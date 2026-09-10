@@ -411,7 +411,12 @@ function parseArtifactExpiry(artifactUrl: string | null) {
   if (!artifactUrl) return null;
 
   try {
-    const parsed = new URL(artifactUrl);
+    // The API's controlled-download links are host-relative
+    // (`/downloads/...`) by default. `new URL()` throws on a relative string
+    // with no base, which made this silently return `null` -- and every
+    // artifact read as "not expired" -- for every real invoice link. The
+    // dummy base is ignored whenever `artifactUrl` is already absolute.
+    const parsed = new URL(artifactUrl, "http://controlled-download.invalid");
     const expiresAt = parsed.searchParams.get("expires_at");
     if (!expiresAt) return null;
     return Number.isFinite(Date.parse(expiresAt)) ? expiresAt : null;

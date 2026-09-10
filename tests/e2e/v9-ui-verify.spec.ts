@@ -24,7 +24,7 @@ const referralBaseURL =
 const referralEntrySlug =
   process.env.DRTS_V9_VERIFY_REFERRAL_ENTRY_SLUG ?? "yuhe-residence";
 const referralEntryHost =
-  process.env.DRTS_V9_VERIFY_REFERRAL_ENTRY_HOST ?? "app.yuhe-living.com.tw";
+  process.env.DRTS_V9_VERIFY_REFERRAL_ENTRY_HOST ?? "app.fabrikam-living.example";
 const tenantFallbackBookingId =
   process.env.DRTS_V9_VERIFY_TENANT_BOOKING_ID ?? "booking-avf-001";
 const sandboxExperimentFallbackId =

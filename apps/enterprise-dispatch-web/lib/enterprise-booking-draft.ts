@@ -3,11 +3,37 @@ import type {
   CreateTenantBookingCommand,
   UpdateTenantBookingCommand,
 } from "@drts/contracts";
-import {
-  enterpriseBookingDraft,
-  getEnterpriseBookingDraft,
-} from "@/lib/enterprise-fixtures";
-import { t as translate, type Locale } from "@/lib/translations";
+import { t as translate, type Locale } from "./translations";
+export type { Locale };
+
+export function resolveCopyByLocale(
+  activeLang: Locale,
+  zhString: string,
+  enString: string,
+): string {
+  if (activeLang === "zh") {
+    return zhString;
+  }
+  return enString;
+}
+
+function getSeedEnterpriseDraft(activeLang: Locale) {
+  const costCenterName = translate("fixture.costCenter.prd07", undefined, activeLang);
+  return {
+    bookedBy: "林宜君",
+    passenger: translate("fixture.passenger.guestSato", undefined, activeLang),
+    pickup: translate("fixture.place.songshanT1Full", undefined, activeLang),
+    dropoff: translate("fixture.place.grandHyattFull", undefined, activeLang),
+    costCenterCode: "CC-PRD-07",
+    costCenter: `CC-PRD-07 · ${costCenterName}`,
+    vehicle: "business",
+    flight: "JL809",
+    terminal: "T1",
+    luggage: "3 件",
+    onsiteContact: translate("fixture.contact.zhou", undefined, activeLang),
+    notes: translate("fixture.bookingDraft.notes", undefined, activeLang),
+  };
+}
 
 export type EnterprisePassengerMode = "self" | "other";
 export type EnterpriseAirportDirection = "pickup" | "dropoff";
@@ -30,6 +56,7 @@ export type EnterpriseBookingDraftForm = {
   terminal: string;
   flight: string;
   luggageCount: string;
+  placard?: string;
 };
 
 type SearchParamRecord = Record<string, string | string[] | undefined>;
@@ -45,6 +72,8 @@ export type EnterpriseBookingPreview = {
   bannerBody: string;
   reservationWindowLabel: string;
 };
+
+export const MIN_LEAD_TIME_MINUTES = 15;
 
 const QUERY_KEYS = {
   passengerMode: "pm",
@@ -63,6 +92,7 @@ const QUERY_KEYS = {
   terminal: "terminal",
   flight: "flight",
   luggageCount: "luggage",
+  placard: "placard",
 } as const;
 
 const DISPLAY_BUDGET_TOTAL = 60_000;
@@ -135,6 +165,136 @@ function estimateFare(draft: EnterpriseBookingDraftForm) {
   return Math.max(480, Math.round(amount / 10) * 10);
 }
 
+export function formatDefaultPlacard(passenger: string): string {
+  const trimmed = passenger.trim();
+  if (!trimmed) return "";
+  if (
+    trimmed.endsWith("様") ||
+    trimmed.endsWith("先生") ||
+    trimmed.endsWith("女士") ||
+    trimmed.endsWith("小姐")
+  ) {
+    return trimmed;
+  }
+  return `${trimmed} 様`;
+}
+
+export type ReservationTimeValidationResult = {
+  isValid: boolean;
+  isPast: boolean;
+  isTooSoon: boolean;
+  earliestAllowedIso: string;
+  earliestAllowedDate: string;
+  earliestAllowedTime: string;
+  earliestAllowedDisplay: string;
+  errorMessage?: string;
+};
+
+export function validateReservationWindow(
+  dateStr: string,
+  timeStr: string,
+  now = new Date(),
+  locale: Locale = "zh",
+): ReservationTimeValidationResult {
+  // Round earliest allowed time UP to the next whole minute to match minute-precision inputs (e.g. now 06:12:30 -> earliest 06:28:00 Taipei 14:28)
+  const earliestAllowedMs =
+    Math.ceil((now.getTime() + MIN_LEAD_TIME_MINUTES * 60 * 1000) / 60000) *
+    60000;
+  const earliestTaipei = new Date(
+    earliestAllowedMs + DEFAULT_TIMEZONE_OFFSET_MS,
+  ).toISOString();
+  const earliestAllowedDate = earliestTaipei.slice(0, 10);
+  const earliestAllowedTime = earliestTaipei.slice(11, 16);
+  const earliestAllowedDisplay = `${earliestAllowedDate} ${earliestAllowedTime}`;
+
+  if (!dateStr || !dateStr.trim() || !timeStr || !timeStr.trim()) {
+    return {
+      isValid: false,
+      isPast: false,
+      isTooSoon: false,
+      earliestAllowedIso: new Date(earliestAllowedMs).toISOString(),
+      earliestAllowedDate,
+      earliestAllowedTime,
+      earliestAllowedDisplay,
+      errorMessage: resolveCopyByLocale(
+        locale,
+        "請填寫用車日期與時間。",
+        "Please provide reservation date and time.",
+      ),
+    };
+  }
+
+  const normalizedDate = dateStr.trim();
+  const normalizedTime = timeStr.trim();
+  const reservationStart = new Date(
+    `${normalizedDate}T${normalizedTime}:00${DEFAULT_TIMEZONE_OFFSET}`,
+  );
+
+  if (Number.isNaN(reservationStart.getTime())) {
+    return {
+      isValid: false,
+      isPast: false,
+      isTooSoon: false,
+      earliestAllowedIso: new Date(earliestAllowedMs).toISOString(),
+      earliestAllowedDate,
+      earliestAllowedTime,
+      earliestAllowedDisplay,
+      errorMessage: resolveCopyByLocale(
+        locale,
+        "用車日期或時間格式無效。",
+        "Invalid reservation date or time format.",
+      ),
+    };
+  }
+
+  const reservationStartMs = reservationStart.getTime();
+  const nowMs = now.getTime();
+
+  if (reservationStartMs < nowMs) {
+    return {
+      isValid: false,
+      isPast: true,
+      isTooSoon: false,
+      earliestAllowedIso: new Date(earliestAllowedMs).toISOString(),
+      earliestAllowedDate,
+      earliestAllowedTime,
+      earliestAllowedDisplay,
+      errorMessage: resolveCopyByLocale(
+        locale,
+        `預約時間不能為過去時間。最早可預約時間為 ${earliestAllowedDisplay}（需至少提前 ${MIN_LEAD_TIME_MINUTES} 分鐘）。`,
+        `Reservation time cannot be in the past. Earliest bookable time is ${earliestAllowedDisplay} (at least ${MIN_LEAD_TIME_MINUTES} min advance notice required).`,
+      ),
+    };
+  }
+
+  if (reservationStartMs < earliestAllowedMs) {
+    return {
+      isValid: false,
+      isPast: false,
+      isTooSoon: true,
+      earliestAllowedIso: new Date(earliestAllowedMs).toISOString(),
+      earliestAllowedDate,
+      earliestAllowedTime,
+      earliestAllowedDisplay,
+      errorMessage: resolveCopyByLocale(
+        locale,
+        `預約需至少提前 ${MIN_LEAD_TIME_MINUTES} 分鐘。最早可預約時間為 ${earliestAllowedDisplay}。`,
+        `Reservation requires at least ${MIN_LEAD_TIME_MINUTES} minutes advance notice. Earliest bookable time is ${earliestAllowedDisplay}.`,
+      ),
+    };
+  }
+
+  return {
+    isValid: true,
+    isPast: false,
+    isTooSoon: false,
+    earliestAllowedIso: new Date(earliestAllowedMs).toISOString(),
+    earliestAllowedDate,
+    earliestAllowedTime,
+    earliestAllowedDisplay,
+  };
+}
+
 function getReservationStart(date: string, time: string, now = new Date()) {
   const normalizedDate = /^\d{4}-\d{2}-\d{2}$/.test(date) ? date : "2026-06-13";
   const normalizedTime = /^\d{2}:\d{2}$/.test(time) ? time : "15:20";
@@ -181,56 +341,124 @@ export function formatReservationWindowLabel(
   return `${date} ${time}`.trim();
 }
 
+export type CreateEnterpriseBookingDraftOptions = {
+  mode?: EnterprisePassengerMode | "delegate" | undefined;
+  entry?: "self" | "other" | "airport" | "delegate" | string | undefined;
+};
+
 export function createEnterpriseBookingDraft(
   locale: Locale,
-  now = new Date(),
+  optionsOrNow?: CreateEnterpriseBookingDraftOptions | Date,
+  maybeNow = new Date(),
 ): EnterpriseBookingDraftForm {
-  const seed = getEnterpriseBookingDraft(locale);
-  const vehicle = normalizeVehicle(enterpriseBookingDraft.vehicle, "business");
+  const isDate = optionsOrNow instanceof Date;
+  const options = isDate ? undefined : optionsOrNow;
+  const now = isDate ? optionsOrNow : maybeNow;
+
+  const seed = getSeedEnterpriseDraft(locale);
+  const vehicle = normalizeVehicle(seed.vehicle, "business");
   const defaultReservation = new Date(
     now.getTime() + 2 * 24 * 60 * 60 * 1000 + DEFAULT_TIMEZONE_OFFSET_MS,
   )
     .toISOString()
     .slice(0, 10);
 
+  const entry = options?.entry?.toLowerCase();
+  const mode = options?.mode?.toLowerCase();
+
+  const isSelf = mode === "self" || entry === "self";
+  const isAirport = entry === "airport" || mode === "airport";
+  const passengerMode: EnterprisePassengerMode = isSelf ? "self" : "other";
+
+  const passenger = isSelf ? seed.bookedBy : seed.passenger;
+  const defaultPlacard = formatDefaultPlacard(passenger);
+
+  const hasExplicitEntry = Boolean(
+    options && options.entry !== undefined,
+  );
+
   return {
-    passengerMode: "other",
-    passenger: seed.passenger,
+    passengerMode,
+    passenger,
     bookedBy: seed.bookedBy,
-    pickup: seed.pickup,
-    dropoff: seed.dropoff,
-    // A new booking must begin inside its editable window; the former demo
-    // date made every post-release create/update journey immediately stale.
+    pickup: isAirport ? seed.pickup : (isSelf ? seed.dropoff : seed.pickup),
+    dropoff: isAirport ? seed.dropoff : (isSelf ? seed.pickup : seed.dropoff),
     reservationDate: defaultReservation,
     reservationTime: "10:00",
     onsiteContactPhone: seed.onsiteContact,
-    costCenterCode: enterpriseBookingDraft.costCenterCode,
+    costCenterCode: seed.costCenterCode,
     costCenterLabel: seed.costCenter,
     vehicle,
     notes: seed.notes,
     airportDirection: "pickup",
-    terminal: seed.terminal,
-    flight: seed.flight,
-    luggageCount: "3",
+    terminal: isAirport ? seed.terminal : "",
+    flight: isAirport ? seed.flight : "",
+    luggageCount: isAirport ? "3" : "",
+    ...(hasExplicitEntry ? { placard: defaultPlacard } : {}),
   } satisfies EnterpriseBookingDraftForm;
 }
 
 export function parseEnterpriseBookingDraft(
   searchParams: SearchParamRecord | undefined,
   locale: Locale,
+  now = new Date(),
 ): EnterpriseBookingDraftForm {
-  const fallback = createEnterpriseBookingDraft(locale);
   const params = searchParams ?? {};
-  const passengerMode = firstParam(params[QUERY_KEYS.passengerMode]);
+  const rawMode =
+    firstParam(params[QUERY_KEYS.passengerMode]) ||
+    firstParam(params["mode"]) ||
+    firstParam(params["entry"]);
+  const entry = firstParam(params["entry"])?.toLowerCase();
+
+  const resolvedMode =
+    rawMode === "self"
+      ? "self"
+      : rawMode === "other" || rawMode === "delegate"
+        ? "other"
+        : undefined;
+
+  const options: CreateEnterpriseBookingDraftOptions = {
+    mode: resolvedMode,
+    entry: entry || (rawMode === "airport" ? "airport" : undefined),
+  };
+
+  const fallback = createEnterpriseBookingDraft(locale, options, now);
+  const passengerMode: EnterprisePassengerMode =
+    rawMode === "self" || entry === "self"
+      ? "self"
+      : rawMode === "other" ||
+          rawMode === "delegate" ||
+          entry === "other" ||
+          entry === "delegate"
+        ? "other"
+        : fallback.passengerMode;
+
+  const bookedBy = parseEditableText(
+    params,
+    QUERY_KEYS.bookedBy,
+    fallback.bookedBy,
+  );
+  let passenger = parseEditableText(
+    params,
+    QUERY_KEYS.passenger,
+    fallback.passenger,
+  );
+
+  if (passengerMode === "self" && !hasQueryKey(params, QUERY_KEYS.passenger)) {
+    passenger = bookedBy;
+  }
+
+  const defaultPlacard = formatDefaultPlacard(passenger);
+  const placard = hasQueryKey(params, QUERY_KEYS.placard)
+    ? parseEditableText(params, QUERY_KEYS.placard, defaultPlacard) || defaultPlacard
+    : entry
+      ? fallback.placard
+      : undefined;
 
   const draft: EnterpriseBookingDraftForm = {
-    passengerMode: passengerMode === "self" ? "self" : "other",
-    passenger: parseEditableText(
-      params,
-      QUERY_KEYS.passenger,
-      fallback.passenger,
-    ),
-    bookedBy: parseEditableText(params, QUERY_KEYS.bookedBy, fallback.bookedBy),
+    passengerMode,
+    passenger,
+    bookedBy,
     pickup: parseEditableText(params, QUERY_KEYS.pickup, fallback.pickup),
     dropoff: parseEditableText(params, QUERY_KEYS.dropoff, fallback.dropoff),
     reservationDate: parseEditableText(
@@ -274,11 +502,8 @@ export function parseEnterpriseBookingDraft(
       QUERY_KEYS.luggageCount,
       fallback.luggageCount,
     ),
+    ...(placard ? { placard } : {}),
   };
-
-  if (draft.passengerMode === "self") {
-    draft.passenger = draft.bookedBy;
-  }
 
   return draft;
 }
@@ -313,6 +538,9 @@ export function serializeEnterpriseBookingDraft(
   params.set(QUERY_KEYS.terminal, draft.terminal);
   params.set(QUERY_KEYS.flight, draft.flight);
   params.set(QUERY_KEYS.luggageCount, draft.luggageCount);
+  if (draft.placard) {
+    params.set(QUERY_KEYS.placard, draft.placard);
+  }
 
   return params;
 }
@@ -352,10 +580,61 @@ export function getEnterpriseBookingPreview(
   };
 }
 
+export function formatBookingNotesWithPlacard(
+  userNotes?: string,
+  placard?: string,
+): string | undefined {
+  const cleanNotes = userNotes?.trim() ?? "";
+  const cleanPlacard = placard?.trim() ?? "";
+
+  if (!cleanPlacard) {
+    return cleanNotes || undefined;
+  }
+
+  const placardText = `需舉牌「${cleanPlacard}」`;
+  if (cleanNotes && cleanNotes.includes(placardText)) {
+    return cleanNotes;
+  }
+
+  if (!cleanNotes) {
+    return placardText;
+  }
+
+  return `${cleanNotes} · ${placardText}`;
+}
+
+export function isCustomPlacard(draft: EnterpriseBookingDraftForm): boolean {
+  if (!draft.placard || !draft.placard.trim()) {
+    return false;
+  }
+  const effectivePassenger =
+    draft.passengerMode === "self" ? draft.bookedBy.trim() : draft.passenger.trim();
+  const defaultPlacard = formatDefaultPlacard(effectivePassenger);
+  const trimmed = draft.placard.trim();
+
+  return trimmed !== defaultPlacard;
+}
+
 export function buildEnterpriseBookingCommand(
   draft: EnterpriseBookingDraftForm,
   now = new Date(),
+  options?: { validateTime?: boolean },
 ): CreateTenantBookingCommand {
+  const shouldValidateTime = options?.validateTime ?? true;
+  if (shouldValidateTime) {
+    const timeValidation = validateReservationWindow(
+      draft.reservationDate,
+      draft.reservationTime,
+      now,
+    );
+    if (!timeValidation.isValid) {
+      throw new Error(
+        timeValidation.errorMessage ??
+          "Reservation time is invalid or has expired.",
+      );
+    }
+  }
+
   const reservationWindowStart = getReservationStart(
     draft.reservationDate,
     draft.reservationTime,
@@ -367,8 +646,13 @@ export function buildEnterpriseBookingCommand(
   const preview = getEnterpriseBookingPreview(draft, "zh");
   const luggageCount = Number.parseInt(draft.luggageCount, 10);
   const passengerName =
-    draft.passengerMode === "self" ? draft.bookedBy : draft.passenger;
+    draft.passengerMode === "self" ? draft.bookedBy.trim() : draft.passenger.trim();
   const onsiteContactPhone = draft.onsiteContactPhone.trim();
+  const customPlacard = isCustomPlacard(draft) ? draft.placard?.trim() : undefined;
+  const finalNotes = formatBookingNotesWithPlacard(
+    draft.notes,
+    customPlacard,
+  );
 
   return {
     businessDispatchSubtype: "enterprise_dispatch",
@@ -404,15 +688,18 @@ export function buildEnterpriseBookingCommand(
     ...(draft.flight.trim() ? { flightNo: draft.flight.trim() } : {}),
     ...(draft.terminal.trim() ? { terminal: draft.terminal.trim() } : {}),
     ...(!Number.isNaN(luggageCount) ? { luggageCount } : {}),
-    ...(draft.notes.trim() ? { notes: draft.notes.trim() } : {}),
+    ...(finalNotes ? { notes: finalNotes } : {}),
   };
 }
 
 export function buildEnterpriseBookingUpdateCommand(
   draft: EnterpriseBookingDraftForm,
   now = new Date(),
+  options?: { validateTime?: boolean },
 ): UpdateTenantBookingCommand {
-  return buildEnterpriseBookingCommand(draft, now);
+  return buildEnterpriseBookingCommand(draft, now, {
+    validateTime: options?.validateTime ?? false,
+  });
 }
 
 export function createEnterpriseBookingDraftFromRecord(
@@ -422,9 +709,12 @@ export function createEnterpriseBookingDraftFromRecord(
     record.reservationWindowStart,
   );
 
+  const passengerMode =
+    record.bookedBy?.name === record.passenger.name ? "self" : "other";
+  const defaultPlacard = formatDefaultPlacard(record.passenger.name);
+
   return {
-    passengerMode:
-      record.bookedBy?.name === record.passenger.name ? "self" : "other",
+    passengerMode,
     passenger: record.passenger.name,
     bookedBy: record.bookedBy?.name ?? record.passenger.name,
     pickup: record.pickup.address,
@@ -443,6 +733,7 @@ export function createEnterpriseBookingDraftFromRecord(
     terminal: record.terminal ?? "",
     flight: record.flightNo ?? "",
     luggageCount: record.luggageCount?.toString() ?? "",
+    placard: defaultPlacard,
   };
 }
 
@@ -452,8 +743,11 @@ function inferAddressName(address: string) {
   return head?.trim() || trimmed;
 }
 
-export function isEnterpriseDraftComplete(draft: EnterpriseBookingDraftForm) {
-  return [
+export function isEnterpriseDraftComplete(
+  draft: EnterpriseBookingDraftForm,
+  now = new Date(),
+) {
+  const basicFieldsValid = [
     draft.passengerMode === "self" ? draft.bookedBy : draft.passenger,
     draft.bookedBy,
     draft.pickup,
@@ -463,7 +757,19 @@ export function isEnterpriseDraftComplete(draft: EnterpriseBookingDraftForm) {
     draft.onsiteContactPhone,
     draft.costCenterCode,
     draft.costCenterLabel,
-  ].every((value) => value.trim().length > 0);
+  ].every((value) => Boolean(value && value.trim().length > 0));
+
+  if (!basicFieldsValid) {
+    return false;
+  }
+
+  const timeValidation = validateReservationWindow(
+    draft.reservationDate,
+    draft.reservationTime,
+    now,
+  );
+
+  return timeValidation.isValid;
 }
 
 export function getVehicleLabelFromDraft(

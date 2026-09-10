@@ -155,6 +155,15 @@ jobs:
       - name: Verify internal key exception registry and documentation
         run: python3 operations/security/verify-internal-key-exceptions.py
 
+  no-real-institutions:
+    name: No real financial-institution identifiers
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Fail if real bank/insurer names or corporate domains appear in deployable source
+        run: ./scripts/ci/check-no-real-institutions.sh
+
   runtime-mirror-guard:
     name: Runtime mirror guard
     runs-on: ubuntu-latest
@@ -246,7 +255,11 @@ jobs:
         # The root `test:unit` only covers tests/unit/**; the apps/api package
         # also owns package-local tests, including DB-backed regressions that
         # must run against the migrated schema to match ci-integ coverage.
-        run: pnpm --filter @drts/api test
+        # All files use this job's one database. Running files concurrently lets
+        # another test's background outbox consumer claim the Stage1 gate's rows,
+        # changing its replay snapshot or consuming its delivery without a sink.
+        # Keep every test and assertion, but serialize access to the shared DB.
+        run: pnpm --filter @drts/api test --no-file-parallelism --maxConcurrency=1
 
   smoke-acceptance:
     name: Smoke acceptance

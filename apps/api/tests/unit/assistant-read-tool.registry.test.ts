@@ -427,4 +427,192 @@ describe("AssistantReadToolRegistry", () => {
       ],
     });
   });
+
+  describe("read-tool authorization and scope enforcement", () => {
+    it("rejects platform realm from accessing complaint tools with AUTH_REALM_DENIED", () => {
+      const { registry } = createRegistry();
+      const platformIdentity = createIdentity({
+        actorType: "platform_admin",
+        actorId: "platform-001",
+        realm: "platform",
+        scopes: ["assistant:write", "foundation:read"],
+      });
+
+      for (const toolName of [
+        "get_complaint_case",
+        "get_complaint_timeline",
+        "get_complaint_export_view",
+      ] as const) {
+        expect(() =>
+          registry.execute({
+            toolName,
+            input: { caseNo: "CMP-001" },
+            identity: platformIdentity,
+          }),
+        ).toThrowError(
+          expect.objectContaining({
+            status: 403,
+            code: "AUTH_REALM_DENIED",
+          }),
+        );
+      }
+    });
+
+    it("rejects platform realm from accessing dispatch jobs with AUTH_REALM_DENIED", () => {
+      const { registry } = createRegistry();
+      const platformIdentity = createIdentity({
+        actorType: "platform_admin",
+        actorId: "platform-001",
+        realm: "platform",
+        scopes: ["assistant:write", "foundation:read"],
+      });
+
+      expect(() =>
+        registry.execute({
+          toolName: "list_dispatch_jobs",
+          identity: platformIdentity,
+        }),
+      ).toThrowError(
+        expect.objectContaining({
+          status: 403,
+          code: "AUTH_REALM_DENIED",
+        }),
+      );
+    });
+
+    it("rejects platform realm from reading orders without owned:read with AUTH_SCOPE_DENIED", () => {
+      const { registry } = createRegistry();
+      const platformIdentity = createIdentity({
+        actorType: "platform_admin",
+        actorId: "platform-001",
+        realm: "platform",
+        scopes: ["assistant:write", "foundation:read"],
+      });
+
+      expect(() =>
+        registry.execute({
+          toolName: "get_order",
+          input: { orderId: "order-tenant-001" },
+          identity: platformIdentity,
+        }),
+      ).toThrowError(
+        expect.objectContaining({
+          status: 403,
+          code: "AUTH_SCOPE_DENIED",
+        }),
+      );
+    });
+
+    it("rejects ops callers lacking required resource scopes with AUTH_SCOPE_DENIED", () => {
+      const { registry } = createRegistry();
+      const restrictedOpsIdentity = createIdentity({
+        actorType: "ops_user",
+        actorId: "ops-restricted",
+        realm: "ops",
+        scopes: ["assistant:write"],
+      });
+
+      expect(() =>
+        registry.execute({
+          toolName: "get_complaint_case",
+          input: { caseNo: "CMP-001" },
+          identity: restrictedOpsIdentity,
+        }),
+      ).toThrowError(
+        expect.objectContaining({
+          status: 403,
+          code: "AUTH_SCOPE_DENIED",
+        }),
+      );
+
+      expect(() =>
+        registry.execute({
+          toolName: "get_order",
+          input: { orderId: "order-tenant-001" },
+          identity: restrictedOpsIdentity,
+        }),
+      ).toThrowError(
+        expect.objectContaining({
+          status: 403,
+          code: "AUTH_SCOPE_DENIED",
+        }),
+      );
+
+      expect(() =>
+        registry.execute({
+          toolName: "list_dispatch_jobs",
+          identity: restrictedOpsIdentity,
+        }),
+      ).toThrowError(
+        expect.objectContaining({
+          status: 403,
+          code: "AUTH_SCOPE_DENIED",
+        }),
+      );
+    });
+
+    it("allows authorized ops_user to read complaints, orders, and dispatch jobs globally", () => {
+      const { registry } = createRegistry();
+      const authorizedOpsIdentity = createIdentity({
+        actorType: "ops_user",
+        actorId: "ops-authorized",
+        realm: "ops",
+        scopes: [
+          "assistant:write",
+          "complaints:read",
+          "owned:read",
+          "dispatch:read",
+        ],
+      });
+
+      const dispatchResult = registry.execute({
+        toolName: "list_dispatch_jobs",
+        identity: authorizedOpsIdentity,
+      });
+      expect(dispatchResult.output).toHaveLength(2);
+
+      const order1Result = registry.execute({
+        toolName: "get_order",
+        input: { orderId: "order-tenant-001" },
+        identity: authorizedOpsIdentity,
+      });
+      expect(order1Result.output).toMatchObject({
+        orderId: "order-tenant-001",
+      });
+
+      const order2Result = registry.execute({
+        toolName: "get_order",
+        input: { orderId: "order-tenant-002" },
+        identity: authorizedOpsIdentity,
+      });
+      expect(order2Result.output).toMatchObject({
+        orderId: "order-tenant-002",
+      });
+
+      const complaintResult = registry.execute({
+        toolName: "get_complaint_case",
+        input: { caseNo: "CMP-001" },
+        identity: authorizedOpsIdentity,
+      });
+      expect(complaintResult.output).toMatchObject({
+        caseNo: "CMP-001",
+      });
+
+      const timelineResult = registry.execute({
+        toolName: "get_complaint_timeline",
+        input: { caseNo: "CMP-001" },
+        identity: authorizedOpsIdentity,
+      });
+      expect(Array.isArray(timelineResult.output)).toBe(true);
+
+      const exportResult = registry.execute({
+        toolName: "get_complaint_export_view",
+        input: { caseNo: "CMP-001" },
+        identity: authorizedOpsIdentity,
+      });
+      expect(exportResult.output).toMatchObject({
+        complaintCase: expect.objectContaining({ caseNo: "CMP-001" }),
+      });
+    });
+  });
 });

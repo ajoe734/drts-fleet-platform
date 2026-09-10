@@ -12,6 +12,7 @@ import {
   CanvasShell,
   ManagementThemeProvider,
   buildCanvasTheme,
+  resolveRuntimeHealth,
 } from "@drts/ui-web";
 import {
   TENANT_CONSOLE_BRAND,
@@ -29,7 +30,7 @@ const tenantCanvasTheme = buildCanvasTheme({
   density: "compact",
 });
 
-type ApiHealthStatus = "checking" | "healthy" | "degraded" | "down";
+type ApiHealthStatus = "checking" | "healthy" | "degraded" | "down" | "unknown";
 
 const LEGACY_EN_COPY: Record<string, string> = {
   工作面: "Workspace",
@@ -742,18 +743,7 @@ function normalizeHealthStatus(
   value: unknown,
   responseOk: boolean,
 ): ApiHealthStatus {
-  if (!responseOk) {
-    return "degraded";
-  }
-
-  const normalized = String(value ?? "healthy").toLowerCase();
-  if (normalized === "down" || normalized === "unhealthy") {
-    return "down";
-  }
-  if (normalized === "degraded" || normalized === "warning") {
-    return "degraded";
-  }
-  return "healthy";
+  return resolveRuntimeHealth({ status: value, responseOk });
 }
 
 function useApiHealth() {
@@ -838,6 +828,12 @@ function TenantShellControls({
       bg: "rgba(248, 113, 113, 0.12)",
       border: "rgba(252, 165, 165, 0.34)",
     },
+    unknown: {
+      label: t("shell.health.unknown"),
+      fg: tenantCanvasTheme.textMuted,
+      bg: tenantCanvasTheme.surface,
+      border: tenantCanvasTheme.border,
+    },
   } satisfies Record<
     ApiHealthStatus,
     { label: string; fg: string; bg: string; border: string }
@@ -876,7 +872,43 @@ function TenantShellControls({
   );
 }
 
-export function TenantShell({ children }: { children: ReactNode }) {
+export function resolveTenantEnvLabel(
+  env: string | undefined,
+  locale: Locale,
+  t: (key: string) => string,
+): string {
+  const normalized = env ? env.trim().toLowerCase() : "";
+  if (normalized === "production" || normalized === "prod") {
+    return t("shell.env.production");
+  }
+  if (normalized === "staging" || normalized === "stage") {
+    return t("shell.env.staging");
+  }
+  if (normalized === "preview") {
+    return t("shell.env.preview");
+  }
+  if (normalized === "sandbox") {
+    return t("shell.env.sandbox");
+  }
+  if (normalized === "development" || normalized === "dev") {
+    return t("shell.env.dev");
+  }
+  if (normalized === "test" || normalized === "mock") {
+    return t("shell.env.mock");
+  }
+  if (normalized === "unknown") {
+    return t("shell.env.unknown");
+  }
+  return t("shell.env.unknown");
+}
+
+export function TenantShell({
+  children,
+  env,
+}: {
+  children: ReactNode;
+  env?: string | undefined;
+}) {
   const pathname = usePathname();
   const { locale, setLocale, t } = useTranslation();
   const navEntries = useMemo(() => createTenantNavEntries(t), [t]);
@@ -891,6 +923,7 @@ export function TenantShell({ children }: { children: ReactNode }) {
     <ManagementThemeProvider defaultDark defaultDensity="compact">
       <div
         data-testid="tenant-console-shell"
+        data-environment={env ?? "unknown"}
         style={{
           height: "100dvh",
           minHeight: "100dvh",
@@ -906,7 +939,7 @@ export function TenantShell({ children }: { children: ReactNode }) {
             t("shell.context"),
             activeItem?.label ?? t("shell.breadcrumb.home"),
           ]}
-          env={t("shell.env")}
+          env={resolveTenantEnvLabel(env, locale, t)}
           versionLabel={TENANT_CONSOLE_VERSION}
           searchPlaceholder={t("shell.search")}
           searchWidth={280}

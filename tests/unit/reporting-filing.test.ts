@@ -231,7 +231,7 @@ describe("reporting and filing service", () => {
       reportingFilingService,
     } = createServices();
 
-    const missingRecordingOrder = ownedMobilityService.createCallCenterOrder({
+    const missingRecordingOrder = await ownedMobilityService.createCallCenterOrder({
       callId: "CALL-20260411-000100",
       agentId: "AGENT-0091",
       pickup: {
@@ -246,7 +246,7 @@ describe("reporting and filing service", () => {
       },
     });
 
-    const recordingBoundOrder = ownedMobilityService.createCallCenterOrder({
+    const recordingBoundOrder = await ownedMobilityService.createCallCenterOrder({
       callId: "CALL-20260411-000101",
       agentId: "AGENT-0092",
       pickup: {
@@ -864,7 +864,7 @@ describe("report export", () => {
   it("streams a report as CSV with the rows it computed", async () => {
     const { services, jobId } = await completedJob("vehicle_roster");
 
-    const artifact = services.reportingFilingService.renderReportArtifact(
+    const artifact = await services.reportingFilingService.renderReportArtifact(
       jobId,
       "req-download",
     );
@@ -905,18 +905,33 @@ describe("report export", () => {
   it("refuses a format that has no renderer instead of returning no file", () => {
     const { reportingFilingService } = createServices();
 
-    // `format` used to be decoration: xlsx and csv produced identical results,
-    // which is to say no bytes at all.
-    for (const format of ["xlsx", "pdf", "zip"] as const) {
-      expectApiErrorCode(
-        () =>
-          reportingFilingService.createReportJob({
-            jobType: "vehicle_roster",
-            format,
-          }),
-        "REPORT_FORMAT_NOT_IMPLEMENTED",
-      );
-    }
+    // `zip` remains unimplemented for general reports (filing ZIP is out of scope).
+    // `csv`, `xlsx`, and `pdf` are implemented and supported (SR-REPORT-001).
+    expectApiErrorCode(
+      () =>
+        reportingFilingService.createReportJob({
+          jobType: "vehicle_roster",
+          format: "zip",
+        }),
+      "REPORT_FORMAT_NOT_IMPLEMENTED",
+    );
+  });
+
+  it("creates and renders report jobs for newly implemented xlsx and pdf formats", async () => {
+    const { services, jobId: xlsxJobId } = await completedJob("vehicle_roster", "xlsx");
+    const xlsxArtifact = await services.reportingFilingService.renderReportArtifact(xlsxJobId);
+    expect(xlsxArtifact.contentType).toBe(
+      "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    );
+    expect(xlsxArtifact.fileName).toBe(`vehicle_roster-${xlsxJobId}.xlsx`);
+    expect(xlsxArtifact.buffer.byteLength).toBeGreaterThan(0);
+
+    const { services: pdfServices, jobId: pdfJobId } = await completedJob("vehicle_roster", "pdf");
+    const pdfArtifact = await pdfServices.reportingFilingService.renderReportArtifact(pdfJobId);
+    expect(pdfArtifact.contentType).toBe("application/pdf");
+    expect(pdfArtifact.fileName).toBe(`vehicle_roster-${pdfJobId}.pdf`);
+    expect(pdfArtifact.buffer.byteLength).toBeGreaterThan(0);
+    expect(pdfArtifact.buffer.subarray(0, 4).toString("ascii")).toBe("%PDF");
   });
 
   it("refuses to hand over a file for a job that has not completed", () => {

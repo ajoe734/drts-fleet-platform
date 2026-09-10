@@ -16,7 +16,7 @@
           "body": {
             "action": "demo-bootstrap",
             "entrySlug": "yuhe-residence",
-            "entryHost": "app.yuhe-living.com.tw"
+            "entryHost": "app.fabrikam-living.example"
           }
         }
       ],
@@ -507,14 +507,14 @@
       "id": "bank-statement-download",
       "surface": "bank",
       "baseUrlEnv": "DRTS_DEV_BANK_CONSOLE_BASE_URL",
-      "route": "/statements?bank=ctbc&locale=zh&role=bank_program_admin",
+      "route": "/statements?bank=acme&locale=zh&role=bank_program_admin",
       "actorScope": "bank_program_admin",
       "setup": [
         {
           "path": "/api/auth/login",
           "method": "POST",
           "body": {
-            "bank": "ctbc",
+            "bank": "acme",
             "locale": "zh",
             "role": "bank_program_admin"
           }
@@ -561,12 +561,12 @@
     {
       "id": "partner-booking-site",
       "baseUrlEnv": "DRTS_DEV_PARTNER_BOOKING_BASE_URL",
-      "path": "/ctbc/program/site"
+      "path": "/acme/program/site"
     },
     {
       "id": "partner-booking-embed",
       "baseUrlEnv": "DRTS_DEV_PARTNER_BOOKING_BASE_URL",
-      "path": "/ctbc/program/embed"
+      "path": "/acme/program/embed"
     },
     {
       "id": "concierge",

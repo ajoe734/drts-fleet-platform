@@ -1,3 +1,5 @@
+import { randomUUID } from "node:crypto";
+
 import { Injectable, Logger, Optional } from "@nestjs/common";
 import type { PoolClient, QueryResult, QueryResultRow } from "pg";
 
@@ -13,6 +15,7 @@ import type {
   PassengerDispatchDisclosureSnapshot,
 } from "@drts/contracts";
 
+import { ApiRequestError } from "../../common/api-envelope";
 import { DatabaseService } from "../../common/db";
 
 type JsonRecordRow = {
@@ -35,6 +38,89 @@ export type OwnedMobilityQueryExecutor = {
     values?: readonly unknown[],
   ): Promise<QueryResult<T>>;
 };
+
+/**
+ * Thrown when a compare-and-swap write against `ops.phase1_owned_orders`
+ * does not match the caller's `expectedVersion` (SD §7.5: "voice aggregate
+ * 以 DB row 與單調 aggregateVersion 為權威"). Covers both a genuinely stale
+ * snapshot (someone else committed in between) and the order simply not
+ * existing -- callers that need to tell those apart should re-read the row.
+ */
+export class OwnedOrderVersionConflictError extends Error {
+  constructor(
+    public readonly orderId: string,
+    public readonly expectedVersion: number,
+  ) {
+    super(
+      `Owned order ${orderId} was not at expected aggregate version ${expectedVersion} (stale snapshot or missing row).`,
+    );
+    this.name = "OwnedOrderVersionConflictError";
+  }
+}
+
+/**
+ * Thrown when creating a voice-linked order collides with an existing
+ * `voice_intent_id` or `call_id` (SD §7.2/§7.5 unique constraints on
+ * `ops.phase1_owned_orders`). Distinguishes "another writer already handled
+ * this exact intent/call" from a generic DB error.
+ */
+export class OwnedOrderDuplicateVoiceLinkError extends Error {
+  constructor(
+    public readonly orderId: string,
+    cause: unknown,
+  ) {
+    super(
+      `Owned order ${orderId} conflicts with an existing voice_intent_id or call_id.`,
+    );
+    this.name = "OwnedOrderDuplicateVoiceLinkError";
+    this.cause = cause;
+  }
+}
+
+export type DispatchResourceType = "driver" | "vehicle";
+export type DispatchResourceReservationStatus =
+  | "held"
+  | "occupied"
+  | "released";
+
+export type DispatchResourceReservationRecord = {
+  reservationId: string;
+  resourceType: DispatchResourceType;
+  resourceId: string;
+  orderId: string;
+  assignmentId: string | null;
+  reservationGroupId: string;
+  status: DispatchResourceReservationStatus;
+  expiresAt: string | null;
+  version: number;
+  createdAt: string;
+  updatedAt: string;
+};
+
+/**
+ * Thrown when SD §7.6's active-occupation uniqueness constraint on
+ * `ops.dispatch_resource_reservations` (resource_type, resource_id WHERE
+ * status IN ('held','occupied')) rejects a driver or vehicle that another
+ * competing order/revision already holds or occupies. This is the mechanism
+ * that guarantees "兩單/兩 revision 競爭最多一個成功" -- the losing insert
+ * fails here and the caller's transaction rolls back instead of both writers
+ * believing they won the same driver/vehicle.
+ */
+export class DispatchResourceReservationConflictError extends Error {
+  constructor(
+    public readonly resourceType: DispatchResourceType,
+    public readonly resourceId: string,
+  ) {
+    super(
+      `${resourceType} ${resourceId} is already held or occupied by another dispatch assignment.`,
+    );
+    this.name = "DispatchResourceReservationConflictError";
+    Object.setPrototypeOf(
+      this,
+      DispatchResourceReservationConflictError.prototype,
+    );
+  }
+}
 
 export type DriverCompletionOutboxEffectType =
   | "tenant_order_completed_webhook"
@@ -168,6 +254,52 @@ export class OwnedMobilityRepository {
         LIMIT 1
       `,
       [bookingId, tenantId],
+    );
+    const row = result.rows[0];
+    return row
+      ? this.parseRecord<OwnedOrderRecord>(
+          row.record,
+          "ops.phase1_owned_orders",
+        )
+      : null;
+  }
+
+  async findActiveOrderByPassengerPhone(
+    phone: string,
+    activeStatuses: readonly string[] = [
+      "created",
+      "recording_pending",
+      "ready_for_dispatch",
+      "preassigned",
+      "assigned",
+      "driver_accepted",
+      "enroute_pickup",
+      "arrived_pickup",
+      "on_trip",
+      "proof_pending",
+      "redispatch_required",
+      "delayed_queue",
+      "exception_hold",
+    ],
+  ): Promise<OwnedOrderRecord | null> {
+    if (!this.isEnabled()) {
+      return null;
+    }
+
+    const result = await this.databaseService!.query<JsonRecordRow>(
+      `
+        SELECT record
+        FROM ops.phase1_owned_orders
+        WHERE status = ANY($1)
+          AND (
+            record->'passenger'->>'phone' = $2
+            OR record->'passenger'->>'mobile' = $2
+            OR record->'bookingRequirements'->'passengerContact'->>'phone' = $2
+          )
+        ORDER BY updated_at DESC, created_at DESC
+        LIMIT 1
+      `,
+      [activeStatuses, phone],
     );
     const row = result.rows[0];
     return row
@@ -342,6 +474,13 @@ export class OwnedMobilityRepository {
     const client = await this.databaseService!.connect();
     try {
       await client.query("BEGIN");
+      // SD §7.1/§7.5: "transaction 內無網路或長運算...DB transaction 設
+      // lock／statement deadline". Every owned-mobility transaction only ever
+      // does row locks and short reads/writes against Postgres itself, so a
+      // stuck lock or a runaway statement is always a bug, never expected
+      // load -- fail fast instead of holding row locks indefinitely.
+      await client.query("SET LOCAL lock_timeout = '3s'");
+      await client.query("SET LOCAL statement_timeout = '8s'");
       const result = await work(client);
       await client.query("COMMIT");
       return result;
@@ -368,6 +507,502 @@ export class OwnedMobilityRepository {
     changes: PersistOwnedMobilityChanges,
   ) {
     await this.persistChangesWithExecutor(executor, changes);
+  }
+
+  /**
+   * Locks and returns the current authoritative row for CAS-protected order
+   * mutations (SD §7.1 fixed lock order: "...→ order" is the last lock taken
+   * before commit). Must be called inside a transaction opened by
+   * `withTransaction`; the `FOR UPDATE` lock is held until that transaction
+   * commits or rolls back.
+   */
+  async findOrderForUpdate(
+    executor: OwnedMobilityQueryExecutor,
+    orderId: string,
+  ): Promise<{ order: OwnedOrderRecord; aggregateVersion: number } | null> {
+    const result = await executor.query<
+      JsonRecordRow & { aggregate_version: number }
+    >(
+      `
+        SELECT record, aggregate_version
+        FROM ops.phase1_owned_orders
+        WHERE order_id = $1
+        LIMIT 1
+        FOR UPDATE
+      `,
+      [orderId],
+    );
+    const row = result.rows[0];
+    if (!row) {
+      return null;
+    }
+    const order = this.parseRecord<OwnedOrderRecord>(
+      row.record,
+      "ops.phase1_owned_orders",
+    );
+    return {
+      order: { ...order, aggregateVersion: row.aggregate_version },
+      aggregateVersion: row.aggregate_version,
+    };
+  }
+
+  /**
+   * SD §7.6: obtain the shared driver+vehicle capacity reservation for one
+   * dispatch assignment, in the same transaction as the assignment insert it
+   * protects. Reserves driver before vehicle -- a fixed lock order
+   * (independent of the actual resource IDs) so two transactions competing
+   * over the same driver/vehicle pair never wait on each other in opposite
+   * orders. The unique partial index on `ops.dispatch_resource_reservations
+   * (resource_type, resource_id) WHERE status IN ('held','occupied')` is
+   * what actually arbitrates "at most one of two competing orders/revisions
+   * succeeds": a losing insert throws
+   * `DispatchResourceReservationConflictError` and the caller is expected to
+   * let that propagate so its own transaction rolls back.
+   *
+   * Must be called with the same `PoolClient` the assignment row is
+   * persisted through in the same `withTransaction` block, not the bare
+   * `databaseService` pool.
+   */
+  async reserveDispatchResources(
+    executor: OwnedMobilityQueryExecutor,
+    params: {
+      orderId: string;
+      assignmentId: string;
+      driverId: string;
+      vehicleId: string;
+      expiresAt: string | null;
+    },
+  ): Promise<DispatchResourceReservationRecord[]> {
+    const reservationGroupId = randomUUID();
+    const resources: Array<{
+      resourceType: DispatchResourceType;
+      resourceId: string;
+    }> = [
+      { resourceType: "driver", resourceId: params.driverId },
+      { resourceType: "vehicle", resourceId: params.vehicleId },
+    ];
+
+    const reserved: DispatchResourceReservationRecord[] = [];
+    for (const resource of resources) {
+      try {
+        const result = await executor.query<{
+          reservation_id: string;
+          resource_type: DispatchResourceType;
+          resource_id: string;
+          order_id: string;
+          assignment_id: string | null;
+          reservation_group_id: string;
+          status: DispatchResourceReservationStatus;
+          expires_at: Date | string | null;
+          version: number;
+          created_at: Date | string;
+          updated_at: Date | string;
+        }>(
+          `
+            INSERT INTO ops.dispatch_resource_reservations (
+              resource_type, resource_id, order_id, assignment_id,
+              reservation_group_id, status, expires_at
+            ) VALUES ($1, $2, $3, $4, $5, 'held', $6)
+            RETURNING
+              reservation_id, resource_type, resource_id, order_id,
+              assignment_id, reservation_group_id, status, expires_at,
+              version, created_at, updated_at
+          `,
+          [
+            resource.resourceType,
+            resource.resourceId,
+            params.orderId,
+            params.assignmentId,
+            reservationGroupId,
+            params.expiresAt,
+          ],
+        );
+        const row = result.rows[0];
+        if (!row) {
+          throw new Error(
+            `INSERT ... RETURNING for ${resource.resourceType} ${resource.resourceId} unexpectedly returned no row`,
+          );
+        }
+        reserved.push({
+          reservationId: row.reservation_id,
+          resourceType: row.resource_type,
+          resourceId: row.resource_id,
+          orderId: row.order_id,
+          assignmentId: row.assignment_id,
+          reservationGroupId: row.reservation_group_id,
+          status: row.status,
+          expiresAt: row.expires_at
+            ? new Date(row.expires_at).toISOString()
+            : null,
+          version: row.version,
+          createdAt: new Date(row.created_at).toISOString(),
+          updatedAt: new Date(row.updated_at).toISOString(),
+        });
+      } catch (error) {
+        const pgCode = (error as { code?: string })?.code;
+        if (pgCode === "23505" || pgCode === "55P03" || pgCode === "40P01") {
+          throw new DispatchResourceReservationConflictError(
+            resource.resourceType,
+            resource.resourceId,
+          );
+        }
+        throw error;
+      }
+    }
+    return reserved;
+  }
+
+  /**
+   * SD §7.6: releasing a reservation must be fenced to the specific
+   * assignment whose offer actually ended (valid reject/cancel/complete/
+   * timeout, or the atomic close of an old assignment during reassign) --
+   * never "whatever is currently held for this resource". Every dispatch
+   * assignment gets its own reservation rows via `reserveDispatchResources`,
+   * so scoping the UPDATE to `assignment_id` makes a stale release (e.g. a
+   * late timer for an assignment a reassign already superseded) a safe
+   * no-op instead of releasing a newer assignment's occupation of the same
+   * driver/vehicle. Defaults to the bare pool for callers outside an
+   * existing transaction. Live assignments must be closed using the same
+   * transaction's `PoolClient`: V0091 rejects a standalone release while
+   * the assignment is still active. All service terminal transitions pass
+   * their transaction here.
+   */
+  async releaseDispatchResourceReservations(
+    assignmentId: string,
+    executor: OwnedMobilityQueryExecutor = this.databaseService!,
+  ): Promise<number> {
+    const result = await executor.query(
+      `
+        UPDATE ops.dispatch_resource_reservations
+        SET status = 'released', version = version + 1
+        WHERE assignment_id = $1
+          AND status IN ('held', 'occupied')
+      `,
+      [assignmentId],
+    );
+    return result.rowCount ?? 0;
+  }
+
+  /**
+   * SD §7.6: "accepted 轉 occupied" -- once the driver actually accepts the
+   * offer, the reservation stops being a soft hold and becomes a firm
+   * occupation for the rest of the trip lifecycle. Scoped to `assignment_id`
+   * for the same fencing reasons as release.
+   */
+  async occupyDispatchResourceReservations(
+    assignmentId: string,
+    executor: OwnedMobilityQueryExecutor = this.databaseService!,
+  ): Promise<number> {
+    const result = await executor.query(
+      `
+        UPDATE ops.dispatch_resource_reservations
+        SET status = 'occupied', version = version + 1
+        WHERE assignment_id = $1
+          AND status = 'held'
+      `,
+      [assignmentId],
+    );
+    return result.rowCount ?? 0;
+  }
+
+  /**
+   * SD §7.6: locks one dispatch assignment row for a status-fenced close --
+   * `assignment_id` is minted fresh per offer (reassign never reuses an old
+   * id), so the row's current `status` under `FOR UPDATE` is itself the
+   * concurrency fence: no separate version column is needed to tell "this
+   * offer is still the one I last observed" from "something else already
+   * closed it". Must run inside the same `withTransaction` block that
+   * subsequently persists a cancellation and/or releases the reservation,
+   * so the lock is held across both. Returns `null` if the assignment row
+   * does not exist (should not happen for a real assignment id, but keeps
+   * the caller's no-op handling uniform with the "already closed" case).
+   */
+  async lockDispatchAssignmentForUpdate(
+    executor: OwnedMobilityQueryExecutor,
+    assignmentId: string,
+  ): Promise<DispatchAssignmentRecord | null> {
+    const result = await executor.query<JsonRecordRow>(
+      `
+        SELECT record
+        FROM ops.phase1_dispatch_assignments
+        WHERE assignment_id = $1
+        LIMIT 1
+        FOR UPDATE
+      `,
+      [assignmentId],
+    );
+    const row = result.rows[0];
+    if (!row) {
+      return null;
+    }
+    return this.parseRecord<DispatchAssignmentRecord>(
+      row.record,
+      "ops.phase1_dispatch_assignments",
+    );
+  }
+
+  /**
+   * SD §7.6: companion lock for the driver task tied to an assignment being
+   * closed, so its terminal-state check and update share the same
+   * transaction and row lock as the assignment above.
+   */
+  async lockDriverTaskForUpdate(
+    executor: OwnedMobilityQueryExecutor,
+    taskId: string,
+  ): Promise<DriverTaskRecord | null> {
+    const result = await executor.query<JsonRecordRow>(
+      `
+        SELECT record
+        FROM ops.phase1_driver_tasks
+        WHERE task_id = $1
+        LIMIT 1
+        FOR UPDATE
+      `,
+      [taskId],
+    );
+    const row = result.rows[0];
+    if (!row) {
+      return null;
+    }
+    return this.parseRecord<DriverTaskRecord>(
+      row.record,
+      "ops.phase1_driver_tasks",
+    );
+  }
+
+  /** Cancellation uses the same assignment -> task lock order as accept/timeout.
+   * Discover from durable rows, then fence discovery again under the order lock.
+   * A concurrent replacement must cause rollback, never release a stale offer.
+   */
+  async loadOrderCancellationForUpdate(
+    executor: OwnedMobilityQueryExecutor,
+    orderId: string,
+  ) {
+    const assignments = await executor.query<JsonRecordRow>(
+      `SELECT record FROM ops.phase1_dispatch_assignments
+       WHERE order_id = $1 AND status IN ('assigned', 'accepted')
+       ORDER BY assignment_id FOR UPDATE`,
+      [orderId],
+    );
+    const assignment = assignments.rows[0]
+      ? this.parseRecord<DispatchAssignmentRecord>(
+          assignments.rows[0].record,
+          "ops.phase1_dispatch_assignments",
+        )
+      : null;
+    if (assignments.rows.length > 1)
+      throw new Error("Multiple active assignments require reconciliation");
+    const tasks = assignment
+      ? await executor.query<JsonRecordRow>(
+          `SELECT record FROM ops.phase1_driver_tasks WHERE assignment_id = $1
+       ORDER BY task_id FOR UPDATE`,
+          [assignment.assignmentId],
+        )
+      : { rows: [] };
+    if (assignment && tasks.rows.length !== 1)
+      throw new ApiRequestError(
+        409,
+        "REDISPATCH_ASSIGNMENT_ALREADY_CLOSED",
+        "Active assignment task requires reconciliation",
+      );
+    const task = tasks.rows[0]
+      ? this.parseRecord<DriverTaskRecord>(
+          tasks.rows[0].record,
+          "ops.phase1_driver_tasks",
+        )
+      : null;
+    const jobs = await executor.query<JsonRecordRow>(
+      `SELECT record FROM ops.phase1_dispatch_jobs WHERE order_id = $1 AND status <> 'closed'
+       ORDER BY dispatch_job_id FOR UPDATE`,
+      [orderId],
+    );
+    const current = await this.findOrderForUpdate(executor, orderId);
+    if (!current) throw new Error(`Owned order ${orderId} missing`);
+    const latest = await executor.query<{ assignment_id: string }>(
+      `SELECT assignment_id FROM ops.phase1_dispatch_assignments
+       WHERE order_id = $1 AND status IN ('assigned', 'accepted') ORDER BY assignment_id`,
+      [orderId],
+    );
+    if (
+      latest.rows.length !== assignments.rows.length ||
+      (latest.rows[0]?.assignment_id ?? null) !==
+        (assignment?.assignmentId ?? null)
+    ) {
+      throw new OwnedOrderVersionConflictError(
+        orderId,
+        current.aggregateVersion,
+      );
+    }
+    const latestJobs = await executor.query<{ dispatch_job_id: string }>(
+      `SELECT dispatch_job_id FROM ops.phase1_dispatch_jobs
+       WHERE order_id = $1 AND status <> 'closed' ORDER BY dispatch_job_id`,
+      [orderId],
+    );
+    if (
+      latestJobs.rows.length !== jobs.rows.length ||
+      latestJobs.rows.some(
+        (row, index) =>
+          row.dispatch_job_id !==
+          this.parseRecord<DispatchJobRecord>(
+            jobs.rows[index]!.record,
+            "ops.phase1_dispatch_jobs",
+          ).dispatchJobId,
+      )
+    ) {
+      throw new OwnedOrderVersionConflictError(
+        orderId,
+        current.aggregateVersion,
+      );
+    }
+    const versions = await executor.query<{ count: string }>(
+      `SELECT count(*) FROM ops.phase1_dispatch_assignments WHERE order_id = $1`,
+      [orderId],
+    );
+    return {
+      order: current.order,
+      assignmentVersion: Number(versions.rows[0]!.count),
+      assignment,
+      task,
+      dispatchJobs: jobs.rows.map((row) =>
+        this.parseRecord<DispatchJobRecord>(
+          row.record,
+          "ops.phase1_dispatch_jobs",
+        ),
+      ),
+    };
+  }
+
+  /**
+   * Inserts a brand-new order row for the pure-prepare voice command path.
+   * Unlike `persistOrderWorkflow`'s blind `ON CONFLICT ... DO UPDATE` upsert
+   * (used by legacy fire-and-forget writers), this never overwrites an
+   * existing `order_id` -- a collision there, or on the partial unique
+   * `voice_intent_id`/`call_id` indexes from V0088, means another writer
+   * already handled this exact intent and this call must not clobber it.
+   */
+  async insertVoiceOrder(
+    executor: OwnedMobilityQueryExecutor,
+    order: OwnedOrderRecord,
+  ): Promise<number> {
+    const record = { ...order, aggregateVersion: order.aggregateVersion ?? 1 };
+    try {
+      const result = await executor.query<{ aggregate_version: number }>(
+        `
+          INSERT INTO ops.phase1_owned_orders (
+            order_id,
+            order_no,
+            status,
+            order_source,
+            service_bucket,
+            dispatch_semantics,
+            runtime_profile_code,
+            service_product_code,
+            acquisition_mode,
+            timing_mode,
+            operating_authorization_id,
+            queue_mode,
+            created_at,
+            updated_at,
+            record
+          ) VALUES (
+            $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12,
+            $13, $14, $15::jsonb
+          )
+          ON CONFLICT (order_id) DO NOTHING
+          RETURNING aggregate_version
+        `,
+        [
+          record.orderId,
+          record.orderNo,
+          record.status,
+          record.orderSource,
+          record.serviceBucket,
+          record.dispatchSemantics,
+          record.runtimeProfileCode ?? null,
+          record.serviceProductCode ?? null,
+          record.acquisitionMode ?? null,
+          record.timingMode ?? null,
+          record.operatingAuthorizationId ?? null,
+          record.queueMode ?? null,
+          record.createdAt,
+          record.updatedAt,
+          JSON.stringify(record),
+        ],
+      );
+      const row = result.rows[0];
+      if (!row) {
+        throw new OwnedOrderVersionConflictError(record.orderId, 0);
+      }
+      return row.aggregate_version;
+    } catch (error) {
+      if ((error as { code?: string })?.code === "23505") {
+        throw new OwnedOrderDuplicateVoiceLinkError(record.orderId, error);
+      }
+      throw error;
+    }
+  }
+
+  /**
+   * Compare-and-swap update of an existing order row. Fails closed
+   * (`OwnedOrderVersionConflictError`) when `expectedVersion` no longer
+   * matches the stored `aggregate_version` -- either the row does not exist
+   * or someone else committed a newer snapshot first (SD §7.5: two instances
+   * writing the same stale snapshot must have one of them rejected). Callers
+   * must have obtained `expectedVersion` from `findOrderForUpdate` in the
+   * same transaction so the row lock and the version check agree.
+   */
+  async updateOrderWithCas(
+    executor: OwnedMobilityQueryExecutor,
+    order: OwnedOrderRecord,
+    expectedVersion: number,
+  ): Promise<number> {
+    const record = {
+      ...order,
+      aggregateVersion: expectedVersion + 1,
+    };
+    const result = await executor.query<{ aggregate_version: number }>(
+      `
+        UPDATE ops.phase1_owned_orders SET
+          order_no = $2,
+          status = $3,
+          order_source = $4,
+          service_bucket = $5,
+          dispatch_semantics = $6,
+          runtime_profile_code = $7,
+          service_product_code = $8,
+          acquisition_mode = $9,
+          timing_mode = $10,
+          operating_authorization_id = $11,
+          queue_mode = $12,
+          updated_at = $13,
+          record = $14::jsonb
+        WHERE order_id = $1
+          AND aggregate_version = $15
+        RETURNING aggregate_version
+      `,
+      [
+        record.orderId,
+        record.orderNo,
+        record.status,
+        record.orderSource,
+        record.serviceBucket,
+        record.dispatchSemantics,
+        record.runtimeProfileCode ?? null,
+        record.serviceProductCode ?? null,
+        record.acquisitionMode ?? null,
+        record.timingMode ?? null,
+        record.operatingAuthorizationId ?? null,
+        record.queueMode ?? null,
+        record.updatedAt,
+        JSON.stringify(record),
+        expectedVersion,
+      ],
+    );
+    const row = result.rows[0];
+    if (!row) {
+      throw new OwnedOrderVersionConflictError(record.orderId, expectedVersion);
+    }
+    return row.aggregate_version;
   }
 
   async isActiveMultiTaxiAuthorizedVehicle(
@@ -436,45 +1071,38 @@ export class OwnedMobilityRepository {
     executor: OwnedMobilityQueryExecutor,
     taskId: string,
   ): Promise<DriverTaskCompletionBundleRecord | null> {
-    const taskResult = await executor.query<JsonRecordRow>(
-      `
-        SELECT record
-        FROM ops.phase1_driver_tasks
-        WHERE task_id = $1
-        LIMIT 1
-        FOR UPDATE
-      `,
+    // Match accept/reject/cancel: assignment -> task -> job -> order.
+    // The subquery discovers the immutable assignment link without locking
+    // the task first (which would invert the shared close lock order).
+    const assignmentResult = await executor.query<JsonRecordRow>(
+      `SELECT record FROM ops.phase1_dispatch_assignments
+       WHERE assignment_id = (
+         SELECT assignment_id FROM ops.phase1_driver_tasks WHERE task_id = $1
+       ) FOR UPDATE`,
       [taskId],
     );
-    const taskRow = taskResult.rows[0];
-    if (!taskRow) {
-      return null;
-    }
-    const task = this.parseRecord<DriverTaskRecord>(
-      taskRow.record,
-      "ops.phase1_driver_tasks",
-    );
-
-    const assignmentResult = await executor.query<JsonRecordRow>(
-      `
-        SELECT record
-        FROM ops.phase1_dispatch_assignments
-        WHERE assignment_id = $1
-        LIMIT 1
-        FOR UPDATE
-      `,
-      [task.assignmentId],
-    );
-    const assignmentRow = assignmentResult.rows[0];
-    if (!assignmentRow) {
-      throw new Error(
-        `Dispatch assignment ${task.assignmentId} missing for driver task ${taskId}.`,
-      );
-    }
+    if (!assignmentResult.rows[0]) return null;
     const assignment = this.parseRecord<DispatchAssignmentRecord>(
-      assignmentRow.record,
+      assignmentResult.rows[0].record,
       "ops.phase1_dispatch_assignments",
     );
+    const task = await this.lockDriverTaskForUpdate(executor, taskId);
+    if (
+      !task ||
+      task.taskId !== taskId ||
+      task.taskId !== assignment.taskId ||
+      task.assignmentId !== assignment.assignmentId ||
+      task.orderId !== assignment.orderId ||
+      task.dispatchJobId !== assignment.dispatchJobId ||
+      task.driverId !== assignment.driverId ||
+      task.vehicleId !== assignment.vehicleId
+    ) {
+      throw new ApiRequestError(
+        409,
+        "ASSIGNMENT_TASK_RECONCILIATION_REQUIRED",
+        "Completion assignment task requires reconciliation.",
+      );
+    }
 
     const dispatchJobResult = await executor.query<JsonRecordRow>(
       `
@@ -518,6 +1146,17 @@ export class OwnedMobilityRepository {
       "ops.phase1_owned_orders",
     );
 
+    if (
+      order.orderId !== assignment.orderId ||
+      dispatchJob.dispatchJobId !== assignment.dispatchJobId ||
+      dispatchJob.orderId !== assignment.orderId
+    ) {
+      throw new ApiRequestError(
+        409,
+        "ASSIGNMENT_TASK_RECONCILIATION_REQUIRED",
+        "Completion order and dispatch job require reconciliation.",
+      );
+    }
     return { order, dispatchJob, assignment, task };
   }
 

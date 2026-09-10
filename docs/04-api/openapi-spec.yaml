@@ -24,6 +24,14 @@ tags:
     description: Rule CRUD, reordering, and dry-run evaluation routes.
   - name: TenantApprovalRequests
     description: Approval request lifecycle and approver action routes.
+  - name: DriverLeave
+    description: 司機請假申請、撤回、主管審核與班表連動
+  - name: DriverAcademy
+    description: 司機培訓課程、教材、測驗作答與完訓紀錄
+  - name: FleetPartnerTraining
+    description: 車行司機完訓率真實看板、名冊與答題證據下鑽
+  - name: HostVehicles
+    description: 車主 Host 自車受限唯讀投影 (車輛、收益、維保、行程、案件)
 security:
   - BearerAuth: []
 paths:
@@ -917,6 +925,711 @@ paths:
           $ref: "#/components/responses/Unauthorized"
         "403":
           $ref: "#/components/responses/Forbidden"
+
+  /api/driver-leave/requests:
+    post:
+      tags:
+        - DriverLeave
+      operationId: createDriverLeave
+      summary: 司機提交請假申請
+      description: |
+        RBAC: realm `driver`, actor `driver_user`, scope `driver:write`.
+        時間邊界：`startTime >= now - 15m` 且 `endTime > startTime`。
+        不可與既有 pending 或 approved 假單區間重疊。
+      security:
+        - BearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/XRequestId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateDriverLeaveCommand"
+      responses:
+        "201":
+          description: 請假申請建立成功
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DriverLeaveEnvelope"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "409":
+          $ref: "#/components/responses/Conflict"
+    get:
+      tags:
+        - DriverLeave
+      operationId: listDriverLeaves
+      summary: 查詢請假申請清單
+      description: |
+        RBAC:
+        - 司機 (`driver_user`): 強制過濾僅限自身紀錄 (`driverId = identity.actorId`)。
+        - 營運審核主管 (`ops_user`): 可依 `driverId`、`status`、時間區間進行篩選。
+      security:
+        - BearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/XRequestId"
+        - name: driverId
+          in: query
+          schema:
+            type: string
+          description: 司機識別碼 (僅 ops 角色可指定)
+        - name: status
+          in: query
+          schema:
+            $ref: "#/components/schemas/DriverLeaveStatus"
+          description: 假單狀態篩選
+        - name: startTimeFrom
+          in: query
+          schema:
+            type: string
+            format: date-time
+          description: 起始時間下限 (ISO 8601 UTC)
+        - name: endTimeTo
+          in: query
+          schema:
+            type: string
+            format: date-time
+          description: 結束時間上限 (ISO 8601 UTC)
+        - name: page
+          in: query
+          schema:
+            type: integer
+            default: 1
+          description: 分頁頁碼
+        - name: pageSize
+          in: query
+          schema:
+            type: integer
+            default: 20
+          description: 每頁筆數
+      responses:
+        "200":
+          description: 請假申請分頁清單
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DriverLeaveListEnvelope"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+
+  /api/driver-leave/requests/{leaveId}/withdraw:
+    post:
+      tags:
+        - DriverLeave
+      operationId: withdrawDriverLeave
+      summary: 司機主動撤回請假申請
+      description: |
+        RBAC: realm `driver`, scope `driver:write`.
+        僅能撤回狀態為 `pending` 且屬於本人之假單。
+      security:
+        - BearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/XRequestId"
+        - name: leaveId
+          in: path
+          required: true
+          schema:
+            type: string
+          description: 假單識別碼 (UUID)
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/WithdrawDriverLeaveCommand"
+      responses:
+        "200":
+          description: 請假申請撤回成功
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DriverLeaveEnvelope"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+
+  /api/driver-leave/requests/{leaveId}/review:
+    post:
+      tags:
+        - DriverLeave
+      operationId: reviewDriverLeave
+      summary: 主管審核請假申請 (核准或駁回)
+      description: |
+        RBAC: realm `ops`, role `ops_user`, scope `driver:write`.
+        核准時連動排班表標記 `leaveReassigned: true`，寫入受影響班次至 `impactedShiftIds`。
+      security:
+        - BearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/XRequestId"
+        - name: leaveId
+          in: path
+          required: true
+          schema:
+            type: string
+          description: 假單識別碼 (UUID)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ReviewDriverLeaveCommand"
+      responses:
+        "200":
+          description: 請假審核成功
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DriverLeaveEnvelope"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+
+  /api/driver-academy/courses:
+    get:
+      tags:
+        - DriverAcademy
+      operationId: listAcademyCourses
+      summary: 查詢司機培訓課程清單
+      description: |
+        RBAC: realm `driver`, scope `driver:read`.
+      security:
+        - BearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/XRequestId"
+        - name: page
+          in: query
+          schema:
+            type: integer
+            default: 1
+          description: 分頁頁碼
+        - name: pageSize
+          in: query
+          schema:
+            type: integer
+            default: 20
+          description: 每頁筆數
+      responses:
+        "200":
+          description: 課程分頁清單
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AcademyCourseListEnvelope"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+
+  /api/driver-academy/courses/{courseId}:
+    get:
+      tags:
+        - DriverAcademy
+      operationId: getAcademyCourse
+      summary: 取得課程教材與試卷題目
+      description: |
+        RBAC: realm `driver`, scope `driver:read`.
+        試卷 JSON 嚴格不包含解答選項，杜絕偷看。
+      security:
+        - BearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/XRequestId"
+        - name: courseId
+          in: path
+          required: true
+          schema:
+            type: string
+          description: 課程識別碼
+      responses:
+        "200":
+          description: 課程詳細內容與試卷
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AcademyCourseEnvelope"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /api/driver-academy/courses/{courseId}/quiz/submit:
+    post:
+      tags:
+        - DriverAcademy
+      operationId: submitQuiz
+      summary: 司機提交測驗答案
+      description: |
+        RBAC: realm `driver`, scope `driver:write`.
+        必須攜帶 courseVersion，若題庫已改版則回傳 409 COURSE_VERSION_STALE。
+        缺題或重複題號作答回傳 400 QUIZ_INCOMPLETE_OR_DUPLICATE_SUBMISSION。
+      security:
+        - BearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/XRequestId"
+        - name: courseId
+          in: path
+          required: true
+          schema:
+            type: string
+          description: 課程識別碼
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/QuizSubmissionCommand"
+      responses:
+        "200":
+          description: 測驗評分結果
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/QuizResultEnvelope"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+
+  /api/driver-academy/records:
+    get:
+      tags:
+        - DriverAcademy
+      operationId: listDriverTrainingRecords
+      summary: 司機查詢個人完訓紀錄列表
+      description: |
+        RBAC: realm `driver`, scope `driver:read`.
+      security:
+        - BearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/XRequestId"
+        - name: page
+          in: query
+          schema:
+            type: integer
+            default: 1
+          description: 分頁頁碼
+        - name: pageSize
+          in: query
+          schema:
+            type: integer
+            default: 20
+          description: 每頁筆數
+      responses:
+        "200":
+          description: 個人完訓紀錄列表
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DriverTrainingRecordListEnvelope"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+
+  /api/driver-academy/courses/{courseId}/attempts/{attemptId}:
+    get:
+      tags:
+        - DriverAcademy
+      operationId: getDriverQuizAttempt
+      summary: 司機查詢個人測驗作答證據
+      description: |
+        RBAC: realm `driver`, scope `driver:read`.
+      security:
+        - BearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/XRequestId"
+        - name: courseId
+          in: path
+          required: true
+          schema:
+            type: string
+          description: 課程識別碼
+        - name: attemptId
+          in: path
+          required: true
+          schema:
+            type: string
+          description: 作答紀錄識別碼
+      responses:
+        "200":
+          description: 作答詳細證據
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DriverQuizAttemptEnvelope"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /api/fleet-partner/training/summary:
+    get:
+      tags:
+        - FleetPartnerTraining
+      operationId: getFleetTrainingSummary
+      summary: 車行管理員查詢完訓率看板
+      description: |
+        RBAC: realm `tenant` / `ops`, role `tenant_ops_admin`, scopes `reports:read`, `driver:read`.
+        以有效司機總數為分母，全數通過必修課為完訓，完訓率不溢出 100%。
+      security:
+        - BearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/XRequestId"
+      responses:
+        "200":
+          description: 車行真實完訓看板
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FleetTrainingViewEnvelope"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+
+  /api/fleet-partner/training/roster:
+    get:
+      tags:
+        - FleetPartnerTraining
+      operationId: listFleetDriverRoster
+      summary: 車行管理員查詢司機培訓名冊
+      description: |
+        RBAC: realm `tenant` / `ops`, scopes `reports:read`, `driver:read`.
+      security:
+        - BearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/XRequestId"
+        - name: page
+          in: query
+          schema:
+            type: integer
+            default: 1
+          description: 分頁頁碼
+        - name: pageSize
+          in: query
+          schema:
+            type: integer
+            default: 20
+          description: 每頁筆數
+      responses:
+        "200":
+          description: 司機名冊清單
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FleetDriverRosterListEnvelope"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+
+  /api/fleet-partner/training/drivers/{driverId}/attempts/{attemptId}:
+    get:
+      tags:
+        - FleetPartnerTraining
+      operationId: getFleetDriverQuizAttempt
+      summary: 車行管理員下鑽司機答題證據
+      description: |
+        RBAC: realm `tenant` / `ops`, scopes `reports:read`, `driver:read`.
+        跨車行存取回傳 403 ACADEMY_FORBIDDEN_FLEET_ACCESS。
+      security:
+        - BearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/XRequestId"
+        - name: driverId
+          in: path
+          required: true
+          schema:
+            type: string
+          description: 司機代碼
+        - name: attemptId
+          in: path
+          required: true
+          schema:
+            type: string
+          description: 作答紀錄識別碼
+      responses:
+        "200":
+          description: 司機答題證據
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DriverQuizAttemptEnvelope"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /api/host/vehicles:
+    get:
+      tags:
+        - HostVehicles
+      operationId: listHostVehicles
+      summary: 查詢車主名下車輛清單
+      description: |
+        RBAC: realm `partner`, scope `owned:read`, resource constraint: `vehicle.owner_partner_id === identity.partnerId`.
+        VIN 後 6 碼去識別化遮蔽。
+      security:
+        - BearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/XRequestId"
+        - name: page
+          in: query
+          schema:
+            type: integer
+            default: 1
+          description: 分頁頁碼
+        - name: pageSize
+          in: query
+          schema:
+            type: integer
+            default: 20
+          description: 每頁筆數
+      responses:
+        "200":
+          description: 車主名下車輛列表
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HostVehicleListEnvelope"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+
+  /api/host/vehicles/{vehicleId}/earnings:
+    get:
+      tags:
+        - HostVehicles
+      operationId: getHostVehicleEarnings
+      summary: 查詢自車收益摘要
+      description: |
+        RBAC: realm `partner`, scopes `reports:read`, `owned:read`.
+        防枚舉：非本人車輛一律回傳 404 HOST_VEHICLE_NOT_FOUND。
+        Phase 1 最小契約中 fleetCommission 與 netEarnings 標為 null (pending_policy)。
+      security:
+        - BearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/XRequestId"
+        - name: vehicleId
+          in: path
+          required: true
+          schema:
+            type: string
+          description: 車輛識別碼
+        - name: month
+          in: query
+          schema:
+            type: string
+            example: "2026-08"
+          description: 收益月份 (YYYY-MM)
+      responses:
+        "200":
+          description: 自車收益摘要
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HostVehicleEarningsEnvelope"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /api/host/vehicles/{vehicleId}/maintenance:
+    get:
+      tags:
+        - HostVehicles
+      operationId: listHostVehicleMaintenance
+      summary: 查詢自車維保紀錄清單
+      description: |
+        RBAC: realm `partner`, scopes `maintenance:read`, `owned:read`.
+        狀態枚舉對齊 MAINTENANCE_STATUSES (含 overdue)。
+      security:
+        - BearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/XRequestId"
+        - name: vehicleId
+          in: path
+          required: true
+          schema:
+            type: string
+          description: 車輛識別碼
+        - name: page
+          in: query
+          schema:
+            type: integer
+            default: 1
+          description: 分頁頁碼
+        - name: pageSize
+          in: query
+          schema:
+            type: integer
+            default: 20
+          description: 每頁筆數
+      responses:
+        "200":
+          description: 自車維保清單
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HostVehicleMaintenanceListEnvelope"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /api/host/vehicles/{vehicleId}/trips:
+    get:
+      tags:
+        - HostVehicles
+      operationId: listHostVehicleTrips
+      summary: 查詢自車行程任務 (去識別化)
+      description: |
+        RBAC: realm `partner`, scope `owned:read`.
+        去識別化：僅呈現概括行政區與金額，無乘客個資。
+      security:
+        - BearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/XRequestId"
+        - name: vehicleId
+          in: path
+          required: true
+          schema:
+            type: string
+          description: 車輛識別碼
+        - name: page
+          in: query
+          schema:
+            type: integer
+            default: 1
+          description: 分頁頁碼
+        - name: pageSize
+          in: query
+          schema:
+            type: integer
+            default: 20
+          description: 每頁筆數
+      responses:
+        "200":
+          description: 自車行程清單
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HostVehicleTripListEnvelope"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /api/host/vehicles/{vehicleId}/cases:
+    get:
+      tags:
+        - HostVehicles
+      operationId: listHostVehicleCases
+      summary: 查詢自車相關案件 (去識別化)
+      description: |
+        RBAC: realm `partner`, scope `owned:read`.
+        去識別化：屏蔽報案人個資，僅投影案件分類與處理結論。
+      security:
+        - BearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/XRequestId"
+        - name: vehicleId
+          in: path
+          required: true
+          schema:
+            type: string
+          description: 車輛識別碼
+        - name: page
+          in: query
+          schema:
+            type: integer
+            default: 1
+          description: 分頁頁碼
+        - name: pageSize
+          in: query
+          schema:
+            type: integer
+            default: 20
+          description: 每頁筆數
+      responses:
+        "200":
+          description: 自車案件清單
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HostVehicleCaseListEnvelope"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
 components:
   securitySchemes:
     BearerAuth:
@@ -992,6 +1705,12 @@ components:
             $ref: "#/components/schemas/ApiErrorEnvelope"
     NotImplemented:
       description: Reserved-but-not-implemented route.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ApiErrorEnvelope"
+    MethodNotAllowed:
+      description: Mutation method not allowed on read-only resource.
       content:
         application/json:
           schema:
@@ -2524,6 +3243,8 @@ components:
         - VOICE_INVALID_ACTOR
         - VOICE_CAPABILITY_REJECTED
         - VOICE_UNSUPPORTED_ACTION
+        - VOICE_CONTROL_CUTOFF_NOT_REACHED
+        - VOICE_UNRESOLVED_INPUT
     VoiceControlCutoff:
       type: object
       properties:
@@ -3359,3 +4080,1067 @@ components:
       oneOf:
         - $ref: "#/components/schemas/VoiceAgentBookingActor"
         - $ref: "#/components/schemas/HumanBookingActor"
+
+    # =========================================================================
+    # System Remediation (SR-CONTRACT-001): Driver Leave Schemas
+    # =========================================================================
+    DriverLeaveType:
+      type: string
+      enum: [annual, sick, personal, bereavement, emergency]
+    DriverLeaveStatus:
+      type: string
+      enum: [pending, approved, rejected, withdrawn]
+    DriverLeaveRecord:
+      type: object
+      required:
+        - leaveId
+        - driverId
+        - leaveType
+        - startTime
+        - endTime
+        - reason
+        - status
+        - reviewedByPrincipalId
+        - reviewedAt
+        - reviewNotes
+        - impactedShiftIds
+        - createdAt
+        - updatedAt
+      properties:
+        leaveId:
+          type: string
+          format: uuid
+        driverId:
+          type: string
+        leaveType:
+          $ref: "#/components/schemas/DriverLeaveType"
+        startTime:
+          type: string
+          format: date-time
+        endTime:
+          type: string
+          format: date-time
+        reason:
+          type: string
+        status:
+          $ref: "#/components/schemas/DriverLeaveStatus"
+        reviewedByPrincipalId:
+          type: string
+          nullable: true
+        reviewedAt:
+          type: string
+          format: date-time
+          nullable: true
+        reviewNotes:
+          type: string
+          nullable: true
+        impactedShiftIds:
+          type: array
+          items:
+            type: string
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+    CreateDriverLeaveCommand:
+      type: object
+      required:
+        - leaveType
+        - startTime
+        - endTime
+        - reason
+      properties:
+        leaveType:
+          $ref: "#/components/schemas/DriverLeaveType"
+        startTime:
+          type: string
+          format: date-time
+        endTime:
+          type: string
+          format: date-time
+        reason:
+          type: string
+    WithdrawDriverLeaveCommand:
+      type: object
+      properties:
+        reason:
+          type: string
+    ReviewDriverLeaveCommand:
+      type: object
+      required:
+        - decision
+      properties:
+        decision:
+          type: string
+          enum: [approve, reject]
+        reviewNotes:
+          type: string
+    DriverLeaveEnvelope:
+      type: object
+      required:
+        - data
+        - meta
+      properties:
+        data:
+          $ref: "#/components/schemas/DriverLeaveRecord"
+        meta:
+          $ref: "#/components/schemas/ApiMeta"
+    DriverLeaveListData:
+      type: object
+      required:
+        - items
+        - pageInfo
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/DriverLeaveRecord"
+        pageInfo:
+          $ref: "#/components/schemas/ApiPageInfo"
+    DriverLeaveListEnvelope:
+      type: object
+      required:
+        - data
+        - meta
+      properties:
+        data:
+          $ref: "#/components/schemas/DriverLeaveListData"
+        meta:
+          $ref: "#/components/schemas/ApiMeta"
+
+    # =========================================================================
+    # System Remediation (SR-CONTRACT-001): Driver Academy & Fleet Training
+    # =========================================================================
+    TrainingStatus:
+      type: string
+      enum: [not_started, in_progress, passed, failed, expired]
+    AcademyModuleType:
+      type: string
+      enum: [video, sop, article]
+    AcademyModule:
+      type: object
+      required:
+        - moduleId
+        - title
+        - type
+        - contentUrl
+        - durationMinutes
+      properties:
+        moduleId:
+          type: string
+        title:
+          type: string
+        type:
+          $ref: "#/components/schemas/AcademyModuleType"
+        contentUrl:
+          type: string
+        durationMinutes:
+          type: number
+    QuizQuestionOption:
+      type: object
+      required:
+        - optionId
+        - text
+      properties:
+        optionId:
+          type: string
+        text:
+          type: string
+    QuizQuestionPublic:
+      type: object
+      required:
+        - questionId
+        - prompt
+        - options
+      properties:
+        questionId:
+          type: string
+        prompt:
+          type: string
+        options:
+          type: array
+          items:
+            $ref: "#/components/schemas/QuizQuestionOption"
+    AcademyCourseCategory:
+      type: string
+      enum: [compliance, service_quality, safety, operations]
+    AcademyCourseSummary:
+      type: object
+      required:
+        - courseId
+        - courseCode
+        - title
+        - category
+        - isRequired
+        - validityDays
+        - passingScore
+        - version
+        - modulesCount
+      properties:
+        courseId:
+          type: string
+        courseCode:
+          type: string
+        title:
+          type: string
+        category:
+          $ref: "#/components/schemas/AcademyCourseCategory"
+        isRequired:
+          type: boolean
+        validityDays:
+          type: integer
+          nullable: true
+        passingScore:
+          type: number
+        version:
+          type: integer
+        modulesCount:
+          type: integer
+        userStatus:
+          $ref: "#/components/schemas/TrainingStatus"
+    AcademyCourseDetail:
+      allOf:
+        - $ref: "#/components/schemas/AcademyCourseSummary"
+        - type: object
+          required:
+            - description
+            - modules
+            - questions
+          properties:
+            description:
+              type: string
+            modules:
+              type: array
+              items:
+                $ref: "#/components/schemas/AcademyModule"
+            questions:
+              type: array
+              items:
+                $ref: "#/components/schemas/QuizQuestionPublic"
+    QuizSubmissionAnswer:
+      type: object
+      required:
+        - questionId
+        - selectedOptionId
+      properties:
+        questionId:
+          type: string
+        selectedOptionId:
+          type: string
+    QuizSubmissionCommand:
+      type: object
+      required:
+        - courseVersion
+        - answers
+      properties:
+        courseVersion:
+          type: integer
+        answers:
+          type: array
+          items:
+            $ref: "#/components/schemas/QuizSubmissionAnswer"
+    QuizResultRecord:
+      type: object
+      required:
+        - attemptId
+        - courseId
+        - courseVersion
+        - score
+        - passed
+        - attemptedAt
+      properties:
+        attemptId:
+          type: string
+        courseId:
+          type: string
+        courseVersion:
+          type: integer
+        score:
+          type: number
+        passed:
+          type: boolean
+        attemptedAt:
+          type: string
+          format: date-time
+        feedback:
+          type: string
+    DriverQuizAttemptAnswerSummary:
+      type: object
+      required:
+        - questionId
+        - selectedOptionId
+        - isCorrect
+      properties:
+        questionId:
+          type: string
+        selectedOptionId:
+          type: string
+        isCorrect:
+          type: boolean
+    DriverQuizAttemptDetail:
+      allOf:
+        - $ref: "#/components/schemas/QuizResultRecord"
+        - type: object
+          required:
+            - driverId
+            - answersSummary
+          properties:
+            driverId:
+              type: string
+            answersSummary:
+              type: array
+              items:
+                $ref: "#/components/schemas/DriverQuizAttemptAnswerSummary"
+    DriverTrainingRecord:
+      type: object
+      required:
+        - recordId
+        - driverId
+        - courseId
+        - courseCode
+        - courseTitle
+        - status
+        - highestScore
+        - passed
+        - attemptsCount
+        - completedAt
+        - expiresAt
+        - isOverdue
+        - lastAttemptAt
+      properties:
+        recordId:
+          type: string
+        driverId:
+          type: string
+        courseId:
+          type: string
+        courseCode:
+          type: string
+        courseTitle:
+          type: string
+        status:
+          $ref: "#/components/schemas/TrainingStatus"
+        highestScore:
+          type: number
+          nullable: true
+        passed:
+          type: boolean
+        attemptsCount:
+          type: integer
+        completedAt:
+          type: string
+          format: date-time
+          nullable: true
+        expiresAt:
+          type: string
+          format: date-time
+          nullable: true
+        isOverdue:
+          type: boolean
+        lastAttemptAt:
+          type: string
+          format: date-time
+          nullable: true
+    FleetTrainingSummaryRow:
+      type: object
+      required:
+        - course
+        - en
+        - completed
+        - total
+        - pct
+      properties:
+        course:
+          type: string
+        en:
+          type: string
+        completed:
+          type: integer
+        total:
+          type: integer
+        pct:
+          type: number
+    FleetTrainingSummaryStats:
+      type: object
+      required:
+        - completionPct
+        - pendingHeadcount
+        - overdueIncomplete
+      properties:
+        completionPct:
+          type: string
+        pendingHeadcount:
+          type: string
+        overdueIncomplete:
+          type: integer
+    FleetTrainingView:
+      type: object
+      required:
+        - fleetPartnerId
+        - rows
+        - summary
+        - source
+      properties:
+        fleetPartnerId:
+          type: string
+        rows:
+          type: array
+          items:
+            $ref: "#/components/schemas/FleetTrainingSummaryRow"
+        summary:
+          $ref: "#/components/schemas/FleetTrainingSummaryStats"
+        source:
+          type: string
+          enum: [authoritative]
+    FleetDriverRosterItem:
+      type: object
+      required:
+        - driverId
+        - driverName
+        - courseCode
+        - status
+        - score
+        - completedAt
+        - isOverdue
+        - latestAttemptId
+      properties:
+        driverId:
+          type: string
+        driverName:
+          type: string
+        courseCode:
+          type: string
+        status:
+          $ref: "#/components/schemas/TrainingStatus"
+        score:
+          type: number
+          nullable: true
+        completedAt:
+          type: string
+          format: date-time
+          nullable: true
+        isOverdue:
+          type: boolean
+        latestAttemptId:
+          type: string
+          nullable: true
+    AcademyCourseListData:
+      type: object
+      required:
+        - items
+        - pageInfo
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/AcademyCourseSummary"
+        pageInfo:
+          $ref: "#/components/schemas/ApiPageInfo"
+    AcademyCourseListEnvelope:
+      type: object
+      required:
+        - data
+        - meta
+      properties:
+        data:
+          $ref: "#/components/schemas/AcademyCourseListData"
+        meta:
+          $ref: "#/components/schemas/ApiMeta"
+    AcademyCourseEnvelope:
+      type: object
+      required:
+        - data
+        - meta
+      properties:
+        data:
+          $ref: "#/components/schemas/AcademyCourseDetail"
+        meta:
+          $ref: "#/components/schemas/ApiMeta"
+    QuizResultEnvelope:
+      type: object
+      required:
+        - data
+        - meta
+      properties:
+        data:
+          $ref: "#/components/schemas/QuizResultRecord"
+        meta:
+          $ref: "#/components/schemas/ApiMeta"
+    DriverTrainingRecordListData:
+      type: object
+      required:
+        - items
+        - pageInfo
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/DriverTrainingRecord"
+        pageInfo:
+          $ref: "#/components/schemas/ApiPageInfo"
+    DriverTrainingRecordListEnvelope:
+      type: object
+      required:
+        - data
+        - meta
+      properties:
+        data:
+          $ref: "#/components/schemas/DriverTrainingRecordListData"
+        meta:
+          $ref: "#/components/schemas/ApiMeta"
+    DriverQuizAttemptEnvelope:
+      type: object
+      required:
+        - data
+        - meta
+      properties:
+        data:
+          $ref: "#/components/schemas/DriverQuizAttemptDetail"
+        meta:
+          $ref: "#/components/schemas/ApiMeta"
+    FleetTrainingViewEnvelope:
+      type: object
+      required:
+        - data
+        - meta
+      properties:
+        data:
+          $ref: "#/components/schemas/FleetTrainingView"
+        meta:
+          $ref: "#/components/schemas/ApiMeta"
+    FleetDriverRosterListData:
+      type: object
+      required:
+        - items
+        - pageInfo
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/FleetDriverRosterItem"
+        pageInfo:
+          $ref: "#/components/schemas/ApiPageInfo"
+    FleetDriverRosterListEnvelope:
+      type: object
+      required:
+        - data
+        - meta
+      properties:
+        data:
+          $ref: "#/components/schemas/FleetDriverRosterListData"
+        meta:
+          $ref: "#/components/schemas/ApiMeta"
+
+    # =========================================================================
+    # System Remediation (SR-CONTRACT-001): Host Vehicles Schemas
+    # =========================================================================
+    HostVehicleContractPeriod:
+      type: object
+      nullable: true
+      required:
+        - startAt
+        - endAt
+        - status
+      properties:
+        startAt:
+          type: string
+          format: date-time
+        endAt:
+          type: string
+          format: date-time
+        status:
+          type: string
+    HostVehicleSummary:
+      type: object
+      required:
+        - vehicleId
+        - plateNo
+        - vinMasked
+        - vehicleForm
+        - licenseClass
+        - energyType
+        - currentStatus
+        - operatingFleetName
+        - contractPeriod
+      properties:
+        vehicleId:
+          type: string
+        plateNo:
+          type: string
+        vinMasked:
+          type: string
+        vehicleForm:
+          type: string
+        licenseClass:
+          type: string
+        energyType:
+          type: string
+        currentStatus:
+          type: string
+        operatingFleetName:
+          type: string
+        contractPeriod:
+          $ref: "#/components/schemas/HostVehicleContractPeriod"
+    HostVehicleEarningsSummary:
+      type: object
+      required:
+        - vehicleId
+        - period
+        - currency
+        - grossRevenue
+        - platformFee
+        - fleetCommission
+        - netEarnings
+        - tripsCount
+        - operatingDays
+        - settlementStatus
+      properties:
+        vehicleId:
+          type: string
+        period:
+          type: string
+        currency:
+          type: string
+          enum: [TWD]
+        grossRevenue:
+          type: number
+        platformFee:
+          type: number
+        fleetCommission:
+          type: number
+          nullable: true
+        netEarnings:
+          type: number
+          nullable: true
+        tripsCount:
+          type: integer
+        operatingDays:
+          type: integer
+        settlementStatus:
+          type: string
+          enum: [calculated, pending_policy]
+    HostVehicleMaintenanceStatus:
+      type: string
+      enum: [scheduled, in_progress, completed, cancelled, overdue]
+    HostVehicleMaintenanceItem:
+      type: object
+      required:
+        - maintenanceId
+        - vehicleId
+        - type
+        - description
+        - status
+        - scheduledAt
+        - completedAt
+        - cost
+        - notesSummary
+      properties:
+        maintenanceId:
+          type: string
+        vehicleId:
+          type: string
+        type:
+          type: string
+        description:
+          type: string
+        status:
+          $ref: "#/components/schemas/HostVehicleMaintenanceStatus"
+        scheduledAt:
+          type: string
+          format: date-time
+          nullable: true
+        completedAt:
+          type: string
+          format: date-time
+          nullable: true
+        cost:
+          type: number
+          nullable: true
+        notesSummary:
+          type: string
+          nullable: true
+    HostVehicleTripItem:
+      type: object
+      required:
+        - tripId
+        - vehicleId
+        - startedAt
+        - completedAt
+        - areaSummary
+        - distanceKm
+        - fareAmount
+        - status
+      properties:
+        tripId:
+          type: string
+        vehicleId:
+          type: string
+        startedAt:
+          type: string
+          format: date-time
+        completedAt:
+          type: string
+          format: date-time
+          nullable: true
+        areaSummary:
+          type: string
+        distanceKm:
+          type: number
+        fareAmount:
+          type: number
+        status:
+          type: string
+    HostVehicleCaseCategory:
+      type: string
+      enum: [vehicle_condition, accident, equipment, service_feedback]
+    HostVehicleCaseStatus:
+      type: string
+      enum: [open, investigating, resolved, closed]
+    HostVehicleCaseItem:
+      type: object
+      required:
+        - caseId
+        - vehicleId
+        - category
+        - status
+        - reportedAt
+        - resolvedAt
+        - resolutionSummary
+      properties:
+        caseId:
+          type: string
+        vehicleId:
+          type: string
+        category:
+          $ref: "#/components/schemas/HostVehicleCaseCategory"
+        status:
+          $ref: "#/components/schemas/HostVehicleCaseStatus"
+        reportedAt:
+          type: string
+          format: date-time
+        resolvedAt:
+          type: string
+          format: date-time
+          nullable: true
+        resolutionSummary:
+          type: string
+          nullable: true
+    HostVehicleListData:
+      type: object
+      required:
+        - items
+        - pageInfo
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/HostVehicleSummary"
+        pageInfo:
+          $ref: "#/components/schemas/ApiPageInfo"
+    HostVehicleListEnvelope:
+      type: object
+      required:
+        - data
+        - meta
+      properties:
+        data:
+          $ref: "#/components/schemas/HostVehicleListData"
+        meta:
+          $ref: "#/components/schemas/ApiMeta"
+    HostVehicleEarningsEnvelope:
+      type: object
+      required:
+        - data
+        - meta
+      properties:
+        data:
+          $ref: "#/components/schemas/HostVehicleEarningsSummary"
+        meta:
+          $ref: "#/components/schemas/ApiMeta"
+    HostVehicleMaintenanceListData:
+      type: object
+      required:
+        - items
+        - pageInfo
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/HostVehicleMaintenanceItem"
+        pageInfo:
+          $ref: "#/components/schemas/ApiPageInfo"
+    HostVehicleMaintenanceListEnvelope:
+      type: object
+      required:
+        - data
+        - meta
+      properties:
+        data:
+          $ref: "#/components/schemas/HostVehicleMaintenanceListData"
+        meta:
+          $ref: "#/components/schemas/ApiMeta"
+    HostVehicleTripListData:
+      type: object
+      required:
+        - items
+        - pageInfo
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/HostVehicleTripItem"
+        pageInfo:
+          $ref: "#/components/schemas/ApiPageInfo"
+    HostVehicleTripListEnvelope:
+      type: object
+      required:
+        - data
+        - meta
+      properties:
+        data:
+          $ref: "#/components/schemas/HostVehicleTripListData"
+        meta:
+          $ref: "#/components/schemas/ApiMeta"
+    HostVehicleCaseListData:
+      type: object
+      required:
+        - items
+        - pageInfo
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/HostVehicleCaseItem"
+        pageInfo:
+          $ref: "#/components/schemas/ApiPageInfo"
+    HostVehicleCaseListEnvelope:
+      type: object
+      required:
+        - data
+        - meta
+      properties:
+        data:
+          $ref: "#/components/schemas/HostVehicleCaseListData"
+        meta:
+          $ref: "#/components/schemas/ApiMeta"
+
+    # =========================================================================
+    # System Remediation (SR-CONTRACT-001): Contract Operational Terms (N14)
+    # =========================================================================
+    ContractOperationalDataStatus:
+      type: string
+      enum: [available, not_applicable, missing_data]
+    ContractOperationalTerms:
+      type: object
+      required:
+        - contractId
+        - modifiableWindowMinutes
+        - proofRequirements
+        - waitingRuleMinutes
+        - noShowRuleMinutes
+        - slaProfileCode
+        - effectiveVersion
+        - authMode
+        - status
+      properties:
+        contractId:
+          type: string
+        modifiableWindowMinutes:
+          type: integer
+          nullable: true
+        proofRequirements:
+          type: array
+          items:
+            type: string
+          nullable: true
+        waitingRuleMinutes:
+          type: integer
+          nullable: true
+        noShowRuleMinutes:
+          type: integer
+          nullable: true
+        slaProfileCode:
+          type: string
+          nullable: true
+        effectiveVersion:
+          type: string
+          nullable: true
+        authMode:
+          type: string
+          nullable: true
+        status:
+          $ref: "#/components/schemas/ContractOperationalDataStatus"
+    ContractOperationalModifiableWindow:
+      type: object
+      nullable: true
+      required:
+        - leadTimeMinutes
+        - cutoffMinutes
+      properties:
+        leadTimeMinutes:
+          type: integer
+        cutoffMinutes:
+          type: integer
+        description:
+          type: string
+    ContractOperationalProofRequirements:
+      type: object
+      nullable: true
+      required:
+        - requiredDocuments
+        - signatureRequired
+        - digitalProofAllowed
+      properties:
+        requiredDocuments:
+          type: array
+          items:
+            type: string
+        signatureRequired:
+          type: boolean
+        digitalProofAllowed:
+          type: boolean
+    ContractOperationalWaitingRule:
+      type: object
+      nullable: true
+      required:
+        - gracePeriodMinutes
+      properties:
+        gracePeriodMinutes:
+          type: integer
+        chargeableIntervalMinutes:
+          type: integer
+    ContractOperationalNoShowRule:
+      type: object
+      nullable: true
+      required:
+        - thresholdMinutes
+        - feeApplicable
+      properties:
+        thresholdMinutes:
+          type: integer
+        feeApplicable:
+          type: boolean
+    ContractOperationalSlaProfile:
+      type: object
+      nullable: true
+      required:
+        - profileId
+        - targetResponseMinutes
+        - pickupWindowMinutes
+      properties:
+        profileId:
+          type: string
+        targetResponseMinutes:
+          type: integer
+        pickupWindowMinutes:
+          type: integer
+        businessDispatchSubtype:
+          type: string
+    ContractOperationalEffectiveVersion:
+      type: object
+      nullable: true
+      required:
+        - versionNumber
+        - versionTag
+        - effectiveFrom
+        - effectiveTo
+      properties:
+        versionNumber:
+          type: integer
+        versionTag:
+          type: string
+        effectiveFrom:
+          type: string
+          format: date-time
+        effectiveTo:
+          type: string
+          format: date-time
+          nullable: true
+    ContractOperationalAuthMode:
+      type: object
+      nullable: true
+      required:
+        - mode
+      properties:
+        mode:
+          type: string
+        eligibilityMode:
+          type: string
+    ContractOperationalFieldStatusMap:
+      type: object
+      required:
+        - modifiableWindow
+        - proofRequirements
+        - waitingRule
+        - noShowRule
+        - slaProfile
+        - effectiveVersion
+        - authMode
+      properties:
+        modifiableWindow:
+          $ref: "#/components/schemas/ContractOperationalDataStatus"
+        proofRequirements:
+          $ref: "#/components/schemas/ContractOperationalDataStatus"
+        waitingRule:
+          $ref: "#/components/schemas/ContractOperationalDataStatus"
+        noShowRule:
+          $ref: "#/components/schemas/ContractOperationalDataStatus"
+        slaProfile:
+          $ref: "#/components/schemas/ContractOperationalDataStatus"
+        effectiveVersion:
+          $ref: "#/components/schemas/ContractOperationalDataStatus"
+        authMode:
+          $ref: "#/components/schemas/ContractOperationalDataStatus"
+    ContractOperationalViewRecord:
+      type: object
+      required:
+        - contractId
+        - modifiableWindow
+        - proofRequirements
+        - waitingRule
+        - noShowRule
+        - slaProfile
+        - effectiveVersion
+        - authMode
+        - dataStatus
+      properties:
+        contractId:
+          type: string
+        modifiableWindow:
+          $ref: "#/components/schemas/ContractOperationalModifiableWindow"
+        proofRequirements:
+          $ref: "#/components/schemas/ContractOperationalProofRequirements"
+        waitingRule:
+          $ref: "#/components/schemas/ContractOperationalWaitingRule"
+        noShowRule:
+          $ref: "#/components/schemas/ContractOperationalNoShowRule"
+        slaProfile:
+          $ref: "#/components/schemas/ContractOperationalSlaProfile"
+        effectiveVersion:
+          $ref: "#/components/schemas/ContractOperationalEffectiveVersion"
+        authMode:
+          $ref: "#/components/schemas/ContractOperationalAuthMode"
+        dataStatus:
+          $ref: "#/components/schemas/ContractOperationalFieldStatusMap"
+    ContractOperationalTermsEnvelope:
+      type: object
+      required:
+        - data
+        - meta
+      properties:
+        data:
+          $ref: "#/components/schemas/ContractOperationalTerms"
+        meta:
+          $ref: "#/components/schemas/ApiMeta"
+    ContractOperationalViewEnvelope:
+      type: object
+      required:
+        - data
+        - meta
+      properties:
+        data:
+          $ref: "#/components/schemas/ContractOperationalViewRecord"
+        meta:
+          $ref: "#/components/schemas/ApiMeta"

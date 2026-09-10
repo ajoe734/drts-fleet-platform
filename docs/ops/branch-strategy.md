@@ -350,14 +350,28 @@ Reviewer: <reviewer>
 
 The body lets the other lane (and future reviewers) tell at a glance whether the two patches are compatible.
 
-### 11.4 `dev` advances → rebase the branch, never `git stash pop` on top
+### 11.4 Preserve published history when `dev` advances
 
-When `dev` has advanced while a lane was paused:
+When `dev` has advanced while a lane was paused, fetch first and inspect the
+remote task branch, existing PR and candidate/CI state:
 
 ```bash
 git fetch origin
-git rebase origin/dev
 ```
+
+- A candidate under review or CI stays at its exact SHA while awaiting results.
+  Trunk movement alone does not require synchronization or restarting CI.
+- Published commits, including pushed anchors, must not be rebased, amended or
+  force-pushed. If synchronization is necessary before candidate handoff, merge
+  `origin/dev` in the owner task worktree, resolve conflicts, validate and push
+  normally. The resulting SHA requires new review and CI.
+- Only a branch confirmed never published, with no PR or candidate, may use
+  `git rebase origin/dev`.
+- If the local task branch is missing but its remote branch exists, recreate it
+  from that remote head, preserving published work rather than starting at trunk.
+- If local history has already diverged from the published head, preserve both
+  refs and report their SHAs and diff for history recovery. Do not reset,
+  force-push or rebase again to make the push succeed.
 
 Do **not** rely on `git stash pop` to recover paused work; the stash blob has no patch identity and almost always requires manual fixups against the moved trunk.
 

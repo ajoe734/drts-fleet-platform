@@ -5,14 +5,14 @@
 | 初始狀態                                     | backlog                                              |
 | 優先級                                       | P2                                                   |
 | Owner / Reviewer（可由 supervisor 合法調派） | Codex / Codex2                                       |
-| 前置任務                                     | SR-DESIGN-001, UV-EXEC-001, UV-EXEC-002, UV-EXEC-019 |
+| 前置任務                                     | SR-DESIGN-001, UV-EXEC-001, UV-EXEC-002, UV-EXEC-019, SR-REPORT-001 |
 | 問題來源                                     | N01, N02, N03, N14                                   |
 | 能力來源                                     | C012, C052, C059, C071, C134                         |
 | 工作類型                                     | implementation                                       |
 
 ## Execution prompt
 
-先讀 execution_ref 中本 task 及追溯來源；從目前 origin/dev 記 base SHA並重現。9/6 audit SHA 是歷史觀察而非當前程式真值；已由其他任務修復時提交目前 SHA 的回歸證據，不重做或回退。只改 write_scopes；額外共用檔案必須由 supervisor 擴 scope 並加入相依後才能寫。沿用權威 API／資料模型，不以 fixture、固定百分比、假簽章或假送達代替完成。 依feature-contracts新增leaf contracts與client typed methods，統一由此task改shared exports/OpenAPI。保留leave/academy/Host的獨立migration filenames並查現有編號；不得與UV schema爭用。根app.module留SR-WIRE-001獨寫。
+先讀 execution_ref 中本 task 及追溯來源；從目前 origin/dev 記 base SHA並重現。9/6 audit SHA 是歷史觀察而非當前程式真值；已由其他任務修復時提交目前 SHA 的回歸證據，不重做或回退。只改 write_scopes；額外共用檔案必須由 supervisor 擴 scope 並加入相依後才能寫。沿用權威 API／資料模型，不以 fixture、固定百分比、假簽章或假送達代替完成。 依feature-contracts新增leaf contracts與client typed methods，新增功能的shared exports/OpenAPI由此task整合；一般報表格式宣告由前置SR-REPORT-001隨renderer同候選更新。保留leave/academy/Host的獨立migration filenames並查現有編號；不得與UV schema爭用。根app.module留SR-WIRE-001獨寫。
 
 先讀 [主執行規則](../system-remediation-execution-tasks-20260906.md)。不得直接修改 `ai-status.json`；使用當前 supervisor release 的 task-board commands。
 
@@ -49,7 +49,7 @@ pnpm exec vitest run tests/unit/system-remediation/sr-contract-001/
 
 ## 整合与結案
 
-測試依 task ID 獨立檔案；不得平行修改中央 test config、lockfile、shared exports、全域 routes。 共用 API-client index 與既有 UV-EXEC-019 的 src/ scope 重疊，必須等該 task canonical done；不得依初始 owner 或不同 worktree 假設可同寫。
+測試依 task ID 獨立檔案；不得平行修改中央 test config、lockfile、shared exports、全域 routes。 共用 API-client index 與既有 UV-EXEC-019 的 src/ scope 重疊，必須等該 task canonical done；不得依初始 owner 或不同 worktree 假設可同寫。 一般報表 implemented-format 宣告由 SR-REPORT-001 隨 renderer 同候選更新；本任務也必須等 SR-REPORT-001 canonical done 與 merge 後接續共用 contracts index，保留其已實作格式，不得回退為 CSV-only。
 
 此任務在獨立worktree執行。根節點不需要等整波；相依task必須是canonical done並含正確merge證據。若issue當前已修，保留回歸與來源證據，不重造功能。
 

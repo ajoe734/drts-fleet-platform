@@ -1,7 +1,7 @@
 # `@drts/partner-booking-web`
 
 White-label partner booking surface for DRTS Phase 1. Each tenant (e.g.
-CTBC World Elite) is reached through the `[tenantSlug]` route segment so a
+ACME Elite Demo) is reached through the `[tenantSlug]` route segment so a
 single deployable can serve any number of partner brands.
 
 ## Status
@@ -14,14 +14,14 @@ so a reviewed change can re-enable the surface later. While paused,
 rail removes any stale `drts-dev-partner-booking-web` Cloud Run service, and
 domain maintenance does not recreate `book.smarttransport.tw`.
 
-This app carries the PBK-UI-003 CTBC reference funnel baseline and the 2026-06
+This app carries the PBK-UI-003 ACME reference funnel baseline and the 2026-06
 credit-card airport transfer release extension:
 
 - Brand layering now resolves through
-  `packages/ui-tokens/src/brands.ts` with shared CTBC / CATHAY / TAISHIN /
-  DBS credit-card airport-transfer issuer templates plus FUBON insurance,
-  LION travel, and GRAND concierge reference templates.
-- The CTBC reference funnel (7 screens) now lands in **PBK-UI-003**.
+  `packages/ui-tokens/src/brands.ts` with shared ACME / CONTOSO / FABRIKAM /
+  NORTHWIND credit-card airport-transfer issuer templates plus TAILSPIN insurance,
+  ADVENTURE travel, and WINGTIP concierge reference templates.
+- The ACME reference funnel (7 screens) now lands in **PBK-UI-003**.
 - The program-specific `card` / `insurance` / `travel` website funnel states
   live under `/[tenantSlug]/program/site`; banking-app embed identity states
   live under `/[tenantSlug]/program/embed`.
@@ -41,7 +41,7 @@ credit-card airport transfer release extension:
   bring-up.
 - Every functional surface lives under `/[tenantSlug]/...`. The dynamic
   segment is required — there is no "default tenant" in this app.
-- The PBK-UI-003 CTBC reference funnel is served as seven explicit Next.js
+- The PBK-UI-003 ACME reference funnel is served as seven explicit Next.js
   routes grouped under `app/[tenantSlug]/(public|authenticated)/...`:
   `landing` (the tenant root), `eligibility`, and `help` sit in
   `(public)/`; `book`, `confirmed`, `trips`, and `receipt` sit in
@@ -57,14 +57,14 @@ credit-card airport transfer release extension:
   ramps.
 - Credit-card airport-transfer website booking and banking-app embedded
   hand-off are separate surfaces:
-  `http://localhost:3007/ctbc` is the PBK-UI-003 CTBC reference landing and the
+  `http://localhost:3007/acme` is the PBK-UI-003 ACME reference landing and the
   route used by the basic deploy smoke;
-  `http://localhost:3007/ctbc/program/site` is the current dev standalone
+  `http://localhost:3007/acme/program/site` is the current dev standalone
   cardholder website surface rendered by `AirportTransferSite`; and
-  `http://localhost:3007/ctbc/program/embed` is the bank-app identity hand-off
-  surface. The same pattern works for `cathay`, `taishin`, and `dbs`;
-  insurance (`fubon`) and travel (`lion`) expose the site funnel but do not
-  expose the banking-app embed surface. Do not present the CTBC reference
+  `http://localhost:3007/acme/program/embed` is the bank-app identity hand-off
+  surface. The same pattern works for `contoso`, `fabrikam`, and `northwind`;
+  insurance (`tailspin`) and travel (`adventureworks`) expose the site funnel but do not
+  expose the banking-app embed surface. Do not present the ACME reference
   landing or these dev routes as evidence of a production partner-entry
   cutover.
 
@@ -88,7 +88,7 @@ task reorganizes the port map, update both `package.json` and the
 ## Storybook
 
 Storybook is wired centrally in `packages/ui-web` (see SBK-UI-001). The
-`Partner Booking/CTBC Funnel` stories compare the built white-label screens
+`Partner Booking/ACME Funnel` stories compare the built white-label screens
 against the matching `Partner Booking.html#PB_*` artboard anchors:
 
 - `PB_Landing`

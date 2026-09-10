@@ -129,6 +129,12 @@ export class AssistantReadToolRegistry {
   ): AssistantReadToolExecutionResult {
     const identity = this.requireIdentity(request.identity);
 
+    if (!this.hasTool(request.toolName)) {
+      return this.handleUnknownTool(request.toolName);
+    }
+
+    this.authorizeTool(request.toolName, identity);
+
     switch (request.toolName) {
       case "list_dispatch_jobs":
         return {
@@ -174,6 +180,108 @@ export class AssistantReadToolRegistry {
 
   hasTool(toolName: string): toolName is AssistantReadToolName {
     return TOOL_DEFINITIONS.some((definition) => definition.name === toolName);
+  }
+
+  private hasScope(identity: BootstrapRequestIdentity, scope: string): boolean {
+    return identity.scopes.includes("*") || identity.scopes.includes(scope);
+  }
+
+  private authorizeTool(
+    toolName: AssistantReadToolName,
+    identity: BootstrapRequestIdentity,
+  ): void {
+    switch (toolName) {
+      case "list_dispatch_jobs": {
+        if (identity.realm === "platform") {
+          throw new ApiRequestError(
+            403,
+            "AUTH_REALM_DENIED",
+            `Realm 'platform' is not allowed to access assistant read tool '${toolName}'.`,
+            { toolName, realm: identity.realm },
+          );
+        }
+        if (!this.hasScope(identity, "dispatch:read")) {
+          throw new ApiRequestError(
+            403,
+            "AUTH_SCOPE_DENIED",
+            `Identity is missing required scope 'dispatch:read' for assistant read tool '${toolName}'.`,
+            {
+              toolName,
+              requiredScope: "dispatch:read",
+              grantedScopes: identity.scopes,
+            },
+          );
+        }
+        break;
+      }
+
+      case "get_order": {
+        if (identity.realm === "platform") {
+          throw new ApiRequestError(
+            403,
+            "AUTH_SCOPE_DENIED",
+            `Identity in realm 'platform' is missing required scope 'owned:read' for assistant read tool '${toolName}'.`,
+            {
+              toolName,
+              requiredScope: "owned:read",
+              grantedScopes: identity.scopes,
+            },
+          );
+        }
+        if (
+          !this.hasScope(identity, "owned:read") &&
+          !(
+            identity.realm === "tenant" &&
+            this.hasScope(identity, "tenant:read")
+          )
+        ) {
+          throw new ApiRequestError(
+            403,
+            "AUTH_SCOPE_DENIED",
+            `Identity is missing required scope 'owned:read' for assistant read tool '${toolName}'.`,
+            {
+              toolName,
+              requiredScope: "owned:read",
+              grantedScopes: identity.scopes,
+            },
+          );
+        }
+        break;
+      }
+
+      case "get_complaint_case":
+      case "get_complaint_timeline":
+      case "get_complaint_export_view": {
+        if (identity.realm === "platform") {
+          throw new ApiRequestError(
+            403,
+            "AUTH_REALM_DENIED",
+            `Realm 'platform' is not allowed to access complaint read tool '${toolName}'.`,
+            { toolName, realm: identity.realm },
+          );
+        }
+        if (
+          !this.hasScope(identity, "complaints:read") &&
+          !(
+            identity.realm === "tenant" &&
+            (this.hasScope(identity, "tenant:read") ||
+              this.hasScope(identity, "owned:read"))
+          )
+        ) {
+          throw new ApiRequestError(
+            403,
+            "AUTH_SCOPE_DENIED",
+            `Identity is missing required scope 'complaints:read' for assistant read tool '${toolName}'.`,
+            {
+              toolName,
+              requiredScope: "complaints:read",
+              grantedScopes: identity.scopes,
+            },
+          );
+        }
+        break;
+      }
+    }
   }
 
   private listDispatchJobs(identity: BootstrapRequestIdentity) {
@@ -257,7 +365,7 @@ export class AssistantReadToolRegistry {
     identity: BootstrapRequestIdentity,
     complaintCase: ComplaintCaseRecord,
   ) {
-    if (this.hasGlobalReadAccess(identity)) {
+    if (this.hasGlobalComplaintReadAccess(identity)) {
       return true;
     }
 
@@ -279,12 +387,17 @@ export class AssistantReadToolRegistry {
     identity: BootstrapRequestIdentity,
     order: OwnedOrderRecord,
   ) {
-    if (this.hasGlobalReadAccess(identity)) {
+    if (this.hasGlobalOrderReadAccess(identity)) {
       return true;
     }
 
     if (identity.realm === "tenant") {
-      return Boolean(identity.tenantId && identity.tenantId === order.tenantId);
+      return Boolean(
+        identity.tenantId &&
+        identity.tenantId === order.tenantId &&
+        (this.hasScope(identity, "owned:read") ||
+          this.hasScope(identity, "tenant:read")),
+      );
     }
 
     if (identity.realm === "partner") {
@@ -301,11 +414,17 @@ export class AssistantReadToolRegistry {
     return false;
   }
 
-  private hasGlobalReadAccess(identity: BootstrapRequestIdentity) {
+  private hasGlobalOrderReadAccess(identity: BootstrapRequestIdentity) {
     return (
-      identity.realm === "system" ||
-      identity.realm === "platform" ||
-      identity.realm === "ops"
+      (identity.realm === "system" || identity.realm === "ops") &&
+      this.hasScope(identity, "owned:read")
+    );
+  }
+
+  private hasGlobalComplaintReadAccess(identity: BootstrapRequestIdentity) {
+    return (
+      (identity.realm === "system" || identity.realm === "ops") &&
+      this.hasScope(identity, "complaints:read")
     );
   }
 

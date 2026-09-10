@@ -1,12 +1,7 @@
 "use client";
 
 import { usePathname, useSearchParams } from "next/navigation";
-import {
-  Suspense,
-  useEffect,
-  type CSSProperties,
-  type ReactNode,
-} from "react";
+import { Suspense, useEffect, type CSSProperties, type ReactNode } from "react";
 import {
   CanvasShell,
   ManagementThemeProvider,
@@ -25,14 +20,13 @@ import type { Locale } from "@/lib/translations";
 import {
   BANK_CONSOLE_BRAND,
   BANK_CONSOLE_BRAND_SUB,
-  BANK_CONSOLE_ENV,
   BANK_CONSOLE_VERSION,
   buildBankNavEntries,
   findNavItem,
 } from "@/lib/navigation";
 import { t } from "@/lib/translations";
 
-// Chrome uses the `bank` surface tokens — CTBC navy/gold — per the design
+// Chrome uses the `bank` surface tokens — ACME navy/gold — per the design
 // canvas (mgmt-tokens.jsx `bank` accent + BK_GOLD). The implementation
 // previously fell back to the `tenant` (teal) realm because no `bank` surface
 // existed; that is the colour mismatch this restores.
@@ -51,7 +45,7 @@ const BANK_SURFACE = "#0F1E3C";
 const BANK_BORDER = "#21376A";
 
 // CSS variables consumed by globals.css; set once on the shell wrapper so the
-// whole console (chrome + page bodies) renders CTBC navy with gold reserved for
+// whole console (chrome + page bodies) renders ACME navy with gold reserved for
 // benefit/quota emphasis — matching the canvas.
 const bankIssuerStyle = {
   "--issuer-accent": BANK_NAVY,
@@ -72,10 +66,45 @@ const bankIssuerStyle = {
   "--bank-gold-soft": "rgba(168, 119, 27, 0.14)",
 } as CSSProperties;
 
-export function BankShell({ children }: { children: ReactNode }) {
+export function resolveBankEnvLabel(
+  env: string | undefined,
+  locale: Locale,
+): string {
+  const normalized = env ? env.trim().toLowerCase() : "";
+  if (normalized === "production" || normalized === "prod") {
+    return t("shell.env.production", locale);
+  }
+  if (normalized === "staging" || normalized === "stage") {
+    return t("shell.env.staging", locale);
+  }
+  if (normalized === "preview") {
+    return t("shell.env.preview", locale);
+  }
+  if (normalized === "sandbox") {
+    return t("shell.env.sandbox", locale);
+  }
+  if (normalized === "development" || normalized === "dev") {
+    return t("shell.env.dev", locale);
+  }
+  if (normalized === "test" || normalized === "mock") {
+    return t("shell.env.mock", locale);
+  }
+  if (normalized === "unknown") {
+    return t("shell.env.unknown", locale);
+  }
+  return t("shell.env.unknown", locale);
+}
+
+export function BankShell({
+  children,
+  env,
+}: {
+  children: ReactNode;
+  env?: string | undefined;
+}) {
   return (
     <Suspense fallback={<div className="bank-runtime-shell" />}>
-      <BankShellContent>{children}</BankShellContent>
+      <BankShellContent env={env}>{children}</BankShellContent>
     </Suspense>
   );
 }
@@ -107,7 +136,13 @@ function SignedOutBoundary({
   );
 }
 
-function BankShellContent({ children }: { children: ReactNode }) {
+function BankShellContent({
+  children,
+  env,
+}: {
+  children: ReactNode;
+  env?: string | undefined;
+}) {
   const pathname = usePathname();
   const searchParams = useSearchParams();
   const locale = resolveLocale(searchParams.get("locale"));
@@ -116,6 +151,7 @@ function BankShellContent({ children }: { children: ReactNode }) {
   const navEntries = buildBankNavEntries(locale, searchParams.toString());
   const activeItem = findNavItem(pathname, navEntries);
   const activeKey = activeItem?.key;
+  const envLabel = resolveBankEnvLabel(env, locale);
 
   useEffect(() => {
     document.documentElement.lang = getLocaleTag(locale);
@@ -123,7 +159,12 @@ function BankShellContent({ children }: { children: ReactNode }) {
 
   return (
     <ManagementThemeProvider defaultDark defaultDensity="compact">
-      <div className="bank-runtime-shell" style={bankIssuerStyle}>
+      <div
+        className="bank-runtime-shell"
+        data-testid="bank-console-shell"
+        data-environment={env ?? "unknown"}
+        style={bankIssuerStyle}
+      >
         <CanvasShell
           theme={bankCanvasTheme}
           nav={navEntries}
@@ -134,7 +175,7 @@ function BankShellContent({ children }: { children: ReactNode }) {
             getBankTenantContext(bank, locale),
             activeItem?.label ?? t("shell.breadcrumb.home", locale),
           ]}
-          env={BANK_CONSOLE_ENV}
+          env={envLabel}
           versionLabel={BANK_CONSOLE_VERSION}
           searchPlaceholder={t("shell.search", locale)}
           searchWidth={260}

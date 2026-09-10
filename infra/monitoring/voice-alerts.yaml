@@ -1,0 +1,146 @@
+groups:
+  - name: voice_booking_alerts
+    rules:
+      - alert: VoiceErrorOrDuplicateBooking
+        expr: increase(drts_voice_error_or_duplicate_bookings_total[1m]) >= 1
+        for: 0m
+        labels:
+          severity: critical
+          owner_team: ops
+          route_channel: voice-pager-p1
+          language: "{{ $labels.language }}"
+          route_profile_version: "{{ $labels.route_profile_version }}"
+          provider: "{{ $labels.provider }}"
+          brand_id: "{{ $labels.brand_id }}"
+        annotations:
+          summary: "Error or duplicate voice booking detected (UV-AC-032 / SD §13.2)"
+          description: "Key field mismatch, duplicate order, or unauthorized booking occurred for language={{ $labels.language }}, profile=v{{ $labels.route_profile_version }}, provider={{ $labels.provider }}, brand={{ $labels.brand_id }}. Halting autonomous creation for affected scope."
+          runbook_url: "docs/03-runbooks/voice-alert-response.md#1-voiceerrororduplicatebooking"
+
+      - alert: VoiceCrossScopeAccessDenied
+        expr: increase(drts_voice_cross_scope_denials_total[1m]) >= 1
+        for: 0m
+        labels:
+          severity: critical
+          owner_team: security_ops
+          route_channel: voice-pager-p1
+          language: "{{ $labels.language }}"
+          route_profile_version: "{{ $labels.route_profile_version }}"
+          provider: "{{ $labels.provider }}"
+          brand_id: "{{ $labels.brand_id }}"
+        annotations:
+          summary: "Cross-scope or unauthorized brand access attempted in voice agent boundary"
+          description: "Voice session attempted to access or mutate resources outside its authorized brand scope (brand={{ $labels.brand_id }}, provider={{ $labels.provider }})."
+          runbook_url: "docs/03-runbooks/voice-alert-response.md#2-voicecrossscopeaccessdenied"
+
+      - alert: VoicePendingCommandTimeout
+        expr: increase(drts_voice_pending_command_timeouts_total[5m]) >= 1
+        for: 1m
+        labels:
+          severity: high
+          owner_team: sre
+          route_channel: voice-oncall
+          language: "{{ $labels.language }}"
+          route_profile_version: "{{ $labels.route_profile_version }}"
+          provider: "{{ $labels.provider }}"
+          brand_id: "{{ $labels.brand_id }}"
+        annotations:
+          summary: "Pending voice booking command receipt reconciliation timeout"
+          description: "One or more booking commands exceeded timeout without receipt confirmation on provider={{ $labels.provider }}, profile=v{{ $labels.route_profile_version }}. Reconciling against ledger."
+          runbook_url: "docs/03-runbooks/voice-alert-response.md#3-voicependingcommandtimeout"
+
+      - alert: VoiceRecordingCheckpointFailure
+        expr: increase(drts_voice_recording_checkpoint_failures_total[1m]) >= 1
+        for: 0m
+        labels:
+          severity: critical
+          owner_team: sre
+          route_channel: voice-pager-p1
+          language: "{{ $labels.language }}"
+          route_profile_version: "{{ $labels.route_profile_version }}"
+          provider: "{{ $labels.provider }}"
+          brand_id: "{{ $labels.brand_id }}"
+        annotations:
+          summary: "Voice recording checkpoint or finalize verification failure"
+          description: "Recording manifest checksum or readability verification failed on language={{ $labels.language }}, provider={{ $labels.provider }}. Booking gate blocked per SD §13.2."
+          runbook_url: "docs/03-runbooks/voice-alert-response.md#4-voicerecordingcheckpointfailure"
+
+      - alert: VoiceProviderCapacityExceeded
+        expr: increase(drts_voice_provider_overflow_total[5m]) >= 3
+        for: 0m
+        labels:
+          severity: high
+          owner_team: sre
+          route_channel: voice-oncall
+          language: "{{ $labels.language }}"
+          route_profile_version: "{{ $labels.route_profile_version }}"
+          provider: "{{ $labels.provider }}"
+          brand_id: "{{ $labels.brand_id }}"
+        annotations:
+          summary: "Voice provider capacity overflow or trunk saturation"
+          description: "Provider trunk or concurrent streams reached capacity limit on provider={{ $labels.provider }}, brand={{ $labels.brand_id }}. Falling back to human queue."
+          runbook_url: "docs/03-runbooks/voice-alert-response.md#5-voiceprovidercapacityexceeded"
+
+      - alert: VoiceHandoffUnansweredBreach
+        expr: drts_voice_handoff_queue_unanswered_count{language=~".+"} >= 1
+        for: 2m
+        labels:
+          severity: high
+          owner_team: ops
+          route_channel: voice-oncall
+          language: "{{ $labels.language }}"
+          route_profile_version: "{{ $labels.route_profile_version }}"
+          provider: "{{ $labels.provider }}"
+          brand_id: "{{ $labels.brand_id }}"
+        annotations:
+          summary: "Human handoff queue unanswered timeout breach (SA §10.1 / SD §13.2)"
+          description: "Caller transferred to human operator remained unanswered beyond 60s SLA on language={{ $labels.language }}. Urgent callback required."
+          runbook_url: "docs/03-runbooks/voice-alert-response.md#6-voicehandoffunansweredbreach"
+
+      - alert: VoiceDispatchUnavailableSpike
+        expr: increase(drts_voice_dispatch_unavailable_total[10m]) >= 5
+        for: 0m
+        labels:
+          severity: warning
+          owner_team: ops
+          route_channel: voice-oncall
+          language: "{{ $labels.language }}"
+          route_profile_version: "{{ $labels.route_profile_version }}"
+          provider: "{{ $labels.provider }}"
+          brand_id: "{{ $labels.brand_id }}"
+        annotations:
+          summary: "Spike in unavailable driver dispatches under AI flow"
+          description: "AI bookings experienced >=5 no-car, rejection, or dispatch timeout events in 10m on brand={{ $labels.brand_id }}. Check vehicle fleet density."
+          runbook_url: "docs/03-runbooks/voice-alert-response.md#7-voicedispatchunavailablespike"
+
+      - alert: VoiceCostAnomalySpike
+        expr: drts_voice_call_unit_cost_twd{provider=~".+"} > 50.0
+        for: 0m
+        labels:
+          severity: high
+          owner_team: finance_ops
+          route_channel: voice-cost-audit
+          language: "{{ $labels.language }}"
+          route_profile_version: "{{ $labels.route_profile_version }}"
+          provider: "{{ $labels.provider }}"
+          brand_id: "{{ $labels.brand_id }}"
+        annotations:
+          summary: "Voice per-call cost anomaly exceeded budget limit (SD §14.3)"
+          description: "Call cost exceeded 50.0 TWD on provider={{ $labels.provider }}, language={{ $labels.language }}. Review LLM token usage and telephony leg count."
+          runbook_url: "docs/03-runbooks/voice-alert-response.md#8-voicecostanomalyspike"
+
+      - alert: VoiceWorkerLeaseConflict
+        expr: increase(drts_voice_worker_lease_conflicts_total[1m]) >= 1
+        for: 0m
+        labels:
+          severity: critical
+          owner_team: sre
+          route_channel: voice-pager-p1
+          language: "{{ $labels.language }}"
+          route_profile_version: "{{ $labels.route_profile_version }}"
+          provider: "{{ $labels.provider }}"
+          brand_id: "{{ $labels.brand_id }}"
+        annotations:
+          summary: "Voice worker lease epoch conflict or crash takeover anomaly"
+          description: "Multiple workers attempted to mutate voice session on profile=v{{ $labels.route_profile_version }}. CAS lease fencing enforced."
+          runbook_url: "docs/03-runbooks/voice-alert-response.md#9-voiceworkerleaseconflict"

@@ -59,6 +59,7 @@ from control_plane.domain.failure_policy import (
 )
 from control_plane.domain.resource_admission import decide as resource_admission_decision
 from control_plane.domain.lane_health import pause_matches_lane
+from control_plane.domain.unblock_resolution import parent_resume_blocker
 from control_plane.domain.chair_policy import (
     normalize_review_defaults as normalize_domain_review_defaults,
 )
@@ -2190,6 +2191,114 @@ def file_iso_mtime(path: Path) -> str | None:
     return datetime.fromtimestamp(path.stat().st_mtime, tz=timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
 
 
+def _agy_stream_productive_event_count(content: str) -> int | None:
+    """Count agy `--output-format stream-json` events that are real turn progress.
+
+    agy's stream floods the log with `step_update` events as the turn runs,
+    including repeated `error_message` steps while it retries/stalls
+    internally; those advance the log's mtime without the turn actually
+    moving forward. Returns ``None`` when the log has no agy event-shaped
+    JSON at all, so callers fall back to plain mtime-based visibility for
+    every other adapter's log format.
+
+    Otherwise returns a count of turn steps that actually represent forward
+    progress, so `update_from_log` can tell transport visibility (bytes were
+    appended) apart from productive progress (the turn advanced):
+
+    - `step_update` entries are deduplicated by `(conversation_id,
+      step_index)`, so a replayed/duplicated line for an already-seen step
+      never inflates the count.
+    - an `agent_response` step immediately followed by an `error_message`
+      step (same conversation, next step_index) is a failed attempt, not
+      progress -- agy's stream shows this as a continuous retry-then-fail
+      loop while a turn is stuck, and none of those attempts ever produced
+      a usable response.
+    - an `agent_response` step with no known successor yet, and no terminal
+      `result` event yet, is *unconfirmed*: a later append could still
+      reveal it as a failed retry, so it is not counted until a following
+      event (another step, or the terminal result) proves it wasn't. Without
+      this, a from-scratch recount on every poll credits each retry's
+      optimistic response immediately, an `error_message` invalidates it,
+      and the *next* retry's optimistic response gets credited all over
+      again -- so repeated failed retries keep re-triggering recovery and
+      resetting the stall clock even though the turn never produces a
+      usable response.
+    - the terminal `result` event only counts when its status is not
+      `ERROR`; a structured failure is not progress no matter how much
+      stream noise led up to it.
+    - `step_update` and `result` payloads are only trusted when their
+      nested `step_update`/`result` value is actually a dict. Some other
+      providers' logs reuse the `event` field name with a differently
+      shaped value (e.g. a plain string), which must neither crash this
+      parser nor be misidentified as agy-shaped.
+    - a `result` event only establishes agy's schema when the nested dict
+      carries a `status` key, mirroring
+      ``worker_failure_detector._is_antigravity_result_event``. Some other
+      providers' logs reuse `{"event": "result", ...}` with an unrelated
+      dict shape (e.g. `{"message": "Task complete"}`), which must not be
+      misidentified as agy-shaped either.
+
+    Callers must still scope this to a worker whose configured adapter is
+    actually antigravity: captured tool output that happens to embed a
+    literal agy stream-json line (e.g. another worker's log inspected via
+    `cat`) can carry this exact shape without the worker itself being an
+    agy process.
+    """
+    found_schema = False
+    steps: dict[tuple[str, int], str] = {}
+    step_order: list[tuple[str, int]] = []
+    result_statuses: list[str] = []
+    for line in content.splitlines():
+        line = line.strip()
+        if not line.startswith("{"):
+            continue
+        try:
+            payload = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if not isinstance(payload, dict):
+            continue
+        event = payload.get("event")
+        if event == "step_update":
+            step = payload.get("step_update")
+            if not isinstance(step, dict):
+                continue
+            found_schema = True
+            try:
+                step_index = int(step.get("step_index"))
+            except (TypeError, ValueError):
+                continue
+            key = (str(step.get("conversation_id") or ""), step_index)
+            if key not in steps:
+                step_order.append(key)
+            steps[key] = str(step.get("step_type") or "").strip()
+        elif event == "result":
+            result = payload.get("result")
+            if not isinstance(result, dict) or "status" not in result:
+                continue
+            found_schema = True
+            result_statuses.append(str(result.get("status") or "").strip().upper())
+    if not found_schema:
+        return None
+    turn_finished = bool(result_statuses)
+    last_key = step_order[-1] if step_order else None
+    count = 0
+    for key in step_order:
+        conversation_id, step_index = key
+        step_type = steps[key]
+        if step_type == "error_message":
+            continue
+        if step_type == "agent_response":
+            next_type = steps.get((conversation_id, step_index + 1))
+            if next_type == "error_message":
+                continue
+            if next_type is None and key == last_key and not turn_finished:
+                continue
+        count += 1
+    count += sum(1 for status in result_statuses if status and status != "ERROR")
+    return count
+
+
 def update_from_log(config: dict[str, Any], worker: dict[str, Any]) -> None:
     log_path_value = worker.get("log_path")
     if not log_path_value:
@@ -2198,11 +2307,53 @@ def update_from_log(config: dict[str, Any], worker: dict[str, Any]) -> None:
     if not log_path.exists():
         return
     mtime = file_iso_mtime(log_path)
-    if mtime and (not worker.get("last_event_at") or mtime > worker.get("last_event_at", "")):
-        worker["last_event_at"] = mtime
     try:
         content = log_path.read_text(encoding="utf-8", errors="ignore")
     except OSError:
+        content = None
+    # Only a worker whose *configured* adapter is antigravity may ever be
+    # treated as agy-shaped. Matching on log content shape alone (any
+    # `{"event": ...}` line) misidentifies other adapters' logs: a Codex
+    # worker that captures tool output embedding a literal agy stream-json
+    # line (e.g. `cat`-ing another worker's agy log) would otherwise gain
+    # `_agy_stream_productive_event_count` and have its own ordinary
+    # progress ignored by the agy-only stall-clock logic below.
+    agent = agent_config_for(config, str(worker.get("agent_id") or worker.get("provider") or ""))
+    is_agy_adapter = str(agent.get("adapter") or "") == "antigravity"
+    productive_count = (
+        _agy_stream_productive_event_count(content) if content is not None and is_agy_adapter else None
+    )
+    if productive_count is None:
+        worker["_agy_retry_noise_detected"] = False
+        if mtime and (not worker.get("last_event_at") or mtime > worker.get("last_event_at", "")):
+            worker["last_event_at"] = mtime
+    else:
+        # The baseline is recorded on every call, not only inside the
+        # mtime-advanced branch below. `file_iso_mtime` truncates to whole
+        # seconds, so two polls landing in the same second used to skip
+        # storing this counter entirely on the poll that first observed a
+        # real step (last_event_at was unchanged that tick, so the old code
+        # never ran `worker["_agy_stream_productive_event_count"] = ...`).
+        # The next poll then compared against a phantom zero baseline and
+        # credited every already-seen step as fresh progress, which is
+        # exactly how a trailing error-only append on an already-observed
+        # log used to falsely mark a stalled worker as recovered.
+        previous_count = int(worker.get("_agy_stream_productive_event_count") or 0)
+        worker["_agy_stream_productive_event_count"] = productive_count
+        # Bytes actually landing in the log this poll (mtime advanced) with
+        # no productive gain is concrete evidence of retry-loop noise (a
+        # fresh error_message step, say). A log that stayed byte-for-byte
+        # unchanged this poll is not noise -- it is silence, which a quiet
+        # but live child command (no error, no retry) also produces, and
+        # that must remain eligible for CPU-tick-based activity credit.
+        log_bytes_advanced = bool(mtime and (not worker.get("last_event_at") or mtime > worker.get("last_event_at", "")))
+        worker["_agy_retry_noise_detected"] = log_bytes_advanced and not (productive_count > previous_count)
+        if (
+            productive_count > previous_count
+            and log_bytes_advanced
+        ):
+            worker["last_event_at"] = mtime
+    if content is None:
         return
     for line in content.splitlines():
         line = line.strip()
@@ -4610,7 +4761,11 @@ def handle_worker_approval_state(
         latest = resolved[-1]
         if latest.get("approval_id") != worker.get("last_approval_id"):
             worker["last_approval_id"] = latest.get("approval_id")
-            if latest.get("decision") == "allow" and worker_supports_approval_resume(worker):
+            # A live worker consumes the broker's approval itself. Launching a
+            # second process can collide with its existing systemd unit and
+            # replace the live worker's stdout path with a failed launch log.
+            # Only an exited, resumable session needs a replacement process.
+            if latest.get("decision") == "allow" and not alive and worker_supports_approval_resume(worker):
                 resumed = resume_claude_worker(config, worker, provider_report, approval=latest)
                 write_activity_log(
                     config,
@@ -4629,7 +4784,10 @@ def handle_worker_approval_state(
                 changed = True
                 if resumed:
                     return True, True
-            if latest.get("decision") == "deny":
+            # The broker denies this tool operation, not the entire live CLI
+            # session. Keep its record so cleanup cannot remove an in-use
+            # worktree while the worker chooses an authorized alternative.
+            if latest.get("decision") == "deny" and not alive:
                 worker["status"] = "failed"
                 worker["last_event_at"] = utc_now()
                 reason = latest.get("note") or "Worker approval denied."
@@ -4785,17 +4943,40 @@ def poll_workers(
                 continue
         update_from_log(config, worker)
         alive = pid_is_alive(worker.get("pid"))
-        process_activity_advanced, process_activity_persisted = observe_worker_process_activity(
-            worker,
-            worker_cpu_ticks.get(int(worker["pid"])) if str(worker.get("pid") or "").isdigit() else None,
-            now,
-        )
-        changed = process_activity_persisted or changed
         last_event_advanced = bool(
             previous_last_event_at
             and worker.get("last_event_at")
             and worker.get("last_event_at") > previous_last_event_at
         )
+        previous_process_activity_at = worker.get("last_process_activity_at")
+        process_activity_advanced, process_activity_persisted = observe_worker_process_activity(
+            worker,
+            worker_cpu_ticks.get(int(worker["pid"])) if str(worker.get("pid") or "").isdigit() else None,
+            now,
+        )
+        if (
+            process_activity_advanced
+            and not last_event_advanced
+            and worker.get("_agy_retry_noise_detected")
+        ):
+            # agy floods /proc CPU accounting with retry-loop noise while a turn is
+            # stuck in a repeated error_message cycle (see
+            # _agy_stream_productive_event_count). This poll's update_from_log call
+            # found concrete evidence of that noise -- the log actually gained new
+            # bytes (mtime advanced) but produced no productive-count gain -- so a
+            # bare CPU tick increase must not renew the effective stall clock or the
+            # stalled->running recovery below, or an ordinary retry keeps an
+            # error-only loop looking alive forever. A quiet-but-live agy worker
+            # whose log received no new bytes at all this poll (no evidence of
+            # retry noise) keeps its CPU-tick activity credit, same as any other
+            # adapter's quiet child-command progress (e.g. a long test run).
+            if previous_process_activity_at is None:
+                worker.pop("last_process_activity_at", None)
+            else:
+                worker["last_process_activity_at"] = previous_process_activity_at
+            process_activity_advanced = False
+            process_activity_persisted = False
+        changed = process_activity_persisted or changed
         current_mode = worker_runtime_mode(worker)
         task_status = str(task.get("status") or "").lower()
         expected_completion_statuses = worker_expected_completion_statuses(config, worker, task)
@@ -5412,6 +5593,7 @@ def dependency_ready_blocked_task_records(
     status: dict[str, Any] | None,
     *,
     limit: int = 8,
+    include_held: bool = False,
 ) -> list[dict[str, Any]]:
     if not isinstance(status, dict):
         return []
@@ -5428,7 +5610,7 @@ def dependency_ready_blocked_task_records(
         if not dependencies_satisfied(task, task_map, dependency_done_statuses):
             continue
         action, helper_task_id = blocked_task_triage_action(status, task)
-        if action == "wait_for_unblock_task":
+        if action == "wait_for_unblock_task" or (action == "wait_for_parent_resolution" and not include_held):
             continue
         records.append(
             {
@@ -5442,7 +5624,10 @@ def dependency_ready_blocked_task_records(
                 "next": brief_reason_text(task.get("next"), max_length=220),
             }
         )
-    records.sort(key=lambda item: task_phase_priority(item["task"], task_map, dependency_done_statuses))
+    records.sort(key=lambda item: (
+        item["action"] == "wait_for_parent_resolution",
+        task_phase_priority(item["task"], task_map, dependency_done_statuses),
+    ))
     return records[:limit]
 
 
@@ -5610,7 +5795,7 @@ def _chair_review_summary_lines(
         dispatch_pause_lines.append("- none")
 
     blocked_task_lines: list[str] = []
-    for item in dependency_ready_blocked_task_records(config, status):
+    for item in dependency_ready_blocked_task_records(config, status, include_held=True):
         action_label = str(item.get("action") or "-")
         helper_label = str(item.get("helper_task_id") or "-")
         blocked_task_lines.append(
@@ -5713,9 +5898,10 @@ def build_chair_review_message(
         "- `dispatch_now` 只能對 machine truth 已符合派工條件的非 blocked 任務觸發。\n"
         "- `create_unblock_task` 只能用在下方 Dependency-ready blocked tasks；它會建立 task-scoped unblock child task，不會直接把 parent 從 blocked 改成 todo/done。\n"
         "- `resume_parent_task` 只能用在已經有 completed unblock child 的 blocked parent；它會把 parent 轉回可派工狀態，讓 owner 繼續主線執行。\n"
+        "- `wait_for_parent_resolution` 表示 helper 明確保留 blocked，或主任务又回報了更新的阻塞；舊 helper done 不能再次恢復派工。保留阻塞與 next，具體落實剩餘 routing/產品修復後由 Supervisor 明確 resume，不要重建同一 helper 或只重試 owner。\n"
         "- blocked task 若是 branch/commit/worktree/push 污染，`unblock_kind=history_repair`；若是 product/contract/canonical 決策缺口，`unblock_kind=planning_decision`；其他才用 `manual_unblock`。\n"
         "- 若 Chair review reason 是 `reassignment_triage`，且 `blocked_by` / `recommended_focus` 已明確指出某個 dependency-ready blocked task 的 unblock route，請直接輸出對應 `task_actions` (`create_unblock_task` 或 `resume_parent_task`)，不要只留在 `recommended_focus`。\n"
-        "- 若 Chair review reason 是 `blocked_task_triage`，不可只評論；每個 listed blocked task 都要依摘要建議採取 `create_unblock_task` 或 `resume_parent_task`，讓 machine truth 真正往前走。\n"
+        "- 若 Chair review reason 是 `blocked_task_triage`，對摘要中的 actionable blocked task 採取 `create_unblock_task` 或 `resume_parent_task`；`wait_for_parent_resolution` 只供追蹤剩餘阻塞，不能把舊證據當成新修復。\n"
         "- `provider_actions` 目前只允許 `pause` / `clear_pause`，只針對 exact lane 生效；暫停原因必須具體；不要重複 pause 已在 Provider lane pauses 列出的 lane，除非你要改變其狀態。\n"
         "- 若 Chair review reason 是 `approval_triage`，Pending approvals 不可只評論；每一個 pending approval 都必須在 `approval_actions` 中明確 `allow` 或 `deny`，並寫具體 reason。\n"
         "- `approval_actions` 必須使用 `decision` 欄位，不要用 `action`；格式是 `{\"approval_id\":\"...\",\"decision\":\"allow|deny\",\"reason\":\"...\"}`。\n"
@@ -6436,6 +6622,8 @@ def blocked_task_triage_action(
     unblock_kind = blocked_task_triage_kind(task)
     completed_helper = completed_unblock_task_for_parent(status, task_id, unblock_kind)
     if completed_helper is not None:
+        if parent_resume_blocker(status, task, completed_helper):
+            return "wait_for_parent_resolution", str(completed_helper.get("id") or "").strip() or None
         return "resume_parent_task", str(completed_helper.get("id") or "").strip() or None
     open_helper = open_unblock_task_for_parent(status, task_id, unblock_kind)
     if open_helper is not None:
@@ -6927,6 +7115,8 @@ def apply_chair_parent_resume_action(
     unblock_kind = blocked_task_triage_kind(parent)
     completed_helper = completed_unblock_task_for_parent(status, task_id, unblock_kind)
     if completed_helper is None:
+        return False
+    if parent_resume_blocker(status, parent, completed_helper):
         return False
 
     resume_status = str(action.get("resume_status") or "todo").strip().lower() or "todo"

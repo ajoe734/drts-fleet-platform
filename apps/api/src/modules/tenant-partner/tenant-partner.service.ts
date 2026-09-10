@@ -777,15 +777,15 @@ const PARTNER_ENTRY_SEED: PartnerChannelEntryRecord[] = [
     tenantId: DEMO_TENANT_ID,
     bankCode: null,
     entrySlug: "yuhe-residence",
-    displayName: "御和物業",
+    displayName: "法碧康物業",
     businessDispatchSubtype: "enterprise_dispatch",
     authMode: "partner_api_key",
     eligibilityMode: "none",
-    entryHost: "app.yuhe-living.com.tw",
+    entryHost: "app.fabrikam-living.example",
     entryPath: "/embed/yuhe-residence",
     themeAccent: "#0F766E",
     brandingMetadata: {
-      displayName: "御和物業",
+      displayName: "法碧康物業",
       themeAccent: "#0F766E",
       supportEmail: null,
       supportPhone: "0800-911-200",
@@ -917,26 +917,26 @@ const PARTNER_ENTRY_SEED: PartnerChannelEntryRecord[] = [
     },
   },
   {
-    partnerId: "partner-ctbc-card-001",
-    partnerCode: "ctbc",
+    partnerId: "partner-acme-card-001",
+    partnerCode: "acme",
     partnerType: "bank_partner",
-    programId: "program-ctbc-world-elite",
+    programId: "program-acme-world-elite",
     programCode: "WORLD_ELITE",
     tenantId: DEMO_TENANT_ID,
-    bankCode: "CTBC",
-    entrySlug: "ctbc",
-    displayName: "CTBC World Elite",
+    bankCode: "ACME",
+    entrySlug: "acme",
+    displayName: "ACME Elite Demo",
     businessDispatchSubtype: "credit_card_airport_transfer",
     authMode: "partner_api_key",
     eligibilityMode: "bank_card_inline",
-    entryHost: "ride.ctbc.com.tw",
-    entryPath: "/ctbc/program/site",
+    entryHost: "ride.acme.example",
+    entryPath: "/acme/program/site",
     themeAccent: "#0B2D5C",
     brandingMetadata: {
-      displayName: "CTBC World Elite",
+      displayName: "ACME Elite Demo",
       themeAccent: "#0B2D5C",
-      supportEmail: "world-elite@ctbc.example",
-      supportPhone: "0800-024-365",
+      supportEmail: "world-elite@acme.example",
+      supportPhone: "0800-000-101",
     },
     eligibilityContract: null,
     status: "active",
@@ -948,32 +948,32 @@ const PARTNER_ENTRY_SEED: PartnerChannelEntryRecord[] = [
     updatedAt: "2026-06-16T00:00:00.000Z",
     auditMetadata: {
       source: "dev_seed_partner_booking_surface",
-      requestId: "seed-partner-booking-ctbc",
+      requestId: "seed-partner-booking-acme",
       createdBy: "system:seed",
       updatedBy: "system:seed",
     },
   },
   {
-    partnerId: "partner-cathay-card-001",
-    partnerCode: "cathay",
+    partnerId: "partner-contoso-card-001",
+    partnerCode: "contoso",
     partnerType: "bank_partner",
-    programId: "program-cathay-cube-world",
+    programId: "program-contoso-cube-world",
     programCode: "CUBE_WORLD",
     tenantId: DEMO_TENANT_ID,
-    bankCode: "CATHAY",
-    entrySlug: "cathay",
-    displayName: "Cathay CUBE World",
+    bankCode: "CONTOSO",
+    entrySlug: "contoso",
+    displayName: "Contoso Prism World",
     businessDispatchSubtype: "credit_card_airport_transfer",
     authMode: "partner_api_key",
     eligibilityMode: "bank_card_inline",
-    entryHost: "ride.cathaybk.com.tw",
-    entryPath: "/cathay/program/site",
+    entryHost: "ride.contoso.example",
+    entryPath: "/contoso/program/site",
     themeAccent: "#0A3621",
     brandingMetadata: {
-      displayName: "Cathay CUBE World",
+      displayName: "Contoso Prism World",
       themeAccent: "#0A3621",
-      supportEmail: "cube-world@cathay.example",
-      supportPhone: "0800-818-001",
+      supportEmail: "cube-world@contoso.example",
+      supportPhone: "0800-000-102",
     },
     eligibilityContract: null,
     status: "active",
@@ -985,32 +985,32 @@ const PARTNER_ENTRY_SEED: PartnerChannelEntryRecord[] = [
     updatedAt: "2026-07-27T00:00:00.000Z",
     auditMetadata: {
       source: "dev_seed_partner_booking_surface",
-      requestId: "seed-partner-booking-cathay",
+      requestId: "seed-partner-booking-contoso",
       createdBy: "system:seed",
       updatedBy: "system:seed",
     },
   },
   {
-    partnerId: "partner-taishin-card-001",
-    partnerCode: "taishin",
+    partnerId: "partner-fabrikam-card-001",
+    partnerCode: "fabrikam",
     partnerType: "bank_partner",
-    programId: "program-taishin-infinite",
-    programCode: "TAISHIN_INFINITE",
+    programId: "program-fabrikam-infinite",
+    programCode: "FABRIKAM_SIGNATURE",
     tenantId: DEMO_TENANT_ID,
-    bankCode: "TAISHIN",
-    entrySlug: "taishin",
-    displayName: "Taishin Infinite",
+    bankCode: "FABRIKAM",
+    entrySlug: "fabrikam",
+    displayName: "Fabrikam Signature",
     businessDispatchSubtype: "credit_card_airport_transfer",
     authMode: "partner_api_key",
     eligibilityMode: "bank_card_inline",
-    entryHost: "ride.taishinbank.com.tw",
-    entryPath: "/taishin/program/site",
+    entryHost: "ride.fabrikam.example",
+    entryPath: "/fabrikam/program/site",
     themeAccent: "#7C2241",
     brandingMetadata: {
-      displayName: "Taishin Infinite",
+      displayName: "Fabrikam Signature",
       themeAccent: "#7C2241",
-      supportEmail: "infinite@taishin.example",
-      supportPhone: "0800-023-123",
+      supportEmail: "infinite@fabrikam.example",
+      supportPhone: "0800-000-103",
     },
     eligibilityContract: null,
     status: "active",
@@ -1022,31 +1022,31 @@ const PARTNER_ENTRY_SEED: PartnerChannelEntryRecord[] = [
     updatedAt: "2026-07-27T00:05:00.000Z",
     auditMetadata: {
       source: "dev_seed_partner_booking_surface",
-      requestId: "seed-partner-booking-taishin",
+      requestId: "seed-partner-booking-fabrikam",
       createdBy: "system:seed",
       updatedBy: "system:seed",
     },
   },
   {
-    partnerId: "partner-dbs-card-001",
-    partnerCode: "dbs",
+    partnerId: "partner-northwind-card-001",
+    partnerCode: "northwind",
     partnerType: "bank_partner",
-    programId: "program-dbs-insignia",
-    programCode: "DBS_INSIGNIA",
+    programId: "program-northwind-signature",
+    programCode: "NORTHWIND_SIGNATURE",
     tenantId: DEMO_TENANT_ID,
-    bankCode: "DBS",
-    entrySlug: "dbs",
-    displayName: "DBS Insignia",
+    bankCode: "NORTHWIND",
+    entrySlug: "northwind",
+    displayName: "Northwind Signature",
     businessDispatchSubtype: "credit_card_airport_transfer",
     authMode: "partner_api_key",
     eligibilityMode: "bank_card_inline",
-    entryHost: "ride.dbs.com.tw",
-    entryPath: "/dbs/program/site",
+    entryHost: "ride.northwind.example",
+    entryPath: "/northwind/program/site",
     themeAccent: "#9B1B22",
     brandingMetadata: {
-      displayName: "DBS Insignia",
+      displayName: "Northwind Signature",
       themeAccent: "#9B1B22",
-      supportEmail: "insignia@dbs.example",
+      supportEmail: "signature@northwind.example",
       supportPhone: "0800-808-889",
     },
     eligibilityContract: null,
@@ -1059,32 +1059,32 @@ const PARTNER_ENTRY_SEED: PartnerChannelEntryRecord[] = [
     updatedAt: "2026-07-27T00:10:00.000Z",
     auditMetadata: {
       source: "dev_seed_partner_booking_surface",
-      requestId: "seed-partner-booking-dbs",
+      requestId: "seed-partner-booking-northwind",
       createdBy: "system:seed",
       updatedBy: "system:seed",
     },
   },
   {
-    partnerId: "partner-fubon-claim-001",
-    partnerCode: "fubon",
+    partnerId: "partner-tailspin-claim-001",
+    partnerCode: "tailspin",
     partnerType: "bank_partner",
-    programId: "program-fubon-claim-mobility",
+    programId: "program-tailspin-claim-mobility",
     programCode: "CLAIM_MOBILITY",
     tenantId: DEMO_TENANT_ID,
-    bankCode: "FUBON",
-    entrySlug: "fubon",
-    displayName: "Fubon Claim Mobility",
+    bankCode: "TAILSPIN",
+    entrySlug: "tailspin",
+    displayName: "Tailspin Claim Mobility",
     businessDispatchSubtype: "insurance_replacement_vehicle",
     authMode: "partner_api_key",
     eligibilityMode: "reference_required",
-    entryHost: "claim.fubon-ins.com.tw",
-    entryPath: "/fubon/program/site",
+    entryHost: "claim.tailspin.example",
+    entryPath: "/tailspin/program/site",
     themeAccent: "#0E6E50",
     brandingMetadata: {
-      displayName: "Fubon Claim Mobility",
+      displayName: "Tailspin Claim Mobility",
       themeAccent: "#0E6E50",
-      supportEmail: "claim-mobility@fubon.example",
-      supportPhone: "0800-073-588",
+      supportEmail: "claim-mobility@tailspin.example",
+      supportPhone: "0800-000-104",
     },
     eligibilityContract: null,
     status: "active",
@@ -1096,32 +1096,32 @@ const PARTNER_ENTRY_SEED: PartnerChannelEntryRecord[] = [
     updatedAt: "2026-06-16T00:05:00.000Z",
     auditMetadata: {
       source: "dev_seed_partner_booking_surface",
-      requestId: "seed-partner-booking-fubon",
+      requestId: "seed-partner-booking-tailspin",
       createdBy: "system:seed",
       updatedBy: "system:seed",
     },
   },
   {
-    partnerId: "partner-lion-travel-001",
-    partnerCode: "lion",
+    partnerId: "partner-adventure-works-001",
+    partnerCode: "adventureworks",
     partnerType: "bank_partner",
-    programId: "program-lion-group-transfer",
+    programId: "program-adventureworks-group-transfer",
     programCode: "GROUP_TRANSFER",
     tenantId: DEMO_TENANT_ID,
-    bankCode: "LION",
-    entrySlug: "lion",
-    displayName: "Lion Group Transfer",
+    bankCode: "ADVENTURE",
+    entrySlug: "adventureworks",
+    displayName: "Adventure Works Transfer",
     businessDispatchSubtype: "travel_agency_transfer",
     authMode: "partner_api_key",
     eligibilityMode: "reference_required",
-    entryHost: "booking.lion-travel.com.tw",
-    entryPath: "/lion/program/site",
+    entryHost: "booking.adventure-works.example",
+    entryPath: "/adventureworks/program/site",
     themeAccent: "#B0420E",
     brandingMetadata: {
-      displayName: "Lion Group Transfer",
+      displayName: "Adventure Works Transfer",
       themeAccent: "#B0420E",
       supportEmail: "group-transfer@liontravel.example",
-      supportPhone: "0800-090-068",
+      supportPhone: "0800-000-105",
     },
     eligibilityContract: null,
     status: "active",
@@ -1133,7 +1133,7 @@ const PARTNER_ENTRY_SEED: PartnerChannelEntryRecord[] = [
     updatedAt: "2026-06-16T00:10:00.000Z",
     auditMetadata: {
       source: "dev_seed_partner_booking_surface",
-      requestId: "seed-partner-booking-lion",
+      requestId: "seed-partner-booking-adventureworks",
       createdBy: "system:seed",
       updatedBy: "system:seed",
     },
@@ -1153,14 +1153,14 @@ const PARTNER_INGRESS_CREDENTIAL_BOOTSTRAPS: readonly PartnerIngressCredentialBo
       envVarName: "PARTNER_INGRESS_KEY_BANK_DEMO_BETA_AIRPORT",
     },
     {
-      entrySlug: "ctbc",
-      keyId: "partner-key-ctbc-dev",
-      envVarName: "PARTNER_INGRESS_KEY_CTBC",
+      entrySlug: "acme",
+      keyId: "partner-key-acme-dev",
+      envVarName: "PARTNER_INGRESS_KEY_ACME",
     },
     {
-      entrySlug: "cathay",
-      keyId: "partner-key-cathay-dev",
-      envVarName: "PARTNER_INGRESS_KEY_CATHAY",
+      entrySlug: "contoso",
+      keyId: "partner-key-contoso-dev",
+      envVarName: "PARTNER_INGRESS_KEY_CONTOSO",
     },
     {
       entrySlug: "yuhe-residence",
@@ -1168,14 +1168,14 @@ const PARTNER_INGRESS_CREDENTIAL_BOOTSTRAPS: readonly PartnerIngressCredentialBo
       envVarName: "PARTNER_INGRESS_KEY_YUHE_RESIDENCE",
     },
     {
-      entrySlug: "taishin",
-      keyId: "partner-key-taishin-dev",
-      envVarName: "PARTNER_INGRESS_KEY_TAISHIN",
+      entrySlug: "fabrikam",
+      keyId: "partner-key-fabrikam-dev",
+      envVarName: "PARTNER_INGRESS_KEY_FABRIKAM",
     },
     {
-      entrySlug: "dbs",
-      keyId: "partner-key-dbs-dev",
-      envVarName: "PARTNER_INGRESS_KEY_DBS",
+      entrySlug: "northwind",
+      keyId: "partner-key-northwind-dev",
+      envVarName: "PARTNER_INGRESS_KEY_NORTHWIND",
     },
   ];
 
@@ -1317,10 +1317,13 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
   private readonly identityRepository: IdentityRepository | undefined;
 
   constructor(
+    @Inject(AuditNotificationService)
     private readonly auditNotificationService: AuditNotificationService,
     @Optional()
+    @Inject(TenantPartnerRepository)
     private readonly tenantPartnerRepository?: TenantPartnerRepository,
     @Optional()
+    @Inject(WebhookDispatchService)
     private readonly webhookDispatchService: WebhookDispatchService = new WebhookDispatchService(),
     @Optional()
     @Inject(PARTNER_INGRESS_CREDENTIAL_SEEDS)
@@ -1332,8 +1335,10 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
       new ReferenceTokenEligibilityAdapter(),
     ],
     @Optional()
+    @Inject(PartnerUserIdentityLinkRepository)
     private readonly partnerUserIdentityLinkRepository: PartnerUserIdentityLinkRepository = new PartnerUserIdentityLinkRepository(),
     @Optional()
+    @Inject(ReferralEmbedHandoffRepository)
     private readonly referralEmbedHandoffRepository: ReferralEmbedHandoffRepository = new ReferralEmbedHandoffRepository(),
     @Optional()
     @Inject(SecurityEventsService)
@@ -1342,6 +1347,7 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
     @Inject(IdentityRepository)
     identityRepository?: IdentityRepository,
     @Optional()
+    @Inject(TenantInvitationDeliveryService)
     private readonly tenantInvitationDelivery: TenantInvitationDeliveryService = new TenantInvitationDeliveryService(),
   ) {
     this.securityEventsService =
@@ -7091,7 +7097,8 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
     });
   }
 
-  listApiKeys(tenantId: string) {
+  listApiKeys(tenantId: string, identity?: IdentityContext | null) {
+    this.assertTenantAccessScope(tenantId, identity, "read");
     return this.apiKeys
       .filter((apiKey) => apiKey.tenantId === tenantId)
       .map((apiKey) => {
@@ -9361,9 +9368,10 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
     };
   }
 
-  private assertTenantMutationScope(
+  private assertTenantAccessScope(
     targetTenantId: string,
     identity?: IdentityContext | null,
+    action: "read" | "mutation" | "access" = "access",
   ) {
     if (!identity) {
       return;
@@ -9384,13 +9392,22 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
       throw new ApiRequestError(
         HttpStatus.FORBIDDEN,
         "TENANT_SCOPE_MISMATCH",
-        "Cross-tenant identity mutation is forbidden. Principal tenantId does not match target tenantId.",
+        action === "read"
+          ? "Cross-tenant identity access is forbidden. Principal tenantId does not match target tenantId."
+          : "Cross-tenant identity mutation is forbidden. Principal tenantId does not match target tenantId.",
         {
           targetTenantId,
           principalTenantId: identity.tenantId ?? null,
         },
       );
     }
+  }
+
+  private assertTenantMutationScope(
+    targetTenantId: string,
+    identity?: IdentityContext | null,
+  ) {
+    this.assertTenantAccessScope(targetTenantId, identity, "mutation");
   }
 
   private requireSecurityEventActor(
@@ -14458,28 +14475,24 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
     const stored =
       await this.identityRepository.upsertInvitationRecord(invitation);
 
-    try {
-      await this.tenantInvitationDelivery.send({
-        invitationId: stored.invitationId,
-        tenantId: userRole.tenantId,
-        recipientEmail: userRole.email,
-        displayName: userRole.displayName,
-        expiresAt: stored.expiresAt,
-        rawToken,
-      });
-      return await this.identityRepository.upsertInvitationRecord({
-        ...stored,
-        deliveryStatus: "delivered",
-        updatedAt: new Date().toISOString(),
-      });
-    } catch (error) {
-      await this.identityRepository.upsertInvitationRecord({
-        ...stored,
-        deliveryStatus: "delivery_failed",
-        updatedAt: new Date().toISOString(),
-      });
-      throw error;
-    }
+    // The delivery adapter never throws; only its reported status may ever
+    // be treated as a real, provider-acknowledged send. A failed/unavailable
+    // outcome still leaves the invitation resendable, never fabricated as
+    // delivered.
+    const delivery = await this.tenantInvitationDelivery.send({
+      invitationId: stored.invitationId,
+      tenantId: userRole.tenantId,
+      recipientEmail: userRole.email,
+      displayName: userRole.displayName,
+      expiresAt: stored.expiresAt,
+      rawToken,
+    });
+    return await this.identityRepository.upsertInvitationRecord({
+      ...stored,
+      deliveryStatus:
+        delivery.status === "sent" ? "delivered" : "delivery_failed",
+      updatedAt: new Date().toISOString(),
+    });
   }
 
   private toTenantInvitationView(

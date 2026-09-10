@@ -135,6 +135,14 @@ const MULTI_TAXI_RECORD_GOVERNANCE_SCOPES = [
   "multi_taxi_records:export",
 ] as const;
 
+const IDENTITY_BREAK_GLASS_SCOPES = [
+  "identity:break-glass:request",
+  "identity:break-glass:approve",
+  "identity:break-glass:activate",
+] as const;
+
+const ASSISTANT_SCOPES = ["assistant:write"] as const;
+
 export const IAM_SCOPE_DEFINITIONS: readonly IamScopeDefinition[] = [
   {
     scope: "identity:read",
@@ -173,6 +181,17 @@ export const IAM_SCOPE_DEFINITIONS: readonly IamScopeDefinition[] = [
     scope: "identity:sessions:read",
     allowedRealms: ["system", "platform", "tenant", "ops"],
     description: "Read active session inventory within the resolved boundary.",
+    resourceConstraints: [
+      TENANT_CONSTRAINT,
+      ACTOR_CONSTRAINT,
+      OBJECT_CONSTRAINT,
+    ],
+  },
+  {
+    scope: "identity:sessions:write",
+    allowedRealms: ["system", "platform", "tenant", "ops"],
+    description:
+      "Revoke active sessions within the resolved authority boundary.",
     resourceConstraints: [
       TENANT_CONSTRAINT,
       ACTOR_CONSTRAINT,
@@ -442,6 +461,32 @@ export const IAM_SCOPE_DEFINITIONS: readonly IamScopeDefinition[] = [
     resourceConstraints: [TENANT_CONSTRAINT, OBJECT_CONSTRAINT] as const,
   })),
   {
+    scope: "assistant:write",
+    allowedRealms: ["system", "platform", "tenant", "ops"] as const,
+    description: "Interact with the operational assistant and propose actions.",
+    resourceConstraints: [TENANT_CONSTRAINT, OBJECT_CONSTRAINT] as const,
+  },
+  {
+    scope: "identity:break-glass:request",
+    allowedRealms: ["system", "platform", "ops"] as const,
+    description: "Submit an emergency break-glass elevation request.",
+    resourceConstraints: [ACTOR_CONSTRAINT, OBJECT_CONSTRAINT] as const,
+  },
+  {
+    scope: "identity:break-glass:approve",
+    allowedRealms: ["system", "platform", "ops"] as const,
+    description:
+      "Review and approve an emergency break-glass elevation request.",
+    resourceConstraints: [ACTOR_CONSTRAINT, OBJECT_CONSTRAINT] as const,
+  },
+  {
+    scope: "identity:break-glass:activate",
+    allowedRealms: ["system", "platform", "ops"] as const,
+    description:
+      "Activate or close an approved emergency break-glass elevation session.",
+    resourceConstraints: [ACTOR_CONSTRAINT, OBJECT_CONSTRAINT] as const,
+  },
+  {
     scope: "partner:entries:read",
     allowedRealms: ["partner"],
     description: "Read partner entry configuration.",
@@ -495,6 +540,19 @@ export const IAM_SCOPE_DEFINITIONS: readonly IamScopeDefinition[] = [
       OBJECT_CONSTRAINT,
     ],
   },
+  {
+    // UV-EXEC-003 / SD §4.2: gates the *first* stage of the two-stage voice
+    // identity exchange. Only a workload service principal already holding
+    // this scope may exchange itself for a short-lived, session-scoped
+    // voice-tool-gateway capability token (see VoiceCapabilityService). It
+    // does not grant any voice tool action itself -- those are the separate
+    // VOICE_CAPABILITY_SCOPES minted onto the exchanged token.
+    scope: "voice:capability:issue",
+    allowedRealms: ["system"],
+    description:
+      "Exchange an authenticated workload service principal for a short-lived voice-tool-gateway session capability token.",
+    resourceConstraints: [ACTOR_CONSTRAINT],
+  },
 ];
 
 export const IAM_SCOPE_DEFINITION_BY_SCOPE = new Map(
@@ -510,6 +568,8 @@ export const IAM_ACTOR_POLICY_DEFINITIONS: readonly IamActorPolicyDefinition[] =
       defaultRoles: [],
       scopes: [
         "identity:read",
+        "identity:sessions:read",
+        "identity:sessions:write",
         "foundation:read",
         "foundation:write",
         "audit:read",
@@ -545,9 +605,12 @@ export const IAM_ACTOR_POLICY_DEFINITIONS: readonly IamActorPolicyDefinition[] =
         "reports:write",
         "forwarder:read",
         "forwarder:write",
+        "voice:capability:issue",
         ...SANDBOX_COMPLIANCE_SCOPES,
         ...MULTI_TAXI_RATING_GOVERNANCE_SCOPES,
         ...MULTI_TAXI_RECORD_GOVERNANCE_SCOPES,
+        ...IDENTITY_BREAK_GLASS_SCOPES,
+        ...ASSISTANT_SCOPES,
       ],
     },
     {
@@ -557,6 +620,8 @@ export const IAM_ACTOR_POLICY_DEFINITIONS: readonly IamActorPolicyDefinition[] =
       defaultRoles: ["platform_admin"],
       scopes: [
         "identity:read",
+        "identity:sessions:read",
+        "identity:sessions:write",
         "foundation:read",
         "foundation:write",
         "audit:read",
@@ -584,6 +649,7 @@ export const IAM_ACTOR_POLICY_DEFINITIONS: readonly IamActorPolicyDefinition[] =
         ...SANDBOX_COMPLIANCE_SCOPES,
         ...MULTI_TAXI_RATING_GOVERNANCE_SCOPES,
         ...MULTI_TAXI_RECORD_GOVERNANCE_SCOPES,
+        ...IDENTITY_BREAK_GLASS_SCOPES,
       ],
     },
     {
@@ -593,6 +659,8 @@ export const IAM_ACTOR_POLICY_DEFINITIONS: readonly IamActorPolicyDefinition[] =
       defaultRoles: ["tenant_admin"],
       scopes: [
         "identity:read",
+        "identity:sessions:read",
+        "identity:sessions:write",
         "audit:read",
         "tenant:read",
         "tenant:write",
@@ -642,6 +710,7 @@ export const IAM_ACTOR_POLICY_DEFINITIONS: readonly IamActorPolicyDefinition[] =
         "sandbox.compliance.read",
         "sandbox.investigation.read",
         "sandbox.evidence.preview",
+        ...ASSISTANT_SCOPES,
       ],
     },
     {
@@ -697,6 +766,8 @@ export const IAM_TENANT_ROLE_POLICY_DEFINITIONS: readonly IamTenantRolePolicyDef
       roleFamily: "tenant",
       scopes: [
         "identity:read",
+        "identity:sessions:read",
+        "identity:sessions:write",
         "audit:read",
         "tenant:read",
         "tenant:write",

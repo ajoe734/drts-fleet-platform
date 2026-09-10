@@ -389,7 +389,7 @@ describe("owned mobility service", () => {
 
   it("creates a phone order without recording_id and binds it later", async () => {
     const { callcenterService, ownedMobilityService } = createService();
-    const order = ownedMobilityService.createCallCenterOrder({
+    const order = await ownedMobilityService.createCallCenterOrder({
       callId: "CALL-20260410-000120",
       agentId: "AGENT-0088",
       pickup: {
@@ -438,6 +438,51 @@ describe("owned mobility service", () => {
       ownedMobilityService.getOrder(order.orderId).complianceFlags,
     ).toEqual(["recording_bound"]);
   });
+
+  it.each(["recording_pending", "on_trip"] as const)(
+    "UV-EXEC-010 unversioned callbacks preserve voice evidence in %s, including DB loss",
+    async (status) => {
+      const { ownedMobilityService } = createService();
+      const created = await ownedMobilityService.createCallCenterOrder({
+        callId: "voice-call",
+        agentId: "agent",
+        pickup: { address: "台中市梧棲區中二路一段9號" },
+        dropoff: { address: "台中市大安區興安路378號" },
+        passenger: { name: "李先生", phone: "0911222333" },
+      });
+      const pinned = {
+        ...created,
+        status,
+        voiceIntentId: "voice-intent",
+        recordingId: "verified-recording",
+        complianceFlags: ["recording_bound"],
+      };
+      // Seed the persisted voice aggregate without using a legacy creation DTO.
+      Object.assign(ownedMobilityService, { orders: [pinned] });
+      const original = ownedMobilityService.getOrder(created.orderId);
+      const common = {
+        callId: "voice-call",
+        linkedOrderId: created.orderId,
+        providerRecordingRef: null,
+        recordingUrl: null,
+        startedAt: null,
+        endedAt: null,
+        agentId: null,
+      };
+      ownedMobilityService.handleCallRecordingAttached({
+        ...common,
+        recordingId: "unverified-old",
+      });
+      for (const recordingState of ["pending", "missing", "ready"] as const) {
+        await ownedMobilityService.handleCallRecordingStateChanged({
+          ...common,
+          recordingState,
+          recordingId: null,
+        });
+      }
+      expect(ownedMobilityService.getOrder(created.orderId)).toEqual(original);
+    },
+  );
 
   it("prevents trip start before arrived_pickup", async () => {
     const { ownedMobilityService } = createService();
@@ -1033,7 +1078,7 @@ describe("owned mobility service", () => {
     }
 
     try {
-      ownedMobilityService.cancelTenantBooking(
+      await ownedMobilityService.cancelTenantBooking(
         TENANT_ACME,
         newcoBooking.bookingId,
         {
@@ -1206,7 +1251,7 @@ describe("owned mobility service", () => {
           .filter((delivery) => delivery.eventType !== "tenant.webhook.test"),
       ).toEqual([]);
 
-      ownedMobilityService.cancelTenantBooking(
+      await ownedMobilityService.cancelTenantBooking(
         TENANT_ACME,
         acmeBooking.bookingId,
         {
@@ -2274,13 +2319,13 @@ describe("owned mobility service", () => {
       }
     });
 
-    it("accepts scheduled booking with pickup beyond minimum lead time", () => {
+    it("accepts scheduled booking with pickup beyond minimum lead time", async () => {
       const { ownedMobilityService } = createService();
       const thirtyMinutesFromNow = new Date(
         Date.now() + 30 * 60 * 1000,
       ).toISOString();
 
-      const order = ownedMobilityService.createMultiTaxiRide(
+      const order = await ownedMobilityService.createMultiTaxiRide(
         {
           pickup: { address: "台北車站" },
           dropoff: { address: "松山機場" },
@@ -2298,7 +2343,7 @@ describe("owned mobility service", () => {
       expect(order.reservationWindowStart).toBe(thirtyMinutesFromNow);
     });
 
-    it("allows dynamically reconfiguring lead time via setMinLeadTimeMinutes", () => {
+    it("allows dynamically reconfiguring lead time via setMinLeadTimeMinutes", async () => {
       const { ownedMobilityService } = createService();
       ownedMobilityService.setMinLeadTimeMinutes(60); // 60 minutes minimum
 
@@ -2325,7 +2370,7 @@ describe("owned mobility service", () => {
       const seventyMinutesFromNow = new Date(
         Date.now() + 70 * 60 * 1000,
       ).toISOString();
-      const order = ownedMobilityService.createMultiTaxiRide(
+      const order = await ownedMobilityService.createMultiTaxiRide(
         {
           pickup: { address: "台北車站" },
           dropoff: { address: "松山機場" },
@@ -2339,12 +2384,12 @@ describe("owned mobility service", () => {
       expect(order.timingMode).toBe("scheduled");
     });
 
-    it("allows immediate future scheduled booking when minLeadTimeMinutes is 0", () => {
+    it("allows immediate future scheduled booking when minLeadTimeMinutes is 0", async () => {
       const { ownedMobilityService } = createService();
       ownedMobilityService.setMinLeadTimeMinutes(0);
 
       const oneMinuteFromNow = new Date(Date.now() + 60 * 1000).toISOString();
-      const order = ownedMobilityService.createMultiTaxiRide(
+      const order = await ownedMobilityService.createMultiTaxiRide(
         {
           pickup: { address: "台北車站" },
           dropoff: { address: "松山機場" },
@@ -2358,11 +2403,11 @@ describe("owned mobility service", () => {
       expect(order.timingMode).toBe("scheduled");
     });
 
-    it("allows on-demand rides with immediate pickup time without lead time restriction", () => {
+    it("allows on-demand rides with immediate pickup time without lead time restriction", async () => {
       const { ownedMobilityService } = createService();
       const nowIso = new Date().toISOString();
 
-      const order = ownedMobilityService.createMultiTaxiRide(
+      const order = await ownedMobilityService.createMultiTaxiRide(
         {
           pickup: { address: "台北車站" },
           dropoff: { address: "松山機場" },

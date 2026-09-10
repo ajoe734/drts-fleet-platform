@@ -4,10 +4,12 @@ import { DatabaseModule } from "../../common/db";
 import { AuditNotificationModule } from "../audit-notification/audit-notification.module";
 import { ComplaintModule } from "../complaint/complaint.module";
 import { IncidentModule } from "../incident/incident.module";
+import { VoiceBookingModule } from "../voice-booking/voice-booking.module";
 import { CallcenterController } from "./callcenter.controller";
 import { CallcenterRepository } from "./callcenter.repository";
 import { SandboxWebhookAdapter } from "./sandbox-webhook.adapter";
 import { CallcenterService } from "./callcenter.service";
+import { VoiceHandoffQueueService } from "./voice-handoff-queue.service";
 
 @Module({
   imports: [
@@ -15,9 +17,15 @@ import { CallcenterService } from "./callcenter.service";
     AuditNotificationModule,
     ComplaintModule,
     IncidentModule,
+    VoiceBookingModule,
   ],
   controllers: [CallcenterController],
-  providers: [CallcenterRepository, CallcenterService, SandboxWebhookAdapter],
-  exports: [CallcenterService],
+  providers: [
+    CallcenterRepository,
+    CallcenterService,
+    SandboxWebhookAdapter,
+    VoiceHandoffQueueService,
+  ],
+  exports: [CallcenterService, VoiceHandoffQueueService],
 })
 export class CallcenterModule {}

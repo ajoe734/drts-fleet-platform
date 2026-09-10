@@ -1,3 +1,8 @@
+import type {
+  BookingRequirements,
+  BookingQualification,
+} from "./booking-requirements";
+export * from "./booking-requirements";
 import { PLATFORM_CODES } from "./platform-codes";
 import type { PlatformCode } from "./platform-codes";
 export * from "./iam-contracts";
@@ -1424,6 +1429,11 @@ export const EVIDENCE_RETENTION_FAMILIES = [
   "webhook_delivery",
   "eligibility_verification",
   "proof_bundle",
+  "voice_booking_evidence",
+  "voice_transcript",
+  "voice_recording_audio",
+  "voice_live_buffer",
+  "voice_telemetry",
 ] as const;
 export type EvidenceRetentionFamily =
   (typeof EVIDENCE_RETENTION_FAMILIES)[number];
@@ -3260,6 +3270,7 @@ export interface CallCenterMapFallbackReview {
 }
 
 export interface CreateCallCenterOrderCommand {
+  bookingRequirements?: BookingRequirements;
   callId: string;
   agentId: string;
   recordingId?: string | null;
@@ -3468,6 +3479,8 @@ export interface DriverCompleteTaskCommand {
 }
 
 export interface OwnedOrderRecord {
+  bookingRequirements?: BookingRequirements;
+  bookingQualification?: BookingQualification;
   orderId: string;
   orderNo: string;
   orderSource: OwnedOrderSource;
@@ -3501,6 +3514,17 @@ export interface OwnedOrderRecord {
   bookingType: BookingType | null;
   etaSnapshot: EtaSnapshot | null;
   callId: string | null;
+  // Present only for orders created through the unattended voice-booking
+  // command path (SD §7.1/§7.2). Optional because it does not exist on
+  // orders persisted before that path landed; `ops.phase1_owned_orders`
+  // enforces `UNIQUE(voice_intent_id)` (non-null) on the DB side.
+  voiceIntentId?: string | null;
+  // Monotonic optimistic-concurrency version for the owned-order aggregate
+  // (SD §7.5: "voice aggregate 以 DB row 與單調 aggregateVersion 為權威").
+  // Absent on orders never written through a CAS-aware path; the DB column
+  // (`ops.phase1_owned_orders.aggregate_version`, a generated column derived
+  // from this same field) treats a missing value as version 1.
+  aggregateVersion?: number;
   recordingId: string | null;
   reservationWindowStart: string | null;
   reservationWindowEnd: string | null;
@@ -3677,6 +3701,8 @@ export interface TenantOrderListQuery {
 }
 
 export interface DispatchCandidate {
+  bookingRequirements?: BookingRequirements;
+  bookingQualification?: BookingQualification;
   vehicleId: string;
   driverId: string;
   operatingArea: string;
@@ -3790,6 +3816,8 @@ export interface DispatchTimeoutRecord {
 }
 
 export interface DispatchAssignmentRecord {
+  bookingRequirements?: BookingRequirements;
+  bookingQualification?: BookingQualification;
   assignmentId: string;
   dispatchJobId: string;
   orderId: string;
@@ -3799,6 +3827,8 @@ export interface DispatchAssignmentRecord {
   driverId: string;
   assignmentType: "metered" | "fixed_price";
   status: DispatchAssignmentStatus;
+  /** Persisted offer deadline; absent legacy offers require reconciliation. */
+  acceptanceDeadline?: string | null;
   acceptedAt: string | null;
   rejectedAt: string | null;
   rejectReasonCode: string | null;
@@ -3817,6 +3847,8 @@ export interface WaypointRecord {
 }
 
 export interface DriverTaskRecord {
+  bookingRequirements?: BookingRequirements;
+  bookingQualification?: BookingQualification;
   taskId: string;
   orderId: string;
   dispatchJobId: string;
@@ -5510,9 +5542,15 @@ export type ReportOutputFormat = (typeof REPORT_OUTPUT_FORMATS)[number];
  * renderer, so a job requested as `pdf` and one requested as `csv` came back
  * identical -- no bytes either way. The API rejects the unrendered ones now, and
  * a picker should offer only these.
+ *
+ * SR-REPORT-001 (N05 gap closure): xlsx and pdf renderers are now implemented
+ * via exceljs and pdfkit respectively. zip remains unimplemented (filing ZIP
+ * is explicitly out of scope for general reports).
  */
 export const IMPLEMENTED_REPORT_OUTPUT_FORMATS = [
   "csv",
+  "xlsx",
+  "pdf",
 ] as const satisfies readonly ReportOutputFormat[];
 export type ImplementedReportOutputFormat =
   (typeof IMPLEMENTED_REPORT_OUTPUT_FORMATS)[number];
@@ -7410,3 +7448,5 @@ export * from "./phase2-tesla-fsd-sandbox";
 export * from "./phase1-p5-s3-multi-taxi";
 export * from "./p5-fare-anomaly-admin";
 export * from "./unattended-voice";
+export * from "./voice-dialogue";
+export * from "./system-remediation";

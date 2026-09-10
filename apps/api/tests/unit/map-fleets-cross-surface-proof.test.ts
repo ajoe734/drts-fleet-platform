@@ -189,7 +189,7 @@ it("writes cross-surface persisted anti-bypass proof for fleets closeout", async
   const partnerVerification =
     await tenantPartnerService.verifyPartnerEligibility(
       {
-        entrySlug: "ctbc",
+        entrySlug: "acme",
         cardLast4: "2468",
         cardholderName: "Closeout Partner Rider",
       },
@@ -297,7 +297,7 @@ it("writes cross-surface persisted anti-bypass proof for fleets closeout", async
       businessDispatchSubtype: "credit_card_airport_transfer",
       reservationWindowStart: "2026-07-11T12:00:00.000Z",
       reservationWindowEnd: "2026-07-11T13:00:00.000Z",
-      partnerEntrySlug: "ctbc",
+      partnerEntrySlug: "acme",
       eligibilityVerificationId: partnerVerification.eligibilityVerificationId,
       pickup: {
         address: "Taoyuan Airport Terminal 1",
@@ -489,7 +489,7 @@ it("writes cross-surface persisted anti-bypass proof for fleets closeout", async
       businessDispatchSubtype: "credit_card_airport_transfer",
       reservationWindowStart: "2026-07-11T16:00:00.000Z",
       reservationWindowEnd: "2026-07-11T17:00:00.000Z",
-      partnerEntrySlug: "ctbc",
+      partnerEntrySlug: "acme",
       eligibilityVerificationId: partnerVerification.eligibilityVerificationId,
       pickup: {
         address: "Partner text-only pickup",

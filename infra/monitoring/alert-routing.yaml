@@ -35,6 +35,21 @@ route:
       receiver: "slack-iam-engineering"
       continue: false
 
+    - match:
+        route_channel: voice-pager-p1
+      receiver: "pagerduty-p1-critical"
+      continue: true
+
+    - match:
+        route_channel: voice-oncall
+      receiver: "slack-voice-oncall"
+      continue: true
+
+    - match:
+        route_channel: voice-cost-audit
+      receiver: "slack-voice-cost-alerts"
+      continue: false
+
 receivers:
   - name: "default-security-catchall"
     slack_configs:
@@ -75,3 +90,17 @@ receivers:
       - channel: "#iam-sec-engineering"
         send_resolved: true
         title: "[IAM DRIFT] {{ .CommonAnnotations.summary }}"
+
+  - name: "slack-voice-oncall"
+    slack_configs:
+      - channel: "#voice-booking-oncall"
+        send_resolved: true
+        title: "[{{ .Status | toUpper }}] Voice Alert: {{ .CommonAnnotations.summary }} [{{ .CommonLabels.language }} / v{{ .CommonLabels.route_profile_version }}]"
+        text: "Provider: {{ .CommonLabels.provider }}\nBrand: {{ .CommonLabels.brand_id }}\nDetails: {{ .CommonAnnotations.description }}\nRunbook: {{ .CommonAnnotations.runbook_url }}"
+
+  - name: "slack-voice-cost-alerts"
+    slack_configs:
+      - channel: "#voice-billing-audit"
+        send_resolved: true
+        title: "[VOICE COST ANOMALY] {{ .CommonAnnotations.summary }}"
+        text: "Provider: {{ .CommonLabels.provider }}\nBrand: {{ .CommonLabels.brand_id }}\nLanguage: {{ .CommonLabels.language }}\nDetails: {{ .CommonAnnotations.description }}"

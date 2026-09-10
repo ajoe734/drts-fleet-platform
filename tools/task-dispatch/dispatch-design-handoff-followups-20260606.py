@@ -105,7 +105,7 @@ FOUNDATION = [
         "Codex",
         "Partner Booking: 3 program-branded flows (theme + landing/eligibility/review/success/tracking)",
         "依 Part C + design canvas pb-screens.jsx：apps/partner-booking-web 目前是泛用流程，需支援 3 個品牌專案 per-program 主題與共用畫面："
-        "信用卡機場接送(中信 ride.ctbc)、保險理賠代步(富邦 claim.fubon-ins)、旅行社團體接送(雄獅 booking.lion-travel)，各自 primary/accent 配色與品牌字樣；"
+        "信用卡機場接送(艾克米 ride.acme)、保險理賠代步(泰思賓 claim.tailspin)、旅行社團體接送(探索 booking.adventure-works)，各自 primary/accent 配色與品牌字樣；"
         "共用 landing / eligibility / review(下單前確認) / success / tracking(行程追蹤) / error·manual-review 畫面，依 program 切換主題。program-specific 表單在 DH-PB-PROGRAM-FORMS。沿用既有 [tenantSlug] route group 結構與 canvas 原語＋t()。",
         "",
         "apps/partner-booking-web/app/,apps/partner-booking-web/lib/",

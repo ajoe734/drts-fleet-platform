@@ -1,5 +1,14 @@
 export type Locale = "en" | "zh";
 
+/**
+ * Compatibility label for callers without the server-provided environment.
+ * Translation catalogs never read deployment/build variables. The server
+ * layout supplies normalized DRTS_ENV to the shell for its explicit label.
+ */
+export function resolveAuthoritativeShellEnv(locale: Locale = "zh"): string {
+  return locale === "zh" ? "未知環境" : "unknown";
+}
+
 const en = {
   "app.title": "Tenant Console",
   "app.description": "Tenant administration workspace for DRTS Phase 1.",
@@ -7,7 +16,21 @@ const en = {
   "shell.search": "Search bookings, passengers, statements, reports...",
   "shell.brand.sub": "TENANT CONSOLE",
   "shell.context": "YAMATO Business Group",
-  "shell.env": "production",
+  "shell.env": resolveAuthoritativeShellEnv("en"),
+  "shell.env.production": "production",
+  "shell.env.staging": "staging",
+  "shell.env.preview": "preview",
+  "shell.env.sandbox": "sandbox",
+  "shell.env.dev": "development",
+  "shell.env.mock": "mock data",
+  "shell.env.unknown": "unknown",
+  "app.environment.production": "production",
+  "app.environment.staging": "staging",
+  "app.environment.preview": "preview",
+  "app.environment.sandbox": "sandbox",
+  "app.environment.dev": "development",
+  "app.environment.mock": "mock data",
+  "app.environment.unknown": "unknown",
   "shell.identity.actor": "Yamato",
   "shell.language.en": "English",
   "shell.language.zh": "繁體中文",
@@ -18,7 +41,13 @@ const en = {
   "shell.health.healthy": "API healthy",
   "shell.health.degraded": "API degraded",
   "shell.health.down": "API down",
+  "shell.health.unknown": "unknown",
   "shell.health.lastChecked": "last checked",
+  "status.order.dispatch_timeout": "Dispatch timeout",
+  "status.order.dispatch_failed": "Dispatch failed",
+  "status.order.exception_hold": "Exception hold",
+  "status.order.no_supply": "No available vehicle",
+  "status.order.redispatch_required": "Redispatch required",
   "shell.nav.aria": "Tenant Console navigation",
   "shell.nav.workspace": "Workspace",
   "shell.nav.directory": "Directory",
@@ -4056,7 +4085,21 @@ const zh: Record<keyof typeof en, string> = {
   "shell.search": "搜尋叫車、乘客、對帳單、報表…",
   "shell.brand.sub": "租戶後台",
   "shell.context": "YAMATO 大和商務集團",
-  "shell.env": "production",
+  "shell.env": resolveAuthoritativeShellEnv("zh"),
+  "shell.env.production": "正式環境",
+  "shell.env.staging": "預發環境",
+  "shell.env.preview": "預覽環境",
+  "shell.env.sandbox": "沙盒環境",
+  "shell.env.dev": "開發環境",
+  "shell.env.mock": "模擬資料",
+  "shell.env.unknown": "未知環境",
+  "app.environment.production": "正式環境",
+  "app.environment.staging": "預發環境",
+  "app.environment.preview": "預覽環境",
+  "app.environment.sandbox": "沙盒環境",
+  "app.environment.dev": "開發環境",
+  "app.environment.mock": "模擬資料",
+  "app.environment.unknown": "未知環境",
   "shell.identity.actor": "大和",
   "shell.language.en": "English",
   "shell.language.zh": "繁體中文",
@@ -4067,7 +4110,13 @@ const zh: Record<keyof typeof en, string> = {
   "shell.health.healthy": "API 正常",
   "shell.health.degraded": "API 降級",
   "shell.health.down": "API 中斷",
+  "shell.health.unknown": "API 未知",
   "shell.health.lastChecked": "最近檢查",
+  "status.order.dispatch_timeout": "派車逾時",
+  "status.order.dispatch_failed": "派車失敗",
+  "status.order.exception_hold": "異常暫留",
+  "status.order.no_supply": "無可用運能",
+  "status.order.redispatch_required": "需重新派車",
   "shell.nav.aria": "租戶後台導覽",
   "shell.nav.workspace": "工作面",
   "shell.nav.directory": "資料維護",
@@ -7841,6 +7890,9 @@ export function t(
   locale: Locale = "zh",
   params?: Record<string, string | number>,
 ): string {
+  if (key === "shell.env") {
+    return resolveAuthoritativeShellEnv(locale);
+  }
   const scoped = translations[locale] as Record<string, string>;
   const fallback = en as Record<string, string>;
   const template = scoped[key] ?? fallback[key] ?? key;

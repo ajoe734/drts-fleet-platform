@@ -254,6 +254,7 @@ export class AuditNotificationService implements OnModuleInit {
 
       const emailDelivery = await this.auditNotificationEmailAdapter.send({
         tenantId: input.tenantId,
+        approvalRequestId: input.approvalRequestId,
         recipientUserId: recipient.userId,
         recipientEmail: recipient.email,
         templateKey: input.templateKey,
@@ -290,9 +291,28 @@ export class AuditNotificationService implements OnModuleInit {
         deliveredToUserIds,
         skippedUserIds,
         skippedEmails,
-        channelCounts: {
-          email: emailDeliveries.length,
-          inApp: deliveredToUserIds.length,
+        // inApp status is a synchronous, always-succeeding in-memory write;
+        // email status reflects the real NotificationDeliveryService outcome
+        // and must never claim "sent" for an unconfigured/failed attempt.
+        inApp: {
+          delivered: deliveredToUserIds.length,
+        },
+        email: {
+          attempted: emailDeliveries.length,
+          sent: emailDeliveries.filter((delivery) => delivery.status === "sent")
+            .length,
+          failed: emailDeliveries.filter(
+            (delivery) => delivery.status === "failed",
+          ).length,
+          unavailable: emailDeliveries.filter(
+            (delivery) => delivery.status === "unavailable",
+          ).length,
+          recipients: emailDeliveries.map((delivery) => ({
+            userId: delivery.recipientUserId,
+            status: delivery.status,
+            deliveryId: delivery.deliveryId,
+            errorCode: delivery.errorCode,
+          })),
         },
       },
       ...(input.requestId ? { requestId: input.requestId } : {}),

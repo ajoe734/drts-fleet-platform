@@ -148,6 +148,9 @@ export const VOICE_ERROR_CODES = [
   "VOICE_INVALID_ACTOR",
   "VOICE_CAPABILITY_REJECTED",
   "VOICE_UNSUPPORTED_ACTION",
+  // Ordered-event / control-cutoff error codes (SD §5.3/§5.4)
+  "VOICE_CONTROL_CUTOFF_NOT_REACHED",
+  "VOICE_UNRESOLVED_INPUT",
 ] as const;
 
 export const VoiceErrorCodeSchema = z.enum(VOICE_ERROR_CODES);
@@ -287,7 +290,6 @@ export const VoiceDraftRevisionSchema = z.object({
   createdAt: z.string().datetime().optional(),
 });
 export type VoiceDraftRevision = z.infer<typeof VoiceDraftRevisionSchema>;
-
 
 export const VOICE_RECEIPT_STATUSES = [
   "pending",
@@ -538,3 +540,79 @@ export const VoiceCapabilityTokenEnvelopeSchema = z
 export type VoiceCapabilityTokenEnvelope = z.infer<
   typeof VoiceCapabilityTokenEnvelopeSchema
 >;
+
+/** SD §7.6: Voice Dispatch Projection states and presentation view */
+export const VoiceDispatchProjectionStateSchema = z.enum([
+  "matching",
+  "offered",
+  "accepted",
+  "arrived",
+  "retrying",
+  "manual_intervention",
+  "terminal",
+]);
+export type VoiceDispatchProjectionState = z.infer<
+  typeof VoiceDispatchProjectionStateSchema
+>;
+
+export const VoiceDispatchProjectionViewSchema = z.object({
+  projection: VoiceDispatchProjectionStateSchema,
+  announcement: z.string(),
+  orderId: z.string(),
+  orderStatus: z.string(),
+  orderVersion: z.number().int().optional(),
+  assignmentId: z.string().nullable().optional(),
+  assignmentVersion: z.number().int().nullable().optional(),
+  driverTaskId: z.string().nullable().optional(),
+  driverTaskStatus: z.string().nullable().optional(),
+  observedAt: z.string().datetime(),
+  acceptedAt: z.string().datetime().nullable().optional(),
+  etaMinutes: z.number().nullable().optional(),
+  etaSource: z.string().nullable().optional(),
+  driverId: z.string().nullable().optional(),
+  vehicleId: z.string().nullable().optional(),
+  licensePlate: z.string().nullable().optional(),
+  driverName: z.string().nullable().optional(),
+  reasonCode: z.string().nullable().optional(),
+  reasonNote: z.string().nullable().optional(),
+});
+export type VoiceDispatchProjectionView = z.infer<
+  typeof VoiceDispatchProjectionViewSchema
+>;
+
+/** SD §7.6: Autonomous Dispatch Executor contract types */
+export interface AutonomousDispatchOfferResult {
+  status: "offered" | "no_supply" | "already_assigned" | "terminal";
+  orderId: string;
+  dispatchJobId: string;
+  round: number;
+  assignmentId?: string | null;
+  taskId?: string | null;
+  driverId?: string | null;
+  vehicleId?: string | null;
+  acceptanceDeadline?: string | null;
+  etaMinutes?: number | null;
+  candidateCount?: number;
+  operationKey?: string;
+  outboxId?: string;
+}
+
+export interface AutonomousDispatchTimeoutCommand {
+  targetJobId: string;
+  round: number;
+  targetAssignmentId: string;
+  assignmentVersion?: number;
+  acceptanceDeadline: string;
+  orderId: string;
+  requestId?: string;
+}
+
+export interface AutonomousDispatchTimeoutResult {
+  outcome: "timed_out_and_retried" | "superseded_or_no_op" | "not_expired";
+  reason?: string;
+  orderId: string;
+  targetAssignmentId: string;
+  nextRound?: number;
+  nextOffer?: AutonomousDispatchOfferResult;
+}
+

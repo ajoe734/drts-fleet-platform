@@ -15,19 +15,19 @@ type TenantShellProps = {
 };
 
 const ENGLISH_BRAND_NAMES = {
-  CTBC: { displayName: "CTBC World Elite", issuerLabel: "CTBC Bank" },
-  CATHAY: {
-    displayName: "Cathay CUBE World",
-    issuerLabel: "Cathay United Bank",
+  ACME: { displayName: "ACME Elite Demo", issuerLabel: "Acme Bank" },
+  CONTOSO: {
+    displayName: "Contoso Prism World",
+    issuerLabel: "Contoso Bank",
   },
-  TAISHIN: { displayName: "Taishin Infinite", issuerLabel: "Taishin Bank" },
-  DBS: { displayName: "DBS Insignia", issuerLabel: "DBS Bank" },
-  GRAND: { displayName: "Grand Concierge", issuerLabel: "Grand Hotel" },
-  FUBON: {
-    displayName: "Fubon Claim Mobility",
-    issuerLabel: "Fubon Insurance",
+  FABRIKAM: { displayName: "Fabrikam Signature", issuerLabel: "Fabrikam Bank" },
+  NORTHWIND: { displayName: "Northwind Signature", issuerLabel: "Northwind Bank" },
+  WINGTIP: { displayName: "Wingtip Concierge", issuerLabel: "Grand Hotel" },
+  TAILSPIN: {
+    displayName: "Tailspin Claim Mobility",
+    issuerLabel: "Tailspin Insurance",
   },
-  LION: { displayName: "Lion Group Transfer", issuerLabel: "Lion Travel" },
+  ADVENTURE: { displayName: "Adventure Works Transfer", issuerLabel: "AdventureWorks Travel" },
 } as const;
 
 function getBrandDisplay(brand: PartnerBrand, locale: Locale) {
@@ -44,11 +44,11 @@ function getBrandDisplay(brand: PartnerBrand, locale: Locale) {
 
   const names = ENGLISH_BRAND_NAMES[brand.code];
   const programLabel =
-    brand.code === "FUBON"
+    brand.code === "TAILSPIN"
       ? "Insurance replacement mobility"
-      : brand.code === "LION"
+      : brand.code === "ADVENTURE"
         ? "Travel agency group transfer"
-        : brand.code === "GRAND"
+        : brand.code === "WINGTIP"
           ? "Concierge booking"
           : "Credit-card airport transfer";
 

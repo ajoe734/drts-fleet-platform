@@ -380,7 +380,7 @@ export class MultiTaxiService implements OnModuleInit {
   ) {
     this.assertServiceProductPolicy();
     const authorization = this.resolveActiveAuthorization();
-    const order = this.ownedMobilityService.createMultiTaxiRide(
+    const order = await this.ownedMobilityService.createMultiTaxiRide(
       command,
       authorization,
       identity,
@@ -395,7 +395,7 @@ export class MultiTaxiService implements OnModuleInit {
   ) {
     this.assertServiceProductPolicy();
     const authorization = this.resolveActiveAuthorization();
-    const order = this.ownedMobilityService.createMultiTaxiRide(
+    const order = await this.ownedMobilityService.createMultiTaxiRide(
       command,
       authorization,
       null,
@@ -1150,7 +1150,7 @@ export class MultiTaxiService implements OnModuleInit {
       process.env.NODE_ENV === "production" &&
       !this.repository?.isEnabled()
     ) {
-      this.failRideAccessCreation(order, passengerAccess, requestId);
+      return this.failRideAccessCreation(order, passengerAccess, requestId);
     }
     try {
       // Strip the raw token before it crosses the persistence boundary. The
@@ -1163,7 +1163,7 @@ export class MultiTaxiService implements OnModuleInit {
         this.digestAccessToken(accessToken),
       );
     } catch {
-      this.failRideAccessCreation(order, passengerAccess, requestId);
+      return this.failRideAccessCreation(order, passengerAccess, requestId);
     }
     return {
       ride: order,
@@ -1198,16 +1198,16 @@ export class MultiTaxiService implements OnModuleInit {
     };
   }
 
-  private failRideAccessCreation(
+  private async failRideAccessCreation(
     order: OwnedOrderRecord,
     passengerAccess: PassengerRideAccessGrant,
     requestId?: string,
-  ): never {
+  ): Promise<never> {
     this.accessTokensByDigest.delete(
       this.digestAccessToken(passengerAccess.accessToken),
     );
     try {
-      this.ownedMobilityService.cancelOwnedOrder(
+      await this.ownedMobilityService.cancelOwnedOrder(
         order.orderId,
         { reason: "passenger_access_token_persistence_failed" },
         requestId,
