@@ -25,18 +25,14 @@ function LanguageIcon({ size = 14 }: { size?: number }) {
 import { useTranslation } from "@/lib/i18n";
 import { getRuntimeApiBaseUrl } from "@/lib/runtime-config";
 import { buildFleetTheme } from "@/lib/fleet-portal-theme";
+import { resolveRuntimeHealth, type RuntimeHealthStatus } from "@drts/ui-web";
 
-type ApiHealthStatus = "checking" | "healthy" | "degraded" | "down";
+type ApiHealthStatus = RuntimeHealthStatus;
 
 const theme = buildFleetTheme();
 
 function normalizeHealthStatus(value: unknown, ok: boolean): ApiHealthStatus {
-  if (!ok) return "down";
-
-  const normalized = String(value ?? "healthy").toLowerCase();
-  if (normalized === "down" || normalized === "unhealthy") return "down";
-  if (normalized === "degraded" || normalized === "warning") return "degraded";
-  return "healthy";
+  return resolveRuntimeHealth({ status: value, responseOk: ok });
 }
 
 function useApiHealth() {
@@ -91,6 +87,12 @@ export function FleetPortalHealthFooter() {
   > = {
     checking: {
       label: t("shell.api.checking"),
+      fg: theme.textMuted,
+      bg: theme.neutralBg,
+      border: theme.neutralBorder,
+    },
+    unknown: {
+      label: t("shell.api.unknown"),
       fg: theme.textMuted,
       bg: theme.neutralBg,
       border: theme.neutralBorder,
