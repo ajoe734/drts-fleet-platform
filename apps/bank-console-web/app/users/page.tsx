@@ -1,12 +1,19 @@
 import type { CSSProperties } from "react";
 import Link from "next/link";
+import { cookies } from "next/headers";
 import {
   resolveBankDemoTenant,
   resolveLocale,
   type BankDemoTenant,
 } from "@/lib/demo-tenants";
 import { loadBankUsersData } from "@/lib/bank-dev-read-models";
-import { getBankConsoleSession, type BankConsoleRole } from "@/lib/session";
+import {
+  BANK_CONSOLE_ROLE_COOKIE,
+  BANK_CONSOLE_SESSION_COOKIE,
+  getBankConsoleSession,
+  resolveServerSessionRole,
+  type BankConsoleRole,
+} from "@/lib/session";
 import { t, type Locale } from "@/lib/translations";
 
 type BankRole = BankConsoleRole;
@@ -89,7 +96,18 @@ export default async function UsersPage({
   const params = await searchParams;
   const locale = resolveLocale(params?.locale);
   const tenant = resolveBankDemoTenant(params?.bank);
-  const session = getBankConsoleSession(tenant, locale, params?.role);
+  let cookieRole: string | undefined;
+  try {
+    const cookieStore = await cookies();
+    cookieRole =
+      cookieStore.get(BANK_CONSOLE_SESSION_COOKIE)?.value ||
+      cookieStore.get(BANK_CONSOLE_ROLE_COOKIE)?.value;
+  } catch {
+    // Fallback for test / non-HTTP contexts
+  }
+  const roleParam = Array.isArray(params?.role) ? params.role[0] : params?.role;
+  const sessionRole = resolveServerSessionRole(cookieRole, roleParam).role;
+  const session = getBankConsoleSession(tenant, locale, sessionRole);
   const userData = await loadBankUsersData(tenant.tenantId, session.role);
   const issuerTokens = tenant.template.tokens.dark;
   const activeFilter = FILTERS.includes(params?.status as UserFilter)

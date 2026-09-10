@@ -74,6 +74,22 @@ export async function GET(
     }
 
     const statementData = await loadBankStatementsData(tenant.tenantId, session.role);
+
+    // An upstream denial/outage must be reported explicitly, never
+    // conflated with a genuine 404 ("this period has no statement").
+    if (statementData.degradedMessage) {
+      return NextResponse.json(
+        {
+          ok: false,
+          error: {
+            code: "UPSTREAM_UNAVAILABLE",
+            message: statementData.degradedMessage,
+          },
+        },
+        { status: 503 },
+      );
+    }
+
     const statement = statementData.data.statements.find(
       (s) => s.period === period,
     );
