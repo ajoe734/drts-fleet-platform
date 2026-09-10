@@ -143,7 +143,7 @@ export function CaseReplyComposer({
   return (
     <CanvasCard
       theme={theme}
-      title="回覆處理 · Reply"
+      title={"回覆處理 · Reply"}
       subtitle="回覆內容、可回覆狀態與錯誤代碼皆由 API 決定"
     >
       {isPlatform ? (
@@ -152,7 +152,7 @@ export function CaseReplyComposer({
             theme={theme}
             tone="info"
             icon="lock"
-            title="唯讀檢視 · CASE_PLATFORM_OWNED"
+            title={"唯讀檢視 · CASE_PLATFORM_OWNED"}
             body="責任歸屬 platform，回覆按鈕停用，車行無法處理。如認為責任歸屬有誤，請聯繫 Ops 申請重新歸屬。"
           />
         </div>
@@ -162,7 +162,7 @@ export function CaseReplyComposer({
             theme={theme}
             tone="info"
             icon="lock"
-            title="已結案 · CASE_CLOSED_NO_REPLY"
+            title={"已結案 · CASE_CLOSED_NO_REPLY"}
             body="closed 案件不得再回覆。如需追加說明，請聯繫 Ops 申請 reopen；reopen 後才會重新開放回覆與附件上傳。"
           />
           <div
@@ -174,7 +174,7 @@ export function CaseReplyComposer({
               marginBottom: 6,
             }}
           >
-            已送出回覆（唯讀）
+            {"已送出回覆（唯讀）"}
           </div>
           <div
             style={{
@@ -186,7 +186,7 @@ export function CaseReplyComposer({
               marginBottom: 10,
             }}
           >
-            已與司機當面對證並完成教育訓練，訓練紀錄與行車記錄器截圖已附上。
+            {"已與司機當面對證並完成教育訓練，訓練紀錄與行車記錄器截圖已附上。"}
           </div>
         </div>
       ) : replyState === "sent" ? (
@@ -195,7 +195,7 @@ export function CaseReplyComposer({
             theme={theme}
             tone="success"
             icon="check"
-            title="回覆已送出 · CASE_REPLY_RECEIVED"
+            title={"回覆已送出 · CASE_REPLY_RECEIVED"}
             body="已寫入案件歷程，Ops 可即時回讀。回覆以 idempotency-key 去重：重複送出同一操作只回傳原始收據，不會建立第二筆。"
           />
           <div
@@ -207,7 +207,7 @@ export function CaseReplyComposer({
               marginBottom: 6,
             }}
           >
-            已送出回覆（唯讀）
+            {"已送出回覆（唯讀）"}
           </div>
           <div
             style={{
@@ -231,7 +231,7 @@ export function CaseReplyComposer({
                 theme={theme}
                 tone="info"
                 icon="clock"
-                title="回覆送出中"
+                title={"回覆送出中"}
                 body="請勿重複點擊「送出回覆」；送出完成前按鈕維持停用。"
               />
             </div>
@@ -242,7 +242,7 @@ export function CaseReplyComposer({
                 theme={theme}
                 tone="danger"
                 icon="warn"
-                title="回覆送出失敗 · CASE_REPLY_SUBMIT_FAILED"
+                title={"回覆送出失敗 · CASE_REPLY_SUBMIT_FAILED"}
                 body={
                   errorMessage ||
                   "內容未遺失，可直接重試；重試沿用同一 idempotency-key，不會建立重複回覆。"
@@ -254,7 +254,7 @@ export function CaseReplyComposer({
                     icon="arrow"
                     onClick={handleSubmit}
                   >
-                    重試送出
+                    {"重試送出"}
                   </CanvasBtn>
                 }
               />
@@ -284,7 +284,7 @@ export function CaseReplyComposer({
                 boxSizing: "border-box",
                 opacity: replyState === "submitting" ? 0.6 : 1,
               }}
-              placeholder="說明已完成的處置與後續預防措施…"
+              placeholder={"說明已完成的處置與後續預防措施…"}
             />
           </CanvasField>
           <div
@@ -438,7 +438,7 @@ export function CaseReplyComposer({
                 {label}
               </span>
               {file.state === "done" && (
-                <span title="授權回讀（簽章由 API 核發）">
+                <span title={"授權回讀（簽章由 API 核發）"}>
                   <CanvasBtn
                     theme={theme}
                     size="xs"
@@ -446,7 +446,7 @@ export function CaseReplyComposer({
                     icon="download"
                     onClick={() => handleDownload(file)}
                   >
-                    下載
+                    {"下載"}
                   </CanvasBtn>
                 </span>
               )}

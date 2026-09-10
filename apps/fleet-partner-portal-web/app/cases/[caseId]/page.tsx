@@ -39,7 +39,7 @@ function TimelineList({
         <CanvasEmptyState
           theme={theme}
           tone="neutral"
-          title="歷程 · 空歷程"
+          title={"歷程 · 空歷程"}
           body="案件剛建立，尚無歷程事件；這是合法的空狀態。"
         />
       </div>
@@ -247,7 +247,7 @@ export default async function FleetCaseDetailPage({
           <CanvasEmptyState
             theme={theme}
             tone="danger"
-            title="非本車行案件 · CASE_NOT_FLEET_SCOPED"
+            title={"非本車行案件 · CASE_NOT_FLEET_SCOPED"}
             body="依 API 授權規則隱藏，不可存取。"
             action={
               <Link
@@ -258,7 +258,7 @@ export default async function FleetCaseDetailPage({
                   textDecoration: "underline",
                 }}
               >
-                ← 返回事故 / 申訴列表
+                {"← 返回事故 / 申訴列表"}
               </Link>
             }
           />
@@ -294,7 +294,7 @@ export default async function FleetCaseDetailPage({
           href="/cases"
           style={{ color: theme.accent, textDecoration: "none" }}
         >
-          事故 / 申訴
+          {"事故 / 申訴"}
         </Link>
         <span style={{ color: theme.textDim }}>/</span>
         <span style={{ color: theme.text }}>{c.id}</span>
@@ -332,7 +332,7 @@ export default async function FleetCaseDetailPage({
               theme={theme}
               tone={isPlatform ? "neutral" : "danger"}
             >
-              責任歸屬 · {c.responsibility}
+              {"責任歸屬 · "} {c.responsibility}
             </CanvasPill>
           </span>
         }
@@ -388,7 +388,7 @@ export default async function FleetCaseDetailPage({
               textDecoration: "none",
             }}
           >
-            ← 返回事故 / 申訴列表
+            {"← 返回事故 / 申訴列表"}
           </Link>
           <span style={{ color: theme.textDim }}>|</span>
           <Link
@@ -399,7 +399,7 @@ export default async function FleetCaseDetailPage({
               textDecoration: "none",
             }}
           >
-            案件錯誤指引
+            {"案件錯誤指引"}
           </Link>
           <span style={{ color: theme.textDim }}>|</span>
           <Link
@@ -410,7 +410,7 @@ export default async function FleetCaseDetailPage({
               textDecoration: "none",
             }}
           >
-            附件/歷程讀取狀態
+            {"附件/歷程讀取狀態"}
           </Link>
         </div>
 
@@ -433,11 +433,11 @@ export default async function FleetCaseDetailPage({
               theme={theme}
               tone="info"
               icon="lock"
-              title="車行可見範圍 · fleet-scoped"
+              title={"車行可見範圍 · fleet-scoped"}
               body="僅顯示本車行旗下司機 / 車輛的案件；他車行案件依 API 授權隱藏，不在前端過濾。責任歸屬 platform 的案件維持可見，但唯讀、回覆停用 — 見下方 variant='platform' 範例。Ops 始終保留案件 owner。"
             />
 
-            <CanvasCard theme={theme} title="案件摘要 · Case summary">
+            <CanvasCard theme={theme} title={"案件摘要 · Case summary"}>
               <CanvasDL
                 theme={theme}
                 cols={3}
@@ -523,18 +523,18 @@ export default async function FleetCaseDetailPage({
 
             <CanvasCard
               theme={theme}
-              title="歷程 Timeline · cross-actor"
+              title={"歷程 Timeline · cross-actor"}
               subtitle="車行僅可見與本案相關、對車行揭露的事件 · 讀取失敗 / 空歷程見 case-access-states"
             >
               {error ? (
                 <CanvasEmptyState
                   theme={theme}
                   tone="warn"
-                  title="歷程 · 讀取失敗"
+                  title={"歷程 · 讀取失敗"}
                   body="歷程服務暫時無法回應，Ops owner 資訊仍保留於案件摘要。"
                   action={
                     <CanvasBtn theme={theme} size="xs" icon="refresh">
-                      重新整理
+                      {"重新整理"}
                     </CanvasBtn>
                   }
                 />
@@ -551,7 +551,7 @@ export default async function FleetCaseDetailPage({
               initialAttachments={attachments}
             />
 
-            <CanvasCard theme={theme} title="Linked entities">
+            <CanvasCard theme={theme} title={"Linked entities"}>
               <CanvasDL
                 theme={theme}
                 cols={1}

@@ -277,7 +277,7 @@ describe("SR-FLEET-CASE-001: 車行案件回覆與 Ops timeline 閉環", () => {
       expect(replyEntry?.body).toBe(content);
       expect(replyEntry?.attachments).toBeDefined();
       expect(replyEntry?.attachments?.length).toBe(1);
-      expect(replyEntry?.attachments?.[0].name).toBe("training_ack_20260523.pdf");
+      expect(replyEntry?.attachments?.[0]?.name).toBe("training_ack_20260523.pdf");
     });
 
     it("should synchronize reply to Ops complaint timeline via addComplaintCaseNote and preserve Ops owner (assignee)", async () => {
@@ -295,7 +295,7 @@ describe("SR-FLEET-CASE-001: 車行案件回覆與 Ops timeline 閉環", () => {
 
       // Ops timeline service was called with authoritative prefix
       expect(mockComplaintService.addComplaintCaseNote).toHaveBeenCalledTimes(1);
-      const [calledCaseNo, calledPayload] = mockComplaintService.addComplaintCaseNote.mock.calls[0];
+      const [calledCaseNo, calledPayload] = mockComplaintService.addComplaintCaseNote.mock.calls[0] as [string, any];
       expect(calledCaseNo).toBe("C-20260520-000001");
       expect(calledPayload.note).toContain("[車行回覆 · METRO_FLEET]");
       expect(calledPayload.note).toContain(content);
@@ -369,6 +369,7 @@ describe("SR-FLEET-CASE-001: 車行案件回覆與 Ops timeline 閉環", () => {
           {
             fileName: "late_report.pdf",
             fileSize: 102400,
+            contentType: "application/pdf",
           },
         ),
       ).rejects.toThrow();
@@ -381,6 +382,7 @@ describe("SR-FLEET-CASE-001: 車行案件回覆與 Ops timeline 閉環", () => {
           {
             fileName: "late_report.pdf",
             fileSize: 102400,
+            contentType: "application/pdf",
           },
         );
       } catch (err: any) {

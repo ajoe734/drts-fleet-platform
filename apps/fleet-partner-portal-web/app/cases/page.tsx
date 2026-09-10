@@ -114,7 +114,7 @@ export default async function FleetCasesPage({ searchParams }: CasesPageProps) {
         >
           <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
             <span style={{ fontSize: 12, fontWeight: 600, color: theme.textMuted }}>
-              案件詳情快捷入口：
+              {"案件詳情快捷入口："}
             </span>
             <Link
               href="/cases/cmp_0908"
@@ -132,7 +132,7 @@ export default async function FleetCasesPage({ searchParams }: CasesPageProps) {
               }}
             >
               <CanvasIcon name="complaints" size={12} />
-              cmp_0908 (車行責任·待回覆)
+              {"cmp_0908 (車行責任·待回覆)"}
             </Link>
             <Link
               href="/cases/cmp_0912"
@@ -150,7 +150,7 @@ export default async function FleetCasesPage({ searchParams }: CasesPageProps) {
               }}
             >
               <CanvasIcon name="complaints" size={12} />
-              cmp_0912 (平台責任·唯讀)
+              {"cmp_0912 (平台責任·唯讀)"}
             </Link>
             <Link
               href="/cases/cmp_closed_001"
@@ -168,7 +168,7 @@ export default async function FleetCasesPage({ searchParams }: CasesPageProps) {
               }}
             >
               <CanvasIcon name="complaints" size={12} />
-              cmp_closed_001 (已結案)
+              {"cmp_closed_001 (已結案)"}
             </Link>
           </div>
 
@@ -185,7 +185,7 @@ export default async function FleetCasesPage({ searchParams }: CasesPageProps) {
               }}
             >
               <CanvasIcon name="warn" size={12} />
-              案件錯誤指引
+              {"案件錯誤指引"}
             </Link>
             <span style={{ color: theme.textDim }}>|</span>
             <Link
@@ -200,7 +200,7 @@ export default async function FleetCasesPage({ searchParams }: CasesPageProps) {
               }}
             >
               <CanvasIcon name="audit" size={12} />
-              附件/歷程讀取狀態
+              {"附件/歷程讀取狀態"}
             </Link>
           </div>
         </div>

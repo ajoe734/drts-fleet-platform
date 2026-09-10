@@ -65,15 +65,15 @@ export default function FleetCaseErrorsPage() {
           href="/cases"
           style={{ color: theme.accent, textDecoration: "none" }}
         >
-          事故 / 申訴
+          {"事故 / 申訴"}
         </Link>
         <span style={{ color: theme.textDim }}>/</span>
-        <span style={{ color: theme.text }}>錯誤狀態</span>
+        <span style={{ color: theme.text }}>{"錯誤狀態"}</span>
       </div>
 
       <CanvasPageHeader
         theme={theme}
-        title="案件錯誤 / Edge States"
+        title={"案件錯誤 / Edge States"}
         subtitle="R12 · 每個錯誤皆由 API 決定，UI 僅呈現訊息與後續指引"
       />
 
@@ -97,7 +97,7 @@ export default function FleetCaseErrorsPage() {
               textDecoration: "none",
             }}
           >
-            ← 返回事故 / 申訴列表
+            {"← 返回事故 / 申訴列表"}
           </Link>
           <span style={{ color: theme.textDim }}>|</span>
           <Link
@@ -108,7 +108,7 @@ export default function FleetCaseErrorsPage() {
               textDecoration: "none",
             }}
           >
-            查看附件/歷程讀取狀態
+            {"查看附件/歷程讀取狀態"}
           </Link>
         </div>
 

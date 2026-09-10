@@ -2,7 +2,7 @@
 
 - Status: `ready_for_review`
 - Owner: `Gemini2`
-- Reviewer: `Claude2`
+- Reviewer: `Gemini`
 - Planning Ref: `docs/04-uat/system-remediation-20260906/source/capabilities.json` (`C067`)
 - Source Finding: `docs/04-uat/system-remediation-20260906/source/findings.json` (`R12`)
 - Canonical Canvas: PR #1890 (`SR-FLEET-CASE-001-CANVAS`, commit `8ee0afcce52f4fdbe50bc936c10b04b1d49c8b91`)
@@ -141,4 +141,4 @@ pnpm exec vitest run tests/unit/system-remediation/sr-fleet-case-001/
 
 - 本次修改完整修復 R12/C067 缺口，對齊 PR #1890 規範畫布與螢幕合約。
 - 所有型別檢查與單元測試 100% 通過。
-- 移交審查者：`Claude2`。
+- 移交審查者：`Gemini`。
