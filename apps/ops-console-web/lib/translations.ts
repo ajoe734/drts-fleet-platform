@@ -3397,6 +3397,9 @@ const en = {
   "callcenter.workspace.fresh": "Fresh",
   "callcenter.workspace.healthy": "Healthy",
   "callcenter.workspace.degraded": "Degraded",
+  "callcenter.voiceLedger.loading": "Loading voice metrics…",
+  "callcenter.voiceLedger.staleTitle":
+    "Voice metrics refresh failed — showing last known data",
   "callcenter.kpi.openSessions": "Open call work sessions",
   "callcenter.kpi.pendingCallbacks": "Pending callbacks",
   "callcenter.kpi.recordingGaps": "Recording gaps",
@@ -7756,6 +7759,8 @@ const zh: Record<keyof typeof en, string> = {
   "callcenter.workspace.fresh": "最新",
   "callcenter.workspace.healthy": "健康",
   "callcenter.workspace.degraded": "降級中",
+  "callcenter.voiceLedger.loading": "語音指標載入中…",
+  "callcenter.voiceLedger.staleTitle": "語音指標更新失敗，顯示最後已知資料",
   "callcenter.kpi.openSessions": "進行中的通話工作階段",
   "callcenter.kpi.pendingCallbacks": "待處理回撥",
   "callcenter.kpi.recordingGaps": "錄音缺口",

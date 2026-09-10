@@ -344,6 +344,100 @@ export function deriveDimensionalAlertPresentation(params: {
 }
 
 /**
+ * Minimal transport surface the voice ledger loader depends on. Matches the
+ * subset of `@drts/api-client`'s `ApiClient` actually used here, so the
+ * loader stays testable against a plain mock without importing the full
+ * client.
+ */
+export interface VoiceLedgerClient {
+  get<T>(path: string): Promise<T>;
+  getList<T>(path: string): Promise<T[]>;
+}
+
+export interface VoiceLedgerWindowParams {
+  windowStart: string;
+  windowEnd: string;
+}
+
+/**
+ * Builds the explicit `?windowStart=...&windowEnd=...` query for
+ * `callcenter/voice/metrics/cohort`. `observationWindowClosed` is
+ * deliberately omitted so the backend derives it from `windowEnd` (SA
+ * §10.2) rather than the caller guessing whether the window has closed.
+ */
+export function buildVoiceCohortQuery(params: VoiceLedgerWindowParams): string {
+  const search = new URLSearchParams({
+    windowStart: params.windowStart,
+    windowEnd: params.windowEnd,
+  });
+  return `?${search.toString()}`;
+}
+
+/**
+ * True when `responseRequestId` is not the most recently issued request,
+ * i.e. an earlier in-flight fetch resolved after a newer one and its
+ * result must be discarded rather than overwriting fresher state.
+ */
+export function isStaleVoiceLedgerResponse(
+  latestRequestId: string,
+  responseRequestId: string,
+): boolean {
+  return latestRequestId !== responseRequestId;
+}
+
+export type VoiceLedgerLoadResult =
+  | {
+      ok: true;
+      requestId: string;
+      cohort: UiCohortMetricsView;
+      usageRecords: UiCostLedgerItem[];
+      alerts: VoiceDimensionalAlertWire[];
+    }
+  | {
+      ok: false;
+      requestId: string;
+      error: string;
+    };
+
+/**
+ * The actual data-loading function backing the callcenter page's voice
+ * ledger panel: real typed GET requests against `client`, real response
+ * mapping, and an explicit window binding. Isolated from React so it can be
+ * unit tested with a mocked transport that resolves or rejects like a real
+ * fetch would, instead of only exercising the pure formatters below.
+ */
+export async function loadVoiceLedgerAndAlerts(
+  client: VoiceLedgerClient,
+  requestId: string,
+  windowParams: VoiceLedgerWindowParams,
+): Promise<VoiceLedgerLoadResult> {
+  try {
+    const cohortQuery = buildVoiceCohortQuery(windowParams);
+    const [cohortReport, records, alerts] = await Promise.all([
+      client.get<VoiceCohortMetricsReportWire>(
+        `/api/callcenter/voice/metrics/cohort${cohortQuery}`,
+      ),
+      client.getList<VoiceUsageRecordWire>("/api/callcenter/voice/usage/records"),
+      client.getList<VoiceDimensionalAlertWire>("/api/callcenter/voice/metrics/alerts"),
+    ]);
+
+    return {
+      ok: true,
+      requestId,
+      cohort: mapCohortReportToView(cohortReport),
+      usageRecords: records.map(mapUsageRecordToLedgerItem),
+      alerts,
+    };
+  } catch (error) {
+    return {
+      ok: false,
+      requestId,
+      error: error instanceof Error ? error.message : "unknown_error",
+    };
+  }
+}
+
+/**
  * Derives UI presentation for human callback SLA tracking.
  */
 export function deriveCallbackSlaPresentation(params: {

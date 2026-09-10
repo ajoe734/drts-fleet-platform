@@ -14,7 +14,11 @@ import {
   IdempotencyRepository,
   IdempotencyService,
 } from "../../common/idempotency";
-import { VoiceBookingMetricsService, type CohortEvaluationFilter } from "../../observability/voice-booking-metrics.service";
+import {
+  VoiceBookingMetricsService,
+  deriveObservationWindowClosed,
+  type CohortEvaluationFilter,
+} from "../../observability/voice-booking-metrics.service";
 import {
   VoiceUsageService,
   type ProviderInvoiceLineItem,
@@ -46,10 +50,14 @@ export class VoiceBookingController {
     @Query("observationWindowClosed") observationWindowClosed?: string,
     @Headers("x-request-id") requestId?: string,
   ) {
+    const resolvedWindowEnd = windowEnd ?? new Date().toISOString();
     const filter: CohortEvaluationFilter = {
       windowStart: windowStart ?? new Date(Date.now() - 86400000).toISOString(),
-      windowEnd: windowEnd ?? new Date().toISOString(),
-      observationWindowClosed: observationWindowClosed !== "false",
+      windowEnd: resolvedWindowEnd,
+      observationWindowClosed: deriveObservationWindowClosed(
+        resolvedWindowEnd,
+        observationWindowClosed,
+      ),
       language,
       routeProfileVersion: routeProfileVersion ? Number(routeProfileVersion) : undefined,
       provider,

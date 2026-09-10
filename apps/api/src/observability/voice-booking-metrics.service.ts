@@ -9,6 +9,35 @@ import type {
 import type { VoiceUsageService } from "../modules/voice-booking/voice-usage.service";
 import type { VoiceDispatchProjectionService } from "../modules/voice-booking/voice-dispatch-projection.service";
 
+/**
+ * Minimum time after `windowEnd` before an observation window is treated as
+ * closed for cost-per-dispatch settlement (SA §10.2): recent calls may not
+ * have finished dispatch yet, so closing the window too early would settle
+ * a unit cost against an artificially low denominator.
+ */
+export const OBSERVATION_WINDOW_BUFFER_MS = 15 * 60 * 1000;
+
+/**
+ * Resolves whether a cohort observation window is closed. An explicit
+ * caller-supplied value always wins; when omitted, the window is only
+ * closed once `windowEnd` is more than the buffer in the past. Omission
+ * must NOT default to closed — that would settle unit costs before enough
+ * time has passed for late dispatch outcomes to land (SA §10.2).
+ */
+export function deriveObservationWindowClosed(
+  windowEnd: string,
+  explicit?: string,
+): boolean {
+  if (explicit !== undefined) {
+    return explicit !== "false";
+  }
+  const windowEndMs = new Date(windowEnd).getTime();
+  if (Number.isNaN(windowEndMs)) {
+    return false;
+  }
+  return Date.now() - windowEndMs > OBSERVATION_WINDOW_BUFFER_MS;
+}
+
 export interface VoiceCallMetricRecord {
   callId: string;
   providerCallId: string;

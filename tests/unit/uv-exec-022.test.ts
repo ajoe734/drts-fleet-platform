@@ -18,8 +18,16 @@ import {
   formatVoiceCost,
   deriveCohortMetricsPresentation,
   deriveDimensionalAlertPresentation,
+  buildVoiceCohortQuery,
+  isStaleVoiceLedgerResponse,
+  loadVoiceLedgerAndAlerts,
+  type VoiceLedgerClient,
+  type VoiceCohortMetricsReportWire,
+  type VoiceUsageRecordWire,
+  type VoiceDimensionalAlertWire,
 } from "../../apps/ops-console-web/app/callcenter/callcenter-metrics-ledger";
 import { REALM_COLORS, STATUS_TONES } from "../../packages/ui-tokens/src";
+import { deriveObservationWindowClosed } from "../../apps/api/src/observability/voice-booking-metrics.service";
 
 describe("UV-EXEC-022 All-Call Metrics, Complete Cost Ledger & Dimensional Alerts", () => {
   // ============================================================================
@@ -2390,6 +2398,235 @@ describe("UV-EXEC-022 All-Call Metrics, Complete Cost Ledger & Dimensional Alert
         provider: "rp-shared",
       });
       expect(routingProfileIdAsProvider.allCallCoverage.denominatorRealIngress).toBe(0);
+    });
+  });
+
+  // ============================================================================
+  // Suite 9: Frontend Voice Ledger Loader - Real Transport, Failure & Race
+  // Guarantees (frontend_query_nonzero_and_failure_evidence)
+  // ============================================================================
+  describe("9. Frontend Voice Ledger Loader - Real Transport, Failure & Race Guarantees (frontend_query_nonzero_and_failure_evidence)", () => {
+    function buildCohortWire(
+      overrides: Partial<VoiceCohortMetricsReportWire> = {},
+    ): VoiceCohortMetricsReportWire {
+      return {
+        cohortWindow: {
+          windowStart: "2026-09-09T00:00:00Z",
+          windowEnd: "2026-09-09T23:59:59Z",
+          observationWindowClosed: true,
+        },
+        allCallCoverage: {
+          rate: 0.9,
+          numeratorEnteredAi: 9,
+          denominatorRealIngress: 10,
+        },
+        unattendedEffectiveIntake: { rate: 0.8, numeratorValidIntakes: 8 },
+        unattendedDispatchCompletion: {
+          rate: 0.75,
+          numeratorDriverAcceptedUniqueOrders: 6,
+        },
+        humanTransfer: { rate: 0.1 },
+        errorBooking: { rate: 0.01 },
+        costPerEffectiveIntake: { cost: 12.5 },
+        costPerSuccessfulDispatch: { cost: 16.0, status: "settled" },
+        ...overrides,
+      };
+    }
+
+    const sampleUsageRecords: VoiceUsageRecordWire[] = [
+      {
+        serviceType: "asr",
+        provider: "twm",
+        quantity: 180,
+        billingUnit: "minute",
+        currency: "TWD",
+        estimatedCost: 2.22,
+        unverified: false,
+      },
+    ];
+
+    const sampleAlerts: VoiceDimensionalAlertWire[] = [
+      {
+        alertId: "alert-live-1",
+        alertName: "VoiceCostAnomalySpike",
+        severity: "high",
+        dimensions: {
+          language: "zh-TW",
+          routeProfileVersion: 1,
+          provider: "twm",
+          brandId: "brand-drts-01",
+        },
+        summary: "Cost spike",
+      },
+    ];
+
+    it("loads real non-zero cohort/usage/alert data through typed transport calls bound to an explicit window", async () => {
+      const getCalls: string[] = [];
+      const client: VoiceLedgerClient = {
+        get: vi.fn(async (path: string) => {
+          getCalls.push(path);
+          return buildCohortWire() as any;
+        }),
+        getList: vi.fn(async (path: string) => {
+          if (path.includes("usage/records")) return sampleUsageRecords as any;
+          if (path.includes("metrics/alerts")) return sampleAlerts as any;
+          return [] as any;
+        }),
+      };
+
+      const result = await loadVoiceLedgerAndAlerts(client, "req-1", {
+        windowStart: "2026-09-09T00:00:00Z",
+        windowEnd: "2026-09-09T23:59:59Z",
+      });
+
+      expect(result.ok).toBe(true);
+      if (!result.ok) throw new Error("expected ok result");
+
+      // Non-zero, actually mapped through the real formatters (not a
+      // fabricated report handed directly to a presentation helper).
+      expect(result.requestId).toBe("req-1");
+      expect(result.cohort.totalIngressCalls).toBe(10);
+      expect(result.cohort.driverAcceptedOrdersCount).toBe(6);
+      expect(result.usageRecords.length).toBe(1);
+      expect(result.usageRecords[0]?.serviceType).toBe("asr");
+      expect(result.alerts.length).toBe(1);
+
+      // The cohort request explicitly binds the observation window and
+      // omits observationWindowClosed so the backend derives it (SA §10.2)
+      // instead of the frontend guessing it.
+      expect(getCalls[0]).toContain("windowStart=2026-09-09T00%3A00%3A00Z");
+      expect(getCalls[0]).toContain("windowEnd=2026-09-09T23%3A59%3A59Z");
+      expect(getCalls[0]).not.toContain("observationWindowClosed");
+    });
+
+    it("returns an explicit failure (never a fabricated success) when a refresh fails after a prior success", async () => {
+      const okClient: VoiceLedgerClient = {
+        get: vi.fn(async () => buildCohortWire() as any),
+        getList: vi.fn(async (path: string) =>
+          (path.includes("alerts") ? sampleAlerts : sampleUsageRecords) as any,
+        ),
+      };
+
+      const firstResult = await loadVoiceLedgerAndAlerts(okClient, "req-ok", {
+        windowStart: "2026-09-09T00:00:00Z",
+        windowEnd: "2026-09-09T23:59:59Z",
+      });
+      expect(firstResult.ok).toBe(true);
+
+      const failingClient: VoiceLedgerClient = {
+        get: vi.fn(async () => {
+          throw new Error("upstream 503");
+        }),
+        getList: vi.fn(async () => []),
+      };
+
+      const secondResult = await loadVoiceLedgerAndAlerts(
+        failingClient,
+        "req-fail",
+        {
+          windowStart: "2026-09-09T00:00:00Z",
+          windowEnd: "2026-09-09T23:59:59Z",
+        },
+      );
+
+      expect(secondResult.ok).toBe(false);
+      if (secondResult.ok) throw new Error("expected failure result");
+      expect(secondResult.error).toContain("upstream 503");
+      // A failed result carries no cohort/usageRecords/alerts fields at
+      // all -- the caller (page.tsx) is responsible for retaining the
+      // previous good state plus an explicit stale/error flag, rather
+      // than this loader silently synthesizing a zeroed report.
+      expect("cohort" in secondResult).toBe(false);
+    });
+
+    it("rejects a stale, out-of-order response instead of letting it overwrite fresher state", async () => {
+      // Same-id comparisons: the latest in-flight request is never stale
+      // relative to itself.
+      expect(isStaleVoiceLedgerResponse("req-2", "req-2")).toBe(false);
+      // An older response arriving after a newer request has been issued
+      // must be treated as stale.
+      expect(isStaleVoiceLedgerResponse("req-2", "req-1")).toBe(true);
+
+      // End-to-end: request "req-old" is slow, request "req-new" resolves
+      // first. Mirrors the page's requestId-ref guard against overwriting
+      // state with the older, out-of-order response.
+      let resolveOld: (() => void) | undefined;
+      const oldClient: VoiceLedgerClient = {
+        get: vi.fn(
+          () =>
+            new Promise((resolve) => {
+              resolveOld = () => resolve(buildCohortWire({ allCallCoverage: { rate: 0.1, numeratorEnteredAi: 1, denominatorRealIngress: 100 } }) as any);
+            }),
+        ),
+        getList: vi.fn(async () => []),
+      };
+      const newClient: VoiceLedgerClient = {
+        get: vi.fn(async () => buildCohortWire() as any),
+        getList: vi.fn(async () => []),
+      };
+
+      let latestRequestId = "req-old";
+      const oldPromise = loadVoiceLedgerAndAlerts(oldClient, "req-old", {
+        windowStart: "2026-09-09T00:00:00Z",
+        windowEnd: "2026-09-09T23:59:59Z",
+      });
+
+      latestRequestId = "req-new";
+      const newResult = await loadVoiceLedgerAndAlerts(newClient, "req-new", {
+        windowStart: "2026-09-09T00:00:00Z",
+        windowEnd: "2026-09-09T23:59:59Z",
+      });
+      expect(newResult.ok).toBe(true);
+      if (!newResult.ok) throw new Error("expected ok result");
+      const acceptedFromNew = !isStaleVoiceLedgerResponse(
+        latestRequestId,
+        newResult.requestId,
+      );
+      expect(acceptedFromNew).toBe(true);
+
+      // Now the slow old request finally resolves.
+      resolveOld?.();
+      const oldResult = await oldPromise;
+      expect(oldResult.ok).toBe(true);
+      if (!oldResult.ok) throw new Error("expected ok result");
+      const acceptedFromOld = !isStaleVoiceLedgerResponse(
+        latestRequestId,
+        oldResult.requestId,
+      );
+      // Even though it resolved successfully, its requestId no longer
+      // matches the latest issued request, so it must be discarded.
+      expect(acceptedFromOld).toBe(false);
+    });
+
+    it("derives open-vs-closed observation window from windowEnd + buffer instead of assuming omission means closed", () => {
+      const now = Date.now();
+      const oneHourAgo = new Date(now - 60 * 60 * 1000).toISOString();
+      const oneMinuteAgo = new Date(now - 60 * 1000).toISOString();
+
+      // Explicit values always win.
+      expect(deriveObservationWindowClosed(oneMinuteAgo, "true")).toBe(true);
+      expect(deriveObservationWindowClosed(oneHourAgo, "false")).toBe(false);
+
+      // Omitted: only closed once windowEnd is more than the buffer in the
+      // past. A recently-ended window must stay pending, not silently
+      // closed.
+      expect(deriveObservationWindowClosed(oneHourAgo, undefined)).toBe(true);
+      expect(deriveObservationWindowClosed(oneMinuteAgo, undefined)).toBe(
+        false,
+      );
+    });
+
+    it("builds the cohort query with an explicit window and without a guessed observationWindowClosed", () => {
+      const query = buildVoiceCohortQuery({
+        windowStart: "2026-09-09T00:00:00Z",
+        windowEnd: "2026-09-09T23:59:59Z",
+      });
+
+      expect(query.startsWith("?")).toBe(true);
+      const params = new URLSearchParams(query.slice(1));
+      expect(params.get("windowStart")).toBe("2026-09-09T00:00:00Z");
+      expect(params.get("windowEnd")).toBe("2026-09-09T23:59:59Z");
+      expect(params.has("observationWindowClosed")).toBe(false);
     });
   });
 });

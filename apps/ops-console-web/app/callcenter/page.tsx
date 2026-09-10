@@ -8,6 +8,7 @@ import {
   useDeferredValue,
   useEffect,
   useMemo,
+  useRef,
   useState,
 } from "react";
 import {
@@ -84,13 +85,11 @@ import {
   deriveCallbackSlaPresentation,
   deriveDimensionalAlertPresentation,
   formatVoiceCost,
-  mapCohortReportToView,
-  mapUsageRecordToLedgerItem,
+  isStaleVoiceLedgerResponse,
+  loadVoiceLedgerAndAlerts,
   type UiCohortMetricsView,
   type UiCostLedgerItem,
-  type VoiceCohortMetricsReportWire,
   type VoiceDimensionalAlertWire,
-  type VoiceUsageRecordWire,
 } from "./callcenter-metrics-ledger";
 
 const theme = buildCanvasTheme({
@@ -1081,6 +1080,12 @@ export default function CallcenterPage() {
   const [dimensionalAlerts, setDimensionalAlerts] = useState<
     VoiceDimensionalAlertWire[]
   >([]);
+  const [voiceLedgerStatus, setVoiceLedgerStatus] = useState<
+    "idle" | "loading" | "ready" | "error"
+  >("idle");
+  const [voiceLedgerError, setVoiceLedgerError] = useState<string | null>(null);
+  const [voiceLedgerStale, setVoiceLedgerStale] = useState(false);
+  const voiceLedgerRequestIdRef = useRef<string>("");
   const [loading, setLoading] = useState(true);
   const [query, setQuery] = useState("");
   const [queueView, setQueueView] = useState<QueueView>("sessions");
@@ -1542,43 +1547,51 @@ export default function CallcenterPage() {
   useEffect(() => {
     let cancelled = false;
 
-    async function loadVoiceLedgerAndAlerts() {
-      try {
-        const client = getOpsClient();
-        const [cohortReport, records, alerts] = await Promise.all([
-          client.get<VoiceCohortMetricsReportWire>(
-            "/api/callcenter/voice/metrics/cohort",
-          ),
-          client.getList<VoiceUsageRecordWire>(
-            "/api/callcenter/voice/usage/records",
-          ),
-          client.getList<VoiceDimensionalAlertWire>(
-            "/api/callcenter/voice/metrics/alerts",
-          ),
-        ]);
+    async function refreshVoiceLedgerAndAlerts() {
+      const requestId = createIdempotencyKey("voice-ledger");
+      voiceLedgerRequestIdRef.current = requestId;
+      setVoiceLedgerStatus((current) =>
+        current === "ready" ? current : "loading",
+      );
 
-        if (cancelled) {
-          return;
-        }
-        setServerCohort(mapCohortReportToView(cohortReport));
-        setUsageRecords(records.map(mapUsageRecordToLedgerItem));
-        setDimensionalAlerts(alerts);
-      } catch {
-        // Supplementary raw ledger/alert data: cohortMetrics already falls
-        // back to a client-side computation from `sessions` when server
-        // data is unavailable, so a silent skip (rather than the shared
-        // `error` banner) is intentional here.
-        if (!cancelled) {
-          setServerCohort(null);
-          setUsageRecords([]);
-          setDimensionalAlerts([]);
-        }
+      const windowEnd = new Date();
+      const windowStart = new Date(windowEnd.getTime() - 86400000);
+      const result = await loadVoiceLedgerAndAlerts(getOpsClient(), requestId, {
+        windowStart: windowStart.toISOString(),
+        windowEnd: windowEnd.toISOString(),
+      });
+
+      if (
+        cancelled ||
+        isStaleVoiceLedgerResponse(voiceLedgerRequestIdRef.current, requestId)
+      ) {
+        // A newer refresh already superseded this one (or the effect
+        // unmounted); an older in-flight response must never overwrite
+        // fresher state.
+        return;
       }
+
+      if (result.ok) {
+        setServerCohort(result.cohort);
+        setUsageRecords(result.usageRecords);
+        setDimensionalAlerts(result.alerts);
+        setVoiceLedgerStatus("ready");
+        setVoiceLedgerError(null);
+        setVoiceLedgerStale(false);
+        return;
+      }
+
+      // Keep the last known-good cohort/ledger/alerts data (never fabricate
+      // a fresh-looking zero denominator on a failed refresh) but surface
+      // the failure explicitly instead of silently pretending it succeeded.
+      setVoiceLedgerStatus("error");
+      setVoiceLedgerError(result.error);
+      setVoiceLedgerStale(true);
     }
 
-    void loadVoiceLedgerAndAlerts();
+    void refreshVoiceLedgerAndAlerts();
     const intervalId = window.setInterval(
-      () => void loadVoiceLedgerAndAlerts(),
+      () => void refreshVoiceLedgerAndAlerts(),
       CALLCENTER_REFRESH_INTERVAL_MS,
     );
 
@@ -2094,6 +2107,15 @@ export default function CallcenterPage() {
                   ? t("callcenter.workspace.healthy")
                   : t("callcenter.workspace.degraded")}
               </CanvasPill>
+              {voiceLedgerStatus === "loading" && !serverCohort ? (
+                <CanvasPill theme={theme} tone="info">
+                  {t("callcenter.voiceLedger.loading")}
+                </CanvasPill>
+              ) : voiceLedgerStatus === "error" ? (
+                <CanvasPill theme={theme} tone="warn">
+                  {t("callcenter.voiceLedger.staleTitle")}
+                </CanvasPill>
+              ) : null}
             </div>
           }
         >
@@ -2146,6 +2168,17 @@ export default function CallcenterPage() {
               value={cohortMetrics.costPerEffectiveIntakeFormatted}
             />
           </div>
+          {voiceLedgerStale ? (
+            <div style={{ marginBottom: 16 }}>
+              <CanvasBanner
+                theme={theme}
+                tone="warn"
+                icon="warn"
+                title={t("callcenter.voiceLedger.staleTitle")}
+                body={voiceLedgerError ?? undefined}
+              />
+            </div>
+          ) : null}
           {dimensionalAlerts.length > 0 ? (
             <div
               style={{
