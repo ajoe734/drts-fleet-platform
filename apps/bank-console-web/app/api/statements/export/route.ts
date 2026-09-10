@@ -70,6 +70,23 @@ export async function GET(request: NextRequest) {
     }
 
     const statementData = await loadBankStatementsData(tenant.tenantId, session.role);
+
+    // An upstream denial/outage must be reported explicitly, never rendered
+    // as a silently-empty CSV that could be mistaken for a genuinely empty
+    // statement list for this tenant.
+    if (statementData.degradedMessage) {
+      return NextResponse.json(
+        {
+          ok: false,
+          error: {
+            code: "UPSTREAM_UNAVAILABLE",
+            message: statementData.degradedMessage,
+          },
+        },
+        { status: 503 },
+      );
+    }
+
     const statements = statementData.data.statements;
 
     const csvRows = [

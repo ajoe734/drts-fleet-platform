@@ -196,6 +196,16 @@ export function resolveServerSessionRole(
   };
 }
 
+// Settlement amounts (statement totals, per-trip fare/subsidy/paid figures)
+// are finance data, not operational data. Ops viewers get read-only
+// operational monitoring but no amount visibility, matching the
+// users.roleCard.bank_ops_viewer policy copy. Keep this the single source of
+// truth for amount visibility across statements HTML, CSV export, and
+// artifact downloads so the three surfaces cannot diverge (R15).
+export function canViewSettlementAmounts(role: BankConsoleRole): boolean {
+  return role === "bank_program_admin" || role === "bank_finance";
+}
+
 export function toHomeRole(role: BankConsoleRole): HomeRole {
   if (role === "bank_finance") {
     return "finance";

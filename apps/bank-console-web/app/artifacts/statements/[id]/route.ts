@@ -77,6 +77,22 @@ export async function GET(
     }
 
     const statementData = await loadBankStatementsData(tenant.tenantId, session.role);
+
+    // An upstream denial/outage must be reported explicitly, never
+    // conflated with a genuine 404 ("no such statement exists").
+    if (statementData.degradedMessage) {
+      return NextResponse.json(
+        {
+          ok: false,
+          error: {
+            code: "UPSTREAM_UNAVAILABLE",
+            message: statementData.degradedMessage,
+          },
+        },
+        { status: 503 },
+      );
+    }
+
     const statements = statementData.data.statements;
 
     // Match statement strictly by statementNo, period, or artifact href
