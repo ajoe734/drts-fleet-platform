@@ -58,7 +58,7 @@
     "test:e2e:dev-runtime-matrix": "playwright test -c playwright.dev-runtime-matrix.config.ts",
     "test:e2e:google-map-live": "playwright test -c playwright.google-map-live.config.ts",
     "test:security:iam-negative-matrix": "./tests/security/run-iam-negative-matrix.sh",
-    "test:unit": "vitest run",
+    "test:unit": "vitest run --exclude tests/integration/unattended-voice-postgres.integration.test.ts",
     "typecheck": "pnpm typecheck:root && turbo run typecheck --concurrency=${DRTS_TURBO_CONCURRENCY:-2}",
     "typecheck:root": "tsc -p tsconfig.json --noEmit",
     "verify:internal-key-exceptions": "python3 operations/security/verify-internal-key-exceptions.py"
