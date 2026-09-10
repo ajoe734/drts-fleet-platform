@@ -161,7 +161,7 @@ export class DriverLeaveController {
 
   @Post("requests/:leaveId/review")
   @RequireRealms("ops", "system")
-  @RequireScopes("driver:write")
+  @RequireScopes("dispatch:write")
   async reviewDriverLeave(
     @Param("leaveId") leaveId: string,
     @Body() command: ReviewDriverLeaveCommand,
