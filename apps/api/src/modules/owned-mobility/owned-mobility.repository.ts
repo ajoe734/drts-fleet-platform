@@ -214,6 +214,10 @@ export class OwnedMobilityRepository {
     return this.databaseService?.isEnabled() ?? false;
   }
 
+  isDatabaseEnabled() {
+    return this.isEnabled();
+  }
+
   async findOrderById(orderId: string): Promise<OwnedOrderRecord | null> {
     if (!this.isEnabled()) {
       return null;

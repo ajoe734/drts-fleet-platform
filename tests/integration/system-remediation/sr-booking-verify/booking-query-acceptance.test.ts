@@ -187,6 +187,7 @@ describe("SR-BOOKING-VERIFY Integration Acceptance Suite", () => {
           process.env.DATABASE_URL = dbUrl;
           const dbService = new DatabaseService();
           const repository = new OwnedMobilityRepository(dbService);
+          expect(repository.isEnabled()).toBe(true);
           expect(repository.isDatabaseEnabled()).toBe(true);
 
           const service = new OwnedMobilityService(
