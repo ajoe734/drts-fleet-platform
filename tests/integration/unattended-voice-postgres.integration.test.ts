@@ -20,15 +20,23 @@ import { VoiceSessionRepository } from "../../apps/api/src/modules/voice-booking
 import { VoiceHandoffQueueService } from "../../apps/api/src/modules/callcenter/voice-handoff-queue.service";
 import { CallcenterService } from "../../apps/api/src/modules/callcenter/callcenter.service";
 import { AuditNotificationService } from "../../apps/api/src/modules/audit-notification/audit-notification.service";
+import { AuditLogRepository } from "../../apps/api/src/modules/audit-notification/audit-log.repository";
 import { voiceSnapshotHash } from "../../apps/api/src/modules/voice-booking/voice-confirmation.service";
 import { voiceCommandFixture } from "../support/voice-booking-command-fixture";
-import { OwnedAutonomousDispatchExecutorService } from "../../apps/api/src/modules/owned-mobility/owned-autonomous-dispatch-executor.service";
+import { OwnedMobilityService } from "../../apps/api/src/modules/owned-mobility/owned-mobility.service";
+import { OwnedMobilityTaskEventsService } from "../../apps/api/src/modules/owned-mobility/owned-mobility-task-events.service";
+import { OpsDispatchEventsService } from "../../apps/api/src/common/ops-dispatch-events.service";
 import type { AutonomousDispatchTimeoutCommand } from "@drts/contracts";
 
+// `tests/` is not under apps/api's package.json, so bare npm specifiers for
+// apps/api-only deps (only resolvable relative to apps/api/node_modules)
+// must go through a require() scoped there, same as `pg` below -- a plain
+// `import` would resolve against this file's own (root) node_modules instead.
 const require = createRequire(
   new URL("../../apps/api/package.json", import.meta.url),
 );
 const { Pool } = require("pg") as typeof import("pg");
+const { EventEmitter2 } = require("@nestjs/event-emitter") as typeof import("@nestjs/event-emitter");
 
 // Explicit isolated test database configuration is required (Acceptance 1 / UV-AC-023).
 // Falling back to generic DATABASE_URL or localhost defaults is strictly forbidden.
@@ -71,9 +79,26 @@ describe("UV-EXEC-024 Real PostgreSQL Two-Instance Race & Fault Matrix", () => {
     pool = new Pool({ connectionString: url.toString() });
 
     // Apply baseline schemas and functions
-    await pool.query(`CREATE SCHEMA ops; CREATE SCHEMA crm; CREATE SCHEMA admin;
+    await pool.query(`CREATE SCHEMA ops; CREATE SCHEMA crm; CREATE SCHEMA admin; CREATE SCHEMA core;
       CREATE FUNCTION admin.touch_updated_at() RETURNS trigger LANGUAGE plpgsql AS
-      $$ BEGIN NEW.updated_at = now(); RETURN NEW; END $$;`);
+      $$ BEGIN NEW.updated_at = now(); RETURN NEW; END $$;
+      CREATE TABLE core.tenants (tenant_id uuid PRIMARY KEY);`);
+
+    // Case 4.3 exercises AuditLogRepository (admin.audit_logs) for real
+    // persisted audit evidence; its tenant_id column FKs to core.tenants
+    // (created above as a minimal stub -- this suite has no tenant lifecycle
+    // of its own).
+    const auditLogsSchema = migration(
+      "V0009__admin_reporting_audit_and_integrations.sql",
+    );
+    await pool.query(
+      auditLogsSchema.slice(
+        auditLogsSchema.indexOf("CREATE TABLE IF NOT EXISTS admin.audit_logs"),
+        auditLogsSchema.indexOf(
+          "CREATE TABLE IF NOT EXISTS admin.webhook_endpoints",
+        ),
+      ),
+    );
 
     await pool.query(migration("V0011__phase1_runtime_snapshots.sql"));
 
@@ -84,6 +109,19 @@ describe("UV-EXEC-024 Real PostgreSQL Two-Instance Race & Fault Matrix", () => {
       runtimeColumns.slice(
         runtimeColumns.indexOf("ALTER TABLE ops.phase1_owned_orders"),
         runtimeColumns.indexOf("CREATE INDEX"),
+      ),
+    );
+
+    // Case 4.1 hydrates a real OwnedMobilityService via
+    // OwnedMobilityRepository.loadState(), which also reads these two
+    // tables; without them onModuleInit()'s try/catch would silently no-op
+    // and leave the service's in-memory cache empty.
+    await pool.query(
+      runtimeColumns.slice(
+        runtimeColumns.indexOf(
+          "CREATE TABLE IF NOT EXISTS ops.passenger_dispatch_disclosure_snapshots",
+        ),
+        runtimeColumns.indexOf("CREATE TABLE IF NOT EXISTS billing."),
       ),
     );
 
@@ -135,7 +173,9 @@ describe("UV-EXEC-024 Real PostgreSQL Two-Instance Race & Fault Matrix", () => {
               return (...args: unknown[]) => {
                 try {
                   return (target as any).release(...args);
-                } catch {}
+                } catch {
+                  // client already released/destroyed by an injected crash
+                }
               };
             }
             if (prop === "query") {
@@ -157,7 +197,9 @@ describe("UV-EXEC-024 Real PostgreSQL Two-Instance Race & Fault Matrix", () => {
                   if (injected.crash) {
                     try {
                       (target as any).connection?.stream?.destroy();
-                    } catch {}
+                    } catch {
+                      // stream already gone; injected crash still applies below
+                    }
                   }
                   throw new Error("injected connection loss before write");
                 }
@@ -166,7 +208,9 @@ describe("UV-EXEC-024 Real PostgreSQL Two-Instance Race & Fault Matrix", () => {
                   if (injected.crash) {
                     try {
                       (target as any).connection?.stream?.destroy();
-                    } catch {}
+                    } catch {
+                      // stream already gone; injected crash still applies below
+                    }
                   }
                   throw new Error("injected response loss after write");
                 }
@@ -208,6 +252,47 @@ describe("UV-EXEC-024 Real PostgreSQL Two-Instance Race & Fault Matrix", () => {
         hasOrderWrite = false;
       },
     };
+  }
+
+  // Builds a real OwnedMobilityService + OwnedMobilityRepository wired to
+  // this suite's Postgres pool, for Case 4.1. Each call models an
+  // independent process/pod: after `onModuleInit()` it only knows whatever
+  // is currently committed in the DB (via `OwnedMobilityRepository.loadState()`),
+  // never another instance's in-memory state. Constructor wiring follows the
+  // proven recipe in apps/api/tests/integration/stage1-uat-pg-gate.integration.test.ts
+  // `createHarness`; tenant/vehicle-eligibility/service-product services are
+  // omitted (all `@Optional()`) since this suite never exercises quota or
+  // candidate-selection paths.
+  function createDispatchHarness() {
+    const repository = new OwnedMobilityRepository(
+      { isEnabled: () => true, query: (sql: string, values?: unknown[]) => pool.query(sql, values) } as never,
+    );
+    const auditService = new AuditNotificationService(new AuditLogRepository());
+    const emitter = new EventEmitter2();
+    const taskEvents = new OwnedMobilityTaskEventsService(emitter, {
+      isEnabled: () => true,
+      query: (sql: string, values?: unknown[]) => pool.query(sql, values),
+    } as never);
+    const opsEvents = new OpsDispatchEventsService(emitter, {
+      isEnabled: () => true,
+      query: (sql: string, values?: unknown[]) => pool.query(sql, values),
+    } as never);
+    const service = new OwnedMobilityService(
+      { listVehicles: () => [] } as never,
+      auditService,
+      {
+        registerRecordingAttachmentListener: () => undefined,
+        registerRecordingStateChangeListener: () => undefined,
+      } as never,
+      taskEvents,
+      opsEvents,
+      repository,
+      undefined,
+      undefined,
+      undefined,
+      emitter,
+    );
+    return { repository, service };
   }
 
   interface FixtureOptions {
@@ -1154,6 +1239,7 @@ describe("UV-EXEC-024 Real PostgreSQL Two-Instance Race & Fault Matrix", () => {
   describe("Suite 4: callback_control_race_evidence", () => {
     it("Case 4.1: Late timeout race (UV-AC-047) is safe no-op on already accepted offer or replaced assignment", async () => {
       const orderId = `order-timeout-test-${randomUUID()}`;
+      const now = new Date().toISOString();
       await pool.query(
         `INSERT INTO ops.phase1_owned_orders (
           order_id,order_no,status,order_source,service_bucket,dispatch_semantics,created_at,updated_at,record
@@ -1164,19 +1250,36 @@ describe("UV-EXEC-024 Real PostgreSQL Two-Instance Race & Fault Matrix", () => {
       const driverId = `driver-${randomUUID().slice(0, 8)}`;
       const vehicleId = `vehicle-${randomUUID().slice(0, 8)}`;
       const assign1Id = randomUUID();
+      const dispatchJob1Id = randomUUID();
+      const task1Id = randomUUID();
       const groupId = randomUUID();
 
-      // Seed real DB rows for Assignment 1 (accepted) and occupied reservation within one transaction
+      // Seed real DB rows for Assignment 1 (accepted) and occupied reservation within one transaction.
+      // The `record` jsonb column is the sole source OwnedMobilityRepository.loadState() hydrates
+      // from (see parseRecord()), so it must mirror what a real writer would have persisted --
+      // not just the indexed SQL columns.
       const client = await pool.connect();
       try {
         await client.query("BEGIN");
         await client.query(
           `INSERT INTO ops.phase1_dispatch_assignments (assignment_id, dispatch_job_id, order_id, task_id, status, created_at, updated_at, record)
-           VALUES ($1, gen_random_uuid(), $2, gen_random_uuid(), 'accepted', now(), now(), $3::jsonb)`,
+           VALUES ($1, $2, $3, $4, 'accepted', now(), now(), $5::jsonb)`,
           [
             assign1Id,
+            dispatchJob1Id,
             orderId,
-            JSON.stringify({ driverId, vehicleId, status: "accepted" }),
+            task1Id,
+            JSON.stringify({
+              assignmentId: assign1Id,
+              dispatchJobId: dispatchJob1Id,
+              orderId,
+              taskId: task1Id,
+              driverId,
+              vehicleId,
+              status: "accepted",
+              createdAt: now,
+              updatedAt: now,
+            }),
           ],
         );
         await client.query(
@@ -1192,32 +1295,24 @@ describe("UV-EXEC-024 Real PostgreSQL Two-Instance Race & Fault Matrix", () => {
         client.release();
       }
 
-      // Real OwnedMobilityService reading from DB
-      const mockOwnedMobilityService: any = {
-        getActiveDispatchAssignmentForOrder: (oid: string) => {
-          return {
-            assignmentId: assign1Id,
-            status: "accepted",
-            orderId: oid,
-          };
-        },
-      };
-
-      const dispatchExecutor1 = new OwnedAutonomousDispatchExecutorService(
-        mockOwnedMobilityService,
-      );
+      // Instance B: an independent process that only knows what onModuleInit()
+      // reads back from Postgres (UV-EXEC-024 review: no hardcoded mock answer).
+      const harnessB1 = createDispatchHarness();
+      await harnessB1.service.onModuleInit();
 
       // Driver accepted Offer 1 (assign1Id). Late timeout for Offer 1 arrives:
       const timeoutCmdA: AutonomousDispatchTimeoutCommand = {
         orderId,
-        targetJobId: "job-001",
+        targetJobId: dispatchJob1Id,
         round: 1,
         targetAssignmentId: assign1Id,
         assignmentVersion: 1,
         acceptanceDeadline: new Date(Date.now() - 5000).toISOString(),
       };
 
-      const resultA = await dispatchExecutor1.handleOfferTimeout(timeoutCmdA);
+      const resultA = await harnessB1.service
+        .getAutonomousDispatchExecutor()
+        .handleOfferTimeout(timeoutCmdA);
       expect(resultA.outcome).toBe("superseded_or_no_op");
       expect(resultA.reason).toBe("offer_already_accepted");
 
@@ -1234,8 +1329,11 @@ describe("UV-EXEC-024 Real PostgreSQL Two-Instance Race & Fault Matrix", () => {
       );
       expect(dbOrder.rows[0].status).toBe("driver_accepted");
 
-      // Scenario B: Offer 1 was replaced by Offer 2
+      // Scenario B: Offer 1 was replaced by Offer 2 (real writer: cancel + release,
+      // then a fresh assignment + reservation for the same order).
       const assign2Id = randomUUID();
+      const dispatchJob2Id = randomUUID();
+      const task2Id = randomUUID();
       const group2Id = randomUUID();
       const client2 = await pool.connect();
       try {
@@ -1250,11 +1348,23 @@ describe("UV-EXEC-024 Real PostgreSQL Two-Instance Race & Fault Matrix", () => {
         );
         await client2.query(
           `INSERT INTO ops.phase1_dispatch_assignments (assignment_id, dispatch_job_id, order_id, task_id, status, created_at, updated_at, record)
-           VALUES ($1, gen_random_uuid(), $2, gen_random_uuid(), 'assigned', now(), now(), $3::jsonb)`,
+           VALUES ($1, $2, $3, $4, 'assigned', now(), now(), $5::jsonb)`,
           [
             assign2Id,
+            dispatchJob2Id,
             orderId,
-            JSON.stringify({ driverId, vehicleId, status: "assigned" }),
+            task2Id,
+            JSON.stringify({
+              assignmentId: assign2Id,
+              dispatchJobId: dispatchJob2Id,
+              orderId,
+              taskId: task2Id,
+              driverId,
+              vehicleId,
+              status: "assigned",
+              createdAt: new Date().toISOString(),
+              updatedAt: new Date().toISOString(),
+            }),
           ],
         );
         await client2.query(
@@ -1270,20 +1380,16 @@ describe("UV-EXEC-024 Real PostgreSQL Two-Instance Race & Fault Matrix", () => {
         client2.release();
       }
 
-      const mockReplacedService: any = {
-        getActiveDispatchAssignmentForOrder: () => ({
-          assignmentId: assign2Id,
-          status: "assigned",
-          orderId,
-        }),
-      };
-      const dispatchExecutor2 = new OwnedAutonomousDispatchExecutorService(
-        mockReplacedService,
-      );
+      // Instance B2: a second independent hydration, taken AFTER the replace lands
+      // in Postgres -- models a pod that boots (or resyncs) after the reassign and
+      // correctly observes the new assignment via a real DB read, not a fed answer.
+      const harnessB2 = createDispatchHarness();
+      await harnessB2.service.onModuleInit();
 
       // Late timeout for superseded Offer 1 arrives:
-      const resultLate =
-        await dispatchExecutor2.handleOfferTimeout(timeoutCmdA);
+      const resultLate = await harnessB2.service
+        .getAutonomousDispatchExecutor()
+        .handleOfferTimeout(timeoutCmdA);
       expect(resultLate.outcome).toBe("superseded_or_no_op");
       expect(resultLate.reason).toBe("superseded_by_newer_assignment");
 
@@ -1293,11 +1399,29 @@ describe("UV-EXEC-024 Real PostgreSQL Two-Instance Race & Fault Matrix", () => {
         [assign2Id],
       );
       expect(dbAssign2.rows[0].status).toBe("assigned");
+
+      const dbGroup2Reservations = await pool.query<{ status: string }>(
+        "SELECT status FROM ops.dispatch_resource_reservations WHERE reservation_group_id = $1",
+        [group2Id],
+      );
+      expect(dbGroup2Reservations.rows.every((r) => r.status === "held")).toBe(
+        true,
+      );
     });
 
     it("Case 4.2: Callback cancel vs complete race (UV-AC-046) enforces terminal immutability and outcall fencing", async () => {
       const f = await seedVoiceFixture();
       const taskId = randomUUID();
+
+      // Instance A and Instance B are real VoiceCallbackService objects, each
+      // wired to the same Postgres pool via its own DatabaseService, driving
+      // the CAS terminal-state fencing through completeCallbackDurable /
+      // cancelCallbackDurable (UV-EXEC-024: real service, not test-written
+      // UPDATE predicates supplying their own guard).
+      const instA = createInstance();
+      const instB = createInstance();
+      const callbackSvcA = new VoiceCallbackService(undefined, instA.database);
+      const callbackSvcB = new VoiceCallbackService(undefined, instB.database);
 
       // Seed real callback task in voice.callback_task
       await pool.query(
@@ -1308,16 +1432,14 @@ describe("UV-EXEC-024 Real PostgreSQL Two-Instance Race & Fault Matrix", () => {
         [taskId, f.request.voiceSessionId, f.scopeId],
       );
 
-      // Operator completes task (Instance A) via CAS
-      const completeRes = await pool.query(
-        `UPDATE voice.callback_task
-         SET status = 'completed', version = version + 1, updated_at = now()
-         WHERE task_id = $1 AND version = 1 AND status NOT IN ('completed', 'cancelled', 'unreachable')
-         RETURNING *`,
-        [taskId],
-      );
-      expect(completeRes.rowCount).toBe(1);
-      expect(completeRes.rows[0].status).toBe("completed");
+      // Operator completes task (Instance A) via the real service's DB CAS
+      const completeRes = await callbackSvcA.completeCallbackDurable({
+        taskId,
+        operatorId: "op-001",
+        expectedVersion: 1,
+      });
+      expect(completeRes.status).toBe("completed");
+      expect(completeRes.replayed).toBe(false);
 
       // Record successful outcall attempt in voice.callback_attempt
       await pool.query(
@@ -1327,16 +1449,16 @@ describe("UV-EXEC-024 Real PostgreSQL Two-Instance Race & Fault Matrix", () => {
         [taskId],
       );
 
-      // Competing cancellation (Instance B) attempts to cancel already completed task
-      // Terminal state CAS: cannot cancel a completed task
-      const cancelAttempt = await pool.query(
-        `UPDATE voice.callback_task
-         SET status = 'cancelled', version = version + 1, updated_at = now()
-         WHERE task_id = $1 AND status NOT IN ('completed', 'cancelled', 'unreachable')
-         RETURNING *`,
-        [taskId],
-      );
-      expect(cancelAttempt.rowCount).toBe(0);
+      // Competing cancellation (Instance B) attempts to cancel the already
+      // completed task through the real service. Terminal state CAS: cannot
+      // cancel a completed task.
+      await expect(
+        callbackSvcB.cancelCallbackDurable({
+          taskId,
+          reason: "customer_requested_after_completion",
+          expectedVersion: 2,
+        }),
+      ).rejects.toMatchObject({ code: "CALLBACK_TERMINAL_RACE_CONFLICT" });
 
       // Verify DB final state remains completed
       const checkTask1 = await pool.query(
@@ -1345,6 +1467,58 @@ describe("UV-EXEC-024 Real PostgreSQL Two-Instance Race & Fault Matrix", () => {
       );
       expect(checkTask1.rows[0].status).toBe("completed");
       expect(checkTask1.rows[0].version).toBe(2);
+
+      // Scenario 1b: a genuine concurrent barrier -- fire complete (A) and
+      // cancel (B) at the same time via Promise.allSettled on a fresh task,
+      // rather than sequential awaits, so Postgres's own row lock (not test
+      // ordering) decides the winner. Exactly one must land; the loser must
+      // observe the real winning terminal state, not its own stale guess.
+      const task1bId = randomUUID();
+      await pool.query(
+        `INSERT INTO voice.callback_task (
+          task_id, voice_session_id, contact_phone_encrypted, contact_phone_lookup_token,
+          consent_snapshot_hash, status, reason, resource_scope_id, version
+         ) VALUES ($1, $2, 'enc-0913000000', 'lookup-0913', 'consent-hash-1b', 'pending', 'concurrent race', $3, 1)`,
+        [task1bId, f.request.voiceSessionId, f.scopeId],
+      );
+
+      const [raceComplete, raceCancel] = await Promise.allSettled([
+        callbackSvcA.completeCallbackDurable({
+          taskId: task1bId,
+          operatorId: "op-003",
+          expectedVersion: 1,
+        }),
+        callbackSvcB.cancelCallbackDurable({
+          taskId: task1bId,
+          reason: "concurrent_customer_cancel",
+          expectedVersion: 1,
+        }),
+      ]);
+
+      const settled = [raceComplete, raceCancel];
+      const fulfilled = settled.filter((r) => r.status === "fulfilled");
+      const rejected = settled.filter((r) => r.status === "rejected");
+      expect(fulfilled.length).toBe(1);
+      expect(rejected.length).toBe(1);
+      expect(
+        (rejected[0] as PromiseRejectedResult).reason?.code,
+      ).toBe("CALLBACK_TERMINAL_RACE_CONFLICT");
+
+      const task1bFinal = await pool.query(
+        "SELECT status, version FROM voice.callback_task WHERE task_id = $1",
+        [task1bId],
+      );
+      // Whichever of complete/cancel won, exactly one terminal write landed
+      // (version 2), and the fulfilled promise's own reported status agrees
+      // with the persisted row -- proving the winner was determined by the
+      // real DB CAS, not by which call happened to be issued first.
+      expect(["completed", "cancelled"]).toContain(task1bFinal.rows[0].status);
+      expect(task1bFinal.rows[0].version).toBe(2);
+      if (raceComplete.status === "fulfilled") {
+        expect(task1bFinal.rows[0].status).toBe("completed");
+      } else {
+        expect(task1bFinal.rows[0].status).toBe("cancelled");
+      }
 
       // Scenario 2: Cancel first with outcall fencing
       const session2Id = randomUUID();
@@ -1396,16 +1570,14 @@ describe("UV-EXEC-024 Real PostgreSQL Two-Instance Race & Fault Matrix", () => {
         [task2Id, session2Id, f.scopeId],
       );
 
-      // Customer cancels task (Instance B)
-      const cancelRes = await pool.query(
-        `UPDATE voice.callback_task
-         SET status = 'cancelled', reason = 'customer hung up', version = version + 1, updated_at = now()
-         WHERE task_id = $1 AND status NOT IN ('completed', 'cancelled', 'unreachable')
-         RETURNING *`,
-        [task2Id],
-      );
-      expect(cancelRes.rowCount).toBe(1);
-      expect(cancelRes.rows[0].status).toBe("cancelled");
+      // Customer cancels task (Instance B) through the real service
+      const cancelRes = await callbackSvcB.cancelCallbackDurable({
+        taskId: task2Id,
+        reason: "customer hung up",
+        expectedVersion: 1,
+      });
+      expect(cancelRes.status).toBe("cancelled");
+      expect(cancelRes.replayed).toBe(false);
 
       // In-flight outcall attempts to complete / resurrect the task (Instance A)
       // Outcall attempt history is logged in voice.callback_attempt
@@ -1416,15 +1588,22 @@ describe("UV-EXEC-024 Real PostgreSQL Two-Instance Race & Fault Matrix", () => {
         [task2Id],
       );
 
-      // But the outcall write MUST NOT resurrect the task to active/completed in voice.callback_task
-      const resurrectAttempt = await pool.query(
-        `UPDATE voice.callback_task
-         SET status = 'completed', version = version + 1, updated_at = now()
-         WHERE task_id = $1 AND status NOT IN ('completed', 'cancelled', 'unreachable')
-         RETURNING *`,
+      // But the outcall write MUST NOT resurrect the task to active/completed,
+      // again through the real service (not a test-supplied UPDATE predicate).
+      await expect(
+        callbackSvcA.completeCallbackDurable({
+          taskId: task2Id,
+          operatorId: "op-002",
+          expectedVersion: 2,
+        }),
+      ).rejects.toMatchObject({ code: "CALLBACK_TERMINAL_RACE_CONFLICT" });
+
+      const task2Final = await pool.query(
+        "SELECT status, version FROM voice.callback_task WHERE task_id = $1",
         [task2Id],
       );
-      expect(resurrectAttempt.rowCount).toBe(0);
+      expect(task2Final.rows[0].status).toBe("cancelled");
+      expect(task2Final.rows[0].version).toBe(2);
 
       // Scenario 3: Call closed does not abort pending callback (SD §12.5)
       const task3Id = randomUUID();
@@ -1491,6 +1670,12 @@ describe("UV-EXEC-024 Real PostgreSQL Two-Instance Race & Fault Matrix", () => {
       const f = await seedVoiceFixture();
       const instA = createInstance();
       const instB = createInstance();
+      // admin.audit_logs.tenant_id FKs to core.tenants; this suite has no
+      // tenant lifecycle of its own, so seed the one row this session's
+      // resource_scope_id will be recorded under.
+      await pool.query("INSERT INTO core.tenants (tenant_id) VALUES ($1)", [
+        f.scopeId,
+      ]);
 
       const cmdA = new VoiceBookingCommandService(
         instA.repository,
@@ -1500,35 +1685,77 @@ describe("UV-EXEC-024 Real PostgreSQL Two-Instance Race & Fault Matrix", () => {
         f.access,
       );
 
+      const auditServiceB = new AuditNotificationService(
+        new AuditLogRepository(instB.database),
+      );
       const handoffServiceB = new VoiceHandoffService(
         instB.sessionRepository,
         {} as any,
         instB.repository,
         new VoiceHandoffQueueService(),
+        auditServiceB,
       );
 
-      // Competing schedule: Instance B initiates handoff while Instance A holds stale lease epoch 1
-      const handoffRes = await handoffServiceB.initiateHandoff({
-        voiceSessionId: f.request.voiceSessionId,
-        expectedSessionVersion: 1,
-        expectedLeaseEpoch: 1,
-        reason: "passenger requested human operator",
-      });
+      // Genuine concurrency (UV-EXEC-024 review: "never overlaps confirm/handoff
+      // or tests confirm-first"): fire the handoff and the competing AI accept
+      // at the same stale epoch without sequentially awaiting either first.
+      // Both re-validate ownership under a real row lock at commit time --
+      // initiateHandoff's CAS UPDATE, acceptNew's `FOR UPDATE` lockVoiceCommand
+      // -- so whichever transaction's write actually lands first at Postgres
+      // decides the other's fate; either ordering is individually valid.
+      const [handoffSettled, acceptSettled] = await Promise.allSettled([
+        handoffServiceB.initiateHandoff({
+          voiceSessionId: f.request.voiceSessionId,
+          expectedSessionVersion: 1,
+          expectedLeaseEpoch: 1,
+          reason: "passenger requested human operator",
+        }),
+        cmdA.accept("test-cred-a", {
+          ...f.request,
+          leaseEpoch: 1, // Stale once/if handoff wins the race
+        }),
+      ]);
+
+      let handoffRes: Extract<
+        typeof handoffSettled,
+        { status: "fulfilled" }
+      >["value"];
+      if (handoffSettled.status === "fulfilled") {
+        // Handoff-first: the concurrently-racing AI accept lost and must be
+        // rejected once handoff's epoch bump is visible to it.
+        handoffRes = handoffSettled.value;
+        expect(acceptSettled.status).toBe("rejected");
+        if (acceptSettled.status === "rejected") {
+          expect(acceptSettled.reason).toBeInstanceOf(VoiceBookingRejection);
+        }
+        // No order or receipt was committed by the AI actor in this ordering.
+        const counts = await getCounts(f.request.intentId);
+        expect(counts.orders).toBe(0);
+        expect(counts.receipts).toBe(0);
+      } else {
+        // Confirm-first: accept's transaction committed before handoff's CAS
+        // landed, so handoff legitimately lost the race and must be retried
+        // against the now-current session state -- exactly what a real
+        // coordinator client does on a 409 VOICE_SESSION_NOT_OWNER.
+        expect(acceptSettled.status).toBe("fulfilled");
+        const current = await instB.repository.findSessionById(
+          f.request.voiceSessionId,
+        );
+        handoffRes = await handoffServiceB.initiateHandoff({
+          voiceSessionId: f.request.voiceSessionId,
+          expectedSessionVersion: current!.sessionVersion,
+          expectedLeaseEpoch: current!.leaseEpoch,
+          reason: "passenger requested human operator",
+        });
+      }
 
       expect(["coordinator", "handoff"]).toContain(
         handoffRes.session.controlOwner,
       );
-      expect(handoffRes.session.leaseEpoch).toBe(2);
 
-      // Concurrently, competing AI actor at lease epoch 1 attempts to accept booking command
-      await expect(
-        cmdA.accept("test-cred-a", {
-          ...f.request,
-          leaseEpoch: 1, // Stale epoch before handoff
-        }),
-      ).rejects.toThrow(VoiceBookingRejection);
-
-      // Concurrently, late AI tool result arrives from old worker at lease epoch 1
+      // Regardless of which ordering actually occurred, control has now moved
+      // past the AI worker's original epoch 1 -- its stale tool result must be
+      // discarded and durably audited (not just returned in-process).
       const lateAiResult = await handoffServiceB.handleLateAiToolResult({
         voiceSessionId: f.request.voiceSessionId,
         leaseEpoch: 1,
@@ -1539,23 +1766,37 @@ describe("UV-EXEC-024 Real PostgreSQL Two-Instance Race & Fault Matrix", () => {
       expect(lateAiResult.accepted).toBe(false);
       expect(lateAiResult.audited).toBe(true);
       expect(lateAiResult.reason).toBe("session_handed_off_owner_changed");
+      expect(lateAiResult.auditEventId).toBeTruthy();
 
       // Verify in PostgreSQL:
-      // 1. Session control is locked to coordinator with lease_epoch 2
+      // 1. Session control is locked to coordinator/handoff, past epoch 1
       const sessionRow = await pool.query(
-        "SELECT control_owner, lease_epoch, dialog_state, session_version FROM voice.session WHERE voice_session_id = $1",
+        "SELECT control_owner, lease_epoch, dialog_state FROM voice.session WHERE voice_session_id = $1",
         [f.request.voiceSessionId],
       );
-      expect(sessionRow.rows[0].control_owner).toBe("handoff");
-      expect(sessionRow.rows[0].lease_epoch).toBe(2);
-      expect(sessionRow.rows[0].dialog_state).toBe("handoff_pending");
+      expect(["coordinator", "handoff"]).toContain(
+        sessionRow.rows[0].control_owner,
+      );
+      expect(sessionRow.rows[0].lease_epoch).toBeGreaterThan(1);
 
-      // 2. No order or receipt was committed by the stale AI worker
-      const counts = await getCounts(f.request.intentId);
-      expect(counts.orders).toBe(0);
-      expect(counts.receipts).toBe(0);
+      // 2. The discarded late AI tool result was durably persisted to
+      // admin.audit_logs -- the real DB write the prior review found missing.
+      const auditRow = await pool.query(
+        "SELECT action_name, resource_id, new_value FROM admin.audit_logs WHERE audit_id = $1",
+        [lateAiResult.auditEventId],
+      );
+      expect(auditRow.rowCount).toBe(1);
+      expect(auditRow.rows[0].action_name).toBe(
+        "late_ai_tool_result_discarded",
+      );
+      expect(auditRow.rows[0].resource_id).toBe(f.request.voiceSessionId);
+      expect(auditRow.rows[0].new_value).toMatchObject({
+        reason: "session_handed_off_owner_changed",
+        toolName: "confirm_booking_tool",
+        callingLeaseEpoch: 1,
+      });
 
-      // 3. Confirmation remains accepted, not consumed
+      // 3. Confirmation remains accepted, not consumed by the stale AI worker
       const confRow = await pool.query(
         "SELECT state FROM voice.confirmation WHERE confirmation_id = $1",
         [f.request.confirmationId],

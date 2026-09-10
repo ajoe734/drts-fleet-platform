@@ -364,9 +364,13 @@ export class VoiceHandoffService {
       // The session has been handed off to coordinator or human agent!
       // Must NOT execute any command, mutate draft, or affect order.
       // Safely record to audit log for compliance and auditability.
+      // `audited` must reflect a durable write, not merely an in-memory
+      // append: use recordAuditLogAsync (persists via AuditLogRepository
+      // when DB-backed) and only claim `audited: true` once that resolves.
       const auditEventId = randomUUID();
+      let audited = false;
       if (this.auditService) {
-        this.auditService.recordAuditLog({
+        await this.auditService.recordAuditLogAsync({
           auditId: auditEventId,
           tenantId: session.resourceScopeId,
           moduleName: "voice_booking",
@@ -384,13 +388,14 @@ export class VoiceHandoffService {
             toolResult: command.toolResult,
           },
         });
+        audited = true;
       }
 
       return {
         accepted: false,
-        audited: true,
+        audited,
         reason: "session_handed_off_owner_changed",
-        auditEventId,
+        ...(audited ? { auditEventId } : {}),
       };
     }
 
