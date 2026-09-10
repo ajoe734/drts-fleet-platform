@@ -68,14 +68,13 @@ describe("SR-OPS-SHELL-001: Cross-App Platform Admin & Audit Link Resolution", (
 
   it("resolves browser localhost window location to port 3002", () => {
     const originalWindow = globalThis.window;
-    // @ts-expect-error mock window
     globalThis.window = {
       location: {
         hostname: "localhost",
         protocol: "http:",
         port: "3003",
       },
-    };
+    } as unknown as Window & typeof globalThis;
 
     try {
       const origin = resolvePlatformAdminOrigin();
@@ -87,14 +86,13 @@ describe("SR-OPS-SHELL-001: Cross-App Platform Admin & Audit Link Resolution", (
 
   it("resolves browser domain ops.example.com to platform-admin.example.com", () => {
     const originalWindow = globalThis.window;
-    // @ts-expect-error mock window
     globalThis.window = {
       location: {
         hostname: "ops.fleet-mobility.test",
         protocol: "https:",
         port: "",
       },
-    };
+    } as unknown as Window & typeof globalThis;
 
     try {
       const origin = resolvePlatformAdminOrigin();
@@ -174,8 +172,8 @@ describe("SR-OPS-SHELL-001: Cross-App Platform Admin & Audit Link Resolution", (
       },
       health: {
         status: "healthy",
-        lastChecked: "2026-09-06T06:00:00Z",
-        services: {},
+        lastCheckedAt: "2026-09-06T06:00:00Z",
+        degradedServices: [],
       },
       locale: "en",
     };
@@ -345,11 +343,10 @@ describe("SR-OPS-SHELL-001: OpsShell Link Interception & Keyboard Focus Return",
     const origin = resolvePlatformAdminOrigin();
     const openSpy = vi.fn();
     const originalOpen = globalThis.window?.open;
-    // @ts-expect-error mock window
     globalThis.window = {
       open: openSpy,
       location: { hostname: "localhost", protocol: "http:", port: "3003" },
-    };
+    } as unknown as Window & typeof globalThis;
 
     try {
       // Simulate the handleClickCapture logic in ops-shell.tsx
@@ -376,11 +373,10 @@ describe("SR-OPS-SHELL-001: OpsShell Link Interception & Keyboard Focus Return",
   it("OpsShell link interception handles /_apps/platform-admin/payments", () => {
     const origin = resolvePlatformAdminOrigin();
     const openSpy = vi.fn();
-    // @ts-expect-error mock window
     globalThis.window = {
       open: openSpy,
       location: { hostname: "localhost", protocol: "http:", port: "3003" },
-    };
+    } as unknown as Window & typeof globalThis;
 
     try {
       const href = "/_apps/platform-admin/payments";
@@ -655,7 +651,7 @@ describe("SR-OPS-SHELL-001: Platform Admin Audit Receiver Context & Filtering", 
     expect(result.isFiltered).toBe(true);
     expect(result.isContextualEmpty).toBe(false);
     expect(result.filteredRecords).toHaveLength(1);
-    expect(result.filteredRecords[0].auditId).toBe("aud-001");
+    expect(result.filteredRecords[0]?.auditId).toBe("aud-001");
   });
 
   it("filterAuditRecords yields contextual empty state on unknown/no-match", () => {

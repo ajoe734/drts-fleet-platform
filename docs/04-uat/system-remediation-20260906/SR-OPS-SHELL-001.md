@@ -185,7 +185,7 @@ $ git diff --check
 Per repository policy:
 > VM restriction: supervisor/workers may run repository checks, but must not start product development servers, preview/browser test servers, or Docker Compose infrastructure here. Do not run `pnpm exec playwright`, `playwright test`, `pnpm dev`, or `docker compose`; if a task requires a running environment, record the concrete blocker instead.
 
-- **Local Verification**: All 42 unit tests, Next.js route generation and TypeScript checks for both `@drts/ops-console-web` and `@drts/platform-admin-web`, ESLint checks, i18n-guard scans, and CI workflow contract tests ran and passed cleanly with exit code 0.
+- **Local Verification**: All 49 unit tests, Next.js route generation and TypeScript checks for both `@drts/ops-console-web` and `@drts/platform-admin-web`, ESLint checks, i18n-guard scans, and CI workflow contract tests ran and passed cleanly with exit code 0.
 - **Remote Acceptance**: The required acceptance checks (`ops_cross_app_resource_navigation`, `ops_widget_remote_viewport_keyboard`) are packaged in `.github/workflows/ops-shell-acceptance.yml` and `tests/e2e/system-remediation/sr-ops-shell-001/ops-shell-acceptance.spec.ts` for GitHub-hosted execution against the candidate commit SHA. They remain open until executed in GitHub Actions.
 
 ---

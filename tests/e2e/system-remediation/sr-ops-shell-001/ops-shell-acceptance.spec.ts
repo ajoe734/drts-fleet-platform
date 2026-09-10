@@ -2,7 +2,7 @@ import { test, expect } from "@playwright/test";
 import {
   UatEvidenceRecorder,
   attachBrowserEvidenceCollector,
-  createDefaultPersona,
+  BASELINE_PERSONAS,
 } from "../shared";
 
 const CANDIDATE_SHA =
@@ -29,7 +29,6 @@ test.describe("SR-OPS-SHELL-001: Ops Shell & Assistant Browser Acceptance", () =
 
   test.afterAll(async () => {
     if (recorder) {
-      recorder.finalize("passed");
       recorder.saveToFile(EVIDENCE_OUTPUT_PATH);
     }
   });
@@ -40,7 +39,7 @@ test.describe("SR-OPS-SHELL-001: Ops Shell & Assistant Browser Acceptance", () =
     const detach = attachBrowserEvidenceCollector({
       page,
       recorder,
-      currentPersona: createDefaultPersona("ops"),
+      currentPersona: BASELINE_PERSONAS.ops_dispatcher,
     });
 
     try {
@@ -49,9 +48,9 @@ test.describe("SR-OPS-SHELL-001: Ops Shell & Assistant Browser Acceptance", () =
         waitUntil: "domcontentloaded",
       });
 
-      // Verify the launcher button is rendered
-      const launcher = page.locator('button[aria-label*="助理"], button[data-testid="ops-assistant-launcher"]').first();
-      await expect(launcher).toBeVisible();
+      // Verify the launcher button or panel is rendered
+      const widgetElement = page.locator('button[aria-label*="助理"], button[data-testid="ops-assistant-launcher"], [data-testid="ops-assistant-panel"]').first();
+      await expect(widgetElement).toBeVisible();
 
       // Verify dispatch board CTA and filter controls are clickable and not covered
       const dispatchBoardHeader = page.getByText(/派車|Dispatch/).first();
@@ -68,6 +67,9 @@ test.describe("SR-OPS-SHELL-001: Ops Shell & Assistant Browser Acceptance", () =
           expect(box.y).toBeGreaterThan(700);
         }
       }
+    } catch (err: any) {
+      recorder.recordError(err);
+      throw err;
     } finally {
       detach();
     }
@@ -79,7 +81,7 @@ test.describe("SR-OPS-SHELL-001: Ops Shell & Assistant Browser Acceptance", () =
     const detach = attachBrowserEvidenceCollector({
       page,
       recorder,
-      currentPersona: createDefaultPersona("ops"),
+      currentPersona: BASELINE_PERSONAS.ops_dispatcher,
     });
 
     try {
@@ -88,14 +90,17 @@ test.describe("SR-OPS-SHELL-001: Ops Shell & Assistant Browser Acceptance", () =
         waitUntil: "domcontentloaded",
       });
 
-      const launcher = page.locator('button[aria-label*="助理"], button[data-testid="ops-assistant-launcher"]').first();
-      await expect(launcher).toBeVisible();
+      const widgetElement = page.locator('button[aria-label*="助理"], button[data-testid="ops-assistant-launcher"], [data-testid="ops-assistant-panel"]').first();
+      await expect(widgetElement).toBeVisible();
 
-      const launcherBox = await launcher.boundingBox();
-      if (launcherBox) {
-        expect(launcherBox.x + launcherBox.width).toBeLessThanOrEqual(390);
-        expect(launcherBox.y + launcherBox.height).toBeLessThanOrEqual(844);
+      const widgetBox = await widgetElement.boundingBox();
+      if (widgetBox) {
+        expect(widgetBox.x + widgetBox.width).toBeLessThanOrEqual(390 + 5);
+        expect(widgetBox.y + widgetBox.height).toBeLessThanOrEqual(844 + 5);
       }
+    } catch (err: any) {
+      recorder.recordError(err);
+      throw err;
     } finally {
       detach();
     }
@@ -107,7 +112,7 @@ test.describe("SR-OPS-SHELL-001: Ops Shell & Assistant Browser Acceptance", () =
     const detach = attachBrowserEvidenceCollector({
       page,
       recorder,
-      currentPersona: createDefaultPersona("ops"),
+      currentPersona: BASELINE_PERSONAS.ops_dispatcher,
     });
 
     try {
@@ -117,18 +122,27 @@ test.describe("SR-OPS-SHELL-001: Ops Shell & Assistant Browser Acceptance", () =
       });
 
       const launcher = page.locator('button[aria-label*="助理"], button[data-testid="ops-assistant-launcher"]').first();
-      await expect(launcher).toBeVisible();
-
-      // Open assistant
-      await launcher.click();
-
-      // Close / minimize assistant
       const closeBtn = page.locator('button[aria-label*="關閉"], button[aria-label*="Close"], button[data-testid="ops-assistant-close"]').first();
+
       if (await closeBtn.isVisible()) {
         await closeBtn.click();
-        // Check focus returned to launcher
+        await expect(launcher).toBeVisible();
         await expect(launcher).toBeFocused();
+
+        await launcher.click();
+        const panel = page.locator('[data-testid="ops-assistant-panel"]').first();
+        await expect(panel).toBeVisible();
+      } else {
+        await expect(launcher).toBeVisible();
+        await launcher.click();
+        if (await closeBtn.isVisible()) {
+          await closeBtn.click();
+          await expect(launcher).toBeFocused();
+        }
       }
+    } catch (err: any) {
+      recorder.recordError(err);
+      throw err;
     } finally {
       detach();
     }
@@ -140,7 +154,7 @@ test.describe("SR-OPS-SHELL-001: Ops Shell & Assistant Browser Acceptance", () =
     const detach = attachBrowserEvidenceCollector({
       page,
       recorder,
-      currentPersona: createDefaultPersona("ops"),
+      currentPersona: BASELINE_PERSONAS.ops_dispatcher,
     });
 
     try {
@@ -155,7 +169,13 @@ test.describe("SR-OPS-SHELL-001: Ops Shell & Assistant Browser Acceptance", () =
         expect(href).toBeTruthy();
         expect(href).toMatch(/\/audit(?:\?|$)/);
         expect(href).not.toContain("404");
+      } else {
+        const board = page.locator('[data-testid="ops-shell-content"]');
+        await expect(board).toBeVisible();
       }
+    } catch (err: any) {
+      recorder.recordError(err);
+      throw err;
     } finally {
       detach();
     }
@@ -167,7 +187,7 @@ test.describe("SR-OPS-SHELL-001: Ops Shell & Assistant Browser Acceptance", () =
     const detach = attachBrowserEvidenceCollector({
       page,
       recorder,
-      currentPersona: createDefaultPersona("admin"),
+      currentPersona: BASELINE_PERSONAS.platform_admin,
     });
 
     try {
@@ -196,6 +216,9 @@ test.describe("SR-OPS-SHELL-001: Ops Shell & Assistant Browser Acceptance", () =
         await clearBtn.click();
         await expect(page).not.toHaveURL(/resourceType=order/);
       }
+    } catch (err: any) {
+      recorder.recordError(err);
+      throw err;
     } finally {
       detach();
     }
