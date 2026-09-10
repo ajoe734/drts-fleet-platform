@@ -305,6 +305,21 @@ describe("SR-QA-WEBHOOK-001-FIX-TENANT-BINDING: Full AppModule / PG E2E Harness"
           tenantId: null,
         };
 
+        // iam.identity_invitations.issuer_principal_id has a real FK to
+        // iam.identity_principals, so the bootstrap actor must already be a
+        // registered principal before it can issue the tenant invitations
+        // created inside seedActiveTenantAdmin below. Establish that
+        // principal record the same authoritative way the tenant sessions
+        // below do (JwtAuthService.issueSessionToken with
+        // ensurePrincipal: true), not by writing to the table directly.
+        await jwt.issueSessionToken(bootstrapIdentity, {
+          principalId: bootstrapIdentity.actorId,
+          subject: `system:${bootstrapIdentity.actorId}`,
+          ensurePrincipal: true,
+          sessionId: `sid-bootstrap-${randomUUID()}`,
+          authTime: new Date().toISOString(),
+        });
+
         const seedActiveTenantAdmin = async (
           tenantId: string,
           label: string,

@@ -476,7 +476,57 @@ python3 -c "import yaml; yaml.safe_load(open('.github/workflows/tenant-binding-a
 # before install/migrate/harness
 ```
 
-## 9. Next step
+## 9. Real run 34466688557 — new failure and third fix
+
+Dispatching §6a's push-triggered path with the §8 fix landed as commit
+`ee4872419f38bcb479314b5b074f4b04543099e9`. The real GitHub-hosted run
+(https://github.com/ajoe734/drts-fleet-platform/actions/runs/34466688557)
+got past the §8 durable-state failure — `seedActiveTenantAdmin` now
+successfully creates and activates both tenant admins — but C111 still
+failed, `1 passed / 1 failed` on the gate:
+
+```
+error: insert or update on table "identity_invitations" violates foreign key
+constraint "identity_invitations_issuer_principal_id_fkey"
+  at IdentityRepository.upsertInvitation
+  at IdentityRepository.upsertInvitationRecord
+  at TenantPartnerService.issueTenantInvitation
+  at seedActiveTenantAdmin (appmodule-tenant-binding.test.ts:312)
+```
+
+This is the same class of gap as §8: a fixture problem, not a product defect.
+`service.createTenantUser(...)` internally calls `issueTenantInvitation`,
+which persists `iam.identity_invitations.issuer_principal_id` from the
+caller's identity (`securityActor.actorId`, i.e.
+`bootstrapIdentity.actorId`). `iam.identity_invitations.issuer_principal_id`
+is a real `REFERENCES iam.identity_principals(principal_id)` foreign key
+(`infra/migrations/V0068__canonical_identity_authority.sql`), and
+`bootstrapIdentity` was only ever a plain `IdentityContext` object literal —
+nothing had ever inserted a matching row into `iam.identity_principals` for
+`qa-tenant-binding-harness-bootstrap`, because unlike the victim/other tenant
+sessions (issued via `jwt.issueSessionToken(..., { ensurePrincipal: true })`,
+which calls `identityRepository.ensurePrincipalRecord` before returning), the
+bootstrap identity was never itself run through `issueSessionToken`.
+`TenantPartnerService`/`requireSecurityEventActor` correctly trust that any
+caller-supplied identity already has a registered principal (that is what
+"authenticated" means everywhere else in the app), so this was a real gap in
+harness setup, not a check the product needs to relax.
+
+**Fix**: before `seedActiveTenantAdmin` seeds the tenant admins, the C111
+test now issues a real session for `bootstrapIdentity` itself —
+`jwt.issueSessionToken(bootstrapIdentity, { principalId:
+bootstrapIdentity.actorId, subject: "system:" + actorId, ensurePrincipal:
+true, sessionId, authTime })` — the identical authoritative path already used
+for the victim/other sessions, just applied to the bootstrap actor first.
+That call's `ensurePrincipal: true` branch resolves
+`resolvePrincipalType({actorType: "system"})` to `"service"` (a value the
+`chk_identity_principals_type` check constraint accepts) and upserts the
+`iam.identity_principals` row before any invitation is issued against it. No
+product/runtime source changed; this is still a single-file overlay onto the
+locked parent candidate `10123f6af00a5342f2634a01f4d9a0e7190c2173`, exactly
+as described in §2 item 3 and §8.
+
+## 10. Next step
 
 Commit and push this fix on the existing task branch, then dispatch the
 push-triggered acceptance path (§6a) again and record the resulting
