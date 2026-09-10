@@ -1,14 +1,14 @@
 # SR-OPS-SHELL-001 Remediation Evidence: 營運助理遮擋與跨app導航
 
 - **Task ID**: `SR-OPS-SHELL-001`
-- **Owner**: `Gemini2`
-- **Reviewer**: `Gemini` (reassigned from Claude per supervisor dispatch)
-- **Worktree**: `/home/lupin/workspace/drts-fleet-platform/.artifacts/worktrees/auto/gemini2-sr-ops-shell-001`
+- **Owner**: `Gemini` (reassigned availability-first per supervisor dispatch)
+- **Reviewer**: `Gemini2`
+- **Worktree**: `/home/lupin/workspace/drts-fleet-platform/.artifacts/worktrees/auto/gemini-sr-ops-shell-001`
 - **Branch**: `gemini2/sr-ops-shell-001`
 - **Base SHA**: `8f2a6be907dd85d44024b572524063d3a42f0942` (`origin/dev`)
-- **Previous Failed Candidate SHA**: `6df982cbabc11eebedb61fab5914b990305df210` (PR #1636, CI run #34499433388 failed due to unexported createDefaultPersona test helper and mock type mismatch)
+- **Previous Candidate SHA**: `9f6855e2b993c64b3129faf4d2541fe786acb150` (PR #1636, diagnosed: TS2307 `@/lib/translations` root typecheck failure in `context-envelope.ts` and remote acceptance SSR 500 failure due to missing `@drts/ui-web` build in `.github/workflows/ops-shell-acceptance.yml`)
 - **Candidate SHA**: 於 `handoff` 時以 `git rev-parse HEAD` 鎖定（見 task board 與 machine truth）
-- **Timestamp**: 2026-09-10T16:20:00Z
+- **Timestamp**: 2026-09-10T16:44:00Z
 - **Reference Gaps**: R18 (404 on cross-app audit link from ops console), R19 (Ops Assistant panel obstruction of dispatch board and core CTAs at 1440px/390px)
 - **Capability Ref**: C048 (`docs/04-uat/system-remediation-20260906/source/capabilities.json`)
 - **Required Acceptance**: `ops_cross_app_resource_navigation`, `ops_widget_remote_viewport_keyboard`

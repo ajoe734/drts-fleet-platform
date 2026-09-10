@@ -108,6 +108,7 @@ jobs:
           pnpm --filter @drts/contracts build 2>&1 | tee -a .artifacts/ops-shell-acceptance/execution-log.txt
           pnpm --filter @drts/control-plane-auth build 2>&1 | tee -a .artifacts/ops-shell-acceptance/execution-log.txt
           pnpm --filter @drts/ui-tokens build 2>&1 | tee -a .artifacts/ops-shell-acceptance/execution-log.txt
+          pnpm --filter @drts/ui-web build 2>&1 | tee -a .artifacts/ops-shell-acceptance/execution-log.txt
           pnpm --filter @drts/ops-console-web build 2>&1 | tee -a .artifacts/ops-shell-acceptance/execution-log.txt
           pnpm --filter @drts/platform-admin-web build 2>&1 | tee -a .artifacts/ops-shell-acceptance/execution-log.txt
 
