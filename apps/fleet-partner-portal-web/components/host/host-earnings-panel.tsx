@@ -16,6 +16,8 @@ import {
 } from "@drts/ui-web";
 import type { HostVehicleEarningsSummary } from "@drts/contracts";
 import { formatHostMoney, formatHostMoneyOrNull } from "@/app/host/lib/host-format";
+import type { Locale } from "@/lib/translations";
+import { trHost } from "@/app/host/translations";
 
 function shiftMonth(period: string, delta: number): string {
   const [yearStr, monthStr] = period.split("-");
@@ -27,10 +29,12 @@ function shiftMonth(period: string, delta: number): string {
 
 function MonthNav({
   theme,
+  locale,
   vehicleId,
   period,
 }: {
   theme: CanvasTheme;
+  locale: Locale;
   vehicleId: string;
   period: string;
 }) {
@@ -50,7 +54,7 @@ function MonthNav({
         href={`${basePath}?tab=earnings&month=${shiftMonth(period, -1)}`}
         style={linkStyle}
       >
-        ← 上月
+        {trHost("earningsPrevMonth", locale)}
       </Link>
       <span
         style={{
@@ -67,7 +71,7 @@ function MonthNav({
         href={`${basePath}?tab=earnings&month=${shiftMonth(period, 1)}`}
         style={linkStyle}
       >
-        下月 →
+        {trHost("earningsNextMonth", locale)}
       </Link>
     </div>
   );
@@ -75,12 +79,14 @@ function MonthNav({
 
 export function HostEarningsPanel({
   theme,
+  locale,
   vehicleId,
   period,
   variant,
   earnings,
 }: {
   theme: CanvasTheme;
+  locale: Locale;
   vehicleId: string;
   period: string;
   variant: "no_record" | "zero" | "reported";
@@ -88,12 +94,16 @@ export function HostEarningsPanel({
 }) {
   if (variant === "no_record" || !earnings) {
     return (
-      <CanvasCard theme={theme} title="收益摘要 · Earnings" subtitle={`${period} · 依月結算`}>
-        <MonthNav theme={theme} vehicleId={vehicleId} period={period} />
+      <CanvasCard
+        theme={theme}
+        title={trHost("earningsCardTitle", locale)}
+        subtitle={`${period} · 依月結算`}
+      >
+        <MonthNav theme={theme} locale={locale} vehicleId={vehicleId} period={period} />
         <CanvasEmptyState
           theme={theme}
           tone="neutral"
-          title="尚無收益紀錄"
+          title={trHost("earningsEmptyTitle", locale)}
           body="尚無此月份的收益紀錄。這是合法的空狀態（例如車輛剛掛靠），與「零營收」及「分潤未定」是三種不同情況，不可互相混用。"
         />
       </CanvasCard>
@@ -104,10 +114,10 @@ export function HostEarningsPanel({
   return (
     <CanvasCard
       theme={theme}
-      title="收益摘要 · Earnings"
+      title={trHost("earningsCardTitle", locale)}
       subtitle={`${e.period} · 依月結算 · 資料源 ops.phase1_platform_earnings_ledger`}
     >
-      <MonthNav theme={theme} vehicleId={vehicleId} period={period} />
+      <MonthNav theme={theme} locale={locale} vehicleId={vehicleId} period={period} />
       <CanvasDL
         theme={theme}
         cols={3}
@@ -150,7 +160,7 @@ export function HostEarningsPanel({
             theme={theme}
             tone="warn"
             icon="warn"
-            title="分潤比例尚未確定 · pending_policy"
+            title={trHost("earningsPendingPolicyTitle", locale)}
             body="平台服務費已計入；惟車行分潤與車主淨收益的拆分比例尚未核定，系統不以假設公式推算或顯示為 0，待分潤政策確定後才會顯示金額。"
           />
         </div>
@@ -161,7 +171,7 @@ export function HostEarningsPanel({
             theme={theme}
             tone="info"
             icon="check"
-            title="本月零營收 · 合法的零值"
+            title={trHost("earningsZeroTitle", locale)}
             body="本車本月尚無完成訂單，總車資與趟次皆為 0，這是真實結算結果，不是讀取失敗或無資料 — 與「尚無收益紀錄」是不同狀態。"
           />
         </div>

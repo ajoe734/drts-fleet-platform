@@ -19,6 +19,9 @@ import { HostMaintenanceTable } from "@/components/host/host-maintenance-table";
 import { HostTripsTable } from "@/components/host/host-trips-table";
 import { HostCasesTable } from "@/components/host/host-cases-table";
 import { HostPageFooter } from "@/components/host/host-page-footer";
+import { getServerLocale } from "@/lib/server-locale";
+import type { Locale } from "@/lib/translations";
+import { trHost } from "@/app/host/translations";
 
 export const dynamic = "force-dynamic";
 
@@ -44,6 +47,7 @@ export default async function HostVehicleDetailPage({
 }) {
   const { vehicleId } = await params;
   const query = searchParams ? await searchParams : {};
+  const locale = await getServerLocale();
   const theme = buildFleetTheme();
 
   const detail = await loadHostVehicleDetail(vehicleId);
@@ -51,7 +55,11 @@ export default async function HostVehicleDetailPage({
   if (!detail.ok) {
     return (
       <>
-        <CanvasPageHeader theme={theme} title="自有車輛 · My Vehicles" subtitle="唯讀檢視" />
+        <CanvasPageHeader
+          theme={theme}
+          title={trHost("vehiclesPageTitle", locale)}
+          subtitle="唯讀檢視"
+        />
         <div style={{ padding: 24 }}>
           <HostAccessStateCard theme={theme} state={detail.accessState} detail={detail.error} />
         </div>
@@ -94,19 +102,19 @@ export default async function HostVehicleDetailPage({
         activeTab={activeTab}
       />
       <div style={{ padding: 24, display: "flex", flexDirection: "column", gap: 16 }}>
-        <HostVehicleSummaryCard theme={theme} vehicle={vehicle} />
+        <HostVehicleSummaryCard theme={theme} locale={locale} vehicle={vehicle} />
 
         {activeTabId === "earnings" ? (
-          <HostEarningsTab theme={theme} vehicleId={vehicleId} month={query.month} />
+          <HostEarningsTab theme={theme} locale={locale} vehicleId={vehicleId} month={query.month} />
         ) : null}
         {activeTabId === "maintenance" ? (
-          <HostMaintenanceTab theme={theme} vehicleId={vehicleId} page={query.page} />
+          <HostMaintenanceTab theme={theme} locale={locale} vehicleId={vehicleId} page={query.page} />
         ) : null}
         {activeTabId === "trips" ? (
-          <HostTripsTab theme={theme} vehicleId={vehicleId} page={query.page} />
+          <HostTripsTab theme={theme} locale={locale} vehicleId={vehicleId} page={query.page} />
         ) : null}
         {activeTabId === "cases" ? (
-          <HostCasesTab theme={theme} vehicleId={vehicleId} page={query.page} />
+          <HostCasesTab theme={theme} locale={locale} vehicleId={vehicleId} page={query.page} />
         ) : null}
       </div>
     </>
@@ -115,10 +123,12 @@ export default async function HostVehicleDetailPage({
 
 async function HostEarningsTab({
   theme,
+  locale,
   vehicleId,
   month,
 }: {
   theme: ReturnType<typeof buildFleetTheme>;
+  locale: Locale;
   vehicleId: string;
   month: string | undefined;
 }) {
@@ -130,6 +140,7 @@ async function HostEarningsTab({
   return (
     <HostEarningsPanel
       theme={theme}
+      locale={locale}
       vehicleId={vehicleId}
       period={period}
       variant={result.variant}
@@ -140,10 +151,12 @@ async function HostEarningsTab({
 
 async function HostMaintenanceTab({
   theme,
+  locale,
   vehicleId,
   page,
 }: {
   theme: ReturnType<typeof buildFleetTheme>;
+  locale: Locale;
   vehicleId: string;
   page: string | undefined;
 }) {
@@ -155,10 +168,12 @@ async function HostMaintenanceTab({
   return (
     <HostMaintenanceTable
       theme={theme}
+      locale={locale}
       rows={result.items}
       footer={
         <HostPageFooter
           theme={theme}
+          locale={locale}
           pageInfo={result.pageInfo}
           basePath={`/host/vehicles/${encodeURIComponent(vehicleId)}`}
           extraParams={{ tab: "maintenance" }}
@@ -170,10 +185,12 @@ async function HostMaintenanceTab({
 
 async function HostTripsTab({
   theme,
+  locale,
   vehicleId,
   page,
 }: {
   theme: ReturnType<typeof buildFleetTheme>;
+  locale: Locale;
   vehicleId: string;
   page: string | undefined;
 }) {
@@ -185,10 +202,12 @@ async function HostTripsTab({
   return (
     <HostTripsTable
       theme={theme}
+      locale={locale}
       rows={result.items}
       footer={
         <HostPageFooter
           theme={theme}
+          locale={locale}
           pageInfo={result.pageInfo}
           basePath={`/host/vehicles/${encodeURIComponent(vehicleId)}`}
           extraParams={{ tab: "trips" }}
@@ -200,10 +219,12 @@ async function HostTripsTab({
 
 async function HostCasesTab({
   theme,
+  locale,
   vehicleId,
   page,
 }: {
   theme: ReturnType<typeof buildFleetTheme>;
+  locale: Locale;
   vehicleId: string;
   page: string | undefined;
 }) {
@@ -215,10 +236,12 @@ async function HostCasesTab({
   return (
     <HostCasesTable
       theme={theme}
+      locale={locale}
       rows={result.items}
       footer={
         <HostPageFooter
           theme={theme}
+          locale={locale}
           pageInfo={result.pageInfo}
           basePath={`/host/vehicles/${encodeURIComponent(vehicleId)}`}
           extraParams={{ tab: "cases" }}

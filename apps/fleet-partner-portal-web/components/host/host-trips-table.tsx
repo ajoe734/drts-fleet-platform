@@ -8,6 +8,8 @@ import {
 } from "@drts/ui-web";
 import type { HostVehicleTripItem } from "@drts/contracts";
 import { formatHostMoney, hostTripStatusTone } from "@/app/host/lib/host-format";
+import type { Locale } from "@/lib/translations";
+import { trHost } from "@/app/host/translations";
 
 // De-identified: areaSummary is district-only (backend-masked, see
 // apps/api/src/modules/host-view/host-view.types.ts maskAreaSummary). This
@@ -15,10 +17,12 @@ import { formatHostMoney, hostTripStatusTone } from "@/app/host/lib/host-format"
 // not exist on HostVehicleTripItem at all.
 export function HostTripsTable({
   theme,
+  locale,
   rows,
   footer,
 }: {
   theme: CanvasTheme;
+  locale: Locale;
   rows: HostVehicleTripItem[];
   footer?: ReactNode;
 }) {
@@ -49,7 +53,7 @@ export function HostTripsTable({
   return (
     <CanvasCard
       theme={theme}
-      title="行程 · Trips (去識別化)"
+      title={trHost("tripsCardTitle", locale)}
       subtitle="僅顯示概括行政區與金額，絕不含乘客姓名 / 電話 / 門牌地址"
       padding={0}
     >

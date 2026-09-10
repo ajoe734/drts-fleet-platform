@@ -8,6 +8,8 @@ import {
 } from "@drts/ui-web";
 import type { HostVehicleCaseItem } from "@drts/contracts";
 import { HOST_CASE_CATEGORY_LABEL, HOST_CASE_STATUS_TONE } from "@/app/host/lib/host-format";
+import type { Locale } from "@/lib/translations";
+import { trHost } from "@/app/host/translations";
 
 // De-identified: reporter identity is never present on HostVehicleCaseItem
 // (host-view.types.ts extractResolutionSummary strips it server-side) — this
@@ -15,10 +17,12 @@ import { HOST_CASE_CATEGORY_LABEL, HOST_CASE_STATUS_TONE } from "@/app/host/lib/
 // reply/attachment affordance (Host has zero write scope by contract).
 export function HostCasesTable({
   theme,
+  locale,
   rows,
   footer,
 }: {
   theme: CanvasTheme;
+  locale: Locale;
   rows: HostVehicleCaseItem[];
   footer?: ReactNode;
 }) {
@@ -49,7 +53,9 @@ export function HostCasesTable({
       w: 240,
       r: (r) =>
         r.resolutionSummary ?? (
-          <span style={{ color: theme.textDim }}>尚未結案，無結論摘要</span>
+          <span style={{ color: theme.textDim }}>
+            {trHost("casesNoResolution", locale)}
+          </span>
         ),
     },
   ];
@@ -57,7 +63,7 @@ export function HostCasesTable({
   return (
     <CanvasCard
       theme={theme}
-      title="相關案件 · Cases (去識別化)"
+      title={trHost("casesCardTitle", locale)}
       subtitle="僅呈現案件分類與處理結論摘要；不揭露報案人身分，無回覆 / 附件入口（車主唯讀）"
       padding={0}
     >

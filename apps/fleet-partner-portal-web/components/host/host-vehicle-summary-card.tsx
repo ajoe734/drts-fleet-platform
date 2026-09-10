@@ -1,16 +1,20 @@
 import { CanvasCard, CanvasDL, CanvasPill, type CanvasTheme } from "@drts/ui-web";
 import type { HostVehicleSummary } from "@drts/contracts";
 import { HOST_VEHICLE_STATUS_TONE, sliceIsoDate } from "@/app/host/lib/host-format";
+import type { Locale } from "@/lib/translations";
+import { trHost } from "@/app/host/translations";
 
 export function HostVehicleSummaryCard({
   theme,
+  locale,
   vehicle,
 }: {
   theme: CanvasTheme;
+  locale: Locale;
   vehicle: HostVehicleSummary;
 }) {
   return (
-    <CanvasCard theme={theme} title="車輛基本資料 · Vehicle summary">
+    <CanvasCard theme={theme} title={trHost("vehicleSummaryCardTitle", locale)}>
       <CanvasDL
         theme={theme}
         cols={3}

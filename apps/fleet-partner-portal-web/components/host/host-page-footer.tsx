@@ -9,6 +9,8 @@
 import Link from "next/link";
 import type { CanvasTheme } from "@drts/ui-web";
 import type { ApiListData } from "@drts/contracts";
+import type { Locale } from "@/lib/translations";
+import { trHost } from "@/app/host/translations";
 
 function buildHref(basePath: string, params: URLSearchParams, page: number) {
   const next = new URLSearchParams(params);
@@ -23,11 +25,13 @@ function buildHref(basePath: string, params: URLSearchParams, page: number) {
 
 export function HostPageFooter<T>({
   theme,
+  locale,
   pageInfo,
   basePath,
   extraParams,
 }: {
   theme: CanvasTheme;
+  locale: Locale;
   pageInfo: ApiListData<T>["pageInfo"];
   basePath: string;
   extraParams?: Record<string, string | undefined>;
@@ -62,31 +66,35 @@ export function HostPageFooter<T>({
       }}
     >
       <span>
-        {totalItems} 筆 · 第 {page} / {Math.max(totalPages, 1)} 頁
+        {trHost("paginationSummary", locale, {
+          count: totalItems,
+          page,
+          totalPages: Math.max(totalPages, 1),
+        })}
       </span>
       <div style={{ display: "flex", gap: 6 }}>
         {page <= 1 ? (
           <span style={{ ...navLinkStyle, color: theme.textDim }}>
-            上一頁
+            {trHost("paginationPrev", locale)}
           </span>
         ) : (
           <Link
             href={buildHref(basePath, params, page - 1)}
             style={{ ...navLinkStyle, color: theme.text }}
           >
-            上一頁
+            {trHost("paginationPrev", locale)}
           </Link>
         )}
         {page >= totalPages ? (
           <span style={{ ...navLinkStyle, color: theme.textDim }}>
-            下一頁
+            {trHost("paginationNext", locale)}
           </span>
         ) : (
           <Link
             href={buildHref(basePath, params, page + 1)}
             style={{ ...navLinkStyle, color: theme.text }}
           >
-            下一頁
+            {trHost("paginationNext", locale)}
           </Link>
         )}
       </div>

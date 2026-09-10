@@ -8,13 +8,17 @@ import {
 } from "@drts/ui-web";
 import type { HostVehicleMaintenanceItem } from "@drts/contracts";
 import { HOST_MAINT_STATUS_TONE, formatHostMoney } from "@/app/host/lib/host-format";
+import type { Locale } from "@/lib/translations";
+import { trHost } from "@/app/host/translations";
 
 export function HostMaintenanceTable({
   theme,
+  locale,
   rows,
   footer,
 }: {
   theme: CanvasTheme;
+  locale: Locale;
   rows: HostVehicleMaintenanceItem[];
   footer?: ReactNode;
 }) {
@@ -45,7 +49,7 @@ export function HostMaintenanceTable({
   return (
     <CanvasCard
       theme={theme}
-      title="維保紀錄 · Maintenance"
+      title={trHost("maintenanceCardTitle", locale)}
       subtitle="資料源 ops.phase1_maintenance_logs · 狀態對齊 HOST_VEHICLE_MAINTENANCE_STATUSES"
       padding={0}
     >

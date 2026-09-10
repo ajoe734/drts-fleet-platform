@@ -13,12 +13,16 @@ import {
 } from "@drts/ui-web";
 import type { HostVehicleSummary } from "@drts/contracts";
 import { HOST_VEHICLE_STATUS_TONE, sliceIsoDate } from "@/app/host/lib/host-format";
+import type { Locale } from "@/lib/translations";
+import { trHost } from "@/app/host/translations";
 
 export function HostVehicleTable({
   theme,
+  locale,
   rows,
 }: {
   theme: CanvasTheme;
+  locale: Locale;
   rows: HostVehicleSummary[];
 }) {
   const columns: CanvasTableColumn<HostVehicleSummary>[] = [
@@ -78,7 +82,7 @@ export function HostVehicleTable({
             textDecoration: "none",
           }}
         >
-          詳情 →
+          {trHost("vehicleTableDetailLink", locale)}
         </Link>
       ),
     },
