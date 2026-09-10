@@ -56,7 +56,8 @@
 | `pnpm lint:root`                                                  |     0     |  14.5s   | Root ESLint 檢查 100% 通過                       |
 | `pnpm --filter @drts/api lint`                                    |     0     |   3.2s   | `@drts/api` ESLint 檢查 100% 通過                |
 | `pnpm --filter @drts/api typecheck`                               |     0     |  17.2s   | `@drts/api` 完整 TypeScript 型別檢查 100% 通過    |
-| `pnpm exec vitest run tests/unit/system-remediation/sr-host-be-001/` |     0     |   1.3s   | 33 tests across 11 test suites 100% 全部通過     |
+| `pnpm exec vitest run tests/unit/system-remediation/sr-host-be-001/` |     0     |   1.4s   | 33 tests across 11 test suites 100% 全部通過     |
+| `pnpm exec vitest run tests/security/iam-route-inventory.test.ts` |     0     |   3.2s   | IAM 路由目錄與 Realm 相容性檢驗 100% 通過 (10/10) |
 
 ### 測試套件詳細明細 (33 Passed Tests)
 

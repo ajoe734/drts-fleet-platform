@@ -671,7 +671,7 @@ describe("SR-HOST-BE-001: Host Restricted Read Model & Vehicle Access Authorizat
     });
 
     it("Throws 403 HOST_FORBIDDEN when identity realm is not partner", async () => {
-      const driverIdentity = createMockIdentity({ realm: "driver", partnerId: undefined });
+      const driverIdentity = createMockIdentity({ realm: "driver", partnerId: null });
       await expect(service.listVehicles(driverIdentity)).rejects.toThrow(
         expect.objectContaining({
           status: 403,

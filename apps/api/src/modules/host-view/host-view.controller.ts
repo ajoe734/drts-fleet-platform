@@ -13,7 +13,6 @@ import { toApiSuccessEnvelope } from "../../common/api-envelope";
 import {
   CurrentIdentity,
   RequireRealms,
-  RequireScopes,
 } from "../../common/auth/auth.decorators";
 import type { BootstrapRequestIdentity } from "../../common/auth/auth.types";
 import { HostViewService } from "./host-view.service";
@@ -28,7 +27,6 @@ export class HostViewController {
    * Queries vehicles owned by the authenticated partner.
    */
   @Get("vehicles")
-  @RequireScopes("owned:read")
   async listVehicles(
     @CurrentIdentity() identity: BootstrapRequestIdentity | null,
     @Query("page") page?: number,
@@ -47,7 +45,6 @@ export class HostViewController {
    * Queries earnings summary for a vehicle owned by the authenticated partner.
    */
   @Get("vehicles/:vehicleId/earnings")
-  @RequireScopes("reports:read", "owned:read")
   async getEarnings(
     @Param("vehicleId") vehicleId: string,
     @CurrentIdentity() identity: BootstrapRequestIdentity | null,
@@ -67,7 +64,6 @@ export class HostViewController {
    * Queries maintenance logs for a vehicle owned by the authenticated partner.
    */
   @Get("vehicles/:vehicleId/maintenance")
-  @RequireScopes("maintenance:read", "owned:read")
   async listMaintenance(
     @Param("vehicleId") vehicleId: string,
     @CurrentIdentity() identity: BootstrapRequestIdentity | null,
@@ -91,7 +87,6 @@ export class HostViewController {
    * Queries de-identified trips for a vehicle owned by the authenticated partner.
    */
   @Get("vehicles/:vehicleId/trips")
-  @RequireScopes("owned:read")
   async listTrips(
     @Param("vehicleId") vehicleId: string,
     @CurrentIdentity() identity: BootstrapRequestIdentity | null,
@@ -115,7 +110,6 @@ export class HostViewController {
    * Queries de-identified complaint cases for a vehicle owned by the authenticated partner.
    */
   @Get("vehicles/:vehicleId/cases")
-  @RequireScopes("owned:read")
   async listCases(
     @Param("vehicleId") vehicleId: string,
     @CurrentIdentity() identity: BootstrapRequestIdentity | null,
