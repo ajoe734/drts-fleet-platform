@@ -63,6 +63,9 @@ export class VoiceBookingController {
     @Query("provider") provider?: string,
     @Query("serviceType") serviceType?: VoiceUsageServiceType,
     @Query("usageDate") usageDate?: string,
+    @Query("language") language?: string,
+    @Query("windowStart") windowStart?: string,
+    @Query("windowEnd") windowEnd?: string,
     @Headers("x-request-id") requestId?: string,
   ) {
     const records = this.voiceUsageService.listUsageRecords({
@@ -72,6 +75,9 @@ export class VoiceBookingController {
       provider,
       serviceType,
       usageDate,
+      language,
+      windowStart,
+      windowEnd,
     });
 
     return toApiSuccessEnvelope({ items: records }, requestId);

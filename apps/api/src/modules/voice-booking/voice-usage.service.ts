@@ -823,6 +823,9 @@ export class VoiceUsageService implements OnModuleInit {
     provider?: string | undefined;
     serviceType?: VoiceUsageServiceType | undefined;
     usageDate?: string | undefined;
+    language?: string | undefined;
+    windowStart?: string | undefined;
+    windowEnd?: string | undefined;
   }): VoiceUsageRecord[] {
     let list = Array.from(this.usageRecords.values());
     if (filter) {
@@ -845,6 +848,17 @@ export class VoiceUsageService implements OnModuleInit {
       }
       if (filter.usageDate) {
         list = list.filter((r) => r.usageDate === filter.usageDate);
+      }
+      if (filter.language) {
+        list = list.filter((r) => r.language === filter.language);
+      }
+      if (filter.windowStart) {
+        const startMs = new Date(filter.windowStart).getTime();
+        list = list.filter((r) => new Date(r.createdAt).getTime() >= startMs);
+      }
+      if (filter.windowEnd) {
+        const endMs = new Date(filter.windowEnd).getTime();
+        list = list.filter((r) => new Date(r.createdAt).getTime() <= endMs);
       }
     }
     return list;
