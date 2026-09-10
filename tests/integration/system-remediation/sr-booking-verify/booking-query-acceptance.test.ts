@@ -37,8 +37,10 @@ function makeTenantIdentity(tenantId: string): BootstrapRequestIdentity {
   };
 }
 
-const dbUrl =
-  process.env.DRTS_BOOKING_VERIFY_DATABASE_URL || process.env.DATABASE_URL;
+// Falling back to generic DATABASE_URL is prohibited because standard CI sets DATABASE_URL
+// globally before running migrations in unit test suites. Real database acceptance is guarded by
+// DRTS_BOOKING_VERIFY_DATABASE_URL, which is explicitly provided in the dedicated acceptance workflow.
+const dbUrl = process.env.DRTS_BOOKING_VERIFY_DATABASE_URL;
 
 describe("SR-BOOKING-VERIFY Integration Acceptance Suite", () => {
   describe("AppModule & OwnedMobilityModule DI wiring", () => {

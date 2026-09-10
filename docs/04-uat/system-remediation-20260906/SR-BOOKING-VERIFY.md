@@ -42,6 +42,10 @@
    - 診斷確認：
      1. 整合測試的種子資料直接拼裝 JSON 記錄時缺少 canonical `OwnedOrderRecord` 欄位（`bookingType: "oneway"`, `approvalState: "not_required"`, `approvalRequestIds: []`, `complianceFlags: []` 等），造成 `mapOrderToBooking` 的嚴格檢查觸發 404；
      2. `OwnedMobilityService.mapOrderToBooking` 在既有實作中對可缺省欄位過於嚴苛；修復其對 `bookingType`（預設 `"oneway"`）、`reservationWindowEnd`（預設 `reservationWindowStart`）、`approvalState`（預設 `"not_required"`）與陣列解構的韌性保護，維持 `bookingId` 與 `tenantId` 核心不變數，確保多實例持久化資料映射不致因局部欄位缺失而誤判 404。
+8. **通用 CI 單元測試隔離診斷與修復（Candidate ea308ba8 Diagnostic & Fix）**：
+   - 遠端 PR #1927 之通用 CI（`ci-integ.yml` 及 `ci.yml` 之 `unit` / `smoke-acceptance`）失敗，因 runner 全域注入 `DATABASE_URL`，但單元測試階段尚未執行 `pnpm db:migrate`，導致 `booking-query-acceptance.test.ts` 誤判資料庫已就緒，拋出 `ops.phase1_owned_orders does not exist`。
+   - 參照 `unattended-voice-postgres.integration.test.ts` 與專屬 acceptance 規範，嚴格禁止回退至通用 `DATABASE_URL`；將資料庫整合驗收測試守護精準綁定至專屬 `DRTS_BOOKING_VERIFY_DATABASE_URL`，避免通用單元測試套件因 unmigrated DB 誤報失敗，並確保專屬 GitHub Actions acceptance 工作流執行完整且零略過之遠端 PostgreSQL 驗收。
+
 
 ---
 
