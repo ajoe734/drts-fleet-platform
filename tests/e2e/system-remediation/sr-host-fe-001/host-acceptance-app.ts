@@ -132,8 +132,14 @@ export async function createHostAcceptanceApp(): Promise<HostAcceptanceAppLike> 
     ],
   })(HostAcceptanceModule);
 
+  // `logger: false` previously silenced Nest's own error-level logging too,
+  // so a real, unhandled 500 in the standalone `host-acceptance-server.ts`
+  // process (used only by the browser-acceptance job) left zero trace in
+  // its stdout log — defeating this task's "report real failures honestly"
+  // mandate. `["error", "warn"]` keeps noisy startup/info banners off while
+  // still printing real exceptions.
   const app = await NestFactory.create(HostAcceptanceModule, {
-    logger: false,
+    logger: ["error", "warn"],
     abortOnError: false,
   });
   app.setGlobalPrefix("api");
