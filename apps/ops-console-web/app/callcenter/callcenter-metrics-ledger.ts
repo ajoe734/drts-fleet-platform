@@ -59,6 +59,147 @@ export interface UiCallbackSlaSummary {
 }
 
 /**
+ * Wire shape of GET callcenter/voice/metrics/cohort
+ * (apps/api VoiceCohortMetricsReport, camelCased by the API client).
+ */
+export interface VoiceCohortMetricsReportWire {
+  cohortWindow: {
+    windowStart: string;
+    windowEnd: string;
+    observationWindowClosed: boolean;
+  };
+  allCallCoverage: {
+    rate: number;
+    numeratorEnteredAi: number;
+    denominatorRealIngress: number;
+  };
+  unattendedEffectiveIntake: {
+    rate: number;
+    numeratorValidIntakes: number;
+  };
+  unattendedDispatchCompletion: {
+    rate: number;
+    numeratorDriverAcceptedUniqueOrders: number;
+  };
+  humanTransfer: { rate: number };
+  errorBooking: { rate: number };
+  costPerEffectiveIntake: {
+    cost: number | null;
+    zeroDenominatorReason?: string | undefined;
+  };
+  costPerSuccessfulDispatch: {
+    cost: number | null;
+    status: "settled" | "pending_observation_window";
+    pendingReason?: string | undefined;
+  };
+}
+
+/**
+ * Wire shape of one item from GET callcenter/voice/usage/records
+ * (apps/api VoiceUsageRecord, camelCased by the API client).
+ */
+export interface VoiceUsageRecordWire {
+  serviceType: string;
+  provider: string;
+  model?: string | undefined;
+  quantity: number;
+  billingUnit: string;
+  currency: string;
+  estimatedCost: number;
+  actualCost?: number | undefined;
+  unverified: boolean;
+}
+
+/**
+ * Wire shape of one item from GET callcenter/voice/metrics/alerts
+ * (apps/api VoiceDimensionalAlert, camelCased by the API client).
+ */
+export interface VoiceDimensionalAlertWire {
+  alertId: string;
+  alertName: string;
+  severity: "critical" | "high" | "warning";
+  dimensions: {
+    language: string;
+    routeProfileVersion: number;
+    provider: string;
+    brandId: string;
+  };
+  summary: string;
+}
+
+/**
+ * Maps the authoritative server-computed cohort report (SA §10.2 evaluator,
+ * durable-evidence joined) onto the UI view. Formats the server's own
+ * rate/cost decisions rather than recomputing them, so the zero-denominator
+ * and observation-window gating rules stay in one place (the backend).
+ */
+export function mapCohortReportToView(
+  report: VoiceCohortMetricsReportWire,
+): UiCohortMetricsView {
+  const pct = (rate: number) => `${(rate * 100).toFixed(1)}%`;
+
+  const costPerIntake = report.costPerEffectiveIntake;
+  const costPerEffectiveIntakeFormatted =
+    costPerIntake.cost !== null
+      ? formatVoiceCost(costPerIntake.cost)
+      : (costPerIntake.zeroDenominatorReason ?? "N/A (無受理單)");
+
+  const costPerDispatch = report.costPerSuccessfulDispatch;
+  const costPerSuccessfulDispatchFormatted =
+    costPerDispatch.status === "pending_observation_window"
+      ? "待觀察窗口結算"
+      : costPerDispatch.cost !== null
+        ? formatVoiceCost(costPerDispatch.cost)
+        : "N/A (無成功派車)";
+
+  return {
+    windowLabel: `${report.cohortWindow.windowStart.slice(0, 10)} ~ ${report.cohortWindow.windowEnd.slice(0, 10)}`,
+    observationWindowClosed: report.cohortWindow.observationWindowClosed,
+    totalIngressCalls: report.allCallCoverage.denominatorRealIngress,
+    enteredAiCalls: report.allCallCoverage.numeratorEnteredAi,
+    coverageRateFormatted: pct(report.allCallCoverage.rate),
+    effectiveIntakeCount: report.unattendedEffectiveIntake.numeratorValidIntakes,
+    effectiveIntakeRateFormatted: pct(report.unattendedEffectiveIntake.rate),
+    driverAcceptedOrdersCount:
+      report.unattendedDispatchCompletion.numeratorDriverAcceptedUniqueOrders,
+    dispatchRateFormatted: pct(report.unattendedDispatchCompletion.rate),
+    humanTransferRateFormatted: pct(report.humanTransfer.rate),
+    errorBookingRateFormatted: `${(report.errorBooking.rate * 100).toFixed(2)}%`,
+    costPerEffectiveIntakeFormatted,
+    costPerSuccessfulDispatchFormatted,
+    costPerSuccessfulDispatchStatus: costPerDispatch.status,
+    pendingReason: costPerDispatch.pendingReason,
+  };
+}
+
+/**
+ * Maps one raw metering/rate-card usage record onto the ledger row view.
+ * Preserves the `unverified` flag and never derives a unit price that would
+ * imply the estimate has already been reconciled against a real invoice.
+ */
+export function mapUsageRecordToLedgerItem(
+  record: VoiceUsageRecordWire,
+): UiCostLedgerItem {
+  return {
+    serviceType: record.serviceType,
+    provider: record.provider,
+    model: record.model,
+    quantity: record.quantity,
+    billingUnit: record.billingUnit,
+    unitPrice:
+      record.quantity > 0 ? record.estimatedCost / record.quantity : 0,
+    estimatedCost: record.estimatedCost,
+    actualCost: record.actualCost,
+    variance:
+      record.actualCost !== undefined
+        ? Number((record.actualCost - record.estimatedCost).toFixed(4))
+        : undefined,
+    currency: record.currency,
+    unverified: record.unverified,
+  };
+}
+
+/**
  * Formats a monetary amount into a clean currency string.
  */
 export function formatVoiceCost(

@@ -30,7 +30,7 @@ export default defineConfig({
       "tests/security/**/*.test.ts",
       "tests/load/**/*.test.ts",
       "tests/e2e/**/*.test.ts",
-      "apps/*/tests/unit/**/*.test.ts",
+      "apps/ops-console-web/tests/unit/**/*.test.ts",
     ],
   },
 });

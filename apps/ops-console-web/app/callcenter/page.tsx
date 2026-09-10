@@ -84,8 +84,13 @@ import {
   deriveCallbackSlaPresentation,
   deriveDimensionalAlertPresentation,
   formatVoiceCost,
+  mapCohortReportToView,
+  mapUsageRecordToLedgerItem,
   type UiCohortMetricsView,
   type UiCostLedgerItem,
+  type VoiceCohortMetricsReportWire,
+  type VoiceDimensionalAlertWire,
+  type VoiceUsageRecordWire,
 } from "./callcenter-metrics-ledger";
 
 const theme = buildCanvasTheme({
@@ -1073,6 +1078,9 @@ export default function CallcenterPage() {
   );
   const [usageRecords, setUsageRecords] = useState<UiCostLedgerItem[]>([]);
   const [serverCohort, setServerCohort] = useState<UiCohortMetricsView | null>(null);
+  const [dimensionalAlerts, setDimensionalAlerts] = useState<
+    VoiceDimensionalAlertWire[]
+  >([]);
   const [loading, setLoading] = useState(true);
   const [query, setQuery] = useState("");
   const [queueView, setQueueView] = useState<QueueView>("sessions");
@@ -1533,6 +1541,55 @@ export default function CallcenterPage() {
 
   useEffect(() => {
     let cancelled = false;
+
+    async function loadVoiceLedgerAndAlerts() {
+      try {
+        const client = getOpsClient();
+        const [cohortReport, records, alerts] = await Promise.all([
+          client.get<VoiceCohortMetricsReportWire>(
+            "/api/callcenter/voice/metrics/cohort",
+          ),
+          client.getList<VoiceUsageRecordWire>(
+            "/api/callcenter/voice/usage/records",
+          ),
+          client.getList<VoiceDimensionalAlertWire>(
+            "/api/callcenter/voice/metrics/alerts",
+          ),
+        ]);
+
+        if (cancelled) {
+          return;
+        }
+        setServerCohort(mapCohortReportToView(cohortReport));
+        setUsageRecords(records.map(mapUsageRecordToLedgerItem));
+        setDimensionalAlerts(alerts);
+      } catch {
+        // Supplementary raw ledger/alert data: cohortMetrics already falls
+        // back to a client-side computation from `sessions` when server
+        // data is unavailable, so a silent skip (rather than the shared
+        // `error` banner) is intentional here.
+        if (!cancelled) {
+          setServerCohort(null);
+          setUsageRecords([]);
+          setDimensionalAlerts([]);
+        }
+      }
+    }
+
+    void loadVoiceLedgerAndAlerts();
+    const intervalId = window.setInterval(
+      () => void loadVoiceLedgerAndAlerts(),
+      CALLCENTER_REFRESH_INTERVAL_MS,
+    );
+
+    return () => {
+      cancelled = true;
+      window.clearInterval(intervalId);
+    };
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
     setServiceAreaMapStatus("loading");
 
     void getOpsClient()
@@ -1927,6 +1984,45 @@ export default function CallcenterPage() {
     },
   ];
 
+  const usageLedgerColumns: CanvasTableColumn<UiCostLedgerItem>[] = [
+    {
+      h: "服務項目",
+      r: (item) => (
+        <div>
+          <div style={{ fontWeight: 600 }}>
+            {item.serviceType} · {item.provider}
+          </div>
+          {item.model ? (
+            <div style={subtleTextStyle}>{item.model}</div>
+          ) : null}
+        </div>
+      ),
+    },
+    {
+      h: "計費量",
+      r: (item) => `${item.quantity} ${item.billingUnit}`,
+    },
+    {
+      h: "估計成本",
+      r: (item) => formatVoiceCost(item.estimatedCost, item.currency),
+    },
+    {
+      h: "實際成本",
+      r: (item) =>
+        item.actualCost !== undefined
+          ? formatVoiceCost(item.actualCost, item.currency)
+          : "待對帳",
+    },
+    {
+      h: "狀態",
+      r: (item) => (
+        <CanvasPill theme={theme} tone={item.unverified ? "warn" : "success"}>
+          {item.unverified ? "未驗證" : "已驗證"}
+        </CanvasPill>
+      ),
+    },
+  ];
+
   return (
     <>
       <PageHeader
@@ -2050,6 +2146,50 @@ export default function CallcenterPage() {
               value={cohortMetrics.costPerEffectiveIntakeFormatted}
             />
           </div>
+          {dimensionalAlerts.length > 0 ? (
+            <div
+              style={{
+                display: "flex",
+                flexWrap: "wrap",
+                gap: 8,
+                marginBottom: 16,
+              }}
+            >
+              {dimensionalAlerts.map((alert) => {
+                const badge = deriveDimensionalAlertPresentation({
+                  alertId: alert.alertId,
+                  alertName: alert.alertName,
+                  severity: alert.severity,
+                  language: alert.dimensions.language,
+                  routeProfileVersion: alert.dimensions.routeProfileVersion,
+                  provider: alert.dimensions.provider,
+                  brandId: alert.dimensions.brandId,
+                  summary: alert.summary,
+                });
+                const tone: CanvasTone =
+                  badge.severity === "critical"
+                    ? "danger"
+                    : badge.severity === "high"
+                      ? "warn"
+                      : "info";
+                return (
+                  <CanvasPill key={badge.alertId} theme={theme} tone={tone}>
+                    {badge.alertName} · {badge.language}/v
+                    {badge.routeProfileVersion}/{badge.provider}
+                  </CanvasPill>
+                );
+              })}
+            </div>
+          ) : null}
+          {usageRecords.length > 0 ? (
+            <div style={{ marginBottom: 16 }}>
+              <CanvasTable
+                theme={theme}
+                columns={usageLedgerColumns}
+                rows={usageRecords}
+              />
+            </div>
+          ) : null}
           <div style={formGridStyle}>
             <CanvasField theme={theme} label={t("callcenter.search")}>
               <input

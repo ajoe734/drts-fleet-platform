@@ -1576,4 +1576,93 @@ export class VoiceBookingMetricsService {
       }
     }
   }
+
+  /**
+   * Materializes SD §13.2 dimensional alerts from the same per-call record
+   * stream and (language, routeProfileVersion, provider, brandId) grouping
+   * as `syncActiveAlertMetrics`, so the ops console can render alert badges
+   * without polling Prometheus directly. Only alert inputs backed by fields
+   * actually present on `VoiceCallMetricRecord` are counted here (error/
+   * duplicate booking, provider capacity overflow, dispatch unavailability,
+   * unanswered handoff, per-call cost anomaly); cross-scope denial, pending
+   * command timeout, recording checkpoint failure and worker lease conflict
+   * are security/runtime events tracked only by the dedicated Prometheus
+   * counters in infra/monitoring/voice-alerts.yaml and are intentionally
+   * left at zero rather than guessed from unrelated fields.
+   */
+  public evaluateActiveDimensionalAlerts(): VoiceDimensionalAlert[] {
+    const records = this.getCallRecords();
+
+    const groups = new Map<
+      string,
+      {
+        dimensions: VoiceAlertDimensions;
+        totalCost: number;
+        count: number;
+        unansweredHandoff: number;
+        errorBookingCount: number;
+        duplicateBookingCount: number;
+        providerCapacityExceededCount: number;
+        dispatchUnavailableCount: number;
+      }
+    >();
+
+    for (const rec of records) {
+      const key = `${rec.language}#${rec.routeProfileVersion}#${rec.provider}#${rec.brandId}`;
+      let group = groups.get(key);
+      if (!group) {
+        group = {
+          dimensions: {
+            language: rec.language,
+            routeProfileVersion: rec.routeProfileVersion,
+            provider: rec.provider,
+            brandId: rec.brandId,
+          },
+          totalCost: 0,
+          count: 0,
+          unansweredHandoff: 0,
+          errorBookingCount: 0,
+          duplicateBookingCount: 0,
+          providerCapacityExceededCount: 0,
+          dispatchUnavailableCount: 0,
+        };
+        groups.set(key, group);
+      }
+      group.totalCost += rec.totalCallCost;
+      group.count++;
+      if (rec.handoffRequired && !rec.handoffSucceeded) {
+        group.unansweredHandoff++;
+      }
+      if (rec.errorBookingDiscovered) {
+        group.errorBookingCount++;
+      }
+      if (rec.isKeyFieldMismatchOrUnauthorized) {
+        group.duplicateBookingCount++;
+      }
+      if (rec.admissionOutcome === "overflow") {
+        group.providerCapacityExceededCount++;
+      }
+      if (rec.dispatchFailureReason) {
+        group.dispatchUnavailableCount++;
+      }
+    }
+
+    const alerts: VoiceDimensionalAlert[] = [];
+    for (const group of groups.values()) {
+      const avgCost = group.count > 0 ? group.totalCost / group.count : 0;
+      alerts.push(
+        ...this.evaluateDimensionalAlerts({
+          dimensions: group.dimensions,
+          errorBookingCount: group.errorBookingCount,
+          duplicateBookingCount: group.duplicateBookingCount,
+          providerCapacityExceededCount: group.providerCapacityExceededCount,
+          unansweredHandoffCount: group.unansweredHandoff,
+          dispatchUnavailableCount: group.dispatchUnavailableCount,
+          perCallCostTwd: Number(avgCost.toFixed(4)),
+        }),
+      );
+    }
+
+    return alerts;
+  }
 }

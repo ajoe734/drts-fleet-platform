@@ -54,6 +54,13 @@ export class VoiceBookingController {
     return toApiSuccessEnvelope(report, requestId);
   }
 
+  @Get("metrics/alerts")
+  @RequireRealms("ops", "platform")
+  getActiveDimensionalAlerts(@Headers("x-request-id") requestId?: string) {
+    const alerts = this.voiceBookingMetricsService.evaluateActiveDimensionalAlerts();
+    return toApiSuccessEnvelope({ items: alerts }, requestId);
+  }
+
   @Get("usage/records")
   @RequireRealms("ops", "platform")
   listUsageRecords(

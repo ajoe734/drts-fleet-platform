@@ -844,6 +844,100 @@ describe("UV-EXEC-022 All-Call Metrics, Complete Cost Ledger & Dimensional Alert
       }
     });
 
+    it("aggregates active dimensional alerts per (language, routeProfileVersion, provider, brandId) group from real call records (evaluateActiveDimensionalAlerts)", () => {
+      const metricsService = new VoiceBookingMetricsService();
+
+      // Group A: zh-TW / v1 / twm / brand-drts-01 -- one error booking, one
+      // capacity overflow; average cost stays well under budget so only the
+      // error and capacity alerts fire.
+      metricsService.recordCallMetric({
+        callId: "alert-call-001",
+        providerCallId: "twm-alert-001",
+        providerAccountId: "twm-acc-01",
+        receivedAt: "2026-09-01T10:00:00Z",
+        lineBindingId: "line-001",
+        brandId: "brand-drts-01",
+        language: "zh-TW",
+        product: "ordinary_taxi",
+        routeProfileVersion: 1,
+        policyVersion: "uv-policy-v1",
+        provider: "twm",
+        admissionOutcome: "admitted",
+        enteredAi: true,
+        intentDiscernible: true,
+        isSupportedBusinessNeed: true,
+        errorBookingDiscovered: true,
+        totalCallCost: 10.0,
+      });
+      metricsService.recordCallMetric({
+        callId: "alert-call-002",
+        providerCallId: "twm-alert-002",
+        providerAccountId: "twm-acc-01",
+        receivedAt: "2026-09-01T10:01:00Z",
+        lineBindingId: "line-001",
+        brandId: "brand-drts-01",
+        language: "zh-TW",
+        product: "ordinary_taxi",
+        routeProfileVersion: 1,
+        policyVersion: "uv-policy-v1",
+        provider: "twm",
+        admissionOutcome: "overflow",
+        enteredAi: false,
+        intentDiscernible: false,
+        isSupportedBusinessNeed: false,
+        totalCallCost: 5.0,
+      });
+
+      // Group B: nan / v2 / gemini / brand-drts-02 -- no errors, but average
+      // per-call cost exceeds the default 50 TWD budget threshold.
+      metricsService.recordCallMetric({
+        callId: "alert-call-003",
+        providerCallId: "gemini-alert-003",
+        providerAccountId: "gemini-acc-01",
+        receivedAt: "2026-09-01T10:02:00Z",
+        lineBindingId: "line-002",
+        brandId: "brand-drts-02",
+        language: "nan",
+        product: "ordinary_taxi",
+        routeProfileVersion: 2,
+        policyVersion: "uv-policy-v1",
+        provider: "gemini",
+        admissionOutcome: "admitted",
+        enteredAi: true,
+        intentDiscernible: true,
+        isSupportedBusinessNeed: true,
+        totalCallCost: 80.0,
+      });
+
+      const alerts = metricsService.evaluateActiveDimensionalAlerts();
+
+      const groupAAlerts = alerts.filter(
+        (a) => a.dimensions.brandId === "brand-drts-01",
+      );
+      const groupBAlerts = alerts.filter(
+        (a) => a.dimensions.brandId === "brand-drts-02",
+      );
+
+      expect(groupAAlerts.map((a) => a.alertName)).toEqual([
+        "VoiceErrorOrDuplicateBooking",
+        "VoiceProviderCapacityExceeded",
+      ]);
+      for (const alert of groupAAlerts) {
+        expect(alert.dimensions).toEqual({
+          language: "zh-TW",
+          routeProfileVersion: 1,
+          provider: "twm",
+          brandId: "brand-drts-01",
+        });
+      }
+
+      expect(groupBAlerts.map((a) => a.alertName)).toEqual([
+        "VoiceCostAnomalySpike",
+      ]);
+      expect(groupBAlerts[0]?.metricValue).toBe(80.0);
+      expect(groupBAlerts[0]?.threshold).toBe(50.0);
+    });
+
     it("evaluates human callback SLA adherence and breach detection (SA §10.1 / SD §13.2)", () => {
       const metricsService = new VoiceBookingMetricsService();
 
