@@ -63,16 +63,16 @@ describe("SR-LEAVE-BE-001-ACCEPTANCE-RUNNER: Durable Reload Across a Real Postgr
         await db.query(
           `
           INSERT INTO ops.phase1_driver_shifts (
-            shift_id, driver_id, scheduled_start, scheduled_end, clock_in_at,
+            shift_id, shift_no, driver_id, scheduled_start, scheduled_end, clock_in_at,
             clock_out_at, status, record, created_at, updated_at
           ) VALUES (
-            $1, $2, '2026-09-10T12:00:00.000Z', '2026-09-10T18:00:00.000Z',
+            $1, $3, $2, '2026-09-10T12:00:00.000Z', '2026-09-10T18:00:00.000Z',
             '2026-09-10T12:00:00.000Z', null, 'scheduled',
             '{"shiftId": "${shiftId}", "driverId": "${driverId}"}'::jsonb,
             now(), now()
           )
         `,
-          [shiftId, driverId],
+          [shiftId, driverId, `SFT-${shiftId}`],
         );
 
         const leave = await service.createLeave(

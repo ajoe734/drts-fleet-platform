@@ -37,7 +37,6 @@ describe("SR-LEAVE-BE-001-ACCEPTANCE-RUNNER: Real PostgreSQL Race, Persistence &
   let repo1: DriverLeaveRepository;
   let repo2: DriverLeaveRepository;
   let service1: DriverLeaveService;
-  let service2: DriverLeaveService;
 
   beforeAll(async () => {
     if (!connectionString) {
@@ -66,7 +65,6 @@ describe("SR-LEAVE-BE-001-ACCEPTANCE-RUNNER: Real PostgreSQL Race, Persistence &
     repo1 = new DriverLeaveRepository(dbInstance1);
     repo2 = new DriverLeaveRepository(dbInstance2);
     service1 = new DriverLeaveService(repo1);
-    service2 = new DriverLeaveService(repo2);
   });
 
   afterAll(async () => {
@@ -273,16 +271,16 @@ describe("SR-LEAVE-BE-001-ACCEPTANCE-RUNNER: Real PostgreSQL Race, Persistence &
       await pool.query(
         `
         INSERT INTO ops.phase1_driver_shifts (
-          shift_id, driver_id, scheduled_start, scheduled_end, clock_in_at,
+          shift_id, shift_no, driver_id, scheduled_start, scheduled_end, clock_in_at,
           clock_out_at, status, record, created_at, updated_at
         ) VALUES (
-          $1, $2, '2026-09-10T11:00:00.000Z', '2026-09-10T16:00:00.000Z',
+          $1, $3, $2, '2026-09-10T11:00:00.000Z', '2026-09-10T16:00:00.000Z',
           '2026-09-10T11:00:00.000Z', null, 'scheduled',
           '{"shiftId": "${shiftId}", "driverId": "${driverId}"}'::jsonb,
           now(), now()
         )
       `,
-        [shiftId, driverId],
+        [shiftId, driverId, `SFT-${shiftId}`],
       );
 
       const driverToken = await mintAccessToken(harness1.jwtAuthService, driverIdentity(driverId));
@@ -535,16 +533,16 @@ describe("SR-LEAVE-BE-001-ACCEPTANCE-RUNNER: Real PostgreSQL Race, Persistence &
         await pool.query(
           `
           INSERT INTO ops.phase1_driver_shifts (
-            shift_id, driver_id, scheduled_start, scheduled_end, clock_in_at,
+            shift_id, shift_no, driver_id, scheduled_start, scheduled_end, clock_in_at,
             clock_out_at, status, record, created_at, updated_at
           ) VALUES (
-            $1, $2, '2026-09-10T11:00:00.000Z', '2026-09-10T16:00:00.000Z',
+            $1, $3, $2, '2026-09-10T11:00:00.000Z', '2026-09-10T16:00:00.000Z',
             '2026-09-10T11:00:00.000Z', null, 'scheduled',
             '{"shiftId": "${shiftId}", "driverId": "${driverId}"}'::jsonb,
             now(), now()
           )
         `,
-          [shiftId, driverId],
+          [shiftId, driverId, `SFT-${shiftId}`],
         );
 
         const leave = await service1.createLeave(
