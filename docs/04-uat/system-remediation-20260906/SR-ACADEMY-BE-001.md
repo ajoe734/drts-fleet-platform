@@ -132,6 +132,43 @@ corrected shared regulatory tables (`reg.driver_training_records`,
   `reg.phase1_registry_drivers` before grading and returns
   `404 DRIVER_NOT_FOUND` for an unknown id; this is covered by a unit test,
   not a live-DB negative test.
+- **Pre-existing (not introduced by this task) `uuid = varchar` join risk
+  in `regulatory-registry.repository.ts`'s `runIdempotentBackfill()`.**
+  Reviewer flagged that after this migration converts
+  `reg.driver_reg_profiles.driver_id` to `varchar(100)`,
+  `RegulatoryRegistryRepository.runIdempotentBackfill()`
+  (`regulatory-registry.repository.ts:1074-1121`, called from
+  `RegulatoryRegistryService.onModuleInit()` on every boot when the DB is
+  enabled) joins `reg.drivers d` (`driver_id uuid`, `V0004`) against
+  `reg.driver_reg_profiles dp` via `d.driver_id = dp.driver_id` — now
+  `uuid = varchar(100)`, a comparison Postgres rejects without an explicit
+  cast on one side (`operator does not exist: uuid = character varying`).
+
+  Verified via `git log -p --follow` on that file: the same function's
+  adjacent join, `d.driver_id = dc.driver_id` against
+  `reg.driver_public_registration_credentials dc`, has had this identical
+  `uuid = varchar(100)` shape since the function was introduced in commit
+  `cb6f46f61` (PR #1117, P5-SUP-DRV-001) — that commit's own migration
+  (`V0055__p5_disclosure_ids_as_varchar.sql`) converted `dc.driver_id` to
+  `varchar(100)` in the same change that added this join. This defect
+  pattern therefore predates SR-ACADEMY-BE-001; this migration's `dp`
+  conversion adds a second instance of an already-existing bug, it does not
+  create a new one.
+
+  `regulatory-registry.repository.ts` is outside this task's
+  `write_scopes`, so it was not modified here. Per
+  `regulatory-registry.service.ts`, the failure mode if the join does error
+  is non-fatal — caught and logged via `reportPersistenceFailure`, no
+  crash — but it would silently skip that backfill's DB-state hydration on
+  every boot post-deploy, for both the pre-existing `dc` join and the new
+  `dp` join alike. No live Postgres was available in this VM to confirm
+  empirically whether Postgres rejects this comparison at parse time; the
+  above is static/historical evidence (git history), not an execution
+  result. Recommended follow-up: a separate task, or supervisor-authorized
+  scope expansion onto `regulatory-registry.repository.ts`, to add an
+  explicit cast (`d.driver_id::text = dp.driver_id` /
+  `d.driver_id::text = dc.driver_id`) to both joins together, since they
+  share the same root cause and neither is in this task's ownership.
 
 ## Executed checks
 
