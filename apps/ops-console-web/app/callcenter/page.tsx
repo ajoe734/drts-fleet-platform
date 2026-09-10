@@ -2214,9 +2214,9 @@ export default function CallcenterPage() {
             theme={theme}
             tone={cohortStatus === "unavailable" ? "danger" : "warn"}
             icon="warn"
-            title="叫車受理/派車指標非最新"
+            title={t("callcenter.metrics.cohortStale.title")}
             body={
-              cohortErrorMessage ?? "指標查詢失敗，顯示的資料可能已過期"
+              cohortErrorMessage ?? t("callcenter.metrics.cohortStale.body")
             }
           />
         ) : null}
@@ -2226,8 +2226,8 @@ export default function CallcenterPage() {
             theme={theme}
             tone={usageStatus === "unavailable" ? "danger" : "warn"}
             icon="warn"
-            title="成本 ledger 非最新"
-            body={usageErrorMessage ?? "成本明細查詢失敗，顯示的資料可能已過期"}
+            title={t("callcenter.metrics.usageStale.title")}
+            body={usageErrorMessage ?? t("callcenter.metrics.usageStale.body")}
           />
         ) : null}
 
