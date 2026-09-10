@@ -145,6 +145,21 @@ corrected shared regulatory tables (`reg.driver_training_records`,
   with realm `tenant`. In `iam-policy-catalog.ts`, `driver:read` allows only `["system", "platform", "ops", "driver"]`
   (excluding `tenant`), and `tenant_ops_admin` role only possesses `reports:read`.
   Fixed by scoping `FleetPartnerTrainingController` endpoints to `@RequireScopes("reports:read")`.
+- **Added real GitHub-hosted remote acceptance runner and integration suite.**
+  Per supervisor instructions and required acceptance criteria (`academy_remote_migration_preserves_records`,
+  `academy_real_identity_and_scope`, `academy_durable_pass_expiry_projection`, `academy_active_cohort_boundaries`),
+  built:
+  1. `.github/workflows/academy-acceptance.yml`: dedicated GitHub Actions workflow running against PostGIS 16-3.4,
+     with immutable candidate SHA checkout, harness overlay preservation, migration execution, real HTTP/SQL test
+     execution, raw SQL row evidence extraction, SHA manifest creation, zero-skip gate, and always()-uploaded artifacts.
+  2. `tools/ci/test_academy_acceptance_workflow.py`: 16 structural contract tests ensuring the workflow declares
+     required candidate SHA, timeouts, immutable checkout, dedicated DB, SQL extractions, manifest, and zero-skip gate.
+  3. `tests/integration/system-remediation/sr-academy-be-001/academy-acceptance-test-harness.ts`: real NestJS HTTP
+     test module booting `DriverAcademyModule` with production `BootstrapAuthGuard` and `JwtAuthService` using verified JWTs.
+  4. `tests/integration/system-remediation/sr-academy-be-001/academy-remote-acceptance.integration.test.ts`: 4 test suites
+     verifying migration varchar conversion, FK removal, backfill textual join execution, real text driver identity,
+     tenant/ops IAM boundaries, real quiz grading & pass/fail persistence, durable pass/expiry projection in PostgreSQL,
+     and exact active cohort boundary resolution (deduping duplicate affiliations, excluding future, expired, and orphan records).
 
 ## Executed checks
 
@@ -154,12 +169,10 @@ corrected shared regulatory tables (`reg.driver_training_records`,
 | `pnpm --filter @drts/api typecheck` | 0 | Clean, 0 errors across entire `@drts/api` |
 | `pnpm exec vitest run tests/unit/system-remediation/sr-academy-be-001/` | 0 | 3 files, 35 tests passed (`academy-domain.test.ts`, `academy.service.test.ts`, `academy.controller.test.ts`) |
 | `pnpm exec vitest run tests/security/iam-route-inventory.test.ts` | 0 | 10/10 tests passed (zero unclassified routes, zero realm mismatches, zero unknown scopes) |
+| `python3 -m unittest tools/ci/test_academy_acceptance_workflow.py -v` | 0 | 16/16 contract tests passed |
+| `pnpm run lint:root` | 0 | ESLint clean across all tests and configs (0 warnings, 0 errors) |
 | `git diff --check` | 0 | No whitespace errors |
 
-No PostgreSQL migration/transaction/concurrency test, HTTP/IAM integration
-test, browser, real-device, deployed qualification, or live academy
-acceptance was run. Test resource IDs (`crs_basics_001`, `drv_1`,
-`drv_other`, `fleet-a`, `fleet-b`, `att_1`, `att_old`, …) used in the unit
-tests above are synthetic unit-test inputs only, not live resource IDs. No
-CI/merge/deploy success is claimed by this document; those are recorded by
-the candidate lifecycle after handoff/review.
+Local verification confirms static correctness, typecheck, contract tests, and unit tests. In accordance with the VM
+guardrails, no local database or HTTP servers were started on this VM; the real PostgreSQL multi-instance migration,
+grading, and cohort execution runs on the GitHub-hosted acceptance runner via `.github/workflows/academy-acceptance.yml`.
