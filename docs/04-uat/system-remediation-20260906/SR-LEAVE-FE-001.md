@@ -203,6 +203,16 @@ ui-realm-token guard: OK (2 canonical hexes; no off-token brand colors)
 exit code: 0
 ```
 
+### 4.7 全庫語法與代碼風格檢查（pnpm run lint）
+```text
+$ pnpm run lint
+> drts-fleet-platform@0.1.0 lint /home/lupin/workspace/drts-fleet-platform/.artifacts/worktrees/auto/gemini2-sr-leave-fe-001
+> pnpm lint:root && turbo run lint --concurrency=2
+
+Tasks:    21 successful, 21 total
+exit code: 0
+```
+
 ---
 
 ## 5. 驗證界限與未施作部分說明（Explicit Limitations）

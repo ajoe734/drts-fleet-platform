@@ -18,7 +18,6 @@ import type {
 } from "@drts/contracts";
 import {
   DRV_LEAVE_TYPE,
-  MAX_PAST_APPLICATION_GRACE_MS,
   checkLeaveOverlap,
   fmtTaipei,
   validateLeaveTimeRange,
@@ -104,8 +103,8 @@ export function DriverLeaveForm({
 
   const preset = getPresetValues();
   const [leaveType, setLeaveType] = useState<DriverLeaveType>(preset.type);
-  const [startTime, setStartTime] = useState<string>(preset.start);
-  const [endTime, setEndTime] = useState<string>(preset.end);
+  const [startTime] = useState<string>(preset.start);
+  const [endTime] = useState<string>(preset.end);
   const [reason, setReason] = useState<string>(preset.reason);
   const [isFocusedReason, setIsFocusedReason] = useState(variant === "keyboard");
 

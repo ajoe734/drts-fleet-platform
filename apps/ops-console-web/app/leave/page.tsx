@@ -17,7 +17,7 @@ import {
   type CanvasTableColumn,
 } from "@drts/ui-web";
 import { getOpsClient } from "@/lib/api-client";
-import { OpsLeaveStatusChip, OpsLeaveTypeChip } from "./leave-chips";
+import { OpsLeaveTypeChip } from "./leave-chips";
 import { LeaveConflictView, type OpsConflictVariant } from "./leave-conflict-view";
 import { LeaveDetailView } from "./leave-detail-view";
 import { LeaveHistoryView } from "./leave-history-view";
@@ -361,9 +361,15 @@ export default function OpsLeavePage() {
       />
 
       <div style={{ padding: 24 }}>
-        {rows.length === 0 ? (
+        {isLoading ? (
           <EmptyState
-            body="此篩選條件下沒有請假申請。"
+            body={LEAVE_OPS_COPY.loadingSubtitle}
+            theme={theme}
+            title={LEAVE_OPS_COPY.loadingTitle}
+          />
+        ) : rows.length === 0 ? (
+          <EmptyState
+            body={LEAVE_OPS_COPY.emptyRequestsSubtitle}
             theme={theme}
             title={tLeave("emptyRequestsTitle")}
           />

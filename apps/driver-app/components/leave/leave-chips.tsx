@@ -1,6 +1,5 @@
-import type { ReactNode } from "react";
 import React from "react";
-import { StyleSheet, Text, View, type StyleProp, type ViewStyle } from "react-native";
+import { StyleSheet, Text, type StyleProp, type ViewStyle } from "react-native";
 import type { DriverLeaveStatus, DriverLeaveType } from "@drts/contracts";
 import {
   DRV_LEAVE_STATUS,

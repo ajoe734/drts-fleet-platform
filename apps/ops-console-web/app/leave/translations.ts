@@ -8,6 +8,8 @@ export const LEAVE_OPS_COPY = {
   pageTitle: "請假審核 · Leave Requests",
   emptyRequestsTitle: "查無請假申請",
   emptyRequestsSubtitle: "目前選取的篩選條件下沒有待處理的請假紀錄。",
+  loadingTitle: "載入中",
+  loadingSubtitle: "正在讀取請假資料…",
   unitRecords: "筆",
   detailsAction: "詳情",
 

@@ -10,9 +10,7 @@ import {
   CanvasEmptyState as EmptyState,
   CanvasField as Field,
   CanvasIcon,
-  CanvasInput as Input,
   CanvasPageHeader as PageHeader,
-  CanvasPill as Pill,
   type CanvasTheme,
 } from "@drts/ui-web";
 import { OpsLeaveStatusChip, OpsLeaveTypeChip } from "./leave-chips";

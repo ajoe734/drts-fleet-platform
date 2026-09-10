@@ -6,7 +6,6 @@ import {
   MAX_PAST_APPLICATION_GRACE_MS,
   SYSTEM_REMEDIATION_ERROR_CODES,
   type CreateDriverLeaveCommand,
-  type DriverLeaveRecord,
   type ReviewDriverLeaveCommand,
   type WithdrawDriverLeaveCommand,
 } from "../../../../packages/contracts/src";
@@ -90,6 +89,7 @@ describe("SR-LEAVE-FE-001 — 司機與主管請假操作畫面", () => {
         "2026-09-16T15:59:00.000Z",
       );
       expect(crossDay).toBe("09/14（一）08:00 – 09/16（三）23:59");
+      expect(formatLeaveRangeZhOps("2026-09-10T08:00:00.000Z", "2026-09-10T13:00:00.000Z")).toBe(sameDay);
     });
 
     it("2.3 Validates normal future date range successfully", () => {
@@ -103,6 +103,7 @@ describe("SR-LEAVE-FE-001 — 司機與主管請假操作畫面", () => {
     });
 
     it("2.4 Validates MAX_PAST_APPLICATION_GRACE_MS: allows within 15 minutes in past, rejects > 15 minutes", () => {
+      expect(MAX_PAST_APPLICATION_GRACE_MS).toBe(15 * 60 * 1000);
       // 10 minutes ago -> allowed
       const tenMinAgo = new Date(
         referenceNow.getTime() - 10 * 60 * 1000,

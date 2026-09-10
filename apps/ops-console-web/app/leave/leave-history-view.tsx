@@ -44,7 +44,16 @@ export function LeaveHistoryView({
       w: 110,
       mono: true,
       r: (r) => (
-        <span style={{ color: theme.accent, fontWeight: 600 }}>{r.leaveId}</span>
+        <span
+          onClick={() => onSelectLeave?.(r)}
+          style={{
+            color: theme.accent,
+            fontWeight: 600,
+            cursor: onSelectLeave ? "pointer" : "default",
+          }}
+        >
+          {r.leaveId}
+        </span>
       ),
     },
     {
