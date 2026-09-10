@@ -113,6 +113,16 @@ def task_index_from_status(config: dict[str, Any], status: dict[str, Any]) -> di
 
 
 def task_is_dispatch_eligible_for_agent(task: dict[str, Any], agent_name: str) -> bool:
+    # `eligible_agents` limits implementation ownership.  A task explicitly
+    # handed to a different reviewer must still be reviewable by that person;
+    # otherwise a valid owner/reviewer separation can enter `review` and never
+    # receive a worker (for example an auto-generated task restricted to its
+    # owner lane but assigned an independent reviewer).
+    if (
+        str(task.get("status") or "").lower() == "review"
+        and str(task.get("reviewer") or "") == agent_name
+    ):
+        return True
     raw = task.get("eligible_agents")
     if raw is None:
         raw = task.get("eligibility")

@@ -1467,6 +1467,47 @@ class ProcessQueueDispatchGuardTests(EvidenceOutputIsolation, unittest.TestCase)
         self.assertEqual(queued_event["target_agent"], "Codex")
         self.assertEqual(queued_event["reason"], "review_ready_dispatch")
 
+    def test_dispatcher_allows_explicit_reviewer_outside_owner_eligible_agents(self) -> None:
+        config = {
+            "schema": {
+                "tasks_path": "tasks",
+                "task_id_field": "id",
+                "assignee_field": "owner",
+                "reviewer_field": "reviewer",
+            },
+            "agents": {
+                "gemini": {"id": "gemini", "display_name": "Gemini", "provider": "gemini"},
+                "gemini2": {"id": "gemini2", "display_name": "Gemini2", "provider": "gemini2"},
+            },
+            "providers": {},
+        }
+        state = {"queue": {"events": {}}, "workers": {}}
+        status = {
+            "tasks": [
+                {
+                    "id": "REVIEW-ELIGIBILITY-001",
+                    "status": "review",
+                    "owner": "Gemini2",
+                    "reviewer": "Gemini",
+                    "eligible_agents": ["Gemini2"],
+                    "depends_on": [],
+                }
+            ]
+        }
+
+        with (
+            mock.patch.object(supervisor, "load_status", return_value=status),
+            mock.patch.object(supervisor, "load_event_queue", return_value=[]),
+            mock.patch.object(supervisor, "queue_delivery_event", return_value=True) as queue_delivery_event,
+        ):
+            changed = supervisor.dispatch_ready_tasks(config, state)
+
+        self.assertTrue(changed)
+        queued_event = queue_delivery_event.call_args.args[1]
+        self.assertEqual(queued_event["task_id"], "REVIEW-ELIGIBILITY-001")
+        self.assertEqual(queued_event["target_agent"], "Gemini")
+        self.assertEqual(queued_event["reason"], "review_ready_dispatch")
+
     def test_dispatcher_does_not_helper_claim_when_owner_is_not_busy(self) -> None:
         config = {
             "schema": {
