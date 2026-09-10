@@ -813,12 +813,14 @@ describe("SR-HOST-BE-001: Host Restricted Read Model & Vehicle Access Authorizat
       const result = evaluateTenantApprovalRules({
         tenantId: "tenant_001",
         subject: {
-          type: "booking_order",
-          id: "ord_test_001",
-          summary: "Test booking order",
+          subjectType: "booking",
+          bookingId: "ord_test_001",
+          draftId: null,
+          operation: "create",
         },
         inputSnapshot: {
           amountMinor: 50000,
+          currency: "TWD",
           businessDispatchSubtype: "vip",
           vehiclePreference: "sedan",
           reservationWindowStart: "2026-09-10T12:00:00.000Z",
@@ -859,9 +861,9 @@ describe("SR-HOST-BE-001: Host Restricted Read Model & Vehicle Access Authorizat
       });
 
       expect(result).toBeDefined();
-      expect(result.outcome.decision).toBe("require_approval");
+      expect(result.outcome?.decision).toBe("require_approval");
       expect(result.matchedRules.length).toBe(1);
-      expect(result.matchedRules[0].ruleId).toBe("rule_001");
+      expect(result.matchedRules[0]?.ruleId).toBe("rule_001");
     });
   });
 });
