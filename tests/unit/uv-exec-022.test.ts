@@ -18,7 +18,11 @@ import {
   formatVoiceCost,
   deriveCohortMetricsPresentation,
   deriveDimensionalAlertPresentation,
+  adaptCohortReportToUiView,
+  mapVoiceUsageRecordToUiItem,
 } from "../../apps/ops-console-web/app/callcenter/callcenter-metrics-ledger";
+import * as fs from "fs";
+import * as path from "path";
 import { REALM_COLORS, STATUS_TONES } from "../../packages/ui-tokens/src";
 
 describe("UV-EXEC-022 All-Call Metrics, Complete Cost Ledger & Dimensional Alerts", () => {
@@ -887,6 +891,31 @@ describe("UV-EXEC-022 All-Call Metrics, Complete Cost Ledger & Dimensional Alert
       expect(slaReport.slaComplianceRate).toBe(0.5); // 2/4 = 50%
       expect(slaReport.averageTimeToFirstContactSeconds).toBe(Math.round((120 + 450) / 2));
     });
+
+    it("verifies all alert rules in infra/monitoring/voice-alerts.yaml point to valid runbook anchors", () => {
+      const alertYamlPath = path.resolve(__dirname, "../../infra/monitoring/voice-alerts.yaml");
+      const runbookPath = path.resolve(__dirname, "../../docs/03-runbooks/voice-alert-response.md");
+
+      expect(fs.existsSync(alertYamlPath)).toBe(true);
+      expect(fs.existsSync(runbookPath)).toBe(true);
+
+      const alertYaml = fs.readFileSync(alertYamlPath, "utf-8");
+      const runbookContent = fs.readFileSync(runbookPath, "utf-8");
+
+      // Extract all runbook_url values
+      const runbookUrlMatches = [...alertYaml.matchAll(/runbook_url:\s*"([^"]+)"/g)];
+      expect(runbookUrlMatches.length).toBe(9); // All 9 alerts must have a runbook_url
+
+      for (const match of runbookUrlMatches) {
+        const fullUrl = match[1];
+        const [filePath, anchor] = fullUrl.split("#");
+        expect(filePath).toBe("docs/03-runbooks/voice-alert-response.md");
+        expect(anchor).toBeDefined();
+        // Check that anchor heading exists in the runbook
+        const expectedHeadingNumber = anchor.slice(0, 1);
+        expect(runbookContent).toContain(`### ${expectedHeadingNumber}. `);
+      }
+    });
   });
 
   // ============================================================================
@@ -916,6 +945,65 @@ describe("UV-EXEC-022 All-Call Metrics, Complete Cost Ledger & Dimensional Alert
       expect(view.dispatchRateFormatted).toBe("80.0%");
       expect(view.costPerEffectiveIntakeFormatted).toBe("20.00 TWD");
       expect(view.costPerSuccessfulDispatchFormatted).toBe("25.71 TWD");
+    });
+
+    it("does not report zero dollars when totalCostTwd is 0 even with valid intakes (SD/SA invariant)", () => {
+      const view = deriveCohortMetricsPresentation({
+        windowStart: "2026-09-01T00:00:00Z",
+        windowEnd: "2026-09-02T00:00:00Z",
+        observationWindowClosed: true,
+        totalRealIngress: 50,
+        callsEnteredAi: 50,
+        expressedBookingIntent: 50,
+        validBookingIntakes: 45,
+        immediateDispatchOrders: 40,
+        driverAcceptedOrders: 35,
+        transferCalls: 2,
+        errorBookings: 0,
+        totalCostTwd: 0, // Zero or unpopulated cost
+      });
+
+      expect(view.costPerEffectiveIntakeFormatted).not.toBe("0.00 TWD");
+      expect(view.costPerEffectiveIntakeFormatted).toBe("N/A (尚無成本資料)");
+      expect(view.costPerSuccessfulDispatchFormatted).not.toBe("0.00 TWD");
+      expect(view.costPerSuccessfulDispatchFormatted).toBe("N/A (尚無成本資料)");
+    });
+
+    it("adapts backend VoiceCohortMetricsReport and maps usage records to UI types", () => {
+      const report = {
+        cohortWindow: {
+          windowStart: "2026-09-01T00:00:00.000Z",
+          windowEnd: "2026-09-02T00:00:00.000Z",
+          observationWindowClosed: true,
+        },
+        allCallCoverage: { rate: 90, numeratorEnteredAi: 90, denominatorRealIngress: 100 },
+        unattendedEffectiveIntake: { rate: 80, numeratorValidIntakes: 72 },
+        unattendedDispatchCompletion: { rate: 70, numeratorDriverAcceptedUniqueOrders: 56 },
+        humanTransfer: { rate: 10 },
+        errorBooking: { rate: 1 },
+        costPerEffectiveIntake: { cost: 15.5, totalVoiceCost: 1116, denominatorValidIntakes: 72 },
+        costPerSuccessfulDispatch: { cost: 19.93, status: "settled", totalVoiceCost: 1116, denominatorDriverAcceptedOrders: 56 },
+      };
+
+      const uiView = adaptCohortReportToUiView(report);
+      expect(uiView.effectiveIntakeRateFormatted).toBe("80.0%");
+      expect(uiView.dispatchRateFormatted).toBe("70.0%");
+      expect(uiView.costPerEffectiveIntakeFormatted).toBe("15.50 TWD");
+      expect(uiView.costPerSuccessfulDispatchFormatted).toBe("19.93 TWD");
+
+      const usageItem = mapVoiceUsageRecordToUiItem({
+        serviceType: "llm",
+        provider: "gemini",
+        quantity: 5000,
+        billingUnit: "token",
+        estimatedCost: 0.75,
+        actualCost: 0.75,
+        currency: "TWD",
+        unverified: false,
+      });
+      expect(usageItem.serviceType).toBe("llm");
+      expect(usageItem.estimatedCost).toBe(0.75);
+      expect(usageItem.variance).toBe(0);
     });
 
     it("adheres strictly to @drts/ui-tokens realm tokens and status tones", () => {

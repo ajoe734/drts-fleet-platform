@@ -4,6 +4,8 @@ import {
   deriveCohortMetricsPresentation,
   deriveDimensionalAlertPresentation,
   deriveCallbackSlaPresentation,
+  adaptCohortReportToUiView,
+  mapVoiceUsageRecordToUiItem,
 } from "../../app/callcenter/callcenter-metrics-ledger";
 import { REALM_COLORS, STATUS_TONES } from "@drts/ui-tokens";
 
@@ -83,6 +85,132 @@ describe("callcenter-metrics-ledger domain helpers & UI contract", () => {
 
       expect(pres.costPerEffectiveIntakeFormatted).not.toBe("0.00 TWD");
       expect(pres.costPerEffectiveIntakeFormatted).toContain("N/A");
+    });
+
+    it("does not report zero dollars when totalCostTwd is 0 even with valid intakes (SD/SA invariant)", () => {
+      const pres = deriveCohortMetricsPresentation({
+        windowStart: "2026-09-01T00:00:00Z",
+        windowEnd: "2026-09-02T00:00:00Z",
+        observationWindowClosed: true,
+        totalRealIngress: 10,
+        callsEnteredAi: 10,
+        expressedBookingIntent: 10,
+        validBookingIntakes: 8,
+        immediateDispatchOrders: 8,
+        driverAcceptedOrders: 6,
+        transferCalls: 1,
+        errorBookings: 0,
+        totalCostTwd: 0, // Unpopulated or zero!
+      });
+
+      expect(pres.costPerEffectiveIntakeFormatted).not.toBe("0.00 TWD");
+      expect(pres.costPerEffectiveIntakeFormatted).toBe("N/A (尚無成本資料)");
+      expect(pres.costPerSuccessfulDispatchFormatted).not.toBe("0.00 TWD");
+      expect(pres.costPerSuccessfulDispatchFormatted).toBe("N/A (尚無成本資料)");
+    });
+  });
+
+  describe("adaptCohortReportToUiView", () => {
+    it("adapts backend VoiceCohortMetricsReport into UiCohortMetricsView correctly", () => {
+      const mockReport = {
+        cohortWindow: {
+          windowStart: "2026-09-01T00:00:00.000Z",
+          windowEnd: "2026-09-02T00:00:00.000Z",
+          observationWindowClosed: true,
+        },
+        allCallCoverage: {
+          rate: 95.0,
+          numeratorEnteredAi: 95,
+          denominatorRealIngress: 100,
+        },
+        unattendedEffectiveIntake: {
+          rate: 85.0,
+          numeratorValidIntakes: 85,
+        },
+        unattendedDispatchCompletion: {
+          rate: 80.0,
+          numeratorDriverAcceptedUniqueOrders: 68,
+        },
+        humanTransfer: {
+          rate: 10.0,
+        },
+        errorBooking: {
+          rate: 0.0,
+        },
+        costPerEffectiveIntake: {
+          cost: 23.5,
+          totalVoiceCost: 1997.5,
+          denominatorValidIntakes: 85,
+        },
+        costPerSuccessfulDispatch: {
+          cost: 29.38,
+          status: "settled",
+          totalVoiceCost: 1997.5,
+          denominatorDriverAcceptedOrders: 68,
+        },
+      };
+
+      const view = adaptCohortReportToUiView(mockReport);
+      expect(view.coverageRateFormatted).toBe("95.0%");
+      expect(view.effectiveIntakeRateFormatted).toBe("85.0%");
+      expect(view.dispatchRateFormatted).toBe("80.0%");
+      expect(view.costPerEffectiveIntakeFormatted).toBe("23.50 TWD");
+      expect(view.costPerSuccessfulDispatchFormatted).toBe("29.38 TWD");
+      expect(view.costPerSuccessfulDispatchStatus).toBe("settled");
+    });
+
+    it("displays pending label when observation window is open in report", () => {
+      const mockReport = {
+        cohortWindow: {
+          windowStart: "2026-09-01T00:00:00.000Z",
+          windowEnd: "2026-09-02T00:00:00.000Z",
+          observationWindowClosed: false,
+        },
+        allCallCoverage: { rate: 100, numeratorEnteredAi: 10, denominatorRealIngress: 10 },
+        unattendedEffectiveIntake: { rate: 100, numeratorValidIntakes: 10 },
+        unattendedDispatchCompletion: { rate: 100, numeratorDriverAcceptedUniqueOrders: 8 },
+        humanTransfer: { rate: 0 },
+        errorBooking: { rate: 0 },
+        costPerEffectiveIntake: { cost: 20, totalVoiceCost: 200, denominatorValidIntakes: 10 },
+        costPerSuccessfulDispatch: {
+          cost: null,
+          status: "pending_observation_window",
+          totalVoiceCost: 200,
+          denominatorDriverAcceptedOrders: 8,
+          pendingReason: "Window open",
+        },
+      };
+
+      const view = adaptCohortReportToUiView(mockReport);
+      expect(view.costPerSuccessfulDispatchStatus).toBe("pending_observation_window");
+      expect(view.costPerSuccessfulDispatchFormatted).toBe("待觀察窗口結算");
+    });
+  });
+
+  describe("mapVoiceUsageRecordToUiItem", () => {
+    it("maps server usage record correctly", () => {
+      const serverRecord = {
+        usageId: "usage-001",
+        serviceType: "telephony",
+        provider: "twm",
+        quantity: 120,
+        billingUnit: "second",
+        estimatedCost: 2.4,
+        actualCost: 2.5,
+        currency: "TWD",
+        unverified: false,
+      };
+
+      const item = mapVoiceUsageRecordToUiItem(serverRecord);
+      expect(item.serviceType).toBe("telephony");
+      expect(item.provider).toBe("twm");
+      expect(item.quantity).toBe(120);
+      expect(item.billingUnit).toBe("second");
+      expect(item.estimatedCost).toBe(2.4);
+      expect(item.actualCost).toBe(2.5);
+      expect(item.variance).toBeCloseTo(0.1);
+      expect(item.currency).toBe("TWD");
+      expect(item.unverified).toBe(false);
     });
   });
 

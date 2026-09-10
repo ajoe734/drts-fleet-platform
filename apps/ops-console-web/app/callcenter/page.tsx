@@ -82,6 +82,8 @@ import {
 import {
   deriveCohortMetricsPresentation,
   deriveCallbackSlaPresentation,
+  adaptCohortReportToUiView,
+  mapVoiceUsageRecordToUiItem,
   type UiCohortMetricsView,
   type UiCostLedgerItem,
 } from "./callcenter-metrics-ledger";
@@ -1069,8 +1071,8 @@ export default function CallcenterPage() {
   const [outcomeNotice, setOutcomeNotice] = useState<OutcomeNotice | null>(
     null,
   );
-  const [usageRecords] = useState<UiCostLedgerItem[]>([]);
-  const [serverCohort] = useState<UiCohortMetricsView | null>(null);
+  const [usageRecords, setUsageRecords] = useState<UiCostLedgerItem[]>([]);
+  const [serverCohort, setServerCohort] = useState<UiCohortMetricsView | null>(null);
   const [loading, setLoading] = useState(true);
   const [query, setQuery] = useState("");
   const [queueView, setQueueView] = useState<QueueView>("sessions");
@@ -1604,13 +1606,24 @@ export default function CallcenterPage() {
 
     try {
       const client = getOpsClient();
-      const [nextSessionsEnvelope, nextCallbacksEnvelope] = await Promise.all([
+      const [
+        nextSessionsEnvelope,
+        nextCallbacksEnvelope,
+        cohortResponse,
+        usageResponse,
+      ] = await Promise.all([
         client.get<CallcenterListEnvelope<RuntimeSessionRecord>>(
           "/api/callcenter/sessions",
         ),
         client.get<CallcenterListEnvelope<RuntimeCallbackRecord>>(
           "/api/callcenter/callbacks",
         ),
+        client
+          .get<any>("/api/callcenter/voice/metrics/cohort")
+          .catch(() => null),
+        client
+          .get<any>("/api/callcenter/voice/usage/records")
+          .catch(() => null),
       ]);
 
       const nextSessions = nextSessionsEnvelope.items ?? [];
@@ -1619,6 +1632,23 @@ export default function CallcenterPage() {
         nextSessionsEnvelope.health ??
         nextCallbacksEnvelope.health ??
         buildFallbackHealth(null);
+
+      if (cohortResponse) {
+        if ("allCallCoverage" in cohortResponse) {
+          setServerCohort(adaptCohortReportToUiView(cohortResponse));
+        } else if ("effectiveIntakeRateFormatted" in cohortResponse) {
+          setServerCohort(cohortResponse as UiCohortMetricsView);
+        }
+      }
+
+      if (usageResponse) {
+        const rawItems = Array.isArray(usageResponse)
+          ? usageResponse
+          : usageResponse?.items;
+        if (Array.isArray(rawItems)) {
+          setUsageRecords(rawItems.map(mapVoiceUsageRecordToUiItem));
+        }
+      }
 
       setSessions(nextSessions);
       setCallbacks(nextCallbacks);
