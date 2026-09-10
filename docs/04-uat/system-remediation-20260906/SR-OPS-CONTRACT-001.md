@@ -58,6 +58,7 @@ Owner：Gemini2；Reviewer：Gemini。日期：2026-09-10 UTC。
 | `pnpm run test:unit tests/unit/system-remediation/sr-ops-contract-001/`              |     0     | 2.00s | 1 test file, 12 passed (Root vitest discovery 通過)               |
 | `pnpm exec vitest run tests/unit/system-remediation/sr-contract-read-001/`           |     0     | 2.46s | 1 test file, 19 passed (前置任務回歸驗證 100% 通過)               |
 | `pnpm exec eslint tests/unit/system-remediation/sr-ops-contract-001/`                 |     0     | 1.8s  | 測試檔案 ESLint 零警告零錯誤                                      |
+| `pnpm run i18n:guard`                                                                 |     0     | 2.8s  | i18n 守門通過（553 檔案掃描零違規，消除 locale-ternary-copy）      |
 | `python3 tools/ci/check_test_coverage.py`                                             |     0     | 0.15s | CI test coverage path 映射全數覆蓋 (67 test files)                 |
 
 ---
@@ -111,6 +112,7 @@ Owner：Gemini2；Reviewer：Gemini。日期：2026-09-10 UTC。
    - `page.tsx`：清除 `contract_detail_pending`，啟用 `open_contract_detail`，在合約列中建構保留篩選的 `detailHref`。
    - `contracts-tables.tsx`：擴充 `ContractRow` 型別包含 `detailHref`，合約 ID 與操作欄詳情按鈕均以 `theme.accent` 樣式連結至對應詳情。
    - `[contractId]/page.tsx`：接收 `searchParams` 並計算 `backHref`；非同步載入 `ContractOperationalViewRecord`；以 `Card` 與 `DL` 完整投影 7 項營運條款，落實三態標記；時間軸呈現版本節點；提供治理轉向至 Platform Admin。
+   - `translations.ts`：專用條款翻譯與格式化模組，將 `formatModifiableWindow`、`formatWaitingRule`、`formatNoShowRule` 自 inline 條件中抽離，完全符合 `i18n-guard` 規範（消弭 `locale-ternary-copy`）。
 2. `tests/unit/system-remediation/sr-ops-contract-001/`
    - `sr-ops-contract-001.test.ts`：12 項完整涵蓋導航、篩選返回、三態條款、AV 特例、夥伴授權與唯讀隔離之單元測試。
 3. `docs/04-uat/system-remediation-20260906/SR-OPS-CONTRACT-001.md`

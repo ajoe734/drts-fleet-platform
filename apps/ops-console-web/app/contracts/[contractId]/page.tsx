@@ -12,6 +12,11 @@ import { formatOpsCodeLabel } from "@/lib/localized-labels";
 import { getServerLocale } from "@/lib/server-locale";
 import type { Locale } from "@/lib/translations";
 import {
+  formatModifiableWindow,
+  formatNoShowRule,
+  formatWaitingRule,
+} from "../translations";
+import {
   CanvasBanner as Banner,
   CanvasCard as Card,
   CanvasDL as DL,
@@ -595,9 +600,11 @@ export default async function ContractDetailPage({
         if (termStatus === "available" && opView?.modifiableWindow) {
           return (
             opView.modifiableWindow.description ??
-            (locale === "zh"
-              ? `出車前 ${opView.modifiableWindow.cutoffMinutes} 分鐘截止修改（前置 ${opView.modifiableWindow.leadTimeMinutes} 分鐘）`
-              : `Cutoff: ${opView.modifiableWindow.cutoffMinutes}m before departure (Lead time: ${opView.modifiableWindow.leadTimeMinutes}m)`)
+            formatModifiableWindow(
+              locale,
+              opView.modifiableWindow.cutoffMinutes,
+              opView.modifiableWindow.leadTimeMinutes,
+            )
           );
         }
         return (
@@ -686,17 +693,11 @@ export default async function ContractDetailPage({
           );
         }
         if (termStatus === "available" && opView?.waitingRule) {
-          return locale === "zh"
-            ? `免費等候 ${opView.waitingRule.gracePeriodMinutes} 分鐘${
-                opView.waitingRule.chargeableIntervalMinutes
-                  ? `（逾時每 ${opView.waitingRule.chargeableIntervalMinutes} 分鐘計費）`
-                  : ""
-              }`
-            : `Grace period: ${opView.waitingRule.gracePeriodMinutes}m${
-                opView.waitingRule.chargeableIntervalMinutes
-                  ? ` (Charge interval: ${opView.waitingRule.chargeableIntervalMinutes}m)`
-                  : ""
-              }`;
+          return formatWaitingRule(
+            locale,
+            opView.waitingRule.gracePeriodMinutes,
+            opView.waitingRule.chargeableIntervalMinutes,
+          );
         }
         return (
           <span
@@ -727,17 +728,11 @@ export default async function ContractDetailPage({
           );
         }
         if (termStatus === "available" && opView?.noShowRule) {
-          return locale === "zh"
-            ? `門檻 ${opView.noShowRule.thresholdMinutes} 分鐘${
-                opView.noShowRule.feeApplicable
-                  ? "（收取 No-show 費用）"
-                  : "（不另收費）"
-              }`
-            : `Threshold: ${opView.noShowRule.thresholdMinutes}m${
-                opView.noShowRule.feeApplicable
-                  ? " (Fee applicable)"
-                  : " (No fee)"
-              }`;
+          return formatNoShowRule(
+            locale,
+            opView.noShowRule.thresholdMinutes,
+            opView.noShowRule.feeApplicable,
+          );
         }
         return (
           <span
