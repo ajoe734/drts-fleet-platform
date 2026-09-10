@@ -39,6 +39,12 @@ describe("SR-LEAVE-BE-001: 請假資料與審核／班次連動服務", () => {
       expect(leaveAlloc.primary_tables).toContain("ops.phase1_driver_leave_requests");
     });
 
+    it("exports driver leave types, statuses, and grace window according to canonical contracts", () => {
+      expect(DRIVER_LEAVE_TYPES).toContain("annual");
+      expect(DRIVER_LEAVE_STATUSES).toContain("pending");
+      expect(MAX_PAST_APPLICATION_GRACE_MS).toBe(15 * 60 * 1000);
+    });
+
     it("verifies V0094__sr_driver_leave.sql migration file exists and has correct DDL", () => {
       expect(fs.existsSync(migrationPath)).toBe(true);
       const sql = fs.readFileSync(migrationPath, "utf-8");
@@ -366,7 +372,9 @@ describe("SR-LEAVE-BE-001: 請假資料與審核／班次連動服務", () => {
 
     it("rejects startTime older than 15 minutes with 400 LEAVE_INVALID_TIME_RANGE", async () => {
       // 16 minutes in past exceeds MAX_PAST_APPLICATION_GRACE_MS
-      const startTime = new Date(now.getTime() - 16 * 60 * 1000).toISOString();
+      const startTime = new Date(
+        now.getTime() - (MAX_PAST_APPLICATION_GRACE_MS + 60 * 1000),
+      ).toISOString();
       const endTime = new Date(now.getTime() + 4 * 3600 * 1000).toISOString();
 
       await expect(
@@ -604,7 +612,7 @@ describe("SR-LEAVE-BE-001: 請假資料與審核／班次連動服務", () => {
   describe("8. DriverLeaveController: RBAC & Envelope Testing", () => {
     let controller: DriverLeaveController;
     let service: DriverLeaveService;
-    const now = new Date("2026-09-10T10:00:00.000Z");
+    const now = new Date(Date.now() + 24 * 3600 * 1000);
 
     beforeEach(() => {
       const repo = new DriverLeaveRepository();
