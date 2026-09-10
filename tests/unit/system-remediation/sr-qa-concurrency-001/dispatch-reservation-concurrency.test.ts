@@ -2,7 +2,30 @@ import { randomUUID } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import type { QueryResultRow } from "pg";
+type QueryResultRow = Record<string, any>;
+
+type PgClientInstance = {
+  query: <T extends QueryResultRow = QueryResultRow>(
+    sql: string,
+    values?: unknown[],
+  ) => Promise<{ rows: T[] }>;
+  release: () => void;
+};
+
+type PgPoolInstance = {
+  query: <T extends QueryResultRow = QueryResultRow>(
+    sql: string,
+    values?: unknown[],
+  ) => Promise<{ rows: T[] }>;
+  connect: () => Promise<PgClientInstance>;
+  end: () => Promise<void>;
+};
+
+type PgPoolConstructor = new (options?: {
+  connectionString?: string;
+  connectionTimeoutMillis?: number;
+}) => PgPoolInstance;
+
 import {
   OwnedMobilityRepository,
   DispatchResourceReservationConflictError,
@@ -12,7 +35,7 @@ import type { DatabaseService } from "../../../../apps/api/src/common/db/databas
 const require = createRequire(
   new URL("../../../../apps/api/package.json", import.meta.url),
 );
-const { Pool } = require("pg") as typeof import("pg");
+const { Pool } = require("pg") as { Pool: PgPoolConstructor };
 
 // Explicit isolated test database configuration is required (Acceptance 1 / UV-EXEC-024 pattern).
 const connectionString =
@@ -28,10 +51,10 @@ const migration = (name: string) =>
 
 describe("SR-QA-CONCURRENCY-001: Multi-Instance Real PostgreSQL Dispatch Reservation Concurrency Matrix", () => {
   const databaseName = `sr_qa_dispatch_${randomUUID().replaceAll("-", "")}`;
-  let admin: InstanceType<typeof Pool>;
-  let pool: InstanceType<typeof Pool>;
-  let poolA: InstanceType<typeof Pool>;
-  let poolB: InstanceType<typeof Pool>;
+  let admin: PgPoolInstance;
+  let pool: PgPoolInstance;
+  let poolA: PgPoolInstance;
+  let poolB: PgPoolInstance;
   let repoA: OwnedMobilityRepository;
   let repoB: OwnedMobilityRepository;
   let created = false;
@@ -101,6 +124,7 @@ describe("SR-QA-CONCURRENCY-001: Multi-Instance Real PostgreSQL Dispatch Reserva
     // Initialize required schemas and functions
     await pool.query(`
       CREATE SCHEMA ops;
+      CREATE SCHEMA crm;
       CREATE SCHEMA admin;
       CREATE SCHEMA core;
       CREATE FUNCTION admin.touch_updated_at() RETURNS trigger LANGUAGE plpgsql AS
@@ -223,7 +247,9 @@ describe("SR-QA-CONCURRENCY-001: Multi-Instance Real PostgreSQL Dispatch Reserva
         [assignmentId],
       );
       expect(dbRows.rows).toHaveLength(2);
-      expect(dbRows.rows.every((r) => r.status === "held")).toBe(true);
+      expect(
+        dbRows.rows.every((r: { status?: string }) => r.status === "held"),
+      ).toBe(true);
     });
 
     it("Case 2.2 (Negative / Conflict): Rejects concurrent reservation on same driver with DispatchResourceReservationConflictError and rolls back loser", async () => {
@@ -285,7 +311,9 @@ describe("SR-QA-CONCURRENCY-001: Multi-Instance Real PostgreSQL Dispatch Reserva
       );
       expect(rowsAfterB.rows).toHaveLength(2);
       expect(
-        rowsAfterB.rows.every((r) => r.assignment_id === assignmentA),
+        rowsAfterB.rows.every(
+          (r: { assignment_id?: string }) => r.assignment_id === assignmentA,
+        ),
       ).toBe(true);
     });
 
@@ -377,9 +405,11 @@ describe("SR-QA-CONCURRENCY-001: Multi-Instance Real PostgreSQL Dispatch Reserva
         [assignmentA],
       );
       expect(rowsAfterRelease.rows).toHaveLength(2);
-      expect(rowsAfterRelease.rows.every((r) => r.status === "released")).toBe(
-        true,
-      );
+      expect(
+        rowsAfterRelease.rows.every(
+          (r: { status?: string }) => r.status === "released",
+        ),
+      ).toBe(true);
 
       // Now Instance B can successfully acquire the exact same driver and vehicle
       const reservedB = await repoB.withTransaction(async (txB) => {
@@ -428,7 +458,9 @@ describe("SR-QA-CONCURRENCY-001: Multi-Instance Real PostgreSQL Dispatch Reserva
         [assignmentA],
       );
       expect(dbRows.rows).toHaveLength(2);
-      expect(dbRows.rows.every((r) => r.status === "occupied")).toBe(true);
+      expect(
+        dbRows.rows.every((r: { status?: string }) => r.status === "occupied"),
+      ).toBe(true);
 
       // Instance B cannot reserve either resource while occupied
       let caught: unknown;

@@ -50,6 +50,7 @@
 1. `cross-month-batch-billing.test.ts`：對齊 `@drts/contracts` 之 `PublishDriverFeePlanCommand.reimbursementMode` 型別定義（改為 `'platform_funded'`）；對齊 `BillingSettlementService.listDriverStatements(periodMonth?: string)` 參數型別。
 2. `dispatch-reservation-concurrency.test.ts`：針對 `authoritativeAssignment?.status` 於逾時檢查中安全比較狀態（轉型為字串比對），消除 TS2367 編譯器未預期重疊報錯。
 3. `CONCURRENCY_TEST_DATABASE_URL` / `UV_BOOKING_TEST_DATABASE_URL` / `DATABASE_URL` 多層相容：允許使用 CI 預設提供之 PostgreSQL 服務連線（`DATABASE_URL`），同時在連線時動態建立完全隔離之獨立暫存資料庫（`sr_qa_idemp_*`、`sr_qa_dispatch_*`），測試完成後自動 drop 清理；若完全未配置資料庫連線或連線失敗，則維持嚴格 fail-closed 中斷（Exit code 1），拒絕靜默跳過。
+4. `dispatch-reservation-concurrency.test.ts` 資料庫結構初始化補齊 `CREATE SCHEMA crm;`，解決 `V0011__phase1_runtime_snapshots.sql` 於 CI 建立 `crm.phase1_call_sessions` 時之 `schema "crm" does not exist` 報錯；採用自包含之 `PgPoolInstance` 與明確回傳型別，徹底消除編譯器 `pg` 根模組解析與隱式 `any` 型別報錯。
 
 ---
 

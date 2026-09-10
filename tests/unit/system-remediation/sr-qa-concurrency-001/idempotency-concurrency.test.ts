@@ -2,7 +2,30 @@ import { randomUUID } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import type { QueryResultRow } from "pg";
+type QueryResultRow = Record<string, any>;
+
+type PgClientInstance = {
+  query: <T extends QueryResultRow = QueryResultRow>(
+    sql: string,
+    values?: unknown[],
+  ) => Promise<{ rows: T[] }>;
+  release: () => void;
+};
+
+type PgPoolInstance = {
+  query: <T extends QueryResultRow = QueryResultRow>(
+    sql: string,
+    values?: unknown[],
+  ) => Promise<{ rows: T[] }>;
+  connect: () => Promise<PgClientInstance>;
+  end: () => Promise<void>;
+};
+
+type PgPoolConstructor = new (options?: {
+  connectionString?: string;
+  connectionTimeoutMillis?: number;
+}) => PgPoolInstance;
+
 import {
   IDEMPOTENCY_IN_PROGRESS,
   IDEMPOTENCY_KEY_REQUIRED,
@@ -17,7 +40,7 @@ import { ApiRequestError } from "../../../../apps/api/src/common/api-envelope";
 const require = createRequire(
   new URL("../../../../apps/api/package.json", import.meta.url),
 );
-const { Pool } = require("pg") as typeof import("pg");
+const { Pool } = require("pg") as { Pool: PgPoolConstructor };
 
 // Explicit isolated test database configuration is required (Acceptance 1 / UV-EXEC-024 pattern).
 const connectionString =
@@ -33,10 +56,10 @@ const migration = (name: string) =>
 
 describe("SR-QA-CONCURRENCY-001: Multi-Instance Real PostgreSQL Idempotency Matrix", () => {
   const databaseName = `sr_qa_idemp_${randomUUID().replaceAll("-", "")}`;
-  let admin: InstanceType<typeof Pool>;
-  let pool: InstanceType<typeof Pool>;
-  let poolA: InstanceType<typeof Pool>;
-  let poolB: InstanceType<typeof Pool>;
+  let admin: PgPoolInstance;
+  let pool: PgPoolInstance;
+  let poolA: PgPoolInstance;
+  let poolB: PgPoolInstance;
   let serviceA: IdempotencyService;
   let serviceB: IdempotencyService;
   let created = false;
