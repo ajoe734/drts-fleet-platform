@@ -1,0 +1,139 @@
+{
+  "taskId": "SR-QA-WEBHOOK-001",
+  "runId": "uat-SR-QA-WEBHOOK-001-c0f51aa7",
+  "shardIndex": 0,
+  "baseSha": "70355aba97c23dd1cd592b71f1d3dfe6315d91ff",
+  "candidateSha": "fdb679c71c82adfaf44f74fd0c052270bba5ba0a",
+  "headSha": "fdb679c71c82adfaf44f74fd0c052270bba5ba0a",
+  "startTime": "2026-09-08T14:09:42.235Z",
+  "endTime": "2026-09-08T14:09:47.490Z",
+  "status": "passed",
+  "exitCode": 0,
+  "roles": [
+    "Tenant Admin (tenant_admin)",
+    "Platform Admin (platform_admin)"
+  ],
+  "trackedResources": [
+    {
+      "type": "tenant",
+      "id": "126c3213-098d-47fd-b362-72508a7d8bf4",
+      "metadata": {
+        "code": "TEN_A_S0_C3922B6E"
+      }
+    },
+    {
+      "type": "tenant_api_key",
+      "id": "api_key_3a7a6c44-71cb-4dcf-b56d-920393f347a2",
+      "metadata": {
+        "status": "active",
+        "scopes": [
+          "tenant:webhooks:read",
+          "tenant:write"
+        ],
+        "keyPrefix": "tk_a811c1498",
+        "maskedSuffix": "****4b4d"
+      }
+    },
+    {
+      "type": "tenant_api_key",
+      "id": "api_key_6ad1a821-64f0-4cff-875a-e18cc8ae2047",
+      "metadata": {
+        "rotatedFromApiKeyId": "api_key_3a7a6c44-71cb-4dcf-b56d-920393f347a2",
+        "status": "active",
+        "overlapEndsAt": "2026-09-15T14:09:46.699Z"
+      }
+    },
+    {
+      "type": "tenant_api_key",
+      "id": "api_key_b83073cc-9ffa-4b4e-9af6-5d72a36e05f2",
+      "metadata": {
+        "status": "revoked",
+        "revokeReason": "manual_revoke"
+      }
+    },
+    {
+      "type": "webhook_endpoint",
+      "id": "wh_b8c89acc-98b1-40ce-8c66-8dc2c94817ef",
+      "metadata": {
+        "url": "http://127.0.0.1:46181/webhooks/receiver",
+        "status": "test_pending"
+      }
+    },
+    {
+      "type": "webhook_delivery",
+      "id": "wd_101e5cb5-51b9-4dce-be07-291e8e2280d7",
+      "metadata": {
+        "status": "queued",
+        "httpStatus": 503,
+        "attempt": 1,
+        "nextAttemptAt": "2026-09-08T14:10:16.890Z"
+      }
+    }
+  ],
+  "httpCalls": [
+    {
+      "id": "49163617-2fa9-4fa0-b544-3adf0c67880f",
+      "timestamp": "2026-09-08T14:09:47.398Z",
+      "method": "POST",
+      "url": "http://127.0.0.1:46181/webhooks/receiver",
+      "statusCode": 200,
+      "durationMs": 8,
+      "requestHeaders": {
+        "x-drts-webhook-signature": "v=1;t=2026-09-08T14:09:46.709Z;sig=ca75099a6f182505e5d9f522336a9703112758b27f5f96cc8155e58b794ebad2"
+      },
+      "responseBody": {
+        "ok": true,
+        "received": true
+      },
+      "actorRole": "Webhook Receiver"
+    },
+    {
+      "id": "aef13b83-9fbd-4eb7-8f7b-7a95d7e90d5b",
+      "timestamp": "2026-09-08T14:09:47.485Z",
+      "method": "POST",
+      "url": "http://127.0.0.1:46181/webhooks/receiver",
+      "statusCode": 200,
+      "durationMs": 6,
+      "requestHeaders": {
+        "x-drts-webhook-signature": "v=2;t=2026-09-08T14:09:46.918Z;sig=ea9f499334c4c65d77327c74b46f6d5f583bf66ed400d7226da42d737caa4ac0"
+      },
+      "responseBody": {
+        "ok": true
+      },
+      "actorRole": "Webhook Receiver"
+    }
+  ],
+  "consoleLogs": [
+    {
+      "timestamp": "2026-09-08T14:09:42.284Z",
+      "level": "info",
+      "message": "Starting C111+C112: real TenantPartnerService/WebhookDispatchService lifecycle run out-of-process via tsx (Playwright's transform cannot load Nest's parameter-decorated constructors)"
+    },
+    {
+      "timestamp": "2026-09-08T14:09:47.361Z",
+      "level": "info",
+      "message": "C111 verified successfully via real service writes + readback: minimal scopes, secret masking, overlap rotation, immediate revocation, and rotation-of-revoked-key rejection validated."
+    },
+    {
+      "timestamp": "2026-09-08T14:09:47.489Z",
+      "level": "info",
+      "message": "C112 verified successfully via real dispatch attempts: HMAC-SHA256, 503 backoff readback, auto-disable readback, secret rotation with recovery redelivery, and replay rejection validated."
+    }
+  ],
+  "artifacts": [],
+  "errors": [],
+  "unimplementedLiveSurfaces": [
+    {
+      "surface": "GATE-C113-ERP-SSO-BANK",
+      "reason": "Live enterprise ERP SSO (SAML 2.0 / Azure AD) and Bank Host-to-Host (H2H) leased lines are external gates requiring production corporate credentials; in-memory statement ledgers verified."
+    },
+    {
+      "surface": "GATE-C114-GOOGLE-MAPS",
+      "reason": "Official Google Maps Platform API key and Taiwan quota credentials are an external gate; geocoding boundary fallback verified."
+    },
+    {
+      "surface": "LIMITATION-C115-CTI-CRON",
+      "reason": "Carrier voice telephony SIP trunk PBX hardware and Cloud Run persistent cron jobs are physical/infra limitations; recording lifecycle adapter callbacks verified."
+    }
+  ]
+}
