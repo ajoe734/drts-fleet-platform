@@ -1182,6 +1182,346 @@ export async function loadDashboard(
 
 // --- views without a portal endpoint yet (fixtures through the seam) --------
 
+export interface FleetCaseItem {
+  id: string;
+  caseNo: string;
+  type: "complaint" | "incident";
+  cat: string;
+  desc: string;
+  driver: string;
+  driverId: string;
+  severity: "high" | "normal" | "medium" | "low" | "critical";
+  responsibility: "fleet" | "shared" | "platform";
+  fleetPartnerId: string;
+  status: string;
+  slaDueAt: string;
+  slaBreachedAt: string | null;
+  slaBreach: boolean;
+  slaTone: "danger" | "success" | "neutral";
+  slaLabel: string;
+  reopenCount: number;
+  relatedOrder: string | null;
+  relatedCall: string | null;
+  assignee: string;
+  openedAt: string;
+  updatedAt: string;
+  closedAt?: string | null;
+  actionDescriptor: {
+    action: string;
+    enabled: boolean;
+    disabledReasonCode?: string;
+    riskLevel?: string;
+  };
+}
+
+export interface FleetCaseTimelineAttachment {
+  attachmentId?: string;
+  name: string;
+  size: string;
+  fileSize?: number;
+  downloadUrl?: string;
+}
+
+export interface FleetCaseTimelineEvent {
+  entryId: string;
+  caseId: string;
+  at: string;
+  tone: "accent" | "warn" | "danger" | "success";
+  t: string;
+  actor: string;
+  actorRealm: "ops" | "tenant" | "system";
+  body: string;
+  attachments?: FleetCaseTimelineAttachment[];
+}
+
+export interface FleetCaseAttachmentRecord {
+  attachmentId: string;
+  caseId: string;
+  fleetPartnerId: string;
+  name: string;
+  size: string;
+  fileSize: number;
+  contentType: string;
+  state: "done" | "uploading" | "fail";
+  pct?: number;
+  uploadedAt: string;
+  uploadedBy: string;
+  objectKey: string;
+}
+
+export interface CaseDetailView {
+  caseDetail: FleetCaseItem;
+  timeline: FleetCaseTimelineEvent[];
+  attachments: FleetCaseAttachmentRecord[];
+  source: DataSource;
+  error?: string | null;
+}
+
+export const FX_CASE_DETAIL_OPEN: FleetCaseItem = {
+  id: "cmp_0908",
+  caseNo: "C-20260520-000001",
+  type: "complaint",
+  cat: "driver_conduct",
+  desc: "乘客反映司機言語不當，已上傳影片證據。",
+  driver: "黃文豪",
+  driverId: "d_8851",
+  severity: "high",
+  responsibility: "fleet",
+  fleetPartnerId: "METRO_FLEET",
+  status: "reopened",
+  slaDueAt: "2026-05-22 14:30",
+  slaBreachedAt: "2026-05-22 14:31",
+  slaBreach: true,
+  slaTone: "danger",
+  slaLabel: "SLA breached",
+  reopenCount: 1,
+  relatedOrder: "ord_8175",
+  relatedCall: "call_2014",
+  assignee: "陳維 (ops_compliance)",
+  openedAt: "2026-05-20 14:30",
+  updatedAt: "2026-05-22 15:00",
+  actionDescriptor: {
+    action: "respond",
+    enabled: true,
+    riskLevel: "medium",
+  },
+};
+
+export const FX_CASE_DETAIL_PLATFORM: FleetCaseItem = {
+  id: "cmp_0912",
+  caseNo: "C-20260518-000001",
+  type: "complaint",
+  cat: "pricing_dispute",
+  desc: "乘客反映車資與預估不符，屬平台計價規則爭議。",
+  driver: "林志偉",
+  driverId: "d_7702",
+  severity: "normal",
+  responsibility: "platform",
+  fleetPartnerId: "METRO_FLEET",
+  status: "under_investigation",
+  slaDueAt: "2026-05-20 09:40",
+  slaBreachedAt: null,
+  slaBreach: false,
+  slaTone: "success",
+  slaLabel: "on track",
+  reopenCount: 0,
+  relatedOrder: "ord_7960",
+  relatedCall: null,
+  assignee: "王芳 (ops_billing)",
+  openedAt: "2026-05-18 09:40",
+  updatedAt: "2026-05-18 11:20",
+  actionDescriptor: {
+    action: "respond",
+    enabled: false,
+    disabledReasonCode: "platform_owned",
+    riskLevel: "medium",
+  },
+};
+
+export const FX_CASE_DETAIL_CLOSED: FleetCaseItem = {
+  id: "cmp_closed_001",
+  caseNo: "C-20260521-000002",
+  type: "complaint",
+  cat: "route_issue",
+  desc: "行車路線爭議已調閱 GPS 記錄並結案。",
+  driver: "黃文豪",
+  driverId: "d_8851",
+  severity: "normal",
+  responsibility: "fleet",
+  fleetPartnerId: "METRO_FLEET",
+  status: "closed",
+  slaDueAt: "2026-05-23 10:00",
+  slaBreachedAt: null,
+  slaBreach: false,
+  slaTone: "neutral",
+  slaLabel: "closed",
+  reopenCount: 0,
+  relatedOrder: "ord_8100",
+  relatedCall: null,
+  assignee: "陳維 (ops_compliance)",
+  openedAt: "2026-05-21 10:00",
+  updatedAt: "2026-05-24 10:05",
+  closedAt: "2026-05-24 10:05",
+  actionDescriptor: {
+    action: "respond",
+    enabled: false,
+    disabledReasonCode: "case_closed",
+    riskLevel: "medium",
+  },
+};
+
+export const FX_CASE_TIMELINE_OPEN: FleetCaseTimelineEvent[] = [
+  {
+    entryId: "tl-0908-1",
+    caseId: "cmp_0908",
+    at: "2026-05-20 14:30",
+    tone: "accent",
+    t: "建立",
+    actor: "eva.wang@yamato.tw",
+    actorRealm: "tenant",
+    body: "乘客反映司機言語不當，已上傳影片證據。",
+  },
+  {
+    entryId: "tl-0908-2",
+    caseId: "cmp_0908",
+    at: "2026-05-20 14:42",
+    tone: "accent",
+    t: "指派",
+    actor: "王芳 → 陳維",
+    actorRealm: "ops",
+    body: "由 ops_compliance 接手。",
+  },
+  {
+    entryId: "tl-0908-3",
+    caseId: "cmp_0908",
+    at: "2026-05-20 16:00",
+    tone: "warn",
+    t: "評論",
+    actor: "陳維",
+    actorRealm: "ops",
+    body: "已聯絡乘客，安排與司機對證。",
+  },
+  {
+    entryId: "tl-0908-4",
+    caseId: "cmp_0908",
+    at: "2026-05-22 14:31",
+    tone: "danger",
+    t: "SLA breach",
+    actor: "system.sla",
+    actorRealm: "system",
+    body: "超出 48h 處理時限。",
+  },
+  {
+    entryId: "tl-0908-5",
+    caseId: "cmp_0908",
+    at: "2026-05-22 15:00",
+    tone: "warn",
+    t: "reopen",
+    actor: "陳維",
+    actorRealm: "ops",
+    body: "乘客回報相同司機再次違規。",
+  },
+  {
+    entryId: "tl-0908-6",
+    caseId: "cmp_0908",
+    at: "2026-05-23 09:12",
+    tone: "accent",
+    t: "車行回覆",
+    actor: "陳家豪 (METRO_FLEET)",
+    actorRealm: "tenant",
+    body: "已與司機當面對證並完成教育訓練，訓練紀錄與行車記錄器截圖已附上。",
+    attachments: [
+      { name: "training_ack_20260523.pdf", size: "482 KB" },
+      { name: "dashcam_clip_0908.mp4", size: "18.4 MB" },
+    ],
+  },
+];
+
+export const FX_CASE_TIMELINE_PLATFORM: FleetCaseTimelineEvent[] = [
+  {
+    entryId: "tl-0912-1",
+    caseId: "cmp_0912",
+    at: "2026-05-18 09:40",
+    tone: "accent",
+    t: "建立",
+    actor: "lin.zhiwei@yamato.tw",
+    actorRealm: "tenant",
+    body: "乘客反映車資與預估不符。",
+  },
+  {
+    entryId: "tl-0912-2",
+    caseId: "cmp_0912",
+    at: "2026-05-18 10:05",
+    tone: "accent",
+    t: "指派",
+    actor: "系統 → 王芳",
+    actorRealm: "ops",
+    body: "依平台計價規則爭議路由至 ops_billing。",
+  },
+  {
+    entryId: "tl-0912-3",
+    caseId: "cmp_0912",
+    at: "2026-05-18 11:20",
+    tone: "accent",
+    t: "責任判定",
+    actor: "王芳",
+    actorRealm: "ops",
+    body: "計價規則由平台端設定，責任歸屬 platform；車行對此案唯讀。",
+  },
+];
+
+export const FX_CASE_ATTACHMENTS: FleetCaseAttachmentRecord[] = [
+  {
+    attachmentId: "att-001",
+    caseId: "cmp_0908",
+    fleetPartnerId: "METRO_FLEET",
+    name: "training_ack_20260523.pdf",
+    size: "482 KB",
+    fileSize: 493568,
+    contentType: "application/pdf",
+    state: "done",
+    uploadedAt: "2026-05-23T09:10:00.000Z",
+    uploadedBy: "陳家豪",
+    objectKey: "fleet-cases/cmp_0908/training_ack_20260523.pdf",
+  },
+  {
+    attachmentId: "att-002",
+    caseId: "cmp_0908",
+    fleetPartnerId: "METRO_FLEET",
+    name: "dashcam_clip_0908.mp4",
+    size: "18.4 MB",
+    fileSize: 19293798,
+    contentType: "video/mp4",
+    state: "uploading",
+    pct: 62,
+    uploadedAt: "2026-05-23T09:11:00.000Z",
+    uploadedBy: "陳家豪",
+    objectKey: "fleet-cases/cmp_0908/dashcam_clip_0908.mp4",
+  },
+  {
+    attachmentId: "att-003",
+    caseId: "cmp_0908",
+    fleetPartnerId: "METRO_FLEET",
+    name: "driver_statement.jpg",
+    size: "2.1 MB",
+    fileSize: 2202009,
+    contentType: "image/jpeg",
+    state: "fail",
+    uploadedAt: "2026-05-23T09:11:30.000Z",
+    uploadedBy: "陳家豪",
+    objectKey: "fleet-cases/cmp_0908/driver_statement.jpg",
+  },
+];
+
+export const FX_CASE_ATTACHMENTS_CLOSED: FleetCaseAttachmentRecord[] = [
+  {
+    attachmentId: "att-closed-1",
+    caseId: "cmp_closed_001",
+    fleetPartnerId: "METRO_FLEET",
+    name: "training_ack_20260523.pdf",
+    size: "482 KB",
+    fileSize: 493568,
+    contentType: "application/pdf",
+    state: "done",
+    uploadedAt: "2026-05-22T10:00:00.000Z",
+    uploadedBy: "陳家豪",
+    objectKey: "fleet-cases/cmp_closed_001/training_ack_20260523.pdf",
+  },
+  {
+    attachmentId: "att-closed-2",
+    caseId: "cmp_closed_001",
+    fleetPartnerId: "METRO_FLEET",
+    name: "dashcam_clip_0908.mp4",
+    size: "18.4 MB",
+    fileSize: 19293798,
+    contentType: "video/mp4",
+    state: "done",
+    uploadedAt: "2026-05-22T10:05:00.000Z",
+    uploadedBy: "陳家豪",
+    objectKey: "fleet-cases/cmp_closed_001/dashcam_clip_0908.mp4",
+  },
+];
+
 export interface CasesView {
   rows: FleetCase[];
   source: DataSource;
@@ -1189,9 +1529,160 @@ export interface CasesView {
 }
 
 export async function loadCases(): Promise<CasesView> {
-  // No /api/fleet-partner/cases endpoint in DH-FLP-BE-CLIENT yet.
-  // Explicitly mark as unintegrated without injecting fake fixture records.
-  return { rows: [], source: "fallback", connected: false };
+  try {
+    const { client } = await getServerFleetPartnerClient();
+    const records = await client.getList<FleetCaseItem>(
+      "/api/fleet-partner/cases",
+    );
+    const rows: FleetCase[] = records.map((r) => ({
+      id: r.id,
+      type: r.type,
+      cat: r.cat,
+      driver: r.driver,
+      severity:
+        r.severity === "high"
+          ? "high"
+          : r.severity === "normal" || r.severity === "medium"
+          ? "medium"
+          : "low",
+      responsibility: r.responsibility,
+      status:
+        r.status === "resolved" || r.status === "closed"
+          ? "pending"
+          : "in_review",
+      sla: r.slaBreach ? "breached" : "on_track",
+      date: r.openedAt ? r.openedAt.slice(0, 10) : "",
+    }));
+    return { rows, source: "live", connected: true };
+  } catch (err) {
+    if (isConfigError(err)) {
+      throw err;
+    }
+    return { rows: [], source: "fallback", connected: false };
+  }
+}
+
+export async function loadCaseDetail(caseId: string): Promise<CaseDetailView> {
+  try {
+    const { client } = await getServerFleetPartnerClient();
+    const [detailRes, timelineRes] = await Promise.all([
+      client.get<{
+        caseDetail: FleetCaseItem;
+        attachments: FleetCaseAttachmentRecord[];
+      }>(`/api/fleet-partner/cases/${caseId}`),
+      client.getList<FleetCaseTimelineEvent>(
+        `/api/fleet-partner/cases/${caseId}/timeline`,
+      ),
+    ]);
+    return {
+      caseDetail: detailRes.caseDetail,
+      attachments: detailRes.attachments || [],
+      timeline: timelineRes || [],
+      source: "live",
+      error: null,
+    };
+  } catch (err) {
+    if (isConfigError(err)) {
+      throw err;
+    }
+    let fallbackDetail: FleetCaseItem = FX_CASE_DETAIL_OPEN;
+    let fallbackTimeline: FleetCaseTimelineEvent[] = FX_CASE_TIMELINE_OPEN;
+    let fallbackAttachments: FleetCaseAttachmentRecord[] = FX_CASE_ATTACHMENTS;
+
+    if (caseId === "cmp_0912") {
+      fallbackDetail = FX_CASE_DETAIL_PLATFORM;
+      fallbackTimeline = FX_CASE_TIMELINE_PLATFORM;
+      fallbackAttachments = FX_CASE_ATTACHMENTS_CLOSED;
+    } else if (caseId === "cmp_closed_001") {
+      fallbackDetail = FX_CASE_DETAIL_CLOSED;
+      fallbackTimeline = [
+        ...FX_CASE_TIMELINE_OPEN,
+        {
+          entryId: "tl-closed-done",
+          caseId: "cmp_closed_001",
+          at: "2026-05-24 10:05",
+          tone: "success",
+          t: "結案",
+          actor: "陳維",
+          actorRealm: "ops",
+          body: "已審閱車行回覆與附件，責任處置完成，案件結案。",
+        },
+      ];
+      fallbackAttachments = FX_CASE_ATTACHMENTS_CLOSED;
+    }
+
+    const message = err instanceof Error ? err.message : "READ_FAILED";
+    return {
+      caseDetail: fallbackDetail,
+      timeline: fallbackTimeline,
+      attachments: fallbackAttachments,
+      source: "fallback",
+      error: message,
+    };
+  }
+}
+
+export async function submitCaseReply(
+  caseId: string,
+  content: string,
+  idempotencyKey?: string,
+  attachmentIds?: string[],
+) {
+  const { client } = await getServerFleetPartnerClient();
+  return client.post(`/api/fleet-partner/cases/${caseId}/reply`, {
+    body: { content, idempotencyKey, attachmentIds },
+  });
+}
+
+export async function createCaseAttachmentUploadUrl(
+  caseId: string,
+  fileName: string,
+  fileSize: number,
+  contentType: string,
+) {
+  const { client } = await getServerFleetPartnerClient();
+  return client.post<{
+    attachmentId: string;
+    objectKey: string;
+    uploadUrl: string;
+    expiresAt: string;
+    method: string;
+  }>(`/api/fleet-partner/cases/${caseId}/attachments/upload-url`, {
+    body: { fileName, fileSize, contentType },
+  });
+}
+
+export async function confirmCaseAttachmentUpload(
+  caseId: string,
+  command: {
+    attachmentId: string;
+    objectKey: string;
+    fileName: string;
+    fileSize: number;
+    contentType: string;
+  },
+) {
+  const { client } = await getServerFleetPartnerClient();
+  return client.post<FleetCaseAttachmentRecord>(
+    `/api/fleet-partner/cases/${caseId}/attachments/confirm`,
+    {
+      body: command,
+    },
+  );
+}
+
+export async function getCaseAttachmentReadUrl(
+  caseId: string,
+  attachmentId: string,
+) {
+  const { client } = await getServerFleetPartnerClient();
+  return client.get<{
+    attachmentId: string;
+    name: string;
+    downloadUrl: string;
+    expiresAt: string;
+    authorized: boolean;
+  }>(`/api/fleet-partner/cases/${caseId}/attachments/${attachmentId}/read-url`);
 }
 
 export interface DocumentsView {

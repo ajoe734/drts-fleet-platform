@@ -114,9 +114,15 @@ import type {
   ReferralPassengerHistoryItem,
   ReferralPassengerReceipt,
   SubmitReferralPassengerRatingCommand,
+  TenantBookingDateField,
+  TenantBookingListQuery,
+  TenantBookingsPageRecord,
 } from "@drts/contracts";
 
 import {
+  BOOKING_STATUSES,
+  OWNED_ORDER_STATUSES,
+  isIso8601InstantWithTimezone,
   PLATFORM_CURRENCY,
   normalisePlatformCurrency,
   QUEUE_ENTRY_POLICY_MAP,
@@ -2204,21 +2210,428 @@ export class OwnedMobilityService
     return snapshot ? this.clonePassengerDisclosureSnapshot(snapshot) : null;
   }
 
-  listTenantBookings(tenantId: string) {
-    this.assertNonBlank(tenantId, "tenantId");
-    const items = this.orders
-      .filter((order) => order.bookingId && order.tenantId === tenantId)
-      .map((order) => this.mapOrderToBooking(order));
+  assertTenantAccessScope(
+    targetTenantId: string,
+    identity?: BootstrapRequestIdentity | null,
+  ) {
+    if (!identity) {
+      return;
+    }
+    if (!identity.actorId) {
+      throw new ApiRequestError(
+        HttpStatus.UNAUTHORIZED,
+        "AUTH_REQUIRED",
+        "Authenticated tenant identity is required.",
+      );
+    }
+
+    const isPlatformOrSystem =
+      identity.realm === "platform" ||
+      identity.realm === "system" ||
+      identity.actorType === "platform_admin" ||
+      identity.actorType === "system" ||
+      identity.roleFamilies?.includes("platform");
+
+    if (isPlatformOrSystem) {
+      return;
+    }
+
+    if (!identity.tenantId || identity.tenantId !== targetTenantId) {
+      throw new ApiRequestError(
+        HttpStatus.FORBIDDEN,
+        "TENANT_SCOPE_MISMATCH",
+        "Cross-tenant identity access is forbidden. Principal tenantId does not match target tenantId.",
+        {
+          targetTenantId,
+          principalTenantId: identity.tenantId ?? null,
+        },
+      );
+    }
+  }
+
+  private validateTenantBookingListQuery(rawQuery?: TenantBookingListQuery): {
+    q: string | undefined;
+    passenger: string | undefined;
+    passengerId: string | undefined;
+    bookingStatuses: string[] | undefined;
+    fulfillmentStatuses: string[] | undefined;
+    dateField: TenantBookingDateField;
+    fromInstant: Date | undefined;
+    toInstant: Date | undefined;
+    page: number;
+    pageSize: number;
+    serviceBucket: string | undefined;
+    subtype: string | undefined;
+  } {
+    const q = rawQuery?.q?.trim() || undefined;
+    const passenger = rawQuery?.passenger?.trim() || undefined;
+    const passengerId = rawQuery?.passengerId?.trim() || undefined;
+
+    // Date field
+    let dateField: TenantBookingDateField = "reservationStart";
+    if (rawQuery?.dateField) {
+      if (
+        rawQuery.dateField !== "reservationStart" &&
+        rawQuery.dateField !== "createdAt"
+      ) {
+        throw new ApiRequestError(
+          HttpStatus.BAD_REQUEST,
+          "INVALID_DATE_FIELD",
+          "dateField must be 'reservationStart' or 'createdAt'.",
+          { dateField: rawQuery.dateField },
+        );
+      }
+      dateField = rawQuery.dateField;
+    }
+
+    // Date from & to validation: require explicit ISO8601 instant with timezone
+    let fromInstant: Date | undefined;
+    if (rawQuery?.dateFrom?.trim()) {
+      const fromStr = rawQuery.dateFrom.trim();
+      if (!isIso8601InstantWithTimezone(fromStr)) {
+        throw new ApiRequestError(
+          HttpStatus.BAD_REQUEST,
+          "INVALID_DATE_BOUNDS",
+          "dateFrom must be an explicit ISO8601 instant with timezone (e.g. 2026-09-10T00:00:00Z). Ambiguous or server-local timestamps are rejected.",
+          { dateFrom: fromStr },
+        );
+      }
+      fromInstant = new Date(fromStr);
+    }
+
+    let toInstant: Date | undefined;
+    if (rawQuery?.dateTo?.trim()) {
+      const toStr = rawQuery.dateTo.trim();
+      if (!isIso8601InstantWithTimezone(toStr)) {
+        throw new ApiRequestError(
+          HttpStatus.BAD_REQUEST,
+          "INVALID_DATE_BOUNDS",
+          "dateTo must be an explicit ISO8601 instant with timezone (e.g. 2026-09-10T00:00:00Z). Ambiguous or server-local timestamps are rejected.",
+          { dateTo: toStr },
+        );
+      }
+      toInstant = new Date(toStr);
+    }
+
+    if (
+      fromInstant &&
+      toInstant &&
+      fromInstant.getTime() >= toInstant.getTime()
+    ) {
+      throw new ApiRequestError(
+        HttpStatus.BAD_REQUEST,
+        "INVALID_DATE_RANGE",
+        "dateFrom must be strictly before dateTo (start inclusive, end exclusive).",
+        { dateFrom: rawQuery?.dateFrom, dateTo: rawQuery?.dateTo },
+      );
+    }
+
+    // Status validation
+    const bookingStatusSet = new Set<string>(BOOKING_STATUSES);
+    const orderStatusSet = new Set<string>(OWNED_ORDER_STATUSES);
+
+    let bookingStatuses: string[] | undefined;
+    let fallbackOrderStatuses: string[] | undefined;
+    const rawBookingStatus = rawQuery?.bookingStatus ?? rawQuery?.status;
+    if (rawBookingStatus) {
+      const rawList = (
+        Array.isArray(rawBookingStatus)
+          ? rawBookingStatus
+          : String(rawBookingStatus).split(",")
+      )
+        .map((s) => String(s).trim())
+        .filter(Boolean);
+
+      const parsedBookingStatuses: string[] = [];
+      const orderFallbacks: string[] = [];
+      for (const s of rawList) {
+        if (bookingStatusSet.has(s)) {
+          parsedBookingStatuses.push(s);
+        } else if (orderStatusSet.has(s)) {
+          orderFallbacks.push(s);
+        } else {
+          throw new ApiRequestError(
+            HttpStatus.BAD_REQUEST,
+            "INVALID_STATUS",
+            `Invalid status '${s}'. Must be a valid booking status (${Array.from(bookingStatusSet).join(", ")}) or order fulfillment status.`,
+            { status: s },
+          );
+        }
+      }
+      if (parsedBookingStatuses.length > 0) {
+        bookingStatuses = parsedBookingStatuses;
+      }
+      if (orderFallbacks.length > 0) {
+        fallbackOrderStatuses = orderFallbacks;
+      }
+    }
+
+    let fulfillmentStatuses: string[] | undefined;
+    const rawFulfillmentStatus =
+      rawQuery?.fulfillmentStatus ?? rawQuery?.orderStatus;
+    if (rawFulfillmentStatus) {
+      const rawList = (
+        Array.isArray(rawFulfillmentStatus)
+          ? rawFulfillmentStatus
+          : String(rawFulfillmentStatus).split(",")
+      )
+        .map((s) => String(s).trim())
+        .filter(Boolean);
+      for (const s of rawList) {
+        if (!orderStatusSet.has(s)) {
+          throw new ApiRequestError(
+            HttpStatus.BAD_REQUEST,
+            "INVALID_STATUS",
+            `Invalid fulfillment/order status '${s}'. Must be one of: ${Array.from(orderStatusSet).join(", ")}.`,
+            { fulfillmentStatus: s },
+          );
+        }
+      }
+      fulfillmentStatuses = rawList;
+    } else if (fallbackOrderStatuses) {
+      fulfillmentStatuses = fallbackOrderStatuses;
+    }
+
+    // Pagination validation
+    let page = 1;
+    if (
+      rawQuery?.page !== undefined &&
+      rawQuery?.page !== null &&
+      String(rawQuery.page).trim() !== ""
+    ) {
+      const pageNum = Number(rawQuery.page);
+      if (!Number.isInteger(pageNum) || pageNum < 1) {
+        throw new ApiRequestError(
+          HttpStatus.BAD_REQUEST,
+          "INVALID_PAGE",
+          "page must be a positive integer >= 1.",
+          { page: rawQuery.page },
+        );
+      }
+      page = pageNum;
+    }
+
+    let pageSize = 20;
+    if (
+      rawQuery?.pageSize !== undefined &&
+      rawQuery?.pageSize !== null &&
+      String(rawQuery.pageSize).trim() !== ""
+    ) {
+      const sizeNum = Number(rawQuery.pageSize);
+      if (!Number.isInteger(sizeNum) || sizeNum < 1 || sizeNum > 100) {
+        throw new ApiRequestError(
+          HttpStatus.BAD_REQUEST,
+          "INVALID_PAGE_SIZE",
+          "pageSize must be an integer between 1 and 100.",
+          { pageSize: rawQuery.pageSize },
+        );
+      }
+      pageSize = sizeNum;
+    } else if (rawQuery === undefined) {
+      pageSize = 0;
+    }
 
     return {
+      q,
+      passenger,
+      passengerId,
+      bookingStatuses,
+      fulfillmentStatuses,
+      dateField,
+      fromInstant,
+      toInstant,
+      page,
+      pageSize,
+      serviceBucket: rawQuery?.serviceBucket?.trim() || undefined,
+      subtype: rawQuery?.subtype?.trim() || undefined,
+    };
+  }
+
+  listTenantBookings(
+    tenantId: string,
+    query?: TenantBookingListQuery,
+    identity?: BootstrapRequestIdentity | null,
+  ): Promise<TenantBookingsPageRecord> & TenantBookingsPageRecord {
+    this.assertNonBlank(tenantId, "tenantId");
+    if (identity) {
+      this.assertTenantAccessScope(tenantId, identity);
+    }
+
+    const validated = this.validateTenantBookingListQuery(query);
+
+    if (this.ownedMobilityRepository?.isEnabled()) {
+      const executeDb = async (): Promise<TenantBookingsPageRecord> => {
+        const dbResult =
+          await this.ownedMobilityRepository!.queryTenantBookings(
+            tenantId,
+            {
+              ...query,
+              page: validated.page,
+              pageSize: validated.pageSize > 0 ? validated.pageSize : 100,
+            },
+          );
+        const effectivePageSize =
+          validated.pageSize > 0
+            ? validated.pageSize
+            : Math.max(1, dbResult.total);
+        const totalPages =
+          dbResult.total > 0
+            ? Math.ceil(dbResult.total / effectivePageSize)
+            : 0;
+        const items = dbResult.items.map((order) =>
+          this.mapOrderToBooking(order),
+        );
+        return {
+          items,
+          pagination: {
+            page: validated.page,
+            pageSize: effectivePageSize,
+            totalItems: dbResult.total,
+            totalPages,
+          },
+          pageInfo: {
+            page: validated.page,
+            pageSize: effectivePageSize,
+            totalItems: dbResult.total,
+            totalPages,
+          },
+        };
+      };
+
+      const promise = executeDb();
+      return promise as unknown as Promise<TenantBookingsPageRecord> &
+        TenantBookingsPageRecord;
+    }
+
+    let filtered = this.orders.filter(
+      (order) => order.bookingId && order.tenantId === tenantId,
+    );
+
+    if (validated.passengerId) {
+      filtered = filtered.filter(
+        (o) => o.passenger?.passengerId === validated.passengerId,
+      );
+    }
+
+    const text = (validated.passenger ?? validated.q)?.toLowerCase();
+    if (text) {
+      filtered = filtered.filter((o) => {
+        const p = o.passenger;
+        return (
+          Boolean(p?.name?.toLowerCase().includes(text)) ||
+          Boolean(p?.phone?.toLowerCase().includes(text)) ||
+          Boolean(p?.passengerId?.toLowerCase().includes(text)) ||
+          Boolean(o.bookedBy?.email?.toLowerCase().includes(text)) ||
+          Boolean(o.bookedBy?.name?.toLowerCase().includes(text)) ||
+          Boolean(o.bookingId?.toLowerCase().includes(text)) ||
+          Boolean(o.orderId?.toLowerCase().includes(text)) ||
+          Boolean(o.costCenter?.toLowerCase().includes(text))
+        );
+      });
+    }
+
+    if (validated.bookingStatuses && validated.bookingStatuses.length > 0) {
+      const bs = new Set(validated.bookingStatuses);
+      filtered = filtered.filter((o) => {
+        const status =
+          o.status === "cancelled"
+            ? "cancelled"
+            : o.status === "completed"
+              ? "completed"
+              : "active";
+        return bs.has(status);
+      });
+    }
+
+    if (
+      validated.fulfillmentStatuses &&
+      validated.fulfillmentStatuses.length > 0
+    ) {
+      const fs = new Set(validated.fulfillmentStatuses);
+      filtered = filtered.filter((o) => fs.has(o.status));
+    }
+
+    if (validated.subtype && validated.subtype !== "all") {
+      filtered = filtered.filter(
+        (o) => o.businessDispatchSubtype === validated.subtype,
+      );
+    }
+    if (validated.serviceBucket && validated.serviceBucket !== "all") {
+      filtered = filtered.filter(
+        (o) => o.serviceBucket === validated.serviceBucket,
+      );
+    }
+
+    if (validated.fromInstant || validated.toInstant) {
+      filtered = filtered.filter((o) => {
+        const dateStr =
+          validated.dateField === "createdAt"
+            ? o.createdAt
+            : o.reservationWindowStart;
+        if (!dateStr) {
+          return false;
+        }
+        const t = new Date(dateStr).getTime();
+        if (validated.fromInstant && t < validated.fromInstant.getTime()) {
+          return false;
+        }
+        if (validated.toInstant && t >= validated.toInstant.getTime()) {
+          return false;
+        }
+        return true;
+      });
+    }
+
+    filtered.sort((a, b) => {
+      const dateA =
+        validated.dateField === "createdAt"
+          ? a.createdAt
+          : a.reservationWindowStart;
+      const dateB =
+        validated.dateField === "createdAt"
+          ? b.createdAt
+          : b.reservationWindowStart;
+      const timeA = dateA ? new Date(dateA).getTime() : -Infinity;
+      const timeB = dateB ? new Date(dateB).getTime() : -Infinity;
+      if (timeA !== timeB) {
+        return timeB - timeA;
+      }
+      return (a.bookingId ?? "").localeCompare(b.bookingId ?? "");
+    });
+
+    const totalItems = filtered.length;
+    const effectivePageSize =
+      validated.pageSize > 0 ? validated.pageSize : Math.max(1, totalItems);
+    const totalPages =
+      totalItems > 0 ? Math.ceil(totalItems / effectivePageSize) : 0;
+
+    let pagedOrders: OwnedOrderRecord[] = [];
+    const offset = (validated.page - 1) * effectivePageSize;
+    if (offset < totalItems) {
+      pagedOrders = filtered.slice(offset, offset + effectivePageSize);
+    }
+
+    const items = pagedOrders.map((order) => this.mapOrderToBooking(order));
+    const result: TenantBookingsPageRecord = {
       items,
       pagination: {
-        page: 1,
-        pageSize: items.length,
-        totalItems: items.length,
-        totalPages: items.length > 0 ? 1 : 0,
+        page: validated.page,
+        pageSize: effectivePageSize,
+        totalItems,
+        totalPages,
+      },
+      pageInfo: {
+        page: validated.page,
+        pageSize: effectivePageSize,
+        totalItems,
+        totalPages,
       },
     };
+
+    const promise = Promise.resolve(result);
+    Object.assign(promise, result);
+    return promise as unknown as Promise<TenantBookingsPageRecord> &
+      TenantBookingsPageRecord;
   }
 
   getTenantBooking(
@@ -10538,14 +10951,26 @@ export class OwnedMobilityService
   }
 
   private mapOrderToBooking(order: OwnedOrderRecord): BookingRecord {
-    if (
-      !order.bookingId ||
-      !order.tenantId ||
-      !order.bookingType ||
-      !order.businessDispatchSubtype ||
-      !order.reservationWindowStart ||
-      !order.reservationWindowEnd
-    ) {
+    if (!order.bookingId || !order.tenantId) {
+      throw new ApiRequestError(
+        HttpStatus.NOT_FOUND,
+        "BOOKING_NOT_FOUND",
+        "Booking was not found.",
+        {
+          orderId: order.orderId,
+        },
+      );
+    }
+
+    const bookingType = order.bookingType ?? "oneway";
+    const businessDispatchSubtype =
+      order.businessDispatchSubtype ?? "enterprise_dispatch";
+    const reservationWindowStart =
+      order.reservationWindowStart ?? order.createdAt;
+    const reservationWindowEnd =
+      order.reservationWindowEnd ?? reservationWindowStart;
+
+    if (!reservationWindowStart || !reservationWindowEnd) {
       throw new ApiRequestError(
         HttpStatus.NOT_FOUND,
         "BOOKING_NOT_FOUND",
@@ -10561,12 +10986,12 @@ export class OwnedMobilityService
       bookingId: order.bookingId,
       orderId: order.orderId,
       tenantId: order.tenantId,
-      partnerId: order.partnerId,
-      partnerProgramId: order.partnerProgramId,
-      partnerEntrySlug: order.partnerEntrySlug,
-      eligibilityVerificationId: order.eligibilityVerificationId,
-      issuerAuthorizationRef: order.issuerAuthorizationRef,
-      passengerDisclosure: order.passengerDisclosure,
+      partnerId: order.partnerId ?? null,
+      partnerProgramId: order.partnerProgramId ?? null,
+      partnerEntrySlug: order.partnerEntrySlug ?? null,
+      eligibilityVerificationId: order.eligibilityVerificationId ?? null,
+      issuerAuthorizationRef: order.issuerAuthorizationRef ?? null,
+      passengerDisclosure: order.passengerDisclosure ?? null,
       status:
         order.status === "cancelled"
           ? "cancelled"
@@ -10574,38 +10999,42 @@ export class OwnedMobilityService
             ? "completed"
             : "active",
       serviceBucket: "business_dispatch",
-      businessDispatchSubtype: order.businessDispatchSubtype,
-      bookingType: order.bookingType,
-      reservationWindowStart: order.reservationWindowStart,
-      reservationWindowEnd: order.reservationWindowEnd,
-      recurrenceRule: order.recurrenceRule,
-      modifiableUntil: order.modifiableUntil,
-      cancelableUntil: order.cancelableUntil,
-      pickup: { ...order.pickup },
-      dropoff: { ...order.dropoff },
-      passenger: { ...order.passenger },
+      businessDispatchSubtype,
+      bookingType,
+      reservationWindowStart,
+      reservationWindowEnd,
+      recurrenceRule: order.recurrenceRule ?? null,
+      modifiableUntil: order.modifiableUntil ?? null,
+      cancelableUntil: order.cancelableUntil ?? null,
+      pickup: order.pickup ? { ...order.pickup } : { address: "" },
+      dropoff: order.dropoff ? { ...order.dropoff } : { address: "" },
+      passenger: order.passenger
+        ? { ...order.passenger }
+        : { name: "", phone: "" },
       bookedBy: order.bookedBy ? { ...order.bookedBy } : null,
       onsiteContact: order.onsiteContact ? { ...order.onsiteContact } : null,
-      costCenter: order.costCenter,
-      vehiclePreference: order.vehiclePreference,
-      benefitReference: order.benefitReference,
-      direction: order.direction,
-      flightNo: order.flightNo,
-      terminal: order.terminal,
-      luggageCount: order.luggageCount,
-      notes: order.notes,
+      costCenter: order.costCenter ?? null,
+      vehiclePreference: order.vehiclePreference ?? null,
+      benefitReference: order.benefitReference ?? null,
+      direction: order.direction ?? null,
+      flightNo: order.flightNo ?? null,
+      terminal: order.terminal ?? null,
+      luggageCount: order.luggageCount ?? null,
+      notes: order.notes ?? null,
       quotedFare: order.quotedFare ? { ...order.quotedFare } : null,
-      quotedFareSource: order.quotedFareSource,
-      quotedFareRuleVersion: order.quotedFareRuleVersion,
+      quotedFareSource: order.quotedFareSource ?? null,
+      quotedFareRuleVersion: order.quotedFareRuleVersion ?? null,
       manualFareOverride: order.manualFareOverride
         ? { ...order.manualFareOverride }
         : null,
-      approvalState: order.approvalState,
-      approvalRequestIds: [...order.approvalRequestIds],
+      approvalState: order.approvalState ?? "not_required",
+      approvalRequestIds: Array.isArray(order.approvalRequestIds)
+        ? [...order.approvalRequestIds]
+        : [],
       complianceGates,
       orderStatus: order.status,
       createdAt: order.createdAt,
-      updatedAt: order.updatedAt,
+      updatedAt: order.updatedAt ?? order.createdAt,
     };
   }
 
@@ -11548,7 +11977,7 @@ export class OwnedMobilityService
 
     const hasRecording = Boolean(order.recordingId);
     const recordingMissing =
-      order.complianceFlags.includes("recording_missing");
+      order.complianceFlags?.includes("recording_missing") ?? false;
     const state: ComplianceGateState = hasRecording ? "clear" : "blocked";
     return {
       gateType: "recording",
@@ -11596,8 +12025,13 @@ export class OwnedMobilityService
     order: OwnedOrderRecord,
     task: DriverTaskRecord | null,
   ): ComplianceGateRecord | null {
+    const proofRequirements = order.proofRequirements ?? {
+      minPhotoCount: 0,
+      signoffRequired: false,
+      expenseProofRequired: false,
+    };
     const { minPhotoCount, signoffRequired, expenseProofRequired } =
-      order.proofRequirements;
+      proofRequirements;
     const required =
       minPhotoCount > 0 || signoffRequired || expenseProofRequired;
     const hasProof = this.hasCompletionProofEvidence(task?.proof);

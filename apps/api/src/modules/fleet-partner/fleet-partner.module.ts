@@ -8,6 +8,9 @@ import { VehicleEligibilityModule } from "../vehicle-eligibility/vehicle-eligibi
 import { FleetPartnerController } from "./fleet-partner.controller";
 import { FleetPartnerRepository } from "./fleet-partner.repository";
 import { FleetPartnerService } from "./fleet-partner.service";
+import { AuditNotificationModule } from "../audit-notification/audit-notification.module";
+import { ComplaintModule } from "../complaint/complaint.module";
+import { FleetPartnerCaseService } from "./fleet-partner-case.service";
 import { SupplyDocumentService } from "./supply-document.service";
 import { SupplyReadinessService } from "./supply-readiness.service";
 import { SupplySubmissionRepository } from "./supply-submission.repository";
@@ -21,10 +24,13 @@ import { SupplySubmissionService } from "./supply-submission.service";
     OwnedMobilityModule,
     RegulatoryRegistryModule,
     VehicleEligibilityModule,
+    AuditNotificationModule,
+    ComplaintModule,
   ],
   controllers: [FleetPartnerController],
   providers: [
     FleetPartnerService,
+    FleetPartnerCaseService,
     FleetPartnerRepository,
     SupplySubmissionRepository,
     SupplySubmissionService,
@@ -34,6 +40,7 @@ import { SupplySubmissionService } from "./supply-submission.service";
   ],
   exports: [
     FleetPartnerService,
+    FleetPartnerCaseService,
     SupplySubmissionRepository,
     SupplySubmissionService,
     SupplyReviewService,
