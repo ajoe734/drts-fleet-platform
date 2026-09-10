@@ -88,6 +88,16 @@ jobs:
             exit 1
           fi
 
+      - name: Prepare evidence directory
+        # actions/checkout empties the workspace before cloning, so this must
+        # run after checkout (not before) or checkout would wipe it. Created
+        # before install/migrate run (not only after) so a failure in either
+        # of those steps still leaves a directory for the run-status step
+        # below to write into. The run-status step also has a defensive
+        # mkdir of its own, for the case where an earlier step (candidate_sha
+        # validation, checkout itself) fails before this step ever runs.
+        run: mkdir -p .artifacts/tenant-binding-acceptance
+
       - uses: pnpm/action-setup@v4
         with: { version: 10.33.0, run_install: false }
       - uses: actions/setup-node@v4
@@ -97,15 +107,21 @@ jobs:
             cache: pnpm,
             cache-dependency-path: pnpm-lock.yaml,
           }
-      - run: pnpm install --frozen-lockfile
+
+      - name: Install dependencies
+        id: install
+        run: |
+          set -o pipefail
+          pnpm install --frozen-lockfile 2>&1 | tee -a .artifacts/tenant-binding-acceptance/execution-log.txt
 
       - name: Apply migrations to the dedicated acceptance database
-        run: pnpm db:migrate
-
-      - name: Prepare evidence directory
-        run: mkdir -p .artifacts/tenant-binding-acceptance
+        id: migrate
+        run: |
+          set -o pipefail
+          pnpm db:migrate 2>&1 | tee -a .artifacts/tenant-binding-acceptance/execution-log.txt
 
       - name: Run full AppModule two-tenant JWT HTTP/SQL acceptance harness
+        id: harness
         # `|| true` here would defeat the point of a gate; let the step fail
         # normally so the job goes red, and rely on `if: always()` below to
         # still capture and upload the log/report/evidence for a failed run.
@@ -116,9 +132,10 @@ jobs:
             --no-file-parallelism --maxConcurrency=1 \
             --reporter=default --reporter=json \
             --outputFile.json=.artifacts/tenant-binding-acceptance/test-report.json \
-            2>&1 | tee .artifacts/tenant-binding-acceptance/execution-log.txt
+            2>&1 | tee -a .artifacts/tenant-binding-acceptance/execution-log.txt
 
       - name: Gate on zero skips and both tests passed
+        id: gate
         if: always()
         run: |
           python3 - <<'PY_GATE'
@@ -146,9 +163,60 @@ jobs:
           print(f"Tenant binding acceptance: {passed}/{total} passed, zero skips.")
           PY_GATE
 
-      - name: Upload execution log, test report, and evidence
+      - name: Record run status
+        # Always runs, even when install/migrate/harness fail before the gate
+        # step above does. This never fabricates a pass: status is derived
+        # only from real step outcomes and whether a report file was actually
+        # written, so an early failure (e.g. `pnpm install` or `db:migrate`)
+        # still leaves an explicit failed/not_run record naming the candidate
+        # instead of silently uploading nothing but a warning.
+        if: always()
+        env:
+          INSTALL_OUTCOME: ${{ steps.install.outcome }}
+          MIGRATE_OUTCOME: ${{ steps.migrate.outcome }}
+          HARNESS_OUTCOME: ${{ steps.harness.outcome }}
+          GATE_OUTCOME: ${{ steps.gate.outcome }}
+        run: |
+          python3 - <<'PY_STATUS'
+          import json
+          import os
+          from pathlib import Path
+
+          report_path = Path(".artifacts/tenant-binding-acceptance/test-report.json")
+          status_path = Path(".artifacts/tenant-binding-acceptance/run-status.json")
+          status_path.parent.mkdir(parents=True, exist_ok=True)
+
+          install_outcome = os.environ.get("INSTALL_OUTCOME", "unknown")
+          migrate_outcome = os.environ.get("MIGRATE_OUTCOME", "unknown")
+          harness_outcome = os.environ.get("HARNESS_OUTCOME", "unknown")
+          gate_outcome = os.environ.get("GATE_OUTCOME", "unknown")
+
+          if gate_outcome == "success" and report_path.exists():
+              status = "passed"
+          elif install_outcome != "success" or migrate_outcome != "success":
+              status = "not_run"
+          else:
+              status = "failed"
+
+          status_path.write_text(json.dumps({
+              "candidate_sha": os.environ.get("CANDIDATE_SHA", ""),
+              "status": status,
+              "install_outcome": install_outcome,
+              "migrate_outcome": migrate_outcome,
+              "harness_outcome": harness_outcome,
+              "gate_outcome": gate_outcome,
+              "report_present": report_path.exists(),
+          }, indent=2) + "\n")
+          print(f"Run status recorded: {status}")
+          PY_STATUS
+
+      - name: Upload execution log, test report, evidence, and run status
         # Acceptance evidence for a failing candidate is as important as for a
-        # passing one: it is what lets the next lane diagnose without re-running.
+        # passing one: it is what lets the next lane diagnose without
+        # re-running. The evidence directory is created before install/
+        # migrate above, and the status file is always written, so this step
+        # always has real content to upload even when the candidate fails
+        # before the harness ever runs.
         if: always()
         uses: actions/upload-artifact@v4
         with:
@@ -157,4 +225,5 @@ jobs:
             .artifacts/tenant-binding-acceptance/execution-log.txt
             .artifacts/tenant-binding-acceptance/test-report.json
             .artifacts/tenant-binding-acceptance/evidence-auth-http.json
+            .artifacts/tenant-binding-acceptance/run-status.json
           if-no-files-found: warn

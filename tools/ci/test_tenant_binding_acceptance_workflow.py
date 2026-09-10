@@ -100,6 +100,34 @@ class TenantBindingAcceptanceWorkflowTests(unittest.TestCase):
         self.assertIn(".artifacts/tenant-binding-acceptance/execution-log.txt", step_text)
         self.assertIn(".artifacts/tenant-binding-acceptance/test-report.json", step_text)
         self.assertIn(".artifacts/tenant-binding-acceptance/evidence-auth-http.json", step_text)
+        self.assertIn(".artifacts/tenant-binding-acceptance/run-status.json", step_text)
+
+    def test_prepares_evidence_directory_before_install_and_migrate(self) -> None:
+        # Evidence must exist even when `pnpm install` or `pnpm db:migrate`
+        # fails, so the directory has to be created before those steps run,
+        # not only after they succeed.
+        dir_index = self.text.index("Prepare evidence directory")
+        install_index = self.text.index("pnpm install --frozen-lockfile")
+        migrate_index = self.text.index("pnpm db:migrate")
+        self.assertLess(dir_index, install_index)
+        self.assertLess(dir_index, migrate_index)
+
+    def test_records_an_always_run_status_that_never_fabricates_success(self) -> None:
+        # A runner-owned status step must exist that runs unconditionally
+        # (even if install/migrate/harness fail before it), names the
+        # candidate, and derives status only from real step outcomes/report
+        # presence rather than assuming success.
+        status_block = self.text.split("Record run status", 1)[1][:2500]
+        self.assertIn("if: always()", status_block)
+        self.assertIn("steps.install.outcome", status_block)
+        self.assertIn("steps.migrate.outcome", status_block)
+        self.assertIn("steps.harness.outcome", status_block)
+        self.assertIn("steps.gate.outcome", status_block)
+        self.assertIn("CANDIDATE_SHA", status_block)
+        self.assertIn("run-status.json", status_block)
+        self.assertIn('"not_run"', status_block)
+        self.assertIn('"failed"', status_block)
+        self.assertIn('"passed"', status_block)
 
     def test_does_not_touch_the_locked_candidate_or_product_source(self) -> None:
         # This workflow only ever reads the candidate; it must not check

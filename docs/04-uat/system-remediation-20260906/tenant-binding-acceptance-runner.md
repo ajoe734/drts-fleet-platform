@@ -51,22 +51,36 @@ locked parent candidate `10123f6af00a5342f2634a01f4d9a0e7190c2173`):
    job if it does not equal the requested SHA — `actions/checkout` resolves a
    moving ref at fetch time, so this guards against silently accepting a
    different commit than the one being accepted.
-3. Installs dependencies and applies migrations (`pnpm db:migrate`) against a
-   dedicated `postgis/postgis:16-3.4` service on `localhost:5432` (PostGIS is
-   required — the migration set enables the `postgis` extension, matching
-   `ci-integ.yml`'s existing jobs).
+3. Creates the evidence directory, then installs dependencies and applies
+   migrations (`pnpm db:migrate`) against a dedicated `postgis/postgis:16-3.4`
+   service on `localhost:5432` (PostGIS is required — the migration set
+   enables the `postgis` extension, matching `ci-integ.yml`'s existing jobs).
+   The evidence directory is created *before* install/migrate run (not only
+   after they succeed), and install/migrate output is appended into the same
+   execution log the harness writes to, so a failure in either step still
+   leaves a log to diagnose from instead of nothing.
 4. Sets `DRTS_TENANT_BINDING_DATABASE_URL` to that migrated database and
    `DRTS_WEBHOOK_AUTH_EVIDENCE` to an output path, then runs the harness with
    `pnpm exec vitest run ... --no-file-parallelism --maxConcurrency=1
-   --reporter=default --reporter=json --outputFile.json=...`, teeing stdout to
-   an execution log.
+   --reporter=default --reporter=json --outputFile.json=...`, appending
+   stdout to the execution log.
 5. Gates on the JSON report: both tests must be present, all must pass, and
    `numPendingTests` must be zero — a skip is treated as a failure, not a
    pass, so a future regression that re-introduces the skip condition cannot
    read as green.
-6. Uploads the execution log, JSON test report, and the
-   `DRTS_WEBHOOK_AUTH_EVIDENCE` file with `if: always()`, so a failing run
-   still leaves evidence to diagnose from instead of nothing.
+6. Records a `run-status.json` file with `if: always()`, derived only from
+   real step outcomes (`steps.install.outcome`, `steps.migrate.outcome`,
+   `steps.harness.outcome`, `steps.gate.outcome`) and whether a test report
+   was actually produced. Status is `passed` only when the gate step
+   succeeded and a report exists; `not_run` when install or migration never
+   completed (harness never got to execute); otherwise `failed`. It always
+   includes `candidate_sha`. This step never infers or fabricates a pass —
+   see §5 for why an early install/migrate failure previously produced no
+   evidence at all.
+7. Uploads the execution log, JSON test report, the
+   `DRTS_WEBHOOK_AUTH_EVIDENCE` file, and `run-status.json` with
+   `if: always()`, so a failing run — even one that fails before the harness
+   runs — still leaves evidence to diagnose from instead of nothing.
 
 No product source is modified or written back; the job only reads the
 candidate and produces evidence artifacts.
@@ -85,8 +99,12 @@ the same CI job it protects) that the workflow file keeps:
 - the acceptance database/evidence env vars pointed at `localhost:5432`,
 - the exact harness path invoked with `--no-file-parallelism
   --maxConcurrency=1`,
-- the zero-skip / both-tests-passed gate, and
-- an `if: always()` upload step covering the log, report, and evidence file.
+- the zero-skip / both-tests-passed gate,
+- an `if: always()` upload step covering the log, report, evidence, and
+  run-status file, and
+- an `if: always()` run-status step that derives status from real step
+  outcomes (never a bare pass) and names the candidate, and creates the
+  evidence directory before `pnpm install`/`pnpm db:migrate` run.
 
 ## 4. Why `.github/workflows/ci-integ.yml` also changed
 
@@ -125,7 +143,7 @@ PostgreSQL/HTTP run cannot be exercised here. What was verified locally:
 
 ```bash
 python3 -m unittest tools/ci/test_tenant_binding_acceptance_workflow.py -v
-# Ran 10 tests in 0.001s — OK
+# Ran 12 tests — OK
 
 python3 tools/ci/check_test_coverage.py
 # check_test_coverage: all 62 test files yield tests CI runs.
@@ -136,10 +154,64 @@ python3 -m unittest tools/ci/test_classify_change_scope.py \
 # Ran 33 tests — OK
 ```
 
-The workflow itself must still be dispatched once (`gh workflow run
-tenant-binding-acceptance.yml -f candidate_sha=10123f6af00a5342f2634a01f4d9a0e7190c2173`
-or the Actions UI equivalent) against a permitted GitHub-hosted runner to
-produce the actual `full_appmodule_two_tenant_jwt_http_sql_candidate_evidence`
-required by the parent task. That dispatch and its resulting run
-URL/log/evidence are the next step, and are what the parent task's
-acceptance lifecycle still needs before it can move past `acceptance`.
+Both embedded `python3 - <<'PY_...'` heredocs (the zero-skip gate and the new
+run-status step) were extracted and byte-compiled locally to catch a syntax
+error before dispatch, since neither runs in this worker's own checks.
+
+## 6. Dispatch registration — this workflow is not runnable from `dev` alone
+
+Codex2 review flagged (2026-09-10) that this workflow cannot actually be
+dispatched once PR #1882 merges to `dev`, even though `candidate_sha`
+defaults to the parent's locked candidate. The mechanism:
+
+- This repository's default branch is `main` (confirmed via the GitHub
+  Contents/Actions APIs: a `workflow_dispatch`-only workflow file that exists
+  only on `dev` returns 404 from both the Contents API and the Actions
+  workflow-list API for `main`).
+- GitHub only lists a `workflow_dispatch`-triggered workflow as dispatchable
+  (via the Actions UI "Run workflow" button, `gh workflow run <file>`, or the
+  `POST .../actions/workflows/{id}/dispatches` API) once that workflow file
+  has been *registered* by existing on the repository's **default branch**.
+  A workflow that only has a `workflow_dispatch` trigger and no `push`/
+  `pull_request` trigger has no other way to become registered — see
+  [Manually running a workflow](https://docs.github.com/en/actions/how-tos/manage-workflow-runs/manually-run-a-workflow).
+- `docs/ops/branch-strategy.md` §4 confirms this repo already has two other
+  `workflow_dispatch`-only workflows (`deploy-staging.yml`, `deploy-prod.yml`)
+  that are runnable today precisely because they already live on `main`.
+  Merging PR #1882 into `dev` does not put `tenant-binding-acceptance.yml` on
+  `main` — `dev` only reaches `main` through the full promote rail (§5 Gates
+  2–3: nightly publish → ≥30 min soak → hourly promote), which can take up to
+  ~24h and is not something this task should wait on or trigger itself.
+
+**Authorized bootstrap path** (branch-strategy.md §5 "Hotfix path", already
+documented and already used for direct-to-main tooling changes): branch this
+one workflow file off `main`, PR it to `main` under the 3 main-branch gates
+(or an authorized admin bypass), merge, then cherry-pick the same commit into
+`dev` in the same change so `main` never out-diverges `dev` per the
+Reconciliation rule. This is a CI/tooling-only file with no product-code
+change and no risk to the reconciliation invariant. Once merged to `main`,
+the workflow is registered and dispatchable.
+
+**Exact dispatch command once registered**, using the locked parent
+candidate SHA and dispatching *from* `main` (where the workflow file now
+lives) while still checking out and verifying the original candidate — the
+`--ref` below selects which copy of the *workflow YAML* runs, not which
+commit gets tested; the job's own `actions/checkout` step still pins to, and
+hard-fails on any mismatch with, `candidate_sha`:
+
+```bash
+gh workflow run tenant-binding-acceptance.yml \
+  --ref main \
+  -f candidate_sha=10123f6af00a5342f2634a01f4d9a0e7190c2173
+```
+
+This retains the parent's locked checkout SHA regardless of which ref the
+workflow definition itself is dispatched from.
+
+That dispatch and its resulting run URL/log/evidence are the next step, and
+are what the parent task's acceptance lifecycle still needs before it can
+move past `acceptance`. The bootstrap PR to `main` is a prerequisite this
+task now depends on and is out of this worker's write scope to execute
+(pushing to `main` is not a normal task-branch push); it must be actioned by
+a lane authorized for direct-to-main changes before the workflow can be
+dispatched.
