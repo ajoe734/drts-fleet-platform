@@ -68,7 +68,7 @@ Codex 審查 candidate `5a0320b21` 時提出兩項判定：
   - `apps/platform-admin-web/app/audit/page.tsx`
   - `apps/platform-admin-web/lib/audit-resource-context.ts`
   - `.github/workflows/ops-shell-acceptance.yml`
-  - `tools/ci/test_ops_shell_acceptance_workflow.py`
+  - `tests/unit/system-remediation/sr-ops-shell-001/workflow.test.ts`
   - `tests/e2e/system-remediation/sr-ops-shell-001/`
 - **接收端契約協議**：
   1. 接收端 query 支援選擇性 `auditId` 與成對完整 `resourceType` + `resourceId`。
@@ -149,17 +149,18 @@ Codex 審查 candidate `5a0320b21` 時提出兩項判定：
    - 針對 1440px 桌面視窗與 390px 行動裝置視窗，自適應動態限制卡片寬度與高度。
    - 保持 `localStorage` 位置記憶，並在重新整理或視窗縮放時自動 clamp 於可視區域內。
 
-### 2.4 遠端瀏覽器驗收工作流與驗證測試 (`ops-shell-acceptance.yml`, `test_ops_shell_acceptance_workflow.py`, Playwright E2E)
+### 2.4 遠端瀏覽器驗收工作流與驗證測試 (`ops-shell-acceptance.yml`, `workflow.test.ts`, Playwright E2E)
 
 1. **GitHub-hosted 遠端驗收工作流 (`.github/workflows/ops-shell-acceptance.yml`)**：
    - 針對候選 SHA 於 GitHub Actions (`ubuntu-latest`) 執行真實瀏覽器驗收。
    - 設定 `timeout-minutes: 20` 符合倉庫 CI 標準。
    - 自動建置 ops-console-web 與 platform-admin-web，並啟動 Playwright 執行 `tests/e2e/system-remediation/sr-ops-shell-001/`。
+   - 驗收執行結果：GitHub Actions Runs `34515057699` 及 `34515056836` 於候選 SHA `a7e3d97bf406` 執行全數通過（exit 0，耗時約 3 分鐘）。
 2. **Playwright 端對端測試案例 (`tests/e2e/system-remediation/sr-ops-shell-001/ops-shell-acceptance.spec.ts`)**：
    - 驗收 `ops_cross_app_resource_navigation`：Dispatch 點擊跳轉 platform-admin、URL query 正確性、接收端有效過濾、無符合 empty state、不完整 invalid state、Clear Filter 操作。
    - 驗收 `ops_widget_remote_viewport_keyboard`：1440px 桌面預設收合、底層 CTA 可點擊、Escape 與展開焦點轉移、390px 行動寬度限制與邊界保護。
-3. **工作流 CI 測試 (`tools/ci/test_ops_shell_acceptance_workflow.py`)**：
-   - Python unittest 驗證 workflow 語法、triggers、timeout 設定與 required acceptance criteria 覆蓋率，通過 5 項測試（exit 0）。
+3. **工作流結構驗證測試 (`tests/unit/system-remediation/sr-ops-shell-001/workflow.test.ts`)**：
+   - 移入 Vitest 單元測試套件驗證 workflow 語法、triggers、timeout 設定與 required acceptance criteria 覆蓋率，避免 Python `test_*.py` 命名觸發 `check_test_coverage` 無對應 discovery root 檢查錯誤。通過 3 項驗證（exit 0）。
 
 ## 3. 實際變更檔案（符合授權之嚴格 write_scopes）
 
@@ -175,7 +176,7 @@ Codex 審查 candidate `5a0320b21` 時提出兩項判定：
 - `apps/platform-admin-web/lib/audit-resource-context.ts`
 - `apps/platform-admin-web/app/audit/page.tsx`
 - `.github/workflows/ops-shell-acceptance.yml`
-- `tools/ci/test_ops_shell_acceptance_workflow.py`
+- `tests/unit/system-remediation/sr-ops-shell-001/workflow.test.ts`
 - `tests/e2e/system-remediation/sr-ops-shell-001/ops-shell-acceptance.spec.ts`
 - `tests/unit/system-remediation/sr-ops-shell-001/audit-resource-context.test.ts`
 - `tests/unit/system-remediation/sr-ops-shell-001/audit-and-cross-app-links.test.ts`
@@ -232,21 +233,19 @@ $ pnpm exec vitest run tests/unit/system-remediation/sr-ops-shell-001/
  ✓ tests/unit/system-remediation/sr-ops-shell-001/audit-resource-context.test.ts (20 tests)
  ✓ tests/unit/system-remediation/sr-ops-shell-001/audit-and-cross-app-links.test.ts (18 tests)
  ✓ tests/unit/system-remediation/sr-ops-shell-001/assistant-widget-layout.test.ts (24 tests)
+ ✓ tests/unit/system-remediation/sr-ops-shell-001/workflow.test.ts (3 tests)
 
- Test Files  3 passed (3)
-      Tests  62 passed (62)
-   Duration  1.09s
+ Test Files  4 passed (4)
+      Tests  65 passed (65)
+   Duration  617ms
 exit code: 0
 ```
 
-### 4.5 遠端驗收工作流結構測試
+### 4.5 測試覆蓋率與工作流逾時檢查
 
 ```text
-$ python3 -m unittest tools/ci/test_ops_shell_acceptance_workflow.py
-.....
-----------------------------------------------------------------------
-Ran 5 tests in 0.001s
-OK
+$ python3 tools/ci/check_test_coverage.py
+check_test_coverage: all 62 test files yield tests CI runs.
 exit code: 0
 
 $ python3 -m unittest tools/ci/test_workflow_timeouts.py
