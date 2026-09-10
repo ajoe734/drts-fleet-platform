@@ -61,7 +61,7 @@
 5. **下游任務依賴與 Migration 編號分配**:
    - `SR-CONTRACT-001`: 依本契約將型別落入 `@drts/contracts` 與 `@drts/api-client`。
    - `SR-LEAVE-BE-001`: 後端請假服務與 Migration `V0086__sr_driver_leave.sql`。
-   - `SR-ACADEMY-BE-001`: 後端學院服務與 Migration `V0087__sr_driver_academy.sql`。
+   - `SR-ACADEMY-BE-001`: 後端學院服務與 Migration `V0095__sr_driver_academy.sql`（依 `schema-allocation.json` 配置；身分契約見 `academy-identity-decision.md`）。
    - `SR-HOST-BE-001`: 後端 Host 自車投影服務與 Migration `V0088__sr_host_vehicle_access.sql`。
    - `SR-WIRE-001`: 各模組全域註冊與路由裝配。
 
@@ -317,7 +317,8 @@ stateDiagram-v2
 **業務不變式 (Business Invariants)**:
 
 1. **多課程完訓率與分母收斂 (Fleet Multi-Course Metrics Invariants)**:
-   - **分母 ($N_{\text{total}}$)**: 該車行當前所有綁定之有效司機總人數（`reg.drivers`）。
+   - **司機身分契約 (Driver Identity Contract)**: 全學院體系（本表四張新表、`reg.driver_training_records`、`reg.driver_reg_profiles`）之 `driver_id` 一律採用 runtime 實際發放之文字 ID（`regulatory-registry.service.ts` 建立、持久化於 `reg.phase1_registry_drivers.driver_id`，`varchar(100)`），**不得**使用 `reg.drivers`（`uuid` PK）；該表無任何 runtime 寫入路徑，禁止 prefix 轉換、hash 或型別轉換發明對應關係。完整決策見 `academy-identity-decision.md`。
+   - **分母 ($N_{\text{total}}$)**: 該車行當前所有綁定之有效司機總人數，來源為 `admin.phase1_driver_fleet_affiliations`（依 `fleetPartnerId` 且 `effective_until` 為空或未到期過濾）與 `reg.phase1_registry_drivers` 之 join，即 `FleetPartnerService.listPortalDrivers()` 已採用之權威解析路徑；**不得**採用 `reg.drivers`（該表無寫入路徑，恆為空，會使分母恆為 0）。
    - **必修課程集 ($M_{\text{required}}$)**: 所有標記 `isRequired: true` 之課程代碼集合。
    - **單門課程統計 (`rows[]`)**:
      - `completed`: 該課程狀態為 `passed` 且未過期（`!isOverdue`）之司機數。
@@ -337,9 +338,9 @@ stateDiagram-v2
    - 提供司機端專屬回讀 API（`GET /api/driver-academy/records` 與 `GET /api/driver-academy/courses/:id/attempts/:attemptId`）。
    - 提供車行端專屬下鑽 API（`GET /api/fleet-partner/training/drivers/:driverId/attempts/:attemptId`）。
 4. **與監管資料庫及可派資格連動 (Regulatory DB & Dispatch Linkage)**:
-   - 通過測驗時，系統於 `reg.driver_training_records`（`V0004:108-118`）插入一筆紀錄。
-   - 若司機已通過所有必修課程，系統將 `reg.driver_reg_profiles.training_status`（`V0004:101`）更新為 `'passed'`；若有任一必修課過期，更新為 `'expired'`。
-   - 派單資格評估引擎（`runtime-eligibility-evaluator.service.ts`）在車輛／服務產品具備 `trainingRequired: true` 時，強制檢查 `driver_reg_profiles.training_status === 'passed'`。未通過或過期者自動阻擋指派並輸出 `DRIVER_TRAINING_INCOMPLETE`。
+   - 通過測驗時，系統於 `reg.driver_training_records`（`V0004:108-118`，`driver_id` 型別由 `V0095` 修正為 `varchar(100)` 並移除對 `reg.drivers` 之 FK，沿用 `V0055` 既有 text-id 慣例）插入一筆紀錄，`driver_id` 為 runtime 文字 ID。
+   - 若司機已通過所有必修課程，系統將 `reg.driver_reg_profiles.training_status`（`V0004:101`，`driver_id` 型別同上修正）更新為 `'passed'`；若有任一必修課過期，更新為 `'expired'`。首次寫入該司機時，因無其他任務會預先建立該列，需採 `INSERT ... ON CONFLICT (driver_id) DO UPDATE` upsert。
+   - 派單資格評估引擎（`apps/api/src/modules/vehicle-eligibility/runtime-eligibility-evaluator.service.ts`）在車輛／服務產品具備 `trainingRequired: true` 時，應強制檢查 `driver_reg_profiles.training_status === 'passed'`。**現況**：該引擎目前僅附加靜態 `"training"` missing-requirement 字串，尚未讀取 `training_status`；此讀取連動歸屬 `SR-WIRE-001`（見本文件 §1.5），非本任務範圍。未通過或過期者阻擋指派並輸出 `DRIVER_TRAINING_INCOMPLETE` 為 `SR-WIRE-001` 完成連動後之行為。
 
 ### 3.4 資料模型與 TypeScript 契約
 
@@ -824,7 +825,7 @@ export interface HostVehicleCaseItem {
 | 關鍵考量點                | 決策落點與權威對齊                                                                                                                                                                                                        | 對應任務與 Migration                                                                 |
 | :------------------------ | :------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | :----------------------------------------------------------------------------------- |
 | **請假與班表連動模式**    | 班表底層為 `ops.phase1_driver_shifts`；請假核准後在 `record` jsonb 註記 `leaveReassigned: true`。在線司機進入假期啟動 `ops.phase1_driver_matching_suppressions`。出勤打卡與請求在線回傳 `409 DRIVER_ON_LEAVE`。           | `SR-LEAVE-BE-001`, `SR-LEAVE-FE-001`<br>Migration `V0086__sr_driver_leave.sql`       |
-| **學院完訓率真值計算**    | 廢止 fixture，以 `reg.driver_training_records` 真實作答動態計算；多課程以「通過全部必修課」為司機完成分母，完訓率不溢出。連動 `reg.driver_reg_profiles.training_status` 與 `trainingRequired`。作答綁定 `courseVersion`。 | `SR-ACADEMY-BE-001`, `SR-ACADEMY-FE-001`<br>Migration `V0087__sr_driver_academy.sql` |
+| **學院完訓率真值計算**    | 廢止 fixture，以 `reg.driver_training_records` 真實作答動態計算；多課程以「通過全部必修課」為司機完成分母，完訓率不溢出。連動 `reg.driver_reg_profiles.training_status` 與 `trainingRequired`。作答綁定 `courseVersion`。 | `SR-ACADEMY-BE-001`, `SR-ACADEMY-FE-001`<br>Migration `V0095__sr_driver_academy.sql` |
 | **Host 車主身份與入口**   | 沿用 `partner` realm（對應 `individual_owner`），授權使用現有 `owned:read`, `reports:read`, `maintenance:read`。維保對齊 `ops.phase1_maintenance_logs`，案件對齊 `crm.phase1_complaint_cases`。                           | `SR-HOST-BE-001`, `SR-HOST-FE-001`<br>Migration `V0088__sr_host_vehicle_access.sql`  |
 | **Host 收益與分潤規則**   | 權威來源為 `ops.phase1_platform_earnings_ledger`；`fleetCommission` 與 `netEarnings` 明確標註為 `null` (決策落點: `SR-HOST-BE-001` 分潤政策)，不建立假數據。                                                              | `SR-HOST-BE-001`                                                                     |
 | **全域 API Envelope**     | 全面統一為權威 `ApiSuccessEnvelope<T>`（`{ data, meta: { requestId, timestamp } }`）與 `ApiListData<T>`。                                                                                                                 | `SR-CONTRACT-001`                                                                    |
