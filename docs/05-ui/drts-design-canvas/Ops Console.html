@@ -131,7 +131,7 @@ function App() {
           <DCArtboard id="leave-queue-pending" label="1 · 待審佇列 · Pending" width={W} height={H}><Hero url="/approvals/leave?status=pending"><OC_LeaveQueue theme={th} activeTab="pending" /></Hero></DCArtboard>
           <DCArtboard id="leave-queue-approved" label="1 · 佇列 · Approved" width={W} height={H}><Bare><OC_LeaveQueue theme={th} activeTab="approved" /></Bare></DCArtboard>
           <DCArtboard id="leave-queue-rejected" label="1 · 佇列 · Rejected" width={W} height={H}><Bare><OC_LeaveQueue theme={th} activeTab="rejected" /></Bare></DCArtboard>
-          <DCArtboard id="leave-queue-withdrawn-empty" label="1 · 佇列 · Withdrawn · filtered_empty" width={W} height={H}><Bare><OC_LeaveQueue theme={th} activeTab="withdrawn" /></Bare></DCArtboard>
+          <DCArtboard id="leave-queue-withdrawn" label="1 · 佇列 · Withdrawn · 司機自行撤回稽核" width={W} height={H}><Bare><OC_LeaveQueue theme={th} activeTab="withdrawn" /></Bare></DCArtboard>
           <DCArtboard id="leave-detail" label="2 · 詳情 + 核准／駁回決策" width={W} height={H}><Bare><OC_LeaveDetail theme={th} /></Bare></DCArtboard>
           <DCArtboard id="leave-conflict-state" label="3 · 409 LEAVE_INVALID_STATE_TRANSITION" width={W} height={H}><Bare><OC_LeaveConflict theme={th} variant="invalid_state" /></Bare></DCArtboard>
           <DCArtboard id="leave-conflict-overlap" label="3 · 409 LEAVE_OVERLAPPING_REQUEST" width={W} height={H}><Bare><OC_LeaveConflict theme={th} variant="overlap" /></Bare></DCArtboard>

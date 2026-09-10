@@ -26,32 +26,53 @@ const OPS_LEAVE_STATUS = {
   withdrawn: { zh: '已撤回', tone: 'neutral' },
 };
 
+// Converts a DriverLeaveRecord UTC ISO timestamp to an Asia/Taipei (UTC+8)
+// "YYYY-MM-DD HH:mm" display string. Used anywhere a raw createdAt/reviewedAt
+// is shown so ops sees local time, not a sliced UTC string (phase1_service_
+// contracts_v1.md §2.2 — timestamps are UTC on the wire, locale on screen).
+function fmtTaipei(iso) {
+  const d = new Date(new Date(iso).getTime() + 8 * 3600 * 1000);
+  const p = (n) => String(n).padStart(2, '0');
+  return `${d.getUTCFullYear()}-${p(d.getUTCMonth() + 1)}-${p(d.getUTCDate())} ${p(d.getUTCHours())}:${p(d.getUTCMinutes())}`;
+}
+
 // Fixture aligned with DriverLeaveRecord — mirrors driver-leave.jsx FX_DRV_LEAVE
-// so ops/driver canvases stay cross-consistent (SA §6.8 rule).
+// so ops/driver canvases stay cross-consistent (SA §6.8 rule): the four leaveIds
+// shared with FX_DRV_LEAVE all belong to the same driverId (drv_0186 · 吳明翰),
+// matching "我的請假" being one driver's own history. impactedShiftIds stays []
+// until a leave is actually approved (§2.3 invariant 3) — a still-pending
+// request's potential overlap is a separate previewShiftIds (see OC_LeaveDetail's
+// "班次重疊預覽" card), never written into impactedShiftIds ahead of the decision.
 const FX_OPS_LEAVE = [
   {
-    leaveId: 'lv_d82a1b5c', driver: '吳明翰 · drv_0186', leaveType: 'personal', status: 'pending',
+    leaveId: 'lv_d82a1b5c', driverId: 'drv_0186', driver: '吳明翰 · drv_0186', leaveType: 'personal', status: 'pending',
     zhRange: '09/10（四）16:00–21:00', startTime: '2026-09-10T08:00:00.000Z', endTime: '2026-09-10T13:00:00.000Z',
-    reason: '家中臨時事務，需請假處理。', impactedShiftIds: ['shift_2305'], createdAt: '2026-09-10T07:42:00.000Z',
+    reason: '家中臨時事務，需請假處理。', impactedShiftIds: [], previewShiftIds: ['shift_2305'], createdAt: '2026-09-10T07:42:00.000Z',
   },
   {
-    leaveId: 'lv_c47b9012', driver: '林建成 · drv_0201', leaveType: 'sick', status: 'pending',
+    leaveId: 'lv_c47b9012', driverId: 'drv_0201', driver: '林建成 · drv_0201', leaveType: 'sick', status: 'pending',
     zhRange: '09/11（五）09:00–18:00', startTime: '2026-09-11T01:00:00.000Z', endTime: '2026-09-11T10:00:00.000Z',
-    reason: '就醫回診，附掛號證明。', impactedShiftIds: [], createdAt: '2026-09-10T06:15:00.000Z',
+    reason: '就醫回診，附掛號證明。', impactedShiftIds: [], previewShiftIds: ['shift_2306'], createdAt: '2026-09-10T06:15:00.000Z',
   },
   {
-    leaveId: 'lv_9c31a204', driver: '陳大明 · drv_0230', leaveType: 'annual', status: 'approved',
+    leaveId: 'lv_9c31a204', driverId: 'drv_0186', driver: '吳明翰 · drv_0186', leaveType: 'annual', status: 'approved',
     zhRange: '09/14（一）08:00 – 09/16（三）23:59', startTime: '2026-09-14T00:00:00.000Z', endTime: '2026-09-16T15:59:00.000Z',
     reason: '家庭旅遊，已提前排班交接。', impactedShiftIds: ['shift_2291', 'shift_2292'],
     reviewedBy: '王芳 · ops_manager', reviewedAt: '2026-09-08T02:10:00.000Z', reviewNotes: '已核准，對應班次已標記調離。',
     createdAt: '2026-09-05T09:00:00.000Z',
   },
   {
-    leaveId: 'lv_71e9f830', driver: '游志豪 · drv_0079', leaveType: 'sick', status: 'rejected',
+    leaveId: 'lv_71e9f830', driverId: 'drv_0186', driver: '吳明翰 · drv_0186', leaveType: 'sick', status: 'rejected',
     zhRange: '09/05（六）09:00–18:00', startTime: '2026-09-05T01:00:00.000Z', endTime: '2026-09-05T10:00:00.000Z',
     reason: '身體不適。', impactedShiftIds: [],
     reviewedBy: '王芳 · ops_manager', reviewedAt: '2026-09-05T02:00:00.000Z', reviewNotes: '未附診斷證明，請補件後重新申請。',
     createdAt: '2026-09-05T00:50:00.000Z',
+  },
+  {
+    leaveId: 'lv_5b204a11', driverId: 'drv_0186', driver: '吳明翰 · drv_0186', leaveType: 'emergency', status: 'withdrawn',
+    zhRange: '09/03（四）21:00 – 09/04（五）01:00', startTime: '2026-09-03T13:00:00.000Z', endTime: '2026-09-03T17:00:00.000Z',
+    reason: '臨時通知取消，已能正常排班。', impactedShiftIds: [],
+    reviewedBy: null, reviewedAt: null, reviewNotes: null, createdAt: '2026-09-03T12:50:00.000Z',
   },
 ];
 
@@ -94,11 +115,16 @@ function OC_LeaveQueue({ theme: th, activeTab = 'pending' }) {
               { h: '時段（UTC+8）', w: 220, r: r => r.zhRange },
               { h: '事由', w: 260, r: r => r.reason },
               { h: '班次連動', w: 100, r: r => r.impactedShiftIds.length > 0 ? <Pill theme={th} tone="warn" dot>{r.impactedShiftIds.length} 筆</Pill> : <span style={{ color: th.textDim }}>—</span> },
-              { h: '提交時間', w: 130, mono: true, r: r => r.createdAt.slice(0, 16).replace('T', ' ') },
+              { h: '提交時間（UTC+8）', w: 150, r: r => (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
+                  <span style={{ fontFamily: SHELL_MONO, fontSize: 11 }}>{fmtTaipei(r.createdAt)}</span>
+                  <span style={{ fontFamily: SHELL_MONO, fontSize: 9, color: th.textDim }}>{r.createdAt} UTC</span>
+                </div>
+              ) },
               { h: '', w: 220, r: r => activeTab === 'pending' ? (
                 <div style={{ display: 'flex', gap: 4 }}>
                   <ActionButton theme={th} size="xs" descriptor={{ action: 'approve', enabled: true, riskLevel: 'medium', requiresReason: false }} label="核准" en="approve" />
-                  <ActionButton theme={th} size="xs" descriptor={{ action: 'reject', enabled: true, riskLevel: 'high', requiresReason: true }} label="駁回" en="reject" />
+                  <ActionButton theme={th} size="xs" descriptor={{ action: 'reject', enabled: true, riskLevel: 'high', requiresReason: false }} label="駁回" en="reject" />
                   <Btn theme={th} size="xs" variant="ghost" icon="ext">詳情</Btn>
                 </div>
               ) : <Btn theme={th} size="xs" variant="ghost" icon="ext">詳情</Btn> },
@@ -118,17 +144,17 @@ function OC_LeaveDetail({ theme: th }) {
       env="production" actor={OPS_ACTOR} health={OPS_HEALTH} refreshTier="medium" dataFreshness="fresh">
       <PageHeader theme={th}
         title={<span style={{ display: 'inline-flex', alignItems: 'center', gap: 10 }}>{r.driver}<OpsLeaveTypeChip theme={th} type={r.leaveType} /><OpsLeaveStatusChip theme={th} status={r.status} /></span>}
-        subtitle={r.zhRange + ' · 提交於 ' + r.createdAt}
+        subtitle={r.zhRange + ' · 提交於 ' + fmtTaipei(r.createdAt) + ' (UTC+8) · ' + r.createdAt + ' UTC'}
         actions={<>
           <ActionButton theme={th} size="md" descriptor={{ action: 'approve', enabled: true, riskLevel: 'medium', requiresReason: false }} icon="check" label="核准" en="approve" />
-          <ActionButton theme={th} size="md" descriptor={{ action: 'reject', enabled: true, riskLevel: 'high', requiresReason: true }} icon="x" label="駁回" en="reject" />
+          <ActionButton theme={th} size="md" descriptor={{ action: 'reject', enabled: true, riskLevel: 'high', requiresReason: false }} icon="x" label="駁回" en="reject" />
         </>} />
 
       <div style={{ padding: 24, display: 'grid', gridTemplateColumns: '1.3fr 1fr', gap: 16, alignItems: 'start' }}>
         <Card theme={th} title="申請內容">
           <DL theme={th} cols={2} items={[
             { k: 'leaveId', v: r.leaveId, mono: true },
-            { k: 'driverId', v: 'drv_0186', mono: true },
+            { k: 'driverId', v: r.driverId, mono: true },
             { k: 'leaveType', v: r.leaveType, mono: true },
             { k: 'status', v: <OpsLeaveStatusChip theme={th} status={r.status} /> },
             { k: 'startTime (UTC)', v: r.startTime, mono: true },
@@ -139,17 +165,17 @@ function OC_LeaveDetail({ theme: th }) {
             <div style={{ fontSize: 12.5, color: th.text, lineHeight: 1.55, background: th.surfaceLo, borderRadius: 8, padding: '10px 12px' }}>{r.reason}</div>
           </div>
           <div style={{ marginTop: 14 }}>
-            <Field theme={th} label="審核備註 · reviewNotes" hint="駁回 (reject) 時為必填，會寫入 ReviewDriverLeaveCommand.reviewNotes">
-              <Input theme={th} ph="輸入核准／駁回原因…" />
+            <Field theme={th} label="審核備註 · reviewNotes" hint="選填，核准／駁回皆可填寫；會寫入 ReviewDriverLeaveCommand.reviewNotes（契約未強制駁回必填）">
+              <Input theme={th} ph="輸入核准／駁回原因（選填）…" />
             </Field>
           </div>
         </Card>
-        <Card theme={th} title="班次重疊預覽" subtitle="核准後將寫入 impactedShiftIds">
-          {r.impactedShiftIds.length === 0 ? (
+        <Card theme={th} title="班次重疊預覽" subtitle="核准後才會寫入 DriverLeaveRecord.impactedShiftIds">
+          {(r.previewShiftIds || []).length === 0 ? (
             <EmptyState theme={th} reason="no_data" compact messageOverride="此區間目前無重疊班次。" />
           ) : (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-              {r.impactedShiftIds.map(id => (
+              {r.previewShiftIds.map(id => (
                 <div key={id} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 10px', background: th.warnBg, border: '1px solid ' + th.warnBorder, borderRadius: 8 }}>
                   <MgmtIcon name="attendance" size={14} style={{ color: th.warn }} />
                   <span style={{ flex: 1, fontSize: 12, fontFamily: SHELL_MONO }}>{id}</span>
@@ -221,7 +247,12 @@ function OC_LeaveHistory({ theme: th }) {
             { h: '結果', w: 110, r: r => <OpsLeaveStatusChip theme={th} status={r.status} /> },
             { h: '時段（UTC+8）', w: 220, r: r => r.zhRange },
             { h: '審核人', w: 150, r: r => r.reviewedBy || <span style={{ color: th.textDim }}>—（司機自行撤回）</span> },
-            { h: '審核時間', w: 140, mono: true, r: r => r.reviewedAt ? r.reviewedAt.slice(0, 16).replace('T', ' ') : '—' },
+            { h: '審核時間（UTC+8）', w: 150, r: r => r.reviewedAt ? (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
+                <span style={{ fontFamily: SHELL_MONO, fontSize: 11 }}>{fmtTaipei(r.reviewedAt)}</span>
+                <span style={{ fontFamily: SHELL_MONO, fontSize: 9, color: th.textDim }}>{r.reviewedAt} UTC</span>
+              </div>
+            ) : <span style={{ color: th.textDim }}>—</span> },
             { h: '備註', w: 240, r: r => r.reviewNotes || <span style={{ color: th.textDim }}>—</span> },
           ]} rows={rows} />
         </Card>
@@ -232,11 +263,15 @@ function OC_LeaveHistory({ theme: th }) {
 
 // ── 5 · Shift reassignment + dispatch suppression board ─────────────────────
 function OC_LeaveShiftImpact({ theme: th }) {
+  // driver/status here matches FX_OPS_LEAVE by leaveId: shift_2291/2292 are the
+  // impactedShiftIds already written by lv_9c31a204 (approved); shift_2305/2306
+  // are only previewShiftIds for still-pending lv_d82a1b5c / lv_c47b9012 — not
+  // yet tagged leaveReassigned, hence pendingReview instead of a warn pill.
   const board = [
-    { shift: 'shift_2291', driver: '陳大明 · drv_0230', zh: '09/14（一）08:00–20:00', tagged: true, elig: 'ineligible' },
-    { shift: 'shift_2292', driver: '陳大明 · drv_0230', zh: '09/15（二）08:00–20:00', tagged: true, elig: 'ineligible' },
+    { shift: 'shift_2291', driver: '吳明翰 · drv_0186', zh: '09/14（一）08:00–20:00', tagged: true, elig: 'ineligible' },
+    { shift: 'shift_2292', driver: '吳明翰 · drv_0186', zh: '09/15（二）08:00–20:00', tagged: true, elig: 'ineligible' },
     { shift: 'shift_2305', driver: '吳明翰 · drv_0186', zh: '09/10（四）16:00–24:00', tagged: false, elig: 'eligible', pendingReview: true },
-    { shift: 'shift_2306', driver: '林建成 · drv_0201', zh: '09/11（五）08:00–20:00', tagged: false, elig: 'eligible' },
+    { shift: 'shift_2306', driver: '林建成 · drv_0201', zh: '09/11（五）08:00–20:00', tagged: false, elig: 'eligible', pendingReview: true },
   ];
   return (
     <Shell theme={th} nav={OPS_NAV} active="approvals" breadcrumb={['審批佇列', '請假審核', '班表連動']}

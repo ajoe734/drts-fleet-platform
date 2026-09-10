@@ -7,10 +7,15 @@
 //   1. DRV_LeaveList          — 列表 / empty (GET /api/driver-leave/requests)
 //   2. DRV_LeaveForm          — 申請 + 日期驗證 (POST /requests, 400/409 errors)
 //   3. DRV_LeaveDetail        — 詳情 / 撤回 / 終態 (POST /:id/withdraw)
+//      + DRV_LeaveConflict    — 撤回競爭與共用錯誤 (409/400/403/404, §2.6)
 //   4. DRV_LeaveShiftImpact   — 主管決定後班表連動 (leaveReassigned / impactedShiftIds)
 //   5. DRV_LeaveDispatchConflict — 出勤與在線防護 (409 DRIVER_ON_LEAVE)
 // zh-TW · raw_code 雙語. All times shown in Asia/Taipei (UTC+8) with raw UTC kept
 // alongside per record, matching DriverLeaveRecord.startTime/endTime (ISO 8601 UTC).
+// Fixture identity: every FX_DRV_LEAVE record belongs to the same driver
+// (driverId: 'drv_0186' · 吳明翰), matching the forced driverId filter on
+// GET /requests. ops-leave.jsx FX_OPS_LEAVE mirrors the same leaveId → driverId
+// mapping for these records so the two canvases stay cross-consistent (SA §6.8).
 
 const DRV_LEAVE_TYPE = {
   annual:      { zh: '特休',     tone: 'info' },
@@ -31,27 +36,27 @@ const DRV_LEAVE_STATUS = {
 // wire value; zh range is the Asia/Taipei (UTC+8) display derived from it.
 const FX_DRV_LEAVE = [
   {
-    leaveId: 'lv_d82a1b5c', leaveType: 'personal', status: 'pending',
+    leaveId: 'lv_d82a1b5c', driverId: 'drv_0186', leaveType: 'personal', status: 'pending',
     zhRange: '09/10（四）16:00–21:00', startTime: '2026-09-10T08:00:00.000Z', endTime: '2026-09-10T13:00:00.000Z',
     reason: '家中臨時事務，需請假處理。', impactedShiftIds: [], reviewNotes: null, reviewedAt: null,
     createdAt: '2026-09-10T07:42:00.000Z',
   },
   {
-    leaveId: 'lv_9c31a204', leaveType: 'annual', status: 'approved',
+    leaveId: 'lv_9c31a204', driverId: 'drv_0186', leaveType: 'annual', status: 'approved',
     zhRange: '09/14（一）08:00 – 09/16（三）23:59', startTime: '2026-09-14T00:00:00.000Z', endTime: '2026-09-16T15:59:00.000Z',
     reason: '家庭旅遊，已提前排班交接。', impactedShiftIds: ['shift_2291', 'shift_2292'],
     reviewNotes: '已核准，對應班次已標記調離。', reviewedAt: '2026-09-08T02:10:00.000Z', reviewedBy: '王芳 · ops_manager',
     createdAt: '2026-09-05T09:00:00.000Z',
   },
   {
-    leaveId: 'lv_71e9f830', leaveType: 'sick', status: 'rejected',
+    leaveId: 'lv_71e9f830', driverId: 'drv_0186', leaveType: 'sick', status: 'rejected',
     zhRange: '09/05（六）09:00–18:00', startTime: '2026-09-05T01:00:00.000Z', endTime: '2026-09-05T10:00:00.000Z',
     reason: '身體不適。', impactedShiftIds: [],
     reviewNotes: '未附診斷證明，請補件後重新申請。', reviewedAt: '2026-09-05T02:00:00.000Z', reviewedBy: '王芳 · ops_manager',
     createdAt: '2026-09-05T00:50:00.000Z',
   },
   {
-    leaveId: 'lv_5b204a11', leaveType: 'emergency', status: 'withdrawn',
+    leaveId: 'lv_5b204a11', driverId: 'drv_0186', leaveType: 'emergency', status: 'withdrawn',
     zhRange: '09/03（四）21:00 – 09/04（五）01:00', startTime: '2026-09-03T13:00:00.000Z', endTime: '2026-09-03T17:00:00.000Z',
     reason: '臨時通知取消，已能正常排班。', impactedShiftIds: [], reviewNotes: null, reviewedAt: null,
     createdAt: '2026-09-03T12:50:00.000Z',
@@ -106,11 +111,32 @@ function DRV_LeaveList({ theme: t, variant = 'default' }) {
   );
 }
 
+// variant → demo start/end pair + which field carries the LEAVE_INVALID_TIME_RANGE
+// error. §2.6 maps that single code to three distinct causes (endTime<=startTime,
+// invalid date format, or start > 15min in the past) — each gets its own variant
+// so the error contract is fully demonstrated, not just the "too early" case.
+const DRV_LEAVE_FORM_VARIANT = {
+  default:       { startZh: '2026-09-10 16:00', startUtc: '2026-09-10T08:00:00Z', endZh: '2026-09-10 21:00', endUtc: '2026-09-10T13:00:00Z' },
+  error_range:   { startZh: '2026-09-01 09:00', startUtc: '2026-09-01T01:00:00Z', endZh: '2026-09-10 21:00', endUtc: '2026-09-10T13:00:00Z',
+                   field: 'start', msg: 'LEAVE_INVALID_TIME_RANGE · 起始時間不得早於現在 15 分鐘以上（MAX_PAST_APPLICATION_GRACE_MS）' },
+  error_order:   { startZh: '2026-09-10 21:00', startUtc: '2026-09-10T13:00:00Z', endZh: '2026-09-10 16:00', endUtc: '2026-09-10T08:00:00Z',
+                   field: 'end', msg: 'LEAVE_INVALID_TIME_RANGE · 結束時間必須晚於開始時間（endTime <= startTime）' },
+  error_invalid: { startZh: '2026-13-45 99:99', startUtc: '（無法解析為合法日期）', endZh: '2026-09-10 21:00', endUtc: '2026-09-10T13:00:00Z',
+                   field: 'start', msg: 'LEAVE_INVALID_TIME_RANGE · 日期格式無效，請重新選擇' },
+  // overlaps lv_9c31a204 (approved, 09/14 00:00 – 09/16 15:59 UTC): this request's
+  // 09/15 UTC window sits fully inside that range, so the 409 below is genuine.
+  error_overlap: { startZh: '2026-09-15 09:00', startUtc: '2026-09-15T01:00:00Z', endZh: '2026-09-15 18:00', endUtc: '2026-09-15T10:00:00Z' },
+  keyboard:      { startZh: '2026-09-10 16:00', startUtc: '2026-09-10T08:00:00Z', endZh: '2026-09-10 21:00', endUtc: '2026-09-10T13:00:00Z' },
+};
+
 // ── 2 · New request + date/timezone validation (POST /requests) ─────────────
-// variant: default | error_range (400 LEAVE_INVALID_TIME_RANGE) |
+// variant: default | error_range | error_order | error_invalid (all three
+//          400 LEAVE_INVALID_TIME_RANGE causes, §2.6) |
 //          error_overlap (409 LEAVE_OVERLAPPING_REQUEST) | keyboard (focus safe-area)
 function DRV_LeaveForm({ theme: t, variant = 'default' }) {
-  const errRange = variant === 'error_range';
+  const cfg = DRV_LEAVE_FORM_VARIANT[variant] || DRV_LEAVE_FORM_VARIANT.default;
+  const startErr = cfg.field === 'start' ? cfg.msg : null;
+  const endErr = cfg.field === 'end' ? cfg.msg : null;
   const errOverlap = variant === 'error_overlap';
   const keyboardOpen = variant === 'keyboard';
 
@@ -143,19 +169,19 @@ function DRV_LeaveForm({ theme: t, variant = 'default' }) {
             </div>
           </FieldRow>
 
-          <FieldRow label="開始時間 · start (Asia/Taipei · UTC+8)" error={errRange ? 'LEAVE_INVALID_TIME_RANGE · 起始時間不得早於現在 15 分鐘以上' : null}>
-            <div style={box(errRange ? t.danger : t.border)}>
-              <DrvIcon name="clock" size={16} style={{ color: errRange ? t.danger : t.textMuted }} />
-              <span style={{ flex: 1 }}>{errRange ? '2026-09-01 09:00' : '2026-09-10 16:00'}</span>
-              <span style={{ fontFamily: DRV_MONO, fontSize: 10, color: t.textDim }}>{errRange ? '2026-09-01T01:00:00Z' : '2026-09-10T08:00:00Z'}</span>
+          <FieldRow label="開始時間 · start (Asia/Taipei · UTC+8)" error={startErr}>
+            <div style={box(startErr ? t.danger : t.border)}>
+              <DrvIcon name="clock" size={16} style={{ color: startErr ? t.danger : t.textMuted }} />
+              <span style={{ flex: 1 }}>{cfg.startZh}</span>
+              <span style={{ fontFamily: DRV_MONO, fontSize: 10, color: t.textDim }}>{cfg.startUtc}</span>
             </div>
           </FieldRow>
 
-          <FieldRow label="結束時間 · end (Asia/Taipei · UTC+8)">
-            <div style={box(t.border)}>
-              <DrvIcon name="clock" size={16} style={{ color: t.textMuted }} />
-              <span style={{ flex: 1 }}>2026-09-10 21:00</span>
-              <span style={{ fontFamily: DRV_MONO, fontSize: 10, color: t.textDim }}>2026-09-10T13:00:00Z</span>
+          <FieldRow label="結束時間 · end (Asia/Taipei · UTC+8)" error={endErr}>
+            <div style={box(endErr ? t.danger : t.border)}>
+              <DrvIcon name="clock" size={16} style={{ color: endErr ? t.danger : t.textMuted }} />
+              <span style={{ flex: 1 }}>{cfg.endZh}</span>
+              <span style={{ fontFamily: DRV_MONO, fontSize: 10, color: t.textDim }}>{cfg.endUtc}</span>
             </div>
           </FieldRow>
 
@@ -185,15 +211,18 @@ function DRV_LeaveForm({ theme: t, variant = 'default' }) {
         </DrvSection>
       </div>
 
-      {keyboardOpen && (
-        <div style={{ flexShrink: 0, background: '#D5D8DE', borderTop: '1px solid #B7BBC4', padding: '10px 14px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-          <span style={{ fontSize: 10.5, color: '#4A4E58', fontWeight: 600, letterSpacing: 0.3 }}>iOS / Android 鍵盤 · keyboard-avoiding-view · safe-area-inset-bottom</span>
-        </div>
-      )}
+      {/* Content → submit row → keyboard (bottom-most), so DrvStickyAction always
+          renders above the keyboard block, never underneath it. Uses theme tokens
+          (not a hardcoded palette) so the simulated keyboard tracks light/dark. */}
       <DrvStickyAction theme={t}
         info={keyboardOpen ? '送出列固定於鍵盤上緣，不被系統鍵盤遮蔽' : null}
         secondary={<DrvBigBtn theme={t} kind="outline" full={false} style={{ width: 88 }}>取消</DrvBigBtn>}
-        primary={<DrvBigBtn theme={t} kind="primary" icon="check" disabled={errRange || errOverlap}>送出申請</DrvBigBtn>} />
+        primary={<DrvBigBtn theme={t} kind="primary" icon="check" disabled={!!cfg.field || errOverlap}>送出申請</DrvBigBtn>} />
+      {keyboardOpen && (
+        <div style={{ flexShrink: 0, background: t.surfaceLo, borderTop: '1px solid ' + t.border, padding: '10px 14px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+          <span style={{ fontSize: 10.5, color: t.textDim, fontWeight: 600, letterSpacing: 0.3 }}>iOS / Android 鍵盤 · keyboard-avoiding-view · safe-area-inset-bottom</span>
+        </div>
+      )}
     </div>
   );
 }
@@ -280,6 +309,53 @@ function DRV_LeaveDetail({ theme: t, variant = 'pending' }) {
   );
 }
 
+// ── 3b · Withdraw race + shared error states (§2.6 LEAVE_* contract) ────────
+// variant: withdraw_conflict (409 LEAVE_INVALID_STATE_TRANSITION — driver taps
+//          撤回 on DRV_LeaveDetail(variant="pending") but ops decided first) |
+//          missing_fields (400 LEAVE_MISSING_REQUIRED_FIELDS) |
+//          forbidden (403 LEAVE_FORBIDDEN_ACCESS) | not_found (404 LEAVE_NOT_FOUND)
+// Covers the codes not otherwise shown by DRV_LeaveForm/DRV_LeaveList so
+// implementation does not have to invent its own screen for them.
+function DRV_LeaveConflict({ theme: t, variant = 'withdraw_conflict' }) {
+  const cfg = {
+    withdraw_conflict: {
+      code: '409 · LEAVE_INVALID_STATE_TRANSITION', title: '此假單已被主管審核',
+      body: '你嘗試撤回時，主管已完成審核決策，此假單已非 pending 狀態，撤回操作被伺服器拒絕。請重新讀取最新狀態，畫面將顯示對應的核准／駁回終態。',
+      cta: '重新讀取最新狀態',
+    },
+    missing_fields: {
+      code: '400 · LEAVE_MISSING_REQUIRED_FIELDS', title: '缺少必填欄位',
+      body: '假別、開始時間、結束時間、事由皆為必填欄位；伺服器已拒絕本次送出，請返回表單完整填寫後再試一次。',
+      cta: '返回表單',
+    },
+    forbidden: {
+      code: '403 · LEAVE_FORBIDDEN_ACCESS', title: '無法存取此假單',
+      body: '此假單不屬於目前登入司機帳號，driverId 強制過濾已拒絕本次查看／撤回請求。',
+      cta: '返回我的請假',
+    },
+    not_found: {
+      code: '404 · LEAVE_NOT_FOUND', title: '找不到此假單',
+      body: '指定的 leaveId 不存在，可能已被刪除或連結已失效。',
+      cta: '返回我的請假',
+    },
+  }[variant];
+  return (
+    <div style={{ flex: 1, overflowY: 'auto', background: t.bg, display: 'flex', flexDirection: 'column' }}>
+      <div style={{ flex: 1, padding: 20, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', textAlign: 'center' }}>
+        <span style={{ width: 68, height: 68, borderRadius: 34, background: t.dangerBg, color: t.danger, display: 'flex', alignItems: 'center', justifyContent: 'center', marginBottom: 16 }}>
+          <DrvIcon name="lock" size={32} stroke={1.8} />
+        </span>
+        <div style={{ fontSize: 18, fontWeight: 800, color: t.text, marginBottom: 8 }}>{cfg.title}</div>
+        <code style={{ fontSize: 11, fontFamily: DRV_MONO, color: t.danger, background: t.dangerBg, padding: '3px 10px', borderRadius: 999, marginBottom: 12 }}>{cfg.code}</code>
+        <div style={{ fontSize: 13, color: t.textMuted, lineHeight: 1.65, maxWidth: 300 }}>{cfg.body}</div>
+      </div>
+      <div style={{ padding: 16, borderTop: '1px solid ' + t.border, background: t.surface }}>
+        <DrvBigBtn theme={t} kind="outline" icon="refresh">{cfg.cta}</DrvBigBtn>
+      </div>
+    </div>
+  );
+}
+
 // ── 4 · Shift reassignment linkage (record.leaveReassigned / impactedShiftIds) ─
 function DRV_LeaveShiftImpact({ theme: t }) {
   const shifts = [
@@ -339,5 +415,5 @@ function DRV_LeaveDispatchConflict({ theme: t, variant = 'clock_in_blocked' }) {
 
 Object.assign(window, {
   DRV_LEAVE_TYPE, DRV_LEAVE_STATUS, FX_DRV_LEAVE, LeaveTypeChip, LeaveStatusChip,
-  DRV_LeaveList, DRV_LeaveForm, DRV_LeaveDetail, DRV_LeaveShiftImpact, DRV_LeaveDispatchConflict,
+  DRV_LeaveList, DRV_LeaveForm, DRV_LeaveDetail, DRV_LeaveConflict, DRV_LeaveShiftImpact, DRV_LeaveDispatchConflict,
 });
