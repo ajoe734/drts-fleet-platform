@@ -624,13 +624,49 @@ export class OwnedAutonomousDispatchExecutorService {
       };
     }
 
-    // 5. Verified expired! Close offer and release reservation
-    await this.ownedMobilityService.handleDispatchTimeout(
+    // 5. Verified expired! Close offer and release reservation.
+    // When DB-backed, `handleDispatchTimeout` re-verifies the target
+    // assignment under a real DB row lock (`closeSupersededDispatchAssignment`)
+    // before touching anything, precisely because steps 1-3 above only
+    // checked *this* process's in-memory cache, which can be stale if
+    // another instance accepted or replaced the offer after this cache was
+    // hydrated but before this timeout fired. When that fresh, authoritative
+    // check finds the offer already left "assigned", it reports
+    // `escalationAction: "superseded"` and leaves all state untouched --
+    // this must be treated as the same safe no-op as steps 1-3, not silently
+    // ignored: falling through here would still mark this stale instance's
+    // cached order `redispatch_required` and start a spurious extra offer
+    // round for an order another instance already resolved. Scoped to the
+    // DB-backed path specifically: the in-memory-only fallback inside
+    // `applyDispatchTimeout` re-derives "already expired" from the stored
+    // assignment's own deadline rather than re-verifying supersession under a
+    // lock, which is a different (and, without a shared DB, unfenceable)
+    // check that existing in-memory-mode callers already account for.
+    const timeoutOutcome = await this.ownedMobilityService.handleDispatchTimeout(
       command.orderId,
       "acceptance_timeout",
       command.requestId,
       { targetAssignmentId: command.targetAssignmentId },
     );
+
+    if (
+      this.ownedMobilityRepository?.isEnabled() &&
+      timeoutOutcome.escalationAction === "superseded"
+    ) {
+      const result: AutonomousDispatchTimeoutResult = {
+        outcome: "superseded_or_no_op",
+        reason: "offer_already_closed",
+        orderId: command.orderId,
+        targetAssignmentId: command.targetAssignmentId,
+      };
+      this.recordReceipt(
+        timeoutOpKey,
+        "superseded",
+        command as unknown as Record<string, unknown>,
+        result as unknown as Record<string, unknown>,
+      );
+      return result;
+    }
 
     if (!this.ownedMobilityRepository?.isEnabled()) {
       this.releaseInMem(command.targetAssignmentId);
