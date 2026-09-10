@@ -535,3 +535,101 @@ evidence once it shows `2 passed / 0 skipped`. If that real run instead
 surfaces a genuine product-code defect (not a fixture gap), stop and register
 that as a separate product-fix task rather than patching it here, per the
 Supervisor's integration note.
+
+## 11. Real run 34471890706 — genuine product auth defect found, task blocked
+
+Dispatching §10's fix landed as commit
+`44f9dcb8562a4e23ea4dffbf1715749104d11651` on top of the reviewed combined
+runtime candidate `9f23efd623d07c613eb61c10cae953f6ba7ea6ef` (the now-approved
+parent runtime after the separate SR-IDENTITY-002 principal-upsert-conflict
+fix landed; still overlaid only with the single harness test file, structural
+overlay hash recorded in
+`.local/worker-recovery-20260910/tenant-run-34471890706/run-status.json`).
+The real GitHub-hosted run
+(https://github.com/ajoe734/drts-fleet-platform/actions/runs/34471890706/job/102853475347)
+got past migrations, the §9 identity-FK fixture fix, and JWT verification —
+`1 passed / 1 failed` on the gate:
+
+```
+AssertionError: expected 200 to be 401 // Object.is equality
+  at appmodule-tenant-binding.test.ts:438:32
+```
+
+Line 438 is step 3, "Anonymous request must be 401": a plain `fetch` with
+only an `x-tenant-id` header, no `Authorization` header at all, against
+`GET /api/tenant/api-keys`. It got `200` back with the victim tenant's data.
+
+**Root cause is a real product auth defect, not a fixture/harness gap.**
+Traced through the actual runtime source on this candidate:
+
+1. `apps/api/src/common/auth/auth.extractor.ts` `hasAuthSignal()` (and the
+   guard's own copy, `hasBootstrapAuthSignal()` in
+   `apps/api/src/common/auth/bootstrap-auth.guard.ts`) both treat the mere
+   *presence* of `x-tenant-id` as sufficient "auth signal" to skip the
+   anonymous branch — it is in the same header list as `x-actor-type`,
+   `x-roles`, etc. A caller who sends only `x-tenant-id` (no
+   `Authorization` header, no other identity claim) is therefore never
+   treated as anonymous.
+2. Once treated as non-anonymous, `extractBootstrapRequestIdentity()`
+   (`auth.extractor.ts:156-159`) falls back `actorType` to `"system"`
+   whenever `x-actor-type` is absent or invalid — which it always is for a
+   request that supplied no identity headers beyond `x-tenant-id`.
+3. `apps/api/src/common/auth/auth.policy.ts` `baseAllowedRealms()`
+   (line 28-30) unconditionally prepends `"system"` to *every* route's
+   `allowedRealms`, including the `tenant/*` fallback policy that governs
+   `GET /api/tenant/api-keys` (line 459-464, `allowedRealms:
+   baseAllowedRealms("platform", "tenant")` → actually `["system",
+   "platform", "tenant"]`).
+4. `packages/contracts/src/iam-policy-catalog.ts` (`IAM_ACTOR_POLICY_DEFINITIONS`,
+   `actorType: "system"`, line ~565) grants the `"system"` actor type a very
+   broad scope preset that includes `tenant:read` and `tenant:write` among
+   many others.
+
+The combination means: an HTTP request with **no credentials at all**, just
+an `x-tenant-id` header naming the target tenant, is accepted as a
+`"system"`-realm, `tenant:read`-scoped actor and is allowed straight through
+`BootstrapAuthGuard.activateNonIap()`'s realm/scope checks — a genuine
+authentication bypass for every `tenant/*` (and likely other) route in
+non-strict (`local`/`test`) auth environments. This is exactly what the C111
+harness step 3 is designed to catch, and it is correctly asserting `401`.
+
+**Why this cannot be "fixed" by flipping to strict auth environment inside
+the harness instead:** `BootstrapAuthGuard.canActivate()` checks
+`strictEnvironment && hasBootstrapAuthSignal(baseHeaders)` **before** it ever
+looks for a `Bearer` token (bootstrap-auth.guard.ts:174-186). The same C111
+test's cross-tenant checks (step 4 onward) send a real, valid `Bearer`
+JWT *together with* `x-tenant-id` on every request. Under strict mode, those
+legitimate Bearer-authenticated requests would also trip
+`hasBootstrapAuthSignal` (because `x-tenant-id` is in that list) and get
+rejected with `401 AUTH_BOOTSTRAP_HEADERS_FORBIDDEN` before the JWT is ever
+verified — destroying the required `403 TENANT_SCOPE_MISMATCH` cross-tenant
+semantics the same test asserts a few lines later. So this is not a single
+narrow bug fixable by an environment toggle; it needs the strict-mode
+bootstrap check to distinguish "has a Bearer token" from "has bootstrap
+headers", and/or the anonymous-detection logic to stop treating
+`x-tenant-id` alone (with no other identity claim) as an authentication
+signal, and/or the `"system"` actor's implicit realm/scope grant to not be
+reachable via unauthenticated bootstrap headers.
+
+**Per this task's write scope, no runtime/product/contracts source file may
+be changed here** (`.github/workflows/tenant-binding-acceptance.yml`,
+`tools/ci/test_tenant_binding_acceptance_workflow.py`, this doc, and the one
+harness test file are the only writable paths). Per the Supervisor's own
+integration note ("If actual runtime security code also needs changes, stop
+and register separate product fix/new candidate rather than silently
+patching it"), this task stops here without touching `auth.extractor.ts`,
+`bootstrap-auth.guard.ts`, `auth.policy.ts`, or `iam-policy-catalog.ts`, and
+without weakening the C111 assertions (401/403 expectations, attack
+coverage, or guard registration) to make the run pass artificially.
+
+Evidence for this run: `.local/worker-recovery-20260910/tenant-run-34471890706/{run-status.json,test-report.json,execution-log.txt}` and `.local/worker-recovery-20260910/ci-job-102853475347.log`.
+
+This task is now `blocked`, waiting on a separate, explicitly authorized
+security-fix task against `apps/api/src/common/auth/auth.extractor.ts`,
+`apps/api/src/common/auth/bootstrap-auth.guard.ts`,
+`apps/api/src/common/auth/auth.policy.ts`, and
+`packages/contracts/src/iam-policy-catalog.ts` (system actor type scope
+preset / realm bypass). Once that fix lands and is reviewed, resume this
+task by rerunning the remote workflow against the new reviewed runtime
+candidate SHA — no harness/workflow changes are expected to be needed beyond
+picking up the new candidate SHA.
