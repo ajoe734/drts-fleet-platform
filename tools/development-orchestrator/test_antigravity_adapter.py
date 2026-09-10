@@ -256,3 +256,44 @@ class AntigravityStreamLifecycleTests(unittest.TestCase):
             _agy_result("DONE", response="Task complete."),
         ]
         self.assertIsNone(detect_failure_signal_in_lines(lines))
+
+    def test_non_agy_result_event_with_string_result_is_not_swallowed(self) -> None:
+        """Codex2 exact-candidate rejection repro: `{"event": "result", "result":
+        "..."}` where `result` is a plain string (not agy's `{"status": ...}`
+        dict) is a different tool's schema reusing the same `event` field name.
+        Recognizing it as agy's terminal event and returning early erased the
+        embedded auth failure text instead of falling through to generic
+        candidate detection.
+        """
+        lines = [json.dumps({"event": "result", "result": "Error: Failed to authenticate"})]
+        signal = detect_failure_signal_in_lines(lines)
+        self.assertIsNotNone(signal)
+        self.assertIn("failed to authenticate", signal.reason.lower())
+
+    def test_agy_shaped_result_dict_without_status_is_not_swallowed(self) -> None:
+        """A `result` dict with no `status` key (e.g. `{"error": "..."}`) is not
+        agy's recognized terminal shape either; it must still fall through to
+        generic candidate detection instead of being treated as an
+        authoritative (and here incorrect) non-failure.
+        """
+        lines = [json.dumps({"event": "result", "result": {"error": "Error: Failed to authenticate"}})]
+        signal = detect_failure_signal_in_lines(lines)
+        self.assertIsNotNone(signal)
+        self.assertIn("failed to authenticate", signal.reason.lower())
+
+    def test_non_agy_result_event_does_not_erase_an_earlier_real_agy_error(self) -> None:
+        """A trailing non-agy `event: result` line (string result) must not
+        short-circuit the reverse scan and hide a genuine agy ERROR earlier in
+        the same log.
+        """
+        lines = [
+            _agy_step_update(0, "user_input"),
+            _agy_step_update(1, "agent_response"),
+            _agy_step_update(2, "error_message"),
+            _agy_result("ERROR", error="The stream was interrupted. Please continue the task you were working on."),
+            json.dumps({"event": "result", "result": "Task complete"}),
+        ]
+        signal = detect_failure_signal_in_lines(lines)
+        self.assertIsNotNone(signal)
+        self.assertIn("stream was interrupted", signal.reason.lower())
+        self.assertEqual(signal.source, "antigravity_stream_result_error")

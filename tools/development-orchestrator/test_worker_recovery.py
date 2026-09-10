@@ -1456,6 +1456,66 @@ class PollWorkersRecoveryTests(EvidenceOutputIsolation, unittest.TestCase):
         ]
         self.assertEqual(recovered, [])
 
+    def test_repeated_agy_error_events_with_advancing_cpu_ticks_do_not_recover_a_stalled_worker(self) -> None:
+        """Codex2 exact-candidate rejection repro (.local/worker-recovery-20260910/
+        gemini-probe.log, terminal result stripped): a stalled agy worker whose
+        stream is stuck in the same error_message retry loop still accrues CPU
+        ticks from the retry/auth machinery itself. worker_process_tree_cpu_ticks
+        advancing (100 -> 101) must not, by itself, flip the worker back to
+        running or refresh last_process_activity_at -- only a real productive
+        step_update/result advance (last_event_at moving) may do that once a
+        worker's log is known to be agy-shaped. Non-agy adapters are unaffected
+        (see test_process_activity_recovers_a_stalled_worker).
+        """
+        with tempfile.TemporaryDirectory() as tmpdir:
+            log_path = Path(tmpdir) / "agy.log"
+            log_path.write_text(
+                "\n".join(self._agy_step_update(i, "error_message") for i in range(6)),
+                encoding="utf-8",
+            )
+            recent = (datetime.now(timezone.utc) - timedelta(seconds=120)).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+            state = {
+                "queue": {"events": {"evt-1": {"status": "started"}}},
+                "workers": {
+                    "run-1": {
+                        "run_id": "run-1",
+                        "task_id": "AGY-007",
+                        "provider": "antigravity",
+                        "agent_id": "antigravity",
+                        "status": "stalled",
+                        "queue_event_id": "evt-1",
+                        "pid": 1234,
+                        "log_path": str(log_path),
+                        "last_event_at": recent,
+                        "process_tree_cpu_ticks": 100,
+                        "last_process_activity_at": recent,
+                    }
+                },
+            }
+            status = {"tasks": [{"id": "AGY-007", "status": "in_progress", "owner": "Antigravity", "reviewer": "Codex"}]}
+
+            with (
+                mock.patch.object(supervisor, "load_approval_state", return_value={"pending": [], "history": []}),
+                mock.patch.object(supervisor, "load_status", return_value=status),
+                mock.patch.object(supervisor, "load_provider_report", return_value={}),
+                mock.patch.object(supervisor, "retry_due_workers", return_value=False),
+                mock.patch.object(supervisor, "pid_is_alive", return_value=True),
+                mock.patch.object(supervisor, "worker_process_tree_cpu_ticks", return_value={1234: 101}),
+                mock.patch.object(supervisor, "write_activity_log") as write_activity_log,
+            ):
+                changed = supervisor.poll_workers(self._agy_config(), state)
+
+        worker = state["workers"]["run-1"]
+        self.assertEqual(worker["status"], "stalled")
+        self.assertEqual(worker["last_event_at"], recent)
+        self.assertEqual(worker["last_process_activity_at"], recent)
+        self.assertEqual(worker["_agy_stream_productive_event_count"], 0)
+        recovered = [
+            entry for entry in write_activity_log.call_args_list
+            if entry.args[1].get("type") == "worker_recovered"
+        ]
+        self.assertEqual(recovered, [])
+
     def test_productive_agy_stream_event_recovers_a_stalled_worker(self) -> None:
         """A real (non-error_message) step_update is the turn actually moving,
         so it must still un-stall the worker the same way any other adapter's

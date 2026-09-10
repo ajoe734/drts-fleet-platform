@@ -4905,17 +4905,39 @@ def poll_workers(
                 continue
         update_from_log(config, worker)
         alive = pid_is_alive(worker.get("pid"))
-        process_activity_advanced, process_activity_persisted = observe_worker_process_activity(
-            worker,
-            worker_cpu_ticks.get(int(worker["pid"])) if str(worker.get("pid") or "").isdigit() else None,
-            now,
-        )
-        changed = process_activity_persisted or changed
         last_event_advanced = bool(
             previous_last_event_at
             and worker.get("last_event_at")
             and worker.get("last_event_at") > previous_last_event_at
         )
+        previous_process_activity_at = worker.get("last_process_activity_at")
+        process_activity_advanced, process_activity_persisted = observe_worker_process_activity(
+            worker,
+            worker_cpu_ticks.get(int(worker["pid"])) if str(worker.get("pid") or "").isdigit() else None,
+            now,
+        )
+        if (
+            process_activity_advanced
+            and not last_event_advanced
+            and worker.get("_agy_stream_productive_event_count") is not None
+        ):
+            # agy floods /proc CPU accounting with retry-loop noise while a turn is
+            # stuck in a repeated error_message cycle (see
+            # _agy_stream_productive_event_count). Once a worker's log is known to
+            # be agy-shaped, only a real productive-count advance
+            # (last_event_advanced) may count as activity -- a bare CPU tick
+            # increase must not renew the effective stall clock or the
+            # stalled->running recovery below, or an ordinary retry keeps an
+            # error-only loop looking alive forever. Other adapters' quiet
+            # child-command progress (e.g. a long test run) is unaffected since
+            # they never populate _agy_stream_productive_event_count.
+            if previous_process_activity_at is None:
+                worker.pop("last_process_activity_at", None)
+            else:
+                worker["last_process_activity_at"] = previous_process_activity_at
+            process_activity_advanced = False
+            process_activity_persisted = False
+        changed = process_activity_persisted or changed
         current_mode = worker_runtime_mode(worker)
         task_status = str(task.get("status") or "").lower()
         expected_completion_statuses = worker_expected_completion_statuses(config, worker, task)
