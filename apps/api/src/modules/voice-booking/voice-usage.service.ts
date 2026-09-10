@@ -1134,7 +1134,6 @@ export class VoiceUsageService implements OnModuleInit {
 
     if (hasMixedCurrencies) {
       let convertedTotal = 0;
-      let allConverted = true;
       for (const item of items) {
         if (item.currency === "TWD") {
           convertedTotal += item.cost;
@@ -1144,7 +1143,6 @@ export class VoiceUsageService implements OnModuleInit {
           if (typeof rate === "number" && rate > 0) {
             convertedTotal += item.cost * rate;
           } else {
-            allConverted = false;
             hasUnverified = true;
           }
         }

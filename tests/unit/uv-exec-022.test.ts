@@ -1006,23 +1006,21 @@ describe("UV-EXEC-022 All-Call Metrics, Complete Cost Ledger & Dimensional Alert
         callId: "call-non-human",
         providerCallId: "twm-prov-nohuman",
         humanInterventionSource: undefined,
-        transferredToHuman: false,
       };
 
       const noneSourceCall: VoiceCallMetricRecord = {
         ...baseRecord,
         callId: "call-none-source",
         providerCallId: "twm-prov-none-src",
-        humanInterventionSource: "none" as any,
-        transferredToHuman: false,
+        humanInterventionSource: "none",
       };
 
       const humanTakeoverCall: VoiceCallMetricRecord = {
         ...baseRecord,
         callId: "call-takeover",
         providerCallId: "twm-prov-takeover",
-        humanInterventionSource: "agent_takeover",
-        transferredToHuman: true,
+        humanInterventionSource: "in_ai_handoff",
+        handoffOccurred: true,
         requiredHumanIntervention: true,
       };
 
@@ -1246,9 +1244,9 @@ describe("UV-EXEC-022 All-Call Metrics, Complete Cost Ledger & Dimensional Alert
       repoUsageService.publishRateCard({
         rateCardId: "rc-repo-test",
         provider: "twm",
-        serviceType: "sms",
+        serviceType: "notification",
         unitPrice: 1.5,
-        billingUnit: "sms",
+        billingUnit: "call",
         effectiveFrom: "2026-09-01T00:00:00Z",
       });
       expect(mockRepo.insertRateCard).toHaveBeenCalledWith(
@@ -1259,9 +1257,9 @@ describe("UV-EXEC-022 All-Call Metrics, Complete Cost Ledger & Dimensional Alert
         providerAccountId: "twm-acc-persist",
         providerUsageRef: "ref-persist-001",
         provider: "twm",
-        serviceType: "sms",
+        serviceType: "notification",
         quantity: 1,
-        billingUnit: "sms",
+        billingUnit: "call",
         estimatedCost: 1.5,
       });
       expect(mockRepo.insertUsageRecord).toHaveBeenCalledWith(
@@ -1272,9 +1270,9 @@ describe("UV-EXEC-022 All-Call Metrics, Complete Cost Ledger & Dimensional Alert
         {
           providerAccountId: "twm-acc-persist",
           providerUsageRef: "ref-persist-001",
-          serviceType: "sms",
+          serviceType: "notification",
           quantity: 1,
-          billingUnit: "sms",
+          billingUnit: "call",
           billedCost: 1.5,
           currency: "TWD",
           invoiceRef: "INV-PERSIST-1",
@@ -1440,6 +1438,7 @@ describe("UV-EXEC-022 All-Call Metrics, Complete Cost Ledger & Dimensional Alert
         scope: "brand",
         scopeId: "brand-overflow-test",
         reason: "Simulated load overflow",
+        activatedBy: "test-operator",
         fallbackRoute: "transfer_human_callcenter",
       });
 

@@ -93,6 +93,7 @@ export class VoiceBookingController {
       providerAccountId: string;
       invoiceLines: ProviderInvoiceLineItem[];
     },
+    @Headers("idempotency-key") _idempotencyKey?: string,
     @Headers("x-request-id") requestId?: string,
   ) {
     const report = this.voiceUsageService.reconcileInvoice(
