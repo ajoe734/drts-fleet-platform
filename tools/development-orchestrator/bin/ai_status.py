@@ -587,7 +587,17 @@ def candidate_is_locked(task: dict[str, Any]) -> bool:
 
 def clear_candidate_evidence(task: dict[str, Any], *, preserve_failed_sha: bool = False) -> None:
     candidate_sha = task.get("candidate_sha") if preserve_failed_sha else None
-    for key in ("candidate_sha", "candidate_branch", "reviewed_sha", "ci_sha", "ci_status", "ci_run_url", "pr_url", "merge_sha"):
+    for key in (
+        "candidate_sha",
+        "candidate_branch",
+        "reviewed_sha",
+        "ci_sha",
+        "ci_status",
+        "ci_run_url",
+        "pr_url",
+        "merge_sha",
+        "acceptance_evidence",
+    ):
         task.pop(key, None)
     if candidate_sha:
         task["candidate_sha"] = candidate_sha
@@ -1959,6 +1969,7 @@ def command_reopen(state: dict[str, Any], args: list[str]) -> None:
     timestamp = iso_now()
     task["status"] = "in_progress"
     clear_candidate_evidence(task)
+    task.pop("acceptance_evidence", None)
     task["last_update"] = timestamp
     task["next"] = message
     task.pop("waiting_for", None)
