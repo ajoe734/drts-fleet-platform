@@ -767,10 +767,98 @@ def candidate_pr_observation(repo: str, number: int) -> dict[str, Any]:
     )
     if not isinstance(data, dict):
         raise GitHubBusError(f"GitHub did not return PR #{number} metadata")
+    checks = data.get("statusCheckRollup") or []
+    if str(data.get("state") or "").upper() == "OPEN" and isinstance(checks, list) and any(
+        isinstance(check, dict) and action_run_id(check) is not None for check in checks
+    ):
+        head = str(data.get("headRefOid") or "")
+        if not re.fullmatch(r"[0-9a-f]{40}", head):
+            data["workflowRunLookupFailed"] = True
+            return data
+        try:
+            payload = gh_json([
+                "api", f"repos/{repo}/actions/runs?head_sha={head}&per_page=100",
+                "--paginate", "--slurp",
+            ])
+            pages = payload if isinstance(payload, list) else [payload]
+            if not pages or any(not isinstance(page, dict) or not isinstance(page.get("workflow_runs"), list) for page in pages):
+                raise GitHubBusError("GitHub did not return workflow run metadata")
+            data["workflowRuns"] = [run for page in pages for run in page["workflow_runs"]]
+        except GitHubBusError:
+            # Missing provenance cannot prove either supersession or a pass.
+            data["workflowRunLookupFailed"] = True
     return data
 
 
-def latest_check_runs(checks: list[Any]) -> list[dict[str, Any]]:
+def action_run_id(check: dict[str, Any]) -> int | None:
+    match = re.fullmatch(
+        r"https://github\.com/[^/]+/[^/]+/actions/runs/(\d+)(?:/job/\d+)?(?:\?[^#]*)?",
+        str(check.get("detailsUrl") or ""),
+    )
+    return int(match.group(1)) if match else None
+
+
+def latest_workflow_checks(observation: dict[str, Any]) -> tuple[list[Any], list[dict[str, Any]]]:
+    """Discard an older run only with matching head and workflow context."""
+    checks = observation.get("statusCheckRollup") or []
+    if observation.get("workflowRunLookupFailed"):
+        raise ValueError("Workflow run provenance unavailable")
+    if "workflowRuns" not in observation:
+        return checks, []
+    rows = observation["workflowRuns"]
+    if not isinstance(rows, list):
+        raise ValueError("Invalid workflow run provenance")
+    observed_ids = {action_run_id(check) for check in checks if isinstance(check, dict)} - {None}
+    by_id: dict[int, dict[str, Any]] = {}
+    for row in rows:
+        if not isinstance(row, dict) or not isinstance(row.get("id"), int):
+            raise ValueError("Invalid workflow run identity")
+        if row["id"] in by_id and row != by_id[row["id"]]:
+            raise ValueError("Conflicting workflow run snapshots")
+        by_id[row["id"]] = row
+    contexts: dict[int, tuple[Any, ...]] = {}
+    latest: dict[tuple[Any, ...], dict[str, Any]] = {}
+    for run_id in observed_ids:
+        run = by_id.get(run_id)
+        if not run or run.get("head_sha") != observation.get("headRefOid"):
+            raise ValueError("Missing or foreign-head workflow run")
+        if observation.get("headRefName") and run.get("head_branch") != observation["headRefName"]:
+            raise ValueError("Foreign-branch workflow run")
+        created = _parse_iso(run.get("created_at"))
+        prs = run.get("pull_requests")
+        if not created or not run.get("workflow_id") or not run.get("event") or not run.get("head_branch") or not isinstance(prs, list):
+            raise ValueError("Incomplete workflow context")
+        if any(not isinstance(pr, dict) or not isinstance(pr.get("number"), int) for pr in prs):
+            raise ValueError("Incomplete pull-request context")
+        context = (run["workflow_id"], run["event"], run["head_branch"], tuple(sorted(pr["number"] for pr in prs)))
+        contexts[run_id] = context
+        previous = latest.get(context)
+        if previous is None or (created, run_id) > (_parse_iso(previous["created_at"]), previous["id"]):
+            latest[context] = run
+    # A rerun may have been created before any of its CheckRuns appear.
+    # Include equivalent newer runs from the head-specific API response too.
+    for run_id, run in by_id.items():
+        if run_id in observed_ids or run.get("head_sha") != observation.get("headRefOid"):
+            continue
+        if run.get("workflow_id") not in {context[0] for context in latest}:
+            continue
+        prs = run.get("pull_requests")
+        created = _parse_iso(run.get("created_at"))
+        if not created or not isinstance(prs, list) or any(not isinstance(pr, dict) or not isinstance(pr.get("number"), int) for pr in prs):
+            raise ValueError("Incomplete newer workflow context")
+        context = (run.get("workflow_id"), run.get("event"), run.get("head_branch"), tuple(sorted(pr["number"] for pr in prs)))
+        previous = latest.get(context)
+        if previous is not None and (created, run_id) > (_parse_iso(previous["created_at"]), previous["id"]):
+            latest[context] = run
+    retained = [
+        check for check in checks
+        if not isinstance(check, dict) or action_run_id(check) is None
+        or latest[contexts[action_run_id(check)]]["id"] == action_run_id(check)
+    ]
+    return retained, list(latest.values())
+
+
+def latest_check_runs(checks: list[Any], *, separate_runs: bool = False) -> list[dict[str, Any]]:
     """Collapse GitHub's check rollup to one entry per (workflow, job) name.
 
     A concurrency-cancelled rerun leaves its CANCELLED entry in
@@ -781,11 +869,11 @@ def latest_check_runs(checks: list[Any]) -> list[dict[str, Any]]:
     started entry per name so a superseded run cannot outvote its
     replacement.
     """
-    latest: dict[tuple[str, str], dict[str, Any]] = {}
+    latest: dict[tuple[str, str, int | None], dict[str, Any]] = {}
     for check in checks:
         if not isinstance(check, dict):
             continue
-        key = (str(check.get("workflowName") or ""), str(check.get("name") or ""))
+        key = (str(check.get("workflowName") or ""), str(check.get("name") or ""), action_run_id(check) if separate_runs else None)
         started = str(check.get("startedAt") or "")
         existing = latest.get(key)
         if existing is None or started >= str(existing.get("startedAt") or ""):
@@ -807,13 +895,25 @@ def candidate_ci_status(observation: dict[str, Any]) -> tuple[str, str]:
         return "queued", ""
     details_url = ""
     pending = False
-    for check in latest_check_runs(checks):
+    try:
+        checks, workflow_runs = latest_workflow_checks(observation)
+    except (ValueError, TypeError):
+        return "running", ""
+    for check in latest_check_runs(checks, separate_runs=bool(workflow_runs)):
         conclusion = str(check.get("conclusion") or "").upper()
         status = str(check.get("status") or "").upper()
         details_url = details_url or str(check.get("detailsUrl") or "")
         if conclusion in {"FAILURE", "CANCELLED", "TIMED_OUT", "ACTION_REQUIRED", "STARTUP_FAILURE"}:
             return "failure", details_url
         if status != "COMPLETED" or not conclusion:
+            pending = True
+    for run in workflow_runs:
+        conclusion = str(run.get("conclusion") or "").upper()
+        if conclusion in {"FAILURE", "CANCELLED", "TIMED_OUT", "ACTION_REQUIRED", "STARTUP_FAILURE"}:
+            return "failure", str(run.get("html_url") or details_url)
+        # New dependent jobs may not have check rows yet. The workflow itself
+        # must finish before its partial set of successful jobs can prove CI.
+        if str(run.get("status") or "").upper() != "COMPLETED" or conclusion not in {"SUCCESS", "SKIPPED", "NEUTRAL"}:
             pending = True
     return ("running" if pending else "success"), details_url
 
