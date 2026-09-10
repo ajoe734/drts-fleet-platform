@@ -2231,6 +2231,18 @@ def _agy_stream_productive_event_count(content: str) -> int | None:
       providers' logs reuse the `event` field name with a differently
       shaped value (e.g. a plain string), which must neither crash this
       parser nor be misidentified as agy-shaped.
+    - a `result` event only establishes agy's schema when the nested dict
+      carries a `status` key, mirroring
+      ``worker_failure_detector._is_antigravity_result_event``. Some other
+      providers' logs reuse `{"event": "result", ...}` with an unrelated
+      dict shape (e.g. `{"message": "Task complete"}`), which must not be
+      misidentified as agy-shaped either.
+
+    Callers must still scope this to a worker whose configured adapter is
+    actually antigravity: captured tool output that happens to embed a
+    literal agy stream-json line (e.g. another worker's log inspected via
+    `cat`) can carry this exact shape without the worker itself being an
+    agy process.
     """
     found_schema = False
     steps: dict[tuple[str, int], str] = {}
@@ -2262,7 +2274,7 @@ def _agy_stream_productive_event_count(content: str) -> int | None:
             steps[key] = str(step.get("step_type") or "").strip()
         elif event == "result":
             result = payload.get("result")
-            if not isinstance(result, dict):
+            if not isinstance(result, dict) or "status" not in result:
                 continue
             found_schema = True
             result_statuses.append(str(result.get("status") or "").strip().upper())
@@ -2299,8 +2311,20 @@ def update_from_log(config: dict[str, Any], worker: dict[str, Any]) -> None:
         content = log_path.read_text(encoding="utf-8", errors="ignore")
     except OSError:
         content = None
-    productive_count = _agy_stream_productive_event_count(content) if content is not None else None
+    # Only a worker whose *configured* adapter is antigravity may ever be
+    # treated as agy-shaped. Matching on log content shape alone (any
+    # `{"event": ...}` line) misidentifies other adapters' logs: a Codex
+    # worker that captures tool output embedding a literal agy stream-json
+    # line (e.g. `cat`-ing another worker's agy log) would otherwise gain
+    # `_agy_stream_productive_event_count` and have its own ordinary
+    # progress ignored by the agy-only stall-clock logic below.
+    agent = agent_config_for(config, str(worker.get("agent_id") or worker.get("provider") or ""))
+    is_agy_adapter = str(agent.get("adapter") or "") == "antigravity"
+    productive_count = (
+        _agy_stream_productive_event_count(content) if content is not None and is_agy_adapter else None
+    )
     if productive_count is None:
+        worker["_agy_retry_noise_detected"] = False
         if mtime and (not worker.get("last_event_at") or mtime > worker.get("last_event_at", "")):
             worker["last_event_at"] = mtime
     else:
@@ -2316,10 +2340,17 @@ def update_from_log(config: dict[str, Any], worker: dict[str, Any]) -> None:
         # log used to falsely mark a stalled worker as recovered.
         previous_count = int(worker.get("_agy_stream_productive_event_count") or 0)
         worker["_agy_stream_productive_event_count"] = productive_count
+        # Bytes actually landing in the log this poll (mtime advanced) with
+        # no productive gain is concrete evidence of retry-loop noise (a
+        # fresh error_message step, say). A log that stayed byte-for-byte
+        # unchanged this poll is not noise -- it is silence, which a quiet
+        # but live child command (no error, no retry) also produces, and
+        # that must remain eligible for CPU-tick-based activity credit.
+        log_bytes_advanced = bool(mtime and (not worker.get("last_event_at") or mtime > worker.get("last_event_at", "")))
+        worker["_agy_retry_noise_detected"] = log_bytes_advanced and not (productive_count > previous_count)
         if (
             productive_count > previous_count
-            and mtime
-            and (not worker.get("last_event_at") or mtime > worker.get("last_event_at", ""))
+            and log_bytes_advanced
         ):
             worker["last_event_at"] = mtime
     if content is None:
@@ -4919,18 +4950,19 @@ def poll_workers(
         if (
             process_activity_advanced
             and not last_event_advanced
-            and worker.get("_agy_stream_productive_event_count") is not None
+            and worker.get("_agy_retry_noise_detected")
         ):
             # agy floods /proc CPU accounting with retry-loop noise while a turn is
             # stuck in a repeated error_message cycle (see
-            # _agy_stream_productive_event_count). Once a worker's log is known to
-            # be agy-shaped, only a real productive-count advance
-            # (last_event_advanced) may count as activity -- a bare CPU tick
-            # increase must not renew the effective stall clock or the
+            # _agy_stream_productive_event_count). This poll's update_from_log call
+            # found concrete evidence of that noise -- the log actually gained new
+            # bytes (mtime advanced) but produced no productive-count gain -- so a
+            # bare CPU tick increase must not renew the effective stall clock or the
             # stalled->running recovery below, or an ordinary retry keeps an
-            # error-only loop looking alive forever. Other adapters' quiet
-            # child-command progress (e.g. a long test run) is unaffected since
-            # they never populate _agy_stream_productive_event_count.
+            # error-only loop looking alive forever. A quiet-but-live agy worker
+            # whose log received no new bytes at all this poll (no evidence of
+            # retry noise) keeps its CPU-tick activity credit, same as any other
+            # adapter's quiet child-command progress (e.g. a long test run).
             if previous_process_activity_at is None:
                 worker.pop("last_process_activity_at", None)
             else:

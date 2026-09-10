@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import os
 import tempfile
 import unittest
 from datetime import datetime, timedelta, timezone
@@ -1373,8 +1374,14 @@ class PollWorkersRecoveryTests(EvidenceOutputIsolation, unittest.TestCase):
                 "active_worker_statuses": ["running", "waiting_approval", "suspended_approval", "manual_pending", "retry_backoff", "stalled"],
             },
             "providers": {},
-            "agents": {"antigravity": {"id": "antigravity", "display_name": "Antigravity"}},
+            "agents": {"antigravity": {"id": "antigravity", "display_name": "Antigravity", "adapter": "antigravity"}},
         }
+
+    def _agy_adapter_config(self) -> dict:
+        """Minimal config for direct update_from_log() calls: only the
+        worker's configured adapter (not log content shape) may mark it
+        agy-shaped, so these unit tests must resolve to adapter=antigravity."""
+        return {"agents": {"antigravity": {"adapter": "antigravity"}}}
 
     def _agy_step_update(self, index: int, step_type: str) -> str:
         return json.dumps({
@@ -1607,6 +1614,73 @@ class PollWorkersRecoveryTests(EvidenceOutputIsolation, unittest.TestCase):
         write_activity_log.assert_not_called()
         self.assertFalse(changed)
 
+    def test_quiet_productive_agy_process_keeps_cpu_activity_credit(self) -> None:
+        """Codex2 rejection repro: a *healthy* quiet agy worker (no error,
+        no retry) whose log has already been fully observed (no new bytes
+        this poll) still advances via /proc CPU accounting while it works.
+        The rejected candidate suppressed that CPU credit for *any*
+        agy-shaped worker whenever the log stayed quiet, with no requirement
+        that the quiet spell actually contain retry-loop noise -- so this
+        legitimate case was stalled after stall_after_seconds and killed
+        after twice that interval despite continuing process-tree CPU
+        progress. Retry noise (see
+        test_repeated_agy_error_events_with_advancing_cpu_ticks_do_not_recover_a_stalled_worker)
+        must still be suppressed; a genuinely silent log must not be.
+        """
+        with tempfile.TemporaryDirectory() as tmpdir:
+            log_path = Path(tmpdir) / "agy.log"
+            log_path.write_text(
+                "\n".join([
+                    self._agy_step_update(0, "user_input"),
+                    self._agy_step_update(1, "agent_response"),
+                    self._agy_result("DONE"),
+                ]),
+                encoding="utf-8",
+            )
+            # Backdate the log's mtime so it matches an already-observed
+            # last_event_at: nothing new landed in the log this poll, so
+            # there is no evidence of retry-loop noise to react to.
+            stale_epoch = (datetime.now(timezone.utc) - timedelta(seconds=400)).timestamp()
+            os.utime(log_path, (stale_epoch, stale_epoch))
+            last_event_at = supervisor.file_iso_mtime(log_path)
+            state = {
+                "queue": {"events": {"evt-1": {"status": "started"}}},
+                "workers": {
+                    "run-1": {
+                        "run_id": "run-1",
+                        "task_id": "AGY-008",
+                        "provider": "antigravity",
+                        "agent_id": "antigravity",
+                        "status": "running",
+                        "queue_event_id": "evt-1",
+                        "pid": 1234,
+                        "log_path": str(log_path),
+                        "last_event_at": last_event_at,
+                        "_agy_stream_productive_event_count": 2,
+                        "process_tree_cpu_ticks": 100,
+                        "last_process_activity_at": last_event_at,
+                    }
+                },
+            }
+            status = {"tasks": [{"id": "AGY-008", "status": "in_progress", "owner": "Antigravity", "reviewer": "Codex"}]}
+
+            with (
+                mock.patch.object(supervisor, "load_approval_state", return_value={"pending": [], "history": []}),
+                mock.patch.object(supervisor, "load_status", return_value=status),
+                mock.patch.object(supervisor, "load_provider_report", return_value={}),
+                mock.patch.object(supervisor, "retry_due_workers", return_value=False),
+                mock.patch.object(supervisor, "pid_is_alive", return_value=True),
+                mock.patch.object(supervisor, "worker_process_tree_cpu_ticks", return_value={1234: 101}),
+                mock.patch.object(supervisor, "write_activity_log"),
+            ):
+                supervisor.poll_workers(self._agy_config(), state)
+
+        worker = state["workers"]["run-1"]
+        self.assertEqual(worker["status"], "running")
+        # The CPU tick advance must still be credited: last_process_activity_at
+        # moves forward from the stale baseline instead of being reverted.
+        self.assertGreater(worker["last_process_activity_at"], last_event_at)
+
     def test_dead_worker_with_structured_agy_error_and_exit_zero_is_never_completed(self) -> None:
         """Live probe evidence (.local/worker-recovery-20260910/gemini-probe-result.json):
         agy exited rc=0 after a stream interruption with an empty response and
@@ -1748,7 +1822,7 @@ class PollWorkersRecoveryTests(EvidenceOutputIsolation, unittest.TestCase):
             }
             log_path.write_text(self._agy_step_update(0, "user_input"), encoding="utf-8")
             with mock.patch.object(supervisor, "file_iso_mtime", return_value="2026-01-01T00:00:00Z"):
-                supervisor.update_from_log({}, worker)
+                supervisor.update_from_log(self._agy_adapter_config(), worker)
 
             self.assertEqual(worker["last_event_at"], "2026-01-01T00:00:00Z")
             self.assertEqual(worker["_agy_stream_productive_event_count"], 1)
@@ -1758,7 +1832,7 @@ class PollWorkersRecoveryTests(EvidenceOutputIsolation, unittest.TestCase):
                 encoding="utf-8",
             )
             with mock.patch.object(supervisor, "file_iso_mtime", return_value="2026-01-01T00:00:01Z"):
-                supervisor.update_from_log({}, worker)
+                supervisor.update_from_log(self._agy_adapter_config(), worker)
 
         self.assertEqual(worker["last_event_at"], "2026-01-01T00:00:00Z")
         self.assertEqual(worker["_agy_stream_productive_event_count"], 1)
@@ -1790,7 +1864,7 @@ class PollWorkersRecoveryTests(EvidenceOutputIsolation, unittest.TestCase):
             def tick(mtime: str) -> None:
                 log_path.write_text("\n".join(lines), encoding="utf-8")
                 with mock.patch.object(supervisor, "file_iso_mtime", return_value=mtime):
-                    supervisor.update_from_log({}, worker)
+                    supervisor.update_from_log(self._agy_adapter_config(), worker)
 
             lines.append(self._agy_step_update(0, "user_input"))
             tick("2026-01-01T00:00:01Z")
@@ -1888,6 +1962,62 @@ class PollWorkersRecoveryTests(EvidenceOutputIsolation, unittest.TestCase):
 
         self.assertTrue(changed)
         self.assertEqual(state["workers"]["run-2"]["status"], "running")
+
+    def test_non_antigravity_worker_with_embedded_agy_shaped_output_keeps_ordinary_progress(self) -> None:
+        """Codex2 rejection repro (case c): a non-antigravity worker's log can
+        capture tool output that happens to embed a literal, fully valid agy
+        stream-json line -- e.g. a Codex tool call that `cat`s another
+        worker's gemini-probe.log. Content-shape detection alone would
+        misidentify this Codex worker as agy-shaped and start suppressing its
+        own ordinary progress. Scoping `_agy_stream_productive_event_count`
+        to the worker's *configured* adapter (this worker's agent_id/provider
+        resolves to the default file_inbox adapter, not antigravity) keeps
+        the worker on plain mtime-based visibility instead.
+        """
+        with tempfile.TemporaryDirectory() as tmpdir:
+            log_path = Path(tmpdir) / "codex.log"
+            log_path.write_text(
+                "\n".join([
+                    json.dumps({"type": "tool_call", "tool": "exec", "command": "cat gemini-probe.log"}),
+                    json.dumps({
+                        "event": "result",
+                        "result": {"status": "ERROR", "response": "", "error": "stream interrupted"},
+                    }),
+                ]),
+                encoding="utf-8",
+            )
+            state = {
+                "queue": {"events": {"evt-1": {"status": "started"}}},
+                "workers": {
+                    "run-1": {
+                        "run_id": "run-1",
+                        "task_id": "CODEX-002",
+                        "provider": "codex",
+                        "agent_id": "codex",
+                        "status": "stalled",
+                        "queue_event_id": "evt-1",
+                        "pid": 1111,
+                        "log_path": str(log_path),
+                        "last_event_at": "2026-04-06T14:20:00Z",
+                    }
+                },
+            }
+            status = {"tasks": [{"id": "CODEX-002", "status": "in_progress", "owner": "Codex", "reviewer": "Claude"}]}
+
+            with (
+                mock.patch.object(supervisor, "load_approval_state", return_value={"pending": [], "history": []}),
+                mock.patch.object(supervisor, "load_status", return_value=status),
+                mock.patch.object(supervisor, "load_provider_report", return_value={}),
+                mock.patch.object(supervisor, "retry_due_workers", return_value=False),
+                mock.patch.object(supervisor, "pid_is_alive", return_value=True),
+                mock.patch.object(supervisor, "write_activity_log"),
+            ):
+                supervisor.poll_workers(self._agy_config(), state)
+
+        worker = state["workers"]["run-1"]
+        self.assertNotIn("_agy_stream_productive_event_count", worker)
+        self.assertGreater(worker["last_event_at"], "2026-04-06T14:20:00Z")
+        self.assertEqual(worker["status"], "running")
 
 
 class AgyStreamProductiveEventCountTests(unittest.TestCase):
@@ -2002,3 +2132,15 @@ class AgyStreamProductiveEventCountTests(unittest.TestCase):
             self._step(0, "user_input"),
         ]
         self.assertEqual(supervisor._agy_stream_productive_event_count("\n".join(lines)), 1)
+
+    def test_result_dict_without_status_key_is_not_agy_shaped(self) -> None:
+        """Codex2 rejection repro: a Codex log line like
+        `{"event":"result","result":{"message":"Task complete"}}` reuses
+        agy's top-level `event` field name and carries a *dict* result, but
+        one with no `status` key -- an unrelated schema. Requiring `status`
+        (mirroring worker_failure_detector._is_antigravity_result_event)
+        keeps this from being misidentified as agy-shaped just because the
+        nested value happens to be a dict.
+        """
+        line = json.dumps({"event": "result", "result": {"message": "Task complete"}})
+        self.assertIsNone(supervisor._agy_stream_productive_event_count(line))
