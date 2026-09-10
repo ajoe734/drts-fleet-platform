@@ -37,10 +37,10 @@ import {
   toApiSuccessEnvelope,
 } from "../../common/api-envelope";
 import { FleetPartnerService } from "./fleet-partner.service";
-import {
+import { FleetPartnerCaseService } from "./fleet-partner-case.service";
+import type {
   ConfirmCaseAttachmentUploadCommand,
   CreateCaseAttachmentUploadUrlCommand,
-  FleetPartnerCaseService,
   SubmitFleetCaseReplyCommand,
 } from "./fleet-partner-case.service";
 import { SupplyDocumentService } from "./supply-document.service";

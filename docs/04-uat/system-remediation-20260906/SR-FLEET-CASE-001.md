@@ -44,7 +44,7 @@
 | 檔案路徑 | 變更說明 |
 |---|---|
 | `apps/api/src/modules/fleet-partner/fleet-partner-case.service.ts` | 實作 `FleetPartnerCaseService`：案件列表、詳情、歷程讀取；回覆提交與冪等去重；同步至 `ComplaintService` 案件筆記；HMAC-SHA256 附件簽名與下載驗證；租戶隔離與邊界狀態判定。 |
-| `apps/api/src/modules/fleet-partner/fleet-partner.controller.ts` | 實作車行案件管理端點：`listPortalCases`、`getPortalCaseDetail`、`getPortalCaseTimeline`、`submitPortalCaseReply`、`createPortalCaseAttachmentUploadUrl`、`confirmPortalCaseAttachmentUpload`、`getPortalCaseAttachmentReadUrl`、`downloadPortalCaseAttachment`；建構子置於第 6 參數並標記 `@Optional()` 確保既有單元測試相容性。 |
+| `apps/api/src/modules/fleet-partner/fleet-partner.controller.ts` | 實作車行案件管理端點：`listPortalCases`、`getPortalCaseDetail`、`getPortalCaseTimeline`、`submitPortalCaseReply`、`createPortalCaseAttachmentUploadUrl`、`confirmPortalCaseAttachmentUpload`、`getPortalCaseAttachmentReadUrl`、`downloadPortalCaseAttachment`；建構子置於第 6 參數並標記 `@Optional()` 確保既有單元測試相容性；將裝飾簽名參數型別獨立為 `import type` 符合 TS1272 isolatedModules 約束。 |
 | `apps/api/src/modules/fleet-partner/fleet-partner.module.ts` | 裝配 `ComplaintModule`、`AuditNotificationModule` 並註冊 `FleetPartnerCaseService`。 |
 | `apps/fleet-partner-portal-web/lib/fleet-portal-data.server.ts` | 擴充 Portal 資料層：實作 `loadCaseDetail`、`submitCaseReply`、`createCaseAttachmentUploadUrl`、`confirmCaseAttachmentUpload`、`getCaseAttachmentReadUrl` 與規範 fixture。 |
 | `apps/fleet-partner-portal-web/app/cases/page.tsx` | 事故/申訴清單頁：補齊 tab 狀態過濾（全部、車行責任、共同責任、已結案）、詳情快捷入口及錯誤指引/存取狀態連結。 |
