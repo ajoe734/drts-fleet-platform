@@ -13,7 +13,6 @@ import {
   mapMaintenanceStatus,
   extractResolutionSummary,
   HOST_ERROR_CODES,
-  type HostVehicleSummary,
 } from "../../../../apps/api/src/modules/host-view";
 import { ApiRequestError } from "../../../../apps/api/src/common/api-envelope";
 import type { BootstrapRequestIdentity } from "../../../../apps/api/src/common/auth/auth.types";

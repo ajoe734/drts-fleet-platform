@@ -2,7 +2,7 @@
 
 - **任務編號**：`SR-HOST-BE-001`
 - **Owner**：`Gemini`
-- **Reviewer**：`Codex2`
+- **Reviewer**：`Gemini2`
 - **狀態**：`review` (Ready for Candidate Lock & Review)
 - **基準 SHA (Base SHA)**：`6a2b7dabf3a9a6e1f0e4b77242bb42d5440d6fd0` (`origin/dev`)
 - **工作分支 (Branch)**：`gemini/sr-host-be-001`
@@ -53,6 +53,8 @@
 | 指令                                                              | Exit Code | 執行時間 | 結果說明                                         |
 | :---------------------------------------------------------------- | :-------: | :------: | :----------------------------------------------- |
 | `git diff --check`                                                |     0     |   0.1s   | 工作目錄無任何 whitespace 格式錯誤               |
+| `pnpm lint:root`                                                  |     0     |  14.5s   | Root ESLint 檢查 100% 通過                       |
+| `pnpm --filter @drts/api lint`                                    |     0     |   3.2s   | `@drts/api` ESLint 檢查 100% 通過                |
 | `pnpm --filter @drts/api typecheck`                               |     0     |  17.2s   | `@drts/api` 完整 TypeScript 型別檢查 100% 通過    |
 | `pnpm exec vitest run tests/unit/system-remediation/sr-host-be-001/` |     0     |   1.3s   | 33 tests across 11 test suites 100% 全部通過     |
 
@@ -112,7 +114,7 @@
 | **兩Host互讀對方ID/list/附件均拒絕；離開所有權後即失效** | **完全符合** | Suite 2 & 3 驗證 Host A 與 Host B 車輛隔離，互查回傳 `404 HOST_VEHICLE_NOT_FOUND`（防探測）；Suite 4 驗證車輛轉移給 Host C 或停用後，Host A 立即取得 404，自清單中完全消失。 |
 | **收益/案件與原authority對得上，不有第二套結算** | **完全符合** | 收益直接統計已完成之 trips / orders 總車資；因 Phase 1 尚無車主分潤抽成政策，依 `financial_policy_hold_rule` 嚴格將 `fleetCommission` 與 `netEarnings` 設為 `null`，`settlementStatus` 設為 `"pending_policy"`，絕不假造第二套結算。案件對齊 `crm.phase1_complaint_cases` 並完成去識別化。 |
 | **證據包含 base/candidate SHA、實際指令結果與資源 ID；未做的 live／真機部分明列，不冒充成功** | **完全符合** | Base SHA 為 `6a2b7dabf3a9a6e1f0e4b77242bb42d5440d6fd0`；Candidate SHA 將於 anchor commit 後記錄；測試指令、exit code 及資源 ID (VEHICLE_A1, VEHICLE_B1 等) 詳列於本文件；VM 環境限制之 live compose / 瀏覽器部分未執行並如實說明。 |
-| **先 commit＋普通 push，再 handoff；owner 不直接 done，獨立 reviewer、同 candidate CI／merge及 required_acceptance 完備才可結案** | **完全遵循** | 遵循 Supervisor 流程規範，先建立 task-scoped commit 並 push 到 `origin/gemini/sr-host-be-001`，再呼叫 `handoff` 交付 `Codex2` 審查。 |
+| **先 commit＋普通 push，再 handoff；owner 不直接 done，獨立 reviewer、同 candidate CI／merge及 required_acceptance 完備才可結案** | **完全遵循** | 遵循 Supervisor 流程規範，先建立 task-scoped commit 並 push 到 `origin/gemini/sr-host-be-001`，再呼叫 `handoff` 交付 `Gemini2` 審查。 |
 
 ---
 
