@@ -2191,6 +2191,114 @@ def file_iso_mtime(path: Path) -> str | None:
     return datetime.fromtimestamp(path.stat().st_mtime, tz=timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
 
 
+def _agy_stream_productive_event_count(content: str) -> int | None:
+    """Count agy `--output-format stream-json` events that are real turn progress.
+
+    agy's stream floods the log with `step_update` events as the turn runs,
+    including repeated `error_message` steps while it retries/stalls
+    internally; those advance the log's mtime without the turn actually
+    moving forward. Returns ``None`` when the log has no agy event-shaped
+    JSON at all, so callers fall back to plain mtime-based visibility for
+    every other adapter's log format.
+
+    Otherwise returns a count of turn steps that actually represent forward
+    progress, so `update_from_log` can tell transport visibility (bytes were
+    appended) apart from productive progress (the turn advanced):
+
+    - `step_update` entries are deduplicated by `(conversation_id,
+      step_index)`, so a replayed/duplicated line for an already-seen step
+      never inflates the count.
+    - an `agent_response` step immediately followed by an `error_message`
+      step (same conversation, next step_index) is a failed attempt, not
+      progress -- agy's stream shows this as a continuous retry-then-fail
+      loop while a turn is stuck, and none of those attempts ever produced
+      a usable response.
+    - an `agent_response` step with no known successor yet, and no terminal
+      `result` event yet, is *unconfirmed*: a later append could still
+      reveal it as a failed retry, so it is not counted until a following
+      event (another step, or the terminal result) proves it wasn't. Without
+      this, a from-scratch recount on every poll credits each retry's
+      optimistic response immediately, an `error_message` invalidates it,
+      and the *next* retry's optimistic response gets credited all over
+      again -- so repeated failed retries keep re-triggering recovery and
+      resetting the stall clock even though the turn never produces a
+      usable response.
+    - the terminal `result` event only counts when its status is not
+      `ERROR`; a structured failure is not progress no matter how much
+      stream noise led up to it.
+    - `step_update` and `result` payloads are only trusted when their
+      nested `step_update`/`result` value is actually a dict. Some other
+      providers' logs reuse the `event` field name with a differently
+      shaped value (e.g. a plain string), which must neither crash this
+      parser nor be misidentified as agy-shaped.
+    - a `result` event only establishes agy's schema when the nested dict
+      carries a `status` key, mirroring
+      ``worker_failure_detector._is_antigravity_result_event``. Some other
+      providers' logs reuse `{"event": "result", ...}` with an unrelated
+      dict shape (e.g. `{"message": "Task complete"}`), which must not be
+      misidentified as agy-shaped either.
+
+    Callers must still scope this to a worker whose configured adapter is
+    actually antigravity: captured tool output that happens to embed a
+    literal agy stream-json line (e.g. another worker's log inspected via
+    `cat`) can carry this exact shape without the worker itself being an
+    agy process.
+    """
+    found_schema = False
+    steps: dict[tuple[str, int], str] = {}
+    step_order: list[tuple[str, int]] = []
+    result_statuses: list[str] = []
+    for line in content.splitlines():
+        line = line.strip()
+        if not line.startswith("{"):
+            continue
+        try:
+            payload = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if not isinstance(payload, dict):
+            continue
+        event = payload.get("event")
+        if event == "step_update":
+            step = payload.get("step_update")
+            if not isinstance(step, dict):
+                continue
+            found_schema = True
+            try:
+                step_index = int(step.get("step_index"))
+            except (TypeError, ValueError):
+                continue
+            key = (str(step.get("conversation_id") or ""), step_index)
+            if key not in steps:
+                step_order.append(key)
+            steps[key] = str(step.get("step_type") or "").strip()
+        elif event == "result":
+            result = payload.get("result")
+            if not isinstance(result, dict) or "status" not in result:
+                continue
+            found_schema = True
+            result_statuses.append(str(result.get("status") or "").strip().upper())
+    if not found_schema:
+        return None
+    turn_finished = bool(result_statuses)
+    last_key = step_order[-1] if step_order else None
+    count = 0
+    for key in step_order:
+        conversation_id, step_index = key
+        step_type = steps[key]
+        if step_type == "error_message":
+            continue
+        if step_type == "agent_response":
+            next_type = steps.get((conversation_id, step_index + 1))
+            if next_type == "error_message":
+                continue
+            if next_type is None and key == last_key and not turn_finished:
+                continue
+        count += 1
+    count += sum(1 for status in result_statuses if status and status != "ERROR")
+    return count
+
+
 def update_from_log(config: dict[str, Any], worker: dict[str, Any]) -> None:
     log_path_value = worker.get("log_path")
     if not log_path_value:
@@ -2199,11 +2307,53 @@ def update_from_log(config: dict[str, Any], worker: dict[str, Any]) -> None:
     if not log_path.exists():
         return
     mtime = file_iso_mtime(log_path)
-    if mtime and (not worker.get("last_event_at") or mtime > worker.get("last_event_at", "")):
-        worker["last_event_at"] = mtime
     try:
         content = log_path.read_text(encoding="utf-8", errors="ignore")
     except OSError:
+        content = None
+    # Only a worker whose *configured* adapter is antigravity may ever be
+    # treated as agy-shaped. Matching on log content shape alone (any
+    # `{"event": ...}` line) misidentifies other adapters' logs: a Codex
+    # worker that captures tool output embedding a literal agy stream-json
+    # line (e.g. `cat`-ing another worker's agy log) would otherwise gain
+    # `_agy_stream_productive_event_count` and have its own ordinary
+    # progress ignored by the agy-only stall-clock logic below.
+    agent = agent_config_for(config, str(worker.get("agent_id") or worker.get("provider") or ""))
+    is_agy_adapter = str(agent.get("adapter") or "") == "antigravity"
+    productive_count = (
+        _agy_stream_productive_event_count(content) if content is not None and is_agy_adapter else None
+    )
+    if productive_count is None:
+        worker["_agy_retry_noise_detected"] = False
+        if mtime and (not worker.get("last_event_at") or mtime > worker.get("last_event_at", "")):
+            worker["last_event_at"] = mtime
+    else:
+        # The baseline is recorded on every call, not only inside the
+        # mtime-advanced branch below. `file_iso_mtime` truncates to whole
+        # seconds, so two polls landing in the same second used to skip
+        # storing this counter entirely on the poll that first observed a
+        # real step (last_event_at was unchanged that tick, so the old code
+        # never ran `worker["_agy_stream_productive_event_count"] = ...`).
+        # The next poll then compared against a phantom zero baseline and
+        # credited every already-seen step as fresh progress, which is
+        # exactly how a trailing error-only append on an already-observed
+        # log used to falsely mark a stalled worker as recovered.
+        previous_count = int(worker.get("_agy_stream_productive_event_count") or 0)
+        worker["_agy_stream_productive_event_count"] = productive_count
+        # Bytes actually landing in the log this poll (mtime advanced) with
+        # no productive gain is concrete evidence of retry-loop noise (a
+        # fresh error_message step, say). A log that stayed byte-for-byte
+        # unchanged this poll is not noise -- it is silence, which a quiet
+        # but live child command (no error, no retry) also produces, and
+        # that must remain eligible for CPU-tick-based activity credit.
+        log_bytes_advanced = bool(mtime and (not worker.get("last_event_at") or mtime > worker.get("last_event_at", "")))
+        worker["_agy_retry_noise_detected"] = log_bytes_advanced and not (productive_count > previous_count)
+        if (
+            productive_count > previous_count
+            and log_bytes_advanced
+        ):
+            worker["last_event_at"] = mtime
+    if content is None:
         return
     for line in content.splitlines():
         line = line.strip()
@@ -4790,17 +4940,40 @@ def poll_workers(
                 continue
         update_from_log(config, worker)
         alive = pid_is_alive(worker.get("pid"))
-        process_activity_advanced, process_activity_persisted = observe_worker_process_activity(
-            worker,
-            worker_cpu_ticks.get(int(worker["pid"])) if str(worker.get("pid") or "").isdigit() else None,
-            now,
-        )
-        changed = process_activity_persisted or changed
         last_event_advanced = bool(
             previous_last_event_at
             and worker.get("last_event_at")
             and worker.get("last_event_at") > previous_last_event_at
         )
+        previous_process_activity_at = worker.get("last_process_activity_at")
+        process_activity_advanced, process_activity_persisted = observe_worker_process_activity(
+            worker,
+            worker_cpu_ticks.get(int(worker["pid"])) if str(worker.get("pid") or "").isdigit() else None,
+            now,
+        )
+        if (
+            process_activity_advanced
+            and not last_event_advanced
+            and worker.get("_agy_retry_noise_detected")
+        ):
+            # agy floods /proc CPU accounting with retry-loop noise while a turn is
+            # stuck in a repeated error_message cycle (see
+            # _agy_stream_productive_event_count). This poll's update_from_log call
+            # found concrete evidence of that noise -- the log actually gained new
+            # bytes (mtime advanced) but produced no productive-count gain -- so a
+            # bare CPU tick increase must not renew the effective stall clock or the
+            # stalled->running recovery below, or an ordinary retry keeps an
+            # error-only loop looking alive forever. A quiet-but-live agy worker
+            # whose log received no new bytes at all this poll (no evidence of
+            # retry noise) keeps its CPU-tick activity credit, same as any other
+            # adapter's quiet child-command progress (e.g. a long test run).
+            if previous_process_activity_at is None:
+                worker.pop("last_process_activity_at", None)
+            else:
+                worker["last_process_activity_at"] = previous_process_activity_at
+            process_activity_advanced = False
+            process_activity_persisted = False
+        changed = process_activity_persisted or changed
         current_mode = worker_runtime_mode(worker)
         task_status = str(task.get("status") or "").lower()
         expected_completion_statuses = worker_expected_completion_statuses(config, worker, task)
