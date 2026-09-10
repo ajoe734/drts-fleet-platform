@@ -5,8 +5,8 @@
 **Parent (blocked until this lands + is reviewed):** `SR-LEAVE-FE-001`
 **Owner lane:** Claude · **Reviewer:** Codex2
 **Status:** canonical canvas addition — closes the "canvas gap" blocker recorded against
-`SR-LEAVE-FE-001` (see `docs/04-uat/system-remediation-20260906/SR-LEAVE-FE-001.md`,
-2026-09-10 entry). This is design authority, **not** the product implementation.
+`SR-LEAVE-FE-001` (see `docs/03-runbooks/system-remediation-20260906/SR-LEAVE-FE-001.md`).
+This is design authority, **not** the product implementation.
 **Behaviour / data authority:**
 `docs/04-uat/system-remediation-20260906/feature-contracts.md` §2 (Family 1: Driver Leave Workflow) ·
 `packages/contracts/src/system-remediation.ts` · `packages/api-client/src/system-remediation.ts`
