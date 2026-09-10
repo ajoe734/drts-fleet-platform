@@ -40,6 +40,7 @@
 <script type="text/babel" src="mgmt-data.jsx"></script>
 <script type="text/babel" src="fleet-data.jsx"></script>
 <script type="text/babel" src="fleet-screens.jsx"></script>
+<script type="text/babel" src="fleet-cases.jsx"></script>
 <script type="text/babel" src="fleet-referral.jsx"></script>
 <script type="text/babel" src="fleet-supply.jsx"></script>
 
@@ -92,6 +93,14 @@ function App() {
           <DCArtboard id="documents" label="文件 / Documents · owner 區分" width={W} height={H}><Hero url="/documents"><FLP_Documents theme={th} /></Hero></DCArtboard>
           <DCArtboard id="training" label="訓練 / Training · 完成率" width={W} height={H}><Bare><FLP_Training theme={th} /></Bare></DCArtboard>
           <DCArtboard id="cases" label="事故 / 申訴 · 責任歸屬" width={W} height={H}><Bare><FLP_Cases theme={th} /></Bare></DCArtboard>
+          <DCArtboard id="case-detail-open" label="R12 · 案件詳情 · 回覆 / 附件 / 歷程 · SLA breached" width={W} height={H}><Bare><FLP_CaseDetail theme={th} variant="open" /></Bare></DCArtboard>
+          <DCArtboard id="case-detail-submitting" label="R12 · 案件詳情 · 回覆送出中" width={W} height={H}><Bare><FLP_CaseDetail theme={th} variant="open" replyState="submitting" /></Bare></DCArtboard>
+          <DCArtboard id="case-detail-reply-failed" label="R12 · 案件詳情 · 回覆送出失敗 · 可重試" width={W} height={H}><Bare><FLP_CaseDetail theme={th} variant="open" replyState="failed" /></Bare></DCArtboard>
+          <DCArtboard id="case-detail-reply-sent" label="R12 · 案件詳情 · 回覆已送出" width={W} height={H}><Bare><FLP_CaseDetail theme={th} variant="open" replyState="sent" /></Bare></DCArtboard>
+          <DCArtboard id="case-detail-closed" label="R12 · 案件詳情 · closed · 回覆停用 / 附件唯讀" width={W} height={H}><Bare><FLP_CaseDetail theme={th} variant="closed" /></Bare></DCArtboard>
+          <DCArtboard id="case-detail-platform" label="R12 · 案件詳情 · platform 責任 · 唯讀可見（不隱藏）" width={W} height={H}><Bare><FLP_CaseDetail theme={th} variant="platform" /></Bare></DCArtboard>
+          <DCArtboard id="case-access-states" label="R12 · 附件 / 歷程 · 讀取狀態（無權限 / 不存在 / 讀取失敗 / 空歷程）" width={W} height={H}><Bare><FLP_CaseAccessStates theme={th} /></Bare></DCArtboard>
+          <DCArtboard id="case-errors" label="R12 · 案件指令錯誤 / edge states" width={W} height={H}><Bare><FLP_CaseErrors theme={th} /></Bare></DCArtboard>
           <DCArtboard id="quality" label="品質指標 / Quality Metrics" width={W} height={H}><Bare><FLP_Quality theme={th} /></Bare></DCArtboard>
         </DCSection>
 
