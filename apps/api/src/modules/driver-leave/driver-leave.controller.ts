@@ -42,6 +42,7 @@ export class DriverLeaveController {
     @Body() command: CreateDriverLeaveCommand & { driverId?: string },
     @CurrentIdentity() identity: BootstrapRequestIdentity | null = null,
     @Headers("x-request-id") requestId?: string,
+    @Headers("idempotency-key") idempotencyKey?: string,
   ) {
     let effectiveDriverId: string | null = null;
 
