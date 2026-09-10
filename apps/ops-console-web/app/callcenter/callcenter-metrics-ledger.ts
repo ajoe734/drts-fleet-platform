@@ -362,3 +362,170 @@ export function deriveCallbackSlaPresentation(params: {
     statusTone,
   };
 }
+
+/**
+ * Explicit shared observation window for the cohort + usage ledger queries.
+ * Both endpoints must be called with the identical window so KPIs and cost
+ * totals are never computed against mismatched slices of time.
+ */
+export interface VoiceObservationWindow {
+  windowStart: string;
+  windowEnd: string;
+  observationWindowClosed: boolean;
+}
+
+export interface VoiceDimensionFilter {
+  language?: string | undefined;
+  routeProfileVersion?: number | undefined;
+  provider?: string | undefined;
+  brandId?: string | undefined;
+}
+
+/**
+ * A trailing window ending "now" is still accumulating calls; it must never
+ * be reported to the cohort endpoint as a closed/settled observation window
+ * (the backend defaults omitted windows to closed=true, which would mislabel
+ * cost-per-dispatch as settled before it is).
+ */
+export function buildDefaultVoiceObservationWindow(
+  now: Date = new Date(),
+): VoiceObservationWindow {
+  return {
+    windowStart: new Date(now.getTime() - 86400000).toISOString(),
+    windowEnd: now.toISOString(),
+    observationWindowClosed: false,
+  };
+}
+
+export function buildVoiceCohortQueryParams(
+  window: VoiceObservationWindow,
+  dims: VoiceDimensionFilter = {},
+): URLSearchParams {
+  const params = new URLSearchParams();
+  params.set("windowStart", window.windowStart);
+  params.set("windowEnd", window.windowEnd);
+  params.set(
+    "observationWindowClosed",
+    String(window.observationWindowClosed),
+  );
+  if (dims.language) params.set("language", dims.language);
+  if (dims.routeProfileVersion !== undefined) {
+    params.set("routeProfileVersion", String(dims.routeProfileVersion));
+  }
+  if (dims.provider) params.set("provider", dims.provider);
+  if (dims.brandId) params.set("brandId", dims.brandId);
+  return params;
+}
+
+export function buildVoiceUsageQueryParams(
+  window: VoiceObservationWindow,
+  dims: VoiceDimensionFilter = {},
+): URLSearchParams {
+  const params = new URLSearchParams();
+  params.set("windowStart", window.windowStart);
+  params.set("windowEnd", window.windowEnd);
+  if (dims.language) params.set("language", dims.language);
+  if (dims.provider) params.set("provider", dims.provider);
+  if (dims.brandId) params.set("brandId", dims.brandId);
+  // routeProfileVersion is intentionally omitted: the usage ledger contract
+  // does not carry a route-profile-version field on raw metering rows.
+  return params;
+}
+
+export type VoiceMetricsSectionStatus = "fresh" | "stale" | "unavailable";
+
+export interface VoiceMetricsLoadResult {
+  serverCohort: UiCohortMetricsView | null;
+  usageRecords: UiCostLedgerItem[];
+  cohortStatus: VoiceMetricsSectionStatus;
+  usageStatus: VoiceMetricsSectionStatus;
+  cohortErrorMessage: string | null;
+  usageErrorMessage: string | null;
+}
+
+export interface VoiceMetricsTransportClient {
+  get<T>(path: string): Promise<T>;
+}
+
+function describeVoiceTransportFailure(reason: unknown): string {
+  if (reason instanceof Error) {
+    return reason.message;
+  }
+  return typeof reason === "string" ? reason : "unknown transport failure";
+}
+
+/**
+ * Fetches call-cohort and usage-ledger data for the given shared observation
+ * window/dimension filter. On transport failure the previous section value
+ * is retained but the returned status is explicitly "stale" (if there was
+ * previous data) or "unavailable" (if there wasn't) — a failed refresh is
+ * never silently reported as fresh/healthy, and the denominator is never
+ * fabricated as zero.
+ */
+export async function loadVoiceCohortAndUsage(
+  client: VoiceMetricsTransportClient,
+  window: VoiceObservationWindow,
+  dims: VoiceDimensionFilter,
+  previous: {
+    serverCohort: UiCohortMetricsView | null;
+    usageRecords: UiCostLedgerItem[];
+  },
+): Promise<VoiceMetricsLoadResult> {
+  const cohortQuery = buildVoiceCohortQueryParams(window, dims);
+  const usageQuery = buildVoiceUsageQueryParams(window, dims);
+
+  const [cohortSettled, usageSettled] = await Promise.allSettled([
+    client.get<any>(
+      `/api/callcenter/voice/metrics/cohort?${cohortQuery.toString()}`,
+    ),
+    client.get<any>(
+      `/api/callcenter/voice/usage/records?${usageQuery.toString()}`,
+    ),
+  ]);
+
+  let serverCohort = previous.serverCohort;
+  let cohortStatus: VoiceMetricsSectionStatus = "fresh";
+  let cohortErrorMessage: string | null = null;
+  if (cohortSettled.status === "fulfilled" && cohortSettled.value) {
+    const raw = cohortSettled.value;
+    serverCohort =
+      raw && typeof raw === "object" && "allCallCoverage" in raw
+        ? adaptCohortReportToUiView(raw)
+        : (raw as UiCohortMetricsView);
+  } else {
+    cohortStatus = previous.serverCohort ? "stale" : "unavailable";
+    cohortErrorMessage =
+      cohortSettled.status === "rejected"
+        ? describeVoiceTransportFailure(cohortSettled.reason)
+        : "cohort metrics response was empty";
+  }
+
+  let usageRecords = previous.usageRecords;
+  let usageStatus: VoiceMetricsSectionStatus = "fresh";
+  let usageErrorMessage: string | null = null;
+  if (usageSettled.status === "fulfilled" && usageSettled.value) {
+    const raw = usageSettled.value;
+    const rawItems = Array.isArray(raw) ? raw : raw?.items;
+    if (Array.isArray(rawItems)) {
+      usageRecords = rawItems.map(mapVoiceUsageRecordToUiItem);
+    } else {
+      usageStatus = previous.usageRecords.length > 0 ? "stale" : "unavailable";
+      usageErrorMessage = "usage ledger response was malformed";
+    }
+  } else {
+    usageStatus = previous.usageRecords.length > 0 ? "stale" : "unavailable";
+    usageErrorMessage =
+      usageSettled.status === "rejected"
+        ? describeVoiceTransportFailure(usageSettled.reason)
+        : "usage ledger response was empty";
+  }
+
+  return {
+    serverCohort,
+    usageRecords,
+    cohortStatus,
+    usageStatus,
+    cohortErrorMessage,
+    usageErrorMessage,
+  };
+}

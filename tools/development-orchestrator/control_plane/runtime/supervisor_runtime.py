@@ -55,6 +55,7 @@ from control_plane.domain.worker_lifecycle import (
 from control_plane.domain.failure_policy import (
     classify_failure as classify_domain_failure,
     infer_pause_resume_at as infer_domain_pause_resume_at,
+    infer_rejected_rate_limit_resume_at,
     retry_settings as domain_retry_settings,
 )
 from control_plane.domain.resource_admission import decide as resource_admission_decision
@@ -2518,7 +2519,11 @@ def maybe_pause_provider_for_terminal_failure(
     if not agent_id:
         return
     if failure.get("kind") == "quota_terminal":
-        pause_provider(state, agent_id, reason, kind="quota", reset_seconds=14400, identity=worker.get("identity"))
+        pause_provider(
+            state, agent_id, reason, kind="quota",
+            reset_seconds=None if infer_rejected_rate_limit_resume_at(reason) is not None else 14400,
+            identity=worker.get("identity"),
+        )
     elif failure.get("kind") == "auth":
         pause_provider(state, agent_id, reason, kind="auth", reset_seconds=None, identity=worker.get("identity"))
 
@@ -4501,7 +4506,9 @@ def handle_worker_failure_signal(
             agent_id,
             failure_reason,
             kind="quota",
-            reset_seconds=14400,
+            # A native rejected event supplies an authoritative reset. Other
+            # textual hints retain the existing four-hour minimum.
+            reset_seconds=None if infer_rejected_rate_limit_resume_at(failure_reason) is not None else 14400,
             identity=worker.get("identity"),
         )
     if failure.get("kind") == "auth" and authorized and agent_id:
