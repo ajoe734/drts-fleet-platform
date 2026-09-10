@@ -848,6 +848,13 @@ def spawn_background_process(
             f"--property=StandardOutput=append:{log_target}",
             f"--property=StandardError=append:{log_target}",
             *[f"--property={value}" for value in worker_properties],
+            # Popen's env reaches systemd-run, not the service manager's child.
+            # Copy by name so isolated credentials and task identity reach the
+            # worker without putting environment values in the launch argv.
+            *[f"--setenv={key}" for key in sorted(child_env)],
+            # Prompts and tool code are literal argv, just as in direct Popen;
+            # systemd must not replace their $references with environment data.
+            "--expand-environment=no",
             "--",
             *command,
         ]
