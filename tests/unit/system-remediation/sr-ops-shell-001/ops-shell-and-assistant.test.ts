@@ -6,6 +6,20 @@ import {
   resolveAssistantActionHref,
   buildAssistantActions,
 } from "../../../../apps/ops-console-web/components/ops-assistant/assistant-actions";
+import {
+  resolvePlatformAdminBase,
+  buildPlatformAdminHref,
+  buildPlatformAdminAuditHref,
+  platformAdminAuditLink,
+  crossAppHref,
+  DEFAULT_PLATFORM_ADMIN_BASE,
+} from "../../../../apps/ops-console-web/lib/ops-cross-app-links";
+import {
+  parseAuditResourceContext,
+  filterAuditRecords,
+  clearAuditResourceSearchParams,
+  getAuditContextCopy,
+} from "../../../../apps/platform-admin-web/lib/audit-resource-context";
 import type { OpsAssistantContext } from "../../../../apps/ops-console-web/components/ops-assistant/context-envelope";
 
 describe("SR-OPS-SHELL-001: Cross-App Platform Admin & Audit Link Resolution", () => {
@@ -408,5 +422,314 @@ describe("SR-OPS-SHELL-001: OpsShell Link Interception & Keyboard Focus Return",
 
     handleOpen();
     expect(dragHandle.focus).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("SR-OPS-SHELL-001: Ops Cross-App Links Shared Resolver", () => {
+  const originalEnv = process.env;
+
+  beforeEach(() => {
+    process.env = { ...originalEnv };
+    delete process.env.NEXT_PUBLIC_PLATFORM_ADMIN_URL;
+    delete process.env.DRTS_PLATFORM_ADMIN_URL;
+  });
+
+  afterEach(() => {
+    process.env = originalEnv;
+  });
+
+  it("resolvePlatformAdminBase falls back to DEFAULT_PLATFORM_ADMIN_BASE when unconfigured", () => {
+    expect(resolvePlatformAdminBase()).toBe(DEFAULT_PLATFORM_ADMIN_BASE);
+  });
+
+  it("resolvePlatformAdminBase respects NEXT_PUBLIC_PLATFORM_ADMIN_URL and trims trailing slash", () => {
+    process.env.NEXT_PUBLIC_PLATFORM_ADMIN_URL = "http://localhost:3002/";
+    expect(resolvePlatformAdminBase()).toBe("http://localhost:3002");
+  });
+
+  it("resolvePlatformAdminBase respects DRTS_PLATFORM_ADMIN_URL fallback", () => {
+    process.env.DRTS_PLATFORM_ADMIN_URL = "https://platform.fleet.internal/";
+    expect(resolvePlatformAdminBase()).toBe("https://platform.fleet.internal");
+  });
+
+  it("buildPlatformAdminHref joins configured base with relative path", () => {
+    process.env.NEXT_PUBLIC_PLATFORM_ADMIN_URL = "http://localhost:3002";
+    expect(buildPlatformAdminHref("/audit")).toBe("http://localhost:3002/audit");
+    expect(buildPlatformAdminHref("/adapter-registry?platformCode=TAXI_01")).toBe(
+      "http://localhost:3002/adapter-registry?platformCode=TAXI_01",
+    );
+  });
+
+  it("buildPlatformAdminHref retains absolute URLs unchanged", () => {
+    expect(buildPlatformAdminHref("https://external.example.com/audit")).toBe(
+      "https://external.example.com/audit",
+    );
+  });
+
+  it("buildPlatformAdminAuditHref constructs correct URLs with and without resource context", () => {
+    process.env.NEXT_PUBLIC_PLATFORM_ADMIN_URL = "http://localhost:3002";
+
+    // No context -> /audit
+    expect(buildPlatformAdminAuditHref()).toBe("http://localhost:3002/audit");
+
+    // auditId only
+    expect(buildPlatformAdminAuditHref({ auditId: "aud-999" })).toBe(
+      "http://localhost:3002/audit?auditId=aud-999",
+    );
+
+    // resourceType + resourceId
+    expect(
+      buildPlatformAdminAuditHref({
+        resourceType: "order",
+        resourceId: "ord-12345",
+      }),
+    ).toBe("http://localhost:3002/audit?resourceType=order&resourceId=ord-12345");
+
+    // Both auditId and resource context (intersected)
+    expect(
+      buildPlatformAdminAuditHref({
+        auditId: "aud-999",
+        resourceType: "forwarded_order",
+        resourceId: "fwd-789",
+      }),
+    ).toBe(
+      "http://localhost:3002/audit?auditId=aud-999&resourceType=forwarded_order&resourceId=fwd-789",
+    );
+  });
+
+  it("platformAdminAuditLink returns valid CrossAppResourceLink", () => {
+    process.env.NEXT_PUBLIC_PLATFORM_ADMIN_URL = "http://localhost:3002";
+    const link = platformAdminAuditLink({
+      resourceType: "order",
+      resourceId: "ord-123",
+      label: "Audit Order",
+    });
+
+    expect(link.targetApp).toBe("platform-admin");
+    expect(link.openMode).toBe("new_tab");
+    expect(link.route).toBe("/audit?resourceType=order&resourceId=ord-123");
+    expect(crossAppHref(link)).toBe(
+      "http://localhost:3002/audit?resourceType=order&resourceId=ord-123",
+    );
+  });
+});
+
+describe("SR-OPS-SHELL-001: Platform Admin Audit Receiver Context & Filtering", () => {
+  const sampleRecords = [
+    {
+      auditId: "aud-001",
+      actorId: "actor-1",
+      actorType: "system",
+      tenantId: "t-01",
+      moduleName: "dispatch",
+      actionName: "order.create",
+      resourceType: "order",
+      resourceId: "ord-100",
+      createdAt: "2026-09-06T10:00:00Z",
+      requestId: "req-1",
+    },
+    {
+      auditId: "aud-002",
+      actorId: "actor-2",
+      actorType: "admin",
+      tenantId: "t-01",
+      moduleName: "forwarder",
+      actionName: "forwarder.assign",
+      resourceType: "forwarded_order",
+      resourceId: "fwd-200",
+      createdAt: "2026-09-06T10:05:00Z",
+      requestId: "req-2",
+    },
+    {
+      auditId: "aud-003",
+      actorId: "actor-1",
+      actorType: "system",
+      tenantId: "t-01",
+      moduleName: "dispatch",
+      actionName: "order.update",
+      resourceType: "order",
+      resourceId: "ord-100",
+      createdAt: "2026-09-06T10:10:00Z",
+      requestId: "req-3",
+    },
+  ];
+
+  it("parses empty or missing URL context as status: none", () => {
+    expect(parseAuditResourceContext("")).toEqual({ status: "none" });
+    expect(parseAuditResourceContext("?")).toEqual({ status: "none" });
+    expect(parseAuditResourceContext("?tab=log")).toEqual({ status: "none" });
+  });
+
+  it("parses valid auditId alone as status: valid", () => {
+    const ctx = parseAuditResourceContext("?auditId=aud-001");
+    expect(ctx).toEqual({
+      status: "valid",
+      auditId: "aud-001",
+    });
+  });
+
+  it("parses valid resourceType + resourceId pair as status: valid", () => {
+    const ctx = parseAuditResourceContext(
+      "?resourceType=order&resourceId=ord-100",
+    );
+    expect(ctx).toEqual({
+      status: "valid",
+      resourceType: "order",
+      resourceId: "ord-100",
+    });
+  });
+
+  it("parses both auditId and resource pair as status: valid with all fields", () => {
+    const ctx = parseAuditResourceContext(
+      "?auditId=aud-001&resourceType=order&resourceId=ord-100",
+    );
+    expect(ctx).toEqual({
+      status: "valid",
+      auditId: "aud-001",
+      resourceType: "order",
+      resourceId: "ord-100",
+    });
+  });
+
+  it("flags incomplete resourceType without resourceId as status: invalid", () => {
+    const ctx = parseAuditResourceContext("?resourceType=order");
+    expect(ctx.status).toBe("invalid");
+    if (ctx.status === "invalid") {
+      expect(ctx.reason).toContain("requires accompanying 'resourceId'");
+    }
+  });
+
+  it("flags incomplete resourceId without resourceType as status: invalid", () => {
+    const ctx = parseAuditResourceContext("?resourceId=ord-100");
+    expect(ctx.status).toBe("invalid");
+    if (ctx.status === "invalid") {
+      expect(ctx.reason).toContain("requires accompanying 'resourceType'");
+    }
+  });
+
+  it("flags empty parameter values as status: invalid", () => {
+    const ctx1 = parseAuditResourceContext("?auditId=");
+    expect(ctx1.status).toBe("invalid");
+
+    const ctx2 = parseAuditResourceContext("?resourceType=&resourceId=ord-100");
+    expect(ctx2.status).toBe("invalid");
+
+    const ctx3 = parseAuditResourceContext("?resourceType=order&resourceId=");
+    expect(ctx3.status).toBe("invalid");
+  });
+
+  it("flags conflicting duplicate parameters as status: invalid", () => {
+    const params = new URLSearchParams();
+    params.append("resourceType", "order");
+    params.append("resourceType", "forwarded_order");
+    params.append("resourceId", "ord-100");
+
+    const ctx = parseAuditResourceContext(params);
+    expect(ctx.status).toBe("invalid");
+    if (ctx.status === "invalid") {
+      expect(ctx.reason).toContain("Conflicting multiple values");
+    }
+  });
+
+  it("filterAuditRecords filters by exact equality when context is valid", () => {
+    const ctx = parseAuditResourceContext("?resourceType=order&resourceId=ord-100");
+    const result = filterAuditRecords(sampleRecords, ctx);
+
+    expect(result.isFiltered).toBe(true);
+    expect(result.isContextualEmpty).toBe(false);
+    expect(result.filteredRecords).toHaveLength(2);
+    expect(result.filteredRecords.map((r) => r.auditId)).toEqual([
+      "aud-001",
+      "aud-003",
+    ]);
+  });
+
+  it("filterAuditRecords intersects multiple criteria", () => {
+    const ctx = parseAuditResourceContext(
+      "?auditId=aud-001&resourceType=order&resourceId=ord-100",
+    );
+    const result = filterAuditRecords(sampleRecords, ctx);
+
+    expect(result.isFiltered).toBe(true);
+    expect(result.isContextualEmpty).toBe(false);
+    expect(result.filteredRecords).toHaveLength(1);
+    expect(result.filteredRecords[0].auditId).toBe("aud-001");
+  });
+
+  it("filterAuditRecords yields contextual empty state on unknown/no-match", () => {
+    const ctx = parseAuditResourceContext(
+      "?resourceType=order&resourceId=non-existent",
+    );
+    const result = filterAuditRecords(sampleRecords, ctx);
+
+    expect(result.isFiltered).toBe(true);
+    expect(result.isContextualEmpty).toBe(true);
+    expect(result.filteredRecords).toHaveLength(0);
+  });
+
+  it("filterAuditRecords preserves unfiltered list when context is none", () => {
+    const result = filterAuditRecords(sampleRecords, { status: "none" });
+    expect(result.isFiltered).toBe(false);
+    expect(result.isContextualEmpty).toBe(false);
+    expect(result.filteredRecords).toHaveLength(3);
+  });
+
+  it("clearAuditResourceSearchParams strips resource parameters while retaining others", () => {
+    const original = "?tab=log&resourceType=order&resourceId=ord-100&module=dispatch";
+    const cleared = clearAuditResourceSearchParams(original);
+    expect(cleared).toBe("?tab=log&module=dispatch");
+
+    const auditOnly = "?auditId=aud-001";
+    expect(clearAuditResourceSearchParams(auditOnly)).toBe("");
+  });
+
+  it("getAuditContextCopy provides localized strings", () => {
+    const zh = getAuditContextCopy("zh");
+    expect(zh.clearFilter).toBe("清除資源篩選");
+    const en = getAuditContextCopy("en");
+    expect(en.clearFilter).toBe("Clear resource filter");
+  });
+});
+
+describe("SR-OPS-SHELL-001: Dispatch Board Selected Record Resource Context Mapping", () => {
+  it("maps RuntimeOwnedOrder to resourceType=order and orderId", () => {
+    const ownedRecord = {
+      orderId: "ORD-OWNED-20260906-001",
+      availableActions: [],
+    };
+
+    const isForwarded = "mirrorOrderId" in ownedRecord;
+    const resourceType = isForwarded ? "forwarded_order" : "order";
+    const resourceId = isForwarded
+      ? (ownedRecord as any).mirrorOrderId
+      : ownedRecord.orderId;
+
+    expect(resourceType).toBe("order");
+    expect(resourceId).toBe("ORD-OWNED-20260906-001");
+
+    const href = buildPlatformAdminAuditHref({ resourceType, resourceId });
+    expect(href).toContain("resourceType=order");
+    expect(href).toContain("resourceId=ORD-OWNED-20260906-001");
+  });
+
+  it("maps RuntimeForwardedOrder to resourceType=forwarded_order and mirrorOrderId", () => {
+    const forwardedRecord = {
+      mirrorOrderId: "FWD-MIRROR-20260906-999",
+      platformCode: "YXC_01",
+      availableActions: [],
+    };
+
+    const isForwarded = "mirrorOrderId" in forwardedRecord;
+    const resourceType = isForwarded ? "forwarded_order" : "order";
+    const resourceId = isForwarded
+      ? forwardedRecord.mirrorOrderId
+      : (forwardedRecord as any).orderId;
+
+    expect(resourceType).toBe("forwarded_order");
+    expect(resourceId).toBe("FWD-MIRROR-20260906-999");
+
+    const href = buildPlatformAdminAuditHref({ resourceType, resourceId });
+    expect(href).toContain("resourceType=forwarded_order");
+    expect(href).toContain("resourceId=FWD-MIRROR-20260906-999");
   });
 });

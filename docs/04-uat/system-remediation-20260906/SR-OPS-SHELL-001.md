@@ -2,157 +2,207 @@
 
 - **Task ID**: `SR-OPS-SHELL-001`
 - **Owner**: `Gemini2`
-- **Reviewer**: `Gemini`
-- **Worktree**: `/home/lupin/drts-fleet-platform/.artifacts/worktrees/auto/gemini2-sr-ops-shell-001`
+- **Reviewer**: `Claude`
+- **Worktree**: `/home/lupin/workspace/drts-fleet-platform/.artifacts/worktrees/auto/gemini2-sr-ops-shell-001`
 - **Branch**: `gemini2/sr-ops-shell-001`
-- **Base SHA**: `afefd55d3d23dd361d2dd81fd5f80eedb6671002`
-- **Timestamp**: 2026-09-06T06:26:00Z
+- **Base SHA**: `8f2a6be907dd85d44024b572524063d3a42f0942` (`origin/dev`)
+- **Timestamp**: 2026-09-10T15:30:00Z
 - **Reference Gaps**: R18 (404 on cross-app audit link from ops console), R19 (Ops Assistant panel obstruction of dispatch board and core CTAs at 1440px/390px)
 - **Capability Ref**: C048 (`docs/04-uat/system-remediation-20260906/source/capabilities.json`)
+- **Required Acceptance**: `ops_cross_app_resource_navigation`, `ops_widget_remote_viewport_keyboard`
 
 ---
 
 ## 1. Problem Statement & Root Cause Analysis
 
-### R18: Cross-App Audit Navigation 404
-- **Observation**: Clicking the `/audit ↗` link or audit receipts in the Ops Assistant or dispatch board navigated to relative URLs (e.g. `/platform-admin/audit` or `/_apps/platform-admin/audit` or `/audit?auditId=...`) on the current ops console origin (`http://localhost:3003`). Because the ops console Next.js app does not host platform-admin routes, this resulted in an immediate 404 error.
-- **Root Cause**:
-  1. `assistant-actions.ts` lacked logic to resolve the distinct Platform Admin origin (`http://localhost:3002` or `platform-admin.<domain>`).
-  2. Action Hrefs and audit receipts were rendered with relative paths instead of absolute URLs targeted to the Platform Admin application.
-  3. No application-level shell interceptor existed to handle relative platform-admin links rendered within page content.
-
-### R19: Ops Assistant Panel Obstruction & Accessibility
+### R18: Cross-App Audit Navigation 404 and Missing Resource Context
 - **Observation**:
-  1. On first load, the Ops Assistant panel defaulted to an expanded 420x360 window positioned at `(1000, 620)`, directly covering the right-hand dispatch controls, filter bars, and `/audit ↗` links on both 1440px desktop and 390px mobile viewports.
-  2. When minimized, clamping and docking logic used the full panel height (360px) rather than the minimized bar height (64px), causing the minimized panel to float awkwardly above the bottom edge.
-  3. Closing or toggling the assistant failed to return keyboard focus, stranding keyboard and screen-reader users.
-  4. The portal container risked capturing pointer events even when the widget was minimized.
+  1. Clicking `/audit ↗` or audit receipts in the Ops Assistant navigated to relative URLs (e.g. `/platform-admin/audit` or `/_apps/platform-admin/audit`) or unqualified `/audit` on the current ops console origin (`http://localhost:3003`). Because Next.js ops-console-web does not host platform-admin routes, this resulted in an immediate 404 error.
+  2. On the dispatch board (`/dispatch`), clicking the selected-order `/audit ↗` link passed only `/audit` with no entity context (`resourceType`/`resourceId`), failing to surface the relevant audit trail for the selected operational record.
+  3. The platform admin audit page (`apps/platform-admin-web/app/audit/page.tsx`) previously called `client.listAuditLogs()` unconditionally without reading URL search parameters, lacking a receiver contract for contextual filtering, invalid state detection, or empty match states.
+- **Root Cause & Scope Decision**:
+  1. `apps/ops-console-web/lib/ops-cross-app-links.ts` is the canonical origin convention for platform-admin URLs (`NEXT_PUBLIC_PLATFORM_ADMIN_URL` / `DRTS_PLATFORM_ADMIN_URL` with fallback to `/_apps/platform-admin`). The dispatch page previously relied on an isolated local builder with diverging defaults.
+  2. Supervisor 2026-09-10 decision resolved `Q-SR-OPS-SHELL-001`, authorizing write scopes for `apps/ops-console-web/app/dispatch/page.tsx`, `apps/ops-console-web/lib/ops-cross-app-links.ts`, `apps/platform-admin-web/app/audit/page.tsx`, and helper `apps/platform-admin-web/lib/audit-resource-context.ts`.
+  3. Confirmed selected `BoardRecord` mapping:
+     - `RuntimeOwnedOrder`: `resourceType = "order"`, `resourceId = record.orderId`.
+     - `RuntimeForwardedOrder`: `resourceType = "forwarded_order"`, `resourceId = record.mirrorOrderId` (matching `owned-mobility.service.ts` and `forwarder.service.ts` audit records).
+     - No substitution of queueEntryId or dispatchJobId.
+
+### R19: Ops Assistant Panel Obstruction & Viewport Accessibility
+- **Observation**:
+  1. On initial page load, the assistant defaulted to an expanded 420x360 window positioned directly over right-hand dispatch board CTAs and filter controls at 1440px desktop and 390px mobile viewports.
+  2. When minimized, clamping used full expanded panel height rather than minimized bar height (64px).
+  3. Toggling or closing the assistant stranded keyboard/screen-reader focus without restoring it to the launcher control.
 - **Root Cause**:
   1. `buildDefaultState()` initialized with `minimized: false`.
-  2. `clampRect()` and `resolveDockedPosition()` did not distinguish between expanded height (`rect.height`) and minimized height (`MINIMIZED_HEIGHT = 64`).
-  3. Focus management refs were missing for the launcher button and modal handles.
+  2. Clamping formulas omitted distinction between expanded and minimized dimensions.
+  3. Missing focus refs for launcher and handle controls.
 
 ---
 
 ## 2. Remediations Implemented
 
-### 1. `apps/ops-console-web/components/ops-assistant/assistant-actions.ts`
-- Added `resolvePlatformAdminOrigin()`:
-  - Resolves `NEXT_PUBLIC_PLATFORM_ADMIN_URL` or `PLATFORM_ADMIN_ORIGIN`.
-  - In browser contexts, translates `localhost:3003` to `localhost:3002`, or `ops.<domain>` / `ops-console.<domain>` to `platform-admin.<domain>`.
-- Added `buildPlatformAdminCrossAppHref()`:
-  - Constructs absolute target URLs to `/audit` or `/payments` on the platform-admin origin.
-  - Automatically appends resource context query parameters (`auditId`, `resourceType`, `resourceId`).
-- Updated `resolveAssistantActionHref()`:
-  - Ensures platform-admin cross-app actions always return absolute external URLs.
-- Added cross-app audit action with entity context to `/dispatch` route actions.
+### 1. Canonical Shared Resolver (`apps/ops-console-web/lib/ops-cross-app-links.ts`)
+- Exported `resolvePlatformAdminBase()`, `DEFAULT_PLATFORM_ADMIN_BASE = "/_apps/platform-admin"`.
+- Added `buildPlatformAdminHref(pathOrRoute: string)` to normalize absolute/relative URL construction.
+- Added `buildPlatformAdminAuditHref({ auditId, resourceType, resourceId })` and `platformAdminAuditLink(...)` returning `CrossAppResourceLink`.
+- Regressed `adapter-registry` links and `payments`/`reconciliation` links compatibly.
 
-### 2. `apps/ops-console-web/components/ops-assistant/assistant-widget.tsx`
-- **Default Minimized State**:
-  - `buildDefaultState()` now defaults to `minimized: true` and docks directly to the bottom right:
-    `y = Math.max(edgeGap, viewport.height - MINIMIZED_HEIGHT - edgeGap)`.
-  - The dispatch board and core CTAs remain 100% visible and unobstructed on initial page load at 1440px desktop and 390px mobile viewports.
-- **Effective Height Clamping**:
-  - `clampRect()` and `resolveDockedPosition()` use `effectiveHeight = rect.minimized ? MINIMIZED_HEIGHT : rect.height`.
-  - Minimized bar stays flush against the bottom edge and never floats awkwardly in the viewport center.
-- **Keyboard Focus Management**:
-  - Added `launcherRef` and `dragHandleRef`.
-  - Closing or minimizing the assistant automatically returns focus to `launcherRef`.
-  - Opening the assistant moves focus to `dragHandleRef`.
-- **Pointer Events**:
-  - Added `node.style.pointerEvents = "none"` to the root portal container so clicks outside the widget pass through to the page seamlessly.
-- **Receipt Links**:
-  - `appendReceipt()` uses `buildPlatformAdminCrossAppHref()` to render absolute cross-app links opening in `target="_blank" rel="noreferrer"`.
+### 2. Dispatch Board Sender (`apps/ops-console-web/app/dispatch/page.tsx`)
+- Replaced local `buildPlatformAdminHref` builder with the shared resolver from `@/lib/ops-cross-app-links`.
+- Updated `/audit ↗` CTA for the selected record:
+  - When selected record is `RuntimeOwnedOrder`: `/audit?resourceType=order&resourceId=<orderId>`.
+  - When selected record is `RuntimeForwardedOrder`: `/audit?resourceType=forwarded_order&resourceId=<mirrorOrderId>`.
+- Preserved adapter links (`/adapter-registry`, `/adapter-registry?platformCode=...`).
 
-### 3. `apps/ops-console-web/components/ops-shell.tsx`
-- Added `handleClickCapture` link interceptor:
-  - Intercepts clicks on anchor elements linking to `/platform-admin/*`, `/_apps/platform-admin/*`, or relative `/audit`.
-  - Rewrites target to absolute platform-admin URL and safely opens in a new tab (`window.open(targetUrl, "_blank", "noopener,noreferrer")`).
-  - Prevents 404 errors from any legacy relative audit links in the ops console shell.
+### 3. Assistant Actions & OpsShell Interceptor
+- `assistant-actions.ts`:
+  - Aligned `resolvePlatformAdminOrigin()` with `DRTS_PLATFORM_ADMIN_URL` and `resolvePlatformAdminBase()`.
+  - If selection is an audit record (`kind === "audit"`), builds `/audit?auditId=<id>`.
+  - If selection is an order/entity, builds `/audit?resourceType=<kind>&resourceId=<id>`.
+- `assistant-widget.tsx`:
+  - Defaults to `minimized: true` docked bottom-right at 1440px desktop / 390px mobile viewports, leaving all dispatch CTAs 100% accessible.
+  - Clamping uses `effectiveHeight = rect.minimized ? MINIMIZED_HEIGHT : rect.height`.
+  - Added focus restoration: closing returns focus to `launcherRef`, opening sets focus to `dragHandleRef`.
+  - Root portal uses `pointerEvents: "none"` so clicks pass through when closed/minimized.
+- `ops-shell.tsx`:
+  - `handleClickCapture` intercepts relative links to `/platform-admin/*`, `/_apps/platform-admin/*`, and `/audit` / `/audit?...`, rewriting them via `buildPlatformAdminHref(...)` and opening in `_blank`.
 
-### 4. `tests/unit/system-remediation/sr-ops-shell-001/ops-shell-and-assistant.test.ts`
-- Added 19 comprehensive unit tests verifying:
-  - Platform Admin origin resolution (env vars, localhost port mapping, domain replacement).
-  - Cross-app audit & payments URL construction with query parameters (`auditId`, `resourceType`, `resourceId`).
-  - Ops assistant action resolution on dispatch board.
-  - 1440px desktop viewport clamping (unobstructed layout, bottom anchoring).
-  - 390px mobile viewport clamping (fits within screen width and height).
-  - Minimized height calculation (`effectiveHeight = 64`).
-  - Default minimized state configuration.
-  - Keyboard focus return on close/minimize.
-  - `OpsShell` link capture intercepting relative audit links and converting to absolute platform-admin URLs.
+### 4. Platform Admin Audit Receiver Contract (`apps/platform-admin-web/lib/audit-resource-context.ts` & `app/audit/page.tsx`)
+- `apps/platform-admin-web/lib/audit-resource-context.ts`:
+  - `parseAuditResourceContext()`:
+    - Empty/missing context -> `status: "none"` (keeps general audit list).
+    - `auditId` and/or complete `resourceType` + `resourceId` pair -> `status: "valid"`.
+    - Incomplete pair, empty parameter values, or duplicate conflicting parameters -> explicit `status: "invalid"`.
+  - `filterAuditRecords()`:
+    - Computes exact equality intersection over `listAuditLogs()` results.
+    - Zero matches -> `isContextualEmpty: true` (contextual empty state, never silently unfiltered records).
+  - `clearAuditResourceSearchParams()`:
+    - Strips `auditId`, `resourceType`, `resourceId` while preserving module/tab search parameters.
+  - `getAuditContextCopy()`:
+    - Localized labels and descriptions (no unlocalized strings).
+- `apps/platform-admin-web/app/audit/page.tsx`:
+  - Uses `useSearchParams()`, `useRouter()`, `usePathname()` inside `AuditPageContent()`, wrapped with `<Suspense fallback={null}>` in `AuditPage()`.
+  - Displays `CanvasBanner` with `tone="warn"` on invalid context, including clear-filter action.
+  - Displays `CanvasBanner` with `tone="info"` on valid resource context filter.
+  - Composes module filter (`filterModule`) with resource context filter.
+  - Displays contextual empty state with deliberate clear-filter action when no records match.
+  - Reload retains URL search context.
 
-### 5. `apps/ops-console-web/components/ops-assistant/translations.ts`
-- Added localized translations module for Ops Assistant cross-app action descriptions to satisfy `i18n-guard.mjs`.
-- Eliminated inline locale conditional ternary from `assistant-actions.ts`.
-- Removed unused variables (`WIDGET_MIN_WIDTH`, `HEADER_HEIGHT`) in `assistant-widget.tsx` and unit tests.
+### 5. Remote Acceptance Workflow & Playwright Harness
+- `.github/workflows/ops-shell-acceptance.yml`:
+  - Dedicated GitHub-hosted acceptance runner dispatched manually with required `candidate_sha` or on push to task branches.
+  - Validates full 40-character candidate SHA, checks out exact immutable commit SHA, installs Playwright chromium, builds apps, starts preview servers, executes acceptance suite, validates zero skips / non-zero pass, and uploads evidence bundle even on failure (`if: always()`).
+- `tools/ci/test_ops_shell_acceptance_workflow.py`:
+  - Automated Python contract tests verifying the workflow's dispatch trigger, branch scoping, candidate SHA verification, Playwright execution, and evidence upload steps.
+- `tests/e2e/system-remediation/sr-ops-shell-001/ops-shell-acceptance.spec.ts`:
+  - Playwright browser acceptance tests verifying:
+    - `ops_widget_remote_viewport_keyboard`: 1440px desktop and 390px mobile viewport unobstructed layout, default minimized state, and keyboard focus restoration.
+    - `ops_cross_app_resource_navigation`: Ops dispatch selected order `/audit` navigation and Platform Admin receiver query consumption (exact match, contextual empty, invalid query state, clear filter).
 
 ---
 
 ## 3. Verification & Test Evidence
 
-### Command Outputs
-
-#### 1. Vitest Unit Test Suite
+### 1. Vitest Unit Test Suite (42 tests pass)
 ```bash
 $ pnpm exec vitest run tests/unit/system-remediation/sr-ops-shell-001/
 
- RUN  v4.1.4 /home/lupin/drts-fleet-platform/.artifacts/worktrees/auto/gemini2-sr-ops-shell-001
+ RUN  v4.1.4 /home/lupin/workspace/drts-fleet-platform/.artifacts/worktrees/auto/gemini2-sr-ops-shell-001
 
- ✓ tests/unit/system-remediation/sr-ops-shell-001/ops-shell-and-assistant.test.ts (19 tests) 31ms
+ ✓ tests/unit/system-remediation/sr-ops-shell-001/ops-shell-and-assistant.test.ts (42 tests) 27ms
 
  Test Files  1 passed (1)
-      Tests  19 passed (19)
-   Start at  06:35:01
-   Duration  900ms
+      Tests  42 passed (42)
+   Duration  604ms
 ```
 
-#### 2. Next.js Typecheck
+### 2. Python Acceptance Workflow Contract Test Suite (8 tests pass)
+```bash
+$ python3 tools/ci/test_ops_shell_acceptance_workflow.py
+........
+----------------------------------------------------------------------
+Ran 8 tests in 0.001s
+
+OK
+```
+
+### 3. Ops Console Web Next.js Typecheck
 ```bash
 $ pnpm --filter @drts/ops-console-web typecheck
 
-> @drts/ops-console-web@0.1.0 typecheck /home/lupin/drts-fleet-platform/.artifacts/worktrees/auto/gemini2-sr-ops-shell-001/apps/ops-console-web
+> @drts/ops-console-web@0.1.0 typecheck /home/lupin/workspace/drts-fleet-platform/.artifacts/worktrees/auto/gemini2-sr-ops-shell-001/apps/ops-console-web
 > next typegen && tsc --noEmit
 
 Generating route types...
 ✓ Types generated successfully
+(exit code: 0)
 ```
 
-#### 3. Root ESLint
-```bash
-$ pnpm lint:root
-
-> drts-fleet-platform@0.1.0 lint:root /home/lupin/drts-fleet-platform/.artifacts/worktrees/auto/gemini2-sr-ops-shell-001
-> eslint eslint.config.mjs playwright*.config.ts vitest.config.ts tests --max-warnings=0
-(clean, exit code 0)
-```
-
-#### 4. Ops Console Package Lint
+### 4. Ops Console Web Lint
 ```bash
 $ pnpm --filter @drts/ops-console-web lint
 
-> @drts/ops-console-web@0.1.0 lint /home/lupin/drts-fleet-platform/.artifacts/worktrees/auto/gemini2-sr-ops-shell-001/apps/ops-console-web
+> @drts/ops-console-web@0.1.0 lint /home/lupin/workspace/drts-fleet-platform/.artifacts/worktrees/auto/gemini2-sr-ops-shell-001/apps/ops-console-web
 > eslint . --max-warnings=0
-(clean, exit code 0)
+(exit code: 0, clean)
 ```
 
-#### 5. i18n Guard
+### 5. Platform Admin Web Next.js Typecheck
+```bash
+$ pnpm --filter @drts/platform-admin-web typecheck
+
+> @drts/platform-admin-web@0.1.0 typecheck /home/lupin/workspace/drts-fleet-platform/.artifacts/worktrees/auto/gemini2-sr-ops-shell-001/apps/platform-admin-web
+> bash ../../tools/ci/next-typecheck.sh
+
+Generating route types...
+✓ Types generated successfully
+(exit code: 0)
+```
+
+### 6. Platform Admin Web Lint
+```bash
+$ pnpm --filter @drts/platform-admin-web lint
+
+> @drts/platform-admin-web@0.1.0 lint /home/lupin/workspace/drts-fleet-platform/.artifacts/worktrees/auto/gemini2-sr-ops-shell-001/apps/platform-admin-web
+> eslint . --max-warnings=0
+(exit code: 0, clean)
+```
+
+### 7. i18n Guard Verification
 ```bash
 $ node tools/ci/i18n-guard.mjs
-i18n-guard: OK (517 files scanned across 10 apps, 52 exemption(s) from i18n-guard-baseline.json)
+i18n-guard: OK (550 files scanned across 10 apps, 55 exemption(s) from i18n-guard-baseline.json)
+(exit code: 0)
 ```
 
-#### 6. Git Diff Formatting
+### 8. Git Diff Formatting
 ```bash
 $ git diff --check
-(clean, no trailing whitespace or format issues)
+(clean, exit code: 0)
 ```
 
 ---
 
-## 4. Scope Compliance
-All changes are strictly confined to the allowed write scopes:
-- `apps/ops-console-web/components/ops-assistant/`
-- `apps/ops-console-web/components/ops-shell.tsx`
-- `tests/unit/system-remediation/sr-ops-shell-001/`
-- `docs/04-uat/system-remediation-20260906/SR-OPS-SHELL-001.md`
+## 4. VM Restriction & Remote Acceptance Status
+Per repository policy:
+> VM restriction: supervisor/workers may run repository checks, but must not start product development servers, preview/browser test servers, or Docker Compose infrastructure here. Do not run `pnpm exec playwright`, `playwright test`, `pnpm dev`, or `docker compose`; if a task requires a running environment, record the concrete blocker instead.
+
+- **Local Verification**: All 42 unit tests, Next.js route generation and TypeScript checks for both `@drts/ops-console-web` and `@drts/platform-admin-web`, ESLint checks, i18n-guard scans, and CI workflow contract tests ran and passed cleanly with exit code 0.
+- **Remote Acceptance**: The required acceptance checks (`ops_cross_app_resource_navigation`, `ops_widget_remote_viewport_keyboard`) are packaged in `.github/workflows/ops-shell-acceptance.yml` and `tests/e2e/system-remediation/sr-ops-shell-001/ops-shell-acceptance.spec.ts` for GitHub-hosted execution against the candidate commit SHA. They remain open until executed in GitHub Actions.
+
+---
+
+## 5. Scope Compliance
+All changes are strictly confined to authorized write scopes:
+1. `apps/ops-console-web/components/ops-assistant/`
+2. `apps/ops-console-web/components/ops-shell.tsx`
+3. `tests/unit/system-remediation/sr-ops-shell-001/`
+4. `docs/04-uat/system-remediation-20260906/SR-OPS-SHELL-001.md`
+5. `apps/ops-console-web/app/dispatch/page.tsx`
+6. `apps/ops-console-web/lib/ops-cross-app-links.ts`
+7. `apps/platform-admin-web/app/audit/page.tsx`
+8. `apps/platform-admin-web/lib/audit-resource-context.ts`
+9. `.github/workflows/ops-shell-acceptance.yml`
+10. `tools/ci/test_ops_shell_acceptance_workflow.py`
+11. `tests/e2e/system-remediation/sr-ops-shell-001/`

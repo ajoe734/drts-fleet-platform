@@ -35,6 +35,7 @@ export function resolvePlatformAdminOrigin(): string {
   const envCandidates = [
     process.env.NEXT_PUBLIC_PLATFORM_ADMIN_ORIGIN,
     process.env.NEXT_PUBLIC_PLATFORM_ADMIN_URL,
+    process.env.DRTS_PLATFORM_ADMIN_URL,
     process.env.PLATFORM_ADMIN_ORIGIN,
     process.env.PLATFORM_ADMIN_URL,
     process.env.DEV_PLATFORM_ADMIN_ORIGIN,
@@ -248,7 +249,9 @@ function buildRouteSpecificActions(
           link: {
             targetApp: "platform-admin",
             route: context.selectedEntity
-              ? `/audit?resourceType=${encodeURIComponent(context.selectedEntity.kind)}&resourceId=${encodeURIComponent(context.selectedEntity.id)}`
+              ? context.selectedEntity.kind === "audit"
+                ? `/audit?auditId=${encodeURIComponent(context.selectedEntity.id)}`
+                : `/audit?resourceType=${encodeURIComponent(context.selectedEntity.kind)}&resourceId=${encodeURIComponent(context.selectedEntity.id)}`
               : "/audit",
             resourceType: context.selectedEntity?.kind ?? "dispatch",
             resourceId: context.selectedEntity?.id ?? "",

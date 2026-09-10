@@ -11,7 +11,7 @@ import type { IncidentRecord } from "@drts/contracts";
 import { OpsHealthFooter } from "@/components/ops-health-footer";
 import { getOpsClient, createOpsDispatchEventSource } from "@/lib/api-client";
 import { isSosIncident, unwrapListItems } from "@/lib/sos-view-model";
-import { resolvePlatformAdminOrigin } from "./ops-assistant";
+import { buildPlatformAdminHref } from "@/lib/ops-cross-app-links";
 
 type OpsShellProps = {
   nav: CanvasShellNavItem[];
@@ -176,17 +176,15 @@ export function OpsShell({
       href.startsWith("/audit?")
     ) {
       event.preventDefault();
-      event.stopPropagation();
-      const origin = resolvePlatformAdminOrigin();
       let targetPath = href;
       if (targetPath.startsWith("/platform-admin")) {
         targetPath = targetPath.slice("/platform-admin".length) || "/";
       } else if (targetPath.startsWith("/_apps/platform-admin")) {
         targetPath = targetPath.slice("/_apps/platform-admin".length) || "/";
       }
-      const targetUrl = new URL(targetPath, origin);
+      const targetUrl = buildPlatformAdminHref(targetPath);
       window.open(
-        targetUrl.toString(),
+        targetUrl,
         anchor.target || "_blank",
         "noopener,noreferrer",
       );
