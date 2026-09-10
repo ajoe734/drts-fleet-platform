@@ -2,6 +2,7 @@ import { Injectable, Logger, Optional } from "@nestjs/common";
 
 import { ApiRequestError } from "../../common/api-envelope";
 import { VoiceBookingRepository } from "./voice-booking.repository";
+import { voiceAlertMetrics } from "../../observability/voice-alert-metrics";
 
 export const DEFAULT_VOICE_POLICY_VERSION = "uv-policy-20260906-v1";
 
@@ -644,6 +645,27 @@ export class VoicePolicyService {
     });
 
     if (switchCheck.active && switchCheck.entry) {
+      voiceAlertMetrics.recordProviderCapacityExceeded({
+        brand_id: input.brandId ?? "default",
+        language: input.language ?? "zh-TW",
+        provider: input.providerAccountId || "unknown",
+        route_profile_version: 1,
+      });
+      if (this.repository && typeof this.repository.insertCallAdmission === "function") {
+        await this.repository
+          .insertCallAdmission({
+            providerAccountId: input.providerAccountId,
+            providerCallId: input.providerCallId,
+            receivedAt,
+            outcome: "overflow",
+            reason: `KILL_SWITCH_ACTIVE:${switchCheck.entry.reason}`,
+            brandId: input.brandId ?? null,
+            lineBindingId: input.lineId ?? null,
+          })
+          .catch((err) => {
+            this.logger.warn(`Failed to insert call admission overflow: ${err}`);
+          });
+      }
       return {
         admitted: false,
         outcome: "overflow",
@@ -661,6 +683,22 @@ export class VoicePolicyService {
           lineBindingId: input.lineId,
         },
       };
+    }
+
+    if (this.repository && typeof this.repository.insertCallAdmission === "function") {
+      await this.repository
+        .insertCallAdmission({
+          providerAccountId: input.providerAccountId,
+          providerCallId: input.providerCallId,
+          receivedAt,
+          outcome: "admitted",
+          reason: "ADMISSION_PERMITTED",
+          brandId: input.brandId ?? null,
+          lineBindingId: input.lineId ?? null,
+        })
+        .catch((err) => {
+          this.logger.warn(`Failed to insert call admission: ${err}`);
+        });
     }
 
     return {
