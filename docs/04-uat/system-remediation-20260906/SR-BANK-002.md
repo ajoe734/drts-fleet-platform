@@ -9,6 +9,52 @@
 
 ---
 
+## 2026-09-10 Round 5 (Claude2) — REOPEN fix: close the R15 HTML amount leak for a never-logged-in visitor supplying `?role=bank_finance`
+
+**Reopen reason (reviewer finding on candidate `ca3b6c4cf826`, verified `HEAD == candidate SHA` at the time):** round 4's fix correctly closed the JSON/CSV surface but left the HTML surface of the exact same R15 bug class open. `proxy.ts` only redirects to `/login` when `isSignedOutCookie && !hasSessionCookie` — a browser that has **never** logged in (no session cookie, no signed-out marker at all) passes straight through, untouched by the proxy. `lib/session.ts`'s `resolveServerSessionRole(cookieRoleValue, queryRoleValue)` computed `role = cookieRole ?? queryRole ?? DEFAULT_ROLE`, so with no cookie at all, `role` echoed the caller-supplied query role verbatim, and `isAuthenticated=false` only gated `isAuthorizedForExport` (used by the CSV/JSON export + artifact download routes) — never the plain `.role` field that `app/statements/page.tsx`, `app/statements/[period]/page.tsx`, and `app/users/page.tsx` all read directly for `canViewSettlementAmounts()` / `canManageUsers` gating. Net effect: an anonymous, never-authenticated visitor hitting `GET /statements?role=bank_finance` (no cookies at all) got `session.role='bank_finance'`, `canViewSettlementAmounts(role)=true`, and the HTML response rendered real settlement totals via `formatAmountForRole` — while the same visitor correctly got `403` from `/api/statements/export?role=bank_finance` (which checks `isAuthorizedForExport`). Base for this round: `ca3b6c4cf8261be56479d2f3d7eb0536e0fe78e8` (this worktree's `HEAD` at reopen time, verified `git rev-parse HEAD` matched the flagged candidate SHA exactly — no re-fetch/re-base needed since round 4 was already the branch tip).
+
+### R5.1 Fix
+
+`apps/bank-console-web/lib/session.ts`, `resolveServerSessionRole`: after computing `role = cookieRole ?? queryRole ?? DEFAULT_ROLE`, added an explicit downgrade — if `!isAuthenticated` (no valid signed session cookie) and the resolved `role` is `bank_finance` or `bank_program_admin`, `role` is forced back to `DEFAULT_ROLE` (`bank_ops_viewer`). This closes the leak at the single source of truth rather than requiring every render call site to separately remember an `isAuthenticated` check (matching the file's existing "single source of truth... so the three surfaces cannot diverge (R15)" comment on `canViewSettlementAmounts`). `isAuthorizedForExport`'s own logic (and the JSON/CSV/download routes that gate on it) is unchanged. No page file (`statements/page.tsx`, `statements/[period]/page.tsx`, `users/page.tsx`) needed to change, since all three already only ever read `.role` from `resolveServerSessionRole(...)`.
+
+### R5.2 Test changes
+
+`tests/unit/system-remediation/sr-bank-002/sr-bank-002.test.ts`, describe block 3:
+- The pre-existing case `"an unauthenticated request cannot buy export authorization by supplying ?role=bank_finance alone"` previously asserted `result.role` toBe `"bank_finance"` (i.e. it *documented* the leak while only checking `isAuthorizedForExport===false`, so the suite passed while the HTML leak remained — exactly why the reviewer's finding notes the candidate's "own new test" masked the regression). That assertion is removed; the test now only asserts `isAuthenticated`/`isAuthorizedForExport`.
+- Added a new `it.each(["bank_finance", "bank_program_admin"])` case asserting that for an unauthenticated request, `result.role` is forced to `"bank_ops_viewer"` and `canViewSettlementAmounts(result.role)` is `false` — the exact HTML-gate regression the reopen flagged.
+
+### R5.3 Verification run (this worktree, on top of this round's fix, base `ca3b6c4cf826`)
+
+```text
+$ git diff --check
+exit code: 0
+
+$ pnpm exec vitest run tests/unit/system-remediation/sr-bank-002/
+ Test Files  1 passed (1)
+      Tests  33 passed (33)
+exit code: 0
+
+$ pnpm --filter @drts/bank-console-web typecheck
+> next typegen && tsc --noEmit
+✓ Types generated successfully
+exit code: 0
+
+$ pnpm --filter @drts/bank-console-web exec vitest run tests/unit
+ Test Files  4 passed (4)
+      Tests  62 passed (62)
+exit code: 0
+```
+
+The 62/62 app-level suite (`proxy.test.ts`, `statements-artifacts.test.ts`, `translations.test.ts`, `bank-dev-read-models.test.ts`) is unchanged and still fully green, confirming this round's change does not regress the already-verified CSV/JSON/artifact-download three-role × cross-tenant matrix.
+
+### R5.4 Explicitly not done in this round (honest gaps)
+
+- No live/browser HTML render was captured (no Playwright walkthrough of `GET /statements?role=bank_finance` with zero cookies actually returning masked `••••••` markup) — this VM's sandbox forbids starting dev/preview servers. The fix and its regression test are verified by direct source read of `resolveServerSessionRole`'s new branch plus the unit-test assertion on its return value (`role` downgrades, `canViewSettlementAmounts(role)` is `false`), not by inspecting rendered DOM.
+- Did not re-verify `auth.policy.ts` / `bank-dev-read-models.ts` fail-closed behavior in this round — unchanged since round 4, and round 4's own verification run (§R4.1) already covers it; this round's diff touches only `lib/session.ts` and the test file.
+- CI, merge, and `required_acceptance` completeness remain for the independent reviewer and candidate lifecycle to determine; this document does not claim `done`.
+
+---
+
 ## 2026-09-10 Round 4 (Claude2) — fix CI regressions on candidate `93dad13a1cdb` (PR #1924), no behavior change
 
 Round 3's candidate (`93dad13a1cdb66676651b9ad6ed7c76856b3f265`, PR #1924, base `8f2a6be90`) was handed off but CI (`https://github.com/ajoe734/drts-fleet-platform/actions/runs/34493683294`) came back `failure` on two independent gates:

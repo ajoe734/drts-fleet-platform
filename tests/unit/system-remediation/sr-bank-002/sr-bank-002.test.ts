@@ -147,10 +147,26 @@ describe("SR-BANK-002: Bank role amount / PII / export consistent isolation (R15
 
     it("an unauthenticated request cannot buy export authorization by supplying ?role=bank_finance alone", () => {
       const result = resolveServerSessionRole(undefined, "bank_finance");
-      expect(result.role).toBe("bank_finance");
       expect(result.isAuthenticated).toBe(false);
       expect(result.isAuthorizedForExport).toBe(false);
     });
+
+    it.each(["bank_finance", "bank_program_admin"] as const)(
+      "an unauthenticated request also cannot buy the privileged *display* role (%s) for HTML rendering -- the R15 regression: proxy.ts only redirects a signed-out cookie, so a browser with NO cookies at all reaches the page, and every page read only .role without checking .isAuthenticated",
+      (privilegedRole) => {
+        const result = resolveServerSessionRole(undefined, privilegedRole);
+        expect(result.isAuthenticated).toBe(false);
+        // The role actually used for rendering must fall back to the
+        // least-privileged default, not the caller-supplied query role --
+        // otherwise app/statements/page.tsx, app/statements/[period]/page.tsx,
+        // and app/users/page.tsx would render real settlement amounts / user
+        // management controls to an anonymous visitor even though the same
+        // request is correctly denied export via isAuthorizedForExport.
+        expect(result.role).toBe("bank_ops_viewer");
+        expect(canViewSettlementAmounts(result.role)).toBe(false);
+        expect(result.isAuthorizedForExport).toBe(false);
+      },
+    );
 
     it("with no cookie and no query role, the session defaults to the least-privileged ops viewer", () => {
       const result = resolveServerSessionRole(undefined, undefined);

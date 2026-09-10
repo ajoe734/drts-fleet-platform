@@ -180,7 +180,21 @@ export function resolveServerSessionRole(
     }
   }
 
-  const role = cookieRole ?? queryRole ?? DEFAULT_ROLE;
+  let role = cookieRole ?? queryRole ?? DEFAULT_ROLE;
+  // An unauthenticated visitor (no valid signed session cookie) must never
+  // be able to buy a privileged *display* role -- and therefore privileged
+  // rendering (settlement amounts, user management) -- by supplying
+  // ?role=bank_finance/bank_program_admin alone. Downgrading here, rather
+  // than only gating export authorization below, keeps every render call
+  // site (statements HTML, statement detail HTML, users HTML) safe by
+  // construction instead of requiring each one to remember an isAuthenticated
+  // check (R15).
+  if (
+    !isAuthenticated &&
+    (role === "bank_finance" || role === "bank_program_admin")
+  ) {
+    role = DEFAULT_ROLE;
+  }
   const hasAuthorizedCookie =
     cookieRole === "bank_finance" || cookieRole === "bank_program_admin";
   const isAuthorizedForExport =
