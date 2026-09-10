@@ -2,8 +2,6 @@ import { test, expect } from "@playwright/test";
 import {
   UatNamespaceManager,
   BASELINE_PERSONAS,
-  createTenantPersonas,
-  generateAuthHeaders,
   UatEvidenceRecorder,
 } from "../shared/index";
 

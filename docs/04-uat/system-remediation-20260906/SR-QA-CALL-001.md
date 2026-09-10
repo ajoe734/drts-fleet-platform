@@ -182,6 +182,47 @@ $ pnpm exec vitest run tests/unit/system-remediation/sr-qa-call-001/
 
 ---
 
+### PR #1946 CI 失敗修復記錄（candidate SHA `93978c6df4afb88fc0431220939b8494dc781ae0`）
+
+`Claude2` handoff 後，PR #1946（candidate `93978c6df4afb88fc0431220939b8494dc781ae0`）之 CI workflow `CI` job `Product smoke acceptance` 之 `Lint` step 失敗：
+
+```
+tests/e2e/system-remediation/sr-qa-call-001/sr-qa-call-001.spec.ts
+  5:3  error  'createTenantPersonas' is defined but never used  @typescript-eslint/no-unused-vars
+  6:3  error  'generateAuthHeaders' is defined but never used   @typescript-eslint/no-unused-vars
+✖ 2 problems (2 errors, 0 warnings)
+```
+
+（見 `gh run view 34523919656 --job 103028285301 --log`；同 workflow 另一次嘗試 `34523912180` 之 `Smoke acceptance` 聚合 gate 因依賴 job 被取消／失敗而一併回報 `FAILURE`，根因相同。）
+
+**根因**：`sr-qa-call-001.spec.ts` 的 import 清單引入 `createTenantPersonas`、`generateAuthHeaders` 但檔案內未使用（該測試改用 `UatNamespaceManager`／`BASELINE_PERSONAS` 直接取得角色資料，未呼叫這兩個 helper）。
+
+**修正**（限於 write_scopes 內 `tests/e2e/system-remediation/sr-qa-call-001/sr-qa-call-001.spec.ts`）：自 import 清單移除 `createTenantPersonas`、`generateAuthHeaders` 兩個未使用的具名匯入，未變動任何測試邏輯或斷言。
+
+**修正後本地重新驗證**（worktree `/home/lupin/workspace/drts-fleet-platform/.artifacts/worktrees/auto/gemini2-sr-qa-call-001`，分支 `claude2/sr-qa-call-001`）：
+
+```bash
+# 1. 以 CI 相同範圍重跑 lint
+$ pnpm exec eslint eslint.config.mjs playwright*.config.ts vitest.config.ts tests --max-warnings=0
+(exit 0，無錯誤)
+
+# 2. 重跑本任務單元測試套件，確認修正未影響既有斷言
+$ pnpm exec vitest run tests/unit/system-remediation/sr-qa-call-001/
+ Test Files  5 passed (5)
+      Tests  44 passed (44)
+   Start at  20:09:54
+   Duration  2.35s
+(exit 0)
+
+# 3. whitespace / 排版檢查
+$ git diff --check
+(exit 0)
+```
+
+`pnpm exec playwright test -c playwright.system-remediation.config.ts sr-qa-call-001`（task_spec 指定指令）依 VM 限制不得在本地啟動瀏覽器測試 runner，維持交由 GitHub-hosted CI 之 `e2e`／`ci-integ` job 執行；本輪已確認之前 CI run 中 `CI (integration trunk)` workflow 的 `e2e`（`34523912145`／job `103028145648`）已為 `SUCCESS`，本次修正僅移除未使用 import，不影響該結果。此修正將以新 commit 推送，產生新 candidate SHA 供 CI 與 reviewer 重新驗證。
+
+---
+
 ## 5. 未做的部分（明列，不冒充成功）
 
 1. **未接入真實外部電信 PSTN 實體交換機與真 E1/SIP 中繼線路（C044）**：
