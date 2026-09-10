@@ -23,10 +23,12 @@ of inventing its own design.
 ## 2. Requirement traceability — original 5 groups, verbatim sub-items
 
 The 5 groups below are quoted in full from the design-gap note at anchor
-`b850e9611b1376048958a0edaa2fee375af0de3f`
-(`docs/04-uat/system-remediation-20260906/SR-FLEET-CASE-001.md`, "Screen
-requirements" section). Each row maps every sub-clause — not just the group
-title — to the artboard and line evidence that closes it.
+`b850e9611b1376048958a0edaa2fee375af0de3f` (path
+docs/04-uat/system-remediation-20260906/SR-FLEET-CASE-001.md on branch
+`codex2/sr-fleet-case-001`, not yet merged to `dev`, so it is cited by commit
+rather than by path), "Screen requirements" section. Each row maps every
+sub-clause — not just the group title — to the artboard and line evidence
+that closes it.
 
 ### Group 1 — 案件詳情："complaint / incident 識別、責任歸屬、Ops owner、API SLA 與可回覆狀態，以及返回列表方式"
 
