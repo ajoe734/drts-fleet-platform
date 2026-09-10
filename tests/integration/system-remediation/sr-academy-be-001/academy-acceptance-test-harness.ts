@@ -11,7 +11,7 @@ import {
   type AuthRealm,
   type AuthRoleFamily,
 } from "../../../../apps/api/src/common/auth";
-import { DriverAcademyModule } from "../../../../apps/api/src/modules/driver-academy";
+import { DriverAcademyModule } from "../../../../apps/api/src/modules/driver-academy/driver-academy.module";
 
 @Module({
   imports: [DriverAcademyModule],
