@@ -92,15 +92,27 @@ export async function createHostAcceptanceApp(): Promise<HostAcceptanceAppLike> 
       NestFactory: {
         create(
           moduleCls: unknown,
-          options?: { logger?: boolean; abortOnError?: boolean },
+          options?: {
+            logger?: boolean | ("log" | "error" | "warn" | "debug" | "verbose")[];
+            abortOnError?: boolean;
+          },
         ): Promise<HostAcceptanceAppLike & { setGlobalPrefix(prefix: string): void; init(): Promise<unknown> }>;
       };
       APP_GUARD: symbol;
       APP_INTERCEPTOR: symbol;
       APP_FILTER: symbol;
     };
-  const { Module } = apiRequire("@nestjs/common") as {
+  const { Module, Injectable } = apiRequire("@nestjs/common") as {
     Module: (metadata: Record<string, unknown>) => ClassDecorator;
+    Injectable: () => ClassDecorator;
+  };
+  const { catchError } = apiRequire("rxjs/operators") as {
+    catchError: (
+      selector: (err: unknown) => unknown,
+    ) => (source: unknown) => unknown;
+  };
+  const { throwError } = apiRequire("rxjs") as {
+    throwError: (factory: () => unknown) => unknown;
   };
 
   const { HostViewModule } = apiRequire(
@@ -116,6 +128,36 @@ export async function createHostAcceptanceApp(): Promise<HostAcceptanceAppLike> 
     "./dist/common/snake-case.exception-filter.js",
   ) as { SnakeCaseExceptionFilter: unknown };
 
+  // The real, production `SnakeCaseExceptionFilter` (`@Catch()`, applied
+  // above) formats any non-`HttpException` into a generic 500 envelope
+  // without ever calling Nest's `Logger` — so a genuine unhandled exception
+  // in `HostViewModule` would reach the browser as an opaque `HTTP_500` with
+  // zero trace in this process's stdout, even with `logger: ["error",
+  // "warn"]` on `NestFactory.create` below (that only restores Nest's own
+  // *handled*-lifecycle logging, which this path never goes through). This
+  // interceptor is the earliest point in the request pipeline this task can
+  // instrument without editing the production filter itself (out of write
+  // scope): it wraps the real handler, logs the real error object/stack to
+  // stdout (captured in this job's `api-server.log`/`execution-log.txt`
+  // evidence) on any failure, then rethrows unchanged so
+  // `SnakeCaseExceptionFilter`'s real response behavior is completely
+  // unaffected.
+  class DiagnosticErrorLoggingInterceptor {
+    intercept(
+      _context: unknown,
+      next: { handle: () => { pipe: (op: unknown) => unknown } },
+    ) {
+      return next.handle().pipe(
+        catchError((err: unknown) => {
+          // eslint-disable-next-line no-console
+          console.error("[host-acceptance] unhandled request error:", err);
+          return throwError(() => err);
+        }),
+      );
+    }
+  }
+  Injectable()(DiagnosticErrorLoggingInterceptor);
+
   // Applied as a plain function call (`Module(metadata)(Class)`) instead of
   // `@Module(...)` decorator syntax so this composition does not depend on
   // the test runner's TypeScript `emitDecoratorMetadata` support — this
@@ -127,6 +169,11 @@ export async function createHostAcceptanceApp(): Promise<HostAcceptanceAppLike> 
     imports: [HostViewModule],
     providers: [
       { provide: APP_GUARD, useClass: BootstrapAuthGuard },
+      // Order matters: providers registered first wrap outermost, so this
+      // diagnostic interceptor sees errors from both the real
+      // `SnakeCaseInterceptor` and the handler before the exception filter
+      // formats the response.
+      { provide: APP_INTERCEPTOR, useClass: DiagnosticErrorLoggingInterceptor },
       { provide: APP_INTERCEPTOR, useClass: SnakeCaseInterceptor },
       { provide: APP_FILTER, useClass: SnakeCaseExceptionFilter },
     ],
