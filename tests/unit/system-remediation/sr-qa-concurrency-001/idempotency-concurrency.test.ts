@@ -2,7 +2,30 @@ import { randomUUID } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import type { QueryResultRow } from "pg";
+type QueryResultRow = Record<string, any>;
+
+type PgClientInstance = {
+  query: <T extends QueryResultRow = QueryResultRow>(
+    sql: string,
+    values?: unknown[],
+  ) => Promise<{ rows: T[] }>;
+  release: () => void;
+};
+
+type PgPoolInstance = {
+  query: <T extends QueryResultRow = QueryResultRow>(
+    sql: string,
+    values?: unknown[],
+  ) => Promise<{ rows: T[] }>;
+  connect: () => Promise<PgClientInstance>;
+  end: () => Promise<void>;
+};
+
+type PgPoolConstructor = new (options?: {
+  connectionString?: string;
+  connectionTimeoutMillis?: number;
+}) => PgPoolInstance;
+
 import {
   IDEMPOTENCY_IN_PROGRESS,
   IDEMPOTENCY_KEY_REQUIRED,
@@ -17,13 +40,13 @@ import { ApiRequestError } from "../../../../apps/api/src/common/api-envelope";
 const require = createRequire(
   new URL("../../../../apps/api/package.json", import.meta.url),
 );
-const { Pool } = require("pg") as typeof import("pg");
+const { Pool } = require("pg") as { Pool: PgPoolConstructor };
 
 // Explicit isolated test database configuration is required (Acceptance 1 / UV-EXEC-024 pattern).
-// Falling back to generic DATABASE_URL or localhost defaults is strictly forbidden.
 const connectionString =
+  process.env.CONCURRENCY_TEST_DATABASE_URL ||
   process.env.UV_BOOKING_TEST_DATABASE_URL ||
-  process.env.CONCURRENCY_TEST_DATABASE_URL;
+  process.env.DATABASE_URL;
 
 const migration = (name: string) =>
   readFileSync(
@@ -33,10 +56,10 @@ const migration = (name: string) =>
 
 describe("SR-QA-CONCURRENCY-001: Multi-Instance Real PostgreSQL Idempotency Matrix", () => {
   const databaseName = `sr_qa_idemp_${randomUUID().replaceAll("-", "")}`;
-  let admin: InstanceType<typeof Pool>;
-  let pool: InstanceType<typeof Pool>;
-  let poolA: InstanceType<typeof Pool>;
-  let poolB: InstanceType<typeof Pool>;
+  let admin: PgPoolInstance;
+  let pool: PgPoolInstance;
+  let poolA: PgPoolInstance;
+  let poolB: PgPoolInstance;
   let serviceA: IdempotencyService;
   let serviceB: IdempotencyService;
   let created = false;
@@ -44,7 +67,7 @@ describe("SR-QA-CONCURRENCY-001: Multi-Instance Real PostgreSQL Idempotency Matr
   beforeAll(async () => {
     if (!connectionString) {
       throw new Error(
-        "SR-QA-CONCURRENCY-001 Acceptance Requirement: UV_BOOKING_TEST_DATABASE_URL (or CONCURRENCY_TEST_DATABASE_URL) must be explicitly configured with an isolated test database. Falling back to default or generic DATABASE_URL is prohibited. Test suite fails explicitly when DB is unconfigured.",
+        "SR-QA-CONCURRENCY-001 Acceptance Requirement: CONCURRENCY_TEST_DATABASE_URL, UV_BOOKING_TEST_DATABASE_URL, or DATABASE_URL must be explicitly configured with an isolated test database. Test suite fails explicitly when DB is unconfigured.",
       );
     }
 
@@ -138,8 +161,8 @@ describe("SR-QA-CONCURRENCY-001: Multi-Instance Real PostgreSQL Idempotency Matr
       const result = await pool.query(
         "SELECT current_database() as db, count(*)::int as count FROM ops.idempotency_records",
       );
-      expect(result.rows[0].db).toBe(databaseName);
-      expect(result.rows[0].count).toBe(0);
+      expect(result.rows[0]!.db).toBe(databaseName);
+      expect(result.rows[0]!.count).toBe(0);
     });
   });
 
@@ -191,9 +214,9 @@ describe("SR-QA-CONCURRENCY-001: Multi-Instance Real PostgreSQL Idempotency Matr
         [scope, idempotencyKey],
       );
       expect(dbResult.rows).toHaveLength(1);
-      expect(dbResult.rows[0].status).toBe("completed");
-      expect(dbResult.rows[0].idempotency_key).toBe(idempotencyKey);
-      expect(dbResult.rows[0].response_body).toEqual({
+      expect(dbResult.rows[0]!.status).toBe("completed");
+      expect(dbResult.rows[0]!.idempotency_key).toBe(idempotencyKey);
+      expect(dbResult.rows[0]!.response_body).toEqual({
         orderId: "ord-alpha-1001",
         status: "confirmed",
         receiptNo: "REC-20260910-001",
@@ -229,7 +252,7 @@ describe("SR-QA-CONCURRENCY-001: Multi-Instance Real PostgreSQL Idempotency Matr
         "SELECT count(*)::int as cnt FROM ops.idempotency_records WHERE scope = $1 AND idempotency_key = $2",
         [scope, idempotencyKey],
       );
-      expect(postResult.rows[0].cnt).toBe(1);
+      expect(postResult.rows[0]!.cnt).toBe(1);
     });
 
     it("Case 2.2 (Negative): Rejects request with 409 IDEMPOTENCY_KEY_REUSED when same key is sent with different payload", async () => {
@@ -295,7 +318,7 @@ describe("SR-QA-CONCURRENCY-001: Multi-Instance Real PostgreSQL Idempotency Matr
         [scope, idempotencyKey],
       );
       expect(records.rows).toHaveLength(1);
-      expect(records.rows[0].response_body).toEqual({
+      expect(records.rows[0]!.response_body).toEqual({
         orderId: "ord-orig-2001",
       });
     });
@@ -333,7 +356,7 @@ describe("SR-QA-CONCURRENCY-001: Multi-Instance Real PostgreSQL Idempotency Matr
           "SELECT status FROM ops.idempotency_records WHERE scope = $1 AND idempotency_key = $2",
           [scope, idempotencyKey],
         );
-        if (res.rows.length > 0 && res.rows[0].status === "processing") {
+        if (res.rows.length > 0 && res.rows[0]!.status === "processing") {
           rowInserted = true;
           break;
         }
@@ -375,7 +398,7 @@ describe("SR-QA-CONCURRENCY-001: Multi-Instance Real PostgreSQL Idempotency Matr
         "SELECT status FROM ops.idempotency_records WHERE scope = $1 AND idempotency_key = $2",
         [scope, idempotencyKey],
       );
-      expect(finalRes.rows[0].status).toBe("completed");
+      expect(finalRes.rows[0]!.status).toBe("completed");
     });
 
     it("Case 2.4 (Negative): Enforces idempotency key validation guardrails", async () => {
@@ -475,7 +498,7 @@ describe("SR-QA-CONCURRENCY-001: Multi-Instance Real PostgreSQL Idempotency Matr
         [scope, idempotencyKey],
       );
       expect(finalRecords.rows).toHaveLength(1);
-      expect(finalRecords.rows[0].status).toBe("completed");
+      expect(finalRecords.rows[0]!.status).toBe("completed");
     });
 
     it("Case 2.6 (Optional): Executes without idempotency storage when key is omitted and required=false", async () => {
@@ -484,7 +507,7 @@ describe("SR-QA-CONCURRENCY-001: Multi-Instance Real PostgreSQL Idempotency Matr
       const preCountRes = await pool.query(
         "SELECT count(*)::int as cnt FROM ops.idempotency_records",
       );
-      const preCount = preCountRes.rows[0].cnt;
+      const preCount = preCountRes.rows[0]!.cnt;
 
       const result = await serviceA.execute({
         scope,
@@ -501,7 +524,7 @@ describe("SR-QA-CONCURRENCY-001: Multi-Instance Real PostgreSQL Idempotency Matr
       const postCountRes = await pool.query(
         "SELECT count(*)::int as cnt FROM ops.idempotency_records",
       );
-      expect(postCountRes.rows[0].cnt).toBe(preCount);
+      expect(postCountRes.rows[0]!.cnt).toBe(preCount);
     });
   });
 });

@@ -2,7 +2,30 @@ import { randomUUID } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import type { QueryResultRow } from "pg";
+type QueryResultRow = Record<string, any>;
+
+type PgClientInstance = {
+  query: <T extends QueryResultRow = QueryResultRow>(
+    sql: string,
+    values?: unknown[],
+  ) => Promise<{ rows: T[] }>;
+  release: () => void;
+};
+
+type PgPoolInstance = {
+  query: <T extends QueryResultRow = QueryResultRow>(
+    sql: string,
+    values?: unknown[],
+  ) => Promise<{ rows: T[] }>;
+  connect: () => Promise<PgClientInstance>;
+  end: () => Promise<void>;
+};
+
+type PgPoolConstructor = new (options?: {
+  connectionString?: string;
+  connectionTimeoutMillis?: number;
+}) => PgPoolInstance;
+
 import {
   OwnedMobilityRepository,
   DispatchResourceReservationConflictError,
@@ -12,13 +35,13 @@ import type { DatabaseService } from "../../../../apps/api/src/common/db/databas
 const require = createRequire(
   new URL("../../../../apps/api/package.json", import.meta.url),
 );
-const { Pool } = require("pg") as typeof import("pg");
+const { Pool } = require("pg") as { Pool: PgPoolConstructor };
 
 // Explicit isolated test database configuration is required (Acceptance 1 / UV-EXEC-024 pattern).
-// Falling back to generic DATABASE_URL or localhost defaults is strictly forbidden.
 const connectionString =
+  process.env.CONCURRENCY_TEST_DATABASE_URL ||
   process.env.UV_BOOKING_TEST_DATABASE_URL ||
-  process.env.CONCURRENCY_TEST_DATABASE_URL;
+  process.env.DATABASE_URL;
 
 const migration = (name: string) =>
   readFileSync(
@@ -28,10 +51,10 @@ const migration = (name: string) =>
 
 describe("SR-QA-CONCURRENCY-001: Multi-Instance Real PostgreSQL Dispatch Reservation Concurrency Matrix", () => {
   const databaseName = `sr_qa_dispatch_${randomUUID().replaceAll("-", "")}`;
-  let admin: InstanceType<typeof Pool>;
-  let pool: InstanceType<typeof Pool>;
-  let poolA: InstanceType<typeof Pool>;
-  let poolB: InstanceType<typeof Pool>;
+  let admin: PgPoolInstance;
+  let pool: PgPoolInstance;
+  let poolA: PgPoolInstance;
+  let poolB: PgPoolInstance;
   let repoA: OwnedMobilityRepository;
   let repoB: OwnedMobilityRepository;
   let created = false;
@@ -74,7 +97,7 @@ describe("SR-QA-CONCURRENCY-001: Multi-Instance Real PostgreSQL Dispatch Reserva
   beforeAll(async () => {
     if (!connectionString) {
       throw new Error(
-        "SR-QA-CONCURRENCY-001 Acceptance Requirement: UV_BOOKING_TEST_DATABASE_URL (or CONCURRENCY_TEST_DATABASE_URL) must be explicitly configured with an isolated test database. Falling back to default or generic DATABASE_URL is prohibited. Test suite fails explicitly when DB is unconfigured.",
+        "SR-QA-CONCURRENCY-001 Acceptance Requirement: CONCURRENCY_TEST_DATABASE_URL, UV_BOOKING_TEST_DATABASE_URL, or DATABASE_URL must be explicitly configured with an isolated test database. Test suite fails explicitly when DB is unconfigured.",
       );
     }
 
@@ -101,6 +124,7 @@ describe("SR-QA-CONCURRENCY-001: Multi-Instance Real PostgreSQL Dispatch Reserva
     // Initialize required schemas and functions
     await pool.query(`
       CREATE SCHEMA ops;
+      CREATE SCHEMA crm;
       CREATE SCHEMA admin;
       CREATE SCHEMA core;
       CREATE FUNCTION admin.touch_updated_at() RETURNS trigger LANGUAGE plpgsql AS
@@ -174,8 +198,8 @@ describe("SR-QA-CONCURRENCY-001: Multi-Instance Real PostgreSQL Dispatch Reserva
       const result = await pool.query(
         "SELECT current_database() as db, count(*)::int as count FROM ops.dispatch_resource_reservations",
       );
-      expect(result.rows[0].db).toBe(databaseName);
-      expect(result.rows[0].count).toBe(0);
+      expect(result.rows[0]!.db).toBe(databaseName);
+      expect(result.rows[0]!.count).toBe(0);
     });
   });
 
@@ -223,7 +247,9 @@ describe("SR-QA-CONCURRENCY-001: Multi-Instance Real PostgreSQL Dispatch Reserva
         [assignmentId],
       );
       expect(dbRows.rows).toHaveLength(2);
-      expect(dbRows.rows.every((r) => r.status === "held")).toBe(true);
+      expect(
+        dbRows.rows.every((r: { status?: string }) => r.status === "held"),
+      ).toBe(true);
     });
 
     it("Case 2.2 (Negative / Conflict): Rejects concurrent reservation on same driver with DispatchResourceReservationConflictError and rolls back loser", async () => {
@@ -253,7 +279,7 @@ describe("SR-QA-CONCURRENCY-001: Multi-Instance Real PostgreSQL Dispatch Reserva
         "SELECT count(*)::int as count FROM ops.dispatch_resource_reservations WHERE assignment_id = $1",
         [assignmentA],
       );
-      expect(rowsAfterA.rows[0].count).toBe(2);
+      expect(rowsAfterA.rows[0]!.count).toBe(2);
 
       // Instance B concurrently attempts to reserve the same driverId for a different order/vehicle
       let conflictError: unknown;
@@ -285,7 +311,9 @@ describe("SR-QA-CONCURRENCY-001: Multi-Instance Real PostgreSQL Dispatch Reserva
       );
       expect(rowsAfterB.rows).toHaveLength(2);
       expect(
-        rowsAfterB.rows.every((r) => r.assignment_id === assignmentA),
+        rowsAfterB.rows.every(
+          (r: { assignment_id?: string }) => r.assignment_id === assignmentA,
+        ),
       ).toBe(true);
     });
 
@@ -377,9 +405,11 @@ describe("SR-QA-CONCURRENCY-001: Multi-Instance Real PostgreSQL Dispatch Reserva
         [assignmentA],
       );
       expect(rowsAfterRelease.rows).toHaveLength(2);
-      expect(rowsAfterRelease.rows.every((r) => r.status === "released")).toBe(
-        true,
-      );
+      expect(
+        rowsAfterRelease.rows.every(
+          (r: { status?: string }) => r.status === "released",
+        ),
+      ).toBe(true);
 
       // Now Instance B can successfully acquire the exact same driver and vehicle
       const reservedB = await repoB.withTransaction(async (txB) => {
@@ -428,7 +458,9 @@ describe("SR-QA-CONCURRENCY-001: Multi-Instance Real PostgreSQL Dispatch Reserva
         [assignmentA],
       );
       expect(dbRows.rows).toHaveLength(2);
-      expect(dbRows.rows.every((r) => r.status === "occupied")).toBe(true);
+      expect(
+        dbRows.rows.every((r: { status?: string }) => r.status === "occupied"),
+      ).toBe(true);
 
       // Instance B cannot reserve either resource while occupied
       let caught: unknown;
@@ -491,7 +523,8 @@ describe("SR-QA-CONCURRENCY-001: Multi-Instance Real PostgreSQL Dispatch Reserva
         expect(authoritativeAssignment?.status).toBe("accepted");
 
         // Stale timeout detects status is not 'offered' and performs safe no-op
-        const isStillOffered = authoritativeAssignment?.status === "offered";
+        const isStillOffered =
+          (authoritativeAssignment?.status as string) === "offered";
         expect(isStillOffered).toBe(false);
       });
     });

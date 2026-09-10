@@ -168,7 +168,7 @@ describe("SR-QA-CONCURRENCY-001: C089 Cross-Month Batch Billing, Rerun & Reconci
       planName: "Standard Driver Fee Plan",
       version: "v2026.03",
       serviceFeeBps: 1200,
-      reimbursementMode: "automatic_bank_transfer",
+      reimbursementMode: "platform_funded",
     });
 
     // First batch generation
@@ -191,10 +191,7 @@ describe("SR-QA-CONCURRENCY-001: C089 Cross-Month Batch Billing, Rerun & Reconci
     expect(batchResult2.items[0]?.statementId).toBe(firstStatement.statementId);
 
     // List driver statements shows no duplicated statements for that period
-    const statements = await service.listDriverStatements(
-      firstStatement.tenantId,
-      periodMonth,
-    );
+    const statements = await service.listDriverStatements(periodMonth);
     const driverStatements = statements.filter(
       (s) => s.driverId === firstStatement.driverId,
     );

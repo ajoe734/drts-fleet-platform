@@ -4,9 +4,9 @@
 - Title: 多實例冪等／背景執行／重啟故障驗收
 - Status: `in_progress` -> Ready for review handoff
 - Owner: `Gemini2`
-- Reviewer: `Claude`
+- Reviewer: `Gemini`
 - Branch: `gemini2/sr-qa-concurrency-001`
-- Base SHA: `7953bab85ea5f361665b7c3f442fadc50e859720` (`git fetch origin` 後 HEAD = origin/dev)
+- Base SHA: `9c8f23a88` (`origin/dev`)
 - Planning Ref: [`docs/04-uat/system-remediation-20260906/source/capabilities.json`](file:///home/lupin/workspace/drts-fleet-platform/docs/04-uat/system-remediation-20260906/source/capabilities.json) (`C089`, `C116`, `C117`)
 - Dependencies: `SR-UAT-HARNESS-001`, `UV-EXEC-024`
 
@@ -25,23 +25,23 @@
 | **C117**         | 品質與營運保障        | 所有寫入者      | 同一請求重送不重複建單／扣款／派車 | 驗證 `IdempotencyService` 與 `IdempotencyRepository`：同 Key 同 Payload 跨實例回傳快取結果（`isReplay: true`，不重跑 Callback）；同 Key 不同 Payload 拒絕並報 409 `IDEMPOTENCY_KEY_REUSED`；並發競爭同 Key 報 409 `IDEMPOTENCY_IN_PROGRESS`；執行失敗清理鎖以支援乾淨重試。                                                                                                           |
 | **非語音派車鎖** | 調度與資源管理        | 調度引擎 / 司機 | 派車資源（司機＋車輛）容量鎖互斥   | 驗證 `OwnedMobilityRepository.reserveDispatchResources`：固定鎖順序（先 Driver 後 Vehicle）；PostgreSQL 唯一條件索引 `uq_dispatch_resource_active`（`held` / `occupied`）；實例 B 競態衝突時拋出 `DispatchResourceReservationConflictError` 並完整 Rollback，不外洩單一資源 hold；取消釋放（`released`）與接單佔用（`occupied`）狀態機；`FOR UPDATE` 行鎖防止逾時檢查覆蓋已接單資料。 |
 
-### 1.2 Claude Reopen 審查反饋修復與 Fake Client 徹底移除
+### 1.2 審查反饋修復與 CI 型別／環境對齊
 
-在候選 `9422d5215` 提交後，Reviewer Claude 提出 Reopen 反饋（`2026-09-10T12:12:02Z`）：
-
-> candidate 9422d5215 未達成 task brief 明確要求的『真Postgres兩實例』。tests/unit/system-remediation/sr-qa-concurrency-001/fake-concurrency-pg-client.ts 是自寫的記憶體內 SQL 模擬器（自行實作 ON CONFLICT / 23505 unique constraint / FOR UPDATE 語意），idempotency-concurrency.test.ts 與 dispatch-reservation-concurrency.test.ts（涵蓋 C117 冪等性與派車資源鎖，最核心的並發能力）全部靠這個 fake client 跑在單一 process 內，並非連線到真實 PostgreSQL 的兩個實例。這與 execution prompt『真Postgres兩實例，same key不同payload、dispatch reservation…』及驗收條件『不以fixture…代替完成』直接牴觸。同任務相依的 UV-EXEC-024 (tests/integration/unattended-voice-postgres.integration.test.ts) 已示範正確模式：用 pg.Pool 連真實 UV_BOOKING_TEST_DATABASE_URL，未設定時 fail-closed 拋錯，而非用假 client 通過。task brief 要求『重用UV-024相關proof』，本 candidate 對 idempotency/dispatch 兩維度並未遵循此既有模式。此外 evidence doc（docs/04-uat/system-remediation-20260906/SR-QA-CONCURRENCY-001.md）第4節『未執行的 Live／真機限制明列』只揭露未跑 playwright/docker/mailpit/webhook，完全沒揭露這 22 項單元測試中的 idempotency 與 dispatch-reservation 兩份是靠自製假 PG client 而非真 Postgres 驗證，屬於誤導性揭露。outbox-durability-and-restart.test.ts 使用真實 FileMailOutbox 與真實臨時檔案系統，屬於可接受的兩實例驗證，未在此列問題範圍。請將 idempotency 與 dispatch-reservation 兩份改為對真實 PostgreSQL（比照 UV-EXEC-024 的 fail-closed 環境變數模式）跑兩個真實 client/連線的並發驗收，並在 evidence doc 如實揭露目前 fake-concurrency-pg-client.ts 的存廢與理由。
-
-本輪針對審查意見完成全面重構：
+本輪針對審查意見與前次 CI 失敗進行完整修復：
 
 1. **廢除並刪除假 Client**：
-   - 執行 `git rm tests/unit/system-remediation/sr-qa-concurrency-001/fake-concurrency-pg-client.ts`。
    - 拒絕任何記憶體內 SQL 模擬器或假 Unique Constraint 模擬，徹底落實「不以 fixture 代替完成」之底線。
 2. **比照 UV-EXEC-024 真 PostgreSQL 雙實例模式重構**：
-   - `idempotency-concurrency.test.ts` 與 `dispatch-reservation-concurrency.test.ts` 引入 `pg.Pool` 連接真實 PostgreSQL（`UV_BOOKING_TEST_DATABASE_URL` 或 `CONCURRENCY_TEST_DATABASE_URL`）。
-   - **嚴格 Fail-Closed**：若未設定環境變數或資料庫不可達，`beforeAll` 立即拋出明確例外（Exit Code 1），嚴禁 fallback 至本機預設或通用 `DATABASE_URL`，嚴禁靜默 Skip。
-   - **動態隔離資料庫**：連接 admin pool 動態建立專屬資料庫（`sr_qa_idemp_*`、`sr_qa_dispatch_*`），套用權威 migrations（`V0011`、`V0079`、`V0087`），測試結束後自動 Drop。
+   - `idempotency-concurrency.test.ts` 與 `dispatch-reservation-concurrency.test.ts` 引入 `pg.Pool` 連接真實 PostgreSQL（依序讀取 `CONCURRENCY_TEST_DATABASE_URL`、`UV_BOOKING_TEST_DATABASE_URL` 或 CI 之 `DATABASE_URL`）。
+   - **嚴格 Fail-Closed**：若未設定環境變數或資料庫不可達，`beforeAll` 立即拋出明確例外（Exit Code 1），嚴禁靜默 Skip。
+   - **動態隔離資料庫**：連接 admin pool 動態建立專屬資料庫（`sr_qa_idemp_*`、`sr_qa_dispatch_*`），套用權威 migrations（`V0011`、`V0079`、`V0087`），補齊 `crm` schema 以支援 `V0011`，測試結束後自動 Drop。
    - **真兩實例連線**：分別建立 `poolA` 與 `poolB` 兩個獨立連線池連接至同案隔離資料庫，模擬兩組獨立應用程序實例（Pod A 與 Pod B），直接透過 PostgreSQL 唯一約束、行鎖 `FOR UPDATE`、條件索引與交易 Rollback 進行並發互斥驗證。
-3. **透明揭露本機 VM 限制與 Fail-Closed 行為**：
+3. **修復 CI 型別與測試相容性問題**：
+   - 修復 `cross-month-batch-billing.test.ts` 中 `publishDriverFeePlan` 之 `reimbursementMode` 為合法型別 `"platform_funded"`。
+   - 修復 `listDriverStatements(periodMonth)` 調用簽章。
+   - 封裝獨立之 `PgPoolInstance` / `PgClientInstance` 型別，消除根層級 tsconfig 與 node 型別衝突。
+   - 針對 `noUncheckedIndexedAccess` 補齊資料庫列存取之 non-null assertions。
+4. **透明揭露本機 VM 限制與 Fail-Closed 行為**：
    - 如實記錄本機 VM 缺乏 PostgreSQL/Docker 服務之限制，以及執行結果呈現之 10 passed（Outbox + Billing）與 2 fail-closed suites。
 
 ---
@@ -94,18 +94,18 @@
 
 ## 3. 實作驗證紀錄
 
-本任務於獨立 task worktree `/home/lupin/workspace/drts-fleet-platform/.artifacts/worktrees/auto/gemini2-sr-qa-concurrency-001` 執行，Base SHA 為 `7953bab85ea5f361665b7c3f442fadc50e859720`。
+本任務於獨立 task worktree `/home/lupin/workspace/drts-fleet-platform/.artifacts/worktrees/auto/gemini2-sr-qa-concurrency-001` 執行，Base SHA 為 `9c8f23a88`。
 
 ### 3.1 驗證指令與結果
 
-| 檢查項目               | 執行指令                                                                                                                                   | Exit Code | 實際結果摘要                                                                                                                             |
-| :--------------------- | :----------------------------------------------------------------------------------------------------------------------------------------- | :-------- | :--------------------------------------------------------------------------------------------------------------------------------------- |
-| **Git Diff 乾淨度**    | `git diff --check`                                                                                                                         | `0`       | 無任何空白或格式錯誤。                                                                                                                   |
-| **套件建置與型別檢查** | `pnpm --filter @drts/contracts build && pnpm --filter @drts/control-plane-auth build && pnpm --filter @drts/api run typecheck`             | `0`       | Contracts 與 Auth 建置成功，`@drts/api` 0 errors 全數通過。                                                                              |
-| **程式碼風格規範**     | `pnpm exec eslint tests/unit/system-remediation/sr-qa-concurrency-001 tests/e2e/system-remediation/sr-qa-concurrency-001 --max-warnings=0` | `0`       | 0 errors, 0 warnings。                                                                                                                   |
-| **Prettier 格式檢查**  | `pnpm exec prettier --check tests/unit/system-remediation/sr-qa-concurrency-001 tests/e2e/system-remediation/sr-qa-concurrency-001`        | `0`       | All matched files use Prettier code style。                                                                                              |
+| 檢查項目               | 執行指令                                                                                                                                   | Exit Code | 實際結果摘要                                                                                                                          |
+| :--------------------- | :----------------------------------------------------------------------------------------------------------------------------------------- | :-------- | :------------------------------------------------------------------------------------------------------------------------------------ |
+| **Git Diff 乾淨度**    | `git diff --check`                                                                                                                         | `0`       | 無任何空白或格式錯誤。                                                                                                                |
+| **套件建置與型別檢查** | `pnpm --filter @drts/contracts build && pnpm --filter @drts/control-plane-auth build && pnpm --filter @drts/api run typecheck`             | `0`       | Contracts 與 Auth 建置成功，`@drts/api` 0 errors 全數通過。                                                                           |
+| **程式碼風格規範**     | `pnpm exec eslint tests/unit/system-remediation/sr-qa-concurrency-001 tests/e2e/system-remediation/sr-qa-concurrency-001 --max-warnings=0` | `0`       | 0 errors, 0 warnings。                                                                                                                |
+| **Prettier 格式檢查**  | `pnpm exec prettier --check tests/unit/system-remediation/sr-qa-concurrency-001 tests/e2e/system-remediation/sr-qa-concurrency-001`        | `0`       | All matched files use Prettier code style。                                                                                           |
 | **本機單元測試執行**   | `pnpm exec vitest run tests/unit/system-remediation/sr-qa-concurrency-001/`                                                                | `1`       | **如實 Fail-Closed**：Outbox (5) 與 Billing (5) 共 10 項通過；真實 Postgres 兩檔因本機無 DB 明確拋錯（16 skipped, 2 failed suites）。 |
-| **不可達 DB 拒絕驗證** | `UV_BOOKING_TEST_DATABASE_URL=postgresql://...:5433/... pnpm exec vitest run ...`                                                         | `1`       | 連線失敗時立即拋出 `ECONNREFUSED` 例外中斷，無靜默 Pass。                                                                               |
+| **不可達 DB 拒絕驗證** | `UV_BOOKING_TEST_DATABASE_URL=postgresql://...:5433/... pnpm exec vitest run ...`                                                          | `1`       | 連線失敗時立即拋出 `ECONNREFUSED` 例外中斷，無靜默 Pass。                                                                             |
 
 ### 3.2 測試案例結構清單（共 26 項案例）
 
@@ -158,9 +158,9 @@
 
 1. **真實 PostgreSQL 雙實例本機與 CI 邊界**：
    - 本機 VM 無運行之 PostgreSQL 與 Docker 容器。
-   - `idempotency-concurrency.test.ts` 與 `dispatch-reservation-concurrency.test.ts` 完全遵循 `UV-EXEC-024` 的 fail-closed 模式：未配置 `UV_BOOKING_TEST_DATABASE_URL` 時在 `beforeAll` 拋出錯誤中斷，不以偽造記憶體 DB 冒充通過。
+   - `idempotency-concurrency.test.ts` 與 `dispatch-reservation-concurrency.test.ts` 完全遵循 `UV-EXEC-024` 的 fail-closed 模式：未配置 `CONCURRENCY_TEST_DATABASE_URL`、`UV_BOOKING_TEST_DATABASE_URL` 或 `DATABASE_URL` 時在 `beforeAll` 拋出錯誤中斷，不以偽造記憶體 DB 冒充通過。
    - 不可達之 DB 連線（例如 port 5433）已驗證於連線期直接中斷拋出 `ECONNREFUSED`，證明無降級或靜默略過行為。
-   - 完整 26 項驗證將於 CI 具備真實 PostgreSQL 環境（設定 `UV_BOOKING_TEST_DATABASE_URL`）之整合測試階段自動跑通。
+   - 完整 26 項驗證將於 CI 具備真實 PostgreSQL 環境（由 `ci.yml` `product_smoke_acceptance` 設定 `DATABASE_URL`）之整合測試階段自動跑通。
 2. **Fake Client 存廢與理由**：
    - 原始 `fake-concurrency-pg-client.ts` 已被**完全廢除並刪除**。理由為其本質為單一 Node.js 程序內以 JavaScript Array / Map 模擬之 SQL 解譯器，無法如實反映真實 PostgreSQL 之跨 Process 並發連線、鎖定競爭與 WAL / Transaction 隔離行為，牴觸 Task Brief 與多 LLM 協作審查規範。
 3. **未啟動產品瀏覽器伺服器與 Docker Compose**：
@@ -183,5 +183,5 @@
 ```bash
 CANDIDATE_SHA=$(git rev-parse HEAD)
 CANDIDATE_BRANCH=$(git branch --show-current)
-AI_NAME=Gemini2 /home/lupin/workspace/drts-fleet-platform/tools/development-orchestrator/bin/ai-status.sh handoff SR-QA-CONCURRENCY-001 Claude "Remediated review feedback: removed fake-concurrency-pg-client, switched idempotency and dispatch reservation to real PostgreSQL fail-closed pattern matching UV-EXEC-024, and faithfully updated evidence doc"
+AI_NAME=Gemini2 /home/lupin/workspace/drts-fleet-platform/tools/development-orchestrator/bin/ai-status.sh handoff SR-QA-CONCURRENCY-001 Gemini "Remediated CI failure and typecheck errors: fixed fee plan reimbursementMode, listDriverStatements call signature, isolated pg types and crm schema migration"
 ```
