@@ -161,6 +161,17 @@ corrected shared regulatory tables (`reg.driver_training_records`,
      tenant/ops IAM boundaries, real quiz grading & pass/fail persistence, durable pass/expiry projection in PostgreSQL,
      and exact active cohort boundary resolution (deduping duplicate affiliations, excluding future, expired, and orphan records).
 
+- **Registered acceptance runner contract test in CI integration workflow.**
+  Following the precedent established in `0e35554dbcf` / `072dfbc3eb4` (`SR-QA-WEBHOOK-001-ACCEPTANCE-RUNNER`),
+  registered `python3 -m unittest tools/ci/test_academy_acceptance_workflow.py` in
+  `.github/workflows/ci-integ.yml` under the `changes` job so `tools/ci/check_test_coverage.py`'s
+  repo-wide gate passes on every PR.
+- **Fixed acceptance workflow candidate fallback and overlay immutability check.**
+  Configured `CANDIDATE_SHA: ${{ github.event.inputs.candidate_sha || github.sha }}` to dynamically
+  target the pushed candidate commit during push events while supporting manual dispatch overrides.
+  Refined overlay step with `git status --porcelain -uall` and regex filtering to prevent false positives
+  on untracked parent directories.
+
 ## Executed checks
 
 | Command | Exit | Result |
@@ -170,6 +181,7 @@ corrected shared regulatory tables (`reg.driver_training_records`,
 | `pnpm exec vitest run tests/unit/system-remediation/sr-academy-be-001/` | 0 | 3 files, 35 tests passed (`academy-domain.test.ts`, `academy.service.test.ts`, `academy.controller.test.ts`) |
 | `pnpm exec vitest run tests/security/iam-route-inventory.test.ts` | 0 | 10/10 tests passed (zero unclassified routes, zero realm mismatches, zero unknown scopes) |
 | `python3 -m unittest tools/ci/test_academy_acceptance_workflow.py -v` | 0 | 16/16 contract tests passed |
+| `python3 tools/ci/check_test_coverage.py` | 0 | All 65 test files verified covered by CI |
 | `pnpm run lint:root` | 0 | ESLint clean across all tests and configs (0 warnings, 0 errors) |
 | `git diff --check` | 0 | No whitespace errors |
 
