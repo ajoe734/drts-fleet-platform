@@ -1,0 +1,351 @@
+name: Leave Acceptance Runner (SR-LEAVE-BE-001-ACCEPTANCE-RUNNER)
+
+# Dedicated, manually-dispatched acceptance runner for SR-LEAVE-BE-001 leave
+# persistence, concurrency races, and shift suppression invariants.
+# It checks out an immutable candidate SHA, validates the checked-out HEAD,
+# records the separate harness/workflow SHA, applies the harness overlay without
+# mutating product runtime sources, runs against a dedicated PostGIS migrated
+# database, executes two-instance races over real guarded HTTP (approve vs
+# withdraw, overlapping creation), verifies atomic rollback against real
+# PostgreSQL faults, restarts the PostgreSQL container to prove durable reload
+# of the exact pre-restart rows, extracts raw SQL evidence, and enforces a
+# zero-skip gate across both the pre-restart and post-restart phases.
+
+on:
+  workflow_dispatch:
+    inputs:
+      candidate_sha:
+        description: "Immutable candidate commit SHA to verify (full 40-char SHA)"
+        required: true
+        default: "d888e0deca3673ac1abe9b7164714bfeadb1caa9"
+      candidate_ref:
+        description: "Optional git ref/branch containing the candidate SHA (default: origin/gemini2/sr-leave-be-001)"
+        required: false
+        default: "origin/gemini2/sr-leave-be-001"
+  push:
+    branches:
+      - "gemini/sr-leave-be-001-acceptance-runner"
+      - "claude2/sr-leave-be-001-acceptance-runner"
+      - "claude/sr-leave-be-001-acceptance-runner"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: leave-acceptance-${{ github.event.inputs.candidate_sha || github.sha }}
+  cancel-in-progress: false
+
+env:
+  CI: true
+  JWT_SECRET: "sr-leave-be-001-acceptance-runner-test-only-hmac-secret-do-not-reuse"
+
+jobs:
+  acceptance:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    services:
+      postgres:
+        image: postgis/postgis:16-3.4
+        env:
+          POSTGRES_DB: drts_fleet_platform
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      DATABASE_URL: postgresql://postgres:postgres@localhost:5432/drts_fleet_platform
+      DRTS_LEAVE_TEST_DATABASE_URL: postgresql://postgres:postgres@localhost:5432/drts_fleet_platform
+      # Routed through job env to prevent script injection
+      CANDIDATE_SHA: ${{ github.event.inputs.candidate_sha || 'd888e0deca3673ac1abe9b7164714bfeadb1caa9' }}
+      CANDIDATE_REF: ${{ github.event.inputs.candidate_ref || 'origin/gemini2/sr-leave-be-001' }}
+    steps:
+      - name: Validate candidate_sha input
+        run: |
+          sha="$CANDIDATE_SHA"
+          if ! [[ "$sha" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "::error::candidate_sha must be a full 40-character commit SHA, got: $sha"
+            exit 1
+          fi
+
+      - name: Checkout harness workspace
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Verify workflow structural contract (pre-overlay, this workflow only)
+        # tools/ci/test_leave_acceptance_workflow.py is not registered in the
+        # shared .github/workflows/ci.yml / ci-integ.yml `check_test_coverage`
+        # scan: this task's write scope is limited to leave-acceptance.yml and
+        # a prior candidate's edit to ci-integ.yml collided with a concurrently
+        # owned tenant runner there. The validator runs here instead so it is
+        # never orphaned; central registration is a separate scope-expansion
+        # follow-up, not something this workflow can self-grant.
+        run: python3 -m unittest tools/ci/test_leave_acceptance_workflow.py -v
+
+      - name: Record harness SHA and preserve harness overlay
+        run: |
+          HARNESS_SHA="$(git rev-parse HEAD)"
+          echo "HARNESS_SHA=$HARNESS_SHA" >> "$GITHUB_ENV"
+          echo "Recorded harness SHA: $HARNESS_SHA"
+          mkdir -p /tmp/leave-harness-overlay
+          cp -r tests/integration/system-remediation/sr-leave-be-001 /tmp/leave-harness-overlay/
+          echo "HARNESS_OVERLAY_HASH_MAIN=$(git hash-object /tmp/leave-harness-overlay/sr-leave-be-001/leave-persistence-race.integration.test.ts)" >> "$GITHUB_ENV"
+          echo "HARNESS_OVERLAY_HASH_DURABLE=$(git hash-object /tmp/leave-harness-overlay/sr-leave-be-001/leave-durable-reload.integration.test.ts)" >> "$GITHUB_ENV"
+          echo "HARNESS_OVERLAY_HASH_TESTKIT=$(git hash-object /tmp/leave-harness-overlay/sr-leave-be-001/leave-acceptance-test-harness.ts)" >> "$GITHUB_ENV"
+
+      - name: Checkout candidate runtime
+        run: |
+          echo "Fetching candidate ref $CANDIDATE_REF and SHA $CANDIDATE_SHA"
+          git fetch origin "$CANDIDATE_REF" || git fetch origin "$CANDIDATE_SHA" || true
+          git checkout "$CANDIDATE_SHA"
+          resolved="$(git rev-parse HEAD)"
+          echo "Resolved HEAD: $resolved"
+          echo "Expected candidate: $CANDIDATE_SHA"
+          if [ "$resolved" != "$CANDIDATE_SHA" ]; then
+            echo "::error::Checked-out HEAD ($resolved) does not match requested candidate ($CANDIDATE_SHA)"
+            exit 1
+          fi
+          echo "CANDIDATE_RESOLVED_SHA=$resolved" >> "$GITHUB_ENV"
+
+      - name: Apply harness overlay and assert candidate runtime immutability
+        run: |
+          mkdir -p tests/integration/system-remediation/sr-leave-be-001
+          cp -r /tmp/leave-harness-overlay/sr-leave-be-001/* tests/integration/system-remediation/sr-leave-be-001/
+
+          # Assert candidate runtime sources and migrations remain strictly immutable
+          modified_prod="$(git diff --name-only apps/api/src/modules/driver-leave infra/migrations || true)"
+          if [ -n "$modified_prod" ]; then
+            echo "::error::Candidate production code or migrations modified by harness overlay: $modified_prod"
+            exit 1
+          fi
+          echo "Candidate runtime immutability verified."
+
+      - uses: pnpm/action-setup@v4
+        with: { version: 10.33.0, run_install: false }
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: pnpm-lock.yaml
+      - run: pnpm install --frozen-lockfile
+
+      - name: Build contracts and control-plane-auth
+        run: |
+          pnpm --filter @drts/contracts build
+          pnpm --filter @drts/control-plane-auth build
+
+      - name: Apply database migrations to dedicated acceptance PostgreSQL
+        run: pnpm db:migrate
+
+      - name: Prepare evidence directory
+        run: mkdir -p .artifacts/leave-acceptance
+
+      - name: Run leave persistence, race & durable-reload seed suite (Phase 1, pre-restart)
+        run: |
+          set -o pipefail
+          pnpm exec vitest run \
+            tests/integration/system-remediation/sr-leave-be-001/leave-persistence-race.integration.test.ts \
+            tests/integration/system-remediation/sr-leave-be-001/leave-durable-reload.integration.test.ts \
+            --no-file-parallelism --maxConcurrency=1 \
+            --reporter=default --reporter=json \
+            --outputFile.json=.artifacts/leave-acceptance/phase1-report.json \
+            2>&1 | tee .artifacts/leave-acceptance/phase1-execution-log.txt
+
+      - name: Restart dedicated PostgreSQL container for durable reload verification
+        env:
+          PG_CONTAINER_ID: ${{ job.services.postgres.id }}
+        run: |
+          set -euo pipefail
+          if [ -z "${PG_CONTAINER_ID:-}" ]; then
+            echo "::error::job.services.postgres.id was not resolved; cannot prove a real container restart."
+            exit 1
+          fi
+          echo "Dedicated PostgreSQL service container: $PG_CONTAINER_ID"
+
+          before_started_at="$(docker inspect -f '{{.State.StartedAt}}' "$PG_CONTAINER_ID")"
+          echo "before_started_at=$before_started_at"
+
+          docker restart "$PG_CONTAINER_ID"
+
+          after_started_at="$(docker inspect -f '{{.State.StartedAt}}' "$PG_CONTAINER_ID")"
+          echo "after_started_at=$after_started_at"
+
+          if [ "$before_started_at" = "$after_started_at" ]; then
+            echo "::error::Container StartedAt timestamp did not change after docker restart; the container was not actually restarted."
+            exit 1
+          fi
+
+          ready=""
+          for i in $(seq 1 30); do
+            if pg_isready -h localhost -p 5432 -U postgres >/dev/null 2>&1; then
+              ready="1"
+              break
+            fi
+            sleep 1
+          done
+          if [ -z "$ready" ]; then
+            echo "::error::PostgreSQL did not become ready within 30s after the real container restart."
+            exit 1
+          fi
+          echo "Postgres is ready after a real, verified container restart."
+
+          mkdir -p .artifacts/leave-acceptance
+          cat > .artifacts/leave-acceptance/restart-evidence.json <<JSON
+          {
+            "containerId": "$PG_CONTAINER_ID",
+            "beforeStartedAt": "$before_started_at",
+            "afterStartedAt": "$after_started_at",
+            "restarted": true
+          }
+          JSON
+
+      - name: Run durable reload verification (Phase 2, post-restart, read-only)
+        run: |
+          set -o pipefail
+          LEAVE_ACCEPTANCE_PHASE=post-restart pnpm exec vitest run \
+            tests/integration/system-remediation/sr-leave-be-001/leave-durable-reload.integration.test.ts \
+            --no-file-parallelism --maxConcurrency=1 \
+            --reporter=default --reporter=json \
+            --outputFile.json=.artifacts/leave-acceptance/phase2-report.json \
+            2>&1 | tee .artifacts/leave-acceptance/phase2-execution-log.txt
+
+      - name: Extract raw SQL row evidence from PostgreSQL
+        if: always()
+        run: |
+          echo "Extracting raw SQL evidence from PostgreSQL..."
+          PGPASSWORD=postgres psql -h localhost -U postgres -d drts_fleet_platform -x -c "
+          SELECT leave_id, driver_id, leave_type, status, start_time, end_time, reviewed_by_principal_id, reviewed_at, impacted_shift_ids, created_at, updated_at
+          FROM ops.phase1_driver_leave_requests
+          ORDER BY created_at DESC
+          LIMIT 20;
+          " > .artifacts/leave-acceptance/raw-sql-leaves.txt || true
+
+          PGPASSWORD=postgres psql -h localhost -U postgres -d drts_fleet_platform -x -c "
+          SELECT shift_id, driver_id, scheduled_start, scheduled_end, clock_in_at, record
+          FROM ops.phase1_driver_shifts
+          WHERE record->>'leaveReassigned' = 'true'
+          ORDER BY updated_at DESC
+          LIMIT 20;
+          " > .artifacts/leave-acceptance/raw-sql-shifts.txt || true
+
+          PGPASSWORD=postgres psql -h localhost -U postgres -d drts_fleet_platform -x -c "
+          SELECT source_incident_id, driver_id, active, reason_code, expires_at, lifted_at, record
+          FROM ops.phase1_driver_matching_suppressions
+          ORDER BY updated_at DESC
+          LIMIT 20;
+          " > .artifacts/leave-acceptance/raw-sql-suppressions.txt || true
+
+      - name: Write acceptance evidence manifest (runtime SHA, harness SHA, overlay hashes)
+        if: always()
+        run: |
+          python3 - <<'PY_MANIFEST'
+          import json
+          import os
+          from datetime import datetime, timezone
+          from pathlib import Path
+
+          manifest = {
+              "requestedCandidateSha": os.environ.get("CANDIDATE_SHA"),
+              "resolvedCandidateSha": os.environ.get("CANDIDATE_RESOLVED_SHA"),
+              "candidateRef": os.environ.get("CANDIDATE_REF"),
+              "harnessSha": os.environ.get("HARNESS_SHA"),
+              "harnessOverlayHashes": {
+                  "leave-persistence-race.integration.test.ts": os.environ.get("HARNESS_OVERLAY_HASH_MAIN"),
+                  "leave-durable-reload.integration.test.ts": os.environ.get("HARNESS_OVERLAY_HASH_DURABLE"),
+                  "leave-acceptance-test-harness.ts": os.environ.get("HARNESS_OVERLAY_HASH_TESTKIT"),
+              },
+              "workflowRunId": os.environ.get("GITHUB_RUN_ID"),
+              "workflowRunAttempt": os.environ.get("GITHUB_RUN_ATTEMPT"),
+              "generatedAt": datetime.now(timezone.utc).isoformat(),
+          }
+          Path(".artifacts/leave-acceptance").mkdir(parents=True, exist_ok=True)
+          Path(".artifacts/leave-acceptance/manifest.json").write_text(json.dumps(manifest, indent=2))
+          print(json.dumps(manifest, indent=2))
+          PY_MANIFEST
+
+      - name: Gate on zero skips, all tests passed (both phases), and real restart evidence
+        if: always()
+        run: |
+          python3 - <<'PY_GATE'
+          import json
+          from pathlib import Path
+
+          def load_report(path):
+              p = Path(path)
+              if not p.exists():
+                  raise SystemExit(f"Acceptance gate: {path} was not produced.")
+              return json.loads(p.read_text())
+
+          def check_report(label, report):
+              total = report.get("numTotalTests", 0)
+              passed = report.get("numPassedTests", 0)
+              pending = report.get("numPendingTests", 0)
+              failed = report.get("numFailedTests", 0)
+              print(f"{label}: total={total} passed={passed} pending={pending} failed={failed}")
+              if total == 0:
+                  raise SystemExit(f"Acceptance gate: {label} executed zero tests.")
+              if pending > 0:
+                  raise SystemExit(f"Acceptance gate: {label} skipped {pending} tests (zero skips required).")
+              if failed > 0 or not report.get("success"):
+                  raise SystemExit(f"Acceptance gate: {label} had {failed} failing tests.")
+              if passed != total:
+                  raise SystemExit(f"Acceptance gate: {label} passed ({passed}) != total ({total}).")
+              return total, passed
+
+          phase1 = load_report(".artifacts/leave-acceptance/phase1-report.json")
+          phase2 = load_report(".artifacts/leave-acceptance/phase2-report.json")
+          total1, passed1 = check_report("Phase 1 (pre-restart)", phase1)
+          total2, passed2 = check_report("Phase 2 (post-restart durable reload)", phase2)
+
+          restart_path = Path(".artifacts/leave-acceptance/restart-evidence.json")
+          if not restart_path.exists():
+              raise SystemExit(
+                  "Acceptance gate: restart-evidence.json was not produced; durable reload was "
+                  "not proven against a real PostgreSQL container restart."
+              )
+          restart = json.loads(restart_path.read_text())
+          if not restart.get("restarted") or restart.get("beforeStartedAt") == restart.get("afterStartedAt"):
+              raise SystemExit(
+                  "Acceptance gate: restart evidence does not prove a real PostgreSQL container restart."
+              )
+
+          for sql_file in ("raw-sql-leaves.txt", "raw-sql-shifts.txt", "raw-sql-suppressions.txt"):
+              sql_path = Path(f".artifacts/leave-acceptance/{sql_file}")
+              if not sql_path.exists() or sql_path.stat().st_size == 0:
+                  raise SystemExit(f"Acceptance gate: {sql_file} raw SQL evidence was not produced.")
+
+          manifest_path = Path(".artifacts/leave-acceptance/manifest.json")
+          if not manifest_path.exists():
+              raise SystemExit("Acceptance gate: manifest.json (runtime/harness SHA evidence) was not produced.")
+          manifest = json.loads(manifest_path.read_text())
+          if not manifest.get("resolvedCandidateSha") or not manifest.get("harnessSha"):
+              raise SystemExit("Acceptance gate: manifest.json is missing resolvedCandidateSha or harnessSha.")
+
+          print(
+              f"Leave acceptance runner: {passed1 + passed2} tests passed across phase1+phase2, "
+              "zero skipped, real container restart verified, raw SQL evidence present, "
+              f"candidate={manifest['resolvedCandidateSha']}."
+          )
+          PY_GATE
+
+      - name: Upload acceptance evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: leave-acceptance-${{ env.CANDIDATE_RESOLVED_SHA || env.CANDIDATE_SHA }}
+          path: |
+            .artifacts/leave-acceptance/phase1-execution-log.txt
+            .artifacts/leave-acceptance/phase1-report.json
+            .artifacts/leave-acceptance/phase2-execution-log.txt
+            .artifacts/leave-acceptance/phase2-report.json
+            .artifacts/leave-acceptance/restart-evidence.json
+            .artifacts/leave-acceptance/manifest.json
+            .artifacts/leave-acceptance/raw-sql-leaves.txt
+            .artifacts/leave-acceptance/raw-sql-shifts.txt
+            .artifacts/leave-acceptance/raw-sql-suppressions.txt
+          if-no-files-found: warn
