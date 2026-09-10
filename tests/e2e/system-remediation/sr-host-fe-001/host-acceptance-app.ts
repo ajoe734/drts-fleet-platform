@@ -38,6 +38,15 @@ const REPO_ROOT = path.resolve(__dirname, "../../../../");
 const API_DIR = path.resolve(REPO_ROOT, "apps/api");
 const API_DIST = path.resolve(API_DIR, "dist");
 
+const CONTROL_PLANE_AUTH_DIR = path.resolve(
+  REPO_ROOT,
+  "packages/control-plane-auth",
+);
+const CONTROL_PLANE_AUTH_DIST_INDEX = path.resolve(
+  CONTROL_PLANE_AUTH_DIR,
+  "dist/index.js",
+);
+
 /**
  * Compiles the candidate `apps/api` TypeScript source to `dist/` so this
  * harness runs against the exact same emitted JS (and decorator metadata)
@@ -64,6 +73,55 @@ export function buildHostAcceptanceCandidate(): void {
     throw new Error(
       `Candidate compiled HostViewModule not found at ${hostViewModulePath}. ` +
         "apps/api/src/modules/host-view/ must exist and compile for this runner to test real production code.",
+    );
+  }
+
+  // `apps/api`'s compiled `bootstrap-auth.guard.js` (real, production
+  // `BootstrapAuthGuard`, required below) itself `require()`s
+  // `@drts/control-plane-auth`'s emitted `dist/index.js` via plain Node
+  // module resolution (it is already-compiled JS, not a `tsx`/Vitest-
+  // transformed source file this harness's own TS tooling can alias to
+  // source). This harness previously relied on a *separate*, external
+  // workflow step (".github/workflows/host-acceptance.yml"'s "Build
+  // workspace packages consumed by fleet-partner-portal-web") having already
+  // built that dist correctly and left it on disk — an ordering assumption
+  // this file has no control over. A real CI run
+  // (34541189923/afe7a48b) proved that assumption unsafe: the same commit's
+  // `api-sql-acceptance` job (which never runs that separate step and builds
+  // nothing for `@drts/control-plane-auth`) passed cleanly, while
+  // `browser-acceptance` (which does run it first) hit a real, logged
+  // `TypeError: extractIapJwtAssertion is not a function` inside
+  // `BootstrapAuthGuard.canActivate` for every single request — meaning
+  // whatever the other step produced was not usable at the point this
+  // process required it. Building this dependency here, from this harness's
+  // own build step, right before the isolated app is constructed, removes
+  // the dependency on that external step's ordering/output entirely.
+  execFileSync("pnpm", ["--filter", "@drts/control-plane-auth", "build"], {
+    cwd: REPO_ROOT,
+    stdio: "pipe",
+    timeout: 180_000,
+  });
+  if (!existsSync(CONTROL_PLANE_AUTH_DIST_INDEX)) {
+    throw new Error(
+      `Candidate compiled @drts/control-plane-auth not found at ${CONTROL_PLANE_AUTH_DIST_INDEX}. ` +
+        "Run 'pnpm --filter @drts/control-plane-auth build' before running Host acceptance evidence.",
+    );
+  }
+  // `BootstrapAuthGuard` (out of this task's write scope) calls
+  // `extractIapJwtAssertion` unconditionally for every non-open-route
+  // request, so a missing/incorrect export here would 500 every Host
+  // request identically to the CI failure this build step now guards
+  // against. Verified directly (not just "the file exists") because the
+  // real CI failure was exactly this: a present, importable module whose
+  // named export still resolved to `undefined`.
+  const controlPlaneAuthExports = apiRequire(
+    CONTROL_PLANE_AUTH_DIST_INDEX,
+  ) as Record<string, unknown>;
+  if (typeof controlPlaneAuthExports.extractIapJwtAssertion !== "function") {
+    throw new Error(
+      `Candidate compiled @drts/control-plane-auth at ${CONTROL_PLANE_AUTH_DIST_INDEX} does not export ` +
+        "extractIapJwtAssertion as a function — BootstrapAuthGuard would 500 on every request. " +
+        `Got: ${typeof controlPlaneAuthExports.extractIapJwtAssertion}.`,
     );
   }
 }
