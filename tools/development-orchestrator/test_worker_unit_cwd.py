@@ -23,8 +23,10 @@ discoverable one.
 from __future__ import annotations
 
 import os
+import json
 import shutil
 import subprocess
+import sys
 import tempfile
 import time
 import unittest
@@ -48,6 +50,81 @@ def _systemd_user_available() -> bool:
 
 
 class WorkerUnitWorkingDirectoryTests(unittest.TestCase):
+    def test_unit_forwards_environment_names_without_values_in_argv(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            env = {
+                **os.environ,
+                "ORCH_WORKER_UNIT": "drts-worker-env-probe.service",
+                "ORCH_TASK_ID": "ENV-001",
+                "CODEX_HOME": "/tmp/isolated account",
+                "TEST_TOKEN": "synthetic-secret-not-for-argv",
+                "NOTIFY_SOCKET": "/tmp/supervisor-notify",
+                "WATCHDOG_USEC": "1000",
+                "WATCHDOG_PID": "123",
+            }
+            with mock.patch.object(common.subprocess, "Popen") as popen, \
+                    mock.patch.object(common.shutil, "which", return_value="/usr/bin/systemd-run"), \
+                    mock.patch.object(common, "transient_service_main_pid", return_value=None):
+                common.spawn_background_process(
+                    ["/bin/true"], cwd=Path(tmpdir),
+                    log_path=Path(tmpdir) / "run.log", env=env,
+                )
+            command = popen.call_args.args[0]
+            for name in ("ORCH_TASK_ID", "CODEX_HOME", "TEST_TOKEN"):
+                self.assertIn(f"--setenv={name}", command)
+                self.assertNotIn(env[name], " ".join(command))
+            for name in ("NOTIFY_SOCKET", "WATCHDOG_USEC", "WATCHDOG_PID"):
+                self.assertNotIn(name, popen.call_args.kwargs["env"])
+                self.assertNotIn(f"--setenv={name}", command)
+            self.assertIn("--expand-environment=no", command)
+            self.assertEqual(env["WATCHDOG_PID"], "123")
+
+    @unittest.skipUnless(_systemd_user_available(), "systemd --user is not available here")
+    def test_real_unit_preserves_account_context_and_literal_arguments(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            workspace = Path(tmpdir)
+            out = workspace / "context.json"
+            expected = {
+                "ORCH_TASK_ID": "ENV-001",
+                "ORCH_RUN_ID": "worker-env-test",
+                "ORCH_STATUS_ROOT": str(workspace),
+                "AI_STATUS_ROOT": str(workspace),
+                "CODEX_HOME": str(workspace / "codex isolated"),
+                "CLAUDE_CONFIG_DIR": str(workspace / "claude isolated"),
+                "ORCH_ENV_TEST_VALUE": 'spaces $dollar %percent "quotes"\nsecond line',
+                "ORCH_ENV_TEST_EMPTY": "",
+            }
+            script = (
+                "import json,os,pathlib,sys; "
+                "pathlib.Path(sys.argv[1]).write_text(json.dumps({"
+                "'values': {k: os.environ.get(k) for k in sys.argv[3:]}, "
+                "'argument': sys.argv[2], "
+                "'watchdog': {k: os.environ.get(k) for k in "
+                "('NOTIFY_SOCKET','WATCHDOG_USEC','WATCHDOG_PID')}}))"
+            )
+            unit = f"drts-env-test-{os.getpid()}.service"
+            process, log = common.spawn_background_process(
+                [sys.executable, "-c", script, str(out), "$ORCH_TASK_ID ${CODEX_HOME}", *expected],
+                cwd=workspace, log_path=workspace / "run.log",
+                env={**os.environ, **expected, "ORCH_WORKER_UNIT": unit,
+                     "NOTIFY_SOCKET": "/tmp/supervisor-notify", "WATCHDOG_USEC": "1000",
+                     "WATCHDOG_PID": "123"},
+            )
+            try:
+                self.assertEqual(process.wait(timeout=15), 0, log.read_text())
+                deadline = time.monotonic() + 15
+                while not out.exists() and time.monotonic() < deadline:
+                    time.sleep(0.1)
+                self.assertTrue(out.exists(), log.read_text())
+                actual = json.loads(out.read_text())
+                self.assertEqual(actual["values"], expected)
+                self.assertEqual(actual["argument"], "$ORCH_TASK_ID ${CODEX_HOME}")
+                self.assertEqual(actual["watchdog"], dict.fromkeys(
+                    ("NOTIFY_SOCKET", "WATCHDOG_USEC", "WATCHDOG_PID")))
+            finally:
+                subprocess.run(["systemctl", "--user", "stop", unit],
+                               capture_output=True, check=False, timeout=15)
+
     def test_the_unit_command_names_the_workspace(self) -> None:
         """The property has to be there before anything can honour it."""
         with tempfile.TemporaryDirectory() as tmpdir:
