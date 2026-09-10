@@ -41,6 +41,7 @@
 <script type="text/babel" src="fleet-data.jsx"></script>
 <script type="text/babel" src="fleet-screens.jsx"></script>
 <script type="text/babel" src="fleet-cases.jsx"></script>
+<script type="text/babel" src="fleet-host.jsx"></script>
 <script type="text/babel" src="fleet-referral.jsx"></script>
 <script type="text/babel" src="fleet-supply.jsx"></script>
 
@@ -102,6 +103,21 @@ function App() {
           <DCArtboard id="case-access-states" label="R12 · 附件 / 歷程 · 讀取狀態（無權限 / 不存在 / 讀取失敗 / 空歷程）" width={W} height={H}><Bare><FLP_CaseAccessStates theme={th} /></Bare></DCArtboard>
           <DCArtboard id="case-errors" label="R12 · 案件指令錯誤 / edge states" width={W} height={H}><Bare><FLP_CaseErrors theme={th} /></Bare></DCArtboard>
           <DCArtboard id="quality" label="品質指標 / Quality Metrics" width={W} height={H}><Bare><FLP_Quality theme={th} /></Bare></DCArtboard>
+        </DCSection>
+
+        <DCSection id="host" title="06 · 車主 Host 自車受限唯讀入口 · N03 / C012" subtitle="individual_owner realm partner · 嚴格唯讀，無新增/編輯/派工入口 · 與上方 flp_admin 是不同 actor">
+          <DCArtboard id="host-vehicles" label="N03 · 自有車輛列表" width={W} height={H}><Hero url="/host/vehicles"><FLP_HostVehicles theme={th} /></Hero></DCArtboard>
+          <DCArtboard id="host-vehicles-loading" label="N03 · 自有車輛列表 · 載入中" width={W} height={H}><Bare><FLP_HostVehicles theme={th} state="loading" /></Bare></DCArtboard>
+          <DCArtboard id="host-vehicles-empty" label="N03 · 自有車輛列表 · 名下無車" width={W} height={H}><Bare><FLP_HostVehicles theme={th} state="empty" /></Bare></DCArtboard>
+          <DCArtboard id="host-vehicles-no-results" label="N03 · 自有車輛列表 · 篩選無結果" width={W} height={H}><Bare><FLP_HostVehicles theme={th} state="no_results" /></Bare></DCArtboard>
+          <DCArtboard id="host-vehicle-earnings" label="N03 · 自車詳情 · 收益 · pending_policy" width={W} height={H}><Bare><FLP_HostVehicleDetail theme={th} tab="earnings" earningsVariant="pending_policy" /></Bare></DCArtboard>
+          <DCArtboard id="host-vehicle-earnings-zero" label="N03 · 自車詳情 · 收益 · 零營收（合法零值）" width={W} height={H}><Bare><FLP_HostVehicleDetail theme={th} tab="earnings" earningsVariant="zero" /></Bare></DCArtboard>
+          <DCArtboard id="host-vehicle-earnings-no-record" label="N03 · 自車詳情 · 收益 · 該月尚無紀錄" width={W} height={H}><Bare><FLP_HostVehicleDetail theme={th} tab="earnings" earningsVariant="no_record" /></Bare></DCArtboard>
+          <DCArtboard id="host-vehicle-maintenance" label="N03 · 自車詳情 · 維保" width={W} height={H}><Bare><FLP_HostVehicleDetail theme={th} tab="maintenance" /></Bare></DCArtboard>
+          <DCArtboard id="host-vehicle-trips" label="N03 · 自車詳情 · 行程（去識別化）" width={W} height={H}><Bare><FLP_HostVehicleDetail theme={th} tab="trips" /></Bare></DCArtboard>
+          <DCArtboard id="host-vehicle-cases" label="N03 · 自車詳情 · 案件（去識別化 / 唯讀）" width={W} height={H}><Bare><FLP_HostVehicleDetail theme={th} tab="cases" /></Bare></DCArtboard>
+          <DCArtboard id="host-vehicle-switching" label="N03 · 自車詳情 · 切換車輛中（防舊車資料殘留）" width={W} height={H}><Bare><FLP_HostVehicleDetail theme={th} tab="earnings" switching /></Bare></DCArtboard>
+          <DCArtboard id="host-access-states" label="N03 · 存取 / 讀取狀態（401/403/404 防探測/讀取失敗/405）" width={W} height={H}><Bare><FLP_HostAccessStates theme={th} /></Bare></DCArtboard>
         </DCSection>
 
         <DCSection id="referral" title="05 · 渠道分潤 Channel Partner Portal · CRC 群組 B" subtitle="物業 App 渠道夥伴看自家數字 · 金流 DRTS → 夥伴（應收分潤）· 同一 portal realm">
