@@ -1,0 +1,25 @@
+{
+  "taskId": "SR-QA-WEBHOOK-001",
+  "runId": "uat-SR-QA-WEBHOOK-001-6ab78b9e",
+  "shardIndex": 0,
+  "baseSha": "3b82fba0fabba3328e3443de3d602780f852d724",
+  "candidateSha": "55334bae5229d38c6254331c58dfdc35d3e91ae9",
+  "headSha": "55334bae5229d38c6254331c58dfdc35d3e91ae9",
+  "startTime": "2026-09-08T18:41:41.938Z",
+  "endTime": "2026-09-08T18:41:41.949Z",
+  "status": "failed",
+  "exitCode": 1,
+  "roles": [],
+  "trackedResources": [],
+  "httpCalls": [],
+  "consoleLogs": [],
+  "artifacts": [],
+  "errors": [
+    {
+      "message": "Live acceptance unavailable: deployed authenticated API, C113/C114 providers and C115 scheduler evidence have not been collected.",
+      "stack": "Error: Live acceptance unavailable: deployed authenticated API, C113/C114 providers and C115 scheduler evidence have not been collected.\n    at /home/lupin/workspace/drts-fleet-platform/.artifacts/worktrees/auto/codex-sr-qa-webhook-001/tests/e2e/system-remediation/sr-qa-webhook-001/sr-qa-webhook-001.spec.ts:24:13\n    at /home/lupin/workspace/drts-fleet-platform/node_modules/.pnpm/p***@1.59.1/node_modules/playwright/lib/worker/workerMain.js:326:15\n    at /home/lupin/workspace/drts-fleet-platform/node_modules/.pnpm/p***@1.59.1/node_modules/playwright/lib/worker/testInfo.js:320:17\n    at TimeoutManager.withRunnable (/home/lupin/workspace/drts-fleet-platform/node_modules/.pnpm/p***@1.59.1/node_modules/playwright/lib/worker/timeoutManager.js:76:9)\n    at TestInfoImpl._runWithTimeout (/home/lupin/workspace/drts-fleet-platform/node_modules/.pnpm/p***@1.59.1/node_modules/playwright/lib/worker/testInfo.js:318:34)\n    at /home/lupin/workspace/drts-fleet-platform/node_modules/.pnpm/p***@1.59.1/node_modules/playwright/lib/worker/workerMain.js:324:22\n    at WorkerMain._runTest (/home/lupin/workspace/drts-fleet-platform/node_modules/.pnpm/p***@1.59.1/node_modules/playwright/lib/worker/workerMain.js:297:5)\n    at WorkerMain.runTestGroup (/home/lupin/workspace/drts-fleet-platform/node_modules/.pnpm/p***@1.59.1/node_modules/playwright/lib/worker/workerMain.js:203:9)\n    at process.<anonymous> (/home/lupin/workspace/drts-fleet-platform/node_modules/.pnpm/p***@1.59.1/node_modules/playwright/lib/common/process.js:73:22)",
+      "timestamp": "2026-09-08T18:41:41.947Z"
+    }
+  ],
+  "unimplementedLiveSurfaces": []
+}

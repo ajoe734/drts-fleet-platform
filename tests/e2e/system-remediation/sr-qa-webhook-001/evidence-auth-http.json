@@ -1,0 +1,63 @@
+{
+  "baseSha": "c71b66ebed6d6948dbb9eca99ce9efea3ede9218",
+  "executionSha": "a95931f57687f26abcfb340df9e00a65448740fe",
+  "recordedAt": "2026-09-08T21:40:34.751Z",
+  "scope": "Local inherited production controller routes, real auth guard/JWT and PostgreSQL. HTTP issue/rotate/revoke with product-issued local session and proof; full AppModule middleware and deployed MFA not verified.",
+  "tenantId": "qa-http-b022d49a-0612-4e35-be7c-f49376c8cd0f",
+  "principalId": "qa-http-principal-d2408851-47b9-40bd-86e7-746b0103e7b3",
+  "sessionId": "sid_9887716daa204c57ad246b67aaf1874e",
+  "writerSessionId": "sid_42d04631b94c4b239a2d887f6907bb14",
+  "apiKeyId": "api_key_de9c2431-e1ae-441a-b9a1-f8ea0d115a59",
+  "isolatedDatabase": "sr_qa_webhook_001_1788903625_919155",
+  "anonymousStatus": 401,
+  "readStatus": 200,
+  "deniedWriteStatus": 403,
+  "failure": {
+    "error": {
+      "code": "AUTH_SCOPE_DENIED",
+      "message": "Bootstrap identity is missing one or more required scopes.",
+      "details": {
+        "route": "/api/tenant/api-keys",
+        "method": "POST",
+        "required_scopes": [
+          "tenant:write"
+        ],
+        "granted_scopes": [
+          "tenant:read"
+        ]
+      },
+      "retryable": false,
+      "trace_id": "d04c27c0-1442-4d61-96e4-23208b9bd7ec"
+    }
+  },
+  "missingProofStatus": 403,
+  "proofFailure": {
+    "error": {
+      "code": "STEP_UP_REQUIRED",
+      "message": "A fresh step-up verification is required for this privileged action.",
+      "details": {
+        "action_id": "tenant:api-keys:issue",
+        "freshness_seconds": 900,
+        "step_up_reference_header": "x-drts-step-up-reference"
+      },
+      "retryable": false,
+      "trace_id": "b804f175-10c6-490c-9cb6-6c31655c4296"
+    }
+  },
+  "rejectedWritesDatabaseUnchanged": true,
+  "httpCreatedApiKeyId": "api_key_00935fff-c737-4390-bbb4-f7e33e1771e5",
+  "httpRotatedApiKeyId": "api_key_015faa61-9863-4070-82f2-3cffcd5b5201",
+  "httpLifecycleStatuses": [
+    201,
+    201,
+    201
+  ],
+  "persistedRevoked": true,
+  "crossTenant": {
+    "authenticatedTenantId": "qa-http-other-318100bf-4984-4ecf-8ee4-fe02472bffc1",
+    "requestedTenantId": "qa-http-b022d49a-0612-4e35-be7c-f49376c8cd0f",
+    "sessionId": "sid_b1070cee978f42609257fdb9ae24f9c7",
+    "status": 200,
+    "exposedVictimKeyId": true
+  }
+}
