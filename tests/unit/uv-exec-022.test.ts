@@ -1359,6 +1359,7 @@ describe("UV-EXEC-022 All-Call Metrics, Complete Cost Ledger & Dimensional Alert
           },
         ]),
         insertUsageRecord: vi.fn(),
+        insertRateCard: vi.fn(),
       };
 
       const usageService = new VoiceUsageService(mockRepo as any);
@@ -1383,6 +1384,7 @@ describe("UV-EXEC-022 All-Call Metrics, Complete Cost Ledger & Dimensional Alert
     it("async usage recording and invoice reconciliation await persistence", async () => {
       const mockRepo = {
         isEnabled: vi.fn().mockReturnValue(true),
+        insertRateCard: vi.fn(),
         insertUsageRecord: vi.fn().mockResolvedValue({ usageId: "u-async-1" }),
         updateUsageRecordReconciliation: vi.fn().mockResolvedValue({ usageId: "u-async-1" }),
       };

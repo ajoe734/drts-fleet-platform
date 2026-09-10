@@ -533,7 +533,7 @@ export class VoiceUsageService implements OnModuleInit {
       this.rateCardLatestVersion.set(uuid, nextVersion);
     }
 
-    if (this.isRepoEnabled() && this.voiceRepo) {
+    if (this.isRepoEnabled() && this.voiceRepo && typeof this.voiceRepo.insertRateCard === "function") {
       try {
         const p = this.voiceRepo.insertRateCard({
           rateCardId: ensureUuid(record.rateCardId),
