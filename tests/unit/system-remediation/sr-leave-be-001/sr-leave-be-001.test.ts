@@ -622,6 +622,7 @@ describe("SR-LEAVE-BE-001: 請假資料與審核／班次連動服務", () => {
 
     it("allows driver_user to submit leave and encapsulates response in ApiSuccessEnvelope", async () => {
       const identity: BootstrapRequestIdentity = {
+        authMode: "jwt_bearer",
         realm: "driver",
         actorType: "driver_user",
         actorId: "driver_001",
@@ -632,7 +633,7 @@ describe("SR-LEAVE-BE-001: 請假資料與審核／班次連動服務", () => {
         partnerProgramId: null,
         partnerEntrySlug: null,
         drtsPassengerId: null,
-        roleFamilies: ["driver_user"],
+        roleFamilies: ["driver"],
         requestId: "req_test_001",
         authTime: null,
         amr: [],
@@ -658,6 +659,7 @@ describe("SR-LEAVE-BE-001: 請假資料與審核／班次連動服務", () => {
     it("enforces driver isolation on GET /api/driver-leave/requests", async () => {
       // Driver identity
       const driverIdentity: BootstrapRequestIdentity = {
+        authMode: "jwt_bearer",
         realm: "driver",
         actorType: "driver_user",
         actorId: "driver_001",
@@ -668,7 +670,7 @@ describe("SR-LEAVE-BE-001: 請假資料與審核／班次連動服務", () => {
         partnerProgramId: null,
         partnerEntrySlug: null,
         drtsPassengerId: null,
-        roleFamilies: ["driver_user"],
+        roleFamilies: ["driver"],
         requestId: "req_test_002",
         authTime: null,
         amr: [],
@@ -690,6 +692,7 @@ describe("SR-LEAVE-BE-001: 請假資料與審核／班次連動服務", () => {
 
     it("prevents driver from calling review endpoint with 403 LEAVE_FORBIDDEN_ACCESS", async () => {
       const driverIdentity: BootstrapRequestIdentity = {
+        authMode: "jwt_bearer",
         realm: "driver",
         actorType: "driver_user",
         actorId: "driver_001",
@@ -700,7 +703,7 @@ describe("SR-LEAVE-BE-001: 請假資料與審核／班次連動服務", () => {
         partnerProgramId: null,
         partnerEntrySlug: null,
         drtsPassengerId: null,
-        roleFamilies: ["driver_user"],
+        roleFamilies: ["driver"],
         requestId: "req_test_003",
         authTime: null,
         amr: [],
@@ -733,17 +736,18 @@ describe("SR-LEAVE-BE-001: 請假資料與審核／班次連動服務", () => {
       );
 
       const opsIdentity: BootstrapRequestIdentity = {
+        authMode: "jwt_bearer",
         realm: "ops",
         actorType: "ops_user",
         actorId: "ops_manager_01",
         roles: ["ops_user"],
-        scopes: ["driver:read", "driver:write"],
+        scopes: ["driver:read", "dispatch:write"],
         tenantId: "tenant_001",
         partnerId: null,
         partnerProgramId: null,
         partnerEntrySlug: null,
         drtsPassengerId: null,
-        roleFamilies: ["ops_user"],
+        roleFamilies: ["ops"],
         requestId: "req_test_004",
         authTime: null,
         amr: [],
