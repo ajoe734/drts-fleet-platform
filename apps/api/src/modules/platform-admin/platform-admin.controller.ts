@@ -5,6 +5,7 @@ import {
   Get,
   Headers,
   Param,
+  Patch,
   Post,
 } from "@nestjs/common";
 import { Throttle } from "@nestjs/throttler";
@@ -15,10 +16,12 @@ import type {
   CreatePlatformNoticeCommand,
   CreatePublicInfoVersionCommand,
   GeneratePlacardVersionCommand,
+  PlatformAdapter,
   PublishPlacardVersionCommand,
   PublishPlatformPricingRuleCommand,
   PublishPublicInfoVersionCommand,
   SetPlatformMaintenanceModeCommand,
+  UpdatePlatformAdapterCommand,
   UpdatePlatformAdminUserRoleCommand,
 } from "@drts/contracts";
 
@@ -280,6 +283,116 @@ export class PlatformAdminController {
       { items: this.platformAdminService.listPlatformInvoices() },
       requestId,
     );
+  }
+
+  // ── Platform Adapters ────────────────────────────────────────────────────
+
+  @Get("adapters")
+  listPlatformAdapters(
+    @CurrentIdentity() identity: BootstrapRequestIdentity | null,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    this.assertAuthorizedRole(identity, "read");
+    return toApiSuccessEnvelope(
+      { items: this.platformAdminService.listPlatformAdapters() },
+      requestId,
+    );
+  }
+
+  @Get("adapters/:adapterId")
+  getPlatformAdapter(
+    @Param("adapterId") adapterId: string,
+    @CurrentIdentity() identity: BootstrapRequestIdentity | null,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    this.assertAuthorizedRole(identity, "read");
+    const adapter = this.platformAdminService.getPlatformAdapter(adapterId);
+    if (!adapter) {
+      throw new ApiRequestError(
+        404,
+        "PLATFORM_ADAPTER_NOT_FOUND",
+        `Platform adapter '${adapterId}' not found.`,
+      );
+    }
+    return toApiSuccessEnvelope(adapter, requestId);
+  }
+
+  @Patch("adapters/:adapterId")
+  updatePlatformAdapter(
+    @Param("adapterId") adapterId: string,
+    @Body() command: UpdatePlatformAdapterCommand,
+    @CurrentIdentity() identity: BootstrapRequestIdentity | null,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    this.assertAuthorizedRole(identity, "write");
+    const updated = this.platformAdminService.updatePlatformAdapter(
+      adapterId,
+      command,
+      requestId,
+      identity?.actorId ?? undefined,
+    );
+    if (!updated) {
+      throw new ApiRequestError(
+        404,
+        "PLATFORM_ADAPTER_NOT_FOUND",
+        `Platform adapter '${adapterId}' not found.`,
+      );
+    }
+    return toApiSuccessEnvelope(updated, requestId);
+  }
+
+  @Post("adapters")
+  createPlatformAdapter(
+    @Body()
+    command: Partial<PlatformAdapter> & {
+      id: string;
+      platformCode: string;
+      name: string;
+    },
+    @CurrentIdentity() identity: BootstrapRequestIdentity | null,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    this.assertAuthorizedRole(identity, "write");
+    const created = this.platformAdminService.createPlatformAdapter(
+      command,
+      requestId,
+      identity?.actorId ?? undefined,
+    );
+    return toApiSuccessEnvelope(created, requestId);
+  }
+
+  private assertAuthorizedRole(
+    identity: BootstrapRequestIdentity | null,
+    action: "read" | "write" = "read",
+  ): void {
+    if (!identity) {
+      throw new ApiRequestError(
+        401,
+        "PLATFORM_ADMIN_IDENTITY_REQUIRED",
+        "Platform admin adapter governance requires an authenticated identity.",
+      );
+    }
+    const realm = identity.realm;
+    if (realm !== "platform" && realm !== "system") {
+      throw new ApiRequestError(
+        403,
+        "PLATFORM_ADMIN_FORBIDDEN",
+        `Realm '${realm}' is not authorized for platform admin adapter governance.`,
+      );
+    }
+    const requiredScope =
+      action === "write" ? "foundation:write" : "foundation:read";
+    if (
+      identity.scopes &&
+      identity.scopes.length > 0 &&
+      !identity.scopes.includes(requiredScope)
+    ) {
+      throw new ApiRequestError(
+        403,
+        "PLATFORM_ADMIN_FORBIDDEN",
+        `Scope '${requiredScope}' is required for adapter governance.`,
+      );
+    }
   }
 
   private requireActorId(identity: BootstrapRequestIdentity | null): string {
