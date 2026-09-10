@@ -16,6 +16,7 @@ on:
   push:
     branches:
       - "gemini/sr-ops-shell-001"
+      - "gemini2/sr-ops-shell-001"
       - "dev"
     paths:
       - "apps/ops-console-web/**"
@@ -26,27 +27,43 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: ops-shell-acceptance-${{ github.event.inputs.candidate_sha || github.sha }}
+  cancel-in-progress: false
+
+env:
+  CI: "true"
+  OPS_CONSOLE_URL: http://localhost:3003
+  PLATFORM_ADMIN_URL: http://localhost:3002
+  OPS_SHELL_EVIDENCE_PATH: .artifacts/ops-shell-acceptance/evidence.json
+
 jobs:
   ops-shell-acceptance:
     name: Ops Shell Remote Acceptance
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 25
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
           ref: ${{ inputs.candidate_sha || github.sha }}
+          fetch-depth: 0
 
-      - name: Setup Node.js and pnpm
-        uses: pnpm/action-setup@v3
+      - name: Prepare evidence directory
+        run: mkdir -p .artifacts/ops-shell-acceptance test-results
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
         with:
-          version: 9
+          version: 10.33.0
+          run_install: false
 
-      - name: Use Node.js 20
+      - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 22
           cache: "pnpm"
+          cache-dependency-path: pnpm-lock.yaml
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
@@ -54,24 +71,85 @@ jobs:
       - name: Install Playwright browsers
         run: pnpm exec playwright install --with-deps chromium
 
-      - name: Build web applications
+      - name: Run unit & regression verification
         run: |
+          pnpm exec vitest run tests/unit/system-remediation/sr-ops-shell-001/
+
+      - name: Build applications for browser acceptance
+        env:
+          NODE_ENV: production
+          DRTS_ENV: development
+          STRICT_IAP_MODE: "false"
+          NEXT_PUBLIC_PLATFORM_ADMIN_URL: http://localhost:3002
+          NEXT_PUBLIC_OPS_CONSOLE_URL: http://localhost:3003
+          NEXT_PUBLIC_OPS_ASSISTANT_ENABLED: "true"
+        run: |
+          pnpm --filter @drts/contracts build
+          pnpm --filter @drts/control-plane-auth build
+          pnpm --filter @drts/ui-tokens build
+          pnpm --filter @drts/ui-web build
           pnpm --filter @drts/ops-console-web build
           pnpm --filter @drts/platform-admin-web build
+
+      - name: Start preview servers for Ops Console and Platform Admin
+        env:
+          NODE_ENV: production
+          DRTS_ENV: development
+          STRICT_IAP_MODE: "false"
+          NEXT_PUBLIC_PLATFORM_ADMIN_URL: http://localhost:3002
+          NEXT_PUBLIC_OPS_CONSOLE_URL: http://localhost:3003
+          NEXT_PUBLIC_OPS_ASSISTANT_ENABLED: "true"
+        run: |
+          PORT=3003 pnpm --filter @drts/ops-console-web start > /tmp/ops-console.log 2>&1 &
+          OPS_PID=$!
+          PORT=3002 pnpm --filter @drts/platform-admin-web start > /tmp/platform-admin.log 2>&1 &
+          ADMIN_PID=$!
+          echo "OPS_PID=$OPS_PID" >> "$GITHUB_ENV"
+          echo "ADMIN_PID=$ADMIN_PID" >> "$GITHUB_ENV"
+
+          for i in $(seq 1 30); do
+            if curl -sfL http://localhost:3003/dispatch > /dev/null && curl -sfL http://localhost:3002/audit > /dev/null; then
+              echo "Preview servers are healthy."
+              break
+            fi
+            if [ "$i" -eq 30 ]; then
+              echo "::error::Preview servers failed to become healthy within 60s."
+              echo "--- Ops console log ---"
+              cat /tmp/ops-console.log || true
+              echo "--- Platform admin log ---"
+              cat /tmp/platform-admin.log || true
+              exit 1
+            fi
+            sleep 2
+          done
 
       - name: Run Playwright remote acceptance tests
         env:
           CI: "true"
           CANDIDATE_SHA: ${{ inputs.candidate_sha || github.sha }}
+          OPS_CONSOLE_URL: http://localhost:3003
+          PLATFORM_ADMIN_URL: http://localhost:3002
+          OPS_SHELL_EVIDENCE_PATH: .artifacts/ops-shell-acceptance/evidence.json
         run: |
-          pnpm exec playwright test tests/e2e/system-remediation/sr-ops-shell-001/ --project=chromium
+          set -o pipefail
+          pnpm exec playwright test tests/e2e/system-remediation/sr-ops-shell-001/ \
+            --config=playwright.system-remediation.config.ts \
+            --reporter=list,json \
+            --output=.artifacts/ops-shell-acceptance/test-results 2>&1 \
+            | tee -a .artifacts/ops-shell-acceptance/execution-log.txt
+
+      - name: Stop preview servers
+        if: always()
+        run: |
+          if [ -n "$OPS_PID" ]; then kill "$OPS_PID" || true; fi
+          if [ -n "$ADMIN_PID" ]; then kill "$ADMIN_PID" || true; fi
 
       - name: Upload acceptance test artifacts
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: ops-shell-acceptance-evidence
+          name: ops-shell-acceptance-evidence-${{ inputs.candidate_sha || github.sha }}
           path: |
+            .artifacts/ops-shell-acceptance/
             test-results/
-            playwright-report/
           retention-days: 14

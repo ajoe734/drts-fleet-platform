@@ -2,14 +2,14 @@
 
 - Task: `SR-OPS-SHELL-001`
 - Owner: `Gemini`
-- Reviewer: `Claude`
+- Reviewer: `Gemini2`
 - Planning Ref: `docs/04-uat/system-remediation-20260906/source/capabilities.json`
 - Base SHA (`origin/dev` at merge): `9efb479a63ae8d27ad9a64f514bf229cfb9d7990` (`[ReviewBus] SR-CONTRACT-READ-001 Ops 合約 read model 補真營運條款 (#1906)`)
 - Current Local Head: `git merge origin/dev` completed cleanly with zero conflicts
 - PR #1648 URL: https://github.com/ajoe734/drts-fleet-platform/pull/1648
 - Worktree: `.artifacts/worktrees/auto/gemini-sr-ops-shell-001`
 - Branch: `gemini/sr-ops-shell-001`
-- Status: `candidate_ready` (待 commit/push 並交接獨立審查者 Claude)
+- Status: `candidate_ready` (待 commit/push 並交接獨立審查者 Gemini2)
 
 ## 1. 現況盤點與根因分析（fix 前）
 
@@ -77,6 +77,24 @@ Codex 審查 candidate `5a0320b21` 時提出兩項判定：
   4. 缺少任何 context 時顯示完整授權日誌清單；不完整（如僅有 resourceType 卻無 resourceId）、衝突或格式錯誤時呈現明確 invalid 狀態；無符合紀錄時呈現 contextual empty 狀態（絕不默認 fallback 至未篩選紀錄）。
   5. 畫面呈現 Active Context 徽章與 Deliberate Clear Filter 按鈕；瀏覽器重載時保留 URL query 參數。
   6. 模組篩選 pill 與 resource context 複合過濾，並保留 legal hold 與 deletion exceptions。
+
+### 1.5 遠端驗收 Run 34503925130 根因分析與預覽伺服器認證修復
+
+- **遠端驗收失敗現象**：在 GitHub Actions run `34503925130`（候選 commit `59212b2988fc02c089a3d814c6ee607bdb1dcc1c`）中，Playwright 遠端瀏覽器驗收全部 5 個案例失敗，伺服器日誌顯示 Next.js SSR 500 錯誤：
+  `Error: Control-plane strict IAP mode requires a valid x-goog-iap-jwt-assertion header.`
+- **根因分析**：
+  1. Next.js 在執行 `next start` 時預設設置 `NODE_ENV=production`。
+  2. `@drts/control-plane-auth` 內的 `detectControlPlaneAuthEnvironment` 依序評估 `(env.DRTS_ENV ?? env.APP_ENV ?? env.NODE_ENV)`。當未特別指定 `DRTS_ENV` 時，`NODE_ENV="production"` 導致被識別為 `"production"` 環境。
+  3. `isStrictControlPlaneIapEnvironment` 在 `"production"` 或 `"staging"` 環境下自動啟用 strict IAP mode，要求所有請求必須帶有 Google Cloud IAP JWT 標頭（`x-goog-iap-jwt-assertion`），否則拋出例外導致 SSR 頁面渲染崩潰（HTTP 500）。
+  4. 原先 health check 指令為 `curl -s`，即使 HTTP 回應 500 也會回傳 exit 0，未能及早攔截伺服器異常。
+- **修復方案**：
+  1. **預覽環境變數修訂**：於 `.github/workflows/ops-shell-acceptance.yml` 之建置與伺服器執行步驟明確注入：
+     `NODE_ENV=production DRTS_ENV=development STRICT_IAP_MODE=false NEXT_PUBLIC_PLATFORM_ADMIN_URL=http://localhost:3002 NEXT_PUBLIC_OPS_CONSOLE_URL=http://localhost:3003 NEXT_PUBLIC_OPS_ASSISTANT_ENABLED=true`
+     使 `detectControlPlaneAuthEnvironment()` 正確識別為 `"local"` 開發/預覽環境，關閉 strict IAP 標頭強硬校驗。
+  2. **嚴格 Health Check 探測**：更新 health check 為 `curl -sfL http://localhost:3003/dispatch` 與 `curl -sfL http://localhost:3002/audit`，強制檢查 2xx/3xx 成功回應，並在逾時 60s 時印出伺服器 stderr 日誌協助除錯。
+  3. **Ops Shell 跨應用深層連結攔截**：在 `ops-shell.tsx` 加入 `handleClickCapture`，攔截 `/audit`、`/_apps/platform-admin` 等跨 app 導航並透過 `resolvePlatformAdminHref` 解析至 platform-admin 正確 URL 開啟新分頁，避免 Ops Console 內部 404。
+  4. **助理元件關閉完全卸載與焦點返還**：在 `assistant-widget.tsx` 中於收合（`widget.closed === true`）時完全不掛載 `<section>` 面板，並利用 `requestAnimationFrame` 確保焦點精準返還發射器按鈕。
+  5. **整合 UatEvidenceRecorder**：在 `ops-shell-acceptance.spec.ts` 中全面接入 `UatEvidenceRecorder` 與 `attachBrowserEvidenceCollector`，產出符合規範之結構化證據。
 
 ## 2. 解決方案與架構設計
 

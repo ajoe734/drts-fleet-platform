@@ -80,11 +80,13 @@ function ActionButton({
   label,
   icon,
   pressed,
+  dataTestId,
   onClick,
 }: {
   label: string;
   icon: "minus" | "pin" | "chevR" | "arrow" | "x";
   pressed?: boolean;
+  dataTestId?: string;
   onClick: () => void;
 }) {
   return (
@@ -92,6 +94,7 @@ function ActionButton({
       type="button"
       aria-label={label}
       aria-pressed={pressed}
+      {...(dataTestId ? { "data-testid": dataTestId } : {})}
       onClick={onClick}
       style={{
         width: 28,
@@ -166,16 +169,16 @@ export function OpsAssistantWidget() {
 
   const handleCloseWidget = () => {
     setWidget((current) => ({ ...current, closed: true }));
-    setTimeout(() => {
+    requestAnimationFrame(() => {
       launcherRef.current?.focus();
-    }, 0);
+    });
   };
 
   const handleOpenWidget = () => {
     setWidget((current) => ({ ...current, closed: false }));
-    setTimeout(() => {
+    requestAnimationFrame(() => {
       dragHandleRef.current?.focus();
-    }, 0);
+    });
   };
 
   const toggleMinimized = () => {
@@ -778,9 +781,10 @@ export function OpsAssistantWidget() {
         </button>
       ) : null}
 
-      <section
-        ref={panelRef}
-        data-testid="ops-assistant-panel"
+      {!widget.closed ? (
+        <section
+          ref={panelRef}
+          data-testid="ops-assistant-panel"
         role="region"
         aria-labelledby={titleId}
         aria-describedby={instructionsId}
@@ -844,6 +848,7 @@ export function OpsAssistantWidget() {
               }
               icon="minus"
               pressed={widget.minimized}
+              dataTestId="ops-assistant-minimize"
               onClick={toggleMinimized}
             />
             <ActionButton
@@ -865,6 +870,7 @@ export function OpsAssistantWidget() {
             <ActionButton
               label={t("opsAssistant.header.close")}
               icon="x"
+              dataTestId="ops-assistant-close"
               onClick={handleCloseWidget}
             />
           </div>
@@ -1370,7 +1376,8 @@ export function OpsAssistantWidget() {
           </div>
         )}
       </section>
-    </>,
+    ) : null}
+  </>,
     portalNode,
   );
 }
