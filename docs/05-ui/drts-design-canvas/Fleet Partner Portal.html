@@ -42,6 +42,7 @@
 <script type="text/babel" src="fleet-screens.jsx"></script>
 <script type="text/babel" src="fleet-referral.jsx"></script>
 <script type="text/babel" src="fleet-supply.jsx"></script>
+<script type="text/babel" src="fleet-cases.jsx"></script>
 
 <script type="text/babel">
 const TWEAK_DEFAULTS = /*EDITMODE-BEGIN*/{
@@ -93,6 +94,18 @@ function App() {
           <DCArtboard id="training" label="訓練 / Training · 完成率" width={W} height={H}><Bare><FLP_Training theme={th} /></Bare></DCArtboard>
           <DCArtboard id="cases" label="事故 / 申訴 · 責任歸屬" width={W} height={H}><Bare><FLP_Cases theme={th} /></Bare></DCArtboard>
           <DCArtboard id="quality" label="品質指標 / Quality Metrics" width={W} height={H}><Bare><FLP_Quality theme={th} /></Bare></DCArtboard>
+        </DCSection>
+
+        <DCSection id="cases-detail" title="04b · 事故 / 申訴 · 詳情、回覆、附件、歷程" subtitle="SR-FLEET-CASE-001-CANVAS · API-owned 權限 / SLA / closed 去重 / 附件掃描">
+          <DCArtboard id="case-detail-fleet" label="案件詳情 · 車行責任 · 可回覆" width={W} height={H}><Bare><FLP_CaseDetail theme={th} caseId="cmp_0908" /></Bare></DCArtboard>
+          <DCArtboard id="case-detail-shared" label="案件詳情 · 共同責任" width={W} height={H}><Bare><FLP_CaseDetail theme={th} caseId="inc_0213" /></Bare></DCArtboard>
+          <DCArtboard id="case-detail-platform" label="案件詳情 · 平台責任 · 唯讀" width={W} height={H}><Bare><FLP_CaseDetail theme={th} caseId="cmp_0912" /></Bare></DCArtboard>
+          <DCArtboard id="case-detail-closed" label="案件詳情 · 已關閉 · 重送去重" width={W} height={H}><Bare><FLP_CaseDetail theme={th} caseId="cmp_0899" /></Bare></DCArtboard>
+          <DCArtboard id="case-detail-timeline-empty" label="案件詳情 · 空歷程" width={W} height={H}><Bare><FLP_CaseDetail theme={th} caseId="inc_0213" timelineMode="empty" /></Bare></DCArtboard>
+          <DCArtboard id="case-detail-timeline-error" label="案件詳情 · 歷程讀取失敗" width={W} height={H}><Bare><FLP_CaseDetail theme={th} caseId="cmp_0908" timelineMode="load_failed" /></Bare></DCArtboard>
+          <DCArtboard id="case-reply-states" label="回覆狀態參考 · idle/submitting/success/error/dedup" width={W} height={H}><Bare><FLP_CaseReplyStates theme={th} /></Bare></DCArtboard>
+          <DCArtboard id="case-attachment-states" label="附件狀態參考 · 上傳/掃描/授權/拒絕/失敗" width={W} height={H}><Bare><FLP_CaseAttachmentStates theme={th} /></Bare></DCArtboard>
+          <DCArtboard id="case-errors" label="錯誤 / edge states 參考" width={W} height={H}><Bare><FLP_CaseErrors theme={th} /></Bare></DCArtboard>
         </DCSection>
 
         <DCSection id="referral" title="05 · 渠道分潤 Channel Partner Portal · CRC 群組 B" subtitle="物業 App 渠道夥伴看自家數字 · 金流 DRTS → 夥伴（應收分潤）· 同一 portal realm">
