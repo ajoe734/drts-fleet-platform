@@ -211,7 +211,10 @@ test.describe("SR-HOST-FE-001-ACCEPTANCE-RUNNER: real browser Host acceptance", 
     const context = await hostContext(browser, undefined);
     const page = await context.newPage();
     await page.goto(`${PORTAL_URL}/host/vehicles`, { waitUntil: "networkidle" });
-    await expect(page.getByText("暫時無法讀取")).toBeVisible();
+    // `{ exact: true }`: the page also renders a longer known-limitation
+    // sentence containing this same substring ("...暫時無法讀取自有車輛資料..."),
+    // so a substring match is ambiguous (Playwright strict mode violation).
+    await expect(page.getByText("暫時無法讀取", { exact: true })).toBeVisible();
     await context.close();
   });
 

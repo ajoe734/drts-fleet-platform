@@ -135,11 +135,10 @@ export async function createHostAcceptanceApp(): Promise<HostAcceptanceAppLike> 
   // zero trace in this process's stdout, even with `logger: ["error",
   // "warn"]` on `NestFactory.create` below (that only restores Nest's own
   // *handled*-lifecycle logging, which this path never goes through). This
-  // interceptor is the earliest point in the request pipeline this task can
-  // instrument without editing the production filter itself (out of write
-  // scope): it wraps the real handler, logs the real error object/stack to
-  // stdout (captured in this job's `api-server.log`/`execution-log.txt`
-  // evidence) on any failure, then rethrows unchanged so
+  // interceptor instruments the handler/interceptor portion of the request
+  // pipeline (post-guard) without editing the production filter itself (out
+  // of write scope): it wraps the real handler, logs the real error
+  // object/stack to stdout, then rethrows unchanged so
   // `SnakeCaseExceptionFilter`'s real response behavior is completely
   // unaffected.
   class DiagnosticErrorLoggingInterceptor {
@@ -157,6 +156,32 @@ export async function createHostAcceptanceApp(): Promise<HostAcceptanceAppLike> 
     }
   }
   Injectable()(DiagnosticErrorLoggingInterceptor);
+
+  // Guard-thrown exceptions (e.g. anything `BootstrapAuthGuard` throws) run
+  // BEFORE any interceptor in Nest's request pipeline (middleware → guards →
+  // interceptors → handler), so `DiagnosticErrorLoggingInterceptor` above
+  // structurally cannot see them — confirmed by the first acceptance run
+  // after adding it still showing zero diagnostic output for a plain
+  // unauthenticated request that returned HTTP 500. `SnakeCaseExceptionFilter`
+  // is the one place every exception in this composition — guard, interceptor,
+  // or handler — is guaranteed to funnel through (it is the sole `@Catch()`
+  // filter registered), so this non-destructively wraps its real, unmodified
+  // `catch` method on the prototype: log the real exception, then delegate to
+  // the original implementation unchanged. This produces the actual
+  // production response byte-for-byte; only stdout gains a diagnostic line.
+  const exceptionFilterProto = (
+    SnakeCaseExceptionFilter as { prototype: { catch: (...args: unknown[]) => unknown } }
+  ).prototype;
+  const originalExceptionFilterCatch = exceptionFilterProto.catch;
+  exceptionFilterProto.catch = function patchedCatch(
+    this: unknown,
+    exception: unknown,
+    ...rest: unknown[]
+  ) {
+    // eslint-disable-next-line no-console
+    console.error("[host-acceptance] exception reaching SnakeCaseExceptionFilter:", exception);
+    return originalExceptionFilterCatch.apply(this, [exception, ...rest]);
+  };
 
   // Applied as a plain function call (`Module(metadata)(Class)`) instead of
   // `@Module(...)` decorator syntax so this composition does not depend on
