@@ -35,6 +35,7 @@ Owner：Gemini2；Reviewer：Gemini。日期：2026-09-10 UTC。
 | `pnpm --filter @drts/api lint`                                                        |     0     | 2.1s  | `@drts/api` ESLint 零錯誤通過（移除未使用之錯誤碼引用）           |
 | `pnpm run lint`                                                                       |     0     | 3.2s  | 全倉儲 ESLint / Turbo 檢查全數通過                                |
 | `pnpm --filter @drts/api typecheck`                                                   |     0     | 4.2s  | `@drts/api` TypeScript 編譯檢查通過（零型別錯誤）                 |
+| `pnpm exec tsc -p tsconfig.json --noEmit`                                             |     0     | 6.8s  | Root TypeScript 型別檢查通過（測試檔 TS2532 嚴格索引存取防護）     |
 | `pnpm exec vitest run tests/unit/system-remediation/sr-contract-read-001/`            |     0     | 2.73s | 1 test file, 19 passed (100% 通過，0 失敗)                        |
 | `pnpm exec vitest run tests/unit/system-remediation/sr-contract-001/`                 |     0     | 1.33s | 1 test file, 32 passed (100% 通過，前置契約回歸驗證無損)          |
 | `pnpm --filter @drts/api test tests/unit/regulatory-registry.controller.test.ts`      |     0     | 2.05s | 1 test file, 2 passed (既有監管名冊 Controller 單元測試零回歸)    |

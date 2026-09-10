@@ -506,7 +506,7 @@ describe("SR-CONTRACT-READ-001: Ops 合約 read model 補真營運條款", () =>
         serviceScope: "standard_taxi",
       });
       expect(standardTaxiOnly.length).toBe(1);
-      expect(standardTaxiOnly[0].contractId).toBe("contract-demo-001");
+      expect(standardTaxiOnly[0]?.contractId).toBe("contract-demo-001");
     });
   });
 
