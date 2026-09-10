@@ -45,7 +45,13 @@ function evaluateSetExpr(
     /^jsonb_set\(\s*EXCLUDED\.record\s*,\s*'\{(\w+)\}'\s*,\s*to_jsonb\(([\w.]+)\)\s*\)$/,
   );
   if (jsonbSet) {
-    const [, jsonKey, columnRef] = jsonbSet;
+    const jsonKey = jsonbSet[1];
+    const columnRef = jsonbSet[2];
+    if (!jsonKey || !columnRef) {
+      throw new Error(
+        `FakeConflictAwarePgClient: malformed jsonb_set SET expr "${expr}"`,
+      );
+    }
     const column = columnRef.split(".").pop()!;
     const base = excludedRow.record as Record<string, unknown>;
     return { ...base, [jsonKey]: existingRow[column] };
@@ -78,7 +84,14 @@ export class FakeConflictAwarePgClient {
         `FakeConflictAwarePgClient only supports INSERT ... ON CONFLICT statements: ${sql}`,
       );
     }
-    const [, tableRaw, columnsRaw, placeholdersRaw] = insertMatch;
+    const tableRaw = insertMatch[1];
+    const columnsRaw = insertMatch[2];
+    const placeholdersRaw = insertMatch[3];
+    if (!tableRaw || !columnsRaw || !placeholdersRaw) {
+      throw new Error(
+        `FakeConflictAwarePgClient: malformed INSERT statement: ${sql}`,
+      );
+    }
     const table = tableRaw.trim();
     const columns = columnsRaw.split(",").map((c) => c.trim());
     const placeholders = splitTopLevelCommas(placeholdersRaw);
@@ -86,8 +99,13 @@ export class FakeConflictAwarePgClient {
     const excludedRow: FakeRow = {};
     placeholders.forEach((placeholder, index) => {
       const column = columns[index];
+      if (!column) {
+        throw new Error(
+          `FakeConflictAwarePgClient: column/placeholder count mismatch for "${sql}"`,
+        );
+      }
       const m = placeholder.match(/^\$(\d+)/);
-      if (!m) {
+      if (!m || !m[1]) {
         throw new Error(
           `FakeConflictAwarePgClient: unsupported placeholder "${placeholder}"`,
         );
@@ -104,7 +122,7 @@ export class FakeConflictAwarePgClient {
 
     const conflictMatch = sql.match(/ON CONFLICT\s*\(([\w]+)\)/i);
     let existingRow: FakeRow | undefined;
-    if (conflictMatch) {
+    if (conflictMatch && conflictMatch[1]) {
       const conflictColumn = conflictMatch[1].trim();
       existingRow = rows.find(
         (row) => row[conflictColumn] === excludedRow[conflictColumn],
@@ -117,7 +135,7 @@ export class FakeConflictAwarePgClient {
         return { rows: [] as T[] };
       }
       const setMatch = sql.match(/DO UPDATE SET([\s\S]*?)RETURNING/i);
-      if (!setMatch) {
+      if (!setMatch || !setMatch[1]) {
         throw new Error(
           `FakeConflictAwarePgClient: missing DO UPDATE SET clause: ${sql}`,
         );
@@ -135,7 +153,8 @@ export class FakeConflictAwarePgClient {
     }
 
     const returningMatch = sql.match(/RETURNING\s+([\s\S]+?)\s*$/i);
-    const returning = returningMatch ? returningMatch[1].trim() : "*";
+    const returning =
+      returningMatch && returningMatch[1] ? returningMatch[1].trim() : "*";
     if (returning === "*") {
       return { rows: [{ ...targetRow }] as T[] };
     }
@@ -151,15 +170,16 @@ export class FakeConflictAwarePgClient {
     params: unknown[],
   ): { rows: T[] } {
     const fromMatch = sql.match(/FROM\s+([\w.]+)/i);
-    if (!fromMatch) {
+    if (!fromMatch || !fromMatch[1]) {
       throw new Error(`FakeConflictAwarePgClient: unsupported SELECT: ${sql}`);
     }
     const table = fromMatch[1].trim();
     let rows = [...(this.tables.get(table) ?? [])];
 
     const whereMatch = sql.match(/WHERE\s+(\w+)\s*=\s*\$(\d+)/i);
-    if (whereMatch) {
-      const [, column, paramIndex] = whereMatch;
+    if (whereMatch && whereMatch[1] && whereMatch[2]) {
+      const column = whereMatch[1];
+      const paramIndex = whereMatch[2];
       const value = params[Number(paramIndex) - 1];
       rows = rows.filter((row) => row[column] === value);
     }
@@ -176,7 +196,8 @@ export class FakeConflictAwarePgClient {
     }
 
     const selectListMatch = sql.match(/SELECT\s+([\s\S]+?)\s+FROM/i);
-    const selectList = selectListMatch ? selectListMatch[1].trim() : "*";
+    const selectList =
+      selectListMatch && selectListMatch[1] ? selectListMatch[1].trim() : "*";
     if (selectList === "*") {
       return { rows: rows.map((row) => ({ ...row })) as T[] };
     }
