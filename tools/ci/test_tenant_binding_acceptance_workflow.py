@@ -37,7 +37,7 @@ TEST_PATH = (
     "tests/e2e/system-remediation/sr-qa-webhook-001-fix-tenant-binding/"
     "appmodule-tenant-binding.test.ts"
 )
-PARENT_CANDIDATE_SHA = "10123f6af00a5342f2634a01f4d9a0e7190c2173"
+PARENT_CANDIDATE_SHA = "87769096068d97cec7aa2edd60d4d6007da81566"
 
 
 def _extract_heredoc(text: str, marker: str) -> str:

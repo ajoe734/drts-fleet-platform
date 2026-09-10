@@ -19,7 +19,7 @@ on:
       candidate_sha:
         description: "Immutable candidate commit SHA to verify (full 40-char SHA)"
         required: true
-        default: "10123f6af00a5342f2634a01f4d9a0e7190c2173"
+        default: "87769096068d97cec7aa2edd60d4d6007da81566"
   # Narrow push trigger, scoped to this task branch and these three files
   # only. workflow_dispatch alone cannot be dispatched until this workflow
   # file is registered on the repo's default branch (see the runbook's
@@ -41,7 +41,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: tenant-binding-acceptance-${{ github.event.inputs.candidate_sha || '10123f6af00a5342f2634a01f4d9a0e7190c2173' }}
+  group: tenant-binding-acceptance-${{ github.event.inputs.candidate_sha || '87769096068d97cec7aa2edd60d4d6007da81566' }}
   cancel-in-progress: false
 
 env:
@@ -77,7 +77,7 @@ jobs:
       # before the shell runs, which is a script-injection vector. Falls back
       # to the locked parent candidate when this run was triggered by push
       # (which has no workflow_dispatch input) rather than manual dispatch.
-      CANDIDATE_SHA: ${{ github.event.inputs.candidate_sha || '10123f6af00a5342f2634a01f4d9a0e7190c2173' }}
+      CANDIDATE_SHA: ${{ github.event.inputs.candidate_sha || '87769096068d97cec7aa2edd60d4d6007da81566' }}
       # The commit that actually supplied this workflow definition, recorded
       # separately from CANDIDATE_SHA (the immutable candidate under test) so
       # a push-triggered run's evidence never conflates "which commit changed
@@ -94,7 +94,7 @@ jobs:
 
       - uses: actions/checkout@v4
         with:
-          ref: ${{ github.event.inputs.candidate_sha || '10123f6af00a5342f2634a01f4d9a0e7190c2173' }}
+          ref: ${{ github.event.inputs.candidate_sha || '87769096068d97cec7aa2edd60d4d6007da81566' }}
           fetch-depth: 0
 
       - name: Verify checkout resolved the exact immutable candidate
@@ -308,7 +308,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: tenant-binding-acceptance-${{ github.event.inputs.candidate_sha || '10123f6af00a5342f2634a01f4d9a0e7190c2173' }}
+          name: tenant-binding-acceptance-${{ github.event.inputs.candidate_sha || '87769096068d97cec7aa2edd60d4d6007da81566' }}
           path: |
             .artifacts/tenant-binding-acceptance/execution-log.txt
             .artifacts/tenant-binding-acceptance/test-report.json
