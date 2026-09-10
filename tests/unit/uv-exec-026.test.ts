@@ -7,7 +7,6 @@ import {
   OPENAI_REALTIME_COSTS_REF,
   OPENAI_REALTIME_MODEL_ID,
   OPENAI_REALTIME_PROTOCOL_VERSION,
-  DRTS_REALTIME_TOOLS,
   parseRealtimeFunctionCall,
   RealtimeSharedGateBridge,
   VoiceMediaOutputFence,
@@ -15,11 +14,9 @@ import {
   VoiceMediaProviderError,
   runVoiceDialogue,
   type ControlledReadback,
-  type NativeVoiceProfile,
 } from "../../apps/voice-media-worker/src";
 import {
   voiceToolProposalSchema,
-  voiceDialogueOutputSchema,
 } from "@drts/contracts";
 import fs from "node:fs";
 import path from "node:path";
@@ -102,7 +99,8 @@ describe("UV-EXEC-026: OpenAI Realtime Single Candidate Selection & Protocol Fix
 
     const serverEvents = adapter.getServerEvents();
     const lastEvent = serverEvents[serverEvents.length - 1];
-    expect(lastEvent.type).toBe("session.updated");
+    expect(lastEvent).toBeDefined();
+    expect(lastEvent?.type).toBe("session.updated");
 
     // Client event: input_audio_buffer.append & clear
     adapter.sendClientEvent({
@@ -316,8 +314,8 @@ describe("UV-EXEC-026: Tool Gateway, In-Flight Correction & Transaction Proof", 
       sourceSegmentIds: ["seg-1"],
     });
     expect(output.tools).toHaveLength(1);
-    expect(output.tools[0].name).toBe("resolve_location");
-    expect((output.tools[0] as any).args.query).toBe("西門町");
+    expect(output.tools[0]?.name).toBe("resolve_location");
+    expect((output.tools[0]?.args as { query?: string } | undefined)?.query).toBe("西門町");
   });
 
   it("handles emergency safety intent and triggers handoff with urgent_safety reason", async () => {

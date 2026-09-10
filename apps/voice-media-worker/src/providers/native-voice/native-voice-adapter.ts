@@ -7,8 +7,6 @@ import type { VoiceDialogueProvider, VoiceDialogueRequest } from "../../dialogue
 import { VoiceMediaProviderError } from "../../media-provider";
 import {
   OPENAI_REALTIME_DOCS_REF,
-  OPENAI_REALTIME_SIP_REF,
-  OPENAI_REALTIME_COSTS_REF,
   OPENAI_REALTIME_MODEL_ID,
   OPENAI_REALTIME_PROTOCOL_VERSION,
   type NativeVoiceProfile,
@@ -19,19 +17,12 @@ import {
   type RealtimeSessionCreatedEvent,
   type RealtimeSessionUpdatedEvent,
   type RealtimeSpeechStartedEvent,
-  type RealtimeSpeechStoppedEvent,
-  type RealtimeAudioDeltaEvent,
-  type RealtimeAudioDoneEvent,
-  type RealtimeFunctionCallArgumentsDoneEvent,
-  type RealtimeResponseDoneEvent,
-  type RealtimeErrorEvent,
   type RealtimeConversationItemTruncateEvent,
   type NativeVoiceTruncationRecord,
 } from "./types";
 import {
   RealtimeSharedGateBridge,
   DRTS_REALTIME_TOOLS,
-  parseRealtimeFunctionCall,
 } from "./shared-gate-bridge";
 import type { VoiceMediaOutputFence } from "../../media/output-fence";
 import type { VoiceConfirmationController } from "../../dialogue/confirmation/confirmation-controller";

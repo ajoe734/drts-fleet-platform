@@ -96,7 +96,7 @@ export function parseRealtimeFunctionCall(
   let parsedArgs: unknown;
   try {
     parsedArgs = JSON.parse(event.arguments || "{}");
-  } catch (err) {
+  } catch {
     throw new Error(`Invalid JSON in Realtime function call arguments: ${event.arguments}`);
   }
 
