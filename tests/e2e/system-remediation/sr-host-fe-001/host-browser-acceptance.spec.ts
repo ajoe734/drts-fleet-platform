@@ -114,7 +114,14 @@ test.describe("SR-HOST-FE-001-ACCEPTANCE-RUNNER: real browser Host acceptance", 
     // Default tab is earnings; switch to maintenance via a real link click.
     await page.getByRole("link", { name: /維保/ }).click();
     await page.waitForLoadState("networkidle");
-    await expect(page.getByText(/oil_change/i).or(page.getByText("UAT note"))).toBeVisible();
+    // `.first()`: the real maintenance row renders both an "oil_change" type
+    // cell and a "UAT note" notes cell in the same row, so the combined
+    // locator legitimately resolves to 2 elements (strict-mode violation
+    // without narrowing) — either one visible is sufficient evidence of real
+    // maintenance data.
+    await expect(
+      page.getByText(/oil_change/i).or(page.getByText("UAT note")).first(),
+    ).toBeVisible();
 
     // Trips tab: real click-through navigation to the endpoint proven broken
     // in host-api-sql-acceptance.test.ts — the browser must show the
@@ -146,8 +153,11 @@ test.describe("SR-HOST-FE-001-ACCEPTANCE-RUNNER: real browser Host acceptance", 
     await casesTabLink.focus();
     await expect(casesTabLink).toBeFocused();
     await page.keyboard.press("Enter");
-    await page.waitForLoadState("networkidle");
-    expect(page.url()).toContain("tab=cases");
+    // `expect(page).toHaveURL(...)` polls/retries; a one-shot `page.url()`
+    // read right after `waitForLoadState` can race Next.js's client-side
+    // history push for a query-param-only navigation (no new document load
+    // to wait on).
+    await expect(page).toHaveURL(/tab=cases/);
 
     await context.close();
   });
@@ -230,7 +240,10 @@ test.describe("SR-HOST-FE-001-ACCEPTANCE-RUNNER: real browser Host acceptance", 
       `${PORTAL_URL}/host/vehicles/${beyondLookupVehicleId}`,
       { waitUntil: "networkidle" },
     );
-    await expect(page.getByText("找不到此車輛")).toBeVisible();
+    // `{ exact: true }`: the page also renders a longer explanatory sentence
+    // containing this same substring ("...找不到此車輛，或該車輛不屬於您名下..."),
+    // so a substring match is ambiguous (Playwright strict mode violation).
+    await expect(page.getByText("找不到此車輛", { exact: true })).toBeVisible();
 
     recorder.recordLiveLimitation(
       "host_frontend_200_row_detail_lookup_browser",
