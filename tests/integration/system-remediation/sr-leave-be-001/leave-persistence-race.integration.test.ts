@@ -267,6 +267,12 @@ describe("SR-LEAVE-BE-001-ACCEPTANCE-RUNNER: Real PostgreSQL Race, Persistence &
     it("permits exactly one HTTP-guarded transition when approval (instance 1) and withdrawal (instance 2) race", async () => {
       const driverId = `drv_race_${randomUUID().slice(0, 8)}`;
       const shiftId = `sh_race_${randomUUID().slice(0, 8)}`;
+      // Anchored to the same Date.now() clock as the leave window below
+      // (futureIso(3_600_000)..futureIso(10_800_000)), not a hardcoded
+      // absolute timestamp: a fixed calendar window drifts out of overlap
+      // with a real-wall-clock leave window depending on when CI executes.
+      const shiftWindowStart = futureIso(0);
+      const shiftWindowEnd = futureIso(14_400_000);
 
       await pool.query(
         `
@@ -274,13 +280,13 @@ describe("SR-LEAVE-BE-001-ACCEPTANCE-RUNNER: Real PostgreSQL Race, Persistence &
           shift_id, shift_no, driver_id, scheduled_start, scheduled_end, clock_in_at,
           clock_out_at, status, record, created_at, updated_at
         ) VALUES (
-          $1, $3, $2, '2026-09-10T11:00:00.000Z', '2026-09-10T16:00:00.000Z',
-          '2026-09-10T11:00:00.000Z', null, 'scheduled',
+          $1, $3, $2, $4, $5,
+          $4, null, 'scheduled',
           '{"shiftId": "${shiftId}", "driverId": "${driverId}"}'::jsonb,
           now(), now()
         )
       `,
-        [shiftId, driverId, `SFT-${shiftId}`],
+        [shiftId, driverId, `SFT-${shiftId}`, shiftWindowStart, shiftWindowEnd],
       );
 
       const driverToken = await mintAccessToken(harness1.jwtAuthService, driverIdentity(driverId));
