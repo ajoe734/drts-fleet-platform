@@ -1599,3 +1599,178 @@ class PollWorkersRecoveryTests(EvidenceOutputIsolation, unittest.TestCase):
         self.assertIn("stream was interrupted", worker["last_error"].lower())
         logged_types = [entry.args[1].get("type") for entry in write_activity_log.call_args_list]
         self.assertNotIn("worker_completed", logged_types)
+
+    def test_full_agy_retry_trace_with_duplicate_step_does_not_recover_a_stalled_worker(self) -> None:
+        """End-to-end reproduction of the rejected-candidate evidence
+        (.local/worker-recovery-20260910/gemini-probe.log): six alternating
+        agent_response/error_message pairs after the initial user_input,
+        terminated by a structured ERROR result, plus a duplicated replay of
+        an already-observed step_index. detect_worker_failure_signal is
+        mocked out so this only exercises the productive-event counting used
+        for the stalled->running recovery decision (the terminal ERROR
+        detection itself is covered separately by
+        test_dead_worker_with_structured_agy_error_and_exit_zero_is_never_completed).
+        """
+        with tempfile.TemporaryDirectory() as tmpdir:
+            log_path = Path(tmpdir) / "agy.log"
+            lines = [self._agy_step_update(0, "user_input")]
+            for i in range(6):
+                lines.append(self._agy_step_update(2 * i + 1, "agent_response"))
+                lines.append(self._agy_step_update(2 * i + 2, "error_message"))
+            lines.append(
+                self._agy_result(
+                    "ERROR",
+                    error="The stream was interrupted. Please continue the task you were working on.",
+                )
+            )
+            lines.append(self._agy_step_update(11, "agent_response"))  # duplicate replay of an already-observed step
+            log_path.write_text("\n".join(lines), encoding="utf-8")
+
+            old = (datetime.now(timezone.utc) - timedelta(seconds=60)).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+            state = {
+                "queue": {"events": {"evt-1": {"status": "started"}}},
+                "workers": {
+                    "run-1": {
+                        "run_id": "run-1",
+                        "task_id": "AGY-006",
+                        "provider": "antigravity",
+                        "agent_id": "antigravity",
+                        "status": "stalled",
+                        "queue_event_id": "evt-1",
+                        "pid": 1234,
+                        "log_path": str(log_path),
+                        "last_event_at": old,
+                        "_agy_stream_productive_event_count": 1,  # user_input already credited
+                    }
+                },
+            }
+            status = {"tasks": [{"id": "AGY-006", "status": "in_progress", "owner": "Antigravity", "reviewer": "Codex"}]}
+
+            with (
+                mock.patch.object(supervisor, "load_approval_state", return_value={"pending": [], "history": []}),
+                mock.patch.object(supervisor, "load_status", return_value=status),
+                mock.patch.object(supervisor, "load_provider_report", return_value={}),
+                mock.patch.object(supervisor, "retry_due_workers", return_value=False),
+                mock.patch.object(supervisor, "pid_is_alive", return_value=True),
+                mock.patch.object(supervisor, "detect_worker_failure_signal", return_value=None),
+                mock.patch.object(supervisor, "write_activity_log") as write_activity_log,
+            ):
+                changed = supervisor.poll_workers(self._agy_config(), state)
+
+        worker = state["workers"]["run-1"]
+        self.assertEqual(worker["status"], "stalled")
+        self.assertEqual(worker["last_event_at"], old)
+        self.assertFalse(changed)
+        recovered = [
+            entry for entry in write_activity_log.call_args_list
+            if entry.args[1].get("type") == "worker_recovered"
+        ]
+        self.assertEqual(recovered, [])
+
+    def test_agy_counter_survives_a_same_second_mtime_collision(self) -> None:
+        """Regression for update_from_log's agy productive-event counter:
+        `file_iso_mtime` truncates to whole seconds, so two writes landing in
+        the same rounded second used to make the counter never get stored on
+        the tick that first saw a real step (the old code only stored it
+        inside the `mtime > last_event_at` branch). The next tick then
+        compared the freshly computed count against an implicit zero
+        baseline and credited the already-seen user_input step as fresh
+        progress, even though the only newly appended line was a
+        non-productive error_message.
+        """
+        with tempfile.TemporaryDirectory() as tmpdir:
+            log_path = Path(tmpdir) / "agy.log"
+            worker: dict = {
+                "run_id": "run-1",
+                "provider": "antigravity",
+                "log_path": str(log_path),
+                "last_event_at": "2026-01-01T00:00:00Z",
+            }
+            log_path.write_text(self._agy_step_update(0, "user_input"), encoding="utf-8")
+            with mock.patch.object(supervisor, "file_iso_mtime", return_value="2026-01-01T00:00:00Z"):
+                supervisor.update_from_log({}, worker)
+
+            self.assertEqual(worker["last_event_at"], "2026-01-01T00:00:00Z")
+            self.assertEqual(worker["_agy_stream_productive_event_count"], 1)
+
+            log_path.write_text(
+                "\n".join([self._agy_step_update(0, "user_input"), self._agy_step_update(1, "error_message")]),
+                encoding="utf-8",
+            )
+            with mock.patch.object(supervisor, "file_iso_mtime", return_value="2026-01-01T00:00:01Z"):
+                supervisor.update_from_log({}, worker)
+
+        self.assertEqual(worker["last_event_at"], "2026-01-01T00:00:00Z")
+        self.assertEqual(worker["_agy_stream_productive_event_count"], 1)
+
+
+class AgyStreamProductiveEventCountTests(unittest.TestCase):
+    """Direct coverage of supervisor_runtime._agy_stream_productive_event_count.
+
+    Live evidence: .local/worker-recovery-20260910/gemini-probe.log records a
+    real agy stream-json turn -- user_input, then six alternating
+    agent_response/error_message pairs, ending in a structured ERROR result
+    with an empty response and zero tokens. None of the six retry attempts
+    ever produced a usable response, so only the initial user_input is real
+    progress.
+    """
+
+    def _step(self, index: int, step_type: str, conversation_id: str = "c1") -> str:
+        return json.dumps({
+            "event": "step_update",
+            "step_update": {
+                "conversation_id": conversation_id,
+                "step_index": index,
+                "state": "DONE",
+                "step_type": step_type,
+                "duration_seconds": 0,
+            },
+        })
+
+    def _result(self, status: str, conversation_id: str = "c1") -> str:
+        return json.dumps({
+            "event": "result",
+            "result": {
+                "conversation_id": conversation_id,
+                "status": status,
+                "response": "",
+                "error": "",
+                "duration_seconds": 1,
+                "num_turns": 1,
+                "usage": {"input_tokens": 0, "output_tokens": 0, "thinking_tokens": 0, "cache_read_tokens": 0, "total_tokens": 0},
+            },
+        })
+
+    def test_returns_none_for_non_agy_shaped_logs(self) -> None:
+        self.assertIsNone(supervisor._agy_stream_productive_event_count("plain text log\nmore lines\n"))
+
+    def test_error_message_steps_are_not_productive(self) -> None:
+        content = "\n".join([self._step(0, "error_message"), self._step(1, "error_message")])
+        self.assertEqual(supervisor._agy_stream_productive_event_count(content), 0)
+
+    def test_agent_response_immediately_followed_by_error_is_a_failed_attempt(self) -> None:
+        lines = [self._step(0, "user_input")]
+        for i in range(6):
+            lines.append(self._step(2 * i + 1, "agent_response"))
+            lines.append(self._step(2 * i + 2, "error_message"))
+        content = "\n".join(lines)
+        self.assertEqual(supervisor._agy_stream_productive_event_count(content), 1)
+
+    def test_error_terminal_result_is_not_productive(self) -> None:
+        lines = [
+            self._step(0, "user_input"),
+            self._step(1, "agent_response"),
+            self._step(2, "error_message"),
+            self._result("ERROR"),
+        ]
+        self.assertEqual(supervisor._agy_stream_productive_event_count("\n".join(lines)), 1)
+
+    def test_successful_terminal_result_is_productive(self) -> None:
+        lines = [self._step(0, "user_input"), self._step(1, "agent_response"), self._result("DONE")]
+        self.assertEqual(supervisor._agy_stream_productive_event_count("\n".join(lines)), 3)
+
+    def test_duplicate_step_index_is_not_double_counted(self) -> None:
+        lines = [self._step(0, "user_input"), self._step(1, "agent_response")]
+        base = supervisor._agy_stream_productive_event_count("\n".join(lines))
+        duplicated = lines + [self._step(1, "agent_response")]
+        self.assertEqual(supervisor._agy_stream_productive_event_count("\n".join(duplicated)), base)

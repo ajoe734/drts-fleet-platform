@@ -2199,13 +2199,28 @@ def _agy_stream_productive_event_count(content: str) -> int | None:
     internally; those advance the log's mtime without the turn actually
     moving forward. Returns ``None`` when the log has no agy event-shaped
     JSON at all, so callers fall back to plain mtime-based visibility for
-    every other adapter's log format; otherwise returns a count that only
-    grows on a non-`error_message` `step_update` or the terminal `result`
-    event, so `update_from_log` can tell transport visibility (bytes were
-    appended) apart from productive progress (the turn advanced).
+    every other adapter's log format.
+
+    Otherwise returns a count of turn steps that actually represent forward
+    progress, so `update_from_log` can tell transport visibility (bytes were
+    appended) apart from productive progress (the turn advanced):
+
+    - `step_update` entries are deduplicated by `(conversation_id,
+      step_index)`, so a replayed/duplicated line for an already-seen step
+      never inflates the count.
+    - an `agent_response` step immediately followed by an `error_message`
+      step (same conversation, next step_index) is a failed attempt, not
+      progress -- agy's stream shows this as a continuous retry-then-fail
+      loop while a turn is stuck, and none of those attempts ever produced
+      a usable response.
+    - the terminal `result` event only counts when its status is not
+      `ERROR`; a structured failure is not progress no matter how much
+      stream noise led up to it.
     """
     found_schema = False
-    count = 0
+    steps: dict[tuple[str, int], str] = {}
+    step_order: list[tuple[str, int]] = []
+    result_statuses: list[str] = []
     for line in content.splitlines():
         line = line.strip()
         if not line.startswith("{"):
@@ -2219,14 +2234,31 @@ def _agy_stream_productive_event_count(content: str) -> int | None:
         event = payload.get("event")
         if event == "step_update":
             found_schema = True
-            step = payload.get("step_update")
-            step_type = str((step or {}).get("step_type") or "").strip()
-            if step_type != "error_message":
-                count += 1
+            step = payload.get("step_update") or {}
+            try:
+                step_index = int(step.get("step_index"))
+            except (TypeError, ValueError):
+                continue
+            key = (str(step.get("conversation_id") or ""), step_index)
+            if key not in steps:
+                step_order.append(key)
+            steps[key] = str(step.get("step_type") or "").strip()
         elif event == "result":
             found_schema = True
-            count += 1
-    return count if found_schema else None
+            result = payload.get("result") or {}
+            result_statuses.append(str(result.get("status") or "").strip().upper())
+    if not found_schema:
+        return None
+    count = 0
+    for conversation_id, step_index in step_order:
+        step_type = steps[(conversation_id, step_index)]
+        if step_type == "error_message":
+            continue
+        if step_type == "agent_response" and steps.get((conversation_id, step_index + 1)) == "error_message":
+            continue
+        count += 1
+    count += sum(1 for status in result_statuses if status and status != "ERROR")
+    return count
 
 
 def update_from_log(config: dict[str, Any], worker: dict[str, Any]) -> None:
@@ -2241,15 +2273,29 @@ def update_from_log(config: dict[str, Any], worker: dict[str, Any]) -> None:
         content = log_path.read_text(encoding="utf-8", errors="ignore")
     except OSError:
         content = None
-    if mtime and (not worker.get("last_event_at") or mtime > worker.get("last_event_at", "")):
-        productive_count = _agy_stream_productive_event_count(content) if content is not None else None
-        if productive_count is None:
+    productive_count = _agy_stream_productive_event_count(content) if content is not None else None
+    if productive_count is None:
+        if mtime and (not worker.get("last_event_at") or mtime > worker.get("last_event_at", "")):
             worker["last_event_at"] = mtime
-        else:
-            previous_count = int(worker.get("_agy_stream_productive_event_count") or 0)
-            if productive_count > previous_count:
-                worker["last_event_at"] = mtime
-            worker["_agy_stream_productive_event_count"] = productive_count
+    else:
+        # The baseline is recorded on every call, not only inside the
+        # mtime-advanced branch below. `file_iso_mtime` truncates to whole
+        # seconds, so two polls landing in the same second used to skip
+        # storing this counter entirely on the poll that first observed a
+        # real step (last_event_at was unchanged that tick, so the old code
+        # never ran `worker["_agy_stream_productive_event_count"] = ...`).
+        # The next poll then compared against a phantom zero baseline and
+        # credited every already-seen step as fresh progress, which is
+        # exactly how a trailing error-only append on an already-observed
+        # log used to falsely mark a stalled worker as recovered.
+        previous_count = int(worker.get("_agy_stream_productive_event_count") or 0)
+        worker["_agy_stream_productive_event_count"] = productive_count
+        if (
+            productive_count > previous_count
+            and mtime
+            and (not worker.get("last_event_at") or mtime > worker.get("last_event_at", ""))
+        ):
+            worker["last_event_at"] = mtime
     if content is None:
         return
     for line in content.splitlines():
