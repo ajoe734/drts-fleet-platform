@@ -10,12 +10,21 @@
 "use client";
 
 import {
+  Suspense,
   useCallback,
   useEffect,
   useMemo,
   useState,
   type CSSProperties,
 } from "react";
+import { useSearchParams, useRouter, usePathname } from "next/navigation";
+import {
+  parseAuditResourceContext,
+  filterAuditRecords,
+  clearAuditResourceSearchParams,
+  getAuditContextCopy,
+  type AuditResourceContext,
+} from "@/lib/audit-resource-context";
 import {
   formatDateTime,
   truncate,
@@ -141,9 +150,35 @@ function actorTone(actorType: AuditLogRecord["actorType"]): CanvasTone {
   }
 }
 
-export default function AuditPage() {
+function AuditPageContent() {
   const { locale, t } = useTranslation();
   const client = usePlatformAdminClient();
+  const searchParams = useSearchParams();
+  const router = useRouter();
+  const pathname = usePathname();
+  const copy = useMemo(() => getAuditContextCopy(locale), [locale]);
+  const [clearedResourceFilter, setClearedResourceFilter] = useState(false);
+
+  const rawResourceContext = useMemo(
+    () => parseAuditResourceContext(searchParams),
+    [searchParams],
+  );
+
+  const resourceContext = useMemo<AuditResourceContext>(() => {
+    if (clearedResourceFilter) {
+      return { status: "none" };
+    }
+    return rawResourceContext;
+  }, [clearedResourceFilter, rawResourceContext]);
+
+  const handleClearFilter = useCallback(() => {
+    setClearedResourceFilter(true);
+    if (typeof window !== "undefined") {
+      const newQuery = clearAuditResourceSearchParams(window.location.search);
+      router.replace(newQuery ? `${pathname}${newQuery}` : pathname);
+    }
+  }, [pathname, router]);
+
   const [records, setRecords] = useState<AuditLogRecord[]>([]);
   const [policies, setPolicies] = useState<EvidenceRetentionPolicyRecord[]>([]);
   const [legalHolds, setLegalHolds] = useState<EvidenceLegalHoldRecord[]>([]);
@@ -226,18 +261,30 @@ export default function AuditPage() {
     return map;
   }, [activeDeletionExceptions]);
 
+  const resourceFilterResult = useMemo(
+    () => filterAuditRecords(records, resourceContext),
+    [records, resourceContext],
+  );
+
   const moduleCounts = useMemo(() => {
     const counts = new Map<string, number>();
-    for (const record of records) {
+    const source =
+      resourceContext.status === "valid"
+        ? resourceFilterResult.filteredRecords
+        : records;
+    for (const record of source) {
       if (!record.moduleName) continue;
       counts.set(record.moduleName, (counts.get(record.moduleName) ?? 0) + 1);
     }
     return [...counts.entries()].sort((a, b) => b[1] - a[1]);
-  }, [records]);
+  }, [records, resourceContext.status, resourceFilterResult.filteredRecords]);
 
   const filtered = useMemo(
-    () => records.filter((r) => !filterModule || r.moduleName === filterModule),
-    [records, filterModule],
+    () =>
+      resourceFilterResult.filteredRecords.filter(
+        (r) => !filterModule || r.moduleName === filterModule,
+      ),
+    [resourceFilterResult.filteredRecords, filterModule],
   );
 
   const rows = useMemo<AuditTableRow[]>(
@@ -456,6 +503,48 @@ export default function AuditPage() {
           />
         ) : null}
 
+        {resourceContext.status === "invalid" ? (
+          <CanvasBanner
+            theme={theme}
+            tone="warn"
+            title={`${copy.invalidContextTitle}: ${resourceContext.reason}`}
+            actions={
+              <CanvasBtn
+                theme={theme}
+                variant="secondary"
+                onClick={handleClearFilter}
+              >
+                {copy.clearFilter}
+              </CanvasBtn>
+            }
+          />
+        ) : null}
+
+        {resourceContext.status === "valid" ? (
+          <CanvasBanner
+            theme={theme}
+            tone="info"
+            title={`${copy.filteredBannerTitle}: ${
+              resourceContext.resourceType
+                ? `${resourceContext.resourceType}:${resourceContext.resourceId}`
+                : ""
+            } ${
+              resourceContext.auditId
+                ? `(${copy.auditIdLabel}: ${resourceContext.auditId})`
+                : ""
+            }`.trim()}
+            actions={
+              <CanvasBtn
+                theme={theme}
+                variant="secondary"
+                onClick={handleClearFilter}
+              >
+                {copy.clearFilter}
+              </CanvasBtn>
+            }
+          />
+        ) : null}
+
         {loading && records.length === 0 ? (
           <CanvasCard
             theme={theme}
@@ -507,7 +596,38 @@ export default function AuditPage() {
               padding={0}
               style={{ overflow: "hidden" }}
             >
-              {rows.length === 0 ? (
+              {resourceFilterResult.isContextualEmpty ? (
+                <div
+                  style={{
+                    ...stateStyle,
+                    padding: "32px 16px",
+                    display: "grid",
+                    gap: 12,
+                    placeItems: "center",
+                  }}
+                >
+                  <div style={{ fontWeight: 600, color: theme.text }}>
+                    {copy.contextualEmptyTitle}
+                  </div>
+                  <div
+                    style={{
+                      color: theme.textMuted,
+                      fontSize: 13,
+                      maxWidth: 460,
+                      textAlign: "center",
+                    }}
+                  >
+                    {copy.contextualEmptyDescription}
+                  </div>
+                  <CanvasBtn
+                    theme={theme}
+                    variant="secondary"
+                    onClick={handleClearFilter}
+                  >
+                    {copy.clearFilter}
+                  </CanvasBtn>
+                </div>
+              ) : rows.length === 0 ? (
                 <div style={stateStyle}>{t("audit.page.emptyLog")}</div>
               ) : (
                 <CanvasTable<AuditTableRow>
@@ -709,5 +829,13 @@ export default function AuditPage() {
         )}
       </div>
     </>
+  );
+}
+
+export default function AuditPage() {
+  return (
+    <Suspense fallback={null}>
+      <AuditPageContent />
+    </Suspense>
   );
 }

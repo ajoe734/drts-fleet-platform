@@ -22,6 +22,7 @@ import { GoogleMapBaseLayer } from "@/components/google-map-base-layer";
 import { PublishAssistantScope } from "@/components/ops-assistant";
 import { getServerOpsClient } from "@/lib/api-client.server";
 import { CanvasEmptyPanel } from "@/lib/canvas-workflow";
+import { buildPlatformAdminHref } from "@/lib/ops-cross-app-links";
 import { formatOpsCodeLabel } from "@/lib/localized-labels";
 import { formatCompactNumber } from "@/lib/ops-analytics";
 import { getServerLocale } from "@/lib/server-locale";
@@ -1221,17 +1222,6 @@ function actionTone(
 
 function normalizeActions(record: BoardRecord): ResourceActionDescriptor[] {
   return Array.isArray(record.availableActions) ? record.availableActions : [];
-}
-
-function buildPlatformAdminHref(path: string) {
-  const baseUrl =
-    process.env.NEXT_PUBLIC_PLATFORM_ADMIN_URL ??
-    process.env.PLATFORM_ADMIN_WEB_URL ??
-    "/platform-admin";
-  if (path.startsWith("http://") || path.startsWith("https://")) {
-    return path;
-  }
-  return `${baseUrl.replace(/\/$/, "")}${path}`;
 }
 
 function buildActionHref(
@@ -4517,7 +4507,17 @@ export default async function DispatchPage({
                               </Link>
                             ) : null}
                             <Link
-                              href={buildPlatformAdminHref("/audit")}
+                              href={buildPlatformAdminHref(
+                                `/audit?resourceType=${encodeURIComponent(
+                                  "mirrorOrderId" in selectedRecord
+                                    ? "forwarded_order"
+                                    : "order",
+                                )}&resourceId=${encodeURIComponent(
+                                  "mirrorOrderId" in selectedRecord
+                                    ? selectedRecord.mirrorOrderId
+                                    : selectedRecord.orderId,
+                                )}`,
+                              )}
                               target="_blank"
                               rel="noreferrer"
                               style={{
