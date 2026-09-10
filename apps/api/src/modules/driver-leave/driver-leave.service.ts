@@ -2,7 +2,7 @@ import { HttpStatus, Injectable } from "@nestjs/common";
 import { randomUUID } from "node:crypto";
 import type { ApiPageInfo } from "../../common/api-envelope";
 import { ApiRequestError } from "../../common/api-envelope";
-import { isDriverIdentityMatching, normalizeDriverId } from "../../common/auth";
+import { normalizeDriverId } from "../../common/auth";
 import {
   DRIVER_LEAVE_ERROR_CODES,
   DRIVER_LEAVE_TYPES,
@@ -174,34 +174,7 @@ export class DriverLeaveService {
     command?: WithdrawDriverLeaveCommand,
     now?: Date,
   ): Promise<DriverLeaveRecord> {
-    const leave = await this.getLeaveById(leaveId);
-
-    if (!isDriverIdentityMatching(actorDriverId, leave.driverId)) {
-      throw new ApiRequestError(
-        HttpStatus.FORBIDDEN,
-        DRIVER_LEAVE_ERROR_CODES.LEAVE_FORBIDDEN_ACCESS,
-        "Driver may only withdraw their own leave requests.",
-        { actorDriverId, leaveDriverId: leave.driverId },
-      );
-    }
-
-    if (leave.status !== "pending") {
-      throw new ApiRequestError(
-        HttpStatus.CONFLICT,
-        DRIVER_LEAVE_ERROR_CODES.LEAVE_INVALID_STATE_TRANSITION,
-        `Cannot withdraw leave request in '${leave.status}' state. Only 'pending' leave requests can be withdrawn.`,
-        { leaveId, currentStatus: leave.status },
-      );
-    }
-
-    const current = now ?? new Date();
-    leave.status = "withdrawn";
-    leave.updatedAt = current.toISOString();
-    if (command?.reason?.trim()) {
-      leave.reviewNotes = `Withdrawn by driver: ${command.reason.trim()}`;
-    }
-
-    return this.repository.save(leave);
+    return this.repository.withdrawLeave(leaveId, actorDriverId, command, now);
   }
 
   async reviewLeave(
@@ -210,63 +183,12 @@ export class DriverLeaveService {
     command: ReviewDriverLeaveCommand,
     now?: Date,
   ): Promise<DriverLeaveRecord> {
-    const leave = await this.getLeaveById(leaveId);
-
-    if (leave.status !== "pending") {
-      throw new ApiRequestError(
-        HttpStatus.CONFLICT,
-        DRIVER_LEAVE_ERROR_CODES.LEAVE_INVALID_STATE_TRANSITION,
-        `Cannot review leave request in '${leave.status}' state. Only 'pending' leave requests can be reviewed.`,
-        { leaveId, currentStatus: leave.status },
-      );
-    }
-
-    if (
-      !command ||
-      (command.decision !== "approve" && command.decision !== "reject")
-    ) {
-      throw new ApiRequestError(
-        HttpStatus.BAD_REQUEST,
-        DRIVER_LEAVE_ERROR_CODES.LEAVE_MISSING_REQUIRED_FIELDS,
-        "Review decision must be 'approve' or 'reject'.",
-      );
-    }
-
-    const current = now ?? new Date();
-    const nowIso = current.toISOString();
-
-    leave.reviewedByPrincipalId = reviewerPrincipalId;
-    leave.reviewedAt = nowIso;
-    leave.reviewNotes = command.reviewNotes?.trim() || null;
-    leave.updatedAt = nowIso;
-
-    if (command.decision === "reject") {
-      leave.status = "rejected";
-      leave.impactedShiftIds = [];
-      return this.repository.save(leave);
-    }
-
-    // Decision is "approve"
-    leave.status = "approved";
-
-    // 1. Link and annotate overlapping shifts
-    const impactedShiftIds = await this.repository.annotateOverlappingShifts(
-      leave.driverId,
-      leave.leaveId,
-      leave.startTime,
-      leave.endTime,
+    return this.repository.reviewLeave(
+      leaveId,
+      reviewerPrincipalId,
+      command,
+      now,
     );
-    leave.impactedShiftIds = impactedShiftIds;
-
-    // 2. Link matching suppression
-    await this.repository.upsertMatchingSuppression(
-      leave.driverId,
-      leave.leaveId,
-      leave.startTime,
-      leave.endTime,
-    );
-
-    return this.repository.save(leave);
   }
 
   async getActiveLeaveForDriver(
