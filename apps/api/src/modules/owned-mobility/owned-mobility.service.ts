@@ -133,6 +133,11 @@ import {
 
 import { DRIVER_TASK_TRANSITIONS } from "@drts/contracts";
 
+import {
+  type DriverAvailabilityGateway,
+  DRIVER_AVAILABILITY_GATEWAY,
+} from "./driver-availability-gateway";
+
 import { ApiRequestError } from "../../common/api-envelope";
 import type { BootstrapRequestIdentity } from "../../common/auth";
 import {
@@ -544,7 +549,18 @@ export class OwnedMobilityService
     @Optional()
     @Inject(forwardRef(() => OwnedAutonomousDispatchExecutorService))
     private readonly autonomousDispatchExecutor?: OwnedAutonomousDispatchExecutorService,
+    @Optional()
+    @Inject(DRIVER_AVAILABILITY_GATEWAY)
+    private driverAvailabilityGateway?: DriverAvailabilityGateway,
   ) {}
+
+  setDriverAvailabilityGateway(gateway: DriverAvailabilityGateway) {
+    this.driverAvailabilityGateway = gateway;
+  }
+
+  getDriverAvailabilityGateway(): DriverAvailabilityGateway | undefined {
+    return this.driverAvailabilityGateway;
+  }
 
   private _fallbackIdempotencyService?: IdempotencyService;
   private _fallbackAutonomousDispatchExecutor?: OwnedAutonomousDispatchExecutorService;
@@ -2462,14 +2478,11 @@ export class OwnedMobilityService
     if (this.ownedMobilityRepository?.isEnabled()) {
       const executeDb = async (): Promise<TenantBookingsPageRecord> => {
         const dbResult =
-          await this.ownedMobilityRepository!.queryTenantBookings(
-            tenantId,
-            {
-              ...query,
-              page: validated.page,
-              pageSize: validated.pageSize > 0 ? validated.pageSize : 100,
-            },
-          );
+          await this.ownedMobilityRepository!.queryTenantBookings(tenantId, {
+            ...query,
+            page: validated.page,
+            pageSize: validated.pageSize > 0 ? validated.pageSize : 100,
+          });
         const effectivePageSize =
           validated.pageSize > 0
             ? validated.pageSize
@@ -5331,9 +5344,10 @@ export class OwnedMobilityService
         (log.details as Record<string, unknown> | undefined)?.assignmentId !==
         assignmentId,
     );
-    this.passengerDisclosureSnapshots = this.passengerDisclosureSnapshots.filter(
-      (snapshot) => snapshot.assignmentId !== assignmentId,
-    );
+    this.passengerDisclosureSnapshots =
+      this.passengerDisclosureSnapshots.filter(
+        (snapshot) => snapshot.assignmentId !== assignmentId,
+      );
     this.consumerNotificationOutbox = this.consumerNotificationOutbox.filter(
       (record) =>
         (record.payload as Record<string, unknown>)?.assignmentId !==
@@ -5343,7 +5357,9 @@ export class OwnedMobilityService
     if (previousOrderSnapshot) {
       this.orders = [
         this.cloneOrder(previousOrderSnapshot),
-        ...this.orders.filter((o) => o.orderId !== previousOrderSnapshot.orderId),
+        ...this.orders.filter(
+          (o) => o.orderId !== previousOrderSnapshot.orderId,
+        ),
       ];
     }
     if (previousJobSnapshot) {
@@ -8658,7 +8674,8 @@ export class OwnedMobilityService
     }
 
     const confirmationWindowMinutes =
-      BOOKING_RULES[order.businessDispatchSubtype].confirmationWindowMinutes;
+      BOOKING_RULES[order.businessDispatchSubtype]?.confirmationWindowMinutes ??
+      30;
     const reservationStartMs = new Date(order.reservationWindowStart).getTime();
     const thresholdMs = reservationStartMs - confirmationWindowMinutes * 60_000;
     return new Date(now).getTime() >= thresholdMs;
@@ -8695,6 +8712,192 @@ export class OwnedMobilityService
     }
     // After first retry failure: escalate to ops for manual intervention
     return "escalate_to_ops";
+  }
+
+  async sweepDispatchTimeouts(now = new Date().toISOString()): Promise<{
+    sweptAcceptanceTimeouts: number;
+    sweptMatchingTimeouts: number;
+  }> {
+    let sweptAcceptanceTimeouts = 0;
+    let sweptMatchingTimeouts = 0;
+
+    const nowMs = Date.parse(now);
+
+    // 1. Scan assignments for acceptance timeout
+    const assignmentsToCheck = [...this.dispatchAssignments].filter(
+      (a) => a.status === "assigned" && a.acceptanceDeadline,
+    );
+
+    for (const assignment of assignmentsToCheck) {
+      const deadlineMs = Date.parse(assignment.acceptanceDeadline ?? "");
+      if (Number.isFinite(deadlineMs) && nowMs >= deadlineMs) {
+        try {
+          const outcome = await this.handleDispatchTimeout(
+            assignment.orderId,
+            "acceptance_timeout",
+            undefined,
+            { targetAssignmentId: assignment.assignmentId },
+          );
+          if (outcome && outcome.escalationAction !== "superseded") {
+            sweptAcceptanceTimeouts += 1;
+          }
+        } catch (err) {
+          this.logger.warn(
+            `Failed to sweep acceptance timeout for assignment ${assignment.assignmentId}: ${err}`,
+          );
+        }
+      }
+    }
+
+    // 2. Scan active dispatch jobs or orders for matching timeout
+    const matchingJobs = [...this.dispatchJobs].filter(
+      (job) => job.status === "matching",
+    );
+    for (const job of matchingJobs) {
+      const jobCreatedMs = Date.parse(job.createdAt);
+      const matchingTimeoutMs = 60_000;
+      if (
+        Number.isFinite(jobCreatedMs) &&
+        nowMs - jobCreatedMs >= matchingTimeoutMs
+      ) {
+        try {
+          const outcome = await this.handleDispatchTimeout(
+            job.orderId,
+            "matching_timeout",
+          );
+          if (outcome) {
+            sweptMatchingTimeouts += 1;
+          }
+        } catch (err) {
+          this.logger.warn(
+            `Failed to sweep matching timeout for order ${job.orderId}: ${err}`,
+          );
+        }
+      }
+    }
+
+    const matchingOrders = [...this.orders].filter(
+      (order) =>
+        order.status === "matching" &&
+        !matchingJobs.some((j) => j.orderId === order.orderId),
+    );
+    for (const order of matchingOrders) {
+      const orderCreatedMs = Date.parse(order.createdAt);
+      if (Number.isFinite(orderCreatedMs) && nowMs - orderCreatedMs >= 60_000) {
+        try {
+          await this.handleDispatchTimeout(order.orderId, "matching_timeout");
+          sweptMatchingTimeouts += 1;
+        } catch (err) {
+          this.logger.warn(
+            `Failed to sweep matching timeout for order ${order.orderId}: ${err}`,
+          );
+        }
+      }
+    }
+
+    return { sweptAcceptanceTimeouts, sweptMatchingTimeouts };
+  }
+
+  async sweepReservationHolds(now = new Date().toISOString()): Promise<{
+    sweptExceptionHolds: number;
+    sweptExpiredOverrides: number;
+  }> {
+    let sweptExceptionHolds = 0;
+    let sweptExpiredOverrides = 0;
+
+    const nowMs = Date.parse(now);
+
+    // 1. Scan reservation orders in requested or redispatch_queue hold status
+    const reservationHoldOrders = [...this.orders].filter(
+      (order) =>
+        order.dispatchSemantics === "reservation" &&
+        ["requested", "redispatch_queue"].includes(
+          order.reservationHoldStatus,
+        ) &&
+        order.status !== "cancelled" &&
+        order.status !== "completed" &&
+        order.status !== "exception_hold",
+    );
+
+    for (const order of reservationHoldOrders) {
+      const inWindow = this.isWithinConfirmationWindow(order, now);
+      const expiresAtMs = order.reservationHoldExpiresAt
+        ? Date.parse(order.reservationHoldExpiresAt)
+        : Number.NaN;
+      const isExpired = Number.isFinite(expiresAtMs) && nowMs >= expiresAtMs;
+
+      if (inWindow || isExpired) {
+        const candidates = this.listEligibleDispatchCandidates(order);
+        if (candidates.length === 0) {
+          const reasonCode: ExceptionHoldReasonCode = isExpired
+            ? "confirmation_window_expired"
+            : "no_eligible_supply";
+
+          order.status = "exception_hold";
+          this.transitionReservationHold(order, "exception_hold");
+          order.exceptionHold = this.createExceptionHoldRecord(
+            reasonCode,
+            `sched-hold-${order.orderId}`,
+            now,
+            {
+              isReservation: true,
+              isWithinConfirmationWindow: inWindow,
+              hasEligibleSupply: false,
+              reasonCode,
+            },
+          );
+          this.dispatchTraceLogs.push(
+            this.buildTraceLog(order.orderId, "dispatch.failed", {
+              reasonCode,
+              source: "dispatch_scheduler_sweep",
+            }),
+          );
+          this.dispatchTraceLogs.push(
+            this.buildTraceLog(order.orderId, "order.exception_hold", {
+              reasonCode,
+              source: "dispatch_scheduler_sweep",
+              exceptionHoldCriteria: {
+                isReservation: true,
+                isWithinConfirmationWindow: inWindow,
+                hasEligibleSupply: false,
+              },
+            }),
+          );
+          sweptExceptionHolds += 1;
+        }
+      }
+    }
+
+    // 2. Scan exception hold override requests
+    const exceptionOrders = [...this.orders].filter(
+      (order) =>
+        order.status === "exception_hold" &&
+        order.exceptionHold?.overrideRequest &&
+        order.exceptionHold.overrideRequest.status === "pending_approval",
+    );
+
+    for (const order of exceptionOrders) {
+      const override = order.exceptionHold?.overrideRequest;
+      if (override && override.expiresAt) {
+        const expMs = Date.parse(override.expiresAt);
+        if (Number.isFinite(expMs) && nowMs >= expMs) {
+          override.status = "expired";
+          this.dispatchTraceLogs.push(
+            this.buildTraceLog(
+              order.orderId,
+              "exception_hold.override_expired",
+              {
+                source: "dispatch_scheduler_sweep",
+                overrideType: override.overrideType,
+              },
+            ),
+          );
+          sweptExpiredOverrides += 1;
+        }
+      }
+    }
+
+    return { sweptExceptionHolds, sweptExpiredOverrides };
   }
 
   async handleDispatchTimeout(
@@ -9433,6 +9636,31 @@ export class OwnedMobilityService
           { driverId },
         );
       }
+
+      if (this.driverAvailabilityGateway) {
+        const availability =
+          this.driverAvailabilityGateway.isDriverAvailableForDispatchSync?.(
+            driverId,
+          ) ?? { available: true };
+        if (!availability.available) {
+          const reasonCode =
+            availability.reason === "busy_on_other_platform"
+              ? "DRIVER_BUSY_ON_OTHER_PLATFORM"
+              : availability.reason === "expired_heartbeat"
+                ? "DRIVER_HEARTBEAT_EXPIRED"
+                : "DRIVER_OFFLINE";
+          throw new ApiRequestError(
+            HttpStatus.BAD_REQUEST,
+            reasonCode,
+            `Driver is not available for dispatch: ${availability.reason}`,
+            {
+              driverId,
+              reason: availability.reason,
+              details: availability.details,
+            },
+          );
+        }
+      }
     } catch (error) {
       if (!(error instanceof ApiRequestError)) {
         throw error;
@@ -9480,6 +9708,9 @@ export class OwnedMobilityService
         return "VEHICLE_NOT_ELIGIBLE_FOR_SERVICE_PRODUCT";
       case "DRIVER_NOT_AVAILABLE":
       case "DRIVER_NOT_ELIGIBLE_FOR_SERVICE_PRODUCT":
+      case "DRIVER_BUSY_ON_OTHER_PLATFORM":
+      case "DRIVER_OFFLINE":
+      case "DRIVER_HEARTBEAT_EXPIRED":
         return "DRIVER_NOT_ELIGIBLE_FOR_SERVICE_PRODUCT";
       default:
         return null;
@@ -11178,6 +11409,17 @@ export class OwnedMobilityService
     }
   }
 
+  private driverAvailabilityCandidateAllowed(driverId: string): boolean {
+    if (!this.driverAvailabilityGateway) {
+      return true;
+    }
+    const availability =
+      this.driverAvailabilityGateway.isDriverAvailableForDispatchSync?.(
+        driverId,
+      ) ?? { available: true };
+    return availability.available;
+  }
+
   private listEligibleDispatchCandidates(order: OwnedOrderRecord) {
     const destination = this.resolvePickupEtaDestination(order);
     const candidates = this.vehicleEligibilityService
@@ -11199,7 +11441,8 @@ export class OwnedMobilityService
             order,
             candidate.vehicleId,
             candidate.driverId,
-          ),
+          ) &&
+          this.driverAvailabilityCandidateAllowed(candidate.driverId),
       )
       .map((candidate) => ({
         ...candidate,
@@ -11244,7 +11487,8 @@ export class OwnedMobilityService
               order,
               candidate.vehicleId,
               candidate.driverId,
-            ),
+            ) &&
+            this.driverAvailabilityCandidateAllowed(candidate.driverId),
         )
         .map(async (candidate) => {
           const decision = await this.runtimeEligibilityEvaluator!.evaluate({
@@ -13610,7 +13854,9 @@ export class OwnedMobilityService
   ): OverrideRequestRecord {
     return {
       ...record,
-      requestedBy: { ...record.requestedBy },
+      requestedBy: record.requestedBy
+        ? { ...record.requestedBy }
+        : ({} as never),
       approval: record.approval ? { ...record.approval } : null,
       rejection: record.rejection ? { ...record.rejection } : null,
     };
@@ -13621,8 +13867,8 @@ export class OwnedMobilityService
   ): ExceptionHoldRecord {
     return {
       ...record,
-      criteria: { ...record.criteria },
-      overrideActors: [...record.overrideActors],
+      criteria: record.criteria ? { ...record.criteria } : ({} as never),
+      overrideActors: record.overrideActors ? [...record.overrideActors] : [],
       resolution: record.resolution
         ? {
             ...record.resolution,

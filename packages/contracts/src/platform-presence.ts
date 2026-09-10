@@ -1,6 +1,6 @@
 import type { PlatformCode } from "./platform-codes";
 
-export type PlatformPresenceStatus = "online" | "offline";
+export type PlatformPresenceStatus = "online" | "offline" | "busy";
 
 export type PlatformEligibility = "eligible" | "ineligible" | "pending";
 
@@ -14,6 +14,7 @@ export interface PlatformPresenceRecord {
   reauthRequired: boolean;
   lastOnlineAt: string | null;
   lastOfflineAt: string | null;
+  lastHeartbeatAt?: string | null;
   updatedAt: string;
 }
 
@@ -40,8 +41,33 @@ export interface PlatformPresenceSummary {
 export interface SetPlatformOnlineCommand {
   platformCode: PlatformCode;
   tokenExpiresAt?: string | null;
+  recordedAt?: string;
 }
 
 export interface SetPlatformOfflineCommand {
   platformCode: PlatformCode;
+  recordedAt?: string;
+}
+
+export interface SetPlatformBusyCommand {
+  platformCode: PlatformCode;
+  reason?: string;
+  recordedAt?: string;
+}
+
+export interface DriverPresenceHeartbeatCommand {
+  platformCode?: PlatformCode;
+  recordedAt?: string;
+}
+
+export type DriverAvailabilityReason =
+  | "busy_on_other_platform"
+  | "offline"
+  | "expired_heartbeat"
+  | "no_presence_records";
+
+export interface DriverAvailabilityResult {
+  available: boolean;
+  reason?: DriverAvailabilityReason;
+  details?: Record<string, unknown>;
 }

@@ -114,6 +114,11 @@ export class PlatformPresenceRepository {
           ? v.toISOString()
           : new Date(v).toISOString();
 
+    const jsonRecord =
+      row.record && typeof row.record === "object"
+        ? (row.record as Partial<PlatformPresenceRecord>)
+        : {};
+
     return {
       driverId: row.driver_id,
       platformCode: row.platform_code as PlatformCode,
@@ -124,6 +129,7 @@ export class PlatformPresenceRepository {
       reauthRequired: row.reauth_required,
       lastOnlineAt: toIso(row.last_online_at),
       lastOfflineAt: toIso(row.last_offline_at),
+      lastHeartbeatAt: jsonRecord.lastHeartbeatAt ?? toIso(row.last_online_at),
       updatedAt: toIso(row.updated_at)!,
     };
   }

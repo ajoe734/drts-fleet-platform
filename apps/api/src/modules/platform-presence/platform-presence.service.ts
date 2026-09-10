@@ -6,10 +6,13 @@ import type {
   PlatformPresenceAdapterStatusRecord,
   PlatformPresenceRecord,
   PlatformPresenceSummary,
+  DriverAvailabilityResult,
 } from "@drts/contracts";
 import { PLATFORM_CODE_REGISTRY } from "@drts/contracts";
 import { ForwarderService } from "../forwarder/forwarder.service";
 import { PlatformPresenceRepository } from "./platform-presence.repository";
+
+export const DEFAULT_MAX_HEARTBEAT_AGE_MS = 5 * 60 * 1000; // 5 minutes
 
 function isoNow() {
   return new Date().toISOString();
@@ -39,6 +42,11 @@ export class PlatformPresenceService {
     return map ? Array.from(map.values()) : [];
   }
 
+  listForDriverSync(driverId: string): PlatformPresenceRecord[] {
+    const map = this.memory.get(driverId);
+    return map ? Array.from(map.values()) : [];
+  }
+
   private getMemoryBucket(
     driverId: string,
   ): Map<string, PlatformPresenceRecord> {
@@ -62,10 +70,12 @@ export class PlatformPresenceService {
     driverId: string,
     platformCode: PlatformCode,
     tokenExpiresAt?: string | null,
+    recordedAt?: string | null,
   ): Promise<PlatformPresenceRecord> {
     const existing = (await this.listForDriver(driverId)).find(
       (r) => r.platformCode === platformCode,
     );
+    const effectiveTime = recordedAt ?? isoNow();
 
     const record: PlatformPresenceRecord = {
       driverId,
@@ -77,13 +87,17 @@ export class PlatformPresenceService {
       reauthRequired: this.computeReauthRequired(
         tokenExpiresAt ?? existing?.tokenExpiresAt ?? null,
       ),
-      lastOnlineAt: isoNow(),
+      lastOnlineAt: effectiveTime,
       lastOfflineAt: existing?.lastOfflineAt ?? null,
-      updatedAt: isoNow(),
+      lastHeartbeatAt: effectiveTime,
+      updatedAt: effectiveTime,
     };
 
     if (this.dbEnabled()) {
-      return this.repo!.upsert(record);
+      const persisted = await this.repo!.upsert(record);
+      const bucket = this.getMemoryBucket(driverId);
+      bucket.set(platformCode, persisted);
+      return persisted;
     }
     const bucket = this.getMemoryBucket(driverId);
     bucket.set(platformCode, record);
@@ -93,10 +107,12 @@ export class PlatformPresenceService {
   async setOffline(
     driverId: string,
     platformCode: PlatformCode,
+    recordedAt?: string | null,
   ): Promise<PlatformPresenceRecord> {
     const existing = (await this.listForDriver(driverId)).find(
       (r) => r.platformCode === platformCode,
     );
+    const effectiveTime = recordedAt ?? isoNow();
 
     const record: PlatformPresenceRecord = {
       driverId,
@@ -109,16 +125,180 @@ export class PlatformPresenceService {
         existing?.tokenExpiresAt ?? null,
       ),
       lastOnlineAt: existing?.lastOnlineAt ?? null,
-      lastOfflineAt: isoNow(),
-      updatedAt: isoNow(),
+      lastOfflineAt: effectiveTime,
+      lastHeartbeatAt: existing?.lastHeartbeatAt ?? null,
+      updatedAt: effectiveTime,
     };
 
     if (this.dbEnabled()) {
-      return this.repo!.upsert(record);
+      const persisted = await this.repo!.upsert(record);
+      const bucket = this.getMemoryBucket(driverId);
+      bucket.set(platformCode, persisted);
+      return persisted;
     }
     const bucket = this.getMemoryBucket(driverId);
     bucket.set(platformCode, record);
     return record;
+  }
+
+  async setBusy(
+    driverId: string,
+    platformCode: PlatformCode,
+    reason?: string | null,
+    recordedAt?: string | null,
+  ): Promise<PlatformPresenceRecord> {
+    const existing = (await this.listForDriver(driverId)).find(
+      (r) => r.platformCode === platformCode,
+    );
+    const effectiveTime = recordedAt ?? isoNow();
+
+    const record: PlatformPresenceRecord = {
+      driverId,
+      platformCode,
+      accountId: existing?.accountId ?? null,
+      status: "busy",
+      eligibility: existing?.eligibility ?? ("eligible" as PlatformEligibility),
+      tokenExpiresAt: existing?.tokenExpiresAt ?? null,
+      reauthRequired: this.computeReauthRequired(
+        existing?.tokenExpiresAt ?? null,
+      ),
+      lastOnlineAt: existing?.lastOnlineAt ?? effectiveTime,
+      lastOfflineAt: existing?.lastOfflineAt ?? null,
+      lastHeartbeatAt: effectiveTime,
+      updatedAt: effectiveTime,
+    };
+
+    if (this.dbEnabled()) {
+      const persisted = await this.repo!.upsert(record);
+      const bucket = this.getMemoryBucket(driverId);
+      bucket.set(platformCode, persisted);
+      return persisted;
+    }
+    const bucket = this.getMemoryBucket(driverId);
+    bucket.set(platformCode, record);
+    return record;
+  }
+
+  async recordHeartbeat(
+    driverId: string,
+    platformCode?: PlatformCode,
+    recordedAt?: string | null,
+  ): Promise<void> {
+    const presences = await this.listForDriver(driverId);
+    const effectiveTime = recordedAt ?? isoNow();
+
+    const targets = platformCode
+      ? presences.filter((p) => p.platformCode === platformCode)
+      : presences;
+
+    if (targets.length === 0 && platformCode) {
+      await this.setOnline(driverId, platformCode, null, effectiveTime);
+      return;
+    }
+
+    for (const target of targets) {
+      const updated: PlatformPresenceRecord = {
+        ...target,
+        lastHeartbeatAt: effectiveTime,
+        updatedAt: effectiveTime,
+      };
+      if (this.dbEnabled()) {
+        await this.repo!.upsert(updated);
+      }
+      const bucket = this.getMemoryBucket(driverId);
+      bucket.set(target.platformCode, updated);
+    }
+  }
+
+  isDriverAvailableForDispatchSync(
+    driverId: string,
+    options?: { maxHeartbeatAgeMs?: number; now?: number },
+  ): DriverAvailabilityResult {
+    const presences = this.listForDriverSync(driverId);
+    return this.evaluateAvailability(driverId, presences, options);
+  }
+
+  async isDriverAvailableForDispatch(
+    driverId: string,
+    options?: { maxHeartbeatAgeMs?: number; now?: number },
+  ): Promise<DriverAvailabilityResult> {
+    const presences = await this.listForDriver(driverId);
+    return this.evaluateAvailability(driverId, presences, options);
+  }
+
+  private evaluateAvailability(
+    driverId: string,
+    presences: PlatformPresenceRecord[],
+    options?: { maxHeartbeatAgeMs?: number; now?: number },
+  ): DriverAvailabilityResult {
+    if (!presences || presences.length === 0) {
+      return { available: true, reason: "no_presence_records" };
+    }
+
+    // 1. Check if driver is busy on ANY platform
+    const busyPresence = presences.find((p) => p.status === "busy");
+    if (busyPresence) {
+      return {
+        available: false,
+        reason: "busy_on_other_platform",
+        details: {
+          driverId,
+          busyPlatform: busyPresence.platformCode,
+          updatedAt: busyPresence.updatedAt,
+        },
+      };
+    }
+
+    // 2. Check if all platforms are offline
+    const onlinePresences = presences.filter((p) => p.status === "online");
+    if (onlinePresences.length === 0) {
+      return {
+        available: false,
+        reason: "offline",
+        details: {
+          driverId,
+          totalPlatforms: presences.length,
+          allOffline: true,
+        },
+      };
+    }
+
+    // 3. Check heartbeat expiry for online platforms
+    const maxHeartbeatAgeMs =
+      options?.maxHeartbeatAgeMs ?? DEFAULT_MAX_HEARTBEAT_AGE_MS;
+    const nowMs = options?.now ?? Date.now();
+
+    let latestHeartbeatMs = 0;
+    for (const presence of onlinePresences) {
+      const hbTime =
+        presence.lastHeartbeatAt ?? presence.lastOnlineAt ?? presence.updatedAt;
+      if (hbTime) {
+        const ms = new Date(hbTime).getTime();
+        if (ms > latestHeartbeatMs) {
+          latestHeartbeatMs = ms;
+        }
+      }
+    }
+
+    if (
+      latestHeartbeatMs === 0 ||
+      nowMs - latestHeartbeatMs > maxHeartbeatAgeMs
+    ) {
+      return {
+        available: false,
+        reason: "expired_heartbeat",
+        details: {
+          driverId,
+          lastHeartbeatAt: latestHeartbeatMs
+            ? new Date(latestHeartbeatMs).toISOString()
+            : null,
+          ageMs: latestHeartbeatMs ? nowMs - latestHeartbeatMs : null,
+          maxHeartbeatAgeMs,
+        },
+      };
+    }
+
+    return { available: true };
   }
 
   private listAdapterHealthSafely(): AdapterHealthRecord[] {
