@@ -7,6 +7,7 @@ Owner：Gemini；Reviewer：Codex2。日期：2026-09-10 UTC。
 - **工作分支 (Branch)**：`gemini/sr-contract-read-001`
 - **工作樹目錄 (Worktree)**：`/home/lupin/workspace/drts-fleet-platform/.artifacts/worktrees/auto/gemini-sr-contract-read-001`
 - **基準 SHA (Base SHA)**：`8ee0afcce19a74ec1b5c928424a13d7494f4a34b` (`origin/dev`)
+- **候選 SHA (Candidate SHA)**：於 `handoff` 時以 `git rev-parse HEAD` 寫入鎖定（見 task board 與 machine truth）
 - **任務類型與工作流**：Priority P1 / Workstream `contract` / Class `implementation` / Serial Resource `registry-controller`
 - **規劃參照 (Planning Reference)**：
   - `docs/04-uat/system-remediation-20260906/source/capabilities.json` (`C134`: 調度與營運 — 合約詳情可進入並提供執行條款)
