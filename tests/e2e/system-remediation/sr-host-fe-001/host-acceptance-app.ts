@@ -76,31 +76,12 @@ export function buildHostAcceptanceCandidate(): void {
     );
   }
 
-  // `apps/api`'s compiled `bootstrap-auth.guard.js` (real, production
-  // `BootstrapAuthGuard`, required below) itself `require()`s
-  // `@drts/control-plane-auth`'s emitted `dist/index.js` via plain Node
-  // module resolution (it is already-compiled JS, not a `tsx`/Vitest-
-  // transformed source file this harness's own TS tooling can alias to
-  // source). This harness previously relied on a *separate*, external
-  // workflow step (".github/workflows/host-acceptance.yml"'s "Build
-  // workspace packages consumed by fleet-partner-portal-web") having already
-  // built that dist correctly and left it on disk — an ordering assumption
-  // this file has no control over. A real CI run
-  // (34541189923/afe7a48b) proved that assumption unsafe: the same commit's
-  // `api-sql-acceptance` job (which never runs that separate step and builds
-  // nothing for `@drts/control-plane-auth`) passed cleanly, while
-  // `browser-acceptance` (which does run it first) hit a real, logged
-  // `TypeError: extractIapJwtAssertion is not a function` inside
-  // `BootstrapAuthGuard.canActivate` for every single request — meaning
-  // whatever the other step produced was not usable at the point this
-  // process required it. Building this dependency here, from this harness's
-  // own build step, right before the isolated app is constructed, removes
-  // the dependency on that external step's ordering/output entirely.
-  execFileSync("pnpm", ["--filter", "@drts/control-plane-auth", "build"], {
-    cwd: REPO_ROOT,
-    stdio: "pipe",
-    timeout: 180_000,
-  });
+  // `pnpm --filter @drts/api... build` above already builds
+  // `@drts/control-plane-auth` too (apps/api's own `prebuild` script
+  // explicitly builds it, and pnpm's `...` dependency-inclusion does the
+  // same) — confirmed by running this exact command locally and observing
+  // `packages/control-plane-auth/dist/index.js` get (re)compiled as part of
+  // it. That is not the failure this block guards against; see below.
   if (!existsSync(CONTROL_PLANE_AUTH_DIST_INDEX)) {
     throw new Error(
       `Candidate compiled @drts/control-plane-auth not found at ${CONTROL_PLANE_AUTH_DIST_INDEX}. ` +
@@ -114,14 +95,51 @@ export function buildHostAcceptanceCandidate(): void {
   // against. Verified directly (not just "the file exists") because the
   // real CI failure was exactly this: a present, importable module whose
   // named export still resolved to `undefined`.
-  const controlPlaneAuthExports = apiRequire(
+  const controlPlaneAuthDirect = apiRequire(
     CONTROL_PLANE_AUTH_DIST_INDEX,
   ) as Record<string, unknown>;
-  if (typeof controlPlaneAuthExports.extractIapJwtAssertion !== "function") {
+  if (typeof controlPlaneAuthDirect.extractIapJwtAssertion !== "function") {
     throw new Error(
       `Candidate compiled @drts/control-plane-auth at ${CONTROL_PLANE_AUTH_DIST_INDEX} does not export ` +
         "extractIapJwtAssertion as a function — BootstrapAuthGuard would 500 on every request. " +
-        `Got: ${typeof controlPlaneAuthExports.extractIapJwtAssertion}.`,
+        `Got: ${typeof controlPlaneAuthDirect.extractIapJwtAssertion}.`,
+    );
+  }
+
+  // Root cause of the run-34542116939/1603d04d CI failure, found by
+  // reproducing it locally with the exact same `tsx`-run process this
+  // harness uses: requiring `@drts/control-plane-auth` by its BARE
+  // SPECIFIER — exactly what the compiled, real, unmodified
+  // `bootstrap-auth.guard.js` does — resolves under `tsx` to a completely
+  // EMPTY module object (`Object.keys(...).length === 0`), while requiring
+  // the identical file by its resolved absolute path (`apiRequire`d directly
+  // above) returns the correct, fully-populated module. This is a `tsx`
+  // package-`exports`-map resolution/interop quirk for this package (its
+  // `package.json` `"exports"` maps both `"import"` and `"require"` to the
+  // same CommonJS file), not anything wrong with the compiled guard or the
+  // compiled `@drts/control-plane-auth` output itself — both are the real,
+  // unmodified candidate. Fixing the package's `exports` map is out of this
+  // task's write scope (`packages/control-plane-auth/`), so this instead
+  // patches the process-wide bare-specifier resolution in place: `require()`
+  // caches by resolved specifier and returns the SAME object on every call,
+  // so copying the correct module's properties onto that cached (empty)
+  // object here — before anything else requires `@drts/control-plane-auth`
+  // by name — makes every later bare-specifier require (including the one
+  // inside `bootstrap-auth.guard.js`, loaded next) observe the real,
+  // correct exports.
+  const controlPlaneAuthBareSpecifier = apiRequire(
+    "@drts/control-plane-auth",
+  ) as Record<string, unknown>;
+  if (
+    typeof controlPlaneAuthBareSpecifier.extractIapJwtAssertion !== "function"
+  ) {
+    Object.assign(controlPlaneAuthBareSpecifier, controlPlaneAuthDirect);
+  }
+  if (typeof controlPlaneAuthBareSpecifier.extractIapJwtAssertion !== "function") {
+    throw new Error(
+      "Patching the bare-specifier '@drts/control-plane-auth' require cache " +
+        "with the correctly-resolved module did not fix extractIapJwtAssertion; " +
+        "BootstrapAuthGuard would still 500 on every request.",
     );
   }
 }
