@@ -3,10 +3,12 @@
 Decision owner: `SR-ACADEMY-BE-001-IDENTITY-CONTRACT` (Claude2). Reviewer: `Codex2`.
 Date: 2026-09-10 UTC. Scope: narrowly-scoped correction to the shared design/schema
 contract (`feature-contracts.md` §3, `schema-allocation.json` SR-ACADEMY-BE-001
-entry) that blocked `SR-ACADEMY-BE-001` implementation
-(`docs/04-uat/system-remediation-20260906/SR-ACADEMY-BE-001.md`, checkpoint SHA
-`d09cefae69816396c799c8e62fe78c0193e14e52`). This document does not implement the
-academy backend; it authorizes the identity model that the backend must use.
+entry) that blocked `SR-ACADEMY-BE-001` implementation (the parent task's own
+`SR-ACADEMY-BE-001.md` under docs/04-uat/system-remediation-20260906/, as of
+that task's checkpoint SHA `d09cefae69816396c799c8e62fe78c0193e14e52` — that
+commit lives on the parent task's branch and is not yet present on this
+branch). This document does not implement the academy backend; it authorizes
+the identity model that the backend must use.
 
 **Revision note (2026-09-10, post-review):** `Codex2` failed the prior candidate
 (`4abf9db99ad98f6e71c15ca03c077482068806aa`) because §2.2's cohort definition
@@ -158,9 +160,10 @@ own, intentionally more permissive, contract; see §1). Allocating this method
 is listed in §2.3 for the supervisor to grant before backend implementation
 resumes.
 
-The task's `read_dependencies` list a stale path,
-`apps/api/src/modules/owned-mobility/runtime-eligibility-evaluator.service.ts`;
-the real file is
+The task's `read_dependencies` list a stale path — module directory
+`owned-mobility` instead of `vehicle-eligibility` — i.e.
+apps/api/src/modules/owned-mobility/runtime-eligibility-evaluator.service.ts,
+which does not exist; the real file is
 `apps/api/src/modules/vehicle-eligibility/runtime-eligibility-evaluator.service.ts`.
 Supervisor should correct this in the task's machine record; not fixed here
 since it is outside this task's `write_scopes`.
