@@ -2,15 +2,39 @@
 
 - Task ID: `SR-QA-DISPATCH-001`
 - Title: 派車／改派／排班與自動超時驗收
-- Status: `in_progress` -> Ready for review handoff
-- Owner: `Claude`
+- Status: `in_progress` -> Ready for review handoff (re-verified by reassigned owner)
+- Owner: `Claude2`（前任 owner `Claude` 因 session resume tool marker 耗盡達 2/2 終止失敗，由 Chairman 改派；本節以下內容為 §0 之前 owner 交付、已合併至 `origin/dev` 的既有成果）
 - Reviewer: `Gemini`
-- Branch: `claude/sr-qa-dispatch-001`
-- Base SHA: `b671bfc72e8a9d969fed1c872b80abc8842ed6f9` (`origin/dev`)
-- Candidate SHA: recorded at handoff (see task-board `handoff` event)
+- Branch: `claude2/sr-qa-dispatch-001`（base `origin/dev`）
+- Base SHA（本次重驗）: `d5dd4f5dab54b3c134a77f08a6136f851aa2f95a`（`origin/dev` tip，含 `SR-QA-DISPATCH-001-UNBLOCK-HISTORY-REPAIR` PR #1952 對本任務內容的乾淨重建）
+- Candidate SHA: recorded at handoff（見 task-board `handoff` event；§0 記錄本次重驗新增的 commit）
 - Planning Ref: [`docs/04-uat/system-remediation-20260906/source/capabilities.json`](file:///home/lupin/workspace/drts-fleet-platform/docs/04-uat/system-remediation-20260906/source/capabilities.json) (`C035`, `C036`, `C037`, `C038`, `C039`, `C040`, `C041`, `C042`, `C048`, `C134`)
-- Dependencies: `SR-UAT-HARNESS-001`, `SR-OPS-MAP-001`, `UV-EXEC-016`, `SR-OPS-CONTRACT-001`, `SR-OPS-SHELL-001` — all `done` as of task pickup.
-- Worktree: `/home/lupin/workspace/drts-fleet-platform/.artifacts/worktrees/auto/claude-sr-qa-dispatch-001`
+- Dependencies: `SR-UAT-HARNESS-001`, `SR-OPS-MAP-001`, `UV-EXEC-016`, `SR-OPS-CONTRACT-001`, `SR-OPS-SHELL-001` — all `done`（本次重驗再次確認）。
+- Worktree: `/home/lupin/workspace/drts-fleet-platform/.artifacts/worktrees/auto/claude2-sr-qa-dispatch-001`
+
+---
+
+## 0. Owner 改派後的重驗紀錄（Claude2，不重做業務邏輯）
+
+前任 owner `Claude` 已完成 §1–§6 全部驗收內容並交付候選（branch `claude/sr-qa-dispatch-001`，PR #1948）；PR #1948 因 commit-trailer subject 格式與一個真實的 DB bootstrap 缺陷（`dispatch-db-persistence.test.ts` 未在隔離測試庫套用 `V0056`）被 CI 擋下。獨立子任務 `SR-QA-DISPATCH-001-UNBLOCK-HISTORY-REPAIR` 已在乾淨 commit 上重建等位元組內容（僅含上述 V0056 修正這一筆真實差異）並合併至 `origin/dev`（PR #1952，commit `d5dd4f5dab54b3c134a77f08a6136f851aa2f95a`）。
+
+Chairman 因前任 owner 的 session resume 失敗（與本任務內容無關）將 owner 改派給 `Claude2`，任務板狀態被重置為 `todo`。依 execution prompt「9/6 audit SHA 是歷史觀察而非當前程式真值；已由其他任務修復時提交目前 SHA 的回歸證據，不重做或回退」，本節記錄 `Claude2` 在當前 `origin/dev` tip（= 上述 base SHA）之上的重驗結果，不重做 §1–§6 的業務驗證：
+
+| 檢查項目 | 執行指令 | Exit Code | 結果 |
+| :--- | :--- | :--- | :--- |
+| Layer B 單元測試（重跑） | `pnpm exec vitest run tests/unit/system-remediation/sr-qa-dispatch-001/dispatch-candidates-and-assignment.test.ts tests/unit/system-remediation/sr-qa-dispatch-001/dispatch-timeout-no-supply-scheduler-gap.test.ts tests/unit/system-remediation/sr-qa-dispatch-001/dispatch-queue-checkin-checkout.test.ts tests/unit/system-remediation/sr-qa-dispatch-001/platform-presence-multiplatform-busy.test.ts` | `0` | 29 passed（與 §3.1 原始紀錄一致） |
+| Layer A DB 測試（重跑，Fail-Closed 確認） | `pnpm exec vitest run tests/unit/system-remediation/sr-qa-dispatch-001/dispatch-db-persistence.test.ts` | `1` | 6 skipped, 1 suite failed；`DATABASE_URL`/`CONCURRENCY_TEST_DATABASE_URL`/`UV_BOOKING_TEST_DATABASE_URL` 於本 VM 仍未配置，行為與 §3.1 原始紀錄一致，如實 fail-closed |
+| `git diff --check` | `git diff --check` | `0` | 無空白/格式錯誤 |
+| ESLint（本任務檔案） | `pnpm exec eslint tests/unit/system-remediation/sr-qa-dispatch-001 tests/e2e/system-remediation/sr-qa-dispatch-001 --max-warnings=0` | `0` | 0 errors, 0 warnings |
+| Prettier（本任務檔案，重跑後發現並修正） | `pnpm exec prettier --check tests/unit/system-remediation/sr-qa-dispatch-001 tests/e2e/system-remediation/sr-qa-dispatch-001` | 修正前 `1` → 修正後 `0` | `dispatch-db-persistence.test.ts` 在 history-repair 的 V0056 修正中引入 1 筆未格式化的 `pool.query(...)` 呼叫（未影響邏輯或測試結果）；已用 `pnpm exec prettier --write` 修正（3 insertions, 1 deletion），重跑 Layer A/B 測試確認行為不變 |
+
+依賴任務重驗：`SR-UAT-HARNESS-001`、`SR-OPS-MAP-001`、`UV-EXEC-016`、`SR-OPS-CONTRACT-001`、`SR-OPS-SHELL-001` 經 `ai-status.sh show` 確認皆為 `done`。
+
+follow-up 子任務 `SR-DISPATCH-SCHEDULER-001`（owner `Codex`, reviewer `Claude`, depends_on `SR-QA-DISPATCH-001`）確認已存在於任務板（狀態 `backlog`），承接 §4 的產品缺陷，不需本次重驗重建。
+
+**未做／VM 限制**：與 §5 原始記錄相同——本次重驗同樣未執行 Playwright（VM 不得啟動 dev/browser server）、未針對真實 Postgres 執行 Layer A 測試（VM 無可達 DB）。未新增、未重寫任何業務邏輯或既有測試案例。
+
+以下 §1–§6 為前任 owner `Claude` 完成、經 PR #1952 合併至 `origin/dev` 的原始驗收內容，原樣保留。
 
 ---
 
