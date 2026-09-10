@@ -1,5 +1,16 @@
 export type Locale = "en" | "zh";
 
+/**
+ * Compatibility label for callers without the server-provided environment.
+ * Translation catalogs never read deployment/build variables. The server
+ * layout supplies normalized DRTS_ENV to the shell for its explicit label.
+ */
+export function resolveAuthoritativeBankShellEnv(
+  locale: Locale = "zh",
+): string {
+  return locale === "zh" ? "未知環境" : "unknown";
+}
+
 // Bank / issuer back-office console (S3). Routes are filled in task-by-task from
 // the bank screen-requirements hand-off and shared token system; remaining routes
 // can stay scaffolded until their respective surfaces land.
@@ -17,6 +28,26 @@ const en = {
   "shell.locale": "Language",
   "shell.locale.zh": "繁",
   "shell.locale.en": "EN",
+  "shell.env": resolveAuthoritativeBankShellEnv("en"),
+  "shell.env.production": "production",
+  "shell.env.staging": "staging",
+  "shell.env.preview": "preview",
+  "shell.env.sandbox": "sandbox",
+  "shell.env.dev": "development",
+  "shell.env.mock": "mock data",
+  "shell.env.unknown": "unknown",
+  "app.environment.production": "production",
+  "app.environment.staging": "staging",
+  "app.environment.preview": "preview",
+  "app.environment.sandbox": "sandbox",
+  "app.environment.dev": "development",
+  "app.environment.mock": "mock data",
+  "app.environment.unknown": "unknown",
+  "shell.health.healthy": "API healthy",
+  "shell.health.degraded": "API degraded",
+  "shell.health.down": "API down",
+  "shell.health.unknown": "unknown",
+  "shell.health.lastChecked": "last checked",
   "shell.guestAvatar": "Guest",
   "shell.account": "Account",
   "shell.signedOut": "Signed out",
@@ -709,6 +740,26 @@ const zh: Record<keyof typeof en, string> = {
   "shell.locale": "語系",
   "shell.locale.zh": "繁",
   "shell.locale.en": "EN",
+  "shell.env": resolveAuthoritativeBankShellEnv("zh"),
+  "shell.env.production": "正式環境",
+  "shell.env.staging": "預發環境",
+  "shell.env.preview": "預覽環境",
+  "shell.env.sandbox": "沙盒環境",
+  "shell.env.dev": "開發環境",
+  "shell.env.mock": "模擬資料",
+  "shell.env.unknown": "未知環境",
+  "app.environment.production": "正式環境",
+  "app.environment.staging": "預發環境",
+  "app.environment.preview": "預覽環境",
+  "app.environment.sandbox": "沙盒環境",
+  "app.environment.dev": "開發環境",
+  "app.environment.mock": "模擬資料",
+  "app.environment.unknown": "未知環境",
+  "shell.health.healthy": "API 正常",
+  "shell.health.degraded": "API 降級",
+  "shell.health.down": "API 中斷",
+  "shell.health.unknown": "API 未知",
+  "shell.health.lastChecked": "最近檢查",
   "shell.guestAvatar": "訪客",
   "shell.account": "帳號",
   "shell.signedOut": "已登出",
@@ -1220,7 +1271,8 @@ const zh: Record<keyof typeof en, string> = {
     "卡友 {issuer}-CH***{cardholder} · 權益 BR***{benefit}",
   "programs.exception.outOfWindow.detail": "多發於凌晨航班改票後逾 24 小時重提",
   "programs.exception.manualReview.detail": "高單價接送與跨區加價需人工覆核",
-  "programs.exception.flightChange.detail": "航班異動後重派車產生 quota 回補延遲",
+  "programs.exception.flightChange.detail":
+    "航班異動後重派車產生 quota 回補延遲",
   "programs.unit.trip": "趟",
   "programs.unit.person": "戶",
   "programs.unit.case": "件",
@@ -1373,6 +1425,9 @@ export function t(
   locale: Locale = "zh",
   params?: Record<string, string | number>,
 ): string {
+  if (key === "shell.env") {
+    return resolveAuthoritativeBankShellEnv(locale);
+  }
   const template = translations[locale][key] ?? en[key];
   if (!params) {
     return template;

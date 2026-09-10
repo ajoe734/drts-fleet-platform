@@ -4784,7 +4784,10 @@ def handle_worker_approval_state(
                 changed = True
                 if resumed:
                     return True, True
-            if latest.get("decision") == "deny":
+            # The broker denies this tool operation, not the entire live CLI
+            # session. Keep its record so cleanup cannot remove an in-use
+            # worktree while the worker chooses an authorized alternative.
+            if latest.get("decision") == "deny" and not alive:
                 worker["status"] = "failed"
                 worker["last_event_at"] = utc_now()
                 reason = latest.get("note") or "Worker approval denied."
