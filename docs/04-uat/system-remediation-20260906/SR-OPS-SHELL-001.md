@@ -92,7 +92,7 @@
 ### 5. Remote Acceptance Workflow & Playwright Harness
 - `.github/workflows/ops-shell-acceptance.yml`:
   - Dedicated GitHub-hosted acceptance runner dispatched manually with required `candidate_sha` or on push to task branches.
-  - Validates full 40-character candidate SHA, checks out exact immutable commit SHA, installs Playwright chromium, builds prerequisite packages (@drts/contracts, @drts/control-plane-auth, @drts/ui-tokens) and applications, starts preview servers, executes acceptance suite, validates zero skips / non-zero pass, and uploads evidence bundle even on failure (`if: always()`).
+  - Validates full 40-character candidate SHA, checks out exact immutable commit SHA, installs Playwright chromium, builds prerequisite packages (@drts/contracts, @drts/control-plane-auth, @drts/ui-tokens) and applications, starts preview servers, executes acceptance suite using `playwright.system-remediation.config.ts`, validates zero skips / non-zero pass, and uploads evidence bundle even on failure (`if: always()`).
 - `tests/unit/system-remediation/sr-ops-shell-001/ops-shell-and-assistant.test.ts`:
   - Automated unit and workflow contract tests verifying the workflow's dispatch trigger, branch scoping, candidate SHA verification, package/app builds, Playwright execution, and evidence upload steps.
 - `tests/e2e/system-remediation/sr-ops-shell-001/ops-shell-acceptance.spec.ts`:

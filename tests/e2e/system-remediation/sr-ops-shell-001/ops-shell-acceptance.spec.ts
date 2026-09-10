@@ -20,21 +20,17 @@ test.describe("SR-OPS-SHELL-001: Ops Shell & Assistant Browser Acceptance", () =
 
   test.beforeAll(async () => {
     recorder = new UatEvidenceRecorder({
-      taskKey: "SR-OPS-SHELL-001",
-      lane: "gemini2",
-      role: "ops",
+      taskId: "SR-OPS-SHELL-001",
+      shardIndex: 0,
       candidateSha: CANDIDATE_SHA,
       baseSha: "origin/dev",
-      outputPath: EVIDENCE_OUTPUT_PATH,
     });
   });
 
   test.afterAll(async () => {
     if (recorder) {
-      await recorder.finalize({
-        overallStatus: "passed",
-        blockerNotes: [],
-      });
+      recorder.finalize("passed");
+      recorder.saveToFile(EVIDENCE_OUTPUT_PATH);
     }
   });
 
@@ -58,7 +54,7 @@ test.describe("SR-OPS-SHELL-001: Ops Shell & Assistant Browser Acceptance", () =
       await expect(launcher).toBeVisible();
 
       // Verify dispatch board CTA and filter controls are clickable and not covered
-      const dispatchBoardHeader = page.locator('text=派車看板, text=Dispatch').first();
+      const dispatchBoardHeader = page.getByText(/派車|Dispatch/).first();
       await expect(dispatchBoardHeader).toBeVisible();
 
       // Ensure assistant panel does not obstruct central/right CTA
@@ -191,7 +187,7 @@ test.describe("SR-OPS-SHELL-001: Ops Shell & Assistant Browser Acceptance", () =
       });
 
       // Explicit invalid state banner must be present
-      const invalidBanner = page.locator('text=無效, text=Invalid, text=requires accompanying').first();
+      const invalidBanner = page.getByText(/無效|Invalid|requires accompanying/i).first();
       await expect(invalidBanner).toBeVisible();
 
       // 3. Clear filter control clears the context

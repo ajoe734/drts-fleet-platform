@@ -137,6 +137,7 @@ jobs:
         run: |
           set -o pipefail
           pnpm exec playwright test tests/e2e/system-remediation/sr-ops-shell-001/ \
+            --config=playwright.system-remediation.config.ts \
             --reporter=list,json \
             --output=.artifacts/ops-shell-acceptance/test-results 2>&1 \
             | tee -a .artifacts/ops-shell-acceptance/execution-log.txt
@@ -157,15 +158,15 @@ jobs:
           if evidence_file.exists():
               try:
                   data = json.loads(evidence_file.read_text(encoding="utf-8"))
-                  status = data.get("overallStatus", "unknown")
-                  print(f"Evidence recorded overallStatus: {status}")
+                  status = data.get("status") or data.get("overallStatus", "unknown")
+                  print(f"Evidence recorded status: {status}")
               except Exception as e:
                   print(f"Warning: could not parse evidence.json: {e}")
 
           # Check Vitest unit output in log
           if log_file.exists():
               content = log_file.read_text(encoding="utf-8")
-              if "42 passed" in content or "passed" in content:
+              if "passed" in content:
                   print("Test execution recorded in execution log.")
           PY_VALIDATE
 
