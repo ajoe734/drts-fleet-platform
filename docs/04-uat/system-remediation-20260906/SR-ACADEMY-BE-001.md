@@ -179,6 +179,16 @@ corrected shared regulatory tables (`reg.driver_training_records`,
   2. Applied optional chaining on `rosterItems[0]?.driverId` and `rosterItems[0]?.status` in
      `academy-remote-acceptance.integration.test.ts` to satisfy `noUncheckedIndexedAccess`.
   3. Cleaned `Pool` type annotation to avoid TS2307 in environments where `@types/pg` is not hoisted.
+- **Remediated CI unit test failure on candidate 3723f632c088 by strictly scoping acceptance connectionString to DRTS_ACADEMY_TEST_DATABASE_URL.**
+  In candidate `3723f632c088`, Vitest glob-matched `tests/integration/system-remediation/sr-academy-be-001/academy-remote-acceptance.integration.test.ts`
+  during generic `pnpm run test:unit` in `ci.yml` and `ci-integ.yml`. Because `ci.yml` sets `DATABASE_URL` globally
+  for all jobs but does not apply migrations or provide JWT signing keys during the unit test job, the fallback
+  `process.env.DRTS_ACADEMY_TEST_DATABASE_URL || process.env.DATABASE_URL` triggered execution against the unmigrated
+  Postgres service, failing with `relation "reg.drivers" does not exist` and `JwtKeyMaterialNotConfiguredError`.
+  Remediated by scoping `connectionString` strictly to `process.env.DRTS_ACADEMY_TEST_DATABASE_URL`.
+  In generic unit tests and local runs without the dedicated DB variable, Vitest cleanly skips the remote suite with
+  exit code 0; under `.github/workflows/academy-acceptance.yml`, `DRTS_ACADEMY_TEST_DATABASE_URL` is explicitly configured
+  along with `JWT_SECRET` and migrations, executing all 6 tests with zero skips.
 
 ## Executed checks
 

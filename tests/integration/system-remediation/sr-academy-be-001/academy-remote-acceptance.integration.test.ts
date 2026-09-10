@@ -22,8 +22,9 @@ const require = createRequire(
 );
 const { Pool } = require("pg") as any;
 
-const connectionString =
-  process.env.DRTS_ACADEMY_TEST_DATABASE_URL || process.env.DATABASE_URL;
+// Strictly scope to dedicated acceptance test DB URL to prevent execution
+// during generic test:unit runs against unmigrated database instances.
+const connectionString = process.env.DRTS_ACADEMY_TEST_DATABASE_URL;
 
 describe("SR-ACADEMY-BE-001 Real PostgreSQL Acceptance Suite", () => {
   let pool: any = null;
