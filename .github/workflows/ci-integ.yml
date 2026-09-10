@@ -254,6 +254,35 @@ jobs:
           name: voice-booking-command-postgres-${{ github.sha }}
           path: .artifacts/voice-booking-command/postgres-results.json
           if-no-files-found: warn
+      - name: Run UV-EXEC-024 real PostgreSQL two-instance race & fault matrix
+        env:
+          UV_BOOKING_TEST_DATABASE_URL: postgresql://postgres:postgres@localhost:5432/postgres
+        run: |
+          pnpm --filter @drts/contracts build
+          pnpm --filter @drts/control-plane-auth build
+          mkdir -p .artifacts/unattended-voice-postgres
+          pnpm exec vitest run tests/integration/unattended-voice-postgres.integration.test.ts \
+            --no-file-parallelism --maxConcurrency=1 \
+            --reporter=default --reporter=json \
+            --outputFile.json=.artifacts/unattended-voice-postgres/postgres-results.json
+          python3 - <<'PY_GATE'
+          import json
+          from pathlib import Path
+          report = json.loads(Path('.artifacts/unattended-voice-postgres/postgres-results.json').read_text())
+          total = report.get('numTotalTests', 0)
+          passed = report.get('numPassedTests', 0)
+          pending = report.get('numPendingTests', 0)
+          if total < 18 or passed != total or pending or not report.get('success'):
+              raise SystemExit(f'UV-EXEC-024 matrix incomplete: total={total}, passed={passed}, pending={pending}')
+          print(f'UV-EXEC-024 two-instance race & fault matrix: {passed} passed, none skipped')
+          PY_GATE
+      - name: Upload UV-EXEC-024 PostgreSQL evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: unattended-voice-postgres-${{ github.sha }}
+          path: .artifacts/unattended-voice-postgres/postgres-results.json
+          if-no-files-found: warn
       - name: Apply migrations
         run: pnpm db:migrate
       - name: Run integration tests

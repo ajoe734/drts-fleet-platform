@@ -1132,7 +1132,20 @@ describe("UV-EXEC-024 Real PostgreSQL Two-Instance Race & Fault Matrix", () => {
         `INSERT INTO ops.phase1_owned_orders (
           order_id,order_no,status,order_source,service_bucket,dispatch_semantics,created_at,updated_at,record
          ) VALUES ($1,$1,'created','enterprise','standard_taxi','immediate',now(),now(),$2::jsonb)`,
-        [orderBId, JSON.stringify({ orderId: orderBId })],
+        // `record` is the entire hydrated OwnedOrderRecord (OwnedMobilityRepository.parseRecord
+        // returns it as-is, with no default-filling); OwnedMobilityService.cloneOrder
+        // unconditionally spreads `approvalRequestIds`/`complianceFlags` as arrays for
+        // EVERY order in the table, so any order row missing them throws
+        // "... is not iterable" out of onModuleInit()'s loadState() hydration for the
+        // whole suite database, not just this test (UV-EXEC-024 review finding).
+        [
+          orderBId,
+          JSON.stringify({
+            orderId: orderBId,
+            approvalRequestIds: [],
+            complianceFlags: [],
+          }),
+        ],
       );
 
       const driverId = `shared-driver-${randomUUID().slice(0, 8)}`;
@@ -1256,7 +1269,20 @@ describe("UV-EXEC-024 Real PostgreSQL Two-Instance Race & Fault Matrix", () => {
         `INSERT INTO ops.phase1_owned_orders (
           order_id,order_no,status,order_source,service_bucket,dispatch_semantics,created_at,updated_at,record
          ) VALUES ($1,$1,'driver_accepted','voice_agent','owned','immediate',now(),now(),$2::jsonb)`,
-        [orderId, JSON.stringify({ orderId, status: "driver_accepted" })],
+        // See the Case 3.3 orderB seed above: every order row in this suite's
+        // shared database must carry `approvalRequestIds`/`complianceFlags` or
+        // OwnedMobilityService.onModuleInit() throws while hydrating this row,
+        // silently leaving every dispatch harness's cache empty for the rest
+        // of the file.
+        [
+          orderId,
+          JSON.stringify({
+            orderId,
+            status: "driver_accepted",
+            approvalRequestIds: [],
+            complianceFlags: [],
+          }),
+        ],
       );
 
       const driverId = `driver-${randomUUID().slice(0, 8)}`;
@@ -1419,6 +1445,301 @@ describe("UV-EXEC-024 Real PostgreSQL Two-Instance Race & Fault Matrix", () => {
       expect(
         dbGroup2Reservations.rows.every((r: { status: string }) => r.status === "held"),
       ).toBe(true);
+    });
+
+    it("Case 4.1b: Late timeout on a genuinely stale hydrated cache is still safe when a concurrent accept lands (UV-AC-047)", async () => {
+      // Unlike Case 4.1 above (both harnesses hydrate strictly AFTER the
+      // competing write commits), this drives the actual interleaving the
+      // review asked for: hydrate an instance's cache FIRST, then let a
+      // second, independent writer accept the offer underneath it, so this
+      // instance's `handleOfferTimeout` genuinely believes (from its stale
+      // cache) that the offer is still open when it decides to act.
+      const orderId = `order-stale-accept-${randomUUID()}`;
+      await pool.query(
+        `INSERT INTO ops.phase1_owned_orders (
+          order_id,order_no,status,order_source,service_bucket,dispatch_semantics,created_at,updated_at,record
+         ) VALUES ($1,$1,'assigned','voice_agent','owned','immediate',now(),now(),$2::jsonb)`,
+        [
+          orderId,
+          JSON.stringify({
+            orderId,
+            status: "assigned",
+            approvalRequestIds: [],
+            complianceFlags: [],
+          }),
+        ],
+      );
+
+      const driverId = `driver-${randomUUID().slice(0, 8)}`;
+      const vehicleId = `vehicle-${randomUUID().slice(0, 8)}`;
+      const assignId = randomUUID();
+      const dispatchJobId = randomUUID();
+      const taskId = randomUUID();
+      const groupId = randomUUID();
+      const now = new Date().toISOString();
+
+      // Seed the offer as still-pending ("assigned", reservation only "held")
+      // -- the driver has NOT accepted yet as far as the database is
+      // concerned.
+      const seedClient = await pool.connect();
+      try {
+        await seedClient.query("BEGIN");
+        await seedClient.query(
+          `INSERT INTO ops.phase1_dispatch_assignments (assignment_id, dispatch_job_id, order_id, task_id, status, created_at, updated_at, record)
+           VALUES ($1, $2, $3, $4, 'assigned', now(), now(), $5::jsonb)`,
+          [
+            assignId,
+            dispatchJobId,
+            orderId,
+            taskId,
+            JSON.stringify({
+              assignmentId: assignId,
+              dispatchJobId,
+              orderId,
+              taskId,
+              driverId,
+              vehicleId,
+              status: "assigned",
+              createdAt: now,
+              updatedAt: now,
+            }),
+          ],
+        );
+        await seedClient.query(
+          `INSERT INTO ops.dispatch_resource_reservations (
+            resource_type, resource_id, order_id, assignment_id, reservation_group_id, status
+           ) VALUES
+           ('driver', $1, $2, $3, $4, 'held'),
+           ('vehicle', $5, $2, $3, $4, 'held')`,
+          [driverId, orderId, assignId, groupId, vehicleId],
+        );
+        await seedClient.query("COMMIT");
+      } finally {
+        seedClient.release();
+      }
+
+      // The stale instance hydrates NOW, while the offer is still "assigned"
+      // in Postgres -- this is the cache it will act on below.
+      const harnessStale = createDispatchHarness();
+      await harnessStale.service.onModuleInit();
+
+      // A second, independent writer (modelled here as a raw transaction,
+      // exactly like the real accept path's own committed write shape) now
+      // accepts the offer. `harnessStale`'s cache above never observes this.
+      const acceptClient = await pool.connect();
+      try {
+        await acceptClient.query("BEGIN");
+        await acceptClient.query(
+          "UPDATE ops.phase1_dispatch_assignments SET status = 'accepted' WHERE assignment_id = $1",
+          [assignId],
+        );
+        await acceptClient.query(
+          "UPDATE ops.dispatch_resource_reservations SET status = 'occupied' WHERE assignment_id = $1",
+          [assignId],
+        );
+        await acceptClient.query("COMMIT");
+      } finally {
+        acceptClient.release();
+      }
+
+      const timeoutCmd: AutonomousDispatchTimeoutCommand = {
+        orderId,
+        targetJobId: dispatchJobId,
+        round: 1,
+        targetAssignmentId: assignId,
+        assignmentVersion: 1,
+        acceptanceDeadline: new Date(Date.now() - 5000).toISOString(),
+      };
+
+      const resultStale = await harnessStale.service
+        .getAutonomousDispatchExecutor()
+        .handleOfferTimeout(timeoutCmd);
+
+      // The stale in-memory check alone would have thought this offer was
+      // still open and expired; the DB-authoritative re-check inside
+      // `handleDispatchTimeout` (a real row lock, not this process's cache)
+      // must be what actually decides the outcome.
+      expect(resultStale.outcome).toBe("superseded_or_no_op");
+      expect(resultStale.reason).toBe("offer_already_closed");
+
+      // Verify the real winning accept was never undone or redispatched.
+      const dbAssign = await pool.query(
+        "SELECT status FROM ops.phase1_dispatch_assignments WHERE assignment_id = $1",
+        [assignId],
+      );
+      expect(dbAssign.rows[0].status).toBe("accepted");
+
+      const dbReservations = await pool.query<{ status: string }>(
+        "SELECT status FROM ops.dispatch_resource_reservations WHERE reservation_group_id = $1",
+        [groupId],
+      );
+      expect(
+        dbReservations.rows.every((r: { status: string }) => r.status === "occupied"),
+      ).toBe(true);
+
+      const dbOrder = await pool.query(
+        "SELECT status FROM ops.phase1_owned_orders WHERE order_id = $1",
+        [orderId],
+      );
+      expect(dbOrder.rows[0].status).not.toBe("redispatch_required");
+    });
+
+    it("Case 4.1c: Late timeout on a genuinely stale hydrated cache is still safe when a concurrent replace lands (UV-AC-047)", async () => {
+      // Same interleaving as Case 4.1b, but the concurrent writer replaces
+      // the offer (cancel + release, then a fresh assignment) instead of
+      // accepting it -- the stale cache must not be able to undo the
+      // replacement either.
+      const orderId = `order-stale-replace-${randomUUID()}`;
+      await pool.query(
+        `INSERT INTO ops.phase1_owned_orders (
+          order_id,order_no,status,order_source,service_bucket,dispatch_semantics,created_at,updated_at,record
+         ) VALUES ($1,$1,'assigned','voice_agent','owned','immediate',now(),now(),$2::jsonb)`,
+        [
+          orderId,
+          JSON.stringify({
+            orderId,
+            status: "assigned",
+            approvalRequestIds: [],
+            complianceFlags: [],
+          }),
+        ],
+      );
+
+      const driverId = `driver-${randomUUID().slice(0, 8)}`;
+      const vehicleId = `vehicle-${randomUUID().slice(0, 8)}`;
+      const assign1Id = randomUUID();
+      const dispatchJob1Id = randomUUID();
+      const task1Id = randomUUID();
+      const group1Id = randomUUID();
+      const now = new Date().toISOString();
+
+      const seedClient = await pool.connect();
+      try {
+        await seedClient.query("BEGIN");
+        await seedClient.query(
+          `INSERT INTO ops.phase1_dispatch_assignments (assignment_id, dispatch_job_id, order_id, task_id, status, created_at, updated_at, record)
+           VALUES ($1, $2, $3, $4, 'assigned', now(), now(), $5::jsonb)`,
+          [
+            assign1Id,
+            dispatchJob1Id,
+            orderId,
+            task1Id,
+            JSON.stringify({
+              assignmentId: assign1Id,
+              dispatchJobId: dispatchJob1Id,
+              orderId,
+              taskId: task1Id,
+              driverId,
+              vehicleId,
+              status: "assigned",
+              createdAt: now,
+              updatedAt: now,
+            }),
+          ],
+        );
+        await seedClient.query(
+          `INSERT INTO ops.dispatch_resource_reservations (
+            resource_type, resource_id, order_id, assignment_id, reservation_group_id, status
+           ) VALUES
+           ('driver', $1, $2, $3, $4, 'held'),
+           ('vehicle', $5, $2, $3, $4, 'held')`,
+          [driverId, orderId, assign1Id, group1Id, vehicleId],
+        );
+        await seedClient.query("COMMIT");
+      } finally {
+        seedClient.release();
+      }
+
+      // Stale hydration, taken while Offer 1 still looks "assigned".
+      const harnessStale = createDispatchHarness();
+      await harnessStale.service.onModuleInit();
+
+      // Independent writer replaces Offer 1 with Offer 2 for the same order.
+      const assign2Id = randomUUID();
+      const dispatchJob2Id = randomUUID();
+      const task2Id = randomUUID();
+      const group2Id = randomUUID();
+      const replaceClient = await pool.connect();
+      try {
+        await replaceClient.query("BEGIN");
+        await replaceClient.query(
+          "UPDATE ops.phase1_dispatch_assignments SET status = 'cancelled' WHERE assignment_id = $1",
+          [assign1Id],
+        );
+        await replaceClient.query(
+          "UPDATE ops.dispatch_resource_reservations SET status = 'released' WHERE assignment_id = $1",
+          [assign1Id],
+        );
+        await replaceClient.query(
+          `INSERT INTO ops.phase1_dispatch_assignments (assignment_id, dispatch_job_id, order_id, task_id, status, created_at, updated_at, record)
+           VALUES ($1, $2, $3, $4, 'assigned', now(), now(), $5::jsonb)`,
+          [
+            assign2Id,
+            dispatchJob2Id,
+            orderId,
+            task2Id,
+            JSON.stringify({
+              assignmentId: assign2Id,
+              dispatchJobId: dispatchJob2Id,
+              orderId,
+              taskId: task2Id,
+              driverId,
+              vehicleId,
+              status: "assigned",
+              createdAt: new Date().toISOString(),
+              updatedAt: new Date().toISOString(),
+            }),
+          ],
+        );
+        await replaceClient.query(
+          `INSERT INTO ops.dispatch_resource_reservations (
+            resource_type, resource_id, order_id, assignment_id, reservation_group_id, status
+           ) VALUES
+           ('driver', $1, $2, $3, $4, 'held'),
+           ('vehicle', $5, $2, $3, $4, 'held')`,
+          [driverId, orderId, assign2Id, group2Id, vehicleId],
+        );
+        await replaceClient.query("COMMIT");
+      } finally {
+        replaceClient.release();
+      }
+
+      const timeoutCmd: AutonomousDispatchTimeoutCommand = {
+        orderId,
+        targetJobId: dispatchJob1Id,
+        round: 1,
+        targetAssignmentId: assign1Id,
+        assignmentVersion: 1,
+        acceptanceDeadline: new Date(Date.now() - 5000).toISOString(),
+      };
+
+      const resultStale = await harnessStale.service
+        .getAutonomousDispatchExecutor()
+        .handleOfferTimeout(timeoutCmd);
+
+      expect(resultStale.outcome).toBe("superseded_or_no_op");
+      expect(resultStale.reason).toBe("offer_already_closed");
+
+      // The replacement (Offer 2) must be completely untouched.
+      const dbAssign2 = await pool.query(
+        "SELECT status FROM ops.phase1_dispatch_assignments WHERE assignment_id = $1",
+        [assign2Id],
+      );
+      expect(dbAssign2.rows[0].status).toBe("assigned");
+
+      const dbGroup2Reservations = await pool.query<{ status: string }>(
+        "SELECT status FROM ops.dispatch_resource_reservations WHERE reservation_group_id = $1",
+        [group2Id],
+      );
+      expect(
+        dbGroup2Reservations.rows.every((r: { status: string }) => r.status === "held"),
+      ).toBe(true);
+
+      const dbOrder = await pool.query(
+        "SELECT status FROM ops.phase1_owned_orders WHERE order_id = $1",
+        [orderId],
+      );
+      expect(dbOrder.rows[0].status).not.toBe("redispatch_required");
     });
 
     it("Case 4.2: Callback cancel vs complete race (UV-AC-046) enforces terminal immutability and outcall fencing", async () => {

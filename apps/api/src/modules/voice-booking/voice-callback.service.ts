@@ -105,6 +105,18 @@ export interface CreateVoiceCallbackInput {
   maxAttempts?: number;
 }
 
+export interface CreateVoiceCallbackDurableInput {
+  voiceSessionId: string;
+  contactPhoneEncrypted: string;
+  contactPhoneLookupToken: string;
+  consentSnapshotHash: string;
+  reason?: string | undefined;
+  resourceScopeId?: string | null | undefined;
+  priority?: CallbackPriority | undefined;
+  scheduledAt?: string | null | undefined;
+  dueAt?: string | null | undefined;
+}
+
 export interface ClaimVoiceCallbackInput {
   taskId: string;
   operatorId: string;
@@ -880,6 +892,88 @@ export class VoiceCallbackService {
       [taskId],
     );
     return result.rows[0] ?? null;
+  }
+
+  /**
+   * Durable, real-PostgreSQL create for `voice.callback_task` (UV-EXEC-024
+   * durable-API parity with `completeCallbackDurable`/`cancelCallbackDurable`
+   * below): all fields are real, caller-supplied consent/contact evidence --
+   * SD §12.5 "沒有同意不能補造" applies here exactly as it does to the
+   * in-memory `createCallback` above, so nothing here may be filled by a
+   * fabricated default. `uq_voice_callback_task_active_session` is the real
+   * concurrency control: a lost-response retry for a session that already
+   * has an active task hits the unique violation and replays that existing
+   * row instead of racing a second one into existence, the same
+   * receipt-recovery shape used by the accept/commit command path elsewhere
+   * in this suite.
+   */
+  async createCallbackDurable(
+    input: CreateVoiceCallbackDurableInput,
+  ): Promise<{ task: VoiceCallbackTaskRecord; replayed: boolean }> {
+    if (!this.isDbBacked()) {
+      throw new Error(
+        "createCallbackDurable requires a DB-enabled databaseService.",
+      );
+    }
+    const consentSnapshotHash = input.consentSnapshotHash?.trim();
+    if (!consentSnapshotHash) {
+      throw new ApiRequestError(
+        400,
+        "CALLBACK_CONSENT_REQUIRED",
+        "Callback requires explicit customer consent; cannot fabricate without consent.",
+      );
+    }
+    const contactPhoneEncrypted = input.contactPhoneEncrypted?.trim();
+    if (!contactPhoneEncrypted) {
+      throw new ApiRequestError(
+        400,
+        "INVALID_CONTACT_PHONE",
+        "Contact phone is required for callback.",
+      );
+    }
+
+    const db = this.databaseService!;
+    try {
+      const result = await db.query<{ task_id: string }>(
+        `INSERT INTO voice.callback_task (
+           voice_session_id, contact_phone_encrypted, contact_phone_lookup_token,
+           consent_snapshot_hash, reason, resource_scope_id, priority, scheduled_at, due_at
+         ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+         RETURNING task_id`,
+        [
+          input.voiceSessionId,
+          contactPhoneEncrypted,
+          input.contactPhoneLookupToken,
+          consentSnapshotHash,
+          input.reason ?? null,
+          input.resourceScopeId ?? null,
+          input.priority ?? null,
+          input.scheduledAt ?? null,
+          input.dueAt ?? null,
+        ],
+      );
+      return {
+        task: await this.loadDbTask(result.rows[0]!.task_id),
+        replayed: false,
+      };
+    } catch (err: unknown) {
+      if ((err as { code?: string }).code === "23505") {
+        const existing = await db.query<{ task_id: string }>(
+          `SELECT task_id FROM voice.callback_task
+           WHERE voice_session_id = $1
+             AND status NOT IN ('completed', 'cancelled', 'unreachable')`,
+          [input.voiceSessionId],
+        );
+        const existingTaskId = existing.rows[0]?.task_id;
+        if (existingTaskId) {
+          return {
+            task: await this.loadDbTask(existingTaskId),
+            replayed: true,
+          };
+        }
+      }
+      throw err;
+    }
   }
 
   /**
