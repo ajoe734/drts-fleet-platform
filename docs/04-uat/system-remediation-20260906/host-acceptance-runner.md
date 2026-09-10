@@ -36,7 +36,7 @@ navigation wiring that belongs to `SR-WIRE-001`.
 
 ## 2. What was actually run, and where
 
-Two independent jobs in `.github/workflows/host-acceptance.yml`, both
+Two independent jobs in the runner workflow (`host-acceptance.yml`, on runner branch `claude2/sr-host-fe-001-acceptance-runner`), both
 GitHub-hosted only (this project's VM does not permit starting product
 dev/preview/HTTP/browser servers or Docker infrastructure, so neither job's
 servers are ever started locally):
@@ -61,8 +61,7 @@ acceptance evidence was still obtained by booting the real, unmodified
 `HostViewModule` (compiled from `apps/api/src/modules/host-view/`, not
 reimplemented) together with the real `BootstrapAuthGuard`,
 `SnakeCaseInterceptor`, and `SnakeCaseExceptionFilter` in a dedicated Nest
-composition — see `tests/e2e/system-remediation/sr-host-fe-001/
-host-acceptance-app.ts`.
+composition — see `host-acceptance-app.ts` (under `sr-host-fe-001/` on runner branch `claude2/sr-host-fe-001-acceptance-runner`).
 
 This is **module-level evidence**, not full-application wiring evidence.
 Explicitly NOT exercised by either job:
@@ -185,7 +184,7 @@ The `browser-acceptance` job's own failure in the same run is a direct
 cascade of this: the isolated API server process crashes at startup for the
 same reason, so `host-browser-acceptance.spec.ts` renders real empty/failed
 states against a dead backend rather than the intended data-backed states.
-This runner's own readiness-wait script (`.github/workflows/host-acceptance.yml`)
+This runner's own readiness-wait script (`host-acceptance.yml` on runner branch `claude2/sr-host-fe-001-acceptance-runner`)
 had two, independent bugs of its own that had to be fixed across two commits
 to get an honest failure signal instead of a misleading one:
 
@@ -292,8 +291,7 @@ section is not a claim that the coverage below has been demonstrated on
 GitHub Actions; it is the suite's designed scope, unblocked and ready to run
 the moment the owning task fixes the bootstrap crashes.**
 
-`tests/e2e/system-remediation/sr-host-fe-001/host-api-sql-acceptance.test.ts`
-(real HTTP + real SQL, isolated composition):
+`host-api-sql-acceptance.test.ts` (under `sr-host-fe-001` acceptance harness on runner branch `claude2/sr-host-fe-001-acceptance-runner`; real HTTP + real SQL, isolated composition):
 
 - Anonymous request → 401; wrong-realm identity → 403.
 - Owner isolation across Host A, Host B, and an unrelated real identity with
@@ -313,8 +311,7 @@ the moment the owning task fixes the bootstrap crashes.**
 - A guardrail test asserting every identifier used in the suite is
   fictional UAT data.
 
-`tests/e2e/system-remediation/sr-host-fe-001/host-browser-acceptance.spec.ts`
-(real Chromium against the real, built Next.js server):
+`host-browser-acceptance.spec.ts` (under `sr-host-fe-001` acceptance harness on runner branch `claude2/sr-host-fe-001-acceptance-runner`; real Chromium against the real, built Next.js server):
 
 - Host A's vehicle list renders real owned vehicles, never Host B's.
 - Switching identity from Host A to Host B (fresh browser context) shows
