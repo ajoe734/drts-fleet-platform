@@ -94,7 +94,13 @@ Codex 審查 candidate `5a0320b21` 時提出兩項判定：
   2. **嚴格 Health Check 探測**：更新 health check 為 `curl -sfL http://localhost:3003/dispatch` 與 `curl -sfL http://localhost:3002/audit`，強制檢查 2xx/3xx 成功回應，並在逾時 60s 時印出伺服器 stderr 日誌協助除錯。
   3. **Ops Shell 跨應用深層連結攔截**：在 `ops-shell.tsx` 加入 `handleClickCapture`，攔截 `/audit`、`/_apps/platform-admin` 等跨 app 導航並透過 `resolvePlatformAdminHref` 解析至 platform-admin 正確 URL 開啟新分頁，避免 Ops Console 內部 404。
   4. **助理元件關閉完全卸載與焦點返還**：在 `assistant-widget.tsx` 中於收合（`widget.closed === true`）時完全不掛載 `<section>` 面板，並利用 `requestAnimationFrame` 確保焦點精準返還發射器按鈕。
-  5. **整合 UatEvidenceRecorder**：在 `ops-shell-acceptance.spec.ts` 中全面接入 `UatEvidenceRecorder` 與 `attachBrowserEvidenceCollector`，產出符合規範之結構化證據。
+
+### 1.6 Candidate 0953d12b7 CI Root Typecheck TS2345 修復
+
+- **CI Failure 現象**：在 GitHub Actions run `34516484156`（PR #1939）中，`pnpm run typecheck`（`pnpm typecheck:root`）報錯：
+  `tests/unit/system-remediation/sr-ops-shell-001/workflow.test.ts(27,30): error TS2345: Argument of type 'string | undefined' is not assignable to parameter of type 'string'.`
+- **根因**：`timeoutMatch![1]` 在 TypeScript `noUncheckedIndexedAccess: true` 嚴格陣列檢索模式下型別為 `string | undefined`，傳遞給 `parseInt` 引發 TS2345 型別不相容。
+- **修復**：改為 `parseInt(timeoutMatch?.[1] ?? "0", 10)`，安全預設 fallback，使 root tsc 嚴格型別檢查順利通過。
 
 ## 2. 解決方案與架構設計
 

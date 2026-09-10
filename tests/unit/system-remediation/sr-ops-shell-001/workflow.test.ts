@@ -24,7 +24,7 @@ describe("SR-OPS-SHELL-001: Ops Shell Remote Acceptance Workflow", () => {
 
     const timeoutMatch = content.match(/timeout-minutes:\s*(\d+)/);
     expect(timeoutMatch).not.toBeNull();
-    const timeout = parseInt(timeoutMatch![1], 10);
+    const timeout = parseInt(timeoutMatch?.[1] ?? "0", 10);
     expect(timeout).toBeLessThanOrEqual(30);
   });
 
