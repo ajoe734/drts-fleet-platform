@@ -45,6 +45,7 @@
 <script type="text/babel" src="ops-av-fallback.jsx"></script>
 <script type="text/babel" src="ops-sos.jsx"></script>
 <script type="text/babel" src="ops-mtx-queue.jsx"></script>
+<script type="text/babel" src="ops-leave.jsx"></script>
 
 <script type="text/babel">
 const TWEAK_DEFAULTS = /*EDITMODE-BEGIN*/{
@@ -131,6 +132,18 @@ function App() {
           <DCArtboard id="revenue" label="收益審視 / Revenue + mismatch (Q-OPS14)" width={W} height={H}><Bare><OC_Revenue theme={th} /></Bare></DCArtboard>
           <DCArtboard id="attendance" label="出勤 / Attendance" width={W} height={H}><Bare><OC_Attendance theme={th} /></Bare></DCArtboard>
           <DCArtboard id="maintenance" label="車輛保修 / Maintenance" width={W} height={H}><Bare><OC_Maintenance theme={th} /></Bare></DCArtboard>
+        </DCSection>
+
+        <DCSection id="leave" title="05d · 請假管理 Leave Management (Family 1 · N01/C052) · SR-LEAVE-FE-001-CANVAS" subtitle="轄下司機假單審核 + 班表調離連動 + 409 stale-state recheck · 契約詳見 leave-screen-contract.md">
+          <DCArtboard id="leave-list-pending" label="請假列表 · 待審核" width={W} height={H}><Hero url="/leave?status=pending"><OC_Leave theme={th} tab="pending" /></Hero></DCArtboard>
+          <DCArtboard id="leave-list-all" label="請假列表 · 全部" width={W} height={H}><Bare><OC_Leave theme={th} tab="all" /></Bare></DCArtboard>
+          <DCArtboard id="leave-list-empty" label="請假列表 · filtered_empty" width={W} height={H}><Bare><OC_Leave theme={th} tab="withdrawn" items={[]} /></Bare></DCArtboard>
+          <DCArtboard id="leave-list-error" label="請假列表 · fetch_failed + retry" width={W} height={H}><Bare><OC_Leave theme={th} tab="pending" error /></Bare></DCArtboard>
+          <DCArtboard id="leave-detail-pending" label="請假詳情 · pending · approve/reject live" width={W} height={H}><Hero url="/leave/lv_d82a1b5c"><OC_LeaveDetail theme={th} variant="pending" /></Hero></DCArtboard>
+          <DCArtboard id="leave-detail-reject-modal" label="請假詳情 · 駁回需填原因 (requiresReason)" width={W} height={H}><Bare><OC_LeaveDetail theme={th} variant="reject_modal" /></Bare></DCArtboard>
+          <DCArtboard id="leave-detail-approved" label="請假詳情 · approved · impactedShiftIds + leaveReassigned" width={W} height={H}><Bare><OC_LeaveDetail theme={th} variant="approved" /></Bare></DCArtboard>
+          <DCArtboard id="leave-detail-rejected" label="請假詳情 · rejected · reviewNotes · 終態" width={W} height={H}><Bare><OC_LeaveDetail theme={th} variant="rejected" /></Bare></DCArtboard>
+          <DCArtboard id="leave-detail-conflict" label="請假詳情 · 409 LEAVE_INVALID_STATE_TRANSITION (stale recheck)" width={W} height={H}><Bare><OC_LeaveDetail theme={th} variant="conflict" /></Bare></DCArtboard>
         </DCSection>
 
         <DCSection id="registry" title="06 · 主資料 Registry" subtitle="3 個新 detail route (Q-OPS01/02/03)">

@@ -40,6 +40,9 @@
 <script type="text/babel" src="driver-supply.jsx"></script>
 <script type="text/babel" src="driver-safety-operator.jsx"></script>
 <script type="text/babel" src="driver-sos.jsx"></script>
+<script type="text/babel" src="ios-frame.jsx"></script>
+<script type="text/babel" src="android-frame.jsx"></script>
+<script type="text/babel" src="driver-leave.jsx"></script>
 
 <script type="text/babel">
 const TWEAK_DEFAULTS = /*EDITMODE-BEGIN*/{
@@ -163,6 +166,54 @@ function App() {
         <DCSection id="settings" title="07 · Settings (spec §5.10 + Q-DRV05/13/14)">
           <DCArtboard id="settings" label="設定 · 4 reauth mechs · auto-accept per-platform · max radius km" width={W} height={H}>
             {pad(<Phone tab="settings"><DRV_Settings theme={t} /></Phone>)}
+          </DCArtboard>
+        </DCSection>
+
+        <DCSection id="leave" title="08 · 請假 Leave (Family 1 · N01/C052) · SR-LEAVE-FE-001-CANVAS" subtitle="申請/撤回/列表 + 日期時區驗證 + 伺服器衝突 + 鍵盤安全區 · 契約詳見 leave-screen-contract.md">
+          <DCArtboard id="leave-list-pending" label="我的假單 · 待審核" width={W} height={H}>
+            {pad(<PhoneRaw tab="settings"><DRV_LeaveList theme={t} tab="pending" /></PhoneRaw>)}
+          </DCArtboard>
+          <DCArtboard id="leave-list-approved" label="我的假單 · 已核准 · 顯示調離班次" width={W} height={H}>
+            {pad(<PhoneRaw tab="settings"><DRV_LeaveList theme={t} tab="approved" /></PhoneRaw>)}
+          </DCArtboard>
+          <DCArtboard id="leave-list-empty" label="我的假單 · filtered_empty" width={W} height={H}>
+            {pad(<PhoneRaw tab="settings"><DRV_LeaveList theme={t} tab="withdrawn" items={[]} /></PhoneRaw>)}
+          </DCArtboard>
+          <DCArtboard id="leave-list-error" label="我的假單 · fetch_failed + retry" width={W} height={H}>
+            {pad(<PhoneRaw tab="settings"><DRV_LeaveList theme={t} tab="pending" error /></PhoneRaw>)}
+          </DCArtboard>
+          <DCArtboard id="leave-create-idle" label="申請假單 · idle" width={W} height={H}>
+            {pad(<PhoneRaw tab="settings"><DRV_LeaveCreate theme={t} /></PhoneRaw>)}
+          </DCArtboard>
+          <DCArtboard id="leave-create-timerange" label="申請假單 · LEAVE_INVALID_TIME_RANGE (endTime<=startTime)" width={W} height={H}>
+            {pad(<PhoneRaw tab="settings"><DRV_LeaveCreate theme={t} startLocal="09/10 20:00" endLocal="09/10 18:00" errors={{ endTime: 'endTime 必須晚於 startTime · endTime must be after startTime' }} /></PhoneRaw>)}
+          </DCArtboard>
+          <DCArtboard id="leave-create-past" label="申請假單 · 起始時間逾 15 分鐘寬限" width={W} height={H}>
+            {pad(<PhoneRaw tab="settings"><DRV_LeaveCreate theme={t} startLocal="09/09 09:00" errors={{ startTime: 'startTime 早於現在 15 分鐘以上，逾寬限期 · exceeds 15-minute grace' }} /></PhoneRaw>)}
+          </DCArtboard>
+          <DCArtboard id="leave-create-conflict" label="申請假單 · 409 LEAVE_OVERLAPPING_REQUEST" width={W} height={H}>
+            {pad(<PhoneRaw tab="settings"><DRV_LeaveCreate theme={t} serverError={{ code: 'LEAVE_OVERLAPPING_REQUEST', title: '時間區間重疊', message: '此區間與您既有 pending 或 approved 假單重疊，請調整時間或先撤回原假單。' }} /></PhoneRaw>)}
+          </DCArtboard>
+          <DCArtboard id="leave-create-submitting" label="申請假單 · submitting" width={W} height={H}>
+            {pad(<PhoneRaw tab="settings"><DRV_LeaveCreate theme={t} submitting /></PhoneRaw>)}
+          </DCArtboard>
+          <DCArtboard id="leave-create-kb-ios" label="申請假單 · iOS 鍵盤展開 · focus=reason · CTA 仍在安全區可見" width={W} height={H}>
+            {pad(<PhoneRaw tab="settings" tabHidden><DRV_LeaveCreate theme={t} focusField="reason" keyboard="ios" /></PhoneRaw>)}
+          </DCArtboard>
+          <DCArtboard id="leave-create-kb-android" label="申請假單 · Android 鍵盤展開 · focus=reason" width={W} height={H}>
+            {pad(<PhoneRaw tab="settings" tabHidden><DRV_LeaveCreate theme={t} focusField="reason" keyboard="android" /></PhoneRaw>)}
+          </DCArtboard>
+          <DCArtboard id="leave-detail-pending" label="假單詳情 · pending · 可撤回" width={W} height={H}>
+            {pad(<PhoneRaw tab="settings"><DRV_LeaveDetail theme={t} variant="pending" /></PhoneRaw>)}
+          </DCArtboard>
+          <DCArtboard id="leave-detail-approved" label="假單詳情 · approved · impactedShiftIds" width={W} height={H}>
+            {pad(<PhoneRaw tab="settings"><DRV_LeaveDetail theme={t} variant="approved" /></PhoneRaw>)}
+          </DCArtboard>
+          <DCArtboard id="leave-detail-rejected" label="假單詳情 · rejected · reviewNotes · 終態無動作" width={W} height={H}>
+            {pad(<PhoneRaw tab="settings"><DRV_LeaveDetail theme={t} variant="rejected" /></PhoneRaw>)}
+          </DCArtboard>
+          <DCArtboard id="leave-detail-forbidden" label="假單詳情 · 403 LEAVE_FORBIDDEN_ACCESS" width={W} height={H}>
+            {pad(<PhoneRaw tab="settings"><DRV_LeaveDetail theme={t} variant="forbidden" /></PhoneRaw>)}
           </DCArtboard>
         </DCSection>
 
