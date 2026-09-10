@@ -13,8 +13,10 @@ import {
   BANK_CONSOLE_ROLE_COOKIE,
   BANK_CONSOLE_SESSION_COOKIE,
   bankConsoleHref,
+  canViewSettlementAmounts,
   getBankConsoleSession,
   resolveServerSessionRole,
+  type BankConsoleRole,
 } from "@/lib/session";
 import { tenantDisplayText } from "@/lib/tenant-display";
 import { type StatementStatus } from "@/lib/statements";
@@ -62,6 +64,20 @@ function formatCurrency(amount: number, locale: Locale) {
     currency: "TWD",
     maximumFractionDigits: 0,
   }).format(amount);
+}
+
+// Non-digit placeholder so a restricted role can never infer a real figure's
+// length or shape from the rendered HTML.
+const RESTRICTED_AMOUNT_PLACEHOLDER = "••••••";
+
+function formatAmountForRole(
+  amount: number,
+  locale: Locale,
+  role: BankConsoleRole,
+) {
+  return canViewSettlementAmounts(role)
+    ? formatCurrency(amount, locale)
+    : RESTRICTED_AMOUNT_PLACEHOLDER;
 }
 
 export default async function StatementDetailPage({
@@ -186,22 +202,38 @@ export default async function StatementDetailPage({
       <section className="surface-grid surface-grid-wide">
         <SurfaceCard
           kicker={t("statements.metrics.kicker", locale)}
-          title={formatCurrency(statement.totalFareAmount, locale)}
+          title={formatAmountForRole(
+            statement.totalFareAmount,
+            locale,
+            session.role,
+          )}
           description={t("statements.detail.metrics.fare", locale)}
         />
         <SurfaceCard
           kicker={t("statements.metrics.kicker", locale)}
-          title={formatCurrency(statement.totalSubsidisedAmount, locale)}
+          title={formatAmountForRole(
+            statement.totalSubsidisedAmount,
+            locale,
+            session.role,
+          )}
           description={t("statements.detail.metrics.subsidised", locale)}
         />
         <SurfaceCard
           kicker={t("statements.metrics.kicker", locale)}
-          title={formatCurrency(statement.totalIssuerPayableAmount, locale)}
+          title={formatAmountForRole(
+            statement.totalIssuerPayableAmount,
+            locale,
+            session.role,
+          )}
           description={t("statements.detail.metrics.issuerPayable", locale)}
         />
         <SurfaceCard
           kicker={t("statements.metrics.kicker", locale)}
-          title={formatCurrency(statement.totalPaidAmount, locale)}
+          title={formatAmountForRole(
+            statement.totalPaidAmount,
+            locale,
+            session.role,
+          )}
           description={t("statements.detail.metrics.paid", locale)}
         />
         <SurfaceCard
@@ -340,9 +372,19 @@ export default async function StatementDetailPage({
                   <span>{formatDate(trip.tripDate)}</span>
                 </div>
               </Td>
-              <Td mono>{formatCurrency(trip.fareAmount, locale)}</Td>
-              <Td mono>{formatCurrency(trip.subsidisedAmount, locale)}</Td>
-              <Td mono>{formatCurrency(trip.paidAmount, locale)}</Td>
+              <Td mono>
+                {formatAmountForRole(trip.fareAmount, locale, session.role)}
+              </Td>
+              <Td mono>
+                {formatAmountForRole(
+                  trip.subsidisedAmount,
+                  locale,
+                  session.role,
+                )}
+              </Td>
+              <Td mono>
+                {formatAmountForRole(trip.paidAmount, locale, session.role)}
+              </Td>
               <Td mono>{trip.benefitReferenceMasked}</Td>
               <Td mono>{trip.cardholderReferenceMasked}</Td>
               <Td mono>{trip.cardReferenceMasked}</Td>

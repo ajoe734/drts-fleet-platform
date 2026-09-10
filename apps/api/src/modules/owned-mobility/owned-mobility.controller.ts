@@ -42,6 +42,7 @@ import type {
   CancelReferralPassengerTripCommand,
   CreateReferralPassengerBookingCommand,
   SubmitReferralPassengerRatingCommand,
+  TenantBookingListQuery,
 } from "@drts/contracts";
 
 import {
@@ -154,6 +155,42 @@ export class OwnedMobilityController {
     }
 
     return normalizedTenantId;
+  }
+
+  private assertTenantAccessScope(
+    targetTenantId: string,
+    identity: BootstrapRequestIdentity | null | undefined,
+  ) {
+    if (!identity || !identity.actorId) {
+      throw new ApiRequestError(
+        HttpStatus.UNAUTHORIZED,
+        "AUTH_REQUIRED",
+        "Authenticated tenant identity is required.",
+      );
+    }
+
+    const isPlatformOrSystem =
+      identity.realm === "platform" ||
+      identity.realm === "system" ||
+      identity.actorType === "platform_admin" ||
+      identity.actorType === "system" ||
+      identity.roleFamilies?.includes("platform");
+
+    if (isPlatformOrSystem) {
+      return;
+    }
+
+    if (!identity.tenantId || identity.tenantId !== targetTenantId) {
+      throw new ApiRequestError(
+        HttpStatus.FORBIDDEN,
+        "TENANT_SCOPE_MISMATCH",
+        "Cross-tenant identity access is forbidden. Principal tenantId does not match target tenantId.",
+        {
+          targetTenantId,
+          principalTenantId: identity.tenantId ?? null,
+        },
+      );
+    }
   }
 
   @Post("orders")
@@ -458,15 +495,29 @@ export class OwnedMobilityController {
 
   @Get("tenant/bookings")
   @Throttle(READ_HEAVY_RATE_LIMIT)
-  listTenantBookings(
+  async listTenantBookings(
+    @Query() query: TenantBookingListQuery,
+    @CurrentIdentity() identity: BootstrapRequestIdentity | null,
     @Headers("x-tenant-id") tenantId?: string,
     @Headers("x-request-id") requestId?: string,
   ) {
-    const bookings = this.ownedMobilityService.listTenantBookings(
-      this.requireTenantId(tenantId),
+    const resolvedTenantId = this.requireTenantId(tenantId);
+    this.assertTenantAccessScope(resolvedTenantId, identity);
+    const bookings = await this.ownedMobilityService.listTenantBookings(
+      resolvedTenantId,
+      {
+        ...query,
+        page: query?.page ?? 1,
+        pageSize: query?.pageSize ?? 20,
+      },
+      identity,
     );
     return toApiSuccessEnvelope(
-      toApiListData(bookings.items, bookings.pagination),
+      {
+        items: bookings.items,
+        pagination: bookings.pagination,
+        pageInfo: bookings.pagination,
+      },
       requestId,
     );
   }

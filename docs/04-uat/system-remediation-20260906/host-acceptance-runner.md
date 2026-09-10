@@ -214,14 +214,23 @@ inside the substitution before applying the empty-string fallback:
 applied to both the API and portal readiness waits. This was verified locally
 against a closed port under `bash -e` (correctly resolves to `code=000` and
 reaches the end of the script) before being pushed for a real re-run — see
-§5 for that run's result. The bootstrap crash itself remains a product
-defect in `apps/api/src/modules/host-view/host-view.controller.ts`, out of
-this task's write scope (owned by `SR-HOST-BE-001`), and is not fixed here.
+§5 for that run's result. The bootstrap crash was a product defect in
+`apps/api/src/modules/host-view/host-view.controller.ts`, out of this task's
+write scope (owned by `SR-HOST-BE-001`) — not fixed by this task.
 
-**Suggested fix for the owning task:** rename the four bare wildcards to
-named wildcards, e.g. `@Post("vehicles*splat")` (and matching `Put`/`Patch`/
-`Delete`), which is the `path-to-regexp@8.4.2`-compatible equivalent of
-"match any path under `vehicles`".
+**Resolution (`SR-HOST-BE-001-POST-ACCEPTANCE-REPAIR-20260910`, merged to
+`dev` as `714ccccd4c302a90c398fcfef050d07dd0d39427`, PR #1951):** repaired in
+`apps/api/src/modules/host-view/host-view.controller.ts` by replacing the bare
+wildcard routes with framework-compatible routes
+`["vehicles", "vehicles/*splat"]` on `@Post`, `@Put`, `@Patch`, and `@Delete`.
+This eliminates the `path-to-regexp@8.4.2` `Missing parameter name` exception
+during route table compilation, matches both the exact `/api/host/vehicles`
+endpoint and all nested subpaths (`/api/host/vehicles/*`), and preserves the
+405 Method Not Allowed mutation rejection contract under partner realm
+authentication. Verified by that task via focused Vitest regression tests
+(`sr-host-be-001.test.ts` Suite 12) and NestJS application bootstrap; this
+runner independently re-verifies it with real remote HTTP acceptance — see
+§5.
 
 ### 3.4 [BLOCKING, second independent crash] `apps/api/dist/modules/tenant-partner/tenant-approval-rule-evaluator.js` throws `TENANT_APPROVAL_RULE_CONDITION_FIELDS is not iterable` on the standalone-server bootstrap path
 
@@ -264,8 +273,26 @@ the `vehicles*` route-binding crash; `browser-acceptance` via the standalone
 `host-acceptance-server.ts` process hits this tenant-partner crash instead,
 before ever reaching route binding. Fixing only §3.3 does not by itself
 prove `browser-acceptance` would then pass — this crash would very likely
-still block it. Both are reported to `SR-HOST-BE-001`'s owners as follow-up
-work; neither is fixed here.
+still block it by itself; both were reported to `SR-HOST-BE-001`'s owners as
+follow-up work.
+
+**Resolution (`SR-HOST-BE-001-POST-ACCEPTANCE-REPAIR-20260910`, merged to
+`dev` as `714ccccd4c302a90c398fcfef050d07dd0d39427`, PR #1951):** repaired in
+`apps/api/src/modules/tenant-partner/tenant-approval-rule-evaluator.ts`. Root
+cause: during standalone server bootstrap under `tsx`, TypeScript resolution
+and module loader interop in `apps/api` caused the runtime value of
+`contracts_1.TENANT_APPROVAL_RULE_CONDITION_FIELDS` to evaluate to `undefined`
+at the time `tenant-approval-rule-evaluator.ts` executed top-level
+`const KNOWN_CONDITION_FIELDS = new Set([...TENANT_APPROVAL_RULE_CONDITION_FIELDS]);`.
+Spreading `undefined` threw `TypeError: contracts_1.TENANT_APPROVAL_RULE_CONDITION_FIELDS is not iterable`.
+Repaired by:
+1. Providing `CANONICAL_TENANT_APPROVAL_RULE_CONDITION_FIELDS` as an immutable fallback whitelist containing all 13 canonical condition fields.
+2. Resolving condition fields safely via `RESOLVED_TENANT_APPROVAL_RULE_CONDITION_FIELDS` so `KNOWN_CONDITION_FIELDS` is always populated with an iterable array.
+3. Exporting `RESOLVED_TENANT_APPROVAL_RULE_CONDITION_FIELDS` as `TENANT_APPROVAL_RULE_CONDITION_FIELDS` to provide an explicit, guaranteed-iterable module export contract.
+Verified by that task via `pnpm exec vitest run tests/unit/system-remediation/sr-host-be-001/`
+Suite 13 and standalone `createHostAcceptanceApp()` bootstrap under `tsx`; this
+runner independently re-verifies it with a real remote browser-acceptance
+bootstrap — see §5.
 
 ## 4. Real acceptance coverage summary
 
