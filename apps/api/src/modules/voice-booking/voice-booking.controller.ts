@@ -3,12 +3,17 @@ import {
   Controller,
   Get,
   Headers,
+  Optional,
   Post,
   Query,
 } from "@nestjs/common";
 
 import { toApiSuccessEnvelope } from "../../common/api-envelope";
 import { RequireRealms } from "../../common/auth";
+import {
+  IdempotencyRepository,
+  IdempotencyService,
+} from "../../common/idempotency";
 import { VoiceBookingMetricsService, type CohortEvaluationFilter } from "../../observability/voice-booking-metrics.service";
 import {
   VoiceUsageService,
@@ -21,6 +26,10 @@ export class VoiceBookingController {
   constructor(
     private readonly voiceBookingMetricsService: VoiceBookingMetricsService,
     private readonly voiceUsageService: VoiceUsageService,
+    @Optional()
+    private readonly idempotencyService: IdempotencyService = new IdempotencyService(
+      new IdempotencyRepository(),
+    ),
   ) {}
 
   @Get("metrics/cohort")
@@ -93,21 +102,33 @@ export class VoiceBookingController {
 
   @Post("usage/reconcile")
   @RequireRealms("ops", "platform")
-  reconcileInvoice(
+  async reconcileInvoice(
     @Body()
     body: {
       invoiceRef: string;
       providerAccountId: string;
       invoiceLines: ProviderInvoiceLineItem[];
     },
+    @Headers("idempotency-key") idempotencyKey?: string,
     @Headers("x-request-id") requestId?: string,
   ) {
-    const report = this.voiceUsageService.reconcileInvoice(
-      body.invoiceRef,
-      body.providerAccountId,
-      body.invoiceLines,
-    );
+    const scope = `voice:usage:reconcile:${body.providerAccountId}`;
 
-    return toApiSuccessEnvelope(report, requestId);
+    const result = await this.idempotencyService.execute({
+      scope,
+      idempotencyKey,
+      required: true,
+      payload: body,
+      execute: async () => ({
+        data: this.voiceUsageService.reconcileInvoice(
+          body.invoiceRef,
+          body.providerAccountId,
+          body.invoiceLines,
+        ),
+        statusCode: 200,
+      }),
+    });
+
+    return toApiSuccessEnvelope(result.data, requestId);
   }
 }
