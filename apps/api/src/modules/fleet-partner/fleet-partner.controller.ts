@@ -4,6 +4,7 @@ import {
   Delete,
   Get,
   Headers,
+  Optional,
   Param,
   Post,
   Put,
@@ -63,12 +64,24 @@ import type {
 export class FleetPartnerController {
   constructor(
     private readonly fleetPartnerService: FleetPartnerService,
-    private readonly fleetPartnerCaseService: FleetPartnerCaseService,
     private readonly supplySubmissionService: SupplySubmissionService,
     private readonly supplyDocumentService: SupplyDocumentService,
     private readonly supplyReviewService: SupplyReviewService,
     private readonly supplyReadinessService: SupplyReadinessService,
+    @Optional()
+    private readonly fleetPartnerCaseService?: FleetPartnerCaseService,
   ) {}
+
+  private get caseService(): FleetPartnerCaseService {
+    if (!this.fleetPartnerCaseService) {
+      throw new ApiRequestError(
+        500,
+        "FLEET_CASE_SERVICE_UNAVAILABLE",
+        "Fleet partner case service is not configured.",
+      );
+    }
+    return this.fleetPartnerCaseService;
+  }
 
   private requireFleetPartnerId(fleetPartnerId?: string) {
     const normalizedFleetPartnerId = fleetPartnerId?.trim();
@@ -690,7 +703,7 @@ export class FleetPartnerController {
     @Headers("x-fleet-partner-id") fleetPartnerId?: string,
     @Headers("x-request-id") requestId?: string,
   ) {
-    const items = await this.fleetPartnerCaseService.listCases(
+    const items = await this.caseService.listCases(
       this.requireFleetPartnerId(fleetPartnerId),
     );
     return toApiSuccessEnvelope(toApiListData(items), requestId);
@@ -702,7 +715,7 @@ export class FleetPartnerController {
     @Param("caseId") caseId: string,
     @Headers("x-request-id") requestId?: string,
   ) {
-    const result = await this.fleetPartnerCaseService.getCaseDetail(
+    const result = await this.caseService.getCaseDetail(
       this.requireFleetPartnerId(fleetPartnerId),
       caseId,
     );
@@ -715,7 +728,7 @@ export class FleetPartnerController {
     @Param("caseId") caseId: string,
     @Headers("x-request-id") requestId?: string,
   ) {
-    const items = await this.fleetPartnerCaseService.getCaseTimeline(
+    const items = await this.caseService.getCaseTimeline(
       this.requireFleetPartnerId(fleetPartnerId),
       caseId,
     );
@@ -730,7 +743,7 @@ export class FleetPartnerController {
     @Body() command: SubmitFleetCaseReplyCommand,
     @Headers("x-request-id") requestId?: string,
   ) {
-    const result = await this.fleetPartnerCaseService.submitReply(
+    const result = await this.caseService.submitReply(
       this.requireFleetPartnerId(fleetPartnerId),
       caseId,
       this.actorId(actorId),
@@ -748,7 +761,7 @@ export class FleetPartnerController {
     @Body() command: CreateCaseAttachmentUploadUrlCommand,
     @Headers("x-request-id") requestId?: string,
   ) {
-    const result = await this.fleetPartnerCaseService.createAttachmentUploadUrl(
+    const result = await this.caseService.createAttachmentUploadUrl(
       this.requireFleetPartnerId(fleetPartnerId),
       caseId,
       this.actorId(actorId),
@@ -765,7 +778,7 @@ export class FleetPartnerController {
     @Body() command: ConfirmCaseAttachmentUploadCommand,
     @Headers("x-request-id") requestId?: string,
   ) {
-    const result = await this.fleetPartnerCaseService.confirmAttachmentUpload(
+    const result = await this.caseService.confirmAttachmentUpload(
       this.requireFleetPartnerId(fleetPartnerId),
       caseId,
       this.actorId(actorId),
@@ -781,7 +794,7 @@ export class FleetPartnerController {
     @Param("attachmentId") attachmentId: string,
     @Headers("x-request-id") requestId?: string,
   ) {
-    const result = await this.fleetPartnerCaseService.getAttachmentReadUrl(
+    const result = await this.caseService.getAttachmentReadUrl(
       this.requireFleetPartnerId(fleetPartnerId),
       caseId,
       attachmentId,
@@ -801,7 +814,7 @@ export class FleetPartnerController {
     const normalizedPartnerId = this.requireFleetPartnerId(fleetPartnerId);
     const expiresAt = Number.parseInt(expiresAtStr || "0", 10);
     const result =
-      await this.fleetPartnerCaseService.verifyAndGetAttachmentForDownload(
+      await this.caseService.verifyAndGetAttachmentForDownload(
         normalizedPartnerId,
         caseId,
         attachmentId,

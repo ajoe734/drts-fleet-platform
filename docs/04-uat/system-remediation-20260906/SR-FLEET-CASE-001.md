@@ -44,7 +44,7 @@
 | 檔案路徑 | 變更說明 |
 |---|---|
 | `apps/api/src/modules/fleet-partner/fleet-partner-case.service.ts` | 實作 `FleetPartnerCaseService`：案件列表、詳情、歷程讀取；回覆提交與冪等去重；同步至 `ComplaintService` 案件筆記；HMAC-SHA256 附件簽名與下載驗證；租戶隔離與邊界狀態判定。 |
-| `apps/api/src/modules/fleet-partner/fleet-partner.controller.ts` | 實作車行案件管理端點：`listPortalCases`、`getPortalCaseDetail`、`getPortalCaseTimeline`、`submitPortalCaseReply`、`createPortalCaseAttachmentUploadUrl`、`confirmPortalCaseAttachmentUpload`、`getPortalCaseAttachmentReadUrl`、`downloadPortalCaseAttachment`。 |
+| `apps/api/src/modules/fleet-partner/fleet-partner.controller.ts` | 實作車行案件管理端點：`listPortalCases`、`getPortalCaseDetail`、`getPortalCaseTimeline`、`submitPortalCaseReply`、`createPortalCaseAttachmentUploadUrl`、`confirmPortalCaseAttachmentUpload`、`getPortalCaseAttachmentReadUrl`、`downloadPortalCaseAttachment`；建構子置於第 6 參數並標記 `@Optional()` 確保既有單元測試相容性。 |
 | `apps/api/src/modules/fleet-partner/fleet-partner.module.ts` | 裝配 `ComplaintModule`、`AuditNotificationModule` 並註冊 `FleetPartnerCaseService`。 |
 | `apps/fleet-partner-portal-web/lib/fleet-portal-data.server.ts` | 擴充 Portal 資料層：實作 `loadCaseDetail`、`submitCaseReply`、`createCaseAttachmentUploadUrl`、`confirmCaseAttachmentUpload`、`getCaseAttachmentReadUrl` 與規範 fixture。 |
 | `apps/fleet-partner-portal-web/app/cases/page.tsx` | 事故/申訴清單頁：補齊 tab 狀態過濾（全部、車行責任、共同責任、已結案）、詳情快捷入口及錯誤指引/存取狀態連結。 |
@@ -124,6 +124,20 @@ pnpm exec vitest run tests/unit/system-remediation/sr-fleet-case-001/
 | `Controller` | `GET /api/fleet-partner/cases/:caseId/attachments/:attachmentId/download should serve binary content with headers` | 授權下載 API 與 Content-Disposition |
 | `Web Loader` | `loadCases should load and map cases with SLA breach derivation` | 前端清單 loader 與 SLA 映射 |
 | `Web Loader` | `loadCaseDetail should return full case detail, timeline, and attachments` | 前端詳情 loader (open / platform / closed) |
+
+### 3.6 既有 Controller 與全模組單元測試回歸驗證
+```sh
+pnpm --filter @drts/api test tests/unit/fleet-partner.controller.test.ts
+# > @drts/api@0.1.0 test
+# Test Files  1 passed (1)
+#      Tests  10 passed (10)
+# Exit code: 0
+
+pnpm --filter @drts/api test tests/unit
+# Test Files  118 passed (118)
+#      Tests  1123 passed (1123)
+# Exit code: 0
+```
 
 ---
 

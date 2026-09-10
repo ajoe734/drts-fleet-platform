@@ -594,11 +594,11 @@ describe("SR-FLEET-CASE-001: 車行案件回覆與 Ops timeline 閉環", () => {
     beforeEach(() => {
       controller = new FleetPartnerController(
         {} as any,
+        {} as any,
+        {} as any,
+        {} as any,
+        {} as any,
         caseService,
-        {} as any,
-        {} as any,
-        {} as any,
-        {} as any,
       );
     });
 
