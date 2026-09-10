@@ -2,14 +2,14 @@
 
 - Task: `SR-OPS-SHELL-001`
 - Owner: `Gemini`
-- Reviewer: `Codex`
+- Reviewer: `Claude`
 - Planning Ref: `docs/04-uat/system-remediation-20260906/source/capabilities.json`
-- Base SHA (`origin/dev` at merge): `074faad1400ee568c39ef046bbeb4aff3890f9c9` (前次 base: `add6694273bb1b590e82c5f1c93fb3ef46ec56df`, `7d04833053b63558c10fb678a422dff3522e0150`, `3062ea363769cc393e59384251f5aedc7e570ac5`, `6f4ac8c74ae3618b6109efd010014365a85d36d8`, 歷史 audit SHA: `6bbeaaa45`, 原始實作 base: `f759582305ca7ff1b17a0225d3dd54db22ee9a18`)
-- Current Local Head: `git merge origin/dev` completed cleanly with zero conflicts (merge commit `d1ebc54cf`)
+- Base SHA (`origin/dev` at merge): `9efb479a63ae8d27ad9a64f514bf229cfb9d7990` (`[ReviewBus] SR-CONTRACT-READ-001 Ops 合約 read model 補真營運條款 (#1906)`)
+- Current Local Head: `git merge origin/dev` completed cleanly with zero conflicts
 - PR #1648 URL: https://github.com/ajoe734/drts-fleet-platform/pull/1648
 - Worktree: `.artifacts/worktrees/auto/gemini-sr-ops-shell-001`
 - Branch: `gemini/sr-ops-shell-001`
-- Status: `blocked` (卡點已記錄於機讀狀態，保留完整驗收條件，不直接 done)
+- Status: `candidate_ready` (待 commit/push 並交接獨立審查者 Claude)
 
 ## 1. 現況盤點與根因分析（fix 前）
 
@@ -36,7 +36,7 @@
   - 在第一版 candidate `4e0e8b82e` 中，為了解決全螢幕 portal 攔截底層點擊的問題，在 `assistant-widget.tsx` 建立了 portal root 並設定 `node.style.pointerEvents = "none"`，展開面板 `shellStyle` 設定了 `pointerEvents: "auto"`。
   - **迴歸缺陷**：浮動發射器按鈕 `<button data-testid="ops-assistant-launcher">`（當 `widget.closed === true` 時呈現）的 inline style 遺漏了 `pointerEvents: "auto"` 設定。由於 CSS `pointer-events` 為繼承屬性，發射器按鈕繼承了 portal root 的 `pointer-events: none`，導致滑鼠與觸控點擊穿透按鈕，使用者一旦收合助理便無法透過滑鼠點擊重新打開（dead button）。
   - **測試缺陷**：先前的單元測試將佈局數學在測試檔中重複實現，未直接引用元件實體模組，亦無 DOM 層級的 pointer-events 繼承或 click 事件驗證。
-- **本次修復重點**：
+- **修復重點**：
   1. 於 `assistant-widget.tsx` 發射器按鈕 inline style 明確加入 `pointerEvents: "auto"`。
   2. 模組化抽取 `apps/ops-console-web/components/ops-assistant/assistant-layout.ts`，由元件與測試共用純函式（`buildPortalRootStyle`, `buildLauncherButtonStyle`, `buildShellPanelStyle`, `resolveEffectivePointerEvents`, `buildDefaultState`, `readStoredState`, `writeStoredState` 等）。
   3. 新增 DOM 事件層級測試，模擬 CSS 繼承特性，重現無設定時繼承 none 導致點擊無效的缺陷，並驗證加上 `auto` 後點擊觸發開關循環與 `localStorage` 持久化狀態。
@@ -44,160 +44,125 @@
 
 ### 1.2 Candidate af617b4388df CI Failure 根因與型別修復
 
-- **CI Failure 現象**：在 GitHub Actions run `34021153566`（PR #1648）中，`pnpm run typecheck` (`pnpm typecheck:root` -> `tsc -p tsconfig.json --noEmit`) 報錯：
+- **CI Failure 現象**：在 GitHub Actions run `34021153566`（PR #1648）中，`pnpm run typecheck` 報錯：
   `tests/unit/system-remediation/sr-ops-shell-001/assistant-widget-layout.test.ts(473,46): error TS2353: Object literal may only specify known properties, and 'key' does not exist in type '{ type: string; defaultPrevented?: boolean; }'.`
 - **根因**：單元測試檔中的 `MockElement.dispatchEvent` 參數定義為 `{ type: string; defaultPrevented?: boolean }`，未定義 index signature；而在 line 473 測試鍵盤事件時傳入了 `{ type: "keydown", key: "Escape" }`，觸發 TypeScript strict excess property check。
 - **修復**：將 `MockElement.dispatchEvent` 的事件參數擴充為 `{ type: string; defaultPrevented?: boolean; [key: string]: any }`，允許自訂事件屬性（如 `key`），使 `pnpm typecheck:root` 與 `vitest` 全面順利通過。
 
 ### 1.3 Candidate 5a0320b21 Codex Review Rejection 分類與進展
 
-Codex 審查 candidate `5a0320b21` 時提出兩項 reopen 判定：
+Codex 審查 candidate `5a0320b21` 時提出兩項判定：
 1. **P1（範疇界線與接收端契約 — Q-SR-OPS-SHELL-001）**：
-   - 審查指出 `apps/ops-console-web/app/dispatch/page.tsx:1226-1230` 預設仍導向 `/platform-admin`，line 4520 audit CTA 僅傳遞 `/audit` 且無 resource 識別；而接收端 `apps/platform-admin-web/app/audit/page.tsx:164` 呼叫 `listAuditLogs()` 未消費 URL query 參數。
-   - **分析與卡點依據**：
-     - 本任務之 `write_scopes` 僅包含 `apps/ops-console-web/components/ops-assistant/`、`apps/ops-console-web/components/ops-shell.tsx`、`tests/unit/system-remediation/sr-ops-shell-001/` 及本證據文件，**不包含** `apps/ops-console-web/app/dispatch/page.tsx` 與 `apps/platform-admin-web/app/audit/page.tsx`。
-     - 依據協同手冊與執行規範，「只改 write_scopes；額外共用檔案必須由 supervisor 擴 scope 並加入相依後才能寫」。
-     - 此外，PR #1749（`support/unblock/SR-OPS-SHELL-001/SR-OPS-SHELL-001-UNBLOCK-PLANNING-DECISION.md`）已由 Codex 與 Gemini 確立決策：保留完整驗收，不擅自修改未授權之共用頁面；由 Supervisor 審查 scope 重疊並正式將 dispatch page 授權納入 scope、確認 audit receiver 契約後，owner 方能實作該頁面之跨 app 連結。
-     - 因此 P1 屬於規格與 scope 授權之外部相依卡點（blocked），需由 Supervisor 擴充 machine-truth `write_scopes` 並確認契約。
+   - 審查指出 `apps/ops-console-web/app/dispatch/page.tsx` 預設仍導向 `/platform-admin`，audit CTA 僅傳遞 `/audit` 且無 resource 識別；而接收端 `apps/platform-admin-web/app/audit/page.tsx` 呼叫 `listAuditLogs()` 未消費 URL query 參數。
+   - 當時因上述共用頁面不在 `write_scopes` 內，依協同守則維持嚴格邊界並以 blocker 回報等待 Supervisor 擴 scope 與相依授權。
 2. **P2（測試真實性與領域實體 ID）**：
-   - 審查指出前版測試依賴手寫 MockElement，未驗證 1440/390px 幾何碰撞與真實 DRTS 領域資源識別碼。
-   - **本次修復（已完全落盤驗證）**：
-     - 於 `assistant-widget-layout.test.ts` 新增 1440x900 與 390x844 視窗的幾何邊界與命中測試（hit-testing），模擬多層 z-index 與 `pointerEvents: "none"` 穿透機制，驗證底層 dispatch 核心控制項（`dispatch-pagination-cta`、`dispatch-order-assign-cta`、`mobile-action-bar-submit`）在各種坐標點均不被 portal 攔截。
-     - 於 `audit-and-cross-app-links.test.ts` 引入 DRTS Phase 1 權威 `ActionReceipt` 契約與真實資源 ID（如 `ord-tpe-2026-8801`、`inc-tpe-2026-0042`、`aud-disp-log-20260908-991`、`act-disp-assign-20260908-01`、`usr-ops-lead-01`），驗證序列化後的審計 URL 完全命中 runtime 正確之 platform-admin origin（而非 ops-console 404 或嵌套 `/platform-admin/audit`），且所有跨 app 連結均保證 `openMode: "new_tab"`。
-     - 測試總數擴充至 41 項，全面 exit 0 通過。
+   - 於 `assistant-widget-layout.test.ts` 新增 1440x900 與 390x844 視窗的幾何邊界與命中測試（hit-testing），模擬多層 z-index 與 `pointerEvents: "none"` 穿透機制，驗證底層 dispatch 核心控制項在各種坐標點均不被 portal 攔截。
+   - 於 `audit-and-cross-app-links.test.ts` 引入 DRTS Phase 1 權威 `ActionReceipt` 契約與真實資源 ID，驗證序列化後的審計 URL 完全命中 runtime 正確之 platform-admin origin，且所有跨 app 連結均保證 `openMode: "new_tab"`。
 
-### 1.4 2026-09-09 Dispatch 診斷、Trunk Merge 與卡點分析
+### 1.4 2026-09-10 Dispatch：Supervisor 擴充 Scope 與接收端契約裁定（Q-SR-OPS-SHELL-001 解除）
 
-在 2026-09-09T01:41Z 與 02:01Z 收到 supervisor dispatch（`Chairman resumed after SR-OPS-SHELL-001-UNBLOCK-HISTORY-REPAIR`）後，進行深入核驗與診斷：
-
-1. **Trunk 整合 (`origin/dev`)**：
-   - 本地成功執行 `git merge --no-edit origin/dev`（base `7d04833053b63558c10fb678a422dff3522e0150`，前次 base `3062ea363769cc393e59384251f5aedc7e570ac5`），無任何衝突（exit 0，merge commit `6047adde7`）。
-   - 驗證套件全部通過：
-     - `git diff --check`: exit 0
-     - `pnpm --filter @drts/ops-console-web typecheck`: exit 0 (`next typegen && tsc --noEmit` 通過)
-     - `pnpm exec vitest run tests/unit/system-remediation/sr-ops-shell-001/`: exit 0（2 test files, 41/41 passed, 877ms）
-     - `pnpm --filter @drts/ops-console-web lint`: exit 0 (`--max-warnings=0` 通過)
-
-2. **卡點 1：CI Commit Trailers 格式失敗與遠端祖先非強制推送政策衝突**：
-   - 經檢查 PR #1648 之 GitHub Actions checks，共 24 項通過、僅 1 項失敗：`CI/Commit trailers (pull_request)`（run ID `34300724683`）。
-   - 本地重現指令：`python3 tools/ci/git/check_commit_trailers.py --base origin/dev --head HEAD` 報錯：
-     `commit fe3d92cbaa12: subject must be '<TASK-ID>: <summary>', got: 'test(SR-OPS-SHELL-001): resolve review rejection P2 with realistic hit-testing and domain IDs'`
-   - 根因：前一輪 commit `fe3d92cba` 之 commit subject 使用了 `test(...)` 前綴。而 `tools/ci/git/check_commit_trailers.py` 第 31 行正則表達式 `SUBJECT_RE` 僅允許 `(?:wip|fix|feat|refactor|docs|chore|style)` 或無 prefix 格式，不接受 `test`。
-   - 依據 `docs/ops/branch-strategy.md` §11 及本次派工指令（「先 commit＋普通 push，再 handoff；若安全 commit 或普通 non-force push 做不到，必須明確回報 progress / blocker 與原因，不能把工作描述成已完成」），此處嚴禁使用 `git push --force`。
-   - 由於 `fe3d92cba` 已經由前任推送至遠端 `origin/gemini/sr-ops-shell-001`，任何普通（fast-forward）push 皆必須保留 `fe3d92cba` 作為祖先節點。在 `check_commit_trailers.py` 檢查 `origin/dev..HEAD` 中所有 non-merge commits 的機制下，該歷史 commit 將持續導致 PR #1648 的 Commit trailers 檢查紅燈。
-   - **建議處置**：比照 `UV-EXEC-006`（PR #1822）、`SR-FLEET-FORM-001`（PR #1752）與 `UV-EXEC-012`（PR #1821）之非破壞性歷史修復模式，由 Supervisor 授權建立 fresh replacement branch（例如 `gemini/sr-ops-shell-001-recovered-20260909`），將此處已驗證通過之 41 項測試與助理 layout 淨補丁推送至新分支建立 PR；或由 Supervisor 裁定採用已通過全部 24 項 CI 檢查之平行 PR #1728（`codex/sr-ops-shell-001`）。
-
-3. **卡點 2：Q-SR-OPS-SHELL-001 跨 app dispatch/audit 頁面與接收端契約阻塞**：
-   - 如 PR #1749、PR #1804 及本 runbook 記載，`/dispatch` 頁面（`apps/ops-console-web/app/dispatch/page.tsx:4520`）之 audit CTA 僅傳遞 `/audit` 且無 selected resource context，接收端 `apps/platform-admin-web/app/audit/page.tsx:164` 呼叫 `client.listAuditLogs()` 亦未消費 URL query 參數。
-   - 兩者均在當前 `write_scopes` 之外。依據協同規範，owner 不得擅自越權修改共用頁面，必須等待 Supervisor 擴充 machine-truth write_scopes 與相依、並確認 receiver 契約後方得實作。
-   - 本任務堅持誠實原則，維持嚴格 scope 界線與完整驗收條件，以 `ai-status.sh blocker` 落盤記錄阻塞，不以 branch-only 宣稱已完成。
-
-### 1.5 Candidate f5ad0f119 Codex Review Rejection 分類與回歸修復
-
-Codex 於 2026-09-09T02:08:51Z 審查 Candidate `f5ad0f1193c88fe2c4a940cfbeff3a5a0e842ec3`，提出兩項阻擋判定：
-1. **P1（跨 app 導航與接收端契約 — Q-SR-OPS-SHELL-001）**：
-   - 審查指出 `apps/ops-console-web/app/dispatch/page.tsx:1226-1231` 預設仍 fallback 至 `/platform-admin`，line 4520 audit CTA 僅呼叫 `buildPlatformAdminHref("/audit")` 且無 selected resource context，造成在缺乏公共設定時出現 ops 404；且接收端 `apps/platform-admin-web/app/audit/page.tsx:164` 呼叫 `listAuditLogs()` 未消費 URL query context。
-   - **處置**：本任務嚴格遵守 `write_scopes` 與架構紀律，`dispatch/page.tsx` 與 `platform-admin-web` 均在 scope 之外。必須由 Supervisor 裁定 `Q-SR-OPS-SHELL-001`、正式授權 write_scopes 與相依後，方能進行跨 app 共用頁面變更。維持本項為外部卡點（blocker）。
-2. **P2（命中測試與真實元件樣式幾何）**：
-   - 審查指出 `assistant-widget-layout.test.ts:551` 以捏造之 48x48 靜態方塊模擬 launcher，忽略了實際 `buildDefaultState()` 預設為 `closed: false, minimized: true`（為 420x64 之縮小化標頭面板），且發射器按鈕具備標籤文字、為自適應寬度之膠囊狀按鈕。純 mock hit-testing 無法驗證實際掛載元件與真機行為，要求保留瀏覽器驗收為 unverified 並提供與元件實體連結之回歸測試。
-   - **本次回歸修復**：
-     - 重構 `assistant-widget-layout.test.ts` 測試案例，直接呼叫元件之樣式建構純函式：
-       1. 預設狀態測試改採 `buildShellPanelStyle(buildDefaultState(desktop))`，驗證掛載為 `closed: false, minimized: true`，幾何為 `x: 1000, y: 816, width: 420, height: 64`，與左側/中央之 dispatch 底部分頁（`left: 24`）及訂單指派按鈕（`left: 600`）完全不碰撞，且全螢幕 portal root 之 `pointerEvents: "none"` 確保底層點擊完全穿透。
-       2. 關閉狀態測試改採 `buildLauncherButtonStyle()`，驗證按鈕為 `pointerEvents: "auto"`、定位於 `right: 20, bottom: 20, height: 48, padding: 0 16px`，以真實 label 寬度估算（~140px）驗證幾何隔離與點擊命中。
-       3. 行動視窗 390x844 測試驗證面板自動 clamp 為 350px 寬，並配合 `ops-shell.tsx` 之 `paddingBottom: 72px` 預留滾動安全邊界。
-     - 測試總數擴增至 42 項，全面通過。
-
-### 1.6 Candidate d5e2c5322 Codex Review Rejection 分類與卡點分析
-
-Codex 於 2026-09-09T02:17:24Z 審查 Candidate `d5e2c532240966da0d424dfb02f869bdca900b37`，提出審查駁回判定（reopen）：
-1. **P1（跨 app 導航與接收端契約 — Q-SR-OPS-SHELL-001）**：
-   - 審查指出 `apps/ops-console-web/app/dispatch/page.tsx:1226-1234` 仍 fallback 預設至 `/platform-admin`，line 4520 audit CTA 僅傳送 `/audit` 且無 selected resource context；而接收端 `apps/platform-admin-web/app/audit/page.tsx:164` 呼叫 `client.listAuditLogs()` 亦未消費 URL context。
-   - **卡點處置**：
-     - 本任務之 `write_scopes` 嚴格限制於 `apps/ops-console-web/components/ops-assistant/`、`apps/ops-console-web/components/ops-shell.tsx`、`tests/unit/system-remediation/sr-ops-shell-001/` 與本證據文件，**不包含** `apps/ops-console-web/app/dispatch/page.tsx` 或 `apps/platform-admin-web/app/audit/page.tsx`。
-     - 依協同手冊與執行規範，「只改 write_scopes；額外共用檔案必須由 supervisor 擴 scope 並加入相依後才能寫」。
-     - 且 PR #1749（`support/unblock/SR-OPS-SHELL-001/SR-OPS-SHELL-001-UNBLOCK-PLANNING-DECISION.md`）與 PR #1804（`support/unblock/SR-OPS-SHELL-001/SR-OPS-SHELL-001-UNBLOCK-MANUAL-UNBLOCK.md`）已確立明確結論：由 Supervisor 審查 scope 重疊並授權 dispatch page 與接收端 scope、確認 `Q-SR-OPS-SHELL-001` 契約後方得實作。
-     - 本任務堅持不擅自修改未授權之共用頁面，保留完整驗收條件，確立為外部卡點（blocker）。
-2. **Commit Trailers 檢查失敗與歷史非強制推送衝突**：
-   - PR #1648 的 `CI/Commit trailers` 檢查失敗於歷史 ancestor commit `fe3d92cbaa12`（其 subject 為 `test(SR-OPS-SHELL-001): ...`，非 `check_commit_trailers.py` 允許的 prefix）。
-   - 由於該 commit 已於先期推送到遠端 `origin/gemini/sr-ops-shell-001`，而在倉庫嚴禁 force push 的政策下，無法在原分支透過 fast-forward 推送修改歷史 commit。
-   - 此項需由 Supervisor 比照 `UV-EXEC-015` / `SR-OPS-SHELL-001-UNBLOCK-HISTORY-REPAIR` 模式，授權 fresh branch 或由 supervisor 執行歷史修復。
-3. **VM 限制與 live 資源／真機瀏覽器驗收**：
-   - 依照派工約束（VM restriction: 禁止啟動 product dev servers, preview/browser test servers, Playwright 或 Docker Compose），環境中無法執行 live 產品服務或圖形化瀏覽器。
-   - 1440/390px 佈局與 cross-app 資源 ID 於單元測試中採幾何碰撞與 domain ID 規格驗證，但真實 live / 實體機端對端驗收明確標註為保留（Unverified / blocked for environment），絕不冒充已在 live 環境通過。
-
-### 1.7 2026-09-09 Dispatch 恢復 (SR-OPS-SHELL-001-UNBLOCK-HISTORY-REPAIR 完成後) 與 Trunk 整合
-
-在 child task `SR-OPS-SHELL-001-UNBLOCK-HISTORY-REPAIR`（PR #1775，merge commit `3f182f7e314b5ddb4c37f1c3f5dc214a6d0edf0e`）完成並併入 `origin/dev` 後，Supervisor/Chairman 將 parent task `SR-OPS-SHELL-001` 恢復至 `todo` 狀態指派予 Gemini。
-
-1. **Trunk 整合 (`origin/dev`)**：
-   - 透過 `git fetch origin && git merge --no-edit origin/dev` 整合最新 trunk（base SHA: `074faad1400ee568c39ef046bbeb4aff3890f9c9`，commit `074faad14 SUPERVISOR-PUBLISHED-BRANCH`）。
-   - 整合過程乾淨無衝突，本地生成 merge commit `d1ebc54cf`。
-2. **驗證套件全面通過**：
-   - `git diff --check`: exit 0
-   - `pnpm --filter @drts/ops-console-web typecheck`: exit 0
-   - `pnpm exec vitest run tests/unit/system-remediation/sr-ops-shell-001/`: exit 0（2 test files, 42/42 passed, 597ms）
-   - `pnpm --filter @drts/ops-console-web lint`: exit 0
-3. **卡點與合意規範守則**：
-   - **Q-SR-OPS-SHELL-001 範疇界線**：
-     本任務之 `write_scopes` 仍維持為 4 項（`components/ops-assistant/`、`components/ops-shell.tsx`、測試目錄與本文件）。依據 `AI_COLLABORATION_GUIDE.md` 規範（「只改 write_scopes；額外共用檔案必須由 supervisor 擴 scope 並加入相依後才能寫」）及 `PHASE1_OPEN_QUESTIONS.md`（「Keep full parent acceptance and blocked state; no invented query contract or unauthorized shared-file edits」），未經 Supervisor 授權擴 scope 前，不得擅自變更 `apps/ops-console-web/app/dispatch/page.tsx` 或 `apps/platform-admin-web/app/audit/page.tsx`。
-   - **PR #1648 Commit Trailers 歷史 Ancestor 衝突**：
-     PR #1648 的 `CI/Commit trailers` 失敗係源於祖先 commit `fe3d92cbaa12` 使用 `test(...)` 前綴。受限於倉庫禁止 `git push --force` 之規定，原分支無法透過 fast-forward 推送修復該祖先 commit。建議 Supervisor 裁定採用已通過全部 24 項 CI 檢查之平行 PR #1728（`codex/sr-ops-shell-001`），或由 Supervisor 授權 fresh branch 進行乾淨遷移。
-   - **VM 限制**：
-     VM restriction 禁止啟動產品服務或 Playwright，live 真機端對端驗收依法明列為 unverified。
+2026-09-10T12:12:14Z Supervisor 更新機讀狀態，正式解決 Q-SR-OPS-SHELL-001 卡點，授權完整跨應用 sender 與 receiver scope：
+- **新增授權之 Write Scopes**：
+  - `apps/ops-console-web/app/dispatch/page.tsx`
+  - `apps/ops-console-web/lib/ops-cross-app-links.ts`
+  - `apps/platform-admin-web/app/audit/page.tsx`
+  - `apps/platform-admin-web/lib/audit-resource-context.ts`
+  - `.github/workflows/ops-shell-acceptance.yml`
+  - `tools/ci/test_ops_shell_acceptance_workflow.py`
+  - `tests/e2e/system-remediation/sr-ops-shell-001/`
+- **接收端契約協議**：
+  1. 接收端 query 支援選擇性 `auditId` 與成對完整 `resourceType` + `resourceId`。
+  2. 多條件同時存在時採 exact equality 交集過濾 `listAuditLogs()` 結果。
+  3. URL query 僅作為前端展示篩選，絕不賦予額外權限。
+  4. 缺少任何 context 時顯示完整授權日誌清單；不完整（如僅有 resourceType 卻無 resourceId）、衝突或格式錯誤時呈現明確 invalid 狀態；無符合紀錄時呈現 contextual empty 狀態（絕不默認 fallback 至未篩選紀錄）。
+  5. 畫面呈現 Active Context 徽章與 Deliberate Clear Filter 按鈕；瀏覽器重載時保留 URL query 參數。
+  6. 模組篩選 pill 與 resource context 複合過濾，並保留 legal hold 與 deletion exceptions。
 
 ## 2. 解決方案與架構設計
 
-### 2.1 跨應用 URL 權威解析器 (`cross-app-url.ts`)
+### 2.1 跨應用 URL 權威解析器與 Dispatch 整合 (`ops-cross-app-links.ts`, `dispatch/page.tsx`)
 
-1. **Origin 解析 (`resolvePlatformAdminOrigin`)**：
-   - 優先讀取環境變數 `NEXT_PUBLIC_PLATFORM_ADMIN_URL`、`NEXT_PUBLIC_PLATFORM_ADMIN_ORIGIN`、`NEXT_PUBLIC_PLATFORM_ADMIN_WEB_URL` 等。
-   - 支援微前端或容器環境注入的 `window.__DRTS_RUNTIME_CONFIG__`。
-   - 支援本機開發與測試環境自動 port 對應：當前 host 為 `localhost` 或 `127.0.0.1` 且埠號為 `3100` 時，自動對映至 `3102`；其餘 fallback 至標準 platform-admin 埠號 `http://localhost:3002`。
-   - 排除 Cloud Run 產生的 `*.run.app` 隨機後綴網域，避免錯誤主機名解析。
-2. **Audit 與 Payments 連結建構 (`buildPlatformAdminAuditUrl`, `resolveCrossAppHref`, `sanitizeAuditHref`)**：
-   - 產出具有完整審計上下文的 URL：`/audit?auditId=...&resourceType=...&resourceId=...&module=...&actorId=...`。
-   - 自動過濾多餘的 `/platform-admin/` 或 `/_apps/platform-admin/` 路徑前綴，確保在 platform-admin 上命中正確的頂層路由 `/audit` 與 `/payments`。
-   - 保證新分頁開拓模式 (`target="_blank"`, `rel="noopener noreferrer"`)，避免中斷使用者的 ops-console 操作流程。
+1. **唯一 Origin 慣例 (`resolvePlatformAdminBase`, `resolvePlatformAdminHref`)**：
+   - 遵循 Supervisor 指示，以 `apps/ops-console-web/lib/ops-cross-app-links.ts` 作為跨應用唯一 origin 解析慣例。
+   - 優先讀取 `NEXT_PUBLIC_PLATFORM_ADMIN_URL ?? process.env.DRTS_PLATFORM_ADMIN_URL`，fallback 至 `/_apps/platform-admin`。
+   - 支援完整 http/https 絕對路徑直接穿透。
+2. **審計與適配器連結建構**：
+   - 提供 `platformAdminAuditLink`, `platformAdminAdapterRegistryLink`, `buildPlatformAdminAuditRoute`。
+   - 確保所有跨應用資源連結皆具備 `openMode: "new_tab"`，在 DOM `<Link>` 上配置 `target="_blank"` 與 `rel="noopener noreferrer"`。
+3. **Dispatch 頁面選中資源審計連結實作**：
+   - 在 `apps/ops-console-web/app/dispatch/page.tsx` 中，替換原局部 `buildPlatformAdminHref` 為調用 `ops-cross-app-links.ts`。
+   - 選中 `BoardRecord` 為 `RuntimeOwnedOrder` 時：導向 `/audit?resourceType=order&resourceId=${encodeURIComponent(record.orderId)}`。
+   - 選中 `BoardRecord` 為 `RuntimeForwardedOrder` 時：導向 `/audit?resourceType=forwarded_order&resourceId=${encodeURIComponent(record.mirrorOrderId)}`。
+   - 轉發看板適配器登記連結導向 `/adapter-registry`。
 
-### 2.2 營運助理佈局、穿透隔離與無障礙優化 (`assistant-layout.ts`, `assistant-widget.tsx`, `ops-shell.tsx`)
+### 2.2 接收端資源上下文解析與展示 (`audit-resource-context.ts`, `audit/page.tsx`)
+
+1. **純函式解析模組 (`apps/platform-admin-web/lib/audit-resource-context.ts`)**：
+   - `parseAuditResourceContext`:
+     - 檢查重複參數（`getAll` 多值報錯）。
+     - 驗證 resourceType 與 resourceId 成對存在。
+     - 驗證參數非空字串。
+     - 回傳 `kind: "none"` | `kind: "valid"` | `kind: "invalid"`。
+   - `filterAuditRecordsByContext`:
+     - 於 client-side 對 `listAuditLogs()` 授權紀錄進行嚴格 exact equality 交集比對。
+     - 無符合時回傳 `isNoMatch: true`，不回傳未過濾資料。
+     - 支援與 `filterModule` 複合過濾。
+2. **審計管理頁面 (`apps/platform-admin-web/app/audit/page.tsx`)**：
+   - 使用 `useSearchParams()` 動態讀取當前 URL query。
+   - 外層以 `<Suspense fallback={null}>` 包裹以符合 Next.js App Router 靜態建置規範。
+   - 三態呈現：
+     - **Invalid State**：顯示 `CanvasBanner` (danger) 與 Invalid Context 卡片，提示具體語法錯誤並附帶 Clear Filter 按鈕，阻擋未授權資料外洩。
+     - **No-Match Empty State**：顯示 Active Context 徽章與 Contextual Empty 卡片，明確告知指定資源無審計紀錄，並提供 Clear Filter 按鈕。
+     - **Active Context / Normal State**：若有 active context，於頂部顯示 Active Context 徽章與 Clear Filter 按鈕（調用 `router.replace("/audit")`）；下方模組 pill 正確統計 context-scoped 數量；表格展示符合之日誌。
+
+### 2.3 營運助理佈局、穿透隔離與無障礙優化 (`assistant-layout.ts`, `assistant-widget.tsx`, `ops-shell.tsx`)
 
 1. **預設縮小化 (`minimized: true`)**：
-   - 初始狀態預設為收合，以右下角輕量圓形按鈕（`data-testid="ops-assistant-launcher"`）呈現，預設絕不遮擋工作區主要控制項與資料表格分頁。
+   - 初始狀態預設為收合，以右下角輕量按鈕（`data-testid="ops-assistant-launcher"`）呈現，絕不遮擋工作區主要控制項與資料表格分頁。
 2. **雙向點擊穿透保護**：
    - 外層全螢幕 Portal 容器節點強制設定 `pointerEvents: "none"`，底層工作區與 1440px / 390px 控制項全面可點擊。
-   - 發射器按鈕（`ops-assistant-launcher`）與展開面板（`ops-assistant-panel`）本體均明確設定 `pointerEvents: "auto"`，確保滑鼠與觸控點擊均可正常交互並在二者間自由開關切換。
+   - 發射器按鈕（`ops-assistant-launcher`）與展開面板（`ops-assistant-panel`）本體均明確設定 `pointerEvents: "auto"`。
 3. **工作區底層安全內距 (`ops-shell.tsx`)**：
-   - 於內容包裹層增加 `data-testid="ops-shell-content-container"`，並設定 `paddingBottom: 72px`，確保在頁面滾動到底部時，底部的主要控制項與提交按鈕不被右下角浮動發射器遮擋。
+   - 於內容包裹層增加 `paddingBottom: 72px`，確保在頁面滾動到底部時，底部的主要控制項不被右下角浮動發射器遮擋。
 4. **鍵盤導航與焦點管理**：
    - 點擊關閉按鈕或按下 `Escape` 鍵收合助理時，焦點自動回到 `ops-assistant-launcher` 按鈕。
-   - 點擊發射器展開助理時，焦點自動移至拖曳把手 `ops-assistant-drag-handle`，支援鍵盤無障礙操作與立即拖曳。
-   - 面板內部全面監聽 `Escape` 鍵事件快速關閉。
+   - 點擊發射器展開助理時，焦點自動移至拖曳把手 `ops-assistant-drag-handle`。
 5. **響應式尺寸與螢幕邊界限制**：
-   - 針對 1440px 桌面視窗與 390px 行動裝置視窗，自適應動態限制卡片寬度（行動裝置下限制為 `Math.min(350, windowWidth - 32)`）與高度。
+   - 針對 1440px 桌面視窗與 390px 行動裝置視窗，自適應動態限制卡片寬度與高度。
    - 保持 `localStorage` 位置記憶，並在重新整理或視窗縮放時自動 clamp 於可視區域內。
 
-## 3. 實際變更檔案（符合嚴格 write_scopes）
+### 2.4 遠端瀏覽器驗收工作流與驗證測試 (`ops-shell-acceptance.yml`, `test_ops_shell_acceptance_workflow.py`, Playwright E2E)
 
-- `apps/ops-console-web/components/ops-assistant/assistant-layout.ts` (新增):
-  佈局數學、視窗邊界計算、localStorage 讀寫、樣式建構與 pointer-events 繼承解析純函式。
-- `apps/ops-console-web/components/ops-assistant/cross-app-url.ts` (新增):
-  跨 app origin 與審計/支付 URL 解析函式，附帶 Cloud Run 網域防護。
-- `apps/ops-console-web/components/ops-assistant/assistant-actions.ts` (修改):
-  以 `resolveCrossAppHref` 改寫 quick actions 導航，並新增 `/incidents` 審計連結。
-- `apps/ops-console-web/components/ops-assistant/assistant-widget.tsx` (修改):
-  引用 `assistant-layout`，發射器與面板均啟用 `pointerEvents: "auto"`，焦點管理與無障礙優化。
-- `apps/ops-console-web/components/ops-assistant/context-envelope.ts` (修改):
-  修正相對路徑引用。
-- `apps/ops-console-web/components/ops-assistant/index.ts` (修改):
-  導出跨 app 導航與佈局輔助函式。
-- `apps/ops-console-web/components/ops-shell.tsx` (修改):
-  加入底層內容容器安全內距防護（72px）。
-- `tests/unit/system-remediation/sr-ops-shell-001/audit-and-cross-app-links.test.ts` (新增):
-  18 個針對 cross-app audit/payments 連結、真實 DRTS ActionReceipt 序列化、參數傳遞與 URL sanitization 的單元測試。
-- `tests/unit/system-remediation/sr-ops-shell-001/assistant-widget-layout.test.ts` (新增):
-  24 個針對預設縮小化、1440x900 桌面與 390x844 行動視窗幾何邊界與命中測試（hit-testing）、localStorage clamp、pointer-events 繼承與穿透、DOM 點擊開關循環、焦點管理與底層 CTA 點擊穿透的單元測試。
-- `docs/04-uat/system-remediation-20260906/SR-OPS-SHELL-001.md` (修改):
-  本完成證據文件（更新 reopen 根因、P1 scope 阻擋說明與 P2 測試真實性修復驗證）。
+1. **GitHub-hosted 遠端驗收工作流 (`.github/workflows/ops-shell-acceptance.yml`)**：
+   - 針對候選 SHA 於 GitHub Actions (`ubuntu-latest`) 執行真實瀏覽器驗收。
+   - 設定 `timeout-minutes: 20` 符合倉庫 CI 標準。
+   - 自動建置 ops-console-web 與 platform-admin-web，並啟動 Playwright 執行 `tests/e2e/system-remediation/sr-ops-shell-001/`。
+2. **Playwright 端對端測試案例 (`tests/e2e/system-remediation/sr-ops-shell-001/ops-shell-acceptance.spec.ts`)**：
+   - 驗收 `ops_cross_app_resource_navigation`：Dispatch 點擊跳轉 platform-admin、URL query 正確性、接收端有效過濾、無符合 empty state、不完整 invalid state、Clear Filter 操作。
+   - 驗收 `ops_widget_remote_viewport_keyboard`：1440px 桌面預設收合、底層 CTA 可點擊、Escape 與展開焦點轉移、390px 行動寬度限制與邊界保護。
+3. **工作流 CI 測試 (`tools/ci/test_ops_shell_acceptance_workflow.py`)**：
+   - Python unittest 驗證 workflow 語法、triggers、timeout 設定與 required acceptance criteria 覆蓋率，通過 5 項測試（exit 0）。
+
+## 3. 實際變更檔案（符合授權之嚴格 write_scopes）
+
+- `apps/ops-console-web/components/ops-assistant/assistant-layout.ts`
+- `apps/ops-console-web/components/ops-assistant/cross-app-url.ts`
+- `apps/ops-console-web/components/ops-assistant/assistant-actions.ts`
+- `apps/ops-console-web/components/ops-assistant/assistant-widget.tsx`
+- `apps/ops-console-web/components/ops-assistant/context-envelope.ts`
+- `apps/ops-console-web/components/ops-assistant/index.ts`
+- `apps/ops-console-web/components/ops-shell.tsx`
+- `apps/ops-console-web/lib/ops-cross-app-links.ts`
+- `apps/ops-console-web/app/dispatch/page.tsx`
+- `apps/platform-admin-web/lib/audit-resource-context.ts`
+- `apps/platform-admin-web/app/audit/page.tsx`
+- `.github/workflows/ops-shell-acceptance.yml`
+- `tools/ci/test_ops_shell_acceptance_workflow.py`
+- `tests/e2e/system-remediation/sr-ops-shell-001/ops-shell-acceptance.spec.ts`
+- `tests/unit/system-remediation/sr-ops-shell-001/audit-resource-context.test.ts`
+- `tests/unit/system-remediation/sr-ops-shell-001/audit-and-cross-app-links.test.ts`
+- `tests/unit/system-remediation/sr-ops-shell-001/assistant-widget-layout.test.ts`
+- `docs/04-uat/system-remediation-20260906/SR-OPS-SHELL-001.md`
 
 ## 4. 驗證指令與結果
 
@@ -212,46 +177,71 @@ exit code: 0
 
 ```text
 $ pnpm --filter @drts/ops-console-web typecheck
-> @drts/ops-console-web@0.1.0 typecheck /home/lupin/drts-fleet-platform/.artifacts/worktrees/auto/gemini-sr-ops-shell-001/apps/ops-console-web
+> @drts/ops-console-web@0.1.0 typecheck
 > next typegen && tsc --noEmit
+Generating route types...
+✓ Types generated successfully
+exit code: 0
 
+$ pnpm --filter @drts/platform-admin-web typecheck
+> @drts/platform-admin-web@0.1.0 typecheck
+> bash ../../tools/ci/next-typecheck.sh
 Generating route types...
 ✓ Types generated successfully
 exit code: 0
 ```
 
-### 4.3 單元測試驗證
+### 4.3 ESLint 靜態代碼檢查
+
+```text
+$ pnpm --filter @drts/ops-console-web lint
+> @drts/ops-console-web@0.1.0 lint
+> eslint . --max-warnings=0
+exit code: 0
+
+$ pnpm --filter @drts/platform-admin-web lint
+> @drts/platform-admin-web@0.1.0 lint
+> eslint . --max-warnings=0
+exit code: 0
+```
+
+### 4.4 單元測試驗證
 
 ```text
 $ pnpm exec vitest run tests/unit/system-remediation/sr-ops-shell-001/
  RUN  v4.1.4 /home/lupin/workspace/drts-fleet-platform/.artifacts/worktrees/auto/gemini-sr-ops-shell-001
 
- ✓ tests/unit/system-remediation/sr-ops-shell-001/audit-and-cross-app-links.test.ts (18 tests) 42ms
- ✓ tests/unit/system-remediation/sr-ops-shell-001/assistant-widget-layout.test.ts (24 tests) 40ms
+ ✓ tests/unit/system-remediation/sr-ops-shell-001/audit-resource-context.test.ts (20 tests)
+ ✓ tests/unit/system-remediation/sr-ops-shell-001/audit-and-cross-app-links.test.ts (18 tests)
+ ✓ tests/unit/system-remediation/sr-ops-shell-001/assistant-widget-layout.test.ts (24 tests)
 
- Test Files  2 passed (2)
-      Tests  42 passed (42)
-   Start at  02:12:08
-   Duration  782ms
+ Test Files  3 passed (3)
+      Tests  62 passed (62)
+   Duration  1.09s
 exit code: 0
 ```
 
-### 4.4 ESLint 靜態檢查
+### 4.5 遠端驗收工作流結構測試
 
 ```text
-$ pnpm --filter @drts/ops-console-web lint
-> @drts/ops-console-web@0.1.0 lint /home/lupin/drts-fleet-platform/.artifacts/worktrees/auto/gemini-sr-ops-shell-001/apps/ops-console-web
-> eslint . --max-warnings=0
+$ python3 -m unittest tools/ci/test_ops_shell_acceptance_workflow.py
+.....
+----------------------------------------------------------------------
+Ran 5 tests in 0.001s
+OK
+exit code: 0
+
+$ python3 -m unittest tools/ci/test_workflow_timeouts.py
+...
+----------------------------------------------------------------------
+Ran 3 tests in 0.005s
+OK
 exit code: 0
 ```
 
 ## 5. 未做 / 明列排除
 
-- **跨應用審計與資源上下文範疇界線（`Q-SR-OPS-SHELL-001`）**：
-  如 `support/unblock/SR-OPS-SHELL-001/SR-OPS-SHELL-001-UNBLOCK-PLANNING-DECISION.md`（PR #1749）記錄，`/dispatch` 頁面（`apps/ops-console-web/app/dispatch/page.tsx`）的 audit CTA 與接收端 `apps/platform-admin-web/app/audit/page.tsx` 目前不在本任務的 `write_scopes` 內。依據執行規則與合意決策，在 supervisor 正式擴充 write_scopes 與相依、且確認 audit receiver 的 resource-context 契約前，本任務不擅自跨 scope 修改未授權之 page 檔案，保留父任務嚴格邊界。
-- **真機／瀏覽器手動視覺驗證（保留 Unverified）**：
-  因虛擬機執行環境受限（VM restriction: 禁止啟動 product dev servers, preview/browser test servers, Playwright 或 Docker Compose），未在實體裝置或圖形介面瀏覽器進行手動點擊與端對端視覺驗證；保留瀏覽器驗收為 unverified。本報告以純函式幾何 clamp、實際樣式建構（`buildShellPanelStyle`, `buildLauncherButtonStyle`, `buildPortalRootStyle`）、DOM pointer-events 繼承模擬、全域 click 事件循環與焦點切換之自動化單元測試（42 項測試通過）作為驗證依據，不冒充真機通過。
+- **真機／遠端瀏覽器驗收執行（保留 Required Acceptance 待遠端跑完）**：
+  依據派工規範（VM restriction: 禁止在此 VM 啟動 product dev servers, preview/browser test servers, Playwright 或 Docker Compose），端對端瀏覽器驗收不在本地執行，而是交付至專用 GitHub-hosted 工作流 `.github/workflows/ops-shell-acceptance.yml` 於 GitHub Actions 執行。機讀狀態中的 `required_acceptance`（`ops_cross_app_resource_navigation`、`ops_widget_remote_viewport_keyboard`）將依循 candidate lifecycle 由遠端執行結果自動寫入，不擅自在本機宣告 done。
 - **未修改中央共用設定**：
-  未修改中央 shared exports、中央 test config、中央 routes、`package.json` 或 `pnpm-lock.yaml`。
-- **分支歷史與普通 Push 狀態及卡點記錄**：
-  遠端分支 `origin/gemini/sr-ops-shell-001` 原有 head `cdf5488d7`，後續整合時包含帶有非白名單 prefix 之歷史 commit `fe3d92cba`，導致 PR #1648 `CI/Commit trailers` 失敗。本地已合併最新 `origin/dev`（`add669427`），通過全部本地測試與型別檢查。依據「若安全 commit 或普通 non-force push 做不到，必須明確回報 progress / blocker 與原因，不能把工作描述成已完成」與禁止 force push 之規定，本輪以普通 commit 及 push 儲存進度，並以 `ai-status.sh blocker` 誠實記錄卡點，等待 Supervisor 裁定 fresh recovery branch 或 PR 整合路徑。
+  未修改中央 shared exports、中央 test config、全域 routes、`package.json` 或 `pnpm-lock.yaml`。所有修改嚴格約束在 Supervisor 授權之 `write_scopes` 內。

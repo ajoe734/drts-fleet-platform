@@ -1,0 +1,77 @@
+name: Ops Shell Remote Acceptance
+
+on:
+  workflow_dispatch:
+    inputs:
+      candidate_sha:
+        description: "Exact candidate commit SHA to verify"
+        required: false
+        default: ""
+  pull_request:
+    paths:
+      - "apps/ops-console-web/**"
+      - "apps/platform-admin-web/**"
+      - "tests/e2e/system-remediation/sr-ops-shell-001/**"
+      - ".github/workflows/ops-shell-acceptance.yml"
+  push:
+    branches:
+      - "gemini/sr-ops-shell-001"
+      - "dev"
+    paths:
+      - "apps/ops-console-web/**"
+      - "apps/platform-admin-web/**"
+      - "tests/e2e/system-remediation/sr-ops-shell-001/**"
+      - ".github/workflows/ops-shell-acceptance.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  ops-shell-acceptance:
+    name: Ops Shell Remote Acceptance
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.candidate_sha || github.sha }}
+
+      - name: Setup Node.js and pnpm
+        uses: pnpm/action-setup@v3
+        with:
+          version: 9
+
+      - name: Use Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: "pnpm"
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Install Playwright browsers
+        run: pnpm exec playwright install --with-deps chromium
+
+      - name: Build web applications
+        run: |
+          pnpm --filter @drts/ops-console-web build
+          pnpm --filter @drts/platform-admin-web build
+
+      - name: Run Playwright remote acceptance tests
+        env:
+          CI: "true"
+          CANDIDATE_SHA: ${{ inputs.candidate_sha || github.sha }}
+        run: |
+          pnpm exec playwright test tests/e2e/system-remediation/sr-ops-shell-001/ --project=chromium
+
+      - name: Upload acceptance test artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ops-shell-acceptance-evidence
+          path: |
+            test-results/
+            playwright-report/
+          retention-days: 14
