@@ -2,6 +2,7 @@ import Link from "next/link";
 import {
   EBtnContent,
   ECard,
+  EEmpty,
   EIcon,
   EKpi,
   EPill,
@@ -9,9 +10,12 @@ import {
 } from "@/components/ent-kit";
 import { EntParty, EntRoute } from "@/components/ent-screen-bits";
 import {
+  adaptBookingRecordToEnterpriseBooking,
+  fetchAuthoritativeEnterpriseBookings,
+} from "@/lib/dispatch-fixture-adapter";
+import {
   enterpriseQuotaSummary,
   getBookingStateMeta,
-  getEnterpriseBookings,
   getEnterpriseTenant,
   getEnterpriseUser,
   getPolicyNotes,
@@ -26,7 +30,10 @@ export default async function HomePage() {
   const locale = await getServerLocale();
   const tr = (key: TranslationKey, params?: Record<string, string | number>) =>
     translate(key, params, locale);
-  const bookings = getEnterpriseBookings(locale);
+  const authoritativeRecords = await fetchAuthoritativeEnterpriseBookings();
+  const bookings = authoritativeRecords.map((record) =>
+    adaptBookingRecordToEnterpriseBooking(record, locale),
+  );
   const stateMeta = getBookingStateMeta(locale);
   const user = getEnterpriseUser(locale);
   const tenant = getEnterpriseTenant(locale);
@@ -102,16 +109,34 @@ export default async function HomePage() {
           t={t}
           label={tr("home.kpi.approval")}
           en="approval"
-          value={tr("home.kpi.approvalValue")}
-          sub={tr("home.kpi.approvalSub")}
-          tone="warn"
+          value={
+            bookings.length > 0
+              ? `${bookings.filter((b) => b.approval === "pending").length} 筆`
+              : "0 筆"
+          }
+          sub={
+            bookings.length > 0
+              ? tr("home.kpi.approvalSub")
+              : "無待審核用車"
+          }
+          {...(bookings.some((b) => b.approval === "pending")
+            ? { tone: "warn" as const }
+            : {})}
         />
         <EKpi
           t={t}
           label={tr("home.kpi.trips")}
           en="trips"
-          value={tr("home.kpi.tripsValue")}
-          sub={tr("home.kpi.tripsSub")}
+          value={
+            bookings.length > 0
+              ? `${bookings.filter((b) => b.state === "completed").length} 趟`
+              : "0 趟"
+          }
+          sub={
+            bookings.length > 0
+              ? tr("home.kpi.tripsSub")
+              : "本月累計用車"
+          }
         />
       </div>
 
@@ -127,8 +152,9 @@ export default async function HomePage() {
               sub={tr("home.activeTrip.sub")}
               actions={
                 <Link
-                  href="/trip"
+                  href={`/trip?bookingId=${encodeURIComponent(active.id)}`}
                   style={entBtnStyle(t, { variant: "soft", size: "sm" })}
+                  data-testid="home-active-trip-link"
                 >
                   <EBtnContent iconR="arrow" size="sm">
                     {tr("home.activeTrip.cta")}
@@ -230,84 +256,105 @@ export default async function HomePage() {
               </Link>
             }
           >
-            <div>
-              {upcoming.map((b, i) => (
-                <div
-                  key={b.id}
-                  style={{
-                    display: "flex",
-                    alignItems: "center",
-                    gap: 14,
-                    padding: "14px 18px",
-                    borderTop: i ? "1px solid " + t.lineSoft : "none",
-                  }}
-                >
-                  <span
-                    style={{
-                      width: 36,
-                      height: 36,
-                      borderRadius: 14,
-                      background: b.self ? t.primaryBg : t.surfaceLo,
-                      color: b.self ? t.primary : t.muted,
-                      border: "1px solid " + (b.self ? t.primaryBd : t.line),
-                      display: "inline-flex",
-                      alignItems: "center",
-                      justifyContent: "center",
-                      fontSize: 14,
-                      fontWeight: 700,
-                      flexShrink: 0,
-                    }}
+            {upcoming.length === 0 ? (
+              <EEmpty
+                t={t}
+                icon="cal"
+                title={tr("home.upcoming.emptyTitle")}
+                body="尚無近期預約行程。您可以隨時為自己或同仁建立新的用車預約。"
+                action={
+                  <Link
+                    href="/bookings/new"
+                    style={entBtnStyle(t, { variant: "primary", size: "sm" })}
                   >
-                    {b.passenger.slice(0, 1)}
-                  </span>
-                  <div style={{ flex: 1, minWidth: 0 }}>
-                    <div
-                      style={{ display: "flex", alignItems: "center", gap: 7 }}
+                    <EBtnContent icon="plus">{tr("home.cta.create")}</EBtnContent>
+                  </Link>
+                }
+              />
+            ) : (
+              <div>
+                {upcoming.map((b, i) => (
+                  <Link
+                    key={b.id}
+                    href={`/bookings/${encodeURIComponent(b.id)}`}
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      gap: 14,
+                      padding: "14px 18px",
+                      borderTop: i ? "1px solid " + t.lineSoft : "none",
+                      textDecoration: "none",
+                      color: t.ink,
+                    }}
+                    data-testid={`home-upcoming-link-${b.id}`}
+                  >
+                    <span
+                      style={{
+                        width: 36,
+                        height: 36,
+                        borderRadius: 14,
+                        background: b.self ? t.primaryBg : t.surfaceLo,
+                        color: b.self ? t.primary : t.muted,
+                        border: "1px solid " + (b.self ? t.primaryBd : t.line),
+                        display: "inline-flex",
+                        alignItems: "center",
+                        justifyContent: "center",
+                        fontSize: 14,
+                        fontWeight: 700,
+                        flexShrink: 0,
+                      }}
                     >
-                      <span style={{ fontSize: 13.5, fontWeight: 600 }}>
-                        {b.passenger}
-                      </span>
-                      {!b.self && (
-                        <span style={{ fontSize: 11, color: t.warn }}>
-                          ·{" "}
-                          {tr("home.upcoming.delegateShort", {
-                            name: b.bookedBy,
-                          })}
+                      {b.passenger.slice(0, 1)}
+                    </span>
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div
+                        style={{ display: "flex", alignItems: "center", gap: 7 }}
+                      >
+                        <span style={{ fontSize: 13.5, fontWeight: 600 }}>
+                          {b.passenger}
                         </span>
-                      )}
+                        {!b.self && (
+                          <span style={{ fontSize: 11, color: t.warn }}>
+                            ·{" "}
+                            {tr("home.upcoming.delegateShort", {
+                              name: b.bookedBy,
+                            })}
+                          </span>
+                        )}
+                      </div>
+                      <div
+                        style={{
+                          fontSize: 12,
+                          color: t.muted,
+                          marginTop: 1,
+                          whiteSpace: "nowrap",
+                          overflow: "hidden",
+                          textOverflow: "ellipsis",
+                        }}
+                      >
+                        {b.from} → {b.to}
+                      </div>
                     </div>
-                    <div
-                      style={{
-                        fontSize: 12,
-                        color: t.muted,
-                        marginTop: 1,
-                        whiteSpace: "nowrap",
-                        overflow: "hidden",
-                        textOverflow: "ellipsis",
-                      }}
-                    >
-                      {b.from} → {b.to}
+                    <div style={{ textAlign: "right", flexShrink: 0 }}>
+                      <div
+                        style={{
+                          fontSize: 12.5,
+                          fontFamily: t.mono,
+                          color: t.ink2,
+                        }}
+                      >
+                        {b.window}
+                      </div>
+                      <div style={{ marginTop: 4 }}>
+                        <EPill t={t} tone={stateMeta[b.state].tone} dot>
+                          {stateMeta[b.state].label}
+                        </EPill>
+                      </div>
                     </div>
-                  </div>
-                  <div style={{ textAlign: "right", flexShrink: 0 }}>
-                    <div
-                      style={{
-                        fontSize: 12.5,
-                        fontFamily: t.mono,
-                        color: t.ink2,
-                      }}
-                    >
-                      {b.window}
-                    </div>
-                    <div style={{ marginTop: 4 }}>
-                      <EPill t={t} tone={stateMeta[b.state].tone} dot>
-                        {stateMeta[b.state].label}
-                      </EPill>
-                    </div>
-                  </div>
-                </div>
-              ))}
-            </div>
+                  </Link>
+                ))}
+              </div>
+            )}
           </ECard>
         </div>
 
