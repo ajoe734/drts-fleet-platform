@@ -11,6 +11,7 @@ import {
 } from "./voice-session.repository";
 import { VoiceUsageService } from "./voice-usage.service";
 import { VoiceBookingMetricsService } from "../../observability/voice-booking-metrics.service";
+import { voiceAlertMetrics } from "../../observability/voice-alert-metrics";
 
 /**
  * SD §5: the session state machine, ordered-event application and
@@ -113,6 +114,12 @@ export class VoiceSessionService {
       expected.leaseEpoch !== undefined &&
       session.leaseEpoch !== expected.leaseEpoch
     ) {
+      voiceAlertMetrics.recordWorkerLeaseConflict({
+        brand_id: session.resourceScopeId || "default",
+        language: "zh-TW",
+        provider: session.providerAccountId || "unknown",
+        route_profile_version: session.routeProfileVersion ?? 1,
+      });
       throw new ApiRequestError(
         409,
         "VOICE_SESSION_NOT_OWNER",

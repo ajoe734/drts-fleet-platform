@@ -1,6 +1,8 @@
 import { describe, expect, it, vi } from "vitest";
 import {
   VoiceUsageService,
+  ensureUuid,
+  DEFAULT_RATE_CARD_IDS,
   type ProviderInvoiceLineItem,
 } from "../../apps/api/src/modules/voice-booking/voice-usage.service";
 import {
@@ -9,6 +11,9 @@ import {
   type CallbackRecordForSla,
 } from "../../apps/api/src/observability/voice-booking-metrics.service";
 import { voiceAlertMetrics } from "../../apps/api/src/observability/voice-alert-metrics";
+import { VoicePolicyService } from "../../apps/api/src/modules/voice-booking/voice-policy.service";
+import { VoiceSessionService } from "../../apps/api/src/modules/voice-booking/voice-session.service";
+import { MetricsController } from "../../apps/api/src/health/metrics.controller";
 import {
   formatVoiceCost,
   deriveCohortMetricsPresentation,
@@ -1210,13 +1215,33 @@ describe("UV-EXEC-022 All-Call Metrics, Complete Cost Ledger & Dimensional Alert
             createdAt: "2026-01-01T00:00:00Z",
           },
         ]),
+        listUsageRecords: vi.fn().mockResolvedValue([
+          {
+            usageId: "f4a50001-0000-4000-8000-000000000001",
+            voiceSessionId: "sess-hydrated-01",
+            providerAccountId: "twm-acc-hydrated",
+            providerUsageRef: "ref-hydrated-01",
+            provider: "twm",
+            serviceType: "asr",
+            billingUnit: "minute",
+            quantity: 2,
+            currency: "TWD",
+            estimatedCost: 1.48,
+            actualCost: null,
+            usageDate: "2026-09-01",
+            createdAt: "2026-09-01T10:00:00Z",
+          },
+        ]),
       };
 
       const repoUsageService = new VoiceUsageService(mockRepo as any);
       await repoUsageService.hydrateFromRepository();
 
       expect(mockRepo.listRateCards).toHaveBeenCalledTimes(1);
+      expect(mockRepo.listUsageRecords).toHaveBeenCalledTimes(1);
       expect(repoUsageService.getRateCard("rc-db-hydrated")?.unitPrice).toBe(0.88);
+      expect(repoUsageService.getUsageRecord("f4a50001-0000-4000-8000-000000000001")?.quantity).toBe(2);
+      expect(repoUsageService.findUsageByProviderRef("twm-acc-hydrated", "ref-hydrated-01")?.usageId).toBe("f4a50001-0000-4000-8000-000000000001");
 
       repoUsageService.publishRateCard({
         rateCardId: "rc-repo-test",
@@ -1227,7 +1252,7 @@ describe("UV-EXEC-022 All-Call Metrics, Complete Cost Ledger & Dimensional Alert
         effectiveFrom: "2026-09-01T00:00:00Z",
       });
       expect(mockRepo.insertRateCard).toHaveBeenCalledWith(
-        expect.objectContaining({ rateCardId: "rc-repo-test", unitPrice: 1.5 }),
+        expect.objectContaining({ rateCardId: ensureUuid("rc-repo-test"), unitPrice: 1.5 }),
       );
 
       const usageRec = repoUsageService.recordUsage({
@@ -1299,6 +1324,310 @@ describe("UV-EXEC-022 All-Call Metrics, Complete Cost Ledger & Dimensional Alert
       expect(output).toContain('route_profile_version="1"');
       expect(output).toContain('provider="twm"');
       expect(output).toContain('brand_id="brand-drts-01"');
+    });
+
+    it("rate cards adhere to RFC 4122 UUID format", () => {
+      const uuidRegex =
+        /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+      for (const [name, id] of Object.entries(DEFAULT_RATE_CARD_IDS)) {
+        expect(uuidRegex.test(id), `${name} must be a valid UUID`).toBe(true);
+      }
+      expect(uuidRegex.test(ensureUuid("my-custom-rate-card"))).toBe(true);
+      expect(ensureUuid("e4a50001-0000-4000-8000-000000000001")).toBe(
+        "e4a50001-0000-4000-8000-000000000001",
+      );
+    });
+
+    it("hydration deduplication: prevents double-recording for hydrated provider usage refs", async () => {
+      const mockRepo = {
+        isEnabled: vi.fn().mockReturnValue(true),
+        listRateCards: vi.fn().mockResolvedValue([]),
+        listUsageRecords: vi.fn().mockResolvedValue([
+          {
+            usageId: "d0000001-0000-4000-8000-000000000001",
+            providerAccountId: "twm-acc-restart",
+            providerUsageRef: "restart-ref-001",
+            provider: "twm",
+            serviceType: "telephony",
+            billingUnit: "minute",
+            quantity: 3,
+            currency: "TWD",
+            estimatedCost: 1.8,
+            actualCost: null,
+            usageDate: "2026-09-09",
+            createdAt: "2026-09-09T10:00:00Z",
+          },
+        ]),
+        insertUsageRecord: vi.fn(),
+      };
+
+      const usageService = new VoiceUsageService(mockRepo as any);
+      await usageService.hydrateFromRepository();
+
+      // Attempt to record usage with identical providerAccountId + providerUsageRef
+      const duplicateRecord = usageService.recordUsage({
+        providerAccountId: "twm-acc-restart",
+        providerUsageRef: "restart-ref-001",
+        provider: "twm",
+        serviceType: "telephony",
+        quantity: 3,
+        billingUnit: "minute",
+        estimatedCost: 1.8,
+      });
+
+      // Must return existing record without inserting new row
+      expect(duplicateRecord.usageId).toBe("d0000001-0000-4000-8000-000000000001");
+      expect(mockRepo.insertUsageRecord).not.toHaveBeenCalled();
+    });
+
+    it("async usage recording and invoice reconciliation await persistence", async () => {
+      const mockRepo = {
+        isEnabled: vi.fn().mockReturnValue(true),
+        insertUsageRecord: vi.fn().mockResolvedValue({ usageId: "u-async-1" }),
+        updateUsageRecordReconciliation: vi.fn().mockResolvedValue({ usageId: "u-async-1" }),
+      };
+
+      const usageService = new VoiceUsageService(mockRepo as any);
+      const rec = await usageService.recordUsageAsync({
+        providerAccountId: "acc-async",
+        providerUsageRef: "ref-async-1",
+        provider: "twm",
+        serviceType: "asr",
+        quantity: 1,
+        billingUnit: "minute",
+        estimatedCost: 0.74,
+      });
+
+      expect(rec.usageId).toBeDefined();
+      expect(mockRepo.insertUsageRecord).toHaveBeenCalledTimes(1);
+
+      const reconciled = await usageService.reconcileInvoiceAsync(
+        "INV-ASYNC-1",
+        "acc-async",
+        [
+          {
+            providerAccountId: "acc-async",
+            providerUsageRef: "ref-async-1",
+            serviceType: "asr",
+            quantity: 1,
+            billingUnit: "minute",
+            billedCost: 0.74,
+            currency: "TWD",
+            invoiceRef: "INV-ASYNC-1",
+            invoiceDate: "2026-09-09",
+          },
+        ],
+      );
+
+      expect(reconciled.matchedCount).toBe(1);
+      expect(mockRepo.updateUsageRecordReconciliation).toHaveBeenCalledWith(
+        rec.usageId,
+        0.74,
+        "INV-ASYNC-1",
+      );
+    });
+
+    it("VoicePolicyService records provider capacity exceeded alert and persists admission row on overflow", async () => {
+      voiceAlertMetrics.resetForTest();
+      const mockRepo = {
+        insertCallAdmission: vi.fn().mockResolvedValue({ admissionId: "adm-overflow-1" }),
+      };
+
+      const policyService = new VoicePolicyService(mockRepo as any);
+      policyService.activateKillSwitch({
+        scope: "brand",
+        scopeId: "brand-overflow-test",
+        reason: "Simulated load overflow",
+        fallbackRoute: "transfer_human_callcenter",
+      });
+
+      const decision = await policyService.evaluateCallAdmission({
+        providerAccountId: "twm-acc-overflow",
+        providerCallId: "twm-call-overflow-1",
+        dnis: "0800000123",
+        brandId: "brand-overflow-test",
+        language: "zh-TW",
+      });
+
+      expect(decision.admitted).toBe(false);
+      expect(decision.outcome).toBe("overflow");
+      expect(mockRepo.insertCallAdmission).toHaveBeenCalledWith(
+        expect.objectContaining({
+          providerAccountId: "twm-acc-overflow",
+          providerCallId: "twm-call-overflow-1",
+          outcome: "overflow",
+        }),
+      );
+
+      const prometheus = voiceAlertMetrics.toPrometheusFormat();
+      expect(prometheus).toContain("drts_voice_provider_overflow_total");
+      expect(prometheus).toContain('brand_id="brand-overflow-test"');
+    });
+
+    it("VoiceSessionService records worker lease conflict alert on stale lease epoch", () => {
+      voiceAlertMetrics.resetForTest();
+      const mockSessionRepo = {
+        casUpdateSessionControl: vi.fn(),
+      };
+
+      const sessionService = new VoiceSessionService(mockSessionRepo as any);
+      const fakeSession = {
+        voiceSessionId: "sess-lease-1",
+        callId: "call-lease-1",
+        providerAccountId: "twm-acc-1",
+        providerCallId: "twm-call-1",
+        resourceScopeId: "scope-lease-test",
+        lineBindingId: "line-1",
+        routeProfileId: "rp-1",
+        routeProfileVersion: 2,
+        dialogState: "in_progress",
+        mediaState: "active",
+        controlOwner: "worker-1",
+        leaseEpoch: 5,
+        sessionVersion: 1,
+        commitStatus: "in_progress",
+        recordingState: "active",
+        confirmationState: "pending",
+        outcome: null,
+        inputEpoch: 1,
+        pendingInput: false,
+        lastResolvedInputEpoch: 0,
+        lastAppliedControlSequence: 0,
+        createdAt: "2026-09-01T10:00:00Z",
+        updatedAt: "2026-09-01T10:00:00Z",
+      };
+
+      expect(() => {
+        (sessionService as any).assertWriteAuthorized(fakeSession, {
+          sessionVersion: 1,
+          leaseEpoch: 4, // Mismatch: expected 4 but current is 5
+        });
+      }).toThrow();
+
+      const prometheus = voiceAlertMetrics.toPrometheusFormat();
+      expect(prometheus).toContain("drts_voice_worker_lease_conflicts_total");
+      expect(prometheus).toContain('brand_id="scope-lease-test"');
+      expect(prometheus).toContain('route_profile_version="2"');
+    });
+
+    it("MetricsController triggers syncActiveAlertMetrics and serializes Prometheus metrics", async () => {
+      const mockMetricsService = {
+        syncActiveAlertMetrics: vi.fn().mockResolvedValue(undefined),
+      };
+
+      const controller = new MetricsController(mockMetricsService as any);
+      const result = await controller.getMetrics();
+
+      expect(mockMetricsService.syncActiveAlertMetrics).toHaveBeenCalledTimes(1);
+      expect(typeof result).toBe("string");
+      expect(result).toContain("drts_voice_");
+    });
+
+    it("deriveCohortFromDurableEvidence incorporates admission overflow into denominator and requires playback ACK", async () => {
+      const mockRepo = {
+        isEnabled: vi.fn().mockReturnValue(true),
+        listCallAdmissions: vi.fn().mockResolvedValue([
+          // 1. Overflow admission (must be in denominator!)
+          {
+            admissionId: "adm-cov-1",
+            providerAccountId: "twm-acc-1",
+            providerCallId: "twm-call-cov-1",
+            dnis: "0800111222",
+            receivedAt: "2026-09-05T12:00:00Z",
+            outcome: "overflow",
+            reason: "KILL_SWITCH_ACTIVE",
+            brandId: "brand-drts-01",
+            lineBindingId: "line-001",
+          },
+          // 2. Admitted call with valid session and playback ACK
+          {
+            admissionId: "adm-cov-2",
+            providerAccountId: "twm-acc-1",
+            providerCallId: "twm-call-cov-2",
+            dnis: "0800111222",
+            receivedAt: "2026-09-05T12:05:00Z",
+            outcome: "admitted",
+            reason: "ADMISSION_PERMITTED",
+            brandId: "brand-drts-01",
+            lineBindingId: "line-001",
+            voiceSessionId: "sess-cov-2",
+          },
+        ]),
+        findSessionById: vi.fn().mockImplementation(async (id: string) => {
+          if (id === "sess-cov-2") {
+            return {
+              voiceSessionId: "sess-cov-2",
+              callId: "call-cov-2",
+              providerAccountId: "twm-acc-1",
+              providerCallId: "twm-call-cov-2",
+              resourceScopeId: "brand-drts-01",
+              lineBindingId: "line-001",
+              routeProfileId: "rp-1",
+              routeProfileVersion: 1,
+              dialogState: "booking_confirmed",
+              mediaState: "idle",
+              controlOwner: "completed",
+              leaseEpoch: 1,
+              sessionVersion: 1,
+              commitStatus: "committed",
+              recordingState: "stopped",
+              confirmationState: "confirmed",
+              outcome: "booking_completed",
+              inputEpoch: 1,
+              pendingInput: false,
+              lastResolvedInputEpoch: 1,
+              lastAppliedControlSequence: 2,
+              createdAt: "2026-09-05T12:05:00Z",
+              updatedAt: "2026-09-05T12:06:00Z",
+            };
+          }
+          return null;
+        }),
+        findUsageRecordsBySession: vi.fn().mockResolvedValue([
+          {
+            usageId: "u-cov-1",
+            estimatedCost: 12.5,
+            actualCost: null,
+          },
+        ]),
+        findActiveCreateIntent: vi.fn().mockResolvedValue({
+          intentId: "intent-cov-2",
+          action: "create_booking",
+          currentDraftVersion: 1,
+          status: "confirmed",
+          orderId: "order-cov-2",
+        }),
+        findActiveConfirmation: vi.fn().mockResolvedValue({
+          confirmationId: "conf-cov-2",
+          state: "accepted",
+          acknowledgedByCustomer: true,
+          bookingId: "booking-cov-2",
+        }),
+        findActiveReservationsForOrder: vi.fn().mockResolvedValue([
+          { reservationId: "res-cov-2" },
+        ]),
+        listSessionEvents: vi.fn().mockResolvedValue([
+          {
+            eventType: "playback_terminal",
+            payload: { playbackStatus: "ack" },
+          },
+        ]),
+      };
+
+      const metricsService = new VoiceBookingMetricsService(mockRepo as any);
+      const cohort = await metricsService.deriveCohortFromDurableEvidence({
+        windowStart: "2026-09-05T00:00:00Z",
+        windowEnd: "2026-09-05T23:59:59Z",
+        observationWindowClosed: true,
+      });
+
+      // Total denominator must be 2 (1 overflow + 1 admitted)
+      expect(cohort.allCallCoverage.denominatorRealIngress).toBe(2);
+      expect(cohort.allCallCoverage.capacityOverflowCount).toBe(1);
+      expect(cohort.allCallCoverage.rate).toBe(0.5);
+      expect(cohort.unattendedEffectiveIntake.numeratorValidIntakes).toBe(1);
+      expect(cohort.unattendedDispatchCompletion.numeratorDriverAcceptedUniqueOrders).toBe(1);
+      expect(cohort.costPerEffectiveIntake.totalVoiceCost).toBe(12.5);
     });
   });
 });

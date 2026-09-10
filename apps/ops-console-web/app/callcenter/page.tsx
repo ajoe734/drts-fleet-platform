@@ -84,6 +84,8 @@ import {
   deriveCallbackSlaPresentation,
   deriveDimensionalAlertPresentation,
   formatVoiceCost,
+  type UiCohortMetricsView,
+  type UiCostLedgerItem,
 } from "./callcenter-metrics-ledger";
 
 const theme = buildCanvasTheme({
@@ -1069,6 +1071,8 @@ export default function CallcenterPage() {
   const [outcomeNotice, setOutcomeNotice] = useState<OutcomeNotice | null>(
     null,
   );
+  const [usageRecords, setUsageRecords] = useState<UiCostLedgerItem[]>([]);
+  const [serverCohort, setServerCohort] = useState<UiCohortMetricsView | null>(null);
   const [loading, setLoading] = useState(true);
   const [query, setQuery] = useState("");
   const [queueView, setQueueView] = useState<QueueView>("sessions");
@@ -1365,38 +1369,105 @@ export default function CallcenterPage() {
     const breached = callbacks.filter(
       (c) => c.status === "pending" && c.dueAt && Date.now() > new Date(c.dueAt).getTime(),
     ).length;
+    const completedWithContact = callbacks.filter(
+      (c) => c.status === "completed" && c.updatedAt && c.createdAt,
+    );
+    const averageFirstContactSeconds =
+      completedWithContact.length > 0
+        ? completedWithContact.reduce((sum, c) => {
+            const diff =
+              (new Date(c.updatedAt).getTime() - new Date(c.createdAt).getTime()) /
+              1000;
+            return sum + Math.max(0, diff);
+          }, 0) / completedWithContact.length
+        : undefined;
+
     return deriveCallbackSlaPresentation({
-      totalCallbacks: Math.max(total, 1),
+      totalCallbacks: total,
       completedCount: completed,
       breachedCount: breached,
-      averageFirstContactSeconds: 120,
+      averageFirstContactSeconds,
     });
   }, [callbacks]);
 
   const cohortMetrics = useMemo(() => {
+    if (serverCohort) {
+      return serverCohort;
+    }
     const total = sessions.length;
     const ai = sessions.filter(isNormalAiCallSession);
-    const valid = ai.filter(
-      (s) => s.bookingStatus === "confirmed" || s.bookingStatus === "created",
-    ).length;
-    const dispatched = ai.filter(
-      (s) => s.dispatchStatus === "dispatched" || s.dispatchStatus === "accepted",
-    ).length;
+    const validSessions = ai.filter((s) => {
+      const ext = s as ExtendedCallSessionRecord;
+      return (
+        (s.linkedOrderId !== null && s.linkedOrderId !== undefined) ||
+        ext.aiMetadata?.step === "booking" ||
+        ext.aiMetadata?.step === "dispatched" ||
+        ext.aiMetadata?.step === "completed" ||
+        Boolean(
+          ext.aiMetadata?.confirmedData?.confirmedPickup &&
+            ext.aiMetadata?.confirmedData?.confirmedDropoff,
+        )
+      );
+    });
+    const valid = validSessions.length;
+    const dispatched = ai.filter((s) => {
+      const ext = s as ExtendedCallSessionRecord;
+      return (
+        ext.aiMetadata?.dispatchState === "accepted" ||
+        ext.aiMetadata?.dispatchState === "arrived"
+      );
+    }).length;
+
+    const transferCalls = sessions.filter((s) => {
+      const ext = s as ExtendedCallSessionRecord;
+      return (
+        s.callType === "complaint" ||
+        ext.aiMetadata?.controlOwner === "human_operator" ||
+        ext.aiMetadata?.controlOwner === "human_queue" ||
+        ext.aiMetadata?.step === "handed_off"
+      );
+    }).length;
+
+    const errorBookings = sessions.filter((s) => {
+      const ext = s as ExtendedCallSessionRecord;
+      return (
+        Boolean(ext.aiMetadata?.hasException) &&
+        (ext.aiMetadata?.exceptionDetails?.category ===
+          "command_pending_reconciliation" ||
+          ext.aiMetadata?.exceptionDetails?.category ===
+            "recording_checkpoint_failed")
+      );
+    }).length;
+
+    const totalCostTwd = usageRecords.reduce(
+      (sum, u) => sum + (u.actualCost ?? u.estimatedCost ?? 0),
+      0,
+    );
+
+    const isWindowClosed =
+      sessions.length > 0 &&
+      sessions.every(
+        (s) =>
+          s.status === "closed" &&
+          (!s.endedAt ||
+            Date.now() - new Date(s.endedAt).getTime() > 15 * 60 * 1000),
+      );
+
     return deriveCohortMetricsPresentation({
       windowStart: new Date(Date.now() - 86400000).toISOString(),
       windowEnd: new Date().toISOString(),
-      observationWindowClosed: true,
-      totalRealIngress: Math.max(total, 1),
+      observationWindowClosed: isWindowClosed,
+      totalRealIngress: total,
       callsEnteredAi: ai.length,
       expressedBookingIntent: Math.max(valid, ai.length),
       validBookingIntakes: valid,
       immediateDispatchOrders: Math.max(dispatched, valid),
       driverAcceptedOrders: dispatched,
-      transferCalls: sessions.filter((s) => s.status === "transferred").length,
-      errorBookings: sessions.filter((s) => s.status === "error").length,
-      totalCostTwd: ai.length * 15.5,
+      transferCalls,
+      errorBookings,
+      totalCostTwd,
     });
-  }, [sessions]);
+  }, [sessions, serverCohort, usageRecords]);
 
   useEffect(() => {
     setOrderForm(INITIAL_ORDER_FORM);
@@ -3650,7 +3721,7 @@ export default function CallcenterPage() {
                     theme={theme}
                     tone={
                       callbackSlaSummary.statusTone === "danger"
-                        ? "critical"
+                        ? "danger"
                         : callbackSlaSummary.statusTone === "warning"
                           ? "warn"
                           : "neutral"

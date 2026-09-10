@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { Injectable, Logger, Optional } from "@nestjs/common";
 import type { PoolClient, QueryResult, QueryResultRow } from "pg";
 
@@ -1161,18 +1162,140 @@ export class VoiceBookingRepository {
     );
     const row = result.rows[0];
     if (!row) return null;
-    return {
-      admissionId: String(row.admission_id),
-      providerAccountId: String(row.provider_account_id),
-      providerCallId: String(row.provider_call_id),
-      receivedAt: new Date(row.received_at as string | number | Date).toISOString(),
-      lineBindingId: row.line_binding_id ? String(row.line_binding_id) : null,
-      brandId: row.brand_id ? String(row.brand_id) : null,
-      outcome: row.outcome as "admitted" | "overflow" | "failed",
-      reason: row.reason ? String(row.reason) : null,
-      voiceSessionId: row.voice_session_id ? String(row.voice_session_id) : null,
-      createdAt: new Date(row.created_at as string | number | Date).toISOString(),
-    };
+    return mapCallAdmissionRow(row);
+  }
+
+  async findCallAdmissionByProviderCall(
+    providerAccountId: string,
+    providerCallId: string,
+    executor?: VoiceQueryExecutor,
+  ): Promise<VoiceCallAdmissionRecord | null> {
+    if (!this.isEnabled()) return null;
+    const result = await (
+      executor ?? this.requireDatabase()
+    ).query<QueryResultRow>(
+      `SELECT * FROM voice.call_admission WHERE provider_account_id = $1 AND provider_call_id = $2 LIMIT 1`,
+      [providerAccountId, providerCallId],
+    );
+    const row = result.rows[0];
+    return row ? mapCallAdmissionRow(row) : null;
+  }
+
+  async insertCallAdmission(
+    record: {
+      admissionId?: string;
+      providerAccountId: string;
+      providerCallId: string;
+      receivedAt: string;
+      lineBindingId?: string | null;
+      brandId?: string | null;
+      outcome: "admitted" | "overflow" | "failed";
+      reason?: string | null;
+      voiceSessionId?: string | null;
+    },
+    executor?: VoiceQueryExecutor,
+  ): Promise<VoiceCallAdmissionRecord> {
+    const db = executor ?? this.requireDatabase();
+    const admissionId = record.admissionId ?? randomUUID();
+    const result = await db.query<QueryResultRow>(
+      `
+        INSERT INTO voice.call_admission (
+          admission_id, provider_account_id, provider_call_id,
+          received_at, line_binding_id, brand_id, outcome,
+          reason, voice_session_id
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+        ON CONFLICT (provider_account_id, provider_call_id) DO NOTHING
+        RETURNING *
+      `,
+      [
+        admissionId,
+        record.providerAccountId,
+        record.providerCallId,
+        record.receivedAt,
+        record.lineBindingId ?? null,
+        record.brandId ?? null,
+        record.outcome,
+        record.reason ?? null,
+        record.voiceSessionId ?? null,
+      ],
+    );
+    if (result.rows.length > 0 && result.rows[0]) {
+      return mapCallAdmissionRow(result.rows[0]);
+    }
+    const existing = await this.findCallAdmissionByProviderCall(
+      record.providerAccountId,
+      record.providerCallId,
+      executor,
+    );
+    if (existing) return existing;
+    throw new Error(`Failed to insert or fetch call admission ${admissionId}`);
+  }
+
+  async listCallAdmissions(
+    filter?: {
+      windowStart?: string | undefined;
+      windowEnd?: string | undefined;
+      brandId?: string | undefined;
+      outcome?: "admitted" | "overflow" | "failed" | undefined;
+    },
+    executor?: VoiceQueryExecutor,
+  ): Promise<VoiceCallAdmissionRecord[]> {
+    if (!this.isEnabled()) return [];
+    const conditions: string[] = [];
+    const values: unknown[] = [];
+    if (filter?.brandId) {
+      values.push(filter.brandId);
+      conditions.push(`brand_id = $${values.length}`);
+    }
+    if (filter?.outcome) {
+      values.push(filter.outcome);
+      conditions.push(`outcome = $${values.length}`);
+    }
+    if (filter?.windowStart) {
+      values.push(filter.windowStart);
+      conditions.push(`received_at >= $${values.length}`);
+    }
+    if (filter?.windowEnd) {
+      values.push(filter.windowEnd);
+      conditions.push(`received_at <= $${values.length}`);
+    }
+    const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
+    const result = await (executor ?? this.requireDatabase()).query<QueryResultRow>(
+      `SELECT * FROM voice.call_admission ${whereClause} ORDER BY received_at ASC`,
+      values,
+    );
+    return result.rows.map(mapCallAdmissionRow);
+  }
+
+  async listSessions(
+    filter?: {
+      windowStart?: string;
+      windowEnd?: string;
+      brandId?: string;
+    },
+    executor?: VoiceQueryExecutor,
+  ): Promise<VoiceSessionRecord[]> {
+    if (!this.isEnabled()) return [];
+    const conditions: string[] = [];
+    const values: unknown[] = [];
+    if (filter?.brandId) {
+      values.push(filter.brandId);
+      conditions.push(`resource_scope_id = $${values.length}`);
+    }
+    if (filter?.windowStart) {
+      values.push(filter.windowStart);
+      conditions.push(`created_at >= $${values.length}`);
+    }
+    if (filter?.windowEnd) {
+      values.push(filter.windowEnd);
+      conditions.push(`created_at <= $${values.length}`);
+    }
+    const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
+    const result = await (executor ?? this.requireDatabase()).query<VoiceSessionRow>(
+      `SELECT * FROM voice.session ${whereClause} ORDER BY created_at ASC`,
+      values,
+    );
+    return result.rows.map(mapSessionRow);
   }
 
   async findUsageRecordsBySession(
@@ -1288,7 +1411,7 @@ export class VoiceBookingRepository {
       ],
     );
 
-    if (insertResult.rows.length > 0) {
+    if (insertResult.rows.length > 0 && insertResult.rows[0]) {
       return mapVoiceUsageRow(insertResult.rows[0]);
     }
 
@@ -1305,6 +1428,60 @@ export class VoiceBookingRepository {
     }
 
     throw new Error(`Failed to insert or fetch existing voice usage record ${usageId}`);
+  }
+
+  async listUsageRecords(
+    filter?: {
+      voiceSessionId?: string;
+      admissionId?: string;
+      brandId?: string;
+      provider?: string;
+      serviceType?: string;
+      usageDate?: string;
+      windowStart?: string;
+      windowEnd?: string;
+    },
+    executor?: VoiceQueryExecutor,
+  ): Promise<VoiceUsageRowRecord[]> {
+    if (!this.isEnabled()) {
+      return [];
+    }
+    const conditions: string[] = [];
+    const values: unknown[] = [];
+
+    if (filter?.voiceSessionId) {
+      values.push(filter.voiceSessionId);
+      conditions.push(`voice_session_id = $${values.length}`);
+    }
+    if (filter?.admissionId) {
+      values.push(filter.admissionId);
+      conditions.push(`admission_id = $${values.length}`);
+    }
+    if (filter?.brandId) {
+      values.push(filter.brandId);
+      conditions.push(`brand_id = $${values.length}`);
+    }
+    if (filter?.provider) {
+      values.push(filter.provider);
+      conditions.push(`LOWER(provider) = LOWER($${values.length})`);
+    }
+    if (filter?.usageDate) {
+      values.push(filter.usageDate);
+      conditions.push(`usage_date = $${values.length}`);
+    }
+    if (filter?.windowStart) {
+      values.push(filter.windowStart);
+      conditions.push(`created_at >= $${values.length}`);
+    }
+    if (filter?.windowEnd) {
+      values.push(filter.windowEnd);
+      conditions.push(`created_at <= $${values.length}`);
+    }
+
+    const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
+    const queryStr = `SELECT * FROM voice.usage_record ${whereClause} ORDER BY created_at ASC`;
+    const result = await (executor ?? this.requireDatabase()).query<QueryResultRow>(queryStr, values);
+    return result.rows.map(mapVoiceUsageRow);
   }
 
   async updateUsageRecordReconciliation(
@@ -1403,7 +1580,7 @@ export class VoiceBookingRepository {
       ],
     );
 
-    if (result.rows.length > 0) {
+    if (result.rows.length > 0 && result.rows[0]) {
       return mapVoiceRateCardRow(result.rows[0]);
     }
     // Existing rate card on conflict
@@ -1459,6 +1636,21 @@ function mapVoiceRateCardRow(row: QueryResultRow): VoiceRateCardRowRecord {
     minimumCharge: row.minimum_charge !== null && row.minimum_charge !== undefined ? Number(row.minimum_charge) : null,
     conditions: row.conditions,
     reconciliationStatus: String(row.reconciliation_status),
+    createdAt: new Date(row.created_at as string | number | Date).toISOString(),
+  };
+}
+
+function mapCallAdmissionRow(row: QueryResultRow): VoiceCallAdmissionRecord {
+  return {
+    admissionId: String(row.admission_id),
+    providerAccountId: String(row.provider_account_id),
+    providerCallId: String(row.provider_call_id),
+    receivedAt: new Date(row.received_at as string | number | Date).toISOString(),
+    lineBindingId: row.line_binding_id ? String(row.line_binding_id) : null,
+    brandId: row.brand_id ? String(row.brand_id) : null,
+    outcome: row.outcome as "admitted" | "overflow" | "failed",
+    reason: row.reason ? String(row.reason) : null,
+    voiceSessionId: row.voice_session_id ? String(row.voice_session_id) : null,
     createdAt: new Date(row.created_at as string | number | Date).toISOString(),
   };
 }

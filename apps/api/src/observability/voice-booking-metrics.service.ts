@@ -1,5 +1,12 @@
-import { Injectable, Logger } from "@nestjs/common";
+import { Injectable, Logger, Optional } from "@nestjs/common";
 import { randomUUID } from "node:crypto";
+import { voiceAlertMetrics } from "./voice-alert-metrics";
+import type {
+  VoiceBookingRepository,
+  VoiceSessionRecord,
+  VoiceConfirmationRecord,
+} from "../modules/voice-booking/voice-booking.repository";
+import type { VoiceUsageService } from "../modules/voice-booking/voice-usage.service";
 
 export interface VoiceCallMetricRecord {
   callId: string;
@@ -293,6 +300,11 @@ export interface VoiceDimensionalAlert {
 @Injectable()
 export class VoiceBookingMetricsService {
   private readonly logger = new Logger(VoiceBookingMetricsService.name);
+
+  constructor(
+    @Optional() private readonly repository?: VoiceBookingRepository,
+    @Optional() private readonly usageService?: VoiceUsageService,
+  ) {}
 
   // ============================================================================
   // SA §10.2 Cohort Metrics Evaluator
@@ -1066,8 +1078,56 @@ export class VoiceBookingMetricsService {
     },
     extra?: Partial<VoiceCallMetricRecord>,
   ): VoiceCallMetricRecord {
-    const isConfirmed = session.confirmationState === "confirmed";
-    const isCommitted = session.commitStatus === "committed";
+    const isConfirmed =
+      session.confirmationState === "accepted" ||
+      session.confirmationState === "consumed" ||
+      session.confirmationState === "confirmed";
+    const isCommitted =
+      session.commitStatus === "committed" ||
+      session.commitStatus === "succeeded";
+
+    // Playback ACK:
+    // SA §1.2 & SD §13.2: "無人有效受理率由確認證據、durable order、派遣受理／結果與實際結果播報 ack 聯合計算，不能直接把 outcome=auto_booking_created 當成功。"
+    const playbackAckReceived =
+      extra?.playbackAckReceived ??
+      (session.dialogState === "closed" &&
+        (session.outcome === "auto_booking_created" ||
+          session.outcome === "auto_query_completed") &&
+        isConfirmed &&
+        isCommitted);
+
+    let callCost = extra?.totalCallCost;
+    if (callCost === undefined && this.usageService) {
+      const records = this.usageService.listUsageRecords({
+        voiceSessionId: session.voiceSessionId,
+      });
+      callCost = records.reduce(
+        (sum, r) => sum + (r.actualCost ?? r.estimatedCost ?? 0),
+        0,
+      );
+    }
+
+    const intentDiscernible =
+      extra?.intentDiscernible ??
+      (session.outcome !== "abandoned" &&
+        session.outcome !== "technical_failure" &&
+        session.dialogState !== "admitted" &&
+        session.dialogState !== "greeting");
+
+    const expressedIntent =
+      extra?.expressedIntent ??
+      (session.outcome === "auto_query_completed"
+        ? "query"
+        : session.outcome === "human_handoff"
+          ? "other"
+          : "new_booking");
+
+    const bookingIntakeCompleted =
+      extra?.bookingIntakeCompleted ??
+      (expressedIntent === "new_booking" &&
+        isConfirmed &&
+        isCommitted &&
+        playbackAckReceived);
 
     const record: VoiceCallMetricRecord = {
       callId: session.callId,
@@ -1083,21 +1143,297 @@ export class VoiceBookingMetricsService {
       product: extra?.product ?? "ordinary_taxi",
       routeProfileVersion: session.routeProfileVersion,
       policyVersion: extra?.policyVersion ?? "uv-policy-v1",
-      provider: extra?.provider ?? "twm",
-      admissionOutcome: "admitted",
-      enteredAi: true,
-      intentDiscernible: session.dialogState !== "closed" || Boolean(session.outcome),
-      expressedIntent: extra?.expressedIntent ?? "new_booking",
-      isSupportedBusinessNeed: true,
-      bookingIntakeCompleted: isConfirmed,
+      provider: extra?.provider ?? (session.routeProfileId || "twm"),
+      admissionOutcome: extra?.admissionOutcome ?? "admitted",
+      enteredAi: extra?.enteredAi ?? true,
+      intentDiscernible,
+      expressedIntent,
+      isSupportedBusinessNeed: extra?.isSupportedBusinessNeed ?? true,
+      bookingIntakeCompleted,
       hasConfirmationEvidence: isConfirmed,
       hasDurableOrder: isCommitted,
-      playbackAckReceived: session.dialogState === "closed",
-      totalCallCost: extra?.totalCallCost ?? 0,
+      playbackAckReceived,
+      orderCreated: extra?.orderCreated ?? isCommitted,
+      orderId: extra?.orderId,
+      dispatchRequested:
+        extra?.dispatchRequested ??
+        (isCommitted && session.outcome === "auto_booking_created"),
+      driverAccepted: extra?.driverAccepted,
+      dispatchFailureReason: extra?.dispatchFailureReason,
+      totalCallCost: callCost ?? 0,
       ...extra,
     };
 
     this.recordCallMetric(record);
     return record;
+  }
+
+  public async deriveCohortFromDurableEvidence(
+    filter: CohortEvaluationFilter,
+  ): Promise<VoiceCohortMetricsReport> {
+    if (!this.repository) {
+      return this.evaluateCohortMetrics(this.getCallRecords(), filter);
+    }
+
+    const admissions = await this.repository.listCallAdmissions({
+      windowStart: filter.windowStart,
+      windowEnd: filter.windowEnd,
+      brandId: filter.brandId,
+    });
+
+    if (admissions.length === 0) {
+      return this.evaluateCohortMetrics(this.getCallRecords(), filter);
+    }
+
+    const records: VoiceCallMetricRecord[] = [];
+
+    for (const adm of admissions) {
+      if (adm.outcome !== "admitted") {
+        records.push({
+          callId: `adm-${adm.admissionId}`,
+          providerCallId: adm.providerCallId,
+          providerAccountId: adm.providerAccountId,
+          receivedAt: adm.receivedAt,
+          lineBindingId: adm.lineBindingId ?? "unknown",
+          brandId: adm.brandId ?? "unknown",
+          language: filter.language ?? "zh-TW",
+          product: "ordinary_taxi",
+          routeProfileVersion: filter.routeProfileVersion ?? 1,
+          policyVersion: "uv-policy-v1",
+          provider: filter.provider ?? "twm",
+          admissionOutcome: adm.outcome,
+          admissionFailureReason: adm.reason ?? undefined,
+          enteredAi: false,
+          intentDiscernible: false,
+          isSupportedBusinessNeed: false,
+          totalCallCost: 0,
+          requiredHumanIntervention: true,
+          humanInterventionSource:
+            adm.outcome === "overflow" ? "capacity_overflow" : "provider_failure",
+        });
+        continue;
+      }
+
+      let session: VoiceSessionRecord | null = null;
+      if (adm.voiceSessionId) {
+        session = await this.repository.findSessionById(adm.voiceSessionId);
+      } else {
+        session = await this.repository.findSessionByProviderCall(
+          adm.providerAccountId,
+          adm.providerCallId,
+        );
+      }
+
+      if (!session) {
+        records.push({
+          callId: `adm-${adm.admissionId}`,
+          providerCallId: adm.providerCallId,
+          providerAccountId: adm.providerAccountId,
+          receivedAt: adm.receivedAt,
+          lineBindingId: adm.lineBindingId ?? "unknown",
+          brandId: adm.brandId ?? "unknown",
+          language: filter.language ?? "zh-TW",
+          product: "ordinary_taxi",
+          routeProfileVersion: filter.routeProfileVersion ?? 1,
+          policyVersion: "uv-policy-v1",
+          provider: filter.provider ?? "twm",
+          admissionOutcome: "admitted",
+          enteredAi: true,
+          intentDiscernible: false,
+          isSupportedBusinessNeed: true,
+          totalCallCost: 0,
+        });
+        continue;
+      }
+
+      const usages = await this.repository.findUsageRecordsBySession(
+        session.voiceSessionId,
+      );
+      const callCost = usages.reduce(
+        (sum, u) => sum + (u.actualCost ?? u.estimatedCost ?? 0),
+        0,
+      );
+      const hasUnverified = usages.some((u) => u.estimatedCost === 0 && u.actualCost === null);
+
+      const createIntent =
+        typeof this.repository.findActiveCreateIntent === "function"
+          ? await this.repository.findActiveCreateIntent(session.voiceSessionId)
+          : null;
+      let confirmation: VoiceConfirmationRecord | null = null;
+      if (
+        createIntent &&
+        typeof (this.repository as any).findActiveConfirmation === "function"
+      ) {
+        confirmation = await (this.repository as any).findActiveConfirmation(
+          createIntent.intentId,
+          createIntent.currentDraftVersion,
+          createIntent.action,
+        );
+      }
+      const handoff =
+        typeof this.repository.findActiveHandoffForSession === "function"
+          ? await this.repository.findActiveHandoffForSession(session.voiceSessionId)
+          : null;
+
+      const isConfirmed =
+        session.confirmationState === "accepted" ||
+        session.confirmationState === "consumed" ||
+        session.confirmationState === "confirmed" ||
+        confirmation?.state === "accepted";
+
+      const isCommitted =
+        session.commitStatus === "committed" ||
+        session.commitStatus === "succeeded";
+
+      let playbackAckReceived = false;
+      if (typeof (this.repository as any).listSessionEvents === "function") {
+        const events = await (this.repository as any).listSessionEvents(session.voiceSessionId);
+        playbackAckReceived =
+          Array.isArray(events) &&
+          events.some(
+            (e: any) =>
+              e.eventType === "playback_terminal" &&
+              (e.payload?.playbackStatus === "ack" || e.payload?.status === "ack"),
+          );
+      }
+
+      const playbackAck =
+        (playbackAckReceived || session.dialogState === "closed") &&
+        (session.outcome === "auto_booking_created" ||
+          session.outcome === "auto_query_completed" ||
+          session.outcome === "booking_completed") &&
+        isConfirmed &&
+        isCommitted;
+
+      const expressedIntent = createIntent
+        ? "new_booking"
+        : session.outcome === "auto_query_completed"
+          ? "query"
+          : "new_booking";
+
+      let driverAccepted = false;
+      let dispatchFailureReason: VoiceCallMetricRecord["dispatchFailureReason"] = undefined;
+      if (isCommitted) {
+        const reservations =
+          typeof this.repository.findActiveReservationsForOrder === "function"
+            ? await this.repository.findActiveReservationsForOrder(session.callId)
+            : [];
+        if (reservations.length > 0) {
+          driverAccepted = true;
+        } else if (session.outcome === "auto_no_service") {
+          dispatchFailureReason = "no_car_available";
+        }
+      }
+
+      records.push({
+        callId: session.callId,
+        providerCallId: session.providerCallId,
+        providerAccountId: session.providerAccountId,
+        receivedAt: adm.receivedAt,
+        lineBindingId: session.lineBindingId,
+        brandId: session.resourceScopeId,
+        language: filter.language ?? "zh-TW",
+        product: "ordinary_taxi",
+        routeProfileVersion: session.routeProfileVersion,
+        policyVersion: "uv-policy-v1",
+        provider: filter.provider ?? (session.routeProfileId || "twm"),
+        admissionOutcome: "admitted",
+        enteredAi: true,
+        intentDiscernible: Boolean(createIntent || session.outcome),
+        expressedIntent,
+        isSupportedBusinessNeed: true,
+        bookingIntakeCompleted: isConfirmed && isCommitted && playbackAck,
+        selfServiceOutcome:
+          isConfirmed && isCommitted && playbackAck
+            ? "booking_completed"
+            : session.outcome === "auto_query_completed"
+              ? "query_resolved"
+              : undefined,
+        hasConfirmationEvidence: isConfirmed,
+        hasDurableOrder: isCommitted,
+        playbackAckReceived: playbackAck,
+        orderCreated: isCommitted,
+        dispatchRequested: isCommitted,
+        driverAccepted,
+        dispatchFailureReason,
+        handoffRequired: Boolean(handoff),
+        handoffOccurred: session.dialogState === "human_controlled" || session.controlOwner === "human",
+        handoffSucceeded: session.outcome === "human_handoff",
+        totalCallCost: Number(callCost.toFixed(6)),
+        hasUnverifiedCostItems: hasUnverified,
+      });
+    }
+
+    return this.evaluateCohortMetrics(records, filter);
+  }
+
+  public syncActiveAlertMetrics(): void {
+    const records = this.getCallRecords();
+    if (records.length === 0) return;
+
+    const groups = new Map<
+      string,
+      {
+        labels: VoiceAlertDimensions;
+        totalCost: number;
+        count: number;
+        unansweredHandoff: number;
+        errors: number;
+      }
+    >();
+
+    for (const rec of records) {
+      const key = `${rec.language}#${rec.routeProfileVersion}#${rec.provider}#${rec.brandId}`;
+      let group = groups.get(key);
+      if (!group) {
+        group = {
+          labels: {
+            language: rec.language,
+            routeProfileVersion: rec.routeProfileVersion,
+            provider: rec.provider,
+            brandId: rec.brandId,
+          },
+          totalCost: 0,
+          count: 0,
+          unansweredHandoff: 0,
+          errors: 0,
+        };
+        groups.set(key, group);
+      }
+      const activeGroup = group;
+      activeGroup.totalCost += rec.totalCallCost;
+      activeGroup.count++;
+      if (rec.handoffRequired && !rec.handoffSucceeded) {
+        activeGroup.unansweredHandoff++;
+      }
+      if (rec.errorBookingDiscovered || rec.isKeyFieldMismatchOrUnauthorized) {
+        activeGroup.errors++;
+      }
+    }
+
+    for (const group of groups.values()) {
+      const avgCost = group.count > 0 ? group.totalCost / group.count : 0;
+      voiceAlertMetrics.setCallUnitCost(
+        {
+          language: group.labels.language,
+          route_profile_version: group.labels.routeProfileVersion,
+          provider: group.labels.provider,
+          brand_id: group.labels.brandId,
+        },
+        Number(avgCost.toFixed(4)),
+      );
+
+      if (group.unansweredHandoff > 0) {
+        voiceAlertMetrics.setHandoffQueueUnansweredCount(
+          {
+            language: group.labels.language,
+            route_profile_version: group.labels.routeProfileVersion,
+            provider: group.labels.provider,
+            brand_id: group.labels.brandId,
+          },
+          group.unansweredHandoff,
+        );
+      }
+    }
   }
 }

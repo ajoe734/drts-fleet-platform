@@ -1,8 +1,26 @@
 import { Injectable, Logger, Optional, type OnModuleInit } from "@nestjs/common";
-import { randomUUID } from "node:crypto";
+import { randomUUID, createHash } from "node:crypto";
 
 import { ApiRequestError } from "../../common/api-envelope";
 import { VoiceBookingRepository } from "./voice-booking.repository";
+
+export const DEFAULT_RATE_CARD_IDS = {
+  TWM_ASR_REALTIME: "e4a50001-0000-4000-8000-000000000001",
+  TWM_TTS: "e4a50001-0000-4000-8000-000000000002",
+  CTI_TELEPHONY: "e4a50001-0000-4000-8000-000000000003",
+  LLM_DIALOGUE: "e4a50001-0000-4000-8000-000000000004",
+  STORAGE: "e4a50001-0000-4000-8000-000000000005",
+  HUMAN_OPERATOR: "e4a50001-0000-4000-8000-000000000006",
+} as const;
+
+export function ensureUuid(id: string): string {
+  const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+  if (uuidRegex.test(id)) {
+    return id;
+  }
+  const hash = createHash("sha256").update(id).digest("hex");
+  return `${hash.slice(0, 8)}-${hash.slice(8, 12)}-4${hash.slice(13, 16)}-a${hash.slice(17, 20)}-${hash.slice(20, 32)}`;
+}
 
 export type VoiceUsageServiceType =
   | "telephony"
@@ -108,6 +126,7 @@ export interface VoiceUsageRecordInput {
   reconciliationAdjustment?: number | undefined;
   usageDate?: string | undefined;
   unverified?: boolean | undefined;
+  unverifiedReasons?: string[] | undefined;
   metadata?: Record<string, unknown> | undefined;
 }
 
@@ -136,6 +155,7 @@ export interface VoiceUsageRecord {
   reconciliationAdjustment?: number | undefined;
   usageDate: string;
   unverified: boolean;
+  unverifiedReasons?: string[] | undefined;
   metadata?: Record<string, unknown> | undefined;
   createdAt: string;
 }
@@ -316,6 +336,49 @@ export class VoiceUsageService implements OnModuleInit {
     } catch (err) {
       this.logger.warn(`Failed to hydrate rate cards from repository: ${err}`);
     }
+
+    try {
+      const persistedUsage = await this.voiceRepo.listUsageRecords();
+      for (const u of persistedUsage) {
+        if (!this.usageRecords.has(u.usageId)) {
+          const rec: VoiceUsageRecord = {
+            usageId: u.usageId,
+            providerAccountId: u.providerAccountId,
+            providerUsageRef: u.providerUsageRef ?? undefined,
+            admissionId: u.admissionId ?? undefined,
+            voiceSessionId: u.voiceSessionId ?? undefined,
+            provider: u.provider,
+            serviceType: "telephony",
+            model: u.model ?? undefined,
+            modelVersion: u.modelVersion ?? undefined,
+            billingUnit: u.billingUnit as BillingUnit,
+            quantity: u.quantity,
+            currency: u.currency,
+            rateCardId: u.rateCardId ?? undefined,
+            rateCardVersion: u.rateCardVersion ?? undefined,
+            estimatedCost: u.estimatedCost ?? 0,
+            actualCost: u.actualCost ?? undefined,
+            invoiceRef: u.invoiceRef ?? undefined,
+            reconciliationStatus: (u.actualCost !== null && u.actualCost !== undefined ? "reconciled" : "estimated") as any,
+            reconciliationAdjustment:
+              u.actualCost !== null && u.actualCost !== undefined && u.estimatedCost !== null && u.estimatedCost !== undefined
+                ? Number((u.actualCost - u.estimatedCost).toFixed(6))
+                : undefined,
+            brandId: u.brandId ?? undefined,
+            usageDate: u.usageDate,
+            createdAt: u.createdAt,
+            unverified: false,
+          };
+          this.usageRecords.set(rec.usageId, rec);
+          if (rec.providerUsageRef) {
+            const key = `${rec.providerAccountId}#${rec.providerUsageRef}`;
+            this.providerRefIndex.set(key, rec.usageId);
+          }
+        }
+      }
+    } catch (err) {
+      this.logger.warn(`Failed to hydrate usage records from repository: ${err}`);
+    }
   }
 
   /**
@@ -331,7 +394,7 @@ export class VoiceUsageService implements OnModuleInit {
   private seedDefaultRateCards(): void {
     // TWM ASR (Realtime)
     this.publishRateCard({
-      rateCardId: "rc-twm-asr-realtime-default",
+      rateCardId: DEFAULT_RATE_CARD_IDS.TWM_ASR_REALTIME,
       provider: "twm",
       serviceType: "asr",
       currency: "TWD",
@@ -349,7 +412,7 @@ export class VoiceUsageService implements OnModuleInit {
 
     // TWM TTS
     this.publishRateCard({
-      rateCardId: "rc-twm-tts-default",
+      rateCardId: DEFAULT_RATE_CARD_IDS.TWM_TTS,
       provider: "twm",
       serviceType: "tts",
       currency: "TWD",
@@ -362,7 +425,7 @@ export class VoiceUsageService implements OnModuleInit {
 
     // Telephony Ingress Leg
     this.publishRateCard({
-      rateCardId: "rc-cti-telephony-default",
+      rateCardId: DEFAULT_RATE_CARD_IDS.CTI_TELEPHONY,
       provider: "twm-telephony",
       serviceType: "telephony",
       currency: "TWD",
@@ -378,7 +441,7 @@ export class VoiceUsageService implements OnModuleInit {
 
     // LLM Dialogue Engine
     this.publishRateCard({
-      rateCardId: "rc-llm-dialogue-default",
+      rateCardId: DEFAULT_RATE_CARD_IDS.LLM_DIALOGUE,
       provider: "gemini",
       serviceType: "llm",
       currency: "TWD",
@@ -391,7 +454,7 @@ export class VoiceUsageService implements OnModuleInit {
 
     // Storage / Audio Evidence
     this.publishRateCard({
-      rateCardId: "rc-storage-default",
+      rateCardId: DEFAULT_RATE_CARD_IDS.STORAGE,
       provider: "gcp-cloud-storage",
       serviceType: "storage",
       currency: "TWD",
@@ -404,7 +467,7 @@ export class VoiceUsageService implements OnModuleInit {
 
     // Human Operator / Callback Time Allocation
     this.publishRateCard({
-      rateCardId: "rc-human-operator-default",
+      rateCardId: DEFAULT_RATE_CARD_IDS.HUMAN_OPERATOR,
       provider: "drts-internal-ops",
       serviceType: "human_operator",
       currency: "TWD",
@@ -464,11 +527,16 @@ export class VoiceUsageService implements OnModuleInit {
     const key = `${rateCardId}#${nextVersion}`;
     this.rateCards.set(key, record);
     this.rateCardLatestVersion.set(rateCardId, nextVersion);
+    const uuid = ensureUuid(rateCardId);
+    if (uuid !== rateCardId) {
+      this.rateCards.set(`${uuid}#${nextVersion}`, record);
+      this.rateCardLatestVersion.set(uuid, nextVersion);
+    }
 
     if (this.isRepoEnabled() && this.voiceRepo) {
       try {
         const p = this.voiceRepo.insertRateCard({
-          rateCardId: record.rateCardId,
+          rateCardId: ensureUuid(record.rateCardId),
           version: record.version,
           provider: record.provider,
           currency: record.currency,
@@ -476,9 +544,9 @@ export class VoiceUsageService implements OnModuleInit {
           unitPrice: record.unitPrice,
           billingUnit: record.billingUnit,
           effectiveFrom: record.effectiveFrom,
-          effectiveUntil: record.effectiveUntil,
-          roundingRule: record.roundingRule,
-          minimumCharge: record.minimumCharge,
+          effectiveUntil: record.effectiveUntil ?? null,
+          roundingRule: record.roundingRule ?? null,
+          minimumCharge: record.minimumCharge ?? null,
           conditions: {
             ...record.conditions,
             serviceType: record.serviceType,
@@ -509,11 +577,19 @@ export class VoiceUsageService implements OnModuleInit {
     version?: number,
   ): VoiceRateCardRecord | null {
     if (version !== undefined) {
-      return this.rateCards.get(`${rateCardId}#${version}`) ?? null;
+      const found = this.rateCards.get(`${rateCardId}#${version}`);
+      if (found) return found;
+      const uuid = ensureUuid(rateCardId);
+      return this.rateCards.get(`${uuid}#${version}`) ?? null;
     }
     const latestVersion = this.rateCardLatestVersion.get(rateCardId);
-    if (!latestVersion) return null;
-    return this.rateCards.get(`${rateCardId}#${latestVersion}`) ?? null;
+    if (latestVersion) {
+      return this.rateCards.get(`${rateCardId}#${latestVersion}`) ?? null;
+    }
+    const uuid = ensureUuid(rateCardId);
+    const uuidLatest = this.rateCardLatestVersion.get(uuid);
+    if (!uuidLatest) return null;
+    return this.rateCards.get(`${uuid}#${uuidLatest}`) ?? null;
   }
 
   public findRateCardForService(
@@ -557,7 +633,7 @@ export class VoiceUsageService implements OnModuleInit {
    * Dedup rule: If providerUsageRef is supplied, checks for duplicate
    * (providerAccountId, providerUsageRef). Retried callbacks return existing record.
    */
-  public recordUsage(input: VoiceUsageRecordInput): VoiceUsageRecord {
+  public recordUsage(input: VoiceUsageRecordInput, persistAsync = true): VoiceUsageRecord {
     // 1. PII Sanitization (SD §14.3: "敏感逐字稿不放帳務 row")
     const sanitizedMetadata = this.sanitizeBillingMetadata(input.metadata);
 
@@ -656,26 +732,26 @@ export class VoiceUsageService implements OnModuleInit {
       this.providerRefIndex.set(dedupKey, usageId);
     }
 
-    if (this.isRepoEnabled() && this.voiceRepo) {
+    if (persistAsync && this.isRepoEnabled() && this.voiceRepo) {
       try {
         const p = this.voiceRepo.insertUsageRecord({
           usageId: record.usageId,
           providerAccountId: record.providerAccountId,
-          providerUsageRef: record.providerUsageRef,
-          admissionId: record.admissionId,
-          voiceSessionId: record.voiceSessionId,
+          providerUsageRef: record.providerUsageRef ?? null,
+          admissionId: record.admissionId ?? null,
+          voiceSessionId: record.voiceSessionId ?? null,
           provider: record.provider,
-          model: record.model,
-          modelVersion: record.modelVersion,
+          model: record.model ?? null,
+          modelVersion: record.modelVersion ?? null,
           billingUnit: record.billingUnit,
           quantity: record.quantity,
           currency: record.currency,
-          rateCardId: record.rateCardId,
-          rateCardVersion: record.rateCardVersion,
+          rateCardId: record.rateCardId ? ensureUuid(record.rateCardId) : null,
+          rateCardVersion: record.rateCardVersion ?? null,
           estimatedCost: record.estimatedCost,
-          actualCost: record.actualCost,
-          invoiceRef: record.invoiceRef,
-          brandId: record.brandId,
+          actualCost: record.actualCost ?? null,
+          invoiceRef: record.invoiceRef ?? null,
+          brandId: record.brandId ?? null,
           usageDate: record.usageDate,
         });
         if (p && typeof (p as Promise<any>).catch === "function") {
@@ -691,17 +767,62 @@ export class VoiceUsageService implements OnModuleInit {
     return record;
   }
 
+  public async recordUsageAsync(input: VoiceUsageRecordInput): Promise<VoiceUsageRecord> {
+    const record = this.recordUsage(input, false);
+    if (this.isRepoEnabled() && this.voiceRepo) {
+      try {
+        const persisted = await this.voiceRepo.insertUsageRecord({
+          usageId: record.usageId,
+          providerAccountId: record.providerAccountId,
+          providerUsageRef: record.providerUsageRef ?? null,
+          admissionId: record.admissionId ?? null,
+          voiceSessionId: record.voiceSessionId ?? null,
+          provider: record.provider,
+          model: record.model ?? null,
+          modelVersion: record.modelVersion ?? null,
+          billingUnit: record.billingUnit,
+          quantity: record.quantity,
+          currency: record.currency,
+          rateCardId: record.rateCardId ? ensureUuid(record.rateCardId) : null,
+          rateCardVersion: record.rateCardVersion ?? null,
+          estimatedCost: record.estimatedCost,
+          actualCost: record.actualCost ?? null,
+          invoiceRef: record.invoiceRef ?? null,
+          brandId: record.brandId ?? null,
+          usageDate: record.usageDate,
+        });
+        if (persisted.usageId !== record.usageId) {
+          record.usageId = persisted.usageId;
+          this.usageRecords.set(persisted.usageId, record);
+        }
+      } catch (err) {
+        this.logger.error(`Failed to persist voice usage record ${record.usageId}: ${err}`);
+      }
+    }
+    return record;
+  }
+
   public getUsageRecord(usageId: string): VoiceUsageRecord | null {
     return this.usageRecords.get(usageId) ?? null;
   }
 
+  public findUsageByProviderRef(
+    providerAccountId: string,
+    providerUsageRef: string,
+  ): VoiceUsageRecord | null {
+    const key = `${providerAccountId}#${providerUsageRef}`;
+    const usageId = this.providerRefIndex.get(key);
+    if (!usageId) return null;
+    return this.usageRecords.get(usageId) ?? null;
+  }
+
   public listUsageRecords(filter?: {
-    voiceSessionId?: string;
-    admissionId?: string;
-    brandId?: string;
-    provider?: string;
-    serviceType?: VoiceUsageServiceType;
-    usageDate?: string;
+    voiceSessionId?: string | undefined;
+    admissionId?: string | undefined;
+    brandId?: string | undefined;
+    provider?: string | undefined;
+    serviceType?: VoiceUsageServiceType | undefined;
+    usageDate?: string | undefined;
   }): VoiceUsageRecord[] {
     let list = Array.from(this.usageRecords.values());
     if (filter) {
@@ -1032,7 +1153,7 @@ export class VoiceUsageService implements OnModuleInit {
       totalEstimatedCost = totalEstimatedCostInBaseCurrency;
       finalCurrency = "MIXED";
     } else {
-      finalCurrency = currencyKeys.length === 1 ? currencyKeys[0] : "TWD";
+      finalCurrency = currencyKeys.length === 1 && currencyKeys[0] ? currencyKeys[0] : "TWD";
       totalEstimatedCost = Number(totalCost.toFixed(6));
       totalEstimatedCostInBaseCurrency = totalEstimatedCost;
     }
@@ -1076,6 +1197,7 @@ export class VoiceUsageService implements OnModuleInit {
     invoiceRef: string,
     providerAccountId: string,
     invoiceLines: ProviderInvoiceLineItem[],
+    persistAsync = true,
   ): InvoiceReconciliationReport {
     let matchedCount = 0;
     let unmatchedLines = 0;
@@ -1112,7 +1234,7 @@ export class VoiceUsageService implements OnModuleInit {
         matchedRecord.reconciliationStatus = "reconciled";
         matchedRecord.reconciliationAdjustment = Number(variance.toFixed(6));
 
-        if (this.isRepoEnabled() && this.voiceRepo) {
+        if (persistAsync && this.isRepoEnabled() && this.voiceRepo) {
           try {
             const p = this.voiceRepo.updateUsageRecordReconciliation(
               matchedRecord.usageId,
@@ -1177,19 +1299,26 @@ export class VoiceUsageService implements OnModuleInit {
           );
         }
 
-        if (this.isRepoEnabled() && this.voiceRepo) {
+        if (persistAsync && this.isRepoEnabled() && this.voiceRepo) {
           try {
             const p = this.voiceRepo.insertUsageRecord({
               usageId: newRecord.usageId,
               providerAccountId: newRecord.providerAccountId,
-              providerUsageRef: newRecord.providerUsageRef,
+              providerUsageRef: newRecord.providerUsageRef ?? null,
+              admissionId: null,
+              voiceSessionId: null,
               provider: newRecord.provider,
+              model: null,
+              modelVersion: null,
               billingUnit: newRecord.billingUnit,
               quantity: newRecord.quantity,
               currency: newRecord.currency,
+              rateCardId: null,
+              rateCardVersion: null,
               estimatedCost: newRecord.estimatedCost,
-              actualCost: newRecord.actualCost,
-              invoiceRef: newRecord.invoiceRef,
+              actualCost: newRecord.actualCost ?? null,
+              invoiceRef: newRecord.invoiceRef ?? null,
+              brandId: null,
               usageDate: newRecord.usageDate,
             });
             if (p && typeof (p as Promise<any>).catch === "function") {
@@ -1233,10 +1362,77 @@ export class VoiceUsageService implements OnModuleInit {
     };
   }
 
+  public async reconcileInvoiceAsync(
+    invoiceRef: string,
+    providerAccountId: string,
+    invoiceLines: ProviderInvoiceLineItem[],
+  ): Promise<InvoiceReconciliationReport> {
+    if (this.isRepoEnabled() && this.voiceRepo) {
+      for (const line of invoiceLines) {
+        if (line.providerUsageRef) {
+          const key = `${providerAccountId}#${line.providerUsageRef}`;
+          if (!this.providerRefIndex.has(key)) {
+            const durable = await this.voiceRepo.findUsageRecordByProviderRef(
+              providerAccountId,
+              line.providerUsageRef,
+            );
+            if (durable) {
+              const rec: VoiceUsageRecord = {
+                usageId: durable.usageId,
+                providerAccountId: durable.providerAccountId,
+                providerUsageRef: durable.providerUsageRef ?? undefined,
+                admissionId: durable.admissionId ?? undefined,
+                voiceSessionId: durable.voiceSessionId ?? undefined,
+                provider: durable.provider,
+                serviceType: "telephony",
+                model: durable.model ?? undefined,
+                modelVersion: durable.modelVersion ?? undefined,
+                billingUnit: durable.billingUnit as BillingUnit,
+                quantity: durable.quantity,
+                currency: durable.currency,
+                rateCardId: durable.rateCardId ?? undefined,
+                rateCardVersion: durable.rateCardVersion ?? undefined,
+                estimatedCost: durable.estimatedCost ?? 0,
+                actualCost: durable.actualCost ?? undefined,
+                invoiceRef: durable.invoiceRef ?? undefined,
+                reconciliationStatus: (durable.actualCost !== null ? "reconciled" : "estimated") as any,
+                reconciliationAdjustment:
+                  durable.actualCost !== null && durable.estimatedCost !== null
+                    ? Number((durable.actualCost - durable.estimatedCost).toFixed(6))
+                    : undefined,
+                brandId: durable.brandId ?? undefined,
+                usageDate: durable.usageDate,
+                createdAt: durable.createdAt,
+                unverified: false,
+              };
+              this.usageRecords.set(rec.usageId, rec);
+              this.providerRefIndex.set(key, rec.usageId);
+            }
+          }
+        }
+      }
+    }
+    const report = this.reconcileInvoice(invoiceRef, providerAccountId, invoiceLines, false);
+    if (this.isRepoEnabled() && this.voiceRepo) {
+      for (const adj of report.adjustments) {
+        if (adj.actualCost !== undefined) {
+          try {
+            await this.voiceRepo.updateUsageRecordReconciliation(
+              adj.usageId,
+              adj.actualCost,
+              invoiceRef,
+            );
+          } catch (err) {
+            this.logger.error(`Failed to await usage reconciliation in DB: ${err}`);
+          }
+        }
+      }
+    }
+    return report;
+  }
+
   // ============================================================================
   // Helpers
-  // ============================================================================
-
   private computeEstimatedCostFromRateCard(
     card: VoiceRateCardRecord,
     quantity: number,

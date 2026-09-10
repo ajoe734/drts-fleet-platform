@@ -25,7 +25,7 @@ export class VoiceBookingController {
 
   @Get("metrics/cohort")
   @RequireRealms("ops", "platform")
-  getCohortMetrics(
+  async getCohortMetrics(
     @Query("windowStart") windowStart?: string,
     @Query("windowEnd") windowEnd?: string,
     @Query("language") language?: string,
@@ -49,8 +49,7 @@ export class VoiceBookingController {
       lineBindingId,
     };
 
-    const records = this.voiceBookingMetricsService.getCallRecords();
-    const report = this.voiceBookingMetricsService.evaluateCohortMetrics(records, filter);
+    const report = await this.voiceBookingMetricsService.deriveCohortFromDurableEvidence(filter);
 
     return toApiSuccessEnvelope(report, requestId);
   }
