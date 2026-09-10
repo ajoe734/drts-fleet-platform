@@ -903,15 +903,28 @@ def reconcile_candidate_lifecycle(
             for field, value in observed_fields.items()
         ):
             continue
-        run_ai_status(
-            config,
-            "reconcile-candidate",
-            str(task["id"]),
-            f"GitHub reconciled candidate {candidate_sha[:12]} from PR #{number}.",
-            actor="Supervisor",
-            extra_env=env,
-        )
+        try:
+            run_ai_status(
+                config,
+                "reconcile-candidate",
+                str(task["id"]),
+                f"GitHub reconciled candidate {candidate_sha[:12]} from PR #{number}.",
+                actor="Supervisor",
+                extra_env=env,
+            )
+        except GitHubBusError as exc:
+            # A bad historical candidate (for example, a PR merged without
+            # same-SHA reviewer evidence) must retain its lifecycle gate.  It
+            # must not, however, put the entire bus into offline backoff and
+            # prevent unrelated candidates from receiving their CI outcomes.
+            entry = task_bus_entry(bus_state, str(task.get("id") or ""))
+            error_key = f"{candidate_sha}:{ci_status}:{trim_text(str(exc), 600)}"
+            if entry.get("last_reconcile_error") != error_key:
+                entry["last_reconcile_error"] = error_key
+                write_activity_log(config, {"type": "github_candidate_reconcile_failed", "task_id": task.get("id"), "candidate_sha": candidate_sha, "message": trim_text(str(exc), 600), "github_pr": number})
+            continue
         entry = task_bus_entry(bus_state, str(task["id"]))
+        entry.pop("last_reconcile_error", None)
         entry["review_pr"] = {
             "number": number,
             "url": observation.get("url"),

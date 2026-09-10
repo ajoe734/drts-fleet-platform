@@ -786,6 +786,29 @@ class GitHubBusLabelTests(unittest.TestCase):
         self.assertFalse(repaired)
 
 
+class CandidateReconcileIsolationTests(unittest.TestCase):
+    def test_bad_merged_candidate_does_not_stop_other_candidate_reconciliation(self) -> None:
+        bad_task = {"id": "BAD-001", "status": "integrating", "candidate_sha": "bad-sha", "candidate_branch": "gemini/bad"}
+        good_task = {"id": "GOOD-001", "status": "review", "candidate_sha": "good-sha", "candidate_branch": "gemini/good"}
+        observations = [
+            {"url": "https://example.test/pull/1", "state": "MERGED", "headRefName": "gemini/bad", "headRefOid": "bad-sha", "mergeCommit": {"oid": "merged-bad"}, "statusCheckRollup": []},
+            {"url": "https://example.test/pull/2", "state": "OPEN", "headRefName": "gemini/good", "headRefOid": "good-sha", "mergeStateStatus": "CLEAN", "mergeCommit": None, "statusCheckRollup": [{"status": "COMPLETED", "conclusion": "SUCCESS"}]},
+        ]
+        bus_state = {"tasks": {}}
+        with (
+            mock.patch.object(github_bus, "candidate_pr_for_task", side_effect=[1, 2]),
+            mock.patch.object(github_bus, "candidate_pr_observation", side_effect=observations),
+            mock.patch.object(github_bus, "run_ai_status", side_effect=[github_bus.GitHubBusError("missing same-SHA reviewer evidence"), None]) as reconcile,
+            mock.patch.object(github_bus, "write_activity_log") as activity_log,
+        ):
+            changed = github_bus.reconcile_candidate_lifecycle({}, bus_state, {"tasks": [bad_task, good_task]}, "example/repo")
+        self.assertTrue(changed)
+        self.assertEqual(reconcile.call_count, 2)
+        self.assertIn("missing same-SHA reviewer evidence", bus_state["tasks"]["BAD-001"]["last_reconcile_error"])
+        self.assertNotIn("last_reconcile_error", bus_state["tasks"]["GOOD-001"])
+        self.assertTrue(any(call.args[1]["type"] == "github_candidate_reconcile_failed" for call in activity_log.call_args_list))
+
+
 if __name__ == "__main__":
     unittest.main()
 
