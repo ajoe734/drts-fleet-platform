@@ -555,7 +555,7 @@ export class VoiceSessionService {
 
     if (this.metricsService) {
       try {
-        this.metricsService.recordCallMetricFromSession(updated);
+        await this.metricsService.recordCallMetricFromSession(updated);
       } catch (err) {
         this.logger.warn(`Failed to record session metric on close: ${err}`);
       }

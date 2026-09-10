@@ -1610,8 +1610,8 @@ describe("UV-EXEC-022 All-Call Metrics, Complete Cost Ledger & Dimensional Alert
         ]),
         listSessionEvents: vi.fn().mockResolvedValue([
           {
-            eventType: "playback_terminal",
-            payload: { playbackStatus: "ack" },
+            eventType: "playback_completed",
+            payload: { outcome: "completed" },
           },
         ]),
       };
@@ -1630,6 +1630,197 @@ describe("UV-EXEC-022 All-Call Metrics, Complete Cost Ledger & Dimensional Alert
       expect(cohort.unattendedEffectiveIntake.numeratorValidIntakes).toBe(1);
       expect(cohort.unattendedDispatchCompletion.numeratorDriverAcceptedUniqueOrders).toBe(1);
       expect(cohort.costPerEffectiveIntake.totalVoiceCost).toBe(12.5);
+    });
+
+    it("deriveCohortFromDurableEvidence joins admission-linked usage cost for failed admissions instead of zeroing them", async () => {
+      const mockRepo = {
+        isEnabled: vi.fn().mockReturnValue(true),
+        listCallAdmissions: vi.fn().mockResolvedValue([
+          {
+            admissionId: "adm-fail-1",
+            providerAccountId: "twm-acc-1",
+            providerCallId: "twm-call-fail-1",
+            receivedAt: "2026-09-06T09:00:00Z",
+            outcome: "failed",
+            reason: "PROVIDER_TIMEOUT",
+            brandId: "brand-drts-01",
+            lineBindingId: "line-001",
+          },
+        ]),
+        listUsageRecords: vi.fn().mockResolvedValue([
+          {
+            usageId: "u-fail-1",
+            admissionId: "adm-fail-1",
+            provider: "openai",
+            estimatedCost: 8.25,
+            actualCost: null,
+          },
+        ]),
+      };
+
+      const metricsService = new VoiceBookingMetricsService(mockRepo as any);
+      const cohort = await metricsService.deriveCohortFromDurableEvidence({
+        windowStart: "2026-09-06T00:00:00Z",
+        windowEnd: "2026-09-06T23:59:59Z",
+        observationWindowClosed: true,
+      });
+
+      expect(mockRepo.listUsageRecords).toHaveBeenCalledWith({
+        admissionId: "adm-fail-1",
+      });
+      expect(cohort.allCallCoverage.denominatorRealIngress).toBe(1);
+      expect(cohort.costPerEffectiveIntake.totalVoiceCost).toBe(8.25);
+    });
+
+    it("deriveCohortFromDurableEvidence derives language/provider from durable evidence, not the query filter, so filters actually exclude unrelated cohorts", async () => {
+      const mockRepo = {
+        isEnabled: vi.fn().mockReturnValue(true),
+        listCallAdmissions: vi.fn().mockResolvedValue([
+          {
+            admissionId: "adm-twm-1",
+            providerAccountId: "twm-acc-1",
+            providerCallId: "twm-call-dim-1",
+            receivedAt: "2026-09-06T10:00:00Z",
+            outcome: "failed",
+            reason: "PROVIDER_TIMEOUT",
+            brandId: "brand-drts-01",
+            lineBindingId: "line-001",
+          },
+          {
+            admissionId: "adm-openai-1",
+            providerAccountId: "twm-acc-2",
+            providerCallId: "twm-call-dim-2",
+            receivedAt: "2026-09-06T10:05:00Z",
+            outcome: "failed",
+            reason: "PROVIDER_TIMEOUT",
+            brandId: "brand-drts-01",
+            lineBindingId: "line-001",
+          },
+        ]),
+        listUsageRecords: vi.fn().mockImplementation(async (filter?: { admissionId?: string }) => {
+          if (filter?.admissionId === "adm-twm-1") {
+            return [{ usageId: "u-twm-1", provider: "twm", estimatedCost: 1, actualCost: null }];
+          }
+          if (filter?.admissionId === "adm-openai-1") {
+            return [{ usageId: "u-openai-1", provider: "openai", estimatedCost: 1, actualCost: null }];
+          }
+          return [];
+        }),
+      };
+
+      const metricsService = new VoiceBookingMetricsService(mockRepo as any);
+      const window = {
+        windowStart: "2026-09-06T00:00:00Z",
+        windowEnd: "2026-09-06T23:59:59Z",
+        observationWindowClosed: true,
+      };
+
+      // Without the fix, requesting provider="twm" would relabel BOTH calls
+      // as twm and both would match; the true openai call must be excluded.
+      const twmOnly = await metricsService.deriveCohortFromDurableEvidence({
+        ...window,
+        provider: "twm",
+      });
+      expect(twmOnly.allCallCoverage.denominatorRealIngress).toBe(1);
+
+      const openaiOnly = await metricsService.deriveCohortFromDurableEvidence({
+        ...window,
+        provider: "openai",
+      });
+      expect(openaiOnly.allCallCoverage.denominatorRealIngress).toBe(1);
+
+      // No durable per-call language capture exists yet; a language filter
+      // must not silently relabel every call to match it (it previously did).
+      const wrongLanguage = await metricsService.deriveCohortFromDurableEvidence({
+        ...window,
+        language: "en",
+      });
+      expect(wrongLanguage.allCallCoverage.denominatorRealIngress).toBe(0);
+    });
+
+    it("deriveCohortFromDurableEvidence does not count a closed session as effective intake without correlated playback_completed evidence", async () => {
+      const mockRepo = {
+        isEnabled: vi.fn().mockReturnValue(true),
+        listCallAdmissions: vi.fn().mockResolvedValue([
+          {
+            admissionId: "adm-closed-1",
+            providerAccountId: "twm-acc-1",
+            providerCallId: "twm-call-closed-1",
+            receivedAt: "2026-09-06T11:00:00Z",
+            outcome: "admitted",
+            reason: "ADMISSION_PERMITTED",
+            brandId: "brand-drts-01",
+            lineBindingId: "line-001",
+            voiceSessionId: "sess-closed-1",
+          },
+        ]),
+        findSessionById: vi.fn().mockResolvedValue({
+          voiceSessionId: "sess-closed-1",
+          callId: "call-closed-1",
+          providerAccountId: "twm-acc-1",
+          providerCallId: "twm-call-closed-1",
+          resourceScopeId: "brand-drts-01",
+          lineBindingId: "line-001",
+          routeProfileId: "rp-1",
+          routeProfileVersion: 1,
+          // Dialog closed and outcome/commit/confirmation all look complete,
+          // but no playback_completed event was ever recorded -- the caller
+          // may have never heard the result. Must not count as intake.
+          dialogState: "closed",
+          mediaState: "idle",
+          controlOwner: "completed",
+          leaseEpoch: 1,
+          sessionVersion: 1,
+          commitStatus: "committed",
+          recordingState: "stopped",
+          confirmationState: "confirmed",
+          outcome: "auto_booking_created",
+          inputEpoch: 1,
+          pendingInput: false,
+          lastResolvedInputEpoch: 1,
+          lastAppliedControlSequence: 2,
+          createdAt: "2026-09-06T11:00:00Z",
+          updatedAt: "2026-09-06T11:01:00Z",
+        }),
+        findUsageRecordsBySession: vi.fn().mockResolvedValue([]),
+        listSessionEvents: vi.fn().mockResolvedValue([]),
+      };
+
+      const metricsService = new VoiceBookingMetricsService(mockRepo as any);
+      const cohort = await metricsService.deriveCohortFromDurableEvidence({
+        windowStart: "2026-09-06T00:00:00Z",
+        windowEnd: "2026-09-06T23:59:59Z",
+        observationWindowClosed: true,
+      });
+
+      expect(cohort.unattendedEffectiveIntake.numeratorValidIntakes).toBe(0);
+    });
+
+    it("recordCallMetricFromSession does not treat a closed dialog state as playback ACK when no repository evidence exists", async () => {
+      const metricsService = new VoiceBookingMetricsService();
+      const record = await metricsService.recordCallMetricFromSession({
+        voiceSessionId: "sess-inmem-closed-1",
+        callId: "call-inmem-closed-1",
+        providerAccountId: "twm-acc-1",
+        providerCallId: "twm-call-inmem-closed-1",
+        resourceScopeId: "brand-drts-01",
+        lineBindingId: "line-001",
+        routeProfileId: "rp-1",
+        routeProfileVersion: 1,
+        dialogState: "closed",
+        mediaState: "idle",
+        controlOwner: "completed",
+        leaseEpoch: 1,
+        sessionVersion: 1,
+        commitStatus: "committed",
+        recordingState: "stopped",
+        confirmationState: "confirmed",
+        outcome: "auto_booking_created",
+        createdAt: "2026-09-06T11:00:00Z",
+      });
+
+      expect(record.playbackAckReceived).toBe(false);
+      expect(record.bookingIntakeCompleted).toBe(false);
     });
   });
 });

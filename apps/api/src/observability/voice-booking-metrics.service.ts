@@ -1055,7 +1055,37 @@ export class VoiceBookingMetricsService {
     return [...this.callRecords];
   }
 
-  public recordCallMetricFromSession(
+  /**
+   * Durable evidence of an actual result-playback ACK: the same
+   * `playback_completed` session event voice-confirmation.service.ts gates
+   * readback confirmation on (SD §13.2). `dialogState === "closed"` only
+   * proves the call leg ended, not that anything was played back to the
+   * caller, so it must never substitute for this.
+   */
+  private async hasPlaybackCompletedEvidence(
+    voiceSessionId: string,
+  ): Promise<boolean> {
+    if (
+      !this.repository ||
+      typeof (this.repository as any).listSessionEvents !== "function"
+    ) {
+      return false;
+    }
+    const events = await (this.repository as any).listSessionEvents(
+      voiceSessionId,
+    );
+    return (
+      Array.isArray(events) &&
+      events.some(
+        (e: any) =>
+          e.eventType === "playback_completed" &&
+          (e.payload as { outcome?: string } | undefined)?.outcome ===
+            "completed",
+      )
+    );
+  }
+
+  public async recordCallMetricFromSession(
     session: {
       voiceSessionId: string;
       callId: string;
@@ -1077,7 +1107,7 @@ export class VoiceBookingMetricsService {
       createdAt: string | Date;
     },
     extra?: Partial<VoiceCallMetricRecord>,
-  ): VoiceCallMetricRecord {
+  ): Promise<VoiceCallMetricRecord> {
     const isConfirmed =
       session.confirmationState === "accepted" ||
       session.confirmationState === "consumed" ||
@@ -1090,11 +1120,7 @@ export class VoiceBookingMetricsService {
     // SA §1.2 & SD §13.2: "無人有效受理率由確認證據、durable order、派遣受理／結果與實際結果播報 ack 聯合計算，不能直接把 outcome=auto_booking_created 當成功。"
     const playbackAckReceived =
       extra?.playbackAckReceived ??
-      (session.dialogState === "closed" &&
-        (session.outcome === "auto_booking_created" ||
-          session.outcome === "auto_query_completed") &&
-        isConfirmed &&
-        isCommitted);
+      (await this.hasPlaybackCompletedEvidence(session.voiceSessionId));
 
     let callCost = extra?.totalCallCost;
     if (callCost === undefined && this.usageService) {
@@ -1189,6 +1215,23 @@ export class VoiceBookingMetricsService {
 
     for (const adm of admissions) {
       if (adm.outcome !== "admitted") {
+        // Failed/overflow admissions still accrue real telephony/provider
+        // cost (e.g. IVR/overflow announcement legs) linked by admissionId;
+        // join it instead of hardcoding zero (SA §10.2, SD §14.3).
+        let failureCost = 0;
+        let failureProvider = "twm";
+        if (typeof this.repository.listUsageRecords === "function") {
+          const admUsages = await this.repository.listUsageRecords({
+            admissionId: adm.admissionId,
+          });
+          if (admUsages.length > 0) {
+            failureCost = admUsages.reduce(
+              (sum, u) => sum + (u.actualCost ?? u.estimatedCost ?? 0),
+              0,
+            );
+            failureProvider = admUsages[0]?.provider ?? failureProvider;
+          }
+        }
         records.push({
           callId: `adm-${adm.admissionId}`,
           providerCallId: adm.providerCallId,
@@ -1196,17 +1239,20 @@ export class VoiceBookingMetricsService {
           receivedAt: adm.receivedAt,
           lineBindingId: adm.lineBindingId ?? "unknown",
           brandId: adm.brandId ?? "unknown",
-          language: filter.language ?? "zh-TW",
+          // No durable per-call language capture exists yet (SA §10.2 gap);
+          // use the same fixed default as the in-memory path rather than the
+          // query filter, so a language filter cannot relabel/absorb calls.
+          language: "zh-TW",
           product: "ordinary_taxi",
           routeProfileVersion: filter.routeProfileVersion ?? 1,
           policyVersion: "uv-policy-v1",
-          provider: filter.provider ?? "twm",
+          provider: failureProvider,
           admissionOutcome: adm.outcome,
           admissionFailureReason: adm.reason ?? undefined,
           enteredAi: false,
           intentDiscernible: false,
           isSupportedBusinessNeed: false,
-          totalCallCost: 0,
+          totalCallCost: Number(failureCost.toFixed(6)),
           requiredHumanIntervention: true,
           humanInterventionSource:
             adm.outcome === "overflow" ? "capacity_overflow" : "provider_failure",
@@ -1225,6 +1271,20 @@ export class VoiceBookingMetricsService {
       }
 
       if (!session) {
+        let orphanCost = 0;
+        let orphanProvider = "twm";
+        if (typeof this.repository.listUsageRecords === "function") {
+          const admUsages = await this.repository.listUsageRecords({
+            admissionId: adm.admissionId,
+          });
+          if (admUsages.length > 0) {
+            orphanCost = admUsages.reduce(
+              (sum, u) => sum + (u.actualCost ?? u.estimatedCost ?? 0),
+              0,
+            );
+            orphanProvider = admUsages[0]?.provider ?? orphanProvider;
+          }
+        }
         records.push({
           callId: `adm-${adm.admissionId}`,
           providerCallId: adm.providerCallId,
@@ -1232,16 +1292,16 @@ export class VoiceBookingMetricsService {
           receivedAt: adm.receivedAt,
           lineBindingId: adm.lineBindingId ?? "unknown",
           brandId: adm.brandId ?? "unknown",
-          language: filter.language ?? "zh-TW",
+          language: "zh-TW",
           product: "ordinary_taxi",
           routeProfileVersion: filter.routeProfileVersion ?? 1,
           policyVersion: "uv-policy-v1",
-          provider: filter.provider ?? "twm",
+          provider: orphanProvider,
           admissionOutcome: "admitted",
           enteredAi: true,
           intentDiscernible: false,
           isSupportedBusinessNeed: true,
-          totalCallCost: 0,
+          totalCallCost: Number(orphanCost.toFixed(6)),
         });
         continue;
       }
@@ -1285,20 +1345,12 @@ export class VoiceBookingMetricsService {
         session.commitStatus === "committed" ||
         session.commitStatus === "succeeded";
 
-      let playbackAckReceived = false;
-      if (typeof (this.repository as any).listSessionEvents === "function") {
-        const events = await (this.repository as any).listSessionEvents(session.voiceSessionId);
-        playbackAckReceived =
-          Array.isArray(events) &&
-          events.some(
-            (e: any) =>
-              e.eventType === "playback_terminal" &&
-              (e.payload?.playbackStatus === "ack" || e.payload?.status === "ack"),
-          );
-      }
+      const playbackAckReceived = await this.hasPlaybackCompletedEvidence(
+        session.voiceSessionId,
+      );
 
       const playbackAck =
-        (playbackAckReceived || session.dialogState === "closed") &&
+        playbackAckReceived &&
         (session.outcome === "auto_booking_created" ||
           session.outcome === "auto_query_completed" ||
           session.outcome === "booking_completed") &&
@@ -1332,11 +1384,11 @@ export class VoiceBookingMetricsService {
         receivedAt: adm.receivedAt,
         lineBindingId: session.lineBindingId,
         brandId: session.resourceScopeId,
-        language: filter.language ?? "zh-TW",
+        language: "zh-TW",
         product: "ordinary_taxi",
         routeProfileVersion: session.routeProfileVersion,
         policyVersion: "uv-policy-v1",
-        provider: filter.provider ?? (session.routeProfileId || "twm"),
+        provider: session.routeProfileId || "twm",
         admissionOutcome: "admitted",
         enteredAi: true,
         intentDiscernible: Boolean(createIntent || session.outcome),
