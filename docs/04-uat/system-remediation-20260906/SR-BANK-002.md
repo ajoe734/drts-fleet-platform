@@ -1,0 +1,198 @@
+# SR-BANK-002 — 銀行角色金額／PII／匯出一致隔離
+
+## 2026-09-09T03:24Z dispatch verification
+
+- Fetched base `origin/dev`: `9b57f767047825fe116b2231aa22900ce408897a`; tested checkpoint `c857abdf6d02341f70982c539fdb9b720290bcd6`. Candidate remains unset.
+- `git rebase origin/dev`: exit 1 at duplicate `dbec26678`, six task-file conflicts; `git rebase --abort`: exit 0. Tests below ran on the preserved branch after abort.
+- `git diff --exit-code origin/dev HEAD -- apps/api/src/common/auth/auth.policy.ts apps/bank-console-web/lib/bank-dev-read-models.ts apps/bank-console-web/app/api/statements/export/route.ts`: exit 0, confirming these defect sources match the fetched base.
+- `pnpm exec vitest run tests/unit/system-remediation/sr-bank-002/`: exit 1; inner matrix 49 passed / 5 failed. Two settlement policies lack financial scope, two upstream-403 loads return seed statements, and Contoso CSV on upstream outage contains ACME seed rows. `pnpm --filter @drts/bank-console-web typecheck`: exit 0. `git diff --check`: exit 0.
+- Resources: `tenant-demo-001`, `tenant-contoso-001`, period `2026-03`, seed sentinel `STM-ACME-202606`. Synthetic upstream inputs with actual handlers and cookie signing; no live, browser/device, product server, CI, merge or deployment acceptance performed.
+- Current task slice still specifies the original branch, six scopes and two dependencies. The merged history helper is a repair plan, not completed branch repair or scope authorization. Supervisor must register the replacement delivery branch, authorize shared loader/export scope with overlapping-writer dependencies, and route canonical IAM integration. No product edits or handoff; this checkpoint records the unresolved prerequisites.
+
+## 2026-09-09T02:24Z dispatch verification
+
+- Fetched base `origin/dev`: `add6694278b3287bb42215b24d4c91039d0c6645`; tested checkpoint `9f7ee75c9d162953c1448adb214e811e8e21bfde`. Candidate remains unset.
+- `git rebase origin/dev`: exit 1 at duplicate `dbec26678`, six task-file conflicts; `git rebase --abort`: exit 0. Tests ran after abort on the preserved branch.
+- `git diff --exit-code origin/dev HEAD -- apps/api/src/common/auth/auth.policy.ts apps/bank-console-web/lib/bank-dev-read-models.ts apps/bank-console-web/app/api/statements/export/route.ts`: exit 0; defect sources match the fetched base.
+- `pnpm exec vitest run tests/unit/system-remediation/sr-bank-002/`: exit 1, inner matrix 49 passed / 5 failed. Two settlement routes lack financial scope, two upstream-403 loaders return seed statements, and Contoso CSV outage returns ACME rows. `pnpm --filter @drts/bank-console-web typecheck`: exit 0. `git diff --check`: exit 0.
+- Resources: `tenant-demo-001`, `tenant-contoso-001`, period `2026-03`, seed sentinel `STM-ACME-202606`. Synthetic upstream inputs with actual handlers/cookie signing; no live, browser/device, product server, CI, merge or deployment acceptance performed.
+- Both unblock documents still require supervisor action. Current dispatch/task slice retains the original branch, six scopes and two dependencies. Register the replacement delivery branch, authorize shared loader/export scope with overlapping-writer dependencies, and route canonical IAM integration before resuming. Repeated todo dispatch does not resolve these prerequisites. No product edits or handoff; this is evidence only.
+
+## 2026-09-09T02:12Z resumed dispatch verification
+
+- Fetched base `origin/dev`: `fb2ea6e2ed3c2937d7d65d601967d183b0257048`; tested checkpoint `c0eca6efebe73a66770d5d29cea109410655122f`. Candidate remains unset.
+- `git rebase origin/dev`: exit 1 at duplicate `dbec26678`, six task-file conflicts. `git rebase --abort`: exit 0. Tests ran after abort on the preserved published branch.
+- `git diff --exit-code origin/dev HEAD -- apps/api/src/common/auth/auth.policy.ts apps/bank-console-web/lib/bank-dev-read-models.ts apps/bank-console-web/app/api/statements/export/route.ts`: exit 0; defect sources match this fresh base.
+- `pnpm exec vitest run tests/unit/system-remediation/sr-bank-002/`: exit 1, inner matrix 49 passed / 5 failed. Both settlement routes lack financial scope, two upstream-403 loaders return seed statements, and Contoso CSV outage returns ACME rows. `pnpm --filter @drts/bank-console-web typecheck`: exit 0. `git diff --check`: exit 0.
+- Resources: `tenant-demo-001`, `tenant-contoso-001`, period `2026-03`, leaked seed sentinel `STM-ACME-202606`. Synthetic upstream inputs with actual application handlers/cookie signing; no live, browser/device, product server, CI, merge, or deployment acceptance performed.
+- Read both merged unblock plans from current `origin/dev`. Current task slice and dispatch still specify the original branch, six scopes, and two dependencies. Supervisor must register the replacement delivery branch, authorize shared loader/export scope with overlapping-writer dependencies, and route canonical IAM policy integration. History-helper completion alone does not satisfy these prerequisites. No product edits or handoff; this is regression evidence only.
+
+## 2026-09-09T02:04Z resumed dispatch verification
+
+- Fetched `origin/dev` base: `7d04833053b63558c10fb678a422dff3522e0150`; tested checkpoint: `b43535ae0870ab4b9a7ea2824f6e083eafe2835f`. Candidate remains unset.
+- `git rebase origin/dev`: exit 1 at duplicate `dbec26678`, six task-file conflicts. `git rebase --abort`: exit 0, preserving published history. All tests below ran after abort.
+- `git diff --exit-code origin/dev HEAD -- apps/api/src/common/auth/auth.policy.ts apps/bank-console-web/lib/bank-dev-read-models.ts apps/bank-console-web/app/api/statements/export/route.ts`: exit 0; the three defect sources still match current fetched dev.
+- `pnpm exec vitest run tests/unit/system-remediation/sr-bank-002/`: exit 1; inner matrix 49 passed / 5 failed. Both settlement routes lack financial scope; two upstream-403 loads return seed statements; Contoso CSV outage returns ACME rows. `pnpm --filter @drts/bank-console-web typecheck`: exit 0. `git diff --check`: exit 0.
+- Resources: `tenant-demo-001`, `tenant-contoso-001`, period `2026-03`, leaked seed sentinel `STM-ACME-202606`. These are synthetic upstream tests using real application handlers and cookie signing, not live financial-data evidence. No product server, browser/device, live, CI, merge, or deployment acceptance ran.
+- Dispatch still specifies the original branch and original six write scopes/two dependencies. Supervisor must register the replacement delivery branch described in the merged history helper, authorize shared loader/export scope with overlapping-writer dependencies, and assign canonical IAM policy integration. The helper explicitly does not grant shared-file permissions or resolve the five failures. No product changes or handoff; this checkpoint preserves fresh evidence only.
+
+## 2026-09-08T23:57Z resumed dispatch verification
+
+- Fetched `origin/dev` base: `32b6dde7db730a8524004a5e87d94d5a2a6d7853`; tested checkpoint: `87d655a63a905c9ac0a4c56421771583ef65b949`. No candidate established.
+- `git rebase origin/dev`: exit 1 at duplicate `dbec26678`, six task-file conflicts. `git rebase --abort`: exit 0; published history preserved. Checks below ran after abort, not on a successfully rebased branch.
+- `git diff --exit-code origin/dev HEAD -- apps/api/src/common/auth/auth.policy.ts apps/bank-console-web/lib/bank-dev-read-models.ts apps/bank-console-web/app/api/statements/export/route.ts`: exit 0; defect sources match this fetched base.
+- `pnpm exec vitest run tests/unit/system-remediation/sr-bank-002/`: exit 1, inner matrix 49 passed / 5 failed. Settlement list/detail lack financial scope; two upstream-403 loads return seed statements; Contoso CSV outage returns ACME rows. `pnpm --filter @drts/bank-console-web typecheck`: exit 0. `git diff --check`: exit 0.
+- Resources: `tenant-demo-001`, `tenant-contoso-001`, period `2026-03`, leaked seed sentinel `STM-ACME-202606`. These remain synthetic upstream tests with actual application handlers and cookie signing; no live/device/server/CI/merge/deployment acceptance was performed.
+- Read execution rules, R15/C005 sources, and both unblock plans. Current machine task still grants only six original scopes and two original dependencies; dispatch still assigns the original branch. Supervisor must register the replacement delivery branch, shared loader/export scope with overlapping-writer dependencies, and canonical IAM producer/dependency (or reviewed policy scope). History-helper completion has not resolved these prerequisites or the five product failures. No product edits or handoff; this commit only anchors fresh regression evidence.
+
+## 2026-09-08T22:43Z resumed dispatch verification
+
+- Fetched `origin/dev` base: `eb684f176b1d3b46553a0f6f0556c79452fbac3c`; tested checkpoint: `564f434edd3428a6c86ecff034fc3d532194793e`. Candidate remains unset.
+- `git rebase origin/dev`: exit 1 at duplicate `dbec26678`, six task-file conflicts; `git rebase --abort`: exit 0, published history preserved. All checks below ran after abort.
+- `git diff --exit-code origin/dev HEAD -- apps/api/src/common/auth/auth.policy.ts apps/bank-console-web/lib/bank-dev-read-models.ts apps/bank-console-web/app/api/statements/export/route.ts`: exit 0. Defect sources match the fetched base.
+- `pnpm exec vitest run tests/unit/system-remediation/sr-bank-002/`: exit 1, inner matrix 49 passed / 5 failed. Both settlement routes lack financial scope; both upstream-403 loads return seed statements; Contoso CSV outage returns ACME rows. `pnpm --filter @drts/bank-console-web typecheck`: exit 0. `git diff --check`: exit 0.
+- Resources: `tenant-demo-001`, `tenant-contoso-001`, period `2026-03`, leaked seed sentinel `STM-ACME-202606`. These are synthetic upstream regressions using actual cookie signing and application handlers, not live financial-data evidence. No live/device/server/CI/merge/deployment acceptance performed.
+- Read both merged unblock plans. Current task slice still grants the original six scopes and two dependencies, and dispatch still specifies the original branch. Supervisor must record the replacement delivery branch, shared loader/export scope with overlapping-writer dependencies, and canonical IAM producer/dependency (or reviewed policy scope) before implementation can proceed. The history helper explicitly does not resolve these product failures; its done status alone is insufficient. No out-of-scope edits or handoff in this dispatch.
+
+## 2026-09-08T21:43Z resumed dispatch verification
+
+- Fetched base `origin/dev`: `a24045986ac29231d34657df3a343b02d9fbb770`; tested checkpoint: `fb2e26e04b092676991e14a6215e870bad1949aa`. Candidate remains unset.
+- `git rebase origin/dev`: exit 1, duplicate `dbec26678` conflicts in six task files; `git rebase --abort`: exit 0. Original published history preserved.
+- `git diff --exit-code origin/dev HEAD -- apps/api/src/common/auth/auth.policy.ts apps/bank-console-web/lib/bank-dev-read-models.ts apps/bank-console-web/app/api/statements/export/route.ts`: exit 0; defect sources match this fetched base.
+- `pnpm exec vitest run tests/unit/system-remediation/sr-bank-002/`: exit 1, inner matrix 49 passed / 5 failed. Both settlement routes lack financial scope; both upstream-403 cases return seed statements; Contoso CSV on upstream failure contains ACME records. `pnpm --filter @drts/bank-console-web typecheck`: exit 0. `git diff --check`: exit 0 before evidence commit.
+- Resources: `tenant-demo-001`, `tenant-contoso-001`, period `2026-03`, seed sentinel `STM-ACME-202606`. Existing synthetic upstream and actual cookie-signing test boundaries apply; no live/device/CI/merge/deployment acceptance performed.
+- Current dispatch still specifies the original branch, six original scopes, and two original dependencies. History/planning helpers have not supplied machine-truth authorization for the replacement delivery branch, shared loader scope with overlapping-writer dependencies, or canonical IAM producer dependency. Supervisor must record these changes before redispatch; another todo transition alone cannot resolve the failures. No product edits or handoff in this dispatch.
+
+## 2026-09-08T21:19Z resumed dispatch verification
+
+- Fetched base `origin/dev`: `e97653b7ffb962a6c4d688e8706711d860fa3604`; tested checkpoint: `cb67ee8fa8de3099feb2c2845e65ab4f17d6b3cd`. No candidate established.
+- Current task slice still grants six original scopes and only SR-BANK-001 / SR-IAM-001 dependencies. Reviewed both unblock helper documents: history repair supplies a replacement-branch plan; planning decision explicitly requires supervisor scope and overlapping-writer dependency updates before shared edits. Dispatch still assigns `codex2/sr-bank-002`.
+- `git rebase origin/dev`: exit 1, duplicate `dbec26678` conflicts in six task files; `git rebase --abort`: exit 0. No shared history rewritten.
+- `git diff --exit-code origin/dev HEAD -- apps/api/src/common/auth/auth.policy.ts apps/bank-console-web/lib/bank-dev-read-models.ts apps/bank-console-web/app/api/statements/export/route.ts`: exit 0. Defect sources are identical to fetched dev.
+- Initial Vitest exit 1 (missing next/server / module resolution), typecheck exit 2 (unexpected virtual store / missing types). Removed only this isolated worktree's node_modules symlinks; `pnpm install --offline --frozen-lockfile --ignore-scripts`: exit 0, tracked files unchanged.
+- After dependency repair, `pnpm exec vitest run tests/unit/system-remediation/sr-bank-002/`: exit 1, inner matrix **49 passed / 5 failed**. Two settlement scope checks, two upstream-403 seed fallbacks, and Contoso CSV outage returning ACME rows remain reproducible. `pnpm --filter @drts/bank-console-web typecheck`: exit 0. `git diff --check`: exit 0.
+- Resources: `tenant-demo-001`, `tenant-contoso-001`, period `2026-03`, leaked seed sentinel `STM-ACME-202606`. Tests use the synthetic upstream and signed-cookie boundaries documented below; no live, device, CI, merge or deployment acceptance was performed.
+- Required resume action remains: supervisor records replacement delivery branch, extends loader scope with overlapping-writer dependencies, and registers canonical IAM producer/dependency. No out-of-scope product edit or handoff; this is an evidence anchor only.
+
+## 2026-09-08T18:51Z resumed dispatch
+
+- Fetch base `origin/dev`：`d4f54ef94e059a981bf2be1f7b944e815870e117`；受測 checkpoint `81f04a90b406a6494e8ec67616d4fa992577d008`，尚無 candidate。task slice 仍指定原 branch／六項 scopes／兩項 dependencies。
+- `git rebase origin/dev`：exit 1，`dbec26678` 六處重複 patch 衝突；`git rebase --abort`：exit 0。helper 文件交付修復方案，明確仍需 replacement delivery branch 與產品修復，並未消除本次阻礙。
+- 本次注入的 dependency symlinks 指向 canonical root／其他 worktree，首次 Vitest exit 1（mock/module resolution 失敗），typecheck exit 2（`ERR_PNPM_UNEXPECTED_VIRTUAL_STORE`／缺失型別），不作產品回歸證據。只刪除此 isolated cwd 的 `node_modules` symlinks，`pnpm install --offline --frozen-lockfile --ignore-scripts` exit 0、下載 0、tracked files 未變。
+- 修復本地依賴後 `pnpm exec vitest run tests/unit/system-remediation/sr-bank-002/`：exit 1，49 passed／5 failed；仍為兩條 settlement financial scope、兩條上游 403 seed fallback、Contoso CSV 上游失效返回 ACME rows。`pnpm --filter @drts/bank-console-web typecheck`：exit 0；`git diff --check`：exit 0。
+- `git diff --exit-code origin/dev HEAD -- apps/api/src/common/auth/auth.policy.ts apps/bank-console-web/lib/bank-dev-read-models.ts apps/bank-console-web/app/api/statements/export/route.ts`：exit 0。缺陷来源仍與本次 base 相同。資源：`tenant-demo-001`、`tenant-contoso-001`、period `2026-03`、`STM-ACME-202606`；沿用下文 synthetic／真實簽章與上游替身界線，未做 live、真機、CI、merge。
+- 請 supervisor 實際更新 replacement delivery branch、擴 `bank-dev-read-models.ts` scope 與重疊 writer 相依，並安排 canonical IAM producer 相依。未修改越界產品檔，未 handoff；本次只有可恢復 evidence anchor。
+
+## 2026-09-08T18:42Z dispatch 前置條件重驗
+
+- 最新 fetch base `origin/dev`：`d4f54ef94e059a981bf2be1f7b944e815870e117`；受測 checkpoint／遠端 task head：`15cfac17fcee78cd85782feec7e7505cef75efdc`。尚無 candidate。
+- `git rebase origin/dev`：exit 1，重複 patch `dbec26678` 仍產生六處衝突；`git rebase --abort`：exit 0。所有下列測試均在 abort 後執行。未改寫遠端歷史。
+- `git diff --exit-code origin/dev HEAD -- apps/api/src/common/auth/auth.policy.ts apps/bank-console-web/lib/bank-dev-read-models.ts apps/bank-console-web/app/api/statements/export/route.ts`：exit 0，三個缺陷來源與最新 base 相同。
+- `pnpm exec vitest run tests/unit/system-remediation/sr-bank-002/`：exit 1，內層 49 passed／5 failed，root wrapper 如實失敗。兩條 settlement API 缺財務 scope、兩個上游 403 seed fallback、Contoso 上游失效 CSV 含 `STM-ACME-202606` 等問題仍在。資源 IDs：`tenant-demo-001`、`tenant-contoso-001`、period `2026-03`；測試替身與 live 界線沿用本文，沒有正式資料驗收。
+- `pnpm --filter @drts/bank-console-web typecheck`：exit 0；`git diff --check`：exit 0。
+- 本輪 task slice 仍為原 delivery branch、原六項 write scopes、原兩項 dependencies。History repair 合併沒有授權 replacement rail 或共用來源修改。須 supervisor 落實 replacement delivery branch、`bank-dev-read-models.ts` scope／重疊 writer 相依，以及 canonical IAM 修復 producer 相依，再恢復產品實作；不能只把 parent 改回 todo。
+- 本輪只保存證據，未改產品／UI，未做 live、真機、CI、merge，未 handoff。checkpoint 提交與普通 push 結果另由 machine blocker 記錄。
+
+## 2026-09-08T18:03Z dispatch 重驗
+
+- Base `origin/dev` 仍為 `fa0fd8257950764526a522d091be9d97effa82b9`；受測 checkpoint `a8f62274abc6ef5c1ac411da6dbb0dd80818a6ce` 與遠端 task branch 相同。Candidate 尚未建立。
+- `git rebase origin/dev`：exit 1，仍在 `dbec26678` 重複 patch 的六個 task 檔衝突；`git rebase --abort`：exit 0。首次測試與 rebase 重疊而讀到衝突標記（Vitest exit 1、typecheck exit 2），不作產品驗證證據；abort 後在乾淨 checkpoint 完整重跑如下。
+- `pnpm exec vitest run tests/unit/system-remediation/sr-bank-002/`：exit 1，49 passed／5 failed，仍為下列五項 canonical IAM／loader fallback 缺陷。Contoso `tenant-contoso-001` CSV 仍含 `STM-ACME-202606`。`pnpm --filter @drts/bank-console-web typecheck`：exit 0。`git diff --check`：exit 0。
+- `git diff --exit-code origin/dev HEAD -- apps/api/src/common/auth/auth.policy.ts apps/bank-console-web/lib/bank-dev-read-models.ts apps/bank-console-web/app/api/statements/export/route.ts`：exit 0，缺陷來源與本次 base 一致。
+- Helper #1734 的 done 僅證明 history repair 文件合併；文件要求 replacement branch，明列產品 blocker 未修。最新 task slice 仍指定原 branch、原 scopes、原兩項 dependencies。需 supervisor 更新 delivery branch，授權 loader scope 並記錄重疊 writer 相依，以及安排 canonical IAM producer；反覆將 parent 改回 todo 無法消除這些阻礙。
+- 本次只新增重驗證據，未修改產品、未執行 live／真機／CI／merge 驗收。沿用下文 synthetic 資源與限制，不能 handoff 或宣稱隔離完成。
+
+## 2026-09-08T17:56Z resumed dispatch（最新）
+
+- Fetch 的最新 base `origin/dev`：`fa0fd8257950764526a522d091be9d97effa82b9`；受測 branch checkpoint：`3b316d27c45d28af7b186cd02241880a9fa411e8`，不是 candidate。
+- `git rebase origin/dev`：exit 1，重播重複 commit `dbec2667882e0f4646a2a07e20eb7420f618640e` 時在 session、三個頁面和兩個測試設定衝突；`git rebase --abort`：exit 0，保留已推送歷史。沒有 force push 或再次 merge 重複 rail。
+- Helper `SR-BANK-002-UNBLOCK-HISTORY-REPAIR` 的 done 只代表 PR #1734 修復方案文件已合併；文件明確指出產品五項失敗仍需另行處理，並要求新 delivery branch。本次 dispatch 仍指定原 branch，未更新 write_scopes 或 IAM 相依。
+- `pnpm exec vitest run tests/unit/system-remediation/sr-bank-002/`：exit 1；內層 49 passed、5 failed，外層 wrapper 如實失敗。失敗仍為兩條 settlement policy 缺財務讀權限、兩個上游 403 seed fallback、Contoso 上游 503 CSV 包含 `STM-ACME-202606`。資源與 synthetic/live 界線沿用下文。
+- `pnpm --filter @drts/bank-console-web typecheck`：exit 0。`git diff --exit-code origin/dev HEAD -- apps/api/src/common/auth/auth.policy.ts apps/bank-console-web/lib/bank-dev-read-models.ts apps/bank-console-web/app/api/statements/export/route.ts`：exit 0，三個缺陷來源檔與最新 dev 完全相同；本次整組測試是在上述 branch checkpoint 執行，沒有冒稱已完成 rebase。
+- 需要 supervisor 擴 loader scope／重疊 writer 相依，安排 canonical IAM policy owner，並將派工 delivery branch 更新為 helper 提出的乾淨 replacement rail。未授權前不修改共用來源，不 handoff。此提交僅保存重驗證據；沒有產品 UI 變更或 live／CI／merge 驗收。
+
+## 2026-09-08T17:46Z dispatch 重驗（最新）
+
+- Owner Codex2；本次 reviewer 為 Codex。任務尚未完成，沒有 candidate／handoff。
+- 本次 fetch 後 base `origin/dev`：`2a093872d05a7d0344adf9bb58f9e5c4c99861d1`。既有分支 `e150fcfe1` 含同一組修復的重複合併歷史；rebase 保留較新的格式化版本，跳過重複舊 patch，移除重複的 `.test.ts`（完整案例仍在 `.spec.mts`，root wrapper 仍會執行）。
+- 前置 task slice：SR-BANK-001、SR-IAM-001 均為 done，記錄 merge 分別為 `6d4c47feb1c6`、`548608e45841`；但目前 base 的下列缺陷仍可重現。
+- `pnpm exec vitest run tests/unit/system-remediation/sr-bank-002/`：exit 1；內層 54 項中 49 passed、5 failed，外層 wrapper 正確回報失敗。完整失敗範圍仍為本文「五個未通過案例」：結算清單／明細僅要求 tenant:read；ACME OPS／Contoso finance 上游 403 回傳 seed；Contoso CSV 上游 503 帶出 `STM-ACME-202606` 等 rows。
+- `pnpm --filter @drts/bank-console-web typecheck`：exit 0（next typegen、tsc --noEmit）。`git diff --check` 及 `git diff --cached --check`：exit 0。
+- 本次沒有產品 UI 改動，未執行 live、真 IAP、真實金融資料或部署驗收；沿用本文列出的 synthetic 資源 ID 和驗證界線。
+- 阻礙仍須 supervisor 處理：擴 scope 至 `apps/bank-console-web/lib/bank-dev-read-models.ts` 並加入重疊 writer 相依；由 canonical IAM owner 整合結算 API 財務讀政策與 bank role mapping。現有 write_scopes 未授權這兩處，不擅改，也不以擴大全員 scope 解決。
+- 本次提交為 WIP evidence checkpoint；實際 checkpoint SHA 與普通 push 結果由 machine progress/blocker 記錄，不能視為 candidate、CI 或 merge 證據。
+
+## 狀態與版本
+
+2026-09-06，Owner Codex2，Reviewer Claude2。**部分修復已推送；任務 blocked，未 handoff，不能結案。**
+
+- Base / 查核時 `origin/dev`：`69c519702047862212bc0e4890350e6b58917062`。`git fetch origin`、`git rebase origin/dev` 成功；另用 `git ls-remote origin refs/heads/dev` 確認遠端仍是同一 SHA。
+- 已驗證的程式與測試 checkpoint：`51357a15ffab969aeb25eb833f506841646b4b72`，branch `codex2/sr-bank-002`，已普通 non-force push。
+- Candidate SHA：**尚未建立**。此 SHA 是可恢復的 WIP checkpoint，不是完成候選；本文件後續提交亦不代表鎖定 candidate。尚無同 candidate review／CI／merge／live 驗收證據。
+- 前置任務查核：SR-BANK-001、SR-IAM-001 的 task slice 均為 `done`，分別記錄 PR #1654 與 #1683；沒有將歷史 audit SHA 當成目前程式。
+
+## 追溯與既有政策
+
+- Execution：`docs/03-runbooks/system-remediation-execution-tasks-20260906.md` 與 `system-remediation-20260906/SR-BANK-002.md`。
+- Finding R15、capability C005：OPS_VIEWER 在人員頁被告知無結算金額，對帳頁仍可讀到金額。
+- `docs/02-architecture/credit-card-airport-transfer-sa-20260610.md` UC-2／UC-3：OPS 作業唯讀，finance 對帳與遮罩參照。
+- 目前 `home-data.ts:roleView`、`session.ts:resolveServerSessionRole` 及既有下載 handlers：program admin／finance 可讀金額及下載；OPS 不可。沿用此政策，未擴大任何角色 scopes。
+- 已讀 `packages/ui-tokens/src/realms.ts`、`bank-screens-2.jsx` 的對帳清單／明細、`bank-screens-3.jsx` 的人員角色卡。延用既有 page shell、CalloutPanel、realm／issuer tokens 與角色文案，沒有新增 palette 或重設畫面。
+
+## 已修正的範圍
+
+1. `session.ts` 新增保護頁面共用 resolver：必須有已驗章 cookie；URL 只能與 cookie 的 role／bank 一致，不能授權。省略 bank 時使用 cookie 中的租戶，不回退預設租戶。
+2. 對帳清單、明細在讀資料前驗證 session／tenant。OPS 只收到既有角色限制提示，完全不呼叫對帳 loader，HTML 無總额、逐趟金額或 artifact 資源參照。
+3. 人員頁不再信任 query role。無 session、偽造 cookie、跨 tenant 或角色竄改均在讀取 directory PII 前 `notFound()`；管理按鈕依已驗證角色判斷。
+4. 人員 email 保留權威 API 值，不再依 URL 租戶改寫網域，把另一筆資料偽装成本租戶人員。
+
+以上只改 dispatch 列出的 source scopes。沒有修改共用 loader、canonical IAM、CSV handlers、artifact handlers、中央測試 config、lockfile 或全域樣式。
+
+## 重現與檢查結果
+
+初次執行 Vitest 因 supervisor 提供的 node_modules symlink 指向失效的其他 worktree，報 `MODULE_NOT_FOUND`（exit 1）。只移除本 isolated worktree 的 dependency symlinks，執行 `pnpm install --offline --frozen-lockfile --ignore-scripts`（exit 0；下載 0；lockfile 未改），建立獨立依賴後重跑。
+
+Root Vitest 的 `@` 屬於 tenant console，無法直接載入 bank SSR。task 專屬 `boundary.test.ts` 執行 task 專屬 Vitest config，以 bank alias 跑 `.spec.mts`；runner 傳回真實 exit code。沒有 `passWithNoTests`、skip 或 expected-failure 標記，沒有修改 root config。`.mts` 將 Next SSR 的 TSX compilation 保留在 bank 測試環境。
+
+| 指令                                                                                                                                                                                                                                                               | 結果／exit code                                                                                                                            |
+| ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------ |
+| `pnpm exec vitest run tests/unit/system-remediation/sr-bank-002/`，頁面修正前、base 程式                                                                                                                                                                           | 頁面 20 tests：4 passed、16 failed；exit 1。失敗包括 OPS 金額、跨 tenant、無 session／偽造 cookie／query 升權。                            |
+| 同指令，頁面修正後、補下載矩陣前                                                                                                                                                                                                                                   | 頁面 20/20 passed；root wrapper 1/1 passed；exit 0。                                                                                       |
+| `pnpm exec vitest run tests/unit/system-remediation/sr-bank-002/`，checkpoint `51357a15f`                                                                                                                                                                          | 3 inner suites、54 assertions：**49 passed、5 failed**；root wrapper 失敗；**exit 1**。五個失敗是下節未修正的 scope 阻礙，不能報整體通過。 |
+| `pnpm --filter @drts/bank-console-web typecheck`                                                                                                                                                                                                                   | `next typegen` 成功、`tsc --noEmit` 成功；exit 0。                                                                                         |
+| `pnpm exec eslint apps/bank-console-web/lib/session.ts apps/bank-console-web/app/statements/page.tsx 'apps/bank-console-web/app/statements/[period]/page.tsx' apps/bank-console-web/app/users/page.tsx tests/unit/system-remediation/sr-bank-002 --max-warnings=0` | exit 0。                                                                                                                                   |
+| `git diff --check`                                                                                                                                                                                                                                                 | exit 0。                                                                                                                                   |
+
+49 個通過案例包括 20 個頁面測試，以及 29 個下載／序列化測試：三角色 × 同 tenant／跨 tenant × 全期 CSV／單期 CSV／statement artifact／trip artifact，加上偽造 cookie／升權與 mapper PII 測試。下載 handlers 與 mapper 均為實際程式；其上游 fetch 使用明列 synthetic inputs。OPS 的下載請求在 fetch 前得到 403；admin／finance 的同租戶回應保留金額而沒有原始乘客姓名、電話、卡號與未遮罩參照；三角色跨租戶皆 403。
+
+## 五個未通過案例與 supervisor 必須處理的 scope
+
+`out-of-scope-blockers.spec.mts` 保留普通失敗測試，令 root task command 維持失敗：
+
+1. `GET /api/tenant/settlement-statements` 的 canonical policy 只有 `tenant:read`，没有財務權限要求。
+2. `GET /api/tenant/settlement-statements/2026-03` 同上。實際 assertion：`expected ['tenant:read'] to include 'tenant:billing:read'`。
+3. ACME OPS 遇上游 403 時，`loadBankStatementsData` 回傳四份 seed statements，而非拒絕／空資料。
+4. Contoso finance 遇上游 403 時亦回傳 ACME seed statements。
+5. Contoso finance 的全期 CSV 遇上游 503 時仍回傳 200，內容包含 `STM-ACME-202606` 等 ACME seed rows。這是重現出的錯誤行為，不是成功跨租戶資料驗收。
+
+需要 supervisor：
+
+- **擴本 task write scope 加入 `apps/bank-console-web/lib/bank-dev-read-models.ts`，並依所有重疊 writer 加入必要相依。** 修正角色禁用 endpoint 的載入與故障策略，禁止對帳在 forbidden、空資料、其他 tenant 或故障時回退 seed。現有檔案不在本 task scope，owner 未改。
+- **由 SR-IAM-001（重新排程或建立有相依的後續 task）整合銀行角色、財務讀 scope 與 settlement API policy。** `server-bank-api.ts` 現況將三角色均轉成 tenant_admin，沒有 `x-scopes`；既有 IAM catalog 也沒有 bank role preset。須待權威 policy 整合後，才能在本 task scope 內將 bridge 串到該 mapping；不能自行擴大 tenant_viewer 或所有角色 scopes 解決。
+
+未授權前不能以只藏 HTML 的修復宣稱 HTML／JSON／CSV 一致隔離，也不能 handoff 完成候選。
+
+## 資源與驗證界線
+
+- Tenant IDs：`tenant-demo-001`（ACME）、`tenant-contoso-001`（Contoso）。
+- Synthetic disclosure sentinels：`sr-bank-002-statement`、`sr-bank-002-trip`、period `2026-03`、amount `987654`。上游測試資料刻意包含未遮罩 PII sentinel，以確認 mapper／CSV／artifact 不洩漏；不是正式銀行帳務資料。
+- 既有程式 seed 重現：`STM-ACME-202606`、`STM-ACME-202605`、`STM-ACME-202604` 及 `settlement-statement-tenant-demo-001-2026-03`。
+- 未執行 live Cloud Run、真實 IAP 登入、正式銀行帳務、瀏覽器畫面／真機、部署、CI 或 merge 驗收。SSR 用實際 React server rendering，cookie 用實際簽章／驗章函式，HTTP context 與上游 API 使用測試替身。沒有宣稱 live 成功、正式資料外洩或真正送達。
+
+## 2026-09-08 rebase 重驗
+
+- 新 base `origin/dev`：`70355aba97c23dd1cd592b71f1d3dfe6315d91ff`；從 `origin/codex2/sr-bank-002@07273996ad39046e0cfdfc124ab26ac3e80a5758` rebase 成功。使用者頁衝突保留 `dev` 的匿名租戶／email 表示，並重套本 task 的已驗章頁面邊界。
+- 因 `dev` 已移除真實金融機構識別字，測試矩陣改以 ACME（`tenant-demo-001`）與 Contoso（`tenant-contoso-001`）表示同租戶與跨租戶；沒有改產品政策或擴大 scope。
+- `pnpm --filter @drts/bank-console-web typecheck`：exit 0。
+- `pnpm exec vitest run --config tests/unit/system-remediation/sr-bank-002/vitest.bank.config.ts`：49 passed、5 failed，exit 1。49 項涵蓋三角色 HTML／CSV／artifact 同租戶正向與跨租戶、偽造 cookie、role escalation、PII serialization；5 項為上列尚未獲 scope 的 IAM／fallback blocker。
+- `git diff --check`：exit 0。尚未建立 candidate 或 handoff；此 task 仍不可宣稱 HTML／JSON／CSV 完整隔離。
