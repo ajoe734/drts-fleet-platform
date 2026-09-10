@@ -19,6 +19,7 @@ import {
 
 export type ContractRow = Record<string, unknown> & {
   contractId: string;
+  detailHref?: string;
   serviceScope: string;
   operatingAreaId: string | null;
   kindKey: string;
@@ -242,7 +243,7 @@ function buildActionHref(
 ): string | null {
   switch (action.action) {
     case "open_contract_detail":
-      return `/contracts/${encodeURIComponent(row.contractId)}`;
+      return row.detailHref ?? `/contracts/${encodeURIComponent(row.contractId)}`;
     case "open_partner_governance":
     case "open_fleet_governance":
       return row.crossAppLinks[0]
@@ -320,9 +321,20 @@ function buildContractColumns(
       w: 200,
       r: (row) => (
         <div style={stackStyle}>
-          <span style={{ ...primaryTextStyle, ...monoTextStyle }}>
+          <Link
+            href={
+              row.detailHref ??
+              `/contracts/${encodeURIComponent(row.contractId)}`
+            }
+            style={{
+              ...primaryTextStyle,
+              ...monoTextStyle,
+              color: theme.accent,
+              textDecoration: "none",
+            }}
+          >
             {row.contractId}
-          </span>
+          </Link>
           <span style={secondaryTextStyle}>{row.serviceScope}</span>
           <span style={{ ...mutedTextStyle, ...monoTextStyle }}>
             {row.operatingAreaId ?? t("contracts.table.noArea", locale)}
