@@ -82,7 +82,7 @@ export function tenantFleetAdminIdentity(
     tenantId,
     roleFamilies: ["tenant"],
     roles: ["tenant_ops_admin"],
-    scopes: ["reports:read"],
+    scopes: ["reports:read", "billing:read"],
   };
 }
 
@@ -94,7 +94,7 @@ export function opsAdminIdentity(actorId = "user_ops_admin"): MintTokenOptions {
     tenantId: null,
     roleFamilies: ["ops"],
     roles: ["ops_manager"],
-    scopes: ["reports:read"],
+    scopes: ["reports:read", "billing:read"],
   };
 }
 

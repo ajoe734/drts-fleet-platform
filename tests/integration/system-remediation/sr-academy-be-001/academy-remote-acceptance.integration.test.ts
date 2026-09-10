@@ -374,10 +374,13 @@ describe("SR-ACADEMY-BE-001 Real PostgreSQL Acceptance Suite", () => {
           `, [driverFailId]);
           expect(failTrainingSql.rows.length).toBe(0);
 
-          // 3. Expiry projection: expire the passing record and verify status updates to 'expired'
+          // 3. Expiry projection: expire the passing record and attempt, then verify status updates to 'expired'
           await client.query(`
             UPDATE reg.driver_training_records
             SET expires_at = now() - interval '2 days'
+            WHERE driver_id = $1;
+            UPDATE reg.phase1_driver_quiz_attempts
+            SET attempted_at = now() - interval '400 days'
             WHERE driver_id = $1;
           `, [driverPassId]);
 
