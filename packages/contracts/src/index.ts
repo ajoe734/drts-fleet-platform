@@ -1429,6 +1429,11 @@ export const EVIDENCE_RETENTION_FAMILIES = [
   "webhook_delivery",
   "eligibility_verification",
   "proof_bundle",
+  "voice_booking_evidence",
+  "voice_transcript",
+  "voice_recording_audio",
+  "voice_live_buffer",
+  "voice_telemetry",
 ] as const;
 export type EvidenceRetentionFamily =
   (typeof EVIDENCE_RETENTION_FAMILIES)[number];
@@ -5537,9 +5542,15 @@ export type ReportOutputFormat = (typeof REPORT_OUTPUT_FORMATS)[number];
  * renderer, so a job requested as `pdf` and one requested as `csv` came back
  * identical -- no bytes either way. The API rejects the unrendered ones now, and
  * a picker should offer only these.
+ *
+ * SR-REPORT-001 (N05 gap closure): xlsx and pdf renderers are now implemented
+ * via exceljs and pdfkit respectively. zip remains unimplemented (filing ZIP
+ * is explicitly out of scope for general reports).
  */
 export const IMPLEMENTED_REPORT_OUTPUT_FORMATS = [
   "csv",
+  "xlsx",
+  "pdf",
 ] as const satisfies readonly ReportOutputFormat[];
 export type ImplementedReportOutputFormat =
   (typeof IMPLEMENTED_REPORT_OUTPUT_FORMATS)[number];
@@ -7438,3 +7449,4 @@ export * from "./phase1-p5-s3-multi-taxi";
 export * from "./p5-fare-anomaly-admin";
 export * from "./unattended-voice";
 export * from "./voice-dialogue";
+export * from "./system-remediation";

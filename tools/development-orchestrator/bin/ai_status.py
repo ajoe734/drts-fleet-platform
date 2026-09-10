@@ -35,6 +35,7 @@ from control_plane.usecases.task_board_commands import (  # noqa: E402
     TaskBoardCommandExecutor,
     TaskBoardCommandRuntime,
 )
+from control_plane.domain.unblock_resolution import parent_resume_blocker  # noqa: E402
 
 
 STATUS_FILE = ROOT / "ai-status.json"
@@ -1043,14 +1044,21 @@ def apply_unblock_parent_resolution(
     if parent is None:
         return
 
-    resume_status = os.environ.get("PARENT_STATUS", "").strip().lower() or "todo"
+    resume_status = (
+        os.environ.get("PARENT_STATUS", "").strip().lower()
+        or str(task.get("resolved_parent_status") or "todo").strip().lower()
+    )
     if resume_status not in {"backlog", "todo", "in_progress", "blocked"}:
         raise SystemExit("PARENT_STATUS must be backlog, todo, in_progress, or blocked")
     parent_message = (
         os.environ.get("PARENT_NEXT", "").strip()
+        or str(task.get("resolved_parent_next") or "").strip()
         or f"Unblock resolution complete via {task.get('id')}: {message}"
     )
-    parent_waiting_for_raw = os.environ.get("PARENT_WAITING_FOR", "").strip()
+    parent_waiting_for_raw = (
+        os.environ.get("PARENT_WAITING_FOR", "").strip()
+        or str(task.get("resolved_parent_waiting_for") or "").strip()
+    )
     parent_waiting_for = canonical_agent_name(parent_waiting_for_raw) if parent_waiting_for_raw else ""
     if parent_waiting_for:
         ensure_agent(parent_waiting_for)
@@ -1058,6 +1066,7 @@ def apply_unblock_parent_resolution(
         parent_waiting_for = canonical_agent_name(parent.get("waiting_for")) or canonical_agent_name(parent.get("owner"))
 
     task["resolved_parent_status"] = resume_status
+    task["resolved_parent_at"] = timestamp
     task["resolved_parent_next"] = parent_message
     if parent_waiting_for:
         task["resolved_parent_waiting_for"] = parent_waiting_for
@@ -1842,6 +1851,11 @@ def command_resume_blocked(state: dict[str, Any], args: list[str]) -> None:
         raise SystemExit(f"Unknown task: {task_id}")
     if task.get("status") != "blocked":
         raise SystemExit(f"{task_id} is not blocked")
+    helper_id = os.environ.get("TASK_RESUME_HELPER_ID", "").strip()
+    if helper_id:
+        reason = parent_resume_blocker(state, task, get_task(state, helper_id))
+        if reason:
+            raise SystemExit(f"Cannot resume {task_id} via {helper_id}: {reason}")
     timestamp = iso_now()
     task["status"] = resume_status
     task["last_update"] = timestamp
@@ -1873,6 +1887,11 @@ def command_start(state: dict[str, Any], args: list[str]) -> None:
         raise SystemExit(f"Unknown task: {task_id}")
     if task.get("owner") != actor:
         raise SystemExit(f"Only the owner ({task.get('owner')}) can start {task_id}")
+    if task.get("status") in {"acceptance", "done"}:
+        raise SystemExit(
+            f"Cannot start {task_id} from {task['status']}; use note/progress for a status report, "
+            "record-acceptance for evidence, or an explicit reviewer reopen for code changes"
+        )
     timestamp = iso_now()
     task["status"] = "in_progress"
     task["last_update"] = timestamp
@@ -1892,8 +1911,14 @@ def command_progress(state: dict[str, Any], args: list[str]) -> None:
         raise SystemExit(f"Unknown task: {task_id}")
     if task.get("owner") != actor:
         raise SystemExit(f"Only the owner ({task.get('owner')}) can progress {task_id}")
+    if task.get("status") in {"acceptance", "done"}:
+        # Acceptance workers report verification progress without changing the
+        # already merged candidate. Reopening implementation is a separate
+        # reviewer action; a status report must never discard its provenance.
+        command_note(state, args)
+        return
     timestamp = iso_now()
-    if task["status"] in {"backlog", "todo", "integrating", "acceptance"}:
+    if task["status"] in {"backlog", "todo", "integrating"}:
         task["status"] = "in_progress"
         clear_candidate_evidence(task)
     task["last_update"] = timestamp
@@ -1929,6 +1954,8 @@ def command_reopen(state: dict[str, Any], args: list[str]) -> None:
     reviewer = canonical_agent_name(task.get("reviewer"))
     if actor not in {owner, reviewer}:
         raise SystemExit(f"Only the owner ({owner}) or reviewer ({reviewer}) can reopen {task_id}")
+    if task.get("status") in {"acceptance", "done"} and actor != reviewer:
+        raise SystemExit(f"Only the reviewer ({reviewer}) can reopen {task_id} from {task['status']}")
     timestamp = iso_now()
     task["status"] = "in_progress"
     clear_candidate_evidence(task)

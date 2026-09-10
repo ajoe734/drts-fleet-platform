@@ -11,6 +11,20 @@ import { VoiceBookingRepository } from "./voice-booking.repository";
 import { VoiceLineScopeService } from "./voice-line-scope.service";
 import { VoiceCheckpointRepository } from "./voice-checkpoint.repository";
 import { VoiceEvidenceService } from "./voice-evidence.service";
+import { VoiceDispatchProjectionService } from "./voice-dispatch-projection.service";
+import { VoiceBookingCommandService } from "./voice-booking-command.service";
+import { VoiceCommandRunnerService } from "./voice-command-runner.service";
+import { OwnedMobilityRepository } from "../owned-mobility/owned-mobility.repository";
+
+import { VoiceHandoffService } from "./voice-handoff.service";
+import { VoiceSessionService } from "./voice-session.service";
+import { VoiceSessionRepository } from "./voice-session.repository";
+import { VoiceHandoffQueueService } from "../callcenter/voice-handoff-queue.service";
+import { VoiceOperationPolicyService } from "./voice-operation-policy.service";
+import { VoiceContactService } from "./voice-contact.service";
+import { VoiceCallbackService } from "./voice-callback.service";
+import { VoicePolicyService } from "./voice-policy.service";
+import { VoiceRetentionService } from "./voice-retention.service";
 
 /**
  * UV-EXEC-003 built VoiceBookingRepository/VoiceBookingAuthorizationService/
@@ -23,6 +37,9 @@ import { VoiceEvidenceService } from "./voice-evidence.service";
 @Module({
   imports: [DatabaseModule, GeoModule, ServiceAreaModule, ServiceProductModule],
   providers: [
+    OwnedMobilityRepository,
+    VoiceBookingCommandService,
+    VoiceCommandRunnerService,
     VoiceBookingDraftService,
     VoiceConfirmationService,
     VoiceCheckpointRepository,
@@ -30,14 +47,37 @@ import { VoiceEvidenceService } from "./voice-evidence.service";
     VoiceBookingRepository,
     VoiceBookingAuthorizationService,
     VoiceLineScopeService,
+    VoiceDispatchProjectionService,
+    VoiceSessionRepository,
+    VoiceSessionService,
+    VoiceHandoffQueueService,
+    VoiceHandoffService,
+    VoiceOperationPolicyService,
+    VoiceContactService,
+    VoiceCallbackService,
+    VoicePolicyService,
+    VoiceRetentionService,
   ],
   exports: [
+    VoiceBookingCommandService,
+    VoiceCommandRunnerService,
     VoiceBookingDraftService,
     VoiceConfirmationService,
     VoiceEvidenceService,
     VoiceBookingRepository,
     VoiceBookingAuthorizationService,
     VoiceLineScopeService,
+    VoiceDispatchProjectionService,
+    VoiceSessionRepository,
+    VoiceSessionService,
+    VoiceHandoffQueueService,
+    VoiceHandoffService,
+    VoiceOperationPolicyService,
+    VoiceContactService,
+    VoiceCallbackService,
+    VoicePolicyService,
+    VoiceRetentionService,
   ],
 })
 export class VoiceBookingModule {}
+

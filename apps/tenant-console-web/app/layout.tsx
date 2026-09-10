@@ -5,6 +5,7 @@ import { LanguageProvider } from "@/lib/i18n";
 import { RuntimeConfigScript } from "@/lib/runtime-config";
 import { getServerLocale } from "@/lib/server-locale";
 import { t } from "@/lib/translations";
+import { normalizeServerRuntimeEnv } from "@drts/ui-web";
 import "./globals.css";
 
 export const metadata: Metadata = {
@@ -20,13 +21,14 @@ export default async function RootLayout({
   children: ReactNode;
 }) {
   const locale = await getServerLocale();
+  const env = normalizeServerRuntimeEnv(process.env.DRTS_ENV);
 
   return (
     <html lang={locale === "zh" ? "zh-Hant" : "en"}>
       <body>
         <RuntimeConfigScript />
         <LanguageProvider defaultLocale={locale}>
-          <TenantShell>{children}</TenantShell>
+          <TenantShell env={env}>{children}</TenantShell>
         </LanguageProvider>
       </body>
     </html>
