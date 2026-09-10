@@ -4,7 +4,7 @@ import { useEffect, useMemo, useState, type CSSProperties } from "react";
 import { formatDateTime, usePlatformAdminClient } from "@/lib/admin-client";
 import { useTranslation } from "@/lib/i18n";
 import { formatPlatformCodeLabel } from "@/lib/localized-labels";
-import type { PlatformAdapter } from "@drts/contracts";
+import type { PlatformAdapter, UpdatePlatformAdapterCommand } from "@drts/contracts";
 import {
   CanvasBanner,
   CanvasBtn,
@@ -15,6 +15,19 @@ import {
   buildCanvasTheme,
   type CanvasTone,
 } from "@drts/ui-web";
+import { EditAdapterModal } from "./components/EditAdapterModal";
+import {
+  RegisterAdapterModal,
+  type RegisterAdapterInput,
+} from "./components/RegisterAdapterModal";
+import {
+  evaluateCredentialExpiry,
+  type CredentialExpiryState,
+} from "./credential-expiry";
+import {
+  ADAPTER_REGISTRY_LOCAL_TRANSLATIONS,
+  type AdapterRegistryLocale,
+} from "./translations";
 
 const theme = buildCanvasTheme({ surface: "platform", density: "compact" });
 
@@ -274,13 +287,44 @@ function booleanTone(value: boolean): CanvasTone {
   return value ? "success" : "neutral";
 }
 
-function findAttentionAdapter(adapters: PlatformAdapter[]) {
-  return adapters.find(
-    (adapter) =>
-      adapter.credentialStatus !== "VALID" ||
-      adapter.healthStatus.status !== "HEALTHY" ||
-      adapter.warn === true,
-  );
+function expiryTone(state: CredentialExpiryState): CanvasTone {
+  switch (state) {
+    case "valid":
+      return "success";
+    case "expiring_soon":
+      return "warn";
+    case "expired":
+      return "danger";
+    case "unknown":
+    default:
+      return "neutral";
+  }
+}
+
+function findAttentionAdapter(adapters: PlatformAdapter[]): PlatformAdapter | null {
+  for (const adapter of adapters) {
+    const expiry = evaluateCredentialExpiry(adapter);
+    if (expiry.state === "expired") {
+      return adapter;
+    }
+  }
+  for (const adapter of adapters) {
+    const expiry = evaluateCredentialExpiry(adapter);
+    if (expiry.state === "expiring_soon") {
+      return adapter;
+    }
+  }
+  for (const adapter of adapters) {
+    if (adapter.credentialStatus !== "VALID") {
+      return adapter;
+    }
+  }
+  for (const adapter of adapters) {
+    if (adapter.healthStatus.status !== "HEALTHY" || adapter.warn === true) {
+      return adapter;
+    }
+  }
+  return null;
 }
 
 function hasSupportedAction(adapter: PlatformAdapter, actionName: string) {
@@ -354,6 +398,15 @@ export default function AdapterRegistryPage() {
   const [error, setError] = useState<string | null>(null);
   const [flash, setFlash] = useState<FlashState>(null);
   const [pendingId, setPendingId] = useState<string | null>(null);
+  const [editingAdapter, setEditingAdapter] = useState<PlatformAdapter | null>(
+    null,
+  );
+  const [isRegisterOpen, setIsRegisterOpen] = useState(false);
+
+  const localT =
+    ADAPTER_REGISTRY_LOCAL_TRANSLATIONS[
+      (locale.startsWith("zh") ? "zh" : "en") as AdapterRegistryLocale
+    ];
 
   const copy: Copy = useMemo(
     () =>
@@ -497,10 +550,64 @@ export default function AdapterRegistryPage() {
     [adapters],
   );
 
-  const bannerAdapter = useMemo(
-    () => attentionAdapter ?? adapters[0] ?? null,
-    [adapters, attentionAdapter],
-  );
+  const bannerDetails = useMemo(() => {
+    if (!attentionAdapter) return null;
+    type BannerTone = Exclude<CanvasTone, "neutral">;
+    const expiry = evaluateCredentialExpiry(attentionAdapter);
+    if (expiry.state === "expired") {
+      return {
+        tone: "danger" as BannerTone,
+        title: `${attentionAdapter.platformCode} · ${localT.expired}`,
+        body: localT.attentionBannerExpiredBody
+          .replace("{name}", attentionAdapter.name)
+          .replace("{date}", expiry.formattedExpiryDate ?? ""),
+      };
+    }
+    if (expiry.state === "expiring_soon") {
+      return {
+        tone: "warn" as BannerTone,
+        title: `${attentionAdapter.platformCode} · ${localT.expiringSoon}`,
+        body: localT.attentionBannerExpiringBody
+          .replace("{name}", attentionAdapter.name)
+          .replace("{date}", expiry.formattedExpiryDate ?? "")
+          .replace("{days}", String(expiry.daysRemaining ?? 0)),
+      };
+    }
+    if (attentionAdapter.credentialStatus !== "VALID") {
+      return {
+        tone: "danger" as BannerTone,
+        title: `${attentionAdapter.platformCode} · ${formatPlatformCodeLabel(locale as LabelLocale, attentionAdapter.credentialStatus)}`,
+        body: localT.attentionBannerUnknownBody
+          .replace("{name}", attentionAdapter.name)
+          .replace(
+            "{credentialStatus}",
+            formatPlatformCodeLabel(
+              locale as LabelLocale,
+              attentionAdapter.credentialStatus,
+            ),
+          ),
+      };
+    }
+    if (attentionAdapter.healthStatus.status !== "HEALTHY") {
+      return {
+        tone: (attentionAdapter.healthStatus.status === "DEGRADED"
+          ? "warn"
+          : "danger") as BannerTone,
+        title: `${attentionAdapter.platformCode} · ${formatHealthLabel(copy, attentionAdapter.healthStatus.status)}`,
+        body: localT.attentionBannerDegradedBody
+          .replace("{name}", attentionAdapter.name)
+          .replace(
+            "{healthStatus}",
+            formatHealthLabel(copy, attentionAdapter.healthStatus.status),
+          ),
+      };
+    }
+    return {
+      tone: "warn" as BannerTone,
+      title: copy.bannerTitle(attentionAdapter),
+      body: copy.bannerBody(attentionAdapter),
+    };
+  }, [attentionAdapter, copy, localT, locale]);
 
   const sortedAdapters = useMemo(
     () =>
@@ -517,6 +624,65 @@ export default function AdapterRegistryPage() {
 
   const showUnavailableState =
     !loading && Boolean(error) && adapters.length === 0;
+
+  async function handleSaveAdapter(cmd: UpdatePlatformAdapterCommand) {
+    if (!editingAdapter) return;
+    setFlash(null);
+    try {
+      const updated = await client.updatePlatformAdapter(
+        editingAdapter.id,
+        cmd,
+      );
+      setAdapters((current) =>
+        current.map((entry) =>
+          entry.id === editingAdapter.id ? updated : entry,
+        ),
+      );
+      setFlash({
+        tone: "success",
+        message: copy.toggleSuccess(updated, updated.config.isEnabled),
+      });
+      setEditingAdapter(null);
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : String(err);
+      setFlash({ tone: "danger", message });
+    }
+  }
+
+  async function handleRegisterAdapter(input: RegisterAdapterInput) {
+    setFlash(null);
+    try {
+      const payload = {
+        id: input.id,
+        platformCode: input.platformCode,
+        name: input.name,
+        description: input.description,
+        adapterType: input.adapterType,
+        environment: input.environment,
+        rolloutStage: input.rolloutStage,
+        credentialExpiresAt: input.credentialExpiresAt,
+        policies: input.serviceBuckets
+          ? {
+              serviceBuckets: input.serviceBuckets,
+            }
+          : undefined,
+      };
+      const created = await client.post<PlatformAdapter>(
+        "/api/platform-admin/adapters",
+        { body: payload },
+      );
+      setAdapters((current) => [...current, created]);
+      setFlash({
+        tone: "success",
+        message: `${localT.registerSuccess}: ${created.name}`,
+      });
+      setIsRegisterOpen(false);
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : String(err);
+      setFlash({ tone: "danger", message });
+      throw err;
+    }
+  }
 
   async function toggleEnabled(adapter: PlatformAdapter) {
     const nextEnabled = !adapter.config.isEnabled;
@@ -590,12 +756,7 @@ export default function AdapterRegistryPage() {
             theme={theme}
             variant="primary"
             icon="plus"
-            onClick={() =>
-              setFlash({
-                tone: "info",
-                message: copy.registerInfo,
-              })
-            }
+            onClick={() => setIsRegisterOpen(true)}
           >
             {copy.registerAction}
           </CanvasBtn>
@@ -603,36 +764,28 @@ export default function AdapterRegistryPage() {
       />
 
       <div style={pageBodyStyle}>
-        <CanvasBanner
-          theme={theme}
-          tone="danger"
-          icon="warn"
-          title={
-            bannerAdapter && attentionAdapter
-              ? copy.bannerTitle(bannerAdapter)
-              : copy.bannerFallbackTitle
-          }
-          body={
-            bannerAdapter && attentionAdapter
-              ? copy.bannerBody(bannerAdapter)
-              : copy.bannerFallbackBody
-          }
-          actions={
-            bannerAdapter ? (
+        {!loading && !error && bannerDetails && attentionAdapter ? (
+          <CanvasBanner
+            theme={theme}
+            tone={bannerDetails.tone}
+            icon="warn"
+            title={bannerDetails.title}
+            body={bannerDetails.body}
+            actions={
               <CanvasBtn
                 theme={theme}
                 variant="primary"
-                danger
+                danger={bannerDetails.tone === "danger"}
                 icon="refresh"
                 onClick={() =>
-                  queueGovernedAction(copy.rotateCredential, bannerAdapter)
+                  queueGovernedAction(copy.rotateCredential, attentionAdapter)
                 }
               >
                 {copy.rotateNow}
               </CanvasBtn>
-            ) : undefined
-          }
-        />
+            }
+          />
+        ) : null}
 
         {flash ? (
           <div style={flashStyle(flash.tone)}>{flash.message}</div>
@@ -656,6 +809,7 @@ export default function AdapterRegistryPage() {
         ) : (
           <div style={cardGridStyle}>
             {sortedAdapters.map((adapter) => {
+              const expiry = evaluateCredentialExpiry(adapter);
               const opsPauseSupported =
                 adapter.isForwarded && hasSupportedAction(adapter, "accept");
               const retrySupported = hasSupportedAction(adapter, "retry");
@@ -768,9 +922,7 @@ export default function AdapterRegistryPage() {
                           theme={theme}
                           size="xs"
                           variant="secondary"
-                          onClick={() =>
-                            queueGovernedAction(copy.editConfig, adapter)
-                          }
+                          onClick={() => setEditingAdapter(adapter)}
                         >
                           {copy.editConfig}
                         </CanvasBtn>
@@ -820,6 +972,23 @@ export default function AdapterRegistryPage() {
                             adapter.credentialStatus,
                           )}
                         </CanvasPill>
+                        <CanvasPill
+                          theme={theme}
+                          tone={expiryTone(expiry.state)}
+                        >
+                          {expiry.state === "valid"
+                            ? localT.valid
+                            : expiry.state === "expiring_soon"
+                              ? `${localT.expiringSoon} (${expiry.daysRemaining}d)`
+                              : expiry.state === "expired"
+                                ? localT.expired
+                                : localT.unknown}
+                        </CanvasPill>
+                        {expiry.formattedExpiryDate ? (
+                          <CanvasPill theme={theme} tone="neutral">
+                            {expiry.formattedExpiryDate}
+                          </CanvasPill>
+                        ) : null}
                         <CanvasPill theme={theme} tone="neutral">
                           {formatPlatformCodeLabel(
                             locale as LabelLocale,
@@ -942,6 +1111,18 @@ export default function AdapterRegistryPage() {
           </div>
         )}
       </div>
+
+      <EditAdapterModal
+        adapter={editingAdapter}
+        isOpen={Boolean(editingAdapter)}
+        onClose={() => setEditingAdapter(null)}
+        onSave={(cmd) => void handleSaveAdapter(cmd)}
+      />
+      <RegisterAdapterModal
+        isOpen={isRegisterOpen}
+        onClose={() => setIsRegisterOpen(false)}
+        onRegister={handleRegisterAdapter}
+      />
     </>
   );
 }
