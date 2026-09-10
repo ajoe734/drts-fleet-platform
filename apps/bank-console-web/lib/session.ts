@@ -3,13 +3,13 @@ import {
   verifyIapJwtAssertion,
   type IapJwtPayload,
 } from "@drts/control-plane-auth";
-import type { BankRole as HomeRole } from "@/lib/home-data";
+import type { BankRole as HomeRole } from "./home-data";
 import {
   BANK_DEMO_TENANTS,
   type BankDemoTenant,
   type BankDemoTenantCode,
-} from "@/lib/demo-tenants";
-import { t, type Locale, type TranslationKey } from "@/lib/translations";
+} from "./demo-tenants";
+import { t, type Locale, type TranslationKey } from "./translations";
 
 export type BankConsoleRole =
   | "bank_program_admin"
