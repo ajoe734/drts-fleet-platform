@@ -7,14 +7,16 @@ import {
   PageHero,
   SurfaceCard,
 } from "@/components/page-primitives";
-import { resolveLocale } from "@/lib/demo-tenants";
+import { resolveBankDemoTenant, resolveLocale } from "@/lib/demo-tenants";
 import { loadBankStatementsData } from "@/lib/bank-dev-read-models";
 import {
   BANK_CONSOLE_ROLE_COOKIE,
   BANK_CONSOLE_SESSION_COOKIE,
   bankConsoleHref,
+  canViewSettlementAmounts,
   getBankConsoleSession,
-  resolveBankPageSession,
+  resolveServerSessionRole,
+  type BankConsoleRole,
 } from "@/lib/session";
 import { tenantDisplayText } from "@/lib/tenant-display";
 import { type StatementStatus } from "@/lib/statements";
@@ -40,6 +42,10 @@ const statementStatusLabelKey: Record<
   due: "statements.status.due",
 };
 
+function one(value: string | string[] | undefined): string | undefined {
+  return Array.isArray(value) ? value[0] : value;
+}
+
 function formatPeriod(period: string) {
   return `${period.slice(0, 4)} / ${period.slice(5, 7)}`;
 }
@@ -60,6 +66,20 @@ function formatCurrency(amount: number, locale: Locale) {
   }).format(amount);
 }
 
+// Non-digit placeholder so a restricted role can never infer a real figure's
+// length or shape from the rendered HTML.
+const RESTRICTED_AMOUNT_PLACEHOLDER = "••••••";
+
+function formatAmountForRole(
+  amount: number,
+  locale: Locale,
+  role: BankConsoleRole,
+) {
+  return canViewSettlementAmounts(role)
+    ? formatCurrency(amount, locale)
+    : RESTRICTED_AMOUNT_PLACEHOLDER;
+}
+
 export default async function StatementDetailPage({
   params,
   searchParams,
@@ -70,6 +90,7 @@ export default async function StatementDetailPage({
   const { period } = await params;
   const resolvedSearchParams = searchParams ? await searchParams : {};
   const locale = resolveLocale(resolvedSearchParams.locale);
+  const tenant = resolveBankDemoTenant(resolvedSearchParams.bank);
   let cookieRole: string | undefined;
   try {
     const cookieStore = await cookies();
@@ -77,35 +98,19 @@ export default async function StatementDetailPage({
       cookieStore.get(BANK_CONSOLE_SESSION_COOKIE)?.value ||
       cookieStore.get(BANK_CONSOLE_ROLE_COOKIE)?.value;
   } catch {
-    // Missing HTTP cookie context stays unauthenticated.
+    // Fallback for test / non-HTTP contexts
   }
-  const authenticated = resolveBankPageSession(
-    cookieRole,
-    resolvedSearchParams.bank,
-    resolvedSearchParams.role,
+  const roleParam = one(resolvedSearchParams.role);
+  const sessionRole = resolveServerSessionRole(cookieRole, roleParam).role;
+  const session = getBankConsoleSession(
+    tenant,
+    locale,
+    sessionRole,
   );
-  if (!authenticated) notFound();
-  if (!authenticated.canReadStatements) {
-    return (
-      <div className="page-shell bank-statements-page">
-        <CalloutPanel
-          title={t("statements.unauthorized.title", locale)}
-          description={t("users.roleCard.bank_ops_viewer", locale)}
-          tone="warning"
-        />
-      </div>
-    );
-  }
-  const tenant = authenticated.bank;
-  const session = getBankConsoleSession(tenant, locale, authenticated.role);
   const issuerBrand = tenant.template;
-  const statementData = await loadBankStatementsData(
-    tenant.tenantId,
-    session.role,
-  );
+  const statementData = await loadBankStatementsData(tenant.tenantId, session.role);
   const statement =
-    statementData.data.statements.find((item) => item.period === period) ??
-    null;
+    statementData.data.statements.find((item) => item.period === period) ?? null;
 
   if (!statement) {
     notFound();
@@ -164,21 +169,13 @@ export default async function StatementDetailPage({
             <>
               <span
                 className="statement-link is-disabled"
-                style={{
-                  opacity: 0.5,
-                  pointerEvents: "none",
-                  cursor: "not-allowed",
-                }}
+                style={{ opacity: 0.5, pointerEvents: "none", cursor: "not-allowed" }}
               >
                 {t("statements.actions.exportCsv", locale)}
               </span>
               <span
                 className="statement-link is-disabled"
-                style={{
-                  opacity: 0.5,
-                  pointerEvents: "none",
-                  cursor: "not-allowed",
-                }}
+                style={{ opacity: 0.5, pointerEvents: "none", cursor: "not-allowed" }}
               >
                 {t("statements.actions.downloadSigned", locale)}
               </span>
@@ -205,22 +202,38 @@ export default async function StatementDetailPage({
       <section className="surface-grid surface-grid-wide">
         <SurfaceCard
           kicker={t("statements.metrics.kicker", locale)}
-          title={formatCurrency(statement.totalFareAmount, locale)}
+          title={formatAmountForRole(
+            statement.totalFareAmount,
+            locale,
+            session.role,
+          )}
           description={t("statements.detail.metrics.fare", locale)}
         />
         <SurfaceCard
           kicker={t("statements.metrics.kicker", locale)}
-          title={formatCurrency(statement.totalSubsidisedAmount, locale)}
+          title={formatAmountForRole(
+            statement.totalSubsidisedAmount,
+            locale,
+            session.role,
+          )}
           description={t("statements.detail.metrics.subsidised", locale)}
         />
         <SurfaceCard
           kicker={t("statements.metrics.kicker", locale)}
-          title={formatCurrency(statement.totalIssuerPayableAmount, locale)}
+          title={formatAmountForRole(
+            statement.totalIssuerPayableAmount,
+            locale,
+            session.role,
+          )}
           description={t("statements.detail.metrics.issuerPayable", locale)}
         />
         <SurfaceCard
           kicker={t("statements.metrics.kicker", locale)}
-          title={formatCurrency(statement.totalPaidAmount, locale)}
+          title={formatAmountForRole(
+            statement.totalPaidAmount,
+            locale,
+            session.role,
+          )}
           description={t("statements.detail.metrics.paid", locale)}
         />
         <SurfaceCard
@@ -359,9 +372,19 @@ export default async function StatementDetailPage({
                   <span>{formatDate(trip.tripDate)}</span>
                 </div>
               </Td>
-              <Td mono>{formatCurrency(trip.fareAmount, locale)}</Td>
-              <Td mono>{formatCurrency(trip.subsidisedAmount, locale)}</Td>
-              <Td mono>{formatCurrency(trip.paidAmount, locale)}</Td>
+              <Td mono>
+                {formatAmountForRole(trip.fareAmount, locale, session.role)}
+              </Td>
+              <Td mono>
+                {formatAmountForRole(
+                  trip.subsidisedAmount,
+                  locale,
+                  session.role,
+                )}
+              </Td>
+              <Td mono>
+                {formatAmountForRole(trip.paidAmount, locale, session.role)}
+              </Td>
               <Td mono>{trip.benefitReferenceMasked}</Td>
               <Td mono>{trip.cardholderReferenceMasked}</Td>
               <Td mono>{trip.cardReferenceMasked}</Td>
@@ -370,11 +393,7 @@ export default async function StatementDetailPage({
                 {session.role === "bank_ops_viewer" ? (
                   <span
                     className="statement-link is-disabled"
-                    style={{
-                      opacity: 0.5,
-                      pointerEvents: "none",
-                      cursor: "not-allowed",
-                    }}
+                    style={{ opacity: 0.5, pointerEvents: "none", cursor: "not-allowed" }}
                   >
                     {t("statements.actions.download", locale)}
                   </span>
@@ -395,11 +414,7 @@ export default async function StatementDetailPage({
                 ) : (
                   <span
                     className="statement-link is-disabled"
-                    style={{
-                      opacity: 0.5,
-                      pointerEvents: "none",
-                      cursor: "not-allowed",
-                    }}
+                    style={{ opacity: 0.5, pointerEvents: "none", cursor: "not-allowed" }}
                   >
                     {t("statements.actions.reportDispute", locale)}
                   </span>

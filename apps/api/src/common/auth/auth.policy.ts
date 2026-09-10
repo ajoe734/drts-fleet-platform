@@ -419,7 +419,8 @@ export function resolveRouteAuthPolicy(
     }
     if (
       routePath.startsWith("tenant/billing") ||
-      routePath.startsWith("tenant/invoices")
+      routePath.startsWith("tenant/invoices") ||
+      routePath.startsWith("tenant/settlement-statements")
     ) {
       return {
         routeKey: `tenant:billing:${upperMethod}`,
@@ -429,7 +430,7 @@ export function resolveRouteAuthPolicy(
           upperMethod,
         ),
         allowedRealms: baseAllowedRealms("platform", "tenant"),
-        description: "Tenant billing and invoices",
+        description: "Tenant billing, invoices, and settlement statements",
       };
     }
     if (

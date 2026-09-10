@@ -1,19 +1,24 @@
 import { CanvasPill, DataTable, Td, Tr } from "@drts/ui-web";
 import { cookies } from "next/headers";
-import { notFound } from "next/navigation";
 import type { CSSProperties } from "react";
 import {
   CalloutPanel,
   PageHero,
   SurfaceCard,
 } from "@/components/page-primitives";
-import { getBankTenantName, resolveLocale } from "@/lib/demo-tenants";
+import {
+  getBankTenantName,
+  resolveBankDemoTenant,
+  resolveLocale,
+} from "@/lib/demo-tenants";
 import {
   BANK_CONSOLE_ROLE_COOKIE,
   BANK_CONSOLE_SESSION_COOKIE,
   bankConsoleHref,
+  canViewSettlementAmounts,
   getBankConsoleSession,
-  resolveBankPageSession,
+  resolveServerSessionRole,
+  type BankConsoleRole,
 } from "@/lib/session";
 import { tenantDisplayText } from "@/lib/tenant-display";
 import { loadBankStatementsData } from "@/lib/bank-dev-read-models";
@@ -64,6 +69,20 @@ function formatCurrency(amount: number, locale: Locale) {
   }).format(amount);
 }
 
+// Non-digit placeholder so a restricted role can never infer a real figure's
+// length or shape from the rendered HTML.
+const RESTRICTED_AMOUNT_PLACEHOLDER = "••••••";
+
+function formatAmountForRole(
+  amount: number,
+  locale: Locale,
+  role: BankConsoleRole,
+) {
+  return canViewSettlementAmounts(role)
+    ? formatCurrency(amount, locale)
+    : RESTRICTED_AMOUNT_PLACEHOLDER;
+}
+
 export default async function StatementsPage({
   searchParams,
 }: {
@@ -71,6 +90,7 @@ export default async function StatementsPage({
 }) {
   const resolvedSearchParams = searchParams ? await searchParams : {};
   const locale = resolveLocale(resolvedSearchParams.locale);
+  const tenant = resolveBankDemoTenant(resolvedSearchParams.bank);
   let cookieRole: string | undefined;
   try {
     const cookieStore = await cookies();
@@ -78,27 +98,11 @@ export default async function StatementsPage({
       cookieStore.get(BANK_CONSOLE_SESSION_COOKIE)?.value ||
       cookieStore.get(BANK_CONSOLE_ROLE_COOKIE)?.value;
   } catch {
-    // Missing HTTP cookie context stays unauthenticated.
+    // Fallback for test / non-HTTP contexts
   }
-  const authenticated = resolveBankPageSession(
-    cookieRole,
-    resolvedSearchParams.bank,
-    resolvedSearchParams.role,
-  );
-  if (!authenticated) notFound();
-  if (!authenticated.canReadStatements) {
-    return (
-      <div className="page-shell bank-statements-page">
-        <CalloutPanel
-          title={t("statements.unauthorized.title", locale)}
-          description={t("users.roleCard.bank_ops_viewer", locale)}
-          tone="warning"
-        />
-      </div>
-    );
-  }
-  const tenant = authenticated.bank;
-  const session = getBankConsoleSession(tenant, locale, authenticated.role);
+  const roleParam = one(resolvedSearchParams.role);
+  const sessionRole = resolveServerSessionRole(cookieRole, roleParam).role;
+  const session = getBankConsoleSession(tenant, locale, sessionRole);
   const statementData = await loadBankStatementsData(
     tenant.tenantId,
     session.role,
@@ -167,7 +171,9 @@ export default async function StatementsPage({
         </div>
         <div>
           <span className="eyebrow">{t("statements.strip.total", locale)}</span>
-          <strong>{formatCurrency(totalIssuerPaid, locale)}</strong>
+          <strong>
+            {formatAmountForRole(totalIssuerPaid, locale, session.role)}
+          </strong>
         </div>
       </section>
 
@@ -247,7 +253,7 @@ export default async function StatementsPage({
         />
         <SurfaceCard
           kicker={t("statements.metrics.kicker", locale)}
-          title={formatCurrency(totalIssuerPaid, locale)}
+          title={formatAmountForRole(totalIssuerPaid, locale, session.role)}
           description={t("statements.metrics.issuerPays", locale)}
         />
       </section>
@@ -311,7 +317,11 @@ export default async function StatementsPage({
                 </div>
               </Td>
               <Td mono>
-                {formatCurrency(statement.totalIssuerPayableAmount, locale)}
+                {formatAmountForRole(
+                  statement.totalIssuerPayableAmount,
+                  locale,
+                  session.role,
+                )}
               </Td>
               <Td>
                 <CanvasPill tone={statementStatusTone[statement.status]} dot>

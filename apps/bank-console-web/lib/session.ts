@@ -3,13 +3,13 @@ import {
   verifyIapJwtAssertion,
   type IapJwtPayload,
 } from "@drts/control-plane-auth";
-import type { BankRole as HomeRole } from "@/lib/home-data";
+import type { BankRole as HomeRole } from "./home-data";
 import {
   BANK_DEMO_TENANTS,
   type BankDemoTenant,
   type BankDemoTenantCode,
-} from "@/lib/demo-tenants";
-import { t, type Locale, type TranslationKey } from "@/lib/translations";
+} from "./demo-tenants";
+import { t, type Locale, type TranslationKey } from "./translations";
 
 export type BankConsoleRole =
   | "bank_program_admin"
@@ -180,7 +180,21 @@ export function resolveServerSessionRole(
     }
   }
 
-  const role = cookieRole ?? queryRole ?? DEFAULT_ROLE;
+  let role = cookieRole ?? queryRole ?? DEFAULT_ROLE;
+  // An unauthenticated visitor (no valid signed session cookie) must never
+  // be able to buy a privileged *display* role -- and therefore privileged
+  // rendering (settlement amounts, user management) -- by supplying
+  // ?role=bank_finance/bank_program_admin alone. Downgrading here, rather
+  // than only gating export authorization below, keeps every render call
+  // site (statements HTML, statement detail HTML, users HTML) safe by
+  // construction instead of requiring each one to remember an isAuthenticated
+  // check (R15).
+  if (
+    !isAuthenticated &&
+    (role === "bank_finance" || role === "bank_program_admin")
+  ) {
+    role = DEFAULT_ROLE;
+  }
   const hasAuthorizedCookie =
     cookieRole === "bank_finance" || cookieRole === "bank_program_admin";
   const isAuthorizedForExport =
@@ -196,6 +210,16 @@ export function resolveServerSessionRole(
   };
 }
 
+// Settlement amounts (statement totals, per-trip fare/subsidy/paid figures)
+// are finance data, not operational data. Ops viewers get read-only
+// operational monitoring but no amount visibility, matching the
+// users.roleCard.bank_ops_viewer policy copy. Keep this the single source of
+// truth for amount visibility across statements HTML, CSV export, and
+// artifact downloads so the three surfaces cannot diverge (R15).
+export function canViewSettlementAmounts(role: BankConsoleRole): boolean {
+  return role === "bank_program_admin" || role === "bank_finance";
+}
+
 export function toHomeRole(role: BankConsoleRole): HomeRole {
   if (role === "bank_finance") {
     return "finance";
@@ -204,39 +228,6 @@ export function toHomeRole(role: BankConsoleRole): HomeRole {
     return "ops";
   }
   return "admin";
-}
-
-/** Resolve protected page identity from the signed cookie, never URL defaults. */
-export function resolveBankPageSession(
-  cookieValue: string | null | undefined,
-  requestedBank: string | string[] | null | undefined,
-  requestedRole: string | string[] | null | undefined,
-): {
-  bank: BankDemoTenant;
-  role: BankConsoleRole;
-  canReadStatements: boolean;
-} | null {
-  const bankCode = Array.isArray(requestedBank)
-    ? requestedBank[0]
-    : requestedBank;
-  const role = Array.isArray(requestedRole) ? requestedRole[0] : requestedRole;
-  const session = resolveServerSessionRole(cookieValue, role);
-  if (
-    !session.isAuthenticated ||
-    session.isForged ||
-    session.isTampered ||
-    !session.bankCode ||
-    !Object.hasOwn(BANK_DEMO_TENANTS, session.bankCode) ||
-    (bankCode != null && bankCode !== session.bankCode)
-  ) {
-    return null;
-  }
-  return {
-    bank: BANK_DEMO_TENANTS[session.bankCode as BankDemoTenantCode],
-    role: session.role,
-    // HTML uses the same policy already applied to CSV and signed downloads.
-    canReadStatements: session.isAuthorizedForExport,
-  };
 }
 
 export function getBankConsoleSession(

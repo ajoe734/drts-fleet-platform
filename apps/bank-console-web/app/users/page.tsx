@@ -1,14 +1,17 @@
 import type { CSSProperties } from "react";
 import Link from "next/link";
 import { cookies } from "next/headers";
-import { notFound } from "next/navigation";
-import { resolveLocale, type BankDemoTenant } from "@/lib/demo-tenants";
+import {
+  resolveBankDemoTenant,
+  resolveLocale,
+  type BankDemoTenant,
+} from "@/lib/demo-tenants";
 import { loadBankUsersData } from "@/lib/bank-dev-read-models";
 import {
-  BANK_CONSOLE_SESSION_COOKIE,
   BANK_CONSOLE_ROLE_COOKIE,
+  BANK_CONSOLE_SESSION_COOKIE,
   getBankConsoleSession,
-  resolveBankPageSession,
+  resolveServerSessionRole,
   type BankConsoleRole,
 } from "@/lib/session";
 import { t, type Locale } from "@/lib/translations";
@@ -24,6 +27,10 @@ const ROLE_CARDS: BankRole[] = [
 ];
 
 const FILTERS: UserFilter[] = ["all", "active", "invited", "suspended"];
+
+function one(value: string | string[] | undefined): string | undefined {
+  return Array.isArray(value) ? value[0] : value;
+}
 
 function roleLabel(role: BankRole, locale: Locale) {
   return t(`users.role.${role}`, locale);
@@ -41,7 +48,10 @@ function filterLabel(filter: UserFilter, locale: Locale) {
   return t(`users.filter.${filter}`, locale);
 }
 
-function getCount(filter: UserFilter, users: Array<{ status: UserStatus }>) {
+function getCount(
+  filter: UserFilter,
+  users: Array<{ status: UserStatus }>,
+) {
   if (filter === "all") {
     return users.length;
   }
@@ -68,6 +78,15 @@ function getActionHref(
   return `/users?${params.toString()}`;
 }
 
+function emailForTenant(email: string, tenant: BankDemoTenant) {
+  const [local] = email.split("@");
+  const domain =
+    tenant.code === "acme"
+      ? "acme.example"
+      : `${tenant.issuerCode.toLowerCase()}.demo`;
+  return `${local}@${domain}`;
+}
+
 export default async function UsersPage({
   searchParams,
 }: {
@@ -80,18 +99,19 @@ export default async function UsersPage({
 }) {
   const params = await searchParams;
   const locale = resolveLocale(params?.locale);
-  const cookieStore = await cookies();
-  const cookieValue =
-    cookieStore.get(BANK_CONSOLE_SESSION_COOKIE)?.value ||
-    cookieStore.get(BANK_CONSOLE_ROLE_COOKIE)?.value;
-  const authenticated = resolveBankPageSession(
-    cookieValue,
-    params?.bank,
-    params?.role,
-  );
-  if (!authenticated) notFound();
-  const tenant = authenticated.bank;
-  const session = getBankConsoleSession(tenant, locale, authenticated.role);
+  const tenant = resolveBankDemoTenant(params?.bank);
+  let cookieRole: string | undefined;
+  try {
+    const cookieStore = await cookies();
+    cookieRole =
+      cookieStore.get(BANK_CONSOLE_SESSION_COOKIE)?.value ||
+      cookieStore.get(BANK_CONSOLE_ROLE_COOKIE)?.value;
+  } catch {
+    // Fallback for test / non-HTTP contexts
+  }
+  const roleParam = one(params?.role);
+  const sessionRole = resolveServerSessionRole(cookieRole, roleParam).role;
+  const session = getBankConsoleSession(tenant, locale, sessionRole);
   const userData = await loadBankUsersData(tenant.tenantId, session.role);
   const issuerTokens = tenant.template.tokens.dark;
   const activeFilter = FILTERS.includes(params?.status as UserFilter)
@@ -200,7 +220,9 @@ export default async function UsersPage({
                         <strong>{user.name}</strong>
                       </div>
                     </td>
-                    <td className="mono-cell">{user.email}</td>
+                    <td className="mono-cell">
+                      {emailForTenant(user.email, tenant)}
+                    </td>
                     <td>
                       <span className={`role-pill role-${user.role}`}>
                         {roleLabel(user.role, locale)}
