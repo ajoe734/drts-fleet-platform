@@ -1,0 +1,528 @@
+name: Host Acceptance (SR-HOST-FE-001-ACCEPTANCE-RUNNER)
+
+# Dedicated, manually-dispatchable acceptance runner supplying the real
+# HTTP/SQL and real-browser acceptance evidence that SR-HOST-FE-001's own
+# candidate never produced (its UAT doc explicitly admits only mocked loader
+# unit tests, no live backend, no browser rendering — see
+# .local/worker-recovery-20260910/host-acceptance-audit/independent-review.md
+# for the audit that established this gap). Root AppModule does not register
+# HostViewModule (verified by reading apps/api/src/app.module.ts's imports
+# array directly) — that wiring remains SR-WIRE-001's scope. This workflow
+# therefore boots an isolated Nest composition of the real, unmodified
+# HostViewModule (see tests/e2e/system-remediation/sr-host-fe-001/
+# host-acceptance-app.ts) rather than the full AppModule, and labels every
+# result as module-level evidence, not full-application wiring evidence.
+#
+# Two independent jobs:
+#   api-sql-acceptance   — real HTTP against the isolated composition, real
+#                           migrated Postgres, real SQL round trips.
+#   browser-acceptance   — real Chromium against the real, built
+#                           fleet-partner-portal-web Next.js server, pointed
+#                           at the same isolated Host API, on its own
+#                           dedicated Postgres.
+#
+# Neither job runs on this project's VM (no product dev/preview/HTTP/browser
+# server or Docker infra permitted there); both run entirely on
+# GitHub-hosted runners.
+
+on:
+  workflow_dispatch:
+    inputs:
+      candidate_sha:
+        description: "Immutable candidate commit SHA to verify (full 40-char SHA); leave blank to use the dispatch ref's HEAD"
+        required: false
+        default: ""
+  push:
+    branches:
+      - claude2/sr-host-fe-001-acceptance-runner
+      - claude/sr-host-fe-001-acceptance-runner
+    paths:
+      - .github/workflows/host-acceptance.yml
+      - tools/ci/test_host_acceptance_workflow.py
+      - tests/e2e/system-remediation/sr-host-fe-001/**
+      - docs/04-uat/system-remediation-20260906/host-acceptance-runner.md
+
+permissions:
+  contents: read
+
+concurrency:
+  group: host-acceptance-${{ github.event.inputs.candidate_sha || github.sha }}
+  cancel-in-progress: false
+
+env:
+  CI: true
+
+jobs:
+  api-sql-acceptance:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    services:
+      postgres:
+        image: postgis/postgis:16-3.4
+        env:
+          POSTGRES_DB: drts_fleet_platform
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      DATABASE_URL: postgresql://postgres:postgres@localhost:5432/drts_fleet_platform
+      HOST_ACCEPTANCE_EVIDENCE_PATH: ${{ github.workspace }}/.artifacts/host-acceptance/api/evidence-http-sql.json
+      # See the comment on the `push:` CANDIDATE_SHA validation step below for
+      # why this is routed through env rather than interpolated directly.
+      CANDIDATE_SHA: ${{ github.event.inputs.candidate_sha || github.sha }}
+      WORKFLOW_SHA: ${{ github.sha }}
+    steps:
+      - name: Validate candidate_sha input
+        run: |
+          sha="$CANDIDATE_SHA"
+          if ! [[ "$sha" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "::error::candidate_sha must be a full 40-character commit SHA, got: $sha"
+            exit 1
+          fi
+
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.inputs.candidate_sha || github.sha }}
+          fetch-depth: 0
+
+      - name: Verify checkout resolved the exact immutable candidate
+        run: |
+          resolved="$(git rev-parse HEAD)"
+          expected="$CANDIDATE_SHA"
+          echo "Resolved HEAD: $resolved"
+          echo "Expected candidate: $expected"
+          if [ "$resolved" != "$expected" ]; then
+            echo "::error::Checked-out HEAD ($resolved) does not match the requested candidate ($expected)."
+            exit 1
+          fi
+
+      - name: Prepare evidence directory
+        run: mkdir -p .artifacts/host-acceptance/api
+
+      - uses: pnpm/action-setup@v4
+        with: { version: 10.33.0, run_install: false }
+      - uses: actions/setup-node@v4
+        with:
+          {
+            node-version: 22,
+            cache: pnpm,
+            cache-dependency-path: pnpm-lock.yaml,
+          }
+
+      - name: Install dependencies
+        id: install
+        run: |
+          set -o pipefail
+          pnpm install --frozen-lockfile 2>&1 | tee -a .artifacts/host-acceptance/api/execution-log.txt
+
+      - name: Apply migrations to the dedicated acceptance database
+        id: migrate
+        run: |
+          set -o pipefail
+          pnpm db:migrate 2>&1 | tee -a .artifacts/host-acceptance/api/execution-log.txt
+
+      - name: Run real HTTP + SQL Host acceptance harness
+        id: harness
+        env:
+          DATABASE_URL: postgresql://postgres:postgres@localhost:5432/drts_fleet_platform
+        run: |
+          set -o pipefail
+          pnpm exec vitest run \
+            tests/e2e/system-remediation/sr-host-fe-001/host-api-sql-acceptance.test.ts \
+            --no-file-parallelism --maxConcurrency=1 \
+            --reporter=default --reporter=json \
+            --outputFile.json=.artifacts/host-acceptance/api/test-report.json \
+            2>&1 | tee -a .artifacts/host-acceptance/api/execution-log.txt
+
+      - name: Gate on zero skips and every test passed
+        id: gate
+        if: always()
+        run: |
+          python3 - <<'PY_GATE'
+          import json
+          from pathlib import Path
+
+          report_path = Path(".artifacts/host-acceptance/api/test-report.json")
+          if not report_path.exists():
+              raise SystemExit(
+                  "Host API/SQL acceptance gate: no test report was produced "
+                  "(the harness likely failed before vitest could write one)."
+              )
+          report = json.loads(report_path.read_text())
+          total = report.get("numTotalTests", 0)
+          passed = report.get("numPassedTests", 0)
+          pending = report.get("numPendingTests", 0)
+          if total < 1 or passed != total or pending or not report.get("success"):
+              raise SystemExit(
+                  f"Host API/SQL acceptance incomplete: total={total}, "
+                  f"passed={passed}, pending/skipped={pending}, "
+                  f"success={report.get('success')}. Every test must pass "
+                  "with zero skips."
+              )
+          print(f"Host API/SQL acceptance: {passed}/{total} passed, zero skips.")
+          PY_GATE
+
+      - name: Record run status
+        if: always()
+        env:
+          INSTALL_OUTCOME: ${{ steps.install.outcome }}
+          MIGRATE_OUTCOME: ${{ steps.migrate.outcome }}
+          HARNESS_OUTCOME: ${{ steps.harness.outcome }}
+          GATE_OUTCOME: ${{ steps.gate.outcome }}
+        run: |
+          python3 - <<'PY_STATUS'
+          import json
+          import os
+          from pathlib import Path
+
+          report_path = Path(".artifacts/host-acceptance/api/test-report.json")
+          status_path = Path(".artifacts/host-acceptance/api/run-status.json")
+          status_path.parent.mkdir(parents=True, exist_ok=True)
+
+          install_outcome = os.environ.get("INSTALL_OUTCOME", "unknown")
+          migrate_outcome = os.environ.get("MIGRATE_OUTCOME", "unknown")
+          harness_outcome = os.environ.get("HARNESS_OUTCOME", "unknown")
+          gate_outcome = os.environ.get("GATE_OUTCOME", "unknown")
+
+          if (
+              install_outcome == "success"
+              and migrate_outcome == "success"
+              and harness_outcome == "success"
+              and gate_outcome == "success"
+              and report_path.exists()
+          ):
+              status = "passed"
+          elif install_outcome != "success" or migrate_outcome != "success":
+              status = "not_run"
+          else:
+              status = "failed"
+
+          status_path.write_text(json.dumps({
+              "candidate_sha": os.environ.get("CANDIDATE_SHA", ""),
+              "workflow_sha": os.environ.get("WORKFLOW_SHA", ""),
+              "status": status,
+              "install_outcome": install_outcome,
+              "migrate_outcome": migrate_outcome,
+              "harness_outcome": harness_outcome,
+              "gate_outcome": gate_outcome,
+              "report_present": report_path.exists(),
+          }, indent=2) + "\n")
+          print(f"Run status recorded: {status}")
+          PY_STATUS
+
+      - name: Upload execution log, test report, evidence, and run status
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: host-acceptance-api-${{ github.event.inputs.candidate_sha || github.sha }}
+          path: |
+            .artifacts/host-acceptance/api/execution-log.txt
+            .artifacts/host-acceptance/api/test-report.json
+            .artifacts/host-acceptance/api/evidence-http-sql.json
+            .artifacts/host-acceptance/api/run-status.json
+          if-no-files-found: warn
+
+  browser-acceptance:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    services:
+      postgres:
+        image: postgis/postgis:16-3.4
+        env:
+          POSTGRES_DB: drts_fleet_platform
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      DATABASE_URL: postgresql://postgres:postgres@localhost:5432/drts_fleet_platform
+      HOST_ACCEPTANCE_API_PORT: 4101
+      HOST_ACCEPTANCE_PORTAL_URL: http://127.0.0.1:3007
+      HOST_ACCEPTANCE_BROWSER_EVIDENCE_PATH: ${{ github.workspace }}/.artifacts/host-acceptance/browser/evidence-browser.json
+      CANDIDATE_SHA: ${{ github.event.inputs.candidate_sha || github.sha }}
+      WORKFLOW_SHA: ${{ github.sha }}
+    steps:
+      - name: Validate candidate_sha input
+        run: |
+          sha="$CANDIDATE_SHA"
+          if ! [[ "$sha" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "::error::candidate_sha must be a full 40-character commit SHA, got: $sha"
+            exit 1
+          fi
+
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.inputs.candidate_sha || github.sha }}
+          fetch-depth: 0
+
+      - name: Verify checkout resolved the exact immutable candidate
+        run: |
+          resolved="$(git rev-parse HEAD)"
+          expected="$CANDIDATE_SHA"
+          if [ "$resolved" != "$expected" ]; then
+            echo "::error::Checked-out HEAD ($resolved) does not match the requested candidate ($expected)."
+            exit 1
+          fi
+
+      - name: Prepare evidence directory
+        run: mkdir -p .artifacts/host-acceptance/browser test-results
+
+      - uses: pnpm/action-setup@v4
+        with: { version: 10.33.0, run_install: false }
+      - uses: actions/setup-node@v4
+        with:
+          {
+            node-version: 22,
+            cache: pnpm,
+            cache-dependency-path: pnpm-lock.yaml,
+          }
+
+      - name: Install dependencies
+        id: install
+        run: |
+          set -o pipefail
+          pnpm install --frozen-lockfile 2>&1 | tee -a .artifacts/host-acceptance/browser/execution-log.txt
+
+      - name: Install Playwright Chromium
+        id: playwright_install
+        run: |
+          set -o pipefail
+          pnpm exec playwright install --with-deps chromium 2>&1 | tee -a .artifacts/host-acceptance/browser/execution-log.txt
+
+      - name: Build workspace packages consumed by fleet-partner-portal-web
+        # Matches the established, already-working webServer command in
+        # playwright.fleet-partner-portal.config.ts. @drts/shared-types and
+        # @drts/ui-web resolve straight to their TS source (`main`/`exports`
+        # point at src/, and their own "build" script is a no-emit
+        # typecheck), and @drts/api-client has no "build" script at all
+        # (same source-resolution shape) — Next's `transpilePackages`
+        # handles all three directly from source. Only @drts/contracts and
+        # @drts/control-plane-auth resolve through a real emitted `dist/`,
+        # and @drts/ui-tokens builds via tsup for the same reason.
+        id: build_packages
+        run: |
+          set -o pipefail
+          {
+            pnpm --filter @drts/contracts build &&
+            pnpm --filter @drts/control-plane-auth build &&
+            pnpm --filter @drts/ui-tokens build
+          } 2>&1 | tee -a .artifacts/host-acceptance/browser/execution-log.txt
+
+      - name: Build fleet-partner-portal-web (production)
+        id: build_portal
+        run: |
+          set -o pipefail
+          pnpm --filter @drts/fleet-partner-portal-web build 2>&1 | tee -a .artifacts/host-acceptance/browser/execution-log.txt
+
+      - name: Apply migrations to the dedicated acceptance database
+        id: migrate
+        run: |
+          set -o pipefail
+          pnpm db:migrate 2>&1 | tee -a .artifacts/host-acceptance/browser/execution-log.txt
+
+      - name: Start isolated Host acceptance API server
+        id: start_api
+        run: |
+          set -o pipefail
+          (
+            cd apps/api
+            pnpm exec tsx ../../tests/e2e/system-remediation/sr-host-fe-001/host-acceptance-server.ts \
+              > ../../.artifacts/host-acceptance/browser/api-server.log 2>&1 &
+            echo $! > ../../.artifacts/host-acceptance/browser/api-server.pid
+          )
+          for i in $(seq 1 60); do
+            code="$(curl -s -o /dev/null -w '%{http_code}' "http://127.0.0.1:${HOST_ACCEPTANCE_API_PORT}/api/host/vehicles" || echo "000")"
+            if [ "$code" != "000" ]; then
+              echo "Host acceptance API responded with HTTP $code after ${i}s"
+              exit 0
+            fi
+            sleep 1
+          done
+          echo "::error::Host acceptance API did not start within 60s"
+          cat .artifacts/host-acceptance/browser/api-server.log || true
+          exit 1
+
+      - name: Start fleet-partner-portal-web (production)
+        id: start_portal
+        env:
+          DRTS_API_URL: http://127.0.0.1:4101
+        run: |
+          set -o pipefail
+          (
+            cd apps/fleet-partner-portal-web
+            DRTS_API_URL="$DRTS_API_URL" pnpm exec next start --port 3007 \
+              > ../../.artifacts/host-acceptance/browser/portal-server.log 2>&1 &
+            echo $! > ../../.artifacts/host-acceptance/browser/portal-server.pid
+          )
+          for i in $(seq 1 90); do
+            code="$(curl -s -o /dev/null -w '%{http_code}' "${HOST_ACCEPTANCE_PORTAL_URL}/host/vehicles" || echo "000")"
+            if [ "$code" != "000" ]; then
+              echo "fleet-partner-portal-web responded with HTTP $code after ${i}s"
+              exit 0
+            fi
+            sleep 1
+          done
+          echo "::error::fleet-partner-portal-web did not start within 90s"
+          cat .artifacts/host-acceptance/browser/portal-server.log || true
+          exit 1
+
+      - name: Run real browser Host acceptance suite
+        id: harness
+        run: |
+          set -o pipefail
+          pnpm exec playwright test \
+            -c playwright.system-remediation.config.ts \
+            tests/e2e/system-remediation/sr-host-fe-001/host-browser-acceptance.spec.ts \
+            2>&1 | tee -a .artifacts/host-acceptance/browser/execution-log.txt
+
+      - name: Stop background servers
+        if: always()
+        run: |
+          for pidfile in .artifacts/host-acceptance/browser/api-server.pid .artifacts/host-acceptance/browser/portal-server.pid; do
+            if [ -f "$pidfile" ]; then
+              kill "$(cat "$pidfile")" 2>/dev/null || true
+            fi
+          done
+
+      - name: Gate on zero skips and every test passed
+        id: gate
+        if: always()
+        run: |
+          python3 - <<'PY_GATE'
+          import json
+          from pathlib import Path
+
+          report_path = Path("test-results/system-remediation-report.json")
+          if not report_path.exists():
+              raise SystemExit(
+                  "Host browser acceptance gate: no Playwright JSON report was "
+                  "produced (the harness likely failed before it could write one)."
+              )
+          report = json.loads(report_path.read_text())
+
+          def iter_specs(suite):
+              for spec in suite.get("specs", []):
+                  yield spec
+              for child in suite.get("suites", []):
+                  yield from iter_specs(child)
+
+          specs = [spec for suite in report.get("suites", []) for spec in iter_specs(suite)]
+          if not specs:
+              raise SystemExit("Host browser acceptance gate: zero specs found in report.")
+
+          total = 0
+          passed = 0
+          skipped = 0
+          for spec in specs:
+              for test in spec.get("tests", []):
+                  total += 1
+                  results = test.get("results", [])
+                  status = results[-1].get("status") if results else None
+                  if status == "passed":
+                      passed += 1
+                  elif status in ("skipped", None):
+                      skipped += 1
+
+          if total < 1 or skipped or passed != total:
+              raise SystemExit(
+                  f"Host browser acceptance incomplete: total={total}, "
+                  f"passed={passed}, skipped={skipped}. Every test must pass "
+                  "with zero skips."
+              )
+          print(f"Host browser acceptance: {passed}/{total} passed, zero skips.")
+          PY_GATE
+
+      - name: Record run status
+        if: always()
+        env:
+          INSTALL_OUTCOME: ${{ steps.install.outcome }}
+          PLAYWRIGHT_INSTALL_OUTCOME: ${{ steps.playwright_install.outcome }}
+          BUILD_PACKAGES_OUTCOME: ${{ steps.build_packages.outcome }}
+          BUILD_PORTAL_OUTCOME: ${{ steps.build_portal.outcome }}
+          MIGRATE_OUTCOME: ${{ steps.migrate.outcome }}
+          START_API_OUTCOME: ${{ steps.start_api.outcome }}
+          START_PORTAL_OUTCOME: ${{ steps.start_portal.outcome }}
+          HARNESS_OUTCOME: ${{ steps.harness.outcome }}
+          GATE_OUTCOME: ${{ steps.gate.outcome }}
+        run: |
+          python3 - <<'PY_STATUS'
+          import json
+          import os
+          from pathlib import Path
+
+          report_path = Path("test-results/system-remediation-report.json")
+          status_path = Path(".artifacts/host-acceptance/browser/run-status.json")
+          status_path.parent.mkdir(parents=True, exist_ok=True)
+
+          outcomes = {
+              key: os.environ.get(key, "unknown")
+              for key in [
+                  "INSTALL_OUTCOME",
+                  "PLAYWRIGHT_INSTALL_OUTCOME",
+                  "BUILD_PACKAGES_OUTCOME",
+                  "BUILD_PORTAL_OUTCOME",
+                  "MIGRATE_OUTCOME",
+                  "START_API_OUTCOME",
+                  "START_PORTAL_OUTCOME",
+                  "HARNESS_OUTCOME",
+                  "GATE_OUTCOME",
+              ]
+          }
+          setup_ok = all(
+              outcomes[key] == "success"
+              for key in [
+                  "INSTALL_OUTCOME",
+                  "PLAYWRIGHT_INSTALL_OUTCOME",
+                  "BUILD_PACKAGES_OUTCOME",
+                  "BUILD_PORTAL_OUTCOME",
+                  "MIGRATE_OUTCOME",
+                  "START_API_OUTCOME",
+                  "START_PORTAL_OUTCOME",
+              ]
+          )
+          if (
+              setup_ok
+              and outcomes["HARNESS_OUTCOME"] == "success"
+              and outcomes["GATE_OUTCOME"] == "success"
+              and report_path.exists()
+          ):
+              status = "passed"
+          elif not setup_ok:
+              status = "not_run"
+          else:
+              status = "failed"
+
+          status_path.write_text(json.dumps({
+              "candidate_sha": os.environ.get("CANDIDATE_SHA", ""),
+              "workflow_sha": os.environ.get("WORKFLOW_SHA", ""),
+              "status": status,
+              **{k.lower(): v for k, v in outcomes.items()},
+              "report_present": report_path.exists(),
+          }, indent=2) + "\n")
+          print(f"Run status recorded: {status}")
+          PY_STATUS
+
+      - name: Upload execution log, Playwright report, screenshots, evidence, and run status
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: host-acceptance-browser-${{ github.event.inputs.candidate_sha || github.sha }}
+          path: |
+            .artifacts/host-acceptance/browser/execution-log.txt
+            .artifacts/host-acceptance/browser/api-server.log
+            .artifacts/host-acceptance/browser/portal-server.log
+            .artifacts/host-acceptance/browser/evidence-browser.json
+            .artifacts/host-acceptance/browser/run-status.json
+            test-results/
+          if-no-files-found: warn
