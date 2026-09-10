@@ -2191,6 +2191,44 @@ def file_iso_mtime(path: Path) -> str | None:
     return datetime.fromtimestamp(path.stat().st_mtime, tz=timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
 
 
+def _agy_stream_productive_event_count(content: str) -> int | None:
+    """Count agy `--output-format stream-json` events that are real turn progress.
+
+    agy's stream floods the log with `step_update` events as the turn runs,
+    including repeated `error_message` steps while it retries/stalls
+    internally; those advance the log's mtime without the turn actually
+    moving forward. Returns ``None`` when the log has no agy event-shaped
+    JSON at all, so callers fall back to plain mtime-based visibility for
+    every other adapter's log format; otherwise returns a count that only
+    grows on a non-`error_message` `step_update` or the terminal `result`
+    event, so `update_from_log` can tell transport visibility (bytes were
+    appended) apart from productive progress (the turn advanced).
+    """
+    found_schema = False
+    count = 0
+    for line in content.splitlines():
+        line = line.strip()
+        if not line.startswith("{"):
+            continue
+        try:
+            payload = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if not isinstance(payload, dict):
+            continue
+        event = payload.get("event")
+        if event == "step_update":
+            found_schema = True
+            step = payload.get("step_update")
+            step_type = str((step or {}).get("step_type") or "").strip()
+            if step_type != "error_message":
+                count += 1
+        elif event == "result":
+            found_schema = True
+            count += 1
+    return count if found_schema else None
+
+
 def update_from_log(config: dict[str, Any], worker: dict[str, Any]) -> None:
     log_path_value = worker.get("log_path")
     if not log_path_value:
@@ -2199,11 +2237,20 @@ def update_from_log(config: dict[str, Any], worker: dict[str, Any]) -> None:
     if not log_path.exists():
         return
     mtime = file_iso_mtime(log_path)
-    if mtime and (not worker.get("last_event_at") or mtime > worker.get("last_event_at", "")):
-        worker["last_event_at"] = mtime
     try:
         content = log_path.read_text(encoding="utf-8", errors="ignore")
     except OSError:
+        content = None
+    if mtime and (not worker.get("last_event_at") or mtime > worker.get("last_event_at", "")):
+        productive_count = _agy_stream_productive_event_count(content) if content is not None else None
+        if productive_count is None:
+            worker["last_event_at"] = mtime
+        else:
+            previous_count = int(worker.get("_agy_stream_productive_event_count") or 0)
+            if productive_count > previous_count:
+                worker["last_event_at"] = mtime
+            worker["_agy_stream_productive_event_count"] = productive_count
+    if content is None:
         return
     for line in content.splitlines():
         line = line.strip()

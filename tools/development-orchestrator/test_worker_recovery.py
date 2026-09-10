@@ -1,8 +1,10 @@
 #!/usr/bin/env python3
 from __future__ import annotations
 
+import json
 import tempfile
 import unittest
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from unittest import mock
 
@@ -1354,3 +1356,246 @@ class PollWorkersRecoveryTests(EvidenceOutputIsolation, unittest.TestCase):
         self.assertEqual(state["queue"]["events"]["evt-1"]["status"], "completed")
         terminate_worker_pid.assert_called_once_with(2222)
         self.assertEqual(write_activity_log.call_args.args[1]["type"], "worker_superseded")
+
+    def _agy_config(self) -> dict:
+        return {
+            "schema": {
+                "tasks_path": "tasks",
+                "task_id_field": "id",
+                "assignee_field": "owner",
+                "reviewer_field": "reviewer",
+            },
+            "supervisor": {"stall_after_seconds": 300},
+            "ready_dispatcher": {
+                "review_statuses": ["review"],
+                "owned_statuses": ["in_progress", "todo"],
+                "done_statuses": ["done"],
+                "active_worker_statuses": ["running", "waiting_approval", "suspended_approval", "manual_pending", "retry_backoff", "stalled"],
+            },
+            "providers": {},
+            "agents": {"antigravity": {"id": "antigravity", "display_name": "Antigravity"}},
+        }
+
+    def _agy_step_update(self, index: int, step_type: str) -> str:
+        return json.dumps({
+            "event": "step_update",
+            "step_update": {
+                "conversation_id": "ff862b49-a393-42f9-a7d1-84cf1951bc45",
+                "step_index": index,
+                "state": "DONE",
+                "step_type": step_type,
+                "duration_seconds": 0,
+            },
+        })
+
+    def _agy_result(self, status: str, *, error: str = "", response: str = "") -> str:
+        return json.dumps({
+            "event": "result",
+            "result": {
+                "conversation_id": "ff862b49-a393-42f9-a7d1-84cf1951bc45",
+                "status": status,
+                "response": response,
+                "error": error,
+                "duration_seconds": 99.1,
+                "num_turns": 1,
+                "usage": {"input_tokens": 0, "output_tokens": 0, "thinking_tokens": 0, "cache_read_tokens": 0, "total_tokens": 0},
+            },
+        })
+
+    def test_repeated_agy_error_events_do_not_recover_a_stalled_worker(self) -> None:
+        """Live evidence: enabling agy's stream-json floods the log with repeated
+        step_update/error_message noise while the turn is stuck retrying. That
+        noise keeps the log's mtime moving, but it is not the turn making
+        progress, so it must not un-stall the worker or reset its stall clock.
+        """
+        with tempfile.TemporaryDirectory() as tmpdir:
+            log_path = Path(tmpdir) / "agy.log"
+            log_path.write_text(
+                "\n".join(self._agy_step_update(i, "error_message") for i in range(6)),
+                encoding="utf-8",
+            )
+            # Recent enough that this poll's job is only to decide whether the
+            # noise recovers the worker, not to also cross the extended-stall
+            # termination threshold checked further down poll_workers.
+            recent = (datetime.now(timezone.utc) - timedelta(seconds=120)).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+            state = {
+                "queue": {"events": {"evt-1": {"status": "started"}}},
+                "workers": {
+                    "run-1": {
+                        "run_id": "run-1",
+                        "task_id": "AGY-001",
+                        "provider": "antigravity",
+                        "agent_id": "antigravity",
+                        "status": "stalled",
+                        "queue_event_id": "evt-1",
+                        "pid": 1234,
+                        "log_path": str(log_path),
+                        "last_event_at": recent,
+                    }
+                },
+            }
+            status = {"tasks": [{"id": "AGY-001", "status": "in_progress", "owner": "Antigravity", "reviewer": "Codex"}]}
+
+            with (
+                mock.patch.object(supervisor, "load_approval_state", return_value={"pending": [], "history": []}),
+                mock.patch.object(supervisor, "load_status", return_value=status),
+                mock.patch.object(supervisor, "load_provider_report", return_value={}),
+                mock.patch.object(supervisor, "retry_due_workers", return_value=False),
+                mock.patch.object(supervisor, "pid_is_alive", return_value=True),
+                mock.patch.object(supervisor, "write_activity_log") as write_activity_log,
+            ):
+                changed = supervisor.poll_workers(self._agy_config(), state)
+
+        worker = state["workers"]["run-1"]
+        self.assertEqual(worker["status"], "stalled")
+        self.assertEqual(worker["last_event_at"], recent)
+        self.assertFalse(changed)
+        recovered = [
+            entry for entry in write_activity_log.call_args_list
+            if entry.args[1].get("type") == "worker_recovered"
+        ]
+        self.assertEqual(recovered, [])
+
+    def test_productive_agy_stream_event_recovers_a_stalled_worker(self) -> None:
+        """A real (non-error_message) step_update is the turn actually moving,
+        so it must still un-stall the worker the same way any other adapter's
+        log growth does.
+        """
+        with tempfile.TemporaryDirectory() as tmpdir:
+            log_path = Path(tmpdir) / "agy.log"
+            log_path.write_text(
+                "\n".join([
+                    self._agy_step_update(0, "user_input"),
+                    self._agy_step_update(1, "agent_response"),
+                ]),
+                encoding="utf-8",
+            )
+            state = {
+                "queue": {"events": {"evt-1": {"status": "started"}}},
+                "workers": {
+                    "run-1": {
+                        "run_id": "run-1",
+                        "task_id": "AGY-002",
+                        "provider": "antigravity",
+                        "agent_id": "antigravity",
+                        "status": "stalled",
+                        "queue_event_id": "evt-1",
+                        "pid": 1234,
+                        "log_path": str(log_path),
+                        "last_event_at": "2026-04-06T14:20:00Z",
+                    }
+                },
+            }
+            status = {"tasks": [{"id": "AGY-002", "status": "in_progress", "owner": "Antigravity", "reviewer": "Codex"}]}
+
+            with (
+                mock.patch.object(supervisor, "load_approval_state", return_value={"pending": [], "history": []}),
+                mock.patch.object(supervisor, "load_status", return_value=status),
+                mock.patch.object(supervisor, "load_provider_report", return_value={}),
+                mock.patch.object(supervisor, "retry_due_workers", return_value=False),
+                mock.patch.object(supervisor, "pid_is_alive", return_value=True),
+                mock.patch.object(supervisor, "write_activity_log") as write_activity_log,
+            ):
+                changed = supervisor.poll_workers(self._agy_config(), state)
+
+        self.assertTrue(changed)
+        worker = state["workers"]["run-1"]
+        self.assertEqual(worker["status"], "running")
+        self.assertGreater(worker["last_event_at"], "2026-04-06T14:20:00Z")
+        self.assertEqual(write_activity_log.call_args.args[1]["type"], "worker_recovered")
+
+    def test_quiet_live_agy_process_leaves_worker_state_unchanged(self) -> None:
+        """No new bytes at all (the process is alive but genuinely silent, not
+        just noisy) must not be confused with either recovery or fresh stall
+        accounting.
+        """
+        with tempfile.TemporaryDirectory() as tmpdir:
+            log_path = Path(tmpdir) / "agy.log"
+            log_path.write_text(self._agy_step_update(0, "user_input"), encoding="utf-8")
+            last_event_at = supervisor.file_iso_mtime(log_path)
+            state = {
+                "queue": {"events": {"evt-1": {"status": "started"}}},
+                "workers": {
+                    "run-1": {
+                        "run_id": "run-1",
+                        "task_id": "AGY-003",
+                        "provider": "antigravity",
+                        "agent_id": "antigravity",
+                        "status": "running",
+                        "queue_event_id": "evt-1",
+                        "pid": 1234,
+                        "log_path": str(log_path),
+                        "last_event_at": last_event_at,
+                    }
+                },
+            }
+            status = {"tasks": [{"id": "AGY-003", "status": "in_progress", "owner": "Antigravity", "reviewer": "Codex"}]}
+
+            with (
+                mock.patch.object(supervisor, "load_approval_state", return_value={"pending": [], "history": []}),
+                mock.patch.object(supervisor, "load_status", return_value=status),
+                mock.patch.object(supervisor, "load_provider_report", return_value={}),
+                mock.patch.object(supervisor, "retry_due_workers", return_value=False),
+                mock.patch.object(supervisor, "pid_is_alive", return_value=True),
+                mock.patch.object(supervisor, "write_activity_log") as write_activity_log,
+            ):
+                changed = supervisor.poll_workers(self._agy_config(), state)
+
+        worker = state["workers"]["run-1"]
+        self.assertEqual(worker["status"], "running")
+        self.assertEqual(worker["last_event_at"], last_event_at)
+        write_activity_log.assert_not_called()
+        self.assertFalse(changed)
+
+    def test_dead_worker_with_structured_agy_error_and_exit_zero_is_never_completed(self) -> None:
+        """Live probe evidence (.local/worker-recovery-20260910/gemini-probe-result.json):
+        agy exited rc=0 after a stream interruption with an empty response and
+        zero tokens. At the poll_workers level (not just the failure detector
+        in isolation) a dead worker whose log ends in a structured ERROR result
+        must be finalized as failed, never as a clean completion.
+        """
+        with tempfile.TemporaryDirectory() as tmpdir:
+            log_path = Path(tmpdir) / "agy.log"
+            log_path.write_text(
+                "\n".join([
+                    self._agy_step_update(0, "user_input"),
+                    self._agy_step_update(1, "agent_response"),
+                    self._agy_step_update(2, "error_message"),
+                    self._agy_result("ERROR", error="The stream was interrupted. Please continue the task you were working on."),
+                ]),
+                encoding="utf-8",
+            )
+            state = {
+                "queue": {"events": {"evt-1": {"status": "started"}}},
+                "workers": {
+                    "run-1": {
+                        "run_id": "run-1",
+                        "task_id": "AGY-004",
+                        "provider": "antigravity",
+                        "agent_id": "antigravity",
+                        "status": "running",
+                        "queue_event_id": "evt-1",
+                        "pid": 999999,
+                        "log_path": str(log_path),
+                        "last_event_at": "2026-04-06T14:20:00Z",
+                    }
+                },
+            }
+            status = {"tasks": [{"id": "AGY-004", "status": "in_progress", "owner": "Antigravity", "reviewer": "Codex"}]}
+
+            with (
+                mock.patch.object(supervisor, "load_approval_state", return_value={"pending": [], "history": []}),
+                mock.patch.object(supervisor, "load_status", return_value=status),
+                mock.patch.object(supervisor, "load_provider_report", return_value={}),
+                mock.patch.object(supervisor, "retry_due_workers", return_value=False),
+                mock.patch.object(supervisor, "pid_is_alive", return_value=False),
+                mock.patch.object(supervisor, "write_activity_log") as write_activity_log,
+            ):
+                changed = supervisor.poll_workers(self._agy_config(), state)
+
+        self.assertTrue(changed)
+        worker = state["workers"]["run-1"]
+        self.assertEqual(worker["status"], "failed")
+        self.assertIn("stream was interrupted", worker["last_error"].lower())
+        logged_types = [entry.args[1].get("type") for entry in write_activity_log.call_args_list]
+        self.assertNotIn("worker_completed", logged_types)
