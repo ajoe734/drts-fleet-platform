@@ -908,9 +908,12 @@ describe("UV-EXEC-022 All-Call Metrics, Complete Cost Ledger & Dimensional Alert
 
       for (const match of runbookUrlMatches) {
         const fullUrl = match[1];
+        expect(fullUrl).toBeDefined();
+        if (!fullUrl) continue;
         const [filePath, anchor] = fullUrl.split("#");
         expect(filePath).toBe("docs/03-runbooks/voice-alert-response.md");
         expect(anchor).toBeDefined();
+        if (!anchor) continue;
         // Check that anchor heading exists in the runbook
         const expectedHeadingNumber = anchor.slice(0, 1);
         expect(runbookContent).toContain(`### ${expectedHeadingNumber}. `);
