@@ -42,8 +42,8 @@ Prior Owner: Claude. Prior Reviewer: Gemini2.
   exists with real `DatabaseService`-backed repository (`host-view.repository.ts`)
   querying SQL tables for vehicle projection rows.
 - `SR-HOST-FE-001-ACCEPTANCE-RUNNER`: companion acceptance workflow task
-  (owned by Claude2) supplying `.github/workflows/host-acceptance.yml` and
-  `tests/e2e/system-remediation/sr-host-fe-001/` for GitHub-hosted remote verification.
+  (owned by Claude2) supplying automated workflow and e2e test harness
+  for GitHub-hosted remote verification.
 
 ## 3. Architecture and Implementation Summary
 
@@ -141,7 +141,6 @@ $ pnpm run i18n:guard
 - **VM Restrictions**: Under local VM operating constraints, workers are prohibited
   from starting background dev servers (`pnpm dev`), databases, or Playwright browsers.
 - **Remote Acceptance Harness**: Companion task `SR-HOST-FE-001-ACCEPTANCE-RUNNER`
-  (`.github/workflows/host-acceptance.yml` and `tests/e2e/system-remediation/sr-host-fe-001/`)
   runs real Postgres migrations, isolated Host Nest API composition, and Playwright
   Chromium on GitHub Actions hosted infrastructure to provide automated remote
   HTTP/SQL and browser evidence.
