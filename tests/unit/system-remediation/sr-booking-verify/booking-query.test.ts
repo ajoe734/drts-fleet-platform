@@ -674,4 +674,97 @@ describe("SR-BOOKING-VERIFY: Unit Tests", () => {
       }
     });
   });
+
+  describe("Booking mapping invariants & resilient defaults (mapOrderToBooking)", () => {
+    it("safely maps order with missing bookingType, defaulting to 'oneway'", () => {
+      const service = createTestService();
+      const order = {
+        orderId: "ord-test-1",
+        orderNo: "ORD-1",
+        tenantId: TENANT_A,
+        bookingId: "bk-test-1",
+        status: "created",
+        businessDispatchSubtype: "enterprise_dispatch",
+        reservationWindowStart: "2026-09-10T10:00:00.000Z",
+        reservationWindowEnd: "2026-09-10T11:00:00.000Z",
+        createdAt: "2026-09-10T09:00:00.000Z",
+      };
+
+      const mapped = (service as any).mapOrderToBooking(order);
+      expect(mapped.bookingId).toBe("bk-test-1");
+      expect(mapped.bookingType).toBe("oneway");
+      expect(mapped.approvalState).toBe("not_required");
+      expect(mapped.approvalRequestIds).toEqual([]);
+    });
+
+    it("safely maps order with missing reservationWindowEnd, defaulting to reservationWindowStart", () => {
+      const service = createTestService();
+      const order = {
+        orderId: "ord-test-2",
+        orderNo: "ORD-2",
+        tenantId: TENANT_A,
+        bookingId: "bk-test-2",
+        bookingType: "oneway",
+        status: "dispatched",
+        businessDispatchSubtype: "enterprise_dispatch",
+        reservationWindowStart: "2026-09-10T10:00:00.000Z",
+        reservationWindowEnd: null,
+        createdAt: "2026-09-10T09:00:00.000Z",
+      };
+
+      const mapped = (service as any).mapOrderToBooking(order);
+      expect(mapped.bookingId).toBe("bk-test-2");
+      expect(mapped.reservationWindowStart).toBe("2026-09-10T10:00:00.000Z");
+      expect(mapped.reservationWindowEnd).toBe("2026-09-10T10:00:00.000Z");
+    });
+
+    it("safely maps order with missing proofRequirements and complianceFlags", () => {
+      const service = createTestService();
+      const order = {
+        orderId: "ord-test-3",
+        orderNo: "ORD-3",
+        tenantId: TENANT_A,
+        bookingId: "bk-test-3",
+        status: "completed",
+        businessDispatchSubtype: "enterprise_dispatch",
+        reservationWindowStart: "2026-09-10T10:00:00.000Z",
+        reservationWindowEnd: "2026-09-10T11:00:00.000Z",
+        createdAt: "2026-09-10T09:00:00.000Z",
+      };
+
+      const mapped = (service as any).mapOrderToBooking(order);
+      expect(mapped.bookingId).toBe("bk-test-3");
+      expect(mapped.status).toBe("completed");
+      expect(Array.isArray(mapped.complianceGates)).toBe(true);
+    });
+
+    it("rejects order lacking bookingId or tenantId with BOOKING_NOT_FOUND", () => {
+      const service = createTestService();
+      expect(() =>
+        (service as any).mapOrderToBooking({
+          orderId: "ord-test-4",
+          tenantId: TENANT_A,
+          bookingId: null,
+        }),
+      ).toThrowError(
+        expect.objectContaining({
+          code: "BOOKING_NOT_FOUND",
+          status: 404,
+        }),
+      );
+
+      expect(() =>
+        (service as any).mapOrderToBooking({
+          orderId: "ord-test-5",
+          tenantId: null,
+          bookingId: "bk-test-5",
+        }),
+      ).toThrowError(
+        expect.objectContaining({
+          code: "BOOKING_NOT_FOUND",
+          status: 404,
+        }),
+      );
+    });
+  });
 });

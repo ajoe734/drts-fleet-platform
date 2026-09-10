@@ -2,7 +2,7 @@
 
 - **Task ID**: `SR-BOOKING-VERIFY`
 - **Owner**: `Gemini`
-- **Reviewer**: `Claude2`
+- **Reviewer**: `Gemini2`
 - **Branch**: `gemini/sr-booking-verify`
 - **Base Commit**: `553c4d6724757c2b9506f89dadcb94bf9829dfeb` (`origin/dev`)
 - **Phase / Wave**: `system-remediation-20260906`
@@ -37,6 +37,11 @@
 6. **專屬 GitHub Actions 遠端驗收工作流**：
    - 新增 `.github/workflows/booking-search-acceptance.yml`，配置真實 PostgreSQL / PostGIS 服務容器、自動遷移、Vitest 執行、零略過閘門（zero-skip gate）、狀態記錄與產物上傳。
    - 建立 `tools/ci/test_booking_search_acceptance_workflow.py` 契約測試。
+7. **遠端驗收回歸診斷與修復（Candidate 6bdc24ee Diagnostic & Fix）**：
+   - 遠端 run 34500698839 於 `booking-query-acceptance.test.ts:211` 拋出 `BOOKING_NOT_FOUND`。
+   - 診斷確認：
+     1. 整合測試的種子資料直接拼裝 JSON 記錄時缺少 canonical `OwnedOrderRecord` 欄位（`bookingType: "oneway"`, `approvalState: "not_required"`, `approvalRequestIds: []`, `complianceFlags: []` 等），造成 `mapOrderToBooking` 的嚴格檢查觸發 404；
+     2. `OwnedMobilityService.mapOrderToBooking` 在既有實作中對可缺省欄位過於嚴苛；修復其對 `bookingType`（預設 `"oneway"`）、`reservationWindowEnd`（預設 `reservationWindowStart`）、`approvalState`（預設 `"not_required"`）與陣列解構的韌性保護，維持 `bookingId` 與 `tenantId` 核心不變數，確保多實例持久化資料映射不致因局部欄位缺失而誤判 404。
 
 ---
 
@@ -47,11 +52,11 @@
 | `packages/contracts/src/index.ts` | 匯出 `TenantBookingDateField`, `TENANT_BOOKING_DATE_FIELDS`, `TenantBookingListQuery`, `TenantBookingsPageRecord`, `DEFAULT_PRODUCT_TIMEZONE`, 日期轉換與驗證輔助函式 |
 | `packages/api-client/src/index.ts` | 新增 `buildTenantBookingQueryParams`、`queryTenantBookings`，更新 `listTenantBookings` 自動分頁遍歷，匯出 `DrtsApiClient` 別名 |
 | `apps/api/src/modules/owned-mobility/owned-mobility.repository.ts` | 在 `ops.phase1_owned_orders` 上實作持久化 `queryTenantBookings`，支援 SQL 萬用字元轉義、精準 passengerId、日期開閉區間、穩定排序與計數 |
-| `apps/api/src/modules/owned-mobility/owned-mobility.service.ts` | 實作 `assertTenantAccessScope`、`validateTenantBookingListQuery`，整合 repository 持久化查詢與記憶體退避，相容同步/非同步呼叫 |
+| `apps/api/src/modules/owned-mobility/owned-mobility.service.ts` | 實作 `assertTenantAccessScope`、`validateTenantBookingListQuery`，整合 repository 持久化查詢與記憶體退避；修復 `mapOrderToBooking` 韌性預設值與合規閘門防禦性存取 |
 | `apps/api/src/modules/owned-mobility/owned-mobility.controller.ts` | 更新 `GET /api/tenant/bookings` 接收 query 參數與當前身分，強制租戶範圍驗證，回傳完整分頁 envelope |
 | `phase1_openapi_v1.yaml` | 更新 `GET /api/tenant/bookings` 參數定義與回應 schema |
-| `tests/unit/system-remediation/sr-booking-verify/booking-query.test.ts` | 完整單元測試：身分隔離、400 參數驗證、日期區間、乘客模糊搜尋、狀態篩選、分頁排序與 ApiClient 相容性（21 項測試） |
-| `tests/integration/system-remediation/sr-booking-verify/booking-query-acceptance.test.ts` | 整合驗收測試：AppModule DI 線路驗證與真實 PostgreSQL 雙租戶資料庫查詢、外部實例異動即時觀察 |
+| `tests/unit/system-remediation/sr-booking-verify/booking-query.test.ts` | 完整單元測試：身分隔離、400 參數驗證、日期區間、乘客模糊搜尋、狀態篩選、分頁排序、ApiClient 相容性以及映射不變數韌性測試（25 項測試） |
+| `tests/integration/system-remediation/sr-booking-verify/booking-query-acceptance.test.ts` | 整合驗收測試：AppModule DI 線路驗證與真實 PostgreSQL 雙租戶資料庫查詢、外部實例異動即時觀察，補齊規範之種子記錄欄位 |
 | `.github/workflows/booking-search-acceptance.yml` | 專屬遠端 acceptance 工作流（Postgres 16 服務、db:migrate、zero-skip gate、產物上傳） |
 | `tools/ci/test_booking_search_acceptance_workflow.py` | GitHub Actions 工作流結構與 run-status 邏輯合約測試（9 項測試） |
 | `docs/04-uat/system-remediation-20260906/SR-BOOKING-VERIFY.md` | 本 UAT 驗收報告 |
@@ -60,7 +65,7 @@
 
 ## 3. 驗證指令與實際結果
 
-所有指令均於隔離 worktree `/home/lupin/workspace/drts-fleet-platform/.artifacts/worktrees/auto/gemini-sr-booking-verify` 中執行：
+所有指令均於隔離 worktree `/home/lupin/workspace/drts-fleet-platform/.artifacts/worktrees/auto/gemini2-sr-booking-verify` 中執行：
 
 | 檢驗項目 | 執行指令 | Exit Code | 實際輸出與結果 |
 |---|---|---|---|
@@ -68,10 +73,10 @@
 | 合約包構建 | `pnpm --filter @drts/contracts build` | 0 | `tsc` 構建成功，型別定義生成 |
 | API Client 型別檢查 | `pnpm --filter @drts/api-client typecheck` | 0 | `tsc -p tsconfig.typecheck.json --noEmit` 通過 |
 | 後端 API 型別檢查 | `pnpm --filter @drts/api typecheck` | 0 | `tsc -p tsconfig.json --noEmit` 通過 |
-| 專屬單元測試套件 | `pnpm exec vitest run tests/unit/system-remediation/sr-booking-verify/` | 0 | 1 檔案，21 項測試全部通過 (21 passed) |
+| 專屬單元測試套件 | `pnpm exec vitest run tests/unit/system-remediation/sr-booking-verify/` | 0 | 1 檔案，25 項測試全部通過 (25 passed) |
 | 既有行程單元測試 | `pnpm exec vitest run tests/unit/owned-mobility.test.ts` | 0 | 1 檔案，39 項測試全部通過 (39 passed) |
 | 整合驗收測試套件 | `pnpm exec vitest run tests/integration/system-remediation/sr-booking-verify/` | 0 | DI 測試通過；PostgreSQL 測試在無本機 DB 守護下安全略過 (1 passed, 1 skipped) |
-| CI 工作流合約測試 | `python3 tools/ci/test_booking_search_acceptance_workflow.py` | 0 | 9 項合約測試全部通過 (Ran 9 tests in 0.104s, OK) |
+| CI 工作流合約測試 | `python3 tools/ci/test_booking_search_acceptance_workflow.py` | 0 | 9 項合約測試全部通過 (Ran 9 tests in 0.199s, OK) |
 
 ---
 

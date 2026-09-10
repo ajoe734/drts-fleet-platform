@@ -10951,14 +10951,26 @@ export class OwnedMobilityService
   }
 
   private mapOrderToBooking(order: OwnedOrderRecord): BookingRecord {
-    if (
-      !order.bookingId ||
-      !order.tenantId ||
-      !order.bookingType ||
-      !order.businessDispatchSubtype ||
-      !order.reservationWindowStart ||
-      !order.reservationWindowEnd
-    ) {
+    if (!order.bookingId || !order.tenantId) {
+      throw new ApiRequestError(
+        HttpStatus.NOT_FOUND,
+        "BOOKING_NOT_FOUND",
+        "Booking was not found.",
+        {
+          orderId: order.orderId,
+        },
+      );
+    }
+
+    const bookingType = order.bookingType ?? "oneway";
+    const businessDispatchSubtype =
+      order.businessDispatchSubtype ?? "enterprise_dispatch";
+    const reservationWindowStart =
+      order.reservationWindowStart ?? order.createdAt;
+    const reservationWindowEnd =
+      order.reservationWindowEnd ?? reservationWindowStart;
+
+    if (!reservationWindowStart || !reservationWindowEnd) {
       throw new ApiRequestError(
         HttpStatus.NOT_FOUND,
         "BOOKING_NOT_FOUND",
@@ -10974,12 +10986,12 @@ export class OwnedMobilityService
       bookingId: order.bookingId,
       orderId: order.orderId,
       tenantId: order.tenantId,
-      partnerId: order.partnerId,
-      partnerProgramId: order.partnerProgramId,
-      partnerEntrySlug: order.partnerEntrySlug,
-      eligibilityVerificationId: order.eligibilityVerificationId,
-      issuerAuthorizationRef: order.issuerAuthorizationRef,
-      passengerDisclosure: order.passengerDisclosure,
+      partnerId: order.partnerId ?? null,
+      partnerProgramId: order.partnerProgramId ?? null,
+      partnerEntrySlug: order.partnerEntrySlug ?? null,
+      eligibilityVerificationId: order.eligibilityVerificationId ?? null,
+      issuerAuthorizationRef: order.issuerAuthorizationRef ?? null,
+      passengerDisclosure: order.passengerDisclosure ?? null,
       status:
         order.status === "cancelled"
           ? "cancelled"
@@ -10987,38 +10999,42 @@ export class OwnedMobilityService
             ? "completed"
             : "active",
       serviceBucket: "business_dispatch",
-      businessDispatchSubtype: order.businessDispatchSubtype,
-      bookingType: order.bookingType,
-      reservationWindowStart: order.reservationWindowStart,
-      reservationWindowEnd: order.reservationWindowEnd,
-      recurrenceRule: order.recurrenceRule,
-      modifiableUntil: order.modifiableUntil,
-      cancelableUntil: order.cancelableUntil,
-      pickup: { ...order.pickup },
-      dropoff: { ...order.dropoff },
-      passenger: { ...order.passenger },
+      businessDispatchSubtype,
+      bookingType,
+      reservationWindowStart,
+      reservationWindowEnd,
+      recurrenceRule: order.recurrenceRule ?? null,
+      modifiableUntil: order.modifiableUntil ?? null,
+      cancelableUntil: order.cancelableUntil ?? null,
+      pickup: order.pickup ? { ...order.pickup } : { address: "" },
+      dropoff: order.dropoff ? { ...order.dropoff } : { address: "" },
+      passenger: order.passenger
+        ? { ...order.passenger }
+        : { name: "", phone: "" },
       bookedBy: order.bookedBy ? { ...order.bookedBy } : null,
       onsiteContact: order.onsiteContact ? { ...order.onsiteContact } : null,
-      costCenter: order.costCenter,
-      vehiclePreference: order.vehiclePreference,
-      benefitReference: order.benefitReference,
-      direction: order.direction,
-      flightNo: order.flightNo,
-      terminal: order.terminal,
-      luggageCount: order.luggageCount,
-      notes: order.notes,
+      costCenter: order.costCenter ?? null,
+      vehiclePreference: order.vehiclePreference ?? null,
+      benefitReference: order.benefitReference ?? null,
+      direction: order.direction ?? null,
+      flightNo: order.flightNo ?? null,
+      terminal: order.terminal ?? null,
+      luggageCount: order.luggageCount ?? null,
+      notes: order.notes ?? null,
       quotedFare: order.quotedFare ? { ...order.quotedFare } : null,
-      quotedFareSource: order.quotedFareSource,
-      quotedFareRuleVersion: order.quotedFareRuleVersion,
+      quotedFareSource: order.quotedFareSource ?? null,
+      quotedFareRuleVersion: order.quotedFareRuleVersion ?? null,
       manualFareOverride: order.manualFareOverride
         ? { ...order.manualFareOverride }
         : null,
-      approvalState: order.approvalState,
-      approvalRequestIds: [...order.approvalRequestIds],
+      approvalState: order.approvalState ?? "not_required",
+      approvalRequestIds: Array.isArray(order.approvalRequestIds)
+        ? [...order.approvalRequestIds]
+        : [],
       complianceGates,
       orderStatus: order.status,
       createdAt: order.createdAt,
-      updatedAt: order.updatedAt,
+      updatedAt: order.updatedAt ?? order.createdAt,
     };
   }
 
@@ -11961,7 +11977,7 @@ export class OwnedMobilityService
 
     const hasRecording = Boolean(order.recordingId);
     const recordingMissing =
-      order.complianceFlags.includes("recording_missing");
+      order.complianceFlags?.includes("recording_missing") ?? false;
     const state: ComplianceGateState = hasRecording ? "clear" : "blocked";
     return {
       gateType: "recording",
@@ -12009,8 +12025,13 @@ export class OwnedMobilityService
     order: OwnedOrderRecord,
     task: DriverTaskRecord | null,
   ): ComplianceGateRecord | null {
+    const proofRequirements = order.proofRequirements ?? {
+      minPhotoCount: 0,
+      signoffRequired: false,
+      expenseProofRequired: false,
+    };
     const { minPhotoCount, signoffRequired, expenseProofRequired } =
-      order.proofRequirements;
+      proofRequirements;
     const required =
       minPhotoCount > 0 || signoffRequired || expenseProofRequired;
     const hasProof = this.hasCompletionProofEvidence(task?.proof);
