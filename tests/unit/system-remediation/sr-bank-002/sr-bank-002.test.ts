@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 
@@ -23,7 +23,12 @@ import {
   type BankConsoleRole,
 } from "../../../../apps/bank-console-web/lib/session";
 import { translations } from "../../../../apps/bank-console-web/lib/translations";
-import { loadBankStatementsData } from "../../../../apps/bank-console-web/lib/bank-dev-read-models";
+import {
+  loadBankBookingsData,
+  loadBankContractsData,
+  loadBankStatementsData,
+} from "../../../../apps/bank-console-web/lib/bank-dev-read-models";
+import { resolveRouteAuthPolicy } from "../../../../apps/api/src/common/auth/auth.policy";
 
 const BANK_CONSOLE_ROLES: BankConsoleRole[] = [
   "bank_program_admin",
@@ -150,10 +155,46 @@ describe("SR-BANK-002: Bank role amount / PII / export consistent isolation (R15
   });
 
   describe("4. Data layer still returns real amounts for every role (masking is a presentation-layer duty)", () => {
+    afterEach(() => {
+      vi.unstubAllGlobals();
+    });
+
+    function stubSuccessfulUpstream(period: string, issuerPayableMinor: number) {
+      vi.stubGlobal(
+        "fetch",
+        vi.fn(async (input: string | URL) => {
+          const url = typeof input === "string" ? input : input.toString();
+          if (url.includes("/api/tenant/settlement-statements")) {
+            return new Response(
+              JSON.stringify({
+                data: {
+                  items: [
+                    {
+                      period,
+                      status: "issued",
+                      totals: { issuer_payable: { amount_minor: issuerPayableMinor } },
+                      lines: [],
+                    },
+                  ],
+                },
+              }),
+              { status: 200, headers: { "content-type": "application/json" } },
+            );
+          }
+          return new Response(JSON.stringify({ data: { items: [] } }), {
+            status: 200,
+            headers: { "content-type": "application/json" },
+          });
+        }),
+      );
+    }
+
     it.each(BANK_CONSOLE_ROLES)(
       "loadBankStatementsData does not pre-filter totals by role (%s) — the page must gate rendering",
       async (role) => {
+        stubSuccessfulUpstream("2026-03", 123456);
         const result = await loadBankStatementsData("tenant-demo-001", role);
+        expect(result.degradedMessage).toBeNull();
         expect(Array.isArray(result.data.statements)).toBe(true);
         expect(result.data.statements.length).toBeGreaterThan(0);
         expect(
@@ -161,6 +202,26 @@ describe("SR-BANK-002: Bank role amount / PII / export consistent isolation (R15
         ).toBeGreaterThan(0);
       },
     );
+
+    it("upstream denial (403) never falls back to the static ACME seed fixture (fail closed)", async () => {
+      vi.stubGlobal(
+        "fetch",
+        vi.fn(async () => new Response("Forbidden", { status: 403 })),
+      );
+      const result = await loadBankStatementsData("tenant-contoso-001", "bank_finance");
+      expect(result.data.statements).toEqual([]);
+      expect(result.degradedMessage).not.toBeNull();
+    });
+
+    it("upstream outage (503) never falls back to the static ACME seed fixture (fail closed)", async () => {
+      vi.stubGlobal(
+        "fetch",
+        vi.fn(async () => new Response("Unavailable", { status: 503 })),
+      );
+      const result = await loadBankStatementsData("tenant-contoso-001", "bank_ops_viewer");
+      expect(result.data.statements).toEqual([]);
+      expect(result.degradedMessage).not.toBeNull();
+    });
   });
 
   describe("5. Statement pages must route every amount cell through the role gate (source contract)", () => {
@@ -214,5 +275,79 @@ describe("SR-BANK-002: Bank role amount / PII / export consistent isolation (R15
         "getBankConsoleSession(tenant, locale, params?.role)",
       );
     });
+  });
+
+  describe("7. Backend settlement-statements route requires the billing scope family, not bare tenant:read (JSON bypass closure)", () => {
+    it.each([
+      "/api/tenant/settlement-statements",
+      "/api/tenant/settlement-statements/2026-03",
+    ])("%s (GET) requires tenant:billing:read", (path) => {
+      const policy = resolveRouteAuthPolicy("GET", path);
+      expect(policy?.requiredScopes).toContain("tenant:billing:read");
+      // Must reuse the existing tenant/billing scope family, not invent a
+      // new platform-wide or bank-specific grant.
+      expect(policy?.requiredScopes).not.toContain("platform:billing:read");
+    });
+
+    it("still allows the pre-existing tenant/billing and tenant/invoices routes (no regression)", () => {
+      expect(
+        resolveRouteAuthPolicy("GET", "/api/tenant/billing")?.requiredScopes,
+      ).toContain("tenant:billing:read");
+      expect(
+        resolveRouteAuthPolicy("GET", "/api/tenant/invoices")?.requiredScopes,
+      ).toContain("tenant:billing:read");
+    });
+  });
+
+  describe("8. bank-dev-read-models loaders fail closed on upstream denial/outage across every financial consumer (booking/contracts/statements)", () => {
+    afterEach(() => {
+      vi.unstubAllGlobals();
+    });
+
+    it.each([
+      ["loadBankStatementsData", loadBankStatementsData] as const,
+      ["loadBankBookingsData", loadBankBookingsData] as const,
+      ["loadBankContractsData", loadBankContractsData] as const,
+    ])(
+      "%s never substitutes the static ACME demo fixture when tenant-contoso-001's upstream returns 403",
+      async (_name, loader) => {
+        vi.stubGlobal(
+          "fetch",
+          vi.fn(async () => new Response("Forbidden", { status: 403 })),
+        );
+        const result = await loader("tenant-contoso-001", "bank_finance");
+        expect(result.degradedMessage).not.toBeNull();
+        for (const value of Object.values(result.data)) {
+          if (Array.isArray(value)) {
+            expect(value).toEqual([]);
+          } else if (value instanceof Map) {
+            expect(value.size).toBe(0);
+          }
+        }
+      },
+    );
+
+    it.each([
+      ["loadBankStatementsData", loadBankStatementsData] as const,
+      ["loadBankBookingsData", loadBankBookingsData] as const,
+      ["loadBankContractsData", loadBankContractsData] as const,
+    ])(
+      "%s never substitutes the static ACME demo fixture when tenant-demo-001's upstream returns 503",
+      async (_name, loader) => {
+        vi.stubGlobal(
+          "fetch",
+          vi.fn(async () => new Response("Unavailable", { status: 503 })),
+        );
+        const result = await loader("tenant-demo-001", "bank_ops_viewer");
+        expect(result.degradedMessage).not.toBeNull();
+        for (const value of Object.values(result.data)) {
+          if (Array.isArray(value)) {
+            expect(value).toEqual([]);
+          } else if (value instanceof Map) {
+            expect(value.size).toBe(0);
+          }
+        }
+      },
+    );
   });
 });

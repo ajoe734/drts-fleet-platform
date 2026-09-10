@@ -2,10 +2,80 @@
 
 - Task: `SR-BANK-002`
 - Owner: `Claude`
-- Reviewer: `Codex`
-- Base SHA (worktree branch tip before this change): `6f4ac8c74`
+- Reviewer: `Claude2`
+- Base SHA (round 2, worktree branch tip before this change): `709d01a184cf85ccf2568b35c64c59a925addadb`
 - Worktree: `/home/lupin/workspace/drts-fleet-platform/.artifacts/worktrees/auto/claude-sr-bank-002`
 - Branch: `claude/sr-bank-002`
+
+---
+
+## 2026-09-10 Round 2 — supervisor-authorized scope expansion closes the JSON API / read-model fallback blocker
+
+Round 1（下方保留為歷史記錄）已修復 R15 HTML 金額遮罩與 `/users` 真實 session 驗證，並以 commit `4d4343904` 落地、通過 62/62 既有測試。但先前候選（`gemini/sr-bank-002` 軌道，`1171e91f0` / `e6fe6b823`）被 reviewer `Codex` 駁回：`write_scopes` 未涵蓋兩個造成實際外洩的共用檔案（`apps/api/src/common/auth/auth.policy.ts`、`apps/bank-console-web/lib/bank-dev-read-models.ts`），因此分流記錄卻始終未被授權修復，驗收標準「受限金額不可在HTML/JSON/CSV間繞過」未達成。
+
+本輪 `ai-status.sh show SR-BANK-002` 的 `integration_notes` 已由 supervisor 明確授權將上述兩檔案（連同對應的 `app/api/statements/`、`app/artifacts/statements/` route 與 `.github/workflows/bank-isolation-acceptance.yml` 等）納入 `write_scopes`，並指定修復方向：沿用既有 `tenant:billing:read`（`tenant/billing`、`tenant/invoices` 同一家族），不新增 scope、不放寬 realm、不擴大全員 grant；read-model 對 403/503/timeout 一律 fail-closed，不得以 ACME 靜態種子資料頂替其他租戶的真實/降級回應。
+
+### R2.1 根因（本輪修復前，於本 worktree base `709d01a18` 重現確認）
+
+1. **後端 JSON API scope 分類過寬（JSON 繞過）**：`apps/api/src/common/auth/auth.policy.ts` 的 `tenant/*` 路由分派中，`tenant/billing`、`tenant/invoices` 已要求 `tenant:billing:read`，但 `tenant/settlement-statements`（含 `/:period` 明細）未被涵蓋，落入預設分支只要求 `tenant:read`（見本檔案舊版第 459-464 行）。任何只有基礎 `tenant:read` scope 的租戶身分即可直接以 JSON 繞過取得完整結算金額，不受銀行主控台前端角色遮罩約束。
+2. **`bank-dev-read-models.ts` 降級時以全域 ACME 種子資料頂替（跨租戶洩漏）**：`loadBankBookingsData`、`loadBankContractsData`、`loadBankStatementsData`、`loadBankHomeSnapshot` 四個 loader 在 `loadCoreBankData` 的 `Promise.allSettled` 偵測到任一上游 endpoint 失敗（403/503/timeout/網路錯誤皆會落入同一個 `degradedMessage` 訊號）時，一律回退回傳寫死在模組層的 ACME demo fixture（`settlementStatements`、`bookingList`、`bookingDetails`、`listContractRecords()` 等），且外層 `catch` 區塊亦同。例如 `tenant-contoso-001` 在上游 403 時，會拿到 `STM-ACME-*` 等 ACME 的真實金額列，被 HTML 頁、CSV 匯出（`app/api/statements/export/route.ts`、`[period]/export/route.ts`）、簽名檔下載（`app/artifacts/statements/[id]/route.ts`）三個介面原樣呈現，且看起來與正常成功回應無法區分。
+
+以 `tests/unit/system-remediation/sr-bank-002/sr-bank-002.test.ts`（本輪新增第 7、8 組、`git stash` 隔離驗證，見下方 R2.3）於 base `709d01a18` 重現：`resolveRouteAuthPolicy("GET", "/api/tenant/settlement-statements")?.requiredScopes` 不含 `tenant:billing:read`；`loadBankStatementsData("tenant-contoso-001", "bank_finance")` 在 fetch 被 stub 為 403 時回傳非空陣列。
+
+### R2.2 修復說明
+
+1. **`apps/api/src/common/auth/auth.policy.ts`**：把 `tenant/settlement-statements`（含 `/:period` 明細）併入既有 `tenant/billing` / `tenant/invoices` 判斷分支，一起要求 `tenant:billing:read`（GET）／`tenant:billing:write`（寫入）。未新增任何 scope 字串，沿用既有 `tenant:billing:*` 家族；`allowedRealms` 與 `routeKey` 前綴維持原本 `tenant:billing:*` 慣例不變。
+   - 相容性查核：銀行主控台 BFF（`server-bank-api.ts` 的 `buildDefaultHeaders`）固定送出 `x-actor-type: tenant_admin`、不帶 `x-scopes`；`packages/contracts/src/iam-policy-catalog.ts` 中 `tenant_admin` 的 `AUTH_SCOPE_PRESETS` 本就包含 `tenant:billing:read`／`tenant:billing:write`（第 656-677 行），因此本次修正對既有合法呼叫零影響，純粹是把先前被誤分類為 `tenant:read` 的路由收斂進正確政策家族——不是新授權，是收斂一個分類缺口。
+2. **`apps/bank-console-web/lib/bank-dev-read-models.ts`**：對 `loadBankBookingsData`、`loadBankContractsData`、`loadBankStatementsData`、`loadBankHomeSnapshot` 四個 loader 移除「`degradedMessage` 存在時回退成 ACME/booking demo fixture」的邏輯（含 try 區塊內與外層 catch 區塊），改為一律回傳空陣列／空 Map，並保留 `degradedMessage` 讓呼叫端頁面照舊渲染既有的「服務降級」提示 banner（`app/statements/page.tsx`、`app/statements/[period]/page.tsx`、`app/page.tsx`、`app/bookings/`、`app/contracts/` 等既有的 `degradedMessage` 條件式渲染邏輯，本次未改動任何頁面檔案，全部原樣沿用）。真正成功但合法為空的上游回應（`degradedMessage === null`）行為不變，仍回傳空陣列，不受影響。
+   - 因不再引用 `bookingList`、`bookingDetails`、`deriveBookingPeriods`、`ORDER_TALLIES`、`QUOTA_PROGRAMS`、`listContractRecords`，一併移除對應現在未使用的 import（`settlementStatements` 因仍被 `deriveStatementDates` 的另一段既有邏輯使用而保留）。
+3. **`apps/bank-console-web/app/api/statements/export/route.ts`、`[period]/export/route.ts`、`apps/bank-console-web/app/artifacts/statements/[id]/route.ts`**：在 `loadBankStatementsData` 呼叫後、組 CSV／文字檔內容前，新增 `statementData.degradedMessage` 顯式檢查，若非 null 直接回傳 `503 UPSTREAM_UNAVAILABLE`，不再讓「上游降級」與「這個 tenant/period 本來就沒有資料」的 404／空 CSV 混淆——確保驗收標準「legitimate server empty dataset distinguished from failure」在 CSV／下載介面也成立，而不只是資料層不洩漏。
+   - `apps/bank-console-web/app/artifacts/trips/[id]/route.ts` 不在本任務 `write_scopes` 內，未修改；但因其同樣呼叫已修復的 `loadBankStatementsData`，降級情境下已自然拿到空陣列（不會有 ACME 列可比對到），查無資料時走既有 404 路徑，不構成外洩，僅缺少與上述三檔一致的顯式 503 區分（誠實列為本輪未做的一致性收尾，見 R2.4）。
+
+### R2.3 驗證指令與執行日誌（附 Exit Code，於本 worktree 執行）
+
+```text
+$ git diff --check
+exit code: 0
+
+$ pnpm --filter @drts/bank-console-web typecheck
+> next typegen && tsc --noEmit
+✓ Types generated successfully
+exit code: 0
+
+$ pnpm exec vitest run tests/unit/system-remediation/sr-bank-002/
+ Test Files  1 passed (1)
+      Tests  31 passed (31)
+exit code: 0
+```
+
+31 項測試涵蓋 round 1 的 20 項（零回歸）加上本輪新增 11 項：
+- 第 4 組擴充：`loadBankStatementsData` 在「真實 stub 成功上游」情境下仍不預先依角色過濾金額（3 案例，改用 `vi.stubGlobal("fetch", ...)` 明確模擬成功 envelope，取代舊版隱含依賴「無後端可連線時退回 fixture」的脆弱假設），並新增上游 403／503 各一案例斷言 fail-closed（不得回退 ACME fixture）。
+- 第 7 組（新增）：`resolveRouteAuthPolicy("GET", "/api/tenant/settlement-statements")` 與 `.../2026-03` 均要求 `tenant:billing:read`、且不含任何新發明的 `platform:billing:read`；並回歸驗證既有 `tenant/billing`、`tenant/invoices` 路由未受影響。
+- 第 8 組（新增）：`loadBankStatementsData`／`loadBankBookingsData`／`loadBankContractsData` 三個 loader，在 `tenant-contoso-001` 遇 403、`tenant-demo-001` 遇 503 兩種情境下，資料一律為空（陣列 `[]` 或 `Map(size 0)`），且 `degradedMessage` 非 null——直接重現並鎖住先前 reviewer 駁回所列的漏洞類型。
+
+零回歸額外驗證（受影響 package 現有全套指令）：
+```text
+$ pnpm --filter @drts/bank-console-web lint
+> eslint . --max-warnings=0
+exit code: 0
+
+$ pnpm --filter @drts/bank-console-web test
+ Test Files  4 passed (4)
+      Tests  62 passed (62)
+exit code: 0
+
+$ (cd apps/api && npx eslint src/common/auth/auth.policy.ts --max-warnings=0)
+exit code: 0
+```
+
+`apps/api` 全套 `pnpm run typecheck` 在本 worktree base（未改動 `auth.policy.ts` 前後，以 `git stash apply` 前後對照確認）皆存在同一批與本次修改無關的既有型別錯誤（`voice-booking`／`owned-mobility`／`vehicle-eligibility` 等模組缺少 `@drts/contracts` 匯出成員），與本次 `auth.policy.ts` 單一 route 分類調整無關，不在本任務 write scope 內、不予修復；已用 stash 前後比對排除本次改動造成回歸的可能性。
+
+### R2.4 Live／真機與 CI 硬體收尾之未做部分（誠實申報，不冒充成功）
+
+- 本輪未新增 `.github/workflows/bank-isolation-acceptance.yml` 與 `tools/ci/test_bank_isolation_acceptance_workflow.py`。`integration_notes` 授權建立一個在 GitHub-hosted runner 上實際啟動 BFF＋backend、對三角色 × 兩租戶跑真實 HTTP（HTML／JSON／CSV／簽名檔下載）矩陣的專屬 workflow；但本 worktree 所在 VM 明確禁止啟動 product/HTTP/DB/Compose 伺服器（見本次 dispatch guardrail），因此無法在本地起服務驗證這樣一個 workflow 是否真的可動作（Node/Nest 啟動順序、DB migration、port、環境變數等）。與其提交一個完全沒有實際跑過、可能一啟用就讓每次 PR CI 失敗的 workflow YAML，選擇誠實列為未完成，交由具備啟動真實服務權限的環境（下一輪 supervisor 週期或 reviewer）補上並驗證，而非假裝已完成。本輪已完成的證據改為全部基於：(a) 真實的 `resolveServerSessionRole`／`signSessionRole`／`resolveRouteAuthPolicy`／`loadBankStatementsData` 等 handler／policy 函式呼叫、(b) 以 `vi.stubGlobal("fetch", ...)` 模擬真實 upstream 403/503/成功回應的邊界情境，而非任何假的固定百分比或假簽章。
+- `apps/bank-console-web/app/artifacts/trips/[id]/route.ts`（trips 簽名檔下載）未獲得與 statements 匯出／下載三檔一致的顯式 503 區分處理（見 R2.2 第 3 點），因不在 `write_scopes` 內故未修改；其降級行為已因 `bank-dev-read-models.ts` 的修復而不再洩漏資料，僅缺少「明確 503 vs 404」語意收斂，風險為低（無資料外洩，僅使用者體感訊息略不精確）。
+- 未執行瀏覽器端 E2E／視覺回歸（無 Playwright 走查 `/statements`、`/statements/[period]`、`/users` 三頁在三種 role、兩租戶下對降級狀態橫幅的實際渲染畫面）；此點與 round 1 揭露的已知邊界一致，本輪未新增或改變此範疇。
+- CI／merge／`required_acceptance`（`bank_three_role_cross_tenant_html_json_csv`、`bank_denial_outage_no_seed_fallback`）完備與否，交由獨立 reviewer 與 candidate lifecycle 判定；本文件不宣稱 `done`。
 
 ---
 
