@@ -105,27 +105,26 @@ print("FAIL_CLOSED_OK")
     });
 
     it("C002-NEG-1: reject authorization callback when redirect_uri is tampered to unauthorized localhost:3104", () => {
-      const service = new OidcPkceService();
+      const service = new OidcPkceService({} as any, {} as any);
       const forbiddenLocalhostCallback =
         "http://localhost:3104/api/auth/callback";
 
-      // Testing validation of disallowed callback origin
-      const isAllowed = service.isAllowedRedirectUri
-        ? service.isAllowedRedirectUri(forbiddenLocalhostCallback)
-        : !forbiddenLocalhostCallback.includes("localhost:3104");
-
-      expect(isAllowed).toBe(false);
+      expect(() => {
+        service.validateRedirectUri(forbiddenLocalhostCallback);
+      }).toThrow();
     });
 
     it("C002-NEG-2: rejects state replay or missing state token with AUTH_SESSION_EXCHANGE_DENIED", async () => {
-      const service = new OidcPkceService();
+      const service = new OidcPkceService({} as any, {} as any);
 
       // Attempting session exchange with invalid or already-consumed state token
       await expect(
         service.exchangeTenantCallbackSession({
+          provider: "oidc",
+          callbackUrl: "https://auth.example.com/callback",
           state: "invalid_expired_or_replayed_state",
           code: "test_auth_code_12345",
-          codeVerifier: "test_code_verifier_12345678901234567890",
+          pkceVerifier: "test_code_verifier_12345678901234567890",
         }),
       ).rejects.toThrowError(
         expect.objectContaining({
@@ -135,13 +134,15 @@ print("FAIL_CLOSED_OK")
     });
 
     it("C002-NEG-3: rejects mismatched PKCE code verifier with AUTH_SESSION_EXCHANGE_DENIED", async () => {
-      const service = new OidcPkceService();
+      const service = new OidcPkceService({} as any, {} as any);
 
       await expect(
         service.exchangeTenantCallbackSession({
+          provider: "oidc",
+          callbackUrl: "https://auth.example.com/callback",
           state: "unregistered_state_key",
           code: "mock_auth_code",
-          codeVerifier: "wrong_verifier",
+          pkceVerifier: "wrong_verifier",
         }),
       ).rejects.toThrowError(
         expect.objectContaining({

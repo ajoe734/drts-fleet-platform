@@ -50,7 +50,6 @@ describe("SR-QA-IDENTITY-001 / C003, C004 & C005 — MFA／IAP／銀行角色與
         mfaIdentity,
         {
           actionId: "platform:tenants:create",
-          expectedFreshnessSeconds: 300,
         },
         "req-step-up-001",
       );

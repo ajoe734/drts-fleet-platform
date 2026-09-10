@@ -43,7 +43,7 @@ describe("SR-QA-IDENTITY-001 / C009, C010 & C011 — 跨租戶隔離／即時失
     let hostViewController: HostViewController;
 
     beforeEach(() => {
-      tenantPartnerService = new TenantPartnerService();
+      tenantPartnerService = new TenantPartnerService({} as any);
       hostViewRepo = new HostViewRepository();
       hostViewService = new HostViewService(hostViewRepo);
       hostViewController = new HostViewController(hostViewService);
@@ -56,9 +56,14 @@ describe("SR-QA-IDENTITY-001 / C009, C010 & C011 — 跨租戶隔離／即時失
         actorId: "actor-admin-alpha",
         realm: "tenant",
         authMode: "jwt_bearer",
+        roleFamilies: ["tenant"],
         roles: ["tenant_admin"],
         scopes: ["tenant:read", "tenant:write"],
         tenantId: tenantAId,
+        supportedExecutionModes: [
+          "discussion_planning",
+          "supervisor_managed_execution",
+        ],
       };
 
       // Tenant A requests keys for Tenant A
@@ -74,9 +79,14 @@ describe("SR-QA-IDENTITY-001 / C009, C010 & C011 — 跨租戶隔離／即時失
         actorId: "actor-admin-alpha",
         realm: "tenant",
         authMode: "jwt_bearer",
+        roleFamilies: ["tenant"],
         roles: ["tenant_admin"],
         scopes: ["tenant:read", "tenant:write"],
         tenantId: tenantAId, // Tenant A
+        supportedExecutionModes: [
+          "discussion_planning",
+          "supervisor_managed_execution",
+        ],
       };
 
       // Tenant A attempts to access Tenant B
@@ -225,7 +235,7 @@ describe("SR-QA-IDENTITY-001 / C009, C010 & C011 — 跨租戶隔離／即時失
 
     beforeEach(() => {
       identityRepo = new IdentityRepository();
-      tenantPartnerService = new TenantPartnerService();
+      tenantPartnerService = new TenantPartnerService({} as any);
       jwtAuthService = new JwtAuthService(identityRepo, tenantPartnerService);
     });
 
@@ -247,14 +257,14 @@ describe("SR-QA-IDENTITY-001 / C009, C010 & C011 — 跨租戶隔離／即時失
         revokedAt: null,
         revokedByPrincipalId: null,
         revokeReason: null,
-        deviceSummary: null,
-        riskSummary: null,
+        deviceSummary: {},
+        riskSummary: {},
         createdAt: new Date().toISOString(),
         updatedAt: new Date().toISOString(),
-        record: {},
       });
 
       const issued = await jwtAuthService.issueSessionToken({
+        authMode: "jwt_bearer",
         actorType: "platform_admin",
         actorId: account.principal.principalId,
         principalId: account.principal.principalId,
@@ -292,14 +302,14 @@ describe("SR-QA-IDENTITY-001 / C009, C010 & C011 — 跨租戶隔離／即時失
         revokedAt: null,
         revokedByPrincipalId: null,
         revokeReason: null,
-        deviceSummary: null,
-        riskSummary: null,
+        deviceSummary: {},
+        riskSummary: {},
         createdAt: new Date().toISOString(),
         updatedAt: new Date().toISOString(),
-        record: {},
       });
 
       const issued = await jwtAuthService.issueSessionToken({
+        authMode: "jwt_bearer",
         actorType: "platform_admin",
         actorId: account.principal.principalId,
         principalId: account.principal.principalId,
@@ -341,14 +351,14 @@ describe("SR-QA-IDENTITY-001 / C009, C010 & C011 — 跨租戶隔離／即時失
         revokedAt: null,
         revokedByPrincipalId: null,
         revokeReason: null,
-        deviceSummary: null,
-        riskSummary: null,
+        deviceSummary: {},
+        riskSummary: {},
         createdAt: new Date().toISOString(),
         updatedAt: new Date().toISOString(),
-        record: {},
       });
 
       const oldToken = await jwtAuthService.issueSessionToken({
+        authMode: "jwt_bearer",
         actorType: "platform_admin",
         actorId: account.principal.principalId,
         principalId: account.principal.principalId,
@@ -391,11 +401,15 @@ describe("SR-QA-IDENTITY-001 / C009, C010 & C011 — 跨租戶隔離／即時失
       ]);
       const serviceWithV1 = new JwtAuthService();
       const token = serviceWithV1.sign({
-        sub: "usr-rot-01",
+        authMode: "jwt_bearer",
+        actorId: "usr-rot-01",
+        principalId: "usr-rot-01",
         actorType: "platform_admin",
         realm: "system",
         roles: ["platform_admin"],
+        roleFamilies: ["platform"],
         scopes: ["all"],
+        tenantId: null,
       });
 
       // Rotate key-v1 to retired
@@ -442,6 +456,10 @@ describe("SR-QA-IDENTITY-001 / C009, C010 & C011 — 跨租戶隔離／即時失
         tenantId: "ten_alpha_001",
         authMethods: ["jwt", "mfa"],
         authTime: new Date().toISOString(),
+        supportedExecutionModes: [
+          "discussion_planning",
+          "supervisor_managed_execution",
+        ],
       };
 
       const approver: IdentityContext = {
@@ -455,6 +473,10 @@ describe("SR-QA-IDENTITY-001 / C009, C010 & C011 — 跨租戶隔離／即時失
         tenantId: "ten_alpha_001",
         authMethods: ["jwt", "mfa"],
         authTime: new Date().toISOString(),
+        supportedExecutionModes: [
+          "discussion_planning",
+          "supervisor_managed_execution",
+        ],
       };
 
       const request = await governanceService.createRequest(
@@ -500,6 +522,10 @@ describe("SR-QA-IDENTITY-001 / C009, C010 & C011 — 跨租戶隔離／即時失
         tenantId: "ten_alpha_001",
         authMethods: ["jwt", "mfa"],
         authTime: new Date().toISOString(),
+        supportedExecutionModes: [
+          "discussion_planning",
+          "supervisor_managed_execution",
+        ],
       };
 
       const request = await governanceService.createRequest(

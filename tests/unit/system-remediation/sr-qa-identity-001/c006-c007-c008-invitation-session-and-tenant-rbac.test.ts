@@ -180,10 +180,9 @@ describe("SR-QA-IDENTITY-001 / C006, C007 & C008 — 邀請發送／Session治�
         revokedByPrincipalId: null,
         revokeReason: null,
         deviceSummary: { userAgent: "Mozilla/5.0 Chrome" },
-        riskSummary: null,
+        riskSummary: {},
         createdAt: new Date().toISOString(),
         updatedAt: new Date().toISOString(),
-        record: {},
       });
 
       const envelope = await controller.listAdminSessions(callerIdentity, {});
@@ -236,11 +235,10 @@ describe("SR-QA-IDENTITY-001 / C006, C007 & C008 — 邀請發送／Session治�
         revokedAt: null,
         revokedByPrincipalId: null,
         revokeReason: null,
-        deviceSummary: null,
-        riskSummary: null,
+        deviceSummary: {},
+        riskSummary: {},
         createdAt: new Date().toISOString(),
         updatedAt: new Date().toISOString(),
-        record: {},
       });
 
       const mockReq = {
