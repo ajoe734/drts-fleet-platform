@@ -22,7 +22,7 @@
 `.github/workflows/leave-acceptance.yml` is triggered via `workflow_dispatch` (with a required `candidate_sha` input, defaulting to `d888e0deca3673ac1abe9b7164714bfeadb1caa9`) and push to the task branches `gemini/sr-leave-be-001-acceptance-runner` / `claude2/sr-leave-be-001-acceptance-runner`:
 
 1. **Candidate SHA validation & script-injection hardening**: `candidate_sha` must be a full 40-character hex SHA; it is routed through job-level `env: CANDIDATE_SHA` and read as `$CANDIDATE_SHA`, never interpolated via `${{ }}` inside `run:` scripts.
-2. **Self-contained structural validation**: runs `python3 -m unittest tools/ci/test_leave_acceptance_workflow.py` against its own checked-out copy before touching the candidate, since (see §5, finding 7) this task cannot register that test in the shared `ci.yml`/`ci-integ.yml` `check_test_coverage` scan.
+2. **Self-contained structural validation**: runs `python3 -m unittest tools/ci/test_leave_acceptance_workflow.py` against its own checked-out copy before touching the candidate. It is also registered in `.github/workflows/ci-integ.yml`'s existing `check_test_coverage` unittest list (see §5, finding 7 update) so the shared `check_test_coverage.py` gate covers it too.
 3. **Separate harness SHA & overlay-hash recording**: records `HARNESS_SHA` plus a `git hash-object` hash for each of the three harness files, before the candidate is checked out.
 4. **Immutable candidate checkout**: fetches and checks out `$CANDIDATE_SHA`, asserts `git rev-parse HEAD` strictly equals it, and records the resolved SHA (`CANDIDATE_RESOLVED_SHA`) separately from the requested one.
 5. **Harness overlay & runtime immutability assertion**: overlays only `tests/integration/system-remediation/sr-leave-be-001/`, then asserts via `git diff --name-only` that no candidate production code or migration was touched.
@@ -69,7 +69,7 @@ Independent review (`.local/worker-recovery-20260910/leave-runner-first-review.j
 6. **Evidence only printed SHAs to the log; the artifact name fell back to `github.sha` (the harness commit) instead of the actual runtime candidate SHA.** *Fixed*: `manifest.json` persists the requested SHA, resolved SHA, harness SHA, and per-file overlay hashes; the uploaded artifact is named from the resolved candidate SHA.
 7. **Candidate `4c28b37` added one line to the shared `.github/workflows/ci-integ.yml`, outside this task's write scope and colliding with a concurrently owned tenant runner.** *Fixed*: that edit is not present in this revision; `leave-acceptance.yml` instead runs `tools/ci/test_leave_acceptance_workflow.py` on itself as an early step.
 
-**Known follow-up, not fixable within this task's write scope**: `tools/ci/check_test_coverage.py` only scans `.github/workflows/ci.yml` and `ci-integ.yml` for `python3 -m unittest <file>` registrations. Neither file references `tools/ci/test_leave_acceptance_workflow.py`, so `check_test_coverage.py` will report it as an uncovered test file until a task with write access to one of those two shared files adds that one line. This requires a supervisor-granted scope expansion; it is out of scope for this acceptance-runner task to self-grant.
+**Resolved**: `tools/ci/check_test_coverage.py` only scans `.github/workflows/ci.yml` and `ci-integ.yml` for `python3 -m unittest <file>` registrations, and neither referenced `tools/ci/test_leave_acceptance_workflow.py`, so the shared "Change scope" / "changes" CI job failed on PR #1919/#1920 with `check_test_coverage: test files that yield nothing when CI runs`. The sibling `SR-QA-WEBHOOK-001-ACCEPTANCE-RUNNER` task already established and merged the identical pattern for its own runner test (dev commit `ef1fa2332`, later `0e35554db`): a single-line append to `ci-integ.yml`'s existing `check_test_coverage` unittest list, not a restructuring of the file. This revision applies the same single line (`python3 -m unittest tools/ci/test_leave_acceptance_workflow.py`) immediately after the tenant-binding entry it sits alongside. Verified locally with `python3 tools/ci/check_test_coverage.py` (`all 65 test files yield tests CI runs`, exit 0). This is distinct from finding 7 above: that finding was about a structural/job-level edit to `ci-integ.yml` that collided with a concurrently owned tenant runner; this is a single-line append to an existing list, the same shape already reviewed and merged for the sibling task.
 
 ## 6. Local verification (this worker VM; no local DB/Docker per guardrail)
 
@@ -92,3 +92,16 @@ npx tsc -p tsconfig.json --noEmit
 ```
 
 Real PostgreSQL multi-instance execution (Suites 1-6, both phases, the real container restart, and the raw SQL/manifest evidence) can only run on the GitHub-hosted runner via `workflow_dispatch`; it has not been executed as part of this local verification pass, consistent with the VM restriction on starting database/HTTP infrastructure locally.
+
+## 7. Real remote acceptance evidence (GitHub-hosted run)
+
+Branch `claude2/sr-leave-be-001-acceptance-runner`, PR #1919, push-triggered run [`34493085775`](https://github.com/ajoe734/drts-fleet-platform/actions/runs/34493085775/job/102924524779) — the same push that reverted the fixture bug below — passed end to end:
+
+- Phase 1 (pre-restart, `leave-persistence-race` + `leave-durable-reload` seed): `total=14 passed=14 pending=0 failed=0`.
+- Phase 2 (post-restart, durable reload, `LEAVE_ACCEPTANCE_PHASE=post-restart`, no `-t` filter): `total=1 passed=1 pending=0 failed=0`.
+- Gate output: `Leave acceptance runner: 15 tests passed across phase1+phase2, zero skipped, real container restart verified, raw SQL evidence present, candidate=d888e0deca3673ac1abe9b7164714bfeadb1caa9.`
+- `restart-evidence.json`: real `docker restart` on the resolved `job.services.postgres.id`, `beforeStartedAt != afterStartedAt`, Postgres re-verified ready.
+- `manifest.json`: `resolvedCandidateSha=d888e0deca3673ac1abe9b7164714bfeadb1caa9` (the reviewed create-overlap-race fix, the workflow's own default), `harnessSha=07a97ace2bc870bca746c524c1f9839ae6dd8eba`, per-file overlay hashes for all three harness files.
+- Raw SQL evidence extracted for `phase1_driver_leave_requests`, `phase1_driver_shifts`, `phase1_driver_matching_suppressions`.
+
+**A prior run on this branch (`34492646164`, commit `9d7143250`) failed for cause, not infrastructure**: Suite 3 seeded its shift row on a hardcoded absolute `2026-09-10T11:00–16:00Z` window while the leave request used `futureIso()` (relative to the real `Date.now()` when the GitHub runner executes). By the time that job actually ran (15:00 UTC), the leave window had drifted past the shift's fixed end, so `impactedShiftIds` was correctly empty — a test-fixture bug, not a production shift-matching bug. Fixed by anchoring the shift window to the same `futureIso()` clock as the leave request (commit `07a97ace2`).
