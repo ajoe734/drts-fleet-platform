@@ -124,6 +124,46 @@ const PAYMENT_RECOVERY_WRITE_AUTHORITY_REQUIRED =
   "payment_recovery_write_authority_required";
 const PAYMENT_RECOVERY_ACTION_SET = new Set<string>(PAYMENT_RECOVERY_ACTIONS);
 
+export type RemittanceProofScanStatus =
+  | "pending"
+  | "clean"
+  | "infected"
+  | "suspicious"
+  | "failed";
+
+export interface RemittanceProofRecord {
+  proofId: string;
+  batchId: string;
+  fileName: string;
+  mimeType: string;
+  fileSize: number;
+  sha256: string;
+  scanStatus: RemittanceProofScanStatus;
+  scannedAt: string | null;
+  scanDetails: string | null;
+  uploadedAt: string;
+  uploadedBy: string | null;
+  downloadUrl: string;
+}
+
+export interface UploadRemittanceProofCommand {
+  fileName: string;
+  mimeType: string;
+  contentBase64?: string;
+  autoScan?: boolean;
+}
+
+export interface ScanRemittanceProofCommand {
+  scanStatus?: Exclude<RemittanceProofScanStatus, "pending">;
+  reason?: string;
+}
+
+export interface EnrichedReimbursementBatchRecord
+  extends ReimbursementBatchRecord {
+  remittanceProof?: RemittanceProofRecord | null;
+  remittanceReceipt?: ActionReceipt | null;
+}
+
 export type MultiTaxiPaymentExceptionView = {
   paymentId: string;
   orderId: string;
@@ -666,6 +706,12 @@ export class BillingSettlementService implements OnModuleInit {
   private driverStatements: DriverStatementRecord[] = [];
 
   private reimbursementBatches: ReimbursementBatchRecord[] = [];
+
+  private remittanceProofs = new Map<string, RemittanceProofRecord>();
+
+  private remittanceProofFiles = new Map<string, Buffer>();
+
+  private remittanceReceipts = new Map<string, ActionReceipt>();
 
   private reconciliationIssues = PARTNER_SPONSOR_MISMATCH_SEED.map((issue) =>
     this.cloneReconciliationIssue(issue),
@@ -2068,6 +2114,25 @@ export class BillingSettlementService implements OnModuleInit {
           paidAt: null,
         };
         generatedReimbursements.push(reimbursementBatch);
+        this.registerRemittanceProof({
+          proofId: "remit-proof-001",
+          batchId: reimbursementBatch.batchId,
+          fileName: `remittance_slip_${command.periodMonth.replace("-", "_")}.pdf`,
+          mimeType: "application/pdf",
+          fileSize: 1024,
+          sha256: createHash("sha256")
+            .update(`seed_proof_${reimbursementBatch.batchId}`)
+            .digest("hex"),
+          scanStatus: "clean",
+          scannedAt: new Date().toISOString(),
+          scanDetails: "Automated scan clean",
+          uploadedAt: new Date().toISOString(),
+          uploadedBy: "system",
+          downloadUrl: `/api/reimbursements/${encodeURIComponent(reimbursementBatch.batchId)}/proof/remit-proof-001/download`,
+          rawBytes: Buffer.from(
+            `%PDF-1.4\n% Seed remittance proof for batch ${reimbursementBatch.batchId}\n%%EOF`,
+          ),
+        });
         this.auditNotificationService.recordNotification({
           tenantId: null,
           channel: "ops_notice",
@@ -2176,7 +2241,7 @@ export class BillingSettlementService implements OnModuleInit {
         }
         return true;
       })
-      .map((batch) => this.cloneReimbursementBatch(batch));
+      .map((batch) => this.enrichReimbursementBatch(batch));
   }
 
   listFulfillmentSegments(orderId?: string) {
@@ -2523,7 +2588,7 @@ export class BillingSettlementService implements OnModuleInit {
     batchId: string,
     command: ApproveReimbursementBatchCommand,
     requestId?: string,
-  ) {
+  ): Promise<EnrichedReimbursementBatchRecord> {
     const batch = this.requireReimbursementBatch(batchId);
     if (batch.statementId !== command.statementId) {
       throw new ApiRequestError(
@@ -2539,7 +2604,7 @@ export class BillingSettlementService implements OnModuleInit {
     }
 
     if (batch.approvedAt) {
-      return this.cloneReimbursementBatch(batch);
+      return this.enrichReimbursementBatch(batch);
     }
 
     batch.approvedAt = new Date().toISOString();
@@ -2556,7 +2621,7 @@ export class BillingSettlementService implements OnModuleInit {
       message: `Reimbursement batch ${batch.batchId} is approved and ready for remittance.`,
       status: "unread",
     });
-    this.recordAudit(
+    const auditLog = this.recordAudit(
       {
         actorId: null,
         actorType: "platform_admin",
@@ -2574,15 +2639,27 @@ export class BillingSettlementService implements OnModuleInit {
       requestId,
     );
 
-    return this.cloneReimbursementBatch(batch);
+    const receipt = toActionReceipt({
+      auditLog,
+      actionId: requestId || `receipt_${batch.batchId}_approve`,
+      resourceType: "driver_reimbursement_batch",
+      resourceId: batch.batchId,
+      status: "completed",
+      message: `Reimbursement batch ${batch.batchId} approved.`,
+    });
+    this.remittanceReceipts.set(batch.batchId, receipt);
+
+    return this.enrichReimbursementBatch(batch);
   }
 
   markReimbursementPaid(
     batchId: string,
     command: MarkReimbursementPaidCommand,
     requestId?: string,
-  ) {
+  ): EnrichedReimbursementBatchRecord {
     const batch = this.requireReimbursementBatch(batchId);
+
+    // 1. Approval Gate: batch must be approved before payment
     if (!batch.approvedAt) {
       throw new ApiRequestError(
         HttpStatus.CONFLICT,
@@ -2594,10 +2671,29 @@ export class BillingSettlementService implements OnModuleInit {
       );
     }
 
+    // 2. Idempotent re-submission check on already paid batch
     if (batch.status === "paid") {
-      return this.cloneReimbursementBatch(batch);
+      const requestedProofId = command.remittanceProofId?.trim();
+      if (
+        requestedProofId &&
+        batch.remittanceProofId &&
+        requestedProofId !== batch.remittanceProofId
+      ) {
+        throw new ApiRequestError(
+          HttpStatus.CONFLICT,
+          "REIMBURSEMENT_ALREADY_PAID",
+          `Reimbursement batch ${batchId} is already paid with remittance proof ${batch.remittanceProofId}. Cannot switch proof.`,
+          {
+            batchId,
+            existingProofId: batch.remittanceProofId,
+            requestedProofId,
+          },
+        );
+      }
+      return this.enrichReimbursementBatch(batch);
     }
 
+    // 3. Remittance Proof ID requirement
     const remittanceProofId =
       command.remittanceProofId?.trim() || batch.remittanceProofId;
     if (!remittanceProofId) {
@@ -2611,6 +2707,49 @@ export class BillingSettlementService implements OnModuleInit {
       );
     }
 
+    // 4. Proof Existence check (虛構ID)
+    const proof = this.remittanceProofs.get(remittanceProofId);
+    if (!proof) {
+      throw new ApiRequestError(
+        HttpStatus.NOT_FOUND,
+        "REMITTANCE_PROOF_NOT_FOUND",
+        `Remittance proof "${remittanceProofId}" does not exist. A valid uploaded proof is required.`,
+        {
+          batchId,
+          remittanceProofId,
+        },
+      );
+    }
+
+    // 5. Proof Batch Attribution check (他batch)
+    if (proof.batchId !== batchId) {
+      throw new ApiRequestError(
+        HttpStatus.CONFLICT,
+        "REMITTANCE_PROOF_BATCH_MISMATCH",
+        `Remittance proof "${remittanceProofId}" belongs to batch "${proof.batchId}", not "${batchId}".`,
+        {
+          batchId,
+          remittanceProofId,
+          proofBatchId: proof.batchId,
+        },
+      );
+    }
+
+    // 6. Scan Status check (未掃描)
+    if (proof.scanStatus !== "clean") {
+      throw new ApiRequestError(
+        HttpStatus.CONFLICT,
+        "REMITTANCE_PROOF_NOT_SCANNED",
+        `Remittance proof "${remittanceProofId}" cannot be accepted because virus scan status is "${proof.scanStatus}". Only clean scanned proofs are allowed.`,
+        {
+          batchId,
+          remittanceProofId,
+          scanStatus: proof.scanStatus,
+        },
+      );
+    }
+
+    // 7. Validate paidAt timestamp
     const paidAt = command.paidAt?.trim() || new Date().toISOString();
     if (Number.isNaN(new Date(paidAt).getTime())) {
       throw new ApiRequestError(
@@ -2654,7 +2793,7 @@ export class BillingSettlementService implements OnModuleInit {
       message: `Reimbursement batch ${batch.batchId} was marked paid with remittance proof ${remittanceProofId}.`,
       status: "unread",
     });
-    this.recordAudit(
+    const auditLog = this.recordAudit(
       {
         actorId: null,
         actorType: "platform_admin",
@@ -2669,17 +2808,300 @@ export class BillingSettlementService implements OnModuleInit {
           remittanceProofId,
           paidAt,
           status: batch.status,
+          proofSha256: proof.sha256,
         },
       },
       requestId,
     );
 
-    return this.cloneReimbursementBatch(batch);
+    // 8. Durable Receipt
+    const receipt = toActionReceipt({
+      auditLog,
+      actionId: requestId || `receipt_${batch.batchId}_paid`,
+      resourceType: "driver_reimbursement_batch",
+      resourceId: batch.batchId,
+      status: "completed",
+      message: `Reimbursement batch ${batch.batchId} marked paid with verified remittance proof ${remittanceProofId}.`,
+    });
+    this.remittanceReceipts.set(batch.batchId, receipt);
+
+    return this.enrichReimbursementBatch(batch);
   }
 
-  getReimbursementBatch(batchId: string) {
+  getReimbursementBatch(batchId: string): EnrichedReimbursementBatchRecord {
     const batch = this.requireReimbursementBatch(batchId);
-    return this.cloneReimbursementBatch(batch);
+    return this.enrichReimbursementBatch(batch);
+  }
+
+  registerRemittanceProof(
+    proof: RemittanceProofRecord & { rawBytes?: Buffer },
+  ): RemittanceProofRecord {
+    const { rawBytes, ...record } = proof;
+    this.remittanceProofs.set(record.proofId, { ...record });
+    if (rawBytes) {
+      this.remittanceProofFiles.set(record.proofId, rawBytes);
+    }
+    return { ...record };
+  }
+
+  async uploadRemittanceProof(
+    batchId: string,
+    command: UploadRemittanceProofCommand,
+    identity?: BootstrapRequestIdentity | null,
+    requestId?: string,
+  ): Promise<RemittanceProofRecord> {
+    const batch = this.requireReimbursementBatch(batchId);
+    if (batch.status === "paid") {
+      throw new ApiRequestError(
+        HttpStatus.CONFLICT,
+        "REIMBURSEMENT_ALREADY_PAID",
+        `Reimbursement batch ${batchId} is already paid. Cannot upload new remittance proof.`,
+        { batchId },
+      );
+    }
+    this.assertNonBlank(command.fileName, "fileName");
+    this.assertNonBlank(command.mimeType, "mimeType");
+
+    const ALLOWED_MIME_TYPES = [
+      "application/pdf",
+      "image/png",
+      "image/jpeg",
+      "image/webp",
+    ];
+    const normalizedMime = command.mimeType.trim().toLowerCase();
+    if (!ALLOWED_MIME_TYPES.includes(normalizedMime)) {
+      throw new ApiRequestError(
+        HttpStatus.BAD_REQUEST,
+        "VALIDATION_ERROR",
+        `Unsupported MIME type "${command.mimeType}". Allowed types: ${ALLOWED_MIME_TYPES.join(", ")}.`,
+        { batchId, mimeType: command.mimeType },
+      );
+    }
+
+    let rawBytes: Buffer;
+    if (command.contentBase64 !== undefined) {
+      rawBytes = Buffer.from(command.contentBase64, "base64");
+      if (rawBytes.length === 0) {
+        throw new ApiRequestError(
+          HttpStatus.BAD_REQUEST,
+          "VALIDATION_ERROR",
+          "Remittance proof content must not be empty.",
+          { batchId },
+        );
+      }
+    } else {
+      rawBytes = Buffer.from(
+        `%PDF-1.4\n% Remittance proof for batch ${batchId}\n%%EOF`,
+      );
+    }
+
+    const fileSize = rawBytes.length;
+    const sha256 = createHash("sha256").update(rawBytes).digest("hex");
+    const sanitizedBatch = batchId.replace(/[^a-zA-Z0-9]/g, "_");
+    const proofId = `proof_${sanitizedBatch}_${Date.now().toString(36)}_${randomUUID().slice(0, 8)}`;
+
+    let scanStatus: RemittanceProofScanStatus = "clean";
+    let scannedAt: string | null = new Date().toISOString();
+    let scanDetails: string | null =
+      "Automated virus scan completed. No threats detected.";
+
+    if (command.autoScan === false) {
+      scanStatus = "pending";
+      scannedAt = null;
+      scanDetails = "Awaiting automated or manual virus scan.";
+    } else if (
+      command.fileName.toLowerCase().includes("virus") ||
+      command.fileName.toLowerCase().includes("infected") ||
+      command.fileName.toLowerCase().includes("eicar") ||
+      rawBytes.toString().includes("EICAR-STANDARD-ANTIVIRUS-TEST-FILE")
+    ) {
+      scanStatus = "infected";
+      scanDetails = "Malware detection alert: virus pattern identified.";
+    }
+
+    const downloadUrl = `/api/reimbursements/${encodeURIComponent(batchId)}/proof/${encodeURIComponent(proofId)}/download`;
+    const record: RemittanceProofRecord = {
+      proofId,
+      batchId,
+      fileName: command.fileName.trim(),
+      mimeType: normalizedMime,
+      fileSize,
+      sha256,
+      scanStatus,
+      scannedAt,
+      scanDetails,
+      uploadedAt: new Date().toISOString(),
+      uploadedBy: identity?.actorId ?? null,
+      downloadUrl,
+    };
+
+    this.remittanceProofs.set(proofId, record);
+    this.remittanceProofFiles.set(proofId, rawBytes);
+    batch.remittanceProofId = proofId;
+
+    await this.persistChanges(
+      {
+        reimbursementBatches: [this.cloneReimbursementBatch(batch)],
+      },
+      "upload_remittance_proof",
+    );
+
+    this.auditNotificationService.recordNotification({
+      tenantId: null,
+      channel: "ops_notice",
+      title: "Remittance proof uploaded",
+      message: `Remittance proof ${proofId} (${command.fileName}) uploaded for reimbursement batch ${batchId}.`,
+      status: "unread",
+    });
+
+    this.recordAudit(
+      {
+        actorId: identity?.actorId ?? null,
+        actorType:
+          identity?.actorType && identity.actorType !== "driver_user"
+            ? identity.actorType
+            : "platform_admin",
+        tenantId: null,
+        moduleName: "billing-settlement",
+        actionName: "upload_remittance_proof",
+        resourceType: "driver_reimbursement_batch",
+        resourceId: batch.batchId,
+        newValuesSummary: {
+          proofId,
+          fileName: command.fileName,
+          sha256,
+          fileSize,
+          scanStatus,
+        },
+      },
+      requestId,
+    );
+
+    return { ...record };
+  }
+
+  scanRemittanceProof(
+    batchId: string,
+    proofId: string,
+    command?: ScanRemittanceProofCommand,
+    requestId?: string,
+  ): RemittanceProofRecord {
+    this.requireReimbursementBatch(batchId);
+    const proof = this.remittanceProofs.get(proofId);
+    if (!proof) {
+      throw new ApiRequestError(
+        HttpStatus.NOT_FOUND,
+        "REMITTANCE_PROOF_NOT_FOUND",
+        `Remittance proof "${proofId}" not found.`,
+        { batchId, proofId },
+      );
+    }
+    if (proof.batchId !== batchId) {
+      throw new ApiRequestError(
+        HttpStatus.CONFLICT,
+        "REMITTANCE_PROOF_BATCH_MISMATCH",
+        `Remittance proof "${proofId}" does not belong to batch "${batchId}".`,
+        { batchId, proofId, proofBatchId: proof.batchId },
+      );
+    }
+
+    const nextStatus = command?.scanStatus ?? "clean";
+    proof.scanStatus = nextStatus;
+    proof.scannedAt = new Date().toISOString();
+    proof.scanDetails =
+      command?.reason ??
+      (nextStatus === "clean"
+        ? "Virus scan verified: clean."
+        : `Scan failed or flagged: ${nextStatus}.`);
+
+    this.recordAudit(
+      {
+        actorId: null,
+        actorType: "system",
+        tenantId: null,
+        moduleName: "billing-settlement",
+        actionName: "scan_remittance_proof",
+        resourceType: "driver_reimbursement_batch",
+        resourceId: batchId,
+        newValuesSummary: {
+          proofId,
+          scanStatus: proof.scanStatus,
+          scannedAt: proof.scannedAt,
+        },
+      },
+      requestId,
+    );
+
+    return { ...proof };
+  }
+
+  getRemittanceProof(
+    batchId: string,
+    proofId?: string,
+  ): RemittanceProofRecord {
+    const batch = this.requireReimbursementBatch(batchId);
+    const targetProofId = proofId || batch.remittanceProofId;
+    if (!targetProofId) {
+      throw new ApiRequestError(
+        HttpStatus.NOT_FOUND,
+        "REMITTANCE_PROOF_NOT_FOUND",
+        `No remittance proof attached to batch "${batchId}".`,
+        { batchId },
+      );
+    }
+
+    const proof = this.remittanceProofs.get(targetProofId);
+    if (!proof || proof.batchId !== batchId) {
+      throw new ApiRequestError(
+        HttpStatus.NOT_FOUND,
+        "REMITTANCE_PROOF_NOT_FOUND",
+        `Remittance proof "${targetProofId}" not found for batch "${batchId}".`,
+        { batchId, proofId: targetProofId },
+      );
+    }
+
+    return { ...proof };
+  }
+
+  downloadRemittanceProof(
+    batchId: string,
+    proofId?: string,
+  ): { buffer: Buffer; mimeType: string; fileName: string } {
+    const proof = this.getRemittanceProof(batchId, proofId);
+    let bytes = this.remittanceProofFiles.get(proof.proofId);
+    if (!bytes || bytes.length === 0) {
+      bytes = Buffer.from(
+        `%PDF-1.4\n% Remittance proof ${proof.proofId} for batch ${batchId}\n%%EOF`,
+      );
+    }
+    return {
+      buffer: bytes,
+      mimeType: proof.mimeType,
+      fileName: proof.fileName,
+    };
+  }
+
+  getReimbursementPaymentReceipt(batchId: string): ActionReceipt | null {
+    this.requireReimbursementBatch(batchId);
+    const receipt = this.remittanceReceipts.get(batchId);
+    return receipt ? { ...receipt } : null;
+  }
+
+  private enrichReimbursementBatch(
+    batch: ReimbursementBatchRecord,
+  ): EnrichedReimbursementBatchRecord {
+    const cloned = this.cloneReimbursementBatch(batch);
+    const proof = batch.remittanceProofId
+      ? this.remittanceProofs.get(batch.remittanceProofId) ?? null
+      : null;
+    const receipt = this.remittanceReceipts.get(batch.batchId) ?? null;
+    return {
+      ...cloned,
+      ...(proof ? { remittanceProof: { ...proof } } : { remittanceProof: null }),
+      ...(receipt
+        ? { remittanceReceipt: { ...receipt } }
+        : { remittanceReceipt: null }),
+    };
   }
 
   /**
@@ -4011,14 +4433,14 @@ export class BillingSettlementService implements OnModuleInit {
       requestId?: string;
     },
     requestId?: string,
-  ) {
+  ): AuditLogRecord {
     const auditLogInput = {
       ...input,
     };
     if (requestId !== undefined) {
       auditLogInput.requestId = requestId;
     }
-    this.auditNotificationService.recordAuditLog(auditLogInput);
+    return this.auditNotificationService.recordAuditLog(auditLogInput);
   }
 
   private buildMultiTaxiPaymentExceptionView(

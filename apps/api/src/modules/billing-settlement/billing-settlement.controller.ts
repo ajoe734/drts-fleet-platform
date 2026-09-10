@@ -3,10 +3,12 @@ import {
   Controller,
   Get,
   Headers,
+  HttpStatus,
   Optional,
   Param,
   Post,
   Query,
+  StreamableFile,
 } from "@nestjs/common";
 import { Throttle } from "@nestjs/throttler";
 
@@ -49,7 +51,11 @@ import {
   IdempotencyService,
 } from "../../common/idempotency";
 import { READ_HEAVY_RATE_LIMIT } from "../../common/throttling/rate-limit.constants";
-import { BillingSettlementService } from "./billing-settlement.service";
+import {
+  BillingSettlementService,
+  type ScanRemittanceProofCommand,
+  type UploadRemittanceProofCommand,
+} from "./billing-settlement.service";
 
 @Controller()
 export class BillingSettlementController {
@@ -617,5 +623,124 @@ export class BillingSettlementController {
       this.billingSettlementService.getReimbursementBatch(batchId),
       requestId,
     );
+  }
+
+  @Post("reimbursements/:batchId/proof")
+  async uploadRemittanceProof(
+    @Param("batchId") batchId: string,
+    @Body() command: UploadRemittanceProofCommand,
+    @CurrentIdentity() identity: BootstrapRequestIdentity | null = null,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    const data = await this.billingSettlementService.uploadRemittanceProof(
+      batchId,
+      command,
+      identity,
+      requestId,
+    );
+    return toApiSuccessEnvelope(data, requestId);
+  }
+
+  @Get("reimbursements/:batchId/proof")
+  getRemittanceProof(
+    @Param("batchId") batchId: string,
+    @Query("proofId") proofId?: string,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    const data = this.billingSettlementService.getRemittanceProof(
+      batchId,
+      proofId,
+    );
+    return toApiSuccessEnvelope(data, requestId);
+  }
+
+  @Post("reimbursements/:batchId/proof/scan")
+  scanRemittanceProof(
+    @Param("batchId") batchId: string,
+    @Body()
+    command: ScanRemittanceProofCommand & { proofId?: string },
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    const batch = this.billingSettlementService.getReimbursementBatch(batchId);
+    const proofId = command.proofId || batch.remittanceProofId;
+    if (!proofId) {
+      throw new ApiRequestError(
+        HttpStatus.BAD_REQUEST,
+        "VALIDATION_ERROR",
+        "proofId is required to scan remittance proof.",
+        { batchId },
+      );
+    }
+    const data = this.billingSettlementService.scanRemittanceProof(
+      batchId,
+      proofId,
+      command,
+      requestId,
+    );
+    return toApiSuccessEnvelope(data, requestId);
+  }
+
+  @Post("reimbursements/:batchId/proof/:proofId/scan")
+  scanRemittanceProofWithId(
+    @Param("batchId") batchId: string,
+    @Param("proofId") proofId: string,
+    @Body() command: ScanRemittanceProofCommand,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    const data = this.billingSettlementService.scanRemittanceProof(
+      batchId,
+      proofId,
+      command,
+      requestId,
+    );
+    return toApiSuccessEnvelope(data, requestId);
+  }
+
+  @Get("reimbursements/:batchId/proof/download")
+  downloadRemittanceProof(
+    @Param("batchId") batchId: string,
+    @Query("proofId") proofId?: string,
+  ) {
+    const file = this.billingSettlementService.downloadRemittanceProof(
+      batchId,
+      proofId,
+    );
+    return new StreamableFile(file.buffer, {
+      type: file.mimeType,
+      disposition: `attachment; filename="${file.fileName}"`,
+    });
+  }
+
+  @Get("reimbursements/:batchId/proof/:proofId/download")
+  downloadRemittanceProofWithId(
+    @Param("batchId") batchId: string,
+    @Param("proofId") proofId: string,
+  ) {
+    const file = this.billingSettlementService.downloadRemittanceProof(
+      batchId,
+      proofId,
+    );
+    return new StreamableFile(file.buffer, {
+      type: file.mimeType,
+      disposition: `attachment; filename="${file.fileName}"`,
+    });
+  }
+
+  @Get("reimbursements/:batchId/receipt")
+  getReimbursementReceipt(
+    @Param("batchId") batchId: string,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    const receipt =
+      this.billingSettlementService.getReimbursementPaymentReceipt(batchId);
+    if (!receipt) {
+      throw new ApiRequestError(
+        HttpStatus.NOT_FOUND,
+        "RECEIPT_NOT_FOUND",
+        `No payment receipt found for reimbursement batch ${batchId}.`,
+        { batchId },
+      );
+    }
+    return toApiSuccessEnvelope(receipt, requestId);
   }
 }

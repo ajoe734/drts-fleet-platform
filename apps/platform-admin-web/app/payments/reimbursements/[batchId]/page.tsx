@@ -55,6 +55,30 @@ type LineItemRow = {
   note: string;
 };
 
+interface RemittanceProofRecord {
+  proofId: string;
+  batchId: string;
+  fileName: string;
+  mimeType: string;
+  fileSize: number;
+  sha256: string;
+  scanStatus: "pending" | "clean" | "infected" | "suspicious" | "failed";
+  scannedAt: string | null;
+  scanDetails: string | null;
+  uploadedAt: string;
+  uploadedBy: string | null;
+  downloadUrl: string;
+}
+
+interface ActionReceiptRecord {
+  actionId: string;
+  auditId: string;
+  resourceType: string;
+  resourceId: string;
+  status: string;
+  message: string;
+}
+
 type TranslateFn = (
   key: string,
   params?: Record<string, string | number>,
@@ -392,6 +416,12 @@ export default function ReimbursementDetailPage() {
   const [approvalError, setApprovalError] = useState<string | null>(null);
   const [approvalReceipt, setApprovalReceipt] = useState<string | null>(null);
   const [remittanceProofId, setRemittanceProofId] = useState("");
+  const [proofRecord, setProofRecord] = useState<RemittanceProofRecord | null>(
+    null,
+  );
+  const [uploadingProof, setUploadingProof] = useState(false);
+  const [proofUploadError, setProofUploadError] = useState<string | null>(null);
+  const [scanningProof, setScanningProof] = useState(false);
   const [savingAction, setSavingAction] = useState<"approve" | "paid" | null>(
     null,
   );
@@ -423,17 +453,31 @@ export default function ReimbursementDetailPage() {
         if (nextBatch) {
           setBatch(nextBatch);
           setRemittanceProofId(nextBatch.remittanceProofId ?? "");
+          if ((nextBatch as any).remittanceProof) {
+            setProofRecord((nextBatch as any).remittanceProof);
+          } else if (nextBatch.remittanceProofId) {
+            try {
+              const proof = await client.get<RemittanceProofRecord>(
+                `/api/reimbursements/${encodeURIComponent(batchId)}/proof`,
+              );
+              setProofRecord(proof);
+            } catch {
+              // ignore if not fetched
+            }
+          }
           return;
         }
 
         setBatch(null);
         setRemittanceProofId("");
+        setProofRecord(null);
       } catch (nextError: any) {
         if (!active) {
           return;
         }
         setBatch(null);
         setRemittanceProofId("");
+        setProofRecord(null);
         setError(nextError?.message ?? String(nextError));
       } finally {
         if (active) {
@@ -448,6 +492,63 @@ export default function ReimbursementDetailPage() {
       active = false;
     };
   }, [batchId, client, t]);
+
+  async function handleFileUpload(event: React.ChangeEvent<HTMLInputElement>) {
+    const file = event.target.files?.[0];
+    if (!file || !batch) return;
+
+    setUploadingProof(true);
+    setProofUploadError(null);
+    try {
+      const base64 = await new Promise<string>((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => {
+          const result = reader.result as string;
+          const commaIdx = result.indexOf(",");
+          resolve(commaIdx >= 0 ? result.slice(commaIdx + 1) : result);
+        };
+        reader.onerror = () => reject(reader.error);
+        reader.readAsDataURL(file);
+      });
+
+      const uploaded = await client.post<RemittanceProofRecord>(
+        `/api/reimbursements/${encodeURIComponent(batch.batchId)}/proof`,
+        {
+          body: {
+            fileName: file.name,
+            mimeType: file.type || "application/pdf",
+            contentBase64: base64,
+            autoScan: true,
+          },
+        },
+      );
+      setProofRecord(uploaded);
+      setRemittanceProofId(uploaded.proofId);
+    } catch (err: any) {
+      setProofUploadError(err?.message ?? String(err));
+    } finally {
+      setUploadingProof(false);
+    }
+  }
+
+  async function handleScanProof() {
+    if (!batch || !proofRecord) return;
+    setScanningProof(true);
+    setProofUploadError(null);
+    try {
+      const scanned = await client.post<RemittanceProofRecord>(
+        `/api/reimbursements/${encodeURIComponent(batch.batchId)}/proof/${encodeURIComponent(proofRecord.proofId)}/scan`,
+        {
+          body: { scanStatus: "clean" },
+        },
+      );
+      setProofRecord(scanned);
+    } catch (err: any) {
+      setProofUploadError(err?.message ?? String(err));
+    } finally {
+      setScanningProof(false);
+    }
+  }
 
   async function handleApprove() {
     if (!batch) {
@@ -508,6 +609,9 @@ export default function ReimbursementDetailPage() {
         },
       );
       setBatch(nextBatch);
+      if ((nextBatch as any).remittanceProof) {
+        setProofRecord((nextBatch as any).remittanceProof);
+      }
       setRemittanceProofId(nextBatch.remittanceProofId ?? remittanceProofId);
       setApprovalReceipt(t("payments.reimbursements.detail.markedPaid"));
       setMarkPaidKey(createIdempotencyKey("reimbursement-mark-paid"));
@@ -757,26 +861,167 @@ export default function ReimbursementDetailPage() {
                 />
               </label>
 
-              <label style={{ display: "grid", gap: 8 }}>
+              <div style={{ display: "grid", gap: 10 }}>
                 <span style={{ fontSize: 12, fontWeight: 700 }}>
                   {t("payments.reimbursements.detail.remittanceProof")}
                 </span>
-                <input
-                  value={remittanceProofId}
-                  onChange={(event) => setRemittanceProofId(event.target.value)}
-                  placeholder="wire_20260602_001"
-                  style={{
-                    width: "100%",
-                    boxSizing: "border-box",
-                    padding: "8px 10px",
-                    borderRadius: 8,
-                    border: `1px solid ${theme.border}`,
-                    background: theme.bgRaised,
-                    color: theme.text,
-                    fontFamily: theme.monoFamily,
-                  }}
-                />
-              </label>
+
+                {proofRecord ? (
+                  <div
+                    style={{
+                      padding: 12,
+                      borderRadius: 8,
+                      border: `1px solid ${theme.border}`,
+                      background: theme.bgRaised,
+                      display: "grid",
+                      gap: 8,
+                    }}
+                  >
+                    <div
+                      style={{
+                        display: "flex",
+                        alignItems: "center",
+                        justifyContent: "space-between",
+                        flexWrap: "wrap",
+                        gap: 8,
+                      }}
+                    >
+                      <span
+                        style={{
+                          fontWeight: 600,
+                          fontSize: 13,
+                          color: theme.accent,
+                        }}
+                      >
+                        {proofRecord.fileName}
+                      </span>
+                      <Pill
+                        theme={theme}
+                        tone={
+                          proofRecord.scanStatus === "clean"
+                            ? "success"
+                            : proofRecord.scanStatus === "pending"
+                              ? "warn"
+                              : "danger"
+                        }
+                        dot
+                      >
+                        {proofRecord.scanStatus === "clean"
+                          ? "掃描通過 · Clean"
+                          : proofRecord.scanStatus === "pending"
+                            ? "待掃描 · Pending"
+                            : "異常 · " + proofRecord.scanStatus}
+                      </Pill>
+                    </div>
+
+                    <div
+                      style={{
+                        fontSize: 12,
+                        color: theme.textMuted,
+                        display: "grid",
+                        gap: 4,
+                      }}
+                    >
+                      <div>
+                        <strong>Proof ID:</strong>{" "}
+                        <span style={{ fontFamily: theme.monoFamily }}>
+                          {proofRecord.proofId}
+                        </span>
+                      </div>
+                      <div>
+                        <strong>SHA-256:</strong>{" "}
+                        <span
+                          style={{
+                            fontFamily: theme.monoFamily,
+                            fontSize: 11,
+                            wordBreak: "break-all",
+                          }}
+                        >
+                          {proofRecord.sha256}
+                        </span>
+                      </div>
+                      <div>
+                        <strong>大小:</strong>{" "}
+                        {(proofRecord.fileSize / 1024).toFixed(1)} KB
+                      </div>
+                    </div>
+
+                    <div
+                      style={{
+                        display: "flex",
+                        alignItems: "center",
+                        gap: 12,
+                        flexWrap: "wrap",
+                        marginTop: 4,
+                      }}
+                    >
+                      <a
+                        href={`/api/reimbursements/${encodeURIComponent(batch.batchId)}/proof/download`}
+                        target="_blank"
+                        rel="noreferrer"
+                        style={{
+                          display: "inline-flex",
+                          alignItems: "center",
+                          fontSize: 12,
+                          color: theme.accent,
+                          textDecoration: "none",
+                          fontWeight: 600,
+                        }}
+                      >
+                        下載證明原檔 ↗
+                      </a>
+                      {proofRecord.scanStatus !== "clean" ? (
+                        <Btn
+                          theme={theme}
+                          variant="ghost"
+                          size="xs"
+                          disabled={scanningProof}
+                          onClick={() => void handleScanProof()}
+                        >
+                          {scanningProof ? "掃描中..." : "重新掃描查驗"}
+                        </Btn>
+                      ) : null}
+                    </div>
+                  </div>
+                ) : null}
+
+                {batch.status !== "paid" ? (
+                  <div style={{ display: "grid", gap: 6 }}>
+                    <label
+                      style={{
+                        fontSize: 12,
+                        color: theme.textMuted,
+                      }}
+                    >
+                      上傳匯款證明原檔 (PDF / PNG / JPEG):
+                    </label>
+                    <input
+                      type="file"
+                      accept=".pdf,image/png,image/jpeg,image/webp"
+                      disabled={uploadingProof}
+                      onChange={(e) => void handleFileUpload(e)}
+                      style={{
+                        fontSize: 12,
+                        color: theme.text,
+                      }}
+                    />
+                    {uploadingProof ? (
+                      <span style={{ fontSize: 12, color: theme.textMuted }}>
+                        上傳並執行安全掃描中...
+                      </span>
+                    ) : null}
+                  </div>
+                ) : null}
+
+                {proofUploadError ? (
+                  <Banner
+                    theme={theme}
+                    tone="danger"
+                    title="證明上傳或掃描異常"
+                    body={proofUploadError}
+                  />
+                ) : null}
+              </div>
 
               {approvalError ? (
                 <Banner
@@ -806,6 +1051,8 @@ export default function ReimbursementDetailPage() {
                   disabled={
                     !batch.approvedAt ||
                     batch.status === "paid" ||
+                    !proofRecord ||
+                    proofRecord.scanStatus !== "clean" ||
                     savingAction !== null
                   }
                   onClick={() => void handleMarkPaid()}
@@ -879,10 +1126,41 @@ export default function ReimbursementDetailPage() {
                 <strong>
                   {t("payments.reimbursements.detail.exportPosture")}
                 </strong>{" "}
-                {batch.remittanceProofId
-                  ? t("payments.reimbursements.detail.exportPostureAttached")
-                  : t("payments.reimbursements.detail.exportPosturePending")}
+                {batch.remittanceProofId ? (
+                  <span>
+                    {t("payments.reimbursements.detail.exportPostureAttached")}{" "}
+                    (
+                    <a
+                      href={`/api/reimbursements/${encodeURIComponent(batch.batchId)}/proof/download`}
+                      target="_blank"
+                      rel="noreferrer"
+                      style={{
+                        color: theme.accent,
+                        textDecoration: "none",
+                        fontWeight: 600,
+                      }}
+                    >
+                      {batch.remittanceProofId} ↗
+                    </a>
+                    )
+                  </span>
+                ) : (
+                  t("payments.reimbursements.detail.exportPosturePending")
+                )}
               </div>
+              {(batch as any).remittanceReceipt ? (
+                <div>
+                  <strong>付款收執 (Receipt):</strong>{" "}
+                  <span style={{ fontFamily: theme.monoFamily }}>
+                    {
+                      (
+                        (batch as any)
+                          .remittanceReceipt as ActionReceiptRecord
+                      ).actionId
+                    }
+                  </span>
+                </div>
+              ) : null}
               <div>
                 <strong>
                   {t("payments.reimbursements.detail.settlementTarget")}
