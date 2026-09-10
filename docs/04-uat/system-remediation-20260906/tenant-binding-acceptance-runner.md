@@ -633,3 +633,78 @@ preset / realm bypass). Once that fix lands and is reviewed, resume this
 task by rerunning the remote workflow against the new reviewed runtime
 candidate SHA — no harness/workflow changes are expected to be needed beyond
 picking up the new candidate SHA.
+
+## 12. Auth fix landed, one more fixture-vs-product distinction, then real SUCCESS
+
+The separate auth-bypass fix (§11) landed as reviewed runtime candidate
+`87769096068d97cec7aa2edd60d4d6007da81566`. Rerunning the remote workflow
+against that candidate (unchanged harness, workflow SHA
+`3269796ddf799327d14e60288b7c1e95da5cc440`) got past the anonymous-401 check
+this task's §11 flagged, but surfaced a new `1 passed / 1 failed` gate on run
+[34475319330](https://github.com/ajoe734/drts-fleet-platform/actions/runs/34475319330/job/102864580858):
+
+```
+AssertionError: expected 'active' to be 'revoked' // ...
+  at appmodule-tenant-binding.test.ts:626
+```
+
+Traced through `apps/api/src/modules/tenant-partner/tenant-partner.service.ts`
+(`rotateApiKey`, ~L7286-7301): rotation deliberately retires every other
+still-live credential on the same tenant (`revokeReason:
+"credential_rotated"`) as part of the single-live-credential rotation policy.
+The C111 harness's victim key from the earlier attack phase was still
+`active` going into the later, legitimate same-tenant rotation step, so that
+rotation correctly retired it — the harness was asserting a stale `"active"`
+expectation for a key that a subsequent, legitimate lifecycle event had
+retired for an unrelated (non-security) reason. This is the same class of
+gap as §7-§9: a fixture/assertion gap, not a product defect, and it does not
+touch the attack-phase immutability §2/§9 already proved (that SQL snapshot
+is asserted before this rotation step ever runs).
+
+**Fix** (commit `3d033c19506691ff49b645778df662b2ce39f8c4`, current branch
+tip): the harness now asserts the exact intermediate lifecycle state right
+after rotation (new key `active`, rotated-from key `overlap_active`, the
+older still-live key retired with `revokeReason: "credential_rotated"`), and
+the final SQL readback for that key now asserts `status: "revoked"` /
+`revokeReason: "credential_rotated"` / non-null `revoked_at` instead of an
+untouched `"active"` state — so a real regression in rotation's retirement
+logic still fails this test. No product/runtime source changed; this is
+still a single-file harness overlay onto the locked parent candidate
+`87769096068d97cec7aa2edd60d4d6007da81566`.
+
+Rerunning the remote workflow against that same runtime candidate with the
+new harness/workflow SHA produced a real `SUCCESS` on run
+[34477893290/job102873068184](https://github.com/ajoe734/drts-fleet-platform/actions/runs/34477893290/job/102873068184):
+migrations passed, `2/2` tests passed, `0` failed, `0` skipped/pending —
+independently reconfirmed via `gh run view 34477893290 --json
+status,conclusion,headSha,jobs`, which reports `conclusion: success`,
+`headSha: 3d033c19506691ff49b645778df662b2ce39f8c4`, and every step
+(`Verify checkout resolved the exact immutable candidate`, `Overlay corrected
+harness test file from this workflow revision`, `Apply migrations`, `Run full
+AppModule two-tenant JWT HTTP/SQL acceptance harness`, `Gate on zero skips
+and both tests passed`, `Upload execution log, test report, evidence, and run
+status`) as `success`.
+
+Acceptance evidence for this run:
+
+- runtime (parent) candidate: `87769096068d97cec7aa2edd60d4d6007da81566`
+  (immutable, unchanged by this task)
+- workflow/harness SHA: `3d033c19506691ff49b645778df662b2ce39f8c4`
+- harness overlay: `tests/e2e/system-remediation/sr-qa-webhook-001-fix-tenant-binding/appmodule-tenant-binding.test.ts`,
+  `sha256:3a2d85ce036a24e762373fca1c6a8f06957fe6530d71d2991de3a97b61937404`
+- raw evidence: `.local/worker-recovery-20260910/tenant-run-34477893290/{run-status.json,test-report.json,verified-result.json}`
+  and `.local/worker-recovery-20260910/tenant-run-34477893290/tenant-binding-acceptance-87769096068d97cec7aa2edd60d4d6007da81566/{run-status.json,test-report.json,execution-log.txt,evidence-auth-http.json}`
+
+This satisfies this task's acceptance criteria: the dedicated GitHub-hosted
+PostgreSQL runner checked the immutable existing parent candidate, the full
+AppModule two-tenant JWT HTTP/SQL harness passed both tests with zero skips,
+execution log/evidence/test report were uploaded, and the original parent
+candidate was preserved unmodified throughout. This task's own candidate
+(this branch, harness overlay + workflow + this doc) is ready for review and
+handoff via the canonical task lifecycle.
+
+A separate, unrelated packaging issue surfaced in the auth task's own CI
+(commit-trailer format on its revert commit, job `102871009143`) while this
+run was being verified; that is tracked and being resolved inside the auth
+task itself and does not affect the runtime candidate SHA or the acceptance
+evidence recorded above.
