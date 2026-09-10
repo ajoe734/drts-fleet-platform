@@ -14,12 +14,16 @@ import { TenantPartnerModule } from "../tenant-partner/tenant-partner.module";
 import { TenantPartnerService } from "../tenant-partner/tenant-partner.service";
 import { VehicleEligibilityModule } from "../vehicle-eligibility/vehicle-eligibility.module";
 import { VoiceBookingModule } from "../voice-booking/voice-booking.module";
+import { PlatformPresenceModule } from "../platform-presence/platform-presence.module";
+import { PlatformPresenceService } from "../platform-presence/platform-presence.service";
 import { OwnedMobilityController } from "./owned-mobility.controller";
 import { OwnedMobilityRepository } from "./owned-mobility.repository";
 import { ReferralBindingScaffoldService } from "./referral-binding.scaffold.service";
 import { OwnedMobilityTaskEventsService } from "./owned-mobility-task-events.service";
 import { OwnedMobilityService } from "./owned-mobility.service";
 import { OwnedAutonomousDispatchExecutorService } from "./owned-autonomous-dispatch-executor.service";
+import { OwnedDispatchSchedulerService } from "./owned-dispatch-scheduler.service";
+import { DRIVER_AVAILABILITY_GATEWAY } from "./driver-availability-gateway";
 
 @Module({
   imports: [
@@ -34,6 +38,7 @@ import { OwnedAutonomousDispatchExecutorService } from "./owned-autonomous-dispa
     CallcenterModule,
     ProductRuleModule,
     VoiceBookingModule,
+    PlatformPresenceModule,
     forwardRef(() => SandboxDispatchGateModule),
     forwardRef(() => TenantPartnerModule),
   ],
@@ -44,11 +49,18 @@ import { OwnedAutonomousDispatchExecutorService } from "./owned-autonomous-dispa
     OwnedMobilityTaskEventsService,
     ReferralBindingScaffoldService,
     OwnedAutonomousDispatchExecutorService,
+    OwnedDispatchSchedulerService,
+    {
+      provide: DRIVER_AVAILABILITY_GATEWAY,
+      useExisting: PlatformPresenceService,
+    },
   ],
   exports: [
     OwnedMobilityService,
     ReferralBindingScaffoldService,
     OwnedAutonomousDispatchExecutorService,
+    OwnedDispatchSchedulerService,
+    DRIVER_AVAILABILITY_GATEWAY,
   ],
 })
 export class OwnedMobilityModule implements OnModuleInit {
