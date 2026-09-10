@@ -147,6 +147,15 @@ function actorTone(actorType: AuditLogRecord["actorType"]): CanvasTone {
   }
 }
 
+const MSG_INVALID_CONTEXT_TITLE = "Invalid Query Context";
+const MSG_INVALID_CONTEXT_BODY =
+  "The specified URL query parameters for audit resource context are invalid or incomplete.";
+const MSG_CLEAR_FILTER = "Clear Filter";
+const MSG_ACTIVE_CONTEXT = "Active Context";
+const MSG_NO_MATCH_TITLE = "No Matching Audit Records";
+const MSG_NO_MATCH_PREFIX =
+  "No authorized audit log records match the requested context";
+
 function AuditPageContent() {
   const { locale, t } = useTranslation();
   const client = usePlatformAdminClient();
@@ -506,12 +515,10 @@ function AuditPageContent() {
                 />
                 <CanvasCard
                   theme={theme}
-                  title="Invalid Query Context"
+                  title={MSG_INVALID_CONTEXT_TITLE}
                   subtitle={contextResult.errorMessage}
                 >
-                  <div style={stateStyle}>
-                    The specified URL query parameters for audit resource context are invalid or incomplete.
-                  </div>
+                  <div style={stateStyle}>{MSG_INVALID_CONTEXT_BODY}</div>
                   <div
                     style={{
                       display: "flex",
@@ -525,7 +532,7 @@ function AuditPageContent() {
                       onClick={handleClearFilter}
                       data-testid="audit-clear-context-btn"
                     >
-                      Clear Filter
+                      {MSG_CLEAR_FILTER}
                     </CanvasBtn>
                   </div>
                 </CanvasCard>
@@ -545,7 +552,7 @@ function AuditPageContent() {
                 >
                   <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
                     <CanvasPill theme={theme} tone="accent">
-                      Active Context
+                      {MSG_ACTIVE_CONTEXT}
                     </CanvasPill>
                     <span
                       style={{
@@ -563,16 +570,16 @@ function AuditPageContent() {
                     onClick={handleClearFilter}
                     data-testid="audit-clear-context-btn"
                   >
-                    Clear Filter
+                    {MSG_CLEAR_FILTER}
                   </CanvasBtn>
                 </div>
                 <CanvasCard
                   theme={theme}
-                  title="No Matching Audit Records"
+                  title={MSG_NO_MATCH_TITLE}
                   subtitle={contextResult.contextSummary}
                 >
                   <div style={stateStyle}>
-                    No authorized audit log records match the requested context ({contextResult.contextSummary}).
+                    {`${MSG_NO_MATCH_PREFIX} (${contextResult.contextSummary}).`}
                   </div>
                   <div
                     style={{
@@ -586,7 +593,7 @@ function AuditPageContent() {
                       variant="secondary"
                       onClick={handleClearFilter}
                     >
-                      Clear Filter
+                      {MSG_CLEAR_FILTER}
                     </CanvasBtn>
                   </div>
                 </CanvasCard>
@@ -607,7 +614,7 @@ function AuditPageContent() {
                   >
                     <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
                       <CanvasPill theme={theme} tone="accent">
-                        Active Context
+                        {MSG_ACTIVE_CONTEXT}
                       </CanvasPill>
                       <span
                         style={{
@@ -625,7 +632,7 @@ function AuditPageContent() {
                       onClick={handleClearFilter}
                       data-testid="audit-clear-context-btn"
                     >
-                      Clear Filter
+                      {MSG_CLEAR_FILTER}
                     </CanvasBtn>
                   </div>
                 ) : null}
