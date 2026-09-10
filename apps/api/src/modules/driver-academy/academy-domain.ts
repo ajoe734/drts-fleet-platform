@@ -13,7 +13,9 @@ export interface AcademyCourseVersion extends AcademyCourseDetail {
   answerKey: Readonly<Record<string, string>>;
 }
 
-export function publicCourse(course: AcademyCourseVersion): AcademyCourseDetail {
+export function publicCourse(
+  course: AcademyCourseVersion,
+): AcademyCourseDetail {
   return {
     courseId: course.courseId,
     courseCode: course.courseCode,
@@ -50,42 +52,74 @@ export function gradeQuiz(
   evidence: { attemptId: string; driverId: string; attemptedAt: string },
 ): DriverQuizAttemptDetail {
   if (!submission || submission.courseVersion !== course.version) {
-    throw new ApiRequestError(409, "COURSE_VERSION_STALE", "Reload the current course version.");
+    throw new ApiRequestError(
+      409,
+      "COURSE_VERSION_STALE",
+      "Reload the current course version.",
+    );
   }
-  const invalid = () => new ApiRequestError(
-    400,
-    "QUIZ_INCOMPLETE_OR_DUPLICATE_SUBMISSION",
-    "Submit each question exactly once with a valid option.",
-  );
+  const invalid = () =>
+    new ApiRequestError(
+      400,
+      "QUIZ_INCOMPLETE_OR_DUPLICATE_SUBMISSION",
+      "Submit each question exactly once with a valid option.",
+    );
   const answers = submission.answers;
-  if (!Array.isArray(answers) || !course.questions.length || answers.length !== course.questions.length) {
+  if (
+    !Array.isArray(answers) ||
+    !course.questions.length ||
+    answers.length !== course.questions.length
+  ) {
     throw invalid();
   }
   const byQuestion = new Map<string, string>();
   for (const answer of answers) {
-    if (!answer || typeof answer.questionId !== "string" || typeof answer.selectedOptionId !== "string" || byQuestion.has(answer.questionId)) {
+    if (
+      !answer ||
+      typeof answer.questionId !== "string" ||
+      typeof answer.selectedOptionId !== "string" ||
+      byQuestion.has(answer.questionId)
+    ) {
       throw invalid();
     }
     byQuestion.set(answer.questionId, answer.selectedOptionId);
   }
   // Reject malformed published data rather than awarding an empty or ambiguous test a pass.
-  if (new Set(course.questions.map((q) => q.questionId)).size !== course.questions.length ||
-      !Number.isFinite(course.passingScore) || course.passingScore < 0 || course.passingScore > 100) {
+  if (
+    new Set(course.questions.map((q) => q.questionId)).size !==
+      course.questions.length ||
+    !Number.isFinite(course.passingScore) ||
+    course.passingScore < 0 ||
+    course.passingScore > 100
+  ) {
     throw new Error("Invalid published academy quiz");
   }
   const answersSummary = course.questions.map((question) => {
     const selectedOptionId = byQuestion.get(question.questionId);
-    if (!selectedOptionId || !question.options.some((option) => option.optionId === selectedOptionId)) {
+    if (
+      !selectedOptionId ||
+      !question.options.some((option) => option.optionId === selectedOptionId)
+    ) {
       throw invalid();
     }
     const correct = course.answerKey[question.questionId];
-    if (!correct || !question.options.some((option) => option.optionId === correct) ||
-        new Set(question.options.map((option) => option.optionId)).size !== question.options.length) {
+    if (
+      !correct ||
+      !question.options.some((option) => option.optionId === correct) ||
+      new Set(question.options.map((option) => option.optionId)).size !==
+        question.options.length
+    ) {
       throw new Error("Invalid published academy answer key");
     }
-    return { questionId: question.questionId, selectedOptionId, isCorrect: selectedOptionId === correct };
+    return {
+      questionId: question.questionId,
+      selectedOptionId,
+      isCorrect: selectedOptionId === correct,
+    };
   });
-  const score = answersSummary.filter((answer) => answer.isCorrect).length * 100 / answersSummary.length;
+  const score =
+    (answersSummary.filter((answer) => answer.isCorrect).length * 100) /
+    answersSummary.length;
   return {
     ...evidence,
     courseId: course.courseId,
@@ -104,16 +138,36 @@ export function trainingRecord(
   now: Date,
   started = false,
 ): DriverTrainingRecord {
-  const history = attempts.filter((attempt) => attempt.driverId === driverId && attempt.courseId === course.courseId)
-    .sort((a, b) => Date.parse(b.attemptedAt) - Date.parse(a.attemptedAt) || b.attemptId.localeCompare(a.attemptId));
-  const current = history.filter((attempt) => attempt.courseVersion === course.version);
+  const history = attempts
+    .filter(
+      (attempt) =>
+        attempt.driverId === driverId && attempt.courseId === course.courseId,
+    )
+    .sort(
+      (a, b) =>
+        Date.parse(b.attemptedAt) - Date.parse(a.attemptedAt) ||
+        b.attemptId.localeCompare(a.attemptId),
+    );
+  const current = history.filter(
+    (attempt) => attempt.courseVersion === course.version,
+  );
   const pass = current.find((attempt) => attempt.passed);
-  const expiresAt = pass && course.validityDays !== null
-    ? new Date(Date.parse(pass.attemptedAt) + course.validityDays * 86_400_000).toISOString()
-    : null;
+  const expiresAt =
+    pass && course.validityDays !== null
+      ? new Date(
+          Date.parse(pass.attemptedAt) + course.validityDays * 86_400_000,
+        ).toISOString()
+      : null;
   const expired = !!expiresAt && Date.parse(expiresAt) <= now.getTime();
-  const status = pass ? (expired ? "expired" : "passed")
-    : current.length ? "failed" : started ? "in_progress" : "not_started";
+  const status = pass
+    ? expired
+      ? "expired"
+      : "passed"
+    : current.length
+      ? "failed"
+      : started
+        ? "in_progress"
+        : "not_started";
   return {
     recordId: `${driverId}:${course.courseId}:v${course.version}`,
     driverId,
@@ -121,7 +175,9 @@ export function trainingRecord(
     courseCode: course.courseCode,
     courseTitle: course.title,
     status,
-    highestScore: current.length ? Math.max(...current.map((attempt) => attempt.score)) : null,
+    highestScore: current.length
+      ? Math.max(...current.map((attempt) => attempt.score))
+      : null,
     passed: status === "passed",
     attemptsCount: history.length,
     completedAt: pass?.attemptedAt ?? null,
@@ -141,22 +197,38 @@ export function fleetTraining(
 ): FleetTrainingView {
   const drivers = [...new Set(activeDriverIds)];
   const required = courses.filter((course) => course.isRequired);
-  const records = new Map(drivers.map((driverId) => [driverId,
-    required.map((course) => trainingRecord(course, driverId, attempts, now)),
-  ]));
+  const records = new Map(
+    drivers.map((driverId) => [
+      driverId,
+      required.map((course) => trainingRecord(course, driverId, attempts, now)),
+    ]),
+  );
   const total = drivers.length;
-  const pct = (completed: number) => total ? Math.round(completed * 100 / total) : 0;
-  const completed = [...records.values()].filter((items) => items.every((item) => item.passed)).length;
+  const pct = (completed: number) =>
+    total ? Math.round((completed * 100) / total) : 0;
+  const completed = [...records.values()].filter((items) =>
+    items.every((item) => item.passed),
+  ).length;
   return {
     fleetPartnerId,
     rows: required.map((course) => {
-      const count = [...records.values()].filter((items) => items.some((item) => item.courseId === course.courseId && item.passed)).length;
-      return { course: course.title, en: course.courseCode, completed: count, total, pct: pct(count) };
+      const count = [...records.values()].filter((items) =>
+        items.some((item) => item.courseId === course.courseId && item.passed),
+      ).length;
+      return {
+        course: course.title,
+        en: course.courseCode,
+        completed: count,
+        total,
+        pct: pct(count),
+      };
     }),
     summary: {
       completionPct: `${pct(completed)}%`,
       pendingHeadcount: String(total - completed),
-      overdueIncomplete: [...records.values()].filter((items) => items.some((item) => item.isOverdue)).length,
+      overdueIncomplete: [...records.values()].filter((items) =>
+        items.some((item) => item.isOverdue),
+      ).length,
     },
     source: "authoritative",
   };
