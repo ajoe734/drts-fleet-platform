@@ -1539,6 +1539,45 @@ describe("UV-EXEC-024 Real PostgreSQL Two-Instance Race & Fault Matrix", () => {
            ('vehicle', $5, $2, $3, $4, 'held')`,
           [driverId, orderId, assignId, groupId, vehicleId],
         );
+        // A real assignment write always lands with its paired
+        // ops.phase1_driver_tasks row in the same transaction (see
+        // OwnedMobilityRepository.persistOrderWorkflow's dispatchAssignments
+        // + driverTasks pairing) -- seeding the assignment alone would let
+        // the DB-authoritative reconciliation check inside
+        // loadOrderCancellationForUpdate() see an assignment with no task
+        // and throw REDISPATCH_ASSIGNMENT_ALREADY_CLOSED, which is not the
+        // race this case is modelling.
+        await seedClient.query(
+          `INSERT INTO ops.phase1_driver_tasks (task_id, order_id, dispatch_job_id, assignment_id, status, created_at, updated_at, record)
+           VALUES ($1, $2, $3, $4, 'pending_acceptance', now(), now(), $5::jsonb)`,
+          [
+            taskId,
+            orderId,
+            dispatchJobId,
+            assignId,
+            JSON.stringify({
+              taskId,
+              orderId,
+              dispatchJobId,
+              assignmentId: assignId,
+              driverId,
+              vehicleId,
+              sourcePlatform: null,
+              routeProvided: false,
+              waypoints: [],
+              status: "pending_acceptance",
+              acceptedAt: null,
+              departedAt: null,
+              arrivedPickupAt: null,
+              startedAt: null,
+              completedAt: null,
+              actualDistanceKm: null,
+              actualDurationSec: null,
+              fare: null,
+              proof: null,
+            }),
+          ],
+        );
         await seedClient.query("COMMIT");
       } finally {
         seedClient.release();
@@ -1557,6 +1596,13 @@ describe("UV-EXEC-024 Real PostgreSQL Two-Instance Race & Fault Matrix", () => {
         await acceptClient.query("BEGIN");
         await acceptClient.query(
           "UPDATE ops.phase1_dispatch_assignments SET status = 'accepted' WHERE assignment_id = $1",
+          [assignId],
+        );
+        await acceptClient.query(
+          `UPDATE ops.phase1_driver_tasks
+           SET status = 'accepted', updated_at = now(),
+               record = jsonb_set(record, '{status}', '"accepted"')
+           WHERE assignment_id = $1`,
           [assignId],
         );
         await acceptClient.query(
@@ -1678,6 +1724,40 @@ describe("UV-EXEC-024 Real PostgreSQL Two-Instance Race & Fault Matrix", () => {
            ('vehicle', $5, $2, $3, $4, 'held')`,
           [driverId, orderId, assign1Id, group1Id, vehicleId],
         );
+        // Pair the assignment with its ops.phase1_driver_tasks row, exactly
+        // like a real write (see the Case 4.1b comment on
+        // loadOrderCancellationForUpdate's reconciliation check).
+        await seedClient.query(
+          `INSERT INTO ops.phase1_driver_tasks (task_id, order_id, dispatch_job_id, assignment_id, status, created_at, updated_at, record)
+           VALUES ($1, $2, $3, $4, 'pending_acceptance', now(), now(), $5::jsonb)`,
+          [
+            task1Id,
+            orderId,
+            dispatchJob1Id,
+            assign1Id,
+            JSON.stringify({
+              taskId: task1Id,
+              orderId,
+              dispatchJobId: dispatchJob1Id,
+              assignmentId: assign1Id,
+              driverId,
+              vehicleId,
+              sourcePlatform: null,
+              routeProvided: false,
+              waypoints: [],
+              status: "pending_acceptance",
+              acceptedAt: null,
+              departedAt: null,
+              arrivedPickupAt: null,
+              startedAt: null,
+              completedAt: null,
+              actualDistanceKm: null,
+              actualDurationSec: null,
+              fare: null,
+              proof: null,
+            }),
+          ],
+        );
         await seedClient.query("COMMIT");
       } finally {
         seedClient.release();
@@ -1697,6 +1777,13 @@ describe("UV-EXEC-024 Real PostgreSQL Two-Instance Race & Fault Matrix", () => {
         await replaceClient.query("BEGIN");
         await replaceClient.query(
           "UPDATE ops.phase1_dispatch_assignments SET status = 'cancelled' WHERE assignment_id = $1",
+          [assign1Id],
+        );
+        await replaceClient.query(
+          `UPDATE ops.phase1_driver_tasks
+           SET status = 'cancelled', updated_at = now(),
+               record = jsonb_set(record, '{status}', '"cancelled"')
+           WHERE assignment_id = $1`,
           [assign1Id],
         );
         await replaceClient.query(
@@ -1721,6 +1808,37 @@ describe("UV-EXEC-024 Real PostgreSQL Two-Instance Race & Fault Matrix", () => {
               status: "assigned",
               createdAt: new Date().toISOString(),
               updatedAt: new Date().toISOString(),
+            }),
+          ],
+        );
+        await replaceClient.query(
+          `INSERT INTO ops.phase1_driver_tasks (task_id, order_id, dispatch_job_id, assignment_id, status, created_at, updated_at, record)
+           VALUES ($1, $2, $3, $4, 'pending_acceptance', now(), now(), $5::jsonb)`,
+          [
+            task2Id,
+            orderId,
+            dispatchJob2Id,
+            assign2Id,
+            JSON.stringify({
+              taskId: task2Id,
+              orderId,
+              dispatchJobId: dispatchJob2Id,
+              assignmentId: assign2Id,
+              driverId,
+              vehicleId,
+              sourcePlatform: null,
+              routeProvided: false,
+              waypoints: [],
+              status: "pending_acceptance",
+              acceptedAt: null,
+              departedAt: null,
+              arrivedPickupAt: null,
+              startedAt: null,
+              completedAt: null,
+              actualDistanceKm: null,
+              actualDurationSec: null,
+              fare: null,
+              proof: null,
             }),
           ],
         );
