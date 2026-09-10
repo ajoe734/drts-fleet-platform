@@ -82,8 +82,6 @@ import {
 import {
   deriveCohortMetricsPresentation,
   deriveCallbackSlaPresentation,
-  deriveDimensionalAlertPresentation,
-  formatVoiceCost,
   type UiCohortMetricsView,
   type UiCostLedgerItem,
 } from "./callcenter-metrics-ledger";
@@ -1071,8 +1069,8 @@ export default function CallcenterPage() {
   const [outcomeNotice, setOutcomeNotice] = useState<OutcomeNotice | null>(
     null,
   );
-  const [usageRecords, setUsageRecords] = useState<UiCostLedgerItem[]>([]);
-  const [serverCohort, setServerCohort] = useState<UiCohortMetricsView | null>(null);
+  const [usageRecords] = useState<UiCostLedgerItem[]>([]);
+  const [serverCohort] = useState<UiCohortMetricsView | null>(null);
   const [loading, setLoading] = useState(true);
   const [query, setQuery] = useState("");
   const [queueView, setQueueView] = useState<QueueView>("sessions");
