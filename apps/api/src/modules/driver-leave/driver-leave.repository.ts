@@ -42,6 +42,28 @@ export class DriverLeaveRepository {
   private readonly leaves = new Map<string, DriverLeaveRecord>();
   private readonly shifts = new Map<string, ShiftSummaryForLeave>();
   private readonly suppressions = new Map<string, MatchingSuppressionRecord>();
+  private readonly memoryDriverQueues = new Map<string, Promise<void>>();
+
+  private async withMemoryDriverLock<T>(
+    driverId: string,
+    fn: () => Promise<T>,
+  ): Promise<T> {
+    const prev = this.memoryDriverQueues.get(driverId) ?? Promise.resolve();
+    let resolveLock!: () => void;
+    const next = new Promise<void>((r) => {
+      resolveLock = r;
+    });
+    this.memoryDriverQueues.set(driverId, next);
+    try {
+      await prev;
+      return await fn();
+    } finally {
+      resolveLock();
+      if (this.memoryDriverQueues.get(driverId) === next) {
+        this.memoryDriverQueues.delete(driverId);
+      }
+    }
+  }
 
   constructor(@Optional() private readonly databaseService?: DatabaseService) {}
 
@@ -150,6 +172,151 @@ export class DriverLeaveRepository {
     const copy = structuredClone(record);
     this.leaves.set(copy.leaveId, copy);
     return copy;
+  }
+
+  async createLeaveWithOverlapCheck(
+    record: DriverLeaveRecord,
+  ): Promise<DriverLeaveRecord> {
+    if (this.isEnabled()) {
+      return this.withTransaction(async (executor) => {
+        // 1. Transaction-scoped per-driver DB lock prevents concurrent creation races across instances
+        await executor.query(
+          "SELECT pg_advisory_xact_lock(hashtext($1)::bigint)",
+          [`driver_leave:${record.driverId}`],
+        );
+
+        // 2. Overlap query inside the same transaction
+        const selectResult = await executor.query<JsonRecordRow>(
+          `
+            SELECT record
+            FROM ops.phase1_driver_leave_requests
+            WHERE driver_id = $1
+              AND status IN ('pending', 'approved')
+              AND start_time < $3::timestamptz
+              AND end_time > $2::timestamptz
+            FOR UPDATE
+          `,
+          [record.driverId, record.startTime, record.endTime],
+        );
+
+        if (selectResult.rows.length > 0) {
+          const overlapping = selectResult.rows.map(
+            (r) => r.record as DriverLeaveRecord,
+          );
+          throw new ApiRequestError(
+            HttpStatus.CONFLICT,
+            DRIVER_LEAVE_ERROR_CODES.LEAVE_OVERLAPPING_REQUEST,
+            "Requested leave time range overlaps with an existing pending or approved leave.",
+            {
+              overlappingLeaves: overlapping.map((l) => ({
+                leaveId: l.leaveId,
+                status: l.status,
+                startTime: l.startTime,
+                endTime: l.endTime,
+              })),
+            },
+          );
+        }
+
+        // 3. Insert record inside the same transaction
+        try {
+          await executor.query(
+            `
+              INSERT INTO ops.phase1_driver_leave_requests (
+                leave_id,
+                driver_id,
+                leave_type,
+                start_time,
+                end_time,
+                reason,
+                status,
+                reviewed_by_principal_id,
+                reviewed_at,
+                review_notes,
+                impacted_shift_ids,
+                created_at,
+                updated_at,
+                record
+              ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14::jsonb)
+            `,
+            [
+              record.leaveId,
+              record.driverId,
+              record.leaveType,
+              record.startTime,
+              record.endTime,
+              record.reason,
+              record.status,
+              record.reviewedByPrincipalId,
+              record.reviewedAt,
+              record.reviewNotes,
+              record.impactedShiftIds,
+              record.createdAt,
+              record.updatedAt,
+              JSON.stringify(record),
+            ],
+          );
+        } catch (err: unknown) {
+          const pgErr = err as { code?: string; message?: string };
+          if (
+            pgErr?.code === "23P01" ||
+            pgErr?.message?.includes("phase1_driver_leave_no_overlap")
+          ) {
+            throw new ApiRequestError(
+              HttpStatus.CONFLICT,
+              DRIVER_LEAVE_ERROR_CODES.LEAVE_OVERLAPPING_REQUEST,
+              "Requested leave time range overlaps with an existing pending or approved leave.",
+              {
+                driverId: record.driverId,
+                startTime: record.startTime,
+                endTime: record.endTime,
+              },
+            );
+          }
+          throw err;
+        }
+
+        return structuredClone(record);
+      });
+    }
+
+    // In-memory fallback ONLY when DB is disabled
+    return this.withMemoryDriverLock(record.driverId, async () => {
+      const startMs = new Date(record.startTime).getTime();
+      const endMs = new Date(record.endTime).getTime();
+
+      const overlapping: DriverLeaveRecord[] = [];
+      for (const l of this.leaves.values()) {
+        if (l.driverId !== record.driverId) continue;
+        if (l.status !== "pending" && l.status !== "approved") continue;
+
+        const lStart = new Date(l.startTime).getTime();
+        const lEnd = new Date(l.endTime).getTime();
+        if (startMs < lEnd && endMs > lStart) {
+          overlapping.push(structuredClone(l));
+        }
+      }
+
+      if (overlapping.length > 0) {
+        throw new ApiRequestError(
+          HttpStatus.CONFLICT,
+          DRIVER_LEAVE_ERROR_CODES.LEAVE_OVERLAPPING_REQUEST,
+          "Requested leave time range overlaps with an existing pending or approved leave.",
+          {
+            overlappingLeaves: overlapping.map((l) => ({
+              leaveId: l.leaveId,
+              status: l.status,
+              startTime: l.startTime,
+              endTime: l.endTime,
+            })),
+          },
+        );
+      }
+
+      const copy = structuredClone(record);
+      this.leaves.set(copy.leaveId, copy);
+      return copy;
+    });
   }
 
   async findById(leaveId: string): Promise<DriverLeaveRecord | null> {

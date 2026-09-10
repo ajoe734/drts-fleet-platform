@@ -90,29 +90,6 @@ export class DriverLeaveService {
       );
     }
 
-    // Overlap prevention with pending or approved leaves
-    const overlapping = await this.repository.findOverlapping(
-      normalizedDriverId,
-      startDate.toISOString(),
-      endDate.toISOString(),
-    );
-
-    if (overlapping.length > 0) {
-      throw new ApiRequestError(
-        HttpStatus.CONFLICT,
-        DRIVER_LEAVE_ERROR_CODES.LEAVE_OVERLAPPING_REQUEST,
-        "Requested leave time range overlaps with an existing pending or approved leave.",
-        {
-          overlappingLeaves: overlapping.map((l) => ({
-            leaveId: l.leaveId,
-            status: l.status,
-            startTime: l.startTime,
-            endTime: l.endTime,
-          })),
-        },
-      );
-    }
-
     const leaveId = `lv_${randomUUID()}`;
     const nowIso = current.toISOString();
 
@@ -132,7 +109,7 @@ export class DriverLeaveService {
       updatedAt: nowIso,
     };
 
-    return this.repository.save(record);
+    return this.repository.createLeaveWithOverlapCheck(record);
   }
 
   async getLeaveById(leaveId: string): Promise<DriverLeaveRecord> {

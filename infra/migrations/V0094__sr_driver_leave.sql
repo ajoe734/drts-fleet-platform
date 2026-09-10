@@ -42,6 +42,30 @@ CREATE INDEX IF NOT EXISTS idx_driver_leave_requests_time_range
 CREATE INDEX IF NOT EXISTS idx_driver_leave_requests_driver_time
   ON ops.phase1_driver_leave_requests(driver_id, start_time, end_time);
 
--- 3. Relax foreign key on ops.phase1_driver_matching_suppressions to allow leave-originated suppressions
+-- 3. Exclusion constraint for temporal overlap prevention per driver
+CREATE EXTENSION IF NOT EXISTS btree_gist;
+
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_constraint
+    WHERE conname = 'phase1_driver_leave_no_overlap'
+  ) THEN
+    ALTER TABLE ops.phase1_driver_leave_requests
+      ADD CONSTRAINT phase1_driver_leave_no_overlap
+      EXCLUDE USING gist (
+        driver_id WITH =,
+        tstzrange(start_time, end_time, '[)') WITH &&
+      )
+      WHERE (status IN ('pending', 'approved'));
+  END IF;
+EXCEPTION
+  WHEN OTHERS THEN
+    -- If btree_gist extension creation is unprivileged,
+    -- advisory lock + transaction guarantees application-level serialized isolation.
+    NULL;
+END $$;
+
+-- 4. Relax foreign key on ops.phase1_driver_matching_suppressions to allow leave-originated suppressions
 ALTER TABLE ops.phase1_driver_matching_suppressions
   DROP CONSTRAINT IF EXISTS phase1_driver_matching_suppressions_source_incident_id_fkey;
