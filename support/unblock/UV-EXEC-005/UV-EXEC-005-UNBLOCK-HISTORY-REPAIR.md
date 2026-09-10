@@ -172,3 +172,72 @@ This unblock note does **not** claim:
 - That the `orchestrator_approval_broker` MCP connection issue observed in this session is resolved — it remains disconnected, it was simply not the actual cause of this particular block.
 
 Parent `UV-EXEC-005` is now correctly in `review`, owned by `Claude`, reviewed by `Claude2`, pointing at the real green candidate `9929c084dcb82c545fd0726ae1fe3870a499b8b6` on `claude2/uv-exec-005` (PR #1663). This task's acceptance is satisfied by identifying the true (non-git, non-contamination) cause of the block, correcting machine truth without any destructive or force-push git operation, and recording the concrete unblocked next step (reviewer `Claude2` — a separate role than this unblock task — to review PR #1663 and continue the normal `approve`/`done` lifecycle for `UV-EXEC-005`).
+
+---
+
+## 8. Second Regression (2026-09-06, later dispatch cycle)
+
+After the §4 repair above, `UV-EXEC-005` went on to complete its real lifecycle:
+`Claude2` approved, CI/merge evidence was reconciled, and all four
+`required_acceptance` keys (`legacy_entry_inventory`,
+`recording_callback_compatibility`, `intent_scope_negative_evidence`,
+`reviewed_candidate_sha`) were recorded in `acceptance_evidence` — the values
+visible in `ai-status.sh show UV-EXEC-005` cite `CI run 34026475330`, PR
+#1663, and candidate `9929c084dcb82c545fd0726ae1fe3870a499b8b6` throughout, and
+`merge_reachability` was set to `verified`.
+
+Despite that, a subsequent dispatch cycle re-delivered `UV-EXEC-005` to a
+fresh `Claude` owner session (this one) with `status: in_progress`,
+**no** `candidate_sha`/`candidate_branch`/`pr_url`/`ci_status`/`merge_sha`
+fields, and a stale `next` note reading exactly like generic dispatch
+boilerplate ("CI typecheck failure: add missing `@nestjs/event-emitter`
+workspace dependency ..."), unrelated to the actual shipped fix (which
+relocated a DB-backed voice-fence test suite, per `9929c084d`'s own commit
+message). This is the same `clear_candidate_evidence()` symptom as §2.4,
+now hitting the *second* time on this task (matching the general pattern
+called out for `UV-EXEC-027` in
+`support/unblock/UV-EXEC-027/UV-EXEC-027-UNBLOCK-HISTORY-REPAIR.md`), not a
+new git problem:
+
+- `git merge-base --is-ancestor 89c101ee8418be64eed276a203af14931af276e0 origin/dev`
+  confirms the PR #1663 merge commit is on `origin/dev`.
+- `gh pr view 1663` confirms `state: MERGED`, `mergeCommit.oid:
+  89c101ee8418be64eed276a203af14931af276e0`, `headRefName:
+  claude2/uv-exec-005`.
+- `gh run view 34026475330` confirms `conclusion: success` at `headSha:
+  9929c084dcb82c545fd0726ae1fe3870a499b8b6`.
+- `git diff 9929c084d 89c101ee8 -- apps/api/src/modules/callcenter/callcenter.service.ts apps/api/src/modules/owned-mobility/owned-mobility.service.ts apps/api/src/modules/voice-booking/voice-order-fence.ts`
+  is empty — the merged code on `dev` is byte-identical to the reviewed
+  candidate for every canonical artifact this task owns.
+
+Repair performed by this `Claude` owner session (no code change, no
+force-push, no branch/worktree touched):
+
+1. `AI_NAME=Claude CANDIDATE_SHA=9929c084dcb82c545fd0726ae1fe3870a499b8b6 CANDIDATE_BRANCH=claude2/uv-exec-005 PR_URL=https://github.com/ajoe734/drts-fleet-platform/pull/1663 ai-status.sh handoff UV-EXEC-005 Claude2 "..."`
+   — restored `status: review` and the candidate pointer fields, run with
+   `AI_NAME=` first per the ordering fix documented in §3.
+2. `AI_NAME=Claude CANDIDATE_HEAD_SHA=9929c084dcb82c545fd0726ae1fe3870a499b8b6 CANDIDATE_CI_STATUS=success CI_RUN_URL=https://github.com/ajoe734/drts-fleet-platform/actions/runs/34026475330 ai-status.sh reconcile-candidate UV-EXEC-005 "..."`
+   — recorded the already-green CI evidence onto the restored candidate.
+
+This owner session deliberately did **not** self-run `approve` under
+`AI_NAME=Claude2`: role gating in `ai_status.py` (`command_approve` requires
+`actor == task.reviewer`) exists precisely so a task's own owner cannot
+manufacture reviewer sign-off, and that gate should be respected even when
+the "true" review already happened once before it was wiped. `UV-EXEC-005`
+is left in `status: review`, `waiting` on reviewer `Claude2`, who can
+independently re-verify PR #1663 (already merged) and run `approve` with
+`REVIEWED_SHA=9929c084dcb82c545fd0726ae1fe3870a499b8b6`; a follow-up
+`reconcile-candidate` call with `MERGE_SHA=89c101ee8418be64eed276a203af14931af276e0`
+will then satisfy `transition_after_merge()`, and because
+`acceptance_evidence` already covers every `required_acceptance` key, the
+task should land directly in `status: done` without any new evidence needing
+to be fabricated.
+
+No hypothesis is offered here for what dispatch/supervisor action caused the
+second wipe (unlike §3, no reproducible tool-classifier cause was found for
+this occurrence); flagging that the same symptom recurring on the same task
+after a prior documented fix suggests the underlying `clear_candidate_evidence()`
+trigger paths in `ai_status.py` (`progress`/`reopen`/reassignment flows) may
+still be reachable from a state that should be terminal, and may warrant a
+guard that refuses to clear candidate fields once `acceptance_evidence`
+already satisfies `required_acceptance` for the task.
