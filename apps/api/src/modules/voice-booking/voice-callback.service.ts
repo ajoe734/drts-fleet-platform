@@ -1,6 +1,7 @@
 import { randomUUID, createHash } from "node:crypto";
 import { Injectable, Optional } from "@nestjs/common";
 import { ApiRequestError } from "../../common/api-envelope";
+import { DatabaseService } from "../../common/db";
 import { type ContactRole } from "./voice-contact.service";
 import { VoiceSessionRepository } from "./voice-session.repository";
 
@@ -104,6 +105,18 @@ export interface CreateVoiceCallbackInput {
   maxAttempts?: number;
 }
 
+export interface CreateVoiceCallbackDurableInput {
+  voiceSessionId: string;
+  contactPhoneEncrypted: string;
+  contactPhoneLookupToken: string;
+  consentSnapshotHash: string;
+  reason?: string | undefined;
+  resourceScopeId?: string | null | undefined;
+  priority?: CallbackPriority | undefined;
+  scheduledAt?: string | null | undefined;
+  dueAt?: string | null | undefined;
+}
+
 export interface ClaimVoiceCallbackInput {
   taskId: string;
   operatorId: string;
@@ -178,6 +191,13 @@ export class VoiceCallbackService {
 
   constructor(
     @Optional() private readonly sessionRepository?: VoiceSessionRepository,
+    // Real DB persistence for `voice.callback_task` is scoped to the
+    // additive `completeCallbackDurable`/`cancelCallbackDurable` methods
+    // below (UV-EXEC-024). No production caller currently constructs this
+    // service with a `databaseService`; the pre-existing `completeCallback`/
+    // `cancelCallback`/`recordAttempt` keep their pure in-memory behavior
+    // unchanged either way.
+    @Optional() private readonly databaseService?: DatabaseService,
   ) {}
 
   /**
@@ -185,6 +205,10 @@ export class VoiceCallbackService {
    */
   private sha256(content: string): string {
     return createHash("sha256").update(content).digest("hex");
+  }
+
+  private isDbBacked(): boolean {
+    return this.databaseService?.isEnabled() ?? false;
   }
 
   /**
@@ -759,5 +783,383 @@ export class VoiceCallbackService {
 
   private cloneTask(task: VoiceCallbackTaskRecord): VoiceCallbackTaskRecord {
     return { ...task };
+  }
+
+  // --- Real PostgreSQL-backed terminal-state CAS (UV-EXEC-024) -----------
+  //
+  // `voice.callback_task` (V0086) only models a subset of the in-memory
+  // `VoiceCallbackTaskRecord` shape (no brand/call/contact-name/attempt
+  // bookkeeping columns). The fields below that aren't backed by a real
+  // column are filled with honest, inert placeholders -- callers relying on
+  // this DB-backed path must not read them for business decisions; they are
+  // only present so `VoiceCallbackTaskRecord`'s shape is satisfied for
+  // status/version fencing consumers.
+
+  private mapDbTaskRow(row: {
+    task_id: string;
+    voice_session_id: string;
+    contact_phone_encrypted: string;
+    consent_snapshot_hash: string;
+    status: CallbackTaskStatus;
+    scheduled_at: Date | string | null;
+    due_at: Date | string | null;
+    priority: string | null;
+    reason: string | null;
+    resource_scope_id: string | null;
+    owner_claim_lease: string | null;
+    version: number;
+    created_at: Date | string;
+    updated_at: Date | string;
+  }): VoiceCallbackTaskRecord {
+    const toIso = (value: Date | string | null): string | null =>
+      value === null
+        ? null
+        : (value instanceof Date ? value : new Date(value)).toISOString();
+
+    return {
+      taskId: row.task_id,
+      voiceSessionId: row.voice_session_id,
+      resourceScopeId: row.resource_scope_id ?? "",
+      brandId: "",
+      callId: "",
+      contactRole: "callbackRecipient",
+      contactName: "",
+      contactPhone: row.contact_phone_encrypted,
+      consentRef: "",
+      consentSnapshotHash: row.consent_snapshot_hash,
+      reason: row.reason ?? "",
+      priority: (row.priority as CallbackPriority | null) ?? "normal",
+      dueAt: toIso(row.due_at) ?? new Date(0).toISOString(),
+      scheduledAt: toIso(row.scheduled_at),
+      status: row.status,
+      ownerClaimLease: row.owner_claim_lease,
+      assignedOperatorId: null,
+      claimExpiresAt: null,
+      version: row.version,
+      attemptCount: 0,
+      maxAttempts: 3,
+      lastOutcome: null,
+      actionKey: "",
+      createdAt: toIso(row.created_at)!,
+      updatedAt: toIso(row.updated_at)!,
+      closedAt: null,
+      cancellationReason: null,
+      dialReconcileRequired: false,
+    };
+  }
+
+  private async loadDbTask(taskId: string): Promise<VoiceCallbackTaskRecord> {
+    const result = await this.databaseService!.query<{
+      task_id: string;
+      voice_session_id: string;
+      contact_phone_encrypted: string;
+      consent_snapshot_hash: string;
+      status: CallbackTaskStatus;
+      scheduled_at: Date | string | null;
+      due_at: Date | string | null;
+      priority: string | null;
+      reason: string | null;
+      resource_scope_id: string | null;
+      owner_claim_lease: string | null;
+      version: number;
+      created_at: Date | string;
+      updated_at: Date | string;
+    }>(
+      `SELECT task_id, voice_session_id, contact_phone_encrypted, consent_snapshot_hash,
+              status, scheduled_at, due_at, priority, reason, resource_scope_id,
+              owner_claim_lease, version, created_at, updated_at
+       FROM voice.callback_task WHERE task_id = $1`,
+      [taskId],
+    );
+    const row = result.rows[0];
+    if (!row) {
+      throw new ApiRequestError(
+        404,
+        "CALLBACK_TASK_NOT_FOUND",
+        `Callback task '${taskId}' not found.`,
+      );
+    }
+    return this.mapDbTaskRow(row);
+  }
+
+  private async findUnresolvedAttemptDb(
+    taskId: string,
+  ): Promise<{ attempt_id: string } | null> {
+    const result = await this.databaseService!.query<{ attempt_id: string }>(
+      `SELECT attempt_id FROM voice.callback_attempt
+       WHERE task_id = $1 AND ended_at IS NULL
+       ORDER BY attempt_number DESC LIMIT 1`,
+      [taskId],
+    );
+    return result.rows[0] ?? null;
+  }
+
+  /**
+   * Durable, real-PostgreSQL create for `voice.callback_task` (UV-EXEC-024
+   * durable-API parity with `completeCallbackDurable`/`cancelCallbackDurable`
+   * below): all fields are real, caller-supplied consent/contact evidence --
+   * SD §12.5 "沒有同意不能補造" applies here exactly as it does to the
+   * in-memory `createCallback` above, so nothing here may be filled by a
+   * fabricated default. `uq_voice_callback_task_active_session` is the real
+   * concurrency control: a lost-response retry for a session that already
+   * has an active task hits the unique violation and replays that existing
+   * row instead of racing a second one into existence, the same
+   * receipt-recovery shape used by the accept/commit command path elsewhere
+   * in this suite.
+   */
+  async createCallbackDurable(
+    input: CreateVoiceCallbackDurableInput,
+  ): Promise<{ task: VoiceCallbackTaskRecord; replayed: boolean }> {
+    if (!this.isDbBacked()) {
+      throw new Error(
+        "createCallbackDurable requires a DB-enabled databaseService.",
+      );
+    }
+    const consentSnapshotHash = input.consentSnapshotHash?.trim();
+    if (!consentSnapshotHash) {
+      throw new ApiRequestError(
+        400,
+        "CALLBACK_CONSENT_REQUIRED",
+        "Callback requires explicit customer consent; cannot fabricate without consent.",
+      );
+    }
+    const contactPhoneEncrypted = input.contactPhoneEncrypted?.trim();
+    if (!contactPhoneEncrypted) {
+      throw new ApiRequestError(
+        400,
+        "INVALID_CONTACT_PHONE",
+        "Contact phone is required for callback.",
+      );
+    }
+
+    const db = this.databaseService!;
+    try {
+      const result = await db.query<{ task_id: string }>(
+        `INSERT INTO voice.callback_task (
+           voice_session_id, contact_phone_encrypted, contact_phone_lookup_token,
+           consent_snapshot_hash, reason, resource_scope_id, priority, scheduled_at, due_at
+         ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+         RETURNING task_id`,
+        [
+          input.voiceSessionId,
+          contactPhoneEncrypted,
+          input.contactPhoneLookupToken,
+          consentSnapshotHash,
+          input.reason ?? null,
+          input.resourceScopeId ?? null,
+          input.priority ?? null,
+          input.scheduledAt ?? null,
+          input.dueAt ?? null,
+        ],
+      );
+      return {
+        task: await this.loadDbTask(result.rows[0]!.task_id),
+        replayed: false,
+      };
+    } catch (err: unknown) {
+      if ((err as { code?: string }).code === "23505") {
+        const existing = await db.query<{ task_id: string }>(
+          `SELECT task_id FROM voice.callback_task
+           WHERE voice_session_id = $1
+             AND status NOT IN ('completed', 'cancelled', 'unreachable')`,
+          [input.voiceSessionId],
+        );
+        const existingTaskId = existing.rows[0]?.task_id;
+        if (existingTaskId) {
+          return {
+            task: await this.loadDbTask(existingTaskId),
+            replayed: true,
+          };
+        }
+      }
+      throw err;
+    }
+  }
+
+  /**
+   * Durable, real-PostgreSQL CAS variant of `completeCallback` (UV-EXEC-024
+   * Case 4.2): fences the terminal-state transition against
+   * `voice.callback_task` itself, so two independent instances racing this
+   * call genuinely serialize through Postgres, not through this process's
+   * in-memory `Map`. Requires a DB-enabled `databaseService` -- unlike
+   * `completeCallback`, this method does not fall back to in-memory state,
+   * since a caller reaching for cross-instance durability that silently
+   * degraded to per-process memory would be worse than an explicit error.
+   */
+  async completeCallbackDurable(
+    input: CompleteVoiceCallbackInput,
+  ): Promise<{ task: VoiceCallbackTaskRecord; status: "completed"; replayed: boolean }> {
+    if (!this.isDbBacked()) {
+      throw new Error(
+        "completeCallbackDurable requires a DB-enabled databaseService.",
+      );
+    }
+    const db = this.databaseService!;
+    const current = await db.query<{ status: CallbackTaskStatus }>(
+      `SELECT status FROM voice.callback_task WHERE task_id = $1`,
+      [input.taskId],
+    );
+    const currentRow = current.rows[0];
+    if (!currentRow) {
+      throw new ApiRequestError(
+        404,
+        "CALLBACK_TASK_NOT_FOUND",
+        `Callback task '${input.taskId}' not found.`,
+      );
+    }
+    if (currentRow.status === "completed") {
+      return {
+        task: await this.loadDbTask(input.taskId),
+        status: "completed",
+        replayed: true,
+      };
+    }
+    if (currentRow.status === "cancelled" || currentRow.status === "unreachable") {
+      throw new ApiRequestError(
+        409,
+        "CALLBACK_TERMINAL_RACE_CONFLICT",
+        `Task is already ${currentRow.status}; terminal states cannot be resurrected or overwritten.`,
+      );
+    }
+
+    const result = await db.query(
+      `UPDATE voice.callback_task
+       SET status = 'completed', version = version + 1, updated_at = now()
+       WHERE task_id = $1 AND version = $2 AND status NOT IN ('completed', 'cancelled', 'unreachable')
+       RETURNING task_id`,
+      [input.taskId, input.expectedVersion],
+    );
+
+    if ((result.rowCount ?? 0) === 0) {
+      // Lost a concurrent race (or stale version) since the SELECT above --
+      // re-verify the authoritative row instead of trusting our own read.
+      const recheck = await db.query<{ status: CallbackTaskStatus }>(
+        `SELECT status FROM voice.callback_task WHERE task_id = $1`,
+        [input.taskId],
+      );
+      const finalStatus = recheck.rows[0]?.status;
+      if (finalStatus === "completed") {
+        return {
+          task: await this.loadDbTask(input.taskId),
+          status: "completed",
+          replayed: true,
+        };
+      }
+      if (finalStatus === "cancelled" || finalStatus === "unreachable") {
+        throw new ApiRequestError(
+          409,
+          "CALLBACK_TERMINAL_RACE_CONFLICT",
+          `Task is already ${finalStatus}; terminal states cannot be resurrected or overwritten.`,
+        );
+      }
+      throw new ApiRequestError(
+        409,
+        "CALLBACK_TASK_VERSION_MISMATCH",
+        `Task version mismatch: expected ${input.expectedVersion}, task changed concurrently.`,
+      );
+    }
+
+    return {
+      task: await this.loadDbTask(input.taskId),
+      status: "completed",
+      replayed: false,
+    };
+  }
+
+  /**
+   * Durable, real-PostgreSQL CAS variant of `cancelCallback` (UV-EXEC-024
+   * Case 4.2) -- see `completeCallbackDurable` for why this is a separate
+   * method rather than a mode switch inside `cancelCallback`.
+   */
+  async cancelCallbackDurable(
+    input: CancelVoiceCallbackInput,
+  ): Promise<CancelVoiceCallbackResult> {
+    if (!this.isDbBacked()) {
+      throw new Error(
+        "cancelCallbackDurable requires a DB-enabled databaseService.",
+      );
+    }
+    const db = this.databaseService!;
+    const current = await db.query<{ status: CallbackTaskStatus }>(
+      `SELECT status FROM voice.callback_task WHERE task_id = $1`,
+      [input.taskId],
+    );
+    const currentRow = current.rows[0];
+    if (!currentRow) {
+      throw new ApiRequestError(
+        404,
+        "CALLBACK_TASK_NOT_FOUND",
+        `Callback task '${input.taskId}' not found.`,
+      );
+    }
+
+    if (currentRow.status === "cancelled") {
+      const inFlight = await this.findUnresolvedAttemptDb(input.taskId);
+      return {
+        task: await this.loadDbTask(input.taskId),
+        status: "cancelled",
+        replayed: true,
+        actualPhoneHungUp: !inFlight,
+        dialReconcileRequired: !!inFlight,
+        inFlightAttemptId: inFlight?.attempt_id,
+      };
+    }
+    if (currentRow.status === "completed" || currentRow.status === "unreachable") {
+      throw new ApiRequestError(
+        409,
+        "CALLBACK_TERMINAL_RACE_CONFLICT",
+        `Task is already ${currentRow.status}; cannot cancel.`,
+      );
+    }
+
+    const result = await db.query(
+      `UPDATE voice.callback_task
+       SET status = 'cancelled', version = version + 1, updated_at = now()
+       WHERE task_id = $1 AND version = $2 AND status NOT IN ('completed', 'cancelled', 'unreachable')
+       RETURNING task_id`,
+      [input.taskId, input.expectedVersion],
+    );
+
+    if ((result.rowCount ?? 0) === 0) {
+      const recheck = await db.query<{ status: CallbackTaskStatus }>(
+        `SELECT status FROM voice.callback_task WHERE task_id = $1`,
+        [input.taskId],
+      );
+      const finalStatus = recheck.rows[0]?.status;
+      if (finalStatus === "cancelled") {
+        const inFlight = await this.findUnresolvedAttemptDb(input.taskId);
+        return {
+          task: await this.loadDbTask(input.taskId),
+          status: "cancelled",
+          replayed: true,
+          actualPhoneHungUp: !inFlight,
+          dialReconcileRequired: !!inFlight,
+          inFlightAttemptId: inFlight?.attempt_id,
+        };
+      }
+      if (finalStatus === "completed" || finalStatus === "unreachable") {
+        throw new ApiRequestError(
+          409,
+          "CALLBACK_TERMINAL_RACE_CONFLICT",
+          `Task is already ${finalStatus}; cannot cancel.`,
+        );
+      }
+      throw new ApiRequestError(
+        409,
+        "CALLBACK_TASK_VERSION_MISMATCH",
+        `Task version mismatch: expected ${input.expectedVersion}, task changed concurrently.`,
+      );
+    }
+
+    const inFlight = await this.findUnresolvedAttemptDb(input.taskId);
+
+    return {
+      task: await this.loadDbTask(input.taskId),
+      status: "cancelled",
+      replayed: false,
+      actualPhoneHungUp: !inFlight,
+      dialReconcileRequired: !!inFlight,
+      inFlightAttemptId: inFlight?.attempt_id,
+    };
   }
 }

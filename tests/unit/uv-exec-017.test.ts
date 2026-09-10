@@ -131,6 +131,10 @@ function buildTestHarness(options: {
       auditLogs.push(log);
       return log;
     }),
+    recordAuditLogAsync: vi.fn(async (log: unknown) => {
+      auditLogs.push(log);
+      return log;
+    }),
   };
 
   const sessionService = new VoiceSessionService(sessionRepository as never);
@@ -283,8 +287,9 @@ describe("UV-EXEC-017: 真人轉接 coordinator 與排隊控制權移交", () =>
       expect(afterHandoff.audited).toBe(true);
       expect(afterHandoff.reason).toBe("session_handed_off_owner_changed");
 
-      // Verify audit log was recorded with exact contextual metadata
-      expect(h.auditService.recordAuditLog).toHaveBeenCalled();
+      // Verify audit log was recorded (durably, via recordAuditLogAsync) with
+      // exact contextual metadata
+      expect(h.auditService.recordAuditLogAsync).toHaveBeenCalled();
       expect(h.auditLogs).toHaveLength(1);
       expect(h.auditLogs[0]).toMatchObject({
         actionName: "late_ai_tool_result_discarded",
