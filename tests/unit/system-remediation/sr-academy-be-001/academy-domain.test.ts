@@ -68,7 +68,7 @@ describe("SR-ACADEMY-BE-001 domain rules (no persistence or HTTP claim)", () => 
       courseVersion: 1,
       attemptId: "attempt-1",
     });
-    expect(result.answersSummary[0].isCorrect).toBe(false);
+    expect(result.answersSummary[0]!.isCorrect).toBe(false);
     expect(
       gradeQuiz(
         { ...course, passingScore: 81 },
@@ -126,8 +126,8 @@ describe("SR-ACADEMY-BE-001 domain rules (no persistence or HTTP claim)", () => 
     };
     const result = publicCourse(privateCourse);
     expect(JSON.stringify(result)).not.toMatch(/answerKey|correctOptionId/);
-    result.questions[0].options[0].text = "modified";
-    expect(course.questions[0].options[0].text).toBe("Yes");
+    result.questions[0]!.options[0]!.text = "modified";
+    expect(course.questions[0]!.options[0]!.text).toBe("Yes");
   });
 
   it("never passes an empty or malformed published quiz", () => {

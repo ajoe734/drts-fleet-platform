@@ -135,7 +135,7 @@ describe("SR-ACADEMY-BE-001 AcademyService (fake repository, no live DB claim)",
     expect(result.passed).toBe(true);
     expect(repo.attempts).toHaveLength(1);
     expect(repo.trainingRecordEvidence).toHaveLength(1);
-    expect(repo.trainingRecordEvidence[0].expiresAt).not.toBeNull();
+    expect(repo.trainingRecordEvidence[0]!.expiresAt).not.toBeNull();
     expect(repo.trainingStatusUpdates.at(-1)).toMatchObject({
       driverId: "drv_1",
       status: "passed",
@@ -190,9 +190,9 @@ describe("SR-ACADEMY-BE-001 AcademyService (fake repository, no live DB claim)",
       ],
     });
     const forDriver = await service.listCourses("drv_1");
-    expect(forDriver[0].userStatus).toBe("passed");
+    expect(forDriver[0]!.userStatus).toBe("passed");
     const anonymous = await service.listCourses(null);
-    expect(anonymous[0].userStatus).toBeUndefined();
+    expect(anonymous[0]!.userStatus).toBeUndefined();
   });
 
   it("blocks a drill-down for a driver outside the fleet's active cohort", async () => {
@@ -243,8 +243,8 @@ describe("SR-ACADEMY-BE-001 AcademyService (fake repository, no live DB claim)",
     ]);
     const summaryA = await service.fleetTrainingSummary("fleet-a");
     const summaryB = await service.fleetTrainingSummary("fleet-b");
-    expect(summaryA.rows[0].total).toBe(1);
-    expect(summaryB.rows[0].total).toBe(2);
+    expect(summaryA.rows[0]!.total).toBe(1);
+    expect(summaryB.rows[0]!.total).toBe(2);
   });
 
   it("throws ApiRequestError instances with stable HTTP-mappable codes", async () => {
