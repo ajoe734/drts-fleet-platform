@@ -83,6 +83,11 @@ Explicitly NOT exercised by either job:
 
 ## 3. Real defects found and reported (not fixed here)
 
+**§3.3 below is a bootstrap-blocking defect, proven on the first real GitHub
+Actions run of this harness. It currently prevents both jobs from producing
+the positive owner-isolation/read-only evidence this task's
+`required_acceptance` gates ask for — see §5 for the exact run.**
+
 This task does not edit `apps/api/src/`. Both defects below are proven with
 real HTTP + real SQL in `host-api-sql-acceptance.test.ts`'s "Known real-schema
 defect" suite (and cross-confirmed from the browser in
@@ -131,6 +136,61 @@ vehicle is genuinely owned and active. Reproduced against a real 205-vehicle
 fixture (`HOST_BULK_PARTNER_ID`) at both the HTTP layer and, separately, by
 real Chromium navigation in `host-browser-acceptance.spec.ts`, per this
 task's explicit instruction not to shrink the fixture to hide this.
+
+### 3.3 [BLOCKING] `vehicles*` bare-wildcard routes crash `HostViewModule` bootstrap entirely under the installed `path-to-regexp@8.4.2`
+
+`apps/api/src/modules/host-view/host-view.controller.ts` declares its
+mutation-rejection routes (AC-HOST-NEG-2) with a bare Express-style wildcard:
+
+```
+@Post("vehicles*")
+@Put("vehicles*")
+@Patch("vehicles*")
+@Delete("vehicles*")
+```
+
+The installed `path-to-regexp@8.4.2` (pulled in by
+`@nestjs/platform-express@^11.1.18`, confirmed in `pnpm-lock.yaml`) dropped
+support for bare `*` wildcards; a trailing `*` now must be a named wildcard
+segment (e.g. `vehicles*splat`). When Nest binds this controller's routes
+under the module's `api` global prefix, this throws synchronously:
+
+```
+TypeError: Missing parameter name at index 19: /api/host/vehicles*; visit https://git.new/pathToRegexpError for info
+```
+
+**Effect:** this is not a single-endpoint failure — it throws while Nest is
+still compiling the HTTP adapter's route table, so the entire isolated
+`HostViewModule` composition (see `host-acceptance-app.ts`) fails to boot.
+No `GET`, and no owner-isolation or read-only check, for any Host endpoint
+can run until this is fixed; the mutation-rejection intent of AC-HOST-NEG-2
+itself is also currently unverifiable, since the process that would reject
+those methods never starts. Proven on the real, GitHub-hosted
+`api-sql-acceptance` job — see §5 for the run/job URL and candidate SHA; the
+full stack trace is in that job's uploaded `execution-log.txt` artifact
+(`host-acceptance-api-<sha>`).
+
+The `browser-acceptance` job's own failure in the same run is a direct
+cascade of this: the isolated API server process crashes at startup for the
+same reason, so `host-browser-acceptance.spec.ts` renders real empty/failed
+states against a dead backend rather than the intended data-backed states.
+This runner's own readiness-wait script (`.github/workflows/host-acceptance.yml`)
+had a second, independent bug that briefly masked this — `curl -s -o /dev/null
+-w '%{http_code}' "$URL" || echo "000"` concatenates curl's own `000` output
+(printed on connection refusal) with the `|| echo "000"` fallback into
+`000000`, which is `!= "000"`, so the wait loop falsely reported the API
+"responding" after 1 second instead of failing loudly at the 60s timeout.
+That harness bug has been fixed in this same commit (`code="$(curl ... 2>/dev/null)"; code="${code:-000}"`,
+applied to both the API and portal readiness waits) so future runs fail fast
+and honestly instead of running Playwright against a server that never
+started. The bootstrap crash itself is a product defect in
+`apps/api/src/modules/host-view/host-view.controller.ts`, out of this task's
+write scope (owned by `SR-HOST-BE-001`), and is not fixed here.
+
+**Suggested fix for the owning task:** rename the four bare wildcards to
+named wildcards, e.g. `@Post("vehicles*splat")` (and matching `Put`/`Patch`/
+`Delete`), which is the `path-to-regexp@8.4.2`-compatible equivalent of
+"match any path under `vehicles`".
 
 ## 4. Real acceptance coverage summary
 
