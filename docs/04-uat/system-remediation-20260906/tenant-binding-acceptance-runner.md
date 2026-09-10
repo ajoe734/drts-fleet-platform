@@ -52,24 +52,28 @@ narrow `push` trigger (see §6a):
    job if it does not equal the requested SHA — `actions/checkout` resolves a
    moving ref at fetch time, so this guards against silently accepting a
    different commit than the one being accepted.
-3. Creates the evidence directory, then installs dependencies and applies
-   migrations (`pnpm db:migrate`) against a dedicated `postgis/postgis:16-3.4`
-   service on `localhost:5432` (PostGIS is required — the migration set
-   enables the `postgis` extension, matching `ci-integ.yml`'s existing jobs).
-   The evidence directory is created *before* install/migrate run (not only
-   after they succeed), and install/migrate output is appended into the same
-   execution log the harness writes to, so a failure in either step still
-   leaves a log to diagnose from instead of nothing.
-4. Sets `DRTS_TENANT_BINDING_DATABASE_URL` to that migrated database and
+3. Creates the evidence directory, then overlays the corrected harness test
+   file — see §8 for why the checked-in harness at the locked parent
+   candidate is broken and why this overlay, not an edit to the immutable
+   candidate, is the sanctioned fix.
+4. Installs dependencies and applies migrations (`pnpm db:migrate`) against a
+   dedicated `postgis/postgis:16-3.4` service on `localhost:5432` (PostGIS is
+   required — the migration set enables the `postgis` extension, matching
+   `ci-integ.yml`'s existing jobs). The evidence directory is created
+   *before* install/migrate run (not only after they succeed), and
+   install/migrate output is appended into the same execution log the
+   harness writes to, so a failure in either step still leaves a log to
+   diagnose from instead of nothing.
+5. Sets `DRTS_TENANT_BINDING_DATABASE_URL` to that migrated database and
    `DRTS_WEBHOOK_AUTH_EVIDENCE` to an output path, then runs the harness with
    `pnpm exec vitest run ... --no-file-parallelism --maxConcurrency=1
    --reporter=default --reporter=json --outputFile.json=...`, appending
    stdout to the execution log.
-5. Gates on the JSON report: both tests must be present, all must pass, and
+6. Gates on the JSON report: both tests must be present, all must pass, and
    `numPendingTests` must be zero — a skip is treated as a failure, not a
    pass, so a future regression that re-introduces the skip condition cannot
    read as green.
-6. Records a `run-status.json` file with `if: always()`, derived only from
+7. Records a `run-status.json` file with `if: always()`, derived only from
    real step outcomes (`steps.install.outcome`, `steps.migrate.outcome`,
    `steps.harness.outcome`, `steps.gate.outcome`) and whether a test report
    was actually produced. Status is `passed` only when **all four** of
@@ -77,16 +81,20 @@ narrow `push` trigger (see §6a):
    exists; `not_run` when install or migration never completed (harness never
    got to execute); otherwise `failed`. It always includes `candidate_sha`
    and, separately, `workflow_sha` (the commit that supplied the workflow
-   definition for this run — see §6a). This step never infers or fabricates a
+   definition for this run — see §6a), and a `harness_overlay` object naming
+   the overlaid path plus the original and overlay content sha256 (see §8).
+   This step never infers or fabricates a
    pass — see §5 for why an early install/migrate failure previously produced
    no evidence at all, and §7 for a real false-pass this logic previously had.
-7. Uploads the execution log, JSON test report, the
+8. Uploads the execution log, JSON test report, the
    `DRTS_WEBHOOK_AUTH_EVIDENCE` file, and `run-status.json` with
    `if: always()`, so a failing run — even one that fails before the harness
    runs — still leaves evidence to diagnose from instead of nothing.
 
-No product source is modified or written back; the job only reads the
-candidate and produces evidence artifacts.
+No product/runtime source (`apps/`, `packages/`, migration/infra files) is
+modified or written back; the job only reads the candidate, overlays one
+non-product test-fixture file in its own ephemeral runner workspace (see §8;
+never committed anywhere), and produces evidence artifacts.
 
 ## 3. Structural contract test and behavioral status-script test
 
@@ -113,7 +121,12 @@ the same CI job it protects) that the workflow file keeps:
   run-status file, and
 - an `if: always()` run-status step that derives status from real step
   outcomes (never a bare pass) and names the candidate, and creates the
-  evidence directory before `pnpm install`/`pnpm db:migrate` run.
+  evidence directory before `pnpm install`/`pnpm db:migrate` run, and
+- the harness-overlay step (§8): it must source the replacement file via
+  `git show "${WORKFLOW_SHA}:..."`, verify via `git status --porcelain` that
+  nothing besides that single file changed (failing the job otherwise), and
+  `run-status.json` must record `overlay_outcome` plus a `harness_overlay`
+  object with the overlaid path and both the pre- and post-overlay sha256.
 
 `RunStatusScriptBehaviorTests` in the same file goes further than token
 presence: it extracts the `Record run status` step's `python3 - <<'PY_STATUS'`
@@ -345,3 +358,130 @@ reproduced case), successful report with `harness=cancelled` (must be
 `failed`), successful report with `gate=failure` (must be `failed`), a
 missing report despite success-looking outcomes (must not be `passed`), and
 install/migrate failure (must be `not_run`).
+
+## 8. Bug found and fixed: checked-in harness fixture fails JwtAuthService's durable-state check
+
+Supervisor-dispatched remote run
+[34463084508](https://github.com/ajoe734/drts-fleet-platform/actions/runs/34463084508)
+exercised the workflow above (before this section's fix) against the locked
+parent candidate `10123f6af00a5342f2634a01f4d9a0e7190c2173` on a real
+GitHub-hosted PostGIS service: install and migrate both succeeded (real SQL
+migration), but the harness itself failed —
+`total=2 passed=1 failed=1 skipped=0`, so `run-status.json` correctly recorded
+`"status": "failed"` (no false pass; see §7). The failure:
+
+```
+TypeError: Cannot read properties of null (reading 'actorType')
+  at JwtAuthService.toRequestIdentity apps/api/dist/common/auth/jwt-auth.service.js:723:32
+  at appmodule-tenant-binding.test.ts:346:36
+    const victimIdentity = jwt.toRequestIdentity(
+      (await jwt.verifyAccessToken(victimSession.token))!,
+    );
+```
+
+**Root cause**: `JwtAuthService.verifyAccessToken` →
+`validateDurableState`'s `realm === "tenant"` branch
+(`apps/api/src/common/auth/jwt-auth.service.ts`) requires the session's
+principal to resolve to an **active** `TenantPartnerService` tenant user
+whose `roleCode`-derived scopes and `Date.parse(user.updatedAt)` match the
+token's `scopes`/`tokenVersion` exactly. The harness (as checked into the
+locked candidate) issued sessions for arbitrary UUID principals
+(`qa-victim-principal-<uuid>`) that were never registered as tenant users
+anywhere — a fixture gap, not a product defect: the real product code was
+correctly rejecting a session with no backing durable identity, exactly as it
+is supposed to for an unenrolled principal. `verifyAccessToken` therefore
+returned `null`, and `toRequestIdentity(null)` threw.
+
+**Fix**: `appmodule-tenant-binding.test.ts`'s C111 test now seeds two real,
+active `tenant_admin` users through the same authoritative
+`TenantPartnerService` the full AppModule already wires up — no mock, no
+bypass of `validateDurableState`:
+
+1. `service.createTenantUser(tenantId, { email, displayName, roleCode:
+   "tenant_admin" }, requestId, bootstrapIdentity)` followed by
+   `service.updateTenantUserRole(tenantId, user.userId, { roleCode:
+   "tenant_admin", status: "active" }, requestId, bootstrapIdentity)`, for
+   both the victim and the other tenant. `bootstrapIdentity` is a
+   `realm: "system"` / `actorType: "system"` `IdentityContext` literal — the
+   same "no identity ⇒ bootstrap-only, no identity ⇒ cross-tenant check
+   skipped" path already exercised by `assertTenantAccessScope` for
+   unauthenticated bootstrap writes, not a forged tenant identity and not an
+   auth-check bypass. Both service calls go through
+   `TenantPartnerService`'s real transactional persistence against the same
+   migrated PostgreSQL (`persistIdentityGovernanceMutation` /
+   `SecurityEventsService`, both wired from the full AppModule), so this is
+   real SQL, matching this task's "no mocks" requirement.
+2. `service.findTenantUser(tenantId, user.userId)` re-reads the activated
+   record so the session is issued with the **post-activation** `roleCode`
+   and `updatedAt` (activation bumps `updatedAt`; using the pre-activation
+   value would still fail `Date.parse(user.updatedAt) === payload.tokenVersion`).
+3. `jwt.issueSessionToken(...)` now sets `actorId`/`principalId` to the real
+   `user.userId` (so `validateDurableState` looks up the same row it just
+   seeded), `roles: [user.roleCode]`, `scopes: [...getTenantRoleScopes(user.roleCode)!]`
+   (imported from the candidate's own compiled
+   `dist/common/auth/auth.constants.js`, exact order preserved — the durable-
+   state check does an ordered array comparison), and
+   `tokenVersion: Date.parse(user.updatedAt)`.
+
+This exact pattern (`createTenantUser` → `updateTenantUserRole` with
+`status: "active"` → session issued with `roles: [user.roleCode]`,
+`scopes: [...getTenantRoleScopes(user.roleCode)!]`,
+`tokenVersion: Date.parse(user.updatedAt)`) is already proven correct
+elsewhere in this repo — `tests/security/iam-tenant-session-revocation-e2e.test.ts`
+uses the identical seeding shape (see its `issueValidAdminSessionToken`
+helper) to construct durable-state-valid tenant sessions.
+
+**Why a workflow overlay, not a harness edit at the locked candidate**: the
+Supervisor's integration note is explicit that
+`10123f6af00a5342f2634a01f4d9a0e7190c2173` — already reviewed and merged as
+the parent task's accepted candidate — must stay byte-for-byte immutable.
+Rewriting its checked-in copy of the harness file would mean the "candidate"
+this workflow claims to verify is no longer the commit that was actually
+reviewed. Instead, `.github/workflows/tenant-binding-acceptance.yml`'s new
+"Overlay corrected harness test file from this workflow revision" step (§2
+item 3) reads the corrected file out of `WORKFLOW_SHA` (the commit that
+supplied *this* workflow revision, already fetched in the same
+`fetch-depth: 0` clone — `git show "${WORKFLOW_SHA}:${HARNESS_PATH}"`, no
+second checkout or network fetch) and overwrites only that one path in the
+otherwise-untouched candidate checkout. Immediately after, a
+`git status --porcelain` check fails the job (`exit 1`) if anything besides
+that single file differs from the candidate — so this step can never widen
+into a silent product-source overlay, by construction, not by convention.
+`run-status.json`'s `harness_overlay` object (`path`, `original_sha256`,
+`overlay_sha256`) plus `overlay_outcome` make this explicit in every run's
+evidence, so a passing run can never be read as "the original,
+unmodified-at-candidate harness passed" — it is always legible as "the
+immutable candidate's product/runtime code, exercised by a harness fixture
+overlaid from this reviewed workflow revision, passed." Both are checked by
+`tools/ci/test_tenant_binding_acceptance_workflow.py`
+(`test_overlays_only_the_corrected_harness_file_from_workflow_sha`,
+`test_run_status_records_harness_overlay_provenance`, and
+`RunStatusScriptBehaviorTests.test_records_harness_overlay_provenance`).
+
+**Verified locally this session** (worker VM cannot start Postgres/HTTP, so
+the real GitHub-hosted run in §9 is what actually proves the fix):
+
+```bash
+pnpm run typecheck:root
+# pre-existing, unrelated failures only (missing optional deps, worktree-vs-
+# canonical-root duplicate package declarations); zero errors in
+# appmodule-tenant-binding.test.ts.
+
+python3 -m unittest tools.ci.test_tenant_binding_acceptance_workflow -v
+# Ran 25 tests — OK (22 prior + 3 new: overlay structural contract, run-status
+# overlay-field structural contract, run-status overlay-field behavioral test)
+
+python3 -c "import yaml; yaml.safe_load(open('.github/workflows/tenant-binding-acceptance.yml'))"
+# parses cleanly; step order confirmed: overlay runs after checkout-verify and
+# before install/migrate/harness
+```
+
+## 9. Next step
+
+Commit and push this fix on the existing task branch, then dispatch the
+push-triggered acceptance path (§6a) again and record the resulting
+`run-status.json` / execution log / test report as the canonical acceptance
+evidence once it shows `2 passed / 0 skipped`. If that real run instead
+surfaces a genuine product-code defect (not a fixture gap), stop and register
+that as a separate product-fix task rather than patching it here, per the
+Supervisor's integration note.

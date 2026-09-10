@@ -213,6 +213,44 @@ class TenantBindingAcceptanceWorkflowTests(unittest.TestCase):
         for token in ("git commit", "git push", "git add"):
             self.assertNotIn(token, self.text)
 
+    def test_overlays_only_the_corrected_harness_file_from_workflow_sha(self) -> None:
+        # The checked-in harness at the locked PARENT_CANDIDATE_SHA is known
+        # broken (run 34463084508: unseeded tenant principal, verifyAccessToken
+        # returns null). This candidate must stay byte-for-byte immutable, so
+        # the corrected fixture can only be overlaid from WORKFLOW_SHA onto the
+        # checkout -- and the step must refuse to proceed if that overlay ever
+        # touches anything beyond this single test file.
+        overlay_block = self.text.split(
+            "Overlay corrected harness test file from this workflow revision", 1
+        )[1][:3000]
+        self.assertIn(f'git show "${{WORKFLOW_SHA}}:${{HARNESS_PATH}}"', overlay_block)
+        self.assertIn("git status --porcelain", overlay_block)
+        self.assertIn("exit 1", overlay_block)
+        self.assertIn("HARNESS_ORIGINAL_SHA256", overlay_block)
+        self.assertIn("HARNESS_OVERLAY_SHA256", overlay_block)
+        self.assertIn(TEST_PATH, overlay_block)
+        # The overlay step must run before the candidate is built/tested, not
+        # merely exist somewhere in the file.
+        overlay_index = self.text.index(
+            "Overlay corrected harness test file from this workflow revision"
+        )
+        harness_run_index = self.text.index(
+            "Run full AppModule two-tenant JWT HTTP/SQL acceptance harness"
+        )
+        self.assertLess(overlay_index, harness_run_index)
+
+    def test_run_status_records_harness_overlay_provenance(self) -> None:
+        # Acceptance evidence must never be mistaken for "unchanged original
+        # harness execution": run-status.json has to name the exact runtime
+        # candidate, the workflow revision that supplied the overlay, and a
+        # content hash of the overlaid harness file.
+        status_block = self.text.split("Record run status", 1)[1][:4000]
+        self.assertIn("harness_overlay", status_block)
+        self.assertIn("HARNESS_ORIGINAL_SHA256", status_block)
+        self.assertIn("HARNESS_OVERLAY_SHA256", status_block)
+        self.assertIn("overlay_outcome", status_block)
+        self.assertIn("steps.overlay.outcome", status_block)
+
 
 class RunStatusScriptBehaviorTests(unittest.TestCase):
     """Executes the embedded `Record run status` heredoc for real, in a
@@ -241,6 +279,7 @@ class RunStatusScriptBehaviorTests(unittest.TestCase):
     def _run(
         self,
         *,
+        overlay: str = "success",
         install: str = "success",
         migrate: str = "success",
         harness: str = "success",
@@ -258,12 +297,16 @@ class RunStatusScriptBehaviorTests(unittest.TestCase):
             env = dict(os.environ)
             env.update(
                 {
+                    "OVERLAY_OUTCOME": overlay,
                     "INSTALL_OUTCOME": install,
                     "MIGRATE_OUTCOME": migrate,
                     "HARNESS_OUTCOME": harness,
                     "GATE_OUTCOME": gate,
                     "CANDIDATE_SHA": PARENT_CANDIDATE_SHA,
                     "WORKFLOW_SHA": "f" * 40,
+                    "HARNESS_PATH": TEST_PATH,
+                    "HARNESS_ORIGINAL_SHA256": "a" * 64,
+                    "HARNESS_OVERLAY_SHA256": "b" * 64,
                 }
             )
             result = subprocess.run(
@@ -286,6 +329,16 @@ class RunStatusScriptBehaviorTests(unittest.TestCase):
         self.assertEqual(status["status"], "passed")
         self.assertEqual(status["candidate_sha"], PARENT_CANDIDATE_SHA)
         self.assertEqual(status["workflow_sha"], "f" * 40)
+
+    def test_records_harness_overlay_provenance(self) -> None:
+        # This is the evidence that lets a reviewer tell the difference
+        # between "ran the original candidate's harness unmodified" and "ran
+        # a corrected harness overlaid from a separate workflow revision".
+        status = self._run()
+        self.assertEqual(status["overlay_outcome"], "success")
+        self.assertEqual(status["harness_overlay"]["path"], TEST_PATH)
+        self.assertEqual(status["harness_overlay"]["original_sha256"], "a" * 64)
+        self.assertEqual(status["harness_overlay"]["overlay_sha256"], "b" * 64)
 
     def test_successful_report_with_failed_harness_is_not_passed(self) -> None:
         # The exact false-pass regression: gate_outcome/report look clean but

@@ -121,6 +121,47 @@ jobs:
         # validation, checkout itself) fails before this step ever runs.
         run: mkdir -p .artifacts/tenant-binding-acceptance
 
+      - name: Overlay corrected harness test file from this workflow revision
+        # CANDIDATE_SHA above is the immutable PRODUCT RUNTIME under test and
+        # is never modified. Its own checked-in copy of this one harness file
+        # is broken: real run 34463084508 proved TypeError reading
+        # 'actorType' -- toRequestIdentity(null) because verifyAccessToken
+        # rejects a session whose principal was never seeded as an active
+        # TenantPartnerService tenant user (validateDurableState's "tenant"
+        # realm branch in jwt-auth.service.ts). WORKFLOW_SHA -- the commit
+        # that supplied this workflow revision -- carries the corrected
+        # fixture in this exact file and no other product/runtime change.
+        # `git show` reads that one blob out of the same fetch-depth:0 clone
+        # (no second checkout/network fetch needed) and overwrites only this
+        # path in the otherwise-untouched candidate checkout. The
+        # `git status --porcelain` check below fails the job loudly if
+        # anything besides this single file changed, so this step can never
+        # silently widen into a product-source overlay, and the run-status
+        # evidence below never lets this be read as an unchanged-original-
+        # harness execution.
+        id: overlay
+        env:
+          HARNESS_PATH: tests/e2e/system-remediation/sr-qa-webhook-001-fix-tenant-binding/appmodule-tenant-binding.test.ts
+        run: |
+          set -o pipefail
+          original_sha256="$(sha256sum "$HARNESS_PATH" | awk '{print $1}')"
+          git show "${WORKFLOW_SHA}:${HARNESS_PATH}" > "$HARNESS_PATH"
+          overlay_sha256="$(sha256sum "$HARNESS_PATH" | awk '{print $1}')"
+          status="$(git status --porcelain)"
+          file_count="$(printf '%s\n' "$status" | grep -c '^')"
+          if [ "$file_count" != "1" ] || ! printf '%s\n' "$status" | grep -qF " M $HARNESS_PATH"; then
+            echo "::error::Overlay must touch exactly one file ($HARNESS_PATH); product/runtime source must stay identical to candidate $CANDIDATE_SHA."
+            printf '%s\n' "$status"
+            exit 1
+          fi
+          {
+            echo "HARNESS_PATH=$HARNESS_PATH"
+            echo "HARNESS_ORIGINAL_SHA256=$original_sha256"
+            echo "HARNESS_OVERLAY_SHA256=$overlay_sha256"
+          } >> "$GITHUB_ENV"
+          echo "Overlaid $HARNESS_PATH from workflow revision $WORKFLOW_SHA onto immutable runtime candidate $CANDIDATE_SHA (original sha256 $original_sha256 -> overlay sha256 $overlay_sha256); verified no other file changed." \
+            | tee -a .artifacts/tenant-binding-acceptance/execution-log.txt
+
       - uses: pnpm/action-setup@v4
         with: { version: 10.33.0, run_install: false }
       - uses: actions/setup-node@v4
@@ -195,6 +236,7 @@ jobs:
         # instead of silently uploading nothing but a warning.
         if: always()
         env:
+          OVERLAY_OUTCOME: ${{ steps.overlay.outcome }}
           INSTALL_OUTCOME: ${{ steps.install.outcome }}
           MIGRATE_OUTCOME: ${{ steps.migrate.outcome }}
           HARNESS_OUTCOME: ${{ steps.harness.outcome }}
@@ -209,6 +251,7 @@ jobs:
           status_path = Path(".artifacts/tenant-binding-acceptance/run-status.json")
           status_path.parent.mkdir(parents=True, exist_ok=True)
 
+          overlay_outcome = os.environ.get("OVERLAY_OUTCOME", "unknown")
           install_outcome = os.environ.get("INSTALL_OUTCOME", "unknown")
           migrate_outcome = os.environ.get("MIGRATE_OUTCOME", "unknown")
           harness_outcome = os.environ.get("HARNESS_OUTCOME", "unknown")
@@ -240,11 +283,17 @@ jobs:
               "candidate_sha": os.environ.get("CANDIDATE_SHA", ""),
               "workflow_sha": os.environ.get("WORKFLOW_SHA", ""),
               "status": status,
+              "overlay_outcome": overlay_outcome,
               "install_outcome": install_outcome,
               "migrate_outcome": migrate_outcome,
               "harness_outcome": harness_outcome,
               "gate_outcome": gate_outcome,
               "report_present": report_path.exists(),
+              "harness_overlay": {
+                  "path": os.environ.get("HARNESS_PATH", ""),
+                  "original_sha256": os.environ.get("HARNESS_ORIGINAL_SHA256", ""),
+                  "overlay_sha256": os.environ.get("HARNESS_OVERLAY_SHA256", ""),
+              },
           }, indent=2) + "\n")
           print(f"Run status recorded: {status}")
           PY_STATUS
