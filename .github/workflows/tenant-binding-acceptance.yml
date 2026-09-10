@@ -1,0 +1,155 @@
+name: Tenant Binding Acceptance (SR-QA-WEBHOOK-001-FIX-TENANT-BINDING)
+
+# Dedicated, manually-dispatched acceptance runner for the C111 tenant-header
+# binding fix. It exists because the standard ci-integ `unit` job never sets
+# DRTS_TENANT_BINDING_DATABASE_URL, so the HTTP/SQL half of
+# tests/e2e/system-remediation/sr-qa-webhook-001-fix-tenant-binding/
+# appmodule-tenant-binding.test.ts always self-skips there (see
+# SR-QA-WEBHOOK-001-FIX-TENANT-BINDING `required_acceptance:
+# full_appmodule_two_tenant_jwt_http_sql_candidate_evidence`). This workflow
+# checks out one immutable candidate SHA, proves the checkout did not move,
+# runs the full-AppModule harness against a dedicated migrated PostgreSQL with
+# both tests required to pass with zero skips, and uploads evidence even when
+# the run fails. It does not run on every PR and is not part of ci-integ; it
+# is invoked once per candidate that needs this acceptance evidence.
+
+on:
+  workflow_dispatch:
+    inputs:
+      candidate_sha:
+        description: "Immutable candidate commit SHA to verify (full 40-char SHA)"
+        required: true
+        default: "10123f6af00a5342f2634a01f4d9a0e7190c2173"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: tenant-binding-acceptance-${{ github.event.inputs.candidate_sha }}
+  cancel-in-progress: false
+
+env:
+  CI: true
+
+jobs:
+  acceptance:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    services:
+      postgres:
+        # PostGIS-enabled image: the migration set enables the postgis
+        # extension, and db:migrate fails without it (see ci-integ.yml).
+        image: postgis/postgis:16-3.4
+        env:
+          POSTGRES_DB: drts_fleet_platform
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      DATABASE_URL: postgresql://postgres:postgres@localhost:5432/drts_fleet_platform
+      DRTS_TENANT_BINDING_DATABASE_URL: postgresql://postgres:postgres@localhost:5432/drts_fleet_platform
+      DRTS_WEBHOOK_AUTH_EVIDENCE: ${{ github.workspace }}/.artifacts/tenant-binding-acceptance/evidence-auth-http.json
+    steps:
+      - name: Validate candidate_sha input
+        run: |
+          sha="${{ github.event.inputs.candidate_sha }}"
+          if ! [[ "$sha" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "::error::candidate_sha must be a full 40-character commit SHA, got: $sha"
+            exit 1
+          fi
+
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.inputs.candidate_sha }}
+          fetch-depth: 0
+
+      - name: Verify checkout resolved the exact immutable candidate
+        # actions/checkout resolves `ref` at fetch time; a moving branch name
+        # would silently substitute a newer commit. Fail loudly instead of
+        # recording acceptance evidence for the wrong SHA.
+        run: |
+          resolved="$(git rev-parse HEAD)"
+          expected="${{ github.event.inputs.candidate_sha }}"
+          echo "Resolved HEAD: $resolved"
+          echo "Expected candidate: $expected"
+          if [ "$resolved" != "$expected" ]; then
+            echo "::error::Checked-out HEAD ($resolved) does not match the requested candidate ($expected)."
+            exit 1
+          fi
+
+      - uses: pnpm/action-setup@v4
+        with: { version: 10.33.0, run_install: false }
+      - uses: actions/setup-node@v4
+        with:
+          {
+            node-version: 22,
+            cache: pnpm,
+            cache-dependency-path: pnpm-lock.yaml,
+          }
+      - run: pnpm install --frozen-lockfile
+
+      - name: Apply migrations to the dedicated acceptance database
+        run: pnpm db:migrate
+
+      - name: Prepare evidence directory
+        run: mkdir -p .artifacts/tenant-binding-acceptance
+
+      - name: Run full AppModule two-tenant JWT HTTP/SQL acceptance harness
+        # `|| true` here would defeat the point of a gate; let the step fail
+        # normally so the job goes red, and rely on `if: always()` below to
+        # still capture and upload the log/report/evidence for a failed run.
+        run: |
+          set -o pipefail
+          pnpm exec vitest run \
+            tests/e2e/system-remediation/sr-qa-webhook-001-fix-tenant-binding/appmodule-tenant-binding.test.ts \
+            --no-file-parallelism --maxConcurrency=1 \
+            --reporter=default --reporter=json \
+            --outputFile.json=.artifacts/tenant-binding-acceptance/test-report.json \
+            2>&1 | tee .artifacts/tenant-binding-acceptance/execution-log.txt
+
+      - name: Gate on zero skips and both tests passed
+        if: always()
+        run: |
+          python3 - <<'PY_GATE'
+          import json
+          from pathlib import Path
+
+          report_path = Path(".artifacts/tenant-binding-acceptance/test-report.json")
+          if not report_path.exists():
+              raise SystemExit(
+                  "Acceptance gate: no test report was produced "
+                  "(the harness likely failed before vitest could write one)."
+              )
+          report = json.loads(report_path.read_text())
+          total = report.get("numTotalTests", 0)
+          passed = report.get("numPassedTests", 0)
+          pending = report.get("numPendingTests", 0)
+          if total < 2 or passed != total or pending or not report.get("success"):
+              raise SystemExit(
+                  f"Tenant binding acceptance incomplete: total={total}, "
+                  f"passed={passed}, pending/skipped={pending}, "
+                  f"success={report.get('success')}. Both the composition test "
+                  "and the C111 two-tenant JWT HTTP/SQL test must pass with "
+                  "zero skips."
+              )
+          print(f"Tenant binding acceptance: {passed}/{total} passed, zero skips.")
+          PY_GATE
+
+      - name: Upload execution log, test report, and evidence
+        # Acceptance evidence for a failing candidate is as important as for a
+        # passing one: it is what lets the next lane diagnose without re-running.
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: tenant-binding-acceptance-${{ github.event.inputs.candidate_sha }}
+          path: |
+            .artifacts/tenant-binding-acceptance/execution-log.txt
+            .artifacts/tenant-binding-acceptance/test-report.json
+            .artifacts/tenant-binding-acceptance/evidence-auth-http.json
+          if-no-files-found: warn
