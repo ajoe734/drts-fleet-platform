@@ -1703,6 +1703,132 @@ class PollWorkersRecoveryTests(EvidenceOutputIsolation, unittest.TestCase):
         self.assertEqual(worker["last_event_at"], "2026-01-01T00:00:00Z")
         self.assertEqual(worker["_agy_stream_productive_event_count"], 1)
 
+    def test_split_retry_pairs_across_polls_do_not_repeatedly_reset_the_stall_clock(self) -> None:
+        """Regression for the Codex2-rejected candidate: recomputing the
+        productive-event count from scratch on every poll let an
+        unconfirmed `agent_response` get credited as recovery before the
+        log proved whether it was a failed retry. Once the following
+        `error_message` invalidated it, the *next* retry's unconfirmed
+        `agent_response` got credited all over again -- every failed retry
+        re-triggered the stall-clock reset, even though the turn never
+        produced a usable response. Unlike
+        test_full_agy_retry_trace_with_duplicate_step_does_not_recover_a_stalled_worker
+        (which writes the whole trace in one shot), this appends and polls
+        one line at a time so the from-scratch count actually fluctuates
+        poll over poll the way it did against the live rejected candidate.
+        """
+        with tempfile.TemporaryDirectory() as tmpdir:
+            log_path = Path(tmpdir) / "agy.log"
+            worker: dict = {
+                "run_id": "run-1",
+                "provider": "antigravity",
+                "log_path": str(log_path),
+                "last_event_at": "2026-01-01T00:00:00Z",
+            }
+            lines: list[str] = []
+
+            def tick(mtime: str) -> None:
+                log_path.write_text("\n".join(lines), encoding="utf-8")
+                with mock.patch.object(supervisor, "file_iso_mtime", return_value=mtime):
+                    supervisor.update_from_log({}, worker)
+
+            lines.append(self._agy_step_update(0, "user_input"))
+            tick("2026-01-01T00:00:01Z")
+            self.assertEqual(worker["last_event_at"], "2026-01-01T00:00:01Z")
+
+            for i in range(3):
+                lines.append(self._agy_step_update(2 * i + 1, "agent_response"))
+                tick(f"2026-01-01T00:00:{2 + 4 * i:02d}Z")
+                credited_before_failure = worker["last_event_at"]
+
+                lines.append(self._agy_step_update(2 * i + 2, "error_message"))
+                tick(f"2026-01-01T00:00:{3 + 4 * i:02d}Z")
+                # A failed retry must never leave the clock further advanced
+                # than it stood right after this attempt's optimistic
+                # (and later invalidated) response.
+                self.assertLessEqual(worker["last_event_at"], credited_before_failure)
+
+            # None of the three retries ever produced a usable response, so
+            # the clock must still read the very first tick.
+            self.assertEqual(worker["last_event_at"], "2026-01-01T00:00:01Z")
+
+            # A genuine success after the retries -- a terminal result, not
+            # another error -- must still be credited.
+            lines.append(self._agy_result("DONE"))
+            tick("2026-01-01T00:00:20Z")
+            self.assertEqual(worker["last_event_at"], "2026-01-01T00:00:20Z")
+
+    def test_codex_result_string_shape_does_not_abort_polling_other_workers(self) -> None:
+        """Codex2 rejection repro: nested `step_update`/`result` values were
+        used with `.get` before checking they were dicts, so a non-agy log
+        line sharing agy's `event` field name (e.g.
+        `{"event":"result","result":"Task complete"}`, a real codex shape)
+        raised an uncaught AttributeError inside `poll_workers` and aborted
+        the tick before the remaining workers were polled.
+        """
+        with tempfile.TemporaryDirectory() as tmpdir:
+            malformed_log = Path(tmpdir) / "codex.log"
+            malformed_log.write_text(
+                json.dumps({"event": "result", "result": "Task complete"}),
+                encoding="utf-8",
+            )
+            normal_log = Path(tmpdir) / "agy.log"
+            normal_log.write_text(
+                "\n".join([
+                    self._agy_step_update(0, "user_input"),
+                    self._agy_step_update(1, "agent_response"),
+                ]),
+                encoding="utf-8",
+            )
+            state = {
+                "queue": {
+                    "events": {"evt-1": {"status": "started"}, "evt-2": {"status": "started"}},
+                },
+                "workers": {
+                    "run-1": {
+                        "run_id": "run-1",
+                        "task_id": "CODEX-001",
+                        "provider": "codex",
+                        "agent_id": "codex",
+                        "status": "stalled",
+                        "queue_event_id": "evt-1",
+                        "pid": 1111,
+                        "log_path": str(malformed_log),
+                        "last_event_at": "2026-04-06T14:20:00Z",
+                    },
+                    "run-2": {
+                        "run_id": "run-2",
+                        "task_id": "AGY-003",
+                        "provider": "antigravity",
+                        "agent_id": "antigravity",
+                        "status": "stalled",
+                        "queue_event_id": "evt-2",
+                        "pid": 2222,
+                        "log_path": str(normal_log),
+                        "last_event_at": "2026-04-06T14:20:00Z",
+                    },
+                },
+            }
+            status = {
+                "tasks": [
+                    {"id": "CODEX-001", "status": "in_progress", "owner": "Codex", "reviewer": "Claude"},
+                    {"id": "AGY-003", "status": "in_progress", "owner": "Antigravity", "reviewer": "Codex"},
+                ]
+            }
+
+            with (
+                mock.patch.object(supervisor, "load_approval_state", return_value={"pending": [], "history": []}),
+                mock.patch.object(supervisor, "load_status", return_value=status),
+                mock.patch.object(supervisor, "load_provider_report", return_value={}),
+                mock.patch.object(supervisor, "retry_due_workers", return_value=False),
+                mock.patch.object(supervisor, "pid_is_alive", return_value=True),
+                mock.patch.object(supervisor, "write_activity_log"),
+            ):
+                changed = supervisor.poll_workers(self._agy_config(), state)
+
+        self.assertTrue(changed)
+        self.assertEqual(state["workers"]["run-2"]["status"], "running")
+
 
 class AgyStreamProductiveEventCountTests(unittest.TestCase):
     """Direct coverage of supervisor_runtime._agy_stream_productive_event_count.
@@ -1774,3 +1900,45 @@ class AgyStreamProductiveEventCountTests(unittest.TestCase):
         base = supervisor._agy_stream_productive_event_count("\n".join(lines))
         duplicated = lines + [self._step(1, "agent_response")]
         self.assertEqual(supervisor._agy_stream_productive_event_count("\n".join(duplicated)), base)
+
+    def test_unconfirmed_trailing_agent_response_is_not_yet_counted(self) -> None:
+        """The newest event being an `agent_response` with nothing after it
+        (no further step, no terminal result) is exactly the ambiguous shape
+        a failed retry starts with. It must not be counted until a following
+        event proves it wasn't one -- see
+        test_agent_response_immediately_followed_by_error_is_a_failed_attempt
+        for what happens once that next event turns out to be an
+        `error_message`.
+        """
+        lines = [self._step(0, "user_input"), self._step(1, "agent_response")]
+        self.assertEqual(supervisor._agy_stream_productive_event_count("\n".join(lines)), 1)
+
+    def test_trailing_agent_response_confirmed_by_a_later_step_is_counted(self) -> None:
+        lines = [
+            self._step(0, "user_input"),
+            self._step(1, "agent_response"),
+            self._step(2, "tool_call"),
+        ]
+        self.assertEqual(supervisor._agy_stream_productive_event_count("\n".join(lines)), 3)
+
+    def test_non_dict_nested_step_update_value_does_not_crash_and_is_not_agy_shaped(self) -> None:
+        line = json.dumps({"event": "step_update", "step_update": [1, 2, 3]})
+        self.assertIsNone(supervisor._agy_stream_productive_event_count(line))
+
+    def test_non_dict_nested_result_value_does_not_crash_and_is_not_agy_shaped(self) -> None:
+        """Codex2 rejection repro: a codex log line shaped like
+        `{"event":"result","result":"Task complete"}` shares agy's
+        top-level `event` field name but carries a plain string, not a
+        dict. It must neither raise (the old code called `.get` on the
+        string) nor be misidentified as an agy-shaped log, so non-agy
+        providers keep falling back to plain mtime-based visibility.
+        """
+        line = json.dumps({"event": "result", "result": "Task complete"})
+        self.assertIsNone(supervisor._agy_stream_productive_event_count(line))
+
+    def test_malformed_nested_value_does_not_mask_real_agy_events_elsewhere_in_the_log(self) -> None:
+        lines = [
+            json.dumps({"event": "result", "result": "Task complete"}),
+            self._step(0, "user_input"),
+        ]
+        self.assertEqual(supervisor._agy_stream_productive_event_count("\n".join(lines)), 1)

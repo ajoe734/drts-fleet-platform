@@ -2213,9 +2213,24 @@ def _agy_stream_productive_event_count(content: str) -> int | None:
       progress -- agy's stream shows this as a continuous retry-then-fail
       loop while a turn is stuck, and none of those attempts ever produced
       a usable response.
+    - an `agent_response` step with no known successor yet, and no terminal
+      `result` event yet, is *unconfirmed*: a later append could still
+      reveal it as a failed retry, so it is not counted until a following
+      event (another step, or the terminal result) proves it wasn't. Without
+      this, a from-scratch recount on every poll credits each retry's
+      optimistic response immediately, an `error_message` invalidates it,
+      and the *next* retry's optimistic response gets credited all over
+      again -- so repeated failed retries keep re-triggering recovery and
+      resetting the stall clock even though the turn never produces a
+      usable response.
     - the terminal `result` event only counts when its status is not
       `ERROR`; a structured failure is not progress no matter how much
       stream noise led up to it.
+    - `step_update` and `result` payloads are only trusted when their
+      nested `step_update`/`result` value is actually a dict. Some other
+      providers' logs reuse the `event` field name with a differently
+      shaped value (e.g. a plain string), which must neither crash this
+      parser nor be misidentified as agy-shaped.
     """
     found_schema = False
     steps: dict[tuple[str, int], str] = {}
@@ -2233,8 +2248,10 @@ def _agy_stream_productive_event_count(content: str) -> int | None:
             continue
         event = payload.get("event")
         if event == "step_update":
+            step = payload.get("step_update")
+            if not isinstance(step, dict):
+                continue
             found_schema = True
-            step = payload.get("step_update") or {}
             try:
                 step_index = int(step.get("step_index"))
             except (TypeError, ValueError):
@@ -2244,18 +2261,27 @@ def _agy_stream_productive_event_count(content: str) -> int | None:
                 step_order.append(key)
             steps[key] = str(step.get("step_type") or "").strip()
         elif event == "result":
+            result = payload.get("result")
+            if not isinstance(result, dict):
+                continue
             found_schema = True
-            result = payload.get("result") or {}
             result_statuses.append(str(result.get("status") or "").strip().upper())
     if not found_schema:
         return None
+    turn_finished = bool(result_statuses)
+    last_key = step_order[-1] if step_order else None
     count = 0
-    for conversation_id, step_index in step_order:
-        step_type = steps[(conversation_id, step_index)]
+    for key in step_order:
+        conversation_id, step_index = key
+        step_type = steps[key]
         if step_type == "error_message":
             continue
-        if step_type == "agent_response" and steps.get((conversation_id, step_index + 1)) == "error_message":
-            continue
+        if step_type == "agent_response":
+            next_type = steps.get((conversation_id, step_index + 1))
+            if next_type == "error_message":
+                continue
+            if next_type is None and key == last_key and not turn_finished:
+                continue
         count += 1
     count += sum(1 for status in result_statuses if status and status != "ERROR")
     return count
