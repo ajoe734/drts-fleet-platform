@@ -4611,7 +4611,11 @@ def handle_worker_approval_state(
         latest = resolved[-1]
         if latest.get("approval_id") != worker.get("last_approval_id"):
             worker["last_approval_id"] = latest.get("approval_id")
-            if latest.get("decision") == "allow" and worker_supports_approval_resume(worker):
+            # A live worker consumes the broker's approval itself. Launching a
+            # second process can collide with its existing systemd unit and
+            # replace the live worker's stdout path with a failed launch log.
+            # Only an exited, resumable session needs a replacement process.
+            if latest.get("decision") == "allow" and not alive and worker_supports_approval_resume(worker):
                 resumed = resume_claude_worker(config, worker, provider_report, approval=latest)
                 write_activity_log(
                     config,
