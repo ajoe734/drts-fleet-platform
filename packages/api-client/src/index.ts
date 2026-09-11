@@ -230,8 +230,15 @@ import type {
   SetPlatformTenantRolloutStageCommand,
   SetPlatformOfflineCommand,
   SetPlatformOnlineCommand,
+  AdapterCredentialExpiryWarning,
   PlatformAdapter,
   UpdatePlatformAdapterCommand,
+  MarkReimbursementPaidWithProofCommand,
+  RemittanceProofPaymentReceipt,
+  RemittanceProofReadbackGrant,
+  RemittanceProofRecord,
+  RequestRemittanceProofReadbackCommand,
+  UploadRemittanceProofCommand,
   SettlementMatrixRecord,
   ShiftRecord,
   SearchGeoQuery,
@@ -2470,6 +2477,51 @@ export class ApiClient {
     );
   }
 
+  // ── Remittance Proof (SR-RECOVERY-CONTRACTS-20260911) ──
+
+  async uploadRemittanceProof(
+    command: UploadRemittanceProofCommand,
+    options?: RequestOptions,
+  ): Promise<RemittanceProofRecord> {
+    return this.post<RemittanceProofRecord>("/api/reimbursements/proofs", {
+      ...options,
+      body: command,
+    });
+  }
+
+  async getRemittanceProof(
+    proofId: string,
+    options?: RequestOptions,
+  ): Promise<RemittanceProofRecord> {
+    return this.get<RemittanceProofRecord>(
+      `/api/reimbursements/proofs/${encodeURIComponent(proofId)}`,
+      options,
+    );
+  }
+
+  async requestRemittanceProofReadback(
+    command: RequestRemittanceProofReadbackCommand,
+    options?: RequestOptions,
+  ): Promise<RemittanceProofReadbackGrant> {
+    return this.post<RemittanceProofReadbackGrant>(
+      `/api/reimbursements/proofs/${encodeURIComponent(command.proofId)}/readback`,
+      options,
+    );
+  }
+
+  async markReimbursementPaidWithProof(
+    command: MarkReimbursementPaidWithProofCommand,
+    options?: RequestOptions,
+  ): Promise<RemittanceProofPaymentReceipt> {
+    return this.post<RemittanceProofPaymentReceipt>(
+      `/api/reimbursements/${encodeURIComponent(command.batchId)}/pay-with-proof`,
+      {
+        ...options,
+        body: command,
+      },
+    );
+  }
+
   async listReconciliationIssues(filters?: {
     status?: ReconciliationIssueRecord["status"];
     issueType?: ReconciliationIssueRecord["issueType"];
@@ -4159,6 +4211,19 @@ export class ApiClient {
     });
   }
 
+  /**
+   * Throws on request failure rather than resolving — an API failure is not
+   * a successful "ok"/"unknown" expiry warning and callers must not treat it
+   * as one.
+   */
+  async getPlatformAdapterCredentialExpiryWarning(
+    id: string,
+  ): Promise<AdapterCredentialExpiryWarning> {
+    return this.get<AdapterCredentialExpiryWarning>(
+      `/api/platform-admin/adapters/${id}/credential-expiry-warning`,
+    );
+  }
+
   // ── Regulatory Registry ──
 
   async listVehicles(): Promise<VehicleRegistryRecord[]> {
@@ -4986,4 +5051,6 @@ export type {
 } from "@drts/contracts";
 
 export * from "./system-remediation";
+export * from "./remittance-proof";
+export * from "./platform-adapter-registry";
 export { ApiClient as DrtsApiClient };
