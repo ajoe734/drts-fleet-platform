@@ -144,9 +144,13 @@ describe("SR-OPS-CAPACITY-RUNNER-20260911 real capacity + durable readback accep
               );
             }
             const rawBody = await response.text();
-            let body: { data?: { orderId?: unknown } };
+            // The API's global snake-case interceptor
+            // (apps/api/src/common/snake-case.interceptor.ts) rewrites every
+            // response body key from camelCase to snake_case, so the wire
+            // field is `order_id`, not the controller's in-code `orderId`.
+            let body: { data?: { order_id?: unknown } };
             try {
-              body = JSON.parse(rawBody) as { data?: { orderId?: unknown } };
+              body = JSON.parse(rawBody) as { data?: { order_id?: unknown } };
             } catch (parseError) {
               throw new Error(
                 `Dispatchable order seed #${index} returned HTTP ${response.status} with unparseable JSON body: ${rawBody.slice(0, 500)} (${
@@ -154,7 +158,7 @@ describe("SR-OPS-CAPACITY-RUNNER-20260911 real capacity + durable readback accep
                 })`,
               );
             }
-            const orderId = body?.data?.orderId;
+            const orderId = body?.data?.order_id;
             if (typeof orderId !== "string" || orderId.length === 0) {
               throw new Error(
                 `Dispatchable order seed #${index} returned HTTP ${response.status} but no valid orderId in body: ${rawBody.slice(0, 500)}`,
@@ -183,10 +187,12 @@ describe("SR-OPS-CAPACITY-RUNNER-20260911 real capacity + durable readback accep
             `tenant bootstrap-session failed: HTTP ${tenantSessionResponse.status} ${await tenantSessionResponse.text()}`,
           );
         }
+        // Same global snake-case interceptor as above: the wire field is
+        // `access_token`, not the service layer's in-code `accessToken`.
         const tenantSessionBody = (await tenantSessionResponse.json()) as {
-          data: { accessToken: string };
+          data: { access_token: string };
         };
-        const tenantJwt = tenantSessionBody.data.accessToken;
+        const tenantJwt = tenantSessionBody.data.access_token;
 
         // --- Mint a real platform JWT in-process, via the SAME running
         // AppModule's own JwtAuthService, against the durable default
