@@ -1,5 +1,6 @@
 import { Module } from "@nestjs/common";
 
+import { DriverAcademyModule } from "../driver-academy/driver-academy.module";
 import { DatabaseModule } from "../../common/db";
 import { BillingSettlementModule } from "../billing-settlement/billing-settlement.module";
 import { OwnedMobilityModule } from "../owned-mobility/owned-mobility.module";
@@ -20,6 +21,7 @@ import { SupplySubmissionService } from "./supply-submission.service";
 @Module({
   imports: [
     DatabaseModule,
+    DriverAcademyModule,
     BillingSettlementModule,
     OwnedMobilityModule,
     RegulatoryRegistryModule,

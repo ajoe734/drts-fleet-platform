@@ -367,7 +367,93 @@ function PA_Pricing({ theme: th, tab = 'passenger' }) {
 // ─────────────────────────────────────────────────────────────────────────────
 // 11. /adapter-registry — split authority (Q-ADM17)
 // ─────────────────────────────────────────────────────────────────────────────
-function PA_AdapterRegistry({ theme: th }) {
+
+// Nullable authoritative credential expiry — missing/invalid data renders as
+// an explicit `unknown` state, never inferred as valid or far-future (Q-SR-ADMIN-ADAPTER-001).
+const FX_ADAPTER_EXPIRY = {
+  'srx-v3':       { expiresAt: '2026-11-02', warnWindowDays: 14, state: 'ok' },
+  'gocab-v1':     { expiresAt: '2026-05-31', warnWindowDays: 14, state: 'expiring' },
+  'ctbc-oauth':   { expiresAt: '2026-09-01', warnWindowDays: 14, state: 'ok' },
+  'cathay-magic': { expiresAt: null,         warnWindowDays: 14, state: 'unknown' },
+  'mof-einv':     { expiresAt: '2026-05-10', warnWindowDays: 14, state: 'expired' },
+  'mof-bgmt':     { expiresAt: '2026-05-31', warnWindowDays: 14, state: 'expiring' },
+};
+
+// Registration / configuration / credential-rotation submission readback — server-reported
+// outcomes only: pending / rejected / unavailable / saved (Q-SR-ADMIN-ADAPTER-001).
+const FX_ADAPTER_SUBMISSIONS = [
+  { id: 'areg_2026_05_014', kind: 'register', target: 'Uber Direct · forwarder', state: 'pending', submittedBy: '陳維 (pa_platform_admin)', submittedAt: '2026-05-25 10:02', serverNote: '等候 server 健康探測與稽核確認' },
+  { id: 'areg_2026_05_013', kind: 'configure', target: 'mof-bgmt · warning-window policy', state: 'rejected', submittedBy: '陳維', submittedAt: '2026-05-24 16:40', serverNote: 'REJECTED · warningWindowDays 超出允許上限 (max 14)' },
+  { id: 'areg_2026_05_012', kind: 'rotate_credential', target: 'ctbc-oauth · oauth_secret', state: 'saved', submittedBy: '陳維', submittedAt: '2026-05-20 09:15', serverNote: 'SAVED · server 已確認新 secret 生效並封存舊值遮罩' },
+  { id: 'areg_2026_05_011', kind: 'configure', target: 'srx-v3 · ops TTL default', state: 'unavailable', submittedBy: '王芳 (ops)', submittedAt: '2026-05-19 14:02', serverNote: 'UNAVAILABLE · adapter 目前離線，設定端點無回應' },
+];
+const ADAPTER_SUBMISSION_TONE = { pending: 'warn', rejected: 'danger', saved: 'success', unavailable: 'neutral' };
+const ADAPTER_SUBMISSION_KIND_ZH = { register: '註冊', configure: '設定', rotate_credential: '輪替 credential' };
+
+function AdapterExpiryPill({ theme: th, exp }) {
+  if (!exp || exp.state === 'unknown' || !exp.expiresAt) {
+    return <Pill theme={th} tone="neutral" dot>unknown · 無到期資料</Pill>;
+  }
+  const tone = exp.state === 'expired' ? 'danger' : exp.state === 'expiring' ? 'warn' : 'success';
+  const label = exp.state === 'expired' ? '已過期' : exp.state === 'expiring' ? `${exp.warnWindowDays}天內到期` : '正常';
+  return (
+    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+      <Pill theme={th} tone={tone} dot>{label}</Pill>
+      <span style={{ fontFamily: SHELL_MONO, fontSize: 11, color: th.textMuted }}>{exp.expiresAt}</span>
+    </span>
+  );
+}
+
+// Registration form — Q-ADM17: only platform-admin registers/configures/rotates; secret
+// material is shown at most once and never re-readable (SecretRevealModal covers rotation).
+function AdapterRegisterModal({ theme: th }) {
+  return (
+    <Modal theme={th} accent={th.accent} w={520}
+      title="註冊新 Adapter · platform-admin 治理"
+      subtitle="送出後進入 pending，等候 server 健康探測與稽核確認 (Q-ADM17)"
+      footer={<>
+        <Btn theme={th} variant="secondary">取消</Btn>
+        <ActionButton theme={th} descriptor={{ action: 'submit_register', enabled: true, riskLevel: 'high', requiresReason: true }} variant="primary" label="送出註冊" en="submit" />
+      </>}>
+      <Field theme={th} label="來源名稱 · source" required><Input theme={th} ph="例如 Uber Direct" /></Field>
+      <Field theme={th} label="類型 · kind" required><Select theme={th} ph="forwarder / auth / filing" /></Field>
+      <Field theme={th} label="初始 credential" required hint="送出後僅顯示一次；平台不儲存可還原明碼值。"><Input theme={th} mono ph="••••••••••••" /></Field>
+      <Field theme={th} label="原因 · reason" required hint="高風險操作，將寫入稽核紀錄並可被後續調閱。">
+        <textarea style={{
+          width: '100%', minHeight: 64, padding: 10, borderRadius: 7,
+          border: '1px solid ' + th.border, background: th.bgRaised, color: th.text,
+          fontFamily: 'inherit', fontSize: 13, resize: 'vertical', boxSizing: 'border-box',
+        }} placeholder="例如：新增北區運能備援 forwarder"></textarea>
+      </Field>
+    </Modal>
+  );
+}
+
+// Configuration drawer — platform-admin configuration only; ops pause/resume TTL stays
+// out of reach here, preserving the Q-ADM17 configuration-vs-ops-TTL authority split.
+function AdapterConfigDrawer({ theme: th, adapter }) {
+  const exp = FX_ADAPTER_EXPIRY[adapter.id];
+  return (
+    <Drawer theme={th} title={'設定 · ' + adapter.source} subtitle={adapter.id + ' · platform-admin configuration only'}
+      footer={<>
+        <Btn theme={th} variant="secondary">取消</Btn>
+        <ActionButton theme={th} descriptor={{ action: 'save_config', enabled: true, riskLevel: 'medium' }} variant="primary" label="儲存設定" en="save" />
+      </>}>
+      <Banner theme={th} tone="info" icon="info" title="Q-ADM17 split authority"
+        body="此處僅平台端設定值 (timeout / retry / 到期告警天數)；ops 暫停 / 恢復與其 TTL 僅能在 Ops Console 操作，platform-admin 無法在此代為執行。" />
+      <div style={{ height: 12 }} />
+      <Field theme={th} label="Request timeout (ms)"><Input theme={th} mono value="4000" /></Field>
+      <Field theme={th} label="重試次數 · retry"><Input theme={th} mono value="2" /></Field>
+      <Field theme={th} label="到期前告警天數 · warning window" hint="server 端上限 14 天；超過將回傳 CONFIG_REJECTED。">
+        <Input theme={th} mono value={String((exp && exp.warnWindowDays) || 14)} />
+      </Field>
+    </Drawer>
+  );
+}
+
+function PA_AdapterRegistry({ theme: th, registerFormOpen = false, configDrawerAdapterId = null, rotateModalAdapterId = null }) {
+  const configAdapter = FX_ADAPTERS.find(a => a.id === configDrawerAdapterId);
+  const rotateAdapter = FX_ADAPTERS.find(a => a.id === rotateModalAdapterId);
   return (
     <Shell theme={th} nav={PA_NAV} active="adapters"
       breadcrumb={['平台與商務', '介接登錄']} env="production" actor={PA_ACTOR} health={PA_HEALTH}
@@ -389,12 +475,14 @@ function PA_AdapterRegistry({ theme: th }) {
               title={<span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>{a.source}<Pill theme={th} tone={a.kind === 'forwarder' ? 'info' : a.kind === 'auth' ? 'accent' : 'neutral'}>{a.kind}</Pill></span>}
               subtitle={a.id}
               actions={<Pill theme={th} tone={a.status === 'healthy' ? 'success' : a.status === 'degraded' ? 'warn' : 'danger'} dot>{a.status}</Pill>}>
-              <DL theme={th} cols={3} items={[
+              <DL theme={th} cols={4} items={[
                 { k: 'LATENCY', v: a.latency, mono: true },
                 { k: 'LAST EVENT', v: a.last, mono: true },
                 { k: 'ORDERS 24H', v: a.orders24h, mono: true },
+                { k: 'CREDENTIAL EXPIRY', v: <AdapterExpiryPill theme={th} exp={FX_ADAPTER_EXPIRY[a.id]} /> },
               ]} />
               <div style={{ marginTop: 12, paddingTop: 12, borderTop: '1px solid ' + th.border, display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                <ActionButton theme={th} size="xs" descriptor={{ action: 'configure', enabled: true, riskLevel: 'medium' }} label="設定" en="configure" />
                 <ActionButton theme={th} size="xs" descriptor={{ action: 'edit_credential', enabled: true, riskLevel: 'high', requiresReason: true }} icon="key" label="編輯 credential" en="cred" />
                 <ActionButton theme={th} size="xs" descriptor={{ action: 'rotate', enabled: true, riskLevel: 'high', requiresReason: true }} icon="refresh" label="輪替" en="rotate" />
                 <ActionButton theme={th} size="xs" descriptor={{ action: 'disable', enabled: a.status === 'healthy', disabledReasonCode: 'already_degraded', riskLevel: 'high', requiresReason: true }} label="停用" en="disable" />
@@ -405,13 +493,38 @@ function PA_AdapterRegistry({ theme: th }) {
             </Card>
           ))}
         </div>
+
+        <Card theme={th} padding={0} title="註冊 / 設定 / credential 送出紀錄 · server readback" subtitle="pending / rejected / unavailable / saved — 僅呈現 server 已回報的結果 (Q-ADM17)">
+          <Table theme={th} columns={[
+            { h: 'SUBMISSION', k: 'id', w: 170, mono: true, r: r => <span style={{ color: th.accent, fontWeight: 600 }}>{r.id}</span> },
+            { h: 'KIND', w: 130, r: r => <Pill theme={th} tone="neutral">{ADAPTER_SUBMISSION_KIND_ZH[r.kind]}</Pill> },
+            { h: 'TARGET', k: 'target', w: 260 },
+            { h: 'STATE', w: 130, r: r => <Pill theme={th} tone={ADAPTER_SUBMISSION_TONE[r.state]} dot>{r.state}</Pill> },
+            { h: 'SUBMITTED BY', k: 'submittedBy', w: 180 },
+            { h: 'SUBMITTED AT', k: 'submittedAt', mono: true, w: 150 },
+            { h: 'SERVER NOTE', k: 'serverNote', r: r => <span style={{ fontSize: 11.5, color: th.textMuted }}>{r.serverNote}</span> },
+          ]} rows={FX_ADAPTER_SUBMISSIONS} />
+        </Card>
       </div>
+
+      {registerFormOpen && <AdapterRegisterModal theme={th} />}
+      {configAdapter && <AdapterConfigDrawer theme={th} adapter={configAdapter} />}
+      {rotateAdapter && (
+        <SecretRevealModal theme={th} secretType="adapter credential"
+          name={rotateAdapter.source + ' · ' + rotateAdapter.id}
+          secret="drts_adapter_live_8AB2k1Mvqp_aE32xQ19LzPnT8B2kK1yQ4z"
+          scope={rotateAdapter.kind + ':dispatch · ' + rotateAdapter.kind + ':webhook'}
+          expiresAt={(FX_ADAPTER_EXPIRY[rotateAdapter.id] && FX_ADAPTER_EXPIRY[rotateAdapter.id].expiresAt) || '—'}
+          acknowledged={false} />
+      )}
     </Shell>
   );
 }
 
 Object.assign(window, {
   FX_EXCLUSIVITY, FX_OFFBOARD, FX_FEE_PLANS, FX_SUBSIDY,
+  FX_ADAPTER_EXPIRY, FX_ADAPTER_SUBMISSIONS,
+  AdapterExpiryPill, AdapterRegisterModal, AdapterConfigDrawer,
   PA_Fleet, PA_FleetVehicles, PA_FleetDrivers, PA_FleetContracts,
   PA_FleetDevice, PA_FleetExclusivity, PA_FleetOffboard,
   PA_Switchboard, PA_Pricing, PA_AdapterRegistry,

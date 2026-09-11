@@ -3,6 +3,7 @@
 import React, { useCallback, useEffect, useState } from "react";
 import type {
   DriverLeaveQueryFilter,
+  DriverLeaveRecord,
   ReviewDriverLeaveCommand,
 } from "@drts/contracts";
 import {
@@ -18,16 +19,14 @@ import {
 } from "@drts/ui-web";
 import { getOpsClient } from "@/lib/api-client";
 import { OpsLeaveTypeChip } from "./leave-chips";
-import { LeaveConflictView, type OpsConflictVariant } from "./leave-conflict-view";
+import {
+  LeaveConflictView,
+  type OpsConflictVariant,
+} from "./leave-conflict-view";
 import { LeaveDetailView } from "./leave-detail-view";
 import { LeaveHistoryView } from "./leave-history-view";
 import { LeaveShiftImpactView } from "./leave-shift-impact-view";
-import {
-  FX_OPS_LEAVE,
-  fmtTaipei,
-  formatLeaveRangeZh,
-  type OpsLeaveRow,
-} from "./leave-types";
+import { fmtTaipei, formatLeaveRangeZh, type OpsLeaveRow } from "./leave-types";
 import { LEAVE_OPS_COPY, tLeave } from "./translations";
 
 const theme = buildCanvasTheme({
@@ -36,34 +35,48 @@ const theme = buildCanvasTheme({
   density: "compact",
 });
 
-type QueueTab = "pending" | "approved" | "rejected" | "withdrawn" | "history" | "shift_impact";
+type QueueTab =
+  | "pending"
+  | "approved"
+  | "rejected"
+  | "withdrawn"
+  | "history"
+  | "shift_impact";
+
+function toLeaveRow(item: DriverLeaveRecord): OpsLeaveRow {
+  return {
+    ...item,
+    driver: item.driverId,
+    zhRange: formatLeaveRangeZh(item.startTime, item.endTime),
+  };
+}
 
 export default function OpsLeavePage() {
   const [activeTab, setActiveTab] = useState<QueueTab>("pending");
-  const [leaves, setLeaves] = useState<OpsLeaveRow[]>(FX_OPS_LEAVE);
+  const [leaves, setLeaves] = useState<OpsLeaveRow[]>([]);
   const [selectedLeave, setSelectedLeave] = useState<OpsLeaveRow | null>(null);
-  const [conflictVariant, setConflictVariant] = useState<OpsConflictVariant | null>(null);
-  const [isLoading, setIsLoading] = useState(false);
+  const [conflictVariant, setConflictVariant] =
+    useState<OpsConflictVariant | null>(null);
+  const [isLoading, setIsLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [typeFilter, setTypeFilter] = useState("all");
   const [searchQuery, setSearchQuery] = useState("");
 
   const fetchLeaves = useCallback(async () => {
     setIsLoading(true);
+    setError(null);
     try {
       const client = getOpsClient();
       const query: DriverLeaveQueryFilter = {};
       const res = await client.listDriverLeaves(query);
-      if (res && Array.isArray(res.items) && res.items.length > 0) {
-        const mapped: OpsLeaveRow[] = res.items.map((item) => ({
-          ...item,
-          driver: `${item.driverId} · 司機`,
-          zhRange: formatLeaveRangeZh(item.startTime, item.endTime),
-        }));
-        setLeaves(mapped);
+      if (!res || !Array.isArray(res.items)) {
+        throw new Error("Invalid leave response");
       }
+      setLeaves(res.items.map(toLeaveRow));
     } catch {
-      // Fallback to FX_OPS_LEAVE in offline / dev mode
+      setLeaves([]);
+      setError(LEAVE_OPS_COPY.loadError);
     } finally {
       setIsLoading(false);
     }
@@ -74,40 +87,32 @@ export default function OpsLeavePage() {
   }, [fetchLeaves]);
 
   // Review (approve / reject)
-  const handleReview = async (leaveId: string, command: ReviewDriverLeaveCommand) => {
+  const handleReview = async (
+    leaveId: string,
+    command: ReviewDriverLeaveCommand,
+  ) => {
     setIsSubmitting(true);
+    setError(null);
     try {
       const client = getOpsClient();
-      await client.reviewDriverLeave(leaveId, command);
-
-      // Optimistically update local leaves
+      const updated = await client.reviewDriverLeave(leaveId, command);
+      // Reviewer identity, decision time and affected shifts come from the
+      // authoritative persisted response, never a predicted local record.
       setLeaves((prev) =>
-        prev.map((l) => {
-          if (l.leaveId === leaveId) {
-            return {
-              ...l,
-              status: command.decision === "approve" ? "approved" : "rejected",
-              reviewedByPrincipalId: "王芳 · ops_manager",
-              reviewedAt: new Date().toISOString(),
-              reviewNotes: command.reviewNotes ?? null,
-              impactedShiftIds:
-                command.decision === "approve" ? l.previewShiftIds ?? ["shift_2305"] : [],
-            };
-          }
-          return l;
-        }),
+        prev.map((leave) =>
+          leave.leaveId === updated.leaveId ? toLeaveRow(updated) : leave,
+        ),
       );
       setSelectedLeave(null);
       setConflictVariant(null);
-    } catch (err: any) {
-      const msg = String(err?.message || err);
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
       if (msg.includes("LEAVE_INVALID_STATE_TRANSITION")) {
         setConflictVariant("invalid_state");
       } else if (msg.includes("LEAVE_OVERLAPPING_REQUEST")) {
         setConflictVariant("overlap");
       } else {
-        // Default to server conflict display
-        setConflictVariant("invalid_state");
+        setError(LEAVE_OPS_COPY.reviewError);
       }
     } finally {
       setIsSubmitting(false);
@@ -116,13 +121,20 @@ export default function OpsLeavePage() {
 
   // Filter rows for current queue tab
   const rows = leaves.filter((r) => {
-    if (activeTab === "pending" || activeTab === "approved" || activeTab === "rejected" || activeTab === "withdrawn") {
+    if (
+      activeTab === "pending" ||
+      activeTab === "approved" ||
+      activeTab === "rejected" ||
+      activeTab === "withdrawn"
+    ) {
       if (r.status !== activeTab) return false;
     }
     if (typeFilter !== "all" && r.leaveType !== typeFilter) return false;
     if (searchQuery.trim()) {
       const q = searchQuery.toLowerCase().trim();
-      const matchDriver = r.driver.toLowerCase().includes(q) || r.driverId.toLowerCase().includes(q);
+      const matchDriver =
+        r.driver.toLowerCase().includes(q) ||
+        r.driverId.toLowerCase().includes(q);
       const matchReason = r.reason.toLowerCase().includes(q);
       const matchId = r.leaveId.toLowerCase().includes(q);
       if (!matchDriver && !matchReason && !matchId) return false;
@@ -150,7 +162,33 @@ export default function OpsLeavePage() {
       {t.label}
     </span>
   ));
-  const activeTabNode = tabNodes.find((_, idx) => tabList[idx]?.id === activeTab);
+  const activeTabNode = tabNodes.find(
+    (_, idx) => tabList[idx]?.id === activeTab,
+  );
+
+  if (error) {
+    return (
+      <div>
+        <PageHeader title={tLeave("pageTitle")} theme={theme} />
+        <div role="alert" style={{ padding: 24 }}>
+          <EmptyState
+            title={LEAVE_OPS_COPY.errorTitle}
+            body={error}
+            theme={theme}
+          />
+          <ActionButton
+            label={LEAVE_OPS_COPY.reloadLatestState}
+            onClick={() => {
+              setSelectedLeave(null);
+              void fetchLeaves();
+            }}
+            theme={theme}
+            variant="secondary"
+          />
+        </div>
+      </div>
+    );
+  }
 
   if (conflictVariant) {
     return (
@@ -211,7 +249,19 @@ export default function OpsLeavePage() {
           theme={theme}
           title={tLeave("pageTitle")}
         />
-        <LeaveShiftImpactView theme={theme} />
+        <LeaveShiftImpactView
+          board={leaves.flatMap((leave) =>
+            leave.impactedShiftIds.map((shift) => ({
+              shift,
+              driver: leave.driverId,
+              zh: leave.zhRange,
+              tagged: leave.status === "approved",
+              pendingReview: leave.status === "pending",
+              elig: "unknown" as const,
+            })),
+          )}
+          theme={theme}
+        />
       </div>
     );
   }
@@ -227,7 +277,9 @@ export default function OpsLeavePage() {
       w: 110,
       mono: true,
       r: (r) => (
-        <span style={{ color: theme.accent, fontWeight: 600 }}>{r.leaveId}</span>
+        <span style={{ color: theme.accent, fontWeight: 600 }}>
+          {r.leaveId}
+        </span>
       ),
     },
     {
@@ -333,9 +385,15 @@ export default function OpsLeavePage() {
               <option value="all">{LEAVE_OPS_COPY.filterTypeAll}</option>
               <option value="annual">{LEAVE_OPS_COPY.filterTypeAnnual}</option>
               <option value="sick">{LEAVE_OPS_COPY.filterTypeSick}</option>
-              <option value="personal">{LEAVE_OPS_COPY.filterTypePersonal}</option>
-              <option value="bereavement">{LEAVE_OPS_COPY.filterTypeFuneral}</option>
-              <option value="emergency">{LEAVE_OPS_COPY.filterTypeEmergency}</option>
+              <option value="personal">
+                {LEAVE_OPS_COPY.filterTypePersonal}
+              </option>
+              <option value="bereavement">
+                {LEAVE_OPS_COPY.filterTypeFuneral}
+              </option>
+              <option value="emergency">
+                {LEAVE_OPS_COPY.filterTypeEmergency}
+              </option>
             </select>
             <input
               onChange={(e) => setSearchQuery(e.target.value)}

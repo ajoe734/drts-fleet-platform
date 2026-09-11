@@ -1,0 +1,133 @@
+name: WIRE Full Application Acceptance
+on:
+  workflow_dispatch:
+    inputs:
+      candidate_sha:
+        description: Full immutable candidate SHA
+        required: true
+        type: string
+  push:
+    branches: [codex/sr-wire-001-complete-20260911]
+permissions:
+  contents: read
+concurrency:
+  group: wire-acceptance-${{ inputs.candidate_sha || github.sha }}
+  cancel-in-progress: false
+jobs:
+  api-db-and-normal-ui:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    services:
+      postgres:
+        image: postgis/postgis:16-3.4
+        env:
+          POSTGRES_DB: drts_wire_acceptance
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd 'pg_isready -U postgres' --health-interval 5s
+          --health-timeout 5s --health-retries 12
+    env:
+      CI: true
+      CANDIDATE_SHA: ${{ inputs.candidate_sha || github.sha }}
+      DATABASE_URL: postgresql://postgres:postgres@localhost:5432/drts_wire_acceptance
+      DRTS_WIRE_TEST_DATABASE_URL: postgresql://postgres:postgres@localhost:5432/drts_wire_acceptance
+      DRTS_ENV: development
+      JWT_SECRET: wire-acceptance-only-localhost-session-signing-key
+      JWT_ALGORITHMS: HS256
+      CONTROLLED_DOWNLOAD_SIGNING_SECRET: wire-acceptance-only-localhost-download-signing-key
+      WIRE_API_PORT: 4102
+      WIRE_DRIVER_URL: http://127.0.0.1:3011
+      WIRE_HOST_URL: http://127.0.0.1:3007
+      WIRE_OPS_URL: http://127.0.0.1:3004
+      DRTS_HOST_PARTNER_ID: a0000000-0000-4000-8000-00000000000a
+      DRTS_API_URL: http://127.0.0.1:4102
+      EXPO_PUBLIC_API_URL: http://127.0.0.1:4102
+      EXPO_PUBLIC_DRIVER_ID: drv_wire_001
+      DRTS_UAT_WORKERS: 1
+    steps:
+      - name: Validate immutable candidate
+        run: '[[ "$CANDIDATE_SHA" =~ ^[0-9a-f]{40}$ ]]'
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.candidate_sha || github.sha }}
+          fetch-depth: 0
+      - name: Verify checkout
+        run: 'test "$(git rev-parse HEAD)" = "$CANDIDATE_SHA"'
+      - uses: pnpm/action-setup@v4
+        with: { version: 10.33.0, run_install: false }
+      - uses: actions/setup-node@v4
+        with: { node-version: 22, cache: pnpm }
+      - name: Install exact dependencies
+        run: pnpm install --frozen-lockfile
+      - name: Prepare evidence and migrate dedicated database
+        run: |
+          mkdir -p .artifacts/wire-acceptance
+          pnpm db:migrate
+      - name: Full AppModule with real HTTP, SQL and durable signed sessions
+        run: |
+          set -o pipefail
+          pnpm exec vitest run tests/integration/system-remediation/sr-wire-001/full-app.remote.test.ts \
+            --no-file-parallelism --maxConcurrency=1 --reporter=default --reporter=json \
+            --outputFile.json=.artifacts/wire-acceptance/api-report.json \
+            2>&1 | tee .artifacts/wire-acceptance/api-log.txt
+      - name: Build real browser surfaces
+        run: |
+          pnpm --filter @drts/ui-tokens build
+          pnpm --filter @drts/fleet-partner-portal-web build
+          pnpm --filter @drts/ops-console-web build
+          pnpm --filter @drts/driver-app exec expo export --platform web --output-dir dist-wire
+          pnpm exec playwright install --with-deps chromium
+      - name: Start candidate servers on this GitHub-hosted runner only
+        run: |
+          pnpm --filter @drts/api exec tsx ../../tests/integration/system-remediation/sr-wire-001/wire-server.ts > .artifacts/wire-acceptance/api-server.log 2>&1 &
+          echo $! > /tmp/wire-api.pid
+          (cd apps/fleet-partner-portal-web && pnpm exec next start --hostname 127.0.0.1 --port 3007) > .artifacts/wire-acceptance/host-server.log 2>&1 &
+          echo $! > /tmp/wire-host.pid
+          (cd apps/ops-console-web && pnpm exec next start --hostname 127.0.0.1 --port 3004) > .artifacts/wire-acceptance/ops-server.log 2>&1 &
+          echo $! > /tmp/wire-ops.pid
+          python3 tests/e2e/system-remediation/sr-wire-001/serve-driver.py > .artifacts/wire-acceptance/driver-server.log 2>&1 &
+          echo $! > /tmp/wire-driver.pid
+          for attempt in $(seq 1 120); do
+            if curl -fsS http://127.0.0.1:4102/api/health >/dev/null && curl -fsS http://127.0.0.1:3011 >/dev/null && curl -fsS http://127.0.0.1:3007/host/vehicles >/dev/null && curl -fsS http://127.0.0.1:3004/leave >/dev/null; then
+              exit 0
+            fi
+            sleep 2
+          done
+          exit 1
+      - name: Normal Driver, Ops and restricted Host UI using real APIs
+        run: |
+          pnpm exec playwright test -c playwright.system-remediation.config.ts tests/e2e/system-remediation/sr-wire-001/normal-ui.spec.ts
+          cp test-results/system-remediation-report.json .artifacts/wire-acceptance/browser-report.json
+      - name: Require both acceptance reports, zero skips, exact candidate
+        if: always()
+        run: |
+          python3 - <<'PY'
+          import json, os, subprocess
+          from pathlib import Path
+          root=Path('.artifacts/wire-acceptance')
+          api=json.loads((root/'api-report.json').read_text())
+          assert api.get('numTotalTests',0) >= 5
+          assert api.get('success') and api['numPassedTests']==api['numTotalTests'] and not api.get('numPendingTests')
+          browser=json.loads((root/'browser-report.json').read_text())
+          stats=browser['stats']
+          assert stats['expected'] >= 3 and not stats['unexpected'] and not stats['skipped'] and not stats['flaky']
+          actual=subprocess.check_output(['git','rev-parse','HEAD'],text=True).strip()
+          assert actual==os.environ['CANDIDATE_SHA']
+          (root/'manifest.json').write_text(json.dumps({'candidateSha':actual,'runId':os.environ['GITHUB_RUN_ID'],'apiPassed':api['numPassedTests'],'browserPassed':stats['expected'],'physicalDeviceTested':False},indent=2))
+          PY
+      - name: Stop dedicated runner processes
+        if: always()
+        run: |
+          for name in api host ops driver; do
+            if test -f /tmp/wire-$name.pid; then kill "$(cat /tmp/wire-$name.pid)" 2>/dev/null || true; fi
+          done
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: wire-acceptance-${{ env.CANDIDATE_SHA }}
+          path: |
+            .artifacts/wire-acceptance/
+            test-results/
+          if-no-files-found: error

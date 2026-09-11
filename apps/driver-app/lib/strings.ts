@@ -11,7 +11,16 @@ export const driverRouteTitles = {
   platformPresence: "平台上線狀態",
   shift: "班次與出勤",
   settings: "設定",
+  leave: "請假",
+  academy: "學院",
   safetyOperator: "安全員模式",
+} as const;
+
+export const driverWorkforceStrings = {
+  sectionTitle: "出勤與學習",
+  sectionDescription: "管理請假、課程與接單所需的訓練。",
+  leaveDetail: "申請請假、查看審核與撤回申請",
+  academyDetail: "查看課程、完成學習與確認訓練資格",
 } as const;
 
 export const driverTaskActionLabels: Record<DriverTaskAction, string> = {
@@ -297,19 +306,22 @@ export const driverAuthStrings = {
     session_expired: {
       title: "裝置憑證已過期",
       badge: "憑證失效",
-      description: "此裝置的司機連線授權已過期，請重新輸入註冊代碼進行重新綁定。",
+      description:
+        "此裝置的司機連線授權已過期，請重新輸入註冊代碼進行重新綁定。",
       action: "重新綁定裝置",
     },
     device_revoked: {
       title: "裝置綁定已撤銷",
       badge: "憑證撤銷",
-      description: "此裝置的司機綁定已遭遠端撤銷或偵測到憑證重複使用。未同步的離線完單佐證已妥善保存，請重新註冊綁定。",
+      description:
+        "此裝置的司機綁定已遭遠端撤銷或偵測到憑證重複使用。未同步的離線完單佐證已妥善保存，請重新註冊綁定。",
       action: "重新註冊裝置",
     },
     driver_suspended: {
       title: "司機帳號已被停權",
       badge: "帳號停權",
-      description: "此司機帳號目前處於停權或證件審查無效狀態，暫時無法接單與使用工作台。請聯絡平台管理員。",
+      description:
+        "此司機帳號目前處於停權或證件審查無效狀態，暫時無法接單與使用工作台。請聯絡平台管理員。",
       action: "聯絡車隊管理員",
     },
   },

@@ -1,5 +1,4 @@
-import { HttpStatus, Injectable, OnModuleInit, Optional } from "@nestjs/common";
-import { ModuleRef } from "@nestjs/core";
+import { HttpStatus, Injectable, Optional } from "@nestjs/common";
 
 import type {
   DriverFleetAffiliationRecord,
@@ -28,9 +27,7 @@ const READINESS_POLICY_VERSION = "phase1-delta-supply-readiness-2026-06-19";
 
 type ApprovedSubmissionArtifacts = {
   submission: SupplySubmissionRecord;
-  driverDraft:
-    | SupplySubmissionPersistenceState["driverDrafts"][number]
-    | null;
+  driverDraft: SupplySubmissionPersistenceState["driverDrafts"][number] | null;
   vehicleDraft:
     | SupplySubmissionPersistenceState["vehicleDrafts"][number]
     | null;
@@ -44,8 +41,14 @@ type PartnerReadinessContext = {
   partnerVehicleAffiliations: VehicleFleetAffiliationRecord[];
   driversById: Map<string, DriverRegistryRecord>;
   vehiclesById: Map<string, VehicleRegistryRecord>;
-  approvedDriverArtifactsByCanonicalId: Map<string, ApprovedSubmissionArtifacts>;
-  approvedVehicleArtifactsByCanonicalId: Map<string, ApprovedSubmissionArtifacts>;
+  approvedDriverArtifactsByCanonicalId: Map<
+    string,
+    ApprovedSubmissionArtifacts
+  >;
+  approvedVehicleArtifactsByCanonicalId: Map<
+    string,
+    ApprovedSubmissionArtifacts
+  >;
   scopedDriverIds: Set<string>;
   scopedVehicleIds: Set<string>;
 };
@@ -63,41 +66,17 @@ export type CanonicalSupplyReadinessEvaluation = {
 };
 
 @Injectable()
-export class SupplyReadinessService implements OnModuleInit {
-  // Resolved lazily via ModuleRef rather than constructor-injected: this
-  // service's providing module (fleet-partner.module.ts) does not import
-  // DriverAcademyModule, so a direct DI edge is out of this task's write
-  // scope. `{ strict: false }` finds the provider anywhere in the
-  // bootstrapped application graph (AcademyService is registered globally
-  // by app.module.ts) without requiring that import.
-  private academyService: AcademyService | undefined;
-
+export class SupplyReadinessService {
   constructor(
     private readonly fleetPartnerService: FleetPartnerService,
     private readonly regulatoryRegistryService: RegulatoryRegistryService,
     private readonly vehicleEligibilityService: VehicleEligibilityService,
     @Optional()
     private readonly supplySubmissionRepository?: SupplySubmissionRepository,
-    // Kept last and optional so existing 4-argument construction (unit
-    // tests that predate this task) keeps binding `supplySubmissionRepository`
-    // to the same position. Nest's real DI container resolves this by type
-    // regardless of position.
-    @Optional()
-    private readonly moduleRef?: ModuleRef,
+    // Required Nest dependency; the optional TypeScript argument preserves
+    // older direct test construction without a global service locator.
+    private readonly academyService?: AcademyService,
   ) {}
-
-  onModuleInit() {
-    if (!this.moduleRef) {
-      return;
-    }
-    try {
-      this.academyService = this.moduleRef.get(AcademyService, {
-        strict: false,
-      });
-    } catch {
-      this.academyService = undefined;
-    }
-  }
 
   async listFleetPartnerReadiness(
     fleetPartnerId: string,
@@ -180,16 +159,20 @@ export class SupplyReadinessService implements OnModuleInit {
     fleetPartnerId: string,
   ): Promise<PartnerReadinessContext> {
     const evaluatedAt = new Date().toISOString();
-    const fleetPartner = this.fleetPartnerService.getFleetPartner(fleetPartnerId);
+    const fleetPartner =
+      this.fleetPartnerService.getFleetPartner(fleetPartnerId);
     const submissionState = await this.loadSubmissionState();
     const partnerDriverAffiliations = this.fleetPartnerService
       .listFleetPartnerDrivers(fleetPartnerId)
-      .filter((affiliation) => this.isAffiliationActive(affiliation, evaluatedAt));
-    const partnerVehicleAffiliations = submissionState.vehicleAffiliations.filter(
-      (affiliation) =>
-        affiliation.fleetPartnerId === fleetPartnerId &&
+      .filter((affiliation) =>
         this.isAffiliationActive(affiliation, evaluatedAt),
-    );
+      );
+    const partnerVehicleAffiliations =
+      submissionState.vehicleAffiliations.filter(
+        (affiliation) =>
+          affiliation.fleetPartnerId === fleetPartnerId &&
+          this.isAffiliationActive(affiliation, evaluatedAt),
+      );
     const approvedArtifacts = this.collectApprovedSubmissionArtifacts(
       submissionState,
       fleetPartnerId,
@@ -298,13 +281,19 @@ export class SupplyReadinessService implements OnModuleInit {
         submission.canonicalDriverId &&
         !driverArtifactsByCanonicalId.has(submission.canonicalDriverId)
       ) {
-        driverArtifactsByCanonicalId.set(submission.canonicalDriverId, artifacts);
+        driverArtifactsByCanonicalId.set(
+          submission.canonicalDriverId,
+          artifacts,
+        );
       }
       if (
         submission.canonicalVehicleId &&
         !vehicleArtifactsByCanonicalId.has(submission.canonicalVehicleId)
       ) {
-        vehicleArtifactsByCanonicalId.set(submission.canonicalVehicleId, artifacts);
+        vehicleArtifactsByCanonicalId.set(
+          submission.canonicalVehicleId,
+          artifacts,
+        );
       }
     }
 
@@ -339,7 +328,12 @@ export class SupplyReadinessService implements OnModuleInit {
       this.pushReason(reasonCodes, "MANUALLY_SUSPENDED");
     }
 
-    this.evaluateDriverCredentialReasons(driver, artifacts, context, reasonCodes);
+    this.evaluateDriverCredentialReasons(
+      driver,
+      artifacts,
+      context,
+      reasonCodes,
+    );
 
     if (!this.hasActiveDriverAffiliation(driverId, context)) {
       this.pushReason(reasonCodes, "DRIVER_AFFILIATION_MISSING");
@@ -351,7 +345,12 @@ export class SupplyReadinessService implements OnModuleInit {
       this.pushReason(reasonCodes, "TRAINING_REQUIRED");
     }
 
-    return this.buildRecord("driver", driverId, reasonCodes, context.evaluatedAt);
+    return this.buildRecord(
+      "driver",
+      driverId,
+      reasonCodes,
+      context.evaluatedAt,
+    );
   }
 
   // Reversible, per-request re-evaluation (no cached "on leave"/"untrained"
@@ -412,7 +411,8 @@ export class SupplyReadinessService implements OnModuleInit {
       this.pushReason(reasonCodes, "CONTRACT_INACTIVE");
     }
 
-    const insuranceLifecycle = vehicle.supplyLifecycle.insurance.lifecycleStatus;
+    const insuranceLifecycle =
+      vehicle.supplyLifecycle.insurance.lifecycleStatus;
     if (insuranceLifecycle === "missing" || insuranceLifecycle === "pending") {
       this.pushReason(reasonCodes, "INSURANCE_MISSING");
     } else if (insuranceLifecycle !== "active") {
@@ -432,7 +432,12 @@ export class SupplyReadinessService implements OnModuleInit {
       this.pushReason(reasonCodes, "TRAINING_REQUIRED");
     }
 
-    return this.buildRecord("vehicle", vehicleId, reasonCodes, context.evaluatedAt);
+    return this.buildRecord(
+      "vehicle",
+      vehicleId,
+      reasonCodes,
+      context.evaluatedAt,
+    );
   }
 
   private async evaluatePairReadiness(
@@ -571,19 +576,27 @@ export class SupplyReadinessService implements OnModuleInit {
   }
 
   private isDriverManuallySuspended(driver: DriverRegistryRecord) {
-    if (driver.lifecycleStatus === "suspended" || driver.lifecycleStatus === "retired") {
+    if (
+      driver.lifecycleStatus === "suspended" ||
+      driver.lifecycleStatus === "retired"
+    ) {
       return true;
     }
 
     return driver.eligibilityBlockedReasons.some((reason) =>
-      ["lifecycle_suspended", "lifecycle_retired", "work_state_suspended", "work_state_incident_hold"].includes(
-        reason,
-      ),
+      [
+        "lifecycle_suspended",
+        "lifecycle_retired",
+        "work_state_suspended",
+        "work_state_incident_hold",
+      ].includes(reason),
     );
   }
 
   private isVehicleManuallySuspended(vehicle: VehicleRegistryRecord) {
-    return vehicle.supplyLifecycle.dispatch.blockedReasons.includes("manual_hold");
+    return vehicle.supplyLifecycle.dispatch.blockedReasons.includes(
+      "manual_hold",
+    );
   }
 
   private supportsAnyServiceBucket(
@@ -593,9 +606,7 @@ export class SupplyReadinessService implements OnModuleInit {
   }
 
   private isAffiliationActive(
-    affiliation:
-      | DriverFleetAffiliationRecord
-      | VehicleFleetAffiliationRecord,
+    affiliation: DriverFleetAffiliationRecord | VehicleFleetAffiliationRecord,
     evaluatedAt: string,
   ) {
     if ("status" in affiliation && affiliation.status !== "active") {
@@ -604,7 +615,10 @@ export class SupplyReadinessService implements OnModuleInit {
     if (affiliation.effectiveFrom > evaluatedAt) {
       return false;
     }
-    if (affiliation.effectiveUntil && affiliation.effectiveUntil < evaluatedAt) {
+    if (
+      affiliation.effectiveUntil &&
+      affiliation.effectiveUntil < evaluatedAt
+    ) {
       return false;
     }
     return true;

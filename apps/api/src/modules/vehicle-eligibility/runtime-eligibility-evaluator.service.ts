@@ -6,6 +6,8 @@ import { Injectable, Optional } from "@nestjs/common";
 
 import type { AuditLogRecord } from "@drts/contracts";
 
+import { AcademyService } from "../driver-academy/academy.service";
+import { DriverLeaveService } from "../driver-leave/driver-leave.service";
 import { AuditNotificationService } from "../audit-notification/audit-notification.service";
 import type {
   ResolveRuntimeEligibilityContextCommand,
@@ -64,12 +66,37 @@ export class RuntimeEligibilityEvaluator {
     @Optional()
     private readonly auditNotificationService?: AuditNotificationService,
     @Optional() private readonly repository?: VehicleEligibilityRepository,
+    // Nest resolves both authorities; optional TS arguments preserve direct
+    // construction in legacy unit tests, never an optional runtime DI edge.
+    private readonly academyService?: AcademyService,
+    private readonly driverLeaveService?: DriverLeaveService,
   ) {}
+
+  /** Read the feature authorities on every candidate/assignment operation.
+   * No cached eligibility flag or registry/AV capability is overwritten. */
+  async assessDriverRequirements(driverId: string) {
+    const [courses, onLeave] = await Promise.all([
+      this.academyService?.listCourses(driverId) ?? Promise.resolve([]),
+      this.driverLeaveService?.isDriverOnLeave(driverId) ??
+        Promise.resolve(false),
+    ]);
+    const required = courses.filter((course) => course.isRequired);
+    return {
+      onLeave,
+      trainingIncomplete: required.some(
+        (course) => course.userStatus !== "passed",
+      ),
+      trainingSatisfied:
+        required.length > 0 &&
+        required.every((course) => course.userStatus === "passed"),
+    };
+  }
 
   /** No persistence or override inside the assignment transaction. Recompute
    * all conditions from current registry facts before reserving supply. */
   assessAutonomous(
     command: EvaluateRuntimeEligibilityCommand,
+    deferTrainingToAsyncGate = false,
   ): EligibilityDecision {
     const context = this.eligibilityContextResolver.resolve(command);
     const hard = this.collectHardReasonCodes(context);
@@ -91,6 +118,7 @@ export class RuntimeEligibilityEvaluator {
       this.collectMissingRequirements(
         context,
         command.missingRequirements ?? [],
+        deferTrainingToAsyncGate,
       ).length
     )
       return "conditionally_eligible";
@@ -103,7 +131,11 @@ export class RuntimeEligibilityEvaluator {
     const context =
       command.resolvedContext ??
       this.eligibilityContextResolver.resolve(command);
+    const driverRequirements = await this.assessDriverRequirements(
+      context.driverId,
+    );
     const hardReasonCodes = this.collectHardReasonCodes(context);
+    if (driverRequirements.onLeave) hardReasonCodes.push("DRIVER_ON_LEAVE");
     if (command.bookingRequirements)
       hardReasonCodes.push(
         ...bookingRequirementFailures(
@@ -115,11 +147,17 @@ export class RuntimeEligibilityEvaluator {
     const softReasonCodes = this.collectSoftReasonCodes(
       context,
       locationState,
-      command.softReasonCodes ?? [],
+      [
+        ...(command.softReasonCodes ?? []),
+        ...(driverRequirements.trainingIncomplete
+          ? ["DRIVER_TRAINING_INCOMPLETE"]
+          : []),
+      ],
     );
     const missingRequirements = this.collectMissingRequirements(
       context,
       command.missingRequirements ?? [],
+      driverRequirements.trainingSatisfied,
     );
 
     let decision: EligibilityDecision = "eligible";
@@ -337,11 +375,12 @@ export class RuntimeEligibilityEvaluator {
   private collectMissingRequirements(
     context: ResolvedRuntimeEligibilityContext,
     extraMissingRequirements: string[],
+    trainingSatisfied = false,
   ) {
     const missingRequirements = [...extraMissingRequirements];
 
     missingRequirements.push(...context.vehicleCapability.requiredDocuments);
-    if (context.vehicleCapability.trainingRequired) {
+    if (context.vehicleCapability.trainingRequired && !trainingSatisfied) {
       missingRequirements.push("training");
     }
     if (context.vehicleCapability.permitRequired) {

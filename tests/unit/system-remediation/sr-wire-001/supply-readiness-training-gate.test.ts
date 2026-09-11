@@ -35,7 +35,9 @@ function createDriver(driverId: string): DriverRegistryRecord {
   };
 }
 
-function createDriverAffiliation(driverId: string): DriverFleetAffiliationRecord {
+function createDriverAffiliation(
+  driverId: string,
+): DriverFleetAffiliationRecord {
   return {
     affiliationId: `driver-aff-${driverId}`,
     driverId,
@@ -45,20 +47,6 @@ function createDriverAffiliation(driverId: string): DriverFleetAffiliationRecord
     effectiveUntil: null,
     driverGroupId: null,
   };
-}
-
-// Mirrors the real ModuleRef.get(token, { strict: false }) shape the
-// production onModuleInit() call relies on -- see the comment on
-// SupplyReadinessService.academyService.
-function fakeModuleRef(academyService: AcademyService | undefined) {
-  return {
-    get: () => {
-      if (!academyService) {
-        throw new Error("no provider found (strict: false)");
-      }
-      return academyService;
-    },
-  } as unknown as import("@nestjs/core").ModuleRef;
 }
 
 function createReadinessServiceWithAcademy(
@@ -99,9 +87,8 @@ function createReadinessServiceWithAcademy(
         vehicleAffiliations: [],
       }),
     } as unknown as SupplySubmissionRepository,
-    fakeModuleRef(academyService),
+    academyService,
   );
-  service.onModuleInit();
   return service;
 }
 
@@ -187,7 +174,7 @@ describe("SR-WIRE-001: driver-academy training wired into fleet-partner readines
     expect(after.reasonCodes).not.toContain("TRAINING_REQUIRED");
   });
 
-  it("degrades gracefully (no crash, no false TRAINING_REQUIRED) when AcademyService is not registered in the module graph", async () => {
+  it("preserves legacy manual construction (production Nest requires the explicit AcademyService dependency)", async () => {
     const driverId = "drv-no-academy-provider";
     const service = createReadinessServiceWithAcademy(driverId, undefined);
     const record = await service.getDriverReadiness("fleet-demo-001", driverId);
@@ -243,7 +230,9 @@ describe("SR-WIRE-001: driver-academy training wired into fleet-partner readines
         listFleetPartnerDrivers: () => [createDriverAffiliation(driverId)],
       } as unknown as FleetPartnerService,
       regulatoryRegistryService,
-      { resolveRuntimeVehicleCapability: () => undefined } as unknown as VehicleEligibilityService,
+      {
+        resolveRuntimeVehicleCapability: () => undefined,
+      } as unknown as VehicleEligibilityService,
       {
         loadState: async () => ({
           submissions: [],
@@ -254,9 +243,8 @@ describe("SR-WIRE-001: driver-academy training wired into fleet-partner readines
           vehicleAffiliations: [],
         }),
       } as unknown as SupplySubmissionRepository,
-      fakeModuleRef(academyService),
+      academyService,
     );
-    service.onModuleInit();
 
     await service.getDriverReadiness("fleet-demo-001", driverId);
 

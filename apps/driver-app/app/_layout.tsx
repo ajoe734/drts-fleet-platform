@@ -162,14 +162,14 @@ export default function RootLayout() {
         <Tabs.Screen
           name="leave"
           options={{
-            title: "請假",
+            title: driverRouteTitles.leave,
             href: null,
           }}
         />
         <Tabs.Screen
           name="academy"
           options={{
-            title: "學院",
+            title: driverRouteTitles.academy,
             href: null,
           }}
         />
@@ -198,4 +198,3 @@ export default function RootLayout() {
     </ThemeProvider>
   );
 }
-

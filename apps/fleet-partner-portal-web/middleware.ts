@@ -9,7 +9,11 @@ export function middleware(request: NextRequest) {
   const isPublic = PUBLIC_PATHS.some((p) => pathname.startsWith(p));
 
   // 1. Security Headers
-  const response = NextResponse.next();
+  // Override inbound metadata: layouts need the actual route to avoid
+  // fetching fleet-admin navigation data for Host-only pages.
+  const requestHeaders = new Headers(request.headers);
+  requestHeaders.set("x-drts-fleet-pathname", pathname);
+  const response = NextResponse.next({ request: { headers: requestHeaders } });
   const candidateSha = process.env.DRTS_CANDIDATE_SHA?.trim() || "unconfigured";
   response.headers.set("x-drts-candidate-sha", candidateSha);
   response.headers.set("X-Frame-Options", "DENY");

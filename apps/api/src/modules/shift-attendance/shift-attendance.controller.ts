@@ -63,10 +63,9 @@ export class ShiftAttendanceController {
       driverId: effectiveDriverId,
     };
 
-    return toApiSuccessEnvelope(
-      this.shiftAttendanceService.clockIn(effectiveCommand, requestId),
-      requestId,
-    );
+    return this.shiftAttendanceService
+      .clockIn(effectiveCommand, requestId)
+      .then((shift) => toApiSuccessEnvelope(shift, requestId));
   }
 
   @Post("clock-out")
