@@ -203,7 +203,18 @@ Verification commands re-run in this worktree before handoff:
 
 ```
 $ git diff --check                                              # exit 0, no output
-$ pnpm --filter @drts/fleet-partner-portal-web typecheck        # (see task evidence for exact output)
+$ pnpm --filter @drts/fleet-partner-portal-web typecheck
+# exit 0
+# Generating route types...
+# ✓ Types generated successfully
+
 $ pnpm exec vitest run tests/unit/system-remediation/sr-host-fe-001/
-                                                                 # (see task evidence for exact output)
+# exit 0
+#  Test Files  3 passed (3)
+#       Tests  32 passed (32)
+#    Duration  618ms
 ```
+
+Candidate SHA for this closure commit is recorded via `CANDIDATE_SHA=$(git
+rev-parse HEAD)` / `CANDIDATE_BRANCH=$(git branch --show-current)` at
+handoff time (see task-board `handoff` event), not asserted here.
