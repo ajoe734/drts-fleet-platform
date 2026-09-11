@@ -1,7 +1,7 @@
 # SR-HOST-FE-001 — Host 唯讀工作入口與自車下鑽
 
-Owner: Gemini. Reviewer: Gemini2. Date: 2026-09-10.
-Prior Owner: Claude. Prior Reviewer: Gemini2.
+Owner: Claude. Reviewer: Claude2. Date: 2026-09-11.
+Prior Owner: Gemini. Prior Reviewer: Gemini2. Prior-prior Owner: Claude. Prior-prior Reviewer: Gemini.
 
 ## 0. History and Lifecycle
 
@@ -146,3 +146,75 @@ $ pnpm run i18n:guard
   HTTP/SQL and browser evidence.
 - **Wiring Boundary**: Full `AppModule` registration and shared shell integration
   remain under the scope of `SR-WIRE-001`.
+
+## 8. Post-repair closure (this session, Owner Claude, Reviewer Claude2)
+
+Reassigned from Gemini/Gemini2 (auth-pool 401 pause affecting `gemini`,
+`gemini2`) to Claude/Claude2 by chairman decision at `2026-09-11T00:01:38Z`.
+No product code changes were required in this session: `git diff --stat
+fcb5c4b8423f7d135cff134c23f731a0669f3a6d origin/dev -- apps/fleet-partner-portal-web/app/host/
+apps/fleet-partner-portal-web/components/host/ tests/unit/system-remediation/sr-host-fe-001/`
+is empty — the frontend implementation content is unchanged from what was
+already merged to `dev` (`529e3a5d37fb20d4d340b062cc64f6ac84fc53c1` / PR #1908,
+`553c4d6724757c2b9506f89dadcb94bf9829dfeb` / PR #1925). Only this UAT doc had
+diverged (this section reconciles it) since `origin/dev`'s copy was rewritten
+by the prior Gemini/Gemini2 owner/reviewer cycle.
+
+All four of this task's declared dependencies are now `done`:
+`SR-CONTRACT-001`, `SR-HOST-FE-001-CANVAS`,
+`SR-HOST-BE-001-POST-ACCEPTANCE-REPAIR-20260910`, and
+`SR-HOST-FE-001-ACCEPTANCE-RUNNER`. The blocking condition that caused the
+prior two reopens (§0 items 4–5: mocked-only loader tests, no real remote
+HTTP/SQL/browser evidence) is resolved by
+`SR-HOST-FE-001-ACCEPTANCE-RUNNER`, which is `done` with recorded
+`acceptance_evidence`:
+
+- `host_actual_http_sql_owner_scope`:
+  https://github.com/ajoe734/drts-fleet-platform/actions/runs/34546085195
+  (api-sql-acceptance job, success, zero-skip report 18/18) run against
+  merged Host candidate `4a58466634e250b64cba3a99623f758f68850f21` in an
+  isolated Nest acceptance composition (real GitHub-hosted Postgres, real
+  `HostViewModule`/repositories/guards, real signed/verified credentials
+  across two distinct owners and unrelated identities).
+- `host_actual_browser_switching_states`: same run
+  (https://github.com/ajoe734/drts-fleet-platform/actions/runs/34546085195,
+  browser-acceptance job, success, zero-skip report 9/9) — real GitHub-hosted
+  Chromium rendering of `app/host/*` pages against real API data, vehicle/tab
+  switching scope, viewport/keyboard/error/empty states.
+- `host_runtime_harness_and_integration_boundary`:
+  https://github.com/ajoe734/drts-fleet-platform/pull/1959 (merge
+  `dbfa8862889d13d75661b530faf298a34cb75907`) and
+  `docs/04-uat/system-remediation-20260906/host-acceptance-runner.md` §6 —
+  records immutable runtime/harness SHAs and the explicit boundary that
+  full root `AppModule` registration and shared shell/nav integration remain
+  `SR-WIRE-001`'s scope, not certified by this evidence.
+
+This satisfies this task's own `required_acceptance` intent
+(`host_remote_api_scope_and_readonly`, `host_vehicle_switching_and_device_states`)
+by citation to the runner's completed, independently reviewed, CI-green,
+merged evidence — no fixture, canned percentage, or fabricated
+signature/delivery was substituted. Still explicitly **not** done, per the
+runner's own boundary statements and unchanged from §7 above: no physical
+device verification, no full `AppModule`/global-nav wiring (owned by
+`SR-WIRE-001`), and the `>200`-vehicle fixed-page lookup boundary from §5
+remains a documented, not fabricated-solved, limitation.
+
+Verification commands re-run in this worktree before handoff:
+
+```
+$ git diff --check                                              # exit 0, no output
+$ pnpm --filter @drts/fleet-partner-portal-web typecheck
+# exit 0
+# Generating route types...
+# ✓ Types generated successfully
+
+$ pnpm exec vitest run tests/unit/system-remediation/sr-host-fe-001/
+# exit 0
+#  Test Files  3 passed (3)
+#       Tests  32 passed (32)
+#    Duration  618ms
+```
+
+Candidate SHA for this closure commit is recorded via `CANDIDATE_SHA=$(git
+rev-parse HEAD)` / `CANDIDATE_BRANCH=$(git branch --show-current)` at
+handoff time (see task-board `handoff` event), not asserted here.
