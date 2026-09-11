@@ -124,7 +124,7 @@ const en = {
   "bookingLifecycle.history.loading": "Loading bookings...",
   "bookingLifecycle.history.empty": "There are no bookings yet.",
   "bookingLifecycle.history.sub":
-    "Read from the tenant booking API with combined date/passenger/status search and pagination; no fixture backfill.",
+    "Find your bookings by passenger, status, and reservation date. Browse all matching results across pages.",
   "bookingLifecycle.history.searchPlaceholder":
     "Search passenger name, phone, or email",
   "bookingLifecycle.history.statusLabel": "Status:",
@@ -778,7 +778,7 @@ const zh: Record<TranslationKey, string> = {
   "bookingLifecycle.history.loading": "正在讀取預約…",
   "bookingLifecycle.history.empty": "目前沒有預約。",
   "bookingLifecycle.history.sub":
-    "從 tenant booking API 讀取，支援日期/乘客/狀態組合查詢與分頁；不以 fixture 補值。",
+    "依乘客、狀態與預約日期查詢，分頁查看所有符合條件的預約。",
   "bookingLifecycle.history.searchPlaceholder": "搜尋乘客姓名、電話或 Email",
   "bookingLifecycle.history.statusLabel": "狀態：",
   "bookingLifecycle.history.statusAll": "全部狀態",

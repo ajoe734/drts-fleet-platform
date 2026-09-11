@@ -43,7 +43,7 @@ async function main() {
     logger: false,
     abortOnError: false,
   });
-  app.setGlobalPrefix("api");
+  app.setGlobalPrefix("api", { exclude: ["health", "metrics"] });
   app.use((req, res, next) => {
     res.on("finish", () => {
       if (req.originalUrl.startsWith("/api/tenant/bookings")) {

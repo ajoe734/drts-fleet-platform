@@ -117,7 +117,28 @@ test("combined filters use actual HTTP totals, reset page, respect timezone boun
   const page = await context.newPage();
   const save = observe(page);
   try {
+    const healthRequest = page.waitForResponse(
+      (response) =>
+        new URL(response.url()).pathname === "/control-plane-proxy/health",
+    );
     const navigation = await page.goto(`${portal}/bookings`);
+    const healthResponse = await healthRequest;
+    expect(healthResponse.status()).toBe(200);
+    const healthPayload = await healthResponse.json();
+    expect(healthPayload.status).toBe("ok");
+    expect(healthPayload.candidateSha).toBe(process.env.CANDIDATE_SHA);
+    writeFileSync(
+      resolve(evidenceDir, "api-health-evidence.json"),
+      JSON.stringify(
+        {
+          candidateSha: process.env.CANDIDATE_SHA,
+          status: healthResponse.status(),
+          body: healthPayload,
+        },
+        null,
+        2,
+      ),
+    );
     expect(navigation?.headers()["x-drts-candidate-sha"]).toBe(
       process.env.CANDIDATE_SHA,
     );
