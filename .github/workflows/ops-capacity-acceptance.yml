@@ -59,6 +59,12 @@ jobs:
           --health-retries 10
     env:
       DATABASE_URL: postgresql://postgres:postgres@localhost:5432/drts_ops_capacity
+      # Distinguishes this dedicated, fully-migrated run from the repo's
+      # generic "unit"/"Product smoke acceptance" CI jobs, which also export
+      # a DATABASE_URL (for their own, unrelated, deliberately-unmigrated
+      # Postgres service) that would otherwise make the test think it should
+      # run there too and fail on missing schema.
+      DRTS_OPS_CAPACITY_ACCEPTANCE: "1"
       PGPASSWORD: postgres
       AUTH_MODE: test
       JWT_SECRET: sr-ops-capacity-runner-20260911-ci-only-secret-do-not-reuse

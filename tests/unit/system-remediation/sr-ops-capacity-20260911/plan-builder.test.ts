@@ -5,6 +5,11 @@ import {
   countForFamily,
   countsForDuration,
 } from "../../../../tools/system-remediation/ops-capacity/plan-builder.mjs";
+// capacity.mjs belongs to the already-accepted SR-OPS-PROOF-001 (C122) task
+// and is out of this task's write scope, so it has no .d.mts declaration
+// file; suppress the resulting no-declaration error here rather than adding
+// one outside this task's owned paths.
+// @ts-expect-error -- TS7016: no declaration file for capacity.mjs
 import { validatePlan } from "../../../../tools/system-remediation/ops-proof/capacity.mjs";
 
 // SR-OPS-CAPACITY-RUNNER-20260911 (C123) unit coverage: proves the plan this
@@ -67,9 +72,11 @@ describe("SR-OPS-CAPACITY-RUNNER-20260911 plan-builder", () => {
 
   it("gives every write a unique idempotency key across the whole plan", () => {
     const plan = buildPlan(60);
-    const keys = Object.values(plan.workloads)
-      .flat()
-      .map((item: { headers: Record<string, string> }) => item.headers["idempotency-key"]);
+    const keys = (
+      Object.values(plan.workloads).flat() as Array<{
+        headers: Record<string, string>;
+      }>
+    ).map((item) => item.headers["idempotency-key"]);
     expect(new Set(keys).size).toBe(keys.length);
   });
 

@@ -30,7 +30,7 @@ const require = createRequire(
   new URL("../../../../apps/api/package.json", import.meta.url),
 );
 const { Pool } = require("pg") as {
-  Pool: new (options?: { connectionString?: string }) => {
+  Pool: new (options?: { connectionString?: string | undefined }) => {
     query: <R = Record<string, unknown>>(
       sql: string,
       params?: unknown[],
@@ -39,8 +39,32 @@ const { Pool } = require("pg") as {
   };
 };
 
+// Manually typed instead of `typeof import("@nestjs/core")`: that type-only
+// form resolves relative to *this file's* location under `tests/`, where
+// "@nestjs/core" isn't installed (it's a dependency of apps/api, hoisted
+// only into apps/api/node_modules) -- so it fails the repo-root `tsc`
+// typecheck even though the `require(...)` value resolution above works.
+type NestApplication = {
+  setGlobalPrefix: (prefix: string, options?: { exclude?: string[] }) => void;
+  init: () => Promise<unknown>;
+  listen: (port: number, host: string) => Promise<unknown>;
+  getHttpServer: () => { address: () => unknown };
+  get: <T>(token: new (...args: never[]) => T) => T;
+  close: () => Promise<unknown>;
+};
+
 const DATABASE_URL = process.env.DATABASE_URL;
-const isConfigured = Boolean(DATABASE_URL);
+// Gated on a dedicated marker, not just DATABASE_URL: the repo's generic
+// "unit"/"Product smoke acceptance" CI jobs also export a (deliberately
+// unmigrated) DATABASE_URL for *their own* unrelated tests, so gating on
+// DATABASE_URL alone would make this real-AppModule/real-Postgres run get
+// swept into those jobs too and fail on missing schema there. Only the
+// dedicated ops-capacity-acceptance.yml workflow sets
+// DRTS_OPS_CAPACITY_ACCEPTANCE, after it has actually migrated its own
+// disposable database -- same pattern as sr-ops-proof-001's dedicated
+// DRTS_OPS_PROOF_*_DATABASE_URL gates.
+const isConfigured =
+  Boolean(DATABASE_URL) && process.env.DRTS_OPS_CAPACITY_ACCEPTANCE === "1";
 
 const DURATION_SECONDS = 900;
 const MAX_IN_FLIGHT = 500;
@@ -62,7 +86,14 @@ describe("SR-OPS-CAPACITY-RUNNER-20260911 real capacity + durable readback accep
       // this file resolves relative to *this* file's location and fails.
       // Route it through the same apps/api-rooted `require` used for `pg`
       // above so Node resolves it from apps/api/node_modules instead.
-      const { NestFactory } = require("@nestjs/core") as typeof import("@nestjs/core");
+      const { NestFactory } = require("@nestjs/core") as {
+        NestFactory: {
+          create: (
+            module: unknown,
+            options?: { logger?: boolean },
+          ) => Promise<NestApplication>;
+        };
+      };
       const { AppModule } = await import("../../../../apps/api/src/app.module");
       const { JwtAuthService } = await import(
         "../../../../apps/api/src/common/auth/jwt-auth.service"
@@ -76,12 +107,21 @@ describe("SR-OPS-CAPACITY-RUNNER-20260911 real capacity + durable readback accep
       const { SecurityEventsService } = await import(
         "../../../../apps/api/src/modules/security-events/security-events.service"
       );
+      const { TenantPartnerService } = await import(
+        "../../../../apps/api/src/modules/tenant-partner/tenant-partner.service"
+      );
+      const { detectAuthEnvironment } = await import(
+        "../../../../apps/api/src/config/auth-startup-config"
+      );
       const { buildCapacityPlan, countsForDuration } = await import(
         "../../../../tools/system-remediation/ops-capacity/plan-builder.mjs"
       );
-      const { runPlan } = await import(
-        "../../../../tools/system-remediation/ops-proof/capacity.mjs"
-      );
+      // capacity.mjs belongs to the already-accepted SR-OPS-PROOF-001 (C122)
+      // task and is out of this task's write scope, so it has no .d.mts
+      // declaration file; suppress the resulting no-declaration error here
+      // rather than adding one outside this task's owned paths.
+      // @ts-expect-error -- TS7016: no declaration file for capacity.mjs
+      const { runPlan } = await import("../../../../tools/system-remediation/ops-proof/capacity.mjs");
       const { readBackOwnedOrders, readBackReportJobs, summarizeReadback, summarizeLag } =
         await import("../../../../tools/system-remediation/ops-capacity/durable-readback.mjs");
 
@@ -189,22 +229,33 @@ describe("SR-OPS-CAPACITY-RUNNER-20260911 real capacity + durable readback accep
           // The controller deliberately collapses every internal failure
           // reason into the same public AUTH_SESSION_EXCHANGE_DENIED 403 for
           // this open, unauthenticated route (see
-          // apps/api/src/common/iam-error-codes.ts toPublicTenantAuthError).
-          // The real reason is still recorded, unmasked, as a
-          // `tenant_bootstrap_session.denied` security event on the same
-          // running app instance, so surface it here instead of guessing.
+          // apps/api/src/common/iam-error-codes.ts toPublicTenantAuthError),
+          // AND both of the controller's own denial branches (fixture mode
+          // disabled vs. tenant user not found/ineligible, see
+          // apps/api/src/modules/auth/auth.controller.ts
+          // assertTenantBootstrapFixtureModeEnabled /
+          // buildTenantBootstrapDeniedError) construct the exact same
+          // "AUTH_SESSION_EXCHANGE_DENIED" code, so the unmasked security
+          // event reasonCode alone cannot distinguish which branch fired.
+          // Inspect the same running app instance's own state directly to
+          // tell them apart instead of guessing.
           const securityEventsService = app.get(SecurityEventsService);
           const recentDenials = await securityEventsService.listEvents(null, {
             eventType: "tenant_bootstrap_session.denied",
             limit: 5,
           });
+          const tenantPartnerService = app.get(TenantPartnerService);
+          const tenantUsers = tenantPartnerService.listTenantUsers(TENANT_ID);
+          const matchingUser = tenantUsers.find(
+            (user: { email: string }) => user.email === TENANT_DISPATCH_EMAIL,
+          );
           throw new Error(
             `tenant bootstrap-session failed: HTTP ${tenantSessionResponse.status} ${await tenantSessionResponse.text()} | unmasked reasonCode(s): ${JSON.stringify(
               recentDenials.map((event) => ({
                 reasonCode: event.reasonCode,
                 occurredAt: event.occurredAt,
               })),
-            )}`,
+            )} | authEnvironment=${detectAuthEnvironment(process.env)} DRTS_TENANT_BOOTSTRAP_MODE=${JSON.stringify(process.env.DRTS_TENANT_BOOTSTRAP_MODE)} CI=${JSON.stringify(process.env.CI)} NODE_ENV=${JSON.stringify(process.env.NODE_ENV)} | tenantUserCount=${tenantUsers.length} matchingUser=${JSON.stringify(matchingUser ?? null)}`,
           );
         }
         // Same global snake-case interceptor as above: the wire field is
@@ -321,13 +372,13 @@ describe("SR-OPS-CAPACITY-RUNNER-20260911 real capacity + durable readback accep
         // failure is not a fabricated success.
         const claimedBookingOrderIds = records
           .filter((row) => row.workload === "booking" && !row.error && row.resourceIds?.orderId)
-          .map((row) => row.resourceIds!.orderId);
+          .map((row) => row.resourceIds!.orderId!);
         const claimedDispatchOrderIds = records
           .filter((row) => row.workload === "dispatch" && !row.error)
-          .map((row) => row.path.split("/")[3]);
+          .map((row) => row.path.split("/")[3]!);
         const claimedReportJobIds = records
           .filter((row) => row.workload === "report" && !row.error && row.resourceIds?.jobId)
-          .map((row) => row.resourceIds!.jobId);
+          .map((row) => row.resourceIds!.jobId!);
 
         const bookingReadback = await readBackOwnedOrders(pool, claimedBookingOrderIds);
         const dispatchReadback = await readBackOwnedOrders(pool, claimedDispatchOrderIds);
