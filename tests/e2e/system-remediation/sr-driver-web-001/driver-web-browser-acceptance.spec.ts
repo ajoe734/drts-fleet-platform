@@ -80,11 +80,24 @@ function assertCleanRun(diagnostics: PageDiagnostics): void {
   ).toEqual([]);
 }
 
-function assertSqliteWasmLoaded(diagnostics: PageDiagnostics): void {
-  expect(
-    diagnostics.wasmResponses.length,
-    "expected at least one network response for expo-sqlite's wa-sqlite.wasm asset (the offline location queue must actually initialize, not be skipped)",
-  ).toBeGreaterThan(0);
+async function waitForSqliteWasmLoaded(
+  diagnostics: PageDiagnostics,
+): Promise<void> {
+  // `initializeDriverLocationOfflineQueue()` is invoked with a bare `void`
+  // from `_layout.tsx`'s mount effect, so the wasm fetch is fire-and-forget
+  // relative to the "not provisioned" heading becoming visible. Routes that
+  // arrive at `/onboarding` via a client-side redirect (from `/` or `/sos`)
+  // get an extra round-trip's worth of wall-clock time for that fetch to
+  // land before this assertion runs; a direct `goto("/onboarding")` does
+  // not, so this must poll rather than read the array's length synchronously
+  // or it flakes on the direct-navigation case.
+  await expect
+    .poll(() => diagnostics.wasmResponses.length, {
+      timeout: 15_000,
+      message:
+        "expected at least one network response for expo-sqlite's wa-sqlite.wasm asset (the offline location queue must actually initialize, not be skipped)",
+    })
+    .toBeGreaterThan(0);
   for (const response of diagnostics.wasmResponses) {
     expect(
       [200, 304],
@@ -113,7 +126,11 @@ for (const route of ["/", "/onboarding", "/sos"] as const) {
     // silently passing either way.
     await expect(page).toHaveURL(new RegExp(`/onboarding/?$`));
 
+    // Wait for the async SQLite/WASM init before checking for console/page
+    // errors: that init is what an unhandled promise rejection would come
+    // from, so asserting a clean run before it has had time to settle would
+    // only prove the assertion ran too early to see the failure.
+    await waitForSqliteWasmLoaded(diagnostics);
     assertCleanRun(diagnostics);
-    assertSqliteWasmLoaded(diagnostics);
   });
 }

@@ -142,7 +142,10 @@ class DriverWebAcceptanceWorkflowStructureTests(unittest.TestCase):
         self.assertIn("if: always()", after_marker[:run_marker_pos])
 
     def test_native_job_exports_both_platforms_without_bytecode(self) -> None:
-        self.assertIn("expo export --platform ios,android --no-bytecode", self.text)
+        # `expo export --platform` only accepts a single platform (or "all"),
+        # not a comma-separated list, so this must be two invocations.
+        self.assertIn("expo export --platform ios --no-bytecode", self.text)
+        self.assertIn("expo export --platform android --no-bytecode", self.text)
 
     def test_native_job_gates_on_native_map_present_and_web_marker_absent(self) -> None:
         self.assertIn("has_native_map_provider", self.text)

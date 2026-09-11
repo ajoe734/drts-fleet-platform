@@ -383,11 +383,17 @@ jobs:
         # This is local Metro bundling only (no Xcode/Android SDK, no EAS
         # credentials, no signed build) — see the acceptance doc for why that
         # is an intentionally narrower claim than a real device/EAS build.
+        # `expo export --platform` only accepts one of android/ios/web/all,
+        # not a comma-separated list, so each platform runs as its own
+        # invocation into the same --output-dir (only the first clears the
+        # bundler cache; the second appends its per-platform bundle dir
+        # alongside the first's instead of wiping it).
         run: |
           set -o pipefail
           (
             cd apps/driver-app
-            npx expo export --platform ios,android --no-bytecode --output-dir dist-native --clear
+            npx expo export --platform ios --no-bytecode --output-dir dist-native --clear
+            npx expo export --platform android --no-bytecode --output-dir dist-native
           ) 2>&1 | tee -a "$DRIVER_NATIVE_EVIDENCE_DIR/execution-log.txt"
 
       - name: Verify native bundles use the real native map and exclude the web-only fallback module
