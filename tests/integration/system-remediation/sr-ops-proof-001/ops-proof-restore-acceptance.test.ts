@@ -60,9 +60,11 @@ describe("SR-OPS-PROOF-001 real snapshot restore + business readback acceptance"
         await pool.query(
           `DELETE FROM billing.phase1_driver_statements WHERE statement_id LIKE 'opsproof-stmt-%'`,
         );
-        await pool.query(
-          `DELETE FROM admin.audit_logs WHERE resource_id LIKE 'opsproof-order-%'`,
-        );
+        // admin.audit_logs is append-only (V0080__audit_log_immutability.sql
+        // rejects UPDATE/DELETE/TRUNCATE at the database level), so seeded
+        // audit rows are never cleaned up; the run tag keeps each run's rows
+        // distinguishable without needing deletion.
+        const runTag = `opsproof-run-${Date.now()}`;
 
         const now = new Date().toISOString();
         for (const [index, orderId] of ["opsproof-order-1", "opsproof-order-2"].entries()) {
@@ -97,7 +99,7 @@ describe("SR-OPS-PROOF-001 real snapshot restore + business readback acceptance"
             `INSERT INTO admin.audit_logs (
               actor_type, module_name, action_name, resource_type, resource_id
             ) VALUES ('system', 'sr-ops-proof-001', 'seed_acceptance_fixture', 'owned_order', $1)`,
-            [orderId],
+            [`${runTag}-${orderId}`],
           );
         }
 
@@ -157,9 +159,6 @@ describe("SR-OPS-PROOF-001 real snapshot restore + business readback acceptance"
         );
         await pool.query(
           `DELETE FROM billing.phase1_driver_statements WHERE statement_id LIKE 'opsproof-stmt-%'`,
-        );
-        await pool.query(
-          `DELETE FROM admin.audit_logs WHERE resource_id LIKE 'opsproof-order-%'`,
         );
       } finally {
         rmSync(directory, { recursive: true, force: true });
