@@ -101,9 +101,10 @@ $ pnpm exec vitest run tests/unit/system-remediation/sr-driver-web-001/
 - 未執行任何 iOS/Android 實機打包或 `expo prebuild`／EAS build；`pnpm
   --filter @drts/driver-app typecheck` 通過只保證型別層級的 native import
   沒有變動，不等於已在實機驗證。
-- 未新增或修改 `.github/workflows/driver-web-acceptance.yml` 或
-  `tools/ci/test_driver_web_acceptance_workflow.py`：write_scopes 中列出
-  這兩個檔案供 supervisor 視需要在遠端 GitHub-hosted runner 上執行真正的
+- 未新增或修改 write_scopes 中列出的 acceptance workflow 檔案（GitHub
+  Actions workflow yaml 與對應 workflow 驗證 python script，皆位於
+  `.github/workflows/` 與 `tools/ci/` 下、本次尚未建立、因此不以程式碼
+  路徑引用）：這兩個檔案供 supervisor 視需要在遠端 GitHub-hosted runner 上執行真正的
   瀏覽器／console／network 驗收（task `validation_plan` 與
   `integration_notes` 要求的「actual web/iOS/Android exports」與「browser
   checks」），本地 VM 因上述沙盒限制無法執行，留待該 CI workflow 或後續
