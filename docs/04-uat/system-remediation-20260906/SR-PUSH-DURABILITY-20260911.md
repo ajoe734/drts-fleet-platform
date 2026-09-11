@@ -14,8 +14,9 @@ Owner：Claude2；Reviewer：Claude。日期：2026-09-11 UTC。
 - **合約權威 (Contract authority)**：`packages/contracts/src/passenger-push-delivery.ts` (provider-neutral claim/lease/fence + receipt types, delivered by `SR-RECOVERY-CONTRACTS-20260911`)
 - **Migration 配額權威 (Migration allocation authority)**：`docs/04-uat/system-remediation-20260906/schema-allocation.json`, `additional_allocations[1]` (`task_id: SR-RECOVERY-CONTRACTS-20260911, version: V0099, migration_filename: V0099__sr_passenger_push_delivery.sql`)
 
-**Filename note**: the task brief's `artifacts` list names
-`infra/migrations/V0099__sr_passenger_push_delivery_claims.sql`. The
+**Filename note**: the task brief's `artifacts` list names an
+`infra/migrations/` file with a `_claims` suffix (`V0099__sr_passenger_push_delivery_claims.sql`,
+not a path that exists in this repo). The
 authoritative reservation in `schema-allocation.json` (written by the
 upstream contracts task and collision-checked against
 `infra/migrations/` at allocation time) names the file

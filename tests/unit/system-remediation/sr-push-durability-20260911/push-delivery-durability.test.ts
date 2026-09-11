@@ -265,7 +265,7 @@ function deliveryOutcome(
 
 describe("SR-PUSH-DURABILITY-20260911: MultiTaxiRepository claim/lease/fence SQL", () => {
   it("claims via a fence-incrementing upsert and returns the granted fence token", async () => {
-    const query = vi.fn(async (sql: string) => {
+    const query = vi.fn(async (sql: string, _parameters?: unknown[]) => {
       if (sql.includes("INSERT INTO ops.phase1_push_delivery_claims")) {
         return { rows: [{ fence_token: 3 }] };
       }
@@ -284,7 +284,7 @@ describe("SR-PUSH-DURABILITY-20260911: MultiTaxiRepository claim/lease/fence SQL
     );
 
     expect(result).toEqual({ claimed: true, fenceToken: 3 });
-    const [sql, parameters] = query.mock.calls[0] as [string, unknown[]];
+    const [sql, parameters] = query.mock.calls[0]!;
     expect(sql).toContain(
       "fence_token = ops.phase1_push_delivery_claims.fence_token + 1",
     );
