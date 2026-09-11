@@ -1,0 +1,215 @@
+name: Enterprise Search Acceptance (SR-ENTERPRISE-SEARCH-001)
+
+# Dedicated acceptance runner proving that the enterprise-dispatch-web
+# frontend's real query-composition function (buildEnterpriseBookingSearchQuery
+# in apps/enterprise-dispatch-web/lib/enterprise-booking-search.ts) drives the
+# real, unmodified OwnedMobilityController/Service against a real migrated
+# PostgreSQL and returns combined passenger/status/date filter, clear,
+# pagination, and empty-state totals that are internally consistent.
+#
+# This workflow does not start an HTTP listener or a browser. See
+# docs/04-uat/system-remediation-20260906/SR-ENTERPRISE-SEARCH-001.md for why
+# a full browser/HTTP acceptance runner (matching the SR-HOST-FE-001-
+# ACCEPTANCE-RUNNER pattern) was scoped out of this task and what evidence
+# gap that leaves for a possible follow-up task.
+
+on:
+  workflow_dispatch:
+    inputs:
+      candidate_sha:
+        description: "Immutable candidate commit SHA to verify (full 40-char SHA)"
+        required: true
+  push:
+    branches:
+      - claude/sr-enterprise-search-001-recovery-20260911
+    paths:
+      - .github/workflows/enterprise-search-acceptance.yml
+      - tools/ci/test_enterprise_search_acceptance_workflow.py
+      - tests/unit/system-remediation/sr-enterprise-search-001/**
+      - tests/e2e/system-remediation/sr-enterprise-search-001/**
+      - apps/enterprise-dispatch-web/lib/enterprise-booking-search.ts
+      - apps/enterprise-dispatch-web/lib/api-client.ts
+      - apps/enterprise-dispatch-web/components/enterprise-booking-lifecycle.tsx
+      - docs/04-uat/system-remediation-20260906/SR-ENTERPRISE-SEARCH-001.md
+
+permissions:
+  contents: read
+
+concurrency:
+  group: enterprise-search-acceptance-${{ github.event.inputs.candidate_sha || github.sha }}
+  cancel-in-progress: false
+
+env:
+  CI: true
+
+jobs:
+  acceptance:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    services:
+      postgres:
+        image: postgis/postgis:16-3.4
+        env:
+          POSTGRES_DB: drts_fleet_platform
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      DATABASE_URL: postgresql://postgres:postgres@localhost:5432/drts_fleet_platform
+      DRTS_ENTERPRISE_SEARCH_DATABASE_URL: postgresql://postgres:postgres@localhost:5432/drts_fleet_platform
+      CANDIDATE_SHA: ${{ github.event.inputs.candidate_sha || github.sha }}
+      WORKFLOW_SHA: ${{ github.sha }}
+    steps:
+      - name: Validate candidate_sha input
+        run: |
+          sha="$CANDIDATE_SHA"
+          if ! [[ "$sha" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "::error::candidate_sha must be a full 40-character commit SHA, got: $sha"
+            exit 1
+          fi
+
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.inputs.candidate_sha || github.sha }}
+          fetch-depth: 0
+
+      - name: Verify checkout resolved the exact immutable candidate
+        run: |
+          resolved="$(git rev-parse HEAD)"
+          expected="$CANDIDATE_SHA"
+          echo "Resolved HEAD: $resolved"
+          echo "Expected candidate: $expected"
+          if [ "$resolved" != "$expected" ]; then
+            echo "::error::Checked-out HEAD ($resolved) does not match the requested candidate ($expected)."
+            exit 1
+          fi
+
+      - name: Prepare evidence directory
+        run: mkdir -p .artifacts/enterprise-search-acceptance
+
+      - uses: pnpm/action-setup@v4
+        with: { version: 10.33.0, run_install: false }
+      - uses: actions/setup-node@v4
+        with:
+          {
+            node-version: 22,
+            cache: pnpm,
+            cache-dependency-path: pnpm-lock.yaml,
+          }
+
+      - name: Install dependencies
+        id: install
+        run: |
+          set -o pipefail
+          pnpm install --frozen-lockfile 2>&1 | tee -a .artifacts/enterprise-search-acceptance/execution-log.txt
+
+      - name: Apply migrations to the dedicated acceptance database
+        id: migrate
+        run: |
+          set -o pipefail
+          pnpm db:migrate 2>&1 | tee -a .artifacts/enterprise-search-acceptance/execution-log.txt
+
+      - name: Run enterprise search unit and frontend-query-to-real-backend acceptance harness
+        id: harness
+        run: |
+          set -o pipefail
+          pnpm exec vitest run \
+            tests/unit/system-remediation/sr-enterprise-search-001/enterprise-booking-search-query.test.ts \
+            tests/e2e/system-remediation/sr-enterprise-search-001/enterprise-search-query-acceptance.test.ts \
+            --no-file-parallelism --maxConcurrency=1 \
+            --reporter=default --reporter=json \
+            --outputFile.json=.artifacts/enterprise-search-acceptance/test-report.json \
+            2>&1 | tee -a .artifacts/enterprise-search-acceptance/execution-log.txt
+
+      - name: Gate on zero skips and all tests passed
+        id: gate
+        if: always()
+        run: |
+          python3 - <<'PY_GATE'
+          import json
+          from pathlib import Path
+
+          report_path = Path(".artifacts/enterprise-search-acceptance/test-report.json")
+          if not report_path.exists():
+              raise SystemExit(
+                  "Acceptance gate: no test report was produced "
+                  "(the harness likely failed before vitest could write one)."
+              )
+          report = json.loads(report_path.read_text())
+          total = report.get("numTotalTests", 0)
+          passed = report.get("numPassedTests", 0)
+          pending = report.get("numPendingTests", 0)
+          if total < 2 or passed != total or pending or not report.get("success"):
+              raise SystemExit(
+                  f"Enterprise search acceptance incomplete: total={total}, "
+                  f"passed={passed}, pending/skipped={pending}, "
+                  f"success={report.get('success')}. All unit and e2e "
+                  "acceptance tests must pass with zero skips."
+              )
+          print(f"Enterprise search acceptance: {passed}/{total} passed, zero skips.")
+          PY_GATE
+
+      - name: Record run status
+        if: always()
+        env:
+          INSTALL_OUTCOME: ${{ steps.install.outcome }}
+          MIGRATE_OUTCOME: ${{ steps.migrate.outcome }}
+          HARNESS_OUTCOME: ${{ steps.harness.outcome }}
+          GATE_OUTCOME: ${{ steps.gate.outcome }}
+        run: |
+          python3 - <<'PY_STATUS'
+          import json
+          import os
+          from pathlib import Path
+
+          report_path = Path(".artifacts/enterprise-search-acceptance/test-report.json")
+          status_path = Path(".artifacts/enterprise-search-acceptance/run-status.json")
+          status_path.parent.mkdir(parents=True, exist_ok=True)
+
+          install_outcome = os.environ.get("INSTALL_OUTCOME", "unknown")
+          migrate_outcome = os.environ.get("MIGRATE_OUTCOME", "unknown")
+          harness_outcome = os.environ.get("HARNESS_OUTCOME", "unknown")
+          gate_outcome = os.environ.get("GATE_OUTCOME", "unknown")
+
+          if (
+              install_outcome == "success"
+              and migrate_outcome == "success"
+              and harness_outcome == "success"
+              and gate_outcome == "success"
+              and report_path.exists()
+          ):
+              status = "passed"
+          elif install_outcome != "success" or migrate_outcome != "success":
+              status = "not_run"
+          else:
+              status = "failed"
+
+          status_path.write_text(json.dumps({
+              "candidate_sha": os.environ.get("CANDIDATE_SHA", ""),
+              "workflow_sha": os.environ.get("WORKFLOW_SHA", ""),
+              "status": status,
+              "install_outcome": install_outcome,
+              "migrate_outcome": migrate_outcome,
+              "harness_outcome": harness_outcome,
+              "gate_outcome": gate_outcome,
+              "report_present": report_path.exists(),
+          }, indent=2) + "\n")
+          print(f"Run status recorded: {status}")
+          PY_STATUS
+
+      - name: Upload execution log, test report, and run status
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: enterprise-search-acceptance-${{ github.event.inputs.candidate_sha || github.sha }}
+          path: |
+            .artifacts/enterprise-search-acceptance/execution-log.txt
+            .artifacts/enterprise-search-acceptance/test-report.json
+            .artifacts/enterprise-search-acceptance/run-status.json
+          if-no-files-found: warn
