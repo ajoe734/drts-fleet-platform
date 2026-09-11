@@ -1,0 +1,154 @@
+name: Webhook Transport Timeout Acceptance (SR-WEBHOOK-TRANSPORT-TIMEOUT-20260911)
+
+# Dedicated, manually-dispatchable acceptance for the production
+# WebhookDispatchService transport deadline. This job never runs on the
+# project's shared development VM: it starts a real node:http receiver and
+# drives the unmodified, zero-arg production WebhookDispatchService against
+# it over a real loopback TCP connection with the real global fetch, so a
+# hung tenant endpoint can only be ended by the production AbortController
+# deadline -- not by any test-supplied wrapper.
+#
+# See docs/04-uat/system-remediation-20260906/webhook-transport-timeout-20260911.md.
+
+on:
+  workflow_dispatch:
+    inputs:
+      candidate_sha:
+        description: "Immutable candidate commit SHA to verify (full 40-char SHA)"
+        required: true
+
+permissions:
+  contents: read
+
+concurrency:
+  group: webhook-transport-acceptance-${{ github.event.inputs.candidate_sha }}
+  cancel-in-progress: false
+
+env:
+  CI: true
+
+jobs:
+  hosted-receiver-acceptance:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      CANDIDATE_SHA: ${{ github.event.inputs.candidate_sha }}
+      WORKFLOW_SHA: ${{ github.sha }}
+    steps:
+      - name: Validate candidate_sha input
+        run: |
+          sha="$CANDIDATE_SHA"
+          if ! [[ "$sha" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "::error::candidate_sha must be a full 40-character commit SHA, got: $sha"
+            exit 1
+          fi
+
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.inputs.candidate_sha }}
+          fetch-depth: 0
+
+      - name: Verify checkout resolved the exact immutable candidate
+        run: |
+          resolved="$(git rev-parse HEAD)"
+          if [ "$resolved" != "$CANDIDATE_SHA" ]; then
+            echo "::error::Checked-out HEAD ($resolved) does not match the requested candidate ($CANDIDATE_SHA)."
+            exit 1
+          fi
+
+      - name: Prepare evidence directory
+        run: mkdir -p .artifacts/webhook-transport-acceptance
+
+      - uses: pnpm/action-setup@v4
+        with: { version: 10.33.0, run_install: false }
+      - uses: actions/setup-node@v4
+        with:
+          {
+            node-version: 22,
+            cache: pnpm,
+            cache-dependency-path: pnpm-lock.yaml,
+          }
+
+      - name: Install dependencies
+        id: install
+        run: |
+          set -o pipefail
+          pnpm install --frozen-lockfile 2>&1 | tee -a .artifacts/webhook-transport-acceptance/execution-log.txt
+
+      - name: Run hosted receiver acceptance (real network, real production transport)
+        id: runner
+        env:
+          SR_WEBHOOK_TIMEOUT_EVIDENCE_PATH: ${{ github.workspace }}/.artifacts/webhook-transport-acceptance/evidence.json
+        run: |
+          set -o pipefail
+          pnpm exec vitest run tests/integration/system-remediation/sr-webhook-transport-timeout-20260911/ --reporter=verbose \
+            2>&1 | tee -a .artifacts/webhook-transport-acceptance/execution-log.txt
+
+      - name: Reject any skipped or todo case
+        if: always()
+        run: |
+          if grep -Eq '\[skip|todo\]|[0-9]+ skipped' .artifacts/webhook-transport-acceptance/execution-log.txt; then
+            echo "::error::Hosted acceptance reported skipped/todo cases; zero skips are allowed."
+            exit 1
+          fi
+
+      - name: Record run status
+        if: always()
+        env:
+          INSTALL_OUTCOME: ${{ steps.install.outcome }}
+          RUNNER_OUTCOME: ${{ steps.runner.outcome }}
+        run: |
+          python3 - <<'PY_STATUS'
+          import json
+          import os
+          from pathlib import Path
+
+          status_path = Path(".artifacts/webhook-transport-acceptance/run-status.json")
+          status_path.parent.mkdir(parents=True, exist_ok=True)
+
+          install_outcome = os.environ.get("INSTALL_OUTCOME", "unknown")
+          runner_outcome = os.environ.get("RUNNER_OUTCOME", "unknown")
+
+          if install_outcome != "success":
+              status = "not_run"
+          elif runner_outcome == "success":
+              status = "passed"
+          else:
+              status = "failed"
+
+          status_path.write_text(json.dumps({
+              "candidate_sha": os.environ.get("CANDIDATE_SHA", ""),
+              "workflow_sha": os.environ.get("WORKFLOW_SHA", ""),
+              "status": status,
+              "install_outcome": install_outcome,
+              "runner_outcome": runner_outcome,
+          }, indent=2) + "\n")
+          print(f"Run status recorded: {status}")
+          PY_STATUS
+
+      - name: Gate on a recorded passed status
+        if: always()
+        run: |
+          python3 - <<'PY_GATE'
+          import json
+          from pathlib import Path
+
+          status_path = Path(".artifacts/webhook-transport-acceptance/run-status.json")
+          if not status_path.exists():
+              raise SystemExit("Webhook transport acceptance gate: no run-status.json was produced.")
+          status = json.loads(status_path.read_text())
+          if status.get("status") != "passed":
+              raise SystemExit(f"Webhook transport acceptance incomplete or failed: {status}")
+          print("Webhook transport acceptance: passed.")
+          PY_GATE
+
+      - name: Upload execution log, evidence, and run status
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: webhook-transport-acceptance-${{ github.event.inputs.candidate_sha }}
+          path: |
+            .artifacts/webhook-transport-acceptance/execution-log.txt
+            .artifacts/webhook-transport-acceptance/evidence.json
+            .artifacts/webhook-transport-acceptance/run-status.json
+          if-no-files-found: warn
