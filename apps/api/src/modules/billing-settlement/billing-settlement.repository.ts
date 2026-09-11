@@ -9,6 +9,9 @@ import type {
   DriverFeePlanRecord,
   DriverStatementRecord,
   MoneyAmount,
+  RemittanceProofPaymentReceipt,
+  RemittanceProofRecord,
+  RemittanceProofScanState,
   OwnedOrderRecord,
   PassengerPaymentStatus,
   ReconciliationIssueRecord,
@@ -26,6 +29,43 @@ import type { PaymentRecoveryAction } from "./payment-recovery.port";
 type JsonRecordRow = {
   record: unknown;
 };
+
+type RemittanceProofRow = {
+  proof_id: string;
+  batch_id: string;
+  driver_id: string;
+  uploaded_by_actor_id: string | null;
+  original_filename: string;
+  content_hash: string;
+  content_type: string;
+  size_bytes: string | number;
+  scan_state: RemittanceProofScanState;
+  scan_completed_at: Date | string | null;
+  rejection_reason: string | null;
+  created_at: Date | string;
+};
+
+type RemittanceProofPaymentReceiptRow = {
+  receipt_id: string;
+  batch_id: string;
+  proof_id: string;
+  idempotency_key: string;
+  driver_id: string;
+  amount_minor: string | number;
+  currency: string;
+  paid_at: Date | string;
+  created_at: Date | string;
+};
+
+export type MarkRemittanceProofPaidResult =
+  | { outcome: "proof_not_found" }
+  | { outcome: "proof_batch_mismatch" }
+  | { outcome: "proof_not_clean" }
+  | {
+      outcome: "paid";
+      receipt: RemittanceProofPaymentReceipt;
+      replayed: boolean;
+    };
 
 type LiveSettlementTripRow = {
   order_record: unknown;
@@ -1416,5 +1456,250 @@ export class BillingSettlementRepository {
     return value instanceof Date
       ? value.toISOString()
       : new Date(value).toISOString();
+  }
+
+  // ── Remittance Proof (SR-PROOF-001) ──
+
+  async insertRemittanceProof(input: {
+    proofId: string;
+    batchId: string;
+    driverId: string;
+    uploadedByActorId: string | null;
+    originalFilename: string;
+    contentHash: string;
+    contentType: string;
+    sizeBytes: number;
+    createdAt: string;
+  }): Promise<RemittanceProofRecord> {
+    if (!this.isEnabled()) {
+      throw new Error("Remittance proof persistence is unavailable.");
+    }
+    const result = await this.databaseService!.query<RemittanceProofRow>(
+      `
+        INSERT INTO billing.phase1_remittance_proofs (
+          proof_id, batch_id, driver_id, uploaded_by_actor_id,
+          original_filename, content_hash, content_type, size_bytes, created_at
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+        RETURNING *
+      `,
+      [
+        input.proofId,
+        input.batchId,
+        input.driverId,
+        input.uploadedByActorId,
+        input.originalFilename,
+        input.contentHash,
+        input.contentType,
+        input.sizeBytes,
+        input.createdAt,
+      ],
+    );
+    return this.mapRemittanceProof(result.rows[0]!);
+  }
+
+  async findRemittanceProofById(
+    proofId: string,
+  ): Promise<RemittanceProofRecord | null> {
+    if (!this.isEnabled()) {
+      return null;
+    }
+    const result = await this.databaseService!.query<RemittanceProofRow>(
+      `SELECT * FROM billing.phase1_remittance_proofs WHERE proof_id = $1`,
+      [proofId],
+    );
+    return result.rows[0] ? this.mapRemittanceProof(result.rows[0]) : null;
+  }
+
+  /**
+   * Transitions a proof out of `pending_scan`. Idempotent by construction:
+   * the `WHERE scan_state = 'pending_scan'` guard means a second call for
+   * an already-terminal proof affects zero rows and returns null rather
+   * than re-writing (or silently flipping) an existing clean/rejected
+   * verdict.
+   */
+  async recordRemittanceProofScanResult(input: {
+    proofId: string;
+    scanState: Extract<RemittanceProofScanState, "clean" | "rejected">;
+    rejectionReason: string | null;
+    scanCompletedAt: string;
+  }): Promise<RemittanceProofRecord | null> {
+    if (!this.isEnabled()) {
+      return null;
+    }
+    const result = await this.databaseService!.query<RemittanceProofRow>(
+      `
+        UPDATE billing.phase1_remittance_proofs
+        SET scan_state = $2, scan_completed_at = $3, rejection_reason = $4
+        WHERE proof_id = $1 AND scan_state = 'pending_scan'
+        RETURNING *
+      `,
+      [
+        input.proofId,
+        input.scanState,
+        input.scanCompletedAt,
+        input.rejectionReason,
+      ],
+    );
+    return result.rows[0] ? this.mapRemittanceProof(result.rows[0]) : null;
+  }
+
+  /**
+   * The durable half of the mark-paid gate: proof existence, batch
+   * ownership and `clean` scan state, plus an idempotent
+   * `(batch_id, idempotency_key)` payment receipt. Batch existence and
+   * `approvedAt` are the caller's responsibility (`BillingSettlementService`
+   * already holds the authoritative in-memory `ReimbursementBatchRecord`
+   * used across this whole module); this method does not re-derive batch
+   * status from SQL to avoid two divergent sources of batch truth.
+   *
+   * Replay is checked before validating the proof, matching the contract's
+   * "the same idempotencyKey on an already-paid batch returns the original
+   * receipt" language -- a proof invalidated after payment must not break
+   * replay of a payment that already happened.
+   */
+  async markRemittanceProofPaid(input: {
+    batchId: string;
+    proofId: string;
+    idempotencyKey: string;
+    driverId: string;
+    amount: MoneyAmount;
+    paidAt: string;
+  }): Promise<MarkRemittanceProofPaidResult> {
+    if (!this.isEnabled()) {
+      throw new Error("Remittance proof persistence is unavailable.");
+    }
+    const client = await this.databaseService!.connect();
+    try {
+      await client.query("BEGIN");
+
+      const existing =
+        await client.query<RemittanceProofPaymentReceiptRow>(
+          `
+            SELECT * FROM billing.phase1_remittance_proof_payment_receipts
+            WHERE batch_id = $1 AND idempotency_key = $2
+          `,
+          [input.batchId, input.idempotencyKey],
+        );
+      if (existing.rows[0]) {
+        await client.query("COMMIT");
+        return {
+          outcome: "paid",
+          receipt: this.mapRemittanceProofPaymentReceipt(existing.rows[0]),
+          replayed: true,
+        };
+      }
+
+      const proofResult = await client.query<RemittanceProofRow>(
+        `SELECT * FROM billing.phase1_remittance_proofs WHERE proof_id = $1 FOR UPDATE`,
+        [input.proofId],
+      );
+      const proof = proofResult.rows[0];
+      if (!proof) {
+        await client.query("ROLLBACK");
+        return { outcome: "proof_not_found" };
+      }
+      if (proof.batch_id !== input.batchId) {
+        await client.query("ROLLBACK");
+        return { outcome: "proof_batch_mismatch" };
+      }
+      if (proof.scan_state !== "clean") {
+        await client.query("ROLLBACK");
+        return { outcome: "proof_not_clean" };
+      }
+
+      const inserted =
+        await client.query<RemittanceProofPaymentReceiptRow>(
+          `
+            INSERT INTO billing.phase1_remittance_proof_payment_receipts (
+              batch_id, proof_id, idempotency_key, driver_id,
+              amount_minor, currency, paid_at
+            ) VALUES ($1, $2, $3, $4, $5, $6, $7)
+            ON CONFLICT (batch_id, idempotency_key) DO NOTHING
+            RETURNING *
+          `,
+          [
+            input.batchId,
+            input.proofId,
+            input.idempotencyKey,
+            input.driverId,
+            input.amount.amountMinor,
+            input.amount.currency,
+            input.paidAt,
+          ],
+        );
+      if (inserted.rows[0]) {
+        await client.query("COMMIT");
+        return {
+          outcome: "paid",
+          receipt: this.mapRemittanceProofPaymentReceipt(inserted.rows[0]),
+          replayed: false,
+        };
+      }
+
+      // Lost a race against a concurrent identical replay between our
+      // pre-check and the insert; the conflicting row is now the answer.
+      const raced = await client.query<RemittanceProofPaymentReceiptRow>(
+        `
+          SELECT * FROM billing.phase1_remittance_proof_payment_receipts
+          WHERE batch_id = $1 AND idempotency_key = $2
+        `,
+        [input.batchId, input.idempotencyKey],
+      );
+      await client.query("COMMIT");
+      if (!raced.rows[0]) {
+        throw new Error(
+          "Remittance proof payment receipt insert conflicted but no row could be re-read.",
+        );
+      }
+      return {
+        outcome: "paid",
+        receipt: this.mapRemittanceProofPaymentReceipt(raced.rows[0]),
+        replayed: true,
+      };
+    } catch (error) {
+      await client.query("ROLLBACK").catch(() => undefined);
+      throw error;
+    } finally {
+      client.release();
+    }
+  }
+
+  private mapRemittanceProof(row: RemittanceProofRow): RemittanceProofRecord {
+    return {
+      proofId: row.proof_id,
+      batchId: row.batch_id,
+      driverId: row.driver_id,
+      uploadedByActorId: row.uploaded_by_actor_id,
+      originalFilename: row.original_filename,
+      content: {
+        contentHash: row.content_hash,
+        contentType: row.content_type,
+        sizeBytes: Number(row.size_bytes),
+      },
+      scanState: row.scan_state,
+      scanCompletedAt: row.scan_completed_at
+        ? this.toIsoString(row.scan_completed_at)
+        : null,
+      rejectionReason: row.rejection_reason,
+      createdAt: this.toIsoString(row.created_at),
+    };
+  }
+
+  private mapRemittanceProofPaymentReceipt(
+    row: RemittanceProofPaymentReceiptRow,
+  ): RemittanceProofPaymentReceipt {
+    return {
+      receiptId: row.receipt_id,
+      batchId: row.batch_id,
+      proofId: row.proof_id,
+      idempotencyKey: row.idempotency_key,
+      driverId: row.driver_id,
+      amount: {
+        amountMinor: Number(row.amount_minor),
+        currency: row.currency,
+      },
+      paidAt: this.toIsoString(row.paid_at),
+      createdAt: this.toIsoString(row.created_at),
+    };
   }
 }

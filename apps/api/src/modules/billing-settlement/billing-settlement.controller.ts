@@ -3,6 +3,8 @@ import {
   Controller,
   Get,
   Headers,
+  HttpCode,
+  HttpStatus,
   Optional,
   Param,
   Post,
@@ -19,6 +21,8 @@ import type {
   GenerateDriverStatementCommand,
   GenerateTenantInvoiceCommand,
   MarkReimbursementPaidCommand,
+  MarkReimbursementPaidWithProofCommand,
+  RequestRemittanceProofReadbackCommand,
   ResolveReconciliationIssueCommand,
   ReopenReconciliationIssueCommand,
   TenantOrderListQuery,
@@ -26,6 +30,7 @@ import type {
   PublishDriverFeePlanCommand,
   TenantPayableSummary,
   UpdateTenantBillingProfileCommand,
+  UploadRemittanceProofCommand,
 } from "@drts/contracts";
 
 import {
@@ -617,5 +622,123 @@ export class BillingSettlementController {
       this.billingSettlementService.getReimbursementBatch(batchId),
       requestId,
     );
+  }
+
+  // ── Remittance Proof (SR-PROOF-001) ──
+
+  /**
+   * Not part of the locked SR-RECOVERY-CONTRACTS-20260911 OpenAPI paths --
+   * that contract's `UploadRemittanceProofCommand.stagedContentRef` is
+   * deliberately opaque ("into the storage adapter's staged upload; not
+   * the raw bytes") and assumes a prior staging call this task's
+   * write_scopes never allocated an endpoint for. This route is the
+   * missing first phase: it accepts the actual bytes (base64, to avoid a
+   * multipart/`multer` dependency nothing else in this codebase uses) and
+   * returns the `stagedContentRef` that `POST reimbursements/proofs`
+   * expects. See `docs/04-uat/system-remediation-20260906/SR-PROOF-001.md`
+   * for why this exists and its boundary.
+   */
+  @Post("reimbursements/proofs/staged-content")
+  @HttpCode(HttpStatus.OK)
+  @RequireRealms("driver")
+  @RequireScopes("driver:write")
+  async stageRemittanceProofContent(
+    @Body() body: { contentBase64?: string; contentType?: string },
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    const contentType = body?.contentType?.trim();
+    if (!contentType) {
+      throw new ApiRequestError(
+        HttpStatus.BAD_REQUEST,
+        "VALIDATION_ERROR",
+        "contentType is required.",
+      );
+    }
+    let bytes: Buffer;
+    try {
+      bytes = Buffer.from(body?.contentBase64 ?? "", "base64");
+    } catch {
+      bytes = Buffer.alloc(0);
+    }
+    if (bytes.length === 0) {
+      throw new ApiRequestError(
+        HttpStatus.BAD_REQUEST,
+        "VALIDATION_ERROR",
+        "contentBase64 must decode to non-empty bytes.",
+      );
+    }
+    const staged = await this.billingSettlementService.stageRemittanceProofContent(
+      bytes,
+      contentType,
+    );
+    return toApiSuccessEnvelope(staged, requestId);
+  }
+
+  @Post("reimbursements/proofs")
+  @RequireRealms("driver")
+  @RequireScopes("driver:write")
+  async uploadRemittanceProof(
+    @Body() command: UploadRemittanceProofCommand,
+    @CurrentIdentity() identity?: BootstrapRequestIdentity | null,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    const data = await this.billingSettlementService.uploadRemittanceProof(
+      command,
+      identity ?? null,
+      requestId,
+    );
+    return toApiSuccessEnvelope(data, requestId);
+  }
+
+  @Get("reimbursements/proofs/:proofId")
+  @RequireRealms("system", "platform", "ops", "driver")
+  @RequireScopes("billing:read")
+  async getRemittanceProof(
+    @Param("proofId") proofId: string,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    const data = await this.billingSettlementService.getRemittanceProof(
+      proofId,
+    );
+    return toApiSuccessEnvelope(data, requestId);
+  }
+
+  @Post("reimbursements/proofs/:proofId/readback")
+  @HttpCode(HttpStatus.OK)
+  @RequireRealms("system", "platform", "ops")
+  @RequireScopes("billing:write")
+  async requestRemittanceProofReadback(
+    @Param("proofId") proofId: string,
+    @Body() command: RequestRemittanceProofReadbackCommand,
+    @CurrentIdentity() identity?: BootstrapRequestIdentity | null,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    const data =
+      await this.billingSettlementService.requestRemittanceProofReadback(
+        { ...command, proofId },
+        identity ?? null,
+        requestId,
+      );
+    return toApiSuccessEnvelope(data, requestId);
+  }
+
+  @Post("reimbursements/:batchId/pay-with-proof")
+  @HttpCode(HttpStatus.OK)
+  @RequireRealms("system", "platform", "ops")
+  @RequireScopes("billing:write")
+  async markReimbursementPaidWithProof(
+    @Param("batchId") batchId: string,
+    @Body() command: MarkReimbursementPaidWithProofCommand,
+    @CurrentIdentity() identity?: BootstrapRequestIdentity | null,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    const data =
+      await this.billingSettlementService.markReimbursementPaidWithProof(
+        batchId,
+        { ...command, batchId },
+        identity ?? null,
+        requestId,
+      );
+    return toApiSuccessEnvelope(data, requestId);
   }
 }
