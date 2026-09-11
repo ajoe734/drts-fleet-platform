@@ -143,13 +143,20 @@ test("combined filters use actual HTTP totals, reset page, respect timezone boun
       (response) =>
         response.url().includes(apiPath) &&
         new URL(response.url()).searchParams.get("dateFrom") ===
-          "2026-09-10T16:00:00.000Z",
+          "2026-09-11T00:00:00+08:00",
     );
     await page.getByTestId("enterprise-date-from").fill("2026-09-11");
     const response = await actualQuery;
     expect(response.status()).toBe(200);
     const params = new URL(response.url()).searchParams;
-    expect(params.get("dateTo")).toBe("2026-09-11T16:00:00.000Z");
+    expect(params.get("dateFrom")).toBe("2026-09-11T00:00:00+08:00");
+    expect(params.get("dateTo")).toBe("2026-09-12T00:00:00+08:00");
+    expect(new Date(params.get("dateFrom")!).toISOString()).toBe(
+      "2026-09-10T16:00:00.000Z",
+    );
+    expect(new Date(params.get("dateTo")!).toISOString()).toBe(
+      "2026-09-11T16:00:00.000Z",
+    );
     expect(params.get("passenger")).toBe("Alpha");
     expect(params.get("status")).toBe("active");
     expect(params.get("page")).toBe("1");
@@ -264,7 +271,23 @@ test("real verified tenant B sees only its own data and cannot select tenant A",
       { headers: { "x-tenant-id": sessions.a.tenantId } },
     );
     expect(mismatch.status()).toBe(403);
-    expect(await mismatch.text()).toContain("TENANT_SCOPE_MISMATCH");
+    const mismatchBody = await mismatch.json();
+    expect(mismatchBody.error).toBe("TENANT_SCOPE_MISMATCH");
+    writeFileSync(
+      resolve(evidenceDir, "tenant-isolation-evidence.json"),
+      JSON.stringify(
+        {
+          candidateSha: process.env.CANDIDATE_SHA,
+          visibleBookingIds: await rowIds(page),
+          attemptedTenant: sessions.a.tenantId,
+          verifiedTenant: sessions.b.tenantId,
+          status: mismatch.status(),
+          error: mismatchBody.error,
+        },
+        null,
+        2,
+      ),
+    );
   } finally {
     await context.close();
   }
@@ -273,6 +296,7 @@ test("real verified tenant B sees only its own data and cannot select tenant A",
 test("missing, genuinely expired, and wrong-realm sessions cannot render or query tenant bookings", async ({
   browser,
 }) => {
+  const evidence: unknown[] = [];
   for (const [name, token, expected] of [
     ["missing", "", 401],
     ["expired", sessions.a.expiredToken, 401],
@@ -290,10 +314,25 @@ test("missing, genuinely expired, and wrong-realm sessions cannot render or quer
         page.getByTestId("enterprise-search-auth-required"),
       ).toBeVisible();
       await expect(rowLocator(page)).toHaveCount(0);
+      evidence.push({
+        name,
+        status: response.status(),
+        body: await response.json(),
+        authRequired: true,
+        visibleBookingIds: await rowIds(page),
+      });
     } finally {
       await context.close();
     }
   }
+  writeFileSync(
+    resolve(evidenceDir, "authentication-negatives-evidence.json"),
+    JSON.stringify(
+      { candidateSha: process.env.CANDIDATE_SHA, cases: evidence },
+      null,
+      2,
+    ),
+  );
 });
 
 test("invalid date range stops queries and rapidly changed filters do not retain stale results", async ({
@@ -312,14 +351,21 @@ test("invalid date range stops queries and rapidly changed filters do not retain
     await page.getByTestId("enterprise-clear-filters").click();
     await expectTotal(page, 25, 10);
     // Delay only dispatch of an actual request; no response or API data is mocked.
+    let observedAlpha!: () => void;
+    const alphaRequested = new Promise<void>((resolve) => {
+      observedAlpha = resolve;
+    });
     await page.route(`**${apiPath}?**`, async (route) => {
       if (
         new URL(route.request().url()).searchParams.get("passenger") === "Alpha"
-      )
+      ) {
+        observedAlpha();
         await new Promise((resolve) => setTimeout(resolve, 300));
+      }
       await route.continue().catch(() => {}); // AbortController legitimately cancels an obsolete request.
     });
     await page.getByTestId("enterprise-search-input").fill("Alpha");
+    await alphaRequested;
     await page.getByTestId("enterprise-search-input").fill("Beta");
     await expectTotal(page, 13, 10);
     await page.waitForTimeout(500);
