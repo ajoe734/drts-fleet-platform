@@ -1,0 +1,312 @@
+name: Live Entry & Map Acceptance (SR-LIVE-ENTRY-MAP-RUNNER-001)
+
+# Dedicated, manually-dispatchable acceptance runner for two independent
+# live profiles against an already-deployed candidate:
+#
+#   entry-acceptance — reuses the existing, unmodified
+#                       verify-iam-staging-live.mjs plus an additional
+#                       positive/negative realm-role HTTP boundary check
+#                       driven by a deployment-issued role session.
+#   map-acceptance   — reuses the existing, unmodified
+#                       verify-google-map-provider-live.mjs (live
+#                       Geocoding/Routes/Maps JS checks).
+#
+# This workflow never deploys anything: both jobs only verify a candidate
+# that a separate deploy workflow already published. Each job independently
+# verifies (a) the checked-out git SHA matches the requested candidate_sha
+# and (b) — for the entry profile — the deployed target itself reports that
+# same candidate SHA via its x-drts-candidate-sha response header, so a
+# stale/rolled-back deployment cannot silently pass. All inputs are
+# explicit, fail-closed allowlists; there is no historical staging default
+# fallback. Neither job runs on this project's VM (no product dev/preview/
+# HTTP/browser server permitted there); both run entirely on GitHub-hosted
+# runners.
+
+on:
+  workflow_dispatch:
+    inputs:
+      candidate_sha:
+        description: "Immutable candidate commit SHA to verify (full 40-char SHA); leave blank to use the dispatch ref's HEAD"
+        required: false
+        default: ""
+      run_entry_profile:
+        description: "Run the entry (IAM/login boundary) profile"
+        type: boolean
+        required: false
+        default: true
+      run_map_profile:
+        description: "Run the map (Google Maps provider) profile"
+        type: boolean
+        required: false
+        default: true
+
+permissions:
+  contents: read
+
+concurrency:
+  group: live-entry-map-acceptance-${{ github.event.inputs.candidate_sha || github.sha }}
+  cancel-in-progress: false
+
+env:
+  CI: true
+
+jobs:
+  entry-acceptance:
+    if: ${{ github.event.inputs.run_entry_profile != 'false' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      CANDIDATE_SHA: ${{ github.event.inputs.candidate_sha || github.sha }}
+      WORKFLOW_SHA: ${{ github.event.inputs.candidate_sha || github.sha }}
+      DRTS_CANDIDATE_SHA: ${{ github.event.inputs.candidate_sha || github.sha }}
+      DRTS_LIVE_ENTRY_EVIDENCE_PATH: ${{ github.workspace }}/.artifacts/live-entry-acceptance/evidence-entry.json
+      DRTS_LIVE_ENTRY_ALLOWED_TARGETS: ${{ vars.DRTS_LIVE_ENTRY_ALLOWED_TARGETS }}
+      DRTS_LIVE_ENTRY_API_ORIGIN: ${{ vars.DRTS_LIVE_ENTRY_API_ORIGIN }}
+      DRTS_LIVE_ENTRY_TENANT_ORIGIN: ${{ vars.DRTS_LIVE_ENTRY_TENANT_ORIGIN }}
+      DRTS_LIVE_ENTRY_PLATFORM_ORIGIN: ${{ vars.DRTS_LIVE_ENTRY_PLATFORM_ORIGIN }}
+      DRTS_LIVE_ENTRY_OPS_ORIGIN: ${{ vars.DRTS_LIVE_ENTRY_OPS_ORIGIN }}
+      DRTS_LIVE_ENTRY_AUTHORIZED_ROLES: ${{ vars.DRTS_LIVE_ENTRY_AUTHORIZED_ROLES }}
+      DRTS_LIVE_ENTRY_AUTHORIZED_ROLE: ${{ vars.DRTS_LIVE_ENTRY_AUTHORIZED_ROLE }}
+      DRTS_LIVE_ENTRY_POSITIVE_ROUTE: ${{ vars.DRTS_LIVE_ENTRY_POSITIVE_ROUTE }}
+      DRTS_LIVE_ENTRY_POSITIVE_EXPECTED_STATUS: ${{ vars.DRTS_LIVE_ENTRY_POSITIVE_EXPECTED_STATUS }}
+      DRTS_LIVE_ENTRY_NEGATIVE_ROUTE: ${{ vars.DRTS_LIVE_ENTRY_NEGATIVE_ROUTE }}
+      DRTS_LIVE_ENTRY_NEGATIVE_EXPECTED_STATUS: ${{ vars.DRTS_LIVE_ENTRY_NEGATIVE_EXPECTED_STATUS }}
+      DRTS_LIVE_ENTRY_ROLE_SESSION_TOKEN: ${{ secrets.DRTS_LIVE_ENTRY_ROLE_SESSION_TOKEN }}
+    steps:
+      - name: Validate candidate_sha input
+        run: |
+          sha="$CANDIDATE_SHA"
+          if ! [[ "$sha" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "::error::candidate_sha must be a full 40-character commit SHA, got: $sha"
+            exit 1
+          fi
+
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.inputs.candidate_sha || github.sha }}
+          fetch-depth: 0
+
+      - name: Verify checkout resolved the exact immutable candidate
+        run: |
+          resolved="$(git rev-parse HEAD)"
+          if [ "$resolved" != "$CANDIDATE_SHA" ]; then
+            echo "::error::Checked-out HEAD ($resolved) does not match the requested candidate ($CANDIDATE_SHA)."
+            exit 1
+          fi
+
+      - name: Prepare evidence directory
+        run: mkdir -p .artifacts/live-entry-acceptance
+
+      - uses: pnpm/action-setup@v4
+        with: { version: 10.33.0, run_install: false }
+      - uses: actions/setup-node@v4
+        with:
+          {
+            node-version: 22,
+            cache: pnpm,
+            cache-dependency-path: pnpm-lock.yaml,
+          }
+
+      - name: Install dependencies
+        id: install
+        run: |
+          set -o pipefail
+          pnpm install --frozen-lockfile 2>&1 | tee -a .artifacts/live-entry-acceptance/execution-log.txt
+
+      - name: Run live entry acceptance profile
+        id: runner
+        run: |
+          set -o pipefail
+          pnpm exec tsx tests/e2e/system-remediation/sr-live-entry-001/entry-acceptance-runner.ts \
+            2>&1 | tee -a .artifacts/live-entry-acceptance/execution-log.txt
+
+      - name: Record run status
+        if: always()
+        env:
+          INSTALL_OUTCOME: ${{ steps.install.outcome }}
+          RUNNER_OUTCOME: ${{ steps.runner.outcome }}
+        run: |
+          python3 - <<'PY_STATUS'
+          import json
+          import os
+          from pathlib import Path
+
+          evidence_path = Path(".artifacts/live-entry-acceptance/evidence-entry.json")
+          status_path = Path(".artifacts/live-entry-acceptance/run-status.json")
+          status_path.parent.mkdir(parents=True, exist_ok=True)
+
+          install_outcome = os.environ.get("INSTALL_OUTCOME", "unknown")
+          runner_outcome = os.environ.get("RUNNER_OUTCOME", "unknown")
+
+          if install_outcome != "success":
+              status = "not_run"
+          elif runner_outcome == "success" and evidence_path.exists():
+              status = "passed"
+          else:
+              status = "failed"
+
+          status_path.write_text(json.dumps({
+              "candidate_sha": os.environ.get("CANDIDATE_SHA", ""),
+              "workflow_sha": os.environ.get("WORKFLOW_SHA", ""),
+              "status": status,
+              "install_outcome": install_outcome,
+              "runner_outcome": runner_outcome,
+              "evidence_present": evidence_path.exists(),
+          }, indent=2) + "\n")
+          print(f"Run status recorded: {status}")
+          PY_STATUS
+
+      - name: Gate on a recorded passed status
+        if: always()
+        run: |
+          python3 - <<'PY_GATE'
+          import json
+          from pathlib import Path
+
+          status_path = Path(".artifacts/live-entry-acceptance/run-status.json")
+          if not status_path.exists():
+              raise SystemExit("Entry acceptance gate: no run-status.json was produced.")
+          status = json.loads(status_path.read_text())
+          if status.get("status") != "passed":
+              raise SystemExit(f"Entry acceptance incomplete or failed: {status}")
+          print("Entry acceptance: passed.")
+          PY_GATE
+
+      - name: Upload execution log, redacted evidence, and run status
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: live-entry-acceptance-${{ github.event.inputs.candidate_sha || github.sha }}
+          path: |
+            .artifacts/live-entry-acceptance/execution-log.txt
+            .artifacts/live-entry-acceptance/evidence-entry.json
+            .artifacts/live-entry-acceptance/run-status.json
+          if-no-files-found: warn
+
+  map-acceptance:
+    if: ${{ github.event.inputs.run_map_profile != 'false' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      CANDIDATE_SHA: ${{ github.event.inputs.candidate_sha || github.sha }}
+      WORKFLOW_SHA: ${{ github.event.inputs.candidate_sha || github.sha }}
+      DRTS_CANDIDATE_SHA: ${{ github.event.inputs.candidate_sha || github.sha }}
+      DRTS_LIVE_MAP_EVIDENCE_PATH: ${{ github.workspace }}/.artifacts/live-map-acceptance/evidence-map.json
+      DRTS_LIVE_MAP_TEST_AUTHORIZED: ${{ vars.DRTS_LIVE_MAP_TEST_AUTHORIZED }}
+      DRTS_LIVE_MAP_ALLOWED_TARGETS: ${{ vars.DRTS_LIVE_MAP_ALLOWED_TARGETS }}
+      DRTS_LIVE_MAP_TEST_ORIGIN: ${{ vars.DRTS_LIVE_MAP_TEST_ORIGIN }}
+      DRTS_LIVE_MAP_AUTHORIZED_ROUTE_LABELS: ${{ vars.DRTS_LIVE_MAP_AUTHORIZED_ROUTE_LABELS }}
+      DRTS_LIVE_MAP_AUTHORIZED_ROUTE_LABEL: ${{ vars.DRTS_LIVE_MAP_AUTHORIZED_ROUTE_LABEL }}
+      GOOGLE_MAPS_GEOCODING_API_KEY: ${{ secrets.GOOGLE_MAPS_GEOCODING_API_KEY }}
+      GOOGLE_MAPS_ROUTES_API_KEY: ${{ secrets.GOOGLE_MAPS_ROUTES_API_KEY }}
+      GOOGLE_MAPS_BROWSER_KEY: ${{ secrets.GOOGLE_MAPS_BROWSER_KEY }}
+    steps:
+      - name: Validate candidate_sha input
+        run: |
+          sha="$CANDIDATE_SHA"
+          if ! [[ "$sha" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "::error::candidate_sha must be a full 40-character commit SHA, got: $sha"
+            exit 1
+          fi
+
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.inputs.candidate_sha || github.sha }}
+          fetch-depth: 0
+
+      - name: Verify checkout resolved the exact immutable candidate
+        run: |
+          resolved="$(git rev-parse HEAD)"
+          if [ "$resolved" != "$CANDIDATE_SHA" ]; then
+            echo "::error::Checked-out HEAD ($resolved) does not match the requested candidate ($CANDIDATE_SHA)."
+            exit 1
+          fi
+
+      - name: Prepare evidence directory
+        run: mkdir -p .artifacts/live-map-acceptance
+
+      - uses: pnpm/action-setup@v4
+        with: { version: 10.33.0, run_install: false }
+      - uses: actions/setup-node@v4
+        with:
+          {
+            node-version: 22,
+            cache: pnpm,
+            cache-dependency-path: pnpm-lock.yaml,
+          }
+
+      - name: Install dependencies
+        id: install
+        run: |
+          set -o pipefail
+          pnpm install --frozen-lockfile 2>&1 | tee -a .artifacts/live-map-acceptance/execution-log.txt
+
+      - name: Run live map acceptance profile
+        id: runner
+        run: |
+          set -o pipefail
+          pnpm exec tsx tests/e2e/system-remediation/sr-live-map-001/map-acceptance-runner.ts \
+            2>&1 | tee -a .artifacts/live-map-acceptance/execution-log.txt
+
+      - name: Record run status
+        if: always()
+        env:
+          INSTALL_OUTCOME: ${{ steps.install.outcome }}
+          RUNNER_OUTCOME: ${{ steps.runner.outcome }}
+        run: |
+          python3 - <<'PY_STATUS'
+          import json
+          import os
+          from pathlib import Path
+
+          evidence_path = Path(".artifacts/live-map-acceptance/evidence-map.json")
+          status_path = Path(".artifacts/live-map-acceptance/run-status.json")
+          status_path.parent.mkdir(parents=True, exist_ok=True)
+
+          install_outcome = os.environ.get("INSTALL_OUTCOME", "unknown")
+          runner_outcome = os.environ.get("RUNNER_OUTCOME", "unknown")
+
+          if install_outcome != "success":
+              status = "not_run"
+          elif runner_outcome == "success" and evidence_path.exists():
+              status = "passed"
+          else:
+              status = "failed"
+
+          status_path.write_text(json.dumps({
+              "candidate_sha": os.environ.get("CANDIDATE_SHA", ""),
+              "workflow_sha": os.environ.get("WORKFLOW_SHA", ""),
+              "status": status,
+              "install_outcome": install_outcome,
+              "runner_outcome": runner_outcome,
+              "evidence_present": evidence_path.exists(),
+          }, indent=2) + "\n")
+          print(f"Run status recorded: {status}")
+          PY_STATUS
+
+      - name: Gate on a recorded passed status
+        if: always()
+        run: |
+          python3 - <<'PY_GATE'
+          import json
+          from pathlib import Path
+
+          status_path = Path(".artifacts/live-map-acceptance/run-status.json")
+          if not status_path.exists():
+              raise SystemExit("Map acceptance gate: no run-status.json was produced.")
+          status = json.loads(status_path.read_text())
+          if status.get("status") != "passed":
+              raise SystemExit(f"Map acceptance incomplete or failed: {status}")
+          print("Map acceptance: passed.")
+          PY_GATE
+
+      - name: Upload execution log, redacted evidence, and run status
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: live-map-acceptance-${{ github.event.inputs.candidate_sha || github.sha }}
+          path: |
+            .artifacts/live-map-acceptance/execution-log.txt
+            .artifacts/live-map-acceptance/evidence-map.json
+            .artifacts/live-map-acceptance/run-status.json
+          if-no-files-found: warn
