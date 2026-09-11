@@ -537,6 +537,37 @@ flaky: 0}`.
   required before merge: a green re-run of PR #1956's `CI` and
   `CI (integration trunk)` on the new candidate SHA, plus `host-acceptance.yml`
   on the same SHA, and independent review (§7).
+- **Actual merge outcome and branch-history correction:** candidate
+  `4a58466634e250b64cba3a99623f758f68850f21` passed all three required
+  workflows (`Host Acceptance`, PR-level `CI`, and `CI (integration trunk)`)
+  and PR [#1956](https://github.com/ajoe734/drts-fleet-platform/pull/1956)
+  was independently reviewed and merged into `dev` via squash commit
+  `dcce17a16d07e89b0e87a3973611b20ec1467b00` at `2026-09-11T00:31:21Z`
+  ("SR-HOST-FE-001: preserve dedicated Host acceptance test contract"),
+  confirmed via `gh pr view 1956 --json state,mergeCommit,mergedAt`. This
+  task's four `write_scopes` artifacts are on `dev` as of that commit.
+  `INTEGRATION_STATUS`: `merged_to_dev`.
+  A later commit pushed to the same branch tip (candidate
+  `b0283ba7b7285ecf6a53971b0b78bcda6c29df67`) incorrectly asserted "PR
+  #1956 is `OPEN` and `MERGEABLE`" and `INTEGRATION_STATUS: branch_pushed`
+  after the merge had already happened; that assertion was factually wrong
+  at the time it was written and is superseded by this entry. Separately,
+  after the squash merge, GitHub's PR bus auto-opened a successor PR
+  [#1958](https://github.com/ajoe734/drts-fleet-platform/pull/1958) from
+  that same branch/tip; that PR's `mergeStateStatus` is `DIRTY`
+  (`mergeable: CONFLICTING`) because the branch tip carries unrelated
+  drift against current `dev` in files outside this task's write scope
+  (`owned-mobility`, `platform-presence`, and
+  `system-remediation/sr-qa-dispatch-001` sources that changed on `dev`
+  after this branch was cut) and so cannot be merged as a docs-only
+  follow-up. Branch `claude2/sr-host-fe-001-acceptance-runner` and PR
+  #1958 are preserved unmodified as evidence of the defect — no rebase,
+  amend, or force-push was performed on them. This correction instead
+  ships from a new branch, `claude2/sr-host-fe-001-acceptance-runner-docs-repair-20260911`,
+  cut directly from `dev` at `dcce17a16d07e89b0e87a3973611b20ec1467b00`
+  (which already contains all four `write_scopes` artifacts merged via
+  #1956), carrying only this documentation correction — no workflow, test,
+  or other product files are touched.
 
 ## 7. Independent review
 
