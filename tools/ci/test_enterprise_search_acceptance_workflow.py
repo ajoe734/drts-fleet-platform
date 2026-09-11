@@ -183,6 +183,59 @@ class EnterpriseSearchAcceptanceWorkflowTests(unittest.TestCase):
             saved = json.loads(status_file.read_text())
             self.assertEqual(saved["status"], "not_run")
 
+    def test_browser_job_builds_real_runtime_and_uploads_no_session_tokens(self) -> None:
+        browser = self.text.split("  browser-acceptance:", 1)[1]
+        for command in ("pnpm --filter @drts/api build", "pnpm --filter @drts/enterprise-dispatch-web build", "enterprise-search-browser-server.mjs", "next start", "pnpm exec playwright test", "enterprise-search-browser.spec.ts"):
+            self.assertIn(command, browser)
+        self.assertIn("runs-on: ubuntu-latest", browser)
+        self.assertIn("git rev-parse HEAD", browser)
+        upload = browser.split("actions/upload-artifact@v4", 1)[1]
+        self.assertNotIn("sessions.private.json", upload)
+        self.assertNotIn("browser/*.json", upload)
+        self.assertIn("seed-sql.json", upload)
+        self.assertIn("api-requests.jsonl", upload)
+
+    def test_browser_gate_executes_and_rejects_missing_skipped_failed_or_partial_report(self) -> None:
+        script = _extract_heredoc(self.text, "PY_BROWSER_GATE")
+        with tempfile.TemporaryDirectory() as td:
+            report = Path(td) / "test-results/system-remediation-report.json"
+            report.parent.mkdir()
+            cases = [
+                ({"stats": {"expected": 7, "unexpected": 0, "skipped": 0, "flaky": 0}}, True),
+                ({"stats": {"expected": 6, "unexpected": 0, "skipped": 0}}, False),
+                ({"stats": {"expected": 7, "skipped": 1}}, False),
+                ({"stats": {"expected": 7, "unexpected": 1}}, False),
+                ({"stats": {"expected": 7}, "errors": [{"message": "worker crashed"}]}, False),
+                ({}, False),
+            ]
+            for data, expected in cases:
+                with self.subTest(data=data):
+                    report.write_text(json.dumps(data))
+                    result = subprocess.run([sys.executable, "-c", script], cwd=td, capture_output=True)
+                    self.assertEqual(result.returncode == 0, expected)
+            report.unlink()
+            self.assertNotEqual(subprocess.run([sys.executable, "-c", script], cwd=td, capture_output=True).returncode, 0)
+
+    def test_browser_status_requires_every_actual_step_to_succeed(self) -> None:
+        script = _extract_heredoc(self.text, "PY_BROWSER_STATUS")
+        names = ("INSTALL", "BROWSER_INSTALL", "BUILD", "MIGRATE", "API", "PORTAL", "HARNESS", "GATE")
+        with tempfile.TemporaryDirectory() as td:
+            report = Path(td) / "test-results/system-remediation-report.json"
+            report.parent.mkdir()
+            report.write_text(json.dumps({"stats": {"expected": 7}}))
+            env = {**os.environ, **{f"{name}_OUTCOME": "success" for name in names}, "CANDIDATE_SHA": "a" * 40, "WORKFLOW_SHA": "b" * 40}
+            status = Path(td) / ".artifacts/enterprise-search-acceptance/browser/run-status.json"
+            subprocess.run([sys.executable, "-c", script], cwd=td, env=env, check=True, capture_output=True)
+            self.assertEqual(json.loads(status.read_text())["status"], "passed")
+            for name in names:
+                with self.subTest(step=name):
+                    failed = {**env, f"{name}_OUTCOME": "failure"}
+                    subprocess.run([sys.executable, "-c", script], cwd=td, env=failed, check=True, capture_output=True)
+                    self.assertEqual(json.loads(status.read_text())["status"], "failed")
+            report.unlink()
+            subprocess.run([sys.executable, "-c", script], cwd=td, env=env, check=True, capture_output=True)
+            self.assertEqual(json.loads(status.read_text())["status"], "failed")
+
 
 if __name__ == "__main__":
     unittest.main()

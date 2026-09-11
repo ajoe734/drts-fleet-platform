@@ -6,6 +6,7 @@ import type {
   TenantBookingsPageRecord,
 } from "@drts/contracts";
 import { ApiClientError } from "@drts/api-client";
+import { DEFAULT_PRODUCT_TIMEZONE } from "@drts/contracts";
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import {
@@ -99,7 +100,7 @@ function errorContent(
   );
 }
 
-export function EnterpriseBookingHistory() {
+export function EnterpriseBookingHistory({ tenantId }: { tenantId: string }) {
   const { t: tr } = useTranslation();
   const [filters, setFilters] = useState<EnterpriseBookingSearchFilters>(
     DEFAULT_ENTERPRISE_BOOKING_SEARCH_FILTERS,
@@ -110,6 +111,7 @@ export function EnterpriseBookingHistory() {
   );
   const [result, setResult] = useState<TenantBookingsPageRecord | null>(null);
   const [state, setState] = useState<GatewayState | null>(null);
+  const [retryAttempt, setRetryAttempt] = useState(0);
 
   const dateRangeValid = validateEnterpriseBookingDateRange(
     filters.dateFrom,
@@ -124,7 +126,9 @@ export function EnterpriseBookingHistory() {
     }
     const controller = new AbortController();
     const query = buildEnterpriseBookingSearchQuery(filters, page, pageSize);
-    getEnterpriseDispatchTenantClient(enterpriseTenant.id)
+    setState(null);
+    setResult(null);
+    getEnterpriseDispatchTenantClient(tenantId)
       .queryBookings(query, { signal: controller.signal })
       .then((pageRecord) => {
         if (!controller.signal.aborted) setResult(pageRecord);
@@ -138,6 +142,8 @@ export function EnterpriseBookingHistory() {
       });
     return () => controller.abort();
   }, [
+    tenantId,
+    retryAttempt,
     filters.passenger,
     filters.status,
     filters.dateFrom,
@@ -157,7 +163,19 @@ export function EnterpriseBookingHistory() {
     setPage(1);
   }
 
-  if (state) return errorContent(state, tr);
+  if (state)
+    return (
+      <>
+        {errorContent(state, tr)}
+        <button
+          type="button"
+          data-testid="enterprise-search-retry"
+          onClick={() => setRetryAttempt((value) => value + 1)}
+        >
+          重新載入
+        </button>
+      </>
+    );
 
   const items = result?.items ?? [];
   const pagination = result?.pagination ?? null;
@@ -277,7 +295,9 @@ export function EnterpriseBookingHistory() {
                 outline: "none",
               }}
             >
-              <option value="">{tr("bookingLifecycle.history.statusAll")}</option>
+              <option value="">
+                {tr("bookingLifecycle.history.statusAll")}
+              </option>
               <option value="active">
                 {tr("bookingLifecycle.history.statusActive")}
               </option>
@@ -340,6 +360,13 @@ export function EnterpriseBookingHistory() {
             />
           </div>
 
+          <span
+            data-testid="enterprise-search-timezone"
+            style={{ fontSize: 12, color: t.muted }}
+          >
+            {DEFAULT_PRODUCT_TIMEZONE}
+          </span>
+
           {active && (
             <button
               type="button"
@@ -379,6 +406,8 @@ export function EnterpriseBookingHistory() {
         {dateRangeValid && (
           <div
             data-testid="enterprise-result-count"
+            data-total-items={pagination?.totalItems ?? ""}
+            data-current-page={pagination?.page ?? ""}
             style={{
               display: "flex",
               alignItems: "center",
@@ -411,7 +440,10 @@ export function EnterpriseBookingHistory() {
 
       <ECard t={t} pad={0}>
         {!dateRangeValid ? null : result === null ? (
-          <div style={{ padding: 18, color: t.muted }}>
+          <div
+            data-testid="enterprise-search-loading"
+            style={{ padding: 18, color: t.muted }}
+          >
             {tr("bookingLifecycle.history.loading")}
           </div>
         ) : items.length === 0 && !active ? (
@@ -436,7 +468,9 @@ export function EnterpriseBookingHistory() {
             <strong style={{ fontSize: 16, color: t.ink }}>
               {tr("bookingLifecycle.history.filteredEmpty.title")}
             </strong>
-            <p style={{ color: t.muted, fontSize: 13, maxWidth: 380, margin: 0 }}>
+            <p
+              style={{ color: t.muted, fontSize: 13, maxWidth: 380, margin: 0 }}
+            >
               {tr("bookingLifecycle.history.filteredEmpty.body")}
             </p>
             <button
@@ -476,7 +510,9 @@ export function EnterpriseBookingHistory() {
                   <strong>{booking.passenger.name}</strong>
                   <small style={{ display: "block", color: t.muted }}>
                     {booking.pickup.address} → {booking.dropoff.address} ·{" "}
-                    {formatEnterpriseBookingTime(booking.reservationWindowStart)}
+                    {formatEnterpriseBookingTime(
+                      booking.reservationWindowStart,
+                    )}
                   </small>
                 </span>
                 <EPill t={t} tone={display.tone} dot>

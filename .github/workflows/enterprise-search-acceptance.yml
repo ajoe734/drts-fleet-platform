@@ -7,11 +7,9 @@ name: Enterprise Search Acceptance (SR-ENTERPRISE-SEARCH-001)
 # PostgreSQL and returns combined passenger/status/date filter, clear,
 # pagination, and empty-state totals that are internally consistent.
 #
-# This workflow does not start an HTTP listener or a browser. See
-# docs/04-uat/system-remediation-20260906/SR-ENTERPRISE-SEARCH-001.md for why
-# a full browser/HTTP acceptance runner (matching the SR-HOST-FE-001-
-# ACCEPTANCE-RUNNER pattern) was scoped out of this task and what evidence
-# gap that leaves for a possible follow-up task.
+# The separate browser job builds the real enterprise Next application and
+# full AppModule, then drives Chromium through real session-authenticated HTTP
+# queries against migrated PostgreSQL. Servers run only on GitHub-hosted CI.
 
 on:
   workflow_dispatch:
@@ -22,6 +20,7 @@ on:
   push:
     branches:
       - claude/sr-enterprise-search-001-recovery-20260911
+      - codex/sr-enterprise-search-ci-registration-20260911
     paths:
       - .github/workflows/enterprise-search-acceptance.yml
       - tools/ci/test_enterprise_search_acceptance_workflow.py
@@ -29,6 +28,10 @@ on:
       - tests/e2e/system-remediation/sr-enterprise-search-001/**
       - apps/enterprise-dispatch-web/lib/enterprise-booking-search.ts
       - apps/enterprise-dispatch-web/lib/api-client.ts
+      - apps/enterprise-dispatch-web/lib/enterprise-session.server.ts
+      - apps/enterprise-dispatch-web/app/bookings/page.tsx
+      - apps/enterprise-dispatch-web/app/control-plane-proxy/**
+      - apps/enterprise-dispatch-web/tests/unit/control-plane-proxy.test.ts
       - apps/enterprise-dispatch-web/components/enterprise-booking-lifecycle.tsx
       - docs/04-uat/system-remediation-20260906/SR-ENTERPRISE-SEARCH-001.md
 
@@ -212,4 +215,161 @@ jobs:
             .artifacts/enterprise-search-acceptance/execution-log.txt
             .artifacts/enterprise-search-acceptance/test-report.json
             .artifacts/enterprise-search-acceptance/run-status.json
+          if-no-files-found: warn
+
+  browser-acceptance:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    services:
+      postgres:
+        image: postgis/postgis:16-3.4
+        env:
+          POSTGRES_DB: drts_fleet_platform
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s --health-timeout 5s --health-retries 10
+    env:
+      DATABASE_URL: postgresql://postgres:postgres@localhost:5432/drts_fleet_platform
+      DRTS_ENTERPRISE_SEARCH_DATABASE_URL: postgresql://postgres:postgres@localhost:5432/drts_fleet_platform
+      CANDIDATE_SHA: ${{ github.event.inputs.candidate_sha || github.sha }}
+      WORKFLOW_SHA: ${{ github.sha }}
+      DRTS_CANDIDATE_SHA: ${{ github.event.inputs.candidate_sha || github.sha }}
+      DRTS_API_URL: http://127.0.0.1:4102
+      ENTERPRISE_SEARCH_API_PORT: 4102
+      ENTERPRISE_SEARCH_PORTAL_URL: http://127.0.0.1:3010
+      ENTERPRISE_SEARCH_BROWSER_EVIDENCE_DIR: ${{ github.workspace }}/.artifacts/enterprise-search-acceptance/browser
+    steps:
+      - name: Validate immutable candidate
+        run: |
+          [[ "$CANDIDATE_SHA" =~ ^[0-9a-f]{40}$ ]] || exit 1
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.inputs.candidate_sha || github.sha }}
+          fetch-depth: 0
+      - name: Verify exact runtime checkout
+        run: test "$(git rev-parse HEAD)" = "$CANDIDATE_SHA"
+      - name: Prepare browser evidence
+        run: mkdir -p .artifacts/enterprise-search-acceptance/browser test-results
+      - uses: pnpm/action-setup@v4
+        with: { version: 10.33.0, run_install: false }
+      - uses: actions/setup-node@v4
+        with:
+          {
+            node-version: 22,
+            cache: pnpm,
+            cache-dependency-path: pnpm-lock.yaml,
+          }
+      - name: Install candidate dependencies
+        id: install
+        run: pnpm install --frozen-lockfile
+      - name: Install Chromium
+        id: browser_install
+        run: pnpm exec playwright install --with-deps chromium
+      - name: Build real API and enterprise application
+        id: build
+        run: |
+          set -o pipefail
+          {
+            pnpm --filter @drts/ui-tokens build &&
+            pnpm --filter @drts/api build &&
+            pnpm --filter @drts/enterprise-dispatch-web build
+          } 2>&1 | tee .artifacts/enterprise-search-acceptance/browser/build.log
+      - name: Migrate disposable database
+        id: migrate
+        run: |
+          set -o pipefail
+          pnpm db:migrate 2>&1 | tee .artifacts/enterprise-search-acceptance/browser/migrations.log
+      - name: Start real AppModule with durable tenant sessions and SQL fixtures
+        id: api
+        env:
+          NODE_ENV: test
+        run: |
+          setsid node tests/e2e/system-remediation/sr-enterprise-search-001/enterprise-search-browser-server.mjs > .artifacts/enterprise-search-acceptance/browser/api-server.log 2>&1 &
+          echo $! > .artifacts/enterprise-search-acceptance/browser/api.pid
+          for i in $(seq 1 90); do
+            status="$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:4102/api/auth/session || true)"
+            if [ "$status" = 401 ]; then exit 0; fi
+            sleep 1
+          done
+          cat .artifacts/enterprise-search-acceptance/browser/api-server.log
+          exit 1
+      - name: Start real enterprise production Next server
+        id: portal
+        run: |
+          setsid pnpm --filter @drts/enterprise-dispatch-web exec next start --hostname 127.0.0.1 --port 3010 > .artifacts/enterprise-search-acceptance/browser/portal-server.log 2>&1 &
+          echo $! > .artifacts/enterprise-search-acceptance/browser/portal.pid
+          for i in $(seq 1 60); do
+            status="$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:3010/bookings || true)"
+            if [ "$status" = 200 ]; then exit 0; fi
+            sleep 1
+          done
+          cat .artifacts/enterprise-search-acceptance/browser/portal-server.log
+          exit 1
+      - name: Drive actual browser filters and authenticated HTTP
+        id: harness
+        run: |
+          set -o pipefail
+          pnpm exec playwright test -c playwright.system-remediation.config.ts \
+            tests/e2e/system-remediation/sr-enterprise-search-001/enterprise-search-browser.spec.ts \
+            --workers=1 2>&1 | tee .artifacts/enterprise-search-acceptance/browser/execution-log.txt
+      - name: Stop acceptance server process groups
+        if: always()
+        run: |
+          for file in .artifacts/enterprise-search-acceptance/browser/api.pid .artifacts/enterprise-search-acceptance/browser/portal.pid; do
+            if [ -f "$file" ]; then kill -- "-$(cat "$file")" 2>/dev/null || true; fi
+          done
+      - name: Gate on all seven browser scenarios with zero skips
+        id: gate
+        if: always()
+        run: |
+          python3 - <<'PY_BROWSER_GATE'
+          import json
+          from pathlib import Path
+          report = json.loads(Path("test-results/system-remediation-report.json").read_text())
+          stats = report.get("stats", {})
+          if stats.get("expected", 0) < 7 or any(stats.get(key, 0) for key in ("unexpected", "skipped", "flaky")) or report.get("errors"):
+              raise SystemExit(f"Incomplete enterprise browser acceptance: {stats}")
+          print(f"Enterprise real browser acceptance: {stats['expected']} passed, zero skips.")
+          PY_BROWSER_GATE
+      - name: Record exact browser runtime and all step outcomes
+        if: always()
+        env:
+          INSTALL_OUTCOME: ${{ steps.install.outcome }}
+          BROWSER_INSTALL_OUTCOME: ${{ steps.browser_install.outcome }}
+          BUILD_OUTCOME: ${{ steps.build.outcome }}
+          MIGRATE_OUTCOME: ${{ steps.migrate.outcome }}
+          API_OUTCOME: ${{ steps.api.outcome }}
+          PORTAL_OUTCOME: ${{ steps.portal.outcome }}
+          HARNESS_OUTCOME: ${{ steps.harness.outcome }}
+          GATE_OUTCOME: ${{ steps.gate.outcome }}
+        run: |
+          python3 - <<'PY_BROWSER_STATUS'
+          import json, os
+          from pathlib import Path
+          names = ("INSTALL", "BROWSER_INSTALL", "BUILD", "MIGRATE", "API", "PORTAL", "HARNESS", "GATE")
+          outcomes = {name.lower(): os.environ.get(f"{name}_OUTCOME", "unknown") for name in names}
+          report = Path("test-results/system-remediation-report.json")
+          passed = report.exists() and all(value == "success" for value in outcomes.values())
+          path = Path(".artifacts/enterprise-search-acceptance/browser/run-status.json")
+          path.parent.mkdir(parents=True, exist_ok=True)
+          path.write_text(json.dumps({"candidate_sha": os.environ.get("CANDIDATE_SHA"), "workflow_sha": os.environ.get("WORKFLOW_SHA"), "status": "passed" if passed else "failed", "step_outcomes": outcomes, "report_present": report.exists(), "boundary": "real built enterprise Next + full AppModule + real JWT/Postgres; Chromium browser emulation"}, indent=2) + "\n")
+          PY_BROWSER_STATUS
+      - name: Upload browser, HTTP, SQL and failure evidence without session tokens
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: enterprise-search-browser-${{ github.event.inputs.candidate_sha || github.sha }}
+          path: |
+            .artifacts/enterprise-search-acceptance/browser/*.log
+            .artifacts/enterprise-search-acceptance/browser/*-evidence.json
+            .artifacts/enterprise-search-acceptance/browser/seed-sql.json
+            .artifacts/enterprise-search-acceptance/browser/api-requests.jsonl
+            .artifacts/enterprise-search-acceptance/browser/run-status.json
+            .artifacts/enterprise-search-acceptance/browser/*.png
+            test-results/system-remediation-report.json
+            test-results/**/test-failed-*.png
           if-no-files-found: warn
