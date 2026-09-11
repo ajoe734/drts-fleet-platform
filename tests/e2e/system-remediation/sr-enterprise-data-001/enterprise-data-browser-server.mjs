@@ -153,6 +153,15 @@ async function main() {
     scopes: [],
     tenantId: null,
   };
+  // The bootstrap actor is the issuer_principal_id on the invitation rows
+  // createTenantUser writes below; that column has a real FK into
+  // identity_principals, so the bootstrap actor's own principal must exist
+  // first (mirrors enterprise-search-browser-server.mjs's identical seed).
+  await jwt.issueSessionToken(bootstrap, {
+    principalId: bootstrap.actorId,
+    subject: `system:${bootstrap.actorId}`,
+    ensurePrincipal: true,
+  });
 
   async function session(tenantId, label) {
     const created = await tenants.createTenantUser(
