@@ -450,25 +450,49 @@ flaky: 0}`.
 
 ## 6. CI / merge status
 
-- Branch: `claude2/sr-host-fe-001-acceptance-runner`
-- Candidate SHA: `a3ebf570748fee3372aab1cfce116e487d89bdc5` (branch tip at
-  handoff time).
-- `INTEGRATION_STATUS`: `branch_pushed` — pushed, not merged. This task's own
-  workflow, tests, and doc are complete and passing: real run
+- Branch: `claude2/sr-host-fe-001-acceptance-runner`; PR
+  [#1956](https://github.com/ajoe734/drts-fleet-platform/pull/1956) into
+  `dev` (open, mergeable).
+- Candidate SHA: the branch tip after this doc commit lands on top of fix
+  commit `804c9787c2c18287689d9dffb0357ff8f8d5af37` (see
+  `git log -1 origin/claude2/sr-host-fe-001-acceptance-runner` or PR #1956
+  for the exact pushed HEAD — a commit cannot cite its own final hash).
+  This supersedes `38960a090210691bcee4c542668847d186f06562`, which PR
+  #1956's own repo-wide `CI` workflow run
+  [`34545025667`](https://github.com/ajoe734/drts-fleet-platform/actions/runs/34545025667)
+  failed on — not this task's dedicated `host-acceptance.yml`, but the
+  monorepo `pnpm lint:root` step in its `Product smoke acceptance` job,
+  which runs with `--max-warnings=0`. The failure was two
+  `// eslint-disable-next-line no-console` comments in
+  `host-acceptance-app.ts` (lines 227 and 257) flagged as
+  "Unused eslint-disable directive (no problems were reported from
+  'no-console')" — `eslint.config.mjs` does not enable `no-console`
+  anywhere in this repo, so the directives never suppressed anything. Fixed
+  by deleting both comments; the underlying `console.error` diagnostic
+  calls are unchanged. Re-verified locally: `npx eslint` on the full
+  `tests/e2e/system-remediation/sr-host-fe-001/` directory is clean, and
+  `python3 tools/ci/test_host_acceptance_workflow.py` still passes 27/27.
+- `INTEGRATION_STATUS`: `branch_pushed` — pushed, not merged, CI re-run
+  pending on the new SHA. This task's own workflow, tests, and doc were
+  already complete and passing on the prior SHA: real run
   [`34544324681`](https://github.com/ajoe734/drts-fleet-platform/actions/runs/34544324681)
   (candidate `a3ebf5707`) produced `status: passed` on both
   `api-sql-acceptance` (18/18) and `browser-acceptance` (9/9), zero skips in
   either, with the product-defect boundary the same run's evidence
-  demonstrates recorded honestly in §3.1/§3.2. All three
-  `required_acceptance` gates (`host_actual_http_sql_owner_scope`,
-  `host_actual_browser_switching_states`,
+  demonstrates recorded honestly in §3.1/§3.2. This lint fix does not touch
+  any file under `tests/e2e/system-remediation/sr-host-fe-001/` test
+  content beyond removing the two dead comments, so it does not invalidate
+  that evidence, but `host-acceptance.yml` must still be re-run on the new
+  SHA to confirm before merge — do not merge on the strength of the prior
+  SHA's green run alone. All three `required_acceptance` gates
+  (`host_actual_http_sql_owner_scope`, `host_actual_browser_switching_states`,
   `host_runtime_harness_and_integration_boundary`) have real, verified
-  evidence as of this run. What remains open is integration, not evidence:
-  this branch has not been merged to `dev`, has no PR yet, and this document
-  has not yet received independent review (§7). The module-level boundary in
-  §2.1 (no root `AppModule` registration of `HostViewModule`, no
-  `SR-WIRE-001` navigation shell, no physical-device verification) is
-  unchanged by this run and remains explicitly out of this task's scope.
+  evidence as of run `34544324681`. What remains open before merge: a clean
+  `host-acceptance.yml` run and a clean repo-wide `CI` run on the new SHA,
+  and independent review (§7). The module-level boundary in §2.1 (no root
+  `AppModule` registration of `HostViewModule`, no `SR-WIRE-001` navigation
+  shell, no physical-device verification) is unchanged and remains
+  explicitly out of this task's scope.
 - This is a non-canonical support/verification task
   (`task_class: implementation`, `mutates_canonical: true` per its own
   record, but it does not touch `apps/api/src/` or
