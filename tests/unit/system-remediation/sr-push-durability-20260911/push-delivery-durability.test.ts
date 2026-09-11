@@ -265,7 +265,7 @@ function deliveryOutcome(
 
 describe("SR-PUSH-DURABILITY-20260911: MultiTaxiRepository claim/lease/fence SQL", () => {
   it("claims via a fence-incrementing upsert and returns the granted fence token", async () => {
-    const query = vi.fn(async (sql: string, _parameters?: unknown[]) => {
+    const query = vi.fn(async (sql: string) => {
       if (sql.includes("INSERT INTO ops.phase1_push_delivery_claims")) {
         return { rows: [{ fence_token: 3 }] };
       }
