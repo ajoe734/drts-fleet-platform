@@ -146,17 +146,37 @@ claiming this as done; flagging for supervisor scope follow-up.
 
 ## Local verification
 
-All checks ran inside this isolated worktree; no product/browser/DB server
-was started (per this task's VM restriction).
+Checks below marked "this session" ran inside this isolated worktree; no
+product/browser/DB server was started (per this task's VM restriction). The
+other rows are carried over from the prior session that produced candidate
+`f95970a9019e` and were not re-run here, because this session's shared
+`node_modules` (a symlink farm at the canonical repo root, pointing into
+several other now-deleted sibling worktrees' local `.pnpm` stores) has 23
+dangling top-level symlinks — including `typescript`, `vitest`, and `vite` —
+that make `tsc`/`vitest` unrunnable here without a shared-state `pnpm
+install` this session's sandbox does not permit outside the assigned
+worktree. This is a pre-existing environment issue unrelated to this task's
+code; `git diff --check` (no `node_modules` dependency) still passes, and the
+new Python contract test was run directly with the system `python3`.
 
 | Command | Result |
 | --- | --- |
-| `git diff --check` | exit 0 |
-| `pnpm --filter @drts/enterprise-dispatch-web typecheck` (`tsc --noEmit`) | exit 0 |
-| `pnpm exec vitest run tests/unit/system-remediation/sr-enterprise-data-001/` | 13 passed (enterprise-trip-status.test.ts) |
-| `pnpm --filter @drts/enterprise-dispatch-web test` (full app vitest) | 30 passed, 1 pre-existing failure (`apps/enterprise-dispatch-web/tests/unit/enterprise-booking-lifecycle.test.ts`, `ApiClient.listTenantBookings` / `paged.items is not iterable`); reproduced identically on the unmodified base commit before this task's changes, confirmed pre-existing and unrelated to this task's write_scopes |
-| `pnpm --filter @drts/enterprise-dispatch-web lint` (`eslint . --max-warnings=0`) | exit 0 |
-| Locale key-parity check (`en` vs `zh` in `lib/translations.ts`) | 574/574 keys match, no orphans either side |
+| `git diff --check` (this session) | exit 0 |
+| `python3 -m unittest tools.ci.test_enterprise_data_acceptance_workflow -v` (this session) | 13/13 passed |
+| `python3 -c "import yaml; yaml.safe_load(open('.github/workflows/enterprise-data-acceptance.yml'))"` (this session) | parses; `jobs: ['browser-acceptance']` |
+| `node --check tests/e2e/system-remediation/sr-enterprise-data-001/enterprise-data-browser-server.mjs` (this session) | exit 0 |
+| `pnpm --filter @drts/enterprise-dispatch-web typecheck` (`tsc --noEmit`) | exit 0 (prior session) |
+| `pnpm exec vitest run tests/unit/system-remediation/sr-enterprise-data-001/` | 13 passed (enterprise-trip-status.test.ts) (prior session) |
+| `pnpm --filter @drts/enterprise-dispatch-web test` (full app vitest) | 30 passed, 1 pre-existing failure (`apps/enterprise-dispatch-web/tests/unit/enterprise-booking-lifecycle.test.ts`, `ApiClient.listTenantBookings` / `paged.items is not iterable`); reproduced identically on the unmodified base commit before this task's changes, confirmed pre-existing and unrelated to this task's write_scopes (prior session) |
+| `pnpm --filter @drts/enterprise-dispatch-web lint` (`eslint . --max-warnings=0`) | exit 0 (prior session) |
+| Locale key-parity check (`en` vs `zh` in `lib/translations.ts`) | 574/574 keys match, no orphans either side (prior session) |
+
+The new `enterprise-data-browser.spec.ts` and the edited
+`enterprise-booking-lifecycle.tsx` have **not** been typechecked in this
+session for the reason above; the CI workflow's own `typecheck`/`lint`/build
+steps (via a fresh `pnpm install --frozen-lockfile`, unaffected by this
+worktree's stale symlinks) and the acceptance workflow's real build are the
+next real verification of them.
 
 ## Follow-up: candidate CI fix (this doc only)
 
@@ -179,18 +199,77 @@ typecheck, unit, i18n guard, BFF-only imports, commit trailers, smoke
 acceptance, product smoke acceptance) were already passing before this
 follow-up and are unaffected by it.
 
+## Acceptance harness added in this recovery pass
+
+Added the real HTTP/browser acceptance runner that was previously listed as
+missing (see "Explicitly not done" below for what it still does *not*
+prove), following `SR-ENTERPRISE-SEARCH-001`'s
+`.github/workflows/enterprise-search-acceptance.yml` pattern:
+
+- `.github/workflows/enterprise-data-acceptance.yml` — single `browser-acceptance`
+  job. Builds the real `@drts/api` and `@drts/enterprise-dispatch-web`
+  packages, migrates a disposable Postgres service container, boots the real,
+  unmodified `AppModule` plus a real production `next start` server, and
+  drives Chromium against both over real HTTP.
+- `tests/e2e/system-remediation/sr-enterprise-data-001/enterprise-data-browser-server.mjs` —
+  seeds one real booking by inserting directly into
+  `ops.phase1_owned_orders` (the same table the production write path
+  writes) *before* `NestFactory.create(AppModule)` boots. This ordering is
+  load-bearing: `OwnedMobilityService` hydrates its in-memory order cache
+  from persisted state exactly once, in `onModuleInit`, and
+  `GET /api/tenant/bookings/:bookingId` (the booking-detail endpoint) reads
+  only that in-memory cache — a row inserted after boot would be visible to
+  the live-DB-backed list/search endpoint but invisible to booking detail.
+  Seeding first keeps the dashboard summary and the booking-detail page
+  reading the identical underlying record
+  (`OwnedMobilityModule.onModuleInit` wires
+  `TenantPartnerService.registerOrderFeedProvider` to
+  `OwnedMobilityService.listOrders()`, so both are backed by the same
+  in-memory array by construction). Also creates a second, genuinely empty
+  tenant (zero orders) and issues real JWT tenant sessions for both via
+  `TenantPartnerService.createTenantUser` / `JwtAuthService.issueSessionToken`,
+  the same way the search browser harness does.
+- `tests/e2e/system-remediation/sr-enterprise-data-001/enterprise-data-browser.spec.ts` —
+  six Playwright scenarios: (1) home upcoming list → trip page → booking
+  detail all resolve to the exact same seeded `bookingId`; (2) the trip
+  page's driver-contact button is `disabled` and never renders a fabricated
+  number, while the support-contact link's `href` is a real
+  `tel:` action built from `enterpriseTenant.supportPhone`; (3) the help
+  page's call/online actions are real `tel:`/`mailto:` links from the same
+  tenant contact fixture; (4) a `bookingId` that was never inserted anywhere
+  resolves to the `enterprise-booking-not-found` testid, with zero instances
+  of the `enterprise-booking-api-state` (retryable-degraded) testid; (5) the
+  zero-booking tenant sees `enterprise-home-upcoming-empty` and
+  `enterprise-trip-empty`, never a fabricated trip; (6) a request with no
+  session cookie cannot render any `enterprise-home-upcoming-*` row.
+- `tools/ci/test_enterprise_data_acceptance_workflow.py` — contract test
+  asserting the workflow YAML's structure (triggers, Postgres service,
+  build-before-migrate-before-seed-before-harness ordering, the zero-skip
+  gate, the run-status heredoc, and that session tokens are never uploaded
+  as artifacts) and that the `.mjs`/`.spec.ts` files contain the seed-before-
+  boot ordering and the testid coverage described above. Run locally with
+  `python3 -m unittest tools.ci.test_enterprise_data_acceptance_workflow -v`:
+  13/13 passed.
+- Added `data-testid="enterprise-booking-detail-id"` to
+  `EnterpriseBookingDetail`'s title in
+  `components/enterprise-booking-lifecycle.tsx` so the identity assertion
+  above has a stable hook (previously the booking id was unlabelled text).
+
 ## Explicitly not done (do not treat as complete)
 
-- No live/browser/CI acceptance run for this candidate. `required_acceptance`
-  items `enterprise_booking_identity_empty_and_error_ui` and
-  `enterprise_authorized_driver_and_support_contact_actions` need real
-  HTTP/browser evidence (same pattern as `SR-ENTERPRISE-SEARCH-001`'s
-  `.github/workflows/enterprise-search-acceptance.yml`) before this task can
-  be marked `done`; this recovery did not add
-  *.github/workflows/enterprise-data-acceptance.yml* or
-  *tools/ci/test_enterprise_data_acceptance_workflow.py* (both are in
-  `write_scopes` but were not reached in this pass — remaining work, not a
-  silent scope cut).
+- **This candidate has not yet actually run in GitHub Actions.** The
+  `enterprise-data-acceptance.yml` workflow above was authored and its
+  structure/ordering verified locally (contract test, 13/13; see "Local
+  verification"), but this session's VM restriction forbids starting
+  product/browser/DB servers here, so the real Postgres + Chromium run has
+  not been executed anywhere. It will run automatically on push to
+  `claude/sr-enterprise-data-001-recovery-20260911` (see the workflow's
+  `paths:` trigger); `required_acceptance` items
+  `enterprise_booking_identity_empty_and_error_ui` and
+  `enterprise_authorized_driver_and_support_contact_actions` are not
+  satisfied until that run is green and its `run-status.json` /
+  `system-remediation-report.json` artifacts are recorded as acceptance
+  evidence — do not record acceptance evidence from this doc alone.
 - Driver contact remains honestly unavailable (see above) — not full
   acceptance for that half of `enterprise_authorized_driver_and_support_contact_actions`.
 - The booking-detail direct-link tenant-session gap (see above) is not fixed.
