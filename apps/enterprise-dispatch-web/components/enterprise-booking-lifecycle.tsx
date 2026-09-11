@@ -745,7 +745,10 @@ export function EnterpriseBookingDetail({
         back="我的預約"
         title={
           <span>
-            {booking.bookingId} {tr("bookingLifecycle.detail.enterpriseTag")}{" "}
+            <span data-testid="enterprise-booking-detail-id">
+              {booking.bookingId}
+            </span>{" "}
+            {tr("bookingLifecycle.detail.enterpriseTag")}{" "}
             <EPill t={t} tone={display.tone} dot>
               {display.label}
             </EPill>
