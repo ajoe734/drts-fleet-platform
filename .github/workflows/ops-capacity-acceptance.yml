@@ -1,0 +1,225 @@
+name: Ops Capacity Acceptance (SR-OPS-CAPACITY-RUNNER-20260911)
+
+# Dedicated acceptance runner for SR-OPS-CAPACITY-RUNNER-20260911 capability
+# C123: the real, full 900-second (15 minute) accepted booking/dispatch/report
+# baseline burst from
+# docs/02-architecture/phase1-operational-workload-sla-degradation-baseline-20260430.md,
+# executed against a real, compiled, GitHub-hosted `AppModule` backed by a
+# real, migrated, disposable loopback PostgreSQL database, with real JWTs
+# minted through the app's own auth stack -- never a mock server, a stripped
+# test module, or a short/skipped stand-in burst. Every claimed successful
+# resource ID is independently read back with direct SQL after the run. This
+# workflow does not cover backup/restore (C122, see ops-proof-acceptance.yml)
+# or deployment/rollback and live cloud load (C124, LIVE-OPS scope).
+
+on:
+  workflow_dispatch:
+    inputs:
+      candidate_sha:
+        description: "Immutable candidate commit SHA to verify (full 40-char SHA)"
+        required: true
+  push:
+    branches:
+      - claude2/sr-ops-capacity-runner-20260911
+    paths:
+      - .github/workflows/ops-capacity-acceptance.yml
+      - tools/system-remediation/ops-capacity/**
+      - tools/system-remediation/ops-proof/capacity.mjs
+      - tests/unit/system-remediation/sr-ops-capacity-20260911/**
+      - tests/integration/system-remediation/sr-ops-capacity-20260911/**
+      - docs/04-uat/system-remediation-20260906/ops-capacity-acceptance-runner.md
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ops-capacity-acceptance-${{ github.event.inputs.candidate_sha || github.sha }}
+  cancel-in-progress: false
+
+env:
+  CI: true
+
+jobs:
+  acceptance:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    services:
+      postgres:
+        image: postgis/postgis:16-3.4
+        env:
+          POSTGRES_DB: drts_ops_capacity
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      DATABASE_URL: postgresql://postgres:postgres@localhost:5432/drts_ops_capacity
+      PGPASSWORD: postgres
+      AUTH_MODE: test
+      JWT_SECRET: sr-ops-capacity-runner-20260911-ci-only-secret-do-not-reuse
+      DRTS_TENANT_BOOTSTRAP_MODE: fixture
+      CANDIDATE_SHA: ${{ github.event.inputs.candidate_sha || github.sha }}
+      WORKFLOW_SHA: ${{ github.sha }}
+    steps:
+      - name: Validate candidate_sha input
+        run: |
+          sha="$CANDIDATE_SHA"
+          if ! [[ "$sha" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "::error::candidate_sha must be a full 40-character commit SHA, got: $sha"
+            exit 1
+          fi
+
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.inputs.candidate_sha || github.sha }}
+          fetch-depth: 0
+
+      - name: Verify checkout resolved the exact immutable candidate
+        run: |
+          resolved="$(git rev-parse HEAD)"
+          expected="$CANDIDATE_SHA"
+          echo "Resolved HEAD: $resolved"
+          echo "Expected candidate: $expected"
+          if [ "$resolved" != "$expected" ]; then
+            echo "::error::Checked-out HEAD ($resolved) does not match the requested candidate ($expected)."
+            exit 1
+          fi
+
+      - name: Prepare evidence directory
+        run: mkdir -p .artifacts/ops-capacity-acceptance
+
+      - uses: pnpm/action-setup@v4
+        with: { version: 10.33.0, run_install: false }
+      - uses: actions/setup-node@v4
+        with:
+          {
+            node-version: 22,
+            cache: pnpm,
+            cache-dependency-path: pnpm-lock.yaml,
+          }
+
+      - name: Install dependencies
+        id: install
+        run: |
+          set -o pipefail
+          pnpm install --frozen-lockfile 2>&1 | tee -a .artifacts/ops-capacity-acceptance/execution-log.txt
+
+      - name: Apply migrations to the disposable capacity database
+        id: migrate
+        run: |
+          set -o pipefail
+          pnpm db:migrate 2>&1 | tee -a .artifacts/ops-capacity-acceptance/execution-log.txt
+
+      - name: Run the SR-OPS-CAPACITY-RUNNER-20260911 unit regression suite
+        id: unit
+        run: |
+          set -o pipefail
+          pnpm exec vitest run tests/unit/system-remediation/sr-ops-capacity-20260911 \
+            --reporter=default --reporter=json \
+            --outputFile.json=.artifacts/ops-capacity-acceptance/unit-report.json \
+            2>&1 | tee -a .artifacts/ops-capacity-acceptance/execution-log.txt
+
+      - name: Run the real full 900s capacity + durable readback acceptance harness
+        id: harness
+        run: |
+          set -o pipefail
+          pnpm exec vitest run \
+            tests/integration/system-remediation/sr-ops-capacity-20260911/ops-capacity-acceptance.test.ts \
+            --no-file-parallelism --maxConcurrency=1 --testTimeout=1320000 \
+            --reporter=default --reporter=json \
+            --outputFile.json=.artifacts/ops-capacity-acceptance/capacity-report.json \
+            2>&1 | tee -a .artifacts/ops-capacity-acceptance/execution-log.txt
+
+      - name: Gate on zero skips and all tests passed
+        id: gate
+        if: always()
+        run: |
+          python3 - <<'PY_GATE'
+          import json
+          from pathlib import Path
+
+          def load(path):
+              p = Path(path)
+              if not p.exists():
+                  raise SystemExit(f"Acceptance gate: no test report was produced at {path}.")
+              return json.loads(p.read_text())
+
+          unit = load(".artifacts/ops-capacity-acceptance/unit-report.json")
+          capacity = load(".artifacts/ops-capacity-acceptance/capacity-report.json")
+
+          if unit.get("numPendingTests") or not unit.get("success") or unit.get("numTotalTests", 0) < 5:
+              raise SystemExit(f"Unit regression incomplete or skipped: {unit}")
+
+          if capacity.get("numPendingTests", 0) != 0:
+              raise SystemExit(
+                  "Capacity acceptance test was skipped: DATABASE_URL was not honored by a real run."
+              )
+          if capacity.get("numTotalTests", 0) != 1 or capacity.get("numPassedTests", 0) != 1 or not capacity.get("success"):
+              raise SystemExit(f"Capacity acceptance did not pass: {capacity}")
+
+          print("Ops capacity acceptance: unit regression and the real full 900s capacity + durable readback run both passed with zero skips.")
+          PY_GATE
+
+      - name: Record run status
+        if: always()
+        env:
+          INSTALL_OUTCOME: ${{ steps.install.outcome }}
+          MIGRATE_OUTCOME: ${{ steps.migrate.outcome }}
+          UNIT_OUTCOME: ${{ steps.unit.outcome }}
+          HARNESS_OUTCOME: ${{ steps.harness.outcome }}
+          GATE_OUTCOME: ${{ steps.gate.outcome }}
+        run: |
+          python3 - <<'PY_STATUS'
+          import json
+          import os
+          from pathlib import Path
+
+          status_path = Path(".artifacts/ops-capacity-acceptance/run-status.json")
+          status_path.parent.mkdir(parents=True, exist_ok=True)
+
+          outcomes = {
+              "install": os.environ.get("INSTALL_OUTCOME", "unknown"),
+              "migrate": os.environ.get("MIGRATE_OUTCOME", "unknown"),
+              "unit": os.environ.get("UNIT_OUTCOME", "unknown"),
+              "harness": os.environ.get("HARNESS_OUTCOME", "unknown"),
+              "gate": os.environ.get("GATE_OUTCOME", "unknown"),
+          }
+
+          if all(value == "success" for value in outcomes.values()):
+              status = "passed"
+          elif outcomes["install"] != "success" or outcomes["migrate"] != "success":
+              status = "not_run"
+          else:
+              status = "failed"
+
+          status_path.write_text(json.dumps({
+              "taskId": "SR-OPS-CAPACITY-RUNNER-20260911",
+              "capability": "C123",
+              "candidate_sha": os.environ.get("CANDIDATE_SHA", ""),
+              "workflow_sha": os.environ.get("WORKFLOW_SHA", ""),
+              "status": status,
+              "outcomes": outcomes,
+              "scopeNote": "real capacity + durable readback (C123) only; backup/restore (C122) is covered by ops-proof-acceptance.yml, deployment/rollback and live cloud load (C124) are separate LIVE-OPS scope",
+          }, indent=2) + "\n")
+          print(f"Run status recorded: {status}")
+          PY_STATUS
+
+      - name: Upload execution log, test reports, run status, and capacity evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ops-capacity-acceptance-${{ github.event.inputs.candidate_sha || github.sha }}
+          path: |
+            .artifacts/ops-capacity-acceptance/execution-log.txt
+            .artifacts/ops-capacity-acceptance/unit-report.json
+            .artifacts/ops-capacity-acceptance/capacity-report.json
+            .artifacts/ops-capacity-acceptance/run-status.json
+            .artifacts/ops-capacity-acceptance/*.jsonl
+            .artifacts/ops-capacity-acceptance/*.jsonl.summary.json
+            .artifacts/ops-capacity-acceptance/*.acceptance.json
+          if-no-files-found: warn
