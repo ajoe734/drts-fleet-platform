@@ -2,9 +2,20 @@
 
 ## Current candidate and base
 
-Recovery branch `claude/sr-enterprise-data-001-recovery-20260911`, fast-forwarded
-onto `origin/dev` base `d9f6766596111b279a39a33e6107f048b75561bd` (includes the
-merged `SR-ENTERPRISE-SEARCH-001` dependency, commit `6cddb9cba1` / PR #1970).
+This task's core product change (home/trip real dashboard data, honest 404,
+real contact actions) already merged to `origin/dev` as `c6580b50dc49` via
+PR #1981 (squash of candidates `a3800a45b6f1` and `f95970a9019e`). This
+recovery branch (`claude/sr-enterprise-data-001-recovery-20260911`) carries a
+follow-up: the real Postgres+browser acceptance workflow for this task's
+`required_acceptance` items, opened as a new PR (#1984) since #1981 was
+already closed. That follow-up's first CI run
+(`gh run view 34578967536`, `CANDIDATE_SHA=ebe1b6428575`) failed with a
+genuine seed-script bug (see "CI failure found and fixed" below), and the PR
+also had a real merge conflict against `origin/dev` (both sides touched
+`docs/04-uat/system-remediation-20260906/SR-ENTERPRISE-DATA-001.md`) because
+`origin/dev` advanced past the #1981 squash-merge while this branch still
+carried the pre-squash commits. This merge (`git merge origin/dev`, `origin/dev`
+at `f31c2489fc9f`) resolves that conflict on top of the fixed seed script.
 This task's candidate SHA is recorded at handoff via
 `CANDIDATE_SHA=$(git rev-parse HEAD)` on this branch; see the machine-truth
 `ai-status.sh show SR-ENTERPRISE-DATA-001` record for the exact value linked
@@ -178,6 +189,43 @@ steps (via a fresh `pnpm install --frozen-lockfile`, unaffected by this
 worktree's stale symlinks) and the acceptance workflow's real build are the
 next real verification of them.
 
+The `typecheck`/`vitest`/`lint`/locale-parity rows above (marked "prior
+session") are unchanged by this merge: this pass only edits
+`enterprise-data-browser-server.mjs` (a CI-only script, `node --check` only)
+and this doc.
+
+## CI failure found and fixed (this pass)
+
+PR #1984's first real run (`gh run view 34578967536`, job
+`browser-acceptance`, `CANDIDATE_SHA=ebe1b6428575`) started the real
+`AppModule` against a migrated disposable Postgres container and failed at
+the seed step:
+
+```
+error: insert or update on table "identity_invitations" violates foreign
+key constraint "identity_invitations_issuer_principal_id_fkey"
+detail: Key (issuer_principal_id)=(data-seed-<suffix>) is not present in
+table "identity_principals".
+```
+
+Root cause: `enterprise-data-browser-server.mjs`'s `session()` helper calls
+`TenantPartnerService.createTenantUser(tenantId, command, requestId,
+bootstrap)`, which internally calls `issueTenantInvitation` and writes the
+`bootstrap` actor's `actorId` as `issuer_principal_id` — a real FK into
+`iam.identity_principals` (`apps/api/src/modules/tenant-partner/tenant-partner.service.ts`,
+`createTenantUser` → `issueTenantInvitation`). The bootstrap actor's own
+principal row was never created before that write. The sibling
+`SR-ENTERPRISE-SEARCH-001` harness
+(`tests/e2e/system-remediation/sr-enterprise-search-001/enterprise-search-browser-server.mjs`)
+avoids this by issuing a session token for the bootstrap actor with
+`ensurePrincipal: true` (which calls
+`IdentityRepository.ensurePrincipalRecord`) before calling
+`createTenantUser`; this script was missing that step. Fixed by adding the
+identical `jwt.issueSessionToken(bootstrap, { ensurePrincipal: true, ... })`
+call before `session()` is defined. This candidate SHA has not yet been
+re-run in real CI after the fix — that is the next required verification,
+not yet recorded as acceptance evidence.
+
 ## Follow-up: candidate CI fix (this doc only)
 
 PR #1981's first CI run on `a3800a45b6f1` failed the "Canonical consistency"
@@ -257,16 +305,14 @@ prove), following `SR-ENTERPRISE-SEARCH-001`'s
 
 ## Explicitly not done (do not treat as complete)
 
-- **This candidate has not yet actually run in GitHub Actions.** The
-  `enterprise-data-acceptance.yml` workflow above was authored and its
-  structure/ordering verified locally (contract test, 13/13; see "Local
-  verification"), but this session's VM restriction forbids starting
-  product/browser/DB servers here, so the real Postgres + Chromium run has
-  not been executed anywhere. It will run automatically on push to
-  `claude/sr-enterprise-data-001-recovery-20260911` (see the workflow's
-  `paths:` trigger); `required_acceptance` items
-  `enterprise_booking_identity_empty_and_error_ui` and
-  `enterprise_authorized_driver_and_support_contact_actions` are not
+- **This exact candidate SHA has not yet run green in GitHub Actions.** The
+  prior candidate (`ebe1b6428575`) did run for real on GitHub-hosted CI (see
+  "CI failure found and fixed" above) and failed on a genuine seed-script
+  bug, which is fixed in this commit. The fix has not yet been re-verified
+  by a real CI run — that run happens automatically on push to
+  `claude/sr-enterprise-data-001-recovery-20260911` / PR #1984.
+  `required_acceptance` items `enterprise_booking_identity_empty_and_error_ui`
+  and `enterprise_authorized_driver_and_support_contact_actions` are not
   satisfied until that run is green and its `run-status.json` /
   `system-remediation-report.json` artifacts are recorded as acceptance
   evidence — do not record acceptance evidence from this doc alone.
