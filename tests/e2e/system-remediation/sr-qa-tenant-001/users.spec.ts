@@ -1,3 +1,4 @@
+import { decodeTenantWire, tenantStepUpHeaders } from "./http-boundary";
 import { randomUUID } from "node:crypto";
 import { test, expect } from "@playwright/test";
 import type { TenantUserRoleRecord } from "@drts/contracts";
@@ -47,7 +48,27 @@ test("Tenant users create, role update and tenant isolation", async ({
       const url = new URL(`api/tenant/${path}`, `${baseURL.origin}/`).href;
       const response = await client.fetch(url, {
         method: data === undefined ? "GET" : "POST",
-        headers: { Authorization: `Bearer ${token}`, "x-tenant-id": tenant },
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "x-tenant-id": tenant,
+          ...(await tenantStepUpHeaders({
+            client,
+            origin: baseURL.origin,
+            token,
+            tenant,
+            method: data === undefined ? "GET" : "POST",
+            apiPath: `tenant/${path}`,
+            record: (proofUrl, statusCode, durationMs) =>
+              evidence.recordHttpCall({
+                method: "POST",
+                url: proofUrl,
+                statusCode,
+                durationMs,
+                actorRole:
+                  tenant === tenantA ? "tenant_admin:A" : "tenant_admin:B",
+              }),
+          })),
+        },
         data,
         maxRedirects: 0,
       });
@@ -67,7 +88,7 @@ test("Tenant users create, role update and tenant isolation", async ({
     ): Promise<T[]> => {
       const response = await call(tenant, token, path);
       expect(response.status()).toBe(200);
-      const body = await response.json();
+      const body = decodeTenantWire(await response.json());
       expect(Array.isArray(body.data.items)).toBe(true);
       return body.data.items;
     };
@@ -77,7 +98,9 @@ test("Tenant users create, role update and tenant isolation", async ({
       const command = { email, displayName: run, roleCode: "tenant_viewer" };
       const created = await call(tenantA, tokenA, "users", command);
       expect(created.status()).toBe(201);
-      const record: TenantUserRoleRecord = (await created.json()).data;
+      const record: TenantUserRoleRecord = decodeTenantWire(
+        await created.json(),
+      ).data;
       expect(record.userId).toBeTruthy();
       evidence.recordResourceId("tenant_user", record.userId);
       const path = `users/${encodeURIComponent(record.userId)}/role`;
@@ -98,12 +121,14 @@ test("Tenant users create, role update and tenant isolation", async ({
       });
       const duplicate = await call(tenantA, tokenA, "users", command);
       expect(duplicate.status()).toBe(409);
-      expect((await duplicate.json()).error.code).toBe("TENANT_USER_EXISTS");
+      expect(decodeTenantWire(await duplicate.json()).error.code).toBe(
+        "TENANT_USER_EXISTS",
+      );
       const crossUpdate = await call(tenantB, tokenB, path, {
         roleCode: "tenant_requester",
       });
       expect(crossUpdate.status()).toBe(404);
-      expect((await crossUpdate.json()).error.code).toBe(
+      expect(decodeTenantWire(await crossUpdate.json()).error.code).toBe(
         "TENANT_USER_NOT_FOUND",
       );
       expect(

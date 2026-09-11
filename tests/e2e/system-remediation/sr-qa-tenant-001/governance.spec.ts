@@ -8,7 +8,7 @@ test("Tenant quotas and approval decisions have real HTTP/DB readback", async ({
   playwright,
 }, testInfo) => {
   await withTenantAcceptance(playwright, testInfo, async (ctx) => {
-    const code = `QA-${ctx.runId.slice(0, 8)}`;
+    const code = `QA-${ctx.runId.slice(0, 8)}`.toUpperCase();
     await ctx.data("tenant/cost-centers", "adminA", "POST", {
       code,
       name: "QA governed bookings",
@@ -189,7 +189,7 @@ test("Tenant quotas and approval decisions have real HTTP/DB readback", async ({
       summary.usage.confirmedBookingCount +
         summary.usage.pendingReservedBookingCount,
     ).toBe(1);
-    const zeroCode = `QA-Z-${ctx.runId.slice(0, 8)}`;
+    const zeroCode = `QA-Z-${ctx.runId.slice(0, 8)}`.toUpperCase();
     await ctx.data("tenant/cost-centers", "adminA", "POST", {
       code: zeroCode,
       name: "QA zero quota",

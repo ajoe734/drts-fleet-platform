@@ -1,3 +1,4 @@
+import { decodeTenantWire, tenantStepUpHeaders } from "./http-boundary";
 import { createHash, randomUUID } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { createRequire } from "node:module";
@@ -81,6 +82,24 @@ export class TenantAcceptance {
         Authorization: `Bearer ${this.tokens[actor]}`,
         "x-request-id": `tenant-qa-${randomUUID()}`,
         ...(selectedTenant ? { "x-tenant-id": selectedTenant } : {}),
+        ...(actor !== "platform" && actor !== "readonlyA" && selectedTenant
+          ? await tenantStepUpHeaders({
+              client: this.client,
+              origin: this.origin,
+              token: this.tokens[actor],
+              tenant: selectedTenant,
+              method,
+              apiPath,
+              record: (proofUrl, statusCode, durationMs) =>
+                this.evidence.recordHttpCall({
+                  method: "POST",
+                  url: proofUrl,
+                  statusCode,
+                  durationMs,
+                  actorRole: actor,
+                }),
+            })
+          : {}),
         ...(method === "POST" && apiPath === "tenant/bookings"
           ? { "idempotency-key": randomUUID() }
           : {}),
@@ -109,11 +128,12 @@ export class TenantAcceptance {
     tenant?: string,
   ): Promise<T> {
     const response = await this.call(apiPath, actor, method, body, tenant);
+    const envelope = decodeTenantWire(await response.json());
     expect(
       response.ok(),
-      `${method} ${apiPath} HTTP ${response.status()}`,
+      `${method} ${apiPath} HTTP ${response.status()} code=${envelope.error?.code ?? "none"}`,
     ).toBe(true);
-    return (await response.json()).data as T;
+    return envelope.data as T;
   }
   async negative(
     apiPath: string,
@@ -125,7 +145,8 @@ export class TenantAcceptance {
   ): Promise<void> {
     const response = await this.call(apiPath, actor, method, body);
     expect(response.status()).toBe(status);
-    if (code) expect((await response.json()).error.code).toBe(code);
+    if (code)
+      expect(decodeTenantWire(await response.json()).error.code).toBe(code);
   }
   async checkpoint(readback: Readback): Promise<void> {
     if (!/^SELECT\s/i.test(readback.sql))

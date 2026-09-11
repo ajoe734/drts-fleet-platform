@@ -1,3 +1,4 @@
+import { decodeTenantWire } from "./http-boundary";
 import { randomUUID } from "node:crypto";
 import { test, expect } from "@playwright/test";
 import type {
@@ -68,7 +69,7 @@ test("C028 approval rule writes, evaluation and tenant isolation", async ({
     ): Promise<T[]> => {
       const response = await call(tenant, token, path);
       expect(response.status()).toBe(200);
-      const body = await response.json();
+      const body = decodeTenantWire(await response.json());
       expect(Array.isArray(body.data.items)).toBe(true);
       return body.data.items;
     };
@@ -83,14 +84,16 @@ test("C028 approval rule writes, evaluation and tenant isolation", async ({
       };
       const created = await call(tenantA, tokenA, "approval-rules", command);
       expect(created.status()).toBe(201);
-      const record: TenantApprovalRuleRecord = (await created.json()).data;
+      const record: TenantApprovalRuleRecord = decodeTenantWire(
+        await created.json(),
+      ).data;
       expect(record.ruleId).toBeTruthy();
       evidence.recordResourceId("tenant_approval_rule", record.ruleId);
       const path = `approval-rules/${encodeURIComponent(record.ruleId)}`;
       const getRecord = async () => {
         const response = await call(tenantA, tokenA, path);
         expect(response.status()).toBe(200);
-        return (await response.json()).data;
+        return decodeTenantWire(await response.json()).data;
       };
       expect(await getRecord()).toMatchObject({
         ...command,
@@ -107,7 +110,7 @@ test("C028 approval rule writes, evaluation and tenant isolation", async ({
           },
         );
         expect(response.status()).toBe(201);
-        const result = (await response.json()).data;
+        const result = decodeTenantWire(await response.json()).data;
         expect(Array.isArray(result.matchedRules)).toBe(true);
         return result.matchedRules.some(
           (rule: { ruleId: string }) => rule.ruleId === record.ruleId,
@@ -135,7 +138,7 @@ test("C028 approval rule writes, evaluation and tenant isolation", async ({
           suffix ? {} : undefined,
         );
         expect(response.status()).toBe(404);
-        expect((await response.json()).error.code).toBe(
+        expect(decodeTenantWire(await response.json()).error.code).toBe(
           "TENANT_APPROVAL_RULE_NOT_FOUND",
         );
       }

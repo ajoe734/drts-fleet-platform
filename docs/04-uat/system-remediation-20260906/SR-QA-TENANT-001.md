@@ -123,3 +123,20 @@ existing `@drts/api-client`, `@drts/ui-tokens`, `pg` and `pdfjs-dist` imports
 outside this task. Focused tenant strict TypeScript passed. Full typecheck on
 the exact merged candidate still requires the clean frozen-install CI result;
 this local environment failure is not reported as a successful full check.
+
+Run `34567457639` on `5e950b3f26024dfc623013b9aef7534000c54cd8` completed
+real AppModule/PG/JWT setup and executed all 10 HTTP tests, with 10 failures
+and zero skips. The raw responses exposed a QA transport mismatch: canonical
+HTTP keys are snake_case, while these tests compared internal camelCase
+records. The task reader now projects only received canonical keys to domain
+keys, rejecting unexpected camelCase wire fields and never inventing values.
+A regression runs the actual production snake-case serializer through that
+reader. Cost-center expectations also follow the service's uppercase codes.
+Privileged user/approval mutations now obtain real action/session-bound
+proofs from `/api/identity/step-up-proofs`; no proof reference is fabricated.
+The new helper records these HTTP requests and retains only safe error codes
+in failure messages. Existing tenant role scopes remain unchanged. The local
+suite now has 27 passing tests across 3 files. Post-fix remote acceptance is
+still required; no product authentication change was made.
+The new run artifact contains zero masking-command records and zero JWT-shaped
+values in its execution log, confirming the artifact filter on actual output.

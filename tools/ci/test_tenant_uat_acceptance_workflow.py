@@ -364,7 +364,7 @@ class FullMatrixGateBehaviorTests(unittest.TestCase):
             (root / "test-results/system-remediation-report.json").write_text(json.dumps({"suites": [{"specs": specs}]}))
             artifact = root / ".artifacts/tenant-uat-acceptance"
             artifact.mkdir(parents=True)
-            (artifact / "unit-test-report.json").write_text(json.dumps({"numTotalTests": 24, "numPassedTests": 24, "numPendingTests": 0, "success": True}))
+            (artifact / "unit-test-report.json").write_text(json.dumps({"numTotalTests": 27, "numPassedTests": 27, "numPendingTests": 0, "success": True}))
             if not missing_restart:
                 (artifact / "restart-report.json").write_text(json.dumps({"status": restart_status, "verified": 12, "candidate_sha": "c" * 40, "tables": [f"table_{i}" for i in range(12)]}))
             return subprocess.run([sys.executable, "-c", self.script], cwd=root, capture_output=True, text=True)

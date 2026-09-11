@@ -1,3 +1,4 @@
+import { decodeTenantWire } from "./http-boundary";
 import { randomUUID } from "node:crypto";
 import { test, expect } from "@playwright/test";
 import type {
@@ -68,7 +69,7 @@ test("C027 passenger/address writes, relation readback and tenant isolation", as
     ): Promise<T[]> => {
       const response = await call(tenant, token, path);
       expect(response.status()).toBe(200);
-      const body = await response.json();
+      const body = decodeTenantWire(await response.json());
       expect(Array.isArray(body.data.items)).toBe(true);
       return body.data.items;
     };
@@ -80,7 +81,9 @@ test("C027 passenger/address writes, relation readback and tenant isolation", as
         fullName: run,
       });
       expect(created.status()).toBe(201);
-      const passenger: TenantPassengerRecord = (await created.json()).data;
+      const passenger: TenantPassengerRecord = decodeTenantWire(
+        await created.json(),
+      ).data;
       expect(passenger.passengerId).toBeTruthy();
       evidence.recordResourceId("passenger", passenger.passengerId);
       expect(await read(tenantA, tokenA, "passengers")).toContainEqual(
@@ -102,7 +105,9 @@ test("C027 passenger/address writes, relation readback and tenant isolation", as
         addressCommand,
       );
       expect(addressResponse.status()).toBe(201);
-      const address: TenantAddressRecord = (await addressResponse.json()).data;
+      const address: TenantAddressRecord = decodeTenantWire(
+        await addressResponse.json(),
+      ).data;
       expect(address.addressId).toBeTruthy();
       evidence.recordResourceId("address", address.addressId);
       expect(await read(tenantA, tokenA, "addresses")).toContainEqual(
@@ -118,7 +123,7 @@ test("C027 passenger/address writes, relation readback and tenant isolation", as
         fullName: `${run}-forbidden`,
       });
       expect(crossPassenger.status()).toBe(404);
-      expect((await crossPassenger.json()).error.code).toBe(
+      expect(decodeTenantWire(await crossPassenger.json()).error.code).toBe(
         "PASSENGER_NOT_FOUND",
       );
       const crossAddress = await call(tenantB, tokenB, "addresses", {
@@ -126,7 +131,9 @@ test("C027 passenger/address writes, relation readback and tenant isolation", as
         addressId: address.addressId,
       });
       expect(crossAddress.status()).toBe(404);
-      expect((await crossAddress.json()).error.code).toBe("ADDRESS_NOT_FOUND");
+      expect(decodeTenantWire(await crossAddress.json()).error.code).toBe(
+        "ADDRESS_NOT_FOUND",
+      );
       const crossOwner = await call(
         tenantB,
         tokenB,
@@ -134,7 +141,9 @@ test("C027 passenger/address writes, relation readback and tenant isolation", as
         addressCommand,
       );
       expect(crossOwner.status()).toBe(404);
-      expect((await crossOwner.json()).error.code).toBe("PASSENGER_NOT_FOUND");
+      expect(decodeTenantWire(await crossOwner.json()).error.code).toBe(
+        "PASSENGER_NOT_FOUND",
+      );
       const invalid = await call(tenantA, tokenA, "passengers", {
         passengerId: passenger.passengerId,
         fullName: " ",

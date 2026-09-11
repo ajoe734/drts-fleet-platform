@@ -1,3 +1,4 @@
+import { decodeTenantWire } from "./http-boundary";
 import { randomUUID } from "node:crypto";
 import { test, expect } from "@playwright/test";
 import type { TenantCostCenterRecord } from "@drts/contracts";
@@ -65,7 +66,7 @@ test("C027 cost center writes, disable and tenant isolation", async ({
     ): Promise<T[]> => {
       const response = await call(tenant, token, path);
       expect(response.status()).toBe(200);
-      const body = await response.json();
+      const body = decodeTenantWire(await response.json());
       expect(Array.isArray(body.data.items)).toBe(true);
       return body.data.items;
     };
@@ -75,14 +76,16 @@ test("C027 cost center writes, disable and tenant isolation", async ({
       const command = { code: run, name: run };
       const created = await call(tenantA, tokenA, "cost-centers", command);
       expect(created.status()).toBe(201);
-      const record: TenantCostCenterRecord = (await created.json()).data;
+      const record: TenantCostCenterRecord = decodeTenantWire(
+        await created.json(),
+      ).data;
       expect(record.code).toBeTruthy();
       evidence.recordResourceId("cost_center", `${tenantA}:${record.code}`);
       const path = `cost-centers/${encodeURIComponent(record.code)}`;
       const getRecord = async () => {
         const response = await call(tenantA, tokenA, path);
         expect(response.status()).toBe(200);
-        return (await response.json()).data;
+        return decodeTenantWire(await response.json()).data;
       };
       expect(await getRecord()).toMatchObject({
         tenantId: tenantA,
@@ -103,13 +106,15 @@ test("C027 cost center writes, disable and tenant isolation", async ({
 
       const crossRead = await call(tenantB, tokenB, path);
       expect(crossRead.status()).toBe(404);
-      expect((await crossRead.json()).error.code).toBe("COST_CENTER_NOT_FOUND");
+      expect(decodeTenantWire(await crossRead.json()).error.code).toBe(
+        "COST_CENTER_NOT_FOUND",
+      );
       const crossDisable = await call(tenantB, tokenB, "cost-centers/disable", {
         code: record.code,
         reason: run,
       });
       expect(crossDisable.status()).toBe(404);
-      expect((await crossDisable.json()).error.code).toBe(
+      expect(decodeTenantWire(await crossDisable.json()).error.code).toBe(
         "COST_CENTER_NOT_FOUND",
       );
       expect(

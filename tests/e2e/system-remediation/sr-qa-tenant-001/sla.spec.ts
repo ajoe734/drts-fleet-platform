@@ -1,3 +1,4 @@
+import { decodeTenantWire } from "./http-boundary";
 import { randomUUID } from "node:crypto";
 import { test, expect } from "@playwright/test";
 import type {
@@ -70,7 +71,9 @@ test("C028 SLA settings readback, invalid input and tenant isolation", async ({
     ): Promise<TenantSlaProfile> => {
       const response = await call(tenant, token);
       expect(response.status()).toBe(200);
-      const profile: TenantSlaProfile = (await response.json()).data;
+      const profile: TenantSlaProfile = decodeTenantWire(
+        await response.json(),
+      ).data;
       expect(profile.tenantId).toBe(tenant);
       return profile;
     };
@@ -103,7 +106,7 @@ test("C028 SLA settings readback, invalid input and tenant isolation", async ({
       attemptedWrite = true;
       const written = await call(tenantA, tokenA, updated);
       expect(written.status()).toBe(201);
-      expect((await written.json()).data).toMatchObject({
+      expect(decodeTenantWire(await written.json()).data).toMatchObject({
         resourceType: "tenant_sla",
         resourceId: tenantA,
         status: "completed",
@@ -117,8 +120,12 @@ test("C028 SLA settings readback, invalid input and tenant isolation", async ({
       expect(await read(tenantB, tokenB)).toEqual(originalB);
       // A valid read session must fail authorization, not authentication, on write.
       expect(
-        (await call(tenantA, readOnlyToken, { ...updated, waitThresholdMin: 31 }))
-          .status(),
+        (
+          await call(tenantA, readOnlyToken, {
+            ...updated,
+            waitThresholdMin: 31,
+          })
+        ).status(),
       ).toBe(403);
       expect(await read(tenantA, tokenA)).toEqual(persisted);
       // A's session must not acquire B's authority by changing a tenant header.

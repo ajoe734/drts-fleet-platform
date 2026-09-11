@@ -327,7 +327,7 @@ jobs:
           unit_passed = unit_report.get("numPassedTests", 0)
           unit_pending = unit_report.get("numPendingTests", 0)
           if (
-              unit_total < 24
+              unit_total < 27
               or unit_passed != unit_total
               or unit_pending
               or not unit_report.get("success")
