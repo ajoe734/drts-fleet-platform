@@ -10,7 +10,7 @@ const script = resolve(__dirname, "../../../../tools/system-remediation/ops-proo
 describe("capacity harness mechanics, not business capacity acceptance", () => {
   it.each(["success", "http-error", "bad-envelope", "overload", "invalid-header", "remote", "replay"])("records %s", async (scenario) => {
     const directory = mkdtempSync(resolve(tmpdir(), "ops-capacity-"));
-    const received: Array<{ method?: string; path?: string; body: string }> = [];
+    const received: Array<{ method?: string | undefined; path?: string | undefined; body: string }> = [];
     const server = createServer((req, res) => {
       let body = "";
       req.on("data", (chunk) => { body += chunk; });
