@@ -101,7 +101,7 @@ async function main() {
 
   try {
     // ---- C111: issuance, masking, overlap rotation, immediate revocation ----
-    const issued = service.issueApiKey(
+    const issued = await service.issueApiKey(
       tenantId,
       {
         keyName: "E2E Automated Webhook Key",
@@ -116,7 +116,7 @@ async function main() {
       throw new Error("issued API key missing from listApiKeys readback");
     }
 
-    const rotated = service.rotateApiKey(
+    const rotated = await service.rotateApiKey(
       tenantId,
       issued.apiKey.apiKeyId,
       { keyName: "E2E Automated Webhook Key v2", overlapDays: 7 },
@@ -130,7 +130,7 @@ async function main() {
       (k) => k.apiKeyId === rotated.apiKey.apiKeyId,
     )!;
 
-    const revocable = service.issueApiKey(
+    const revocable = await service.issueApiKey(
       tenantId,
       { keyName: "Revocation Target Key", scopes: ["tenant:read"] },
       "req-e2e-issue-002",
@@ -167,7 +167,7 @@ async function main() {
     const firstRequest = receiver.requests[receiver.requests.length - 1]!;
     const firstSigHeader = firstRequest.headers["x-drts-webhook-signature"] as string;
     const firstHmac = verifyHmacSignature(firstSigHeader, firstRequest.rawBody, webhookSecret);
-    const [endpointAfterFirstTest] = service.listWebhookEndpoints(tenantId);
+    const endpointAfterFirstTest = service.listWebhookEndpoints(tenantId)[0]!;
 
     // 503 -> queued with exponential backoff
     receiver.setHandler((_req, res) => {
@@ -193,8 +193,10 @@ async function main() {
       { webhookId: createdWebhook.webhookId },
       "req-e2e-fail-001",
     );
-    const [endpointAfterFailure] = service.listWebhookEndpoints(tenantId);
-    const disableNotices = auditNotificationService.listNotifications(tenantId);
+    const endpointAfterFailure = service.listWebhookEndpoints(tenantId)[0]!;
+    const disableNotices = auditNotificationService
+      .listNotifications()
+      .filter((n) => n.tenantId === tenantId);
     const disabledNoticeFound = disableNotices.some((n) =>
       n.title.includes("Tenant webhook disabled after repeated delivery failures"),
     );
@@ -206,7 +208,7 @@ async function main() {
       { webhookId: createdWebhook.webhookId, secret: secretV2, rotationReason: "e2e_recovery_rotation" },
       "req-e2e-secret-rotate-001",
     );
-    const [endpointAfterSecretRotation] = service.listWebhookEndpoints(tenantId);
+    const endpointAfterSecretRotation = service.listWebhookEndpoints(tenantId)[0]!;
     const secretHistoryLeaksPlaintext = endpointAfterSecretRotation.secretHistory.some(
       (hist) => (hist as unknown as Record<string, unknown>).secretValue !== undefined,
     );
@@ -224,7 +226,7 @@ async function main() {
     const v2SigHeader = v2Request.headers["x-drts-webhook-signature"] as string;
     const v2HmacWithNewSecret = verifyHmacSignature(v2SigHeader, v2Request.rawBody, secretV2);
     const v2HmacWithOldSecret = verifyHmacSignature(v2SigHeader, v2Request.rawBody, webhookSecret);
-    const [endpointAfterRecovery] = service.listWebhookEndpoints(tenantId);
+    const endpointAfterRecovery = service.listWebhookEndpoints(tenantId)[0]!;
 
     // Replay protection: a byte-for-byte replay of the last signed request
     // must be rejected by the receiver via delivery-ID uniqueness tracking.

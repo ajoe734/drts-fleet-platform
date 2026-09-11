@@ -245,11 +245,11 @@ describe("SR-QA-WEBHOOK-001: Verification Suite", () => {
   // Capability C111: Tenant API Keys Governance, Minimal Scope, Rotation, Revocation, and Secret Masking
   // =========================================================================
   describe("C111: Tenant API Keys Governance & Lifecycle", () => {
-    it("C111-1 (Normal): Issues API key with minimal scope and normalizes compatibility aliases", () => {
+    it("C111-1 (Normal): Issues API key with minimal scope and normalizes compatibility aliases", async () => {
       const auditNotificationService = new AuditNotificationService();
       const service = new TenantPartnerService(auditNotificationService);
 
-      const issued = service.issueApiKey(
+      const issued = await service.issueApiKey(
         "tenant-demo-001",
         {
           keyName: "Webhook Dispatcher Key",
@@ -268,11 +268,11 @@ describe("SR-QA-WEBHOOK-001: Verification Suite", () => {
       expect(found!.status).toBe("active");
     });
 
-    it("C111-2 (Normal): Plaintext key returned once, prefix/suffix masked, raw secret excluded from storage", () => {
+    it("C111-2 (Normal): Plaintext key returned once, prefix/suffix masked, raw secret excluded from storage", async () => {
       const auditNotificationService = new AuditNotificationService();
       const service = new TenantPartnerService(auditNotificationService);
 
-      const issued = service.issueApiKey("tenant-demo-001", {
+      const issued = await service.issueApiKey("tenant-demo-001", {
         keyName: "Secure Partner Key",
         scopes: ["tenant:read"],
       });
@@ -289,13 +289,13 @@ describe("SR-QA-WEBHOOK-001: Verification Suite", () => {
       expect((record as unknown as Record<string, unknown>).keyHash).toBeUndefined();
     });
 
-    it("C111-3 (Normal & Negative): Enforces default 60-day expiry and rejects expiry exceeding 90 days", () => {
+    it("C111-3 (Normal & Negative): Enforces default 60-day expiry and rejects expiry exceeding 90 days", async () => {
       const auditNotificationService = new AuditNotificationService();
       const service = new TenantPartnerService(auditNotificationService);
       const now = Date.now();
 
       // Normal default expiry: ~60 days
-      const normalKey = service.issueApiKey("tenant-demo-001", {
+      const normalKey = await service.issueApiKey("tenant-demo-001", {
         keyName: "Default Lifetime Key",
         scopes: ["tenant:read"],
       });
@@ -313,12 +313,12 @@ describe("SR-QA-WEBHOOK-001: Verification Suite", () => {
       }).toThrowError();
     });
 
-    it("C111-4 (Normal): Supports key rotation with configurable overlap window", () => {
+    it("C111-4 (Normal): Supports key rotation with configurable overlap window", async () => {
       vi.useFakeTimers();
       vi.setSystemTime(new Date("2026-08-01T00:00:00.000Z"));
 
       const service = new TenantPartnerService(new AuditNotificationService());
-      const first = service.issueApiKey("tenant-demo-001", {
+      const first = await service.issueApiKey("tenant-demo-001", {
         keyName: "Primary Key",
         scopes: ["tenant:webhooks:write"],
       });
@@ -326,7 +326,7 @@ describe("SR-QA-WEBHOOK-001: Verification Suite", () => {
 
       // Rotate after 2 days with a 7-day overlap window
       vi.setSystemTime(new Date("2026-08-03T00:00:00.000Z"));
-      const rotated = service.rotateApiKey("tenant-demo-001", first.apiKey.apiKeyId, {
+      const rotated = await service.rotateApiKey("tenant-demo-001", first.apiKey.apiKeyId, {
         keyName: "Rotated Primary Key v2",
         overlapDays: 7,
       });
@@ -343,17 +343,17 @@ describe("SR-QA-WEBHOOK-001: Verification Suite", () => {
       expect(oldKey.supersededByApiKeyId).toBe(rotated.apiKey.apiKeyId);
     });
 
-    it("C111-5 (Normal): Automatically revokes key after overlap window expires", () => {
+    it("C111-5 (Normal): Automatically revokes key after overlap window expires", async () => {
       vi.useFakeTimers();
       vi.setSystemTime(new Date("2026-08-01T00:00:00.000Z"));
 
       const service = new TenantPartnerService(new AuditNotificationService());
-      const original = service.issueApiKey("tenant-demo-001", {
+      const original = await service.issueApiKey("tenant-demo-001", {
         keyName: "Expiring Overlap Key",
         scopes: ["tenant:read"],
       });
 
-      service.rotateApiKey("tenant-demo-001", original.apiKey.apiKeyId, {
+      await service.rotateApiKey("tenant-demo-001", original.apiKey.apiKeyId, {
         overlapDays: 3,
       });
 
@@ -367,11 +367,11 @@ describe("SR-QA-WEBHOOK-001: Verification Suite", () => {
       expect(reconciledOldKey.revokeReason).toBe("rotation_overlap_elapsed");
     });
 
-    it("C111-6 (Normal & Negative): Immediate revocation works instantly and blocks rotation", () => {
+    it("C111-6 (Normal & Negative): Immediate revocation works instantly and blocks rotation", async () => {
       const auditNotificationService = new AuditNotificationService();
       const service = new TenantPartnerService(auditNotificationService);
 
-      const issued = service.issueApiKey("tenant-demo-001", {
+      const issued = await service.issueApiKey("tenant-demo-001", {
         keyName: "Key To Revoke",
         scopes: ["tenant:read"],
       });
@@ -451,7 +451,7 @@ describe("SR-QA-WEBHOOK-001: Verification Suite", () => {
       expect(sigVerification.version).toBe(1);
 
       // Verify write-then-read: Endpoint status promoted from test_pending to active
-      const [endpoint] = service.listWebhookEndpoints("tenant-demo-001");
+      const endpoint = service.listWebhookEndpoints("tenant-demo-001")[0]!;
       expect(endpoint.status).toBe("active");
       expect(endpoint.runtimeMetadata.lastDeliveredAt).not.toBeNull();
     });
@@ -570,7 +570,7 @@ describe("SR-QA-WEBHOOK-001: Verification Suite", () => {
           expect(recovered!.httpStatus).toBe(200);
           expect(dedicatedReceiver.requests.length).toBe(1);
 
-          const [endpointAfterRecovery] = service.listWebhookEndpoints("tenant-demo-001");
+          const endpointAfterRecovery = service.listWebhookEndpoints("tenant-demo-001")[0]!;
           expect(endpointAfterRecovery.status).toBe("active");
         } finally {
           await dedicatedReceiver.close();
@@ -667,13 +667,15 @@ describe("SR-QA-WEBHOOK-001: Verification Suite", () => {
       });
 
       // Verify endpoint is auto-disabled
-      const [updatedEndpoint] = service.listWebhookEndpoints("tenant-demo-001");
+      const updatedEndpoint = service.listWebhookEndpoints("tenant-demo-001")[0]!;
       expect(updatedEndpoint.status).toBe("disabled");
       expect(updatedEndpoint.runtimeMetadata.disableReason).toBe("delivery_failed");
       expect(updatedEndpoint.runtimeMetadata.disabledAt).not.toBeNull();
 
       // Verify ops notice notification recorded in audit notification service
-      const notices = auditNotificationService.listNotifications("tenant-demo-001");
+      const notices = auditNotificationService
+        .listNotifications()
+        .filter((n) => n.tenantId === "tenant-demo-001");
       const disabledNotice = notices.find((n) =>
         n.title.includes("Tenant webhook disabled after repeated delivery failures"),
       );
@@ -790,7 +792,7 @@ describe("SR-QA-WEBHOOK-001: Verification Suite", () => {
       });
 
       // Verify version 1 via listWebhookEndpoints
-      const [initialEndpoint] = service.listWebhookEndpoints("tenant-demo-001");
+      const initialEndpoint = service.listWebhookEndpoints("tenant-demo-001")[0]!;
       expect(initialEndpoint.secretVersion).toBe(1);
 
       // Validate v1
@@ -816,7 +818,7 @@ describe("SR-QA-WEBHOOK-001: Verification Suite", () => {
       });
 
       // Check endpoint reverted to test_pending and secret history has no plaintext
-      const [endpointAfterRotation] = service.listWebhookEndpoints("tenant-demo-001");
+      const endpointAfterRotation = service.listWebhookEndpoints("tenant-demo-001")[0]!;
       expect(endpointAfterRotation.status).toBe("test_pending");
       expect(endpointAfterRotation.secretVersion).toBe(2);
       for (const hist of endpointAfterRotation.secretHistory) {
@@ -935,7 +937,7 @@ describe("SR-QA-WEBHOOK-001: Verification Suite", () => {
       );
       await serviceB.onModuleInit();
 
-      const [reloadedEndpoint] = serviceB.listWebhookEndpoints("tenant-demo-001");
+      const reloadedEndpoint = serviceB.listWebhookEndpoints("tenant-demo-001")[0]!;
       expect(reloadedEndpoint.webhookId).toBe(endpoint.webhookId);
       expect(reloadedEndpoint.status).toBe("active");
 
@@ -1018,11 +1020,12 @@ describe("SR-QA-WEBHOOK-001: Verification Suite", () => {
       const result = await geoService.search({ q: "台北市信義區市府路1號" });
       expect(result.candidates.length).toBeGreaterThan(0);
       const candidate = result.candidates[0]!;
+      const location = candidate.location!;
       // Taiwan latitude between 21.8 and 25.4, longitude between 119.9 and 122.1
-      expect(candidate.location.lat).toBeGreaterThan(21.8);
-      expect(candidate.location.lat).toBeLessThan(25.4);
-      expect(candidate.location.lng).toBeGreaterThan(119.9);
-      expect(candidate.location.lng).toBeLessThan(122.1);
+      expect(location.lat).toBeGreaterThan(21.8);
+      expect(location.lat).toBeLessThan(25.4);
+      expect(location.lng).toBeGreaterThan(119.9);
+      expect(location.lng).toBeLessThan(122.1);
     });
 
     it("C114-2 (Negative): Blank address throws validation error gracefully", async () => {

@@ -160,6 +160,78 @@ work rather than rewrite it), that work was **ported, not rewritten**:
    canonical sub-task, rather than quietly patch it into this task, still
    stands and is carried forward unchanged into this handoff.
 
+## 0.3 CI 修復輪（2026-09-11，第三次）
+
+`ai-status.sh show SR-QA-WEBHOOK-001` 顯示先前 handoff 的 candidate
+`26eff448abee9f5a14f482e8e42a84e73cda57bc`（PR #1975）`ci_status: failure`。
+`gh pr view 1975 --json statusCheckRollup` 確認失敗來自 CI 的 `Product smoke
+acceptance` 與彙總的 `Smoke acceptance` 兩個 job，其餘 lint／Canonical
+consistency／i18n guard／build 等 job 均為 `SUCCESS`。
+
+`gh run view <run-id> --log-failed` 顯示根因是 `pnpm run typecheck`（`tsc -p
+tsconfig.json --noEmit`）對本任務兩個 `write_scopes` 內檔案的真實型別錯誤，
+非旗標或環境問題：
+
+1. `apps/api/src/modules/tenant-partner/tenant-partner.service.ts` 的
+   `issueApiKey` / `rotateApiKey` 簽章已由其他任務改為
+   `MaybePromise<TenantApiKeyIssued>`（因應真實持久層可能為非同步寫入），但
+   `sr-qa-webhook-001.test.ts`（15 處）與 `run-webhook-lifecycle.ts`（10 處）
+   仍以同步方式直接存取回傳值的 `.apiKey` / `.plaintextKey`，型別上不再合法
+   （`TS2339`）。修法：對應 `it()` 改為 `async`，呼叫處補上 `await`
+   （`await service.issueApiKey(...)` / `await service.rotateApiKey(...)`）；
+   `await` 對 `T | Promise<T>` 兩種情況皆正確處理，不改變任何既有斷言或產品
+   程式碼行為。
+2. `AuditNotificationService.listNotifications()` 簽章已由其他任務改為不接受
+   `tenantId` 參數（`TS2554`），測試改為呼叫 `.listNotifications()` 後在測試
+   端 `.filter((n) => n.tenantId === tenantId)`，语意不變。
+3. 專案 `tsconfig` 的 `noUncheckedIndexedAccess`／陣列解構在多處
+   `const [endpoint] = service.listWebhookEndpoints(...)` 產生
+   `T | undefined`（`TS18048`），以及 `GeoService` 的 `candidate.location`
+   為可空型別（`TS18049`）。修法：比照本檔案既有風格（如
+   `result.candidates[0]!`）改為 `service.listWebhookEndpoints(...)[0]!` /
+   `candidate.location!`，不影響執行期斷言。
+
+修復後於本 worktree 重新驗證（未動任何 production/business 程式碼，僅本任務
+`write_scopes` 內兩個測試檔案）：
+
+```text
+$ pnpm exec tsc -p tsconfig.json --noEmit
+（本任務兩檔案 sr-qa-webhook-001.test.ts / run-webhook-lifecycle.ts 相關的
+ TS2339/TS2554/TS18048/TS18049 錯誤全部消失；worktree 內殘留的其他無關檔案
+ 型別錯誤——如 tests/unit/fleet-partner-list-envelope.test.ts 等——與本任務
+ write_scopes 無關，且與 CI 對同一 candidate SHA 的失敗記錄不符，判定為
+ worktree 內 pnpm workspace 符號連結導致的重複模組識別假象，非本任務需修復
+ 範圍）
+
+$ pnpm exec vitest run tests/unit/system-remediation/sr-qa-webhook-001/
+ Test Files  1 passed (1)
+      Tests  25 passed (25)
+exit code: 0
+
+$ cd apps/api && pnpm exec tsx ../../tests/e2e/system-remediation/sr-qa-webhook-001/run-webhook-lifecycle.ts tenant-demo-e2e-001
+（獨立跑通完整 C111/C112 生命週期腳本本體，輸出單行 JSON 結果：發行/輪替/撤銷
+ API Key 皆讀回正確狀態、HMAC v=1 與 v=2 簽章驗證皆為 valid、503 退避 30s、
+ 400 自動停用、密鑰輪替後回讀 v=2、重放請求收到 409 — 與既有斷言邏輯一致）
+exit code: 0
+
+$ pnpm exec eslint tests/unit/system-remediation/sr-qa-webhook-001/sr-qa-webhook-001.test.ts tests/e2e/system-remediation/sr-qa-webhook-001/run-webhook-lifecycle.ts
+（無輸出，通過）
+exit code: 0
+```
+
+Base（此修復輪合併基準，`git merge-base HEAD origin/dev`）：
+`25ecae6295898d80883f03a9f5a1276fab03ab24`。`origin/dev` 於本輪次已前進至
+`1ac664e920015dcb705470f1d90c01ea6bb2e648`，但因本 candidate 已有開啟中的 PR
+#1975 並已進入 CI/review 流程（`reviewed_sha` 已鎖定於前一顆 candidate），依
+branch-strategy §11 guardrail 不對已鎖定 candidate 的分支執行
+`git merge origin/dev`，僅在既有分支上追加本次修復 commit 並以一般
+（非 force）push 推進，交由新 candidate SHA 重新走 CI／review。
+
+C111–C115 能力覆蓋範圍、已知未竟事項（§6.4）與外部門禁聲明（§6.3）均未變更，
+本輪修復純屬 CI 型別檢查回歸修復，不影響第 5 節能力對照表的驗收結論。
+
+---
+
 ## 1. 問題根因與能力盤點（Fix 前與驗收缺口分析）
 
 本驗收任務針對 2026-09-06 UAT 觀察與 134 能力盤點中整合與自動化領域的核心能力（C111, C112, C113, C114, C115）進行全生命週期可重跑驗收：
