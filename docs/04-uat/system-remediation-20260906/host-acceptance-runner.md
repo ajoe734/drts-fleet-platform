@@ -83,27 +83,28 @@ Explicitly NOT exercised by either job:
 
 ## 3. Real defects found and reported (not fixed here)
 
-**§3.3 and §3.4 below are two independent bootstrap-blocking defects, proven
-across three real GitHub Actions runs of this harness. Together they
-currently prevent both jobs from producing the positive owner-isolation/
-read-only evidence this task's `required_acceptance` gates ask for — see §5
-for the exact runs.**
+**§3.3 and §3.4 below are two independent bootstrap-blocking defects that
+prevented both jobs from producing positive evidence across the first three
+real GitHub Actions runs of this harness. Both were repaired upstream by
+`SR-HOST-BE-001-POST-ACCEPTANCE-REPAIR-20260910` (merged to `dev` as
+`714ccccd4c302a90c398fcfef050d07dd0d39427`, PR #1951). A fourth real run,
+[`34544324681`](https://github.com/ajoe734/drts-fleet-platform/actions/runs/34544324681)
+(candidate `a3ebf570748fee3372aab1cfce116e487d89bdc5`), is the first to boot
+past both crashes: `api-sql-acceptance` passed 18/18, `browser-acceptance`
+passed 9/9, zero skipped in either — see §5 for the full run table and
+evidence artifacts.**
 
 This task does not edit `apps/api/src/`. §3.1 and §3.2 are defects the suite
 is written to prove with real HTTP + real SQL, in
 `host-api-sql-acceptance.test.ts`'s "Known real-schema defect" suite (and
-cross-confirmed from the browser in `host-browser-acceptance.spec.ts`) — **but
-per the honesty rule in this document's header, that proof is not yet real
-GitHub Actions evidence.** Every real run so far (§5) has failed before
-reaching those specific tests, because of the bootstrap-blocking defects in
-§3.3/§3.4. §3.1/§3.2 remain accurately described (their SQL/pagination
-analysis is independent of whether the module boots — it is direct schema
-and source-code inspection, cited below), but they are reported here as
-static/pre-bootstrap analysis confirmed once locally during harness
-authoring, not as something this task's real GitHub Actions runs have
-independently reproduced. All four defects (§3.1–§3.4) are reported to the
-`SR-HOST-BE-001` owners as follow-up work, not silently absorbed into
-"expected" test output.
+cross-confirmed from the browser in `host-browser-acceptance.spec.ts`). As of
+run `34544324681` this is no longer static/pre-bootstrap analysis: every
+assertion below, including the `[DEFECT]` tests, ran for real against a real,
+migrated PostgreSQL and a real, listening `HostViewModule` instance, and
+passed. §3.2 specifically was corrected by that real run — see below; the
+originally-assumed "200-row" frontend-only framing understated the defect.
+All four defects (§3.1–§3.4) are reported to the `SR-HOST-BE-001` owners as
+follow-up work, not silently absorbed into "expected" test output.
 
 ### 3.1 `listTripsByVehicle` / `listVehicleCases` reference columns that do not exist
 
@@ -132,21 +133,34 @@ case data for `VEHICLE_A1` first (proven present via direct SQL assertions)
 specifically so this suite demonstrates the failure is the query, not
 missing data.
 
-### 3.2 Frontend's 200-row vehicle-detail lookup silently misses vehicle #201+
+### 3.2 Combined backend 100-row pageSize clamp + frontend 200-row assumption: the real cutoff is vehicle #101, not #201
 
 `host-data.server.ts`'s `loadHostVehicleDetail` always requests
 `{ page: 1, pageSize: VEHICLE_LOOKUP_PAGE_SIZE }` (200) and searches only
 within that page for the requested `vehicleId`, because the typed API client
-has no single-vehicle-by-id endpoint. The backend list endpoint itself
-paginates correctly past 200 rows (`HostViewService.paginate` fetches all
-owned rows, then paginates in memory — proven in this suite's "long list"
-test), so this is a **frontend-only** limitation, not a backend one. A host
-who owns 201+ vehicles cannot open the detail page for vehicle #201 onward:
-it renders the anti-enumeration `vehicle_not_found` state even though the
-vehicle is genuinely owned and active. Reproduced against a real 205-vehicle
-fixture (`HOST_BULK_PARTNER_ID`) at both the HTTP layer and, separately, by
-real Chromium navigation in `host-browser-acceptance.spec.ts`, per this
-task's explicit instruction not to shrink the fixture to hide this.
+has no single-vehicle-by-id endpoint. This was originally assumed to be a
+**frontend-only** limitation, on the theory that the backend list endpoint
+paginates correctly past 200 rows. Run `34544324681`'s real HTTP/SQL evidence
+(`host-api-sql-acceptance.test.ts`, "reveals the backend's own 100-row
+pageSize clamp") corrects that assumption:
+`HostViewService.paginate` silently clamps any requested `pageSize` to a hard
+max of 100 — `GET /api/host/vehicles?page=1&pageSize=200` returns HTTP 200
+with exactly 100 rows and `page_info.page_size: 100`, not an error and not
+200 rows. The list endpoint itself still paginates correctly across as many
+100-row pages as needed (verified for pages 2 and 3 of a real 205-vehicle
+fixture), so the backend's own paging is not broken — but because the
+frontend's single lookup only ever sees the first 100 rows the backend will
+give it in one response, **the real cutoff for the detail page is a host's
+vehicle #101, not #201** as `host-data.server.ts`'s own comment assumes. A
+host who owns 101+ vehicles cannot open the detail page for vehicle #101
+onward: it renders the anti-enumeration `vehicle_not_found` state even though
+the vehicle is genuinely owned and active. Reproduced against a real
+205-vehicle fixture (`HOST_BULK_PARTNER_ID`) at both the HTTP layer and,
+separately, by real Chromium navigation to vehicle #201 (beyond both the
+frontend's assumed 200-row boundary and the backend's real 100-row clamp, so
+it is not found under either accounting) in
+`host-browser-acceptance.spec.ts`, per this task's explicit instruction not
+to shrink the fixture to hide this.
 
 ### 3.3 [BLOCKING] `vehicles*` bare-wildcard routes crash `HostViewModule` bootstrap entirely under the installed `path-to-regexp@8.4.2`
 
@@ -296,12 +310,12 @@ bootstrap — see §5.
 
 ## 4. Real acceptance coverage summary
 
-**This section describes what the suites are written to prove once
-`HostViewModule` can boot. As of §5's real runs, neither suite has completed
-a single test remotely — both are blocked at bootstrap by §3.3/§3.4. This
-section is not a claim that the coverage below has been demonstrated on
-GitHub Actions; it is the suite's designed scope, unblocked and ready to run
-the moment the owning task fixes the bootstrap crashes.**
+**As of run `34544324681` (see §5), every item below has been demonstrated
+remotely: `api-sql-acceptance` passed 18/18 tests and `browser-acceptance`
+passed 9/9, both with zero pending/skipped, against the real, migrated
+PostgreSQL and the real, listening `HostViewModule`/`fleet-partner-portal-web`
+build described in §2. This is no longer the suite's designed-but-unproven
+scope; it is what the suite actually exercised and passed.**
 
 `tests/e2e/system-remediation/sr-host-fe-001/host-api-sql-acceptance.test.ts`
 (real HTTP + real SQL, isolated composition):
@@ -349,24 +363,78 @@ every declared test passed before recording `status: passed`.
 
 ## 5. Real run evidence
 
-Three real GitHub Actions runs so far, all on `claude2/sr-host-fe-001-acceptance-runner`.
-Runtime candidate SHA and workflow/harness SHA are identical in every run
-because this task's own commits are simultaneously the harness and (for
-`git diff --check`/static-validator purposes) the only thing distinguishing
-runs — the actual product code under test on each run is whatever `dev`
-looked like when that commit's tree was checked out, unchanged by this task.
+Fourteen real GitHub Actions runs so far, all on
+`claude2/sr-host-fe-001-acceptance-runner`, enumerated directly from the
+GitHub Actions API (`gh run list --workflow=host-acceptance.yml`), not
+reconstructed from memory. Each run's candidate SHA is that commit's tip at
+push/dispatch time; the actual product code under test on each run is
+whatever `dev` looked like when that commit's tree was checked out,
+unchanged by this task (this task never edits `apps/api/src/` or
+`apps/fleet-partner-portal-web/`).
 
 | Run | Commit | `api-sql-acceptance` | `browser-acceptance` |
 | --- | --- | --- | --- |
-| [`34496021674`](https://github.com/ajoe734/drts-fleet-platform/actions/runs/34496021674) | `5a8947e80fda2d5e4138fb966846eb8003cb8f87` | failed — §3.3 (`vehicles*`) | failed — readiness-check false positive (§3.3 history) then real defects cascade |
-| [`34497057638`](https://github.com/ajoe734/drts-fleet-platform/actions/runs/34497057638) | `4fc7dd8792de3b2906774258fc09085a87f0136e` | failed — §3.3 (`vehicles*`) | failed — readiness-check `set -e` abort (§3.3 history), no useful signal |
-| [`34497686598`](https://github.com/ajoe734/drts-fleet-platform/actions/runs/34497686598) | `d06c66dd518a0d159eab76793c452f461e458eba` | failed — §3.3 (`vehicles*`) | failed — clean 60s timeout, real §3.4 crash captured |
+| [`34495165342`](https://github.com/ajoe734/drts-fleet-platform/actions/runs/34495165342) | `4a2857540` (initial harness) | failed | failed — ESM `require` crash under Playwright |
+| [`34496021674`](https://github.com/ajoe734/drts-fleet-platform/actions/runs/34496021674) | `5a8947e80` | failed — §3.3 (`vehicles*`) | failed — readiness-check false positive (§3.3 history) then real defects cascade |
+| [`34497057638`](https://github.com/ajoe734/drts-fleet-platform/actions/runs/34497057638) | `4fc7dd879` | failed — §3.3 (`vehicles*`) | failed — readiness-check `set -e` abort (§3.3 history), no useful signal |
+| [`34497686598`](https://github.com/ajoe734/drts-fleet-platform/actions/runs/34497686598) | `d06c66dd5` | failed — §3.3 (`vehicles*`) | failed — clean 60s timeout, real §3.4 crash captured |
+| [`34498758985`](https://github.com/ajoe734/drts-fleet-platform/actions/runs/34498758985) | `7d553fd39` (docs only) | failed — §3.3 still unresolved on this tree | failed — same §3.4 cascade |
+| [`34535868241`](https://github.com/ajoe734/drts-fleet-platform/actions/runs/34535868241) | `1c52cef26` (merged `origin/dev`, pulling in the upstream `SR-HOST-BE-001-POST-ACCEPTANCE-REPAIR-20260910` fix for §3.3/§3.4) | failed | failed |
+| [`34536879852`](https://github.com/ajoe734/drts-fleet-platform/actions/runs/34536879852) | `e11dbf2c0` | **passed** | failed — harness/browser-side issue, not §3.3/§3.4 |
+| [`34537557009`](https://github.com/ajoe734/drts-fleet-platform/actions/runs/34537557009) | `c8afbe9ce` | **passed** | failed — standalone server was silencing real exceptions |
+| [`34540100185`](https://github.com/ajoe734/drts-fleet-platform/actions/runs/34540100185) | `a51913b37` | **passed** | failed — `SnakeCaseExceptionFilter` swallowing real request errors |
+| [`34541189923`](https://github.com/ajoe734/drts-fleet-platform/actions/runs/34541189923) | `afe7a48b9` | **passed** | failed — guard-thrown exceptions the interceptor structurally couldn't see |
+| [`34542116939`](https://github.com/ajoe734/drts-fleet-platform/actions/runs/34542116939) | `1603d04df` | **passed** | failed — acceptance build not self-sufficient for `@drts/control-plane-auth` |
+| [`34543041571`](https://github.com/ajoe734/drts-fleet-platform/actions/runs/34543041571) | `4bf050a38` | **passed** | failed — 6/9 passed; `tsx`'s bare-specifier resolution still broken for `@drts/control-plane-auth` |
+| [`34543449378`](https://github.com/ajoe734/drts-fleet-platform/actions/runs/34543449378) | `5101d047b` | **passed 18/18, 0 skipped** | **passed 9/9, 0 skipped, 0 flaky** |
+| [`34544324681`](https://github.com/ajoe734/drts-fleet-platform/actions/runs/34544324681) | `a3ebf570748fee3372aab1cfce116e487d89bdc5` (workflow_dispatch re-run of the final branch-tip commit, CI-wiring only, no test-file changes) | **passed 18/18, 0 skipped** | **passed 9/9, 0 skipped, 0 flaky** |
 
-The third run (`34497686598`) is the first one where this task's own harness
-bugs are no longer in the way — both jobs fail solely on real product
-defects (§3.3 for `api-sql-acceptance`, §3.4 for `browser-acceptance`), with
-clean, honest diagnostics. No run has produced a passing `status: passed`
-result, and none can until `SR-HOST-BE-001`'s owners fix §3.3 and §3.4.
+Runs 1–5 (through `34498758985`) predate the upstream bootstrap fix and fail
+on §3.3/§3.4 as documented in §3. Run 6 (`34535868241`) is the merge commit
+that pulled `SR-HOST-BE-001-POST-ACCEPTANCE-REPAIR-20260910` into this
+branch; from run 7 onward `api-sql-acceptance` passes consistently (the
+bootstrap crashes are gone), while `browser-acceptance` fails through a
+series of independent, real harness/product-boundary bugs (standalone-server
+exception handling, `tsx` module resolution, then three Playwright
+selector/timing bugs) — each fixed in its own commit per the log above, with
+full technical detail in that commit's message, not repeated here. Run 13
+(`34543449378`) is the first real GitHub Actions run to produce
+`status: passed` on both jobs, on a push trigger. Run 14 (`34544324681`) is a
+workflow_dispatch re-run of the exact final branch-tip commit — the commit
+only wires a CI test-file invocation and does not touch any test under
+`tests/e2e/system-remediation/sr-host-fe-001/`, so this is a confirmatory
+re-run of the same evidence on the SHA that is actually pushed to the branch
+tip, not new coverage.
+
+The rest of this section verifies run `34544324681`'s evidence directly from
+its downloaded artifacts, not just the green workflow check. Run
+`34543449378`'s artifacts were downloaded and checked the same way and show
+identical counts: `numTotalTests: 18, numPassedTests: 18, numFailedTests: 0,
+numPendingTests: 0` and `stats: {expected: 9, skipped: 0, unexpected: 0,
+flaky: 0}`.
+
+- `host-acceptance-api-a3ebf570748fee3372aab1cfce116e487d89bdc5/test-report.json`:
+  `numTotalTests: 18`, `numPassedTests: 18`, `numFailedTests: 0`,
+  `numPendingTests: 0` — includes the anonymous/wrong-realm 401/403 checks,
+  both-direction owner isolation, cross-owner 404 anti-enumeration, the
+  405 read-only/SQL-unchanged check, the real maintenance round trip, all
+  three §3.1 `[DEFECT]` assertions (trips/cases empty, earnings zero), the
+  corrected §3.2 100-row-clamp pagination test, and the fictional-data
+  guardrail.
+- `host-acceptance-browser-a3ebf570748fee3372aab1cfce116e487d89bdc5/test-results/system-remediation-report.json`:
+  `stats.expected: 9`, `stats.skipped: 0`, `stats.unexpected: 0`,
+  `stats.flaky: 0` — includes owner isolation and identity-switch rendering,
+  tab navigation with real maintenance data and honest empty trips tab,
+  keyboard focus/Enter tab activation, mobile (390×844) and desktop
+  (1440×960) viewport rendering, the legitimate empty-owner state, the
+  missing-identity `fetch_failed` state, and the real-browser §3.2
+  reproduction at vehicle #201.
+- The two uploaded screenshots
+  (`host-acceptance-mobile-vehicle-list.png`,
+  `host-acceptance-desktop-vehicle-detail.png`) were opened directly: both
+  are real, populated FLP Host UI at the exact requested viewport
+  dimensions (confirmed via `file` on the PNGs), not blank or placeholder
+  pages.
 
 - Evidence artifacts (uploaded by every run, `if: always()`):
   `host-acceptance-api-<sha>`, `host-acceptance-browser-<sha>` — contain
@@ -375,18 +443,32 @@ result, and none can until `SR-HOST-BE-001`'s owners fix §3.3 and §3.4.
   `UatEvidenceRecorder`. For run `34497686598`: `run-status.json` records
   `START_API_OUTCOME: failure`, `HARNESS_OUTCOME: skipped`,
   `GATE_OUTCOME: failure`, `status: not_run` for `browser-acceptance`, and
-  the equivalent real-vitest-failure fields for `api-sql-acceptance`.
+  the equivalent real-vitest-failure fields for `api-sql-acceptance`. For run
+  `34544324681`, both jobs' `run-status.json` record `status: passed` with
+  every prior-stage outcome (`install`, `migrate`, `build`, `start`,
+  `harness`, `gate`) at `success`.
 
 ## 6. CI / merge status
 
 - Branch: `claude2/sr-host-fe-001-acceptance-runner`
+- Candidate SHA: `a3ebf570748fee3372aab1cfce116e487d89bdc5` (branch tip at
+  handoff time).
 - `INTEGRATION_STATUS`: `branch_pushed` — pushed, not merged. This task's own
-  workflow, tests, and doc are complete and correct (validated by three real
-  GitHub Actions runs, the last of which produced clean, honest failures with
-  no remaining harness bugs). It cannot reach a passing candidate run because
-  the product code it is testing (`HostViewModule`, owned by
-  `SR-HOST-BE-001`) currently cannot bootstrap at all — see §3.3/§3.4. Marked
-  `blocked` in `ai-status.json` pending that fix, not `done`.
+  workflow, tests, and doc are complete and passing: real run
+  [`34544324681`](https://github.com/ajoe734/drts-fleet-platform/actions/runs/34544324681)
+  (candidate `a3ebf5707`) produced `status: passed` on both
+  `api-sql-acceptance` (18/18) and `browser-acceptance` (9/9), zero skips in
+  either, with the product-defect boundary the same run's evidence
+  demonstrates recorded honestly in §3.1/§3.2. All three
+  `required_acceptance` gates (`host_actual_http_sql_owner_scope`,
+  `host_actual_browser_switching_states`,
+  `host_runtime_harness_and_integration_boundary`) have real, verified
+  evidence as of this run. What remains open is integration, not evidence:
+  this branch has not been merged to `dev`, has no PR yet, and this document
+  has not yet received independent review (§7). The module-level boundary in
+  §2.1 (no root `AppModule` registration of `HostViewModule`, no
+  `SR-WIRE-001` navigation shell, no physical-device verification) is
+  unchanged by this run and remains explicitly out of this task's scope.
 - This is a non-canonical support/verification task
   (`task_class: implementation`, `mutates_canonical: true` per its own
   record, but it does not touch `apps/api/src/` or
