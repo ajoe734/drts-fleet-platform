@@ -500,6 +500,43 @@ flaky: 0}`.
   task owns). It does not itself flip `SR-HOST-FE-001`'s status; per the
   independent-review audit, that requires the recorded owner/reviewer path
   for that task specifically.
+- **Narrow out-of-write-scope exception (`b44047aad`):** the PR-level `CI`
+  and `CI (integration trunk)` runs on candidate `afbfa1934` both failed
+  (repo-wide `CI` run
+  [`34545640352`](https://github.com/ajoe734/drts-fleet-platform/actions/runs/34545640352)
+  and `CI (integration trunk)` run
+  [`34545640266`](https://github.com/ajoe734/drts-fleet-platform/actions/runs/34545640266)
+  — see also the earlier failing pair `34545025667` /
+  `34545025633`). Root cause: `vitest.config.ts`'s `include` glob
+  (`tests/e2e/**/*.test.ts`) makes root `pnpm test:unit` — which trunk CI's
+  `unit` job runs — pick up
+  `tests/e2e/system-remediation/sr-host-fe-001/host-api-sql-acceptance.test.ts`
+  even though that test's own file-header comment states it must run only
+  in the dedicated `host-acceptance.yml` workflow against its migrated
+  GitHub-hosted Postgres. Trunk CI's unit job DB has no `core.*` schema
+  applied, so the test failed on seed with `relation "core.partners" does
+  not exist` (`tests/e2e/system-remediation/sr-host-fe-001/host-acceptance-seed.ts:71`).
+  This is not a skipped or weakened acceptance gate: `host-acceptance.yml`
+  is unaffected — it invokes the file directly via `pnpm exec vitest run
+  tests/e2e/.../host-api-sql-acceptance.test.ts` (line 136-137), not
+  through `test:unit` — and `tools/ci/test_host_acceptance_workflow.py`
+  continues to validate that workflow in CI. Fix, scoped to a single line
+  of `package.json`'s `test:unit` script: added
+  `--exclude tests/e2e/system-remediation/sr-host-fe-001/host-api-sql-acceptance.test.ts`
+  alongside the two existing `--exclude` flags for other DB-dependent
+  tests that already don't run under trunk `test:unit`
+  (`tests/integration/unattended-voice-postgres.integration.test.ts` and
+  `tests/integration/system-remediation/sr-leave-be-001/**`). `package.json`
+  is not one of this task's four declared `write_scopes`; this single-line,
+  single-file exception was explicitly authorized in the task's recorded
+  `next` guidance as the minimal correct fix for a genuine contract
+  contradiction (an un-migrated unit-test DB was calling a test that
+  documents it must never run there), not a scope expansion into product
+  code. Verified locally: `python3 tools/ci/test_host_acceptance_workflow.py`
+  passes 27/27 and `git diff --check` is clean on `b44047aad`. Still
+  required before merge: a green re-run of PR #1956's `CI` and
+  `CI (integration trunk)` on the new candidate SHA, plus `host-acceptance.yml`
+  on the same SHA, and independent review (§7).
 
 ## 7. Independent review
 
