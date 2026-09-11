@@ -7,6 +7,7 @@ export const IAM_ACTOR_TYPES = [
   "ops_user",
   "driver_user",
   "partner_api_key",
+  "partner_user",
   "referral_passenger",
 ] as const;
 
@@ -351,9 +352,9 @@ export const IAM_SCOPE_DEFINITIONS: readonly IamScopeDefinition[] = [
   },
   {
     scope: "maintenance:read",
-    allowedRealms: ["system", "platform", "ops"],
+    allowedRealms: ["system", "platform", "ops", "partner"],
     description: "Read maintenance operations data.",
-    resourceConstraints: [OBJECT_CONSTRAINT],
+    resourceConstraints: [PARTNER_CONSTRAINT, OBJECT_CONSTRAINT],
   },
   {
     scope: "maintenance:write",
@@ -363,11 +364,12 @@ export const IAM_SCOPE_DEFINITIONS: readonly IamScopeDefinition[] = [
   },
   {
     scope: "owned:read",
-    allowedRealms: ["system", "ops", "driver"],
+    allowedRealms: ["system", "ops", "driver", "partner"],
     description: "Read owned-mobility records within assignment bounds.",
     resourceConstraints: [
       TENANT_CONSTRAINT,
       DRIVER_CONSTRAINT,
+      PARTNER_CONSTRAINT,
       OBJECT_CONSTRAINT,
     ],
   },
@@ -419,9 +421,13 @@ export const IAM_SCOPE_DEFINITIONS: readonly IamScopeDefinition[] = [
   },
   {
     scope: "reports:read",
-    allowedRealms: ["system", "platform", "tenant", "ops"],
+    allowedRealms: ["system", "platform", "tenant", "ops", "partner"],
     description: "Read reporting jobs and generated artifacts.",
-    resourceConstraints: [TENANT_CONSTRAINT, OBJECT_CONSTRAINT],
+    resourceConstraints: [
+      TENANT_CONSTRAINT,
+      PARTNER_CONSTRAINT,
+      OBJECT_CONSTRAINT,
+    ],
   },
   {
     scope: "reports:write",
@@ -737,6 +743,21 @@ export const IAM_ACTOR_POLICY_DEFINITIONS: readonly IamActorPolicyDefinition[] =
         "partner:eligibility:read",
         "partner:eligibility:write",
       ],
+    },
+    {
+      // Host: an individual vehicle owner (`core.partners.partner_type =
+      // 'individual_owner'`) logging into the Fleet Partner Portal's
+      // restricted `/host/*` surface. A distinct actor from
+      // `partner_api_key` (fleet-admin service key, fleet-wide access):
+      // Host is resource-constrained to `vehicle.owner_partner_id ===
+      // identity.partnerId` and strictly read-only. Scopes mirror
+      // `HOST_SCOPES` in
+      // apps/fleet-partner-portal-web/app/host/lib/host-auth.server.ts.
+      actorType: "partner_user",
+      realm: "partner",
+      roleFamilies: ["partner"],
+      defaultRoles: ["partner_user"],
+      scopes: ["owned:read", "reports:read", "maintenance:read"],
     },
     {
       actorType: "referral_passenger",

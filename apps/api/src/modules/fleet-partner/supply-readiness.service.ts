@@ -14,6 +14,7 @@ import type {
 } from "@drts/contracts";
 
 import { ApiRequestError } from "../../common/api-envelope";
+import { AcademyService } from "../driver-academy/academy.service";
 import { RegulatoryRegistryService } from "../regulatory-registry/regulatory-registry.service";
 import { VehicleEligibilityService } from "../vehicle-eligibility/vehicle-eligibility.service";
 import { FleetPartnerService } from "./fleet-partner.service";
@@ -26,9 +27,7 @@ const READINESS_POLICY_VERSION = "phase1-delta-supply-readiness-2026-06-19";
 
 type ApprovedSubmissionArtifacts = {
   submission: SupplySubmissionRecord;
-  driverDraft:
-    | SupplySubmissionPersistenceState["driverDrafts"][number]
-    | null;
+  driverDraft: SupplySubmissionPersistenceState["driverDrafts"][number] | null;
   vehicleDraft:
     | SupplySubmissionPersistenceState["vehicleDrafts"][number]
     | null;
@@ -42,8 +41,14 @@ type PartnerReadinessContext = {
   partnerVehicleAffiliations: VehicleFleetAffiliationRecord[];
   driversById: Map<string, DriverRegistryRecord>;
   vehiclesById: Map<string, VehicleRegistryRecord>;
-  approvedDriverArtifactsByCanonicalId: Map<string, ApprovedSubmissionArtifacts>;
-  approvedVehicleArtifactsByCanonicalId: Map<string, ApprovedSubmissionArtifacts>;
+  approvedDriverArtifactsByCanonicalId: Map<
+    string,
+    ApprovedSubmissionArtifacts
+  >;
+  approvedVehicleArtifactsByCanonicalId: Map<
+    string,
+    ApprovedSubmissionArtifacts
+  >;
   scopedDriverIds: Set<string>;
   scopedVehicleIds: Set<string>;
 };
@@ -68,6 +73,9 @@ export class SupplyReadinessService {
     private readonly vehicleEligibilityService: VehicleEligibilityService,
     @Optional()
     private readonly supplySubmissionRepository?: SupplySubmissionRepository,
+    // Required Nest dependency; the optional TypeScript argument preserves
+    // older direct test construction without a global service locator.
+    private readonly academyService?: AcademyService,
   ) {}
 
   async listFleetPartnerReadiness(
@@ -75,9 +83,11 @@ export class SupplyReadinessService {
   ): Promise<SupplyReadinessRecord[]> {
     const context = await this.buildPartnerContext(fleetPartnerId);
 
-    const driverReadiness = [...context.scopedDriverIds]
-      .sort((left, right) => left.localeCompare(right))
-      .map((driverId) => this.evaluateDriverReadiness(driverId, context));
+    const driverReadiness = await Promise.all(
+      [...context.scopedDriverIds]
+        .sort((left, right) => left.localeCompare(right))
+        .map((driverId) => this.evaluateDriverReadiness(driverId, context)),
+    );
     const vehicleReadiness = [...context.scopedVehicleIds]
       .sort((left, right) => left.localeCompare(right))
       .map((vehicleId) => this.evaluateVehicleReadiness(vehicleId, context));
@@ -99,7 +109,7 @@ export class SupplyReadinessService {
       );
     }
 
-    return this.evaluateDriverReadiness(driverId, context);
+    return await this.evaluateDriverReadiness(driverId, context);
   }
 
   async getVehicleReadiness(
@@ -126,39 +136,43 @@ export class SupplyReadinessService {
     const driverId = reference.canonicalDriverId?.trim() || null;
     const vehicleId = reference.canonicalVehicleId?.trim() || null;
 
-    return {
-      driver:
-        driverId && context.scopedDriverIds.has(driverId)
-          ? this.evaluateDriverReadiness(driverId, context)
-          : null,
-      vehicle:
-        vehicleId && context.scopedVehicleIds.has(vehicleId)
-          ? this.evaluateVehicleReadiness(vehicleId, context)
-          : null,
-      pair:
-        driverId &&
-        vehicleId &&
-        context.driversById.has(driverId) &&
-        context.vehiclesById.has(vehicleId)
-          ? this.evaluatePairReadiness(driverId, vehicleId, context)
-          : null,
-    };
+    const driver =
+      driverId && context.scopedDriverIds.has(driverId)
+        ? await this.evaluateDriverReadiness(driverId, context)
+        : null;
+    const vehicle =
+      vehicleId && context.scopedVehicleIds.has(vehicleId)
+        ? this.evaluateVehicleReadiness(vehicleId, context)
+        : null;
+    const pair =
+      driverId &&
+      vehicleId &&
+      context.driversById.has(driverId) &&
+      context.vehiclesById.has(vehicleId)
+        ? await this.evaluatePairReadiness(driverId, vehicleId, context)
+        : null;
+
+    return { driver, vehicle, pair };
   }
 
   private async buildPartnerContext(
     fleetPartnerId: string,
   ): Promise<PartnerReadinessContext> {
     const evaluatedAt = new Date().toISOString();
-    const fleetPartner = this.fleetPartnerService.getFleetPartner(fleetPartnerId);
+    const fleetPartner =
+      this.fleetPartnerService.getFleetPartner(fleetPartnerId);
     const submissionState = await this.loadSubmissionState();
     const partnerDriverAffiliations = this.fleetPartnerService
       .listFleetPartnerDrivers(fleetPartnerId)
-      .filter((affiliation) => this.isAffiliationActive(affiliation, evaluatedAt));
-    const partnerVehicleAffiliations = submissionState.vehicleAffiliations.filter(
-      (affiliation) =>
-        affiliation.fleetPartnerId === fleetPartnerId &&
+      .filter((affiliation) =>
         this.isAffiliationActive(affiliation, evaluatedAt),
-    );
+      );
+    const partnerVehicleAffiliations =
+      submissionState.vehicleAffiliations.filter(
+        (affiliation) =>
+          affiliation.fleetPartnerId === fleetPartnerId &&
+          this.isAffiliationActive(affiliation, evaluatedAt),
+      );
     const approvedArtifacts = this.collectApprovedSubmissionArtifacts(
       submissionState,
       fleetPartnerId,
@@ -267,13 +281,19 @@ export class SupplyReadinessService {
         submission.canonicalDriverId &&
         !driverArtifactsByCanonicalId.has(submission.canonicalDriverId)
       ) {
-        driverArtifactsByCanonicalId.set(submission.canonicalDriverId, artifacts);
+        driverArtifactsByCanonicalId.set(
+          submission.canonicalDriverId,
+          artifacts,
+        );
       }
       if (
         submission.canonicalVehicleId &&
         !vehicleArtifactsByCanonicalId.has(submission.canonicalVehicleId)
       ) {
-        vehicleArtifactsByCanonicalId.set(submission.canonicalVehicleId, artifacts);
+        vehicleArtifactsByCanonicalId.set(
+          submission.canonicalVehicleId,
+          artifacts,
+        );
       }
     }
 
@@ -283,10 +303,10 @@ export class SupplyReadinessService {
     };
   }
 
-  private evaluateDriverReadiness(
+  private async evaluateDriverReadiness(
     driverId: string,
     context: PartnerReadinessContext,
-  ): SupplyReadinessRecord {
+  ): Promise<SupplyReadinessRecord> {
     const driver = context.driversById.get(driverId);
     if (!driver) {
       return this.buildRecord(
@@ -308,7 +328,12 @@ export class SupplyReadinessService {
       this.pushReason(reasonCodes, "MANUALLY_SUSPENDED");
     }
 
-    this.evaluateDriverCredentialReasons(driver, artifacts, context, reasonCodes);
+    this.evaluateDriverCredentialReasons(
+      driver,
+      artifacts,
+      context,
+      reasonCodes,
+    );
 
     if (!this.hasActiveDriverAffiliation(driverId, context)) {
       this.pushReason(reasonCodes, "DRIVER_AFFILIATION_MISSING");
@@ -316,8 +341,33 @@ export class SupplyReadinessService {
     if (!this.supportsAnyServiceBucket(driver.supportedServiceBuckets)) {
       this.pushReason(reasonCodes, "SERVICE_PRODUCT_NOT_SUPPORTED");
     }
+    if (await this.isDriverTrainingIncomplete(driverId)) {
+      this.pushReason(reasonCodes, "TRAINING_REQUIRED");
+    }
 
-    return this.buildRecord("driver", driverId, reasonCodes, context.evaluatedAt);
+    return this.buildRecord(
+      "driver",
+      driverId,
+      reasonCodes,
+      context.evaluatedAt,
+    );
+  }
+
+  // Reversible, per-request re-evaluation (no cached "on leave"/"untrained"
+  // flag persisted here) against driver-academy's own authority
+  // (AcademyService.listCourses -> userStatus derived from live attempts).
+  // Deliberately does not touch RegulatoryRegistryService's
+  // dispatchEligible/eligibilityBlockedReasons -- that is the AV/vehicle
+  // dispatch-exclusion condition and stays untouched by this readiness-only
+  // reason code.
+  private async isDriverTrainingIncomplete(driverId: string): Promise<boolean> {
+    if (!this.academyService) {
+      return false;
+    }
+    const courses = await this.academyService.listCourses(driverId);
+    return courses.some(
+      (course) => course.isRequired && course.userStatus !== "passed",
+    );
   }
 
   private evaluateVehicleReadiness(
@@ -361,7 +411,8 @@ export class SupplyReadinessService {
       this.pushReason(reasonCodes, "CONTRACT_INACTIVE");
     }
 
-    const insuranceLifecycle = vehicle.supplyLifecycle.insurance.lifecycleStatus;
+    const insuranceLifecycle =
+      vehicle.supplyLifecycle.insurance.lifecycleStatus;
     if (insuranceLifecycle === "missing" || insuranceLifecycle === "pending") {
       this.pushReason(reasonCodes, "INSURANCE_MISSING");
     } else if (insuranceLifecycle !== "active") {
@@ -381,14 +432,19 @@ export class SupplyReadinessService {
       this.pushReason(reasonCodes, "TRAINING_REQUIRED");
     }
 
-    return this.buildRecord("vehicle", vehicleId, reasonCodes, context.evaluatedAt);
+    return this.buildRecord(
+      "vehicle",
+      vehicleId,
+      reasonCodes,
+      context.evaluatedAt,
+    );
   }
 
-  private evaluatePairReadiness(
+  private async evaluatePairReadiness(
     driverId: string,
     vehicleId: string,
     context: PartnerReadinessContext,
-  ): SupplyReadinessRecord {
+  ): Promise<SupplyReadinessRecord> {
     const driver = context.driversById.get(driverId);
     const vehicle = context.vehiclesById.get(vehicleId);
     if (!driver || !vehicle) {
@@ -401,8 +457,11 @@ export class SupplyReadinessService {
     }
 
     const reasonCodes: SupplyReadinessReasonCode[] = [];
-    for (const reasonCode of this.evaluateDriverReadiness(driverId, context)
-      .reasonCodes) {
+    const driverEvaluation = await this.evaluateDriverReadiness(
+      driverId,
+      context,
+    );
+    for (const reasonCode of driverEvaluation.reasonCodes) {
       this.pushReason(reasonCodes, reasonCode);
     }
     for (const reasonCode of this.evaluateVehicleReadiness(vehicleId, context)
@@ -517,19 +576,27 @@ export class SupplyReadinessService {
   }
 
   private isDriverManuallySuspended(driver: DriverRegistryRecord) {
-    if (driver.lifecycleStatus === "suspended" || driver.lifecycleStatus === "retired") {
+    if (
+      driver.lifecycleStatus === "suspended" ||
+      driver.lifecycleStatus === "retired"
+    ) {
       return true;
     }
 
     return driver.eligibilityBlockedReasons.some((reason) =>
-      ["lifecycle_suspended", "lifecycle_retired", "work_state_suspended", "work_state_incident_hold"].includes(
-        reason,
-      ),
+      [
+        "lifecycle_suspended",
+        "lifecycle_retired",
+        "work_state_suspended",
+        "work_state_incident_hold",
+      ].includes(reason),
     );
   }
 
   private isVehicleManuallySuspended(vehicle: VehicleRegistryRecord) {
-    return vehicle.supplyLifecycle.dispatch.blockedReasons.includes("manual_hold");
+    return vehicle.supplyLifecycle.dispatch.blockedReasons.includes(
+      "manual_hold",
+    );
   }
 
   private supportsAnyServiceBucket(
@@ -539,9 +606,7 @@ export class SupplyReadinessService {
   }
 
   private isAffiliationActive(
-    affiliation:
-      | DriverFleetAffiliationRecord
-      | VehicleFleetAffiliationRecord,
+    affiliation: DriverFleetAffiliationRecord | VehicleFleetAffiliationRecord,
     evaluatedAt: string,
   ) {
     if ("status" in affiliation && affiliation.status !== "active") {
@@ -550,7 +615,10 @@ export class SupplyReadinessService {
     if (affiliation.effectiveFrom > evaluatedAt) {
       return false;
     }
-    if (affiliation.effectiveUntil && affiliation.effectiveUntil < evaluatedAt) {
+    if (
+      affiliation.effectiveUntil &&
+      affiliation.effectiveUntil < evaluatedAt
+    ) {
       return false;
     }
     return true;

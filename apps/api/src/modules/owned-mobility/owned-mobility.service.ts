@@ -658,9 +658,13 @@ export class OwnedMobilityService
     return this.driverTasks.filter((task) => task.orderId === orderId);
   }
 
-  listEligibleDispatchCandidatesForOrder(orderId: string): DispatchCandidate[] {
+  async listEligibleDispatchCandidatesForOrder(
+    orderId: string,
+  ): Promise<DispatchCandidate[]> {
     const order = this.requireOrder(orderId);
-    return this.listEligibleDispatchCandidates(order);
+    return this.excludePlatformPresenceBlockedCandidates(
+      this.listEligibleDispatchCandidates(order),
+    );
   }
 
   executeAutoDispatch(
@@ -9557,15 +9561,21 @@ export class OwnedMobilityService
           requestedAt: new Date().toISOString(),
         }),
       );
+      // This synchronous preliminary filter evaluates location/capability.
+      // Training and leave are read asynchronously from their authorities in
+      // both published candidate filtering and the final assignment recheck.
       if (
-        this.runtimeEligibilityEvaluator.assessAutonomous({
-          orderId: order.orderId,
-          dispatchJobId,
-          driverId,
-          vehicleId,
-          serviceProductCode: "taxi_realtime",
-          bookingRequirements: order.bookingRequirements,
-        }) !== "eligible"
+        this.runtimeEligibilityEvaluator.assessAutonomous(
+          {
+            orderId: order.orderId,
+            dispatchJobId,
+            driverId,
+            vehicleId,
+            serviceProductCode: "taxi_realtime",
+            bookingRequirements: order.bookingRequirements,
+          },
+          true,
+        ) !== "eligible"
       )
         throw new ApiRequestError(
           409,
@@ -9682,10 +9692,10 @@ export class OwnedMobilityService
     // cross-platform presence right before committing the assignment: it can
     // change between candidate listing and assignment just like the checks
     // above, and reuses the same "refresh and retry" contract.
-    if (!this.platformPresenceService) {
+    if (!this.platformPresenceService && !this.runtimeEligibilityEvaluator) {
       return;
     }
-    return this.assertDriverNotBlockedByPlatformPresence(
+    return this.assertCurrentDriverAvailability(
       order,
       dispatchJobId,
       vehicleId,
@@ -9693,14 +9703,32 @@ export class OwnedMobilityService
     );
   }
 
-  private async assertDriverNotBlockedByPlatformPresence(
+  private async assertCurrentDriverAvailability(
     order: OwnedOrderRecord,
     dispatchJobId: string,
     vehicleId: string,
     driverId: string,
   ): Promise<void> {
+    const driverReasons = await this.currentDriverRequirementBlocks(
+      driverId,
+      vehicleId,
+    );
+    if (driverReasons.length) {
+      throw new ApiRequestError(
+        HttpStatus.CONFLICT,
+        "ELIGIBILITY_CHANGED_BEFORE_ASSIGNMENT",
+        "Driver leave or training eligibility changed. Refresh candidates and retry.",
+        {
+          dispatchJobId,
+          orderId: order.orderId,
+          vehicleId,
+          driverId,
+          reasonCodes: driverReasons,
+        },
+      );
+    }
     const block =
-      await this.platformPresenceService!.findDispatchBlockingPresence(
+      await this.platformPresenceService?.findDispatchBlockingPresence(
         driverId,
       );
     if (!block) {
@@ -11495,17 +11523,44 @@ export class OwnedMobilityService
   private async excludePlatformPresenceBlockedCandidates(
     candidates: DispatchCandidate[],
   ): Promise<DispatchCandidate[]> {
-    if (!this.platformPresenceService || candidates.length === 0) {
-      return candidates;
-    }
+    if (candidates.length === 0) return candidates;
     const blocks = await Promise.all(
-      candidates.map((candidate) =>
-        this.platformPresenceService!.findDispatchBlockingPresence(
-          candidate.driverId,
-        ),
-      ),
+      candidates.map(async (candidate) => {
+        const [presence, driverReasons] = await Promise.all([
+          this.platformPresenceService?.findDispatchBlockingPresence(
+            candidate.driverId,
+          ),
+          this.currentDriverRequirementBlocks(
+            candidate.driverId,
+            candidate.vehicleId,
+          ),
+        ]);
+        return Boolean(presence) || driverReasons.length > 0;
+      }),
     );
+    // Applied after the scarcity fallback as well: neither fallback nor
+    // includeIneligible can offer a driver currently on leave or untrained.
     return candidates.filter((_candidate, index) => !blocks[index]);
+  }
+
+  private async currentDriverRequirementBlocks(
+    driverId: string,
+    vehicleId: string,
+  ): Promise<string[]> {
+    if (!this.runtimeEligibilityEvaluator) return [];
+    const current =
+      await this.runtimeEligibilityEvaluator.assessDriverRequirements(driverId);
+    const capability =
+      this.vehicleEligibilityService?.resolveRuntimeVehicleCapability(
+        vehicleId,
+      );
+    return [
+      ...(current.onLeave ? ["DRIVER_ON_LEAVE"] : []),
+      ...(current.trainingIncomplete ||
+      (capability?.trainingRequired && !current.trainingSatisfied)
+        ? ["DRIVER_TRAINING_INCOMPLETE"]
+        : []),
+    ];
   }
 
   private async listDispatchCandidatesWithEligibilityUnfiltered(

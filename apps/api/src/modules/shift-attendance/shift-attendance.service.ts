@@ -9,6 +9,7 @@ import type {
 } from "@drts/contracts";
 
 import { ApiRequestError } from "../../common/api-envelope";
+import { DriverLeaveService } from "../driver-leave/driver-leave.service";
 import { AuditNotificationService } from "../audit-notification/audit-notification.service";
 import { RegulatoryRegistryService } from "../regulatory-registry/regulatory-registry.service";
 import { ShiftAttendanceRepository } from "./shift-attendance.repository";
@@ -25,6 +26,8 @@ export class ShiftAttendanceService implements OnModuleInit {
     @Optional() private readonly repository?: ShiftAttendanceRepository,
     @Optional()
     private readonly regulatoryRegistryService?: RegulatoryRegistryService,
+    // Required by Nest; optional only for existing direct unit construction.
+    private readonly driverLeaveService?: DriverLeaveService,
   ) {}
 
   async onModuleInit() {
@@ -43,8 +46,9 @@ export class ShiftAttendanceService implements OnModuleInit {
     }
   }
 
-  clockIn(command: ClockInCommand, requestId?: string) {
+  async clockIn(command: ClockInCommand, requestId?: string) {
     this.assertNonBlank(command.driverId, "driverId");
+    await this.driverLeaveService?.assertDriverCanClockIn(command.driverId);
 
     // Check for existing active shift
     const activeShift = this.shifts.find(

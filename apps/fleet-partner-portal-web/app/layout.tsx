@@ -1,7 +1,8 @@
 import type { Metadata } from "next";
 import type { ReactNode } from "react";
+import { headers } from "next/headers";
 import { FleetPortalShell } from "@/components/fleet-portal-shell";
-import { buildFleetPortalNav } from "@/lib/fleet-portal-nav";
+import { buildFleetPortalNav, isHostPortalPath } from "@/lib/fleet-portal-nav";
 import { loadNavBadges } from "@/lib/fleet-portal-data.server";
 import { LanguageProvider } from "@/lib/i18n";
 import { RuntimeConfigScript } from "@/lib/runtime-config";
@@ -25,8 +26,16 @@ export default async function RootLayout({
   children: ReactNode;
 }) {
   const locale = await getServerLocale();
-  const badges = await loadNavBadges();
-  const fleetNav = buildFleetPortalNav(locale, badges);
+  const requestHeaders = await headers();
+  const hostOnly =
+    isHostPortalPath(requestHeaders.get("x-drts-fleet-pathname") ?? "") ||
+    Boolean(
+      requestHeaders.get("x-host-partner-id")?.trim() ||
+      process.env.DRTS_HOST_PARTNER_ID?.trim(),
+    );
+  const fleetNav = hostOnly
+    ? []
+    : buildFleetPortalNav(locale, await loadNavBadges());
   const env = normalizeServerRuntimeEnv(process.env.DRTS_ENV);
 
   return (
@@ -36,6 +45,7 @@ export default async function RootLayout({
         <LanguageProvider defaultLocale={locale}>
           <FleetPortalShell
             fleetNav={fleetNav}
+            hostOnly={hostOnly}
             fleetBrandLabel={t("app.name", locale)}
             fleetBrandSubLabel={t("app.sub", locale)}
             fleetBrandMark={t("app.brandMark", locale)}

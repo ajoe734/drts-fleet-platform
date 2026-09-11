@@ -239,7 +239,18 @@ function createOwnedMobilityService(options?: {
     vehicleEligibilityService,
     serviceProductService,
     undefined,
-    options?.runtimeEligibilityEvaluator as never,
+    (options?.runtimeEligibilityEvaluator
+      ? {
+          // These pre-existing decoration fixtures model available, trained
+          // drivers; SR-WIRE-001 tests exercise blocked/recovered authorities.
+          assessDriverRequirements: vi.fn().mockResolvedValue({
+            onLeave: false,
+            trainingIncomplete: false,
+            trainingSatisfied: true,
+          }),
+          ...options.runtimeEligibilityEvaluator,
+        }
+      : undefined) as never,
     undefined,
     undefined,
     options?.serviceAreaService,

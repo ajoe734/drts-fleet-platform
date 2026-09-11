@@ -10,19 +10,25 @@ import {
   type CanvasTableColumn,
   type CanvasTheme,
 } from "@drts/ui-web";
-import { FX_OPS_SHIFT_BOARD, type OpsShiftBoardRow } from "./leave-types";
+import { type OpsShiftBoardRow } from "./leave-types";
 import { LEAVE_OPS_COPY, tLeave } from "./translations";
 
 export interface LeaveShiftImpactViewProps {
-  board?: OpsShiftBoardRow[];
+  board?: Array<
+    Omit<OpsShiftBoardRow, "elig"> & {
+      elig: OpsShiftBoardRow["elig"] | "unknown";
+    }
+  >;
   theme: CanvasTheme;
 }
 
 export function LeaveShiftImpactView({
-  board = FX_OPS_SHIFT_BOARD,
+  board = [],
   theme,
 }: LeaveShiftImpactViewProps) {
-  const columns: CanvasTableColumn<OpsShiftBoardRow>[] = [
+  const columns: CanvasTableColumn<
+    NonNullable<LeaveShiftImpactViewProps["board"]>[number]
+  >[] = [
     {
       h: "班次 ID",
       w: 120,
@@ -42,7 +48,7 @@ export function LeaveShiftImpactView({
       ),
     },
     {
-      h: "時段",
+      h: LEAVE_OPS_COPY.leavePeriod,
       w: 200,
       r: (r) => r.zh,
     },
@@ -78,7 +84,11 @@ export function LeaveShiftImpactView({
       h: "派單資格",
       w: 130,
       r: (r) =>
-        r.elig === "ineligible" ? (
+        r.elig === "unknown" ? (
+          <Pill theme={theme} tone="neutral">
+            {LEAVE_OPS_COPY.eligibilityNotEvaluated}
+          </Pill>
+        ) : r.elig === "ineligible" ? (
           <Pill dot theme={theme} tone="danger">
             {LEAVE_OPS_COPY.ineligibleStatus}
           </Pill>

@@ -9,6 +9,7 @@ import type {
   PlatformPresenceSummary,
 } from "@drts/contracts";
 import { PLATFORM_CODE_REGISTRY } from "@drts/contracts";
+import { DriverLeaveService } from "../driver-leave/driver-leave.service";
 import { ForwarderService } from "../forwarder/forwarder.service";
 import { PlatformPresenceRepository } from "./platform-presence.repository";
 
@@ -32,18 +33,37 @@ export class PlatformPresenceService {
   constructor(
     @Optional() private readonly repo?: PlatformPresenceRepository,
     @Optional() private readonly forwarderService?: ForwarderService,
+    // Nest must resolve the leave authority in the application graph.
+    private readonly driverLeaveService?: DriverLeaveService,
   ) {}
 
   private dbEnabled(): boolean {
     return this.repo?.isEnabled() ?? false;
   }
 
-  async listForDriver(driverId: string): Promise<PlatformPresenceRecord[]> {
-    if (this.dbEnabled()) {
-      return this.repo!.listByDriver(driverId);
-    }
+  private async listStoredForDriver(
+    driverId: string,
+  ): Promise<PlatformPresenceRecord[]> {
     const map = this.memory.get(driverId);
-    return map ? Array.from(map.values()) : [];
+    const records = this.dbEnabled()
+      ? await this.repo!.listByDriver(driverId)
+      : map
+        ? Array.from(map.values())
+        : [];
+    return records;
+  }
+
+  async listForDriver(driverId: string): Promise<PlatformPresenceRecord[]> {
+    const records = await this.listStoredForDriver(driverId);
+    const onLeave = await this.driverLeaveService?.isDriverOnLeave(driverId);
+    // Read-time overlay preserves the platform's own eligibility and restores
+    // it when leave ends or is cancelled, without writing a sticky flag.
+    return onLeave
+      ? records.map((record) => ({
+          ...record,
+          eligibility: "ineligible" as const,
+        }))
+      : records;
   }
 
   private getMemoryBucket(
@@ -70,7 +90,8 @@ export class PlatformPresenceService {
     platformCode: PlatformCode,
     tokenExpiresAt?: string | null,
   ): Promise<PlatformPresenceRecord> {
-    const existing = (await this.listForDriver(driverId)).find(
+    await this.driverLeaveService?.assertDriverCanGoOnline(driverId);
+    const existing = (await this.listStoredForDriver(driverId)).find(
       (r) => r.platformCode === platformCode,
     );
 
@@ -102,7 +123,7 @@ export class PlatformPresenceService {
     driverId: string,
     platformCode: PlatformCode,
   ): Promise<PlatformPresenceRecord> {
-    const existing = (await this.listForDriver(driverId)).find(
+    const existing = (await this.listStoredForDriver(driverId)).find(
       (r) => r.platformCode === platformCode,
     );
 
@@ -138,7 +159,7 @@ export class PlatformPresenceService {
     driverId: string,
     platformCode: PlatformCode,
   ): Promise<PlatformPresenceRecord> {
-    const existing = (await this.listForDriver(driverId)).find(
+    const existing = (await this.listStoredForDriver(driverId)).find(
       (r) => r.platformCode === platformCode,
     );
 
@@ -173,7 +194,7 @@ export class PlatformPresenceService {
     driverId: string,
     platformCode: PlatformCode,
   ): Promise<PlatformPresenceRecord | null> {
-    const existing = (await this.listForDriver(driverId)).find(
+    const existing = (await this.listStoredForDriver(driverId)).find(
       (r) => r.platformCode === platformCode,
     );
     if (!existing) {
