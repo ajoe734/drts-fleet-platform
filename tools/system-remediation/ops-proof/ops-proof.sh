@@ -45,7 +45,7 @@ done
 
 [[ -n "$command_name" && -n "$output" ]] || { usage >&2; exit 2; }
 mkdir -p "$(dirname "$output")"
-base_sha="$(git rev-parse origin/dev 2>/dev/null || git rev-parse HEAD)"
+base_sha="$(git rev-parse origin/dev 2>/dev/null)" || base_sha="$(git rev-parse HEAD)"
 candidate_sha="$(git rev-parse HEAD)"
 now="$(date --utc +%Y-%m-%dT%H:%M:%SZ)"
 
