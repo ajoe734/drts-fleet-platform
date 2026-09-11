@@ -155,6 +155,25 @@ its page wrapper). `EnterpriseBookingDetail` was given an optional `tenantId`
 prop so a future task can close this by editing only the page wrapper. Not
 claiming this as done; flagging for supervisor scope follow-up.
 
+**This gap is no longer only theoretical.** PR #1984's real browser-acceptance
+run on candidate `cbb985688d774b2b179d27baf6e267b0aa074356`
+(`gh run view 34579973654`) proves it: the seed script creates a fresh
+random-UUID tenant (never `10000000-0000-0000-0000-000000000201`), so
+`/bookings/{id}` always resolves the wrong tenant context in that real
+environment, and both scenarios that visit `/bookings/{bookingId}` directly
+fail — `enterprise-booking-detail-id` never becomes visible for the real
+seeded booking, and `enterprise-booking-not-found` never becomes visible for
+the genuinely-missing one (4/6 scenarios still passed: identity via
+home/trip, driver/support contact actions, help page actions, and the
+zero-booking empty state, none of which hit this route). Closing
+`required_acceptance` item `enterprise_booking_identity_empty_and_error_ui`
+therefore requires `apps/enterprise-dispatch-web/app/bookings/[bookingId]/page.tsx`
+to be added to this task's `write_scopes` so it can get the same
+`verifyEnterpriseTenantSession` + `tenantId` prop pattern as
+`app/bookings/page.tsx` (mirrors the exact fix already applied to `app/page.tsx`
+and `app/trip/page.tsx` in this same task). Not editing it without that
+authorization.
+
 ## Local verification
 
 All checks below ran fresh in this session, inside this isolated worktree,
@@ -290,20 +309,33 @@ prove), following `SR-ENTERPRISE-SEARCH-001`'s
 
 ## Explicitly not done (do not treat as complete)
 
-- **This exact candidate SHA has not yet run green in GitHub Actions.** The
-  prior candidate (`ebe1b6428575`) did run for real on GitHub-hosted CI (see
-  "CI failure found and fixed" above) and failed on a genuine seed-script
-  bug, which is fixed in this commit. The fix has not yet been re-verified
-  by a real CI run — that run happens automatically on push to
-  `claude/sr-enterprise-data-001-recovery-20260911` / PR #1984.
-  `required_acceptance` items `enterprise_booking_identity_empty_and_error_ui`
-  and `enterprise_authorized_driver_and_support_contact_actions` are not
-  satisfied until that run is green and its `run-status.json` /
-  `system-remediation-report.json` artifacts are recorded as acceptance
-  evidence — do not record acceptance evidence from this doc alone.
+- **This candidate has not run green in GitHub Actions.** Candidate
+  `cbb985688d774b2b179d27baf6e267b0aa074356`'s real browser-acceptance run
+  (`gh run view 34579973654`) got past the seed step (the FK bug is fixed)
+  and 4 of 6 scenarios passed for real over real HTTP/Postgres/Chromium:
+  list→home→trip identity via the dashboard summary, the honest
+  disabled-driver/real-support-contact trip actions, the help-page tel/mailto
+  actions, and the zero-booking empty state. The remaining 2 scenarios
+  (booking-detail identity for a real booking; honest not-found for a missing
+  one) fail because of the pre-existing, already-documented
+  "booking-detail direct-link tenant scoping" gap above — not a regression
+  from this pass, but a real, CI-proven blocker for
+  `required_acceptance` item `enterprise_booking_identity_empty_and_error_ui`.
+  Also blocking: the repo-wide `tools/ci/check_test_coverage.py` gate fails
+  because `tools/ci/test_enterprise_data_acceptance_workflow.py` was never
+  wired into `.github/workflows/ci.yml` / `ci-integ.yml`'s explicit
+  `python3 -m unittest tools/ci/test_X.py` step list (see "CI failure found
+  and fixed" — that section covers the seed-script bug this doc's own commit
+  fixed; this test-coverage gate is a separate, still-open failure). Neither
+  fix can be made from this task's current `write_scopes`; both are recorded
+  as explicit scope requests in the task's machine-truth `progress` history.
+  Until both are authorized, applied, and this candidate SHA (or its
+  successor) runs fully green, do not record acceptance evidence from this
+  doc alone.
 - Driver contact remains honestly unavailable (see above) — not full
   acceptance for that half of `enterprise_authorized_driver_and_support_contact_actions`.
-- The booking-detail direct-link tenant-session gap (see above) is not fixed.
+- The booking-detail direct-link tenant-session gap (see above) is not fixed;
+  it is now the proven root cause of 2/6 real acceptance scenario failures.
 - No physical device / production traffic verification of any kind.
 - Owner does not self-approve: independent reviewer, this exact candidate's
   CI, and merge to `dev` are still required before `done`.
