@@ -154,9 +154,30 @@ was started (per this task's VM restriction).
 | `git diff --check` | exit 0 |
 | `pnpm --filter @drts/enterprise-dispatch-web typecheck` (`tsc --noEmit`) | exit 0 |
 | `pnpm exec vitest run tests/unit/system-remediation/sr-enterprise-data-001/` | 13 passed (enterprise-trip-status.test.ts) |
-| `pnpm --filter @drts/enterprise-dispatch-web test` (full app vitest) | 30 passed, 1 pre-existing failure (`tests/unit/enterprise-booking-lifecycle.test.ts`, `ApiClient.listTenantBookings` / `paged.items is not iterable`); reproduced identically on the unmodified base commit before this task's changes, confirmed pre-existing and unrelated to this task's write_scopes |
+| `pnpm --filter @drts/enterprise-dispatch-web test` (full app vitest) | 30 passed, 1 pre-existing failure (`apps/enterprise-dispatch-web/tests/unit/enterprise-booking-lifecycle.test.ts`, `ApiClient.listTenantBookings` / `paged.items is not iterable`); reproduced identically on the unmodified base commit before this task's changes, confirmed pre-existing and unrelated to this task's write_scopes |
 | `pnpm --filter @drts/enterprise-dispatch-web lint` (`eslint . --max-warnings=0`) | exit 0 |
 | Locale key-parity check (`en` vs `zh` in `lib/translations.ts`) | 574/574 keys match, no orphans either side |
+
+## Follow-up: candidate CI fix (this doc only)
+
+PR #1981's first CI run on `a3800a45b6f1` failed the "Canonical consistency"
+check (`python3 tools/ci/git/check_canonical_consistency.py --ci`): this
+document's `cited-paths` check flagged three backtick-wrapped paths that do
+not exist verbatim in the tree —
+*tests/unit/enterprise-booking-lifecycle.test.ts* (missing the
+`apps/enterprise-dispatch-web/` prefix; the file exists at
+`apps/enterprise-dispatch-web/tests/unit/enterprise-booking-lifecycle.test.ts`,
+now corrected above) and *.github/workflows/enterprise-data-acceptance.yml* /
+*tools/ci/test_enterprise_data_acceptance_workflow.py* (genuinely not added
+in this pass, per "Explicitly not done" below; switched from backtick to
+italic so the checker's existence gate — correctly — does not read them as a
+claim that they exist). No product code changed in this follow-up; re-run
+locally with `python3 tools/ci/git/check_canonical_consistency.py --ci --base
+origin/dev --head HEAD`, output `[consistency] OK` (0 findings across all four
+sub-checks). All other PR #1981 checks (candidate, e2e, ci-integ, lint,
+typecheck, unit, i18n guard, BFF-only imports, commit trailers, smoke
+acceptance, product smoke acceptance) were already passing before this
+follow-up and are unaffected by it.
 
 ## Explicitly not done (do not treat as complete)
 
@@ -166,8 +187,8 @@ was started (per this task's VM restriction).
   HTTP/browser evidence (same pattern as `SR-ENTERPRISE-SEARCH-001`'s
   `.github/workflows/enterprise-search-acceptance.yml`) before this task can
   be marked `done`; this recovery did not add
-  `.github/workflows/enterprise-data-acceptance.yml` or
-  `tools/ci/test_enterprise_data_acceptance_workflow.py` (both are in
+  *.github/workflows/enterprise-data-acceptance.yml* or
+  *tools/ci/test_enterprise_data_acceptance_workflow.py* (both are in
   `write_scopes` but were not reached in this pass — remaining work, not a
   silent scope cut).
 - Driver contact remains honestly unavailable (see above) — not full
