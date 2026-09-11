@@ -196,12 +196,24 @@ describe.skipIf(!isHostedAcceptanceConfigured)(
       ]);
       expect(closedWithinBudget).toBe(true);
 
-      await new Promise<void>((resolve) => setTimeout(resolve, 100));
-      const connectionCount = await new Promise<number>((resolve, reject) => {
-        server.getConnections((error, count) =>
-          error ? reject(error) : resolve(count),
-        );
-      });
+      // The server's HTTP-level "close" event (asserted above) can fire
+      // slightly before the underlying TCP socket finishes its own teardown
+      // and is dropped from the server's connection count -- the two are
+      // distinct events, not a single atomic step. Poll instead of a single
+      // fixed-delay check so this doesn't flake on a loaded/virtualized
+      // runner while still failing if the socket never actually closes.
+      const getConnectionCount = () =>
+        new Promise<number>((resolve, reject) => {
+          server.getConnections((error, count) =>
+            error ? reject(error) : resolve(count),
+          );
+        });
+      const connectionCloseDeadline = Date.now() + 5_000;
+      let connectionCount = await getConnectionCount();
+      while (connectionCount !== 0 && Date.now() < connectionCloseDeadline) {
+        await new Promise<void>((resolve) => setTimeout(resolve, 50));
+        connectionCount = await getConnectionCount();
+      }
       expect(connectionCount).toBe(0);
 
       (evidence.cases as Record<string, unknown>).boundedTimeout = {
