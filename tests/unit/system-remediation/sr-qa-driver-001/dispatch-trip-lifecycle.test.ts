@@ -271,6 +271,8 @@ describe("SR-QA-DRIVER-001 C054: trip state machine (illegal jumps, idempotent r
     await expect(
       service.completeDriverTask(assignment.taskId, {
         completedAt: "2026-05-01T09:06:00.000Z",
+        actualDistanceKm: 12.4,
+        actualDurationSec: 1200,
         proof: { photos: [SAMPLE_PROOF_PHOTO] },
       }),
     ).rejects.toMatchObject({ code: "TASK_NOT_ACTIVE" });
@@ -323,6 +325,8 @@ describe("SR-QA-DRIVER-001 C055: completion proof (missing-photo gate, signoff)"
     await expect(
       service.completeDriverTask(assignment.taskId, {
         completedAt: "2026-05-01T09:45:00.000Z",
+        actualDistanceKm: 12.4,
+        actualDurationSec: 1200,
         proof: { photos: [SAMPLE_PROOF_PHOTO] }, // only 1 of the required 2
       }),
     ).rejects.toMatchObject({
@@ -341,6 +345,8 @@ describe("SR-QA-DRIVER-001 C055: completion proof (missing-photo gate, signoff)"
     // proof_pending must succeed (this transition IS in DRIVER_TASK_TRANSITIONS).
     const completed = await service.completeDriverTask(assignment.taskId, {
       completedAt: "2026-05-01T09:50:00.000Z",
+      actualDistanceKm: 12.4,
+      actualDurationSec: 1200,
       proof: { photos: [SAMPLE_PROOF_PHOTO, SAMPLE_PROOF_PHOTO] },
     });
     expect(completed.status).toBe("completed");
@@ -367,6 +373,8 @@ describe("SR-QA-DRIVER-001 C055: completion proof (missing-photo gate, signoff)"
     await expect(
       service.completeDriverTask(assignment.taskId, {
         completedAt: "2026-05-01T09:45:00.000Z",
+        actualDistanceKm: 12.4,
+        actualDurationSec: 1200,
         proof: { photos: ["not-a-valid-base64-payload!!"] },
       }),
     ).rejects.toBeInstanceOf(ApiRequestError);
