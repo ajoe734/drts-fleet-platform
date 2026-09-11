@@ -87,6 +87,7 @@ jobs:
           python3 -m unittest tools/ci/test_booking_search_acceptance_workflow.py
           python3 -m unittest tools/ci/test_host_acceptance_workflow.py
           python3 -m unittest tools/ci/test_enterprise_search_acceptance_workflow.py
+          python3 -m unittest tools/ci/test_ops_proof_acceptance_workflow.py
       - name: Verify every test file is on a path CI runs
         run: python3 tools/ci/check_test_coverage.py
       - id: filter

@@ -67,6 +67,79 @@ const FX_REIMBURSE = [
   { id: 'rb_2026_04_008', scope: 'forwarded:SRX', amount: 'NT$ 540,200', state: 'reconciled', submitter: '張薇', submittedAt: '2026-05-08 11:00', updated: '2026-05-15 16:00' },
 ];
 
+// ─────────────────────────────────────────────────────────────────────────────
+// 13.1 Remittance proof — upload/progress/error/retry, pending scan, rejection,
+// server-confirmed metadata, authorized readback (Q-SR-PROOF-001)
+// ─────────────────────────────────────────────────────────────────────────────
+const FX_REIMBURSE_PROOF_SUMMARY = {
+  rb_2026_05_001: 'pending_scan',
+  rb_2026_05_002: 'confirmed',
+  rb_2026_05_003: 'confirmed',
+  rb_2026_05_004: 'not_uploaded',
+  rb_2026_04_007: 'confirmed',
+  rb_2026_04_008: 'confirmed',
+};
+const PROOF_SUMMARY_TONE = { not_uploaded: 'neutral', pending_scan: 'warn', rejected: 'danger', confirmed: 'success' };
+const PROOF_SUMMARY_LABEL = { not_uploaded: '未上傳', pending_scan: '掃描中', rejected: '已拒絕', confirmed: '已確認' };
+
+// Upload attempt history for rb_2026_05_001 — each row is a distinct server-reported state.
+const FX_PROOF_ATTEMPTS = [
+  { id: 'pf_v1', file: 'remit_ctbc_0524_draft.pdf', size: '—', state: 'upload_failed', scan: 'not_started', ownership: 'n/a', uploadedBy: '張薇', uploadedAt: '2026-05-24 10:58', serverNote: 'UPLOAD_FAILED · 連線於 62% 中斷，可重試' },
+  { id: 'pf_v2', file: 'remit_ctbc_0525_v1.pdf', size: '842 KB', state: 'rejected', scan: 'scan_flagged', ownership: 'unverified', uploadedBy: '張薇', uploadedAt: '2026-05-24 11:10', serverNote: 'REJECTED · 浮水印比對失敗，判定非銀行原始憑證' },
+  { id: 'pf_v3', file: 'remit_ctbc_0525_v2.pdf', size: '910 KB', state: 'uploading', pct: 46, scan: 'not_started', ownership: 'pending', uploadedBy: '張薇', uploadedAt: '2026-05-25 09:12', serverNote: null },
+  { id: 'pf_v4', file: 'remit_ctbc_0525_v3.pdf', size: '926 KB', state: 'pending_scan', scan: 'scanning', ownership: 'pending', uploadedBy: '張薇', uploadedAt: '2026-05-25 09:40', serverNote: null },
+];
+// Confirmed proof used to gate mark-paid — server-confirmed metadata, not a free-text proof ID.
+const FX_PROOF_CONFIRMED = {
+  id: 'pf_v5', file: 'remit_ctbc_0525_final.pdf', size: '918 KB', mime: 'application/pdf',
+  state: 'confirmed', scan: 'passed', ownership: 'verified',
+  batchId: 'rb_2026_05_001', driverOrBatchOwner: 'partner:CTBC', hash: 'sha256:9f2a1c…7c31e0',
+  uploadedBy: '張薇', uploadedAt: '2026-05-25 10:02', confirmedAt: '2026-05-25 10:06',
+  serverNote: 'CONFIRMED · scan 通過、批次歸屬核對一致，server 已產生 proofId',
+};
+const FX_PROOF_READBACK = { state: 'expired', authorizedAt: '2026-05-25 10:06', expiresAt: '2026-05-25 10:21', issuedTo: '林宜君 (pa_super_admin)' };
+
+const PROOF_STATE_TONE = { uploading: 'info', upload_failed: 'danger', pending_scan: 'warn', rejected: 'danger', confirmed: 'success' };
+const PROOF_STATE_LABEL = { uploading: '上傳中', upload_failed: '上傳失敗', pending_scan: '掃描中', rejected: '已拒絕', confirmed: '已確認' };
+
+function ProofAttemptRow({ theme: th, p }) {
+  return (
+    <div style={{ padding: '10px 0', borderBottom: '1px solid ' + th.border }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+        <span style={{ flex: 1, minWidth: 0, fontFamily: SHELL_MONO, fontSize: 12, color: th.text, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{p.file}</span>
+        <span style={{ fontSize: 10.5, color: th.textDim, flexShrink: 0 }}>{p.size}</span>
+        <Pill theme={th} tone={PROOF_STATE_TONE[p.state]} dot>{PROOF_STATE_LABEL[p.state]}</Pill>
+        {p.state === 'upload_failed' && (
+          <ActionButton theme={th} size="xs" descriptor={{ action: 'retry_upload', enabled: true, riskLevel: 'low' }} icon="refresh" label="重試" en="retry" />
+        )}
+      </div>
+      {p.state === 'uploading' && (
+        <div style={{ marginTop: 6, height: 4, borderRadius: 2, background: th.surfaceLo, overflow: 'hidden' }}>
+          <div style={{ width: p.pct + '%', height: '100%', background: th.info }} />
+        </div>
+      )}
+      <div style={{ marginTop: 4, fontSize: 11, color: th.textMuted, display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+        <span>scan: <b style={{ color: th.text, fontWeight: 600 }}>{p.scan}</b></span>
+        <span>ownership: <b style={{ color: th.text, fontWeight: 600 }}>{p.ownership}</b></span>
+        <span>{p.uploadedBy} · {p.uploadedAt}</span>
+      </div>
+      {p.serverNote && <div style={{ marginTop: 4, fontSize: 11, color: th.danger }}>{p.serverNote}</div>}
+    </div>
+  );
+}
+
+function GateRow({ theme: th, ok, label, sub }) {
+  return (
+    <div style={{ display: 'flex', alignItems: 'flex-start', gap: 8 }}>
+      <MgmtIcon name={ok ? 'check' : 'x'} size={14} style={{ color: ok ? th.success : th.danger, marginTop: 2, flexShrink: 0 }} />
+      <div>
+        <div style={{ fontSize: 12.5, color: th.text, fontWeight: 600 }}>{label}</div>
+        {sub && <div style={{ fontSize: 11, color: th.textMuted, marginTop: 1 }}>{sub}</div>}
+      </div>
+    </div>
+  );
+}
+
 function PA_Reimbursements({ theme: th }) {
   return (
     <Shell theme={th} nav={PA_NAV} active="reimburse"
@@ -90,6 +163,7 @@ function PA_Reimbursements({ theme: th }) {
             { h: 'SCOPE', k: 'scope', w: 180, mono: true },
             { h: 'AMOUNT', k: 'amount', w: 160, mono: true },
             { h: 'STATE', w: 170, r: r => <Pill theme={th} tone={r.state === 'paid' || r.state === 'reconciled' ? 'success' : r.state === 'pending_approval' ? 'warn' : r.state === 'draft' ? 'neutral' : 'info'} dot>{r.state}</Pill> },
+            { h: 'PROOF', w: 140, r: r => <Pill theme={th} tone={PROOF_SUMMARY_TONE[FX_REIMBURSE_PROOF_SUMMARY[r.id]] || 'neutral'} dot>{PROOF_SUMMARY_LABEL[FX_REIMBURSE_PROOF_SUMMARY[r.id]] || '未上傳'}</Pill> },
             { h: 'SUBMITTER', k: 'submitter', w: 100 },
             { h: 'SUBMITTED', k: 'submittedAt', mono: true, w: 150 },
             { h: 'UPDATED', k: 'updated', mono: true, w: 160 },
@@ -107,6 +181,10 @@ function PA_ReimbursementDetail({ theme: th }) {
   const b = FX_REIMBURSE[0]; // rb_2026_05_001 · pending_approval
   const states = ['draft', 'pending_approval', 'approved', 'exported', 'paid', 'reconciled'];
   const currentIdx = states.indexOf(b.state);
+  const batchApproved = ['approved', 'exported', 'paid', 'reconciled'].includes(b.state);
+  const proof = FX_PROOF_CONFIRMED;
+  const proofReady = proof.state === 'confirmed' && proof.scan === 'passed' && proof.ownership === 'verified';
+  const markPaidReasonCode = !batchApproved ? 'batch_not_approved' : !proofReady ? 'proof_not_confirmed' : undefined;
   return (
     <Shell theme={th} nav={PA_NAV} active="reimburse"
       breadcrumb={['代墊批次', b.id]} env="production" actor={PA_ACTOR} health={PA_HEALTH}
@@ -144,6 +222,44 @@ function PA_ReimbursementDetail({ theme: th }) {
             ]} />
           </Card>
         </div>
+
+        <Card theme={th} title="匯款證明 · Remittance proof" subtitle="upload → pending_scan → confirmed / rejected · 拒絕空值／偽造／跨批次歸屬 (Q-SR-PROOF-001)">
+          {FX_PROOF_ATTEMPTS.map(p => <ProofAttemptRow key={p.id} theme={th} p={p} />)}
+          <div style={{ padding: '10px 0' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+              <span style={{ flex: 1, minWidth: 0, fontFamily: SHELL_MONO, fontSize: 12, color: th.text, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{proof.file}</span>
+              <span style={{ fontSize: 10.5, color: th.textDim, flexShrink: 0 }}>{proof.size}</span>
+              <Pill theme={th} tone="success" dot>已確認</Pill>
+              <ActionButton theme={th} size="xs" descriptor={{ action: 'view_proof', enabled: FX_PROOF_READBACK.state === 'authorized', disabledReasonCode: FX_PROOF_READBACK.state !== 'authorized' ? 'readback_expired' : undefined, riskLevel: 'medium' }} icon="eye" label="檢視" en="view" />
+            </div>
+            <div style={{ marginTop: 4, fontSize: 11, color: th.textMuted, display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+              <span>scan: <b style={{ color: th.text, fontWeight: 600 }}>{proof.scan}</b></span>
+              <span>ownership: <b style={{ color: th.text, fontWeight: 600 }}>{proof.ownership}</b></span>
+              <span>batch: <b style={{ color: th.text, fontWeight: 600 }}>{proof.batchId}</b></span>
+              <span>hash: <b style={{ color: th.text, fontWeight: 600 }}>{proof.hash}</b></span>
+            </div>
+            <div style={{ marginTop: 4, fontSize: 11, color: th.success }}>{proof.serverNote}</div>
+          </div>
+          <div style={{ marginTop: 8 }}>
+            <Banner theme={th} tone={FX_PROOF_READBACK.state === 'expired' ? 'warn' : 'info'} icon="lock"
+              title={FX_PROOF_READBACK.state === 'expired' ? '讀取授權已過期 · 需重新授權' : '已授權讀取 · authorized readback'}
+              body={FX_PROOF_READBACK.state === 'expired'
+                ? `${FX_PROOF_READBACK.issuedTo} 的授權於 ${FX_PROOF_READBACK.expiresAt} 到期；需重新授權才能取得新的短效簽章連結，每次讀取皆寫入稽核。`
+                : `此簽章連結於 ${FX_PROOF_READBACK.expiresAt} 前有效，逾期需重新授權；每次讀取皆寫入稽核 (actor + timestamp)。`}
+              actions={<ActionButton theme={th} size="sm" descriptor={{ action: 're_authorize', enabled: true, riskLevel: 'medium' }} icon="refresh" label="重新授權" en="re_authorize" />} />
+          </div>
+        </Card>
+
+        <Card theme={th} title="標記已付款 · 前置條件" subtitle="mark-paid 需批次核准且證明 confirmed／掃描通過／歸屬核對一致，否則保持停用並顯示原因">
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+            <GateRow theme={th} ok={batchApproved} label="批次已核准" sub={`目前狀態 · ${b.state}`} />
+            <GateRow theme={th} ok={proofReady} label="匯款證明已 confirmed，掃描通過且歸屬核對一致" sub={`${proof.file} · scan=${proof.scan} · ownership=${proof.ownership}`} />
+          </div>
+          <div style={{ marginTop: 14 }}>
+            <ActionButton theme={th} descriptor={{ action: 'mark_paid', enabled: batchApproved && proofReady, disabledReasonCode: markPaidReasonCode, riskLevel: 'high', requiresReason: true }} variant="primary" icon="check" label="標記已付款" en="mark_paid" />
+          </div>
+        </Card>
+
         <Card theme={th} title="Line items · 3 sources" padding={0}>
           <Table theme={th} dense columns={[
             { h: 'RECIPIENT', w: 240, r: r => r.recipient },
@@ -400,6 +516,8 @@ function PA_Flags({ theme: th }) {
 
 Object.assign(window, {
   FX_REIMBURSE, FX_AUDIT_HOLD_EXTRA,
+  FX_REIMBURSE_PROOF_SUMMARY, FX_PROOF_ATTEMPTS, FX_PROOF_CONFIRMED, FX_PROOF_READBACK,
+  ProofAttemptRow, GateRow,
   PA_Payments, PA_Reimbursements, PA_ReimbursementDetail,
   PA_Health, PA_Notices, PA_Audit, PA_Flags,
 });
