@@ -98,11 +98,9 @@ export class RemittanceProofService {
   async uploadProof(
     input: UploadRemittanceProofInput,
   ): Promise<RemittanceProofRecord> {
-    const proofId = `remit-proof-${randomUUID()}`;
     let content;
     try {
       content = await this.storage.commit({
-        proofId,
         stagedContentRef: input.stagedContentRef,
       });
     } catch (cause) {
@@ -116,8 +114,11 @@ export class RemittanceProofService {
 
     const createdAt = new Date().toISOString();
     if (this.useDurablePersistence()) {
+      // proof_id is not supplied here: V0098 defines it as
+      // `uuid PRIMARY KEY DEFAULT gen_random_uuid()`, "server-generated
+      // only; no client-supplied identity column". Postgres generates it
+      // and `insertRemittanceProof` returns it via `RETURNING *`.
       return this.repository!.insertRemittanceProof({
-        proofId,
         batchId: input.batchId,
         driverId: input.driverId,
         uploadedByActorId: input.uploadedByActorId,
@@ -129,6 +130,9 @@ export class RemittanceProofService {
       });
     }
 
+    // In-memory fallback has no DB identity column to respect, so it keeps
+    // its own prefixed, app-generated id.
+    const proofId = `remit-proof-${randomUUID()}`;
     const record: RemittanceProofRecord = {
       proofId,
       batchId: input.batchId,

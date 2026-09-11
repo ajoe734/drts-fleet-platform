@@ -24,7 +24,6 @@ export interface StagedRemittanceProofContent {
 }
 
 export interface CommitRemittanceProofContentCommand {
-  proofId: string;
   stagedContentRef: string;
 }
 
@@ -54,6 +53,15 @@ export interface ReadRemittanceProofContent {
  * `../driver-sos/s3-driver-sos-attachment-storage.adapter.ts`. A
  * `stagedContentRef` is consumed exactly once by `commit`; committing twice
  * with the same ref fails rather than silently duplicating content.
+ *
+ * `commit` deliberately does not take the eventual `proofId`: the durable
+ * persistence path (`BillingSettlementRepository.insertRemittanceProof`)
+ * lets Postgres generate `proof_id` via `DEFAULT gen_random_uuid()`
+ * (`infra/migrations/V0098__sr_remittance_proof.sql` -- "server-generated
+ * only; no client-supplied identity column"), so no `proofId` exists yet at
+ * commit time. Content is addressed by its own `contentHash` instead, which
+ * `commit` computes from the actual staged bytes; `read` looks content back
+ * up by that same hash.
  */
 export interface RemittanceProofStorageProvider {
   readonly providerName: string;
@@ -64,5 +72,5 @@ export interface RemittanceProofStorageProvider {
   commit(
     command: CommitRemittanceProofContentCommand,
   ): Promise<CommittedRemittanceProofContent>;
-  read(proofId: string): Promise<ReadRemittanceProofContent | null>;
+  read(contentHash: string): Promise<ReadRemittanceProofContent | null>;
 }

@@ -1460,8 +1460,16 @@ export class BillingSettlementRepository {
 
   // ── Remittance Proof (SR-PROOF-001) ──
 
+  /**
+   * `proof_id` is deliberately absent from the column/value list: V0098
+   * defines it as `uuid PRIMARY KEY DEFAULT gen_random_uuid()`,
+   * "server-generated only; no client-supplied identity column". Passing a
+   * caller-supplied value here (as this once did) either violates that
+   * invariant or -- if the value isn't a well-formed uuid literal -- fails
+   * every insert with "invalid input syntax for type uuid". `RETURNING *`
+   * hands back the id Postgres actually generated.
+   */
   async insertRemittanceProof(input: {
-    proofId: string;
     batchId: string;
     driverId: string;
     uploadedByActorId: string | null;
@@ -1477,13 +1485,12 @@ export class BillingSettlementRepository {
     const result = await this.databaseService!.query<RemittanceProofRow>(
       `
         INSERT INTO billing.phase1_remittance_proofs (
-          proof_id, batch_id, driver_id, uploaded_by_actor_id,
+          batch_id, driver_id, uploaded_by_actor_id,
           original_filename, content_hash, content_type, size_bytes, created_at
-        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
         RETURNING *
       `,
       [
-        input.proofId,
         input.batchId,
         input.driverId,
         input.uploadedByActorId,

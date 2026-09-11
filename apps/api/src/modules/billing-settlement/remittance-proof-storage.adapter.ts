@@ -69,12 +69,6 @@ export class InMemoryRemittanceProofStorageAdapter
   async commit(
     command: CommitRemittanceProofContentCommand,
   ): Promise<CommittedRemittanceProofContent> {
-    const proofId = command.proofId?.trim();
-    if (!proofId) {
-      throw new Error(
-        "RemittanceProofStorageProvider.commit requires a non-empty proofId.",
-      );
-    }
     const entry = this.staged.get(command.stagedContentRef);
     if (!entry) {
       throw new Error(
@@ -85,17 +79,20 @@ export class InMemoryRemittanceProofStorageAdapter
     // Single-use: a stagedContentRef cannot be replayed into a second proof.
     this.staged.delete(command.stagedContentRef);
 
+    const contentHash = createHash("sha256").update(entry.bytes).digest("hex");
     const record: CommittedRemittanceProofContent = {
-      contentHash: createHash("sha256").update(entry.bytes).digest("hex"),
+      contentHash,
       contentType: entry.contentType,
       sizeBytes: entry.bytes.length,
     };
-    this.committed.set(proofId, { ...record, bytes: entry.bytes });
+    // Content-addressed by contentHash, not by proofId: no proofId exists
+    // yet at commit time on the durable path (see the port's doc comment).
+    this.committed.set(contentHash, { ...record, bytes: entry.bytes });
     return record;
   }
 
-  async read(proofId: string): Promise<ReadRemittanceProofContent | null> {
-    const entry = this.committed.get(proofId);
+  async read(contentHash: string): Promise<ReadRemittanceProofContent | null> {
+    const entry = this.committed.get(contentHash);
     if (!entry) {
       return null;
     }

@@ -4,6 +4,7 @@ import type { MoneyAmount } from "@drts/contracts";
 
 import type { BootstrapRequestIdentity } from "../../../../apps/api/src/common/auth";
 import { AuditNotificationService } from "../../../../apps/api/src/modules/audit-notification/audit-notification.service";
+import { BillingSettlementRepository } from "../../../../apps/api/src/modules/billing-settlement/billing-settlement.repository";
 import { BillingSettlementService } from "../../../../apps/api/src/modules/billing-settlement/billing-settlement.service";
 import { RemittanceProofService } from "../../../../apps/api/src/modules/billing-settlement/remittance-proof.service";
 import {
@@ -625,7 +626,6 @@ describe("SR-PROOF-001: storage adapter (InMemoryRemittanceProofStorageAdapter)"
       contentType: "application/pdf",
     });
     const committed = await storage.commit({
-      proofId: "proof-1",
       stagedContentRef,
     });
 
@@ -633,14 +633,14 @@ describe("SR-PROOF-001: storage adapter (InMemoryRemittanceProofStorageAdapter)"
     expect(committed.contentType).toBe("application/pdf");
     expect(committed.contentHash).toMatch(/^[0-9a-f]{64}$/);
 
-    const read = await storage.read("proof-1");
+    const read = await storage.read(committed.contentHash);
     expect(read?.bytes.toString("utf8")).toBe(bytes.toString("utf8"));
   });
 
   it("rejects committing an unknown stagedContentRef", async () => {
     const storage = new InMemoryRemittanceProofStorageAdapter();
     await expect(
-      storage.commit({ proofId: "proof-2", stagedContentRef: "nope" }),
+      storage.commit({ stagedContentRef: "nope" }),
     ).rejects.toThrow();
   });
 
@@ -650,10 +650,106 @@ describe("SR-PROOF-001: storage adapter (InMemoryRemittanceProofStorageAdapter)"
       bytes: Buffer.from("x"),
       contentType: "text/plain",
     });
-    await storage.commit({ proofId: "proof-a", stagedContentRef });
+    await storage.commit({ stagedContentRef });
     await expect(
-      storage.commit({ proofId: "proof-b", stagedContentRef }),
+      storage.commit({ stagedContentRef }),
     ).rejects.toThrow();
+  });
+});
+
+describe("SR-PROOF-001: durable persistence does not fight V0098's proof_id column", () => {
+  it("insertRemittanceProof never sends proof_id -- V0098 defines it as DEFAULT gen_random_uuid(), server-generated only", async () => {
+    const dbGeneratedProofId = "11111111-2222-4333-8444-555555555555";
+    const query = vi.fn(async () => ({
+      rows: [
+        {
+          proof_id: dbGeneratedProofId,
+          batch_id: "batch-1",
+          driver_id: "drv-1",
+          uploaded_by_actor_id: null,
+          original_filename: "receipt.pdf",
+          content_hash: "a".repeat(64),
+          content_type: "application/pdf",
+          size_bytes: 10,
+          scan_state: "pending_scan",
+          scan_completed_at: null,
+          rejection_reason: null,
+          created_at: "2026-09-11T00:00:00.000Z",
+        },
+      ],
+    }));
+    const repository = new BillingSettlementRepository({
+      isEnabled: () => true,
+      query,
+    } as never);
+
+    const record = await repository.insertRemittanceProof({
+      batchId: "batch-1",
+      driverId: "drv-1",
+      uploadedByActorId: null,
+      originalFilename: "receipt.pdf",
+      contentHash: "a".repeat(64),
+      contentType: "application/pdf",
+      sizeBytes: 10,
+      createdAt: "2026-09-11T00:00:00.000Z",
+    });
+
+    const [sql, params] = query.mock.calls[0] as [string, unknown[]];
+    expect(sql).not.toMatch(/\bproof_id\b/);
+    expect(params).toHaveLength(8);
+    expect(params).not.toContain(dbGeneratedProofId);
+    // The record's proofId comes back from RETURNING *, i.e. whatever
+    // Postgres actually generated -- never a value the caller supplied.
+    expect(record.proofId).toBe(dbGeneratedProofId);
+  });
+
+  it("uploadProof on the durable path never fabricates a proofId for the insert -- it only forwards what RETURNING * gave back", async () => {
+    const dbGeneratedProofId = "66666666-7777-4888-8999-aaaaaaaaaaaa";
+    const insertRemittanceProof = vi.fn(async (input: Record<string, unknown>) => ({
+      proofId: dbGeneratedProofId,
+      batchId: input.batchId,
+      driverId: input.driverId,
+      uploadedByActorId: input.uploadedByActorId,
+      originalFilename: input.originalFilename,
+      content: {
+        contentHash: input.contentHash,
+        contentType: input.contentType,
+        sizeBytes: input.sizeBytes,
+      },
+      scanState: "pending_scan",
+      scanCompletedAt: null,
+      rejectionReason: null,
+      createdAt: input.createdAt,
+    }));
+    const fakeRepository = {
+      isEnabled: () => true,
+      insertRemittanceProof,
+    } as unknown as BillingSettlementRepository;
+
+    const service = new RemittanceProofService(
+      fakeRepository,
+      new InMemoryRemittanceProofStorageAdapter(),
+    );
+    const { stagedContentRef } = await service.stageContent(
+      Buffer.from("durable path bytes"),
+      "application/pdf",
+    );
+
+    const record = await service.uploadProof({
+      batchId: "batch-1",
+      driverId: "drv-1",
+      originalFilename: "receipt.pdf",
+      stagedContentRef,
+      uploadedByActorId: null,
+    });
+
+    expect(insertRemittanceProof).toHaveBeenCalledTimes(1);
+    const insertInput = insertRemittanceProof.mock.calls[0]![0] as Record<
+      string,
+      unknown
+    >;
+    expect(insertInput).not.toHaveProperty("proofId");
+    expect(record.proofId).toBe(dbGeneratedProofId);
   });
 });
 
