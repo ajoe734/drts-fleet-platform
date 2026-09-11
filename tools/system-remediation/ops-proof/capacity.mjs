@@ -102,7 +102,22 @@ export function measure(origin, item) {
           if (!object(data) || envelope.error) error = "Missing successful API data envelope";
         } catch { error = "Invalid JSON response"; }
         if (res.statusCode < 200 || res.statusCode >= 300) error = `HTTP ${res.statusCode}`;
-        const resourceIds = Object.fromEntries(["bookingId", "orderId", "dispatchJobId", "jobId"].filter((key) => typeof data?.[key] === "string").map((key) => [key, data[key]]));
+        // The live API's global response interceptor
+        // (apps/api/src/common/snake-case.interceptor.ts) rewrites every
+        // body key to snake_case on the wire, so `data` carries `order_id`,
+        // not the service layer's in-code `orderId`. Accept both so a
+        // resource id is recorded regardless of which convention the caller
+        // is on; callers of `resourceIds` keep reading the camelCase key.
+        const resourceIds = Object.fromEntries(
+          [
+            ["bookingId", "booking_id"],
+            ["orderId", "order_id"],
+            ["dispatchJobId", "dispatch_job_id"],
+            ["jobId", "job_id"],
+          ]
+            .map(([camel, snake]) => [camel, data?.[camel] ?? data?.[snake]])
+            .filter(([, value]) => typeof value === "string"),
+        );
         finish({ httpStatus: res.statusCode, responseSha256: digest(raw), resourceIds, error });
       });
     });
