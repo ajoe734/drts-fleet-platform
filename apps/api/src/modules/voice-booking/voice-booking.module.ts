@@ -25,6 +25,9 @@ import { VoiceContactService } from "./voice-contact.service";
 import { VoiceCallbackService } from "./voice-callback.service";
 import { VoicePolicyService } from "./voice-policy.service";
 import { VoiceRetentionService } from "./voice-retention.service";
+import { VoiceUsageService } from "./voice-usage.service";
+import { VoiceBookingMetricsService } from "../../observability/voice-booking-metrics.service";
+import { VoiceBookingController } from "./voice-booking.controller";
 
 /**
  * UV-EXEC-003 built VoiceBookingRepository/VoiceBookingAuthorizationService/
@@ -36,6 +39,7 @@ import { VoiceRetentionService } from "./voice-retention.service";
  */
 @Module({
   imports: [DatabaseModule, GeoModule, ServiceAreaModule, ServiceProductModule],
+  controllers: [VoiceBookingController],
   providers: [
     OwnedMobilityRepository,
     VoiceBookingCommandService,
@@ -57,6 +61,8 @@ import { VoiceRetentionService } from "./voice-retention.service";
     VoiceCallbackService,
     VoicePolicyService,
     VoiceRetentionService,
+    VoiceUsageService,
+    VoiceBookingMetricsService,
   ],
   exports: [
     VoiceBookingCommandService,
@@ -77,6 +83,8 @@ import { VoiceRetentionService } from "./voice-retention.service";
     VoiceCallbackService,
     VoicePolicyService,
     VoiceRetentionService,
+    VoiceUsageService,
+    VoiceBookingMetricsService,
   ],
 })
 export class VoiceBookingModule {}

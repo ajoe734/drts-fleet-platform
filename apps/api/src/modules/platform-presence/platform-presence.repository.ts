@@ -17,6 +17,7 @@ interface PresenceRow {
   reauth_required: boolean;
   last_online_at: Date | string | null;
   last_offline_at: Date | string | null;
+  last_heartbeat_at: Date | string | null;
   updated_at: Date | string;
   record: unknown;
 }
@@ -37,7 +38,8 @@ export class PlatformPresenceRepository {
     try {
       const result = await this.db!.query<PresenceRow>(
         `SELECT driver_id, platform_code, account_id, online_status, eligibility,
-                token_expires_at, reauth_required, last_online_at, last_offline_at, updated_at, record
+                token_expires_at, reauth_required, last_online_at, last_offline_at,
+                last_heartbeat_at, updated_at, record
          FROM ops.phase1_platform_presence
          WHERE driver_id = $1
          ORDER BY platform_code`,
@@ -65,9 +67,10 @@ export class PlatformPresenceRepository {
       const result = await this.db!.query<PresenceRow>(
         `INSERT INTO ops.phase1_platform_presence (
            driver_id, platform_code, account_id, online_status, eligibility,
-           token_expires_at, reauth_required, last_online_at, last_offline_at, updated_at, record
+           token_expires_at, reauth_required, last_online_at, last_offline_at,
+           last_heartbeat_at, updated_at, record
          ) VALUES (
-           $1, $2, $3, $4, $5, $6, $7, $8, $9, NOW(), $10
+           $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, NOW(), $11
          )
          ON CONFLICT (driver_id, platform_code)
          DO UPDATE SET
@@ -78,10 +81,12 @@ export class PlatformPresenceRepository {
            reauth_required = EXCLUDED.reauth_required,
            last_online_at = EXCLUDED.last_online_at,
            last_offline_at = EXCLUDED.last_offline_at,
+           last_heartbeat_at = EXCLUDED.last_heartbeat_at,
            updated_at = NOW(),
            record = EXCLUDED.record
          RETURNING driver_id, platform_code, account_id, online_status, eligibility,
-                   token_expires_at, reauth_required, last_online_at, last_offline_at, updated_at, record`,
+                   token_expires_at, reauth_required, last_online_at, last_offline_at,
+                   last_heartbeat_at, updated_at, record`,
         [
           record.driverId,
           record.platformCode,
@@ -92,6 +97,7 @@ export class PlatformPresenceRepository {
           record.reauthRequired,
           record.lastOnlineAt ? new Date(record.lastOnlineAt) : null,
           record.lastOfflineAt ? new Date(record.lastOfflineAt) : null,
+          record.lastHeartbeatAt ? new Date(record.lastHeartbeatAt) : null,
           jsonRecord,
         ],
       );
@@ -124,6 +130,7 @@ export class PlatformPresenceRepository {
       reauthRequired: row.reauth_required,
       lastOnlineAt: toIso(row.last_online_at),
       lastOfflineAt: toIso(row.last_offline_at),
+      lastHeartbeatAt: toIso(row.last_heartbeat_at),
       updatedAt: toIso(row.updated_at)!,
     };
   }

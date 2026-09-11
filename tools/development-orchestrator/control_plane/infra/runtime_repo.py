@@ -36,6 +36,7 @@ def default_state() -> dict[str, Any]:
         },
         "provider_pauses": {},
         "provider_pause_schema": 3,
+        "deadlock_recovery": {},
         "failure_streaks": {},
         "chair_reassignment_guards": {},
         "dispatch_pauses": [],
@@ -111,6 +112,8 @@ def migrate_state(raw: dict[str, Any] | None) -> dict[str, Any]:
     state["maintenance"].setdefault("worker_workspace_cleanup", {})
     state.setdefault("provider_pauses", {})
     state["provider_pause_schema"] = 3
+    if not isinstance(state.get("deadlock_recovery"), dict):
+        state["deadlock_recovery"] = {}
     state.setdefault("failure_streaks", {})
     state.setdefault("chair_reassignment_guards", {})
     state.setdefault("dispatch_pauses", [])

@@ -11,9 +11,6 @@ import type {
 
 import { bankApiGet, bankApiGetList } from "./server-bank-api";
 import {
-  bookingDetails,
-  bookingList,
-  deriveBookingPeriods,
   type BookingDetailRecord,
   type BookingDirection,
   type BookingListItem,
@@ -21,9 +18,8 @@ import {
   type BookingState,
   type BookingTimelineEvent,
 } from "./bookings";
-import { ORDER_TALLIES, QUOTA_PROGRAMS, type BankRole } from "./home-data";
+import { type BankRole } from "./home-data";
 import { settlementStatements, type StatementStatus } from "./statements";
-import { listContractRecords } from "./contracts-data";
 export type BankConsoleRole =
   | "bank_program_admin"
   | "bank_ops_viewer"
@@ -763,33 +759,16 @@ export async function loadBankBookingsData(
       ),
     ].sort((left, right) => right.localeCompare(left));
 
-    const effectiveBookings =
-      bookings.length > 0
-        ? bookings
-        : core.degradedMessage
-          ? bookingList
-          : [];
+    // Fail closed: an upstream denial or outage (403/503/timeout, folded into
+    // core.degradedMessage by loadCoreBankData) must never be papered over
+    // with the static ACME demo fixture — that would leak another tenant's
+    // financial rows into this tenant's degraded response. Only a genuinely
+    // successful, genuinely empty upstream response yields an empty list.
+    const effectiveBookings = bookings;
     const effectivePrograms =
-      core.programs.length > 0
-        ? mapBookingPrograms(core.programs)
-        : core.degradedMessage
-          ? [
-              { code: "WE12", label: "艾克米機場 Elite Demo" },
-              { code: "SIG6", label: "艾克米商旅 Signature" },
-            ]
-          : [];
-    const effectivePeriods =
-      periods.length > 0
-        ? periods
-        : core.degradedMessage
-          ? deriveBookingPeriods(bookingList)
-          : [];
-    const effectiveDetailById =
-      detailById.size > 0
-        ? detailById
-        : core.degradedMessage
-          ? new Map(bookingDetails.map((item) => [item.orderId, item]))
-          : new Map();
+      core.programs.length > 0 ? mapBookingPrograms(core.programs) : [];
+    const effectivePeriods = periods;
+    const effectiveDetailById = detailById;
 
     return {
       data: {
@@ -803,13 +782,10 @@ export async function loadBankBookingsData(
   } catch (error) {
     return {
       data: {
-        bookings: bookingList,
-        programs: [
-          { code: "WE12", label: "艾克米機場 Elite Demo" },
-          { code: "SIG6", label: "艾克米商旅 Signature" },
-        ],
-        periods: deriveBookingPeriods(bookingList),
-        detailById: new Map(bookingDetails.map((item) => [item.orderId, item])),
+        bookings: [],
+        programs: [],
+        periods: [],
+        detailById: new Map(),
       },
       degradedMessage:
         error instanceof Error ? error.message : "Failed to load bookings.",
@@ -823,16 +799,15 @@ export async function loadBankContractsData(
 ): Promise<BankLoadState<{ contracts: IssuerContractStatusRecord[] }>> {
   try {
     const core = await loadCoreBankData(tenantId, role);
-    const effectiveContracts =
-      core.contracts.length > 0
-        ? core.contracts
-        : core.degradedMessage
-          ? listContractRecords()
-          : [];
-    return { data: { contracts: effectiveContracts }, degradedMessage: core.degradedMessage };
+    // Fail closed: see loadBankBookingsData — an upstream denial/outage must
+    // not be masked with the static demo contract fixture.
+    return {
+      data: { contracts: core.contracts },
+      degradedMessage: core.degradedMessage,
+    };
   } catch (error) {
     return {
-      data: { contracts: listContractRecords() },
+      data: { contracts: [] },
       degradedMessage:
         error instanceof Error ? error.message : "Failed to load contracts.",
     };
@@ -848,19 +823,19 @@ export async function loadBankStatementsData(
     const defaultProgramLabel =
       core.usage[0]?.programCode ?? "Airport transfer settlement";
     const mapped = mapStatementsFromApi(core.statements, defaultProgramLabel);
-    const effectiveStatements =
-      mapped.length > 0
-        ? mapped
-        : core.degradedMessage
-          ? settlementStatements
-          : [];
+    // Fail closed: see loadBankBookingsData — an upstream denial/outage on
+    // settlement-statements must never fall back to the static ACME seed
+    // fixture, or a Contoso (or any non-ACME) session would receive another
+    // tenant's real settlement amounts inside a "degraded" response that
+    // looks like legitimate data to both the HTML pages and the CSV/download
+    // routes built on top of this loader.
     return {
-      data: { statements: effectiveStatements },
+      data: { statements: mapped },
       degradedMessage: core.degradedMessage,
     };
   } catch (error) {
     return {
-      data: { statements: settlementStatements },
+      data: { statements: [] },
       degradedMessage:
         error instanceof Error ? error.message : "Failed to load statements.",
     };
@@ -1011,60 +986,30 @@ export async function loadBankHomeSnapshot(
       defaultProgramLabel,
     );
 
-    const effectiveOrders =
-      mappedBookings.length > 0
-        ? mappedBookings
-        : core.degradedMessage
-          ? bookingList
-          : [];
-    const effectiveContracts =
-      core.contracts.length > 0
-        ? core.contracts
-        : core.degradedMessage
-          ? listContractRecords()
-          : [];
-    const effectiveStatements =
-      mappedStatements.length > 0
-        ? mappedStatements
-        : core.degradedMessage
-          ? settlementStatements
-          : [];
+    // Fail closed: see loadBankBookingsData — an upstream denial/outage on
+    // any of the underlying endpoints must not be masked with static demo
+    // fixtures on the home snapshot (which is where per-tenant settlement
+    // totals and order tallies first render).
+    const effectiveOrders = mappedBookings;
+    const effectiveContracts = core.contracts;
+    const effectiveStatements = mappedStatements;
 
-    const hasLiveOrders = core.orders.length > 0;
-    const tallies = hasLiveOrders
-      ? core.orders.reduce<BankHomeOrderTallies>(
-          (sum, order) => {
-            sum.total += 1;
-            sum[mapHomeOrderBucket(order.status)] += 1;
-            return sum;
-          },
-          {
-            total: 0,
-            reserved: 0,
-            live: 0,
-            completed: 0,
-            cancelled: 0,
-          },
-        )
-      : core.degradedMessage
-        ? ORDER_TALLIES
-        : { total: 0, reserved: 0, live: 0, completed: 0, cancelled: 0 };
+    const tallies = core.orders.reduce<BankHomeOrderTallies>(
+      (sum, order) => {
+        sum.total += 1;
+        sum[mapHomeOrderBucket(order.status)] += 1;
+        return sum;
+      },
+      {
+        total: 0,
+        reserved: 0,
+        live: 0,
+        completed: 0,
+        cancelled: 0,
+      },
+    );
 
-    const effectiveUsage =
-      core.usage.length > 0
-        ? core.usage
-        : core.degradedMessage
-          ? QUOTA_PROGRAMS.filter((p) => p.program !== "all").map((p) => ({
-              programId: `prog-${p.program}`,
-              programCode:
-                p.program === "worldElite" ? "CTB-AIR-WE" : "CTB-AIR-SG",
-              period: currentPeriod,
-              quotaTotal: p.total,
-              quotaRemaining: p.total - p.used,
-              tripsConsumed: p.used,
-              cardholdersServed: p.used,
-            }))
-          : [];
+    const effectiveUsage = core.usage;
 
     const period =
       core.usage[0]?.period ??
@@ -1089,11 +1034,11 @@ export async function loadBankHomeSnapshot(
       data: {
         period: currentPeriod,
         todayLabel,
-        orders: bookingList,
-        tallies: ORDER_TALLIES,
+        orders: [],
+        tallies: { total: 0, reserved: 0, live: 0, completed: 0, cancelled: 0 },
         usage: [],
-        contracts: listContractRecords(),
-        statements: settlementStatements,
+        contracts: [],
+        statements: [],
       },
       degradedMessage:
         error instanceof Error ? error.message : "Failed to load home data.",

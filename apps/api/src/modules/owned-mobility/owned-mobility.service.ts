@@ -114,9 +114,15 @@ import type {
   ReferralPassengerHistoryItem,
   ReferralPassengerReceipt,
   SubmitReferralPassengerRatingCommand,
+  TenantBookingDateField,
+  TenantBookingListQuery,
+  TenantBookingsPageRecord,
 } from "@drts/contracts";
 
 import {
+  BOOKING_STATUSES,
+  OWNED_ORDER_STATUSES,
+  isIso8601InstantWithTimezone,
   PLATFORM_CURRENCY,
   normalisePlatformCurrency,
   QUEUE_ENTRY_POLICY_MAP,
@@ -161,6 +167,7 @@ import { VehicleEligibilityService } from "../vehicle-eligibility/vehicle-eligib
 import { SandboxFallbackCostPolicyResolverService } from "../billing-settlement/sandbox-fallback-cost-policy-resolver.service";
 import { RuntimeEligibilityEvaluator } from "../vehicle-eligibility/runtime-eligibility-evaluator.service";
 import { ServiceAreaService } from "../service-area/service-area.service";
+import { PlatformPresenceService } from "../platform-presence/platform-presence.service";
 import {
   OWNED_MOBILITY_MULTI_TAXI_TRIP_COMPLETED_EVENT,
   OWNED_MOBILITY_TRIP_COMPLETED_EVENT,
@@ -414,6 +421,16 @@ const DRIVER_COMPLETION_OUTBOX_RETRY_MS = 5_000;
 const DRIVER_COMPLETION_OUTBOX_RECOVERY_POLL_MS = 15_000;
 const DRIVER_COMPLETION_OUTBOX_RECOVERY_BATCH_SIZE = 25;
 
+// SR-DISPATCH-SCHEDULER-001: background wall-clock sweep for dispatch-timeout
+// and reservation-hold escalation, mirroring the driver-completion-outbox
+// polling pattern above -- a plain setInterval that re-derives its work from
+// current persisted/in-memory state on every tick, so it is safe to restart
+// and safe to run from more than one instance (the underlying mutations
+// `handleDispatchTimeout` / `dispatchOrder` already fence themselves against
+// a stale or repeated call).
+const DISPATCH_SCHEDULER_SWEEP_INTERVAL_MS = 15_000;
+const DISPATCH_MATCHING_TIMEOUT_DEFAULT_MS = 90_000;
+
 // Hard eligibility reasons that must NEVER be re-admitted by the scarcity
 // fallback below. Dispatching a vehicle that failed the airport-permit gate to an
 // airport-transfer order is a compliance violation, not a graceful degradation:
@@ -479,6 +496,10 @@ export class OwnedMobilityService
   private driverCompletionOutboxDrainRequested = false;
   private driverCompletionOutboxStopping = false;
 
+  private dispatchSchedulerSweepTimer: ReturnType<typeof setInterval> | null =
+    null;
+  private dispatchSchedulerSweepRunning = false;
+
   private minLeadTimeMinutes = 15;
 
   getMinLeadTimeMinutes(): number {
@@ -538,6 +559,11 @@ export class OwnedMobilityService
     @Optional()
     @Inject(forwardRef(() => OwnedAutonomousDispatchExecutorService))
     private readonly autonomousDispatchExecutor?: OwnedAutonomousDispatchExecutorService,
+    // Appended LAST (@Optional) for the same reason as the other trailing
+    // params above: preserves every existing positional-arg unit-test
+    // harness that constructs this service directly.
+    @Optional()
+    private readonly platformPresenceService?: PlatformPresenceService,
   ) {}
 
   private _fallbackIdempotencyService?: IdempotencyService;
@@ -720,6 +746,14 @@ export class OwnedMobilityService
 
   async onApplicationBootstrap() {
     this.driverCompletionOutboxStopping = false;
+    this.startDispatchSchedulerPolling();
+    void this.runDispatchSchedulerSweep().catch((error) => {
+      this.logger.error(
+        `Initial dispatch scheduler sweep failed: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      );
+    });
     if (!this.ownedMobilityRepository?.isEnabled()) {
       return;
     }
@@ -741,6 +775,10 @@ export class OwnedMobilityService
     if (this.driverCompletionRecoveryTimer) {
       clearInterval(this.driverCompletionRecoveryTimer);
       this.driverCompletionRecoveryTimer = null;
+    }
+    if (this.dispatchSchedulerSweepTimer) {
+      clearInterval(this.dispatchSchedulerSweepTimer);
+      this.dispatchSchedulerSweepTimer = null;
     }
     const activeDrain = this.driverCompletionOutboxDrainPromise;
     if (activeDrain) {
@@ -2204,21 +2242,425 @@ export class OwnedMobilityService
     return snapshot ? this.clonePassengerDisclosureSnapshot(snapshot) : null;
   }
 
-  listTenantBookings(tenantId: string) {
-    this.assertNonBlank(tenantId, "tenantId");
-    const items = this.orders
-      .filter((order) => order.bookingId && order.tenantId === tenantId)
-      .map((order) => this.mapOrderToBooking(order));
+  assertTenantAccessScope(
+    targetTenantId: string,
+    identity?: BootstrapRequestIdentity | null,
+  ) {
+    if (!identity) {
+      return;
+    }
+    if (!identity.actorId) {
+      throw new ApiRequestError(
+        HttpStatus.UNAUTHORIZED,
+        "AUTH_REQUIRED",
+        "Authenticated tenant identity is required.",
+      );
+    }
+
+    const isPlatformOrSystem =
+      identity.realm === "platform" ||
+      identity.realm === "system" ||
+      identity.actorType === "platform_admin" ||
+      identity.actorType === "system" ||
+      identity.roleFamilies?.includes("platform");
+
+    if (isPlatformOrSystem) {
+      return;
+    }
+
+    if (!identity.tenantId || identity.tenantId !== targetTenantId) {
+      throw new ApiRequestError(
+        HttpStatus.FORBIDDEN,
+        "TENANT_SCOPE_MISMATCH",
+        "Cross-tenant identity access is forbidden. Principal tenantId does not match target tenantId.",
+        {
+          targetTenantId,
+          principalTenantId: identity.tenantId ?? null,
+        },
+      );
+    }
+  }
+
+  private validateTenantBookingListQuery(rawQuery?: TenantBookingListQuery): {
+    q: string | undefined;
+    passenger: string | undefined;
+    passengerId: string | undefined;
+    bookingStatuses: string[] | undefined;
+    fulfillmentStatuses: string[] | undefined;
+    dateField: TenantBookingDateField;
+    fromInstant: Date | undefined;
+    toInstant: Date | undefined;
+    page: number;
+    pageSize: number;
+    serviceBucket: string | undefined;
+    subtype: string | undefined;
+  } {
+    const q = rawQuery?.q?.trim() || undefined;
+    const passenger = rawQuery?.passenger?.trim() || undefined;
+    const passengerId = rawQuery?.passengerId?.trim() || undefined;
+
+    // Date field
+    let dateField: TenantBookingDateField = "reservationStart";
+    if (rawQuery?.dateField) {
+      if (
+        rawQuery.dateField !== "reservationStart" &&
+        rawQuery.dateField !== "createdAt"
+      ) {
+        throw new ApiRequestError(
+          HttpStatus.BAD_REQUEST,
+          "INVALID_DATE_FIELD",
+          "dateField must be 'reservationStart' or 'createdAt'.",
+          { dateField: rawQuery.dateField },
+        );
+      }
+      dateField = rawQuery.dateField;
+    }
+
+    // Date from & to validation: require explicit ISO8601 instant with timezone
+    let fromInstant: Date | undefined;
+    if (rawQuery?.dateFrom?.trim()) {
+      const fromStr = rawQuery.dateFrom.trim();
+      if (!isIso8601InstantWithTimezone(fromStr)) {
+        throw new ApiRequestError(
+          HttpStatus.BAD_REQUEST,
+          "INVALID_DATE_BOUNDS",
+          "dateFrom must be an explicit ISO8601 instant with timezone (e.g. 2026-09-10T00:00:00Z). Ambiguous or server-local timestamps are rejected.",
+          { dateFrom: fromStr },
+        );
+      }
+      fromInstant = new Date(fromStr);
+    }
+
+    let toInstant: Date | undefined;
+    if (rawQuery?.dateTo?.trim()) {
+      const toStr = rawQuery.dateTo.trim();
+      if (!isIso8601InstantWithTimezone(toStr)) {
+        throw new ApiRequestError(
+          HttpStatus.BAD_REQUEST,
+          "INVALID_DATE_BOUNDS",
+          "dateTo must be an explicit ISO8601 instant with timezone (e.g. 2026-09-10T00:00:00Z). Ambiguous or server-local timestamps are rejected.",
+          { dateTo: toStr },
+        );
+      }
+      toInstant = new Date(toStr);
+    }
+
+    if (
+      fromInstant &&
+      toInstant &&
+      fromInstant.getTime() >= toInstant.getTime()
+    ) {
+      throw new ApiRequestError(
+        HttpStatus.BAD_REQUEST,
+        "INVALID_DATE_RANGE",
+        "dateFrom must be strictly before dateTo (start inclusive, end exclusive).",
+        { dateFrom: rawQuery?.dateFrom, dateTo: rawQuery?.dateTo },
+      );
+    }
+
+    // Status validation
+    const bookingStatusSet = new Set<string>(BOOKING_STATUSES);
+    const orderStatusSet = new Set<string>(OWNED_ORDER_STATUSES);
+
+    let bookingStatuses: string[] | undefined;
+    let fallbackOrderStatuses: string[] | undefined;
+    const rawBookingStatus = rawQuery?.bookingStatus ?? rawQuery?.status;
+    if (rawBookingStatus) {
+      const rawList = (
+        Array.isArray(rawBookingStatus)
+          ? rawBookingStatus
+          : String(rawBookingStatus).split(",")
+      )
+        .map((s) => String(s).trim())
+        .filter(Boolean);
+
+      const parsedBookingStatuses: string[] = [];
+      const orderFallbacks: string[] = [];
+      for (const s of rawList) {
+        if (bookingStatusSet.has(s)) {
+          parsedBookingStatuses.push(s);
+        } else if (orderStatusSet.has(s)) {
+          orderFallbacks.push(s);
+        } else {
+          throw new ApiRequestError(
+            HttpStatus.BAD_REQUEST,
+            "INVALID_STATUS",
+            `Invalid status '${s}'. Must be a valid booking status (${Array.from(bookingStatusSet).join(", ")}) or order fulfillment status.`,
+            { status: s },
+          );
+        }
+      }
+      if (parsedBookingStatuses.length > 0) {
+        bookingStatuses = parsedBookingStatuses;
+      }
+      if (orderFallbacks.length > 0) {
+        fallbackOrderStatuses = orderFallbacks;
+      }
+    }
+
+    let fulfillmentStatuses: string[] | undefined;
+    const rawFulfillmentStatus =
+      rawQuery?.fulfillmentStatus ?? rawQuery?.orderStatus;
+    if (rawFulfillmentStatus) {
+      const rawList = (
+        Array.isArray(rawFulfillmentStatus)
+          ? rawFulfillmentStatus
+          : String(rawFulfillmentStatus).split(",")
+      )
+        .map((s) => String(s).trim())
+        .filter(Boolean);
+      for (const s of rawList) {
+        if (!orderStatusSet.has(s)) {
+          throw new ApiRequestError(
+            HttpStatus.BAD_REQUEST,
+            "INVALID_STATUS",
+            `Invalid fulfillment/order status '${s}'. Must be one of: ${Array.from(orderStatusSet).join(", ")}.`,
+            { fulfillmentStatus: s },
+          );
+        }
+      }
+      fulfillmentStatuses = rawList;
+    } else if (fallbackOrderStatuses) {
+      fulfillmentStatuses = fallbackOrderStatuses;
+    }
+
+    // Pagination validation
+    let page = 1;
+    if (
+      rawQuery?.page !== undefined &&
+      rawQuery?.page !== null &&
+      String(rawQuery.page).trim() !== ""
+    ) {
+      const pageNum = Number(rawQuery.page);
+      if (!Number.isInteger(pageNum) || pageNum < 1) {
+        throw new ApiRequestError(
+          HttpStatus.BAD_REQUEST,
+          "INVALID_PAGE",
+          "page must be a positive integer >= 1.",
+          { page: rawQuery.page },
+        );
+      }
+      page = pageNum;
+    }
+
+    let pageSize = 20;
+    if (
+      rawQuery?.pageSize !== undefined &&
+      rawQuery?.pageSize !== null &&
+      String(rawQuery.pageSize).trim() !== ""
+    ) {
+      const sizeNum = Number(rawQuery.pageSize);
+      if (!Number.isInteger(sizeNum) || sizeNum < 1 || sizeNum > 100) {
+        throw new ApiRequestError(
+          HttpStatus.BAD_REQUEST,
+          "INVALID_PAGE_SIZE",
+          "pageSize must be an integer between 1 and 100.",
+          { pageSize: rawQuery.pageSize },
+        );
+      }
+      pageSize = sizeNum;
+    } else if (rawQuery === undefined) {
+      pageSize = 0;
+    }
 
     return {
+      q,
+      passenger,
+      passengerId,
+      bookingStatuses,
+      fulfillmentStatuses,
+      dateField,
+      fromInstant,
+      toInstant,
+      page,
+      pageSize,
+      serviceBucket: rawQuery?.serviceBucket?.trim() || undefined,
+      subtype: rawQuery?.subtype?.trim() || undefined,
+    };
+  }
+
+  listTenantBookings(
+    tenantId: string,
+    query?: TenantBookingListQuery,
+    identity?: BootstrapRequestIdentity | null,
+  ): Promise<TenantBookingsPageRecord> & TenantBookingsPageRecord {
+    this.assertNonBlank(tenantId, "tenantId");
+    if (identity) {
+      this.assertTenantAccessScope(tenantId, identity);
+    }
+
+    const validated = this.validateTenantBookingListQuery(query);
+
+    if (this.ownedMobilityRepository?.isEnabled()) {
+      const executeDb = async (): Promise<TenantBookingsPageRecord> => {
+        const dbResult =
+          await this.ownedMobilityRepository!.queryTenantBookings(tenantId, {
+            ...query,
+            page: validated.page,
+            pageSize: validated.pageSize > 0 ? validated.pageSize : 100,
+          });
+        const effectivePageSize =
+          validated.pageSize > 0
+            ? validated.pageSize
+            : Math.max(1, dbResult.total);
+        const totalPages =
+          dbResult.total > 0
+            ? Math.ceil(dbResult.total / effectivePageSize)
+            : 0;
+        const items = dbResult.items.map((order) =>
+          this.mapOrderToBooking(order),
+        );
+        return {
+          items,
+          pagination: {
+            page: validated.page,
+            pageSize: effectivePageSize,
+            totalItems: dbResult.total,
+            totalPages,
+          },
+          pageInfo: {
+            page: validated.page,
+            pageSize: effectivePageSize,
+            totalItems: dbResult.total,
+            totalPages,
+          },
+        };
+      };
+
+      const promise = executeDb();
+      return promise as unknown as Promise<TenantBookingsPageRecord> &
+        TenantBookingsPageRecord;
+    }
+
+    let filtered = this.orders.filter(
+      (order) => order.bookingId && order.tenantId === tenantId,
+    );
+
+    if (validated.passengerId) {
+      filtered = filtered.filter(
+        (o) => o.passenger?.passengerId === validated.passengerId,
+      );
+    }
+
+    const text = (validated.passenger ?? validated.q)?.toLowerCase();
+    if (text) {
+      filtered = filtered.filter((o) => {
+        const p = o.passenger;
+        return (
+          Boolean(p?.name?.toLowerCase().includes(text)) ||
+          Boolean(p?.phone?.toLowerCase().includes(text)) ||
+          Boolean(p?.passengerId?.toLowerCase().includes(text)) ||
+          Boolean(o.bookedBy?.email?.toLowerCase().includes(text)) ||
+          Boolean(o.bookedBy?.name?.toLowerCase().includes(text)) ||
+          Boolean(o.bookingId?.toLowerCase().includes(text)) ||
+          Boolean(o.orderId?.toLowerCase().includes(text)) ||
+          Boolean(o.costCenter?.toLowerCase().includes(text))
+        );
+      });
+    }
+
+    if (validated.bookingStatuses && validated.bookingStatuses.length > 0) {
+      const bs = new Set(validated.bookingStatuses);
+      filtered = filtered.filter((o) => {
+        const status =
+          o.status === "cancelled"
+            ? "cancelled"
+            : o.status === "completed"
+              ? "completed"
+              : "active";
+        return bs.has(status);
+      });
+    }
+
+    if (
+      validated.fulfillmentStatuses &&
+      validated.fulfillmentStatuses.length > 0
+    ) {
+      const fs = new Set(validated.fulfillmentStatuses);
+      filtered = filtered.filter((o) => fs.has(o.status));
+    }
+
+    if (validated.subtype && validated.subtype !== "all") {
+      filtered = filtered.filter(
+        (o) => o.businessDispatchSubtype === validated.subtype,
+      );
+    }
+    if (validated.serviceBucket && validated.serviceBucket !== "all") {
+      filtered = filtered.filter(
+        (o) => o.serviceBucket === validated.serviceBucket,
+      );
+    }
+
+    if (validated.fromInstant || validated.toInstant) {
+      filtered = filtered.filter((o) => {
+        const dateStr =
+          validated.dateField === "createdAt"
+            ? o.createdAt
+            : o.reservationWindowStart;
+        if (!dateStr) {
+          return false;
+        }
+        const t = new Date(dateStr).getTime();
+        if (validated.fromInstant && t < validated.fromInstant.getTime()) {
+          return false;
+        }
+        if (validated.toInstant && t >= validated.toInstant.getTime()) {
+          return false;
+        }
+        return true;
+      });
+    }
+
+    filtered.sort((a, b) => {
+      const dateA =
+        validated.dateField === "createdAt"
+          ? a.createdAt
+          : a.reservationWindowStart;
+      const dateB =
+        validated.dateField === "createdAt"
+          ? b.createdAt
+          : b.reservationWindowStart;
+      const timeA = dateA ? new Date(dateA).getTime() : -Infinity;
+      const timeB = dateB ? new Date(dateB).getTime() : -Infinity;
+      if (timeA !== timeB) {
+        return timeB - timeA;
+      }
+      return (a.bookingId ?? "").localeCompare(b.bookingId ?? "");
+    });
+
+    const totalItems = filtered.length;
+    const effectivePageSize =
+      validated.pageSize > 0 ? validated.pageSize : Math.max(1, totalItems);
+    const totalPages =
+      totalItems > 0 ? Math.ceil(totalItems / effectivePageSize) : 0;
+
+    let pagedOrders: OwnedOrderRecord[] = [];
+    const offset = (validated.page - 1) * effectivePageSize;
+    if (offset < totalItems) {
+      pagedOrders = filtered.slice(offset, offset + effectivePageSize);
+    }
+
+    const items = pagedOrders.map((order) => this.mapOrderToBooking(order));
+    const result: TenantBookingsPageRecord = {
       items,
       pagination: {
-        page: 1,
-        pageSize: items.length,
-        totalItems: items.length,
-        totalPages: items.length > 0 ? 1 : 0,
+        page: validated.page,
+        pageSize: effectivePageSize,
+        totalItems,
+        totalPages,
+      },
+      pageInfo: {
+        page: validated.page,
+        pageSize: effectivePageSize,
+        totalItems,
+        totalPages,
       },
     };
+
+    const promise = Promise.resolve(result);
+    Object.assign(promise, result);
+    return promise as unknown as Promise<TenantBookingsPageRecord> &
+      TenantBookingsPageRecord;
   }
 
   getTenantBooking(
@@ -4746,7 +5188,7 @@ export class OwnedMobilityService
             options,
             ratingSummary,
           );
-          this.assertAssignmentEligibilityRecheck(
+          await this.assertAssignmentEligibilityRecheck(
             bundle.order,
             dispatchJob.dispatchJobId,
             vehicleId,
@@ -4859,37 +5301,39 @@ export class OwnedMobilityService
       );
     }
 
-    this.assertAssignmentEligibilityRecheck(
+    const eligibilityRecheckResult = this.assertAssignmentEligibilityRecheck(
       order,
       dispatchJob.dispatchJobId,
       vehicleId,
       driverId,
     );
-    const sandboxGateResult = this.assertSandboxDispatchGate(
-      order,
-      dispatchJob.dispatchJobId,
-      vehicleId,
-      driverId,
-      sandboxDispatchSnapshot,
-      requestId,
-    );
-    return this.afterMaybePromise(sandboxGateResult, () =>
-      this.afterMaybePromise(
-        this.buildDispatchAssignmentBundle(
-          dispatchJob,
-          order,
-          vehicleId,
-          driverId,
-          sandboxDispatchSnapshot,
-          options,
-        ),
-        (bundle) =>
-          this.afterMaybePromise(
-            this.resolveSuccessfulFareQuoteAnomalies(bundle),
-            () => this.applyDispatchAssignmentBundle(bundle, requestId),
+    return this.afterMaybePromise(eligibilityRecheckResult, () => {
+      const sandboxGateResult = this.assertSandboxDispatchGate(
+        order,
+        dispatchJob.dispatchJobId,
+        vehicleId,
+        driverId,
+        sandboxDispatchSnapshot,
+        requestId,
+      );
+      return this.afterMaybePromise(sandboxGateResult, () =>
+        this.afterMaybePromise(
+          this.buildDispatchAssignmentBundle(
+            dispatchJob,
+            order,
+            vehicleId,
+            driverId,
+            sandboxDispatchSnapshot,
+            options,
           ),
-      ),
-    );
+          (bundle) =>
+            this.afterMaybePromise(
+              this.resolveSuccessfulFareQuoteAnomalies(bundle),
+              () => this.applyDispatchAssignmentBundle(bundle, requestId),
+            ),
+        ),
+      );
+    });
   }
 
   /**
@@ -4918,9 +5362,10 @@ export class OwnedMobilityService
         (log.details as Record<string, unknown> | undefined)?.assignmentId !==
         assignmentId,
     );
-    this.passengerDisclosureSnapshots = this.passengerDisclosureSnapshots.filter(
-      (snapshot) => snapshot.assignmentId !== assignmentId,
-    );
+    this.passengerDisclosureSnapshots =
+      this.passengerDisclosureSnapshots.filter(
+        (snapshot) => snapshot.assignmentId !== assignmentId,
+      );
     this.consumerNotificationOutbox = this.consumerNotificationOutbox.filter(
       (record) =>
         (record.payload as Record<string, unknown>)?.assignmentId !==
@@ -4930,7 +5375,9 @@ export class OwnedMobilityService
     if (previousOrderSnapshot) {
       this.orders = [
         this.cloneOrder(previousOrderSnapshot),
-        ...this.orders.filter((o) => o.orderId !== previousOrderSnapshot.orderId),
+        ...this.orders.filter(
+          (o) => o.orderId !== previousOrderSnapshot.orderId,
+        ),
       ];
     }
     if (previousJobSnapshot) {
@@ -7147,6 +7594,184 @@ export class OwnedMobilityService
     ].join("-");
   }
 
+  private getDispatchMatchingTimeoutMs(): number {
+    const envVal = process.env.DISPATCH_MATCHING_TIMEOUT_MS;
+    if (envVal !== undefined && envVal !== "") {
+      const parsed = Number(envVal);
+      if (Number.isSafeInteger(parsed) && parsed > 0) {
+        return parsed;
+      }
+    }
+    return DISPATCH_MATCHING_TIMEOUT_DEFAULT_MS;
+  }
+
+  private startDispatchSchedulerPolling() {
+    if (this.dispatchSchedulerSweepTimer) {
+      return;
+    }
+    this.dispatchSchedulerSweepTimer = setInterval(() => {
+      void this.runDispatchSchedulerSweep().catch((error) => {
+        this.logger.error(
+          `Dispatch scheduler sweep tick failed: ${
+            error instanceof Error ? error.message : String(error)
+          }`,
+        );
+      });
+    }, DISPATCH_SCHEDULER_SWEEP_INTERVAL_MS);
+    this.dispatchSchedulerSweepTimer.unref?.();
+  }
+
+  private reportDispatchSchedulerSweepFailure(
+    error: unknown,
+    phase:
+      | "matching_timeout"
+      | "acceptance_timeout"
+      | "reservation_hold_escalation",
+    orderId: string,
+  ) {
+    const message = error instanceof Error ? error.message : String(error);
+    this.logger.error(
+      `Dispatch scheduler sweep failed for order ${orderId} during ${phase}: ${message}`,
+    );
+    const tenantId =
+      this.orders.find((candidateOrder) => candidateOrder.orderId === orderId)
+        ?.tenantId ?? null;
+    try {
+      this.auditNotificationService.recordNotification({
+        tenantId,
+        channel: "ops_notice",
+        title: "Dispatch scheduler sweep failure",
+        message: `Automatic ${phase} failed for order ${orderId}: ${message}`,
+        status: "unread",
+      });
+    } catch (notifyError) {
+      this.logger.error(
+        `Failed to record dispatch scheduler failure notification: ${
+          notifyError instanceof Error
+            ? notifyError.message
+            : String(notifyError)
+        }`,
+      );
+    }
+  }
+
+  // Real background trigger for dispatch-timeout and reservation-hold
+  // escalation (SR-DISPATCH-SCHEDULER-001). Re-derives its work from current
+  // state on every call rather than tracking "already handled" bookkeeping
+  // of its own, which is what makes it safe to call again after a restart or
+  // from more than one concurrently running instance: every mutation below
+  // (`handleDispatchTimeout`, `dispatchOrder`) re-validates the record it is
+  // about to change and is a safe no-op ("superseded", or simply no matching
+  // candidate left) if another call already resolved it first.
+  //
+  // Accepts an explicit `now` so tests can exercise "N minutes later"
+  // deterministically instead of depending on real wall-clock timers.
+  async runDispatchSchedulerSweep(now: Date = new Date()): Promise<{
+    skipped: boolean;
+    matchingTimeouts: number;
+    acceptanceTimeouts: number;
+    reservationHoldEscalations: number;
+    failures: number;
+  }> {
+    const summary = {
+      skipped: false,
+      matchingTimeouts: 0,
+      acceptanceTimeouts: 0,
+      reservationHoldEscalations: 0,
+      failures: 0,
+    };
+
+    if (this.dispatchSchedulerSweepRunning) {
+      summary.skipped = true;
+      return summary;
+    }
+
+    this.dispatchSchedulerSweepRunning = true;
+    try {
+      const nowMs = now.getTime();
+      const matchingTimeoutMs = this.getDispatchMatchingTimeoutMs();
+
+      const overdueMatchingJobs = this.dispatchJobs.filter(
+        (job) =>
+          job.status === "matching" &&
+          nowMs - Date.parse(job.createdAt) > matchingTimeoutMs,
+      );
+      for (const job of overdueMatchingJobs) {
+        try {
+          const result = await this.handleDispatchTimeout(
+            job.orderId,
+            "matching_timeout",
+          );
+          // "superseded" means something else (an accept, a fresh dispatch,
+          // another sweep tick) already resolved this before this call ran --
+          // a safe no-op, not a real timeout, so it must not be counted as one.
+          if (result.escalationAction !== "superseded") {
+            summary.matchingTimeouts += 1;
+          }
+        } catch (error) {
+          summary.failures += 1;
+          this.reportDispatchSchedulerSweepFailure(
+            error,
+            "matching_timeout",
+            job.orderId,
+          );
+        }
+      }
+
+      const overdueAssignments = this.dispatchAssignments.filter(
+        (assignment) =>
+          assignment.status === "assigned" &&
+          !!assignment.acceptanceDeadline &&
+          nowMs > Date.parse(assignment.acceptanceDeadline),
+      );
+      for (const assignment of overdueAssignments) {
+        try {
+          const result = await this.handleDispatchTimeout(
+            assignment.orderId,
+            "acceptance_timeout",
+            undefined,
+            { targetAssignmentId: assignment.assignmentId },
+          );
+          if (result.escalationAction !== "superseded") {
+            summary.acceptanceTimeouts += 1;
+          }
+        } catch (error) {
+          summary.failures += 1;
+          this.reportDispatchSchedulerSweepFailure(
+            error,
+            "acceptance_timeout",
+            assignment.orderId,
+          );
+        }
+      }
+
+      const nowIso = now.toISOString();
+      const staleReservationHolds = this.orders.filter(
+        (order) =>
+          order.dispatchSemantics === "reservation" &&
+          order.status === "redispatch_required" &&
+          this.isWithinConfirmationWindow(order, nowIso),
+      );
+      for (const order of staleReservationHolds) {
+        try {
+          await this.dispatchOrder(order.orderId, { mode: "auto" });
+          summary.reservationHoldEscalations += 1;
+        } catch (error) {
+          summary.failures += 1;
+          this.reportDispatchSchedulerSweepFailure(
+            error,
+            "reservation_hold_escalation",
+            order.orderId,
+          );
+        }
+      }
+    } finally {
+      this.dispatchSchedulerSweepRunning = false;
+    }
+
+    return summary;
+  }
+
   private startDriverCompletionOutboxRecoveryPolling() {
     if (
       this.driverCompletionRecoveryTimer ||
@@ -8974,7 +9599,7 @@ export class OwnedMobilityService
     dispatchJobId: string,
     vehicleId: string,
     driverId: string,
-  ) {
+  ): MaybePromise<void> {
     try {
       this.assertBookingRequirementCandidate(order, vehicleId);
       this.assertQualifiedVoiceDispatch(
@@ -8990,35 +9615,34 @@ export class OwnedMobilityService
           vehicleId,
           driverId,
         );
-        return;
-      }
+      } else {
+        if (
+          !this.regulatoryRegistryService.getVehicleDispatchability(
+            vehicleId,
+            order.serviceBucket,
+          )
+        ) {
+          throw new ApiRequestError(
+            HttpStatus.BAD_REQUEST,
+            "VEHICLE_NOT_DISPATCHABLE",
+            "Vehicle is not eligible for dispatch.",
+            { vehicleId },
+          );
+        }
 
-      if (
-        !this.regulatoryRegistryService.getVehicleDispatchability(
-          vehicleId,
-          order.serviceBucket,
-        )
-      ) {
-        throw new ApiRequestError(
-          HttpStatus.BAD_REQUEST,
-          "VEHICLE_NOT_DISPATCHABLE",
-          "Vehicle is not eligible for dispatch.",
-          { vehicleId },
-        );
-      }
-
-      if (
-        !this.regulatoryRegistryService.getDriverAvailability(
-          driverId,
-          order.serviceBucket,
-        )
-      ) {
-        throw new ApiRequestError(
-          HttpStatus.BAD_REQUEST,
-          "DRIVER_NOT_AVAILABLE",
-          "Driver is not eligible for dispatch.",
-          { driverId },
-        );
+        if (
+          !this.regulatoryRegistryService.getDriverAvailability(
+            driverId,
+            order.serviceBucket,
+          )
+        ) {
+          throw new ApiRequestError(
+            HttpStatus.BAD_REQUEST,
+            "DRIVER_NOT_AVAILABLE",
+            "Driver is not eligible for dispatch.",
+            { driverId },
+          );
+        }
       }
     } catch (error) {
       if (!(error instanceof ApiRequestError)) {
@@ -9053,6 +9677,54 @@ export class OwnedMobilityService
         },
       );
     }
+
+    // Vehicle/driver eligibility passed. Also re-check the driver's
+    // cross-platform presence right before committing the assignment: it can
+    // change between candidate listing and assignment just like the checks
+    // above, and reuses the same "refresh and retry" contract.
+    if (!this.platformPresenceService) {
+      return;
+    }
+    return this.assertDriverNotBlockedByPlatformPresence(
+      order,
+      dispatchJobId,
+      vehicleId,
+      driverId,
+    );
+  }
+
+  private async assertDriverNotBlockedByPlatformPresence(
+    order: OwnedOrderRecord,
+    dispatchJobId: string,
+    vehicleId: string,
+    driverId: string,
+  ): Promise<void> {
+    const block =
+      await this.platformPresenceService!.findDispatchBlockingPresence(
+        driverId,
+      );
+    if (!block) {
+      return;
+    }
+
+    throw new ApiRequestError(
+      HttpStatus.CONFLICT,
+      "ELIGIBILITY_CHANGED_BEFORE_ASSIGNMENT",
+      "Eligibility changed before assignment. Refresh candidates and retry.",
+      {
+        dispatchJobId,
+        orderId: order.orderId,
+        vehicleId,
+        driverId,
+        serviceProductCode: this.resolveServiceProductCodeForOrder(order),
+        reasonCodes: [
+          block.reason === "busy"
+            ? "DRIVER_BUSY_ON_OTHER_PLATFORM"
+            : "DRIVER_DISCONNECTED_ON_OTHER_PLATFORM",
+        ],
+        latestEligibility: { platformPresence: block },
+      },
+    );
   }
 
   private normalizeAssignmentEligibilityReasonCode(code?: string) {
@@ -10538,14 +11210,26 @@ export class OwnedMobilityService
   }
 
   private mapOrderToBooking(order: OwnedOrderRecord): BookingRecord {
-    if (
-      !order.bookingId ||
-      !order.tenantId ||
-      !order.bookingType ||
-      !order.businessDispatchSubtype ||
-      !order.reservationWindowStart ||
-      !order.reservationWindowEnd
-    ) {
+    if (!order.bookingId || !order.tenantId) {
+      throw new ApiRequestError(
+        HttpStatus.NOT_FOUND,
+        "BOOKING_NOT_FOUND",
+        "Booking was not found.",
+        {
+          orderId: order.orderId,
+        },
+      );
+    }
+
+    const bookingType = order.bookingType ?? "oneway";
+    const businessDispatchSubtype =
+      order.businessDispatchSubtype ?? "enterprise_dispatch";
+    const reservationWindowStart =
+      order.reservationWindowStart ?? order.createdAt;
+    const reservationWindowEnd =
+      order.reservationWindowEnd ?? reservationWindowStart;
+
+    if (!reservationWindowStart || !reservationWindowEnd) {
       throw new ApiRequestError(
         HttpStatus.NOT_FOUND,
         "BOOKING_NOT_FOUND",
@@ -10561,12 +11245,12 @@ export class OwnedMobilityService
       bookingId: order.bookingId,
       orderId: order.orderId,
       tenantId: order.tenantId,
-      partnerId: order.partnerId,
-      partnerProgramId: order.partnerProgramId,
-      partnerEntrySlug: order.partnerEntrySlug,
-      eligibilityVerificationId: order.eligibilityVerificationId,
-      issuerAuthorizationRef: order.issuerAuthorizationRef,
-      passengerDisclosure: order.passengerDisclosure,
+      partnerId: order.partnerId ?? null,
+      partnerProgramId: order.partnerProgramId ?? null,
+      partnerEntrySlug: order.partnerEntrySlug ?? null,
+      eligibilityVerificationId: order.eligibilityVerificationId ?? null,
+      issuerAuthorizationRef: order.issuerAuthorizationRef ?? null,
+      passengerDisclosure: order.passengerDisclosure ?? null,
       status:
         order.status === "cancelled"
           ? "cancelled"
@@ -10574,38 +11258,42 @@ export class OwnedMobilityService
             ? "completed"
             : "active",
       serviceBucket: "business_dispatch",
-      businessDispatchSubtype: order.businessDispatchSubtype,
-      bookingType: order.bookingType,
-      reservationWindowStart: order.reservationWindowStart,
-      reservationWindowEnd: order.reservationWindowEnd,
-      recurrenceRule: order.recurrenceRule,
-      modifiableUntil: order.modifiableUntil,
-      cancelableUntil: order.cancelableUntil,
-      pickup: { ...order.pickup },
-      dropoff: { ...order.dropoff },
-      passenger: { ...order.passenger },
+      businessDispatchSubtype,
+      bookingType,
+      reservationWindowStart,
+      reservationWindowEnd,
+      recurrenceRule: order.recurrenceRule ?? null,
+      modifiableUntil: order.modifiableUntil ?? null,
+      cancelableUntil: order.cancelableUntil ?? null,
+      pickup: order.pickup ? { ...order.pickup } : { address: "" },
+      dropoff: order.dropoff ? { ...order.dropoff } : { address: "" },
+      passenger: order.passenger
+        ? { ...order.passenger }
+        : { name: "", phone: "" },
       bookedBy: order.bookedBy ? { ...order.bookedBy } : null,
       onsiteContact: order.onsiteContact ? { ...order.onsiteContact } : null,
-      costCenter: order.costCenter,
-      vehiclePreference: order.vehiclePreference,
-      benefitReference: order.benefitReference,
-      direction: order.direction,
-      flightNo: order.flightNo,
-      terminal: order.terminal,
-      luggageCount: order.luggageCount,
-      notes: order.notes,
+      costCenter: order.costCenter ?? null,
+      vehiclePreference: order.vehiclePreference ?? null,
+      benefitReference: order.benefitReference ?? null,
+      direction: order.direction ?? null,
+      flightNo: order.flightNo ?? null,
+      terminal: order.terminal ?? null,
+      luggageCount: order.luggageCount ?? null,
+      notes: order.notes ?? null,
       quotedFare: order.quotedFare ? { ...order.quotedFare } : null,
-      quotedFareSource: order.quotedFareSource,
-      quotedFareRuleVersion: order.quotedFareRuleVersion,
+      quotedFareSource: order.quotedFareSource ?? null,
+      quotedFareRuleVersion: order.quotedFareRuleVersion ?? null,
       manualFareOverride: order.manualFareOverride
         ? { ...order.manualFareOverride }
         : null,
-      approvalState: order.approvalState,
-      approvalRequestIds: [...order.approvalRequestIds],
+      approvalState: order.approvalState ?? "not_required",
+      approvalRequestIds: Array.isArray(order.approvalRequestIds)
+        ? [...order.approvalRequestIds]
+        : [],
       complianceGates,
       orderStatus: order.status,
       createdAt: order.createdAt,
-      updatedAt: order.updatedAt,
+      updatedAt: order.updatedAt ?? order.createdAt,
     };
   }
 
@@ -10786,6 +11474,41 @@ export class OwnedMobilityService
   }
 
   private async listDispatchCandidatesWithEligibility(
+    dispatchJob: DispatchJobRecord,
+    order: OwnedOrderRecord,
+    includeIneligible: boolean,
+  ): Promise<DispatchCandidate[]> {
+    const candidates =
+      await this.listDispatchCandidatesWithEligibilityUnfiltered(
+        dispatchJob,
+        order,
+        includeIneligible,
+      );
+    return this.excludePlatformPresenceBlockedCandidates(candidates);
+  }
+
+  // Multi-platform driver presence (busy elsewhere, or disconnected) is not
+  // part of the runtime eligibility evaluator's own decision -- it is a
+  // dispatch-scoped concern layered on top of whatever candidate list comes
+  // back, so it is applied once here regardless of which branch below
+  // produced the list.
+  private async excludePlatformPresenceBlockedCandidates(
+    candidates: DispatchCandidate[],
+  ): Promise<DispatchCandidate[]> {
+    if (!this.platformPresenceService || candidates.length === 0) {
+      return candidates;
+    }
+    const blocks = await Promise.all(
+      candidates.map((candidate) =>
+        this.platformPresenceService!.findDispatchBlockingPresence(
+          candidate.driverId,
+        ),
+      ),
+    );
+    return candidates.filter((_candidate, index) => !blocks[index]);
+  }
+
+  private async listDispatchCandidatesWithEligibilityUnfiltered(
     dispatchJob: DispatchJobRecord,
     order: OwnedOrderRecord,
     includeIneligible: boolean,
@@ -11548,7 +12271,7 @@ export class OwnedMobilityService
 
     const hasRecording = Boolean(order.recordingId);
     const recordingMissing =
-      order.complianceFlags.includes("recording_missing");
+      order.complianceFlags?.includes("recording_missing") ?? false;
     const state: ComplianceGateState = hasRecording ? "clear" : "blocked";
     return {
       gateType: "recording",
@@ -11596,8 +12319,13 @@ export class OwnedMobilityService
     order: OwnedOrderRecord,
     task: DriverTaskRecord | null,
   ): ComplianceGateRecord | null {
+    const proofRequirements = order.proofRequirements ?? {
+      minPhotoCount: 0,
+      signoffRequired: false,
+      expenseProofRequired: false,
+    };
     const { minPhotoCount, signoffRequired, expenseProofRequired } =
-      order.proofRequirements;
+      proofRequirements;
     const required =
       minPhotoCount > 0 || signoffRequired || expenseProofRequired;
     const hasProof = this.hasCompletionProofEvidence(task?.proof);

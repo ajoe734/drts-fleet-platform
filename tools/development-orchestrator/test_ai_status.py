@@ -420,16 +420,105 @@ class CandidateLifecycleTest(unittest.TestCase):
             with self.subTest(status=status):
                 state = self.state()
                 task = self.task(state)
-                task.update(status=status, candidate_sha="abc123", reviewed_sha="abc123",
-                            ci_sha="abc123", ci_status="success", merge_sha="def456")
+                task.update(
+                    status=status,
+                    candidate_sha="abc123",
+                    reviewed_sha="abc123",
+                    ci_sha="abc123",
+                    ci_status="success",
+                    merge_sha="def456",
+                    acceptance_evidence={"live_probe": "verified"},
+                )
                 with mock.patch.dict(os.environ, {"AI_NAME": "Claude"}, clear=True):
                     ai_status.command_reopen(state, [task["id"], "Code correction required"])
                 self.assertEqual(task["status"], "in_progress")
-                for key in ("candidate_sha", "reviewed_sha", "ci_sha", "ci_status", "merge_sha"):
+                for key in (
+                    "candidate_sha",
+                    "reviewed_sha",
+                    "ci_sha",
+                    "ci_status",
+                    "merge_sha",
+                    "acceptance_evidence",
+                ):
                     self.assertNotIn(key, task)
                 self.assertEqual(state["handoffs"][-1]["to"], "Codex")
                 self.assertEqual(state["handoffs"][-1]["status"], "pending")
                 self.assertEqual(log.call_args.args[0]["type"], "reopen")
+
+    @mock.patch.object(ai_status, "append_log")
+    @mock.patch.object(ai_status, "git_commit_exists", return_value=True)
+    def test_reopen_clears_acceptance_evidence_and_new_candidate_waits_for_fresh_evidence(
+        self, _exists: mock.Mock, _log: mock.Mock
+    ) -> None:
+        for initial_status in ("acceptance", "done"):
+            with self.subTest(initial_status=initial_status):
+                state = self.state(required_acceptance=["staging_signoff"])
+                task = self.task(state)
+                task.update(
+                    {
+                        "status": initial_status,
+                        "candidate_sha": "cand-111",
+                        "candidate_branch": "codex/task-001",
+                        "reviewed_sha": "cand-111",
+                        "ci_sha": "cand-111",
+                        "ci_status": "success",
+                        "ci_run_url": "https://ci.example/1",
+                        "pr_url": "https://github.com/example/repo/pull/1",
+                        "merge_sha": "merge-111",
+                        "acceptance_evidence": {"staging_signoff": "run-42"},
+                    }
+                )
+
+                with mock.patch.dict(os.environ, {"AI_NAME": "Claude"}, clear=True):
+                    ai_status.command_reopen(state, [task["id"], "Code correction required"])
+                self.assertEqual(task["status"], "in_progress")
+                self.assertNotIn("acceptance_evidence", task)
+                self.assertNotIn("candidate_sha", task)
+                self.assertNotIn("merge_sha", task)
+
+                with mock.patch.dict(
+                    os.environ,
+                    {
+                        "AI_NAME": "Codex",
+                        "CANDIDATE_SHA": "cand-222",
+                        "CANDIDATE_BRANCH": "codex/task-001",
+                        "PR_URL": "https://github.com/example/repo/pull/2",
+                    },
+                    clear=True,
+                ):
+                    ai_status.command_handoff(state, [task["id"], "Claude", "New candidate"])
+                self.assertEqual(task["status"], "review")
+                self.assertEqual(task["candidate_sha"], "cand-222")
+
+                with mock.patch.dict(
+                    os.environ,
+                    {"AI_NAME": "Claude", "REVIEWED_SHA": "cand-222"},
+                    clear=True,
+                ):
+                    ai_status.command_approve(state, [task["id"], "LGTM"])
+                self.assertEqual(task["status"], "integrating")
+                self.assertEqual(task["reviewed_sha"], "cand-222")
+
+                env_reconcile = {
+                    "AI_NAME": "Supervisor",
+                    "CANDIDATE_HEAD_SHA": "cand-222",
+                    "CANDIDATE_CI_STATUS": "success",
+                    "MERGE_SHA": "merge-222",
+                }
+                with mock.patch.dict(os.environ, env_reconcile, clear=True):
+                    ai_status.command_reconcile_candidate(state, [task["id"], "Merged new candidate"])
+
+                self.assertEqual(task["status"], "acceptance")
+                self.assertNotIn("acceptance_evidence", task)
+
+                with mock.patch.dict(
+                    os.environ,
+                    {"AI_NAME": "Codex", "ACCEPTANCE_EVIDENCE_JSON": '{"staging_signoff":"run-43"}'},
+                    clear=True,
+                ):
+                    ai_status.command_record_acceptance(state, [task["id"], "Fresh staging accepted"])
+                self.assertEqual(task["status"], "done")
+                self.assertEqual(task["acceptance_evidence"]["staging_signoff"], "run-43")
 
     @mock.patch.object(ai_status, "append_log")
     def test_owner_reopen_other_states_is_unchanged(self, _log: mock.Mock) -> None:

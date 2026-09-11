@@ -10,6 +10,8 @@ import {
 import { Throttle } from "@nestjs/throttler";
 import type {
   PlatformPresenceSummary,
+  RecordPlatformHeartbeatCommand,
+  SetPlatformBusyCommand,
   SetPlatformOfflineCommand,
   SetPlatformOnlineCommand,
 } from "@drts/contracts";
@@ -118,6 +120,36 @@ export class PlatformPresenceController {
     const driverId = this.resolveDriverId(identity, requestedDriverId);
 
     const rec = await this.service.setOffline(driverId, body.platformCode);
+    return toApiSuccessEnvelope(rec, requestId);
+  }
+
+  @Post("busy")
+  @RequireRealms("system", "driver")
+  @RequireScopes("driver:write")
+  async setBusy(
+    @CurrentIdentity() identity: BootstrapRequestIdentity | null,
+    @Body() body: SetPlatformBusyCommand,
+    @Query("driverId") requestedDriverId?: string,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    const driverId = this.resolveDriverId(identity, requestedDriverId);
+
+    const rec = await this.service.setBusy(driverId, body.platformCode);
+    return toApiSuccessEnvelope(rec, requestId);
+  }
+
+  @Post("heartbeat")
+  @RequireRealms("system", "driver")
+  @RequireScopes("driver:write")
+  async recordHeartbeat(
+    @CurrentIdentity() identity: BootstrapRequestIdentity | null,
+    @Body() body: RecordPlatformHeartbeatCommand,
+    @Query("driverId") requestedDriverId?: string,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    const driverId = this.resolveDriverId(identity, requestedDriverId);
+
+    const rec = await this.service.recordHeartbeat(driverId, body.platformCode);
     return toApiSuccessEnvelope(rec, requestId);
   }
 }

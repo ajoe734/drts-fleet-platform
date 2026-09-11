@@ -10,6 +10,7 @@ import { RegulatoryRegistryModule } from "../regulatory-registry/regulatory-regi
 import { SandboxDispatchGateModule } from "../sandbox-dispatch-gate/sandbox-dispatch-gate.module";
 import { ServiceAreaModule } from "../service-area/service-area.module";
 import { ServiceProductModule } from "../service-product/service-product.module";
+import { PlatformPresenceModule } from "../platform-presence/platform-presence.module";
 import { TenantPartnerModule } from "../tenant-partner/tenant-partner.module";
 import { TenantPartnerService } from "../tenant-partner/tenant-partner.service";
 import { VehicleEligibilityModule } from "../vehicle-eligibility/vehicle-eligibility.module";
@@ -36,6 +37,7 @@ import { OwnedAutonomousDispatchExecutorService } from "./owned-autonomous-dispa
     VoiceBookingModule,
     forwardRef(() => SandboxDispatchGateModule),
     forwardRef(() => TenantPartnerModule),
+    forwardRef(() => PlatformPresenceModule),
   ],
   controllers: [OwnedMobilityController],
   providers: [

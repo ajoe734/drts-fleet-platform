@@ -25,6 +25,7 @@ import { CanvasEmptyPanel } from "@/lib/canvas-workflow";
 import { formatOpsCodeLabel } from "@/lib/localized-labels";
 import { formatCompactNumber } from "@/lib/ops-analytics";
 import { getServerLocale } from "@/lib/server-locale";
+import { resolvePlatformAdminHref } from "@/lib/ops-cross-app-links";
 import {
   resolveQueueSemantics,
   isForbiddenStatutoryOverrideAction,
@@ -1224,14 +1225,7 @@ function normalizeActions(record: BoardRecord): ResourceActionDescriptor[] {
 }
 
 function buildPlatformAdminHref(path: string) {
-  const baseUrl =
-    process.env.NEXT_PUBLIC_PLATFORM_ADMIN_URL ??
-    process.env.PLATFORM_ADMIN_WEB_URL ??
-    "/platform-admin";
-  if (path.startsWith("http://") || path.startsWith("https://")) {
-    return path;
-  }
-  return `${baseUrl.replace(/\/$/, "")}${path}`;
+  return resolvePlatformAdminHref(path);
 }
 
 function buildActionHref(
@@ -4505,7 +4499,7 @@ export default async function DispatchPage({
                                   "/adapter-registry",
                                 )}
                                 target="_blank"
-                                rel="noreferrer"
+                                rel="noopener noreferrer"
                                 style={{
                                   textDecoration: "none",
                                   color: "inherit",
@@ -4517,9 +4511,17 @@ export default async function DispatchPage({
                               </Link>
                             ) : null}
                             <Link
-                              href={buildPlatformAdminHref("/audit")}
+                              href={buildPlatformAdminHref(
+                                "mirrorOrderId" in selectedRecord
+                                  ? `/audit?resourceType=forwarded_order&resourceId=${encodeURIComponent(
+                                      selectedRecord.mirrorOrderId,
+                                    )}`
+                                  : `/audit?resourceType=order&resourceId=${encodeURIComponent(
+                                      selectedRecord.orderId,
+                                    )}`,
+                              )}
                               target="_blank"
-                              rel="noreferrer"
+                              rel="noopener noreferrer"
                               style={{
                                 textDecoration: "none",
                                 color: "inherit",
