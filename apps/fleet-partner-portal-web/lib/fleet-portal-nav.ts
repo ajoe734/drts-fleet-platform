@@ -97,3 +97,29 @@ export function buildFleetPortalNav(
     },
   ];
 }
+
+// Host (individual vehicle owner, `/host/*`) is a strictly-read-only actor
+// distinct from the fleet-admin actor `buildFleetPortalNav` above serves --
+// per docs/05-ui/drts-design-canvas/host-screen-contract.md §1, Host "must
+// not see fleet-admin nav items (drivers, vehicles fleet-wide, supply,
+// revenue, training, etc.)", so this is a separate, single-entry nav rather
+// than an addition to `buildFleetPortalNav`'s list.
+//
+// Not yet wired to a request: `app/layout.tsx` renders every route
+// (including `/host/*`) through the single root `FleetPortalShell` with
+// `buildFleetPortalNav`'s admin nav, and neither `app/layout.tsx` nor
+// `components/fleet-portal-shell.tsx` are in this task's write scope. A
+// follow-up scope expansion to those two files is required to detect the
+// Host actor (`x-actor-type: partner_user`, see
+// app/host/lib/host-auth.server.ts) and render this nav (or a dedicated
+// HostShell) instead of the admin one for `/host/*` sessions.
+export function buildHostPortalNav(locale: Locale): CanvasShellNavItem[] {
+  return [
+    {
+      key: "host-vehicles",
+      href: "/host/vehicles",
+      icon: "vehicles",
+      label: locale === "zh" ? "自有車輛" : "My Vehicles",
+    },
+  ];
+}
