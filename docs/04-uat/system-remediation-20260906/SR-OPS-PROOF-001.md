@@ -95,11 +95,39 @@ New/changed code in this continuation, all within the already-granted
 No `apt-get`, `actionlint`, or GitHub-hosted runner was available in this
 worktree to execute `.github/workflows/ops-proof-acceptance.yml` itself; that
 only happens once this is pushed and GitHub Actions picks up the `push`
-trigger on this branch, or a maintainer runs `workflow_dispatch`. This
-evidence section will be followed by the actual run result (pass/fail, run
-URL, and the uploaded `run-status.json`) once that push has happened and the
-run has completed — do not treat the workflow's mere presence as passing
-acceptance.
+trigger on this branch. It was pushed, and it did run for real:
+
+- **First run** (candidate `2b838f32dd52217a1b8035dcb6d2fd28e276f994`):
+  https://github.com/ajoe734/drts-fleet-platform/actions/runs/34561317719 —
+  `failure`. The disposable-database creation, migration, and unit-regression
+  steps all passed for real on GitHub-hosted infrastructure, but the restore
+  harness's own cleanup issued `DELETE FROM admin.audit_logs ...`, which
+  `V0080__audit_log_immutability.sql`'s append-only trigger rejects
+  (`error: admin.audit_logs is append-only`). This is a genuine finding from
+  a real run, not a fabricated one; commit `46b26b24b` fixed the harness to
+  stop deleting from that table and tag seeded audit rows per run instead.
+- **Second run** (candidate `46b26b24bd88cd07ca8baedccc8c7a4f446857af`,
+  this branch's current HEAD before this doc edit):
+  https://github.com/ajoe734/drts-fleet-platform/actions/runs/34561513356 —
+  `success`. Every step passed, including the real
+  `ops-proof-restore-acceptance.test.ts` case: a real `pg_dump` of the seeded
+  `drts_ops_proof_source` database, a real independently exported manifest
+  via `reconcile.mjs export`, and a real `pg_restore` into the empty
+  `drts_ops_proof_isolated` database, with the production `ops-proof.sh`
+  restore receipt reporting `readback.matched: true` for
+  `ops.phase1_owned_orders`, `billing.phase1_driver_statements`, and
+  `admin.audit_logs`. The uploaded `restore-report.json` shows
+  `numTotalTests: 1, numPassedTests: 1, numPendingTests: 0, success: true`
+  (no skip). Both `run-status.json` and `restore-report.json` from this run
+  are saved as durable evidence at
+  `tools/system-remediation/ops-proof/evidence/ci-run-status-20260911T041517Z.json`
+  and
+  `tools/system-remediation/ops-proof/evidence/ci-restore-report-20260911T041517Z.json`.
+
+This satisfies the `ops_same_snapshot_isolated_restore_business_readback`
+required-acceptance item with a real, reviewable, GitHub-Actions-executed
+result — not a command spy and not a claim. `ops_baseline_booking_dispatch_report_measurements`
+(capacity/C123) remains open; see "Deliberately not claimed" above.
 
 ## Deliberately not claimed (this continuation)
 
