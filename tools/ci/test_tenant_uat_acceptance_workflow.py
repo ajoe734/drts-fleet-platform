@@ -125,6 +125,12 @@ class TenantUatAcceptanceWorkflowStructureTests(unittest.TestCase):
         self.assertIn("node dist/main.js", self.text)
         self.assertIn("/api/health", self.text)
 
+    def test_typescript_runner_resolves_from_its_declaring_workspace(self) -> None:
+        package = json.loads((ROOT / "apps/api/package.json").read_text())
+        self.assertIn("tsx", package["devDependencies"])
+        self.assertEqual(self.text.count("./apps/api/node_modules/.bin/tsx "), 2)
+        self.assertNotIn("pnpm exec tsx ", self.text)
+
     def test_sets_the_uat_harness_environment_contract(self) -> None:
         # Matches the harness's own required() checks in the ported specs:
         # DRTS_UAT_ENV must be local|sandbox, and DRTS_UAT_API_URL is set.

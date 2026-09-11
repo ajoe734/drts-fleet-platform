@@ -155,7 +155,7 @@ jobs:
         id: seed
         run: |
           set -o pipefail
-          pnpm exec tsx tests/e2e/system-remediation/sr-qa-tenant-001/appmodule-acceptance-seed.ts \
+          ./apps/api/node_modules/.bin/tsx tests/e2e/system-remediation/sr-qa-tenant-001/appmodule-acceptance-seed.ts \
             2>&1 | tee -a .artifacts/tenant-uat-acceptance/execution-log.txt
 
       - name: Start the real API server
@@ -236,7 +236,7 @@ jobs:
         id: restart_readback
         run: |
           set -o pipefail
-          pnpm exec tsx tests/e2e/system-remediation/sr-qa-tenant-001/restart-readback.ts \
+          ./apps/api/node_modules/.bin/tsx tests/e2e/system-remediation/sr-qa-tenant-001/restart-readback.ts \
             2>&1 | tee -a .artifacts/tenant-uat-acceptance/execution-log.txt
 
       - name: Stop background API server

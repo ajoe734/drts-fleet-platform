@@ -74,7 +74,7 @@ worker VM.
 ## Local verification and remaining evidence
 
 - `python3 -m unittest tools/ci/test_tenant_uat_acceptance_workflow.py -v`:
-  30 tests passed, including execution of the embedded gate/status Python with
+  31 tests passed, including execution of the embedded gate/status Python with
   missing-mail, missing-governance, missing/failed-restart and skipped fixtures.
 - `python3 tools/ci/check_test_coverage.py`: all 69 tracked Python test files
   yield tests CI runs; the original CI discovery defect is fixed locally.
@@ -94,3 +94,11 @@ candidate CI/merge and both required acceptance keys are still necessary:
 `tenant_role_and_cross_tenant_negative_evidence`. Code and local checks alone
 do not mark either acceptance complete. Any product failure reproduced by the
 runner must become an explicitly scoped producer before QA acceptance closes.
+
+The first expanded remote run `34566322674` for candidate
+`fb6eaf046c024f214357db7b9278a75e226d96fe` completed migrations and the API
+build but did not reach HTTP execution: `pnpm exec tsx` was unavailable in the
+root package after frozen installation. `tsx` is declared by `apps/api`, so
+both seed and restart verification now invoke that workspace's installed
+binary while retaining repository-root working directory. Its artifact says
+`not_run`; this infrastructure failure is not a product acceptance result.
