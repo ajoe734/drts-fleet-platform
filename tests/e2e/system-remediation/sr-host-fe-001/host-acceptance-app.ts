@@ -224,7 +224,6 @@ export async function createHostAcceptanceApp(): Promise<HostAcceptanceAppLike> 
     ) {
       return next.handle().pipe(
         catchError((err: unknown) => {
-          // eslint-disable-next-line no-console
           console.error("[host-acceptance] unhandled request error:", err);
           return throwError(() => err);
         }),
@@ -254,7 +253,6 @@ export async function createHostAcceptanceApp(): Promise<HostAcceptanceAppLike> 
     exception: unknown,
     ...rest: unknown[]
   ) {
-    // eslint-disable-next-line no-console
     console.error("[host-acceptance] exception reaching SnakeCaseExceptionFilter:", exception);
     return originalExceptionFilterCatch.apply(this, [exception, ...rest]);
   };
