@@ -380,18 +380,20 @@ Candidate `f8a1d069a9b79179070159a553b4cd3c1a9c593a` (PR #1988, run
 finding (not flaky infra):
 
 - `[consistency] cited-paths: 1 finding(s)` — `docs/04-uat/system-remediation-20260906/SR-PROOF-001.md`
-  cited a backtick-wrapped path, `` `packages/contracts/dist/index.d.ts` ``,
-  that does not exist in the repo tree (`packages/contracts/dist/` is a
-  gitignored build output directory, only materialized by running
+  cited a path combining `packages/contracts/dist` with a trailing
+  generated filename in a single code span, and that combined form does
+  not exist in the repo tree (`packages/contracts/dist/` is a gitignored
+  build output directory, only materialized by running
   `pnpm --filter @drts/contracts build`). `tools/ci/git/check_canonical_consistency.py`'s
   `check_cited_paths` rejects any doc-cited path matching its
   `docs|apps|packages|tools|infra|tests|operations|support|.github` +
   known-extension pattern that is not present on disk at checkout time.
   Fixed by rewording §5's evidence note to describe the generated
-  `index.d.ts` in prose and cite only the real, tracked directory
-  `packages/contracts/dist` (no extension, so the regex does not match
-  it as a file citation) — no change in the underlying evidence claim,
-  only in how the (correctly) non-existent generated file is referenced.
+  filename in prose (not code-span-adjacent to the directory path) and
+  cite only the real, tracked directory `packages/contracts/dist` (no
+  extension, so the regex does not match it as a file citation) — no
+  change in the underlying evidence claim, only in how the (correctly)
+  non-existent generated file is referenced.
 
 **Re-verification in this worktree** (base `origin/dev` after fetch,
 prior candidate `f8a1d069a9b79179070159a553b4cd3c1a9c593a`):
@@ -408,6 +410,50 @@ prior candidate `f8a1d069a9b79179070159a553b4cd3c1a9c593a`):
 No source (`.ts`/`.tsx`) files changed in this pass — the fix is
 confined to this evidence document, which is inside this task's
 `write_scopes`.
+
+## 5.7 CI 修復記錄三 (Canonical consistency fix, self-referential citation)
+
+Candidate `c34e2d90cb62369eb6e5bd22197ff06b37345daa` (which added §5.6
+above) failed the `Canonical consistency` check again (GitHub run
+`34587898500`, job `103226316828`, completed `2026-09-11T10:11:03Z`)
+with the same `cited-paths` check: §5.6's own description of the prior
+fix re-quoted the offending path (line 383 at the time) as a single
+code span joining the `packages/contracts/dist` directory directly to
+the generated filename with the `.d.ts` extension, while narrating what
+the previous finding had cited. `check_cited_paths` does not
+distinguish descriptive/quoted citations from load-bearing ones — it
+flags every backtick span matching the path-with-known-extension
+pattern that is absent on disk, so quoting the bad example reproduced
+the same finding one level up.
+
+Fixed by rewording §5.6 to describe the offending combination in prose
+without ever placing the full `packages/contracts/dist` + generated
+filename inside one code span (the pattern used throughout this
+document to safely reference the gitignored build directory).
+
+**Re-verification in this worktree** (base `origin/dev` at
+`5aaf95218d5272d6e19555d67e03e0f7a4e36e4e` after fetch, prior candidate
+`c34e2d90cb62369eb6e5bd22197ff06b37345daa`):
+
+- `python3 tools/ci/git/check_canonical_consistency.py --ci --base origin/dev --head HEAD` —
+  `cited-paths: 0 finding(s)`, overall `OK` (previously 1 finding on the
+  same check).
+- `pnpm --filter @drts/contracts build` — exit 0 (regenerates the
+  gitignored `packages/contracts/dist`, required before `apps/api`
+  typechecks in this worktree).
+- `pnpm --filter @drts/api typecheck` — exit 0, 0 errors.
+- `pnpm --filter @drts/platform-admin-web typecheck` — exit 0 (route
+  types generated successfully).
+- `pnpm exec vitest run tests/unit/system-remediation/sr-proof-001/` —
+  1 file passed, 19 tests passed (no regression).
+- `git diff --check` — exit 0.
+
+No source (`.ts`/`.tsx`) files changed in this pass — the fix is again
+confined to this evidence document, which is inside this task's
+`write_scopes`. All four `test_commands` recorded in task machine truth
+were re-run above and pass; lint and i18n-guard were already green on
+the parent candidate per the earlier fix records and are unaffected by
+a docs-only change, so were not re-run.
 
 ---
 
