@@ -101,7 +101,15 @@ describe("SR-OPS-CAPACITY-RUNNER-20260911 real capacity + durable readback accep
 
         // --- Setup phase (not part of the measured burst): pre-provision
         // real dispatchable orders over real HTTP, using a legitimate
-        // ops_user bootstrap identity (non-strict test environment).
+        // ops_user bootstrap identity (non-strict test environment). Each
+        // seed request carries its own distinct actor-id: the real
+        // `BootstrapThrottlerGuard` (apps/api/src/common/throttling) tracks
+        // the global 60-req/min limit per actor-id, and a single shared
+        // seed identity across dozens of concurrent workers would collapse
+        // onto one throttle bucket and trip the app's own real rate limiter
+        // before the (unrelated, unmeasured) seed phase even finishes --
+        // that's a false negative from the harness, not a signal about the
+        // measured booking/dispatch/report burst.
         const dispatchCount = countsForDuration(DURATION_SECONDS).dispatch;
         const orderIds: string[] = new Array(dispatchCount);
         let nextIndex = 0;
@@ -117,7 +125,7 @@ describe("SR-OPS-CAPACITY-RUNNER-20260911 real capacity + durable readback accep
               headers: {
                 "content-type": "application/json",
                 "x-actor-type": "ops_user",
-                "x-actor-id": "sr-ops-capacity-seed",
+                "x-actor-id": `sr-ops-capacity-seed-${index}`,
                 "x-request-id": `${runTag}-seed-req-${index}`,
                 "idempotency-key": `${runTag}-seed-${index}`,
               },
