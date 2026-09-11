@@ -11,6 +11,9 @@ import type {
   CrossAppResourceLink,
   DispatchOrderCommand,
   ReassignDispatchCommand,
+  TenantBookingListQuery,
+  TenantBookingsPageRecord,
+  TenantDashboardSummary,
   UpdateTenantBookingCommand,
 } from "@drts/contracts";
 import {
@@ -23,6 +26,16 @@ import { getRuntimeApiBaseUrl } from "./runtime-config";
 import { ENTERPRISE_DISPATCH_TENANT_API_GAP_MAP } from "./tenant-api-gap-map";
 
 const DEFAULT_ACTOR_ID = "enterprise-dispatch-web";
+
+// SR-ENTERPRISE-SEARCH-001: the composable, testable search-query builder
+// lives in ./enterprise-booking-search (no @drts/api-client dependency) so
+// root Vitest can import it directly; re-exported here for callers that
+// already import the tenant client from this module.
+export * from "./enterprise-booking-search";
+
+// SR-ENTERPRISE-DATA-001: same rationale — pure home/trip status logic lives
+// in ./enterprise-trip-status so root Vitest can import it directly.
+export * from "./enterprise-trip-status";
 
 export type EnterpriseDispatchBookingSubmitResult = {
   orderId: string;
@@ -56,8 +69,19 @@ export class EnterpriseDispatchTenantClient {
     return this.client.getTenantBooking(bookingId) as Promise<BookingRecord>;
   }
 
+  async getDashboardSummary(): Promise<TenantDashboardSummary> {
+    return this.client.getTenantDashboardSummary();
+  }
+
   async listBookings(): Promise<BookingRecord[]> {
     return this.client.listTenantBookings();
+  }
+
+  async queryBookings(
+    query: TenantBookingListQuery,
+    options?: RequestOptions,
+  ): Promise<TenantBookingsPageRecord> {
+    return this.client.queryTenantBookings(query, options);
   }
 
   async updateBooking(

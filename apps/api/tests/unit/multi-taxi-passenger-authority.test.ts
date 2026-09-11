@@ -71,6 +71,15 @@ function createHarness(options?: {
         findPassengerPayment: vi.fn(async () => null),
         findElectronicReceipt: vi.fn(async () => null),
         reportPersistenceFailure: vi.fn(),
+        claimPushDeliveryRow: vi.fn(async () => ({
+          claimed: true,
+          fenceToken: 1,
+        })),
+        releasePushDeliveryClaim: vi.fn(async () => undefined),
+        recordPushDeliveryOutcome: vi.fn(async () => ({
+          recorded: true,
+          replayed: false,
+        })),
         ...options.repository,
       }
     : undefined;
