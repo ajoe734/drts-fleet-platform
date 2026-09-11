@@ -23,7 +23,7 @@ on:
       candidate_sha:
         description: "Immutable candidate commit SHA to verify (full 40-char SHA)"
         required: true
-        default: "75136fe3e7c9d143e6a0dbd012e8ec8856ae8127"
+        default: "d5edf78ff03a7313f2c9edaa4070d4e5ac79672f"
       live_target_origin:
         description: "Optional: real deployed bank-console origin for live storage/signing acceptance (leave empty to run runner-validation only)"
         required: false
@@ -57,7 +57,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: live-document-acceptance-${{ github.event.inputs.candidate_sha || '75136fe3e7c9d143e6a0dbd012e8ec8856ae8127' }}
+  group: live-document-acceptance-${{ github.event.inputs.candidate_sha || 'd5edf78ff03a7313f2c9edaa4070d4e5ac79672f' }}
   cancel-in-progress: false
 
 env:
@@ -72,7 +72,7 @@ jobs:
       # script: a workflow_dispatch input is attacker-controllable text, and
       # direct ${{ }} interpolation inside a shell block is substituted
       # before the shell runs, which is a script-injection vector.
-      CANDIDATE_SHA: ${{ github.event.inputs.candidate_sha || '75136fe3e7c9d143e6a0dbd012e8ec8856ae8127' }}
+      CANDIDATE_SHA: ${{ github.event.inputs.candidate_sha || 'd5edf78ff03a7313f2c9edaa4070d4e5ac79672f' }}
       # The commit that actually supplied this workflow/test definition,
       # recorded separately from CANDIDATE_SHA so a push-triggered run's
       # evidence never conflates "which commit changed the workflow" with
@@ -95,7 +95,7 @@ jobs:
 
       - uses: actions/checkout@v4
         with:
-          ref: ${{ github.event.inputs.candidate_sha || '75136fe3e7c9d143e6a0dbd012e8ec8856ae8127' }}
+          ref: ${{ github.event.inputs.candidate_sha || 'd5edf78ff03a7313f2c9edaa4070d4e5ac79672f' }}
           fetch-depth: 0
 
       - name: Verify checkout resolved the exact immutable candidate
@@ -245,7 +245,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: live-document-acceptance-${{ github.event.inputs.candidate_sha || '75136fe3e7c9d143e6a0dbd012e8ec8856ae8127' }}
+          name: live-document-acceptance-${{ github.event.inputs.candidate_sha || 'd5edf78ff03a7313f2c9edaa4070d4e5ac79672f' }}
           path: |
             .artifacts/live-document-acceptance/execution-log.txt
             .artifacts/live-document-acceptance/test-report.json
