@@ -108,34 +108,157 @@ describe("enterprise-dispatch control-plane proxy", () => {
     expect(headers.get("x-roles")).toBeNull();
   });
 
-  it("reads created booking records back through the same tenant seam", async () => {
+  it("reads bookings using the cookie session's verified tenant, without bootstrap identity", async () => {
     process.env.DRTS_API_URL = "https://api.dev.example";
-    process.env.DRTS_ENTERPRISE_DISPATCH_TENANT_ID = "tenant-e2e-001";
-    process.env.DRTS_ENTERPRISE_DISPATCH_ACTOR_ID = "enterprise-e2e";
-    const fetchMock = vi.fn().mockResolvedValue(
-      new Response(JSON.stringify({ data: { bookingId: "booking-001" } }), {
-        status: 200,
-        headers: { "Content-Type": "application/json" },
-      }),
-    );
+    process.env.DRTS_ENTERPRISE_DISPATCH_TENANT_ID =
+      "fixture-must-not-authorize";
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            data: {
+              active: true,
+              identity: { realm: "tenant", tenant_id: "verified-tenant" },
+            },
+          }),
+          { status: 200 },
+        ),
+      )
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ data: { bookingId: "booking-001" } }), {
+          status: 200,
+        }),
+      );
     vi.stubGlobal("fetch", fetchMock);
-
     const response = await GET(
-      requestFor("GET", ["tenant", "bookings", "booking-001"]),
+      requestFor("GET", ["tenant", "bookings", "booking-001"], {
+        headers: {
+          cookie: "drts_tenant_session=real-cookie-token",
+          "x-tenant-id": "verified-tenant",
+          "x-actor-id": "spoof",
+          "x-realm": "platform",
+          "x-drts-authorization": "Bearer spoof",
+        },
+      }),
       contextFor(["tenant", "bookings", "booking-001"]),
     );
-
     expect(response.status).toBe(200);
-    const [targetUrl, init] = fetchMock.mock.calls[0] as [URL, RequestInit];
-    const headers = init.headers as Headers;
-
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(String(fetchMock.mock.calls[0]![0])).toBe(
+      "https://api.dev.example/api/auth/session",
+    );
+    expect(
+      new Headers(fetchMock.mock.calls[0]![1].headers).get("authorization"),
+    ).toBe("Bearer real-cookie-token");
+    const [targetUrl, init] = fetchMock.mock.calls[1] as [URL, RequestInit];
+    const headers = new Headers(init.headers);
     expect(targetUrl.toString()).toBe(
       "https://api.dev.example/api/tenant/bookings/booking-001",
     );
-    expect(init.method).toBe("GET");
-    expect(headers.get("x-realm")).toBe("tenant");
-    expect(headers.get("x-actor-id")).toBe("enterprise-e2e");
-    expect(headers.get("x-tenant-id")).toBe("tenant-e2e-001");
+    expect(headers.get("authorization")).toBe("Bearer real-cookie-token");
+    expect(headers.get("x-tenant-id")).toBe("verified-tenant");
+    for (const name of [
+      "x-realm",
+      "x-actor-type",
+      "x-actor-id",
+      "x-drts-authorization",
+      "cookie",
+    ])
+      expect(headers.has(name)).toBe(false);
+  });
+
+  it("rejects a missing session without calling the backend", async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+    const response = await GET(
+      requestFor("GET", ["tenant", "bookings"]),
+      contextFor(["tenant", "bookings"]),
+    );
+    expect(response.status).toBe(401);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["expired", 401, { error: "TOKEN_EXPIRED" }, 401],
+    [
+      "wrong realm",
+      200,
+      {
+        data: {
+          active: true,
+          identity: { realm: "ops", tenant_id: "tenant-a" },
+        },
+      },
+      403,
+    ],
+    [
+      "inactive",
+      200,
+      {
+        data: {
+          active: false,
+          identity: { realm: "tenant", tenant_id: "tenant-a" },
+        },
+      },
+      403,
+    ],
+    [
+      "missing tenant",
+      200,
+      { data: { active: true, identity: { realm: "tenant" } } },
+      403,
+    ],
+    ["auth outage", 503, { error: "DOWN" }, 503],
+  ])(
+    "does not forward a booking query with %s session",
+    async (_name, upstreamStatus, body, expectedStatus) => {
+      const fetchMock = vi
+        .fn()
+        .mockResolvedValue(
+          new Response(JSON.stringify(body), {
+            status: Number(upstreamStatus),
+          }),
+        );
+      vi.stubGlobal("fetch", fetchMock);
+      const response = await GET(
+        requestFor("GET", ["tenant", "bookings"], {
+          headers: { cookie: "drts_tenant_session=token" },
+        }),
+        contextFor(["tenant", "bookings"]),
+      );
+      expect(response.status).toBe(expectedStatus);
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+    },
+  );
+
+  it("rejects another tenant selector even with a valid cookie session", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValue(
+        new Response(
+          JSON.stringify({
+            data: {
+              active: true,
+              identity: { realm: "tenant", tenant_id: "tenant-a" },
+            },
+          }),
+          { status: 200 },
+        ),
+      );
+    vi.stubGlobal("fetch", fetchMock);
+    const response = await GET(
+      requestFor("GET", ["tenant", "bookings"], {
+        headers: {
+          cookie: "drts_tenant_session=token",
+          "x-tenant-id": "tenant-b",
+        },
+      }),
+      contextFor(["tenant", "bookings"]),
+    );
+    expect(response.status).toBe(403);
+    expect(await response.text()).toContain("TENANT_SCOPE_MISMATCH");
+    expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
   it("forwards the declared booking update and cancellation lifecycle", async () => {

@@ -1,19 +1,36 @@
 "use client";
 
-import type { BookingRecord } from "@drts/contracts";
+import type {
+  BookingRecord,
+  BookingStatus,
+  TenantBookingsPageRecord,
+} from "@drts/contracts";
 import { ApiClientError } from "@drts/api-client";
+import { DEFAULT_PRODUCT_TIMEZONE } from "@drts/contracts";
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import {
   EBtnContent,
   ECard,
+  EIcon,
   EPill,
   ERow,
   entBtnStyle,
 } from "@/components/ent-kit";
 import { EntRoute } from "@/components/ent-screen-bits";
 import { EntPageHead } from "@/components/enterprise-shell";
-import { getEnterpriseDispatchTenantClient } from "@/lib/api-client";
+import {
+  buildEnterpriseBookingSearchQuery,
+  computeEnterpriseBookingPageRangeLabel,
+  DEFAULT_ENTERPRISE_BOOKING_SEARCH_FILTERS,
+  DEFAULT_ENTERPRISE_BOOKING_SEARCH_PAGE_SIZE,
+  ENTERPRISE_BOOKING_SEARCH_PAGE_SIZE_OPTIONS,
+  formatEnterpriseBookingTime,
+  getEnterpriseDispatchTenantClient,
+  hasActiveEnterpriseBookingFilters,
+  validateEnterpriseBookingDateRange,
+  type EnterpriseBookingSearchFilters,
+} from "@/lib/api-client";
 import {
   createEnterpriseBookingDraftFromRecord,
   serializeEnterpriseBookingDraft,
@@ -83,30 +100,94 @@ function errorContent(
   );
 }
 
-export function EnterpriseBookingHistory() {
+export function EnterpriseBookingHistory({ tenantId }: { tenantId: string }) {
   const { t: tr } = useTranslation();
-  const [bookings, setBookings] = useState<BookingRecord[] | null>(null);
+  const [filters, setFilters] = useState<EnterpriseBookingSearchFilters>(
+    DEFAULT_ENTERPRISE_BOOKING_SEARCH_FILTERS,
+  );
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(
+    DEFAULT_ENTERPRISE_BOOKING_SEARCH_PAGE_SIZE,
+  );
+  const [result, setResult] = useState<TenantBookingsPageRecord | null>(null);
   const [state, setState] = useState<GatewayState | null>(null);
+  const [retryAttempt, setRetryAttempt] = useState(0);
+
+  const dateRangeValid = validateEnterpriseBookingDateRange(
+    filters.dateFrom,
+    filters.dateTo,
+  );
+  const active = hasActiveEnterpriseBookingFilters(filters);
 
   useEffect(() => {
-    getEnterpriseDispatchTenantClient(enterpriseTenant.id)
-      .listBookings()
-      .then(setBookings)
-      .catch((error: unknown) =>
+    if (!dateRangeValid) {
+      setResult(null);
+      return;
+    }
+    const controller = new AbortController();
+    const query = buildEnterpriseBookingSearchQuery(filters, page, pageSize);
+    setState(null);
+    setResult(null);
+    getEnterpriseDispatchTenantClient(tenantId)
+      .queryBookings(query, { signal: controller.signal })
+      .then((pageRecord) => {
+        if (!controller.signal.aborted) setResult(pageRecord);
+      })
+      .catch((error: unknown) => {
+        if (controller.signal.aborted) return;
         setState(
           (gatewayHref(error)?.slice(1) as GatewayState | undefined) ??
             "degraded",
-        ),
-      );
-  }, []);
+        );
+      });
+    return () => controller.abort();
+  }, [
+    tenantId,
+    retryAttempt,
+    filters.passenger,
+    filters.status,
+    filters.dateFrom,
+    filters.dateTo,
+    page,
+    pageSize,
+    dateRangeValid,
+  ]);
 
-  if (state) return errorContent(state, tr);
+  function updateFilters(patch: Partial<EnterpriseBookingSearchFilters>) {
+    setFilters((prev) => ({ ...prev, ...patch }));
+    setPage(1);
+  }
+
+  function clearFilters() {
+    setFilters(DEFAULT_ENTERPRISE_BOOKING_SEARCH_FILTERS);
+    setPage(1);
+  }
+
+  if (state)
+    return (
+      <>
+        {errorContent(state, tr)}
+        <button
+          type="button"
+          data-testid="enterprise-search-retry"
+          onClick={() => setRetryAttempt((value) => value + 1)}
+        >
+          {tr("bookingLifecycle.history.retry")}
+        </button>
+      </>
+    );
+
+  const items = result?.items ?? [];
+  const pagination = result?.pagination ?? null;
+  const rangeLabel = pagination
+    ? computeEnterpriseBookingPageRangeLabel(pagination, items.length)
+    : "";
 
   return (
     <>
       <EntPageHead
         title={tr("bookings.title")}
-        sub="從 tenant booking API 讀取；不以 fixture 補值"
+        sub={tr("bookingLifecycle.history.sub")}
         actions={
           <Link
             href="/bookings/new"
@@ -116,22 +197,304 @@ export function EnterpriseBookingHistory() {
           </Link>
         }
       />
+
+      <div
+        style={{
+          display: "flex",
+          flexDirection: "column",
+          gap: 12,
+          marginBottom: 16,
+        }}
+      >
+        <div
+          style={{
+            display: "flex",
+            gap: 10,
+            flexWrap: "wrap",
+            alignItems: "center",
+          }}
+        >
+          <div
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: 8,
+              padding: "0 12px",
+              height: 36,
+              background: t.surface,
+              border: `1px solid ${t.line}`,
+              borderRadius: t.radiusSm,
+              minWidth: 240,
+            }}
+          >
+            <span style={{ color: t.faint, display: "flex" }}>
+              <EIcon name="search" size={15} />
+            </span>
+            <input
+              type="text"
+              aria-label={tr("bookingLifecycle.history.searchPlaceholder")}
+              data-testid="enterprise-search-input"
+              value={filters.passenger}
+              onChange={(e) => updateFilters({ passenger: e.target.value })}
+              placeholder={tr("bookingLifecycle.history.searchPlaceholder")}
+              style={{
+                border: "none",
+                background: "transparent",
+                outline: "none",
+                fontSize: 13,
+                fontFamily: t.sans,
+                color: t.ink,
+                width: "100%",
+              }}
+            />
+            {filters.passenger && (
+              <button
+                type="button"
+                onClick={() => updateFilters({ passenger: "" })}
+                aria-label={tr("bookingLifecycle.history.clearFilters")}
+                style={{
+                  border: "none",
+                  background: "transparent",
+                  color: t.muted,
+                  cursor: "pointer",
+                  padding: 2,
+                  display: "flex",
+                }}
+              >
+                <EIcon name="x" size={14} />
+              </button>
+            )}
+          </div>
+
+          <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+            <label
+              htmlFor="booking-status-filter"
+              style={{ fontSize: 12, color: t.muted, fontWeight: 500 }}
+            >
+              {tr("bookingLifecycle.history.statusLabel")}
+            </label>
+            <select
+              id="booking-status-filter"
+              data-testid="enterprise-status-select"
+              value={filters.status}
+              onChange={(e) =>
+                updateFilters({
+                  status: e.target.value as BookingStatus | "",
+                })
+              }
+              style={{
+                height: 36,
+                padding: "0 10px",
+                borderRadius: t.radiusSm,
+                border: `1px solid ${t.line}`,
+                background: t.surface,
+                color: t.ink,
+                fontSize: 13,
+                fontFamily: t.sans,
+                cursor: "pointer",
+                outline: "none",
+              }}
+            >
+              <option value="">
+                {tr("bookingLifecycle.history.statusAll")}
+              </option>
+              <option value="active">
+                {tr("bookingLifecycle.history.statusActive")}
+              </option>
+              <option value="completed">
+                {tr("bookingLifecycle.history.statusCompleted")}
+              </option>
+              <option value="cancelled">
+                {tr("bookingLifecycle.history.statusCancelled")}
+              </option>
+            </select>
+          </div>
+
+          <div style={{ flex: 1 }} />
+
+          <div
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: 6,
+              background: t.surface,
+              border: `1px solid ${t.line}`,
+              borderRadius: t.radiusSm,
+              padding: "0 8px",
+              height: 36,
+            }}
+          >
+            <span style={{ color: t.faint, display: "flex" }}>
+              <EIcon name="cal" size={15} />
+            </span>
+            <input
+              type="date"
+              aria-label={tr("bookingLifecycle.history.dateFrom")}
+              data-testid="enterprise-date-from"
+              value={filters.dateFrom}
+              onChange={(e) => updateFilters({ dateFrom: e.target.value })}
+              style={{
+                border: "none",
+                background: "transparent",
+                color: t.ink,
+                fontSize: 12.5,
+                fontFamily: t.sans,
+                outline: "none",
+              }}
+            />
+            <span style={{ color: t.muted, fontSize: 12 }}>–</span>
+            <input
+              type="date"
+              aria-label={tr("bookingLifecycle.history.dateTo")}
+              data-testid="enterprise-date-to"
+              value={filters.dateTo}
+              onChange={(e) => updateFilters({ dateTo: e.target.value })}
+              style={{
+                border: "none",
+                background: "transparent",
+                color: t.ink,
+                fontSize: 12.5,
+                fontFamily: t.sans,
+                outline: "none",
+              }}
+            />
+          </div>
+
+          <span
+            data-testid="enterprise-search-timezone"
+            style={{ fontSize: 12, color: t.muted }}
+          >
+            {DEFAULT_PRODUCT_TIMEZONE}
+          </span>
+
+          {active && (
+            <button
+              type="button"
+              onClick={clearFilters}
+              data-testid="enterprise-clear-filters"
+              style={{
+                height: 36,
+                padding: "0 12px",
+                border: `1px solid ${t.line}`,
+                borderRadius: t.radiusSm,
+                background: t.surfaceLo,
+                color: t.muted,
+                fontSize: 12.5,
+                fontWeight: 600,
+                fontFamily: t.sans,
+                cursor: "pointer",
+                display: "inline-flex",
+                alignItems: "center",
+                gap: 5,
+              }}
+            >
+              <EIcon name="refresh" size={13} />
+              {tr("bookingLifecycle.history.clearFilters")}
+            </button>
+          )}
+        </div>
+
+        {!dateRangeValid && (
+          <div
+            data-testid="enterprise-date-range-error"
+            style={{ fontSize: 12.5, color: t.danger }}
+          >
+            {tr("bookingLifecycle.history.dateRangeError")}
+          </div>
+        )}
+
+        {dateRangeValid && (
+          <div
+            data-testid="enterprise-result-count"
+            data-total-items={pagination?.totalItems ?? ""}
+            data-current-page={pagination?.page ?? ""}
+            style={{
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "space-between",
+              fontSize: 12.5,
+              color: t.muted,
+              padding: "2px 4px",
+            }}
+          >
+            <span>
+              {result === null
+                ? tr("bookingLifecycle.history.loading")
+                : active
+                  ? tr("bookingLifecycle.history.resultCount", {
+                      count: pagination?.totalItems ?? 0,
+                      total: pagination?.totalItems ?? 0,
+                    })
+                  : tr("bookingLifecycle.history.resultCountAll", {
+                      total: pagination?.totalItems ?? 0,
+                    })}
+            </span>
+            {pagination && pagination.totalItems > 0 && (
+              <span>
+                {tr("bookingLifecycle.history.pageRange", {
+                  range: rangeLabel,
+                  pages: pagination.totalPages,
+                })}
+              </span>
+            )}
+          </div>
+        )}
+      </div>
+
       <ECard t={t} pad={0}>
-        {bookings === null ? (
-          <div style={{ padding: 18, color: t.muted }}>
+        {!dateRangeValid ? null : result === null ? (
+          <div
+            data-testid="enterprise-search-loading"
+            style={{ padding: 18, color: t.muted }}
+          >
             {tr("bookingLifecycle.history.loading")}
           </div>
-        ) : bookings.length === 0 ? (
-          <div style={{ padding: 18, color: t.muted }}>
+        ) : items.length === 0 && !active ? (
+          <div
+            data-testid="enterprise-empty-state"
+            style={{ padding: 18, color: t.muted }}
+          >
             {tr("bookingLifecycle.history.empty")}
           </div>
+        ) : items.length === 0 ? (
+          <div
+            data-testid="enterprise-filtered-empty-state"
+            style={{
+              padding: "48px 24px",
+              textAlign: "center",
+              display: "flex",
+              flexDirection: "column",
+              alignItems: "center",
+              gap: 12,
+            }}
+          >
+            <strong style={{ fontSize: 16, color: t.ink }}>
+              {tr("bookingLifecycle.history.filteredEmpty.title")}
+            </strong>
+            <p
+              style={{ color: t.muted, fontSize: 13, maxWidth: 380, margin: 0 }}
+            >
+              {tr("bookingLifecycle.history.filteredEmpty.body")}
+            </p>
+            <button
+              type="button"
+              onClick={clearFilters}
+              data-testid="enterprise-filter-empty-clear"
+              style={entBtnStyle(t, { variant: "default", size: "sm" })}
+            >
+              <EBtnContent icon="refresh">
+                {tr("bookingLifecycle.history.clearFilters")}
+              </EBtnContent>
+            </button>
+          </div>
         ) : (
-          bookings.map((booking, index) => {
+          items.map((booking, index) => {
             const display = bookingState(booking);
             return (
               <Link
                 key={booking.bookingId}
                 href={`/bookings/${encodeURIComponent(booking.bookingId)}`}
+                data-testid={`enterprise-booking-row-${booking.bookingId}`}
                 style={{
                   display: "grid",
                   gridTemplateColumns: "140px 1fr auto",
@@ -149,7 +512,10 @@ export function EnterpriseBookingHistory() {
                 <span>
                   <strong>{booking.passenger.name}</strong>
                   <small style={{ display: "block", color: t.muted }}>
-                    {booking.pickup.address} → {booking.dropoff.address}
+                    {booking.pickup.address} → {booking.dropoff.address} ·{" "}
+                    {formatEnterpriseBookingTime(
+                      booking.reservationWindowStart,
+                    )}
                   </small>
                 </span>
                 <EPill t={t} tone={display.tone} dot>
@@ -160,6 +526,106 @@ export function EnterpriseBookingHistory() {
           })
         )}
       </ECard>
+
+      {dateRangeValid && pagination && pagination.totalItems > 0 && (
+        <div
+          data-testid="enterprise-pagination"
+          style={{
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "space-between",
+            flexWrap: "wrap",
+            gap: 12,
+            marginTop: 16,
+            padding: "8px 4px",
+          }}
+        >
+          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            <span style={{ fontSize: 12, color: t.muted }}>
+              {tr("bookingLifecycle.history.pageSizeLabel")}
+            </span>
+            <select
+              aria-label={tr("bookingLifecycle.history.pageSizeAria")}
+              data-testid="enterprise-page-size"
+              value={pageSize}
+              onChange={(e) => {
+                setPageSize(Number(e.target.value));
+                setPage(1);
+              }}
+              style={{
+                height: 32,
+                padding: "0 8px",
+                borderRadius: t.radiusSm,
+                border: `1px solid ${t.line}`,
+                background: t.surface,
+                color: t.ink,
+                fontSize: 12.5,
+                fontFamily: t.sans,
+                cursor: "pointer",
+                outline: "none",
+              }}
+            >
+              {ENTERPRISE_BOOKING_SEARCH_PAGE_SIZE_OPTIONS.map((size) => (
+                <option key={size} value={size}>
+                  {tr("bookingLifecycle.history.pageSizeOption", { size })}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            <button
+              type="button"
+              onClick={() => setPage((p) => Math.max(1, p - 1))}
+              disabled={pagination.page <= 1}
+              data-testid="enterprise-page-prev"
+              style={{
+                ...entBtnStyle(t, {
+                  variant: "default",
+                  size: "sm",
+                  disabled: pagination.page <= 1,
+                }),
+                cursor: pagination.page <= 1 ? "not-allowed" : "pointer",
+                opacity: pagination.page <= 1 ? 0.5 : 1,
+              }}
+            >
+              {tr("bookingLifecycle.history.previousPage")}
+            </button>
+            <span
+              style={{
+                fontSize: 13,
+                fontFamily: t.mono,
+                color: t.ink2,
+                padding: "0 6px",
+              }}
+            >
+              {pagination.page} / {pagination.totalPages}
+            </span>
+            <button
+              type="button"
+              onClick={() =>
+                setPage((p) => Math.min(pagination.totalPages, p + 1))
+              }
+              disabled={pagination.page >= pagination.totalPages}
+              data-testid="enterprise-page-next"
+              style={{
+                ...entBtnStyle(t, {
+                  variant: "default",
+                  size: "sm",
+                  disabled: pagination.page >= pagination.totalPages,
+                }),
+                cursor:
+                  pagination.page >= pagination.totalPages
+                    ? "not-allowed"
+                    : "pointer",
+                opacity: pagination.page >= pagination.totalPages ? 0.5 : 1,
+              }}
+            >
+              {tr("bookingLifecycle.history.nextPage")}
+            </button>
+          </div>
+        </div>
+      )}
     </>
   );
 }
