@@ -2,13 +2,15 @@
 
 import Link from "next/link";
 import { useParams } from "next/navigation";
-import React, { useEffect, useState } from "react";
+import React, { useCallback, useEffect, useState } from "react";
 import { formatDateTime, usePlatformAdminClient } from "@/lib/admin-client";
 import { createIdempotencyKey } from "@drts/api-client";
 import { useTranslation } from "@/lib/i18n";
 import type {
   ReimbursementBatchRecord,
   ReimbursementItemRecord,
+  RemittanceProofReadbackGrant,
+  RemittanceProofRecord,
 } from "@drts/contracts";
 import {
   CanvasBanner as Banner,
@@ -23,6 +25,7 @@ import {
   type CanvasTheme,
   type CanvasTone,
 } from "@drts/ui-web";
+import { proofT } from "../translations";
 
 const theme = buildCanvasTheme({
   surface: "platform",
@@ -219,6 +222,50 @@ function toneText(th: CanvasTheme, tone: CanvasTone) {
   }
 }
 
+function GateRow({
+  theme: th,
+  ok,
+  label,
+  sub,
+}: {
+  theme: CanvasTheme;
+  ok: boolean;
+  label: string;
+  sub?: string;
+}) {
+  return (
+    <div style={{ display: "flex", alignItems: "flex-start", gap: 8 }}>
+      <span
+        aria-hidden
+        style={{
+          width: 14,
+          height: 14,
+          marginTop: 2,
+          flexShrink: 0,
+          display: "inline-flex",
+          alignItems: "center",
+          justifyContent: "center",
+          fontSize: 11,
+          fontWeight: 700,
+          color: ok ? toneText(th, "success") : toneText(th, "danger"),
+        }}
+      >
+        {ok ? "✓" : "✕"}
+      </span>
+      <div>
+        <div style={{ fontSize: 12.5, color: th.text, fontWeight: 600 }}>
+          {label}
+        </div>
+        {sub ? (
+          <div style={{ fontSize: 11, color: th.textMuted, marginTop: 1 }}>
+            {sub}
+          </div>
+        ) : null}
+      </div>
+    </div>
+  );
+}
+
 function formatMoney(
   amount?: { amountMinor: number; currency: string } | null,
 ) {
@@ -381,7 +428,7 @@ function actionButtonLinkStyle(primary = false) {
 export default function ReimbursementDetailPage() {
   const client = usePlatformAdminClient();
   const params = useParams<{ batchId: string }>();
-  const { t } = useTranslation();
+  const { t, locale } = useTranslation();
   const batchId = Array.isArray(params.batchId)
     ? params.batchId[0]
     : params.batchId;
@@ -391,63 +438,87 @@ export default function ReimbursementDetailPage() {
   const [approveReason, setApproveReason] = useState("");
   const [approvalError, setApprovalError] = useState<string | null>(null);
   const [approvalReceipt, setApprovalReceipt] = useState<string | null>(null);
-  const [remittanceProofId, setRemittanceProofId] = useState("");
   const [savingAction, setSavingAction] = useState<"approve" | "paid" | null>(
     null,
   );
   const [approvalKey, setApprovalKey] = useState(() =>
     createIdempotencyKey("reimbursement-approve"),
   );
-  const [markPaidKey, setMarkPaidKey] = useState(() =>
-    createIdempotencyKey("reimbursement-mark-paid"),
+  const [payWithProofKey, setPayWithProofKey] = useState(() =>
+    createIdempotencyKey("reimbursement-pay-with-proof"),
   );
+  const [proof, setProof] = useState<RemittanceProofRecord | null>(null);
+  const [proofLoading, setProofLoading] = useState(false);
+  const [proofError, setProofError] = useState<string | null>(null);
+  const [readbackGrant, setReadbackGrant] =
+    useState<RemittanceProofReadbackGrant | null>(null);
+  const [readbackLoading, setReadbackLoading] = useState(false);
+  const [readbackError, setReadbackError] = useState<string | null>(null);
+  const [payWithProofError, setPayWithProofError] = useState<string | null>(
+    null,
+  );
+
+  const loadBatch = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+
+    try {
+      const batches = await client.listReimbursementBatches();
+      const nextBatch =
+        batches.find(
+          (item: ReimbursementBatchRecord) => item.batchId === batchId,
+        ) ?? null;
+      setBatch(nextBatch);
+      if (!nextBatch) {
+        setError(null);
+      }
+    } catch (nextError: any) {
+      setBatch(null);
+      setError(nextError?.message ?? String(nextError));
+    } finally {
+      setLoading(false);
+    }
+  }, [batchId, client]);
+
+  useEffect(() => {
+    void loadBatch();
+  }, [loadBatch]);
 
   useEffect(() => {
     let active = true;
 
-    async function loadBatch() {
-      setLoading(true);
-      setError(null);
-
+    async function loadProof() {
+      const proofId = batch?.remittanceProofId;
+      if (!proofId) {
+        setProof(null);
+        setProofError(null);
+        return;
+      }
+      setProofLoading(true);
+      setProofError(null);
       try {
-        const batches = await client.listReimbursementBatches();
-        const nextBatch =
-          batches.find(
-            (item: ReimbursementBatchRecord) => item.batchId === batchId,
-          ) ?? null;
-
-        if (!active) {
-          return;
+        const record = await client.getRemittanceProof(proofId);
+        if (active) {
+          setProof(record);
         }
-
-        if (nextBatch) {
-          setBatch(nextBatch);
-          setRemittanceProofId(nextBatch.remittanceProofId ?? "");
-          return;
-        }
-
-        setBatch(null);
-        setRemittanceProofId("");
       } catch (nextError: any) {
-        if (!active) {
-          return;
+        if (active) {
+          setProof(null);
+          setProofError(nextError?.message ?? String(nextError));
         }
-        setBatch(null);
-        setRemittanceProofId("");
-        setError(nextError?.message ?? String(nextError));
       } finally {
         if (active) {
-          setLoading(false);
+          setProofLoading(false);
         }
       }
     }
 
-    void loadBatch();
+    void loadProof();
 
     return () => {
       active = false;
     };
-  }, [batchId, client, t]);
+  }, [batch?.remittanceProofId, client]);
 
   async function handleApprove() {
     if (!batch) {
@@ -487,32 +558,48 @@ export default function ReimbursementDetailPage() {
     }
   }
 
-  async function handleMarkPaid() {
-    if (!batch) {
+  async function handleRequestReadback() {
+    if (!proof) {
+      return;
+    }
+    setReadbackLoading(true);
+    setReadbackError(null);
+    try {
+      const grant = await client.requestRemittanceProofReadback({
+        proofId: proof.proofId,
+      });
+      setReadbackGrant(grant);
+    } catch (nextError: any) {
+      setReadbackError(nextError?.message ?? String(nextError));
+    } finally {
+      setReadbackLoading(false);
+    }
+  }
+
+  async function handleMarkPaidWithProof() {
+    if (!batch || !proof) {
       return;
     }
 
     setSavingAction("paid");
-    setApprovalError(null);
+    setPayWithProofError(null);
 
     try {
-      const proofId = remittanceProofId.trim();
-      const nextBatch = await client.markReimbursementPaid(
-        batch.batchId,
-        {
-          ...(proofId ? { remittanceProofId: proofId } : {}),
-          paidAt: new Date().toISOString(),
-        },
-        {
-          idempotencyKey: markPaidKey,
-        },
+      const receipt = await client.markReimbursementPaidWithProof({
+        batchId: batch.batchId,
+        proofId: proof.proofId,
+        idempotencyKey: payWithProofKey,
+      });
+      setApprovalReceipt(
+        proofT("payWithProof.success", locale, {
+          proofId: receipt.proofId,
+          receiptId: receipt.receiptId,
+        }),
       );
-      setBatch(nextBatch);
-      setRemittanceProofId(nextBatch.remittanceProofId ?? remittanceProofId);
-      setApprovalReceipt(t("payments.reimbursements.detail.markedPaid"));
-      setMarkPaidKey(createIdempotencyKey("reimbursement-mark-paid"));
+      setPayWithProofKey(createIdempotencyKey("reimbursement-pay-with-proof"));
+      await loadBatch();
     } catch (nextError: any) {
-      setApprovalError(nextError?.message ?? String(nextError));
+      setPayWithProofError(nextError?.message ?? String(nextError));
     } finally {
       setSavingAction(null);
     }
@@ -757,27 +844,6 @@ export default function ReimbursementDetailPage() {
                 />
               </label>
 
-              <label style={{ display: "grid", gap: 8 }}>
-                <span style={{ fontSize: 12, fontWeight: 700 }}>
-                  {t("payments.reimbursements.detail.remittanceProof")}
-                </span>
-                <input
-                  value={remittanceProofId}
-                  onChange={(event) => setRemittanceProofId(event.target.value)}
-                  placeholder="wire_20260602_001"
-                  style={{
-                    width: "100%",
-                    boxSizing: "border-box",
-                    padding: "8px 10px",
-                    borderRadius: 8,
-                    border: `1px solid ${theme.border}`,
-                    background: theme.bgRaised,
-                    color: theme.text,
-                    fontFamily: theme.monoFamily,
-                  }}
-                />
-              </label>
-
               {approvalError ? (
                 <Banner
                   theme={theme}
@@ -799,25 +865,229 @@ export default function ReimbursementDetailPage() {
                     ? t("payments.saving")
                     : t("payments.approve")}
                 </Btn>
-                <Btn
-                  theme={theme}
-                  variant="secondary"
-                  icon="billing"
-                  disabled={
-                    !batch.approvedAt ||
-                    batch.status === "paid" ||
-                    savingAction !== null
-                  }
-                  onClick={() => void handleMarkPaid()}
-                >
-                  {savingAction === "paid"
-                    ? t("payments.saving")
-                    : t("payments.reimbursements.detail.markPaid")}
-                </Btn>
               </div>
             </div>
           </Card>
         </div>
+
+        <Card
+          theme={theme}
+          title={proofT("proof.cardTitle", locale)}
+          subtitle={proofT("proof.cardSubtitle", locale)}
+        >
+          {proofError ? (
+            <Banner
+              theme={theme}
+              tone="danger"
+              title={proofT("proof.loadError", locale)}
+              body={proofError}
+            />
+          ) : proofLoading ? (
+            <div style={{ padding: "10px 0", color: theme.textMuted, fontSize: 12.5 }}>
+              {t("payments.reimbursements.detail.loading")}
+            </div>
+          ) : proof ? (
+            <div style={{ display: "grid", gap: 10 }}>
+              <div
+                style={{ display: "flex", alignItems: "center", gap: 10 }}
+              >
+                <span
+                  style={{
+                    flex: 1,
+                    minWidth: 0,
+                    ...monoStyle,
+                    color: theme.text,
+                    overflow: "hidden",
+                    textOverflow: "ellipsis",
+                    whiteSpace: "nowrap",
+                  }}
+                >
+                  {proof.originalFilename}
+                </span>
+                <span style={{ fontSize: 10.5, color: theme.textMuted }}>
+                  {proof.content.sizeBytes.toLocaleString()} bytes
+                </span>
+                <Pill
+                  theme={theme}
+                  tone={
+                    proof.scanState === "clean"
+                      ? "success"
+                      : proof.scanState === "rejected"
+                        ? "danger"
+                        : "warn"
+                  }
+                  dot
+                >
+                  {proofT(`proof.scanState.${proof.scanState}`, locale)}
+                </Pill>
+                <Btn
+                  theme={theme}
+                  size="sm"
+                  icon="eye"
+                  disabled={readbackLoading}
+                  onClick={() => void handleRequestReadback()}
+                >
+                  {readbackLoading
+                    ? proofT("proof.viewing", locale)
+                    : proofT("proof.viewButton", locale)}
+                </Btn>
+              </div>
+              <div
+                style={{
+                  fontSize: 11,
+                  color: theme.textMuted,
+                  display: "flex",
+                  gap: 10,
+                  flexWrap: "wrap",
+                }}
+              >
+                <span>
+                  {proofT("proof.metaBatch", locale)}:{" "}
+                  <b style={{ color: theme.text, fontWeight: 600 }}>
+                    {proof.batchId}
+                  </b>
+                </span>
+                <span>
+                  {proofT("proof.metaHash", locale)}:{" "}
+                  <b style={{ color: theme.text, fontWeight: 600 }}>
+                    {proof.content.contentHash.slice(0, 16)}…
+                  </b>
+                </span>
+                <span>
+                  {proofT("proof.metaUploadedBy", locale)}:{" "}
+                  <b style={{ color: theme.text, fontWeight: 600 }}>
+                    {proof.uploadedByActorId ?? "—"}
+                  </b>
+                </span>
+                <span>
+                  {proofT("proof.metaUploadedAt", locale)}:{" "}
+                  <b style={{ color: theme.text, fontWeight: 600 }}>
+                    {formatDateTime(proof.createdAt)}
+                  </b>
+                </span>
+              </div>
+              {proof.scanState === "rejected" && proof.rejectionReason ? (
+                <div style={{ fontSize: 11, color: toneText(theme, "danger") }}>
+                  {proofT("proof.rejectionReason", locale)}:{" "}
+                  {proof.rejectionReason}
+                </div>
+              ) : null}
+
+              {readbackError ? (
+                <Banner
+                  theme={theme}
+                  tone="danger"
+                  title={proofT("proof.readbackError", locale)}
+                  body={readbackError}
+                />
+              ) : readbackGrant ? (
+                (() => {
+                  const expired =
+                    Date.parse(readbackGrant.expiresAt) <= Date.now();
+                  return (
+                    <Banner
+                      theme={theme}
+                      tone={expired ? "warn" : "info"}
+                      title={proofT(
+                        expired
+                          ? "proof.readbackExpiredTitle"
+                          : "proof.readbackAuthorizedTitle",
+                        locale,
+                      )}
+                      body={proofT(
+                        expired
+                          ? "proof.readbackExpiredBody"
+                          : "proof.readbackAuthorizedBody",
+                        locale,
+                        { expiresAt: formatDateTime(readbackGrant.expiresAt) },
+                      )}
+                      actions={
+                        <Btn
+                          theme={theme}
+                          size="sm"
+                          icon="refresh"
+                          disabled={readbackLoading}
+                          onClick={() => void handleRequestReadback()}
+                        >
+                          {proofT("proof.reauthorizeButton", locale)}
+                        </Btn>
+                      }
+                    />
+                  );
+                })()
+              ) : null}
+            </div>
+          ) : (
+            <div style={{ display: "grid", gap: 6 }}>
+              <Pill theme={theme} tone="neutral" dot>
+                {proofT("proof.notUploadedTitle", locale)}
+              </Pill>
+              <div style={{ fontSize: 11.5, color: theme.textMuted }}>
+                {proofT("proof.notUploadedBody", locale)}
+              </div>
+            </div>
+          )}
+        </Card>
+
+        <Card
+          theme={theme}
+          title={proofT("gate.title", locale)}
+          subtitle={proofT("gate.subtitle", locale)}
+        >
+          <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+            <GateRow
+              theme={theme}
+              ok={Boolean(batch.approvedAt)}
+              label={proofT("gate.batchApproved", locale)}
+              sub={
+                batch.approvedAt
+                  ? proofT("gate.batchApprovedSub", locale, {
+                      status: workflowLabel(workflowState, t),
+                    })
+                  : proofT("gate.batchNotApprovedSub", locale)
+              }
+            />
+            <GateRow
+              theme={theme}
+              ok={proof?.scanState === "clean"}
+              label={proofT("gate.proofClean", locale)}
+              sub={
+                proof
+                  ? proofT("gate.proofReadySub", locale, {
+                      filename: proof.originalFilename,
+                      scanState: proof.scanState,
+                    })
+                  : proofT("gate.proofNotReadySub", locale)
+              }
+            />
+          </div>
+          <div style={{ marginTop: 14, display: "grid", gap: 10 }}>
+            {payWithProofError ? (
+              <Banner
+                theme={theme}
+                tone="danger"
+                title={proofT("payWithProof.error", locale)}
+                body={payWithProofError}
+              />
+            ) : null}
+            <Btn
+              theme={theme}
+              variant="primary"
+              icon="check"
+              disabled={
+                !batch.approvedAt ||
+                batch.status === "paid" ||
+                proof?.scanState !== "clean" ||
+                savingAction !== null
+              }
+              onClick={() => void handleMarkPaidWithProof()}
+            >
+              {savingAction === "paid"
+                ? proofT("payWithProof.saving", locale)
+                : proofT("payWithProof.button", locale)}
+            </Btn>
+          </div>
+        </Card>
 
         <div style={heroGridStyle}>
           <Card
