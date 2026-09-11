@@ -68,7 +68,13 @@ const isConfigured =
 
 const DURATION_SECONDS = 900;
 const MAX_IN_FLIGHT = 500;
-const TENANT_ID = "tenant-demo-001";
+// Not the in-code TenantPartnerService fallback tenant ("tenant-demo-001"):
+// once a real Postgres is wired, onModuleInit() rehydrates `userRoles`
+// entirely from the DB-persisted rows (infra/migrations/V0029, reconciled by
+// V0085) and those rows carry this UUID tenant_id, so the in-code fallback
+// tenant has zero users and every bootstrap-session request against it is
+// denied. Target the migration-seeded tenant instead.
+const TENANT_ID = "10000000-0000-0000-0000-000000000201";
 // tenant_ops_admin is the seeded demo role that carries both `tenant:write`
 // (tenant/bookings) and `owned:write` (orders/:orderId/dispatch); the seeded
 // tenant_admin role only carries the former, so it cannot dispatch.
