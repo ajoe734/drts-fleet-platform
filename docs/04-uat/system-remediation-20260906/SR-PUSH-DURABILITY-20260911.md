@@ -221,7 +221,8 @@ other task's declared scope was modified.
 
 ## 6. 交接資訊 (Handoff)
 
-- **狀態 (Status)**：candidate ready, awaiting independent review (`Claude`) and CI
-- **CANDIDATE_SHA**：`8350f8387e1ef09a9b8d90731d177535319e554e`
+- **狀態 (Status)**：candidate ready, awaiting independent review (`Claude2`) and fresh CI on this exact SHA
+- **CANDIDATE_SHA**：`6136d0800279944b5161554392e7e0f583bad867`
 - **CANDIDATE_BRANCH**：`claude/sr-push-durability-20260911`
 - **INTEGRATION_STATUS**：`branch_pushed` pending this handoff's push
+- **History**：superseded prior candidates `8350f8387` → `4596f04b8` → `75bc42612` (PR #1977, CI failure: TS2493 at `push-delivery-durability.test.ts:287:17`, caused by `75bc42612` itself undoing `4596f04b8`'s fix of that same error — see §3). This SHA fixes the round-trip; requires a new review and a new CI run, not reuse of any prior result.
