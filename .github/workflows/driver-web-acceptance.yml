@@ -1,0 +1,501 @@
+name: Driver Web Acceptance (SR-DRIVER-WEB-ACCEPTANCE-RUNNER-20260911)
+
+# Dedicated, manually-dispatchable acceptance runner supplying the real web
+# export + real-browser + SQLite runtime evidence, and the real native
+# (iOS/Android) import-boundary evidence, that SR-DRIVER-WEB-001's own
+# candidate explicitly never produced. That candidate's own UAT doc
+# (docs/04-uat/system-remediation-20260906/SR-DRIVER-WEB-001.md, "未執行 /
+# 誠實揭露的限制") states plainly: no `expo export` or any `expo` CLI command
+# was ever run, no browser check of `/`, `/onboarding`, `/sos` was ever
+# performed, and no native export was ever produced — every claim in that
+# doc is static source analysis plus unit/type tests, not runtime proof.
+#
+# Two independent jobs, both GitHub-hosted only (this project's VM does not
+# permit starting product dev/preview/browser servers):
+#   web-export-and-browser-acceptance — really runs `expo export -p web`,
+#     serves the real static output with the headers its SQLite runtime
+#     needs, and drives real Chromium against `/`, `/onboarding`, `/sos`.
+#   native-export-acceptance — really runs `expo export` for iOS and Android
+#     (plain JS bundles, `--no-bytecode`, so they stay grep-able) and asserts
+#     each platform bundle contains the real native map import and excludes
+#     the web-only fallback module's marker string.
+#
+# Neither job produces physical-device, live-GPS, live-SOS-delivery, or
+# EAS/signed-build evidence — see
+# docs/04-uat/system-remediation-20260906/driver-web-acceptance-runner.md for
+# what is and is not covered.
+
+on:
+  workflow_dispatch:
+    inputs:
+      candidate_sha:
+        description: "Immutable candidate commit SHA to verify (full 40-char SHA); leave blank to use the dispatch ref's HEAD"
+        required: false
+        default: ""
+  push:
+    branches:
+      - claude/sr-driver-web-acceptance-runner-20260911
+    paths:
+      - .github/workflows/driver-web-acceptance.yml
+      - tools/ci/test_driver_web_acceptance_workflow.py
+      - tests/e2e/system-remediation/sr-driver-web-001/**
+      - docs/04-uat/system-remediation-20260906/driver-web-acceptance-runner.md
+
+permissions:
+  contents: read
+
+concurrency:
+  group: driver-web-acceptance-${{ github.event.inputs.candidate_sha || github.sha }}
+  cancel-in-progress: false
+
+env:
+  CI: true
+
+jobs:
+  web-export-and-browser-acceptance:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    env:
+      DRIVER_WEB_STATIC_PORT: 3101
+      DRIVER_WEB_ACCEPTANCE_BASE_URL: http://127.0.0.1:3101
+      DRIVER_WEB_EVIDENCE_DIR: .artifacts/driver-web-acceptance/web
+      # Intentionally-unreachable loopback placeholder: this job never
+      # exercises a real backend, and must not depend on the real
+      # apps/driver-app/app.json `extra.apiBaseUrl` Cloud Run URL being
+      # reachable or its response shape being deterministic. See
+      # driver-web-browser-acceptance.spec.ts's header comment for why an
+      # unreachable API here must never surface as a console/page error.
+      EXPO_PUBLIC_API_URL: http://127.0.0.1:1
+      EXPO_NO_TELEMETRY: "1"
+      CANDIDATE_SHA: ${{ github.event.inputs.candidate_sha || github.sha }}
+      WORKFLOW_SHA: ${{ github.sha }}
+    steps:
+      - name: Validate candidate_sha input
+        run: |
+          sha="$CANDIDATE_SHA"
+          if ! [[ "$sha" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "::error::candidate_sha must be a full 40-character commit SHA, got: $sha"
+            exit 1
+          fi
+
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.inputs.candidate_sha || github.sha }}
+          fetch-depth: 0
+
+      - name: Verify checkout resolved the exact immutable candidate
+        run: |
+          resolved="$(git rev-parse HEAD)"
+          expected="$CANDIDATE_SHA"
+          echo "Resolved HEAD: $resolved"
+          echo "Expected candidate: $expected"
+          if [ "$resolved" != "$expected" ]; then
+            echo "::error::Checked-out HEAD ($resolved) does not match the requested candidate ($expected)."
+            exit 1
+          fi
+
+      - name: Prepare evidence directory
+        run: mkdir -p "$DRIVER_WEB_EVIDENCE_DIR" test-results
+
+      - uses: pnpm/action-setup@v4
+        with: { version: 10.33.0, run_install: false }
+      - uses: actions/setup-node@v4
+        with:
+          {
+            node-version: 22,
+            cache: pnpm,
+            cache-dependency-path: pnpm-lock.yaml,
+          }
+
+      - name: Install dependencies
+        id: install
+        run: |
+          set -o pipefail
+          pnpm install --frozen-lockfile 2>&1 | tee -a "$DRIVER_WEB_EVIDENCE_DIR/execution-log.txt"
+
+      - name: Install Playwright Chromium
+        id: playwright_install
+        run: |
+          set -o pipefail
+          pnpm exec playwright install --with-deps chromium 2>&1 | tee -a "$DRIVER_WEB_EVIDENCE_DIR/execution-log.txt"
+
+      - name: Export apps/driver-app for web
+        id: export_web
+        run: |
+          set -o pipefail
+          (
+            cd apps/driver-app
+            npx expo export -p web --output-dir dist --clear
+          ) 2>&1 | tee -a "$DRIVER_WEB_EVIDENCE_DIR/execution-log.txt"
+
+      - name: Verify the web export never bundles the native map SDK
+        id: web_bundle_boundary
+        run: |
+          set -o pipefail
+          python3 - <<'PY_GATE'
+          import json
+          from pathlib import Path
+
+          dist_dir = Path("apps/driver-app/dist")
+          evidence_path = Path(".artifacts/driver-web-acceptance/web/evidence-web-bundle-boundary.json")
+
+          if not dist_dir.exists():
+              raise SystemExit(f"Web bundle boundary gate: export output not found at {dist_dir}.")
+
+          js_files = sorted(dist_dir.rglob("*.js"))
+          leaking_files = [
+              str(path)
+              for path in js_files
+              if "PROVIDER_GOOGLE" in path.read_text(encoding="utf-8", errors="replace")
+          ]
+
+          evidence_path.write_text(json.dumps({
+              "js_file_count": len(js_files),
+              "leaking_files": leaking_files,
+          }, indent=2) + "\n")
+
+          if not js_files:
+              raise SystemExit("Web bundle boundary gate: zero JS files found in the web export.")
+          if leaking_files:
+              raise SystemExit(
+                  "Web bundle boundary gate failed: native react-native-maps "
+                  f"(PROVIDER_GOOGLE) leaked into the web bundle: {leaking_files}"
+              )
+          print(f"Web bundle boundary gate: {len(js_files)} JS files, zero PROVIDER_GOOGLE leaks.")
+          PY_GATE
+
+      - name: Start driver web static server
+        id: start_server
+        run: |
+          set -o pipefail
+          pnpm exec tsx tests/e2e/system-remediation/sr-driver-web-001/driver-web-static-server.ts \
+            > "$DRIVER_WEB_EVIDENCE_DIR/static-server.log" 2>&1 &
+          echo $! > "$DRIVER_WEB_EVIDENCE_DIR/static-server.pid"
+          for i in $(seq 1 30); do
+            code="$(curl -s -o /dev/null -w '%{http_code}' "$DRIVER_WEB_ACCEPTANCE_BASE_URL/" 2>/dev/null || true)"
+            code="${code:-000}"
+            if [ "$code" != "000" ]; then
+              echo "Driver web static server responded with HTTP $code after ${i}s"
+              exit 0
+            fi
+            sleep 1
+          done
+          echo "::error::Driver web static server did not start within 30s"
+          cat "$DRIVER_WEB_EVIDENCE_DIR/static-server.log" || true
+          exit 1
+
+      - name: Run real browser driver-web acceptance suite
+        id: harness
+        run: |
+          set -o pipefail
+          pnpm exec playwright test \
+            -c playwright.system-remediation.config.ts \
+            tests/e2e/system-remediation/sr-driver-web-001/driver-web-browser-acceptance.spec.ts \
+            2>&1 | tee -a "$DRIVER_WEB_EVIDENCE_DIR/execution-log.txt"
+
+      - name: Stop static server
+        if: always()
+        run: |
+          if [ -f "$DRIVER_WEB_EVIDENCE_DIR/static-server.pid" ]; then
+            kill "$(cat "$DRIVER_WEB_EVIDENCE_DIR/static-server.pid")" 2>/dev/null || true
+          fi
+
+      - name: Gate on zero skips and every test passed
+        id: gate
+        if: always()
+        run: |
+          python3 - <<'PY_GATE'
+          import json
+          from pathlib import Path
+
+          report_path = Path("test-results/system-remediation-report.json")
+          if not report_path.exists():
+              raise SystemExit(
+                  "Driver web browser acceptance gate: no Playwright JSON "
+                  "report was produced (the harness likely failed before it "
+                  "could write one)."
+              )
+          report = json.loads(report_path.read_text())
+
+          def iter_specs(suite):
+              for spec in suite.get("specs", []):
+                  yield spec
+              for child in suite.get("suites", []):
+                  yield from iter_specs(child)
+
+          specs = [spec for suite in report.get("suites", []) for spec in iter_specs(suite)]
+          if not specs:
+              raise SystemExit("Driver web browser acceptance gate: zero specs found in report.")
+
+          total = 0
+          passed = 0
+          skipped = 0
+          for spec in specs:
+              for test in spec.get("tests", []):
+                  total += 1
+                  results = test.get("results", [])
+                  status = results[-1].get("status") if results else None
+                  if status == "passed":
+                      passed += 1
+                  elif status in ("skipped", None):
+                      skipped += 1
+
+          if total < 1 or skipped or passed != total:
+              raise SystemExit(
+                  f"Driver web browser acceptance incomplete: total={total}, "
+                  f"passed={passed}, skipped={skipped}. Every test must pass "
+                  "with zero skips."
+              )
+          print(f"Driver web browser acceptance: {passed}/{total} passed, zero skips.")
+          PY_GATE
+
+      - name: Record run status
+        if: always()
+        env:
+          INSTALL_OUTCOME: ${{ steps.install.outcome }}
+          PLAYWRIGHT_INSTALL_OUTCOME: ${{ steps.playwright_install.outcome }}
+          EXPORT_WEB_OUTCOME: ${{ steps.export_web.outcome }}
+          WEB_BUNDLE_BOUNDARY_OUTCOME: ${{ steps.web_bundle_boundary.outcome }}
+          START_SERVER_OUTCOME: ${{ steps.start_server.outcome }}
+          HARNESS_OUTCOME: ${{ steps.harness.outcome }}
+          GATE_OUTCOME: ${{ steps.gate.outcome }}
+        run: |
+          python3 - <<'PY_STATUS'
+          import json
+          import os
+          from pathlib import Path
+
+          report_path = Path("test-results/system-remediation-report.json")
+          status_path = Path(".artifacts/driver-web-acceptance/web/run-status.json")
+          status_path.parent.mkdir(parents=True, exist_ok=True)
+
+          outcomes = {
+              key: os.environ.get(key, "unknown")
+              for key in [
+                  "INSTALL_OUTCOME",
+                  "PLAYWRIGHT_INSTALL_OUTCOME",
+                  "EXPORT_WEB_OUTCOME",
+                  "WEB_BUNDLE_BOUNDARY_OUTCOME",
+                  "START_SERVER_OUTCOME",
+                  "HARNESS_OUTCOME",
+                  "GATE_OUTCOME",
+              ]
+          }
+          setup_ok = all(
+              outcomes[key] == "success"
+              for key in [
+                  "INSTALL_OUTCOME",
+                  "PLAYWRIGHT_INSTALL_OUTCOME",
+                  "EXPORT_WEB_OUTCOME",
+                  "START_SERVER_OUTCOME",
+              ]
+          )
+          if (
+              setup_ok
+              and outcomes["WEB_BUNDLE_BOUNDARY_OUTCOME"] == "success"
+              and outcomes["HARNESS_OUTCOME"] == "success"
+              and outcomes["GATE_OUTCOME"] == "success"
+              and report_path.exists()
+          ):
+              status = "passed"
+          elif not setup_ok:
+              status = "not_run"
+          else:
+              status = "failed"
+
+          status_path.write_text(json.dumps({
+              "candidate_sha": os.environ.get("CANDIDATE_SHA", ""),
+              "workflow_sha": os.environ.get("WORKFLOW_SHA", ""),
+              "status": status,
+              **{k.lower(): v for k, v in outcomes.items()},
+              "report_present": report_path.exists(),
+          }, indent=2) + "\n")
+          print(f"Run status recorded: {status}")
+          PY_STATUS
+
+      - name: Upload execution log, Playwright report, screenshots, evidence, and run status
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: driver-web-acceptance-web-${{ github.event.inputs.candidate_sha || github.sha }}
+          path: |
+            .artifacts/driver-web-acceptance/web/execution-log.txt
+            .artifacts/driver-web-acceptance/web/static-server.log
+            .artifacts/driver-web-acceptance/web/evidence-web-bundle-boundary.json
+            .artifacts/driver-web-acceptance/web/run-status.json
+            test-results/
+          if-no-files-found: warn
+
+  native-export-acceptance:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      DRIVER_NATIVE_EVIDENCE_DIR: .artifacts/driver-web-acceptance/native
+      DIST_DIR: apps/driver-app/dist-native
+      CANDIDATE_SHA: ${{ github.event.inputs.candidate_sha || github.sha }}
+      WORKFLOW_SHA: ${{ github.sha }}
+    steps:
+      - name: Validate candidate_sha input
+        run: |
+          sha="$CANDIDATE_SHA"
+          if ! [[ "$sha" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "::error::candidate_sha must be a full 40-character commit SHA, got: $sha"
+            exit 1
+          fi
+
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.inputs.candidate_sha || github.sha }}
+          fetch-depth: 0
+
+      - name: Verify checkout resolved the exact immutable candidate
+        run: |
+          resolved="$(git rev-parse HEAD)"
+          expected="$CANDIDATE_SHA"
+          if [ "$resolved" != "$expected" ]; then
+            echo "::error::Checked-out HEAD ($resolved) does not match the requested candidate ($expected)."
+            exit 1
+          fi
+
+      - name: Prepare evidence directory
+        run: mkdir -p "$DRIVER_NATIVE_EVIDENCE_DIR"
+
+      - uses: pnpm/action-setup@v4
+        with: { version: 10.33.0, run_install: false }
+      - uses: actions/setup-node@v4
+        with:
+          {
+            node-version: 22,
+            cache: pnpm,
+            cache-dependency-path: pnpm-lock.yaml,
+          }
+
+      - name: Install dependencies
+        id: install
+        run: |
+          set -o pipefail
+          pnpm install --frozen-lockfile 2>&1 | tee -a "$DRIVER_NATIVE_EVIDENCE_DIR/execution-log.txt"
+
+      - name: Export apps/driver-app for iOS and Android
+        id: export_native
+        # `--no-bytecode` keeps the output as plain JS instead of Hermes
+        # bytecode so the import-boundary gate below can grep it directly.
+        # This is local Metro bundling only (no Xcode/Android SDK, no EAS
+        # credentials, no signed build) — see the acceptance doc for why that
+        # is an intentionally narrower claim than a real device/EAS build.
+        run: |
+          set -o pipefail
+          (
+            cd apps/driver-app
+            npx expo export --platform ios,android --no-bytecode --output-dir dist-native --clear
+          ) 2>&1 | tee -a "$DRIVER_NATIVE_EVIDENCE_DIR/execution-log.txt"
+
+      - name: Verify native bundles use the real native map and exclude the web-only fallback module
+        id: gate
+        if: always()
+        env:
+          WEB_ONLY_MARKER: "畫面保留地址與 fallback 指引"
+        run: |
+          python3 - <<'PY_GATE'
+          import json
+          import os
+          from pathlib import Path
+
+          dist_dir = Path(os.environ["DIST_DIR"])
+          web_only_marker = os.environ["WEB_ONLY_MARKER"]
+          evidence_path = Path(".artifacts/driver-web-acceptance/native/evidence-native-import-boundaries.json")
+          evidence_path.parent.mkdir(parents=True, exist_ok=True)
+
+          if not dist_dir.exists():
+              raise SystemExit(f"Native import boundary gate: export output not found at {dist_dir}.")
+
+          def bundle_files(platform):
+              platform_dir = dist_dir / "_expo" / "static" / "js" / platform
+              files = sorted(platform_dir.rglob("*.js")) if platform_dir.exists() else []
+              if not files:
+                  # Fall back to scanning the whole export tree in case a
+                  # future Expo CLI restructures the per-platform js path, so
+                  # that changes fails this gate loudly instead of silently
+                  # reporting zero bundles found as a pass.
+                  files = sorted(dist_dir.rglob("*.js"))
+              return files
+
+          results = {}
+          ok = True
+          for platform in ("ios", "android"):
+              files = bundle_files(platform)
+              text = "\n".join(
+                  f.read_text(encoding="utf-8", errors="replace") for f in files
+              )
+              has_native_map = "PROVIDER_GOOGLE" in text
+              has_web_leak = web_only_marker in text
+              results[platform] = {
+                  "bundle_file_count": len(files),
+                  "has_native_map_provider": has_native_map,
+                  "leaks_web_only_fallback_marker": has_web_leak,
+              }
+              if not files or not has_native_map or has_web_leak:
+                  ok = False
+
+          evidence_path.write_text(json.dumps(results, indent=2) + "\n")
+          print(json.dumps(results, indent=2))
+
+          if not ok:
+              raise SystemExit(
+                  "Native import boundary gate failed: every platform bundle "
+                  "must be non-empty, contain the real native map provider "
+                  "import, and never contain the web-only fallback module's "
+                  "marker string."
+              )
+          print("Native import boundary gate: both platforms use the real native map and exclude the web fallback module.")
+          PY_GATE
+
+      - name: Record run status
+        if: always()
+        env:
+          INSTALL_OUTCOME: ${{ steps.install.outcome }}
+          EXPORT_NATIVE_OUTCOME: ${{ steps.export_native.outcome }}
+          GATE_OUTCOME: ${{ steps.gate.outcome }}
+        run: |
+          python3 - <<'PY_STATUS'
+          import json
+          import os
+          from pathlib import Path
+
+          evidence_path = Path(".artifacts/driver-web-acceptance/native/evidence-native-import-boundaries.json")
+          status_path = Path(".artifacts/driver-web-acceptance/native/run-status.json")
+          status_path.parent.mkdir(parents=True, exist_ok=True)
+
+          install_outcome = os.environ.get("INSTALL_OUTCOME", "unknown")
+          export_outcome = os.environ.get("EXPORT_NATIVE_OUTCOME", "unknown")
+          gate_outcome = os.environ.get("GATE_OUTCOME", "unknown")
+
+          if install_outcome != "success" or export_outcome != "success":
+              status = "not_run"
+          elif gate_outcome == "success" and evidence_path.exists():
+              status = "passed"
+          else:
+              status = "failed"
+
+          status_path.write_text(json.dumps({
+              "candidate_sha": os.environ.get("CANDIDATE_SHA", ""),
+              "workflow_sha": os.environ.get("WORKFLOW_SHA", ""),
+              "status": status,
+              "install_outcome": install_outcome,
+              "export_native_outcome": export_outcome,
+              "gate_outcome": gate_outcome,
+              "evidence_present": evidence_path.exists(),
+          }, indent=2) + "\n")
+          print(f"Run status recorded: {status}")
+          PY_STATUS
+
+      - name: Upload execution log, evidence, and run status
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: driver-web-acceptance-native-${{ github.event.inputs.candidate_sha || github.sha }}
+          path: |
+            .artifacts/driver-web-acceptance/native/execution-log.txt
+            .artifacts/driver-web-acceptance/native/evidence-native-import-boundaries.json
+            .artifacts/driver-web-acceptance/native/run-status.json
+          if-no-files-found: warn
