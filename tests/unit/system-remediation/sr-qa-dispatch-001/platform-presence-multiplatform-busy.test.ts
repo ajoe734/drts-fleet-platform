@@ -62,8 +62,8 @@ describe("SR-QA-DISPATCH-001 / C041: platform presence online/offline tracking",
   });
 });
 
-describe("SR-QA-DISPATCH-001 / C041: multi-platform busy state is NOT wired into dispatch eligibility (gap regression)", () => {
-  it("Demonstrates: a driver marked offline on every platform still appears as an eligible dispatch candidate", async () => {
+describe("SR-QA-DISPATCH-001 / C041: multi-platform busy state IS wired into dispatch eligibility (resolved by SR-DISPATCH-SCHEDULER-001)", () => {
+  it("Resolved: a driver marked offline on every bound platform is excluded from owned-fleet dispatch candidates", async () => {
     const presence = new PlatformPresenceService();
     await presence.setOffline("driver-busy-elsewhere", "uber" as never);
     await presence.setOffline("driver-busy-elsewhere", "line-taxi" as never);
@@ -73,9 +73,10 @@ describe("SR-QA-DISPATCH-001 / C041: multi-platform busy state is NOT wired into
     ).every((record) => record.status === "offline");
     expect(allOffline).toBe(true);
 
-    // The owned-mobility candidate source is the regulatory registry alone;
-    // it has no dependency on `PlatformPresenceService` and therefore cannot
-    // see -- let alone react to -- the offline state just proven above.
+    // Wiring the same presence instance into owned-mobility is what closes
+    // the gap this file used to document: without it (see the structural
+    // test below for the "unwired" baseline this file previously asserted),
+    // the candidate list cannot see -- let alone react to -- offline state.
     const { service } = buildOwnedMobilityServiceForTest({
       candidates: [
         {
@@ -86,6 +87,7 @@ describe("SR-QA-DISPATCH-001 / C041: multi-platform busy state is NOT wired into
           serviceBuckets: ["standard_taxi"],
         },
       ],
+      platformPresenceService: presence,
     });
     const order = await service.createPassengerOrder({
       pickup: { address: "Taipei Main Station" },
@@ -98,15 +100,78 @@ describe("SR-QA-DISPATCH-001 / C041: multi-platform busy state is NOT wired into
       .find((j) => j.orderId === order.orderId)!;
 
     const candidates = await service.listDispatchCandidates(job.dispatchJobId);
-    // This is the gap: production dispatch has no mechanism today that
-    // would exclude "driver-busy-elsewhere" here even though presence
-    // tracking independently reports them offline on every platform.
+    // The gap is closed: a driver reported offline on every bound platform
+    // is now excluded from the owned-fleet candidate list.
     expect(candidates.some((c) => c.driverId === "driver-busy-elsewhere")).toBe(
-      true,
+      false,
     );
   });
 
-  it("Structural: owned-mobility.service.ts has zero references to platform-presence", () => {
+  it("Resolved: a driver marked busy on another platform is excluded even while genuinely online (fresh heartbeat) on a second platform", async () => {
+    const presence = new PlatformPresenceService();
+    await presence.setOnline("driver-multi-app", "line-taxi" as never);
+    await presence.setBusy("driver-multi-app", "uber" as never);
+
+    const { service } = buildOwnedMobilityServiceForTest({
+      candidates: [
+        {
+          driverId: "driver-multi-app",
+          vehicleId: "vehicle-multi-app",
+          etaMinutes: 5,
+          operatingArea: "taipei",
+          serviceBuckets: ["standard_taxi"],
+        },
+      ],
+      platformPresenceService: presence,
+    });
+    const order = await service.createPassengerOrder({
+      pickup: { address: "Taipei Main Station" },
+      dropoff: { address: "Taipei 101" },
+      passenger: { name: "SR-QA-DISPATCH-001", phone: "0912345678" },
+    } as never);
+    service.dispatchOrder(order.orderId, { mode: "auto" });
+    const job = service
+      .listDispatchJobs()
+      .find((j) => j.orderId === order.orderId)!;
+
+    const candidates = await service.listDispatchCandidates(job.dispatchJobId);
+    expect(candidates.some((c) => c.driverId === "driver-multi-app")).toBe(
+      false,
+    );
+  });
+
+  it("Negative fence: a driver with no platform-presence records at all (never bound to an external platform) is not excluded", async () => {
+    const presence = new PlatformPresenceService();
+
+    const { service } = buildOwnedMobilityServiceForTest({
+      candidates: [
+        {
+          driverId: "driver-owned-fleet-only",
+          vehicleId: "vehicle-owned-fleet-only",
+          etaMinutes: 5,
+          operatingArea: "taipei",
+          serviceBuckets: ["standard_taxi"],
+        },
+      ],
+      platformPresenceService: presence,
+    });
+    const order = await service.createPassengerOrder({
+      pickup: { address: "Taipei Main Station" },
+      dropoff: { address: "Taipei 101" },
+      passenger: { name: "SR-QA-DISPATCH-001", phone: "0912345678" },
+    } as never);
+    service.dispatchOrder(order.orderId, { mode: "auto" });
+    const job = service
+      .listDispatchJobs()
+      .find((j) => j.orderId === order.orderId)!;
+
+    const candidates = await service.listDispatchCandidates(job.dispatchJobId);
+    expect(
+      candidates.some((c) => c.driverId === "driver-owned-fleet-only"),
+    ).toBe(true);
+  });
+
+  it("Structural (resolved): owned-mobility.service.ts now references platform-presence to exclude busy/offline/disconnected drivers", () => {
     const source = readFileSync(
       new URL(
         "../../../../apps/api/src/modules/owned-mobility/owned-mobility.service.ts",
@@ -114,10 +179,13 @@ describe("SR-QA-DISPATCH-001 / C041: multi-platform busy state is NOT wired into
       ),
       "utf8",
     );
-    // Intentional tripwire: if this starts failing because the dispatch
-    // eligibility path now consults platform presence, C041's gap in
-    // docs/04-uat/system-remediation-20260906/SR-QA-DISPATCH-001.md should
-    // be marked resolved, not silently accepted by loosening this test.
-    expect(/platform[-_]?presence/i.test(source)).toBe(false);
+    // This used to be an intentional tripwire asserting the opposite (zero
+    // references). SR-DISPATCH-SCHEDULER-001 wires
+    // `PlatformPresenceService.findDispatchBlockingPresence` into candidate
+    // listing and the assignment-time recheck, so the gap in
+    // docs/04-uat/system-remediation-20260906/SR-QA-DISPATCH-001.md is
+    // resolved, not silently accepted by loosening this test.
+    expect(/platform[-_]?presence/i.test(source)).toBe(true);
+    expect(source).toContain("findDispatchBlockingPresence");
   });
 });

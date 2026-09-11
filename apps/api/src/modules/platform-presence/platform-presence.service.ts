@@ -4,6 +4,7 @@ import type {
   PlatformEligibility,
   PlatformCode,
   PlatformPresenceAdapterStatusRecord,
+  PlatformPresenceDispatchBlock,
   PlatformPresenceRecord,
   PlatformPresenceSummary,
 } from "@drts/contracts";
@@ -14,6 +15,12 @@ import { PlatformPresenceRepository } from "./platform-presence.repository";
 function isoNow() {
   return new Date().toISOString();
 }
+
+// A platform-presence record claiming "online" (or "busy") with no heartbeat
+// newer than this is treated as disconnected: the driver's app stopped
+// reporting in without an explicit offline transition, so the last known
+// status can no longer be trusted as a live signal.
+const PRESENCE_HEARTBEAT_STALE_MS = 5 * 60 * 1000;
 
 @Injectable()
 export class PlatformPresenceService {
@@ -79,6 +86,7 @@ export class PlatformPresenceService {
       ),
       lastOnlineAt: isoNow(),
       lastOfflineAt: existing?.lastOfflineAt ?? null,
+      lastHeartbeatAt: isoNow(),
       updatedAt: isoNow(),
     };
 
@@ -110,6 +118,7 @@ export class PlatformPresenceService {
       ),
       lastOnlineAt: existing?.lastOnlineAt ?? null,
       lastOfflineAt: isoNow(),
+      lastHeartbeatAt: existing?.lastHeartbeatAt ?? null,
       updatedAt: isoNow(),
     };
 
@@ -119,6 +128,128 @@ export class PlatformPresenceService {
     const bucket = this.getMemoryBucket(driverId);
     bucket.set(platformCode, record);
     return record;
+  }
+
+  // Set when a forwarder-integrated platform reports the driver as actively
+  // engaged (e.g. an accepted/in-progress trip on that platform). A busy
+  // driver is physically committed elsewhere and must not also receive an
+  // owned-fleet dispatch.
+  async setBusy(
+    driverId: string,
+    platformCode: PlatformCode,
+  ): Promise<PlatformPresenceRecord> {
+    const existing = (await this.listForDriver(driverId)).find(
+      (r) => r.platformCode === platformCode,
+    );
+
+    const record: PlatformPresenceRecord = {
+      driverId,
+      platformCode,
+      accountId: existing?.accountId ?? null,
+      status: "busy",
+      eligibility: existing?.eligibility ?? ("eligible" as PlatformEligibility),
+      tokenExpiresAt: existing?.tokenExpiresAt ?? null,
+      reauthRequired: this.computeReauthRequired(
+        existing?.tokenExpiresAt ?? null,
+      ),
+      lastOnlineAt: existing?.lastOnlineAt ?? isoNow(),
+      lastOfflineAt: existing?.lastOfflineAt ?? null,
+      lastHeartbeatAt: isoNow(),
+      updatedAt: isoNow(),
+    };
+
+    if (this.dbEnabled()) {
+      return this.repo!.upsert(record);
+    }
+    const bucket = this.getMemoryBucket(driverId);
+    bucket.set(platformCode, record);
+    return record;
+  }
+
+  // Liveness ping for a platform binding, independent of an online/offline
+  // status transition. Lets a long-lived "online"/"busy" status stay
+  // verifiably live instead of going stale the instant it is set.
+  async recordHeartbeat(
+    driverId: string,
+    platformCode: PlatformCode,
+  ): Promise<PlatformPresenceRecord | null> {
+    const existing = (await this.listForDriver(driverId)).find(
+      (r) => r.platformCode === platformCode,
+    );
+    if (!existing) {
+      return null;
+    }
+
+    const record: PlatformPresenceRecord = {
+      ...existing,
+      lastHeartbeatAt: isoNow(),
+      updatedAt: isoNow(),
+    };
+
+    if (this.dbEnabled()) {
+      return this.repo!.upsert(record);
+    }
+    const bucket = this.getMemoryBucket(driverId);
+    bucket.set(platformCode, record);
+    return record;
+  }
+
+  private isHeartbeatStale(
+    record: PlatformPresenceRecord,
+    nowMs: number,
+  ): boolean {
+    if (!record.lastHeartbeatAt) {
+      return true;
+    }
+    return (
+      nowMs - new Date(record.lastHeartbeatAt).getTime() >
+      PRESENCE_HEARTBEAT_STALE_MS
+    );
+  }
+
+  // Consulted by owned-fleet dispatch eligibility (listDispatchCandidates /
+  // assertAssignmentEligibilityRecheck) so a driver who is busy or
+  // disconnected on another bound platform is not also handed an owned
+  // dispatch. A driver with no presence records at all (never bound to an
+  // external platform) is never blocked here -- absence of data is not a
+  // busy/offline signal.
+  async findDispatchBlockingPresence(
+    driverId: string,
+    now: Date = new Date(),
+  ): Promise<PlatformPresenceDispatchBlock | null> {
+    const records = await this.listForDriver(driverId);
+    if (records.length === 0) {
+      return null;
+    }
+
+    const nowMs = now.getTime();
+
+    const busy = records.find((r) => r.status === "busy");
+    if (busy) {
+      return { platformCode: busy.platformCode, reason: "busy" };
+    }
+
+    const liveOnline = records.find(
+      (r) => r.status === "online" && !this.isHeartbeatStale(r, nowMs),
+    );
+    if (liveOnline) {
+      return null;
+    }
+
+    // Every record is either explicitly offline, or claims "online" with a
+    // heartbeat that has gone stale -- either way, nothing here confirms the
+    // driver is currently live and reachable on any platform.
+    const staleOnline = records.find(
+      (r) => r.status === "online" && this.isHeartbeatStale(r, nowMs),
+    );
+    if (staleOnline) {
+      return {
+        platformCode: staleOnline.platformCode,
+        reason: "heartbeat_expired",
+      };
+    }
+
+    return { platformCode: records[0]!.platformCode, reason: "offline" };
   }
 
   private listAdapterHealthSafely(): AdapterHealthRecord[] {
