@@ -76,46 +76,46 @@ describe("SR-ENTERPRISE-SEARCH-001 Frontend Query -> Real Backend Acceptance", (
         const TENANT = "tenant-ent-search-integ";
 
         await pool.query(
-          `DELETE FROM ops.phase1_owned_orders WHERE tenant_id = $1 OR order_id LIKE 'ent-search-ord-%'`,
+          `DELETE FROM ops.phase1_owned_orders WHERE tenant_id = $1 OR order_id LIKE 'entq-ord-%'`,
           [TENANT],
         );
 
         const seedOrders = [
           {
-            orderId: "ent-search-ord-1",
-            bookingId: "bk-ent-search-1",
+            orderId: "entq-ord-1",
+            bookingId: "bkq-ent-1",
             status: "dispatched", // -> booking status "active"
             passengerName: "Alice Search",
             reservationWindowStart: "2026-09-10T08:00:00.000Z",
             createdAt: "2026-09-09T10:00:00.000Z",
           },
           {
-            orderId: "ent-search-ord-2",
-            bookingId: "bk-ent-search-2",
+            orderId: "entq-ord-2",
+            bookingId: "bkq-ent-2",
             status: "completed",
             passengerName: "Bob Search",
             reservationWindowStart: "2026-09-11T09:00:00.000Z",
             createdAt: "2026-09-09T11:00:00.000Z",
           },
           {
-            orderId: "ent-search-ord-3",
-            bookingId: "bk-ent-search-3",
+            orderId: "entq-ord-3",
+            bookingId: "bkq-ent-3",
             status: "cancelled",
             passengerName: "Carol Search",
             reservationWindowStart: "2026-09-12T09:00:00.000Z",
             createdAt: "2026-09-09T12:00:00.000Z",
           },
           {
-            orderId: "ent-search-ord-4",
-            bookingId: "bk-ent-search-4",
+            orderId: "entq-ord-4",
+            bookingId: "bkq-ent-4",
             status: "dispatched",
             passengerName: "Dave Other",
             reservationWindowStart: "2026-09-20T09:00:00.000Z",
             createdAt: "2026-09-09T13:00:00.000Z",
           },
           {
-            orderId: "ent-search-ord-5",
-            bookingId: "bk-ent-search-5",
+            orderId: "entq-ord-5",
+            bookingId: "bkq-ent-5",
             status: "dispatched",
             passengerName: "Eve Search",
             reservationWindowStart: "2026-09-11T10:00:00.000Z",
@@ -239,7 +239,7 @@ describe("SR-ENTERPRISE-SEARCH-001 Frontend Query -> Real Backend Acceptance", (
         expect(
           passengerOnly.items.map((b) => b.bookingId).sort(),
         ).toEqual(
-          ["bk-ent-search-1", "bk-ent-search-2", "bk-ent-search-3", "bk-ent-search-5"].sort(),
+          ["bkq-ent-1", "bkq-ent-2", "bkq-ent-3", "bkq-ent-5"].sort(),
         );
 
         // 3. Status-only filter.
@@ -249,7 +249,7 @@ describe("SR-ENTERPRISE-SEARCH-001 Frontend Query -> Real Backend Acceptance", (
           20,
         );
         expect(cancelledOnly.pagination.totalItems).toBe(1);
-        expect(cancelledOnly.items[0]?.bookingId).toBe("bk-ent-search-3");
+        expect(cancelledOnly.items[0]?.bookingId).toBe("bkq-ent-3");
 
         // 4. Combined passenger + status + date-range filter (calendar dates
         // converted to explicit start-inclusive/end-exclusive instants by
@@ -266,7 +266,7 @@ describe("SR-ENTERPRISE-SEARCH-001 Frontend Query -> Real Backend Acceptance", (
         );
         expect(combined.pagination.totalItems).toBe(2);
         expect(combined.items.map((b) => b.bookingId).sort()).toEqual(
-          ["bk-ent-search-1", "bk-ent-search-5"].sort(),
+          ["bkq-ent-1", "bkq-ent-5"].sort(),
         );
 
         // 5. Pagination over the combined result set: stable DESC-by-date
@@ -281,12 +281,12 @@ describe("SR-ENTERPRISE-SEARCH-001 Frontend Query -> Real Backend Acceptance", (
         expect(page1.items).toHaveLength(1);
         expect(page1.pagination.totalItems).toBe(2);
         expect(page1.pagination.totalPages).toBe(2);
-        expect(page1.items[0]?.bookingId).toBe("bk-ent-search-5");
+        expect(page1.items[0]?.bookingId).toBe("bkq-ent-5");
 
         const page2 = await search(combinedFilters, 2, 1);
         expect(page2.items).toHaveLength(1);
         expect(page2.pagination.totalItems).toBe(2);
-        expect(page2.items[0]?.bookingId).toBe("bk-ent-search-1");
+        expect(page2.items[0]?.bookingId).toBe("bkq-ent-1");
 
         // 6. Filtered empty state: zero rows but the total stays exact (0),
         // never crashes or falls back to an unfiltered list.
@@ -309,7 +309,7 @@ describe("SR-ENTERPRISE-SEARCH-001 Frontend Query -> Real Backend Acceptance", (
         expect(clearedAgain.pagination.totalItems).toBe(5);
 
         await pool.query(
-          `DELETE FROM ops.phase1_owned_orders WHERE tenant_id = $1 OR order_id LIKE 'ent-search-ord-%'`,
+          `DELETE FROM ops.phase1_owned_orders WHERE tenant_id = $1 OR order_id LIKE 'entq-ord-%'`,
           [TENANT],
         );
         await dbService.onModuleDestroy();
