@@ -660,7 +660,7 @@ describe("SR-PROOF-001: storage adapter (InMemoryRemittanceProofStorageAdapter)"
 describe("SR-PROOF-001: durable persistence does not fight V0098's proof_id column", () => {
   it("insertRemittanceProof never sends proof_id -- V0098 defines it as DEFAULT gen_random_uuid(), server-generated only", async () => {
     const dbGeneratedProofId = "11111111-2222-4333-8444-555555555555";
-    const query = vi.fn(async () => ({
+    const query = vi.fn(async (_sql: string, _params: unknown[]) => ({
       rows: [
         {
           proof_id: dbGeneratedProofId,
