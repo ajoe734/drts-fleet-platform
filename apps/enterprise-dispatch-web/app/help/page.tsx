@@ -1,4 +1,4 @@
-import { EBanner, EBtn, ECard, EIcon } from "@/components/ent-kit";
+import { EBanner, EBtnContent, ECard, EIcon, entBtnStyle } from "@/components/ent-kit";
 import { EntPageHead } from "@/components/enterprise-shell";
 import {
   enterpriseTenant,
@@ -104,12 +104,22 @@ export default async function HelpPage() {
                   </div>
                 </div>
               </div>
-              <EBtn t={t} variant="primary" block icon="phone">
-                {tr("help.contact.call")}
-              </EBtn>
-              <EBtn t={t} variant="default" block icon="brief">
-                {tr("help.contact.online")}
-              </EBtn>
+              <a
+                href={`tel:${enterpriseTenant.supportPhone.replace(/[^+0-9]/g, "")}`}
+                data-testid="enterprise-help-call"
+                style={entBtnStyle(t, { variant: "primary", block: true })}
+              >
+                <EBtnContent icon="phone">{tr("help.contact.call")}</EBtnContent>
+              </a>
+              <a
+                href={`mailto:${enterpriseTenant.supportEmail}`}
+                data-testid="enterprise-help-online"
+                style={entBtnStyle(t, { variant: "default", block: true })}
+              >
+                <EBtnContent icon="brief">
+                  {tr("help.contact.online")}
+                </EBtnContent>
+              </a>
             </div>
           </ECard>
           <ECard t={t} title={tr("help.policy.title")}>

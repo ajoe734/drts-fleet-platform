@@ -13,6 +13,7 @@ import type {
   ReassignDispatchCommand,
   TenantBookingListQuery,
   TenantBookingsPageRecord,
+  TenantDashboardSummary,
   UpdateTenantBookingCommand,
 } from "@drts/contracts";
 import {
@@ -31,6 +32,10 @@ const DEFAULT_ACTOR_ID = "enterprise-dispatch-web";
 // root Vitest can import it directly; re-exported here for callers that
 // already import the tenant client from this module.
 export * from "./enterprise-booking-search";
+
+// SR-ENTERPRISE-DATA-001: same rationale — pure home/trip status logic lives
+// in ./enterprise-trip-status so root Vitest can import it directly.
+export * from "./enterprise-trip-status";
 
 export type EnterpriseDispatchBookingSubmitResult = {
   orderId: string;
@@ -62,6 +67,10 @@ export class EnterpriseDispatchTenantClient {
 
   async getBooking(bookingId: string): Promise<BookingRecord> {
     return this.client.getTenantBooking(bookingId) as Promise<BookingRecord>;
+  }
+
+  async getDashboardSummary(): Promise<TenantDashboardSummary> {
+    return this.client.getTenantDashboardSummary();
   }
 
   async listBookings(): Promise<BookingRecord[]> {
