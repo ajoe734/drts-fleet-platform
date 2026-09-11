@@ -120,7 +120,7 @@ class DriverWebAcceptanceWorkflowStructureTests(unittest.TestCase):
     def test_web_job_exports_web_serves_it_and_runs_the_real_browser_spec(self) -> None:
         self.assertIn("expo export -p web", self.text)
         self.assertIn("playwright install --with-deps chromium", self.text)
-        self.assertIn("driver-web-static-server.ts", self.text)
+        self.assertIn("driver-web-static-server.mjs", self.text)
         self.assertIn(
             "tests/e2e/system-remediation/sr-driver-web-001/driver-web-browser-acceptance.spec.ts",
             self.text,

@@ -1,6 +1,6 @@
 // SR-DRIVER-WEB-ACCEPTANCE-RUNNER-20260911: real Chromium acceptance for the
 // real, `expo export -p web` static build of apps/driver-app, served by
-// driver-web-static-server.ts (see that file for why the COOP/COEP headers
+// driver-web-static-server.mjs (see that file for why the COOP/COEP headers
 // and index.html SPA fallback both exist).
 //
 // This runs with EXPO_PUBLIC_API_URL pointed at an intentionally-unreachable

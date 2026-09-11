@@ -1,6 +1,12 @@
 // SR-DRIVER-WEB-ACCEPTANCE-RUNNER-20260911: minimal static file server for
 // apps/driver-app's `expo export -p web` output.
 //
+// Plain Node ESM (`.mjs`) on purpose, not TypeScript: `tsx` is only a
+// devDependency of apps/api, not the workspace root, so `pnpm exec tsx` run
+// from the repo root (as this workflow's steps are) resolves to nothing.
+// Node runs `.mjs` directly with no transpile step, so this avoids adding a
+// root-level tsx dependency just to start a throwaway CI static server.
+//
 // Two things a generic static server (`npx serve`, `python -m http.server`)
 // does not do out of the box, both required for this app to actually work:
 //
@@ -23,7 +29,10 @@
 //    promise rejection in the browser.
 import { createReadStream, existsSync, statSync } from "node:fs";
 import { createServer } from "node:http";
-import { extname, join, resolve } from "node:path";
+import { extname, join, resolve, dirname } from "node:path";
+import { fileURLToPath } from "node:url";
+
+const __dirname = dirname(fileURLToPath(import.meta.url));
 
 const DIST_ROOT = resolve(__dirname, "../../../../apps/driver-app/dist");
 const PORT = Number.parseInt(
@@ -31,7 +40,7 @@ const PORT = Number.parseInt(
   10,
 );
 
-const MIME_TYPES: Record<string, string> = {
+const MIME_TYPES = {
   ".html": "text/html; charset=utf-8",
   ".js": "application/javascript; charset=utf-8",
   ".mjs": "application/javascript; charset=utf-8",
@@ -58,7 +67,7 @@ if (!existsSync(DIST_ROOT)) {
   process.exit(1);
 }
 
-function resolveRequestedFile(pathname: string): string {
+function resolveRequestedFile(pathname) {
   const decoded = decodeURIComponent(pathname);
   const candidate = resolve(join(DIST_ROOT, decoded));
 

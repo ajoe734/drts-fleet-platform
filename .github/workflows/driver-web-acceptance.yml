@@ -168,7 +168,7 @@ jobs:
         id: start_server
         run: |
           set -o pipefail
-          pnpm exec tsx tests/e2e/system-remediation/sr-driver-web-001/driver-web-static-server.ts \
+          node tests/e2e/system-remediation/sr-driver-web-001/driver-web-static-server.mjs \
             > "$DRIVER_WEB_EVIDENCE_DIR/static-server.log" 2>&1 &
           echo $! > "$DRIVER_WEB_EVIDENCE_DIR/static-server.pid"
           for i in $(seq 1 30); do

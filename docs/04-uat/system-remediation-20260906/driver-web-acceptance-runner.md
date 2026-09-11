@@ -65,7 +65,7 @@ dev-server-adjacent command, confirmed while building this task):
   true for `web.output: "static"`/`"server"`, so this app's export is a
   single-bundle SPA (one `index.html`, all routing client-side). A generic
   static file server 404s on `/onboarding` and `/sos` because of this;
-  `driver-web-static-server.ts` serves `apps/driver-app/dist` with an
+  `driver-web-static-server.mjs` serves `apps/driver-app/dist` with an
   index.html fallback for exactly that reason.
 - `expo-sqlite`'s web runtime (`expo-sqlite/web/WorkerChannel.ts`) opens a
   Worker that allocates `SharedArrayBuffer`s for its lock/result channel.
@@ -75,7 +75,7 @@ dev-server-adjacent command, confirmed while building this task):
   those, `initializeDriverLocationOfflineQueue()` (invoked unconditionally,
   bare `void`, no `.catch`, from `_layout.tsx`'s mount effect via
   `initializeDriverLocationHeartbeat()`) throws as an **unhandled promise
-  rejection**. `driver-web-static-server.ts` sets both headers on every
+  rejection**. `driver-web-static-server.mjs` sets both headers on every
   response for exactly this reason, and the Playwright spec's
   zero-console-error / zero-page-error assertions are what would actually
   catch a regression here, not decoration.
