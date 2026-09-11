@@ -157,42 +157,27 @@ claiming this as done; flagging for supervisor scope follow-up.
 
 ## Local verification
 
-Checks below marked "this session" ran inside this isolated worktree; no
-product/browser/DB server was started (per this task's VM restriction). The
-other rows are carried over from the prior session that produced candidate
-`f95970a9019e` and were not re-run here, because this session's shared
-`node_modules` (a symlink farm at the canonical repo root, pointing into
-several other now-deleted sibling worktrees' local `.pnpm` stores) has 23
-dangling top-level symlinks — including `typescript`, `vitest`, and `vite` —
-that make `tsc`/`vitest` unrunnable here without a shared-state `pnpm
-install` this session's sandbox does not permit outside the assigned
-worktree. This is a pre-existing environment issue unrelated to this task's
-code; `git diff --check` (no `node_modules` dependency) still passes, and the
-new Python contract test was run directly with the system `python3`.
+All checks below ran fresh in this session, inside this isolated worktree,
+after the `git merge origin/dev` described above (the prior session's
+`node_modules` symlink issue that blocked `tsc`/`vitest` in this worktree is
+no longer present). No product/browser/DB server was started (per this
+task's VM restriction).
 
 | Command | Result |
 | --- | --- |
-| `git diff --check` (this session) | exit 0 |
-| `python3 -m unittest tools.ci.test_enterprise_data_acceptance_workflow -v` (this session) | 13/13 passed |
-| `python3 -c "import yaml; yaml.safe_load(open('.github/workflows/enterprise-data-acceptance.yml'))"` (this session) | parses; `jobs: ['browser-acceptance']` |
-| `node --check tests/e2e/system-remediation/sr-enterprise-data-001/enterprise-data-browser-server.mjs` (this session) | exit 0 |
-| `pnpm --filter @drts/enterprise-dispatch-web typecheck` (`tsc --noEmit`) | exit 0 (prior session) |
-| `pnpm exec vitest run tests/unit/system-remediation/sr-enterprise-data-001/` | 13 passed (enterprise-trip-status.test.ts) (prior session) |
-| `pnpm --filter @drts/enterprise-dispatch-web test` (full app vitest) | 30 passed, 1 pre-existing failure (`apps/enterprise-dispatch-web/tests/unit/enterprise-booking-lifecycle.test.ts`, `ApiClient.listTenantBookings` / `paged.items is not iterable`); reproduced identically on the unmodified base commit before this task's changes, confirmed pre-existing and unrelated to this task's write_scopes (prior session) |
-| `pnpm --filter @drts/enterprise-dispatch-web lint` (`eslint . --max-warnings=0`) | exit 0 (prior session) |
-| Locale key-parity check (`en` vs `zh` in `lib/translations.ts`) | 574/574 keys match, no orphans either side (prior session) |
+| `git diff --check` | exit 0 |
+| `python3 tools/ci/git/check_canonical_consistency.py --ci --base origin/dev --head HEAD` | `[consistency] OK` (0 findings, all 4 sub-checks) |
+| `python3 -m unittest tools.ci.test_enterprise_data_acceptance_workflow -v` | 13/13 passed |
+| `python3 -c "import yaml; yaml.safe_load(open('.github/workflows/enterprise-data-acceptance.yml'))"` | parses; `jobs: ['browser-acceptance']` |
+| `node --check tests/e2e/system-remediation/sr-enterprise-data-001/enterprise-data-browser-server.mjs` | exit 0 |
+| `pnpm --filter @drts/enterprise-dispatch-web typecheck` (`tsc --noEmit`) | exit 0 |
+| `pnpm exec vitest run tests/unit/system-remediation/sr-enterprise-data-001/` | 13 passed (enterprise-trip-status.test.ts) |
+| `pnpm --filter @drts/enterprise-dispatch-web test` (full app vitest) | 30 passed, 1 pre-existing failure (`apps/enterprise-dispatch-web/tests/unit/enterprise-booking-lifecycle.test.ts`, `ApiClient.listTenantBookings` / `paged.items is not iterable`); same failure as documented in the prior session, unrelated to this task's write_scopes |
+| `pnpm --filter @drts/enterprise-dispatch-web lint` (`eslint . --max-warnings=0`) | exit 0 |
 
-The new `enterprise-data-browser.spec.ts` and the edited
-`enterprise-booking-lifecycle.tsx` have **not** been typechecked in this
-session for the reason above; the CI workflow's own `typecheck`/`lint`/build
-steps (via a fresh `pnpm install --frozen-lockfile`, unaffected by this
-worktree's stale symlinks) and the acceptance workflow's real build are the
-next real verification of them.
-
-The `typecheck`/`vitest`/`lint`/locale-parity rows above (marked "prior
-session") are unchanged by this merge: this pass only edits
-`enterprise-data-browser-server.mjs` (a CI-only script, `node --check` only)
-and this doc.
+None of these commands exercise the real Postgres/HTTP/Chromium path the
+acceptance workflow drives; that only runs on GitHub-hosted CI (see "CI
+failure found and fixed" above and "Explicitly not done" below).
 
 ## CI failure found and fixed (this pass)
 
