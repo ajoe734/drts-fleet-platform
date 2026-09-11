@@ -16,6 +16,11 @@ on:
       candidate_sha:
         description: "Immutable candidate commit SHA to verify (full 40-char SHA)"
         required: true
+  push:
+    branches:
+      - claude/sr-webhook-transport-timeout-20260911
+    paths:
+      - .github/workflows/webhook-transport-acceptance.yml
 
 permissions:
   contents: read
