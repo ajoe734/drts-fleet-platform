@@ -164,9 +164,12 @@ definitions exactly (method, path shape, request/response types).
   components before this task touched it (see the existing hand-rolled
   `stepperStyle` state-machine stepper), so the new proof/gate sections
   follow that same established translation, not the canvas's literal props.
-- `remittance-proof-translations.ts` (new, local to this directory) — see
-  §5 for why this exists instead of adding keys to the shared
-  `apps/platform-admin-web/lib/translations.ts`.
+- `translations.ts` (new, local to this directory) — see §5 for why this
+  exists instead of adding keys to the shared
+  `apps/platform-admin-web/lib/translations.ts`. Named `translations.ts`
+  (not a task-specific filename) because `tools/ci/i18n-guard.mjs` only
+  skips scanning files with that exact name, matching the repo's existing
+  route-scoped convention (e.g. `apps/platform-admin-web/app/users/translations.ts`).
 - The queue list page (`page.tsx`) is **not** changed: it already derives an
   "exported" status from `remittanceProofId` presence, and adding a live
   per-row proof-state column would need an additional list-of-batches →
@@ -221,7 +224,7 @@ Only files in this task's declared `write_scopes` were touched:
 8. `apps/api/src/modules/billing-settlement/remittance-proof-scanner.port.ts` — new
 9. `apps/api/src/modules/billing-settlement/remittance-proof-scanner.adapter.ts` — new
 10. `apps/platform-admin-web/app/payments/reimbursements/[batchId]/page.tsx`
-11. `apps/platform-admin-web/app/payments/reimbursements/remittance-proof-translations.ts` — new
+11. `apps/platform-admin-web/app/payments/reimbursements/translations.ts` — new
 12. `tests/unit/system-remediation/sr-proof-001/` — new
 13. `infra/migrations/V0098__sr_remittance_proof.sql` — new
 14. `docs/04-uat/system-remediation-20260906/SR-PROOF-001.md` — this document

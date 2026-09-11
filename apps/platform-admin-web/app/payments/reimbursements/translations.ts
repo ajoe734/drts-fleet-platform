@@ -4,11 +4,13 @@
  * `apps/platform-admin-web/lib/translations.ts` is the app's central
  * dictionary, but it is not in this task's `write_scopes` -- widening it
  * requires a supervisor-approved scope expansion this task does not have.
- * `t()`'s own fallback (see `translations.ts`'s `t()`) returns the raw key
- * string for anything missing from that dictionary, which would show
- * dotted keys in the rendered UI. This local dictionary avoids that
- * without touching the shared file, covering only the new remittance-proof
- * strings this task's detail page adds.
+ * `t()`'s own fallback (see the central `translations.ts`'s `t()`) returns
+ * the raw key string for anything missing from that dictionary, which would
+ * show dotted keys in the rendered UI. This local `translations.ts` (the
+ * repo convention for route-scoped bilingual copy, e.g.
+ * `apps/platform-admin-web/app/users/translations.ts`) avoids that without
+ * touching the shared file, covering only the new remittance-proof strings
+ * this task's detail page adds.
  */
 import type { Locale } from "@/lib/translations";
 

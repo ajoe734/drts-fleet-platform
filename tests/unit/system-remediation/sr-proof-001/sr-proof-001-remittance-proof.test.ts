@@ -2,7 +2,6 @@ import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 
 import type { MoneyAmount } from "@drts/contracts";
 
-import { ApiRequestError } from "../../../../apps/api/src/common/api-envelope";
 import type { BootstrapRequestIdentity } from "../../../../apps/api/src/common/auth";
 import { AuditNotificationService } from "../../../../apps/api/src/modules/audit-notification/audit-notification.service";
 import { BillingSettlementService } from "../../../../apps/api/src/modules/billing-settlement/billing-settlement.service";

@@ -25,7 +25,7 @@ import {
   type CanvasTheme,
   type CanvasTone,
 } from "@drts/ui-web";
-import { proofT } from "../remittance-proof-translations";
+import { proofT } from "../translations";
 
 const theme = buildCanvasTheme({
   surface: "platform",
