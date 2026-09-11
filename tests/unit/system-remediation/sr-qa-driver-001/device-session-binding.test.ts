@@ -106,7 +106,7 @@ describe("SR-QA-DRIVER-001 C050: device binding lifecycle", () => {
     ).toBe(true);
 
     await sessionService.revoke(
-      { bindingId: session.bindingId },
+      { bindingId: session.bindingId, deviceId: session.deviceId },
       driverIdentityFor(session.driverId),
     );
 
@@ -132,7 +132,10 @@ describe("SR-QA-DRIVER-001 C050: device binding lifecycle", () => {
     });
 
     await expect(
-      sessionService.revoke({ bindingId: session.bindingId }),
+      sessionService.revoke({
+        bindingId: session.bindingId,
+        deviceId: session.deviceId,
+      }),
     ).rejects.toMatchObject({ code: "DRIVER_DEVICE_BINDING_FORBIDDEN" });
 
     expect(
@@ -158,7 +161,7 @@ describe("SR-QA-DRIVER-001 C050: device binding lifecycle", () => {
 
     await expect(
       sessionService.revoke(
-        { bindingId: session.bindingId },
+        { bindingId: session.bindingId, deviceId: session.deviceId },
         driverIdentityFor("drv-someone-else"),
       ),
     ).rejects.toMatchObject({ code: "DRIVER_DEVICE_BINDING_FORBIDDEN" });

@@ -97,7 +97,7 @@ describe("SR-QA-DRIVER-001 C061: vehicle insurance expiry -> dispatch block (pos
       policyNo: "SR-QA-DRIVER-001-POL-002",
       insuranceType: "third_party_liability",
       insurerName: "SR-QA-DRIVER-001 Test Insurer",
-      coverageAmount: { amountMinor: 100000000, currency: "TWD" },
+      coverageAmount: 1000000,
       startAt,
       endAt: in10Days,
     });
@@ -110,7 +110,7 @@ describe("SR-QA-DRIVER-001 C061: vehicle insurance expiry -> dispatch block (pos
       policyNo: "SR-QA-DRIVER-001-POL-003",
       insuranceType: "third_party_liability",
       insurerName: "SR-QA-DRIVER-001 Test Insurer",
-      coverageAmount: { amountMinor: 100000000, currency: "TWD" },
+      coverageAmount: 1000000,
       startAt,
       endAt: in90Days,
     });
