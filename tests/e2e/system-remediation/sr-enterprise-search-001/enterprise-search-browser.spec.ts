@@ -126,7 +126,7 @@ test("combined filters use actual HTTP totals, reset page, respect timezone boun
     expect(healthResponse.status()).toBe(200);
     const healthPayload = await healthResponse.json();
     expect(healthPayload.status).toBe("ok");
-    expect(healthPayload.candidateSha).toBe(process.env.CANDIDATE_SHA);
+    expect(healthPayload.candidate_sha).toBe(process.env.CANDIDATE_SHA);
     writeFileSync(
       resolve(evidenceDir, "api-health-evidence.json"),
       JSON.stringify(
