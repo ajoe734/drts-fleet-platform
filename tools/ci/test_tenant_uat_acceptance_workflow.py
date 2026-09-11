@@ -140,9 +140,8 @@ class TenantUatAcceptanceWorkflowStructureTests(unittest.TestCase):
         harness_index = self.text.index(
             "Run tenant HTTP acceptance specs (real server, real DB, real sessions)"
         )
-        # Seeding must happen after the server is reachable and before the
-        # specs that consume DRTS_UAT_TOKEN_* run against it.
-        self.assertLess(start_api_index, seed_index)
+        # Seed the durable users before the HTTP process loads its caches.
+        self.assertLess(seed_index, start_api_index)
         self.assertLess(seed_index, harness_index)
 
     def test_runs_both_the_e2e_specs_and_the_unit_regression_suite(self) -> None:
@@ -200,6 +199,15 @@ class TenantUatAcceptanceWorkflowStructureTests(unittest.TestCase):
         self.assertIn('"failed"', status_block)
         self.assertIn('"passed"', status_block)
 
+    def test_actual_smtp_receiver_and_restart_are_required(self) -> None:
+        self.assertIn("image: axllent/mailpit:v1.29.2", self.text)
+        self.assertIn("MAILPIT_SMTP_PORT:", self.text)
+        self.assertIn("NOTIFICATION_OUTBOX_DIRECTORY:", self.text)
+        self.assertIn("DRTS_UAT_MAILPIT_URL:", self.text)
+        self.assertIn("restart-readback.ts", self.text)
+        self.assertIn('outcomes["RESTART_READBACK_OUTCOME"] == "success"', self.text)
+        self.assertIn("restart-report.json", self.text)
+
     def test_does_not_touch_the_locked_candidate_or_product_source(self) -> None:
         for token in ("git commit", "git push", "git add"):
             self.assertNotIn(token, self.text)
@@ -232,6 +240,8 @@ class RunStatusScriptBehaviorTests(unittest.TestCase):
         harness_e2e: str = "success",
         harness_unit: str = "success",
         gate: str = "success",
+        restart_api: str = "success",
+        restart_readback: str = "success",
     ) -> dict:
         with tempfile.TemporaryDirectory() as tmp:
             script_path = Path(tmp) / "run_status.py"
@@ -245,6 +255,8 @@ class RunStatusScriptBehaviorTests(unittest.TestCase):
                 "HARNESS_E2E_OUTCOME": harness_e2e,
                 "HARNESS_UNIT_OUTCOME": harness_unit,
                 "GATE_OUTCOME": gate,
+                "RESTART_API_OUTCOME": restart_api,
+                "RESTART_READBACK_OUTCOME": restart_readback,
                 "CANDIDATE_SHA": "c" * 40,
                 "WORKFLOW_SHA": "f" * 40,
                 "PATH": "/usr/bin:/bin",
@@ -283,6 +295,12 @@ class RunStatusScriptBehaviorTests(unittest.TestCase):
         status = self._run(gate="failure")
         self.assertEqual(status["status"], "failed")
 
+    def test_failed_restart_is_not_passed(self) -> None:
+        self.assertEqual(self._run(restart_api="failure")["status"], "failed")
+
+    def test_failed_restart_readback_is_not_passed(self) -> None:
+        self.assertEqual(self._run(restart_readback="failure")["status"], "failed")
+
     def test_seed_failure_is_not_run(self) -> None:
         status = self._run(
             seed="failure",
@@ -304,6 +322,49 @@ class RunStatusScriptBehaviorTests(unittest.TestCase):
             gate="unknown",
         )
         self.assertEqual(status["status"], "not_run")
+
+
+class FullMatrixGateBehaviorTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self.script = _extract_step_run_block(WORKFLOW.read_text(), "Gate on zero skips", "PY_GATE")
+
+    def run_gate(self, *, missing_file: str | None = None, restart_status: str = "passed", missing_restart: bool = False, skipped: bool = False):
+        files = ["approval-rules.spec.ts", "cost-center.spec.ts", "passenger-address.spec.ts", "sla.spec.ts", "users.spec.ts", "directory-durability.spec.ts", "governance.spec.ts", "invitation-mail.spec.ts"]
+        specs = []
+        for name in files:
+            if name == missing_file:
+                continue
+            for unused in range(3 if name == "governance.spec.ts" else 1):
+                specs.append({"file": "tests/e2e/system-remediation/sr-qa-tenant-001/" + name, "tests": [{"results": [{"status": "skipped" if skipped else "passed"}]}]})
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "test-results").mkdir()
+            (root / "test-results/system-remediation-report.json").write_text(json.dumps({"suites": [{"specs": specs}]}))
+            artifact = root / ".artifacts/tenant-uat-acceptance"
+            artifact.mkdir(parents=True)
+            (artifact / "unit-test-report.json").write_text(json.dumps({"numTotalTests": 24, "numPassedTests": 24, "numPendingTests": 0, "success": True}))
+            if not missing_restart:
+                (artifact / "restart-report.json").write_text(json.dumps({"status": restart_status, "verified": 12, "candidate_sha": "c" * 40, "tables": [f"table_{i}" for i in range(12)]}))
+            return subprocess.run([sys.executable, "-c", self.script], cwd=root, capture_output=True, text=True)
+
+    def test_complete_matrix_can_pass(self):
+        result = self.run_gate()
+        self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_unit_pass_does_not_hide_missing_live_governance(self):
+        self.assertNotEqual(self.run_gate(missing_file="governance.spec.ts").returncode, 0)
+
+    def test_unit_pass_does_not_hide_missing_mail_delivery(self):
+        self.assertNotEqual(self.run_gate(missing_file="invitation-mail.spec.ts").returncode, 0)
+
+    def test_missing_restart_evidence_fails(self):
+        self.assertNotEqual(self.run_gate(missing_restart=True).returncode, 0)
+
+    def test_failed_restart_evidence_fails(self):
+        self.assertNotEqual(self.run_gate(restart_status="failed").returncode, 0)
+
+    def test_skipped_live_matrix_fails(self):
+        self.assertNotEqual(self.run_gate(skipped=True).returncode, 0)
 
 
 if __name__ == "__main__":

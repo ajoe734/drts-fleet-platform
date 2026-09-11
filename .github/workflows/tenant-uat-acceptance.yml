@@ -14,16 +14,17 @@ name: Tenant UAT Acceptance (SR-QA-TENANT-001)
 # tenant_role_and_cross_tenant_negative_evidence) can actually be produced.
 #
 # Three stages in one job:
-#   1. migrate a dedicated Postgres and start the real compiled API server.
+#   1. migrate a dedicated Postgres and build the real compiled API server.
 #   2. seed two disposable tenants (A, B) with real, durable-state-valid
 #      tenant_admin sessions plus a read-only tenant_viewer session on tenant
 #      A, through the authoritative TenantPartnerService/JwtAuthService (see
 #      appmodule-acceptance-seed.ts) -- never by writing tables directly or
 #      forging a session.
-#   3. run the ported tests/e2e/system-remediation/sr-qa-tenant-001/*.spec.ts
+#   3. start the separate HTTP server, run the full tests/e2e/system-remediation/sr-qa-tenant-001/*.spec.ts
 #      Playwright HTTP-acceptance specs against that live server, and the
 #      tests/unit/system-remediation/sr-qa-tenant-001/*.test.ts service-level
-#      regression suite, gated on zero skips.
+#      regression suite, then replace the API process and verify same-ID
+#      HTTP/PG durability across the complete matrix, gated on zero skips.
 
 on:
   workflow_dispatch:
@@ -36,6 +37,7 @@ on:
     branches:
       - claude2/sr-qa-tenant-001-acceptance-runner
       - claude/sr-qa-tenant-001-acceptance-runner
+      - codex/sr-qa-tenant-ci-repair-20260911
     paths:
       - .github/workflows/tenant-uat-acceptance.yml
       - tools/ci/test_tenant_uat_acceptance_workflow.py
@@ -71,15 +73,25 @@ jobs:
           --health-interval 5s
           --health-timeout 5s
           --health-retries 10
+      mailpit:
+        image: axllent/mailpit:v1.29.2
+        ports:
+          - 1025:1025
+          - 8025:8025
     env:
       DATABASE_URL: postgresql://postgres:postgres@localhost:5432/drts_fleet_platform
       DRTS_UAT_ENV: sandbox
+      MAILPIT_SMTP_PORT: "1025"
+      DRTS_UAT_MAILPIT_URL: http://127.0.0.1:8025
+      NOTIFICATION_OUTBOX_DIRECTORY: /tmp/tenant-uat-mail-outbox
+      NOTIFICATION_FROM_EMAIL: qa-sender@qa-tenant-uat.example
       DRTS_UAT_API_URL: http://127.0.0.1:4102
       JWT_SECRET: tenant-uat-acceptance-runner-not-a-real-secret-32-chars-min
       JWT_ALGORITHMS: HS256
       CONTROLLED_DOWNLOAD_SIGNING_SECRET: tenant-uat-acceptance-runner-not-a-real-secret-32-chars-min
       CANDIDATE_SHA: ${{ github.event.inputs.candidate_sha || github.sha }}
       WORKFLOW_SHA: ${{ github.sha }}
+      DRTS_CANDIDATE_SHA: ${{ github.event.inputs.candidate_sha || github.sha }}
     steps:
       - name: Validate candidate_sha input
         run: |
@@ -106,7 +118,10 @@ jobs:
           fi
 
       - name: Prepare evidence directory
-        run: mkdir -p .artifacts/tenant-uat-acceptance
+        run: |
+          mkdir -p .artifacts/tenant-uat-acceptance
+          base_sha="$(git merge-base origin/dev HEAD)"
+          echo "BASE_SHA=$base_sha" >> "$GITHUB_ENV"
 
       - uses: pnpm/action-setup@v4
         with: { version: 10.33.0, run_install: false }
@@ -136,6 +151,13 @@ jobs:
           set -o pipefail
           pnpm --filter @drts/api... build 2>&1 | tee -a .artifacts/tenant-uat-acceptance/execution-log.txt
 
+      - name: Seed disposable tenant A/B sessions through the authoritative service
+        id: seed
+        run: |
+          set -o pipefail
+          pnpm exec tsx tests/e2e/system-remediation/sr-qa-tenant-001/appmodule-acceptance-seed.ts \
+            2>&1 | tee -a .artifacts/tenant-uat-acceptance/execution-log.txt
+
       - name: Start the real API server
         id: start_api
         env:
@@ -151,7 +173,7 @@ jobs:
           for i in $(seq 1 60); do
             code="$(curl -s -o /dev/null -w '%{http_code}' "${DRTS_UAT_API_URL}/api/health" 2>/dev/null || true)"
             code="${code:-000}"
-            if [ "$code" != "000" ]; then
+            if [ "$code" = "200" ]; then
               echo "Tenant UAT API responded with HTTP $code after ${i}s"
               exit 0
             fi
@@ -161,20 +183,13 @@ jobs:
           cat .artifacts/tenant-uat-acceptance/api-server.log || true
           exit 1
 
-      - name: Seed disposable tenant A/B sessions through the authoritative service
-        id: seed
-        run: |
-          set -o pipefail
-          pnpm exec tsx tests/e2e/system-remediation/sr-qa-tenant-001/appmodule-acceptance-seed.ts \
-            2>&1 | tee -a .artifacts/tenant-uat-acceptance/execution-log.txt
-
       - name: Run tenant HTTP acceptance specs (real server, real DB, real sessions)
         id: harness_e2e
         run: |
           set -o pipefail
           pnpm exec playwright test \
             -c playwright.system-remediation.config.ts \
-            tests/e2e/system-remediation/sr-qa-tenant-001 \
+            tests/e2e/system-remediation/sr-qa-tenant-001 --workers=1 --trace=off \
             2>&1 | tee -a .artifacts/tenant-uat-acceptance/execution-log.txt
 
       - name: Run tenant service-level regression suite
@@ -185,6 +200,43 @@ jobs:
             tests/unit/system-remediation/sr-qa-tenant-001/ \
             --reporter=default --reporter=json \
             --outputFile.json=.artifacts/tenant-uat-acceptance/unit-test-report.json \
+            2>&1 | tee -a .artifacts/tenant-uat-acceptance/execution-log.txt
+
+      - name: Restart the real API without resetting its database
+        id: restart_api
+        run: |
+          set -euo pipefail
+          old_pid="$(cat .artifacts/tenant-uat-acceptance/api-server.pid)"
+          kill "$old_pid"
+          for i in $(seq 1 30); do
+            if ! kill -0 "$old_pid" 2>/dev/null; then break; fi
+            sleep 1
+          done
+          if kill -0 "$old_pid" 2>/dev/null; then
+            echo "::error::Original API process did not terminate"
+            exit 1
+          fi
+          (
+            cd apps/api
+            API_PORT=4102 API_HOST=127.0.0.1 node dist/main.js >> ../../.artifacts/tenant-uat-acceptance/api-server.log 2>&1 &
+            echo $! > ../../.artifacts/tenant-uat-acceptance/api-server.pid
+          )
+          new_pid="$(cat .artifacts/tenant-uat-acceptance/api-server.pid)"
+          test "$new_pid" != "$old_pid"
+          for i in $(seq 1 60); do
+            if curl --fail --silent "${DRTS_UAT_API_URL}/api/health" > /dev/null; then
+              echo "Restarted API PID $old_pid -> $new_pid; database and mail outbox preserved"
+              exit 0
+            fi
+            sleep 1
+          done
+          exit 1
+
+      - name: Verify every captured resource through HTTP and PG after restart
+        id: restart_readback
+        run: |
+          set -o pipefail
+          pnpm exec tsx tests/e2e/system-remediation/sr-qa-tenant-001/restart-readback.ts \
             2>&1 | tee -a .artifacts/tenant-uat-acceptance/execution-log.txt
 
       - name: Stop background API server
@@ -243,13 +295,25 @@ jobs:
                       passed += 1
                   elif status in ("skipped", None):
                       skipped += 1
-          if total < 1 or skipped or passed != total:
+          if total < 10 or skipped or passed != total:
               raise SystemExit(
                   f"Tenant UAT HTTP acceptance incomplete: total={total}, "
                   f"passed={passed}, skipped={skipped}. Every "
                   "sr-qa-tenant-001 spec must pass with zero skips."
               )
           print(f"Tenant UAT HTTP acceptance: {passed}/{total} passed, zero skips.")
+
+          required_files = {
+              "approval-rules.spec.ts", "cost-center.spec.ts", "passenger-address.spec.ts",
+              "sla.spec.ts", "users.spec.ts", "directory-durability.spec.ts",
+              "governance.spec.ts", "invitation-mail.spec.ts",
+          }
+          actual_files = {Path(spec.get("file", "")).name for spec in tenant_specs}
+          if not required_files.issubset(actual_files):
+              raise SystemExit(f"Tenant capability matrix missing: {sorted(required_files - actual_files)}")
+          restart = json.loads(Path(".artifacts/tenant-uat-acceptance/restart-report.json").read_text())
+          if restart.get("status") != "passed" or restart.get("verified", 0) < 12:
+              raise SystemExit("Tenant restart durability did not pass the complete matrix")
 
           unit_report_path = Path(".artifacts/tenant-uat-acceptance/unit-test-report.json")
           if not unit_report_path.exists():
@@ -261,7 +325,7 @@ jobs:
           unit_passed = unit_report.get("numPassedTests", 0)
           unit_pending = unit_report.get("numPendingTests", 0)
           if (
-              unit_total < 1
+              unit_total < 24
               or unit_passed != unit_total
               or unit_pending
               or not unit_report.get("success")
@@ -285,6 +349,8 @@ jobs:
           HARNESS_E2E_OUTCOME: ${{ steps.harness_e2e.outcome }}
           HARNESS_UNIT_OUTCOME: ${{ steps.harness_unit.outcome }}
           GATE_OUTCOME: ${{ steps.gate.outcome }}
+          RESTART_API_OUTCOME: ${{ steps.restart_api.outcome }}
+          RESTART_READBACK_OUTCOME: ${{ steps.restart_readback.outcome }}
         run: |
           python3 - <<'PY_STATUS'
           import json
@@ -305,6 +371,8 @@ jobs:
                   "HARNESS_E2E_OUTCOME",
                   "HARNESS_UNIT_OUTCOME",
                   "GATE_OUTCOME",
+                  "RESTART_API_OUTCOME",
+                  "RESTART_READBACK_OUTCOME",
               ]
           }
           setup_ok = all(
@@ -322,6 +390,8 @@ jobs:
               and outcomes["HARNESS_E2E_OUTCOME"] == "success"
               and outcomes["HARNESS_UNIT_OUTCOME"] == "success"
               and outcomes["GATE_OUTCOME"] == "success"
+              and outcomes["RESTART_API_OUTCOME"] == "success"
+              and outcomes["RESTART_READBACK_OUTCOME"] == "success"
           ):
               status = "passed"
           elif not setup_ok:
@@ -348,5 +418,8 @@ jobs:
             .artifacts/tenant-uat-acceptance/api-server.log
             .artifacts/tenant-uat-acceptance/unit-test-report.json
             .artifacts/tenant-uat-acceptance/run-status.json
+            .artifacts/tenant-uat-acceptance/identity-fixtures.json
+            .artifacts/tenant-uat-acceptance/restart-report.json
+            .artifacts/tenant-uat-acceptance/restart-readbacks/
             test-results/
           if-no-files-found: warn

@@ -15,34 +15,19 @@
 // tenant:sla:write) so the SLA acceptance spec can assert an authenticated
 // read-only rejection on write, not merely an authentication failure.
 //
-// All classes are loaded from the compiled apps/api/dist/ output (built by
-// buildTenantUatAcceptanceCandidate below), never reimplemented here, so the
+// All classes are loaded from the compiled apps/api/dist/ output (built once
+// by the dedicated workflow), never reimplemented here, so the
 // guard/service/repository behavior under test is the actual candidate
 // product code.
 
 import { createRequire } from "node:module";
-import { existsSync, appendFileSync } from "node:fs";
-import { execFileSync } from "node:child_process";
+import { existsSync, appendFileSync, mkdirSync, writeFileSync } from "node:fs";
 import { randomUUID } from "node:crypto";
 import path from "node:path";
 
 const REPO_ROOT = path.resolve(__dirname, "../../../../");
 const API_DIR = path.resolve(REPO_ROOT, "apps/api");
 const API_DIST = path.resolve(API_DIR, "dist");
-
-export function buildTenantUatAcceptanceCandidate(): void {
-  execFileSync("pnpm", ["--filter", "@drts/api...", "build"], {
-    cwd: REPO_ROOT,
-    stdio: "pipe",
-    timeout: 180_000,
-  });
-  const distAppModulePath = path.resolve(API_DIST, "app.module.js");
-  if (!existsSync(distAppModulePath)) {
-    throw new Error(
-      `Candidate compiled build not found at ${distAppModulePath}. Run 'pnpm --filter @drts/api build' before seeding SR-QA-TENANT-001 acceptance fixtures.`,
-    );
-  }
-}
 
 interface JwtSignIdentityLike {
   authMode: "jwt_bearer";
@@ -68,7 +53,8 @@ export interface TenantUatFixtures {
   tokenA: string;
   tokenB: string;
   tokenReadonlyA: string;
-  /** Fictional, undeliverable-by-design mailbox for the users.spec.ts create-user case; CI has no real receiver, see docs/04-uat/.../SR-QA-TENANT-001.md */
+  tokenPlatform: string;
+  /** Disposable mailbox received by the actual GitHub-hosted Mailpit SMTP service. */
   userEmail: string;
 }
 
@@ -94,7 +80,10 @@ export async function seedTenantUatFixtures(): Promise<TenantUatFixtures> {
       createApplicationContext(
         moduleCls: unknown,
         options?: { logger?: boolean },
-      ): Promise<{ get<T = unknown>(token: unknown): T; close(): Promise<void> }>;
+      ): Promise<{
+        get<T = unknown>(token: unknown): T;
+        close(): Promise<void>;
+      }>;
     };
   };
   const { AppModule } = apiRequire("./dist/app.module.js") as {
@@ -106,6 +95,12 @@ export async function seedTenantUatFixtures(): Promise<TenantUatFixtures> {
   const { TenantPartnerService } = apiRequire(
     "./dist/modules/tenant-partner/tenant-partner.service.js",
   ) as { TenantPartnerService: unknown };
+  const { TenantsService } = apiRequire(
+    "./dist/modules/platform-admin/tenants.service.js",
+  ) as { TenantsService: unknown };
+  const { DatabaseService } = apiRequire(
+    "./dist/common/db/database.service.js",
+  ) as { DatabaseService: unknown };
   const { getTenantRoleScopes } = apiRequire(
     "./dist/common/auth/auth.constants.js",
   ) as { getTenantRoleScopes: (roleCode: string) => readonly string[] | null };
@@ -147,7 +142,7 @@ export async function seedTenantUatFixtures(): Promise<TenantUatFixtures> {
       authMode: "bootstrap_headers" as const,
       roleFamilies: ["platform" as const],
       roles: [],
-      scopes: [],
+      scopes: ["foundation:read", "foundation:write"],
       tenantId: null,
     };
 
@@ -156,13 +151,23 @@ export async function seedTenantUatFixtures(): Promise<TenantUatFixtures> {
     // principal before it can issue the tenant-user invitations created by
     // seedActiveTenantUser below (same requirement documented in
     // appmodule-tenant-binding.test.ts).
-    await jwt.issueSessionToken(bootstrapIdentity as never, {
-      principalId: bootstrapIdentity.actorId,
-      subject: `system:${bootstrapIdentity.actorId}`,
-      ensurePrincipal: true,
-      sessionId: `sid-bootstrap-${randomUUID()}`,
-      authTime: new Date().toISOString(),
-    });
+    const platformSession = await jwt.issueSessionToken(
+      {
+        ...bootstrapIdentity,
+        authMode: "jwt_bearer",
+        amr: ["mfa", "totp"],
+        acr: "aal2",
+      } as never,
+      {
+        principalId: bootstrapIdentity.actorId,
+        subject: `system:${bootstrapIdentity.actorId}`,
+        amr: ["mfa", "totp"],
+        acr: "aal2",
+        ensurePrincipal: true,
+        sessionId: `sid-bootstrap-${randomUUID()}`,
+        authTime: new Date().toISOString(),
+      },
+    );
 
     const seedActiveTenantUser = async (
       tenantId: string,
@@ -235,11 +240,47 @@ export async function seedTenantUatFixtures(): Promise<TenantUatFixtures> {
       return issued.token;
     };
 
-    const tenantA = `qa-tenant-uat-a-${randomUUID()}`;
-    const tenantB = `qa-tenant-uat-b-${randomUUID()}`;
+    const tenants = appCtx.get(TenantsService) as {
+      create(command: { name: string; code: string }): { id: string };
+    };
+    const db = appCtx.get(DatabaseService) as {
+      query(sql: string, parameters: unknown[]): Promise<{ rows: unknown[] }>;
+    };
+    const tenantA = tenants.create({
+      name: "QA Tenant A",
+      code: `qa-a-${randomUUID()}`,
+    }).id;
+    const tenantB = tenants.create({
+      name: "QA Tenant B",
+      code: `qa-b-${randomUUID()}`,
+    }).id;
+    // Await actual persisted resources before starting the separate HTTP server.
+    for (const tenant of [tenantA, tenantB]) {
+      let durable = false;
+      for (let attempt = 0; attempt < 50; attempt += 1) {
+        const result = await db.query(
+          "SELECT tenant_id FROM admin.phase1_platform_tenants WHERE tenant_id = $1",
+          [tenant],
+        );
+        if (result.rows.length === 1) {
+          durable = true;
+          break;
+        }
+        await new Promise((resolve) => setTimeout(resolve, 100));
+      }
+      if (!durable) throw new Error("Tenant fixture did not persist");
+    }
 
-    const adminA = await seedActiveTenantUser(tenantA, "admin-a", "tenant_admin");
-    const adminB = await seedActiveTenantUser(tenantB, "admin-b", "tenant_admin");
+    const adminA = await seedActiveTenantUser(
+      tenantA,
+      "admin-a",
+      "tenant_admin",
+    );
+    const adminB = await seedActiveTenantUser(
+      tenantB,
+      "admin-b",
+      "tenant_admin",
+    );
     const readonlyA = await seedActiveTenantUser(
       tenantA,
       "readonly-a",
@@ -256,6 +297,7 @@ export async function seedTenantUatFixtures(): Promise<TenantUatFixtures> {
       tokenA,
       tokenB,
       tokenReadonlyA,
+      tokenPlatform: platformSession.token,
       userEmail: `sr-qa-tenant-001-${randomUUID()}@qa-tenant-uat.example`,
     };
   } finally {
@@ -264,16 +306,57 @@ export async function seedTenantUatFixtures(): Promise<TenantUatFixtures> {
 }
 
 function writeGithubEnv(fixtures: TenantUatFixtures): void {
+  const identities = Object.entries({
+    adminA: fixtures.tokenA,
+    adminB: fixtures.tokenB,
+    readonlyA: fixtures.tokenReadonlyA,
+    platform: fixtures.tokenPlatform,
+  }).map(([role, token]) => {
+    const payload = JSON.parse(
+      Buffer.from(token.split(".")[1]!, "base64url").toString("utf8"),
+    ) as { exp?: number; sub?: string };
+    if (!payload.exp || payload.exp * 1000 <= Date.now())
+      throw new Error("Seeded session is already expired");
+    return {
+      role,
+      principalSubject: payload.sub,
+      expiresAt: new Date(payload.exp * 1000).toISOString(),
+    };
+  });
+  const directory = path.resolve(REPO_ROOT, ".artifacts/tenant-uat-acceptance");
+  mkdirSync(directory, { recursive: true });
+  writeFileSync(
+    path.join(directory, "identity-fixtures.json"),
+    JSON.stringify(
+      {
+        candidateSha: process.env.CANDIDATE_SHA,
+        tenantA: fixtures.tenantA,
+        tenantB: fixtures.tenantB,
+        identities,
+      },
+      null,
+      2,
+    ),
+  );
   const lines = [
     `DRTS_UAT_TENANT_A=${fixtures.tenantA}`,
     `DRTS_UAT_TENANT_B=${fixtures.tenantB}`,
     `DRTS_UAT_TOKEN_A=${fixtures.tokenA}`,
     `DRTS_UAT_TOKEN_B=${fixtures.tokenB}`,
     `DRTS_UAT_TOKEN_READONLY_A=${fixtures.tokenReadonlyA}`,
+    `DRTS_UAT_TOKEN_PLATFORM=${fixtures.tokenPlatform}`,
     `DRTS_UAT_USER_EMAIL=${fixtures.userEmail}`,
   ];
   const githubEnvPath = process.env.GITHUB_ENV;
   if (githubEnvPath) {
+    for (const token of [
+      fixtures.tokenA,
+      fixtures.tokenB,
+      fixtures.tokenReadonlyA,
+      fixtures.tokenPlatform,
+    ]) {
+      console.log(`::add-mask::${token}`);
+    }
     appendFileSync(githubEnvPath, lines.join("\n") + "\n");
   }
   for (const line of lines) {
@@ -285,7 +368,9 @@ function writeGithubEnv(fixtures: TenantUatFixtures): void {
 }
 
 async function main() {
-  buildTenantUatAcceptanceCandidate();
+  if (!existsSync(path.resolve(API_DIST, "app.module.js"))) {
+    throw new Error("Build the immutable candidate before seeding");
+  }
   const fixtures = await seedTenantUatFixtures();
   writeGithubEnv(fixtures);
 }
