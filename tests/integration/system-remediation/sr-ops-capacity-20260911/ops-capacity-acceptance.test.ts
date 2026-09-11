@@ -73,6 +73,9 @@ describe("SR-OPS-CAPACITY-RUNNER-20260911 real capacity + durable readback accep
       const { AUTH_SCOPE_PRESETS } = await import(
         "../../../../apps/api/src/common/auth/auth.constants"
       );
+      const { SecurityEventsService } = await import(
+        "../../../../apps/api/src/modules/security-events/security-events.service"
+      );
       const { buildCapacityPlan, countsForDuration } = await import(
         "../../../../tools/system-remediation/ops-capacity/plan-builder.mjs"
       );
@@ -183,8 +186,25 @@ describe("SR-OPS-CAPACITY-RUNNER-20260911 real capacity + durable readback accep
           },
         );
         if (!tenantSessionResponse.ok) {
+          // The controller deliberately collapses every internal failure
+          // reason into the same public AUTH_SESSION_EXCHANGE_DENIED 403 for
+          // this open, unauthenticated route (see
+          // apps/api/src/common/iam-error-codes.ts toPublicTenantAuthError).
+          // The real reason is still recorded, unmasked, as a
+          // `tenant_bootstrap_session.denied` security event on the same
+          // running app instance, so surface it here instead of guessing.
+          const securityEventsService = app.get(SecurityEventsService);
+          const recentDenials = await securityEventsService.listEvents(null, {
+            eventType: "tenant_bootstrap_session.denied",
+            limit: 5,
+          });
           throw new Error(
-            `tenant bootstrap-session failed: HTTP ${tenantSessionResponse.status} ${await tenantSessionResponse.text()}`,
+            `tenant bootstrap-session failed: HTTP ${tenantSessionResponse.status} ${await tenantSessionResponse.text()} | unmasked reasonCode(s): ${JSON.stringify(
+              recentDenials.map((event) => ({
+                reasonCode: event.reasonCode,
+                occurredAt: event.occurredAt,
+              })),
+            )}`,
           );
         }
         // Same global snake-case interceptor as above: the wire field is
