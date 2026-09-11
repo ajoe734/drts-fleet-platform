@@ -85,7 +85,7 @@ function buildValidEvidence(overrides: Record<string, unknown> = {}) {
 describe("UV-EXEC-029-PILOT-RUNNER: getApplicableAcs", () => {
   it("excludes pending ACs and keeps conditional/live/pass", () => {
     const applicable = getApplicableAcs(FIXTURE_MANIFEST);
-    expect(applicable.map((ac) => ac.ac_id).sort()).toEqual(["UV-AC-032", "UV-AC-034", "UV-AC-038"]);
+    expect(applicable.map((ac: { ac_id: string }) => ac.ac_id).sort()).toEqual(["UV-AC-032", "UV-AC-034", "UV-AC-038"]);
   });
 });
 
@@ -148,7 +148,7 @@ describe("UV-EXEC-029-PILOT-RUNNER: runPilotAcceptanceGate", () => {
     const result = runPilotAcceptanceGate({ manifestPath, evidencePath, expectedSha: EXPECTED_SHA });
 
     expect(result.ok).toBe(false);
-    expect(result.failures.some((f) => f.startsWith("SHA_MISMATCH:candidate_sha"))).toBe(true);
+    expect(result.failures.some((f: string) => f.startsWith("SHA_MISMATCH:candidate_sha"))).toBe(true);
   });
 
   it("rejects an AC evidence entry stamped with a different run SHA than the candidate", () => {
@@ -197,7 +197,7 @@ describe("UV-EXEC-029-PILOT-RUNNER: runPilotAcceptanceGate", () => {
     const result = runPilotAcceptanceGate({ manifestPath, evidencePath, expectedSha: EXPECTED_SHA });
 
     expect(result.ok).toBe(false);
-    expect(result.failures.some((f) => f.startsWith("COHORT_HUMAN_EXCEPTION_RATE_NOT_FULL_COHORT"))).toBe(true);
+    expect(result.failures.some((f: string) => f.startsWith("COHORT_HUMAN_EXCEPTION_RATE_NOT_FULL_COHORT"))).toBe(true);
   });
 
   it("rejects a bare authorization string instead of a structured approval", () => {
@@ -283,7 +283,7 @@ describe("UV-EXEC-029-PILOT-RUNNER: runPilotAcceptanceGate", () => {
     });
 
     expect(result.ok).toBe(false);
-    expect(result.failures.some((f) => f.startsWith("EVIDENCE_STALE"))).toBe(true);
+    expect(result.failures.some((f: string) => f.startsWith("EVIDENCE_STALE"))).toBe(true);
   });
 
   it("fails closed when the evidence file does not exist", () => {
@@ -294,7 +294,7 @@ describe("UV-EXEC-029-PILOT-RUNNER: runPilotAcceptanceGate", () => {
     });
 
     expect(result.ok).toBe(false);
-    expect(result.failures.some((f) => f.startsWith("EVIDENCE_NOT_FOUND"))).toBe(true);
+    expect(result.failures.some((f: string) => f.startsWith("EVIDENCE_NOT_FOUND"))).toBe(true);
     expect(result.report).toBeNull();
   });
 

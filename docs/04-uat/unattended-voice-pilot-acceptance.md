@@ -44,7 +44,7 @@ Applicable-AC scoping intentionally excludes `pending` ACs: those are still insi
 
 ## 3. Pilot Evidence Bundle Schema (External Input Handoff)
 
-Operations submits one JSON file (default path `docs/04-uat/unattended-voice-pilot-evidence.json`, or any path passed via `--evidence`) with this shape:
+Operations submits one JSON file (default path docs/04-uat/unattended-voice-pilot-evidence.json, or any path passed via `--evidence`) with this shape. This is a runtime operations artifact and is intentionally not checked into this repository:
 
 ```json
 {

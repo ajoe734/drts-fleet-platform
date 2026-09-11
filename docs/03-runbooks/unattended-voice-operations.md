@@ -31,7 +31,7 @@ This runbook tells operations how to submit pilot evidence and run the executabl
    - `cohort` figures computed against the **full** incoming-call cohort for the pilot window, not a filtered or successful-only subset.
    - `language_route_model_profile_signoff` for every language/model-profile actually enabled during the pilot.
    - `staffing_callback_drill_evidence` and `kill_switch_rollback_drill_evidence` from drills that were actually executed (see §3).
-3. Save the bundle (default expected path `docs/04-uat/unattended-voice-pilot-evidence.json`, or any path passed via `--evidence`). This file is operational evidence, not generated code — do not check in a fixture/placeholder version.
+3. Save the bundle (default expected path docs/04-uat/unattended-voice-pilot-evidence.json, or any path passed via `--evidence`). This is a runtime operations artifact, not a repo-tracked file — do not check in a fixture/placeholder version, which is why that path is intentionally absent from this repository.
 4. Run the gate:
    ```bash
    node operations/verification/check-unattended-voice-pilot.mjs \
