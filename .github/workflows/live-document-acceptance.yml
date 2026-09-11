@@ -1,0 +1,254 @@
+name: Live Document Acceptance (SR-LIVE-DOC-RUNNER-001)
+
+# Dedicated, manually-dispatched acceptance runner for SR-LIVE-DOC-RUNNER-001:
+# an authenticated remote artifact downloader that invokes the existing,
+# unmodified independent bank artifact verifier
+# (tests/unit/system-remediation/sr-bank-003/verify_artifact.py) against
+# genuinely downloaded bytes, and separately exercises the real
+# ControlledDownloadController for tenant-invoice/report/placard coverage.
+#
+# This checks out one immutable candidate SHA, proves the checkout did not
+# move, runs the runner-validation suite (test doubles only -- an ephemeral
+# loopback HTTP listener standing in for the still-blocked live deployment;
+# see SR-RELEASE-001), and uploads evidence even when the run fails. It does
+# not run on every PR and is not part of ci-integ; it is invoked once per
+# candidate that needs this acceptance evidence, and -- once real deployed
+# targets and credentials exist -- can additionally be dispatched with the
+# live-target inputs below to run genuine live storage/signing acceptance
+# against a real host.
+
+on:
+  workflow_dispatch:
+    inputs:
+      candidate_sha:
+        description: "Immutable candidate commit SHA to verify (full 40-char SHA)"
+        required: true
+        default: "75136fe3e7c9d143e6a0dbd012e8ec8856ae8127"
+      live_target_origin:
+        description: "Optional: real deployed bank-console origin for live storage/signing acceptance (leave empty to run runner-validation only)"
+        required: false
+        default: ""
+      live_bank_code:
+        description: "Optional: authorized bank tenant code for live acceptance"
+        required: false
+        default: ""
+      live_statement_path:
+        description: "Optional: authorized statement download path for live acceptance (e.g. /artifacts/statements/<id>.pdf)"
+        required: false
+        default: ""
+  # Narrow push trigger, scoped to this task branch and these files only.
+  # workflow_dispatch alone cannot be dispatched until this workflow file is
+  # registered on the repo's default branch -- push has no such registration
+  # requirement, so this is the actual runnable acceptance path while that
+  # bootstrap is pending. It always re-verifies the locked candidate below
+  # (see the candidate_sha fallback), never the pushed commit itself.
+  push:
+    branches:
+      - claude2/sr-live-doc-runner-001-20260911
+      - claude/sr-live-doc-runner-001-20260911
+    paths:
+      - .github/workflows/live-document-acceptance.yml
+      - tests/e2e/system-remediation/sr-live-doc-001/**
+      - tests/unit/system-remediation/sr-live-doc-001/**
+      - tests/unit/system-remediation/sr-bank-003/verify_artifact.py
+      - docs/04-uat/system-remediation-20260906/live-document-acceptance-runner.md
+
+permissions:
+  contents: read
+
+concurrency:
+  group: live-document-acceptance-${{ github.event.inputs.candidate_sha || '75136fe3e7c9d143e6a0dbd012e8ec8856ae8127' }}
+  cancel-in-progress: false
+
+env:
+  CI: true
+
+jobs:
+  acceptance:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      # Routed through env rather than interpolated directly into a `run:`
+      # script: a workflow_dispatch input is attacker-controllable text, and
+      # direct ${{ }} interpolation inside a shell block is substituted
+      # before the shell runs, which is a script-injection vector.
+      CANDIDATE_SHA: ${{ github.event.inputs.candidate_sha || '75136fe3e7c9d143e6a0dbd012e8ec8856ae8127' }}
+      # The commit that actually supplied this workflow/test definition,
+      # recorded separately from CANDIDATE_SHA so a push-triggered run's
+      # evidence never conflates "which commit changed the workflow" with
+      # "which commit is being accepted".
+      WORKFLOW_SHA: ${{ github.sha }}
+      SR_LIVE_DOC_RUNNER_EVIDENCE: ${{ github.workspace }}/.artifacts/live-document-acceptance/evidence-runner-record.json
+      SR_LIVE_DOC_LIVE_TARGET_ORIGIN: ${{ github.event.inputs.live_target_origin }}
+      SR_LIVE_DOC_LIVE_BANK_CODE: ${{ github.event.inputs.live_bank_code }}
+      SR_LIVE_DOC_LIVE_STATEMENT_PATH: ${{ github.event.inputs.live_statement_path }}
+      SR_LIVE_DOC_LIVE_SESSION_COOKIE: ${{ secrets.SR_LIVE_DOC_LIVE_SESSION_COOKIE }}
+      SR_LIVE_DOC_LIVE_PUBLIC_KEY_PATH: ${{ github.workspace }}/.artifacts/live-document-acceptance/live-public-key.pem
+    steps:
+      - name: Validate candidate_sha input
+        run: |
+          sha="$CANDIDATE_SHA"
+          if ! [[ "$sha" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "::error::candidate_sha must be a full 40-character commit SHA, got: $sha"
+            exit 1
+          fi
+
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.inputs.candidate_sha || '75136fe3e7c9d143e6a0dbd012e8ec8856ae8127' }}
+          fetch-depth: 0
+
+      - name: Verify checkout resolved the exact immutable candidate
+        # actions/checkout resolves `ref` at fetch time; a moving branch name
+        # would silently substitute a newer commit. This stands in for "verify
+        # the deployed candidate SHA before fetching bytes" (SR-LIVE-DOC-001's
+        # integration_notes) until a real deployed target exists for this
+        # still-blocked parent (SR-RELEASE-001) -- there is no live host today
+        # whose running SHA could be queried instead.
+        run: |
+          resolved="$(git rev-parse HEAD)"
+          expected="$CANDIDATE_SHA"
+          echo "Resolved HEAD: $resolved"
+          echo "Expected candidate: $expected"
+          if [ "$resolved" != "$expected" ]; then
+            echo "::error::Checked-out HEAD ($resolved) does not match the requested candidate ($expected)."
+            exit 1
+          fi
+
+      - name: Prepare evidence directory
+        run: mkdir -p .artifacts/live-document-acceptance
+
+      - name: Write live public key from secret (only when live acceptance is requested)
+        if: ${{ github.event.inputs.live_target_origin != '' }}
+        env:
+          LIVE_PUBLIC_KEY_PEM: ${{ secrets.SR_LIVE_DOC_LIVE_PUBLIC_KEY_PEM }}
+        run: |
+          if [ -z "$LIVE_PUBLIC_KEY_PEM" ]; then
+            echo "::error::live_target_origin was supplied but SR_LIVE_DOC_LIVE_PUBLIC_KEY_PEM secret is not configured."
+            exit 1
+          fi
+          printf '%s' "$LIVE_PUBLIC_KEY_PEM" > "$SR_LIVE_DOC_LIVE_PUBLIC_KEY_PATH"
+
+      - uses: pnpm/action-setup@v4
+        with: { version: 10.33.0, run_install: false }
+      - uses: actions/setup-node@v4
+        with:
+          {
+            node-version: 22,
+            cache: pnpm,
+            cache-dependency-path: pnpm-lock.yaml,
+          }
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.11" }
+
+      - name: Install dependencies
+        id: install
+        run: |
+          set -o pipefail
+          pnpm install --frozen-lockfile 2>&1 | tee -a .artifacts/live-document-acceptance/execution-log.txt
+
+      - name: Run SR-LIVE-DOC-RUNNER-001 unit + e2e acceptance suite
+        id: harness
+        run: |
+          set -o pipefail
+          pnpm exec vitest run \
+            tests/unit/system-remediation/sr-live-doc-001/ \
+            tests/e2e/system-remediation/sr-live-doc-001/ \
+            --no-file-parallelism --maxConcurrency=1 \
+            --reporter=default --reporter=json \
+            --outputFile.json=.artifacts/live-document-acceptance/test-report.json \
+            2>&1 | tee -a .artifacts/live-document-acceptance/execution-log.txt
+
+      - name: Gate on zero skips beyond the expected live-acceptance placeholder, and all executed tests passed
+        id: gate
+        if: always()
+        env:
+          LIVE_TARGET_SUPPLIED: ${{ github.event.inputs.live_target_origin != '' && 'true' || 'false' }}
+        run: |
+          python3 - <<'PY_GATE'
+          import json
+          import os
+          from pathlib import Path
+
+          report_path = Path(".artifacts/live-document-acceptance/test-report.json")
+          if not report_path.exists():
+              raise SystemExit(
+                  "Acceptance gate: no test report was produced "
+                  "(the harness likely failed before vitest could write one)."
+              )
+          report = json.loads(report_path.read_text())
+          total = report.get("numTotalTests", 0)
+          passed = report.get("numPassedTests", 0)
+          pending = report.get("numPendingTests", 0)
+          live_target_supplied = os.environ.get("LIVE_TARGET_SUPPLIED") == "true"
+          # Exactly one test (the live-acceptance placeholder) is allowed to be
+          # pending when no live target was supplied -- that is `it.runIf`
+          # correctly declining to fabricate a live result, not a real skip.
+          allowed_pending = 0 if live_target_supplied else 1
+          if total < 27 or passed != total - pending or pending > allowed_pending or not report.get("success"):
+              raise SystemExit(
+                  f"Live document acceptance incomplete: total={total}, "
+                  f"passed={passed}, pending={pending} (allowed={allowed_pending}), "
+                  f"success={report.get('success')}."
+              )
+          print(f"Live document acceptance: {passed}/{total} passed, pending={pending} (allowed={allowed_pending}).")
+          PY_GATE
+
+      - name: Record run status
+        if: always()
+        env:
+          INSTALL_OUTCOME: ${{ steps.install.outcome }}
+          HARNESS_OUTCOME: ${{ steps.harness.outcome }}
+          GATE_OUTCOME: ${{ steps.gate.outcome }}
+          LIVE_TARGET_SUPPLIED: ${{ github.event.inputs.live_target_origin != '' && 'true' || 'false' }}
+        run: |
+          python3 - <<'PY_STATUS'
+          import json
+          import os
+          from pathlib import Path
+
+          report_path = Path(".artifacts/live-document-acceptance/test-report.json")
+          status_path = Path(".artifacts/live-document-acceptance/run-status.json")
+          status_path.parent.mkdir(parents=True, exist_ok=True)
+
+          install_outcome = os.environ.get("INSTALL_OUTCOME", "unknown")
+          harness_outcome = os.environ.get("HARNESS_OUTCOME", "unknown")
+          gate_outcome = os.environ.get("GATE_OUTCOME", "unknown")
+          mode = "live_acceptance" if os.environ.get("LIVE_TARGET_SUPPLIED") == "true" else "runner_validation"
+
+          if (
+              install_outcome == "success"
+              and harness_outcome == "success"
+              and gate_outcome == "success"
+              and report_path.exists()
+          ):
+              status = "passed"
+          elif install_outcome != "success":
+              status = "not_run"
+          else:
+              status = "failed"
+
+          status_path.write_text(json.dumps({
+              "candidate_sha": os.environ.get("CANDIDATE_SHA", ""),
+              "workflow_sha": os.environ.get("WORKFLOW_SHA", ""),
+              "mode": mode,
+              "status": status,
+              "install_outcome": install_outcome,
+              "harness_outcome": harness_outcome,
+              "gate_outcome": gate_outcome,
+              "report_present": report_path.exists(),
+          }, indent=2) + "\n")
+          print(f"Run status recorded: {status} (mode={mode})")
+          PY_STATUS
+
+      - name: Upload execution log, test report, evidence, and run status
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: live-document-acceptance-${{ github.event.inputs.candidate_sha || '75136fe3e7c9d143e6a0dbd012e8ec8856ae8127' }}
+          path: |
+            .artifacts/live-document-acceptance/execution-log.txt
+            .artifacts/live-document-acceptance/test-report.json
+            .artifacts/live-document-acceptance/evidence-runner-record.json
+            .artifacts/live-document-acceptance/run-status.json
+          if-no-files-found: warn
