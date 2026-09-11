@@ -143,8 +143,24 @@ describe("SR-OPS-CAPACITY-RUNNER-20260911 real capacity + durable readback accep
                 `Dispatchable order seed #${index} failed: HTTP ${response.status} ${await response.text()}`,
               );
             }
-            const body = (await response.json()) as { data: { orderId: string } };
-            orderIds[index] = body.data.orderId;
+            const rawBody = await response.text();
+            let body: { data?: { orderId?: unknown } };
+            try {
+              body = JSON.parse(rawBody) as { data?: { orderId?: unknown } };
+            } catch (parseError) {
+              throw new Error(
+                `Dispatchable order seed #${index} returned HTTP ${response.status} with unparseable JSON body: ${rawBody.slice(0, 500)} (${
+                  parseError instanceof Error ? parseError.message : String(parseError)
+                })`,
+              );
+            }
+            const orderId = body?.data?.orderId;
+            if (typeof orderId !== "string" || orderId.length === 0) {
+              throw new Error(
+                `Dispatchable order seed #${index} returned HTTP ${response.status} but no valid orderId in body: ${rawBody.slice(0, 500)}`,
+              );
+            }
+            orderIds[index] = orderId;
           }
         }
         await Promise.all(
