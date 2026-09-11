@@ -33,7 +33,10 @@ export class UnprovisionedRemittanceProofScannerAdapter
     };
   }
 
-  async scan(): Promise<RemittanceProofScanOutcome> {
+  async scan(
+    input: RemittanceProofScanInput,
+  ): Promise<RemittanceProofScanOutcome> {
+    void input;
     throw new Error(
       "Remittance proof scanner adapter is not provisioned. " +
         "Configure REMITTANCE_PROOF_SCANNER_PROVIDER to enable scanning.",
