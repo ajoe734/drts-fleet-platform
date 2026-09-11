@@ -401,12 +401,11 @@ describe("SR-RECOVERY-CONTRACTS-20260911: Proof, Push-Receipt & Adapter-Registry
         createdAt: "2026-01-01T00:00:00.000Z",
         updatedAt: "2026-01-01T00:00:00.000Z",
       };
-      const bareUpdate: UpdatePlatformAdapterCommand = {
-        rolloutStatus: undefined,
-      };
+      const bareUpdate: UpdatePlatformAdapterCommand = {};
       expect(bareAdapterFields.id).toBe("adapter-legacy-001");
       expect(bareUpdate.reason).toBeUndefined();
       expect(bareUpdate.expectedRevision).toBeUndefined();
+      expect(bareUpdate.rolloutStatus).toBeUndefined();
     });
   });
 

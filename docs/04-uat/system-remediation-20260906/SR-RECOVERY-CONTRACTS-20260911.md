@@ -12,7 +12,7 @@ HEAD was bit-for-bit identical to `origin/dev`'s tip (no task commit existed
 at all — that tip commit is `c0ec81b69`, the unrelated `SR-RECOVERY-CANVAS-20260911`
 canvas-states PR), and only 2 of the 11 declared artifacts existed on disk —
 `packages/contracts/src/platform-adapter-registry.ts` and
-`docs/04-uat/.../schema-allocation.json` — both pre-existing baseline files
+`docs/04-uat/system-remediation-20260906/schema-allocation.json` — both pre-existing baseline files
 last touched by `SR-CONTRACT-001`/`SR-ACADEMY-BE-001`/W2, not new work. This
 was recorded via `ai-status.sh progress` before implementation began. Every
 claim in this report was re-verified against actual command output, not
