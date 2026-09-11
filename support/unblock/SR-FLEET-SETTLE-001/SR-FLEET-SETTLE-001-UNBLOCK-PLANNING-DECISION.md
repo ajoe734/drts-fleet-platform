@@ -18,12 +18,12 @@ A comprehensive review of the codebase, commit history, and canonical planning a
    - Source finding `R13` (`docs/04-uat/system-remediation-20260906/source/findings.json`) identified a UI self-contradiction:
      "分潤頁同時說本期對帳單已產生及沒有可操作對帳單；對帳清單空白" with recommended fix "由同一單據狀態驅動提示，無單據時提供原因及下一步".
    - On branch `claude2/sr-fleet-settle-001` at commit `13a7fc1fab189bad3b2e08c297e92daa5992e2e0` (base `69e31e793489202c612c5f46dbc801099b5cf5c0`), Claude2 delivered:
-     - Pure tri-state banner resolver (`apps/fleet-partner-portal-web/app/revenue/statement-banner.ts`: `resolveStatementBannerState(currentStatement)`) mapping strictly to `no_statement`, `pending`, or `paid`, preventing contradictory banners.
+     - Pure tri-state banner resolver (branch file `app/revenue/statement-banner.ts`: `resolveStatementBannerState(currentStatement)`) mapping strictly to `no_statement`, `pending`, or `paid`, preventing contradictory banners.
      - Real statement detail view (`apps/fleet-partner-portal-web/app/statements/[id]/page.tsx`) rendering DL summary and line item tables directly from `loadStatementDetail`.
-     - Real CSV export (`apps/fleet-partner-portal-web/app/statements/export/route.ts`) supporting query parameters (`?statementId=`) for line item details or full list summary.
+     - Real CSV export (branch route `app/statements/export/route.ts`) supporting query parameters (`?statementId=`) for line item details or full list summary.
      - Cross-fleet partner security isolation: `loadStatementDetail` in `apps/fleet-partner-portal-web/lib/fleet-portal-data.server.ts` validates that the requested statement belongs to the authenticated fleet partner; foreign IDs return `null` and render a 404 page, preventing cross-tenant leakage.
      - Honest empty list state in `apps/fleet-partner-portal-web/app/statements/page.tsx`.
-     - 8 unit tests in `tests/unit/system-remediation/sr-fleet-settle-001/sr-fleet-settle-001.test.ts` (100% passing).
+     - 8 unit tests in candidate suite (`sr-fleet-settle-001.test.ts` under `tests/unit/system-remediation/sr-fleet-settle-001/`, 100% passing).
 
 2. **Assigned Backend `write_scopes` Suffers from a Canonical Assignment Mismatch**:
    - `docs/03-runbooks/system-remediation-20260906/SR-FLEET-SETTLE-001.md` and `ai-status.json` listed `apps/api/src/modules/billing-settlement/billing-settlement.service.ts` as the sole backend write scope.
@@ -156,4 +156,4 @@ Higher-precedence first per `AI_COLLABORATION_GUIDE.md` §2:
 - `docs/03-runbooks/system-remediation-20260906/SR-FLEET-SETTLE-001.md`
 - `docs/04-uat/system-remediation-20260906/schema-allocation.json`
 - Commit `13a7fc1fab189bad3b2e08c297e92daa5992e2e0` on `origin/claude2/sr-fleet-settle-001`
-- `tests/unit/system-remediation/sr-fleet-settle-001/sr-fleet-settle-001.test.ts` (8/8 pass)
+- Candidate unit test suite under `tests/unit/system-remediation/sr-fleet-settle-001/` (`sr-fleet-settle-001.test.ts`, 8/8 pass)
