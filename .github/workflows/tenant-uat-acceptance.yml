@@ -1,0 +1,427 @@
+name: Tenant UAT Acceptance (SR-QA-TENANT-001)
+
+# Dedicated, manually-dispatchable acceptance runner for SR-QA-TENANT-001
+# (租戶日常工作、配額與整合設定驗收). TenantPartnerModule -- users, addresses,
+# passengers, cost centers, approval rules, SLA, invites, quota -- IS
+# registered in the real root apps/api/src/app.module.ts (unlike
+# SR-HOST-FE-001's HostViewModule, which had no root registration), so this
+# workflow boots the real, unmodified, compiled full AppModule server rather
+# than a narrower isolated composition. Neither Postgres, a real HTTP server,
+# nor real JWT identity provisioning is permitted on this project's worker
+# VM, so this workflow -- entirely on GitHub-hosted runners -- is the only
+# place SR-QA-TENANT-001's required_acceptance evidence
+# (tenant_daily_work_quota_and_integrations_write_readback,
+# tenant_role_and_cross_tenant_negative_evidence) can actually be produced.
+#
+# Three stages in one job:
+#   1. migrate a dedicated Postgres and build the real compiled API server.
+#   2. seed two disposable tenants (A, B) with real, durable-state-valid
+#      tenant_admin sessions plus a read-only tenant_viewer session on tenant
+#      A, through the authoritative TenantPartnerService/JwtAuthService (see
+#      appmodule-acceptance-seed.ts) -- never by writing tables directly or
+#      forging a session.
+#   3. start the separate HTTP server, run the full tests/e2e/system-remediation/sr-qa-tenant-001/*.spec.ts
+#      Playwright HTTP-acceptance specs against that live server, and the
+#      tests/unit/system-remediation/sr-qa-tenant-001/*.test.ts service-level
+#      regression suite, then replace the API process and verify same-ID
+#      HTTP/PG durability across the complete matrix, gated on zero skips.
+
+on:
+  workflow_dispatch:
+    inputs:
+      candidate_sha:
+        description: "Immutable candidate commit SHA to verify (full 40-char SHA); leave blank to use the dispatch ref's HEAD"
+        required: false
+        default: ""
+  push:
+    branches:
+      - claude2/sr-qa-tenant-001-acceptance-runner
+      - claude/sr-qa-tenant-001-acceptance-runner
+      - codex/sr-qa-tenant-ci-repair-20260911
+    paths:
+      - .github/workflows/tenant-uat-acceptance.yml
+      - tools/ci/test_tenant_uat_acceptance_workflow.py
+      - tests/e2e/system-remediation/sr-qa-tenant-001/**
+      - tests/unit/system-remediation/sr-qa-tenant-001/**
+      - docs/04-uat/system-remediation-20260906/SR-QA-TENANT-001.md
+
+permissions:
+  contents: read
+
+concurrency:
+  group: tenant-uat-acceptance-${{ github.event.inputs.candidate_sha || github.sha }}
+  cancel-in-progress: false
+
+env:
+  CI: true
+
+jobs:
+  acceptance:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    services:
+      postgres:
+        image: postgis/postgis:16-3.4
+        env:
+          POSTGRES_DB: drts_fleet_platform
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+      mailpit:
+        image: axllent/mailpit:v1.29.2
+        ports:
+          - 1025:1025
+          - 8025:8025
+    env:
+      DATABASE_URL: postgresql://postgres:postgres@localhost:5432/drts_fleet_platform
+      DRTS_UAT_ENV: sandbox
+      NODE_ENV: test
+      AUTH_MODE: test
+      MAILPIT_SMTP_PORT: "1025"
+      DRTS_UAT_MAILPIT_URL: http://127.0.0.1:8025
+      NOTIFICATION_OUTBOX_DIRECTORY: /tmp/tenant-uat-mail-outbox
+      NOTIFICATION_FROM_EMAIL: qa-sender@qa-tenant-uat.example
+      DRTS_UAT_API_URL: http://127.0.0.1:4102
+      JWT_SECRET: tenant-uat-acceptance-runner-not-a-real-secret-32-chars-min
+      JWT_ALGORITHMS: HS256
+      CONTROLLED_DOWNLOAD_SIGNING_SECRET: tenant-uat-acceptance-runner-not-a-real-secret-32-chars-min
+      CANDIDATE_SHA: ${{ github.event.inputs.candidate_sha || github.sha }}
+      WORKFLOW_SHA: ${{ github.sha }}
+      DRTS_CANDIDATE_SHA: ${{ github.event.inputs.candidate_sha || github.sha }}
+    steps:
+      - name: Validate candidate_sha input
+        run: |
+          sha="$CANDIDATE_SHA"
+          if ! [[ "$sha" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "::error::candidate_sha must be a full 40-character commit SHA, got: $sha"
+            exit 1
+          fi
+
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.inputs.candidate_sha || github.sha }}
+          fetch-depth: 0
+
+      - name: Verify checkout resolved the exact immutable candidate
+        run: |
+          resolved="$(git rev-parse HEAD)"
+          expected="$CANDIDATE_SHA"
+          echo "Resolved HEAD: $resolved"
+          echo "Expected candidate: $expected"
+          if [ "$resolved" != "$expected" ]; then
+            echo "::error::Checked-out HEAD ($resolved) does not match the requested candidate ($expected)."
+            exit 1
+          fi
+
+      - name: Prepare evidence directory
+        run: |
+          mkdir -p .artifacts/tenant-uat-acceptance
+          base_sha="$(git merge-base origin/dev HEAD)"
+          echo "BASE_SHA=$base_sha" >> "$GITHUB_ENV"
+
+      - uses: pnpm/action-setup@v4
+        with: { version: 10.33.0, run_install: false }
+      - uses: actions/setup-node@v4
+        with:
+          {
+            node-version: 22,
+            cache: pnpm,
+            cache-dependency-path: pnpm-lock.yaml,
+          }
+
+      - name: Install dependencies
+        id: install
+        run: |
+          set -o pipefail
+          pnpm install --frozen-lockfile 2>&1 | tee -a .artifacts/tenant-uat-acceptance/execution-log.txt
+
+      - name: Apply migrations to the dedicated acceptance database
+        id: migrate
+        run: |
+          set -o pipefail
+          pnpm db:migrate 2>&1 | tee -a .artifacts/tenant-uat-acceptance/execution-log.txt
+
+      - name: Build the real API server
+        id: build_api
+        run: |
+          set -o pipefail
+          pnpm --filter @drts/api... build 2>&1 | tee -a .artifacts/tenant-uat-acceptance/execution-log.txt
+
+      - name: Seed disposable tenant A/B sessions through the authoritative service
+        id: seed
+        run: |
+          set -o pipefail
+          ./apps/api/node_modules/.bin/tsx tests/e2e/system-remediation/sr-qa-tenant-001/appmodule-acceptance-seed.ts \
+            2>&1 | awk '{ print; if ($0 !~ /^::add-mask::/) print >> ".artifacts/tenant-uat-acceptance/execution-log.txt"; }'
+
+      - name: Start the real API server
+        id: start_api
+        env:
+          API_PORT: "4102"
+          API_HOST: "127.0.0.1"
+        run: |
+          set -o pipefail
+          (
+            cd apps/api
+            node dist/main.js > ../../.artifacts/tenant-uat-acceptance/api-server.log 2>&1 &
+            echo $! > ../../.artifacts/tenant-uat-acceptance/api-server.pid
+          )
+          for i in $(seq 1 60); do
+            code="$(curl -s -o /dev/null -w '%{http_code}' "${DRTS_UAT_API_URL}/api/health" 2>/dev/null || true)"
+            code="${code:-000}"
+            if [ "$code" = "200" ]; then
+              echo "Tenant UAT API responded with HTTP $code after ${i}s"
+              exit 0
+            fi
+            sleep 1
+          done
+          echo "::error::Tenant UAT API did not start within 60s"
+          cat .artifacts/tenant-uat-acceptance/api-server.log || true
+          exit 1
+
+      - name: Run tenant HTTP acceptance specs (real server, real DB, real sessions)
+        id: harness_e2e
+        run: |
+          set -o pipefail
+          pnpm exec playwright test \
+            -c playwright.system-remediation.config.ts \
+            tests/e2e/system-remediation/sr-qa-tenant-001 --workers=1 --trace=off \
+            2>&1 | tee -a .artifacts/tenant-uat-acceptance/execution-log.txt
+
+      - name: Run tenant service-level regression suite
+        id: harness_unit
+        run: |
+          set -o pipefail
+          pnpm exec vitest run \
+            tests/unit/system-remediation/sr-qa-tenant-001/ \
+            --reporter=default --reporter=json \
+            --outputFile.json=.artifacts/tenant-uat-acceptance/unit-test-report.json \
+            2>&1 | tee -a .artifacts/tenant-uat-acceptance/execution-log.txt
+
+      - name: Restart the real API without resetting its database
+        id: restart_api
+        run: |
+          set -euo pipefail
+          old_pid="$(cat .artifacts/tenant-uat-acceptance/api-server.pid)"
+          kill "$old_pid"
+          for i in $(seq 1 30); do
+            if ! kill -0 "$old_pid" 2>/dev/null; then break; fi
+            sleep 1
+          done
+          if kill -0 "$old_pid" 2>/dev/null; then
+            echo "::error::Original API process did not terminate"
+            exit 1
+          fi
+          (
+            cd apps/api
+            API_PORT=4102 API_HOST=127.0.0.1 node dist/main.js >> ../../.artifacts/tenant-uat-acceptance/api-server.log 2>&1 &
+            echo $! > ../../.artifacts/tenant-uat-acceptance/api-server.pid
+          )
+          new_pid="$(cat .artifacts/tenant-uat-acceptance/api-server.pid)"
+          test "$new_pid" != "$old_pid"
+          for i in $(seq 1 60); do
+            if curl --fail --silent "${DRTS_UAT_API_URL}/api/health" > /dev/null; then
+              echo "Restarted API PID $old_pid -> $new_pid; database and mail outbox preserved"
+              exit 0
+            fi
+            sleep 1
+          done
+          exit 1
+
+      - name: Verify every captured resource through HTTP and PG after restart
+        id: restart_readback
+        run: |
+          set -o pipefail
+          ./apps/api/node_modules/.bin/tsx tests/e2e/system-remediation/sr-qa-tenant-001/restart-readback.ts \
+            2>&1 | tee -a .artifacts/tenant-uat-acceptance/execution-log.txt
+
+      - name: Stop background API server
+        if: always()
+        run: |
+          if [ -f .artifacts/tenant-uat-acceptance/api-server.pid ]; then
+            kill "$(cat .artifacts/tenant-uat-acceptance/api-server.pid)" 2>/dev/null || true
+          fi
+
+      - name: Gate on zero skips and every test passed (Playwright + Vitest)
+        id: gate
+        if: always()
+        run: |
+          python3 - <<'PY_GATE'
+          import json
+          from pathlib import Path
+
+          playwright_report = Path("test-results/system-remediation-report.json")
+          if not playwright_report.exists():
+              raise SystemExit(
+                  "Tenant UAT acceptance gate: no Playwright JSON report was "
+                  "produced (the harness likely failed before it could write one)."
+              )
+          report = json.loads(playwright_report.read_text())
+
+          def iter_specs(suite):
+              for spec in suite.get("specs", []):
+                  yield spec
+              for child in suite.get("suites", []):
+                  yield from iter_specs(child)
+
+          all_specs = [
+              spec
+              for suite in report.get("suites", [])
+              for spec in iter_specs(suite)
+          ]
+          tenant_specs = [
+              spec
+              for spec in all_specs
+              if "sr-qa-tenant-001" in spec.get("file", "")
+          ]
+          if not tenant_specs:
+              raise SystemExit(
+                  "Tenant UAT acceptance gate: zero sr-qa-tenant-001 specs found "
+                  "in the Playwright report."
+              )
+          total = 0
+          passed = 0
+          skipped = 0
+          for spec in tenant_specs:
+              for test in spec.get("tests", []):
+                  total += 1
+                  results = test.get("results", [])
+                  status = results[-1].get("status") if results else None
+                  if status == "passed":
+                      passed += 1
+                  elif status in ("skipped", None):
+                      skipped += 1
+          if total < 10 or skipped or passed != total:
+              raise SystemExit(
+                  f"Tenant UAT HTTP acceptance incomplete: total={total}, "
+                  f"passed={passed}, skipped={skipped}. Every "
+                  "sr-qa-tenant-001 spec must pass with zero skips."
+              )
+          print(f"Tenant UAT HTTP acceptance: {passed}/{total} passed, zero skips.")
+
+          required_files = {
+              "approval-rules.spec.ts", "cost-center.spec.ts", "passenger-address.spec.ts",
+              "sla.spec.ts", "users.spec.ts", "directory-durability.spec.ts",
+              "governance.spec.ts", "invitation-mail.spec.ts",
+          }
+          actual_files = {Path(spec.get("file", "")).name for spec in tenant_specs}
+          if not required_files.issubset(actual_files):
+              raise SystemExit(f"Tenant capability matrix missing: {sorted(required_files - actual_files)}")
+          restart = json.loads(Path(".artifacts/tenant-uat-acceptance/restart-report.json").read_text())
+          if restart.get("status") != "passed" or restart.get("verified", 0) < 12:
+              raise SystemExit("Tenant restart durability did not pass the complete matrix")
+
+          unit_report_path = Path(".artifacts/tenant-uat-acceptance/unit-test-report.json")
+          if not unit_report_path.exists():
+              raise SystemExit(
+                  "Tenant UAT acceptance gate: no Vitest JSON report was produced."
+              )
+          unit_report = json.loads(unit_report_path.read_text())
+          unit_total = unit_report.get("numTotalTests", 0)
+          unit_passed = unit_report.get("numPassedTests", 0)
+          unit_pending = unit_report.get("numPendingTests", 0)
+          if (
+              unit_total < 24
+              or unit_passed != unit_total
+              or unit_pending
+              or not unit_report.get("success")
+          ):
+              raise SystemExit(
+                  f"Tenant UAT unit regression incomplete: total={unit_total}, "
+                  f"passed={unit_passed}, pending/skipped={unit_pending}, "
+                  f"success={unit_report.get('success')}."
+              )
+          print(f"Tenant UAT unit regression: {unit_passed}/{unit_total} passed, zero skips.")
+          PY_GATE
+
+      - name: Record run status
+        if: always()
+        env:
+          INSTALL_OUTCOME: ${{ steps.install.outcome }}
+          MIGRATE_OUTCOME: ${{ steps.migrate.outcome }}
+          BUILD_API_OUTCOME: ${{ steps.build_api.outcome }}
+          START_API_OUTCOME: ${{ steps.start_api.outcome }}
+          SEED_OUTCOME: ${{ steps.seed.outcome }}
+          HARNESS_E2E_OUTCOME: ${{ steps.harness_e2e.outcome }}
+          HARNESS_UNIT_OUTCOME: ${{ steps.harness_unit.outcome }}
+          GATE_OUTCOME: ${{ steps.gate.outcome }}
+          RESTART_API_OUTCOME: ${{ steps.restart_api.outcome }}
+          RESTART_READBACK_OUTCOME: ${{ steps.restart_readback.outcome }}
+        run: |
+          python3 - <<'PY_STATUS'
+          import json
+          import os
+          from pathlib import Path
+
+          status_path = Path(".artifacts/tenant-uat-acceptance/run-status.json")
+          status_path.parent.mkdir(parents=True, exist_ok=True)
+
+          outcomes = {
+              key: os.environ.get(key, "unknown")
+              for key in [
+                  "INSTALL_OUTCOME",
+                  "MIGRATE_OUTCOME",
+                  "BUILD_API_OUTCOME",
+                  "START_API_OUTCOME",
+                  "SEED_OUTCOME",
+                  "HARNESS_E2E_OUTCOME",
+                  "HARNESS_UNIT_OUTCOME",
+                  "GATE_OUTCOME",
+                  "RESTART_API_OUTCOME",
+                  "RESTART_READBACK_OUTCOME",
+              ]
+          }
+          setup_ok = all(
+              outcomes[key] == "success"
+              for key in [
+                  "INSTALL_OUTCOME",
+                  "MIGRATE_OUTCOME",
+                  "BUILD_API_OUTCOME",
+                  "START_API_OUTCOME",
+                  "SEED_OUTCOME",
+              ]
+          )
+          if (
+              setup_ok
+              and outcomes["HARNESS_E2E_OUTCOME"] == "success"
+              and outcomes["HARNESS_UNIT_OUTCOME"] == "success"
+              and outcomes["GATE_OUTCOME"] == "success"
+              and outcomes["RESTART_API_OUTCOME"] == "success"
+              and outcomes["RESTART_READBACK_OUTCOME"] == "success"
+          ):
+              status = "passed"
+          elif not setup_ok:
+              status = "not_run"
+          else:
+              status = "failed"
+
+          status_path.write_text(json.dumps({
+              "candidate_sha": os.environ.get("CANDIDATE_SHA", ""),
+              "workflow_sha": os.environ.get("WORKFLOW_SHA", ""),
+              "status": status,
+              **{k.lower(): v for k, v in outcomes.items()},
+          }, indent=2) + "\n")
+          print(f"Run status recorded: {status}")
+          PY_STATUS
+
+      - name: Upload execution log, reports, evidence, and run status
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: tenant-uat-acceptance-${{ github.event.inputs.candidate_sha || github.sha }}
+          path: |
+            .artifacts/tenant-uat-acceptance/execution-log.txt
+            .artifacts/tenant-uat-acceptance/api-server.log
+            .artifacts/tenant-uat-acceptance/unit-test-report.json
+            .artifacts/tenant-uat-acceptance/run-status.json
+            .artifacts/tenant-uat-acceptance/identity-fixtures.json
+            .artifacts/tenant-uat-acceptance/restart-report.json
+            .artifacts/tenant-uat-acceptance/restart-readbacks/
+            test-results/
+          if-no-files-found: warn
