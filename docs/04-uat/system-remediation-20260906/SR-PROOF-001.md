@@ -349,7 +349,8 @@ infra):
 `b630fff4834463ad8d017a997a174e772d41499a`):
 
 - `pnpm --filter @drts/contracts build` — required first; `apps/api`'s
-  `tsconfig.json` resolves `@drts/contracts` to `packages/contracts/dist/index.d.ts`,
+  `tsconfig.json` resolves `@drts/contracts` to a generated `index.d.ts`
+  under `packages/contracts/dist` (a gitignored build output directory),
   which did not exist in this worktree until built (a stale/missing build
   artifact, not a source problem — confirmed `git status` shows no
   `packages/contracts` source changes).
@@ -369,6 +370,44 @@ same locked SHA. Those jobs require a running product/browser/DB
 environment this VM does not permit (VM restriction: no dev servers,
 Playwright, or Docker Compose here) and were not investigated or fixed in
 this pass — flagged here as unresolved, not claimed fixed.
+
+---
+
+## 5.6 CI 修復記錄二 (Canonical consistency fix, post-review)
+
+Candidate `f8a1d069a9b79179070159a553b4cd3c1a9c593a` (PR #1988, run
+`34587199282`) failed the `Canonical consistency` check with a real
+finding (not flaky infra):
+
+- `[consistency] cited-paths: 1 finding(s)` — `docs/04-uat/system-remediation-20260906/SR-PROOF-001.md`
+  cited a backtick-wrapped path, `` `packages/contracts/dist/index.d.ts` ``,
+  that does not exist in the repo tree (`packages/contracts/dist/` is a
+  gitignored build output directory, only materialized by running
+  `pnpm --filter @drts/contracts build`). `tools/ci/git/check_canonical_consistency.py`'s
+  `check_cited_paths` rejects any doc-cited path matching its
+  `docs|apps|packages|tools|infra|tests|operations|support|.github` +
+  known-extension pattern that is not present on disk at checkout time.
+  Fixed by rewording §5's evidence note to describe the generated
+  `index.d.ts` in prose and cite only the real, tracked directory
+  `packages/contracts/dist` (no extension, so the regex does not match
+  it as a file citation) — no change in the underlying evidence claim,
+  only in how the (correctly) non-existent generated file is referenced.
+
+**Re-verification in this worktree** (base `origin/dev` after fetch,
+prior candidate `f8a1d069a9b79179070159a553b4cd3c1a9c593a`):
+
+- `python3 tools/ci/git/check_canonical_consistency.py --ci --base origin/dev --head HEAD` —
+  `cited-paths: 0 finding(s)`, overall `OK` (previously 1 finding).
+- `pnpm --filter @drts/contracts build` — exit 0.
+- `pnpm --filter @drts/api typecheck` — exit 0.
+- `pnpm --filter @drts/platform-admin-web typecheck` — exit 0.
+- `pnpm exec vitest run tests/unit/system-remediation/sr-proof-001/` — 1
+  file passed, 19 tests passed (no regression; docs-only change).
+- `git diff --check` — exit 0.
+
+No source (`.ts`/`.tsx`) files changed in this pass — the fix is
+confined to this evidence document, which is inside this task's
+`write_scopes`.
 
 ---
 
