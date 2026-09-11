@@ -131,6 +131,22 @@ class TenantUatAcceptanceWorkflowStructureTests(unittest.TestCase):
         self.assertEqual(self.text.count("./apps/api/node_modules/.bin/tsx "), 2)
         self.assertNotIn("pnpm exec tsx ", self.text)
 
+    def test_seed_log_preserves_action_masking_without_archiving_the_token(self) -> None:
+        seed_block = self.text.split("id: seed", 1)[1].split("      - name:", 1)[0]
+        match = re.search(r"awk '([^']+)'", seed_block)
+        self.assertIsNotNone(match)
+        with tempfile.TemporaryDirectory() as directory:
+            log = Path(directory) / ".artifacts/tenant-uat-acceptance/execution-log.txt"
+            log.parent.mkdir(parents=True)
+            log.write_text("Earlier migration evidence\n")
+            result = subprocess.run(
+                ["awk", match.group(1)], cwd=directory, text=True, capture_output=True,
+                input="::add-mask::synthetic-fixture-token\nSeeded DRTS_UAT_TOKEN_A\n",
+                check=True,
+            )
+            self.assertIn("::add-mask::synthetic-fixture-token", result.stdout)
+            self.assertEqual(log.read_text(), "Earlier migration evidence\nSeeded DRTS_UAT_TOKEN_A\n")
+
     def test_sets_the_uat_harness_environment_contract(self) -> None:
         # Matches the harness's own required() checks in the ported specs:
         # DRTS_UAT_ENV must be local|sandbox, and DRTS_UAT_API_URL is set.

@@ -74,7 +74,7 @@ worker VM.
 ## Local verification and remaining evidence
 
 - `python3 -m unittest tools/ci/test_tenant_uat_acceptance_workflow.py -v`:
-  31 tests passed, including execution of the embedded gate/status Python with
+  32 tests passed, including execution of the embedded gate/status Python with
   missing-mail, missing-governance, missing/failed-restart and skipped fixtures.
 - `python3 tools/ci/check_test_coverage.py`: all 69 tracked Python test files
   yield tests CI runs; the original CI discovery defect is fixed locally.
@@ -102,3 +102,24 @@ root package after frozen installation. `tsx` is declared by `apps/api`, so
 both seed and restart verification now invoke that workspace's installed
 binary while retaining repository-root working directory. Its artifact says
 `not_run`; this infrastructure failure is not a product acceptance result.
+
+The second run `34566678302` at `81e8599b72d5ec7fa4372936d23c1783f8b7b092`
+seeded real tenant records and JWT sessions successfully, then the unchanged
+API startup guard rejected the runner's missing explicit `AUTH_MODE`.
+The workflow now declares `NODE_ENV=test` and `AUTH_MODE=test`, which the
+production configuration validator accepts; it continues using actual signed
+JWTs and durable session validation. No authentication guard was bypassed.
+A normal merge of dev `25ecae6295898d80883f03a9f5a1276fab03ab24` preserves
+existing OPS validator registration and the tenant validator together.
+
+Seed output now forwards GitHub masking commands only to the job console;
+those commands are excluded from the appended execution-log artifact. A
+synthetic-token regression verifies that masking remains active, the token
+is not archived and prior migration/build evidence is preserved.
+
+The post-merge full local `pnpm run typecheck` was attempted and exited 2
+because this isolated worktree's shared installed dependencies do not resolve
+existing `@drts/api-client`, `@drts/ui-tokens`, `pg` and `pdfjs-dist` imports
+outside this task. Focused tenant strict TypeScript passed. Full typecheck on
+the exact merged candidate still requires the clean frozen-install CI result;
+this local environment failure is not reported as a successful full check.
