@@ -1,8 +1,11 @@
 # SR-DRIVER-WEB-ACCEPTANCE-RUNNER-20260911: Driver web/SQLite and native-export acceptance
 
 - Task: `SR-DRIVER-WEB-ACCEPTANCE-RUNNER-20260911`
-- Owner: `Claude`
-- Reviewer: `Claude2`
+- Owner: `Claude2` (reassigned mid-task from `Claude` via an
+  availability-first supervisor reassignment; `Claude2` picked up the
+  in-flight implementation, fixed the bugs the first hosted run exposed —
+  see §5 — and pushed the candidate)
+- Reviewer: `Claude`
 - Parent: `SR-DRIVER-WEB-001` (merged as `cad0b6b3c03fdd79efb56a8762184bb0580ce461`,
   PR #1965). That candidate's own UAT doc,
   `docs/04-uat/system-remediation-20260906/SR-DRIVER-WEB-001.md` §"未執行 /
@@ -38,7 +41,7 @@ dev-server-adjacent command, confirmed while building this task):
 | Job | Required-acceptance gate | What it proves |
 | --- | --- | --- |
 | `web-export-and-browser-acceptance` | `driver_web_routes_and_sqlite_runtime` | A real `expo export -p web`, served over HTTP with the headers its SQLite runtime needs, real Chromium hitting `/`, `/onboarding`, `/sos`. |
-| `native-export-acceptance` | `driver_native_export_import_boundaries` | A real `expo export --platform ios,android` (plain JS, no Hermes bytecode) whose output is grepped to prove the native map module was actually selected and the web-only fallback module was not. |
+| `native-export-acceptance` | `driver_native_export_import_boundaries` | A real `expo export --platform ios` followed by `expo export --platform android` into the same output dir (plain JS, no Hermes bytecode) whose output is grepped to prove the native map module was actually selected and the web-only fallback module was not. |
 
 ### 2.1 Web job: export, serve, browse
 
@@ -92,11 +95,18 @@ dev-server-adjacent command, confirmed while building this task):
 
 ### 2.2 Native job: export, grep
 
-- `npx expo export --platform ios,android --no-bytecode --output-dir
-  dist-native` runs Metro's serializer for both platforms with Hermes
-  bytecode compilation disabled (`--no-bytecode`, confirmed to exist by
-  reading `@expo/cli`'s `resolveOptions.js` directly), so the output stays
-  plain, grep-able JS instead of opaque `.hbc` bytecode.
+- `expo export --platform` only accepts a single value (`android`, `ios`,
+  `web`, or `all`; confirmed via `--help` and by the first hosted run's own
+  `CommandError: Unsupported platform "ios,android"`), not a comma-separated
+  list. The job therefore runs `npx expo export --platform ios --no-bytecode
+  --output-dir dist-native --clear` followed by `npx expo export --platform
+  android --no-bytecode --output-dir dist-native` (no `--clear` on the
+  second call). Reading `@expo/cli`'s `exportApp.js` directly confirms
+  `--clear` only resets the Metro bundler cache (`resetDevServer`), not the
+  output directory, so the second invocation does not erase the first
+  platform's bundle. `--no-bytecode` disables Hermes bytecode compilation
+  (confirmed to exist by reading `@expo/cli`'s `resolveOptions.js` directly),
+  so the output stays plain, grep-able JS instead of opaque `.hbc` bytecode.
 - The gate asserts, per platform: at least one output JS file exists, it
   contains `PROVIDER_GOOGLE` (the real native map was bundled, not silently
   dropped), and it does **not** contain the web-only fallback module's own
@@ -173,11 +183,45 @@ files) and zero new errors from either new file.
 
 ## 5. Real run evidence
 
-_Filled in after the workflow actually runs on GitHub Actions for this
-task's pushed candidate — see the run table and artifacts below once
-available. Until this section names a concrete run ID and result, treat
-§§2–4 as design/local-validation only, not as proof either job passes for
-real._
+Three `push`-triggered hosted runs against this branch, all on
+GitHub-hosted `ubuntu-latest` runners. The first two are kept here, not
+scrubbed, because they are exactly the kind of real-runtime evidence this
+task exists to produce — including of its own workflow's bugs, not just of
+`apps/driver-app`:
+
+| Run | SHA | Result | What it proved |
+| --- | --- | --- | --- |
+| [34569089458](https://github.com/ajoe734/drts-fleet-platform/actions/runs/34569089458) | `a43f4e85b` | both jobs failed | `web` job: static server step ran `pnpm exec tsx driver-web-static-server.ts`, but `tsx` is only a devDependency of `apps/api`, not the workspace root — command not found. `native` job: `expo export --platform ios,android` — `CommandError: Unsupported platform "ios,android"`. |
+| [34570107192](https://github.com/ajoe734/drts-fleet-platform/actions/runs/34570107192) | `21b53296a` | `web` job partially passed, `native` job still failed | Static server fix worked: export, boundary gate, and server start all passed for real, and the browser suite **genuinely executed** — `/` and `/sos` passed, `/onboarding` failed on `expected at least one network response for expo-sqlite's wa-sqlite.wasm asset, got 0` (a real wasm-load race between the async SQLite init and the synchronous assertion, worse on direct navigation than on the client-redirect routes — see §2.1 and the spec's own comment). `native` job: same `ios,android` platform-arg bug, not yet fixed at this SHA. |
+| [34570415756](https://github.com/ajoe734/drts-fleet-platform/actions/runs/34570415756) | `fe40644f6` | **both jobs passed** | See below. |
+
+`34570415756` (`fe40644f6`, both jobs `success`, `conclusion: success`):
+
+```
+web-export-and-browser-acceptance:
+  Web bundle boundary gate: 2 JS files, zero PROVIDER_GOOGLE leaks.
+  Driver web browser acceptance: 3/3 passed, zero skips.
+  Run status recorded: passed
+
+native-export-acceptance:
+  {
+    "ios":     {"bundle_file_count": 1, "has_native_map_provider": true, "leaks_web_only_fallback_marker": false},
+    "android": {"bundle_file_count": 1, "has_native_map_provider": true, "leaks_web_only_fallback_marker": false}
+  }
+  Native import boundary gate: both platforms use the real native map and exclude the web fallback module.
+  Run status recorded: passed
+```
+
+Both jobs' `run-status.json`, the Playwright JSON report, execution logs, and
+native-bundle-boundary evidence JSON are uploaded as workflow artifacts
+(`driver-web-acceptance-web-fe40644f66bb443d40768ba7018c908106fc9a87`,
+`driver-web-acceptance-native-fe40644f66bb443d40768ba7018c908106fc9a87`) on
+that run.
+
+This closes both required-acceptance gates for real:
+`driver_web_routes_and_sqlite_runtime` and
+`driver_native_export_import_boundaries`. Scope boundaries in §3 remain
+unperformed by design, not by omission.
 
 ## 6. Traceability
 
