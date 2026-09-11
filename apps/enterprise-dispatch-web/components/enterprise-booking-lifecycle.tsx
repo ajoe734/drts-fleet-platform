@@ -21,6 +21,7 @@ import { EntRoute } from "@/components/ent-screen-bits";
 import { EntPageHead } from "@/components/enterprise-shell";
 import {
   buildEnterpriseBookingSearchQuery,
+  classifyEnterpriseBookingFetchError,
   computeEnterpriseBookingPageRangeLabel,
   DEFAULT_ENTERPRISE_BOOKING_SEARCH_FILTERS,
   DEFAULT_ENTERPRISE_BOOKING_SEARCH_PAGE_SIZE,
@@ -630,23 +631,42 @@ export function EnterpriseBookingHistory({ tenantId }: { tenantId: string }) {
   );
 }
 
-export function EnterpriseBookingDetail({ bookingId }: { bookingId: string }) {
+export function EnterpriseBookingDetail({
+  bookingId,
+  tenantId,
+}: {
+  bookingId: string;
+  // Optional: callers that have already verified a tenant session (see
+  // app/bookings/page.tsx's EnterpriseBookingHistory usage) should pass the
+  // real session tenantId here. When omitted this falls back to the fixture
+  // demo tenant id — a known gap tracked in
+  // docs/04-uat/system-remediation-20260906/SR-ENTERPRISE-DATA-001.md,
+  // since closing it requires editing app/bookings/[bookingId]/page.tsx,
+  // which is outside this task's write_scopes.
+  tenantId?: string;
+}) {
   const { t: tr } = useTranslation();
   const [booking, setBooking] = useState<BookingRecord | null>(null);
   const [state, setState] = useState<GatewayState | null>(null);
+  const [notFound, setNotFound] = useState(false);
   const [isCancelling, setIsCancelling] = useState(false);
 
   useEffect(() => {
-    getEnterpriseDispatchTenantClient(enterpriseTenant.id)
+    setBooking(null);
+    setState(null);
+    setNotFound(false);
+    getEnterpriseDispatchTenantClient(tenantId ?? enterpriseTenant.id)
       .getBooking(bookingId)
       .then(setBooking)
-      .catch((error: unknown) =>
-        setState(
-          (gatewayHref(error)?.slice(1) as GatewayState | undefined) ??
-            "degraded",
-        ),
-      );
-  }, [bookingId]);
+      .catch((error: unknown) => {
+        const classified = classifyEnterpriseBookingFetchError(error);
+        if (classified === "not-found") {
+          setNotFound(true);
+          return;
+        }
+        setState(classified);
+      });
+  }, [bookingId, tenantId]);
 
   const editHref = useMemo(
     () =>
@@ -655,6 +675,37 @@ export function EnterpriseBookingDetail({ bookingId }: { bookingId: string }) {
         : "#",
     [booking],
   );
+  if (notFound)
+    return (
+      <ECard t={t}>
+        <div
+          data-testid="enterprise-booking-not-found"
+          style={{
+            padding: "24px 12px",
+            textAlign: "center",
+            display: "flex",
+            flexDirection: "column",
+            alignItems: "center",
+            gap: 10,
+          }}
+        >
+          <strong style={{ fontSize: 16 }}>
+            {tr("bookingLifecycle.detail.notFound.title")}
+          </strong>
+          <p style={{ color: t.muted, fontSize: 13, maxWidth: 380, margin: 0 }}>
+            {tr("bookingLifecycle.detail.notFound.body")}
+          </p>
+          <Link
+            href="/bookings"
+            style={entBtnStyle(t, { variant: "default", size: "sm" })}
+          >
+            <EBtnContent size="sm">
+              {tr("bookingLifecycle.detail.notFound.cta")}
+            </EBtnContent>
+          </Link>
+        </div>
+      </ECard>
+    );
   if (state) return errorContent(state, tr);
   if (!booking)
     return (
@@ -675,16 +726,14 @@ export function EnterpriseBookingDetail({ bookingId }: { bookingId: string }) {
     setIsCancelling(true);
     try {
       const result = await getEnterpriseDispatchTenantClient(
-        enterpriseTenant.id,
+        tenantId ?? enterpriseTenant.id,
       ).cancelBooking(bookingToCancel.bookingId, {
         reason: "Cancelled from Enterprise Dispatch",
       });
       setBooking(result);
     } catch (error) {
-      setState(
-        (gatewayHref(error)?.slice(1) as GatewayState | undefined) ??
-          "degraded",
-      );
+      const classified = classifyEnterpriseBookingFetchError(error);
+      setState(classified === "not-found" ? "degraded" : classified);
     } finally {
       setIsCancelling(false);
     }
