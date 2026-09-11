@@ -56,13 +56,23 @@ describe.runIf(enabled)(
         wire.hostB,
       );
       expect(other.status).toBe(404);
+      const vehicleBefore = await wire.db.query(
+        "SELECT current_status, active_flag FROM reg.vehicles WHERE vehicle_id=$1",
+        [VEHICLE_A1],
+      );
       const write = await wireRequest(
         wire.baseUrl,
         "/host/vehicles",
         wire.hostA,
         { vehicleId: VEHICLE_A1 },
       );
-      expect(write.status).toBe(403);
+      expect(write.status).toBe(405);
+      expect(write.json.error.code).toBe("HOST_MUTATION_NOT_SUPPORTED");
+      const vehicleAfter = await wire.db.query(
+        "SELECT current_status, active_flag FROM reg.vehicles WHERE vehicle_id=$1",
+        [VEHICLE_A1],
+      );
+      expect(vehicleAfter.rows).toEqual(vehicleBefore.rows);
       facts.host = {
         partnerId: HOST_A_PARTNER_ID,
         ownedVehicleId: VEHICLE_A1,
@@ -217,7 +227,7 @@ describe.runIf(enabled)(
     it("reloads leave expiry from SQL and restores online/clock-in without altering exclusion authority", async () => {
       const ended = new Date(Date.now() - 1000).toISOString();
       await wire.db.query(
-        "UPDATE ops.phase1_driver_leave_requests SET end_time=$2, record=jsonb_set(record,'{endTime}',to_jsonb($2::text)) WHERE leave_id=$1",
+        "UPDATE ops.phase1_driver_leave_requests SET end_time=$2::text::timestamptz, record=jsonb_set(record,'{endTime}',to_jsonb($2::text)) WHERE leave_id=$1",
         [leaveId, ended],
       );
       expect(

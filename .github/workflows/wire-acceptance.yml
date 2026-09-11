@@ -112,7 +112,7 @@ jobs:
           assert api.get('success') and api['numPassedTests']==api['numTotalTests'] and not api.get('numPendingTests')
           browser=json.loads((root/'browser-report.json').read_text())
           stats=browser['stats']
-          assert stats['expected'] >= 3 and not stats['unexpected'] and not stats['skipped'] and not stats['flaky']
+          assert stats['expected'] >= 5 and not stats['unexpected'] and not stats['skipped'] and not stats['flaky']
           actual=subprocess.check_output(['git','rev-parse','HEAD'],text=True).strip()
           assert actual==os.environ['CANDIDATE_SHA']
           (root/'manifest.json').write_text(json.dumps({'candidateSha':actual,'runId':os.environ['GITHUB_RUN_ID'],'apiPassed':api['numPassedTests'],'browserPassed':stats['expected'],'physicalDeviceTested':False},indent=2))
