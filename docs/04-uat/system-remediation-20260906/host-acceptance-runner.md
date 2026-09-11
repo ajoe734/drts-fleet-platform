@@ -537,6 +537,27 @@ flaky: 0}`.
   required before merge: a green re-run of PR #1956's `CI` and
   `CI (integration trunk)` on the new candidate SHA, plus `host-acceptance.yml`
   on the same SHA, and independent review (§7).
+- **Final candidate `4a58466634e250b64cba3a99623f758f68850f21`** (docs commit
+  on top of `b44047aad`, recording the §6 defect above) is confirmed green on
+  all three required workflows, checked via `gh run view --json
+  status,conclusion,headSha` against this exact SHA:
+  - `Host Acceptance (SR-HOST-FE-001-ACCEPTANCE-RUNNER)` run
+    [`34546085195`](https://github.com/ajoe734/drts-fleet-platform/actions/runs/34546085195):
+    `completed` / `success` — both `api-sql-acceptance` and
+    `browser-acceptance` jobs green.
+  - PR-level `CI` run
+    [`34546088731`](https://github.com/ajoe734/drts-fleet-platform/actions/runs/34546088731):
+    `completed` / `success`, including `Product smoke acceptance`.
+  - `CI (integration trunk)` run
+    [`34546088695`](https://github.com/ajoe734/drts-fleet-platform/actions/runs/34546088695):
+    `completed` / `success` (confirms the `test:unit` exclude fix in
+    `b44047aad` resolved the trunk `unit` job failure with no further
+    scope creep).
+  Local re-verification on this SHA: `python3
+  tools/ci/test_host_acceptance_workflow.py` 27/27, `git diff --check`
+  clean. PR #1956 is `OPEN` and `MERGEABLE` into `dev`.
+  `INTEGRATION_STATUS` remains `branch_pushed` — pushed with all CI green,
+  not yet merged; merge requires independent review (§7) first.
 
 ## 7. Independent review
 
