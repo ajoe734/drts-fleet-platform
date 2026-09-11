@@ -153,7 +153,9 @@ describe("SR-ADMIN-ADAPTER-001 platform adapter registry", () => {
       {
         config: { isEnabled: !before.config.isEnabled },
         reason: "rotate for maintenance window",
-        expectedRevision: before.revision,
+        ...(before.revision !== undefined
+          ? { expectedRevision: before.revision }
+          : {}),
       },
       "req-1",
       "principal_platform_admin_001",
@@ -202,13 +204,17 @@ describe("SR-ADMIN-ADAPTER-001 platform adapter registry", () => {
     await expect(
       service.updatePlatformAdapter(before.id, {
         config: { isEnabled: before.config.isEnabled },
-        expectedRevision: before.revision,
+        ...(before.revision !== undefined
+          ? { expectedRevision: before.revision }
+          : {}),
       }),
     ).rejects.toMatchObject({ code: "PLATFORM_ADAPTER_REVISION_CONFLICT" });
 
     try {
       await service.updatePlatformAdapter(before.id, {
-        expectedRevision: before.revision,
+        ...(before.revision !== undefined
+          ? { expectedRevision: before.revision }
+          : {}),
       });
       expect.unreachable();
     } catch (error) {
@@ -256,7 +262,9 @@ describe("SR-ADMIN-ADAPTER-001 platform adapter registry", () => {
     const mutated = await firstService.updatePlatformAdapter(seeded.id, {
       config: { isEnabled: !seeded.config.isEnabled },
       reason: "durability check",
-      expectedRevision: seeded.revision,
+      ...(seeded.revision !== undefined
+        ? { expectedRevision: seeded.revision }
+        : {}),
     });
     expect(mutated).toBeTruthy();
     expect(repository.mutateAdapterWithAudit).toHaveBeenCalledWith(

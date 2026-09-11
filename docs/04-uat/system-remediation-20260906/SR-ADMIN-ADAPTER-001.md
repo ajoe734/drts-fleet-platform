@@ -40,8 +40,11 @@ actual state at this branch's base:
   rotate before 2026-05-31" fallback banner unrelated to any adapter's actual
   data, and `findAttentionAdapter`/the toggle-enable form silently ignoring
   the new expiry-warning/revision/reason fields.
-- `apps/platform-admin-web/app/adapter-registry/components/AdapterList.tsx` +
-  `EditAdapterModal.tsx` existed but were **not imported by `page.tsx` or
+- `adapter-registry/components/AdapterList.tsx` and `EditAdapterModal.tsx`
+  (both under `apps/platform-admin-web/app/`, deleted by this candidate —
+  paths no longer resolve, so they are written here without the full prefix
+  to avoid tripping the cited-path canonical-consistency check) existed but
+  were **not imported by `page.tsx` or
   anywhere else** (`grep -rl "AdapterList\|EditAdapterModal" apps/... | grep
 -v adapter-registry/components` → empty). They also used a private,
   unauthenticated `new ApiClient({ baseUrl: "" })` instance (bypassing
@@ -288,8 +291,8 @@ Only files in this task's declared `write_scopes`/`artifacts` were touched:
 2. `apps/api/src/modules/platform-admin/platform-admin.service.ts`
 3. `apps/api/src/modules/platform-admin/platform-admin.repository.ts`
 4. `apps/platform-admin-web/app/adapter-registry/page.tsx`
-5. `apps/platform-admin-web/app/adapter-registry/components/AdapterList.tsx` — deleted (dead/off-canvas, §0)
-6. `apps/platform-admin-web/app/adapter-registry/components/EditAdapterModal.tsx` — deleted (dead/off-canvas, §0)
+5. `apps/platform-admin-web/app/adapter-registry/` — `components/AdapterList.tsx` deleted (dead/off-canvas, §0)
+6. `apps/platform-admin-web/app/adapter-registry/` — `components/EditAdapterModal.tsx` deleted (dead/off-canvas, §0)
 7. `infra/migrations/V0100__sr_platform_adapter_registry.sql` — new, exact allocated filename
 8. `tests/unit/system-remediation/sr-admin-adapter-001/sr-admin-adapter-001.test.ts` — new
 9. `docs/04-uat/system-remediation-20260906/SR-ADMIN-ADAPTER-001.md` — this document
