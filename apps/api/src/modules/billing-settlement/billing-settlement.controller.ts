@@ -644,6 +644,7 @@ export class BillingSettlementController {
   @RequireScopes("driver:write")
   async stageRemittanceProofContent(
     @Body() body: { contentBase64?: string; contentType?: string },
+    @Headers("idempotency-key") idempotencyKey?: string,
     @Headers("x-request-id") requestId?: string,
   ) {
     const contentType = body?.contentType?.trim();
@@ -667,11 +668,23 @@ export class BillingSettlementController {
         "contentBase64 must decode to non-empty bytes.",
       );
     }
-    const staged = await this.billingSettlementService.stageRemittanceProofContent(
-      bytes,
-      contentType,
-    );
-    return toApiSuccessEnvelope(staged, requestId);
+    const result = await this.idempotencyService.execute({
+      scope: "billing:remittance_proof:staged_content:create",
+      idempotencyKey,
+      required: true,
+      payload: { contentType, contentBase64: body?.contentBase64 ?? "" },
+      execute: async () => {
+        const data = await this.billingSettlementService.stageRemittanceProofContent(
+          bytes,
+          contentType,
+        );
+        return {
+          data,
+          statusCode: 200,
+        };
+      },
+    });
+    return toApiSuccessEnvelope(result.data, requestId);
   }
 
   @Post("reimbursements/proofs")
@@ -680,18 +693,36 @@ export class BillingSettlementController {
   async uploadRemittanceProof(
     @Body() command: UploadRemittanceProofCommand,
     @CurrentIdentity() identity?: BootstrapRequestIdentity | null,
+    @Headers("idempotency-key") idempotencyKey?: string,
     @Headers("x-request-id") requestId?: string,
   ) {
-    const data = await this.billingSettlementService.uploadRemittanceProof(
-      command,
-      identity ?? null,
-      requestId,
-    );
-    return toApiSuccessEnvelope(data, requestId);
+    const scope = `billing:remittance_proof:${command.batchId}:upload`;
+    const result = await this.idempotencyService.execute({
+      scope,
+      idempotencyKey,
+      required: true,
+      payload: {
+        batchId: command.batchId,
+        originalFilename: command.originalFilename,
+        stagedContentRef: command.stagedContentRef,
+      },
+      execute: async () => {
+        const data = await this.billingSettlementService.uploadRemittanceProof(
+          command,
+          identity ?? null,
+          requestId,
+        );
+        return {
+          data,
+          statusCode: 200,
+        };
+      },
+    });
+    return toApiSuccessEnvelope(result.data, requestId);
   }
 
   @Get("reimbursements/proofs/:proofId")
-  @RequireRealms("system", "platform", "ops", "driver")
+  @RequireRealms("system", "platform", "ops")
   @RequireScopes("billing:read")
   async getRemittanceProof(
     @Param("proofId") proofId: string,

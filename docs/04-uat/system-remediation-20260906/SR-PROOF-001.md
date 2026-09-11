@@ -304,6 +304,74 @@ artifact regeneration from already-merged source, not a source edit, and
 
 ---
 
+## 5.5 CI 修復記錄 (CI regression fix, post-review)
+
+Reviewer `Claude2` locked candidate `b630fff4834463ad8d017a997a174e772d41499a`
+(PR #1988, run `34584718150`); `unit` and `iam-negative-matrix` both failed
+with real regressions in this task's own new controller code (not flaky
+infra):
+
+1. **`tests/security/iam-route-inventory.test.ts` — `realmMismatches`
+   non-empty.** `BillingSettlementController#getRemittanceProof`
+   (`GET reimbursements/proofs/:proofId`) declared
+   `@RequireRealms("system","platform","ops","driver")` on scope
+   `billing:read`, but `packages/contracts/src/iam-policy-catalog.ts`'s
+   `billing:read` `allowedRealms` is `[system,platform,tenant,ops,partner]`
+   — `driver` is not in the catalogue. `packages/contracts` is not in this
+   task's `write_scopes`, so the catalogue could not be widened; the only
+   in-scope fix is to drop `driver` from the decorator. Confirmed safe: the
+   only caller of this route is `apps/platform-admin-web/app/payments/reimbursements/[batchId]/page.tsx`
+   (an admin/ops surface); no driver-web caller exists, and this task's own
+   `tests/unit/system-remediation/sr-proof-001/` coverage calls
+   `billingSettlementService.getRemittanceProof` directly (bypassing the
+   controller decorator), so no test depended on the `driver` realm being
+   present. Fixed in `billing-settlement.controller.ts` by changing
+   `@RequireRealms("system", "platform", "ops", "driver")` to
+   `@RequireRealms("system", "platform", "ops")`.
+2. **`tests/security/idempotency-regression-guard.test.ts` —
+   `unexpectedUnprotected` non-empty.** Two new `POST` create-type routes
+   lacked idempotency protection: `stageRemittanceProofContent`
+   (`POST reimbursements/proofs/staged-content`) and
+   `uploadRemittanceProof` (`POST reimbursements/proofs`) — both had
+   `hasIdempotencyHeader=false` and `hasIdempotencyServiceUsage=false`.
+   Fixed by wrapping both handler bodies in `this.idempotencyService.execute(...)`
+   (the same `IdempotencyService`/`IdempotencyRepository` already
+   constructed in this controller for `approveReimbursementBatch` /
+   `markReimbursementPaid`), with an added `@Headers("idempotency-key")
+   idempotencyKey?: string` parameter on each, `required: true`, and a
+   scope key (`billing:remittance_proof:staged_content:create` /
+   `` `billing:remittance_proof:${command.batchId}:upload` ``) plus a
+   request-shaped `payload` for replay-hash matching — matching the
+   existing pattern exactly.
+
+**Verification run in this worktree** (base `origin/dev` at
+`f31c2489fc9f9406e3313d984e729287d2f602cb`, prior failing candidate
+`b630fff4834463ad8d017a997a174e772d41499a`):
+
+- `pnpm --filter @drts/contracts build` — required first; `apps/api`'s
+  `tsconfig.json` resolves `@drts/contracts` to `packages/contracts/dist/index.d.ts`,
+  which did not exist in this worktree until built (a stale/missing build
+  artifact, not a source problem — confirmed `git status` shows no
+  `packages/contracts` source changes).
+- `pnpm --filter @drts/api typecheck` — 0 errors (previously failed with
+  `@drts/contracts` "has no exported member" errors purely from the missing
+  `dist/`; unrelated to this fix).
+- `pnpm --filter @drts/platform-admin-web typecheck` — exit 0.
+- `pnpm exec vitest run tests/security/iam-route-inventory.test.ts tests/security/idempotency-regression-guard.test.ts` —
+  2 files passed, 15 tests passed (both previously-failing suites now green).
+- `pnpm exec vitest run tests/unit/system-remediation/sr-proof-001/` — 1
+  file passed, 19 tests passed (no regression from the fix).
+- `git diff --check` — exit 0 (no whitespace errors).
+
+**Not reproduced/root-caused in this session**: CI also reported failures
+on `Product smoke acceptance`, `Smoke acceptance`, and `ci-integ` on the
+same locked SHA. Those jobs require a running product/browser/DB
+environment this VM does not permit (VM restriction: no dev servers,
+Playwright, or Docker Compose here) and were not investigated or fixed in
+this pass — flagged here as unresolved, not claimed fixed.
+
+---
+
 ## 6. 交接資訊 (Handoff)
 
 - **狀態 (Status)**：candidate ready, awaiting independent review (`Claude2`) and CI.
