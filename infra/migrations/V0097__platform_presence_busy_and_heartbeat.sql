@@ -1,4 +1,4 @@
--- V0090__platform_presence_busy_and_heartbeat.sql
+-- V0097__platform_presence_busy_and_heartbeat.sql
 --
 -- SR-DISPATCH-SCHEDULER-001: platform-presence gains a "busy" status
 -- (actively engaged on another platform) and a per-platform heartbeat
