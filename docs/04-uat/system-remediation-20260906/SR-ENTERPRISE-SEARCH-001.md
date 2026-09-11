@@ -60,7 +60,32 @@
 | 專屬 e2e 驗收套件（本機） | `pnpm exec vitest run tests/e2e/system-remediation/sr-enterprise-search-001/` | 0 | 1 檔案，1 項測試因 `DRTS_ENTERPRISE_SEARCH_DATABASE_URL` 未設定而安全略過 (1 skipped) — 見第 4 節 |
 | CI 工作流合約測試 | `python3 -m unittest tools/ci/test_enterprise_search_acceptance_workflow.py -v` | 0 | 9 項合約測試全部通過 (Ran 9 tests, OK) |
 
-Resource IDs（e2e 測試種子資料，僅於真實 DB 驗收工作流執行時建立/刪除）：`tenant-ent-search-integ` 租戶下 `bk-ent-search-1`..`bk-ent-search-5`（`ent-search-ord-1`..`ent-search-ord-5`）。
+Resource IDs（e2e 測試種子資料，僅於真實 DB 驗收工作流執行時建立/刪除）：`tenant-ent-search-integ` 租戶下 `bkq-ent-1`..`bkq-ent-5`（`entq-ord-1`..`entq-ord-5`）。
+
+---
+
+## 3.1 candidate `af0bfedef50e` 的真實 CI 回歸與修復（GitHub reconciled）
+
+`af0bfedef50e308bc10cd1591620958778f9d83e`（PR #1961）經 GitHub 對帳為 candidate 後，`Enterprise Search Acceptance (SR-ENTERPRISE-SEARCH-001)` 工作流（run `34560574799` / job `103142275007`）在真實 PostgreSQL 上實際執行，發現真實缺陷，**並非本機 6 項指令能重現**（本機當時無 `DRTS_ENTERPRISE_SEARCH_DATABASE_URL`，e2e 只能安全 skip，第 3 節第 4 列所述僅是「未崩潰」，不是「已驗證通過」）：
+
+- **失敗現象**：`expect(passengerOnly.pagination.totalItems).toBe(4)` 實際收到 `5`（`tests/e2e/.../enterprise-search-query-acceptance.test.ts:238`）。
+- **根因**：種子資料把 `bookingId`/`orderId` 命名為 `bk-ent-search-N` / `ent-search-ord-N`，而 `OwnedMobilityRepository.queryTenantBookings` 的 `passenger` 篩選（`apps/api/src/modules/owned-mobility/owned-mobility.repository.ts:291-308`，非本任務 write_scopes、未改動）本就是對 `record->'passenger'->>'name'`／`phone`／`mobile`／`email`／`passengerId`／`booking_id`／`order_id`／`costCenter` 做 `ILIKE '%…%'` 的多欄位比對，屬於既有、正確的權威後端行為。種子的 `bookingId`/`orderId` 字面含有 `search` 子字串，導致 `passenger=Search` 這個「只想比對乘客姓名」的測試查詢，連帶把所有 5 筆（含不該命中的 `Dave Other`）都透過 `booking_id ILIKE '%Search%'` 命中——是測試資料設計缺陷，不是後端或前端查詢組合邏輯的缺陷。
+- **修復**（commit `924c9e42be67f7b855bdb491d6776f2738c78279`，在本任務 write_scopes 內 `tests/e2e/system-remediation/sr-enterprise-search-001/`）：把種子 `bookingId`/`orderId` 改名為 `bkq-ent-N` / `entq-ord-N`（不再含 `search` 子字串），使 `passenger=Search` 只命中乘客姓名含 "Search" 的 4 筆，其餘欄位不再意外命中。本機重跑 `pnpm exec vitest run tests/unit/system-remediation/sr-enterprise-search-001/`（19 passed）與 `tests/e2e/.../enterprise-search-query-acceptance.test.ts`（1 skipped，因本機無 DB，行為與修復前一致，非本次驗證範圍）。真實 DB 驗證交由 CI 重跑（見下）。
+- **CI 重跑證據**：push 後 PR #1961 head 變為 `924c9e42be67f7b855bdb491d6776f2738c78279`，觸發新的 `Enterprise Search Acceptance` run `34561207686`（job `103144130125`），對真實 PostGIS/PostgreSQL 服務容器執行，結果 `SUCCESS`：`Gate on zero skips and all tests passed` 步驟輸出 `Enterprise search acceptance: 20/20 passed, zero skips.`，`run-status.json` 記錄 `status: passed`（`candidate_sha`/`workflow_sha` 均為 `924c9e42be67f7b855bdb491d6776f2738c78279`）。乘客篩選 `totalItems=4` 的原始斷言失敗已確認修復。
+
+### 未解決的第二個真實缺陷（超出本任務 write_scopes，阻塞 CI 綠燈）
+
+同一 candidate 的 `CI (integration trunk)` 工作流之 `changes` job（`tools/ci/check_test_coverage.py`）持續失敗，與上述乘客篩選缺陷**無關**、獨立缺陷：
+
+```
+check_test_coverage: test files that yield nothing when CI runs
+  - tools/ci/test_enterprise_search_acceptance_workflow.py: on no path CI runs (discovery roots: tools/development-orchestrator)
+```
+
+- **根因**：本任務自己新增的 `tools/ci/test_enterprise_search_acceptance_workflow.py`（write_scopes 內）從未被接進 `.github/workflows/ci.yml` 與 `.github/workflows/ci-integ.yml` 的「Verify scope classifier contract」步驟——對照同目錄下已有先例（`test_tenant_binding_acceptance_workflow.py`、`test_academy_acceptance_workflow.py`、`test_leave_acceptance_workflow.py`、`test_booking_search_acceptance_workflow.py`、`test_host_acceptance_workflow.py`，皆各自在 `ci-integ.yml` 以 `python3 -m unittest tools/ci/test_X.py` 直接列出），本任務缺了對稱的一行 `python3 -m unittest tools/ci/test_enterprise_search_acceptance_workflow.py`。`tools/ci/check_test_coverage.py`（`tools/ci/`）的存在正是為了攔截「新增了測試檔但沒接進 CI discovery」這類缺口，此處被它正確攔下。
+- **為何本任務未直接修**：`.github/workflows/ci.yml`、`.github/workflows/ci-integ.yml` 皆不在本任務 `write_scopes`（僅 `.github/workflows/enterprise-search-acceptance.yml` 在內），依 task brief「只改 write_scopes；額外共用檔案必須由 supervisor 擴 scope 並加入相依後才能寫」與 `AI_COLLABORATION_GUIDE.md` §0.6，不應未經授權逕自修改這兩個跨任務共用的 CI 檔案。
+- **需要的動作**：請 supervisor 將 `.github/workflows/ci.yml`、`.github/workflows/ci-integ.yml` 納入本任務 write_scopes（或改指派給有權限的 lane），各補一行對稱既有 pattern 的 `python3 -m unittest tools/ci/test_enterprise_search_acceptance_workflow.py`（`ci.yml` 第 55-59 行區塊、`ci-integ.yml` 第 80-88 行區塊）。此為機械式、與既有 5 個手足 acceptance workflow test 同 pattern 的單行新增，無需重新設計。
+- 已透過 `ai-status.sh blocker` 記錄，`waiting_for=Claude`。
 
 ---
 
@@ -86,7 +111,7 @@ Resource IDs（e2e 測試種子資料，僅於真實 DB 驗收工作流執行時
   - 兩種空狀態（全域無資料 vs. 篩選後無資料）在元件層以不同 `data-testid` 與文案區分，未合併成同一種訊息。
 - [x] **證據包含 base/candidate SHA、實際指令結果與資源 ID**：見第 3 節指令表與資源 ID 清單；candidate SHA 將於 commit 後由 `ai-status.sh handoff` 記錄。
 - [x] **未做的 live／真機部分明列，不冒充成功**：見第 4 節。
-- [x] **先 commit＋普通 push，再 handoff**：owner 不直接 `done`；本任務將以 `handoff` 交給獨立 reviewer `Claude2`，待 candidate CI／merge 及 `required_acceptance` 完備後才可結案。
+- [x] **先 commit＋普通 push，再 handoff**：owner 不直接 `done`。commit `924c9e42be67f7b855bdb491d6776f2738c78279` 已於 `af0bfedef50e` 之上以普通 non-force push 發布至 `claude/sr-enterprise-search-001-recovery-20260911`。因第 3.1 節所述、超出 write_scopes 的第二個缺陷仍阻塞該 candidate 的 CI 全綠，本次以 `ai-status.sh blocker` 而非 `handoff` 記錄狀態；待 scope 授權或 CI 修復後才會 `handoff` 給獨立 reviewer `Claude2`，且仍待 candidate CI／merge 及 `required_acceptance` 完備才可結案。
 
 ---
 
