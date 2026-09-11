@@ -57,7 +57,12 @@ describe("SR-OPS-CAPACITY-RUNNER-20260911 real capacity + durable readback accep
       process.env.AUTH_MODE = process.env.AUTH_MODE ?? "test";
       process.env.DRTS_TENANT_BOOTSTRAP_MODE = "fixture";
 
-      const { NestFactory } = await import("@nestjs/core");
+      // "@nestjs/core" is a dependency of the apps/api package, not this
+      // repo-root package; a bare-specifier `import("@nestjs/core")` from
+      // this file resolves relative to *this* file's location and fails.
+      // Route it through the same apps/api-rooted `require` used for `pg`
+      // above so Node resolves it from apps/api/node_modules instead.
+      const { NestFactory } = require("@nestjs/core") as typeof import("@nestjs/core");
       const { AppModule } = await import("../../../../apps/api/src/app.module");
       const { JwtAuthService } = await import(
         "../../../../apps/api/src/common/auth/jwt-auth.service"
