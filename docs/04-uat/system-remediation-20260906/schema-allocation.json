@@ -107,6 +107,79 @@
       "scope": "SR-ACADEMY-BE-001 allocation entry only",
       "reason": "Original allocation referenced reg.drivers (uuid PK, no runtime write path) as a referenced table for driver identity, which blocked SR-ACADEMY-BE-001 implementation (docs/04-uat/system-remediation-20260906/SR-ACADEMY-BE-001.md checkpoint). Corrected to the runtime text driver-id model already used by reg.phase1_registry_drivers, following the V0055 precedent.",
       "detail_ref": "docs/04-uat/system-remediation-20260906/academy-identity-decision.md"
+    },
+    {
+      "amended_by_task_id": "SR-RECOVERY-CONTRACTS-20260911",
+      "amended_at": "2026-09-11",
+      "scope": "Appended allocations only; V0094-V0096 entries above are unchanged",
+      "reason": "SR-RECOVERY-CONTRACTS-20260911 centralizes migration allocation for the remittance-proof, passenger-push-delivery and platform-adapter-registry contracts routed via support/unblock/SR-PROOF-001, SR-PUSH-001 and SR-ADMIN-ADAPTER-001 planning decisions. At inspected base (origin/dev, HEAD c0ec81b694fbd440d9c835129fcb062ba6b04340) the highest canonical infra migration is V0097__platform_presence_busy_and_heartbeat.sql (infra/migrations/); V0098-V0100 below are reserved by this task and were unclaimed by any other in_progress task's schema-allocation entry at allocation time. This task supplies typed contracts and migration allocation only; it does not write the infra/migrations/*.sql files themselves, matching the SR-CONTRACT-001 precedent above."
+    }
+  ],
+  "additional_allocations": [
+    {
+      "task_id": "SR-RECOVERY-CONTRACTS-20260911",
+      "version": "V0098",
+      "migration_filename": "V0098__sr_remittance_proof.sql",
+      "domain": "remittance_proof",
+      "target_schema": "billing",
+      "primary_tables": ["billing.phase1_remittance_proofs"],
+      "referenced_tables": ["billing.phase1_reimbursement_batches"],
+      "table_invariants": [
+        "billing.phase1_remittance_proofs.proof_id uuid PRIMARY KEY DEFAULT gen_random_uuid() — server-generated only; no client-supplied identity column.",
+        "batch_id uuid NOT NULL REFERENCES billing.phase1_reimbursement_batches(batch_id) — fixed at insert, never updated (no UPDATE ... SET batch_id path).",
+        "driver_id varchar(100) NOT NULL — denormalised from the batch at insert time for ownership checks without a join; must equal the batch's driver_id (enforced in application layer or a CHECK against a computed column, not by trusting client input).",
+        "content_hash text NOT NULL, content_type text NOT NULL, size_bytes bigint NOT NULL — set once at insert (immutable content identity); no UPDATE statement may target these three columns.",
+        "scan_state text NOT NULL DEFAULT 'pending_scan' CHECK (scan_state IN ('pending_scan','clean','rejected')) — the only column a scan-worker transition may write, plus scan_completed_at/rejection_reason.",
+        "UNIQUE (content_hash) is NOT applied — the same physical proof file may legitimately be re-uploaded/re-referenced across distinct batches; dedupe is a future concern, not this migration's.",
+        "billing.phase1_remittance_proof_payment_receipts: receipt_id uuid PRIMARY KEY DEFAULT gen_random_uuid(), batch_id uuid NOT NULL REFERENCES billing.phase1_reimbursement_batches(batch_id), proof_id uuid NOT NULL REFERENCES billing.phase1_remittance_proofs(proof_id), idempotency_key text NOT NULL, UNIQUE (batch_id, idempotency_key) — the idempotency invariant: a retried mark-paid call with the same key on the same batch must read back this row instead of inserting a second one.",
+        "Application transaction for mark-paid-with-proof: SELECT batch FOR UPDATE, verify approved_at IS NOT NULL AND proof.scan_state = 'clean' AND proof.batch_id = batch.batch_id, INSERT ... ON CONFLICT (batch_id, idempotency_key) DO NOTHING RETURNING *, then UPDATE batch.status='paid' only when the INSERT actually happened (i.e. this was not a replay) — all within one transaction so a crash between steps cannot leave a receipt without a paid batch or vice versa."
+      ],
+      "description": "匯款證明儲存中繼資料、掃描狀態與冪等付款收據 migration",
+      "downstream_tasks": ["SR-PROOF-001", "SR-QA-NEWFEATURES-001"]
+    },
+    {
+      "task_id": "SR-RECOVERY-CONTRACTS-20260911",
+      "version": "V0099",
+      "migration_filename": "V0099__sr_passenger_push_delivery.sql",
+      "domain": "passenger_push_delivery",
+      "target_schema": "ops",
+      "primary_tables": [
+        "ops.phase1_push_delivery_claims",
+        "ops.phase1_push_delivery_receipts"
+      ],
+      "referenced_tables": ["ops.consumer_notification_outbox"],
+      "table_invariants": [
+        "ops.phase1_push_delivery_claims: outbox_id uuid PRIMARY KEY REFERENCES ops.consumer_notification_outbox(outbox_id) — one live claim row per outbox row (not a history table); fence_token integer NOT NULL DEFAULT 0.",
+        "Claim acquisition: UPDATE ... SET worker_id=$new, claim_state='claimed', fence_token = fence_token + 1, lease_expires_at = now() + lease WHERE outbox_id=$1 AND (claim_state != 'claimed' OR lease_expires_at < now()) RETURNING fence_token — an already-live, unexpired lease is never silently reassigned; the caller must observe zero rows updated and back off.",
+        "Every subsequent write (release, receipt persistence) is WHERE outbox_id=$1 AND fence_token=$claimedFenceToken — a worker whose lease has since been reclaimed writes with a stale fence_token and its UPDATE affects zero rows, which the caller must treat as claim loss, not success.",
+        "ops.phase1_push_delivery_receipts: receipt_id uuid PRIMARY KEY DEFAULT gen_random_uuid(), outbox_id uuid NOT NULL REFERENCES ops.consumer_notification_outbox(outbox_id), dedupe_key text NOT NULL, UNIQUE (dedupe_key) — dedupe_key is server-derived from (outbox_id, fence_token), never client-suppliable, so a retried send for the same claimed attempt cannot insert a second receipt.",
+        "tenant_id and passenger_subject_ref are NOT NULL on both tables and copied from ops.consumer_notification_outbox at claim/receipt time, not re-derived from caller input, preserving tenant + passenger-subject isolation independent of what a compromised or buggy caller asserts.",
+        "device_delivery_state text NOT NULL DEFAULT 'unknown' CHECK (device_delivery_state IN ('unknown','delivered','delivery_failed')) — no application code path may set this to 'delivered' as a side effect of provider_ack_state='provider_acknowledged'; they are independent columns written by independent events.",
+        "Persistence-failure handling is an application-transaction concern, not a schema constraint: the service records provider ack results by first executing the fence-checked UPDATE/INSERT inside a transaction; if that transaction itself fails to commit, the caller's return value must be the outcome 'persistence_unknown' (see packages/contracts/src/passenger-push-delivery.ts), never a fabricated 'recorded' outcome — this table design supplies the idempotent target for a retry, it does not itself prevent a caller from mis-reporting a failed commit."
+      ],
+      "description": "被動推播送達 claim/lease/fence 與冪等收據 migration；provider 回執與真實裝置送達分離記錄",
+      "downstream_tasks": ["SR-PUSH-001", "SR-LIVE-PUSH-001", "SR-QA-NEWFEATURES-001"]
+    },
+    {
+      "task_id": "SR-RECOVERY-CONTRACTS-20260911",
+      "version": "V0100",
+      "migration_filename": "V0100__sr_platform_adapter_registry.sql",
+      "domain": "platform_adapter_registry",
+      "target_schema": "admin",
+      "primary_tables": [
+        "admin.phase1_platform_adapters",
+        "admin.phase1_platform_adapter_mutation_audit"
+      ],
+      "referenced_tables": [],
+      "table_invariants": [
+        "admin.phase1_platform_adapters: id text PRIMARY KEY, revision integer NOT NULL DEFAULT 1 — no table existed for this domain before this migration; platform_admin.repository.ts's PlatformAdminState currently covers only tenants/public-info/placards (see support/unblock/SR-ADMIN-ADAPTER-001 planning decision).",
+        "credential_expiry_reference text NULL, credential_expiry_expires_at timestamptz NULL — both columns nullable independently of each other and of the row; absent/unrecorded expiry is a valid, distinct state, never coerced to a sentinel value. Never a column for the secret itself.",
+        "Optimistic concurrency: every UPDATE is WHERE id=$1 AND revision=$expectedRevision, and the same statement sets revision = revision + 1; zero rows affected means a stale expectedRevision and the caller must surface a conflict rather than retry-and-overwrite.",
+        "admin.phase1_platform_adapter_mutation_audit: audit_id uuid PRIMARY KEY DEFAULT gen_random_uuid(), adapter_id text NOT NULL REFERENCES admin.phase1_platform_adapters(id), previous_revision integer NOT NULL, new_revision integer NOT NULL, reason text NOT NULL — inserted in the same transaction as the adapter UPDATE (both succeed or both roll back), so lastMutationAudit on the returned record is always the row the caller can see, never a promise of an audit write that might not have landed.",
+        "The warning-window policy (packages/contracts/src/platform-adapter-registry.ts AdapterCredentialExpiryWarning) is computed at read time from credential_expiry_expires_at against a server-side configured window; it is not a persisted column, so changing the window does not require a migration or a backfill."
+      ],
+      "description": "Adapter registry 持久化、憑證到期非機密參照與伺服器端稽核 migration",
+      "downstream_tasks": ["SR-ADMIN-ADAPTER-001", "SR-QA-NEWFEATURES-001"]
     }
   ]
 }
