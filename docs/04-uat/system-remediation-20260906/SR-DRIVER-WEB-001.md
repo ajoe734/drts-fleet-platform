@@ -89,15 +89,30 @@ $ pnpm exec vitest run tests/unit/system-remediation/sr-driver-web-001/
 
 ## 未執行 / 誠實揭露的限制
 
-- **未執行 `expo export -p web` 或任何 `expo` CLI 指令**：本 VM 的工具沙盒
-  對任何 `expo` binary 呼叫（包含 `expo --version`、`expo export`）一律回報
-  `Bash command classified as defer`，即使加上 `dangerouslyDisableSandbox`
-  仍相同，判斷是此 VM 對「可能啟動 dev-server 類流程」的工具做了分類攔截
-  （`expo export` 底層仍會啟一個暫時性 Metro server）。因此本任務**沒有**
-  實際打包出 web bundle 或驗證 `/`、`/onboarding`、`/sos` 三路由真的能在
-  瀏覽器開啟；上述修復是根據原始碼靜態分析（import graph、Metro 平台副檔
-  名解析規則、expo-sqlite 官方 wasm asset 需求）與型別/單元測試推導，不能
-  當作「已在瀏覽器驗證成功」。
+- **未成功執行 `expo export -p web`**（2026-09-11 acceptance-review 重新驗證，
+  修正前一版本的錯誤診斷）：`expo --version`／`expo export` 實際上**沒有**
+  被本 VM 沙盒歸類為 defer（前一版記錄的「Bash command classified as defer」
+  在本次重測中未重現，判斷是前次觀察誤植或環境已變化）。實際重跑
+  `pnpm exec expo export -p web` 得到不同的失敗：Metro 對 `expo-router/entry`
+  的模組解析算出錯誤的相對路徑深度（`../../../../../../node_modules/.pnpm/...`），
+  根因是本 worker cwd 是 git worktree
+  （`.artifacts/worktrees/auto/claude-sr-driver-web-001/apps/driver-app`），
+  其 `node_modules` 是指向 canonical root（`/home/lupin/workspace/
+  drts-fleet-platform/apps/driver-app/node_modules`）的 symlink，pnpm
+  monorepo 下 Expo/Metro 以 workspace root 為 projectRoot 解析 entry 時，
+  worktree 路徑比 canonical root 多 4 層目錄（`.artifacts/worktrees/auto/
+  claude-sr-driver-web-001`），造成相對路徑深度算錯而找不到檔案。已用
+  `config.resolver.unstable_enableSymlinks = true` 做過對照測試，結果相同
+  （非 symlink-following 開關可解），確認是 worktree 巢狀路徑深度問題，
+  屬於本機 worktree 基礎設施限制，與本任務程式碼修復（web map 分流／wasm
+  assetExts）本身無關；未對 `metro.config.js` 做任何永久性改動（對照測試
+  已還原，`git status`／`git diff` 乾淨）。因此本任務在此 worker cwd 下
+  仍然**沒有**實際打包出 web bundle 或驗證 `/`、`/onboarding`、`/sos` 三路由
+  真的能在瀏覽器開啟；上述修復是根據原始碼靜態分析（import graph、Metro
+  平台副檔名解析規則、expo-sqlite 官方 wasm asset 需求）與型別/單元測試
+  推導，不能當作「已在瀏覽器驗證成功」。由於一般 CI runner 是乾淨 checkout
+  （非巢狀 worktree、`node_modules` 非跨目錄 symlink），這個路徑深度問題
+  預期不會在 GitHub Actions 上重現，但這仍是**推測**，未經實跑驗證。
 - 未執行任何 iOS/Android 實機打包或 `expo prebuild`／EAS build；`pnpm
   --filter @drts/driver-app typecheck` 通過只保證型別層級的 native import
   沒有變動，不等於已在實機驗證。
