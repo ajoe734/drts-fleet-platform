@@ -141,12 +141,33 @@ type.
 | `git diff --check` | 0 | 工作目錄零 whitespace error |
 | `pnpm exec vitest run tests/unit/system-remediation/sr-push-durability-20260911/` | 0 | 1 test file, **12 passed**, 0 failed |
 | `pnpm exec vitest run apps/api/tests/unit/multi-taxi-passenger-authority.test.ts` (run from `apps/api/`) | 0 | 1 test file, **15 passed**, 0 failed — confirms the harness stub addition (§2.4) did not regress this pre-existing suite |
-| `pnpm --filter @drts/api typecheck` | 2 | **Fails, but on files this task never touched**: `owned-mobility.service.ts`, `voice-booking/*.service.ts`, `contract-operational-view.service.ts`, `vehicle-eligibility/*.ts` — all missing-export/property errors against `@drts/contracts` (e.g. `BookingRequirements`, `ContractOperationalViewRecord`). Verified pre-existing: this task's base SHA `e2e17cb8d` (before any of this task's 5 commits) already fails the same way in this worktree, and none of the failing files appear in `git diff origin/dev...HEAD --stat` (only `multi-taxi.repository.ts`, `multi-taxi.service.ts`, two test files, and the new migration changed — see §4). `owned-mobility.service.ts`'s last touching commit on `origin/dev` is `693a80bb4` (`SR-DISPATCH-SCHEDULER-001`), itself an ancestor of this task's base SHA. Not fixed here: out of `write_scopes`, and fixing it would require editing `apps/api/src/modules/owned-mobility/`, `voice-booking/`, `regulatory-registry/`, `vehicle-eligibility/` — none declared for this task. |
+| `pnpm --filter @drts/api typecheck` (run directly, no prior workspace build) | 2 | Misleading in this shared multi-worktree VM: `apps/api`'s own `tsconfig.json` resolves `@drts/contracts`/`@drts/control-plane-auth` to those packages' `dist/*.d.ts`, and running the script directly against whatever `dist/` happens to be sitting on disk (built at some earlier, possibly stale point by another concurrent worktree/task) produces spurious missing-export errors in files this task never touched. Not a reliable signal on this VM — see the corrected row below. |
+| `pnpm exec turbo run typecheck --filter=@drts/api` (builds `@drts/contracts` and `@drts/control-plane-auth` fresh via turbo's `typecheck: dependsOn: ["^build"]` pipeline, per `turbo.json`, before typechecking `@drts/api`) | 0 | **5/5 tasks successful** (`@drts/contracts` build+typecheck, `@drts/control-plane-auth` build+typecheck, `@drts/api` typecheck). Zero diagnostics anywhere in `apps/api/src`, including `owned-mobility.service.ts` / `voice-booking/*` / `contract-operational-view.service.ts` / `vehicle-eligibility/*.ts` that the stale-`dist` run above misreported. This is the authoritative local proxy for CI's typecheck step; use this form, not the bare `--filter` script, in this environment. |
 
 `multi-taxi.service.ts` and `multi-taxi.repository.ts` — the two files this
-task actually changed — produce no new diagnostics of their own; every
-`tsc` error above is in unrelated files that were already broken at this
-task's base commit.
+task actually changed — produce no diagnostics of their own under either
+run.
+
+**CI regression-then-refix note**: candidate `75bc42612` (this doc's prior
+revision) had round-tripped a typecheck/lint conflict in the new claim-SQL
+test (`push-delivery-durability.test.ts`, first `it` block): commit
+`4596f04b8` fixed a `noUncheckedIndexedAccess` TS2493 (destructuring
+`query.mock.calls[0]` as a 2-tuple when the mock's declared type had only
+one parameter) by giving the mock's implementation a second, unused
+`_parameters` parameter — which then failed
+`@typescript-eslint/no-unused-vars` (this repo's ESLint config has no
+`argsIgnorePattern`, so the underscore prefix does not suppress it).
+Commit `75bc42612` "fixed" the lint failure by deleting that parameter
+again, which silently reopened the exact TS2493 the prior commit had
+fixed. The current commit resolves both simultaneously by giving the
+`vi.fn` an explicit two-parameter generic type argument
+(`vi.fn<(sql: string, parameters?: unknown[]) => Promise<...>>(...)`) so
+`.mock.calls` is typed as a 2-tuple regardless of the implementation
+function's own (single-parameter, nothing-unused) arity. Verified via
+`pnpm exec turbo run typecheck --filter=@drts/api` (0 exit, above),
+`pnpm exec vitest run tests/unit/system-remediation/sr-push-durability-20260911/`
+(12/12 passed), and `pnpm exec eslint tests/unit/system-remediation/sr-push-durability-20260911/push-delivery-durability.test.ts`
+(0 exit, no output).
 
 ---
 
@@ -190,8 +211,11 @@ other task's declared scope was modified.
   against `schema-allocation.json` and by unit-level SQL/transaction-shape
   assertions (query text, parameter order, commit/rollback sequencing) in
   §2.4, not by an actual applied migration.
-- **Pre-existing, unrelated `@drts/api` typecheck failure not fixed** — see
-  §3; out of this task's `write_scopes`.
+- **`@drts/api` typecheck is clean** — the bare `pnpm --filter @drts/api
+  typecheck` script can misreport spurious failures on this shared VM if
+  another worktree's stale `dist/` is on disk; the turbo-orchestrated form
+  that builds dependencies fresh (§3) is the authoritative check and
+  passes with zero diagnostics.
 
 ---
 
