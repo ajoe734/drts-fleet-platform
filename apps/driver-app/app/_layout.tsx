@@ -160,6 +160,20 @@ export default function RootLayout() {
           }}
         />
         <Tabs.Screen
+          name="leave"
+          options={{
+            title: "請假",
+            href: null,
+          }}
+        />
+        <Tabs.Screen
+          name="academy"
+          options={{
+            title: "學院",
+            href: null,
+          }}
+        />
+        <Tabs.Screen
           name="sos"
           options={{
             title: driverRouteTitles.sos,

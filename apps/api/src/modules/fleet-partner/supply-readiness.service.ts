@@ -1,4 +1,5 @@
-import { HttpStatus, Injectable, Optional } from "@nestjs/common";
+import { HttpStatus, Injectable, OnModuleInit, Optional } from "@nestjs/common";
+import { ModuleRef } from "@nestjs/core";
 
 import type {
   DriverFleetAffiliationRecord,
@@ -14,6 +15,7 @@ import type {
 } from "@drts/contracts";
 
 import { ApiRequestError } from "../../common/api-envelope";
+import { AcademyService } from "../driver-academy/academy.service";
 import { RegulatoryRegistryService } from "../regulatory-registry/regulatory-registry.service";
 import { VehicleEligibilityService } from "../vehicle-eligibility/vehicle-eligibility.service";
 import { FleetPartnerService } from "./fleet-partner.service";
@@ -61,23 +63,52 @@ export type CanonicalSupplyReadinessEvaluation = {
 };
 
 @Injectable()
-export class SupplyReadinessService {
+export class SupplyReadinessService implements OnModuleInit {
+  // Resolved lazily via ModuleRef rather than constructor-injected: this
+  // service's providing module (fleet-partner.module.ts) does not import
+  // DriverAcademyModule, so a direct DI edge is out of this task's write
+  // scope. `{ strict: false }` finds the provider anywhere in the
+  // bootstrapped application graph (AcademyService is registered globally
+  // by app.module.ts) without requiring that import.
+  private academyService: AcademyService | undefined;
+
   constructor(
     private readonly fleetPartnerService: FleetPartnerService,
     private readonly regulatoryRegistryService: RegulatoryRegistryService,
     private readonly vehicleEligibilityService: VehicleEligibilityService,
     @Optional()
     private readonly supplySubmissionRepository?: SupplySubmissionRepository,
+    // Kept last and optional so existing 4-argument construction (unit
+    // tests that predate this task) keeps binding `supplySubmissionRepository`
+    // to the same position. Nest's real DI container resolves this by type
+    // regardless of position.
+    @Optional()
+    private readonly moduleRef?: ModuleRef,
   ) {}
+
+  onModuleInit() {
+    if (!this.moduleRef) {
+      return;
+    }
+    try {
+      this.academyService = this.moduleRef.get(AcademyService, {
+        strict: false,
+      });
+    } catch {
+      this.academyService = undefined;
+    }
+  }
 
   async listFleetPartnerReadiness(
     fleetPartnerId: string,
   ): Promise<SupplyReadinessRecord[]> {
     const context = await this.buildPartnerContext(fleetPartnerId);
 
-    const driverReadiness = [...context.scopedDriverIds]
-      .sort((left, right) => left.localeCompare(right))
-      .map((driverId) => this.evaluateDriverReadiness(driverId, context));
+    const driverReadiness = await Promise.all(
+      [...context.scopedDriverIds]
+        .sort((left, right) => left.localeCompare(right))
+        .map((driverId) => this.evaluateDriverReadiness(driverId, context)),
+    );
     const vehicleReadiness = [...context.scopedVehicleIds]
       .sort((left, right) => left.localeCompare(right))
       .map((vehicleId) => this.evaluateVehicleReadiness(vehicleId, context));
@@ -99,7 +130,7 @@ export class SupplyReadinessService {
       );
     }
 
-    return this.evaluateDriverReadiness(driverId, context);
+    return await this.evaluateDriverReadiness(driverId, context);
   }
 
   async getVehicleReadiness(
@@ -126,23 +157,23 @@ export class SupplyReadinessService {
     const driverId = reference.canonicalDriverId?.trim() || null;
     const vehicleId = reference.canonicalVehicleId?.trim() || null;
 
-    return {
-      driver:
-        driverId && context.scopedDriverIds.has(driverId)
-          ? this.evaluateDriverReadiness(driverId, context)
-          : null,
-      vehicle:
-        vehicleId && context.scopedVehicleIds.has(vehicleId)
-          ? this.evaluateVehicleReadiness(vehicleId, context)
-          : null,
-      pair:
-        driverId &&
-        vehicleId &&
-        context.driversById.has(driverId) &&
-        context.vehiclesById.has(vehicleId)
-          ? this.evaluatePairReadiness(driverId, vehicleId, context)
-          : null,
-    };
+    const driver =
+      driverId && context.scopedDriverIds.has(driverId)
+        ? await this.evaluateDriverReadiness(driverId, context)
+        : null;
+    const vehicle =
+      vehicleId && context.scopedVehicleIds.has(vehicleId)
+        ? this.evaluateVehicleReadiness(vehicleId, context)
+        : null;
+    const pair =
+      driverId &&
+      vehicleId &&
+      context.driversById.has(driverId) &&
+      context.vehiclesById.has(vehicleId)
+        ? await this.evaluatePairReadiness(driverId, vehicleId, context)
+        : null;
+
+    return { driver, vehicle, pair };
   }
 
   private async buildPartnerContext(
@@ -283,10 +314,10 @@ export class SupplyReadinessService {
     };
   }
 
-  private evaluateDriverReadiness(
+  private async evaluateDriverReadiness(
     driverId: string,
     context: PartnerReadinessContext,
-  ): SupplyReadinessRecord {
+  ): Promise<SupplyReadinessRecord> {
     const driver = context.driversById.get(driverId);
     if (!driver) {
       return this.buildRecord(
@@ -316,8 +347,28 @@ export class SupplyReadinessService {
     if (!this.supportsAnyServiceBucket(driver.supportedServiceBuckets)) {
       this.pushReason(reasonCodes, "SERVICE_PRODUCT_NOT_SUPPORTED");
     }
+    if (await this.isDriverTrainingIncomplete(driverId)) {
+      this.pushReason(reasonCodes, "TRAINING_REQUIRED");
+    }
 
     return this.buildRecord("driver", driverId, reasonCodes, context.evaluatedAt);
+  }
+
+  // Reversible, per-request re-evaluation (no cached "on leave"/"untrained"
+  // flag persisted here) against driver-academy's own authority
+  // (AcademyService.listCourses -> userStatus derived from live attempts).
+  // Deliberately does not touch RegulatoryRegistryService's
+  // dispatchEligible/eligibilityBlockedReasons -- that is the AV/vehicle
+  // dispatch-exclusion condition and stays untouched by this readiness-only
+  // reason code.
+  private async isDriverTrainingIncomplete(driverId: string): Promise<boolean> {
+    if (!this.academyService) {
+      return false;
+    }
+    const courses = await this.academyService.listCourses(driverId);
+    return courses.some(
+      (course) => course.isRequired && course.userStatus !== "passed",
+    );
   }
 
   private evaluateVehicleReadiness(
@@ -384,11 +435,11 @@ export class SupplyReadinessService {
     return this.buildRecord("vehicle", vehicleId, reasonCodes, context.evaluatedAt);
   }
 
-  private evaluatePairReadiness(
+  private async evaluatePairReadiness(
     driverId: string,
     vehicleId: string,
     context: PartnerReadinessContext,
-  ): SupplyReadinessRecord {
+  ): Promise<SupplyReadinessRecord> {
     const driver = context.driversById.get(driverId);
     const vehicle = context.vehiclesById.get(vehicleId);
     if (!driver || !vehicle) {
@@ -401,8 +452,11 @@ export class SupplyReadinessService {
     }
 
     const reasonCodes: SupplyReadinessReasonCode[] = [];
-    for (const reasonCode of this.evaluateDriverReadiness(driverId, context)
-      .reasonCodes) {
+    const driverEvaluation = await this.evaluateDriverReadiness(
+      driverId,
+      context,
+    );
+    for (const reasonCode of driverEvaluation.reasonCodes) {
       this.pushReason(reasonCodes, reasonCode);
     }
     for (const reasonCode of this.evaluateVehicleReadiness(vehicleId, context)

@@ -108,6 +108,16 @@ export function buildOpsShellNav(
       label: t("nav.attendance", locale),
     },
     {
+      // SR-LEAVE-BE-001 / SR-WIRE-001: /leave (driver-leave review queue)
+      // has no `nav.leave` translation key yet -- adding one is out of this
+      // task's write scope (lib/translations.ts), so the label is inlined
+      // here rather than falling back to the raw `t()` key string.
+      key: "leave",
+      href: "/leave",
+      icon: "attendance",
+      label: locale === "zh" ? "請假審核" : "Leave Requests",
+    },
+    {
       key: "maintenance",
       href: "/maintenance",
       icon: "maintenance",
