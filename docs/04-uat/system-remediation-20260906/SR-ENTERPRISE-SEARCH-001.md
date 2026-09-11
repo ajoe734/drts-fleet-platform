@@ -65,3 +65,9 @@ All checks run inside the new isolated worktree; none starts a server.
 | `node --check tests/e2e/system-remediation/sr-enterprise-search-001/enterprise-search-browser-server.mjs` | exit 0; syntax only |
 
 Actual `pnpm --filter @drts/ui-tokens build`, `pnpm --filter @drts/api build` (including contracts and control-plane-auth), and `pnpm --filter @drts/enterprise-dispatch-web build` all exited 0. The real production Next bundle compiled successfully; no server was started. Final diff/commit validation is recorded at delivery. Same-candidate remote browser execution, independent Claude2 review and CI/merge remain required before completion. No gate is accepted solely by this report.
+
+## First full remote execution and follow-up
+
+Candidate `7e5bb2473aa8aa8ba051ffa63449aba825e942fd` is preserved in [PR #1970](https://github.com/ajoe734/drts-fleet-platform/pull/1970). Run [34565741104](https://github.com/ajoe734/drts-fleet-platform/actions/runs/34565741104) passed the separate data job but failed before browser execution: the real JWT service rejected the harness-only `-1s` duration. The runner now issues a supported `0s` token and explicitly checks that real JWT verification rejects it. The original failed run and downloaded raw artifacts remain available under `.local/blocked-recovery-20260911/enterprise-search-run-34565741104/`; they do not count as browser acceptance.
+
+The first matching CI also identified untranslated pagination/retry copy and root strict type errors in the browser fixture map. The follow-up moves copy into both translation catalogs and uses explicit `a`/`b`/`empty` fixture keys. `pnpm run i18n:guard`, `pnpm run typecheck:root`, scoped lint and the 12 workflow checks then passed. The follow-up candidate still requires its own complete remote browser result.

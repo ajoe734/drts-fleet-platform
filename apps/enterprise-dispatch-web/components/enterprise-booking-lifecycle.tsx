@@ -172,7 +172,7 @@ export function EnterpriseBookingHistory({ tenantId }: { tenantId: string }) {
           data-testid="enterprise-search-retry"
           onClick={() => setRetryAttempt((value) => value + 1)}
         >
-          重新載入
+          {tr("bookingLifecycle.history.retry")}
         </button>
       </>
     );
@@ -329,7 +329,7 @@ export function EnterpriseBookingHistory({ tenantId }: { tenantId: string }) {
             </span>
             <input
               type="date"
-              aria-label="預約起始日期"
+              aria-label={tr("bookingLifecycle.history.dateFrom")}
               data-testid="enterprise-date-from"
               value={filters.dateFrom}
               onChange={(e) => updateFilters({ dateFrom: e.target.value })}
@@ -345,7 +345,7 @@ export function EnterpriseBookingHistory({ tenantId }: { tenantId: string }) {
             <span style={{ color: t.muted, fontSize: 12 }}>–</span>
             <input
               type="date"
-              aria-label="預約結束日期"
+              aria-label={tr("bookingLifecycle.history.dateTo")}
               data-testid="enterprise-date-to"
               value={filters.dateTo}
               onChange={(e) => updateFilters({ dateTo: e.target.value })}
@@ -431,7 +431,10 @@ export function EnterpriseBookingHistory({ tenantId }: { tenantId: string }) {
             </span>
             {pagination && pagination.totalItems > 0 && (
               <span>
-                顯示第 {rangeLabel} 筆，共 {pagination.totalPages} 頁
+                {tr("bookingLifecycle.history.pageRange", {
+                  range: rangeLabel,
+                  pages: pagination.totalPages,
+                })}
               </span>
             )}
           </div>
@@ -538,9 +541,11 @@ export function EnterpriseBookingHistory({ tenantId }: { tenantId: string }) {
           }}
         >
           <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-            <span style={{ fontSize: 12, color: t.muted }}>每頁顯示:</span>
+            <span style={{ fontSize: 12, color: t.muted }}>
+              {tr("bookingLifecycle.history.pageSizeLabel")}
+            </span>
             <select
-              aria-label="每頁顯示筆數"
+              aria-label={tr("bookingLifecycle.history.pageSizeAria")}
               data-testid="enterprise-page-size"
               value={pageSize}
               onChange={(e) => {
@@ -562,7 +567,7 @@ export function EnterpriseBookingHistory({ tenantId }: { tenantId: string }) {
             >
               {ENTERPRISE_BOOKING_SEARCH_PAGE_SIZE_OPTIONS.map((size) => (
                 <option key={size} value={size}>
-                  {size} 筆
+                  {tr("bookingLifecycle.history.pageSizeOption", { size })}
                 </option>
               ))}
             </select>
@@ -584,7 +589,7 @@ export function EnterpriseBookingHistory({ tenantId }: { tenantId: string }) {
                 opacity: pagination.page <= 1 ? 0.5 : 1,
               }}
             >
-              上一頁
+              {tr("bookingLifecycle.history.previousPage")}
             </button>
             <span
               style={{
@@ -616,7 +621,7 @@ export function EnterpriseBookingHistory({ tenantId }: { tenantId: string }) {
                 opacity: pagination.page >= pagination.totalPages ? 0.5 : 1,
               }}
             >
-              下一頁
+              {tr("bookingLifecycle.history.nextPage")}
             </button>
           </div>
         </div>

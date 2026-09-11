@@ -129,8 +129,10 @@ async function main() {
       throw new Error(`Real JWT failed verification: ${label}`);
     const expired = await jwt.issueSessionToken(identity, {
       ...options,
-      expiresIn: "-1s",
+      expiresIn: "0s",
     });
+    if (await jwt.verifyAccessToken(expired.token))
+      throw new Error(`Expired JWT unexpectedly verified: ${label}`);
     return { tenantId, token: issued.token, expiredToken: expired.token };
   }
   const identities = {

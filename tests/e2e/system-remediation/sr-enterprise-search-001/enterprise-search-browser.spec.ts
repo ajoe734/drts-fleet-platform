@@ -15,7 +15,7 @@ const evidenceDir = resolve(
     ".artifacts/enterprise-search-acceptance/browser",
 );
 const sessions: Record<
-  string,
+  "a" | "b" | "empty",
   { token: string; tenantId: string; expiredToken: string }
 > & { wrongRealm: string } = JSON.parse(
   readFileSync(resolve(evidenceDir, "sessions.private.json"), "utf8"),
