@@ -28,7 +28,7 @@ Root 已驗證的 immutable QA candidate `26eff448abee9f5a14f482e8e42a84e73cda57
 
 ### 只在 GitHub-hosted disposable runner 執行（未在本 VM 執行）
 
-- `tests/integration/system-remediation/sr-webhook-transport-timeout-20260911/webhook-transport-timeout.acceptance.test.ts`：起一個真實 `node:http` server（loopback），用**零參數**建構正式 `WebhookDispatchService`（即 production 預設 `globalThis.fetch`，只透過真正的 `WEBHOOK_DISPATCH_TIMEOUT_MS` 環境變數配置逾時，不注入任何 wrapper），對它發真實 TCP 請求：
+- `tests/integration/system-remediation/sr-webhook-transport-timeout-20260911/webhook-transport-timeout.acceptance.test.ts`：起一個真實 `node:http` server（loopback），用**零參數**建構正式 `WebhookDispatchService`（即 production 預設 `globalThis.fetch`，只透過真正的 `WEBHOOK_DISPATCH_TIMEOUT_MS` 環境變數配置逾時，不注入任何 wrapper）。**self-gate**：`tests/integration/**` 在根目錄 `vitest.config.ts` 的 `include` 內，且 `package.json` 的 `test:unit` 只排除三個既有目錄（不含本目錄），因此外層 `describe` 用 `describe.skipIf(!process.env.SR_WEBHOOK_TIMEOUT_EVIDENCE_PATH)` 自我 gate（比照 `sr-ops-proof-001`／`sr-booking-verify` 既有的 dedicated-env-var `skipIf` 慣例）；`SR_WEBHOOK_TIMEOUT_EVIDENCE_PATH` 只由 `.github/workflows/webhook-transport-acceptance.yml` 的「Run hosted receiver acceptance」step 設定，一般 `pnpm test`／`pnpm run test:unit`（本機 VM 或任何 PR 的 CI Unit tests step）不會設定該變數，因此 receiver server 不會意外啟動。gate 內對它發真實 TCP 請求，5 個測試案例本身維持無 `.skip`／`.todo`：
   - `/hang` 路由永不回應（不呼叫 `res.end()`）：驗證真實 elapsed time 落在 `[timeoutMs, timeoutMs + 6s]` 有界範圍、`result.status`／`httpStatus`／`nextAttemptAt` 符合既有 retry 分類、server 端真的觀察到連線被 client abort（`req.on("close")`）、且 abort 後 `server.getConnections()` 歸零（沒有殘留 socket）。
   - 耗盡重試（`attempt = maxAttempts`）打 `/hang` → `delivery_failed`、`nextAttemptAt: null`。
   - 逾時後對健康的 `/ok` endpoint 立刻恢復投遞成功（`delivered`／200／elapsed < timeoutMs），並用真實收到的 request body／header 重算 HMAC 位元組，確認與 `signatureHeader` 完全一致（bytes-level 驗證，不是字串格式檢查）。
@@ -38,15 +38,33 @@ Root 已驗證的 immutable QA candidate `26eff448abee9f5a14f482e8e42a84e73cda57
 
 ## 本次實際執行指令與結果（本 worktree：`/home/lupin/workspace/drts-fleet-platform/.artifacts/worktrees/auto/claude2-sr-webhook-transport-timeout-20260911`，base `e2e17cb8d`）
 
-| 指令                                                                                                                    | Exit | 實際結果                            |
-| ------------------------------------------------------------------------------------------------------------------------ | ---- | ------------------------------------ |
-| `git diff --check`                                                                                                        | 0    | 無 whitespace errors                 |
-| `pnpm --filter @drts/api exec vitest run tests/unit/webhook-dispatch.service.test.ts`                                    | 0    | 1 file / 10 tests passed             |
-| `pnpm exec vitest run tests/unit/system-remediation/sr-webhook-transport-timeout-20260911/`                              | 0    | 1 file / 5 tests passed              |
-| `pnpm --filter @drts/api exec eslint src/modules/tenant-partner/webhook-dispatch.service.ts tests/unit/webhook-dispatch.service.test.ts --max-warnings=0` | 0    | 無 errors/warnings（type-aware rules） |
-| `pnpm exec eslint tests/unit/system-remediation/sr-webhook-transport-timeout-20260911/ tests/integration/system-remediation/sr-webhook-transport-timeout-20260911/ --max-warnings=0` | 0 | 無 errors/warnings |
-| `pnpm --filter @drts/api exec prettier --check ...`／`pnpm exec prettier --check ...`（新增／修改檔案）                  | 0    | 皆已用 `--write` 套用 Prettier 格式後複驗通過 |
-| `python3 tools/ci/check_test_coverage.py`                                                                                 | 0    | `all 69 test files yield tests CI runs.` |
+| 指令                                                                                                                                                                                 | Exit | 實際結果                                      |
+| ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ---- | --------------------------------------------- |
+| `git diff --check`                                                                                                                                                                   | 0    | 無 whitespace errors                          |
+| `pnpm --filter @drts/api exec vitest run tests/unit/webhook-dispatch.service.test.ts`                                                                                                | 0    | 1 file / 10 tests passed                      |
+| `pnpm exec vitest run tests/unit/system-remediation/sr-webhook-transport-timeout-20260911/`                                                                                          | 0    | 1 file / 5 tests passed                       |
+| `pnpm --filter @drts/api exec eslint src/modules/tenant-partner/webhook-dispatch.service.ts tests/unit/webhook-dispatch.service.test.ts --max-warnings=0`                            | 0    | 無 errors/warnings（type-aware rules）        |
+| `pnpm exec eslint tests/unit/system-remediation/sr-webhook-transport-timeout-20260911/ tests/integration/system-remediation/sr-webhook-transport-timeout-20260911/ --max-warnings=0` | 0    | 無 errors/warnings                            |
+| `pnpm --filter @drts/api exec prettier --check ...`／`pnpm exec prettier --check ...`（新增／修改檔案）                                                                              | 0    | 皆已用 `--write` 套用 Prettier 格式後複驗通過 |
+| `python3 tools/ci/check_test_coverage.py`                                                                                                                                            | 0    | `all 69 test files yield tests CI runs.`      |
+
+### Review round 2：修補 acceptance receiver 缺少 skip gate
+
+Reviewer（Claude）審查 candidate `1c5789bfb1146c930b74e82f227a9fd3bb4bb5c7`（PR #1976）時發現：新增的 `tests/integration/system-remediation/sr-webhook-transport-timeout-20260911/webhook-transport-timeout.acceptance.test.ts` 雖然文件與 workflow 註解宣稱「only GitHub-hosted，never本機VM」，但程式碼本身在 `beforeAll` 無條件啟動真實 `node:http` server：`vitest.config.ts` 的 `include` 涵蓋 `tests/integration/**/*.test.ts`，`package.json` 的 `test:unit` 只排除三個既有目錄（不含本目錄），`.github/workflows/ci.yml` 的 Unit tests step 對每個 PR 都直接跑 `pnpm run test:unit`——代表這個 receiver 會在一般 CI 與任何在本機/VM 執行 `pnpm test`／`pnpm run test:unit` 的人身上無條件執行，違反 acceptance 第三點「no VM...receiver server」，且與 repo 既有同類 GitHub-hosted-only acceptance test（`sr-ops-proof-001`／`sr-booking-verify`／`sr-academy-be-001`）皆用 `it.skipIf(!process.env.<DEDICATED_ENV_VAR>)` 自我 gate 的慣例不一致。
+
+修補：外層 `describe` 改為 `describe.skipIf(!process.env.SR_WEBHOOK_TIMEOUT_EVIDENCE_PATH)`（見上方測試小節說明）。`SR_WEBHOOK_TIMEOUT_EVIDENCE_PATH` 原本就只由 `.github/workflows/webhook-transport-acceptance.yml` 的「Run hosted receiver acceptance」step 設定，不需要新增 workflow env var；一般 `test:unit`／CI sweep 不會設定它，因此 gate 後 4 個 test case 全部回報 `skipped` 而不會啟動 server（已在本 worktree 以 `pnpm exec vitest run tests/integration/system-remediation/sr-webhook-transport-timeout-20260911/` 不帶該 env var 重新驗證，回報 `1 skipped (1)` / `4 skipped (4)`，未起 server）；只有 hosted workflow 設定該變數時，gate 打開，5 個真實斷言案例照常執行且不含 `.skip`／`.todo`，`webhook-transport-acceptance.yml` 的「Reject any skipped or todo case」grep 仍然有效（該 job 執行時 gate 必為 open，不會被自己的 skip 判定誤傷）。
+
+| 指令（round 2 複驗）                                                                                                                                             | Exit | 實際結果                                                             |
+| ---------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---- | -------------------------------------------------------------------- |
+| `pnpm exec vitest run tests/integration/system-remediation/sr-webhook-transport-timeout-20260911/ --reporter=verbose`（不帶 `SR_WEBHOOK_TIMEOUT_EVIDENCE_PATH`） | 0    | `1 skipped (1)` file / `4 skipped (4)` tests，未啟動 receiver server |
+| `pnpm --filter @drts/api exec vitest run tests/unit/webhook-dispatch.service.test.ts`                                                                            | 0    | 1 file / 10 tests passed（未變動）                                   |
+| `pnpm exec vitest run tests/unit/system-remediation/sr-webhook-transport-timeout-20260911/`                                                                      | 0    | 1 file / 5 tests passed（未變動）                                    |
+| `pnpm exec eslint tests/integration/system-remediation/sr-webhook-transport-timeout-20260911/ --max-warnings=0`                                                  | 0    | 無 errors/warnings                                                   |
+| `pnpm exec prettier --write` 後 `--check`（本檔＋本文件）                                                                                                        | 0    | 已格式化並複驗通過                                                   |
+| `python3 tools/ci/check_test_coverage.py`                                                                                                                        | 0    | `all 69 test files yield tests CI runs.`                             |
+| `git diff --check`                                                                                                                                               | 0    | 無 whitespace errors                                                 |
+
+未再嘗試在本 VM 帶 `SR_WEBHOOK_TIMEOUT_EVIDENCE_PATH` 執行以觸發真實 open-gate 路徑：這正是本次修補要防止的行為（receiver 在此 VM 啟動），因此該路徑的真實 PASS 證據只能來自 `.github/workflows/webhook-transport-acceptance.yml` 的 hosted 執行，與既有「未做的 live／真機部分」小節說明一致。
 
 ### `pnpm --filter @drts/api typecheck` 已知的、與本 task 無關的既有失敗
 
