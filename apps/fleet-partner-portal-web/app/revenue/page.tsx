@@ -12,6 +12,8 @@ import { loadRevenue, loadStatements } from "@/lib/fleet-portal-data.server";
 import { BiLabel, DataSourceNotice } from "@/lib/fleet-portal-ui";
 import { getServerLocale } from "@/lib/server-locale";
 import { t } from "@/lib/translations";
+import { resolveStatementBannerState } from "./statement-banner";
+import { trRevenue } from "./translations";
 
 export const dynamic = "force-dynamic";
 
@@ -27,6 +29,7 @@ export default async function FleetRevenuePage() {
     statementsView.rows.find((row) => row.period === s.period) ??
     statementsView.rows[0] ??
     null;
+  const bannerState = resolveStatementBannerState(currentStatement);
 
   return (
     <>
@@ -178,13 +181,42 @@ export default async function FleetRevenuePage() {
             />
           </CanvasCard>
           <CanvasCard theme={theme} title={t("revenue.actions", locale)}>
-            <CanvasBanner
-              theme={theme}
-              tone="warn"
-              icon="warn"
-              title={t("revenue.pendingTitle", locale)}
-              body={t("revenue.pendingBody", locale, { period: s.period })}
-            />
+            {/* Banner is driven by the same statement record the actions
+                panel below uses, so it can never claim "generated, please
+                confirm" while also saying "no actionable statement" — the
+                exact self-contradiction reported in R13. */}
+            {bannerState === "no_statement" ? (
+              <CanvasBanner
+                theme={theme}
+                tone="info"
+                icon="notices"
+                title={trRevenue("revenue.noStatement.title", locale)}
+                body={trRevenue("revenue.noStatement.body", locale, {
+                  period: s.period,
+                })}
+              />
+            ) : bannerState === "paid" ? (
+              <CanvasBanner
+                theme={theme}
+                tone="success"
+                icon="ok"
+                title={trRevenue("revenue.paidStatement.title", locale)}
+                body={trRevenue("revenue.paidStatement.body", locale, {
+                  period: currentStatement!.period,
+                  payable: currentStatement!.payable,
+                })}
+              />
+            ) : (
+              <CanvasBanner
+                theme={theme}
+                tone="warn"
+                icon="warn"
+                title={t("revenue.pendingTitle", locale)}
+                body={t("revenue.pendingBody", locale, {
+                  period: currentStatement!.period,
+                })}
+              />
+            )}
             {currentStatement ? (
               <div style={{ marginTop: 12 }}>
                 <FleetStatementActions
