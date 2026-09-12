@@ -8,10 +8,36 @@
 | 工作類型 / 優先級 | verification / P1                                                                                    |
 | Owner / Reviewer | `Gemini` / `Gemini2`                                                                                 |
 | Base SHA         | `efaa9ff6efbf6ae76d7450a257e8ea38071ba40a` (Clean fast-forward to `origin/dev` after PR #1995)       |
-| Candidate SHA    | 於 commit & push 後記錄於本報告與 handoff 指令                                                       |
+| Candidate SHA    | 於 `handoff` 時以 `CANDIDATE_SHA=$(git rev-parse HEAD)` 鎖定（前版候選 `fb2e85dc5e715f85736d9d2f6a963e5c4990e4c2` 由 Reviewer Gemini2 退回重驗，本版完全修復 70 處型別錯誤） |
 | 分支 / Worktree  | `gemini/sr-qa-finance-001` / `/home/lupin/workspace/drts-fleet-platform/.artifacts/worktrees/auto/gemini-sr-qa-finance-001` |
 | 前置依賴任務     | `SR-UAT-HARNESS-001`, `SR-FLEET-SETTLE-001`, `SR-BANK-003`, `SR-CHANNEL-001`, `SR-BANK-001`, `SR-MAIL-002` (皆已合併至 `origin/dev`) |
 | 負責驗收能力 (16) | `C068`, `C074`, `C075`, `C076`, `C077`, `C078`, `C079`, `C080`, `C081`, `C082`, `C083`, `C084`, `C085`, `C086`, `C087`, `C088` |
+
+---
+
+## 0. Reviewer 反饋與型別回歸修復說明（Gemini2 Reopen Resolution）
+
+Reviewer `Gemini2` 於第一版候選（`fb2e85dc5e715f85736d9d2f6a963e5c4990e4c2`）審查時退回，指出：
+1. `tsc -p tsconfig.json --noEmit` 存在 70 處 TypeScript 型別檢查錯誤（集中於 candidate test files）。
+2. UAT 完成報告中 Candidate SHA 欄位未明確化。
+
+Owner `Gemini` 接手後，徹底依據 `@drts/contracts` 權威定義與各服務層介面修復所有型別不一致：
+- **`@drts/contracts` 合約介面對齊**：
+  - `DriverFeePlanRecord`：修正鍵值為 `feePlanId`、`planName`、`status: "published"`，移除不存在之 `planId` 與 `publishedBy`。
+  - `ReconciliationIssueType`：對齊權威列舉值 `"partner_sponsor_mismatch"` 與 `"forwarder_status_mismatch"`，修正測試資料中無效之 `"fare_calculation_discrepancy"` 與 `"billing_inconsistency"`。
+  - `ReconciliationIssueResolutionCode`：對齊權威列舉值 `"sponsor_corrected"` 與 `"resolved_other"`，修正非標準之 `"partner_corrected"` 與 `"resolved_with_refund"`。
+  - `ForwarderReconciliationIssue`：補齊 `ReconciliationJobRecord`（`platformCode`, `externalOrderId`）、`ForwarderSyncErrorRecord`（`failedAt`, `nativeStatus`, `payload`）、`ForwardedOrderFinanceContext`（`driverPayoutAuthority`）及 `ForwardedOrderManualFallbackRecord`（`notes`）等必要屬性。
+  - `UploadRemittanceProofCommand`：補齊必要屬性 `contentType` 與 `sizeBytes`。
+  - `MarkReimbursementPaidCommand`：移除不存在之 `statementId`；`MarkReimbursementPaidWithProofCommand` 補齊 `batchId`。
+- **純函式型別與非空守衛對齊**：
+  - `resolveStatementBannerState`：輸入型別 `Pick<FleetStatement, "status"> | null`，狀態嚴格對齊 `"pending_confirm" | "paid"`，避免傳入 `undefined` 或 `"pending"`。
+  - `OwnedMobilityTripCompletedEvent`：補齊必要屬性 `bookingId: null`。
+  - `AuditNotificationService.listNotifications()`：修正為 0 參數呼叫。
+  - 全面修正所有陣列與可空存取點（`batch!`、`driverStmt!`、`lines[0]!` 等），消除 `TS18048` 與 `TS2532`。
+- **驗證執行成果**：
+  - `pnpm exec tsc -p tsconfig.json --noEmit`：`sr-qa-finance-001` 下全數 9 個測試檔案 **0 錯誤**，原先 70 處錯誤全數消除。
+  - `pnpm exec vitest run tests/unit/system-remediation/sr-qa-finance-001/`：8 個套件、50 個單元測試 **100% 通過（Exit Code 0）**。
+  - `git diff --check`：通過，無多餘空白或格式錯誤。
 
 ---
 

@@ -34,7 +34,7 @@ describe("SR-QA-FINANCE-001 - C074 & C075: 支付訂單、Reconciliation 案件�
       expect(created.ownerId).toBe("fin-investigator-01");
       expect(created.evidenceArtifactIds).toContain("art-bank-stmt-202606-raw");
       expect(created.comments).toHaveLength(1);
-      expect(created.comments[0].message).toContain("Discrepancy of 300 NTD");
+      expect(created.comments[0]!.message).toContain("Discrepancy of 300 NTD");
     });
 
     it("executes assignment, comment addition, resolution, and reopening transitions", async () => {
@@ -42,7 +42,7 @@ describe("SR-QA-FINANCE-001 - C074 & C075: 支付訂單、Reconciliation 案件�
 
       // Create issue
       const issue = await service.createReconciliationIssue({
-        issueType: "fare_calculation_discrepancy",
+        issueType: "partner_sponsor_mismatch",
         summary: "Platform gross calculation differs from partner report",
         openedBy: "fin-auditor-01",
         comment: "Initial audit discrepancy",
@@ -70,12 +70,12 @@ describe("SR-QA-FINANCE-001 - C074 & C075: 支付訂單、Reconciliation 案件�
       // Resolve issue
       const resolved = await service.resolveReconciliationIssue(issue.issueId, {
         actorId: "settlement-specialist-02",
-        resolutionCode: "partner_corrected",
+        resolutionCode: "sponsor_corrected",
         resolutionSummary: "Partner re-issued ledger matching platform figures.",
         artifactIds: ["art-partner-signoff"],
       });
       expect(resolved.status).toBe("resolved");
-      expect(resolved.resolutionCode).toBe("partner_corrected");
+      expect(resolved.resolutionCode).toBe("sponsor_corrected");
       expect(resolved.resolvedAt).not.toBeNull();
 
       // Reopen issue
@@ -96,6 +96,8 @@ describe("SR-QA-FINANCE-001 - C074 & C075: 支付訂單、Reconciliation 案件�
         reconciliationJob: {
           reconciliationJobId: "recon-forwarder-qa-001",
           mirrorOrderId: "mirror-ord-qa-001",
+          platformCode: "grab_taiwan",
+          externalOrderId: "grab-order-qa-12345",
           status: "queued",
           reason: "sync_failed",
           mismatchCount: 1,
@@ -112,18 +114,22 @@ describe("SR-QA-FINANCE-001 - C074 & C075: 支付訂單、Reconciliation 案件�
           code: "FORWARDER_ACCEPT_RELAY_FAILED",
           message: "Upstream accept relay failed.",
           retryable: true,
-          occurredAt: "2026-06-01T12:05:00Z",
+          failedAt: "2026-06-01T12:05:00Z",
+          nativeStatus: "DRIVER_RELAY_ERROR",
+          payload: {},
         },
         financeContext: {
           fareAuthority: "external_platform",
           settlementAuthority: "external_platform",
+          driverPayoutAuthority: "external_platform",
           localLedgerMode: "shadow_only",
-          receiptOwner: "external_platform",
         },
         manualFallback: {
           required: true,
           reason: "sync_failed",
-          instructions: ["Manual coordination required with forwarder platform."],
+          requestedAt: "2026-06-01T12:05:00Z",
+          requestedBy: "ops-system",
+          notes: "Manual coordination required with forwarder platform.",
         },
         createdAt: "2026-06-01T12:00:00Z",
         updatedAt: "2026-06-01T12:05:00Z",
@@ -135,10 +141,10 @@ describe("SR-QA-FINANCE-001 - C074 & C075: 支付訂單、Reconciliation 案件�
       });
 
       expect(issues).toHaveLength(1);
-      expect(issues[0].channelKey).toBe("forwarded_shadow");
-      expect(issues[0].forwardedFinanceContext?.platformCode).toBe("grab_taiwan");
-      expect(issues[0].forwardedFinanceContext?.localLedgerMode).toBe("shadow_only");
-      expect(issues[0].forwardedFinanceContext?.driverPayoutAuthority).toBe("external_platform");
+      expect(issues[0]!.channelKey).toBe("forwarded_shadow");
+      expect(issues[0]!.forwardedFinanceContext?.platformCode).toBe("grab_taiwan");
+      expect(issues[0]!.forwardedFinanceContext?.localLedgerMode).toBe("shadow_only");
+      expect(issues[0]!.forwardedFinanceContext?.driverPayoutAuthority).toBe("external_platform");
     });
   });
 

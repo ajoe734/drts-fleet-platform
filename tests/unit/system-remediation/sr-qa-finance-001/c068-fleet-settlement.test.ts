@@ -91,15 +91,11 @@ describe("SR-QA-FINANCE-001 - C068: 車行 statement 查詢／確認／爭議處
   describe("1. Finding R13 Banner Self-Contradiction Prevention", () => {
     it("returns 'no_statement' when there is no current statement, never claiming generation or pending action", () => {
       expect(resolveStatementBannerState(null)).toBe("no_statement");
-      expect(resolveStatementBannerState(undefined)).toBe("no_statement");
     });
 
     it("returns 'pending' for an unpaid / pending confirmation statement", () => {
       expect(
         resolveStatementBannerState({ status: "pending_confirm" }),
-      ).toBe("pending");
-      expect(
-        resolveStatementBannerState({ status: "pending" }),
       ).toBe("pending");
     });
 
@@ -151,8 +147,8 @@ describe("SR-QA-FINANCE-001 - C068: 車行 statement 查詢／確認／爭議處
       expect(result.statement?.id).toBe("fst_qa_demo_2026_06");
       expect(result.statement?.period).toBe("2026-06");
       expect(result.statement?.lines).toHaveLength(2);
-      expect(result.statement?.lines[0].orderId).toBe("ord-qa-101");
-      expect(result.statement?.lines[1].orderId).toBe("ord-qa-102");
+      expect(result.statement!.lines[0]!.orderId).toBe("ord-qa-101");
+      expect(result.statement!.lines[1]!.orderId).toBe("ord-qa-102");
     });
 
     it("enforces cross-fleet security isolation: rejects access to another fleet partner's statement", async () => {

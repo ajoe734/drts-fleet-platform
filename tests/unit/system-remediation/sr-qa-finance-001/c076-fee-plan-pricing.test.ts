@@ -32,7 +32,7 @@ describe("SR-QA-FINANCE-001 - C076: 費率草稿、比較、發布與不可變�
 
       const plans = service.listDriverFeePlans();
       expect(plans).toHaveLength(1);
-      expect(plans[0].version).toBe("2026-Q2-v1");
+      expect(plans[0]!.version).toBe("2026-Q2-v1");
     });
 
     it("rejects duplicate planName and version with FEE_PLAN_IMMUTABLE (409 Conflict)", async () => {
@@ -50,7 +50,7 @@ describe("SR-QA-FINANCE-001 - C076: 費率草稿、比較、發布與不可變�
           planName: "Standard Fleet Fee Plan",
           version: "2026-Q2-v1",
           serviceFeeBps: 1500,
-          reimbursementMode: "operator_funded",
+          reimbursementMode: "mixed",
         }),
       ).rejects.toMatchObject({
         status: 409,
@@ -104,7 +104,7 @@ describe("SR-QA-FINANCE-001 - C076: 費率草稿、比較、發布與不可變�
         periodMonth: "2026-03",
       });
       expect(marchStatements.items.length).toBeGreaterThan(0);
-      const marchSnapshotVersion = marchStatements.items[0].feePlanVersion;
+      const marchSnapshotVersion = marchStatements.items[0]!.feePlanVersion;
       expect(marchSnapshotVersion).toBe("2026-03");
 
       // Now publish updated plan v2 (15%)
@@ -125,7 +125,7 @@ describe("SR-QA-FINANCE-001 - C076: 費率草稿、比較、發布與不可變�
 
       // Verify active fee plan is now v2
       const allPlans = service.listDriverFeePlans();
-      expect(allPlans[0].version).toBe("2026-04");
+      expect(allPlans[0]!.version).toBe("2026-04");
     });
   });
 });

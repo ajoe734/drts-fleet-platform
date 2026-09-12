@@ -45,8 +45,8 @@ describe("SR-QA-FINANCE-001 - C086 & C087: 通路分潤、對帳明細與總覽�
       expect(statement.totals.gmv.amountMinor).toBe(150000); // 1500 NTD
       expect(statement.totals.shareTotal.amountMinor).toBe(22500); // 225 NTD (15%)
       expect(statement.lines).toHaveLength(2);
-      expect(statement.lines[0].rateType).toBe("percent");
-      expect(statement.lines[0].rateValue).toBe(15);
+      expect(statement.lines[0]!.rateType).toBe("percent");
+      expect(statement.lines[0]!.rateValue).toBe(15);
     });
 
     it("resolves referral revenue share rule dynamically and rejects unregistered channels", () => {

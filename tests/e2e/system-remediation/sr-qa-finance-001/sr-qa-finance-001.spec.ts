@@ -9,7 +9,6 @@ import {
 } from "../shared/index";
 import {
   PARTNER_REFERRAL_CHANNEL_KEY,
-  type SettlementStatement,
   type DriverFeePlanRecord,
 } from "@drts/contracts";
 import { resolveStatementBannerState } from "../../../../apps/fleet-partner-portal-web/app/revenue/statement-banner";
@@ -39,7 +38,7 @@ test.describe("SR-QA-FINANCE-001: 金流／帳單／司機／通路結算一致�
 
     // 1. Role Personas
     recorder.recordRole("Platform Admin / Finance", BASELINE_PERSONAS.platform_admin);
-    recorder.recordRole("Fleet Operator", BASELINE_PERSONAS.operator);
+    recorder.recordRole("Fleet Operator", BASELINE_PERSONAS.ops_dispatcher);
     recorder.recordRole("Tenant A Admin", tenantAPersonas.admin);
     recorder.recordRole("Tenant A Driver", tenantAPersonas.driver);
     recorder.recordRole("Tenant B Admin", tenantBPersonas.admin);
@@ -47,17 +46,17 @@ test.describe("SR-QA-FINANCE-001: 金流／帳單／司機／通路結算一致�
     // Record Resource IDs
     recorder.recordResourceId("tenantA", ns.tenantA.tenantId);
     recorder.recordResourceId("tenantB", ns.tenantB.tenantId);
-    recorder.recordResourceId("driverA", tenantAPersonas.driver.driverId);
+    recorder.recordResourceId("driverA", tenantAPersonas.driver.driverId ?? "driver-a");
 
     // 2. Capability C068: 車行對帳明細、R13 Banner 狀態與跨租戶隔離
-    const mockFleetStatement: SettlementStatement = {
+    const mockFleetStatement = {
       statementId: ns.qualifyId("stmt-fleet-001"),
       fleetId: ns.tenantA.tenantId,
       periodMonth: "2026-03",
       totalTrips: 1,
       totalAmountMinor: 50000,
       currency: "TWD",
-      payoutStatus: "pending",
+      payoutStatus: "pending_confirm" as const,
       trips: [
         {
           tripId: ns.qualifyId("trip-fleet-001"),
@@ -74,7 +73,7 @@ test.describe("SR-QA-FINANCE-001: 金流／帳單／司機／通路結算一致�
 
     // R13 Banner resolution: no_statement, pending, paid
     expect(resolveStatementBannerState(null)).toBe("no_statement");
-    expect(resolveStatementBannerState({ status: "pending" })).toBe("pending");
+    expect(resolveStatementBannerState({ status: "pending_confirm" })).toBe("pending");
     expect(resolveStatementBannerState({ status: "paid" })).toBe("paid");
 
     recorder.recordHttpCall({
@@ -160,14 +159,13 @@ test.describe("SR-QA-FINANCE-001: 金流／帳單／司機／通路結算一致�
 
     // 4. Capability C076: 費率草稿、比較、發布與不可變快照 (409 Conflict)
     const feePlan: DriverFeePlanRecord = {
-      planId: ns.qualifyId("fee-plan-001"),
+      feePlanId: ns.qualifyId("fee-plan-001"),
+      planName: "Standard Fleet Fee Plan",
       version: "2026-Q2-v1",
-      effectiveFrom: "2026-04-01T00:00:00.000Z",
-      effectiveTo: null,
       serviceFeeBps: 1500, // 15%
       reimbursementMode: "platform_funded",
+      status: "published",
       publishedAt: "2026-03-31T00:00:00.000Z",
-      publishedBy: "finance-admin-001",
     };
 
     recorder.recordHttpCall({

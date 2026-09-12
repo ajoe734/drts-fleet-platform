@@ -37,7 +37,7 @@ describe("SR-QA-FINANCE-001 - C088: 跨帳一致性與總額守恆 (Cancellation
         periodMonth: "2026-03",
         driverId: "drv-demo-001",
       });
-      const driverStmt = driverResult.items[0];
+      const driverStmt = driverResult.items[0]!;
       expect(driverStmt).toBeDefined();
 
       // Find enterprise trip line (order-demo-031)
@@ -95,7 +95,7 @@ describe("SR-QA-FINANCE-001 - C088: 跨帳一致性與總額守恆 (Cancellation
         periodMonth: "2026-03",
         driverId: "drv-demo-001",
       });
-      const driverStmt = driverResult.items[0];
+      const driverStmt = driverResult.items[0]!;
       const airportLine = driverStmt.lines.find(
         (l) => l.orderId === "order-demo-032",
       );
@@ -218,7 +218,7 @@ describe("SR-QA-FINANCE-001 - C088: 跨帳一致性與總額守恆 (Cancellation
 
       // Open a reconciliation issue for a fare dispute
       const issue = await service.createReconciliationIssue({
-        issueType: "billing_inconsistency",
+        issueType: "partner_sponsor_mismatch",
         channelKey: "tenant_enterprise",
         summary:
           "Rider was double-charged on order-c088-dispute-001; refund approved by finance.",
@@ -245,12 +245,12 @@ describe("SR-QA-FINANCE-001 - C088: 跨帳一致性與總額守恆 (Cancellation
       // Resolve the dispute with refund resolution code
       const resolved = await service.resolveReconciliationIssue(issue.issueId, {
         actorId: "finance-operator-01",
-        resolutionCode: "resolved_with_refund",
+        resolutionCode: "resolved_other",
         resolutionSummary:
           "Full fare reversed on card gateway; tenant invoice credited.",
       });
       expect(resolved.status).toBe("resolved");
-      expect(resolved.resolutionCode).toBe("resolved_with_refund");
+      expect(resolved.resolutionCode).toBe("resolved_other");
       expect(resolved.resolvedAt).toBeDefined();
 
       // Read back from service
@@ -258,7 +258,7 @@ describe("SR-QA-FINANCE-001 - C088: 跨帳一致性與總額守恆 (Cancellation
         .listReconciliationIssues()
         .find((i) => i.issueId === issue.issueId);
       expect(fetched).toBeDefined();
-      expect(fetched!.resolutionCode).toBe("resolved_with_refund");
+      expect(fetched!.resolutionCode).toBe("resolved_other");
       expect(fetched!.evidenceArtifactIds).toContain(
         "artifact-gateway-refund-receipt-001",
       );

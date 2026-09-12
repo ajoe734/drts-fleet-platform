@@ -31,12 +31,12 @@ function driverIdentity(driverId: string): BootstrapRequestIdentity {
 function platformFinanceIdentity(actorId = "fin-admin-qa"): BootstrapRequestIdentity {
   return {
     authMode: "bootstrap_headers",
-    actorType: "platform_user",
+    actorType: "platform_admin",
     actorId,
     realm: "platform",
     tenantId: null,
-    roleFamilies: ["finance"],
-    roles: ["finance_admin"],
+    roleFamilies: ["platform"],
+    roles: ["platform_admin"],
     scopes: ["billing:write", "reimbursement:write"],
     requestId: null,
   };
@@ -60,7 +60,7 @@ describe("SR-QA-FINANCE-001 - C080 & C081: 代墊批次、核准、匯款證明�
 
       const batches = service.listReimbursementBatches();
       expect(batches.length).toBeGreaterThan(0);
-      const batch = batches[0];
+      const batch = batches[0]!;
       expect(batch.batchId).toBeDefined();
       expect(batch.status).toBe("pending");
       expect(batch.approvedAt).toBeNull();
@@ -84,7 +84,7 @@ describe("SR-QA-FINANCE-001 - C080 & C081: 代墊批次、核准、匯款證明�
       });
       await service.generateDriverStatements({ periodMonth: "2026-03" });
 
-      const batch = service.listReimbursementBatches()[0];
+      const batch = service.listReimbursementBatches()[0]!;
       await expect(
         service.approveReimbursementBatch(batch.batchId, {
           statementId: "mismatched-statement-id-999",
@@ -106,12 +106,11 @@ describe("SR-QA-FINANCE-001 - C080 & C081: 代墊批次、核准、匯款證明�
       });
       await service.generateDriverStatements({ periodMonth: "2026-03" });
 
-      const batch = service.listReimbursementBatches()[0];
+      const batch = service.listReimbursementBatches()[0]!;
       expect(batch.approvedAt).toBeNull();
 
       expect(() =>
         service.markReimbursementPaid(batch.batchId, {
-          statementId: batch.statementId,
           remittanceProofId: "proof-test-01",
         }),
       ).toThrowError();
@@ -130,7 +129,7 @@ describe("SR-QA-FINANCE-001 - C080 & C081: 代墊批次、核准、匯款證明�
       });
       await service.generateDriverStatements({ periodMonth: "2026-03" });
 
-      const batch = service.listReimbursementBatches()[0];
+      const batch = service.listReimbursementBatches()[0]!;
       const targetDriverId = batch.driverId;
       const attackerDriverId = `attacker-${targetDriverId}`;
 
@@ -144,6 +143,8 @@ describe("SR-QA-FINANCE-001 - C080 & C081: 代墊批次、核准、匯款證明�
           {
             batchId: batch.batchId,
             originalFilename: "remittance_slip.png",
+            contentType: "image/png",
+            sizeBytes: 21,
             stagedContentRef: staged.stagedContentRef,
           },
           driverIdentity(attackerDriverId),
@@ -165,7 +166,7 @@ describe("SR-QA-FINANCE-001 - C080 & C081: 代墊批次、核准、匯款證明�
       });
       await service.generateDriverStatements({ periodMonth: "2026-03" });
 
-      const batch = service.listReimbursementBatches()[0];
+      const batch = service.listReimbursementBatches()[0]!;
       await service.approveReimbursementBatch(batch.batchId, {
         statementId: batch.statementId,
       });
@@ -178,6 +179,8 @@ describe("SR-QA-FINANCE-001 - C080 & C081: 代墊批次、核准、匯款證明�
         {
           batchId: batch.batchId,
           originalFilename: "slip.png",
+          contentType: "image/png",
+          sizeBytes: 32,
           stagedContentRef: staged.stagedContentRef,
         },
         driverIdentity(batch.driverId),
@@ -191,6 +194,7 @@ describe("SR-QA-FINANCE-001 - C080 & C081: 代墊批次、核准、匯款證明�
         service.markReimbursementPaidWithProof(
           batch.batchId,
           {
+            batchId: batch.batchId,
             proofId: uploaded.proofId,
             idempotencyKey: "idem-unscanned-001",
             paidAt: "2026-03-31T15:00:00.000Z",
@@ -214,7 +218,7 @@ describe("SR-QA-FINANCE-001 - C080 & C081: 代墊批次、核准、匯款證明�
       });
       await service.generateDriverStatements({ periodMonth: "2026-03" });
 
-      const batch = service.listReimbursementBatches()[0];
+      const batch = service.listReimbursementBatches()[0]!;
       await service.approveReimbursementBatch(batch.batchId, {
         statementId: batch.statementId,
       });
@@ -229,6 +233,8 @@ describe("SR-QA-FINANCE-001 - C080 & C081: 代墊批次、核准、匯款證明�
         {
           batchId: batch.batchId,
           originalFilename: "remittance_202603.png",
+          contentType: "image/png",
+          sizeBytes: fileBytes.length,
           stagedContentRef: staged.stagedContentRef,
         },
         driverIdentity(batch.driverId),
@@ -262,6 +268,7 @@ describe("SR-QA-FINANCE-001 - C080 & C081: 代墊批次、核准、匯款證明�
       const receipt = await service.markReimbursementPaidWithProof(
         batch.batchId,
         {
+          batchId: batch.batchId,
           proofId: uploaded.proofId,
           idempotencyKey: "idem-remittance-pay-001",
           paidAt: "2026-03-31T15:00:00.000Z",

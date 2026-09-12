@@ -117,6 +117,7 @@ describe("SR-QA-FINANCE-001 - C077, C078 & C079: 租戶請款、真實 PDF 下�
 
       // Complete 2 trips in May 2026
       const trip1: OwnedMobilityTripCompletedEvent = {
+        bookingId: null,
         tenantId: TENANT_ID,
         driverId: "drv-qa-501",
         orderId: "ord-qa-501",
@@ -139,6 +140,7 @@ describe("SR-QA-FINANCE-001 - C077, C078 & C079: 租戶請款、真實 PDF 下�
       };
 
       const trip2: OwnedMobilityTripCompletedEvent = {
+        bookingId: null,
         tenantId: TENANT_ID,
         driverId: "drv-qa-502",
         orderId: "ord-qa-502",
@@ -194,6 +196,7 @@ describe("SR-QA-FINANCE-001 - C077, C078 & C079: 租戶請款、真實 PDF 下�
       });
 
       service.handleOwnedMobilityTripCompleted({
+        bookingId: null,
         tenantId: TENANT_ID,
         driverId: "drv-qa-pdf-1",
         orderId: "ord-qa-pdf-1",
@@ -264,6 +267,7 @@ describe("SR-QA-FINANCE-001 - C077, C078 & C079: 租戶請款、真實 PDF 下�
       });
 
       service.handleOwnedMobilityTripCompleted({
+        bookingId: null,
         tenantId: TENANT_ID,
         driverId: "drv-qa-notif-1",
         orderId: "ord-qa-notif-1",
@@ -296,7 +300,7 @@ describe("SR-QA-FINANCE-001 - C077, C078 & C079: 租戶請款、真實 PDF 下�
       );
 
       // In-app ops notice was recorded by the service
-      const notifications = auditNotificationService.listNotifications(TENANT_ID);
+      const notifications = auditNotificationService.listNotifications();
       expect(notifications.length).toBeGreaterThan(0);
       const invoiceNotice = notifications.find(
         (n) => n.message.includes(invoice.invoiceId),
