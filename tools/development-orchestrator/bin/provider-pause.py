@@ -27,10 +27,11 @@ _TOOL_ROOT = Path(__file__).resolve().parent.parent
 if str(_TOOL_ROOT) not in sys.path:
     sys.path.insert(0, str(_TOOL_ROOT))
 
-from common import config_path  # noqa: E402
+from common import config_path, write_activity_log  # noqa: E402
 from control_plane.infra.runtime_repo import load_runtime_state, save_runtime_state  # noqa: E402
 from control_plane.runtime.supervisor_runtime import (  # noqa: E402
     _lane_probe_healthy,
+    clear_provider_pause,
     lanes_covered_by_pause,
     load_config,
     pause_covers_lane,
@@ -84,10 +85,13 @@ def command_clear(config: dict, state: dict, report: dict, lane: str) -> int:
         print(f"no pause covers {lane}; nothing to clear.", file=sys.stderr)
         return 1
 
-    freed: set[str] = set()
-    for key in doomed:
-        freed.update(lanes_covered_by_pause(config, report, pauses[key]))
-        pauses.pop(key, None)
+    freed = {lane_id for key in doomed
+             for lane_id in lanes_covered_by_pause(config, report, pauses[key])}
+    recovery = clear_provider_pause(state, lane, pause_keys=doomed, affected_lanes=freed)
+    write_activity_log(config, {
+        "type": "provider_pause_cleared", "provider": lane, **recovery,
+        "message": f"Explicit provider-pause clear for {lane}; retired matching quota/auth failures.",
+    })
     save_runtime_state(config, state)
 
     for lane_id in sorted(freed):
