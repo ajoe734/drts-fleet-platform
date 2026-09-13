@@ -465,6 +465,42 @@ describe("tenant partner ingress handoff controller", () => {
       status: "completed",
     });
   });
+
+  it("rejects SLA update with negative threshold minutes", () => {
+    const { controller } = createController();
+    const identity: IdentityContext = {
+      actorType: "tenant_admin",
+      actorId: "admin-a",
+      realm: "tenant",
+      authMode: "jwt_bearer",
+      roleFamilies: ["tenant"],
+      roles: ["tenant_admin"],
+      scopes: ["tenant:sla:write"],
+      tenantId: "tenant-a",
+      supportedExecutionModes: ["supervisor_managed_execution"],
+    };
+
+    for (const field of [
+      "waitThresholdMin",
+      "arrivalThresholdMin",
+      "completionThresholdMin",
+    ] as const) {
+      expect(() =>
+        controller.updateSlaProfile(
+          { [field]: -1 },
+          identity,
+          "tenant-a",
+          "admin-a",
+          "req-neg-sla",
+        ),
+      ).toThrowError(
+        expect.objectContaining({
+          status: 400,
+          code: "INVALID_SLA_THRESHOLD",
+        }),
+      );
+    }
+  });
 });
 
 describe("tenant API key authoritative consumer and usage tracking", () => {
