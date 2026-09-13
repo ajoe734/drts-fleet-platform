@@ -534,12 +534,15 @@ function createInitialReferralRevenueShareRules(): ReferralRevenueShareRule[] {
 
 const TENANT_INVOICE_PDF_LINES_PER_PAGE = 48;
 
-function toPdfAsciiText(value: string): string {
-  return value.replace(/[^\x20-\x7e]/g, "?");
+function toPdfAsciiText(value?: string | null): string {
+  return String(value ?? "").replace(/[^\x20-\x7e]/g, "?");
 }
 
 function escapePdfLiteralText(value: string): string {
-  return value.replace(/\\/g, "\\\\").replace(/\(/g, "\\(").replace(/\)/g, "\\)");
+  return value
+    .replace(/\\/g, "\\\\")
+    .replace(/\(/g, "\\(")
+    .replace(/\)/g, "\\)");
 }
 
 function formatMoneyForPdf(amount: MoneyAmount): string {
@@ -615,8 +618,8 @@ function buildMinimalPdf(lines: string[]): Buffer {
     offset += Buffer.byteLength(objectBody, "latin1");
   }
 
-  const xrefOffset = offset;
   let xref = `xref\n0 ${totalObjects + 1}\n0000000000 65535 f \n`;
+  const xrefOffset = offset;
   for (let id = 1; id <= totalObjects; id += 1) {
     xref += `${String(offsets[id]).padStart(10, "0")} 00000 n \n`;
   }
@@ -657,6 +660,34 @@ function buildTenantInvoicePdfRows(input: {
     ),
     "----------------------------------------------------------------",
     `Total (${input.lines.length} line${input.lines.length === 1 ? "" : "s"}): ${formatMoneyForPdf(input.amount)}`,
+  ];
+}
+
+function buildDriverStatementPdfRows(
+  statement: DriverStatementRecord,
+): string[] {
+  return [
+    `Driver Statement ${statement.statementId}`,
+    `Driver ID: ${statement.driverId}`,
+    `Period: ${statement.periodMonth}`,
+    `Receipt No: ${statement.receiptNo}`,
+    `Payout Status: ${statement.payoutStatus}`,
+    `Fee Plan Version: ${statement.feePlanVersion}`,
+    `Generated At: ${statement.createdAt}`,
+    "",
+    `Gross Earning: ${formatMoneyForPdf(statement.grossEarning)}`,
+    `Service Fee: ${formatMoneyForPdf(statement.serviceFee)}`,
+    `Subsidy: ${formatMoneyForPdf(statement.subsidy)}`,
+    `Net Amount: ${formatMoneyForPdf(statement.netAmount)}`,
+    "",
+    "Order ID | Channel | Net Amount | Reimbursement Required",
+    "----------------------------------------------------------------",
+    ...statement.lines.map(
+      (line) =>
+        `${line.orderId} | ${toPdfAsciiText(line.channelKey ?? "-")} | ${formatMoneyForPdf(line.netAmount)} | ${line.reimbursementRequired ? "yes" : "no"}`,
+    ),
+    "----------------------------------------------------------------",
+    `Total Lines: ${statement.lines.length}`,
   ];
 }
 
@@ -1456,7 +1487,8 @@ export class BillingSettlementService implements OnModuleInit {
     return [
       {
         action: "download_artifact",
-        enabled: Boolean(invoice.artifactUrl) && !artifactExpired && !isUnfinalised,
+        enabled:
+          Boolean(invoice.artifactUrl) && !artifactExpired && !isUnfinalised,
         riskLevel: "low",
         ...(isUnfinalised
           ? { disabledReasonCode: "invoice_not_finalized" }
@@ -2031,6 +2063,26 @@ export class BillingSettlementService implements OnModuleInit {
         updatedAt: now,
       };
 
+      const artifactRecord = this.documentArtifactStore.put({
+        kind: "report",
+        subjectId: statementId,
+        mimeType: "application/pdf",
+        bytes: buildMinimalPdf(buildDriverStatementPdfRows(statement)),
+      });
+      const artifactDownloadMetadata = createControlledDownloadMetadata({
+        kind: "report",
+        subjectId: statementId,
+        manifestHash: artifactRecord.sha256,
+        createdAt: now,
+        host: this.downloadHost,
+        keyId: this.downloadSigningKeyId,
+        signingSecret: this.downloadSigningSecret,
+        ttlMinutes: this.downloadExpiryMinutes,
+        signatureVersion: this.downloadSignatureVersion,
+      });
+      statement.artifactUrl = artifactDownloadMetadata.downloadUrl;
+      statement.artifactDownloadMetadata = artifactDownloadMetadata;
+
       generatedStatements.push(statement);
       this.auditNotificationService.recordNotification({
         tenantId: null,
@@ -2131,16 +2183,76 @@ export class BillingSettlementService implements OnModuleInit {
     };
   }
 
-  listDriverStatements(periodMonth?: string) {
+  private ensureDriverStatementArtifact(
+    statement: DriverStatementRecord,
+  ): DriverStatementRecord {
+    const stored = this.documentArtifactStore.get(
+      "report",
+      statement.statementId,
+    );
+    const materialised =
+      Boolean(statement.artifactDownloadMetadata) &&
+      stored?.record.sha256 ===
+        statement.artifactDownloadMetadata?.manifestHash;
+    const expired = this.isInvoiceArtifactExpired(statement.artifactUrl ?? "");
+
+    if (materialised && !expired) {
+      return statement;
+    }
+
+    const record = materialised
+      ? stored!.record
+      : this.documentArtifactStore.put({
+          kind: "report",
+          subjectId: statement.statementId,
+          mimeType: "application/pdf",
+          bytes: buildMinimalPdf(buildDriverStatementPdfRows(statement)),
+        });
+
+    const now = new Date().toISOString();
+    const artifactDownloadMetadata = createControlledDownloadMetadata({
+      kind: "report",
+      subjectId: statement.statementId,
+      manifestHash: record.sha256,
+      createdAt: now,
+      host: this.downloadHost,
+      keyId: this.downloadSigningKeyId,
+      signingSecret: this.downloadSigningSecret,
+      ttlMinutes: this.downloadExpiryMinutes,
+      signatureVersion: this.downloadSignatureVersion,
+    });
+
+    const refreshed: DriverStatementRecord = {
+      ...statement,
+      artifactUrl: artifactDownloadMetadata.downloadUrl,
+      artifactDownloadMetadata,
+    };
+
+    this.driverStatements = this.driverStatements.map((candidate) =>
+      candidate.statementId === refreshed.statementId ? refreshed : candidate,
+    );
+    this.persistChanges(
+      { driverStatements: [this.cloneStatement(refreshed)] },
+      "reissue_driver_statement_artifact",
+    );
+
+    return refreshed;
+  }
+
+  listDriverStatements(periodMonth?: string, driverId?: string) {
     return this.driverStatements
       .filter(
         (statement) =>
-          !periodMonth || statement.periodMonth.trim() === periodMonth.trim(),
+          (!periodMonth ||
+            statement.periodMonth.trim() === periodMonth.trim()) &&
+          (!driverId || statement.driverId.trim() === driverId.trim()),
       )
-      .map((statement) => this.cloneStatement(statement));
+      .map((statement) =>
+        this.cloneStatement(this.ensureDriverStatementArtifact(statement)),
+      );
   }
 
-  getDriverStatement(statementId: string) {
+  getDriverStatement(statementId: string, requestingDriverId?: string) {
     const statement = this.driverStatements.find(
       (candidate) => candidate.statementId === statementId,
     );
@@ -2154,7 +2266,22 @@ export class BillingSettlementService implements OnModuleInit {
         },
       );
     }
-    return this.cloneStatement(statement);
+    if (
+      requestingDriverId &&
+      statement.driverId.trim() !== requestingDriverId.trim()
+    ) {
+      throw new ApiRequestError(
+        HttpStatus.FORBIDDEN,
+        "DRIVER_IDENTITY_MISMATCH",
+        "Driver cannot access another driver's statement.",
+        {
+          statementId,
+          requestedDriverId: statement.driverId,
+          actorDriverId: requestingDriverId,
+        },
+      );
+    }
+    return this.cloneStatement(this.ensureDriverStatementArtifact(statement));
   }
 
   async listSettlementTripsForPeriodMonth(
@@ -2734,7 +2861,11 @@ export class BillingSettlementService implements OnModuleInit {
         HttpStatus.FORBIDDEN,
         "REMITTANCE_PROOF_BATCH_OWNERSHIP_VIOLATION",
         "A driver may only upload a remittance proof against their own reimbursement batch.",
-        { batchId: batch.batchId, callerDriverId, batchDriverId: batch.driverId },
+        {
+          batchId: batch.batchId,
+          callerDriverId,
+          batchDriverId: batch.driverId,
+        },
       );
     }
 
@@ -3895,6 +4026,9 @@ export class BillingSettlementService implements OnModuleInit {
       serviceFee: { ...statement.serviceFee },
       subsidy: { ...statement.subsidy },
       netAmount: { ...statement.netAmount },
+      artifactDownloadMetadata: statement.artifactDownloadMetadata
+        ? { ...statement.artifactDownloadMetadata }
+        : null,
       lines: statement.lines.map((line) => ({
         ...line,
         grossEarning: { ...line.grossEarning },

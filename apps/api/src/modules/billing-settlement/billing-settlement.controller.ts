@@ -47,6 +47,8 @@ import {
   CurrentIdentity,
   RequireRealms,
   RequireScopes,
+  isDriverIdentityMatching,
+  normalizeDriverId,
   type BootstrapRequestIdentity,
 } from "../../common/auth";
 import {
@@ -318,6 +320,8 @@ export class BillingSettlementController {
   }
 
   @Post("driver-statements/generate")
+  @RequireRealms("platform", "ops")
+  @RequireScopes("billing:write")
   async generateDriverStatements(
     @Body() command: GenerateDriverStatementCommand,
     @Headers("idempotency-key") idempotencyKey?: string,
@@ -347,24 +351,70 @@ export class BillingSettlementController {
   }
 
   @Get("driver-statements")
+  @RequireRealms("platform", "ops", "driver")
   listDriverStatements(
+    @CurrentIdentity() identity: BootstrapRequestIdentity | null = null,
     @Query("period") period?: string,
     @Query("periodMonth") periodMonth?: string,
+    @Query("driverId") driverId?: string,
     @Headers("x-request-id") requestId?: string,
   ) {
+    let effectiveDriverId = driverId?.trim() || undefined;
+    if (identity?.realm === "driver" || identity?.actorType === "driver_user") {
+      const actorDriverId = normalizeDriverId(identity.actorId);
+      if (!actorDriverId) {
+        throw new ApiRequestError(
+          HttpStatus.UNAUTHORIZED,
+          "DRIVER_IDENTITY_REQUIRED",
+          "Driver identity is required.",
+        );
+      }
+      if (
+        effectiveDriverId &&
+        !isDriverIdentityMatching(actorDriverId, effectiveDriverId)
+      ) {
+        throw new ApiRequestError(
+          HttpStatus.FORBIDDEN,
+          "DRIVER_IDENTITY_MISMATCH",
+          "Driver identity may only view its own statements.",
+          { actorId: identity.actorId, requestedDriverId: effectiveDriverId },
+        );
+      }
+      effectiveDriverId = actorDriverId;
+    }
+
     const items = this.billingSettlementService.listDriverStatements(
       periodMonth ?? period,
+      effectiveDriverId,
     );
     return toApiSuccessEnvelope(toApiListData(items), requestId);
   }
 
   @Get("driver-statements/:statementId")
+  @RequireRealms("platform", "ops", "driver")
   getDriverStatement(
     @Param("statementId") statementId: string,
+    @CurrentIdentity() identity: BootstrapRequestIdentity | null = null,
     @Headers("x-request-id") requestId?: string,
   ) {
+    let requestingDriverId: string | undefined;
+    if (identity?.realm === "driver" || identity?.actorType === "driver_user") {
+      const actorDriverId = normalizeDriverId(identity.actorId);
+      if (!actorDriverId) {
+        throw new ApiRequestError(
+          HttpStatus.UNAUTHORIZED,
+          "DRIVER_IDENTITY_REQUIRED",
+          "Driver identity is required.",
+        );
+      }
+      requestingDriverId = actorDriverId;
+    }
+
     return toApiSuccessEnvelope(
-      this.billingSettlementService.getDriverStatement(statementId),
+      this.billingSettlementService.getDriverStatement(
+        statementId,
+        requestingDriverId,
+      ),
       requestId,
     );
   }
@@ -674,10 +724,11 @@ export class BillingSettlementController {
       required: true,
       payload: { contentType, contentBase64: body?.contentBase64 ?? "" },
       execute: async () => {
-        const data = await this.billingSettlementService.stageRemittanceProofContent(
-          bytes,
-          contentType,
-        );
+        const data =
+          await this.billingSettlementService.stageRemittanceProofContent(
+            bytes,
+            contentType,
+          );
         return {
           data,
           statusCode: 200,
@@ -728,9 +779,8 @@ export class BillingSettlementController {
     @Param("proofId") proofId: string,
     @Headers("x-request-id") requestId?: string,
   ) {
-    const data = await this.billingSettlementService.getRemittanceProof(
-      proofId,
-    );
+    const data =
+      await this.billingSettlementService.getRemittanceProof(proofId);
     return toApiSuccessEnvelope(data, requestId);
   }
 
