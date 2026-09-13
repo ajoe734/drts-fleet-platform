@@ -2,7 +2,15 @@ import { createHmac } from "node:crypto";
 import { EventEmitter } from "node:events";
 import http from "node:http";
 import { type AddressInfo } from "node:net";
-import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
+import {
+  afterAll,
+  afterEach,
+  beforeAll,
+  describe,
+  expect,
+  it,
+  vi,
+} from "vitest";
 
 import { OpsDispatchEventsService } from "../../../../apps/api/src/common/ops-dispatch-events.service";
 import { AuditNotificationService } from "../../../../apps/api/src/modules/audit-notification/audit-notification.service";
@@ -24,10 +32,7 @@ import type {
   TenantPartnerState,
 } from "../../../../apps/api/src/modules/tenant-partner/tenant-partner.repository";
 import { TenantPartnerService } from "../../../../apps/api/src/modules/tenant-partner/tenant-partner.service";
-import {
-  WebhookDispatchService,
-  type WebhookFetch,
-} from "../../../../apps/api/src/modules/tenant-partner/webhook-dispatch.service";
+import { WebhookDispatchService } from "../../../../apps/api/src/modules/tenant-partner/webhook-dispatch.service";
 
 interface ControlledReceiverRequest {
   method: string;
@@ -127,7 +132,13 @@ function verifyHmacSignature(
 ) {
   const match = /^v=(\d+);t=([^;]+);sig=([0-9a-f]+)$/.exec(headerValue);
   if (!match) {
-    return { valid: false, version: 0, timestamp: "", signature: "", expectedSig: "" };
+    return {
+      valid: false,
+      version: 0,
+      timestamp: "",
+      signature: "",
+      expectedSig: "",
+    };
   }
   const [, vStr, timestamp, signature] = match;
   const version = parseInt(vStr!, 10);
@@ -208,9 +219,7 @@ function createInMemoryWebhookRepository() {
         webhookEndpoints = [...byId.values()];
       }
       if (changes.webhookDeliveries?.length) {
-        const byId = new Map(
-          webhookDeliveries.map((d) => [d.deliveryId, d]),
-        );
+        const byId = new Map(webhookDeliveries.map((d) => [d.deliveryId, d]));
         for (const delivery of changes.webhookDeliveries) {
           byId.set(delivery.deliveryId, delivery);
         }
@@ -285,8 +294,12 @@ describe("SR-QA-WEBHOOK-001: Verification Suite", () => {
       const record = keys.find((k) => k.apiKeyId === issued.apiKey.apiKeyId)!;
       expect(record.keyPrefix).toBe(issued.plaintextKey.slice(0, 12));
       expect(record.maskedSuffix).toBe(`****${issued.plaintextKey.slice(-4)}`);
-      expect((record as unknown as Record<string, unknown>).plaintextKey).toBeUndefined();
-      expect((record as unknown as Record<string, unknown>).keyHash).toBeUndefined();
+      expect(
+        (record as unknown as Record<string, unknown>).plaintextKey,
+      ).toBeUndefined();
+      expect(
+        (record as unknown as Record<string, unknown>).keyHash,
+      ).toBeUndefined();
     });
 
     it("C111-3 (Normal & Negative): Enforces default 60-day expiry and rejects expiry exceeding 90 days", async () => {
@@ -326,10 +339,14 @@ describe("SR-QA-WEBHOOK-001: Verification Suite", () => {
 
       // Rotate after 2 days with a 7-day overlap window
       vi.setSystemTime(new Date("2026-08-03T00:00:00.000Z"));
-      const rotated = await service.rotateApiKey("tenant-demo-001", first.apiKey.apiKeyId, {
-        keyName: "Rotated Primary Key v2",
-        overlapDays: 7,
-      });
+      const rotated = await service.rotateApiKey(
+        "tenant-demo-001",
+        first.apiKey.apiKeyId,
+        {
+          keyName: "Rotated Primary Key v2",
+          overlapDays: 7,
+        },
+      );
 
       // New key is active
       expect(rotated.apiKey.status).toBe("active");
@@ -362,7 +379,9 @@ describe("SR-QA-WEBHOOK-001: Verification Suite", () => {
 
       // Reconcile and inspect
       const keys = service.listApiKeys("tenant-demo-001");
-      const reconciledOldKey = keys.find((k) => k.apiKeyId === original.apiKey.apiKeyId)!;
+      const reconciledOldKey = keys.find(
+        (k) => k.apiKeyId === original.apiKey.apiKeyId,
+      )!;
       expect(reconciledOldKey.status).toBe("auto_revoked");
       expect(reconciledOldKey.revokeReason).toBe("rotation_overlap_elapsed");
     });
@@ -377,10 +396,16 @@ describe("SR-QA-WEBHOOK-001: Verification Suite", () => {
       });
 
       // Immediate revocation
-      service.revokeApiKey("tenant-demo-001", issued.apiKey.apiKeyId, "req-revoke-001");
+      service.revokeApiKey(
+        "tenant-demo-001",
+        issued.apiKey.apiKeyId,
+        "req-revoke-001",
+      );
 
       const keys = service.listApiKeys("tenant-demo-001");
-      const revokedKey = keys.find((k) => k.apiKeyId === issued.apiKey.apiKeyId)!;
+      const revokedKey = keys.find(
+        (k) => k.apiKeyId === issued.apiKey.apiKeyId,
+      )!;
       expect(revokedKey.status).toBe("revoked");
       expect(revokedKey.revokedAt).not.toBeNull();
       expect(revokedKey.revokeReason).toBe("manual_revoke");
@@ -441,12 +466,18 @@ describe("SR-QA-WEBHOOK-001: Verification Suite", () => {
       expect(req.method).toBe("POST");
       expect(req.headers["x-drts-event-type"]).toBe("tenant.webhook.test");
       expect(req.headers["x-drts-tenant-id"]).toBe("tenant-demo-001");
-      expect(req.headers["x-drts-webhook-delivery-id"]).toBe(testResult.deliveryId);
+      expect(req.headers["x-drts-webhook-delivery-id"]).toBe(
+        testResult.deliveryId,
+      );
 
       // Check HMAC signature calculation
       const sigHeader = req.headers["x-drts-webhook-signature"] as string;
       expect(sigHeader).toBeDefined();
-      const sigVerification = verifyHmacSignature(sigHeader, req.rawBody, sharedSecret);
+      const sigVerification = verifyHmacSignature(
+        sigHeader,
+        req.rawBody,
+        sharedSecret,
+      );
       expect(sigVerification.valid).toBe(true);
       expect(sigVerification.version).toBe(1);
 
@@ -486,7 +517,10 @@ describe("SR-QA-WEBHOOK-001: Verification Suite", () => {
       expect(result.nextAttemptAt).not.toBeNull();
 
       // Verify delivery record in service is queued
-      const deliveries = service.listWebhookDeliveriesByWebhook("tenant-demo-001", created.webhookId);
+      const deliveries = service.listWebhookDeliveriesByWebhook(
+        "tenant-demo-001",
+        created.webhookId,
+      );
       expect(deliveries.length).toBeGreaterThanOrEqual(1);
       const delivery = deliveries[0]!;
       expect(delivery.status).toBe("queued");
@@ -499,85 +533,83 @@ describe("SR-QA-WEBHOOK-001: Verification Suite", () => {
       expect(delaySec).toBe(30);
     });
 
-    it(
-      "C112-2b (Normal): A queued 503 delivery automatically retries after its real scheduled backoff and recovers to delivered, promoting the endpoint back to active",
-      async () => {
-        // Dedicated receiver: this test spans the real ~30s backoff window, and
-        // a sibling test's own dangling scheduleWebhookRetry timer (fired
-        // against the shared suite-level receiver) could otherwise land here
-        // and pollute the request count.
-        const dedicatedReceiver = await createControlledReceiver();
-        try {
-          dedicatedReceiver.setHandler((_req, res) => {
-            res.writeHead(503, { "content-type": "application/json" });
-            res.end(JSON.stringify({ error: "Service Temporarily Unavailable" }));
-          });
+    it("C112-2b (Normal): A queued 503 delivery automatically retries after its real scheduled backoff and recovers to delivered, promoting the endpoint back to active", async () => {
+      // Dedicated receiver: this test spans the real ~30s backoff window, and
+      // a sibling test's own dangling scheduleWebhookRetry timer (fired
+      // against the shared suite-level receiver) could otherwise land here
+      // and pollute the request count.
+      const dedicatedReceiver = await createControlledReceiver();
+      try {
+        dedicatedReceiver.setHandler((_req, res) => {
+          res.writeHead(503, { "content-type": "application/json" });
+          res.end(JSON.stringify({ error: "Service Temporarily Unavailable" }));
+        });
 
-          const auditNotificationService = new AuditNotificationService();
-          const webhookDispatchService = new WebhookDispatchService();
-          const service = new TenantPartnerService(
-            auditNotificationService,
-            undefined,
-            webhookDispatchService,
-            [],
-          );
+        const auditNotificationService = new AuditNotificationService();
+        const webhookDispatchService = new WebhookDispatchService();
+        const service = new TenantPartnerService(
+          auditNotificationService,
+          undefined,
+          webhookDispatchService,
+          [],
+        );
 
-          const created = service.createWebhookEndpoint("tenant-demo-001", {
-            url: dedicatedReceiver.url,
-            secret: "whsec_retry_recovery_001",
-            events: ["tenant.webhook.test"],
-          });
+        const created = service.createWebhookEndpoint("tenant-demo-001", {
+          url: dedicatedReceiver.url,
+          secret: "whsec_retry_recovery_001",
+          events: ["tenant.webhook.test"],
+        });
 
-          const first = await service.sendTestWebhook("tenant-demo-001", {
-            webhookId: created.webhookId,
-          });
-          expect(first.httpStatus).toBe(503);
-          expect(first.nextAttemptAt).not.toBeNull();
+        const first = await service.sendTestWebhook("tenant-demo-001", {
+          webhookId: created.webhookId,
+        });
+        expect(first.httpStatus).toBe(503);
+        expect(first.nextAttemptAt).not.toBeNull();
 
-          const [queued] = service.listWebhookDeliveriesByWebhook(
+        const [queued] = service.listWebhookDeliveriesByWebhook(
+          "tenant-demo-001",
+          created.webhookId,
+        );
+        expect(queued!.status).toBe("queued");
+        const deliveryId = queued!.deliveryId;
+
+        // Recovery: receiver comes back healthy well before the scheduled retry fires.
+        dedicatedReceiver.requests.length = 0;
+        dedicatedReceiver.setHandler((_req, res) => {
+          res.writeHead(200, { "content-type": "application/json" });
+          res.end(JSON.stringify({ ok: true }));
+        });
+
+        // No manual re-dispatch call here: this waits out the service's own
+        // internally-scheduled setTimeout (default 30s exponential backoff,
+        // attempt 1) so the recovery is exercised through the real retry
+        // pathway, not simulated by calling an internal method directly.
+        await waitFor(() => {
+          const [delivery] = service.listWebhookDeliveriesByWebhook(
             "tenant-demo-001",
             created.webhookId,
           );
-          expect(queued!.status).toBe("queued");
-          const deliveryId = queued!.deliveryId;
-
-          // Recovery: receiver comes back healthy well before the scheduled retry fires.
-          dedicatedReceiver.requests.length = 0;
-          dedicatedReceiver.setHandler((_req, res) => {
-            res.writeHead(200, { "content-type": "application/json" });
-            res.end(JSON.stringify({ ok: true }));
-          });
-
-          // No manual re-dispatch call here: this waits out the service's own
-          // internally-scheduled setTimeout (default 30s exponential backoff,
-          // attempt 1) so the recovery is exercised through the real retry
-          // pathway, not simulated by calling an internal method directly.
-          await waitFor(() => {
-            const [delivery] = service.listWebhookDeliveriesByWebhook(
-              "tenant-demo-001",
-              created.webhookId,
-            );
-            return (
-              delivery?.deliveryId === deliveryId && delivery.status === "delivered"
-            );
-          }, 33_000);
-
-          const [recovered] = service.listWebhookDeliveriesByWebhook(
-            "tenant-demo-001",
-            created.webhookId,
+          return (
+            delivery?.deliveryId === deliveryId &&
+            delivery.status === "delivered"
           );
-          expect(recovered!.status).toBe("delivered");
-          expect(recovered!.httpStatus).toBe(200);
-          expect(dedicatedReceiver.requests.length).toBe(1);
+        }, 33_000);
 
-          const endpointAfterRecovery = service.listWebhookEndpoints("tenant-demo-001")[0]!;
-          expect(endpointAfterRecovery.status).toBe("active");
-        } finally {
-          await dedicatedReceiver.close();
-        }
-      },
-      35_000,
-    );
+        const [recovered] = service.listWebhookDeliveriesByWebhook(
+          "tenant-demo-001",
+          created.webhookId,
+        );
+        expect(recovered!.status).toBe("delivered");
+        expect(recovered!.httpStatus).toBe(200);
+        expect(dedicatedReceiver.requests.length).toBe(1);
+
+        const endpointAfterRecovery =
+          service.listWebhookEndpoints("tenant-demo-001")[0]!;
+        expect(endpointAfterRecovery.status).toBe("active");
+      } finally {
+        await dedicatedReceiver.close();
+      }
+    }, 35_000);
 
     it("C112-3 (Negative): A real network timeout (AbortController firing after the response never arrives) is caught as a queued retry, not a thrown error", async () => {
       const timeoutMs = 150;
@@ -597,18 +629,16 @@ describe("SR-QA-WEBHOOK-001: Verification Suite", () => {
         safetyNet.unref();
       });
 
-      const timeoutFetch: WebhookFetch = async (input, init) => {
-        const controller = new AbortController();
-        const timer = setTimeout(() => controller.abort(), timeoutMs);
-        try {
-          return await fetch(input, { ...init, signal: controller.signal });
-        } finally {
-          clearTimeout(timer);
-        }
-      };
-
       const auditNotificationService = new AuditNotificationService();
-      const webhookDispatchService = new WebhookDispatchService(timeoutFetch);
+      // Transport-deadline contract verification: instantiate WebhookDispatchService
+      // with standard globalThis.fetch (no custom timeoutFetch wrapper) and pass
+      // the contract timeout override (150ms). WebhookDispatchService.dispatchAttempt()
+      // itself must enforce the deadline against the real stalled local HTTP receiver
+      // via internal AbortController and classify the resulting timeout into queued retry.
+      const webhookDispatchService = new WebhookDispatchService(
+        undefined,
+        timeoutMs,
+      );
       const service = new TenantPartnerService(
         auditNotificationService,
         undefined,
@@ -636,7 +666,10 @@ describe("SR-QA-WEBHOOK-001: Verification Suite", () => {
       expect(result.attempt).toBe(1);
       expect(result.nextAttemptAt).not.toBeNull();
 
-      const deliveries = service.listWebhookDeliveriesByWebhook("tenant-demo-001", created.webhookId);
+      const deliveries = service.listWebhookDeliveriesByWebhook(
+        "tenant-demo-001",
+        created.webhookId,
+      );
       expect(deliveries[0]!.status).toBe("queued");
     });
 
@@ -644,7 +677,9 @@ describe("SR-QA-WEBHOOK-001: Verification Suite", () => {
       receiver.setHandler((_req, res) => {
         // 400 Bad Request is non-retryable in retryPolicy.retryableStatusCodes ([408, 429, 500, 502, 503, 504])
         res.writeHead(400, { "content-type": "application/json" });
-        res.end(JSON.stringify({ error: "Permanent Non-Retryable Client Error" }));
+        res.end(
+          JSON.stringify({ error: "Permanent Non-Retryable Client Error" }),
+        );
       });
 
       const auditNotificationService = new AuditNotificationService();
@@ -667,9 +702,12 @@ describe("SR-QA-WEBHOOK-001: Verification Suite", () => {
       });
 
       // Verify endpoint is auto-disabled
-      const updatedEndpoint = service.listWebhookEndpoints("tenant-demo-001")[0]!;
+      const updatedEndpoint =
+        service.listWebhookEndpoints("tenant-demo-001")[0]!;
       expect(updatedEndpoint.status).toBe("disabled");
-      expect(updatedEndpoint.runtimeMetadata.disableReason).toBe("delivery_failed");
+      expect(updatedEndpoint.runtimeMetadata.disableReason).toBe(
+        "delivery_failed",
+      );
       expect(updatedEndpoint.runtimeMetadata.disabledAt).not.toBeNull();
 
       // Verify ops notice notification recorded in audit notification service
@@ -677,7 +715,9 @@ describe("SR-QA-WEBHOOK-001: Verification Suite", () => {
         .listNotifications()
         .filter((n) => n.tenantId === "tenant-demo-001");
       const disabledNotice = notices.find((n) =>
-        n.title.includes("Tenant webhook disabled after repeated delivery failures"),
+        n.title.includes(
+          "Tenant webhook disabled after repeated delivery failures",
+        ),
       );
       expect(disabledNotice).toBeDefined();
     });
@@ -792,7 +832,8 @@ describe("SR-QA-WEBHOOK-001: Verification Suite", () => {
       });
 
       // Verify version 1 via listWebhookEndpoints
-      const initialEndpoint = service.listWebhookEndpoints("tenant-demo-001")[0]!;
+      const initialEndpoint =
+        service.listWebhookEndpoints("tenant-demo-001")[0]!;
       expect(initialEndpoint.secretVersion).toBe(1);
 
       // Validate v1
@@ -818,11 +859,14 @@ describe("SR-QA-WEBHOOK-001: Verification Suite", () => {
       });
 
       // Check endpoint reverted to test_pending and secret history has no plaintext
-      const endpointAfterRotation = service.listWebhookEndpoints("tenant-demo-001")[0]!;
+      const endpointAfterRotation =
+        service.listWebhookEndpoints("tenant-demo-001")[0]!;
       expect(endpointAfterRotation.status).toBe("test_pending");
       expect(endpointAfterRotation.secretVersion).toBe(2);
       for (const hist of endpointAfterRotation.secretHistory) {
-        expect((hist as unknown as Record<string, unknown>).secretValue).toBeUndefined();
+        expect(
+          (hist as unknown as Record<string, unknown>).secretValue,
+        ).toBeUndefined();
       }
 
       // Validate v2
@@ -865,7 +909,9 @@ describe("SR-QA-WEBHOOK-001: Verification Suite", () => {
       });
 
       // Activate endpoint first
-      await service.sendTestWebhook("tenant-demo-001", { webhookId: endpoint.webhookId });
+      await service.sendTestWebhook("tenant-demo-001", {
+        webhookId: endpoint.webhookId,
+      });
       receiver.requests.length = 0;
 
       // Publish with an outboxKey
@@ -910,7 +956,9 @@ describe("SR-QA-WEBHOOK-001: Verification Suite", () => {
       });
 
       // Activate the endpoint with a real test dispatch, then clear the log.
-      await serviceA.sendTestWebhook("tenant-demo-001", { webhookId: endpoint.webhookId });
+      await serviceA.sendTestWebhook("tenant-demo-001", {
+        webhookId: endpoint.webhookId,
+      });
       receiver.requests.length = 0;
 
       const outboxKey = "outbox-restart-dedup-key-01";
@@ -937,7 +985,8 @@ describe("SR-QA-WEBHOOK-001: Verification Suite", () => {
       );
       await serviceB.onModuleInit();
 
-      const reloadedEndpoint = serviceB.listWebhookEndpoints("tenant-demo-001")[0]!;
+      const reloadedEndpoint =
+        serviceB.listWebhookEndpoints("tenant-demo-001")[0]!;
       expect(reloadedEndpoint.webhookId).toBe(endpoint.webhookId);
       expect(reloadedEndpoint.status).toBe("active");
 
@@ -954,6 +1003,91 @@ describe("SR-QA-WEBHOOK-001: Verification Suite", () => {
       // re-dispatched: the receiver still shows exactly one request.
       expect(receiver.requests.length).toBe(1);
     });
+
+    it("C112-10 (Normal): A pending queued webhook delivery attempt survives simulated process restart and is resumed by onModuleInit()", async () => {
+      const repository = createInMemoryWebhookRepository();
+
+      const serviceA = new TenantPartnerService(
+        new AuditNotificationService(),
+        repository as never,
+        new WebhookDispatchService(),
+        [],
+      );
+      await serviceA.onModuleInit();
+
+      const endpoint = serviceA.createWebhookEndpoint("tenant-demo-001", {
+        url: receiver.url,
+        secret: "whsec_restart_pending_001",
+        events: ["dispatch.assigned"],
+      });
+
+      // Activate endpoint with test webhook
+      await serviceA.sendTestWebhook("tenant-demo-001", {
+        webhookId: endpoint.webhookId,
+      });
+      receiver.requests.length = 0;
+
+      // Set receiver to 503 so publishWebhookEvent enqueues a retry
+      receiver.setHandler((_req, res) => {
+        res.writeHead(503, { "content-type": "application/json" });
+        res.end(JSON.stringify({ error: "Temporary outage" }));
+      });
+
+      const published = await serviceA.publishWebhookEvent("tenant-demo-001", {
+        eventType: "dispatch.assigned",
+        data: { orderId: "ord-restart-pending-01", status: "assigned" },
+        outboxKey: "outbox-restart-pending-key-01",
+      });
+      expect(published.length).toBe(1);
+      expect(published[0]!.status).toBe("queued");
+      expect(published[0]!.attempt).toBe(1);
+      expect(published[0]!.nextAttemptAt).not.toBeNull();
+      expect(receiver.requests.length).toBe(1);
+
+      // Simulate restart while attempt was pending:
+      // Adjust nextAttemptAt in repository to simulate the process being down past the retry time
+      const persistedState = await repository.loadState();
+      const delivery = persistedState.webhookDeliveries.find(
+        (d) => d.deliveryId === published[0]!.deliveryId,
+      )!;
+      delivery.nextAttemptAt = new Date(Date.now() - 100).toISOString();
+      await repository.persistChanges({
+        webhookDeliveries: [delivery],
+      });
+
+      // Reset receiver to return 200 OK for the resumed attempt
+      receiver.requests.length = 0;
+      receiver.setHandler((_req, res) => {
+        res.writeHead(200, { "content-type": "application/json" });
+        res.end(JSON.stringify({ ok: true, recovered: true }));
+      });
+
+      // Boot serviceB with the persisted repository
+      const serviceB = new TenantPartnerService(
+        new AuditNotificationService(),
+        repository as never,
+        new WebhookDispatchService(),
+        [],
+      );
+      // onModuleInit() detects the overdue queued attempt and schedules immediate retry (delayMs = 0)
+      await serviceB.onModuleInit();
+
+      // Allow event loop to process the retry
+      await new Promise((resolve) => setTimeout(resolve, 50));
+
+      expect(receiver.requests.length).toBe(1);
+      const reloadedDeliveries = serviceB.listWebhookDeliveriesByWebhook(
+        "tenant-demo-001",
+        endpoint.webhookId,
+      );
+      const resumed = reloadedDeliveries.find(
+        (d) => d.deliveryId === published[0]!.deliveryId,
+      )!;
+      expect(resumed.status).toBe("delivered");
+      expect(resumed.attempt).toBe(2);
+      expect(resumed.httpStatus).toBe(200);
+      expect(resumed.nextAttemptAt).toBeNull();
+    });
   });
 
   // =========================================================================
@@ -962,9 +1096,12 @@ describe("SR-QA-WEBHOOK-001: Verification Suite", () => {
   describe("C113: ERP & Bank Ledger Settlement Matrix (External Gate Verification)", () => {
     it("C113-1 (Normal): Retrieves settlement statement records and verifies financial data structure", async () => {
       const auditNotificationService = new AuditNotificationService();
-      const billingService = new BillingSettlementService(auditNotificationService);
+      const billingService = new BillingSettlementService(
+        auditNotificationService,
+      );
 
-      const statements = await billingService.listTenantSettlementStatements("tenant-demo-001");
+      const statements =
+        await billingService.listTenantSettlementStatements("tenant-demo-001");
       expect(statements.length).toBeGreaterThanOrEqual(1);
 
       const statement = statements[0]!;
@@ -973,15 +1110,22 @@ describe("SR-QA-WEBHOOK-001: Verification Suite", () => {
       expect(statement.periodStart).toBeDefined();
       expect(statement.periodEnd).toBeDefined();
       expect(statement.totals.fareTotal.amountMinor).toBeGreaterThanOrEqual(0);
-      expect(Date.parse(statement.periodStart)).toBeLessThanOrEqual(Date.parse(statement.periodEnd));
+      expect(Date.parse(statement.periodStart)).toBeLessThanOrEqual(
+        Date.parse(statement.periodEnd),
+      );
     });
 
     it("C113-2 (Negative): Querying invalid settlement statement period throws VALIDATION_ERROR", async () => {
       const auditNotificationService = new AuditNotificationService();
-      const billingService = new BillingSettlementService(auditNotificationService);
+      const billingService = new BillingSettlementService(
+        auditNotificationService,
+      );
 
       try {
-        await billingService.getTenantSettlementStatement("tenant-demo-001", "invalid-period");
+        await billingService.getTenantSettlementStatement(
+          "tenant-demo-001",
+          "invalid-period",
+        );
         expect.unreachable();
       } catch (err: any) {
         const code = err?.errorCode ?? err?.getResponse?.()?.error?.code;
@@ -994,12 +1138,15 @@ describe("SR-QA-WEBHOOK-001: Verification Suite", () => {
         externalGateId: "GATE-C113-ERP-SSO-BANK",
         bankingH2H: "Dedicated MPLS leased line / SWIFT MT940 statement sync",
         enterpriseSso: "SAML 2.0 / OIDC IdP federation with Azure AD / Okta",
-        simulatedEnvironment: "dev/demo in-memory read models and seeded bank statements",
+        simulatedEnvironment:
+          "dev/demo in-memory read models and seeded bank statements",
         status: "external_gate_pending_live_credentials",
       };
 
       expect(prerequisites.externalGateId).toBe("GATE-C113-ERP-SSO-BANK");
-      expect(prerequisites.status).toBe("external_gate_pending_live_credentials");
+      expect(prerequisites.status).toBe(
+        "external_gate_pending_live_credentials",
+      );
     });
   });
 
@@ -1044,8 +1191,14 @@ describe("SR-QA-WEBHOOK-001: Verification Suite", () => {
     it("C114-3 (External Gate Declaration): Documents Google Maps Platform API key and quota prerequisites", () => {
       const prerequisites = {
         externalGateId: "GATE-C114-GOOGLE-MAPS",
-        requiredServices: ["Geocoding API", "Directions API", "Distance Matrix API", "Maps JavaScript API"],
-        taiwanAddressQuota: "Requires production Google Cloud Billing account and restricted API key",
+        requiredServices: [
+          "Geocoding API",
+          "Directions API",
+          "Distance Matrix API",
+          "Maps JavaScript API",
+        ],
+        taiwanAddressQuota:
+          "Requires production Google Cloud Billing account and restricted API key",
         status: "external_gate_mock_verified",
       };
 
@@ -1061,8 +1214,12 @@ describe("SR-QA-WEBHOOK-001: Verification Suite", () => {
     function createMobilityAndCallServices() {
       const auditService = new AuditNotificationService();
       const callcenterService = new CallcenterService(auditService);
-      const sandboxWebhookAdapter = new SandboxWebhookAdapter(callcenterService);
-      const opsDispatchEventsService = new OpsDispatchEventsService(new EventEmitter() as never);
+      const sandboxWebhookAdapter = new SandboxWebhookAdapter(
+        callcenterService,
+      );
+      const opsDispatchEventsService = new OpsDispatchEventsService(
+        new EventEmitter() as never,
+      );
       const regulatoryRegistryService = new RegulatoryRegistryService(
         opsDispatchEventsService,
         auditService,
@@ -1091,7 +1248,10 @@ describe("SR-QA-WEBHOOK-001: Verification Suite", () => {
 
       sandboxWebhookAdapter.ingest(sandboxFixtures.callStarted, "req-start");
       sandboxWebhookAdapter.ingest(sandboxFixtures.callEnded, "req-end");
-      sandboxWebhookAdapter.ingest(sandboxFixtures.recordingPending, "req-recording-pending");
+      sandboxWebhookAdapter.ingest(
+        sandboxFixtures.recordingPending,
+        "req-recording-pending",
+      );
 
       const order = await ownedMobilityService.createCallCenterOrder({
         callId: sandboxFixtures.callStarted.provider_call_id,
@@ -1108,19 +1268,28 @@ describe("SR-QA-WEBHOOK-001: Verification Suite", () => {
       expect(order.complianceFlags).toContain("recording_pending");
 
       // Ingest recording.ready
-      sandboxWebhookAdapter.ingest(sandboxFixtures.recordingReady, "req-recording-ready");
+      sandboxWebhookAdapter.ingest(
+        sandboxFixtures.recordingReady,
+        "req-recording-ready",
+      );
 
       const readyOrder = ownedMobilityService.getOrder(order.orderId);
       expect(readyOrder.status).toBe("ready_for_dispatch");
-      expect(readyOrder.recordingId).toBe(sandboxFixtures.recordingReady.recording_id);
+      expect(readyOrder.recordingId).toBe(
+        sandboxFixtures.recordingReady.recording_id,
+      );
       expect(readyOrder.complianceFlags).toContain("recording_bound");
     });
 
     it("C115-2 (Negative): Ingesting recording.failed callback flags order as recording_missing", async () => {
-      const { ownedMobilityService, sandboxWebhookAdapter } = createMobilityAndCallServices();
+      const { ownedMobilityService, sandboxWebhookAdapter } =
+        createMobilityAndCallServices();
 
       sandboxWebhookAdapter.ingest(sandboxFixtures.callStarted, "req-start");
-      sandboxWebhookAdapter.ingest(sandboxFixtures.recordingPending, "req-pending");
+      sandboxWebhookAdapter.ingest(
+        sandboxFixtures.recordingPending,
+        "req-pending",
+      );
 
       const order = await ownedMobilityService.createCallCenterOrder({
         callId: sandboxFixtures.callStarted.provider_call_id,
@@ -1133,7 +1302,10 @@ describe("SR-QA-WEBHOOK-001: Verification Suite", () => {
         dropoff: { address: "台中市大安區興安路378號" },
       });
 
-      sandboxWebhookAdapter.ingest(sandboxFixtures.recordingFailed, "req-recording-failed");
+      sandboxWebhookAdapter.ingest(
+        sandboxFixtures.recordingFailed,
+        "req-recording-failed",
+      );
 
       const failedOrder = ownedMobilityService.getOrder(order.orderId);
       expect(failedOrder.status).toBe("recording_pending");
@@ -1144,13 +1316,17 @@ describe("SR-QA-WEBHOOK-001: Verification Suite", () => {
     it("C115-3 (Live Limitation Declaration): Documents live CTI telephony and Cloud Run persistent scheduler", () => {
       const liveLimitation = {
         limitationId: "LIMITATION-C115-CTI-CRON",
-        telephonyCarrier: "Requires physical SIP trunking / PBX hardware for carrier audio ingestion",
-        persistentTimer: "Cloud Run containers scale to zero; requires Cloud Scheduler / Cloud Tasks for durable cron",
+        telephonyCarrier:
+          "Requires physical SIP trunking / PBX hardware for carrier audio ingestion",
+        persistentTimer:
+          "Cloud Run containers scale to zero; requires Cloud Scheduler / Cloud Tasks for durable cron",
         status: "adapter_tested_live_infrastructure_deferred",
       };
 
       expect(liveLimitation.limitationId).toBe("LIMITATION-C115-CTI-CRON");
-      expect(liveLimitation.status).toBe("adapter_tested_live_infrastructure_deferred");
+      expect(liveLimitation.status).toBe(
+        "adapter_tested_live_infrastructure_deferred",
+      );
     });
   });
 });
