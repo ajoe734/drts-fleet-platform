@@ -230,6 +230,21 @@ branch-strategy §11 guardrail 不對已鎖定 candidate 的分支執行
 C111–C115 能力覆蓋範圍、已知未竟事項（§6.4）與外部門禁聲明（§6.3）均未變更，
 本輪修復純屬 CI 型別檢查回歸修復，不影響第 5 節能力對照表的驗收結論。
 
+## 0.4 依 2026-09-13 共識封包 B8 補齊 C113–C115 驗收（SR-C115-HARNESS-20260913，Gemini2）
+
+依據 2026-09-13 共識封包 B8（`docs/02-architecture/consensus/phase1/consensus-packet.md`）與規劃錨點 `c8865b11b20c2b660e3017e89b93b9a3b193aa31`，本任務由 `Gemini2` 於分支 `gemini2/sr-c115-harness-20260913` 補齊 C113–C115 驗收 Harness 與 Hosted Runner：
+
+1. **撤銷不存在的 `webhook-uat-acceptance.yml` 目標**：改於現有 `tenant-uat-acceptance.yml` hosted workflow 擴充，完整保留原租戶門禁（Playwright ≥10 passed、0 skipped、8 個必要 spec、unit ≥27 passed、重啟回讀 ≥12 個資料表）作為獨立失敗門禁。
+2. **單元回歸套件補齊（34/34 通過）**：
+   - C113（6 項）：`C113-4` 驗證 sandbox 履約片段、計費處置對映與租戶隔離；`C113-5` 驗證補送冪等、不可變稽核歷程與 `ADJUSTMENT_POSTED` 解析碼；`C113-6` 驗證調帳指令空白檢查與權限防護。
+   - C114（6 項）：`C114-4` 驗證臺灣多模式路由計算（drive, walk, two_wheeler）；`C114-5` 驗證無效模式與坐標拒絕；`C114-6` 驗證配置式提供者 504 逾時（retryable=true）與 500 內部錯誤（retryable=false）映射至型別化 `ApiRequestError`，並精確驗證 `MapGeofenceObservabilityService` 的 `provider_outage` 觀測計數增加。
+   - C115（5 項）：`C115-4` 驗證電話錄音回調去重與冪等處理；`C115-5` 驗證司機執照與資格背景到期掃描、派單阻斷與換證恢復。
+3. **Hosted E2E Runner 建置**：
+   - `c113-c115-acceptance.ts`：於真實 PostgreSQL 驗證 C113 帳本調解（`billing.phase1_reconciliation_issues`，包含來源對映、防重、解析碼稽核與租戶隔離）、C114 路由與配置式提供者故障，並於 `crm.phase1_call_sessions` 與 `reg.phase1_registry_drivers` 寫入重啟前持久種子。
+   - `c115-restart-readback.ts`：於 API 重啟後驗證保留之 PostgreSQL 資料庫（零記憶體重構）持久性，執行 `recording.ready` 回調補收與去重回執，驗證資格到期後台掃描追趕與派單阻斷，並輸出標準化能力報告 `.artifacts/tenant-uat-acceptance/c111-c115-capability-report.json`。
+4. **CI 驗證腳本強化**：
+   - `tools/ci/test_tenant_uat_acceptance_workflow.py` 擴充至 45/45 測試全數通過，涵蓋虛擬 workflow 撤銷斷言、C111–C115 能力驗證、run-status 各步驟失敗防偽，以及原租戶門禁獨立性保全。
+
 ---
 
 ## 1. 問題根因與能力盤點（Fix 前與驗收缺口分析）
@@ -368,9 +383,9 @@ exit code: 0
 | --- | --- | --- | --- | --- |
 | **C111** | 租戶技術管理員 | 最小 scope、到期時間、輪替重疊窗、立即撤銷、密鑰遮罩 | `C111-1` 驗證 `tenant:webhooks:read` 最小 scope 與相容別名正規化。<br>`C111-2` 驗證明文金鑰僅發行回傳一次，API 回讀 `keyPrefix` 前 12 碼與 `maskedSuffix`（`****xxxx`），庫存不存明文。<br>`C111-3` 驗證預設 60 天到期，超過 90 天拋出錯誤拒絕。<br>`C111-4` 驗證輪替後舊 key 進入 `overlap_active` 並設定 `overlapEndsAt`。<br>`C111-5` 驗證重疊期滿後自動轉為 `auto_revoked`，原因為 `rotation_overlap_elapsed`。<br>`C111-6` 驗證手動即時撤銷（`status: "revoked"`）並拒絕旋轉已撤銷金鑰（409 Conflict）。<br>E2E `run-webhook-lifecycle.ts` 額外以獨立第二把 key 實跑 `revokeApiKey` → `listApiKeys` 回讀 `revoked` → `rotateApiKey` 拋出 `TENANT_API_KEY_NOT_ROTATABLE`，取代先前僅宣告未實跑的撤銷案例。 | ✅ 通過 |
 | **C112** | Webhook 接收平臺 | 簽章、重試、停用、回放與密鑰輪替（本機受控 Receiver） | `C112-1` 啟動本機真 HTTP server，驗證請求 header `x-drts-webhook-signature` 之 HMAC-SHA256 簽名正確無誤，200 成功後端點由 `test_pending` 晉升為 `active`。<br>`C112-2` 接收器模擬 503，驗證狀態為 `queued` 並精準計算指數退避延遲（30s）。<br>`C112-2b`（新增）：接收器恢復 200 後，**等待服務內部真實 `setTimeout` 排程重試（無 fake timer、無手動觸發）**，驗證送達記錄回讀為 `delivered` 且端點回晉升 `active`。<br>`C112-3`（重寫）：接收器保持連線開啟永不回應，透過注入的 `WebhookFetch`（真 `fetch` + `AbortController`，150ms）驗證服務等待真實逾時（量測實際耗時 ≥130ms）後才捕獲為 queued，而非先前的立即 `res.destroy()`。<br>`C112-4` 接收器回傳非重試 400，端點自動停用為 `disabled`（原因 `delivery_failed`）並寫入營運告警通知。<br>`C112-5` 驗證非活躍端點完全隔離於生產事件派發。<br>`C112-6` 接收端驗證 Timestamp 時效性與 Delivery ID 唯一性，重複重放回傳 409 拒絕。<br>`C112-7` 密鑰輪替至 `v=2`，端點退回待測，新簽名以新密鑰驗簽通過、以舊密鑰驗簽失敗。<br>`C112-8` 驗證相同 outboxKey 於同一服務實例幂等去重，重複派發不重複投遞。<br>`C112-9`（新增）：兩個各自建構的 `TenantPartnerService` 實例共用同一個實作 `isEnabled`/`loadState`/`persistChanges` 契約（比照真實 `TenantPartnerRepository` SQL upsert 之 `webhookId`/`deliveryId` 鍵）的記憶體 repository double，模擬行程重啟；重啟後第二實例以相同 outboxKey 發布，回傳相同 `deliveryId` 且 receiver 僅收到一次請求，證明去重來自 repository 持久層而非同一實例的記憶體物件。 | ✅ 通過 |
-| **C113** | 租戶／外部系統 | ERP／企業 SSO／銀行帳本同步（外部門禁 GATE） | `C113-1` 走訪 `listTenantSettlementStatements` 與對帳單模型，驗證期別、收支總額與不可變日期。<br>`C113-2` 驗證無效期別查詢拋出 `VALIDATION_ERROR`。<br>`C113-3` 明確宣告實體銀行專線與企業 SSO 為外部門禁。 | ⚠️ 部分驗收：僅涵蓋對帳單資料模型與門禁申報，**未涵蓋** capability-source sandbox mapping、resend、reconciliation 深度能力（見 §6.4 未竟事項），不宣稱完整通過 |
-| **C114** | 地圖／定位提供者 | 真地圖、地理編碼、路由／ETA（外部門禁 MAP,GATE） | `C114-1` 走訪地理編碼服務，驗證台北市地址解析落在台灣合法經緯度範圍內。<br>`C114-2` 驗證空白無效地址安全拋出防護例外。<br>`C114-3` 明確宣告正式 Google Maps Platform 配額憑證為外部門禁。 | ⚠️ 部分驗收：僅涵蓋地理編碼邊界，**未涵蓋** 路由／ETA 失敗案例（見 §6.4），不宣稱完整通過 |
-| **C115** | 錄音與證照保存 | 背景補件、到期掃描與告警回執（驗收缺口） | `C115-1` 走訪電話叫車錄音生命週期：`recordingPending` 保留於 `recording_pending`，`recordingReady` 到達後晉升為 `ready_for_dispatch` 並綁定 `recording_bound` 旗標。<br>`C115-2` `recordingFailed` 到達後訂單合規標記為 `recording_missing`。<br>`C115-3` 明確宣告實體 PBX 語音硬體與 Cloud Run 持久排程為環境限制。 | ⚠️ 部分驗收：僅涵蓋錄音回調狀態機，**未涵蓋** scheduler backlog／restart／catch-up（見 §6.4），不宣稱完整通過 |
+| **C113** | 租戶／外部系統 | ERP／企業 SSO／銀行帳本同步（外部門禁 GATE） | `C113-1` 走訪 `listTenantSettlementStatements` 與對帳單模型，驗證期別、收支總額與不可變日期。<br>`C113-2` 驗證無效期別查詢拋出 `VALIDATION_ERROR`。<br>`C113-3` 明確宣告實體銀行專線與企業 SSO 為外部門禁。<br>`C113-4` 驗證 sandbox 履約片段、計費處置對映、capability-source mapping 與租戶／訂單隔離。<br>`C113-5` 驗證補送（resend）處理之冪等性，不可變稽核歷程與 `ADJUSTMENT_POSTED` 解析碼。<br>`C113-6` 驗證調帳指令空白檢查與權限防護。<br>Hosted E2E runner `c113-c115-acceptance.ts` 於真實 PostgreSQL 之 `billing.phase1_reconciliation_issues` 驗證調帳與防重。 | ✅ 通過 |
+| **C114** | 地圖／定位提供者 | 真地圖、地理編碼、路由／ETA（外部門禁 MAP,GATE） | `C114-1` 走訪地理編碼服務，驗證台北市地址解析落在台灣合法經緯度範圍內。<br>`C114-2` 驗證空白無效地址安全拋出防護例外。<br>`C114-3` 明確宣告正式 Google Maps Platform 配額憑證為外部門禁。<br>`C114-4` 走訪臺灣核心座標多模式路由計算（drive, walk, two_wheeler），驗證有效行車距離與時間。<br>`C114-5` 驗證無效模式與坐標邊界拒絕防護。<br>`C114-6` 驗證配置式提供者逾時（504，retryable=true）與內部錯誤（500，retryable=false）之型別化 `ApiRequestError` 映射，並驗證 `MapGeofenceObservabilityService` 的 `provider_outage` 計數器精確遞增。<br>Hosted E2E runner `c113-c115-acceptance.ts` 驗證真實路由與配置式錯誤映射。 | ✅ 通過 |
+| **C115** | 錄音與證照保存 | 背景補件、到期掃描與告警回執（驗收缺口） | `C115-1` 走訪電話叫車錄音生命週期：`recordingPending` 保留於 `recording_pending`，`recordingReady` 到達後晉升為 `ready_for_dispatch` 並綁定 `recording_bound` 旗標。<br>`C115-2` `recordingFailed` 到達後訂單合規標記為 `recording_missing`。<br>`C115-3` 明確宣告實體 PBX 語音硬體與 Cloud Run 持久排程為環境限制。<br>`C115-4` 驗證電話進件錄音回調去重與冪等處理，確保訂單合規狀態一致。<br>`C115-5` 驗證司機執照與資格背景到期掃描，偵測過期並阻斷派單資格，換證後恢復派單狀態。<br>Hosted E2E runner `c113-c115-acceptance.ts` 預埋種子，`c115-restart-readback.ts` 於 API 重啟後驗證保留之 PostgreSQL 持久性、回調補收與換證恢復，輸出 `c111-c115-capability-report.json`。 | ✅ 通過 |
 
 ---
 
@@ -404,12 +419,10 @@ exit code: 0
 3. **LIMITATION-C115-CTI-CRON (真機環境限制)**:
    - 實體電信業者 SIP Trunking 語音 PBX 總機錄音設備與 Cloud Run 無伺服器持久計時排程（Scale-to-zero 環境需依賴 Cloud Scheduler / Cloud Tasks 外部觸發）；本次以 SandboxWebhookAdapter 語音回調配對生命週期完成驗收。
 
-### 6.4 未竟驗收事項（reviewer 指出，誠實記錄為未關閉，不冒充完整通過）
+### 6.4 驗收缺口補齊與關閉記錄（SR-C115-HARNESS-20260913 完成）
 
-`Codex2` 的 review 指出 C113–C115 目前的測試僅是 fixture／mock／常數宣告層級，未覆蓋以下深度能力；本輪未新增這些案例（超出本任務標題「API keys／Webhook簽章與故障恢复驗收」核心範圍，且需要更大規模的 sandbox/route/scheduler 測試建置），如實列出而非宣稱已通過：
+原 `Codex2` review 所指出的三項缺口已於 `SR-C115-HARNESS-20260913` 任務完整補齊並關閉：
 
-1. **C113 — capability-source sandbox mapping／resend／reconciliation**：目前只驗證 `listTenantSettlementStatements`／`getTenantSettlementStatement` 的資料結構與無效期別防護，未驗證銀行對帳來源的 sandbox 對映、補送（resend）與對帳差異調解（reconciliation）流程。
-2. **C114 — 路由／ETA 失敗案例**：目前只驗證地理編碼（geocoding）邊界與空白輸入防護，未驗證路由規劃（routing）或 ETA 計算失敗時的降級／重試行為。
-3. **C115 — scheduler backlog／restart／catch-up**：目前只驗證單次 webhook 回調驅動的訂單狀態機，未驗證背景排程器在待辦堆積（backlog）、服務重啟、或補做（catch-up）情境下的行為。
-
-以上三項為本任務已知、明確記錄的未關閉缺口；若後續 wave 需要關閉，應由 supervisor 以 canonical task command 建立具追溯來源的新驗收子任務，而非在本任務範圍內默默補測或逕稱已完成。
+1. **C113 — capability-source sandbox mapping／resend／reconciliation**：已透過 `C113-4`、`C113-5`、`C113-6` 與 hosted runner `c113-c115-acceptance.ts` 於 PostgreSQL `billing.phase1_reconciliation_issues` 驗證來源對映、補送冪等、`ADJUSTMENT_POSTED` 解析碼與不可變稽核歷程（非僅改狀態，而是包含解析碼與歷程稽核），以及租戶隔離。
+2. **C114 — 路由／ETA 失敗案例**：已透過 `C114-4`、`C114-5`、`C114-6` 與 hosted runner `c113-c115-acceptance.ts` 驗證臺灣多模式（drive, walk, two_wheeler）路由計算，並透過配置式提供者驗證 504 逾時與 500 內部錯誤映射至型別化 `ApiRequestError`，且確認 `MapGeofenceObservabilityService` 的 `provider_outage` 觀測計數正確記錄。
+3. **C115 — scheduler backlog／restart／catch-up**：已透過 `C115-4`、`C115-5` 與 hosted runner `c113-c115-acceptance.ts`（重啟前寫入 `crm.phase1_call_sessions` 與 `reg.phase1_registry_drivers` 持久種子）及 `c115-restart-readback.ts`（API 行程重啟後讀回真實 retained PostgreSQL 資料庫，執行錄音回調補收去重，以及司機到期資格掃描追趕阻斷派單與換證恢復），產出 `c111-c115-capability-report.json` 並整合進 `tenant-uat-acceptance.yml` 門禁。

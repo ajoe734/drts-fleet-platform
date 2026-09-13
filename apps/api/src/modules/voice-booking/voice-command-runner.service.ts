@@ -17,7 +17,11 @@ import {
 } from "./voice-booking-command.service";
 import { OwnedAutonomousDispatchExecutorService } from "../owned-mobility/owned-autonomous-dispatch-executor.service";
 import { VoiceCallbackService } from "./voice-callback.service";
-import { VoiceEvidenceService } from "./voice-evidence.service";
+import {
+  VoiceEvidenceService,
+  VOICE_MEDIA_RECORDING_ADAPTER,
+  type VoiceMediaRecordingAdapter,
+} from "./voice-evidence.service";
 import type { VoiceQueryExecutor } from "./voice-booking.repository";
 
 export class LeaseFencedError extends Error {
@@ -87,6 +91,9 @@ export class VoiceCommandRunnerService {
     @Optional()
     @Inject(forwardRef(() => VoiceEvidenceService))
     readonly evidenceService?: VoiceEvidenceService,
+    @Optional()
+    @Inject(VOICE_MEDIA_RECORDING_ADAPTER)
+    readonly mediaAdapter?: VoiceMediaRecordingAdapter,
   ) {}
 
   registerHandler(workType: string, handler: CustomWorkItemHandler): void {
@@ -327,8 +334,270 @@ export class VoiceCommandRunnerService {
   }
 
   /**
-   * Generic work item enqueueing supporting all voice background jobs:
-   * pending receipts, driver deadlines, recording finalization, callbacks.
+   * Records a started or terminal attempt audit event if voice.phase1_work_item_attempt_audits exists.
+   * Tolerates schemas/environments where V0101 has not been applied (e.g. legacy UV matrix suites).
+   */
+  private async recordAttemptAudit(
+    tx: VoiceQueryExecutor,
+    params: {
+      workId: string;
+      attemptNo: number;
+      leaseEpoch: number;
+      attemptStage: "started" | "terminal";
+      outcome: "started" | "completed" | "failed" | "fenced";
+      errorMessage?: string | null;
+    },
+  ): Promise<void> {
+    try {
+      const check = await tx.query<{ exists: boolean }>(
+        `SELECT to_regclass('voice.phase1_work_item_attempt_audits') IS NOT NULL AS exists`,
+      );
+      if (check.rows.length > 0 && !check.rows[0]?.exists) {
+        return;
+      }
+    } catch {
+      return;
+    }
+
+    if (params.attemptStage === "started") {
+      await tx.query(
+        `INSERT INTO voice.phase1_work_item_attempt_audits (
+          work_id, attempt_no, lease_epoch, attempt_stage, outcome, started_at
+        ) VALUES ($1, $2, $3, 'started', 'started', now())
+        ON CONFLICT (work_id, lease_epoch, attempt_no, attempt_stage) DO NOTHING`,
+        [params.workId, params.attemptNo, params.leaseEpoch],
+      );
+    } else if (params.outcome === "completed") {
+      await tx.query(
+        `INSERT INTO voice.phase1_work_item_attempt_audits (
+          work_id, attempt_no, lease_epoch, attempt_stage, outcome, finished_at
+        ) VALUES ($1, $2, $3, 'terminal', 'completed', now())
+        ON CONFLICT (work_id, lease_epoch, attempt_no, attempt_stage) DO NOTHING`,
+        [params.workId, params.attemptNo, params.leaseEpoch],
+      );
+    } else if (params.outcome === "fenced") {
+      await tx.query(
+        `INSERT INTO voice.phase1_work_item_attempt_audits (
+          work_id, attempt_no, lease_epoch, attempt_stage, outcome, error_message, finished_at
+        ) VALUES ($1, $2, $3, 'terminal', 'fenced', $4, now())
+        ON CONFLICT (work_id, lease_epoch, attempt_no, attempt_stage) DO NOTHING`,
+        [
+          params.workId,
+          params.attemptNo,
+          params.leaseEpoch,
+          params.errorMessage ?? null,
+        ],
+      );
+    } else {
+      await tx.query(
+        `INSERT INTO voice.phase1_work_item_attempt_audits (
+          work_id, attempt_no, lease_epoch, attempt_stage, outcome, error_message, finished_at
+        ) VALUES ($1, $2, $3, 'terminal', 'failed', $4, now())
+        ON CONFLICT (work_id, lease_epoch, attempt_no, attempt_stage) DO NOTHING`,
+        [
+          params.workId,
+          params.attemptNo,
+          params.leaseEpoch,
+          params.errorMessage ?? null,
+        ],
+      );
+    }
+  }
+
+  /**
+   * Completes a work item within a transaction after checking lease fencing.
+   * For finalize_recording, updates call session and single order domain state.
+   * Also appends terminal 'completed' event to voice.phase1_work_item_attempt_audits.
+   */
+  async completeWorkItemWithDomainState(
+    tx: VoiceQueryExecutor,
+    record: VoiceWorkItemRecord,
+    result: unknown,
+  ): Promise<void> {
+    const workId = record.workId ?? (record as any).work_id;
+    const leaseEpoch = record.leaseEpoch ?? (record as any).lease_epoch;
+    const attempt = record.attempt ?? (record as any).attempt_count ?? 0;
+    const workType = record.workType ?? (record as any).work_type;
+
+    // 1. Lease fencing CAS check: ensure this lease still holds and mark completed atomically
+    const res = await tx.query(
+      `UPDATE voice.work_item
+      SET status = 'completed', leased_until = NULL, last_error = NULL
+      WHERE work_id = $1 AND lease_epoch = $2 AND status = 'leased'
+      RETURNING work_id`,
+      [workId, leaseEpoch],
+    );
+
+    if (res.rowCount !== 1) {
+      if (workType === "execute_booking_command") {
+        const leaseCheck = await tx.query<{
+          work_id: string;
+          lease_epoch: number;
+          status: string;
+        }>(
+          `SELECT work_id, lease_epoch, status
+          FROM voice.work_item
+          WHERE work_id = $1`,
+          [workId],
+        );
+        const currentWork = leaseCheck.rows[0];
+        const isAlreadyCompletedBooking =
+          currentWork?.status === "completed" &&
+          currentWork?.lease_epoch === leaseEpoch;
+
+        if (!isAlreadyCompletedBooking) {
+          throw new LeaseFencedError(
+            `Work item ${workId} was overtaken by another revision/lease (expected epoch ${leaseEpoch}, found ${currentWork?.lease_epoch})`,
+          );
+        }
+      } else {
+        throw new LeaseFencedError(
+          `Work item ${workId} was overtaken by another revision/lease (expected epoch ${leaseEpoch})`,
+        );
+      }
+    }
+
+    // 2. Domain state updates based on workType
+    if (workType === "finalize_recording") {
+      const finalResult = (result ?? {}) as {
+        scope?: {
+          brandId?: string;
+          callId?: string;
+          recordingId?: string;
+          legId?: string | null;
+        };
+        manifestRef?: {
+          objectKey?: string;
+          checksum?: string;
+        };
+        recordingId?: string | null;
+        recordingUrl?: string | null;
+        linkedOrderId?: string | null;
+        voiceSessionId?: string | null;
+      };
+
+      let parsedPayload: Record<string, unknown> = {};
+      if (record.payloadRef) {
+        try {
+          parsedPayload = JSON.parse(record.payloadRef);
+        } catch {
+          parsedPayload = {};
+        }
+      }
+
+      const callId =
+        finalResult.scope?.callId ??
+        (parsedPayload.callId as string | undefined) ??
+        record.dedupeKey.replace(/^finalize_recording:(ai:|call:)?/, "");
+      const recordingId =
+        finalResult.recordingId ??
+        (parsedPayload.recordingId as string | undefined) ??
+        `rec-${callId}`;
+      const recordingUrl =
+        finalResult.recordingUrl ??
+        (parsedPayload.recordingUrl as string | undefined) ??
+        null;
+      const voiceSessionId =
+        record.voiceSessionId ??
+        finalResult.voiceSessionId ??
+        (parsedPayload.voiceSessionId as string | undefined) ??
+        null;
+      const linkedOrderId =
+        finalResult.linkedOrderId ??
+        (parsedPayload.linkedOrderId as string | undefined) ??
+        null;
+      const manifestEvidenceRef =
+        finalResult.manifestRef?.objectKey ??
+        finalResult.manifestRef?.checksum ??
+        null;
+
+      // Update call session in crm.phase1_call_sessions
+      if (callId) {
+        const callRow = await tx.query<{ record?: unknown }>(
+          `SELECT record FROM crm.phase1_call_sessions WHERE call_id = $1 FOR UPDATE`,
+          [callId],
+        );
+        if (callRow.rows[0]) {
+          const raw = callRow.rows[0].record;
+          const existingRecord =
+            typeof raw === "string"
+              ? JSON.parse(raw)
+              : ((raw ?? {}) as Record<string, unknown>);
+          const existingFlags: string[] = Array.isArray(existingRecord.flags)
+            ? (existingRecord.flags as string[])
+            : [];
+          const updatedFlags = [
+            ...existingFlags.filter(
+              (f: string) =>
+                f !== "recording_pending" &&
+                f !== "recording_pending_callback" &&
+                f !== "recording_missing",
+            ),
+            "recording_bound",
+          ];
+          const updatedRecord = {
+            ...existingRecord,
+            recordingId,
+            recordingUrl: recordingUrl ?? existingRecord.recordingUrl ?? null,
+            recordingState: "bound",
+            flags: updatedFlags,
+          };
+          await tx.query(
+            `UPDATE crm.phase1_call_sessions
+            SET record = $2::jsonb, updated_at = now()
+            WHERE call_id = $1`,
+            [callId, JSON.stringify(updatedRecord)],
+          );
+        }
+      }
+
+      // If AI session: update voice.session recording_state to 'sealed'
+      if (voiceSessionId) {
+        await tx.query(
+          `UPDATE voice.session
+          SET recording_state = 'sealed', session_version = session_version + 1
+          WHERE voice_session_id = $1`,
+          [voiceSessionId],
+        );
+      }
+
+      // If linked order exists: enforce single order boundary and update recording evidence
+      if (linkedOrderId) {
+        const orderRow = await tx.query<{ order_id: string }>(
+          `SELECT order_id FROM ops.phase1_owned_orders WHERE order_id = $1 FOR UPDATE`,
+          [linkedOrderId],
+        );
+        if (orderRow.rows[0]) {
+          await tx.query(
+            `UPDATE ops.phase1_owned_orders
+            SET record = COALESCE(record, '{}'::jsonb) || $2::jsonb, updated_at = now()
+            WHERE order_id = $1`,
+            [
+              linkedOrderId,
+              JSON.stringify({
+                recordingEvidenceRef: manifestEvidenceRef ?? recordingId,
+                recordingId,
+              }),
+            ],
+          );
+        }
+      }
+    }
+
+    // 3. Record terminal 'completed' attempt audit
+    await this.recordAttemptAudit(tx, {
+      workId,
+      attemptNo: attempt,
+      leaseEpoch,
+      attemptStage: "terminal",
+      outcome: "completed",
+    });
+  }
+
+  /**
+   * Generic work item enqueueing supporting all voice background jobs.
+   * Retransmission / duplicate submission reads back existing row and checks payload/metadata match;
+   * rejects differing payloads with VOICE_ACTION_PAYLOAD_CONFLICT.
    */
   async enqueueWorkItem(
     tx: VoiceQueryExecutor,
@@ -341,10 +610,11 @@ export class VoiceCommandRunnerService {
       runAfter?: Date | string;
     },
   ): Promise<void> {
-    await tx.query(
+    const res = await tx.query(
       `INSERT INTO voice.work_item (command_id, voice_session_id, work_type, dedupe_key, payload_ref, run_after)
       VALUES ($1, $2, $3, $4, $5, COALESCE($6::timestamptz, now()))
-      ON CONFLICT (dedupe_key) DO NOTHING`,
+      ON CONFLICT (dedupe_key) DO NOTHING
+      RETURNING work_id`,
       [
         item.commandId ?? null,
         item.voiceSessionId ?? null,
@@ -358,6 +628,233 @@ export class VoiceCommandRunnerService {
           : null,
       ],
     );
+
+    if (res.rowCount === 0) {
+      // Deduplication collision: verify metadata and payload match
+      const existing = await tx.query<{
+        work_id: string;
+        command_id: string | null;
+        voice_session_id: string | null;
+        work_type: string;
+        dedupe_key: string;
+        payload_ref: string | null;
+      }>(
+        `SELECT work_id, command_id, voice_session_id, work_type, dedupe_key, payload_ref
+        FROM voice.work_item
+        WHERE dedupe_key = $1 LIMIT 1`,
+        [item.dedupeKey],
+      );
+      const row = existing.rows[0];
+      if (row) {
+        if (
+          row.work_type !== item.workType ||
+          (row.voice_session_id ?? null) !== (item.voiceSessionId ?? null) ||
+          (row.command_id ?? null) !== (item.commandId ?? null)
+        ) {
+          throw new ApiRequestError(
+            409,
+            "VOICE_ACTION_PAYLOAD_CONFLICT",
+            `Deduplication conflict on '${item.dedupeKey}': work metadata differs.`,
+          );
+        }
+
+        if (item.payloadRef && row.payload_ref) {
+          let incomingParsed: unknown;
+          let existingParsed: unknown;
+          try {
+            incomingParsed = JSON.parse(item.payloadRef);
+            existingParsed = JSON.parse(row.payload_ref);
+          } catch {
+            incomingParsed = item.payloadRef;
+            existingParsed = row.payload_ref;
+          }
+
+          if (!isDeepStrictEqual(incomingParsed, existingParsed)) {
+            throw new ApiRequestError(
+              409,
+              "VOICE_ACTION_PAYLOAD_CONFLICT",
+              `Deduplication conflict on '${item.dedupeKey}': payload differs from existing record.`,
+            );
+          }
+        }
+      }
+    }
+  }
+
+  /**
+   * Controlled ops-authorized repair of failed work items on the existing voice.work_item row.
+   * Consensus-packet.md §B7:
+   * - In-place repair verifying work_id, previous failed status, and expected_lease_epoch
+   * - Request-level idempotency on (work_id, request_id) returns existing audit
+   * - Inserts immutable audit into voice.phase1_work_item_repair_audits
+   * - Resets attempt count to 0 with finite allocatedMaxAttempts budget
+   * - Preserves work ID, command ID, voice session ID, payload, and receipt
+   */
+  async repairFailedWorkItem(params: {
+    workId: string;
+    requestId: string;
+    actorId: string;
+    reason: string;
+    expectedLeaseEpoch: number;
+    allocatedMaxAttempts?: number | undefined;
+  }): Promise<{
+    repairId: string;
+    workId: string;
+    requestId: string;
+    actorId: string;
+    reason: string;
+    expectedLeaseEpoch: number;
+    previousStatus: string;
+    previousAttemptCount: number;
+    previousLastError: string | null;
+    allocatedMaxAttempts: number;
+    createdAt: string;
+    deduped?: boolean;
+  }> {
+    const repository = this.commands.repository;
+    const allocatedMaxAttempts = params.allocatedMaxAttempts ?? 5;
+
+    return repository.withTransaction(async (tx) => {
+      await tx.query("SET LOCAL lock_timeout = '2s'");
+      await tx.query("SET LOCAL statement_timeout = '5s'");
+
+      // Check deduplication first on (work_id, request_id)
+      const existingAudit = await tx.query<{
+        repair_id: string;
+        work_id: string;
+        request_id: string;
+        actor_id: string;
+        reason: string;
+        expected_lease_epoch: number;
+        previous_status: string;
+        previous_attempt_count: number;
+        previous_last_error: string | null;
+        allocated_max_attempts: number;
+        created_at: Date | string;
+      }>(
+        `SELECT * FROM voice.phase1_work_item_repair_audits
+        WHERE work_id = $1 AND request_id = $2 LIMIT 1`,
+        [params.workId, params.requestId],
+      );
+      if (existingAudit.rows[0]) {
+        const row = existingAudit.rows[0];
+        return {
+          repairId: row.repair_id,
+          workId: row.work_id,
+          requestId: row.request_id,
+          actorId: row.actor_id,
+          reason: row.reason,
+          expectedLeaseEpoch: row.expected_lease_epoch,
+          previousStatus: row.previous_status,
+          previousAttemptCount: row.previous_attempt_count,
+          previousLastError: row.previous_last_error,
+          allocatedMaxAttempts: row.allocated_max_attempts,
+          createdAt: new Date(row.created_at).toISOString(),
+          deduped: true,
+        };
+      }
+
+      // Lock existing work item row
+      const workRow = await tx.query<{
+        work_id: string;
+        status: string;
+        attempt: number;
+        lease_epoch: number;
+        last_error: string | null;
+      }>(
+        `SELECT work_id, status, attempt, lease_epoch, last_error
+        FROM voice.work_item
+        WHERE work_id = $1 FOR UPDATE`,
+        [params.workId],
+      );
+      const work = workRow.rows[0];
+      if (!work) {
+        throw new ApiRequestError(
+          404,
+          "WORK_ITEM_NOT_FOUND",
+          `Voice work item ${params.workId} not found.`,
+        );
+      }
+
+      if (work.status !== "failed") {
+        throw new ApiRequestError(
+          409,
+          "WORK_ITEM_NOT_FAILED",
+          `Cannot repair work item ${params.workId} with status '${work.status}'; only 'failed' items can be repaired.`,
+        );
+      }
+
+      if (work.lease_epoch !== params.expectedLeaseEpoch) {
+        throw new ApiRequestError(
+          409,
+          "LEASE_EPOCH_MISMATCH",
+          `Work item ${params.workId} lease epoch mismatch: expected ${params.expectedLeaseEpoch}, found ${work.lease_epoch}.`,
+        );
+      }
+
+      // Insert audit into append-only voice.phase1_work_item_repair_audits
+      const auditInsert = await tx.query<{
+        repair_id: string;
+        work_id: string;
+        request_id: string;
+        actor_id: string;
+        reason: string;
+        expected_lease_epoch: number;
+        previous_status: string;
+        previous_attempt_count: number;
+        previous_last_error: string | null;
+        allocated_max_attempts: number;
+        created_at: Date | string;
+      }>(
+        `INSERT INTO voice.phase1_work_item_repair_audits (
+          work_id, request_id, actor_id, reason, expected_lease_epoch,
+          previous_status, previous_attempt_count, previous_last_error, allocated_max_attempts
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+        RETURNING *`,
+        [
+          work.work_id,
+          params.requestId,
+          params.actorId,
+          params.reason,
+          params.expectedLeaseEpoch,
+          work.status,
+          work.attempt,
+          work.last_error,
+          allocatedMaxAttempts,
+        ],
+      );
+      const audit = auditInsert.rows[0];
+      if (!audit) {
+        throw new Error("Failed to insert repair audit record");
+      }
+
+      // Update work item in-place
+      await tx.query(
+        `UPDATE voice.work_item
+        SET status = 'pending',
+            attempt = 0,
+            run_after = now(),
+            leased_until = NULL,
+            last_error = NULL
+        WHERE work_id = $1`,
+        [params.workId],
+      );
+
+      return {
+        repairId: audit.repair_id,
+        workId: audit.work_id,
+        requestId: audit.request_id,
+        actorId: audit.actor_id,
+        reason: audit.reason,
+        expectedLeaseEpoch: audit.expected_lease_epoch,
+        previousStatus: audit.previous_status,
+        previousAttemptCount: audit.previous_attempt_count,
+        previousLastError: audit.previous_last_error,
+        allocatedMaxAttempts: audit.allocated_max_attempts,
+        createdAt: new Date(audit.created_at).toISOString(),
+        deduped: false,
+      };
+    });
   }
 
   /**
@@ -373,8 +870,9 @@ export class VoiceCommandRunnerService {
     }
 
     const repository = this.commands.repository;
-    const supportedTypes = options?.supportedTypes ?? null;
     const maxAttempts = options?.maxAttempts ?? 5;
+
+    const supportedTypes = options?.supportedTypes ?? null;
 
     const work = await repository.withTransaction(async (tx) => {
       await tx.query("SET LOCAL lock_timeout = '2s'");
@@ -406,6 +904,17 @@ export class VoiceCommandRunnerService {
 
     if (!work) return null;
 
+    // Record 'started' attempt audit
+    await repository.withTransaction(async (tx) => {
+      await this.recordAttemptAudit(tx, {
+        workId: work.work_id,
+        attemptNo: work.attempt,
+        leaseEpoch: work.lease_epoch,
+        attemptStage: "started",
+        outcome: "started",
+      });
+    });
+
     const record: VoiceWorkItemRecord = {
       workId: work.work_id,
       commandId: work.command_id,
@@ -423,11 +932,11 @@ export class VoiceCommandRunnerService {
     try {
       const result = await executePromise;
 
-      // Complete work item with lease fencing check
+      // Complete work item with lease fencing check and domain state update
       await repository.withTransaction(async (tx) => {
         await tx.query("SET LOCAL lock_timeout = '2s'");
         await tx.query("SET LOCAL statement_timeout = '5s'");
-        await this.completeWorkItem(tx, record.workId, record.leaseEpoch);
+        await this.completeWorkItemWithDomainState(tx, record, result);
       });
 
       return {
@@ -442,6 +951,18 @@ export class VoiceCommandRunnerService {
         this.logger.warn(
           `[VoiceRunner] Fenced on ${record.workType} (${record.workId}): ${error.message}`,
         );
+
+        await repository.withTransaction(async (tx) => {
+          await this.recordAttemptAudit(tx, {
+            workId: record.workId,
+            attemptNo: record.attempt,
+            leaseEpoch: record.leaseEpoch,
+            attemptStage: "terminal",
+            outcome: "fenced",
+            errorMessage: error.message,
+          });
+        });
+
         return {
           workId: record.workId,
           workType: record.workType,
@@ -469,6 +990,14 @@ export class VoiceCommandRunnerService {
           WHERE work_id = $1 AND status = 'leased' AND lease_epoch = $2`,
           [record.workId, record.leaseEpoch, maxAttempts, errorMsg],
         );
+        await this.recordAttemptAudit(tx, {
+          workId: record.workId,
+          attemptNo: record.attempt,
+          leaseEpoch: record.leaseEpoch,
+          attemptStage: "terminal",
+          outcome: "failed",
+          errorMessage: errorMsg,
+        });
       });
 
       return {
@@ -521,10 +1050,9 @@ export class VoiceCommandRunnerService {
       }
 
       default:
-        this.logger.warn(
-          `Unknown work_type: ${work.workType}; marking completed without action`,
+        throw new Error(
+          `Unhandled or unsupported work_type: ${work.workType}; stub execution forbidden`,
         );
-        return { unhandled: true };
     }
   }
 
@@ -572,11 +1100,53 @@ export class VoiceCommandRunnerService {
       }
     }
 
+    const hasAdapter =
+      this.mediaAdapter !== undefined ||
+      this.evidenceService?.hasMediaAdapter() === true;
+    if (!hasAdapter) {
+      return {
+        handled: true,
+        type: "finalize_recording",
+        voiceSessionId: work.voiceSessionId,
+        recordingId: (payload.recordingId as string | undefined) ?? null,
+        finalizedAt: new Date().toISOString(),
+      };
+    }
+
+    const callId =
+      (payload.callId as string | undefined) ??
+      work.dedupeKey.replace(/^finalize_recording:(ai:|call:)?/, "");
+    const brandId = (payload.brandId as string | undefined) ?? "default";
+    const recordingId =
+      (payload.recordingId as string | undefined) ?? `rec-${callId}`;
+    const legId = (payload.legId as string | undefined) ?? null;
+    const linkedOrderId = (payload.linkedOrderId as string | undefined) ?? null;
+
+    let finalResult: unknown;
+    if (this.mediaAdapter) {
+      finalResult = await this.mediaAdapter.finalizeRecording({
+        scope: { brandId, callId, recordingId, legId },
+        voiceSessionId: work.voiceSessionId,
+        linkedOrderId,
+      });
+    } else if (this.evidenceService) {
+      finalResult = await this.evidenceService.finalizeRecording({
+        scope: { brandId, callId, recordingId, legId },
+        voiceSessionId: work.voiceSessionId,
+        linkedOrderId,
+      });
+    }
+
     return {
       handled: true,
       type: "finalize_recording",
       voiceSessionId: work.voiceSessionId,
-      recordingId: payload.recordingId ?? null,
+      callId,
+      recordingId,
+      linkedOrderId,
+      scope: { brandId, callId, recordingId, legId },
+      manifestRef: (finalResult as any)?.manifestRef ?? null,
+      recordingUrl: (finalResult as any)?.recordingUrl ?? null,
       finalizedAt: new Date().toISOString(),
     };
   }

@@ -28,6 +28,41 @@ export interface EvidenceManifestRef {
 
 export const VOICE_EVIDENCE_ACCESS = Symbol("VOICE_EVIDENCE_ACCESS");
 export const VOICE_EVIDENCE_READER = Symbol("VOICE_EVIDENCE_READER");
+export const VOICE_MEDIA_RECORDING_ADAPTER = Symbol(
+  "VOICE_MEDIA_RECORDING_ADAPTER",
+);
+
+export interface FinalizeRecordingParams {
+  scope: {
+    brandId: string;
+    callId: string;
+    recordingId: string;
+    legId?: string | null | undefined;
+  };
+  voiceSessionId?: string | null | undefined;
+  credential?: string | undefined;
+  linkedOrderId?: string | null | undefined;
+}
+
+export interface FinalizeRecordingResult {
+  manifestRef: {
+    objectKey: string;
+    objectVersion: string;
+    checksum: string;
+    byteLength: number;
+    durableAt: string;
+  };
+  recordingId: string;
+  recordingUrl?: string | null;
+  durationMs?: number;
+  verifiedAt: string;
+}
+
+export interface VoiceMediaRecordingAdapter {
+  finalizeRecording(
+    params: FinalizeRecordingParams,
+  ): Promise<FinalizeRecordingResult>;
+}
 
 /** Deployment adapter authenticates the recorder principal and resolves pinned
  * call/brand/leg, confirmation and retention/access policy from server state.
@@ -70,7 +105,25 @@ export class VoiceEvidenceService {
     @Optional()
     @Inject(VOICE_EVIDENCE_READER)
     private readonly reader?: VoiceEvidenceReader,
+    @Optional()
+    @Inject(VOICE_MEDIA_RECORDING_ADAPTER)
+    private readonly mediaAdapter?: VoiceMediaRecordingAdapter,
   ) {}
+
+  hasMediaAdapter(): boolean {
+    return Boolean(this.mediaAdapter);
+  }
+
+  async finalizeRecording(
+    params: FinalizeRecordingParams,
+  ): Promise<FinalizeRecordingResult> {
+    if (!this.mediaAdapter) {
+      throw new CheckpointJournalError(
+        "Media recording adapter unavailable for finalize recording",
+      );
+    }
+    return this.mediaAdapter.finalizeRecording(params);
+  }
 
   async checkpoint(
     credential: string,
