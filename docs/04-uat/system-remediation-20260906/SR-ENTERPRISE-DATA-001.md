@@ -287,6 +287,12 @@ prove), following `SR-ENTERPRISE-SEARCH-001`'s
   `EnterpriseBookingDetail`'s title in
   `components/enterprise-booking-lifecycle.tsx` so the identity assertion
   above has a stable hook (previously the booking id was unlabelled text).
+- Fixed root typecheck failure from smoke acceptance job 103670531714:
+  `apps/enterprise-dispatch-web/lib/enterprise-fixtures.ts` had imported
+  from `@/lib/translations`, which failed when checked by root
+  `tsc -p tsconfig.json --noEmit` (via `tests/e2e/.../enterprise-data-browser.spec.ts`).
+  Switched to the sibling relative import `./translations` (consistent with
+  `./dispatch-fixture-adapter`, `./enterprise-booking-draft`, and `./server-locale`).
 
 ## Explicitly not done (do not treat as complete)
 
