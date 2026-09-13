@@ -1,0 +1,240 @@
+name: Enterprise Data Acceptance (SR-ENTERPRISE-DATA-001)
+
+# Dedicated acceptance runner proving that enterprise-dispatch-web's home,
+# trip, booking-detail, and help pages are driven by the real, unmodified
+# TenantPartnerService/OwnedMobilityService/OwnedMobilityController against a
+# real migrated PostgreSQL, and that:
+#   - the home upcoming list, the trip page, and the booking-detail page all
+#     resolve to the exact same real booking (list -> home -> detail
+#     identity), and a genuinely nonexistent booking id renders an honest
+#     not-found state, never a retryable "degraded" banner;
+#   - the driver-contact and support-contact actions on the trip and help
+#     pages are real, testable navigation/tel/mailto actions, and an
+#     unauthorized/unavailable driver contact is never faked.
+#
+# The browser job builds the real enterprise Next application and full
+# AppModule, then drives Chromium through real session-authenticated HTTP
+# against migrated PostgreSQL. Servers run only on GitHub-hosted CI.
+
+on:
+  workflow_dispatch:
+    inputs:
+      candidate_sha:
+        description: "Immutable candidate commit SHA to verify (full 40-char SHA)"
+        required: true
+  push:
+    branches:
+      - claude/sr-enterprise-data-001-recovery-20260911
+    paths:
+      - .github/workflows/enterprise-data-acceptance.yml
+      - tools/ci/test_enterprise_data_acceptance_workflow.py
+      - tests/unit/system-remediation/sr-enterprise-data-001/**
+      - tests/e2e/system-remediation/sr-enterprise-data-001/**
+      - apps/enterprise-dispatch-web/app/page.tsx
+      - apps/enterprise-dispatch-web/app/trip/**
+      - apps/enterprise-dispatch-web/app/help/page.tsx
+      - apps/enterprise-dispatch-web/app/bookings/[bookingId]/**
+      - apps/enterprise-dispatch-web/app/control-plane-proxy/**
+      - apps/enterprise-dispatch-web/components/enterprise-booking-lifecycle.tsx
+      - apps/enterprise-dispatch-web/lib/api-client.ts
+      - apps/enterprise-dispatch-web/lib/enterprise-trip-status.ts
+      - apps/enterprise-dispatch-web/lib/enterprise-fixtures.ts
+      - apps/enterprise-dispatch-web/lib/enterprise-session.server.ts
+      - apps/enterprise-dispatch-web/lib/translations.ts
+      - docs/04-uat/system-remediation-20260906/SR-ENTERPRISE-DATA-001.md
+
+permissions:
+  contents: read
+
+concurrency:
+  group: enterprise-data-acceptance-${{ github.event.inputs.candidate_sha || github.sha }}
+  cancel-in-progress: false
+
+env:
+  CI: true
+
+jobs:
+  browser-acceptance:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    services:
+      postgres:
+        image: postgis/postgis:16-3.4
+        env:
+          POSTGRES_DB: drts_fleet_platform
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s --health-timeout 5s --health-retries 10
+    env:
+      DATABASE_URL: postgresql://postgres:postgres@localhost:5432/drts_fleet_platform
+      DRTS_ENTERPRISE_DATA_DATABASE_URL: postgresql://postgres:postgres@localhost:5432/drts_fleet_platform
+      CANDIDATE_SHA: ${{ github.event.inputs.candidate_sha || github.sha }}
+      WORKFLOW_SHA: ${{ github.sha }}
+      DRTS_CANDIDATE_SHA: ${{ github.event.inputs.candidate_sha || github.sha }}
+      DRTS_API_URL: http://127.0.0.1:4103
+      ENTERPRISE_DATA_API_PORT: 4103
+      ENTERPRISE_DATA_PORTAL_URL: http://127.0.0.1:3011
+      ENTERPRISE_DATA_BROWSER_EVIDENCE_DIR: ${{ github.workspace }}/.artifacts/enterprise-data-acceptance/browser
+    steps:
+      - name: Validate candidate_sha input
+        run: |
+          sha="$CANDIDATE_SHA"
+          if ! [[ "$sha" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "::error::candidate_sha must be a full 40-character commit SHA, got: $sha"
+            exit 1
+          fi
+
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.inputs.candidate_sha || github.sha }}
+          fetch-depth: 0
+
+      - name: Verify checkout resolved the exact immutable candidate
+        run: |
+          resolved="$(git rev-parse HEAD)"
+          expected="$CANDIDATE_SHA"
+          echo "Resolved HEAD: $resolved"
+          echo "Expected candidate: $expected"
+          if [ "$resolved" != "$expected" ]; then
+            echo "::error::Checked-out HEAD ($resolved) does not match the requested candidate ($expected)."
+            exit 1
+          fi
+
+      - name: Prepare evidence directory
+        run: mkdir -p .artifacts/enterprise-data-acceptance/browser test-results
+
+      - uses: pnpm/action-setup@v4
+        with: { version: 10.33.0, run_install: false }
+      - uses: actions/setup-node@v4
+        with:
+          {
+            node-version: 22,
+            cache: pnpm,
+            cache-dependency-path: pnpm-lock.yaml,
+          }
+
+      - name: Install candidate dependencies
+        id: install
+        run: pnpm install --frozen-lockfile
+
+      - name: Install Chromium
+        id: browser_install
+        run: pnpm exec playwright install --with-deps chromium
+
+      - name: Build real API and enterprise application
+        id: build
+        run: |
+          set -o pipefail
+          {
+            pnpm --filter @drts/ui-tokens build &&
+            pnpm --filter @drts/api build &&
+            pnpm --filter @drts/enterprise-dispatch-web build
+          } 2>&1 | tee .artifacts/enterprise-data-acceptance/browser/build.log
+
+      - name: Migrate disposable database
+        id: migrate
+        run: |
+          set -o pipefail
+          pnpm db:migrate 2>&1 | tee .artifacts/enterprise-data-acceptance/browser/migrations.log
+
+      - name: Seed a real booking and start real AppModule with durable tenant sessions
+        id: api
+        env:
+          NODE_ENV: test
+        run: |
+          setsid node tests/e2e/system-remediation/sr-enterprise-data-001/enterprise-data-browser-server.mjs > .artifacts/enterprise-data-acceptance/browser/api-server.log 2>&1 &
+          echo $! > .artifacts/enterprise-data-acceptance/browser/api.pid
+          for i in $(seq 1 90); do
+            if [ -f .artifacts/enterprise-data-acceptance/browser/seed-data.json ]; then
+              status="$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:4103/api/auth/session || true)"
+              if [ "$status" = 401 ]; then exit 0; fi
+            fi
+            sleep 1
+          done
+          cat .artifacts/enterprise-data-acceptance/browser/api-server.log
+          exit 1
+
+      - name: Start real enterprise production Next server
+        id: portal
+        run: |
+          setsid pnpm --filter @drts/enterprise-dispatch-web exec next start --hostname 127.0.0.1 --port 3011 > .artifacts/enterprise-data-acceptance/browser/portal-server.log 2>&1 &
+          echo $! > .artifacts/enterprise-data-acceptance/browser/portal.pid
+          for i in $(seq 1 60); do
+            status="$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:3011/help || true)"
+            if [ "$status" = 200 ]; then exit 0; fi
+            sleep 1
+          done
+          cat .artifacts/enterprise-data-acceptance/browser/portal-server.log
+          exit 1
+
+      - name: Drive actual browser identity, honest-error, and contact-action assertions
+        id: harness
+        run: |
+          set -o pipefail
+          pnpm exec playwright test -c playwright.system-remediation.config.ts \
+            tests/e2e/system-remediation/sr-enterprise-data-001/enterprise-data-browser.spec.ts \
+            --workers=1 2>&1 | tee .artifacts/enterprise-data-acceptance/browser/execution-log.txt
+
+      - name: Stop acceptance server process groups
+        if: always()
+        run: |
+          for file in .artifacts/enterprise-data-acceptance/browser/api.pid .artifacts/enterprise-data-acceptance/browser/portal.pid; do
+            if [ -f "$file" ]; then kill -- "-$(cat "$file")" 2>/dev/null || true; fi
+          done
+
+      - name: Gate on all six scenarios with zero skips
+        id: gate
+        if: always()
+        run: |
+          python3 - <<'PY_GATE'
+          import json
+          from pathlib import Path
+          report = json.loads(Path("test-results/system-remediation-report.json").read_text())
+          stats = report.get("stats", {})
+          if stats.get("expected", 0) < 6 or any(stats.get(key, 0) for key in ("unexpected", "skipped", "flaky")) or report.get("errors"):
+              raise SystemExit(f"Incomplete enterprise data acceptance: {stats}")
+          print(f"Enterprise data real browser acceptance: {stats['expected']} passed, zero skips.")
+          PY_GATE
+
+      - name: Record exact browser runtime and all step outcomes
+        if: always()
+        env:
+          INSTALL_OUTCOME: ${{ steps.install.outcome }}
+          BROWSER_INSTALL_OUTCOME: ${{ steps.browser_install.outcome }}
+          BUILD_OUTCOME: ${{ steps.build.outcome }}
+          MIGRATE_OUTCOME: ${{ steps.migrate.outcome }}
+          API_OUTCOME: ${{ steps.api.outcome }}
+          PORTAL_OUTCOME: ${{ steps.portal.outcome }}
+          HARNESS_OUTCOME: ${{ steps.harness.outcome }}
+          GATE_OUTCOME: ${{ steps.gate.outcome }}
+        run: |
+          python3 - <<'PY_STATUS'
+          import json, os
+          from pathlib import Path
+          names = ("INSTALL", "BROWSER_INSTALL", "BUILD", "MIGRATE", "API", "PORTAL", "HARNESS", "GATE")
+          outcomes = {name.lower(): os.environ.get(f"{name}_OUTCOME", "unknown") for name in names}
+          report = Path("test-results/system-remediation-report.json")
+          passed = report.exists() and all(value == "success" for value in outcomes.values())
+          path = Path(".artifacts/enterprise-data-acceptance/browser/run-status.json")
+          path.parent.mkdir(parents=True, exist_ok=True)
+          path.write_text(json.dumps({"candidate_sha": os.environ.get("CANDIDATE_SHA"), "workflow_sha": os.environ.get("WORKFLOW_SHA"), "status": "passed" if passed else "failed", "step_outcomes": outcomes, "report_present": report.exists(), "boundary": "real built enterprise Next + full AppModule + real JWT/Postgres; Chromium browser emulation"}, indent=2) + "\n")
+          PY_STATUS
+
+      - name: Upload browser, HTTP, and failure evidence without session tokens
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: enterprise-data-browser-${{ github.event.inputs.candidate_sha || github.sha }}
+          path: |
+            .artifacts/enterprise-data-acceptance/browser/*.log
+            .artifacts/enterprise-data-acceptance/browser/*-evidence.json
+            .artifacts/enterprise-data-acceptance/browser/seed-data.json
+            .artifacts/enterprise-data-acceptance/browser/run-status.json
+            .artifacts/enterprise-data-acceptance/browser/*.png
+            test-results/system-remediation-report.json
+            test-results/**/test-failed-*.png
+          if-no-files-found: warn
