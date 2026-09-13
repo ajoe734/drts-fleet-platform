@@ -51,6 +51,22 @@ class CandidateDispatchPolicyTest(unittest.TestCase):
         self.assertEqual(decision.target_agent, "Codex")
         self.assertEqual(decision.reason, DispatchReason.ACCEPTANCE_READY)
 
+    def test_external_acceptance_waits_until_existing_gate_is_released(self) -> None:
+        task = self.task("acceptance", merge_sha="abc123", external_gate=True)
+        for update in ("first verification", "same missing phone resources"):
+            task["last_update"] = update
+            self.assertIsNone(resolve_dispatch_target(task, {task["id"]: task}, self.policy))
+        task["external_gate"] = False
+        decision = resolve_dispatch_target(task, {task["id"]: task}, self.policy)
+        self.assertIsNotNone(decision)
+        self.assertEqual(decision.reason, DispatchReason.ACCEPTANCE_READY)
+
+    def test_external_acceptance_gate_does_not_block_preparation_work(self) -> None:
+        task = self.task("in_progress", external_gate=True)
+        decision = resolve_dispatch_target(task, {task["id"]: task}, self.policy)
+        self.assertIsNotNone(decision)
+        self.assertEqual(decision.reason, DispatchReason.OWNED_IN_PROGRESS)
+
     def test_integrating_done_and_blocked_never_dispatch_workers(self) -> None:
         for status in ("integrating", "done", "blocked"):
             with self.subTest(status=status):

@@ -1,5 +1,5 @@
 import type { EnterpriseDispatchBookingFixture } from "./dispatch-fixture-adapter";
-import { type Locale, type TranslationKey, t } from "@/lib/translations";
+import { type Locale, type TranslationKey, t } from "./translations";
 
 export type BookingState =
   | "assigned"

@@ -12,6 +12,7 @@ beforeAll(() => {
 });
 
 import type {
+  IdentityContext,
   PartnerChannelEntryRecord,
   PartnerEligibilityVerificationRecord,
 } from "@drts/contracts";
@@ -1133,6 +1134,85 @@ describe("tenant partner foundation service", () => {
         .find((address) => address.addressId === otherAddress.addressId)
         ?.addressName,
     ).toBe("Other Tenant HQ");
+  });
+
+  it("rejects cross-tenant SLA update when identity tenant does not match target tenant", () => {
+    const auditService = new AuditNotificationService();
+    const tenantPartnerService = new TenantPartnerService(auditService);
+
+    const crossTenantIdentity: IdentityContext = {
+      actorType: "tenant_admin",
+      actorId: "admin-a",
+      realm: "tenant",
+      authMode: "jwt_bearer",
+      roleFamilies: ["tenant"],
+      roles: ["tenant_admin"],
+      scopes: ["tenant:sla:write"],
+      tenantId: TENANT_ID,
+      supportedExecutionModes: ["supervisor_managed_execution"],
+    };
+
+    let thrown: unknown;
+    try {
+      tenantPartnerService.updateSlaProfile(
+        OTHER_TENANT_ID,
+        { waitThresholdMin: 15 },
+        "admin-a",
+        "req-cross-sla",
+        crossTenantIdentity,
+      );
+    } catch (error) {
+      thrown = error;
+    }
+
+    expect(thrown).toBeDefined();
+    expect(
+      (
+        thrown as { getResponse?: () => { error?: { code?: string } } }
+      ).getResponse?.().error?.code,
+    ).toBe("TENANT_SCOPE_MISMATCH");
+  });
+
+  it("rejects SLA update when threshold minutes are negative", () => {
+    const auditService = new AuditNotificationService();
+    const tenantPartnerService = new TenantPartnerService(auditService);
+
+    const identity: IdentityContext = {
+      actorType: "tenant_admin",
+      actorId: "admin-a",
+      realm: "tenant",
+      authMode: "jwt_bearer",
+      roleFamilies: ["tenant"],
+      roles: ["tenant_admin"],
+      scopes: ["tenant:sla:write"],
+      tenantId: TENANT_ID,
+      supportedExecutionModes: ["supervisor_managed_execution"],
+    };
+
+    for (const field of [
+      "waitThresholdMin",
+      "arrivalThresholdMin",
+      "completionThresholdMin",
+    ] as const) {
+      let thrown: unknown;
+      try {
+        tenantPartnerService.updateSlaProfile(
+          TENANT_ID,
+          { [field]: -1 },
+          "admin-a",
+          "req-neg-sla",
+          identity,
+        );
+      } catch (error) {
+        thrown = error;
+      }
+      expect(thrown).toBeDefined();
+      expect(
+        (
+          thrown as { getResponse?: () => { error?: { code?: string } } }
+        ).getResponse?.().error?.code,
+      ).toBe("INVALID_SLA_THRESHOLD");
+    }
   });
 
   it("publishes a tenant role catalog and rejects unsupported role assignments", () => {

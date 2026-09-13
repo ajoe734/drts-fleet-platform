@@ -42,6 +42,7 @@ class ProviderPauseCliTests(unittest.TestCase):
                 "state_file": str(root / ".orchestrator" / "state.json"),
                 "provider_capabilities": str(root / ".orchestrator" / "provider_capabilities.json"),
                 "event_queue": str(root / ".orchestrator" / "event-queue.json"),
+                "activity_log": str(root / "ai-activity-log.jsonl"),
             },
         }
         config_file = root / ".orchestrator" / "config.json"
@@ -102,6 +103,32 @@ class ProviderPauseCliTests(unittest.TestCase):
             self.assertIn("claude, claude2", result.stdout)
             written = json.loads((root / ".orchestrator" / "state.json").read_text())
             self.assertEqual(written.get("provider_pauses"), {})
+
+    def test_explicit_clear_survives_dispatch_failure_rehydration(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root, config_file = self._root(tmpdir, pauses={"claude2": {
+                "kind": "quota", "scope": "lane", "lane_id": "claude2",
+                "reason": "You've hit your usage limit. Resets in 96h.",
+                "resume_at": 4102444800,
+            }}, report=self._report())
+            state_path = root / ".orchestrator" / "state.json"
+            state = json.loads(state_path.read_text())
+            history = {"failure_kind": "quota/terminal", "paused_at": "2099-01-01T00:00:00Z",
+                       "summary": "You've hit your usage limit. Resets in 96h.", "task_id": None}
+            state["dispatch_pauses"] = [dict(history, provider="claude2"), dict(history, provider="gemini"), dict(history, provider="claude2", failure_kind="terminal", task_id="PRODUCT-001")]
+            state_path.write_text(json.dumps(state))
+            result = self._run(config_file, "clear", "claude2")
+            self.assertEqual(result.returncode, 0, result.stderr)
+            written = json.loads(state_path.read_text())
+            self.assertEqual(written["provider_pauses"], {})
+            # An unrelated lane's quota and the cleared lane's task-specific
+            # non-provider failure both remain active.
+            self.assertEqual([p["provider"] for p in written["dispatch_pauses"]], ["gemini", "claude2"])
+            self.assertEqual(written["dispatch_pauses"][1]["failure_kind"], "terminal")
+            audit = [json.loads(line) for line in (root / "ai-activity-log.jsonl").read_text().splitlines()]
+            self.assertEqual(len(audit), 1)
+            self.assertEqual(audit[0]["retired_dispatch_pauses"][0]["summary"], history["summary"])
+            self.assertEqual(audit[0]["provider"], "claude2")
 
     def test_a_lane_with_no_pause_is_reported_not_silently_accepted(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:

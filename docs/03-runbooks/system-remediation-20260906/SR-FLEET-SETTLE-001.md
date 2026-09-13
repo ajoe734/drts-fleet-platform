@@ -58,3 +58,17 @@ pnpm exec vitest run tests/unit/system-remediation/sr-fleet-settle-001/
 - [原30問題](../../04-uat/system-remediation-20260906/source/findings.json)
 - [新增14工作卡](../../04-uat/system-remediation-20260906/source/new-gaps.json)
 - [134能力](../../04-uat/system-remediation-20260906/source/capabilities.json)
+
+## 規劃決策與範圍切分 (Planning Decision Addendum 2026-09-11)
+
+依據 `support/unblock/SR-FLEET-SETTLE-001/SR-FLEET-SETTLE-001-UNBLOCK-PLANNING-DECISION.md` 之正式決策：
+
+1. **Scope Cut (範圍切分)**：
+   - `SR-FLEET-SETTLE-001` 聚焦於車行對帳單入口修復與權威讀取交付：
+     - 修復 R13 自相矛盾 banner（由 `resolveStatementBannerState` 三態驅動）。
+     - 交付真實且一致之 statement list、detail (`/statements/[id]`) 與 CSV export (`/statements/export`)。
+     - 嚴格落實跨車行租戶隔離（非本車行回傳 404 / `null`）與誠實空狀態。
+     - 前端明確標註確認／爭議持久化等待後端串接，杜絕假送達假完成。
+   - 後端持久化確認／爭議 API、取消冲正資料模型擴充與 migration 移交後續專門任務 `SR-FLEET-SETTLE-002`。
+2. **寫入範疇校正**：
+   - 原始 write_scopes 列出之 `billing-settlement.service.ts` 經查不包含 `FleetPartnerStatementRecord`，實際管理模組為 `apps/api/src/modules/fleet-partner/`；此部分交由 `SR-FLEET-SETTLE-002` 處理。

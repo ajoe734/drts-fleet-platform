@@ -79,8 +79,47 @@ import {
   type PassengerPushPort,
 } from "./passenger-push.port";
 
+/**
+ * A live, unexpired lease is already held by another worker for this outbox
+ * row. Thrown instead of returning a fabricated `PassengerPushDeliveryOutcome`
+ * so a concurrent or restarted caller cannot mistake this for an attempt
+ * that actually ran.
+ */
+export class PassengerPushClaimConflictError extends Error {
+  constructor(outboxId: string) {
+    super(
+      `Passenger push delivery for outbox ${outboxId} is already claimed by another worker; skipping to avoid a duplicate send.`,
+    );
+    this.name = "PassengerPushClaimConflictError";
+  }
+}
+
+/**
+ * The push provider acknowledged (or rejected) the notification, but the
+ * durable receipt/outbox write did not commit. The real delivery outcome is
+ * unresolved: it must never be reported as `delivered`, since the provider
+ * step may have actually succeeded while a future retry — reading a stale
+ * `pending` outbox row — could send the passenger a duplicate notification.
+ */
+export class PassengerPushPersistenceUnknownError extends Error {
+  constructor(outboxId: string, cause?: unknown) {
+    super(
+      `Passenger push delivery outcome for outbox ${outboxId} could not be durably recorded after a provider acknowledgement; delivery state is unknown.`,
+      cause !== undefined ? { cause } : undefined,
+    );
+    this.name = "PassengerPushPersistenceUnknownError";
+  }
+}
+
 @Injectable()
 export class MultiTaxiService implements OnModuleInit {
+  /**
+   * Crash-safety ceiling for a claim lease. Normal completion (success or
+   * failure) always releases the claim promptly; this bound only protects
+   * against a worker that stalls or crashes mid-attempt.
+   */
+  private static readonly PUSH_DELIVERY_LEASE_SECONDS = 120;
+  private readonly pushDeliveryWorkerId = randomUUID();
   private authorizations: MultiTaxiOperatingAuthorizationRecord[] = [];
   private vehicles: MultiTaxiAuthorizedVehicleRecord[] = [];
   private readonly accessTokensByDigest = new Map<
@@ -906,6 +945,18 @@ export class MultiTaxiService implements OnModuleInit {
    * Hands one consumer-notification outbox row to the push provider.
    * An unconfigured or failing provider leaves the row undelivered with an
    * explicit result rather than stamping `delivered`.
+   *
+   * Before a real send, this claims an exclusive, leased fence on the
+   * outbox row (`MultiTaxiRepository.claimPushDeliveryRow`) so a concurrent
+   * or restarted caller cannot send the same notification twice; an
+   * unconfigured provider never reaches this claim, preserving the previous
+   * fail-fast behavior for that path. After a successful send, the provider
+   * receipt is durably recorded together with the outbox row update and the
+   * claim release in one fence-checked transaction
+   * (`MultiTaxiRepository.recordPushDeliveryOutcome`); if that does not
+   * commit, this throws rather than resolving with a fabricated `delivered`
+   * outcome, since the retry that would otherwise follow a stale `pending`
+   * row could re-send to the passenger for real.
    */
   async deliverPassengerNotification(
     record: ConsumerNotificationOutboxRecord,
@@ -933,8 +984,20 @@ export class MultiTaxiService implements OnModuleInit {
       );
     }
 
+    const claim = await this.repository?.claimPushDeliveryRow(
+      record.outboxId,
+      record.passengerSubjectRef,
+      this.pushDeliveryWorkerId,
+      MultiTaxiService.PUSH_DELIVERY_LEASE_SECONDS,
+    );
+    if (claim && !claim.claimed) {
+      throw new PassengerPushClaimConflictError(record.outboxId);
+    }
+    const fenceToken = claim?.claimed ? claim.fenceToken : 1;
+
+    let receipt: Awaited<ReturnType<PassengerPushPort["send"]>>;
     try {
-      const receipt = await this.passengerPushPort.send(
+      receipt = await this.passengerPushPort.send(
         {
           outboxId: record.outboxId,
           orderId: record.orderId,
@@ -945,20 +1008,60 @@ export class MultiTaxiService implements OnModuleInit {
         },
         { requestId },
       );
-      return this.persistPassengerNotificationOutcome({
-        outboxId: record.outboxId,
-        status: "delivered",
-        result: "delivered",
-        attemptCount,
-        nextAttemptAt: attemptedAt.toISOString(),
-        deliveredAt: attemptedAt.toISOString(),
-        providerName: receipt.providerName,
-      });
     } catch {
-      return this.persistPassengerNotificationOutcome(
+      const failedOutcome = await this.persistPassengerNotificationOutcome(
         failure("provider_error"),
       );
+      try {
+        await this.repository?.releasePushDeliveryClaim(
+          record.outboxId,
+          fenceToken,
+        );
+      } catch (releaseError) {
+        this.repository?.reportPersistenceFailure(
+          releaseError,
+          "push delivery claim release",
+        );
+      }
+      return failedOutcome;
     }
+
+    const outcome: PassengerPushDeliveryOutcome = {
+      outboxId: record.outboxId,
+      status: "delivered",
+      result: "delivered",
+      attemptCount,
+      nextAttemptAt: attemptedAt.toISOString(),
+      deliveredAt: attemptedAt.toISOString(),
+      providerName: receipt.providerName,
+    };
+
+    let recordResult: Awaited<
+      ReturnType<MultiTaxiRepository["recordPushDeliveryOutcome"]>
+    > | undefined;
+    try {
+      recordResult = await this.repository?.recordPushDeliveryOutcome({
+        outboxId: record.outboxId,
+        passengerSubjectRef: record.passengerSubjectRef,
+        fenceToken,
+        providerName: receipt.providerName,
+        providerAckState: "provider_acknowledged",
+        providerMessageRef: receipt.providerMessageRef,
+        deliveryOutcome: outcome,
+      });
+    } catch (error) {
+      this.repository?.reportPersistenceFailure(
+        error,
+        "consumer notification outbox delivery",
+      );
+      throw new PassengerPushPersistenceUnknownError(record.outboxId, error);
+    }
+
+    if (recordResult && !recordResult.recorded) {
+      throw new PassengerPushPersistenceUnknownError(record.outboxId);
+    }
+
+    return outcome;
   }
 
   private async persistPassengerNotificationOutcome(

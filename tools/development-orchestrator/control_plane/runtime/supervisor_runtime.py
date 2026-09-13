@@ -2679,12 +2679,25 @@ def maybe_rotate_antigravity_lane(
     return True
 
 
-def clear_provider_pause(state: dict[str, Any], agent_id: str) -> None:
+def clear_provider_pause(
+    state: dict[str, Any], agent_id: str, *,
+    pause_keys: list[str] | None = None, affected_lanes: set[str] | None = None,
+) -> dict[str, Any]:
+    """Retire a provider pause and the failure records that could resurrect it."""
     normalized = normalize_agent_id(agent_id) or str(agent_id).strip()
     registry = provider_pause_registry(state)
-    for key, entry in list(registry.items()):
-        if key == normalized or (isinstance(entry, dict) and entry.get("lane_id") == normalized):
-            registry.pop(key, None)
+    keys = pause_keys if pause_keys is not None else [
+        key for key, entry in registry.items()
+        if key == normalized or (isinstance(entry, dict) and entry.get("lane_id") == normalized)
+    ]
+    cleared = {key: registry.pop(key) for key in keys if key in registry}
+    lanes = affected_lanes or {normalized}
+    retired = [entry for entry in state.get("dispatch_pauses", [])
+               if cleared and normalize_agent_id(str(entry.get("provider") or "")) in lanes
+               and entry.get("failure_kind") in {"quota/terminal", "quota_terminal", "auth"}]
+    state["dispatch_pauses"] = [entry for entry in state.get("dispatch_pauses", [])
+                                if entry not in retired]
+    return {"cleared_provider_pauses": cleared, "retired_dispatch_pauses": retired}
 
 
 def lane_has_recorded_pause(state: dict[str, Any], agent_id: str) -> bool:
@@ -6623,6 +6636,8 @@ def blocked_task_triage_action(
     status: dict[str, Any],
     task: dict[str, Any],
 ) -> tuple[str, str | None]:
+    if task.get("external_gate"):
+        return "wait_for_parent_resolution", None
     task_id = str(task.get("id") or "").strip()
     if not task_id:
         return "create_unblock_task", None
@@ -6964,6 +6979,8 @@ def create_chair_unblock_task(
     parent = task_map.get(parent_id)
     if parent is None or str(parent.get("status") or "").lower() != "blocked":
         return False
+    if parent.get("external_gate"):
+        return False
     # Recursion base case: a blocked unblock/repair task or auto-generated helper
     # must NOT spawn another governance
     # child. Without this, a blocked `X-UNBLOCK` triages into `X-UNBLOCK-UNBLOCK`
@@ -7111,6 +7128,8 @@ def apply_chair_parent_resume_action(
     task_map = task_index_from_status(config, status)
     parent = task_map.get(task_id)
     if parent is None or str(parent.get("status") or "").lower() != "blocked":
+        return False
+    if parent.get("external_gate"):
         return False
 
     dependency_done_statuses = {
@@ -7882,6 +7901,14 @@ def break_full_deadlock(
     settings = config.get("supervisor", {})
     if not settings.get("deadlock_breaker_enabled", True):
         return False
+    recovery = state.get("deadlock_recovery", {})
+    if recovery.get("operator_attention") and _has_any_dispatchable_lane(config, state):
+        recovery.pop("operator_attention")
+        write_activity_log(config, {
+            "type": "deadlock_recovered",
+            "message": "A lane is dispatchable again; cleared stale all-lanes-paused attention.",
+        })
+        return True
     active_statuses = {str(v) for v in ready_dispatch_settings(config).get("active_worker_statuses", [])}
     active_agents, _ = active_worker_indexes(state, active_statuses)
     if active_agents:
