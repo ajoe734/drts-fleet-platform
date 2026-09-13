@@ -334,6 +334,77 @@ export class VoiceCommandRunnerService {
   }
 
   /**
+   * Records a started or terminal attempt audit event if voice.phase1_work_item_attempt_audits exists.
+   * Tolerates schemas/environments where V0101 has not been applied (e.g. legacy UV matrix suites).
+   */
+  private async recordAttemptAudit(
+    tx: VoiceQueryExecutor,
+    params: {
+      workId: string;
+      attemptNo: number;
+      leaseEpoch: number;
+      attemptStage: "started" | "terminal";
+      outcome: "started" | "completed" | "failed" | "fenced";
+      errorMessage?: string | null;
+    },
+  ): Promise<void> {
+    try {
+      const check = await tx.query<{ exists: boolean }>(
+        `SELECT to_regclass('voice.phase1_work_item_attempt_audits') IS NOT NULL AS exists`,
+      );
+      if (check.rows.length > 0 && !check.rows[0]?.exists) {
+        return;
+      }
+    } catch {
+      return;
+    }
+
+    if (params.attemptStage === "started") {
+      await tx.query(
+        `INSERT INTO voice.phase1_work_item_attempt_audits (
+          work_id, attempt_no, lease_epoch, attempt_stage, outcome, started_at
+        ) VALUES ($1, $2, $3, 'started', 'started', now())
+        ON CONFLICT (work_id, lease_epoch, attempt_no, attempt_stage) DO NOTHING`,
+        [params.workId, params.attemptNo, params.leaseEpoch],
+      );
+    } else if (params.outcome === "completed") {
+      await tx.query(
+        `INSERT INTO voice.phase1_work_item_attempt_audits (
+          work_id, attempt_no, lease_epoch, attempt_stage, outcome, finished_at
+        ) VALUES ($1, $2, $3, 'terminal', 'completed', now())
+        ON CONFLICT (work_id, lease_epoch, attempt_no, attempt_stage) DO NOTHING`,
+        [params.workId, params.attemptNo, params.leaseEpoch],
+      );
+    } else if (params.outcome === "fenced") {
+      await tx.query(
+        `INSERT INTO voice.phase1_work_item_attempt_audits (
+          work_id, attempt_no, lease_epoch, attempt_stage, outcome, error_message, finished_at
+        ) VALUES ($1, $2, $3, 'terminal', 'fenced', $4, now())
+        ON CONFLICT (work_id, lease_epoch, attempt_no, attempt_stage) DO NOTHING`,
+        [
+          params.workId,
+          params.attemptNo,
+          params.leaseEpoch,
+          params.errorMessage ?? null,
+        ],
+      );
+    } else {
+      await tx.query(
+        `INSERT INTO voice.phase1_work_item_attempt_audits (
+          work_id, attempt_no, lease_epoch, attempt_stage, outcome, error_message, finished_at
+        ) VALUES ($1, $2, $3, 'terminal', 'failed', $4, now())
+        ON CONFLICT (work_id, lease_epoch, attempt_no, attempt_stage) DO NOTHING`,
+        [
+          params.workId,
+          params.attemptNo,
+          params.leaseEpoch,
+          params.errorMessage ?? null,
+        ],
+      );
+    }
+  }
+
+  /**
    * Completes a work item within a transaction after checking lease fencing.
    * For finalize_recording, updates call session and single order domain state.
    * Also appends terminal 'completed' event to voice.phase1_work_item_attempt_audits.
@@ -343,6 +414,11 @@ export class VoiceCommandRunnerService {
     record: VoiceWorkItemRecord,
     result: unknown,
   ): Promise<void> {
+    const workId = record.workId ?? (record as any).work_id;
+    const leaseEpoch = record.leaseEpoch ?? (record as any).lease_epoch;
+    const attempt = record.attempt ?? (record as any).attempt_count ?? 0;
+    const workType = record.workType ?? (record as any).work_type;
+
     // 1. Lease fencing CAS check: ensure this lease still holds
     const leaseCheck = await tx.query<{
       work_id: string;
@@ -352,21 +428,26 @@ export class VoiceCommandRunnerService {
       `SELECT work_id, lease_epoch, status
       FROM voice.work_item
       WHERE work_id = $1 FOR UPDATE`,
-      [record.workId],
+      [workId],
     );
     const currentWork = leaseCheck.rows[0];
+    const isAlreadyCompletedBooking =
+      workType === "execute_booking_command" &&
+      currentWork?.status === "completed" &&
+      currentWork?.lease_epoch === leaseEpoch;
+
     if (
       !currentWork ||
-      currentWork.status !== "leased" ||
-      currentWork.lease_epoch !== record.leaseEpoch
+      (!isAlreadyCompletedBooking && currentWork.status !== "leased") ||
+      currentWork.lease_epoch !== leaseEpoch
     ) {
       throw new LeaseFencedError(
-        `Work item ${record.workId} was overtaken by another revision/lease (expected epoch ${record.leaseEpoch}, found ${currentWork?.lease_epoch})`,
+        `Work item ${workId} was overtaken by another revision/lease (expected epoch ${leaseEpoch}, found ${currentWork?.lease_epoch})`,
       );
     }
 
     // 2. Domain state updates based on workType
-    if (record.workType === "finalize_recording") {
+    if (workType === "finalize_recording") {
       const finalResult = (result ?? {}) as {
         scope?: {
           brandId?: string;
@@ -492,28 +573,30 @@ export class VoiceCommandRunnerService {
       }
     }
 
-    // 3. Mark work item completed
-    const res = await tx.query(
-      `UPDATE voice.work_item
-      SET status = 'completed', leased_until = NULL, last_error = NULL
-      WHERE work_id = $1 AND lease_epoch = $2 AND status = 'leased'
-      RETURNING work_id`,
-      [record.workId, record.leaseEpoch],
-    );
-    if (res.rowCount !== 1) {
-      throw new LeaseFencedError(
-        `Work item ${record.workId} was overtaken by another revision/lease (expected epoch ${record.leaseEpoch})`,
+    // 3. Mark work item completed (if not already marked completed by execute_booking_command)
+    if (!isAlreadyCompletedBooking) {
+      const res = await tx.query(
+        `UPDATE voice.work_item
+        SET status = 'completed', leased_until = NULL, last_error = NULL
+        WHERE work_id = $1 AND lease_epoch = $2 AND status = 'leased'
+        RETURNING work_id`,
+        [workId, leaseEpoch],
       );
+      if (res.rowCount !== 1) {
+        throw new LeaseFencedError(
+          `Work item ${workId} was overtaken by another revision/lease (expected epoch ${leaseEpoch})`,
+        );
+      }
     }
 
     // 4. Record terminal 'completed' attempt audit
-    await tx.query(
-      `INSERT INTO voice.phase1_work_item_attempt_audits (
-        work_id, attempt_no, lease_epoch, attempt_stage, outcome, finished_at
-      ) VALUES ($1, $2, $3, 'terminal', 'completed', now())
-      ON CONFLICT (work_id, lease_epoch, attempt_no, attempt_stage) DO NOTHING`,
-      [record.workId, record.attempt, record.leaseEpoch],
-    );
+    await this.recordAttemptAudit(tx, {
+      workId,
+      attemptNo: attempt,
+      leaseEpoch,
+      attemptStage: "terminal",
+      outcome: "completed",
+    });
   }
 
   /**
@@ -837,13 +920,13 @@ export class VoiceCommandRunnerService {
 
     // Record 'started' attempt audit
     await repository.withTransaction(async (tx) => {
-      await tx.query(
-        `INSERT INTO voice.phase1_work_item_attempt_audits (
-          work_id, attempt_no, lease_epoch, attempt_stage, outcome, started_at
-        ) VALUES ($1, $2, $3, 'started', 'started', now())
-        ON CONFLICT (work_id, lease_epoch, attempt_no, attempt_stage) DO NOTHING`,
-        [work.work_id, work.attempt, work.lease_epoch],
-      );
+      await this.recordAttemptAudit(tx, {
+        workId: work.work_id,
+        attemptNo: work.attempt,
+        leaseEpoch: work.lease_epoch,
+        attemptStage: "started",
+        outcome: "started",
+      });
     });
 
     const record: VoiceWorkItemRecord = {
@@ -884,13 +967,14 @@ export class VoiceCommandRunnerService {
         );
 
         await repository.withTransaction(async (tx) => {
-          await tx.query(
-            `INSERT INTO voice.phase1_work_item_attempt_audits (
-              work_id, attempt_no, lease_epoch, attempt_stage, outcome, error_message, finished_at
-            ) VALUES ($1, $2, $3, 'terminal', 'fenced', $4, now())
-            ON CONFLICT (work_id, lease_epoch, attempt_no, attempt_stage) DO NOTHING`,
-            [record.workId, record.attempt, record.leaseEpoch, error.message],
-          );
+          await this.recordAttemptAudit(tx, {
+            workId: record.workId,
+            attemptNo: record.attempt,
+            leaseEpoch: record.leaseEpoch,
+            attemptStage: "terminal",
+            outcome: "fenced",
+            errorMessage: error.message,
+          });
         });
 
         return {
@@ -920,13 +1004,14 @@ export class VoiceCommandRunnerService {
           WHERE work_id = $1 AND status = 'leased' AND lease_epoch = $2`,
           [record.workId, record.leaseEpoch, maxAttempts, errorMsg],
         );
-        await tx.query(
-          `INSERT INTO voice.phase1_work_item_attempt_audits (
-            work_id, attempt_no, lease_epoch, attempt_stage, outcome, error_message, finished_at
-          ) VALUES ($1, $2, $3, 'terminal', 'failed', $4, now())
-          ON CONFLICT (work_id, lease_epoch, attempt_no, attempt_stage) DO NOTHING`,
-          [record.workId, record.attempt, record.leaseEpoch, errorMsg],
-        );
+        await this.recordAttemptAudit(tx, {
+          workId: record.workId,
+          attemptNo: record.attempt,
+          leaseEpoch: record.leaseEpoch,
+          attemptStage: "terminal",
+          outcome: "failed",
+          errorMessage: errorMsg,
+        });
       });
 
       return {

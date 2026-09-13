@@ -403,6 +403,11 @@ class InMemoryDatabase {
       return { rows: [repair as unknown as T], rowCount: 1 };
     }
 
+    // 4.5. Table existence check
+    if (trimmed.includes("to_regclass")) {
+      return { rows: [{ exists: true } as unknown as T], rowCount: 1 };
+    }
+
     // 5. INSERT into voice.phase1_work_item_attempt_audits
     if (trimmed.includes("INSERT INTO voice.phase1_work_item_attempt_audits")) {
       const workId = params[0] as string;
@@ -1524,6 +1529,129 @@ describe("SR-RECORDING-RECOVERY-20260913: Recording Recovery and Controlled Repl
       );
       expect(work).toBeDefined();
       expect(work!.voice_session_id).toBeNull();
+    });
+
+    it("gracefully tolerates database schemas without voice.phase1_work_item_attempt_audits", async () => {
+      const db = new InMemoryDatabase();
+      // Override to_regclass to return false (table does not exist in legacy schema)
+      const origQuery = db.query.bind(db);
+      db.query = async <T = any>(sql: string, params: unknown[] = []) => {
+        if (sql.includes("to_regclass")) {
+          return { rows: [{ exists: false } as unknown as T], rowCount: 1 };
+        }
+        if (sql.includes("INSERT INTO voice.phase1_work_item_attempt_audits")) {
+          throw new Error(
+            'relation "voice.phase1_work_item_attempt_audits" does not exist',
+          );
+        }
+        return origQuery(sql, params);
+      };
+
+      const runner = new VoiceCommandRunnerService(
+        {
+          repository: {
+            withTransaction: (fn: any) => fn(db),
+          },
+        } as any,
+        {
+          finalizeRecording: async (p: any) => ({
+            manifestRef: { objectKey: "obj-001", checksum: "sha256-hash-001" },
+            recordingId: p.scope.recordingId,
+            scope: p.scope,
+            linkedOrderId: p.linkedOrderId,
+          }),
+        } as any,
+      );
+
+      const workId = "work-no-audit-table";
+      db.workItems.set(workId, {
+        work_id: workId,
+        command_id: null,
+        voice_session_id: null,
+        work_type: "finalize_recording",
+        dedupe_key: "finalize_recording:call:call-no-audit",
+        payload_ref: JSON.stringify({
+          callId: "call-no-audit",
+          brandId: "default",
+        }),
+        status: "leased",
+        lease_epoch: 1,
+        leaseEpoch: 1,
+        attempt: 0,
+        attempt_count: 0,
+        max_attempts: 5,
+        last_error: null,
+        leased_until: null,
+        created_at: new Date(),
+        updated_at: new Date(),
+      } as any);
+
+      await expect(
+        runner.completeWorkItemWithDomainState(
+          db as any,
+          {
+            workId,
+            leaseEpoch: 1,
+            attempt: 0,
+            workType: "finalize_recording",
+            commandId: null,
+            voiceSessionId: null,
+            dedupeKey: "finalize_recording:call:call-no-audit",
+            payloadRef: null,
+          },
+          {
+            scope: { brandId: "default", callId: "call-no-audit" },
+          },
+        ),
+      ).resolves.not.toThrow();
+
+      expect(db.workItems.get(workId)?.status).toBe("completed");
+    });
+
+    it("booking command already completed does not cause secondary lease fencing conflict (§B6)", async () => {
+      const db = new InMemoryDatabase();
+      const workId = "work-booking-already-completed";
+      db.workItems.set(workId, {
+        work_id: workId,
+        command_id: "cmd-booking-123",
+        voice_session_id: "vs-123",
+        work_type: "execute_booking_command",
+        dedupe_key: "cmd-booking-123",
+        payload_ref: null,
+        status: "completed",
+        lease_epoch: 2,
+        leaseEpoch: 2,
+        attempt: 1,
+        attempt_count: 1,
+        max_attempts: 5,
+        last_error: null,
+        leased_until: null,
+        created_at: new Date(),
+        updated_at: new Date(),
+      } as any);
+
+      const runner = new VoiceCommandRunnerService({
+        repository: {
+          withTransaction: (fn: any) => fn(db),
+        },
+      } as any);
+
+      await expect(
+        runner.completeWorkItemWithDomainState(
+          db as any,
+          {
+            workId,
+            commandId: "cmd-booking-123",
+            voiceSessionId: "vs-123",
+            workType: "execute_booking_command",
+            dedupeKey: "cmd-booking-123",
+            payloadRef: null,
+            leaseEpoch: 2,
+            attempt: 1,
+          },
+          { status: "succeeded" },
+        ),
+      ).resolves.not.toThrow();
     });
   });
 });
