@@ -1,3 +1,4 @@
+import { EventEmitter } from "node:events";
 import { describe, expect, it } from "vitest";
 
 import { ApiRequestError } from "../../../../apps/api/src/common/api-envelope";
@@ -12,9 +13,9 @@ import { MemoryMailOutbox } from "../../../unit/system-remediation/sr-credential
 
 describe("SR-CREDENTIAL-EXPIRY-20260913: RegulatoryRegistry Controller & Lifecycle Integration", () => {
   const createController = () => {
-    const opsEvents = new OpsDispatchEventsService();
+    const opsEvents = new OpsDispatchEventsService(new EventEmitter() as any);
     const auditNotification = new AuditNotificationService();
-    const driverProfile = new DriverProfileService(opsEvents);
+    const driverProfile = new DriverProfileService(auditNotification);
     const repository = new RegulatoryRegistryRepository();
     const outbox = new MemoryMailOutbox();
     const notificationDelivery = new NotificationDeliveryService(outbox);
@@ -60,6 +61,7 @@ describe("SR-CREDENTIAL-EXPIRY-20260913: RegulatoryRegistry Controller & Lifecyc
 
     const targetEvent = events.find((e: any) => e.entity_id === "drv-demo-001");
     expect(targetEvent).toBeDefined();
+    if (!targetEvent) throw new Error("targetEvent expected to be defined");
     expect(targetEvent.credential_type).toBe("driver_license");
 
     // 4. Query receipts endpoint

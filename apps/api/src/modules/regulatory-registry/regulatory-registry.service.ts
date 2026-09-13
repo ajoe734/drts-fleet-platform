@@ -726,7 +726,12 @@ export class RegulatoryRegistryService implements OnModuleInit, OnModuleDestroy 
 
       // Bounded startup catch-up for expired credentials and policies
       try {
-        await this.reconcileExpiredCredentials({ limit: 100 });
+        if (
+          typeof (this.regulatoryRegistryRepository as any)?.scanExpiredDrivers === "function" &&
+          typeof (this.regulatoryRegistryRepository as any)?.withTransaction === "function"
+        ) {
+          await this.reconcileExpiredCredentials({ limit: 100 });
+        }
       } catch (err) {
         this.logger.warn(
           `Startup credential expiry catch-up skipped or failed: ${err instanceof Error ? err.message : String(err)}`,
@@ -1799,7 +1804,10 @@ export class RegulatoryRegistryService implements OnModuleInit, OnModuleDestroy 
       "activate_insurance_policy",
     );
 
-    if (this.regulatoryRegistryRepository && policy.status === "active") {
+    if (
+      this.regulatoryRegistryRepository?.supersedeActiveExpiryEventsForEntity &&
+      policy.status === "active"
+    ) {
       void this.regulatoryRegistryRepository.supersedeActiveExpiryEventsForEntity(
         "policy",
         policy.policyId,
@@ -3740,7 +3748,7 @@ export class RegulatoryRegistryService implements OnModuleInit, OnModuleDestroy 
     driverId: string,
     command: UpdateDriverLicensesCommand,
   ): Promise<void> {
-    if (!this.regulatoryRegistryRepository) return;
+    if (!this.regulatoryRegistryRepository?.supersedeActiveExpiryEventsForEntity) return;
     const now = Date.now();
     if (command.licenseExpiry && Date.parse(command.licenseExpiry) > now) {
       await this.regulatoryRegistryRepository.supersedeActiveExpiryEventsForEntity(
@@ -3777,7 +3785,7 @@ export class RegulatoryRegistryService implements OnModuleInit, OnModuleDestroy 
     status?: ExpiryEventStatus | undefined;
     limit?: number | undefined;
   }): Promise<RegistryExpiryEventWithIntent[]> {
-    if (!this.regulatoryRegistryRepository) return [];
+    if (!this.regulatoryRegistryRepository?.listExpiryEvents) return [];
     return this.regulatoryRegistryRepository.listExpiryEvents(filter);
   }
 
@@ -3786,14 +3794,14 @@ export class RegulatoryRegistryService implements OnModuleInit, OnModuleDestroy 
     deliveryStatus?: DeliveryIntentStatus | undefined;
     limit?: number | undefined;
   }): Promise<RegistryExpiryDeliveryIntentRow[]> {
-    if (!this.regulatoryRegistryRepository) return [];
+    if (!this.regulatoryRegistryRepository?.listDeliveryIntents) return [];
     return this.regulatoryRegistryRepository.listDeliveryIntents(filter);
   }
 
   async getExpiryEvent(
     eventId: string,
   ): Promise<RegistryExpiryEventWithIntent | null> {
-    if (!this.regulatoryRegistryRepository) return null;
+    if (!this.regulatoryRegistryRepository?.getExpiryEventById) return null;
     return this.regulatoryRegistryRepository.getExpiryEventById(eventId);
   }
 
@@ -3815,6 +3823,19 @@ export class RegulatoryRegistryService implements OnModuleInit, OnModuleDestroy 
     let deliveryIntentsEnqueued = 0;
 
     const repository = this.regulatoryRegistryRepository!;
+    if (typeof (repository as any)?.withTransaction !== "function") {
+      return {
+        asOf,
+        scope,
+        scannedDrivers: 0,
+        scannedPolicies: 0,
+        expiredEventsCreated: 0,
+        expiredEventsSuperseded: 0,
+        deliveryIntentsCreated: 0,
+        deliveryIntentsEnqueued: 0,
+        events: [],
+      };
+    }
 
     // 1. Scan PostgreSQL or in-memory sources for candidate expired records
     let driverCandidates: DriverRegistryRecord[] = [];

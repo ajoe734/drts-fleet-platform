@@ -1,3 +1,4 @@
+import { EventEmitter } from "node:events";
 import { describe, expect, it } from "vitest";
 
 import { OpsDispatchEventsService } from "../../../../apps/api/src/common/ops-dispatch-events.service";
@@ -13,9 +14,9 @@ describe("SR-CREDENTIAL-EXPIRY-20260913: Credential Expiry Reconciliation & Rene
     withOutbox?: boolean;
     mockAcademyService?: any;
   }) => {
-    const opsEvents = new OpsDispatchEventsService();
+    const opsEvents = new OpsDispatchEventsService(new EventEmitter() as any);
     const auditNotification = new AuditNotificationService();
-    const driverProfile = new DriverProfileService(opsEvents);
+    const driverProfile = new DriverProfileService(auditNotification);
     const repository = new RegulatoryRegistryRepository();
 
     const outbox = options?.withOutbox ? new MemoryMailOutbox() : null;

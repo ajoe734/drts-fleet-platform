@@ -9,13 +9,13 @@ import type {
 
 describe("SR-CREDENTIAL-EXPIRY-20260913: PostgresMailOutbox Invariants (§B5 / V0103)", () => {
   class FakePoolClient {
-    public queries: Array<{ text: string; values?: unknown[] }> = [];
+    public queries: Array<{ text: string; values?: unknown[] | undefined }> = [];
     public inTransaction = false;
     public rows: any[] = [];
     public deliveriesStore: Map<string, any> = new Map();
 
     async query(text: string, values?: unknown[]): Promise<{ rows: any[]; rowCount: number }> {
-      this.queries.push({ text: text.trim(), values });
+      this.queries.push(values !== undefined ? { text: text.trim(), values } : { text: text.trim() });
       const normalized = text.trim();
 
       if (normalized === "BEGIN") {
