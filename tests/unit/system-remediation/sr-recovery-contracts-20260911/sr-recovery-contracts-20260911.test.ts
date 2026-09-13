@@ -139,24 +139,46 @@ describe("SR-RECOVERY-CONTRACTS-20260911: Proof, Push-Receipt & Adapter-Registry
       }
     });
 
-    it("does not itself create infra/migrations/*.sql files (allocation only, matching SR-CONTRACT-001 precedent)", () => {
+    it("allocated migrations on disk match approved filenames when delivered by dependent tasks (matching SR-CONTRACT-001 precedent)", () => {
       const migrationsDir = path.join(repoRoot, "infra/migrations");
       const content = JSON.parse(fs.readFileSync(allocationPath, "utf8"));
+      const diskFiles = fs.existsSync(migrationsDir)
+        ? fs.readdirSync(migrationsDir)
+        : [];
       for (const alloc of content.additional_allocations) {
-        expect(
-          fs.existsSync(path.join(migrationsDir, alloc.migration_filename)),
-        ).toBe(false);
+        const prefix = `${alloc.version}_`;
+        const matching = diskFiles.filter((f: string) => f.startsWith(prefix));
+        for (const file of matching) {
+          expect(file).toBe(alloc.migration_filename);
+        }
       }
+      // V0100 is formally implemented by SR-ADMIN-ADAPTER-001
+      expect(
+        fs.existsSync(
+          path.join(migrationsDir, "V0100__sr_platform_adapter_registry.sql"),
+        ),
+      ).toBe(true);
     });
 
-    it("highest canonical migration on disk remains below the new reservations", () => {
+    it("highest canonical migration on disk remains within the new reservations", () => {
       const migrationsDir = path.join(repoRoot, "infra/migrations");
       const files = fs
         .readdirSync(migrationsDir)
         .filter((f) => /^V\d{4}__/.test(f));
       const versions = files.map((f) => parseInt(f.slice(1, 5), 10));
       const highest = Math.max(...versions);
-      expect(highest).toBeLessThan(98);
+      expect(highest).toBeLessThanOrEqual(100);
+      const content = JSON.parse(fs.readFileSync(allocationPath, "utf8"));
+      const allowedVersions = new Set(
+        content.additional_allocations.map((a: any) =>
+          parseInt(a.version.replace(/^V0*/, ""), 10),
+        ),
+      );
+      for (const ver of versions) {
+        if (ver >= 98) {
+          expect(allowedVersions.has(ver)).toBe(true);
+        }
+      }
     });
   });
 

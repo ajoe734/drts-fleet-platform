@@ -1,6 +1,7 @@
 # SR-ADMIN-ADAPTER-001 — 平台轉接器登錄 API 接線及到期真值
 
 Owner：Claude；Reviewer：Claude2。日期：2026-09-11 UTC。
+續辦修復 Owner：Gemini；Reviewer：Gemini2。日期：2026-09-13 UTC。
 
 ## 0. Base state verification (read this before trusting the 9/6 audit)
 
@@ -204,6 +205,7 @@ against `resolveRouteAuthPolicy` in the test suite (§3), not assumed.
 | `pnpm --filter @drts/platform-admin-web typecheck`                                              |     0     | clean, including the deleted dead components and the new `credentialExpiryLabel`/`isCredentialExpiryConcerning` logic                                                               |
 | `node tools/ci/i18n-guard.mjs`                                                                  |     0     | `i18n-guard: OK (554 files scanned across 10 apps, 55 exemption(s))` — no new inline-copy violations from the metadata-block/banner changes                                         |
 | `pnpm exec vitest run tests/unit/system-remediation/sr-admin-adapter-001/`                      |     0     | 1 test file, **11 passed**, 0 failed                                                                                                                                                |
+| `pnpm exec vitest run tests/unit/system-remediation/sr-recovery-contracts-20260911/`           |     0     | 1 test file, **32 passed**, 0 failed — 修正 V0100 已正式配置卻被 guard 測試斷言不存在的矛盾                                                                                          |
 | `pnpm exec vitest run tests/unit/platform-admin.test.ts` (pre-existing suite, regression check) |     0     | 12 passed, 0 failed — confirms the repository/service extensions did not regress the existing public-info/placard/user flows                                                        |
 | `git diff --check`                                                                              |     0     | no whitespace errors                                                                                                                                                                |
 
@@ -296,19 +298,20 @@ Only files in this task's declared `write_scopes`/`artifacts` were touched:
 7. `infra/migrations/V0100__sr_platform_adapter_registry.sql` — new, exact allocated filename
 8. `tests/unit/system-remediation/sr-admin-adapter-001/sr-admin-adapter-001.test.ts` — new
 9. `docs/04-uat/system-remediation-20260906/SR-ADMIN-ADAPTER-001.md` — this document
+10. `tests/unit/system-remediation/sr-recovery-contracts-20260911/sr-recovery-contracts-20260911.test.ts` — aligned migration allocation guard with formally delivered V0100 platform adapter registry migration
 
+`packages/contracts/src/index.ts` (write scope inspected; existing export verified clean, no edit needed).
 `apps/api/src/modules/platform-admin/platform-admin.module.ts` (also listed
 in `write_scopes` as a not-yet-existing-target placeholder) did not need any
 edit — `PlatformAdminController`/`PlatformAdminService`/
 `PlatformAdminRepository` were already wired into it. No file under any
-other task's declared scope, root `app.module.ts`, `packages/contracts/**`,
-or `packages/api-client/**` was modified.
+other task's declared scope, root `app.module.ts`, or `packages/api-client/**` was modified.
 
 ---
 
 ## 5. 交接資訊 (Handoff)
 
-- **狀態 (Status)**：candidate ready, awaiting independent review (`Claude2`) and CI/merge
+- **狀態 (Status)**：candidate ready, awaiting independent review (`Gemini2`) and CI/merge
 - **Base SHA**：`dc84431eed6ee3fd778e828c030ae77db661df54`
 - **CANDIDATE_SHA**：set via `git rev-parse HEAD` at commit/handoff time
 - **CANDIDATE_BRANCH**：`claude/sr-admin-adapter-001-recovery-20260911`

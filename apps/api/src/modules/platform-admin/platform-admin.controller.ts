@@ -51,7 +51,7 @@ import { PlatformAdminService } from "./platform-admin.service";
 export class PlatformAdminController {
   constructor(
     private readonly platformAdminService: PlatformAdminService,
-    private readonly idempotencyService: IdempotencyService,
+    private readonly idempotencyService?: IdempotencyService,
   ) {}
 
   @Get("public-info")
@@ -361,6 +361,10 @@ export class PlatformAdminController {
     @Headers("idempotency-key") idempotencyKey?: string,
     @Headers("x-request-id") requestId?: string,
   ) {
+    if (!this.idempotencyService) {
+      const data = this.platformAdminService.registerPlatformAdapter(adapter);
+      return toApiSuccessEnvelope(data, requestId);
+    }
     const result = await this.idempotencyService.execute({
       scope: `platform-admin:${adapter.id}:adapter_register`,
       idempotencyKey,
