@@ -17,7 +17,6 @@ import {
   Req,
   Res,
   StreamableFile,
-  UseGuards,
 } from "@nestjs/common";
 import { Throttle } from "@nestjs/throttler";
 
