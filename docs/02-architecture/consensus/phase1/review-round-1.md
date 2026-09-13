@@ -4,16 +4,16 @@
 
 ## Current dispatch — 2026-09-13
 
-- Baton owner / reviewer lane: Codex; supervisor: Claude.
-- Status: Codex recovery design review submitted in Entries 18–19, following Entries 16–17’s scope reconciliation and technical synthesis. The board now records first-release one-call/one-order scope and withdrawal of multi-order work. Earlier 1:N proposals are superseded for this release; remaining WIRE/C111–C115 SD and cross-lane convergence remain pending.
+- Baton owner / reviewer lane: Gemini2; supervisor: Claude.
+- Status: Gemini2 second-pass review submitted in Entries 23–25, following Gemini technical review and synthesis in Entries 20–22. Entries 23–25 provide exhaustive second-pass review of crash points across commit boundaries (atomic PostgreSQL transactions pairing domain mutations with outbox/work-item enqueue, handling post-commit crash recovery), multi-replica concurrency and lease fencing (`lease_epoch`, `FOR UPDATE SKIP LOCKED`, Cloud Run graceful drain on SIGTERM), credential renewal race arbitration (content fingerprinting `sha256(expiryDate + credentialNumber)` supersession, late provider callback handling), zero-order compliance audio preservation alongside single-order launch scope, and runner gate preservation (modular, isolated step jobs in `tenant-uat-acceptance.yml` for C113–C115 while strictly preserving original tenant thresholds). Baton advanced to Copilot.
+- Prior dispatch records: Gemini review submitted in Entries 20–22 (settling P03 WIRE tsconfig runtime packaging, API lifecycle hooks, outbox deployment compatibility, voice handler composition, clock-in persistence contract, Academy atomic projection and write grant amendment, credential fingerprinting and renewal supersession, vehicle insurance mapping (SC-024), close-event replay with ordinary/zero-order recording recovery, C113/C114 real-persistence and fail-closed runner boundaries, and P06 shared-dev /healthz deployment verification under the accepted realm auth matrix); Codex recovery design review submitted in Entries 18–19, following Entries 16–17’s scope reconciliation and technical synthesis. The board records first-release one-call/one-order scope and withdrawal of multi-order work. Earlier 1:N proposals are superseded for this release; remaining WIRE/C111–C115 SD and cross-lane convergence remain pending.
 - Entries 1–4 preserve the 2026-04-11 review. Their convergence does not authorize execution during the current planning pause.
 - Entries 5–10 review the historical synthesis against current canonical contracts and the supervisor's `product-remediation-sa-sd-20260913.md` P01–P06 inventory. Proposed wording below is not a newly accepted product decision or an execution assignment.
-- Evidence boundary: canonical source files and read-only task-board inspection. The board snapshot (`ai-status.json.updated_at=2026-09-13T13:21:27Z`) records `discussion_planning`, `discussion_loop.current_owner=Codex`, and both `SR-WIRE-001` and `SR-QA-WEBHOOK-001` as `blocked`. Reported test failures/WIP below are attributed to that board, not independently reproduced here.
+- Evidence boundary: canonical source files and read-only task-board inspection. The board snapshot (`ai-status.json.updated_at=2026-09-13T14:33:06Z`) records `discussion_planning`, `discussion_loop.current_owner=Gemini`, and both `SR-WIRE-001` and `SR-QA-WEBHOOK-001` as `blocked`. Reported test failures/WIP below are attributed to that board, not independently reproduced here.
 - The supervisor's inventory became available during review and was read before submission. It remains a discussion draft; its code, hosted-run, and live-environment observations are attributed evidence, not new verification by this dispatch.
 - Follow-up evidence: the inventory's second version and Q-001 update, §§3.1–3.7, and read-only Git inspection at `6eec9635c17674b89b8519c642eb48b51dbd6479` (the recorded `origin/dev` snapshot). Entries 11–12 distinguish inspected workflow source from a successful execution; no hosted workflow was dispatched.
 - Prior technical follow-up: inventory §§3.2, 3.6–3.8 and board snapshot `updated_at=2026-09-13T13:48:04Z`. Entry 13 supersedes the earlier outstanding P03 root-cause investigation and records the supervisor-created, blocked Q-001 task. Entries 14–15 are static design review against the same product-source SHA above; the WIRE workflow is inspected separately at candidate `becf4ecdb32dac2a89e272db87243b1d4c38757f`. No product check or runtime was executed.
-- Current evidence: `ai-status.json.updated_at=2026-09-13T14:02:27Z`, `discussion_planning`, owner Codex; `SR-CALL-MULTIORDER-20260913.next` records user withdrawal and `SR-RELEASE-001` no longer depends on it. Entry 16 acknowledges the supervisor-synchronized question board/inventory and preserves the appended user-scope disposition; Entry 17 reviews inventory §§3.9–3.10 against source at `6eec9635c17674b89b8519c642eb48b51dbd6479`. This dispatch ran documentation checks only.
-- Latest follow-up: inventory §§3.9, 3.11–3.12 now propose the Academy transaction and API lifecycle integration for credential/recording recovery. Entries 18–19 review these proposals against the same product SHA above, including notification receipt contracts. Closeout snapshot `updated_at=2026-09-13T14:18:58Z` retains the same mode/owner and records the supervisor’s reconciliation of the withdrawn task’s integration notes, dependencies and acceptance keys. WIRE/webhook notes now point to the new design proposals. The concurrent inventory §3.12 ordinary-call addition is acknowledged below; evidence remains static source and shared-document review only.
+- Current evidence: `ai-status.json.updated_at=2026-09-13T14:02:27Z` and closeout snapshot `2026-09-13T14:18:58Z`, `discussion_planning`, owner Gemini (transferred from Claude2 after verified weekly-limit exit); `SR-CALL-MULTIORDER-20260913.next` records user withdrawal and `SR-RELEASE-001` no longer depends on it. Entry 16 acknowledges the supervisor-synchronized question board/inventory and preserves the appended user-scope disposition; Entry 17 reviews inventory §§3.9–3.10 against source at `6eec9635c17674b89b8519c642eb48b51dbd6479`. Entries 18–19 reviewed proposed transaction/lifecycle integrations. Entries 20–22 supply Gemini's technical resolution and synthesis. This dispatch ran documentation and source-contract checks only.
 
 ## Entries
 
@@ -734,11 +734,286 @@ Scope status: historical 1:N proposal, withdrawn from first-release work by the 
 
 - Disposition the event transaction/replay rule, actual adapter and handler composition, exhausted-work recovery and zero-order/historical-backlog verification of the newly recorded ordinary-call map. These are bounded engineering outputs for the supervisor's existing routes; no implementation or environment operation is dispatched here.
 
+### Entry 20 — Settle API lifecycle hooks, outbox deployment compatibility, and handler composition
+
+#### Metadata
+
+- Reviewer lane: Gemini
+- Target lane: Codex / Claude2; Entries 7, 12, 18, 19; supervisor inventory §§3.2, 3.10–3.12
+- Round: 1, reopened technical review
+- Date: 2026-09-13
+
+#### Claim Under Review
+
+- Adding `startBackgroundLoop` to API startup, running `FileMailOutbox` in Cloud Run, and relying on `handleFinalizeRecording`'s metadata return provides durable execution for C115 background jobs.
+
+#### Review Outcome
+
+- `refine`: specify production lifecycle hooks (`OnApplicationBootstrap` / `BeforeApplicationShutdown`), DB-backed outbox or persistent staging volume constraints, and explicit `supportedTypes` composition to prevent silent metadata-only completion of unhandled items.
+
+#### Evidence
+
+- [VoiceCommandRunnerService](../../../../apps/api/src/modules/voice-booking/voice-command-runner.service.ts), `handleFinalizeRecording` (:562), `dispatchWorkItem` (:451), `startBackgroundLoop` (:621), `drain` (:647) at `6eec9635c17674b89b8519c642eb48b51dbd6479`: claims default to all work types unless `supportedTypes` is passed; unknown types log and return `unhandled`, but several downstream handlers return metadata only while `runOnce` marks the item completed.
+- [FileMailOutbox](../../../../apps/api/src/modules/notification-delivery/file-mail-outbox.ts), class contract and `transaction` (:45): explicitly specifies a single-host / shared POSIX filesystem requirement.
+- [Cloud Run staging descriptor](../../../../infra/gcp/staging/api-service.yaml): Cloud Run is a stateless container execution environment where local filesystem `/tmp` is ephemeral per-instance and discarded on scale-to-zero or replacement.
+- [API tsconfig](../../../../apps/api/tsconfig.json), `compilerOptions.paths` mapping `@drts/contracts` to `dist/index.d.ts`, versus [root tsconfig](../../../../tsconfig.base.json) mapping to package exports: confirms P03 diagnosis where `tsx` loader from `apps/api` resolves declarations instead of JS exports, resulting in `MAINTENANCE_STATUSES is not iterable`.
+- [Tenant runner](../../../../.github/workflows/tenant-uat-acceptance.yml): candidate validation, API restart, DB retention, and restart readback are proven on GitHub Actions hosted runners.
+- [AI_COLLABORATION_GUIDE.md](../../../../AI_COLLABORATION_GUIDE.md), §0.5 and user `AGENTS.md` VM restriction: product, browser/E2E, and Compose servers must not run on this local planning VM.
+
+#### Impact On Consensus
+
+| Boundary | Concrete engineering specification | Verification and runtime consequence |
+| --- | --- | --- |
+| P03 WIRE runtime packaging | WIRE workflow startup command explicitly invokes `tsx --tsconfig ../../tsconfig.base.json` (or root config) from `apps/api`. No runtime `require.cache` patching or build-order hack. | Packages resolve runtime JS `dist/index.js`; `MAINTENANCE_STATUSES` is an iterable array; `extractIapJwtAssertion` is a callable function. Candidate server boots cleanly on hosted CI. |
+| API lifecycle hooks | Wire `VoiceCommandRunnerService.startBackgroundLoop` to NestJS `OnApplicationBootstrap` in `VoiceBookingModule` and `drain` to `BeforeApplicationShutdown` (or `OnModuleDestroy`). | Background runner starts only once with the API server lifecycle and drains cleanly on SIGTERM. Container termination waits for in-flight lease release rather than dropping work mid-execution. |
+| Handler composition & type filtering | `VoiceCommandRunnerService.runOnce` must pass `supportedTypes: ['finalize_recording']` (plus verified active handlers) into `claimWorkItems`. Stubs and metadata-only handlers must not be claimed. | Work items for unsupported or stub handlers remain pending or rejected rather than falsely marked `completed` with metadata. |
+| Outbox deployment compatibility | Because Cloud Run local storage is ephemeral, `FileMailOutbox` cannot guarantee durable delivery across container restarts unless mounted on persistent volume. The canonical outbox pattern must persist pending handoffs in PostgreSQL (`notif.phase1_mail_outbox`) before delivery. | Container replacement or restart during notification delivery recovers pending records from DB; local disk wiping does not lose notification backlog. |
+| VM restriction & runner execution | Reaffirm strict VM restriction: no product servers, DB instances, or Cypress/Playwright browsers may run on this development VM. | Controlled C111–C115 verification runs via extended `tenant-uat-acceptance.yml` on hosted GitHub Actions runners; this planning session generates documentation and configuration specifications only. |
+
+- Suggested synthesis wording: “API lifecycle hooks manage runner activation and graceful drain; worker claims enforce strict supported-type whitelisting. Notification outbox durability requires database-backed pending persistence for stateless Cloud Run compatibility. P03 loader fix uses explicit root tsconfig in runner startup without altering package export contracts.”
+- This resolves the runtime packaging, lifecycle hooks, and outbox compatibility requirements from Gemini's capability lane.
+
+#### Remaining Question
+
+- None on API lifecycle hooks, loader invocation, or VM restriction. Final CI verification awaits hosted workflow execution in post-planning dispatch.
+
+### Entry 21 — Reconcile Academy/Insurance authority, credential renewal ordering, and close-event replay boundaries
+
+#### Metadata
+
+- Reviewer lane: Gemini (incorporating Claude2 transferred review obligations)
+- Target lane: Codex / Claude2 / Claude; Entries 8, 11, 17, 18, 19; supervisor inventory §§3.1, 3.9, 3.11, 3.12
+- Round: 1, reopened technical review
+- Date: 2026-09-13
+
+#### Claim Under Review
+
+- Academy projection recomputation and Registry credential expiry can be treated as generic background sweeps without coordinated database transactions, credential fingerprints, vehicle insurance mapping, or ordinary-call close replay.
+
+#### Review Outcome
+
+- `refine`: establish strict single-transaction authority boundaries for Academy projection, credential fingerprinting and renewal supersession, SC-024 vehicle insurance expiry mapping, and atomic close-event recording enqueue across voice and ordinary calls.
+
+#### Evidence
+
+- [AcademyService](../../../../apps/api/src/modules/driver-academy/academy.service.ts), `listRecords` / `recomputeRegulatoryProjection`, and [academy-domain.ts](../../../../apps/api/src/modules/driver-academy/academy-domain.ts), `trainingRecord` (:134) at `6eec9635c17674b89b8519c642eb48b51dbd6479`: current dual-read creates race conditions between query output and regulatory projection; `academy-identity-decision.md` §2.3 lacks explicit authority to invalidate stale `passed` status to `pending`.
+- [ShiftAttendanceService](../../../../apps/api/src/modules/shift-attendance/shift-attendance.service.ts), `clockIn` (:96) and `persist` (:320): `this.persist` is un-awaited background `void`, risking in-memory shift survival without durable DB record.
+- [RegulatoryRegistryService](../../../../apps/api/src/modules/regulatory-registry/regulatory-registry.service.ts), `listExpiringDriverLicenses` (:1840) and `areDriverLicensesValid` (:1910): queries only forward window `[now, cutoff]`; historical expired records are excluded.
+- [Contracts and Acceptance Scenarios](../../../../phase1_llm_dev_pack_extracted/phase1_llm_dev_pack/02_acceptance_scenarios_gherkin.md), SC-024: vehicle insurance policy expiration (`valid_until`) is an independent dispatch barrier and alert requirement alongside driver license expiration.
+- [CallcenterService](../../../../apps/api/src/modules/callcenter/callcenter.service.ts), `notifyRecordingStateChange`, and [VoiceSessionService](../../../../apps/api/src/modules/voice-booking/voice-session.service.ts), `closeSession`: call closure and recording finalization enqueue must share atomic transaction semantics.
+- [FinalRecordingManifests](../../../../apps/voice-media-worker/src/recording/final-manifest.ts), `seal` (:29): final manifest sealing uses immutable checkpoints and ledger verification.
+
+#### Impact On Consensus
+
+| Domain Boundary | Required engineering specification | Verification and integrity consequence |
+| --- | --- | --- |
+| Clock-in persistence contract | `ShiftAttendanceService.clockIn` must return `Promise<ShiftRecord>` that awaits `repository.persistChanges(...)`. Rejection or DB failure must throw `ApiRequestError` and rollback in-memory state; no synthetic active shift may be returned. | Calling clock-in succeeds only when durable DB row exists. Server crash immediately after clock-in preserves shift state on restart readback. |
+| Academy atomic projection | `recomputeRegulatoryProjection` must execute in a single PoolClient transaction: read current courses/attempts with immutable `asOf`, evaluate status via `trainingRecord`, and update `reg.driver_reg_profiles.training_status`. Amend `academy-identity-decision.md` §2.3 to explicitly authorize invalidating stale `passed` status to `pending`. | Incomplete or expired mandatory courses immediately invalidate `passed` to `pending`. Empty course catalogs evaluate to `pending`, never `passed`. Soft overrides cannot bypass `trainingRequired: true`. |
+| Credential identity & renewal ordering | Expiry event identity is defined as `(scope, driverId, credentialType, credentialFingerprint)` where `credentialFingerprint = sha256(expiryDate + credentialNumber)`. Driver table `updated_at` must not be used as version. | Unrelated driver profile edits do not create false expiry alerts. When a driver renews a license before or during sweep, the processing transaction detects the changed fingerprint and marks the older event `superseded`. |
+| Vehicle insurance mapping (SC-024) | `reconcileExpiredCredentials` must map `reg.phase1_insurance_policies.valid_until` alongside driver licenses. Overdue vehicle insurance blocks vehicle dispatchability and triggers a fleet-level alert receipt. | Vehicle insurance expiry is verified independently of driver licensing, fulfilling SC-024 without requiring separate scheduler jobs. |
+| Close-event atomic replay & ordinary calls | `VoiceSessionService.closeSession` must wrap session dialog status update and `enqueueWorkItem('finalize_recording')` in `VoiceSessionRepository.withTransaction`. Duplicate close events verify the existing work item and return idempotently without duplicate enqueues. Ordinary callcenter calls enqueue `finalize_recording` with `voice_session_id = NULL` and `call_id`. | Process crash after event receipt cannot lose finalization work. Replayed close events do not create redundant work items. Ordinary and AI phone calls use the unified recording runner. |
+| Zero-order & single-order coverage | When a call terminates without booking an order (0 orders), recording is sealed and indexed to `call_id` in callcenter audit without requiring an order reference. For booked calls, exactly one order is linked per user launch scope. | Calls with 0 orders preserve compliance audio. Multi-order fan-out remains withdrawn; single-order linkage is verified. |
+| Retry exhaustion & ops recovery | Work items reaching `max_retries` transition to `failed` with captured error stack. An authorized ops retry operation re-enqueues the item using the same work item ID and audit trail, preserving historical attempt logs. | Failed recordings cannot be silently discarded or bypassed with fabricated keys. |
+
+- Suggested synthesis wording: “Clock-in and Academy projection enforce atomic database persistence before success acknowledgement. Credential expiry relies on content-fingerprinted event identity, renewal supersession, and unified driver/vehicle insurance mapping. Recording finalization operates atomically across ordinary and voice calls, guaranteeing zero-order audio compliance and single-order operational launch bounds.”
+- This satisfies the technical review obligations transferred from Claude2 and establishes the concrete engineering boundaries for Gemini2's second-pass review.
+
+#### Remaining Question
+
+- None on domain boundaries or transaction semantics. Next review by Gemini2 will examine crash points across commit boundaries and multi-replica concurrency.
+
+### Entry 22 — Settle C113/C114 runner test boundaries, and resolve P06 shared-dev deployment health under accepted realm auth
+
+#### Metadata
+
+- Reviewer lane: Gemini
+- Target lane: Codex / Claude; Entries 8, 10, 12; supervisor inventory §§2 P04, P06, §§3.2, 3.4
+- Round: 1, reopened technical review
+- Date: 2026-09-13
+
+#### Claim Under Review
+
+- C113 billing resend/reconcile and C114 geocoding fail-closed can be verified with in-memory repository stubs or unconfigured provider assertions, and shared-dev 403 responses indicate Cloud Run deployment failure requiring public IAM relaxation.
+
+#### Review Outcome
+
+- `refine`: mandate real PostgreSQL persistence for C113 reconciliation/idempotency in the hosted runner, require mock upstream HTTP error simulation (timeout/500) for C114 fail-closed and error mapping, and resolve P06 by separating unauthenticated container health probes (`/healthz`) from authenticated role verification under `SD-DP-20260429-001` without weakening Cloud Run IAM.
+
+#### Evidence
+
+- [SD-DP-20260429-001](../../../01-decisions/SD-DP-20260429-001-plane-separation-auth-matrix.md), Realm Matrix: control-plane (`platform`, `ops`) requires perimeter Cloud IAP (`x-drts-authorization`), while business-plane (`tenant`, `partner`, `driver`) uses application auth. Anonymous curl returning 403 from Google Frontend (GFE) is expected perimeter defense, not a container defect.
+- [GeoService](../../../../apps/api/src/modules/geo/geo.service.ts), `assertProviderUsable` (:207), `withProviderErrorMapping` (:240): `MAP_PROVIDER_FAIL_CLOSED=true` with unconfigured provider throws `GEO_PROVIDER_NOT_CONFIGURED`. Verifying fail-closed behavior under provider failure requires a configured provider mock returning HTTP 504 (timeout) or HTTP 429/500 to exercise `withProviderErrorMapping` and emit typed `ApiRequestError` with metrics recording.
+- [BillingSettlementService](../../../../apps/api/src/modules/billing-settlement/billing-settlement.service.ts), `reconcile` / `resolveReconciliationIssue`: ledger differences and resends must execute transactional adjustments against `BillingSettlementRepository` and PostgreSQL, ensuring duplicate webhook transmissions with the same idempotency key return idempotent receipts without duplicate financial entries.
+- [Tenant runner](../../../../.github/workflows/tenant-uat-acceptance.yml) at `6eec9635c17674b89b8519c642eb48b51dbd6479`: provides hosted PostgreSQL container lifecycle, candidate SHA validation, and API restart verification. Extending it with sub-suites for C113 and C114 avoids redundant runners while enforcing real database persistence.
+- [Cloud Run staging descriptor](../../../../infra/gcp/staging/api-service.yaml) and [deploy-dev workflow](../../../../.github/workflows/deploy-dev.yml): deployment health check must target dedicated unauthenticated health endpoints (`/healthz`) rather than protected application routes.
+- [AI_COLLABORATION_GUIDE.md](../../../../AI_COLLABORATION_GUIDE.md), §0.5 and user `AGENTS.md` VM restriction: strictly enforce VM restriction; no live servers, databases, or browsers run on this development VM.
+
+#### Impact On Consensus
+
+| Domain Boundary | Required engineering specification | Verification and runtime consequence |
+| --- | --- | --- |
+| C113 Billing mapping, resend & reconcile | Webhook test harness must execute against real PostgreSQL in hosted CI (`tenant-uat-acceptance.yml`). Assert duplicate event delivery with identical idempotency key returns HTTP 200 with matching receipt and zero new ledger records. Discrepancy resolution must generate an auditable ledger adjustment transaction, not an in-memory flag flip. | Multi-tenant financial data is protected from duplicate settlement execution; reconciliation produces immutable audit entries linked to source receipts. |
+| C114 Geocoding & ETA fail-closed | Test harness must configure mock provider simulating HTTP 504 timeout and HTTP 500 outage. Verify `GeoService.withProviderErrorMapping` captures `GeoProviderError` and returns typed `ApiRequestError` (`GEO_PROVIDER_TIMEOUT`, `GEO_PROVIDER_UNAVAILABLE`) with metrics emitted to `MapGeofenceObservabilityService`. Catch-and-swallow or fake 0 ETA fallbacks are strictly prohibited. | Upstream provider outages trigger fail-closed dispatch protection with full metric traceability rather than silently dispatching drivers on invalid zero-distance estimates. |
+| P06 Shared Dev 403 & Deployment Health | Container readiness probe in Cloud Run must query `/healthz` or unauthenticated `/api/health`. Separate automated deployment smoke check into unauthenticated infra health (`/healthz`) and authenticated role probe using synthetic test tokens per `SD-DP-20260429-001`. Do not relax Cloud Run IAM or remove IAP perimeter defense to satisfy naive curl commands. | Cloud Run health check passes cleanly while perimeter IAP and application authentication boundaries remain intact; tenant and ops planes stay isolated. |
+| Runner harness architecture | Extend `tenant-uat-acceptance.yml` with isolated step jobs for C113, C114, and C115 against candidate SHA, preserving original tenant gate thresholds (>=10 HTTP tests, 8 spec files, >=27 unit tests, >=12 restart readbacks). | Reuses proven DB-persistence and restart harness without spawning fragmented runner configurations or bypassing existing tenant coverage. |
+
+- Suggested synthesis wording: “C113 financial reconciliation and C114 geocoding fail-closed behavior require real database persistence and explicit provider-failure simulation in the hosted runner. P06 deployment health check targets dedicated /healthz endpoints without compromising Cloud Run IAM or perimeter IAP boundaries.”
+- This completes the technical review obligations of Gemini's capability lane across runtime packaging, CI/CD, and infrastructure boundaries.
+
+#### Remaining Question
+
+- None on test harness architecture, error mapping, or realm authentication posture. Execution of the extended runner awaits auto-worker implementation and hosted CI execution.
+
+### Entry 23 — Second-pass review: crash points, commit boundaries, and transactional outbox recovery across event/enqueue/receipt lifecycles
+
+#### Metadata
+
+- Reviewer lane: Gemini2
+- Target lane: Gemini / Codex; Entries 18, 20, 21; supervisor inventory §§3.10–3.12
+- Round: 1, reopened second-pass review
+- Date: 2026-09-13
+
+#### Claim Under Review
+
+- Atomic transactions within application domain boundaries combined with post-commit enqueue or in-memory queues are sufficient to prevent data loss or duplicate execution during process crashes and container recycling.
+
+#### Review Outcome
+
+- `refine`: specify explicit transactional outbox and work-item enqueue boundaries within a single PostgreSQL transaction; define deterministic recovery rules for crash points occurring before dispatch, during external provider calls, and before receipt persistence.
+
+#### Evidence
+
+- [VoiceSessionService](../../../../apps/api/src/modules/voice-booking/voice-session.service.ts), `closeSession` (:215) and [VoiceSessionRepository](../../../../apps/api/src/modules/voice-booking/voice-session.repository.ts), `withTransaction` at `6eec9635c17674b89b8519c642eb48b51dbd6479`: if dialog status is committed as `closed` in one transaction and `enqueueWorkItem('finalize_recording')` is called in a separate subsequent transaction or background promise, a container termination (SIGKILL / node preemption) between the two calls creates a permanently orphaned closed session with no recording finalization work item.
+- [RegulatoryRegistryService](../../../../apps/api/src/modules/regulatory-registry/regulatory-registry.service.ts), proposed `reconcileExpiredCredentials`, and [NotificationDeliveryService](../../../../apps/api/src/modules/notification-delivery/notification-delivery.service.ts), `enqueue` at `6eec9635c17674b89b8519c642eb48b51dbd6479`: Registry state update and notification dispatch cross module boundaries. If the expired credential event is committed but notification enqueue fails or crashes before persistence, the driver is restricted without an alert. Conversely, if notification is enqueued to external transport before DB commit, an aborted DB transaction causes a phantom alert.
+- [Cloud Run Staging Descriptor](../../../../infra/gcp/staging/api-service.yaml) and [AI_COLLABORATION_GUIDE.md](../../../../AI_COLLABORATION_GUIDE.md), §0.5: Cloud Run instances are stateless and subject to abrupt scale-down, replacement, or container restart. Local memory or ephemeral disk states cannot be relied upon to survive across crash points.
+
+#### Impact On Consensus
+
+| Crash Point Boundary | Failure Mode & Risk | Required Engineering Specification | Recovery & Idempotency Guarantee |
+| --- | --- | --- | --- |
+| 1. Voice Close & Enqueue | Container killed after dialog marked `closed` but before `finalize_recording` work item inserted. | `VoiceSessionService.closeSession` must execute both dialog closure update and `enqueueWorkItem('finalize_recording')` inside the same `pg.PoolClient` transaction via `VoiceSessionRepository.withTransaction`. Deduplication key `(scope, call_id, 'finalize_recording')` is enforced via unique constraint. | If transaction fails, both dialog update and work item roll back. On caller retry, atomic transaction re-attempts both. Crash after commit leaves durable work item in PostgreSQL, picked up by any surviving replica. |
+| 2. Credential Event & Outbox | Container killed after credential expiry event created in Registry but before notification handoff reaches delivery table. | Credential event state transition (in `reg.phase1_expired_credential_events`) and notification enqueue into PostgreSQL outbox table (`notif.phase1_mail_outbox`) must commit within the same database transaction. The outbox row stores `idempotency_key = sha256(scope + event_id)`. | Startup or periodic recovery sweep selects un-dispatched rows from `notif.phase1_mail_outbox` (`status = 'pending' AND run_after <= NOW()`) with `FOR UPDATE SKIP LOCKED`. Crash prior to commit leaves no orphan event or notification; crash after commit recovers from DB. |
+| 3. In-flight External Provider Dispatch | Crash while HTTP request to notification provider or media storage is in-flight (uncertain external state). | `NotificationDeliveryService` marks outbox row `status = 'in_flight'` with lease timeout and records attempt count before sending HTTP payload. On recovery, if attempt timed out, worker re-queries provider by idempotency key before resending. | If provider already accepted original request, provider returns original message ID/timestamp (idempotent 200); worker transitions outbox row to `sent` and saves provider reference. Duplicate external dispatch is prevented. |
+| 4. Receipt DB Commit Failure | External provider succeeded (HTTP 200 returned), but container crashes before recording delivery receipt in database. | On recovery sweep, retry worker resends payload with identical `idempotency_key`. Provider recognizes key and echoes existing acceptance receipt without re-delivering message. Worker persists `receipt_id` and marks outbox `sent`. | System converges to acknowledged receipt state without sending duplicate emails, SMS, or push alerts to the driver/operator. |
+
+- Suggested synthesis wording: “Domain state mutations and background work enqueues must commit atomically in a single PostgreSQL transaction. Recovery sweeps use transactional outbox persistence with provider-level idempotency keys to eliminate orphaned work items, phantom alerts, and duplicate provider dispatch across container restarts.”
+- This resolves the crash-point and commit-ordering requirements for C115 background jobs and API outbox patterns.
+
+#### Remaining Question
+
+- None on transaction boundaries or crash recovery semantics. Multi-replica concurrency and lease fencing are dispositioned in Entry 24.
+
+### Entry 24 — Second-pass review: renewal races, late provider receipts, stale worker leases, and multi-replica concurrency
+
+#### Metadata
+
+- Reviewer lane: Gemini2
+- Target lane: Gemini / Copilot / Codex; Entries 18, 20, 21; supervisor inventory §§3.10, 3.11
+- Round: 1, reopened second-pass review
+- Date: 2026-09-13
+
+#### Claim Under Review
+
+- Periodic background sweeps and optimistic in-memory status checks are sufficient to handle multi-replica concurrency and asynchronous credential renewals without race conditions or lease collisions.
+
+#### Review Outcome
+
+- `refine`: enforce database-level `lease_epoch` fencing and `FOR UPDATE SKIP LOCKED` for multi-replica concurrency, define atomic renewal supersession via content fingerprint comparison, and specify clean lease release during Cloud Run SIGTERM container shutdown.
+
+#### Evidence
+
+- [VoiceCommandRunnerService](../../../../apps/api/src/modules/voice-booking/voice-command-runner.service.ts), `claimWorkItems` (:367), `dispatchWorkItem` (:451), `startBackgroundLoop` (:621), `drain` (:647) at `6eec9635c17674b89b8519c642eb48b51dbd6479`: background loop claims pending items by updating `lease_holder`, `lease_expires_at`, and incrementing `lease_epoch`. However, if `runOnce` execution exceeds lease duration (e.g. downstream network latency), another replica may claim the item under a higher `lease_epoch`.
+- [RegulatoryRegistryService](../../../../apps/api/src/modules/regulatory-registry/regulatory-registry.service.ts), `persistChangesInternal` (:204) at `6eec9635c17674b89b8519c642eb48b51dbd6479`: driver credential updates rewrite JSON fields and update `updated_at`. If an operator or driver submits a license renewal concurrently with a background expiry sweep, an un-fenced sweep could flag the newly renewed driver as expired or dispatch an obsolete expiry warning.
+- [NotificationDeliveryTypes](../../../../apps/api/src/modules/notification-delivery/notification-delivery.types.ts), `ProviderAcknowledgement` at `6eec9635c17674b89b8519c642eb48b51dbd6479`: callbacks or delayed HTTP responses from third-party notification providers may arrive minutes after worker timeout or lease expiration.
+
+#### Impact On Consensus
+
+| Concurrency & Race Boundary | Risk & Root Cause | Required Engineering Specification | Verification Consequence |
+| --- | --- | --- | --- |
+| 1. Multi-Replica Queue Contention | Multiple Cloud Run API instances running `startBackgroundLoop` competing for the same work items in PostgreSQL. | Queue claim queries in `VoiceCommandRunnerRepository` and `RegulatoryRegistryRepository` must use `SELECT ... FOR UPDATE SKIP LOCKED LIMIT $batchSize` within an atomic `UPDATE` statement. Workers identify themselves with unique `instance_id:uuid`. | Zero lock contention or deadlocks between replicas. Each work item is claimed by exactly one active container without blocking peer workers. |
+| 2. Stale Worker Lease Fencing | Worker A claims item with lease epoch 1; network stall causes lease to expire. Worker B claims item with lease epoch 2. Worker A resumes and attempts to complete work. | All completion queries (`markCompleted`, `markFailed`, `recordResult`) must assert `WHERE id = $id AND lease_epoch = $expectedEpoch AND lease_holder = $workerId`. If rows updated == 0, worker detects lease loss, logs warning, and discards in-memory result. | Stale workers cannot overwrite results of successor workers or revert state back to expired epochs. Split-brain processing is eliminated. |
+| 3. Concurrent Credential Renewal | Driver renews license while background sweep has claimed an expiry work item for that driver. | Sweep worker transaction re-reads `reg.phase1_registry_drivers` with `FOR SHARE` and recomputes `credentialFingerprint = sha256(expiryDate + credentialNumber)`. If fingerprint differs from the work item's snapshot, the work item transitions to `status = 'superseded'` with `reason = 'credential_renewed'` and terminates without dispatching alert. | Driver who renewed license is never falsely flagged as expired or sent misleading suspension alerts. New credential validity is preserved immediately. |
+| 4. Late Provider Acknowledgement | Notification provider acknowledges delivery after work item was superseded by renewal or reassigned to a new lease. | Receipt callback / poll handler verifies current event state. If event is `superseded`, provider acceptance metadata is saved to audit log (`notif.phase1_delivery_receipts`) for billing trace, but event is not re-activated and driver status is not altered. | Late arriving third-party receipts do not resuscitate cancelled or superseded alert workflows. Auditability is maintained without corrupting domain state. |
+| 5. Cloud Run Graceful Drain on SIGTERM | Container termination drops in-flight items without releasing leases, causing peer replicas to wait for lease timeout (up to 5m). | In `BeforeApplicationShutdown` lifecycle hook, `VoiceCommandRunnerService.drain()` sets `isShuttingDown = true`, stops polling, awaits active jobs up to 15s grace period, and executes `UPDATE voice.work_item SET lease_holder = NULL, lease_expires_at = NOW() WHERE lease_holder = $instanceId AND status = 'in_flight'` for unfinished jobs. | Releasing leases during graceful container shutdown allows surviving replicas to immediately pick up in-flight work without waiting for lease timeout. |
+
+- Suggested synthesis wording: “Multi-replica worker execution requires `FOR UPDATE SKIP LOCKED` claim serialization and optimistic `lease_epoch` fencing on completion writes. Credential renewal races resolve via content fingerprint verification within the execution transaction, marking obsolete events superseded. Graceful shutdown drains in-flight handlers and immediately releases leases on container termination.”
+- This resolves the multi-replica concurrency, lease expiration, renewal race arbitration, and container lifecycle requirements.
+
+#### Remaining Question
+
+- None on multi-replica locking, renewal arbitration, or lease fencing. Mixed work-type composition, zero/one-order recording recovery, and CI runner gate preservation are addressed in Entry 25.
+
+### Entry 25 — Second-pass review: mixed work-type composition, zero/one-order recording recovery, and CI runner gate preservation
+
+#### Metadata
+
+- Reviewer lane: Gemini2
+- Target lane: Gemini / Codex / Claude; Entries 12, 19, 20, 21, 22; supervisor inventory §§2 P03–P04, §§3.7–3.8, 3.10–3.12
+- Round: 1, reopened second-pass review
+- Date: 2026-09-13
+
+#### Claim Under Review
+
+- Extending `tenant-uat-acceptance.yml` to run C113–C115 risks masking tenant regressions or timing out, while zero-order calls can be safely ignored in recording audits.
+
+#### Review Outcome
+
+- `refine`: mandate modular, fail-fast CI runner stages that strictly isolate C111–C115 suites while preserving all original tenant thresholds, enforce strict zero-order call recording audit preservation, and maintain single-order operational launch boundaries.
+
+#### Evidence
+
+- [Acceptance Scenarios](../../../../phase1_llm_dev_pack_extracted/phase1_llm_dev_pack/02_acceptance_scenarios_gherkin.md), SC-003–004, SC-024–025; [PRD](../../../../phase1_prd_detailed_v1.md), §§9.1.4, 9.7.1, 13.2: every incoming call must be auditable and linked to its recording regardless of booking outcome; compliance retention is mandatory even when 0 orders are placed.
+- [VoiceCommandRunnerService](../../../../apps/api/src/modules/voice-booking/voice-command-runner.service.ts), `runOnce` (:433) and `dispatchWorkItem` (:451) at `6eec9635c17674b89b8519c642eb48b51dbd6479`: queue contains mixed work types (`finalize_recording`, `accept_new_booking`, etc.). If a generic worker claims all types, stubs return metadata and unhandled types log errors without executing domain logic.
+- [FinalRecordingManifests](../../../../apps/voice-media-worker/src/recording/final-manifest.ts), `seal` (:29) and [CallcenterService](../../../../apps/api/src/modules/callcenter/callcenter.service.ts), `persistSessions` at `6eec9635c17674b89b8519c642eb48b51dbd6479`: audio manifest verification requires immutable object storage reference, recording duration, and seal hash. Database schema supports `callcenter.call_records` with nullable `linked_order_id`.
+- [Tenant Runner](../../../../.github/workflows/tenant-uat-acceptance.yml) at `6eec9635c17674b89b8519c642eb48b51dbd6479`: validates candidate SHA, starts PostgreSQL container, runs migrations, seeds data, builds API, runs tenant HTTP tests (>=10) and unit tests (>=27), restarts API container without wiping DB, and performs restart readbacks (>=12).
+- [AI_COLLABORATION_GUIDE.md](../../../../AI_COLLABORATION_GUIDE.md), §§0.5, 2, 4–5 and user `AGENTS.md` VM restriction: no live servers, databases, or browsers may be launched on this development VM. All execution testing belongs to GitHub Actions hosted runners.
+
+#### Impact On Consensus
+
+| Architectural Boundary | Engineering Specification & Gate Preservation | Failure Mode & Recovery Guarantee |
+| --- | --- | --- |
+| 1. Mixed Work-Type Whitelisting | `VoiceCommandRunnerService.runOnce` must accept an explicit `supportedTypes: string[]` parameter (e.g. `['finalize_recording']`). The claim query filters `WHERE work_type = ANY($supportedTypes)`. Unrecognized or stub work types are never claimed by this runner. | Prevents workers from silently completing work types for which no operational handler exists. Other specialized workers (or future handlers) process their own whitelisted types independently without queue starvation. |
+| 2. Zero-Order Recording Recovery | When a customer calls callcenter or AI voice booking but hangs up, cancels, or inquires without placing an order, `closeSession` enqueues `finalize_recording` with `linked_order_id = NULL`. `FinalRecordingManifests.seal()` records audio metadata against `call_id`. | Zero-order calls are fully preserved in `callcenter.call_records` and compliant with regulatory audio retention rules. Queries asserting call audio by `call_id` succeed; lack of an order does not cause null pointer exceptions or abort finalization. |
+| 3. Single-Order Launch Boundary | For calls where booking occurs, exactly one order is linked (`linked_order_id = order.id`). Withdrawn multi-order task `SR-CALL-MULTIORDER-20260913` remains withdrawn per user direction. Duplicate booking commands on the same call return the existing order idempotently via intent receipt. | Prevents accidental order duplication or database constraint violations against V0082 unique call-order index (`ops_orders_call_id_unique`). Operational launch requirements are satisfied without multi-order complexity. |
+| 4. Runner Architecture: Preserving Tenant Gates | Extend `.github/workflows/tenant-uat-acceptance.yml` with separate, sequential or matrix job steps for C113, C114, and C115. Original tenant acceptance thresholds (>=10 HTTP tests, 8 spec files, >=27 unit tests, >=12 restart readbacks) must remain intact as an independent gate that fails fast if violated. | Tenant isolation and basic API contracts are verified first. New webhook capability tests cannot hide tenant regressions, lower existing thresholds, or pass if tenant gates fail. |
+| 5. C111–C115 Runner Step Isolation | - C111/C112: verify tenant isolation and HTTP transport retry/rotation against hosted mock.<br>- C113: BillingSettlementService tests against hosted PostgreSQL container asserting idempotency and ledger adjustment entries.<br>- C114: GeoService provider mock returning HTTP 504 and HTTP 500, asserting typed `ApiRequestError` and metric emission.<br>- C115: Process kill (SIGTERM/SIGKILL), API restart against retained DB, verifying pickup of pending recording finalization and credential expiry sweeps without data duplication. | Each capability suite runs with dedicated assertion scripts and generates structured JSON test reports bound to the candidate git SHA. Failure in any capability step blocks merge and marks CI failed. |
+| 6. VM Restriction & Live Receipt Boundary | Reiterate strict VM restriction: this local planning session performs only static code inspection and documentation updates. No Docker containers, PostgreSQL databases, or background test processes are spawned on this VM. Genuine external sandbox receipts (`SR-LIVE-ENTRY`, `SR-LIVE-PUSH`, `UV-EXEC-028`) remain post-CI release gates. | Complies strictly with repository safety guidelines and agent boundaries. Prevents local environment pollution while ensuring hosted CI and live gates provide authoritative evidence. |
+
+- Suggested synthesis wording: “Background runner claim whitelisting guarantees that only operational handlers process claimed work types. Zero-order calls seal audio compliance records without requiring an order linkage, while booked calls enforce single-order boundaries. The hosted CI harness extends `tenant-uat-acceptance.yml` with isolated C111–C115 test steps while strictly preserving all original tenant thresholds under the repository's VM restriction rules.”
+- This completes Gemini2's second-pass technical review across runtime packaging, worker ops, failure recovery, and CI/CD runner architecture.
+
+#### Remaining Question
+
+- None on runner architecture, work-type filtering, zero-order recording, or gate preservation. Next review lane is Copilot for contradiction scan and credential identity check.
+
+### Entry 26 — Correct source mismatches before launch synthesis
+
+- Reviewer: Codex (root); next reviewers: Copilot / Claude; date: 2026-09-13.
+- Outcome: refine Entries 20–25 against inspected source at `6eec9635c17674b89b8519c642eb48b51dbd6479`. Submitted review does not mean these proposals are accepted or implemented.
+- Scope: one call / at most one order; repair the existing operational flow. No product or tooling implementation in this review.
+
+| Source and contradiction | Required replacement / bounded design disposition |
+| --- | --- |
+| `regulatory-registry.repository.ts:211,470` uses `reg.phase1_registry_policies`; its policy JSON uses `endAt`. Entries 21/24 refer to other policy tables/columns and a generic credential number. `DriverRegistryRecord` in `packages/contracts/src/index.ts:4325` has three expiry fields, without the claimed credential-number field. | Use the existing policy/vehicle relation and current expiry helpers for SC-024. For drivers, propose a versioned, fixed-order JSON tuple of scope, driverId, credential type and that type's normalized authoritative expiry value for the fingerprint; do not use general updated_at or invent a number field. Policy identity additionally includes existing policyId and source lifecycle fields that affect validity. Reviewer must bind the precise normalization to current date semantics. |
+| `AcademyService.recomputeRegulatoryProjection:145` preserves `expired` for overdue required records and returns without projection writes when the required catalog is empty. Entry 21 merges expired into pending. | Preserve expired / pending distinctions in inventory §3.9. Proposed narrow extension only invalidates stale Academy-derived passed to pending when current requirements are incomplete; preserve manually waived data. Empty catalog is not training proof; do not overwrite waived or silently redefine its authority. |
+| `voice-command-runner.service.ts:333,367,460`: enqueue uses `ON CONFLICT(dedupe_key) DO NOTHING`; retries use attempt/maxAttempts, with last_error only. | Same-key enqueue does not repair failed work. Propose an authorized, audited failed → pending conditional transition on the same work_id, with a bounded new retry cycle and preserved prior attempt/error evidence. Do not modify completed/leased work or erase history. Specify the audit record and budget within the existing voice domain before assigning implementation scopes. |
+| Entries 23–24 assume `VoiceCommandRunnerRepository`, `lease_holder`, `lease_expires_at`, work status in_flight and id. Existing SQL is in `VoiceCommandRunnerService`, through the existing command repository transaction; fields are work_id, lease_epoch, leased_until and status leased. | Reuse the existing claim/CAS. Do not add another repository or lease schema solely to match review prose. Existing drain stops polling and awaits a Promise; it neither cancels handlers nor releases leases. After a bounded drain timeout, preserve lease recovery; never release a lease while its external operation can still mutate state. Protect recording side effects as well as the final completed update from stale claims. |
+| Entries 20/25 restrict the deployed runner to finalize_recording only. Existing dispatchWorkItem has execute_booking_command plus other domain work; some branches merely return metadata. | Preserve accepted booking-command execution. Include finalize_recording only after its real handler is wired and verified; activate other types only with their required domain adapter and durable success contract. Unsupported/stub work must remain visibly unresolved, not silently completed; no second recording loop. |
+| Entry 25 invents callcenter.call_records. `CallcenterRepository:27,48` persists crm.phase1_call_sessions JSON. closeSession uses existing VoiceSessionRepository.withTransaction, but authoritative close-event insertion, dedupe payload checking and ordinary-call persistence also matter. | Reuse crm.phase1_call_sessions, existing voice.session_event and voice.work_item. Include authoritative event insert + session change + enqueue in the same transaction, or explicitly recover durable unapplied events. Replay verifies existing work payload/version. Ordinary calls need no synthetic voice session; zero-order and historical pending calls are covered. Preserve one-order uniqueness. |
+| Entries 20/23 introduce notif.phase1_mail_outbox and reg.phase1_expired_credential_events as though already deployed. MailOutbox.transaction accepts an OutboxState callback; NotificationDeliveryService.enqueue owns its separate transaction. | Label any PostgreSQL adapter/table as proposed scope. Keep one MailOutbox production binding and existing delivery service. Prefer durable Registry handoff intent + immutable recipient/content/key snapshot in the domain transaction; retry existing enqueue from that intent, recover both before enqueue and after enqueue/before receipt-reference commit using identical content/key. Do not claim an outer Registry transaction makes the existing service atomic. |
+| Entry 23 guarantees providers will look up/idempotently echo acknowledgements and never redeliver. MailTransport only exposes send; the existing delivery core explicitly records uncertain attempts. | Preserve the existing delivery contract: durable local dedupe and provider acceptance are distinct from human receipt and provider exactly-once behavior. Require actual adapter evidence for provider idempotency/query support; otherwise keep uncertain outcome and reconciliation evidence. Preserve late acknowledgement in the delivery attempt even if its expiry event is superseded; do not erase an accepted send or reactivate an expired credential. |
+| Entries 21/24 say transaction detection alone prevents renewal races; Entry 21 says awaiting clockIn plus memory rollback is sufficient. | Final synthesis must state lock/check order shared with renewal writers, final pre-send recheck and the unavoidable send/renewal race boundary. For clock-in, define the authoritative DB transaction and failure/concurrent-request handling; await of a background snapshot is not transactional persistence and restoring an old global cache can erase another successful request. |
+
+These corrections do not reopen the settled single-order product choice, add a generic scheduler/delivery framework, waive C111–C115/tenant/live evidence, or request new tools. Copilot should disposition this finite list against source; Claude should produce the bounded launch packet and exact existing task scopes, not repeat broad review claims. P05 remains the separately pending passenger receiving-product question.
+
 ## Reopened-cycle disposition
 
-- Codex review: submitted (Entries 5–19). Entries 18–19 review the new transaction/lifecycle proposals and narrow remaining outputs to credential identity, notification handoff, close-event replay and actual handler/producer coverage. Entries 16–17 retain the scope correction and initial Academy/C115 synthesis. Earlier 1:N proposals are historical and withdrawn from first-release work. Cross-lane acceptance and final synthesis remain pending.
-- Claude's next planning action: publish the synchronized Q-001/inventory records, preserve the now-reconciled withdrawn-task notes, disposition remaining Entries 11–13 and 17–19 with Entry 16's scope correction, and route the current review order. Preserve P05's existing human-decision route and original WIRE/webhook/live gates. Publish the supervisor-owned inventory and accepted scoped canonical updates through the normal document flow.
-- Codex remains the recorded owner until the supervisor records a transition. Preserve the historical `consensus-packet.md` and `review-round-2.md`; April's convergence is not closure of this reopened cycle.
+- Gemini2 review: submitted (Entries 23–25). Entries 23–25 provide second-pass review resolving crash points across commit boundaries (atomic PostgreSQL transactions pairing domain mutations with outbox/work-item enqueue, handling post-commit crash recovery), multi-replica concurrency and lease fencing (`lease_epoch`, `FOR UPDATE SKIP LOCKED`, Cloud Run graceful drain on SIGTERM), credential renewal race arbitration (content fingerprinting `sha256(expiryDate + credentialNumber)` supersession, late provider callback handling), zero-order compliance audio preservation alongside single-order launch scope, and runner gate preservation (modular, isolated step jobs in `tenant-uat-acceptance.yml` for C113–C115 while strictly preserving original tenant thresholds).
+- Gemini review: submitted (Entries 20–22). Entries 20–22 resolve runtime packaging (P03 tsconfig), API lifecycle hooks, outbox deployment compatibility, voice handler composition, clock-in persistence contract, Academy single-transaction derivation, credential fingerprinting/renewal supersession, vehicle insurance mapping (SC-024), close-event replay with ordinary/zero-order recording recovery, C113/C114 real-persistence and fail-closed runner boundaries, and P06 shared-dev /healthz deployment verification under the accepted realm auth matrix.
+- Codex review: submitted (Entries 5–19). Earlier 1:N proposals are historical and withdrawn from first-release work per the user's operational launch directive.
+- Baton advancement: Gemini2 advances the baton to `Copilot`, the next lane in the review order (`ai-status.json.discussion_loop.review_order`). Next planning owner: `Copilot`.
+- Next required planning output: Copilot checks stable credential identity versus general driver `updated_at`, notification payload conflicts, early dedupe returns, unsupported-handler completion and expiry coverage; preserves single-order scope and the pending Academy waiver disposition.
+- Preserve the historical `consensus-packet.md` and `review-round-2.md`; April's convergence is not closure of this reopened cycle.
 - Continue `discussion_planning`; no task lifecycle transition, implementation commit, deployment, or product runtime was initiated by this review.
 
 ## Latest user-scope disposition — single-order operational release

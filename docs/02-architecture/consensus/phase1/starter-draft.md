@@ -11,11 +11,11 @@ Rules:
 ## Current Round
 
 - Round: 1, reopened planning review on 2026-09-13
-- Current owner: Codex
+- Current owner: Copilot
 - Supervisor: Claude
-- Active artifact: [review-round-1.md](review-round-1.md), Entries 5–19
-- Goal: reconcile historical synthesis with current release scope and complete cited WIRE/webhook SA/SD review before supervisor-led synthesis
-- Status: recovery design review submitted; cross-lane disposition and convergence pending; execution remains paused
+- Active artifact: [review-round-1.md](review-round-1.md), Entries 5–25
+- Goal: reconcile historical synthesis with current release scope, complete cited WIRE/webhook SA/SD review, and verify lifecycle/recovery boundaries before supervisor-led synthesis
+- Status: Gemini2 second-pass review submitted (Entries 23–25); baton advanced to Copilot for contradiction scan and credential identity check; execution remains paused
 
 ## Reopened Review Inputs
 
@@ -23,7 +23,9 @@ The cited feedback lives in [review-round-1.md](review-round-1.md). Entries 5–
 
 **Current launch scope:** board snapshot `2026-09-13T14:02:27Z` records the user's later direction: first operational release uses one call / one order. `SR-CALL-MULTIORDER-20260913` is withdrawn with empty scopes and no release dependency. Its blocked state preserves history because the board has no cancellation state; it is not awaiting technical SD or a launch requirement. The supervisor has synchronized the question board and inventory; preserve its appended scope record. Closeout board snapshot `2026-09-13T14:18:58Z` also reconciles the older task note and clears its active dependencies/acceptance keys; that reconciliation is no longer pending. This review neither reopens the cardinality question nor changes the board.
 
-Entry 17 reviews Academy projection and recording-handler gaps. The inventory now proposes a shared Academy transaction (§3.9), Registry expiry processing (§3.11) and recording adapters/API lifecycle integration (§3.12). Entries 18–19 carry those proposals forward and specify the remaining credential identity, renewal/delivery ordering, close-event replay, handler readiness, exhausted-work recovery and ordinary-call coverage. These remain submitted technical outputs for cross-review, not accepted state-machine changes, execution assignments or evidence of running services.
+Entries 17–19 reviewed Academy projection, recording-handler gaps, and proposed recovery transactions. Entries 20–22 dispositioned the technical outputs across runtime and domain boundaries: settling P03 WIRE tsconfig runtime packaging without package export mutations; connecting API lifecycle hooks (`OnApplicationBootstrap` / `BeforeApplicationShutdown`); enforcing explicit `supportedTypes` whitelisting to eliminate silent metadata-only completion; establishing database-backed outbox persistence for stateless Cloud Run compatibility; enforcing an awaited persistence contract for clock-in; mandating a single PoolClient transaction for Academy projection derivation with an explicit write grant amendment; defining content-fingerprinted credential event identity and renewal supersession; mapping SC-024 vehicle insurance expiration; guaranteeing atomic close-event recording enqueue across ordinary and voice calls with zero-order audio compliance; mandating real PostgreSQL persistence for C113 webhook idempotency and reconciliation; specifying C114 simulated provider timeout and outage error mapping for fail-closed dispatch protection; resolving P06 deployment health check targets (`/healthz`) without weakening Cloud Run IAM or perimeter IAP boundaries; and extending `tenant-uat-acceptance.yml` to host C111–C115 suites while preserving original tenant gates.
+
+Entries 23–25 provide Gemini2's second-pass technical review: establishing atomic database transaction boundaries pairing domain mutations with outbox/work-item enqueues to eliminate orphan states across crash points; mandating `SELECT ... FOR UPDATE SKIP LOCKED` and database-level `lease_epoch` fencing for multi-replica concurrency control; arbitrating credential renewal races via content fingerprint verification (`sha256(expiryDate + credentialNumber)`) to supersede obsolete expiry alerts; integrating Cloud Run SIGTERM graceful shutdown with immediate lease release; enforcing strict work-type whitelisting in background runners; preserving zero-order call audio compliance records linked to `call_id` without requiring order creation; upholding the single-order launch boundary; and isolating C111–C115 runner steps in `tenant-uat-acceptance.yml` while strictly preserving all original tenant thresholds under the repository's VM restriction rules.
 
 Preserve the inventory's distinction between root's restore regression, worker compatibility code, published candidate evidence and unverified WIP. Keep original WIRE, C111–C115 and live acceptance gates, and P05's existing product/device decision route. [AI_COLLABORATION_GUIDE.md](../../../../AI_COLLABORATION_GUIDE.md), §§4–5, governs convergence and current-packet acceptance; the user's existing direction already assigns subsequent implementation to supervisor/auto workers.
 

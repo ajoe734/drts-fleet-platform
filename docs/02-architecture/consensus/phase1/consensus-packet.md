@@ -1,5 +1,7 @@
 # Phase 1 Consensus Packet
 
+> Historical consensus packet note (2026-09-13): This packet records the 2026-04-11 convergence. It is preserved as historical evidence and does not authorize execution for the reopened 2026-09-13 planning cycle. Active pre-implementation discussion proceeds in `review-round-1.md` and `product-remediation-sa-sd-20260913.md` under `discussion_planning`. Promotion to an updated consensus packet occurs only after cross-lane convergence and human acceptance.
+
 ## Metadata
 
 - Date: 2026-04-11
