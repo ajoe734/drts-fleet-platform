@@ -32,6 +32,7 @@ import type {
   FleetPartnerPortalQualityMetricsRecord,
   FleetPartnerPortalTripRecord,
   FleetPartnerPortalVehicleRecord,
+  FleetPartnerStatementLineRecord,
   FleetPartnerStatementRecord,
   MoneyAmount,
   Phase1ServiceBucket,
@@ -736,6 +737,102 @@ export async function loadStatements(): Promise<StatementsView> {
       throw err;
     }
     return { rows: FX_FLEET_STATEMENTS, source: "fallback" };
+  }
+}
+
+// --- statement detail (line-level, single statement) ------------------------
+//
+// The list endpoint (`listFleetPortalStatements`) already returns every
+// line for every statement it's authoritative for one fleet partner (the
+// backend scopes the query by the caller's `x-fleet-partner-id`). Detail is
+// therefore derived from the same live call as the list/revenue views
+// instead of a second endpoint, which is what keeps period/list/detail
+// downloads in agreement (SR-FLEET-SETTLE-001 acceptance: "同一statement
+// period/list/detail/download一致"). A statement id that isn't present in
+// the caller's scoped list — whether it belongs to another fleet partner or
+// simply doesn't exist — resolves to `statement: null`, which callers must
+// render as "not found", never as an empty-but-generated statement.
+
+export type StatementDetailLine = {
+  lineId: string;
+  formula: string;
+  orderId: string | null;
+  driverId: string | null;
+  grossEarning: string | null;
+  driverNetAmount: string | null;
+  shareAmount: string;
+  sponsorFunded: boolean;
+  completedAt: string | null;
+};
+
+export type FleetStatementDetail = FleetStatement & {
+  lines: StatementDetailLine[];
+};
+
+export interface StatementDetailView {
+  statement: FleetStatementDetail | null;
+  source: DataSource;
+}
+
+function mapStatementDetailLine(
+  line: FleetPartnerStatementLineRecord,
+): StatementDetailLine {
+  return {
+    lineId: line.lineId,
+    formula: line.formula,
+    orderId: line.orderId,
+    driverId: line.driverId,
+    grossEarning: formatOptionalMoney(line.grossEarning),
+    driverNetAmount: formatOptionalMoney(line.driverNetAmount),
+    shareAmount: formatMoney(line.shareAmount),
+    sponsorFunded: line.metadata.sponsorFunded,
+    completedAt: line.completedAt,
+  };
+}
+
+function mapStatementDetail(
+  record: FleetPartnerStatementRecord,
+): FleetStatementDetail {
+  return {
+    ...mapStatement(record),
+    lines: record.lines.map(mapStatementDetailLine),
+  };
+}
+
+export async function loadStatementDetail(
+  statementId: string,
+): Promise<StatementDetailView> {
+  try {
+    const { client } = await getServerFleetPartnerClient();
+    const records = await client.listFleetPortalStatements();
+    const match = records.find((record) => record.statementId === statementId);
+    return { statement: match ? mapStatementDetail(match) : null, source: "live" };
+  } catch (err) {
+    if (isConfigError(err)) {
+      throw err;
+    }
+    const fixture = FX_FLEET_STATEMENTS.find((row) => row.id === statementId);
+    if (!fixture) {
+      return { statement: null, source: "fallback" };
+    }
+    // Fixture detail lines only exist for the current-period demo row; older
+    // fallback rows show the summary with an empty line list rather than
+    // fabricating per-line detail that was never modeled in the fixture.
+    const lines =
+      fixture.id === FX_FLEET_STATEMENTS[0]?.id
+        ? FX_FLEET_STATEMENT.lines.map((line) => ({
+            lineId: `${fixture.id}-${line.key}`,
+            formula: line.key,
+            orderId: null,
+            driverId: null,
+            grossEarning: null,
+            driverNetAmount: null,
+            shareAmount: line.v,
+            sponsorFunded: false,
+            completedAt: null,
+          }))
+        : [];
+    return { statement: { ...fixture, lines }, source: "fallback" };
   }
 }
 

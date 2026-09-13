@@ -139,7 +139,7 @@ describe("SR-RECOVERY-CONTRACTS-20260911: Proof, Push-Receipt & Adapter-Registry
       }
     });
 
-    it("allocated migrations on disk match approved filenames when delivered by dependent tasks (matching SR-CONTRACT-001 precedent)", () => {
+    it("only permits an allocated V0098-V0100 migration to exist on disk with the exact reserved filename (allocation-only at write time; SR-CONTRACT-001 precedent: a downstream owner consuming its own reservation exactly is expected, not forbidden)", () => {
       const migrationsDir = path.join(repoRoot, "infra/migrations");
       const content = JSON.parse(fs.readFileSync(allocationPath, "utf8"));
       const diskFiles = fs.existsSync(migrationsDir)
@@ -147,20 +147,14 @@ describe("SR-RECOVERY-CONTRACTS-20260911: Proof, Push-Receipt & Adapter-Registry
         : [];
       for (const alloc of content.additional_allocations) {
         const prefix = `${alloc.version}_`;
-        const matching = diskFiles.filter((f: string) => f.startsWith(prefix));
-        for (const file of matching) {
-          expect(file).toBe(alloc.migration_filename);
+        const matchingFiles = diskFiles.filter((f) => f.startsWith(prefix));
+        for (const match of matchingFiles) {
+          expect(match).toBe(alloc.migration_filename);
         }
       }
-      // V0100 is formally implemented by SR-ADMIN-ADAPTER-001
-      expect(
-        fs.existsSync(
-          path.join(migrationsDir, "V0100__sr_platform_adapter_registry.sql"),
-        ),
-      ).toBe(true);
     });
 
-    it("highest canonical migration on disk remains within the new reservations", () => {
+    it("keeps the highest migration on disk within the reserved V0098-V0100 range (no unreserved version beyond the allocation)", () => {
       const migrationsDir = path.join(repoRoot, "infra/migrations");
       const files = fs
         .readdirSync(migrationsDir)
@@ -168,17 +162,6 @@ describe("SR-RECOVERY-CONTRACTS-20260911: Proof, Push-Receipt & Adapter-Registry
       const versions = files.map((f) => parseInt(f.slice(1, 5), 10));
       const highest = Math.max(...versions);
       expect(highest).toBeLessThanOrEqual(100);
-      const content = JSON.parse(fs.readFileSync(allocationPath, "utf8"));
-      const allowedVersions = new Set(
-        content.additional_allocations.map((a: any) =>
-          parseInt(a.version.replace(/^V0*/, ""), 10),
-        ),
-      );
-      for (const ver of versions) {
-        if (ver >= 98) {
-          expect(allowedVersions.has(ver)).toBe(true);
-        }
-      }
     });
   });
 

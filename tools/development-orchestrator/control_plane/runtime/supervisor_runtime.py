@@ -2679,12 +2679,25 @@ def maybe_rotate_antigravity_lane(
     return True
 
 
-def clear_provider_pause(state: dict[str, Any], agent_id: str) -> None:
+def clear_provider_pause(
+    state: dict[str, Any], agent_id: str, *,
+    pause_keys: list[str] | None = None, affected_lanes: set[str] | None = None,
+) -> dict[str, Any]:
+    """Retire a provider pause and the failure records that could resurrect it."""
     normalized = normalize_agent_id(agent_id) or str(agent_id).strip()
     registry = provider_pause_registry(state)
-    for key, entry in list(registry.items()):
-        if key == normalized or (isinstance(entry, dict) and entry.get("lane_id") == normalized):
-            registry.pop(key, None)
+    keys = pause_keys if pause_keys is not None else [
+        key for key, entry in registry.items()
+        if key == normalized or (isinstance(entry, dict) and entry.get("lane_id") == normalized)
+    ]
+    cleared = {key: registry.pop(key) for key in keys if key in registry}
+    lanes = affected_lanes or {normalized}
+    retired = [entry for entry in state.get("dispatch_pauses", [])
+               if cleared and normalize_agent_id(str(entry.get("provider") or "")) in lanes
+               and entry.get("failure_kind") in {"quota/terminal", "quota_terminal", "auth"}]
+    state["dispatch_pauses"] = [entry for entry in state.get("dispatch_pauses", [])
+                                if entry not in retired]
+    return {"cleared_provider_pauses": cleared, "retired_dispatch_pauses": retired}
 
 
 def lane_has_recorded_pause(state: dict[str, Any], agent_id: str) -> bool:
