@@ -181,3 +181,9 @@ SMTP delivery injection) are blocked by the two reproduced product defects recor
 Canonical child repair tasks `SR-QA-TENANT-001-FIX-SLA-CROSS-TENANT` and
 `SR-QA-TENANT-001-FIX-INVITATION-DELIVERY-DI` have been created in machine truth
 (`ai-status.json`) to track their repair and authorization under canonical product write scopes.
+
+Run `34738229797` on candidate `68e025fff697e4c1495310eb84d1c6a094581064`
+advanced to 8 passing specs out of 10 (`users.spec.ts` passed completely).
+The only remaining 2 failures are the two concrete product defects reproduced
+above (`sla.spec.ts` and `invitation-mail.spec.ts`). Full QA acceptance closure
+is blocked pending the merge of their scoped repair subtasks.
