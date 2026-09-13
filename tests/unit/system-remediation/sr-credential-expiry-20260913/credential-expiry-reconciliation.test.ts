@@ -37,7 +37,7 @@ describe("SR-CREDENTIAL-EXPIRY-20260913: Credential Expiry Reconciliation & Rene
 
   describe("Driver Credential Expiry Scanning & Event Invariants", () => {
     it("scans expired driver licenses (<= asOf) and creates expiry events with delivery intents", async () => {
-      const { service, repository } = createService();
+      const { service } = createService();
 
       // Seed driver with expired license
       service.updateDriverLicenses("drv-demo-001", {
@@ -219,7 +219,7 @@ describe("SR-CREDENTIAL-EXPIRY-20260913: Credential Expiry Reconciliation & Rene
     });
 
     it("marks older active policy event superseded upon policy activation", async () => {
-      const { service, repository } = createService();
+      const { repository } = createService();
 
       // Insert an expired policy event
       const event = await repository.insertExpiryEvent({

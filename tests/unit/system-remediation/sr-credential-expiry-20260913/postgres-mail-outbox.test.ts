@@ -3,10 +3,8 @@ import { describe, expect, it } from "vitest";
 import { PostgresMailOutbox } from "../../../../apps/api/src/modules/notification-delivery/postgres-mail-outbox";
 import { NotificationDeliveryService } from "../../../../apps/api/src/modules/notification-delivery/notification-delivery.service";
 import type {
-  DeliveryReceipt,
   EnqueueMail,
   MailTransport,
-  OutboxState,
 } from "../../../../apps/api/src/modules/notification-delivery/notification-delivery.types";
 
 describe("SR-CREDENTIAL-EXPIRY-20260913: PostgresMailOutbox Invariants (§B5 / V0103)", () => {
