@@ -8709,6 +8709,23 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
     identity?: IdentityContext | null,
   ): ActionReceipt {
     this.assertTenantMutationScope(tenantId, identity);
+    for (const [field, value] of [
+      ["waitThresholdMin", command.waitThresholdMin],
+      ["arrivalThresholdMin", command.arrivalThresholdMin],
+      ["completionThresholdMin", command.completionThresholdMin],
+    ] as const) {
+      if (
+        value !== undefined &&
+        (typeof value !== "number" || Number.isNaN(value) || value < 0)
+      ) {
+        throw new ApiRequestError(
+          HttpStatus.BAD_REQUEST,
+          "INVALID_SLA_THRESHOLD",
+          `SLA threshold '${field}' must be a non-negative number.`,
+          { field, value },
+        );
+      }
+    }
     const currentProfile = this.getOrCreateSlaProfile(tenantId);
     const slaProfile: TenantSlaProfile = {
       tenantId,
