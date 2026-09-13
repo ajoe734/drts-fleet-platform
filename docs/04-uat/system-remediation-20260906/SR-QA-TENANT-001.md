@@ -197,3 +197,21 @@ and reopened `SR-QA-TENANT-001` at 2026-09-13T06:38:54Z, confirming that CI fail
 is confined to these two external product defects. Next QA candidate handoff is
 held pending the implementation and merge of scoped repair subtasks
 `SR-QA-TENANT-001-FIX-SLA-CROSS-TENANT` and `SR-QA-TENANT-001-FIX-INVITATION-DELIVERY-DI`.
+
+Both child repair tasks have now completed independent review, candidate CI,
+and merge to `dev`:
+- `SR-QA-TENANT-001-FIX-SLA-CROSS-TENANT` (PR #1999, merge SHA `3da88741327cd26c911caf6f4372ec0353c6a894`):
+  Enforces tenant mutation scope and identity check in `TenantPartnerController.updateSlaProfile`.
+- `SR-QA-TENANT-001-FIX-INVITATION-DELIVERY-DI` (PR #2001, merge SHA `c0a75c6e5aac1c13fd9e40985f3363017af36d5a`):
+  Adds explicit `@Inject(NotificationDeliveryService)` to `TenantInvitationDeliveryService` constructor.
+
+`origin/dev` has been merged into `codex/sr-qa-tenant-ci-repair-20260911` cleanly (merge commit `5ef4f2df9`).
+Local test verification on the merged tree confirms:
+- `python3 -m unittest tools/ci/test_tenant_uat_acceptance_workflow.py -v`: 32 tests passed (exit 0).
+- `python3 tools/ci/check_test_coverage.py`: 74 test files yield tests CI runs (exit 0).
+- `pnpm exec vitest run tests/unit/system-remediation/sr-qa-tenant-001/`: 27 tests in 3 files passed (exit 0).
+- `pnpm exec playwright test -c playwright.system-remediation.config.ts tests/e2e/system-remediation/sr-qa-tenant-001 --list`: 10 tests in 8 files discovered without error (exit 0).
+- `git diff --check`: clean (exit 0).
+
+With both child bugfixes integrated and local checks passing, this candidate is ready for handoff to reviewer Gemini2 to trigger acceptance CI run on GitHub.
+
