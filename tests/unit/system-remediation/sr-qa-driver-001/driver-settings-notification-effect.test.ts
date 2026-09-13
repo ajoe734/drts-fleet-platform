@@ -33,8 +33,8 @@ import { describe, expect, it } from "vitest";
 import { AuditNotificationService } from "../../../../apps/api/src/modules/audit-notification/audit-notification.service";
 import { DriverSettingsService } from "../../../../apps/api/src/modules/driver-settings/driver-settings.service";
 
-describe("SR-QA-DRIVER-001 C060: notification preference has no effect on delivery (current-behaviour finding)", () => {
-  it("CURRENT-BEHAVIOUR FINDING: a driver with notificationsEnabled=false still has notifications recorded for them", async () => {
+describe("SR-QA-DRIVER-001 C060: notification preference genuinely affects delivery (remediated behaviour)", () => {
+  it("suppresses notifications for a driver with notificationsEnabled=false", async () => {
     const auditService = new AuditNotificationService();
     const settingsService = new DriverSettingsService(auditService);
 
@@ -64,10 +64,35 @@ describe("SR-QA-DRIVER-001 C060: notification preference has no effect on delive
     });
 
     expect(recorded.notificationId).toBeTruthy();
+    // Notification is suppressed from the driver's notification feed:
+    expect(auditService.listNotifications().length).toBe(beforeCount);
+    expect(
+      auditService
+        .listNotifications()
+        .some((n) => n.notificationId === recorded.notificationId),
+    ).toBe(false);
+  });
+
+  it("delivers notifications when notificationsEnabled=true", async () => {
+    const auditService = new AuditNotificationService();
+    const settingsService = new DriverSettingsService(auditService);
+
+    settingsService.updateSettings("drv-demo-notif-002", {
+      notificationsEnabled: true,
+    });
+
+    const beforeCount = auditService.listNotifications().length;
+    const recorded = auditService.recordNotification({
+      tenantId: null,
+      channel: "driver_task",
+      title: "Driver statement generated",
+      message:
+        "Statement DRV-202603-002 is ready for driver drv-demo-notif-002.",
+      status: "unread",
+    });
+
+    expect(recorded.notificationId).toBeTruthy();
     expect(auditService.listNotifications().length).toBe(beforeCount + 1);
-    // If a preference check is ever wired in, this assertion (notification
-    // recorded despite the opt-out) must start failing and should be
-    // updated to assert suppression instead of loosened further.
     expect(
       auditService
         .listNotifications()
