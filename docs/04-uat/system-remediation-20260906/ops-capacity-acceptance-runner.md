@@ -126,3 +126,15 @@ on GitHub-hosted infrastructure; that result, once obtained, must be appended
 here with the run URL and outcome, following the same evidence-provenance
 discipline as `SR-OPS-PROOF-001.md`. A branch push alone is not a substitute
 for that recorded run.
+
+## Remediation: SR-API-THROTTLE-BASELINE-20260911
+
+The initial 900s execution under run 34581509135 revealed:
+1. HTTP 429 rate limit lockouts due to missing route-level `@Throttle` decorators, which inherited the global 60/min limit and 5-minute blockDuration.
+2. HTTP 409 conflict during order dispatch due to missing coordinates on seeded orders (`service_area` compliance gate `review_required`).
+
+Both issues were resolved in `SR-API-THROTTLE-BASELINE-20260911`:
+- Explicit `@Throttle` decorators applied to `POST tenant/bookings` (60/min), `POST orders/:orderId/dispatch` (300/min), and `POST reports/jobs` (30/min) with `blockDuration: seconds(1)`.
+- Pre-provisioned seed orders updated to include valid Taipei Core coordinates.
+- Full details documented in `docs/04-uat/system-remediation-20260906/SR-API-THROTTLE-BASELINE-20260911.md`.
+
