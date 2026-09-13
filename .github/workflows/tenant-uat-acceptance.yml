@@ -98,7 +98,6 @@ jobs:
       CANDIDATE_SHA: ${{ github.event.inputs.candidate_sha || github.sha }}
       WORKFLOW_SHA: ${{ github.sha }}
       DRTS_CANDIDATE_SHA: ${{ github.event.inputs.candidate_sha || github.sha }}
-      TSX_TSCONFIG_PATH: apps/api/tsconfig.json
     steps:
       - name: Validate candidate_sha input
         run: |
@@ -232,6 +231,8 @@ jobs:
 
       - name: Run C113-C115 pre-restart hosted acceptance (ledger audit, geo provider, C115 seed)
         id: c113_c115_acceptance
+        env:
+          TSX_TSCONFIG_PATH: apps/api/tsconfig.json
         run: |
           set -o pipefail
           ./apps/api/node_modules/.bin/tsx --tsconfig apps/api/tsconfig.json tests/e2e/system-remediation/sr-qa-webhook-001/c113-c115-acceptance.ts \
@@ -276,6 +277,8 @@ jobs:
 
       - name: Verify C115 restart readback and generate C111-C115 capability report
         id: c115_restart_readback
+        env:
+          TSX_TSCONFIG_PATH: apps/api/tsconfig.json
         run: |
           set -o pipefail
           ./apps/api/node_modules/.bin/tsx --tsconfig apps/api/tsconfig.json tests/e2e/system-remediation/sr-qa-webhook-001/c115-restart-readback.ts \
