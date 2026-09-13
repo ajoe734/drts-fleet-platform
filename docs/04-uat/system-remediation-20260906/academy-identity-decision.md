@@ -188,6 +188,10 @@ Beyond the four new tables it already owns, the backend needs:
   first-pass-write must `INSERT ... ON CONFLICT (driver_id) DO UPDATE` (upsert)
   rather than assume a pre-existing row, since there is no other task that
   creates one.
+- **Narrow pending reset and manual waiver preservation**:
+  When projecting qualification status into `reg.driver_reg_profiles.training_status`:
+  - If a driver has no passing record or has an incomplete training profile without an active manual waiver, the status is projected or reset to `'pending'` (or `'expired'` if a required course has expired). An empty required courses list does not produce a synthetic pass; it resolves to `'pending'`.
+  - Manual waivers (`training_status = 'waived'`) represent an authoritative regulatory override and must be strictly preserved across all status projection and re-evaluation transactions (`WHERE reg.driver_reg_profiles.training_status IS DISTINCT FROM 'waived'`). The Academy service must never overwrite an existing `'waived'` profile status.
 
 These are listed for the supervisor to allocate to `SR-ACADEMY-BE-001`'s
 `read_dependencies`/write scopes before backend implementation resumes; this

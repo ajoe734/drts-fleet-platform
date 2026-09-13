@@ -66,9 +66,9 @@ describe("SR-QA-DRIVER-001 C051: shift clock-in vs. driver suspension (fixed beh
     expect(suspended.lifecycleStatus).toBe("suspended");
     expect(suspended.dispatchEligible).toBe(false);
 
-    expect(() =>
+    await expect(
       shiftService.clockIn({ driverId: "drv-demo-003" }),
-    ).toThrowError(
+    ).rejects.toThrowError(
       expect.objectContaining({
         code: "DRIVER_AUTH_SUSPENDED",
         status: 403,
@@ -95,12 +95,12 @@ describe("SR-QA-DRIVER-001 C051: shift clock-in vs. driver suspension (fixed beh
       true,
     );
 
-    expect(() =>
+    await expect(
       shiftService.clockIn({
         driverId: "drv-demo-004",
         vehicleId: "veh-demo-001",
       }),
-    ).toThrowError(
+    ).rejects.toThrowError(
       expect.objectContaining({
         code: "DRIVER_AUTH_SUSPENDED",
         status: 403,

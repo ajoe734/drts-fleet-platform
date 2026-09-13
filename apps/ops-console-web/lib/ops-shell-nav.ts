@@ -108,6 +108,12 @@ export function buildOpsShellNav(
       label: t("nav.attendance", locale),
     },
     {
+      key: "leave",
+      href: "/leave",
+      icon: "attendance",
+      label: t("nav.leave", locale),
+    },
+    {
       key: "maintenance",
       href: "/maintenance",
       icon: "maintenance",

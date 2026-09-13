@@ -96,7 +96,8 @@ export class OwnedAutonomousDispatchExecutorService {
     orderId: string,
     options?: { idempotencyKey?: string; requestId?: string },
   ): Promise<AutonomousDispatchOfferResult> {
-    const opKey = options?.idempotencyKey ?? `order:${orderId}:request_dispatch`;
+    const opKey =
+      options?.idempotencyKey ?? `order:${orderId}:request_dispatch`;
     const existingReceipt = this.getReceipt(opKey);
     if (existingReceipt) {
       return existingReceipt.result as unknown as AutonomousDispatchOfferResult;
@@ -110,7 +111,9 @@ export class OwnedAutonomousDispatchExecutorService {
         { mode: "auto" },
         options?.requestId,
       );
-      job = this.ownedMobilityService.requireDispatchJob(dispatchRes.dispatchJobId);
+      job = this.ownedMobilityService.requireDispatchJob(
+        dispatchRes.dispatchJobId,
+      );
     }
 
     const offerResult = await this.executeOfferRound(orderId, {
@@ -207,7 +210,9 @@ export class OwnedAutonomousDispatchExecutorService {
 
     // List and filter candidates
     const allCandidates =
-      this.ownedMobilityService.listEligibleDispatchCandidatesForOrder(orderId);
+      await this.ownedMobilityService.listEligibleDispatchCandidatesForOrder(
+        orderId,
+      );
     const excluded = new Set(options?.excludedDriverIds ?? []);
     const availableCandidates = allCandidates.filter(
       (c) => !excluded.has(c.driverId),
@@ -280,11 +285,15 @@ export class OwnedAutonomousDispatchExecutorService {
         );
 
         // Track assignmentVersion as round
-        (assignment as unknown as { assignmentVersion?: number }).assignmentVersion =
-          round;
+        (
+          assignment as unknown as { assignmentVersion?: number }
+        ).assignmentVersion = round;
 
         // In-memory reservation ledger: bind provisional reservation to actual assignment
-        if (!this.ownedMobilityRepository?.isEnabled() && provisionalReservation) {
+        if (
+          !this.ownedMobilityRepository?.isEnabled() &&
+          provisionalReservation
+        ) {
           this.bindProvisionalInMem(
             provisionalReservation.reservationId,
             assignment.assignmentId,
@@ -344,7 +353,11 @@ export class OwnedAutonomousDispatchExecutorService {
         this.recordReceipt(
           offerOpKey,
           "succeeded",
-          { round, driverId: candidate.driverId, vehicleId: candidate.vehicleId },
+          {
+            round,
+            driverId: candidate.driverId,
+            vehicleId: candidate.vehicleId,
+          },
           offerResult as unknown as Record<string, unknown>,
         );
 
@@ -412,7 +425,12 @@ export class OwnedAutonomousDispatchExecutorService {
     taskId: string,
     command: DriverAcceptTaskCommand,
     options?: { requestId?: string },
-  ): Promise<{ status: "accepted"; assignmentId: string; taskId: string; acceptedAt: string }> {
+  ): Promise<{
+    status: "accepted";
+    assignmentId: string;
+    taskId: string;
+    acceptedAt: string;
+  }> {
     const task = this.ownedMobilityService.getDriverTask(taskId);
     const assignment = this.ownedMobilityService.requireAssignment(
       task.assignmentId,
@@ -642,12 +660,13 @@ export class OwnedAutonomousDispatchExecutorService {
     // assignment's own deadline rather than re-verifying supersession under a
     // lock, which is a different (and, without a shared DB, unfenceable)
     // check that existing in-memory-mode callers already account for.
-    const timeoutOutcome = await this.ownedMobilityService.handleDispatchTimeout(
-      command.orderId,
-      "acceptance_timeout",
-      command.requestId,
-      { targetAssignmentId: command.targetAssignmentId },
-    );
+    const timeoutOutcome =
+      await this.ownedMobilityService.handleDispatchTimeout(
+        command.orderId,
+        "acceptance_timeout",
+        command.requestId,
+        { targetAssignmentId: command.targetAssignmentId },
+      );
 
     if (
       this.ownedMobilityRepository?.isEnabled() &&
@@ -868,7 +887,10 @@ export class OwnedAutonomousDispatchExecutorService {
 
   private releaseInMem(assignmentId: string) {
     for (const r of this.inMemReservations) {
-      if (r.assignmentId === assignmentId && ["held", "occupied"].includes(r.status)) {
+      if (
+        r.assignmentId === assignmentId &&
+        ["held", "occupied"].includes(r.status)
+      ) {
         r.status = "released";
         r.version += 1;
       }

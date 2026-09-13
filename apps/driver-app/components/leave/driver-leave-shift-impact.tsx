@@ -21,14 +21,8 @@ export interface DriverLeaveShiftImpactProps {
   theme?: DriverCanvasTheme;
 }
 
-const DEFAULT_SHIFTS: ShiftImpactItem[] = [
-  { id: "shift_2291", zh: "09/14（一）08:00–20:00", tagged: true },
-  { id: "shift_2292", zh: "09/15（二）08:00–20:00", tagged: true },
-  { id: "shift_2293", zh: "09/17（四）08:00–20:00", tagged: false },
-];
-
 export function DriverLeaveShiftImpact({
-  shifts = DEFAULT_SHIFTS,
+  shifts = [],
   onBack,
   theme = driverCanvasTheme,
 }: DriverLeaveShiftImpactProps) {
@@ -40,7 +34,12 @@ export function DriverLeaveShiftImpact({
       >
         {/* Section Header */}
         <View style={styles.sectionHeader}>
-          <Text style={[styles.sectionTitleZh, { color: theme.text, fontFamily: theme.fontFamily }]}>
+          <Text
+            style={[
+              styles.sectionTitleZh,
+              { color: theme.text, fontFamily: theme.fontFamily },
+            ]}
+          >
             班表連動
           </Text>
           <Text
@@ -93,7 +92,10 @@ export function DriverLeaveShiftImpact({
             padding={12}
             style={[
               styles.shiftCard,
-              { borderLeftWidth: 3, borderLeftColor: s.tagged ? theme.warn : theme.border },
+              {
+                borderLeftWidth: 3,
+                borderLeftColor: s.tagged ? theme.warn : theme.border,
+              },
             ]}
             theme={theme}
           >
@@ -166,7 +168,12 @@ export function DriverLeaveShiftImpact({
             },
           ]}
         >
-          <Btn onPress={onBack} style={styles.backBtn} theme={theme} variant="secondary">
+          <Btn
+            onPress={onBack}
+            style={styles.backBtn}
+            theme={theme}
+            variant="secondary"
+          >
             返回詳情
           </Btn>
         </View>

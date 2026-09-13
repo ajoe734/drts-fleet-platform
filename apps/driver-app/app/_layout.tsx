@@ -160,6 +160,20 @@ export default function RootLayout() {
           }}
         />
         <Tabs.Screen
+          name="leave"
+          options={{
+            title: driverRouteTitles.leave,
+            href: null,
+          }}
+        />
+        <Tabs.Screen
+          name="academy"
+          options={{
+            title: driverRouteTitles.academy,
+            href: null,
+          }}
+        />
+        <Tabs.Screen
           name="sos"
           options={{
             title: driverRouteTitles.sos,
@@ -184,4 +198,3 @@ export default function RootLayout() {
     </ThemeProvider>
   );
 }
-

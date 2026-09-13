@@ -4,6 +4,7 @@ import type { ReactNode } from "react";
 import { usePathname } from "next/navigation";
 import { CanvasShell, type CanvasShellNavItem } from "@drts/ui-web";
 import { FleetPortalHealthFooter } from "@/components/fleet-portal-health-footer";
+import { buildHostPortalNav, isHostPortalPath } from "@/lib/fleet-portal-nav";
 import { buildFleetTheme } from "@/lib/fleet-portal-theme";
 import { useTranslation } from "@/lib/i18n";
 import { type Locale, t } from "@/lib/translations";
@@ -39,6 +40,7 @@ export function resolveFleetPortalEnvLabel(
 
 export function FleetPortalShell({
   fleetNav,
+  hostOnly = false,
   fleetBrandLabel,
   fleetBrandSubLabel,
   fleetBrandMark,
@@ -47,6 +49,7 @@ export function FleetPortalShell({
   children,
 }: {
   fleetNav: CanvasShellNavItem[];
+  hostOnly?: boolean;
   fleetBrandLabel: ReactNode;
   fleetBrandSubLabel: ReactNode;
   fleetBrandMark: ReactNode;
@@ -58,24 +61,26 @@ export function FleetPortalShell({
   const pathname = usePathname();
   const { locale } = useTranslation();
   const envLabel = resolveFleetPortalEnvLabel(env, locale);
+  const isHost = hostOnly || isHostPortalPath(pathname);
 
   return (
     <div
       data-testid="fleet-portal-shell"
       data-environment={env ?? "unknown"}
+      data-portal-scope={isHost ? "host" : "fleet"}
       style={{ minHeight: "100dvh", height: "100dvh" }}
     >
       <CanvasShell
         theme={theme}
-        nav={fleetNav}
+        nav={isHost ? buildHostPortalNav(locale) : fleetNav}
         currentPath={pathname}
-        brandLabel={fleetBrandLabel}
-        brandSubLabel={fleetBrandSubLabel}
+        brandLabel={isHost ? t("host.appName", locale) : fleetBrandLabel}
+        brandSubLabel={isHost ? t("host.appSub", locale) : fleetBrandSubLabel}
         brandMark={fleetBrandMark}
         searchPlaceholder={searchPlaceholder}
         env={envLabel}
         avatarLabel="CH"
-        sidebarFooter={<FleetPortalHealthFooter />}
+        sidebarFooter={isHost ? undefined : <FleetPortalHealthFooter />}
         style={{ minHeight: "100dvh", height: "100dvh" }}
       >
         {children}

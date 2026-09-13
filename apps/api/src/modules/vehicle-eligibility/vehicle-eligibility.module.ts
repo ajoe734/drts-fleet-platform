@@ -1,5 +1,7 @@
 import { Module } from "@nestjs/common";
 
+import { DriverAcademyModule } from "../driver-academy/driver-academy.module";
+import { DriverLeaveModule } from "../driver-leave/driver-leave.module";
 import { DatabaseModule } from "../../common/db";
 import { AuditNotificationModule } from "../audit-notification/audit-notification.module";
 import { RegulatoryRegistryModule } from "../regulatory-registry/regulatory-registry.module";
@@ -13,6 +15,8 @@ import { VehicleEligibilityService } from "./vehicle-eligibility.service";
 @Module({
   imports: [
     DatabaseModule,
+    DriverAcademyModule,
+    DriverLeaveModule,
     AuditNotificationModule,
     RegulatoryRegistryModule,
     ServiceProductModule,
