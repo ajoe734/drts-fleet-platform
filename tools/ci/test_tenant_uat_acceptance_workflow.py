@@ -268,6 +268,13 @@ class TenantUatAcceptanceWorkflowStructureTests(unittest.TestCase):
         self.assertIn("PLAYWRIGHT_JSON_OUTPUT_FILE:", webhook_e2e_block)
         self.assertIn("test-results/webhook-e2e-report.json", webhook_e2e_block)
 
+    def test_hosted_tsx_acceptance_runners_use_api_tsconfig(self) -> None:
+        self.assertIn("TSX_TSCONFIG_PATH: apps/api/tsconfig.json", self.text)
+        c113_step = self.text.split("id: c113_c115_acceptance", 1)[1].split("      - name:", 1)[0]
+        self.assertIn("--tsconfig apps/api/tsconfig.json", c113_step)
+        c115_step = self.text.split("id: c115_restart_readback", 1)[1].split("      - name:", 1)[0]
+        self.assertIn("--tsconfig apps/api/tsconfig.json", c115_step)
+
 
 class RunStatusScriptBehaviorTests(unittest.TestCase):
     """Executes the embedded `Record run status` heredoc for real, in a
