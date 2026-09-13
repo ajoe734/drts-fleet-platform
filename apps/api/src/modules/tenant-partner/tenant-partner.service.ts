@@ -386,6 +386,20 @@ type ReferralEmbedHandoffResolution = PartnerIngressHandoffResolution & {
   consentGrantedAt: string | null;
 };
 
+export type TenantApiKeyResolution = {
+  apiKey: StoredTenantApiKeyRecord;
+  identity: IdentityContext;
+};
+
+export interface AuthenticateTenantApiKeyOptions {
+  requiredScopes?: string[] | undefined;
+  tenantId?: string | null | undefined;
+  workload?: string | undefined;
+  requestId?: string | undefined;
+}
+
+export type { StoredTenantApiKeyRecord };
+
 type PartnerEligibilityIdentity = Pick<
   IdentityContext,
   | "actorType"
@@ -7108,6 +7122,220 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
       .map((apiKey) => this.toApiKeyResponse(apiKey));
   }
 
+  findStoredApiKeyByPlaintext(
+    plaintextKey: string,
+  ): StoredTenantApiKeyRecord | null {
+    if (!plaintextKey || typeof plaintextKey !== "string") {
+      return null;
+    }
+    const trimmed = plaintextKey.trim();
+    if (!trimmed) {
+      return null;
+    }
+    const providedHash = this.hashSecret(trimmed);
+    const found = this.apiKeys.find((candidate) =>
+      this.hashesMatch(providedHash, candidate.keyHash),
+    );
+    if (!found) {
+      return null;
+    }
+    this.reconcileStoredApiKey(found);
+    return this.cloneStoredApiKey(found);
+  }
+
+  authenticateTenantApiKey(
+    apiKey: string,
+    options?: AuthenticateTenantApiKeyOptions,
+  ): MaybePromise<TenantApiKeyResolution> {
+    const rawKey = apiKey?.trim();
+    if (!rawKey) {
+      throw new ApiRequestError(
+        HttpStatus.UNAUTHORIZED,
+        "TENANT_API_KEY_REQUIRED",
+        "apiKey is required for tenant API key authentication.",
+        {
+          tenantId: options?.tenantId ?? null,
+        },
+      );
+    }
+
+    const providedHash = this.hashSecret(rawKey);
+    const matchingKey = this.apiKeys.find((candidate) =>
+      this.hashesMatch(providedHash, candidate.keyHash),
+    );
+
+    if (!matchingKey) {
+      throw new ApiRequestError(
+        HttpStatus.UNAUTHORIZED,
+        "TENANT_API_KEY_INVALID",
+        "Tenant API key is invalid.",
+        {
+          tenantId: options?.tenantId ?? null,
+        },
+      );
+    }
+
+    if (options?.tenantId && matchingKey.tenantId !== options.tenantId) {
+      throw new ApiRequestError(
+        HttpStatus.FORBIDDEN,
+        "TENANT_API_KEY_TENANT_MISMATCH",
+        "Tenant API key does not match the requested tenant.",
+        {
+          apiKeyId: matchingKey.apiKeyId,
+          tenantId: options.tenantId,
+          expectedTenantId: matchingKey.tenantId,
+        },
+      );
+    }
+
+    this.reconcileStoredApiKey(matchingKey);
+
+    if (
+      matchingKey.autoRevokedAt ||
+      matchingKey.status === "auto_revoked" ||
+      matchingKey.revokeReason === "rotation_overlap_elapsed"
+    ) {
+      throw new ApiRequestError(
+        HttpStatus.UNAUTHORIZED,
+        "TENANT_API_KEY_AUTO_REVOKED",
+        "Tenant API key was auto-revoked after rotation overlap elapsed.",
+        {
+          apiKeyId: matchingKey.apiKeyId,
+          tenantId: matchingKey.tenantId,
+          autoRevokedAt: matchingKey.autoRevokedAt,
+          revokeReason: matchingKey.revokeReason,
+        },
+      );
+    }
+
+    if (matchingKey.revokedAt || matchingKey.status === "revoked") {
+      throw new ApiRequestError(
+        HttpStatus.UNAUTHORIZED,
+        "TENANT_API_KEY_REVOKED",
+        "Tenant API key is revoked.",
+        {
+          apiKeyId: matchingKey.apiKeyId,
+          tenantId: matchingKey.tenantId,
+          revokedAt: matchingKey.revokedAt,
+          revokeReason: matchingKey.revokeReason ?? "revoked",
+        },
+      );
+    }
+
+    const now = Date.now();
+    const expiresAtMs = matchingKey.expiresAt
+      ? Date.parse(matchingKey.expiresAt)
+      : Number.NaN;
+    if (
+      matchingKey.status === "expired" ||
+      (!Number.isNaN(expiresAtMs) && expiresAtMs <= now)
+    ) {
+      matchingKey.status = "expired";
+      throw new ApiRequestError(
+        HttpStatus.UNAUTHORIZED,
+        "TENANT_API_KEY_EXPIRED",
+        "Tenant API key has expired.",
+        {
+          apiKeyId: matchingKey.apiKeyId,
+          tenantId: matchingKey.tenantId,
+          expiresAt: matchingKey.expiresAt,
+        },
+      );
+    }
+
+    if (options?.requiredScopes && options.requiredScopes.length > 0) {
+      const normalizedRequired = this.normalizeTenantApiKeyScopes(
+        options.requiredScopes,
+      );
+      const missingScopes = normalizedRequired.filter(
+        (required) => !matchingKey.scopes.includes(required),
+      );
+      if (missingScopes.length > 0) {
+        throw new ApiRequestError(
+          HttpStatus.FORBIDDEN,
+          "INSUFFICIENT_SCOPE",
+          "Tenant API key lacks the required scopes.",
+          {
+            apiKeyId: matchingKey.apiKeyId,
+            tenantId: matchingKey.tenantId,
+            requiredScopes: normalizedRequired,
+            missingScopes,
+            grantedScopes: matchingKey.scopes,
+          },
+        );
+      }
+    }
+
+    const nowIso = new Date().toISOString();
+    const previousLastUsedAt = matchingKey.lastUsedAt;
+    matchingKey.lastUsedAt = nowIso;
+    matchingKey.lastUsedWorkload = options?.workload ?? "tenant_api";
+    matchingKey.signals = this.buildCredentialSignals(
+      matchingKey.lastUsedAt,
+      matchingKey.expiresAt ?? null,
+      matchingKey.autoRevokedAt ?? null,
+      nowIso,
+    );
+
+    this.maybeRecordDormantCredentialUse({
+      tenantId: matchingKey.tenantId,
+      channel: "ops_notice",
+      title: "Dormant tenant API key used",
+      message: `Tenant API key ${matchingKey.apiKeyId} (${matchingKey.keyName}) was used after dormancy.`,
+      previousLastUsedAt,
+      createdAt: matchingKey.createdAt,
+    });
+
+    this.recordTenantAudit(
+      {
+        actorId: matchingKey.ownerRef ?? matchingKey.apiKeyId,
+        actorType: "tenant_admin",
+        tenantId: matchingKey.tenantId,
+        moduleName: "tenant-partner",
+        actionName: "use_api_key",
+        resourceType: "tenant_api_key",
+        resourceId: matchingKey.apiKeyId,
+        newValuesSummary: {
+          apiKeyId: matchingKey.apiKeyId,
+          keyName: matchingKey.keyName,
+          lastUsedAt: matchingKey.lastUsedAt,
+          lastUsedWorkload: matchingKey.lastUsedWorkload,
+          workload: matchingKey.lastUsedWorkload,
+        },
+      },
+      options?.requestId,
+    );
+
+    const persisted = this.persistChanges(
+      {
+        apiKeys: [this.cloneStoredApiKey(matchingKey)],
+      },
+      "authenticate_tenant_api_key",
+    );
+
+    const identity: IdentityContext = {
+      actorType: "tenant_admin",
+      actorId: matchingKey.apiKeyId,
+      realm: "tenant",
+      authMode: "bootstrap_headers",
+      roleFamilies: ["tenant"],
+      roles: ["tenant_admin", "tc_integration_mgr"],
+      scopes: [...matchingKey.scopes],
+      tenantId: matchingKey.tenantId,
+      principalId: matchingKey.ownerRef ?? matchingKey.apiKeyId,
+      tokenId: matchingKey.apiKeyId,
+      supportedExecutionModes: [
+        "discussion_planning",
+        "supervisor_managed_execution",
+      ],
+    };
+
+    return this.afterPersistence(persisted, () => ({
+      apiKey: this.cloneStoredApiKey(matchingKey),
+      identity,
+    }));
+  }
+
   issueApiKey(
     tenantId: string,
     command: IssueTenantApiKeyCommand,
@@ -9283,7 +9511,7 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
     };
   }
 
-  private toApiKeyResponse(
+  toApiKeyResponse(
     apiKey: StoredTenantApiKeyRecord,
   ): TenantApiKeyRecord & Record<string, unknown> {
     const signals = this.materializeCredentialSignals(
@@ -14424,7 +14652,7 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
   private persistChanges(
     changes: PersistTenantPartnerChanges,
     context: string,
-  ) {
+  ): MaybePromise<void> {
     if (
       !this.tenantPartnerRepository ||
       typeof (this.tenantPartnerRepository as any).persistChanges !== "function"
@@ -14432,19 +14660,22 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
       return;
     }
 
-    void this.tenantPartnerRepository
-      .persistChanges(changes)
-      .catch((error: unknown) => {
-        if (
-          typeof (this.tenantPartnerRepository as any)
-            .reportPersistenceFailure === "function"
-        ) {
-          (this.tenantPartnerRepository as any).reportPersistenceFailure(
-            error,
-            context,
-          );
-        }
-      });
+    const result = this.tenantPartnerRepository.persistChanges(changes);
+    if (result && typeof (result as any).catch === "function") {
+      return (result as Promise<unknown>)
+        .then(() => undefined)
+        .catch((error: unknown) => {
+          if (
+            typeof (this.tenantPartnerRepository as any)
+              .reportPersistenceFailure === "function"
+          ) {
+            (this.tenantPartnerRepository as any).reportPersistenceFailure(
+              error,
+              context,
+            );
+          }
+        });
+    }
   }
 
   private syncIdentityTenantUserRoles(context: string) {
