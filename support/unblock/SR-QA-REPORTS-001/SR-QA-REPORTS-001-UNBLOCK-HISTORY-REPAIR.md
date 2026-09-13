@@ -124,22 +124,24 @@ A complete verification of the changes in `gemini/sr-qa-reports-001` was conduct
 - **Authorized Write Scopes**:
   `SR-QA-REPORTS-001` defines three `write_scopes`:
   1. `tests/unit/system-remediation/sr-qa-reports-001/`
-  2. `docs/04-uat/system-remediation-20260906/SR-QA-REPORTS-001.md`
+  2. `docs/04-uat/system-remediation-20260906/` (`SR-QA-REPORTS-001.md`)
   3. `tests/e2e/system-remediation/sr-qa-reports-001/`
 
-- **Modified Files Audit** (12 files total):
-  1. `docs/04-uat/system-remediation-20260906/SR-QA-REPORTS-001.md` (242 insertions)
-  2. `tests/e2e/system-remediation/sr-qa-reports-001/sr-qa-reports-001.spec.ts` (371 insertions)
-  3. `tests/unit/system-remediation/sr-qa-reports-001/c090-operational-reports.test.ts` (306 insertions)
-  4. `tests/unit/system-remediation/sr-qa-reports-001/c091-general-report-renderers.test.ts` (314 insertions)
-  5. `tests/unit/system-remediation/sr-qa-reports-001/c092-regulatory-nine-builders.test.ts` (387 insertions)
-  6. `tests/unit/system-remediation/sr-qa-reports-001/c093-p5-records-retention.test.ts` (189 insertions)
-  7. `tests/unit/system-remediation/sr-qa-reports-001/c094-c096-public-info-placards-governance.test.ts` (219 insertions)
-  8. `tests/unit/system-remediation/sr-qa-reports-001/c095-p5-fare-anomalies-ratings.test.ts` (241 insertions)
-  9. `tests/unit/system-remediation/sr-qa-reports-001/c097-placard-printable-download.test.ts` (296 insertions)
-  10. `tests/unit/system-remediation/sr-qa-reports-001/c098-electronic-ride-certificate.test.ts` (176 insertions)
-  11. `tests/unit/system-remediation/sr-qa-reports-001/c099-evidence-governance-controlled-export.test.ts` (254 insertions)
-  12. `tests/unit/system-remediation/sr-qa-reports-001/c100-audit-immutability-retention-boundary.test.ts` (127 insertions)
+- **Modified Files Audit** (12 files total on parent branch `gemini/sr-qa-reports-001`):
+  ```text
+  1. docs/04-uat/system-remediation-20260906/SR-QA-REPORTS-001.md (242 insertions)
+  2. tests/e2e/system-remediation/sr-qa-reports-001/sr-qa-reports-001.spec.ts (371 insertions)
+  3. tests/unit/system-remediation/sr-qa-reports-001/c090-operational-reports.test.ts (306 insertions)
+  4. tests/unit/system-remediation/sr-qa-reports-001/c091-general-report-renderers.test.ts (314 insertions)
+  5. tests/unit/system-remediation/sr-qa-reports-001/c092-regulatory-nine-builders.test.ts (387 insertions)
+  6. tests/unit/system-remediation/sr-qa-reports-001/c093-p5-records-retention.test.ts (189 insertions)
+  7. tests/unit/system-remediation/sr-qa-reports-001/c094-c096-public-info-placards-governance.test.ts (219 insertions)
+  8. tests/unit/system-remediation/sr-qa-reports-001/c095-p5-fare-anomalies-ratings.test.ts (241 insertions)
+  9. tests/unit/system-remediation/sr-qa-reports-001/c097-placard-printable-download.test.ts (296 insertions)
+  10. tests/unit/system-remediation/sr-qa-reports-001/c098-electronic-ride-certificate.test.ts (176 insertions)
+  11. tests/unit/system-remediation/sr-qa-reports-001/c099-evidence-governance-controlled-export.test.ts (254 insertions)
+  12. tests/unit/system-remediation/sr-qa-reports-001/c100-audit-immutability-retention-boundary.test.ts (127 insertions)
+  ```
 
   **100% of modified files strictly adhere to authorized write scopes.** No out-of-scope files were touched.
 
