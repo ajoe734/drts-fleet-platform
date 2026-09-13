@@ -38,12 +38,16 @@ on:
       - claude2/sr-qa-tenant-001-acceptance-runner
       - claude/sr-qa-tenant-001-acceptance-runner
       - codex/sr-qa-tenant-ci-repair-20260911
+      - gemini2/sr-c115-harness-20260913
     paths:
       - .github/workflows/tenant-uat-acceptance.yml
       - tools/ci/test_tenant_uat_acceptance_workflow.py
       - tests/e2e/system-remediation/sr-qa-tenant-001/**
       - tests/unit/system-remediation/sr-qa-tenant-001/**
       - docs/04-uat/system-remediation-20260906/SR-QA-TENANT-001.md
+      - tests/e2e/system-remediation/sr-qa-webhook-001/**
+      - tests/unit/system-remediation/sr-qa-webhook-001/**
+      - docs/04-uat/system-remediation-20260906/SR-QA-WEBHOOK-001.md
 
 permissions:
   contents: read
@@ -191,8 +195,11 @@ jobs:
           set -o pipefail
           pnpm exec playwright test \
             -c playwright.system-remediation.config.ts \
+            --output test-results/tenant-artifacts \
             tests/e2e/system-remediation/sr-qa-tenant-001 --workers=1 --trace=off \
             2>&1 | tee -a .artifacts/tenant-uat-acceptance/execution-log.txt
+          mkdir -p .artifacts/tenant-uat-acceptance
+          cp test-results/system-remediation-report.json .artifacts/tenant-uat-acceptance/system-remediation-report.json || true
 
       - name: Run tenant service-level regression suite
         id: harness_unit
@@ -202,6 +209,40 @@ jobs:
             tests/unit/system-remediation/sr-qa-tenant-001/ \
             --reporter=default --reporter=json \
             --outputFile.json=.artifacts/tenant-uat-acceptance/unit-test-report.json \
+            2>&1 | tee -a .artifacts/tenant-uat-acceptance/execution-log.txt
+
+      - name: Run webhook E2E acceptance specs (C111-C112 real service & HTTP)
+        id: webhook_e2e
+        env:
+          PLAYWRIGHT_JSON_OUTPUT_FILE: "test-results/webhook-e2e-report.json"
+        run: |
+          set -o pipefail
+          pnpm exec playwright test \
+            -c playwright.system-remediation.config.ts \
+            --output test-results/webhook-artifacts \
+            tests/e2e/system-remediation/sr-qa-webhook-001/sr-qa-webhook-001.spec.ts --workers=1 --trace=off \
+            2>&1 | tee -a .artifacts/tenant-uat-acceptance/execution-log.txt
+          if [ ! -f test-results/system-remediation-report.json ] && [ -f .artifacts/tenant-uat-acceptance/system-remediation-report.json ]; then
+            cp .artifacts/tenant-uat-acceptance/system-remediation-report.json test-results/system-remediation-report.json
+          fi
+
+      - name: Run webhook unit regression suite (C111-C115 34 tests)
+        id: webhook_unit
+        run: |
+          set -o pipefail
+          pnpm exec vitest run \
+            tests/unit/system-remediation/sr-qa-webhook-001/ \
+            --reporter=default --reporter=json \
+            --outputFile.json=.artifacts/tenant-uat-acceptance/webhook-unit-report.json \
+            2>&1 | tee -a .artifacts/tenant-uat-acceptance/execution-log.txt
+
+      - name: Run C113-C115 pre-restart hosted acceptance (ledger audit, geo provider, C115 seed)
+        id: c113_c115_acceptance
+        env:
+          TSX_TSCONFIG_PATH: apps/api/tsconfig.json
+        run: |
+          set -o pipefail
+          ./apps/api/node_modules/.bin/tsx --tsconfig apps/api/tsconfig.json tests/e2e/system-remediation/sr-qa-webhook-001/c113-c115-acceptance.ts \
             2>&1 | tee -a .artifacts/tenant-uat-acceptance/execution-log.txt
 
       - name: Restart the real API without resetting its database
@@ -241,6 +282,15 @@ jobs:
           ./apps/api/node_modules/.bin/tsx tests/e2e/system-remediation/sr-qa-tenant-001/restart-readback.ts \
             2>&1 | tee -a .artifacts/tenant-uat-acceptance/execution-log.txt
 
+      - name: Verify C115 restart readback and generate C111-C115 capability report
+        id: c115_restart_readback
+        env:
+          TSX_TSCONFIG_PATH: apps/api/tsconfig.json
+        run: |
+          set -o pipefail
+          ./apps/api/node_modules/.bin/tsx --tsconfig apps/api/tsconfig.json tests/e2e/system-remediation/sr-qa-webhook-001/c115-restart-readback.ts \
+            2>&1 | tee -a .artifacts/tenant-uat-acceptance/execution-log.txt
+
       - name: Stop background API server
         if: always()
         run: |
@@ -257,6 +307,8 @@ jobs:
           from pathlib import Path
 
           playwright_report = Path("test-results/system-remediation-report.json")
+          if not playwright_report.exists() and Path(".artifacts/tenant-uat-acceptance/system-remediation-report.json").exists():
+              playwright_report = Path(".artifacts/tenant-uat-acceptance/system-remediation-report.json")
           if not playwright_report.exists():
               raise SystemExit(
                   "Tenant UAT acceptance gate: no Playwright JSON report was "
@@ -338,6 +390,86 @@ jobs:
                   f"success={unit_report.get('success')}."
               )
           print(f"Tenant UAT unit regression: {unit_passed}/{unit_total} passed, zero skips.")
+
+          # Webhook unit regression suite gate (C111-C115 34 tests)
+          webhook_unit_path = Path(".artifacts/tenant-uat-acceptance/webhook-unit-report.json")
+          if not webhook_unit_path.exists():
+              raise SystemExit(
+                  "Tenant UAT acceptance gate: no Webhook Vitest JSON report was produced."
+              )
+          webhook_unit = json.loads(webhook_unit_path.read_text())
+          wh_total = webhook_unit.get("numTotalTests", 0)
+          wh_passed = webhook_unit.get("numPassedTests", 0)
+          wh_pending = webhook_unit.get("numPendingTests", 0)
+          if (
+              wh_total < 34
+              or wh_passed != wh_total
+              or wh_pending
+              or not webhook_unit.get("success")
+          ):
+              raise SystemExit(
+                  f"Webhook unit regression incomplete: total={wh_total}, "
+                  f"passed={wh_passed}, pending/skipped={wh_pending}, "
+                  f"success={webhook_unit.get('success')}."
+              )
+          print(f"Webhook unit regression: {wh_passed}/{wh_total} passed, zero skips.")
+
+          # C111-C115 Capability matrix report gate
+          capability_report_path = Path(".artifacts/tenant-uat-acceptance/c111-c115-capability-report.json")
+          if not capability_report_path.exists():
+              raise SystemExit(
+                  "Tenant UAT acceptance gate: no C111-C115 capability report was produced."
+              )
+          import os
+          cap_report = json.loads(capability_report_path.read_text())
+          expected_candidate = os.environ.get("CANDIDATE_SHA", "").strip()
+          actual_candidate = cap_report.get("candidate_sha", "").strip()
+          if expected_candidate and actual_candidate != expected_candidate:
+              raise SystemExit(
+                  f"Capability report candidate SHA mismatch: expected {expected_candidate}, got {actual_candidate}"
+              )
+          if cap_report.get("status") != "passed":
+              raise SystemExit(f"Capability report status is not 'passed': {cap_report.get('status')}")
+
+          capabilities = cap_report.get("capabilities", {})
+          required_caps = {"C111", "C112", "C113", "C114", "C115"}
+          if not required_caps.issubset(capabilities.keys()):
+              raise SystemExit(
+                  f"Capability report missing required capabilities: {sorted(required_caps - set(capabilities.keys()))}"
+              )
+
+          for cap_id in sorted(required_caps):
+              cap_data = capabilities[cap_id]
+              if cap_data.get("status") != "passed":
+                  raise SystemExit(f"Capability {cap_id} did not pass: {cap_data.get('status')}")
+              if not cap_data.get("verified"):
+                  raise SystemExit(f"Capability {cap_id} has empty verification evidence")
+          print(f"C111-C115 Capability matrix verified: all 5 capabilities passed under candidate {actual_candidate}.")
+
+          webhook_e2e_report = Path("test-results/webhook-e2e-report.json")
+          if webhook_e2e_report.exists():
+              wh_e2e_data = json.loads(webhook_e2e_report.read_text())
+              wh_e2e_specs = [
+                  spec
+                  for suite in wh_e2e_data.get("suites", [])
+                  for spec in iter_specs(suite)
+                  if "sr-qa-webhook-001" in spec.get("file", "")
+              ]
+              wh_e2e_total = 0
+              wh_e2e_passed = 0
+              for spec in wh_e2e_specs:
+                  for test in spec.get("tests", []):
+                      wh_e2e_total += 1
+                      results = test.get("results", [])
+                      status = results[-1].get("status") if results else None
+                      if status == "passed":
+                          wh_e2e_passed += 1
+              if wh_e2e_total and wh_e2e_passed != wh_e2e_total:
+                  raise SystemExit(
+                      f"Webhook E2E acceptance incomplete: total={wh_e2e_total}, passed={wh_e2e_passed}."
+                  )
+              if wh_e2e_total:
+                  print(f"Webhook E2E acceptance: {wh_e2e_passed}/{wh_e2e_total} passed, zero skips.")
           PY_GATE
 
       - name: Record run status
@@ -350,9 +482,13 @@ jobs:
           SEED_OUTCOME: ${{ steps.seed.outcome }}
           HARNESS_E2E_OUTCOME: ${{ steps.harness_e2e.outcome }}
           HARNESS_UNIT_OUTCOME: ${{ steps.harness_unit.outcome }}
+          WEBHOOK_E2E_OUTCOME: ${{ steps.webhook_e2e.outcome }}
+          WEBHOOK_UNIT_OUTCOME: ${{ steps.webhook_unit.outcome }}
+          C113_C115_ACCEPTANCE_OUTCOME: ${{ steps.c113_c115_acceptance.outcome }}
           GATE_OUTCOME: ${{ steps.gate.outcome }}
           RESTART_API_OUTCOME: ${{ steps.restart_api.outcome }}
           RESTART_READBACK_OUTCOME: ${{ steps.restart_readback.outcome }}
+          C115_RESTART_READBACK_OUTCOME: ${{ steps.c115_restart_readback.outcome }}
         run: |
           python3 - <<'PY_STATUS'
           import json
@@ -372,9 +508,13 @@ jobs:
                   "SEED_OUTCOME",
                   "HARNESS_E2E_OUTCOME",
                   "HARNESS_UNIT_OUTCOME",
+                  "WEBHOOK_E2E_OUTCOME",
+                  "WEBHOOK_UNIT_OUTCOME",
+                  "C113_C115_ACCEPTANCE_OUTCOME",
                   "GATE_OUTCOME",
                   "RESTART_API_OUTCOME",
                   "RESTART_READBACK_OUTCOME",
+                  "C115_RESTART_READBACK_OUTCOME",
               ]
           }
           setup_ok = all(
@@ -391,9 +531,13 @@ jobs:
               setup_ok
               and outcomes["HARNESS_E2E_OUTCOME"] == "success"
               and outcomes["HARNESS_UNIT_OUTCOME"] == "success"
+              and outcomes["WEBHOOK_E2E_OUTCOME"] == "success"
+              and outcomes["WEBHOOK_UNIT_OUTCOME"] == "success"
+              and outcomes["C113_C115_ACCEPTANCE_OUTCOME"] == "success"
               and outcomes["GATE_OUTCOME"] == "success"
               and outcomes["RESTART_API_OUTCOME"] == "success"
               and outcomes["RESTART_READBACK_OUTCOME"] == "success"
+              and outcomes["C115_RESTART_READBACK_OUTCOME"] == "success"
           ):
               status = "passed"
           elif not setup_ok:
@@ -418,10 +562,14 @@ jobs:
           path: |
             .artifacts/tenant-uat-acceptance/execution-log.txt
             .artifacts/tenant-uat-acceptance/api-server.log
+            .artifacts/tenant-uat-acceptance/system-remediation-report.json
             .artifacts/tenant-uat-acceptance/unit-test-report.json
+            .artifacts/tenant-uat-acceptance/webhook-unit-report.json
             .artifacts/tenant-uat-acceptance/run-status.json
             .artifacts/tenant-uat-acceptance/identity-fixtures.json
             .artifacts/tenant-uat-acceptance/restart-report.json
             .artifacts/tenant-uat-acceptance/restart-readbacks/
+            .artifacts/tenant-uat-acceptance/c115-pre-restart-manifest.json
+            .artifacts/tenant-uat-acceptance/c111-c115-capability-report.json
             test-results/
           if-no-files-found: warn
