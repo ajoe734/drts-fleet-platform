@@ -12,9 +12,13 @@
 --    via an audited transaction checking expected_lease_epoch and previous_status='failed'.
 -- 3. Request-level idempotency: UNIQUE (work_id, request_id) prevents concurrent or duplicate
 --    ops repair triggers for the same incident request.
--- 4. Append-only history: both repair authorizations and execution attempts are protected
+-- 4. Append-only history: both repair authorizations and execution attempt audits are protected
 --    by voice._make_append_only triggers; no UPDATE or DELETE is permitted.
--- 5. Existing historical work items only contain aggregate attempt count and last_error;
+-- 5. Finite append-only attempt event contract: supports discrete 'started' and terminal
+--    ('completed', 'failed', 'fenced') events with duplicate protection via
+--    UNIQUE (work_id, lease_epoch, attempt_no, attempt_stage).
+--    Preserves started facts after crashes without UPDATE, and prevents duplicate terminal outcomes.
+-- 6. Existing historical work items only contain aggregate attempt count and last_error;
 --    repair records capture these observable facts without fabricating historical timestamps.
 
 CREATE TABLE IF NOT EXISTS voice.phase1_work_item_repair_audits (
@@ -42,14 +46,21 @@ CREATE TABLE IF NOT EXISTS voice.phase1_work_item_attempt_audits (
   work_id uuid NOT NULL REFERENCES voice.work_item (work_id),
   attempt_no integer NOT NULL,
   lease_epoch integer NOT NULL,
+  attempt_stage varchar(20) NOT NULL CHECK (
+    attempt_stage IN ('started', 'terminal')
+  ),
   outcome varchar(20) NOT NULL CHECK (
-    outcome IN ('started', 'completed', 'failed', 'fenced', 'repaired')
+    outcome IN ('started', 'completed', 'failed', 'fenced')
   ),
   error_message text,
   started_at timestamptz NOT NULL DEFAULT now(),
   finished_at timestamptz,
   created_at timestamptz NOT NULL DEFAULT now(),
-  CONSTRAINT uq_phase1_work_item_attempt_lease UNIQUE (work_id, lease_epoch, attempt_no)
+  CONSTRAINT ck_phase1_work_item_attempt_stage_outcome CHECK (
+    (attempt_stage = 'started' AND outcome = 'started') OR
+    (attempt_stage = 'terminal' AND outcome IN ('completed', 'failed', 'fenced'))
+  ),
+  CONSTRAINT uq_phase1_work_item_attempt_stage UNIQUE (work_id, lease_epoch, attempt_no, attempt_stage)
 );
 
 CREATE INDEX IF NOT EXISTS idx_phase1_work_item_attempt_work_id

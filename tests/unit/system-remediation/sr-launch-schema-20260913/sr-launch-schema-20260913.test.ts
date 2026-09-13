@@ -1,9 +1,8 @@
 import fs from "node:fs";
 import path from "node:path";
-import crypto from "node:crypto";
 import { describe, expect, it } from "vitest";
 
-describe("SR-LAUNCH-SCHEMA-20260913: Forward Migrations & Schema Allocation Invariants", () => {
+describe("SR-LAUNCH-SCHEMA-20260913: Non-serving Schema Allocation & Migration Contract Invariants", () => {
   const repoRoot = path.resolve(__dirname, "../../../..");
   const allocationPath = path.join(
     repoRoot,
@@ -14,7 +13,7 @@ describe("SR-LAUNCH-SCHEMA-20260913: Forward Migrations & Schema Allocation Inva
   // ==========================================================================
   // 1. Schema Allocation Authority Invariants
   // ==========================================================================
-  describe("Schema Allocation Invariants (schema-allocation.json)", () => {
+  describe("Schema Allocation Authority (schema-allocation.json)", () => {
     it("exists, is valid JSON, and preserves the SR-CONTRACT-001 base allocation untouched", () => {
       expect(fs.existsSync(allocationPath)).toBe(true);
       const content = JSON.parse(fs.readFileSync(allocationPath, "utf8"));
@@ -48,9 +47,11 @@ describe("SR-LAUNCH-SCHEMA-20260913: Forward Migrations & Schema Allocation Inva
       expect(v101.migration_filename).toBe("V0101__voice_work_recovery_audit.sql");
       expect(v101.domain).toBe("voice_work_recovery_audit");
       expect(v101.target_schema).toBe("voice");
-      expect(v101.primary_tables).toContain("voice.phase1_work_item_repair_audits");
-      expect(v101.primary_tables).toContain("voice.phase1_work_item_attempt_audits");
-      expect(v101.referenced_tables).toContain("voice.work_item");
+      expect(v101.primary_tables).toEqual([
+        "voice.phase1_work_item_repair_audits",
+        "voice.phase1_work_item_attempt_audits",
+      ]);
+      expect(v101.referenced_tables).toEqual(["voice.work_item"]);
 
       const v102 = launch.find((a: any) => a.version === "V0102");
       expect(v102).toBeDefined();
@@ -58,12 +59,14 @@ describe("SR-LAUNCH-SCHEMA-20260913: Forward Migrations & Schema Allocation Inva
       expect(v102.migration_filename).toBe("V0102__registry_expiry_processing.sql");
       expect(v102.domain).toBe("registry_expiry_processing");
       expect(v102.target_schema).toBe("reg");
-      expect(v102.primary_tables).toContain("reg.phase1_registry_expiry_events");
-      expect(v102.primary_tables).toContain(
+      expect(v102.primary_tables).toEqual([
+        "reg.phase1_registry_expiry_events",
         "reg.phase1_registry_expiry_delivery_intents",
-      );
-      expect(v102.referenced_tables).toContain("reg.phase1_registry_drivers");
-      expect(v102.referenced_tables).toContain("reg.phase1_registry_policies");
+      ]);
+      expect(v102.referenced_tables).toEqual([
+        "reg.phase1_registry_drivers",
+        "reg.phase1_registry_policies",
+      ]);
 
       const v103 = launch.find((a: any) => a.version === "V0103");
       expect(v103).toBeDefined();
@@ -71,15 +74,10 @@ describe("SR-LAUNCH-SCHEMA-20260913: Forward Migrations & Schema Allocation Inva
       expect(v103.migration_filename).toBe("V0103__notification_mail_outbox.sql");
       expect(v103.domain).toBe("notification_mail_outbox");
       expect(v103.target_schema).toBe("ops");
-      expect(v103.primary_tables).toContain(
+      expect(v103.primary_tables).toEqual([
         "ops.phase1_notification_mail_deliveries",
-      );
-      expect(v103.primary_tables).toContain(
         "ops.phase1_notification_mail_outbox_lock",
-      );
-      expect(v103.primary_tables).toContain(
-        "ops.phase1_notification_mail_attempts",
-      );
+      ]);
 
       // Verify no duplicate versions across base allocations, additional allocations, and launch allocations
       const allAllocatedVersions = [
@@ -96,9 +94,26 @@ describe("SR-LAUNCH-SCHEMA-20260913: Forward Migrations & Schema Allocation Inva
         expect(Array.isArray(alloc.table_invariants)).toBe(true);
         expect(alloc.table_invariants.length).toBeGreaterThanOrEqual(3);
       }
+
+      const v101 = content.launch_allocations.find((a: any) => a.version === "V0101");
+      const v101Invariants = v101.table_invariants.join("\n");
+      expect(v101Invariants).toContain("attempt_stage");
+      expect(v101Invariants).toContain("uq_phase1_work_item_attempt_stage");
+      expect(v101Invariants).toContain("voice._make_append_only");
+
+      const v102 = content.launch_allocations.find((a: any) => a.version === "V0102");
+      const v102Invariants = v102.table_invariants.join("\n");
+      expect(v102Invariants).toContain("source_fingerprint");
+      expect(v102Invariants).toContain("reg.enforce_phase1_expiry_delivery_intent_immutability");
+
+      const v103 = content.launch_allocations.find((a: any) => a.version === "V0103");
+      const v103Invariants = v103.table_invariants.join("\n");
+      expect(v103Invariants).toContain("Single persisted attempt authority");
+      expect(v103Invariants).toContain("attempts jsonb");
+      expect(v103Invariants).not.toContain("ops.phase1_notification_mail_attempts");
     });
 
-    it("records an amendment entry for SR-LAUNCH-SCHEMA-20260913", () => {
+    it("records an amendment entry for SR-LAUNCH-SCHEMA-20260913 documenting Codex review fixes", () => {
       const content = JSON.parse(fs.readFileSync(allocationPath, "utf8"));
       const amendment = content.amendments.find(
         (a: any) => a.amended_by_task_id === "SR-LAUNCH-SCHEMA-20260913",
@@ -106,13 +121,16 @@ describe("SR-LAUNCH-SCHEMA-20260913: Forward Migrations & Schema Allocation Inva
       expect(amendment).toBeDefined();
       expect(amendment.scope).toContain("V0101-V0103");
       expect(amendment.reason).toContain("Phase 1 launch remediation");
+      expect(amendment.reason).toContain("finite append-only attempt event contract");
+      expect(amendment.reason).toContain("concrete trigger-enforced immutability boundary");
+      expect(amendment.reason).toContain("single persisted attempt authority");
     });
   });
 
   // ==========================================================================
-  // 2. Migration SQL File Invariants & Structure
+  // 2. Migration DDL & Contract Invariants
   // ==========================================================================
-  describe("Migration Files (infra/migrations/V0101-V0103)", () => {
+  describe("Migration DDL & Contract Invariants (infra/migrations/V0101-V0103)", () => {
     it("all allocated SQL files exist on disk with exact filenames matching schema-allocation.json", () => {
       const content = JSON.parse(fs.readFileSync(allocationPath, "utf8"));
       for (const alloc of content.launch_allocations) {
@@ -127,7 +145,7 @@ describe("SR-LAUNCH-SCHEMA-20260913: Forward Migrations & Schema Allocation Inva
         "utf8",
       );
 
-      it("creates voice.phase1_work_item_repair_audits with required columns and foreign keys", () => {
+      it("creates voice.phase1_work_item_repair_audits with required columns, FK, and deduplication", () => {
         expect(sql).toContain(
           "CREATE TABLE IF NOT EXISTS voice.phase1_work_item_repair_audits",
         );
@@ -147,7 +165,7 @@ describe("SR-LAUNCH-SCHEMA-20260913: Forward Migrations & Schema Allocation Inva
         );
       });
 
-      it("creates voice.phase1_work_item_attempt_audits with lease fencing and attempt audit trail", () => {
+      it("creates voice.phase1_work_item_attempt_audits with finite append-only event contract supporting started and terminal events with duplicate protection", () => {
         expect(sql).toContain(
           "CREATE TABLE IF NOT EXISTS voice.phase1_work_item_attempt_audits",
         );
@@ -157,10 +175,16 @@ describe("SR-LAUNCH-SCHEMA-20260913: Forward Migrations & Schema Allocation Inva
         expect(sql).toContain("attempt_no integer NOT NULL");
         expect(sql).toContain("lease_epoch integer NOT NULL");
         expect(sql).toContain(
-          "outcome IN ('started', 'completed', 'failed', 'fenced', 'repaired')",
+          "attempt_stage IN ('started', 'terminal')",
         );
         expect(sql).toContain(
-          "CONSTRAINT uq_phase1_work_item_attempt_lease UNIQUE (work_id, lease_epoch, attempt_no)",
+          "outcome IN ('started', 'completed', 'failed', 'fenced')",
+        );
+        expect(sql).toContain(
+          "CONSTRAINT ck_phase1_work_item_attempt_stage_outcome CHECK (",
+        );
+        expect(sql).toContain(
+          "CONSTRAINT uq_phase1_work_item_attempt_stage UNIQUE (work_id, lease_epoch, attempt_no, attempt_stage)",
         );
       });
 
@@ -173,7 +197,7 @@ describe("SR-LAUNCH-SCHEMA-20260913: Forward Migrations & Schema Allocation Inva
         );
       });
 
-      it("does not mutate or drop existing tables or columns", () => {
+      it("preserves existing schema and data without destructive operations", () => {
         expect(sql).not.toContain("DROP TABLE");
         expect(sql).not.toContain("ALTER TABLE voice.work_item DROP");
         expect(sql).not.toContain("TRUNCATE");
@@ -208,7 +232,7 @@ describe("SR-LAUNCH-SCHEMA-20260913: Forward Migrations & Schema Allocation Inva
         expect(sql).toContain("idx_reg_expiry_events_entity");
       });
 
-      it("creates reg.phase1_registry_expiry_delivery_intents with immutable delivery attributes", () => {
+      it("creates reg.phase1_registry_expiry_delivery_intents with concrete trigger-enforced immutability boundary", () => {
         expect(sql).toContain(
           "CREATE TABLE IF NOT EXISTS reg.phase1_registry_expiry_delivery_intents",
         );
@@ -228,6 +252,27 @@ describe("SR-LAUNCH-SCHEMA-20260913: Forward Migrations & Schema Allocation Inva
         expect(sql).toContain(
           "CONSTRAINT uq_reg_expiry_delivery_intents_key UNIQUE (idempotency_key)",
         );
+
+        // Immutability trigger function and trigger definition
+        expect(sql).toContain(
+          "CREATE OR REPLACE FUNCTION reg.enforce_phase1_expiry_delivery_intent_immutability()",
+        );
+        expect(sql).toContain("NEW.intent_id IS DISTINCT FROM OLD.intent_id");
+        expect(sql).toContain("NEW.event_id IS DISTINCT FROM OLD.event_id");
+        expect(sql).toContain("NEW.scope IS DISTINCT FROM OLD.scope");
+        expect(sql).toContain("NEW.idempotency_key IS DISTINCT FROM OLD.idempotency_key");
+        expect(sql).toContain("NEW.tenant_id IS DISTINCT FROM OLD.tenant_id");
+        expect(sql).toContain("NEW.recipient_email IS DISTINCT FROM OLD.recipient_email");
+        expect(sql).toContain("NEW.from_email IS DISTINCT FROM OLD.from_email");
+        expect(sql).toContain("NEW.subject IS DISTINCT FROM OLD.subject");
+        expect(sql).toContain("NEW.body IS DISTINCT FROM OLD.body");
+        expect(sql).toContain("NEW.created_at IS DISTINCT FROM OLD.created_at");
+        expect(sql).toContain(
+          "CREATE TRIGGER trg_enforce_phase1_registry_expiry_delivery_intents_immutability",
+        );
+        expect(sql).toContain(
+          "BEFORE UPDATE ON reg.phase1_registry_expiry_delivery_intents",
+        );
       });
     });
 
@@ -237,7 +282,7 @@ describe("SR-LAUNCH-SCHEMA-20260913: Forward Migrations & Schema Allocation Inva
         "utf8",
       );
 
-      it("creates ops.phase1_notification_mail_deliveries with tenant-scoped idempotency and attempts jsonb", () => {
+      it("creates ops.phase1_notification_mail_deliveries with tenant-scoped idempotency and attempts jsonb as sole authority", () => {
         expect(sql).toContain(
           "CREATE TABLE IF NOT EXISTS ops.phase1_notification_mail_deliveries",
         );
@@ -268,343 +313,8 @@ describe("SR-LAUNCH-SCHEMA-20260913: Forward Migrations & Schema Allocation Inva
         expect(sql).toContain("ON CONFLICT DO NOTHING");
       });
 
-      it("creates ops.phase1_notification_mail_attempts for append-only attempt recording", () => {
-        expect(sql).toContain(
-          "CREATE TABLE IF NOT EXISTS ops.phase1_notification_mail_attempts",
-        );
-        expect(sql).toContain(
-          "delivery_id uuid NOT NULL REFERENCES ops.phase1_notification_mail_deliveries (delivery_id) ON DELETE CASCADE",
-        );
-        expect(sql).toContain(
-          "outcome IN ('started', 'sent', 'failed', 'uncertain')",
-        );
-        expect(sql).toContain(
-          "CONSTRAINT uq_phase1_notification_mail_attempt_no UNIQUE (delivery_id, attempt_no)",
-        );
-      });
-    });
-  });
-
-  // ==========================================================================
-  // 3. Contract Invariants & Behavioral Logic Verification
-  // ==========================================================================
-  describe("Domain Contract Invariants (Non-serving Simulation)", () => {
-    describe("B7: Voice Work Repair & Fencing Semantics", () => {
-      it("simulates repair CAS check: only failed items with matching lease_epoch can be repaired", () => {
-        type WorkItemRow = {
-          work_id: string;
-          status: "pending" | "leased" | "completed" | "failed" | "dead_letter";
-          lease_epoch: number;
-          attempt: number;
-          last_error: string | null;
-        };
-
-        const failedItem: WorkItemRow = {
-          work_id: "c8865b11-2026-0913-b700-000000000001",
-          status: "failed",
-          lease_epoch: 5,
-          attempt: 5,
-          last_error: "connection_timeout",
-        };
-
-        function executeRepair(
-          item: WorkItemRow,
-          repairReq: {
-            requestId: string;
-            actorId: string;
-            reason: string;
-            expectedLeaseEpoch: number;
-          },
-          existingRepairs: Set<string>,
-        ) {
-          const dedupeKey = `${item.work_id}:${repairReq.requestId}`;
-          if (existingRepairs.has(dedupeKey)) {
-            throw new Error("REPAIR_REQUEST_ALREADY_EXISTS");
-          }
-          if (item.status !== "failed") {
-            throw new Error(`CANNOT_REPAIR_NON_FAILED_ITEM: status=${item.status}`);
-          }
-          if (item.lease_epoch !== repairReq.expectedLeaseEpoch) {
-            throw new Error("LEASE_EPOCH_MISMATCH");
-          }
-
-          const auditRecord = {
-            repairId: crypto.randomUUID(),
-            workId: item.work_id,
-            requestId: repairReq.requestId,
-            actorId: repairReq.actorId,
-            reason: repairReq.reason,
-            expectedLeaseEpoch: repairReq.expectedLeaseEpoch,
-            previousStatus: item.status,
-            previousAttemptCount: item.attempt,
-            previousLastError: item.last_error,
-            allocatedMaxAttempts: 5,
-          };
-
-          // Reset work item row in-place
-          item.status = "pending";
-          item.attempt = 0;
-          item.last_error = null;
-          item.lease_epoch += 1;
-
-          existingRepairs.add(dedupeKey);
-          return auditRecord;
-        }
-
-        const existingRepairs = new Set<string>();
-
-        // Positive case: repair succeeds
-        const audit = executeRepair(
-          failedItem,
-          {
-            requestId: "req-001",
-            actorId: "ops-admin",
-            reason: "manual network glitch recovery",
-            expectedLeaseEpoch: 5,
-          },
-          existingRepairs,
-        );
-
-        expect(audit.previousStatus).toBe("failed");
-        expect(audit.previousAttemptCount).toBe(5);
-        expect(failedItem.status).toBe("pending");
-        expect(failedItem.attempt).toBe(0);
-        expect(failedItem.lease_epoch).toBe(6);
-
-        // Negative case 1: duplicate repair request rejected
-        expect(() =>
-          executeRepair(
-            failedItem,
-            {
-              requestId: "req-001",
-              actorId: "ops-admin",
-              reason: "retry",
-              expectedLeaseEpoch: 6,
-            },
-            existingRepairs,
-          ),
-        ).toThrow("REPAIR_REQUEST_ALREADY_EXISTS");
-
-        // Negative case 2: cannot repair pending or leased item
-        expect(() =>
-          executeRepair(
-            failedItem,
-            {
-              requestId: "req-002",
-              actorId: "ops-admin",
-              reason: "retry",
-              expectedLeaseEpoch: 6,
-            },
-            existingRepairs,
-          ),
-        ).toThrow("CANNOT_REPAIR_NON_FAILED_ITEM");
-      });
-    });
-
-    describe("B4: Registry Expiry Fingerprinting & Superseded Semantics", () => {
-      function computeDriverExpiryFingerprint(
-        scope: string,
-        driverId: string,
-        sourceFieldName: string,
-        expiryDateString: string,
-      ): string {
-        const canonicalTuple = [
-          "credential-expiry/v1",
-          scope,
-          "driver",
-          driverId,
-          sourceFieldName,
-          Date.parse(expiryDateString),
-        ];
-        return crypto
-          .createHash("sha256")
-          .update(JSON.stringify(canonicalTuple))
-          .digest("hex");
-      }
-
-      function computePolicyExpiryFingerprint(
-        scope: string,
-        policyId: string,
-        vehicleId: string,
-        policyNo: string,
-        insuranceType: string,
-        startAt: string,
-        endAt: string,
-        status: string,
-      ): string {
-        const canonicalTuple = [
-          "credential-expiry/v1",
-          scope,
-          "policy",
-          policyId,
-          vehicleId,
-          policyNo,
-          insuranceType,
-          Date.parse(startAt),
-          Date.parse(endAt),
-          status,
-        ];
-        return crypto
-          .createHash("sha256")
-          .update(JSON.stringify(canonicalTuple))
-          .digest("hex");
-      }
-
-      function computeAlertIdempotencyKey(
-        scope: string,
-        eventId: string,
-        recipientEmail: string,
-      ): string {
-        const tuple = ["credential-alert/v1", scope, eventId, recipientEmail];
-        return crypto
-          .createHash("sha256")
-          .update(JSON.stringify(tuple))
-          .digest("hex");
-      }
-
-      it("produces deterministic SHA-256 fingerprints for identical driver/policy inputs", () => {
-        const fp1 = computeDriverExpiryFingerprint(
-          "tenant-drts",
-          "driver-123",
-          "licenseExpiry",
-          "2026-10-01T00:00:00.000Z",
-        );
-        const fp2 = computeDriverExpiryFingerprint(
-          "tenant-drts",
-          "driver-123",
-          "licenseExpiry",
-          "2026-10-01T00:00:00.000Z",
-        );
-        expect(fp1).toBe(fp2);
-        expect(fp1).toHaveLength(64);
-
-        const pol1 = computePolicyExpiryFingerprint(
-          "tenant-drts",
-          "pol-456",
-          "veh-789",
-          "POL-2026-001",
-          "liability",
-          "2025-10-01T00:00:00.000Z",
-          "2026-10-01T00:00:00.000Z",
-          "active",
-        );
-        const pol2 = computePolicyExpiryFingerprint(
-          "tenant-drts",
-          "pol-456",
-          "veh-789",
-          "POL-2026-001",
-          "liability",
-          "2025-10-01T00:00:00.000Z",
-          "2026-10-01T00:00:00.000Z",
-          "active",
-        );
-        expect(pol1).toBe(pol2);
-      });
-
-      it("changes fingerprint when credential expiry is renewed (superseded trigger)", () => {
-        const originalFp = computeDriverExpiryFingerprint(
-          "tenant-drts",
-          "driver-123",
-          "licenseExpiry",
-          "2026-10-01T00:00:00.000Z",
-        );
-        const renewedFp = computeDriverExpiryFingerprint(
-          "tenant-drts",
-          "driver-123",
-          "licenseExpiry",
-          "2027-10-01T00:00:00.000Z",
-        );
-        expect(originalFp).not.toBe(renewedFp);
-      });
-
-      it("derives deterministic alert idempotency keys matching B4 specification", () => {
-        const key1 = computeAlertIdempotencyKey(
-          "tenant-drts",
-          "event-uuid-001",
-          "driver@example.com",
-        );
-        const key2 = computeAlertIdempotencyKey(
-          "tenant-drts",
-          "event-uuid-001",
-          "driver@example.com",
-        );
-        expect(key1).toBe(key2);
-      });
-    });
-
-    describe("B5: Notification MailOutbox Transaction Storage Contract", () => {
-      it("validates payloadHash computation and idempotency conflict behavior", () => {
-        function computePayloadHash(message: {
-          tenantId: string;
-          idempotencyKey: string;
-          recipientEmail: string;
-          fromEmail: string;
-          subject: string;
-          body: string;
-        }): string {
-          return crypto
-            .createHash("sha256")
-            .update(
-              JSON.stringify([
-                message.tenantId,
-                message.idempotencyKey,
-                message.recipientEmail,
-                message.fromEmail,
-                message.subject,
-                message.body,
-              ]),
-            )
-            .digest("hex");
-        }
-
-        const msg1 = {
-          tenantId: "tenant-a",
-          idempotencyKey: "key-123",
-          recipientEmail: "driver@example.com",
-          fromEmail: "noreply@drts.platform",
-          subject: "License Expired",
-          body: "Your license has expired.",
-        };
-        const hash1 = computePayloadHash(msg1);
-
-        const msg2 = {
-          tenantId: "tenant-a",
-          idempotencyKey: "key-123",
-          recipientEmail: "driver@example.com",
-          fromEmail: "noreply@drts.platform",
-          subject: "License Expired",
-          body: "Your license has expired.",
-        };
-        const hash2 = computePayloadHash(msg2);
-        expect(hash1).toBe(hash2);
-
-        // Mismatched body with same idempotency key
-        const msgConflict = {
-          ...msg1,
-          body: "Different content with same key.",
-        };
-        const hashConflict = computePayloadHash(msgConflict);
-        expect(hashConflict).not.toBe(hash1);
-      });
-
-      it("keeps provider acknowledgement separate from device delivery proof", () => {
-        const providerAck = {
-          provider: "mock_smtp",
-          response: "250 Message accepted",
-          providerMessageId: "msg-smtp-999",
-          acceptedAt: new Date().toISOString(),
-        };
-
-        const attempt = {
-          attemptId: crypto.randomUUID(),
-          attemptNo: 1,
-          outcome: "sent",
-          acknowledgement: providerAck,
-        };
-
-        // Provider accepted the message, but receipt does not falsely assert device delivery
-        expect(attempt.acknowledgement.providerMessageId).toBe("msg-smtp-999");
-        expect(attempt.outcome).toBe("sent");
+      it("does not create duplicate ops.phase1_notification_mail_attempts table", () => {
+        expect(sql).not.toContain("CREATE TABLE IF NOT EXISTS ops.phase1_notification_mail_attempts");
       });
     });
   });

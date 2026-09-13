@@ -21,9 +21,11 @@
 --    a new event is created and previous un-superseded events for that entity/credential
 --    are marked status='superseded' with superseded_at timestamp, preserving history
 --    without corrupting original source validity.
--- 5. Immutable delivery intent: stores recipient, from, subject, body, tenant_id,
---    event_id, idempotency_key inside the domain transaction. Outbox delivery reference
---    links directly to the MailOutbox delivery ID once enqueued.
+-- 5. Concrete immutability boundary: delivery intent stores recipient, from, subject, body,
+--    tenant_id, event_id, idempotency_key inside the domain transaction. A BEFORE UPDATE
+--    trigger (reg.enforce_phase1_expiry_delivery_intent_immutability) strictly forbids
+--    mutation of frozen identity and payload fields, while permitting status and outbox
+--    bookkeeping transitions (delivery_status, outbox_delivery_id, last_error, enqueued_at, updated_at).
 
 CREATE TABLE IF NOT EXISTS reg.phase1_registry_expiry_events (
   event_id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -84,6 +86,36 @@ CREATE TABLE IF NOT EXISTS reg.phase1_registry_expiry_delivery_intents (
 
 CREATE INDEX IF NOT EXISTS idx_reg_expiry_delivery_intents_event
   ON reg.phase1_registry_expiry_delivery_intents (event_id);
+
+-- Enforce concrete immutability boundary on delivery intent payload:
+-- Frozen identity and content fields cannot drift on UPDATE;
+-- only bookkeeping columns (delivery_status, outbox_delivery_id, last_error, enqueued_at, updated_at) are mutable.
+CREATE OR REPLACE FUNCTION reg.enforce_phase1_expiry_delivery_intent_immutability()
+RETURNS trigger
+LANGUAGE plpgsql
+AS $$
+BEGIN
+  IF NEW.intent_id IS DISTINCT FROM OLD.intent_id OR
+     NEW.event_id IS DISTINCT FROM OLD.event_id OR
+     NEW.scope IS DISTINCT FROM OLD.scope OR
+     NEW.idempotency_key IS DISTINCT FROM OLD.idempotency_key OR
+     NEW.tenant_id IS DISTINCT FROM OLD.tenant_id OR
+     NEW.recipient_email IS DISTINCT FROM OLD.recipient_email OR
+     NEW.from_email IS DISTINCT FROM OLD.from_email OR
+     NEW.subject IS DISTINCT FROM OLD.subject OR
+     NEW.body IS DISTINCT FROM OLD.body OR
+     NEW.created_at IS DISTINCT FROM OLD.created_at THEN
+    RAISE EXCEPTION 'phase1_delivery_intent_immutable_fields_violation: immutable payload fields (intent_id, event_id, scope, idempotency_key, tenant_id, recipient_email, from_email, subject, body, created_at) cannot be updated';
+  END IF;
+  RETURN NEW;
+END;
+$$;
+
+DROP TRIGGER IF EXISTS trg_enforce_phase1_registry_expiry_delivery_intents_immutability
+  ON reg.phase1_registry_expiry_delivery_intents;
+CREATE TRIGGER trg_enforce_phase1_registry_expiry_delivery_intents_immutability
+BEFORE UPDATE ON reg.phase1_registry_expiry_delivery_intents
+FOR EACH ROW EXECUTE FUNCTION reg.enforce_phase1_expiry_delivery_intent_immutability();
 
 DROP TRIGGER IF EXISTS trg_touch_phase1_registry_expiry_delivery_intents ON reg.phase1_registry_expiry_delivery_intents;
 CREATE TRIGGER trg_touch_phase1_registry_expiry_delivery_intents

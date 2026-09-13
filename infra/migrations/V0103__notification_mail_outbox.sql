@@ -15,10 +15,24 @@
 -- 3. Tenant-scoped idempotency: UNIQUE (tenant_id, idempotency_key) ensures that
 --    identical requests cannot insert duplicate delivery rows. Mismatched payload_hash
 --    triggers notification_idempotency_conflict as required by NotificationDeliveryService.
--- 4. Separation of provider acknowledgement and device/inbox arrival: provider
+-- 4. Single persisted attempt authority: `ops.phase1_notification_mail_deliveries.attempts`
+--    (JSONB) is the sole persisted attempt authority for each delivery, mapping 1:1 and
+--    losslessly to `DeliveryReceipt.attempts: DeliveryAttempt[]`:
+--      - attemptId: string (UUID)
+--      - attemptNo: integer (1-based attempt sequence)
+--      - startedAt: ISO 8601 string
+--      - finishedAt: ISO 8601 string | null
+--      - outcome: 'started' | 'sent' | 'failed' | 'uncertain'
+--      - errorCode: string | null
+--      - retryable: boolean
+--      - acknowledgement: ProviderAcknowledgement | null ({ provider, response, providerMessageId, acceptedAt })
+--    This single authority eliminates duplicate attempts tables and cleanly handles
+--    uncertain-to-late-sent reconciliation: late provider acceptance modifies the
+--    attempt in-place within the transaction callback without schema split-brain.
+-- 5. Separation of provider acknowledgement and device/inbox arrival: provider
 --    acknowledgement records transport acceptance evidence, never a fabricated claim
 --    of end-user inbox receipt.
--- 5. Survives process crashes and restarts without ephemeral volume dependencies,
+-- 6. Survives process crashes and restarts without ephemeral volume dependencies,
 --    replacing FileMailOutbox with production-grade PostgreSQL storage.
 
 CREATE TABLE IF NOT EXISTS ops.phase1_notification_mail_deliveries (
@@ -66,22 +80,3 @@ CREATE TABLE IF NOT EXISTS ops.phase1_notification_mail_outbox_lock (
 INSERT INTO ops.phase1_notification_mail_outbox_lock (lock_key)
 VALUES ('mail_outbox_master')
 ON CONFLICT DO NOTHING;
-
-CREATE TABLE IF NOT EXISTS ops.phase1_notification_mail_attempts (
-  attempt_id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-  delivery_id uuid NOT NULL REFERENCES ops.phase1_notification_mail_deliveries (delivery_id) ON DELETE CASCADE,
-  attempt_no integer NOT NULL,
-  started_at timestamptz NOT NULL,
-  finished_at timestamptz,
-  outcome varchar(20) NOT NULL CHECK (
-    outcome IN ('started', 'sent', 'failed', 'uncertain')
-  ),
-  error_code text,
-  retryable boolean NOT NULL DEFAULT false,
-  acknowledgement jsonb,
-  created_at timestamptz NOT NULL DEFAULT now(),
-  CONSTRAINT uq_phase1_notification_mail_attempt_no UNIQUE (delivery_id, attempt_no)
-);
-
-CREATE INDEX IF NOT EXISTS idx_phase1_notification_mail_attempts_delivery
-  ON ops.phase1_notification_mail_attempts (delivery_id, started_at DESC);
