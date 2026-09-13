@@ -165,7 +165,6 @@ describe("SR-PLACARD-001: placard download lifecycle, self-healing, and authoriz
   it("self-heals missing artifact from store when re-entering or querying placard", async () => {
     const store = new InMemoryDocumentArtifactStore();
     const { platformAdminService } = createService(store);
-    const downloadController = new ControlledDownloadController(store);
 
     const publicInfo = platformAdminService.createPublicInfoVersion({
       title: "Self-Healing Test Disclosure",
@@ -439,7 +438,7 @@ describe("SR-PLACARD-001: placard download lifecycle, self-healing, and authoriz
           actorId: "   ",
           actorType: "platform_admin",
           tenantId: null,
-        }),
+        } as unknown as Parameters<PlatformAdminController["publishPlacardVersion"]>[2]),
       401,
       "PLATFORM_ADMIN_IDENTITY_REQUIRED",
     );

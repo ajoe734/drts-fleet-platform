@@ -405,6 +405,9 @@ export default function SwitchboardPage() {
             `Current placard · ${code} (source ${src})`,
           placardPreviewEmpty: "No placard generated yet.",
           downloadPdf: "Download PDF",
+          placardExpired: "Expired",
+          placardLinkExpired: "Link expired",
+          sourceRetired: "Source retired",
           generatePlacard: "Generate placard",
           placardListTitle: "Placard versions",
           placardListSubtitle: "Seat-back artifacts traced to a source version",
@@ -501,6 +504,9 @@ export default function SwitchboardPage() {
             `目前發行牌貼 · ${code}（來源 ${src}）`,
           placardPreviewEmpty: "目前尚未產生牌貼。",
           downloadPdf: "下載牌貼檔",
+          placardExpired: "已過期",
+          placardLinkExpired: "連結已過期",
+          sourceRetired: "來源已停用",
           generatePlacard: "產生新牌貼",
           placardListTitle: "牌貼版本",
           placardListSubtitle: "每張牌貼皆可追溯到來源公開資訊版本",
@@ -1029,12 +1035,12 @@ export default function SwitchboardPage() {
                 </a>
                 {isExpired ? (
                   <CanvasPill theme={th} tone="warn" dot>
-                    已過期
+                    {copy.placardExpired}
                   </CanvasPill>
                 ) : null}
                 {isRetired ? (
                   <CanvasPill theme={th} tone="danger" dot>
-                    來源已停用
+                    {copy.sourceRetired}
                   </CanvasPill>
                 ) : null}
               </div>
@@ -1345,12 +1351,12 @@ export default function SwitchboardPage() {
                     )}
                     {isArtifactExpired(livePlacard.artifactDownloadUrl) ? (
                       <CanvasPill theme={th} tone="warn" dot>
-                        連結已過期
+                        {copy.placardLinkExpired}
                       </CanvasPill>
                     ) : null}
                     {livePlacardSource?.status === "retired" ? (
                       <CanvasPill theme={th} tone="danger" dot>
-                        來源已停用
+                        {copy.sourceRetired}
                       </CanvasPill>
                     ) : null}
                     <DescriptorButton

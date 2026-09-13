@@ -148,6 +148,16 @@ $ git diff --check
   - `pnpm exec vitest run tests/unit/system-remediation/sr-placard-001/` (10/10 passed)
   - `pnpm exec vitest run tests/unit/system-remediation/sr-admin-adapter-001/` (11/11 passed)
 
+### 4.7 CI 修復與 i18n / lint 驗證
+針對 PR #2002 CI 失敗項目完成修復與驗證：
+1. **i18n-guard 規範對齊**：
+   - 修正 `apps/platform-admin-web/app/switchboard/page.tsx` 中 `CanvasPill` 之內嵌文字（`已過期`、`連結已過期`、`來源已停用`），改由雙語物件 `copy.placardExpired`、`copy.placardLinkExpired`、`copy.sourceRetired` 統一管理，通過 `pnpm run i18n:guard`（exit code 0）。
+2. **ESLint 與 Root Typecheck 修正**：
+   - 移除 `tests/unit/system-remediation/sr-placard-001/placard-download-lifecycle.test.ts` 中未使用之 `downloadController` 宣告，通過 `pnpm lint:root`（exit code 0）。
+   - 對負向測試之身分參數加上型別斷言（`as unknown as Parameters<PlatformAdminController["publishPlacardVersion"]>[2]`），確保 root TypeScript typecheck 中本工作項目無任何型別錯誤。
+3. **origin/dev 同步**：
+   - 透過 `git merge origin/dev` 同步 dev 最新變更（`2e211b3cc`）。
+
 ---
 
 ## 5. 未做的部分（明列，不冒充完成）
