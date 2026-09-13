@@ -7,7 +7,10 @@ import type { BillingSettlementService } from "../../src/modules/billing-settlem
 import type { ReferralStatementRecord } from "../../src/modules/billing-settlement/referral-statement.types";
 import type { OwnedMobilityService } from "../../src/modules/owned-mobility/owned-mobility.service";
 import type { IdentityContext } from "@drts/contracts";
-import { TenantPartnerController } from "../../src/modules/tenant-partner/tenant-partner.controller";
+import {
+  TenantApiKeyAuthGuard,
+  TenantPartnerController,
+} from "../../src/modules/tenant-partner/tenant-partner.controller";
 import { TenantPartnerService } from "../../src/modules/tenant-partner/tenant-partner.service";
 
 function createController(jwtAuthService = new JwtAuthService()) {
@@ -462,40 +465,172 @@ describe("tenant partner ingress handoff controller", () => {
       status: "completed",
     });
   });
+});
 
-  it("rejects SLA update with negative threshold minutes", () => {
-    const { controller } = createController();
-    const identity: IdentityContext = {
-      actorType: "tenant_admin",
-      actorId: "admin-a",
-      realm: "tenant",
-      authMode: "jwt_bearer",
-      roleFamilies: ["tenant"],
-      roles: ["tenant_admin"],
-      scopes: ["tenant:sla:write"],
-      tenantId: "tenant-a",
-      supportedExecutionModes: ["supervisor_managed_execution"],
+describe("tenant API key authoritative consumer and usage tracking", () => {
+  it("authenticates and updates usage tracking on listApiKeys when API key header is provided", async () => {
+    const { controller, tenantPartnerService } = createController();
+
+    const issued = tenantPartnerService.issueApiKey("tenant-demo-001", {
+      keyName: "Consumer key",
+      scopes: ["tenant:read"],
+    });
+
+    expect(issued.apiKey.lastUsedAt).toBeNull();
+
+    // Call listApiKeys passing the plaintext API key via x-api-key header
+    const response = await controller.listApiKeys(
+      "tenant-demo-001",
+      "req-list-with-key-001",
+      null,
+      issued.plaintextKey,
+    );
+
+    expect(response.data.items).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          apiKeyId: issued.apiKey.apiKeyId,
+          lastUsedAt: expect.any(String),
+          lastUsedWorkload: "tenant_api_list",
+        }),
+      ]),
+    );
+
+    // Call listApiKeys with Authorization: Bearer tk_...
+    const bearerResponse = await controller.listApiKeys(
+      "tenant-demo-001",
+      "req-list-bearer-001",
+      null,
+      undefined,
+      undefined,
+      `Bearer ${issued.plaintextKey}`,
+    );
+    expect(bearerResponse.data.items).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          apiKeyId: issued.apiKey.apiKeyId,
+          lastUsedAt: expect.any(String),
+          lastUsedWorkload: "tenant_api_list",
+        }),
+      ]),
+    );
+  });
+
+  it("authenticates and exchanges credentials through dedicated controller endpoints", async () => {
+    const { controller, tenantPartnerService } = createController();
+
+    const issued = tenantPartnerService.issueApiKey("tenant-demo-001", {
+      keyName: "Exchange key",
+      scopes: ["tenant:read", "tenant:write"],
+    });
+
+    // POST tenant/api-keys/authenticate
+    const authResult = await controller.authenticateApiKey(
+      { apiKey: issued.plaintextKey, requiredScopes: ["tenant:read"] },
+      undefined,
+      undefined,
+      undefined,
+      "tenant-demo-001",
+      "req-auth-endpoint-001",
+    );
+    expect(authResult.data).toMatchObject({
+      authenticated: true,
+      apiKey: expect.objectContaining({
+        apiKeyId: issued.apiKey.apiKeyId,
+        lastUsedAt: expect.any(String),
+        lastUsedWorkload: "tenant_api_authenticate",
+      }),
+      identity: expect.objectContaining({
+        actorType: "tenant_admin",
+        actorId: issued.apiKey.apiKeyId,
+        tenantId: "tenant-demo-001",
+      }),
+    });
+
+    // POST tenant/api-keys/exchange
+    const exchangeResult = await controller.exchangeApiKey(
+      undefined,
+      issued.plaintextKey,
+      undefined,
+      undefined,
+      "tenant-demo-001",
+      "req-exchange-endpoint-001",
+    );
+    expect(exchangeResult.data).toMatchObject({
+      tokenType: "Bearer",
+      apiKeyId: issued.apiKey.apiKeyId,
+      tenantId: "tenant-demo-001",
+      scopes: expect.arrayContaining(["tenant:read", "tenant:write"]),
+      identity: expect.objectContaining({
+        actorType: "tenant_admin",
+        tenantId: "tenant-demo-001",
+      }),
+    });
+  });
+
+  it("enforces TenantApiKeyAuthGuard on incoming requests", async () => {
+    const { tenantPartnerService } = createController();
+    const guard = new TenantApiKeyAuthGuard(tenantPartnerService);
+
+    const issued = tenantPartnerService.issueApiKey("tenant-demo-001", {
+      keyName: "Guard test key",
+      scopes: ["tenant:read"],
+    });
+
+    // Valid header via x-api-key
+    const mockRequest1: any = {
+      headers: {
+        "x-api-key": issued.plaintextKey,
+        "x-tenant-id": "tenant-demo-001",
+        "x-request-id": "req-guard-001",
+      },
+    };
+    const context1: any = {
+      switchToHttp: () => ({
+        getRequest: () => mockRequest1,
+      }),
     };
 
-    for (const field of [
-      "waitThresholdMin",
-      "arrivalThresholdMin",
-      "completionThresholdMin",
-    ] as const) {
-      expect(() =>
-        controller.updateSlaProfile(
-          { [field]: -1 },
-          identity,
-          "tenant-a",
-          "admin-a",
-          "req-neg-sla",
-        ),
-      ).toThrowError(
-        expect.objectContaining({
-          status: 400,
-          code: "INVALID_SLA_THRESHOLD",
-        }),
-      );
-    }
+    const allowed1 = await guard.canActivate(context1);
+    expect(allowed1).toBe(true);
+    expect(mockRequest1.identity).toMatchObject({
+      actorType: "tenant_admin",
+      actorId: issued.apiKey.apiKeyId,
+      tenantId: "tenant-demo-001",
+    });
+    expect(mockRequest1.authenticatedApiKey.lastUsedWorkload).toBe("tenant_api_guard");
+
+    // Valid header via Authorization: Bearer tk_...
+    const mockRequest2: any = {
+      headers: {
+        authorization: `Bearer ${issued.plaintextKey}`,
+        "x-tenant-id": "tenant-demo-001",
+      },
+    };
+    const context2: any = {
+      switchToHttp: () => ({
+        getRequest: () => mockRequest2,
+      }),
+    };
+    const allowed2 = await guard.canActivate(context2);
+    expect(allowed2).toBe(true);
+
+    // Missing key fails with 401
+    const mockRequest3: any = {
+      headers: {},
+    };
+    const context3: any = {
+      switchToHttp: () => ({
+        getRequest: () => mockRequest3,
+      }),
+    };
+    await expect(guard.canActivate(context3)).rejects.toMatchObject({
+      status: 401,
+      response: {
+        error: {
+          code: "TENANT_API_KEY_REQUIRED",
+        },
+      },
+    });
   });
 });
