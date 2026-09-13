@@ -368,6 +368,17 @@ class CandidateLifecycleTest(unittest.TestCase):
         self.assertEqual(task["reviewer"], "Claude2")
 
     @mock.patch.object(ai_status, "append_log")
+    def test_supervisor_can_reassign_backlog_owner_and_reviewer_together(self, _log: mock.Mock) -> None:
+        state = self.state()
+        task = self.task(state)
+        task["status"] = "backlog"
+        env = {"AI_NAME": "Supervisor", "TASK_EXPECTED_OWNER": "Codex", "TASK_EXPECTED_REVIEWER": "Claude"}
+        with mock.patch.dict(os.environ, env, clear=True):
+            ai_status.command_reassign(state, ["TASK-001", "Gemini", "Gemini2", "Claim from paused lanes"])
+        self.assertEqual((task["owner"], task["reviewer"], task["status"]), ("Gemini", "Gemini2", "backlog"))
+        self.assertNotIn("reviewed_sha", task)
+
+    @mock.patch.object(ai_status, "append_log")
     def test_supervisor_resume_resolves_blocker_in_same_transaction(self, _log: mock.Mock) -> None:
         state = self.state()
         task = self.task(state)

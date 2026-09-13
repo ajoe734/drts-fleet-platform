@@ -1793,7 +1793,7 @@ def command_reassign(state: dict[str, Any], args: list[str]) -> None:
     status = str(task.get("status") or "").lower()
     if owner_changed and status not in {"backlog", "todo", "in_progress"}:
         raise SystemExit(f"Owner reassignment is not allowed while {task_id} is {status}")
-    if reviewer_changed and status not in {"todo", "in_progress", "review"}:
+    if reviewer_changed and status not in {"backlog", "todo", "in_progress", "review"}:
         raise SystemExit(f"Reviewer reassignment is not allowed while {task_id} is {status}")
 
     timestamp = iso_now()
