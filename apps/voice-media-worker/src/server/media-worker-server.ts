@@ -10,6 +10,7 @@ import {
   completeWebSocketHandshake,
   WebSocketServerChannel,
 } from "./websocket-channel";
+import type { MediaRecordingAdapter } from "../recording/media-recording-adapter";
 
 export interface MediaWorkerServerConfig {
   port?: number | undefined;
@@ -18,6 +19,7 @@ export interface MediaWorkerServerConfig {
   wsTimeoutMs?: number | undefined;
   drainTimeoutMs?: number | undefined;
   serviceVersion?: string | undefined;
+  recordingAdapter?: MediaRecordingAdapter | undefined;
 }
 
 export interface MediaSessionRecord {
@@ -41,9 +43,11 @@ export class MediaWorkerServer extends EventEmitter {
   private isDraining = false;
   private totalAdmitted = 0;
   private isRunning = false;
+  private recordingAdapter?: MediaRecordingAdapter | undefined;
 
   constructor(config?: MediaWorkerServerConfig) {
     super();
+    this.recordingAdapter = config?.recordingAdapter;
     this.config = {
       port:
         config?.port ??
@@ -242,6 +246,14 @@ export class MediaWorkerServer extends EventEmitter {
     return true;
   }
 
+  getRecordingAdapter(): MediaRecordingAdapter | undefined {
+    return this.recordingAdapter;
+  }
+
+  setRecordingAdapter(adapter: MediaRecordingAdapter): void {
+    this.recordingAdapter = adapter;
+  }
+
   private handleHttpRequest(req: IncomingMessage, res: ServerResponse): void {
     const url = new URL(
       req.url ?? "/",
@@ -353,6 +365,46 @@ export class MediaWorkerServer extends EventEmitter {
             errorMsg.includes("DRAINING") || errorMsg.includes("CAPACITY")
               ? 503
               : 400;
+          res.end(JSON.stringify({ error: errorMsg }));
+        }
+      });
+      return;
+    }
+
+    if (req.method === "POST" && pathname === "/recording/finalize") {
+      if (this.isDraining) {
+        res.statusCode = 503;
+        res.end(JSON.stringify({ error: "Server is draining" }));
+        return;
+      }
+      let body = "";
+      req.on("data", (chunk) => (body += chunk));
+      req.on("end", async () => {
+        try {
+          if (!this.recordingAdapter) {
+            res.statusCode = 503;
+            res.end(
+              JSON.stringify({
+                error:
+                  "MediaRecordingAdapter is not configured on media worker server",
+              }),
+            );
+            return;
+          }
+          const parsed = body ? JSON.parse(body) : {};
+          const result = await this.recordingAdapter.sealFinalRecording({
+            credential: parsed.credential ?? "media-internal",
+            scope: parsed.scope,
+            segments: parsed.segments ?? [],
+            closureLedger: parsed.closureLedger ?? {
+              resolve: async () => parsed.closure ?? null,
+            },
+          });
+          res.statusCode = 200;
+          res.end(JSON.stringify({ status: "sealed", ...result }));
+        } catch (err) {
+          const errorMsg = err instanceof Error ? err.message : String(err);
+          res.statusCode = 400;
           res.end(JSON.stringify({ error: errorMsg }));
         }
       });

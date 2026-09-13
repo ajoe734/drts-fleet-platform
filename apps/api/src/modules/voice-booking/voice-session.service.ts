@@ -1,4 +1,5 @@
 import { Injectable, Logger, Optional } from "@nestjs/common";
+import { isDeepStrictEqual } from "node:util";
 
 import { ApiRequestError } from "../../common/api-envelope";
 import type {
@@ -90,6 +91,29 @@ const DIALOG_STATE_TRANSITIONS: Readonly<Record<string, readonly string[]>> = {
   closed: [],
 };
 
+export interface CloseSessionWithFinalizeRecordingCommand {
+  voiceSessionId: string;
+  expectedSessionVersion: number;
+  expectedLeaseEpoch?: number | undefined;
+  closeEvent?: {
+    source?: string | undefined;
+    sourceEventId?: string | null | undefined;
+    occurredAt?: string | undefined;
+    sequence?: number | undefined;
+    mediaEpoch?: number | undefined;
+    eventType?: string | undefined;
+    payload?: unknown;
+    payloadRef?: string | null | undefined;
+  } | undefined;
+  recordingId?: string | null | undefined;
+}
+
+export interface CloseSessionWithFinalizeRecordingResult {
+  session: VoiceSessionRecord;
+  workItemEnqueued: boolean;
+  deduped: boolean;
+}
+
 @Injectable()
 export class VoiceSessionService {
   private readonly logger = new Logger(VoiceSessionService.name);
@@ -108,7 +132,7 @@ export class VoiceSessionService {
    */
   private assertWriteAuthorized(
     session: VoiceSessionRecord,
-    expected: { sessionVersion: number; leaseEpoch?: number },
+    expected: { sessionVersion: number; leaseEpoch?: number | undefined },
   ): void {
     if (
       expected.leaseEpoch !== undefined &&
@@ -506,62 +530,276 @@ export class VoiceSessionService {
    * after the call ends. Idempotent: closing an already-closed session is a
    * no-op rather than an error.
    */
-  async closeSession(
-    voiceSessionId: string,
-    expectedSessionVersion: number,
-  ): Promise<VoiceSessionRecord> {
-    const session = await this.requireSession(voiceSessionId);
-    if (session.dialogState === "closed") {
-      return session;
-    }
-    this.assertWriteAuthorized(session, {
-      sessionVersion: expectedSessionVersion,
+
+
+  /**
+   * SD §5.1, §7.3, consensus-packet.md §B6:
+   * AI close event insertion into voice.session_event, session CAS update,
+   * and finalize_recording work item enqueue occur within ONE atomic transaction.
+   *
+   * Idempotency & Retransmission:
+   * Re-reading and verifying payload, scope, callId, and recordingId prevents
+   * differences from being silently swallowed by already-closed or ON CONFLICT DO NOTHING.
+   */
+  async closeSessionWithFinalizeRecording(
+    command: CloseSessionWithFinalizeRecordingCommand,
+  ): Promise<CloseSessionWithFinalizeRecordingResult> {
+    const result = await this.repository.withTransaction(async (tx) => {
+      const session = await this.repository.findSessionById(
+        command.voiceSessionId,
+        tx,
+      );
+      if (!session) {
+        throw new ApiRequestError(
+          403,
+          "VOICE_SESSION_NOT_OWNER",
+          "Voice session not found.",
+        );
+      }
+
+      if (session.dialogState === "closed") {
+        // Re-read and verify that existing event/payload matches
+        if (command.closeEvent?.payload !== undefined) {
+          const existingEvent = await tx.query<{
+            payload: unknown;
+            payload_ref: string | null;
+          }>(
+            `SELECT payload, payload_ref FROM voice.session_event
+            WHERE voice_session_id = $1 AND event_type IN ('call.ended', 'session.closed')
+            ORDER BY sequence DESC LIMIT 1`,
+            [command.voiceSessionId],
+          );
+          if (existingEvent.rows[0]) {
+            const existingPayload = existingEvent.rows[0].payload;
+            if (
+              existingPayload &&
+              !isDeepStrictEqual(command.closeEvent.payload, existingPayload)
+            ) {
+              throw new ApiRequestError(
+                409,
+                "VOICE_ACTION_PAYLOAD_CONFLICT",
+                "Close event payload differs from existing closed session event.",
+              );
+            }
+          }
+        }
+
+        // Also verify existing finalize_recording work item if present
+        const existingWork = await tx.query<{ payload_ref: string | null }>(
+          `SELECT payload_ref FROM voice.work_item
+          WHERE dedupe_key = $1 LIMIT 1`,
+          [`finalize_recording:ai:${session.voiceSessionId}`],
+        );
+        if (existingWork.rows[0]?.payload_ref) {
+          try {
+            const parsed = JSON.parse(existingWork.rows[0].payload_ref);
+            if (
+              command.recordingId &&
+              parsed.recordingId &&
+              command.recordingId !== parsed.recordingId
+            ) {
+              throw new ApiRequestError(
+                409,
+                "VOICE_ACTION_PAYLOAD_CONFLICT",
+                "Recording ID differs from existing finalize_recording work item for this closed session.",
+              );
+            }
+          } catch (e) {
+            if (e instanceof ApiRequestError) throw e;
+          }
+        }
+
+        return { session, workItemEnqueued: false, deduped: true };
+      }
+
+      this.assertWriteAuthorized(session, {
+        sessionVersion: command.expectedSessionVersion,
+        leaseEpoch: command.expectedLeaseEpoch,
+      });
+
+      const closeEvent = command.closeEvent;
+      const eventType = closeEvent?.eventType ?? "call.ended";
+      const sequence =
+        closeEvent?.sequence ?? session.lastAppliedControlSequence + 1;
+      const mediaEpoch = closeEvent?.mediaEpoch ?? 1;
+      const occurredAt = closeEvent?.occurredAt ?? new Date().toISOString();
+      const source = closeEvent?.source ?? "media_worker";
+      const sourceEventId = closeEvent?.sourceEventId ?? null;
+      const payload = closeEvent?.payload ?? null;
+      const payloadRef = closeEvent?.payloadRef ?? null;
+
+      // 1. Insert session event
+      await tx.query(
+        `INSERT INTO voice.session_event (
+          voice_session_id, leg_id, source, provider_account_id,
+          source_event_id, occurred_at, sequence, media_epoch, input_epoch,
+          lease_epoch, event_type, payload, payload_ref
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)`,
+        [
+          session.voiceSessionId,
+          null,
+          source,
+          session.providerAccountId,
+          sourceEventId,
+          occurredAt,
+          sequence,
+          mediaEpoch,
+          session.inputEpoch,
+          session.leaseEpoch,
+          eventType,
+          payload,
+          payloadRef,
+        ],
+      );
+
+      // 2. CAS update session control
+      const updated = await this.repository.casUpdateSessionControl(
+        session.voiceSessionId,
+        session.sessionVersion,
+        {
+          dialogState: "closed",
+          mediaState: "ended",
+          recordingState: "pending",
+          lastAppliedControlSequence: sequence,
+        },
+        tx,
+      );
+      if (!updated) {
+        throw new ApiRequestError(
+          409,
+          "VOICE_DRAFT_STALE",
+          "Session revision changed while closing; retry.",
+        );
+      }
+
+      // 3. Enqueue finalize_recording into voice.work_item
+      const dedupeKey = `finalize_recording:ai:${session.voiceSessionId}`;
+      const payloadRefData = JSON.stringify({
+        voiceSessionId: session.voiceSessionId,
+        callId: session.callId,
+        brandId: session.resourceScopeId,
+        recordingId: command.recordingId ?? null,
+        closedAt: occurredAt,
+      });
+
+      await tx.query(
+        `INSERT INTO voice.work_item (command_id, voice_session_id, work_type, dedupe_key, payload_ref, run_after)
+        VALUES (NULL, $1, 'finalize_recording', $2, $3, now())
+        ON CONFLICT (dedupe_key) DO NOTHING`,
+        [session.voiceSessionId, dedupeKey, payloadRefData],
+      );
+
+      return { session: updated, workItemEnqueued: true, deduped: false };
     });
 
-    const updated = await this.repository.casUpdateSessionControl(
-      voiceSessionId,
-      session.sessionVersion,
-      { dialogState: "closed", mediaState: "ended" },
-    );
-    if (!updated) {
-      throw new ApiRequestError(
-        409,
-        "VOICE_DRAFT_STALE",
-        "Session revision changed while closing; retry.",
-      );
-    }
-
-    if (this.usageService) {
+    if (this.usageService && result.workItemEnqueued) {
       try {
         const durationSec = Math.max(
           1,
           Math.round(
-            (Date.now() - new Date(updated.createdAt).getTime()) / 1000,
+            (Date.now() - new Date(result.session.createdAt).getTime()) / 1000,
           ),
         );
         this.usageService.recordUsage({
-          providerAccountId: updated.providerAccountId,
-          voiceSessionId: updated.voiceSessionId,
-          provider: updated.routeProfileId || "twm",
+          providerAccountId: result.session.providerAccountId,
+          voiceSessionId: result.session.voiceSessionId,
+          provider: result.session.routeProfileId || "twm",
           serviceType: "telephony",
           billingUnit: "second",
           quantity: durationSec,
-          brandId: updated.resourceScopeId,
+          brandId: result.session.resourceScopeId,
         });
       } catch (err) {
         this.logger.warn(`Failed to record session usage on close: ${err}`);
       }
     }
 
-    if (this.metricsService) {
+    if (this.metricsService && result.workItemEnqueued) {
       try {
-        this.metricsService.recordCallMetricFromSession(updated);
+        this.metricsService.recordCallMetricFromSession(result.session);
       } catch (err) {
         this.logger.warn(`Failed to record session metric on close: ${err}`);
       }
     }
 
-    return updated;
+    return result;
+  }
+
+  /**
+   * SD §5.1/§7.3: ending media only stops new passenger commands. This only
+   * ever touches `dialog_state`/`media_state` -- it deliberately leaves
+   * `commit_status`, `voice.command_receipt` and `voice.confirmation`
+   * untouched, so an already durably-accepted command keeps reconciling
+   * after the call ends. Idempotent: closing an already-closed session is a
+   * no-op rather than an error.
+   * Atomically enqueues finalize_recording in the same transaction.
+   */
+  async closeSession(
+    voiceSessionId: string,
+    expectedSessionVersion: number,
+  ): Promise<VoiceSessionRecord> {
+    const result = await this.closeSessionWithFinalizeRecording({
+      voiceSessionId,
+      expectedSessionVersion,
+    });
+    return result.session;
+  }
+
+  /**
+   * Consensus-packet.md §B6:
+   * Historical recording-pending recovery scan.
+   * Discovers and enqueues historical AI sessions with pending recordings without requiring a new close event.
+   */
+  async recoverPendingRecordingSessions(): Promise<{
+    scanned: number;
+    enqueued: number;
+  }> {
+    if (!this.repository.isEnabled()) {
+      return { scanned: 0, enqueued: 0 };
+    }
+
+    return this.repository.withTransaction(async (tx) => {
+      const candidates = await tx.query<{
+        voice_session_id: string;
+        call_id: string;
+        resource_scope_id: string;
+      }>(
+        `SELECT s.voice_session_id, s.call_id, s.resource_scope_id
+        FROM voice.session s
+        LEFT JOIN voice.work_item w
+          ON w.voice_session_id = s.voice_session_id
+         AND w.work_type = 'finalize_recording'
+        WHERE (s.dialog_state = 'closed' OR s.recording_state = 'pending')
+          AND (w.work_id IS NULL OR w.status IN ('failed', 'dead_letter'))
+        ORDER BY s.created_at ASC
+        LIMIT 100`,
+      );
+
+      let enqueued = 0;
+      for (const sess of candidates.rows) {
+        const dedupeKey = `finalize_recording:ai:${sess.voice_session_id}`;
+        const payloadRef = JSON.stringify({
+          voiceSessionId: sess.voice_session_id,
+          callId: sess.call_id,
+          brandId: sess.resource_scope_id,
+          recordingId: null,
+          recoveredAt: new Date().toISOString(),
+        });
+
+        const insertRes = await tx.query(
+          `INSERT INTO voice.work_item (command_id, voice_session_id, work_type, dedupe_key, payload_ref, run_after)
+          VALUES (NULL, $1, 'finalize_recording', $2, $3, now())
+          ON CONFLICT (dedupe_key) DO NOTHING
+          RETURNING work_id`,
+          [sess.voice_session_id, dedupeKey, payloadRef],
+        );
+        if (insertRes.rowCount && insertRes.rowCount > 0) {
+          enqueued++;
+        }
+      }
+
+      return { scanned: candidates.rows.length, enqueued };
+    });
   }
 
   /**
