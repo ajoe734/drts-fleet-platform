@@ -461,6 +461,7 @@ export class CallcenterService implements OnModuleInit {
       this.syncRecordingFlagsWithoutAttachment(session);
     }
     this.persistSessions([session], "close_call_session");
+    this.enqueueFinalizeRecordingWorkItem(session);
     this.notifyRecordingStateChange(session, requestId);
 
     this.recordAudit(
@@ -718,6 +719,7 @@ export class CallcenterService implements OnModuleInit {
     this.addFlag(session, "recording_pending_callback");
     this.addFlag(session, "recording_pending");
     this.persistSessions([session], "mark_recording_pending");
+    this.enqueueFinalizeRecordingWorkItem(session);
     this.notifyRecordingStateChange(session, requestId);
 
     this.recordAudit(
@@ -1359,6 +1361,37 @@ export class CallcenterService implements OnModuleInit {
     ).catch((error: unknown) => {
       this.callcenterRepository!.reportPersistenceFailure(error, context);
     });
+  }
+
+  private enqueueFinalizeRecordingWorkItem(session: CallSessionRecord) {
+    if (!this.callcenterRepository?.isEnabled()) {
+      return;
+    }
+
+    void this.callcenterRepository
+      .enqueueFinalizeRecording({
+        callId: session.callId,
+        brandId: null,
+        recordingId: session.recordingId,
+        linkedOrderId: session.linkedOrderId,
+        endedAt: session.endedAt,
+      })
+      .catch((error: unknown) => {
+        this.callcenterRepository!.reportPersistenceFailure(
+          error,
+          "enqueue_finalize_recording",
+        );
+      });
+  }
+
+  async recoverPendingRecordingCalls(): Promise<{
+    scanned: number;
+    enqueued: number;
+  }> {
+    if (!this.callcenterRepository?.isEnabled()) {
+      return { scanned: 0, enqueued: 0 };
+    }
+    return this.callcenterRepository.recoverPendingRecordingCalls();
   }
 
   private requireSession(callId: string) {

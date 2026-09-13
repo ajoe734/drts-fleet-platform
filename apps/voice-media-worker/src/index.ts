@@ -7,6 +7,7 @@ export * from "./recording/immutable-manifest";
 export * from "./recording/confirmation-coverage";
 export * from "./recording/confirmed-manifest";
 export * from "./recording/final-manifest";
+export * from "./recording/media-recording-adapter";
 export * from "./providers/twm/twm-adapter";
 export * from "./providers/native-voice";
 export * from "./language/language-router";
