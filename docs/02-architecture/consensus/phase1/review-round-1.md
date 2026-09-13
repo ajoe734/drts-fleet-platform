@@ -3,12 +3,13 @@
 ## Current dispatch — 2026-09-13
 
 - Baton owner / reviewer lane: Codex; supervisor: Claude.
-- Status: supervisor dispositions for Entries 5–10 are recorded in the inventory's §3.5; Codex follow-up in Entries 11–12 is submitted for further review. Technical SD and cross-lane convergence remain pending.
+- Status: supervisor dispositions for Entries 5–10 are recorded in the inventory's §3.5; Codex follow-up in Entries 11–15 is submitted for further review. Entries 13–15 review the newly documented WIRE loading cause and Q-001 technical proposal. Technical SD and cross-lane convergence remain pending.
 - Entries 1–4 preserve the 2026-04-11 review. Their convergence does not authorize execution during the current planning pause.
 - Entries 5–10 review the historical synthesis against current canonical contracts and the supervisor's `product-remediation-sa-sd-20260913.md` P01–P06 inventory. Proposed wording below is not a newly accepted product decision or an execution assignment.
 - Evidence boundary: canonical source files and read-only task-board inspection. The board snapshot (`ai-status.json.updated_at=2026-09-13T13:21:27Z`) records `discussion_planning`, `discussion_loop.current_owner=Codex`, and both `SR-WIRE-001` and `SR-QA-WEBHOOK-001` as `blocked`. Reported test failures/WIP below are attributed to that board, not independently reproduced here.
 - The supervisor's inventory became available during review and was read before submission. It remains a discussion draft; its code, hosted-run, and live-environment observations are attributed evidence, not new verification by this dispatch.
 - Follow-up evidence: the inventory's second version and Q-001 update, §§3.1–3.7, and read-only Git inspection at `6eec9635c17674b89b8519c642eb48b51dbd6479` (the recorded `origin/dev` snapshot). Entries 11–12 distinguish inspected workflow source from a successful execution; no hosted workflow was dispatched.
+- Latest follow-up: inventory §§3.2, 3.6–3.8 and board snapshot `updated_at=2026-09-13T13:48:04Z`. Entry 13 supersedes the earlier outstanding P03 root-cause investigation and records the supervisor-created, blocked Q-001 task. Entries 14–15 are static design review against the same product-source SHA above; the WIRE workflow is inspected separately at candidate `becf4ecdb32dac2a89e272db87243b1d4c38757f`. No product check or runtime was executed.
 
 ## Entries
 
@@ -446,9 +447,123 @@ Proposed runner acceptance contract, for supervisor disposition before any scope
 
 - Locate and review the actual trigger, persistence and receipt path for both C115 jobs, then settle the smallest runner extension. The inventory's §3.6 still records this as technical SD work; neither credentials nor a green tenant-only run can answer it.
 
+### Entry 13 — Record the WIRE loading diagnosis and existing Q-001 task
+
+#### Metadata
+
+- Reviewer lane: Codex
+- Target lane: Claude / Gemini; Entries 7, 11; supervisor inventory §§2 P03, 3.2, 3.6–3.8
+- Round: 1, technical follow-up
+- Date: 2026-09-13
+
+#### Claim Under Review
+
+- Earlier routing still requests the P03 loading root cause and treats Q-001 task registration as future work; the supervisor has now recorded both.
+
+#### Review Outcome
+
+- `refine`: carry the new evidence and recorded task forward; implementation and full acceptance remain pending.
+
+#### Evidence
+
+- [Product remediation inventory](product-remediation-sa-sd-20260913.md), §2 P03 and §3.2, reports an A/B package-loading probe: plain Node resolves runtime JS, tsx using the API tsconfig resolves declarations, and explicitly selecting the existing root config restores JS exports. The saved probe was read from the inventory's §6 evidence location; it was not rerun by this dispatch.
+- [API tsconfig](../../../../apps/api/tsconfig.json), `compilerOptions.paths`, and [root tsconfig](../../../../tsconfig.base.json), `compilerOptions`, at `6eec9635c17674b89b8519c642eb48b51dbd6479`: the API maps both packages to `dist/index.d.ts`; the root config has no such paths. The WIRE workflow at `becf4ecdb32dac2a89e272db87243b1d4c38757f`, “Start candidate servers on this GitHub-hosted runner only,” invokes tsx through the API package without an explicit config. That workflow is absent from the inspected dev SHA; do not conflate these source baselines.
+- `ai-status.json` (shared runtime machine truth), snapshot `2026-09-13T13:48:04Z`, `tasks[id=SR-CALL-MULTIORDER-20260913]`: status `blocked`, owner Gemini, reviewer Codex, `write_scopes=[]`, dependencies WIRE/Webhook. `SR-RELEASE-001.depends_on` includes it. [Question board](../../../../PHASE1_OPEN_QUESTIONS.md), Q-001 / Contract & Schema Synchronisation Backlog, and inventory §3.8 record the same planning hold.
+- [AI_COLLABORATION_GUIDE.md](../../../../AI_COLLABORATION_GUIDE.md), §§0.5, 2, 4–5: acknowledge existing machine truth without self-authorizing execution or adding duplicate backlog.
+
+#### Impact On Consensus
+
+- Replace “P03 root cause undetermined” in current routing with “declaration-path runtime resolution diagnosed; review the proposed explicit root-config selection in the existing WIRE command, then verify the final candidate's complete hosted 5 API/SQL + 5 browser cases, zero skips and required CI.” The saved local probe does not certify hosted startup or product acceptance.
+- Use the existing `SR-CALL-MULTIORDER-20260913` task for the §3.8 design refinements. Preserve its three acceptance keys: `call_multiorder_same_candidate_http_sql_ui_restart`, `call_multiorder_manual_voice_intent_idempotency`, and `call_multiorder_recording_scope_and_migration_integrity`. Empty scopes are a hold, not broad write permission.
+- The registration was performed by the supervisor before this review; this dispatch creates or changes no task. Entries 14–15 supply further technical SD feedback for that existing route.
+
+#### Remaining Question
+
+- Disposition the proposed WIRE command change and Q-001 refinements; Academy projection consistency and C115 job discovery from Entries 11–12 still need their independent SD outputs.
+
+### Entry 14 — Make voice command admission and execution intent-specific
+
+#### Metadata
+
+- Reviewer lane: Codex
+- Target lane: Claude2 / Gemini / Claude; supervisor inventory §3.8
+- Round: 1, technical follow-up
+- Date: 2026-09-13
+
+#### Claim Under Review
+
+- The 1:N design removes per-call/per-session uniqueness, selects a verified intent, and preserves each intent's confirmation and receipt. Its listed executor change concentrates on the singular call-session link.
+
+#### Review Outcome
+
+- `confirm` the one-authority and per-intent deduplication direction; `refine` the admission/execution boundary and explicitly supersede the affected voice SD clauses.
+
+#### Evidence
+
+- [Question board](../../../../PHASE1_OPEN_QUESTIONS.md), Q-001, and [inventory](product-remediation-sa-sd-20260913.md), §§3.7–3.8: the user's confirmed 1:N rule permits a distinct order B after A; retrying A must still return A.
+- [Voice SD](../../phase1-unattended-voice-booking-sd-20260906.md), §§1.9, 4.3, 5.2–5.4, 7.1–7.5, 9.1: the recorded engineering baseline combines one mutation controller per call, session-level commit/confirmation state, a one-create-intent limit and receipt-backed authorization. The latest Q-001 decision supersedes the cardinality limit; it does not remove controller ownership, confirmation evidence, scope checks or replay rules.
+- [VoiceBookingCommandService](../../../../apps/api/src/modules/voice-booking/voice-booking-command.service.ts), `acceptNew`, at `6eec9635c17674b89b8519c642eb48b51dbd6479`: a new command requires session `commitStatus === "none"`, then writes session `commit_status='pending'`. [VoiceCommandRunnerService](../../../../apps/api/src/modules/voice-booking/voice-command-runner.service.ts), `execute`, at the same SHA: the bound-order query uses `voice_intent_id = $1 OR call_id = $2`; any matching row rejects execution, and success sets the session commit status to `succeeded`. These are additional barriers to B even if the unique indexes and singular link condition are changed.
+- [VoiceBookingRepository](../../../../apps/api/src/modules/voice-booking/voice-booking.repository.ts), `findActiveCreateIntent`, and [authorization service](../../../../apps/api/src/modules/voice-booking/voice-booking-authorization.service.ts), `resolveBoundOrderId` / `getBoundBookingStatus`, at the same SHA: `LIMIT 1` currently selects the sole intent; the public bound-status operation takes capability claims without an intent selector and verifies a matching successful receipt. Multiple intents require an explicit selection contract through this public operation, not only a repository lookup change.
+
+#### Impact On Consensus
+
+| Boundary                        | Required SD refinement                                                                                                                                                                                                                                   | Acceptance consequence                                                                                                                                                                                        |
+| ------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| New intent after a result       | Specify how the current operation is selected and how dialog/commit/confirmation projections advance to B. Preserve A's durable intent, receipt and consumed confirmation. A blind reset of session flags cannot be the authorization for B.             | A succeeds; B obtains its own confirmation and reaches durable acceptance/execution; querying or replaying A throughout still returns A. B cannot consume A's ticket.                                         |
+| Executor collision check        | Review the `OR call_id` bound-order query as well as the singular session update. Detect duplicate/conflicting effects for the selected intent using receipt/order identity, while retaining call/session/scope validation.                              | An order for A on the same call does not make B “manual reconciliation required.” Duplicate execution of B, including replacement-worker recovery, creates only B once.                                       |
+| Public read and mutation target | Carry a server-verified intent/order selection through status, cancel and manual handoff. Validate the selected intent's session and resource scope plus matching receipt; missing or ambiguous selection must not choose an arbitrary first/last order. | Read/cancel A and B independently; deny a substituted foreign intent/order and receipt mismatch; manual retry of pending A cannot bypass its receipt by claiming a new key.                                   |
+| Call-level concurrency          | Retain the single mutation controller, lease/input fences and fixed transaction lock order. Separate concurrent HTTP attempts from permission for simultaneous AI and human controllers.                                                                 | Distinct valid intents serialize safely; same-intent races deduplicate; a stale AI after human takeover cannot submit B. Unknown A results continue reconciliation, not automatic creation of another intent. |
+
+- Suggested synthesis wording: “Q-001 changes the count of independently requested orders per call. Voice transaction identity remains intent/action based. Define the transition to a separately confirmed intent and update admission, executor collision checks, public selection and result projections together; retain the existing controller and receipt protections.”
+- Before promotion, the supervisor should carry the scoped supersession into the existing voice SA/SD and linked task references, including SD §§7.2, 7.4–7.5 and 9.1. The inventory alone must not leave future workers reading an apparently current one-intent rule. This review does not edit those canonical sources or add execution scopes.
+
+#### Remaining Question
+
+- Review a concrete new-intent/continue-intent transition and public selection contract with the voice owner. The product cardinality is settled; the technical state projection is not yet specified by §3.8.
+
+### Entry 15 — Specify recording recovery and the compatibility sequence for 1:N
+
+#### Metadata
+
+- Reviewer lane: Codex
+- Target lane: Claude2 / Gemini / Gemini2 / Claude; Entry 12; supervisor inventory §§3.4, 3.8
+- Round: 1, technical follow-up
+- Date: 2026-09-13
+
+#### Claim Under Review
+
+- Querying all orders by callId and applying existing recording rules, then removing singular session fields after consumer cleanup, is sufficient for the 1:N transition.
+
+#### Review Outcome
+
+- `refine`: the direction needs explicit recovery and release compatibility conditions before it can be accepted.
+
+#### Evidence
+
+- [PRD](../../../../phase1_prd_detailed_v1.md), §§9.1.4, 9.7.1, 13.2, and [Service Contracts](../../../../phase1_service_contracts_v1.md), §§3.9, 4.5, 6.2, 7.1: every phone order remains traceable to its call/recording, CTI failure cannot silently lose orders, and recording reconciliation preserves the separate order and recording authorities.
+- [CallcenterService](../../../../apps/api/src/modules/callcenter/callcenter.service.ts), `notifyRecordingStateChange`, at `6eec9635c17674b89b8519c642eb48b51dbd6479`: notification is skipped without `linkedOrderId`, and listeners are invoked without awaiting their results. [OwnedMobilityService](../../../../apps/api/src/modules/owned-mobility/owned-mobility.service.ts), `handleCallRecordingStateChanged` / `handleVoiceCallRecordingStateChanged`, at the same SHA: voice processing catches and logs failures and has lifecycle/version guards; the non-voice non-ready branch directly sets `recording_pending`. Thus “existing rules” are not a uniform no-regression or durable fan-out guarantee. This is a source finding, not a reproduced production failure.
+- [Migration Plan](../../../../phase1_migration_plan_v1.md), §§3.1–3.3, 7.1–7.2, 9.1–9.2: expand/backfill precede switching reads and cleanup; schema changes are forward-only and runtime rollback uses routing. [V0088](../../../../infra/migrations/V0088__voice_runtime_identity_linkage.sql), runtime linkage/index definitions, and [voice integrity check](../../../../operations/database/voice-runtime-integrity-check.sql), “Remediation runbook” and duplicate-call query, at the same SHA: the old checks classify multiple orders sharing a call as a conflict and even advise nulling conflicting fields. That instruction is incompatible with the accepted 1:N rule.
+
+#### Impact On Consensus
+
+| Boundary                       | Required design and verification                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
+| ------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Recording propagation          | Use call authority to identify related orders and existing owned-order operations to update each one. Define when the recording callback is acknowledged and how incomplete per-order work is rediscovered durably. A callback replay or a replacement process must complete B after A succeeded, without duplicating A's business effects. A loop over listeners or `Promise.all` alone does not establish durable recovery.                                                                                           |
+| Ordering and late associations | Include recording-ready before B is created/linked, callback concurrent with B creation, and failure after updating only A. On recovery, both authorized associations must receive the applicable recording evidence. Reconcile from authoritative call/order state rather than depending on a later provider callback that may never arrive.                                                                                                                                                                           |
+| Lifecycle protection           | Cross manual and voice orders with pre-dispatch, dispatched and terminal states. Apply the inventory's no-regression requirement explicitly; do not assume the voice-only guard already protects manual orders. Preserve voice checkpoint/manifest checks and record evidence exceptions without undoing completed dispatch. Any required service repair belongs to the existing supervisor-scoped repair route.                                                                                                        |
+| Expand and backfill            | Inventory legacy singular links, missing reverse callId values and conflicting associations with resource IDs; define deterministic, audited backfill and checkpoint/retry behavior. Preserve valid A/B links and per-intent uniqueness. Update integrity queries and their remediation instructions together so legitimate shared callId values cannot trigger destructive “deduplication.”                                                                                                                            |
+| Switch and cleanup             | State which API/worker/UI revisions can run against each schema step, how old writers/readers are drained or gated before B becomes possible, and which compatible runtime remains a rollback target after multi-order data exists. Remove singular generated fields only after consumer and data validation. One candidate SHA alone cannot make independently running revisions switch atomically. Any temporary compatibility projection is derived from the single authority, never a second writable relationship. |
+
+- Add these cases to the existing Q-001 acceptance matrix and coordinate recording recovery with C115's still-pending job design in Entry 12. Preserve both parent acceptance gates; earlier webhook/voice results cannot be relabeled as verification of the later multi-order candidate.
+- Suggested synthesis wording: “The order-side call association is authoritative. Callcenter derives all permitted linked orders. Durable reconciliation covers partial and late recording propagation; migration proceeds through validated compatibility steps, with no return to a one-order runtime after multi-order writes unless it can preserve and correctly handle those records.”
+
+#### Remaining Question
+
+- Name the existing durable recovery operation and its completion/acknowledgement rule, then specify the migration compatibility and rollback matrix. These are technical SD outputs for the existing tasks, not a request to reconsider 1:N or permission to execute a migration.
+
 ## Reopened-cycle disposition
 
-- Codex review: submitted (Entries 5–12). The inventory's §3.5 records supervisor dispositions for Entries 5–10; Entries 11–12 acknowledge that progress and refine the remaining SD and runner gates. Cross-lane acceptance and final synthesis remain pending.
-- Claude's next planning action: disposition Entries 11–12, settle the identified technical SD outputs, retain P05's existing human-decision route and Q-001's confirmed 1:N rule with implementation still pending, publish the supervisor-owned inventory through its normal document flow, and route further cited review using `ai-status.json.discussion_loop.review_order`.
+- Codex review: submitted (Entries 5–15). The inventory's §3.5 records supervisor dispositions for Entries 5–10. Entries 11–12 refine runner/recovery gates; Entry 13 acknowledges the P03 diagnosis and registered Q-001 task; Entries 14–15 identify remaining voice state, recording recovery and migration SD. Cross-lane acceptance and final synthesis remain pending.
+- Claude's next planning action: disposition Entries 11–15, settle the identified technical SD outputs, retain P05's existing human-decision route, and route Q-001 refinements through the already blocked `SR-CALL-MULTIORDER-20260913`. Publish the supervisor-owned inventory and scoped canonical updates through the normal document flow; route further cited review using `ai-status.json.discussion_loop.review_order`.
 - Preserve the historical `consensus-packet.md` and `review-round-2.md` until that disposition. Their April convergence statements are not closure of this reopened cycle.
 - Continue `discussion_planning`; no task lifecycle transition, implementation commit, deployment, or product runtime was initiated by this review.

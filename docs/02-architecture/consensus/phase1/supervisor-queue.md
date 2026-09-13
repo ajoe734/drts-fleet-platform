@@ -15,12 +15,12 @@ This file is the live routing note for the pre-implementation discussion loop.
 - Supervisor: Claude
 - Current baton owner: Codex
 - Active working file: `review-round-1.md`
-- Planning status: Codex follow-up review_submitted; supervisor dispositions for Entries 5–10 recorded in inventory §3.5; Entries 11–12 and cross-lane review pending (2026-09-13)
+- Planning status: Codex technical follow-up review_submitted; supervisor dispositions for Entries 5–10 recorded in inventory §3.5; Entries 11–15 and cross-lane review pending (2026-09-13)
 - Mode: `discussion_planning`
-- Current discussion inventory: `product-remediation-sa-sd-20260913.md`, P01–P06 (supervisor-owned draft, not an accepted execution packet)
-- Next required output: disposition Entries 11–12 with citations, settle the remaining technical SD, and collect further review before a new synthesis.
+- Current discussion inventory: `product-remediation-sa-sd-20260913.md`, P01–P06 and Q-001 §§3.7–3.8 (supervisor-owned draft, not an accepted execution packet)
+- Next required output: disposition Entries 11–15 with citations, settle the remaining technical SD, and collect further review before a new synthesis. P03 loading is diagnosed; review the proposed existing-command change and retain full hosted acceptance.
 
-Authority checked: `ai-status.json` (shared runtime machine truth), `updated_at=2026-09-13T13:21:27Z`, `execution_mode`, `discussion_loop`, and the WIRE/webhook task `next` fields; [AI_COLLABORATION_GUIDE.md](../../../../AI_COLLABORATION_GUIDE.md), §§0, 2, 4–6. This note records no ownership or task-lifecycle transition.
+Authority checked: `ai-status.json` (shared runtime machine truth), `updated_at=2026-09-13T13:48:04Z`, `execution_mode`, `discussion_loop`, WIRE/webhook task `next` fields, `SR-CALL-MULTIORDER-20260913` and the release dependency; [AI_COLLABORATION_GUIDE.md](../../../../AI_COLLABORATION_GUIDE.md), §§0, 2, 4–6. This note records no ownership or task-lifecycle transition.
 
 ## Current review order
 
@@ -37,19 +37,20 @@ This is `ai-status.json.discussion_loop.review_order`. Qwen's April readout and 
 - The supervisor records disposition and any actual baton transition; Codex remains owner until then.
 - Reviewers comment through the round file; only the current baton owner changes the shared draft.
 - Preserve the existing `SR-WIRE-001` and `SR-QA-WEBHOOK-001` planning pause, WIP, and required acceptance. These review proposals establish no new implementation backlog.
+- Preserve the supervisor's existing blocked `SR-CALL-MULTIORDER-20260913` route (Gemini owner, Codex reviewer, depends on WIRE/Webhook; required by release). Its `write_scopes=[]` does not authorize implementation. Carry Entries 14–15 into that task's SD disposition, not a duplicate task.
 - Complete the current SA/SD discussion and record the user's acceptance of the packet before a later mode change. The user's existing instruction already directs supervisor/auto-worker execution after that discussion; do not add a second request for the same execution authorization. April's convergence cannot satisfy this cycle's gate.
 
 ## Current disposition and review follow-up
 
-Codex submitted [review-round-1.md](review-round-1.md), Entries 5–12. Inventory §3.5 records supervisor dispositions for Entries 5–10; Entries 11–12 carry those dispositions forward and refine runner reuse and C115 recovery coverage. The starter draft preserves April's synthesis; the historical packet and round-2 file remain unchanged. This cycle has not converged.
+Codex submitted [review-round-1.md](review-round-1.md), Entries 5–15. Inventory §3.5 records supervisor dispositions for Entries 5–10. Entries 11–12 refine runner/C115 gates; Entry 13 acknowledges P03's diagnosis and the existing Q-001 task; Entries 14–15 refine voice intent state, recording propagation and migration compatibility. The starter draft preserves April's synthesis; the historical packet and round-2 file remain unchanged. This cycle has not converged.
 
-| Lane    | Cited planning output requested                                                                                                                                               |
-| ------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Claude2 | Review the WIRE persistence/Academy public-authority boundary and C113 adapter seams; carry Q-001's confirmed 1:N rule into technical SD.                                     |
-| Gemini  | Review contracts loading, C115 job triggers/durable pending-work sources, and Entry 12's tenant-runner reuse; retain the VM runtime restriction.                              |
-| Gemini2 | Independently review C111–C115 coverage and process/domain readback gates; distinguish controlled integration from provider/scheduler/alert receipts.                         |
-| Copilot | Check decision precedence, Entry 11's historical/current distinctions, and Entry 12's tenant-only gate limitation.                                                            |
-| Claude  | Disposition Entries 11–12, settle technical SD, publish the inventory and canonical decision updates, retain P05's existing question, and record any actual baton transition. |
+| Lane    | Cited planning output requested                                                                                                                                                                |
+| ------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Claude2 | Review WIRE persistence/Academy authority and C113 seams; review Entry 14's voice intent transition and public selection plus Entry 15's partial recording recovery.                           |
+| Gemini  | Review the diagnosed WIRE loader's proposed command fix, C115 triggers/durable work, tenant-runner reuse and Q-001 migration compatibility; retain the VM restriction.                         |
+| Gemini2 | Review C111–C115 coverage and process/domain readback; review Q-001 intent races, recording arrival order and mixed-revision acceptance without replacing live receipt gates.                  |
+| Copilot | Check precedence against the superseded voice SD cardinality clauses, session-level fences and old integrity-check remediation; retain the tenant-only gate limitation.                        |
+| Claude  | Disposition Entries 11–15, settle technical SD, publish the inventory and scoped canonical updates, preserve the existing Q-001 task and P05 question, and record any actual baton transition. |
 
 Q-001 was explicitly resolved by the user on 2026-09-13: one call may create multiple orders (1:N). The existing question-board entry and the inventory §3.7 record the decision; do not ask the cardinality question again or retain V0082's one-order interpretation. Technical SA/SD and scoped implementation remain pending. P05 remains on its separate existing human-decision route; this cardinality answer does not select a push provider or passenger topology. The supervisor's inventory and its publication remain supervisor-owned.
 

@@ -13,8 +13,8 @@ Rules:
 - Round: 1, reopened planning review on 2026-09-13
 - Current owner: Codex
 - Supervisor: Claude
-- Active artifact: [review-round-1.md](review-round-1.md), Entries 5–12
-- Goal: reconcile the historical synthesis with accepted contract decisions and the paused WIRE/webhook SA/SD inventory before supervisor-led synthesis
+- Active artifact: [review-round-1.md](review-round-1.md), Entries 5–15
+- Goal: reconcile the historical synthesis with accepted contract decisions and the paused WIRE/webhook/Q-001 SA/SD inventory before supervisor-led synthesis
 - Status: supervisor dispositions for Entries 5–10 recorded; Codex follow-up submitted; technical SD and cross-lane convergence pending; execution remains paused
 
 ## Reopened Review Inputs
@@ -22,6 +22,8 @@ Rules:
 The cited claims and proposed wording live in [review-round-1.md](review-round-1.md). They cover current planning authority (Entry 5), accepted state/ownership/topology decisions (Entry 6), WIRE authority and failure behavior (Entry 7), C111–C115 acceptance boundaries (Entry 8), Q-001's historical conflict and appended 1:N user resolution (Entry 9), P05/P06 decision and evidence boundaries (Entry 10), supervisor dispositions (Entry 11), and capability-specific runner/recovery gates (Entry 12).
 
 The supervisor’s `product-remediation-sa-sd-20260913.md` supplies the current P01–P06 inventory and records dispositions for Entries 5–10 in §3.5. Preserve its distinction between root’s restore regression, worker compatibility code, published candidate evidence, and unverified WIP. Entries 11–12 refine the remaining technical SD and runner coverage; they are not accepted synthesis. The supervisor must disposition the follow-up and obtain the remaining cited reviews before promotion. [AI_COLLABORATION_GUIDE.md](../../../../AI_COLLABORATION_GUIDE.md), §§4–5, governs convergence and human acceptance, subject to the user's existing direction to route implementation through supervisor/auto workers after accepted SA/SD.
+
+The inventory's newer §§3.2, 3.6–3.8 and board snapshot `2026-09-13T13:48:04Z` are reviewed in Entries 13–15. P03's declaration-path loading cause is documented; the proposed WIRE command fix and full hosted acceptance remain pending. Q-001 already has the blocked task `SR-CALL-MULTIORDER-20260913`, with empty scopes. Its 1:N proposal still needs explicit voice intent admission/execution and public selection contracts, durable recording propagation, and migration compatibility steps. These refinements preserve the settled product answer; they are submitted feedback, not accepted state-machine changes or implementation assignments.
 
 ## Working Synthesis
 
