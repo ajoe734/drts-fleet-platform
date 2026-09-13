@@ -252,4 +252,139 @@ describe("SR-WIRE-001: driver-academy training wired into fleet-partner readines
     expect(driver.dispatchEligible).toBe(true);
     expect(driver.eligibilityBlockedReasons).toEqual([]);
   });
+
+  it("does not push TRAINING_REQUIRED for newly approved supply onboarding driver draft (E2E-019 parity)", async () => {
+    const driverId = "drv-onboarding-approved";
+    const academyService = {
+      listCourses: async () => [
+        {
+          courseId: "course-safety-101",
+          courseCode: "SAFETY-101",
+          title: "Safety Basics",
+          category: "safety",
+          isRequired: true,
+          validityDays: 365,
+          passingScore: 80,
+          version: 1,
+          modulesCount: 3,
+          userStatus: "not_started",
+        },
+      ],
+    } as unknown as AcademyService;
+
+    const partner: FleetPartnerRecord = {
+      fleetPartnerId: "fleet-demo-001",
+      legalName: "Demo Fleet",
+      displayName: "Demo Fleet",
+      businessRegistrationNo: "12345678",
+      contactName: "Ops",
+      contactPhone: "02-1234-5678",
+      active: true,
+      partnershipType: "fleet_management",
+    };
+
+    const submissionId = "sub-drv-001";
+    const service = new SupplyReadinessService(
+      {
+        getFleetPartner: () => ({ ...partner }),
+        listFleetPartnerDrivers: () => [createDriverAffiliation(driverId)],
+      } as unknown as FleetPartnerService,
+      {
+        listDrivers: () => [createDriver(driverId)],
+        listVehicles: () => [],
+        listSupplyPairs: () => [],
+      } as unknown as RegulatoryRegistryService,
+      {
+        resolveRuntimeVehicleCapability: () => undefined,
+      } as unknown as VehicleEligibilityService,
+      {
+        loadState: async () => ({
+          submissions: [
+            {
+              submissionId,
+              fleetPartnerId: "fleet-demo-001",
+              submissionType: "driver",
+              status: "approved",
+              revisionNo: 10,
+              canonicalDriverId: driverId,
+              canonicalVehicleId: null,
+              canonicalContractId: null,
+              canonicalPolicyId: null,
+              subjectDriverId: null,
+              subjectVehicleId: null,
+              submittedBy: "partner-user",
+              submittedAt: FIXED_NOW,
+              reviewStartedBy: "admin-user",
+              reviewStartedAt: FIXED_NOW,
+              reviewedBy: "admin-user",
+              reviewedAt: FIXED_NOW,
+              reviewReasonCode: "all_documents_valid",
+              reviewComment: "Driver approved",
+              createdAt: FIXED_NOW,
+              updatedAt: FIXED_NOW,
+            },
+          ],
+          driverDrafts: [
+            {
+              submissionId,
+              name: "E2E Driver",
+              mobile: "+886900111224",
+              professionalDriverLicenseNo: "E2E-PDL-001",
+              professionalDriverLicenseExpiry: "2027-12-31",
+              taxiDriverRegistrationNo: "E2E-TAXI-001",
+              taxiDriverRegistrationArea: "TPE",
+              taxiDriverRegistrationExpiry: "2027-12-31",
+              supportedServiceProductCodes: ["taxi_realtime"],
+              preferredVehicleSubmissionId: null,
+            },
+          ],
+          vehicleDrafts: [],
+          documents: [
+            {
+              documentId: "doc-license",
+              submissionId,
+              fleetPartnerId: "fleet-demo-001",
+              documentType: "professional_driver_license",
+              fileName: "license.pdf",
+              fileSize: 1024,
+              mimeType: "application/pdf",
+              sha256Checksum: "checksum",
+              storageKey: "storage/key/1",
+              reviewStatus: "approved",
+              rejectionReason: null,
+              effectiveUntil: "2027-12-31",
+              uploadedAt: FIXED_NOW,
+              reviewedAt: FIXED_NOW,
+              reviewedBy: "admin-user",
+            },
+            {
+              documentId: "doc-reg",
+              submissionId,
+              fleetPartnerId: "fleet-demo-001",
+              documentType: "taxi_driver_registration",
+              fileName: "reg.pdf",
+              fileSize: 1024,
+              mimeType: "application/pdf",
+              sha256Checksum: "checksum",
+              storageKey: "storage/key/2",
+              reviewStatus: "approved",
+              rejectionReason: null,
+              effectiveUntil: "2027-12-31",
+              uploadedAt: FIXED_NOW,
+              reviewedAt: FIXED_NOW,
+              reviewedBy: "admin-user",
+            },
+          ],
+          reviewEvents: [],
+          vehicleAffiliations: [],
+        }),
+      } as unknown as SupplySubmissionRepository,
+      academyService,
+    );
+
+    const record = await service.getDriverReadiness("fleet-demo-001", driverId);
+
+    expect(record.reasonCodes).toEqual([]);
+    expect(record.state).toBe("ready");
+  });
 });

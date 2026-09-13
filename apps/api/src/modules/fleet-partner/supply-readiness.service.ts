@@ -83,11 +83,14 @@ export class SupplyReadinessService {
   ): Promise<SupplyReadinessRecord[]> {
     const context = await this.buildPartnerContext(fleetPartnerId);
 
-    const driverReadiness = await Promise.all(
-      [...context.scopedDriverIds]
-        .sort((left, right) => left.localeCompare(right))
-        .map((driverId) => this.evaluateDriverReadiness(driverId, context)),
-    );
+    const driverReadiness: SupplyReadinessRecord[] = [];
+    for (const driverId of [...context.scopedDriverIds].sort((left, right) =>
+      left.localeCompare(right),
+    )) {
+      driverReadiness.push(
+        await this.evaluateDriverReadiness(driverId, context),
+      );
+    }
     const vehicleReadiness = [...context.scopedVehicleIds]
       .sort((left, right) => left.localeCompare(right))
       .map((vehicleId) => this.evaluateVehicleReadiness(vehicleId, context));
@@ -341,7 +344,10 @@ export class SupplyReadinessService {
     if (!this.supportsAnyServiceBucket(driver.supportedServiceBuckets)) {
       this.pushReason(reasonCodes, "SERVICE_PRODUCT_NOT_SUPPORTED");
     }
-    if (await this.isDriverTrainingIncomplete(driverId)) {
+    if (
+      !artifacts?.driverDraft &&
+      (await this.isDriverTrainingIncomplete(driverId))
+    ) {
       this.pushReason(reasonCodes, "TRAINING_REQUIRED");
     }
 

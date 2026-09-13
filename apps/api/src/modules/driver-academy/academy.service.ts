@@ -154,7 +154,7 @@ export class AcademyService {
 
         const computed = computeFromData(courses, attempts, existingStatus);
 
-        if (!computed.isWaived) {
+        if (!computed.isWaived && computed.derivedStatus !== existingStatus) {
           await this.repository.upsertTrainingStatus(
             driverId,
             computed.derivedStatus,
@@ -186,7 +186,7 @@ export class AcademyService {
 
     const computed = computeFromData(courses, attempts, existingStatus);
 
-    if (!computed.isWaived) {
+    if (!computed.isWaived && computed.derivedStatus !== existingStatus) {
       await this.repository.upsertTrainingStatus(
         driverId,
         computed.derivedStatus,
