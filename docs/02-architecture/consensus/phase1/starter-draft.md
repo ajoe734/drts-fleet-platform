@@ -10,12 +10,22 @@ Rules:
 
 ## Current Round
 
-- Round: 1
+- Round: 1, reopened planning review on 2026-09-13
 - Current owner: Codex
 - Supervisor: Claude
-- Goal: merge Codex, Qwen, Gemini, Copilot, and Claude readouts into a shared cited synthesis
+- Active artifact: [review-round-1.md](review-round-1.md), Entries 5–10
+- Goal: reconcile the historical synthesis with accepted contract decisions and the paused WIRE/webhook SA/SD inventory before supervisor-led synthesis
+- Status: Codex cited feedback submitted; supervisor disposition pending; execution remains paused
+
+## Reopened Review Inputs
+
+The cited claims and proposed wording live in [review-round-1.md](review-round-1.md). They cover current planning authority (Entry 5), accepted state/ownership/topology decisions (Entry 6), WIRE authority and failure behavior (Entry 7), C111–C115 acceptance boundaries (Entry 8), the conflicting Q-001 cardinality records (Entry 9), and the P05 product decision/P06 environment evidence boundaries (Entry 10).
+
+The supervisor’s `product-remediation-sa-sd-20260913.md` now supplies the current P01–P06 inventory. Preserve its distinction between root’s restore regression, worker compatibility code, published candidate evidence, and unverified WIP. The supervisor must disposition these entries and obtain the remaining cited reviews before promoting a new synthesis. [AI_COLLABORATION_GUIDE.md](../../../../AI_COLLABORATION_GUIDE.md), §§4–5, governs convergence and human acceptance.
 
 ## Working Synthesis
+
+The text below is the preserved 2026-04-11 synthesis. Its wave order and open questions are historical inputs, not current assignments or a claim that later decisions remain unanswered. Apply the accepted-source corrections in Entry 6 and carry the explicit conflict in Entry 9 into the next synthesis.
 
 ### Scope
 
