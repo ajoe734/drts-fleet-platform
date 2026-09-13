@@ -187,3 +187,13 @@ advanced to 8 passing specs out of 10 (`users.spec.ts` passed completely).
 The only remaining 2 failures are the two concrete product defects reproduced
 above (`sla.spec.ts` and `invitation-mail.spec.ts`). Full QA acceptance closure
 is blocked pending the merge of their scoped repair subtasks.
+
+Run `34738341982` (job `103673642122`) on candidate `98200cddb129e72aaa6bc721e90798af2c9a0938`
+(PR #1973) reconfirmed 8 passing specs out of 10 with zero skips. The only
+failing specs remain the two verified product defects: `invitation-mail.spec.ts`
+(C021 NestJS DI injection issue) and `sla.spec.ts` (C028 cross-tenant header spoofing).
+Reviewer Gemini2 evaluated candidate `98200cddb129e72aaa6bc721e90798af2c9a0938`
+and reopened `SR-QA-TENANT-001` at 2026-09-13T06:38:54Z, confirming that CI failure
+is confined to these two external product defects. Next QA candidate handoff is
+held pending the implementation and merge of scoped repair subtasks
+`SR-QA-TENANT-001-FIX-SLA-CROSS-TENANT` and `SR-QA-TENANT-001-FIX-INVITATION-DELIVERY-DI`.
