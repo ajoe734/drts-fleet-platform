@@ -1,15 +1,15 @@
 # 產品剩餘問題與 SA／SD 討論稿（2026-09-13）
 
-狀態：SA／SD 技術審查已收斂，現行定稿提案見 [consensus-packet.md](consensus-packet.md) B1–B9／C；待使用者確認，未重新派實作。2026-09-13 最新使用者指示：**先做到能上線營運；一通電話只能一張訂單**。撤回本日稍早的多單提案，停止相應 schema／service／UI 擴充。
+狀態：SA／SD 技術審查已收斂，現行定稿提案見 [consensus-packet.md](consensus-packet.md) B1–B9／C；使用者已確認，正式派工已恢復。2026-09-13 最新使用者指示：**先做到能上線營運；一通電話只能一張訂單**。撤回本日稍早的多單提案，停止相應 schema／service／UI 擴充。
 
 使用者要求：「把問題先整理出來，我們做完 SA SD 後派工給 supervisor 跟 auto worker 來執行。」本文件承接既有任務與規格，不新增另一套派工流程。
 
 ## 1. 工作方式與目前現場
 
 - 本對話負責問題整理、SA／SD 討論與結果審查。發現缺陷時先記錄證據及修正要求，不再直接接手產品實作。
-- 已透過既有 `ai-status.sh mode discussion_planning` 切回規劃模式；supervisor 保持運行，實作 worker 已停止。
-- `SR-WIRE-001`、`SR-QA-WEBHOOK-001` 已記錄為使用者要求的 SA／SD 暫停。這個暫停不是 quota、權限或外部服務故障。
-- 現有工作樹已鎖定並保存 staged／unstaged 差異，不清除、不整批覆蓋、不把未完成修改提交成完成品。
+- 使用者確認後，已透過既有 `ai-status.sh mode supervisor_managed_execution` 恢復正式派工；supervisor 持續運行。
+- 原 SA／SD 暫停已解除。SR-WIRE-001 由 Gemini 實作、Codex review；Webhook 父任務改為等已登記的 schema／錄音／證照／harness 子任務後做整合驗收。
+- 規劃時已保存 staged／unstaged 差異；WIRE 原工作樹已解除暫停鎖供原任務續作，Webhook 舊 WIP 保留供子任務選取有效內容。不清除或整批覆蓋資料。
 - SA／SD 定案後由 supervisor 用既有任務指令派工，實作優先使用可用的 agy／Claude，Codex 負責獨立 review；不可因角色暫不可用而冒用其審查身分。
 - VM 僅執行 supervisor、worker 與允許的非服務型檢查。需啟動產品、HTTP receiver、資料庫或瀏覽器驗收的案例交給既有 hosted workflow／shared dev。
 
@@ -286,16 +286,18 @@ Gemini／Gemini2 已提交 Entries 20–25，但提交不代表方案已通過�
 
 本輪只校正會使首版修復做錯的設計前提，不擴張多單 UI、另建排程框架或改 supervisor。設計收斂後用既有任務派工，首版完成判準仍為 §5 的營運流程與原 hosted／live 驗收。
 
-## 4. 現行 18 項未完成任務與歷史紀錄對照
+## 4. 原任務與正式修復子任務對照
 
 這是任務數，不代表 18 個獨立程式缺陷。其餘已完成或已封存前置任務不重新建立。
+
+使用者確認後，原 18 項現行任務另拆出 4 個具體修復子項，現在是 **22 項現行任務＋2 筆歷史紀錄**。子項是 SR-LAUNCH-SCHEMA-20260913（共用 migration）、SR-RECORDING-RECOVERY-20260913（B6–B7）、SR-CREDENTIAL-EXPIRY-20260913（B4–B5）、SR-C115-HARNESS-20260913（B8）；狀態／依賴以 board 為準，下方保留拆分前的基線。
 
 更新：目前 board 有 20 筆非 done 紀錄，其中 **18 項是現行營運範圍的未完成任務，2 筆是保留的歷史紀錄**。多單任務已由使用者撤回；舊 tenant-binding 候選已由驗證完成的後續任務接替，父任務早已改依賴後續版本，且目前沒有 open task 依賴舊候選。兩筆都保留 blocked 以阻止重新派工，不是上線 blocker，也沒有冒充實作 done。下表保留原十九項基線，舊候選列明為歷史；證據及處置快照保存在 `.local/`。
 
 | 任務 | 數量 | 未完成原因／接續條件 |
 | --- | ---: | --- |
-| SR-WIRE-001 | 1 | P01–P03；目前按使用者要求暫停，等待 SA／SD |
-| SR-QA-WEBHOOK-001 | 1 | P04；目前按使用者要求暫停，等待 SA／SD |
+| SR-WIRE-001 | 1 | P01–P03；SA／SD 已確認，Gemini 實作／Codex review |
+| SR-QA-WEBHOOK-001 | 1 | P04；SA／SD 已確認，等待已登記的修復／harness 子項後進行最終整合驗收 |
 | SR-PUSH-001 | 1 | P05，接收端／裝置契約尚未決定 |
 | SR-QA-BOOKING-001 | 1 | 等 SR-PUSH-001，不能宣稱預約通知閉環已完成 |
 | SR-QA-NEWFEATURES-001 | 1 | 等 SR-WIRE-001 |

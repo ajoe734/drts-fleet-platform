@@ -196,3 +196,10 @@ This file is append-only. It records who owned the shared draft in each round an
 - Cleared active reviewer ownership using the existing board transaction/sync API. This prevents repeat planning dispatch through the existing empty-owner behavior; no tool implementation changed.
 - Stopped only duplicate Gemini planning run gemini-20260913T151242Z-9cc9b656. Product WIP, task/candidate states and discussion_planning mode remain preserved.
 - Await concrete SA/SD packet acceptance under the existing guide §5; execution after acceptance is already authorized. Public document publication is a separately pending question after automatic approval rejection.
+
+## User accepted current packet; formal execution resumed — 2026-09-13T15:31:32.328251+00:00
+
+- User message: 確認. This accepts the current finite SA/SD packet at c8865b11b after Gemini Entry 27. Existing authorization for supervisor/auto-worker implementation is applied; no additional execution approval requested.
+- Codex acted as the authorized supervisor operator through canonical assign/note/resume-blocked/reassign/mode commands. Registered four exact child scopes/dependency graphs before changing execution_mode to supervisor_managed_execution (consensus_status accepted).
+- WIRE: Gemini implements, Codex reviews; old failed candidate snapshot preserved, new candidate required. Original WIRE worktree unlocked without clearing WIP. Webhook parent retains all required acceptance and waits for its product/harness children.
+- Machine-specific command receipts are in .local/product-completion-20260913/approved-launch/. Public planning-document publication remains separately pending; no public push performed.

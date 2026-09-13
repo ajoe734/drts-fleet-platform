@@ -83,7 +83,7 @@ Q-SR-PUSH-001 只缺既有接收產品／服務及 passenger subject-to-device �
 
 ## C. supervisor 派工範圍與順序提案
 
-共識接受後使用既有任務 authority 註冊範圍／依賴，再派可用 agy／Claude 實作，Codex review。下列是具體 scope 提案，**不是已派工或已完成的 board 任務**。
+使用者確認後已透過既有 task commands 登記範圍／依賴，派可用 agy 實作、Codex review。WIRE 已恢復；新增 SR-LAUNCH-SCHEMA-20260913、SR-RECORDING-RECOVERY-20260913、SR-CREDENTIAL-EXPIRY-20260913、SR-C115-HARNESS-20260913。這是原修復工作拆分，沒有新增產品流程；狀態以 ai-status.json 為準。下表為已接受的 scope 邊界，精確檔案範圍已放入任務紀錄。
 
 | 原任務／必要修正 slice | 寫入範圍 | 次序／完成證據 |
 | --- | --- | --- |

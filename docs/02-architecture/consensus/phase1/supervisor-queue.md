@@ -1,6 +1,16 @@
 # Supervisor Queue
 
-This file is the live routing note for the pre-implementation discussion loop.
+This file records current execution routing and the preserved prior discussion loop.
+
+## Current execution routing — user confirmed 2026-09-13
+
+- User replied 確認 to the concrete current SA/SD packet; acceptance is complete. execution_mode is supervisor_managed_execution, consensus_status accepted. The planning notes below are historical routing evidence; do not reopen the same approval or review loop.
+- WIRE is assigned Gemini / Codex, resumes the preserved original worktree. SR-LAUNCH-SCHEMA-20260913 and SR-C115-HARNESS-20260913 are assigned Gemini2 / Codex and can run in parallel with WIRE.
+- SR-RECORDING-RECOVERY-20260913 follows the schema child. SR-CREDENTIAL-EXPIRY-20260913 follows schema and WIRE. SR-QA-WEBHOOK-001 waits for all four children before final integrated C111–C115 acceptance; its three acceptance keys are unchanged.
+- Read the approved packet using the explicit canonical/local path recorded in each task, because the fresh dev branch may still show April history. Implementers must not copy or publish the operational planning packet/state/logs to bypass the separate public-document publication hold.
+- P05 receiving-product/device information remains on its existing route. Withdrawn multi-order and superseded tenant repair remain historical holds, not launch blockers. No VM product servers/deployment.
+
+
 
 ## Active user-directed planning round — 2026-09-13
 
