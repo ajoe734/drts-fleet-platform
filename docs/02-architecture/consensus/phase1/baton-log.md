@@ -32,3 +32,15 @@ This file is append-only. It records who owned the shared draft in each round an
 - Findings: April execution handoff is historical; later accepted contracts refine the baseline; WIRE and webhook need explicit SA/SD acceptance boundaries; the supervisor’s newly available P01–P06 inventory is reviewed without promoting its proposals; P05 retains its existing human-decision route; Q-001 and V0082 record conflicting cardinality decisions
 - Next planning step: Claude dispositions Entries 5–10 and routes the current review order (`Claude2`, `Gemini`, `Gemini2`, `Copilot`, `Claude`). Ownership remains with Codex until the supervisor records a transition.
 - Scope: planning documents only. No execution task started or changed; no implementation commit, product server, or deployment. April's convergence entry is preserved as history, not reused as current authorization.
+
+### Round 1 follow-up — 2026-09-13
+
+- Supervisor: Claude
+- Baton owner: Codex (unchanged; the supervisor has not recorded a transition)
+- Basis: current planning dispatch; machine-truth snapshot remains `updated_at=2026-09-13T13:21:27Z`, `execution_mode=discussion_planning`, `discussion_loop.current_owner=Codex`.
+- Output: [review-round-1.md](review-round-1.md), Entries 11–12; synchronized current pointers in README, starter draft and supervisor queue. Preserved the concurrent Entry 9 user-resolution addendum and the queue's existing authorization clarification.
+- Status: review_submitted; supervisor dispositions for Entries 5–10 are acknowledged from inventory §3.5; further disposition, technical SD and cross-lane convergence remain pending.
+- Findings: Q-001's recorded 1:N user decision settles the product question; its implementation remains pending. The existing tenant runner provides useful API/SQL/restart infrastructure, but its tenant-only gates do not prove C113–C115 coverage. C115 retains recording recovery and credential-expiry/alert jobs, with actual triggers and durable pending-work sources still to be reviewed.
+- Evidence boundary: canonical specifications and read-only Git inspection at `6eec9635c17674b89b8519c642eb48b51dbd6479`; supervisor inventory observations remain attributed. No tests, hosted runs or live probes were executed by this follow-up.
+- Next planning step: supervisor dispositions Entries 11–12 and routes the existing review order. Use the user's existing supervisor/auto-worker execution direction after current SA/SD acceptance; do not repeat the authorization request.
+- Scope: documentation-only planning update on the existing planning branch. No task lifecycle or mode change, implementation commit, product runtime or deployment; historical consensus packet and round 2 preserved.

@@ -13,19 +13,19 @@ Rules:
 - Round: 1, reopened planning review on 2026-09-13
 - Current owner: Codex
 - Supervisor: Claude
-- Active artifact: [review-round-1.md](review-round-1.md), Entries 5–10
+- Active artifact: [review-round-1.md](review-round-1.md), Entries 5–12
 - Goal: reconcile the historical synthesis with accepted contract decisions and the paused WIRE/webhook SA/SD inventory before supervisor-led synthesis
-- Status: Codex cited feedback submitted; supervisor disposition pending; execution remains paused
+- Status: supervisor dispositions for Entries 5–10 recorded; Codex follow-up submitted; technical SD and cross-lane convergence pending; execution remains paused
 
 ## Reopened Review Inputs
 
-The cited claims and proposed wording live in [review-round-1.md](review-round-1.md). They cover current planning authority (Entry 5), accepted state/ownership/topology decisions (Entry 6), WIRE authority and failure behavior (Entry 7), C111–C115 acceptance boundaries (Entry 8), the conflicting Q-001 cardinality records (Entry 9), and the P05 product decision/P06 environment evidence boundaries (Entry 10).
+The cited claims and proposed wording live in [review-round-1.md](review-round-1.md). They cover current planning authority (Entry 5), accepted state/ownership/topology decisions (Entry 6), WIRE authority and failure behavior (Entry 7), C111–C115 acceptance boundaries (Entry 8), Q-001's historical conflict and appended 1:N user resolution (Entry 9), P05/P06 decision and evidence boundaries (Entry 10), supervisor dispositions (Entry 11), and capability-specific runner/recovery gates (Entry 12).
 
-The supervisor’s `product-remediation-sa-sd-20260913.md` now supplies the current P01–P06 inventory. Preserve its distinction between root’s restore regression, worker compatibility code, published candidate evidence, and unverified WIP. The supervisor must disposition these entries and obtain the remaining cited reviews before promoting a new synthesis. [AI_COLLABORATION_GUIDE.md](../../../../AI_COLLABORATION_GUIDE.md), §§4–5, governs convergence and human acceptance.
+The supervisor’s `product-remediation-sa-sd-20260913.md` supplies the current P01–P06 inventory and records dispositions for Entries 5–10 in §3.5. Preserve its distinction between root’s restore regression, worker compatibility code, published candidate evidence, and unverified WIP. Entries 11–12 refine the remaining technical SD and runner coverage; they are not accepted synthesis. The supervisor must disposition the follow-up and obtain the remaining cited reviews before promotion. [AI_COLLABORATION_GUIDE.md](../../../../AI_COLLABORATION_GUIDE.md), §§4–5, governs convergence and human acceptance, subject to the user's existing direction to route implementation through supervisor/auto workers after accepted SA/SD.
 
 ## Working Synthesis
 
-The text below is the preserved 2026-04-11 synthesis. Its wave order and open questions are historical inputs, not current assignments or a claim that later decisions remain unanswered. Apply the accepted-source corrections in Entry 6 and carry the explicit conflict in Entry 9 into the next synthesis.
+The text below is the preserved 2026-04-11 synthesis. Its wave order and open questions are historical inputs, not current assignments or a claim that later decisions remain unanswered. Apply the accepted-source corrections in Entry 6 and Q-001's recorded 1:N resolution in Entry 9 when preparing the next synthesis; cardinality implementation is still pending.
 
 ### Scope
 

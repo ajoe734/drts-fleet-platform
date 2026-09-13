@@ -3,11 +3,12 @@
 ## Current dispatch — 2026-09-13
 
 - Baton owner / reviewer lane: Codex; supervisor: Claude.
-- Status: cited review submitted for the reopened planning cycle; supervisor disposition pending.
+- Status: supervisor dispositions for Entries 5–10 are recorded in the inventory's §3.5; Codex follow-up in Entries 11–12 is submitted for further review. Technical SD and cross-lane convergence remain pending.
 - Entries 1–4 preserve the 2026-04-11 review. Their convergence does not authorize execution during the current planning pause.
 - Entries 5–10 review the historical synthesis against current canonical contracts and the supervisor's `product-remediation-sa-sd-20260913.md` P01–P06 inventory. Proposed wording below is not a newly accepted product decision or an execution assignment.
 - Evidence boundary: canonical source files and read-only task-board inspection. The board snapshot (`ai-status.json.updated_at=2026-09-13T13:21:27Z`) records `discussion_planning`, `discussion_loop.current_owner=Codex`, and both `SR-WIRE-001` and `SR-QA-WEBHOOK-001` as `blocked`. Reported test failures/WIP below are attributed to that board, not independently reproduced here.
 - The supervisor's inventory became available during review and was read before submission. It remains a discussion draft; its code, hosted-run, and live-environment observations are attributed evidence, not new verification by this dispatch.
+- Follow-up evidence: the inventory's second version and Q-001 update, §§3.1–3.7, and read-only Git inspection at `6eec9635c17674b89b8519c642eb48b51dbd6479` (the recorded `origin/dev` snapshot). Entries 11–12 distinguish inspected workflow source from a successful execution; no hosted workflow was dispatched.
 
 ## Entries
 
@@ -322,6 +323,10 @@ Proposed review matrix for the SA/SD inventory:
 
 - Which accepted decision record supports the conflicting one-order claim in V0082? Recover its provenance, or explicitly route the existing Q-001 conflict for human resolution through the canonical question board before implementation.
 
+#### User resolution recorded 2026-09-13
+
+The user explicitly confirmed: 「一通電話可建幾張訂單，允許可以建多張訂單阿」. The product rule is **one call to multiple orders (1:N)**. This resolves the decision question above and supersedes V0082's one-order interpretation; the historical review remains preserved. The existing `PHASE1_OPEN_QUESTIONS.md` Q-001 record and `product-remediation-sa-sd-20260913.md` §3.7 now carry the answer and the pending schema/contracts/service/UI work. This documentation update does not resume execution or claim that the database has been migrated.
+
 ### Entry 10 — Keep P05's product decision and P06's environment evidence distinct
 
 #### Metadata
@@ -356,9 +361,94 @@ Proposed review matrix for the SA/SD inventory:
 
 - P05's existing product/device decision remains pending. P06 needs role-correct environment verification in an authorized later dispatch. Neither removes the current planning pause or the original acceptance gates.
 
+### Entry 11 — Carry the supervisor's dispositions forward without declaring convergence
+
+#### Metadata
+
+- Reviewer lane: Codex
+- Target lane: Claude; Entries 5, 7–10; supervisor inventory §§3.1–3.7
+- Round: 1, reopened follow-up
+- Date: 2026-09-13
+
+#### Claim Under Review
+
+- The routing notes still say that all supervisor disposition is pending, while the second inventory records dispositions and narrows the unanswered technical questions.
+
+#### Review Outcome
+
+- `refine`: acknowledge the recorded dispositions, retain the remaining SD work, and correct the earlier wording that could imply a second execution-authorization request.
+
+#### Evidence
+
+- [Product remediation inventory](product-remediation-sa-sd-20260913.md), §§3.1–3.3, 3.5–3.7: the supervisor records dispositions for Entries 5–10, established WIRE error/eligibility rules, and outstanding Academy projection, contracts loading, and C115 job boundaries. The document explicitly remains a discussion draft.
+- [PHASE1_OPEN_QUESTIONS.md](../../../../PHASE1_OPEN_QUESTIONS.md), Resolved Items / Q-001 and Contract & Schema Synchronisation Backlog, updated during this follow-up: the recorded 2026-09-13 user decision confirms one call to multiple orders (1:N). Entry 9's appended resolution preserves this update; implementation remains pending.
+- [AI_COLLABORATION_GUIDE.md](../../../../AI_COLLABORATION_GUIDE.md), §§2, 4–5: latest user direction controls the process; a lane's disposition is distinct from completed cross-review and accepted consensus. `ai-status.json.discussion_loop` still names Codex as owner and retains the five-lane review order.
+- [Service Contracts](../../../../phase1_service_contracts_v1.md), §§2.5, 7.1: source-of-truth owners remain authoritative. The inventory's P01 background-persistence observation is a separate durability concern, not evidence that the five previously reported WIRE test failures have a new cause.
+
+#### Impact On Consensus
+
+| Prior review                | Follow-up disposition to carry forward                                                                                                                                                         | Still required before synthesis                                                                                                                                                                                                    |
+| --------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Entry 5: planning authority | Record that the supervisor has responded. The user's existing instruction already directs supervisor/auto-worker execution after accepted SA/SD; do not ask again for that same authorization. | Record acceptance of the current SA/SD and the supervisor's later mode/baton transition. April convergence cannot supply either.                                                                                                   |
+| Entry 7: WIRE P01–P03       | Use §3.1's established guards and error cases; preserve the root restore-regression attribution. Treat async completion and successful persistence as separate obligations.                    | Identify the persistence acknowledgement/failure boundary and shared caller impact; settle Academy's authoritative operation/projection consistency and the contracts-loading root cause. Keep the original full WIRE acceptance.  |
+| Entry 8: webhook P04        | Carry §3.4's input → authority → state → persistence → receipt matrix. C115 means recording recovery and credential-expiry work.                                                               | Review the concrete trigger and durable pending-work source for each C115 job; review runner gates in Entry 12.                                                                                                                    |
+| Entry 9: Q-001              | Carry the recorded user resolution: one call may create multiple orders (1:N). V0082's one-order interpretation is superseded; do not ask the product question again.                          | Schema/contracts/service/UI alignment, distinct creation-intent idempotency, multi-order recording linkage, and data-preserving verification need technical SD and supervisor routing. This review does not perform those changes. |
+| Entry 10: P05, P06          | Preserve the Q-SR-PUSH-001 route and use the accepted realm matrix for environment checks. Q-001 does not select a passenger push topology.                                                    | The passenger receiving-product/device decision and role-correct live evidence remain pending and distinct.                                                                                                                        |
+
+- Suggested routing wording: “Entries 5–10 have supervisor dispositions in inventory §3.5. Entries 11–12 refine the remaining technical SD and runner evidence requirements. Codex remains the recorded owner; further cited review and current-packet acceptance remain pending. Once the accepted design satisfies the gate, use the user's existing direction to route implementation through supervisor and auto workers.”
+- The inventory remains supervisor-owned and untracked in the shared checkout at this inspection. Its publication and transfer of accepted additions into canonical specifications remain pending; this review preserves its relevant dispositions without presenting it as a published consensus packet.
+
+#### Remaining Question
+
+- Technical SD and the existing product-decision route still need their stated outputs. The supervisor should route the next cited review; this entry neither changes machine truth nor self-approves the packet.
+
+### Entry 12 — Reuse the tenant runner only with explicit capability and recovery gates
+
+#### Metadata
+
+- Reviewer lane: Codex
+- Target lane: Claude2 / Gemini / Gemini2; Entry 8; supervisor inventory §§3.2, 3.4
+- Round: 1, reopened follow-up
+- Date: 2026-09-13
+
+#### Claim Under Review
+
+- The existing `tenant-uat-acceptance.yml` can host controlled C113–C115 verification, and C115 must retain its recording/credential scope.
+
+#### Review Outcome
+
+- `confirm` the C115 correction; `refine` runner reuse as a feasible source-backed proposal whose current pass gate does not verify webhook coverage.
+
+#### Evidence
+
+- [Capability inventory](../../../04-uat/system-remediation-20260906/source/capabilities.json), `ID=C113`, `C114`, `C115`: C113 names ERP/enterprise SSO/bank synchronization; C114 names real geocoding/routing/ETA; C115 names recording and credential preservation, background recovery, expiry scans, alert receipts, backlog, restart and catch-up. A dispatch timeout cannot substitute for C115.
+- [Service Contracts](../../../../phase1_service_contracts_v1.md), §§3.9, 3.13, 5.2, 6.2: Callcenter owns recording indexes; Audit/Notification owns delivery records; recording reconciliation uses calls and persisted state, not an assumed event bus. [Acceptance scenarios](../../../../phase1_llm_dev_pack_extracted/phase1_llm_dev_pack/02_acceptance_scenarios_gherkin.md), SC-003–004, SC-024–025, and [API examples](../../../../phase1_llm_dev_pack_extracted/phase1_llm_dev_pack/03_api_examples_and_error_contracts.md), §3.16, require recording linkage/idempotency and independent expiry guards.
+- [Tenant runner](../../../../.github/workflows/tenant-uat-acceptance.yml), `acceptance` job / candidate validation, `build_api`, `seed`, `restart_api`, `restart_readback`, `gate`, and `Record run status`, inspected at `6eec9635c17674b89b8519c642eb48b51dbd6479`: it validates a full candidate SHA, builds the real API, creates tenant A/B sessions, replaces the API process without resetting PostgreSQL, and records candidate/workflow SHAs. Its gate filters `sr-qa-tenant-001`, requires at least 10 HTTP tests and eight named tenant spec files, at least 27 unit tests, and at least 12 restart readbacks. It contains no C113–C115 completeness gate.
+- At that same snapshot, [transport runner](../../../../.github/workflows/webhook-transport-acceptance.yml), `Run hosted receiver acceptance`, and [tenant-binding runner](../../../../.github/workflows/tenant-binding-acceptance.yml), `Run full AppModule two-tenant JWT HTTP/SQL acceptance harness`, provide distinct reusable verification paths. The tree has no `webhook-uat-acceptance.yml`. This is file inspection, not a new statement about any run result or current cloud readiness.
+
+#### Impact On Consensus
+
+Proposed runner acceptance contract, for supervisor disposition before any scope change:
+
+| Boundary                  | Required design refinement                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
+| ------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Existing tenant coverage  | Preserve all existing tenant spec-file, count, zero-skip, restart and run-status gates. Passing these gates alone cannot certify any new webhook cases.                                                                                                                                                                                                                                                                                                                                |
+| Added capability coverage | Define an explicit C111–C115 case manifest with positive/negative cases, each case's authority, candidate SHA, verification layer and evidence reference. Fail the relevant acceptance result when a required case/report is absent, skipped or unsuccessful. Keep all three parent `required_acceptance` keys.                                                                                                                                                                        |
+| C115 process recovery     | For recording recovery and credential expiry separately, capture pending resource IDs before stopping the responsible process, accumulate due work while it is stopped, start a replacement against the retained DB, invoke the actual recovery path, and verify the same IDs plus alert/delivery outcomes. Repeating the trigger must not duplicate business effects. Identify the responsible job process; restarting only the API is sufficient only if it actually hosts that job. |
+| Domain-specific readback  | Extend readback beyond the tenant resources: call/recording/order linkage and compliance flags; credential/vehicle eligibility and alert/delivery IDs. The existing tenant readback count is not a proxy for these results.                                                                                                                                                                                                                                                            |
+| Evidence layers           | Keep controlled adapter/receiver results separate from genuine provider, deployed-scheduler and alert receipts. Record workflow SHA as well as candidate SHA when evidence spans runners; historical fixed-candidate results cannot be attributed to a later candidate. Missing external receipts keep the parent gate open.                                                                                                                                                           |
+| Future edit scope         | Reuse is a proposal for the existing QA task. Before implementation, the supervisor must specify the workflow, verifier, fixtures and readback files and preserve the tenant owner's coverage. Product repair, if established, needs its own authorized scope; the QA task must not repair business services silently.                                                                                                                                                                 |
+
+- Suggested synthesis wording: “The existing tenant runner supplies useful full-API/SQL and process-replacement infrastructure. It does not yet supply C113–C115 cases or their pass gate. Reuse requires explicit capability coverage and domain readback while preserving the tenant suite. C115 retains recording recovery and credential-expiry/alert jobs, whose concrete triggers and durable pending-work sources must be settled before implementation.”
+- The VM restriction remains in force. This follow-up reads workflow definitions only; it creates no runner, provider adapter, scheduler, migration or execution task.
+
+#### Remaining Question
+
+- Locate and review the actual trigger, persistence and receipt path for both C115 jobs, then settle the smallest runner extension. The inventory's §3.6 still records this as technical SD work; neither credentials nor a green tenant-only run can answer it.
+
 ## Reopened-cycle disposition
 
-- Codex review: submitted (Entries 5–10); P01–P06 have cited review coverage; cross-lane acceptance and final synthesis remain pending.
-- Claude's next planning action: disposition each entry as accepted/refined/rejected with citations, settle the identified SA/SD outputs, retain the existing P05 human-decision route and Q-001 conflict, and route further review using `ai-status.json.discussion_loop.review_order`.
+- Codex review: submitted (Entries 5–12). The inventory's §3.5 records supervisor dispositions for Entries 5–10; Entries 11–12 acknowledge that progress and refine the remaining SD and runner gates. Cross-lane acceptance and final synthesis remain pending.
+- Claude's next planning action: disposition Entries 11–12, settle the identified technical SD outputs, retain P05's existing human-decision route and Q-001's confirmed 1:N rule with implementation still pending, publish the supervisor-owned inventory through its normal document flow, and route further cited review using `ai-status.json.discussion_loop.review_order`.
 - Preserve the historical `consensus-packet.md` and `review-round-2.md` until that disposition. Their April convergence statements are not closure of this reopened cycle.
 - Continue `discussion_planning`; no task lifecycle transition, implementation commit, deployment, or product runtime was initiated by this review.
