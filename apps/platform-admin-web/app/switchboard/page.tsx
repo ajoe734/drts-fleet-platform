@@ -49,7 +49,9 @@ import {
   formatPlacardSourceOptionLabel,
   getPlacardSourceSelectionHint,
   getPreferredPlacardSourceVersion,
+  getPreferredLivePlacard,
   getPlacardRetiredSourceAuditNote,
+  isArtifactExpired,
   isPlacardSourceSelectionBlocked,
 } from "./placard-source";
 
@@ -403,6 +405,9 @@ export default function SwitchboardPage() {
             `Current placard · ${code} (source ${src})`,
           placardPreviewEmpty: "No placard generated yet.",
           downloadPdf: "Download PDF",
+          placardExpired: "Expired",
+          placardLinkExpired: "Link expired",
+          sourceRetired: "Source retired",
           generatePlacard: "Generate placard",
           placardListTitle: "Placard versions",
           placardListSubtitle: "Seat-back artifacts traced to a source version",
@@ -499,6 +504,9 @@ export default function SwitchboardPage() {
             `目前發行牌貼 · ${code}（來源 ${src}）`,
           placardPreviewEmpty: "目前尚未產生牌貼。",
           downloadPdf: "下載牌貼檔",
+          placardExpired: "已過期",
+          placardLinkExpired: "連結已過期",
+          sourceRetired: "來源已停用",
           generatePlacard: "產生新牌貼",
           placardListTitle: "牌貼版本",
           placardListSubtitle: "每張牌貼皆可追溯到來源公開資訊版本",
@@ -615,11 +623,8 @@ export default function SwitchboardPage() {
   );
 
   const livePlacard = useMemo(
-    () =>
-      placards.find((placard) => placard.publishedAt != null) ??
-      placards[0] ??
-      null,
-    [placards],
+    () => getPreferredLivePlacard(placards, publicInfoById),
+    [placards, publicInfoById],
   );
 
   const livePlacardSource = livePlacard
@@ -1007,24 +1012,42 @@ export default function SwitchboardPage() {
     {
       h: copy.colArtifact,
       w: 200,
-      r: (row) => (
-        <div style={cellStackStyle}>
-          <span style={monoCellStyle}>
-            {row.artifactFileId ??
-              getPlatformLabel(locale, "pendingArtifactId")}
-          </span>
-          {row.artifactDownloadUrl ? (
-            <a
-              href={row.artifactDownloadUrl}
-              target="_blank"
-              rel="noreferrer"
-              style={{ color: th.accent, fontSize: 11.5 }}
-            >
-              {copy.downloadPdf}
-            </a>
-          ) : null}
-        </div>
-      ),
+      r: (row) => {
+        const isExpired = isArtifactExpired(row.artifactDownloadUrl);
+        const source = publicInfoById[row.publicInfoVersionId];
+        const isRetired = source?.status === "retired";
+
+        return (
+          <div style={cellStackStyle}>
+            <span style={monoCellStyle}>
+              {row.artifactFileId ??
+                getPlatformLabel(locale, "pendingArtifactId")}
+            </span>
+            {row.artifactDownloadUrl ? (
+              <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
+                <a
+                  href={row.artifactDownloadUrl}
+                  target="_blank"
+                  rel="noreferrer"
+                  style={{ color: th.accent, fontSize: 11.5 }}
+                >
+                  {copy.downloadPdf}
+                </a>
+                {isExpired ? (
+                  <CanvasPill theme={th} tone="warn" dot>
+                    {copy.placardExpired}
+                  </CanvasPill>
+                ) : null}
+                {isRetired ? (
+                  <CanvasPill theme={th} tone="danger" dot>
+                    {copy.sourceRetired}
+                  </CanvasPill>
+                ) : null}
+              </div>
+            ) : null}
+          </div>
+        );
+      },
     },
     {
       h: copy.colStatus,
@@ -1304,7 +1327,7 @@ export default function SwitchboardPage() {
                       </div>
                     </div>
                   </div>
-                  <div style={{ display: "flex", gap: 8, marginTop: 12 }}>
+                  <div style={{ display: "flex", gap: 8, marginTop: 12, alignItems: "center", flexWrap: "wrap" }}>
                     {livePlacard.artifactDownloadUrl ? (
                       <a
                         href={livePlacard.artifactDownloadUrl}
@@ -1326,6 +1349,16 @@ export default function SwitchboardPage() {
                         {copy.downloadPdf}
                       </CanvasBtn>
                     )}
+                    {isArtifactExpired(livePlacard.artifactDownloadUrl) ? (
+                      <CanvasPill theme={th} tone="warn" dot>
+                        {copy.placardLinkExpired}
+                      </CanvasPill>
+                    ) : null}
+                    {livePlacardSource?.status === "retired" ? (
+                      <CanvasPill theme={th} tone="danger" dot>
+                        {copy.sourceRetired}
+                      </CanvasPill>
+                    ) : null}
                     <DescriptorButton
                       descriptor={generateOpenDescriptor}
                       label={copy.generatePlacard}
