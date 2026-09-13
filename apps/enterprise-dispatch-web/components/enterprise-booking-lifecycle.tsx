@@ -637,12 +637,9 @@ export function EnterpriseBookingDetail({
 }: {
   bookingId: string;
   // Optional: callers that have already verified a tenant session (see
-  // app/bookings/page.tsx's EnterpriseBookingHistory usage) should pass the
+  // app/bookings/page.tsx and app/bookings/[bookingId]/page.tsx) pass the
   // real session tenantId here. When omitted this falls back to the fixture
-  // demo tenant id — a known gap tracked in
-  // docs/04-uat/system-remediation-20260906/SR-ENTERPRISE-DATA-001.md,
-  // since closing it requires editing app/bookings/[bookingId]/page.tsx,
-  // which is outside this task's write_scopes.
+  // demo tenant id.
   tenantId?: string;
 }) {
   const { t: tr } = useTranslation();

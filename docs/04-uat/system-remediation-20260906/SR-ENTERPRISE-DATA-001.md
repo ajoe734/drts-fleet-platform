@@ -133,46 +133,26 @@ phone. `required_acceptance` item
 partially met (support contact is real and actionable; driver contact is
 honestly unavailable, not faked) until that follow-up producer exists.
 
-## Known gap not fixed: booking-detail direct-link tenant scoping
+## Fixed: booking-detail direct-link tenant scoping and CI test-coverage wiring
 
-`EnterpriseBookingDetail` (`components/enterprise-booking-lifecycle.tsx`)
-still resolves its API tenant context as `tenantId ?? enterpriseTenant.id`
-when no `tenantId` prop is supplied. `app/bookings/[bookingId]/page.tsx` (the
-only current caller) does not verify the tenant session or pass a `tenantId`
-prop — unlike `app/bookings/page.tsx`, which verifies
-`verifyEnterpriseTenantSession` and passes the verified tenantId into
-`EnterpriseBookingHistory`. `enterpriseTenant.id` happens to equal the real
-seeded demo tenant UUID (`10000000-0000-0000-0000-000000000201`, see
-`infra/seeds/S0002__demo_operational_seed.sql`), so in the current
-single-demo-tenant deployment this does not point at the wrong tenant's data.
-It does, however, mean the direct `/bookings/{id}` route does not itself
-enforce that the caller has a valid tenant session before issuing the API
-call. Fixing this requires editing `app/bookings/[bookingId]/page.tsx` to add
-the same session-verify-and-pass-prop pattern as `app/bookings/page.tsx` —
-that file is not in this task's `write_scopes` (`append_write_scopes` for
-this recovery only lists `components/enterprise-booking-lifecycle.tsx`, not
-its page wrapper). `EnterpriseBookingDetail` was given an optional `tenantId`
-prop so a future task can close this by editing only the page wrapper. Not
-claiming this as done; flagging for supervisor scope follow-up.
+Following supervisor authorization of the expanded `write_scopes` on 2026-09-13:
 
-**This gap is no longer only theoretical.** PR #1984's real browser-acceptance
-run on candidate `cbb985688d774b2b179d27baf6e267b0aa074356`
-(`gh run view 34579973654`) proves it: the seed script creates a fresh
-random-UUID tenant (never `10000000-0000-0000-0000-000000000201`), so
-`/bookings/{id}` always resolves the wrong tenant context in that real
-environment, and both scenarios that visit `/bookings/{bookingId}` directly
-fail — `enterprise-booking-detail-id` never becomes visible for the real
-seeded booking, and `enterprise-booking-not-found` never becomes visible for
-the genuinely-missing one (4/6 scenarios still passed: identity via
-home/trip, driver/support contact actions, help page actions, and the
-zero-booking empty state, none of which hit this route). Closing
-`required_acceptance` item `enterprise_booking_identity_empty_and_error_ui`
-therefore requires `apps/enterprise-dispatch-web/app/bookings/[bookingId]/page.tsx`
-to be added to this task's `write_scopes` so it can get the same
-`verifyEnterpriseTenantSession` + `tenantId` prop pattern as
-`app/bookings/page.tsx` (mirrors the exact fix already applied to `app/page.tsx`
-and `app/trip/page.tsx` in this same task). Not editing it without that
-authorization.
+1. **Booking-detail direct-link tenant scoping**:
+   `apps/enterprise-dispatch-web/app/bookings/[bookingId]/page.tsx` now verifies
+   the `drts_tenant_session` cookie via `verifyEnterpriseTenantSession` (matching
+   `app/bookings/page.tsx`, `app/page.tsx`, and `app/trip/page.tsx`), renders
+   `EnterpriseGatePage kind="auth-required"` for unauthenticated requests, and
+   passes the verified `tenantId` into `EnterpriseBookingDetail(bookingId, tenantId)`.
+   This resolves the root cause of the two CI browser acceptance test failures
+   (where direct `/bookings/{id}` previously defaulted to `enterpriseTenant.id`
+   and triggered 403 `TENANT_SCOPE_MISMATCH` when queried with a session from a
+   newly seeded random tenant).
+
+2. **CI test-coverage wiring**:
+   `tools/ci/test_enterprise_data_acceptance_workflow.py` is now added to the
+   explicit unittest list in both `.github/workflows/ci.yml` and
+   `.github/workflows/ci-integ.yml`. `python3 tools/ci/check_test_coverage.py`
+   now succeeds with exit code 0 (`all 72 test files yield tests CI runs`).
 
 ## Local verification
 
@@ -186,6 +166,7 @@ task's VM restriction).
 | --- | --- |
 | `git diff --check` | exit 0 |
 | `python3 tools/ci/git/check_canonical_consistency.py --ci --base origin/dev --head HEAD` | `[consistency] OK` (0 findings, all 4 sub-checks) |
+| `python3 tools/ci/check_test_coverage.py` | exit 0 (`all 72 test files yield tests CI runs`) |
 | `python3 -m unittest tools.ci.test_enterprise_data_acceptance_workflow -v` | 13/13 passed |
 | `python3 -c "import yaml; yaml.safe_load(open('.github/workflows/enterprise-data-acceptance.yml'))"` | parses; `jobs: ['browser-acceptance']` |
 | `node --check tests/e2e/system-remediation/sr-enterprise-data-001/enterprise-data-browser-server.mjs` | exit 0 |
@@ -309,33 +290,13 @@ prove), following `SR-ENTERPRISE-SEARCH-001`'s
 
 ## Explicitly not done (do not treat as complete)
 
-- **This candidate has not run green in GitHub Actions.** Candidate
-  `cbb985688d774b2b179d27baf6e267b0aa074356`'s real browser-acceptance run
-  (`gh run view 34579973654`) got past the seed step (the FK bug is fixed)
-  and 4 of 6 scenarios passed for real over real HTTP/Postgres/Chromium:
-  list→home→trip identity via the dashboard summary, the honest
-  disabled-driver/real-support-contact trip actions, the help-page tel/mailto
-  actions, and the zero-booking empty state. The remaining 2 scenarios
-  (booking-detail identity for a real booking; honest not-found for a missing
-  one) fail because of the pre-existing, already-documented
-  "booking-detail direct-link tenant scoping" gap above — not a regression
-  from this pass, but a real, CI-proven blocker for
-  `required_acceptance` item `enterprise_booking_identity_empty_and_error_ui`.
-  Also blocking: the repo-wide `tools/ci/check_test_coverage.py` gate fails
-  because `tools/ci/test_enterprise_data_acceptance_workflow.py` was never
-  wired into `.github/workflows/ci.yml` / `ci-integ.yml`'s explicit
-  `python3 -m unittest tools/ci/test_X.py` step list (see "CI failure found
-  and fixed" — that section covers the seed-script bug this doc's own commit
-  fixed; this test-coverage gate is a separate, still-open failure). Neither
-  fix can be made from this task's current `write_scopes`; both are recorded
-  as explicit scope requests in the task's machine-truth `progress` history.
-  Until both are authorized, applied, and this candidate SHA (or its
-  successor) runs fully green, do not record acceptance evidence from this
-  doc alone.
+- **Awaiting real GitHub Actions CI verification on this candidate.** Both the
+  booking-detail session scoping gap and the CI test-coverage wiring have been
+  implemented and locally verified. Pushing this candidate will trigger both the
+  standard CI suites and the `enterprise-data-acceptance` workflow. Until those
+  runs complete green, do not record acceptance evidence from local checks alone.
 - Driver contact remains honestly unavailable (see above) — not full
   acceptance for that half of `enterprise_authorized_driver_and_support_contact_actions`.
-- The booking-detail direct-link tenant-session gap (see above) is not fixed;
-  it is now the proven root cause of 2/6 real acceptance scenario failures.
 - No physical device / production traffic verification of any kind.
 - Owner does not self-approve: independent reviewer, this exact candidate's
   CI, and merge to `dev` are still required before `done`.
