@@ -179,8 +179,16 @@ describe("SR-OPS-CAPACITY-RUNNER-20260911 real capacity + durable readback accep
                 "idempotency-key": `${runTag}-seed-${index}`,
               },
               body: JSON.stringify({
-                pickup: { address: `SR-OPS-CAPACITY seed pickup ${index}` },
-                dropoff: { address: `SR-OPS-CAPACITY seed dropoff ${index}` },
+                pickup: {
+                  address: `SR-OPS-CAPACITY seed pickup ${index}`,
+                  lat: 25.042,
+                  lng: 121.552,
+                },
+                dropoff: {
+                  address: `SR-OPS-CAPACITY seed dropoff ${index}`,
+                  lat: 25.045,
+                  lng: 121.555,
+                },
                 passenger: {
                   name: `SR-OPS-CAPACITY seed passenger ${index}`,
                   phone: `08${String(index % 100000000).padStart(8, "0")}`,
