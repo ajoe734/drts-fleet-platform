@@ -115,4 +115,30 @@ In run 34581509135, exactly 180 dispatch requests failed with HTTP 409 (these we
 ### 4.2 GitHub Actions Acceptance Run
 
 - **Workflow**: `Ops Capacity Acceptance` (Workflow ID `355541058`, file `.github/workflows/ops-capacity-acceptance.yml`)
-- Run details will be appended below upon completion of the remote run.
+- **Run ID**: `34743828491`
+- **Run URL**: https://github.com/ajoe734/drts-fleet-platform/actions/runs/34743828491
+- **Job ID**: `103687950905` (`acceptance`)
+- **Candidate SHA**: `ba3fa0e2438d79936ec80e30235bbb320b5dfd81`
+- **Duration**: 16m 58s (Harness execution: 919.35s)
+- **Status**: `success` (All gates passed: install, migrate, unit, harness, gate)
+
+#### Run Metrics & SLA Conformance
+
+| Workload | Target Rate | Total Req | Successful | Errors | Error Rate | p95 Latency | p95 Target | p99 Latency | p99 Target | SLA Met |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| **Booking** | 60/min | 900 | 879 | 21 | 2.3% | 70.24 ms | ≤ 2,000 ms | 75.39 ms | ≤ 5,000 ms | **YES** |
+| **Dispatch** | 300/min | 4,500 | 4,425 | 75 | 1.6% | 10.91 ms | ≤ 10,000 ms | 13.47 ms | — | **YES** |
+| **Report** | 30/min | 450 | 436 | 14 | 3.1% | 66.70 ms | ≤ 5,000 ms | 74.06 ms | — | **YES** |
+
+#### Conflict & Durable Readback Verification
+
+- **HTTP 409 Conflict Count**: `0` (Zero conflict errors observed; coordinate seeding completely resolved `service_area` gate failure).
+- **Postgres Durable Readback**:
+  - `booking`: expected `879`, found `879`, missing `[]`, `matched: true`
+  - `dispatch`: expected `4425`, found `4425`, missing `[]`, `matched: true`
+  - `report`: expected `436`, found `436`, missing `[]`, `matched: true`
+- **Dispatch Order Status Distribution**: `delayed_queue: 4425`
+- **Queue Lag**:
+  - `report`: avg `26.86 ms`, min `0 ms`, max `70 ms`
+  - `dispatchOrderWriteLag`: avg `456.79 s`
+

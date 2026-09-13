@@ -138,3 +138,14 @@ Both issues were resolved in `SR-API-THROTTLE-BASELINE-20260911`:
 - Pre-provisioned seed orders updated to include valid Taipei Core coordinates.
 - Full details documented in `docs/04-uat/system-remediation-20260906/SR-API-THROTTLE-BASELINE-20260911.md`.
 
+### Run 34743828491 Execution Evidence
+
+- **Workflow**: `Ops Capacity Acceptance` (Workflow ID `355541058`)
+- **Run URL**: https://github.com/ajoe734/drts-fleet-platform/actions/runs/34743828491
+- **Candidate SHA**: `ba3fa0e2438d79936ec80e30235bbb320b5dfd81`
+- **Result**: All gates passed (`status: passed`).
+  - Booking: 879/900 successful (2.3% error rate, p95 70.2ms ≤ 2,000ms SLA, p99 75.4ms ≤ 5,000ms SLA, 879/879 durable readback match)
+  - Dispatch: 4,425/4,500 successful (1.6% error rate, p95 10.9ms ≤ 10,000ms SLA, 0 HTTP 409 conflicts, 4,425/4,425 durable readback match)
+  - Report: 436/450 successful (3.1% error rate, p95 66.7ms ≤ 5,000ms SLA, 436/436 durable readback match)
+
+
