@@ -1849,7 +1849,9 @@ export class TenantPartnerController {
     @Headers("authorization") authorizationHeader?: string,
     @Headers("x-tenant-id") tenantId?: string,
     @Headers("x-request-id") requestId?: string,
+    @Headers("idempotency-key") idempotencyKey?: string,
   ) {
+    void idempotencyKey;
     const rawKey =
       command?.apiKey ||
       apiKeyHeader ||
@@ -1886,7 +1888,9 @@ export class TenantPartnerController {
     @Headers("authorization") authorizationHeader?: string,
     @Headers("x-tenant-id") tenantId?: string,
     @Headers("x-request-id") requestId?: string,
+    @Headers("idempotency-key") idempotencyKey?: string,
   ) {
+    void idempotencyKey;
     const rawKey =
       command?.apiKey ||
       apiKeyHeader ||
