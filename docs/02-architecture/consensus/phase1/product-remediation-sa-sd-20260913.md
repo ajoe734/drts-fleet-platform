@@ -1,6 +1,6 @@
 # 產品剩餘問題與 SA／SD 討論稿（2026-09-13）
 
-狀態：SA／SD 討論中，未重新派實作。2026-09-13 最新使用者指示：**先做到能上線營運；一通電話只能一張訂單**。撤回本日稍早的多單提案，停止相應 schema／service／UI 擴充。
+狀態：SA／SD 技術審查已收斂，現行定稿提案見 [consensus-packet.md](consensus-packet.md) B1–B9／C；待使用者確認，未重新派實作。2026-09-13 最新使用者指示：**先做到能上線營運；一通電話只能一張訂單**。撤回本日稍早的多單提案，停止相應 schema／service／UI 擴充。
 
 使用者要求：「把問題先整理出來，我們做完 SA SD 後派工給 supervisor 跟 auto worker 來執行。」本文件承接既有任務與規格，不新增另一套派工流程。
 
@@ -282,7 +282,7 @@ handler 對已完成的封存引用先驗證及回讀，再接原錄音狀態路
 
 ### 3.13 跨審後的程式來源校正
 
-Gemini／Gemini2 已提交 Entries 20–25，但提交不代表方案已通過。root 重新讀取相同基準後，將具體矛盾列在 [review-round-1.md](review-round-1.md) Entry 26，交 Copilot／Claude 一次處置：現有保險與 call session 資料表、Academy expired／pending／waived 邊界、failed work 真正補跑、既有 lease 欄位與安全 drain、保留 booking handler、close-event 原子性，以及沿原 MailOutbox 的持久交付意圖／不確定投遞結果。擬新增的 adapter／migration 必須明列為修正範圍，不能當成現有實作。
+Gemini／Gemini2 已提交 Entries 20–25，但提交不代表方案已通過。root 重新讀取相同基準後，將具體矛盾列在 [review-round-1.md](review-round-1.md) Entry 26，由現行 consensus-packet.md B1–B9 具體處置並經 Gemini Entry 27 核對：現有保險與 call session 資料表、Academy expired／pending／waived 邊界、failed work 真正補跑、既有 lease 欄位與安全 drain、保留 booking handler、close-event 原子性，以及沿原 MailOutbox 的持久交付意圖／不確定投遞結果。擬新增的 adapter／migration 必須明列為修正範圍，不能當成現有實作。
 
 本輪只校正會使首版修復做錯的設計前提，不擴張多單 UI、另建排程框架或改 supervisor。設計收斂後用既有任務派工，首版完成判準仍為 §5 的營運流程與原 hosted／live 驗收。
 

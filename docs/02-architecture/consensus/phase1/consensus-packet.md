@@ -1,6 +1,6 @@
 # 首版營運 SA／SD 定稿提案 — 2026-09-13
 
-狀態：root 完成具體整合方案，待派出的 agy reviewer 核對；尚未標記共識接受、產品完成或可上線。這是本轮現行提案，文末 2026-04-11 封包保留為歷史。
+狀態：root 完成具體整合方案，agy reviewer (Gemini) 已於 review-round-1.md Entry 27 完成來源核對並接受 B1–B9/C/D；待人類進行共識接受授權；尚未標記產品完成或可上線。這是本輪現行提案，文末 2026-04-11 封包保留為歷史。
 
 使用者決策：先做到能夠上線營運；**一通電話最多一張訂單**。本對話整理 SA／SD 和審查，supervisor／auto worker 實作。下列方案沿既有服務、資料權威及驗收流程修復；來源查核基準是 `6eec9635c17674b89b8519c642eb48b51dbd6479`。
 
@@ -98,7 +98,7 @@ migration 名稱及共享 contract allocation 由既有 schema owner 在派工�
 
 ## D. 仍須取得的結果
 
-1. agy reviewer 核對 B1–B9 與 Entry 26 的處置，再由本對話確認使用者所要求的 SA／SD 討論結果；不能沿用 April 的接受紀錄。
+1. agy reviewer (Gemini) 已於 review-round-1.md Entry 27 完成來源核對並接受 B1–B9 與 Entry 26 的處置；待由本對話人類確認並授權接受本輪共識封包，不能沿用 April 的接受紀錄。
 2. 實作／review／hosted／live 證據尚未產出，不宣稱已達可上線營運。P05 與真實服務驗收資料各留具體 blocker，不阻止獨立修復／查核。
 3. 本輪 SA／SD 公開推送遭 automatic approval review 拒絕，正在詢問使用者本次文件公開授權。文件可本機審查及 anchor；不得以另一個 worker／PR 繞過。SA／SD 接受後的 supervisor／auto-worker 執行已有使用者指示，不再重問相同執行授權。
 
