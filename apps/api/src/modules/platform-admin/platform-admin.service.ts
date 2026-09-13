@@ -2,7 +2,16 @@ import { createHash, randomUUID } from "node:crypto";
 
 import { HttpStatus, Injectable, OnModuleInit, Optional } from "@nestjs/common";
 
+import {
+  AdapterType,
+  CredentialStatus,
+  Environment,
+  FinanceAuthorityMode,
+  RolloutStatus,
+} from "@drts/contracts";
 import type {
+  AdapterCredentialExpiry,
+  AdapterCredentialExpiryWarning,
   AuditLogRecord,
   CanonicalAccountStatus,
   CanonicalIdentityMembershipRecord,
@@ -12,8 +21,11 @@ import type {
   CreatePlatformAdminUserCommand,
   CreatePlatformNoticeCommand,
   CreatePublicInfoVersionCommand,
+  CredentialExpiryWarningState,
   GeneratePlacardVersionCommand,
   PlacardVersionRecord,
+  PlatformAdapter,
+  PlatformAdapterAuditEvidence,
   PlatformAdminUserRecord,
   PlatformAdminUserRole,
   PlatformAdminUserStatus,
@@ -26,6 +38,7 @@ import type {
   PublicInfoVersionRecord,
   SetPlatformMaintenanceModeCommand,
   TenantInvoiceRecord,
+  UpdatePlatformAdapterCommand,
   UpdatePlatformAdminUserRoleCommand,
 } from "@drts/contracts";
 
@@ -43,9 +56,19 @@ import type { AuditedActionResult } from "../../common/action-receipt";
 import { AuditNotificationService } from "../audit-notification/audit-notification.service";
 import { IdentityRepository } from "../identity/identity.repository";
 import {
+  PlatformAdapterRevisionConflictError,
   PlatformAdminRepository,
   type PersistPlatformAdminChanges,
 } from "./platform-admin.repository";
+
+/**
+ * Warning window for adapter credential expiry (SR-ADMIN-ADAPTER-001):
+ * server-computed at read time, never persisted (schema-allocation.json
+ * V0100 note). Replaces the previous UI-side fixed "expires in 6 days /
+ * 2026-05-31" copy, which did not reflect any real adapter's credential
+ * expiry.
+ */
+const CREDENTIAL_EXPIRY_WARNING_WINDOW_DAYS = 14;
 
 const PUBLIC_INFO_SEED: PublicInfoVersionRecord[] = [
   {
@@ -80,6 +103,152 @@ const PLACARD_SEED: PlacardVersionRecord[] = [
     createdAt: "2026-03-25T00:00:00.000Z",
     updatedAt: "2026-04-01T00:00:00.000Z",
     downloadMetadata: null,
+  },
+];
+
+const PLATFORM_ADAPTERS_SEED: PlatformAdapter[] = [
+  {
+    id: "owned-dispatch",
+    platformCode: "DRTS",
+    name: "DRTS Native Dispatch",
+    description: "Fleet-owned booking and dispatch pipeline.",
+    version: "1.0.0",
+    environment: Environment.PRODUCTION,
+    rolloutStage: Environment.PRODUCTION,
+    adapterType: AdapterType.NATIVE,
+    isForwarded: false,
+    config: { isEnabled: true },
+    rolloutStatus: RolloutStatus.COMPLETED,
+    credentialStatus: CredentialStatus.VALID,
+    webhookStatus: null,
+    healthStatus: {
+      lastCheckTimestamp: "2026-09-10T08:00:00.000Z",
+      status: "HEALTHY",
+      message: null,
+    },
+    policies: {
+      serviceBuckets: ["standard", "accessible"],
+      maxCandidates: 3,
+      acceptTimeoutSeconds: 25,
+      manualFallbackThresholdSeconds: 90,
+      financeAuthorityMode: FinanceAuthorityMode.OWNED,
+    },
+    featureFlags: {
+      driverSafeActions: true,
+      proofRequired: false,
+      manualFallback: true,
+    },
+    supportedActions: [
+      { name: "accept", description: "Driver accepts a native task." },
+      { name: "complete", description: "Driver closes owned trip workflow." },
+      { name: "incident", description: "Driver raises safety incident." },
+    ],
+    revision: 1,
+    credentialExpiry: null,
+    lastMutationAudit: null,
+    createdAt: "2026-05-08T00:00:00.000Z",
+    updatedAt: "2026-05-08T00:00:00.000Z",
+  },
+  {
+    id: "cityride-forwarder",
+    platformCode: "CITY",
+    name: "CityRide Forwarded Orders",
+    description:
+      "External forwarded-order source with platform-owned fare authority.",
+    version: "1.0.0",
+    environment: Environment.PRODUCTION,
+    rolloutStage: Environment.PRODUCTION,
+    adapterType: AdapterType.EXTERNAL_COMBINED,
+    isForwarded: true,
+    config: { isEnabled: true },
+    rolloutStatus: RolloutStatus.COMPLETED,
+    credentialStatus: CredentialStatus.VALID,
+    webhookStatus: {
+      url: "https://cityride.example.com/webhooks/drts",
+      isEnabled: true,
+      lastEventTimestamp: "2026-09-10T07:45:00.000Z",
+      lastStatus: "SUCCESS",
+      lastStatusCode: "200",
+    },
+    healthStatus: {
+      lastCheckTimestamp: "2026-09-10T08:00:00.000Z",
+      status: "HEALTHY",
+      message: null,
+    },
+    policies: {
+      serviceBuckets: ["standard", "accessible"],
+      maxCandidates: 3,
+      acceptTimeoutSeconds: 25,
+      manualFallbackThresholdSeconds: 90,
+      financeAuthorityMode: FinanceAuthorityMode.EXTERNAL,
+    },
+    featureFlags: {
+      driverSafeActions: true,
+      proofRequired: true,
+      manualFallback: true,
+    },
+    supportedActions: [
+      { name: "accept", description: "Forward acceptance to CityRide." },
+      {
+        name: "reject",
+        description: "Forward rejection reason to CityRide.",
+      },
+      {
+        name: "proof_upload",
+        description: "Upload completion proof for reconciliation.",
+      },
+    ],
+    revision: 1,
+    credentialExpiry: {
+      reference: "cityride-oauth-client-2026-09",
+      expiresAt: "2026-09-17T00:00:00.000Z",
+    },
+    lastMutationAudit: null,
+    createdAt: "2026-05-08T00:00:00.000Z",
+    updatedAt: "2026-05-08T00:00:00.000Z",
+  },
+  {
+    id: "grab_taiwan",
+    platformCode: "grab_taiwan",
+    name: "Grab Taiwan (Stub)",
+    description:
+      "Stub-only external forwarded adapter for local integration scaffolding.",
+    version: "1.0.0",
+    environment: Environment.SANDBOX,
+    rolloutStage: Environment.SANDBOX,
+    adapterType: AdapterType.EXTERNAL_REST,
+    isForwarded: true,
+    config: { isEnabled: false },
+    rolloutStatus: RolloutStatus.NOT_STARTED,
+    credentialStatus: CredentialStatus.NOT_CONFIGURED,
+    webhookStatus: null,
+    healthStatus: {
+      lastCheckTimestamp: null,
+      status: "DEGRADED",
+      message:
+        "Stub-only adapter; not approved for production live auth or callback governance.",
+    },
+    policies: {
+      serviceBuckets: ["standard"],
+      maxCandidates: 1,
+      acceptTimeoutSeconds: 30,
+      manualFallbackThresholdSeconds: 120,
+      financeAuthorityMode: FinanceAuthorityMode.EXTERNAL,
+    },
+    featureFlags: {
+      driverSafeActions: false,
+      proofRequired: true,
+      manualFallback: true,
+    },
+    supportedActions: [
+      { name: "accept", description: "Stub accept for Grab Taiwan." },
+      { name: "reject", description: "Stub reject for Grab Taiwan." },
+    ],
+    revision: 1,
+    credentialExpiry: null,
+    lastMutationAudit: null,
+    createdAt: "2026-05-08T00:00:00.000Z",
+    updatedAt: "2026-05-08T00:00:00.000Z",
   },
 ];
 
@@ -183,6 +352,10 @@ export class PlatformAdminService implements OnModuleInit {
     this.clonePlacardVersion(placard),
   );
 
+  private adapters: PlatformAdapter[] = PLATFORM_ADAPTERS_SEED.map((adapter) =>
+    this.clonePlatformAdapter(adapter),
+  );
+
   private platformNotices: PlatformNoticeRecord[] = PLATFORM_NOTICES_SEED.map(
     (n) => ({ ...n }),
   );
@@ -223,6 +396,7 @@ export class PlatformAdminService implements OnModuleInit {
     if (this.platformAdminRepository) {
       try {
         const persistedState = await this.platformAdminRepository.loadState();
+        const persistedAdapters = persistedState.platformAdapters ?? [];
         const hasPersistedState =
           persistedState.publicInfoVersions.length > 0 ||
           persistedState.placardVersions.length > 0;
@@ -245,6 +419,21 @@ export class PlatformAdminService implements OnModuleInit {
           );
           this.placardVersions = persistedState.placardVersions.map((placard) =>
             this.clonePlacardVersion(placard),
+          );
+        }
+
+        if (persistedAdapters.length === 0) {
+          this.persistChanges(
+            {
+              platformAdapters: this.adapters.map((adapter) =>
+                this.clonePlatformAdapter(adapter),
+              ),
+            },
+            "module init bootstrap adapters",
+          );
+        } else {
+          this.adapters = persistedAdapters.map((adapter) =>
+            this.clonePlatformAdapter(adapter),
           );
         }
       } catch (error) {
@@ -850,6 +1039,324 @@ export class PlatformAdminService implements OnModuleInit {
       requestId,
     );
     return user;
+  }
+
+  // ── Platform Adapters ───────────────────────────────────────────────────
+
+  listPlatformAdapters(): PlatformAdapter[] {
+    return this.adapters.map((adapter) =>
+      this.attachCredentialExpiryWarning(this.clonePlatformAdapter(adapter)),
+    );
+  }
+
+  getPlatformAdapter(id: string): PlatformAdapter | undefined {
+    const adapter = this.adapters.find((a) => a.id === id);
+    return adapter
+      ? this.attachCredentialExpiryWarning(this.clonePlatformAdapter(adapter))
+      : undefined;
+  }
+
+  /**
+   * Server-computed credential-expiry-warning read (contracts:
+   * AdapterCredentialExpiryWarning). Never fabricates a success/"ok" result:
+   * a missing adapter is a 404, not a synthesized "unknown" warning.
+   */
+  getPlatformAdapterCredentialExpiryWarning(
+    id: string,
+  ): AdapterCredentialExpiryWarning {
+    const adapter = this.adapters.find((a) => a.id === id);
+    if (!adapter) {
+      throw new ApiRequestError(
+        HttpStatus.NOT_FOUND,
+        "PLATFORM_ADAPTER_NOT_FOUND",
+        `Platform adapter ${id} not found.`,
+        { id },
+      );
+    }
+
+    return this.evaluateCredentialExpiryWarning(adapter.credentialExpiry);
+  }
+
+  async updatePlatformAdapter(
+    id: string,
+    command: UpdatePlatformAdapterCommand,
+    requestId?: string,
+    actorId?: string | null,
+  ): Promise<PlatformAdapter | undefined> {
+    const index = this.adapters.findIndex((a) => a.id === id);
+    if (index === -1) {
+      return undefined;
+    }
+
+    const current = this.adapters[index]!;
+    if (
+      command.expectedRevision !== undefined &&
+      command.expectedRevision !== (current.revision ?? 1)
+    ) {
+      throw new ApiRequestError(
+        HttpStatus.CONFLICT,
+        "PLATFORM_ADAPTER_REVISION_CONFLICT",
+        `Platform adapter ${id} was not at expected revision ${command.expectedRevision}.`,
+        {
+          id,
+          expectedRevision: command.expectedRevision,
+          actualRevision: current.revision ?? 1,
+        },
+      );
+    }
+
+    const previousRevision = current.revision ?? 1;
+    const newRevision = previousRevision + 1;
+    const now = new Date().toISOString();
+    const reason = this.normalizeNullableText(command.reason) ?? "not provided";
+    const mutationAudit: PlatformAdapterAuditEvidence = {
+      auditId: `platform-adapter-audit_${randomUUID()}`,
+      actorId: this.normalizeNullableText(actorId),
+      reason,
+      previousRevision,
+      newRevision,
+      occurredAt: now,
+    };
+
+    const updated: PlatformAdapter = {
+      ...current,
+      config: command.config
+        ? { ...current.config, ...command.config }
+        : current.config,
+      rolloutStatus: command.rolloutStatus ?? current.rolloutStatus,
+      rolloutStage: command.rolloutStage ?? current.rolloutStage,
+      credentialExpiry:
+        command.credentialExpiry !== undefined
+          ? command.credentialExpiry
+          : (current.credentialExpiry ?? null),
+      policies: command.policies
+        ? {
+            ...current.policies,
+            ...command.policies,
+            serviceBuckets:
+              command.policies.serviceBuckets ??
+              current.policies.serviceBuckets,
+          }
+        : current.policies,
+      featureFlags: command.featureFlags
+        ? { ...current.featureFlags, ...command.featureFlags }
+        : current.featureFlags,
+      webhookStatus:
+        current.webhookStatus || command.webhookStatus
+          ? {
+              url: null,
+              isEnabled: false,
+              lastEventTimestamp: null,
+              lastStatus: "UNKNOWN",
+              ...current.webhookStatus,
+              ...command.webhookStatus,
+            }
+          : null,
+      revision: newRevision,
+      lastMutationAudit: mutationAudit,
+      updatedAt: now,
+    };
+
+    this.adapters[index] = updated;
+
+    await this.persistAdapterMutation(
+      current.id,
+      previousRevision,
+      updated,
+      mutationAudit,
+    );
+
+    this.recordAudit(
+      {
+        actorId: mutationAudit.actorId,
+        actorType: "platform_admin",
+        tenantId: null,
+        moduleName: "platform-admin",
+        actionName: "update_platform_adapter",
+        resourceType: "platform_adapter",
+        resourceId: updated.id,
+        oldValuesSummary: {
+          revision: previousRevision,
+          config: current.config,
+          rolloutStatus: current.rolloutStatus,
+          credentialExpiry: current.credentialExpiry ?? null,
+        },
+        newValuesSummary: {
+          revision: newRevision,
+          reason,
+          config: updated.config,
+          rolloutStatus: updated.rolloutStatus,
+          credentialExpiry: updated.credentialExpiry ?? null,
+        },
+      },
+      requestId,
+    );
+
+    return this.attachCredentialExpiryWarning(
+      this.clonePlatformAdapter(updated),
+    );
+  }
+
+  registerPlatformAdapter(adapter: PlatformAdapter): PlatformAdapter {
+    const existingIndex = this.adapters.findIndex((a) => a.id === adapter.id);
+    const now = new Date().toISOString();
+    const cloned = this.clonePlatformAdapter({
+      ...adapter,
+      revision: adapter.revision ?? 1,
+      lastMutationAudit: adapter.lastMutationAudit ?? null,
+      updatedAt: now,
+    });
+    if (existingIndex >= 0) {
+      this.adapters[existingIndex] = cloned;
+    } else {
+      this.adapters.push(cloned);
+    }
+
+    this.persistChanges(
+      { platformAdapters: [this.clonePlatformAdapter(cloned)] },
+      "register_platform_adapter",
+    );
+    this.recordAudit({
+      actorId: null,
+      actorType: "platform_admin",
+      tenantId: null,
+      moduleName: "platform-admin",
+      actionName: "register_platform_adapter",
+      resourceType: "platform_adapter",
+      resourceId: cloned.id,
+      newValuesSummary: { id: cloned.id, platformCode: cloned.platformCode },
+    });
+
+    return this.attachCredentialExpiryWarning(
+      this.clonePlatformAdapter(cloned),
+    );
+  }
+
+  private async persistAdapterMutation(
+    adapterId: string,
+    previousRevision: number,
+    updated: PlatformAdapter,
+    audit: PlatformAdapterAuditEvidence,
+  ) {
+    if (!this.platformAdminRepository?.isEnabled()) {
+      return;
+    }
+
+    try {
+      await this.platformAdminRepository.mutateAdapterWithAudit(
+        adapterId,
+        previousRevision,
+        this.clonePlatformAdapter(updated),
+        {
+          previousRevision,
+          newRevision: audit.newRevision,
+          reason: audit.reason,
+          actorId: audit.actorId,
+        },
+      );
+    } catch (error) {
+      if (error instanceof PlatformAdapterRevisionConflictError) {
+        // The in-memory row above is this process's authority for the HTTP
+        // response already returned; a persisted-row mismatch here means the
+        // durable copy has not caught up (e.g. first mutation before the
+        // initial seed row landed) rather than a real concurrent writer in
+        // this single-instance service, so it is logged, not surfaced to the
+        // caller who already has a consistent in-memory result.
+        this.platformAdminRepository.reportPersistenceFailure(
+          error,
+          "update_platform_adapter revision",
+        );
+        return;
+      }
+
+      this.platformAdminRepository.reportPersistenceFailure(
+        error,
+        "update_platform_adapter",
+      );
+    }
+  }
+
+  /**
+   * Missing or unparsable expiry data resolves to "unknown", never "ok" --
+   * absent/unrecorded expiry is a distinct valid state, not evidence of
+   * health (contracts: AdapterCredentialExpiryWarning). This function itself
+   * never throws: an evaluation failure belongs to the caller (e.g. a 404 for
+   * a missing adapter), never fabricated into a warning-state value.
+   */
+  private evaluateCredentialExpiryWarning(
+    credentialExpiry: AdapterCredentialExpiry | null | undefined,
+  ): AdapterCredentialExpiryWarning {
+    const evaluatedAt = new Date().toISOString();
+    const state = this.resolveCredentialExpiryWarningState(
+      credentialExpiry,
+      evaluatedAt,
+    );
+
+    return {
+      state,
+      warningWindowDays: CREDENTIAL_EXPIRY_WARNING_WINDOW_DAYS,
+      evaluatedAt,
+    };
+  }
+
+  private resolveCredentialExpiryWarningState(
+    credentialExpiry: AdapterCredentialExpiry | null | undefined,
+    evaluatedAt: string,
+  ): CredentialExpiryWarningState {
+    const expiresAt = credentialExpiry?.expiresAt;
+    if (!expiresAt) {
+      return "unknown";
+    }
+
+    const expiresAtMs = Date.parse(expiresAt);
+    if (Number.isNaN(expiresAtMs)) {
+      return "unknown";
+    }
+
+    const nowMs = Date.parse(evaluatedAt);
+    if (expiresAtMs <= nowMs) {
+      return "expired";
+    }
+
+    const warningThresholdMs =
+      nowMs + CREDENTIAL_EXPIRY_WARNING_WINDOW_DAYS * 24 * 60 * 60 * 1000;
+    return expiresAtMs <= warningThresholdMs ? "warning" : "ok";
+  }
+
+  private attachCredentialExpiryWarning(
+    adapter: PlatformAdapter,
+  ): PlatformAdapter {
+    return {
+      ...adapter,
+      credentialExpiryWarning: this.evaluateCredentialExpiryWarning(
+        adapter.credentialExpiry,
+      ),
+    };
+  }
+
+  private clonePlatformAdapter(adapter: PlatformAdapter): PlatformAdapter {
+    return {
+      ...adapter,
+      config: { ...adapter.config },
+      healthStatus: { ...adapter.healthStatus },
+      policies: {
+        ...adapter.policies,
+        serviceBuckets: [...adapter.policies.serviceBuckets],
+      },
+      featureFlags: { ...adapter.featureFlags },
+      supportedActions: adapter.supportedActions.map((action) => ({
+        ...action,
+      })),
+      webhookStatus: adapter.webhookStatus
+        ? { ...adapter.webhookStatus }
+        : null,
+      credentialExpiry: adapter.credentialExpiry
+        ? { ...adapter.credentialExpiry }
+        : (adapter.credentialExpiry ?? null),
+      lastMutationAudit: adapter.lastMutationAudit
+        ? { ...adapter.lastMutationAudit }
+        : (adapter.lastMutationAudit ?? null),
+    };
   }
 
   // ── Platform Notices ──────────────────────────────────────────────────────
