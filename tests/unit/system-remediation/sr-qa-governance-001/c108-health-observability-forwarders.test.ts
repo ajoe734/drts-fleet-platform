@@ -4,7 +4,10 @@ import type {
   PlatformCode,
   ReportForwarderSyncFailureCommand,
 } from "@drts/contracts";
-import type { ForwarderAdapterInterface } from "../../../../apps/api/src/modules/forwarder/forwarder-adapter.interface";
+import type {
+  ForwarderAdapterHealthSnapshot,
+  ForwarderAdapterInterface,
+} from "../../../../apps/api/src/modules/forwarder/forwarder-adapter.interface";
 import { GRAB_TAIWAN_PLATFORM_CODE } from "../../../../apps/api/src/modules/forwarder/grab-taiwan.adapter";
 import { ForwarderService } from "../../../../apps/api/src/modules/forwarder/forwarder.service";
 import { OperationalObservabilityService } from "../../../../apps/api/src/modules/operational-observability/operational-observability.service";
@@ -53,7 +56,7 @@ function createMockAdapter(
       totalAmount: 0,
       asOf: new Date().toISOString(),
     })),
-    getHealthSnapshot: vi.fn(async () => ({
+    getHealthSnapshot: vi.fn(async (): Promise<ForwarderAdapterHealthSnapshot> => ({
       status: "healthy",
       reason: "none",
       credentialStatus: "valid",

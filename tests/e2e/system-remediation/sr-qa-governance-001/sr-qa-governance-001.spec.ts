@@ -9,10 +9,7 @@ import {
 import {
   PARTNER_REFERRAL_CHANNEL_KEY,
   REFERRAL_SETTLEMENT_DIRECTION_DRTS_PAYS_PARTNER,
-  PLATFORM_TENANT_MODULES,
-  SERVICE_PRODUCT_TYPES,
 } from "@drts/contracts";
-import { SERVICE_PRODUCT_BILLING_MODE_VALUES } from "../../../../apps/api/src/modules/platform-admin/platform-admin.service";
 import {
   normalizeServerRuntimeEnv,
   resolveRuntimeEnvironment,
@@ -99,10 +96,7 @@ test.describe("SR-QA-GOVERNANCE-001: 平台治理／區域／產品／通知與�
         name: "台積電企業專車",
         code: tenantCode,
         rolloutStage: "sandbox",
-        modules: [
-          PLATFORM_TENANT_MODULES.ENTERPRISE_DISPATCH,
-          PLATFORM_TENANT_MODULES.BILLING,
-        ],
+        modules: ["enterprise_dispatch", "billing"],
         quotas: {
           activeDrivers: 200,
           monthlyBookings: 10000,
@@ -307,8 +301,8 @@ test.describe("SR-QA-GOVERNANCE-001: 平台治理／區域／產品／通知與�
       requestBody: {
         productCode,
         name: "企業貴賓尊榮接送",
-        productType: SERVICE_PRODUCT_TYPES.TRAVEL_AGENCY_TRANSFER,
-        billingMode: SERVICE_PRODUCT_BILLING_MODE_VALUES.TENANT_INVOICE,
+        productType: "travel_agency_transfer",
+        billingMode: "tenant_invoice",
         proofRequirements: ["signoff", "photo", "signoff"], // 含重複項需去重
       },
       responseBody: {

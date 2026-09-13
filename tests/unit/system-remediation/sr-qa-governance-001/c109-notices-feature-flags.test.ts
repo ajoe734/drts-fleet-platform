@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it } from "vitest";
 
 import type {
   CreatePlatformNoticeCommand,
@@ -8,7 +8,6 @@ import { PlatformAdminService } from "../../../../apps/api/src/modules/platform-
 import { PlatformAdminController } from "../../../../apps/api/src/modules/platform-admin/platform-admin.controller";
 import { FeatureFlagsService } from "../../../../apps/api/src/modules/feature-flags/feature-flags.service";
 import { AuditNotificationService } from "../../../../apps/api/src/modules/audit-notification/audit-notification.service";
-import { ApiRequestError } from "../../../../apps/api/src/common/api-envelope";
 
 describe("C109: 公告／維護通知與分租戶功能旗標驗收", () => {
   function setupPlatformAdmin() {

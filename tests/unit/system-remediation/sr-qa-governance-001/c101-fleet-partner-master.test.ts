@@ -9,10 +9,7 @@ import {
   createDriverAffiliation,
   createFleetPartner,
   createRevenueShareRule,
-  listFleetPartnerDrivers,
   listFleetPartners,
-  listFleetStatements,
-  listRevenueShareRules,
   updateFleetPartner,
   type FleetPartnerFormState,
 } from "../../../../apps/platform-admin-web/app/fleet-partners/fleet-partner-shared";
@@ -25,9 +22,9 @@ afterEach(() => {
 
 describe("C101: 車隊夥伴主檔列表、管理、停用與關聯引用驗收", () => {
   const createMockClient = () =>
-    new ApiClient({
+    (new ApiClient({
       baseUrl: "http://governance-regression.test",
-    }) as Parameters<typeof listFleetPartners>[0];
+    }) as unknown) as Parameters<typeof listFleetPartners>[0];
 
   it("正確解析 API 清單 envelope，且空清單安全回傳空陣列避免 .map is not a function 崩潰", async () => {
     const fetchMock = vi.fn<typeof fetch>(async () =>
@@ -98,7 +95,7 @@ describe("C101: 車隊夥伴主檔列表、管理、停用與關聯引用驗收"
             "FLEET_ACCESS_DENIED",
             "Caller does not possess fleet management permissions",
             { tenantId: "tenant-other" },
-            "req-c101-forbidden",
+            false,
           ),
         ),
         { status: 403, headers: { "Content-Type": "application/json" } },
