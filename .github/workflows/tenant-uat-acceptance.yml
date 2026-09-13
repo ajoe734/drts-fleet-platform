@@ -210,6 +210,8 @@ jobs:
 
       - name: Run webhook E2E acceptance specs (C111-C112 real service & HTTP)
         id: webhook_e2e
+        env:
+          PLAYWRIGHT_JSON_OUTPUT_FILE: "test-results/webhook-e2e-report.json"
         run: |
           set -o pipefail
           pnpm exec playwright test \
@@ -430,6 +432,31 @@ jobs:
               if not cap_data.get("verified"):
                   raise SystemExit(f"Capability {cap_id} has empty verification evidence")
           print(f"C111-C115 Capability matrix verified: all 5 capabilities passed under candidate {actual_candidate}.")
+
+          webhook_e2e_report = Path("test-results/webhook-e2e-report.json")
+          if webhook_e2e_report.exists():
+              wh_e2e_data = json.loads(webhook_e2e_report.read_text())
+              wh_e2e_specs = [
+                  spec
+                  for suite in wh_e2e_data.get("suites", [])
+                  for spec in iter_specs(suite)
+                  if "sr-qa-webhook-001" in spec.get("file", "")
+              ]
+              wh_e2e_total = 0
+              wh_e2e_passed = 0
+              for spec in wh_e2e_specs:
+                  for test in spec.get("tests", []):
+                      wh_e2e_total += 1
+                      results = test.get("results", [])
+                      status = results[-1].get("status") if results else None
+                      if status == "passed":
+                          wh_e2e_passed += 1
+              if wh_e2e_total and wh_e2e_passed != wh_e2e_total:
+                  raise SystemExit(
+                      f"Webhook E2E acceptance incomplete: total={wh_e2e_total}, passed={wh_e2e_passed}."
+                  )
+              if wh_e2e_total:
+                  print(f"Webhook E2E acceptance: {wh_e2e_passed}/{wh_e2e_total} passed, zero skips.")
           PY_GATE
 
       - name: Record run status

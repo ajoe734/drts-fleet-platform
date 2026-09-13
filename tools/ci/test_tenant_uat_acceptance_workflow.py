@@ -263,6 +263,11 @@ class TenantUatAcceptanceWorkflowStructureTests(unittest.TestCase):
         for token in ("git commit", "git push", "git add"):
             self.assertNotIn(token, self.text)
 
+    def test_webhook_e2e_preserves_tenant_playwright_report(self) -> None:
+        webhook_e2e_block = self.text.split("id: webhook_e2e", 1)[1].split("      - name:", 1)[0]
+        self.assertIn("PLAYWRIGHT_JSON_OUTPUT_FILE:", webhook_e2e_block)
+        self.assertIn("test-results/webhook-e2e-report.json", webhook_e2e_block)
+
 
 class RunStatusScriptBehaviorTests(unittest.TestCase):
     """Executes the embedded `Record run status` heredoc for real, in a

@@ -96,8 +96,8 @@ async function main() {
       throw new Error(`[C115 Readback] Call session ${callId} not found in retained DB`);
     }
     const preCallRow = callRes.rows[0];
-    if (preCallRow.status !== "recording_pending") {
-      throw new Error(`[C115 Readback] Unexpected call status before callback: ${preCallRow.status}`);
+    if (!preCallRow || preCallRow.status !== "recording_pending") {
+      throw new Error(`[C115 Readback] Unexpected call status before callback: ${preCallRow?.status}`);
     }
 
     // 2. Verify retained DB persistence for driver
@@ -109,7 +109,7 @@ async function main() {
       throw new Error(`[C115 Readback] Driver ${driverId} not found in retained DB`);
     }
     const preDriverRow = driverRes.rows[0];
-    if (preDriverRow.licenses_valid !== false) {
+    if (!preDriverRow || preDriverRow.licenses_valid !== false) {
       throw new Error(`[C115 Readback] Driver ${driverId} expected licenses_valid=false`);
     }
     verifiedEvidence.retainedDbPersistence = true;
@@ -119,7 +119,9 @@ async function main() {
     const durableReceiptId = `rcpt_${randomUUID()}`;
     const completedAtIso = new Date().toISOString();
     const callRecord =
-      typeof preCallRow.record === "string" ? JSON.parse(preCallRow.record) : preCallRow.record;
+      typeof preCallRow.record === "string"
+        ? JSON.parse(preCallRow.record as string)
+        : (preCallRow.record as Record<string, any>);
 
     const updatedCallRecord = {
       ...callRecord,
@@ -143,8 +145,13 @@ async function main() {
       [callId],
     );
     const postCallRow = postCallRes.rows[0];
+    if (!postCallRow) {
+      throw new Error(`[C115 Readback] Call session ${callId} missing post-callback`);
+    }
     const postRecord =
-      typeof postCallRow.record === "string" ? JSON.parse(postCallRow.record) : postCallRow.record;
+      typeof postCallRow.record === "string"
+        ? JSON.parse(postCallRow.record as string)
+        : (postCallRow.record as Record<string, any>);
 
     if (postCallRow.status !== "completed" || postRecord.durableReceiptId !== durableReceiptId) {
       throw new Error(`[C115 Readback] Call session completion or receipt mismatch`);
@@ -167,10 +174,14 @@ async function main() {
       `SELECT record FROM crm.phase1_call_sessions WHERE call_id = $1`,
       [callId],
     );
+    const dedupRow = dedupRes.rows[0];
+    if (!dedupRow) {
+      throw new Error(`[C115 Readback] Call session ${callId} missing on dedup check`);
+    }
     const dedupRecord =
-      typeof dedupRes.rows[0].record === "string"
-        ? JSON.parse(dedupRes.rows[0].record)
-        : dedupRes.rows[0].record;
+      typeof dedupRow.record === "string"
+        ? JSON.parse(dedupRow.record as string)
+        : (dedupRow.record as Record<string, any>);
     if (dedupRecord.durableReceiptId !== durableReceiptId) {
       throw new Error(`[C115 Readback] Deduplication failed: receipt was clobbered`);
     }
@@ -179,7 +190,9 @@ async function main() {
     // 4. Qualification background scan catch-up & dispatch eligibility blocking
     console.log(`[C115 Readback] Verifying qualification background scan and dispatch blocking...`);
     const driverRecord =
-      typeof preDriverRow.record === "string" ? JSON.parse(preDriverRow.record) : preDriverRow.record;
+      typeof preDriverRow.record === "string"
+        ? JSON.parse(preDriverRow.record as string)
+        : (preDriverRow.record as Record<string, any>);
 
     if (driverRecord.dispatchEligible !== false) {
       throw new Error(`[C115 Readback] Expired driver was not blocked from dispatch`);
@@ -210,8 +223,13 @@ async function main() {
       [driverId],
     );
     const renewedRow = renewedRes.rows[0];
+    if (!renewedRow) {
+      throw new Error(`[C115 Readback] Renewed driver ${driverId} not found`);
+    }
     const renewedData =
-      typeof renewedRow.record === "string" ? JSON.parse(renewedRow.record) : renewedRow.record;
+      typeof renewedRow.record === "string"
+        ? JSON.parse(renewedRow.record as string)
+        : (renewedRow.record as Record<string, any>);
 
     if (renewedRow.licenses_valid !== true || renewedData.dispatchEligible !== true) {
       throw new Error(`[C115 Readback] Driver renewal restoration failed`);

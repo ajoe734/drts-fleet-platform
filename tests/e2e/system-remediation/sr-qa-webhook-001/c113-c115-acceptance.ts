@@ -18,17 +18,18 @@
 //   a manifest for post-restart verification.
 
 import { randomUUID } from "node:crypto";
-import { existsSync, mkdirSync, writeFileSync } from "node:fs";
+import { mkdirSync, writeFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import path from "node:path";
 
-import { ApiRequestError } from "../../../../apps/api/src/common/errors/api-request-error";
-import { GeoService } from "../../../../apps/api/src/modules/geo/geo.service";
-import { GeoProviderConfigService } from "../../../../apps/api/src/modules/geo/providers/geo-provider-config.service";
+import { ApiRequestError } from "../../../../apps/api/src/common/api-envelope";
+import { GeoProviderConfigService } from "../../../../apps/api/src/modules/geo/geo-provider-config.service";
 import {
   GeoProvider,
   GeoProviderError,
-} from "../../../../apps/api/src/modules/geo/providers/geo-provider.interface";
+} from "../../../../apps/api/src/modules/geo/geo.provider";
+import { GeoService } from "../../../../apps/api/src/modules/geo/geo.service";
+import { MockGeoProvider } from "../../../../apps/api/src/modules/geo/mock-geo.provider";
 import { MapGeofenceObservabilityService } from "../../../../apps/api/src/modules/operational-observability/map-geofence-observability.service";
 
 interface DbPool {
@@ -202,14 +203,20 @@ async function verifyC113(db: DbPool): Promise<{
     [issueId],
   );
   const row = readback.rows[0];
-  const rec = typeof row.record === "string" ? JSON.parse(row.record) : row.record;
+  if (!row) {
+    throw new Error(`[C113] Reconciliation issue ${issueId} not found`);
+  }
+  const rec =
+    typeof row.record === "string"
+      ? JSON.parse(row.record as string)
+      : (row.record as Record<string, any>);
   if (row.status !== "resolved") {
     throw new Error(`[C113] Expected status 'resolved', got '${row.status}'`);
   }
   if (!Array.isArray(rec.auditTrail) || rec.auditTrail.length !== 2) {
     throw new Error(`[C113] Expected 2 audit trail entries, got ${rec.auditTrail?.length}`);
   }
-  if (rec.auditTrail[1].resolutionCode !== "ADJUSTMENT_POSTED") {
+  if (rec.auditTrail[1]?.resolutionCode !== "ADJUSTMENT_POSTED") {
     throw new Error(`[C113] Missing resolution code in audit trail`);
   }
 
@@ -244,8 +251,9 @@ async function verifyC114(): Promise<{
   });
 
   // 1. Normal Multi-Mode Routing across Taiwan coordinates
+  const mockGeoProvider = new MockGeoProvider();
   const normalGeoService = new GeoService(
-    undefined,
+    mockGeoProvider,
     config,
     undefined,
     observability,

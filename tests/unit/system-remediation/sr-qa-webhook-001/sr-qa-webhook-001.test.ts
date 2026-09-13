@@ -1220,39 +1220,63 @@ describe("SR-QA-WEBHOOK-001: Verification Suite", () => {
 
       await billingService.handleOwnedMobilityTripCompleted({
         orderId: "order-sandbox-mapped-001",
-        settlementId: "settlement-sandbox-001",
+        bookingId: "booking-sandbox-001",
         tenantId: "tenant-demo-001",
         driverId: "drv-sandbox-001",
+        orderSource: "api",
         serviceBucket: "business_dispatch",
         businessDispatchSubtype: "enterprise_dispatch",
+        costCenterCode: null,
+        riderId: null,
+        partnerId: null,
+        partnerProgramId: null,
+        partnerEntrySlug: null,
+        eligibilityVerificationId: null,
+        issuerAuthorizationRef: null,
+        benefitReference: null,
         completedAt: new Date().toISOString(),
         grossEarning: { currency: "TWD", amountMinor: 50000 },
         sandboxFulfillmentSegments: [
           {
             fulfillmentSegmentId: "seg-sandbox-001",
+            bookingId: "booking-sandbox-001",
             orderId: "order-sandbox-mapped-001",
-            segmentIndex: 0,
-            carrierName: "Demo Partner Fleet",
-            carrierCode: "CPF",
-            vehiclePlate: "TWD-8888",
-            status: "completed",
+            sandboxTripId: "trip-001",
+            segmentType: "tesla_av",
+            segmentReason: "demo",
             startedAt: new Date().toISOString(),
-            completedAt: new Date().toISOString(),
+            endedAt: new Date().toISOString(),
+            vehicleId: "veh-001",
+            vin: "VIN12345",
+            driverId: "drv-001",
+            safetyOperatorId: null,
+            sourcePlatform: "tesla_sandbox",
+            distanceKm: 5.5,
+            durationSeconds: 600,
+            cost: { amountMinor: 50000, currency: "TWD" },
+            evidenceReference: "ref-001",
             createdAt: new Date().toISOString(),
-            updatedAt: new Date().toISOString(),
           },
         ],
         sandboxBillingTreatment: {
           sandboxBillingTreatmentId: "treat-sandbox-001",
+          bookingId: "booking-sandbox-001",
           orderId: "order-sandbox-mapped-001",
-          ratePlanName: "Enterprise Tier 1",
-          taxTreatment: "tax_inclusive",
-          partnerCommissionRatePercent: 12,
-          platformFeeRatePercent: 3,
-          status: "applied",
-          appliedAt: new Date().toISOString(),
+          sandboxTripId: "trip-001",
+          treatmentType: "normal_av",
+          fallbackCostAbsorber: null,
+          fallbackPolicyId: null,
+          policyResolution: "accepted",
+          passengerExtraChargeAllowed: false,
+          passengerExtraCharge: { amountMinor: 0, currency: "TWD" },
+          internalAvCost: { amountMinor: 30000, currency: "TWD" },
+          internalHumanFallbackCost: null,
+          partnerCharge: { amountMinor: 40000, currency: "TWD" },
+          tenantCharge: { amountMinor: 50000, currency: "TWD" },
+          platformAbsorbed: null,
+          fallbackSurchargeApplied: false,
+          treatmentSnapshot: {},
           createdAt: new Date().toISOString(),
-          updatedAt: new Date().toISOString(),
         },
       });
 
@@ -1260,16 +1284,16 @@ describe("SR-QA-WEBHOOK-001: Verification Suite", () => {
         "order-sandbox-mapped-001",
       );
       expect(segments.length).toBe(1);
-      expect(segments[0]!.carrierName).toBe("Demo Partner Fleet");
-      expect(segments[0]!.carrierCode).toBe("CPF");
-      expect(segments[0]!.vehiclePlate).toBe("TWD-8888");
+      expect(segments[0]!.fulfillmentSegmentId).toBe("seg-sandbox-001");
+      expect(segments[0]!.sourcePlatform).toBe("tesla_sandbox");
+      expect(segments[0]!.distanceKm).toBe(5.5);
 
       const treatments = billingService.listSandboxBillingTreatments(
         "order-sandbox-mapped-001",
       );
       expect(treatments.length).toBe(1);
-      expect(treatments[0]!.ratePlanName).toBe("Enterprise Tier 1");
-      expect(treatments[0]!.partnerCommissionRatePercent).toBe(12);
+      expect(treatments[0]!.sandboxBillingTreatmentId).toBe("treat-sandbox-001");
+      expect(treatments[0]!.treatmentType).toBe("normal_av");
 
       // Isolation check: querying another order returns empty array
       const unrelatedSegments = billingService.listFulfillmentSegments(
@@ -1310,13 +1334,13 @@ describe("SR-QA-WEBHOOK-001: Verification Suite", () => {
         issue.issueId,
         {
           actorId: "actor-ops-001",
-          resolutionCode: "ledger_adjusted_with_receipt",
+          resolutionCode: "sponsor_corrected",
           resolutionSummary:
             "Adjusted bank ledger difference with bank confirmation slip",
         },
       );
       expect(resolved.status).toBe("resolved");
-      expect(resolved.resolutionCode).toBe("ledger_adjusted_with_receipt");
+      expect(resolved.resolutionCode).toBe("sponsor_corrected");
       expect(resolved.resolutionSummary).toBe(
         "Adjusted bank ledger difference with bank confirmation slip",
       );
@@ -1345,13 +1369,13 @@ describe("SR-QA-WEBHOOK-001: Verification Suite", () => {
       const issue = await billingService.createReconciliationIssue({
         openedBy: "actor-ops-001",
         summary: "Missing Settlement Row",
-        issueType: "missing_settlement",
+        issueType: "partner_sponsor_mismatch",
       });
 
       await expect(
         billingService.resolveReconciliationIssue(issue.issueId, {
           actorId: "   ",
-          resolutionCode: "ledger_adjusted_with_receipt",
+          resolutionCode: "sponsor_corrected",
           resolutionSummary: "Valid summary",
         }),
       ).rejects.toThrow();
@@ -1359,7 +1383,7 @@ describe("SR-QA-WEBHOOK-001: Verification Suite", () => {
       await expect(
         billingService.resolveReconciliationIssue(issue.issueId, {
           actorId: "actor-ops-001",
-          resolutionCode: "ledger_adjusted_with_receipt",
+          resolutionCode: "sponsor_corrected",
           resolutionSummary: "   ",
         }),
       ).rejects.toThrow();
