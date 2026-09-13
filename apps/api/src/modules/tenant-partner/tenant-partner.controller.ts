@@ -89,7 +89,10 @@ import type {
   UpsertTenantQuotaPolicyCommand,
   ReorderTenantApprovalRulesCommand,
   RejectTenantBookingApprovalRequestCommand,
+  TenantApiKeyRecord,
   VerifyPartnerEligibilityCommand,
+  ApiListData,
+  ApiSuccessEnvelope,
 } from "@drts/contracts";
 
 import { toCsv } from "../../common/csv";
@@ -1760,6 +1763,21 @@ export class TenantPartnerController {
     );
   }
 
+  listApiKeys(
+    tenantId?: string,
+    requestId?: string,
+    identity?: IdentityContext | null,
+  ): ApiSuccessEnvelope<ApiListData<TenantApiKeyRecord & Record<string, unknown>>>;
+  listApiKeys(
+    tenantId?: string,
+    requestId?: string,
+    identity?: IdentityContext | null,
+    apiKeyHeader?: string,
+    tenantApiKeyHeader?: string,
+    authorizationHeader?: string,
+  ):
+    | ApiSuccessEnvelope<ApiListData<TenantApiKeyRecord & Record<string, unknown>>>
+    | Promise<ApiSuccessEnvelope<ApiListData<TenantApiKeyRecord & Record<string, unknown>>>>;
   @Get("tenant/api-keys")
   @Throttle(READ_HEAVY_RATE_LIMIT)
   listApiKeys(
@@ -1769,7 +1787,9 @@ export class TenantPartnerController {
     @Headers("x-api-key") apiKeyHeader?: string,
     @Headers("x-tenant-api-key") tenantApiKeyHeader?: string,
     @Headers("authorization") authorizationHeader?: string,
-  ) {
+  ):
+    | ApiSuccessEnvelope<ApiListData<TenantApiKeyRecord & Record<string, unknown>>>
+    | Promise<ApiSuccessEnvelope<ApiListData<TenantApiKeyRecord & Record<string, unknown>>>> {
     const resolvedTenantId = this.requireTenantId(tenantId);
     const resolvedIdentity =
       identity ??
