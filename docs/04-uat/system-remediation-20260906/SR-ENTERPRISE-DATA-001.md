@@ -290,17 +290,25 @@ prove), following `SR-ENTERPRISE-SEARCH-001`'s
 - Fixed root typecheck failure from smoke acceptance job 103670531714:
   `apps/enterprise-dispatch-web/lib/enterprise-fixtures.ts` had imported
   from `@/lib/translations`, which failed when checked by root
-  `tsc -p tsconfig.json --noEmit` (via `tests/e2e/.../enterprise-data-browser.spec.ts`).
+  `tsc -p tsconfig.json --noEmit` (via `tests/e2e/system-remediation/sr-enterprise-data-001/enterprise-data-browser.spec.ts`).
   Switched to the sibling relative import `./translations` (consistent with
   `./dispatch-fixture-adapter`, `./enterprise-booking-draft`, and `./server-locale`).
+- Fixed canonical consistency failure from CI run 34737540684:
+  corrected the truncated citation path `tests/e2e/system-remediation/sr-enterprise-data-001/enterprise-data-browser.spec.ts`
+  in this doc so `tools/ci/git/check_canonical_consistency.py` verifies cleanly.
+- Real GitHub Actions verification on candidate `dff2097660553bc3ac38825da8e3cc4812bc7584`:
+  - `Enterprise Data Acceptance` (run 34737539448): `browser-acceptance` completed green
+    (`conclusion: success`), passing all 6 Playwright scenarios over real HTTP/Postgres/Chromium
+    and generating artifact `enterprise-data-browser-dff2097660553bc3ac38825da8e3cc4812bc7584`.
+  - `CI (integration trunk)` (run 34737540653): completed green (`conclusion: success`) across
+    all jobs (`build`, `unit`, `lint`, `integration`, `iam-negative-matrix`, `ui-route-e2e`,
+    `cross-surface-e2e`, `typecheck`, `i18n-guard`, `e2e`).
+  - `CI` (run 34737540684): `Product smoke acceptance` completed green (`conclusion: success`,
+    including root typecheck and unit tests); only `Canonical consistency` failed on the doc path
+    typo resolved above.
 
 ## Explicitly not done (do not treat as complete)
 
-- **Awaiting real GitHub Actions CI verification on this candidate.** Both the
-  booking-detail session scoping gap and the CI test-coverage wiring have been
-  implemented and locally verified. Pushing this candidate will trigger both the
-  standard CI suites and the `enterprise-data-acceptance` workflow. Until those
-  runs complete green, do not record acceptance evidence from local checks alone.
 - Driver contact remains honestly unavailable (see above) — not full
   acceptance for that half of `enterprise_authorized_driver_and_support_contact_actions`.
 - No physical device / production traffic verification of any kind.
