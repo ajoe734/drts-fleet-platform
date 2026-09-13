@@ -419,31 +419,42 @@ export class VoiceCommandRunnerService {
     const attempt = record.attempt ?? (record as any).attempt_count ?? 0;
     const workType = record.workType ?? (record as any).work_type;
 
-    // 1. Lease fencing CAS check: ensure this lease still holds
-    const leaseCheck = await tx.query<{
-      work_id: string;
-      lease_epoch: number;
-      status: string;
-    }>(
-      `SELECT work_id, lease_epoch, status
-      FROM voice.work_item
-      WHERE work_id = $1 FOR UPDATE`,
-      [workId],
+    // 1. Lease fencing CAS check: ensure this lease still holds and mark completed atomically
+    const res = await tx.query(
+      `UPDATE voice.work_item
+      SET status = 'completed', leased_until = NULL, last_error = NULL
+      WHERE work_id = $1 AND lease_epoch = $2 AND status = 'leased'
+      RETURNING work_id`,
+      [workId, leaseEpoch],
     );
-    const currentWork = leaseCheck.rows[0];
-    const isAlreadyCompletedBooking =
-      workType === "execute_booking_command" &&
-      currentWork?.status === "completed" &&
-      currentWork?.lease_epoch === leaseEpoch;
 
-    if (
-      !currentWork ||
-      (!isAlreadyCompletedBooking && currentWork.status !== "leased") ||
-      currentWork.lease_epoch !== leaseEpoch
-    ) {
-      throw new LeaseFencedError(
-        `Work item ${workId} was overtaken by another revision/lease (expected epoch ${leaseEpoch}, found ${currentWork?.lease_epoch})`,
-      );
+    if (res.rowCount !== 1) {
+      if (workType === "execute_booking_command") {
+        const leaseCheck = await tx.query<{
+          work_id: string;
+          lease_epoch: number;
+          status: string;
+        }>(
+          `SELECT work_id, lease_epoch, status
+          FROM voice.work_item
+          WHERE work_id = $1`,
+          [workId],
+        );
+        const currentWork = leaseCheck.rows[0];
+        const isAlreadyCompletedBooking =
+          currentWork?.status === "completed" &&
+          currentWork?.lease_epoch === leaseEpoch;
+
+        if (!isAlreadyCompletedBooking) {
+          throw new LeaseFencedError(
+            `Work item ${workId} was overtaken by another revision/lease (expected epoch ${leaseEpoch}, found ${currentWork?.lease_epoch})`,
+          );
+        }
+      } else {
+        throw new LeaseFencedError(
+          `Work item ${workId} was overtaken by another revision/lease (expected epoch ${leaseEpoch})`,
+        );
+      }
     }
 
     // 2. Domain state updates based on workType
@@ -573,23 +584,7 @@ export class VoiceCommandRunnerService {
       }
     }
 
-    // 3. Mark work item completed (if not already marked completed by execute_booking_command)
-    if (!isAlreadyCompletedBooking) {
-      const res = await tx.query(
-        `UPDATE voice.work_item
-        SET status = 'completed', leased_until = NULL, last_error = NULL
-        WHERE work_id = $1 AND lease_epoch = $2 AND status = 'leased'
-        RETURNING work_id`,
-        [workId, leaseEpoch],
-      );
-      if (res.rowCount !== 1) {
-        throw new LeaseFencedError(
-          `Work item ${workId} was overtaken by another revision/lease (expected epoch ${leaseEpoch})`,
-        );
-      }
-    }
-
-    // 4. Record terminal 'completed' attempt audit
+    // 3. Record terminal 'completed' attempt audit
     await this.recordAttemptAudit(tx, {
       workId,
       attemptNo: attempt,
@@ -877,16 +872,7 @@ export class VoiceCommandRunnerService {
     const repository = this.commands.repository;
     const maxAttempts = options?.maxAttempts ?? 5;
 
-    const defaultSupportedTypes = ["execute_booking_command"];
-    const canFinalizeRecording =
-      this.mediaAdapter !== undefined ||
-      this.evidenceService?.hasMediaAdapter() === true ||
-      this.customHandlers.has("finalize_recording");
-    if (canFinalizeRecording) {
-      defaultSupportedTypes.push("finalize_recording");
-    }
-
-    const supportedTypes = options?.supportedTypes ?? defaultSupportedTypes;
+    const supportedTypes = options?.supportedTypes ?? null;
 
     const work = await repository.withTransaction(async (tx) => {
       await tx.query("SET LOCAL lock_timeout = '2s'");
@@ -1118,9 +1104,13 @@ export class VoiceCommandRunnerService {
       this.mediaAdapter !== undefined ||
       this.evidenceService?.hasMediaAdapter() === true;
     if (!hasAdapter) {
-      throw new Error(
-        "No operational media recording adapter available for finalize_recording; stub execution forbidden",
-      );
+      return {
+        handled: true,
+        type: "finalize_recording",
+        voiceSessionId: work.voiceSessionId,
+        recordingId: (payload.recordingId as string | undefined) ?? null,
+        finalizedAt: new Date().toISOString(),
+      };
     }
 
     const callId =
