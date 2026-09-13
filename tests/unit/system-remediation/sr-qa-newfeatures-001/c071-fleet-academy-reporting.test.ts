@@ -117,6 +117,7 @@ describe("SR-QA-NEWFEATURES-001 / C071: 車行訓練管理員真完訓率、逾�
     actorId: "usr_fleet_mgr_001",
     realm: "tenant",
     tenantId: FLEET_ALPHA,
+    roleFamilies: ["tenant"],
     roles: ["training_admin"],
     scopes: ["tenant:admin", "driver:read"],
     requestId: "req_fleet_alpha_001",

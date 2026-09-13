@@ -27,7 +27,9 @@ describe("SR-QA-NEWFEATURES-001 / C012: 車主 Host 受限讀取模型、資料�
     actorType: "partner_user",
     actorId: `usr_${partnerId}`,
     partnerId,
+    tenantId: null,
     realm: "partner",
+    roleFamilies: ["partner"],
     roles: ["vehicle_owner"],
     scopes,
     requestId: `req_${partnerId}_001`,
@@ -89,15 +91,15 @@ describe("SR-QA-NEWFEATURES-001 / C012: 車主 Host 受限讀取模型、資料�
 
     // Seed maintenance item for VEHICLE_A1
     repository.seedMaintenanceItem({
-      logId: "maint_001",
+      maintenanceId: "maint_001",
       vehicleId: VEHICLE_A1,
       status: "completed",
-      maintenanceType: "regular",
+      type: "regular",
       description: "五萬公里定期保養與更換煞車皮",
-      scheduledDate: "2026-08-10",
-      completedDate: "2026-08-10",
-      costAmount: 4500,
-      notes: "各項安全項目檢測正常",
+      scheduledAt: "2026-08-10",
+      completedAt: "2026-08-10",
+      cost: 4500,
+      notesSummary: "各項安全項目檢測正常",
     });
 
     // Seed trip item for VEHICLE_A1
@@ -114,11 +116,11 @@ describe("SR-QA-NEWFEATURES-001 / C012: 車主 Host 受限讀取模型、資料�
 
     // Seed complaint case for VEHICLE_A1
     repository.seedCaseItem({
-      caseNo: "case_001",
+      caseId: "case_001",
       vehicleId: VEHICLE_A1,
       status: "closed",
-      category: "comfort",
-      createdAt: "2026-09-05T14:00:00.000Z",
+      category: "service_feedback",
+      reportedAt: "2026-09-05T14:00:00.000Z",
       resolvedAt: "2026-09-06T10:00:00.000Z",
       resolutionSummary: "車內冷氣出風調整，案件已結案",
     });
@@ -159,7 +161,7 @@ describe("SR-QA-NEWFEATURES-001 / C012: 車主 Host 受限讀取模型、資料�
       // (b) 維保
       const maintRes = await controller.listMaintenance(VEHICLE_A1, identityA);
       expect(maintRes.data.items.length).toBe(1);
-      expect(maintRes.data.items[0]!.logId).toBe("maint_001");
+      expect(maintRes.data.items[0]!.maintenanceId).toBe("maint_001");
       expect(maintRes.data.items[0]!.description).toBe(
         "五萬公里定期保養與更換煞車皮",
       );
@@ -173,7 +175,7 @@ describe("SR-QA-NEWFEATURES-001 / C012: 車主 Host 受限讀取模型、資料�
       // (d) 案件 (脫敏投訴案件)
       const casesRes = await controller.listCases(VEHICLE_A1, identityA);
       expect(casesRes.data.items.length).toBe(1);
-      expect(casesRes.data.items[0]!.caseNo).toBe("case_001");
+      expect(casesRes.data.items[0]!.caseId).toBe("case_001");
       expect(casesRes.data.items[0]!.status).toBe("closed");
     });
 
@@ -387,7 +389,10 @@ describe("SR-QA-NEWFEATURES-001 / C012: 車主 Host 受限讀取模型、資料�
         authMode: "bootstrap_headers",
         actorType: "driver_user",
         actorId: "drv_001",
+        tenantId: null,
         realm: "driver",
+        roleFamilies: ["driver"],
+        roles: ["driver_standard"],
         scopes: ["driver:read"],
         requestId: "req_drv_cross_001",
       };

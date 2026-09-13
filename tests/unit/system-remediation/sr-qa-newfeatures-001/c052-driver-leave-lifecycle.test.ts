@@ -27,7 +27,10 @@ describe("SR-QA-NEWFEATURES-001 / C052: 司機請假申請、審核與班表／�
     authMode: "bootstrap_headers",
     actorType: "driver_user",
     actorId: DRIVER_A,
+    tenantId: null,
     realm: "driver",
+    roleFamilies: ["driver"],
+    roles: ["driver_standard"],
     scopes: ["driver:write", "driver:read"],
     requestId: "req_leave_drv_001",
   };

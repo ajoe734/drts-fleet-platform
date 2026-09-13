@@ -35,7 +35,7 @@ test.describe("SR-QA-NEWFEATURES-001: Leave / Academy / Host End-to-End Acceptan
 
     const personas = createTenantPersonas(shard0.tenantA);
     const driver = personas.driver;
-    const supervisor = personas.dispatcher;
+    const supervisor = personas.operator;
     recorder.recordRole("Driver", driver);
     recorder.recordRole("Supervisor", supervisor);
 
@@ -108,14 +108,14 @@ test.describe("SR-QA-NEWFEATURES-001: Leave / Academy / Host End-to-End Acceptan
       responseBody: {
         leaveId,
         status: "approved",
-        reviewedByPrincipalId: supervisor.dispatcherId,
+        reviewedByPrincipalId: supervisor.actorId,
         reviewNotes: "核准病假，請多休息",
       },
       actorRole: "ops_operator",
     });
     recorder.recordResourceId("driver_leave_request", leaveId, {
       status: "approved",
-      reviewedByPrincipalId: supervisor.dispatcherId,
+      reviewedByPrincipalId: supervisor.actorId,
     });
 
     // 4. Driver attempts clock-in during approved leave period -> rejected (C052 linkage)
@@ -334,11 +334,11 @@ test.describe("SR-QA-NEWFEATURES-001: Leave / Academy / Host End-to-End Acceptan
     });
 
     const personas = createTenantPersonas(shard0.tenantA);
-    const fleetAdmin = personas.dispatcher;
+    const fleetAdmin = personas.admin;
     const driver = personas.driver;
     recorder.recordRole("FleetAdmin", fleetAdmin);
 
-    const fleetPartnerId = shard0.tenantA;
+    const fleetPartnerId = shard0.tenantA.tenantId;
     const attemptId = shard0.qualifyId("att-authoritative-001");
 
     // 1. Fleet Admin queries authoritative training summary
