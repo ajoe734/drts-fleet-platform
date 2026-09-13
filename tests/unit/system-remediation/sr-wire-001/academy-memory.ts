@@ -56,7 +56,11 @@ export class FakeAcademyRepository {
     return operation(this);
   }
 
-  async getDriverTrainingProfileStatus(driverId: string, _client?: unknown): Promise<string | null> {
+  async getDriverTrainingProfileStatus(
+    driverId: string,
+    _client?: unknown,
+  ): Promise<string | null> {
+    void _client;
     const update = this.trainingStatusUpdates
       .filter((u) => u.driverId === driverId)
       .slice(-1)[0];
@@ -104,6 +108,8 @@ export class FakeAcademyRepository {
     _lastTrainingAt?: string | null,
     _client?: unknown,
   ) {
+    void _lastTrainingAt;
+    void _client;
     this.trainingStatusUpdates.push({ driverId, status });
   }
 

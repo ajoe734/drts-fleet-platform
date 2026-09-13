@@ -80,27 +80,37 @@ export class AcademyRepository {
 
   async executeSerializableTransaction<T>(
     work: (client: PoolClient) => Promise<T>,
+    maxRetries = 5,
   ): Promise<T> {
     if (!this.isEnabled()) {
       throw new Error("DatabaseService is not enabled");
     }
 
-    const client = await this.databaseService!.connect();
-    try {
-      await client.query("BEGIN TRANSACTION ISOLATION LEVEL SERIALIZABLE");
-      const result = await work(client);
-      await client.query("COMMIT");
-      return result;
-    } catch (error) {
+    for (let attempt = 1; attempt <= maxRetries; attempt++) {
+      const client = await this.databaseService!.connect();
       try {
-        await client.query("ROLLBACK");
-      } catch {
-        // ignore rollback error
+        await client.query("BEGIN TRANSACTION ISOLATION LEVEL SERIALIZABLE");
+        const result = await work(client);
+        await client.query("COMMIT");
+        return result;
+      } catch (error: any) {
+        try {
+          await client.query("ROLLBACK");
+        } catch {
+          // ignore rollback error
+        }
+        if (error?.code === "40001" && attempt < maxRetries) {
+          await new Promise((resolve) =>
+            setTimeout(resolve, Math.random() * 50 + 20 * attempt),
+          );
+          continue;
+        }
+        throw error;
+      } finally {
+        client.release();
       }
-      throw error;
-    } finally {
-      client.release();
     }
+    throw new Error("Serialization retries exhausted");
   }
 
   private getExecutor(client?: PoolClient): QueryExecutor {
@@ -217,7 +227,9 @@ export class AcademyRepository {
   }
 
   /** The current (highest-version) published snapshot of every known course. */
-  async listCurrentCourses(client?: PoolClient): Promise<AcademyCourseVersion[]> {
+  async listCurrentCourses(
+    client?: PoolClient,
+  ): Promise<AcademyCourseVersion[]> {
     if (!this.isEnabled()) {
       return [];
     }

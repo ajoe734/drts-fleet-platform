@@ -20,6 +20,7 @@ The recovery branch is `codex/sr-wire-001-complete-20260911`. It preserves the s
 - Consensus B1: Single async persistent clock-in/out path. Per-driver database transaction locking `reg.phase1_registry_drivers`, validating active shift in `ops.phase1_driver_shifts`, executing dev auth/lifecycle guards (`assertDriverAuthEligible`, `getVehicleDispatchability`, `assertDriverCanClockIn`), committing transaction before returning, no synthetic success facade.
 - Consensus B2: Single authoritative Academy qualification operation (`evaluateDriverQualification`) and SERIALIZABLE projection transaction. Preserves manual waivers (`training_status = 'waived'`), resets uncompleted/expired to `pending`/`expired`. Vehicle eligibility respects `trainingRequired: false` by skipping requirement checks.
 - Consensus B3: Explicit root `tsconfig.base.json` in `wire-acceptance.yml` for `tsx` server execution, ensuring `@drts/contracts` runtime JS exports are resolved instead of `.d.ts`.
+- Serialization and acceptance resilience: Implemented PostgreSQL 40001 retry loop with backoff in `AcademyRepository.executeSerializableTransaction`, guarded evaluator/repository calls against incomplete mock collaborator instances in unit tests, restricted quiz submission regulatory evaluation updates to passing attempts, cleaned up fixtures before re-seeding in `wire-app.ts` for acceptance server idempotency, and resolved root lint and typecheck contract alignments.
 
 ## Validation and acceptance boundary
 
@@ -27,16 +28,16 @@ The local development VM is used only for repository checks/builds. No API, Next
 
 Locally verified during implementation:
 
-| Command | Result |
-| --- | --- |
-| `git diff --check` | Exit 0 |
-| `pnpm --filter @drts/contracts build` and `pnpm --filter @drts/control-plane-auth build` | Exit 0; required in fresh worktree before API typecheck |
-| `pnpm --filter @drts/api typecheck` | Exit 0 |
-| `pnpm --filter @drts/driver-app typecheck` | Exit 0 |
-| `pnpm --filter @drts/fleet-partner-portal-web typecheck` | Exit 0 |
-| `pnpm --filter @drts/ops-console-web typecheck` | Exit 0 |
-| `pnpm exec vitest run tests/unit/system-remediation/sr-wire-001/` | 7 test files, 49 passed (including B1/B2 consensus tests) |
-| `pnpm exec vitest run tests/unit/shift-attendance.test.ts tests/security/iam-route-driver-negative.test.ts tests/unit/system-remediation/sr-driver-gaps-20260911/driver-gaps-remediation.test.ts tests/unit/system-remediation/sr-qa-driver-001/shift-clockin-suspension-gap.test.ts` | 4 test files, 33 passed |
+| Command                                                                                                                                                                                                                                                                               | Result                                                    |
+| ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------- |
+| `git diff --check`                                                                                                                                                                                                                                                                    | Exit 0                                                    |
+| `pnpm --filter @drts/contracts build` and `pnpm --filter @drts/control-plane-auth build`                                                                                                                                                                                              | Exit 0; required in fresh worktree before API typecheck   |
+| `pnpm --filter @drts/api typecheck`                                                                                                                                                                                                                                                   | Exit 0                                                    |
+| `pnpm --filter @drts/driver-app typecheck`                                                                                                                                                                                                                                            | Exit 0                                                    |
+| `pnpm --filter @drts/fleet-partner-portal-web typecheck`                                                                                                                                                                                                                              | Exit 0                                                    |
+| `pnpm --filter @drts/ops-console-web typecheck`                                                                                                                                                                                                                                       | Exit 0                                                    |
+| `pnpm exec vitest run tests/unit/system-remediation/sr-wire-001/`                                                                                                                                                                                                                     | 7 test files, 49 passed (including B1/B2 consensus tests) |
+| `pnpm exec vitest run tests/unit/shift-attendance.test.ts tests/security/iam-route-driver-negative.test.ts tests/unit/system-remediation/sr-driver-gaps-20260911/driver-gaps-remediation.test.ts tests/unit/system-remediation/sr-qa-driver-001/shift-clockin-suspension-gap.test.ts` | 4 test files, 33 passed                                   |
 
 The task unit tests use in-memory collaborators and explicitly do not claim HTTP/SQL proof. The full acceptance implementation is `.github/workflows/wire-acceptance.yml`:
 

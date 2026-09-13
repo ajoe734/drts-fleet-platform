@@ -9,6 +9,7 @@ import type { RuntimeEligibilityEvaluator } from "../../../../apps/api/src/modul
 import { buildHostAcceptanceCandidate } from "../../../e2e/system-remediation/sr-host-fe-001/host-acceptance-app";
 import {
   seedHostAcceptanceFixtures,
+  cleanupHostAcceptanceFixtures,
   HOST_A_PARTNER_ID,
   HOST_B_PARTNER_ID,
 } from "../../../e2e/system-remediation/sr-host-fe-001/host-acceptance-seed";
@@ -117,6 +118,7 @@ export async function createWireApp(port = 0) {
       VALUES ($1,$2,'available',true,$3,$4::jsonb) ON CONFLICT (driver_id) DO UPDATE SET record=EXCLUDED.record, updated_at=EXCLUDED.updated_at`,
       [DRIVER_ID, driver.name, now, JSON.stringify(driver)],
     );
+    await cleanupHostAcceptanceFixtures();
     await seedHostAcceptanceFixtures();
     app.setGlobalPrefix("api");
     await app.init();

@@ -18,12 +18,14 @@ describe("SR-WIRE-001 Consensus B1: Single async persistent clock-in/out path", 
 
     let transactionExecuted = false;
     mockRepo.isEnabled = () => true;
-    mockRepo.executeClockInTransaction = vi.fn(async (driverId, verifyEligibilityAndBuildShift) => {
-      transactionExecuted = true;
-      const client = {} as any;
-      const shift = await verifyEligibilityAndBuildShift(client);
-      return shift;
-    });
+    mockRepo.executeClockInTransaction = vi.fn(
+      async (driverId, verifyEligibilityAndBuildShift) => {
+        transactionExecuted = true;
+        const client = {} as any;
+        const shift = await verifyEligibilityAndBuildShift(client);
+        return shift;
+      },
+    );
 
     const service = new ShiftAttendanceService(auditService, mockRepo);
 
@@ -53,7 +55,11 @@ describe("SR-WIRE-001 Consensus B1: Single async persistent clock-in/out path", 
 
     mockRepo.isEnabled = () => true;
     mockRepo.executeClockInTransaction = vi.fn(async () => {
-      throw new ApiRequestError(500, "DB_CONNECTION_LOST", "Database connection lost during clock-in.");
+      throw new ApiRequestError(
+        500,
+        "DB_CONNECTION_LOST",
+        "Database connection lost during clock-in.",
+      );
     });
 
     const service = new ShiftAttendanceService(auditService, mockRepo);
@@ -124,6 +130,7 @@ describe("SR-WIRE-001 Consensus B2: Academy qualification single operation, waiv
     passingScore: 80,
     version: 1,
     modulesCount: 1,
+    description: "Required Training Course",
     modules: [],
     questions: [],
     answerKey: {},
@@ -144,7 +151,11 @@ describe("SR-WIRE-001 Consensus B2: Academy qualification single operation, waiv
     expect(qual.regulatoryStatus).toBe("pending");
     expect(qual.trainingSatisfied).toBe(false);
     expect(qual.trainingIncomplete).toBe(false);
-    expect(mockRepo.upsertTrainingStatus).toHaveBeenCalledWith("drv-empty", "pending", null);
+    expect(mockRepo.upsertTrainingStatus).toHaveBeenCalledWith(
+      "drv-empty",
+      "pending",
+      null,
+    );
   });
 
   it("projects 'passed' when all required courses have passing attempts", async () => {
@@ -161,7 +172,7 @@ describe("SR-WIRE-001 Consensus B2: Academy qualification single operation, waiv
           score: 100,
           passed: true,
           attemptedAt: "2026-09-10T10:00:00Z",
-          answers: [],
+          answersSummary: [],
         } as DriverQuizAttemptDetail,
       ],
       getDriverTrainingProfileStatus: async () => null,
@@ -195,7 +206,7 @@ describe("SR-WIRE-001 Consensus B2: Academy qualification single operation, waiv
           score: 100,
           passed: true,
           attemptedAt: "2026-06-01T10:00:00Z", // > 30 days ago
-          answers: [],
+          answersSummary: [],
         } as DriverQuizAttemptDetail,
       ],
       getDriverTrainingProfileStatus: async () => null,
@@ -265,7 +276,7 @@ describe("SR-WIRE-001 Consensus B2: Academy qualification single operation, waiv
       vehicleId: "veh-001",
       orderId: "ord-001",
       dispatchJobId: "job-001",
-      serviceProductCode: "standard_taxi",
+      serviceProductCode: "taxi_realtime",
     });
 
     expect(result.decision).toBe("eligible");
@@ -302,7 +313,7 @@ describe("SR-WIRE-001 Consensus B2: Academy qualification single operation, waiv
       vehicleId: "veh-001",
       orderId: "ord-001",
       dispatchJobId: "job-001",
-      serviceProductCode: "standard_taxi",
+      serviceProductCode: "taxi_realtime",
     });
 
     expect(result.decision).toBe("eligible");

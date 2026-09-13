@@ -141,7 +141,10 @@ export class AcademyService {
       };
     };
 
-    if (this.repository.isEnabled()) {
+    if (
+      this.repository.isEnabled() &&
+      typeof this.repository.executeSerializableTransaction === "function"
+    ) {
       return this.repository.executeSerializableTransaction(async (client) => {
         const [existingStatus, courses, attempts] = await Promise.all([
           this.repository.getDriverTrainingProfileStatus(driverId, client),
@@ -275,9 +278,9 @@ export class AcademyService {
         completedAt: attemptedAt,
         expiresAt,
       });
-    }
 
-    await this.evaluateDriverQualification(driverId, new Date(attemptedAt));
+      await this.evaluateDriverQualification(driverId, new Date(attemptedAt));
+    }
 
     return {
       ...attempt,

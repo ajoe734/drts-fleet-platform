@@ -11547,7 +11547,13 @@ export class OwnedMobilityService
     driverId: string,
     vehicleId: string,
   ): Promise<string[]> {
-    if (!this.runtimeEligibilityEvaluator) return [];
+    if (
+      !this.runtimeEligibilityEvaluator ||
+      typeof this.runtimeEligibilityEvaluator.assessDriverRequirements !==
+        "function"
+    ) {
+      return [];
+    }
     const current =
       await this.runtimeEligibilityEvaluator.assessDriverRequirements(driverId);
     const capability =
