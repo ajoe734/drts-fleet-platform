@@ -195,8 +195,11 @@ jobs:
           set -o pipefail
           pnpm exec playwright test \
             -c playwright.system-remediation.config.ts \
+            --output test-results/tenant-artifacts \
             tests/e2e/system-remediation/sr-qa-tenant-001 --workers=1 --trace=off \
             2>&1 | tee -a .artifacts/tenant-uat-acceptance/execution-log.txt
+          mkdir -p .artifacts/tenant-uat-acceptance
+          cp test-results/system-remediation-report.json .artifacts/tenant-uat-acceptance/system-remediation-report.json || true
 
       - name: Run tenant service-level regression suite
         id: harness_unit
@@ -216,8 +219,12 @@ jobs:
           set -o pipefail
           pnpm exec playwright test \
             -c playwright.system-remediation.config.ts \
+            --output test-results/webhook-artifacts \
             tests/e2e/system-remediation/sr-qa-webhook-001/sr-qa-webhook-001.spec.ts --workers=1 --trace=off \
             2>&1 | tee -a .artifacts/tenant-uat-acceptance/execution-log.txt
+          if [ ! -f test-results/system-remediation-report.json ] && [ -f .artifacts/tenant-uat-acceptance/system-remediation-report.json ]; then
+            cp .artifacts/tenant-uat-acceptance/system-remediation-report.json test-results/system-remediation-report.json
+          fi
 
       - name: Run webhook unit regression suite (C111-C115 34 tests)
         id: webhook_unit
@@ -300,6 +307,8 @@ jobs:
           from pathlib import Path
 
           playwright_report = Path("test-results/system-remediation-report.json")
+          if not playwright_report.exists() and Path(".artifacts/tenant-uat-acceptance/system-remediation-report.json").exists():
+              playwright_report = Path(".artifacts/tenant-uat-acceptance/system-remediation-report.json")
           if not playwright_report.exists():
               raise SystemExit(
                   "Tenant UAT acceptance gate: no Playwright JSON report was "
@@ -553,6 +562,7 @@ jobs:
           path: |
             .artifacts/tenant-uat-acceptance/execution-log.txt
             .artifacts/tenant-uat-acceptance/api-server.log
+            .artifacts/tenant-uat-acceptance/system-remediation-report.json
             .artifacts/tenant-uat-acceptance/unit-test-report.json
             .artifacts/tenant-uat-acceptance/webhook-unit-report.json
             .artifacts/tenant-uat-acceptance/run-status.json

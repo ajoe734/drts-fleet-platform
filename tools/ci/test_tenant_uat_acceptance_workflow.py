@@ -267,6 +267,7 @@ class TenantUatAcceptanceWorkflowStructureTests(unittest.TestCase):
         webhook_e2e_block = self.text.split("id: webhook_e2e", 1)[1].split("      - name:", 1)[0]
         self.assertIn("PLAYWRIGHT_JSON_OUTPUT_FILE:", webhook_e2e_block)
         self.assertIn("test-results/webhook-e2e-report.json", webhook_e2e_block)
+        self.assertIn("--output test-results/webhook-artifacts", webhook_e2e_block)
 
     def test_hosted_tsx_acceptance_runners_use_api_tsconfig(self) -> None:
         top_env = self.text.split("jobs:", 1)[1].split("steps:", 1)[0]
@@ -543,6 +544,65 @@ class FullMatrixGateBehaviorTests(unittest.TestCase):
         # a failure in tenant specs or restart durability STILL fails the gate independently!
         self.assertNotEqual(self.run_gate(missing_file="approval-rules.spec.ts").returncode, 0)
         self.assertNotEqual(self.run_gate(restart_status="failed").returncode, 0)
+
+    def test_playwright_report_fallback_from_artifact_dir(self):
+        # Even if test-results/system-remediation-report.json was cleaned by an external step,
+        # the fallback in .artifacts/tenant-uat-acceptance/system-remediation-report.json satisfies the gate!
+        files = [
+            "approval-rules.spec.ts", "cost-center.spec.ts", "passenger-address.spec.ts",
+            "sla.spec.ts", "users.spec.ts", "directory-durability.spec.ts",
+            "governance.spec.ts", "invitation-mail.spec.ts"
+        ]
+        specs = []
+        for name in files:
+            for unused in range(3 if name == "governance.spec.ts" else 1):
+                specs.append({
+                    "file": "tests/e2e/system-remediation/sr-qa-tenant-001/" + name,
+                    "tests": [{"results": [{"status": "passed"}]}]
+                })
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            artifact = root / ".artifacts/tenant-uat-acceptance"
+            artifact.mkdir(parents=True)
+            (artifact / "system-remediation-report.json").write_text(
+                json.dumps({"suites": [{"specs": specs}]})
+            )
+            (artifact / "unit-test-report.json").write_text(
+                json.dumps({"numTotalTests": 27, "numPassedTests": 27, "numPendingTests": 0, "success": True})
+            )
+            (artifact / "restart-report.json").write_text(
+                json.dumps({"status": "passed", "verified": 12, "candidate_sha": "c" * 40, "tables": [f"table_{i}" for i in range(12)]})
+            )
+            (artifact / "webhook-unit-report.json").write_text(
+                json.dumps({
+                    "numTotalTests": 34,
+                    "numPassedTests": 34,
+                    "numPendingTests": 0,
+                    "success": True,
+                })
+            )
+            caps = {
+                "C111": {"status": "passed", "verified": ["ok"]},
+                "C112": {"status": "passed", "verified": ["ok"]},
+                "C113": {"status": "passed", "verified": ["ok"]},
+                "C114": {"status": "passed", "verified": ["ok"]},
+                "C115": {"status": "passed", "verified": ["ok"]},
+            }
+            (artifact / "c111-c115-capability-report.json").write_text(
+                json.dumps({
+                    "candidate_sha": "c" * 40,
+                    "status": "passed",
+                    "capabilities": caps,
+                })
+            )
+            result = subprocess.run(
+                [sys.executable, "-c", self.script],
+                cwd=root,
+                env={"CANDIDATE_SHA": "c" * 40, "PATH": "/usr/bin:/bin"},
+                capture_output=True,
+                text=True,
+            )
+            self.assertEqual(result.returncode, 0, result.stderr)
 
 
 if __name__ == "__main__":

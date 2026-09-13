@@ -16,6 +16,7 @@
 //    .artifacts/tenant-uat-acceptance/c111-c115-capability-report.json
 //    covering capabilities C111 through C115.
 
+import "./register-tsx-paths";
 import { randomUUID } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { createRequire } from "node:module";

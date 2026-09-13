@@ -17,6 +17,7 @@
 //   and reg.phase1_registry_drivers (expired qualification / license), saving
 //   a manifest for post-restart verification.
 
+import "./register-tsx-paths";
 import { randomUUID } from "node:crypto";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { createRequire } from "node:module";
