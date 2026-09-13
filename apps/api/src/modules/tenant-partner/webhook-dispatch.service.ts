@@ -17,7 +17,8 @@ const WEBHOOK_DISPATCH_TIMEOUT_MAX_MS = 60_000;
 // outbound adapters (driver-sos scanner / geo provider default 5_000ms). A slow but
 // healthy tenant endpoint should not be misclassified as failed on that tighter,
 // synchronous-call budget, so the default sits higher while still bounding the worst
-// case; see docs/04-uat/system-remediation-20260906/webhook-transport-timeout-20260911.md.
+// case; see docs/03-runbooks/tenant-api-webhook-governance-runbook.md and
+// docs/04-uat/system-remediation-20260906/webhook-transport-timeout-20260911.md.
 const DEFAULT_WEBHOOK_DISPATCH_TIMEOUT_MS = 10_000;
 
 function validateWebhookDispatchTimeoutMs(
