@@ -146,12 +146,12 @@ test("Tenant users create, role update and tenant isolation", async ({
       expect(
         (
           await call(tenantA, tokenA, path, {
-            roleCode: "tenant_requester",
+            roleCode: "tenant_ops_admin",
           })
         ).status(),
       ).toBe(201);
       expect(await getRecord()).toMatchObject({
-        roleCode: "tenant_requester",
+        roleCode: "tenant_ops_admin",
         status: "invited",
       });
       // Revoke the unused invitation before suspending this disposable user.

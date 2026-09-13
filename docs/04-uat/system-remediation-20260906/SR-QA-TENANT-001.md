@@ -170,3 +170,14 @@ The 4 failures were diagnosed as follows:
   returns `status: "unavailable"`, dropping the email without enqueuing to Mailpit SMTP.
   Scoped repair subtask: `SR-QA-TENANT-001-FIX-INVITATION-DELIVERY-DI`.
 
+Run `34738075114` on candidate `9f10242ac66da876c56f69e128dad4d38863ae5c`
+confirmed that the `governance.spec.ts` quota ledger variants fix was effective,
+advancing passed specs to 7/10. The failure in `users.spec.ts:152` occurred because
+the positive role update at line 149 also requested `roleCode: "tenant_requester"`,
+which is rejected by `assertSupportedTenantRoleCode` with 400. That call was updated
+to valid `tenant_ops_admin`, aligning all role tests with `TENANT_ROLE_CATALOG`.
+The two remaining failures (`sla.spec.ts` cross-tenant spoofing and `invitation-mail.spec.ts`
+SMTP delivery injection) are blocked by the two reproduced product defects recorded above.
+Canonical child repair tasks `SR-QA-TENANT-001-FIX-SLA-CROSS-TENANT` and
+`SR-QA-TENANT-001-FIX-INVITATION-DELIVERY-DI` have been created in machine truth
+(`ai-status.json`) to track their repair and authorization under canonical product write scopes.
