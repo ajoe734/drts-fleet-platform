@@ -5,7 +5,7 @@
 ## Current dispatch — 2026-09-13
 
 - Baton owner / reviewer lane: Codex; supervisor: Claude.
-- Status: Codex scope reconciliation and technical synthesis submitted in Entries 16–17. The board now records first-release one-call/one-order scope and withdrawal of multi-order work. Earlier 1:N proposals are superseded for this release; remaining WIRE/C111–C115 SD and cross-lane convergence remain pending.
+- Status: Codex recovery design review submitted in Entries 18–19, following Entries 16–17’s scope reconciliation and technical synthesis. The board now records first-release one-call/one-order scope and withdrawal of multi-order work. Earlier 1:N proposals are superseded for this release; remaining WIRE/C111–C115 SD and cross-lane convergence remain pending.
 - Entries 1–4 preserve the 2026-04-11 review. Their convergence does not authorize execution during the current planning pause.
 - Entries 5–10 review the historical synthesis against current canonical contracts and the supervisor's `product-remediation-sa-sd-20260913.md` P01–P06 inventory. Proposed wording below is not a newly accepted product decision or an execution assignment.
 - Evidence boundary: canonical source files and read-only task-board inspection. The board snapshot (`ai-status.json.updated_at=2026-09-13T13:21:27Z`) records `discussion_planning`, `discussion_loop.current_owner=Codex`, and both `SR-WIRE-001` and `SR-QA-WEBHOOK-001` as `blocked`. Reported test failures/WIP below are attributed to that board, not independently reproduced here.
@@ -13,6 +13,7 @@
 - Follow-up evidence: the inventory's second version and Q-001 update, §§3.1–3.7, and read-only Git inspection at `6eec9635c17674b89b8519c642eb48b51dbd6479` (the recorded `origin/dev` snapshot). Entries 11–12 distinguish inspected workflow source from a successful execution; no hosted workflow was dispatched.
 - Prior technical follow-up: inventory §§3.2, 3.6–3.8 and board snapshot `updated_at=2026-09-13T13:48:04Z`. Entry 13 supersedes the earlier outstanding P03 root-cause investigation and records the supervisor-created, blocked Q-001 task. Entries 14–15 are static design review against the same product-source SHA above; the WIRE workflow is inspected separately at candidate `becf4ecdb32dac2a89e272db87243b1d4c38757f`. No product check or runtime was executed.
 - Current evidence: `ai-status.json.updated_at=2026-09-13T14:02:27Z`, `discussion_planning`, owner Codex; `SR-CALL-MULTIORDER-20260913.next` records user withdrawal and `SR-RELEASE-001` no longer depends on it. Entry 16 acknowledges the supervisor-synchronized question board/inventory and preserves the appended user-scope disposition; Entry 17 reviews inventory §§3.9–3.10 against source at `6eec9635c17674b89b8519c642eb48b51dbd6479`. This dispatch ran documentation checks only.
+- Latest follow-up: inventory §§3.9, 3.11–3.12 now propose the Academy transaction and API lifecycle integration for credential/recording recovery. Entries 18–19 review these proposals against the same product SHA above, including notification receipt contracts. Closeout snapshot `updated_at=2026-09-13T14:18:58Z` retains the same mode/owner and records the supervisor’s reconciliation of the withdrawn task’s integration notes, dependencies and acceptance keys. WIRE/webhook notes now point to the new design proposals. The concurrent inventory §3.12 ordinary-call addition is acknowledged below; evidence remains static source and shared-document review only.
 
 ## Entries
 
@@ -653,10 +654,90 @@ Scope status: historical 1:N proposal, withdrawn from first-release work by the 
 
 - Supervisor/capability-owner disposition of the four technical outputs above, including the concrete persistence and deployed trigger/transport choices. P05 remains on its existing product/device decision route. No implementation is dispatched by this synthesis.
 
+### Entry 18 — Define credential event identity and notification handoff recovery
+
+#### Metadata
+
+- Reviewer lane: Codex
+- Target lane: Claude2 / Gemini / Gemini2 / Claude; Entry 17; inventory §§3.9, 3.11
+- Round: 1, recovery design review
+- Date: 2026-09-13
+
+#### Claim Under Review
+
+- The new Registry reconciliation operation can recover overdue credentials from PostgreSQL, suppress obsolete renewal events and reuse the existing notification service with an idempotency key.
+
+#### Review Outcome
+
+- `confirm` the bounded Registry operation and overdue-work direction; `refine` event identity, renewal ordering and the durable handoff to notification delivery. The new inventory supplies proposed trigger/transaction choices; do not keep describing those choices as wholly unspecified.
+
+#### Evidence
+
+- [Inventory](product-remediation-sa-sd-20260913.md), §3.9 item 4 and §3.11 items 1–6: the supervisor now proposes a shared Academy transaction, an API lifecycle trigger, overdue-source discovery, a dedicated Registry processing record, lease protection and separate notification results. These remain submitted SD, not accepted implementation scopes.
+- [PRD](../../../../phase1_prd_detailed_v1.md), §§9.6.2, 9.6.4; [Service Contracts](../../../../phase1_service_contracts_v1.md), §§3.3, 3.13, 7.1; [acceptance scenarios](../../../../phase1_llm_dev_pack_extracted/phase1_llm_dev_pack/02_acceptance_scenarios_gherkin.md), SC-024–025: current eligibility and expiry alerts retain their existing authorities, including the vehicle-insurance case.
+- [RegulatoryRegistryService](../../../../apps/api/src/modules/regulatory-registry/regulatory-registry.service.ts), `listExpiringDriverLicenses` / `areDriverLicensesValid`, at `6eec9635c17674b89b8519c642eb48b51dbd6479`: the query selects active drivers with at least one expiry in the future window, while the validity helper rejects a date at or before the reference time. Repeating that query misses drivers whose dated credentials are all overdue. [Registry repository](../../../../apps/api/src/modules/regulatory-registry/regulatory-registry.repository.ts), `persistChangesInternal` / driver upsert, at the same SHA: expiry fields are in the JSON record; every driver write sets the row's `updated_at` anew. That timestamp is not a credential-specific revision.
+- [NotificationDeliveryService](../../../../apps/api/src/modules/notification-delivery/notification-delivery.service.ts), `enqueue`, `dispatch`, `drain`, and [delivery types](../../../../apps/api/src/modules/notification-delivery/notification-delivery.types.ts), `EnqueueMail`, `ProviderAcknowledgement`, at the same SHA: deduplication uses tenant plus key and rejects a changed recipient/content hash. The core preserves uncertain attempts and late provider acceptance; `sent` means provider acceptance, not recipient receipt. [FileMailOutbox](../../../../apps/api/src/modules/notification-delivery/file-mail-outbox.ts), class contract / `transaction`, provides a separate storage transaction with a single-host/shared-local-volume guarantee.
+
+#### Impact On Consensus
+
+| Boundary                | Proposed refinement before acceptance                                                                                                                                                                                                                                                                                                                                                                            | Verification consequence                                                                                                                                                                                                                            |
+| ----------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Credential identity     | Name the exact credential source revision or canonical fingerprint and its authorized scope mapping. Do not use the driver's general `updated_at` as the event version. Compare the current credential again within the transaction that records the event disposition; a claim lease alone does not serialize renewal writes.                                                                                   | Unrelated driver writes do not create another expiry alert; a real renewal/correction is distinguishable. Cover renewal before claim and between validation and persistence, using retained IDs.                                                    |
+| Event → delivery        | Persist the authorized notification request identity and stable recipient/content snapshot with the pending handoff. Re-enqueue with that same key and payload after a crash, then persist/read back its delivery ID. A Registry transaction cannot by itself make the separate outbox commit atomic. Recipient/routing changes need an explicit disposition rather than changing the payload under the old key. | Crash after event commit but before enqueue, and after enqueue but before saving the receipt reference. Recovery reaches the original delivery without an idempotency conflict or duplicate logical alert. Missing durable storage remains visible. |
+| Renewal / late evidence | Keep event supersession separate from delivery-attempt history. Recheck obsolete unsent work before sending; preserve acceptance already returned by the provider for an earlier attempt, even after renewal or lease replacement. Fence stale Registry state writes without erasing that evidence or claiming a sent alert was recalled.                                                                        | Late failure cannot overwrite known acceptance. Distinguish pending handoff, provider acceptance and actual recipient evidence; local deduplication alone does not establish exactly-once external delivery.                                        |
+| Expiry coverage         | Map Academy expiry and SC-024 insurance expiry to their existing due-work sources and owners alongside the three driver date fields. The driver-date scan alone does not enumerate either population. Carry §3.9's proposed shared transaction forward for review; preserve its pending waiver/write-grant disposition.                                                                                          | An expired course with all driver licenses valid, and an expired vehicle policy, retain their independent guards/alert requirements. Record where each case is covered before claiming C115 complete.                                               |
+
+- Suggested synthesis wording: “Registry owns expiry reconciliation and event disposition; notification delivery owns its attempts and receipts. Recovery retains a stable credential identity and notification request across both persistence boundaries. Academy and insurance cases retain their own source mapping and qualification rules.”
+- These are refinements to the existing C115/WIRE design routes. Before execution, the supervisor must publish the accepted design and record any required product repair beyond the QA task's scopes. No new event bus, delivery service, task or migration is created by this review.
+
+#### Remaining Question
+
+- Capability owners should disposition the credential-version/scope mapping, event-to-delivery recovery contract and Academy/insurance coverage. The inventory's proposed API trigger still needs environment evidence; this review performs no live check.
+
+### Entry 19 — Make recording close replay and runner activation explicit
+
+#### Metadata
+
+- Reviewer lane: Codex
+- Target lane: Claude2 / Gemini / Gemini2 / Claude; Entries 12, 17; inventory §3.12
+- Round: 1, recovery design review
+- Date: 2026-09-13
+
+#### Claim Under Review
+
+- Trusted close events can use the existing session-event authority, create finalization work with session closure, call the recorder adapter and activate the existing API runner lifecycle.
+
+#### Review Outcome
+
+- `confirm` the reuse and explicit missing-adapter disclosure; `refine` the close-event replay boundary, supported work types and recovery coverage. This advances §3.12 without accepting unspecified transports or claiming a deployed loop exists.
+
+#### Evidence
+
+- [Voice SD](../../phase1-unattended-voice-booking-sd-20260906.md), §§3.4, 5.4, 7.3, 9.1: closed sessions stop new passenger commands while accepted commands and reconciliation continue; session events are append-only and work is durable. [Service Contracts](../../../../phase1_service_contracts_v1.md), §§6.2, 8.1, and [API examples](../../../../phase1_llm_dev_pack_extracted/phase1_llm_dev_pack/03_api_examples_and_error_contracts.md), §3.16: recording callbacks retain trusted provider timestamps, replay protection and call-only indexing when no order exists.
+- [VoiceSessionService](../../../../apps/api/src/modules/voice-booking/voice-session.service.ts), `recordControlEvent` / `closeSession`, and [session repository](../../../../apps/api/src/modules/voice-booking/voice-session.repository.ts), `insertControlEvent`, at `6eec9635c17674b89b8519c642eb48b51dbd6479`: event insertion and later application are separate calls; a duplicate event returns early. `closeSession` also returns early for an already closed session. Event deduplication alone therefore does not establish that the proposed close/enqueue effects occurred.
+- [VoiceCommandRunnerService](../../../../apps/api/src/modules/voice-booking/voice-command-runner.service.ts), `enqueueWorkItem`, `runOnce`, `dispatchWorkItem`, `startBackgroundLoop`, at the same SHA: enqueue does nothing on a duplicate key; claims default to every work type unless `supportedTypes` is supplied. Several built-in downstream handlers return metadata, and unknown types return `unhandled` before completion. Exhausted failures remain `failed`, outside the pending/expired-lease claim query.
+- [FinalRecordingManifests](../../../../apps/voice-media-worker/src/recording/final-manifest.ts), `seal` / `read`, and [VoiceEvidenceService](../../../../apps/api/src/modules/voice-booking/voice-evidence.service.ts), access/reader interfaces, at the same SHA: finalization uses the close ledger and checkpoint references, while the current API reader is confirmation-oriented. Inventory §3.12 correctly describes the final-manifest adapter/verification extension as proposed, rather than an existing HTTP/RPC endpoint.
+- Concurrent [inventory](product-remediation-sa-sd-20260913.md), §3.12 addition: the supervisor now explicitly includes ordinary Callcenter close/pending producers, nullable voice-session linkage, recovery of historical pending sessions and server-selected evidence requirements. Confirm this proposal; retain its separate controlled-adapter versus actual-provider evidence boundary.
+
+#### Impact On Consensus
+
+| Boundary                | Proposed refinement before acceptance                                                                                                                                                                                                                                                                                                                                  | Verification consequence                                                                                                                                                                                                                              |
+| ----------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Close-event application | Specify either the same transaction for trusted event acceptance, closure and enqueue, or a durable unapplied-event recovery rule. A duplicate event or already closed dialog must verify the matching finalization work/effects. Validate the retained event/work binding and payload on a dedupe hit; a reused identifier is not proof of an equivalent close event. | Crash after event insertion and before closure/enqueue; replay after closed state; conflicting payload under the same event/work key; stale leg/media epoch. Exactly one matching work item survives, and accepted booking receipts remain unchanged. |
+| Runner activation       | Inventory each claimed work type and its actual registered handler before connecting the lifecycle hook. Supply an explicit supported-type composition; do not let a newly started loop silently complete unrelated metadata-only handlers. Preserve already accepted command recovery through the reviewed composition.                                               | Mixed pending work includes recording, accepted commands and an unsupported type. Only verified durable outcomes can complete their work; absent adapter/handler readiness is observable.                                                             |
+| Retry exhaustion        | Specify an authorized repair/retry operation through the existing voice owner for exhausted recording work, retaining its identity and attempt history. Re-enqueueing the same key currently cannot revive a failed row. Never manufacture a new key merely to evade a failure or erase earlier evidence.                                                              | Exhaust attempts, restore the dependency and use the reviewed recovery path. Reuse verified media results after interruption; stale workers cannot overwrite newer domain results.                                                                    |
+| Call/order coverage     | Carry the newly recorded ordinary-call producer/recovery map forward, including historical pending calls. Add explicit no-order coverage. Preserve call-only recording indexes, the ordinary callback's own evidence rules and the sole linked order where present. Do not fabricate a voice session or require a booking confirmation for a call that never booked.   | Voice and ordinary phone paths recover with zero or one order. Ready-before-link, failed/late callbacks and terminal orders preserve existing evidence and lifecycle; multi-order fan-out remains withdrawn.                                          |
+
+- Carry the new lifecycle/adapter proposals forward to the current review order. Keep Entry 12's hosted process replacement and domain readback, full WIRE acceptance, all three webhook keys and UV-EXEC-028's separate live/PSTN gates. Source inspection and a deployment-check script's exit status cannot establish those outcomes.
+
+#### Remaining Question
+
+- Disposition the event transaction/replay rule, actual adapter and handler composition, exhausted-work recovery and zero-order/historical-backlog verification of the newly recorded ordinary-call map. These are bounded engineering outputs for the supervisor's existing routes; no implementation or environment operation is dispatched here.
+
 ## Reopened-cycle disposition
 
-- Codex review: submitted (Entries 5–17). Entries 16–17 reconcile the recorded launch-scope correction and review the newer Academy/C115 inventory. Earlier 1:N proposals are historical and withdrawn from first-release work; they are not outstanding release SD. Cross-lane acceptance and final synthesis remain pending.
-- Claude's next planning action: publish the synchronized Q-001/inventory records, reconcile the older withdrawn-task note, disposition remaining Entries 11–13 and 17 with Entry 16's scope correction, and route the current review order. Preserve P05's existing human-decision route and original WIRE/webhook/live gates. Publish the supervisor-owned inventory and accepted scoped canonical updates through the normal document flow.
+- Codex review: submitted (Entries 5–19). Entries 18–19 review the new transaction/lifecycle proposals and narrow remaining outputs to credential identity, notification handoff, close-event replay and actual handler/producer coverage. Entries 16–17 retain the scope correction and initial Academy/C115 synthesis. Earlier 1:N proposals are historical and withdrawn from first-release work. Cross-lane acceptance and final synthesis remain pending.
+- Claude's next planning action: publish the synchronized Q-001/inventory records, preserve the now-reconciled withdrawn-task notes, disposition remaining Entries 11–13 and 17–19 with Entry 16's scope correction, and route the current review order. Preserve P05's existing human-decision route and original WIRE/webhook/live gates. Publish the supervisor-owned inventory and accepted scoped canonical updates through the normal document flow.
 - Codex remains the recorded owner until the supervisor records a transition. Preserve the historical `consensus-packet.md` and `review-round-2.md`; April's convergence is not closure of this reopened cycle.
 - Continue `discussion_planning`; no task lifecycle transition, implementation commit, deployment, or product runtime was initiated by this review.
 

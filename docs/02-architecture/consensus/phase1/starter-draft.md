@@ -13,17 +13,17 @@ Rules:
 - Round: 1, reopened planning review on 2026-09-13
 - Current owner: Codex
 - Supervisor: Claude
-- Active artifact: [review-round-1.md](review-round-1.md), Entries 5–17
+- Active artifact: [review-round-1.md](review-round-1.md), Entries 5–19
 - Goal: reconcile historical synthesis with current release scope and complete cited WIRE/webhook SA/SD review before supervisor-led synthesis
-- Status: scope reconciliation and technical synthesis submitted; cross-lane disposition and convergence pending; execution remains paused
+- Status: recovery design review submitted; cross-lane disposition and convergence pending; execution remains paused
 
 ## Reopened Review Inputs
 
 The cited feedback lives in [review-round-1.md](review-round-1.md). Entries 5–10 cover planning authority, accepted contract decisions and P01–P06 boundaries; the supervisor inventory §3.5 records their earlier dispositions. Entries 11–13 refine clock-in persistence, runner/recovery gates and the documented P03 declaration-path loading cause. Their Q-001 portions and Entries 14–15's multi-order proposals are historical following Entry 16.
 
-**Current launch scope:** board snapshot `2026-09-13T14:02:27Z` records the user's later direction: first operational release uses one call / one order. `SR-CALL-MULTIORDER-20260913` is withdrawn with empty scopes and no release dependency. Its blocked state preserves history because the board has no cancellation state; it is not awaiting technical SD or a launch requirement. The supervisor has synchronized the question board and inventory; preserve its appended scope record and reconcile only the older task note when publishing. This review neither reopens the cardinality question nor changes the board.
+**Current launch scope:** board snapshot `2026-09-13T14:02:27Z` records the user's later direction: first operational release uses one call / one order. `SR-CALL-MULTIORDER-20260913` is withdrawn with empty scopes and no release dependency. Its blocked state preserves history because the board has no cancellation state; it is not awaiting technical SD or a launch requirement. The supervisor has synchronized the question board and inventory; preserve its appended scope record. Closeout board snapshot `2026-09-13T14:18:58Z` also reconciles the older task note and clears its active dependencies/acceptance keys; that reconciliation is no longer pending. This review neither reopens the cardinality question nor changes the board.
 
-Entry 17 reviews the supervisor inventory's newer §§3.9–3.10: reuse Academy's existing qualification calculation with an explicit regulatory projection/write boundary; reuse the voice work queue with a real recording producer, verified durable completion and actual deployment hook. Credential-expiry/alert work remains a separate C115 obligation. These are submitted technical outputs for cross-review, not accepted state-machine changes, execution assignments or evidence of running services.
+Entry 17 reviews Academy projection and recording-handler gaps. The inventory now proposes a shared Academy transaction (§3.9), Registry expiry processing (§3.11) and recording adapters/API lifecycle integration (§3.12). Entries 18–19 carry those proposals forward and specify the remaining credential identity, renewal/delivery ordering, close-event replay, handler readiness, exhausted-work recovery and ordinary-call coverage. These remain submitted technical outputs for cross-review, not accepted state-machine changes, execution assignments or evidence of running services.
 
 Preserve the inventory's distinction between root's restore regression, worker compatibility code, published candidate evidence and unverified WIP. Keep original WIRE, C111–C115 and live acceptance gates, and P05's existing product/device decision route. [AI_COLLABORATION_GUIDE.md](../../../../AI_COLLABORATION_GUIDE.md), §§4–5, governs convergence and current-packet acceptance; the user's existing direction already assigns subsequent implementation to supervisor/auto workers.
 

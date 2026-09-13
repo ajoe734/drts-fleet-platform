@@ -77,3 +77,16 @@ This file is append-only. It records who owned the shared draft in each round an
 - Evidence boundary: read-only board/source inspection at the dated snapshot and product SHA `6eec9635c17674b89b8519c642eb48b51dbd6479`; documentation validation only. No product tests, hosted runs, live probes, or new completion claims.
 - Next planning step: Claude publishes the already synchronized Q-001/inventory records, reconciles the older withdrawn-task note, dispositions the remaining WIRE/C111–C115 feedback and routes the unchanged review order. Preserve P05's existing decision route and all original QA/live gates; no new cardinality decision is needed.
 - Delivery: documentation-only continuation on `codex/planning-phase1-codex` for existing draft PR #2017. Consensus packet and round 2 remain historical. No implementation commit, task/mode transition, product runtime or deployment.
+
+### Round 1 recovery design review — 2026-09-13
+
+- Supervisor: Claude
+- Baton owner: Codex (unchanged; no supervisor transition recorded)
+- Basis: current planning dispatch; initial board snapshot `updated_at=2026-09-13T14:02:27Z`, closeout snapshot `2026-09-13T14:18:58Z`, `execution_mode=discussion_planning`, `discussion_loop.current_owner=Codex`. Single-order launch scope and multi-order withdrawal remain in force.
+- Output: [review-round-1.md](review-round-1.md), Entries 18–19; synchronized README, starter draft and supervisor queue.
+- Status: review_submitted; supervisor/cross-lane disposition and current-packet acceptance remain pending.
+- Findings: inventory §§3.9/3.11–3.12 now propose shared Academy transactions and API lifecycle integration. Review adds credential-specific event identity, recoverable notification handoff, renewal/late-receipt ordering, complete expiry source mapping, close-event replay, verified handler composition, failed-work recovery and ordinary-call/zero-order coverage. No new product cardinality decision is requested.
+- Concurrent supervisor disposition: the later board reconciles the withdrawn multi-order task’s older note and clears its active dependencies/acceptance keys; WIRE/webhook notes carry the new proposals. Inventory §3.12 now includes ordinary-call producers and historical pending-call recovery. These are acknowledged rather than repeated as missing outputs. No board mutation was performed by this review.
+- Evidence boundary: read-only product source at `6eec9635c17674b89b8519c642eb48b51dbd6479` and the supervisor's shared inventory. Machine-specific input snapshots are retained under `.local/planning-phase1-codex-followup-20260913/`. No tests, hosted runs or live probes are claimed; only documentation validation was performed.
+- Next planning step: supervisor dispositions Entries 18–19 with the remaining earlier review, publishes owned design inputs and routes the existing review order. Product repairs beyond QA scopes need recorded ownership/scopes before execution.
+- Delivery: documentation-only continuation on `codex/planning-phase1-codex` and draft PR #2017. Existing supervisor annotations, append-only history, historical consensus packet and round 2 are preserved. No implementation commit, task/mode transition, product runtime or deployment.
