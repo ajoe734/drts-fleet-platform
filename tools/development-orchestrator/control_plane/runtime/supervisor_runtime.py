@@ -6636,6 +6636,8 @@ def blocked_task_triage_action(
     status: dict[str, Any],
     task: dict[str, Any],
 ) -> tuple[str, str | None]:
+    if task.get("external_gate"):
+        return "wait_for_parent_resolution", None
     task_id = str(task.get("id") or "").strip()
     if not task_id:
         return "create_unblock_task", None
@@ -6977,6 +6979,8 @@ def create_chair_unblock_task(
     parent = task_map.get(parent_id)
     if parent is None or str(parent.get("status") or "").lower() != "blocked":
         return False
+    if parent.get("external_gate"):
+        return False
     # Recursion base case: a blocked unblock/repair task or auto-generated helper
     # must NOT spawn another governance
     # child. Without this, a blocked `X-UNBLOCK` triages into `X-UNBLOCK-UNBLOCK`
@@ -7124,6 +7128,8 @@ def apply_chair_parent_resume_action(
     task_map = task_index_from_status(config, status)
     parent = task_map.get(task_id)
     if parent is None or str(parent.get("status") or "").lower() != "blocked":
+        return False
+    if parent.get("external_gate"):
         return False
 
     dependency_done_statuses = {
