@@ -139,7 +139,11 @@ describe("SR-QA-UX-001 — C117: Idempotency Deduplication & Replay Verification
         payload,
         execute: async () => {
           executionCount += 1;
-          return { bookingId: "tb-duplicate-should-not-occur" };
+          return {
+            bookingId: "tb-duplicate-should-not-occur",
+            status: "pending",
+            chargedMinor: 0,
+          };
         },
       });
 

@@ -81,11 +81,11 @@ describe("SR-QA-UX-001 — C121: Multilingual Locale, Currency & Time Consistenc
         "common.self",
         "common.notReady",
         "common.generalDispatch",
-      ];
+      ] as const;
 
       for (const key of criticalEnterpriseKeys) {
-        const zhVal = enterpriseT(key, "zh");
-        const enVal = enterpriseT(key, "en");
+        const zhVal = enterpriseT(key, undefined, "zh");
+        const enVal = enterpriseT(key, undefined, "en");
 
         expect(zhVal).not.toMatch(technicalTokenRegex);
         expect(enVal).not.toMatch(technicalTokenRegex);

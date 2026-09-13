@@ -91,10 +91,11 @@ describe("SR-QA-UX-001 — C120: Global Accessibility, Keyboard Focus & Responsi
   describe("2. R23 Traceability: Label Associations & WCAG AA Color Contrast", () => {
     // Relative luminance calculation according to WCAG 2.1 specs
     function srgbLuminance(r: number, g: number, b: number): number {
-      const [rs, gs, bs] = [r / 255, g / 255, b / 255].map((c) =>
-        c <= 0.03928 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4),
-      );
-      return 0.2126 * rs + 0.7152 * gs + 0.0722 * bs;
+      const toLinear = (c: number): number => {
+        const v = c / 255;
+        return v <= 0.03928 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4);
+      };
+      return 0.2126 * toLinear(r) + 0.7152 * toLinear(g) + 0.0722 * toLinear(b);
     }
 
     function contrastRatio(l1: number, l2: number): number {

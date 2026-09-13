@@ -153,14 +153,15 @@ describe("SR-QA-UX-001 — C119: Error Recovery, Classification & Truthful Empty
         const envelope: EmptyStateEnvelope = {
           reason,
           messageCode: `empty.${reason}`,
-          nextAction:
-            reason === "not_provisioned"
-              ? {
+          ...(reason === "not_provisioned"
+            ? {
+                nextAction: {
                   action: "configure_settings",
                   enabled: true,
                   riskLevel: "low",
-                }
-              : undefined,
+                },
+              }
+            : {}),
         };
 
         expect(envelope.reason).toBe(reason);

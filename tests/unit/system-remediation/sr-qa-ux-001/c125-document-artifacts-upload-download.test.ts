@@ -229,6 +229,8 @@ describe("SR-QA-UX-001 — C125: Document Artifacts, Bytes Integrity, Virus Scan
       // Record clean scan result
       const scannedProof = await service.recordScanResult(proof.proofId, {
         scanState: "clean",
+        rejectionReason: null,
+        scanCompletedAt: new Date().toISOString(),
       });
       expect(scannedProof.scanState).toBe("clean");
 
@@ -276,6 +278,7 @@ describe("SR-QA-UX-001 — C125: Document Artifacts, Bytes Integrity, Virus Scan
       const rejectedProof = await service.recordScanResult(proof.proofId, {
         scanState: "rejected",
         rejectionReason: "EICAR-Test-Signature detected",
+        scanCompletedAt: new Date().toISOString(),
       });
 
       expect(rejectedProof.scanState).toBe("rejected");
