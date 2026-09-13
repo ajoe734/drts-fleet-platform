@@ -140,3 +140,33 @@ suite now has 27 passing tests across 3 files. Post-fix remote acceptance is
 still required; no product authentication change was made.
 The new run artifact contains zero masking-command records and zero JWT-shaped
 values in its execution log, confirming the artifact filter on actual output.
+
+Run `34737623747` on candidate `9bda59e457212a7557f3fdfe3d346eaa8f74031f`
+progressed to 6 passing specs out of 10 (approval-rules, cost-center,
+directory-durability, governance lifecycle/flags, and passenger-address).
+The 4 failures were diagnosed as follows:
+- `governance.spec.ts:7:5`: Quota ledger variants checkpoint expected only
+  cost-center scoped entries, whereas `tenant-quota-ledger.ts:325` intentionally
+  emits both tenant-wide (`null`) and cost-center (`code`) entries. Fixed in QA
+  test: assert both variants exist and checkpoint against `entry.costCenterCode`.
+- `users.spec.ts:10:5`: Negative cross-tenant user update used `tenant_requester`,
+  which is not a member of `TENANT_ROLE_CATALOG` (`tenant_admin`, `tenant_ops_admin`,
+  `tenant_finance_admin`, `tenant_viewer`) and failed validation with 400
+  `UNSUPPORTED_TENANT_ROLE` before reaching cross-tenant boundary. Fixed in QA test:
+  switched to supported `tenant_ops_admin`, properly asserting 404 `TENANT_USER_NOT_FOUND`.
+- `sla.spec.ts:10:5` (Reproduced Product Defect): Line 132 asserts that Tenant A's
+  token cannot mutate Tenant B's SLA by supplying `x-tenant-id: tenantB` (expects 403).
+  In `TenantPartnerController.updateSlaProfile`, the endpoint only reads `@Headers("x-tenant-id")`
+  without injecting `@CurrentIdentity()` or invoking `assertTenantMutationScope(tenantId, identity)`.
+  Any caller with `tenant:sla:write` scope can mutate any tenant's SLA simply by spoofing
+  the header, returning 201 instead of 403. Scoped repair subtask:
+  `SR-QA-TENANT-001-FIX-SLA-CROSS-TENANT`.
+- `invitation-mail.spec.ts:10:5` (Reproduced Product Defect): Line 17 timed out after
+  15s waiting for an invitation email in Mailpit. In `TenantInvitationDeliveryService`,
+  the constructor declares `@Optional() private readonly deliveryService: NotificationDeliveryService | null = null`.
+  Due to TypeScript compiling the union type to `__metadata("design:paramtypes", [Object])`,
+  NestJS cannot identify the token and injects `undefined`, defaulting to `null`.
+  When `null`, `deliver()` logs that the notification outbox is not configured and
+  returns `status: "unavailable"`, dropping the email without enqueuing to Mailpit SMTP.
+  Scoped repair subtask: `SR-QA-TENANT-001-FIX-INVITATION-DELIVERY-DI`.
+

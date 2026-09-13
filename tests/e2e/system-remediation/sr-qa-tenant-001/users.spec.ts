@@ -125,7 +125,7 @@ test("Tenant users create, role update and tenant isolation", async ({
         "TENANT_USER_EXISTS",
       );
       const crossUpdate = await call(tenantB, tokenB, path, {
-        roleCode: "tenant_requester",
+        roleCode: "tenant_ops_admin",
       });
       expect(crossUpdate.status()).toBe(404);
       expect(decodeTenantWire(await crossUpdate.json()).error.code).toBe(

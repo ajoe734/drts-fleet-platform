@@ -151,12 +151,14 @@ test("Tenant quotas and approval decisions have real HTTP/DB readback", async ({
       items: {
         ledgerEntryId: string;
         bookingId: string;
-        costCenterCode: string;
+        costCenterCode: string | null;
       }[];
     }>(
       `tenant/quotas/ledger?bookingId=${encodeURIComponent(booking.bookingId)}`,
     );
     expect(ledger.items.length).toBeGreaterThan(0);
+    expect(ledger.items.some((item) => item.costCenterCode === code)).toBe(true);
+    expect(ledger.items.some((item) => item.costCenterCode === null)).toBe(true);
     for (const entry of ledger.items) {
       await ctx.checkpoint({
         apiPath: `tenant/quotas/ledger?bookingId=${encodeURIComponent(booking.bookingId)}`,
@@ -165,7 +167,7 @@ test("Tenant quotas and approval decisions have real HTTP/DB readback", async ({
         expected: {
           ledgerEntryId: entry.ledgerEntryId,
           bookingId: booking.bookingId,
-          costCenterCode: code,
+          costCenterCode: entry.costCenterCode,
         },
         sql: "SELECT record FROM core.phase1_tenant_quota_ledger WHERE tenant_id=$1 AND ledger_entry_id=$2",
         parameters: [ctx.tenantA, entry.ledgerEntryId],
