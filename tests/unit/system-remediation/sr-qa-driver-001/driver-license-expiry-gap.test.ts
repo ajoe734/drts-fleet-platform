@@ -125,28 +125,58 @@ describe("SR-QA-DRIVER-001 C061: vehicle insurance expiry -> dispatch block (pos
   });
 });
 
-describe("SR-QA-DRIVER-001 C061: driver license/registration expiry (current-behaviour finding)", () => {
-  it("CURRENT-BEHAVIOUR FINDING: DriverRegistryRecord has no expiry-date field, so licensesValid/dispatchEligible cannot react to a date passing -- only an explicit manual write changes it", async () => {
+describe("SR-QA-DRIVER-001 C061: driver license/registration expiry (remediated behaviour)", () => {
+  it("verifies DriverRegistryRecord carries expiry date fields and past expiry automatically blocks dispatch and auth", async () => {
     const registry = setupRegistry();
 
     const before = registry
       .listDrivers()
       .find((d) => d.driverId === "drv-demo-001")!;
-    expect(before).not.toHaveProperty("licenseExpiry");
-    expect(before).not.toHaveProperty("professionalDriverLicenseExpiry");
-    expect(before).not.toHaveProperty("taxiDriverRegistrationExpiry");
+    expect(before.licenseExpiry).toBeTruthy();
+    expect(before.professionalDriverLicenseExpiry).toBeTruthy();
+    expect(before.taxiDriverRegistrationExpiry).toBeTruthy();
     expect(before.licensesValid).toBe(true);
     expect(before.dispatchEligible).toBe(true);
 
-    // Simulate "a long time has passed" -- there is no scheduled job or
-    // date-comparison path in RegulatoryRegistryService that this test could
-    // trigger, because none reads a driver-level expiry date. The driver
-    // stays dispatch-eligible purely because nothing ever re-evaluates a
-    // date against "now" for driver licensing.
-    const stillAfter = registry
+    // Update driver license expiry date to the past
+    const expiredAt = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+    registry.updateDriverLicenses("drv-demo-001", {
+      professionalDriverLicenseExpiry: expiredAt,
+    });
+
+    const after = registry
       .listDrivers()
       .find((d) => d.driverId === "drv-demo-001")!;
-    expect(stillAfter.licensesValid).toBe(true);
-    expect(stillAfter.dispatchEligible).toBe(true);
+    expect(after.licensesValid).toBe(false);
+    expect(after.dispatchEligible).toBe(false);
+    expect(after.eligibilityBlockedReasons).toContain("licenses_invalid");
+
+    // assertDriverAuthEligible blocks expired driver with DRIVER_CERT_INVALID
+    expect(() =>
+      registry.assertDriverAuthEligible("drv-demo-001"),
+    ).toThrowError(
+      expect.objectContaining({
+        code: "DRIVER_CERT_INVALID",
+      }),
+    );
+  });
+
+  it("lists drivers with expiring licenses within windowDays (T-30 reminder window)", async () => {
+    const registry = setupRegistry();
+    const now = Date.now();
+    const in10Days = new Date(now + 10 * 24 * 60 * 60 * 1000).toISOString();
+    const in90Days = new Date(now + 90 * 24 * 60 * 60 * 1000).toISOString();
+
+    registry.updateDriverLicenses("drv-demo-001", {
+      professionalDriverLicenseExpiry: in10Days,
+    });
+    registry.updateDriverLicenses("drv-demo-002", {
+      professionalDriverLicenseExpiry: in90Days,
+    });
+
+    const expiring = registry.listExpiringDriverLicenses(30);
+    const expiringIds = expiring.map((d) => d.driverId);
+    expect(expiringIds).toContain("drv-demo-001");
+    expect(expiringIds).not.toContain("drv-demo-002");
   });
 });

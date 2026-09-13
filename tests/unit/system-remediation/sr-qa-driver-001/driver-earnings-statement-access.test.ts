@@ -119,8 +119,8 @@ describe("SR-QA-DRIVER-001 C057: platform-earnings self-only access (positive re
   });
 });
 
-describe("SR-QA-DRIVER-001 C058: driver statement ownership (current-behaviour finding)", () => {
-  it("CURRENT-BEHAVIOUR FINDING: getDriverStatement/listDriverStatements return another driver's financial data with no identity parameter to check against", async () => {
+describe("SR-QA-DRIVER-001 C058: driver statement ownership (remediated behaviour)", () => {
+  it("enforces driver identity ownership on getDriverStatement and filters listDriverStatements", async () => {
     const auditService = new AuditNotificationService();
     const billingSettlementService = new BillingSettlementService(auditService);
 
@@ -139,31 +139,40 @@ describe("SR-QA-DRIVER-001 C058: driver statement ownership (current-behaviour f
     );
     expect(someoneElsesStatement).toBeTruthy();
 
-    // `getDriverStatement`'s TypeScript signature is `(statementId: string)`
-    // -- there is no second "requesting driver identity" parameter to even
-    // pass a different caller's id into. Calling it with only the
-    // statementId (as the controller does verbatim) succeeds and returns
-    // drv-demo-001's real gross earning / service fee / subsidy / net
-    // amount to this call site, which is exactly what a differently-scoped
-    // caller would receive too, since there is no filter in between.
+    // Calling getDriverStatement with a mismatched requestingDriverId throws DRIVER_IDENTITY_MISMATCH
+    expect(() =>
+      billingSettlementService.getDriverStatement(
+        someoneElsesStatement!.statementId,
+        "drv-demo-002",
+      ),
+    ).toThrowError(
+      expect.objectContaining({
+        code: "DRIVER_IDENTITY_MISMATCH",
+      }),
+    );
+
+    // Calling getDriverStatement with matching requestingDriverId succeeds
     const fetched = billingSettlementService.getDriverStatement(
       someoneElsesStatement!.statementId,
+      "drv-demo-001",
     );
     expect(fetched.driverId).toBe("drv-demo-001");
     expect(fetched.grossEarning).toBeTruthy();
     expect(fetched.serviceFee).toBeTruthy();
     expect(fetched.subsidy).toBeTruthy();
 
-    // listDriverStatements(periodMonth) has the same shape: no driverId
-    // filter parameter exists at all, so it returns every driver's
-    // statement for the period, not just one caller's own.
-    const allForPeriod =
-      billingSettlementService.listDriverStatements("2026-03");
-    expect(allForPeriod.length).toBeGreaterThanOrEqual(1);
-    expect(allForPeriod.some((s) => s.driverId === "drv-demo-001")).toBe(true);
+    // Calling listDriverStatements with driverId filter only returns statements for that driver
+    const driverStatements = billingSettlementService.listDriverStatements(
+      "2026-03",
+      "drv-demo-001",
+    );
+    expect(driverStatements.length).toBeGreaterThanOrEqual(1);
+    expect(driverStatements.every((s) => s.driverId === "drv-demo-001")).toBe(
+      true,
+    );
   });
 
-  it("confirms DriverStatementRecord carries no downloadable-artifact field (no bytes/PDF/signed-URL) as of this SHA", async () => {
+  it("confirms DriverStatementRecord carries downloadable-artifact fields with valid signature metadata", async () => {
     const auditService = new AuditNotificationService();
     const billingSettlementService = new BillingSettlementService(auditService);
     await billingSettlementService.publishDriverFeePlan({
@@ -177,7 +186,11 @@ describe("SR-QA-DRIVER-001 C058: driver statement ownership (current-behaviour f
     });
     const statement = generated.items[0]!;
 
-    expect(statement).not.toHaveProperty("artifactUrl");
-    expect(statement).not.toHaveProperty("artifactDownloadMetadata");
+    expect(statement.artifactUrl).toBeTruthy();
+    expect(statement.artifactDownloadMetadata).toBeTruthy();
+    expect(statement.artifactDownloadMetadata?.downloadUrl).toBe(
+      statement.artifactUrl,
+    );
+    expect(statement.artifactDownloadMetadata?.kind).toBe("report");
   });
 });
