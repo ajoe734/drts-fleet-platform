@@ -2061,6 +2061,7 @@ export class TenantPartnerController {
   @Post("tenant/sla")
   updateSlaProfile(
     @Body() command: UpdateTenantSlaProfileCommand,
+    @CurrentIdentity() identity: IdentityContext | null,
     @Headers("x-tenant-id") tenantId?: string,
     @Headers("x-actor-id") actorId?: string,
     @Headers("x-request-id") requestId?: string,
@@ -2071,6 +2072,7 @@ export class TenantPartnerController {
         command,
         actorId,
         requestId,
+        identity,
       ),
       requestId,
     );

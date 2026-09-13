@@ -6,6 +6,7 @@ import { AuditNotificationService } from "../../src/modules/audit-notification/a
 import type { BillingSettlementService } from "../../src/modules/billing-settlement/billing-settlement.service";
 import type { ReferralStatementRecord } from "../../src/modules/billing-settlement/referral-statement.types";
 import type { OwnedMobilityService } from "../../src/modules/owned-mobility/owned-mobility.service";
+import type { IdentityContext } from "@drts/contracts";
 import { TenantPartnerController } from "../../src/modules/tenant-partner/tenant-partner.controller";
 import { TenantPartnerService } from "../../src/modules/tenant-partner/tenant-partner.service";
 
@@ -401,5 +402,64 @@ describe("tenant partner ingress handoff controller", () => {
     expect(Buffer.concat(chunks).toString("utf8")).toContain(
       "'=formula-not-executed",
     );
+  });
+
+  it("rejects cross-tenant SLA update when identity tenant does not match x-tenant-id", () => {
+    const { controller } = createController();
+    const identity: IdentityContext = {
+      actorType: "tenant_admin",
+      actorId: "admin-a",
+      realm: "tenant",
+      authMode: "jwt_bearer",
+      roleFamilies: ["tenant"],
+      roles: ["tenant_admin"],
+      scopes: ["tenant:sla:write"],
+      tenantId: "tenant-a",
+      supportedExecutionModes: ["supervisor_managed_execution"],
+    };
+
+    expect(() =>
+      controller.updateSlaProfile(
+        { waitThresholdMin: 15 },
+        identity,
+        "tenant-b",
+        "admin-a",
+        "req-cross-tenant-sla",
+      ),
+    ).toThrowError(
+      expect.objectContaining({
+        status: 403,
+        code: "TENANT_SCOPE_MISMATCH",
+      }),
+    );
+  });
+
+  it("allows same-tenant SLA update with matching identity", () => {
+    const { controller } = createController();
+    const identity: IdentityContext = {
+      actorType: "tenant_admin",
+      actorId: "admin-a",
+      realm: "tenant",
+      authMode: "jwt_bearer",
+      roleFamilies: ["tenant"],
+      roles: ["tenant_admin"],
+      scopes: ["tenant:sla:write"],
+      tenantId: "tenant-a",
+      supportedExecutionModes: ["supervisor_managed_execution"],
+    };
+
+    const response = controller.updateSlaProfile(
+      { waitThresholdMin: 15 },
+      identity,
+      "tenant-a",
+      "admin-a",
+      "req-same-tenant-sla",
+    );
+
+    expect(response.data).toMatchObject({
+      resourceType: "tenant_sla",
+      resourceId: "tenant-a",
+      status: "completed",
+    });
   });
 });
