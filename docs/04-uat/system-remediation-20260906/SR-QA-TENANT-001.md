@@ -213,5 +213,28 @@ Local test verification on the merged tree confirms:
 - `pnpm exec playwright test -c playwright.system-remediation.config.ts tests/e2e/system-remediation/sr-qa-tenant-001 --list`: 10 tests in 8 files discovered without error (exit 0).
 - `git diff --check`: clean (exit 0).
 
-With both child bugfixes integrated and local checks passing, this candidate is ready for handoff to reviewer Gemini2 to trigger acceptance CI run on GitHub.
+With both child bugfixes integrated and local checks passing, candidate `8c709f51af8a` was pushed to PR #1973 and evaluated in acceptance CI run `34744559930` (job `103689952667`).
 
+Acceptance run `34744559930` confirmed:
+- 9 out of 10 HTTP acceptance specs passed with zero skips (3.3s runtime).
+- All 27 Vitest unit regression tests passed with zero skips.
+- The two previous child bugfixes were verified in live execution:
+  - `invitation-mail.spec.ts` passed (real Mailpit SMTP received invitation email and resolved token).
+  - `sla.spec.ts` line 132 passed (cross-tenant header spoofing was rejected with 403 `TENANT_SCOPE_MISMATCH`).
+- The sole failing assertion was `sla.spec.ts:143:11`:
+  Negative threshold input `call(tenantA, tokenA, { [field]: -1, reason: run })` returned 201 Created instead of 400 BadRequest. In `TenantPartnerService.updateSlaProfile`, threshold minutes lacked non-negative validation, allowing negative numbers to be persisted.
+
+To address this third reproduced product defect under canonical write scopes:
+- Canonical child repair task `SR-QA-TENANT-001-FIX-SLA-THRESHOLD-VALIDATION` was created in machine truth (`ai-status.json`).
+- Non-negative validation for `waitThresholdMin`, `arrivalThresholdMin`, and `completionThresholdMin` was implemented in `TenantPartnerService.updateSlaProfile`, throwing `ApiRequestError(HttpStatus.BAD_REQUEST, "INVALID_SLA_THRESHOLD", ...)`.
+- Comprehensive unit tests were added in `apps/api/tests/unit/tenant-partner.controller.test.ts` and `tests/unit/tenant-partner-foundation.test.ts`.
+- All 24 CI checks passed green on PR #2007, reviewer Gemini2 approved, and the PR was merged to dev as commit `dd1689fa6d84e7368d70ee82dcb0ce682e509bbf`.
+
+`origin/dev` has now been merged into `codex/sr-qa-tenant-ci-repair-20260911`. Local test verification confirms:
+- `python3 -m unittest tools/ci/test_tenant_uat_acceptance_workflow.py -v`: 32 tests passed (exit 0).
+- `python3 tools/ci/check_test_coverage.py`: 74 test files yield tests CI runs (exit 0).
+- `pnpm exec vitest run tests/unit/system-remediation/sr-qa-tenant-001/`: 27 tests in 3 files passed (exit 0).
+- `pnpm exec playwright test -c playwright.system-remediation.config.ts tests/e2e/system-remediation/sr-qa-tenant-001 --list`: 10 tests in 8 files discovered without error (exit 0).
+- `git diff --check`: clean (exit 0).
+
+With all three reproduced product defects resolved and merged into dev, this candidate is ready for handoff to reviewer Gemini2 for the final 10/10 acceptance run.
