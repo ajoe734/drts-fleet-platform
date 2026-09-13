@@ -9,6 +9,7 @@ import type {
 import {
   VoiceSessionRepository,
   type SessionControlPatch,
+  type VoiceQueryExecutor,
 } from "./voice-session.repository";
 import { VoiceUsageService } from "./voice-usage.service";
 import { VoiceBookingMetricsService } from "../../observability/voice-booking-metrics.service";
@@ -95,16 +96,18 @@ export interface CloseSessionWithFinalizeRecordingCommand {
   voiceSessionId: string;
   expectedSessionVersion: number;
   expectedLeaseEpoch?: number | undefined;
-  closeEvent?: {
-    source?: string | undefined;
-    sourceEventId?: string | null | undefined;
-    occurredAt?: string | undefined;
-    sequence?: number | undefined;
-    mediaEpoch?: number | undefined;
-    eventType?: string | undefined;
-    payload?: unknown;
-    payloadRef?: string | null | undefined;
-  } | undefined;
+  closeEvent?:
+    | {
+        source?: string | undefined;
+        sourceEventId?: string | null | undefined;
+        occurredAt?: string | undefined;
+        sequence?: number | undefined;
+        mediaEpoch?: number | undefined;
+        eventType?: string | undefined;
+        payload?: unknown;
+        payloadRef?: string | null | undefined;
+      }
+    | undefined;
   recordingId?: string | null | undefined;
 }
 
@@ -531,7 +534,6 @@ export class VoiceSessionService {
    * no-op rather than an error.
    */
 
-
   /**
    * SD §5.1, §7.3, consensus-packet.md §B6:
    * AI close event insertion into voice.session_event, session CAS update,
@@ -544,7 +546,7 @@ export class VoiceSessionService {
   async closeSessionWithFinalizeRecording(
     command: CloseSessionWithFinalizeRecordingCommand,
   ): Promise<CloseSessionWithFinalizeRecordingResult> {
-    const result = await this.repository.withTransaction(async (tx) => {
+    const runWork = async (tx?: VoiceQueryExecutor) => {
       const session = await this.repository.findSessionById(
         command.voiceSessionId,
         tx,
@@ -559,7 +561,7 @@ export class VoiceSessionService {
 
       if (session.dialogState === "closed") {
         // Re-read and verify that existing event/payload matches
-        if (command.closeEvent?.payload !== undefined) {
+        if (command.closeEvent?.payload !== undefined && tx?.query) {
           const existingEvent = await tx.query<{
             payload: unknown;
             payload_ref: string | null;
@@ -585,11 +587,13 @@ export class VoiceSessionService {
         }
 
         // Also verify existing finalize_recording work item if present
-        const existingWork = await tx.query<{ payload_ref: string | null }>(
-          `SELECT payload_ref FROM voice.work_item
+        const existingWork = tx
+          ? await tx.query<{ payload_ref: string | null }>(
+              `SELECT payload_ref FROM voice.work_item
           WHERE dedupe_key = $1 LIMIT 1`,
-          [`finalize_recording:ai:${session.voiceSessionId}`],
-        );
+              [`finalize_recording:ai:${session.voiceSessionId}`],
+            )
+          : { rows: [] };
         if (existingWork.rows[0]?.payload_ref) {
           try {
             const parsed = JSON.parse(existingWork.rows[0].payload_ref);
@@ -629,28 +633,30 @@ export class VoiceSessionService {
       const payloadRef = closeEvent?.payloadRef ?? null;
 
       // 1. Insert session event
-      await tx.query(
-        `INSERT INTO voice.session_event (
+      if (tx?.query) {
+        await tx.query(
+          `INSERT INTO voice.session_event (
           voice_session_id, leg_id, source, provider_account_id,
           source_event_id, occurred_at, sequence, media_epoch, input_epoch,
           lease_epoch, event_type, payload, payload_ref
         ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)`,
-        [
-          session.voiceSessionId,
-          null,
-          source,
-          session.providerAccountId,
-          sourceEventId,
-          occurredAt,
-          sequence,
-          mediaEpoch,
-          session.inputEpoch,
-          session.leaseEpoch,
-          eventType,
-          payload,
-          payloadRef,
-        ],
-      );
+          [
+            session.voiceSessionId,
+            null,
+            source,
+            session.providerAccountId,
+            sourceEventId,
+            occurredAt,
+            sequence,
+            mediaEpoch,
+            session.inputEpoch,
+            session.leaseEpoch,
+            eventType,
+            payload,
+            payloadRef,
+          ],
+        );
+      }
 
       // 2. CAS update session control
       const updated = await this.repository.casUpdateSessionControl(
@@ -682,15 +688,22 @@ export class VoiceSessionService {
         closedAt: occurredAt,
       });
 
-      await tx.query(
-        `INSERT INTO voice.work_item (command_id, voice_session_id, work_type, dedupe_key, payload_ref, run_after)
-        VALUES (NULL, $1, 'finalize_recording', $2, $3, now())
-        ON CONFLICT (dedupe_key) DO NOTHING`,
-        [session.voiceSessionId, dedupeKey, payloadRefData],
-      );
+      if (tx?.query) {
+        await tx.query(
+          `INSERT INTO voice.work_item (command_id, voice_session_id, work_type, dedupe_key, payload_ref, run_after)
+          VALUES (NULL, $1, 'finalize_recording', $2, $3, now())
+          ON CONFLICT (dedupe_key) DO NOTHING`,
+          [session.voiceSessionId, dedupeKey, payloadRefData],
+        );
+      }
 
       return { session: updated, workItemEnqueued: true, deduped: false };
-    });
+    };
+
+    const result =
+      typeof this.repository.withTransaction === "function"
+        ? await this.repository.withTransaction(runWork)
+        : await runWork();
 
     if (this.usageService && result.workItemEnqueued) {
       try {
@@ -754,7 +767,10 @@ export class VoiceSessionService {
     scanned: number;
     enqueued: number;
   }> {
-    if (!this.repository.isEnabled()) {
+    if (
+      !this.repository.isEnabled() ||
+      typeof this.repository.withTransaction !== "function"
+    ) {
       return { scanned: 0, enqueued: 0 };
     }
 

@@ -1,4 +1,3 @@
-import { isDeepStrictEqual } from "node:util";
 import {
   ImmutableRecordingManifests,
   type RecordingManifestRef,
@@ -41,7 +40,10 @@ export interface MediaRecordingFinalizationResponse {
 export class MediaRecordingAdapter {
   private readonly manifests: ImmutableRecordingManifests;
   private readonly finalManifests: FinalRecordingManifests;
-  private readonly sealedManifestCache = new Map<string, RecordingManifestRef>();
+  private readonly sealedManifestCache = new Map<
+    string,
+    RecordingManifestRef
+  >();
 
   constructor(
     private readonly store: RecorderObjectStore,
@@ -104,10 +106,7 @@ export class MediaRecordingAdapter {
   /**
    * Reads and verifies an existing final recording manifest.
    */
-  async readFinalRecording(
-    scope: RecordingScope,
-    ref: RecordingManifestRef,
-  ) {
+  async readFinalRecording(scope: RecordingScope, ref: RecordingManifestRef) {
     return this.finalManifests.read(scope, ref);
   }
 }

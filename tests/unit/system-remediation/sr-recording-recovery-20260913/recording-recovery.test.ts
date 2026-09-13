@@ -66,7 +66,10 @@ class MemoryRecorderObjectStore implements RecorderObjectStore {
   public objects = new Map<string, { metadata: unknown; bytes: Uint8Array }>();
 
   async putRecordingImmutable(
-    metadata: Omit<RecorderObjectMetadata, "objectKey" | "objectVersion" | "durableAt">,
+    metadata: Omit<
+      RecorderObjectMetadata,
+      "objectKey" | "objectVersion" | "durableAt"
+    >,
     bytes: Uint8Array,
   ): Promise<{ objectKey: string; objectVersion: string; durableAt: string }> {
     const objectKey = `rec/${metadata.brandId}/${metadata.callId}/${metadata.recordingId}/${metadata.channel}-${metadata.startMs}-${metadata.endMs}.opus`;
@@ -82,19 +85,35 @@ class MemoryRecorderObjectStore implements RecorderObjectStore {
   async putImmutable(
     scope: RecordingScope,
     bytes: Uint8Array,
-  ): Promise<{ objectKey: string; objectVersion: string; durableAt: string; checksum: string }> {
+  ): Promise<{
+    objectKey: string;
+    objectVersion: string;
+    durableAt: string;
+    checksum: string;
+  }> {
     const objectKey = `manifests/${scope.brandId}/${scope.callId}/${scope.recordingId}/final.json`;
     const objectVersion = "v1";
     const durableAt = "2026-09-13T16:00:05.000Z";
     const checksum = recordingChecksum(bytes);
-    this.objects.set(objectKey, { metadata: { scope, objectKey, objectVersion, durableAt, checksum }, bytes });
+    this.objects.set(objectKey, {
+      metadata: { scope, objectKey, objectVersion, durableAt, checksum },
+      bytes,
+    });
     return { objectKey, objectVersion, durableAt, checksum };
   }
 
   async getImmutable(
     scope: RecordingScope,
     ref: RecordingManifestRef,
-  ): Promise<{ bytes: Uint8Array; metadata: { objectKey: string; objectVersion: string; durableAt: string; checksum: string } }> {
+  ): Promise<{
+    bytes: Uint8Array;
+    metadata: {
+      objectKey: string;
+      objectVersion: string;
+      durableAt: string;
+      checksum: string;
+    };
+  }> {
     const item = this.objects.get(ref.objectKey);
     if (!item) {
       throw new Error(`Object not found: ${ref.objectKey}`);
@@ -263,7 +282,11 @@ class InMemoryDatabase {
     const trimmed = sql.trim().replace(/\s+/g, " ");
 
     // 1. SELECT for repair dedupe
-    if (trimmed.includes("FROM voice.phase1_work_item_repair_audits WHERE work_id = $1 AND request_id = $2")) {
+    if (
+      trimmed.includes(
+        "FROM voice.phase1_work_item_repair_audits WHERE work_id = $1 AND request_id = $2",
+      )
+    ) {
       const [workId, reqId] = params as [string, string];
       const match = this.repairAudits.find(
         (a) => a.work_id === workId && a.request_id === reqId,
@@ -273,8 +296,10 @@ class InMemoryDatabase {
     }
 
     // 2. SELECT work_item by work_id
-    if (trimmed.includes("FROM voice.work_item WHERE work_id = $1 FOR UPDATE") ||
-        trimmed.includes("FROM voice.work_item WHERE work_id = $1")) {
+    if (
+      trimmed.includes("FROM voice.work_item WHERE work_id = $1 FOR UPDATE") ||
+      trimmed.includes("FROM voice.work_item WHERE work_id = $1")
+    ) {
       const [workId] = params as [string];
       const item = this.workItems.get(workId);
       const rows = item
@@ -340,13 +365,25 @@ class InMemoryDatabase {
         previousAttemptCount,
         previousLastError,
         allocatedMaxAttempts,
-      ] = params as [string, string, string, string, number, string, number, string | null, number];
+      ] = params as [
+        string,
+        string,
+        string,
+        string,
+        number,
+        string,
+        number,
+        string | null,
+        number,
+      ];
 
       const collision = this.repairAudits.find(
         (a) => a.work_id === workId && a.request_id === requestId,
       );
       if (collision) {
-        throw new Error("duplicate key value violates unique constraint \"uq_phase1_work_item_repair_dedupe\"");
+        throw new Error(
+          'duplicate key value violates unique constraint "uq_phase1_work_item_repair_dedupe"',
+        );
       }
 
       const repair: MockRepairAudit = {
@@ -403,7 +440,9 @@ class InMemoryDatabase {
           a.attempt_stage === attemptStage,
       );
       if (collision) {
-        throw new Error("duplicate key value violates unique constraint \"uq_phase1_work_item_attempt_stage\"");
+        throw new Error(
+          'duplicate key value violates unique constraint "uq_phase1_work_item_attempt_stage"',
+        );
       }
 
       const audit: MockAttemptAudit = {
@@ -423,7 +462,10 @@ class InMemoryDatabase {
     }
 
     // 6. UPDATE voice.work_item in repair
-    if (trimmed.includes("UPDATE voice.work_item") && trimmed.includes("attempt = 0")) {
+    if (
+      trimmed.includes("UPDATE voice.work_item") &&
+      trimmed.includes("attempt = 0")
+    ) {
       const [workId] = params as [string];
       const item = this.workItems.get(workId);
       if (item) {
@@ -471,13 +513,14 @@ class InMemoryDatabase {
         dedupeKey = params[1] as string;
         payloadRef = params[2] as string | null;
       } else {
-        [commandId, voiceSessionId, workType, dedupeKey, payloadRef] = params as [
-          string | null,
-          string | null,
-          string,
-          string,
-          string | null,
-        ];
+        [commandId, voiceSessionId, workType, dedupeKey, payloadRef] =
+          params as [
+            string | null,
+            string | null,
+            string,
+            string,
+            string | null,
+          ];
       }
 
       const existing = Array.from(this.workItems.values()).find(
@@ -487,7 +530,9 @@ class InMemoryDatabase {
         if (trimmed.includes("ON CONFLICT (dedupe_key) DO NOTHING")) {
           return { rows: [], rowCount: 0 };
         }
-        throw new Error("duplicate key value violates unique constraint \"uq_voice_work_item_dedupe_key\"");
+        throw new Error(
+          'duplicate key value violates unique constraint "uq_voice_work_item_dedupe_key"',
+        );
       }
 
       const workId = `work-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
@@ -520,7 +565,11 @@ class InMemoryDatabase {
     }
 
     // 9. crm.phase1_call_sessions SELECT / UPDATE
-    if (trimmed.includes("SELECT record FROM crm.phase1_call_sessions WHERE call_id = $1")) {
+    if (
+      trimmed.includes(
+        "SELECT record FROM crm.phase1_call_sessions WHERE call_id = $1",
+      )
+    ) {
       const [callId] = params as [string];
       const session = this.callSessions.get(callId);
       const rows = session ? [{ record: session.record } as unknown as T] : [];
@@ -539,7 +588,9 @@ class InMemoryDatabase {
     }
 
     // 10. voice.session UPDATE
-    if (trimmed.includes("UPDATE voice.session SET recording_state = 'sealed'")) {
+    if (
+      trimmed.includes("UPDATE voice.session SET recording_state = 'sealed'")
+    ) {
       const [voiceSessionId] = params as [string];
       const sess = this.voiceSessions.get(voiceSessionId);
       if (sess) {
@@ -565,7 +616,8 @@ class InMemoryDatabase {
         try {
           const patch = JSON.parse(patchJson);
           order.recording_id = patch.recordingId ?? order.recording_id;
-          order.recording_evidence_ref = patch.recordingEvidenceRef ?? order.recording_evidence_ref;
+          order.recording_evidence_ref =
+            patch.recordingEvidenceRef ?? order.recording_evidence_ref;
           order.recording_state = "bound";
         } catch {
           // fallback
@@ -588,7 +640,11 @@ class InMemoryDatabase {
       return { rows, rowCount: rows.length };
     }
 
-    if (trimmed.includes("FROM crm.phase1_call_sessions c LEFT JOIN voice.work_item w")) {
+    if (
+      trimmed.includes(
+        "FROM crm.phase1_call_sessions c LEFT JOIN voice.work_item w",
+      )
+    ) {
       const candidates = Array.from(this.callSessions.values()).filter(
         (c) => c.status === "closed" || c.record.recordingState === "pending",
       );
@@ -602,7 +658,9 @@ class InMemoryDatabase {
     return { rows: [], rowCount: 0 };
   }
 
-  async withTransaction<T>(callback: (tx: InMemoryDatabase) => Promise<T>): Promise<T> {
+  async withTransaction<T>(
+    callback: (tx: InMemoryDatabase) => Promise<T>,
+  ): Promise<T> {
     return callback(this);
   }
 }
@@ -626,28 +684,44 @@ describe("SR-RECORDING-RECOVERY-20260913: Recording Recovery and Controlled Repl
       expect(fs.existsSync(migrationV101Path)).toBe(true);
       const sql = fs.readFileSync(migrationV101Path, "utf8");
 
-      expect(sql).toContain("CREATE TABLE IF NOT EXISTS voice.phase1_work_item_repair_audits");
-      expect(sql).toContain("work_id uuid NOT NULL REFERENCES voice.work_item (work_id)");
+      expect(sql).toContain(
+        "CREATE TABLE IF NOT EXISTS voice.phase1_work_item_repair_audits",
+      );
+      expect(sql).toContain(
+        "work_id uuid NOT NULL REFERENCES voice.work_item (work_id)",
+      );
       expect(sql).toContain("request_id varchar(255) NOT NULL");
       expect(sql).toContain("expected_lease_epoch integer NOT NULL");
-      expect(sql).toContain("allocated_max_attempts integer NOT NULL DEFAULT 5");
-      expect(sql).toContain("CONSTRAINT uq_phase1_work_item_repair_dedupe UNIQUE (work_id, request_id)");
-      expect(sql).toContain("SELECT voice._make_append_only('voice.phase1_work_item_repair_audits')");
+      expect(sql).toContain(
+        "allocated_max_attempts integer NOT NULL DEFAULT 5",
+      );
+      expect(sql).toContain(
+        "CONSTRAINT uq_phase1_work_item_repair_dedupe UNIQUE (work_id, request_id)",
+      );
+      expect(sql).toContain(
+        "SELECT voice._make_append_only('voice.phase1_work_item_repair_audits')",
+      );
     });
 
     it("verifies V0101 defines discrete append-only attempt events contract", () => {
       const sql = fs.readFileSync(migrationV101Path, "utf8");
 
-      expect(sql).toContain("CREATE TABLE IF NOT EXISTS voice.phase1_work_item_attempt_audits");
+      expect(sql).toContain(
+        "CREATE TABLE IF NOT EXISTS voice.phase1_work_item_attempt_audits",
+      );
       expect(sql).toContain("attempt_stage varchar(20) NOT NULL CHECK");
       expect(sql).toContain("('started', 'terminal')");
       expect(sql).toContain("outcome varchar(20) NOT NULL CHECK");
       expect(sql).toContain("('started', 'completed', 'failed', 'fenced')");
-      expect(sql).toContain("CONSTRAINT ck_phase1_work_item_attempt_stage_outcome CHECK");
+      expect(sql).toContain(
+        "CONSTRAINT ck_phase1_work_item_attempt_stage_outcome CHECK",
+      );
       expect(sql).toContain(
         "CONSTRAINT uq_phase1_work_item_attempt_stage UNIQUE (work_id, lease_epoch, attempt_no, attempt_stage)",
       );
-      expect(sql).toContain("SELECT voice._make_append_only('voice.phase1_work_item_attempt_audits')");
+      expect(sql).toContain(
+        "SELECT voice._make_append_only('voice.phase1_work_item_attempt_audits')",
+      );
     });
   });
 
@@ -689,7 +763,9 @@ describe("SR-RECORDING-RECOVERY-20260913: Recording Recovery and Controlled Repl
         [dedupeKey, payloadRef],
       );
 
-      const workItem = Array.from(db.workItems.values()).find((w) => w.dedupe_key === dedupeKey)!;
+      const workItem = Array.from(db.workItems.values()).find(
+        (w) => w.dedupe_key === dedupeKey,
+      )!;
       expect(workItem).toBeDefined();
       expect(workItem.voice_session_id).toBeNull();
       expect(workItem.status).toBe("pending");
@@ -714,7 +790,10 @@ describe("SR-RECORDING-RECOVERY-20260913: Recording Recovery and Controlled Repl
 
       await runner.completeWorkItemWithDomainState(db as any, workItem as any, {
         scope: { brandId: "default", callId, recordingId: `rec-${callId}` },
-        manifestRef: { objectKey: "manifest-key-001", checksum: "manifest-sha256" },
+        manifestRef: {
+          objectKey: "manifest-key-001",
+          checksum: "manifest-sha256",
+        },
         recordingId: `rec-${callId}`,
         recordingUrl: `https://storage.drts.local/rec-${callId}.opus`,
         linkedOrderId: null,
@@ -778,7 +857,9 @@ describe("SR-RECORDING-RECOVERY-20260913: Recording Recovery and Controlled Repl
         [dedupeKey, payloadRef],
       );
 
-      const workItem = Array.from(db.workItems.values()).find((w) => w.dedupe_key === dedupeKey)!;
+      const workItem = Array.from(db.workItems.values()).find(
+        (w) => w.dedupe_key === dedupeKey,
+      )!;
       workItem.status = "leased";
 
       const runner = new VoiceCommandRunnerService(
@@ -789,7 +870,10 @@ describe("SR-RECORDING-RECOVERY-20260913: Recording Recovery and Controlled Repl
         } as any,
         {
           finalizeRecording: async (p: any) => ({
-            manifestRef: { objectKey: "obj-ord-555", checksum: "sha256-order-evidence" },
+            manifestRef: {
+              objectKey: "obj-ord-555",
+              checksum: "sha256-order-evidence",
+            },
             recordingId: p.scope.recordingId,
             scope: p.scope,
             linkedOrderId: p.linkedOrderId,
@@ -799,7 +883,10 @@ describe("SR-RECORDING-RECOVERY-20260913: Recording Recovery and Controlled Repl
 
       await runner.completeWorkItemWithDomainState(db as any, workItem as any, {
         scope: { brandId: "default", callId, recordingId: `rec-${callId}` },
-        manifestRef: { objectKey: "obj-ord-555", checksum: "sha256-order-evidence" },
+        manifestRef: {
+          objectKey: "obj-ord-555",
+          checksum: "sha256-order-evidence",
+        },
         recordingId: `rec-${callId}`,
         recordingUrl: `https://storage.drts.local/rec-${callId}.opus`,
         linkedOrderId: orderId,
@@ -859,7 +946,9 @@ describe("SR-RECORDING-RECOVERY-20260913: Recording Recovery and Controlled Repl
         [voiceSessionId, dedupeKey, payloadRef],
       );
 
-      const workItem = Array.from(db.workItems.values()).find((w) => w.dedupe_key === dedupeKey)!;
+      const workItem = Array.from(db.workItems.values()).find(
+        (w) => w.dedupe_key === dedupeKey,
+      )!;
       workItem.status = "leased";
 
       const runner = new VoiceCommandRunnerService(
@@ -870,7 +959,10 @@ describe("SR-RECORDING-RECOVERY-20260913: Recording Recovery and Controlled Repl
         } as any,
         {
           finalizeRecording: async () => ({
-            manifestRef: { objectKey: "ai-manifest", checksum: "sha256-ai-hash" },
+            manifestRef: {
+              objectKey: "ai-manifest",
+              checksum: "sha256-ai-hash",
+            },
             recordingId: `rec-${voiceSessionId}`,
           }),
         } as any,
@@ -878,7 +970,11 @@ describe("SR-RECORDING-RECOVERY-20260913: Recording Recovery and Controlled Repl
 
       await runner.completeWorkItemWithDomainState(db as any, workItem as any, {
         voiceSessionId,
-        scope: { brandId: "brand-tw", callId, recordingId: `rec-${voiceSessionId}` },
+        scope: {
+          brandId: "brand-tw",
+          callId,
+          recordingId: `rec-${voiceSessionId}`,
+        },
         manifestRef: { objectKey: "ai-manifest", checksum: "sha256-ai-hash" },
         recordingId: `rec-${voiceSessionId}`,
       });
@@ -904,7 +1000,12 @@ describe("SR-RECORDING-RECOVERY-20260913: Recording Recovery and Controlled Repl
         status: "closed",
         started_at: new Date().toISOString(),
         updated_at: new Date().toISOString(),
-        record: { callId, status: "closed", recordingState: "pending", flags: ["closed", "recording_pending"] },
+        record: {
+          callId,
+          status: "closed",
+          recordingState: "pending",
+          flags: ["closed", "recording_pending"],
+        },
       });
 
       const dedupeKey = `finalize_recording:call:${callId}`;
@@ -914,7 +1015,9 @@ describe("SR-RECORDING-RECOVERY-20260913: Recording Recovery and Controlled Repl
         [dedupeKey],
       );
 
-      const workItem = Array.from(db.workItems.values()).find((w) => w.dedupe_key === dedupeKey)!;
+      const workItem = Array.from(db.workItems.values()).find(
+        (w) => w.dedupe_key === dedupeKey,
+      )!;
       workItem.status = "leased";
       workItem.lease_epoch = 1;
       workItem.leaseEpoch = 1;
@@ -939,9 +1042,13 @@ describe("SR-RECORDING-RECOVERY-20260913: Recording Recovery and Controlled Repl
       );
 
       await expect(
-        runner.completeWorkItemWithDomainState(db as any, staleWorkerRecord as any, {
-          scope: { brandId: "default", callId },
-        }),
+        runner.completeWorkItemWithDomainState(
+          db as any,
+          staleWorkerRecord as any,
+          {
+            scope: { brandId: "default", callId },
+          },
+        ),
       ).rejects.toThrow(LeaseFencedError);
 
       const callSession = db.callSessions.get(callId)!;
@@ -981,7 +1088,10 @@ describe("SR-RECORDING-RECOVERY-20260913: Recording Recovery and Controlled Repl
         runner.enqueueWorkItem(db as any, {
           workType: "finalize_recording",
           dedupeKey: `finalize_recording:call:${callId}`,
-          payloadRef: JSON.stringify({ callId, recordingId: "rec-altered-conflicting-999" }),
+          payloadRef: JSON.stringify({
+            callId,
+            recordingId: "rec-altered-conflicting-999",
+          }),
         }),
       ).rejects.toThrow(ApiRequestError);
 
@@ -989,7 +1099,10 @@ describe("SR-RECORDING-RECOVERY-20260913: Recording Recovery and Controlled Repl
         await runner.enqueueWorkItem(db as any, {
           workType: "finalize_recording",
           dedupeKey: `finalize_recording:call:${callId}`,
-          payloadRef: JSON.stringify({ callId, recordingId: "rec-altered-conflicting-999" }),
+          payloadRef: JSON.stringify({
+            callId,
+            recordingId: "rec-altered-conflicting-999",
+          }),
         });
       } catch (err: any) {
         expect(err.getStatus()).toBe(409);
@@ -1029,14 +1142,21 @@ describe("SR-RECORDING-RECOVERY-20260913: Recording Recovery and Controlled Repl
       expect(sealed.manifestRef).toBeDefined();
 
       const failingDb = {
-        withTransaction: async <T>(_fn?: (tx: any) => Promise<T>): Promise<T> => {
-          throw new Error("Simulated PostgreSQL connection failure or disk quota exceeded");
+        withTransaction: async <T>(
+          fn?: (tx: any) => Promise<T>,
+        ): Promise<T> => {
+          void fn;
+          throw new Error(
+            "Simulated PostgreSQL connection failure or disk quota exceeded",
+          );
         },
       };
 
       await expect(
         failingDb.withTransaction(async () => {
-          throw new Error("Simulated PostgreSQL connection failure or disk quota exceeded");
+          throw new Error(
+            "Simulated PostgreSQL connection failure or disk quota exceeded",
+          );
         }),
       ).rejects.toThrow("Simulated PostgreSQL connection failure");
 
@@ -1079,8 +1199,12 @@ describe("SR-RECORDING-RECOVERY-20260913: Recording Recovery and Controlled Repl
       // Second invocation (reentrant after worker restart)
       const secondSeal = await mediaAdapter.sealFinalRecording(req);
 
-      expect(secondSeal.manifestRef.objectKey).toBe(firstSeal.manifestRef.objectKey);
-      expect(secondSeal.manifestRef.checksum).toBe(firstSeal.manifestRef.checksum);
+      expect(secondSeal.manifestRef.objectKey).toBe(
+        firstSeal.manifestRef.objectKey,
+      );
+      expect(secondSeal.manifestRef.checksum).toBe(
+        firstSeal.manifestRef.checksum,
+      );
       expect(secondSeal.endMs).toBe(firstSeal.endMs);
       expect(secondSeal.closedEventId).toBe(firstSeal.closedEventId);
     });
@@ -1129,7 +1253,9 @@ describe("SR-RECORDING-RECOVERY-20260913: Recording Recovery and Controlled Repl
       expect(result1.workId).toBe(workId);
       expect(result1.previousStatus).toBe("failed");
       expect(result1.previousAttemptCount).toBe(5);
-      expect(result1.previousLastError).toBe("Temporary network timeout during upload");
+      expect(result1.previousLastError).toBe(
+        "Temporary network timeout during upload",
+      );
       expect(result1.deduped).toBeFalsy();
 
       const updatedWork = db.workItems.get(workId)!;
@@ -1363,7 +1489,9 @@ describe("SR-RECORDING-RECOVERY-20260913: Recording Recovery and Controlled Repl
       expect(res.enqueued).toBe(2);
 
       expect(Array.from(db.workItems.values())).toHaveLength(2);
-      expect(Array.from(db.workItems.values())[0]?.work_type).toBe("finalize_recording");
+      expect(Array.from(db.workItems.values())[0]?.work_type).toBe(
+        "finalize_recording",
+      );
     });
 
     it("scans and enqueues unfinalized ordinary calls", async () => {

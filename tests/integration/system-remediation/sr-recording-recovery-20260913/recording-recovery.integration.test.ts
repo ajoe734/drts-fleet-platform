@@ -2,8 +2,6 @@ import { describe, expect, it } from "vitest";
 
 import { CallcenterService } from "../../../../apps/api/src/modules/callcenter/callcenter.service";
 import { CallcenterRepository } from "../../../../apps/api/src/modules/callcenter/callcenter.repository";
-import { VoiceCommandRunnerService } from "../../../../apps/api/src/modules/voice-booking/voice-command-runner.service";
-import { VoiceSessionService } from "../../../../apps/api/src/modules/voice-booking/voice-session.service";
 import { MediaRecordingAdapter } from "../../../../apps/voice-media-worker/src/recording/media-recording-adapter";
 import type {
   RecorderObjectMetadata,
@@ -23,35 +21,60 @@ const DUMMY_AUDIO = new Uint8Array([10, 20, 30, 40, 50]);
 const DUMMY_HASH = recordingChecksum(DUMMY_AUDIO);
 
 class MemoryObjectStore implements RecorderObjectStore {
-  private readonly store = new Map<string, { metadata: unknown; bytes: Uint8Array }>();
+  private readonly store = new Map<
+    string,
+    { metadata: unknown; bytes: Uint8Array }
+  >();
 
   async putRecordingImmutable(
-    metadata: Omit<RecorderObjectMetadata, "objectKey" | "objectVersion" | "durableAt">,
+    metadata: Omit<
+      RecorderObjectMetadata,
+      "objectKey" | "objectVersion" | "durableAt"
+    >,
     bytes: Uint8Array,
   ): Promise<{ objectKey: string; objectVersion: string; durableAt: string }> {
     const objectKey = `rec/${metadata.brandId}/${metadata.callId}/${metadata.recordingId}/${metadata.channel}.opus`;
     const objectVersion = "v1";
     const durableAt = metadata.utcEnd;
-    this.store.set(objectKey, { metadata: { ...metadata, objectKey, objectVersion, durableAt }, bytes });
+    this.store.set(objectKey, {
+      metadata: { ...metadata, objectKey, objectVersion, durableAt },
+      bytes,
+    });
     return { objectKey, objectVersion, durableAt };
   }
 
   async putImmutable(
     scope: RecordingScope,
     bytes: Uint8Array,
-  ): Promise<{ objectKey: string; objectVersion: string; durableAt: string; checksum: string }> {
+  ): Promise<{
+    objectKey: string;
+    objectVersion: string;
+    durableAt: string;
+    checksum: string;
+  }> {
     const objectKey = `manifests/${scope.brandId}/${scope.callId}/${scope.recordingId}/final.json`;
     const objectVersion = "v1";
     const durableAt = "2026-09-13T16:00:10.000Z";
     const checksum = recordingChecksum(bytes);
-    this.store.set(objectKey, { metadata: { scope, objectKey, objectVersion, durableAt, checksum }, bytes });
+    this.store.set(objectKey, {
+      metadata: { scope, objectKey, objectVersion, durableAt, checksum },
+      bytes,
+    });
     return { objectKey, objectVersion, durableAt, checksum };
   }
 
   async getImmutable(
     _scope: RecordingScope,
     ref: RecordingManifestRef,
-  ): Promise<{ bytes: Uint8Array; metadata: { objectKey: string; objectVersion: string; durableAt: string; checksum: string } }> {
+  ): Promise<{
+    bytes: Uint8Array;
+    metadata: {
+      objectKey: string;
+      objectVersion: string;
+      durableAt: string;
+      checksum: string;
+    };
+  }> {
     const item = this.store.get(ref.objectKey);
     if (!item) throw new Error("not found");
     return {
@@ -109,9 +132,13 @@ describe("SR-RECORDING-RECOVERY-20260913: Integration Service Coordination", () 
     const executedQueries: string[] = [];
     const mockDb = {
       isEnabled: () => true,
-      query: async (sql: string, params: unknown[]) => {
+      query: async (sql: string) => {
         executedQueries.push(sql);
-        if (sql.includes("SELECT work_id, payload_ref, status FROM voice.work_item")) {
+        if (
+          sql.includes(
+            "SELECT work_id, payload_ref, status FROM voice.work_item",
+          )
+        ) {
           return { rows: [], rowCount: 0 };
         }
         if (sql.includes("INSERT INTO voice.work_item")) {
@@ -139,7 +166,10 @@ describe("SR-RECORDING-RECOVERY-20260913: Integration Service Coordination", () 
 
     const callRepo = new CallcenterRepository(mockDb as any);
     const callcenterService = new CallcenterService(
-      { recordAuditLog: () => ({}), emitSessionAuditNotification: () => {} } as any,
+      {
+        recordAuditLog: () => ({}),
+        emitSessionAuditNotification: () => {},
+      } as any,
       callRepo,
     );
 
