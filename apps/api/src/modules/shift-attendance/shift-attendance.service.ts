@@ -59,6 +59,17 @@ export class ShiftAttendanceService implements OnModuleInit {
       );
     }
 
+    if (this.regulatoryRegistryService) {
+      if (
+        typeof this.regulatoryRegistryService.assertDriverAuthEligible ===
+        "function"
+      ) {
+        this.regulatoryRegistryService.assertDriverAuthEligible(
+          command.driverId,
+        );
+      }
+    }
+
     if (command.vehicleId?.trim()) {
       if (this.regulatoryRegistryService) {
         const isDispatchable =

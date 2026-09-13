@@ -55,8 +55,8 @@ function setupServices() {
   return { shiftService, regulatoryService };
 }
 
-describe("SR-QA-DRIVER-001 C051: shift clock-in vs. driver suspension (current-behaviour finding)", () => {
-  it("CURRENT-BEHAVIOUR FINDING: a suspended driver can still clock in without a vehicle -- ShiftAttendanceService.clockIn never checks driver lifecycle/suspension status", async () => {
+describe("SR-QA-DRIVER-001 C051: shift clock-in vs. driver suspension (fixed behaviour)", () => {
+  it("rejects clock-in when driver is suspended without a vehicle -- ShiftAttendanceService.clockIn checks driver lifecycle/suspension status", async () => {
     const { shiftService, regulatoryService } = setupServices();
 
     // drv-demo-003 is one of RegulatoryRegistryService's seeded drivers.
@@ -66,40 +66,51 @@ describe("SR-QA-DRIVER-001 C051: shift clock-in vs. driver suspension (current-b
     expect(suspended.lifecycleStatus).toBe("suspended");
     expect(suspended.dispatchEligible).toBe(false);
 
-    // If this ever starts throwing (e.g. once a real suspension gate is
-    // added to clockIn), this test must be updated to assert the rejection
-    // instead of loosened further.
-    const shift = shiftService.clockIn({ driverId: "drv-demo-003" });
-    expect(shift.status).toBe("active");
+    expect(() =>
+      shiftService.clockIn({ driverId: "drv-demo-003" }),
+    ).toThrowError(
+      expect.objectContaining({
+        code: "DRIVER_AUTH_SUSPENDED",
+        status: 403,
+      }),
+    );
 
-    // Read-back through an independent surface, not just the write's own
-    // return value.
+    // Read-back through an independent surface: no active shift created.
     expect(
       shiftService
         .listShifts("drv-demo-003")
-        .some((s) => s.shiftId === shift.shiftId && s.status === "active"),
-    ).toBe(true);
+        .some((s) => s.status === "active"),
+    ).toBe(false);
   });
 
-  it("CURRENT-BEHAVIOUR FINDING: a suspended driver can still clock in WITH a fully dispatch-eligible vehicle attached -- the vehicle-dispatchability gate does not substitute for a driver-eligibility gate", async () => {
+  it("rejects clock-in when driver is suspended WITH a fully dispatch-eligible vehicle attached", async () => {
     const { shiftService, regulatoryService } = setupServices();
 
     regulatoryService.updateDriverLifecycle("drv-demo-004", {
       lifecycleStatus: "suspended",
     });
 
-    // veh-demo-001 is one of RegulatoryRegistryService's seeded, dispatchable
-    // vehicles (confirmed dispatchable via the same real service used by the
-    // C053-055 dispatch-trip-lifecycle test in this task).
+    // veh-demo-001 is dispatchable, but driver suspension must take precedence
     expect(regulatoryService.getVehicleDispatchability("veh-demo-001")).toBe(
       true,
     );
 
-    const shift = shiftService.clockIn({
-      driverId: "drv-demo-004",
-      vehicleId: "veh-demo-001",
-    });
-    expect(shift.status).toBe("active");
-    expect(shift.vehicleId).toBe("veh-demo-001");
+    expect(() =>
+      shiftService.clockIn({
+        driverId: "drv-demo-004",
+        vehicleId: "veh-demo-001",
+      }),
+    ).toThrowError(
+      expect.objectContaining({
+        code: "DRIVER_AUTH_SUSPENDED",
+        status: 403,
+      }),
+    );
+
+    expect(
+      shiftService
+        .listShifts("drv-demo-004")
+        .some((s) => s.status === "active"),
+    ).toBe(false);
   });
 });
