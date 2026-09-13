@@ -318,6 +318,29 @@ class CandidateLifecycleTest(unittest.TestCase):
         self.assertEqual(state["handoffs"][0]["to"], "Gemini")
 
     @mock.patch.object(ai_status, "append_log")
+    def test_late_unblock_merge_preserves_progressed_or_externally_gated_parent(self, _log: mock.Mock) -> None:
+        parent_states = ["backlog", "todo", "in_progress", "review", "integrating", "acceptance", "done"]
+        cases = [(value, False) for value in parent_states] + [("blocked", True)]
+        for parent_status, external_gate in cases:
+            with self.subTest(parent_status=parent_status, external_gate=external_gate):
+                state = self.state(task_class="unblock")
+                helper = self.task(state)
+                helper.update(helper_parent="PARENT-001", status="integrating", candidate_sha="abc123",
+                              candidate_branch="codex/task-001", reviewed_sha="abc123")
+                parent = {"id": "PARENT-001", "owner": "Gemini", "reviewer": "Claude", "status": parent_status,
+                          "external_gate": external_gate, "next": "Current parent disposition", "last_update": "2026-09-11T03:58:00Z",
+                          "acceptance_evidence": {"operational": "existing independently reviewed evidence"}}
+                state["tasks"].append(parent)
+                before = copy.deepcopy(parent)
+                env = {"AI_NAME": "Supervisor", "CANDIDATE_HEAD_SHA": "abc123", "CANDIDATE_CI_STATUS": "success", "MERGE_SHA": "fedcba"}
+                with mock.patch.dict(os.environ, env, clear=True):
+                    ai_status.command_reconcile_candidate(state, ["TASK-001", "Historical helper merged"])
+                self.assertEqual(helper["status"], "done")
+                self.assertEqual(parent, before)
+                self.assertEqual(state["handoffs"], [])
+                self.assertEqual(state["blockers"], [])
+
+    @mock.patch.object(ai_status, "append_log")
     def test_supervisor_reassigns_through_candidate_writer(self, _log: mock.Mock) -> None:
         state = self.state()
         task = self.task(state)

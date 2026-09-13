@@ -1051,7 +1051,7 @@ def apply_unblock_parent_resolution(
     if not parent_id:
         return
     parent = get_task(state, parent_id)
-    if parent is None:
+    if parent is None or parent.get("status") != "blocked" or parent.get("external_gate"):
         return
 
     resume_status = (
