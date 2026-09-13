@@ -170,7 +170,10 @@ for (const identity of [
       ]) {
         await expect(page.locator(`a[href="${path}"]`)).toHaveCount(0);
       }
-      await page.getByRole("link", { name: "詳情 →" }).first().click();
+      await page
+        .locator("tr", { hasText: identity.ownPlate })
+        .getByRole("link", { name: "詳情 →" })
+        .click();
       await expect(page).toHaveURL(/\/host\/vehicles\/[^/?]+/);
       await expect(shell).toHaveAttribute("data-portal-scope", "host");
       await expect(
@@ -206,6 +209,6 @@ test("OPS navigation opens a real leave review queue including valid empty resul
       page.getByText(String(pending[0]!.leaveId), { exact: true }),
     ).toBeVisible();
   }
-  await expect(page.getByRole("alert")).toHaveCount(0);
+  await expect(page.locator("main").getByRole("alert")).toHaveCount(0);
   expect(errors).toEqual([]);
 });

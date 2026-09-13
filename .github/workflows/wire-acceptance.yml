@@ -100,8 +100,10 @@ jobs:
           exit 1
       - name: Normal Driver, Ops and restricted Host UI using real APIs
         run: |
-          pnpm exec playwright test -c playwright.system-remediation.config.ts tests/e2e/system-remediation/sr-wire-001/normal-ui.spec.ts
-          cp test-results/system-remediation-report.json .artifacts/wire-acceptance/browser-report.json
+          status=0
+          pnpm exec playwright test -c playwright.system-remediation.config.ts tests/e2e/system-remediation/sr-wire-001/normal-ui.spec.ts || status=$?
+          cp test-results/system-remediation-report.json .artifacts/wire-acceptance/browser-report.json || true
+          exit $status
       - name: Require both acceptance reports, zero skips, exact candidate
         if: always()
         run: |

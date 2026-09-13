@@ -21,6 +21,7 @@ The recovery branch is `codex/sr-wire-001-complete-20260911`. It preserves the s
 - Consensus B2: Single authoritative Academy qualification operation (`evaluateDriverQualification`) and SERIALIZABLE projection transaction. Preserves manual waivers (`training_status = 'waived'`), resets uncompleted/expired to `pending`/`expired`. Vehicle eligibility respects `trainingRequired: false` by skipping requirement checks.
 - Consensus B3: Explicit root `tsconfig.base.json` in `wire-acceptance.yml` for `tsx` server execution, ensuring `@drts/contracts` runtime JS exports are resolved instead of `.d.ts`.
 - Serialization and acceptance resilience: Implemented PostgreSQL 40001 retry loop with backoff in `AcademyRepository.executeSerializableTransaction`, guarded evaluator/repository calls against incomplete mock collaborator instances in unit tests, restricted quiz submission regulatory evaluation updates to passing attempts, cleaned up fixtures before re-seeding in `wire-app.ts` for acceptance server idempotency, and resolved root lint and typecheck contract alignments.
+- Browser acceptance resilience: Targeted own-plate vehicle table row for multi-vehicle Host details navigation, and scoped Ops leave review page alert check to the main application container to avoid false positive matching against Next.js App Router client navigation announcer (`#__next-route-announcer__`). Preserved `browser-report.json` copy on acceptance test execution.
 
 ## Validation and acceptance boundary
 
