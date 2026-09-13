@@ -1,6 +1,6 @@
 import { createHash, randomUUID } from "node:crypto";
 
-import { HttpStatus, Injectable, OnModuleInit, Optional } from "@nestjs/common";
+import { HttpStatus, Inject, Injectable, OnModuleInit, Optional } from "@nestjs/common";
 
 import type {
   AuditLogRecord,
@@ -43,9 +43,125 @@ import type { AuditedActionResult } from "../../common/action-receipt";
 import { AuditNotificationService } from "../audit-notification/audit-notification.service";
 import { IdentityRepository } from "../identity/identity.repository";
 import {
+  DOCUMENT_ARTIFACT_STORE,
+  InMemoryDocumentArtifactStore,
+  type DocumentArtifactRecord,
+  type DocumentArtifactStore,
+} from "../../common/document-artifacts";
+import {
   PlatformAdminRepository,
   type PersistPlatformAdminChanges,
 } from "./platform-admin.repository";
+
+// ── Placard PDF rendering (SR-PLACARD-001) ──────────────────────────────────
+// Dependency-free, minimal PDF-1.4 writer for vehicle placards.
+// Matches the minimal PDF-1.4 writer used by billing settlement (SR-INVOICE-001).
+
+const PLACARD_PDF_LINES_PER_PAGE = 40;
+
+function toPdfAsciiText(value: string): string {
+  return value.replace(/[^\x20-\x7e]/g, "?");
+}
+
+function escapePdfLiteralText(value: string): string {
+  return value.replace(/\\/g, "\\\\").replace(/\(/g, "\\(").replace(/\)/g, "\\)");
+}
+
+function chunkPdfLines(lines: string[], size: number): string[][] {
+  const chunks: string[][] = [];
+  for (let index = 0; index < lines.length; index += size) {
+    chunks.push(lines.slice(index, index + size));
+  }
+  return chunks.length > 0 ? chunks : [[]];
+}
+
+function buildPdfPageContentStream(lines: string[]): string {
+  const operators: string[] = ["BT", "/F1 10 Tf", "40 760 Td"];
+  lines.forEach((line, index) => {
+    if (index > 0) {
+      operators.push("0 -16 Td");
+    }
+    operators.push(`(${escapePdfLiteralText(toPdfAsciiText(line))}) Tj`);
+  });
+  operators.push("ET");
+  return operators.join("\n");
+}
+
+function buildMinimalPdf(lines: string[]): Buffer {
+  const pages = chunkPdfLines(lines, PLACARD_PDF_LINES_PER_PAGE);
+  const pageCount = pages.length;
+  const fontId = 3 + pageCount * 2;
+  const totalObjects = fontId;
+  const objectBodies: string[] = new Array(totalObjects + 1).fill("");
+  const kids = Array.from(
+    { length: pageCount },
+    (_, index) => `${3 + index * 2} 0 R`,
+  ).join(" ");
+
+  objectBodies[1] = `1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n`;
+  objectBodies[2] = `2 0 obj\n<< /Type /Pages /Kids [${kids}] /Count ${pageCount} >>\nendobj\n`;
+
+  pages.forEach((pageLines, index) => {
+    const pageId = 3 + index * 2;
+    const contentId = 4 + index * 2;
+    const content = buildPdfPageContentStream(pageLines);
+    const contentByteLength = Buffer.byteLength(content, "latin1");
+    objectBodies[pageId] =
+      `${pageId} 0 obj\n<< /Type /Page /Parent 2 0 R /Resources << /Font << /F1 ${fontId} 0 R >> >> /MediaBox [0 0 612 792] /Contents ${contentId} 0 R >>\nendobj\n`;
+    objectBodies[contentId] =
+      `${contentId} 0 obj\n<< /Length ${contentByteLength} >>\nstream\n${content}\nendstream\nendobj\n`;
+  });
+
+  objectBodies[fontId] =
+    `${fontId} 0 obj\n<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>\nendobj\n`;
+
+  const header = "%PDF-1.4\n";
+  const offsets: number[] = new Array(totalObjects + 1).fill(0);
+  let offset = Buffer.byteLength(header, "latin1");
+  let body = "";
+  for (let id = 1; id <= totalObjects; id += 1) {
+    offsets[id] = offset;
+    const objectBody = objectBodies[id]!;
+    body += objectBody;
+    offset += Buffer.byteLength(objectBody, "latin1");
+  }
+
+  const xrefOffset = offset;
+  let xref = `xref\n0 ${totalObjects + 1}\n0000000000 65535 f \n`;
+  for (let id = 1; id <= totalObjects; id += 1) {
+    xref += `${String(offsets[id]).padStart(10, "0")} 00000 n \n`;
+  }
+  const trailer = `trailer\n<< /Size ${totalObjects + 1} /Root 1 0 R >>\nstartxref\n${xrefOffset}\n%%EOF`;
+
+  return Buffer.from(header + body + xref + trailer, "latin1");
+}
+
+function buildPlacardPdfRows(
+  placard: Pick<
+    PlacardVersionRecord,
+    "placardVersionId" | "versionCode" | "templateName" | "publishedAt" | "createdAt"
+  >,
+  source: PublicInfoVersionRecord,
+): string[] {
+  return [
+    `Vehicle Service Placard`,
+    `========================================`,
+    `Version Code: ${placard.versionCode}`,
+    `Placard ID: ${placard.placardVersionId}`,
+    `Template: ${placard.templateName}`,
+    `Public Info Source: ${toPdfAsciiText(source.title)} (${source.versionId})`,
+    `Source Status: ${source.status}`,
+    `Booking / Dispatch Phone: ${toPdfAsciiText(source.callPhone ?? "N/A")}`,
+    `Customer Complaint Hotline: ${toPdfAsciiText(source.complaintPhone ?? "N/A")}`,
+    `Call Rate: ${toPdfAsciiText(source.callRateText ?? "N/A")}`,
+    `Fare Rule: ${toPdfAsciiText(source.fareText ?? "N/A")}`,
+    `Payment Methods: ${toPdfAsciiText(source.paymentMethodText ?? "N/A")}`,
+    `Effective Period: ${source.effectiveFrom ?? "N/A"} to ${source.effectiveTo ?? "indefinite"}`,
+    `Published At: ${placard.publishedAt ?? "Draft"}`,
+    `Generated At: ${placard.createdAt}`,
+    `========================================`,
+  ];
+}
 
 const PUBLIC_INFO_SEED: PublicInfoVersionRecord[] = [
   {
@@ -179,9 +295,7 @@ export class PlatformAdminService implements OnModuleInit {
     this.clonePublicInfoVersion(version),
   );
 
-  private placardVersions = PLACARD_SEED.map((placard) =>
-    this.clonePlacardVersion(placard),
-  );
+  private placardVersions: PlacardVersionRecord[] = [];
 
   private platformNotices: PlatformNoticeRecord[] = PLATFORM_NOTICES_SEED.map(
     (n) => ({ ...n }),
@@ -217,7 +331,14 @@ export class PlatformAdminService implements OnModuleInit {
     private readonly platformAdminRepository?: PlatformAdminRepository,
     @Optional()
     private readonly identityRepository: IdentityRepository = new IdentityRepository(),
-  ) {}
+    @Optional()
+    @Inject(DOCUMENT_ARTIFACT_STORE)
+    private readonly documentArtifactStore: DocumentArtifactStore = new InMemoryDocumentArtifactStore(),
+  ) {
+    this.placardVersions = PLACARD_SEED.map((placard) =>
+      this.clonePlacardVersion(placard),
+    );
+  }
 
   async onModuleInit() {
     if (this.platformAdminRepository) {
@@ -253,6 +374,10 @@ export class PlatformAdminService implements OnModuleInit {
           "module init",
         );
       }
+    } else {
+      this.placardVersions = this.placardVersions.map((placard) =>
+        this.clonePlacardVersion(placard),
+      );
     }
 
     await this.bootstrapSeedPlatformAdminUsers();
@@ -358,7 +483,9 @@ export class PlatformAdminService implements OnModuleInit {
     version.effectiveFrom =
       this.normalizeNullableText(command.effectiveFrom) ??
       version.effectiveFrom;
-    version.effectiveTo = this.normalizeNullableText(command.effectiveTo);
+    version.effectiveTo =
+      this.normalizeNullableText(command.effectiveTo) ??
+      version.effectiveTo;
     version.updatedAt = publishedAt;
 
     const changedVersions = previousPublished
@@ -458,6 +585,21 @@ export class PlatformAdminService implements OnModuleInit {
     );
   }
 
+  getPlacardVersion(placardVersionId: string): PlacardVersionRecord {
+    const placard = this.placardVersions.find(
+      (candidate) => candidate.placardVersionId === placardVersionId,
+    );
+    if (!placard) {
+      throw new ApiRequestError(
+        HttpStatus.NOT_FOUND,
+        "PLACARD_VERSION_NOT_FOUND",
+        "The placard version could not be found.",
+        { placardVersionId },
+      );
+    }
+    return this.clonePlacardVersion(placard);
+  }
+
   publishPlacardVersion(
     placardVersionId: string,
     command: PublishPlacardVersionCommand = {},
@@ -488,6 +630,9 @@ export class PlatformAdminService implements OnModuleInit {
     const now = new Date().toISOString();
     placard.publishedAt = now;
     placard.updatedAt = now;
+
+    // Force re-render so PDF reflects the actual publishedAt timestamp
+    this.ensurePlacardArtifact(placard, true);
 
     this.persistChanges(
       { placardVersions: [this.clonePlacardVersion(placard)] },
@@ -524,6 +669,17 @@ export class PlatformAdminService implements OnModuleInit {
     const publicInfoVersion = this.requirePublicInfoVersion(
       command.publicInfoVersionId,
     );
+    if (publicInfoVersion.status === "retired") {
+      throw new ApiRequestError(
+        HttpStatus.BAD_REQUEST,
+        "PUBLIC_INFO_VERSION_RETIRED",
+        "Cannot generate placard from a retired public info version.",
+        {
+          publicInfoVersionId: command.publicInfoVersionId,
+          status: publicInfoVersion.status,
+        },
+      );
+    }
     const normalizedVersionCode = command.versionCode.trim();
     const duplicate = this.placardVersions.find(
       (candidate) =>
@@ -566,6 +722,9 @@ export class PlatformAdminService implements OnModuleInit {
       updatedAt: now,
       downloadMetadata: null,
     };
+
+    // Materialise real PDF bytes and sign the URL
+    this.ensurePlacardArtifact(placard);
 
     this.placardVersions = [
       this.clonePlacardVersion(placard),
@@ -1666,37 +1825,110 @@ export class PlatformAdminService implements OnModuleInit {
     };
   }
 
+  private isPlacardArtifactExpired(
+    artifactUrl: string | null | undefined,
+    artifactExpiresAt: string | null | undefined,
+  ): boolean {
+    if (artifactExpiresAt) {
+      const expiry = Date.parse(artifactExpiresAt);
+      if (!Number.isNaN(expiry)) {
+        return expiry <= Date.now();
+      }
+    }
+    if (!artifactUrl) {
+      return true;
+    }
+    try {
+      const parsed = new URL(artifactUrl, "http://controlled-download.invalid");
+      const param = parsed.searchParams.get("expires_at");
+      if (!param) return true;
+      const expiry = Date.parse(param);
+      return Number.isNaN(expiry) ? true : expiry <= Date.now();
+    } catch {
+      return true;
+    }
+  }
+
+  private ensurePlacardArtifact(
+    placard: PlacardVersionRecord,
+    forceRerender = false,
+  ): PlacardVersionRecord {
+    const stored = this.documentArtifactStore.get(
+      "placard",
+      placard.placardVersionId,
+    );
+    const materialised =
+      !forceRerender &&
+      stored != null &&
+      placard.artifactManifestHash != null &&
+      stored.record.sha256 === placard.artifactManifestHash;
+    const expired = this.isPlacardArtifactExpired(
+      placard.artifactDownloadUrl,
+      placard.artifactExpiresAt,
+    );
+
+    if (materialised && !expired && placard.artifactDownloadUrl) {
+      return placard;
+    }
+
+    const publicInfoVersion = this.publicInfoVersions.find(
+      (v) => v.versionId === placard.publicInfoVersionId,
+    );
+
+    let record: DocumentArtifactRecord;
+    if (materialised) {
+      record = stored!.record;
+    } else if (publicInfoVersion) {
+      const pdfBytes = buildMinimalPdf(
+        buildPlacardPdfRows(placard, publicInfoVersion),
+      );
+      record = this.documentArtifactStore.put({
+        kind: "placard",
+        subjectId: placard.placardVersionId,
+        mimeType: "application/pdf",
+        bytes: pdfBytes,
+      });
+    } else {
+      const fallbackBytes = buildMinimalPdf([
+        `Vehicle Service Placard ${placard.versionCode}`,
+        `Placard ID: ${placard.placardVersionId}`,
+        `Source Version: ${placard.publicInfoVersionId}`,
+        `Generated At: ${placard.createdAt}`,
+      ]);
+      record = this.documentArtifactStore.put({
+        kind: "placard",
+        subjectId: placard.placardVersionId,
+        mimeType: "application/pdf",
+        bytes: fallbackBytes,
+      });
+    }
+
+    const downloadMetadata = this.createPlacardDownloadMetadata(
+      placard.placardVersionId,
+      record.sha256,
+    );
+
+    placard.artifactFileId =
+      this.normalizeNullableText(placard.artifactFileId) ??
+      `placard-${record.sha256.slice(0, 16)}`;
+    placard.artifactManifestHash = record.sha256;
+    placard.artifactDownloadUrl = downloadMetadata.downloadUrl;
+    placard.artifactExpiresAt = downloadMetadata.expiresAt;
+    placard.downloadMetadata = downloadMetadata;
+
+    return placard;
+  }
+
   private clonePlacardVersion(
     placard: PlacardVersionRecord,
   ): PlacardVersionRecord {
-    const artifactFileId =
-      this.normalizeNullableText(placard.artifactFileId) ??
-      `placard-artifact-${placard.placardVersionId}`;
-    const artifactManifestHash =
-      placard.artifactManifestHash ??
-      this.computeHash({
-        placardVersionId: placard.placardVersionId,
-        versionCode: placard.versionCode,
-        publicInfoVersionId: placard.publicInfoVersionId,
-        templateName: placard.templateName,
-        artifactFileId,
-      });
-    const downloadMetadata =
-      placard.downloadMetadata &&
-      placard.downloadMetadata.manifestHash === artifactManifestHash
-        ? { ...placard.downloadMetadata }
-        : this.createPlacardDownloadMetadata(
-            placard.placardVersionId,
-            artifactManifestHash,
-          );
+    const ensured = this.ensurePlacardArtifact(placard);
 
     return {
-      ...placard,
-      artifactFileId,
-      artifactManifestHash,
-      artifactDownloadUrl: downloadMetadata.downloadUrl,
-      artifactExpiresAt: downloadMetadata.expiresAt,
-      downloadMetadata,
+      ...ensured,
+      downloadMetadata: ensured.downloadMetadata
+        ? { ...ensured.downloadMetadata }
+        : null,
     };
   }
 
