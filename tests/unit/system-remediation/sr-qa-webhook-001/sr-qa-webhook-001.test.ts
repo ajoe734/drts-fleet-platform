@@ -13,6 +13,7 @@ import {
 } from "vitest";
 
 import { OpsDispatchEventsService } from "../../../../apps/api/src/common/ops-dispatch-events.service";
+import { ApiRequestError } from "../../../../apps/api/src/common/api-envelope";
 import { AuditNotificationService } from "../../../../apps/api/src/modules/audit-notification/audit-notification.service";
 import { BillingSettlementService } from "../../../../apps/api/src/modules/billing-settlement/billing-settlement.service";
 import { CallcenterService } from "../../../../apps/api/src/modules/callcenter/callcenter.service";
@@ -22,6 +23,11 @@ import { DriverProfileService } from "../../../../apps/api/src/modules/driver-pr
 import { GeoProviderConfigService } from "../../../../apps/api/src/modules/geo/geo-provider-config.service";
 import { GeoService } from "../../../../apps/api/src/modules/geo/geo.service";
 import { MockGeoProvider } from "../../../../apps/api/src/modules/geo/mock-geo.provider";
+import {
+  type GeoProvider,
+  GeoProviderError,
+} from "../../../../apps/api/src/modules/geo/geo.provider";
+import { MapGeofenceObservabilityService } from "../../../../apps/api/src/modules/operational-observability/map-geofence-observability.service";
 import { OwnedMobilityTaskEventsService } from "../../../../apps/api/src/modules/owned-mobility/owned-mobility-task-events.service";
 import { OwnedMobilityService } from "../../../../apps/api/src/modules/owned-mobility/owned-mobility.service";
 import { RegulatoryRegistryService } from "../../../../apps/api/src/modules/regulatory-registry/regulatory-registry.service";
@@ -226,6 +232,60 @@ function createInMemoryWebhookRepository() {
         webhookDeliveries = [...byId.values()];
       }
     },
+  };
+}
+
+function createInMemoryBillingSettlementRepository() {
+  let reconciliationIssues: any[] = [];
+  let fulfillmentSegments: any[] = [];
+  let sandboxBillingTreatments: any[] = [];
+
+  return {
+    isEnabled: () => true,
+    loadState: async () => ({
+      tenantBillingProfiles: [],
+      tenantInvoices: [],
+      driverFeePlans: [],
+      driverStatements: [],
+      reimbursementBatches: [],
+      reconciliationIssues: [...reconciliationIssues],
+      fulfillmentSegments: [...fulfillmentSegments],
+      sandboxBillingTreatments: [...sandboxBillingTreatments],
+    }),
+    persistChanges: async (changes: any) => {
+      if (changes.reconciliationIssues?.length) {
+        const byId = new Map(
+          reconciliationIssues.map((r: any) => [r.issueId, r]),
+        );
+        for (const issue of changes.reconciliationIssues) {
+          byId.set(issue.issueId, issue);
+        }
+        reconciliationIssues = [...byId.values()];
+      }
+      if (changes.fulfillmentSegments?.length) {
+        const byId = new Map(
+          fulfillmentSegments.map((f: any) => [f.fulfillmentSegmentId, f]),
+        );
+        for (const seg of changes.fulfillmentSegments) {
+          byId.set(seg.fulfillmentSegmentId, seg);
+        }
+        fulfillmentSegments = [...byId.values()];
+      }
+      if (changes.sandboxBillingTreatments?.length) {
+        const byId = new Map(
+          sandboxBillingTreatments.map((t: any) => [
+            t.sandboxBillingTreatmentId,
+            t,
+          ]),
+        );
+        for (const treat of changes.sandboxBillingTreatments) {
+          byId.set(treat.sandboxBillingTreatmentId, treat);
+        }
+        sandboxBillingTreatments = [...byId.values()];
+      }
+    },
+    listLiveCardBenefitSettlementPeriods: async () => [],
+    reportPersistenceFailure: () => {},
   };
 }
 
@@ -1148,6 +1208,162 @@ describe("SR-QA-WEBHOOK-001: Verification Suite", () => {
         "external_gate_pending_live_credentials",
       );
     });
+
+    it("C113-4 (Normal): Ingests sandbox-source fulfillment segments & billing treatments, verifying capability-source mapping and tenant/order isolation", async () => {
+      const repo = createInMemoryBillingSettlementRepository();
+      const auditNotificationService = new AuditNotificationService();
+      const billingService = new BillingSettlementService(
+        auditNotificationService,
+        repo as never,
+      );
+      await billingService.onModuleInit();
+
+      await billingService.handleOwnedMobilityTripCompleted({
+        orderId: "order-sandbox-mapped-001",
+        settlementId: "settlement-sandbox-001",
+        tenantId: "tenant-demo-001",
+        driverId: "drv-sandbox-001",
+        serviceBucket: "business_dispatch",
+        businessDispatchSubtype: "enterprise_dispatch",
+        completedAt: new Date().toISOString(),
+        grossEarning: { currency: "TWD", amountMinor: 50000 },
+        sandboxFulfillmentSegments: [
+          {
+            fulfillmentSegmentId: "seg-sandbox-001",
+            orderId: "order-sandbox-mapped-001",
+            segmentIndex: 0,
+            carrierName: "Demo Partner Fleet",
+            carrierCode: "CPF",
+            vehiclePlate: "TWD-8888",
+            status: "completed",
+            startedAt: new Date().toISOString(),
+            completedAt: new Date().toISOString(),
+            createdAt: new Date().toISOString(),
+            updatedAt: new Date().toISOString(),
+          },
+        ],
+        sandboxBillingTreatment: {
+          sandboxBillingTreatmentId: "treat-sandbox-001",
+          orderId: "order-sandbox-mapped-001",
+          ratePlanName: "Enterprise Tier 1",
+          taxTreatment: "tax_inclusive",
+          partnerCommissionRatePercent: 12,
+          platformFeeRatePercent: 3,
+          status: "applied",
+          appliedAt: new Date().toISOString(),
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+        },
+      });
+
+      const segments = billingService.listFulfillmentSegments(
+        "order-sandbox-mapped-001",
+      );
+      expect(segments.length).toBe(1);
+      expect(segments[0]!.carrierName).toBe("Demo Partner Fleet");
+      expect(segments[0]!.carrierCode).toBe("CPF");
+      expect(segments[0]!.vehiclePlate).toBe("TWD-8888");
+
+      const treatments = billingService.listSandboxBillingTreatments(
+        "order-sandbox-mapped-001",
+      );
+      expect(treatments.length).toBe(1);
+      expect(treatments[0]!.ratePlanName).toBe("Enterprise Tier 1");
+      expect(treatments[0]!.partnerCommissionRatePercent).toBe(12);
+
+      // Isolation check: querying another order returns empty array
+      const unrelatedSegments = billingService.listFulfillmentSegments(
+        "order-unrelated-999",
+      );
+      expect(unrelatedSegments.length).toBe(0);
+    });
+
+    it("C113-5 (Normal & Idempotency): Resend handling is idempotent and reconciliation issues record immutable audit trail and resolution codes", async () => {
+      const repo = createInMemoryBillingSettlementRepository();
+      const auditNotificationService = new AuditNotificationService();
+      const billingService = new BillingSettlementService(
+        auditNotificationService,
+        repo as never,
+      );
+      await billingService.onModuleInit();
+
+      // Create reconciliation issue
+      const issue = await billingService.createReconciliationIssue({
+        openedBy: "actor-ops-001",
+        summary: "Bank Ledger Mismatch for Batch 202609",
+        issueType: "partner_sponsor_mismatch",
+        tenantId: "tenant-demo-001",
+        orderId: "order-recon-001",
+        channelKey: "partner_airport",
+        comment: "Card benefit subsidised amount does not match statement",
+      });
+      expect(issue.issueId).toBeTruthy();
+      expect(issue.status).toBe("open");
+      expect(issue.issueType).toBe("partner_sponsor_mismatch");
+
+      // Verify audit trail for creation
+      const auditLogs = auditNotificationService.listNotifications();
+      expect(auditLogs.length).toBeGreaterThanOrEqual(1);
+
+      // Resolve reconciliation issue with required resolution code and summary
+      const resolved = await billingService.resolveReconciliationIssue(
+        issue.issueId,
+        {
+          actorId: "actor-ops-001",
+          resolutionCode: "ledger_adjusted_with_receipt",
+          resolutionSummary:
+            "Adjusted bank ledger difference with bank confirmation slip",
+        },
+      );
+      expect(resolved.status).toBe("resolved");
+      expect(resolved.resolutionCode).toBe("ledger_adjusted_with_receipt");
+      expect(resolved.resolutionSummary).toBe(
+        "Adjusted bank ledger difference with bank confirmation slip",
+      );
+      expect(resolved.resolvedAt).toBeTruthy();
+
+      // Reopen to verify state machine flow
+      const reopened = await billingService.reopenReconciliationIssue(
+        issue.issueId,
+        {
+          actorId: "actor-ops-001",
+          reason: "Additional bank fee discrepancy reported",
+        },
+      );
+      expect(reopened.status).toBe("reopened");
+    });
+
+    it("C113-6 (Negative & Auth): Rejects blank actor or summary and enforces reconciliation command validations", async () => {
+      const repo = createInMemoryBillingSettlementRepository();
+      const auditNotificationService = new AuditNotificationService();
+      const billingService = new BillingSettlementService(
+        auditNotificationService,
+        repo as never,
+      );
+      await billingService.onModuleInit();
+
+      const issue = await billingService.createReconciliationIssue({
+        openedBy: "actor-ops-001",
+        summary: "Missing Settlement Row",
+        issueType: "missing_settlement",
+      });
+
+      await expect(
+        billingService.resolveReconciliationIssue(issue.issueId, {
+          actorId: "   ",
+          resolutionCode: "ledger_adjusted_with_receipt",
+          resolutionSummary: "Valid summary",
+        }),
+      ).rejects.toThrow();
+
+      await expect(
+        billingService.resolveReconciliationIssue(issue.issueId, {
+          actorId: "actor-ops-001",
+          resolutionCode: "ledger_adjusted_with_receipt",
+          resolutionSummary: "   ",
+        }),
+      ).rejects.toThrow();
+    });
   });
 
   // =========================================================================
@@ -1204,6 +1420,173 @@ describe("SR-QA-WEBHOOK-001: Verification Suite", () => {
 
       expect(prerequisites.externalGateId).toBe("GATE-C114-GOOGLE-MAPS");
       expect(prerequisites.status).toBe("external_gate_mock_verified");
+    });
+
+    it("C114-4 (Normal): Computes geo route between valid Taiwan locations across travel modes (drive, walk, two_wheeler), returning valid distance and duration", async () => {
+      const geoService = new GeoService(
+        new MockGeoProvider(),
+        new GeoProviderConfigService({
+          NODE_ENV: "test",
+          DRTS_ENV: "test",
+          MAP_PROVIDER_MODE: "mock",
+        }),
+      );
+
+      const routeDrive = await geoService.route({
+        origin: { lat: 25.0375, lng: 121.5637 },
+        destination: { lat: 25.0478, lng: 121.5171 },
+        travelMode: "drive",
+      });
+      expect(routeDrive.provider).toBe("mock");
+      expect(routeDrive.distanceMeters).toBeGreaterThan(1000);
+      expect(routeDrive.durationSeconds).toBeGreaterThan(60);
+
+      const routeWalk = await geoService.route({
+        origin: { lat: 25.0375, lng: 121.5637 },
+        destination: { lat: 25.0478, lng: 121.5171 },
+        travelMode: "walk",
+      });
+      expect(routeWalk.distanceMeters).toBe(routeDrive.distanceMeters);
+      expect(routeWalk.durationSeconds).toBeGreaterThan(
+        routeDrive.durationSeconds,
+      );
+
+      const routeTwoWheeler = await geoService.route({
+        origin: { lat: 25.0375, lng: 121.5637 },
+        destination: { lat: 25.0478, lng: 121.5171 },
+        travelMode: "two_wheeler",
+      });
+      expect(routeTwoWheeler.distanceMeters).toBe(routeDrive.distanceMeters);
+      expect(routeTwoWheeler.durationSeconds).toBeGreaterThan(
+        routeDrive.durationSeconds,
+      );
+    });
+
+    it("C114-5 (Negative): Rejects invalid route commands: invalid travel mode, missing or out-of-range coordinates", async () => {
+      const geoService = new GeoService(
+        new MockGeoProvider(),
+        new GeoProviderConfigService({
+          NODE_ENV: "test",
+          DRTS_ENV: "test",
+          MAP_PROVIDER_MODE: "mock",
+        }),
+      );
+
+      try {
+        await geoService.route({
+          origin: { lat: 25.0375, lng: 121.5637 },
+          destination: { lat: 25.0478, lng: 121.5171 },
+          travelMode: "flight" as never,
+        });
+        expect.unreachable("expected invalid travel mode to throw");
+      } catch (err: any) {
+        expect(err).toBeInstanceOf(ApiRequestError);
+        expect(err.getStatus()).toBe(400);
+        expect(err.code).toBe("INVALID_GEO_ROUTE_TRAVEL_MODE");
+      }
+
+      try {
+        await geoService.route({
+          origin: { lat: 99.99, lng: 121.5637 },
+          destination: { lat: 25.0478, lng: 121.5171 },
+          travelMode: "drive",
+        });
+        expect.unreachable("expected invalid coordinates to throw");
+      } catch (err: any) {
+        expect(err).toBeInstanceOf(ApiRequestError);
+        expect(err.getStatus()).toBe(400);
+      }
+    });
+
+    it("C114-6 (Negative & Failure Handling): Handles configured provider timeout (504) and internal error (500) with typed ApiRequestError and provider_outage observability", async () => {
+      class FailingGeoProvider implements GeoProvider {
+        readonly providerId = "google";
+        async search(): Promise<any> {
+          throw new GeoProviderError(
+            500,
+            "GEO_PROVIDER_INTERNAL_ERROR",
+            "Google Geocoding service 500 error",
+            { provider: "google" },
+            false,
+          );
+        }
+        async resolve(): Promise<any> {
+          throw new GeoProviderError(
+            500,
+            "GEO_PROVIDER_INTERNAL_ERROR",
+            "Resolve failed",
+            { provider: "google" },
+            false,
+          );
+        }
+        async reverse(): Promise<any> {
+          throw new GeoProviderError(
+            500,
+            "GEO_PROVIDER_INTERNAL_ERROR",
+            "Reverse failed",
+            { provider: "google" },
+            false,
+          );
+        }
+        async route(): Promise<any> {
+          throw new GeoProviderError(
+            504,
+            "GEO_PROVIDER_TIMEOUT",
+            "Google Directions API timed out after 5000ms",
+            { provider: "google" },
+            true,
+          );
+        }
+      }
+
+      const observability = new MapGeofenceObservabilityService();
+      const failingGeoService = new GeoService(
+        new FailingGeoProvider(),
+        new GeoProviderConfigService({
+          NODE_ENV: "test",
+          DRTS_ENV: "test",
+          MAP_PROVIDER_MODE: "mock",
+        }),
+        undefined,
+        observability,
+      );
+
+      // Route timeout: 504 typed ApiRequestError with retryable=true
+      try {
+        await failingGeoService.route({
+          origin: { lat: 25.0375, lng: 121.5637 },
+          destination: { lat: 25.0478, lng: 121.5171 },
+          travelMode: "drive",
+        });
+        expect.unreachable("expected route to fail with 504");
+      } catch (error: any) {
+        expect(error).toBeInstanceOf(ApiRequestError);
+        expect(error.getStatus()).toBe(504);
+        expect(error.code).toBe("GEO_PROVIDER_TIMEOUT");
+        const resp = error.getResponse() as any;
+        expect(resp.error.retryable).toBe(true);
+      }
+
+      // Provider outage observability counter incremented
+      expect(
+        observability.getSnapshot().geo.providerOutageCount,
+      ).toBeGreaterThanOrEqual(1);
+
+      // Search 500 error: 500 typed ApiRequestError with retryable=false
+      try {
+        await failingGeoService.search({ q: "台北市信義區市府路1號" });
+        expect.unreachable("expected search to fail with 500");
+      } catch (error: any) {
+        expect(error).toBeInstanceOf(ApiRequestError);
+        expect(error.getStatus()).toBe(500);
+        expect(error.code).toBe("GEO_PROVIDER_INTERNAL_ERROR");
+        const resp = error.getResponse() as any;
+        expect(resp.error.retryable).toBe(false);
+      }
+
+      expect(
+        observability.getSnapshot().geo.providerOutageCount,
+      ).toBeGreaterThanOrEqual(2);
     });
   });
 
@@ -1326,6 +1709,114 @@ describe("SR-QA-WEBHOOK-001: Verification Suite", () => {
       expect(liveLimitation.limitationId).toBe("LIMITATION-C115-CTI-CRON");
       expect(liveLimitation.status).toBe(
         "adapter_tested_live_infrastructure_deferred",
+      );
+    });
+
+    it("C115-4 (Normal): Call recording callback deduplication and idempotent processing preserves order compliance state", async () => {
+      const { ownedMobilityService, sandboxWebhookAdapter } =
+        createMobilityAndCallServices();
+
+      sandboxWebhookAdapter.ingest(sandboxFixtures.callStarted, "req-start-idem");
+      sandboxWebhookAdapter.ingest(sandboxFixtures.callEnded, "req-end-idem");
+      sandboxWebhookAdapter.ingest(
+        sandboxFixtures.recordingPending,
+        "req-pending-idem",
+      );
+
+      const order = await ownedMobilityService.createCallCenterOrder({
+        callId: sandboxFixtures.callStarted.provider_call_id,
+        agentId: sandboxFixtures.callStarted.agent_extension!,
+        passenger: {
+          name: "陳宏達",
+          phone: sandboxFixtures.callStarted.caller_phone!,
+        },
+        pickup: { address: "台中市梧棲區中二路一段9號" },
+        dropoff: { address: "台中市大安區興安路378號" },
+      });
+
+      expect(order.status).toBe("recording_pending");
+
+      // Ingest recordingReady first time
+      sandboxWebhookAdapter.ingest(
+        sandboxFixtures.recordingReady,
+        "req-ready-first",
+      );
+      const readyOrder = ownedMobilityService.getOrder(order.orderId);
+      expect(readyOrder.status).toBe("ready_for_dispatch");
+      expect(readyOrder.recordingId).toBe(
+        sandboxFixtures.recordingReady.recording_id,
+      );
+      expect(readyOrder.complianceFlags).toContain("recording_bound");
+
+      // Ingest duplicate recordingReady (resend)
+      sandboxWebhookAdapter.ingest(
+        sandboxFixtures.recordingReady,
+        "req-ready-duplicate",
+      );
+      const recheckedOrder = ownedMobilityService.getOrder(order.orderId);
+      expect(recheckedOrder.status).toBe("ready_for_dispatch");
+      expect(recheckedOrder.recordingId).toBe(
+        sandboxFixtures.recordingReady.recording_id,
+      );
+      expect(recheckedOrder.complianceFlags).toContain("recording_bound");
+    });
+
+    it("C115-5 (Normal & Degradation): Driver license & qualification background scan detects expirations, blocks dispatch eligibility, and updates status on renewal", async () => {
+      const auditService = new AuditNotificationService();
+      const driverProfileService = new DriverProfileService(auditService);
+      const opsDispatchEventsService = new OpsDispatchEventsService(
+        new EventEmitter() as never,
+      );
+      const regulatoryRegistryService = new RegulatoryRegistryService(
+        opsDispatchEventsService,
+        auditService,
+        driverProfileService,
+      );
+
+      const initialDriver = regulatoryRegistryService
+        .listDrivers()
+        .find((d) => d.driverId === "drv-demo-001");
+      expect(initialDriver).toBeDefined();
+      expect(initialDriver!.dispatchEligible).toBe(true);
+      expect(initialDriver!.licensesValid).toBe(true);
+
+      // Degrade status: expire license in the past
+      const expiredDriver = regulatoryRegistryService.updateDriverLicenses(
+        "drv-demo-001",
+        {
+          licenseExpiry: "2025-01-01T00:00:00.000Z",
+        },
+      );
+      expect(expiredDriver.dispatchEligible).toBe(false);
+      expect(expiredDriver.licensesValid).toBe(false);
+      expect(expiredDriver.eligibilityBlockedReasons).toContain(
+        "licenses_invalid",
+      );
+
+      // Expiring licenses scan finds expiring/expired licenses
+      const expiringDrivers =
+        regulatoryRegistryService.listExpiringDriverLicenses(
+          60,
+          Date.parse("2027-12-01T00:00:00.000Z"),
+        );
+      expect(expiringDrivers.length).toBeGreaterThan(0);
+
+      // Expiring policies scan
+      const expiringPolicies =
+        regulatoryRegistryService.listExpiringPolicies(365 * 5);
+      expect(expiringPolicies.length).toBeGreaterThan(0);
+
+      // Renew driver license with future date: restores dispatch eligibility
+      const renewedDriver = regulatoryRegistryService.updateDriverLicenses(
+        "drv-demo-001",
+        {
+          licenseExpiry: "2028-12-31T23:59:59.000Z",
+        },
+      );
+      expect(renewedDriver.dispatchEligible).toBe(true);
+      expect(renewedDriver.licensesValid).toBe(true);
+      expect(renewedDriver.eligibilityBlockedReasons).not.toContain(
+        "licenses_invalid",
       );
     });
   });

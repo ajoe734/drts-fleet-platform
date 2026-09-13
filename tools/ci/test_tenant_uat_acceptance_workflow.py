@@ -95,6 +95,17 @@ class TenantUatAcceptanceWorkflowStructureTests(unittest.TestCase):
             "docs/04-uat/system-remediation-20260906/SR-QA-TENANT-001.md",
             push_block,
         )
+        self.assertIn("gemini2/sr-c115-harness-20260913", push_block)
+        self.assertIn(
+            "tests/e2e/system-remediation/sr-qa-webhook-001/**", push_block
+        )
+        self.assertIn(
+            "tests/unit/system-remediation/sr-qa-webhook-001/**", push_block
+        )
+        self.assertIn(
+            "docs/04-uat/system-remediation-20260906/SR-QA-WEBHOOK-001.md",
+            push_block,
+        )
 
     def test_candidate_sha_falls_back_to_github_sha_everywhere_it_is_used(
         self,
@@ -128,7 +139,7 @@ class TenantUatAcceptanceWorkflowStructureTests(unittest.TestCase):
     def test_typescript_runner_resolves_from_its_declaring_workspace(self) -> None:
         package = json.loads((ROOT / "apps/api/package.json").read_text())
         self.assertIn("tsx", package["devDependencies"])
-        self.assertEqual(self.text.count("./apps/api/node_modules/.bin/tsx "), 2)
+        self.assertEqual(self.text.count("./apps/api/node_modules/.bin/tsx "), 4)
         self.assertNotIn("pnpm exec tsx ", self.text)
 
     def test_seed_log_preserves_action_masking_without_archiving_the_token(self) -> None:
@@ -193,13 +204,19 @@ class TenantUatAcceptanceWorkflowStructureTests(unittest.TestCase):
         upload_block = self.text.split("upload-artifact@v4", 1)[1]
         preceding = self.text.split("upload-artifact@v4", 1)[0]
         step_start = preceding.rfind("- name:")
-        step_text = preceding[step_start:] + upload_block[:600]
+        step_text = preceding[step_start:] + upload_block[:1200]
         self.assertIn("if: always()", step_text)
         self.assertIn(
             ".artifacts/tenant-uat-acceptance/execution-log.txt", step_text
         )
         self.assertIn(
             ".artifacts/tenant-uat-acceptance/unit-test-report.json", step_text
+        )
+        self.assertIn(
+            ".artifacts/tenant-uat-acceptance/webhook-unit-report.json", step_text
+        )
+        self.assertIn(
+            ".artifacts/tenant-uat-acceptance/c111-c115-capability-report.json", step_text
         )
         self.assertIn(
             ".artifacts/tenant-uat-acceptance/run-status.json", step_text
@@ -213,13 +230,25 @@ class TenantUatAcceptanceWorkflowStructureTests(unittest.TestCase):
         self.assertIn("if: always()", status_block)
         self.assertIn("steps.harness_e2e.outcome", status_block)
         self.assertIn("steps.harness_unit.outcome", status_block)
+        self.assertIn("steps.webhook_e2e.outcome", status_block)
+        self.assertIn("steps.webhook_unit.outcome", status_block)
+        self.assertIn("steps.c113_c115_acceptance.outcome", status_block)
         self.assertIn("steps.gate.outcome", status_block)
         self.assertIn("steps.seed.outcome", status_block)
+        self.assertIn("steps.c115_restart_readback.outcome", status_block)
         self.assertIn("CANDIDATE_SHA", status_block)
         self.assertIn("run-status.json", status_block)
         self.assertIn('"not_run"', status_block)
         self.assertIn('"failed"', status_block)
         self.assertIn('"passed"', status_block)
+
+    def test_retraction_of_phantom_webhook_uat_acceptance_workflow(self) -> None:
+        self.assertFalse((ROOT / ".github/workflows/webhook-uat-acceptance.yml").exists())
+
+    def test_c111_to_c115_capabilities_validated_in_gate(self) -> None:
+        gate_block = self.text.split("Gate on zero skips", 1)[1][:8000]
+        for cap in ("C111", "C112", "C113", "C114", "C115"):
+            self.assertIn(cap, gate_block)
 
     def test_actual_smtp_receiver_and_restart_are_required(self) -> None:
         self.assertIn("image: axllent/mailpit:v1.29.2", self.text)
@@ -261,9 +290,13 @@ class RunStatusScriptBehaviorTests(unittest.TestCase):
         seed: str = "success",
         harness_e2e: str = "success",
         harness_unit: str = "success",
+        webhook_e2e: str = "success",
+        webhook_unit: str = "success",
+        c113_c115_acceptance: str = "success",
         gate: str = "success",
         restart_api: str = "success",
         restart_readback: str = "success",
+        c115_restart_readback: str = "success",
     ) -> dict:
         with tempfile.TemporaryDirectory() as tmp:
             script_path = Path(tmp) / "run_status.py"
@@ -276,9 +309,13 @@ class RunStatusScriptBehaviorTests(unittest.TestCase):
                 "SEED_OUTCOME": seed,
                 "HARNESS_E2E_OUTCOME": harness_e2e,
                 "HARNESS_UNIT_OUTCOME": harness_unit,
+                "WEBHOOK_E2E_OUTCOME": webhook_e2e,
+                "WEBHOOK_UNIT_OUTCOME": webhook_unit,
+                "C113_C115_ACCEPTANCE_OUTCOME": c113_c115_acceptance,
                 "GATE_OUTCOME": gate,
                 "RESTART_API_OUTCOME": restart_api,
                 "RESTART_READBACK_OUTCOME": restart_readback,
+                "C115_RESTART_READBACK_OUTCOME": c115_restart_readback,
                 "CANDIDATE_SHA": "c" * 40,
                 "WORKFLOW_SHA": "f" * 40,
                 "PATH": "/usr/bin:/bin",
@@ -311,6 +348,18 @@ class RunStatusScriptBehaviorTests(unittest.TestCase):
 
     def test_cancelled_unit_harness_is_not_passed(self) -> None:
         status = self._run(harness_unit="cancelled")
+        self.assertEqual(status["status"], "failed")
+
+    def test_failed_webhook_e2e_is_not_passed(self) -> None:
+        status = self._run(webhook_e2e="failure")
+        self.assertEqual(status["status"], "failed")
+
+    def test_failed_c113_c115_acceptance_is_not_passed(self) -> None:
+        status = self._run(c113_c115_acceptance="failure")
+        self.assertEqual(status["status"], "failed")
+
+    def test_failed_c115_restart_readback_is_not_passed(self) -> None:
+        status = self._run(c115_restart_readback="failure")
         self.assertEqual(status["status"], "failed")
 
     def test_gate_failure_is_not_passed(self) -> None:
@@ -350,24 +399,87 @@ class FullMatrixGateBehaviorTests(unittest.TestCase):
     def setUp(self) -> None:
         self.script = _extract_step_run_block(WORKFLOW.read_text(), "Gate on zero skips", "PY_GATE")
 
-    def run_gate(self, *, missing_file: str | None = None, restart_status: str = "passed", missing_restart: bool = False, skipped: bool = False):
-        files = ["approval-rules.spec.ts", "cost-center.spec.ts", "passenger-address.spec.ts", "sla.spec.ts", "users.spec.ts", "directory-durability.spec.ts", "governance.spec.ts", "invitation-mail.spec.ts"]
+    def run_gate(
+        self,
+        *,
+        missing_file: str | None = None,
+        restart_status: str = "passed",
+        missing_restart: bool = False,
+        skipped: bool = False,
+        missing_webhook_unit: bool = False,
+        webhook_unit_success: bool = True,
+        webhook_unit_pending: int = 0,
+        webhook_unit_total: int = 34,
+        missing_capability_report: bool = False,
+        capability_status: str = "passed",
+        candidate_sha: str = "c" * 40,
+        missing_capability: str | None = None,
+        empty_capability_verified: bool = False,
+    ):
+        files = [
+            "approval-rules.spec.ts", "cost-center.spec.ts", "passenger-address.spec.ts",
+            "sla.spec.ts", "users.spec.ts", "directory-durability.spec.ts",
+            "governance.spec.ts", "invitation-mail.spec.ts"
+        ]
         specs = []
         for name in files:
             if name == missing_file:
                 continue
             for unused in range(3 if name == "governance.spec.ts" else 1):
-                specs.append({"file": "tests/e2e/system-remediation/sr-qa-tenant-001/" + name, "tests": [{"results": [{"status": "skipped" if skipped else "passed"}]}]})
+                specs.append({
+                    "file": "tests/e2e/system-remediation/sr-qa-tenant-001/" + name,
+                    "tests": [{"results": [{"status": "skipped" if skipped else "passed"}]}]
+                })
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             (root / "test-results").mkdir()
-            (root / "test-results/system-remediation-report.json").write_text(json.dumps({"suites": [{"specs": specs}]}))
+            (root / "test-results/system-remediation-report.json").write_text(
+                json.dumps({"suites": [{"specs": specs}]})
+            )
             artifact = root / ".artifacts/tenant-uat-acceptance"
             artifact.mkdir(parents=True)
-            (artifact / "unit-test-report.json").write_text(json.dumps({"numTotalTests": 27, "numPassedTests": 27, "numPendingTests": 0, "success": True}))
+            (artifact / "unit-test-report.json").write_text(
+                json.dumps({"numTotalTests": 27, "numPassedTests": 27, "numPendingTests": 0, "success": True})
+            )
             if not missing_restart:
-                (artifact / "restart-report.json").write_text(json.dumps({"status": restart_status, "verified": 12, "candidate_sha": "c" * 40, "tables": [f"table_{i}" for i in range(12)]}))
-            return subprocess.run([sys.executable, "-c", self.script], cwd=root, capture_output=True, text=True)
+                (artifact / "restart-report.json").write_text(
+                    json.dumps({"status": restart_status, "verified": 12, "candidate_sha": "c" * 40, "tables": [f"table_{i}" for i in range(12)]})
+                )
+            if not missing_webhook_unit:
+                (artifact / "webhook-unit-report.json").write_text(
+                    json.dumps({
+                        "numTotalTests": webhook_unit_total,
+                        "numPassedTests": webhook_unit_total if webhook_unit_success else 0,
+                        "numPendingTests": webhook_unit_pending,
+                        "success": webhook_unit_success and webhook_unit_pending == 0,
+                    })
+                )
+            if not missing_capability_report:
+                caps = {
+                    "C111": {"status": "passed", "verified": ["ok"]},
+                    "C112": {"status": "passed", "verified": ["ok"]},
+                    "C113": {"status": "passed", "verified": ["ok"]},
+                    "C114": {"status": "passed", "verified": ["ok"]},
+                    "C115": {"status": "passed", "verified": ["ok"]},
+                }
+                if missing_capability:
+                    caps.pop(missing_capability, None)
+                if empty_capability_verified:
+                    caps["C115"]["verified"] = []
+                (artifact / "c111-c115-capability-report.json").write_text(
+                    json.dumps({
+                        "candidate_sha": candidate_sha,
+                        "status": capability_status,
+                        "capabilities": caps,
+                    })
+                )
+            return subprocess.run(
+                [sys.executable, "-c", self.script],
+                cwd=root,
+                env={"CANDIDATE_SHA": "c" * 40, "PATH": "/usr/bin:/bin"},
+                capture_output=True,
+                text=True,
+            )
 
     def test_complete_matrix_can_pass(self):
         result = self.run_gate()
@@ -387,6 +499,33 @@ class FullMatrixGateBehaviorTests(unittest.TestCase):
 
     def test_skipped_live_matrix_fails(self):
         self.assertNotEqual(self.run_gate(skipped=True).returncode, 0)
+
+    def test_missing_webhook_unit_report_fails(self):
+        self.assertNotEqual(self.run_gate(missing_webhook_unit=True).returncode, 0)
+
+    def test_failed_webhook_unit_fails(self):
+        self.assertNotEqual(self.run_gate(webhook_unit_success=False).returncode, 0)
+
+    def test_missing_capability_report_fails(self):
+        self.assertNotEqual(self.run_gate(missing_capability_report=True).returncode, 0)
+
+    def test_failed_capability_c113_or_c115_fails(self):
+        self.assertNotEqual(self.run_gate(capability_status="failed").returncode, 0)
+
+    def test_candidate_sha_mismatch_in_capability_report_fails(self):
+        self.assertNotEqual(self.run_gate(candidate_sha="wrong_candidate_sha").returncode, 0)
+
+    def test_missing_required_capability_fails(self):
+        self.assertNotEqual(self.run_gate(missing_capability="C113").returncode, 0)
+
+    def test_empty_capability_verified_evidence_fails(self):
+        self.assertNotEqual(self.run_gate(empty_capability_verified=True).returncode, 0)
+
+    def test_independent_tenant_gates_preserved_when_c111_to_c115_passes(self):
+        # Even when all C111-C115 and webhook unit tests pass cleanly,
+        # a failure in tenant specs or restart durability STILL fails the gate independently!
+        self.assertNotEqual(self.run_gate(missing_file="approval-rules.spec.ts").returncode, 0)
+        self.assertNotEqual(self.run_gate(restart_status="failed").returncode, 0)
 
 
 if __name__ == "__main__":
