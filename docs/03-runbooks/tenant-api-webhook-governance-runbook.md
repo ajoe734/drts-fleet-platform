@@ -62,12 +62,50 @@ Webhook endpoint states:
 - `disabled`: endpoint was manually paused or auto-disabled after final
   delivery failure and must be revalidated before reuse
 
-Retry contract:
+### Transport Deadline Contract
+
+- **Per-attempt timeout deadline**: Default `10,000` ms (`10s`). Bounded to the
+  integer range `[1, 60,000]` ms (`1ms` to `60s`). Non-integer, non-finite,
+  or out-of-range configurations reject with an explicit validation error on startup.
+- **Configuration boundary**: Platform-level environment variable
+  `WEBHOOK_DISPATCH_TIMEOUT_MS` (with optional `@Inject(WEBHOOK_DISPATCH_TIMEOUT_MS)`
+  token override for testing/scaffolding).
+- **Tenant-level override boundary**: Per-tenant timeout overrides are
+  **PROHIBITED** in Phase 1. Allowing tenant-controlled request deadlines introduces
+  denial-of-service risks where a stalled tenant receiver could exhaust shared
+  dispatch worker threads and connection pools.
+- **Response body read time boundary**: The transport deadline strictly bounds
+  connection handshake and initial HTTP response headers receipt (`fetch` promise settlement).
+  The dispatch client does not buffer or stream large response bodies; the HTTP
+  status code determines delivery or retry eligibility immediately, preventing slow-read
+  connection holds.
+- **Timeout failure classification**: A transport timeout triggers an `AbortController.abort()`
+  with `webhook_dispatch_transport_timeout` / `AbortError`, captured and classified
+  as a network failure (`httpStatus: null`). It falls into standard retry evaluation
+  (`shouldRetry(retryPolicy, attempt, null)`).
+- **Retry & backoff on timeout**: If attempts remain (`attempt < maxAttempts`),
+  the delivery is persisted as `queued` with an exponentially backed-off
+  `nextAttemptAt` and an in-process retry timer is scheduled. Once attempts are
+  exhausted (`attempt >= maxAttempts`), the status transitions to `delivery_failed`,
+  `nextAttemptAt: null`, and the endpoint increments its failed delivery counter
+  toward auto-disablement.
+- **Process restart & pending attempt recovery**:
+  - Deliveries are durably persisted in the repository before timers are set.
+  - On process boot (`onModuleInit()`), `TenantPartnerService.schedulePersistedWebhookRetries()`
+    scans all deliveries in `status === 'queued'` with non-null `nextAttemptAt`.
+  - Overdue attempts (`nextAttemptAt <= now`) are scheduled with `delayMs = 0` to
+    re-dispatch on the immediate next tick.
+  - Future attempts are scheduled with the remaining difference (`nextAttemptAt - now`).
+  - In-flight attempts interrupted by a sudden process termination remain recorded
+    as `queued` (since the database write occurs upon attempt completion), ensuring
+    zero dropped webhook delivery attempts across server restarts.
+
+### Retry contract
 
 - Initial attempt plus up to 4 retries, capped by `maxAttempts = 5`
 - Backoff: `30s`, `60s`, `120s`, `240s`, `480s`
 - Retryable HTTP statuses: `408`, `429`, `500`, `502`, `503`, `504`
-- Network failures are retried under the same policy
+- Network failures (including transport timeouts) are retried under the same policy
 
 Validation and disable rules:
 

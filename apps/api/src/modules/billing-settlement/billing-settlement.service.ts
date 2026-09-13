@@ -28,6 +28,7 @@ import type {
   GenerateTenantInvoiceCommand,
   InvoiceLineRecord,
   MarkReimbursementPaidCommand,
+  MarkReimbursementPaidWithProofCommand,
   MoneyAmount,
   PassengerPaymentStatus,
   PublishDriverFeePlanCommand,
@@ -35,6 +36,10 @@ import type {
   ReconciliationIssueRecord,
   ReimbursementBatchRecord,
   ReimbursementItemRecord,
+  RemittanceProofPaymentReceipt,
+  RemittanceProofReadbackGrant,
+  RemittanceProofRecord,
+  RequestRemittanceProofReadbackCommand,
   ResourceActionDescriptor,
   SandboxBillingTreatmentRecord,
   ResolveReconciliationIssueCommand,
@@ -50,6 +55,7 @@ import type {
   UiRefreshMetadata,
   UpdateTenantBillingProfileCommand,
   ReferralRevenueShareRule,
+  UploadRemittanceProofCommand,
 } from "@drts/contracts";
 
 import { ApiRequestError } from "../../common/api-envelope";
@@ -77,6 +83,7 @@ import {
   type PaymentRecoveryPort,
   UnavailablePaymentRecoveryPort,
 } from "./payment-recovery.port";
+import { RemittanceProofService } from "./remittance-proof.service";
 import {
   DEFAULT_CONTROLLED_DOWNLOAD_HOST,
   DEFAULT_CONTROLLED_DOWNLOAD_KEY_ID,
@@ -710,6 +717,8 @@ export class BillingSettlementService implements OnModuleInit {
     @Optional()
     @Inject(DOCUMENT_ARTIFACT_STORE)
     private readonly documentArtifactStore: DocumentArtifactStore = new InMemoryDocumentArtifactStore(),
+    @Optional()
+    private readonly remittanceProofService: RemittanceProofService = new RemittanceProofService(),
   ) {}
 
   async getMultiTaxiPaymentException(
@@ -2680,6 +2689,208 @@ export class BillingSettlementService implements OnModuleInit {
   getReimbursementBatch(batchId: string) {
     const batch = this.requireReimbursementBatch(batchId);
     return this.cloneReimbursementBatch(batch);
+  }
+
+  // ── Remittance Proof (SR-PROOF-001) ──
+  //
+  // `markReimbursementPaid` above stays untouched: it is exercised by an
+  // existing regression (`tests/unit/billing-settlement.test.ts`, outside
+  // this task's write_scopes) that marks a batch paid with a bare,
+  // never-uploaded `remittanceProofId` string, so gating it on a real proof
+  // record here would break out-of-scope, already-passing coverage. The
+  // proof-backed gate this task delivers is the new
+  // `markReimbursementPaidWithProof` method/`/pay-with-proof` route below --
+  // see `docs/04-uat/system-remediation-20260906/SR-PROOF-001.md` for the
+  // explicit boundary this records.
+
+  /**
+   * Test-only escape hatch onto the underlying `RemittanceProofService` --
+   * used to drive `attemptScan`/`markPaidWithProof` directly in unit tests,
+   * since neither is reachable over HTTP (no scan-completion callback route
+   * exists in this task's locked OpenAPI paths; see
+   * `docs/04-uat/system-remediation-20260906/SR-PROOF-001.md`).
+   */
+  get remittanceProofServiceForTest(): RemittanceProofService {
+    return this.remittanceProofService;
+  }
+
+  async stageRemittanceProofContent(bytes: Buffer, contentType: string) {
+    return this.remittanceProofService.stageContent(bytes, contentType);
+  }
+
+  async uploadRemittanceProof(
+    command: UploadRemittanceProofCommand,
+    identity: BootstrapRequestIdentity | null,
+    requestId?: string,
+  ): Promise<RemittanceProofRecord> {
+    const batch = this.requireReimbursementBatch(command.batchId);
+    const callerDriverId = identity?.actorId?.trim() || null;
+    if (
+      identity?.realm === "driver" &&
+      callerDriverId &&
+      callerDriverId !== batch.driverId
+    ) {
+      throw new ApiRequestError(
+        HttpStatus.FORBIDDEN,
+        "REMITTANCE_PROOF_BATCH_OWNERSHIP_VIOLATION",
+        "A driver may only upload a remittance proof against their own reimbursement batch.",
+        { batchId: batch.batchId, callerDriverId, batchDriverId: batch.driverId },
+      );
+    }
+
+    const proof = await this.remittanceProofService.uploadProof({
+      batchId: batch.batchId,
+      // Denormalised from the batch, never from the command -- see
+      // `packages/contracts/src/remittance-proof.ts`.
+      driverId: batch.driverId,
+      originalFilename: command.originalFilename,
+      stagedContentRef: command.stagedContentRef,
+      uploadedByActorId: identity?.actorId ?? null,
+    });
+
+    this.recordAudit(
+      {
+        actorId: identity?.actorId ?? null,
+        actorType:
+          identity?.actorType === "driver_user"
+            ? "system"
+            : (identity?.actorType ?? "system"),
+        tenantId: identity?.tenantId ?? null,
+        moduleName: "billing-settlement",
+        actionName: "upload_remittance_proof",
+        resourceType: "remittance_proof",
+        resourceId: proof.proofId,
+        newValuesSummary: {
+          batchId: proof.batchId,
+          driverId: proof.driverId,
+          scanState: proof.scanState,
+        },
+      },
+      requestId,
+    );
+
+    return proof;
+  }
+
+  async getRemittanceProof(proofId: string): Promise<RemittanceProofRecord> {
+    return this.remittanceProofService.getProof(proofId);
+  }
+
+  async requestRemittanceProofReadback(
+    command: RequestRemittanceProofReadbackCommand,
+    identity: BootstrapRequestIdentity | null,
+    requestId?: string,
+  ): Promise<RemittanceProofReadbackGrant> {
+    const grant = await this.remittanceProofService.requestReadback(
+      command.proofId,
+    );
+    this.recordAudit(
+      {
+        actorId: identity?.actorId ?? null,
+        actorType:
+          identity?.actorType === "driver_user"
+            ? "system"
+            : (identity?.actorType ?? "system"),
+        tenantId: identity?.tenantId ?? null,
+        moduleName: "billing-settlement",
+        actionName: "request_remittance_proof_readback",
+        resourceType: "remittance_proof",
+        resourceId: grant.proofId,
+        newValuesSummary: { expiresAt: grant.expiresAt },
+      },
+      requestId,
+    );
+    return grant;
+  }
+
+  async markReimbursementPaidWithProof(
+    batchId: string,
+    command: MarkReimbursementPaidWithProofCommand,
+    identity: BootstrapRequestIdentity | null,
+    requestId?: string,
+  ): Promise<RemittanceProofPaymentReceipt> {
+    const batch = this.requireReimbursementBatch(batchId);
+    if (!batch.approvedAt) {
+      throw new ApiRequestError(
+        HttpStatus.CONFLICT,
+        "REMITTANCE_PROOF_BATCH_NOT_APPROVED",
+        "Reimbursement batch must be approved before it can be marked as paid.",
+        { batchId },
+      );
+    }
+
+    const paidAt = command.paidAt?.trim() || new Date().toISOString();
+    if (Number.isNaN(new Date(paidAt).getTime())) {
+      throw new ApiRequestError(
+        HttpStatus.BAD_REQUEST,
+        "VALIDATION_ERROR",
+        "paidAt must be a valid ISO timestamp.",
+        { batchId, paidAt },
+      );
+    }
+
+    const receipt = await this.remittanceProofService.markPaidWithProof({
+      batchId: batch.batchId,
+      proofId: command.proofId,
+      idempotencyKey: command.idempotencyKey,
+      driverId: batch.driverId,
+      amount: batch.totalAmount,
+      paidAt,
+    });
+
+    if (batch.status !== "paid") {
+      batch.status = "paid";
+      batch.paidAt = receipt.paidAt;
+      batch.remittanceProofId = receipt.proofId;
+
+      const relatedStatement = this.driverStatements.find(
+        (statement) => statement.statementId === batch.statementId,
+      );
+      if (relatedStatement) {
+        relatedStatement.payoutStatus = "paid";
+        relatedStatement.updatedAt = receipt.paidAt;
+      }
+
+      await this.persistChanges(
+        {
+          reimbursementBatches: [this.cloneReimbursementBatch(batch)],
+          ...(relatedStatement
+            ? { driverStatements: [this.cloneStatement(relatedStatement)] }
+            : {}),
+        },
+        "mark_reimbursement_paid_with_proof",
+      );
+      this.auditNotificationService.recordNotification({
+        tenantId: null,
+        channel: "ops_notice",
+        title: "Reimbursement batch paid",
+        message: `Reimbursement batch ${batch.batchId} was marked paid with remittance proof ${receipt.proofId}.`,
+        status: "unread",
+      });
+      this.recordAudit(
+        {
+          actorId: identity?.actorId ?? null,
+          actorType:
+            identity?.actorType === "driver_user"
+              ? "system"
+              : (identity?.actorType ?? "platform_admin"),
+          tenantId: identity?.tenantId ?? null,
+          moduleName: "billing-settlement",
+          actionName: "mark_reimbursement_paid_with_proof",
+          resourceType: "driver_reimbursement_batch",
+          resourceId: batch.batchId,
+          newValuesSummary: {
+            driverId: batch.driverId,
+            proofId: receipt.proofId,
+            receiptId: receipt.receiptId,
+            paidAt: receipt.paidAt,
+          },
+        },
+        requestId,
+      );
+    }
+
+    return receipt;
   }
 
   /**

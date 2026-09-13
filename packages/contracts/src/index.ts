@@ -7580,3 +7580,5 @@ export * from "./p5-fare-anomaly-admin";
 export * from "./unattended-voice";
 export * from "./voice-dialogue";
 export * from "./system-remediation";
+export * from "./remittance-proof";
+export * from "./passenger-push-delivery";

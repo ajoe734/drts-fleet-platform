@@ -1,4 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
+import {
+  ENTERPRISE_TENANT_SESSION_COOKIE,
+  verifyEnterpriseTenantSession,
+} from "@/lib/enterprise-session.server";
 
 const DEFAULT_API_BASE_URL = "http://localhost:3001";
 const DEFAULT_ENTERPRISE_DISPATCH_TENANT_ID =
@@ -210,6 +214,30 @@ async function forward(
 
   const targetUrl = buildTargetUrl(request, path);
   const headers = copyRequestHeaders(request, path);
+  if (method === "GET" && isTenantBookingPath(path)) {
+    const verified = await verifyEnterpriseTenantSession(
+      request.cookies.get(ENTERPRISE_TENANT_SESSION_COOKIE)?.value,
+      resolveTargetOrigin(),
+    );
+    if (!verified.session) {
+      return NextResponse.json(
+        { error: "ENTERPRISE_TENANT_SESSION_REQUIRED" },
+        { status: verified.status },
+      );
+    }
+    const requestedTenant = request.headers.get("x-tenant-id")?.trim();
+    if (requestedTenant && requestedTenant !== verified.session.tenantId) {
+      return NextResponse.json(
+        { error: "TENANT_SCOPE_MISMATCH" },
+        { status: 403 },
+      );
+    }
+    for (const name of ["x-realm", "x-actor-type", "x-actor-id"])
+      headers.delete(name);
+    headers.delete("x-drts-authorization");
+    headers.set("authorization", `Bearer ${verified.session.accessToken}`);
+    headers.set("x-tenant-id", verified.session.tenantId);
+  }
   await applyUpstreamAuth(headers, targetUrl);
 
   const init: RequestInit = {

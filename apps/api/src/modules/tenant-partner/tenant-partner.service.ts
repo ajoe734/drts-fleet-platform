@@ -8706,7 +8706,9 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
     command: UpdateTenantSlaProfileCommand,
     actorId?: string,
     requestId?: string,
+    identity?: IdentityContext | null,
   ): ActionReceipt {
+    this.assertTenantMutationScope(tenantId, identity);
     const currentProfile = this.getOrCreateSlaProfile(tenantId);
     const slaProfile: TenantSlaProfile = {
       tenantId,
@@ -8728,7 +8730,7 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
 
     this.recordTenantAudit(
       {
-        actorId: actorId ?? null,
+        actorId: actorId ?? identity?.actorId ?? null,
         actorType: "tenant_admin",
         tenantId,
         moduleName: "tenant-partner",

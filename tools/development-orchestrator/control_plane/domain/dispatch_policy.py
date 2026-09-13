@@ -137,6 +137,8 @@ def resolve_dispatch_target(
     if not dependencies_satisfied(record, tasks_by_id, policy.dependency_done_statuses):
         return None
     if record.status in policy.acceptance_statuses and record.owner:
+        if record.raw.get("external_gate"):
+            return None
         return DispatchDecision(record.id, record.owner, DispatchReason.ACCEPTANCE_READY)
     if record.status in policy.in_progress_statuses and record.owner:
         return DispatchDecision(record.id, record.owner, DispatchReason.OWNED_IN_PROGRESS)
