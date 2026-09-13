@@ -59,7 +59,11 @@ import {
 } from "../../common/auth";
 import type { BootstrapRequestIdentity } from "../../common/auth";
 import { IdempotencyService } from "../../common/idempotency";
-import { READ_HEAVY_RATE_LIMIT } from "../../common/throttling/rate-limit.constants";
+import {
+  BOOKING_INTAKE_RATE_LIMIT,
+  DISPATCH_RATE_LIMIT,
+  READ_HEAVY_RATE_LIMIT,
+} from "../../common/throttling/rate-limit.constants";
 import type { PassthroughResponseLike } from "../../common/idempotency-http";
 import { applyIdempotentResponseHeaders } from "../../common/idempotency-http";
 import { TenantPartnerService } from "../tenant-partner/tenant-partner.service";
@@ -299,6 +303,7 @@ export class OwnedMobilityController {
   }
 
   @Post("tenant/bookings")
+  @Throttle(BOOKING_INTAKE_RATE_LIMIT)
   async createTenantBooking(
     @Body() command: CreateTenantBookingCommand,
     @CurrentIdentity() identity: BootstrapRequestIdentity | null,
@@ -605,6 +610,7 @@ export class OwnedMobilityController {
   }
 
   @Post("orders/:orderId/dispatch")
+  @Throttle(DISPATCH_RATE_LIMIT)
   async dispatchOrder(
     @Param("orderId") orderId: string,
     @Body() command: DispatchOrderCommand,
