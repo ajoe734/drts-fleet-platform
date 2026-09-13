@@ -75,20 +75,15 @@ export class RuntimeEligibilityEvaluator {
   /** Read the feature authorities on every candidate/assignment operation.
    * No cached eligibility flag or registry/AV capability is overwritten. */
   async assessDriverRequirements(driverId: string) {
-    const [courses, onLeave] = await Promise.all([
-      this.academyService?.listCourses(driverId) ?? Promise.resolve([]),
+    const [qualification, onLeave] = await Promise.all([
+      this.academyService?.evaluateDriverQualification(driverId),
       this.driverLeaveService?.isDriverOnLeave(driverId) ??
         Promise.resolve(false),
     ]);
-    const required = courses.filter((course) => course.isRequired);
     return {
       onLeave,
-      trainingIncomplete: required.some(
-        (course) => course.userStatus !== "passed",
-      ),
-      trainingSatisfied:
-        required.length > 0 &&
-        required.every((course) => course.userStatus === "passed"),
+      trainingIncomplete: qualification?.trainingIncomplete ?? false,
+      trainingSatisfied: qualification?.trainingSatisfied ?? false,
     };
   }
 
@@ -149,7 +144,8 @@ export class RuntimeEligibilityEvaluator {
       locationState,
       [
         ...(command.softReasonCodes ?? []),
-        ...(driverRequirements.trainingIncomplete
+        ...(context.vehicleCapability.trainingRequired &&
+        driverRequirements.trainingIncomplete
           ? ["DRIVER_TRAINING_INCOMPLETE"]
           : []),
       ],

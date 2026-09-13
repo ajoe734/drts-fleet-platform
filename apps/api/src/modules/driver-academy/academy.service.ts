@@ -23,6 +23,16 @@ import {
 } from "./academy-domain";
 import { AcademyRepository } from "./academy.repository";
 
+export interface DriverTrainingQualification {
+  driverId: string;
+  asOf: string;
+  records: DriverTrainingRecord[];
+  requiredCount: number;
+  trainingSatisfied: boolean;
+  trainingIncomplete: boolean;
+  regulatoryStatus: "passed" | "expired" | "pending" | "waived";
+}
+
 function courseNotFound(courseId: string): ApiRequestError {
   return new ApiRequestError(
     404,
@@ -44,6 +54,153 @@ function attemptNotFound(attemptId: string): ApiRequestError {
 @Injectable()
 export class AcademyService {
   constructor(private readonly repository: AcademyRepository) {}
+
+  /**
+   * Authoritative single public qualification and regulatory projection operation
+   * per consensus B2 and academy-identity-decision.md §2.3.
+   * Derives required course satisfaction and projects passed/expired/pending,
+   * preserving any manually-waived profile status without modification.
+   */
+  async evaluateDriverQualification(
+    driverId: string,
+    asOfDate: Date = new Date(),
+  ): Promise<DriverTrainingQualification> {
+    const asOfIso = asOfDate.toISOString();
+
+    const computeFromData = (
+      courses: Awaited<ReturnType<AcademyRepository["listCurrentCourses"]>>,
+      attempts: DriverQuizAttemptDetail[],
+      existingStatus: string | null,
+    ) => {
+      const records = courses.map((course) =>
+        trainingRecord(publicCourse(course), driverId, attempts, asOfDate),
+      );
+      const required = courses.filter((course) => course.isRequired);
+      const requiredRecords = required.map((course) =>
+        trainingRecord(publicCourse(course), driverId, attempts, asOfDate),
+      );
+      const requiredCount = required.length;
+
+      let trainingSatisfied = false;
+      let trainingIncomplete = false;
+      let derivedStatus: "passed" | "expired" | "pending" = "pending";
+
+      if (requiredCount === 0) {
+        // 空必修清單不產生完訓證明
+        trainingSatisfied = false;
+        trainingIncomplete = false;
+        derivedStatus = "pending";
+      } else {
+        const allPassed = requiredRecords.every((record) => record.passed);
+        const anyOverdue = requiredRecords.some((record) => record.isOverdue);
+
+        if (allPassed) {
+          trainingSatisfied = true;
+          trainingIncomplete = false;
+          derivedStatus = "passed";
+        } else if (anyOverdue) {
+          trainingSatisfied = false;
+          trainingIncomplete = true;
+          derivedStatus = "expired";
+        } else {
+          trainingSatisfied = false;
+          trainingIncomplete = true;
+          derivedStatus = "pending";
+        }
+      }
+
+      const isWaived = existingStatus === "waived";
+      const finalRegulatoryStatus: "passed" | "expired" | "pending" | "waived" =
+        isWaived ? "waived" : derivedStatus;
+
+      if (isWaived) {
+        trainingSatisfied = true;
+        trainingIncomplete = false;
+      }
+
+      const lastTrainingAt =
+        derivedStatus === "passed"
+          ? requiredRecords.reduce<string>(
+              (latest, record) =>
+                record.completedAt && record.completedAt > latest
+                  ? record.completedAt
+                  : latest,
+              requiredRecords[0]?.completedAt ?? asOfIso,
+            )
+          : null;
+
+      return {
+        records,
+        requiredCount,
+        trainingSatisfied,
+        trainingIncomplete,
+        derivedStatus,
+        finalRegulatoryStatus,
+        lastTrainingAt,
+        isWaived,
+      };
+    };
+
+    if (this.repository.isEnabled()) {
+      return this.repository.executeSerializableTransaction(async (client) => {
+        const [existingStatus, courses, attempts] = await Promise.all([
+          this.repository.getDriverTrainingProfileStatus(driverId, client),
+          this.repository.listCurrentCourses(client),
+          this.repository.listAttempts({ driverId }, client),
+        ]);
+
+        const computed = computeFromData(courses, attempts, existingStatus);
+
+        if (!computed.isWaived) {
+          await this.repository.upsertTrainingStatus(
+            driverId,
+            computed.derivedStatus,
+            computed.lastTrainingAt,
+            client,
+          );
+        }
+
+        return {
+          driverId,
+          asOf: asOfIso,
+          records: computed.records,
+          requiredCount: computed.requiredCount,
+          trainingSatisfied: computed.trainingSatisfied,
+          trainingIncomplete: computed.trainingIncomplete,
+          regulatoryStatus: computed.finalRegulatoryStatus,
+        };
+      });
+    }
+
+    // In-memory mode (DB disabled / direct unit test)
+    const [courses, attempts] = await Promise.all([
+      this.repository.listCurrentCourses(),
+      this.repository.listAttempts({ driverId }),
+    ]);
+    const existingStatus =
+      (await this.repository.getDriverTrainingProfileStatus?.(driverId)) ??
+      null;
+
+    const computed = computeFromData(courses, attempts, existingStatus);
+
+    if (!computed.isWaived) {
+      await this.repository.upsertTrainingStatus(
+        driverId,
+        computed.derivedStatus,
+        computed.lastTrainingAt,
+      );
+    }
+
+    return {
+      driverId,
+      asOf: asOfIso,
+      records: computed.records,
+      requiredCount: computed.requiredCount,
+      trainingSatisfied: computed.trainingSatisfied,
+      trainingIncomplete: computed.trainingIncomplete,
+      regulatoryStatus: computed.finalRegulatoryStatus,
+    };
+  }
 
   async listCourses(driverId: string | null): Promise<AcademyCourseSummary[]> {
     const courses = await this.repository.listCurrentCourses();
@@ -120,7 +277,7 @@ export class AcademyService {
       });
     }
 
-    await this.recomputeRegulatoryProjection(driverId);
+    await this.evaluateDriverQualification(driverId, new Date(attemptedAt));
 
     return {
       ...attempt,
@@ -132,61 +289,13 @@ export class AcademyService {
     };
   }
 
-  /**
-   * Lazily re-derives reg.driver_reg_profiles.training_status from the
-   * driver's current required-course completion state (feature-contracts.md
-   * §3.3 invariant 4): 'passed' once every required course is passed and
-   * unexpired, 'expired' once any required course has lapsed. Recomputed on
-   * every quiz submission and on every records read; there is no separate
-   * time-driven background sweep (see SR-ACADEMY-BE-001.md evidence — a
-   * proactive, traffic-independent expiry sweep is out of scope here and
-   * remains a documented limitation).
-   */
   private async recomputeRegulatoryProjection(driverId: string) {
-    const courses = await this.repository.listCurrentCourses();
-    const required = courses.filter((course) => course.isRequired);
-    if (!required.length) {
-      return;
-    }
-    const attempts = await this.repository.listAttempts({ driverId });
-    const now = new Date();
-    const records = required.map((course) =>
-      trainingRecord(publicCourse(course), driverId, attempts, now),
-    );
-
-    if (records.every((record) => record.passed)) {
-      const lastTrainingAt = records.reduce<string>(
-        (latest, record) =>
-          record.completedAt && record.completedAt > latest
-            ? record.completedAt
-            : latest,
-        records[0]?.completedAt ?? now.toISOString(),
-      );
-      await this.repository.upsertTrainingStatus(
-        driverId,
-        "passed",
-        lastTrainingAt,
-      );
-      return;
-    }
-
-    if (records.some((record) => record.isOverdue)) {
-      await this.repository.upsertTrainingStatus(
-        driverId,
-        "expired",
-        now.toISOString(),
-      );
-    }
+    await this.evaluateDriverQualification(driverId);
   }
 
   async listRecords(driverId: string): Promise<DriverTrainingRecord[]> {
-    const courses = await this.repository.listCurrentCourses();
-    const attempts = await this.repository.listAttempts({ driverId });
-    const now = new Date();
-    await this.recomputeRegulatoryProjection(driverId);
-    return courses.map((course) =>
-      trainingRecord(publicCourse(course), driverId, attempts, now),
-    );
+    const qualification = await this.evaluateDriverQualification(driverId);
+    return qualification.records;
   }
 
   async getAttempt(attemptId: string): Promise<DriverQuizAttemptDetail> {

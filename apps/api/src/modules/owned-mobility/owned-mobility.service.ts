@@ -11554,10 +11554,11 @@ export class OwnedMobilityService
       this.vehicleEligibilityService?.resolveRuntimeVehicleCapability(
         vehicleId,
       );
+    const trainingRequired = capability ? capability.trainingRequired : true;
     return [
       ...(current.onLeave ? ["DRIVER_ON_LEAVE"] : []),
-      ...(current.trainingIncomplete ||
-      (capability?.trainingRequired && !current.trainingSatisfied)
+      ...(trainingRequired &&
+      (current.trainingIncomplete || !current.trainingSatisfied)
         ? ["DRIVER_TRAINING_INCOMPLETE"]
         : []),
     ];

@@ -1,0 +1,15 @@
+{
+  "taskId": "SR-OPS-PROOF-001",
+  "capability": "C122",
+  "candidate_sha": "46b26b24bd88cd07ca8baedccc8c7a4f446857af",
+  "workflow_sha": "46b26b24bd88cd07ca8baedccc8c7a4f446857af",
+  "status": "passed",
+  "outcomes": {
+    "install": "success",
+    "migrate": "success",
+    "unit": "success",
+    "harness": "success",
+    "gate": "success"
+  },
+  "scopeNote": "restore/readback (C122) only; capacity (C123) and deployment/rollback (C124) are not exercised by this workflow"
+}

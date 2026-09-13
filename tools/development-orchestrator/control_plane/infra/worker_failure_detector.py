@@ -253,6 +253,15 @@ def _detect_json_worker_failure_signal(line: str) -> WorkerFailureSignal | None:
         return None
     if _is_antigravity_result_event(payload):
         return _detect_antigravity_result_signal(payload)
+    if payload.get("event") == "step_update":
+        step = payload.get("step_update")
+        if isinstance(step, dict) and step.get("step_type") in {
+            "tool", "user_input", "agent_response",
+        }:
+            # Live scans must not attribute tool stdout, prompts, or quoted
+            # failures to this provider. Native error_message steps and the
+            # terminal result still pass through the failure detector.
+            return None
     if payload.get("type") == "rate_limit_event":
         rate_info = payload.get("rate_limit_info") if isinstance(payload.get("rate_limit_info"), dict) else {}
         status = str(rate_info.get("status") or payload.get("status") or "").strip().lower()

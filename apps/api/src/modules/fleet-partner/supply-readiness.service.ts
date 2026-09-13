@@ -364,6 +364,11 @@ export class SupplyReadinessService {
     if (!this.academyService) {
       return false;
     }
+    if (typeof this.academyService.evaluateDriverQualification === "function") {
+      const qualification =
+        await this.academyService.evaluateDriverQualification(driverId);
+      return qualification.trainingIncomplete;
+    }
     const courses = await this.academyService.listCourses(driverId);
     return courses.some(
       (course) => course.isRequired && course.userStatus !== "passed",

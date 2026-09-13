@@ -1,4 +1,4 @@
-import { Injectable, Logger, Optional } from "@nestjs/common";
+import { Inject, Injectable, Logger, Optional } from "@nestjs/common";
 
 import { NotificationDeliveryService } from "../notification-delivery/notification-delivery.service";
 import type { DeliveryStatus } from "../notification-delivery/notification-delivery.types";
@@ -76,6 +76,7 @@ export class TenantInvitationDeliveryService {
 
   constructor(
     @Optional()
+    @Inject(NotificationDeliveryService)
     private readonly deliveryService: NotificationDeliveryService | null = null,
   ) {}
 

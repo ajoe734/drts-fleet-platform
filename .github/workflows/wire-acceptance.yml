@@ -75,6 +75,7 @@ jobs:
             2>&1 | tee .artifacts/wire-acceptance/api-log.txt
       - name: Build real browser surfaces
         run: |
+          pnpm --filter @drts/contracts build
           pnpm --filter @drts/ui-tokens build
           pnpm --filter @drts/fleet-partner-portal-web build
           pnpm --filter @drts/ops-console-web build
@@ -82,7 +83,7 @@ jobs:
           pnpm exec playwright install --with-deps chromium
       - name: Start candidate servers on this GitHub-hosted runner only
         run: |
-          pnpm --filter @drts/api exec tsx ../../tests/integration/system-remediation/sr-wire-001/wire-server.ts > .artifacts/wire-acceptance/api-server.log 2>&1 &
+          pnpm --filter @drts/api exec tsx --tsconfig ../../tsconfig.base.json ../../tests/integration/system-remediation/sr-wire-001/wire-server.ts > .artifacts/wire-acceptance/api-server.log 2>&1 &
           echo $! > /tmp/wire-api.pid
           (cd apps/fleet-partner-portal-web && pnpm exec next start --hostname 127.0.0.1 --port 3007) > .artifacts/wire-acceptance/host-server.log 2>&1 &
           echo $! > /tmp/wire-host.pid

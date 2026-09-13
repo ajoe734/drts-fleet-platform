@@ -32,6 +32,10 @@ tags:
     description: 車行司機完訓率真實看板、名冊與答題證據下鑽
   - name: HostVehicles
     description: 車主 Host 自車受限唯讀投影 (車輛、收益、維保、行程、案件)
+  - name: RemittanceProof
+    description: 匯款證明上傳、掃描狀態、具時效授權讀回與冪等付款收據
+  - name: PlatformAdapterRegistry
+    description: Platform adapter 憑證到期告警 (唯讀；不含機密內容)
 security:
   - BearerAuth: []
 paths:
@@ -1630,6 +1634,193 @@ paths:
           $ref: "#/components/responses/Forbidden"
         "404":
           $ref: "#/components/responses/NotFound"
+
+  /api/reimbursements/proofs:
+    post:
+      tags:
+        - RemittanceProof
+      operationId: uploadRemittanceProof
+      summary: 上傳匯款證明
+      description: |
+        RBAC: realm `driver`, actor `driver_user`, scope `driver:write`.
+        `proofId` 與內容雜湊 (`content.contentHash`) 皆由伺服器產生；批次
+        (`batchId`) 與司機歸屬 (`driverId`) 於上傳當下固定，之後不可變更。
+        新建證明的掃描狀態恆為 `pending_scan`。
+      security:
+        - BearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/XRequestId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UploadRemittanceProofCommand"
+      responses:
+        "201":
+          description: 匯款證明建立成功 (待掃描)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RemittanceProofEnvelope"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+
+  /api/reimbursements/proofs/{proofId}:
+    get:
+      tags:
+        - RemittanceProof
+      operationId: getRemittanceProof
+      summary: 查詢匯款證明中繼資料 (不含內容)
+      description: |
+        回傳證明中繼資料與掃描狀態；不回傳可讀取內容，讀取須另呼叫
+        `/readback` 取得具時效的授權連結。
+      security:
+        - BearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/XRequestId"
+        - name: proofId
+          in: path
+          required: true
+          schema:
+            type: string
+          description: 匯款證明識別碼 (伺服器產生)
+      responses:
+        "200":
+          description: 匯款證明中繼資料
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RemittanceProofEnvelope"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /api/reimbursements/proofs/{proofId}/readback:
+    post:
+      tags:
+        - RemittanceProof
+      operationId: requestRemittanceProofReadback
+      summary: 請求匯款證明具時效授權讀回連結
+      description: |
+        回傳的 `readbackUrl` 於 `expiresAt` 後失效；過期後需重新請求，
+        不可沿用舊連結。
+      security:
+        - BearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/XRequestId"
+        - name: proofId
+          in: path
+          required: true
+          schema:
+            type: string
+          description: 匯款證明識別碼
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RequestRemittanceProofReadbackCommand"
+      responses:
+        "200":
+          description: 具時效的讀回授權
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RemittanceProofReadbackGrantEnvelope"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /api/reimbursements/{batchId}/pay-with-proof:
+    post:
+      tags:
+        - RemittanceProof
+      operationId: markReimbursementPaidWithProof
+      summary: 以已核可匯款證明將請款批次標記為已付款 (冪等)
+      description: |
+        前置條件：批次須已核可 (`approvedAt` 已設定)，且指定 `proofId` 之
+        `scanState` 為 `clean` 並屬於同一批次；否則回 409。以相同
+        `idempotencyKey` 重複呼叫回傳原始收據，不會產生第二筆付款收據。
+      security:
+        - BearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/XRequestId"
+        - name: batchId
+          in: path
+          required: true
+          schema:
+            type: string
+          description: 請款批次識別碼
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/MarkReimbursementPaidWithProofCommand"
+      responses:
+        "200":
+          description: 付款收據 (冪等回放或新建)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RemittanceProofPaymentReceiptEnvelope"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+
+  /api/platform-admin/adapters/{id}/credential-expiry-warning:
+    get:
+      tags:
+        - PlatformAdapterRegistry
+      operationId: getPlatformAdapterCredentialExpiryWarning
+      summary: 查詢 adapter 憑證到期告警狀態
+      description: |
+        `state` 由伺服器依 `AdapterCredentialExpiry` 與伺服器定義告警窗口
+        計算；缺漏或無法解析的到期資料回傳 `unknown`，絕不回傳 `ok`。
+        請求本身失敗 (非 2xx) 不代表 `ok` 或 `unknown` 的成功判定，呼叫端
+        不得將錯誤回應誤植為此結構。回應絕不含憑證機密內容。
+      security:
+        - BearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/XRequestId"
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+          description: Adapter 識別碼
+      responses:
+        "200":
+          description: 憑證到期告警狀態
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdapterCredentialExpiryWarningEnvelope"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
 components:
   securitySchemes:
     BearerAuth:
@@ -5142,5 +5333,222 @@ components:
       properties:
         data:
           $ref: "#/components/schemas/ContractOperationalViewRecord"
+        meta:
+          $ref: "#/components/schemas/ApiMeta"
+
+    # === SR-RECOVERY-CONTRACTS-20260911: Remittance Proof ===
+    RemittanceProofScanState:
+      type: string
+      enum: [pending_scan, clean, rejected]
+    RemittanceProofContentIdentity:
+      type: object
+      required:
+        - contentHash
+        - contentType
+        - sizeBytes
+      properties:
+        contentHash:
+          type: string
+          description: 伺服器對已儲存位元組計算之雜湊 (如 sha256 hex)；一經記錄不可變更。
+        contentType:
+          type: string
+        sizeBytes:
+          type: integer
+    RemittanceProofRecord:
+      type: object
+      required:
+        - proofId
+        - batchId
+        - driverId
+        - uploadedByActorId
+        - originalFilename
+        - content
+        - scanState
+        - scanCompletedAt
+        - rejectionReason
+        - createdAt
+      properties:
+        proofId:
+          type: string
+          description: 伺服器產生；絕不接受客戶端提供的值。
+        batchId:
+          type: string
+        driverId:
+          type: string
+        uploadedByActorId:
+          type: string
+          nullable: true
+        originalFilename:
+          type: string
+        content:
+          $ref: "#/components/schemas/RemittanceProofContentIdentity"
+        scanState:
+          $ref: "#/components/schemas/RemittanceProofScanState"
+        scanCompletedAt:
+          type: string
+          format: date-time
+          nullable: true
+        rejectionReason:
+          type: string
+          nullable: true
+        createdAt:
+          type: string
+          format: date-time
+    UploadRemittanceProofCommand:
+      type: object
+      required:
+        - batchId
+        - originalFilename
+        - contentType
+        - sizeBytes
+        - stagedContentRef
+      properties:
+        batchId:
+          type: string
+        originalFilename:
+          type: string
+        contentType:
+          type: string
+        sizeBytes:
+          type: integer
+        stagedContentRef:
+          type: string
+          description: 指向儲存 adapter 暫存上傳的不透明參照；非原始位元組。
+    RemittanceProofEnvelope:
+      type: object
+      required:
+        - data
+        - meta
+      properties:
+        data:
+          $ref: "#/components/schemas/RemittanceProofRecord"
+        meta:
+          $ref: "#/components/schemas/ApiMeta"
+    RequestRemittanceProofReadbackCommand:
+      type: object
+      required:
+        - proofId
+      properties:
+        proofId:
+          type: string
+    RemittanceProofReadbackGrant:
+      type: object
+      required:
+        - proofId
+        - readbackUrl
+        - expiresAt
+        - issuedAt
+      properties:
+        proofId:
+          type: string
+        readbackUrl:
+          type: string
+        expiresAt:
+          type: string
+          format: date-time
+        issuedAt:
+          type: string
+          format: date-time
+    RemittanceProofReadbackGrantEnvelope:
+      type: object
+      required:
+        - data
+        - meta
+      properties:
+        data:
+          $ref: "#/components/schemas/RemittanceProofReadbackGrant"
+        meta:
+          $ref: "#/components/schemas/ApiMeta"
+    MarkReimbursementPaidWithProofCommand:
+      type: object
+      required:
+        - batchId
+        - proofId
+        - idempotencyKey
+      properties:
+        batchId:
+          type: string
+        proofId:
+          type: string
+        idempotencyKey:
+          type: string
+        paidAt:
+          type: string
+          format: date-time
+    RemittanceProofPaymentReceipt:
+      type: object
+      required:
+        - receiptId
+        - batchId
+        - proofId
+        - idempotencyKey
+        - driverId
+        - amount
+        - paidAt
+        - createdAt
+      properties:
+        receiptId:
+          type: string
+        batchId:
+          type: string
+        proofId:
+          type: string
+        idempotencyKey:
+          type: string
+        driverId:
+          type: string
+        amount:
+          type: object
+          required:
+            - currency
+            - amountMinor
+          properties:
+            currency:
+              type: string
+            amountMinor:
+              type: integer
+        paidAt:
+          type: string
+          format: date-time
+        createdAt:
+          type: string
+          format: date-time
+    RemittanceProofPaymentReceiptEnvelope:
+      type: object
+      required:
+        - data
+        - meta
+      properties:
+        data:
+          $ref: "#/components/schemas/RemittanceProofPaymentReceipt"
+        meta:
+          $ref: "#/components/schemas/ApiMeta"
+
+    # === SR-RECOVERY-CONTRACTS-20260911: Platform Adapter Registry credential expiry ===
+    CredentialExpiryWarningState:
+      type: string
+      enum: [unknown, ok, warning, expired]
+    AdapterCredentialExpiryWarning:
+      type: object
+      required:
+        - state
+        - warningWindowDays
+        - evaluatedAt
+      properties:
+        state:
+          $ref: "#/components/schemas/CredentialExpiryWarningState"
+        warningWindowDays:
+          type: integer
+        evaluatedAt:
+          type: string
+          format: date-time
+    AdapterCredentialExpiryWarningEnvelope:
+      type: object
+      required:
+        - data
+        - meta
+      properties:
+        data:
+          $ref: "#/components/schemas/AdapterCredentialExpiryWarning"
         meta:
           $ref: "#/components/schemas/ApiMeta"

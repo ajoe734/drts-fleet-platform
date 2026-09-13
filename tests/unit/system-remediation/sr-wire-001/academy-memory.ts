@@ -50,6 +50,19 @@ export class FakeAcademyRepository {
     return true;
   }
 
+  async executeSerializableTransaction<T>(
+    operation: (client: unknown) => Promise<T>,
+  ): Promise<T> {
+    return operation(this);
+  }
+
+  async getDriverTrainingProfileStatus(driverId: string, _client?: unknown): Promise<string | null> {
+    const update = this.trainingStatusUpdates
+      .filter((u) => u.driverId === driverId)
+      .slice(-1)[0];
+    return update ? update.status : null;
+  }
+
   async getCurrentCourse(courseId: string) {
     return this.courses.find((c) => c.courseId === courseId) ?? null;
   }
@@ -85,7 +98,12 @@ export class FakeAcademyRepository {
     this.trainingRecordEvidence.push(params);
   }
 
-  async upsertTrainingStatus(driverId: string, status: string) {
+  async upsertTrainingStatus(
+    driverId: string,
+    status: string,
+    _lastTrainingAt?: string | null,
+    _client?: unknown,
+  ) {
     this.trainingStatusUpdates.push({ driverId, status });
   }
 

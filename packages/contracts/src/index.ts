@@ -4328,6 +4328,9 @@ export interface DriverRegistryRecord {
   supportedServiceBuckets: Phase1ServiceBucket[];
   workState: DriverWorkState;
   licensesValid: boolean;
+  licenseExpiry?: string | null;
+  professionalDriverLicenseExpiry?: string | null;
+  taxiDriverRegistrationExpiry?: string | null;
   lifecycleStatus: DriverMasterLifecycleStatus;
   eligibilityBlockedReasons: DriverEligibilityBlockReason[];
   dispatchEligible: boolean;
@@ -4386,6 +4389,9 @@ export interface CreateDriverMasterCommand {
   bankAccount?: DriverProfileBankAccount | null;
   supportedServiceBuckets?: Phase1ServiceBucket[];
   licensesValid?: boolean;
+  licenseExpiry?: string | null;
+  professionalDriverLicenseExpiry?: string | null;
+  taxiDriverRegistrationExpiry?: string | null;
   lifecycleStatus?: DriverMasterLifecycleStatus;
 }
 
@@ -4404,6 +4410,17 @@ export interface UpdateDriverServiceBucketsCommand {
 
 export interface UpdateDriverMasterLifecycleCommand {
   lifecycleStatus: DriverMasterLifecycleStatus;
+  reason?: string | null;
+  licenseExpiry?: string | null;
+  professionalDriverLicenseExpiry?: string | null;
+  taxiDriverRegistrationExpiry?: string | null;
+}
+
+export interface UpdateDriverLicensesCommand {
+  licensesValid?: boolean;
+  licenseExpiry?: string | null;
+  professionalDriverLicenseExpiry?: string | null;
+  taxiDriverRegistrationExpiry?: string | null;
   reason?: string | null;
 }
 
@@ -5434,6 +5451,8 @@ export interface DriverStatementRecord {
   netAmount: MoneyAmount;
   feePlanVersion: string;
   lines: DriverStatementLineRecord[];
+  artifactUrl?: string | null;
+  artifactDownloadMetadata?: ControlledDownloadRecord | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -7580,3 +7599,5 @@ export * from "./p5-fare-anomaly-admin";
 export * from "./unattended-voice";
 export * from "./voice-dialogue";
 export * from "./system-remediation";
+export * from "./remittance-proof";
+export * from "./passenger-push-delivery";

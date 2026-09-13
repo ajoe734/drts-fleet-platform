@@ -1,10 +1,15 @@
 import {
   Body,
+  CanActivate,
   Controller,
   Delete,
+  ExecutionContext,
   Get,
   Headers,
   HttpStatus,
+  Inject,
+  Injectable,
+  Optional,
   Param,
   Post,
   Put,
@@ -12,8 +17,6 @@ import {
   Req,
   Res,
   StreamableFile,
-  Optional,
-  Inject,
 } from "@nestjs/common";
 import { Throttle } from "@nestjs/throttler";
 
@@ -86,7 +89,10 @@ import type {
   UpsertTenantQuotaPolicyCommand,
   ReorderTenantApprovalRulesCommand,
   RejectTenantBookingApprovalRequestCommand,
+  TenantApiKeyRecord,
   VerifyPartnerEligibilityCommand,
+  ApiListData,
+  ApiSuccessEnvelope,
 } from "@drts/contracts";
 
 import { toCsv } from "../../common/csv";
@@ -135,6 +141,55 @@ type JwtExpiresIn = NonNullable<
 >;
 
 const PARTNER_INGRESS_HANDOFF_EXPIRES_IN: JwtExpiresIn = "15m";
+
+function isPromiseLike<T>(value: T | Promise<T>): value is Promise<T> {
+  return (
+    typeof value === "object" &&
+    value !== null &&
+    typeof (value as any).then === "function"
+  );
+}
+
+@Injectable()
+export class TenantApiKeyAuthGuard implements CanActivate {
+  constructor(
+    @Inject(TenantPartnerService)
+    private readonly tenantPartnerService: TenantPartnerService,
+  ) {}
+
+  async canActivate(context: ExecutionContext): Promise<boolean> {
+    const request = context.switchToHttp().getRequest<any>();
+    const headers = request.headers ?? {};
+    const rawKey =
+      headers["x-api-key"] ||
+      headers["x-tenant-api-key"] ||
+      (typeof headers["authorization"] === "string" &&
+      headers["authorization"].startsWith("Bearer ")
+        ? headers["authorization"].slice(7).trim()
+        : undefined);
+
+    if (!rawKey) {
+      throw new ApiRequestError(
+        HttpStatus.UNAUTHORIZED,
+        "TENANT_API_KEY_REQUIRED",
+        "Tenant API key must be provided in Authorization header (Bearer tk_...) or x-api-key / x-tenant-api-key header.",
+      );
+    }
+
+    const tenantId = headers["x-tenant-id"] || request.query?.tenantId;
+    const resolution = await Promise.resolve(
+      this.tenantPartnerService.authenticateTenantApiKey(rawKey, {
+        tenantId: typeof tenantId === "string" ? tenantId : undefined,
+        workload: "tenant_api_guard",
+        requestId: headers["x-request-id"],
+      }),
+    );
+
+    request.identity = resolution.identity;
+    request.authenticatedApiKey = resolution.apiKey;
+    return true;
+  }
+}
 
 @Controller()
 export class TenantPartnerController {
@@ -1708,13 +1763,33 @@ export class TenantPartnerController {
     );
   }
 
+  listApiKeys(
+    tenantId?: string,
+    requestId?: string,
+    identity?: IdentityContext | null,
+  ): ApiSuccessEnvelope<ApiListData<TenantApiKeyRecord & Record<string, unknown>>>;
+  listApiKeys(
+    tenantId?: string,
+    requestId?: string,
+    identity?: IdentityContext | null,
+    apiKeyHeader?: string,
+    tenantApiKeyHeader?: string,
+    authorizationHeader?: string,
+  ):
+    | ApiSuccessEnvelope<ApiListData<TenantApiKeyRecord & Record<string, unknown>>>
+    | Promise<ApiSuccessEnvelope<ApiListData<TenantApiKeyRecord & Record<string, unknown>>>>;
   @Get("tenant/api-keys")
   @Throttle(READ_HEAVY_RATE_LIMIT)
   listApiKeys(
     @Headers("x-tenant-id") tenantId?: string,
     @Headers("x-request-id") requestId?: string,
     @CurrentIdentity() identity?: IdentityContext | null,
-  ) {
+    @Headers("x-api-key") apiKeyHeader?: string,
+    @Headers("x-tenant-api-key") tenantApiKeyHeader?: string,
+    @Headers("authorization") authorizationHeader?: string,
+  ):
+    | ApiSuccessEnvelope<ApiListData<TenantApiKeyRecord & Record<string, unknown>>>
+    | Promise<ApiSuccessEnvelope<ApiListData<TenantApiKeyRecord & Record<string, unknown>>>> {
     const resolvedTenantId = this.requireTenantId(tenantId);
     const resolvedIdentity =
       identity ??
@@ -1723,11 +1798,127 @@ export class TenantPartnerController {
         : undefined);
     const resolvedRequestId =
       typeof requestId === "string" ? requestId : undefined;
+
+    const apiKey =
+      apiKeyHeader ||
+      tenantApiKeyHeader ||
+      (typeof authorizationHeader === "string" &&
+      authorizationHeader.startsWith("Bearer ") &&
+      authorizationHeader.includes("tk_")
+        ? authorizationHeader.slice(7).trim()
+        : undefined);
+
+    if (apiKey) {
+      const resolution = this.tenantPartnerService.authenticateTenantApiKey(
+        apiKey,
+        {
+          tenantId: resolvedTenantId,
+          requiredScopes: ["tenant:read"],
+          requestId: resolvedRequestId,
+          workload: "tenant_api_list",
+        },
+      );
+      if (isPromiseLike(resolution)) {
+        return resolution.then((res) => {
+          const items = this.tenantPartnerService.listApiKeys(
+            resolvedTenantId,
+            res.identity,
+          );
+          return toApiSuccessEnvelope(toApiListData(items), resolvedRequestId);
+        });
+      }
+      const items = this.tenantPartnerService.listApiKeys(
+        resolvedTenantId,
+        resolution.identity,
+      );
+      return toApiSuccessEnvelope(toApiListData(items), resolvedRequestId);
+    }
+
     const items = this.tenantPartnerService.listApiKeys(
       resolvedTenantId,
       resolvedIdentity,
     );
     return toApiSuccessEnvelope(toApiListData(items), resolvedRequestId);
+  }
+
+  @Post("tenant/api-keys/authenticate")
+  async authenticateApiKey(
+    @Body() command?: { apiKey?: string; requiredScopes?: string[] },
+    @Headers("x-api-key") apiKeyHeader?: string,
+    @Headers("x-tenant-api-key") tenantApiKeyHeader?: string,
+    @Headers("authorization") authorizationHeader?: string,
+    @Headers("x-tenant-id") tenantId?: string,
+    @Headers("x-request-id") requestId?: string,
+    @Headers("idempotency-key") idempotencyKey?: string,
+  ) {
+    void idempotencyKey;
+    const rawKey =
+      command?.apiKey ||
+      apiKeyHeader ||
+      tenantApiKeyHeader ||
+      (typeof authorizationHeader === "string" &&
+      authorizationHeader.startsWith("Bearer ")
+        ? authorizationHeader.slice(7).trim()
+        : undefined);
+
+    const resolution = await Promise.resolve(
+      this.tenantPartnerService.authenticateTenantApiKey(rawKey ?? "", {
+        tenantId: tenantId ?? null,
+        requiredScopes: command?.requiredScopes,
+        workload: "tenant_api_authenticate",
+        requestId,
+      }),
+    );
+
+    return toApiSuccessEnvelope(
+      {
+        authenticated: true,
+        apiKey: this.tenantPartnerService.toApiKeyResponse(resolution.apiKey),
+        identity: resolution.identity,
+      },
+      requestId,
+    );
+  }
+
+  @Post("tenant/api-keys/exchange")
+  async exchangeApiKey(
+    @Body() command?: { apiKey?: string; requiredScopes?: string[] },
+    @Headers("x-api-key") apiKeyHeader?: string,
+    @Headers("x-tenant-api-key") tenantApiKeyHeader?: string,
+    @Headers("authorization") authorizationHeader?: string,
+    @Headers("x-tenant-id") tenantId?: string,
+    @Headers("x-request-id") requestId?: string,
+    @Headers("idempotency-key") idempotencyKey?: string,
+  ) {
+    void idempotencyKey;
+    const rawKey =
+      command?.apiKey ||
+      apiKeyHeader ||
+      tenantApiKeyHeader ||
+      (typeof authorizationHeader === "string" &&
+      authorizationHeader.startsWith("Bearer ")
+        ? authorizationHeader.slice(7).trim()
+        : undefined);
+
+    const resolution = await Promise.resolve(
+      this.tenantPartnerService.authenticateTenantApiKey(rawKey ?? "", {
+        tenantId: tenantId ?? null,
+        requiredScopes: command?.requiredScopes,
+        workload: "tenant_api_exchange",
+        requestId,
+      }),
+    );
+
+    return toApiSuccessEnvelope(
+      {
+        tokenType: "Bearer",
+        apiKeyId: resolution.apiKey.apiKeyId,
+        tenantId: resolution.apiKey.tenantId,
+        scopes: resolution.apiKey.scopes,
+        identity: resolution.identity,
+      },
+      requestId,
+    );
   }
 
   @Post("tenant/api-keys")
@@ -2061,6 +2252,7 @@ export class TenantPartnerController {
   @Post("tenant/sla")
   updateSlaProfile(
     @Body() command: UpdateTenantSlaProfileCommand,
+    @CurrentIdentity() identity: IdentityContext | null,
     @Headers("x-tenant-id") tenantId?: string,
     @Headers("x-actor-id") actorId?: string,
     @Headers("x-request-id") requestId?: string,
@@ -2071,6 +2263,7 @@ export class TenantPartnerController {
         command,
         actorId,
         requestId,
+        identity,
       ),
       requestId,
     );

@@ -1,0 +1,77 @@
+{
+  "taskId": "SR-OPS-PROOF-001",
+  "kind": "read_only_inventory",
+  "observedAt": "2026-09-08T16:38:58.266Z",
+  "baseSha": "1cdaaa5b5e5301de2da0a692c78c4cc29b0c10a9",
+  "candidateSha": "f631527de93b7e168559d8f44e91c0786d307fb6",
+  "sources": [
+    {
+      "path": "docs/02-architecture/phase1-operational-workload-sla-degradation-baseline-20260430.md",
+      "sha256": "982de23c4afc3f50eb926f96ed9c8157da5783748b8d334160fdb8512f9a42c9"
+    },
+    {
+      "path": "docs/03-runbooks/operational-sla-degradation-runbook.md",
+      "sha256": "b0f2fc781645228ebdca14273bb9bb77c11721b3d22cdcba409fc4994c0efd4f"
+    },
+    {
+      "path": "docs/03-runbooks/production-deploy-rail-spec-20260519.md",
+      "sha256": "81aba37bd8aa804767179ccc57955ec9d876eafdf58bb67852a5e0e173b8f02c"
+    },
+    {
+      "path": ".github/workflows/deploy-dev.yml",
+      "sha256": "854b8ef88de472d9b190cdb4705e4c34cffbf43a0dbecc88c49ce2de0f458551"
+    }
+  ],
+  "localTools": [
+    {
+      "command": [
+        "node",
+        "--version"
+      ],
+      "observedAt": "2026-09-08T16:38:58.274Z",
+      "exitCode": 0,
+      "signal": null,
+      "stdout": "v22.23.2\n",
+      "stderr": "",
+      "error": null
+    },
+    {
+      "command": [
+        "psql",
+        "--version"
+      ],
+      "observedAt": "2026-09-08T16:38:58.277Z",
+      "exitCode": null,
+      "signal": null,
+      "stdout": "",
+      "stderr": "",
+      "error": "spawnSync psql ENOENT"
+    },
+    {
+      "command": [
+        "pg_restore",
+        "--version"
+      ],
+      "observedAt": "2026-09-08T16:38:58.279Z",
+      "exitCode": null,
+      "signal": null,
+      "stdout": "",
+      "stderr": "",
+      "error": "spawnSync pg_restore ENOENT"
+    }
+  ],
+  "deployment": {
+    "state": "not_requested",
+    "resource": null,
+    "observation": null
+  },
+  "liveNotPerformed": [
+    "cloud_backup_read",
+    "cloud_restore",
+    "production_load",
+    "physical_device_validation",
+    "application_health",
+    "rollback_exercise",
+    "cloud_deployment_read"
+  ]
+}

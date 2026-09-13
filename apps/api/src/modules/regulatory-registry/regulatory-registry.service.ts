@@ -36,6 +36,7 @@ import type {
   SupplyLifecycleTraceRecord,
   SupplySubmissionRecord,
   SubmitExclusivityReviewCommand,
+  UpdateDriverLicensesCommand,
   UpdateDriverMasterLifecycleCommand,
   UpdateDriverServiceBucketsCommand,
   UpdateDriverWorkStateCommand,
@@ -98,6 +99,29 @@ export type SubmissionProvisioningResult = ProvisionedCanonicalRecordIds & {
   vehicleAffiliation: VehicleFleetAffiliationRecord | null;
 };
 
+function areDriverLicensesValid(
+  driver: DriverRegistryRecord,
+  referenceDateMs: number = Date.now(),
+): boolean {
+  if (driver.licensesValid === false) {
+    return false;
+  }
+  const dates = [
+    driver.licenseExpiry,
+    driver.professionalDriverLicenseExpiry,
+    driver.taxiDriverRegistrationExpiry,
+  ];
+  for (const d of dates) {
+    if (d) {
+      const time = Date.parse(d);
+      if (!Number.isNaN(time) && time <= referenceDateMs) {
+        return false;
+      }
+    }
+  }
+  return true;
+}
+
 function createSeedDriver(
   input: Pick<
     DriverRegistryRecord,
@@ -106,8 +130,17 @@ function createSeedDriver(
     | "supportedServiceBuckets"
     | "workState"
     | "licensesValid"
-  >,
+  > & {
+    licenseExpiry?: string | null;
+    professionalDriverLicenseExpiry?: string | null;
+    taxiDriverRegistrationExpiry?: string | null;
+  },
 ): DriverRegistryRecord {
+  const licenseExpiry = input.licenseExpiry ?? "2027-12-31T23:59:59.000Z";
+  const professionalDriverLicenseExpiry =
+    input.professionalDriverLicenseExpiry ?? "2027-12-31T23:59:59.000Z";
+  const taxiDriverRegistrationExpiry =
+    input.taxiDriverRegistrationExpiry ?? "2027-12-31T23:59:59.000Z";
   const lifecycleStatus: DriverMasterLifecycleStatus =
     input.workState === "suspended" ? "suspended" : "active";
   const eligibilityBlockedReasons: DriverEligibilityBlockReason[] = [];
@@ -125,6 +158,9 @@ function createSeedDriver(
 
   return {
     ...input,
+    licenseExpiry,
+    professionalDriverLicenseExpiry,
+    taxiDriverRegistrationExpiry,
     lifecycleStatus,
     eligibilityBlockedReasons,
     dispatchEligible: eligibilityBlockedReasons.length === 0,
@@ -910,6 +946,11 @@ export class RegulatoryRegistryService implements OnModuleInit {
         : ["standard_taxi"],
       workState: lifecycleStatus === "active" ? "available" : "offline",
       licensesValid: command.licensesValid ?? false,
+      licenseExpiry: command.licenseExpiry ?? null,
+      professionalDriverLicenseExpiry:
+        command.professionalDriverLicenseExpiry ?? null,
+      taxiDriverRegistrationExpiry:
+        command.taxiDriverRegistrationExpiry ?? null,
       lifecycleStatus,
       eligibilityBlockedReasons: [],
       dispatchEligible: false,
@@ -1065,6 +1106,18 @@ export class RegulatoryRegistryService implements OnModuleInit {
       driver.retiredAt = null;
     }
 
+    if (command.licenseExpiry !== undefined) {
+      driver.licenseExpiry = command.licenseExpiry;
+    }
+    if (command.professionalDriverLicenseExpiry !== undefined) {
+      driver.professionalDriverLicenseExpiry =
+        command.professionalDriverLicenseExpiry;
+    }
+    if (command.taxiDriverRegistrationExpiry !== undefined) {
+      driver.taxiDriverRegistrationExpiry =
+        command.taxiDriverRegistrationExpiry;
+    }
+
     const updated = this.decorateDriver(driver);
     this.persistChanges(
       { drivers: [this.cloneDriver(updated)] },
@@ -1077,6 +1130,57 @@ export class RegulatoryRegistryService implements OnModuleInit {
         tenantId: null,
         moduleName: "regulatory-registry",
         actionName: "update_driver_master_lifecycle",
+        resourceType: "driver_master",
+        resourceId: driverId,
+        oldValuesSummary: this.buildDriverAuditSummary(previous, null),
+        newValuesSummary: this.buildDriverAuditSummary(
+          updated,
+          command.reason ?? null,
+        ),
+      },
+      requestId,
+    );
+
+    return this.cloneDriver(updated);
+  }
+
+  updateDriverLicenses(
+    driverId: string,
+    command: UpdateDriverLicensesCommand,
+    requestId?: string,
+  ): DriverRegistryRecord {
+    const driver = this.requireDriver(driverId);
+    const previous = this.decorateDriver(driver);
+    const now = new Date().toISOString();
+
+    if (command.licenseExpiry !== undefined) {
+      driver.licenseExpiry = command.licenseExpiry;
+    }
+    if (command.professionalDriverLicenseExpiry !== undefined) {
+      driver.professionalDriverLicenseExpiry =
+        command.professionalDriverLicenseExpiry;
+    }
+    if (command.taxiDriverRegistrationExpiry !== undefined) {
+      driver.taxiDriverRegistrationExpiry =
+        command.taxiDriverRegistrationExpiry;
+    }
+    if (command.licensesValid !== undefined) {
+      driver.licensesValid = command.licensesValid;
+    }
+    driver.updatedAt = now;
+
+    const updated = this.decorateDriver(driver);
+    this.persistChanges(
+      { drivers: [this.cloneDriver(updated)] },
+      "update_driver_licenses",
+    );
+    this.recordAudit(
+      {
+        actorId: "platform-admin",
+        actorType: "platform_admin",
+        tenantId: null,
+        moduleName: "regulatory-registry",
+        actionName: "update_driver_licenses",
         resourceType: "driver_master",
         resourceId: driverId,
         oldValuesSummary: this.buildDriverAuditSummary(previous, null),
@@ -1493,6 +1597,30 @@ export class RegulatoryRegistryService implements OnModuleInit {
         return endAt >= now && endAt <= cutoff;
       })
       .map((policy) => this.clonePolicy(policy));
+  }
+
+  listExpiringDriverLicenses(
+    windowDays = 30,
+    referenceDateMs: number = Date.now(),
+  ): DriverRegistryRecord[] {
+    const cutoff = referenceDateMs + windowDays * 24 * 60 * 60 * 1000;
+
+    return this.drivers
+      .filter((driver) => driver.lifecycleStatus === "active")
+      .map((driver) => this.decorateDriver(driver, referenceDateMs))
+      .filter((driver) => {
+        const dates = [
+          driver.licenseExpiry,
+          driver.professionalDriverLicenseExpiry,
+          driver.taxiDriverRegistrationExpiry,
+        ]
+          .filter((d): d is string => Boolean(d && typeof d === "string"))
+          .map((d) => Date.parse(d))
+          .filter((t) => !Number.isNaN(t));
+
+        return dates.some((t) => t >= referenceDateMs && t <= cutoff);
+      })
+      .map((driver) => this.cloneDriver(driver));
   }
 
   createInsurancePolicy(command: CreateInsurancePolicyCommand) {
@@ -2127,6 +2255,10 @@ export class RegulatoryRegistryService implements OnModuleInit {
       ),
       workState: "available",
       licensesValid: true,
+      licenseExpiry: draft.professionalDriverLicenseExpiry ?? null,
+      professionalDriverLicenseExpiry:
+        draft.professionalDriverLicenseExpiry ?? null,
+      taxiDriverRegistrationExpiry: draft.taxiDriverRegistrationExpiry ?? null,
       lifecycleStatus: "active",
       eligibilityBlockedReasons: [],
       dispatchEligible: false,
@@ -2816,15 +2948,25 @@ export class RegulatoryRegistryService implements OnModuleInit {
     };
   }
 
-  private decorateDriver(driver: DriverRegistryRecord): DriverRegistryRecord {
+  private decorateDriver(
+    driver: DriverRegistryRecord,
+    referenceDateMs: number = Date.now(),
+  ): DriverRegistryRecord {
     const profile = this.driverProfileService.findProfileForDriver(
       driver.driverId,
     );
+    const licensesValid =
+      driver.licensesValid !== false &&
+      areDriverLicensesValid(driver, referenceDateMs);
+    const candidate: DriverRegistryRecord = {
+      ...driver,
+      licensesValid,
+    };
     const eligibilityBlockedReasons =
-      this.computeDriverEligibilityBlockedReasons(driver);
+      this.computeDriverEligibilityBlockedReasons(candidate);
 
     return {
-      ...driver,
+      ...candidate,
       supportedServiceBuckets: [...driver.supportedServiceBuckets],
       eligibilityBlockedReasons,
       dispatchEligible: eligibilityBlockedReasons.length === 0,

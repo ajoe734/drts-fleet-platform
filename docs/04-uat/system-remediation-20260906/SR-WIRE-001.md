@@ -17,6 +17,9 @@ The recovery branch is `codex/sr-wire-001-complete-20260911`. It preserves the s
 - Driver settings has real, visible leave/academy actions while retaining device/provisioning routing and the existing primary tabs. Host requests use the active restricted shell; the root layout skips fleet-admin badge fetches for Host context and the shell omits fleet-admin navigation/footer. The middleware overwrites route metadata, so caller-supplied route headers cannot select the shell.
 - Leave pages start with empty state and consume real API records. They show recoverable request errors instead of fallback fixtures; Ops review consumes the returned record without inventing reviewer/time/shift data. Shift-impact displays use supplied IDs instead of hardcoded drivers or shift assignments.
 - New Host/Ops labels use the existing translation catalogs.
+- Consensus B1: Single async persistent clock-in/out path. Per-driver database transaction locking `reg.phase1_registry_drivers`, validating active shift in `ops.phase1_driver_shifts`, executing dev auth/lifecycle guards (`assertDriverAuthEligible`, `getVehicleDispatchability`, `assertDriverCanClockIn`), committing transaction before returning, no synthetic success facade.
+- Consensus B2: Single authoritative Academy qualification operation (`evaluateDriverQualification`) and SERIALIZABLE projection transaction. Preserves manual waivers (`training_status = 'waived'`), resets uncompleted/expired to `pending`/`expired`. Vehicle eligibility respects `trainingRequired: false` by skipping requirement checks.
+- Consensus B3: Explicit root `tsconfig.base.json` in `wire-acceptance.yml` for `tsx` server execution, ensuring `@drts/contracts` runtime JS exports are resolved instead of `.d.ts`.
 
 ## Validation and acceptance boundary
 
@@ -24,21 +27,16 @@ The local development VM is used only for repository checks/builds. No API, Next
 
 Locally verified during implementation:
 
-| Command                                                                                                                                                                                        | Result                                                                                                                                                |
-| ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `pnpm --filter @drts/contracts build` and `pnpm --filter @drts/control-plane-auth build`                                                                                                       | Exit 0; required in a fresh worktree before API typecheck                                                                                             |
-| `pnpm --filter @drts/api typecheck`                                                                                                                                                            | Exit 0                                                                                                                                                |
-| `pnpm typecheck:root`                                                                                                                                                                          | Exit 0 after removing application JSX/alias coupling from task nav tests                                                                              |
-| `pnpm exec vitest run tests/unit/shift-attendance.test.ts tests/security/iam-route-driver-negative.test.ts tests/unit/system-remediation/sr-wire-001/supply-readiness-training-gate.test.ts`   | 26 passed                                                                                                                                             |
-| `pnpm exec vitest run tests/unit/system-remediation/sr-wire-001/authority-gates.test.ts`                                                                                                       | 5 passed: leave block/recovery, excluded-vehicle preservation, training pass/expiry, candidate/assignment recheck, authority-read failure propagation |
-| `pnpm --filter @drts/api exec vitest run tests/unit/runtime-eligibility-evaluator.service.test.ts tests/unit/platform-presence.service.test.ts tests/unit/owned-mobility.service.test.ts`      | 119 passed; existing partial evaluator fixture extended to its new method contract                                                                    |
-| `pnpm exec vitest run tests/unit/system-remediation/sr-wire-001/ tests/unit/shift-attendance.test.ts tests/security/iam-route-driver-negative.test.ts`                                         | Final focused suite: 8 files, 61 passed (includes 20 navigation/real-data UI behavior tests)                                                          |
-| `pnpm --filter @drts/driver-app exec vitest run tests/unit/driver-identity-routing.test.ts tests/unit/driver-route-guards-and-feature-entries.test.ts`                                                       | Supervisor verified 20 passed; existing provisioning/identity assertions retained for expanded routes                                                 |
-| `pnpm --filter @drts/driver-app typecheck`, `pnpm --filter @drts/ops-console-web typecheck`, `pnpm --filter @drts/fleet-partner-portal-web typecheck`                                          | Exit 0 for all three                                                                                                                                  |
-| `pnpm i18n:guard` and targeted UI ESLint                                                                                                                                                       | Supervisor verified exit 0                                                                                                                            |
-| `pnpm --filter @drts/api build`                                                                                                                                                                | Exit 0; emitted DI metadata separately confirms all added feature-authority dependencies are required by Nest                                         |
-| `EXPO_PUBLIC_API_URL=http://127.0.0.1:4102 EXPO_PUBLIC_DRIVER_ID=drv_wire_001 pnpm --filter @drts/driver-app exec expo export --platform web --output-dir /tmp/sr-wire-driver-export-20260911` | Exit 0; static build only, no product/browser server                                                                                                  |
-| Targeted API/remote-harness ESLint                                                                                                                                                             | Exit 0                                                                                                                                                |
+| Command | Result |
+| --- | --- |
+| `git diff --check` | Exit 0 |
+| `pnpm --filter @drts/contracts build` and `pnpm --filter @drts/control-plane-auth build` | Exit 0; required in fresh worktree before API typecheck |
+| `pnpm --filter @drts/api typecheck` | Exit 0 |
+| `pnpm --filter @drts/driver-app typecheck` | Exit 0 |
+| `pnpm --filter @drts/fleet-partner-portal-web typecheck` | Exit 0 |
+| `pnpm --filter @drts/ops-console-web typecheck` | Exit 0 |
+| `pnpm exec vitest run tests/unit/system-remediation/sr-wire-001/` | 7 test files, 49 passed (including B1/B2 consensus tests) |
+| `pnpm exec vitest run tests/unit/shift-attendance.test.ts tests/security/iam-route-driver-negative.test.ts tests/unit/system-remediation/sr-driver-gaps-20260911/driver-gaps-remediation.test.ts tests/unit/system-remediation/sr-qa-driver-001/shift-clockin-suspension-gap.test.ts` | 4 test files, 33 passed |
 
 The task unit tests use in-memory collaborators and explicitly do not claim HTTP/SQL proof. The full acceptance implementation is `.github/workflows/wire-acceptance.yml`:
 
