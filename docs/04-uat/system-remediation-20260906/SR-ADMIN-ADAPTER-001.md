@@ -312,6 +312,14 @@ other task's declared scope, root `app.module.ts`, or `packages/api-client/**` w
 ## 5. 交接資訊 (Handoff)
 
 - **狀態 (Status)**：candidate ready, awaiting independent review (`Gemini2`) and CI/merge
-- **Base SHA**：`dc84431eed6ee3fd778e828c030ae77db661df54`
-- **CANDIDATE_SHA**：set via `git rev-parse HEAD` at commit/handoff time
+- **Base SHA**：`dc84431eed6ee3fd778e828c030ae77db661df54` (歷史 base); 同步 `origin/dev` base: `f2484bb52`
 - **CANDIDATE_BRANCH**：`claude/sr-admin-adapter-001-recovery-20260911`
+- **PR**：https://github.com/ajoe734/drts-fleet-platform/pull/1979
+- **驗證摘要 (Verification Summary)**：
+  - `git diff --check`: 0 (clean)
+  - `pnpm --filter @drts/api typecheck`: 0 (clean)
+  - `pnpm --filter @drts/platform-admin-web typecheck`: 0 (clean)
+  - `node tools/ci/i18n-guard.mjs`: 0 (clean)
+  - `pnpm exec vitest run tests/unit/system-remediation/sr-admin-adapter-001/`: 0 (11 passed)
+  - `pnpm exec vitest run tests/unit/system-remediation/sr-recovery-contracts-20260911/`: 0 (32 passed)
+  - `pnpm exec vitest run tests/unit/platform-admin.test.ts`: 0 (12 passed)
