@@ -8,8 +8,6 @@ type StreamableFileLike = {
 import { ApiRequestError } from "../../../../apps/api/src/common/api-envelope";
 import {
   createControlledDownloadMetadata,
-  DEFAULT_CONTROLLED_DOWNLOAD_KEY_ID,
-  DEFAULT_CONTROLLED_DOWNLOAD_SECRET,
 } from "../../../../apps/api/src/common/controlled-download";
 import { ControlledDownloadController } from "../../../../apps/api/src/modules/controlled-download/controlled-download.controller";
 import { InMemoryDocumentArtifactStore } from "../../../../apps/api/src/common/document-artifacts";
@@ -199,7 +197,6 @@ describe("C097: 可列印車內牌貼下載、簽章驗證與版本一致性驗�
 
     // 隨後 Store 儲存的是被更換之新檔案（不同 hash）
     const newContent = Buffer.from("%PDF-1.7 modified version 2", "utf-8");
-    const newHash = createHash("sha256").update(newContent).digest("hex");
     store.put({
       kind: "placard",
       subjectId: placardVersionId,

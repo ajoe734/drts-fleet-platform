@@ -41,7 +41,7 @@ function buildSnapshot(
     chargingMode: "fixed_quote",
     estimatedFareMinor: 32000,
     payableFareMinor: 32000,
-    currency: "NTD",
+    currency: "TWD",
     farePolicyId: "fare-policy-standard",
     farePolicyVersion: "v1.2",
     fareChangeRuleId: "none",
@@ -80,14 +80,14 @@ describe("C095: 車資異常處理、評價審查與補正驗收 (原交易不�
     expect(recorded.snapshot.quoteSnapshotId).toBe("quote-anomaly-001");
     expect(recorded.snapshot.orderId).toBe("order-quote-anomaly-001");
     expect(recorded.snapshot.payableFareMinor).toBe(32000);
-    expect(recorded.snapshot.currency).toBe("NTD");
+    expect(recorded.snapshot.currency).toBe("TWD");
     expect(recorded.snapshot.chargingMode).toBe("fixed_quote");
 
     // 2. 處置前回讀驗證
     const beforeResolve = service.get("quote-anomaly-001");
     expect(beforeResolve.snapshot.quoteSnapshotId).toBe("quote-anomaly-001");
     expect(beforeResolve.snapshot.payableFareMinor).toBe(32000);
-    expect(beforeResolve.snapshot.currency).toBe("NTD");
+    expect(beforeResolve.snapshot.currency).toBe("TWD");
 
     // 3. 處置異常（解決訂單相關異常）
     await service.resolveOrderAnomalies("order-quote-anomaly-001", "2026-09-01T09:00:00.000Z");

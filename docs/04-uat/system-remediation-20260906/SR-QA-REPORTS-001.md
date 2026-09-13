@@ -63,6 +63,16 @@
 | `tests/e2e/system-remediation/sr-qa-reports-001/sr-qa-reports-001.spec.ts` | C090-C100 | 1 | ✅ Specified | N/A (Spec Verified) |
 | **總計** | **C090-C100** | **51 案例** | **100% 通過 (Exit 0)** | **~4.4s** |
 
+### 2.1 Candidate 型別與 Linter 修正紀錄
+針對先前 candidate `f3031a7e093058ff5c850045a0215938c0adb419` 回報之型別與 Linter 缺口進行全面修復：
+1. **貨幣代碼對齊**：`c093` 與 `c095` 將測試資料之 `currency` 由舊版 `'NTD'` 修正為標準平臺幣別 `'TWD'`。
+2. **C093 規格對齊**：依 `@drts/contracts` 之 `MultiTaxiTripOperationalAdminView` 規格，修正 `legalHold` 結構（移除不存在之頂層 `notes`，以 `activeHolds[].reasonNote` 對齊），並將 `recordNo` 修正為 `recordId` 且補齊 `vehicleId` 與 `route` 欄位。
+3. **ESLint 警告與未引用代碼清理**：
+   - `c093`：移除未使用的 `calculateRetentionCoverage` import。
+   - `c097`：移除未使用的 `DEFAULT_CONTROLLED_DOWNLOAD_KEY_ID`、`DEFAULT_CONTROLLED_DOWNLOAD_SECRET` import 及未使用的 `newHash` 變數。
+   - `c099`：移除未使用的 `listEvidenceRetentionPolicies` import 及未使用的 `opsDispatcherIdentity` 變數。
+4. **驗證結果**：全數 10 組單元測試 (51 tests) 通過，ESLint 檢查 0 錯誤 0 警告，TypeScript 型別檢查完全無錯誤。
+
 ---
 
 ## 3. 11 項能力驗收結果逐項對照

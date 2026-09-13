@@ -5,7 +5,6 @@ import {
   assertEvidenceAccess,
   getEvidenceGovernanceCatalog,
   getEvidenceRetentionPolicy,
-  listEvidenceRetentionPolicies,
   type EvidenceAccessIdentity,
 } from "../../../../apps/api/src/common/evidence-governance";
 import { ReportingFilingService } from "../../../../apps/api/src/modules/reporting-filing/reporting-filing.service";
@@ -27,14 +26,6 @@ describe("C099: 證據清單治理、逐 Family 授權邊界、法律保留與�
     realm: "tenant",
     scopes: ["reports:read", "audit:read", "tenant:webhooks:read", "tenant:read"],
     tenantId: "tenant-metro-001",
-  };
-
-  const opsDispatcherIdentity: EvidenceAccessIdentity = {
-    actorType: "ops_user",
-    actorId: "ops-user-001",
-    realm: "ops",
-    scopes: ["audit:read"],
-    tenantId: null,
   };
 
   it("證據治理目錄涵蓋完整 Phase 1 證據家族與法律保留工作流程規範", () => {
