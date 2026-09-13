@@ -158,11 +158,12 @@ class DeadlockCooldownPersistenceTests(unittest.TestCase):
             }
             state = migrate_state({
                 "chair_review": {"blocked": {"reason": "all quotas exhausted"}},
-                "provider_pauses": {"claude": {"lane_id": "claude", "kind": "quota", "resume_at": 1789048200}},
+                "provider_pauses": {"claude": {"lane_id": "claude", "kind": "quota", "resume_at": (datetime.now(timezone.utc) + timedelta(hours=1)).timestamp()}},
             })
             status = {"tasks": [{"id": "TASK", "status": "todo"}]}
             report = {"providers": {"claude": {"installed": True, "auth_ready": True}}}
-            with (mock.patch.object(supervisor, "_force_recovery_probe", return_value=report) as probe,
+            with (mock.patch.object(supervisor, "load_provider_report", return_value=report),
+                  mock.patch.object(supervisor, "_force_recovery_probe", return_value=report) as probe,
                   mock.patch.object(supervisor, "write_activity_log"),
                   mock.patch.object(supervisor, "console_log")):
                 self.assertTrue(supervisor.break_full_deadlock(config, state, status))

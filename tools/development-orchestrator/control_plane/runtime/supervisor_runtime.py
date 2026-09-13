@@ -7895,6 +7895,14 @@ def break_full_deadlock(
     settings = config.get("supervisor", {})
     if not settings.get("deadlock_breaker_enabled", True):
         return False
+    recovery = state.get("deadlock_recovery", {})
+    if recovery.get("operator_attention") and _has_any_dispatchable_lane(config, state):
+        recovery.pop("operator_attention")
+        write_activity_log(config, {
+            "type": "deadlock_recovered",
+            "message": "A lane is dispatchable again; cleared stale all-lanes-paused attention.",
+        })
+        return True
     active_statuses = {str(v) for v in ready_dispatch_settings(config).get("active_worker_statuses", [])}
     active_agents, _ = active_worker_indexes(state, active_statuses)
     if active_agents:

@@ -2229,7 +2229,13 @@ def command_reconcile_candidate(state: dict[str, Any], args: list[str]) -> None:
         mark_handoffs_done(state, task_id)
     elif merge_sha:
         if task.get("reviewed_sha") != candidate_sha:
-            raise SystemExit("Cannot record merge without reviewer approval for the same candidate SHA")
+            task["status"] = "review"
+            task["last_update"] = timestamp
+            task["next"] = f"Merged candidate {candidate_sha[:12]} still requires independent same-SHA reviewer approval."
+            append_log({"ts": timestamp, "agent": current_actor("Supervisor"),
+                        "type": "candidate_review_required", "task_id": task_id,
+                        "candidate_sha": candidate_sha, "message": task["next"]})
+            return
         if task.get("ci_sha") != candidate_sha or task.get("ci_status") != "success":
             raise SystemExit("Cannot record merge without successful CI for the same candidate SHA")
         task["merge_sha"] = merge_sha
