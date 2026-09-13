@@ -5,13 +5,13 @@ This directory stores the working artifacts for Phase 1 discussion, cited review
 ## Current planning cycle — 2026-09-13
 
 - Mode: `discussion_planning`; recorded baton owner: Codex; supervisor: Claude.
-- Active artifact: [review-round-1.md](review-round-1.md), Entries 5–15. The supervisor inventory records dispositions for Entries 5–10; Codex's follow-up on WIRE loading, runner gates and Q-001 technical SD is submitted. Further review and convergence remain pending.
+- Active artifact: [review-round-1.md](review-round-1.md), Entries 5–17. Entries 16–17 reconcile the latest recorded launch scope and review Academy/C115 technical SD. Cross-lane disposition and convergence remain pending.
 - Routing: [supervisor-queue.md](supervisor-queue.md); history: [baton-log.md](baton-log.md).
-- [starter-draft.md](starter-draft.md) retains the April synthesis and points to the reopened review. The April packet and round-2 “not required” note remain historical; neither authorizes the current return to execution.
-- The supervisor’s `product-remediation-sa-sd-20260913.md` is the current P01–P06 and Q-001 discussion inventory. Entries 11–12 review runner reuse; Entry 13 acknowledges the documented WIRE declaration-path loading cause; Entries 14–15 refine voice intent transitions, recording recovery and migration compatibility. Academy projection and C115 recording/credential job SD remain pending, as does inventory publication.
-- Q-001 now records the user's 2026-09-13 confirmation of one call to multiple orders (1:N); Entry 9 retains the earlier conflict as history and appends the resolution. Technical alignment remains pending; the product question is settled.
-- Board snapshot `2026-09-13T13:48:04Z` already includes `SR-CALL-MULTIORDER-20260913` as blocked, with Gemini owner, Codex reviewer and empty write scopes; release depends on it. This review records that existing route and starts no task.
-- Authority: `ai-status.json` (shared runtime machine truth), `execution_mode` and `discussion_loop`; [AI_COLLABORATION_GUIDE.md](../../../../AI_COLLABORATION_GUIDE.md), §§0, 2, 4–6. This dated summary does not override later machine truth or user instructions.
+- [starter-draft.md](starter-draft.md) retains the April synthesis as history. The April packet and round-2 “not required” note do not authorize the current return to execution.
+- Latest scope: board snapshot `2026-09-13T14:02:27Z` records the user's subsequent direction to use **one call / one order for the first operational release**. `SR-CALL-MULTIORDER-20260913` is withdrawn, retained as blocked for history, and removed from release dependencies. It must not auto-resume after SA/SD or be reported as a launch blocker/completed implementation.
+- Entry 16 supersedes the earlier 1:N planning direction. The supervisor synchronized the shared Q-001 question record and `product-remediation-sa-sd-20260913.md` during review; their publication and the older withdrawn-task note remain supervisor-owned. Multi-order intent/UI/migration/fan-out proposals remain historical; C115 recording recovery and credential-expiry/alert work remain required.
+- The inventory's §§3.9–3.10 now identify Academy projection and built-in recording-handler gaps. Entry 17 confirms inspected source findings and identifies the remaining authority, persistence, trigger and receipt design outputs. P03 loading is diagnosed; full WIRE acceptance, C111–C115 coverage, P05's existing decision route and live evidence remain pending.
+- Authority: `ai-status.json` (shared runtime machine truth), `execution_mode`, `discussion_loop` and current task notes; [AI_COLLABORATION_GUIDE.md](../../../../AI_COLLABORATION_GUIDE.md), §§0, 2, 4–6. This dated summary does not override later machine truth or user instructions.
 
 ## Files
 

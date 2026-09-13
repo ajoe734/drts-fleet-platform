@@ -56,3 +56,24 @@ This file is append-only. It records who owned the shared draft in each round an
 - Evidence boundary: read-only source inspection at `6eec9635c17674b89b8519c642eb48b51dbd6479`; WIRE workflow separately inspected at `becf4ecdb32dac2a89e272db87243b1d4c38757f`; supervisor's saved loader probe read without rerunning it. No product tests, hosted runs or live probes executed.
 - Next planning step: Claude dispositions Entries 11–15 and routes the unchanged review order. Academy projection and C115 trigger/persistence questions remain; Q-001's cardinality and execution-task registration are settled, while technical SD and scopes remain pending.
 - Delivery: documentation-only continuation on the existing `codex/planning-phase1-codex` branch and draft PR #2017; shared planning files updated with the reviewed text. No implementation commit or task/mode transition; consensus packet and round 2 remain historical.
+
+## User launch-scope revision — 2026-09-13T14:04:55.309086+00:00
+
+- Source: latest explicit user instruction to revert to one call / one order and prioritize operational launch.
+- Supersedes: the earlier same-day 1:N decision and multi-order action items; prior entries remain history.
+- Action: updated Q-001/current inventory/routing; canonical commands removed the multi-order release dependency and recorded withdrawal without claiming implementation done.
+- Next: complete launch-required SA/SD for existing flows and route implementation through supervisor/auto workers. No baton transition or mode change is claimed.
+
+### Round 1 scope reconciliation and technical synthesis — 2026-09-13
+
+- Supervisor: Claude
+- Baton owner: Codex (unchanged; no supervisor transition recorded)
+- Basis: current planning dispatch; machine-truth snapshot `updated_at=2026-09-13T14:02:27Z`, `execution_mode=discussion_planning`, `discussion_loop.current_owner=Codex`.
+- Output: [review-round-1.md](review-round-1.md), Entries 16–17 and explicit supersession notes on the prior 1:N discussion; synchronized README, starter draft and supervisor queue.
+- Status: review_submitted; further supervisor/cross-lane disposition and current-packet acceptance remain pending.
+- Scope correction: the board records the user's later first-release one-call/one-order direction. `SR-CALL-MULTIORDER-20260913` is withdrawn, retained blocked with empty scopes for history, and removed from release dependencies. Earlier log entries describing required multi-order work remain historical and are superseded for current routing; do not auto-resume that task.
+- Technical findings: inventory §§3.9–3.10 now identify Academy's duplicate derivation/projection gap and the built-in recording finalizer's metadata-only result. Entry 17 confirms the inspected source and narrows the remaining authority, persistence, trigger, lease and receipt outputs. Independent C115 recording/credential recovery remains required under the current single-order scope.
+- Concurrent update preserved: supervisor's `User launch-scope revision` log entry and `Latest user-scope disposition` in the review round, plus the synchronized Q-001/inventory direction. No superseded multi-order routing was restored.
+- Evidence boundary: read-only board/source inspection at the dated snapshot and product SHA `6eec9635c17674b89b8519c642eb48b51dbd6479`; documentation validation only. No product tests, hosted runs, live probes, or new completion claims.
+- Next planning step: Claude publishes the already synchronized Q-001/inventory records, reconciles the older withdrawn-task note, dispositions the remaining WIRE/C111–C115 feedback and routes the unchanged review order. Preserve P05's existing decision route and all original QA/live gates; no new cardinality decision is needed.
+- Delivery: documentation-only continuation on `codex/planning-phase1-codex` for existing draft PR #2017. Consensus packet and round 2 remain historical. No implementation commit, task/mode transition, product runtime or deployment.

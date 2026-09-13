@@ -1,15 +1,18 @@
 # Review Round 1
 
+> Latest user scope (2026-09-13): one call / one order; prioritize operational launch. The earlier 1:N answer and multi-order action items in Entries 9 and 13–15 are superseded. See the appended user-scope disposition and current inventory §§3.7–3.8. Historical reviewer statements below are preserved, not current dispatch instructions.
+
 ## Current dispatch — 2026-09-13
 
 - Baton owner / reviewer lane: Codex; supervisor: Claude.
-- Status: supervisor dispositions for Entries 5–10 are recorded in the inventory's §3.5; Codex follow-up in Entries 11–15 is submitted for further review. Entries 13–15 review the newly documented WIRE loading cause and Q-001 technical proposal. Technical SD and cross-lane convergence remain pending.
+- Status: Codex scope reconciliation and technical synthesis submitted in Entries 16–17. The board now records first-release one-call/one-order scope and withdrawal of multi-order work. Earlier 1:N proposals are superseded for this release; remaining WIRE/C111–C115 SD and cross-lane convergence remain pending.
 - Entries 1–4 preserve the 2026-04-11 review. Their convergence does not authorize execution during the current planning pause.
 - Entries 5–10 review the historical synthesis against current canonical contracts and the supervisor's `product-remediation-sa-sd-20260913.md` P01–P06 inventory. Proposed wording below is not a newly accepted product decision or an execution assignment.
 - Evidence boundary: canonical source files and read-only task-board inspection. The board snapshot (`ai-status.json.updated_at=2026-09-13T13:21:27Z`) records `discussion_planning`, `discussion_loop.current_owner=Codex`, and both `SR-WIRE-001` and `SR-QA-WEBHOOK-001` as `blocked`. Reported test failures/WIP below are attributed to that board, not independently reproduced here.
 - The supervisor's inventory became available during review and was read before submission. It remains a discussion draft; its code, hosted-run, and live-environment observations are attributed evidence, not new verification by this dispatch.
 - Follow-up evidence: the inventory's second version and Q-001 update, §§3.1–3.7, and read-only Git inspection at `6eec9635c17674b89b8519c642eb48b51dbd6479` (the recorded `origin/dev` snapshot). Entries 11–12 distinguish inspected workflow source from a successful execution; no hosted workflow was dispatched.
-- Latest follow-up: inventory §§3.2, 3.6–3.8 and board snapshot `updated_at=2026-09-13T13:48:04Z`. Entry 13 supersedes the earlier outstanding P03 root-cause investigation and records the supervisor-created, blocked Q-001 task. Entries 14–15 are static design review against the same product-source SHA above; the WIRE workflow is inspected separately at candidate `becf4ecdb32dac2a89e272db87243b1d4c38757f`. No product check or runtime was executed.
+- Prior technical follow-up: inventory §§3.2, 3.6–3.8 and board snapshot `updated_at=2026-09-13T13:48:04Z`. Entry 13 supersedes the earlier outstanding P03 root-cause investigation and records the supervisor-created, blocked Q-001 task. Entries 14–15 are static design review against the same product-source SHA above; the WIRE workflow is inspected separately at candidate `becf4ecdb32dac2a89e272db87243b1d4c38757f`. No product check or runtime was executed.
+- Current evidence: `ai-status.json.updated_at=2026-09-13T14:02:27Z`, `discussion_planning`, owner Codex; `SR-CALL-MULTIORDER-20260913.next` records user withdrawal and `SR-RELEASE-001` no longer depends on it. Entry 16 acknowledges the supervisor-synchronized question board/inventory and preserves the appended user-scope disposition; Entry 17 reviews inventory §§3.9–3.10 against source at `6eec9635c17674b89b8519c642eb48b51dbd6479`. This dispatch ran documentation checks only.
 
 ## Entries
 
@@ -328,6 +331,10 @@ Proposed review matrix for the SA/SD inventory:
 
 The user explicitly confirmed: 「一通電話可建幾張訂單，允許可以建多張訂單阿」. The product rule is **one call to multiple orders (1:N)**. This resolves the decision question above and supersedes V0082's one-order interpretation; the historical review remains preserved. The existing `PHASE1_OPEN_QUESTIONS.md` Q-001 record and `product-remediation-sa-sd-20260913.md` §3.7 now carry the answer and the pending schema/contracts/service/UI work. This documentation update does not resume execution or claim that the database has been migrated.
 
+#### Subsequent scope correction — see Entry 16
+
+The board snapshot at `2026-09-13T14:02:27Z` records a later user direction: first operational release uses one call / one order; multi-order implementation is withdrawn. The preceding 1:N decision and its follow-up proposals remain historical. Do not resume them or require their acceptance gates for this release. The supervisor has synchronized the question board and inventory with that later direction; Entry 16 records that disposition.
+
 ### Entry 10 — Keep P05's product decision and P06's environment evidence distinct
 
 #### Metadata
@@ -483,6 +490,8 @@ Proposed runner acceptance contract, for supervisor disposition before any scope
 
 ### Entry 14 — Make voice command admission and execution intent-specific
 
+Scope status: historical 1:N proposal, withdrawn from first-release work by the later board-recorded user direction in Entry 16. Independent C115 recording recovery remains in scope.
+
 #### Metadata
 
 - Reviewer lane: Codex
@@ -523,6 +532,8 @@ Proposed runner acceptance contract, for supervisor disposition before any scope
 
 ### Entry 15 — Specify recording recovery and the compatibility sequence for 1:N
 
+Scope status: historical 1:N proposal, withdrawn from first-release work by the later board-recorded user direction in Entry 16. Independent C115 recording recovery remains in scope.
+
 #### Metadata
 
 - Reviewer lane: Codex
@@ -561,9 +572,100 @@ Proposed runner acceptance contract, for supervisor disposition before any scope
 
 - Name the existing durable recovery operation and its completion/acknowledgement rule, then specify the migration compatibility and rollback matrix. These are technical SD outputs for the existing tasks, not a request to reconsider 1:N or permission to execute a migration.
 
+### Entry 16 — Apply the recorded launch-scope correction to Q-001
+
+#### Metadata
+
+- Reviewer lane: Codex
+- Target lane: Claude / all current reviewers; Entries 9, 11, 13–15; inventory §§3.5, 3.7–3.8, 3.10, 4
+- Round: 1, scope reconciliation
+- Date: 2026-09-13
+
+#### Claim Under Review
+
+- Earlier review pointers treated multi-order technical SD, migration and acceptance as required before release; the supervisor has now withdrawn that scope.
+
+#### Review Outcome
+
+- `confirm` the supervisor's scope correction; `reject` carrying the earlier multi-order release requirement forward. Preserve the earlier discussion as history.
+
+#### Evidence
+
+- `ai-status.json` (shared runtime machine truth), snapshot `updated_at=2026-09-13T14:02:27Z`, `tasks[id=SR-CALL-MULTIORDER-20260913].title`, `.next`, `.last_update`: the supervisor records “WITHDRAWN BY USER” and first operational release as one call / one order. The task remains `blocked` with empty write scopes because the board has no cancellation state; its latest note explicitly says it is neither a launch blocker nor completed implementation.
+- The same snapshot, `tasks[id=SR-RELEASE-001].depends_on` and `.next`: only the withdrawn multi-order dependency was removed; the previous QA dependencies and acceptance remain. `execution_mode=discussion_planning` and `discussion_loop.current_owner=Codex` are unchanged. This is the supervisor's recorded user direction, not a new user quotation supplied by this review.
+- [AI_COLLABORATION_GUIDE.md](../../../../AI_COLLABORATION_GUIDE.md), §§0.5, 2, 4–6: latest user direction controls scope; machine truth controls routing; the supervisor records transitions. A historical task's older acceptance or integration notes cannot reinstate withdrawn work.
+- [Question board](../../../../PHASE1_OPEN_QUESTIONS.md), Resolved Items / Q-001 and Contract & Schema Synchronisation Backlog; [inventory](product-remediation-sa-sd-20260913.md), §§3.5, 3.7–3.8, 3.10, 4; [baton log](baton-log.md), User launch-scope revision at `2026-09-13T14:04:55.309086+00:00`: the supervisor synchronized these shared records during review. They now retain at most one order per call, withdraw the multi-order proposal, apply recording recovery to the single linked order, and separate the withdrawn record from launch backlog. This supersedes the stale copies seen at initial inspection.
+
+#### Impact On Consensus
+
+| Earlier material                                                               | Current disposition                                                                                                                                                                                                                |
+| ------------------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Entry 9 resolution; Entry 11 Q-001 row                                         | Superseded for first-release scope. Do not repeat the cardinality question or present 1:N as the active answer.                                                                                                                    |
+| Entry 13 Q-001 registration; inventory §4 release prerequisite                 | Retain the registration as history. The task is withdrawn, not waiting for SD completion, credentials or expanded scopes; it is no longer a release prerequisite.                                                                  |
+| Entry 14; Entry 15 multi-order association, fan-out and migration requirements | Archive as unaccepted design for withdrawn work. No index removal, new-intent redesign, multi-order UI or compatibility migration is requested for this release.                                                                   |
+| Entry 12 and independent recording concerns in Entry 15; inventory §3.10       | Retain C115 recovery for the existing call/order relationship: durable pending work, verified recording evidence, restart, replay and lifecycle protection. Remove the dependency on multi-order fan-out from the active proposal. |
+
+- Suggested synthesis wording: “The first operational release uses one call / one order. Multi-order work is withdrawn and excluded from release prerequisites. Continue the existing booking, dispatch, driver, billing and required QA/live closure. Recording recovery and credential-expiry/alert acceptance remain required under their existing tasks.”
+- Carry inventory §§3.7–3.8's current-flow acceptance into the existing booking/callcenter QA: same request returns the original order; distinct/manual/voice races create at most one; cancel/complete do not release the call limit; rejection preserves the first order and recording; restart and cross-scope negatives remain covered. Preserve any conflicting historical data for investigation rather than deleting it. This is review of the recorded design, not a new implementation task.
+- Q-001 and the inventory are already synchronized. The withdrawn task's older `integration_notes` still describe resuming 1:N after SD; the supervisor should reconcile that stale note with its latest `next` field when publishing the disposition. Preserve history and the blocked-state explanation; do not mark implementation done, recreate the task or automatically resume it. This dispatch performs no board transition.
+
+#### Remaining Question
+
+- None on call cardinality for this release. Publish the synchronized records and reconcile the older task note through the supervisor; continue the remaining operational SA/SD review.
+
+### Entry 17 — Carry the new Academy and recording findings into bounded SD review
+
+#### Metadata
+
+- Reviewer lane: Codex
+- Target lane: Claude2 / Gemini / Gemini2 / Claude; Entries 7, 11–12; inventory §§3.9–3.10
+- Round: 1, technical synthesis
+- Date: 2026-09-13
+
+#### Claim Under Review
+
+- Academy should reuse one qualification derivation and synchronize its regulatory projection; C115 recording work should reuse the existing voice queue and complete only after verified durable effects.
+
+#### Review Outcome
+
+- `confirm` the inspected reuse direction and source findings; `refine` the remaining completion and authority boundaries. These proposals still need cross-lane disposition, not another product cardinality decision.
+
+#### Evidence
+
+- [PRD](../../../../phase1_prd_detailed_v1.md), §§9.6.2, 9.7.1, and [Service Contracts](../../../../phase1_service_contracts_v1.md), §§2.5, 3.3, 3.9: qualification guards and recording traceability remain separate domain responsibilities. [Acceptance scenarios](../../../../phase1_llm_dev_pack_extracted/phase1_llm_dev_pack/02_acceptance_scenarios_gherkin.md), SC-003–004 and SC-024–025, retain recording completion, expiry alerts and backend eligibility guards under one-call/one-order scope.
+- [AcademyService](../../../../apps/api/src/modules/driver-academy/academy.service.ts), `listRecords` / `recomputeRegulatoryProjection`, and [academy-domain](../../../../apps/api/src/modules/driver-academy/academy-domain.ts), `trainingRecord`, inspected at `6eec9635c17674b89b8519c642eb48b51dbd6479`: records and projection are currently derived from separate reads/times; projection writes cover passed/expired and return early with no required courses. Current-version filtering and expiry calculation already exist in `trainingRecord`. This confirms inventory §3.9's static finding; no database failure was reproduced.
+- [Academy identity decision](../../../04-uat/system-remediation-20260906/academy-identity-decision.md), §§2.2–2.3, and [inventory](product-remediation-sa-sd-20260913.md), §3.9: the existing regulatory write grant is narrow; proposed invalidation back to pending and treatment of existing waived records require explicit design disposition and scoped authority before workers change them.
+- [VoiceCommandRunnerService](../../../../apps/api/src/modules/voice-booking/voice-command-runner.service.ts), `enqueueWorkItem`, `runOnce`, `dispatchWorkItem`, `handleFinalizeRecording`, at the same SHA: enqueue accepts a transaction; claim/retry/completion use durable work and lease epochs. The built-in finalizer only returns metadata, after which `runOnce` completes the item. Unknown work types also return without domain work. This confirms the built-in handler gap; it does not establish which handlers or processes run in shared dev.
+
+#### Impact On Consensus
+
+| Boundary                             | Concrete SD output still needed                                                                                                                                                                                                                                                                       | Acceptance consequence                                                                                                                                                                                                                           |
+| ------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Academy derivation / projection      | One current-course/attempt snapshot and `asOf` for the existing calculation; define projection invalidation, waiver provenance and the narrow write-grant amendment. Specify how concurrent quiz/course updates prevent an older result overwriting a newer projection.                               | Same-input records/qualification/projection agree; course changes, expiry, empty required courses and existing waived data are explicit cases. Failed persistence cannot be reported as synchronized; assignment rechecks current qualification. |
+| Recording producer / completion      | Identify the trusted close-event or pending-recording source, enqueue transaction boundary, existing media/API result transport, verification step and acknowledged call/order persistence. Use the current single linked order after Entry 16.                                                       | Persist pending work, replace the process, recover the same work/resource IDs and verify recording/domain readback. A returned `handled=true` or a completed work row alone is insufficient.                                                     |
+| Recording leases / handler readiness | Name the actual deployment start/drain hook and supported handler types. Specify protection for domain writes and external finalization when a lease expires; completion-row fencing alone does not prove those effects are fenced. Unhandled recording work must not count as successful completion. | A stale worker cannot overwrite the replacement worker's result. Interruption after media finalization but before acknowledgement reuses the verified result; replay creates no duplicate business effects.                                      |
+| Credential expiry / alerts           | Keep a separate regulatory domain trigger and durable due-work/alert receipt path; the Academy authority supplies training results where applicable. Inventory §3.10 still lacks the concrete deployed entry and durable delivery path.                                                               | Catch-up works without user reads. Expiry blocks dispatch immediately; alert creation, durable delivery and recipient receipt remain distinguishable evidence.                                                                                   |
+
+- Carry these outputs into the existing WIRE and C115 design routes. The inspection identifies no need for a second eligibility algorithm, queue or delivery service. If accepted findings require product repair beyond QA scopes, the supervisor must record that repair and exact ownership before execution, as required by the collaboration guide §§0.5 and 5.
+- Entries 11–12 still govern clock-in persistence and runner coverage; Entry 13's P03 loading diagnosis stands independently of its withdrawn Q-001 route. Keep WIRE's full same-candidate 5 API/SQL + 5 browser cases, zero skips and CI, all three webhook acceptance keys, and the separate live receipt gates. No new test or hosted-run result is claimed.
+
+#### Remaining Question
+
+- Supervisor/capability-owner disposition of the four technical outputs above, including the concrete persistence and deployed trigger/transport choices. P05 remains on its existing product/device decision route. No implementation is dispatched by this synthesis.
+
 ## Reopened-cycle disposition
 
-- Codex review: submitted (Entries 5–15). The inventory's §3.5 records supervisor dispositions for Entries 5–10. Entries 11–12 refine runner/recovery gates; Entry 13 acknowledges the P03 diagnosis and registered Q-001 task; Entries 14–15 identify remaining voice state, recording recovery and migration SD. Cross-lane acceptance and final synthesis remain pending.
-- Claude's next planning action: disposition Entries 11–15, settle the identified technical SD outputs, retain P05's existing human-decision route, and route Q-001 refinements through the already blocked `SR-CALL-MULTIORDER-20260913`. Publish the supervisor-owned inventory and scoped canonical updates through the normal document flow; route further cited review using `ai-status.json.discussion_loop.review_order`.
-- Preserve the historical `consensus-packet.md` and `review-round-2.md` until that disposition. Their April convergence statements are not closure of this reopened cycle.
+- Codex review: submitted (Entries 5–17). Entries 16–17 reconcile the recorded launch-scope correction and review the newer Academy/C115 inventory. Earlier 1:N proposals are historical and withdrawn from first-release work; they are not outstanding release SD. Cross-lane acceptance and final synthesis remain pending.
+- Claude's next planning action: publish the synchronized Q-001/inventory records, reconcile the older withdrawn-task note, disposition remaining Entries 11–13 and 17 with Entry 16's scope correction, and route the current review order. Preserve P05's existing human-decision route and original WIRE/webhook/live gates. Publish the supervisor-owned inventory and accepted scoped canonical updates through the normal document flow.
+- Codex remains the recorded owner until the supervisor records a transition. Preserve the historical `consensus-packet.md` and `review-round-2.md`; April's convergence is not closure of this reopened cycle.
 - Continue `discussion_planning`; no task lifecycle transition, implementation commit, deployment, or product runtime was initiated by this review.
+
+## Latest user-scope disposition — single-order operational release
+
+Recorded by root from explicit user instructions, not an independent candidate approval.
+
+The user changed the decision to 「改回一通電話只能一張訂單」, explained the additional UI work, and directed 「先做到能夠上線營運」. This supersedes the same-day earlier 1:N decision. Keep at most one order per call and the existing UI/schema/intent fences; preserve idempotency, authorization and recording correctness.
+
+The multi-order expansion discussed in Entries 14–15 is withdrawn. Canonical commands removed `SR-CALL-MULTIORDER-20260913` from release dependencies and marked its retained record withdrawn-by-user with no write scopes; it is neither a launch blocker nor a completed implementation. No multi-order product change or migration had been executed. Recording durability concerns that apply to the existing single-order flow remain within the current defect analysis.
+
+Next synthesis should cover operational blockers in the existing product flow and required evidence, using the inventory's updated §§3.7–3.10. No implementation mode change, deployment or candidate approval is recorded by this disposition.
