@@ -383,7 +383,7 @@ async function seedC115PreRestart(db: DbPool): Promise<{
     orderId,
     status: "recording_pending",
     phone: "+886912345678",
-    sourceChannel: "carrier_voice",
+    sourceChannel: "voice_agent",
     createdAt: now.toISOString(),
   };
 
