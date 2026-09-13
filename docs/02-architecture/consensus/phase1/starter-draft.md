@@ -11,7 +11,7 @@ Rules:
 ## Current Round
 
 - Round: 1, reopened planning review on 2026-09-13
-- Current owner: Copilot
+- Current owner: Gemini
 - Supervisor: Claude
 - Active artifact: [review-round-1.md](review-round-1.md), Entries 5–25
 - Goal: reconcile historical synthesis with current release scope, complete cited WIRE/webhook SA/SD review, and verify lifecycle/recovery boundaries before supervisor-led synthesis

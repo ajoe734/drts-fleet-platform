@@ -154,3 +154,15 @@ This file is append-only. It records who owned the shared draft in each round an
 - Stopped only duplicate planning run `gemini2-20260913T145245Z-0ff91082`; files preserved. Machine baton Gemini2 → Copilot through the existing transaction/sync authority.
 - Source correction Entry 26 is required input to Copilot and Claude. This is routing and root review, not another lane's approval.
 - Product tasks/candidates and discussion_planning mode remain unchanged.
+
+## Final synthesis route after disabled review lane — 2026-09-13T15:01:45.125981+00:00
+
+- Operator Codex inspected effective config.local.json: Copilot max_tasks_per_agent_by_lane = 0. Pending event evt-20260913T145733Z-0f405329 reports lane worker limit with no running workers. This is configured unavailability, not a quota/auth claim; no Copilot review occurred.
+- Machine baton Copilot → Claude, the next existing lane. Entry 26 corrections and finite synthesis requirements are transferred without waiving them. Product tasks and planning mode are unchanged.
+- Local docs anchor c44c70cd8 exists. Public push was rejected by automatic approval review; local review can continue, but no worker may publish that content through an indirect route.
+
+## Finite launch packet review after Claude limit — 2026-09-13T15:09:28.654925+00:00
+
+- Operator Codex verified Claude run claude-20260913T150222Z-2589adec returned weekly limit and its unit was inactive/dead. No Claude review is claimed.
+- Root authored current consensus-packet.md B1–B9/C/D, preserving April history verbatim. Machine baton Claude → Gemini for one concrete source-correctness review; this is fallback review after the unavailable lanes, not another full general discussion cycle.
+- Product task/candidate states and planning mode remain unchanged. Public publication remains pending explicit authorization; local work continues.
