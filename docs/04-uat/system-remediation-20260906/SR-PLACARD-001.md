@@ -137,6 +137,17 @@ $ git diff --check
 (clean, exit code 0)
 ```
 
+### 4.6 origin/dev 同步與衝突解決驗證 (SR-ADMIN-ADAPTER-001)
+因 origin/dev 合入 `SR-ADMIN-ADAPTER-001` 引起 `platform-admin.service.ts` 衝突，透過 `git merge origin/dev` 整合雙方變更：
+- 保留 `SR-ADMIN-ADAPTER-001` 的轉接器憑證警示視窗邏輯、`PlatformAdapterRevisionConflictError` 與 durable write sidecar。
+- 保留 `SR-PLACARD-001` 的手寫 minimal PDF-1.4 渲染引擎、`DOCUMENT_ARTIFACT_STORE` 注入、`ensurePlacardArtifact` 與過期自我修復邏輯。
+- 衝突解決後全數通過所有驗收指令：
+  - `git diff --check` (0)
+  - `pnpm --filter @drts/api typecheck` (0)
+  - `pnpm --filter @drts/platform-admin-web typecheck` (0)
+  - `pnpm exec vitest run tests/unit/system-remediation/sr-placard-001/` (10/10 passed)
+  - `pnpm exec vitest run tests/unit/system-remediation/sr-admin-adapter-001/` (11/11 passed)
+
 ---
 
 ## 5. 未做的部分（明列，不冒充完成）
