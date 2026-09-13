@@ -1630,11 +1630,14 @@ describe("SR-RECORDING-RECOVERY-20260913: Recording Recovery and Controlled Repl
         updated_at: new Date(),
       } as any);
 
-      const runner = new VoiceCommandRunnerService({
-        repository: {
-          withTransaction: (fn: any) => fn(db),
-        },
-      } as any);
+      const runner = new VoiceCommandRunnerService(
+        {
+          repository: {
+            withTransaction: (fn: any) => fn(db),
+          },
+        } as any,
+        {} as any,
+      );
 
       await expect(
         runner.completeWorkItemWithDomainState(
