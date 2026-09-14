@@ -4,7 +4,7 @@
 - Title: API keys／Webhook簽章與故障恢复驗收
 - Status: `in_progress` → handoff pending
 - Owner: `Gemini2`
-- Reviewer: `Codex`
+- Reviewer: `Gemini`
 - Base SHA (`origin/dev`): `b3ab146dea842f44d5d907926047d6e636c88d97`
 - Candidate SHA: recorded at handoff time via `git rev-parse HEAD`
 - Worktree: `/home/lupin/workspace/drts-fleet-platform/.artifacts/worktrees/auto/gemini2-sr-qa-webhook-001`
