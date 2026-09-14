@@ -41,7 +41,7 @@ describe("SR-DRIVER-GAPS-20260911: Remediation Suite", () => {
         registry,
       );
 
-      const shift = shiftService.clockIn({
+      const shift = await shiftService.clockIn({
         driverId: "drv-demo-001",
         vehicleId: "veh-demo-001",
       });
@@ -64,12 +64,12 @@ describe("SR-DRIVER-GAPS-20260911: Remediation Suite", () => {
         reason: "Disciplinary suspension",
       });
 
-      expect(() =>
+      await expect(
         shiftService.clockIn({
           driverId: "drv-demo-001",
           vehicleId: "veh-demo-001",
         }),
-      ).toThrowError(
+      ).rejects.toThrowError(
         expect.objectContaining({
           status: 403,
           code: "DRIVER_AUTH_SUSPENDED",
@@ -90,12 +90,12 @@ describe("SR-DRIVER-GAPS-20260911: Remediation Suite", () => {
         professionalDriverLicenseExpiry: pastDate,
       });
 
-      expect(() =>
+      await expect(
         shiftService.clockIn({
           driverId: "drv-demo-001",
           vehicleId: "veh-demo-001",
         }),
-      ).toThrowError(
+      ).rejects.toThrowError(
         expect.objectContaining({
           status: 403,
           code: "DRIVER_CERT_INVALID",

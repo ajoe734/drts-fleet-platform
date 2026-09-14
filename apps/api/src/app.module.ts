@@ -27,6 +27,8 @@ import { CallcenterModule } from "./modules/callcenter/callcenter.module";
 import { CertificateSupportModule } from "./modules/certificate-support/certificate-support.module";
 import { ComplaintModule } from "./modules/complaint/complaint.module";
 import { ControlledDownloadModule } from "./modules/controlled-download/controlled-download.module";
+import { DriverAcademyModule } from "./modules/driver-academy/driver-academy.module";
+import { DriverLeaveModule } from "./modules/driver-leave/driver-leave.module";
 import { DriverProfileModule } from "./modules/driver-profile/driver-profile.module";
 import { DriverSosModule } from "./modules/driver-sos/driver-sos.module";
 import { DriverSettingsModule } from "./modules/driver-settings/driver-settings.module";
@@ -35,6 +37,7 @@ import { FleetPartnerModule } from "./modules/fleet-partner/fleet-partner.module
 import { FoundationModule } from "./modules/foundation/foundation.module";
 import { ForwarderModule } from "./modules/forwarder/forwarder.module";
 import { GeoModule } from "./modules/geo/geo.module";
+import { HostViewModule } from "./modules/host-view/host-view.module";
 import { IdentityModule } from "./modules/identity/identity.module";
 import { IncidentModule } from "./modules/incident/incident.module";
 import { MaintenanceModule } from "./modules/maintenance/maintenance.module";
@@ -109,6 +112,9 @@ import { CandidateShaMiddleware } from "./common/candidate-sha.middleware";
     MaintenanceModule,
     MultiTaxiModule,
     ShiftAttendanceModule,
+    DriverLeaveModule,
+    DriverAcademyModule,
+    HostViewModule,
     DriverSettingsModule,
     PlatformPresenceModule,
     PlatformEarningsModule,

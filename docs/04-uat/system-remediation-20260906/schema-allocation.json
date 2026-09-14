@@ -113,6 +113,12 @@
       "amended_at": "2026-09-11",
       "scope": "Appended allocations only; V0094-V0096 entries above are unchanged",
       "reason": "SR-RECOVERY-CONTRACTS-20260911 centralizes migration allocation for the remittance-proof, passenger-push-delivery and platform-adapter-registry contracts routed via support/unblock/SR-PROOF-001, SR-PUSH-001 and SR-ADMIN-ADAPTER-001 planning decisions. At inspected base (origin/dev, HEAD c0ec81b694fbd440d9c835129fcb062ba6b04340) the highest canonical infra migration is V0097__platform_presence_busy_and_heartbeat.sql (infra/migrations/); V0098-V0100 below are reserved by this task and were unclaimed by any other in_progress task's schema-allocation entry at allocation time. This task supplies typed contracts and migration allocation only; it does not write the infra/migrations/*.sql files themselves, matching the SR-CONTRACT-001 precedent above."
+    },
+    {
+      "amended_by_task_id": "SR-LAUNCH-SCHEMA-20260913",
+      "amended_at": "2026-09-13",
+      "scope": "Launch schema allocations V0101-V0103; pre-existing allocations and additional_allocations are preserved untouched",
+      "reason": "SR-LAUNCH-SCHEMA-20260913 allocates three collision-free migrations (V0101__voice_work_recovery_audit.sql, V0102__registry_expiry_processing.sql, V0103__notification_mail_outbox.sql) for Phase 1 launch remediation per consensus-packet.md (B4, B5, B7) and user confirmation on 2026-09-13. Updated per Codex review to establish finite append-only attempt event contract with duplicate protection in V0101, concrete trigger-enforced immutability boundary in V0102, and single persisted attempt authority in V0103 with redundant table removed, preserving all existing rows and data without duplicate authorities."
     }
   ],
   "additional_allocations": [
@@ -180,6 +186,87 @@
       ],
       "description": "Adapter registry 持久化、憑證到期非機密參照與伺服器端稽核 migration",
       "downstream_tasks": ["SR-ADMIN-ADAPTER-001", "SR-QA-NEWFEATURES-001"]
+    }
+  ],
+  "launch_allocations": [
+    {
+      "task_id": "SR-LAUNCH-SCHEMA-20260913",
+      "version": "V0101",
+      "migration_filename": "V0101__voice_work_recovery_audit.sql",
+      "domain": "voice_work_recovery_audit",
+      "target_schema": "voice",
+      "primary_tables": [
+        "voice.phase1_work_item_repair_audits",
+        "voice.phase1_work_item_attempt_audits"
+      ],
+      "referenced_tables": [
+        "voice.work_item"
+      ],
+      "table_invariants": [
+        "voice.phase1_work_item_repair_audits: repair_id uuid PRIMARY KEY DEFAULT gen_random_uuid(), work_id uuid NOT NULL REFERENCES voice.work_item(work_id), request_id varchar(255) NOT NULL, actor_id varchar(100) NOT NULL, reason text NOT NULL, expected_lease_epoch integer NOT NULL, previous_status varchar(20) NOT NULL, previous_attempt_count integer NOT NULL, previous_last_error text NULL, allocated_max_attempts integer NOT NULL DEFAULT 5, created_at timestamptz NOT NULL DEFAULT now(), UNIQUE (work_id, request_id) — captures durable ops repair authorization with request-level deduplication; never creates a parallel queue.",
+        "Repair transaction invariants: repair execution must verify in the same transaction that target work_item is currently status='failed' with lease_epoch=expected_lease_epoch; resets status to 'pending' with a fresh maxAttempts budget, preserving original work_id, payload_ref, dedupe_key, command_id and ordinary-call nullable voice_session_id.",
+        "voice.phase1_work_item_attempt_audits: attempt_audit_id uuid PRIMARY KEY DEFAULT gen_random_uuid(), work_id uuid NOT NULL REFERENCES voice.work_item(work_id), attempt_no integer NOT NULL, lease_epoch integer NOT NULL, attempt_stage varchar(20) NOT NULL CHECK (attempt_stage IN ('started', 'terminal')), outcome varchar(20) NOT NULL CHECK (outcome IN ('started', 'completed', 'failed', 'fenced')), error_message text NULL, started_at timestamptz NOT NULL DEFAULT now(), finished_at timestamptz NULL, created_at timestamptz NOT NULL DEFAULT now(), CONSTRAINT ck_phase1_work_item_attempt_stage_outcome CHECK ((attempt_stage = 'started' AND outcome = 'started') OR (attempt_stage = 'terminal' AND outcome IN ('completed', 'failed', 'fenced'))), CONSTRAINT uq_phase1_work_item_attempt_stage UNIQUE (work_id, lease_epoch, attempt_no, attempt_stage) — finite append-only attempt event contract with discrete started and terminal stages, duplicate protection, and crash-safe event preservation without UPDATE or DELETE.",
+        "Both audit tables are strictly append-only via voice._make_append_only(...) trigger: no UPDATE or DELETE is permitted by any application or repair code path.",
+        "Historical data invariant: existing historical work only preserves recorded attempt count and last_error; repair records do not fabricate non-existent historical attempt timestamps."
+      ],
+      "description": "Voice work_item 補跑稽核、嘗試紀錄與 lease-fenced 修復資料表 migration",
+      "downstream_tasks": [
+        "SR-QA-WEBHOOK-001",
+        "SR-QA-BOOKING-001"
+      ]
+    },
+    {
+      "task_id": "SR-LAUNCH-SCHEMA-20260913",
+      "version": "V0102",
+      "migration_filename": "V0102__registry_expiry_processing.sql",
+      "domain": "registry_expiry_processing",
+      "target_schema": "reg",
+      "primary_tables": [
+        "reg.phase1_registry_expiry_events",
+        "reg.phase1_registry_expiry_delivery_intents"
+      ],
+      "referenced_tables": [
+        "reg.phase1_registry_drivers",
+        "reg.phase1_registry_policies"
+      ],
+      "table_invariants": [
+        "reg.phase1_registry_expiry_events: event_id uuid PRIMARY KEY DEFAULT gen_random_uuid(), scope varchar(100) NOT NULL, entity_type varchar(50) NOT NULL CHECK (entity_type IN ('driver', 'policy')), entity_id varchar(100) NOT NULL, credential_type varchar(100) NOT NULL, source_fingerprint text NOT NULL, source_expiry_at timestamptz NULL, status varchar(50) NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'leased', 'completed', 'superseded', 'failed')), attempt integer NOT NULL DEFAULT 0, run_after timestamptz NOT NULL DEFAULT now(), lease_token integer NOT NULL DEFAULT 0, leased_until timestamptz NULL, worker_id text NULL, last_error text NULL, superseded_by_event_id uuid NULL REFERENCES reg.phase1_registry_expiry_events(event_id), superseded_at timestamptz NULL, created_at timestamptz NOT NULL DEFAULT now(), updated_at timestamptz NOT NULL DEFAULT now(), UNIQUE (source_fingerprint) — dedicated expiry tracking without duplicate driver or policy state.",
+        "Deterministic source fingerprint: SHA-256 over canonical UTF-8 JSON tuple guarantees exact source revision uniqueness: driver = ['credential-expiry/v1', scope, 'driver', driverId, sourceFieldName, Date.parse(expiry)]; policy = ['credential-expiry/v1', scope, 'policy', policyId, vehicleId, policyNo, insuranceType, Date.parse(startAt), Date.parse(endAt), status]. Updated_at and derived lifecycle statuses are excluded.",
+        "Strict row locking order: source row lock (FOR UPDATE on driver or policy) strictly precedes event row lock, ordered by entity ID in multi-row batches.",
+        "Superseded invariant: renewed credentials yield a distinct fingerprint; previous un-superseded events for the same entity and credential type are marked status='superseded' with superseded_at timestamp, preserving historical audit without overwriting original source validity.",
+        "reg.phase1_registry_expiry_delivery_intents: intent_id uuid PRIMARY KEY DEFAULT gen_random_uuid(), event_id uuid NOT NULL REFERENCES reg.phase1_registry_expiry_events(event_id), scope varchar(100) NOT NULL, idempotency_key text NOT NULL UNIQUE, tenant_id varchar(100) NOT NULL, recipient_email text NOT NULL, from_email text NOT NULL, subject text NOT NULL, body text NOT NULL, delivery_status varchar(50) NOT NULL DEFAULT 'pending' CHECK (delivery_status IN ('pending', 'enqueued', 'sent', 'failed', 'superseded')), outbox_delivery_id text NULL, last_error text NULL, enqueued_at timestamptz NULL, created_at timestamptz NOT NULL DEFAULT now(), updated_at timestamptz NOT NULL DEFAULT now() — immutable delivery intent with concrete trigger-enforced immutability boundary.",
+        "Concrete immutability boundary: BEFORE UPDATE trigger reg.enforce_phase1_expiry_delivery_intent_immutability() strictly forbids updates to frozen payload fields (intent_id, event_id, scope, idempotency_key, tenant_id, recipient_email, from_email, subject, body, created_at), while permitting mutable delivery bookkeeping transitions (delivery_status, outbox_delivery_id, last_error, enqueued_at, updated_at).",
+        "Idempotency key format: derived deterministically as ['credential-alert/v1', scope, eventId, recipientEmail] to prevent duplicate alert fan-out."
+      ],
+      "description": "Registry 證照與保險到期掃描處理、來源指紋去重、租約保護與不可變告警交付意圖 migration",
+      "downstream_tasks": [
+        "SR-QA-WEBHOOK-001",
+        "SR-LIVE-OPS-001"
+      ]
+    },
+    {
+      "task_id": "SR-LAUNCH-SCHEMA-20260913",
+      "version": "V0103",
+      "migration_filename": "V0103__notification_mail_outbox.sql",
+      "domain": "notification_mail_outbox",
+      "target_schema": "ops",
+      "primary_tables": [
+        "ops.phase1_notification_mail_deliveries",
+        "ops.phase1_notification_mail_outbox_lock"
+      ],
+      "referenced_tables": [],
+      "table_invariants": [
+        "ops.phase1_notification_mail_deliveries: delivery_id uuid PRIMARY KEY DEFAULT gen_random_uuid(), tenant_id varchar(100) NOT NULL, idempotency_key text NOT NULL, message_id text NOT NULL, payload_hash text NOT NULL, status varchar(20) NOT NULL DEFAULT 'queued' CHECK (status IN ('queued', 'sent', 'failed')), recipient_email text NOT NULL, from_email text NOT NULL, subject text NOT NULL, body text NOT NULL, queued_at timestamptz NOT NULL DEFAULT now(), sent_at timestamptz NULL, next_attempt_at timestamptz NULL, lease_attempt_id uuid NULL, lease_expires_at timestamptz NULL, attempts jsonb NOT NULL DEFAULT '[]'::jsonb, created_at timestamptz NOT NULL DEFAULT now(), updated_at timestamptz NOT NULL DEFAULT now(), CONSTRAINT uq_phase1_notification_mail_tenant_key UNIQUE (tenant_id, idempotency_key) — durable PostgreSQL storage for OutboxState compatible with MailOutbox.transaction callback.",
+        "Idempotency invariant: UNIQUE (tenant_id, idempotency_key) enforces that the same key within a tenant cannot produce duplicate delivery rows. Replaying identical payload returns existing receipt; differing payload throws conflict.",
+        "ops.phase1_notification_mail_outbox_lock: lock_key varchar(50) PRIMARY KEY DEFAULT 'mail_outbox_master', locked_by text NULL, locked_at timestamptz NULL — serialization lock row for multi-replica MailOutbox.transaction execution.",
+        "Single persisted attempt authority: ops.phase1_notification_mail_deliveries.attempts jsonb is the sole persisted attempt authority for each delivery, mapping 1:1 and losslessly to DeliveryReceipt.attempts: DeliveryAttempt[] (attemptId, attemptNo, startedAt, finishedAt, outcome, errorCode, retryable, acknowledgement). Reconciling uncertain-to-late-sent updates modifies this authority atomically inside MailOutbox.transaction without a redundant secondary attempts table or dual-write divergence.",
+        "Separation of provider acknowledgement and inbox arrival: provider acknowledgement is recorded as transport acceptance evidence, never converted to a false assertion of end-user inbox receipt. Late acknowledgements remain associated with their original attempt."
+      ],
+      "description": "PostgreSQL 版 Notification MailOutbox 持久儲存、租約重試、冪等交付與嘗試稽核 migration",
+      "downstream_tasks": [
+        "SR-QA-WEBHOOK-001",
+        "SR-LIVE-MAIL-001"
+      ]
     }
   ]
 }

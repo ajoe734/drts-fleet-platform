@@ -32,7 +32,13 @@ import {
   revokeDriverDeviceBinding,
 } from "@/lib/api-client";
 import { resetDriverAppToOnboarding } from "@/lib/driver-identity-routing";
-import { driverAuthStrings, driverSaveStatusLabels, driverStrings } from "@/lib/strings";
+import {
+  driverAuthStrings,
+  driverRouteTitles,
+  driverSaveStatusLabels,
+  driverStrings,
+  driverWorkforceStrings,
+} from "@/lib/strings";
 import {
   DEFAULT_PROFILE_VALUES,
   DEFAULT_SETTINGS_VALUES,
@@ -138,6 +144,7 @@ interface UtilityRowProps {
   detail?: string;
   tone?: "default" | "danger";
   onPress?: () => void;
+  testID?: string;
 }
 
 function UtilityRow({
@@ -145,6 +152,7 @@ function UtilityRow({
   detail,
   tone = "default",
   onPress,
+  testID,
 }: UtilityRowProps) {
   const content = (
     <View style={styles.utilityRow}>
@@ -174,7 +182,13 @@ function UtilityRow({
   }
 
   return (
-    <Pressable onPress={onPress} style={styles.utilityPressable}>
+    <Pressable
+      onPress={onPress}
+      style={styles.utilityPressable}
+      accessibilityRole="button"
+      accessibilityLabel={label}
+      testID={testID}
+    >
       {content}
     </Pressable>
   );
@@ -505,6 +519,27 @@ export default function SettingsScreen() {
           {saveError ? <ErrorBanner message={saveError} /> : null}
 
           <FormSection
+            title={driverWorkforceStrings.sectionTitle}
+            description={driverWorkforceStrings.sectionDescription}
+          >
+            <View style={styles.utilityCard}>
+              <UtilityRow
+                label={driverRouteTitles.leave}
+                detail={driverWorkforceStrings.leaveDetail}
+                testID="driver-settings-leave"
+                onPress={() => router.push("/leave")}
+              />
+              <View style={styles.utilityDivider} />
+              <UtilityRow
+                label={driverRouteTitles.academy}
+                detail={driverWorkforceStrings.academyDetail}
+                testID="driver-settings-academy"
+                onPress={() => router.push("/academy")}
+              />
+            </View>
+          </FormSection>
+
+          <FormSection
             title="司機身份"
             description="維持最新的聯絡方式以便派遣與行政聯繫。"
           >
@@ -653,7 +688,8 @@ export default function SettingsScreen() {
                     {driverAuthStrings.devices.deviceIdLabel}
                   </Text>
                   <Text style={styles.deviceFieldValue} selectable>
-                    {getProvisionedSession()?.deviceId ?? (driverId ? `device-${driverId}` : "unknown-device")}
+                    {getProvisionedSession()?.deviceId ??
+                      (driverId ? `device-${driverId}` : "unknown-device")}
                   </Text>
                 </View>
                 <View style={styles.deviceField}>

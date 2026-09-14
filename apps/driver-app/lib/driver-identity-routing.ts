@@ -13,6 +13,8 @@ export const PROTECTED_DRIVER_ROUTES = [
   "trip",
   "platform-presence",
   "settings",
+  "leave",
+  "academy",
   "earnings",
   "shift",
   "sos",

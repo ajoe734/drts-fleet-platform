@@ -517,7 +517,10 @@ describe("IAM Route Driver Operations Negative Matrix", () => {
 
       // Querying non-existent other driver
       try {
-        driverSettingsController.getSettings("drv-nonexistent", driver1Identity);
+        driverSettingsController.getSettings(
+          "drv-nonexistent",
+          driver1Identity,
+        );
       } catch (error: any) {
         expect(error.getStatus()).toBe(404);
         expect(error.code).toBe("DRIVER_SETTINGS_NOT_FOUND");
@@ -699,12 +702,12 @@ describe("IAM Route Driver Operations Negative Matrix", () => {
       }
     });
 
-    it("filters shifts and attendance queries to self only for drivers", () => {
+    it("filters shifts and attendance queries to self only for drivers", async () => {
       const { shiftAttendanceController, shiftAttendanceService } =
         createDriverFixture();
 
-      shiftAttendanceService.clockIn({ driverId: "drv-001" });
-      shiftAttendanceService.clockIn({ driverId: "drv-002" });
+      await shiftAttendanceService.clockIn({ driverId: "drv-001" });
+      await shiftAttendanceService.clockIn({ driverId: "drv-002" });
 
       const driver1Identity: BootstrapRequestIdentity = {
         authMode: "bootstrap_headers",
@@ -747,11 +750,13 @@ describe("IAM Route Driver Operations Negative Matrix", () => {
       expect(otherAttendance.data?.items).toHaveLength(0);
     });
 
-    it("denies driver viewing or abandoning another driver shift without existence leakage", () => {
+    it("denies driver viewing or abandoning another driver shift without existence leakage", async () => {
       const { shiftAttendanceController, shiftAttendanceService } =
         createDriverFixture();
 
-      const shift2 = shiftAttendanceService.clockIn({ driverId: "drv-002" });
+      const shift2 = await shiftAttendanceService.clockIn({
+        driverId: "drv-002",
+      });
 
       const driver1Identity: BootstrapRequestIdentity = {
         authMode: "bootstrap_headers",

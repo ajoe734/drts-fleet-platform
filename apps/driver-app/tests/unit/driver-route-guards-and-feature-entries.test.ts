@@ -318,15 +318,17 @@ describe("DRV-AUTH-002: Route guards and feature entries agree with server autho
   });
 
   describe("Acceptance 1 & 2: Single session authority and route protection per route", () => {
-    it("strictly allows only onboarding and protects all 10 driver screens", () => {
+    it("strictly allows only onboarding and protects all 12 driver screens", () => {
       expect(PUBLIC_DRIVER_ROUTES).toEqual(["onboarding"]);
-      expect(PROTECTED_DRIVER_ROUTES).toHaveLength(10);
+      expect(PROTECTED_DRIVER_ROUTES).toHaveLength(12);
       expect(PROTECTED_DRIVER_ROUTES).toEqual([
         "index",
         "jobs",
         "trip",
         "platform-presence",
         "settings",
+        "leave",
+        "academy",
         "earnings",
         "shift",
         "sos",

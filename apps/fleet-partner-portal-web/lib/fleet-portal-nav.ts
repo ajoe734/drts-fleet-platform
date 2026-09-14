@@ -97,3 +97,20 @@ export function buildFleetPortalNav(
     },
   ];
 }
+
+// Keep Host navigation separate from fleet administration, including nested
+// vehicle routes. Exact path boundaries prevent /hostname matching /host.
+export function isHostPortalPath(pathname: string): boolean {
+  return pathname === "/host" || pathname.startsWith("/host/");
+}
+
+export function buildHostPortalNav(locale: Locale): CanvasShellNavItem[] {
+  return [
+    {
+      key: "host-vehicles",
+      href: "/host/vehicles",
+      icon: "vehicles",
+      label: t("nav.hostVehicles", locale),
+    },
+  ];
+}

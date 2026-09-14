@@ -17,13 +17,9 @@ import {
   DriverLeaveForm,
   DriverLeaveList,
   DriverLeaveShiftImpact,
-  FX_DRV_LEAVE,
   type DriverConflictVariant,
 } from "@/components/leave";
-import {
-  PageHeader,
-  driverCanvasTheme,
-} from "@/components/canvas-primitives";
+import { PageHeader, driverCanvasTheme } from "@/components/canvas-primitives";
 
 type ActiveView = "list" | "create" | "detail" | "shift_impact" | "conflict";
 
@@ -38,7 +34,7 @@ export default function DriverLeaveScreen() {
   const [activeView, setActiveView] = useState<ActiveView>(
     params.view ?? "list",
   );
-  const [leaves, setLeaves] = useState<DriverLeaveRecord[]>(FX_DRV_LEAVE);
+  const [leaves, setLeaves] = useState<DriverLeaveRecord[]>([]);
   const [selectedLeave, setSelectedLeave] = useState<DriverLeaveRecord | null>(
     null,
   );
@@ -56,11 +52,12 @@ export default function DriverLeaveScreen() {
       const client = getDriverClient();
       const driverId = getDriverId();
       const res = await client.listDriverLeaves({ driverId });
-      if (res && Array.isArray(res.items)) {
-        setLeaves(res.items);
+      if (!res || !Array.isArray(res.items)) {
+        throw new Error("Invalid leave response");
       }
+      setLeaves(res.items);
     } catch (err) {
-      // In dev or offline, fallback to FX_DRV_LEAVE so screen remains reviewable
+      setLeaves([]);
       const message = formatDriverError(err, "無法取得請假資料");
       setError(message);
     } finally {
@@ -216,6 +213,13 @@ export default function DriverLeaveScreen() {
 
       {activeView === "shift_impact" && (
         <DriverLeaveShiftImpact
+          shifts={(selectedLeave?.impactedShiftIds ?? []).map((id) => ({
+            id,
+            zh: selectedLeave
+              ? `${new Date(selectedLeave.startTime).toLocaleString("zh-TW", { timeZone: "Asia/Taipei" })} – ${new Date(selectedLeave.endTime).toLocaleString("zh-TW", { timeZone: "Asia/Taipei" })}`
+              : "",
+            tagged: selectedLeave?.status === "approved",
+          }))}
           onBack={() => setActiveView("detail")}
           theme={driverCanvasTheme}
         />

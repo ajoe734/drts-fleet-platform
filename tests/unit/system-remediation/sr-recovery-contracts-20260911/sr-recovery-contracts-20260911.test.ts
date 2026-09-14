@@ -154,14 +154,26 @@ describe("SR-RECOVERY-CONTRACTS-20260911: Proof, Push-Receipt & Adapter-Registry
       }
     });
 
-    it("keeps the highest migration on disk within the reserved V0098-V0100 range (no unreserved version beyond the allocation)", () => {
+    it("keeps the highest migration on disk within the reserved allocation range (no unreserved version beyond the allocation)", () => {
       const migrationsDir = path.join(repoRoot, "infra/migrations");
+      const content = JSON.parse(fs.readFileSync(allocationPath, "utf8"));
+      const allAllocations = [
+        ...(content.allocations || []),
+        ...(content.additional_allocations || []),
+        ...(content.launch_allocations || []),
+      ];
+      const maxAllocated = Math.max(
+        100,
+        ...allAllocations.map((a: any) =>
+          parseInt(String(a.version).replace(/^V0*/, ""), 10),
+        ),
+      );
       const files = fs
         .readdirSync(migrationsDir)
         .filter((f) => /^V\d{4}__/.test(f));
       const versions = files.map((f) => parseInt(f.slice(1, 5), 10));
       const highest = Math.max(...versions);
-      expect(highest).toBeLessThanOrEqual(100);
+      expect(highest).toBeLessThanOrEqual(maxAllocated);
     });
   });
 

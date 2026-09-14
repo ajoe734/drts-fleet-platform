@@ -36,7 +36,15 @@ import {
   toApiSuccessEnvelope,
 } from "../../common/api-envelope";
 import { ContractOperationalViewService } from "./contract-operational-view.service";
-import { RegulatoryRegistryService } from "./regulatory-registry.service";
+import type {
+  DeliveryIntentStatus,
+  ExpiryEntityType,
+  ExpiryEventStatus,
+} from "./regulatory-registry.repository";
+import {
+  RegulatoryRegistryService,
+  type ReconcileExpiryCommand,
+} from "./regulatory-registry.service";
 
 @Controller("regulatory-registry")
 export class RegulatoryRegistryController {
@@ -546,6 +554,70 @@ export class RegulatoryRegistryController {
       registrationNo: credential.maskedDisplay,
     };
     return toApiSuccessEnvelope(projected, requestId);
+  }
+
+  @Post("credentials/reconcile-expiry")
+  async reconcileExpiry(
+    @Body() command?: ReconcileExpiryCommand,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    const result =
+      await this.regulatoryRegistryService.reconcileExpiredCredentials(command);
+    return toApiSuccessEnvelope(result, requestId);
+  }
+
+  @Get("expiry-backlog")
+  async getExpiryBacklog(
+    @Query("scope") scope?: string,
+    @Query("entityType") entityType?: ExpiryEntityType,
+    @Query("status") status?: ExpiryEventStatus,
+    @Query("limit") limitRaw?: string,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    const limit = limitRaw
+      ? this.parseFiniteQueryNumber(limitRaw, "limit")
+      : undefined;
+    const backlog = await this.regulatoryRegistryService.getExpiryBacklog({
+      ...(scope ? { scope } : {}),
+      ...(entityType ? { entityType } : {}),
+      ...(status ? { status } : {}),
+      ...(limit !== undefined ? { limit } : {}),
+    });
+    return toApiSuccessEnvelope(backlog, requestId);
+  }
+
+  @Get("expiry-receipts")
+  async getExpiryReceipts(
+    @Query("tenantId") tenantId?: string,
+    @Query("deliveryStatus") deliveryStatus?: DeliveryIntentStatus,
+    @Query("limit") limitRaw?: string,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    const limit = limitRaw
+      ? this.parseFiniteQueryNumber(limitRaw, "limit")
+      : undefined;
+    const receipts = await this.regulatoryRegistryService.getExpiryReceipts({
+      ...(tenantId ? { tenantId } : {}),
+      ...(deliveryStatus ? { deliveryStatus } : {}),
+      ...(limit !== undefined ? { limit } : {}),
+    });
+    return toApiSuccessEnvelope(receipts, requestId);
+  }
+
+  @Get("expiry-events/:eventId")
+  async getExpiryEvent(
+    @Param("eventId") eventId: string,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    const event = await this.regulatoryRegistryService.getExpiryEvent(eventId);
+    if (!event) {
+      throw new ApiRequestError(
+        HttpStatus.NOT_FOUND,
+        "CREDENTIAL_EXPIRY_EVENT_NOT_FOUND",
+        `Expiry event '${eventId}' not found.`,
+      );
+    }
+    return toApiSuccessEnvelope(event, requestId);
   }
 
   private parseFiniteQueryNumber(

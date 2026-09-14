@@ -266,6 +266,8 @@ describe("UV-EXEC-002 voice-booking runtime schema", () => {
       "legal_hold",
       "line_binding",
       "passenger_proof",
+      "phase1_work_item_attempt_audits",
+      "phase1_work_item_repair_audits",
       "rate_card",
       "recording_checkpoint",
       "resource_scope",
