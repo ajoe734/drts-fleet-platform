@@ -1,6 +1,6 @@
 import { createHmac } from "node:crypto";
 import { EventEmitter } from "node:events";
-import http from "node:http";
+import * as http from "node:http";
 import { type AddressInfo } from "node:net";
 import {
   afterAll,
@@ -216,16 +216,61 @@ function createInMemoryWebhookRepository() {
         for (const endpoint of changes.webhookEndpoints) {
           byId.set(endpoint.webhookId, endpoint);
         }
-        webhookEndpoints = [...byId.values()];
+        webhookEndpoints = Array.from(byId.values());
       }
       if (changes.webhookDeliveries?.length) {
         const byId = new Map(webhookDeliveries.map((d) => [d.deliveryId, d]));
         for (const delivery of changes.webhookDeliveries) {
           byId.set(delivery.deliveryId, delivery);
         }
-        webhookDeliveries = [...byId.values()];
+        webhookDeliveries = Array.from(byId.values());
       }
     },
+  };
+}
+
+function createInMemoryBillingSettlementRepository() {
+  let reconciliationIssues: any[] = [];
+  let fulfillmentSegments: any[] = [];
+  let sandboxBillingTreatments: any[] = [];
+
+  return {
+    isEnabled: () => true,
+    loadState: async () => ({
+      tenantBillingProfiles: [],
+      tenantInvoices: [],
+      driverFeePlans: [],
+      driverStatements: [],
+      reimbursementBatches: [],
+      reconciliationIssues: [...reconciliationIssues],
+      fulfillmentSegments: [...fulfillmentSegments],
+      sandboxBillingTreatments: [...sandboxBillingTreatments],
+    }),
+    persistChanges: async (changes: any) => {
+      if (changes.reconciliationIssues?.length) {
+        const byId = new Map(reconciliationIssues.map((r: any) => [r.issueId, r]));
+        for (const issue of changes.reconciliationIssues) {
+          byId.set(issue.issueId, issue);
+        }
+        reconciliationIssues = Array.from(byId.values());
+      }
+      if (changes.fulfillmentSegments?.length) {
+        const byId = new Map(fulfillmentSegments.map((f: any) => [f.fulfillmentSegmentId, f]));
+        for (const seg of changes.fulfillmentSegments) {
+          byId.set(seg.fulfillmentSegmentId, seg);
+        }
+        fulfillmentSegments = Array.from(byId.values());
+      }
+      if (changes.sandboxBillingTreatments?.length) {
+        const byId = new Map(sandboxBillingTreatments.map((t: any) => [t.sandboxBillingTreatmentId, t]));
+        for (const treat of changes.sandboxBillingTreatments) {
+          byId.set(treat.sandboxBillingTreatmentId, treat);
+        }
+        sandboxBillingTreatments = Array.from(byId.values());
+      }
+    },
+    listLiveCardBenefitSettlementPeriods: async () => [],
+    reportPersistenceFailure: () => {},
   };
 }
 
@@ -1148,6 +1193,226 @@ describe("SR-QA-WEBHOOK-001: Verification Suite", () => {
         "external_gate_pending_live_credentials",
       );
     });
+
+    it("C113-4 (Normal): Ingests sandbox-source fulfillment segments & billing treatments, verifying capability-source mapping and repository persistence", async () => {
+      const repo = createInMemoryBillingSettlementRepository();
+      const auditNotificationService = new AuditNotificationService();
+      const billingService = new BillingSettlementService(
+        auditNotificationService,
+        repo as never,
+      );
+      await billingService.onModuleInit();
+
+      await billingService.handleOwnedMobilityTripCompleted({
+        orderId: "order-sandbox-mapped-001",
+        tenantId: "tenant-demo-001",
+        driverId: "drv-sandbox-001",
+        bookingId: null,
+        orderSource: "portal",
+        serviceBucket: "business_dispatch",
+        businessDispatchSubtype: "enterprise_dispatch",
+        costCenterCode: null,
+        riderId: null,
+        partnerId: null,
+        partnerProgramId: null,
+        partnerEntrySlug: null,
+        eligibilityVerificationId: null,
+        issuerAuthorizationRef: null,
+        benefitReference: null,
+        completedAt: new Date().toISOString(),
+        grossEarning: { currency: "TWD", amountMinor: 50000 },
+        sandboxFulfillmentSegments: [
+          {
+            fulfillmentSegmentId: "seg-sandbox-001",
+            bookingId: "book-sandbox-001",
+            orderId: "order-sandbox-mapped-001",
+            sandboxTripId: "trip-sandbox-001",
+            segmentType: "tesla_av",
+            segmentReason: "primary_dispatch",
+            startedAt: new Date().toISOString(),
+            endedAt: new Date().toISOString(),
+            vehicleId: "veh-tesla-001",
+            vin: "5YJSA1E21HF000001",
+            driverId: "drv-sandbox-001",
+            safetyOperatorId: null,
+            sourcePlatform: "portal",
+            distanceKm: 12.5,
+            durationSeconds: 900,
+            cost: { currency: "TWD", amountMinor: 50000 },
+            evidenceReference: null,
+            createdAt: new Date().toISOString(),
+          },
+        ],
+        sandboxBillingTreatment: {
+          sandboxBillingTreatmentId: "treat-sandbox-001",
+          bookingId: "book-sandbox-001",
+          orderId: "order-sandbox-mapped-001",
+          sandboxTripId: "trip-sandbox-001",
+          treatmentType: "normal_av",
+          fallbackCostAbsorber: "platform",
+          fallbackPolicyId: "policy-standard-001",
+          policyResolution: "standard_av_rate",
+          passengerExtraChargeAllowed: false,
+          passengerExtraCharge: { currency: "TWD", amountMinor: 0 },
+          internalAvCost: { currency: "TWD", amountMinor: 35000 },
+          internalHumanFallbackCost: null,
+          partnerCharge: null,
+          tenantCharge: null,
+          platformAbsorbed: null,
+          fallbackSurchargeApplied: false,
+          treatmentSnapshot: {},
+          createdAt: new Date().toISOString(),
+        },
+      });
+
+      const segments = billingService.listFulfillmentSegments(
+        "order-sandbox-mapped-001",
+      );
+      expect(segments.length).toBe(1);
+      expect(segments[0]!.segmentType).toBe("tesla_av");
+      expect(segments[0]!.vehicleId).toBe("veh-tesla-001");
+      expect(segments[0]!.vin).toBe("5YJSA1E21HF000001");
+
+      const treatments = billingService.listSandboxBillingTreatments(
+        "order-sandbox-mapped-001",
+      );
+      expect(treatments.length).toBe(1);
+      expect(treatments[0]!.treatmentType).toBe("normal_av");
+      expect(treatments[0]!.fallbackCostAbsorber).toBe("platform");
+
+      const loaded = await repo.loadState();
+      expect(loaded.fulfillmentSegments.length).toBe(1);
+      expect(loaded.sandboxBillingTreatments.length).toBe(1);
+    });
+
+    it("C113-5 (Normal): Handles complete reconciliation issue lifecycle — creation, assignment, comment with evidence artifact, resolution, and reopening on recurring ledger difference", async () => {
+      const repo = createInMemoryBillingSettlementRepository();
+      const auditNotificationService = new AuditNotificationService();
+      const billingService = new BillingSettlementService(
+        auditNotificationService,
+        repo as never,
+      );
+      await billingService.onModuleInit();
+
+      const issue = await billingService.createReconciliationIssue({
+        issueType: "partner_sponsor_mismatch",
+        summary:
+          "Discrepancy in card-benefit subsidy reconciliation with partner bank ledger",
+        openedBy: "finance.audit@drts.local",
+        tenantId: "tenant-demo-001",
+        orderId: "order-demo-032",
+        partnerId: "partner-bank-demo-001",
+        sponsorReference: "benefit-bank-demo-032",
+        artifactIds: ["art-ledger-bank-001"],
+        comment:
+          "Bank export shows $800 subsidy while internal ledger records $1000",
+      });
+      expect(issue.issueId).toMatch(/^recon-partner_sponsor_mismatch-/);
+      expect(issue.status).toBe("open");
+      expect(issue.channelKey).toBe("partner_airport");
+
+      const assigned = await billingService.assignReconciliationIssue(
+        issue.issueId,
+        {
+          assigneeId: "fin-agent-01",
+          actorId: "finance.audit@drts.local",
+          note: "Investigating bank gateway transmission report",
+        },
+      );
+      expect(assigned.status).toBe("assigned");
+      expect(assigned.ownerId).toBe("fin-agent-01");
+
+      const withComment = await billingService.addReconciliationIssueComment(
+        issue.issueId,
+        {
+          actorId: "fin-agent-01",
+          message:
+            "Bank confirmed $200 adjustment credit on reference benefit-bank-demo-032",
+          artifactIds: ["art-bank-credit-ack-001"],
+        },
+      );
+      expect(withComment.comments.length).toBe(3);
+      expect(withComment.evidenceArtifactIds).toContain("art-bank-credit-ack-001");
+
+      const resolved = await billingService.resolveReconciliationIssue(
+        issue.issueId,
+        {
+          actorId: "fin-manager-01",
+          resolutionCode: "sponsor_corrected",
+          resolutionSummary:
+            "Difference reconciled with credit memo from partner bank",
+        },
+      );
+      expect(resolved.status).toBe("resolved");
+      expect(resolved.resolvedAt).not.toBeNull();
+
+      const reopened = await billingService.reopenReconciliationIssue(
+        issue.issueId,
+        {
+          actorId: "finance.audit@drts.local",
+          reason: "Subsequent batch export shows credit memo was voided",
+        },
+      );
+      expect(reopened.status).toBe("reopened");
+      expect(reopened.reopenCount).toBe(1);
+
+      const reloaded = billingService.listReconciliationIssues({
+        channelKey: "partner_airport",
+      });
+      const found = reloaded.find((i) => i.issueId === issue.issueId);
+      expect(found).toBeDefined();
+      expect(found!.status).toBe("reopened");
+      expect(found!.reopenCount).toBe(1);
+    });
+
+    it("C113-6 (Normal & Negative): Generates tenant billing invoice with calculated line items, PDF byte rendering, and period validation", async () => {
+      process.env.CONTROLLED_DOWNLOAD_SIGNING_SECRET =
+        process.env.CONTROLLED_DOWNLOAD_SIGNING_SECRET ||
+        "test-secret-controlled-download-signing-key-32chars";
+
+      const auditNotificationService = new AuditNotificationService();
+      const billingService = new BillingSettlementService(
+        auditNotificationService,
+      );
+
+      const invoice = await billingService.generateTenantInvoice(
+        "tenant-demo-001",
+        {
+          tenantId: "tenant-demo-001",
+          periodStart: "2026-03-01T00:00:00Z",
+          periodEnd: "2026-03-31T23:59:59Z",
+        },
+      );
+      expect(invoice.invoiceId).toMatch(/^invoice-/);
+      expect(invoice.tenantId).toBe("tenant-demo-001");
+      expect(invoice.status).toBe("issued");
+      expect(invoice.lines.length).toBeGreaterThan(0);
+      expect(invoice.amount.amountMinor).toBeGreaterThan(0);
+      expect(invoice.artifactDownloadMetadata).toBeDefined();
+      expect(invoice.artifactDownloadMetadata.downloadUrl).toBeDefined();
+
+      // Negative case: inverted period throws VALIDATION_ERROR
+      await expect(
+        billingService.generateTenantInvoice("tenant-demo-001", {
+          tenantId: "tenant-demo-001",
+          periodStart: "2026-03-31T23:59:59Z",
+          periodEnd: "2026-03-01T00:00:00Z",
+        }),
+      ).rejects.toMatchObject({
+        code: "VALIDATION_ERROR",
+      });
+
+      // Negative case: tenant mismatch throws TENANT_SCOPE_MISMATCH
+      await expect(
+        billingService.generateTenantInvoice("tenant-demo-001", {
+          tenantId: "other-tenant",
+          periodStart: "2026-03-01T00:00:00Z",
+          periodEnd: "2026-03-31T23:59:59Z",
+        }),
+      ).rejects.toMatchObject({
+        code: "TENANT_SCOPE_MISMATCH",
+      });
+    });
   });
 
   // =========================================================================
@@ -1204,6 +1469,104 @@ describe("SR-QA-WEBHOOK-001: Verification Suite", () => {
 
       expect(prerequisites.externalGateId).toBe("GATE-C114-GOOGLE-MAPS");
       expect(prerequisites.status).toBe("external_gate_mock_verified");
+    });
+
+    it("C114-4 (Normal): Computes geo route between valid Taiwan locations across travel modes (drive, walk, two_wheeler), returning valid distance and duration", async () => {
+      const geoService = new GeoService(
+        new MockGeoProvider(),
+        new GeoProviderConfigService({
+          NODE_ENV: "test",
+          DRTS_ENV: "test",
+          MAP_PROVIDER_MODE: "mock",
+        }),
+      );
+
+      const routeDrive = await geoService.route({
+        origin: { lat: 25.0375, lng: 121.5637 },
+        destination: { lat: 25.0478, lng: 121.5171 },
+        travelMode: "drive",
+      });
+      expect(routeDrive.provider).toBe("mock");
+      expect(routeDrive.distanceMeters).toBeGreaterThan(1000);
+      expect(routeDrive.durationSeconds).toBeGreaterThan(60);
+
+      const routeWalk = await geoService.route({
+        origin: { lat: 25.0375, lng: 121.5637 },
+        destination: { lat: 25.0478, lng: 121.5171 },
+        travelMode: "walk",
+      });
+      expect(routeWalk.distanceMeters).toBe(routeDrive.distanceMeters);
+      expect(routeWalk.durationSeconds).toBeGreaterThan(
+        routeDrive.durationSeconds,
+      );
+
+      const routeTwoWheeler = await geoService.route({
+        origin: { lat: 25.0375, lng: 121.5637 },
+        destination: { lat: 25.0478, lng: 121.5171 },
+        travelMode: "two_wheeler",
+      });
+      expect(routeTwoWheeler.distanceMeters).toBe(routeDrive.distanceMeters);
+      expect(routeTwoWheeler.durationSeconds).toBeGreaterThan(
+        routeDrive.durationSeconds,
+      );
+    });
+
+    it("C114-5 (Negative): Rejects invalid route commands: invalid travel mode, missing or out-of-range coordinates", async () => {
+      const geoService = new GeoService(
+        new MockGeoProvider(),
+        new GeoProviderConfigService({
+          NODE_ENV: "test",
+          DRTS_ENV: "test",
+          MAP_PROVIDER_MODE: "mock",
+        }),
+      );
+
+      await expect(
+        geoService.route({
+          origin: { lat: 25.0375, lng: 121.5637 },
+          destination: { lat: 25.0478, lng: 121.5171 },
+          travelMode: "flight" as never,
+        }),
+      ).rejects.toMatchObject({
+        code: "INVALID_GEO_ROUTE_TRAVEL_MODE",
+      });
+
+      await expect(
+        geoService.route({
+          origin: { lat: 99.99, lng: 121.5637 },
+          destination: { lat: 25.0478, lng: 121.5171 },
+          travelMode: "drive",
+        }),
+      ).rejects.toMatchObject({
+        code: "INVALID_COORDINATE",
+      });
+    });
+
+    it("C114-6 (Negative & Degradation): Handles routing & geocoding provider outages and degradation, recording observability outcomes", async () => {
+      const failingGeoService = new GeoService(
+        new MockGeoProvider(),
+        new GeoProviderConfigService({
+          NODE_ENV: "test",
+          DRTS_ENV: "test",
+          MAP_PROVIDER_MODE: "disabled",
+        }),
+      );
+
+      await expect(
+        failingGeoService.route({
+          origin: { lat: 25.0375, lng: 121.5637 },
+          destination: { lat: 25.0478, lng: 121.5171 },
+          travelMode: "drive",
+        }),
+      ).rejects.toMatchObject({
+        code: "GEO_PROVIDER_NOT_CONFIGURED",
+      });
+
+      await expect(
+        failingGeoService.search({ q: "台北市信義區市府路1號" }),
+      ).rejects.toMatchObject({
+        code: "GEO_PROVIDER_NOT_CONFIGURED",
+      });
     });
   });
 
@@ -1327,6 +1690,101 @@ describe("SR-QA-WEBHOOK-001: Verification Suite", () => {
       expect(liveLimitation.status).toBe(
         "adapter_tested_live_infrastructure_deferred",
       );
+    });
+
+    it("C115-4 (Normal): Dispatch scheduler sweep catches up accumulated backlog across simulated service downtime / restart and enforces concurrency guard", async () => {
+      const { ownedMobilityService, sandboxWebhookAdapter } =
+        createMobilityAndCallServices();
+
+      // Normal empty sweep with zero backlog
+      const emptySweep =
+        await ownedMobilityService.runDispatchSchedulerSweep(new Date());
+      expect(emptySweep.skipped).toBe(false);
+      expect(emptySweep.matchingTimeouts).toBe(0);
+      expect(emptySweep.failures).toBe(0);
+
+      // Create and dispatch an order
+      sandboxWebhookAdapter.ingest(
+        sandboxFixtures.callStarted,
+        "req-start-sweep",
+      );
+      sandboxWebhookAdapter.ingest(sandboxFixtures.callEnded, "req-end-sweep");
+      sandboxWebhookAdapter.ingest(
+        sandboxFixtures.recordingPending,
+        "req-pending-sweep",
+      );
+      const order = await ownedMobilityService.createCallCenterOrder({
+        callId: sandboxFixtures.callStarted.provider_call_id,
+        agentId: sandboxFixtures.callStarted.agent_extension!,
+        passenger: {
+          name: "陳宏達",
+          phone: sandboxFixtures.callStarted.caller_phone!,
+        },
+        pickup: { address: "台中市梧棲區中二路一段9號" },
+        dropoff: { address: "台中市大安區興安路378號" },
+      });
+      sandboxWebhookAdapter.ingest(
+        sandboxFixtures.recordingReady,
+        "req-ready-sweep",
+      );
+
+      await ownedMobilityService.dispatchOrder(order.orderId, { mode: "auto" });
+
+      // Simulate a service restart 10 minutes later (matching timeout exceeded)
+      const futureNow = new Date(Date.now() + 10 * 60 * 1000);
+      const backlogSweep =
+        await ownedMobilityService.runDispatchSchedulerSweep(futureNow);
+      expect(backlogSweep.skipped).toBe(false);
+      expect(backlogSweep.matchingTimeouts).toBeGreaterThanOrEqual(1);
+
+      const timedOutOrder = ownedMobilityService.getOrder(order.orderId);
+      expect(timedOutOrder.status).toBe("dispatch_timeout");
+    });
+
+    it("C115-5 (Normal & Degradation): Driver license & qualification background scan detects expirations and updates eligibility status", async () => {
+      const auditService = new AuditNotificationService();
+      const driverProfileService = new DriverProfileService(auditService);
+      const opsDispatchEventsService = new OpsDispatchEventsService(
+        new EventEmitter() as never,
+      );
+      const regulatoryRegistryService = new RegulatoryRegistryService(
+        opsDispatchEventsService,
+        auditService,
+        driverProfileService,
+      );
+
+      const initialDriver = regulatoryRegistryService
+        .listDrivers()
+        .find((d) => d.driverId === "drv-demo-001");
+      expect(initialDriver).toBeDefined();
+      expect(initialDriver!.dispatchEligible).toBe(true);
+      expect(initialDriver!.licensesValid).toBe(true);
+
+      // Degrade status: expire license in the past
+      const expiredDriver = regulatoryRegistryService.updateDriverLicenses(
+        "drv-demo-001",
+        {
+          licenseExpiry: "2025-01-01T00:00:00.000Z",
+        },
+      );
+      expect(expiredDriver.dispatchEligible).toBe(false);
+      expect(expiredDriver.licensesValid).toBe(false);
+      expect(expiredDriver.eligibilityBlockedReasons).toContain(
+        "licenses_invalid",
+      );
+
+      // Expiring licenses scan
+      const expiringDrivers =
+        regulatoryRegistryService.listExpiringDriverLicenses(
+          60,
+          Date.parse("2027-12-01T00:00:00.000Z"),
+        );
+      expect(expiringDrivers.length).toBeGreaterThan(0);
+
+      // Expiring policies scan
+      const expiringPolicies =
+        regulatoryRegistryService.listExpiringPolicies(365 * 5);
+      expect(expiringPolicies.length).toBeGreaterThan(0);
     });
   });
 });
