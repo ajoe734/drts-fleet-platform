@@ -4,7 +4,6 @@ import { Injectable, Optional } from "@nestjs/common";
 import type { CreateStepUpProofCommand, StepUpProof } from "@drts/contracts";
 
 import { ApiRequestError } from "../api-envelope";
-import { detectAuthEnvironment } from "../../config/auth-startup-config";
 import { SecurityEventsService } from "../../modules/security-events/security-events.service";
 import { AUTH_STEP_UP_REFERENCE_HEADER } from "./auth.constants";
 import type {
@@ -15,23 +14,9 @@ import {
   resolveRouteStepUpPolicy,
   resolveStepUpActionPolicy,
 } from "./step-up.policy";
+import { hasTrustedMfa } from "./trusted-mfa.policy";
 
 const MAX_STORED_PROOFS = 1000;
-
-const STRICT_TRUSTED_AMR = new Set([
-  "mfa",
-  "otp",
-  "totp",
-  "push",
-  "webauthn",
-  "fido2",
-  "verified_iap_workforce",
-]);
-
-const NON_STRICT_TRUSTED_AMR = new Set([
-  ...STRICT_TRUSTED_AMR,
-  "tenant_bootstrap_fixture",
-]);
 
 interface StoredStepUpProof {
   stepUpReference: string;
@@ -96,11 +81,6 @@ function extractStepUpReference(
   );
 }
 
-function isStrictAuthEnvironment(): boolean {
-  const environment = detectAuthEnvironment(process.env);
-  return environment === "production" || environment === "staging";
-}
-
 @Injectable()
 export class StepUpProofService {
   private readonly storedProofs = new Map<string, StoredStepUpProof>();
@@ -135,7 +115,7 @@ export class StepUpProofService {
     }
 
     const authTimeMs = parseTimestamp(identity.authTime);
-    if (authTimeMs === null || !this.hasTrustedMfa(identity)) {
+    if (authTimeMs === null || !hasTrustedMfa(identity)) {
       this.recordEvent("step_up.denied", identity, {
         actionId: policy.actionId,
         outcome: "denied",
@@ -383,20 +363,6 @@ export class StepUpProofService {
       command.method!,
       command.path!,
       identity.realm,
-    );
-  }
-
-  private hasTrustedMfa(identity: BootstrapRequestIdentity) {
-    const normalizedAcr = identity.acr?.trim().toLowerCase() ?? null;
-    if (normalizedAcr === "aal2" || normalizedAcr === "aal3") {
-      return true;
-    }
-
-    const trustedAmr = isStrictAuthEnvironment()
-      ? STRICT_TRUSTED_AMR
-      : NON_STRICT_TRUSTED_AMR;
-    return (identity.amr ?? []).some((method) =>
-      trustedAmr.has(method.trim().toLowerCase()),
     );
   }
 
