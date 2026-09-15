@@ -37,6 +37,43 @@ function target(surface: { id: string; urlEnv: string; path: string }) {
   return `${baseUrl}${surface.path}`;
 }
 
+function getIdentityToken(surface: {
+  id: string;
+  urlEnv?: string;
+}): string | undefined {
+  if (
+    surface.id === "tenant-console-web" ||
+    surface.urlEnv === "DRTS_OPERATIONAL_TENANT_CONSOLE_URL" ||
+    surface.urlEnv === "DRTS_DEV_TENANT_CONSOLE_BASE_URL"
+  ) {
+    return (
+      process.env.DRTS_OPERATIONAL_TENANT_CONSOLE_ID_TOKEN ||
+      process.env.DRTS_DEV_TENANT_CONSOLE_ID_TOKEN
+    );
+  }
+  if (
+    surface.id === "bank-console-web" ||
+    surface.urlEnv === "DRTS_OPERATIONAL_BANK_CONSOLE_URL" ||
+    surface.urlEnv === "DRTS_DEV_BANK_CONSOLE_BASE_URL"
+  ) {
+    return (
+      process.env.DRTS_OPERATIONAL_BANK_CONSOLE_ID_TOKEN ||
+      process.env.DRTS_DEV_BANK_CONSOLE_ID_TOKEN
+    );
+  }
+  if (
+    surface.id === "enterprise-dispatch-web" ||
+    surface.urlEnv === "DRTS_OPERATIONAL_ENTERPRISE_DISPATCH_URL" ||
+    surface.urlEnv === "DRTS_DEV_ENTERPRISE_DISPATCH_BASE_URL"
+  ) {
+    return (
+      process.env.DRTS_OPERATIONAL_ENTERPRISE_DISPATCH_ID_TOKEN ||
+      process.env.DRTS_DEV_ENTERPRISE_DISPATCH_ID_TOKEN
+    );
+  }
+  return undefined;
+}
+
 test("candidate manifest is executable and candidate-bound", () => {
   expect(manifest.schemaVersion).toBe(1);
   expect(manifest.taskId).toBe("S1F-REL-001-PREDEPLOY");
@@ -49,11 +86,28 @@ for (const surface of manifest.activeSurfaces) {
   test(`${surface.id} serves the immutable candidate through HTTP and browser`, async ({
     page,
     request,
+    context,
   }) => {
     const url = target(surface);
-    const http = await request.get(url, { failOnStatusCode: false });
+    const idToken = getIdentityToken(surface);
+
+    const httpHeaders: Record<string, string> = {};
+    if (idToken) {
+      httpHeaders["Authorization"] = `Bearer ${idToken}`;
+    }
+
+    const http = await request.get(url, {
+      failOnStatusCode: false,
+      ...(idToken ? { headers: httpHeaders } : {}),
+    });
     expect(http.status()).toBe(surface.expectedStatus);
     expect(http.headers()[manifest.responseHeader]).toBe(manifest.candidateSha);
+
+    if (idToken) {
+      await context.setExtraHTTPHeaders({
+        Authorization: `Bearer ${idToken}`,
+      });
+    }
 
     const browserResponse = await page.goto(url, {
       waitUntil: "domcontentloaded",
@@ -72,6 +126,7 @@ for (const surface of manifest.activeSurfaces) {
 
 test("bank console demo login remains on the deployed public origin", async ({
   page,
+  context,
 }) => {
   const baseUrl = process.env.DRTS_OPERATIONAL_BANK_CONSOLE_URL;
   if (!baseUrl)
@@ -79,6 +134,16 @@ test("bank console demo login remains on the deployed public origin", async ({
       "DRTS_OPERATIONAL_BANK_CONSOLE_URL is required for Bank Console acceptance.",
     );
   const expectedOrigin = new URL(baseUrl).origin;
+
+  const idToken = getIdentityToken({
+    id: "bank-console-web",
+    urlEnv: "DRTS_OPERATIONAL_BANK_CONSOLE_URL",
+  });
+  if (idToken) {
+    await context.setExtraHTTPHeaders({
+      Authorization: `Bearer ${idToken}`,
+    });
+  }
 
   await page.goto(`${expectedOrigin}/login?bank=acme&locale=zh&signedOut=1`, {
     waitUntil: "domcontentloaded",
