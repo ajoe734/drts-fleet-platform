@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { AuditNotificationService } from "../../src/modules/audit-notification/audit-notification.service";
 import { CallcenterService } from "../../src/modules/callcenter/callcenter.service";
@@ -71,6 +71,15 @@ function createService(options?: {
 }
 
 describe("OwnedMobilityService compliance gates", () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-04-29T00:00:00.000Z"));
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
   it("marks phone orders without recording linkage as dispatch-blocked", () => {
     const service = createService({ callSessionRecordingId: null });
 

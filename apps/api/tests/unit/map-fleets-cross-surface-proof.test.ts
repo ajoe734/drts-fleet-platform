@@ -2,7 +2,7 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import { resolve } from "node:path";
 
 import { EventEmitter2 } from "@nestjs/event-emitter";
-import { expect, it } from "vitest";
+import { afterEach, beforeEach, expect, it, vi } from "vitest";
 
 import type {
   AuditLogRecord,
@@ -181,6 +181,15 @@ function captureDispatchRefusal(
       .filter((job) => job.orderId === orderId),
   };
 }
+
+beforeEach(() => {
+  vi.useFakeTimers();
+  vi.setSystemTime(new Date("2026-07-11T02:38:29.000Z"));
+});
+
+afterEach(() => {
+  vi.useRealTimers();
+});
 
 it("writes cross-surface persisted anti-bypass proof for fleets closeout", async () => {
   const tenantPartnerService = new TenantPartnerService(
