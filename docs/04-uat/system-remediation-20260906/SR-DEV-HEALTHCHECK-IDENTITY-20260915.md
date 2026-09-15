@@ -44,63 +44,64 @@ The following constraints are strictly upheld:
 
 ## 3. Remediation Architecture
 
-### 3.1 Authenticated Health Check Probing (`curl_ready_auth`)
+### 3.1 Authenticated Health Check Probing (`curl_ready_auth` & WIF Auth Actions)
 
-In `.github/workflows/deploy-dev.yml`, an authenticated probe function `curl_ready_auth` is introduced for private Cloud Run services:
+In `.github/workflows/deploy-dev.yml`, dedicated steps mint Google Cloud identity tokens via `google-github-actions/auth@v2` for each private Cloud Run service audience before invoking `Verify dev endpoints`:
+
+```yaml
+- name: Mint Tenant Console ID token
+  id: auth_tenant_console
+  uses: google-github-actions/auth@v2
+  with:
+    workload_identity_provider: ${{ env.DEV_WIF_PROVIDER || env.WIF_PROVIDER }}
+    service_account: ${{ env.DEV_WIF_SERVICE_ACCOUNT || env.WIF_SERVICE_ACCOUNT }}
+    token_format: id_token
+    id_token_audience: ${{ steps.urls.outputs.tenant_console }}
+    id_token_include_email: true
+
+- name: Mint Bank Console ID token
+  id: auth_bank_console
+  uses: google-github-actions/auth@v2
+  with:
+    workload_identity_provider: ${{ env.DEV_WIF_PROVIDER || env.WIF_PROVIDER }}
+    service_account: ${{ env.DEV_WIF_SERVICE_ACCOUNT || env.WIF_SERVICE_ACCOUNT }}
+    token_format: id_token
+    id_token_audience: ${{ steps.urls.outputs.bank_console }}
+    id_token_include_email: true
+
+- name: Mint Enterprise Dispatch ID token
+  id: auth_enterprise_dispatch
+  uses: google-github-actions/auth@v2
+  with:
+    workload_identity_provider: ${{ env.DEV_WIF_PROVIDER || env.WIF_PROVIDER }}
+    service_account: ${{ env.DEV_WIF_SERVICE_ACCOUNT || env.WIF_SERVICE_ACCOUNT }}
+    token_format: id_token
+    id_token_audience: ${{ steps.urls.outputs.enterprise_dispatch }}
+    id_token_include_email: true
+```
+
+The minted identity tokens are supplied to `Verify dev endpoints` via environment variables (`TENANT_CONSOLE_ID_TOKEN`, `BANK_CONSOLE_ID_TOKEN`, `ENTERPRISE_DISPATCH_ID_TOKEN`), and consumed by `curl_ready_auth`:
 
 ```bash
-declare -A ID_TOKENS=()
-
-get_identity_token() {
-  local audience="$1"
-  if [[ -n "${ID_TOKENS[$audience]:-}" ]]; then
-    printf '%s' "${ID_TOKENS[$audience]}"
-    return 0
-  fi
-
-  local token=""
-  # Attempt 1: gcloud auth print-identity-token (standard SDK path)
-  token="$(gcloud auth print-identity-token --audiences="${audience}" 2>/dev/null || true)"
-
-  # Attempt 2: IAM credentials API generateIdToken via WIF access token
-  if [[ -z "${token}" ]]; then
-    local sa="${DEV_WIF_SERVICE_ACCOUNT:-${WIF_SERVICE_ACCOUNT:-}}"
-    if [[ -z "${sa}" ]]; then
-      sa="$(gcloud config get-value account 2>/dev/null || true)"
-    fi
-    if [[ -n "${sa}" ]]; then
-      local access_token
-      access_token="$(gcloud auth print-access-token 2>/dev/null || true)"
-      if [[ -n "${access_token}" ]]; then
-        local resp
-        resp="$(curl --silent --show-error --fail \
-          --request POST \
-          --header "Authorization: Bearer ${access_token}" \
-          --header "Content-Type: application/json" \
-          "https://iamcredentials.googleapis.com/v1/projects/-/serviceAccounts/${sa}:generateIdToken" \
-          --data "{\"audience\": \"${audience}\", \"includeEmail\": true}" 2>/dev/null || true)"
-        token="$(echo "${resp}" | python3 -c "import sys, json; print(json.load(sys.stdin).get('token', ''))" 2>/dev/null || true)"
-      fi
-    fi
-  fi
-
-  if [[ -z "${token}" ]]; then
-    echo "::error::Failed to obtain identity token for audience ${audience}" >&2
-    return 1
-  fi
-
-  echo "::add-mask::${token}"
-  ID_TOKENS["$audience"]="$token"
-  printf '%s' "${token}"
-  return 0
-}
-
 curl_ready_auth() {
   local target_url="$1"
   shift
-  local audience="$(echo "$target_url" | sed -E 's#^(https?://[^/]+).*#\1#')"
-  local id_token
-  id_token="$(get_identity_token "$audience")"
+  local id_token=""
+  case "$target_url" in
+    *"${{ steps.urls.outputs.tenant_console }}"*)
+      id_token="${TENANT_CONSOLE_ID_TOKEN:-}"
+      ;;
+    *"${{ steps.urls.outputs.bank_console }}"*)
+      id_token="${BANK_CONSOLE_ID_TOKEN:-}"
+      ;;
+    *"${{ steps.urls.outputs.enterprise_dispatch }}"*)
+      id_token="${ENTERPRISE_DISPATCH_ID_TOKEN:-}"
+      ;;
+  esac
+  if [[ -z "${id_token}" ]]; then
+    echo "::error::Failed to obtain identity token for target ${target_url}" >&2
+    return 1
+  fi
   curl --fail --silent --show-error --location-trusted \
     --retry 10 --retry-all-errors --retry-delay 3 --max-time 30 \
     --header "Authorization: Bearer ${id_token}" \
@@ -109,10 +110,9 @@ curl_ready_auth() {
 ```
 
 Key features of this design:
-- **Audience Derivation**: Extracts the Cloud Run origin (`https://<service-url>`), which matches Cloud Run's expected OIDC audience claim.
-- **Dual Identity Token Acquisition**: Attempts native `gcloud auth print-identity-token --audiences` first, falling back to Google Cloud IAM Credentials REST API (`generateIdToken`) using the active WIF access token.
-- **Log Masking**: Automatically registers tokens with GitHub Actions secret masking (`::add-mask::`).
-- **In-Memory Caching**: Caches minted identity tokens by audience in `ID_TOKENS`, preventing redundant network calls across multiple probes to the same service.
+- **Native GitHub Actions WIF Token Minting**: Directly leverages `google-github-actions/auth@v2` with `token_format: id_token` and `id_token_audience: <url>`, which reliably exchanges GitHub OIDC tokens for Google identity tokens without depending on external account gcloud CLI plugins or ad-hoc curl scripts.
+- **Strict Error Handling**: Any failure in minting or resolving an identity token fails closed.
+- **Log Masking**: Managed automatically by `google-github-actions/auth@v2`.
 - **`--location-trusted` Redirect Support**: Ensures the `Authorization: Bearer <id_token>` header is preserved across HTTP redirects (e.g. from `/` to `/login` within the private Cloud Run service).
 
 ### 3.2 Resolution of `/healthz` 404 & Root Path Strategy
