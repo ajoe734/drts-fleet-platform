@@ -1,6 +1,6 @@
 # SR-RELEASE-001 — 整合候選與全角色本機／dev可重跑閉環
 
-- Status: `in_progress` → handoff pending review
+- Status: `in_progress` → CI typecheck fix applied → handoff pending review (round 2)
 - Owner: `Claude2`
 - Reviewer: `Claude`
 - Planning Ref: `docs/04-uat/system-remediation-20260906/source/capabilities.json`
@@ -44,6 +44,16 @@
      `ai-status.sh assign` 建立追蹤任務
      `SR-QA-BOOKING-001-FIX-QUOTA-RELEASE-STALE-GAP-ASSERTIONS`（owner `Codex2`、
      reviewer `Codex`），未直接修改該檔案（不在本任務 write_scopes 內）。
+8. Candidate `91999fee3850`（PR #2033）review 時，reviewer 回報 CI 的
+   `Product smoke acceptance` job 於根層級 `pnpm run typecheck:root` fail：新測試對
+   `assignDispatch()`（回傳型別為 `MaybePromise<DispatchAssignmentResult>`）未 `await`
+   就直接讀 `.taskId`，共 7 處 `TS2339`；本機先前只跑了 `apps/api` 範圍的 `tsc`，未涵蓋
+   repo-root `tests/**/*.ts`，故未捕捉到。已在測試中補上 `await`（未改動
+   `assignDispatch()` 本身或任何業務碼），重跑 `pnpm run typecheck:root` 確認此檔案的 7
+   處錯誤全部消失，並重跑測試（1/1 passing）、`apps/api` 範圍 `tsc`、ESLint、Prettier、
+   `git diff --check` 全部通過。細節與根層級 typecheck 在本 worktree 因共用 `node_modules`
+   未同步（`@drts/api-client`／`@drts/ui-tokens` workspace symlink 缺失，與本任務無關的
+   環境落差）而整體仍非零 exit 的誠實揭露，見 `closed-loop-evidence.md` §7.1。
 
 ## 結論（誠實揭露，非全系統 done）
 

@@ -299,7 +299,7 @@ describe("SR-RELEASE-001 / C118: same-order cross-role closed loop", () => {
         { mode: "auto" },
         "req-release-001-dispatch",
       );
-      const assignment = ownedMobilityService.assignDispatch(
+      const assignment = await ownedMobilityService.assignDispatch(
         {
           dispatchJobId: dispatchJob.dispatchJobId,
           vehicleId: "vehicle-release-001",
