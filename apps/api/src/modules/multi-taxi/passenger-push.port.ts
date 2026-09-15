@@ -84,3 +84,19 @@ export class PassengerPushProviderError extends Error {
     this.name = "PassengerPushProviderError";
   }
 }
+
+/**
+ * No active Web Push subscription is on file for this passenger (never
+ * subscribed, or the only subscription on file was revoked). Kept distinct
+ * from `PassengerPushDeviceRevokedError` — which the device-lifecycle checks
+ * inside `PassengerPushAdapter` throw for a subscription that *was* resolved
+ * but is expired/revoked — because a transport can also reach this state
+ * from `resolveDevice` returning `null`, before any device-lifecycle check
+ * runs at all.
+ */
+export class PassengerPushNoSubscriptionError extends Error {
+  constructor(message = "No active push subscription for this passenger") {
+    super(message);
+    this.name = "PassengerPushNoSubscriptionError";
+  }
+}
