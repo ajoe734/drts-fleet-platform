@@ -44,6 +44,7 @@ import { extractBootstrapRequestIdentity } from "../../common/auth/auth.extracto
 import type { AuthBootstrapHeaders, AuthRealm } from "../../common/auth/auth.types";
 import { OPEN_ROUTE_RATE_LIMIT } from "../../common/throttling/rate-limit.constants";
 import type { BootstrapRequestIdentity } from "../../common/auth";
+import { hasTrustedMfa } from "../../common/auth/trusted-mfa.policy";
 import { detectAuthEnvironment } from "../../config/auth-startup-config";
 import { extractIapJwtAssertion } from "@drts/control-plane-auth";
 import { DriverDeviceSessionService } from "./driver-device-session.service";
@@ -1412,13 +1413,12 @@ export class AuthController {
     }
     const amr = Array.isArray(payload.amr) ? payload.amr.filter((value): value is string => typeof value === "string") : [];
     const acr = typeof payload.acr === "string" && payload.acr.trim() ? payload.acr.trim() : "aal1";
-    const hasTrustedMfa = amr.some((method) => ["mfa", "otp", "webauthn", "hwk", "fido2"].includes(method.toLowerCase())) || /(?:aal|urn:.*:aal)[2-9]/i.test(acr);
     return {
       email,
       subject,
       amr: [...new Set(["oidc", ...amr])],
       acr,
-      hasTrustedMfa,
+      hasTrustedMfa: hasTrustedMfa({ amr, acr }),
       authTime: typeof payload.auth_time === "number" ? new Date(payload.auth_time * 1000).toISOString() : new Date().toISOString(),
     };
   }
