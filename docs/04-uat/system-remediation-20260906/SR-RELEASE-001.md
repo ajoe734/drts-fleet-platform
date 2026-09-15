@@ -1,12 +1,12 @@
 # SR-RELEASE-001 — 整合候選與全角色本機／dev可重跑閉環
 
-- Status: `in_progress` → CI typecheck fix applied → handoff pending review (round 2)
+- Status: `in_progress` → CI typecheck fix applied → reviewed/approved → reconciled to PR, full CI failure (round 2, out-of-scope stale test, see below) → re-synced with origin/dev → handoff pending review (round 3)
 - Owner: `Claude2`
 - Reviewer: `Claude`
 - Planning Ref: `docs/04-uat/system-remediation-20260906/source/capabilities.json`
 - Task Spec Ref: `docs/03-runbooks/system-remediation-20260906/SR-RELEASE-001.md`
 - Dispatch base SHA: `acfe53f6533ca2d74379c3b2b4dd7ff0c92d1bfc`
-- Synced `origin/dev` SHA at handoff: `4b62cf4d7dbc2363870a1e1faa8149a1a1a1d926`
+- Synced `origin/dev` SHA at handoff: `c189ee2da29eefb31fc2de0c1b787c4e843c317c`
 - Last Update: see `ai-status.sh show SR-RELEASE-001`
 
 ## 這份文件是什麼
@@ -42,8 +42,9 @@
      的 3 項「現況缺陷重現」斷言已因 `SR-QA-BOOKING-001-FIX-QUOTA-RELEASE`（先於本任務
      merge）修復生效而過期（斷言的壞行為已不存在）。已用
      `ai-status.sh assign` 建立追蹤任務
-     `SR-QA-BOOKING-001-FIX-QUOTA-RELEASE-STALE-GAP-ASSERTIONS`（owner `Codex2`、
-     reviewer `Codex`），未直接修改該檔案（不在本任務 write_scopes 內）。
+     `SR-QA-BOOKING-001-FIX-QUOTA-RELEASE-STALE-GAP-ASSERTIONS`（實際 owner `Gemini`、
+     reviewer `Gemini2`，orchestrator 後續重新指派），未直接修改該檔案（不在本任務
+     write_scopes 內）。
 8. Candidate `91999fee3850`（PR #2033）review 時，reviewer 回報 CI 的
    `Product smoke acceptance` job 於根層級 `pnpm run typecheck:root` fail：新測試對
    `assignDispatch()`（回傳型別為 `MaybePromise<DispatchAssignmentResult>`）未 `await`
@@ -54,6 +55,17 @@
    `git diff --check` 全部通過。細節與根層級 typecheck 在本 worktree 因共用 `node_modules`
    未同步（`@drts/api-client`／`@drts/ui-tokens` workspace symlink 缺失，與本任務無關的
    環境落差）而整體仍非零 exit 的誠實揭露，見 `closed-loop-evidence.md` §7.1。
+9. Candidate `a4acf6877b44`（PR #2033）review 通過後，完整 CI 才跑完並回報
+   `ci_status: failure`（`unit`／`Product smoke acceptance`／`Smoke acceptance`／
+   `ci-integ` 四項），任務被 reconciler 退回 `in_progress`。排查後確認：四項失敗全部
+   cascade 自同一顆種子——就是第 7 點記錄的、已建追蹤任務的那個過期斷言檔案；
+   而該追蹤任務（`SR-QA-BOOKING-001-FIX-QUOTA-RELEASE-STALE-GAP-ASSERTIONS`）已在本
+   task review 通過後的同一時段完成並合併進 `origin/dev`（`4b62cf4d7` → `c189ee2da`，
+   PR #2032），但本任務分支早於該合併就已鎖定 candidate，所以仍帶著舊檔案。確認
+   candidate 已因 CI failure 被解鎖（非仍在 review 中），依 §11 規則再次
+   `git merge origin/dev`（零衝突），重跑先前失敗的檔案（5/5 passing，先前
+   3 failed／2 passed）與本任務自身測試（1/1 passing）、`git diff --check`
+   （clean）全部通過。細節見 `closed-loop-evidence.md` §7.2。
 
 ## 結論（誠實揭露，非全系統 done）
 

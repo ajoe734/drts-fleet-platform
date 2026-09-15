@@ -4,8 +4,8 @@
   "owner": "Claude2",
   "reviewer": "Claude",
   "dispatch_base_sha": "acfe53f6533ca2d74379c3b2b4dd7ff0c92d1bfc",
-  "synced_dev_sha": "4b62cf4d7dbc2363870a1e1faa8149a1a1a1d926",
-  "sync_note": "origin/dev advanced from acfe53f65 to 4b62cf4d7 (merges SR-QA-BOOKING-001 v2, PR #2031) while this task was in_progress and before any candidate was locked; fast-forward merged via `git merge origin/dev` per docs/ops/branch-strategy.md §11 (no candidate had been locked yet, no conflicts).",
+  "synced_dev_sha": "c189ee2da29eefb31fc2de0c1b787c4e843c317c",
+  "sync_note": "Two sync rounds. Round 1: origin/dev advanced from acfe53f65 to 4b62cf4d7 (merges SR-QA-BOOKING-001 v2, PR #2031) while this task was in_progress and before any candidate was locked; fast-forward merged via `git merge origin/dev` (no conflicts). Round 2 (this session): after candidate a4acf6877 was reviewed/approved and reconciled onto PR #2033, full CI ran and reported `ci_status: failure` (unit / Product smoke acceptance / Smoke acceptance / ci-integ all failed), which bounced the task back to `in_progress`. Root cause: origin/dev had advanced again, from 4b62cf4d7 to c189ee2da, merging SR-QA-BOOKING-001-FIX-QUOTA-RELEASE-STALE-GAP-ASSERTIONS (PR #2032, done, owner Gemini/reviewer Gemini2) -- the exact followup task this doc's `known_stale_regression_found_during_this_integration` entry below had already flagged. This task's branch predated that merge, so it still carried the file with pre-fix stale assertions, and CI failed on it (out of this task's write_scopes). Merged `git merge origin/dev` again in the owner task worktree (candidate was unlocked/bounced back, not actively under review; no conflicts, write_scopes don't overlap) to pick up the fix. Re-ran the previously-failing file after merge: `pnpm exec vitest run tests/unit/system-remediation/sr-qa-booking-001/c028-tenant-quota-reservation-and-cancellation-gap.test.ts` -> 5/5 passed (was 3/5 failing pre-merge). Re-ran this task's own scope: `pnpm exec vitest run tests/unit/system-remediation/sr-release-001/` -> 1/1 passed; `git diff --check` -> clean.",
   "dependencies_confirmed_done_at_dispatch": [
     "SR-QA-IDENTITY-001",
     "SR-QA-TENANT-001",
@@ -29,10 +29,10 @@
       "SR-QA-BOOKING-001-FIX-TENANT-LEAD-TIME": {
         "capability_id": "C016",
         "status": "in_progress",
-        "candidate_sha": "8c0e8bb14939b6103dd1043c8e5d56faf3ba0199",
+        "candidate_sha": "8980696bdf3519a14b80b21ceff079a18bb0f5ef",
         "ci_status": "failure",
         "pr_url": "https://github.com/ajoe734/drts-fleet-platform/pull/2030",
-        "note": "Re-ran tests/unit/system-remediation/sr-qa-booking-001/c016-c024-tenant-booking-cutoff-and-lead-time.test.ts on the merged dev tree at 4b62cf4d7: 12/12 passed, confirming the gap-1/gap-2/gap-3 reproductions still reproduce the C016 defect (fix not yet merged)."
+        "note": "Re-ran tests/unit/system-remediation/sr-qa-booking-001/c016-c024-tenant-booking-cutoff-and-lead-time.test.ts on the merged dev tree at 4b62cf4d7: 12/12 passed, confirming the gap-1/gap-2/gap-3 reproductions still reproduce the C016 defect (fix not yet merged). As of this session's re-check (dev synced to c189ee2da), still `in_progress`/`ci_status: failure` on a newer candidate SHA -- disposition unchanged, remains open_gap_in_progress."
       }
     },
     "known_stale_regression_found_during_this_integration": {
@@ -40,7 +40,8 @@
         "capability_id": "C028",
         "finding": "gap-1/gap-2/gap-3 in this file assert the PRE-fix broken behavior (no quota release on cancel). SR-QA-BOOKING-001-FIX-QUOTA-RELEASE (merged acfe53f65, before this task's dispatch) already fixed the underlying defect. Re-running this file on the current merged tree: 3/5 tests now fail because the bug they were written to reproduce no longer exists -- confirms the FIX is genuinely effective, but leaves this specific test file's assertions stale.",
         "not_fixed_here_because": "tests/unit/system-remediation/sr-qa-booking-001/ is not in SR-RELEASE-001's write_scopes.",
-        "followup_task_created": "SR-QA-BOOKING-001-FIX-QUOTA-RELEASE-STALE-GAP-ASSERTIONS"
+        "followup_task_created": "SR-QA-BOOKING-001-FIX-QUOTA-RELEASE-STALE-GAP-ASSERTIONS",
+        "followup_task_resolution": "Task completed (owner Gemini, reviewer Gemini2, PR #2032, merge_sha c189ee2da29eefb31fc2de0c1b787c4e843c317c, merged to origin/dev). This task's candidate a4acf6877 had already been approved and reconciled to PR #2033 before that merge landed, so full CI on PR #2033 failed against the stale pre-fix file. Resolved in this session by `git merge origin/dev` (round 2, see `sync_note` above): re-ran the file post-merge, 5/5 passing."
       }
     },
     "external_gate_blocked_intentionally_excluded_from_done": [

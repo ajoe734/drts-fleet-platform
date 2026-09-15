@@ -2,11 +2,11 @@
 
 - Task ID: `SR-RELEASE-001`
 - Title: 整合候選與全角色本機／dev可重跑閉環
-- Status: `in_progress` → CI typecheck fix applied（見 §7.1）→ handoff pending（round 2）
+- Status: `in_progress` → CI typecheck fix applied（見 §7.1）→ reviewed/reconciled → CI failure round 2（分支落後於 origin/dev 新合併的追蹤任務，見 §7.2）→ synced，handoff pending（round 3）
 - Owner: `Claude2`
 - Reviewer: `Claude`
 - Dispatch base SHA（`origin/dev` tip at dispatch time）: `acfe53f6533ca2d74379c3b2b4dd7ff0c92d1bfc`
-- 任務期間 `origin/dev` 前進至: `4b62cf4d7dbc2363870a1e1faa8149a1a1a1d926`（merges SR-QA-BOOKING-001 v2, PR #2031；尚未鎖定candidate前以 `git merge origin/dev` fast-forward 同步，無衝突）
+- 任務期間 `origin/dev` 前進至: `c189ee2da29eefb31fc2de0c1b787c4e843c317c`（兩輪同步：round 1 `acfe53f65`→`4b62cf4d7` merges SR-QA-BOOKING-001 v2, PR #2031；round 2 `4b62cf4d7`→`c189ee2da` merges SR-QA-BOOKING-001-FIX-QUOTA-RELEASE-STALE-GAP-ASSERTIONS, PR #2032，見 §7.2；兩輪皆以 `git merge origin/dev` 同步，零衝突）
 - Candidate SHA: recorded at handoff via `CANDIDATE_SHA=$(git rev-parse HEAD)`
 - Branch: `claude2/sr-release-001`
 - Worker cwd: `/home/lupin/workspace/drts-fleet-platform/.artifacts/worktrees/auto/claude2-sr-release-001`
@@ -151,8 +151,8 @@ tests/unit/system-remediation/sr-qa-booking-001/c028-tenant-quota-reservation-an
 | **新增 same-order 閉環測試**                                                                       | `pnpm exec vitest run tests/unit/system-remediation/sr-release-001/`                                                                                                                                                                 | `0`                      | 1 test file, **1 passed**                               |
 | **新增測試 ESLint**                                                                                | `pnpm exec eslint tests/unit/system-remediation/sr-release-001 --max-warnings=0`                                                                                                                                                     | `0`                      | 0 errors, 0 warnings                                    |
 | **新增測試 Prettier**                                                                              | `pnpm exec prettier --check tests/unit/system-remediation/sr-release-001/`                                                                                                                                                           | `0`（初次 `--write` 後） | All matched files use Prettier code style               |
-| **型別檢查（apps/api 範圍）**                                                                       | `pnpm --filter @drts/contracts build && pnpm --filter @drts/control-plane-auth build && pnpm --filter @drts/api exec tsc -p tsconfig.json --noEmit`                                                                                  | `0`                      | 0 errors                                                |
-| **型別檢查（repo-root canonical，CI 實際指令）**                                                    | `pnpm run typecheck:root`（即 `tsc -p tsconfig.json --noEmit`，範圍含 `tests/**/*.ts`）                                                                                                                                             | `0`（見 §7.1）           | `same-order-cross-role-closed-loop.test.ts` 0 errors     |
+| **型別檢查（apps/api 範圍）**                                                                      | `pnpm --filter @drts/contracts build && pnpm --filter @drts/control-plane-auth build && pnpm --filter @drts/api exec tsc -p tsconfig.json --noEmit`                                                                                  | `0`                      | 0 errors                                                |
+| **型別檢查（repo-root canonical，CI 實際指令）**                                                   | `pnpm run typecheck:root`（即 `tsc -p tsconfig.json --noEmit`，範圍含 `tests/**/*.ts`）                                                                                                                                              | `0`（見 §7.1）           | `same-order-cross-role-closed-loop.test.ts` 0 errors    |
 | **Git Diff 格式**                                                                                  | `git diff --check`                                                                                                                                                                                                                   | `0`                      | 無多餘空白或格式錯誤                                    |
 | **既有回歸：owned-mobility／tenant-governance-e2e／complaint**                                     | `pnpm exec vitest run tests/unit/owned-mobility.service.test.ts tests/integration/tenant-governance-e2e.test.ts tests/unit/complaint-taxonomy-reopen-sla.test.ts tests/unit/complaint-incident-escalation.test.ts`（於 `apps/api`）  | `0`                      | 4 files, **140 passed**                                 |
 | **既有回歸：sr-qa-booking-001-fix-quota-release／sr-invoice-001／sr-placard-001／sr-artifact-001** | `pnpm exec vitest run tests/unit/system-remediation/sr-qa-booking-001-fix-quota-release/ tests/unit/system-remediation/sr-invoice-001/ tests/unit/system-remediation/sr-placard-001/ tests/unit/system-remediation/sr-artifact-001/` | `0`                      | 7 files, **44 passed**                                  |
@@ -175,14 +175,14 @@ Reviewer（`Claude`）review 時回報：candidate `91999fee3850` 的 GitHub Act
 
 **修復後重新驗證**（本次 session，於 candidate 分支修復後）：
 
-| 檢查項目                                                     | 執行指令                                                                        | Exit Code | 結果摘要                                                                                                        |
-| :------------------------------------------------------------ | :------------------------------------------------------------------------------- | :-------- | :---------------------------------------------------------------------------------------------------------------- |
-| Repo-root canonical typecheck（CI 實際指令）                | `pnpm run typecheck:root`                                                        | `2`       | 之前 7 處 `TS2339`（本檔案）已全部消失（以 `grep -n "sr-release-001\|same-order-cross-role"` 確認 0 命中）        |
-| 新增測試 runtime 重跑                                        | `pnpm exec vitest run tests/unit/system-remediation/sr-release-001/`             | `0`       | 1 test file, **1 passed**                                                                                          |
-| apps/api 範圍 typecheck 重跑                                 | `pnpm --filter @drts/contracts build && pnpm --filter @drts/control-plane-auth build && pnpm --filter @drts/api exec tsc -p tsconfig.json --noEmit` | `0`       | 0 errors                                                                                                            |
-| ESLint（本檔案）                                              | `npx eslint tests/unit/system-remediation/sr-release-001/same-order-cross-role-closed-loop.test.ts` | `0`       | 0 errors, 0 warnings                                                                                                |
-| Prettier（本檔案）                                            | `npx prettier --check tests/unit/system-remediation/sr-release-001/same-order-cross-role-closed-loop.test.ts` | `0`       | All matched files use Prettier code style                                                                          |
-| Git diff 格式                                                | `git diff --check`                                                               | `0`       | 無多餘空白或格式錯誤                                                                                                |
+| 檢查項目                                     | 執行指令                                                                                                                                            | Exit Code | 結果摘要                                                                                                   |
+| :------------------------------------------- | :-------------------------------------------------------------------------------------------------------------------------------------------------- | :-------- | :--------------------------------------------------------------------------------------------------------- |
+| Repo-root canonical typecheck（CI 實際指令） | `pnpm run typecheck:root`                                                                                                                           | `2`       | 之前 7 處 `TS2339`（本檔案）已全部消失（以 `grep -n "sr-release-001\|same-order-cross-role"` 確認 0 命中） |
+| 新增測試 runtime 重跑                        | `pnpm exec vitest run tests/unit/system-remediation/sr-release-001/`                                                                                | `0`       | 1 test file, **1 passed**                                                                                  |
+| apps/api 範圍 typecheck 重跑                 | `pnpm --filter @drts/contracts build && pnpm --filter @drts/control-plane-auth build && pnpm --filter @drts/api exec tsc -p tsconfig.json --noEmit` | `0`       | 0 errors                                                                                                   |
+| ESLint（本檔案）                             | `npx eslint tests/unit/system-remediation/sr-release-001/same-order-cross-role-closed-loop.test.ts`                                                 | `0`       | 0 errors, 0 warnings                                                                                       |
+| Prettier（本檔案）                           | `npx prettier --check tests/unit/system-remediation/sr-release-001/same-order-cross-role-closed-loop.test.ts`                                       | `0`       | All matched files use Prettier code style                                                                  |
+| Git diff 格式                                | `git diff --check`                                                                                                                                  | `0`       | 無多餘空白或格式錯誤                                                                                       |
 
 **誠實揭露：`pnpm run typecheck:root` 在本 worker worktree 整體仍以非零 exit 結束**，但與本檔案／本任務 write_scopes 無關，原因是這個共用（跨所有 worktree 以 symlink 共用的）canonical root 的 `node_modules` 尚未針對近期新增的 workspace 套件 `@drts/api-client`、`@drts/ui-tokens` 完成 `pnpm install`（兩者 `package.json` 的 `main`/`types`/`exports` 直接指向 `src/index.ts`，不需 build，只需 workspace symlink；目前 `node_modules/@drts/` 底下確認完全不存在這兩個 symlink）。這造成：
 
@@ -190,6 +190,29 @@ Reviewer（`Claude`）review 時回報：candidate `91999fee3850` 的 GitHub Act
 - 連帶造成 `packages/ui-web/src/management-theme.ts` 的 `MANAGEMENT_SURFACE_TONES` 型別因上游模組解析失敗而退化，使 `tests/unit/system-remediation/sr-qa-ux-001/c120-accessibility-responsive-focus.test.ts`（既有檔案，非本任務所有、非本次改動，最後修改於 PR #2008）出現 4 處 `TS18048` 連帶錯誤。
 
 判定此為**本地共用環境（canonical root `node_modules` 未同步）造成的既有落差，非本次修復引入、也非 CI 上會重現的問題**：(a) reviewer 回報的 CI run `34921499275` 只列出本檔案的 7 處 `TS2339`，未提及上述任一模組解析或 `sr-qa-ux-001` 錯誤——CI 的 `Install` 步驟固定執行乾淨的 `pnpm install --frozen-lockfile`，會正確建立所有 workspace symlink；(b) 本任務 `write_scopes` 不含 `node_modules`、`pnpm-lock.yaml`、`apps/*`、`packages/ui-web`、`tests/unit/system-remediation/sr-qa-ux-001`，且該 `node_modules` 由 symlink 指向 canonical root、被所有並行 worker 共用，不在本任務授權範圍內修改；(c) 依 guardrail 只做 verification，不在本任務內修其他 task 的缺口。因此**未**執行 `pnpm install` 改動共用 `node_modules`，改以上述定位分析與逐項確認「原被 CI 標記的 7 處錯誤已消失」作為本次修復的直接證據。
+
+---
+
+### 7.2 二輪 CI failure：分支落後於 origin/dev 的 §6 追蹤任務修復，已同步解決
+
+Candidate `a4acf6877b44`（PR #2033）review 通過（`Claude` approve，`2026-09-15T02:45:13Z`）並由 GitHub reconciler 綁定後，完整 CI 才跑完，結果為 `ci_status: failure`：`unit`、`Product smoke acceptance`、`Smoke acceptance`、`ci-integ` 四項 check 全部 FAILURE，任務因而被 supervisor 退回 `in_progress`（reconciled 訊息 `2026-09-15T02:49:18Z`）。
+
+**根因排查**（`gh run view --log-failed`）：四項失敗全部 cascade 自同一顆種子——`unit` job 的唯一失敗檔案正是 §6 已記錄的
+`tests/unit/system-remediation/sr-qa-booking-001/c028-tenant-quota-reservation-and-cancellation-gap.test.ts`（gap-1/gap-2/gap-3 三項斷言 fail，`Product smoke acceptance` job 完全相同錯誤；`Smoke acceptance`／`ci-integ` 是純聚合 gate，僅因上游 `PRODUCT_SMOKE_RESULT=failure` 而失敗，本身無額外邏輯）。
+
+**時序**：本任務 candidate `a4acf6877` 建立於 `origin/dev@4b62cf4d7`（§2 同步後的 SHA）。但 §6 記錄的追蹤任務 `SR-QA-BOOKING-001-FIX-QUOTA-RELEASE-STALE-GAP-ASSERTIONS`（實際 owner 為 `Gemini`、reviewer `Gemini2`，非本文件先前記錄建立時的 `Codex2`/`Codex`——orchestrator 之後重新指派）已在本任務 review 通過的同一時段完成並合併：`merge_sha c189ee2da29eefb31fc2de0c1b787c4e843c317c`（PR #2032），把 `origin/dev` 推進到 `c189ee2da`。本任務分支在合併前就已鎖定 candidate，因此仍帶著舊版（斷言修復前）的該測試檔案，於是在 `origin/dev` 已經修好的同一份程式碼上，CI 又重新踩到 §6 所述的同一個「斷言已過期」問題——不是新缺陷，是分支落後於已完成的追蹤任務。
+
+**處置**：確認本任務 candidate 因 CI failure 已被 reconciler 解鎖退回 `in_progress`（非仍處於 review 中的鎖定候選），依 `docs/ops/branch-strategy.md` §11 於 owner task worktree 執行 `git merge origin/dev`（`4b62cf4d7` → `c189ee2da`，僅 1 個 commit，僅涉及 §6 追蹤任務自己的 `write_scopes`，與本任務 `write_scopes` 零重疊，`git merge --no-edit` 乾淨合併、零衝突）。
+
+合併後重新驗證：
+
+| 檢查項目               | 執行指令                                                                                                                          | Exit Code | 結果摘要                                            |
+| :--------------------- | :-------------------------------------------------------------------------------------------------------------------------------- | :-------- | :-------------------------------------------------- |
+| 先前失敗檔案重跑       | `pnpm exec vitest run tests/unit/system-remediation/sr-qa-booking-001/c028-tenant-quota-reservation-and-cancellation-gap.test.ts` | `0`       | 1 file, **5 passed**（合併前為 3 failed／2 passed） |
+| 本任務自身新增測試重跑 | `pnpm exec vitest run tests/unit/system-remediation/sr-release-001/`                                                              | `0`       | 1 file, **1 passed**                                |
+| Git diff 格式          | `git diff --check`                                                                                                                | `0`       | 無多餘空白或格式錯誤                                |
+
+`release-candidate.json` 的 `synced_dev_sha`、`sync_note`、`known_stale_regression_found_during_this_integration.*.followup_task_resolution` 已同步更新以反映這輪同步；`known_open_gap_in_progress`（C016）的 candidate SHA 亦一併刷新為重新查詢的現況（disposition 不變，仍 `open_gap_in_progress`）。
 
 ---
 
