@@ -31,6 +31,15 @@ import { ServiceProductService } from "../../src/modules/service-product/service
 import { TenantPartnerService } from "../../src/modules/tenant-partner/tenant-partner.service";
 import { VehicleEligibilityService } from "../../src/modules/vehicle-eligibility/vehicle-eligibility.service";
 
+function defaultReservationWindowStart(offsetHours = 2): string {
+  return new Date(Date.now() + offsetHours * 3600_000).toISOString();
+}
+
+function defaultReservationWindowEnd(offsetHours = 3): string {
+  return new Date(Date.now() + offsetHours * 3600_000).toISOString();
+}
+
+
 const SAMPLE_PROOF_PHOTO = "cHJvb2YtcGhvdG8tMDAx";
 const DEFAULT_VEHICLE_LICENSE_TYPES: Record<string, string> = {
   "veh-demo-001": "multi_purpose_taxi",
@@ -788,8 +797,8 @@ describe("OwnedMobilityService queue and reservation orchestration", () => {
     const booking = await service.createTenantBooking(
       {
         businessDispatchSubtype: "insurance_replacement_vehicle",
-        reservationWindowStart: "2026-06-05T10:00:00.000Z",
-        reservationWindowEnd: "2026-06-05T11:00:00.000Z",
+        reservationWindowStart: defaultReservationWindowStart(),
+        reservationWindowEnd: defaultReservationWindowEnd(),
         pickup: {
           address: "Some place outside any service area",
           lat: 24.15,
@@ -1062,8 +1071,8 @@ describe("OwnedMobilityService queue and reservation orchestration", () => {
     const booking = await service.createTenantBooking(
       {
         businessDispatchSubtype: "enterprise_dispatch",
-        reservationWindowStart: "2026-06-05T10:00:00.000Z",
-        reservationWindowEnd: "2026-06-05T11:00:00.000Z",
+        reservationWindowStart: defaultReservationWindowStart(),
+        reservationWindowEnd: defaultReservationWindowEnd(),
         pickup: { address: "台中市西屯區台灣大道 1 號" },
         dropoff: { address: "台中市南屯區公益路 2 號" },
         passenger: { name: "測試乘客", phone: "0911222333" },
@@ -1111,8 +1120,8 @@ describe("OwnedMobilityService queue and reservation orchestration", () => {
     const booking = service.createTenantBooking(
       {
         businessDispatchSubtype: "enterprise_dispatch",
-        reservationWindowStart: "2026-06-05T10:00:00.000Z",
-        reservationWindowEnd: "2026-06-05T11:00:00.000Z",
+        reservationWindowStart: defaultReservationWindowStart(),
+        reservationWindowEnd: defaultReservationWindowEnd(),
         pickup: { address: "台中市西屯區台灣大道 1 號" },
         dropoff: { address: "台中市南屯區公益路 2 號" },
         passenger: { name: "測試乘客", phone: "0911222333" },
@@ -1227,8 +1236,8 @@ describe("OwnedMobilityService queue and reservation orchestration", () => {
     const booking = await service.createTenantBooking(
       {
         businessDispatchSubtype: "credit_card_airport_transfer",
-        reservationWindowStart: "2026-06-20T14:00:00.000Z",
-        reservationWindowEnd: "2026-06-20T15:00:00.000Z",
+        reservationWindowStart: defaultReservationWindowStart(),
+        reservationWindowEnd: defaultReservationWindowEnd(),
         pickup: { address: "Pickup" },
         dropoff: { address: "Dropoff" },
         passenger: { name: "Rider One", phone: "0912000000" },
@@ -1267,8 +1276,8 @@ describe("OwnedMobilityService queue and reservation orchestration", () => {
     const booking = await service.createTenantBooking(
       {
         businessDispatchSubtype: "credit_card_airport_transfer",
-        reservationWindowStart: "2026-06-20T14:00:00.000Z",
-        reservationWindowEnd: "2026-06-20T15:00:00.000Z",
+        reservationWindowStart: defaultReservationWindowStart(),
+        reservationWindowEnd: defaultReservationWindowEnd(),
         pickup: { address: "Pickup" },
         dropoff: { address: "Dropoff" },
         passenger: { name: "Rider One", phone: "0912000000" },
@@ -1474,8 +1483,8 @@ describe("OwnedMobilityService queue and reservation orchestration", () => {
     const booking = await service.createTenantBooking(
       {
         businessDispatchSubtype: "enterprise_dispatch",
-        reservationWindowStart: "2026-06-20T13:00:00.000Z",
-        reservationWindowEnd: "2026-06-20T14:00:00.000Z",
+        reservationWindowStart: defaultReservationWindowStart(),
+        reservationWindowEnd: defaultReservationWindowEnd(),
         pickup: { address: "HQ", lat: 25.033, lng: 121.5654 },
         dropoff: { address: "Airport" },
         passenger: { name: "Rider", phone: "0912000000" },
@@ -1540,8 +1549,8 @@ describe("OwnedMobilityService queue and reservation orchestration", () => {
     const booking = await service.createTenantBooking(
       {
         businessDispatchSubtype: "enterprise_dispatch",
-        reservationWindowStart: "2026-06-20T13:00:00.000Z",
-        reservationWindowEnd: "2026-06-20T14:00:00.000Z",
+        reservationWindowStart: defaultReservationWindowStart(),
+        reservationWindowEnd: defaultReservationWindowEnd(),
         pickup: { address: "HQ", lat: 25.033, lng: 121.5654 },
         dropoff: { address: "Airport" },
         passenger: { name: "Rider", phone: "0912000000" },
@@ -1599,8 +1608,8 @@ describe("OwnedMobilityService queue and reservation orchestration", () => {
     const booking = await service.createTenantBooking(
       {
         businessDispatchSubtype: "credit_card_airport_transfer",
-        reservationWindowStart: "2026-06-20T13:00:00.000Z",
-        reservationWindowEnd: "2026-06-20T14:00:00.000Z",
+        reservationWindowStart: defaultReservationWindowStart(),
+        reservationWindowEnd: defaultReservationWindowEnd(),
         pickup: { address: "HQ", lat: 25.033, lng: 121.5654 },
         dropoff: { address: "Taoyuan Airport" },
         passenger: { name: "Rider", phone: "0912000000" },
@@ -1678,8 +1687,8 @@ describe("OwnedMobilityService queue and reservation orchestration", () => {
         passengerId: passenger.passengerId,
         pickupAddressId: pickupAddress.addressId,
         dropoffAddressId: dropoffAddress.addressId,
-        reservationWindowStart: "2026-04-29T14:00:00.000Z",
-        reservationWindowEnd: "2026-04-29T15:00:00.000Z",
+        reservationWindowStart: defaultReservationWindowStart(),
+        reservationWindowEnd: defaultReservationWindowEnd(),
         pickup: { address: "ignored pickup" },
         dropoff: { address: "ignored dropoff" },
         passenger: { name: "ignored passenger", phone: "0900000000" },
@@ -1855,8 +1864,8 @@ describe("OwnedMobilityService queue and reservation orchestration", () => {
         direction: "pickup",
         pickup: { address: "桃園機場第二航廈" },
         dropoff: { address: "台北市信義區松高路11號" },
-        reservationWindowStart: "2026-06-05T10:00:00.000Z",
-        reservationWindowEnd: "2026-06-05T11:00:00.000Z",
+        reservationWindowStart: defaultReservationWindowStart(),
+        reservationWindowEnd: defaultReservationWindowEnd(),
         passenger: { name: "測試乘客", phone: "0911222333" },
         flightNo: "CI-001",
       },
@@ -1895,8 +1904,8 @@ describe("OwnedMobilityService queue and reservation orchestration", () => {
     const booking = await service.createTenantBooking(
       {
         businessDispatchSubtype: "enterprise_dispatch",
-        reservationWindowStart: "2026-05-13T14:00:00.000Z",
-        reservationWindowEnd: "2026-05-13T15:00:00.000Z",
+        reservationWindowStart: defaultReservationWindowStart(),
+        reservationWindowEnd: defaultReservationWindowEnd(),
         pickup: { address: "Pickup" },
         dropoff: { address: "Dropoff" },
         passenger: { name: "Rider One", phone: "0912000000" },
@@ -1980,8 +1989,8 @@ describe("OwnedMobilityService queue and reservation orchestration", () => {
     const created = await service.createTenantBooking(
       {
         businessDispatchSubtype: "enterprise_dispatch",
-        reservationWindowStart: "2026-05-13T14:00:00.000Z",
-        reservationWindowEnd: "2026-05-13T15:00:00.000Z",
+        reservationWindowStart: defaultReservationWindowStart(),
+        reservationWindowEnd: defaultReservationWindowEnd(),
         pickup: { address: "Pickup" },
         dropoff: { address: "Dropoff" },
         passenger: { name: "Rider One", phone: "0912000000" },
@@ -2048,8 +2057,8 @@ describe("OwnedMobilityService queue and reservation orchestration", () => {
     const created = await service.createTenantBooking(
       {
         businessDispatchSubtype: "enterprise_dispatch",
-        reservationWindowStart: "2026-05-13T16:00:00.000Z",
-        reservationWindowEnd: "2026-05-13T17:00:00.000Z",
+        reservationWindowStart: defaultReservationWindowStart(),
+        reservationWindowEnd: defaultReservationWindowEnd(),
         pickup: { address: "Pickup" },
         dropoff: { address: "Dropoff" },
         passenger: { name: "Rider Two", phone: "0912000001" },
@@ -2145,8 +2154,8 @@ describe("OwnedMobilityService queue and reservation orchestration", () => {
     const created = await service.createTenantBooking(
       {
         businessDispatchSubtype: "enterprise_dispatch",
-        reservationWindowStart: "2026-05-13T18:00:00.000Z",
-        reservationWindowEnd: "2026-05-13T19:00:00.000Z",
+        reservationWindowStart: defaultReservationWindowStart(),
+        reservationWindowEnd: defaultReservationWindowEnd(),
         pickup: { address: "Pickup" },
         dropoff: { address: "Dropoff" },
         passenger: { name: "Exec Rider", phone: "0912000002" },
@@ -2196,8 +2205,8 @@ describe("OwnedMobilityService queue and reservation orchestration", () => {
     const created = await service.createTenantBooking(
       {
         businessDispatchSubtype: "enterprise_dispatch",
-        reservationWindowStart: "2026-05-13T20:00:00.000Z",
-        reservationWindowEnd: "2026-05-13T21:00:00.000Z",
+        reservationWindowStart: defaultReservationWindowStart(),
+        reservationWindowEnd: defaultReservationWindowEnd(),
         pickup: { address: "Pickup" },
         dropoff: { address: "Dropoff" },
         passenger: { name: "Rider Three", phone: "0912000003" },
@@ -2261,8 +2270,8 @@ describe("OwnedMobilityService queue and reservation orchestration", () => {
       service.createTenantBooking(
         {
           businessDispatchSubtype: "enterprise_dispatch",
-          reservationWindowStart: "2026-05-13T22:00:00.000Z",
-          reservationWindowEnd: "2026-05-13T23:00:00.000Z",
+          reservationWindowStart: defaultReservationWindowStart(),
+          reservationWindowEnd: defaultReservationWindowEnd(),
           pickup: { address: "Pickup" },
           dropoff: { address: "Dropoff" },
           passenger: { name: "Blocked Rider", phone: "0912000004" },
@@ -2299,8 +2308,8 @@ describe("OwnedMobilityService queue and reservation orchestration", () => {
     const created = await service.createTenantBooking(
       {
         businessDispatchSubtype: "enterprise_dispatch",
-        reservationWindowStart: "2026-05-14T00:00:00.000Z",
-        reservationWindowEnd: "2026-05-14T01:00:00.000Z",
+        reservationWindowStart: defaultReservationWindowStart(),
+        reservationWindowEnd: defaultReservationWindowEnd(),
         pickup: { address: "Pickup" },
         dropoff: { address: "Dropoff" },
         passenger: { name: "Escalation Rider", phone: "0912000005" },
@@ -2345,8 +2354,8 @@ describe("OwnedMobilityService queue and reservation orchestration", () => {
       service.createTenantBooking(
         {
           businessDispatchSubtype: "enterprise_dispatch",
-          reservationWindowStart: "2026-04-29T14:00:00.000Z",
-          reservationWindowEnd: "2026-04-29T15:00:00.000Z",
+          reservationWindowStart: defaultReservationWindowStart(),
+          reservationWindowEnd: defaultReservationWindowEnd(),
           pickup: { address: "Pickup" },
           dropoff: { address: "Dropoff" },
           passenger: { name: "Rider One", phone: "0912000000" },
@@ -2366,8 +2375,8 @@ describe("OwnedMobilityService queue and reservation orchestration", () => {
       service.createTenantBooking(
         {
           businessDispatchSubtype: "enterprise_dispatch",
-          reservationWindowStart: "2026-04-29T14:00:00.000Z",
-          reservationWindowEnd: "2026-04-29T15:00:00.000Z",
+          reservationWindowStart: defaultReservationWindowStart(),
+          reservationWindowEnd: defaultReservationWindowEnd(),
           pickup: { address: "Pickup" },
           dropoff: { address: "Dropoff" },
           passenger: { name: "Rider One", phone: "0912000000" },
@@ -2397,8 +2406,8 @@ describe("OwnedMobilityService queue and reservation orchestration", () => {
     const booking = service.createTenantBooking(
       {
         businessDispatchSubtype: "enterprise_dispatch",
-        reservationWindowStart: "2026-04-29T14:00:00.000Z",
-        reservationWindowEnd: "2026-04-29T15:00:00.000Z",
+        reservationWindowStart: defaultReservationWindowStart(),
+        reservationWindowEnd: defaultReservationWindowEnd(),
         pickup: { address: "Pickup" },
         dropoff: { address: "Dropoff" },
         passenger: { name: "Rider One", phone: "0912000000" },
@@ -2476,8 +2485,8 @@ describe("OwnedMobilityService queue and reservation orchestration", () => {
     const booking = service.createTenantBooking(
       {
         businessDispatchSubtype: "enterprise_dispatch",
-        reservationWindowStart: "2026-04-29T14:00:00.000Z",
-        reservationWindowEnd: "2026-04-29T15:00:00.000Z",
+        reservationWindowStart: defaultReservationWindowStart(),
+        reservationWindowEnd: defaultReservationWindowEnd(),
         pickup: { address: "Pickup" },
         dropoff: { address: "Dropoff" },
         passenger: { name: "Rider One", phone: "0912000000" },
@@ -2567,8 +2576,8 @@ describe("OwnedMobilityService queue and reservation orchestration", () => {
     const booking = service.createTenantBooking(
       {
         businessDispatchSubtype: "enterprise_dispatch",
-        reservationWindowStart: "2026-04-29T14:00:00.000Z",
-        reservationWindowEnd: "2026-04-29T15:00:00.000Z",
+        reservationWindowStart: defaultReservationWindowStart(),
+        reservationWindowEnd: defaultReservationWindowEnd(),
         pickup: { address: "Pickup" },
         dropoff: { address: "Dropoff" },
         passenger: { name: "Rider One", phone: "0912000000" },
@@ -3374,8 +3383,8 @@ describe("OwnedMobilityService queue and reservation orchestration", () => {
     const reservationBooking = service.createTenantBooking(
       {
         businessDispatchSubtype: "enterprise_dispatch",
-        reservationWindowStart: "2026-04-29T14:00:00.000Z",
-        reservationWindowEnd: "2026-04-29T15:00:00.000Z",
+        reservationWindowStart: defaultReservationWindowStart(),
+        reservationWindowEnd: defaultReservationWindowEnd(),
         pickup: { address: "Reservation A" },
         dropoff: { address: "Reservation B" },
         passenger: { name: "Reservation Rider", phone: "0933000000" },
@@ -3546,8 +3555,8 @@ describe("OwnedMobilityService queue and reservation orchestration", () => {
     const booking = service.createTenantBooking(
       {
         businessDispatchSubtype: "enterprise_dispatch",
-        reservationWindowStart: "2026-04-29T14:00:00.000Z",
-        reservationWindowEnd: "2026-04-29T15:00:00.000Z",
+        reservationWindowStart: defaultReservationWindowStart(),
+        reservationWindowEnd: defaultReservationWindowEnd(),
         pickup: { address: "Pickup" },
         dropoff: { address: "Dropoff" },
         passenger: { name: "Rider", phone: "0912000000" },
@@ -3600,8 +3609,8 @@ describe("OwnedMobilityService queue and reservation orchestration", () => {
     const booking = service.createTenantBooking(
       {
         businessDispatchSubtype: "enterprise_dispatch",
-        reservationWindowStart: "2026-04-29T14:00:00.000Z",
-        reservationWindowEnd: "2026-04-29T15:00:00.000Z",
+        reservationWindowStart: defaultReservationWindowStart(),
+        reservationWindowEnd: defaultReservationWindowEnd(),
         pickup: { address: "Pickup" },
         dropoff: { address: "Dropoff" },
         passenger: { name: "Rider", phone: "0912000000" },
@@ -3897,8 +3906,8 @@ describe("OwnedMobilityService queue and reservation orchestration", () => {
     const booking = service.createTenantBooking(
       {
         businessDispatchSubtype: "enterprise_dispatch",
-        reservationWindowStart: "2026-04-29T14:00:00.000Z",
-        reservationWindowEnd: "2026-04-29T15:00:00.000Z",
+        reservationWindowStart: defaultReservationWindowStart(),
+        reservationWindowEnd: defaultReservationWindowEnd(),
         pickup: { address: "Pickup" },
         dropoff: { address: "Dropoff" },
         passenger: { name: "Rider One", phone: "0912000000" },
@@ -3943,8 +3952,8 @@ describe("OwnedMobilityService queue and reservation orchestration", () => {
     const booking = service.createTenantBooking(
       {
         businessDispatchSubtype: "enterprise_dispatch",
-        reservationWindowStart: "2026-04-29T14:00:00.000Z",
-        reservationWindowEnd: "2026-04-29T15:00:00.000Z",
+        reservationWindowStart: defaultReservationWindowStart(),
+        reservationWindowEnd: defaultReservationWindowEnd(),
         pickup: { address: "Pickup" },
         dropoff: { address: "Dropoff" },
         passenger: { name: "Rider One", phone: "0912000000" },
@@ -4023,8 +4032,8 @@ describe("OwnedMobilityService queue and reservation orchestration", () => {
     const booking = service.createTenantBooking(
       {
         businessDispatchSubtype: "credit_card_airport_transfer",
-        reservationWindowStart: "2026-04-29T14:00:00.000Z",
-        reservationWindowEnd: "2026-04-29T15:00:00.000Z",
+        reservationWindowStart: defaultReservationWindowStart(),
+        reservationWindowEnd: defaultReservationWindowEnd(),
         pickup: { address: "Pickup" },
         dropoff: { address: "Dropoff" },
         passenger: { name: "Rider One", phone: "0912000000" },
@@ -4121,8 +4130,8 @@ describe("OwnedMobilityService queue and reservation orchestration", () => {
     const booking = service.createTenantBooking(
       {
         businessDispatchSubtype: "enterprise_dispatch",
-        reservationWindowStart: "2026-04-29T14:00:00.000Z",
-        reservationWindowEnd: "2026-04-29T15:00:00.000Z",
+        reservationWindowStart: defaultReservationWindowStart(),
+        reservationWindowEnd: defaultReservationWindowEnd(),
         pickup: { address: "Pickup" },
         dropoff: { address: "Dropoff" },
         passenger: { name: "Rider One", phone: "0912000000" },
@@ -4292,8 +4301,8 @@ describe("OwnedMobilityService queue and reservation orchestration", () => {
     const booking = seedService.createTenantBooking(
       {
         businessDispatchSubtype: "enterprise_dispatch",
-        reservationWindowStart: "2026-04-29T14:00:00.000Z",
-        reservationWindowEnd: "2026-04-29T15:00:00.000Z",
+        reservationWindowStart: defaultReservationWindowStart(),
+        reservationWindowEnd: defaultReservationWindowEnd(),
         pickup: { address: "Pickup" },
         dropoff: { address: "Dropoff" },
         passenger: { name: "Rider One", phone: "0912000000" },
@@ -4473,8 +4482,8 @@ describe("OwnedMobilityService queue and reservation orchestration", () => {
     const booking = seedService.createTenantBooking(
       {
         businessDispatchSubtype: "enterprise_dispatch",
-        reservationWindowStart: "2026-04-29T14:00:00.000Z",
-        reservationWindowEnd: "2026-04-29T15:00:00.000Z",
+        reservationWindowStart: defaultReservationWindowStart(),
+        reservationWindowEnd: defaultReservationWindowEnd(),
         pickup: { address: "Pickup" },
         dropoff: { address: "Dropoff" },
         passenger: { name: "Rider One", phone: "0912000000" },
@@ -4608,8 +4617,8 @@ describe("OwnedMobilityService queue and reservation orchestration", () => {
     const booking = seedService.createTenantBooking(
       {
         businessDispatchSubtype: "enterprise_dispatch",
-        reservationWindowStart: "2026-04-29T14:00:00.000Z",
-        reservationWindowEnd: "2026-04-29T15:00:00.000Z",
+        reservationWindowStart: defaultReservationWindowStart(),
+        reservationWindowEnd: defaultReservationWindowEnd(),
         pickup: { address: "Pickup" },
         dropoff: { address: "Dropoff" },
         passenger: { name: "Rider One", phone: "0912000000" },
@@ -4739,8 +4748,8 @@ describe("OwnedMobilityService queue and reservation orchestration", () => {
     const booking = seedService.createTenantBooking(
       {
         businessDispatchSubtype: "enterprise_dispatch",
-        reservationWindowStart: "2026-04-29T14:00:00.000Z",
-        reservationWindowEnd: "2026-04-29T15:00:00.000Z",
+        reservationWindowStart: defaultReservationWindowStart(),
+        reservationWindowEnd: defaultReservationWindowEnd(),
         pickup: { address: "Pickup" },
         dropoff: { address: "Dropoff" },
         passenger: { name: "Rider One", phone: "0912000000" },
@@ -4908,8 +4917,8 @@ describe("OwnedMobilityService queue and reservation orchestration", () => {
     const booking = seedService.createTenantBooking(
       {
         businessDispatchSubtype: "enterprise_dispatch",
-        reservationWindowStart: "2026-04-29T14:00:00.000Z",
-        reservationWindowEnd: "2026-04-29T15:00:00.000Z",
+        reservationWindowStart: defaultReservationWindowStart(),
+        reservationWindowEnd: defaultReservationWindowEnd(),
         pickup: { address: "Pickup" },
         dropoff: { address: "Dropoff" },
         passenger: { name: "Rider One", phone: "0912000000" },
@@ -5399,8 +5408,8 @@ describe("OwnedMobilityService queue and reservation orchestration", () => {
     const booking = service.createTenantBooking(
       {
         businessDispatchSubtype: "enterprise_dispatch",
-        reservationWindowStart: "2026-04-29T14:00:00.000Z",
-        reservationWindowEnd: "2026-04-29T15:00:00.000Z",
+        reservationWindowStart: defaultReservationWindowStart(),
+        reservationWindowEnd: defaultReservationWindowEnd(),
         pickup: { address: "Pickup" },
         dropoff: { address: "Dropoff" },
         passenger: { name: "Rider One", phone: "0912000000" },
@@ -5474,8 +5483,8 @@ describe("OwnedMobilityService queue and reservation orchestration", () => {
     const booking = service.createTenantBooking(
       {
         businessDispatchSubtype: "enterprise_dispatch",
-        reservationWindowStart: "2026-04-29T14:00:00.000Z",
-        reservationWindowEnd: "2026-04-29T15:00:00.000Z",
+        reservationWindowStart: defaultReservationWindowStart(),
+        reservationWindowEnd: defaultReservationWindowEnd(),
         pickup: { address: "Pickup" },
         dropoff: { address: "Dropoff" },
         passenger: { name: "Rider One", phone: "0912000000" },
@@ -5572,8 +5581,8 @@ describe("OwnedMobilityService queue and reservation orchestration", () => {
       service.createTenantBooking(
         {
           businessDispatchSubtype: "credit_card_airport_transfer",
-          reservationWindowStart: "2026-06-05T10:00:00.000Z",
-          reservationWindowEnd: "2026-06-05T11:00:00.000Z",
+          reservationWindowStart: defaultReservationWindowStart(),
+          reservationWindowEnd: defaultReservationWindowEnd(),
           pickup: { address: "台中市西屯區台灣大道 1 號" },
           dropoff: { address: "桃園機場第一航廈" },
           passenger: { name: "測試乘客", phone: "0911222333" },
@@ -5628,8 +5637,8 @@ describe("OwnedMobilityService queue and reservation orchestration", () => {
       service.createTenantBooking(
         {
           businessDispatchSubtype: "credit_card_airport_transfer",
-          reservationWindowStart: "2026-06-05T10:00:00.000Z",
-          reservationWindowEnd: "2026-06-05T11:00:00.000Z",
+          reservationWindowStart: defaultReservationWindowStart(),
+          reservationWindowEnd: defaultReservationWindowEnd(),
           pickup: { address: "台中市西屯區台灣大道 1 號" },
           dropoff: { address: "桃園機場第一航廈" },
           passenger: { name: "測試乘客", phone: "0911222333" },
@@ -5646,8 +5655,8 @@ describe("OwnedMobilityService queue and reservation orchestration", () => {
       service.createTenantBooking(
         {
           businessDispatchSubtype: "credit_card_airport_transfer",
-          reservationWindowStart: "2026-06-05T10:00:00.000Z",
-          reservationWindowEnd: "2026-06-05T11:00:00.000Z",
+          reservationWindowStart: defaultReservationWindowStart(),
+          reservationWindowEnd: defaultReservationWindowEnd(),
           pickup: { address: "台中市西屯區台灣大道 1 號" },
           dropoff: { address: "桃園機場第一航廈" },
           passenger: { name: "測試乘客", phone: "0911222333" },

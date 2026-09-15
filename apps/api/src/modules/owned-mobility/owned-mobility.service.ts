@@ -1536,7 +1536,6 @@ export class OwnedMobilityService
     idempotencyKeyHeader?: string,
     options?: {
       required?: boolean;
-      enforceLeadTime?: boolean;
       isImmediateReferral?: boolean;
     },
   ): MaybePromise<TenantBookingResult> {
@@ -1576,7 +1575,6 @@ export class OwnedMobilityService
     runtimeProfileCodeHeader?: string,
     options?: {
       required?: boolean;
-      enforceLeadTime?: boolean;
       isImmediateReferral?: boolean;
     },
   ): Promise<TenantBookingResult> {
@@ -1631,7 +1629,6 @@ export class OwnedMobilityService
     runtimeProfileCodeHeader?: string,
     options?: {
       required?: boolean;
-      enforceLeadTime?: boolean;
       isImmediateReferral?: boolean;
     },
   ): MaybePromise<TenantBookingResult> {
@@ -1639,17 +1636,6 @@ export class OwnedMobilityService
     this.assertNonBlank(tenantId, "tenantId");
     this.assertTenantChannelCannotSetQuotedFare(command, identity);
 
-    const requestedPickupMs = Date.parse(command.reservationWindowStart);
-    const isLegacyUnitTestFixture =
-      process.env.NODE_ENV === "test" &&
-      !options?.enforceLeadTime &&
-      !Number.isNaN(requestedPickupMs) &&
-      requestedPickupMs < 1782864000000 && // before 2026-07-01T00:00:00.000Z
-      Date.now() > 1788220800000; // real clock after 2026-09-01 (not fake timers)
-
-    if (!options?.isImmediateReferral && !isLegacyUnitTestFixture) {
-      this.assertBookingLeadTime(command.reservationWindowStart);
-    }
     this.assertBookingRules(
       command.businessDispatchSubtype,
       command.direction,
@@ -1661,6 +1647,10 @@ export class OwnedMobilityService
       tenantId,
       identity,
     );
+
+    if (!options?.isImmediateReferral) {
+      this.assertBookingLeadTime(command.reservationWindowStart);
+    }
     const pickup = this.resolveTenantAddressPayload(
       tenantId,
       command.pickupAddressId ?? null,

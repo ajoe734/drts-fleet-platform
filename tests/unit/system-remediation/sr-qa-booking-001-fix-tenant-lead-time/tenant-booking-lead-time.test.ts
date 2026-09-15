@@ -429,4 +429,91 @@ describe("SR-QA-BOOKING-001-FIX-TENANT-LEAD-TIME: Tenant and referral booking le
       expect(created.orderId).toBeTruthy();
     });
   });
+
+  describe("5. Regression verification of cutoff and modifiable/cancelable rules (C024/C031/C032 compatibility)", () => {
+    it("computes modifiableUntil / cancelableUntil correctly on valid tenant booking and enforces cutoff rules", async () => {
+      vi.useFakeTimers();
+      vi.setSystemTime(new Date("2026-06-01T00:00:00.000Z"));
+      const { service } = createLeadTimeTestHarness();
+      // reservationWindowStart = 40 minutes in future (> 15 min minLeadTime)
+      const reservationWindowStart = "2026-06-01T00:40:00.000Z";
+      const created = await service.createTenantBooking(
+        tenantBookingCommand({ reservationWindowStart }),
+        TENANT_ID,
+        TENANT_ADMIN,
+      );
+
+      const order = service.getOrder(created.orderId);
+      const expectedCutoffMs =
+        new Date(reservationWindowStart).getTime() - 30 * 60_000;
+      expect(new Date(order.modifiableUntil!).getTime()).toBe(expectedCutoffMs);
+      expect(new Date(order.cancelableUntil!).getTime()).toBe(expectedCutoffMs);
+
+      // Before cutoff (at 00:05), update succeeds
+      vi.setSystemTime(new Date("2026-06-01T00:05:00.000Z"));
+      const updated = service.updateTenantBooking(
+        TENANT_ID,
+        created.bookingId,
+        { notes: "Updated before cutoff" } as never,
+        TENANT_ADMIN,
+      );
+      expect((updated as { notes?: string }).notes).toBe(
+        "Updated before cutoff",
+      );
+
+      // Past cutoff (at 00:15 > modifiableUntil at 00:10), update throws 409 ORDER_NOT_MODIFIABLE
+      vi.setSystemTime(new Date("2026-06-01T00:15:00.000Z"));
+      expect(() =>
+        service.updateTenantBooking(
+          TENANT_ID,
+          created.bookingId,
+          { notes: "Update after cutoff" } as never,
+          TENANT_ADMIN,
+        ),
+      ).toThrowError(
+        expect.objectContaining({
+          response: expect.objectContaining({
+            error: expect.objectContaining({ code: "ORDER_NOT_MODIFIABLE" }),
+          }),
+        }),
+      );
+
+      // Past cutoff (at 00:15 > cancelableUntil at 00:10), cancel throws 409 ORDER_NOT_CANCELABLE
+      await expect(
+        service.cancelTenantBooking(TENANT_ID, created.bookingId, {
+          reason: "Cancel after cutoff",
+        }),
+      ).rejects.toMatchObject({
+        response: { error: { code: "ORDER_NOT_CANCELABLE" } },
+      });
+    });
+
+    it("respects service product specific cutoffs (airport transfer 60m, insurance replacement 120m)", async () => {
+      const { service, serviceProductService } = createLeadTimeTestHarness();
+      serviceProductService.createServiceProduct({
+        serviceProductType: "insurance_replacement_vehicle",
+        displayName: "Insurance Replacement Vehicle",
+        timing: "reservation",
+        active: true,
+        defaultBillingMode: "partner_settlement",
+      } as never);
+
+      const reservationWindowStart = new Date(
+        Date.now() + 5 * 3600_000,
+      ).toISOString();
+      const created = await service.createTenantBooking(
+        tenantBookingCommand({
+          businessDispatchSubtype: "insurance_replacement_vehicle",
+          reservationWindowStart,
+        }),
+        TENANT_ID,
+        TENANT_ADMIN,
+      );
+
+      const order = service.getOrder(created.orderId);
+      const expectedCutoffMs =
+        new Date(reservationWindowStart).getTime() - 120 * 60_000;
+      expect(new Date(order.cancelableUntil!).getTime()).toBe(expectedCutoffMs);
+    });
+  });
 });
