@@ -12,7 +12,7 @@
 // the subscription's private key) from scratch and confirms it recovers the
 // exact plaintext, and it verifies the VAPID JWT signature with Node's own
 // `crypto.verify` rather than re-using any signing-side helper.
-import { createECDH, createHmac, createPrivateKey, createDecipheriv, createPublicKey, randomBytes, verify as cryptoVerify } from "node:crypto";
+import { createECDH, createHmac, createDecipheriv, createPublicKey, randomBytes, verify as cryptoVerify } from "node:crypto";
 import { describe, expect, it } from "vitest";
 
 import {
