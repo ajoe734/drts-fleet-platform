@@ -1244,65 +1244,74 @@ jobs:
           echo "enterprise_dispatch=${enterprise_dispatch_url}" >> "$GITHUB_OUTPUT"
           echo "channel_partner_portal=${channel_partner_portal_url}" >> "$GITHUB_OUTPUT"
 
+      # gcloud auth print-identity-token, and IAM credentials API generateIdToken
+      # called with an *already-impersonated* SA access token (self-impersonation),
+      # both fail silently under Workload Identity Federation: the WIF principal's
+      # Token Creator grant on the runtime SA covers access-token impersonation,
+      # not a second-hop ID-token mint from the SA's own derived access token. The
+      # google-github-actions/auth action mints the ID token from the original WIF
+      # federation exchange instead, so it stays within the already-granted trust
+      # chain. One step per private-service audience since the action mints for a
+      # single audience at a time.
+      - name: Mint identity token — tenant console
+        id: id_token_tenant_console
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ env.DEV_WIF_PROVIDER || env.WIF_PROVIDER }}
+          service_account: ${{ env.DEV_WIF_SERVICE_ACCOUNT || env.WIF_SERVICE_ACCOUNT }}
+          project_id: ${{ needs.prepare.outputs.project_id }}
+          token_format: id_token
+          id_token_audience: ${{ steps.urls.outputs.tenant_console }}
+          id_token_include_email: true
+
+      - name: Mint identity token — bank console
+        id: id_token_bank_console
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ env.DEV_WIF_PROVIDER || env.WIF_PROVIDER }}
+          service_account: ${{ env.DEV_WIF_SERVICE_ACCOUNT || env.WIF_SERVICE_ACCOUNT }}
+          project_id: ${{ needs.prepare.outputs.project_id }}
+          token_format: id_token
+          id_token_audience: ${{ steps.urls.outputs.bank_console }}
+          id_token_include_email: true
+
+      - name: Mint identity token — enterprise dispatch
+        id: id_token_enterprise_dispatch
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ env.DEV_WIF_PROVIDER || env.WIF_PROVIDER }}
+          service_account: ${{ env.DEV_WIF_SERVICE_ACCOUNT || env.WIF_SERVICE_ACCOUNT }}
+          project_id: ${{ needs.prepare.outputs.project_id }}
+          token_format: id_token
+          id_token_audience: ${{ steps.urls.outputs.enterprise_dispatch }}
+          id_token_include_email: true
+
       - name: Verify dev endpoints
+        env:
+          TENANT_CONSOLE_ID_TOKEN: ${{ steps.id_token_tenant_console.outputs.id_token }}
+          BANK_CONSOLE_ID_TOKEN: ${{ steps.id_token_bank_console.outputs.id_token }}
+          ENTERPRISE_DISPATCH_ID_TOKEN: ${{ steps.id_token_enterprise_dispatch.outputs.id_token }}
         run: |
+          echo "::add-mask::${TENANT_CONSOLE_ID_TOKEN}"
+          echo "::add-mask::${BANK_CONSOLE_ID_TOKEN}"
+          echo "::add-mask::${ENTERPRISE_DISPATCH_ID_TOKEN}"
+
+          for name in TENANT_CONSOLE_ID_TOKEN BANK_CONSOLE_ID_TOKEN ENTERPRISE_DISPATCH_ID_TOKEN; do
+            if [[ -z "${!name:-}" ]]; then
+              echo "::error::${name} is empty; identity token minting failed upstream." >&2
+              exit 1
+            fi
+          done
+
           curl_ready() {
             curl --fail --silent --show-error --location \
               --retry 10 --retry-all-errors --retry-delay 3 --max-time 30 "$@"
           }
 
-          declare -A ID_TOKENS=()
-
-          get_identity_token() {
-            local audience="$1"
-            if [[ -n "${ID_TOKENS[$audience]:-}" ]]; then
-              printf '%s' "${ID_TOKENS[$audience]}"
-              return 0
-            fi
-
-            local token=""
-            # Attempt 1: gcloud auth print-identity-token
-            token="$(gcloud auth print-identity-token --audiences="${audience}" 2>/dev/null || true)"
-
-            # Attempt 2: IAM credentials API generateIdToken using current access token
-            if [[ -z "${token}" ]]; then
-              local sa="${DEV_WIF_SERVICE_ACCOUNT:-${WIF_SERVICE_ACCOUNT:-}}"
-              if [[ -z "${sa}" ]]; then
-                sa="$(gcloud config get-value account 2>/dev/null || true)"
-              fi
-              if [[ -n "${sa}" ]]; then
-                local access_token
-                access_token="$(gcloud auth print-access-token 2>/dev/null || true)"
-                if [[ -n "${access_token}" ]]; then
-                  local resp
-                  resp="$(curl --silent --show-error --fail \
-                    --request POST \
-                    --header "Authorization: Bearer ${access_token}" \
-                    --header "Content-Type: application/json" \
-                    "https://iamcredentials.googleapis.com/v1/projects/-/serviceAccounts/${sa}:generateIdToken" \
-                    --data "{\"audience\": \"${audience}\", \"includeEmail\": true}" 2>/dev/null || true)"
-                  token="$(echo "${resp}" | python3 -c "import sys, json; print(json.load(sys.stdin).get('token', ''))" 2>/dev/null || true)"
-                fi
-              fi
-            fi
-
-            if [[ -z "${token}" ]]; then
-              echo "::error::Failed to obtain identity token for audience ${audience}" >&2
-              return 1
-            fi
-
-            echo "::add-mask::${token}"
-            ID_TOKENS["$audience"]="$token"
-            printf '%s' "${token}"
-            return 0
-          }
-
           curl_ready_auth() {
             local target_url="$1"
-            shift
-            local audience="$(echo "$target_url" | sed -E 's#^(https?://[^/]+).*#\1#')"
-            local id_token
-            id_token="$(get_identity_token "$audience")"
+            local id_token="$2"
+            shift 2
             curl --fail --silent --show-error --location-trusted \
               --retry 10 --retry-all-errors --retry-delay 3 --max-time 30 \
               --header "Authorization: Bearer ${id_token}" \
@@ -1313,9 +1322,9 @@ jobs:
           curl_ready "${{ steps.urls.outputs.platform_admin }}" >/dev/null
           curl_ready "${{ steps.urls.outputs.ops_console }}" >/dev/null
           curl_ready "${{ steps.urls.outputs.fleet_partner_portal }}" >/dev/null
-          curl_ready_auth "${{ steps.urls.outputs.tenant_console }}" >/dev/null
-          curl_ready_auth "${{ steps.urls.outputs.tenant_console }}/healthz" >/dev/null
-          curl_ready_auth "${{ steps.urls.outputs.bank_console }}" >/dev/null
+          curl_ready_auth "${{ steps.urls.outputs.tenant_console }}" "${TENANT_CONSOLE_ID_TOKEN}" >/dev/null
+          curl_ready_auth "${{ steps.urls.outputs.tenant_console }}/healthz" "${TENANT_CONSOLE_ID_TOKEN}" >/dev/null
+          curl_ready_auth "${{ steps.urls.outputs.bank_console }}" "${BANK_CONSOLE_ID_TOKEN}" >/dev/null
           referral_embed_path="/embed/${{ needs.prepare.outputs.referral_embed_entry_slug }}"
           referral_embed_body="$(curl_ready \
             "${{ steps.urls.outputs.referral_embed }}${referral_embed_path}")"
@@ -1323,11 +1332,18 @@ jobs:
           referral_embed_root_body="$(curl_ready \
             "${{ steps.urls.outputs.referral_embed }}")"
           grep --fixed-strings "$referral_embed_path" <<<"$referral_embed_root_body" >/dev/null
-          curl_ready_auth "${{ steps.urls.outputs.enterprise_dispatch }}" >/dev/null
-          curl_ready_auth "${{ steps.urls.outputs.enterprise_dispatch }}/healthz" >/dev/null
-          curl_ready_auth "${{ steps.urls.outputs.enterprise_dispatch }}/bookings/new" >/dev/null
-          curl_ready_auth "${{ steps.urls.outputs.enterprise_dispatch }}/embed/unsupported-host" >/dev/null
+          curl_ready_auth "${{ steps.urls.outputs.enterprise_dispatch }}" "${ENTERPRISE_DISPATCH_ID_TOKEN}" >/dev/null
+          curl_ready_auth "${{ steps.urls.outputs.enterprise_dispatch }}/healthz" "${ENTERPRISE_DISPATCH_ID_TOKEN}" >/dev/null
+          curl_ready_auth "${{ steps.urls.outputs.enterprise_dispatch }}/bookings/new" "${ENTERPRISE_DISPATCH_ID_TOKEN}" >/dev/null
+          curl_ready_auth "${{ steps.urls.outputs.enterprise_dispatch }}/embed/unsupported-host" "${ENTERPRISE_DISPATCH_ID_TOKEN}" >/dev/null
           curl_ready "${{ steps.urls.outputs.channel_partner_portal }}" >/dev/null
+
+      - name: Re-authenticate to GCP (restore access-token credentials)
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ env.DEV_WIF_PROVIDER || env.WIF_PROVIDER }}
+          service_account: ${{ env.DEV_WIF_SERVICE_ACCOUNT || env.WIF_SERVICE_ACCOUNT }}
+          project_id: ${{ needs.prepare.outputs.project_id }}
 
       - name: Verify referral handoff session lifecycle
         run: |
