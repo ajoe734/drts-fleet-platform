@@ -78,6 +78,10 @@ import {
   InjectPassengerPushPort,
   type PassengerPushPort,
 } from "./passenger-push.port";
+import {
+  PassengerPushRepository,
+  type RegisterPassengerPushSubscriptionCommand,
+} from "./passenger-push.repository";
 
 /**
  * A live, unexpired lease is already held by another worker for this outbox
@@ -162,6 +166,8 @@ export class MultiTaxiService implements OnModuleInit {
     @Optional()
     @InjectPassengerPushPort()
     private readonly passengerPushPort?: PassengerPushPort,
+    @Optional()
+    private readonly pushSubscriptionRepository?: PassengerPushRepository,
   ) {}
 
   async onModuleInit() {
@@ -1110,6 +1116,68 @@ export class MultiTaxiService implements OnModuleInit {
       );
     }
     return receipt;
+  }
+
+  /**
+   * Registers (or replaces) the passenger's Web Push subscription for this
+   * ride. Scoped to `ride:read` — the same scope that lets the passenger
+   * read ride status at all — rather than a dedicated scope, since a push
+   * subscription only ever carries the same ride-status updates the
+   * passenger can already read on this token.
+   */
+  async registerPassengerPushSubscription(
+    accessToken: string,
+    command: RegisterPassengerPushSubscriptionCommand,
+  ): Promise<{ registered: true }> {
+    const token = await this.requireAccessToken(accessToken, "ride:read");
+    const endpoint = command.endpoint?.trim();
+    const p256dh = command.keys?.p256dh?.trim();
+    const auth = command.keys?.auth?.trim();
+    if (!endpoint || !endpoint.startsWith("https://") || !p256dh || !auth) {
+      throw new ApiRequestError(
+        HttpStatus.BAD_REQUEST,
+        "PASSENGER_PUSH_SUBSCRIPTION_INVALID",
+        "A valid Web Push subscription endpoint and keys are required.",
+      );
+    }
+    if (!this.pushSubscriptionRepository) {
+      throw new ApiRequestError(
+        HttpStatus.SERVICE_UNAVAILABLE,
+        "PASSENGER_PUSH_SUBSCRIPTION_STORE_UNAVAILABLE",
+        "Push subscription storage is not available.",
+      );
+    }
+    this.pushSubscriptionRepository.upsertSubscription({
+      orderId: token.orderId,
+      passengerSubjectRef: token.passengerSubjectRef,
+      endpoint,
+      keys: { p256dh, auth },
+      accessTokenExpiresAt: token.expiresAt,
+    });
+    return { registered: true };
+  }
+
+  /** Token-scoped unsubscribe, called on explicit opt-out from the ride page. */
+  async unregisterPassengerPushSubscription(
+    accessToken: string,
+  ): Promise<{ revoked: boolean }> {
+    const token = await this.requireAccessToken(accessToken, "ride:read");
+    const revoked =
+      this.pushSubscriptionRepository?.revokeByOrderId(token.orderId) ?? false;
+    return { revoked };
+  }
+
+  /**
+   * Not a secret — this is the VAPID *public* key the browser needs to call
+   * `PushManager.subscribe({ applicationServerKey })`. Read directly from
+   * the environment (mirroring `resolveAccessTokenTtlHours` below) rather
+   * than via the injected push transport, since the port surface has no
+   * reason to expose a Web-Push-specific getter.
+   */
+  getPassengerPushVapidPublicKey(): { publicKey: string | null } {
+    return {
+      publicKey: process.env.PASSENGER_WEBPUSH_VAPID_PUBLIC_KEY?.trim() || null,
+    };
   }
 
   streamPassengerRide(accessToken: string): Observable<MessageEvent> {

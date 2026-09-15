@@ -14,7 +14,16 @@ import { MultiTaxiController } from "./multi-taxi.controller";
 import { MultiTaxiRepository } from "./multi-taxi.repository";
 import { MultiTaxiService } from "./multi-taxi.service";
 import { PASSENGER_PUSH_PORT } from "./passenger-push.port";
-import { PassengerPushAdapter } from "./passenger-push.adapter";
+import {
+  PASSENGER_DEVICE_RESOLVER,
+  PASSENGER_PUSH_TRANSPORT,
+  PassengerPushAdapter,
+} from "./passenger-push.adapter";
+import {
+  PassengerPushDeviceResolver,
+  PassengerPushRepository,
+} from "./passenger-push.repository";
+import { WebPushTransport } from "./web-push.transport";
 
 @Module({
   imports: [
@@ -35,6 +44,15 @@ import { PassengerPushAdapter } from "./passenger-push.adapter";
     // falls safe to unavailable without faking success.
     PassengerPushAdapter,
     { provide: PASSENGER_PUSH_PORT, useClass: PassengerPushAdapter },
+    // SR-PUSH-WEBPUSH-20260915: passenger receiver is the existing
+    // passenger-web app via browser Web Push (VAPID) — no external push
+    // vendor. The transport carries the VAPID signing + aes128gcm
+    // encryption; the resolver reads the subscription store below.
+    PassengerPushRepository,
+    PassengerPushDeviceResolver,
+    { provide: PASSENGER_DEVICE_RESOLVER, useClass: PassengerPushDeviceResolver },
+    WebPushTransport,
+    { provide: PASSENGER_PUSH_TRANSPORT, useClass: WebPushTransport },
   ],
   exports: [MultiTaxiService],
 })

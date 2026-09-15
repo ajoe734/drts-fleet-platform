@@ -10,6 +10,22 @@ import {
   type PassengerPushReceipt,
 } from "./passenger-push.port";
 
+/**
+ * A Web Push subscription's real shape: its own `endpoint` plus the
+ * subscriber's `p256dh`/`auth` keys (all base64url, straight from the
+ * browser's `PushSubscription.toJSON()`). This must never be flattened into
+ * `deviceToken` — the built-in HTTP transport's single-config-endpoint +
+ * opaque-token shape does not fit a per-subscription push service endpoint
+ * plus its own encryption keys.
+ */
+export interface WebPushSubscriptionDetails {
+  endpoint: string;
+  keys: {
+    p256dh: string;
+    auth: string;
+  };
+}
+
 export interface PassengerDeviceRecord {
   deviceId: string;
   passengerSubjectRef: string;
@@ -17,6 +33,7 @@ export interface PassengerDeviceRecord {
   status: "active" | "expired" | "revoked";
   tenantId?: string | null | undefined;
   expiresAt?: string | null | undefined;
+  webPushSubscription?: WebPushSubscriptionDetails | null | undefined;
 }
 
 export interface PassengerDeviceResolver {
@@ -25,6 +42,8 @@ export interface PassengerDeviceResolver {
     context?: {
       tenantId?: string | undefined;
       requestId?: string | undefined;
+      /** Present so a resolver can look up an order-scoped subscription. */
+      orderId?: string | undefined;
     },
   ): Promise<PassengerDeviceRecord | null> | PassengerDeviceRecord | null;
 }
@@ -39,6 +58,13 @@ export interface PassengerPushTransportRequest {
 
 export interface PassengerPushTransport {
   send(request: PassengerPushTransportRequest): Promise<PassengerPushReceipt>;
+  /**
+   * When present, `PassengerPushAdapter.isAvailable()` defers to this instead
+   * of treating the transport's mere presence as availability — an injected
+   * transport object with no real credentials (e.g. Web Push without VAPID
+   * keys configured) must not be reported as deliverable.
+   */
+  isAvailable?(): boolean;
 }
 
 export interface PassengerPushAdapterConfig {
@@ -80,7 +106,11 @@ export class PassengerPushAdapter implements PassengerPushPort {
 
   isAvailable(): boolean {
     if (this.transport) {
-      return true;
+      // An injected transport's mere presence is not proof it can actually
+      // send: Web Push, for example, still needs VAPID keys. Defer to the
+      // transport's own readiness check when it exposes one instead of
+      // reporting available on object presence alone.
+      return this.transport.isAvailable ? this.transport.isAvailable() : true;
     }
     if (
       this.config?.apiKey ||
@@ -136,6 +166,7 @@ export class PassengerPushAdapter implements PassengerPushPort {
           ...(context.requestId !== undefined
             ? { requestId: context.requestId }
             : {}),
+          orderId: message.orderId,
         },
       );
 

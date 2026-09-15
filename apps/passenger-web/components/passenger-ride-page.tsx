@@ -26,6 +26,11 @@ import {
   requestPassengerRideAction,
   subscribePassengerRideAuthority,
 } from "@/lib/passenger-live";
+import {
+  isWebPushSupported,
+  subscribePassengerPush,
+  type PassengerPushSubscribeResult,
+} from "@/lib/passenger-push-subscription";
 
 function readQueryValue(value: string | string[] | undefined) {
   return Array.isArray(value) ? value[0] : value;
@@ -1926,12 +1931,86 @@ function RideContent({
   );
 }
 
+function PushNotificationPromptMessage(result: PassengerPushSubscribeResult) {
+  switch (result.status) {
+    case "subscribed":
+      return "已開啟行程通知";
+    case "permission_denied":
+      return "瀏覽器通知權限已被拒絕，請至瀏覽器設定重新開啟";
+    case "unsupported":
+      return "此瀏覽器不支援推播通知";
+    case "vapid_unavailable":
+      return "推播服務尚未設定完成，請稍後再試";
+    default:
+      return "開啟通知失敗，請稍後再試";
+  }
+}
+
+function PushNotificationPrompt({ token }: { token: string }) {
+  const [result, setResult] = useState<PassengerPushSubscribeResult | null>(
+    null,
+  );
+  const [pending, setPending] = useState(false);
+
+  if (!isWebPushSupported()) {
+    return null;
+  }
+  if (result?.status === "subscribed") {
+    return (
+      <div
+        style={{
+          margin: `0 ${shellInset}px 12px`,
+          fontSize: 11,
+          color: passengerChrome.muted,
+          textAlign: "center",
+        }}
+      >
+        {PushNotificationPromptMessage(result)}
+      </div>
+    );
+  }
+
+  const enable = () => {
+    if (pending) return;
+    setPending(true);
+    void subscribePassengerPush(token)
+      .then(setResult)
+      .finally(() => setPending(false));
+  };
+
+  return (
+    <ActionGroup>
+      <button
+        type="button"
+        style={buttonStyle("ghost")}
+        onClick={enable}
+        disabled={pending}
+      >
+        {pending ? "設定通知中…" : "開啟行程狀態通知"}
+      </button>
+      {result ? (
+        <div
+          style={{
+            fontSize: 11,
+            color: passengerChrome.muted,
+            textAlign: "center",
+          }}
+        >
+          {PushNotificationPromptMessage(result)}
+        </div>
+      ) : null}
+    </ActionGroup>
+  );
+}
+
 function PassengerScreen({
   fixture,
   token,
+  kind,
 }: {
   fixture: PassengerRideFixture;
   token: string;
+  kind: "ride" | "fares" | "receipt";
 }) {
   return (
     <>
@@ -1954,6 +2033,7 @@ function PassengerScreen({
         }}
       >
         <RideContent fixture={fixture} token={token} />
+        {kind === "ride" ? <PushNotificationPrompt token={token} /> : null}
         <FooterNotice />
       </div>
     </>
@@ -2063,7 +2143,7 @@ export function PassengerRidePage({
 
   return (
     <Shell token={token} sourceMode={sourceMode}>
-      <PassengerScreen fixture={fixture} token={token} />
+      <PassengerScreen fixture={fixture} token={token} kind={kind} />
     </Shell>
   );
 }

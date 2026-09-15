@@ -47,6 +47,14 @@ function isAllowedPassengerPath(path: string[], method: string) {
   if (path.length === 2 && path[0] === "multi-taxi" && path[1] === "rides") {
     return method === "POST";
   }
+  if (
+    path.length === 3 &&
+    path[0] === "multi-taxi" &&
+    path[1] === "push" &&
+    path[2] === "vapid-public-key"
+  ) {
+    return method === "GET";
+  }
   if (path[0] !== "passenger-rides" || path.length < 2) {
     return false;
   }
@@ -62,7 +70,8 @@ function isAllowedPassengerPath(path: string[], method: string) {
   const action = path[2]!;
   return (
     (["events", "receipt"].includes(action) && method === "GET") ||
-    (["cancel", "ratings", "contact"].includes(action) && method === "POST")
+    (["cancel", "ratings", "contact"].includes(action) && method === "POST") ||
+    (action === "push-subscriptions" && (method === "POST" || method === "DELETE"))
   );
 }
 
@@ -172,6 +181,13 @@ export async function GET(
 }
 
 export async function POST(
+  request: NextRequest,
+  context: { params: Promise<{ path: string[] }> },
+) {
+  return forward(request, context);
+}
+
+export async function DELETE(
   request: NextRequest,
   context: { params: Promise<{ path: string[] }> },
 ) {
