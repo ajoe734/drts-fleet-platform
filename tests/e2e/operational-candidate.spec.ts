@@ -37,7 +37,10 @@ function target(surface: { id: string; urlEnv: string; path: string }) {
   return `${baseUrl}${surface.path}`;
 }
 
-function getIdentityToken(surface: { id: string; urlEnv?: string }): string | undefined {
+function getIdentityToken(surface: {
+  id: string;
+  urlEnv?: string;
+}): string | undefined {
   if (
     surface.id === "tenant-console-web" ||
     surface.urlEnv === "DRTS_OPERATIONAL_TENANT_CONSOLE_URL" ||
@@ -95,7 +98,7 @@ for (const surface of manifest.activeSurfaces) {
 
     const http = await request.get(url, {
       failOnStatusCode: false,
-      headers: Object.keys(httpHeaders).length > 0 ? httpHeaders : undefined,
+      ...(idToken ? { headers: httpHeaders } : {}),
     });
     expect(http.status()).toBe(surface.expectedStatus);
     expect(http.headers()[manifest.responseHeader]).toBe(manifest.candidateSha);

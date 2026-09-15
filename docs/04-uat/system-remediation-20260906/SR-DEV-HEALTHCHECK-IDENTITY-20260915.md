@@ -361,10 +361,13 @@ In dev deploy run `34965087961`:
   `pnpm vitest run tests/unit/deployment-architecture-guards.test.ts tests/unit/cloud-run-deploy-retry.test.ts tests/unit/dev-active-surface-contract.test.ts`
   Result: 19 tests passed (100% pass).
 - **TypeScript Static Verification**:
-  `pnpm exec tsc --noEmit tests/e2e/operational-candidate.spec.ts` completed with exit code 0.
+  `pnpm exec tsc -p tsconfig.json --noEmit` verified 0 errors in `tests/e2e/operational-candidate.spec.ts` with `exactOptionalPropertyTypes: true` satisfied (using spread rather than passing explicit `undefined` to `headers`).
+- **Code Style & Lint Verification**:
+  `pnpm lint:root` and `pnpm prettier --check tests/e2e/operational-candidate.spec.ts` passed with 0 errors.
 - **CI Test Coverage Gate**:
   `python3 tools/ci/check_test_coverage.py`
   Result: `check_test_coverage: all 74 test files yield tests CI runs.`
 - **Workflow YAML Validation**:
   `python3 -c "import yaml; yaml.safe_load(open('.github/workflows/deploy-dev.yml'))"` — Valid.
+
 
