@@ -321,44 +321,45 @@ describe("SR-QA-BOOKING-001 / C016 [產品缺口重現，非預期通過]: 企�
     );
   });
 
-  it("gap-2 [現況缺陷重現] 企業／租戶通道建單 2 分鐘後即出發，目前未被拒絕（無對應的 TOO_SOON_TO_BOOK 檢查）", async () => {
+  it("gap-2 [已修復: SR-QA-BOOKING-001-FIX-TENANT-LEAD-TIME] 企業／租戶通道建單 2 分鐘後即出發，正確拒絕 (400 TOO_SOON_TO_BOOK)", () => {
     const { service } = createBookingCutoffHarness();
     const reservationWindowStart = new Date(
       Date.now() + 2 * 60_000,
     ).toISOString();
 
-    // 現況：與 gap-1 使用完全相同的提前時間（2 分鐘 < 15 分鐘門檻），
-    // multi-taxi 通道會拒絕，但企業／租戶通道（createTenantBooking）目前
-    // 直接成功建立訂單。這證明 C016 稽核所述落差在目前程式碼中確實存在，
-    // 且與轉介乘客通道共用同一路徑（createReferralPassengerBooking 內部呼叫
-    // createTenantBooking），故轉介乘客亦受影響。追蹤修復：
-    // SR-QA-BOOKING-001-FIX-TENANT-LEAD-TIME。
-    const created = await service.createTenantBooking(
-      bookingCommand({ reservationWindowStart }),
-      TENANT_ID,
-      TENANT_ADMIN,
-    );
-    expect(created.orderId).toBeTruthy();
-    expect(service.getOrder(created.orderId).reservationWindowStart).toBe(
-      reservationWindowStart,
+    expect(() =>
+      service.createTenantBooking(
+        bookingCommand({ reservationWindowStart }),
+        TENANT_ID,
+        TENANT_ADMIN,
+      ),
+    ).toThrowError(
+      expect.objectContaining({
+        response: expect.objectContaining({
+          error: expect.objectContaining({ code: "TOO_SOON_TO_BOOK" }),
+        }),
+      }),
     );
   });
 
-  it("gap-3 [現況缺陷重現] 企業／租戶通道建單可用過去時間作為 reservationWindowStart，目前未被拒絕", async () => {
+  it("gap-3 [已修復: SR-QA-BOOKING-001-FIX-TENANT-LEAD-TIME] 企業／租戶通道建單可用過去時間作為 reservationWindowStart，正確拒絕 (400 TOO_SOON_TO_BOOK)", () => {
     const { service } = createBookingCutoffHarness();
     const pastReservationWindowStart = new Date(
       Date.now() - 3600_000,
     ).toISOString();
 
-    const created = await service.createTenantBooking(
-      bookingCommand({ reservationWindowStart: pastReservationWindowStart }),
-      TENANT_ID,
-      TENANT_ADMIN,
+    expect(() =>
+      service.createTenantBooking(
+        bookingCommand({ reservationWindowStart: pastReservationWindowStart }),
+        TENANT_ID,
+        TENANT_ADMIN,
+      ),
+    ).toThrowError(
+      expect.objectContaining({
+        response: expect.objectContaining({
+          error: expect.objectContaining({ code: "TOO_SOON_TO_BOOK" }),
+        }),
+      }),
     );
-    expect(created.orderId).toBeTruthy();
-    // 現況缺陷連帶效應：cutoff 也隨之落在過去，訂單建立當下即已超過
-    // modifiableUntil/cancelableUntil，形同建立即不可修改／不可取消。
-    const order = service.getOrder(created.orderId);
-    expect(new Date(order.cancelableUntil!).getTime()).toBeLessThan(Date.now());
   });
 });

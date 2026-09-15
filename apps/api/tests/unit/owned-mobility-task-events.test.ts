@@ -173,6 +173,8 @@ describe("owned mobility task events", () => {
   });
 
   it("emits order_updated when manual fare override changes a fixed-price order", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-04-29T12:00:00.000Z"));
     const { service } = createOwnedMobilityService();
     const streamPromise = firstValueFrom(
       service

@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { BootstrapRequestIdentity } from "../../../../apps/api/src/common/auth";
 import { OwnedMobilityController } from "../../../../apps/api/src/modules/owned-mobility/owned-mobility.controller";
@@ -96,6 +96,15 @@ function createSampleBookingCommand(
 describe("SR-BOOKING-VERIFY: Unit Tests", () => {
   const TENANT_A = "tenant-alpha";
   const TENANT_B = "tenant-beta";
+
+  beforeEach(() => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-09-01T00:00:00.000Z"));
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
 
   describe("Calendar date helpers (@drts/contracts)", () => {
     it("converts inclusive calendar date range to explicit timezone instants", () => {

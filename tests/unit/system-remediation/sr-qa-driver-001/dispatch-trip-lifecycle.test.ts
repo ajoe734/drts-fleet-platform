@@ -18,7 +18,7 @@
 // delivery are out of scope for this VM (see SR-LIVE-DRIVER-001) and are not
 // asserted here.
 
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { ApiRequestError } from "../../../../apps/api/src/common/api-envelope";
 import { OpsDispatchEventsService } from "../../../../apps/api/src/common/ops-dispatch-events.service";
@@ -110,6 +110,15 @@ function bookAndAssign(
 
   return { booking, assignment };
 }
+
+beforeEach(() => {
+  vi.useFakeTimers();
+  vi.setSystemTime(new Date("2026-05-01T08:00:00.000Z"));
+});
+
+afterEach(() => {
+  vi.useRealTimers();
+});
 
 describe("SR-QA-DRIVER-001 C053: driver accept / reject / timeout", () => {
   it("accepts a dispatched task and the acceptance is durably readable back through order status, task status, and the dispatch trace", async () => {

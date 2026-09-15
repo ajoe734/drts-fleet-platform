@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { OpsDispatchEventsService } from "../../../../apps/api/src/common/ops-dispatch-events.service";
 import { AuditNotificationService } from "../../../../apps/api/src/modules/audit-notification/audit-notification.service";
@@ -133,6 +133,15 @@ async function completeOrder(service: OwnedMobilityService, orderId: string) {
 }
 
 describe("SR-QA-BOOKING-001 / C028: 租戶額度建單預留與完成消費", () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-08-01T00:00:00.000Z"));
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
   it("1.1 建單即時預留額度，quota ledger 記錄 reserve", async () => {
     const { service, tenantPartnerService } = createQuotaHarness(TENANT_ID);
     const created = await createBooking(service);

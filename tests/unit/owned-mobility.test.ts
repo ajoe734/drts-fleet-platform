@@ -20,6 +20,14 @@ import {
 import { TenantPartnerService } from "../../apps/api/src/modules/tenant-partner/tenant-partner.service";
 import { WebhookDispatchService } from "../../apps/api/src/modules/tenant-partner/webhook-dispatch.service";
 
+function defaultReservationWindowStart(offsetHours = 2): string {
+  return new Date(Date.now() + offsetHours * 3600_000).toISOString();
+}
+
+function defaultReservationWindowEnd(offsetHours = 3): string {
+  return new Date(Date.now() + offsetHours * 3600_000).toISOString();
+}
+
 function createService(
   repository?: OwnedMobilityRepository,
   tenantPartnerService?: TenantPartnerService,
@@ -542,8 +550,8 @@ describe("owned mobility service", () => {
           dropoff: {
             address: "台中市梧棲區中二路一段9號",
           },
-          reservationWindowStart: "2026-04-18T10:00:00Z",
-          reservationWindowEnd: "2026-04-18T10:20:00Z",
+          reservationWindowStart: defaultReservationWindowStart(),
+          reservationWindowEnd: defaultReservationWindowEnd(),
           passenger: {
             name: "陳小姐",
             phone: "0900123456",
@@ -567,8 +575,8 @@ describe("owned mobility service", () => {
         dropoff: {
           address: "桃園機場第二航廈",
         },
-        reservationWindowStart: "2026-04-15T08:30:00Z",
-        reservationWindowEnd: "2026-04-15T08:45:00Z",
+        reservationWindowStart: defaultReservationWindowStart(),
+        reservationWindowEnd: defaultReservationWindowEnd(),
         passenger: {
           name: "王小明",
           phone: "0912000111",
@@ -689,8 +697,8 @@ describe("owned mobility service", () => {
         dropoff: {
           address: "台北市信義區松高路11號",
         },
-        reservationWindowStart: "2026-04-18T10:00:00Z",
-        reservationWindowEnd: "2026-04-18T10:20:00Z",
+        reservationWindowStart: defaultReservationWindowStart(),
+        reservationWindowEnd: defaultReservationWindowEnd(),
         passenger: {
           name: "陳小姐",
           phone: "0900123456",
@@ -799,8 +807,8 @@ describe("owned mobility service", () => {
         dropoff: {
           address: "台北市信義區松高路11號",
         },
-        reservationWindowStart: "2026-04-18T10:00:00Z",
-        reservationWindowEnd: "2026-04-18T10:20:00Z",
+        reservationWindowStart: defaultReservationWindowStart(),
+        reservationWindowEnd: defaultReservationWindowEnd(),
         passenger: {
           name: "陳小姐",
           phone: "0900123456",
@@ -838,8 +846,8 @@ describe("owned mobility service", () => {
           dropoff: {
             address: "台北市信義區松高路11號",
           },
-          reservationWindowStart: "2026-04-18T10:00:00Z",
-          reservationWindowEnd: "2026-04-18T10:20:00Z",
+          reservationWindowStart: defaultReservationWindowStart(),
+          reservationWindowEnd: defaultReservationWindowEnd(),
           passenger: {
             name: "陳小姐",
             phone: "0900123456",
@@ -867,8 +875,8 @@ describe("owned mobility service", () => {
         dropoff: {
           address: "桃園機場第二航廈",
         },
-        reservationWindowStart: "2026-04-15T08:30:00Z",
-        reservationWindowEnd: "2026-04-15T08:45:00Z",
+        reservationWindowStart: defaultReservationWindowStart(),
+        reservationWindowEnd: defaultReservationWindowEnd(),
         passenger: {
           name: "王小明",
           phone: "0912000111",
@@ -1014,8 +1022,8 @@ describe("owned mobility service", () => {
         dropoff: {
           address: "桃園機場第二航廈",
         },
-        reservationWindowStart: "2026-04-16T10:00:00Z",
-        reservationWindowEnd: "2026-04-16T10:20:00Z",
+        reservationWindowStart: defaultReservationWindowStart(2),
+        reservationWindowEnd: defaultReservationWindowEnd(3),
         passenger: {
           name: "ACME Admin",
           phone: "0912000001",
@@ -1032,8 +1040,8 @@ describe("owned mobility service", () => {
         dropoff: {
           address: "台北南港展覽館",
         },
-        reservationWindowStart: "2026-04-16T11:00:00Z",
-        reservationWindowEnd: "2026-04-16T11:20:00Z",
+        reservationWindowStart: defaultReservationWindowStart(3),
+        reservationWindowEnd: defaultReservationWindowEnd(4),
         passenger: {
           name: "NEWCO Admin",
           phone: "0912000002",
@@ -1106,8 +1114,8 @@ describe("owned mobility service", () => {
         dropoff: {
           address: "台中市梧棲區中二路一段9號",
         },
-        reservationWindowStart: "2026-04-16T10:00:00Z",
-        reservationWindowEnd: "2026-04-16T10:20:00Z",
+        reservationWindowStart: defaultReservationWindowStart(),
+        reservationWindowEnd: defaultReservationWindowEnd(),
         passenger: {
           name: "企業旅客",
           phone: "0912000003",
@@ -1349,8 +1357,8 @@ describe("owned mobility service", () => {
         dropoff: {
           address: "桃園機場第二航廈",
         },
-        reservationWindowStart: "2026-04-16T10:00:00Z",
-        reservationWindowEnd: "2026-04-16T10:20:00Z",
+        reservationWindowStart: defaultReservationWindowStart(),
+        reservationWindowEnd: defaultReservationWindowEnd(),
         passenger: {
           name: "王小明",
           phone: "0912000111",
@@ -1920,8 +1928,8 @@ describe("owned mobility service", () => {
           dropoff: {
             address: "台北市信義區松高路11號",
           },
-          reservationWindowStart: "2026-04-18T10:00:00Z",
-          reservationWindowEnd: "2026-04-18T10:20:00Z",
+          reservationWindowStart: defaultReservationWindowStart(),
+          reservationWindowEnd: defaultReservationWindowEnd(),
           passenger: {
             name: "陳小姐",
             phone: "0900123456",

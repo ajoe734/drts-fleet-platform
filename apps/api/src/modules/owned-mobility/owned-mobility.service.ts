@@ -1542,7 +1542,10 @@ export class OwnedMobilityService
     requestId?: string,
     runtimeProfileCodeHeader?: string,
     idempotencyKeyHeader?: string,
-    options?: { required?: boolean },
+    options?: {
+      required?: boolean;
+      isImmediateReferral?: boolean;
+    },
   ): MaybePromise<TenantBookingResult> {
     const resolvedKey =
       idempotencyKeyHeader?.trim() ||
@@ -1567,6 +1570,7 @@ export class OwnedMobilityService
       identity,
       requestId,
       runtimeProfileCodeHeader,
+      options,
     );
   }
 
@@ -1577,7 +1581,10 @@ export class OwnedMobilityService
     identity?: BootstrapRequestIdentity | null,
     requestId?: string,
     runtimeProfileCodeHeader?: string,
-    options?: { required?: boolean },
+    options?: {
+      required?: boolean;
+      isImmediateReferral?: boolean;
+    },
   ): Promise<TenantBookingResult> {
     const scope = `tenant:${tenantId}:booking_create`;
     const idempotencyService = this.getIdempotencyService();
@@ -1604,6 +1611,7 @@ export class OwnedMobilityService
           identity,
           requestId,
           runtimeProfileCodeHeader,
+          options,
         );
         return {
           data: {
@@ -1627,10 +1635,15 @@ export class OwnedMobilityService
     identity?: BootstrapRequestIdentity | null,
     requestId?: string,
     runtimeProfileCodeHeader?: string,
+    options?: {
+      required?: boolean;
+      isImmediateReferral?: boolean;
+    },
   ): MaybePromise<TenantBookingResult> {
     this.assertRuntimeProfileAllowances(command, runtimeProfileCodeHeader);
     this.assertNonBlank(tenantId, "tenantId");
     this.assertTenantChannelCannotSetQuotedFare(command, identity);
+
     this.assertBookingRules(
       command.businessDispatchSubtype,
       command.direction,
@@ -1642,6 +1655,10 @@ export class OwnedMobilityService
       tenantId,
       identity,
     );
+
+    if (!options?.isImmediateReferral) {
+      this.assertBookingLeadTime(command.reservationWindowStart);
+    }
     const pickup = this.resolveTenantAddressPayload(
       tenantId,
       command.pickupAddressId ?? null,
@@ -8454,6 +8471,39 @@ export class OwnedMobilityService
     return payload;
   }
 
+  private assertBookingLeadTime(reservationWindowStart?: string | null) {
+    if (!reservationWindowStart || typeof reservationWindowStart !== "string") {
+      throw new ApiRequestError(
+        HttpStatus.BAD_REQUEST,
+        "RESERVATION_WINDOW_START_REQUIRED",
+        "reservationWindowStart is required.",
+      );
+    }
+    const requestedPickupMs = Date.parse(reservationWindowStart);
+    if (Number.isNaN(requestedPickupMs)) {
+      throw new ApiRequestError(
+        HttpStatus.BAD_REQUEST,
+        "INVALID_RESERVATION_WINDOW_START",
+        "reservationWindowStart must be a valid ISO-8601 date string.",
+      );
+    }
+    const minLeadTimeMinutes = this.getMinLeadTimeMinutes();
+    const minAllowedPickupMs = Date.now() + minLeadTimeMinutes * 60 * 1000;
+    if (requestedPickupMs < minAllowedPickupMs) {
+      throw new ApiRequestError(
+        HttpStatus.BAD_REQUEST,
+        "TOO_SOON_TO_BOOK",
+        `A tenant booking requires at least ${minLeadTimeMinutes} minutes advance notice.`,
+        {
+          requestedPickupAt: reservationWindowStart,
+          reservationWindowStart,
+          minLeadTimeMinutes,
+          minimumAllowedPickupAt: new Date(minAllowedPickupMs).toISOString(),
+        },
+      );
+    }
+  }
+
   private assertBookingRules(
     businessDispatchSubtype: NonNullable<
       OwnedOrderRecord["businessDispatchSubtype"]
@@ -13240,6 +13290,10 @@ export class OwnedMobilityService
       command.entrySlug,
     );
 
+    if (command.scheduledAt) {
+      this.assertBookingLeadTime(command.scheduledAt);
+    }
+
     try {
       this.tenantPartnerService.getPassengerMasterRecord(tenantId, passengerId);
     } catch {
@@ -13296,6 +13350,10 @@ export class OwnedMobilityService
             : {}),
         },
         execute: async () => {
+          if (command.scheduledAt) {
+            this.assertBookingLeadTime(command.scheduledAt);
+          }
+          const isImmediateReferral = !command.scheduledAt;
           const reservationWindowStart =
             command.scheduledAt ?? new Date().toISOString();
           const tenantBookingCommand: CreateTenantBookingCommand = {
@@ -13332,6 +13390,8 @@ export class OwnedMobilityService
             identity,
             requestId,
             runtimeProfileCodeHeader,
+            undefined,
+            { isImmediateReferral },
           );
 
           if (
@@ -13369,6 +13429,10 @@ export class OwnedMobilityService
       };
     }
 
+    if (command.scheduledAt) {
+      this.assertBookingLeadTime(command.scheduledAt);
+    }
+    const isImmediateReferral = !command.scheduledAt;
     const reservationWindowStart =
       command.scheduledAt ?? new Date().toISOString();
     const tenantBookingCommand: CreateTenantBookingCommand = {
@@ -13407,6 +13471,8 @@ export class OwnedMobilityService
       identity,
       requestId,
       runtimeProfileCodeHeader,
+      undefined,
+      { isImmediateReferral },
     );
 
     return result;

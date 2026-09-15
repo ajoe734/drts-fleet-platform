@@ -388,8 +388,8 @@ describe("reporting and filing service", () => {
         direction: "pickup",
         pickup: { address: "桃園機場第二航廈" },
         dropoff: { address: "台北市信義區松高路11號" },
-        reservationWindowStart: "2026-04-18T10:00:00Z",
-        reservationWindowEnd: "2026-04-18T10:20:00Z",
+        reservationWindowStart: new Date(Date.now() + 7200000).toISOString(),
+        reservationWindowEnd: new Date(Date.now() + 10800000).toISOString(),
         passenger: {
           name: "陳小姐",
           phone: "0900123456",
@@ -404,8 +404,8 @@ describe("reporting and filing service", () => {
         businessDispatchSubtype: "enterprise_dispatch",
         pickup: { address: "台中市政府" },
         dropoff: { address: "台中高鐵站" },
-        reservationWindowStart: "2026-04-18T12:00:00Z",
-        reservationWindowEnd: "2026-04-18T12:20:00Z",
+        reservationWindowStart: new Date(Date.now() + 7200000).toISOString(),
+        reservationWindowEnd: new Date(Date.now() + 10800000).toISOString(),
         passenger: {
           name: "一般企業乘客",
           phone: "0900000000",
