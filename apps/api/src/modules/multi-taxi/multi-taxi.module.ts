@@ -13,10 +13,8 @@ import {
 import { MultiTaxiController } from "./multi-taxi.controller";
 import { MultiTaxiRepository } from "./multi-taxi.repository";
 import { MultiTaxiService } from "./multi-taxi.service";
-import {
-  PASSENGER_PUSH_PORT,
-  UnavailablePassengerPushPort,
-} from "./passenger-push.port";
+import { PASSENGER_PUSH_PORT } from "./passenger-push.port";
+import { PassengerPushAdapter } from "./passenger-push.adapter";
 
 @Module({
   imports: [
@@ -30,10 +28,13 @@ import {
   providers: [
     MultiTaxiRepository,
     MultiTaxiService,
-    // P5-CALL-001 / P5-PUSH-001 stay `blocked_ext`: until a provider contract
+    // P5-CALL-001 stays `blocked_ext`: until a provider contract
     // and credentials land, the only binding is the one that reports absence.
     { provide: MASKED_CALL_PORT, useClass: UnavailableMaskedCallPort },
-    { provide: PASSENGER_PUSH_PORT, useClass: UnavailablePassengerPushPort },
+    // P5-PUSH-001: real adapter with safe absence detection. Absence of credentials
+    // falls safe to unavailable without faking success.
+    PassengerPushAdapter,
+    { provide: PASSENGER_PUSH_PORT, useClass: PassengerPushAdapter },
   ],
   exports: [MultiTaxiService],
 })

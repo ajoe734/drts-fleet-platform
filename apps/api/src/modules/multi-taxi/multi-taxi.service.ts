@@ -978,6 +978,18 @@ export class MultiTaxiService implements OnModuleInit {
       providerName: null,
     });
 
+    if (record.status === "delivered") {
+      return {
+        outboxId: record.outboxId,
+        status: "delivered",
+        result: "delivered",
+        attemptCount: record.attemptCount,
+        nextAttemptAt: record.nextAttemptAt,
+        deliveredAt: record.deliveredAt ?? attemptedAt.toISOString(),
+        providerName: null,
+      };
+    }
+
     if (!this.passengerPushPort?.isAvailable()) {
       return this.persistPassengerNotificationOutcome(
         failure("provider_not_configured"),
@@ -1036,9 +1048,9 @@ export class MultiTaxiService implements OnModuleInit {
       providerName: receipt.providerName,
     };
 
-    let recordResult: Awaited<
-      ReturnType<MultiTaxiRepository["recordPushDeliveryOutcome"]>
-    > | undefined;
+    let recordResult:
+      | Awaited<ReturnType<MultiTaxiRepository["recordPushDeliveryOutcome"]>>
+      | undefined;
     try {
       recordResult = await this.repository?.recordPushDeliveryOutcome({
         outboxId: record.outboxId,
