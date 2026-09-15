@@ -14,19 +14,20 @@ import { TenantPartnerService } from "../../../../apps/api/src/modules/tenant-pa
 // consumption" 已驗證之 建單預留(reserve) -> 完成消費(consume) 路徑，作為本任務
 // 的獨立回歸證據，非重寫。
 //
-// 2.x 區塊是本任務新發現、直接檢視原始碼確認的產品缺口重現：
-//   - `owned-mobility.service.ts` 的 `cancelOwnedOrder()` / `cancelTenantBooking()`
-//     （3355-5555 行）完整讀過，全程未呼叫 `tenantPartnerService` 的任何方法。
-//   - `tenant-quota-ledger.ts` 的 `buildQuotaLifecycleEntrySpecs()` 明確支援
-//     "cancel" -> "release" ledger entry transition，且
-//     `tenant-partner.service.ts` 的用量彙總邏輯（約 2443-2447 行）也已支援
-//     解讀 entryType "release"；但全庫搜尋 `buildQuotaLifecycleEntrySpecs` 僅
-//     `tenant-quota-ledger.test.ts` 呼叫，生產路徑從未呼叫。
-//   - 換言之：取消租戶訂單目前「完全不會」釋放建單時預留的額度，
-//     `pendingReservedBookingCount` 永久停留，額度用盡後即使取消訂單仍無法
-//     再次建單。此為現況缺陷重現（非預期通過），已依規範另建
-//     SR-QA-BOOKING-001-FIX-QUOTA-RELEASE 修復子任務追蹤，不在本
-//     verification-only 任務內直接修改業務碼。
+// 2.x 區塊沿革說明：
+//   - 原在 SR-QA-BOOKING-001 任務中作為產品缺口重現（gap-1/gap-2/gap-3）：
+//     當時檢視原始碼發現 `owned-mobility.service.ts` 取消訂單時全程未呼叫 `tenantPartnerService`，
+//     導致建單預留之額度在取消時完全不會釋放，`pendingReservedBookingCount` 永久停留，
+//     額度用盡後即使取消訂單仍無法再次建單。當時依 verification-only 任務紀律
+//     以「現況缺陷重現，非預期通過」斷言鎖定該缺口，並建立子任務追蹤。
+//   - 後續於 SR-QA-BOOKING-001-FIX-QUOTA-RELEASE（PR #2029, commit acfe53f65）完成修復：
+//     `owned-mobility.service.ts` 取消鏈路已完整接通 `tenantPartnerService`，
+//     並透過 `tenant-quota-ledger.ts` 的 `buildQuotaLifecycleEntrySpecs()` 產生
+//     entryType 為 "release" 的分錄，正確釋放 pendingReserved 配額。
+//   - 本任務（SR-QA-BOOKING-001-FIX-QUOTA-RELEASE-STALE-GAP-ASSERTIONS）：
+//     將原已過期的缺口重現斷言改寫為驗證「修復後正確行為」的回歸測試（regression suite），
+//     涵蓋 release 分錄生成 (gap-1)、pendingReservedBookingCount 歸零 (gap-2)、
+//     以及額度騰出後可再次成功建單 (gap-3)，並完整保留歷史沿革說明。
 function createQuotaHarness(tenantId: string) {
   const auditNotificationService = new AuditNotificationService();
   const tenantPartnerService = new TenantPartnerService(
@@ -87,6 +88,7 @@ const RESERVATION_WINDOW_START = "2026-08-01T14:00:00.000Z";
 async function createBooking(
   service: OwnedMobilityService,
   reservationWindowStart = RESERVATION_WINDOW_START,
+  requestId = `req-quota-create-${Math.random()}`,
 ) {
   return service.createTenantBooking(
     {
@@ -99,7 +101,7 @@ async function createBooking(
     } as never,
     TENANT_ID,
     TENANT_ADMIN,
-    "req-quota-create",
+    requestId,
   );
 }
 
@@ -187,12 +189,12 @@ describe("SR-QA-BOOKING-001 / C028: 租戶額度建單預留與完成消費", ()
   });
 });
 
-describe("SR-QA-BOOKING-001 / C028 [產品缺口重現，非預期通過]: 取消租戶訂單不釋放已預留額度", () => {
+describe("SR-QA-BOOKING-001 / C028 [回歸驗證，原產品缺口已修復]: 取消租戶訂單釋放已預留額度 (原 gap-1/gap-2/gap-3 回歸防線)", () => {
   afterEach(() => {
     vi.useRealTimers();
   });
 
-  it("gap-1 [現況缺陷重現] 取消訂單後 quota ledger 沒有任何 release 分錄", async () => {
+  it("gap-1 [回歸驗證／原現況缺陷已修復] 取消訂單後 quota ledger 確實新增 release 分錄", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-08-01T00:00:00.000Z"));
     const { service, tenantPartnerService } = createQuotaHarness(TENANT_ID);
@@ -208,18 +210,40 @@ describe("SR-QA-BOOKING-001 / C028 [產品缺口重現，非預期通過]: 取�
     const ledger = tenantPartnerService.listTenantQuotaLedger(TENANT_ID, {
       bookingId: created.bookingId,
     });
-    // 現況：cancel 只有最初的 "reserve" 分錄，沒有任何 "release" 分錄
-    // （buildQuotaLifecycleEntrySpecs 的 cancel->release 路徑在生產程式碼
-    // 中從未被呼叫）。
-    expect(ledger.some((entry) => entry.entryType === "release")).toBe(false);
-    expect(ledger.every((entry) => entry.entryType === "reserve")).toBe(true);
+    // 沿革說明：
+    // 原 SR-QA-BOOKING-001 現況缺陷重現階段，cancel 因未對接 tenantPartnerService
+    // 而只有最初的 "reserve" 分錄，無任何 "release" 分錄。
+    // 經 SR-QA-BOOKING-001-FIX-QUOTA-RELEASE 修復後，cancelTenantBooking / cancelOwnedOrder
+    // 會在取消時呼叫 tenantPartnerService 並透過 buildQuotaLifecycleEntrySpecs
+    // 寫入 release 分錄。此處更新為正確行為的回歸斷言：
+    const releaseEntries = ledger.filter((entry) => entry.entryType === "release");
+    expect(releaseEntries.length).toBeGreaterThanOrEqual(1);
+
+    const bookingCountRelease = releaseEntries.find(
+      (entry) => entry.dimension === "booking_count",
+    );
+    expect(bookingCountRelease).toBeDefined();
+    expect(bookingCountRelease).toMatchObject({
+      tenantId: TENANT_ID,
+      bookingId: created.bookingId,
+      entryType: "release",
+      dimension: "booking_count",
+      amount: 1,
+    });
   });
 
-  it("gap-2 [現況缺陷重現] 取消訂單後 getTenantQuotaSummary 的 pendingReservedBookingCount 仍計入已取消的訂單", async () => {
+  it("gap-2 [回歸驗證／原現況缺陷已修復] 取消訂單後 getTenantQuotaSummary 的 pendingReservedBookingCount 正確歸零", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-08-01T00:00:00.000Z"));
     const { service, tenantPartnerService } = createQuotaHarness(TENANT_ID);
     const created = await createBooking(service);
+
+    // 建單後預留額度為 1
+    const usageBeforeCancel = tenantPartnerService.getTenantQuotaSummary(
+      TENANT_ID,
+      RESERVATION_WINDOW_START,
+    ).usage;
+    expect(usageBeforeCancel.pendingReservedBookingCount).toBe(1);
 
     await service.cancelTenantBooking(TENANT_ID, created.bookingId, {
       reason: "客戶臨時取消",
@@ -229,13 +253,17 @@ describe("SR-QA-BOOKING-001 / C028 [產品缺口重現，非預期通過]: 取�
       TENANT_ID,
       RESERVATION_WINDOW_START,
     ).usage;
-    // 預期正確行為應為 0（取消應歸還額度）；現況記錄實際仍為 1，
-    // 證明取消未觸發額度釋放。此斷言驗證的是「現況」而非「正確」行為。
-    expect(usageAfterCancel.pendingReservedBookingCount).toBe(1);
+    // 沿革說明：
+    // 原 SR-QA-BOOKING-001 現況缺陷重現階段，取消後 pendingReservedBookingCount
+    // 仍殘留為 1（斷言驗證了該未釋放缺陷）。
+    // 經 SR-QA-BOOKING-001-FIX-QUOTA-RELEASE 修復後，取消後預留額度已正確釋放，
+    // pendingReservedBookingCount 歸零，且可用額度恢復至上限 2。
+    expect(usageAfterCancel.pendingReservedBookingCount).toBe(0);
     expect(usageAfterCancel.confirmedBookingCount).toBe(0);
+    expect(usageAfterCancel.bookingCountRemaining).toBe(2);
   });
 
-  it("gap-3 [現況缺陷重現／業務衝擊] 額度用盡後取消一筆訂單，仍無法建立新訂單（quota 未真正騰出）", async () => {
+  it("gap-3 [回歸驗證／原現況缺陷已修復／業務閉環] 額度用盡後取消一筆訂單，額度騰出後可再次成功建立新訂單", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-08-01T00:00:00.000Z"));
     const { service, tenantPartnerService } = createQuotaHarness(TENANT_ID);
@@ -255,14 +283,23 @@ describe("SR-QA-BOOKING-001 / C028 [產品缺口重現，非預期通過]: 取�
       reason: "騰出額度",
     });
 
-    // 現況缺陷：因取消未釋放額度，第三筆訂單仍因 hard_block 被拒絕
-    // （QUOTA_INSUFFICIENT_AT_COMMIT），即使邏輯上應有 1 個空位。
-    await expect(
-      createBooking(service, "2026-08-01T16:00:00.000Z"),
-    ).rejects.toMatchObject({
-      response: {
-        error: { code: "QUOTA_INSUFFICIENT_AT_COMMIT" },
-      },
+    // 沿革說明：
+    // 原 SR-QA-BOOKING-001 現況缺陷重現階段，因取消未釋放額度，第三筆訂單
+    // 即使在取消一筆訂單後仍被 hard_block (QUOTA_INSUFFICIENT_AT_COMMIT) 拒絕。
+    // 經 SR-QA-BOOKING-001-FIX-QUOTA-RELEASE 修復後，取消訂單已能即時釋放額度，
+    // 騰出之額度可立即供第三筆訂單成功建立（完成業務閉環）。
+    const third = await createBooking(service, "2026-08-01T16:00:00.000Z");
+    expect(third.status).toBe("created");
+    expect(third.bookingId).toBeDefined();
+    expect(
+      tenantPartnerService.getTenantQuotaSummary(
+        TENANT_ID,
+        RESERVATION_WINDOW_START,
+      ).usage,
+    ).toMatchObject({
+      pendingReservedBookingCount: 2,
+      confirmedBookingCount: 0,
+      bookingCountRemaining: 0,
     });
   });
 });
