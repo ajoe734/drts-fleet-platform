@@ -23,7 +23,11 @@ import { getTenantRoleScopes } from "../../common/auth/auth.constants";
 import { SecurityEventsService } from "../security-events/security-events.service";
 import { TenantPartnerService } from "../tenant-partner/tenant-partner.service";
 import { PartnerUserIdentityLinkRepository } from "../tenant-partner/partner-user-identity-link.repository";
-import { detectAuthEnvironment } from "../../config/auth-startup-config";
+import {
+  detectAuthEnvironment,
+  isOrdinaryLoginMfaRequired,
+  resolveOrdinaryLoginMfaPolicy,
+} from "../../config/auth-startup-config";
 import { ConsumedOidcStateRepository } from "./consumed-oidc-state.repository";
 
 export interface OidcStateRecord {
@@ -457,8 +461,15 @@ export class OidcPkceService {
         m.toLowerCase(),
       ),
     );
+    // Named, auditable policy switch — see isOrdinaryLoginMfaRequired in
+    // auth-startup-config.ts. v1 product decision (2026-09-15): ordinary
+    // tenant login does not require an MFA-bearing amr claim. This gate is
+    // distinct from, and does not weaken, the tenant_admin/tenant_ops_admin
+    // trusted-MFA requirement enforced separately in auth.controller.ts.
+    const mfaRequired = isOrdinaryLoginMfaRequired();
+    const mfaPolicy = resolveOrdinaryLoginMfaPolicy();
 
-    if (!mfaVerified) {
+    if (mfaRequired && !mfaVerified) {
       this.recordSecurityEvent({
         eventType: "tenant_oidc_session.denied",
         outcome: "denied",
@@ -539,6 +550,7 @@ export class OidcPkceService {
         acr,
         authTime,
         mfaVerified,
+        mfaPolicy,
       },
       meta,
     });
@@ -703,8 +715,13 @@ export class OidcPkceService {
         m.toLowerCase(),
       ),
     );
+    // Named, auditable policy switch — see isOrdinaryLoginMfaRequired in
+    // auth-startup-config.ts. v1 product decision (2026-09-15): ordinary
+    // partner login does not require an MFA-bearing amr claim.
+    const mfaRequired = isOrdinaryLoginMfaRequired();
+    const mfaPolicy = resolveOrdinaryLoginMfaPolicy();
 
-    if (!mfaVerified) {
+    if (mfaRequired && !mfaVerified) {
       this.recordSecurityEvent({
         eventType: "partner_oidc_session.denied",
         outcome: "denied",
@@ -774,6 +791,12 @@ export class OidcPkceService {
       actorType: "partner_user",
       subjectId: claims.sub,
       tokenId: token,
+      afterSummary: {
+        sub: claims.sub,
+        amr,
+        mfaVerified,
+        mfaPolicy,
+      },
       meta,
     });
 

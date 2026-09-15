@@ -446,7 +446,40 @@ describe("OidcPkceService & BFF Auth Flow (IAM-IDP-001)", () => {
       ).rejects.toThrow(ApiRequestError);
     });
 
-    it("rejects partner login when subject claims lack required MFA proof", async () => {
+    it("v1 policy: allows partner login without MFA-bearing amr claims (product decision 2026-09-15)", async () => {
+      const partnerUserIdentityLinkRepo = (oidcService as any)
+        .partnerUserIdentityLinkRepo;
+      await partnerUserIdentityLinkRepo.resolveOrCreate({
+        entrySlug: "yuhe-residence",
+        partnerUserRef: "sub_no_mfa",
+      });
+
+      const loginParams = oidcService.generateLoginParameters("partner", {
+        partnerId: "yuhe-residence",
+      });
+      const session = await oidcService.exchangePartnerCallbackSession(
+        {
+          provider: "oidc",
+          callbackUrl: "http://localhost:3000/api/auth/callback",
+          code: "code_no_mfa",
+          state: loginParams.state,
+          partnerId: "yuhe-residence",
+        },
+        { stateToken: loginParams.stateToken },
+      );
+      expect(session.accessToken).toBeDefined();
+      expect(session.identity.realm).toBe("partner");
+    });
+
+    it("AUTH_REQUIRE_ORDINARY_LOGIN_MFA=true restores the blanket partner MFA gate without a code change", async () => {
+      const partnerUserIdentityLinkRepo = (oidcService as any)
+        .partnerUserIdentityLinkRepo;
+      await partnerUserIdentityLinkRepo.resolveOrCreate({
+        entrySlug: "yuhe-residence",
+        partnerUserRef: "sub_no_mfa",
+      });
+
+      process.env.AUTH_REQUIRE_ORDINARY_LOGIN_MFA = "true";
       const loginParams = oidcService.generateLoginParameters("partner", {
         partnerId: "yuhe-residence",
       });
