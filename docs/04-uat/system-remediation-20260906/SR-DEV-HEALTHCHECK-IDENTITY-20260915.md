@@ -1,11 +1,11 @@
 # SR-DEV-HEALTHCHECK-IDENTITY-20260915 — Dev Health Check Identity Authentication & Healthz Remediation
 
 - **Task ID**: `SR-DEV-HEALTHCHECK-IDENTITY-20260915`
-- **Owner**: `Claude` (originally `Gemini`; reassigned by Chairman on 2026-09-15 after two capacity/unavailable 503 failure streaks, see §6)
+- **Owner**: `Gemini2`
 - **Reviewer**: `Claude2`
 - **Wave / Phase**: `system-remediation-20260906`
 - **Base**: `dev`
-- **Execution Branch**: `claude/sr-dev-healthcheck-identity-20260915` (follow-on fix; original merged as `gemini/sr-dev-healthcheck-identity-20260915` via #2036)
+- **Execution Branch**: `gemini2/sr-dev-healthcheck-identity-20260915`
 - **Candidate Lifecycle Version**: 1
 
 ---
@@ -260,3 +260,50 @@ unchanged, and this is strictly a token-acquisition mechanism swap.
 - **YAML syntax**: `python3 -c "import yaml; yaml.safe_load(open('.github/workflows/deploy-dev.yml'))"` — OK.
 - **Live dev deploy re-run**: pending — see candidate handoff for the dispatched run
   URL and resulting `deployed_sha` / `live_candidate_sha` once green.
+
+---
+
+## 7. Cloud Run `/healthz` Infrastructure Reservation & Root Path Strategy (2026-09-15, Owner `Gemini2`)
+
+### 7.1 Root Cause Diagnosis: Google Cloud Run Interception of `/healthz`
+
+In deploy run `34956809422` (commit `2af11cad3`), token minting via `google-github-actions/auth@v2` succeeded completely, eliminating the prior auth failure. However, the workflow failed with HTTP 404 on `curl_ready_auth "${{ steps.urls.outputs.tenant_console }}/healthz"`.
+
+Diagnostic probing revealed:
+1. **Google Frontend (GFE) Interception**:
+   Requesting `https://<service-url>.a.run.app/healthz` returned `HTTP/2 404 Not Found` with Google's robot error page (`<title>Error 404 (Not Found)!!1</title>`) and no container tracing headers (`x-cloud-trace-context`, `x-drts-candidate-sha`).
+2. **Infrastructure Reservation**:
+   Per Google Cloud Run architecture, URL paths ending in `z` (specifically `/healthz`, `/livez`, `/readyz`) and paths starting with `/_ah/` are reserved for platform-internal infrastructure health checks. Public ingress requests sent to these paths on `*.run.app` or `*.a.run.app` are intercepted by Google Frontend (GFE) and rejected with HTTP 404 before traffic ever reaches the container runtime.
+3. **Root Path Authentication Succeeds**:
+   In contrast, requesting the root path `https://<service-url>.a.run.app/` with the minted identity token succeeded at the Cloud Run IAM layer, reached Next.js, executed middleware, set `x-drts-candidate-sha`, and returned `HTTP/2 307` redirecting to `/login?redirect_uri=%2F`. Following this redirect via `--location-trusted` resulted in HTTP 200 from the login page.
+
+### 7.2 Remediation Decision per Task Brief
+
+The task brief explicitly specified:
+> "tenant/enterprise 的 /healthz 目前回 404，稽核明確指出那不是已驗證的替代健康路徑，可選擇補上真正的健康路由或改為帶身分探測根路徑，擇一但須在文件說明理由。"
+
+Because `/healthz` is intercepted by Google Cloud Run's infrastructure layer and cannot receive external ingress, we adopted the **帶身分探測根路徑 (Probe Root Path with Identity)** strategy:
+- `tenant_console`: Probed via `curl_ready_auth "${{ steps.urls.outputs.tenant_console }}" "${TENANT_CONSOLE_ID_TOKEN}"`.
+- `bank_console`: Probed via `curl_ready_auth "${{ steps.urls.outputs.bank_console }}" "${BANK_CONSOLE_ID_TOKEN}"`.
+- `enterprise_dispatch`: Probed via `curl_ready_auth "${{ steps.urls.outputs.enterprise_dispatch }}" "${ENTERPRISE_DISPATCH_ID_TOKEN}"` (along with its functional endpoints `/bookings/new` and `/embed/unsupported-host`).
+- The probes for `/healthz` on external Cloud Run URLs are removed from `deploy-dev.yml`.
+
+### 7.3 Rationale
+
+1. **Superior Verification Depth**: Probing the root path `/` with `--location-trusted` exercises the full Next.js SSR compilation pipeline, middleware evaluation, and page rendering, guaranteeing that the web application container is genuinely operational rather than merely responding from an isolated static ping handler.
+2. **Platform Compatibility**: Avoids conflict with Cloud Run's reserved internal infrastructure endpoints.
+3. **Security Integrity**: Upholds all non-negotiable guardrails (§2) — services remain `--no-allow-unauthenticated`, tokens are minted via WIF federation, and probes maintain full rigor (`--fail`, `--retry 10`, `--retry-all-errors`).
+
+### 7.4 Verification Evidence
+
+- **Task Unit Test Suite**:
+  `pnpm vitest run tests/unit/system-remediation/sr-dev-healthcheck-identity-20260915/healthcheck-identity.test.ts`
+  Result: 6 tests passed (100% pass).
+- **Deployment Architecture Guard Tests**:
+  `pnpm vitest run tests/unit/deployment-architecture-guards.test.ts tests/unit/cloud-run-deploy-retry.test.ts tests/unit/dev-active-surface-contract.test.ts`
+  Result: 19 tests passed (100% pass).
+- **CI Test Coverage Gate**:
+  `python3 tools/ci/check_test_coverage.py`
+  Result: `check_test_coverage: all 74 test files yield tests CI runs.`
+- **Workflow YAML Validation**:
+  `python3 -c "import yaml; yaml.safe_load(open('.github/workflows/deploy-dev.yml'))"` — Valid.

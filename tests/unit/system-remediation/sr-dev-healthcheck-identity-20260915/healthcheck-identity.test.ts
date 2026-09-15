@@ -24,14 +24,16 @@ describe("SR-DEV-HEALTHCHECK-IDENTITY-20260915: dev deployment health check iden
     expect(workflowContent).toContain("--retry 10");
     expect(workflowContent).toContain("--fail");
 
-    // Assert private services use curl_ready_auth
-    expect(workflowContent).toContain('curl_ready_auth "${{ steps.urls.outputs.tenant_console }}"');
-    expect(workflowContent).toContain('curl_ready_auth "${{ steps.urls.outputs.tenant_console }}/healthz"');
-    expect(workflowContent).toContain('curl_ready_auth "${{ steps.urls.outputs.bank_console }}"');
-    expect(workflowContent).toContain('curl_ready_auth "${{ steps.urls.outputs.enterprise_dispatch }}"');
-    expect(workflowContent).toContain('curl_ready_auth "${{ steps.urls.outputs.enterprise_dispatch }}/healthz"');
-    expect(workflowContent).toContain('curl_ready_auth "${{ steps.urls.outputs.enterprise_dispatch }}/bookings/new"');
-    expect(workflowContent).toContain('curl_ready_auth "${{ steps.urls.outputs.enterprise_dispatch }}/embed/unsupported-host"');
+    // Assert private services use curl_ready_auth with minted identity tokens
+    expect(workflowContent).toContain('curl_ready_auth "${{ steps.urls.outputs.tenant_console }}" "${TENANT_CONSOLE_ID_TOKEN}"');
+    expect(workflowContent).toContain('curl_ready_auth "${{ steps.urls.outputs.bank_console }}" "${BANK_CONSOLE_ID_TOKEN}"');
+    expect(workflowContent).toContain('curl_ready_auth "${{ steps.urls.outputs.enterprise_dispatch }}" "${ENTERPRISE_DISPATCH_ID_TOKEN}"');
+    expect(workflowContent).toContain('curl_ready_auth "${{ steps.urls.outputs.enterprise_dispatch }}/bookings/new" "${ENTERPRISE_DISPATCH_ID_TOKEN}"');
+    expect(workflowContent).toContain('curl_ready_auth "${{ steps.urls.outputs.enterprise_dispatch }}/embed/unsupported-host" "${ENTERPRISE_DISPATCH_ID_TOKEN}"');
+
+    // Assert Cloud Run infrastructure-reserved path /healthz is not probed over public GFE
+    expect(workflowContent).not.toContain('curl_ready_auth "${{ steps.urls.outputs.tenant_console }}/healthz"');
+    expect(workflowContent).not.toContain('curl_ready_auth "${{ steps.urls.outputs.enterprise_dispatch }}/healthz"');
   });
 
   it("maintains anonymous probes for public services", () => {

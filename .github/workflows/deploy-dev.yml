@@ -1323,7 +1323,6 @@ jobs:
           curl_ready "${{ steps.urls.outputs.ops_console }}" >/dev/null
           curl_ready "${{ steps.urls.outputs.fleet_partner_portal }}" >/dev/null
           curl_ready_auth "${{ steps.urls.outputs.tenant_console }}" "${TENANT_CONSOLE_ID_TOKEN}" >/dev/null
-          curl_ready_auth "${{ steps.urls.outputs.tenant_console }}/healthz" "${TENANT_CONSOLE_ID_TOKEN}" >/dev/null
           curl_ready_auth "${{ steps.urls.outputs.bank_console }}" "${BANK_CONSOLE_ID_TOKEN}" >/dev/null
           referral_embed_path="/embed/${{ needs.prepare.outputs.referral_embed_entry_slug }}"
           referral_embed_body="$(curl_ready \
@@ -1333,7 +1332,6 @@ jobs:
             "${{ steps.urls.outputs.referral_embed }}")"
           grep --fixed-strings "$referral_embed_path" <<<"$referral_embed_root_body" >/dev/null
           curl_ready_auth "${{ steps.urls.outputs.enterprise_dispatch }}" "${ENTERPRISE_DISPATCH_ID_TOKEN}" >/dev/null
-          curl_ready_auth "${{ steps.urls.outputs.enterprise_dispatch }}/healthz" "${ENTERPRISE_DISPATCH_ID_TOKEN}" >/dev/null
           curl_ready_auth "${{ steps.urls.outputs.enterprise_dispatch }}/bookings/new" "${ENTERPRISE_DISPATCH_ID_TOKEN}" >/dev/null
           curl_ready_auth "${{ steps.urls.outputs.enterprise_dispatch }}/embed/unsupported-host" "${ENTERPRISE_DISPATCH_ID_TOKEN}" >/dev/null
           curl_ready "${{ steps.urls.outputs.channel_partner_portal }}" >/dev/null
