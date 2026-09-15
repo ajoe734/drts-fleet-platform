@@ -1251,12 +1251,71 @@ jobs:
               --retry 10 --retry-all-errors --retry-delay 3 --max-time 30 "$@"
           }
 
+          declare -A ID_TOKENS=()
+
+          get_identity_token() {
+            local audience="$1"
+            if [[ -n "${ID_TOKENS[$audience]:-}" ]]; then
+              printf '%s' "${ID_TOKENS[$audience]}"
+              return 0
+            fi
+
+            local token=""
+            # Attempt 1: gcloud auth print-identity-token
+            token="$(gcloud auth print-identity-token --audiences="${audience}" 2>/dev/null || true)"
+
+            # Attempt 2: IAM credentials API generateIdToken using current access token
+            if [[ -z "${token}" ]]; then
+              local sa="${DEV_WIF_SERVICE_ACCOUNT:-${WIF_SERVICE_ACCOUNT:-}}"
+              if [[ -z "${sa}" ]]; then
+                sa="$(gcloud config get-value account 2>/dev/null || true)"
+              fi
+              if [[ -n "${sa}" ]]; then
+                local access_token
+                access_token="$(gcloud auth print-access-token 2>/dev/null || true)"
+                if [[ -n "${access_token}" ]]; then
+                  local resp
+                  resp="$(curl --silent --show-error --fail \
+                    --request POST \
+                    --header "Authorization: Bearer ${access_token}" \
+                    --header "Content-Type: application/json" \
+                    "https://iamcredentials.googleapis.com/v1/projects/-/serviceAccounts/${sa}:generateIdToken" \
+                    --data "{\"audience\": \"${audience}\", \"includeEmail\": true}" 2>/dev/null || true)"
+                  token="$(echo "${resp}" | python3 -c "import sys, json; print(json.load(sys.stdin).get('token', ''))" 2>/dev/null || true)"
+                fi
+              fi
+            fi
+
+            if [[ -z "${token}" ]]; then
+              echo "::error::Failed to obtain identity token for audience ${audience}" >&2
+              return 1
+            fi
+
+            echo "::add-mask::${token}"
+            ID_TOKENS["$audience"]="$token"
+            printf '%s' "${token}"
+            return 0
+          }
+
+          curl_ready_auth() {
+            local target_url="$1"
+            shift
+            local audience="$(echo "$target_url" | sed -E 's#^(https?://[^/]+).*#\1#')"
+            local id_token
+            id_token="$(get_identity_token "$audience")"
+            curl --fail --silent --show-error --location-trusted \
+              --retry 10 --retry-all-errors --retry-delay 3 --max-time 30 \
+              --header "Authorization: Bearer ${id_token}" \
+              "$target_url" "$@"
+          }
+
           curl_ready "${{ steps.urls.outputs.api }}/health" >/dev/null
           curl_ready "${{ steps.urls.outputs.platform_admin }}" >/dev/null
           curl_ready "${{ steps.urls.outputs.ops_console }}" >/dev/null
           curl_ready "${{ steps.urls.outputs.fleet_partner_portal }}" >/dev/null
-          curl_ready "${{ steps.urls.outputs.tenant_console }}" >/dev/null
-          curl_ready "${{ steps.urls.outputs.bank_console }}" >/dev/null
+          curl_ready_auth "${{ steps.urls.outputs.tenant_console }}" >/dev/null
+          curl_ready_auth "${{ steps.urls.outputs.tenant_console }}/healthz" >/dev/null
+          curl_ready_auth "${{ steps.urls.outputs.bank_console }}" >/dev/null
           referral_embed_path="/embed/${{ needs.prepare.outputs.referral_embed_entry_slug }}"
           referral_embed_body="$(curl_ready \
             "${{ steps.urls.outputs.referral_embed }}${referral_embed_path}")"
@@ -1264,9 +1323,10 @@ jobs:
           referral_embed_root_body="$(curl_ready \
             "${{ steps.urls.outputs.referral_embed }}")"
           grep --fixed-strings "$referral_embed_path" <<<"$referral_embed_root_body" >/dev/null
-          curl_ready "${{ steps.urls.outputs.enterprise_dispatch }}" >/dev/null
-          curl_ready "${{ steps.urls.outputs.enterprise_dispatch }}/bookings/new" >/dev/null
-          curl_ready "${{ steps.urls.outputs.enterprise_dispatch }}/embed/unsupported-host" >/dev/null
+          curl_ready_auth "${{ steps.urls.outputs.enterprise_dispatch }}" >/dev/null
+          curl_ready_auth "${{ steps.urls.outputs.enterprise_dispatch }}/healthz" >/dev/null
+          curl_ready_auth "${{ steps.urls.outputs.enterprise_dispatch }}/bookings/new" >/dev/null
+          curl_ready_auth "${{ steps.urls.outputs.enterprise_dispatch }}/embed/unsupported-host" >/dev/null
           curl_ready "${{ steps.urls.outputs.channel_partner_portal }}" >/dev/null
 
       - name: Verify referral handoff session lifecycle
