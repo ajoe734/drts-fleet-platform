@@ -83,4 +83,47 @@ describe("SR-DEV-HEALTHCHECK-IDENTITY-20260915: dev deployment health check iden
       service: "bank-console-web",
     });
   });
+
+  it("mints ID tokens for private services in operational-candidate-acceptance and passes them to journey runner", () => {
+    // Assert minting steps exist in operational-candidate-acceptance job
+    expect(workflowContent).toContain("Mint identity token — tenant console (operational candidate)");
+    expect(workflowContent).toContain("Mint identity token — bank console (operational candidate)");
+    expect(workflowContent).toContain("Mint identity token — enterprise dispatch (operational candidate)");
+
+    // Assert tokens are passed to Execute candidate-bound operational journeys step
+    expect(workflowContent).toContain("DRTS_DEV_TENANT_CONSOLE_ID_TOKEN: ${{ steps.id_token_tenant_console.outputs.id_token }}");
+    expect(workflowContent).toContain("DRTS_DEV_BANK_CONSOLE_ID_TOKEN: ${{ steps.id_token_bank_console.outputs.id_token }}");
+    expect(workflowContent).toContain("DRTS_DEV_ENTERPRISE_DISPATCH_ID_TOKEN: ${{ steps.id_token_enterprise_dispatch.outputs.id_token }}");
+  });
+
+  it("exports ID tokens in run-operational-browser-acceptance.sh", () => {
+    const runnerContent = readFileSync(
+      path.join(repoRoot, "operations/verification/run-operational-browser-acceptance.sh"),
+      "utf8",
+    );
+    expect(runnerContent).toContain('export DRTS_OPERATIONAL_TENANT_CONSOLE_ID_TOKEN="${DRTS_DEV_TENANT_CONSOLE_ID_TOKEN:-${DRTS_OPERATIONAL_TENANT_CONSOLE_ID_TOKEN:-}}"');
+    expect(runnerContent).toContain('export DRTS_OPERATIONAL_BANK_CONSOLE_ID_TOKEN="${DRTS_DEV_BANK_CONSOLE_ID_TOKEN:-${DRTS_OPERATIONAL_BANK_CONSOLE_ID_TOKEN:-}}"');
+    expect(runnerContent).toContain('export DRTS_OPERATIONAL_ENTERPRISE_DISPATCH_ID_TOKEN="${DRTS_DEV_ENTERPRISE_DISPATCH_ID_TOKEN:-${DRTS_OPERATIONAL_ENTERPRISE_DISPATCH_ID_TOKEN:-}}"');
+  });
+
+  it("applies Authorization header and extraHTTPHeaders to private services in operational-candidate.spec.ts", () => {
+    const specContent = readFileSync(
+      path.join(repoRoot, "tests/e2e/operational-candidate.spec.ts"),
+      "utf8",
+    );
+    // Identity token resolution
+    expect(specContent).toContain("getIdentityToken");
+    expect(specContent).toContain("DRTS_OPERATIONAL_TENANT_CONSOLE_ID_TOKEN");
+    expect(specContent).toContain("DRTS_OPERATIONAL_BANK_CONSOLE_ID_TOKEN");
+    expect(specContent).toContain("DRTS_OPERATIONAL_ENTERPRISE_DISPATCH_ID_TOKEN");
+
+    // Request and browser context authentication
+    expect(specContent).toContain('httpHeaders["Authorization"] = `Bearer ${idToken}`');
+    expect(specContent).toContain("await context.setExtraHTTPHeaders({");
+    expect(specContent).toContain("Authorization: `Bearer ${idToken}`,");
+
+    // Bank console login authentication
+    expect(specContent).toContain("bank console demo login remains on the deployed public origin");
+    expect(specContent).toContain('id: "bank-console-web"');
+  });
 });

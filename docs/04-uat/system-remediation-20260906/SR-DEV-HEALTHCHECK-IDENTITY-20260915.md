@@ -307,3 +307,64 @@ Because `/healthz` is intercepted by Google Cloud Run's infrastructure layer and
   Result: `check_test_coverage: all 74 test files yield tests CI runs.`
 - **Workflow YAML Validation**:
   `python3 -c "import yaml; yaml.safe_load(open('.github/workflows/deploy-dev.yml'))"` — Valid.
+
+---
+
+## 8. Candidate SHA Operational Acceptance Identity Remediation (2026-09-15, Owner `Gemini2`)
+
+### 8.1 Post-Deploy Progress & Root Cause in Run 34965087961
+
+In dev deploy run `34965087961`:
+- All nine service builds, migrations, and deployments succeeded.
+- The `Dev health check` job passed in 1m 14s using the WIF-minted ID tokens and root-path probes (§7), confirming that authenticated health checks function reliably.
+- The `retired-service-cleanup` job completed cleanly.
+- The pipeline halted at `operational-candidate-acceptance` (`Candidate SHA operational acceptance`).
+
+#### Diagnostic Root Cause
+
+1. **Private Services Ingress Rejection (HTTP 403)**:
+   The Playwright suite `tests/e2e/operational-candidate.spec.ts` was issuing anonymous HTTP requests (`request.get(url, { failOnStatusCode: false })`) and browser navigations (`page.goto(url)`) to all surfaces declared in `candidate-journey-manifest.json`. For the three private Cloud Run services (`tenant_console`, `bank_console`, and `enterprise_dispatch`), Google Frontend (GFE) returned **HTTP 403 Forbidden** because no Google IAM identity token was attached. The tests expected `200`, causing the suite to fail.
+2. **Bank Console Demo Login Timeout**:
+   The test `bank console demo login remains on the deployed public origin` timed out at 30 seconds on `page.waitForURL`. Because `page.goto` to `${expectedOrigin}/login...` was received anonymously by Cloud Run, GFE returned the 403 error page. Consequently, the button `"方案管理員"` could not be activated and subsequent authentication requests failed, producing a timeout cascade.
+
+### 8.2 Remediation Architecture
+
+1. **Workflow Token Minting**:
+   In `.github/workflows/deploy-dev.yml` under `operational-candidate-acceptance`, three new token-minting steps were introduced using `google-github-actions/auth@v2` with `token_format: id_token`:
+   - `Mint identity token — tenant console (operational candidate)` (audience: `${{ needs.health-check.outputs.tenant_console }}`)
+   - `Mint identity token — bank console (operational candidate)` (audience: `${{ needs.health-check.outputs.bank_console }}`)
+   - `Mint identity token — enterprise dispatch (operational candidate)` (audience: `${{ needs.health-check.outputs.enterprise_dispatch }}`)
+   These tokens are passed as environment variables (`DRTS_DEV_TENANT_CONSOLE_ID_TOKEN`, `DRTS_DEV_BANK_CONSOLE_ID_TOKEN`, `DRTS_DEV_ENTERPRISE_DISPATCH_ID_TOKEN`) into the test runner step.
+2. **Acceptance Runner Propagation**:
+   In `operations/verification/run-operational-browser-acceptance.sh`, the token environment variables are exported as both `DRTS_OPERATIONAL_*_ID_TOKEN` and `DRTS_DEV_*_ID_TOKEN`, ensuring downstream Playwright test processes receive them regardless of invocation style.
+3. **Playwright Spec Authentication**:
+   In `tests/e2e/operational-candidate.spec.ts`:
+   - Added `getIdentityToken(surface)` helper to resolve the appropriate token for `tenant-console-web`, `bank-console-web`, and `enterprise-dispatch-web`.
+   - Attached `Authorization: Bearer <idToken>` to `request.get` for private services.
+   - Provided `await context.setExtraHTTPHeaders({ Authorization: `Bearer ${idToken}` })` on the Playwright browser context prior to `page.goto`, ensuring initial navigation, subsequent form submissions (such as POST `/api/auth/login`), and redirects pass Cloud Run GFE IAM checks.
+   - Maintained **anonymous probing** for all public services (`api`, `platform-admin-web`, `ops-console-web`, `fleet-partner-portal-web`, `referral-embed-web`, `channel-partner-portal-web`).
+   - Retained strict **HTTP 404** expectations for retired and paused surfaces (`partner-booking-web`, `concierge-portal-web`, `passenger-web`).
+   - Preserved `x-drts-candidate-sha` header assertions across both HTTP and browser response pipelines.
+4. **Configuration Robustness**:
+   In `playwright.operational-candidate.config.ts`, increased test timeout to `60_000` ms to accommodate cold-start latency on Cloud Run without prematurely failing valid operational tests.
+5. **Guardrail Compliance**:
+   - Zero services converted to `--allow-unauthenticated`.
+   - Zero realm ingress policies relaxed.
+   - Zero probe assertions softened (`expectedStatus` remains 200, `failOnStatusCode` not suppressed).
+
+### 8.3 Verification Evidence
+
+- **Task Unit Test Suite**:
+  `pnpm vitest run tests/unit/system-remediation/sr-dev-healthcheck-identity-20260915/healthcheck-identity.test.ts`
+  Result: 9 tests passed (100% pass).
+- **Deployment Architecture Guard Tests**:
+  `pnpm vitest run tests/unit/deployment-architecture-guards.test.ts tests/unit/cloud-run-deploy-retry.test.ts tests/unit/dev-active-surface-contract.test.ts`
+  Result: 19 tests passed (100% pass).
+- **TypeScript Static Verification**:
+  `pnpm exec tsc --noEmit tests/e2e/operational-candidate.spec.ts` completed with exit code 0.
+- **CI Test Coverage Gate**:
+  `python3 tools/ci/check_test_coverage.py`
+  Result: `check_test_coverage: all 74 test files yield tests CI runs.`
+- **Workflow YAML Validation**:
+  `python3 -c "import yaml; yaml.safe_load(open('.github/workflows/deploy-dev.yml'))"` — Valid.
+
