@@ -179,6 +179,42 @@ export function detectAuthEnvironment(
   return "local";
 }
 
+export type OrdinaryLoginMfaPolicy = "v1_not_required" | "required";
+
+/**
+ * Named, auditable policy switch for the ordinary tenant/partner OIDC session
+ * exchange in `OidcPkceService` (`exchangeTenantCallbackSession` /
+ * `exchangePartnerCallbackSession`).
+ *
+ * Product decision (2026-09-15): v1 does not require an MFA-bearing `amr`
+ * claim for ordinary tenant/partner login. Restoring the requirement is a
+ * config-only change (`AUTH_REQUIRE_ORDINARY_LOGIN_MFA=true`); no code change
+ * is needed to flip it back.
+ *
+ * This switch is scoped ONLY to that blanket ordinary-login gate. It does not
+ * affect, and must never be wired into:
+ * - the `tenant_admin` / `tenant_ops_admin` trusted-MFA gate in
+ *   `auth.controller.ts` (`isHighPrivilegeTenantRole` + `hasTrustedMfa`)
+ * - the privileged-role-governance fresh step-up requirement
+ * - `STRICT_TRUSTED_AMR` / `NON_STRICT_TRUSTED_AMR` in
+ *   `step-up-proof.service.ts`, which continue to reject
+ *   `tenant_bootstrap_fixture` in production/staging regardless of this flag
+ */
+export function isOrdinaryLoginMfaRequired(env: EnvLike = process.env): boolean {
+  const override = normalizeString(
+    env.AUTH_REQUIRE_ORDINARY_LOGIN_MFA,
+  )?.toLowerCase();
+  if (override === "true") return true;
+  if (override === "false") return false;
+  return false;
+}
+
+export function resolveOrdinaryLoginMfaPolicy(
+  env: EnvLike = process.env,
+): OrdinaryLoginMfaPolicy {
+  return isOrdinaryLoginMfaRequired(env) ? "required" : "v1_not_required";
+}
+
 function normalizeString(value: string | undefined): string | undefined {
   const normalized = value?.trim();
   return normalized ? normalized : undefined;
