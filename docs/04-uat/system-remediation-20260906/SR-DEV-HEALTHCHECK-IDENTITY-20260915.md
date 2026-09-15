@@ -1,11 +1,11 @@
 # SR-DEV-HEALTHCHECK-IDENTITY-20260915 — Dev Health Check Identity Authentication & Healthz Remediation
 
 - **Task ID**: `SR-DEV-HEALTHCHECK-IDENTITY-20260915`
-- **Owner**: `Gemini`
+- **Owner**: `Claude` (originally `Gemini`; reassigned by Chairman on 2026-09-15 after two capacity/unavailable 503 failure streaks, see §6)
 - **Reviewer**: `Claude2`
 - **Wave / Phase**: `system-remediation-20260906`
 - **Base**: `dev`
-- **Execution Branch**: `gemini/sr-dev-healthcheck-identity-20260915`
+- **Execution Branch**: `claude/sr-dev-healthcheck-identity-20260915` (follow-on fix; original merged as `gemini/sr-dev-healthcheck-identity-20260915` via #2036)
 - **Candidate Lifecycle Version**: 1
 
 ---
@@ -175,3 +175,88 @@ Both aspects were resolved in an integrated manner:
 - **CI Test Coverage Gate**:
   `python3 tools/ci/check_test_coverage.py`
   Result: `check_test_coverage: all 74 test files yield tests CI runs.`
+
+---
+
+## 6. Follow-On Fix: Identity Token Minting Still Failed After #2036 (2026-09-15, Owner `Claude`)
+
+### 6.1 What Happened After Merge
+
+PR #2036 merged `curl_ready_auth` / `get_identity_token` (§3.1 above) to `dev`. The
+next dev deploy dispatch after the merge — run
+[`34943580004`](https://github.com/ajoe734/drts-fleet-platform/actions/runs/34943580004),
+`source_ref` resolved to `de34d1ae303d8ea3c0a0248bf4e2601ae9dfb8b5` (the #2036 merge
+commit itself) — still failed at the `Dev health check` job's `Verify dev endpoints`
+step:
+
+```
+##[error]Failed to obtain identity token for audience https://drts-dev-tenant-console-web-r6ykdme3wa-uc.a.run.app
+##[error]Process completed with exit code 1.
+```
+
+All prior jobs (`Build & push images`, `DB migration`, `Deploy services`, `Enforce
+Partner Booking paused state`) were green; only the health check's own token-minting
+logic was broken. `retired-service-cleanup` and `operational-candidate-acceptance`
+were skipped again for the same reason as the original root cause — no candidate SHA
+was produced, and the task remained `todo`/`in_progress` in `ai-status.json` despite
+the code having merged.
+
+### 6.2 Root Cause of the Second Failure
+
+The `Dev health check` job authenticates via `google-github-actions/auth@v2` with a
+`service_account:` input (Workload Identity Federation with direct impersonation).
+Both token-acquisition attempts inside `get_identity_token()` failed silently
+(stderr was redirected to `/dev/null`, masking the actual error) because of a
+credential-type mismatch:
+
+1. **Attempt 1** (`gcloud auth print-identity-token --audiences=...`): this gcloud
+   subcommand does not mint ID tokens for the `external_account` /
+   impersonated-service-account credential type that `google-github-actions/auth@v2`
+   writes to the runner's ADC file. It returns an empty string rather than raising a
+   catchable error, so the script silently fell through to attempt 2.
+2. **Attempt 2** (manual `iamcredentials.googleapis.com...:generateIdToken` call):
+   this used an access token obtained from `gcloud auth print-access-token`, which by
+   that point already represents the *impersonated* runtime service account
+   (`DEV_WIF_SERVICE_ACCOUNT`), not the original WIF principal. Calling
+   `generateIdToken` on `serviceAccounts/${sa}:generateIdToken` with that access
+   token is a **self-impersonation** request — it requires `${sa}` to hold
+   `roles/iam.serviceAccountTokenCreator` on *itself*, which is not part of the
+   normal WIF trust chain (only the original WIF principal is granted Token Creator
+   on `${sa}`, not `${sa}` on itself). The call therefore failed (HTTP error was
+   discarded by `--fail` combined with `2>/dev/null || true`), leaving `token` empty
+   and both attempts exhausted.
+
+### 6.3 Fix
+
+Replaced both gcloud/curl-based attempts with the officially supported path: mint the
+ID token directly from `google-github-actions/auth@v2` using `token_format: id_token`
+and `id_token_audience: <service-url>`. This mints the token from the *original* WIF
+federation exchange (the same trust chain already used to obtain the access-token
+credential), so it does not require any additional self-impersonation IAM grant.
+
+Because the action mints one ID token per invocation/audience, three new steps
+(`Mint identity token — tenant console`, `— bank console`, `— enterprise dispatch`)
+were added to the `health-check` job, each producing a `steps.<id>.outputs.id_token`
+output. `Verify dev endpoints` now receives these three tokens via `env:` (masked
+with `::add-mask::` and explicitly checked for emptiness before use) instead of
+minting tokens inline. A `Re-authenticate to GCP` step restores the access-token
+credential immediately after, since the downstream `Verify referral handoff session
+lifecycle` step calls `gcloud secrets versions access`.
+
+No guardrail from §2 was touched: private services remain
+`--no-allow-unauthenticated`, probe rigor (`--fail`, `--retry-all-errors`, etc.) is
+unchanged, and this is strictly a token-acquisition mechanism swap.
+
+### 6.4 Verification Evidence (Follow-On Fix)
+
+- **Local regression suite** (unchanged assertions, still pass against the new
+  script since `curl_ready_auth()` and its `Authorization: Bearer ${id_token}`
+  header remain intact):
+  `pnpm vitest run tests/unit/system-remediation/sr-dev-healthcheck-identity-20260915/healthcheck-identity.test.ts`
+  Result: 6 tests passed.
+- **Deployment architecture guard tests**:
+  `pnpm vitest run tests/unit/deployment-architecture-guards.test.ts tests/unit/cloud-run-deploy-retry.test.ts tests/unit/dev-active-surface-contract.test.ts`
+  Result: 19 tests passed.
+- **YAML syntax**: `python3 -c "import yaml; yaml.safe_load(open('.github/workflows/deploy-dev.yml'))"` — OK.
+- **Live dev deploy re-run**: pending — see candidate handoff for the dispatched run
+  URL and resulting `deployed_sha` / `live_candidate_sha` once green.
