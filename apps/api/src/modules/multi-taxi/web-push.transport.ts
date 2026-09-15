@@ -122,7 +122,7 @@ export class WebPushTransport implements PassengerPushTransport {
           ? { "x-request-id": request.context.requestId }
           : {}),
       },
-      body,
+      body: new Uint8Array(body),
     });
 
     if (GONE_HTTP_STATUSES.has(res.status)) {

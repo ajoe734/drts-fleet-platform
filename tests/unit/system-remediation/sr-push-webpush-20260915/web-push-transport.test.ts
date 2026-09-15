@@ -146,14 +146,19 @@ describe("SR-PUSH-WEBPUSH-20260915: WebPushTransport.send()", () => {
 
     expect(receipt.providerName).toBe("webpush");
     expect(fetchMock).toHaveBeenCalledTimes(1);
-    const [url, init] = fetchMock.mock.calls[0]!;
+    const [url, init] = fetchMock.mock.calls[0] as unknown as [
+      string,
+      RequestInit,
+    ];
     expect(url).toBe(device.webPushSubscription!.endpoint);
     const headers = init.headers as Record<string, string>;
     expect(headers["content-encoding"]).toBe("aes128gcm");
     expect(headers.authorization).toMatch(/^vapid t=/);
-    const body = init.body as Buffer;
-    expect(Buffer.isBuffer(body)).toBe(true);
-    expect(body.includes("must-not-appear-in-plaintext")).toBe(false);
+    const body = init.body as Uint8Array;
+    expect(body instanceof Uint8Array).toBe(true);
+    expect(
+      Buffer.from(body).includes("must-not-appear-in-plaintext"),
+    ).toBe(false);
   });
 
   it("maps a 410 Gone response to PassengerPushDeviceRevokedError", async () => {
