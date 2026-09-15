@@ -69,7 +69,7 @@ function referralIdentity(overrides?: Partial<Record<string, unknown>>) {
 
 async function completeOrder(service: OwnedMobilityService, orderId: string) {
   const dispatchJob = service.dispatchOrder(orderId, { mode: "auto" });
-  const assignment = service.assignDispatch({
+  const assignment = await service.assignDispatch({
     dispatchJobId: (dispatchJob as { dispatchJobId: string }).dispatchJobId,
     vehicleId: "vehicle-referral-001",
     driverId: "driver-referral-001",

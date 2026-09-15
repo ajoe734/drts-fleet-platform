@@ -207,6 +207,7 @@ describe("SR-QA-BOOKING-001 / C025: 租戶送審與核准／駁回／升級的�
         approvalRequest!.approvalRequestId,
         "tenant-user-demo-001",
         null,
+        {},
         "req-escalate-001",
       );
 
