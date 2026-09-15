@@ -41,6 +41,14 @@ describe("Tenant Console Middleware", () => {
       expect(response.status).toBe(200);
       expect(response.headers.get("location")).toBeNull();
     });
+
+    it("allows /healthz without session cookie", () => {
+      const request = new NextRequest("http://localhost:3004/healthz");
+      const response = middleware(request);
+
+      expect(response.status).toBe(200);
+      expect(response.headers.get("location")).toBeNull();
+    });
   });
 
   describe("Protected Page Routes", () => {

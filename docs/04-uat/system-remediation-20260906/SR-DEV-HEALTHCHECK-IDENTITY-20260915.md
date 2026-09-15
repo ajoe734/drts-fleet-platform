@@ -1,0 +1,177 @@
+# SR-DEV-HEALTHCHECK-IDENTITY-20260915 — Dev Health Check Identity Authentication & Healthz Remediation
+
+- **Task ID**: `SR-DEV-HEALTHCHECK-IDENTITY-20260915`
+- **Owner**: `Gemini`
+- **Reviewer**: `Claude2`
+- **Wave / Phase**: `system-remediation-20260906`
+- **Base**: `dev`
+- **Execution Branch**: `gemini/sr-dev-healthcheck-identity-20260915`
+- **Candidate Lifecycle Version**: 1
+
+---
+
+## 1. Context & Problem Statement
+
+In DRTS dev environment deployment (`.github/workflows/deploy-dev.yml`), the post-deploy job `Dev health check` validates all deployed Cloud Run services in the `Verify dev endpoints` step before proceeding to `retired-service-cleanup` and `operational-candidate-acceptance`.
+
+### 1.1 Root Cause Diagnosis
+
+As audited following deploy run `34681171586` (deployed SHA `69e31e793489202c612c5f46dbc801099b5cf5c0`, project `drts-dev-devcc-20260825`, region `us-central1`):
+
+1. **Private vs. Public Service Asymmetry**:
+   Per the B9 security architecture and `GCP-TOS-REMEDIATION-20260707` (`commit 70355aba9`), services that handle sensitive enterprise/tenant/banking data (`tenant_console`, `bank_console`, and `enterprise_dispatch`) are deployed with `--no-allow-unauthenticated`. Their default exposure is fail-closed (`DEV_*_ALLOW_UNAUTHENTICATED` defaults to `false`). Public endpoints (`api`, `platform_admin`, `ops_console`, `fleet_partner_portal`, `channel_partner_portal`, and `referral_embed`) remain accessible without Google IAM credentials.
+2. **Anonymous Probes Failing on Private Cloud Run Services**:
+   The `Verify dev endpoints` step utilized an anonymous `curl_ready` probe against the root path of all 9 services. While public services returned HTTP 200, Google Frontend (GFE) rejected anonymous requests to `tenant_console`, `bank_console`, and `enterprise_dispatch` with **HTTP 403 Forbidden**.
+3. **Pipeline Stoppage**:
+   Because `curl` failed with exit code 22 (`403 Forbidden`), the `Dev health check` job failed. Consequently, subsequent downstream jobs `retired-service-cleanup` and `operational-candidate-acceptance` were skipped, preventing candidate SHA verification and locking candidate release.
+4. **Historical `/healthz` 404 Issue**:
+   During initial diagnostic attempts, requests to `/healthz` returned HTTP 404 because neither `apps/tenant-console-web` nor `apps/enterprise-dispatch-web` defined a `/healthz` route handler, leading to confusion over valid health endpoints.
+
+---
+
+## 2. Non-Negotiable Guardrails & Policy Constraints
+
+The following constraints are strictly upheld:
+
+1. **NO Relaxation of Service Exposure**:
+   Under no circumstances may any private service (`tenant_console`, `bank_console`, `enterprise_dispatch`) be flipped to `--allow-unauthenticated`. The default in `deploy-dev.yml` remains `false`.
+2. **NO Relaxation of Realm Ingress Rules**:
+   Application-level session boundaries, middleware authorization rules, and cross-realm ingress protections remain intact.
+3. **NO Reduction of Probe Rigor**:
+   `curl` probes must continue to enforce `--fail --silent --show-error --retry 10 --retry-all-errors --retry-delay 3 --max-time 30`. Probes must not ignore non-2xx HTTP status codes or mask errors.
+
+---
+
+## 3. Remediation Architecture
+
+### 3.1 Authenticated Health Check Probing (`curl_ready_auth`)
+
+In `.github/workflows/deploy-dev.yml`, an authenticated probe function `curl_ready_auth` is introduced for private Cloud Run services:
+
+```bash
+declare -A ID_TOKENS=()
+
+get_identity_token() {
+  local audience="$1"
+  if [[ -n "${ID_TOKENS[$audience]:-}" ]]; then
+    printf '%s' "${ID_TOKENS[$audience]}"
+    return 0
+  fi
+
+  local token=""
+  # Attempt 1: gcloud auth print-identity-token (standard SDK path)
+  token="$(gcloud auth print-identity-token --audiences="${audience}" 2>/dev/null || true)"
+
+  # Attempt 2: IAM credentials API generateIdToken via WIF access token
+  if [[ -z "${token}" ]]; then
+    local sa="${DEV_WIF_SERVICE_ACCOUNT:-${WIF_SERVICE_ACCOUNT:-}}"
+    if [[ -z "${sa}" ]]; then
+      sa="$(gcloud config get-value account 2>/dev/null || true)"
+    fi
+    if [[ -n "${sa}" ]]; then
+      local access_token
+      access_token="$(gcloud auth print-access-token 2>/dev/null || true)"
+      if [[ -n "${access_token}" ]]; then
+        local resp
+        resp="$(curl --silent --show-error --fail \
+          --request POST \
+          --header "Authorization: Bearer ${access_token}" \
+          --header "Content-Type: application/json" \
+          "https://iamcredentials.googleapis.com/v1/projects/-/serviceAccounts/${sa}:generateIdToken" \
+          --data "{\"audience\": \"${audience}\", \"includeEmail\": true}" 2>/dev/null || true)"
+        token="$(echo "${resp}" | python3 -c "import sys, json; print(json.load(sys.stdin).get('token', ''))" 2>/dev/null || true)"
+      fi
+    fi
+  fi
+
+  if [[ -z "${token}" ]]; then
+    echo "::error::Failed to obtain identity token for audience ${audience}" >&2
+    return 1
+  fi
+
+  echo "::add-mask::${token}"
+  ID_TOKENS["$audience"]="$token"
+  printf '%s' "${token}"
+  return 0
+}
+
+curl_ready_auth() {
+  local target_url="$1"
+  shift
+  local audience="$(echo "$target_url" | sed -E 's#^(https?://[^/]+).*#\1#')"
+  local id_token
+  id_token="$(get_identity_token "$audience")"
+  curl --fail --silent --show-error --location-trusted \
+    --retry 10 --retry-all-errors --retry-delay 3 --max-time 30 \
+    --header "Authorization: Bearer ${id_token}" \
+    "$target_url" "$@"
+}
+```
+
+Key features of this design:
+- **Audience Derivation**: Extracts the Cloud Run origin (`https://<service-url>`), which matches Cloud Run's expected OIDC audience claim.
+- **Dual Identity Token Acquisition**: Attempts native `gcloud auth print-identity-token --audiences` first, falling back to Google Cloud IAM Credentials REST API (`generateIdToken`) using the active WIF access token.
+- **Log Masking**: Automatically registers tokens with GitHub Actions secret masking (`::add-mask::`).
+- **In-Memory Caching**: Caches minted identity tokens by audience in `ID_TOKENS`, preventing redundant network calls across multiple probes to the same service.
+- **`--location-trusted` Redirect Support**: Ensures the `Authorization: Bearer <id_token>` header is preserved across HTTP redirects (e.g. from `/` to `/login` within the private Cloud Run service).
+
+### 3.2 Resolution of `/healthz` 404 & Root Path Strategy
+
+Per specification ("處理 /healthz 404（補真健康路由或帶身分打根路徑，擇一並說明）"):
+
+Both aspects were resolved in an integrated manner:
+
+1. **Authentic Health Route Implementation**:
+   - Added `apps/tenant-console-web/app/healthz/route.ts` returning `{ status: "ok", service: "tenant-console-web" }`.
+   - Added `apps/enterprise-dispatch-web/app/healthz/route.ts` returning `{ status: "ok", service: "enterprise-dispatch-web" }`.
+   - Added `apps/bank-console-web/app/healthz/route.ts` returning `{ status: "ok", service: "bank-console-web" }`.
+   - Updated `apps/tenant-console-web/lib/auth/constants.ts` to include `HEALTHCHECK_PATH = "/healthz"` within `PUBLIC_AUTH_PATHS`, allowing health checks to be served directly without tenant session redirects.
+2. **Dual Verification in `deploy-dev.yml`**:
+   - Probing the **root path `/`** is retained for all services because it exercises the real user-facing SSR rendering pipeline and middleware execution (verifying that the web app actually compiles and serves HTML).
+   - Probing the **dedicated `/healthz` route** is added to verify that the application process is healthy without triggering full page renders.
+   - For private services, both probes use `curl_ready_auth` with the identity token.
+
+---
+
+## 4. Artifacts & Code Changes
+
+1. `.github/workflows/deploy-dev.yml`:
+   - Updated `Verify dev endpoints` step with `curl_ready_auth`, token minting, and audience resolution.
+   - Private services (`tenant_console`, `bank_console`, `enterprise_dispatch`) probed with identity token.
+   - Explicit `/healthz` probes added for `tenant_console` and `enterprise_dispatch`.
+   - Preserved anonymous probing for public endpoints (`api`, `platform_admin`, `ops_console`, `fleet_partner_portal`, `channel_partner_portal`, `referral_embed`).
+2. `apps/tenant-console-web/app/healthz/route.ts`:
+   - New standard Next.js App Router route handler.
+3. `apps/tenant-console-web/lib/auth/constants.ts`:
+   - Added `HEALTHCHECK_PATH` to `PUBLIC_AUTH_PATHS`.
+4. `apps/tenant-console-web/tests/unit/middleware.test.ts`:
+   - Added unit test asserting `/healthz` is permitted without session cookie.
+5. `apps/enterprise-dispatch-web/app/healthz/route.ts`:
+   - New standard Next.js App Router route handler.
+6. `apps/bank-console-web/app/healthz/route.ts`:
+   - New standard Next.js App Router route handler.
+7. `tests/unit/system-remediation/sr-dev-healthcheck-identity-20260915/healthcheck-identity.test.ts`:
+   - Comprehensive vitest regression suite testing workflow syntax, security flags, route handlers, and middleware public path exports.
+8. `docs/04-uat/system-remediation-20260906/SR-DEV-HEALTHCHECK-IDENTITY-20260915.md`:
+   - Canonical documentation of the remediation.
+
+---
+
+## 5. Verification Evidence
+
+### 5.1 Local Automated Verification
+
+- **Task Unit Test Suite**:
+  `pnpm vitest run tests/unit/system-remediation/sr-dev-healthcheck-identity-20260915/healthcheck-identity.test.ts`
+  Result: 6 tests passed (100% pass).
+- **Tenant Middleware Unit Tests**:
+  `pnpm --filter @drts/tenant-console-web exec vitest run tests/unit/middleware.test.ts`
+  Result: 11 tests passed (100% pass).
+- **Deployment Architecture Guard Tests**:
+  `pnpm vitest run tests/unit/deployment-architecture-guards.test.ts tests/unit/cloud-run-deploy-retry.test.ts tests/unit/dev-active-surface-contract.test.ts`
+  Result: 19 tests passed (100% pass).
+- **TypeScript Static Verification**:
+  `tsc --noEmit` on `@drts/tenant-console-web`, `@drts/enterprise-dispatch-web`, and `@drts/bank-console-web` completed with 0 errors.
+- **CI Test Coverage Gate**:
+  `python3 tools/ci/check_test_coverage.py`
+  Result: `check_test_coverage: all 74 test files yield tests CI runs.`
