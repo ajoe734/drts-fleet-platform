@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import type {
   TenantBookingQuotaImpactResult,
   TenantQuotaLedgerEntry,
@@ -325,3 +326,408 @@ function buildReservationEntries(
 function buildScopeVariants(costCenterCode: string | null) {
   return costCenterCode === null ? [null] : [null, costCenterCode];
 }
+
+export function buildQuotaReleaseLedgerEntryId(input: {
+  tenantId: string;
+  bookingId: string;
+  costCenterCode: string | null;
+  periodKey: string;
+  dimension: TenantQuotaLedgerEntry["dimension"];
+}): string {
+  const digest = createHash("sha256")
+    .update(input.tenantId)
+    .update("\u0000")
+    .update(input.bookingId)
+    .update("\u0000")
+    .update(input.costCenterCode ?? "__tenant__")
+    .update("\u0000")
+    .update(input.periodKey)
+    .update("\u0000")
+    .update(input.dimension)
+    .digest("hex");
+
+  return `quota-ledger-release-${digest.slice(0, 32)}`;
+}
+
+export function buildQuotaReleaseEntries(params: {
+  tenantId: string;
+  bookingId: string;
+  sourceEntries: readonly TenantQuotaLedgerEntry[];
+}): TenantQuotaLedgerEntry[] {
+  const outstanding = new Map<
+    string,
+    {
+      costCenterCode: string | null;
+      periodKey: string;
+      dimension: TenantQuotaLedgerEntry["dimension"];
+      amount: number;
+      evaluationId: string;
+    }
+  >();
+
+  const bookingEntries = params.sourceEntries
+    .filter(
+      (entry) =>
+        entry.tenantId === params.tenantId &&
+        entry.bookingId === params.bookingId,
+    )
+    .sort(
+      (left, right) =>
+        left.createdAt.localeCompare(right.createdAt) ||
+        left.ledgerEntryId.localeCompare(right.ledgerEntryId),
+    );
+
+  for (const entry of bookingEntries) {
+    const key = `${entry.costCenterCode ?? "__tenant__"}:${entry.periodKey}:${entry.dimension}`;
+    const current = outstanding.get(key) ?? {
+      costCenterCode: entry.costCenterCode,
+      periodKey: entry.periodKey,
+      dimension: entry.dimension,
+      amount: 0,
+      evaluationId: entry.evaluationId,
+    };
+    const direction =
+      entry.entryType === "reserve" || entry.entryType === "adjust" ? 1 : -1;
+    current.amount += direction * entry.amount;
+    current.evaluationId = entry.evaluationId;
+    outstanding.set(key, current);
+  }
+
+  const now = new Date().toISOString();
+  return [...outstanding.values()]
+    .filter((entry) => entry.amount > 0)
+    .map((entry) => ({
+      ledgerEntryId: buildQuotaReleaseLedgerEntryId({
+        tenantId: params.tenantId,
+        bookingId: params.bookingId,
+        costCenterCode: entry.costCenterCode,
+        periodKey: entry.periodKey,
+        dimension: entry.dimension,
+      }),
+      tenantId: params.tenantId,
+      bookingId: params.bookingId,
+      evaluationId: entry.evaluationId,
+      costCenterCode: entry.costCenterCode,
+      periodKey: entry.periodKey,
+      dimension: entry.dimension,
+      amount: entry.amount,
+      entryType: "release" as const,
+      createdAt: now,
+    }));
+}
+
+export function releaseTenantQuotaInMemory(
+  service: any,
+  input: { tenantId: string; bookingId: string },
+): { ledgerEntries: TenantQuotaLedgerEntry[] } {
+  const sourceEntries: TenantQuotaLedgerEntry[] = service.quotaLedger ?? [];
+  const entries = buildQuotaReleaseEntries({
+    tenantId: input.tenantId,
+    bookingId: input.bookingId,
+    sourceEntries,
+  });
+
+  if (entries.length === 0) {
+    return { ledgerEntries: [] };
+  }
+
+  let updatedSnapshots: any[] = [];
+  if (typeof service.applyQuotaLedgerEntries === "function") {
+    updatedSnapshots = service.applyQuotaLedgerEntries(input.tenantId, entries);
+  } else if (typeof service.applyQuotaLedgerEntriesToSnapshots === "function") {
+    const snapshots = Array.from(
+      (service.quotaMonthlySnapshots?.values() ?? []) as any[],
+    );
+    updatedSnapshots = service.applyQuotaLedgerEntriesToSnapshots(
+      input.tenantId,
+      entries,
+      snapshots,
+      (costCenterCode: string | null) =>
+        service.resolveQuotaPolicy(input.tenantId, costCenterCode),
+    );
+    for (const snapshot of updatedSnapshots) {
+      const key = `${snapshot.tenantId}:${snapshot.costCenterCode ?? "null"}:${snapshot.period}:${snapshot.periodKey}`;
+      service.quotaMonthlySnapshots?.set(key, { ...snapshot });
+    }
+  } else {
+    for (const entry of entries) {
+      const policy = service.resolveQuotaPolicy
+        ? service.resolveQuotaPolicy(input.tenantId, entry.costCenterCode)
+        : null;
+      const limit = policy?.limit ?? {
+        bookingCountLimit: null,
+        amountMinorLimit: null,
+        currency: "TWD",
+        enforcementMode: "hard_block",
+      };
+      const key = `${input.tenantId}:${entry.costCenterCode ?? "null"}:monthly:${entry.periodKey}`;
+      const snapshot = service.quotaMonthlySnapshots?.get(key) ?? {
+        tenantId: input.tenantId,
+        costCenterCode: entry.costCenterCode,
+        period: "monthly",
+        periodKey: entry.periodKey,
+        limit,
+        usage: createEmptyTenantQuotaUsage(limit),
+        refreshedAt: new Date().toISOString(),
+      };
+      snapshot.usage = applyLedgerEntryToUsage(snapshot.usage, limit, entry);
+      snapshot.refreshedAt = entry.createdAt;
+      service.quotaMonthlySnapshots?.set(key, snapshot);
+      updatedSnapshots.push(snapshot);
+    }
+  }
+
+  if (typeof service.applyQuotaReservationCommit === "function") {
+    service.applyQuotaReservationCommit(entries, updatedSnapshots);
+  } else {
+    service.quotaLedger = [
+      ...entries.map((entry) => ({ ...entry })),
+      ...(service.quotaLedger ?? []),
+    ];
+  }
+
+  if (typeof service.persistChanges === "function") {
+    service.persistChanges(
+      {
+        quotaLedger: entries.map((entry) => ({ ...entry })),
+        quotaMonthlySnapshots: updatedSnapshots.map((snapshot) => ({
+          ...snapshot,
+          limit: { ...snapshot.limit },
+          usage: { ...snapshot.usage },
+        })),
+      },
+      "release tenant quota",
+    );
+  }
+
+  if (typeof service.recordQuotaReservationAudits === "function") {
+    service.recordQuotaReservationAudits(
+      input.tenantId,
+      entries,
+      updatedSnapshots,
+    );
+  }
+
+  return {
+    ledgerEntries: entries.map((entry) => ({ ...entry })),
+  };
+}
+
+export async function prepareTenantQuotaRelease(
+  service: any,
+  executor: any,
+  input: { tenantId: string; bookingId: string },
+) {
+  const existingEntries =
+    await service.tenantPartnerRepository.loadQuotaLedgerForBookingForUpdate(
+      executor,
+      input.tenantId,
+      input.bookingId,
+    );
+  const entries = buildQuotaReleaseEntries({
+    tenantId: input.tenantId,
+    bookingId: input.bookingId,
+    sourceEntries: existingEntries,
+  });
+
+  if (entries.length === 0) {
+    return {
+      tenantId: input.tenantId,
+      ledgerEntries: [],
+      updatedSnapshots: [],
+      auditEntries: [],
+    };
+  }
+
+  const claimedEntries =
+    await service.tenantPartnerRepository.claimQuotaLedgerEntries(
+      executor,
+      entries,
+    );
+
+  if (claimedEntries.length === 0) {
+    return {
+      tenantId: input.tenantId,
+      ledgerEntries: [],
+      updatedSnapshots: [],
+      auditEntries: [],
+    };
+  }
+
+  const snapshotGroups = new Map<
+    string,
+    { costCenterCode: string | null; periodKey: string }
+  >();
+  for (const entry of claimedEntries) {
+    const key = `${entry.costCenterCode ?? "__tenant__"}:${entry.periodKey}`;
+    snapshotGroups.set(key, {
+      costCenterCode: entry.costCenterCode,
+      periodKey: entry.periodKey,
+    });
+  }
+
+  const lockedSnapshots = (
+    await Promise.all(
+      [...snapshotGroups.values()].map((group) =>
+        service.tenantPartnerRepository.loadQuotaMonthlySnapshotsForUpdate(
+          executor,
+          input.tenantId,
+          group.costCenterCode,
+          group.periodKey,
+        ),
+      ),
+    )
+  ).flat();
+
+  const uniqueSnapshots = new Map<string, any>();
+  for (const snapshot of lockedSnapshots) {
+    const key = `${snapshot.tenantId}:${snapshot.costCenterCode ?? "null"}:${snapshot.period}:${snapshot.periodKey}`;
+    uniqueSnapshots.set(key, snapshot);
+  }
+
+  const updatedSnapshots = service.applyQuotaLedgerEntriesToSnapshots(
+    input.tenantId,
+    claimedEntries,
+    [...uniqueSnapshots.values()],
+    (costCenterCode: string | null) =>
+      service.resolveQuotaPolicy(input.tenantId, costCenterCode),
+  );
+
+  await service.tenantPartnerRepository.persistQuotaReservation(executor, {
+    quotaMonthlySnapshots: updatedSnapshots,
+  });
+
+  const auditEntries =
+    typeof service.buildQuotaReservationAuditEntries === "function"
+      ? service.buildQuotaReservationAuditEntries(
+          input.tenantId,
+          claimedEntries,
+          updatedSnapshots,
+        )
+      : [];
+
+  return {
+    tenantId: input.tenantId,
+    ledgerEntries: claimedEntries.map((entry: any) => ({ ...entry })),
+    updatedSnapshots: updatedSnapshots.map((snapshot: any) => ({
+      ...snapshot,
+      limit: { ...snapshot.limit },
+      usage: { ...snapshot.usage },
+    })),
+    auditEntries,
+  };
+}
+
+export async function releaseTenantQuotaWithDatabase(
+  service: any,
+  input: { tenantId: string; bookingId: string },
+) {
+  const committed = await service.tenantPartnerRepository.withTransaction(
+    (executor: any) => prepareTenantQuotaRelease(service, executor, input),
+  );
+
+  applyCommittedQuotaRelease(service, committed);
+  if (typeof service.recordQuotaAuditEntries === "function") {
+    service.recordQuotaAuditEntries(committed.auditEntries);
+  }
+
+  return {
+    ledgerEntries: committed.ledgerEntries.map((entry: any) => ({ ...entry })),
+  };
+}
+
+export function applyCommittedQuotaRelease(service: any, committed: any) {
+  if (
+    !committed ||
+    !committed.ledgerEntries ||
+    committed.ledgerEntries.length === 0
+  ) {
+    return;
+  }
+
+  if (typeof service.applyQuotaReservationCommit === "function") {
+    service.applyQuotaReservationCommit(
+      committed.ledgerEntries,
+      committed.updatedSnapshots,
+    );
+  } else {
+    service.quotaLedger = [
+      ...committed.ledgerEntries.map((entry: any) => ({ ...entry })),
+      ...(service.quotaLedger ?? []),
+    ];
+    for (const snapshot of committed.updatedSnapshots ?? []) {
+      const key = `${snapshot.tenantId}:${snapshot.costCenterCode ?? "null"}:${snapshot.period}:${snapshot.periodKey}`;
+      service.quotaMonthlySnapshots?.set(key, { ...snapshot });
+    }
+  }
+}
+
+export function releaseTenantQuota(
+  service: any,
+  txOrInput: any,
+  maybeInput?: any,
+):
+  | { ledgerEntries: TenantQuotaLedgerEntry[] }
+  | Promise<{ ledgerEntries: TenantQuotaLedgerEntry[] }> {
+  const tx = maybeInput ? txOrInput : null;
+  const input = maybeInput ?? txOrInput;
+
+  if (service?.tenantPartnerRepository?.isEnabled()) {
+    if (tx) {
+      return prepareTenantQuotaRelease(service, tx, input).then(
+        (committed: any) => ({
+          ledgerEntries: committed.ledgerEntries.map((entry: any) => ({
+            ...entry,
+          })),
+        }),
+      );
+    }
+    return releaseTenantQuotaWithDatabase(service, input);
+  }
+
+  return releaseTenantQuotaInMemory(service, input);
+}
+
+export function installTenantQuotaRelease(target: any) {
+  const proto = target?.prototype ?? target;
+  if (!proto) return;
+  if (typeof proto.releaseTenantQuota === "function") return;
+
+  proto.releaseTenantQuota = function (txOrInput: any, maybeInput?: any) {
+    return releaseTenantQuota(this, txOrInput, maybeInput);
+  };
+
+  proto.prepareTenantQuotaRelease = function (tx: any, input: any) {
+    return prepareTenantQuotaRelease(this, tx, input);
+  };
+
+  proto.applyCommittedQuotaRelease = function (committed: any) {
+    return applyCommittedQuotaRelease(this, committed);
+  };
+}
+
+declare module "./tenant-partner.service" {
+  interface TenantPartnerService {
+    releaseTenantQuota(
+      tx: any,
+      input: { tenantId: string; bookingId: string },
+    ): Promise<{ ledgerEntries: TenantQuotaLedgerEntry[] }>;
+    releaseTenantQuota(input: {
+      tenantId: string;
+      bookingId: string;
+    }):
+      | { ledgerEntries: TenantQuotaLedgerEntry[] }
+      | Promise<{ ledgerEntries: TenantQuotaLedgerEntry[] }>;
+    prepareTenantQuotaRelease(
+      tx: any,
+      input: { tenantId: string; bookingId: string },
+    ): Promise<{
+      tenantId: string;
+      ledgerEntries: TenantQuotaLedgerEntry[];
+      updatedSnapshots: any[];
+      auditEntries: any[];
+    }>;
+    applyCommittedQuotaRelease(committed: any): void;
+  }
+}
+

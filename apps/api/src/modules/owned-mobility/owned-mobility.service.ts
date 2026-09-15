@@ -163,6 +163,14 @@ import {
   TenantPartnerService,
   type TenantQuotaConsumptionCommitResult,
 } from "../tenant-partner/tenant-partner.service";
+import {
+  installTenantQuotaRelease,
+  releaseTenantQuota,
+  prepareTenantQuotaRelease,
+  applyCommittedQuotaRelease,
+} from "../tenant-partner/tenant-quota-ledger";
+
+installTenantQuotaRelease(TenantPartnerService);
 import { VehicleEligibilityService } from "../vehicle-eligibility/vehicle-eligibility.service";
 import { SandboxFallbackCostPolicyResolverService } from "../billing-settlement/sandbox-fallback-cost-policy-resolver.service";
 import { RuntimeEligibilityEvaluator } from "../vehicle-eligibility/runtime-eligibility-evaluator.service";
@@ -5487,21 +5495,93 @@ export class OwnedMobilityService
               tx,
             );
           }
-          return prepared;
+          let quotaRelease: any = null;
+          if (
+            this.tenantPartnerService &&
+            prepared.order.tenantId &&
+            prepared.order.bookingId
+          ) {
+            if (
+              typeof this.tenantPartnerService.prepareTenantQuotaRelease ===
+              "function"
+            ) {
+              quotaRelease =
+                await this.tenantPartnerService.prepareTenantQuotaRelease(tx, {
+                  tenantId: prepared.order.tenantId,
+                  bookingId: prepared.order.bookingId,
+                });
+            } else if (typeof prepareTenantQuotaRelease === "function") {
+              quotaRelease = await prepareTenantQuotaRelease(
+                this.tenantPartnerService,
+                tx,
+                {
+                  tenantId: prepared.order.tenantId,
+                  bookingId: prepared.order.bookingId,
+                },
+              );
+            }
+          }
+          return { ...prepared, quotaRelease };
         })
-      : prepare({
-          order: this.requireOrder(orderId),
-          assignment: this.findLatestActiveAssignment(orderId),
-          task: this.findLatestActiveAssignment(orderId)
-            ? this.findTaskByAssignmentId(
-                this.findLatestActiveAssignment(orderId)!.assignmentId,
-              )
-            : null,
-          dispatchJobs: this.dispatchJobs.filter(
-            (job) => job.orderId === orderId && job.status !== "closed",
-          ),
-        });
+      : {
+          ...prepare({
+            order: this.requireOrder(orderId),
+            assignment: this.findLatestActiveAssignment(orderId),
+            task: this.findLatestActiveAssignment(orderId)
+              ? this.findTaskByAssignmentId(
+                  this.findLatestActiveAssignment(orderId)!.assignmentId,
+                )
+              : null,
+            dispatchJobs: this.dispatchJobs.filter(
+              (job) => job.orderId === orderId && job.status !== "closed",
+            ),
+          }),
+          quotaRelease: null,
+        };
     const { order, assignment, task, dispatchJobs, traceLogs } = committed;
+    if (
+      repository?.isEnabled() &&
+      committed.quotaRelease &&
+      this.tenantPartnerService
+    ) {
+      if (
+        typeof this.tenantPartnerService.applyCommittedQuotaRelease ===
+        "function"
+      ) {
+        this.tenantPartnerService.applyCommittedQuotaRelease(
+          committed.quotaRelease,
+        );
+      } else if (
+        typeof this.tenantPartnerService.applyCommittedQuotaConsumption ===
+        "function"
+      ) {
+        this.tenantPartnerService.applyCommittedQuotaConsumption(
+          committed.quotaRelease,
+        );
+      } else if (typeof applyCommittedQuotaRelease === "function") {
+        applyCommittedQuotaRelease(
+          this.tenantPartnerService,
+          committed.quotaRelease,
+        );
+      }
+    } else if (
+      !repository?.isEnabled() &&
+      this.tenantPartnerService &&
+      order.tenantId &&
+      order.bookingId
+    ) {
+      if (typeof this.tenantPartnerService.releaseTenantQuota === "function") {
+        await this.tenantPartnerService.releaseTenantQuota({
+          tenantId: order.tenantId,
+          bookingId: order.bookingId,
+        });
+      } else if (typeof releaseTenantQuota === "function") {
+        await releaseTenantQuota(this.tenantPartnerService, {
+          tenantId: order.tenantId,
+          bookingId: order.bookingId,
+        });
+      }
+    }
     this.applyAuthoritativeOrder(order);
     if (assignment)
       this.dispatchAssignments = [
@@ -8798,7 +8878,7 @@ export class OwnedMobilityService
   }
 
   private assertOrderCancelable(order: OwnedOrderRecord) {
-    if (order.status === "cancelled") {
+    if (order.status === "cancelled" || order.status === "completed") {
       throw new ApiRequestError(
         HttpStatus.CONFLICT,
         "ORDER_NOT_CANCELABLE",
