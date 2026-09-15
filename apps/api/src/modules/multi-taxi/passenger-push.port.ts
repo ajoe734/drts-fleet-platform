@@ -53,3 +53,34 @@ export class UnavailablePassengerPushPort implements PassengerPushPort {
 }
 
 export const InjectPassengerPushPort = () => Inject(PASSENGER_PUSH_PORT);
+
+export class PassengerPushDeviceExpiredError extends Error {
+  constructor(message = "Passenger push device registration has expired") {
+    super(message);
+    this.name = "PassengerPushDeviceExpiredError";
+  }
+}
+
+export class PassengerPushDeviceRevokedError extends Error {
+  constructor(message = "Passenger push device registration has been revoked") {
+    super(message);
+    this.name = "PassengerPushDeviceRevokedError";
+  }
+}
+
+export class PassengerPushTenantMismatchError extends Error {
+  constructor(message = "Passenger push device belongs to a different tenant") {
+    super(message);
+    this.name = "PassengerPushTenantMismatchError";
+  }
+}
+
+export class PassengerPushProviderError extends Error {
+  constructor(
+    message: string,
+    readonly statusCode?: number,
+  ) {
+    super(message);
+    this.name = "PassengerPushProviderError";
+  }
+}
