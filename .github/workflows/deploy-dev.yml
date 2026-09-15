@@ -1322,6 +1322,23 @@ jobs:
           curl_ready "${{ steps.urls.outputs.platform_admin }}" >/dev/null
           curl_ready "${{ steps.urls.outputs.ops_console }}" >/dev/null
           curl_ready "${{ steps.urls.outputs.fleet_partner_portal }}" >/dev/null
+          echo "::group::DIAGNOSTIC tenant_console root (single hop, no --fail)"
+          curl -sS -D - -o /tmp/diag_tenant_root.html --max-time 15 \
+            --header "Authorization: Bearer ${TENANT_CONSOLE_ID_TOKEN}" \
+            "${{ steps.urls.outputs.tenant_console }}/" || true
+          echo "--- body head ---"
+          head -c 1000 /tmp/diag_tenant_root.html || true
+          echo
+          echo "::endgroup::"
+          echo "::group::DIAGNOSTIC tenant_console /healthz (single hop, no --fail)"
+          curl -sS -D - -o /tmp/diag_tenant_healthz.html --max-time 15 \
+            --header "Authorization: Bearer ${TENANT_CONSOLE_ID_TOKEN}" \
+            "${{ steps.urls.outputs.tenant_console }}/healthz" || true
+          echo "--- body head ---"
+          head -c 1000 /tmp/diag_tenant_healthz.html || true
+          echo
+          echo "::endgroup::"
+
           curl_ready_auth "${{ steps.urls.outputs.tenant_console }}" "${TENANT_CONSOLE_ID_TOKEN}" >/dev/null
           curl_ready_auth "${{ steps.urls.outputs.tenant_console }}/healthz" "${TENANT_CONSOLE_ID_TOKEN}" >/dev/null
           curl_ready_auth "${{ steps.urls.outputs.bank_console }}" "${BANK_CONSOLE_ID_TOKEN}" >/dev/null
