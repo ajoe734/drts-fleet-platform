@@ -4046,10 +4046,11 @@ def maybe_trigger_retry_or_fallback(
     if failure.get("kind") == "capacity" and allow_provider_pause:
         agent_id = str(worker.get("agent_id") or worker.get("provider") or "")
         if agent_id:
-            from control_plane.usecases.dispatch_runtime import ready_dispatch_settings
-            dispatch_cooldown = int(ready_dispatch_settings(config).get("dispatch_cooldown_seconds", 300))
-            if dispatch_cooldown > 0:
-                pause_provider(state, agent_id, failure_summary, kind="capacity", reset_seconds=dispatch_cooldown)
+            reset_seconds = int(
+                worker_retry_settings(config, worker.get("provider")).get("capacity_pause_seconds", 300)
+            )
+            if reset_seconds > 0:
+                pause_provider(state, agent_id, failure_summary, kind="capacity", reset_seconds=reset_seconds)
 
     if retry.get("fallback_mode") == "file_inbox":
         existing_fallback = existing_file_inbox_fallback_run_id(
@@ -4569,10 +4570,11 @@ def handle_worker_failure_signal(
             return True, changed
 
     if failure.get("kind") == "capacity" and authorized and agent_id:
-        from control_plane.usecases.dispatch_runtime import ready_dispatch_settings
-        dispatch_cooldown = int(ready_dispatch_settings(config).get("dispatch_cooldown_seconds", 300))
-        if dispatch_cooldown > 0:
-            pause_provider(state, agent_id, failure_reason, kind="capacity", reset_seconds=dispatch_cooldown)
+        reset_seconds = int(
+            worker_retry_settings(config, worker.get("provider")).get("capacity_pause_seconds", 300)
+        )
+        if reset_seconds > 0:
+            pause_provider(state, agent_id, failure_reason, kind="capacity", reset_seconds=reset_seconds)
 
     reassigned_to = maybe_reassign_task_after_worker_failure(
         config,

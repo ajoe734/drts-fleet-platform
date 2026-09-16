@@ -1477,7 +1477,8 @@ class WorkerReassignmentTests(EvidenceOutputIsolation, unittest.TestCase):
         self.assertEqual(worker["reassigned_to"], "Codex")
         self.assertIs(maybe_reassign.call_args.kwargs["state"], state)
 
-    def test_capacity_retry_temporarily_pauses_exact_lane(self) -> None:
+    def test_capacity_retry_respects_backoff_without_pausing_lane_early(self) -> None:
+        """Verify that capacity errors under the max_attempts threshold only backoff the specific task, keeping the lane open."""
         config = {
             **self.config,
             "agents": {
