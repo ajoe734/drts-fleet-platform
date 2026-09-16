@@ -84,7 +84,7 @@
     },
     {
       "id": "active-product-apps",
-      "pattern": "^apps/(?:api|bank-console-web|channel-partner-portal-web|driver-app|enterprise-dispatch-web|fleet-partner-portal-web|ops-console-web|platform-admin-web|referral-embed-web|tenant-console-web)/",
+      "pattern": "^apps/(?:api|bank-console-web|channel-partner-portal-web|driver-app|enterprise-dispatch-web|fleet-partner-portal-web|ops-console-web|platform-admin-web|referral-embed-web|tenant-console-web|voice-media-worker)/",
       "classification": "product_runtime",
       "status": "active"
     },
@@ -168,13 +168,13 @@
     },
     {
       "id": "ci-tools",
-      "pattern": "^tools/ci/",
+      "pattern": "^(?:tools|scripts)/ci/",
       "classification": "test_only",
       "status": "active"
     },
     {
       "id": "development-tools",
-      "pattern": "^tools/(?:development-orchestrator|local-development|task-dispatch)/",
+      "pattern": "^tools/(?:development-orchestrator|local-development|task-dispatch|system-remediation)/",
       "classification": "development_tool",
       "status": "active"
     },
