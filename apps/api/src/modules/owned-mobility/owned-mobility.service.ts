@@ -9171,14 +9171,16 @@ export class OwnedMobilityService
     }
 
     // SD §7.6 / Review Round 4: Stale-worker and timer fencing.
-    // Only orders in active pre-trip matching or offer acceptance states are timeoutable:
-    // ["created", "ready_for_dispatch", "redispatch_required", "assigned"].
+    // Pre-trip matching and offer acceptance states are timeoutable:
+    // ["created", "ready_for_dispatch", "redispatch_required", "assigned", "preassigned", "delayed_queue"].
+    // Note: "preassigned" (unmatched reservation hold) and "delayed_queue" (unassigned order awaiting supply retry)
+    // are explicitly validated by canonical test suites (SR-QA-DRIVER-001 C053, SR-QA-DISPATCH-001 C038)
+    // to transition to dispatch_timeout and enter the redispatch priority queue upon matching_timeout.
     // All other statuses are non-timeoutable and must be treated as superseded:
     // - Terminal states: "completed", "cancelled"
     // - Active in-trip execution states: "driver_accepted", "enroute_pickup", "arrived_pickup", "on_trip", "proof_pending"
     // - Already timed out: "dispatch_timeout"
-    // - Operator/specialized workflow exception states: "no_supply", "delayed_queue", "exception_hold", "dispatch_failed"
-    // - Held/compliance pre-dispatch states: "preassigned", "recording_pending"
+    // - Operator manual-intervention / held exception states: "no_supply", "exception_hold", "dispatch_failed", "recording_pending"
     const nonTimeoutableStatuses = [
       "completed",
       "cancelled",
@@ -9189,10 +9191,8 @@ export class OwnedMobilityService
       "proof_pending",
       "dispatch_timeout",
       "no_supply",
-      "delayed_queue",
       "exception_hold",
       "dispatch_failed",
-      "preassigned",
       "recording_pending",
     ];
     const timeoutableStatuses = [
@@ -9200,6 +9200,8 @@ export class OwnedMobilityService
       "ready_for_dispatch",
       "redispatch_required",
       "assigned",
+      "preassigned",
+      "delayed_queue",
     ];
     if (
       nonTimeoutableStatuses.includes(order.status) ||

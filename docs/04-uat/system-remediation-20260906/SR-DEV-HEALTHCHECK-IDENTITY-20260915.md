@@ -508,29 +508,37 @@ Following the merge of PR #2041 (`9680f6a5923f06f2d8cc41a0eae42fc77c931a03`), de
 - `python3 tools/ci/check_test_coverage.py`: all 74 test files yield tests CI runs.
 - `python3 operations/security/verify-internal-key-exceptions.py`: AUDIT PASSED.
 
-### 10.4 Review Round 4: Stale-Worker Fencing for Non-Timeoutable Exception States
+### 10.4 Review Round 4 & CI Reconciliation: Stale-Worker Fencing Precision & Test Alignment
 
 #### Diagnosis
-In commit `934f67716`, `nonTimeoutableStatuses` in `applyDispatchTimeout` omitted operator exception states (`no_supply`, `delayed_queue`, `exception_hold`, `dispatch_failed`) and pre-dispatch hold states (`preassigned`, `recording_pending`). A stale or duplicate `matching_timeout` firing against an order in these states would bypass fencing, overwrite the order status to `dispatch_timeout`, increment `dispatchAttemptCount`, and place it in `redispatch_priority_queue` without operator intervention—violating SD §7.6 stale-worker fencing.
+1. In commit `934f67716`, `nonTimeoutableStatuses` in `applyDispatchTimeout` omitted operator exception states (`no_supply`, `exception_hold`, `dispatch_failed`) and compliance hold (`recording_pending`).
+2. In commit `691d7c85c`, over-broad inclusion of `preassigned` and `delayed_queue` into `nonTimeoutableStatuses` caused regressions in CI (`PR #2043`, run `35058540965`):
+   - `tests/unit/system-remediation/sr-qa-driver-001/dispatch-trip-lifecycle.test.ts`: C053 driver acceptance gap test verifies that an unmatched reservation order (`preassigned`) times out into `dispatch_timeout` and enters `redispatch_priority_queue`.
+   - `tests/unit/system-remediation/sr-qa-dispatch-001/dispatch-timeout-no-supply-scheduler-gap.test.ts`: C038 dispatch timeout test verifies that an unassigned order awaiting supply retry (`delayed_queue`) times out into `dispatch_timeout` and enters `redispatch_priority_queue`.
+   - Both states are legitimate pre-trip matching/queueing states waiting for vehicle assignment; when matching timeout fires, they must be allowed to transition to `dispatch_timeout` and requeue into `redispatch_priority_queue`.
 
 #### Remediation Implementation
-1. **Restored Full Stale-Worker & Timer Fencing**:
+1. **Precise Stale-Worker & Timer Fencing**:
    In `apps/api/src/modules/owned-mobility/owned-mobility.service.ts`:
-   - Updated `applyDispatchTimeout` to enforce both a comprehensive `nonTimeoutableStatuses` blacklist and a conservative `timeoutableStatuses` whitelist (`["created", "ready_for_dispatch", "redispatch_required", "assigned"]`).
-   - Specifically intercepted `no_supply`, `delayed_queue`, `exception_hold`, `dispatch_failed`, `preassigned`, and `recording_pending` alongside terminal (`completed`, `cancelled`) and active trip states (`driver_accepted`, `enroute_pickup`, `arrived_pickup`, `on_trip`, `proof_pending`, `dispatch_timeout`).
-   - Treated non-timeoutable states as `escalationAction: "superseded"`, leaving order status, attempt counts, and queue states untouched.
-   - Allowed unassigned orders in `created`, `ready_for_dispatch`, and `redispatch_required` to legitimately time out and enter `redispatch_priority_queue`.
+   - Enforced full 18-status coverage of `OWNED_ORDER_STATUSES`:
+     - **Timeoutable statuses (6)**: `["created", "ready_for_dispatch", "redispatch_required", "assigned", "preassigned", "delayed_queue"]`.
+     - **Non-timeoutable statuses (12)**: `["completed", "cancelled", "driver_accepted", "enroute_pickup", "arrived_pickup", "on_trip", "proof_pending", "dispatch_timeout", "no_supply", "exception_hold", "dispatch_failed", "recording_pending"]`.
+   - Operator intervention states (`no_supply`, `exception_hold`, `dispatch_failed`), compliance hold (`recording_pending`), terminal states (`completed`, `cancelled`), and active in-trip states are strictly fenced as `superseded`.
+   - Allowed pre-trip matching and unassigned queue states (`created`, `ready_for_dispatch`, `redispatch_required`, `preassigned`, `delayed_queue`) to legitimately transition to `dispatch_timeout` upon `matching_timeout`.
 2. **Regression Test Coverage**:
    In `tests/unit/system-remediation/sr-dev-healthcheck-identity-20260915/healthcheck-identity.test.ts`:
-   - Added 14 test cases verifying stale `matching_timeout` fencing on all non-timeoutable statuses with DB repository enabled.
-   - Added 14 test cases verifying stale `matching_timeout` fencing on all non-timeoutable statuses in in-memory mode.
-   - Added 3 test cases verifying valid `matching_timeout` on unassigned timeoutable statuses (`created`, `ready_for_dispatch`, `redispatch_required`).
+   - 12 test cases verifying stale `matching_timeout` fencing on all non-timeoutable statuses with DB repository enabled.
+   - 12 test cases verifying stale `matching_timeout` fencing on all non-timeoutable statuses in in-memory mode.
+   - 5 test cases verifying valid `matching_timeout` on unassigned timeoutable statuses (`created`, `ready_for_dispatch`, `redispatch_required`, `preassigned`, `delayed_queue`).
 
 #### Verification Evidence
-- `pnpm vitest run tests/unit/system-remediation/sr-dev-healthcheck-identity-20260915/healthcheck-identity.test.ts tests/unit/operational-browser-manifest.test.ts`: 44 passed (100%).
+- `pnpm vitest run tests/unit/system-remediation/sr-dev-healthcheck-identity-20260915/healthcheck-identity.test.ts tests/unit/operational-browser-manifest.test.ts`: 42 passed (100%).
+- `pnpm vitest run tests/unit/system-remediation/sr-qa-driver-001/dispatch-trip-lifecycle.test.ts tests/unit/system-remediation/sr-qa-dispatch-001/dispatch-timeout-no-supply-scheduler-gap.test.ts tests/unit/system-remediation/sr-dispatch-scheduler-001/dispatch-scheduler-sweep.test.ts`: 33 passed (100%).
+- `pnpm --filter @drts/enterprise-dispatch-web exec vitest run tests/unit/control-plane-proxy.test.ts`: 12 passed (100%).
 - `pnpm --filter @drts/api exec vitest run tests/unit/owned-mobility.service.test.ts`: 113 passed (100%).
 - `pnpm --filter @drts/enterprise-dispatch-web exec tsc --noEmit`: 0 errors.
 - `pnpm exec eslint apps/api/src/modules/owned-mobility/owned-mobility.service.ts tests/unit/system-remediation/sr-dev-healthcheck-identity-20260915/healthcheck-identity.test.ts`: 0 errors, 0 warnings.
 - `python3 tools/ci/check_test_coverage.py`: all 74 test files yield tests CI runs.
 - `python3 operations/security/verify-internal-key-exceptions.py`: AUDIT PASSED.
+
 

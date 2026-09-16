@@ -258,10 +258,8 @@ describe("SR-DEV-HEALTHCHECK-IDENTITY-20260915: dev deployment health check iden
 
   it.each([
     "no_supply",
-    "delayed_queue",
     "exception_hold",
     "dispatch_failed",
-    "preassigned",
     "recording_pending",
     "completed",
     "cancelled",
@@ -314,10 +312,8 @@ describe("SR-DEV-HEALTHCHECK-IDENTITY-20260915: dev deployment health check iden
 
   it.each([
     "no_supply",
-    "delayed_queue",
     "exception_hold",
     "dispatch_failed",
-    "preassigned",
     "recording_pending",
     "completed",
     "cancelled",
@@ -355,6 +351,8 @@ describe("SR-DEV-HEALTHCHECK-IDENTITY-20260915: dev deployment health check iden
     "created",
     "ready_for_dispatch",
     "redispatch_required",
+    "preassigned",
+    "delayed_queue",
   ] as const)(
     "allows matching_timeout on %s orders without assignment",
     async (timeoutableStatus) => {
