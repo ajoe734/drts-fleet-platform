@@ -4568,6 +4568,12 @@ def handle_worker_failure_signal(
         if handled:
             return True, changed
 
+    if failure.get("kind") == "capacity" and authorized and agent_id:
+        from control_plane.usecases.dispatch_runtime import ready_dispatch_settings
+        dispatch_cooldown = int(ready_dispatch_settings(config).get("dispatch_cooldown_seconds", 300))
+        if dispatch_cooldown > 0:
+            pause_provider(state, agent_id, failure_reason, kind="capacity", reset_seconds=dispatch_cooldown)
+
     reassigned_to = maybe_reassign_task_after_worker_failure(
         config,
         worker,

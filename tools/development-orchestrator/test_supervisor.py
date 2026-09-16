@@ -1520,9 +1520,8 @@ class WorkerReassignmentTests(EvidenceOutputIsolation, unittest.TestCase):
         self.assertTrue(handled)
         self.assertTrue(changed)
         self.assertEqual(worker["status"], "retry_backoff")
-        self.assertIn("gemini2", state["provider_pauses"])
-        self.assertEqual(state["provider_pauses"]["gemini2"]["kind"], "capacity")
-        self.assertTrue(
+        self.assertNotIn("gemini2", state.get("provider_pauses", {}))
+        self.assertFalse(
             supervisor.is_agent_dispatch_paused(
                 config,
                 state,
