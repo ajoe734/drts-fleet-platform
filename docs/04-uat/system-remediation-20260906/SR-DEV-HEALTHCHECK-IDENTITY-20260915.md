@@ -109,6 +109,7 @@ curl_ready_auth() {
 ```
 
 Key features of this design:
+
 - **Audience Derivation**: Extracts the Cloud Run origin (`https://<service-url>`), which matches Cloud Run's expected OIDC audience claim.
 - **Dual Identity Token Acquisition**: Attempts native `gcloud auth print-identity-token --audiences` first, falling back to Google Cloud IAM Credentials REST API (`generateIdToken`) using the active WIF access token.
 - **Log Masking**: Automatically registers tokens with GitHub Actions secret masking (`::add-mask::`).
@@ -216,11 +217,11 @@ credential-type mismatch:
    catchable error, so the script silently fell through to attempt 2.
 2. **Attempt 2** (manual `iamcredentials.googleapis.com...:generateIdToken` call):
    this used an access token obtained from `gcloud auth print-access-token`, which by
-   that point already represents the *impersonated* runtime service account
+   that point already represents the _impersonated_ runtime service account
    (`DEV_WIF_SERVICE_ACCOUNT`), not the original WIF principal. Calling
    `generateIdToken` on `serviceAccounts/${sa}:generateIdToken` with that access
    token is a **self-impersonation** request — it requires `${sa}` to hold
-   `roles/iam.serviceAccountTokenCreator` on *itself*, which is not part of the
+   `roles/iam.serviceAccountTokenCreator` on _itself_, which is not part of the
    normal WIF trust chain (only the original WIF principal is granted Token Creator
    on `${sa}`, not `${sa}` on itself). The call therefore failed (HTTP error was
    discarded by `--fail` combined with `2>/dev/null || true`), leaving `token` empty
@@ -230,7 +231,7 @@ credential-type mismatch:
 
 Replaced both gcloud/curl-based attempts with the officially supported path: mint the
 ID token directly from `google-github-actions/auth@v2` using `token_format: id_token`
-and `id_token_audience: <service-url>`. This mints the token from the *original* WIF
+and `id_token_audience: <service-url>`. This mints the token from the _original_ WIF
 federation exchange (the same trust chain already used to obtain the access-token
 credential), so it does not require any additional self-impersonation IAM grant.
 
@@ -270,6 +271,7 @@ unchanged, and this is strictly a token-acquisition mechanism swap.
 In deploy run `34956809422` (commit `2af11cad3`), token minting via `google-github-actions/auth@v2` succeeded completely, eliminating the prior auth failure. However, the workflow failed with HTTP 404 on `curl_ready_auth "${{ steps.urls.outputs.tenant_console }}/healthz"`.
 
 Diagnostic probing revealed:
+
 1. **Google Frontend (GFE) Interception**:
    Requesting `https://<service-url>.a.run.app/healthz` returned `HTTP/2 404 Not Found` with Google's robot error page (`<title>Error 404 (Not Found)!!1</title>`) and no container tracing headers (`x-cloud-trace-context`, `x-drts-candidate-sha`).
 2. **Infrastructure Reservation**:
@@ -280,9 +282,11 @@ Diagnostic probing revealed:
 ### 7.2 Remediation Decision per Task Brief
 
 The task brief explicitly specified:
+
 > "tenant/enterprise 的 /healthz 目前回 404，稽核明確指出那不是已驗證的替代健康路徑，可選擇補上真正的健康路由或改為帶身分探測根路徑，擇一但須在文件說明理由。"
 
 Because `/healthz` is intercepted by Google Cloud Run's infrastructure layer and cannot receive external ingress, we adopted the **帶身分探測根路徑 (Probe Root Path with Identity)** strategy:
+
 - `tenant_console`: Probed via `curl_ready_auth "${{ steps.urls.outputs.tenant_console }}" "${TENANT_CONSOLE_ID_TOKEN}"`.
 - `bank_console`: Probed via `curl_ready_auth "${{ steps.urls.outputs.bank_console }}" "${BANK_CONSOLE_ID_TOKEN}"`.
 - `enterprise_dispatch`: Probed via `curl_ready_auth "${{ steps.urls.outputs.enterprise_dispatch }}" "${ENTERPRISE_DISPATCH_ID_TOKEN}"` (along with its functional endpoints `/bookings/new` and `/embed/unsupported-host`).
@@ -315,6 +319,7 @@ Because `/healthz` is intercepted by Google Cloud Run's infrastructure layer and
 ### 8.1 Post-Deploy Progress & Root Cause in Run 34965087961
 
 In dev deploy run `34965087961`:
+
 - All nine service builds, migrations, and deployments succeeded.
 - The `Dev health check` job passed in 1m 14s using the WIF-minted ID tokens and root-path probes (§7), confirming that authenticated health checks function reliably.
 - The `retired-service-cleanup` job completed cleanly.
@@ -334,7 +339,7 @@ In dev deploy run `34965087961`:
    - `Mint identity token — tenant console (operational candidate)` (audience: `${{ needs.health-check.outputs.tenant_console }}`)
    - `Mint identity token — bank console (operational candidate)` (audience: `${{ needs.health-check.outputs.bank_console }}`)
    - `Mint identity token — enterprise dispatch (operational candidate)` (audience: `${{ needs.health-check.outputs.enterprise_dispatch }}`)
-   These tokens are passed as environment variables (`DRTS_DEV_TENANT_CONSOLE_ID_TOKEN`, `DRTS_DEV_BANK_CONSOLE_ID_TOKEN`, `DRTS_DEV_ENTERPRISE_DISPATCH_ID_TOKEN`) into the test runner step.
+     These tokens are passed as environment variables (`DRTS_DEV_TENANT_CONSOLE_ID_TOKEN`, `DRTS_DEV_BANK_CONSOLE_ID_TOKEN`, `DRTS_DEV_ENTERPRISE_DISPATCH_ID_TOKEN`) into the test runner step.
 2. **Acceptance Runner Propagation**:
    In `operations/verification/run-operational-browser-acceptance.sh`, the token environment variables are exported as both `DRTS_OPERATIONAL_*_ID_TOKEN` and `DRTS_DEV_*_ID_TOKEN`, ensuring downstream Playwright test processes receive them regardless of invocation style.
 3. **Playwright Spec Authentication**:
@@ -377,6 +382,7 @@ In dev deploy run `34965087961`:
 ### 9.1 Dev Deploy Run 35000817647 Audit & Root Cause Analysis
 
 Following the merge of PR #2040 (`d853b7e4bd0db475cc451df06b01a4c0c214f280`), dev deploy run `35000817647` was executed on `dev`:
+
 - **Build & Push Images**: Success
 - **DB Migration**: Success
 - **Deploy Services**: Success
@@ -430,5 +436,19 @@ Following the merge of PR #2040 (`d853b7e4bd0db475cc451df06b01a4c0c214f280`), de
 - **Code Style & Lint Verification**:
   `pnpm lint:root` and `pnpm prettier --check tests/e2e/operational-browser-acceptance.spec.ts tests/unit/system-remediation/sr-dev-healthcheck-identity-20260915/healthcheck-identity.test.ts` passed with 0 errors.
 
+### 9.4 Internal Key Exception Rotation (2026-09-16, Owner `Gemini2`)
 
-
+- **Root Cause & Diagnosis**:
+  At midnight UTC on 2026-09-16, `INTERNAL_KEY_EXCP_002` reached its documented 14-day expiry (`2026-09-15T23:59:59Z`), causing CI job `Verify Internal Key Exceptions` (`operations/security/verify-internal-key-exceptions.py`) and downstream test suites depending on active `x-drts-internal-key` authentication (`deploy-dev.yml` session generation and `iap-subject-adapter.integration.test.ts`) to fail closed.
+- **Rotation Remediation**:
+  Following the dual-key rotation policy in `docs/02-architecture/internal-key-exceptions.md` §3 and 14-day rotation cadence:
+  - Advanced `INTERNAL_KEY_EXCP_002` `ttl`, `expiresAt`, and `removalDate` to `2026-09-30T23:59:59Z` / `2026-09-30` across `apps/api/src/common/auth/internal-key-exception-registry.ts` and `docs/02-architecture/internal-key-exceptions.md`.
+  - Updated `tests/unit/internal-key-exception-registry.test.ts` test case for total expiration after the new window (`2026-09-30`).
+- **Verification**:
+  - `python3 operations/security/verify-internal-key-exceptions.py`: PASS (AUDIT PASSED).
+  - `pnpm vitest run tests/unit/internal-key-exception-registry.test.ts`: 13 passed (100%).
+  - `pnpm vitest run tests/integration/internal-key-rotation-retirement.integration.test.ts`: 6 passed (100%).
+  - `pnpm vitest run tests/unit/internal-key-alerts.test.ts`: 6 passed (100%).
+  - `pnpm vitest run tests/integration/iap-subject-adapter.integration.test.ts`: 14 passed (100%).
+  - `pnpm vitest run tests/security/iam-auth-negative-matrix.test.ts`: 4 passed (100%).
+  - `pnpm lint:root`: 0 warnings, 0 errors.
