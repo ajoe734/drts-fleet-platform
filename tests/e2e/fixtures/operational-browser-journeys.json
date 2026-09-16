@@ -94,6 +94,11 @@
       "baseUrlEnv": "DRTS_DEV_ENTERPRISE_DISPATCH_BASE_URL",
       "route": "/bookings/new",
       "actorScope": "tenant_admin",
+      "browserSession": {
+        "cookieName": "drts_tenant_session",
+        "tokenEnv": "DRTS_OPERATIONAL_TENANT_SESSION_TOKEN",
+        "templateVariable": "tenantSessionToken"
+      },
       "operations": [
         {
           "kind": "request",
@@ -489,7 +494,7 @@
             "idempotency-key": "operational-dispatch-timeout-{{runId}}"
           },
           "body": {
-            "timeoutReasonCode": "acceptance_timeout"
+            "timeoutReasonCode": "matching_timeout"
           }
         }
       ],
