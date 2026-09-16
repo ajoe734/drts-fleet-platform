@@ -746,6 +746,30 @@ jobs:
             exit 1
           fi
 
+          # SR-LIVE-PUSH-001 web push is self-signed VAPID, not an external
+          # provider (2026-09-15 decision). --set-secrets replaces the whole
+          # set and gcloud run deploy fails on a missing secret name, so all
+          # three must exist before any is mounted -- a partial mount would
+          # either 500 the deploy or silently boot the API with an incomplete
+          # VAPID config. Dev is not blocked when the credentials are absent;
+          # Web Push just stays unavailable until an operator provisions them.
+          vapid_public_secret="${secret_prefix}-passenger-webpush-vapid-public-key"
+          vapid_private_secret="${secret_prefix}-passenger-webpush-vapid-private-key"
+          vapid_subject_secret="${secret_prefix}-passenger-webpush-vapid-subject"
+          vapid_secret_count=0
+          for vapid_secret in "$vapid_public_secret" "$vapid_private_secret" "$vapid_subject_secret"; do
+            if gcloud secrets describe "$vapid_secret" --project "$project_id" >/dev/null 2>&1; then
+              vapid_secret_count=$((vapid_secret_count + 1))
+            fi
+          done
+          if [[ "$vapid_secret_count" -eq 3 ]]; then
+            secret_args="${secret_args},PASSENGER_WEBPUSH_VAPID_PUBLIC_KEY=${vapid_public_secret}:latest,PASSENGER_WEBPUSH_VAPID_PRIVATE_KEY=${vapid_private_secret}:latest,PASSENGER_WEBPUSH_VAPID_SUBJECT=${vapid_subject_secret}:latest"
+          elif [[ "$vapid_secret_count" -eq 0 ]]; then
+            echo "::notice::${vapid_public_secret}/${vapid_private_secret}/${vapid_subject_secret} are absent; dev deploys with Web Push unavailable (isAvailable() stays false)."
+          else
+            echo "::notice::VAPID configuration is partial (${vapid_secret_count}/3 secrets present); dev deploys with Web Push unavailable until all three of ${vapid_public_secret}, ${vapid_private_secret}, ${vapid_subject_secret} exist."
+          fi
+
           llm_secret="${secret_prefix}-llm-gateway-api-key"
           if gcloud secrets describe "$llm_secret" --project "$project_id" >/dev/null 2>&1; then
             secret_args="${secret_args},LLM_GATEWAY_API_KEY=${llm_secret}:latest"
