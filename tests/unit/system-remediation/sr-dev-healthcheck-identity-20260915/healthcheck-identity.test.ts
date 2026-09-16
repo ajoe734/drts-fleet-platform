@@ -217,4 +217,179 @@ describe("SR-DEV-HEALTHCHECK-IDENTITY-20260915: dev deployment health check iden
     expect(specContent).toContain('page.waitForEvent("download"');
     expect(specContent).toContain("downloadResponse.headers()");
   });
+
+  it("allows matching_timeout on created orders with DB repository enabled so operational journey setup succeeds", async () => {
+    const { buildOwnedMobilityServiceForTest, createTestPassengerOrder } = await import(
+      "../sr-qa-dispatch-001/test-support"
+    );
+    const { vi } = await import("vitest");
+
+    const mockRepo = {
+      isEnabled: vi.fn(() => true),
+      withTransaction: vi.fn(async (cb: (tx: unknown) => Promise<unknown>) => cb({})),
+      loadOrderCancellationForUpdate: vi.fn(async (_tx: unknown, orderId: string) => ({
+        order: testService.requireOrder(orderId),
+        assignment: null,
+        task: null,
+        dispatchJobs: [],
+      })),
+      persistChanges: vi.fn(async () => undefined),
+      persistOrderWorkflow: vi.fn(async () => undefined),
+      reportPersistenceFailure: vi.fn(),
+    };
+
+    const { service: testService } = buildOwnedMobilityServiceForTest();
+    // Attach repo
+    (testService as any).ownedMobilityRepository = mockRepo;
+
+    const order = createTestPassengerOrder(testService);
+    // Explicitly test an order in "created" status (as produced by tenant booking creation)
+    testService.requireOrder(order.orderId).status = "created";
+
+    const result = await testService.handleDispatchTimeout(
+      order.orderId,
+      "matching_timeout",
+    );
+
+    expect(result.status).toBe("dispatch_timeout");
+    expect(result.escalationAction).not.toBe("superseded");
+    expect(testService.getOrder(order.orderId).status).toBe("dispatch_timeout");
+  });
+
+  it.each([
+    "no_supply",
+    "exception_hold",
+    "dispatch_failed",
+    "recording_pending",
+    "completed",
+    "cancelled",
+    "driver_accepted",
+    "enroute_pickup",
+    "arrived_pickup",
+    "on_trip",
+    "proof_pending",
+    "dispatch_timeout",
+  ] as const)(
+    "fences stale matching_timeout on %s orders as superseded (DB repo enabled)",
+    async (nonTimeoutableStatus) => {
+      const { buildOwnedMobilityServiceForTest, createTestPassengerOrder } = await import(
+        "../sr-qa-dispatch-001/test-support"
+      );
+      const { vi } = await import("vitest");
+
+      const mockRepo = {
+        isEnabled: vi.fn(() => true),
+        withTransaction: vi.fn(async (cb: (tx: unknown) => Promise<unknown>) => cb({})),
+        loadOrderCancellationForUpdate: vi.fn(async (_tx: unknown, orderId: string) => ({
+          order: testService.requireOrder(orderId),
+          assignment: null,
+          task: null,
+          dispatchJobs: [],
+        })),
+        persistChanges: vi.fn(async () => undefined),
+        persistOrderWorkflow: vi.fn(async () => undefined),
+        reportPersistenceFailure: vi.fn(),
+      };
+
+      const { service: testService } = buildOwnedMobilityServiceForTest();
+      (testService as any).ownedMobilityRepository = mockRepo;
+
+      const order = createTestPassengerOrder(testService);
+      testService.requireOrder(order.orderId).status = nonTimeoutableStatus;
+      const initialAttemptCount = testService.requireOrder(order.orderId).dispatchAttemptCount;
+
+      const result = await testService.handleDispatchTimeout(
+        order.orderId,
+        "matching_timeout",
+      );
+
+      expect(result.status).toBe(nonTimeoutableStatus);
+      expect(result.escalationAction).toBe("superseded");
+      expect(testService.getOrder(order.orderId).status).toBe(nonTimeoutableStatus);
+      expect(testService.getOrder(order.orderId).dispatchAttemptCount).toBe(initialAttemptCount);
+    },
+  );
+
+  it.each([
+    "no_supply",
+    "exception_hold",
+    "dispatch_failed",
+    "recording_pending",
+    "completed",
+    "cancelled",
+    "driver_accepted",
+    "enroute_pickup",
+    "arrived_pickup",
+    "on_trip",
+    "proof_pending",
+    "dispatch_timeout",
+  ] as const)(
+    "fences stale matching_timeout on %s orders as superseded (in-memory mode)",
+    async (nonTimeoutableStatus) => {
+      const { buildOwnedMobilityServiceForTest, createTestPassengerOrder } = await import(
+        "../sr-qa-dispatch-001/test-support"
+      );
+
+      const { service: testService } = buildOwnedMobilityServiceForTest();
+      const order = createTestPassengerOrder(testService);
+      testService.requireOrder(order.orderId).status = nonTimeoutableStatus;
+      const initialAttemptCount = testService.requireOrder(order.orderId).dispatchAttemptCount;
+
+      const result = await testService.handleDispatchTimeout(
+        order.orderId,
+        "matching_timeout",
+      );
+
+      expect(result.status).toBe(nonTimeoutableStatus);
+      expect(result.escalationAction).toBe("superseded");
+      expect(testService.getOrder(order.orderId).status).toBe(nonTimeoutableStatus);
+      expect(testService.getOrder(order.orderId).dispatchAttemptCount).toBe(initialAttemptCount);
+    },
+  );
+
+  it.each([
+    "created",
+    "ready_for_dispatch",
+    "redispatch_required",
+    "preassigned",
+    "delayed_queue",
+  ] as const)(
+    "allows matching_timeout on %s orders without assignment",
+    async (timeoutableStatus) => {
+      const { buildOwnedMobilityServiceForTest, createTestPassengerOrder } = await import(
+        "../sr-qa-dispatch-001/test-support"
+      );
+      const { vi } = await import("vitest");
+
+      const mockRepo = {
+        isEnabled: vi.fn(() => true),
+        withTransaction: vi.fn(async (cb: (tx: unknown) => Promise<unknown>) => cb({})),
+        loadOrderCancellationForUpdate: vi.fn(async (_tx: unknown, orderId: string) => ({
+          order: testService.requireOrder(orderId),
+          assignment: null,
+          task: null,
+          dispatchJobs: [],
+        })),
+        persistChanges: vi.fn(async () => undefined),
+        persistOrderWorkflow: vi.fn(async () => undefined),
+        reportPersistenceFailure: vi.fn(),
+      };
+
+      const { service: testService } = buildOwnedMobilityServiceForTest();
+      (testService as any).ownedMobilityRepository = mockRepo;
+
+      const order = createTestPassengerOrder(testService);
+      testService.requireOrder(order.orderId).status = timeoutableStatus;
+
+      const result = await testService.handleDispatchTimeout(
+        order.orderId,
+        "matching_timeout",
+      );
+
+      expect(result.status).toBe("dispatch_timeout");
+      expect(result.escalationAction).not.toBe("superseded");
+      expect(testService.getOrder(order.orderId).status).toBe("dispatch_timeout");
+    },
+  );
 });
+

@@ -9170,15 +9170,42 @@ export class OwnedMobilityService
       };
     }
 
+    // SD §7.6 / Review Round 4: Stale-worker and timer fencing.
+    // Pre-trip matching and offer acceptance states are timeoutable:
+    // ["created", "ready_for_dispatch", "redispatch_required", "assigned", "preassigned", "delayed_queue"].
+    // Note: "preassigned" (unmatched reservation hold) and "delayed_queue" (unassigned order awaiting supply retry)
+    // are explicitly validated by canonical test suites (SR-QA-DRIVER-001 C053, SR-QA-DISPATCH-001 C038)
+    // to transition to dispatch_timeout and enter the redispatch priority queue upon matching_timeout.
+    // All other statuses are non-timeoutable and must be treated as superseded:
+    // - Terminal states: "completed", "cancelled"
+    // - Active in-trip execution states: "driver_accepted", "enroute_pickup", "arrived_pickup", "on_trip", "proof_pending"
+    // - Already timed out: "dispatch_timeout"
+    // - Operator manual-intervention / held exception states: "no_supply", "exception_hold", "dispatch_failed", "recording_pending"
+    const nonTimeoutableStatuses = [
+      "completed",
+      "cancelled",
+      "driver_accepted",
+      "enroute_pickup",
+      "arrived_pickup",
+      "on_trip",
+      "proof_pending",
+      "dispatch_timeout",
+      "no_supply",
+      "exception_hold",
+      "dispatch_failed",
+      "recording_pending",
+    ];
+    const timeoutableStatuses = [
+      "created",
+      "ready_for_dispatch",
+      "redispatch_required",
+      "assigned",
+      "preassigned",
+      "delayed_queue",
+    ];
     if (
-      current &&
-      (!activeJob ||
-        ![
-          "created",
-          "ready_for_dispatch",
-          "redispatch_required",
-          "assigned",
-        ].includes(order.status))
+      nonTimeoutableStatuses.includes(order.status) ||
+      !timeoutableStatuses.includes(order.status)
     ) {
       return {
         orderId,
