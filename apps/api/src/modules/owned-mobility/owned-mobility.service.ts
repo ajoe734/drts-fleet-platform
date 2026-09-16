@@ -9170,16 +9170,17 @@ export class OwnedMobilityService
       };
     }
 
-    if (
-      current &&
-      (!activeJob ||
-        ![
-          "created",
-          "ready_for_dispatch",
-          "redispatch_required",
-          "assigned",
-        ].includes(order.status))
-    ) {
+    const nonTimeoutableStatuses = [
+      "completed",
+      "cancelled",
+      "driver_accepted",
+      "enroute_pickup",
+      "arrived_pickup",
+      "on_trip",
+      "proof_pending",
+      "dispatch_timeout",
+    ];
+    if (nonTimeoutableStatuses.includes(order.status)) {
       return {
         orderId,
         status: order.status,
