@@ -4011,14 +4011,20 @@ def maybe_trigger_retry_or_fallback(
         return True, True
     if retry_count < max_attempts:
         schedule_worker_retry(config, worker, failure_summary)
-        if failure.get("kind") == "capacity" and allow_provider_pause:
-            agent_id = str(worker.get("agent_id") or worker.get("provider") or "")
-            next_retry_at = parse_runtime_timestamp(worker.get("next_retry_at"))
-            reset_seconds = None
-            if next_retry_at is not None:
-                reset_seconds = max(1, int((next_retry_at - datetime.now(timezone.utc)).total_seconds()))
-            if agent_id:
-                pause_provider(state, agent_id, failure_summary, kind="capacity", reset_seconds=reset_seconds)
+        if failure.get("kind") == "capacity":
+            capacity_pause = int(retry.get("capacity_pause_seconds", 300))
+            hinted = infer_pause_resume_at(reason)
+            now_ts = datetime.now(timezone.utc).timestamp()
+            resume_timestamp = now_ts + capacity_pause
+            if hinted is not None and hinted > resume_timestamp:
+                resume_timestamp = hinted
+            
+            worker["next_retry_at"] = datetime.fromtimestamp(resume_timestamp, tz=timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+            
+            if allow_provider_pause:
+                agent_id = str(worker.get("agent_id") or worker.get("provider") or "")
+                if agent_id:
+                    pause_provider(state, agent_id, failure_summary, kind="capacity", reset_seconds=capacity_pause)
         upsert_worker_dispatch_pause(
             state,
             worker,
