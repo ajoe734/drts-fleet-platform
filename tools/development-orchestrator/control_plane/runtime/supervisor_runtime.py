@@ -1814,6 +1814,7 @@ def start_worker_for_request(
     attempt_count: int,
     event_id_for_log: str | None,
     parent_run_id: str | None = None,
+    retry_count: int = 0,
     delivery_mode_override: str | None = None,
     activity_type: str = "worker_started",
     activity_message: str | None = None,
@@ -1953,7 +1954,7 @@ def start_worker_for_request(
         "workspace_source": workspace_source,
         "request_snapshot": request_snapshot(request),
         "parent_run_id": parent_run_id,
-        "retry_count": 0,
+        "retry_count": retry_count,
         "next_retry_at": None,
         "last_error": None,
         "last_error_kind": None,
@@ -4011,14 +4012,20 @@ def maybe_trigger_retry_or_fallback(
         return True, True
     if retry_count < max_attempts:
         schedule_worker_retry(config, worker, failure_summary)
-        if failure.get("kind") == "capacity" and allow_provider_pause:
-            agent_id = str(worker.get("agent_id") or worker.get("provider") or "")
-            next_retry_at = parse_runtime_timestamp(worker.get("next_retry_at"))
-            reset_seconds = None
-            if next_retry_at is not None:
-                reset_seconds = max(1, int((next_retry_at - datetime.now(timezone.utc)).total_seconds()))
-            if agent_id:
-                pause_provider(state, agent_id, failure_summary, kind="capacity", reset_seconds=reset_seconds)
+        if failure.get("kind") == "capacity":
+            capacity_pause = int(retry.get("capacity_pause_seconds", 300))
+            hinted = infer_pause_resume_at(reason)
+            now_ts = datetime.now(timezone.utc).timestamp()
+            resume_timestamp = now_ts + capacity_pause
+            if hinted is not None and hinted > resume_timestamp:
+                resume_timestamp = hinted
+            
+            worker["next_retry_at"] = datetime.fromtimestamp(resume_timestamp, tz=timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+            
+            if allow_provider_pause:
+                agent_id = str(worker.get("agent_id") or worker.get("provider") or "")
+                if agent_id:
+                    pause_provider(state, agent_id, failure_summary, kind="capacity", reset_seconds=capacity_pause)
         upsert_worker_dispatch_pause(
             state,
             worker,
@@ -4343,6 +4350,7 @@ def retry_due_workers(
             attempt_count=int(worker.get("attempt_count", 0)) + 1,
             event_id_for_log=worker.get("queue_event_id"),
             parent_run_id=worker["run_id"],
+            retry_count=int(worker.get("retry_count", 0)),
             activity_type="worker_retried",
             activity_message=f"Worker retry launched after backoff from {worker['run_id']}",
         )
