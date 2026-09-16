@@ -1814,6 +1814,7 @@ def start_worker_for_request(
     attempt_count: int,
     event_id_for_log: str | None,
     parent_run_id: str | None = None,
+    retry_count: int = 0,
     delivery_mode_override: str | None = None,
     activity_type: str = "worker_started",
     activity_message: str | None = None,
@@ -1953,7 +1954,7 @@ def start_worker_for_request(
         "workspace_source": workspace_source,
         "request_snapshot": request_snapshot(request),
         "parent_run_id": parent_run_id,
-        "retry_count": 0,
+        "retry_count": retry_count,
         "next_retry_at": None,
         "last_error": None,
         "last_error_kind": None,
@@ -4343,6 +4344,7 @@ def retry_due_workers(
             attempt_count=int(worker.get("attempt_count", 0)) + 1,
             event_id_for_log=worker.get("queue_event_id"),
             parent_run_id=worker["run_id"],
+            retry_count=int(worker.get("retry_count", 0)),
             activity_type="worker_retried",
             activity_message=f"Worker retry launched after backoff from {worker['run_id']}",
         )
@@ -4533,7 +4535,7 @@ def handle_worker_failure_signal(
             reset_seconds=None,
             identity=worker.get("identity"),
         )
-    if failure.get("kind") == "capacity" and current_mode == "coordination":
+    if failure.get("kind") == "capacity":
         reset_seconds = int(
             worker_retry_settings(config, worker.get("provider")).get("capacity_pause_seconds", 300)
         )
