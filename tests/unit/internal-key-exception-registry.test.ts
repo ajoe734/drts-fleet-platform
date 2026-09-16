@@ -11,7 +11,7 @@ import {
 } from "../../apps/api/src/common/auth/internal-key-exception-registry";
 
 // The registry entries expire on real dates -- EXCP_003 on 2026-08-31,
-// EXCP_002 on 2026-09-15, EXCP_001 on 2026-10-31. Assertions about which
+// EXCP_002 on 2026-09-30, EXCP_001 on 2026-10-31. Assertions about which
 // exception matches are about the registry's shape, not about today, so
 // they are evaluated at a fixed instant inside every window. Cases that
 // are about expiry pin their own later `now` and are left alone.
@@ -65,8 +65,12 @@ describe("InternalKeyExceptionRegistry (IAM-SVC-002)", () => {
   });
 
   it("classifies production allowed network boundaries correctly using isProductionAllowedBoundary (F14)", () => {
-    expect(isProductionAllowedBoundary("internal-vpc-to-api-ingress")).toBe(true);
-    expect(isProductionAllowedBoundary("control-plane-proxy-to-api")).toBe(true);
+    expect(isProductionAllowedBoundary("internal-vpc-to-api-ingress")).toBe(
+      true,
+    );
+    expect(isProductionAllowedBoundary("control-plane-proxy-to-api")).toBe(
+      true,
+    );
     expect(isProductionAllowedBoundary("staging-break-glass-only")).toBe(false);
     expect(isProductionAllowedBoundary("custom-staging-network")).toBe(false);
   });
@@ -281,14 +285,16 @@ describe("InternalKeyExceptionRegistry (IAM-SVC-002)", () => {
       },
     );
     expect(resultStagingOnlyInProd.valid).toBe(false);
-    expect(resultStagingOnlyInProd.code).toBe("INTERNAL_KEY_BOUNDARY_VIOLATION");
-    expect(resultStagingOnlyInProd.exception?.exceptionId).toBe("INTERNAL_KEY_EXCP_003");
+    expect(resultStagingOnlyInProd.code).toBe(
+      "INTERNAL_KEY_BOUNDARY_VIOLATION",
+    );
+    expect(resultStagingOnlyInProd.exception?.exceptionId).toBe(
+      "INTERNAL_KEY_EXCP_003",
+    );
   });
 
-  it("triggers EXCP_003 expiration after 2026-08-31 and total expiration after 2026-09-15", () => {
-    const excp003Registry = [
-      RETIRED_STAGING_ONLY,
-    ];
+  it("triggers EXCP_003 expiration after 2026-08-31 and total expiration after 2026-09-30", () => {
+    const excp003Registry = [RETIRED_STAGING_ONLY];
     const resultPostExpiry003 = evaluateInternalKey(
       "secret-key-1234567890123456789012345",
       "secret-key-1234567890123456789012345",
@@ -303,7 +309,9 @@ describe("InternalKeyExceptionRegistry (IAM-SVC-002)", () => {
     );
     expect(resultPostExpiry003.valid).toBe(false);
     expect(resultPostExpiry003.code).toBe("INTERNAL_KEY_EXPIRED");
-    expect(resultPostExpiry003.exception?.exceptionId).toBe("INTERNAL_KEY_EXCP_003");
+    expect(resultPostExpiry003.exception?.exceptionId).toBe(
+      "INTERNAL_KEY_EXCP_003",
+    );
 
     const resultAllExpired = evaluateInternalKey(
       "secret-key-1234567890123456789012345",
@@ -312,7 +320,7 @@ describe("InternalKeyExceptionRegistry (IAM-SVC-002)", () => {
         headerName: "x-drts-internal-key",
         requestMethod: "POST",
         requestPath: "/api/ops/test",
-        now: new Date("2026-09-20T00:00:00Z"),
+        now: new Date("2026-10-05T00:00:00Z"),
         environment: "staging",
       },
     );

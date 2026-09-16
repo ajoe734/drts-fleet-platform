@@ -119,6 +119,38 @@ function requiredEnvironmentValue(envName: string) {
   return value;
 }
 
+function getIdentityToken(baseUrlEnv?: string): string | undefined {
+  if (!baseUrlEnv) return undefined;
+  if (
+    baseUrlEnv === "DRTS_OPERATIONAL_TENANT_CONSOLE_URL" ||
+    baseUrlEnv === "DRTS_DEV_TENANT_CONSOLE_BASE_URL"
+  ) {
+    return (
+      process.env.DRTS_OPERATIONAL_TENANT_CONSOLE_ID_TOKEN ||
+      process.env.DRTS_DEV_TENANT_CONSOLE_ID_TOKEN
+    );
+  }
+  if (
+    baseUrlEnv === "DRTS_OPERATIONAL_BANK_CONSOLE_URL" ||
+    baseUrlEnv === "DRTS_DEV_BANK_CONSOLE_BASE_URL"
+  ) {
+    return (
+      process.env.DRTS_OPERATIONAL_BANK_CONSOLE_ID_TOKEN ||
+      process.env.DRTS_DEV_BANK_CONSOLE_ID_TOKEN
+    );
+  }
+  if (
+    baseUrlEnv === "DRTS_OPERATIONAL_ENTERPRISE_DISPATCH_URL" ||
+    baseUrlEnv === "DRTS_DEV_ENTERPRISE_DISPATCH_BASE_URL"
+  ) {
+    return (
+      process.env.DRTS_OPERATIONAL_ENTERPRISE_DISPATCH_ID_TOKEN ||
+      process.env.DRTS_DEV_ENTERPRISE_DISPATCH_ID_TOKEN
+    );
+  }
+  return undefined;
+}
+
 function record(entry: Record<string, unknown>) {
   evidence.push({
     candidateSha,
@@ -228,9 +260,16 @@ async function assertReadback(
   variables: TemplateVariables,
 ) {
   const readbackPath = interpolatePath(readback.url, resultId, variables);
+  const idToken = getIdentityToken(journey.baseUrlEnv);
+  const readbackHeaders: Record<string, string> = {};
+  if (idToken) {
+    readbackHeaders["Authorization"] = `Bearer ${idToken}`;
+  }
   const readbackResponse = await page
     .context()
-    .request.get(new URL(readbackPath, origin).toString());
+    .request.get(new URL(readbackPath, origin).toString(), {
+      ...(idToken ? { headers: readbackHeaders } : {}),
+    });
   expect(
     readbackResponse.ok(),
     `${journey.id}/${operationName} readback`,
@@ -293,13 +332,22 @@ async function runSetup(
   variables: TemplateVariables,
 ) {
   for (const setup of journey.setup ?? []) {
-    const origin = requiredOrigin(setup.baseUrlEnv ?? journey.baseUrlEnv);
+    const setupBaseUrlEnv = setup.baseUrlEnv ?? journey.baseUrlEnv;
+    const origin = requiredOrigin(setupBaseUrlEnv);
     const body = setup.body
       ? materializeValue(setup.body, variables)
       : undefined;
-    const headers = setup.headers
+    const rawHeaders = setup.headers
       ? (materializeValue(setup.headers, variables) as Record<string, string>)
       : undefined;
+    const headers: Record<string, string> = { ...(rawHeaders ?? {}) };
+    const setupIdToken = getIdentityToken(setupBaseUrlEnv);
+    if (
+      setupIdToken &&
+      !Object.keys(headers).some((k) => k.toLowerCase() === "authorization")
+    ) {
+      headers["Authorization"] = `Bearer ${setupIdToken}`;
+    }
     const response = await page
       .context()
       .request.fetch(
@@ -312,7 +360,7 @@ async function runSetup(
                 data: body,
                 headers: { "Content-Type": "application/json", ...headers },
               }
-            : headers
+            : Object.keys(headers).length > 0
               ? { headers }
               : {}),
         },
@@ -488,6 +536,12 @@ for (const journey of manifest.journeys) {
       runId: `${journey.id}-${Date.now().toString(36)}`,
     };
     installEnvironmentVariables(journey, variables);
+    const idToken = getIdentityToken(journey.baseUrlEnv);
+    if (idToken) {
+      await page.context().setExtraHTTPHeaders({
+        Authorization: `Bearer ${idToken}`,
+      });
+    }
     await installBrowserSession(page, journey, origin, variables);
     await runSetup(page, journey, variables);
     await navigate(
@@ -606,6 +660,59 @@ for (const journey of manifest.journeys) {
         continue;
       }
 
+      if (operation.responseKind === "download") {
+        const downloadPromise = page.waitForEvent("download", {
+          timeout: interactionTimeoutMs,
+        });
+        await activeControl.click({ noWaitAfter: true });
+        const download = await downloadPromise;
+        expect(
+          await download.failure(),
+          `${journey.id}/${operation.name} download failure`,
+        ).toBeNull();
+        expect(
+          (await download.createReadStream()) !== null,
+          `${journey.id}/${operation.name} artifact stream`,
+        ).toBeTruthy();
+
+        const downloadUrl = download.url();
+        const opIdToken = getIdentityToken(journey.baseUrlEnv);
+        const downloadHeaders: Record<string, string> = {};
+        if (opIdToken) {
+          downloadHeaders["Authorization"] = `Bearer ${opIdToken}`;
+        }
+        const downloadResponse = await page.context().request.get(downloadUrl, {
+          ...(opIdToken ? { headers: downloadHeaders } : {}),
+        });
+        expect(
+          downloadResponse.ok(),
+          `${journey.id}/${operation.name} download response ok`,
+        ).toBeTruthy();
+        expectCandidateRevision(
+          downloadResponse.headers(),
+          `${journey.id}/${operation.name} download candidate revision`,
+        );
+        expect(
+          downloadResponse.headers()["content-type"] ?? "",
+          `${journey.id}/${operation.name} content type`,
+        ).toContain(operation.expectedContentTypeIncludes as string);
+        expect(
+          downloadResponse.headers()["content-disposition"] ?? "",
+          `${journey.id}/${operation.name} attachment`,
+        ).toContain("attachment");
+
+        record({
+          kind: "download",
+          journey: journey.id,
+          surface: journey.surface,
+          actorScope: journey.actorScope,
+          operation: operation.name,
+          requestUrl: downloadUrl,
+          contentType: downloadResponse.headers()["content-type"],
+        });
+        continue;
+      }
+
       const resultIdLocationPromise = operation.resultIdQueryParam
         ? page.waitForURL(
             (url) => url.searchParams.has(operation.resultIdQueryParam!),
@@ -618,10 +725,6 @@ for (const journey of manifest.journeys) {
           response.url().includes(operation.requestUrlIncludes),
         { timeout: interactionTimeoutMs },
       );
-      const downloadPromise =
-        operation.responseKind === "download"
-          ? page.waitForEvent("download", { timeout: interactionTimeoutMs })
-          : null;
       // Begin reading before a mutation-triggered navigation can detach the
       // Chromium response body from its request identifier.
       const responseBodyPromise =
@@ -642,36 +745,6 @@ for (const journey of manifest.journeys) {
         response.headers(),
         `${journey.id}/${operation.name} response`,
       );
-
-      if (operation.responseKind === "download") {
-        const download = await downloadPromise!;
-        expect(
-          response.headers()["content-type"] ?? "",
-          `${journey.id}/${operation.name} content type`,
-        ).toContain(operation.expectedContentTypeIncludes as string);
-        expect(
-          response.headers()["content-disposition"] ?? "",
-          `${journey.id}/${operation.name} attachment`,
-        ).toContain("attachment");
-        expect(
-          await download.failure(),
-          `${journey.id}/${operation.name} download failure`,
-        ).toBeNull();
-        expect(
-          (await download.createReadStream()) !== null,
-          `${journey.id}/${operation.name} artifact stream`,
-        ).toBeTruthy();
-        record({
-          kind: "download",
-          journey: journey.id,
-          surface: journey.surface,
-          actorScope: journey.actorScope,
-          operation: operation.name,
-          requestUrl: response.url(),
-          contentType: response.headers()["content-type"],
-        });
-        continue;
-      }
 
       const resultId = operation.resultIdQueryParam
         ? await resultIdLocationPromise!.then(() =>
@@ -709,6 +782,12 @@ for (const journey of manifest.journeys) {
       runId: `${journey.id}-route-${Date.now().toString(36)}`,
     };
     installEnvironmentVariables(journey, variables);
+    const idToken = getIdentityToken(journey.baseUrlEnv);
+    if (idToken) {
+      await page.context().setExtraHTTPHeaders({
+        Authorization: `Bearer ${idToken}`,
+      });
+    }
     await installBrowserSession(page, journey, origin, variables);
     await runSetup(page, journey, variables);
     const response = await page.goto(

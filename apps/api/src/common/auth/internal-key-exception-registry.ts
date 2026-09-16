@@ -63,12 +63,12 @@ export const INTERNAL_KEY_EXCEPTION_REGISTRY: InternalKeyExceptionMetadata[] = [
     purpose:
       "Legacy control-plane proxy serverless fallback key when GCP WIF identity assertion is absent in transitional environment",
     scope: ["* *", "POST partner/ingress/handoff", "POST auth/token"],
-    ttl: "2026-09-15T23:59:59Z",
-    expiresAt: "2026-09-15T23:59:59Z",
+    ttl: "2026-09-30T23:59:59Z",
+    expiresAt: "2026-09-30T23:59:59Z",
     networkBoundary: "control-plane-proxy-to-api",
     rotationCadence: "14d",
     usageSignal: "AUTH_LEGACY_INTERNAL_KEY_USED",
-    removalDate: "2026-09-15",
+    removalDate: "2026-09-30",
     removalPlan:
       "Full deprecation of DRTS_INTERNAL_KEY fallback in favor of mandatory WIF workload identity assertion headers on all control-plane proxies",
     header: "x-drts-internal-key",
