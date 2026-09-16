@@ -143,6 +143,9 @@ describe("Cloud Run deploy quota retry", () => {
     ).toEqual([
       'description: "Fail-closed cleanup for the retired passenger service. Delete is allowed only when the regional Cloud Run inventory is exactly the intended 9 active services plus drts-passenger-web."',
       '- "delete-drts-passenger-web"',
+      'vapid_public_secret="${secret_prefix}-passenger-webpush-vapid-public-key"',
+      'vapid_private_secret="${secret_prefix}-passenger-webpush-vapid-private-key"',
+      'vapid_subject_secret="${secret_prefix}-passenger-webpush-vapid-subject"',
       'export DRTS_DEV_PASSENGER_BASE_URL="https://drts-dev-passenger-web-${cloud_run_suffix}"',
     ]);
     expect(workflow).toContain(
