@@ -104,6 +104,8 @@ class TestCapacityRetryStorm(unittest.TestCase):
         self.assertTrue(handled)
         self.assertTrue(changed)
         self.assertEqual(worker["status"], "failed")
+        self.assertIn("gemini2", state.get("provider_pauses", {}))
+        self.assertEqual(state["provider_pauses"]["gemini2"]["kind"], "capacity")
 
 
     @patch('control_plane.runtime.supervisor_runtime.write_activity_log')
