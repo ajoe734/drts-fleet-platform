@@ -4013,19 +4013,11 @@ def maybe_trigger_retry_or_fallback(
     if retry_count < max_attempts:
         schedule_worker_retry(config, worker, failure_summary)
         if failure.get("kind") == "capacity":
-            capacity_pause = int(retry.get("capacity_pause_seconds", 300))
             hinted = infer_pause_resume_at(reason)
-            now_ts = datetime.now(timezone.utc).timestamp()
-            resume_timestamp = now_ts + capacity_pause
-            if hinted is not None and hinted > resume_timestamp:
-                resume_timestamp = hinted
-            
-            worker["next_retry_at"] = datetime.fromtimestamp(resume_timestamp, tz=timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
-            
-            if allow_provider_pause:
-                agent_id = str(worker.get("agent_id") or worker.get("provider") or "")
-                if agent_id:
-                    pause_provider(state, agent_id, failure_summary, kind="capacity", reset_seconds=capacity_pause)
+            if hinted is not None:
+                current_retry_ts = datetime.fromisoformat(worker["next_retry_at"].replace("Z", "+00:00")).timestamp()
+                if hinted > current_retry_ts:
+                    worker["next_retry_at"] = datetime.fromtimestamp(hinted, tz=timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
         upsert_worker_dispatch_pause(
             state,
             worker,
@@ -4050,6 +4042,14 @@ def maybe_trigger_retry_or_fallback(
             quiet=SUPERVISOR_LOG_QUIET,
         )
         return True, True
+
+    if failure.get("kind") == "capacity" and allow_provider_pause:
+        agent_id = str(worker.get("agent_id") or worker.get("provider") or "")
+        if agent_id:
+            from control_plane.usecases.dispatch_runtime import ready_dispatch_settings
+            dispatch_cooldown = int(ready_dispatch_settings(config).get("dispatch_cooldown_seconds", 300))
+            if dispatch_cooldown > 0:
+                pause_provider(state, agent_id, failure_summary, kind="capacity", reset_seconds=dispatch_cooldown)
 
     if retry.get("fallback_mode") == "file_inbox":
         existing_fallback = existing_file_inbox_fallback_run_id(
