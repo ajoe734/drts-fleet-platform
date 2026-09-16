@@ -4535,7 +4535,7 @@ def handle_worker_failure_signal(
             reset_seconds=None,
             identity=worker.get("identity"),
         )
-    if failure.get("kind") == "capacity":
+    if failure.get("kind") == "capacity" and current_mode == "coordination":
         reset_seconds = int(
             worker_retry_settings(config, worker.get("provider")).get("capacity_pause_seconds", 300)
         )
