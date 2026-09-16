@@ -370,4 +370,65 @@ In dev deploy run `34965087961`:
 - **Workflow YAML Validation**:
   `python3 -c "import yaml; yaml.safe_load(open('.github/workflows/deploy-dev.yml'))"` — Valid.
 
+---
+
+## 9. Operational Browser Acceptance Identity & Download Remediation (2026-09-16, Owner `Gemini2`)
+
+### 9.1 Dev Deploy Run 35000817647 Audit & Root Cause Analysis
+
+Following the merge of PR #2040 (`d853b7e4bd0db475cc451df06b01a4c0c214f280`), dev deploy run `35000817647` was executed on `dev`:
+- **Build & Push Images**: Success
+- **DB Migration**: Success
+- **Deploy Services**: Success
+- **Enforce Partner Booking Paused State**: Success
+- **Dev Health Check**: Success (all 9 endpoints verified green with identity tokens for private services)
+- **Fail-Closed Retired Service Cleanup**: Success
+- **Candidate SHA Operational Acceptance**: Failed at step `Execute candidate-bound operational journeys` (job `104495816178`)
+
+#### Detailed Root Cause Diagnosis
+
+1. **`tests/e2e/operational-candidate.spec.ts` Passed (14/14)**:
+   The identity token authentication introduced in PR #2040 was fully effective for `operational-candidate.spec.ts`, validating all 10 active surfaces, the bank console login, and retired surface contracts.
+2. **`tests/e2e/operational-browser-acceptance.spec.ts` Failed (7 failed, 9 passed)**:
+   Inspection of `report.json` and Playwright traces revealed two distinct root causes:
+   - **Private Cloud Run Services Missing IAM Identity Token (403 Forbidden)**:
+     - `enterprise-create-read-update-cancel`: Navigating to `DRTS_DEV_ENTERPRISE_DISPATCH_BASE_URL` returned HTTP 403 Forbidden from GFE, causing locator `[data-drt-intent='enterprise-review']` to not appear.
+     - `tenant-ops-dispatch-intent`: Setup step 2 calling `/control-plane-proxy/tenant/bookings/{{tenantBookingId}}` on `DRTS_DEV_TENANT_CONSOLE_BASE_URL` returned HTTP 403 Forbidden.
+     - `bank-statement-download`: Setup step calling `/api/auth/login` on `DRTS_DEV_BANK_CONSOLE_BASE_URL` returned HTTP 403 Forbidden.
+     - Route tests for `enterprise`, `tenant-ops`, and `bank` all failed with HTTP 403 Forbidden.
+   - **Chromium Download Event vs. `page.waitForResponse` Timeout**:
+     - `channel-statement-download`: In `apps/channel-partner-portal-web/app/statements/[period]/page.tsx`, the download anchor includes the `download` HTML attribute. When clicked in Chromium, Chromium's download manager handles the transfer directly and does not emit a `Network.responseReceived` page response event to Playwright. `page.waitForResponse` timed out after 10 seconds despite the `download` event completing successfully.
+
+### 9.2 Remediation Implementation
+
+1. **Identity Token Resolution & Browser Context Authentication**:
+   In `tests/e2e/operational-browser-acceptance.spec.ts`:
+   - Added `getIdentityToken(baseUrlEnv)` helper to resolve `DRTS_OPERATIONAL_*_ID_TOKEN` / `DRTS_DEV_*_ID_TOKEN` for `tenant-console-web`, `bank-console-web`, and `enterprise-dispatch-web`.
+   - In both journey contract tests and route verification tests, injected `Authorization: Bearer <idToken>` into the Playwright browser context via `await page.context().setExtraHTTPHeaders(...)` prior to navigation.
+   - In `runSetup`, ensured setup requests to private services automatically attach `Authorization: Bearer <idToken>` if an application-level `authorization` header is not explicitly present.
+   - In `assertReadback`, attached `Authorization: Bearer <idToken>` when reading back from private services.
+2. **Clean Download Event & Artifact Verification**:
+   - For `operation.responseKind === "download"`, removed the hanging `page.waitForResponse` call.
+   - Awaited `page.waitForEvent("download")`, confirmed `download.failure()` is null and `download.createReadStream()` is readable.
+   - Fetched the download URL directly via `page.context().request.get(downloadUrl)` with identity headers, asserting HTTP 200, `x-drts-candidate-sha`, `content-type`, and `content-disposition: attachment`.
+3. **Strict Guardrail Compliance**:
+   - Zero services exposed unauthenticated.
+   - Zero probe or acceptance checks relaxed.
+   - Full conformance to UI design contract and `@drts/ui-tokens`.
+
+### 9.3 Verification Evidence
+
+- **Regression Unit Test Suite**:
+  `pnpm vitest run tests/unit/system-remediation/sr-dev-healthcheck-identity-20260915/healthcheck-identity.test.ts`
+  Result: 10 tests passed (100% pass).
+- **Deployment Architecture Guard Tests**:
+  `pnpm vitest run tests/unit/deployment-architecture-guards.test.ts tests/unit/cloud-run-deploy-retry.test.ts tests/unit/dev-active-surface-contract.test.ts`
+  Result: 19 tests passed (100% pass).
+- **CI Test Coverage Gate**:
+  `python3 tools/ci/check_test_coverage.py`
+  Result: `check_test_coverage: all 74 test files yield tests CI runs.`
+- **Code Style & Lint Verification**:
+  `pnpm lint:root` and `pnpm prettier --check tests/e2e/operational-browser-acceptance.spec.ts tests/unit/system-remediation/sr-dev-healthcheck-identity-20260915/healthcheck-identity.test.ts` passed with 0 errors.
+
+
 
