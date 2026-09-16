@@ -108,6 +108,62 @@ describe("enterprise-dispatch control-plane proxy", () => {
     expect(headers.get("x-roles")).toBeNull();
   });
 
+  it("strips Cloud Run ingress Google ID token from Authorization header before proxying", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          data: {
+            bookingId: "booking-001",
+            orderId: "order-001",
+            status: "approval_required",
+          },
+        }),
+        {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        },
+      ),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const googlePayload = Buffer.from(
+      JSON.stringify({
+        iss: "https://accounts.google.com",
+        aud: "https://enterprise-dispatch-web-12345.a.run.app",
+        email: "sa@project.iam.gserviceaccount.com",
+      }),
+    ).toString("base64url");
+    const googleIdToken = `eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCJ9.${googlePayload}.fakeSignature`;
+
+    const requestBody = JSON.stringify({
+      businessDispatchSubtype: "enterprise_dispatch",
+      costCenter: "CC-PRD-07",
+    });
+    const response = await POST(
+      requestFor("POST", ["api", "tenant", "bookings"], {
+        body: requestBody,
+        headers: {
+          Authorization: `Bearer ${googleIdToken}`,
+          "Content-Type": "application/json",
+        },
+      }),
+      contextFor(["api", "tenant", "bookings"]),
+    );
+
+    expect(response.status).toBe(200);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+
+    const [, init] = fetchMock.mock.calls[0] as [URL, RequestInit];
+    const headers = init.headers as Headers;
+
+    expect(headers.has("authorization")).toBe(false);
+    expect(headers.get("x-realm")).toBe("tenant");
+    expect(headers.get("x-actor-type")).toBe("tenant_admin");
+    expect(headers.get("x-tenant-id")).toBe(
+      "10000000-0000-0000-0000-000000000201",
+    );
+  });
+
   it("reads bookings using the cookie session's verified tenant, without bootstrap identity", async () => {
     process.env.DRTS_API_URL = "https://api.dev.example";
     process.env.DRTS_ENTERPRISE_DISPATCH_TENANT_ID =
@@ -213,13 +269,11 @@ describe("enterprise-dispatch control-plane proxy", () => {
   ])(
     "does not forward a booking query with %s session",
     async (_name, upstreamStatus, body, expectedStatus) => {
-      const fetchMock = vi
-        .fn()
-        .mockResolvedValue(
-          new Response(JSON.stringify(body), {
-            status: Number(upstreamStatus),
-          }),
-        );
+      const fetchMock = vi.fn().mockResolvedValue(
+        new Response(JSON.stringify(body), {
+          status: Number(upstreamStatus),
+        }),
+      );
       vi.stubGlobal("fetch", fetchMock);
       const response = await GET(
         requestFor("GET", ["tenant", "bookings"], {
@@ -233,19 +287,17 @@ describe("enterprise-dispatch control-plane proxy", () => {
   );
 
   it("rejects another tenant selector even with a valid cookie session", async () => {
-    const fetchMock = vi
-      .fn()
-      .mockResolvedValue(
-        new Response(
-          JSON.stringify({
-            data: {
-              active: true,
-              identity: { realm: "tenant", tenant_id: "tenant-a" },
-            },
-          }),
-          { status: 200 },
-        ),
-      );
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          data: {
+            active: true,
+            identity: { realm: "tenant", tenant_id: "tenant-a" },
+          },
+        }),
+        { status: 200 },
+      ),
+    );
     vi.stubGlobal("fetch", fetchMock);
     const response = await GET(
       requestFor("GET", ["tenant", "bookings"], {

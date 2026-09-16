@@ -118,6 +118,9 @@ describe("operational browser journeys manifest guard", () => {
             "x-tenant-id": "10000000-0000-0000-0000-000000000201",
             "idempotency-key": "operational-dispatch-timeout-{{runId}}",
           }),
+          body: {
+            timeoutReasonCode: "matching_timeout",
+          },
         }),
       ]),
     );
@@ -129,6 +132,16 @@ describe("operational browser journeys manifest guard", () => {
         expectedPathPattern: "^/dispatch/[^/?#]+$",
       }),
     ]);
+
+    const enterpriseJourney = manifest.journeys.find(
+      (j: { id: string }) => j.id === "enterprise-create-read-update-cancel",
+    );
+    expect(enterpriseJourney).toBeDefined();
+    expect(enterpriseJourney?.browserSession).toEqual({
+      cookieName: "drts_tenant_session",
+      tokenEnv: "DRTS_OPERATIONAL_TENANT_SESSION_TOKEN",
+      templateVariable: "tenantSessionToken",
+    });
 
     const referralJourney = manifest.journeys.find(
       (journey: { id: string }) =>

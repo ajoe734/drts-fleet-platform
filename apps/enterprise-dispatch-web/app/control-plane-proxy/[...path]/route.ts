@@ -112,11 +112,48 @@ function resolveEnterpriseActorId(): string {
   );
 }
 
+function isGoogleOrCloudRunIdToken(token: string): boolean {
+  try {
+    const parts = token.split(".");
+    if (parts.length !== 3) return false;
+    const payloadPart = parts[1];
+    if (!payloadPart) return false;
+    const payload = JSON.parse(
+      Buffer.from(payloadPart, "base64url").toString("utf-8"),
+    );
+    if (
+      payload.iss === "https://accounts.google.com" ||
+      payload.iss === "accounts.google.com"
+    ) {
+      return true;
+    }
+    if (
+      typeof payload.aud === "string" &&
+      (payload.aud.includes(".a.run.app") || payload.aud.includes(".run.app"))
+    ) {
+      return true;
+    }
+    return false;
+  } catch {
+    return false;
+  }
+}
+
+function isCloudRunIngressAuthorization(headerValue: string): boolean {
+  const match = headerValue.match(/^Bearer\s+(.+)$/i);
+  if (!match || !match[1]) return false;
+  return isGoogleOrCloudRunIdToken(match[1].trim());
+}
+
 function copyRequestHeaders(request: NextRequest, path: string[]) {
   const headers = new Headers();
 
   request.headers.forEach((value, key) => {
-    if (REQUEST_HEADER_BLOCKLIST.has(key.toLowerCase())) {
+    const lowerKey = key.toLowerCase();
+    if (REQUEST_HEADER_BLOCKLIST.has(lowerKey)) {
+      return;
+    }
+    if (lowerKey === "authorization" && isCloudRunIngressAuthorization(value)) {
       return;
     }
     headers.set(key, value);

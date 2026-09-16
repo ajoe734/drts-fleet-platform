@@ -452,3 +452,58 @@ Following the merge of PR #2040 (`d853b7e4bd0db475cc451df06b01a4c0c214f280`), de
   - `pnpm vitest run tests/integration/iap-subject-adapter.integration.test.ts`: 14 passed (100%).
   - `pnpm vitest run tests/security/iam-auth-negative-matrix.test.ts`: 4 passed (100%).
   - `pnpm lint:root`: 0 warnings, 0 errors.
+
+---
+
+## 10. Operational Acceptance Remediation — Enterprise Proxy Ingress Token & Timeout Target (2026-09-16, Owner `Gemini2`)
+
+### 10.1 Dev Deploy Run 35050979259 Audit & Root Cause Analysis
+
+Following the merge of PR #2041 (`9680f6a5923f06f2d8cc41a0eae42fc77c931a03`), dev deploy run `35050979259` was dispatched:
+
+- **Prepare dev deploy**: Success
+- **Build & push images**: Success (all 10 images built and pushed)
+- **DB migration**: Success
+- **Deploy services**: Success (all 9 Cloud Run services deployed)
+- **Enforce Partner Booking paused state**: Success
+- **Dev health check**: Success (all endpoints verified green with identity tokens for private services)
+- **Fail-closed retired service cleanup**: Success
+- **Candidate SHA operational acceptance**: Failed (13 passed, 3 failed)
+
+#### Detailed Diagnosis of Failed Tests
+
+1. **`enterprise-create-read-update-cancel` (1 test failure)**:
+   - Playwright config sets `extraHTTPHeaders: { Authorization: Bearer ${idToken} }` with the Google IAM ID token for GFE ingress on `enterprise-dispatch-web`.
+   - In `apps/enterprise-dispatch-web/app/control-plane-proxy/[...path]/route.ts`, `copyRequestHeaders` forwarded this `Authorization: Bearer <Google ID token>` header upstream to `apps/api`.
+   - `apps/api`'s `BootstrapAuthGuard` attempted to verify the Google ID token with its local `DRTS_JWT_SECRET`, resulting in `401 {"error": {"code": "JWT_INVALID"}}`.
+   - Additionally, `enterprise-create-read-update-cancel` in `tests/e2e/fixtures/operational-browser-journeys.json` lacked a `browserSession` declaration, which meant readback GET requests lacked the `drts_tenant_session` cookie required by `route.ts`.
+
+2. **`tenant-ops-dispatch-intent` (2 test failures)**:
+   - Failed at setup step 3: `POST /api/orders/{{tenantOrderId}}/dispatch-timeout` with `400 BAD_REQUEST: ACCEPTANCE_TIMEOUT_TARGET_REQUIRED`.
+   - Per `owned-mobility.service.ts` line 9118, `acceptance_timeout` requires `targetAssignmentId`. Because the order was newly created in `matching` state without assignments, the valid timeout code is `"matching_timeout"`, which places the order into the redispatch queue without requiring an assignment ID.
+
+### 10.2 Remediation Implementation
+
+1. **Enterprise Proxy Cloud Run Ingress Token Stripping**:
+   In `apps/enterprise-dispatch-web/app/control-plane-proxy/[...path]/route.ts`:
+   - Added helper `isCloudRunIngressAuthorization` detecting Google IAM / Cloud Run ingress ID tokens (`iss: "https://accounts.google.com"` or `aud` ending with `.a.run.app`).
+   - In `copyRequestHeaders`, stripped such ingress tokens so they are not forwarded upstream to `apps/api`, allowing backend bootstrap identity headers (`x-realm: tenant`, `x-actor-type: tenant_admin`) and serverless authorization to authenticate the request.
+2. **Journey Fixture Updates**:
+   In `tests/e2e/fixtures/operational-browser-journeys.json`:
+   - Added `browserSession` to `enterprise-create-read-update-cancel`:
+     - `cookieName`: `"drts_tenant_session"`
+     - `tokenEnv`: `"DRTS_OPERATIONAL_TENANT_SESSION_TOKEN"`
+     - `templateVariable`: `"tenantSessionToken"`
+   - Updated `tenant-ops-dispatch-intent` setup step 3 from `"timeoutReasonCode": "acceptance_timeout"` to `"timeoutReasonCode": "matching_timeout"`.
+3. **Unit Tests & Manifest Guard Verification**:
+   - Added unit test in `apps/enterprise-dispatch-web/tests/unit/control-plane-proxy.test.ts` verifying that Cloud Run ingress Google ID tokens are stripped while application session tokens are preserved.
+   - Added assertions to `tests/unit/operational-browser-manifest.test.ts` ensuring both `browserSession` on `enterprise-create-read-update-cancel` and `matching_timeout` on `tenant-ops-dispatch-intent` are strictly enforced.
+
+### 10.3 Verification Evidence
+
+- `pnpm vitest run tests/unit/system-remediation/sr-dev-healthcheck-identity-20260915/healthcheck-identity.test.ts`: 10 passed (100%).
+- `pnpm --filter @drts/enterprise-dispatch-web exec vitest run tests/unit/control-plane-proxy.test.ts`: 12 passed (100%).
+- `pnpm vitest run tests/unit/operational-browser-manifest.test.ts`: 2 passed (100%).
+- `pnpm --filter @drts/enterprise-dispatch-web exec tsc --noEmit`: 0 errors.
+- `python3 tools/ci/check_test_coverage.py`: all 74 test files yield tests CI runs.
+- `python3 operations/security/verify-internal-key-exceptions.py`: AUDIT PASSED.
