@@ -185,6 +185,7 @@ def _is_result_level_provider_blocker(candidate: str) -> bool:
         "payment required",
         "hit your limit",
         "exhausted your capacity",
+        "no capacity available",
         "rate limit",
         "rate limited",
         "invalid api key",
