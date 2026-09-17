@@ -89,7 +89,7 @@ class CandidateLifecycleTest(unittest.TestCase):
         return state["tasks"][0]
 
     @mock.patch.object(ai_status, "append_log")
-    @mock.patch.object(ai_status, "git_commit_exists", return_value=True)
+    @mock.patch.object(ai_status, "resolve_full_commit_sha", side_effect=lambda value: value)
     def test_canonical_handoff_locks_sha_and_branch(self, _exists: mock.Mock, _log: mock.Mock) -> None:
         state = self.state()
         env = {
@@ -135,15 +135,123 @@ class CandidateLifecycleTest(unittest.TestCase):
         self.assertEqual(task["acceptance"], ["Reviewed content is traceable through PR and CI"])
         self.assertEqual(task["status"], "in_progress")
 
+    FULL_SHA = "e343eb5824f657352fd51c2b4983032141f0a8ce"
+
     @mock.patch.object(ai_status, "append_log")
-    @mock.patch.object(ai_status, "git_commit_exists", return_value=True)
+    def test_handoff_expands_an_abbreviated_candidate_sha(self, _log: mock.Mock) -> None:
+        """The 2026-09-16 defect, at the point the short SHA entered the board.
+
+        `git rev-parse --verify` accepts abbreviations, so a 9-character SHA
+        passed validation and was stored verbatim. GitHub reports the full 40
+        characters and every gate downstream compares exactly, so the task's
+        own pull request stopped matching its candidate: reconciliation and
+        auto-merge both skipped it and it sat in `integrating` with a blank
+        `ci_status` while its CI had already run.
+        """
+        state = self.state()
+        env = {
+            "AI_NAME": "Codex",
+            "CANDIDATE_SHA": self.FULL_SHA[:9],
+            "CANDIDATE_BRANCH": "codex/task-001",
+        }
+        with (
+            mock.patch.object(ai_status, "resolve_full_commit_sha", return_value=self.FULL_SHA),
+            mock.patch.dict(os.environ, env, clear=True),
+        ):
+            ai_status.command_handoff(state, ["TASK-001", "Claude", "Ready for review"])
+
+        self.assertEqual(self.task(state)["candidate_sha"], self.FULL_SHA)
+
+    @mock.patch.object(ai_status, "append_log")
+    def test_approve_accepts_an_abbreviation_of_the_same_commit(self, _log: mock.Mock) -> None:
+        """A reviewer naming the candidate in short form is naming the same
+        commit. What gets recorded stays byte-identical to candidate_sha,
+        because the later gates compare the two with exact equality."""
+        state = self.state()
+        task = self.task(state)
+        task.update({
+            "status": "review",
+            "candidate_sha": self.FULL_SHA,
+            "candidate_branch": "codex/task-001",
+        })
+        env = {"AI_NAME": "Claude", "REVIEWED_SHA": self.FULL_SHA[:9]}
+        with (
+            mock.patch.object(ai_status, "resolve_full_commit_sha", return_value=self.FULL_SHA),
+            mock.patch.dict(os.environ, env, clear=True),
+        ):
+            ai_status.command_approve(state, ["TASK-001", "Looks right"])
+
+        self.assertEqual(task["reviewed_sha"], self.FULL_SHA)
+
+    @mock.patch.object(ai_status, "append_log")
+    def test_approve_still_rejects_a_different_commit(self, _log: mock.Mock) -> None:
+        state = self.state()
+        task = self.task(state)
+        task.update({
+            "status": "review",
+            "candidate_sha": self.FULL_SHA,
+            "candidate_branch": "codex/task-001",
+        })
+        env = {"AI_NAME": "Claude", "REVIEWED_SHA": "0" * 40}
+        with (
+            mock.patch.object(ai_status, "resolve_full_commit_sha", side_effect=lambda value: value),
+            mock.patch.dict(os.environ, env, clear=True),
+        ):
+            with self.assertRaisesRegex(SystemExit, "REVIEWED_SHA"):
+                ai_status.command_approve(state, ["TASK-001", "Looks right"])
+
+    def test_commit_sha_differs_refuses_to_decide_on_an_abbreviation(self) -> None:
+        """A True here invalidates a completed review and clears its evidence.
+        An abbreviation, or a commit this clone has not fetched, must never be
+        what destroys an approval."""
+        short = self.FULL_SHA[:9]
+        with mock.patch.object(ai_status, "resolve_full_commit_sha", return_value=None):
+            self.assertFalse(ai_status.commit_sha_differs(short, self.FULL_SHA))
+            self.assertFalse(ai_status.commit_sha_differs(self.FULL_SHA, short))
+            self.assertTrue(ai_status.commit_sha_differs(self.FULL_SHA, "b" * 40))
+        self.assertFalse(ai_status.commit_sha_differs("", self.FULL_SHA))
+        self.assertFalse(ai_status.commit_sha_differs(self.FULL_SHA, self.FULL_SHA))
+
+    @mock.patch.object(ai_status, "append_log")
+    def test_normalize_candidate_shas_expands_only_what_resolves(self, _log: mock.Mock) -> None:
+        state = {
+            "tasks": [
+                {"id": "SHORT-1", "candidate_sha": self.FULL_SHA[:9], "reviewed_sha": self.FULL_SHA[:9]},
+                {"id": "FULL-1", "candidate_sha": self.FULL_SHA},
+                {"id": "NA-1", "candidate_sha": "not_applicable"},
+                {"id": "GONE-1", "candidate_sha": "deadbee"},
+            ],
+            "blockers": [],
+            "handoffs": [],
+        }
+
+        def resolve(value: str):
+            return self.FULL_SHA if self.FULL_SHA.startswith(str(value)) else None
+
+        with (
+            mock.patch.object(ai_status, "resolve_full_commit_sha", side_effect=resolve),
+            mock.patch.dict(os.environ, {"AI_NAME": "Supervisor"}, clear=True),
+        ):
+            ai_status.command_normalize_candidate_shas(state, [])
+
+        by_id = {t["id"]: t for t in state["tasks"]}
+        # The abbreviation expands, and two fields that were equal stay equal.
+        self.assertEqual(by_id["SHORT-1"]["candidate_sha"], self.FULL_SHA)
+        self.assertEqual(by_id["SHORT-1"]["reviewed_sha"], self.FULL_SHA)
+        self.assertEqual(by_id["FULL-1"]["candidate_sha"], self.FULL_SHA)
+        self.assertEqual(by_id["NA-1"]["candidate_sha"], "not_applicable")
+        # Unresolvable in this clone: left exactly as found rather than guessed.
+        self.assertEqual(by_id["GONE-1"]["candidate_sha"], "deadbee")
+
+    @mock.patch.object(ai_status, "append_log")
+    @mock.patch.object(ai_status, "resolve_full_commit_sha", side_effect=lambda value: value)
     def test_handoff_rejects_canonical_work_without_candidate_evidence(self, _exists: mock.Mock, _log: mock.Mock) -> None:
         with mock.patch.dict(os.environ, {"AI_NAME": "Codex"}, clear=True):
             with self.assertRaisesRegex(SystemExit, "CANDIDATE_SHA"):
                 ai_status.command_handoff(self.state(), ["TASK-001", "Claude", "Ready"])
 
     @mock.patch.object(ai_status, "append_log")
-    @mock.patch.object(ai_status, "git_commit_exists", return_value=True)
+    @mock.patch.object(ai_status, "resolve_full_commit_sha", side_effect=lambda value: value)
     def test_reviewer_approval_requires_same_sha(self, _exists: mock.Mock, _log: mock.Mock) -> None:
         state = self.state()
         task = self.task(state)
@@ -158,7 +266,7 @@ class CandidateLifecycleTest(unittest.TestCase):
         self.assertEqual(task["reviewed_sha"], "abc123")
 
     @mock.patch.object(ai_status, "append_log")
-    @mock.patch.object(ai_status, "git_commit_exists", return_value=True)
+    @mock.patch.object(ai_status, "resolve_full_commit_sha", side_effect=lambda value: value)
     def test_merged_candidate_without_review_returns_to_existing_review_flow(self, _exists: mock.Mock, _log: mock.Mock) -> None:
         state = self.state()
         task = self.task(state)
@@ -502,7 +610,7 @@ class CandidateLifecycleTest(unittest.TestCase):
                 self.assertEqual(log.call_args.args[0]["type"], "reopen")
 
     @mock.patch.object(ai_status, "append_log")
-    @mock.patch.object(ai_status, "git_commit_exists", return_value=True)
+    @mock.patch.object(ai_status, "resolve_full_commit_sha", side_effect=lambda value: value)
     def test_reopen_clears_acceptance_evidence_and_new_candidate_waits_for_fresh_evidence(
         self, _exists: mock.Mock, _log: mock.Mock
     ) -> None:

@@ -11,6 +11,14 @@ from control_plane.runtime import supervisor_runtime as supervisor
 from orchestrator_test_support import EvidenceOutputIsolation
 
 
+def _ago_iso(**delta) -> str:
+    from datetime import datetime, timedelta, timezone
+
+    moment = datetime.now(timezone.utc) - timedelta(**delta)
+    return moment.replace(microsecond=0).isoformat().replace("+00:00", "Z")
+
+
+
 class ProcessQueueDispatchGuardTests(EvidenceOutputIsolation, unittest.TestCase):
     def setUp(self) -> None:
         super().setUp()
@@ -897,6 +905,108 @@ class ProcessQueueDispatchGuardTests(EvidenceOutputIsolation, unittest.TestCase)
 
         changed = supervisor.prune_completed_dispatch_pauses(
             state, {"tasks": []}, config=self.config, provider_report=self.HEALTHY)
+
+        self.assertFalse(changed)
+        self.assertEqual(len(state["dispatch_pauses"]), 1)
+
+    def _orphan(self, **overrides) -> dict:
+        """The record from the live board, reduced to what the rule reads.
+
+        `PLANNING-PHASE1-CLAUDE2` is a worker-run label from a planning round,
+        not a board task id, so no task-based rule could ever match it.
+        """
+        pause = {
+            "provider": "claude2",
+            "task_id": "PLANNING-PHASE1-CLAUDE2",
+            "worker_run_id": "claude2-20260913T143057Z-9a14d58d",
+            "failure_kind": "quota/terminal",
+            "summary": "quota/terminal: {\"type\":\"rate_limit_event\",\"rate_limit_info\":{\"status\":\"rejec",
+            "paused_at": _ago_iso(days=3),
+            "blocked_until": None,
+        }
+        pause.update(overrides)
+        return pause
+
+    def test_a_dispatch_pause_naming_a_task_the_board_never_had_is_pruned(self) -> None:
+        """The 2026-09-16 incident. Four of these, written on 2026-09-13
+        against worker-run labels, outlived every rule here: the done check
+        read a status off a task that does not exist, the active-worker and
+        updated-task checks had nothing to compare, and the taskless rule
+        returns early because the id is present, just wrong. Three days later
+        a chair read them as current lane health and paused both Claude lanes
+        indefinitely on a quota window that had already reset."""
+        state = {"provider_pauses": {}, "dispatch_pauses": [self._orphan()], "workers": {}}
+
+        changed = supervisor.prune_completed_dispatch_pauses(
+            state, {"tasks": []}, config=self.config, provider_report=self.HEALTHY)
+
+        self.assertTrue(changed)
+        self.assertEqual(state["dispatch_pauses"], [])
+
+    def test_an_unknown_task_id_inside_the_grace_period_is_kept(self) -> None:
+        """A pause is written the moment a dispatch fails; the board file is
+        written by another path. A task can legitimately be missing from it
+        for a tick, and retiring the record in that window would discard a
+        live failure."""
+        state = {"provider_pauses": {},
+                 "dispatch_pauses": [self._orphan(paused_at=_ago_iso(seconds=30))],
+                 "workers": {}}
+
+        changed = supervisor.prune_completed_dispatch_pauses(
+            state, {"tasks": []}, config=self.config, provider_report=self.HEALTHY)
+
+        self.assertFalse(changed)
+        self.assertEqual(len(state["dispatch_pauses"]), 1)
+
+    def test_an_unknown_task_id_still_inside_its_stated_reset_is_kept(self) -> None:
+        """Whether the board knows the task is a separate question from
+        whether the provider window it recorded has elapsed."""
+        state = {"provider_pauses": {},
+                 "dispatch_pauses": [self._orphan(
+                     summary="quota/terminal: You've hit your usage limit. Resets in 96h.")],
+                 "workers": {}}
+
+        changed = supervisor.prune_completed_dispatch_pauses(
+            state, {"tasks": []}, config=self.config, provider_report=self.HEALTHY)
+
+        self.assertFalse(changed)
+        self.assertEqual(len(state["dispatch_pauses"]), 1)
+
+    def test_an_unknown_task_id_inside_its_retry_window_is_kept(self) -> None:
+        state = {"provider_pauses": {},
+                 "dispatch_pauses": [self._orphan(blocked_until="2099-01-01T00:00:00Z")],
+                 "workers": {}}
+
+        changed = supervisor.prune_completed_dispatch_pauses(
+            state, {"tasks": []}, config=self.config, provider_report=self.HEALTHY)
+
+        self.assertFalse(changed)
+        self.assertEqual(len(state["dispatch_pauses"]), 1)
+
+    def test_an_archived_task_id_is_pruned_without_waiting_out_the_grace(self) -> None:
+        """The grace period buys time for a board write that may not have
+        landed yet. An id the board has explicitly archived needs none."""
+        state = {"provider_pauses": {},
+                 "dispatch_pauses": [self._orphan(task_id="SR-FLEET-SETTLE-001",
+                                                  paused_at=_ago_iso(seconds=30))],
+                 "workers": {}}
+        status = {"tasks": [], "archived_task_ids": ["SR-FLEET-SETTLE-001"]}
+
+        changed = supervisor.prune_completed_dispatch_pauses(
+            state, status, config=self.config, provider_report=self.HEALTHY)
+
+        self.assertTrue(changed)
+        self.assertEqual(state["dispatch_pauses"], [])
+
+    def test_a_pause_whose_task_is_on_the_board_is_untouched_by_the_orphan_rule(self) -> None:
+        """The existing rules own that case; the orphan rule must not
+        second-guess them just because the task is old."""
+        state = {"provider_pauses": {}, "dispatch_pauses": [self._orphan(task_id="REAL-1")],
+                 "workers": {}}
+        status = {"tasks": [{"id": "REAL-1", "status": "blocked"}]}
+
+        changed = supervisor.prune_completed_dispatch_pauses(
+            state, status, config=self.config, provider_report=self.HEALTHY)
 
         self.assertFalse(changed)
         self.assertEqual(len(state["dispatch_pauses"]), 1)

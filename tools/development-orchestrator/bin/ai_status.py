@@ -484,16 +484,67 @@ def merge_reachability(commit_hash: str) -> str:
     return "unknown"
 
 
-def git_commit_exists(commit_hash: str) -> bool:
-    if not commit_hash.strip():
-        return False
+def resolve_full_commit_sha(commit_hash: str) -> str | None:
+    """Resolve any commit-ish to its full 40-character SHA, or None.
+
+    `git rev-parse --verify` accepts abbreviations, and for years this module
+    only asked it whether the commit existed and then stored whatever string
+    the caller happened to pass. On 2026-09-16 a handoff passed a 9-character
+    SHA, so `candidate_sha` was recorded as `e343eb582` while GitHub reports
+    `headRefOid` as the full 40 characters. Every downstream comparison is an
+    exact string equality, so the task's own pull request stopped matching it:
+    `candidate_pr_for_task` returned None, and both candidate reconciliation
+    and auto-merge skipped the task at `if not number: continue`. It sat in
+    `integrating` with an approved candidate and a blank `ci_status` while its
+    CI had in fact already run. It was the only one of 166 board tasks whose
+    candidate SHA was not full length.
+
+    Exact equality is the right comparison and must stay: it is what makes
+    "the reviewed SHA is the merged SHA" provable, and loosening it to a
+    prefix match would weaken the lineage guarantee the candidate transaction
+    is built on. What was wrong is the write, not the comparison, so the fix
+    belongs here, at the point the value enters machine truth.
+    """
+    text = str(commit_hash or "").strip()
+    if not text:
+        return None
     result = subprocess.run(
-        ["git", "rev-parse", "--verify", "--quiet", f"{commit_hash.strip()}^{{commit}}"],
+        ["git", "rev-parse", "--verify", "--quiet", f"{text}^{{commit}}"],
         cwd=str(ROOT),
         text=True,
         capture_output=True,
     )
-    return result.returncode == 0
+    if result.returncode != 0:
+        return None
+    resolved = result.stdout.strip()
+    return resolved or None
+
+
+def git_commit_exists(commit_hash: str) -> bool:
+    return resolve_full_commit_sha(commit_hash) is not None
+
+
+def commit_sha_differs(candidate_sha: str, head_sha: str) -> bool:
+    """Whether head_sha names a genuinely different commit than candidate_sha.
+
+    The caller acts on a True by invalidating a completed review and clearing
+    its evidence, so this answers False whenever the two cannot be compared
+    with confidence. An abbreviation on either side, or a commit this clone
+    has not fetched, must never be what destroys an approval.
+    """
+    left = str(candidate_sha or "").strip().lower()
+    right = str(head_sha or "").strip().lower()
+    if not left or not right or left == right:
+        return False
+    full_left = resolve_full_commit_sha(left) or left
+    full_right = resolve_full_commit_sha(right) or right
+    if full_left == full_right:
+        return False
+    if len(left) != len(right) and (
+        full_right.startswith(full_left) or full_left.startswith(full_right)
+    ):
+        return False
+    return True
 
 
 CANDIDATE_CI_STATUSES = {"queued", "running", "success", "failure", "merge_conflict", "closed"}
@@ -2010,8 +2061,12 @@ def command_handoff(state: dict[str, Any], args: list[str]) -> None:
     if candidate_required(task):
         if not candidate_sha:
             raise SystemExit("handoff requires CANDIDATE_SHA for canonical tasks")
-        if not git_commit_exists(candidate_sha):
+        resolved_sha = resolve_full_commit_sha(candidate_sha)
+        if resolved_sha is None:
             raise SystemExit(f"CANDIDATE_SHA does not resolve to a local commit: {candidate_sha}")
+        # Store the full SHA, never the abbreviation the caller typed. GitHub
+        # reports full SHAs and every downstream check compares exactly.
+        candidate_sha = resolved_sha
         if not candidate_branch:
             raise SystemExit("handoff requires CANDIDATE_BRANCH for canonical tasks")
     else:
@@ -2135,9 +2190,22 @@ def command_approve(state: dict[str, Any], args: list[str]) -> None:
     if not candidate_is_locked(task):
         raise SystemExit(f"{task_id} has no locked candidate to approve")
 
-    reviewed_sha = os.environ.get("REVIEWED_SHA", "").strip() or str(task.get("candidate_sha") or "")
-    if reviewed_sha != task.get("candidate_sha"):
-        raise SystemExit("REVIEWED_SHA must exactly match CANDIDATE_SHA")
+    candidate_sha = str(task.get("candidate_sha") or "")
+    reviewed_sha = os.environ.get("REVIEWED_SHA", "").strip() or candidate_sha
+    # A reviewer naming the candidate in abbreviated form is naming the same
+    # commit, so resolve both before rejecting. What gets recorded is always
+    # candidate_sha itself: reviewed_sha has to stay byte-identical to it,
+    # because every later gate compares the two with exact equality.
+    if reviewed_sha != candidate_sha:
+        resolved_reviewed = resolve_full_commit_sha(reviewed_sha)
+        resolved_candidate = resolve_full_commit_sha(candidate_sha)
+        if (
+            resolved_reviewed is None
+            or resolved_candidate is None
+            or resolved_reviewed != resolved_candidate
+        ):
+            raise SystemExit("REVIEWED_SHA must exactly match CANDIDATE_SHA")
+    reviewed_sha = candidate_sha
 
     timestamp = iso_now()
     task["reviewed_sha"] = reviewed_sha
@@ -2192,7 +2260,7 @@ def command_reconcile_candidate(state: dict[str, Any], args: list[str]) -> None:
 
     if ci_status and ci_status not in CANDIDATE_CI_STATUSES:
         raise SystemExit(f"CANDIDATE_CI_STATUS must be one of: {', '.join(sorted(CANDIDATE_CI_STATUSES))}")
-    if head_sha and head_sha != candidate_sha:
+    if head_sha and commit_sha_differs(candidate_sha, head_sha):
         task["status"] = "in_progress"
         clear_candidate_evidence(task)
         task["last_update"] = timestamp
@@ -2355,6 +2423,52 @@ def command_migrate_candidate_lifecycle(state: dict[str, Any], _args: list[str])
     print(f"migrate-candidate-lifecycle: migrated {migrated} task record(s)")
 
 
+CANDIDATE_SHA_FIELDS = ("candidate_sha", "reviewed_sha", "ci_sha", "merge_sha")
+
+
+def command_normalize_candidate_shas(state: dict[str, Any], args: list[str]) -> None:
+    """Rewrite abbreviated commit SHAs on the board to their full 40 characters.
+
+    Repairs records written before `handoff` resolved the value it was given.
+    Every gate downstream compares these fields with exact string equality
+    against each other and against GitHub's full `headRefOid`, so a short SHA
+    silently excludes the task from candidate reconciliation and auto-merge.
+
+    Fields are normalised independently, which preserves the equalities that
+    matter: two fields holding the same abbreviation resolve to the same full
+    SHA, and two that differed still differ. A value that does not resolve in
+    this clone is left exactly as it is rather than guessed at.
+    """
+    timestamp = iso_now()
+    changed: list[str] = []
+    for task in state.get("tasks", []) or []:
+        if not isinstance(task, dict):
+            continue
+        task_id = str(task.get("id") or "")
+        for field in CANDIDATE_SHA_FIELDS:
+            value = str(task.get(field) or "").strip()
+            if not value or value == "not_applicable" or len(value) == 40:
+                continue
+            resolved = resolve_full_commit_sha(value)
+            if resolved is None or resolved == value:
+                continue
+            task[field] = resolved
+            changed.append(f"{task_id}.{field}: {value} -> {resolved[:12]}")
+            append_log(
+                {
+                    "ts": timestamp,
+                    "agent": current_actor("Supervisor"),
+                    "type": "candidate_sha_normalized",
+                    "task_id": task_id,
+                    "field": field,
+                    "message": f"Expanded abbreviated {field} {value} to its full commit SHA.",
+                }
+            )
+    for line in changed:
+        print(f"normalize-candidate-shas: {line}")
+    print(f"normalize-candidate-shas: normalized {len(changed)} field(s)")
+
+
 def command_mode(state: dict[str, Any], args: list[str]) -> None:
     if len(args) < 1:
         raise SystemExit("Usage: mode <discussion_planning|supervisor_managed_execution> [message]")
@@ -2482,6 +2596,7 @@ def _command_runtime() -> TaskBoardCommandRuntime:
         "reconcile-candidate": command_reconcile_candidate,
         "record-acceptance": command_record_acceptance,
         "migrate-candidate-lifecycle": command_migrate_candidate_lifecycle,
+        "normalize-candidate-shas": command_normalize_candidate_shas,
         "mode": command_mode,
         "sync": command_sync,
         },
