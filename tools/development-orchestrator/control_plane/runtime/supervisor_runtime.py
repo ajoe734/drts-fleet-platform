@@ -2782,6 +2782,34 @@ def is_agent_dispatch_paused(
     return False
 
 
+def agent_lane_auth_unavailable(
+    config: dict[str, Any],
+    state: dict[str, Any],
+    agent_id: str,
+    *,
+    provider_report: dict[str, Any] | None = None,
+) -> bool:
+    """Whether a lane is out for lack of credentials rather than for a while.
+
+    A quota or capacity pause carries a resume time and the explicit owner is
+    respected across it. An auth pause has no such horizon: on 2026-09-08 the
+    tasks owned by Claude2/Gemini/Gemini2 sat with no dispatch at all for 85
+    minutes until a person reassigned them. That is the case a helper claim
+    exists for, so it is the one case the explicit-owner guard yields to.
+    """
+    normalized = normalize_agent_id(agent_id) or str(agent_id).strip()
+    report = provider_report or load_provider_report(config)
+    provider_info = provider_info_for_agent(config, report, normalized)
+    if provider_info.get("auth_ready") is False:
+        return True
+    for entry in provider_pause_registry(state).values():
+        if not isinstance(entry, dict) or not pause_covers_lane(config, report, entry, normalized):
+            continue
+        if str(entry.get("kind") or "") == "auth":
+            return True
+    return False
+
+
 def _force_recovery_probe(config: dict[str, Any]) -> dict[str, Any] | None:
     """Force a fresh provider capability probe, bypassing the cached
     provider_capabilities.json (which is stale when
@@ -3633,7 +3661,12 @@ def proactive_claim_plan_for_idle_agent(
     # under quota_exhausted, or Codex with broken CLI) gets reshuffled
     # to whoever is idle — typically cascading the entire queue onto a
     # single lane. See feedback_supervisor_ignores_explicit_owner.md.
-    if helper_settings.get("respect_explicit_owner_when_paused", True) and state is not None:
+    assigned_auth_unavailable = bool(
+        state is not None
+        and helper_settings.get("claim_from_auth_unavailable_lane", True)
+        and agent_lane_auth_unavailable(config, state, assigned_agent)
+    )
+    if helper_settings.get("respect_explicit_owner_when_paused", True) and state is not None and not assigned_auth_unavailable:
         if not lane_dispatch_disabled(config, assigned_agent) and is_agent_dispatch_paused(config, state, assigned_agent):
             assigned_load = len(agent_loads.get(assigned_agent, []))
             if assigned_load == 0:
@@ -3647,7 +3680,11 @@ def proactive_claim_plan_for_idle_agent(
         # cannot service this task on the current host, so waiting for
         # higher-priority load on that lane would deadlock dispatch.
         has_higher_priority_load = True
-    assigned_busy = assigned_agent not in idle_agent_names
+    if assigned_auth_unavailable:
+        # No credentials is not "busy", but waiting on that lane is the same
+        # deadlock as waiting on a banned one: nothing will ever free up there.
+        has_higher_priority_load = True
+    assigned_busy = assigned_agent not in idle_agent_names or assigned_auth_unavailable
 
     if helper_settings.get("require_owner_higher_priority_load", False):
         if not has_higher_priority_load and not (helper_settings.get("availability_first", True) and assigned_busy):
@@ -5083,6 +5120,11 @@ def poll_workers(
             and current_mode == "execution"
             and not worker_matches_current_assignment(config, worker, task_map)
         )
+        if assignment_moved and alive:
+            in_grace, grace_changed = worker_in_handoff_grace(config, worker, now=now)
+            changed = grace_changed or changed
+            if in_grace:
+                assignment_moved = False
         priority_escalation = (
             worker.get("queue_event_id")
             and current_mode == "execution"
@@ -5332,6 +5374,34 @@ def reconcile_queue_records(config: dict[str, Any], state: dict[str, Any]) -> bo
             changed = True
     return changed
 
+
+
+def worker_in_handoff_grace(
+    config: dict[str, Any],
+    worker: dict[str, Any],
+    *,
+    now: datetime | None = None,
+) -> tuple[bool, bool]:
+    """Whether a running worker whose task just moved on may finish its attempt.
+
+    Returns (in_grace, changed). An owner's handoff moves the task to review,
+    which makes the reviewer the dispatch target and the owner's own worker
+    look reassigned -- it was being killed within seconds of pushing, halfway
+    through its closing summary, so no result file was ever written. The
+    window is measured from the first poll that saw the move, not from the
+    worker's activity, so a worker cannot extend it.
+    """
+    grace_seconds = int(ready_dispatch_settings(config).get("handoff_grace_seconds", 120) or 0)
+    if grace_seconds <= 0 or worker.get("status") != "running":
+        return False, False
+    current = now or datetime.now(timezone.utc)
+    started = parse_runtime_timestamp(worker.get("handoff_grace_started_at"))
+    changed = False
+    if started is None:
+        started = current
+        worker["handoff_grace_started_at"] = current.replace(microsecond=0).isoformat().replace("+00:00", "Z")
+        changed = True
+    return (current - started).total_seconds() < grace_seconds, changed
 
 
 def worker_in_dispatch_cooldown(

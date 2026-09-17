@@ -1457,6 +1457,102 @@ class ProcessQueueDispatchGuardTests(EvidenceOutputIsolation, unittest.TestCase)
         self.assertEqual(queued_event["target_agent"], "Claude")
         self.assertEqual(queued_event["reason"], "owned_in_progress_dispatch")
 
+    def _auth_pause_claim_fixture(self, pause: dict) -> tuple[dict, dict, dict]:
+        config = {
+            "schema": {
+                "tasks_path": "tasks",
+                "task_id_field": "id",
+                "assignee_field": "owner",
+                "reviewer_field": "reviewer",
+            },
+            "ready_dispatcher": {
+                "helper_claim": {
+                    "enabled": True,
+                    "task_statuses": ["in_progress"],
+                    "availability_first": False,
+                    "allow_any_idle_lane": False,
+                    "require_assigned_agent_busy": True,
+                }
+            },
+            "agents": {
+                "copilot": {"id": "copilot", "display_name": "Copilot", "provider": "copilot"},
+                "codex": {"id": "codex", "display_name": "Codex", "provider": "codex"},
+                "claude": {"id": "claude", "display_name": "Claude", "provider": "claude"},
+            },
+            "providers": {},
+        }
+        state = {
+            "queue": {"events": {}},
+            "provider_pauses": {"copilot": {"schema": 3, "scope": "lane", "lane_id": "copilot", **pause}},
+            "workers": {},
+        }
+        status = {
+            "tasks": [
+                {"id": "REG-AUTH", "status": "in_progress", "owner": "Copilot", "reviewer": "Claude", "depends_on": []},
+            ]
+        }
+        return config, state, status
+
+    def test_dispatcher_claims_task_whose_owner_lane_has_no_credentials(self) -> None:
+        """An auth pause has no resume time; an explicit owner there is a dead end.
+
+        On 2026-09-08 tasks owned by lanes with no credentials went 85 minutes
+        with no dispatch until a person reassigned them. The explicit-owner
+        guard is meant for a quota pause that will lift, not for this.
+        """
+        config, state, status = self._auth_pause_claim_fixture(
+            {"kind": "auth", "reason": "provider auth unavailable", "paused_at": "2026-09-08T09:40:00Z", "resume_at": None}
+        )
+        with (
+            mock.patch.object(supervisor, "load_status", return_value=status),
+            mock.patch.object(supervisor, "load_event_queue", return_value=[]),
+            mock.patch.object(supervisor, "persist_task_reassignment", return_value=True) as persist,
+            mock.patch.object(supervisor, "queue_delivery_event", return_value=True) as queue_delivery_event,
+            mock.patch.object(supervisor, "write_activity_log"),
+        ):
+            changed = supervisor.dispatch_ready_tasks(config, state)
+
+        self.assertTrue(changed)
+        persist.assert_called_once()
+        kwargs = persist.call_args.kwargs
+        self.assertEqual(kwargs["task_id"], "REG-AUTH")
+        self.assertIn(kwargs["new_owner"], {"Codex", "Claude"})
+        self.assertNotEqual(kwargs["new_owner"], kwargs["new_reviewer"])
+        queued_event = queue_delivery_event.call_args.args[1]
+        self.assertEqual(queued_event["task_id"], "REG-AUTH")
+        self.assertEqual(queued_event["target_agent"], kwargs["new_owner"])
+
+    def test_dispatcher_still_respects_explicit_owner_across_a_quota_pause(self) -> None:
+        config, state, status = self._auth_pause_claim_fixture(
+            {"kind": "quota", "reason": "provider quota exhausted", "paused_at": "2026-09-08T09:40:00Z", "resume_at": 9999999999}
+        )
+        with (
+            mock.patch.object(supervisor, "load_status", return_value=status),
+            mock.patch.object(supervisor, "load_event_queue", return_value=[]),
+            mock.patch.object(supervisor, "persist_task_reassignment", return_value=True) as persist,
+            mock.patch.object(supervisor, "queue_delivery_event", return_value=True),
+            mock.patch.object(supervisor, "write_activity_log"),
+        ):
+            supervisor.dispatch_ready_tasks(config, state)
+
+        persist.assert_not_called()
+
+    def test_auth_unavailable_claim_can_be_switched_off(self) -> None:
+        config, state, status = self._auth_pause_claim_fixture(
+            {"kind": "auth", "reason": "provider auth unavailable", "paused_at": "2026-09-08T09:40:00Z", "resume_at": None}
+        )
+        config["ready_dispatcher"]["helper_claim"]["claim_from_auth_unavailable_lane"] = False
+        with (
+            mock.patch.object(supervisor, "load_status", return_value=status),
+            mock.patch.object(supervisor, "load_event_queue", return_value=[]),
+            mock.patch.object(supervisor, "persist_task_reassignment", return_value=True) as persist,
+            mock.patch.object(supervisor, "queue_delivery_event", return_value=True),
+            mock.patch.object(supervisor, "write_activity_log"),
+        ):
+            supervisor.dispatch_ready_tasks(config, state)
+
+        persist.assert_not_called()
+
     def test_dispatcher_does_not_claim_evidence_only_integration_when_owner_is_busy(self) -> None:
         config = {
             "schema": {
