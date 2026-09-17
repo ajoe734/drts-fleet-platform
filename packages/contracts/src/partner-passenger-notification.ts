@@ -1,10 +1,10 @@
 export const PARTNER_PASSENGER_EVENT_TYPES = [
-  "assignment_disclosure_ready",
-  "assignment_replaced",
-  "eta_changed",
-  "driver_arrived",
-  "receipt_ready",
-  "notification_test"
+  "passenger.assignment_disclosure_ready.v1",
+  "passenger.assignment_replaced.v1",
+  "passenger.eta_changed.v1",
+  "passenger.driver_arrived.v1",
+  "passenger.receipt_ready.v1",
+  "passenger.notification_test.v1"
 ] as const;
 export type PartnerPassengerEventType = (typeof PARTNER_PASSENGER_EVENT_TYPES)[number];
 
@@ -82,4 +82,48 @@ export interface PartnerNotificationDeliveryContext {
   deliveryTarget: 'partner_endpoint' | null;
   deliveryStage: 'partner_accepted' | null;
   receiptId: string | null;
+}
+
+export interface PartnerPassengerNotificationRecipient {
+  partner_user_ref: string;
+}
+
+export interface PartnerPassengerNotificationEta {
+  minutes: number;
+  as_of: string;
+}
+
+export interface PartnerPassengerNotificationNavigation {
+  type: 'ride';
+  ride_ref: string;
+}
+
+export interface PartnerPassengerNotificationData {
+  schema_version: '1.0';
+  notification_id: string;
+  partner_entry_slug: string;
+  recipient: PartnerPassengerNotificationRecipient;
+  ride_ref: string;
+  event_sequence: number;
+  assignment_version: string | null;
+  expires_at: string;
+  message: string;
+  navigation: PartnerPassengerNotificationNavigation;
+  eta?: PartnerPassengerNotificationEta;
+}
+
+export interface PartnerPassengerNotificationWirePayload {
+  event: PartnerPassengerEventType;
+  delivery_id: string;
+  occurred_at: string;
+  tenant_id: string;
+  data: PartnerPassengerNotificationData;
+}
+
+export interface PartnerPassengerNotificationAck {
+  notification_id: string;
+  delivery_id: string;
+  partner_entry_slug: string;
+  status: 'accepted' | 'duplicate';
+  receipt_id: string;
 }
