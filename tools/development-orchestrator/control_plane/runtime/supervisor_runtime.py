@@ -4014,10 +4014,21 @@ def maybe_trigger_retry_or_fallback(
         schedule_worker_retry(config, worker, failure_summary)
         if failure.get("kind") == "capacity":
             hinted = infer_pause_resume_at(reason)
-            if hinted is not None:
-                current_retry_ts = datetime.fromisoformat(worker["next_retry_at"].replace("Z", "+00:00")).timestamp()
-                if hinted > current_retry_ts:
-                    worker["next_retry_at"] = datetime.fromtimestamp(hinted, tz=timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+            current_retry_ts = datetime.fromisoformat(worker["next_retry_at"].replace("Z", "+00:00")).timestamp()
+            target_ts = current_retry_ts
+            if hinted is not None and hinted > target_ts:
+                target_ts = hinted
+            
+            reset_seconds = int(
+                worker_retry_settings(config, worker.get("provider")).get("capacity_pause_seconds", 300)
+            )
+            if reset_seconds > 0:
+                fallback_ts = datetime.now(timezone.utc).timestamp() + reset_seconds
+                if fallback_ts > target_ts:
+                    target_ts = fallback_ts
+            
+            if target_ts > current_retry_ts:
+                worker["next_retry_at"] = datetime.fromtimestamp(target_ts, tz=timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
         upsert_worker_dispatch_pause(
             state,
             worker,
@@ -5216,6 +5227,9 @@ def poll_workers(
                         },
                     )
                     changed = True
+            continue
+
+        if worker.get("status") in {"retry_backoff", "fallback"}:
             continue
 
         failure_signal = detect_worker_failure_signal(worker)
