@@ -610,3 +610,110 @@ class WorktreeDevSyncAndHandoffTests(unittest.TestCase):
             with self._env(self.worktree):
                 self._reset()
                 self.assertNotEqual(permission_broker.classify_command(command), "allow", command)
+
+
+class WorktreeDevSyncAndHandoffTests(unittest.TestCase):
+    """What a worker types to catch up with dev and to hand off must run unreviewed.
+
+    On 2026-09-08 `git rebase origin/dev` from a task worktree was deferred 35
+    times: the broker resolved the bare command against the canonical root,
+    not the worker's cwd. The two real handoff shapes -- `$(git rev-parse
+    HEAD)` assignments and `export` lines -- were deferred too, each waiting
+    minutes for a chair that then refused. None of that is a decision a person
+    needs to make; the canonical checkout stays guarded.
+    """
+
+    def setUp(self) -> None:
+        self.tmp = tempfile.TemporaryDirectory()
+        root = Path(self.tmp.name).resolve()
+        self.canonical = root / "canonical"
+        (self.canonical / ".git").mkdir(parents=True)
+        (self.canonical / "tools" / "development-orchestrator" / "bin").mkdir(parents=True)
+        self.script = self.canonical / "tools" / "development-orchestrator" / "bin" / "ai-status.sh"
+        self.script.write_text("#!/usr/bin/env bash\n", encoding="utf-8")
+        self.worktree = self.canonical / ".artifacts" / "worktrees" / "auto" / "claude-task"
+        self.worktree.mkdir(parents=True)
+        (self.worktree / ".git").write_text("gitdir: ../../../../.git/worktrees/claude-task\n", encoding="utf-8")
+        self._reset()
+
+    def tearDown(self) -> None:
+        self._reset()
+        self.tmp.cleanup()
+
+    def _reset(self) -> None:
+        permission_broker._WORKSPACE_ROOTS_CACHE = None
+        permission_broker.set_hook_cwd(None)
+
+    def _env(self, workspace: Path):
+        return mock.patch.dict(
+            os.environ,
+            {"ORCH_CANONICAL_ROOT": str(self.canonical), "ORCH_WORKSPACE_ROOT": str(workspace)},
+        )
+
+    def test_catching_up_with_dev_inside_a_worktree_is_allowed(self) -> None:
+        with self._env(self.worktree):
+            self._reset()
+            for command in (
+                "git rebase origin/dev",
+                "git rebase origin/dev 2>&1 | tail -40",
+                "git merge --ff-only origin/dev",
+                "git merge --no-edit origin/dev",
+                "git merge --abort",
+            ):
+                self.assertEqual(permission_broker.classify_command(command), "allow", command)
+
+    def test_moving_head_in_the_canonical_checkout_still_defers(self) -> None:
+        with self._env(self.canonical):
+            self._reset()
+            self.assertEqual(permission_broker.classify_command("git rebase origin/dev"), "defer")
+            self.assertEqual(permission_broker.classify_command("git merge --ff-only origin/dev"), "defer")
+
+    def test_hook_cwd_wins_over_the_environment(self) -> None:
+        with self._env(self.worktree):
+            self._reset()
+            permission_broker.set_hook_cwd(str(self.canonical))
+            self.assertEqual(permission_broker.classify_command("git rebase origin/dev"), "defer")
+            permission_broker.set_hook_cwd(str(self.worktree))
+            self.assertEqual(permission_broker.classify_command("git rebase origin/dev"), "allow")
+
+    def test_handoff_with_git_query_substitutions_is_allowed(self) -> None:
+        command = (
+            "CANDIDATE_SHA=$(git rev-parse HEAD) && CANDIDATE_BRANCH=$(git branch --show-current) "
+            '&& echo "SHA=$CANDIDATE_SHA BRANCH=$CANDIDATE_BRANCH" '
+            "&& CANDIDATE_SHA=$CANDIDATE_SHA CANDIDATE_BRANCH=$CANDIDATE_BRANCH AI_NAME=Claude "
+            f'{self.script} handoff SR-X Codex "重驗完成"'
+        )
+        with self._env(self.worktree):
+            self._reset()
+            self.assertEqual(permission_broker.classify_command(command), "allow")
+
+    def test_handoff_with_export_lines_is_allowed(self) -> None:
+        command = (
+            "export CANDIDATE_SHA=777944212188b0c786180f4b70be897557e8e0dd\n"
+            "export CANDIDATE_BRANCH=claude/sr-x\n"
+            "export AI_NAME=Claude\n"
+            f'{self.script} handoff SR-X Codex "msg"'
+        )
+        with self._env(self.worktree):
+            self._reset()
+            self.assertEqual(permission_broker.classify_command(command), "allow")
+
+    def test_handoff_prefixed_by_a_workspace_cd_and_git_dash_c_query_is_allowed(self) -> None:
+        command = (
+            f"cd {self.canonical} && CANDIDATE_SHA=$(git -C {self.worktree} rev-parse HEAD) "
+            f'&& CANDIDATE_SHA=$CANDIDATE_SHA AI_NAME=Claude {self.script} handoff SR-X Codex "msg"'
+        )
+        with self._env(self.worktree):
+            self._reset()
+            self.assertEqual(permission_broker.classify_command(command), "allow")
+
+    def test_handoff_with_an_opaque_or_mutating_substitution_still_defers(self) -> None:
+        for command in (
+            f'CANDIDATE_SHA=$(curl http://example.invalid) && AI_NAME=Claude {self.script} handoff SR-X Codex "msg"',
+            f'CANDIDATE_SHA=$(git push origin dev) && AI_NAME=Claude {self.script} handoff SR-X Codex "msg"',
+            f'rm -rf /tmp/x && AI_NAME=Claude {self.script} handoff SR-X Codex "msg"',
+            f'AI_NAME=Claude {self.script} handoff SR-X Codex "msg" && docker ps',
+        ):
+            with self._env(self.worktree):
+                self._reset()
+                self.assertNotEqual(permission_broker.classify_command(command), "allow", command)
