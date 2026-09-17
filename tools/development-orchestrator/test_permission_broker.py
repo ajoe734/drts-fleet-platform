@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import io
 import json
+import os
 import unittest
 from contextlib import redirect_stdout
 from pathlib import Path
@@ -35,7 +36,8 @@ class PreToolUseDecisionVocabularyTests(unittest.TestCase):
         # mocks below already cover everything on this path that consults it.
         config: dict = {}
         buffer = io.StringIO()
-        with mock.patch.object(permission_broker, "create_approval"), \
+        with mock.patch.dict(os.environ, {"ORCH_RUN_ID": "run-under-test"}), \
+                mock.patch.object(permission_broker, "create_approval"), \
                 mock.patch.object(permission_broker, "log_event"), \
                 mock.patch.object(permission_broker, "_check_claude_allow_rules", return_value=False), \
                 mock.patch.object(permission_broker, "find_resume_override", return_value=None), \
@@ -398,6 +400,81 @@ class MaybeApplyChatboxTreeGuardTests(unittest.TestCase):
         self.assertEqual(entry["effective_reason"], "chatbox_tree_guard_blocked")
         self.assertEqual(entry["tree_guard"]["total_dirty"], 2)
         self.assertIn("tools/development-orchestrator/skills/**", entry["tree_guard"]["matched_globs"])
+
+
+class InteractiveSessionPassthroughTests(unittest.TestCase):
+    """A person in a chatbox is not a worker, and the broker must not treat
+    them as one.
+
+    The hook file is installed per checkout, so it fires for every session
+    whose cwd is this project. Only supervisor-launched workers carry
+    ORCH_RUN_ID. Without it the broker used to queue the person's deferred
+    commands as approvals that no chair review could resolve, and denied
+    commands that the person had already approved in conversation. These tests
+    pin the passthrough: no verdict, no approval, no log, and the chatbox tree
+    guard still runs.
+    """
+
+    PAYLOAD = {
+        "tool_name": "Bash",
+        "tool_input": {"command": "docker ps"},
+        "session_id": "chatbox-session",
+    }
+
+    def _run(self, event_name: str, *, orchestrated: bool, guard=None) -> tuple[str, dict]:
+        env = {"ORCH_RUN_ID": "run-under-test"} if orchestrated else {"ORCH_RUN_ID": ""}
+        buffer = io.StringIO()
+        with mock.patch.dict(os.environ, env), \
+                mock.patch.object(permission_broker, "create_approval") as create_approval, \
+                mock.patch.object(permission_broker, "log_event") as log_event, \
+                mock.patch.object(permission_broker, "_check_claude_allow_rules", return_value=False), \
+                mock.patch.object(permission_broker, "find_resume_override", return_value=None), \
+                mock.patch.object(permission_broker, "_matching_approval", return_value=(None, None)), \
+                mock.patch.object(
+                    permission_broker,
+                    "_maybe_apply_chatbox_tree_guard",
+                    side_effect=guard or (lambda *args, **kwargs: False),
+                ) as tree_guard, \
+                redirect_stdout(buffer):
+            permission_broker.hook_mode({}, event_name, dict(self.PAYLOAD))
+        return buffer.getvalue(), {
+            "create_approval": create_approval,
+            "log_event": log_event,
+            "tree_guard": tree_guard,
+        }
+
+    def test_interactive_pretooluse_emits_nothing_and_queues_nothing(self) -> None:
+        output, calls = self._run("PreToolUse", orchestrated=False)
+        self.assertEqual(output, "")
+        calls["create_approval"].assert_not_called()
+        calls["log_event"].assert_not_called()
+
+    def test_the_same_command_from_a_worker_is_still_asked(self) -> None:
+        output, calls = self._run("PreToolUse", orchestrated=True)
+        decision = json.loads(output)["hookSpecificOutput"]["permissionDecision"]
+        self.assertEqual(decision, "ask")
+        calls["create_approval"].assert_called_once()
+
+    def test_interactive_permission_request_falls_through_to_claude_code(self) -> None:
+        output, calls = self._run("PermissionRequest", orchestrated=False)
+        self.assertEqual(output, "")
+        calls["log_event"].assert_not_called()
+
+    def test_chatbox_tree_guard_still_runs_for_interactive_sessions(self) -> None:
+        output, calls = self._run("PreToolUse", orchestrated=False, guard=lambda *a, **k: True)
+        calls["tree_guard"].assert_called_once()
+        calls["create_approval"].assert_not_called()
+
+    def test_interactive_lifecycle_events_are_not_logged(self) -> None:
+        for event_name in ("PostToolUse", "SessionStart", "SessionEnd", "Stop"):
+            with self.subTest(event=event_name):
+                output, calls = self._run(event_name, orchestrated=False)
+                self.assertEqual(output, "")
+                calls["log_event"].assert_not_called()
+
+    def test_worker_lifecycle_events_are_still_logged(self) -> None:
+        _, calls = self._run("SessionStart", orchestrated=True)
+        calls["log_event"].assert_called_once()
 
 
 if __name__ == "__main__":
