@@ -3489,6 +3489,56 @@ def prune_unmatched_provider_pauses(
     return True
 
 
+ORPHANED_RECORD_GRACE_SECONDS = 3600.0
+
+
+def orphaned_dispatch_pause(
+    status: dict[str, Any],
+    pause: dict[str, Any],
+    task_by_id: dict[str, dict[str, Any]],
+) -> bool:
+    """Retire a pause whose task_id names a subject the board does not have.
+
+    Every other rule here asks the board about the task the pause names: it is
+    done, it has a live worker, it moved on since. A task_id that resolves to
+    nothing answers none of those questions, so such a record survives all of
+    them, forever. `recovered_taskless_dispatch_pause` does not catch it
+    either -- that one returns early unless the task_id is empty, and these are
+    not empty, they are wrong.
+
+    Four of them, written on 2026-09-13 against worker-run labels
+    (`PLANNING-PHASE1-CLAUDE2`) instead of board task ids, were still on the
+    list three days later. By themselves they block no dispatch. But
+    provider_health_triage reads this list as current lane health, and on
+    2026-09-16 a chair did exactly that and paused both Claude lanes with no
+    resume_at, on a seven-day quota window that had reset two days earlier.
+    That pause then held the only reviewer the remaining live tasks had.
+
+    An unknown id is not on its own proof of an orphan: a pause is written the
+    moment a dispatch fails and the board file is written by another path, so a
+    genuinely new task can be missing from it for a tick. Hence the grace
+    period. An id the board has explicitly archived needs no such benefit of
+    the doubt.
+    """
+    task_id = str(pause.get("task_id") or "").strip()
+    if not task_id or task_id in task_by_id:
+        return False
+    now = datetime.now(timezone.utc)
+    blocked_until = parse_runtime_timestamp(str(pause.get("blocked_until") or ""))
+    if blocked_until is not None and blocked_until > now:
+        return False
+    paused_at = parse_runtime_timestamp(str(pause.get("paused_at") or ""))
+    resume_at = infer_pause_resume_at(str(pause.get("summary") or ""), paused_at=paused_at)
+    if resume_at is not None and resume_at > now.timestamp():
+        return False
+    archived = status.get("archived_task_ids", []) or []
+    if isinstance(archived, list) and task_id in {str(item) for item in archived}:
+        return True
+    if paused_at is None:
+        return False
+    return (now - paused_at).total_seconds() >= ORPHANED_RECORD_GRACE_SECONDS
+
+
 def prune_completed_dispatch_pauses(
     state: dict[str, Any],
     status: dict[str, Any],
@@ -3534,6 +3584,7 @@ def prune_completed_dispatch_pauses(
         and str(pause.get("task_id") or "") not in active_task_ids
         and not pause_is_stale_for_updated_task(pause)
         and not recovered_taskless_dispatch_pause(config, state, pause, provider_report)
+        and not orphaned_dispatch_pause(status, pause, task_by_id)
     ]
     if len(keep) == len(pauses):
         return False
@@ -5614,10 +5665,48 @@ def worker_matches_current_assignment(
 TASK_DISPATCH_REASONS = frozenset(reason.value for reason in DomainDispatchReason)
 
 
+def orphaned_queue_event_skip_message(
+    event: dict[str, Any],
+    task_map: dict[str, dict[str, Any]],
+) -> str | None:
+    """Retire a queued event whose task the board does not have.
+
+    The staleness rules below only run for reasons in TASK_DISPATCH_REASONS,
+    so an event queued by any other path -- a planning baton dispatch, for
+    instance -- had no expiry at all. `reconcile_queue_records` does not reach
+    it either: that one starts from the event's workers, and an event that
+    never admitted a worker has none.
+
+    `evt-20260913T145733Z-0f405329` was one. A planning-round dispatch to the
+    Copilot lane, naming task `PLANNING-PHASE1-COPILOT`, which is a worker-run
+    label rather than a board task. Its lane had no capacity, so it was
+    deferred with `waiting_capacity` and re-queued on every tick, and it was
+    still being retried four days later, long after that planning round ended
+    and the supervisor had moved to execution mode.
+
+    The grace period is the same concession made for dispatch pauses: an event
+    is queued before the board file is rewritten, so a genuinely new task can
+    be missing for a tick.
+    """
+    task_id = str(event.get("task_id") or "").strip()
+    if not task_id or task_id in task_map:
+        return None
+    created_at = parse_runtime_timestamp(str(event.get("created_at") or ""))
+    if created_at is None:
+        return None
+    age = (datetime.now(timezone.utc) - created_at).total_seconds()
+    if age < ORPHANED_RECORD_GRACE_SECONDS:
+        return None
+    return (
+        f"Skipped stale queued event for {task_id}: the board has no such task, "
+        f"and the event has been waiting since {event.get('created_at')}."
+    )
+
+
 def stale_dispatch_skip_message(config: dict[str, Any], event: dict[str, Any], task_map: dict[str, dict[str, Any]]) -> str | None:
     reason = str(event.get("reason") or "")
     if reason not in TASK_DISPATCH_REASONS:
-        return None
+        return orphaned_queue_event_skip_message(event, task_map)
 
     expected_key = current_dispatch_event_key(config, event, task_map)
     task_id = str(event.get("task_id") or "unknown task")
@@ -6503,32 +6592,75 @@ def apply_chair_reassignment_action(
     from_agent = str(action.get("from") or "").strip()
     to_agent = str(action.get("to") or "").strip()
     reason = str(action.get("reason") or "").strip()
+
+    # Every guard below used to be a bare `return False`. A chair decision that
+    # named a task the board does not have was therefore accepted, recorded as
+    # `last_decision`, and applied to nothing, in silence: no activity log, no
+    # guard entry, no queue event. From the outside that is indistinguishable
+    # from a supervisor that has stopped consuming decisions, and in September
+    # 2026 it was read as exactly that for several hours while the real cause
+    # was a chair copying worker-run labels out of `dispatch_pauses` into
+    # `task_id`. A rejected action has to say why it was rejected.
+    def reject(detail: str) -> bool:
+        write_activity_log(
+            config,
+            {
+                "type": "chair_reassignment_rejected",
+                "task_id": task_id or None,
+                "role": role or None,
+                "from_agent": from_agent or None,
+                "to_agent": to_agent or None,
+                "message": f"Rejected chair reassignment: {detail}",
+            },
+        )
+        return False
+
     if not task_id or role not in {"owner", "reviewer"} or not from_agent or not to_agent or not reason:
-        return False
+        return reject(
+            "action is malformed; task_id/from/to/reason must be non-empty and "
+            f"role must be owner or reviewer (got role={role!r})."
+        )
     if to_agent not in known_agent_display_names(config):
-        return False
+        return reject(f"target agent {to_agent} is not a known agent display name.")
     if is_agent_dispatch_paused(config, state, to_agent, provider_report=provider_report):
-        return False
+        return reject(f"target agent {to_agent} is dispatch-paused, so it cannot take the work.")
     status = load_status(config)
     task = next((item for item in status.get("tasks", []) or [] if str(item.get("id") or "") == task_id), None)
-    if task is None or not task_is_dispatch_eligible_for_agent(task, to_agent):
-        return False
+    if task is None:
+        archived = status.get("archived_task_ids", []) or []
+        if isinstance(archived, list) and task_id in {str(item) for item in archived}:
+            return reject(f"{task_id} is archived; an archived task cannot be reassigned.")
+        return reject(
+            f"{task_id} is not on the task board. Check that the id is a board task id "
+            "and not a worker run label or a dispatch-pause record."
+        )
+    if not task_is_dispatch_eligible_for_agent(task, to_agent):
+        return reject(f"{task_id} is not dispatch-eligible for {to_agent}.")
     current_owner = str(task.get("owner") or "").strip()
     current_reviewer = str(task.get("reviewer") or "").strip()
     if role == "owner" and to_agent == current_reviewer:
-        return False
+        return reject(f"{to_agent} already reviews {task_id}; owner and reviewer must differ.")
     if role == "reviewer" and to_agent == current_owner:
-        return False
+        return reject(f"{to_agent} already owns {task_id}; owner and reviewer must differ.")
+    task_status = str(task.get("status") or "").lower()
     if role == "reviewer":
-        if str(task.get("status") or "").lower() not in {"todo", "in_progress", "review"}:
-            return False
-        if str(task.get("reviewer") or "") != from_agent:
-            return False
+        if task_status not in {"todo", "in_progress", "review"}:
+            return reject(
+                f"reviewer reassignment needs {task_id} in todo/in_progress/review, but it is {task_status or 'unset'}."
+            )
+        if current_reviewer != from_agent:
+            return reject(
+                f"{task_id} reviewer is {current_reviewer or 'unset'}, not the {from_agent} the action hands off from."
+            )
     else:
-        if str(task.get("status") or "").lower() not in {"backlog", "todo", "in_progress"}:
-            return False
-        if str(task.get("owner") or "") != from_agent:
-            return False
+        if task_status not in {"backlog", "todo", "in_progress"}:
+            return reject(
+                f"owner reassignment needs {task_id} in backlog/todo/in_progress, but it is {task_status or 'unset'}."
+            )
+        if current_owner != from_agent:
+            return reject(
+                f"{task_id} owner is {current_owner or 'unset'}, not the {from_agent} the action hands off from."
+            )
     message = brief_reason_text(
         f"Chairman reassigned {role} from {from_agent} to {to_agent}: {reason}",
         max_length=280,
