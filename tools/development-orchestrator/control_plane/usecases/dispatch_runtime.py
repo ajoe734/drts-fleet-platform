@@ -32,6 +32,12 @@ def ready_dispatch_settings(config: dict[str, Any]) -> dict[str, Any]:
     # (5 min) is enough to absorb a normal supervisor reshuffle without
     # killing real work; set to 0 to disable. See worker_in_dispatch_cooldown.
     settings.setdefault("dispatch_cooldown_seconds", 300)
+    # Handoff grace: a *running* worker whose task assignment moved away is
+    # given N seconds from the first poll that saw the move before it is
+    # superseded, so an owner that just handed off can finish writing its
+    # result instead of being killed mid-summary. Set to 0 to disable. See
+    # worker_in_handoff_grace.
+    settings.setdefault("handoff_grace_seconds", 120)
     return settings
 
 
