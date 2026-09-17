@@ -55,6 +55,7 @@ from control_plane.domain.worker_lifecycle import (
 from control_plane.domain.failure_policy import (
     classify_failure as classify_domain_failure,
     infer_pause_resume_at as infer_domain_pause_resume_at,
+    infer_rejected_rate_limit_resume_at,
     retry_settings as domain_retry_settings,
 )
 from control_plane.domain.resource_admission import decide as resource_admission_decision
@@ -2207,6 +2208,114 @@ def file_iso_mtime(path: Path) -> str | None:
     return datetime.fromtimestamp(path.stat().st_mtime, tz=timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
 
 
+def _agy_stream_productive_event_count(content: str) -> int | None:
+    """Count agy `--output-format stream-json` events that are real turn progress.
+
+    agy's stream floods the log with `step_update` events as the turn runs,
+    including repeated `error_message` steps while it retries/stalls
+    internally; those advance the log's mtime without the turn actually
+    moving forward. Returns ``None`` when the log has no agy event-shaped
+    JSON at all, so callers fall back to plain mtime-based visibility for
+    every other adapter's log format.
+
+    Otherwise returns a count of turn steps that actually represent forward
+    progress, so `update_from_log` can tell transport visibility (bytes were
+    appended) apart from productive progress (the turn advanced):
+
+    - `step_update` entries are deduplicated by `(conversation_id,
+      step_index)`, so a replayed/duplicated line for an already-seen step
+      never inflates the count.
+    - an `agent_response` step immediately followed by an `error_message`
+      step (same conversation, next step_index) is a failed attempt, not
+      progress -- agy's stream shows this as a continuous retry-then-fail
+      loop while a turn is stuck, and none of those attempts ever produced
+      a usable response.
+    - an `agent_response` step with no known successor yet, and no terminal
+      `result` event yet, is *unconfirmed*: a later append could still
+      reveal it as a failed retry, so it is not counted until a following
+      event (another step, or the terminal result) proves it wasn't. Without
+      this, a from-scratch recount on every poll credits each retry's
+      optimistic response immediately, an `error_message` invalidates it,
+      and the *next* retry's optimistic response gets credited all over
+      again -- so repeated failed retries keep re-triggering recovery and
+      resetting the stall clock even though the turn never produces a
+      usable response.
+    - the terminal `result` event only counts when its status is not
+      `ERROR`; a structured failure is not progress no matter how much
+      stream noise led up to it.
+    - `step_update` and `result` payloads are only trusted when their
+      nested `step_update`/`result` value is actually a dict. Some other
+      providers' logs reuse the `event` field name with a differently
+      shaped value (e.g. a plain string), which must neither crash this
+      parser nor be misidentified as agy-shaped.
+    - a `result` event only establishes agy's schema when the nested dict
+      carries a `status` key, mirroring
+      ``worker_failure_detector._is_antigravity_result_event``. Some other
+      providers' logs reuse `{"event": "result", ...}` with an unrelated
+      dict shape (e.g. `{"message": "Task complete"}`), which must not be
+      misidentified as agy-shaped either.
+
+    Callers must still scope this to a worker whose configured adapter is
+    actually antigravity: captured tool output that happens to embed a
+    literal agy stream-json line (e.g. another worker's log inspected via
+    `cat`) can carry this exact shape without the worker itself being an
+    agy process.
+    """
+    found_schema = False
+    steps: dict[tuple[str, int], str] = {}
+    step_order: list[tuple[str, int]] = []
+    result_statuses: list[str] = []
+    for line in content.splitlines():
+        line = line.strip()
+        if not line.startswith("{"):
+            continue
+        try:
+            payload = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if not isinstance(payload, dict):
+            continue
+        event = payload.get("event")
+        if event == "step_update":
+            step = payload.get("step_update")
+            if not isinstance(step, dict):
+                continue
+            found_schema = True
+            try:
+                step_index = int(step.get("step_index"))
+            except (TypeError, ValueError):
+                continue
+            key = (str(step.get("conversation_id") or ""), step_index)
+            if key not in steps:
+                step_order.append(key)
+            steps[key] = str(step.get("step_type") or "").strip()
+        elif event == "result":
+            result = payload.get("result")
+            if not isinstance(result, dict) or "status" not in result:
+                continue
+            found_schema = True
+            result_statuses.append(str(result.get("status") or "").strip().upper())
+    if not found_schema:
+        return None
+    turn_finished = bool(result_statuses)
+    last_key = step_order[-1] if step_order else None
+    count = 0
+    for key in step_order:
+        conversation_id, step_index = key
+        step_type = steps[key]
+        if step_type == "error_message":
+            continue
+        if step_type == "agent_response":
+            next_type = steps.get((conversation_id, step_index + 1))
+            if next_type == "error_message":
+                continue
+            if next_type is None and key == last_key and not turn_finished:
+                continue
+        count += 1
+    count += sum(1 for status in result_statuses if status and status != "ERROR")
+    return count
+
+
 def update_from_log(config: dict[str, Any], worker: dict[str, Any]) -> None:
     log_path_value = worker.get("log_path")
     if not log_path_value:
@@ -2215,11 +2324,53 @@ def update_from_log(config: dict[str, Any], worker: dict[str, Any]) -> None:
     if not log_path.exists():
         return
     mtime = file_iso_mtime(log_path)
-    if mtime and (not worker.get("last_event_at") or mtime > worker.get("last_event_at", "")):
-        worker["last_event_at"] = mtime
     try:
         content = log_path.read_text(encoding="utf-8", errors="ignore")
     except OSError:
+        content = None
+    # Only a worker whose *configured* adapter is antigravity may ever be
+    # treated as agy-shaped. Matching on log content shape alone (any
+    # `{"event": ...}` line) misidentifies other adapters' logs: a Codex
+    # worker that captures tool output embedding a literal agy stream-json
+    # line (e.g. `cat`-ing another worker's agy log) would otherwise gain
+    # `_agy_stream_productive_event_count` and have its own ordinary
+    # progress ignored by the agy-only stall-clock logic below.
+    agent = agent_config_for(config, str(worker.get("agent_id") or worker.get("provider") or ""))
+    is_agy_adapter = str(agent.get("adapter") or "") == "antigravity"
+    productive_count = (
+        _agy_stream_productive_event_count(content) if content is not None and is_agy_adapter else None
+    )
+    if productive_count is None:
+        worker["_agy_retry_noise_detected"] = False
+        if mtime and (not worker.get("last_event_at") or mtime > worker.get("last_event_at", "")):
+            worker["last_event_at"] = mtime
+    else:
+        # The baseline is recorded on every call, not only inside the
+        # mtime-advanced branch below. `file_iso_mtime` truncates to whole
+        # seconds, so two polls landing in the same second used to skip
+        # storing this counter entirely on the poll that first observed a
+        # real step (last_event_at was unchanged that tick, so the old code
+        # never ran `worker["_agy_stream_productive_event_count"] = ...`).
+        # The next poll then compared against a phantom zero baseline and
+        # credited every already-seen step as fresh progress, which is
+        # exactly how a trailing error-only append on an already-observed
+        # log used to falsely mark a stalled worker as recovered.
+        previous_count = int(worker.get("_agy_stream_productive_event_count") or 0)
+        worker["_agy_stream_productive_event_count"] = productive_count
+        # Bytes actually landing in the log this poll (mtime advanced) with
+        # no productive gain is concrete evidence of retry-loop noise (a
+        # fresh error_message step, say). A log that stayed byte-for-byte
+        # unchanged this poll is not noise -- it is silence, which a quiet
+        # but live child command (no error, no retry) also produces, and
+        # that must remain eligible for CPU-tick-based activity credit.
+        log_bytes_advanced = bool(mtime and (not worker.get("last_event_at") or mtime > worker.get("last_event_at", "")))
+        worker["_agy_retry_noise_detected"] = log_bytes_advanced and not (productive_count > previous_count)
+        if (
+            productive_count > previous_count
+            and log_bytes_advanced
+        ):
+            worker["last_event_at"] = mtime
+    if content is None:
         return
     for line in content.splitlines():
         line = line.strip()
@@ -2328,23 +2479,27 @@ def pause_provider(
     kind: str,
     reset_seconds: int | None = None,
     identity: dict[str, Any] | None = None,
+    resume_at: float | None = None,
 ) -> None:
     normalized = normalize_agent_id(agent_id) or str(agent_id).strip()
-    resume_at = (
-        datetime.now(timezone.utc).timestamp() + reset_seconds
-        if reset_seconds is not None
-        else None
-    )
-    resume_source = "reset_seconds" if reset_seconds is not None else None
-    if kind in {"quota", "capacity"}:
-        hinted = infer_pause_resume_at(reason)
-        # The provider states when the quota actually resets; a caller-supplied
-        # default (quota pauses hardcode 4h) is only a guess. Waking earlier than
-        # the stated reset just burns an attempt and re-pauses, so take whichever
-        # is later.
-        if hinted is not None and (resume_at is None or hinted > resume_at):
-            resume_at = hinted
-            resume_source = "reason_hint"
+    if resume_at is not None:
+        resume_source = "recovered_dispatch_pause"
+    else:
+        resume_at = (
+            datetime.now(timezone.utc).timestamp() + reset_seconds
+            if reset_seconds is not None
+            else None
+        )
+        resume_source = "reset_seconds" if reset_seconds is not None else None
+        if kind in {"quota", "capacity"}:
+            hinted = infer_pause_resume_at(reason)
+            # The provider states when the quota actually resets; a caller-supplied
+            # default (quota pauses hardcode 4h) is only a guess. Waking earlier than
+            # the stated reset just burns an attempt and re-pauses, so take whichever
+            # is later.
+            if hinted is not None and (resume_at is None or hinted > resume_at):
+                resume_at = hinted
+                resume_source = "reason_hint"
     entry = {
         "kind": kind,
         "reason": reason,
@@ -2384,7 +2539,11 @@ def maybe_pause_provider_for_terminal_failure(
     if not agent_id:
         return
     if failure.get("kind") == "quota_terminal":
-        pause_provider(state, agent_id, reason, kind="quota", reset_seconds=14400, identity=worker.get("identity"))
+        pause_provider(
+            state, agent_id, reason, kind="quota",
+            reset_seconds=None if infer_rejected_rate_limit_resume_at(reason) is not None else 14400,
+            identity=worker.get("identity"),
+        )
     elif failure.get("kind") == "auth":
         pause_provider(state, agent_id, reason, kind="auth", reset_seconds=None, identity=worker.get("identity"))
 
@@ -2540,12 +2699,25 @@ def maybe_rotate_antigravity_lane(
     return True
 
 
-def clear_provider_pause(state: dict[str, Any], agent_id: str) -> None:
+def clear_provider_pause(
+    state: dict[str, Any], agent_id: str, *,
+    pause_keys: list[str] | None = None, affected_lanes: set[str] | None = None,
+) -> dict[str, Any]:
+    """Retire a provider pause and the failure records that could resurrect it."""
     normalized = normalize_agent_id(agent_id) or str(agent_id).strip()
     registry = provider_pause_registry(state)
-    for key, entry in list(registry.items()):
-        if key == normalized or (isinstance(entry, dict) and entry.get("lane_id") == normalized):
-            registry.pop(key, None)
+    keys = pause_keys if pause_keys is not None else [
+        key for key, entry in registry.items()
+        if key == normalized or (isinstance(entry, dict) and entry.get("lane_id") == normalized)
+    ]
+    cleared = {key: registry.pop(key) for key in keys if key in registry}
+    lanes = affected_lanes or {normalized}
+    retired = [entry for entry in state.get("dispatch_pauses", [])
+               if cleared and normalize_agent_id(str(entry.get("provider") or "")) in lanes
+               and entry.get("failure_kind") in {"quota/terminal", "quota_terminal", "auth"}]
+    state["dispatch_pauses"] = [entry for entry in state.get("dispatch_pauses", [])
+                                if entry not in retired]
+    return {"cleared_provider_pauses": cleared, "retired_dispatch_pauses": retired}
 
 
 def lane_has_recorded_pause(state: dict[str, Any], agent_id: str) -> bool:
@@ -2625,6 +2797,81 @@ def is_agent_dispatch_paused(
             return True
         resume_at = entry.get("resume_at")
         if resume_at is None or float(resume_at) > datetime.now(timezone.utc).timestamp():
+            return True
+    return False
+
+
+def rehydrate_provider_pauses_from_dispatch_failures(
+    config: dict[str, Any],
+    state: dict[str, Any],
+    provider_report: dict[str, Any],
+) -> bool:
+    """Restore a quota pause that an older terminal/stall path recorded only per task.
+
+    A dispatch pause preserves both the original failure time and provider reset
+    hint.  Reusing that original timestamp is essential: interpreting "Resets
+    in 1h" at restart time would extend an already elapsed provider window.
+    Only explicit quota-terminal records with a still-future inferred reset are
+    eligible; generic terminal failures and expired history remain untouched.
+    """
+    now_ts = datetime.now(timezone.utc).timestamp()
+    recovered = False
+    for dispatch_pause in state.get("dispatch_pauses", []) or []:
+        failure_kind = str(dispatch_pause.get("failure_kind") or "").lower()
+        if failure_kind not in {"quota/terminal", "quota_terminal"}:
+            continue
+        agent_id = normalize_agent_id(str(dispatch_pause.get("provider") or ""))
+        if not agent_id:
+            continue
+        if any(
+            isinstance(entry, dict)
+            and pause_covers_lane(config, provider_report, entry, agent_id)
+            for entry in provider_pause_registry(state).values()
+        ):
+            continue
+        reason = str(dispatch_pause.get("summary") or "").strip()
+        paused_at = parse_runtime_timestamp(str(dispatch_pause.get("paused_at") or ""))
+        resume_at = infer_pause_resume_at(reason, paused_at=paused_at)
+        if resume_at is None or resume_at <= now_ts:
+            continue
+        provider_info = provider_info_for_agent(config, provider_report, agent_id)
+        identity = provider_info.get("identity") if isinstance(provider_info.get("identity"), dict) else None
+        pause_provider(
+            state,
+            agent_id,
+            reason,
+            kind="quota",
+            identity=identity,
+            resume_at=resume_at,
+        )
+        recovered = True
+    return recovered
+
+
+def agent_lane_auth_unavailable(
+    config: dict[str, Any],
+    state: dict[str, Any],
+    agent_id: str,
+    *,
+    provider_report: dict[str, Any] | None = None,
+) -> bool:
+    """Whether a lane is out for lack of credentials rather than for a while.
+
+    A quota or capacity pause carries a resume time and the explicit owner is
+    respected across it. An auth pause has no such horizon: on 2026-09-08 the
+    tasks owned by Claude2/Gemini/Gemini2 sat with no dispatch at all for 85
+    minutes until a person reassigned them. That is the case a helper claim
+    exists for, so it is the one case the explicit-owner guard yields to.
+    """
+    normalized = normalize_agent_id(agent_id) or str(agent_id).strip()
+    report = provider_report or load_provider_report(config)
+    provider_info = provider_info_for_agent(config, report, normalized)
+    if provider_info.get("auth_ready") is False:
+        return True
+    for entry in provider_pause_registry(state).values():
+        if not isinstance(entry, dict) or not pause_covers_lane(config, report, entry, normalized):
+            continue
+        if str(entry.get("kind") or "") == "auth":
             return True
     return False
 
@@ -3336,6 +3583,59 @@ def prune_unmatched_provider_pauses(
     return True
 
 
+ORPHANED_DISPATCH_PAUSE_GRACE_SECONDS = 3600.0
+
+
+def orphaned_dispatch_pause(
+    status: dict[str, Any],
+    pause: dict[str, Any],
+    task_by_id: dict[str, dict[str, Any]],
+) -> bool:
+    """Retire a pause whose task_id names a subject the board does not have.
+
+    Every other rule here asks the board about the task the pause names: it is
+    done, it has a live worker, it moved on since. A task_id that resolves to
+    nothing answers none of those questions, so such a record survives all of
+    them, forever. `recovered_taskless_dispatch_pause` does not catch it
+    either -- that one returns early unless the task_id is empty, and these
+    are not empty, they are wrong.
+
+    Four of them, written on 2026-09-13 against worker-run labels
+    (`PLANNING-PHASE1-CLAUDE2`) instead of board task ids, were still on the
+    list three days later. By themselves they block no dispatch. But
+    provider_health_triage reads this list as current lane health, and on
+    2026-09-16 a chair did exactly that and paused both Claude lanes with no
+    resume_at, on a seven-day quota window that had reset two days earlier.
+    That pause then held the only reviewer the remaining live tasks had. A
+    stale record that still speaks is the failure this whole series has been
+    removing; this is the same failure reached through a wrong name rather
+    than a missing one.
+
+    An unknown id is not on its own proof of an orphan: a pause is written the
+    moment a dispatch fails, and the board file is written by another path, so
+    a genuinely new task can be missing from it for a tick. Hence the grace
+    period. An id the board has explicitly archived needs no such benefit of
+    the doubt -- that task is gone by the board's own account.
+    """
+    task_id = str(pause.get("task_id") or "").strip()
+    if not task_id or task_id in task_by_id:
+        return False
+    now = datetime.now(timezone.utc)
+    blocked_until = parse_runtime_timestamp(str(pause.get("blocked_until") or ""))
+    if blocked_until is not None and blocked_until > now:
+        return False
+    paused_at = parse_runtime_timestamp(str(pause.get("paused_at") or ""))
+    resume_at = infer_pause_resume_at(str(pause.get("summary") or ""), paused_at=paused_at)
+    if resume_at is not None and resume_at > now.timestamp():
+        return False
+    archived = status.get("archived_task_ids", []) or []
+    if isinstance(archived, list) and task_id in {str(item) for item in archived}:
+        return True
+    if paused_at is None:
+        return False
+    return (now - paused_at).total_seconds() >= ORPHANED_DISPATCH_PAUSE_GRACE_SECONDS
+
+
 def prune_completed_dispatch_pauses(
     state: dict[str, Any],
     status: dict[str, Any],
@@ -3354,6 +3654,11 @@ def prune_completed_dispatch_pauses(
     # job is to prune a list. Without a config there is simply no report.
     if provider_report is None:
         provider_report = load_provider_report(config) if config else {}
+    rehydrated_provider_pause = bool(config) and rehydrate_provider_pauses_from_dispatch_failures(
+        config,
+        state,
+        provider_report,
+    )
     task_by_id = {
         str(task.get("id") or ""): task
         for task in tasks
@@ -3381,9 +3686,10 @@ def prune_completed_dispatch_pauses(
         and str(pause.get("task_id") or "") not in active_task_ids
         and not pause_is_stale_for_updated_task(pause)
         and not recovered_taskless_dispatch_pause(config, state, pause, provider_report)
+        and not orphaned_dispatch_pause(status, pause, task_by_id)
     ]
     if len(keep) == len(pauses):
-        return False
+        return rehydrated_provider_pause
     state["dispatch_pauses"] = keep
     return True
 
@@ -3429,7 +3735,12 @@ def proactive_claim_plan_for_idle_agent(
     # under quota_exhausted, or Codex with broken CLI) gets reshuffled
     # to whoever is idle — typically cascading the entire queue onto a
     # single lane. See feedback_supervisor_ignores_explicit_owner.md.
-    if helper_settings.get("respect_explicit_owner_when_paused", True) and state is not None:
+    assigned_auth_unavailable = bool(
+        state is not None
+        and helper_settings.get("claim_from_auth_unavailable_lane", True)
+        and agent_lane_auth_unavailable(config, state, assigned_agent)
+    )
+    if helper_settings.get("respect_explicit_owner_when_paused", True) and state is not None and not assigned_auth_unavailable:
         if not lane_dispatch_disabled(config, assigned_agent) and is_agent_dispatch_paused(config, state, assigned_agent):
             assigned_load = len(agent_loads.get(assigned_agent, []))
             if assigned_load == 0:
@@ -3443,7 +3754,11 @@ def proactive_claim_plan_for_idle_agent(
         # cannot service this task on the current host, so waiting for
         # higher-priority load on that lane would deadlock dispatch.
         has_higher_priority_load = True
-    assigned_busy = assigned_agent not in idle_agent_names
+    if assigned_auth_unavailable:
+        # No credentials is not "busy", but waiting on that lane is the same
+        # deadlock as waiting on a banned one: nothing will ever free up there.
+        has_higher_priority_load = True
+    assigned_busy = assigned_agent not in idle_agent_names or assigned_auth_unavailable
 
     if helper_settings.get("require_owner_higher_priority_load", False):
         if not has_higher_priority_load and not (helper_settings.get("availability_first", True) and assigned_busy):
@@ -3861,12 +4176,12 @@ def maybe_trigger_retry_or_fallback(
         schedule_worker_retry(config, worker, failure_summary)
         if failure.get("kind") == "capacity" and allow_provider_pause:
             agent_id = str(worker.get("agent_id") or worker.get("provider") or "")
-            next_retry_at = parse_runtime_timestamp(worker.get("next_retry_at"))
-            reset_seconds = None
-            if next_retry_at is not None:
-                reset_seconds = max(1, int((next_retry_at - datetime.now(timezone.utc)).total_seconds()))
             if agent_id:
-                pause_provider(state, agent_id, failure_summary, kind="capacity", reset_seconds=reset_seconds)
+                reset_seconds = int(
+                    worker_retry_settings(config, worker.get("provider")).get("capacity_pause_seconds", 300)
+                )
+                if reset_seconds > 0:
+                    pause_provider(state, agent_id, failure_summary, kind="capacity", reset_seconds=reset_seconds)
         upsert_worker_dispatch_pause(
             state,
             worker,
@@ -4367,7 +4682,9 @@ def handle_worker_failure_signal(
             agent_id,
             failure_reason,
             kind="quota",
-            reset_seconds=14400,
+            # A native rejected event supplies an authoritative reset. Other
+            # textual hints retain the existing four-hour minimum.
+            reset_seconds=None if infer_rejected_rate_limit_resume_at(failure_reason) is not None else 14400,
             identity=worker.get("identity"),
         )
     if failure.get("kind") == "auth" and authorized and agent_id:
@@ -4627,7 +4944,11 @@ def handle_worker_approval_state(
         latest = resolved[-1]
         if latest.get("approval_id") != worker.get("last_approval_id"):
             worker["last_approval_id"] = latest.get("approval_id")
-            if latest.get("decision") == "allow" and worker_supports_approval_resume(worker):
+            # A live worker consumes the broker's approval itself. Launching a
+            # second process can collide with its existing systemd unit and
+            # replace the live worker's stdout path with a failed launch log.
+            # Only an exited, resumable session needs a replacement process.
+            if latest.get("decision") == "allow" and not alive and worker_supports_approval_resume(worker):
                 resumed = resume_claude_worker(config, worker, provider_report, approval=latest)
                 write_activity_log(
                     config,
@@ -4646,7 +4967,10 @@ def handle_worker_approval_state(
                 changed = True
                 if resumed:
                     return True, True
-            if latest.get("decision") == "deny":
+            # The broker denies this tool operation, not the entire live CLI
+            # session. Keep its record so cleanup cannot remove an in-use
+            # worktree while the worker chooses an authorized alternative.
+            if latest.get("decision") == "deny" and not alive:
                 worker["status"] = "failed"
                 worker["last_event_at"] = utc_now()
                 reason = latest.get("note") or "Worker approval denied."
@@ -4759,6 +5083,13 @@ def poll_workers(
             resolved_by_run.setdefault(run_id, []).append(item)
 
     stall_after = float(config.get("supervisor", {}).get("stall_after_seconds", 300))
+    # A silent child retains its lane's capacity until it is killed. Keep the
+    # historical two-window default, while allowing an execution fleet to
+    # shorten that second window after a verified no-progress stall.
+    terminate_stalled_after = float(
+        config.get("supervisor", {}).get("terminate_stalled_after_seconds", stall_after * 2)
+    )
+    terminate_stalled_after = max(stall_after, terminate_stalled_after)
     now = datetime.now(timezone.utc)
     provider_report = provider_report or load_provider_report(config)
     changed = retry_due_workers(config, state, provider_report, now) or changed
@@ -4802,17 +5133,40 @@ def poll_workers(
                 continue
         update_from_log(config, worker)
         alive = pid_is_alive(worker.get("pid"))
-        process_activity_advanced, process_activity_persisted = observe_worker_process_activity(
-            worker,
-            worker_cpu_ticks.get(int(worker["pid"])) if str(worker.get("pid") or "").isdigit() else None,
-            now,
-        )
-        changed = process_activity_persisted or changed
         last_event_advanced = bool(
             previous_last_event_at
             and worker.get("last_event_at")
             and worker.get("last_event_at") > previous_last_event_at
         )
+        previous_process_activity_at = worker.get("last_process_activity_at")
+        process_activity_advanced, process_activity_persisted = observe_worker_process_activity(
+            worker,
+            worker_cpu_ticks.get(int(worker["pid"])) if str(worker.get("pid") or "").isdigit() else None,
+            now,
+        )
+        if (
+            process_activity_advanced
+            and not last_event_advanced
+            and worker.get("_agy_retry_noise_detected")
+        ):
+            # agy floods /proc CPU accounting with retry-loop noise while a turn is
+            # stuck in a repeated error_message cycle (see
+            # _agy_stream_productive_event_count). This poll's update_from_log call
+            # found concrete evidence of that noise -- the log actually gained new
+            # bytes (mtime advanced) but produced no productive-count gain -- so a
+            # bare CPU tick increase must not renew the effective stall clock or the
+            # stalled->running recovery below, or an ordinary retry keeps an
+            # error-only loop looking alive forever. A quiet-but-live agy worker
+            # whose log received no new bytes at all this poll (no evidence of
+            # retry noise) keeps its CPU-tick activity credit, same as any other
+            # adapter's quiet child-command progress (e.g. a long test run).
+            if previous_process_activity_at is None:
+                worker.pop("last_process_activity_at", None)
+            else:
+                worker["last_process_activity_at"] = previous_process_activity_at
+            process_activity_advanced = False
+            process_activity_persisted = False
+        changed = process_activity_persisted or changed
         current_mode = worker_runtime_mode(worker)
         task_status = str(task.get("status") or "").lower()
         expected_completion_statuses = worker_expected_completion_statuses(config, worker, task)
@@ -4821,6 +5175,11 @@ def poll_workers(
             and current_mode == "execution"
             and not worker_matches_current_assignment(config, worker, task_map)
         )
+        if assignment_moved and alive:
+            in_grace, grace_changed = worker_in_handoff_grace(config, worker, now=now)
+            changed = grace_changed or changed
+            if in_grace:
+                assignment_moved = False
         priority_escalation = (
             worker.get("queue_event_id")
             and current_mode == "execution"
@@ -4993,10 +5352,21 @@ def poll_workers(
             if last_activity:
                 last_dt = datetime.fromisoformat(last_activity.replace("Z", "+00:00"))
                 stalled_for_seconds = (now - last_dt).total_seconds()
-                if worker.get("status") == "stalled" and stalled_for_seconds >= stall_after * 2:
+                if worker.get("status") == "stalled" and stalled_for_seconds >= terminate_stalled_after:
                     terminate_worker_pid(worker.get("pid"))
                     reason = f"Worker remained stalled for {int(stalled_for_seconds)} seconds and was terminated for redispatch."
-                    finalize_terminal_worker_outcome(config, state, worker, reason)
+                    # The watchdog may be the first code path to reap a worker
+                    # whose final log line is a real provider quota/auth error.
+                    # Let terminal finalization inspect that log and record its
+                    # provider pause; otherwise the task alone waits for chair
+                    # review while the unavailable lane keeps looking healthy.
+                    finalize_terminal_worker_outcome(
+                        config,
+                        state,
+                        worker,
+                        reason,
+                        allow_provider_pause=True,
+                    )
                     console_log(
                         f"worker terminated after extended stall: task={worker.get('task_id')} provider={worker.get('provider')} run={worker.get('run_id')}",
                         quiet=SUPERVISOR_LOG_QUIET,
@@ -5067,6 +5437,34 @@ def reconcile_queue_records(config: dict[str, Any], state: dict[str, Any]) -> bo
             changed = True
     return changed
 
+
+
+def worker_in_handoff_grace(
+    config: dict[str, Any],
+    worker: dict[str, Any],
+    *,
+    now: datetime | None = None,
+) -> tuple[bool, bool]:
+    """Whether a running worker whose task just moved on may finish its attempt.
+
+    Returns (in_grace, changed). An owner's handoff moves the task to review,
+    which makes the reviewer the dispatch target and the owner's own worker
+    look reassigned -- it was being killed within seconds of pushing, halfway
+    through its closing summary, so no result file was ever written. The
+    window is measured from the first poll that saw the move, not from the
+    worker's activity, so a worker cannot extend it.
+    """
+    grace_seconds = int(ready_dispatch_settings(config).get("handoff_grace_seconds", 120) or 0)
+    if grace_seconds <= 0 or worker.get("status") != "running":
+        return False, False
+    current = now or datetime.now(timezone.utc)
+    started = parse_runtime_timestamp(worker.get("handoff_grace_started_at"))
+    changed = False
+    if started is None:
+        started = current
+        worker["handoff_grace_started_at"] = current.replace(microsecond=0).isoformat().replace("+00:00", "Z")
+        changed = True
+    return (current - started).total_seconds() < grace_seconds, changed
 
 
 def worker_in_dispatch_cooldown(
@@ -5678,6 +6076,20 @@ def build_chair_review_message(
             path = config_path(config, key)
         except KeyError:
             continue
+        if key == "status_file":
+            # The canonical board is intentionally large. A chairman needs
+            # current task slices, not a multi-megabyte Read that can exhaust
+            # its context before it writes its decision packet. The dispatch
+            # brief already contains the actionable task, failure, pause, and
+            # blocked-task summary; use the status CLI only to inspect a
+            # specific task or status bucket that needs corroboration.
+            status_cli = CANONICAL_ROOT / "tools/development-orchestrator/bin/ai-status.sh"
+            machine_truth_lines.append(
+                "- ai-status slices: do not read the full board; use "
+                f"`{status_cli.resolve()} list --status <status>` or "
+                f"`{status_cli.resolve()} show <TASK-ID>` when more detail is required"
+            )
+            continue
         if key == "state_file":
             # Point the chair at the bounded chair-scoped digest, not the full
             # state.json — the latter exceeds the 256 KB worker Read cap under
@@ -5692,6 +6104,30 @@ def build_chair_review_message(
         machine_truth_lines.append(f"- {label}: `{path.resolve()}`")
     if not machine_truth_lines:
         machine_truth_lines.append("- configured machine-truth paths are unavailable in this test/config context")
+    emergency_recovery_guidance = ""
+    if reason == "reassignment_triage":
+        failing_names = {
+            str(record.get("agent") or "").strip()
+            for record in repeated_failure_records(state, status)
+            if str(record.get("agent") or "").strip()
+        }
+        report = provider_report if isinstance(provider_report, dict) else {}
+        dispatchable_names = [
+            task_agent_display_name(config, status, agent_id)
+            for agent_id in (config.get("agents", {}) or {})
+            if task_agent_display_name(config, status, agent_id)
+            and not is_agent_dispatch_paused(config, state, agent_id, provider_report=report)
+            and agent_supports_auto_delivery(config, report, agent_id)
+        ]
+        if len(dispatchable_names) == 1 and dispatchable_names[0] in failing_names:
+            emergency_recovery_guidance = (
+                "\n\nFull-deadlock recovery exception:\n"
+                "- Only one dispatch-capable lane remains, and it is the same lane as the repeated failure loop. "
+                "The provider health check is still ready, so this is a controlled chairman-approved retry, not a "
+                "pause clear. Emit a `dispatch_now` task action for the waiting task when the machine truth is "
+                "otherwise eligible; this action clears only that task's `awaiting_chair` guard. Do not emit a "
+                "provider clear or reassign to a paused lane.\n"
+            )
     return (
         "你是本輪 chairman，角色是 operational reviewer，不是主線實作者。\n\n"
         "請閱讀 canonical machine truth；若本次 cwd 是 isolated worktree，不要讀 worktree 內的 stale state copy。\n"
@@ -5750,7 +6186,8 @@ def build_chair_review_message(
         "- 若 provider/lane 顯示 auth、quota、capacity 或 repeated terminal degraded，不要把新工作派回該 lane；請優先用 reassignment_actions 把可改派的 owner/reviewer work 移到健康 lane。\n"
         "- 若任務 owner/reviewer 指到 `legacy alias`，那不是可執行 lane；請用 reassignment_actions 改到真實健康 lane。\n"
         "- 若資訊不足，保守輸出 blocked_by / recommended_focus，不要猜。\n\n"
-        "Pending approvals:\n"
+        + emergency_recovery_guidance
+        + "Pending approvals:\n"
         + "\n".join(approval_lines)
         + "\n\nRepeated failure loops:\n"
         + "\n".join(failure_lines)
@@ -5894,6 +6331,7 @@ def choose_chair_reviewer(
     candidates: list[tuple[str, str]] = []
     primary_work_candidates: list[tuple[str, str]] = []
     active_recovery_candidates: list[tuple[str, str]] = []
+    failing_recovery_candidates: list[tuple[str, str]] = []
     for agent_id, agent in (config.get("agents", {}) or {}).items():
         configured_display_name = str(agent.get("display_name") or agent.get("name") or agent_id).strip()
         display_name = task_agent_display_name(config, status, agent_id)
@@ -5921,6 +6359,14 @@ def choose_chair_reviewer(
         if not agent_supports_auto_delivery(config, provider_report, agent_id):
             continue
         if display_name in failing_agents:
+            # A repeated worker failure normally excludes that lane from chair
+            # selection so the chair cannot silently approve another retry.
+            # During a full deadlock, however, this can exclude the only
+            # healthy lane and leave the failure streak permanently awaiting a
+            # chair. Keep the lane as a last-resort recovery candidate; it is
+            # only selected after every non-failing lane has been rejected.
+            if allow_primary_work_fallback:
+                failing_recovery_candidates.append((normalized, display_name))
             continue
         if agent_has_dispatchable_primary_work(config, status, display_name, task_map):
             if allow_primary_work_fallback:
@@ -5928,7 +6374,7 @@ def choose_chair_reviewer(
             continue
         candidates.append((normalized, display_name))
     if not candidates and allow_primary_work_fallback:
-        candidates = primary_work_candidates or active_recovery_candidates
+        candidates = primary_work_candidates or active_recovery_candidates or failing_recovery_candidates
     if not candidates:
         return None
     rotation_index = int(state.setdefault("chair_review", {}).get("rotation_index", 0) or 0)
@@ -6289,32 +6735,75 @@ def apply_chair_reassignment_action(
     from_agent = str(action.get("from") or "").strip()
     to_agent = str(action.get("to") or "").strip()
     reason = str(action.get("reason") or "").strip()
+
+    # Every guard below used to be a bare `return False`. A chair decision that
+    # named a task the board does not have was therefore accepted, recorded as
+    # `last_decision`, and applied to nothing, in silence: no activity log, no
+    # guard entry, no queue event. From the outside that is indistinguishable
+    # from a supervisor that has stopped consuming decisions, and in September
+    # 2026 it was read as exactly that for several hours while the real cause
+    # was a chair copying worker-run labels out of `dispatch_pauses` into
+    # `task_id`. A rejected action has to say why it was rejected.
+    def reject(detail: str) -> bool:
+        write_activity_log(
+            config,
+            {
+                "type": "chair_reassignment_rejected",
+                "task_id": task_id or None,
+                "role": role or None,
+                "from_agent": from_agent or None,
+                "to_agent": to_agent or None,
+                "message": f"Rejected chair reassignment: {detail}",
+            },
+        )
+        return False
+
     if not task_id or role not in {"owner", "reviewer"} or not from_agent or not to_agent or not reason:
-        return False
+        return reject(
+            "action is malformed; task_id/from/to/reason must be non-empty and "
+            f"role must be owner or reviewer (got role={role!r})."
+        )
     if to_agent not in known_agent_display_names(config):
-        return False
+        return reject(f"target agent {to_agent} is not a known agent display name.")
     if is_agent_dispatch_paused(config, state, to_agent, provider_report=provider_report):
-        return False
+        return reject(f"target agent {to_agent} is dispatch-paused, so it cannot take the work.")
     status = load_status(config)
     task = next((item for item in status.get("tasks", []) or [] if str(item.get("id") or "") == task_id), None)
-    if task is None or not task_is_dispatch_eligible_for_agent(task, to_agent):
-        return False
+    if task is None:
+        archived = status.get("archived_task_ids", []) or []
+        if isinstance(archived, list) and task_id in {str(item) for item in archived}:
+            return reject(f"{task_id} is archived; an archived task cannot be reassigned.")
+        return reject(
+            f"{task_id} is not on the task board. Check that the id is a board task id "
+            "and not a worker run label or a dispatch-pause record."
+        )
+    if not task_is_dispatch_eligible_for_agent(task, to_agent):
+        return reject(f"{task_id} is not dispatch-eligible for {to_agent}.")
     current_owner = str(task.get("owner") or "").strip()
     current_reviewer = str(task.get("reviewer") or "").strip()
     if role == "owner" and to_agent == current_reviewer:
-        return False
+        return reject(f"{to_agent} already reviews {task_id}; owner and reviewer must differ.")
     if role == "reviewer" and to_agent == current_owner:
-        return False
+        return reject(f"{to_agent} already owns {task_id}; owner and reviewer must differ.")
+    task_status = str(task.get("status") or "").lower()
     if role == "reviewer":
-        if str(task.get("status") or "").lower() not in {"todo", "in_progress", "review"}:
-            return False
-        if str(task.get("reviewer") or "") != from_agent:
-            return False
+        if task_status not in {"todo", "in_progress", "review"}:
+            return reject(
+                f"reviewer reassignment needs {task_id} in todo/in_progress/review, but it is {task_status or 'unset'}."
+            )
+        if current_reviewer != from_agent:
+            return reject(
+                f"{task_id} reviewer is {current_reviewer or 'unset'}, not the {from_agent} the action hands off from."
+            )
     else:
-        if str(task.get("status") or "").lower() not in {"backlog", "todo", "in_progress"}:
-            return False
-        if str(task.get("owner") or "") != from_agent:
-            return False
+        if task_status not in {"backlog", "todo", "in_progress"}:
+            return reject(
+                f"owner reassignment needs {task_id} in backlog/todo/in_progress, but it is {task_status or 'unset'}."
+            )
+        if current_owner != from_agent:
+            return reject(
+                f"{task_id} owner is {current_owner or 'unset'}, not the {from_agent} the action hands off from."
+            )
     message = brief_reason_text(
         f"Chairman reassigned {role} from {from_agent} to {to_agent}: {reason}",
         max_length=280,
@@ -6452,6 +6941,8 @@ def blocked_task_triage_action(
     status: dict[str, Any],
     task: dict[str, Any],
 ) -> tuple[str, str | None]:
+    if task.get("external_gate"):
+        return "wait_for_parent_resolution", None
     task_id = str(task.get("id") or "").strip()
     if not task_id:
         return "create_unblock_task", None
@@ -6793,6 +7284,8 @@ def create_chair_unblock_task(
     parent = task_map.get(parent_id)
     if parent is None or str(parent.get("status") or "").lower() != "blocked":
         return False
+    if parent.get("external_gate"):
+        return False
     # Recursion base case: a blocked unblock/repair task or auto-generated helper
     # must NOT spawn another governance
     # child. Without this, a blocked `X-UNBLOCK` triages into `X-UNBLOCK-UNBLOCK`
@@ -6940,6 +7433,8 @@ def apply_chair_parent_resume_action(
     task_map = task_index_from_status(config, status)
     parent = task_map.get(task_id)
     if parent is None or str(parent.get("status") or "").lower() != "blocked":
+        return False
+    if parent.get("external_gate"):
         return False
 
     dependency_done_statuses = {
@@ -7720,6 +8215,14 @@ def break_full_deadlock(
     settings = config.get("supervisor", {})
     if not settings.get("deadlock_breaker_enabled", True):
         return False
+    recovery = state.get("deadlock_recovery", {})
+    if recovery.get("operator_attention") and _has_any_dispatchable_lane(config, state):
+        recovery.pop("operator_attention")
+        write_activity_log(config, {
+            "type": "deadlock_recovered",
+            "message": "A lane is dispatchable again; cleared stale all-lanes-paused attention.",
+        })
+        return True
     active_statuses = {str(v) for v in ready_dispatch_settings(config).get("active_worker_statuses", [])}
     active_agents, _ = active_worker_indexes(state, active_statuses)
     if active_agents:

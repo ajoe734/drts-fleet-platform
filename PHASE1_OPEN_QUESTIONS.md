@@ -4,9 +4,88 @@ These questions are intentionally isolated here so the repo does not silently in
 
 ## Open Items
 
-_None as of 2026-08-20._
+### Q-SR-PUSH-001 — provider/device contract and shared writer authorization
 
-Every question on this board has been answered. Worth noting how, because the
+Supervisor/Chairman must route the passenger push provider and pseudonymous
+subject-to-device contract to the product/contract decision owner; an adapter
+worker cannot infer this from Identity Service's driver/session device binding.
+SR-CONTRACT-001 owner Codex must receive explicitly authorized receipt/claim
+contract and migration-allocation scope before implementing that follow-up.
+Supervisor must authorize the parent's service/repository writes and sequence
+overlapping writers. UV-EXEC-006 is already done; it is not the remaining blocker.
+Keep SR-PUSH-001 blocked pending these recorded decisions, retain C023/N10 and
+the separate SR-LIVE-PUSH-001 device evidence gate. No scope cut or provider
+selection is approved by this routing record. See the
+[decision packet and concrete resume steps](support/unblock/SR-PUSH-001/SR-PUSH-001-UNBLOCK-PLANNING-DECISION.md).
+
+### Q-SR-QA-WEBHOOK-TENANT-BINDING-001 — repair scope authorization pending
+
+> Historical routing request, superseded 2026-09-13: canonical task state now records `superseded_by_verified_successors`; completed SR-AUTH-SELECTOR-001 and SR-QA-WEBHOOK-001-ACCEPTANCE-RUNNER replace the old candidate. No new permission or rerun of the old candidate is needed. Its failed evidence remains historical; the parent retains its C111–C115 gates.
+
+Supervisor/Claude must authorize product write scopes and IAM/tenant overlap
+sequencing for `SR-QA-WEBHOOK-001-FIX-TENANT-BINDING` (owner Codex, reviewer
+Gemini), and add the repair as a dependency of `SR-QA-WEBHOOK-001` acceptance.
+The required cross-tenant rejection remains unchanged; no scope cut or new
+entitlement is approved. Keep the repair blocked with `waiting_for: Claude`
+until machine truth records the authorization. This is follow-up on the existing
+repair task, not a new implementation assignment. See the
+[decision, proposed scopes, and resume gate](support/unblock/SR-QA-WEBHOOK-001-FIX-TENANT-BINDING/SR-QA-WEBHOOK-001-FIX-TENANT-BINDING-UNBLOCK-PLANNING-DECISION.md).
+
+
+### Q-SR-ENV-COPY-001 — runtime source and integration scope routing
+
+Supervisor/Chairman must authorize the runtime badge wiring scopes and sequence
+overlapping shell/deployment work for parent `SR-ENV-COPY-001` (Codex / Codex2).
+The existing task contract already requires authoritative runtime environment,
+no domain guessing, and no production/healthy claim for unknown data. Retain
+that acceptance. The parent can resume authorized catalog cleanup and scoped
+resolver work; full acceptance still requires actual render integration.
+Before wiring, record the existing deployment configuration producer, its
+server/client delivery boundary and allowed values; unresolved source selection
+returns to Supervisor/Chairman, not an invented environment variable.
+This is a follow-up on the existing parent, not a new implementation task or
+scope grant. See [decision, paths and resume gate](support/unblock/SR-ENV-COPY-001/SR-ENV-COPY-001-UNBLOCK-PLANNING-DECISION.md).
+
+### Q-SR-QA-TENANT-001 — UAT provisioning follow-up, no product scope cut
+
+The planning triage found no unresolved product/contract choice in the reported
+blocker. PRD §9.1.2, service contracts §3.2 and the parent execution task retain
+the full tenant acceptance matrix. Supervisor/Gemini must coordinate provisioned
+disposable tenants and legitimate writable/read-only identities. The current parent
+uses `DRTS_UAT_ENV`, `DRTS_UAT_API_URL` (origin), tenant A/B IDs and tokens,
+and `DRTS_UAT_USER_EMAIL`; record deployment SHA, identity expiry/refresh and
+DB teardown ownership. Current parent owner Codex2 and reviewer Codex resume
+scoped test development and, once access exists, real write/readback verification.
+This remains an open environment follow-up on the registered parent, not a new
+implementation task or scope grant. Preserve useful in-progress test work; helper
+merge cannot clear the live acceptance gate. See the [planning decision and resume conditions](support/unblock/SR-QA-TENANT-001/SR-QA-TENANT-001-UNBLOCK-PLANNING-DECISION.md).
+
+### Q-SR-QA-WEBHOOK-001 — tenant repair scope and webhook deadline
+
+Existing tenant isolation rules already forbid the API key metadata exposure
+reported by `SR-QA-WEBHOOK-001`; no product waiver is implied. Supervisor/Claude
+must authorize and sequence the existing P0
+`SR-QA-WEBHOOK-001-FIX-TENANT-BINDING`, add it to the parent's dependencies,
+and route the still-unspecified default webhook transport deadline contract.
+Codex owns parent/repair execution; Gemini reviews them. Preserve all C111–C115
+acceptance and the parent's blocked state, including usage and external evidence
+gates. See the [contract basis, proposed scope and resume steps](support/unblock/SR-QA-WEBHOOK-001/SR-QA-WEBHOOK-001-UNBLOCK-PLANNING-DECISION.md).
+
+Open remediation follow-ups as of 2026-09-08: `Q-SR-OPS-SHELL-001`, `Q-SR-BANK-002`, `Q-SR-ENTERPRISE-SEARCH-001`, `Q-SR-FLEET-DATA-001`, `Q-SR-DRIVER-WEB-001`, `Q-SR-ENTERPRISE-FORM-001`, `Q-SR-ENTERPRISE-DATA-001`, `Q-SR-PROOF-001`, `Q-SR-REPORT-001`.
+
+### Q-SR-ENTERPRISE-FORM-001 — theme precedence and shared scope authorization
+
+Supervisor/Chairman must confirm whether enterprise canvas branding or tenant
+realm tokens govern the shared enterprise theme, then authorize the theme and
+three existing translation keys with overlap/dependency sequencing. Parent owner
+Codex2 and reviewer Codex preserve full acceptance and the blocked state until
+that authorization or an accepted, merged shared-theme producer exists.
+`SR-DESIGN-001` covers leave/academy/Host contracts and is not an established
+theme dependency. This is an explicit follow-up on the existing parent, not a
+scope grant or a new registered implementation task. See the
+[decision routing and resume gate](support/unblock/SR-ENTERPRISE-FORM-001/SR-ENTERPRISE-FORM-001-UNBLOCK-PLANNING-DECISION.md).
+
+The original fifteen questions on this board were answered. Worth noting how, because the
 distribution was not what the board implied: of the fifteen, four were closed by
 a human decision, four were already answered by an accepted decision or a
 canonical document and had simply never been marked, four turned out to be
@@ -21,13 +100,119 @@ the code or an accepted packet already answers it.
 
 | ID  | Question | Source / Module | Named Owner | Decision Route | Interim Default |
 | --- | -------- | --------------- | ----------- | -------------- | --------------- |
+| Q-SR-OPS-SHELL-001 | Confirm the dispatch audit resource-context receiver contract and authorize the missing sender/receiver write scopes. | SR-OPS-SHELL-001; dispatch audit CTA; PRD §13.3; service contracts §3.13 | Codex (parent owner); Gemini (reviewer) | Supervisor first reviews scope overlap/dependencies; Codex and Gemini confirm existing receiver/API semantics. Escalate to human product owner only if acceptance must be reduced. See [routing record](support/unblock/SR-OPS-SHELL-001/SR-OPS-SHELL-001-UNBLOCK-PLANNING-DECISION.md). | Keep full parent acceptance and blocked state; no invented query contract or unauthorized shared-file edits. Reuse existing runtime URL resolver after scope authorization. |
+
+### Q-SR-BANK-002 — scope authorization pending
+
+This item remains open; it is a routing decision, not a new grant of financial access.
+Supervisor/Claude must authorize shared-file scope and dependency sequencing for
+`SR-BANK-002` (owner Gemini, reviewer Codex): central tenant settlement route policy
+and bank read-model failure behavior. Preserve the parent acceptance and blocked
+state. Do not broaden all roles to bypass 403 or return seed statements after API
+failure. The existing completed `SR-IAM-001` and `SR-BANK-001` are provenance,
+not authorization to edit their shared files under the parent.
+See [decision and executable follow-up](support/unblock/SR-BANK-002/SR-BANK-002-UNBLOCK-PLANNING-DECISION.md).
+
+### Q-SR-ENTERPRISE-SEARCH-001 — producer and contract routing pending
+
+This question remains **open**: Supervisor/Chairman must register or identify the
+missing booking-filter producer, authorize backend and shared contract/client
+scopes with dependency ordering, and route exact date/passenger/status/pagination
+semantics to contract review. Parent owner Codex2 and reviewer Codex retain the
+full acceptance; no scope cut or frontend-only substitute is approved. The parent
+stays blocked until the producer is accepted and merged. See the
+[decision routing record](support/unblock/SR-ENTERPRISE-SEARCH-001/SR-ENTERPRISE-SEARCH-001-UNBLOCK-PLANNING-DECISION.md)
+for evidence, named follow-ups, and the resume gate. This is tracked follow-up on
+the existing parent, not a claim that a new producer is already on the task board.
+
+### Q-SR-FLEET-DATA-001 — shared scope and detail surface routing pending
+
+Supervisor/Chairman must authorize the parent's missing training/cases page and
+shared table/copy scopes, with explicit sequencing against `SR-FLEET-CASE-001`
+and `SR-ACADEMY-FE-001`. Parent owner Codex and reviewer Codex2 retain full
+acceptance: unknown document/training state is not completed, and unintegrated
+data must be visible. Do not make FLEET-DATA depend on FLEET-CASE: CASE already
+depends on DATA. Confirm the intended authorized detail surface before adding
+a new screen. See the [routing decision and resume gate](support/unblock/SR-FLEET-DATA-001/SR-FLEET-DATA-001-UNBLOCK-PLANNING-DECISION.md).
+This is an open supervisor follow-up on the existing parent, not scope approval
+or a reduction in acceptance. The parent remains blocked pending authorization;
+its existing CSV/filter work can resume within current scopes when dispatched.
+
+### Q-SR-DRIVER-WEB-001 — Metro scope authorization pending
+
+Owner: Codex2 (parent); reviewer: Codex; decision route: supervisor scope review.
+The parent reports SQLite WASM resolution failure after native-map isolation.
+Authorize the smallest driver Metro configuration scope, after checking overlapping
+writers and recording necessary dependencies in machine truth, or register a
+separate producer with a parent dependency. This entry does not grant that scope.
+Preserve all three web-route checks and native import regression acceptance;
+do not replace the offline queue or waive browser checks to obtain a green export.
+The parent remains blocked until authorization. See the
+[decision and continuation record](support/unblock/SR-DRIVER-WEB-001/SR-DRIVER-WEB-001-UNBLOCK-PLANNING-DECISION.md)
+for source evidence, exact proposed path and validation gates. No new product
+semantics or acceptance scope cut is approved.
+
+### Q-SR-ENTERPRISE-DATA-001 — shared scope and contact contract routing pending
+
+Owner: Codex2 (parent); reviewer: Codex. Supervisor/Chairman must adjudicate
+the shared detail 404, support action, and theme scopes and record dependency
+ordering before parent UI completion. Contract reviewer Codex must confirm an
+authorized driver/support contact source or route an explicit unavailable-contact
+acceptance decision. Passenger/onsite contact is not driver contact. Preserve
+the full parent acceptance; history repair does not grant scope or clear this
+gate. The parent remains blocked pending these decisions, tracked on the
+existing parent task rather than an unregistered producer. See the
+[routing record and concrete resume gate](support/unblock/SR-ENTERPRISE-DATA-001/SR-ENTERPRISE-DATA-001-UNBLOCK-PLANNING-DECISION.md).
+
+### Q-SR-PROOF-001 — proof contract and scope routing pending
+
+Supervisor/Chairman must authorize repository/module/proof storage-scanner
+scopes, record SR-CONTRACT-001 ordering or an explicit reviewed alternative,
+route the missing proof UI states, and select an unused recovery branch.
+Parent owner Codex and reviewer Gemini retain all proof validation, readback,
+concurrency and durable receipt acceptance. PRD §9.8.4 and service contracts
+§3.11 already establish product ownership; this open item concerns the missing
+implementation allocation, not permission to accept arbitrary proof IDs.
+SR-CONTRACT-001 is currently todo; its owner Gemini must supply the reviewed
+contract/persistence allocation before dependent implementation. The parent is
+`blocked` as of 2026-09-08T16:35:21Z, waiting for Gemini to route the remaining
+authorizations to Supervisor/Chairman; history recovery did not supply them.
+The [resume gate](support/unblock/SR-PROOF-001/SR-PROOF-001-UNBLOCK-PLANNING-DECISION.md)
+still applies to dependent implementation. This follow-up is tracked on the existing parent; any separate
+producer must first be registered by the supervisor in machine truth.
+
+### Q-SR-REPORT-001 — ordinary report shared-file scope pending
+
+Supervisor/Chairman must authorize the parent's shared format declaration in
+`packages/contracts/src/index.ts` and affected assertions in
+`tests/unit/reporting-filing.test.ts`, with overlapping writer dependencies,
+or register a coordinated producer. Parent owner Codex and reviewer Gemini retain
+full CSV/XLSX/PDF acceptance under PRD §9.5.6 and the filing-byte exclusion under
+§9.10.2. No product scope cut is needed. Keep SR-REPORT-001 blocked until scope
+and sequencing are recorded in machine truth; history recovery alone does not
+satisfy that gate. See the [evidence, routing decision and resume gate](support/unblock/SR-REPORT-001/SR-REPORT-001-UNBLOCK-PLANNING-DECISION.md).
+This is an explicit follow-up on the existing parent, not authorization to edit
+shared files or a claim that a new producer task already exists.
+
+### Q-SR-OPS-PROOF-001 — preparation handoff and live resource sequencing pending
+
+Supervisor/Chairman must record the preparation-versus-live acceptance boundary
+for SR-OPS-PROOF-001 (Codex / Codex2) and route isolated resource preparation
+through Gemini, owner of SR-LIVE-OPS-001. LIVE-OPS already depends on OPS-PROOF;
+do not add the reverse dependency or require completed live receipts to begin
+resource coordination. Preserve both acceptance sets until the supervisor records
+a reviewed allocation; no preparation-only scope cut is approved by this helper.
+The parent remains blocked pending that decision and retrievable authorized
+inputs. This is follow-up on the existing parent, not a new unregistered task.
+See the [decision route and resume gate](support/unblock/SR-OPS-PROOF-001/SR-OPS-PROOF-001-UNBLOCK-PLANNING-DECISION.md).
 
 ## Resolved Items
+
 
 | ID     | Resolution                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     | Accepted Decision                                                                                                                                                  |
 | ------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ---------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Q-007  | Already answered by an accepted canonical document, and this question was restating a rule rather than raising one. `CANONICAL_DOCUMENT_MAP.md` section 4's product-semantics precedence list ranks `phase1_prd_detailed_v1.md` third and `phase1_service_contracts_v1.md` fifth, while item 8 is "OpenAPI examples, **UI skeletons**, generated artifacts, and local placeholders" — last. So when a booking or complaint rule conflicts with an existing UI placeholder, the placeholder loses: change the skeleton, never bend the contract. That is the interim default this question carried, and it was already binding.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 | `CANONICAL_DOCUMENT_MAP.md` section 4, precedence item 8                                                                                                           |
-| Q-013  | The interim default is implemented. One shared frontend codebase with distinct per-partner entry contexts: `apps/partner-booking-web/app/[tenantSlug]/` is a dynamic route with `(authenticated)` and `(public)` groups, `entrySlug` carries the context through the contracts, and two bank entries already coexist to prove the model — `bank-demo-alpha-airport` and `bank-demo-beta-airport`, alongside `ctbc` and `program-ctbc-world-elite`. No repository is forked per bank, which is what the question asked to avoid. **Implemented but not enabled**: Partner Booking is paused and returns HTTP 404, gated on `EXT-001` bank credentials, so the topology is verified in code rather than in production.                                                                                                                                                                                                                                                                                                                                                                                                           | Code-backed closure, 2026-08-20 conformance follow-up                                                                                                              |
+| Q-013  | The interim default is implemented. One shared frontend codebase with distinct per-partner entry contexts: `apps/partner-booking-web/app/[tenantSlug]/` is a dynamic route with `(authenticated)` and `(public)` groups, `entrySlug` carries the context through the contracts, and two bank entries already coexist to prove the model — `bank-demo-alpha-airport` and `bank-demo-beta-airport`, alongside `ctbc` and `program-acme-world-elite`. No repository is forked per bank, which is what the question asked to avoid. **Implemented but not enabled**: Partner Booking is paused and returns HTTP 404, gated on `EXT-001` bank credentials, so the topology is verified in code rather than in production.                                                                                                                                                                                                                                                                                                                                                                                                           | Code-backed closure, 2026-08-20 conformance follow-up                                                                                                              |
 | Q-014  | Implemented. Fourteen routes carry a `partner/` prefix behind `@RequireRealms("partner")` in `tenant-partner.controller.ts`, including `partner/ingress/handoff`, `partner/ingress/referral-embed-handoff`, `partner/eligibility/verify`, `partner/entries/:entrySlug`, and the four `partner/referral/*` surfaces. The partner realm has its own authentication mode (`partner_api_key`) rather than borrowing tenant-admin auth, which is exactly what the interim default required.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         | Code-backed closure, 2026-08-20 conformance follow-up                                                                                                              |
 | Q-015  | Implemented, and both options exist rather than one being chosen. `PARTNER_ELIGIBILITY_MODES` is `["none", "bank_card_inline", "reference_required"]`, configurable per entry: `bank_card_inline` verifies synchronously before booking creation, and `reference_required` accepts a partner-issued proof resolved by `ReferenceTokenEligibilityAdapter` (`issuer_reference_lookup_v1`). Both adapters sit side by side under `tenant-partner/`. The interim default — backend-visible eligibility truth before booking, by direct verify or reference-backed proof only — is what shipped.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    | Code-backed closure, 2026-08-20 conformance follow-up                                                                                                              |
 | Q-005  | **Moot, not deferred (2026-08-20).** The question asked whether filing artifacts need storage-level Object Lock or whether an immutable manifest plus hash suffices. It presumed artifacts. There are none: `reporting-filing` writes no bytes, `apps/api` has no object-store client, `DEFAULT_CONTROLLED_DOWNLOAD_HOST` is a non-resolving `.local` host with no route serving it, and the `checksum` hashes the manifest listing rather than file content. Phase 1 will not build the generator — the 立案 registration was filed externally — so there is nothing to lock. If a future wave produces real artifacts the order is generator, then object store, then an Object Lock evaluation, and this question reopens at that third step.                                                                                                                                                                                                                                                                                                                                                                               | `docs/01-decisions/SD-DP-20260820-012-phase1-regulatory-output-scope.md`, accepted 2026-08-20                                                                      |
@@ -37,7 +222,7 @@ the code or an accepted packet already answers it.
 | Q-004  | Forwarded orders keep a mirrored completion projection only (`completed_synced`); no local `trip completed` truth entity exists or is required. Answered by an accepted decision rather than left open: `SD-DP-20260817-010` (`GAP-CONF-04`) ratifies the external platform as the sole authoritative state machine for trip execution, with DRTS as relay and mirror, and expresses in-flight execution through `confirmed_by_platform` plus `authoritativeSnapshot.nativeStatus`. That packet's decision route already named `GAP-CONF-04` as the resolving vehicle.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         | `docs/01-decisions/SD-DP-20260817-010-state-models-conformance-resolution.md`, accepted 2026-08-19                                                                 |
 | Q-003  | Phase 1 driver payout stops at statement and reimbursement; **no wallet ledger, and withdrawal is not enabled**. There is no contradiction to resolve, contrary to an earlier reading of this question: PRD §9.4.8 item 5 already reads "可提領（若平台開放）" — a platform-gated option, not a requirement — and Phase 1 does not open it. Service contracts §3.11 ("driver wallet 僅為讀模型，不作真值帳本") states the same position. Implementation matches both: settlement is statement-driven (`payoutStatus` is a field on the driver statement, `pending` -> `paid`), there is no balance entity, and `apps/driver-app/app/earnings.tsx` is a read view over statements covering PRD §9.4.8 items 1-4 (日/週/月 earnings, service fee, subsidy, statement). Standing reason not to revisit casually: holding driver balances would make the platform a custodian of user funds, which in Taiwan engages 電子支付機構管理條例 — a licensing question, not an engineering one. Reopening requires that regulatory answer first.                                                                                         | Code-backed closure, 2026-08-19 conformance follow-up; PRD §9.4.8 and contracts §3.11 already agree, so no L1 revision is required                                 |
 | Q-005a | Phase 1's filing-artifact durability commitment is settled at the application and data layer: an immutable manifest carrying `manifestHash` and `checksum` with `immutable: true` (`reporting-filing.service.ts:116-121`), plus controlled signed download per contracts §3.12. That is the Phase 1 answer; the storage-lock question is split out as the narrowed Q-005. One consistency gap is recorded rather than assumed away: `GAP-CONF-03` closed the identical question for audit logs by moving immutability out of application convention into a database trigger (`V0080__audit_log_immutability.sql`), on the reasoning that a code convention cannot constrain the people who can change code. `admin.phase1_filing_packages` has no equivalent, and its audience is a regulator. Logged in the synchronisation backlog below.                                                                                                                                                                                                                                                                                    | Code-backed closure, 2026-08-19 conformance follow-up                                                                                                              |
-| Q-001  | **Yes — the callcenter console needs a multi-order-per-call journey** (decided 2026-08-19). One call may create more than one order. Recorded with a correction: an earlier reading of this question said the data layer had already settled 1:n and only the UI was open. It had not. The relationship is modelled with opposite cardinalities in two places — `ops.orders.call_id` (`V0006:29`) is nullable with no unique constraint and permits many orders per call, while `crm.call_sessions.linked_order_id` (`V0007:11`) is a single FK and can acknowledge only one. `linkedOrderId` is singular in `packages/contracts/src/index.ts:4439,4463`, and `ops-console-web` blocks a second order through a `linked_order_exists` disable reason that has **no server-side counterpart** — so a second order created through the API today succeeds and sets `call_id`, while the session surfaces only one. Implementing this decision therefore spans schema, contracts, service, and UI, not UI alone.                                                                                                                  | service contracts §10.1 (`callcenter` + `owned-mobility`)                                                                                                          | `Codex` (Contracts & Schema) | Implementation, not a further decision: make the session-to-order relationship 1:n consistently across the four layers above, and give the console a journey for it |
+| Q-001 | **Latest user decision, 2026-09-13: one call may create at most one order; prioritize operational launch.** This supersedes the same-day earlier 1:N answer. Keep existing single-order schema constraints, linkedOrderId contract and console journey; preserve request/intent idempotency and authorization. No multi-order migration or UI expansion is in the initial release scope. | service contracts §10.1 (`callcenter` + `owned-mobility`); current SA/SD §3.7–3.8 | `Codex` (Contracts & Schema) | Product decision settled; verify the existing single-order flow in current QA. Multi-order task withdrawn and removed from release dependencies. |
 | Q-006  | Passenger App / Web is deferred beyond Phase 1 closeout. Reopening requires a human topology decision (standalone consumer app vs embedded web route vs third-party white-label). Current Phase 1 demand entry relies on third-party ride-hailing, partner / tenant channel, and operator manual entry.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        | `support/sidecars/MSC-P1-001/MSC-P1-001-SURFACE-DECISION-PACKET.md` §Decision 1 (also `docs/01-decisions/SD-DP-20260422-001-phase1-entry-and-receipt-topology.md`) |
 | Q-008  | Dedicated concierge / call-point portal surface is deferred beyond Phase 1. Callcenter booking workflow is complete in `ops-console-web` for Phase 1. Reopening dedicated concierge portal requires a human topology decision (extend ops-console-web with restricted role vs dedicated frontend app).                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         | `support/sidecars/MSC-P1-001/MSC-P1-001-SURFACE-DECISION-PACKET.md` §Decision 2 (also `docs/01-decisions/SD-DP-20260422-001-phase1-entry-and-receipt-topology.md`) |
 | Q-009  | Phase 1 removes first-party `Passenger App / Web` from the current completion bar. Demand entry is third-party ride-hailing, partner / tenant channel, and operator / backoffice manual entry.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 | `docs/01-decisions/SD-DP-20260422-001-phase1-entry-and-receipt-topology.md`                                                                                        |
@@ -49,7 +234,7 @@ the code or an accepted packet already answers it.
 
 - 汽車運輸業管理規則 §91(4) requires the operator to give 公路主管機關 query and download access to operational data. The platform has `regulatory:read` / `regulatory:write` scopes and a regulator-case export surface, but that controller is `@RequireRealms("platform")` — there is no regulator realm, so an authority cannot query directly and platform staff must export on its behalf. Whether that satisfies the article is a compliance judgement, not an engineering one. Surfaced 2026-08-20. Owner: `Gemini` (Infra & Compliance).
 
-- ~~`crm.call_sessions.linked_order_id` is a single FK while `ops.orders.call_id` permits many orders per call.~~ **Closed 2026-08-23** by `V0082__call_session_order_cardinality.sql`: a partial unique index on `ops.orders(call_id)` makes the order side state what Q-001 decided, with a pre-check that names offending rows rather than failing on a bare index violation.
+- **Q-001 multi-order implementation withdrawn, 2026-09-13 (latest instruction).** After the earlier 1:N answer, the user explicitly said 「改回一通電話只能一張訂單」 and 「先做到能夠上線營運」. Keep V0082/V0088 call uniqueness, the existing voice intent fence and single-order UI. `SR-CALL-MULTIORDER-20260913` is retained only as a withdrawn historical record, with no implementation scopes; it no longer blocks `SR-RELEASE-001`. Verify retry/concurrency/recording/tenant isolation through the existing single-order QA. No multi-order product change or migration was executed. The superseded proposal is preserved in the local discussion snapshot; current design is inventory §3.7–3.8.
 
 - ~~Completed filing packages carry an application-level `immutable: true` flag but no database-level protection.~~ **Closed 2026-08-23** by `V0083__filing_package_completed_immutability.sql`. Not append-only: the repository upserts a package through queued -> running -> completed, so the trigger freezes a row only once `status` is `completed`, and blocks TRUNCATE outright.
 

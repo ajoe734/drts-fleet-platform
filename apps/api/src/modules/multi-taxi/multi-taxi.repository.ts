@@ -13,6 +13,7 @@ import type {
   PassengerPushDeliveryOutcome,
   PassengerRideAccessToken,
   PassengerTripRatingRecord,
+  PushProviderAckState,
 } from "@drts/contracts";
 
 import { DatabaseService } from "../../common/db";
@@ -121,6 +122,37 @@ export interface PassengerRatingReviewRepositoryQuery {
   page: number;
   pageSize: number;
 }
+
+type PushDeliveryClaimRow = QueryResultRow & {
+  fence_token: number;
+};
+
+export interface PushDeliveryClaimGranted {
+  claimed: true;
+  fenceToken: number;
+}
+
+export interface PushDeliveryClaimDenied {
+  claimed: false;
+}
+
+export type PushDeliveryClaimOutcome =
+  | PushDeliveryClaimGranted
+  | PushDeliveryClaimDenied;
+
+export interface RecordPushDeliveryOutcomeInput {
+  outboxId: string;
+  passengerSubjectRef: string;
+  fenceToken: number;
+  providerName: string | null;
+  providerAckState: PushProviderAckState;
+  providerMessageRef: string | null;
+  deliveryOutcome: PassengerPushDeliveryOutcome;
+}
+
+export type RecordPushDeliveryOutcomeResult =
+  | { recorded: true; replayed: boolean }
+  | { recorded: false; reason: "fence_lost" };
 
 export interface PassengerRatingReviewRepositoryDetail {
   rating: PassengerTripRatingRecord;
@@ -376,6 +408,168 @@ export class MultiTaxiRepository {
         outcome.status === "delivered" ? outcome.deliveredAt : null,
       ],
     );
+  }
+
+  /**
+   * Acquires an exclusive, leased claim on one outbox row before a real push
+   * attempt so a concurrent or restarted worker cannot send the same
+   * notification twice. An already-live, unexpired lease is never silently
+   * reassigned: the caller observes `claimed: false` and must back off
+   * instead of sending (V0099 table invariant).
+   */
+  async claimPushDeliveryRow(
+    outboxId: string,
+    passengerSubjectRef: string,
+    workerId: string,
+    leaseSeconds: number,
+  ): Promise<PushDeliveryClaimOutcome> {
+    if (!this.isEnabled()) {
+      return { claimed: true, fenceToken: 1 };
+    }
+
+    const result = await this.databaseService!.query<PushDeliveryClaimRow>(
+      `
+        INSERT INTO ops.phase1_push_delivery_claims (
+          outbox_id, passenger_subject_ref, worker_id, claim_state,
+          fence_token, lease_expires_at, claimed_at
+        ) VALUES (
+          $1, $2, $3, 'claimed', 1, now() + ($4 || ' seconds')::interval, now()
+        )
+        ON CONFLICT (outbox_id) DO UPDATE SET
+          passenger_subject_ref = EXCLUDED.passenger_subject_ref,
+          worker_id = EXCLUDED.worker_id,
+          claim_state = 'claimed',
+          fence_token = ops.phase1_push_delivery_claims.fence_token + 1,
+          lease_expires_at = EXCLUDED.lease_expires_at,
+          claimed_at = now()
+        WHERE
+          ops.phase1_push_delivery_claims.claim_state != 'claimed'
+          OR ops.phase1_push_delivery_claims.lease_expires_at < now()
+        RETURNING fence_token
+      `,
+      [outboxId, passengerSubjectRef, workerId, leaseSeconds],
+    );
+    const row = result.rows[0];
+    return row
+      ? { claimed: true, fenceToken: row.fence_token }
+      : { claimed: false };
+  }
+
+  /**
+   * Best-effort release after a failed provider attempt, so the next
+   * scheduled retry is not blocked until the lease naturally expires. A
+   * stale fence_token (lease already reclaimed by someone else) affects
+   * zero rows, which is the correct outcome: whoever reclaimed it owns the
+   * row now.
+   */
+  async releasePushDeliveryClaim(outboxId: string, fenceToken: number) {
+    if (!this.isEnabled()) {
+      return;
+    }
+    await this.databaseService!.query(
+      `
+        UPDATE ops.phase1_push_delivery_claims
+        SET claim_state = 'released'
+        WHERE outbox_id = $1 AND fence_token = $2
+      `,
+      [outboxId, fenceToken],
+    );
+  }
+
+  /**
+   * Durably records one provider acknowledgement: the receipt (keyed by a
+   * server-derived `outboxId:fenceToken` dedupe key so a retried write for
+   * the same attempt cannot double-insert), the outbox row's final status,
+   * and the claim release — all in one transaction. If the fence_token has
+   * moved on (another worker reclaimed this row while this write was in
+   * flight), the whole write is rejected rather than silently overwriting
+   * that worker's attempt; the caller must treat `recorded: false` as an
+   * unresolved delivery state, never as success.
+   */
+  async recordPushDeliveryOutcome(
+    input: RecordPushDeliveryOutcomeInput,
+  ): Promise<RecordPushDeliveryOutcomeResult> {
+    if (!this.isEnabled()) {
+      return { recorded: true, replayed: false };
+    }
+
+    const client = await this.databaseService!.connect();
+    try {
+      await client.query("BEGIN");
+      const claimResult = await client.query<PushDeliveryClaimRow>(
+        `
+          SELECT fence_token
+          FROM ops.phase1_push_delivery_claims
+          WHERE outbox_id = $1
+          FOR UPDATE
+        `,
+        [input.outboxId],
+      );
+      const claimRow = claimResult.rows[0];
+      if (!claimRow || claimRow.fence_token !== input.fenceToken) {
+        await client.query("ROLLBACK");
+        return { recorded: false, reason: "fence_lost" };
+      }
+
+      const dedupeKey = `${input.outboxId}:${input.fenceToken}`;
+      const receiptResult = await client.query<{ receipt_id: string }>(
+        `
+          INSERT INTO ops.phase1_push_delivery_receipts (
+            outbox_id, passenger_subject_ref, dedupe_key, fence_token,
+            provider_name, provider_ack_state, provider_message_ref
+          ) VALUES ($1, $2, $3, $4, $5, $6, $7)
+          ON CONFLICT (dedupe_key) DO NOTHING
+          RETURNING receipt_id
+        `,
+        [
+          input.outboxId,
+          input.passengerSubjectRef,
+          dedupeKey,
+          input.fenceToken,
+          input.providerName,
+          input.providerAckState,
+          input.providerMessageRef,
+        ],
+      );
+
+      await client.query(
+        `
+          UPDATE ops.consumer_notification_outbox
+          SET
+            status = $2,
+            attempt_count = $3,
+            next_attempt_at = $4,
+            delivered_at = $5
+          WHERE outbox_id = $1
+        `,
+        [
+          input.deliveryOutcome.outboxId,
+          input.deliveryOutcome.status,
+          input.deliveryOutcome.attemptCount,
+          input.deliveryOutcome.nextAttemptAt,
+          input.deliveryOutcome.status === "delivered"
+            ? input.deliveryOutcome.deliveredAt
+            : null,
+        ],
+      );
+
+      await client.query(
+        `
+          UPDATE ops.phase1_push_delivery_claims
+          SET claim_state = 'released'
+          WHERE outbox_id = $1 AND fence_token = $2
+        `,
+        [input.outboxId, input.fenceToken],
+      );
+
+      await client.query("COMMIT");
+      return { recorded: true, replayed: receiptResult.rows.length === 0 };
+    } catch (error) {
+      await client.query("ROLLBACK");
+      throw error;
+    } finally {
+      client.release();
+    }
   }
 
   async findPassengerRating(orderId: string, passengerSubjectRef: string) {

@@ -229,6 +229,16 @@ class AntigravityAdapter(BaseAdapter):
         print_timeout = str(settings.get("print_timeout") or "1h").strip()
         if print_timeout:
             command.extend(["--print-timeout", print_timeout])
+        # Default text output only ever surfaces the final line (e.g. a bare
+        # "error: interrupted"), so a failed turn is indistinguishable from a
+        # quiet one until the process exits. stream-json emits step_update
+        # events as the turn progresses plus a final result event carrying an
+        # explicit status, which worker_failure_detector.py's antigravity
+        # branch relies on to recognize a structured ERROR even when the
+        # process itself exits 0.
+        output_format = str(settings.get("output_format") or "stream-json").strip()
+        if output_format:
+            command.extend(["--output-format", output_format])
         workspace_root = delivery_workspace_root(self.config, request.metadata)
         for directory in _include_directories(self.config, settings, Path(str(workspace_root))):
             command.extend(["--add-dir", directory])

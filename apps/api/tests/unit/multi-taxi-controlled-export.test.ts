@@ -323,9 +323,9 @@ describe("P5-EXPORT-001 controlled multi-taxi export", () => {
         .status,
     ).toBe("completed");
 
-    function expectReportJobNotFound(run: () => unknown) {
+    async function expectReportJobNotFound(run: () => unknown) {
       try {
-        run();
+        await run();
         expect.unreachable("expected REPORT_JOB_NOT_FOUND to be thrown");
       } catch (error) {
         expect(error).toBeInstanceOf(ApiRequestError);
@@ -348,10 +348,10 @@ describe("P5-EXPORT-001 controlled multi-taxi export", () => {
           .listReportJobs(undefined, genericIdentity)
           .some((job) => job.jobId === accepted.jobId),
       ).toBe(false);
-      expectReportJobNotFound(() =>
+      await expectReportJobNotFound(() =>
         service.getReportJob(accepted.jobId, undefined, genericIdentity),
       );
-      expectReportJobNotFound(() =>
+      await expectReportJobNotFound(() =>
         service.renderReportArtifact(accepted.jobId, undefined, genericIdentity),
       );
     }

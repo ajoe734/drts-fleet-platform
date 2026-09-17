@@ -3675,6 +3675,36 @@ export interface TenantDashboardSummary {
   upcomingBookings: TenantBookingSummary[];
 }
 
+export const BOOKING_LIST_DATE_FIELDS = [
+  "reservationStart",
+  "createdAt",
+] as const;
+export type BookingListDateField = (typeof BOOKING_LIST_DATE_FIELDS)[number];
+
+/**
+ * `GET /tenant/bookings` query. All dimensions AND together. `startAt`/`endAt`
+ * are ISO-8601 instants with an explicit timezone offset (never a bare
+ * server-local date-time): `startAt` is inclusive, `endAt` is exclusive, so a
+ * one-calendar-day window is `startAt=<day>T00:00:00<tz>` and
+ * `endAt=<next day>T00:00:00<tz>`. `status` filters the booking-level status
+ * (active/completed/cancelled); `fulfillmentStatus` filters the underlying
+ * dispatch/order status, which is deliberately a separate dimension from
+ * `status`. `passengerId` is an exact match on the canonical passenger
+ * identity; `passenger` is a trimmed, case-insensitive literal (not regex)
+ * substring match against passenger name/phone and the booking/order id.
+ */
+export interface ListTenantBookingsQuery {
+  dateField?: BookingListDateField;
+  startAt?: string;
+  endAt?: string;
+  status?: BookingStatus;
+  fulfillmentStatus?: OwnedOrderStatus;
+  passengerId?: string;
+  passenger?: string;
+  page?: number;
+  pageSize?: number;
+}
+
 export interface TenantOrderListQuery {
   from?: string;
   to?: string;

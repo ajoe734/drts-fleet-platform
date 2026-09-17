@@ -84,6 +84,31 @@ def workspace_root() -> Path:
     return workspace_roots()[0]
 
 
+_HOOK_CWD: Path | None = None
+
+
+def set_hook_cwd(raw: Any) -> None:
+    """Remember the cwd a hook payload reported for the current tool call."""
+    global _HOOK_CWD
+    text = str(raw or "").strip()
+    _HOOK_CWD = Path(text).expanduser().resolve(strict=False) if text else None
+
+
+def worker_cwd() -> Path:
+    """Where a relative path in the worker's command actually resolves.
+
+    The worker runs inside its task worktree (ORCH_WORKSPACE_ROOT), not the
+    canonical checkout, so resolving a bare `git rebase origin/dev` against
+    the canonical root read every worktree-local rebase as a head move on dev
+    and sent it to review -- 35 such deferrals on 2026-09-08 alone, each
+    waiting minutes for a chair to say no. A hook payload carries the real
+    cwd; the environment is the next best answer; the canonical root is last.
+    """
+    if _HOOK_CWD is not None:
+        return _HOOK_CWD
+    return workspace_roots()[-1]
+
+
 SAFE_BASH_PATTERNS = [
     re.compile(r"^pwd$"),
     re.compile(r"^echo(\s|$)"),
@@ -183,6 +208,10 @@ SAFE_BASH_PATTERNS = [
     # damages anything, which is a worker-liveness matter, not a permission one.
     re.compile(r"^git rebase(\s|$)"),
     re.compile(r"^git -C .+ rebase(\s|$)"),
+    # Catching up with the integration branch inside a task worktree. The
+    # canonical-checkout guard in classify_command still defers it on dev.
+    re.compile(r"^git merge( --ff-only| --no-edit| --ff| --no-ff)* origin/dev$"),
+    re.compile(r"^git merge --abort$"),
     re.compile(r"^git -C .+ (status|diff|show|log|remote -v|submodule status)(\s|$)"),
     re.compile(r"^gh issue comment(\s|$)"),
     re.compile(r"^gh pr create(\s|$)"),
@@ -1087,28 +1116,66 @@ def _requires_review_dependency_command(shell_command: str) -> bool:
     return False
 
 
-def _is_safe_status_sync_command(shell_command: str) -> bool:
-    command = _normalize_shell_command(shell_command)
+_STATUS_SYNC_SUBSTITUTION_PATTERNS = (
+    re.compile(r"^git (-C \S+ )?rev-parse(\s|$)"),
+    re.compile(r"^git (-C \S+ )?branch --show-current$"),
+    re.compile(r"^git (-C \S+ )?log -1 --format=\S+( \S+)?$"),
+    re.compile(r"^date(\s|$)"),
+)
+_STATUS_SYNC_PLACEHOLDER = "__ORCH_SUBST__"
+_ASSIGNMENT_TOKEN = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*=")
+
+
+def _status_sync_tokens(segment: str) -> list[str] | None:
+    """Tokens of one segment with each `$(...)` collapsed to a placeholder.
+
+    The bodies are judged on their own in `_is_safe_status_sync_command`;
+    here they only need to stay one token so `SHA=$(git rev-parse HEAD)` reads
+    as an assignment rather than three words.
+    """
+    masked = re.sub(r"\$\([^()]*\)", _STATUS_SYNC_PLACEHOLDER, segment)
+    if "$(" in masked:
+        return None
     try:
-        parts = shlex.split(command)
+        return shlex.split(masked)
     except ValueError:
-        return any(pattern.search(command) for pattern in STATUS_SYNC_BASH_PATTERNS)
-    if "&&" in parts:
-        try:
-            amp_index = parts.index("&&")
-        except ValueError:
-            amp_index = -1
-        if amp_index == 2 and parts[0] == "cd":
-            cd_target = parts[1]
-            if not _paths_within_workspace([Path(cd_target)]):
-                return False
-            parts = parts[amp_index + 1 :]
+        return None
+
+
+def _strip_env_prefix(tokens: list[str]) -> list[str]:
+    """Drop leading `VAR=value` and `export VAR=value` words."""
     index = 0
-    while index < len(parts) and re.match(r"^[A-Za-z_][A-Za-z0-9_]*=.*$", parts[index]):
-        index += 1
-    if index >= len(parts):
+    while index < len(tokens):
+        token = tokens[index]
+        if _ASSIGNMENT_TOKEN.match(token):
+            index += 1
+            continue
+        if token == "export" and index + 1 < len(tokens) and _ASSIGNMENT_TOKEN.match(tokens[index + 1]):
+            index += 1
+            continue
+        break
+    return tokens[index:]
+
+
+def _status_sync_prelude_segment_is_safe(segment: str) -> bool:
+    """A segment that may run ahead of the status script on the same line."""
+    tokens = _status_sync_tokens(segment)
+    if not tokens:
         return False
-    remaining = parts[index:]
+    if tokens[0] == "cd":
+        return len(tokens) == 2 and _paths_within_workspace([Path(tokens[1])])
+    if tokens[0] in {"echo", "printf"}:
+        return True
+    return not _strip_env_prefix(tokens)
+
+
+def _status_sync_invocation_segment_is_safe(segment: str) -> bool:
+    tokens = _status_sync_tokens(segment)
+    if not tokens:
+        return False
+    remaining = _strip_env_prefix(tokens)
+    if not remaining:
+        return False
     if len(remaining) >= 2 and remaining[0] == "python3" and (
         remaining[1] == "tools/development-orchestrator/bin/ai_status.py" or _matches_workspace_script(remaining[1], "tools/development-orchestrator/bin/ai_status.py")
     ):
@@ -1117,8 +1184,38 @@ def _is_safe_status_sync_command(shell_command: str) -> bool:
         remaining[1] == "tools/development-orchestrator/bin/ai-status.sh" or _matches_workspace_script(remaining[1], "tools/development-orchestrator/bin/ai-status.sh")
     ):
         return True
-    if remaining[0] == "tools/development-orchestrator/bin/ai-status.sh" or _matches_workspace_script(remaining[0], "tools/development-orchestrator/bin/ai-status.sh"):
-        return True
+    return remaining[0] == "tools/development-orchestrator/bin/ai-status.sh" or _matches_workspace_script(remaining[0], "tools/development-orchestrator/bin/ai-status.sh")
+
+
+def _is_safe_status_sync_command(shell_command: str) -> bool:
+    """A status-script call, with the setup a handoff needs around it.
+
+    `CANDIDATE_SHA=$(git rev-parse HEAD) && ... ai-status.sh handoff ...` and
+    the multi-line `export CANDIDATE_SHA=...` form are what workers actually
+    type, and both were deferred: the substitution made the line opaque and
+    `export` is not a `VAR=` token. A handoff that waits up to 16 minutes for
+    a chair and is then refused leaves the task with no way to finish.
+
+    Every `$(...)` body must be a read-only git query, every segment ahead of
+    the script must be a `cd` inside the workspace, an `echo`, or assignments,
+    and anything after it must be safe on its own.
+    """
+    command = _normalize_shell_command(shell_command)
+    bodies = substitution_bodies(command)
+    if bodies is None:
+        return False
+    for body in bodies:
+        candidate = _strip_invocation_prefixes(body.strip())
+        if not any(pattern.search(candidate) for pattern in _STATUS_SYNC_SUBSTITUTION_PATTERNS):
+            return False
+    segments = _split_shell_segments(command, opaque_substitution=True)
+    if not segments:
+        return False
+    for index, segment in enumerate(segments):
+        if _status_sync_invocation_segment_is_safe(segment):
+            return all(_status_sync_prelude_segment_is_safe(item) for item in segments[:index]) and all(
+                _segment_is_safe(item) for item in segments[index + 1 :]
+            )
     return any(pattern.search(command) for pattern in STATUS_SYNC_BASH_PATTERNS)
 
 
@@ -1175,13 +1272,13 @@ def _command_tokens_and_cwd(shell_command: str) -> tuple[list[str], Path]:
         tokens = shlex.split(command)
     except ValueError:
         return [], root
-    cwd = root
+    cwd = worker_cwd()
     if "&&" in tokens:
         amp_index = tokens.index("&&")
         if amp_index == 2 and tokens[0] == "cd":
             cd_target = Path(tokens[1])
             if _paths_within_workspace([cd_target]):
-                cwd = _resolve_workspace_path(root, tokens[1])
+                cwd = _resolve_workspace_path(cwd, tokens[1])
                 tokens = tokens[amp_index + 1 :]
     index = 0
     while index < len(tokens) and re.match(r"^[A-Za-z_][A-Za-z0-9_]*=.*$", tokens[index]):
@@ -1288,7 +1385,7 @@ def _moves_head_in_the_canonical_checkout(shell_command: str) -> bool:
     segments = _split_shell_segments(normalized)
     if segments is None:
         return False
-    cwd = workspace_root()
+    cwd = worker_cwd()
     for segment in segments:
         try:
             tokens = shlex.split(_strip_invocation_prefixes(segment))
@@ -2031,6 +2128,7 @@ def hook_mode(config: dict[str, Any], event_name: str, payload: dict[str, Any]) 
         tool_name = payload.get("tool_name") or payload.get("toolName") or ""
         tool_input = payload.get("tool_input") or payload.get("toolInput") or {}
         session_id = payload.get("session_id") or payload.get("sessionId")
+        set_hook_cwd(payload.get("cwd"))
         # Chatbox tree guard fires before override/approval lookups so a
         # dirty fragile working tree can't be auto-allowed by a prior
         # session approval. Only PreToolUse; PermissionRequest is the

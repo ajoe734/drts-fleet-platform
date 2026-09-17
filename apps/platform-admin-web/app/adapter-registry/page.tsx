@@ -6,7 +6,6 @@ import { useTranslation } from "@/lib/i18n";
 import { formatPlatformCodeLabel } from "@/lib/localized-labels";
 import type { PlatformAdapter } from "@drts/contracts";
 import {
-  CanvasBanner,
   CanvasBtn,
   CanvasCard,
   CanvasDL,
@@ -15,6 +14,14 @@ import {
   buildCanvasTheme,
   type CanvasTone,
 } from "@drts/ui-web";
+
+import {
+  evaluateCredentialExpiry,
+  findAttentionAdapter,
+  type GovernedPlatformAdapter,
+  RegistryNotice,
+  REGISTRY_NOTICE_COPY,
+} from "./registry-notice";
 
 const theme = buildCanvasTheme({ surface: "platform", density: "compact" });
 
@@ -51,10 +58,10 @@ const flashStyle = (tone: CanvasTone): CSSProperties =>
     }`,
     background:
       tone === "danger"
-        ? "rgba(185, 28, 28, 0.08)"
+        ? theme.dangerBg
         : tone === "success"
-          ? "rgba(6, 95, 70, 0.08)"
-          : "rgba(59, 130, 246, 0.08)",
+          ? theme.successBg
+          : theme.infoBg,
     color:
       tone === "danger"
         ? theme.danger

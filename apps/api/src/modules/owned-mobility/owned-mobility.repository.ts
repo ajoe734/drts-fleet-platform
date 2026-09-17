@@ -36,6 +36,32 @@ export type OwnedMobilityQueryExecutor = {
   ): Promise<QueryResult<T>>;
 };
 
+export type TenantBookingQueryDateField = "reservationStart" | "createdAt";
+
+export type TenantBookingQueryStatus = "active" | "completed" | "cancelled";
+
+export type ListTenantBookingsPageParams = {
+  tenantId: string;
+  dateField: TenantBookingQueryDateField;
+  startAt: string | null;
+  endAt: string | null;
+  status: TenantBookingQueryStatus | null;
+  fulfillmentStatus: string | null;
+  passengerId: string | null;
+  passengerQuery: string | null;
+  page: number;
+  pageSize: number;
+};
+
+export type ListTenantBookingsPageResult = {
+  orders: OwnedOrderRecord[];
+  totalItems: number;
+};
+
+type TenantBookingTotalRow = QueryResultRow & {
+  total: string;
+};
+
 /**
  * Thrown when a compare-and-swap write against `ops.phase1_owned_orders`
  * does not match the caller's `expectedVersion` (SD §7.5: "voice aggregate
@@ -216,6 +242,113 @@ export class OwnedMobilityRepository {
       : null;
   }
 
+  /**
+   * Authoritative, tenant-scoped, filtered and paginated booking search.
+   * `WHERE` and its bind values are shared between the exact-total `COUNT(*)`
+   * query and the page query so the reported `totalItems` always matches the
+   * filter that produced the returned rows, even when the requested page is
+   * past the end of the result set (in which case the page query legitimately
+   * returns zero rows but `totalItems` still reflects the full filtered set).
+   * The required-booking-field predicates mirror what `mapOrderToBooking`
+   * (owned-mobility.service.ts) itself requires, so every row this returns is
+   * guaranteed to map to a `BookingRecord` without throwing.
+   */
+  async listTenantBookingsPage(
+    params: ListTenantBookingsPageParams,
+  ): Promise<ListTenantBookingsPageResult> {
+    if (!this.isEnabled()) {
+      return { orders: [], totalItems: 0 };
+    }
+
+    const useCreatedAt = params.dateField === "createdAt";
+    const passengerPattern = params.passengerQuery
+      ? this.toLikePattern(params.passengerQuery)
+      : null;
+
+    const whereSql = `
+      tenant_id = $1
+      AND booking_id IS NOT NULL
+      AND record ->> 'reservationWindowStart' IS NOT NULL
+      AND record ->> 'reservationWindowEnd' IS NOT NULL
+      AND record ->> 'bookingType' IS NOT NULL
+      AND record ->> 'businessDispatchSubtype' IS NOT NULL
+      AND ($2::text IS NULL OR status = $2)
+      AND (
+        $3::text IS NULL
+        OR ($3 = 'active' AND status NOT IN ('completed', 'cancelled'))
+        OR ($3 = 'completed' AND status = 'completed')
+        OR ($3 = 'cancelled' AND status = 'cancelled')
+      )
+      AND (
+        $4::text IS NULL
+        OR NULLIF(record -> 'passenger' ->> 'passengerId', '') = $4
+      )
+      AND (
+        $5::text IS NULL
+        OR COALESCE(record -> 'passenger' ->> 'name', '') ILIKE $5 ESCAPE '\\'
+        OR COALESCE(record -> 'passenger' ->> 'phone', '') ILIKE $5 ESCAPE '\\'
+        OR booking_id ILIKE $5 ESCAPE '\\'
+        OR order_id ILIKE $5 ESCAPE '\\'
+      )
+      AND (
+        $7::timestamptz IS NULL
+        OR (CASE WHEN $6 THEN created_at ELSE (record ->> 'reservationWindowStart')::timestamptz END) >= $7::timestamptz
+      )
+      AND (
+        $8::timestamptz IS NULL
+        OR (CASE WHEN $6 THEN created_at ELSE (record ->> 'reservationWindowStart')::timestamptz END) < $8::timestamptz
+      )
+    `;
+
+    const baseValues: unknown[] = [
+      params.tenantId,
+      params.fulfillmentStatus,
+      params.status,
+      params.passengerId,
+      passengerPattern,
+      useCreatedAt,
+      params.startAt,
+      params.endAt,
+    ];
+
+    const countResult = await this.databaseService!.query<TenantBookingTotalRow>(
+      `SELECT COUNT(*)::text AS total FROM ops.phase1_owned_orders WHERE ${whereSql}`,
+      baseValues,
+    );
+    const totalItems = Number.parseInt(countResult.rows[0]?.total ?? "0", 10);
+
+    const offset = (params.page - 1) * params.pageSize;
+    const pageResult = await this.databaseService!.query<JsonRecordRow>(
+      `
+        SELECT record
+        FROM ops.phase1_owned_orders
+        WHERE ${whereSql}
+        ORDER BY
+          (CASE WHEN $6 THEN created_at ELSE (record ->> 'reservationWindowStart')::timestamptz END) DESC,
+          booking_id ASC
+        LIMIT $9 OFFSET $10
+      `,
+      [...baseValues, params.pageSize, offset],
+    );
+
+    const orders = pageResult.rows.map((row) =>
+      this.parseRecord<OwnedOrderRecord>(row.record, "ops.phase1_owned_orders"),
+    );
+
+    return { orders, totalItems };
+  }
+
+  /**
+   * Escapes `\`, `%` and `_` in free-text search input so a literal percent
+   * or underscore the caller typed is matched literally instead of acting as
+   * an ILIKE wildcard. Paired with `ESCAPE '\'` on every ILIKE call site
+   * above.
+   */
+  private toLikePattern(text: string): string {
+    const escaped = text.replace(/[\\%_]/g, (match) => `\\${match}`);
+    return `%${escaped}%`;
+  }
+
   async loadState(): Promise<OwnedMobilityState> {
     if (!this.isEnabled()) {
       return {
@@ -369,7 +502,9 @@ export class OwnedMobilityRepository {
       return;
     }
 
-    await this.persistChangesWithExecutor(this.databaseService!, changes);
+    await this.persistChangesWithExecutor(this.databaseService!, changes, {
+      withinTransaction: false,
+    });
   }
 
   async withTransaction<T>(work: (executor: PoolClient) => Promise<T>) {
@@ -412,7 +547,9 @@ export class OwnedMobilityRepository {
     executor: OwnedMobilityQueryExecutor,
     changes: PersistOwnedMobilityChanges,
   ) {
-    await this.persistChangesWithExecutor(executor, changes);
+    await this.persistChangesWithExecutor(executor, changes, {
+      withinTransaction: true,
+    });
   }
 
   /**
@@ -451,6 +588,8 @@ export class OwnedMobilityRepository {
       aggregateVersion: row.aggregate_version,
     };
   }
+
+  /** UV_EXEC_006_EDIT_PROBE */
 
   /**
    * Inserts a brand-new order row for the pure-prepare voice command path.
@@ -947,15 +1086,35 @@ export class OwnedMobilityRepository {
     return (result.rowCount ?? 0) > 0;
   }
 
-  private async persistChangesWithExecutor(
+  /**
+   * `phase1_owned_orders` has two writers that both keep this row current:
+   * the fire-and-forget shadow write `persistChanges` fires (unawaited) at
+   * order-creation time to keep `createPassengerOrder`/`createMultiTaxiRide`
+   * synchronous, and the authoritative write `persistOrderWorkflow` does
+   * inside `createDispatchAssignment`'s transaction (SD §7.6). Both upsert
+   * on `ON CONFLICT (order_id) DO UPDATE`, but Postgres's conflict-target
+   * arbiter only protects that one index -- if the two writers' INSERTs for
+   * the *same brand-new row* (same `order_id` *and* `order_no`) race each
+   * other concurrently, the loser can still hit a hard `23505` on the
+   * `order_no` unique constraint instead of resolving to the DO UPDATE, even
+   * though both statements carry identical values. The race is self-healing
+   * within milliseconds (single-row insert, no external calls in between),
+   * so retry rather than surface it. Inside a transaction, a plain retry
+   * would run against an already-aborted transaction after the first error,
+   * so this uses a savepoint to undo just the failed statement.
+   */
+  private async upsertOwnedOrderWithRetry(
     executor: OwnedMobilityQueryExecutor,
-    changes: PersistOwnedMobilityChanges,
+    order: OwnedOrderRecord,
+    withinTransaction: boolean,
   ) {
-    const writes: Array<() => Promise<unknown>> = [];
-
-    for (const order of changes.orders ?? []) {
-      writes.push(() =>
-        executor.query(
+    const maxAttempts = 4;
+    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+      if (withinTransaction) {
+        await executor.query("SAVEPOINT owned_order_upsert");
+      }
+      try {
+        const result = await executor.query(
           `
             INSERT INTO ops.phase1_owned_orders (
               order_id,
@@ -1010,6 +1169,41 @@ export class OwnedMobilityRepository {
             order.updatedAt,
             JSON.stringify(order),
           ],
+        );
+        if (withinTransaction) {
+          await executor.query("RELEASE SAVEPOINT owned_order_upsert");
+        }
+        return result;
+      } catch (error) {
+        const pgError = error as { code?: string; constraint?: string };
+        const isOrderNoRace =
+          pgError?.code === "23505" &&
+          pgError?.constraint === "phase1_owned_orders_order_no_key";
+        if (!isOrderNoRace || attempt === maxAttempts) {
+          throw error;
+        }
+        if (withinTransaction) {
+          await executor.query("ROLLBACK TO SAVEPOINT owned_order_upsert");
+        }
+        await new Promise((resolve) => setTimeout(resolve, 15 * attempt));
+      }
+    }
+    throw new Error("unreachable: upsertOwnedOrderWithRetry exhausted attempts without returning or throwing");
+  }
+
+  private async persistChangesWithExecutor(
+    executor: OwnedMobilityQueryExecutor,
+    changes: PersistOwnedMobilityChanges,
+    options: { withinTransaction: boolean },
+  ) {
+    const writes: Array<() => Promise<unknown>> = [];
+
+    for (const order of changes.orders ?? []) {
+      writes.push(() =>
+        this.upsertOwnedOrderWithRetry(
+          executor,
+          order,
+          options.withinTransaction,
         ),
       );
     }

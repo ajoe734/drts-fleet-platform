@@ -5,6 +5,7 @@ import {
   Get,
   Headers,
   Param,
+  Patch,
   Post,
 } from "@nestjs/common";
 import { Throttle } from "@nestjs/throttler";
@@ -15,10 +16,13 @@ import type {
   CreatePlatformNoticeCommand,
   CreatePublicInfoVersionCommand,
   GeneratePlacardVersionCommand,
+  PlacardVersionRecord,
+  PlatformAdapter,
   PublishPlacardVersionCommand,
   PublishPlatformPricingRuleCommand,
   PublishPublicInfoVersionCommand,
   SetPlatformMaintenanceModeCommand,
+  UpdatePlatformAdapterCommand,
   UpdatePlatformAdminUserRoleCommand,
 } from "@drts/contracts";
 
@@ -278,6 +282,63 @@ export class PlatformAdminController {
   listPlatformInvoices(@Headers("x-request-id") requestId?: string) {
     return toApiSuccessEnvelope(
       { items: this.platformAdminService.listPlatformInvoices() },
+      requestId,
+    );
+  }
+
+  // ── Platform Adapters ────────────────────────────────────────────────────
+
+  @Get("adapters")
+  listPlatformAdapters(@Headers("x-request-id") requestId?: string) {
+    return toApiSuccessEnvelope(
+      { items: this.platformAdminService.listPlatformAdapters() },
+      requestId,
+    );
+  }
+
+  @Get("adapters/:adapterId")
+  getPlatformAdapter(
+    @Param("adapterId") adapterId: string,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    const adapter = this.platformAdminService.getPlatformAdapter(adapterId);
+    if (!adapter) {
+      throw new ApiRequestError(
+        404,
+        "PLATFORM_ADAPTER_NOT_FOUND",
+        `Platform adapter ${adapterId} not found.`,
+      );
+    }
+    return toApiSuccessEnvelope(adapter, requestId);
+  }
+
+  @Patch("adapters/:adapterId")
+  updatePlatformAdapter(
+    @Param("adapterId") adapterId: string,
+    @Body() command: UpdatePlatformAdapterCommand,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    const updated = this.platformAdminService.updatePlatformAdapter(
+      adapterId,
+      command,
+    );
+    if (!updated) {
+      throw new ApiRequestError(
+        404,
+        "PLATFORM_ADAPTER_NOT_FOUND",
+        `Platform adapter ${adapterId} not found.`,
+      );
+    }
+    return toApiSuccessEnvelope(updated, requestId);
+  }
+
+  @Post("adapters")
+  registerPlatformAdapter(
+    @Body() adapter: PlatformAdapter,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    return toApiSuccessEnvelope(
+      this.platformAdminService.registerPlatformAdapter(adapter),
       requestId,
     );
   }

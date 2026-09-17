@@ -334,11 +334,6 @@
         "skip_trust": true,
         "allowed_tools": ["run_shell_command"]
       },
-      "model_preference": {
-        "default": "gemini-2.5-flash-lite",
-        "gemini2": "gemini-2.5-flash-lite",
-        "supported": ["gemini-2.5-flash-lite", "gemini-2.5-flash"]
-      },
       "approval": {
         "default_approval_mode": "auto_edit",
         "workspace_agent_yolo_mode": false,

@@ -2,6 +2,13 @@ import { createHash, randomUUID } from "node:crypto";
 
 import { HttpStatus, Injectable, OnModuleInit, Optional } from "@nestjs/common";
 
+import {
+  AdapterType,
+  CredentialStatus,
+  Environment,
+  FinanceAuthorityMode,
+  RolloutStatus,
+} from "@drts/contracts";
 import type {
   AuditLogRecord,
   CanonicalAccountStatus,
@@ -14,6 +21,7 @@ import type {
   CreatePublicInfoVersionCommand,
   GeneratePlacardVersionCommand,
   PlacardVersionRecord,
+  PlatformAdapter,
   PlatformAdminUserRecord,
   PlatformAdminUserRole,
   PlatformAdminUserStatus,
@@ -26,6 +34,7 @@ import type {
   PublicInfoVersionRecord,
   SetPlatformMaintenanceModeCommand,
   TenantInvoiceRecord,
+  UpdatePlatformAdapterCommand,
   UpdatePlatformAdminUserRoleCommand,
 } from "@drts/contracts";
 
@@ -155,6 +164,141 @@ const PLATFORM_PRICING_RULES_SEED: PlatformPricingRuleRecord[] = [
   },
 ];
 
+export interface GovernedPlatformAdapterRecord extends PlatformAdapter {
+  credentialExpiresAt?: string | null;
+}
+
+const PLATFORM_ADAPTERS_SEED: GovernedPlatformAdapterRecord[] = [
+  {
+    id: "owned-dispatch",
+    platformCode: "DRTS",
+    name: "DRTS Native Dispatch",
+    description: "Fleet-owned booking and dispatch pipeline.",
+    version: "1.0.0",
+    environment: Environment.PRODUCTION,
+    rolloutStage: Environment.SANDBOX,
+    adapterType: AdapterType.NATIVE,
+    isForwarded: false,
+    config: { isEnabled: true },
+    rolloutStatus: RolloutStatus.IN_PROGRESS,
+    credentialStatus: CredentialStatus.VALID,
+    webhookStatus: null,
+    healthStatus: {
+      lastCheckTimestamp: null,
+      status: "HEALTHY",
+      message: null,
+    },
+    policies: {
+      serviceBuckets: ["standard", "accessible"],
+      maxCandidates: 3,
+      acceptTimeoutSeconds: 25,
+      manualFallbackThresholdSeconds: 90,
+      financeAuthorityMode: FinanceAuthorityMode.OWNED,
+    },
+    featureFlags: {
+      driverSafeActions: true,
+      proofRequired: false,
+      manualFallback: true,
+    },
+    supportedActions: [
+      { name: "accept", description: "Driver accepts a native task." },
+      { name: "complete", description: "Driver closes owned trip workflow." },
+      { name: "incident", description: "Driver raises safety incident." },
+    ],
+    credentialExpiresAt: "2026-12-31T23:59:59.000Z",
+    createdAt: "2026-05-08T00:00:00.000Z",
+    updatedAt: "2026-05-08T00:00:00.000Z",
+  },
+  {
+    id: "cityride-forwarder",
+    platformCode: "CITY",
+    name: "CityRide Forwarded Orders",
+    description:
+      "External forwarded-order source with platform-owned fare authority.",
+    version: "1.0.0",
+    environment: Environment.PRODUCTION,
+    rolloutStage: Environment.SANDBOX,
+    adapterType: AdapterType.EXTERNAL_COMBINED,
+    isForwarded: true,
+    config: { isEnabled: true },
+    rolloutStatus: RolloutStatus.IN_PROGRESS,
+    credentialStatus: CredentialStatus.PENDING,
+    webhookStatus: null,
+    healthStatus: {
+      lastCheckTimestamp: null,
+      status: "HEALTHY",
+      message: null,
+    },
+    policies: {
+      serviceBuckets: ["standard", "accessible"],
+      maxCandidates: 3,
+      acceptTimeoutSeconds: 25,
+      manualFallbackThresholdSeconds: 90,
+      financeAuthorityMode: FinanceAuthorityMode.EXTERNAL,
+    },
+    featureFlags: {
+      driverSafeActions: true,
+      proofRequired: true,
+      manualFallback: true,
+    },
+    supportedActions: [
+      { name: "accept", description: "Forward acceptance to CityRide." },
+      {
+        name: "reject",
+        description: "Forward rejection reason to CityRide.",
+      },
+      {
+        name: "proof_upload",
+        description: "Upload completion proof for reconciliation.",
+      },
+    ],
+    credentialExpiresAt: null,
+    createdAt: "2026-05-08T00:00:00.000Z",
+    updatedAt: "2026-05-08T00:00:00.000Z",
+  },
+  {
+    id: "grab_taiwan",
+    platformCode: "grab_taiwan",
+    name: "Grab Taiwan (Stub)",
+    description:
+      "Stub-only external forwarded adapter for local integration scaffolding.",
+    version: "1.0.0",
+    environment: Environment.SANDBOX,
+    rolloutStage: Environment.SANDBOX,
+    adapterType: AdapterType.EXTERNAL_REST,
+    isForwarded: true,
+    config: { isEnabled: false },
+    rolloutStatus: RolloutStatus.NOT_STARTED,
+    credentialStatus: CredentialStatus.NOT_CONFIGURED,
+    webhookStatus: null,
+    healthStatus: {
+      lastCheckTimestamp: null,
+      status: "DEGRADED",
+      message:
+        "Stub-only adapter; not approved for production live auth or callback governance.",
+    },
+    policies: {
+      serviceBuckets: ["standard"],
+      maxCandidates: 1,
+      acceptTimeoutSeconds: 30,
+      manualFallbackThresholdSeconds: 120,
+      financeAuthorityMode: FinanceAuthorityMode.EXTERNAL,
+    },
+    featureFlags: {
+      driverSafeActions: false,
+      proofRequired: true,
+      manualFallback: true,
+    },
+    supportedActions: [
+      { name: "accept", description: "Stub accept for Grab Taiwan." },
+      { name: "reject", description: "Stub reject for Grab Taiwan." },
+    ],
+    credentialExpiresAt: null,
+    createdAt: "2026-05-08T00:00:00.000Z",
+    updatedAt: "2026-05-08T00:00:00.000Z",
+  },
+];
+
 const CONTROL_PLANE_SCOPE_REF = "platform:control_plane";
 const CONTROL_PLANE_REALMS = ["platform", "ops"] as const;
 const PLATFORM_ADMIN_PLACEHOLDER_ISSUER = "platform_admin_email";
@@ -175,6 +319,10 @@ type PlatformAdminUserSnapshot = {
 
 @Injectable()
 export class PlatformAdminService implements OnModuleInit {
+  private adapters: GovernedPlatformAdapterRecord[] = PLATFORM_ADAPTERS_SEED.map(
+    (a) => this.clonePlatformAdapter(a),
+  );
+
   private publicInfoVersions = PUBLIC_INFO_SEED.map((version) =>
     this.clonePublicInfoVersion(version),
   );
@@ -1781,6 +1929,106 @@ export class PlatformAdminService implements OnModuleInit {
     return JSON.stringify(value);
   }
 
+  // ── Platform Adapters ───────────────────────────────────────────────────
+
+  listPlatformAdapters(): GovernedPlatformAdapterRecord[] {
+    return this.adapters.map((a) => this.clonePlatformAdapter(a));
+  }
+
+  getPlatformAdapter(id: string): GovernedPlatformAdapterRecord | undefined {
+    const adapter = this.adapters.find((a) => a.id === id);
+    return adapter ? this.clonePlatformAdapter(adapter) : undefined;
+  }
+
+  updatePlatformAdapter(
+    id: string,
+    command: UpdatePlatformAdapterCommand & {
+      credentialStatus?: CredentialStatus;
+      credentialExpiresAt?: string | null;
+    },
+  ): GovernedPlatformAdapterRecord | undefined {
+    const index = this.adapters.findIndex((a) => a.id === id);
+    if (index === -1) {
+      return undefined;
+    }
+
+    const current = this.adapters[index];
+    const updated: GovernedPlatformAdapterRecord = {
+      ...current,
+      config: command.config
+        ? { ...current.config, ...command.config }
+        : current.config,
+      rolloutStatus: command.rolloutStatus ?? current.rolloutStatus,
+      rolloutStage: command.rolloutStage ?? current.rolloutStage,
+      credentialStatus: command.credentialStatus ?? current.credentialStatus,
+      credentialExpiresAt:
+        command.credentialExpiresAt !== undefined
+          ? command.credentialExpiresAt
+          : current.credentialExpiresAt,
+      policies: command.policies
+        ? {
+            ...current.policies,
+            ...command.policies,
+            serviceBuckets:
+              command.policies.serviceBuckets ?? current.policies.serviceBuckets,
+          }
+        : current.policies,
+      featureFlags: command.featureFlags
+        ? { ...current.featureFlags, ...command.featureFlags }
+        : current.featureFlags,
+      webhookStatus:
+        current.webhookStatus || command.webhookStatus
+          ? {
+              url: null,
+              isEnabled: false,
+              lastEventTimestamp: null,
+              lastStatus: "UNKNOWN",
+              ...current.webhookStatus,
+              ...command.webhookStatus,
+            }
+          : null,
+      updatedAt: new Date().toISOString(),
+    };
+
+    this.adapters[index] = updated;
+    return this.clonePlatformAdapter(updated);
+  }
+
+  registerPlatformAdapter(
+    adapter: GovernedPlatformAdapterRecord,
+  ): GovernedPlatformAdapterRecord {
+    const existingIndex = this.adapters.findIndex((a) => a.id === adapter.id);
+    const cloned = this.clonePlatformAdapter({
+      ...adapter,
+      updatedAt: new Date().toISOString(),
+    });
+    if (existingIndex >= 0) {
+      this.adapters[existingIndex] = cloned;
+    } else {
+      this.adapters.push(cloned);
+    }
+    return this.clonePlatformAdapter(cloned);
+  }
+
+  private clonePlatformAdapter(
+    adapter: GovernedPlatformAdapterRecord,
+  ): GovernedPlatformAdapterRecord {
+    return {
+      ...adapter,
+      config: { ...adapter.config },
+      healthStatus: { ...adapter.healthStatus },
+      policies: {
+        ...adapter.policies,
+        serviceBuckets: [...adapter.policies.serviceBuckets],
+      },
+      featureFlags: { ...adapter.featureFlags },
+      supportedActions: adapter.supportedActions.map((action) => ({
+        ...action,
+      })),
+      webhookStatus: adapter.webhookStatus ? { ...adapter.webhookStatus } : null,
+    };
+  }
+
   private persistChanges(
     changes: PersistPlatformAdminChanges,
     context: string,
@@ -1796,3 +2044,4 @@ export class PlatformAdminService implements OnModuleInit {
       });
   }
 }
+

@@ -31,6 +31,7 @@ import type {
   DriverDepartTaskCommand,
   DriverRejectTaskCommand,
   DriverStartTaskCommand,
+  ListTenantBookingsQuery,
   QueueCheckInCommand,
   QueueCheckOutCommand,
   ReassignDispatchCommand,
@@ -150,6 +151,41 @@ export class OwnedMobilityController {
         400,
         "TENANT_ID_REQUIRED",
         "x-tenant-id header is required for tenant booking endpoints.",
+      );
+    }
+
+    return normalizedTenantId;
+  }
+
+  /**
+   * `x-tenant-id` is a resource *selector*, not identity (it carries no
+   * authentication signal on its own -- see bootstrap-auth.guard.ts /
+   * auth.extractor.ts). Booking search additionally requires a real
+   * authenticated identity whose own tenant matches the selector: anonymous
+   * requests get 401, and a caller authenticated for a different tenant gets
+   * 403 rather than being allowed to read another tenant's bookings.
+   */
+  private requireAuthenticatedTenantId(
+    tenantId: string | undefined,
+    identity: BootstrapRequestIdentity | null,
+  ) {
+    const normalizedTenantId = this.requireTenantId(tenantId);
+    if (!identity) {
+      throw new ApiRequestError(
+        HttpStatus.UNAUTHORIZED,
+        "TENANT_BOOKING_IDENTITY_REQUIRED",
+        "Tenant booking search requires an authenticated identity; x-tenant-id alone is not identity.",
+      );
+    }
+    if (identity.tenantId !== normalizedTenantId) {
+      throw new ApiRequestError(
+        HttpStatus.FORBIDDEN,
+        "TENANT_BOOKING_TENANT_MISMATCH",
+        "Authenticated identity does not match the requested tenant selector.",
+        {
+          requestedTenantId: normalizedTenantId,
+          identityTenantId: identity.tenantId,
+        },
       );
     }
 
@@ -458,12 +494,19 @@ export class OwnedMobilityController {
 
   @Get("tenant/bookings")
   @Throttle(READ_HEAVY_RATE_LIMIT)
-  listTenantBookings(
+  async listTenantBookings(
+    @Query() query: ListTenantBookingsQuery,
+    @CurrentIdentity() identity: BootstrapRequestIdentity | null,
     @Headers("x-tenant-id") tenantId?: string,
     @Headers("x-request-id") requestId?: string,
   ) {
-    const bookings = this.ownedMobilityService.listTenantBookings(
-      this.requireTenantId(tenantId),
+    const resolvedTenantId = this.requireAuthenticatedTenantId(
+      tenantId,
+      identity,
+    );
+    const bookings = await this.ownedMobilityService.listTenantBookings(
+      resolvedTenantId,
+      query,
     );
     return toApiSuccessEnvelope(
       toApiListData(bookings.items, bookings.pagination),

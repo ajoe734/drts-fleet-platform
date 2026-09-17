@@ -30,6 +30,26 @@ class ChairmanFlowTests(unittest.TestCase):
                     self.assertFalse(supervisor.apply_chair_parent_resume_action({}, {}, {"task_id": parent["id"], "reason": "Old helper is done"}))
                 writer.assert_not_called()
 
+    def test_external_gate_is_held_without_creating_or_resuming_helpers(self) -> None:
+        parent = {"id": "PUBLISH-001", "status": "blocked", "owner": "Codex", "reviewer": "Gemini2",
+                  "depends_on": [], "external_gate": True, "next": "Public push needs explicit authorization"}
+        helper = {"id": "HELPER-001", "status": "done", "task_class": "unblock", "helper_parent": parent["id"],
+                  "helper_kind": "history_repair", "resolved_parent_status": "todo", "resolved_parent_at": "2026-09-13T05:00:00Z"}
+        for helpers in ([], [helper]):
+            with self.subTest(completed_helper=bool(helpers)):
+                status = {"tasks": [parent, *helpers]}
+                self.assertEqual(supervisor.blocked_task_triage_action(status, parent), ("wait_for_parent_resolution", None))
+                self.assertEqual(supervisor.dependency_ready_blocked_task_records({}, status), [])
+                held = supervisor.dependency_ready_blocked_task_records({}, status, include_held=True)
+                self.assertEqual(held[0]["task_id"], parent["id"])
+                action = {"task_id": parent["id"], "reason": "Stale chair decision requests history repair"}
+                with mock.patch.object(supervisor, "load_status", return_value=status), mock.patch.object(supervisor, "run_task_board_command") as writer:
+                    self.assertFalse(supervisor.create_chair_unblock_task({}, {}, action, {}))
+                    self.assertFalse(supervisor.apply_chair_parent_resume_action({}, {}, action))
+                writer.assert_not_called()
+        parent["external_gate"] = False
+        self.assertEqual(supervisor.blocked_task_triage_action({"tasks": [parent]}, parent), ("create_unblock_task", None))
+
     def test_chair_review_message_includes_provider_health_context(self) -> None:
         message = supervisor.build_chair_review_message(
             {
@@ -1129,6 +1149,71 @@ class ChairmanFlowTests(unittest.TestCase):
 
         self.assertEqual(chosen, ("codex", "Codex"))
 
+    def test_urgent_chair_review_uses_only_healthy_failing_lane_as_last_resort(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            (root / "ai-status.json").write_text('{"tasks": []}\n', encoding="utf-8")
+            config = {
+                "agents": {
+                    "gemini": {"id": "gemini", "display_name": "Gemini", "provider": "gemini"},
+                    "codex": {"id": "codex", "display_name": "Codex", "provider": "codex"},
+                },
+                "paths": {
+                    "status_file": str(root / "ai-status.json"),
+                    "event_queue": str(root / "event-queue.jsonl"),
+                },
+                "ready_dispatcher": {"active_worker_statuses": []},
+            }
+            state = {
+                "workers": {},
+                "provider_pauses": {
+                    "codex": {
+                        "kind": "quota",
+                        "scope": "lane",
+                        "lane_id": "codex",
+                        "resume_at": 9e12,
+                    }
+                },
+                "failure_streaks": {
+                    "UV-EXEC-016:owner": {
+                        "task_id": "UV-EXEC-016",
+                        "role": "owner",
+                        "agent": "Gemini",
+                        "count": 2,
+                        "threshold": 2,
+                        "awaiting_chair": True,
+                    }
+                },
+                "chair_review": {},
+            }
+            status = {
+                "tasks": [
+                    {
+                        "id": "UV-EXEC-016",
+                        "status": "in_progress",
+                        "owner": "Gemini",
+                        "reviewer": "Codex",
+                        "depends_on": [],
+                    }
+                ]
+            }
+            provider_report = {
+                "agent_adapters": {
+                    "gemini": {"supported": True, "can_auto_deliver": True},
+                    "codex": {"supported": True, "can_auto_deliver": True},
+                }
+            }
+
+            chosen = supervisor.choose_chair_reviewer(
+                config,
+                state,
+                status,
+                provider_report,
+                allow_primary_work_fallback=True,
+            )
+
+        self.assertEqual(chosen, ("gemini", "Gemini"))
+
     def test_urgent_chair_review_records_blocked_when_no_lane_available(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             root = Path(tmpdir)
@@ -2056,6 +2141,171 @@ class ChairmanFlowTests(unittest.TestCase):
             task = json.loads(status_path.read_text(encoding="utf-8"))["tasks"][0]
             self.assertEqual(task["owner"], "Codex")
             self.assertEqual(task["reviewer"], "Codex2")
+
+    def _rejection_fixture(self, tmpdir: str, tasks: list, archived: list | None = None):
+        root = Path(tmpdir)
+        status_path = root / "ai-status.json"
+        payload = {"tasks": tasks, "handoffs": []}
+        if archived is not None:
+            payload["archived_task_ids"] = archived
+        status_path.write_text(json.dumps(payload, ensure_ascii=False) + "\n", encoding="utf-8")
+        config = {
+            "paths": {
+                "status_file": str(status_path),
+                "state_file": str(root / "state.json"),
+                "approval_queue": str(root / "approval-queue.json"),
+                "activity_log": str(root / "activity-log.jsonl"),
+                "event_queue": str(root / "event-queue.jsonl"),
+            },
+            "agents": {
+                "codex": {"display_name": "Codex", "provider": "codex"},
+                "codex2": {"display_name": "Codex2", "provider": "codex2"},
+                "claude2": {"display_name": "Claude2", "provider": "claude2"},
+                "gemini": {"display_name": "Gemini", "provider": "gemini"},
+            },
+        }
+        state = {"queue": {"events": {}}, "workers": {}, "failure_streaks": {}}
+        return config, state, root / "activity-log.jsonl"
+
+    def _rejections(self, log_path: Path) -> list:
+        if not log_path.exists():
+            return []
+        return [
+            json.loads(line)
+            for line in log_path.read_text(encoding="utf-8").splitlines()
+            if line.strip() and json.loads(line).get("type") == "chair_reassignment_rejected"
+        ]
+
+    def test_chair_reassignment_rejection_reports_a_task_id_the_board_does_not_have(self) -> None:
+        """The 2026-09-16 incident, at the point where it became invisible.
+
+        Gemini2 copied `PLANNING-PHASE1-CLAUDE2` out of a stale dispatch-pause
+        record, where that field holds a worker-run label rather than a board
+        task id. The decision validated, was consumed, was stored as
+        `last_decision`, and then applied to nothing and said nothing. With no
+        log line, no guard entry and no queue event, the only reading left
+        from outside was that the supervisor had stopped consuming decisions,
+        which is what was believed for several hours. The rejection has to
+        name itself.
+        """
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config, state, log_path = self._rejection_fixture(
+                tmpdir,
+                [{"id": "SR-ACCEPT-001", "owner": "Codex", "reviewer": "Codex2", "status": "todo"}],
+            )
+
+            with mock.patch.object(
+                supervisor, "run_task_board_command", return_value=mock.MagicMock(ok=True)
+            ) as command:
+                changed = supervisor.apply_chair_reassignment_action(
+                    config,
+                    state,
+                    {
+                        "task_id": "PLANNING-PHASE1-CLAUDE2",
+                        "role": "owner",
+                        "from": "Claude2",
+                        "to": "Gemini",
+                        "reason": "Claude2 lane is paused due to quota limits.",
+                    },
+                    provider_report={},
+                )
+
+            self.assertFalse(changed)
+            command.assert_not_called()
+            rejections = self._rejections(log_path)
+            self.assertEqual(len(rejections), 1)
+            self.assertEqual(rejections[0]["task_id"], "PLANNING-PHASE1-CLAUDE2")
+            self.assertEqual(rejections[0]["to_agent"], "Gemini")
+            self.assertIn("not on the task board", rejections[0]["message"])
+
+    def test_chair_reassignment_rejection_distinguishes_an_archived_task(self) -> None:
+        """An archived id is a different mistake from a fabricated one, and
+        the operator reading the log needs to be able to tell them apart."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config, state, log_path = self._rejection_fixture(
+                tmpdir,
+                [{"id": "SR-ACCEPT-001", "owner": "Codex", "reviewer": "Codex2", "status": "todo"}],
+                archived=["SR-FLEET-SETTLE-001"],
+            )
+
+            with mock.patch.object(
+                supervisor, "run_task_board_command", return_value=mock.MagicMock(ok=True)
+            ):
+                changed = supervisor.apply_chair_reassignment_action(
+                    config,
+                    state,
+                    {
+                        "task_id": "SR-FLEET-SETTLE-001",
+                        "role": "owner",
+                        "from": "Claude2",
+                        "to": "Gemini",
+                        "reason": "Move the settle work off the paused lane.",
+                    },
+                    provider_report={},
+                )
+
+            self.assertFalse(changed)
+            rejections = self._rejections(log_path)
+            self.assertEqual(len(rejections), 1)
+            self.assertIn("archived", rejections[0]["message"])
+
+    def test_chair_reassignment_rejection_reports_a_wrong_handoff_source(self) -> None:
+        """Not just the missing-task path: every guard that used to return a
+        bare False now has to account for itself."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config, state, log_path = self._rejection_fixture(
+                tmpdir,
+                [{"id": "PBK-UI-004", "owner": "Codex", "reviewer": "Codex2", "status": "in_progress"}],
+            )
+
+            with mock.patch.object(
+                supervisor, "run_task_board_command", return_value=mock.MagicMock(ok=True)
+            ) as command:
+                changed = supervisor.apply_chair_reassignment_action(
+                    config,
+                    state,
+                    {
+                        "task_id": "PBK-UI-004",
+                        "role": "owner",
+                        "from": "Claude2",
+                        "to": "Gemini",
+                        "reason": "Claude2 lane is paused.",
+                    },
+                    provider_report={},
+                )
+
+            self.assertFalse(changed)
+            command.assert_not_called()
+            rejections = self._rejections(log_path)
+            self.assertEqual(len(rejections), 1)
+            self.assertIn("owner is Codex", rejections[0]["message"])
+
+    def test_chair_reassignment_that_applies_writes_no_rejection(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config, state, log_path = self._rejection_fixture(
+                tmpdir,
+                [{"id": "PBK-UI-004", "owner": "Claude2", "reviewer": "Codex2", "status": "in_progress"}],
+            )
+
+            with mock.patch.object(
+                supervisor, "run_task_board_command", return_value=mock.MagicMock(ok=True)
+            ) as command:
+                changed = supervisor.apply_chair_reassignment_action(
+                    config,
+                    state,
+                    {
+                        "task_id": "PBK-UI-004",
+                        "role": "owner",
+                        "from": "Claude2",
+                        "to": "Gemini",
+                        "reason": "Claude2 lane is paused.",
+                    },
+                    provider_report={},
+                )
+
+            self.assertTrue(changed)
+            command.assert_called_once()
+            self.assertEqual(self._rejections(log_path), [])
 
     def test_refresh_chair_review_state_reassigns_backlog_owner_failure(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:

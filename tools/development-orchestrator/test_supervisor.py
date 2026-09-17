@@ -2225,6 +2225,39 @@ class BreakFullDeadlockTests(unittest.TestCase):
         kinds = [c.args[1].get("type") for c in wal.call_args_list]
         self.assertIn("operator_attention_required", kinds)
 
+    def test_recovered_lane_clears_stale_attention_while_workers_continue(self):
+        config = {**self.CONFIG, "agents": {"claude2": {"provider": "claude2"},
+                                          "gemini": {"provider": "gemini"}}}
+        state = self._wedged_state()
+        state["workers"] = {"w1": {"agent_id": "gemini", "status": "running"}}
+        state["deadlock_recovery"] = {"operator_attention": {"reason": "All lanes paused"},
+                                      "last_attempt_at": "2026-09-11T00:00:00Z"}
+        report = {"providers": {"gemini": {"auth_ready": True}}}
+        with (mock.patch.object(supervisor, "load_provider_report", return_value=report),
+              mock.patch.object(supervisor, "_force_recovery_probe") as probe,
+              mock.patch.object(supervisor, "write_activity_log") as activity):
+            self.assertTrue(supervisor.break_full_deadlock(config, state, self._STATUS))
+            self.assertFalse(supervisor.break_full_deadlock(config, state, self._STATUS))
+        self.assertNotIn("operator_attention", state["deadlock_recovery"])
+        self.assertEqual(state["workers"]["w1"]["status"], "running")
+        self.assertIn("claude2", state["provider_pauses"])
+        self.assertEqual(state["deadlock_recovery"]["last_attempt_at"], "2026-09-11T00:00:00Z")
+        probe.assert_not_called()
+        activity.assert_called_once()
+
+    def test_cached_login_does_not_clear_attention_while_quota_is_paused(self):
+        state = self._wedged_state()
+        state["provider_pauses"]["claude2"].update(kind="quota", resume_at=4102444800)
+        state["workers"] = {"inbox": {"agent_id": "claude2", "status": "manual_pending"}}
+        attention = {"reason": "All lanes paused"}
+        state["deadlock_recovery"] = {"operator_attention": attention.copy()}
+        report = {"providers": {"claude2": {"auth_ready": True}}}
+        with (mock.patch.object(supervisor, "load_provider_report", return_value=report),
+              mock.patch.object(supervisor, "_force_recovery_probe") as probe):
+            self.assertFalse(supervisor.break_full_deadlock(self.CONFIG, state, self._STATUS))
+        self.assertEqual(state["deadlock_recovery"]["operator_attention"], attention)
+        probe.assert_not_called()
+
     def test_noop_when_workers_active(self):
         state = self._wedged_state()
         state["workers"] = {"w1": {"agent_id": "claude2", "status": "running"}}

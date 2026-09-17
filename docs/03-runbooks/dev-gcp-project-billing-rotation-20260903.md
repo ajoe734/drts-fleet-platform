@@ -115,3 +115,81 @@ Steps 1–2 need Billing Admin on `018481-006A8C-BF1660`. Note that
 - `CI-DEPLOY-IMMUTABLE-TAG-001` / `-002` / `-003`, `CI-DEPLOY-BOOTSTRAP-001` —
   the deploy-rail defects the move to a new registry and an empty project
   exposed
+
+---
+
+## Outcome — 2026-09-08
+
+Dev was cut over to the canonical project. This section records what actually
+landed, so the next person does not have to re-derive it.
+
+### What forced it
+
+`nodal-alloy-503700-s3` — the personal project holding the entire dev
+environment — is now **`CONSUMER_SUSPENDED`** itself. Every `gcloud` call
+against it is refused, so nothing in it could be exported: not the database,
+not the three Google Maps keys, not the other secrets. That is the fifth
+rotation, and the second project to die rather than be retired deliberately.
+
+### Steps 1 and 3, done
+
+Billing was attached to `drts-dev-devcc-20260825`
+(`billingAccounts/0108A0-30D264-286D9C`, `billingEnabled: true`), and the
+project was provisioned with `infra/gcp/dev/provision-dev-project.sh`, which was
+written for this rotation and is idempotent:
+
+- APIs: run, sqladmin, secretmanager, artifactregistry, iam, iamcredentials, sts, and support APIs
+- Cloud SQL `drts-dev-db` — `POSTGRES_15`, `db-custom-1-3840`, `us-central1`, database `drts_fleet_platform`, user `drts_dev`
+- Artifact Registry `drts` (`us-central1`, docker) — dev images no longer live in a personal project
+- Service accounts `drts-dev-runtime` and `github-actions-deployer`, with the same role split staging uses
+- WIF pool `github-actions` + OIDC provider `github`, constrained by `assertion.repository=='ajoe734/drts-fleet-platform'`
+- Six Secret Manager secrets, generated in place: `db-url`, `api-key-salt`, `jwt-secret`, `controlled-download-signing-secret`, `referral-embed-handoff-key`, `referral-embed-partner-ingress-key`
+
+Project ownership was granted to `john.lin@dev.cctech-support.com`. The
+temporary `roles/owner` used to run the provisioning was removed afterwards.
+
+Google Maps keys were **not** recreated: they are external credentials, the old
+ones are unrecoverable, and the deploy requires all three or none. Dev runs the
+map provider in its degraded mode until they are supplied.
+
+### Cutover and verification
+
+GitHub variables `DEV_GCP_PROJECT_ID`, `DEV_GCP_CLOUDSQL_INSTANCE`,
+`DEV_GCP_RUNTIME_SERVICE_ACCOUNT` and `DEV_ARTIFACT_PROJECT_ID`, plus secrets
+`DEV_WIF_PROVIDER` and `DEV_WIF_SERVICE_ACCOUNT`, were repointed.
+`deploy-dev.yml` then ran green on `publish/v2026.09.07.0`
+(run `34177265018`): 89 migrations applied to the empty database, nine Cloud Run
+services deployed, health check and the sixteen candidate-bound operational
+journeys all passing. `GET /health` on the API returns 200.
+
+Two failures on the way there, both worth knowing about:
+
+1. **Dispatching from `main` is blocked.** `gh workflow run` defaults to the
+   repository default branch, and `deploy-dev.yml` rejects that per
+   branch-strategy v4. Dispatch with `--ref publish/v<date>` as well as
+   `-f source_ref=publish/v<date>`.
+2. **Cross-app origins do not bootstrap in an empty project.** The deploy
+   resolves sibling origins by describing already-deployed services, so on a
+   project with no services the Tenant Console shipped with its own origin where
+   the Ops Console origin belonged, and the `tenant-ops-dispatch-intent`
+   acceptance journey failed. Fixed by setting the `DEV_*_ORIGIN` variables
+   explicitly; they are no longer order-dependent. `DEV_MAP_PROVIDER_ALLOWED_ORIGINS`
+   still held the old project's Cloud Run hostname and was corrected at the same time.
+
+### Still open
+
+- **Step 2 is only half done.** `STAGING_ARTIFACT_PROJECT_ID`,
+  `PROD_ARTIFACT_PROJECT_ID` and `PROD_ARTIFACT_REGISTRY` still resolve to the
+  suspended `nodal-alloy-503700-s3`, so staging and prod cannot pull or push
+  images. Production's image registry is in a dead personal sandbox.
+- **Prod has no billing.** `drts-prod-devcc-20260825` is `billingEnabled: false`
+  on the old account. Linking it to `0108A0-30D264-286D9C` fails with
+  `Cloud billing quota exceeded` — that account is capped despite holding only
+  three projects, one of which is an unused default "My First Project". Either
+  request a quota increase, or put prod on a verified account rather than the
+  newest one.
+- **Custom domains are down.** The nine `smarttransport.tw` hostnames pointed at
+  the suspended project. `gcloud domains list-user-verified` is empty for
+  `john.lin@`, so domain mappings cannot be recreated until the domain is
+  re-verified for the operating account and the new deployer service account.
+  Dev is reachable only on `*.run.app` until then.

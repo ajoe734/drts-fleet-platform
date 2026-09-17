@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import tempfile
 import unittest
+from datetime import datetime, timezone
 from pathlib import Path
 from unittest import mock
 
@@ -1354,3 +1355,107 @@ class PollWorkersRecoveryTests(EvidenceOutputIsolation, unittest.TestCase):
         self.assertEqual(state["queue"]["events"]["evt-1"]["status"], "completed")
         terminate_worker_pid.assert_called_once_with(2222)
         self.assertEqual(write_activity_log.call_args.args[1]["type"], "worker_superseded")
+
+
+class HandoffGraceTests(EvidenceOutputIsolation, unittest.TestCase):
+    """An owner that just handed off gets to finish its attempt.
+
+    The handoff moves the task to review, the reviewer becomes the dispatch
+    target, and the owner's still-running worker reads as reassigned. On
+    2026-09-08 that killed workers 1-26 seconds after they pushed, mid-way
+    through the closing summary, so no result file was written. A running
+    worker now keeps a short grace window measured from the first poll that
+    saw the move; a stalled or dead worker gets none.
+    """
+
+    def _config(self, **ready_dispatcher_extra: object) -> dict:
+        return {
+            "schema": {
+                "tasks_path": "tasks",
+                "task_id_field": "id",
+                "assignee_field": "owner",
+                "reviewer_field": "reviewer",
+            },
+            "supervisor": {"stall_after_seconds": 300},
+            "ready_dispatcher": {
+                "review_statuses": ["review"],
+                "owned_statuses": ["in_progress", "todo"],
+                "done_statuses": ["done"],
+                "active_worker_statuses": ["running", "waiting_approval", "suspended_approval", "manual_pending", "retry_backoff", "stalled"],
+                **ready_dispatcher_extra,
+            },
+            "providers": {},
+            "agents": {
+                "copilot": {"id": "copilot", "display_name": "Copilot"},
+                "gemini": {"id": "gemini", "display_name": "Gemini"},
+            },
+        }
+
+    def _state(self, **worker_extra: object) -> dict:
+        return {
+            "queue": {"events": {"evt-1": {"status": "started"}}},
+            "workers": {
+                "run-1": {
+                    "run_id": "run-1",
+                    "task_id": "REG-002",
+                    "provider": "copilot",
+                    "agent_id": "copilot",
+                    "status": "running",
+                    "queue_event_id": "evt-1",
+                    "pid": 2222,
+                    # Fresh activity: a worker that just handed off is still
+                    # writing, so the stall detector must not fire here.
+                    "last_event_at": datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z"),
+                    "request_snapshot": {"reason": "owned_in_progress_dispatch"},
+                    **worker_extra,
+                }
+            },
+        }
+
+    def _poll(self, config: dict, state: dict) -> tuple[bool, mock.MagicMock]:
+        status = {"tasks": [{"id": "REG-002", "status": "review", "owner": "Copilot", "reviewer": "Gemini"}]}
+        with (
+            mock.patch.object(supervisor, "load_approval_state", return_value={"pending": [], "history": []}),
+            mock.patch.object(supervisor, "load_status", return_value=status),
+            mock.patch.object(supervisor, "load_provider_report", return_value={}),
+            mock.patch.object(supervisor, "retry_due_workers", return_value=False),
+            mock.patch.object(supervisor, "pid_is_alive", return_value=True),
+            mock.patch.object(supervisor, "terminate_worker_pid", return_value=True) as terminate_worker_pid,
+            mock.patch.object(supervisor, "write_activity_log"),
+        ):
+            changed = supervisor.poll_workers(config, state)
+        return changed, terminate_worker_pid
+
+    def test_running_owner_is_not_superseded_right_after_its_handoff(self) -> None:
+        state = self._state()
+        changed, terminate_worker_pid = self._poll(self._config(), state)
+
+        self.assertTrue(changed)
+        terminate_worker_pid.assert_not_called()
+        self.assertEqual(state["workers"]["run-1"]["status"], "running")
+        self.assertTrue(state["workers"]["run-1"].get("handoff_grace_started_at"))
+        self.assertEqual(state["queue"]["events"]["evt-1"]["status"], "started")
+
+    def test_running_owner_is_superseded_once_the_grace_window_has_passed(self) -> None:
+        state = self._state(handoff_grace_started_at="2026-04-06T14:00:00Z")
+        changed, terminate_worker_pid = self._poll(self._config(), state)
+
+        self.assertTrue(changed)
+        terminate_worker_pid.assert_called_once_with(2222)
+        self.assertEqual(state["workers"]["run-1"]["status"], "superseded")
+
+    def test_grace_window_can_be_disabled(self) -> None:
+        state = self._state()
+        changed, terminate_worker_pid = self._poll(self._config(handoff_grace_seconds=0), state)
+
+        self.assertTrue(changed)
+        terminate_worker_pid.assert_called_once_with(2222)
+        self.assertEqual(state["workers"]["run-1"]["status"], "superseded")
+
+    def test_stalled_worker_gets_no_grace(self) -> None:
+        state = self._state(status="stalled")
+        changed, terminate_worker_pid = self._poll(self._config(), state)
+
+        self.assertTrue(changed)
+        terminate_worker_pid.assert_called_once_with(2222)
+        self.assertEqual(state["workers"]["run-1"]["status"], "superseded")

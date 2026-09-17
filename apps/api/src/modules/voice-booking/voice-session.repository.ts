@@ -5,6 +5,7 @@ import { DatabaseService } from "../../common/db";
 import type {
   VoiceCommandReceiptRecord,
   VoiceConfirmationRecord,
+  VoiceRecordingCheckpointRecord,
   VoiceSessionEventRecord,
   VoiceSessionRecord,
 } from "./voice-booking.repository";
@@ -198,6 +199,36 @@ function mapConfirmationRow(
       ? new Date(row.confirmed_at).toISOString()
       : null,
     expiresAt: new Date(row.expires_at).toISOString(),
+  };
+}
+
+type VoiceRecordingCheckpointRow = QueryResultRow & {
+  checkpoint_id: string;
+  call_id: string;
+  recording_id: string | null;
+  manifest_version: number;
+  manifest: unknown;
+  manifest_hash: string;
+  coverage: unknown;
+  policy_version: string;
+  verified_at: Date | string | null;
+};
+
+function mapRecordingCheckpointRow(
+  row: VoiceRecordingCheckpointRow,
+): VoiceRecordingCheckpointRecord {
+  return {
+    checkpointId: row.checkpoint_id,
+    callId: row.call_id,
+    recordingId: row.recording_id,
+    manifestVersion: row.manifest_version,
+    manifest: row.manifest,
+    manifestHash: row.manifest_hash,
+    coverage: row.coverage,
+    policyVersion: row.policy_version,
+    verifiedAt: row.verified_at
+      ? new Date(row.verified_at).toISOString()
+      : null,
   };
 }
 
@@ -525,6 +556,80 @@ export class VoiceSessionRepository {
       [voiceSessionId],
     );
     return result.rows.map(mapCommandReceiptRow);
+  }
+
+  /**
+   * SD §8.2/§9.1: `voice.recording_checkpoint` is append-only
+   * (`voice._make_append_only`, V0086) and uniquely keyed on
+   * `(call_id, recording_id, manifest_version)` -- an already-sealed
+   * manifest version can never be overwritten. A conflicting insert (a
+   * retried report for a manifest version that already exists) is treated
+   * as a safe no-op that returns the existing row, exactly like
+   * `insertControlEvent`'s dedup semantics: recorder callback retries must
+   * never appear to mutate already-established evidence (SD §8.3
+   * "callback 重送只更新相同 manifest 的可驗證結果").
+   */
+  async insertRecordingCheckpoint(
+    input: {
+      callId: string;
+      recordingId: string | null;
+      manifestVersion: number;
+      manifest: unknown;
+      manifestHash: string;
+      coverage: unknown;
+      policyVersion: string;
+      verifiedAt: string | null;
+    },
+    executor?: VoiceQueryExecutor,
+  ): Promise<{ checkpoint: VoiceRecordingCheckpointRecord; inserted: boolean }> {
+    const exec = executor ?? this.requireDatabase();
+    const insertResult = await exec.query<VoiceRecordingCheckpointRow>(
+      `
+        INSERT INTO voice.recording_checkpoint (
+          call_id, recording_id, manifest_version, manifest, manifest_hash,
+          coverage, policy_version, verified_at
+        ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
+        ON CONFLICT DO NOTHING
+        RETURNING *
+      `,
+      [
+        input.callId,
+        input.recordingId,
+        input.manifestVersion,
+        JSON.stringify(input.manifest),
+        input.manifestHash,
+        JSON.stringify(input.coverage),
+        input.policyVersion,
+        input.verifiedAt,
+      ],
+    );
+
+    const insertedRow = insertResult.rows[0];
+    if (insertedRow) {
+      return {
+        checkpoint: mapRecordingCheckpointRow(insertedRow),
+        inserted: true,
+      };
+    }
+
+    const existing = await exec.query<VoiceRecordingCheckpointRow>(
+      `
+        SELECT * FROM voice.recording_checkpoint
+        WHERE call_id = $1 AND COALESCE(recording_id, '') = COALESCE($2, '') AND manifest_version = $3
+        LIMIT 1
+      `,
+      [input.callId, input.recordingId, input.manifestVersion],
+    );
+    const existingRow = existing.rows[0];
+    if (!existingRow) {
+      throw new Error(
+        "voice.recording_checkpoint insert conflicted but no existing row could be located",
+      );
+    }
+    return {
+      checkpoint: mapRecordingCheckpointRow(existingRow),
+      inserted: false,
+    };
   }
 
   private requireDatabase(): VoiceQueryExecutor {

@@ -11,6 +11,14 @@ from control_plane.runtime import supervisor_runtime as supervisor
 from orchestrator_test_support import EvidenceOutputIsolation
 
 
+def _ago_iso(**delta) -> str:
+    from datetime import datetime, timedelta, timezone
+
+    moment = datetime.now(timezone.utc) - timedelta(**delta)
+    return moment.replace(microsecond=0).isoformat().replace("+00:00", "Z")
+
+
+
 class ProcessQueueDispatchGuardTests(EvidenceOutputIsolation, unittest.TestCase):
     def setUp(self) -> None:
         super().setUp()
@@ -901,6 +909,116 @@ class ProcessQueueDispatchGuardTests(EvidenceOutputIsolation, unittest.TestCase)
         self.assertFalse(changed)
         self.assertEqual(len(state["dispatch_pauses"]), 1)
 
+    def _orphan(self, **overrides) -> dict:
+        """The record from the live board, reduced to what the rule reads.
+
+        `PLANNING-PHASE1-CLAUDE2` is a worker-run label from a planning round,
+        not a board task id, so no task-based rule could ever match it.
+        """
+        pause = {
+            "provider": "claude2",
+            "task_id": "PLANNING-PHASE1-CLAUDE2",
+            "worker_run_id": "claude2-20260913T143057Z-9a14d58d",
+            "failure_kind": "quota/terminal",
+            "summary": "quota/terminal: {\"type\":\"rate_limit_event\",\"rate_limit_info\":{\"status\":\"rejec",
+            "paused_at": _ago_iso(days=3),
+            "blocked_until": None,
+        }
+        pause.update(overrides)
+        return pause
+
+    def test_a_dispatch_pause_naming_a_task_the_board_never_had_is_pruned(self) -> None:
+        """The 2026-09-16 incident. Four of these, written on 2026-09-13
+        against worker-run labels, outlived every rule here: the done check
+        read a status off a task that does not exist, the active-worker and
+        updated-task checks had nothing to compare, and the taskless rule
+        returns early because the id is present, just wrong. Three days later
+        a chair read them as current lane health and paused both Claude lanes
+        indefinitely on a quota window that had already reset."""
+        state = {"provider_pauses": {}, "dispatch_pauses": [self._orphan()], "workers": {}}
+
+        changed = supervisor.prune_completed_dispatch_pauses(
+            state, {"tasks": []}, config=self.config, provider_report=self.HEALTHY)
+
+        self.assertTrue(changed)
+        self.assertEqual(state["dispatch_pauses"], [])
+
+    def test_an_unknown_task_id_inside_the_grace_period_is_kept(self) -> None:
+        """A pause is written the moment a dispatch fails; the board file is
+        written by another path. A task can legitimately be missing from it
+        for a tick, and retiring the record in that window would discard a
+        live failure."""
+        state = {"provider_pauses": {},
+                 "dispatch_pauses": [self._orphan(paused_at=_ago_iso(seconds=30))],
+                 "workers": {}}
+
+        changed = supervisor.prune_completed_dispatch_pauses(
+            state, {"tasks": []}, config=self.config, provider_report=self.HEALTHY)
+
+        self.assertFalse(changed)
+        self.assertEqual(len(state["dispatch_pauses"]), 1)
+
+    def test_an_unknown_task_id_still_inside_its_stated_reset_is_kept(self) -> None:
+        """Whether the board knows the task is a separate question from
+        whether the provider window it recorded has elapsed. A reset that is
+        still ahead means the record is describing something current.
+
+        `changed` is True here, but not because anything was pruned:
+        rehydration reads the same still-future window and re-records the lane
+        pause, which is the right answer to a live window. The record itself
+        has to survive.
+        """
+        state = {"provider_pauses": {},
+                 "dispatch_pauses": [self._orphan(
+                     summary="quota/terminal: You've hit your usage limit. Resets in 96h.")],
+                 "workers": {}}
+
+        supervisor.prune_completed_dispatch_pauses(
+            state, {"tasks": []}, config=self.config, provider_report=self.HEALTHY)
+
+        self.assertEqual(len(state["dispatch_pauses"]), 1)
+        self.assertEqual(state["dispatch_pauses"][0]["task_id"], "PLANNING-PHASE1-CLAUDE2")
+
+    def test_an_unknown_task_id_inside_its_retry_window_is_kept(self) -> None:
+        state = {"provider_pauses": {},
+                 "dispatch_pauses": [self._orphan(blocked_until="2099-01-01T00:00:00Z")],
+                 "workers": {}}
+
+        changed = supervisor.prune_completed_dispatch_pauses(
+            state, {"tasks": []}, config=self.config, provider_report=self.HEALTHY)
+
+        self.assertFalse(changed)
+        self.assertEqual(len(state["dispatch_pauses"]), 1)
+
+    def test_an_archived_task_id_is_pruned_without_waiting_out_the_grace(self) -> None:
+        """The grace period buys time for a board write that may not have
+        landed yet. An id the board has explicitly archived needs none: that
+        task is gone by the board's own account."""
+        state = {"provider_pauses": {},
+                 "dispatch_pauses": [self._orphan(task_id="SR-FLEET-SETTLE-001",
+                                                  paused_at=_ago_iso(seconds=30))],
+                 "workers": {}}
+        status = {"tasks": [], "archived_task_ids": ["SR-FLEET-SETTLE-001"]}
+
+        changed = supervisor.prune_completed_dispatch_pauses(
+            state, status, config=self.config, provider_report=self.HEALTHY)
+
+        self.assertTrue(changed)
+        self.assertEqual(state["dispatch_pauses"], [])
+
+    def test_a_pause_whose_task_is_on_the_board_is_untouched_by_the_orphan_rule(self) -> None:
+        """The existing rules own that case; the orphan rule must not
+        second-guess them just because the task is old."""
+        state = {"provider_pauses": {}, "dispatch_pauses": [self._orphan(task_id="REAL-1")],
+                 "workers": {}}
+        status = {"tasks": [{"id": "REAL-1", "status": "blocked"}]}
+
+        changed = supervisor.prune_completed_dispatch_pauses(
+            state, status, config=self.config, provider_report=self.HEALTHY)
+
+        self.assertFalse(changed)
+        self.assertEqual(len(state["dispatch_pauses"]), 1)
+
     def test_lane_has_recorded_pause_reads_the_key_as_well_as_the_field(self) -> None:
         self.assertTrue(supervisor.lane_has_recorded_pause(
             {"provider_pauses": {"gemini": {"kind": "quota"}}}, "gemini"))
@@ -1346,6 +1464,102 @@ class ProcessQueueDispatchGuardTests(EvidenceOutputIsolation, unittest.TestCase)
         self.assertEqual(queued_event["task_id"], "REG-PAUSED")
         self.assertEqual(queued_event["target_agent"], "Claude")
         self.assertEqual(queued_event["reason"], "owned_in_progress_dispatch")
+
+    def _auth_pause_claim_fixture(self, pause: dict) -> tuple[dict, dict, dict]:
+        config = {
+            "schema": {
+                "tasks_path": "tasks",
+                "task_id_field": "id",
+                "assignee_field": "owner",
+                "reviewer_field": "reviewer",
+            },
+            "ready_dispatcher": {
+                "helper_claim": {
+                    "enabled": True,
+                    "task_statuses": ["in_progress"],
+                    "availability_first": False,
+                    "allow_any_idle_lane": False,
+                    "require_assigned_agent_busy": True,
+                }
+            },
+            "agents": {
+                "copilot": {"id": "copilot", "display_name": "Copilot", "provider": "copilot"},
+                "codex": {"id": "codex", "display_name": "Codex", "provider": "codex"},
+                "claude": {"id": "claude", "display_name": "Claude", "provider": "claude"},
+            },
+            "providers": {},
+        }
+        state = {
+            "queue": {"events": {}},
+            "provider_pauses": {"copilot": {"schema": 3, "scope": "lane", "lane_id": "copilot", **pause}},
+            "workers": {},
+        }
+        status = {
+            "tasks": [
+                {"id": "REG-AUTH", "status": "in_progress", "owner": "Copilot", "reviewer": "Claude", "depends_on": []},
+            ]
+        }
+        return config, state, status
+
+    def test_dispatcher_claims_task_whose_owner_lane_has_no_credentials(self) -> None:
+        """An auth pause has no resume time; an explicit owner there is a dead end.
+
+        On 2026-09-08 tasks owned by lanes with no credentials went 85 minutes
+        with no dispatch until a person reassigned them. The explicit-owner
+        guard is meant for a quota pause that will lift, not for this.
+        """
+        config, state, status = self._auth_pause_claim_fixture(
+            {"kind": "auth", "reason": "provider auth unavailable", "paused_at": "2026-09-08T09:40:00Z", "resume_at": None}
+        )
+        with (
+            mock.patch.object(supervisor, "load_status", return_value=status),
+            mock.patch.object(supervisor, "load_event_queue", return_value=[]),
+            mock.patch.object(supervisor, "persist_task_reassignment", return_value=True) as persist,
+            mock.patch.object(supervisor, "queue_delivery_event", return_value=True) as queue_delivery_event,
+            mock.patch.object(supervisor, "write_activity_log"),
+        ):
+            changed = supervisor.dispatch_ready_tasks(config, state)
+
+        self.assertTrue(changed)
+        persist.assert_called_once()
+        kwargs = persist.call_args.kwargs
+        self.assertEqual(kwargs["task_id"], "REG-AUTH")
+        self.assertIn(kwargs["new_owner"], {"Codex", "Claude"})
+        self.assertNotEqual(kwargs["new_owner"], kwargs["new_reviewer"])
+        queued_event = queue_delivery_event.call_args.args[1]
+        self.assertEqual(queued_event["task_id"], "REG-AUTH")
+        self.assertEqual(queued_event["target_agent"], kwargs["new_owner"])
+
+    def test_dispatcher_still_respects_explicit_owner_across_a_quota_pause(self) -> None:
+        config, state, status = self._auth_pause_claim_fixture(
+            {"kind": "quota", "reason": "provider quota exhausted", "paused_at": "2026-09-08T09:40:00Z", "resume_at": 9999999999}
+        )
+        with (
+            mock.patch.object(supervisor, "load_status", return_value=status),
+            mock.patch.object(supervisor, "load_event_queue", return_value=[]),
+            mock.patch.object(supervisor, "persist_task_reassignment", return_value=True) as persist,
+            mock.patch.object(supervisor, "queue_delivery_event", return_value=True),
+            mock.patch.object(supervisor, "write_activity_log"),
+        ):
+            supervisor.dispatch_ready_tasks(config, state)
+
+        persist.assert_not_called()
+
+    def test_auth_unavailable_claim_can_be_switched_off(self) -> None:
+        config, state, status = self._auth_pause_claim_fixture(
+            {"kind": "auth", "reason": "provider auth unavailable", "paused_at": "2026-09-08T09:40:00Z", "resume_at": None}
+        )
+        config["ready_dispatcher"]["helper_claim"]["claim_from_auth_unavailable_lane"] = False
+        with (
+            mock.patch.object(supervisor, "load_status", return_value=status),
+            mock.patch.object(supervisor, "load_event_queue", return_value=[]),
+            mock.patch.object(supervisor, "persist_task_reassignment", return_value=True) as persist,
+            mock.patch.object(supervisor, "queue_delivery_event", return_value=True),
+            mock.patch.object(supervisor, "write_activity_log"),
+        ):
+            supervisor.dispatch_ready_tasks(config, state)
+
+        persist.assert_not_called()
 
     def test_dispatcher_does_not_claim_evidence_only_integration_when_owner_is_busy(self) -> None:
         config = {

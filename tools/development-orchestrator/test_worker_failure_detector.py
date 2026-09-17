@@ -43,8 +43,26 @@ class CodexFailureProvenanceTests(unittest.TestCase):
         ):
             with self.subTest(payload=payload):
                 signal = detect_failure_signal_in_lines([json.dumps(payload)])
-                self.assertIsNotNone(signal)
-                self.assertTrue(signal.provider_pause_authorized)
+            self.assertIsNotNone(signal)
+            self.assertTrue(signal.provider_pause_authorized)
+
+    def test_antigravity_individual_quota_result_authorizes_rotation(self):
+        """Agy reports this quota wall in its terminal result without an Error: prefix.
+
+        The failure must be provider-authorized so a rotation-enabled lane cools
+        only the exhausted model instead of falling through to a broad pool
+        pause.
+        """
+        signal = detect_failure_signal_in_lines([json.dumps({
+            "event": "result",
+            "result": {
+                "status": "ERROR",
+                "error": "Individual quota reached. Resets in 61h34m52s.",
+            },
+        })])
+        self.assertIsNotNone(signal)
+        self.assertEqual(signal.source, "antigravity_stream_result_error")
+        self.assertTrue(signal.provider_pause_authorized)
 
 
 if __name__ == "__main__":
