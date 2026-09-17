@@ -1994,8 +1994,33 @@ def _matching_approval(
     return pending_match, history_match
 
 
+def is_orchestrated_session() -> bool:
+    """True only inside a worker the supervisor launched.
+
+    Every Claude adapter exports ORCH_RUN_ID into the worker's environment, and
+    a hook command inherits the environment of the CLI that fired it, so this
+    is the one signal that separates a supervised worker from a person typing
+    in a chatbox in the same checkout. The repo-local hook file cannot tell the
+    two apart on its own: it applies to every session whose cwd is this
+    project.
+
+    Interactive sessions used to take the full broker path. Their deferred
+    commands were queued as approvals that no chair review can resolve, since
+    they belong to no task and no worker; the chair then retried on every lane,
+    each attempt holding the supervisor loop for about two minutes, and the
+    person at the keyboard saw either a hang or a denial that their own
+    approval in the conversation could not lift. One session produced a
+    hundred such approvals in a day. A person already has a permission system:
+    Claude Code's own prompt.
+    """
+    return bool((os.environ.get("ORCH_RUN_ID") or "").strip())
+
+
 def hook_mode(config: dict[str, Any], event_name: str, payload: dict[str, Any]) -> int:
+    orchestrated = is_orchestrated_session()
     if event_name in {"PostToolUse", "PostToolUseFailure"}:
+        if not orchestrated:
+            return 0
         tool_name = payload.get("tool_name") or payload.get("toolName") or ""
         tool_input = payload.get("tool_input") or payload.get("toolInput") or {}
         session_id = payload.get("session_id") or payload.get("sessionId")
@@ -2039,6 +2064,11 @@ def hook_mode(config: dict[str, Any], event_name: str, payload: dict[str, Any]) 
         if event_name == "PreToolUse" and _maybe_apply_chatbox_tree_guard(
             config, payload, tool_name
         ):
+            return 0
+        if not orchestrated:
+            # A person's tool call: no broker verdict, no approval queued, no
+            # response emitted. Claude Code's own permission prompt decides,
+            # exactly as it would in a checkout without these hooks.
             return 0
         active_override = find_resume_override(
             config,
@@ -2205,6 +2235,8 @@ def hook_mode(config: dict[str, Any], event_name: str, payload: dict[str, Any]) 
         emit_hook_response(_decision_response(event_name, "ask", decision["reason"]))
         return 0
 
+    if not orchestrated:
+        return 0
     log_event(config, event_name, payload)
     return 0
 
