@@ -17,12 +17,14 @@
       "migration_filename": "V0094__sr_driver_leave.sql",
       "domain": "driver_leave",
       "target_schema": "ops",
-      "primary_tables": ["ops.phase1_driver_leave_requests"],
+      "primary_tables": [
+        "ops.phase1_driver_leave_requests"
+      ],
       "referenced_tables": [
         "ops.phase1_driver_shifts",
         "ops.phase1_driver_matching_suppressions"
       ],
-      "description": "請假資料與審核／班次連動服務 migration",
+      "description": "\u8acb\u5047\u8cc7\u6599\u8207\u5be9\u6838\uff0f\u73ed\u6b21\u9023\u52d5\u670d\u52d9 migration",
       "downstream_tasks": [
         "SR-LEAVE-FE-001",
         "SR-WIRE-001",
@@ -48,7 +50,7 @@
         "reg.phase1_registry_drivers",
         "admin.phase1_driver_fleet_affiliations"
       ],
-      "referenced_tables_access": "read-only; reg.phase1_registry_drivers is the driver identity source, admin.phase1_driver_fleet_affiliations is the active fleet cohort source via a new dedicated resolver (academy-identity-decision.md §2.2.1: as-of instant, effective_from<=asOfInstant AND (effective_until IS NULL OR effective_until>asOfInstant), inner join on reg.phase1_registry_drivers, DISTINCT driver_id) — NOT FleetPartnerService.listPortalDrivers(), which is a portal-display read (no date filtering, no dedup, fallback rows for orphaned affiliations) and must not be reused for this denominator",
+      "referenced_tables_access": "read-only; reg.phase1_registry_drivers is the driver identity source, admin.phase1_driver_fleet_affiliations is the active fleet cohort source via a new dedicated resolver (academy-identity-decision.md \u00a72.2.1: as-of instant, effective_from<=asOfInstant AND (effective_until IS NULL OR effective_until>asOfInstant), inner join on reg.phase1_registry_drivers, DISTINCT driver_id) \u2014 NOT FleetPartnerService.listPortalDrivers(), which is a portal-display read (no date filtering, no dedup, fallback rows for orphaned affiliations) and must not be reused for this denominator",
       "modifies_existing_tables": [
         {
           "table": "reg.driver_training_records",
@@ -64,7 +66,7 @@
         }
       ],
       "not_referenced": "reg.drivers (uuid PK) has no runtime write path in apps/api/src and must not be used as an identity target or cohort denominator; see driver_identity_decision_ref",
-      "description": "課程、測驗、完訓與重訓資料服務 migration",
+      "description": "\u8ab2\u7a0b\u3001\u6e2c\u9a57\u3001\u5b8c\u8a13\u8207\u91cd\u8a13\u8cc7\u6599\u670d\u52d9 migration",
       "downstream_tasks": [
         "SR-ACADEMY-FE-001",
         "SR-WIRE-001",
@@ -77,7 +79,9 @@
       "migration_filename": "V0096__sr_host_vehicle_access.sql",
       "domain": "host_vehicle_access",
       "target_schema": "ops",
-      "primary_views_or_tables": ["ops.phase1_host_vehicle_projections"],
+      "primary_views_or_tables": [
+        "ops.phase1_host_vehicle_projections"
+      ],
       "referenced_tables": [
         "reg.vehicles",
         "ops.phase1_maintenance_logs",
@@ -85,12 +89,29 @@
         "ops.phase1_platform_earnings_ledger",
         "ops.phase1_owned_orders"
       ],
-      "description": "Host 自車受限 read model 與所有權授權 migration",
+      "description": "Host \u81ea\u8eca\u53d7\u9650 read model \u8207\u6240\u6709\u6b0a\u6388\u6b0a migration",
       "downstream_tasks": [
         "SR-HOST-FE-001",
         "SR-WIRE-001",
         "SR-QA-NEWFEATURES-001"
       ]
+    },
+    {
+      "task_id": "SR-PARTNER-NOTIFY-CON-20260917",
+      "version": "V0104",
+      "migration_filename": "V0104__sr_partner_notification_contracts.sql",
+      "domain": "partner_notification_contracts",
+      "target_schema": "mobility,admin",
+      "primary_tables": [
+        "admin.phase1_partner_notification_bindings",
+        "mobility.phase1_order_partner_notification_routes",
+        "mobility.phase1_partner_notification_delivery_contexts",
+        "mobility.phase1_partner_notification_sequences"
+      ],
+      "referenced_tables": [],
+      "table_invariants": [],
+      "description": "Partner notification contracts and routing schema allocation",
+      "downstream_tasks": []
     }
   ],
   "boundary_invariants": {
@@ -128,20 +149,27 @@
       "migration_filename": "V0098__sr_remittance_proof.sql",
       "domain": "remittance_proof",
       "target_schema": "billing",
-      "primary_tables": ["billing.phase1_remittance_proofs"],
-      "referenced_tables": ["billing.phase1_reimbursement_batches"],
-      "table_invariants": [
-        "billing.phase1_remittance_proofs.proof_id uuid PRIMARY KEY DEFAULT gen_random_uuid() — server-generated only; no client-supplied identity column.",
-        "batch_id uuid NOT NULL REFERENCES billing.phase1_reimbursement_batches(batch_id) — fixed at insert, never updated (no UPDATE ... SET batch_id path).",
-        "driver_id varchar(100) NOT NULL — denormalised from the batch at insert time for ownership checks without a join; must equal the batch's driver_id (enforced in application layer or a CHECK against a computed column, not by trusting client input).",
-        "content_hash text NOT NULL, content_type text NOT NULL, size_bytes bigint NOT NULL — set once at insert (immutable content identity); no UPDATE statement may target these three columns.",
-        "scan_state text NOT NULL DEFAULT 'pending_scan' CHECK (scan_state IN ('pending_scan','clean','rejected')) — the only column a scan-worker transition may write, plus scan_completed_at/rejection_reason.",
-        "UNIQUE (content_hash) is NOT applied — the same physical proof file may legitimately be re-uploaded/re-referenced across distinct batches; dedupe is a future concern, not this migration's.",
-        "billing.phase1_remittance_proof_payment_receipts: receipt_id uuid PRIMARY KEY DEFAULT gen_random_uuid(), batch_id uuid NOT NULL REFERENCES billing.phase1_reimbursement_batches(batch_id), proof_id uuid NOT NULL REFERENCES billing.phase1_remittance_proofs(proof_id), idempotency_key text NOT NULL, UNIQUE (batch_id, idempotency_key) — the idempotency invariant: a retried mark-paid call with the same key on the same batch must read back this row instead of inserting a second one.",
-        "Application transaction for mark-paid-with-proof: SELECT batch FOR UPDATE, verify approved_at IS NOT NULL AND proof.scan_state = 'clean' AND proof.batch_id = batch.batch_id, INSERT ... ON CONFLICT (batch_id, idempotency_key) DO NOTHING RETURNING *, then UPDATE batch.status='paid' only when the INSERT actually happened (i.e. this was not a replay) — all within one transaction so a crash between steps cannot leave a receipt without a paid batch or vice versa."
+      "primary_tables": [
+        "billing.phase1_remittance_proofs"
       ],
-      "description": "匯款證明儲存中繼資料、掃描狀態與冪等付款收據 migration",
-      "downstream_tasks": ["SR-PROOF-001", "SR-QA-NEWFEATURES-001"]
+      "referenced_tables": [
+        "billing.phase1_reimbursement_batches"
+      ],
+      "table_invariants": [
+        "billing.phase1_remittance_proofs.proof_id uuid PRIMARY KEY DEFAULT gen_random_uuid() \u2014 server-generated only; no client-supplied identity column.",
+        "batch_id uuid NOT NULL REFERENCES billing.phase1_reimbursement_batches(batch_id) \u2014 fixed at insert, never updated (no UPDATE ... SET batch_id path).",
+        "driver_id varchar(100) NOT NULL \u2014 denormalised from the batch at insert time for ownership checks without a join; must equal the batch's driver_id (enforced in application layer or a CHECK against a computed column, not by trusting client input).",
+        "content_hash text NOT NULL, content_type text NOT NULL, size_bytes bigint NOT NULL \u2014 set once at insert (immutable content identity); no UPDATE statement may target these three columns.",
+        "scan_state text NOT NULL DEFAULT 'pending_scan' CHECK (scan_state IN ('pending_scan','clean','rejected')) \u2014 the only column a scan-worker transition may write, plus scan_completed_at/rejection_reason.",
+        "UNIQUE (content_hash) is NOT applied \u2014 the same physical proof file may legitimately be re-uploaded/re-referenced across distinct batches; dedupe is a future concern, not this migration's.",
+        "billing.phase1_remittance_proof_payment_receipts: receipt_id uuid PRIMARY KEY DEFAULT gen_random_uuid(), batch_id uuid NOT NULL REFERENCES billing.phase1_reimbursement_batches(batch_id), proof_id uuid NOT NULL REFERENCES billing.phase1_remittance_proofs(proof_id), idempotency_key text NOT NULL, UNIQUE (batch_id, idempotency_key) \u2014 the idempotency invariant: a retried mark-paid call with the same key on the same batch must read back this row instead of inserting a second one.",
+        "Application transaction for mark-paid-with-proof: SELECT batch FOR UPDATE, verify approved_at IS NOT NULL AND proof.scan_state = 'clean' AND proof.batch_id = batch.batch_id, INSERT ... ON CONFLICT (batch_id, idempotency_key) DO NOTHING RETURNING *, then UPDATE batch.status='paid' only when the INSERT actually happened (i.e. this was not a replay) \u2014 all within one transaction so a crash between steps cannot leave a receipt without a paid batch or vice versa."
+      ],
+      "description": "\u532f\u6b3e\u8b49\u660e\u5132\u5b58\u4e2d\u7e7c\u8cc7\u6599\u3001\u6383\u63cf\u72c0\u614b\u8207\u51aa\u7b49\u4ed8\u6b3e\u6536\u64da migration",
+      "downstream_tasks": [
+        "SR-PROOF-001",
+        "SR-QA-NEWFEATURES-001"
+      ]
     },
     {
       "task_id": "SR-RECOVERY-CONTRACTS-20260911",
@@ -153,18 +181,24 @@
         "ops.phase1_push_delivery_claims",
         "ops.phase1_push_delivery_receipts"
       ],
-      "referenced_tables": ["ops.consumer_notification_outbox"],
-      "table_invariants": [
-        "ops.phase1_push_delivery_claims: outbox_id uuid PRIMARY KEY REFERENCES ops.consumer_notification_outbox(outbox_id) — one live claim row per outbox row (not a history table); fence_token integer NOT NULL DEFAULT 0.",
-        "Claim acquisition: UPDATE ... SET worker_id=$new, claim_state='claimed', fence_token = fence_token + 1, lease_expires_at = now() + lease WHERE outbox_id=$1 AND (claim_state != 'claimed' OR lease_expires_at < now()) RETURNING fence_token — an already-live, unexpired lease is never silently reassigned; the caller must observe zero rows updated and back off.",
-        "Every subsequent write (release, receipt persistence) is WHERE outbox_id=$1 AND fence_token=$claimedFenceToken — a worker whose lease has since been reclaimed writes with a stale fence_token and its UPDATE affects zero rows, which the caller must treat as claim loss, not success.",
-        "ops.phase1_push_delivery_receipts: receipt_id uuid PRIMARY KEY DEFAULT gen_random_uuid(), outbox_id uuid NOT NULL REFERENCES ops.consumer_notification_outbox(outbox_id), dedupe_key text NOT NULL, UNIQUE (dedupe_key) — dedupe_key is server-derived from (outbox_id, fence_token), never client-suppliable, so a retried send for the same claimed attempt cannot insert a second receipt.",
-        "tenant_id and passenger_subject_ref are NOT NULL on both tables and copied from ops.consumer_notification_outbox at claim/receipt time, not re-derived from caller input, preserving tenant + passenger-subject isolation independent of what a compromised or buggy caller asserts.",
-        "device_delivery_state text NOT NULL DEFAULT 'unknown' CHECK (device_delivery_state IN ('unknown','delivered','delivery_failed')) — no application code path may set this to 'delivered' as a side effect of provider_ack_state='provider_acknowledged'; they are independent columns written by independent events.",
-        "Persistence-failure handling is an application-transaction concern, not a schema constraint: the service records provider ack results by first executing the fence-checked UPDATE/INSERT inside a transaction; if that transaction itself fails to commit, the caller's return value must be the outcome 'persistence_unknown' (see packages/contracts/src/passenger-push-delivery.ts), never a fabricated 'recorded' outcome — this table design supplies the idempotent target for a retry, it does not itself prevent a caller from mis-reporting a failed commit."
+      "referenced_tables": [
+        "ops.consumer_notification_outbox"
       ],
-      "description": "被動推播送達 claim/lease/fence 與冪等收據 migration；provider 回執與真實裝置送達分離記錄",
-      "downstream_tasks": ["SR-PUSH-001", "SR-LIVE-PUSH-001", "SR-QA-NEWFEATURES-001"]
+      "table_invariants": [
+        "ops.phase1_push_delivery_claims: outbox_id uuid PRIMARY KEY REFERENCES ops.consumer_notification_outbox(outbox_id) \u2014 one live claim row per outbox row (not a history table); fence_token integer NOT NULL DEFAULT 0.",
+        "Claim acquisition: UPDATE ... SET worker_id=$new, claim_state='claimed', fence_token = fence_token + 1, lease_expires_at = now() + lease WHERE outbox_id=$1 AND (claim_state != 'claimed' OR lease_expires_at < now()) RETURNING fence_token \u2014 an already-live, unexpired lease is never silently reassigned; the caller must observe zero rows updated and back off.",
+        "Every subsequent write (release, receipt persistence) is WHERE outbox_id=$1 AND fence_token=$claimedFenceToken \u2014 a worker whose lease has since been reclaimed writes with a stale fence_token and its UPDATE affects zero rows, which the caller must treat as claim loss, not success.",
+        "ops.phase1_push_delivery_receipts: receipt_id uuid PRIMARY KEY DEFAULT gen_random_uuid(), outbox_id uuid NOT NULL REFERENCES ops.consumer_notification_outbox(outbox_id), dedupe_key text NOT NULL, UNIQUE (dedupe_key) \u2014 dedupe_key is server-derived from (outbox_id, fence_token), never client-suppliable, so a retried send for the same claimed attempt cannot insert a second receipt.",
+        "tenant_id and passenger_subject_ref are NOT NULL on both tables and copied from ops.consumer_notification_outbox at claim/receipt time, not re-derived from caller input, preserving tenant + passenger-subject isolation independent of what a compromised or buggy caller asserts.",
+        "device_delivery_state text NOT NULL DEFAULT 'unknown' CHECK (device_delivery_state IN ('unknown','delivered','delivery_failed')) \u2014 no application code path may set this to 'delivered' as a side effect of provider_ack_state='provider_acknowledged'; they are independent columns written by independent events.",
+        "Persistence-failure handling is an application-transaction concern, not a schema constraint: the service records provider ack results by first executing the fence-checked UPDATE/INSERT inside a transaction; if that transaction itself fails to commit, the caller's return value must be the outcome 'persistence_unknown' (see packages/contracts/src/passenger-push-delivery.ts), never a fabricated 'recorded' outcome \u2014 this table design supplies the idempotent target for a retry, it does not itself prevent a caller from mis-reporting a failed commit."
+      ],
+      "description": "\u88ab\u52d5\u63a8\u64ad\u9001\u9054 claim/lease/fence \u8207\u51aa\u7b49\u6536\u64da migration\uff1bprovider \u56de\u57f7\u8207\u771f\u5be6\u88dd\u7f6e\u9001\u9054\u5206\u96e2\u8a18\u9304",
+      "downstream_tasks": [
+        "SR-PUSH-001",
+        "SR-LIVE-PUSH-001",
+        "SR-QA-NEWFEATURES-001"
+      ]
     },
     {
       "task_id": "SR-RECOVERY-CONTRACTS-20260911",
@@ -178,14 +212,17 @@
       ],
       "referenced_tables": [],
       "table_invariants": [
-        "admin.phase1_platform_adapters: id text PRIMARY KEY, revision integer NOT NULL DEFAULT 1 — no table existed for this domain before this migration; platform_admin.repository.ts's PlatformAdminState currently covers only tenants/public-info/placards (see support/unblock/SR-ADMIN-ADAPTER-001 planning decision).",
-        "credential_expiry_reference text NULL, credential_expiry_expires_at timestamptz NULL — both columns nullable independently of each other and of the row; absent/unrecorded expiry is a valid, distinct state, never coerced to a sentinel value. Never a column for the secret itself.",
+        "admin.phase1_platform_adapters: id text PRIMARY KEY, revision integer NOT NULL DEFAULT 1 \u2014 no table existed for this domain before this migration; platform_admin.repository.ts's PlatformAdminState currently covers only tenants/public-info/placards (see support/unblock/SR-ADMIN-ADAPTER-001 planning decision).",
+        "credential_expiry_reference text NULL, credential_expiry_expires_at timestamptz NULL \u2014 both columns nullable independently of each other and of the row; absent/unrecorded expiry is a valid, distinct state, never coerced to a sentinel value. Never a column for the secret itself.",
         "Optimistic concurrency: every UPDATE is WHERE id=$1 AND revision=$expectedRevision, and the same statement sets revision = revision + 1; zero rows affected means a stale expectedRevision and the caller must surface a conflict rather than retry-and-overwrite.",
-        "admin.phase1_platform_adapter_mutation_audit: audit_id uuid PRIMARY KEY DEFAULT gen_random_uuid(), adapter_id text NOT NULL REFERENCES admin.phase1_platform_adapters(id), previous_revision integer NOT NULL, new_revision integer NOT NULL, reason text NOT NULL — inserted in the same transaction as the adapter UPDATE (both succeed or both roll back), so lastMutationAudit on the returned record is always the row the caller can see, never a promise of an audit write that might not have landed.",
+        "admin.phase1_platform_adapter_mutation_audit: audit_id uuid PRIMARY KEY DEFAULT gen_random_uuid(), adapter_id text NOT NULL REFERENCES admin.phase1_platform_adapters(id), previous_revision integer NOT NULL, new_revision integer NOT NULL, reason text NOT NULL \u2014 inserted in the same transaction as the adapter UPDATE (both succeed or both roll back), so lastMutationAudit on the returned record is always the row the caller can see, never a promise of an audit write that might not have landed.",
         "The warning-window policy (packages/contracts/src/platform-adapter-registry.ts AdapterCredentialExpiryWarning) is computed at read time from credential_expiry_expires_at against a server-side configured window; it is not a persisted column, so changing the window does not require a migration or a backfill."
       ],
-      "description": "Adapter registry 持久化、憑證到期非機密參照與伺服器端稽核 migration",
-      "downstream_tasks": ["SR-ADMIN-ADAPTER-001", "SR-QA-NEWFEATURES-001"]
+      "description": "Adapter registry \u6301\u4e45\u5316\u3001\u6191\u8b49\u5230\u671f\u975e\u6a5f\u5bc6\u53c3\u7167\u8207\u4f3a\u670d\u5668\u7aef\u7a3d\u6838 migration",
+      "downstream_tasks": [
+        "SR-ADMIN-ADAPTER-001",
+        "SR-QA-NEWFEATURES-001"
+      ]
     }
   ],
   "launch_allocations": [
@@ -203,13 +240,13 @@
         "voice.work_item"
       ],
       "table_invariants": [
-        "voice.phase1_work_item_repair_audits: repair_id uuid PRIMARY KEY DEFAULT gen_random_uuid(), work_id uuid NOT NULL REFERENCES voice.work_item(work_id), request_id varchar(255) NOT NULL, actor_id varchar(100) NOT NULL, reason text NOT NULL, expected_lease_epoch integer NOT NULL, previous_status varchar(20) NOT NULL, previous_attempt_count integer NOT NULL, previous_last_error text NULL, allocated_max_attempts integer NOT NULL DEFAULT 5, created_at timestamptz NOT NULL DEFAULT now(), UNIQUE (work_id, request_id) — captures durable ops repair authorization with request-level deduplication; never creates a parallel queue.",
+        "voice.phase1_work_item_repair_audits: repair_id uuid PRIMARY KEY DEFAULT gen_random_uuid(), work_id uuid NOT NULL REFERENCES voice.work_item(work_id), request_id varchar(255) NOT NULL, actor_id varchar(100) NOT NULL, reason text NOT NULL, expected_lease_epoch integer NOT NULL, previous_status varchar(20) NOT NULL, previous_attempt_count integer NOT NULL, previous_last_error text NULL, allocated_max_attempts integer NOT NULL DEFAULT 5, created_at timestamptz NOT NULL DEFAULT now(), UNIQUE (work_id, request_id) \u2014 captures durable ops repair authorization with request-level deduplication; never creates a parallel queue.",
         "Repair transaction invariants: repair execution must verify in the same transaction that target work_item is currently status='failed' with lease_epoch=expected_lease_epoch; resets status to 'pending' with a fresh maxAttempts budget, preserving original work_id, payload_ref, dedupe_key, command_id and ordinary-call nullable voice_session_id.",
-        "voice.phase1_work_item_attempt_audits: attempt_audit_id uuid PRIMARY KEY DEFAULT gen_random_uuid(), work_id uuid NOT NULL REFERENCES voice.work_item(work_id), attempt_no integer NOT NULL, lease_epoch integer NOT NULL, attempt_stage varchar(20) NOT NULL CHECK (attempt_stage IN ('started', 'terminal')), outcome varchar(20) NOT NULL CHECK (outcome IN ('started', 'completed', 'failed', 'fenced')), error_message text NULL, started_at timestamptz NOT NULL DEFAULT now(), finished_at timestamptz NULL, created_at timestamptz NOT NULL DEFAULT now(), CONSTRAINT ck_phase1_work_item_attempt_stage_outcome CHECK ((attempt_stage = 'started' AND outcome = 'started') OR (attempt_stage = 'terminal' AND outcome IN ('completed', 'failed', 'fenced'))), CONSTRAINT uq_phase1_work_item_attempt_stage UNIQUE (work_id, lease_epoch, attempt_no, attempt_stage) — finite append-only attempt event contract with discrete started and terminal stages, duplicate protection, and crash-safe event preservation without UPDATE or DELETE.",
+        "voice.phase1_work_item_attempt_audits: attempt_audit_id uuid PRIMARY KEY DEFAULT gen_random_uuid(), work_id uuid NOT NULL REFERENCES voice.work_item(work_id), attempt_no integer NOT NULL, lease_epoch integer NOT NULL, attempt_stage varchar(20) NOT NULL CHECK (attempt_stage IN ('started', 'terminal')), outcome varchar(20) NOT NULL CHECK (outcome IN ('started', 'completed', 'failed', 'fenced')), error_message text NULL, started_at timestamptz NOT NULL DEFAULT now(), finished_at timestamptz NULL, created_at timestamptz NOT NULL DEFAULT now(), CONSTRAINT ck_phase1_work_item_attempt_stage_outcome CHECK ((attempt_stage = 'started' AND outcome = 'started') OR (attempt_stage = 'terminal' AND outcome IN ('completed', 'failed', 'fenced'))), CONSTRAINT uq_phase1_work_item_attempt_stage UNIQUE (work_id, lease_epoch, attempt_no, attempt_stage) \u2014 finite append-only attempt event contract with discrete started and terminal stages, duplicate protection, and crash-safe event preservation without UPDATE or DELETE.",
         "Both audit tables are strictly append-only via voice._make_append_only(...) trigger: no UPDATE or DELETE is permitted by any application or repair code path.",
         "Historical data invariant: existing historical work only preserves recorded attempt count and last_error; repair records do not fabricate non-existent historical attempt timestamps."
       ],
-      "description": "Voice work_item 補跑稽核、嘗試紀錄與 lease-fenced 修復資料表 migration",
+      "description": "Voice work_item \u88dc\u8dd1\u7a3d\u6838\u3001\u5617\u8a66\u7d00\u9304\u8207 lease-fenced \u4fee\u5fa9\u8cc7\u6599\u8868 migration",
       "downstream_tasks": [
         "SR-QA-WEBHOOK-001",
         "SR-QA-BOOKING-001"
@@ -230,15 +267,15 @@
         "reg.phase1_registry_policies"
       ],
       "table_invariants": [
-        "reg.phase1_registry_expiry_events: event_id uuid PRIMARY KEY DEFAULT gen_random_uuid(), scope varchar(100) NOT NULL, entity_type varchar(50) NOT NULL CHECK (entity_type IN ('driver', 'policy')), entity_id varchar(100) NOT NULL, credential_type varchar(100) NOT NULL, source_fingerprint text NOT NULL, source_expiry_at timestamptz NULL, status varchar(50) NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'leased', 'completed', 'superseded', 'failed')), attempt integer NOT NULL DEFAULT 0, run_after timestamptz NOT NULL DEFAULT now(), lease_token integer NOT NULL DEFAULT 0, leased_until timestamptz NULL, worker_id text NULL, last_error text NULL, superseded_by_event_id uuid NULL REFERENCES reg.phase1_registry_expiry_events(event_id), superseded_at timestamptz NULL, created_at timestamptz NOT NULL DEFAULT now(), updated_at timestamptz NOT NULL DEFAULT now(), UNIQUE (source_fingerprint) — dedicated expiry tracking without duplicate driver or policy state.",
+        "reg.phase1_registry_expiry_events: event_id uuid PRIMARY KEY DEFAULT gen_random_uuid(), scope varchar(100) NOT NULL, entity_type varchar(50) NOT NULL CHECK (entity_type IN ('driver', 'policy')), entity_id varchar(100) NOT NULL, credential_type varchar(100) NOT NULL, source_fingerprint text NOT NULL, source_expiry_at timestamptz NULL, status varchar(50) NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'leased', 'completed', 'superseded', 'failed')), attempt integer NOT NULL DEFAULT 0, run_after timestamptz NOT NULL DEFAULT now(), lease_token integer NOT NULL DEFAULT 0, leased_until timestamptz NULL, worker_id text NULL, last_error text NULL, superseded_by_event_id uuid NULL REFERENCES reg.phase1_registry_expiry_events(event_id), superseded_at timestamptz NULL, created_at timestamptz NOT NULL DEFAULT now(), updated_at timestamptz NOT NULL DEFAULT now(), UNIQUE (source_fingerprint) \u2014 dedicated expiry tracking without duplicate driver or policy state.",
         "Deterministic source fingerprint: SHA-256 over canonical UTF-8 JSON tuple guarantees exact source revision uniqueness: driver = ['credential-expiry/v1', scope, 'driver', driverId, sourceFieldName, Date.parse(expiry)]; policy = ['credential-expiry/v1', scope, 'policy', policyId, vehicleId, policyNo, insuranceType, Date.parse(startAt), Date.parse(endAt), status]. Updated_at and derived lifecycle statuses are excluded.",
         "Strict row locking order: source row lock (FOR UPDATE on driver or policy) strictly precedes event row lock, ordered by entity ID in multi-row batches.",
         "Superseded invariant: renewed credentials yield a distinct fingerprint; previous un-superseded events for the same entity and credential type are marked status='superseded' with superseded_at timestamp, preserving historical audit without overwriting original source validity.",
-        "reg.phase1_registry_expiry_delivery_intents: intent_id uuid PRIMARY KEY DEFAULT gen_random_uuid(), event_id uuid NOT NULL REFERENCES reg.phase1_registry_expiry_events(event_id), scope varchar(100) NOT NULL, idempotency_key text NOT NULL UNIQUE, tenant_id varchar(100) NOT NULL, recipient_email text NOT NULL, from_email text NOT NULL, subject text NOT NULL, body text NOT NULL, delivery_status varchar(50) NOT NULL DEFAULT 'pending' CHECK (delivery_status IN ('pending', 'enqueued', 'sent', 'failed', 'superseded')), outbox_delivery_id text NULL, last_error text NULL, enqueued_at timestamptz NULL, created_at timestamptz NOT NULL DEFAULT now(), updated_at timestamptz NOT NULL DEFAULT now() — immutable delivery intent with concrete trigger-enforced immutability boundary.",
+        "reg.phase1_registry_expiry_delivery_intents: intent_id uuid PRIMARY KEY DEFAULT gen_random_uuid(), event_id uuid NOT NULL REFERENCES reg.phase1_registry_expiry_events(event_id), scope varchar(100) NOT NULL, idempotency_key text NOT NULL UNIQUE, tenant_id varchar(100) NOT NULL, recipient_email text NOT NULL, from_email text NOT NULL, subject text NOT NULL, body text NOT NULL, delivery_status varchar(50) NOT NULL DEFAULT 'pending' CHECK (delivery_status IN ('pending', 'enqueued', 'sent', 'failed', 'superseded')), outbox_delivery_id text NULL, last_error text NULL, enqueued_at timestamptz NULL, created_at timestamptz NOT NULL DEFAULT now(), updated_at timestamptz NOT NULL DEFAULT now() \u2014 immutable delivery intent with concrete trigger-enforced immutability boundary.",
         "Concrete immutability boundary: BEFORE UPDATE trigger reg.enforce_phase1_expiry_delivery_intent_immutability() strictly forbids updates to frozen payload fields (intent_id, event_id, scope, idempotency_key, tenant_id, recipient_email, from_email, subject, body, created_at), while permitting mutable delivery bookkeeping transitions (delivery_status, outbox_delivery_id, last_error, enqueued_at, updated_at).",
         "Idempotency key format: derived deterministically as ['credential-alert/v1', scope, eventId, recipientEmail] to prevent duplicate alert fan-out."
       ],
-      "description": "Registry 證照與保險到期掃描處理、來源指紋去重、租約保護與不可變告警交付意圖 migration",
+      "description": "Registry \u8b49\u7167\u8207\u4fdd\u96aa\u5230\u671f\u6383\u63cf\u8655\u7406\u3001\u4f86\u6e90\u6307\u7d0b\u53bb\u91cd\u3001\u79df\u7d04\u4fdd\u8b77\u8207\u4e0d\u53ef\u8b8a\u544a\u8b66\u4ea4\u4ed8\u610f\u5716 migration",
       "downstream_tasks": [
         "SR-QA-WEBHOOK-001",
         "SR-LIVE-OPS-001"
@@ -256,13 +293,13 @@
       ],
       "referenced_tables": [],
       "table_invariants": [
-        "ops.phase1_notification_mail_deliveries: delivery_id uuid PRIMARY KEY DEFAULT gen_random_uuid(), tenant_id varchar(100) NOT NULL, idempotency_key text NOT NULL, message_id text NOT NULL, payload_hash text NOT NULL, status varchar(20) NOT NULL DEFAULT 'queued' CHECK (status IN ('queued', 'sent', 'failed')), recipient_email text NOT NULL, from_email text NOT NULL, subject text NOT NULL, body text NOT NULL, queued_at timestamptz NOT NULL DEFAULT now(), sent_at timestamptz NULL, next_attempt_at timestamptz NULL, lease_attempt_id uuid NULL, lease_expires_at timestamptz NULL, attempts jsonb NOT NULL DEFAULT '[]'::jsonb, created_at timestamptz NOT NULL DEFAULT now(), updated_at timestamptz NOT NULL DEFAULT now(), CONSTRAINT uq_phase1_notification_mail_tenant_key UNIQUE (tenant_id, idempotency_key) — durable PostgreSQL storage for OutboxState compatible with MailOutbox.transaction callback.",
+        "ops.phase1_notification_mail_deliveries: delivery_id uuid PRIMARY KEY DEFAULT gen_random_uuid(), tenant_id varchar(100) NOT NULL, idempotency_key text NOT NULL, message_id text NOT NULL, payload_hash text NOT NULL, status varchar(20) NOT NULL DEFAULT 'queued' CHECK (status IN ('queued', 'sent', 'failed')), recipient_email text NOT NULL, from_email text NOT NULL, subject text NOT NULL, body text NOT NULL, queued_at timestamptz NOT NULL DEFAULT now(), sent_at timestamptz NULL, next_attempt_at timestamptz NULL, lease_attempt_id uuid NULL, lease_expires_at timestamptz NULL, attempts jsonb NOT NULL DEFAULT '[]'::jsonb, created_at timestamptz NOT NULL DEFAULT now(), updated_at timestamptz NOT NULL DEFAULT now(), CONSTRAINT uq_phase1_notification_mail_tenant_key UNIQUE (tenant_id, idempotency_key) \u2014 durable PostgreSQL storage for OutboxState compatible with MailOutbox.transaction callback.",
         "Idempotency invariant: UNIQUE (tenant_id, idempotency_key) enforces that the same key within a tenant cannot produce duplicate delivery rows. Replaying identical payload returns existing receipt; differing payload throws conflict.",
-        "ops.phase1_notification_mail_outbox_lock: lock_key varchar(50) PRIMARY KEY DEFAULT 'mail_outbox_master', locked_by text NULL, locked_at timestamptz NULL — serialization lock row for multi-replica MailOutbox.transaction execution.",
+        "ops.phase1_notification_mail_outbox_lock: lock_key varchar(50) PRIMARY KEY DEFAULT 'mail_outbox_master', locked_by text NULL, locked_at timestamptz NULL \u2014 serialization lock row for multi-replica MailOutbox.transaction execution.",
         "Single persisted attempt authority: ops.phase1_notification_mail_deliveries.attempts jsonb is the sole persisted attempt authority for each delivery, mapping 1:1 and losslessly to DeliveryReceipt.attempts: DeliveryAttempt[] (attemptId, attemptNo, startedAt, finishedAt, outcome, errorCode, retryable, acknowledgement). Reconciling uncertain-to-late-sent updates modifies this authority atomically inside MailOutbox.transaction without a redundant secondary attempts table or dual-write divergence.",
         "Separation of provider acknowledgement and inbox arrival: provider acknowledgement is recorded as transport acceptance evidence, never converted to a false assertion of end-user inbox receipt. Late acknowledgements remain associated with their original attempt."
       ],
-      "description": "PostgreSQL 版 Notification MailOutbox 持久儲存、租約重試、冪等交付與嘗試稽核 migration",
+      "description": "PostgreSQL \u7248 Notification MailOutbox \u6301\u4e45\u5132\u5b58\u3001\u79df\u7d04\u91cd\u8a66\u3001\u51aa\u7b49\u4ea4\u4ed8\u8207\u5617\u8a66\u7a3d\u6838 migration",
       "downstream_tasks": [
         "SR-QA-WEBHOOK-001",
         "SR-LIVE-MAIL-001"
