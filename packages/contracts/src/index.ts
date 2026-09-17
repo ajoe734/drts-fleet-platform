@@ -27,6 +27,7 @@ import type {
   SandboxDispatchAssignmentSnapshot,
 } from "./phase2-tesla-fsd-sandbox";
 
+export * from "./partner-passenger-notification";
 export * from "./referral-channel";
 export type {
   RequestSandboxRegulatorCaseExportCommand,
