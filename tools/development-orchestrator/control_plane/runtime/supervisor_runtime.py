@@ -5388,6 +5388,9 @@ def poll_workers(
                     changed = True
             continue
 
+        if worker.get("status") in {"retry_backoff", "fallback"}:
+            continue
+
         failure_signal = detect_worker_failure_signal(worker)
         if failure_signal and worker.get("status") != "failed":
             handled, failure_changed = handle_worker_failure_signal(
