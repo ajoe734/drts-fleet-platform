@@ -161,7 +161,7 @@ def active_worker_indexes(state: dict[str, Any], active_statuses: set[str]) -> t
     for worker in state.get("workers", {}).values():
         if worker.get("status") not in active_statuses:
             continue
-        agent_id = str(worker.get("agent_id") or "")
+        agent_id = normalize_agent_id(str(worker.get("agent_id") or ""))
         task_id = str(worker.get("task_id") or "")
         if agent_id:
             agents.add(agent_id)
@@ -175,7 +175,7 @@ def active_worker_agent_counts(state: dict[str, Any], active_statuses: set[str])
     for worker in state.get("workers", {}).values():
         if worker.get("status") not in active_statuses:
             continue
-        agent_id = str(worker.get("agent_id") or "")
+        agent_id = normalize_agent_id(str(worker.get("agent_id") or ""))
         if agent_id:
             counts[agent_id] = counts.get(agent_id, 0) + 1
     return counts
