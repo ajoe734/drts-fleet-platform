@@ -9,6 +9,7 @@ import {
   Body,
   UseGuards,
   NotFoundException,
+  NotImplementedException,
 } from "@nestjs/common";
 import { PartnerEntryNotificationBinding } from "@drts/contracts";
 
@@ -102,23 +103,22 @@ export class PartnerEntryNotificationBindingController {
   }
 
   @Get(":entrySlug/notification-deliveries")
-  async getDeliveries(
-    @Param("entrySlug") _entrySlug: string,
-  ): Promise<any[]> {
+  async getDeliveries(): Promise<any[]> {
     // Descoped for SR-PARTNER-NOTIFY-ROUTE-20260917.
     // Delivery tracking relies on delivery contexts and the outbox which
     // is fully implemented in the subsequent TRANSPORT/ACK tasks (V0105).
-    throw new (require("@nestjs/common").NotImplementedException)("Notification delivery fetching is descoped to TRANSPORT task");
+    throw new NotImplementedException(
+      "Notification delivery fetching is descoped to TRANSPORT task",
+    );
   }
 
   @Post(":entrySlug/notification-deliveries/:outboxId/retry")
-  async retryDelivery(
-    @Param("entrySlug") _entrySlug: string,
-    @Param("outboxId") _outboxId: string,
-  ): Promise<{ status: "ok" }> {
+  async retryDelivery(): Promise<{ status: "ok" }> {
     // Descoped for SR-PARTNER-NOTIFY-ROUTE-20260917.
     // Delivery retries involve interaction with the new transport layer and
     // delivery contexts, which will be implemented in the subsequent TRANSPORT/ACK tasks (V0105).
-    throw new (require("@nestjs/common").NotImplementedException)("Notification delivery retry is descoped to TRANSPORT task");
+    throw new NotImplementedException(
+      "Notification delivery retry is descoped to TRANSPORT task",
+    );
   }
 }
