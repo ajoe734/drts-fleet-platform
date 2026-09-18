@@ -1886,6 +1886,7 @@ export class OwnedMobilityRepository {
               UPDATE mobility.phase1_partner_notification_sequences
               SET next_sequence = next_sequence + 1
               WHERE order_id = $2
+                AND NOT EXISTS (SELECT 1 FROM ops.consumer_notification_outbox WHERE outbox_id = $1)
               RETURNING next_sequence - 1 AS event_sequence
             )
             INSERT INTO ops.consumer_notification_outbox (

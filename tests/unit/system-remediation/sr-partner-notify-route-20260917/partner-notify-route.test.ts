@@ -96,6 +96,7 @@ describe("SR-PARTNER-NOTIFY-ROUTE-20260917: Partner notification routing and del
       {
         partnerUserRef: "u-abc",
         drtsPassengerId: "p-123",
+        status: "active",
         linkedAt: "2026-09-18",
         consentScope: "passenger_identity_link",
       },
@@ -136,6 +137,7 @@ describe("SR-PARTNER-NOTIFY-ROUTE-20260917: Partner notification routing and del
       {
         partnerUserRef: "u-abc",
         drtsPassengerId: "p-123",
+        status: "active",
       },
     );
     mockTenantPartnerService.getPartnerEntry.mockReturnValue({
@@ -170,6 +172,7 @@ describe("SR-PARTNER-NOTIFY-ROUTE-20260917: Partner notification routing and del
       {
         partnerUserRef: "u-xyz",
         drtsPassengerId: "p-123",
+        status: "active",
       },
     );
     mockTenantPartnerService.getPartnerEntry.mockReturnValue({
@@ -202,9 +205,13 @@ describe("SR-PARTNER-NOTIFY-ROUTE-20260917: Partner notification routing and del
       drtsPassengerId: "p-123",
     };
 
-    // Simulate revoked or missing link
+    // Simulate revoked link
     mockPartnerUserIdentityLinkRepository.findByDrtsPassengerId.mockResolvedValue(
-      null,
+      {
+        partnerUserRef: "u-revoked",
+        drtsPassengerId: "p-123",
+        status: "revoked",
+      }
     );
     mockTenantPartnerService.getPartnerEntry.mockReturnValue({
       entrySlug: "entry-d",
@@ -217,7 +224,7 @@ describe("SR-PARTNER-NOTIFY-ROUTE-20260917: Partner notification routing and del
     const callArgs = mockOwnedMobilityService.createMultiTaxiRide.mock.calls[0];
     const factory = callArgs?.[5];
 
-    // Factory should be undefined if link is missing
+    // Factory should be undefined if link is not active
     expect(factory).toBeUndefined();
   });
 });

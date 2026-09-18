@@ -450,7 +450,7 @@ export class MultiTaxiService implements OnModuleInit {
     }
 
     const partnerNotificationContextFactory =
-      link && entry
+      link && link.status === "active" && entry
         ? (orderId: string) => ({
             route: {
               orderId,
