@@ -10,12 +10,18 @@
 "use client";
 
 import {
+  Suspense,
   useCallback,
   useEffect,
   useMemo,
   useState,
   type CSSProperties,
 } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
+import {
+  parseAuditResourceContext,
+  filterAuditRecordsByContext,
+} from "@/lib/audit-resource-context";
 import {
   formatDateTime,
   truncate,
@@ -141,9 +147,20 @@ function actorTone(actorType: AuditLogRecord["actorType"]): CanvasTone {
   }
 }
 
-export default function AuditPage() {
+const MSG_INVALID_CONTEXT_TITLE = "Invalid Query Context";
+const MSG_INVALID_CONTEXT_BODY =
+  "The specified URL query parameters for audit resource context are invalid or incomplete.";
+const MSG_CLEAR_FILTER = "Clear Filter";
+const MSG_ACTIVE_CONTEXT = "Active Context";
+const MSG_NO_MATCH_TITLE = "No Matching Audit Records";
+const MSG_NO_MATCH_PREFIX =
+  "No authorized audit log records match the requested context";
+
+function AuditPageContent() {
   const { locale, t } = useTranslation();
   const client = usePlatformAdminClient();
+  const router = useRouter();
+  const searchParams = useSearchParams();
   const [records, setRecords] = useState<AuditLogRecord[]>([]);
   const [policies, setPolicies] = useState<EvidenceRetentionPolicyRecord[]>([]);
   const [legalHolds, setLegalHolds] = useState<EvidenceLegalHoldRecord[]>([]);
@@ -154,6 +171,21 @@ export default function AuditPage() {
   const [error, setError] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<AuditTabId>("log");
   const [filterModule, setFilterModule] = useState<string>("");
+
+  const contextEvaluation = useMemo(
+    () => parseAuditResourceContext(searchParams),
+    [searchParams],
+  );
+
+  const contextResult = useMemo(
+    () => filterAuditRecordsByContext(records, contextEvaluation, filterModule),
+    [records, contextEvaluation, filterModule],
+  );
+
+  const handleClearFilter = useCallback(() => {
+    setFilterModule("");
+    router.replace("/audit");
+  }, [router]);
 
   const loadRecords = useCallback(async () => {
     setLoading(true);
@@ -226,23 +258,31 @@ export default function AuditPage() {
     return map;
   }, [activeDeletionExceptions]);
 
+  const contextCandidates = useMemo(() => {
+    if (contextEvaluation.kind === "valid") {
+      const { auditId, resourceType, resourceId } = contextEvaluation.filter;
+      return records.filter((rec) => {
+        if (auditId && rec.auditId !== auditId) return false;
+        if (resourceType && rec.resourceType !== resourceType) return false;
+        if (resourceId && rec.resourceId !== resourceId) return false;
+        return true;
+      });
+    }
+    return records;
+  }, [records, contextEvaluation]);
+
   const moduleCounts = useMemo(() => {
     const counts = new Map<string, number>();
-    for (const record of records) {
+    for (const record of contextCandidates) {
       if (!record.moduleName) continue;
       counts.set(record.moduleName, (counts.get(record.moduleName) ?? 0) + 1);
     }
     return [...counts.entries()].sort((a, b) => b[1] - a[1]);
-  }, [records]);
-
-  const filtered = useMemo(
-    () => records.filter((r) => !filterModule || r.moduleName === filterModule),
-    [records, filterModule],
-  );
+  }, [contextCandidates]);
 
   const rows = useMemo<AuditTableRow[]>(
     () =>
-      filtered.map((record) => ({
+      contextResult.rows.map((record) => ({
         ...record,
         hold: record.resourceId
           ? holdByResource.get(record.resourceId)
@@ -251,7 +291,7 @@ export default function AuditPage() {
           ? exemptByResource.get(record.resourceId)
           : undefined,
       })),
-    [filtered, holdByResource, exemptByResource],
+    [contextResult.rows, holdByResource, exemptByResource],
   );
 
   const tabDefs: { id: AuditTabId; label: string; badge?: number }[] = [
@@ -466,57 +506,190 @@ export default function AuditPage() {
           </CanvasCard>
         ) : activeTab === "log" ? (
           <>
-            <div style={pillRowStyle}>
-              <button
-                type="button"
-                style={pillButtonStyle}
-                onClick={() => setFilterModule("")}
-              >
-                <CanvasPill
+            {contextResult.isInvalid ? (
+              <>
+                <CanvasBanner
                   theme={theme}
-                  tone={filterModule ? "neutral" : "accent"}
-                  dot
-                >
-                  {t("audit.page.all")} {records.length.toLocaleString()}
-                </CanvasPill>
-              </button>
-              {moduleCounts.map(([moduleName, count]) => (
-                <button
-                  key={moduleName}
-                  type="button"
-                  style={pillButtonStyle}
-                  onClick={() =>
-                    setFilterModule((current) =>
-                      current === moduleName ? "" : moduleName,
-                    )
-                  }
-                >
-                  <CanvasPill
-                    theme={theme}
-                    tone={filterModule === moduleName ? "accent" : "neutral"}
-                    dot
-                  >
-                    {formatPlatformCodeLabel(locale, moduleName)} {count}
-                  </CanvasPill>
-                </button>
-              ))}
-            </div>
-
-            <CanvasCard
-              theme={theme}
-              padding={0}
-              style={{ overflow: "hidden" }}
-            >
-              {rows.length === 0 ? (
-                <div style={stateStyle}>{t("audit.page.emptyLog")}</div>
-              ) : (
-                <CanvasTable<AuditTableRow>
-                  theme={theme}
-                  columns={auditColumns}
-                  rows={rows}
+                  tone="danger"
+                  title={`Invalid Audit Context: ${contextResult.errorMessage}`}
                 />
-              )}
-            </CanvasCard>
+                <CanvasCard
+                  theme={theme}
+                  title={MSG_INVALID_CONTEXT_TITLE}
+                  subtitle={contextResult.errorMessage}
+                >
+                  <div style={stateStyle}>{MSG_INVALID_CONTEXT_BODY}</div>
+                  <div
+                    style={{
+                      display: "flex",
+                      justifyContent: "center",
+                      paddingBottom: 16,
+                    }}
+                  >
+                    <CanvasBtn
+                      theme={theme}
+                      variant="secondary"
+                      onClick={handleClearFilter}
+                      data-testid="audit-clear-context-btn"
+                    >
+                      {MSG_CLEAR_FILTER}
+                    </CanvasBtn>
+                  </div>
+                </CanvasCard>
+              </>
+            ) : contextResult.isNoMatch ? (
+              <>
+                <div
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "space-between",
+                    padding: "10px 14px",
+                    background: theme.bgRaised,
+                    borderRadius: 6,
+                    border: `1px solid ${theme.border}`,
+                  }}
+                >
+                  <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                    <CanvasPill theme={theme} tone="accent">
+                      {MSG_ACTIVE_CONTEXT}
+                    </CanvasPill>
+                    <span
+                      style={{
+                        fontFamily: theme.monoFamily,
+                        fontSize: 12,
+                        color: theme.text,
+                      }}
+                    >
+                      {contextResult.contextSummary}
+                    </span>
+                  </div>
+                  <CanvasBtn
+                    theme={theme}
+                    variant="secondary"
+                    onClick={handleClearFilter}
+                    data-testid="audit-clear-context-btn"
+                  >
+                    {MSG_CLEAR_FILTER}
+                  </CanvasBtn>
+                </div>
+                <CanvasCard
+                  theme={theme}
+                  title={MSG_NO_MATCH_TITLE}
+                  subtitle={contextResult.contextSummary}
+                >
+                  <div style={stateStyle}>
+                    {`${MSG_NO_MATCH_PREFIX} (${contextResult.contextSummary}).`}
+                  </div>
+                  <div
+                    style={{
+                      display: "flex",
+                      justifyContent: "center",
+                      paddingBottom: 16,
+                    }}
+                  >
+                    <CanvasBtn
+                      theme={theme}
+                      variant="secondary"
+                      onClick={handleClearFilter}
+                    >
+                      {MSG_CLEAR_FILTER}
+                    </CanvasBtn>
+                  </div>
+                </CanvasCard>
+              </>
+            ) : (
+              <>
+                {contextResult.isContextActive ? (
+                  <div
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "space-between",
+                      padding: "10px 14px",
+                      background: theme.bgRaised,
+                      borderRadius: 6,
+                      border: `1px solid ${theme.border}`,
+                    }}
+                  >
+                    <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                      <CanvasPill theme={theme} tone="accent">
+                        {MSG_ACTIVE_CONTEXT}
+                      </CanvasPill>
+                      <span
+                        style={{
+                          fontFamily: theme.monoFamily,
+                          fontSize: 12,
+                          color: theme.text,
+                        }}
+                      >
+                        {contextResult.contextSummary}
+                      </span>
+                    </div>
+                    <CanvasBtn
+                      theme={theme}
+                      variant="secondary"
+                      onClick={handleClearFilter}
+                      data-testid="audit-clear-context-btn"
+                    >
+                      {MSG_CLEAR_FILTER}
+                    </CanvasBtn>
+                  </div>
+                ) : null}
+
+                <div style={pillRowStyle}>
+                  <button
+                    type="button"
+                    style={pillButtonStyle}
+                    onClick={() => setFilterModule("")}
+                  >
+                    <CanvasPill
+                      theme={theme}
+                      tone={filterModule ? "neutral" : "accent"}
+                      dot
+                    >
+                      {t("audit.page.all")} {contextCandidates.length.toLocaleString()}
+                    </CanvasPill>
+                  </button>
+                  {moduleCounts.map(([moduleName, count]) => (
+                    <button
+                      key={moduleName}
+                      type="button"
+                      style={pillButtonStyle}
+                      onClick={() =>
+                        setFilterModule((current) =>
+                          current === moduleName ? "" : moduleName,
+                        )
+                      }
+                    >
+                      <CanvasPill
+                        theme={theme}
+                        tone={filterModule === moduleName ? "accent" : "neutral"}
+                        dot
+                      >
+                        {formatPlatformCodeLabel(locale, moduleName)} {count}
+                      </CanvasPill>
+                    </button>
+                  ))}
+                </div>
+
+                <CanvasCard
+                  theme={theme}
+                  padding={0}
+                  style={{ overflow: "hidden" }}
+                >
+                  {rows.length === 0 ? (
+                    <div style={stateStyle}>{t("audit.page.emptyLog")}</div>
+                  ) : (
+                    <CanvasTable<AuditTableRow>
+                      theme={theme}
+                      columns={auditColumns}
+                      rows={rows}
+                    />
+                  )}
+                </CanvasCard>
+              </>
+            )}
 
             <div style={summaryGridStyle}>
               <CanvasCard
@@ -709,5 +882,13 @@ export default function AuditPage() {
         )}
       </div>
     </>
+  );
+}
+
+export default function AuditPage() {
+  return (
+    <Suspense fallback={null}>
+      <AuditPageContent />
+    </Suspense>
   );
 }

@@ -5,7 +5,7 @@ This directory is now the repo-local canonical path for the adopted Phase 1 SQL 
 Current status:
 
 - `V0001` through `V0010` are copied from the reviewed Phase 1 DB migration bundle.
-- these files are the repo execution path used by `./scripts/db-apply.sh`
+- these files are the repo execution path used by `./operations/database/db-apply.sh`
 - the extracted bundle remains tracked as imported reference material and provenance, not the primary execution location
 
 Rules:

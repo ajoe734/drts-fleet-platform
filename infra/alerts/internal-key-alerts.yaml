@@ -1,0 +1,38 @@
+groups:
+  - name: internal-key-security
+    rules:
+      - alert: InternalKeyExceptionDriftAlert
+        expr: sum by (exception_id, code, route) (increase(drts_internal_key_drift_alert_total[5m])) > 0
+        for: 0m
+        labels:
+          severity: critical
+          team: sec-ops
+          domain: identity_access
+        annotations:
+          summary: Internal key security drift or unauthorized attempt detected
+          description: "Internal key drift alert for exception_id={{ $labels.exception_id }}, code={{ $labels.code }} on route={{ $labels.route }}."
+          runbook: docs/02-architecture/internal-key-exceptions.md
+
+      - alert: InternalKeyExpiredOrUndocumentedAttempt
+        expr: sum by (code, route) (increase(drts_internal_key_unauthorized_attempts_total[5m])) > 0
+        for: 0m
+        labels:
+          severity: critical
+          team: sec-ops
+          domain: identity_access
+        annotations:
+          summary: Undocumented or expired internal key usage attempt
+          description: "Uninventoried or expired internal key header presented on route={{ $labels.route }} with code={{ $labels.code }}."
+          runbook: docs/02-architecture/internal-key-exceptions.md
+
+      - alert: InternalKeyRotationPreviousKeyUsed
+        expr: sum by (exception_id, owner) (increase(drts_internal_key_rotation_previous_used_total[15m])) > 5
+        for: 5m
+        labels:
+          severity: warning
+          team: platform
+          domain: identity_access
+        annotations:
+          summary: High volume of requests using legacy overlap key
+          description: "Exception {{ $labels.exception_id }} (owner: {{ $labels.owner }}) is receiving high traffic on the rotated previous key."
+          runbook: docs/02-architecture/internal-key-exceptions.md

@@ -56,7 +56,9 @@ describe("dev active surface contract", () => {
 
     expect(source).not.toContain("drts-referral-embed-web");
     expect(source).not.toContain('"" "drts-api")');
-    expect(source).not.toContain("concierge-portal-web");
+    // Candidate acceptance derives retired URLs only to assert their
+    // retire/paused behavior; these surfaces remain absent from build/deploy.
+    expect(source).not.toMatch(/(?:Deploy|Build & push) — .*concierge/i);
     expect(
       source
         .split("\n")
@@ -65,7 +67,14 @@ describe("dev active surface contract", () => {
     ).toEqual([
       'description: "Fail-closed cleanup for the retired passenger service. Delete is allowed only when the regional Cloud Run inventory is exactly the intended 9 active services plus drts-passenger-web."',
       '- "delete-drts-passenger-web"',
+      'vapid_public_secret="${secret_prefix}-passenger-webpush-vapid-public-key"',
+      'vapid_private_secret="${secret_prefix}-passenger-webpush-vapid-private-key"',
+      'vapid_subject_secret="${secret_prefix}-passenger-webpush-vapid-subject"',
+      'export DRTS_DEV_PASSENGER_BASE_URL="https://drts-dev-passenger-web-${cloud_run_suffix}"',
     ]);
+    expect(source).toContain(
+      'export DRTS_DEV_CONCIERGE_BASE_URL="https://drts-dev-concierge-portal-web-${cloud_run_suffix}"',
+    );
     expect(source).not.toMatch(/Deploy — .*passenger/i);
     expect(source).not.toMatch(/Build & push — .*passenger/i);
     expect(source).not.toContain("DEV_GCP_PASSENGER");
@@ -75,7 +84,7 @@ describe("dev active surface contract", () => {
       'DEV_PAUSED_PARTNER_BOOKING_SERVICE: "drts-dev-partner-booking-web"',
     );
     expect(source).toContain(
-      "./scripts/cleanup-paused-partner-booking-service.sh",
+      "./operations/deployment/cleanup-paused-partner-booking-service.sh",
     );
     expect(source).not.toContain("DEV_GCP_PARTNER_BOOKING_SERVICE");
     expect(source).not.toContain("Deploy — partner-booking-web");
@@ -89,11 +98,25 @@ describe("dev active surface contract", () => {
     expect(source).not.toContain(
       '"${DEV_REFERRAL_EMBED_ENTRY_SLUG:-}" "" "referral-demo-community"',
     );
+    expect(source).toContain(
+      'referral_embed_secret_args="${referral_embed_secret_args},DRTS_INTERNAL_KEY=${internal_key_secret}:latest"',
+    );
+    expect(source).toContain("Verify referral handoff session lifecycle");
+    expect(source).toContain("x-drts-referral-handoff-key");
+    expect(source).toContain("drts_referral_embed_session");
+    expect(source).toContain(
+      "The referral handoff artifact has already been consumed.",
+    );
+    expect(source).toContain(
+      "The referral handoff artifact is not valid for this entry host.",
+    );
   });
 
   it("keeps domain mapping defaults and fail-closed wording aligned", () => {
     const source = readRepoFile(".github/workflows/domain-mappings-dev.yml");
-    const helperSource = readRepoFile("scripts/map-domain-service.sh");
+    const helperSource = readRepoFile(
+      "operations/deployment/map-domain-service.sh",
+    );
 
     expectServiceDefaults(source, {
       api: "DEV_GCP_API_SERVICE",
@@ -108,7 +131,7 @@ describe("dev active surface contract", () => {
     });
 
     expect(source).toContain("uses: actions/checkout@v4");
-    expect(source).toContain("./scripts/map-domain-service.sh");
+    expect(source).toContain("./operations/deployment/map-domain-service.sh");
     expect(helperSource).toContain(
       "fail closed and hand off to the single deploy cleanup task.",
     );
@@ -121,7 +144,7 @@ describe("dev active surface contract", () => {
     expect(source).not.toContain("ride.smarttransport.tw");
     expect(source).toContain('DEV_PARTNER_BOOKING_STATE: "paused"');
     expect(source).not.toContain(
-      "./scripts/map-domain-service.sh book.smarttransport.tw",
+      "./operations/deployment/map-domain-service.sh book.smarttransport.tw",
     );
     expect(source).not.toContain("DEV_GCP_PARTNER_BOOKING_SERVICE");
   });
@@ -152,7 +175,14 @@ describe("dev active surface contract", () => {
     expect(appEntryIndex).toContain(
       "https://drts-channel-partner-portal-web-4t7rg6fmeq-uc.a.run.app",
     );
-    expect(appEntryIndex).toContain("Partner Booking — PAUSED");
+    // The contract is that the frozen surface is declared paused and its URL is
+    // not advertised (GAP gate G7), not that a particular heading is worded a
+    // particular way. S1F-DOC-001 replaced the free-text "Partner Booking —
+    // PAUSED" section with a structured Paused Surfaces table carrying the same
+    // status, and this assertion failed on the wording while the substance was
+    // intact — turning a documentation improvement into a red trunk.
+    expect(appEntryIndex).toMatch(/##\s*\d*\.?\s*Paused Surfaces/i);
+    expect(appEntryIndex).toMatch(/partner-booking-web[\s\S]{0,600}?PAUSED/);
     expect(appEntryIndex).not.toContain(
       "https://drts-dev-partner-booking-web-4t7rg6fmeq-uc.a.run.app",
     );
@@ -165,11 +195,11 @@ describe("dev active surface contract", () => {
       "fail closed and hand off to the single deploy cleanup task.",
     );
     expect(runbook).toContain("domain-maintenance");
-    expect(runbook).toContain("drts-dev-ray-tw-20260730");
+    expect(runbook).toContain("nodal-alloy-503700-s3");
     expect(runbook).toContain("us-central1");
     expect(runbook).toContain("Partner Booking — PAUSED");
     expect(runbook).not.toContain(
-      "./scripts/map-domain-service.sh book.smarttransport.tw",
+      "./operations/deployment/map-domain-service.sh book.smarttransport.tw",
     );
     expect(runbook).not.toContain("drts-referral-embed-web");
   });

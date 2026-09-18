@@ -16,11 +16,13 @@ Before starting any task:
 
 Working rules:
 
-- Use `scripts/ai-status.sh` or `python3 scripts/ai_status.py` for state changes.
+- Use `tools/development-orchestrator/bin/ai-status.sh` or `python3 tools/development-orchestrator/bin/ai_status.py` for state changes.
 - Do not manually patch `ai-status.json`, `current-work.md`, or `ai-activity-log.jsonl`.
 - Prefer review, approval, and control-plane tasks first.
 - If a task is already in `review`, finish the review before taking new implementation work.
-- If a task is `review_approved` and owned by Claude, finalize it to `done`.
+- For canonical work, hand off only a locked `candidate_sha` and `candidate_branch`.
+- As reviewer, do not modify the candidate; approve only the exact reviewed SHA.
+- Never write `done` directly. GitHub reconciliation and required acceptance evidence derive completion.
 
 Output expectations:
 

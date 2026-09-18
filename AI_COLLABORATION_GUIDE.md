@@ -288,8 +288,8 @@ If implementation later reveals unresolved design or semantic conflicts, the sup
 Until the switch gate is cleared, use the local runtime only for visibility.
 
 ```bash
-python3 scripts/ai_status.py prompt
-./scripts/sync-state.sh
+python3 tools/development-orchestrator/bin/ai_status.py prompt
+./tools/development-orchestrator/bin/ai-status.sh sync
 ```
 
 The supervisor queue is document-driven before implementation mode. Update:
@@ -300,11 +300,11 @@ The supervisor queue is document-driven before implementation mode. Update:
 After human approval, status transitions may resume through:
 
 ```bash
-AI_NAME=Codex ./scripts/ai-status.sh assign <task-id> <owner> <reviewer> "Optional title"
-AI_NAME=Codex ./scripts/ai-status.sh start <task-id> "Started implementation"
-AI_NAME=Codex ./scripts/ai-status.sh progress <task-id> "Updated progress"
-AI_NAME=Codex ./scripts/ai-status.sh handoff <task-id> Claude "Ready for review"
-AI_NAME=Claude REVIEW_NOTES_ZH="審查通過||回到 owner 收尾" ./scripts/ai-status.sh approve <task-id> "Review approved and returned to the owner for finalization"
-AI_NAME=Codex COMMIT_HASH=<sha> COMMIT_SUBJECT="feat(w8-001a): close rollout blockers" PUSH_REMOTE=origin PUSH_BRANCH=<branch> INTEGRATION_STATUS=branch_pushed ./scripts/ai-status.sh done <task-id> "Owner finalized approved task, committed, pushed, and recorded integration status"
-./scripts/sync-state.sh
+AI_NAME=Codex ./tools/development-orchestrator/bin/ai-status.sh assign <task-id> <owner> <reviewer> "Optional title"
+AI_NAME=Codex ./tools/development-orchestrator/bin/ai-status.sh start <task-id> "Started implementation"
+AI_NAME=Codex ./tools/development-orchestrator/bin/ai-status.sh progress <task-id> "Updated progress"
+AI_NAME=Codex ./tools/development-orchestrator/bin/ai-status.sh handoff <task-id> Claude "Ready for review"
+AI_NAME=Claude REVIEW_NOTES_ZH="審查通過||回到 owner 收尾" ./tools/development-orchestrator/bin/ai-status.sh approve <task-id> "Review approved and returned to the owner for finalization"
+AI_NAME=Codex COMMIT_HASH=<sha> COMMIT_SUBJECT="feat(w8-001a): close rollout blockers" PUSH_REMOTE=origin PUSH_BRANCH=<branch> INTEGRATION_STATUS=branch_pushed ./tools/development-orchestrator/bin/ai-status.sh done <task-id> "Owner finalized approved task, committed, pushed, and recorded integration status"
+./tools/development-orchestrator/bin/ai-status.sh sync
 ```

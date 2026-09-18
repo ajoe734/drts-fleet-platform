@@ -29,12 +29,8 @@ import {
   type CanvasTone,
   buildCanvasTheme,
 } from "@drts/ui-web";
-import {
-  API_URL,
-  DEMO_ACTOR_ID,
-  DEMO_TENANT_ID,
-  getTenantClient,
-} from "@/lib/api-client";
+import { getTenantClient } from "@/lib/api-client";
+import { createIdempotencyKey } from "@drts/api-client";
 import { getServerLocale } from "@/lib/server-locale";
 import { type Locale, t } from "@/lib/translations";
 import { SecretRevealCard } from "./secret-reveal-card";
@@ -321,7 +317,7 @@ type ActionDescriptor = {
   disabledReasonCode?: string;
   tone?: CanvasTone;
   href?: string;
-  formAction?: "retryFailedDelivery";
+  formAction?: "retryFailedDelivery" | "sendTestWebhook";
   webhookId?: string | undefined;
   deliveryId?: string | undefined;
 };
@@ -764,6 +760,8 @@ function getActionLabel(action: string, locale: Locale) {
       return t("webhooks.action.viewDeliveryLog", locale);
     case "retryFailedDelivery":
       return t("webhooks.action.retryFailed", locale);
+    case "sendTestWebhook":
+      return t("webhooks.action.sendTest", locale);
     default:
       return action;
   }
@@ -895,10 +893,17 @@ function decorateEndpointActions(
     status?: string;
   },
 ): ActionDescriptor[] {
-  return descriptors.flatMap((descriptor) => {
+  const actions = descriptors.flatMap((descriptor) => {
     const tone = getActionTone(descriptor.action);
     const href = getEndpointActionHref(descriptor.action, options);
-    if (!href && descriptor.action !== "deleteWebhookEndpoint") {
+    const formFields =
+      descriptor.action === "sendTestWebhook" && options?.webhookId
+        ? {
+            formAction: "sendTestWebhook" as const,
+            webhookId: options.webhookId,
+          }
+        : undefined;
+    if (!href && descriptor.action !== "deleteWebhookEndpoint" && !formFields) {
       return [];
     }
 
@@ -916,9 +921,27 @@ function decorateEndpointActions(
           : {}),
         ...(tone ? { tone } : {}),
         ...(href ? { href } : {}),
+        ...(formFields ?? {}),
       },
     ];
   });
+
+  if (
+    options?.webhookId &&
+    !actions.some((a) => a.action === "sendTestWebhook")
+  ) {
+    actions.unshift({
+      action: "sendTestWebhook",
+      label: getActionLabel("sendTestWebhook", locale),
+      riskLevel: "low",
+      enabled: true,
+      tone: "accent",
+      formAction: "sendTestWebhook" as const,
+      webhookId: options.webhookId,
+    });
+  }
+
+  return actions;
 }
 
 function decorateDeliveryActions(
@@ -1032,15 +1055,26 @@ function renderAction(
   const size = small ? "sm" : "md";
   const submitActionReady =
     descriptor.enabled &&
-    descriptor.formAction === "retryFailedDelivery" &&
-    descriptor.webhookId &&
-    descriptor.deliveryId;
+    ((descriptor.formAction === "retryFailedDelivery" &&
+      descriptor.webhookId &&
+      descriptor.deliveryId) ||
+      (descriptor.formAction === "sendTestWebhook" && descriptor.webhookId));
 
   if (submitActionReady) {
+    const isTest = descriptor.formAction === "sendTestWebhook";
     return (
-      <form key={key} action={retryFailedDeliveryAction}>
+      <form
+        key={key}
+        action={isTest ? sendTestWebhookAction : retryFailedDeliveryAction}
+      >
         <input type="hidden" name="webhookId" value={descriptor.webhookId} />
-        <input type="hidden" name="deliveryId" value={descriptor.deliveryId} />
+        {descriptor.deliveryId ? (
+          <input
+            type="hidden"
+            name="deliveryId"
+            value={descriptor.deliveryId}
+          />
+        ) : null}
         <button
           type="submit"
           style={{
@@ -1106,7 +1140,7 @@ function buildExternalLink(
 }
 
 async function loadWebhooksPageData(locale: Locale): Promise<WebhooksPageData> {
-  const client = getTenantClient();
+  const client = await getTenantClient();
   const [
     identityResult,
     governanceResult,
@@ -1283,34 +1317,22 @@ async function rotateWebhookSecretRequest(
     rotationReason?: string;
   },
 ): Promise<RotateWebhookSecretResponse> {
-  const response = await fetch(
-    `${API_URL}/api/tenant/webhooks/${encodeURIComponent(webhookId)}/rotate-secret`,
+  const client = await getTenantClient();
+  const data = await client.post<RotateWebhookSecretResponse["data"]>(
+    `/api/tenant/webhooks/${encodeURIComponent(webhookId)}/rotate-secret`,
     {
-      method: "POST",
-      headers: {
-        "content-type": "application/json",
-        "x-actor-type": "tenant_admin",
-        "x-actor-id": DEMO_ACTOR_ID,
-        "x-realm": "tenant",
-        "x-tenant-id": DEMO_TENANT_ID,
-      },
-      body: JSON.stringify(body),
-      cache: "no-store",
+      body,
     },
   );
 
-  if (!response.ok) {
-    throw new Error(`API error ${response.status}: ${await response.text()}`);
-  }
-
-  return response.json() as Promise<RotateWebhookSecretResponse>;
+  return { data };
 }
 
 async function createWebhookAction(formData: FormData) {
   "use server";
 
   const locale = await getServerLocale();
-  const client = getTenantClient();
+  const client = await getTenantClient();
   const events = parseEvents(formData);
   try {
     if (events.length === 0) {
@@ -1345,7 +1367,7 @@ async function updateWebhookAction(formData: FormData) {
   "use server";
 
   const locale = await getServerLocale();
-  const client = getTenantClient();
+  const client = await getTenantClient();
   const webhookId = String(formData.get("webhookId") ?? "");
   const disableReason = String(formData.get("disableReason") ?? "").trim();
   const events = parseEvents(formData);
@@ -1424,7 +1446,7 @@ async function deleteWebhookAction(formData: FormData) {
   "use server";
 
   const locale = await getServerLocale();
-  const client = getTenantClient();
+  const client = await getTenantClient();
   const webhookId = String(formData.get("webhookId") ?? "");
   const deleteReason = String(formData.get("deleteReason") ?? "").trim();
   try {
@@ -1510,11 +1532,42 @@ async function rotateWebhookSecretAction(formData: FormData) {
   }
 }
 
+async function sendTestWebhookAction(formData: FormData) {
+  "use server";
+
+  const locale = await getServerLocale();
+  const client = await getTenantClient();
+  const webhookId = String(formData.get("webhookId") ?? "").trim();
+  const idempotencyKey =
+    String(formData.get("idempotencyKey") ?? "").trim() ||
+    createIdempotencyKey("webhook-test");
+
+  try {
+    if (!webhookId) {
+      throw new Error(t("webhooks.error.missingWebhookId", locale));
+    }
+
+    await client.sendTestWebhook({ webhookId }, { idempotencyKey });
+    revalidatePath("/webhooks");
+    redirect(
+      `/webhooks?webhookId=${encodeURIComponent(webhookId)}&success=${encodeURIComponent(
+        t("webhooks.success.testSubmitted", locale),
+      )}`,
+    );
+  } catch (error) {
+    redirect(
+      `/webhooks?webhookId=${encodeURIComponent(webhookId)}&error=${encodeURIComponent(
+        toErrorMessage(error, locale),
+      )}`,
+    );
+  }
+}
+
 async function retryFailedDeliveryAction(formData: FormData) {
   "use server";
 
   const locale = await getServerLocale();
-  const client = getTenantClient();
+  const client = await getTenantClient();
   const webhookId = String(formData.get("webhookId") ?? "").trim();
   const deliveryId = String(formData.get("deliveryId") ?? "").trim();
 

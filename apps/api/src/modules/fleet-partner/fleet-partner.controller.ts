@@ -4,11 +4,18 @@ import {
   Delete,
   Get,
   Headers,
+  Optional,
   Param,
   Post,
   Put,
   Query,
+  Res,
 } from "@nestjs/common";
+
+interface HttpResponseLike {
+  setHeader(name: string, value: string | number): void;
+  send(body: Buffer | string): void;
+}
 
 import type {
   CreateDriverFleetAffiliationCommand,
@@ -30,6 +37,12 @@ import {
   toApiSuccessEnvelope,
 } from "../../common/api-envelope";
 import { FleetPartnerService } from "./fleet-partner.service";
+import { FleetPartnerCaseService } from "./fleet-partner-case.service";
+import type {
+  ConfirmCaseAttachmentUploadCommand,
+  CreateCaseAttachmentUploadUrlCommand,
+  SubmitFleetCaseReplyCommand,
+} from "./fleet-partner-case.service";
 import { SupplyDocumentService } from "./supply-document.service";
 import { SupplyReadinessService } from "./supply-readiness.service";
 import { SupplyReviewService } from "./supply-review.service";
@@ -55,7 +68,20 @@ export class FleetPartnerController {
     private readonly supplyDocumentService: SupplyDocumentService,
     private readonly supplyReviewService: SupplyReviewService,
     private readonly supplyReadinessService: SupplyReadinessService,
+    @Optional()
+    private readonly fleetPartnerCaseService?: FleetPartnerCaseService,
   ) {}
+
+  private get caseService(): FleetPartnerCaseService {
+    if (!this.fleetPartnerCaseService) {
+      throw new ApiRequestError(
+        500,
+        "FLEET_CASE_SERVICE_UNAVAILABLE",
+        "Fleet partner case service is not configured.",
+      );
+    }
+    return this.fleetPartnerCaseService;
+  }
 
   private requireFleetPartnerId(fleetPartnerId?: string) {
     const normalizedFleetPartnerId = fleetPartnerId?.trim();
@@ -670,5 +696,138 @@ export class FleetPartnerController {
       ),
       requestId,
     );
+  }
+
+  @Get("fleet-partner/cases")
+  async listPortalCases(
+    @Headers("x-fleet-partner-id") fleetPartnerId?: string,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    const items = await this.caseService.listCases(
+      this.requireFleetPartnerId(fleetPartnerId),
+    );
+    return toApiSuccessEnvelope(toApiListData(items), requestId);
+  }
+
+  @Get("fleet-partner/cases/:caseId")
+  async getPortalCaseDetail(
+    @Headers("x-fleet-partner-id") fleetPartnerId: string | undefined,
+    @Param("caseId") caseId: string,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    const result = await this.caseService.getCaseDetail(
+      this.requireFleetPartnerId(fleetPartnerId),
+      caseId,
+    );
+    return toApiSuccessEnvelope(result, requestId);
+  }
+
+  @Get("fleet-partner/cases/:caseId/timeline")
+  async getPortalCaseTimeline(
+    @Headers("x-fleet-partner-id") fleetPartnerId: string | undefined,
+    @Param("caseId") caseId: string,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    const items = await this.caseService.getCaseTimeline(
+      this.requireFleetPartnerId(fleetPartnerId),
+      caseId,
+    );
+    return toApiSuccessEnvelope(toApiListData(items), requestId);
+  }
+
+  @Post("fleet-partner/cases/:caseId/reply")
+  async submitPortalCaseReply(
+    @Headers("x-fleet-partner-id") fleetPartnerId: string | undefined,
+    @Headers("x-actor-id") actorId: string | undefined,
+    @Param("caseId") caseId: string,
+    @Body() command: SubmitFleetCaseReplyCommand,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    const result = await this.caseService.submitReply(
+      this.requireFleetPartnerId(fleetPartnerId),
+      caseId,
+      this.actorId(actorId),
+      command,
+      requestId,
+    );
+    return toApiSuccessEnvelope(result, requestId);
+  }
+
+  @Post("fleet-partner/cases/:caseId/attachments/upload-url")
+  async createPortalCaseAttachmentUploadUrl(
+    @Headers("x-fleet-partner-id") fleetPartnerId: string | undefined,
+    @Headers("x-actor-id") actorId: string | undefined,
+    @Param("caseId") caseId: string,
+    @Body() command: CreateCaseAttachmentUploadUrlCommand,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    const result = await this.caseService.createAttachmentUploadUrl(
+      this.requireFleetPartnerId(fleetPartnerId),
+      caseId,
+      this.actorId(actorId),
+      command,
+    );
+    return toApiSuccessEnvelope(result, requestId);
+  }
+
+  @Post("fleet-partner/cases/:caseId/attachments/confirm")
+  async confirmPortalCaseAttachmentUpload(
+    @Headers("x-fleet-partner-id") fleetPartnerId: string | undefined,
+    @Headers("x-actor-id") actorId: string | undefined,
+    @Param("caseId") caseId: string,
+    @Body() command: ConfirmCaseAttachmentUploadCommand,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    const result = await this.caseService.confirmAttachmentUpload(
+      this.requireFleetPartnerId(fleetPartnerId),
+      caseId,
+      this.actorId(actorId),
+      command,
+    );
+    return toApiSuccessEnvelope(result, requestId);
+  }
+
+  @Get("fleet-partner/cases/:caseId/attachments/:attachmentId/read-url")
+  async getPortalCaseAttachmentReadUrl(
+    @Headers("x-fleet-partner-id") fleetPartnerId: string | undefined,
+    @Param("caseId") caseId: string,
+    @Param("attachmentId") attachmentId: string,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    const result = await this.caseService.getAttachmentReadUrl(
+      this.requireFleetPartnerId(fleetPartnerId),
+      caseId,
+      attachmentId,
+    );
+    return toApiSuccessEnvelope(result, requestId);
+  }
+
+  @Get("fleet-partner/cases/:caseId/attachments/:attachmentId/download")
+  async downloadPortalCaseAttachment(
+    @Headers("x-fleet-partner-id") fleetPartnerId: string | undefined,
+    @Param("caseId") caseId: string,
+    @Param("attachmentId") attachmentId: string,
+    @Query("expiresAt") expiresAtStr: string,
+    @Query("sig") sig: string,
+    @Res() res: HttpResponseLike,
+  ) {
+    const normalizedPartnerId = this.requireFleetPartnerId(fleetPartnerId);
+    const expiresAt = Number.parseInt(expiresAtStr || "0", 10);
+    const result =
+      await this.caseService.verifyAndGetAttachmentForDownload(
+        normalizedPartnerId,
+        caseId,
+        attachmentId,
+        expiresAt,
+        sig || "",
+      );
+
+    res.setHeader("Content-Type", result.attachment.contentType);
+    res.setHeader(
+      "Content-Disposition",
+      `attachment; filename="${encodeURIComponent(result.attachment.name)}"`,
+    );
+    res.setHeader("Content-Length", result.fileContent.length);
+    res.send(result.fileContent);
   }
 }

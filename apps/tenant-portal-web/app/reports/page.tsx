@@ -2,7 +2,7 @@ import Link from "next/link";
 import type { ReportJobRecord } from "@drts/contracts";
 import { AppShellCard } from "@drts/ui-web";
 import { getTenantClient } from "@/lib/api-client";
-import { createReportJob, refreshReports } from "./actions";
+import { ReportCreateForm } from "./report-create-form";
 import {
   getReportJobSourceSummary,
   getSourceToneClassName,
@@ -41,54 +41,9 @@ export default async function ReportsPage() {
           </div>
         )}
 
-        <form
-          action={createReportJob}
-          method="post"
-          className="form-inline"
-          style={{ marginBottom: 16 }}
-        >
-          <label htmlFor="jobType" style={{ marginRight: 8 }}>
-            Job Type
-          </label>
-          <select
-            id="jobType"
-            name="jobType"
-            defaultValue="dispatch_recording_index"
-            style={{ marginRight: 16 }}
-          >
-            <option value="dispatch_recording_index">
-              dispatch_recording_index
-            </option>
-            <option value="revenue_summary">revenue_summary</option>
-          </select>
-          <label htmlFor="format" style={{ marginRight: 8 }}>
-            Format
-          </label>
-          <select
-            id="format"
-            name="format"
-            defaultValue="csv"
-            style={{ marginRight: 16 }}
-          >
-            <option value="csv">csv</option>
-            <option value="xlsx">xlsx</option>
-            <option value="pdf">pdf</option>
-            <option value="zip">zip</option>
-          </select>
-          <button
-            type="submit"
-            disabled={!roleSnapshot.capabilities.canWriteReports}
-          >
-            Create Job
-          </button>
-          <button
-            type="submit"
-            formAction={refreshReports}
-            style={{ marginLeft: 8 }}
-          >
-            Refresh
-          </button>
-        </form>
+        <ReportCreateForm
+          canWriteReports={roleSnapshot.capabilities.canWriteReports}
+        />
 
         {jobs.length > 0 ? (
           <div className="data-table">

@@ -49,10 +49,28 @@ export interface CertificateSupportView {
   htmlUrl: string | null;
   pdfUrl: string | null;
   supersededByCertificateId: string | null;
+  /**
+   * Why no artifact is offered, empty when one is.
+   *
+   * `htmlUrl` and `pdfUrl` used to go `null` with nothing said, and the single
+   * `regeneration.reasonCode` value available --
+   * `certificate_canonical_record_incomplete` -- reported an unexpected currency
+   * as a missing field. The record was complete; the label was unexpected. A
+   * passenger's receipt should not disappear behind a reason that is wrong
+   * about which thing is wrong.
+   */
+  artifactBlockers: CertificateArtifactBlocker[];
   regeneration: {
     enabled: boolean;
     reasonCode: string | null;
   };
+}
+
+export interface CertificateArtifactBlocker {
+  /** `missing_field` | `unexpected_currency` | `state_not_issuable`. */
+  code: string;
+  field?: string;
+  detail?: string;
 }
 
 export interface CertificateArtifact {

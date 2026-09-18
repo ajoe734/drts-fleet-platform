@@ -1,13 +1,21 @@
 import type {
   ApiErrorEnvelope,
   ApiSuccessEnvelope,
+  ConsumeReferralEmbedHandoffArtifactCommand,
   PartnerChannelEntryRecord,
+  RecordReferralEmbedConsentCommand,
 } from "@drts/contracts";
 import type { CreatePartnerIngressHandoffCommand } from "@drts/contracts";
 import type { PartnerIngressHandoffSession } from "@drts/contracts";
+import type {
+  CreateReferralEmbedHandoffArtifactCommand,
+  ReferralEmbedHandoffArtifact,
+  ReferralEmbedSession,
+} from "@drts/contracts";
 import { getServerApiBaseUrl } from "./embed-runtime";
 
 const API_URL = getServerApiBaseUrl();
+const REFERRAL_EMBED_HANDOFF_KEY_HEADER = "x-drts-referral-handoff-key";
 
 // The authority API serialises responses in snake_case, but the embed reads the
 // records as the camelCase contract types (entry.displayName / entryHost /
@@ -19,7 +27,7 @@ function snakeToCamelKey(key: string): string {
   return key.replace(/_([a-z0-9])/g, (_match, ch: string) => ch.toUpperCase());
 }
 
-function deepCamelize(value: unknown): unknown {
+export function deepCamelize(value: unknown): unknown {
   if (Array.isArray(value)) {
     return value.map(deepCamelize);
   }
@@ -74,6 +82,12 @@ async function requestAuthority<T>(
         // ever runs server-side, so reading the secret here is safe.
         ...(process.env.DRTS_INTERNAL_KEY
           ? { "x-drts-internal-key": process.env.DRTS_INTERNAL_KEY }
+          : {}),
+        ...(process.env.DRTS_REFERRAL_EMBED_HANDOFF_KEY
+          ? {
+              [REFERRAL_EMBED_HANDOFF_KEY_HEADER]:
+                process.env.DRTS_REFERRAL_EMBED_HANDOFF_KEY,
+            }
           : {}),
         ...(init?.headers ?? {}),
       },
@@ -134,6 +148,42 @@ export async function issuePartnerIngressHandoff(
 ) {
   return requestAuthority<PartnerIngressHandoffSession>(
     "/api/partner/ingress/handoff",
+    {
+      method: "POST",
+      body: JSON.stringify(command),
+    },
+  );
+}
+
+export async function issueReferralEmbedHandoffArtifact(
+  command: CreateReferralEmbedHandoffArtifactCommand,
+) {
+  return requestAuthority<ReferralEmbedHandoffArtifact>(
+    "/api/partner/ingress/referral-embed-handoff",
+    {
+      method: "POST",
+      body: JSON.stringify(command),
+    },
+  );
+}
+
+export async function consumeReferralEmbedHandoffArtifact(
+  command: ConsumeReferralEmbedHandoffArtifactCommand,
+) {
+  return requestAuthority<ReferralEmbedSession>(
+    "/api/partner/ingress/referral-embed-handoff/consume",
+    {
+      method: "POST",
+      body: JSON.stringify(command),
+    },
+  );
+}
+
+export async function recordReferralEmbedConsent(
+  command: RecordReferralEmbedConsentCommand,
+) {
+  return requestAuthority<ReferralEmbedSession>(
+    "/api/partner/ingress/referral-embed-handoff/consent",
     {
       method: "POST",
       body: JSON.stringify(command),

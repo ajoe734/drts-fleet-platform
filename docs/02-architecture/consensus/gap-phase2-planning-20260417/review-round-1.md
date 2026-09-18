@@ -3,13 +3,13 @@
 **Reviewer：** Codex  
 **焦點：** contracts 完整性、schema / 依賴鏈正確性、範圍修正  
 **接棒時間：** 2026-04-17T14:33:25Z  
-**工作模式：** planning-only；共享 L0 仍將本 workspace 鎖在 `discussion_planning`，目前 baton owner 仍是 Codex，且只有在 human accept 後才會切回 execution，因此本 round 僅修正文檔與規劃，不進入實作或提交（`ai-status.json:3,68-105`; `current-work.md:26-35`; `ai-activity-log.jsonl` at `2026-04-17T14:33:25Z`; `docs-site/index.html:40-55`）。
+**工作模式：** planning-only；共享 L0 仍將本 workspace 鎖在 `discussion_planning`，目前 baton owner 仍是 Codex，且只有在 human accept 後才會切回 execution，因此本 round 僅修正文檔與規劃，不進入實作或提交（`ai-status.json:3,68-105`; `current-work.md:26-35`; `ai-activity-log.jsonl` at `2026-04-17T14:33:25Z`; `tools/development-orchestrator/dashboard/index.html:40-55`）。
 
 ---
 
 ## 0. Baton State Sanity Check
 
-- 共享 L0 目前仍以 `discussion_planning` 運作，`discussion_loop.current_owner` 是 Codex，review order 仍是 Codex → Qwen → Gemini → Copilot；也就是說，目前 canonical baton 還停在 R1，而不是後續 round 或 execution（`ai-status.json:3,68-105`; `current-work.md:26-35`; `docs-site/index.html:40-55`）。
+- 共享 L0 目前仍以 `discussion_planning` 運作，`discussion_loop.current_owner` 是 Codex，review order 仍是 Codex → Qwen → Gemini → Copilot；也就是說，目前 canonical baton 還停在 R1，而不是後續 round 或 execution（`ai-status.json:3,68-105`; `current-work.md:26-35`; `tools/development-orchestrator/dashboard/index.html:40-55`）。
 - `ai-activity-log.jsonl` 對這次 planning baton 的唯一 shared wake-up 事件是 Codex 在 `2026-04-17T14:33:25Z` 被喚醒處理 `starter-draft.md`；共享狀態裡還沒有對 Qwen / Gemini / Copilot 的正式交棒紀錄（`ai-activity-log.jsonl` at `2026-04-17T14:33:25Z`; `current-work.md:32-35`）。
 - `ai-activity-log.jsonl` 在 `2026-04-17T14:42:36Z`、`14:49:39Z`、`14:53:18Z`、`14:56:38Z` 又連續記錄了 Codex planning worker 的 `worker_failed` / `worker_started` retry，但這些都只是同一個 R1 dispatch 的重送；shared L0 並沒有因此前移 baton owner 或新增任何 Qwen handoff 事件（`ai-activity-log.jsonl` at `2026-04-17T14:42:36Z`, `2026-04-17T14:49:39Z`, `2026-04-17T14:53:18Z`, `2026-04-17T14:56:38Z`; `ai-status.json:93-105`; `current-work.md:26-35`）。
 - 但工作區內已有 ahead-of-state artifact：`baton-log.md` 已把 R1 標為完成，而 `review-round-2.md`、`review-round-3.md`、`review-round-4.md` 的「接棒時間」分別寫成 `2026-04-17T13:30:00Z`、`13:40:00Z`、`13:50:00Z`，都早於 Codex 的 canonical wake-up；`consensus-packet.md` 也已經以「4 輪 review 後」口吻起草（`baton-log.md:5-10`; `review-round-2.md:3-5`; `review-round-3.md:3-5`; `review-round-4.md:3-5`; `consensus-packet.md:3-20`）。
@@ -280,7 +280,7 @@
 
 ### 5.6 owner 重分配目前仍是提案，不是 canonical execution truth
 
-- shared canonical context 仍顯示專案處於 `discussion_planning`，目前 baton owner 是 Codex，review order 仍是 Codex → Qwen → Gemini → Copilot（`ai-status.json:68-105`; `current-work.md:26-35`; `docs-site/index.html:40-55`）。
+- shared canonical context 仍顯示專案處於 `discussion_planning`，目前 baton owner 是 Codex，review order 仍是 Codex → Qwen → Gemini → Copilot（`ai-status.json:68-105`; `current-work.md:26-35`; `tools/development-orchestrator/dashboard/index.html:40-55`）。
 - shared task board 也仍將多個 Sprint 2 / Sprint 3 任務掛在 Qwen 與 Gemini 名下（`current-work.md:55-70,87-102`）。
 - 但 consensus packet 已先寫入「Qwen 任務全部重新分配」與新的 owner matrix（`consensus-packet.md:17,38-48,56-63`）。
 

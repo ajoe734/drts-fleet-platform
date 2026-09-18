@@ -21,8 +21,6 @@ import { ApiClient, createFleetPartnerPortalClient } from "@drts/api-client";
 import { CONTROL_PLANE_IAP_EMAIL_HEADER } from "@drts/control-plane-auth";
 import { headers as nextHeaders } from "next/headers";
 
-import { FLEET_SELF } from "./fleet-portal-fixtures";
-
 const DEFAULT_API_BASE_URL = "http://localhost:3001";
 const FLEET_PARTNER_ID_HEADER = "x-fleet-partner-id";
 // Self-service portals read billing/statement data scoped to one partner.
@@ -48,7 +46,9 @@ function resolveFleetPartnerId(requestHeaders: Headers): string {
     return fromEnv;
   }
 
-  return FLEET_SELF.id;
+  throw new Error(
+    "Missing fleet scope configuration: DRTS_FLEET_PARTNER_ID environment variable or x-fleet-partner-id header is required.",
+  );
 }
 
 async function mintMetadataIdentityToken(

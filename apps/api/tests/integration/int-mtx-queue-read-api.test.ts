@@ -6,6 +6,10 @@ import { EventEmitter2 } from "@nestjs/event-emitter";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { BootstrapAuthGuard } from "../../src/common/auth";
+import {
+  IdempotencyRepository,
+  IdempotencyService,
+} from "../../src/common/idempotency";
 import { OpsDispatchEventsService } from "../../src/common/ops-dispatch-events.service";
 import { OwnedMobilityController } from "../../src/modules/owned-mobility/owned-mobility.controller";
 import { OwnedMobilityTaskEventsService } from "../../src/modules/owned-mobility/owned-mobility-task-events.service";
@@ -112,6 +116,8 @@ async function startQueueApi() {
     providers: [
       { provide: OwnedMobilityService, useValue: service },
       { provide: APP_GUARD, useClass: BootstrapAuthGuard },
+      IdempotencyRepository,
+      IdempotencyService,
     ],
   })
   class QueueReadApiTestModule {}

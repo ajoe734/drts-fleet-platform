@@ -1,9 +1,7 @@
 import Link from "next/link";
 import type { CSSProperties, ReactNode } from "react";
 import type {
-  ApiErrorEnvelope,
   ApiListData,
-  ApiSuccessEnvelope,
   BookingRecord,
   CrossAppResourceLink,
   EmptyReason,
@@ -30,7 +28,7 @@ import {
   parseBookingListQuery,
   toggleStatus,
 } from "@/lib/booking-list";
-import { API_URL, DEMO_ACTOR_ID, DEMO_TENANT_ID } from "@/lib/api-client";
+import { getTenantClient } from "@/lib/api-client";
 import { formatDateTime } from "@/lib/formatters";
 import { getServerLocale } from "@/lib/server-locale";
 import {
@@ -422,7 +420,8 @@ function buildBookingCrossAppLinks(
   ) {
     links.push({
       targetApp: "ops-console",
-      route: `/dispatch?bookingId=${encodeURIComponent(booking.bookingId)}`,
+      // Dispatch work belongs to the Ops detail workspace, not its read-only board.
+      route: `/dispatch/${encodeURIComponent(booking.bookingId)}`,
       resourceType: "dispatch_queue_item",
       resourceId: booking.bookingId,
       openMode: "new_tab",
@@ -746,54 +745,21 @@ async function loadBookingsPageData(
   };
 
   try {
-    const response = await fetch(`${API_URL}/api/tenant/bookings`, {
-      cache: "no-store",
-      headers: {
-        "x-actor-type": "tenant_admin",
-        "x-actor-id": DEMO_ACTOR_ID,
-        "x-realm": "tenant",
-        "x-tenant-id": DEMO_TENANT_ID,
-      },
-    });
-
-    if (!response.ok) {
-      const errorEnvelope = (await response
-        .json()
-        .catch(() => null)) as ApiErrorEnvelope | null;
-
-      return {
-        bookings: [],
-        pageInfo: {
-          page: 1,
-          pageSize: 25,
-          totalItems: 0,
-          totalPages: 0,
-        },
-        refresh: {
-          ...refresh,
-          dataFreshness: "degraded",
-        },
-        emptyReason: mapErrorToEmptyReason(
-          response.status,
-          errorEnvelope?.error.code,
-        ),
-        errorMessage:
-          errorEnvelope?.error.message ??
-          t("bookingList.error.unknown", undefined, locale),
-      };
-    }
-
-    const envelope = (await response.json()) as ApiSuccessEnvelope<
-      ApiListData<BookingRecord>
-    >;
+    const client = await getTenantClient();
+    const bookings = await client.listTenantBookings();
 
     return {
-      bookings: envelope.data.items.map((booking) =>
+      bookings: bookings.map((booking) =>
         toBookingListRecord(booking, locale),
       ),
-      pageInfo: envelope.data.pageInfo,
+      pageInfo: {
+        page: 1,
+        pageSize: 25,
+        totalItems: bookings.length,
+        totalPages: Math.ceil(bookings.length / 25) || 1,
+      },
       refresh: {
-        generatedAt: envelope.meta.timestamp,
+        generatedAt: new Date().toISOString(),
         staleAfterMs: BOOKING_STALE_AFTER_MS,
         dataFreshness: "fresh",
         source: "live",
@@ -802,6 +768,7 @@ async function loadBookingsPageData(
       errorMessage: null,
     };
   } catch (error) {
+    const apiError = error as { status?: number; code?: string; message?: string };
     return {
       bookings: [],
       pageInfo: {
@@ -814,11 +781,15 @@ async function loadBookingsPageData(
         ...refresh,
         dataFreshness: "degraded",
       },
-      emptyReason: "fetch_failed",
+      emptyReason: mapErrorToEmptyReason(
+        apiError.status ?? 500,
+        apiError.code,
+      ),
       errorMessage:
-        error instanceof Error
+        apiError.message ??
+        (error instanceof Error
           ? error.message
-          : t("bookingList.error.unknown", undefined, locale),
+          : t("bookingList.error.unknown", undefined, locale)),
     };
   }
 }
@@ -874,6 +845,11 @@ function renderBookingActionLinks(booking: BookingListRecord, locale: Locale) {
             <Link
               key={action.action}
               href={target}
+              data-drt-intent={
+                action.action === "open_ops_dispatch"
+                  ? "tenant-open-dispatch"
+                  : undefined
+              }
               style={actionLinkStyle(
                 action.action === "open_detail" ? "primary" : "secondary",
               )}
@@ -883,11 +859,22 @@ function renderBookingActionLinks(booking: BookingListRecord, locale: Locale) {
           );
         }
 
-        return renderActionLink({
-          href: buildCrossAppHref(target),
-          label,
-          external: target.openMode === "new_tab",
-        });
+        return (
+          <a
+            key={action.action}
+            href={buildCrossAppHref(target)}
+            data-drt-intent={
+              action.action === "open_ops_dispatch"
+                ? "tenant-open-dispatch"
+                : undefined
+            }
+            style={actionLinkStyle("secondary")}
+            target={target.openMode === "new_tab" ? "_blank" : undefined}
+            rel={target.openMode === "new_tab" ? "noreferrer" : undefined}
+          >
+            {label}
+          </a>
+        );
       })}
     </div>
   );

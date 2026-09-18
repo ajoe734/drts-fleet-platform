@@ -3,6 +3,9 @@ import {
   Controller,
   Get,
   Headers,
+  HttpCode,
+  HttpStatus,
+  Optional,
   Param,
   Post,
   Query,
@@ -18,6 +21,8 @@ import type {
   GenerateDriverStatementCommand,
   GenerateTenantInvoiceCommand,
   MarkReimbursementPaidCommand,
+  MarkReimbursementPaidWithProofCommand,
+  RequestRemittanceProofReadbackCommand,
   ResolveReconciliationIssueCommand,
   ReopenReconciliationIssueCommand,
   TenantOrderListQuery,
@@ -25,6 +30,7 @@ import type {
   PublishDriverFeePlanCommand,
   TenantPayableSummary,
   UpdateTenantBillingProfileCommand,
+  UploadRemittanceProofCommand,
 } from "@drts/contracts";
 
 import {
@@ -33,11 +39,22 @@ import {
   toApiSuccessEnvelope,
 } from "../../common/api-envelope";
 import {
+  assertTenantVisibility,
+  filterToTenantVisibility,
+  resolveTenantVisibility,
+} from "../../common/tenant-scope";
+import {
   CurrentIdentity,
   RequireRealms,
   RequireScopes,
+  isDriverIdentityMatching,
+  normalizeDriverId,
   type BootstrapRequestIdentity,
 } from "../../common/auth";
+import {
+  IdempotencyRepository,
+  IdempotencyService,
+} from "../../common/idempotency";
 import { READ_HEAVY_RATE_LIMIT } from "../../common/throttling/rate-limit.constants";
 import { BillingSettlementService } from "./billing-settlement.service";
 
@@ -45,6 +62,10 @@ import { BillingSettlementService } from "./billing-settlement.service";
 export class BillingSettlementController {
   constructor(
     private readonly billingSettlementService: BillingSettlementService,
+    @Optional()
+    private readonly idempotencyService: IdempotencyService = new IdempotencyService(
+      new IdempotencyRepository(),
+    ),
   ) {}
 
   @Get("payment-exceptions/:orderId")
@@ -248,13 +269,29 @@ export class BillingSettlementController {
   }
 
   @Get("settlement/invoices")
-  listPlatformInvoices(@Headers("x-request-id") requestId?: string) {
-    const items = this.billingSettlementService.listPlatformInvoices();
+  @RequireRealms("system", "platform", "tenant", "ops", "partner")
+  @RequireScopes("billing:read")
+  listPlatformInvoices(
+    @CurrentIdentity() identity?: BootstrapRequestIdentity | null,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    // `partner` is an allowed realm here and was never narrowed, so a partner
+    // could list every tenant's invoices. Visibility is resolved once and
+    // applies to whoever is asking.
+    const items = filterToTenantVisibility(
+      this.billingSettlementService.listPlatformInvoices(),
+      resolveTenantVisibility(identity),
+    );
     return toApiSuccessEnvelope(toApiListData(items), requestId);
   }
 
   @Get("settlement/matrix")
-  listSettlementMatrix(@Headers("x-request-id") requestId?: string) {
+  @RequireRealms("system", "platform", "tenant", "ops", "partner")
+  @RequireScopes("billing:read")
+  listSettlementMatrix(
+    @CurrentIdentity() _identity?: BootstrapRequestIdentity | null,
+    @Headers("x-request-id") requestId?: string,
+  ) {
     const items = this.billingSettlementService.listSettlementMatrix();
     return toApiSuccessEnvelope(toApiListData(items), requestId);
   }
@@ -269,8 +306,11 @@ export class BillingSettlementController {
   }
 
   @Post("driver-fee-plans/publish")
+  @RequireRealms("system", "platform", "tenant", "ops")
+  @RequireScopes("billing:write")
   publishDriverFeePlan(
     @Body() command: PublishDriverFeePlanCommand,
+    @CurrentIdentity() _identity?: BootstrapRequestIdentity | null,
     @Headers("x-request-id") requestId?: string,
   ) {
     return toApiSuccessEnvelope(
@@ -280,38 +320,101 @@ export class BillingSettlementController {
   }
 
   @Post("driver-statements/generate")
+  @RequireRealms("platform", "ops")
+  @RequireScopes("billing:write")
   async generateDriverStatements(
     @Body() command: GenerateDriverStatementCommand,
+    @Headers("idempotency-key") idempotencyKey?: string,
     @Headers("x-request-id") requestId?: string,
   ) {
-    return toApiSuccessEnvelope(
-      await this.billingSettlementService.generateDriverStatements(
-        command,
-        requestId,
-      ),
-      requestId,
-    );
+    const scope = `billing:payout:driver:${command.driverId?.trim() || "all"}`;
+
+    const result = await this.idempotencyService.execute({
+      scope,
+      idempotencyKey,
+      required: true,
+      payload: command,
+      execute: async () => {
+        const data =
+          await this.billingSettlementService.generateDriverStatements(
+            command,
+            requestId,
+          );
+        return {
+          data,
+          statusCode: 200,
+        };
+      },
+    });
+
+    return toApiSuccessEnvelope(result.data, requestId);
   }
 
   @Get("driver-statements")
+  @RequireRealms("platform", "ops", "driver")
   listDriverStatements(
+    @CurrentIdentity() identity: BootstrapRequestIdentity | null = null,
     @Query("period") period?: string,
     @Query("periodMonth") periodMonth?: string,
+    @Query("driverId") driverId?: string,
     @Headers("x-request-id") requestId?: string,
   ) {
+    let effectiveDriverId = driverId?.trim() || undefined;
+    if (identity?.realm === "driver" || identity?.actorType === "driver_user") {
+      const actorDriverId = normalizeDriverId(identity.actorId);
+      if (!actorDriverId) {
+        throw new ApiRequestError(
+          HttpStatus.UNAUTHORIZED,
+          "DRIVER_IDENTITY_REQUIRED",
+          "Driver identity is required.",
+        );
+      }
+      if (
+        effectiveDriverId &&
+        !isDriverIdentityMatching(actorDriverId, effectiveDriverId)
+      ) {
+        throw new ApiRequestError(
+          HttpStatus.FORBIDDEN,
+          "DRIVER_IDENTITY_MISMATCH",
+          "Driver identity may only view its own statements.",
+          { actorId: identity.actorId, requestedDriverId: effectiveDriverId },
+        );
+      }
+      effectiveDriverId = actorDriverId;
+    }
+
     const items = this.billingSettlementService.listDriverStatements(
       periodMonth ?? period,
+      effectiveDriverId,
     );
     return toApiSuccessEnvelope(toApiListData(items), requestId);
   }
 
   @Get("driver-statements/:statementId")
+  @RequireRealms("platform", "ops", "driver")
   getDriverStatement(
     @Param("statementId") statementId: string,
+    @CurrentIdentity() identity: BootstrapRequestIdentity | null = null,
     @Headers("x-request-id") requestId?: string,
   ) {
+    let requestingDriverId: string | undefined;
+    if (identity?.realm === "driver" || identity?.actorType === "driver_user") {
+      const actorDriverId = normalizeDriverId(identity.actorId);
+      if (!actorDriverId) {
+        throw new ApiRequestError(
+          HttpStatus.UNAUTHORIZED,
+          "DRIVER_IDENTITY_REQUIRED",
+          "Driver identity is required.",
+        );
+      }
+      requestingDriverId = actorDriverId;
+    }
+
     return toApiSuccessEnvelope(
-      this.billingSettlementService.getDriverStatement(statementId),
+      this.billingSettlementService.getDriverStatement(
+        statementId,
+        requestingDriverId,
+      ),
       requestId,
     );
   }
@@ -336,26 +439,46 @@ export class BillingSettlementController {
   }
 
   @Get("settlement/reconciliation-issues")
+  @RequireRealms("system", "platform", "tenant", "ops")
+  @RequireScopes("billing:read")
   listReconciliationIssues(
     @Query("status") status?: "open" | "assigned" | "resolved" | "reopened",
     @Query("issueType")
     issueType?: "forwarder_status_mismatch" | "partner_sponsor_mismatch",
     @Query("channelKey") channelKey?: string,
+    @CurrentIdentity() identity?: BootstrapRequestIdentity | null,
     @Headers("x-request-id") requestId?: string,
   ) {
-    const items = this.billingSettlementService.listReconciliationIssues({
-      ...(status ? { status } : {}),
-      ...(issueType ? { issueType } : {}),
-      ...(channelKey ? { channelKey } : {}),
-    });
+    const items = filterToTenantVisibility(
+      this.billingSettlementService.listReconciliationIssues({
+        ...(status ? { status } : {}),
+        ...(issueType ? { issueType } : {}),
+        ...(channelKey ? { channelKey } : {}),
+      }),
+      resolveTenantVisibility(identity),
+    );
     return toApiSuccessEnvelope(toApiListData(items), requestId);
   }
 
   @Post("settlement/reconciliation-issues")
+  @RequireRealms("system", "platform", "tenant", "ops")
+  @RequireScopes("billing:write")
   createReconciliationIssue(
     @Body() command: CreateReconciliationIssueCommand,
+    @CurrentIdentity() identity?: BootstrapRequestIdentity | null,
     @Headers("x-request-id") requestId?: string,
   ) {
+    const visibility = resolveTenantVisibility(identity);
+    if (visibility.scope === "tenant") {
+      if (command.tenantId && command.tenantId !== visibility.tenantId) {
+        throw new ApiRequestError(
+          403,
+          "TENANT_BOUNDARY_VIOLATION",
+          "Tenant caller cannot create reconciliation issues for another tenant.",
+        );
+      }
+      command.tenantId = visibility.tenantId;
+    }
     return toApiSuccessEnvelope(
       this.billingSettlementService.createReconciliationIssue(
         command,
@@ -366,11 +489,23 @@ export class BillingSettlementController {
   }
 
   @Post("settlement/reconciliation-issues/:issueId/assign")
+  @RequireRealms("system", "platform", "tenant", "ops")
+  @RequireScopes("billing:write")
   assignReconciliationIssue(
     @Param("issueId") issueId: string,
     @Body() command: AssignReconciliationIssueCommand,
+    @CurrentIdentity() identity?: BootstrapRequestIdentity | null,
     @Headers("x-request-id") requestId?: string,
   ) {
+    // `issue.tenantId && ...` let a tenant act on any issue whose tenant was
+    // null -- platform-level records were open to everyone.
+    assertTenantVisibility(
+      this.billingSettlementService
+        .listReconciliationIssues()
+        .find((item) => item.issueId === issueId)?.tenantId,
+      resolveTenantVisibility(identity),
+      { issueId },
+    );
     return toApiSuccessEnvelope(
       this.billingSettlementService.assignReconciliationIssue(
         issueId,
@@ -382,11 +517,23 @@ export class BillingSettlementController {
   }
 
   @Post("settlement/reconciliation-issues/:issueId/comment")
+  @RequireRealms("system", "platform", "tenant", "ops")
+  @RequireScopes("billing:write")
   addReconciliationIssueComment(
     @Param("issueId") issueId: string,
     @Body() command: AddReconciliationIssueCommentCommand,
+    @CurrentIdentity() identity?: BootstrapRequestIdentity | null,
     @Headers("x-request-id") requestId?: string,
   ) {
+    // `issue.tenantId && ...` let a tenant act on any issue whose tenant was
+    // null -- platform-level records were open to everyone.
+    assertTenantVisibility(
+      this.billingSettlementService
+        .listReconciliationIssues()
+        .find((item) => item.issueId === issueId)?.tenantId,
+      resolveTenantVisibility(identity),
+      { issueId },
+    );
     return toApiSuccessEnvelope(
       this.billingSettlementService.addReconciliationIssueComment(
         issueId,
@@ -398,11 +545,23 @@ export class BillingSettlementController {
   }
 
   @Post("settlement/reconciliation-issues/:issueId/resolve")
+  @RequireRealms("system", "platform", "tenant", "ops")
+  @RequireScopes("billing:write")
   resolveReconciliationIssue(
     @Param("issueId") issueId: string,
     @Body() command: ResolveReconciliationIssueCommand,
+    @CurrentIdentity() identity?: BootstrapRequestIdentity | null,
     @Headers("x-request-id") requestId?: string,
   ) {
+    // `issue.tenantId && ...` let a tenant act on any issue whose tenant was
+    // null -- platform-level records were open to everyone.
+    assertTenantVisibility(
+      this.billingSettlementService
+        .listReconciliationIssues()
+        .find((item) => item.issueId === issueId)?.tenantId,
+      resolveTenantVisibility(identity),
+      { issueId },
+    );
     return toApiSuccessEnvelope(
       this.billingSettlementService.resolveReconciliationIssue(
         issueId,
@@ -414,11 +573,23 @@ export class BillingSettlementController {
   }
 
   @Post("settlement/reconciliation-issues/:issueId/reopen")
+  @RequireRealms("system", "platform", "tenant", "ops")
+  @RequireScopes("billing:write")
   reopenReconciliationIssue(
     @Param("issueId") issueId: string,
     @Body() command: ReopenReconciliationIssueCommand,
+    @CurrentIdentity() identity?: BootstrapRequestIdentity | null,
     @Headers("x-request-id") requestId?: string,
   ) {
+    // `issue.tenantId && ...` let a tenant act on any issue whose tenant was
+    // null -- platform-level records were open to everyone.
+    assertTenantVisibility(
+      this.billingSettlementService
+        .listReconciliationIssues()
+        .find((item) => item.issueId === issueId)?.tenantId,
+      resolveTenantVisibility(identity),
+      { issueId },
+    );
     return toApiSuccessEnvelope(
       this.billingSettlementService.reopenReconciliationIssue(
         issueId,
@@ -430,35 +601,66 @@ export class BillingSettlementController {
   }
 
   @Post("reimbursements/:batchId/approve")
-  approveReimbursementBatch(
+  async approveReimbursementBatch(
     @Param("batchId") batchId: string,
     @Body() command: ApproveReimbursementBatchCommand,
+    @Headers("idempotency-key") idempotencyKey?: string,
     @Headers("x-request-id") requestId?: string,
   ) {
-    return toApiSuccessEnvelope(
-      this.billingSettlementService.approveReimbursementBatch(
-        batchId,
-        command,
-        requestId,
-      ),
-      requestId,
-    );
+    const scope = `billing:reimbursement_batch:${batchId}:approve`;
+    const result = await this.idempotencyService.execute({
+      scope,
+      idempotencyKey,
+      required: true,
+      payload: { batchId, statementId: command.statementId },
+      execute: async () => {
+        const data =
+          await this.billingSettlementService.approveReimbursementBatch(
+            batchId,
+            command,
+            requestId,
+          );
+        return {
+          data,
+          statusCode: 200,
+        };
+      },
+    });
+
+    return toApiSuccessEnvelope(result.data, requestId);
   }
 
   @Post("reimbursements/:batchId/pay")
-  markReimbursementPaid(
+  async markReimbursementPaid(
     @Param("batchId") batchId: string,
     @Body() command: MarkReimbursementPaidCommand,
+    @Headers("idempotency-key") idempotencyKey?: string,
     @Headers("x-request-id") requestId?: string,
   ) {
-    return toApiSuccessEnvelope(
-      this.billingSettlementService.markReimbursementPaid(
+    const scope = `billing:reimbursement_batch:${batchId}:pay`;
+    const result = await this.idempotencyService.execute({
+      scope,
+      idempotencyKey,
+      required: true,
+      payload: {
         batchId,
-        command,
-        requestId,
-      ),
-      requestId,
-    );
+        paidAt: command.paidAt,
+        remittanceProofId: command.remittanceProofId,
+      },
+      execute: async () => {
+        const data = await this.billingSettlementService.markReimbursementPaid(
+          batchId,
+          command,
+          requestId,
+        );
+        return {
+          data,
+          statusCode: 200,
+        };
+      },
+    });
+
+    return toApiSuccessEnvelope(result.data, requestId);
   }
 
   @Get("reimbursements/:batchId")
@@ -470,5 +672,154 @@ export class BillingSettlementController {
       this.billingSettlementService.getReimbursementBatch(batchId),
       requestId,
     );
+  }
+
+  // ── Remittance Proof (SR-PROOF-001) ──
+
+  /**
+   * Not part of the locked SR-RECOVERY-CONTRACTS-20260911 OpenAPI paths --
+   * that contract's `UploadRemittanceProofCommand.stagedContentRef` is
+   * deliberately opaque ("into the storage adapter's staged upload; not
+   * the raw bytes") and assumes a prior staging call this task's
+   * write_scopes never allocated an endpoint for. This route is the
+   * missing first phase: it accepts the actual bytes (base64, to avoid a
+   * multipart/`multer` dependency nothing else in this codebase uses) and
+   * returns the `stagedContentRef` that `POST reimbursements/proofs`
+   * expects. See `docs/04-uat/system-remediation-20260906/SR-PROOF-001.md`
+   * for why this exists and its boundary.
+   */
+  @Post("reimbursements/proofs/staged-content")
+  @HttpCode(HttpStatus.OK)
+  @RequireRealms("driver")
+  @RequireScopes("driver:write")
+  async stageRemittanceProofContent(
+    @Body() body: { contentBase64?: string; contentType?: string },
+    @Headers("idempotency-key") idempotencyKey?: string,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    const contentType = body?.contentType?.trim();
+    if (!contentType) {
+      throw new ApiRequestError(
+        HttpStatus.BAD_REQUEST,
+        "VALIDATION_ERROR",
+        "contentType is required.",
+      );
+    }
+    let bytes: Buffer;
+    try {
+      bytes = Buffer.from(body?.contentBase64 ?? "", "base64");
+    } catch {
+      bytes = Buffer.alloc(0);
+    }
+    if (bytes.length === 0) {
+      throw new ApiRequestError(
+        HttpStatus.BAD_REQUEST,
+        "VALIDATION_ERROR",
+        "contentBase64 must decode to non-empty bytes.",
+      );
+    }
+    const result = await this.idempotencyService.execute({
+      scope: "billing:remittance_proof:staged_content:create",
+      idempotencyKey,
+      required: true,
+      payload: { contentType, contentBase64: body?.contentBase64 ?? "" },
+      execute: async () => {
+        const data =
+          await this.billingSettlementService.stageRemittanceProofContent(
+            bytes,
+            contentType,
+          );
+        return {
+          data,
+          statusCode: 200,
+        };
+      },
+    });
+    return toApiSuccessEnvelope(result.data, requestId);
+  }
+
+  @Post("reimbursements/proofs")
+  @RequireRealms("driver")
+  @RequireScopes("driver:write")
+  async uploadRemittanceProof(
+    @Body() command: UploadRemittanceProofCommand,
+    @CurrentIdentity() identity?: BootstrapRequestIdentity | null,
+    @Headers("idempotency-key") idempotencyKey?: string,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    const scope = `billing:remittance_proof:${command.batchId}:upload`;
+    const result = await this.idempotencyService.execute({
+      scope,
+      idempotencyKey,
+      required: true,
+      payload: {
+        batchId: command.batchId,
+        originalFilename: command.originalFilename,
+        stagedContentRef: command.stagedContentRef,
+      },
+      execute: async () => {
+        const data = await this.billingSettlementService.uploadRemittanceProof(
+          command,
+          identity ?? null,
+          requestId,
+        );
+        return {
+          data,
+          statusCode: 200,
+        };
+      },
+    });
+    return toApiSuccessEnvelope(result.data, requestId);
+  }
+
+  @Get("reimbursements/proofs/:proofId")
+  @RequireRealms("system", "platform", "ops")
+  @RequireScopes("billing:read")
+  async getRemittanceProof(
+    @Param("proofId") proofId: string,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    const data =
+      await this.billingSettlementService.getRemittanceProof(proofId);
+    return toApiSuccessEnvelope(data, requestId);
+  }
+
+  @Post("reimbursements/proofs/:proofId/readback")
+  @HttpCode(HttpStatus.OK)
+  @RequireRealms("system", "platform", "ops")
+  @RequireScopes("billing:write")
+  async requestRemittanceProofReadback(
+    @Param("proofId") proofId: string,
+    @Body() command: RequestRemittanceProofReadbackCommand,
+    @CurrentIdentity() identity?: BootstrapRequestIdentity | null,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    const data =
+      await this.billingSettlementService.requestRemittanceProofReadback(
+        { ...command, proofId },
+        identity ?? null,
+        requestId,
+      );
+    return toApiSuccessEnvelope(data, requestId);
+  }
+
+  @Post("reimbursements/:batchId/pay-with-proof")
+  @HttpCode(HttpStatus.OK)
+  @RequireRealms("system", "platform", "ops")
+  @RequireScopes("billing:write")
+  async markReimbursementPaidWithProof(
+    @Param("batchId") batchId: string,
+    @Body() command: MarkReimbursementPaidWithProofCommand,
+    @CurrentIdentity() identity?: BootstrapRequestIdentity | null,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    const data =
+      await this.billingSettlementService.markReimbursementPaidWithProof(
+        batchId,
+        { ...command, batchId },
+        identity ?? null,
+        requestId,
+      );
+    return toApiSuccessEnvelope(data, requestId);
   }
 }

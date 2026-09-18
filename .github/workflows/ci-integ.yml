@@ -1,12 +1,9 @@
 name: CI (integration trunk)
 
-# v4: post-merge integration suite on `dev`. Triggered by `push` only —
-# PR-time gating is handled by ci.yml's 3 named checks (Commit trailers /
-# Runtime mirror guard / Smoke acceptance).
-#
-# A green ci-integ on dev HEAD is the prerequisite for nightly-publish.yml
-# to cut the next publish/v<date> snapshot. Without ci-integ green,
-# nightly-publish skips with a warning.
+# Runs the full integration candidate on pull requests to `dev`, then repeats
+# it on the merged `dev` head. `ci-integ` is a required PR check; a green dev
+# result remains the prerequisite for nightly-publish.yml to cut the next
+# publish/v<date> snapshot.
 
 on:
   push:
@@ -32,9 +29,90 @@ concurrency:
 env:
   CI: true
 
+# Every job carries timeout-minutes. GitHub's default is six hours, and on
+# 2026-08-19 a transient hang in `apt-get install postgresql-client` held
+# iam-negative-matrix for three hours and twenty minutes on dev while the
+# branch's CI result stayed unknown; the same step had hung three jobs on a PR
+# earlier the same day. The limits are three times the longest observed
+# successful run, floored at ten minutes, so a slow runner still passes and a
+# hang is capped in minutes rather than hours.
+
 jobs:
-  lint:
+  # Owner checkpoints are intentionally cheap. A review candidate is the first
+  # immutable SHA that may start the full integration gate.
+  candidate:
     runs-on: ubuntu-latest
+    timeout-minutes: 10
+    outputs:
+      run_full_ci: ${{ steps.gate.outputs.run_full_ci }}
+    steps:
+      - id: gate
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          PR_DRAFT: ${{ github.event.pull_request.draft }}
+        run: |
+          if [ "$EVENT_NAME" = "pull_request" ] && [ "$PR_DRAFT" = "true" ]; then
+            echo "run_full_ci=false" >> "$GITHUB_OUTPUT"
+            echo "Draft PR: waiting for the owner to hand off an immutable candidate."
+          else
+            echo "run_full_ci=true" >> "$GITHUB_OUTPUT"
+          fi
+
+  # One fail-safe classifier owns product/tool scope for both CI workflows.
+  # Unknown paths, workflow changes, empty diffs, and non-PR events run the full
+  # suite. Only a dev PR containing exclusively known internal-tool/docs paths
+  # may skip product jobs.
+  changes:
+    needs: candidate
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    outputs:
+      scope: ${{ steps.filter.outputs.scope }}
+      product: ${{ steps.filter.outputs.product }}
+      orchestrator: ${{ steps.filter.outputs.orchestrator }}
+      e2e: ${{ steps.filter.outputs.e2e }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Verify scope classifier contract
+        run: |
+          python3 -m unittest tools/ci/test_classify_change_scope.py
+          python3 -m unittest tools/ci/test_check_commit_trailers.py
+          python3 -m unittest tools/ci/test_check_test_coverage.py
+          python3 -m unittest tools/ci/test_workflow_timeouts.py
+          python3 -m unittest tools/ci/test_tenant_binding_acceptance_workflow.py
+          python3 -m unittest tools/ci/test_academy_acceptance_workflow.py
+          python3 -m unittest tools/ci/test_leave_acceptance_workflow.py
+          python3 -m unittest tools/ci/test_booking_search_acceptance_workflow.py
+          python3 -m unittest tools/ci/test_host_acceptance_workflow.py
+          python3 -m unittest tools/ci/test_driver_web_acceptance_workflow.py
+          python3 -m unittest tools/ci/test_enterprise_search_acceptance_workflow.py
+          python3 -m unittest tools/ci/test_enterprise_data_acceptance_workflow.py
+          python3 -m unittest tools/ci/test_ops_proof_acceptance_workflow.py
+          python3 -m unittest tools/ci/test_tenant_uat_acceptance_workflow.py
+      - name: Verify every test file is on a path CI runs
+        run: python3 tools/ci/check_test_coverage.py
+      - id: filter
+        name: Classify product and internal-tool changes
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          BASE_REF: ${{ github.event.pull_request.base.ref || '' }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha || '' }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          python3 tools/ci/classify_change_scope.py \
+            --event-name "$EVENT_NAME" \
+            --base-ref "$BASE_REF" \
+            --base-sha "$BASE_SHA" \
+            --head-sha "$HEAD_SHA" \
+            --github-output "$GITHUB_OUTPUT"
+
+  lint:
+    needs: [candidate, changes]
+    if: needs.candidate.outputs.run_full_ci == 'true' && needs.changes.outputs.product == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
@@ -50,7 +128,10 @@ jobs:
       - run: pnpm run lint
 
   typecheck:
+    needs: [candidate, changes]
+    if: needs.candidate.outputs.run_full_ci == 'true' && needs.changes.outputs.product == 'true'
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
@@ -66,7 +147,10 @@ jobs:
       - run: pnpm run typecheck
 
   unit:
+    needs: [candidate, changes]
+    if: needs.candidate.outputs.run_full_ci == 'true' && needs.changes.outputs.product == 'true'
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     services:
       postgres:
         image: postgis/postgis:16-3.4
@@ -94,13 +178,35 @@ jobs:
             cache: pnpm,
             cache-dependency-path: pnpm-lock.yaml,
           }
-      - name: Install PostgreSQL client
-        run: sudo apt-get update && sudo apt-get install -y postgresql-client
       - run: pnpm install --frozen-lockfile
-      - run: pnpm run test:unit
+      # Built here rather than inside the test: a cold image build is minutes of
+      # work, and paying for it inside a vitest budget made the suite fail with
+      # "Test timed out" on branches that never touched it. Buildx cache keeps
+      # this near-free on repeat runs, and the failure now names the real cause.
+      # The default docker driver cannot export a cache; the container driver can.
+      - uses: docker/setup-buildx-action@v3
+      - name: Build API image for the control-plane resolution test
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: apps/api/Dockerfile
+          tags: drts-api:test
+          push: false
+          load: true
+          cache-from: type=gha,scope=api-test-image
+          cache-to: type=gha,scope=api-test-image,mode=max
+      - name: Run unit tests
+        # Only this job builds drts-api:test, so only here is a missing image a
+        # failure. Smoke acceptance runs the same suite without one.
+        env:
+          DRTS_REQUIRE_API_TEST_IMAGE: "1"
+        run: pnpm run test:unit
 
   integration:
+    needs: [candidate, changes]
+    if: needs.candidate.outputs.run_full_ci == 'true' && needs.changes.outputs.product == 'true'
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     services:
       postgres:
         image: postgis/postgis:16-3.4
@@ -128,9 +234,65 @@ jobs:
             cache: pnpm,
             cache-dependency-path: pnpm-lock.yaml,
           }
-      - name: Install PostgreSQL client
-        run: sudo apt-get update && sudo apt-get install -y postgresql-client
       - run: pnpm install --frozen-lockfile
+      - name: Run voice booking command PostgreSQL crash matrix
+        env:
+          UV_BOOKING_TEST_DATABASE_URL: postgresql://postgres:postgres@localhost:5432/postgres
+        run: |
+          pnpm --filter @drts/contracts build
+          pnpm --filter @drts/control-plane-auth build
+          mkdir -p .artifacts/voice-booking-command
+          pnpm exec vitest run tests/integration/uv-exec-015.integration.test.ts \
+            --no-file-parallelism --maxConcurrency=1 \
+            --reporter=default --reporter=json \
+            --outputFile.json=.artifacts/voice-booking-command/postgres-results.json
+          python3 - <<'PY_GATE'
+          import json
+          from pathlib import Path
+          report = json.loads(Path('.artifacts/voice-booking-command/postgres-results.json').read_text())
+          total = report.get('numTotalTests', 0)
+          passed = report.get('numPassedTests', 0)
+          pending = report.get('numPendingTests', 0)
+          if total < 14 or passed != total or pending or not report.get('success'):
+              raise SystemExit(f'PostgreSQL matrix incomplete: total={total}, passed={passed}, pending={pending}')
+          print(f'PostgreSQL command/crash matrix: {passed} passed, none skipped')
+          PY_GATE
+      - name: Upload voice booking command PostgreSQL evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: voice-booking-command-postgres-${{ github.sha }}
+          path: .artifacts/voice-booking-command/postgres-results.json
+          if-no-files-found: warn
+      - name: Run UV-EXEC-024 real PostgreSQL two-instance race & fault matrix
+        env:
+          UV_BOOKING_TEST_DATABASE_URL: postgresql://postgres:postgres@localhost:5432/postgres
+        run: |
+          pnpm --filter @drts/contracts build
+          pnpm --filter @drts/control-plane-auth build
+          mkdir -p .artifacts/unattended-voice-postgres
+          pnpm exec vitest run tests/integration/unattended-voice-postgres.integration.test.ts \
+            --no-file-parallelism --maxConcurrency=1 \
+            --reporter=default --reporter=json \
+            --outputFile.json=.artifacts/unattended-voice-postgres/postgres-results.json
+          python3 - <<'PY_GATE'
+          import json
+          from pathlib import Path
+          report = json.loads(Path('.artifacts/unattended-voice-postgres/postgres-results.json').read_text())
+          total = report.get('numTotalTests', 0)
+          passed = report.get('numPassedTests', 0)
+          pending = report.get('numPendingTests', 0)
+          if total < 18 or passed != total or pending or not report.get('success'):
+              raise SystemExit(f'UV-EXEC-024 matrix incomplete: total={total}, passed={passed}, pending={pending}')
+          print(f'UV-EXEC-024 two-instance race & fault matrix: {passed} passed, none skipped')
+          PY_GATE
+      - name: Upload UV-EXEC-024 PostgreSQL evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: unattended-voice-postgres-${{ github.sha }}
+          path: .artifacts/unattended-voice-postgres/postgres-results.json
+          if-no-files-found: warn
       - name: Apply migrations
         run: pnpm db:migrate
       - name: Run integration tests
@@ -138,8 +300,62 @@ jobs:
       - name: Run PostgreSQL UAT gates serially
         run: pnpm --filter @drts/api run test:integration:postgres-gates
 
-  build:
+  iam-negative-matrix:
+    needs: [candidate, changes]
+    if: needs.candidate.outputs.run_full_ci == 'true' && needs.changes.outputs.product == 'true'
     runs-on: ubuntu-latest
+    timeout-minutes: 15
+    services:
+      postgres:
+        image: postgis/postgis:16-3.4
+        env:
+          POSTGRES_DB: drts_fleet_platform
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      DATABASE_URL: postgresql://postgres:postgres@localhost:5432/drts_fleet_platform
+      API_PORT: "3001"
+      API_HOST: 0.0.0.0
+      E2E_API_URL: http://localhost:3001
+      AUTH_MODE: test
+      JWT_SECRET: ci-e2e-secret
+      JWT_ISSUER: drts-local
+      JWT_AUDIENCE: drts-api
+      CONTROLLED_DOWNLOAD_SIGNING_SECRET: ci-e2e-controlled-download-secret
+      PARTNER_INGRESS_KEY_BANK_DEMO_ALPHA_AIRPORT: ci-e2e-alpha-ingress-key
+      PARTNER_INGRESS_KEY_BANK_DEMO_BETA_AIRPORT: ci-e2e-beta-ingress-key
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with: { version: 10.33.0, run_install: false }
+      - uses: actions/setup-node@v4
+        with:
+          {
+            node-version: 22,
+            cache: pnpm,
+            cache-dependency-path: pnpm-lock.yaml,
+          }
+      - run: pnpm install --frozen-lockfile
+      # The suite asserts denial behaviour against real iam.* tables; without
+      # the schema every case fails with `relation "iam.identity_principals"
+      # does not exist` rather than testing anything.
+      - name: Apply migrations
+        run: pnpm db:migrate
+      - name: Run IAM negative matrix
+        run: pnpm run test:security:iam-negative-matrix
+
+  build:
+    needs: [candidate, changes]
+    if: needs.candidate.outputs.run_full_ci == 'true' && needs.changes.outputs.product == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
@@ -155,7 +371,10 @@ jobs:
       - run: pnpm run build
 
   i18n-guard:
+    needs: [candidate, changes]
+    if: needs.candidate.outputs.run_full_ci == 'true' && needs.changes.outputs.product == 'true'
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
@@ -171,21 +390,28 @@ jobs:
       - run: pnpm run i18n:guard
 
   orchestrator-tests:
+    needs: [candidate, changes]
+    if: needs.candidate.outputs.run_full_ci == 'true' && needs.changes.outputs.orchestrator == 'true'
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with: { python-version: "3.12" }
       - name: Run orchestrator unit tests
-        working-directory: .orchestrator
-        run: python3 -m unittest discover -s . -p 'test_*.py' -v
+        run: python3 -m unittest discover -s tools/development-orchestrator -p 'test_*.py' -v
+      - name: Validate task materializer contract
+        run: python3 tools/task-dispatch/dispatch-stage1-functional-completion-20260808.py --dry-run
 
   # Cross-surface E2E suite (tests/e2e/E2E-0*.sh) against a real Postgres-backed
   # API runtime. This is the gate that proves the named business-line workflows
   # (enterprise dispatch, forwarded order, partner airport/booking, tenant
   # governance, driver multi-platform, fleet revenue share, etc.) stay green.
-  e2e:
+  cross-surface-e2e:
+    needs: [candidate, changes]
+    if: needs.candidate.outputs.run_full_ci == 'true' && needs.changes.outputs.e2e == 'true'
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     services:
       postgres:
         # PostGIS-enabled image: V0038 migration enables the postgis extension
@@ -208,6 +434,8 @@ jobs:
       API_PORT: "3001"
       API_HOST: 0.0.0.0
       E2E_API_URL: http://localhost:3001
+      # The API rejects implicit local/test auth configuration at startup.
+      AUTH_MODE: test
       JWT_SECRET: ci-e2e-secret
       JWT_ISSUER: drts-local
       JWT_AUDIENCE: drts-api
@@ -228,11 +456,52 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - name: Build API
         run: pnpm --filter @drts/api build
-      - name: Run cross-surface E2E suite (hermetic — reset DB + restart API per scenario)
+      - name: Run cross-surface E2E suite (hermetic baseline clone + restart API per scenario)
         run: ./tests/e2e/run-e2e-hermetic.sh
-      - name: Run deterministic 39-route UI suite
+      - name: API logs on failure
+        if: failure()
+        run: tail -n 100 /tmp/drts-e2e-api.log || true
+
+  # This suite is independent from the API lifecycle exercised above. Running
+  # it in a second runner removes a serialized 39-route tail from every CI run.
+  ui-route-e2e:
+    needs: [candidate, changes]
+    if: needs.candidate.outputs.run_full_ci == 'true' && needs.changes.outputs.e2e == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    services:
+      postgres:
+        image: postgis/postgis:16-3.4
         env:
-          DATABASE_URL: postgresql://postgres:postgres@localhost:5432/drts_route_suite
+          POSTGRES_DB: drts_fleet_platform
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      DATABASE_URL: postgresql://postgres:postgres@localhost:5432/drts_route_suite
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with: { version: 10.33.0, run_install: false }
+      - uses: actions/setup-node@v4
+        with:
+          {
+            node-version: 22,
+            cache: pnpm,
+            cache-dependency-path: pnpm-lock.yaml,
+          }
+      - run: pnpm install --frozen-lockfile
+      # This runner owns its web server. Parallel E2E jobs cannot consume the
+      # API build produced by cross-surface-e2e's ephemeral filesystem.
+      - name: Build API
+        run: pnpm --filter @drts/api build
+      - name: Run deterministic 39-route UI suite
         run: |
           PGPASSWORD=postgres psql \
             postgresql://postgres:postgres@localhost:5432/postgres \
@@ -241,31 +510,82 @@ jobs:
             -c 'CREATE DATABASE drts_route_suite;'
           pnpm db:migrate
           pnpm db:seed
+          # ubuntu-latest can expose a stale Google Chrome apt index whose hash
+          # mismatch prevents Playwright dependency installation. Chromium uses
+          # Ubuntu packages here, so disable that unrelated source in this
+          # ephemeral runner before installing browser dependencies.
+          sudo find /etc/apt/sources.list.d -maxdepth 1 -type f \
+            \( -iname "*google*" -o -iname "*chrome*" \) \
+            -exec mv "{}" "{}.disabled" \; || true
           pnpm exec playwright install --with-deps chromium
           pnpm exec playwright test -c playwright.deterministic-route-suite.config.ts
-      - name: API logs on failure
-        if: failure()
-        run: tail -n 100 /tmp/drts-e2e-api.log || true
+
+  e2e:
+    needs: [candidate, changes, cross-surface-e2e, ui-route-e2e]
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    if: always()
+    steps:
+      - name: Aggregate E2E gates
+        run: |
+          if [ '${{ needs.candidate.outputs.run_full_ci }}' != 'true' ]; then
+            echo "E2E skipped for an owner checkpoint draft."
+            exit 0
+          fi
+          [ '${{ needs.changes.result }}' = 'success' ] || { echo "changes gate failed"; exit 1; }
+          for result in '${{ needs.cross-surface-e2e.result }}' '${{ needs.ui-route-e2e.result }}'; do
+            case "$result" in
+              success) ;;
+              skipped) echo "E2E skipped: no changed path can exercise it." ;;
+              *) echo "Required E2E gate failed: $result"; exit 1 ;;
+            esac
+          done
 
   # Aggregate job for branch-protection "required check" simplicity.
   ci-integ:
     needs:
       [
+        candidate,
+        changes,
         lint,
         typecheck,
         unit,
         integration,
+        iam-negative-matrix,
         build,
         i18n-guard,
         orchestrator-tests,
         e2e,
       ]
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     if: always()
     steps:
       - name: Aggregate
         run: |
-          for r in '${{ needs.lint.result }}' '${{ needs.typecheck.result }}' '${{ needs.unit.result }}' '${{ needs.integration.result }}' '${{ needs.build.result }}' '${{ needs.i18n-guard.result }}' '${{ needs.orchestrator-tests.result }}' '${{ needs.e2e.result }}'; do
-            [ "$r" = "success" ] || { echo "Required check failed: $r"; exit 1; }
-          done
-          echo "All integration checks passed."
+          # `changes` must succeed on its own: if the gate breaks, e2e reports
+          # "skipped" for the wrong reason, and treating that as a pass would
+          # silently disable the suite.
+          [ '${{ needs.candidate.result }}' = 'success' ] || { echo "Candidate gate failed"; exit 1; }
+          if [ '${{ needs.candidate.outputs.run_full_ci }}' != 'true' ]; then
+            echo "Owner checkpoint draft accepted; full CI starts only for a locked candidate."
+            exit 0
+          fi
+          [ '${{ needs.changes.result }}' = 'success' ] || { echo "Change scope gate failed"; exit 1; }
+
+          if [ '${{ needs.changes.outputs.product }}' = 'true' ]; then
+            for r in '${{ needs.lint.result }}' '${{ needs.typecheck.result }}' '${{ needs.unit.result }}' '${{ needs.integration.result }}' '${{ needs.iam-negative-matrix.result }}' '${{ needs.build.result }}' '${{ needs.i18n-guard.result }}'; do
+              [ "$r" = "success" ] || { echo "Required product check failed: $r"; exit 1; }
+            done
+          else
+            echo "Product checks are not applicable to scope '${{ needs.changes.outputs.scope }}'."
+          fi
+
+          if [ '${{ needs.changes.outputs.orchestrator }}' = 'true' ]; then
+            [ '${{ needs.orchestrator-tests.result }}' = 'success' ] || { echo "Orchestrator tests failed"; exit 1; }
+          else
+            echo "Orchestrator tests are not applicable to scope '${{ needs.changes.outputs.scope }}'."
+          fi
+
+          [ '${{ needs.e2e.result }}' = 'success' ] || { echo "Required E2E aggregate failed: ${{ needs.e2e.result }}"; exit 1; }
+          echo "All checks required for scope '${{ needs.changes.outputs.scope }}' passed."

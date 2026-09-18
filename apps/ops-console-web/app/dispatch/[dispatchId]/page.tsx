@@ -17,6 +17,7 @@ import type {
   UiRefreshMetadata,
 } from "@drts/contracts";
 import { getServerOpsClient } from "@/lib/api-client.server";
+import { OpsDispatchAssignmentButton } from "@/components/ops-dispatch-assignment-button";
 import { formatOpsCodeLabel } from "@/lib/localized-labels";
 import { formatMinorCurrency } from "@/lib/ops-analytics";
 import { getServerLocale } from "@/lib/server-locale";
@@ -27,7 +28,6 @@ import {
 import { t, type Locale } from "@/lib/translations";
 import {
   CanvasBanner as Banner,
-  CanvasBtn as Btn,
   CanvasCard as Card,
   CanvasDL as DL,
   CanvasIcon,
@@ -1238,145 +1238,19 @@ function renderActivityFeed(locale: Locale, entries: ActivityEntry[]) {
   );
 }
 
-// ── availableActions → CTA (§3.5 authority boundaries, §3.4 confirmation) ──
-
-type ActionVisual = {
-  icon: Parameters<typeof Btn>[0]["icon"];
-  label: string;
-  variant: "primary" | "secondary";
-  danger: boolean;
-};
-
-function actionVisual(
-  action: ResourceActionDescriptor,
-  locale: Locale,
-): ActionVisual {
-  const danger = action.riskLevel === "high";
-  const variant: "primary" | "secondary" =
-    action.riskLevel === "medium" ? "primary" : "secondary";
-
-  switch (action.action) {
-    case "contact_passenger":
-      return {
-        icon: "phone",
-        label: tr(locale, "dispatch.detail.headerAction.contactRider"),
-        variant: "secondary",
-        danger: false,
-      };
-    case "assign_candidate":
-      return {
-        icon: "check",
-        label: tr(locale, "dispatch.detail.headerAction.assignTopCandidate"),
-        variant: "primary",
-        danger: false,
-      };
-    case "release_driver":
-      return {
-        icon: "switchboard",
-        label: tr(locale, "dispatch.detail.headerAction.releaseDriver"),
-        variant,
-        danger,
-      };
-    case "cancel_order":
-      return {
-        icon: "x",
-        label: tr(locale, "dispatch.workflow.cancelOrder"),
-        variant,
-        danger,
-      };
-    case "fare_override":
-      return {
-        icon: "warn",
-        label: tr(locale, "dispatch.detail.headerAction.fareOverride"),
-        variant,
-        danger: true,
-      };
-    case "redispatch":
-      return {
-        icon: "dispatch",
-        label: tr(locale, "dispatch.workflow.redispatch"),
-        variant,
-        danger,
-      };
-    case "resolve_no_supply":
-      return {
-        icon: "health",
-        label: tr(locale, "dispatch.workflow.resolveNoSupply"),
-        variant,
-        danger,
-      };
-    case "escalate_incident":
-      return {
-        icon: "incidents",
-        label: tr(locale, "dispatch.workflow.escalateIncident"),
-        variant,
-        danger: true,
-      };
-    case "complete_reconciliation":
-      return {
-        icon: "check",
-        label: tr(locale, "dispatch.forwarded.action.completeReconciliation"),
-        variant: "primary",
-        danger: false,
-      };
-    case "engage_manual_fallback":
-      return {
-        icon: "switchboard",
-        label: formatOpsCodeLabel(locale, "manual_fallback"),
-        variant,
-        danger,
-      };
-    case "force_refresh":
-      return {
-        icon: "clock",
-        label: tr(locale, "dispatch.detail.headerAction.forceRefresh"),
-        variant: "secondary",
-        danger: false,
-      };
-    case "broadcast_eligible":
-      return {
-        icon: "dispatch",
-        label: tr(locale, "dispatch.detail.headerAction.broadcast"),
-        variant,
-        danger,
-      };
-    case "report_sync_failure":
-      return {
-        icon: "warn",
-        label: tr(locale, "dispatch.detail.headerAction.reportSyncFailure"),
-        variant,
-        danger: true,
-      };
-    default:
-      return {
-        icon: "more",
-        label: formatOpsCodeLabel(locale, action.action),
-        variant,
-        danger,
-      };
-  }
-}
-
-function actionHint(action: ResourceActionDescriptor, locale: Locale) {
-  if (!action.enabled) {
-    return action.disabledReasonCode
-      ? formatOpsCodeLabel(locale, action.disabledReasonCode)
-      : tr(locale, "dispatch.detail.action.unavailable");
-  }
-
-  const risk = tr(locale, "dispatch.detail.action.risk", {
-    level: formatOpsCodeLabel(locale, action.riskLevel),
-  });
-  return action.requiresReason
-    ? `${risk} · ${tr(locale, "dispatch.detail.action.reasonRequired")}`
-    : risk;
-}
-
 function renderHeaderActions(
   actions: ResourceActionDescriptor[],
   locale: Locale,
+  assignment?: {
+    dispatchJobId: string;
+    candidate: DispatchCandidate;
+  },
 ) {
-  if (actions.length === 0) {
+  const assignAction = actions.find(
+    (action) => action.action === "assign_candidate" && action.enabled,
+  );
+
+  if (!assignAction || !assignment) {
     return (
       <Pill theme={theme} tone="neutral">
         {tr(locale, "dispatch.detail.action.readOnlyTerminal")}
@@ -1385,28 +1259,11 @@ function renderHeaderActions(
   }
 
   return (
-    <>
-      {actions.map((action) => {
-        const visual = actionVisual(action, locale);
-        return (
-          <span
-            key={action.action}
-            title={actionHint(action, locale)}
-            style={{ display: "inline-flex" }}
-          >
-            <Btn
-              theme={theme}
-              variant={visual.variant}
-              danger={visual.danger}
-              disabled={!action.enabled}
-              icon={visual.icon}
-            >
-              {visual.label}
-            </Btn>
-          </span>
-        );
-      })}
-    </>
+    <OpsDispatchAssignmentButton
+      dispatchJobId={assignment.dispatchJobId}
+      candidate={assignment.candidate}
+      locale={locale}
+    />
   );
 }
 
@@ -2270,7 +2127,16 @@ async function renderOwnedWorkspace({
           </span>
         }
         subtitle={`${getAddressLabel(order.pickup)}  →  ${getAddressLabel(order.dropoff)}  ·  ${formatWindow(order, locale)}`}
-        actions={renderHeaderActions(availableActions, locale)}
+        actions={renderHeaderActions(
+          availableActions,
+          locale,
+          dispatchJob && sortedCandidates[0]
+            ? {
+                dispatchJobId: dispatchJob.dispatchJobId,
+                candidate: sortedCandidates[0],
+              }
+            : undefined,
+        )}
       />
 
       {renderRefreshRow(

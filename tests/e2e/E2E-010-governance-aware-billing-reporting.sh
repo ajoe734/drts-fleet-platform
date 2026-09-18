@@ -362,12 +362,17 @@ write_report_job_fixture() {
   local period_start period_end
   period_start=$(date -u +"%Y-%m-01T00:00:00Z")
   period_end=$(date -u +"%Y-%m-%dT23:59:59Z")
+  # FG-04 checks the governance columns on a report job, not any one report.
+  # `trip_summary` is declared but has no row builder, so it is now rejected at
+  # creation rather than completing empty; this scenario would have degraded to
+  # "not-available" and quietly stopped covering governance. `monthly_trip_report`
+  # is tenant-scoped and built, so the governance probe keeps running.
   jq -n \
     --arg tid "$tenant_id" \
     --arg ps "$period_start" \
     --arg pe "$period_end" \
     '{
-      jobType: "trip_summary",
+      jobType: "monthly_trip_report",
       format: "csv",
       filters: {
         tenantId: $tid,

@@ -65,6 +65,8 @@ env:
   DEV_ARTIFACT_REPOSITORY: ${{ vars.DEV_ARTIFACT_REPOSITORY }}
   DEV_SECRET_PREFIX: ${{ vars.DEV_SECRET_PREFIX }}
   DEV_MAP_PROVIDER_ALLOWED_ORIGINS: ${{ vars.DEV_MAP_PROVIDER_ALLOWED_ORIGINS }}
+  DEV_JWT_ISSUER: ${{ vars.DEV_JWT_ISSUER }}
+  DEV_JWT_AUDIENCE: ${{ vars.DEV_JWT_AUDIENCE }}
   DEV_GCP_API_SERVICE: ${{ vars.DEV_GCP_API_SERVICE }}
   DEV_GCP_PLATFORM_ADMIN_SERVICE: ${{ vars.DEV_GCP_PLATFORM_ADMIN_SERVICE }}
   DEV_GCP_OPS_CONSOLE_SERVICE: ${{ vars.DEV_GCP_OPS_CONSOLE_SERVICE }}
@@ -85,6 +87,8 @@ env:
   DEV_ENTERPRISE_DISPATCH_ALLOW_UNAUTHENTICATED: ${{ vars.DEV_ENTERPRISE_DISPATCH_ALLOW_UNAUTHENTICATED }}
   DEV_CHANNEL_PARTNER_PORTAL_ALLOW_UNAUTHENTICATED: ${{ vars.DEV_CHANNEL_PARTNER_PORTAL_ALLOW_UNAUTHENTICATED }}
   DEV_CONTROL_PLANE_API_ORIGIN: ${{ vars.DEV_CONTROL_PLANE_API_ORIGIN }}
+  DEV_WORKLOAD_IDENTITY_ISSUER: ${{ vars.DEV_WORKLOAD_IDENTITY_ISSUER || vars.WORKLOAD_IDENTITY_ISSUER }}
+  DEV_WORKLOAD_IDENTITY_AUDIENCE: ${{ vars.DEV_WORKLOAD_IDENTITY_AUDIENCE || vars.WORKLOAD_IDENTITY_AUDIENCE }}
   DEV_IAP_CLIENT_ID: ${{ vars.DEV_IAP_CLIENT_ID }}
   DEV_PLATFORM_ADMIN_ORIGIN: ${{ vars.DEV_PLATFORM_ADMIN_ORIGIN }}
   DEV_OPS_CONSOLE_ORIGIN: ${{ vars.DEV_OPS_CONSOLE_ORIGIN }}
@@ -245,14 +249,14 @@ jobs:
           assert_exact_active_service enterprise-dispatch-web "$enterprise_dispatch_service" "drts-dev-enterprise-dispatch-web"
           assert_exact_active_service channel-partner-portal-web "$channel_partner_portal_service" "drts-channel-partner-portal-web"
 
-          api_exposure_flag="$(exposure_flag "${DEV_API_ALLOW_UNAUTHENTICATED:-}" true)"
-          platform_admin_exposure_flag="$(exposure_flag "${DEV_PLATFORM_ADMIN_ALLOW_UNAUTHENTICATED:-}" true)"
-          ops_console_exposure_flag="$(exposure_flag "${DEV_OPS_CONSOLE_ALLOW_UNAUTHENTICATED:-}" true)"
-          fleet_partner_portal_exposure_flag="$(exposure_flag "${DEV_FLEET_PARTNER_PORTAL_ALLOW_UNAUTHENTICATED:-}" true)"
-          tenant_console_exposure_flag="$(exposure_flag "${DEV_TENANT_CONSOLE_ALLOW_UNAUTHENTICATED:-}" true)"
-          bank_console_exposure_flag="$(exposure_flag "${DEV_BANK_CONSOLE_ALLOW_UNAUTHENTICATED:-}" true)"
-          enterprise_dispatch_exposure_flag="$(exposure_flag "${DEV_ENTERPRISE_DISPATCH_ALLOW_UNAUTHENTICATED:-}" true)"
-          channel_partner_portal_exposure_flag="$(exposure_flag "${DEV_CHANNEL_PARTNER_PORTAL_ALLOW_UNAUTHENTICATED:-}" true)"
+          api_exposure_flag="$(exposure_flag "${DEV_API_ALLOW_UNAUTHENTICATED:-}" false)"
+          platform_admin_exposure_flag="$(exposure_flag "${DEV_PLATFORM_ADMIN_ALLOW_UNAUTHENTICATED:-}" false)"
+          ops_console_exposure_flag="$(exposure_flag "${DEV_OPS_CONSOLE_ALLOW_UNAUTHENTICATED:-}" false)"
+          fleet_partner_portal_exposure_flag="$(exposure_flag "${DEV_FLEET_PARTNER_PORTAL_ALLOW_UNAUTHENTICATED:-}" false)"
+          tenant_console_exposure_flag="$(exposure_flag "${DEV_TENANT_CONSOLE_ALLOW_UNAUTHENTICATED:-}" false)"
+          bank_console_exposure_flag="$(exposure_flag "${DEV_BANK_CONSOLE_ALLOW_UNAUTHENTICATED:-}" false)"
+          enterprise_dispatch_exposure_flag="$(exposure_flag "${DEV_ENTERPRISE_DISPATCH_ALLOW_UNAUTHENTICATED:-}" false)"
+          channel_partner_portal_exposure_flag="$(exposure_flag "${DEV_CHANNEL_PARTNER_PORTAL_ALLOW_UNAUTHENTICATED:-}" false)"
           api_origin="${DEV_CONTROL_PLANE_API_ORIGIN:-}"
           platform_admin_origin="${DEV_PLATFORM_ADMIN_ORIGIN:-}"
           ops_console_origin="${DEV_OPS_CONSOLE_ORIGIN:-}"
@@ -315,6 +319,8 @@ jobs:
           [[ -n "$runtime_sa" ]] || missing+=("vars.DEV_GCP_RUNTIME_SERVICE_ACCOUNT or secrets.DEV_GCP_RUNTIME_SERVICE_ACCOUNT")
           [[ -n "$deployer_sa" ]] || missing+=("secrets.DEV_WIF_SERVICE_ACCOUNT or secrets.WIF_SERVICE_ACCOUNT")
           [[ -n "$wif_provider" ]] || missing+=("secrets.DEV_WIF_PROVIDER or secrets.WIF_PROVIDER")
+          [[ -n "${DEV_WORKLOAD_IDENTITY_ISSUER:-}" ]] || missing+=("vars.DEV_WORKLOAD_IDENTITY_ISSUER or vars.WORKLOAD_IDENTITY_ISSUER")
+          [[ -n "${DEV_WORKLOAD_IDENTITY_AUDIENCE:-}" ]] || missing+=("vars.DEV_WORKLOAD_IDENTITY_AUDIENCE or vars.WORKLOAD_IDENTITY_AUDIENCE")
 
           if (( ${#missing[@]} > 0 )); then
             echo "::error::Missing GitHub Actions dev configuration: ${missing[*]}."
@@ -362,6 +368,7 @@ jobs:
     needs: prepare
     outputs:
       image_tag: ${{ steps.tag.outputs.tag }}
+      candidate_sha: ${{ steps.tag.outputs.candidate_sha }}
 
     steps:
       - name: Checkout
@@ -373,6 +380,7 @@ jobs:
         id: tag
         run: |
           echo "tag=$(git rev-parse --short=12 HEAD)" >> "$GITHUB_OUTPUT"
+          echo "candidate_sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
 
       - name: Authenticate to GCP
         uses: google-github-actions/auth@v2
@@ -394,7 +402,31 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
+      - name: Check which images the registry already has
+        id: existing
+        run: |
+          set -euo pipefail
+
+          # Under tag immutability a candidate tag can be written once and never
+          # again, so re-running a deploy for a source ref that was already built
+          # fails on the push -- the deploy is not idempotent without this. The
+          # tag is the source SHA, so an image that is already there was built
+          # from exactly this commit and is the image we would have produced.
+          # Skip those and build only what is genuinely missing.
+          for image in api migrate platform-admin-web ops-console-web fleet-partner-portal-web tenant-console-web bank-console-web referral-embed-web enterprise-dispatch-web channel-partner-portal-web;
+          do
+            reference="${{ needs.prepare.outputs.registry }}/${image}:${{ steps.tag.outputs.tag }}"
+            if gcloud container images describe "$reference" >/dev/null 2>&1; then
+              echo "${image}=true" >> "$GITHUB_OUTPUT"
+              echo "already published: ${reference}"
+            else
+              echo "${image}=false" >> "$GITHUB_OUTPUT"
+              echo "needs build: ${reference}"
+            fi
+          done
+
       - name: Build & push — api
+        if: steps.existing.outputs.api != 'true'
         uses: docker/build-push-action@v5
         with:
           context: .
@@ -402,11 +434,11 @@ jobs:
           push: true
           tags: |
             ${{ needs.prepare.outputs.registry }}/api:${{ steps.tag.outputs.tag }}
-            ${{ needs.prepare.outputs.registry }}/api:latest
-          cache-from: type=registry,ref=${{ needs.prepare.outputs.registry }}/api:cache
-          cache-to: type=registry,ref=${{ needs.prepare.outputs.registry }}/api:cache,mode=max
+          cache-from: type=gha,scope=api
+          cache-to: type=gha,scope=api,mode=min
 
       - name: Build & push — migrate
+        if: steps.existing.outputs.migrate != 'true'
         uses: docker/build-push-action@v5
         with:
           context: .
@@ -414,105 +446,112 @@ jobs:
           push: true
           tags: |
             ${{ needs.prepare.outputs.registry }}/migrate:${{ steps.tag.outputs.tag }}
-            ${{ needs.prepare.outputs.registry }}/migrate:latest
-          cache-from: type=registry,ref=${{ needs.prepare.outputs.registry }}/migrate:cache
-          cache-to: type=registry,ref=${{ needs.prepare.outputs.registry }}/migrate:cache,mode=max
+          cache-from: type=gha,scope=migrate
+          cache-to: type=gha,scope=migrate,mode=min
 
       - name: Build & push — platform-admin-web
+        if: steps.existing.outputs.platform-admin-web != 'true'
         uses: docker/build-push-action@v5
         with:
           context: .
           file: apps/platform-admin-web/Dockerfile
+          build-args: DRTS_CANDIDATE_SHA=${{ steps.tag.outputs.candidate_sha }}
           push: true
           tags: |
             ${{ needs.prepare.outputs.registry }}/platform-admin-web:${{ steps.tag.outputs.tag }}
-            ${{ needs.prepare.outputs.registry }}/platform-admin-web:latest
-          cache-from: type=registry,ref=${{ needs.prepare.outputs.registry }}/platform-admin-web:cache
-          cache-to: type=registry,ref=${{ needs.prepare.outputs.registry }}/platform-admin-web:cache,mode=max
+          cache-from: type=gha,scope=platform-admin-web
+          cache-to: type=gha,scope=platform-admin-web,mode=min
 
       - name: Build & push — ops-console-web
+        if: steps.existing.outputs.ops-console-web != 'true'
         uses: docker/build-push-action@v5
         with:
           context: .
           file: apps/ops-console-web/Dockerfile
+          build-args: DRTS_CANDIDATE_SHA=${{ steps.tag.outputs.candidate_sha }}
           push: true
           tags: |
             ${{ needs.prepare.outputs.registry }}/ops-console-web:${{ steps.tag.outputs.tag }}
-            ${{ needs.prepare.outputs.registry }}/ops-console-web:latest
-          cache-from: type=registry,ref=${{ needs.prepare.outputs.registry }}/ops-console-web:cache
-          cache-to: type=registry,ref=${{ needs.prepare.outputs.registry }}/ops-console-web:cache,mode=max
+          cache-from: type=gha,scope=ops-console-web
+          cache-to: type=gha,scope=ops-console-web,mode=min
 
       - name: Build & push — fleet-partner-portal-web
+        if: steps.existing.outputs.fleet-partner-portal-web != 'true'
         uses: docker/build-push-action@v5
         with:
           context: .
           file: apps/fleet-partner-portal-web/Dockerfile
+          build-args: DRTS_CANDIDATE_SHA=${{ steps.tag.outputs.candidate_sha }}
           push: true
           tags: |
             ${{ needs.prepare.outputs.registry }}/fleet-partner-portal-web:${{ steps.tag.outputs.tag }}
-            ${{ needs.prepare.outputs.registry }}/fleet-partner-portal-web:latest
-          cache-from: type=registry,ref=${{ needs.prepare.outputs.registry }}/fleet-partner-portal-web:cache
-          cache-to: type=registry,ref=${{ needs.prepare.outputs.registry }}/fleet-partner-portal-web:cache,mode=max
+          cache-from: type=gha,scope=fleet-partner-portal-web
+          cache-to: type=gha,scope=fleet-partner-portal-web,mode=min
 
       - name: Build & push — tenant-console-web
+        if: steps.existing.outputs.tenant-console-web != 'true'
         uses: docker/build-push-action@v5
         with:
           context: .
           file: apps/tenant-console-web/Dockerfile
+          build-args: DRTS_CANDIDATE_SHA=${{ steps.tag.outputs.candidate_sha }}
           push: true
           tags: |
             ${{ needs.prepare.outputs.registry }}/tenant-console-web:${{ steps.tag.outputs.tag }}
-            ${{ needs.prepare.outputs.registry }}/tenant-console-web:latest
-          cache-from: type=registry,ref=${{ needs.prepare.outputs.registry }}/tenant-console-web:cache
-          cache-to: type=registry,ref=${{ needs.prepare.outputs.registry }}/tenant-console-web:cache,mode=max
+          cache-from: type=gha,scope=tenant-console-web
+          cache-to: type=gha,scope=tenant-console-web,mode=min
 
       - name: Build & push — bank-console-web
+        if: steps.existing.outputs.bank-console-web != 'true'
         uses: docker/build-push-action@v5
         with:
           context: .
           file: apps/bank-console-web/Dockerfile
+          build-args: DRTS_CANDIDATE_SHA=${{ steps.tag.outputs.candidate_sha }}
           push: true
           tags: |
             ${{ needs.prepare.outputs.registry }}/bank-console-web:${{ steps.tag.outputs.tag }}
-            ${{ needs.prepare.outputs.registry }}/bank-console-web:latest
-          cache-from: type=registry,ref=${{ needs.prepare.outputs.registry }}/bank-console-web:cache
-          cache-to: type=registry,ref=${{ needs.prepare.outputs.registry }}/bank-console-web:cache,mode=max
+          cache-from: type=gha,scope=bank-console-web
+          cache-to: type=gha,scope=bank-console-web,mode=min
 
       - name: Build & push — referral-embed-web
+        if: steps.existing.outputs.referral-embed-web != 'true'
         uses: docker/build-push-action@v5
         with:
           context: .
           file: apps/referral-embed-web/Dockerfile
+          build-args: DRTS_CANDIDATE_SHA=${{ steps.tag.outputs.candidate_sha }}
           push: true
           tags: |
             ${{ needs.prepare.outputs.registry }}/referral-embed-web:${{ steps.tag.outputs.tag }}
-            ${{ needs.prepare.outputs.registry }}/referral-embed-web:latest
-          cache-from: type=registry,ref=${{ needs.prepare.outputs.registry }}/referral-embed-web:cache
-          cache-to: type=registry,ref=${{ needs.prepare.outputs.registry }}/referral-embed-web:cache,mode=max
+          cache-from: type=gha,scope=referral-embed-web
+          cache-to: type=gha,scope=referral-embed-web,mode=min
 
       - name: Build & push — enterprise-dispatch-web
+        if: steps.existing.outputs.enterprise-dispatch-web != 'true'
         uses: docker/build-push-action@v5
         with:
           context: .
           file: apps/enterprise-dispatch-web/Dockerfile
+          build-args: DRTS_CANDIDATE_SHA=${{ steps.tag.outputs.candidate_sha }}
           push: true
           tags: |
             ${{ needs.prepare.outputs.registry }}/enterprise-dispatch-web:${{ steps.tag.outputs.tag }}
-            ${{ needs.prepare.outputs.registry }}/enterprise-dispatch-web:latest
-          cache-from: type=registry,ref=${{ needs.prepare.outputs.registry }}/enterprise-dispatch-web:cache
-          cache-to: type=registry,ref=${{ needs.prepare.outputs.registry }}/enterprise-dispatch-web:cache,mode=max
+          cache-from: type=gha,scope=enterprise-dispatch-web
+          cache-to: type=gha,scope=enterprise-dispatch-web,mode=min
 
       - name: Build & push — channel-partner-portal-web
+        if: steps.existing.outputs.channel-partner-portal-web != 'true'
         uses: docker/build-push-action@v5
         with:
           context: .
           file: apps/channel-partner-portal-web/Dockerfile
+          build-args: DRTS_CANDIDATE_SHA=${{ steps.tag.outputs.candidate_sha }}
           push: true
           tags: |
             ${{ needs.prepare.outputs.registry }}/channel-partner-portal-web:${{ steps.tag.outputs.tag }}
-            ${{ needs.prepare.outputs.registry }}/channel-partner-portal-web:latest
-          cache-from: type=registry,ref=${{ needs.prepare.outputs.registry }}/channel-partner-portal-web:cache
-          cache-to: type=registry,ref=${{ needs.prepare.outputs.registry }}/channel-partner-portal-web:cache,mode=max
+          cache-from: type=gha,scope=channel-partner-portal-web
+          cache-to: type=gha,scope=channel-partner-portal-web,mode=min
 
   migrate:
     name: DB migration
@@ -607,6 +646,7 @@ jobs:
           project_id="${{ needs.prepare.outputs.project_id }}"
           secret_args="DATABASE_URL=${secret_prefix}-db-url:latest,API_KEY_SALT=${secret_prefix}-api-key-salt:latest,JWT_SECRET=${secret_prefix}-jwt-secret:latest"
           web_secret_args="JWT_SECRET=${secret_prefix}-jwt-secret:latest"
+          referral_embed_secret_args="$web_secret_args"
           ops_secret_args="$web_secret_args"
           map_provider_mode="mock"
           assistant_runtime="${DEV_PLATFORM_ADMIN_ASSISTANT_RUNTIME:-openclaw}"
@@ -617,26 +657,76 @@ jobs:
           openclaw_auth_provider=""
           openclaw_home=""
 
+          # One source for both the API (which validates) and the control-plane
+          # web apps (which mint the proxy token). Splitting these is what let
+          # the minted and expected claims drift apart.
+          jwt_issuer="${DEV_JWT_ISSUER:-https://auth.local.drts.internal}"
+          jwt_audience="${DEV_JWT_AUDIENCE:-https://api.local.drts.internal}"
+
           controlled_download_secret="${secret_prefix}-controlled-download-signing-secret"
+          workload_key_secret="${secret_prefix}-workload-identity-jwt-public-key"
+          workload_registry_secret="${secret_prefix}-workload-identity-service-principals"
           if ! gcloud secrets describe "$controlled_download_secret" --project "$project_id" >/dev/null 2>&1; then
             echo "::error::Required secret ${controlled_download_secret} not found in project ${project_id}."
             exit 1
           fi
           secret_args="${secret_args},CONTROLLED_DOWNLOAD_SIGNING_SECRET=${controlled_download_secret}:latest"
 
+          # Workload identity key material is mounted when it exists, and dev is
+          # not blocked when it does not. The API agrees: its startup validation
+          # requires the full set only for `production` and `staging`
+          # (`isStrictEnvironment` in apps/api/src/config/auth-startup-config.ts),
+          # and the verifier only reads these when a request actually presents a
+          # workload assertion. Nothing in this repository mints one, and no
+          # dev/staging GCP project has ever held these secrets.
+          #
+          # Demanding them here would only be satisfiable by inventing them, and
+          # invented values are worse than absent ones: a public key whose
+          # private half nobody holds, and a registry naming a service principal
+          # that does not exist, read as configured security while authorising a
+          # subject nobody can be. staging and prod keep their own checks.
+          workload_mounts=""
+          if gcloud secrets describe "$workload_key_secret" --project "$project_id" >/dev/null 2>&1; then
+            workload_mounts="${workload_mounts},WORKLOAD_IDENTITY_JWT_SECRET_OR_PUBLIC_KEY=${workload_key_secret}:latest"
+          else
+            echo "::notice::${workload_key_secret} is absent; dev deploys without workload identity key material."
+          fi
+          if gcloud secrets describe "$workload_registry_secret" --project "$project_id" >/dev/null 2>&1; then
+            workload_mounts="${workload_mounts},WORKLOAD_IDENTITY_SERVICE_PRINCIPALS=${workload_registry_secret}:latest"
+          else
+            echo "::notice::${workload_registry_secret} is absent; dev deploys without a service principal registry."
+          fi
+          secret_args="${secret_args}${workload_mounts}"
+
           # Dev reuses the already-managed JWT secret for internal handoff.
           # Production environments can map these slots to distinct secrets.
           internal_key_secret="${secret_prefix}-jwt-secret"
           secret_args="${secret_args},DRTS_INTERNAL_KEY=${internal_key_secret}:latest"
           web_secret_args="${web_secret_args},DRTS_INTERNAL_KEY=${internal_key_secret}:latest"
+          referral_embed_secret_args="${referral_embed_secret_args},DRTS_INTERNAL_KEY=${internal_key_secret}:latest"
+
+          referral_handoff_secret="${secret_prefix}-referral-embed-handoff-key"
+          if ! gcloud secrets describe "$referral_handoff_secret" --project "$project_id" >/dev/null 2>&1; then
+            echo "::error::Required secret ${referral_handoff_secret} not found in project ${project_id}."
+            exit 1
+          fi
+          secret_args="${secret_args},DRTS_REFERRAL_EMBED_HANDOFF_KEY=${referral_handoff_secret}:latest"
+          referral_embed_secret_args="${referral_embed_secret_args},DRTS_REFERRAL_EMBED_HANDOFF_KEY=${referral_handoff_secret}:latest"
+
+          referral_partner_ingress_secret="${secret_prefix}-referral-embed-partner-ingress-key"
+          if ! gcloud secrets describe "$referral_partner_ingress_secret" --project "$project_id" >/dev/null 2>&1; then
+            echo "::error::Required secret ${referral_partner_ingress_secret} not found in project ${project_id}."
+            exit 1
+          fi
+          secret_args="${secret_args},PARTNER_INGRESS_KEY_YUHE_RESIDENCE=${referral_partner_ingress_secret}:latest"
 
           # Dev embeds use server-to-server handoff. Map the managed secret to
           # issuer-scoped credential slots without exposing it to the
           # browser or accepting API keys from query parameters.
-          secret_args="${secret_args},PARTNER_INGRESS_KEY_CTBC=${internal_key_secret}:latest"
-          secret_args="${secret_args},PARTNER_INGRESS_KEY_CATHAY=${internal_key_secret}:latest"
-          secret_args="${secret_args},PARTNER_INGRESS_KEY_TAISHIN=${internal_key_secret}:latest"
-          secret_args="${secret_args},PARTNER_INGRESS_KEY_DBS=${internal_key_secret}:latest"
+          secret_args="${secret_args},PARTNER_INGRESS_KEY_ACME=${internal_key_secret}:latest"
+          secret_args="${secret_args},PARTNER_INGRESS_KEY_CONTOSO=${internal_key_secret}:latest"
+          secret_args="${secret_args},PARTNER_INGRESS_KEY_FABRIKAM=${internal_key_secret}:latest"
+          secret_args="${secret_args},PARTNER_INGRESS_KEY_NORTHWIND=${internal_key_secret}:latest"
 
           geocoding_secret="${secret_prefix}-google-maps-geocoding-api-key"
           routes_secret="${secret_prefix}-google-maps-routes-api-key"
@@ -656,6 +746,30 @@ jobs:
             exit 1
           fi
 
+          # SR-LIVE-PUSH-001 web push is self-signed VAPID, not an external
+          # provider (2026-09-15 decision). --set-secrets replaces the whole
+          # set and gcloud run deploy fails on a missing secret name, so all
+          # three must exist before any is mounted -- a partial mount would
+          # either 500 the deploy or silently boot the API with an incomplete
+          # VAPID config. Dev is not blocked when the credentials are absent;
+          # Web Push just stays unavailable until an operator provisions them.
+          vapid_public_secret="${secret_prefix}-passenger-webpush-vapid-public-key"
+          vapid_private_secret="${secret_prefix}-passenger-webpush-vapid-private-key"
+          vapid_subject_secret="${secret_prefix}-passenger-webpush-vapid-subject"
+          vapid_secret_count=0
+          for vapid_secret in "$vapid_public_secret" "$vapid_private_secret" "$vapid_subject_secret"; do
+            if gcloud secrets describe "$vapid_secret" --project "$project_id" >/dev/null 2>&1; then
+              vapid_secret_count=$((vapid_secret_count + 1))
+            fi
+          done
+          if [[ "$vapid_secret_count" -eq 3 ]]; then
+            secret_args="${secret_args},PASSENGER_WEBPUSH_VAPID_PUBLIC_KEY=${vapid_public_secret}:latest,PASSENGER_WEBPUSH_VAPID_PRIVATE_KEY=${vapid_private_secret}:latest,PASSENGER_WEBPUSH_VAPID_SUBJECT=${vapid_subject_secret}:latest"
+          elif [[ "$vapid_secret_count" -eq 0 ]]; then
+            echo "::notice::${vapid_public_secret}/${vapid_private_secret}/${vapid_subject_secret} are absent; dev deploys with Web Push unavailable (isAvailable() stays false)."
+          else
+            echo "::notice::VAPID configuration is partial (${vapid_secret_count}/3 secrets present); dev deploys with Web Push unavailable until all three of ${vapid_public_secret}, ${vapid_private_secret}, ${vapid_subject_secret} exist."
+          fi
+
           llm_secret="${secret_prefix}-llm-gateway-api-key"
           if gcloud secrets describe "$llm_secret" --project "$project_id" >/dev/null 2>&1; then
             secret_args="${secret_args},LLM_GATEWAY_API_KEY=${llm_secret}:latest"
@@ -673,8 +787,11 @@ jobs:
             fi
           fi
 
+          echo "jwt_issuer=${jwt_issuer}" >> "$GITHUB_OUTPUT"
+          echo "jwt_audience=${jwt_audience}" >> "$GITHUB_OUTPUT"
           echo "api=${secret_args}" >> "$GITHUB_OUTPUT"
           echo "web=${web_secret_args}" >> "$GITHUB_OUTPUT"
+          echo "referral_embed=${referral_embed_secret_args}" >> "$GITHUB_OUTPUT"
           echo "ops=${ops_secret_args}" >> "$GITHUB_OUTPUT"
           echo "map_provider_mode=${map_provider_mode}" >> "$GITHUB_OUTPUT"
           echo "llm_provider=${llm_provider}" >> "$GITHUB_OUTPUT"
@@ -698,27 +815,62 @@ jobs:
           echo "::add-mask::${GOOGLE_MAPS_GEOCODING_API_KEY}"
           echo "::add-mask::${GOOGLE_MAPS_ROUTES_API_KEY}"
           echo "::add-mask::${GOOGLE_MAPS_BROWSER_KEY}"
-          node scripts/verify-google-map-provider-live.mjs
+          node operations/verification/verify-google-map-provider-live.mjs
 
       - name: Build API env vars
         id: api_env
         run: |
           set -euo pipefail
 
-          env_vars="NODE_ENV=production,DRTS_ENV=development,API_PORT=3001,DRTS_INTERNAL_KEY_ENFORCED=false,PLATFORM_ADMIN_ASSISTANT_ENABLED=true,LLM_GATEWAY_PROVIDER=${{ steps.api_secrets.outputs.llm_provider }},LLM_GATEWAY_CHAT_MODEL=${{ steps.api_secrets.outputs.llm_chat_model }},LLM_GATEWAY_SUMMARIZER_MODEL=${{ steps.api_secrets.outputs.llm_summarizer_model }},MAP_PROVIDER_MODE=${{ steps.api_secrets.outputs.map_provider_mode }},MAP_PROVIDER_BACKEND=${{ steps.api_secrets.outputs.map_provider_mode == 'external' && 'google' || 'mock' }},MAP_PROVIDER_NAME=${{ steps.api_secrets.outputs.map_provider_mode == 'external' && 'google' || 'mock' }}"
+          # This step runs before any service is deployed, so on a freshly
+          # provisioned project the Tenant Console does not exist yet. A missing
+          # service must not be fatal here: it only means its URL cannot be known
+          # on this pass. Treating it as fatal left the deploy unable to bootstrap
+          # an empty project at all -- the origin it demanded could only be
+          # created by the deploy it was blocking.
+          tenant_console_cloud_run_origin="$(gcloud run services describe "${{ needs.prepare.outputs.tenant_console_service }}" \
+            --region "${{ needs.prepare.outputs.region }}" \
+            --project "${{ needs.prepare.outputs.project_id }}" \
+            --format='value(status.url)' 2>/dev/null || true)"
+
+          auth_allowed_origins=""
+          for origin in "${{ needs.prepare.outputs.tenant_console_origin }}" "$tenant_console_cloud_run_origin"; do
+            [[ -n "$origin" ]] || continue
+            case "$origin" in
+              https://*) ;;
+              *)
+                echo "::error::Tenant Console origin must be an HTTPS origin: $origin"
+                exit 1
+                ;;
+            esac
+            case ",${auth_allowed_origins}," in
+              *",${origin},"*) continue ;;
+            esac
+            auth_allowed_origins="${auth_allowed_origins:+${auth_allowed_origins},}${origin}"
+          done
+
+          if [[ -z "$auth_allowed_origins" ]]; then
+            echo "::warning::No Tenant Console origin available: ${{ needs.prepare.outputs.tenant_console_service }} does not exist in ${{ needs.prepare.outputs.project_id }} yet and DEV_TENANT_CONSOLE_ORIGIN is unset. Deploying the API with an empty browser origin allowlist -- dev treats that as local-origins-only, not as a wildcard. Re-run this deploy once the Tenant Console service exists to grant it access."
+          fi
+
+          # Use @ as the gcloud list delimiter because the allowlist itself is CSV.
+          # Two long-lived LISTEN bridges occupy pool clients. Four query slots
+          # keep startup and acceptance traffic moving; one API instance keeps
+          # rollout demand below the 25-connection dev database limit.
+          env_vars="^@^NODE_ENV=production@DRTS_ENV=development@DRTS_CANDIDATE_SHA=${{ needs.build-push.outputs.candidate_sha }}@AUTH_MODE=explicit@API_PORT=3001@DATABASE_POOL_MAX=6@JWT_ISSUER=${{ steps.api_secrets.outputs.jwt_issuer }}@JWT_AUDIENCE=${{ steps.api_secrets.outputs.jwt_audience }}@AUTH_ALLOWED_ORIGINS=${auth_allowed_origins}@DRTS_INTERNAL_KEY_ENFORCED=false@PLATFORM_ADMIN_ASSISTANT_ENABLED=true@WORKLOAD_IDENTITY_ISSUER=${DEV_WORKLOAD_IDENTITY_ISSUER}@WORKLOAD_IDENTITY_AUDIENCE=${DEV_WORKLOAD_IDENTITY_AUDIENCE}@LLM_GATEWAY_PROVIDER=${{ steps.api_secrets.outputs.llm_provider }}@LLM_GATEWAY_CHAT_MODEL=${{ steps.api_secrets.outputs.llm_chat_model }}@LLM_GATEWAY_SUMMARIZER_MODEL=${{ steps.api_secrets.outputs.llm_summarizer_model }}@MAP_PROVIDER_MODE=${{ steps.api_secrets.outputs.map_provider_mode }}@MAP_PROVIDER_BACKEND=${{ steps.api_secrets.outputs.map_provider_mode == 'external' && 'google' || 'mock' }}@MAP_PROVIDER_NAME=${{ steps.api_secrets.outputs.map_provider_mode == 'external' && 'google' || 'mock' }}"
           if [[ -n "${DEV_MAP_PROVIDER_ALLOWED_ORIGINS:-}" ]]; then
-            env_vars="${env_vars},MAP_PROVIDER_ALLOWED_ORIGINS=${DEV_MAP_PROVIDER_ALLOWED_ORIGINS}"
+            env_vars="${env_vars}@MAP_PROVIDER_ALLOWED_ORIGINS=${DEV_MAP_PROVIDER_ALLOWED_ORIGINS}"
           fi
           if [[ -n "${{ steps.api_secrets.outputs.llm_base_url }}" ]]; then
-            env_vars="${env_vars},LLM_GATEWAY_BASE_URL=${{ steps.api_secrets.outputs.llm_base_url }}"
+            env_vars="${env_vars}@LLM_GATEWAY_BASE_URL=${{ steps.api_secrets.outputs.llm_base_url }}"
           fi
           if [[ "${{ steps.api_secrets.outputs.llm_provider }}" == "openclaw" ]]; then
-            env_vars="${env_vars},OPENCLAW_AGENT_MODEL=${{ steps.api_secrets.outputs.llm_chat_model }}"
+            env_vars="${env_vars}@OPENCLAW_AGENT_MODEL=${{ steps.api_secrets.outputs.llm_chat_model }}"
             if [[ -n "${{ steps.api_secrets.outputs.openclaw_auth_provider }}" ]]; then
-              env_vars="${env_vars},OPENCLAW_AUTH_PROVIDER=${{ steps.api_secrets.outputs.openclaw_auth_provider }}"
+              env_vars="${env_vars}@OPENCLAW_AUTH_PROVIDER=${{ steps.api_secrets.outputs.openclaw_auth_provider }}"
             fi
             if [[ -n "${{ steps.api_secrets.outputs.openclaw_home }}" ]]; then
-              env_vars="${env_vars},OPENCLAW_HOME=${{ steps.api_secrets.outputs.openclaw_home }}"
+              env_vars="${env_vars}@OPENCLAW_HOME=${{ steps.api_secrets.outputs.openclaw_home }}"
             fi
           fi
 
@@ -728,7 +880,7 @@ jobs:
         run: |
           IMAGE="${{ needs.prepare.outputs.registry }}/api:${{ needs.build-push.outputs.image_tag }}"
 
-          scripts/deploy-cloud-run-service.sh "${{ needs.prepare.outputs.api_service }}" \
+          operations/deployment/deploy-cloud-run-service.sh "${{ needs.prepare.outputs.api_service }}" \
             --region "${{ needs.prepare.outputs.region }}" \
             --image "$IMAGE" \
             --port 3001 \
@@ -739,7 +891,7 @@ jobs:
             --set-env-vars "${{ steps.api_env.outputs.vars }}" \
             ${{ needs.prepare.outputs.api_exposure_flag }} \
             --min-instances 0 \
-            --max-instances 3 \
+            --max-instances 1 \
             --project "${{ needs.prepare.outputs.project_id }}"
 
       - name: Resolve API URL
@@ -761,7 +913,35 @@ jobs:
             api_origin="${{ steps.api_url.outputs.url }}"
           fi
 
-          env_vars="NODE_ENV=production,DRTS_API_URL=${api_origin},NEXT_PUBLIC_API_URL=/control-plane-proxy,DRTS_ENTERPRISE_DISPATCH_TENANT_ID=10000000-0000-0000-0000-000000000201,DRTS_TENANT_CONSOLE_TENANT_ID=10000000-0000-0000-0000-000000000201,MAP_PROVIDER_MODE=${{ steps.api_secrets.outputs.map_provider_mode }},MAP_PROVIDER_NAME=${{ steps.api_secrets.outputs.map_provider_mode == 'external' && 'google' || 'mock' }}"
+          ops_console_origin="${{ needs.prepare.outputs.ops_console_origin }}"
+          if [[ -z "$ops_console_origin" ]]; then
+            # Same bootstrap case as the Tenant Console above: this runs before
+            # `Deploy — ops-console-web`, so on a fresh project the service is
+            # not there to describe yet.
+            ops_console_origin="$(gcloud run services describe "${{ needs.prepare.outputs.ops_console_service }}" \
+              --region "${{ needs.prepare.outputs.region }}" \
+              --project "${{ needs.prepare.outputs.project_id }}" \
+              --format='value(status.url)' 2>/dev/null || true)"
+          fi
+          if [[ -z "$ops_console_origin" ]]; then
+            echo "::warning::No Ops Console origin available yet; the web apps ship with NEXT_PUBLIC_OPS_CONSOLE_ORIGIN empty, which disables their cross-app links until a later deploy fills it in."
+          fi
+
+          # The Tenant Console links back into Platform Admin, so it needs that
+          # origin the same way it needs the Ops Console one. It was never
+          # passed, so those links could only ever fall back to localhost.
+          platform_admin_origin="${{ needs.prepare.outputs.platform_admin_origin }}"
+          if [[ -z "$platform_admin_origin" ]]; then
+            platform_admin_origin="$(gcloud run services describe "${{ needs.prepare.outputs.platform_admin_service }}" \
+              --region "${{ needs.prepare.outputs.region }}" \
+              --project "${{ needs.prepare.outputs.project_id }}" \
+              --format='value(status.url)' 2>/dev/null || true)"
+          fi
+          if [[ -z "$platform_admin_origin" ]]; then
+            echo "::warning::No Platform Admin origin available yet; the web apps ship with NEXT_PUBLIC_PLATFORM_ADMIN_ORIGIN empty, which disables their cross-app links until a later deploy fills it in."
+          fi
+
+          env_vars="NODE_ENV=production,DRTS_ENV=development,DRTS_CANDIDATE_SHA=${{ needs.build-push.outputs.candidate_sha }},NEXT_PUBLIC_DRTS_CANDIDATE_SHA=${{ needs.build-push.outputs.candidate_sha }},JWT_ISSUER=${{ steps.api_secrets.outputs.jwt_issuer }},JWT_AUDIENCE=${{ steps.api_secrets.outputs.jwt_audience }},DRTS_API_URL=${api_origin},NEXT_PUBLIC_API_URL=/control-plane-proxy,NEXT_PUBLIC_OPS_CONSOLE_ORIGIN=${ops_console_origin},NEXT_PUBLIC_PLATFORM_ADMIN_ORIGIN=${platform_admin_origin},DRTS_FLEET_PARTNER_ID=fleet-demo-001,DRTS_ENTERPRISE_DISPATCH_TENANT_ID=10000000-0000-0000-0000-000000000201,MAP_PROVIDER_MODE=${{ steps.api_secrets.outputs.map_provider_mode }},MAP_PROVIDER_NAME=${{ steps.api_secrets.outputs.map_provider_mode == 'external' && 'google' || 'mock' }}"
           if [[ -n "${DEV_MAP_PROVIDER_ALLOWED_ORIGINS:-}" ]]; then
             env_vars="${env_vars},MAP_PROVIDER_ALLOWED_ORIGINS=${DEV_MAP_PROVIDER_ALLOWED_ORIGINS}"
           fi
@@ -776,7 +956,7 @@ jobs:
         run: |
           IMAGE="${{ needs.prepare.outputs.registry }}/platform-admin-web:${{ needs.build-push.outputs.image_tag }}"
 
-          scripts/deploy-cloud-run-service.sh "${{ needs.prepare.outputs.platform_admin_service }}" \
+          operations/deployment/deploy-cloud-run-service.sh "${{ needs.prepare.outputs.platform_admin_service }}" \
             --region "${{ needs.prepare.outputs.region }}" \
             --image "$IMAGE" \
             --port 3002 \
@@ -797,7 +977,7 @@ jobs:
         run: |
           IMAGE="${{ needs.prepare.outputs.registry }}/ops-console-web:${{ needs.build-push.outputs.image_tag }}"
 
-          scripts/deploy-cloud-run-service.sh "${{ needs.prepare.outputs.ops_console_service }}" \
+          operations/deployment/deploy-cloud-run-service.sh "${{ needs.prepare.outputs.ops_console_service }}" \
             --region "${{ needs.prepare.outputs.region }}" \
             --image "$IMAGE" \
             --port 3003 \
@@ -818,7 +998,7 @@ jobs:
         run: |
           IMAGE="${{ needs.prepare.outputs.registry }}/fleet-partner-portal-web:${{ needs.build-push.outputs.image_tag }}"
 
-          scripts/deploy-cloud-run-service.sh "${{ needs.prepare.outputs.fleet_partner_portal_service }}" \
+          operations/deployment/deploy-cloud-run-service.sh "${{ needs.prepare.outputs.fleet_partner_portal_service }}" \
             --region "${{ needs.prepare.outputs.region }}" \
             --image "$IMAGE" \
             --port 3007 \
@@ -839,13 +1019,13 @@ jobs:
         run: |
           IMAGE="${{ needs.prepare.outputs.registry }}/tenant-console-web:${{ needs.build-push.outputs.image_tag }}"
 
-          scripts/deploy-cloud-run-service.sh "${{ needs.prepare.outputs.tenant_console_service }}" \
+          operations/deployment/deploy-cloud-run-service.sh "${{ needs.prepare.outputs.tenant_console_service }}" \
             --region "${{ needs.prepare.outputs.region }}" \
             --image "$IMAGE" \
             --port 3004 \
             --ingress all \
             --service-account "${{ needs.prepare.outputs.runtime_service_account }}" \
-            --set-secrets "JWT_SECRET=${{ needs.prepare.outputs.secret_prefix }}-jwt-secret:latest,DRTS_PARTNER_SESSION_SECRET=${{ needs.prepare.outputs.secret_prefix }}-jwt-secret:latest" \
+            --set-secrets "JWT_SECRET=${{ needs.prepare.outputs.secret_prefix }}-jwt-secret:latest" \
             --set-env-vars "${{ steps.web_env.outputs.vars }}" \
             ${{ needs.prepare.outputs.tenant_console_exposure_flag }} \
             --cpu 1 \
@@ -860,14 +1040,14 @@ jobs:
         run: |
           IMAGE="${{ needs.prepare.outputs.registry }}/bank-console-web:${{ needs.build-push.outputs.image_tag }}"
 
-          scripts/deploy-cloud-run-service.sh "${{ needs.prepare.outputs.bank_console_service }}" \
+          operations/deployment/deploy-cloud-run-service.sh "${{ needs.prepare.outputs.bank_console_service }}" \
             --region "${{ needs.prepare.outputs.region }}" \
             --image "$IMAGE" \
             --port 3008 \
             --ingress all \
             --service-account "${{ needs.prepare.outputs.runtime_service_account }}" \
-            --set-secrets "JWT_SECRET=${{ needs.prepare.outputs.secret_prefix }}-jwt-secret:latest" \
-            --set-env-vars "${{ steps.web_env.outputs.vars }}" \
+            --set-secrets "JWT_SECRET=${{ needs.prepare.outputs.secret_prefix }}-jwt-secret:latest,BANK_SESSION_SECRET=${{ needs.prepare.outputs.secret_prefix }}-jwt-secret:latest" \
+            --set-env-vars "${{ steps.web_env.outputs.vars }},BANK_CONSOLE_DEMO_LOGIN=true" \
             ${{ needs.prepare.outputs.bank_console_exposure_flag }} \
             --cpu 1 \
             --concurrency 80 \
@@ -881,14 +1061,14 @@ jobs:
         run: |
           IMAGE="${{ needs.prepare.outputs.registry }}/referral-embed-web:${{ needs.build-push.outputs.image_tag }}"
 
-          scripts/deploy-cloud-run-service.sh "${{ needs.prepare.outputs.referral_embed_service }}" \
+          operations/deployment/deploy-cloud-run-service.sh "${{ needs.prepare.outputs.referral_embed_service }}" \
             --region "${{ needs.prepare.outputs.region }}" \
             --image "$IMAGE" \
             --port 3014 \
             --ingress all \
             --service-account "${{ needs.prepare.outputs.runtime_service_account }}" \
-            --set-secrets "${{ steps.api_secrets.outputs.web }}" \
-            --set-env-vars "${{ steps.web_env.outputs.vars }},REFERRAL_EMBED_ALLOWED_HOSTS=app.yuhe-living.com.tw app-stg.yuhe-living.com.tw,REFERRAL_EMBED_DEMO=true,REFERRAL_EMBED_DEFAULT_ENTRY_SLUG=${{ needs.prepare.outputs.referral_embed_entry_slug }}" \
+            --set-secrets "${{ steps.api_secrets.outputs.referral_embed }}" \
+            --set-env-vars "${{ steps.web_env.outputs.vars }},REFERRAL_EMBED_ALLOWED_HOSTS=app.fabrikam-living.example app-stg.fabrikam-living.example,REFERRAL_EMBED_DEMO=true,REFERRAL_EMBED_DEFAULT_ENTRY_SLUG=${{ needs.prepare.outputs.referral_embed_entry_slug }}" \
             --allow-unauthenticated \
             --cpu 1 \
             --concurrency 80 \
@@ -902,7 +1082,7 @@ jobs:
         run: |
           IMAGE="${{ needs.prepare.outputs.registry }}/enterprise-dispatch-web:${{ needs.build-push.outputs.image_tag }}"
 
-          scripts/deploy-cloud-run-service.sh "${{ needs.prepare.outputs.enterprise_dispatch_service }}" \
+          operations/deployment/deploy-cloud-run-service.sh "${{ needs.prepare.outputs.enterprise_dispatch_service }}" \
             --region "${{ needs.prepare.outputs.region }}" \
             --image "$IMAGE" \
             --port 3010 \
@@ -923,14 +1103,14 @@ jobs:
         run: |
           IMAGE="${{ needs.prepare.outputs.registry }}/channel-partner-portal-web:${{ needs.build-push.outputs.image_tag }}"
 
-          scripts/deploy-cloud-run-service.sh "${{ needs.prepare.outputs.channel_partner_portal_service }}" \
+          operations/deployment/deploy-cloud-run-service.sh "${{ needs.prepare.outputs.channel_partner_portal_service }}" \
             --region "${{ needs.prepare.outputs.region }}" \
             --image "$IMAGE" \
             --port 3013 \
             --ingress all \
             --service-account "${{ needs.prepare.outputs.runtime_service_account }}" \
             --set-secrets "JWT_SECRET=${{ needs.prepare.outputs.secret_prefix }}-jwt-secret:latest" \
-            --set-env-vars "${{ steps.web_env.outputs.vars }}" \
+            --set-env-vars "${{ steps.web_env.outputs.vars }},DRTS_PARTNER_ID=partner_ead6bf3d-e858-47cc-bfe1-5a3742524118,DRTS_TENANT_ID=tenant-demo-001,DRTS_PARTNER_PROGRAM_ID=program-referral-community,DRTS_PARTNER_ENTRY_SLUG=yuhe-residence" \
             ${{ needs.prepare.outputs.channel_partner_portal_exposure_flag }} \
             --cpu 1 \
             --concurrency 80 \
@@ -966,7 +1146,7 @@ jobs:
 
       - name: Remove paused Partner Booking Cloud Run service
         run: |
-          ./scripts/cleanup-paused-partner-booking-service.sh \
+          ./operations/deployment/cleanup-paused-partner-booking-service.sh \
             "${{ needs.prepare.outputs.project_id }}" \
             "${{ needs.prepare.outputs.region }}"
 
@@ -1088,25 +1268,175 @@ jobs:
           echo "enterprise_dispatch=${enterprise_dispatch_url}" >> "$GITHUB_OUTPUT"
           echo "channel_partner_portal=${channel_partner_portal_url}" >> "$GITHUB_OUTPUT"
 
+      # gcloud auth print-identity-token, and IAM credentials API generateIdToken
+      # called with an *already-impersonated* SA access token (self-impersonation),
+      # both fail silently under Workload Identity Federation: the WIF principal's
+      # Token Creator grant on the runtime SA covers access-token impersonation,
+      # not a second-hop ID-token mint from the SA's own derived access token. The
+      # google-github-actions/auth action mints the ID token from the original WIF
+      # federation exchange instead, so it stays within the already-granted trust
+      # chain. One step per private-service audience since the action mints for a
+      # single audience at a time.
+      - name: Mint identity token — tenant console
+        id: id_token_tenant_console
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ env.DEV_WIF_PROVIDER || env.WIF_PROVIDER }}
+          service_account: ${{ env.DEV_WIF_SERVICE_ACCOUNT || env.WIF_SERVICE_ACCOUNT }}
+          project_id: ${{ needs.prepare.outputs.project_id }}
+          token_format: id_token
+          id_token_audience: ${{ steps.urls.outputs.tenant_console }}
+          id_token_include_email: true
+
+      - name: Mint identity token — bank console
+        id: id_token_bank_console
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ env.DEV_WIF_PROVIDER || env.WIF_PROVIDER }}
+          service_account: ${{ env.DEV_WIF_SERVICE_ACCOUNT || env.WIF_SERVICE_ACCOUNT }}
+          project_id: ${{ needs.prepare.outputs.project_id }}
+          token_format: id_token
+          id_token_audience: ${{ steps.urls.outputs.bank_console }}
+          id_token_include_email: true
+
+      - name: Mint identity token — enterprise dispatch
+        id: id_token_enterprise_dispatch
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ env.DEV_WIF_PROVIDER || env.WIF_PROVIDER }}
+          service_account: ${{ env.DEV_WIF_SERVICE_ACCOUNT || env.WIF_SERVICE_ACCOUNT }}
+          project_id: ${{ needs.prepare.outputs.project_id }}
+          token_format: id_token
+          id_token_audience: ${{ steps.urls.outputs.enterprise_dispatch }}
+          id_token_include_email: true
+
       - name: Verify dev endpoints
+        env:
+          TENANT_CONSOLE_ID_TOKEN: ${{ steps.id_token_tenant_console.outputs.id_token }}
+          BANK_CONSOLE_ID_TOKEN: ${{ steps.id_token_bank_console.outputs.id_token }}
+          ENTERPRISE_DISPATCH_ID_TOKEN: ${{ steps.id_token_enterprise_dispatch.outputs.id_token }}
         run: |
-          curl --fail --silent --show-error "${{ steps.urls.outputs.api }}/health" >/dev/null
-          curl --fail --silent --show-error "${{ steps.urls.outputs.platform_admin }}" >/dev/null
-          curl --fail --silent --show-error "${{ steps.urls.outputs.ops_console }}" >/dev/null
-          curl --fail --silent --show-error "${{ steps.urls.outputs.fleet_partner_portal }}" >/dev/null
-          curl --fail --silent --show-error "${{ steps.urls.outputs.tenant_console }}" >/dev/null
-          curl --fail --silent --show-error "${{ steps.urls.outputs.bank_console }}" >/dev/null
+          echo "::add-mask::${TENANT_CONSOLE_ID_TOKEN}"
+          echo "::add-mask::${BANK_CONSOLE_ID_TOKEN}"
+          echo "::add-mask::${ENTERPRISE_DISPATCH_ID_TOKEN}"
+
+          for name in TENANT_CONSOLE_ID_TOKEN BANK_CONSOLE_ID_TOKEN ENTERPRISE_DISPATCH_ID_TOKEN; do
+            if [[ -z "${!name:-}" ]]; then
+              echo "::error::${name} is empty; identity token minting failed upstream." >&2
+              exit 1
+            fi
+          done
+
+          curl_ready() {
+            curl --fail --silent --show-error --location \
+              --retry 10 --retry-all-errors --retry-delay 3 --max-time 30 "$@"
+          }
+
+          curl_ready_auth() {
+            local target_url="$1"
+            local id_token="$2"
+            shift 2
+            curl --fail --silent --show-error --location-trusted \
+              --retry 10 --retry-all-errors --retry-delay 3 --max-time 30 \
+              --header "Authorization: Bearer ${id_token}" \
+              "$target_url" "$@"
+          }
+
+          curl_ready "${{ steps.urls.outputs.api }}/health" >/dev/null
+          curl_ready "${{ steps.urls.outputs.platform_admin }}" >/dev/null
+          curl_ready "${{ steps.urls.outputs.ops_console }}" >/dev/null
+          curl_ready "${{ steps.urls.outputs.fleet_partner_portal }}" >/dev/null
+          curl_ready_auth "${{ steps.urls.outputs.tenant_console }}" "${TENANT_CONSOLE_ID_TOKEN}" >/dev/null
+          curl_ready_auth "${{ steps.urls.outputs.bank_console }}" "${BANK_CONSOLE_ID_TOKEN}" >/dev/null
           referral_embed_path="/embed/${{ needs.prepare.outputs.referral_embed_entry_slug }}"
-          referral_embed_body="$(curl --fail --silent --show-error --location \
+          referral_embed_body="$(curl_ready \
             "${{ steps.urls.outputs.referral_embed }}${referral_embed_path}")"
           grep --fixed-strings "$referral_embed_path" <<<"$referral_embed_body" >/dev/null
-          referral_embed_root_body="$(curl --fail --silent --show-error --location \
+          referral_embed_root_body="$(curl_ready \
             "${{ steps.urls.outputs.referral_embed }}")"
           grep --fixed-strings "$referral_embed_path" <<<"$referral_embed_root_body" >/dev/null
-          curl --fail --silent --show-error "${{ steps.urls.outputs.enterprise_dispatch }}" >/dev/null
-          curl --fail --silent --show-error "${{ steps.urls.outputs.enterprise_dispatch }}/bookings/new" >/dev/null
-          curl --fail --silent --show-error "${{ steps.urls.outputs.enterprise_dispatch }}/embed/unsupported-host" >/dev/null
-          curl --fail --silent --show-error "${{ steps.urls.outputs.channel_partner_portal }}" >/dev/null
+          curl_ready_auth "${{ steps.urls.outputs.enterprise_dispatch }}" "${ENTERPRISE_DISPATCH_ID_TOKEN}" >/dev/null
+          curl_ready_auth "${{ steps.urls.outputs.enterprise_dispatch }}/bookings/new" "${ENTERPRISE_DISPATCH_ID_TOKEN}" >/dev/null
+          curl_ready_auth "${{ steps.urls.outputs.enterprise_dispatch }}/embed/unsupported-host" "${ENTERPRISE_DISPATCH_ID_TOKEN}" >/dev/null
+          curl_ready "${{ steps.urls.outputs.channel_partner_portal }}" >/dev/null
+
+      - name: Re-authenticate to GCP (restore access-token credentials)
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ env.DEV_WIF_PROVIDER || env.WIF_PROVIDER }}
+          service_account: ${{ env.DEV_WIF_SERVICE_ACCOUNT || env.WIF_SERVICE_ACCOUNT }}
+          project_id: ${{ needs.prepare.outputs.project_id }}
+
+      - name: Verify referral handoff session lifecycle
+        run: |
+          set -euo pipefail
+
+          api_url="${{ steps.urls.outputs.api }}"
+          referral_embed_url="${{ steps.urls.outputs.referral_embed }}"
+          entry_slug="${{ needs.prepare.outputs.referral_embed_entry_slug }}"
+          entry_host="$(curl --fail --silent --show-error \
+            "${api_url}/api/partner/entries/${entry_slug}" \
+            | jq -er '.data.entry_host // .data.entryHost')"
+          handoff_secret="${{ needs.prepare.outputs.secret_prefix }}-referral-embed-handoff-key"
+          handoff_key="$(gcloud secrets versions access latest \
+            --secret="$handoff_secret" \
+            --project="${{ needs.prepare.outputs.project_id }}")"
+          echo "::add-mask::${handoff_key}"
+
+          body_file="$(mktemp)"
+          headers_file="$(mktemp)"
+          trap 'rm -f "$body_file" "$headers_file"' EXIT
+
+          issue_artifact() {
+            local partner_user_ref="$1"
+            local response artifact
+            response="$(jq -nc \
+              --arg entrySlug "$entry_slug" \
+              --arg entryHost "$entry_host" \
+              --arg partnerUserRef "$partner_user_ref" \
+              '{entrySlug: $entrySlug, entryHost: $entryHost, partnerUserRef: $partnerUserRef}' \
+              | curl --fail --silent --show-error \
+                --request POST \
+                --header "Content-Type: application/json" \
+                --header "x-drts-referral-handoff-key: ${handoff_key}" \
+                --data @- \
+                "${api_url}/api/partner/ingress/referral-embed-handoff")"
+            artifact="$(jq -er '.data.artifact' <<<"$response")"
+            printf '%s' "$artifact"
+          }
+
+          exchange_artifact() {
+            local artifact="$1"
+            local target_host="$2"
+            jq -nc \
+              --arg artifact "$artifact" \
+              --arg entrySlug "$entry_slug" \
+              --arg entryHost "$target_host" \
+              '{artifact: $artifact, entrySlug: $entrySlug, entryHost: $entryHost}' \
+              | curl --silent --show-error \
+                --request POST \
+                --header "Content-Type: application/json" \
+                --dump-header "$headers_file" \
+                --output "$body_file" \
+                --write-out '%{http_code}' \
+                --data @- \
+                "${referral_embed_url}/api/referral/session"
+          }
+
+          artifact="$(issue_artifact "deploy-smoke-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}")"
+          [[ "$(exchange_artifact "$artifact" "$entry_host")" == "200" ]]
+          jq -e '.ok == true' "$body_file" >/dev/null
+          grep -Eqi '^set-cookie: drts_referral_embed_session=' "$headers_file"
+
+          [[ "$(exchange_artifact "$artifact" "$entry_host")" == "400" ]]
+          jq -e \
+            '.ok == false and .message == "The referral handoff artifact has already been consumed."' \
+            "$body_file" >/dev/null
+          artifact_for_wrong_host="$(issue_artifact "deploy-smoke-cross-host-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}")"
+          [[ "$(exchange_artifact "$artifact_for_wrong_host" "evil.example")" == "400" ]]
+          jq -e \
+            '.ok == false and .message == "The referral handoff artifact is not valid for this entry host."' \
+            "$body_file" >/dev/null
 
       - name: Print dev URLs
         run: |
@@ -1122,88 +1452,11 @@ jobs:
           echo "  enterprise-dispatch: ${{ steps.urls.outputs.enterprise_dispatch }}"
           echo "  channel-partner-portal: ${{ steps.urls.outputs.channel_partner_portal }}"
 
-  ui-smoke:
-    name: Dev UI smoke (playwright vs deployed)
-    runs-on: ubuntu-latest
-    needs: [prepare, health-check]
-    if: ${{ always() && needs.health-check.result == 'success' }}
-    steps:
-      - uses: actions/checkout@v4
-      - uses: pnpm/action-setup@v4
-        with: { version: 10.33.0, run_install: false }
-      - uses: actions/setup-node@v4
-        with:
-          {
-            node-version: 22,
-            cache: pnpm,
-            cache-dependency-path: pnpm-lock.yaml,
-          }
-      - run: pnpm install --frozen-lockfile
-      - name: Install Playwright Chromium
-        run: pnpm exec playwright install --with-deps chromium
-      # Post-deploy UI smoke: drives the deployed dev front-ends with a real browser
-      # across all business-line surfaces. URLs come from the health-check job's
-      # resolved Cloud Run service URLs.
-      - name: Run UI smoke against deployed dev
-        env:
-          DRTS_DEV_API_BASE_URL: ${{ needs.health-check.outputs.api }}
-          DRTS_DEV_PLATFORM_ADMIN_BASE_URL: ${{ needs.health-check.outputs.platform_admin }}
-          DRTS_DEV_OPS_CONSOLE_BASE_URL: ${{ needs.health-check.outputs.ops_console }}
-          LIVE_GOOGLE_MAP_BASE_URL: ${{ needs.health-check.outputs.ops_console }}
-          DRTS_DEV_FLEET_PARTNER_PORTAL_BASE_URL: ${{ needs.health-check.outputs.fleet_partner_portal }}
-          DRTS_DEV_TENANT_CONSOLE_BASE_URL: ${{ needs.health-check.outputs.tenant_console }}
-          DRTS_DEV_BANK_CONSOLE_BASE_URL: ${{ needs.health-check.outputs.bank_console }}
-          DRTS_DEV_ENTERPRISE_DISPATCH_BASE_URL: ${{ needs.health-check.outputs.enterprise_dispatch }}
-          ENTERPRISE_DISPATCH_BASE_URL: ${{ needs.health-check.outputs.enterprise_dispatch }}
-          DRTS_DEV_CHANNEL_PARTNER_PORTAL_BASE_URL: ${{ needs.health-check.outputs.channel_partner_portal }}
-          DRTS_DEV_REFERRAL_EMBED_BASE_URL: ${{ needs.health-check.outputs.referral_embed }}
-          DRTS_REFERRAL_EMBED_ENTRY_SLUG: ${{ needs.prepare.outputs.referral_embed_entry_slug }}
-        run: |
-          set -euo pipefail
-          smoke_status=0
-          run_suite() {
-            local config="$1"
-            local suite="${config#playwright.}"
-            suite="${suite%.config.ts}"
-            echo "::group::Playwright ${config}"
-            PLAYWRIGHT_HTML_OUTPUT_DIR="playwright-report/${suite}" \
-              pnpm exec playwright test \
-                --retries=1 \
-                --config "${config}" \
-                --reporter=list,html \
-                --output "test-results/${suite}" || smoke_status=1
-            echo "::endgroup::"
-          }
-
-          run_suite playwright.bank-console-depth.config.ts
-          run_suite playwright.bank-console-auth.config.ts
-          run_suite playwright.ops-console-parity.config.ts
-          run_suite playwright.google-map-live.config.ts
-          run_suite playwright.ops-assistant.config.ts
-          run_suite playwright.fleet-partner-portal.config.ts
-          run_suite playwright.enterprise-dispatch.config.ts
-          run_suite playwright.channel-partner-portal.config.ts
-          run_suite playwright.referral-embed.config.ts
-          run_suite playwright.platform-admin-service-area.config.ts
-          # Run the high-volume matrix after business-flow suites so load
-          # coverage cannot starve or mask airport and operations regressions.
-          run_suite playwright.dev-runtime-matrix.config.ts
-          exit "${smoke_status}"
-      - name: Upload Playwright report on failure
-        if: failure()
-        uses: actions/upload-artifact@v4
-        with:
-          name: dev-ui-smoke-playwright-report
-          path: |
-            playwright-report/
-            test-results/
-          retention-days: 7
-
   retired-service-cleanup:
     name: Fail-closed retired service cleanup
     runs-on: ubuntu-latest
-    needs: [prepare, health-check, ui-smoke]
-    if: ${{ always() && needs.health-check.result == 'success' && needs.ui-smoke.result == 'success' }}
+    needs: [prepare, health-check]
+    if: ${{ always() && needs.health-check.result == 'success' }}
     environment: dev
     steps:
       - name: Checkout deploy source
@@ -1227,7 +1480,293 @@ jobs:
         env:
           RETIRED_SERVICE_CLEANUP: ${{ inputs.retired_service_cleanup || 'none' }}
         run: |
-          ./scripts/cleanup-retired-dev-service.sh \
+          ./operations/deployment/cleanup-retired-dev-service.sh \
             "${RETIRED_SERVICE_CLEANUP}" \
             "${{ needs.prepare.outputs.project_id }}" \
             "${{ needs.prepare.outputs.region }}"
+
+  operational-candidate-acceptance:
+    name: Candidate SHA operational acceptance
+    runs-on: ubuntu-latest
+    needs: [prepare, build-push, health-check, retired-service-cleanup]
+    if: ${{ always() && needs.health-check.result == 'success' && needs.retired-service-cleanup.result == 'success' }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.build-push.outputs.candidate_sha }}
+      - name: Authenticate to GCP
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ env.DEV_WIF_PROVIDER || env.WIF_PROVIDER }}
+          service_account: ${{ env.DEV_WIF_SERVICE_ACCOUNT || env.WIF_SERVICE_ACCOUNT }}
+          project_id: ${{ needs.prepare.outputs.project_id }}
+      - name: Set up Cloud SDK
+        uses: google-github-actions/setup-gcloud@v2
+        with:
+          project_id: ${{ needs.prepare.outputs.project_id }}
+      - name: Issue deployment-machine Tenant acceptance session
+        env:
+          API_URL: ${{ needs.health-check.outputs.api }}
+          PROJECT_ID: ${{ needs.prepare.outputs.project_id }}
+          SECRET_PREFIX: ${{ needs.prepare.outputs.secret_prefix }}
+        run: |
+          set -euo pipefail
+
+          internal_key="$(gcloud secrets versions access latest \
+            --secret="${SECRET_PREFIX}-jwt-secret" \
+            --project="$PROJECT_ID" | tr -d '\r\n')"
+          echo "::add-mask::$internal_key"
+
+          assert_tenant_session() {
+            local token="$1"
+            local expected_role="$2"
+            local label="$3"
+            local session_check http_status response_body
+
+            session_check="$(curl --silent --show-error --write-out '\n%{http_code}' \
+              --request GET "${API_URL}/api/auth/session" \
+              --header "authorization: Bearer ${token}")"
+            http_status="$(echo "$session_check" | tail -n 1)"
+            response_body="$(echo "$session_check" | sed '$d')"
+            if [[ "$http_status" -lt 200 || "$http_status" -ge 300 ]]; then
+              echo "::error::${label} session verification failed with HTTP ${http_status}: ${response_body}" >&2
+              exit 1
+            fi
+            jq --exit-status \
+              --arg tenant_id '10000000-0000-0000-0000-000000000201' \
+              --arg expected_role "$expected_role" \
+              '.data.active == true and
+               .data.identity.realm == "tenant" and
+               .data.identity.tenant_id == $tenant_id and
+               (.data.identity.roles | index($expected_role) != null)' \
+              <<<"$response_body" >/dev/null || {
+                safe_summary="$(jq --compact-output \
+                  '{active: .data.active, identity: {
+                    actor_id: .data.identity.actor_id,
+                    realm: .data.identity.realm,
+                    tenant_id: .data.identity.tenant_id,
+                    roles: .data.identity.roles
+                  }}' <<<"$response_body")"
+                echo "::error::${label} session is not bound to the expected durable tenant role: ${safe_summary}" >&2
+                exit 1
+              }
+          }
+
+          session_response="$(curl --silent --show-error --write-out '\n%{http_code}' \
+            --request POST "${API_URL}/api/auth/token" \
+            --header 'content-type: application/json' \
+            --header "x-drts-internal-key: ${internal_key}" \
+            --header 'x-actor-type: tenant_admin' \
+            --header 'x-actor-id: 10000000-0000-0000-0000-000000000901' \
+            --header 'x-realm: tenant' \
+            --header 'x-tenant-id: 10000000-0000-0000-0000-000000000201' \
+            --data '{}')"
+          http_status="$(echo "$session_response" | tail -n 1)"
+          response_body="$(echo "$session_response" | sed '$d')"
+          if [[ "$http_status" -lt 200 || "$http_status" -ge 300 ]]; then
+            echo "::error::Tenant session issuance failed with HTTP ${http_status}: ${response_body}" >&2
+            exit 1
+          fi
+          tenant_session="$(jq --exit-status --raw-output '.token' <<<"$response_body")"
+          echo "::add-mask::$tenant_session"
+          assert_tenant_session "$tenant_session" "tenant_admin" "Tenant Admin"
+          printf 'DRTS_OPERATIONAL_TENANT_SESSION_TOKEN=%s\n' "$tenant_session" >> "$GITHUB_ENV"
+
+          dispatch_response="$(curl --silent --show-error --write-out '\n%{http_code}' \
+            --request POST "${API_URL}/api/auth/token" \
+            --header 'content-type: application/json' \
+            --header "x-drts-internal-key: ${internal_key}" \
+            --header 'x-actor-type: tenant_admin' \
+            --header 'x-actor-id: 10000000-0000-0000-0000-000000000902' \
+            --header 'x-realm: tenant' \
+            --header 'x-tenant-id: 10000000-0000-0000-0000-000000000201' \
+            --data '{}')"
+          http_status="$(echo "$dispatch_response" | tail -n 1)"
+          response_body="$(echo "$dispatch_response" | sed '$d')"
+          if [[ "$http_status" -lt 200 || "$http_status" -ge 300 ]]; then
+            echo "::error::Tenant Ops session issuance failed with HTTP ${http_status}: ${response_body}" >&2
+            exit 1
+          fi
+          dispatch_session="$(jq --exit-status --raw-output '.token' <<<"$response_body")"
+          echo "::add-mask::$dispatch_session"
+          assert_tenant_session "$dispatch_session" "tenant_ops_admin" "Tenant Ops"
+          printf 'DRTS_OPERATIONAL_DISPATCH_SESSION_TOKEN=%s\n' "$dispatch_session" >> "$GITHUB_ENV"
+      - name: Mint identity token — tenant console (operational candidate)
+        id: id_token_tenant_console
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ env.DEV_WIF_PROVIDER || env.WIF_PROVIDER }}
+          service_account: ${{ env.DEV_WIF_SERVICE_ACCOUNT || env.WIF_SERVICE_ACCOUNT }}
+          project_id: ${{ needs.prepare.outputs.project_id }}
+          token_format: id_token
+          id_token_audience: ${{ needs.health-check.outputs.tenant_console }}
+          id_token_include_email: true
+
+      - name: Mint identity token — bank console (operational candidate)
+        id: id_token_bank_console
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ env.DEV_WIF_PROVIDER || env.WIF_PROVIDER }}
+          service_account: ${{ env.DEV_WIF_SERVICE_ACCOUNT || env.WIF_SERVICE_ACCOUNT }}
+          project_id: ${{ needs.prepare.outputs.project_id }}
+          token_format: id_token
+          id_token_audience: ${{ needs.health-check.outputs.bank_console }}
+          id_token_include_email: true
+
+      - name: Mint identity token — enterprise dispatch (operational candidate)
+        id: id_token_enterprise_dispatch
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ env.DEV_WIF_PROVIDER || env.WIF_PROVIDER }}
+          service_account: ${{ env.DEV_WIF_SERVICE_ACCOUNT || env.WIF_SERVICE_ACCOUNT }}
+          project_id: ${{ needs.prepare.outputs.project_id }}
+          token_format: id_token
+          id_token_audience: ${{ needs.health-check.outputs.enterprise_dispatch }}
+          id_token_include_email: true
+
+      - uses: pnpm/action-setup@v4
+        with: { version: 10.33.0, run_install: false }
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: pnpm-lock.yaml
+      - run: pnpm install --frozen-lockfile
+      - name: Install Playwright Chromium
+        run: pnpm exec playwright install --with-deps chromium
+      - name: Execute candidate-bound operational journeys
+        env:
+          DRTS_DEV_API_BASE_URL: ${{ needs.health-check.outputs.api }}
+          DRTS_DEV_OPS_CONSOLE_BASE_URL: ${{ needs.health-check.outputs.ops_console }}
+          DRTS_DEV_REFERRAL_EMBED_BASE_URL: ${{ needs.health-check.outputs.referral_embed }}
+          DRTS_DEV_ENTERPRISE_DISPATCH_BASE_URL: ${{ needs.health-check.outputs.enterprise_dispatch }}
+          DRTS_DEV_FLEET_PARTNER_PORTAL_BASE_URL: ${{ needs.health-check.outputs.fleet_partner_portal }}
+          DRTS_DEV_PLATFORM_ADMIN_BASE_URL: ${{ needs.health-check.outputs.platform_admin }}
+          DRTS_DEV_TENANT_CONSOLE_BASE_URL: ${{ needs.health-check.outputs.tenant_console }}
+          DRTS_DEV_BANK_CONSOLE_BASE_URL: ${{ needs.health-check.outputs.bank_console }}
+          DRTS_DEV_CHANNEL_PARTNER_PORTAL_BASE_URL: ${{ needs.health-check.outputs.channel_partner_portal }}
+          DRTS_DEV_TENANT_CONSOLE_ID_TOKEN: ${{ steps.id_token_tenant_console.outputs.id_token }}
+          DRTS_DEV_BANK_CONSOLE_ID_TOKEN: ${{ steps.id_token_bank_console.outputs.id_token }}
+          DRTS_DEV_ENTERPRISE_DISPATCH_ID_TOKEN: ${{ steps.id_token_enterprise_dispatch.outputs.id_token }}
+        run: |
+          set -euo pipefail
+          # Deleted Cloud Run services retain their service hostname; the control
+          # plane returns 404, which is the retire/paused contract under test.
+          api_url="${{ needs.health-check.outputs.api }}"
+          cloud_run_suffix="${api_url#https://drts-dev-api-}"
+          export DRTS_DEV_PARTNER_BOOKING_BASE_URL="https://drts-dev-partner-booking-web-${cloud_run_suffix}"
+          export DRTS_DEV_CONCIERGE_BASE_URL="https://drts-dev-concierge-portal-web-${cloud_run_suffix}"
+          export DRTS_DEV_PASSENGER_BASE_URL="https://drts-dev-passenger-web-${cloud_run_suffix}"
+          operations/verification/run-operational-browser-acceptance.sh \
+            --sha "${{ needs.build-push.outputs.candidate_sha }}"
+      - name: Upload operational evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: operational-browser-evidence-${{ needs.build-push.outputs.candidate_sha }}
+          path: test-results/
+          if-no-files-found: warn
+
+  # A red run used to mean two very different things that looked identical in the
+  # run list: images never reached Artifact Registry and nothing was deployed, or
+  # the deploy succeeded and a post-deploy check failed. Between 2026-08-09 and
+  # 2026-08-22 both happened -- eight runs deployed fine and failed on UI smoke or
+  # operational acceptance, four never built at all because GCP billing was off --
+  # and telling them apart meant opening the run and reading job durations.
+  outcome:
+    name: Deploy outcome
+    runs-on: ubuntu-latest
+    if: always()
+    needs:
+      - prepare
+      - build-push
+      - migrate
+      - deploy
+      - paused-partner-booking-cleanup
+      - health-check
+      - retired-service-cleanup
+      - operational-candidate-acceptance
+    steps:
+      - name: Summarise what actually reached Cloud Run
+        env:
+          CANDIDATE_SHA: ${{ needs.build-push.outputs.candidate_sha }}
+          API_URL: ${{ needs.health-check.outputs.api }}
+          R_PREPARE: ${{ needs.prepare.result }}
+          R_BUILD_PUSH: ${{ needs.build-push.result }}
+          R_MIGRATE: ${{ needs.migrate.result }}
+          R_DEPLOY: ${{ needs.deploy.result }}
+          R_PAUSED_CLEANUP: ${{ needs.paused-partner-booking-cleanup.result }}
+          R_HEALTH_CHECK: ${{ needs.health-check.result }}
+          R_RETIRED_CLEANUP: ${{ needs.retired-service-cleanup.result }}
+          R_ACCEPTANCE: ${{ needs.operational-candidate-acceptance.result }}
+        run: |
+          set -euo pipefail
+
+          # Stage order matters: the first non-success is the one that stopped the
+          # run, and everything after it is skipped rather than broken.
+          stages=(
+            "prepare|Prepare dev deploy|before deploy|${R_PREPARE}"
+            "build-push|Build & push images|before deploy|${R_BUILD_PUSH}"
+            "migrate|DB migration|before deploy|${R_MIGRATE}"
+            "deploy|Deploy services|the deploy itself|${R_DEPLOY}"
+            "paused-cleanup|Enforce Partner Booking paused state|after deploy|${R_PAUSED_CLEANUP}"
+            "health-check|Dev health check|after deploy|${R_HEALTH_CHECK}"
+            "retired-cleanup|Fail-closed retired service cleanup|after deploy|${R_RETIRED_CLEANUP}"
+            "acceptance|Candidate SHA operational acceptance|after deploy|${R_ACCEPTANCE}"
+          )
+
+          failed_name=""
+          failed_phase=""
+          failed_result=""
+          for stage in "${stages[@]}"; do
+            IFS='|' read -r _ name phase result <<<"${stage}"
+            if [[ "${result}" != "success" && "${result}" != "skipped" ]]; then
+              failed_name="${name}"
+              failed_phase="${phase}"
+              failed_result="${result}"
+              break
+            fi
+          done
+
+          # "Deployed" means exactly one thing: the Deploy services job succeeded,
+          # so Cloud Run is now serving the candidate SHA. Nothing after it can
+          # take that back, and nothing before it can stand in for it.
+          if [[ "${R_DEPLOY}" == "success" ]]; then
+            deployed="yes"
+          else
+            deployed="no"
+          fi
+
+          {
+            echo "## Dev deploy outcome"
+            echo
+            echo "\`deployed=${deployed}\`"
+            echo
+            if [[ "${deployed}" == "yes" ]]; then
+              echo "Cloud Run is serving \`${CANDIDATE_SHA:-<unknown>}\`."
+              if [[ -n "${API_URL:-}" ]]; then
+                echo "Confirm with \`curl ${API_URL}/api/health\` and compare \`candidateSha\`."
+              fi
+            else
+              echo "**Nothing reached Cloud Run. The previously deployed version is still running**, unchanged."
+            fi
+            echo
+            if [[ -n "${failed_name}" ]]; then
+              echo "First stage to fail: **${failed_name}** (${failed_phase}, \`${failed_result}\`)."
+              if [[ "${deployed}" == "yes" ]]; then
+                echo
+                echo "This run is red because a check after the deploy failed, not because the deploy failed."
+                echo "Do not read it as \"the change is not live\" -- it is live and something about it did not pass."
+              fi
+            else
+              echo "Every stage passed."
+            fi
+          } >> "${GITHUB_STEP_SUMMARY}"
+
+          # Also an annotation, so `gh run view` and the run header carry the
+          # verdict without anyone opening the summary tab.
+          if [[ -n "${failed_name}" ]]; then
+            echo "::notice title=Deploy outcome::deployed=${deployed}; first failure: ${failed_name} (${failed_phase})"
+          else
+            echo "::notice title=Deploy outcome::deployed=${deployed}; all stages passed"
+          fi

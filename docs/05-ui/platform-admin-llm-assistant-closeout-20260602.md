@@ -14,7 +14,7 @@ Last updated: 2026-06-03
 
 ## 1. Dependency census (machine truth)
 
-All entries verified via `scripts/ai-status.sh show <id>` and `archived_task_ids`. Commit→branch verified via `git branch -r --contains`.
+All entries verified via `tools/development-orchestrator/bin/ai-status.sh show <id>` and `archived_task_ids`. Commit→branch verified via `git branch -r --contains`.
 
 | Task             | Status          | Owner / Reviewer | Commit         | Branch                          |
 | ---------------- | --------------- | ---------------- | -------------- | ------------------------------- |

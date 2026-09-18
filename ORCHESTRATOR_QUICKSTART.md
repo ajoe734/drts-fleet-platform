@@ -5,7 +5,7 @@ This repo contains the reusable supervisor + auto-worker + dashboard bundle, and
 ## 1. Prepare local LLM and IDE integration
 
 ```bash
-bash scripts/setup-llm-cli.sh
+bash tools/development-orchestrator/bin/setup-llm-cli.sh
 ```
 
 That will:
@@ -19,25 +19,25 @@ That will:
 Supervisor:
 
 ```bash
-bash scripts/run-supervisor.sh --verbose
+bash tools/development-orchestrator/bin/run-supervisor.sh --verbose
 ```
 
 Dashboard:
 
 ```bash
-bash scripts/run-dashboard.sh
+bash tools/development-orchestrator/bin/run-dashboard.sh
 ```
 
 Temporary public dashboard URL:
 
 ```bash
-bash scripts/run-dashboard-tunnel.sh
+bash tools/development-orchestrator/bin/run-dashboard-tunnel.sh
 ```
 
 Public dashboard on a VM:
 
 ```bash
-HOST=0.0.0.0 bash scripts/run-dashboard.sh
+HOST=0.0.0.0 bash tools/development-orchestrator/bin/run-dashboard.sh
 ```
 
 ## 3. Use the runtime in discussion mode
@@ -45,7 +45,7 @@ HOST=0.0.0.0 bash scripts/run-dashboard.sh
 Before consensus:
 
 - use the dashboard and status mirrors for visibility only
-- use `python3 scripts/ai_status.py prompt` to generate the shared first prompt
+- use `python3 tools/development-orchestrator/bin/ai_status.py prompt` to generate the shared first prompt
 - let the supervisor pick a starter lane to update `starter-draft.md`
 - write lane readouts and cited review rounds under `docs/02-architecture/consensus/phase1/`
 - track baton ownership in `baton-log.md` and `supervisor-queue.md`
@@ -65,9 +65,9 @@ After the consensus packet is accepted:
 Only after the consensus packet is explicitly accepted should you seed the first implementation task:
 
 ```bash
-AI_NAME=Codex TASK_PHASE="Wave 1" TASK_SUMMARY_ZH="從共識封包切出第一個實作任務。" ./scripts/ai-status.sh assign DEMO-001 Codex Claude "First supervisor-managed task"
-AI_NAME=Codex ./scripts/ai-status.sh start DEMO-001 "Started the first supervisor-managed task"
-./scripts/sync-state.sh
+AI_NAME=Codex TASK_PHASE="Wave 1" TASK_SUMMARY_ZH="從共識封包切出第一個實作任務。" ./tools/development-orchestrator/bin/ai-status.sh assign DEMO-001 Codex Claude "First supervisor-managed task"
+AI_NAME=Codex ./tools/development-orchestrator/bin/ai-status.sh start DEMO-001 "Started the first supervisor-managed task"
+./tools/development-orchestrator/bin/ai-status.sh sync
 ```
 
 ## 6. Keep the prompt and workflow aligned
@@ -75,7 +75,7 @@ AI_NAME=Codex ./scripts/ai-status.sh start DEMO-001 "Started the first superviso
 The repo-aware prompt is generated from `ai-status.json`:
 
 ```bash
-python3 scripts/ai_status.py prompt
+python3 tools/development-orchestrator/bin/ai_status.py prompt
 ```
 
 If the canonical document layers or discussion workflow change, update these files together:

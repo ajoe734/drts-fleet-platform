@@ -19,6 +19,7 @@ const baseRecord = {
   reauthRequired: false,
   lastOnlineAt: "2026-05-27T00:00:00.000Z",
   lastOfflineAt: null,
+  lastHeartbeatAt: "2026-05-27T00:00:00.000Z",
   updatedAt: "2026-05-27T00:00:00.000Z",
 };
 

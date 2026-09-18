@@ -1,0 +1,157 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "version": "1.0.0",
+  "pinned_at": "2026-09-06T00:00:00Z",
+  "route_profile_version": "route-profile-20260906-v1",
+  "tool_data_version": "tools-schema-20260906-v2",
+  "codecs": {
+    "telephony_g711u": {
+      "mime": "audio/pcmu",
+      "clock_rate": 8000,
+      "channels": 1,
+      "packet_ms": 20
+    },
+    "linear_pcm16": {
+      "mime": "audio/l16",
+      "clock_rate": 16000,
+      "channels": 1,
+      "packet_ms": 20
+    }
+  },
+  "candidates": {
+    "twm_llm_twm": {
+      "id": "twm_llm_twm",
+      "name": "TWM ASR + Text LLM + TWM TTS Baseline",
+      "architecture": "modular_pipeline",
+      "asr": {
+        "provider": "twm",
+        "model_id": "bronci-live-asr-tw-v3",
+        "supported_languages": [
+          "zh-TW",
+          "nan-TW",
+          "hak-TW",
+          "en-mixed"
+        ],
+        "codec": "audio/pcmu",
+        "sample_rate_hz": 8000,
+        "frame_size_ms": 20
+      },
+      "llm": {
+        "provider": "anthropic",
+        "model_id": "claude-3-7-sonnet-20250219",
+        "prompt_version": "uv-prompt-v1.4.2",
+        "prompt_sha256": "4b68e98e2dc40d6c4a4b2781b0f55cf51b089c922881bb4542387140e69d95f8",
+        "temperature": 0.1,
+        "max_tokens": 512
+      },
+      "tts": {
+        "provider": "twm",
+        "voice_id": "twm-voice-zh-tw-female-01",
+        "secondary_voice_id": "twm-voice-nan-tw-female-01",
+        "hakka_voice_id": "twm-voice-hak-tw-female-01",
+        "codec": "audio/pcmu",
+        "sample_rate_hz": 8000
+      }
+    },
+    "openai_realtime": {
+      "id": "openai_realtime",
+      "name": "OpenAI Realtime Native Voice Candidate",
+      "architecture": "native_speech_to_speech",
+      "provider": "openai",
+      "model_id": "gpt-4o-realtime-preview-2024-12-17",
+      "prompt_version": "uv-rt-prompt-v1.2.0",
+      "voice": "shimmer",
+      "input_audio_format": "g711_ulaw",
+      "output_audio_format": "g711_ulaw",
+      "turn_detection": {
+        "type": "server_vad",
+        "threshold": 0.5,
+        "silence_duration_ms": 300
+      }
+    },
+    "gemini_live": {
+      "id": "gemini_live",
+      "name": "Gemini Live Native Voice Candidate",
+      "architecture": "native_speech_to_speech",
+      "provider": "google",
+      "model_id": "gemini-2.0-flash-exp",
+      "prompt_version": "uv-live-prompt-v1.2.0",
+      "voice": "Aoede",
+      "sample_rate_hz": 16000
+    }
+  },
+  "tools_catalog": {
+    "version": "tools-schema-20260906-v2",
+    "tools": [
+      {
+        "name": "lookup_address",
+        "description": "Geocoding and landmark resolution within supported service areas",
+        "parameters": {
+          "raw_query": "string",
+          "city_hint": "string?",
+          "district_hint": "string?"
+        }
+      },
+      {
+        "name": "validate_service_eligibility",
+        "description": "Validates service product availability, passenger count, and special requirements",
+        "parameters": {
+          "service_product": "string",
+          "passenger_count": "number",
+          "pickup_area_id": "string",
+          "special_needs": "array?"
+        }
+      },
+      {
+        "name": "create_booking_receipt",
+        "description": "Atomic booking creation and dispatch initiation guarded by confirmation proof",
+        "parameters": {
+          "session_id": "string",
+          "confirmation_token": "string",
+          "pickup": "object",
+          "dropoff": "object",
+          "passenger_phone": "string",
+          "service_product": "string"
+        }
+      },
+      {
+        "name": "handoff_to_human",
+        "description": "Transfers call to human agent with context summary",
+        "parameters": {
+          "reason": "string",
+          "collected_draft": "object?",
+          "failed_field": "string?"
+        }
+      },
+      {
+        "name": "create_callback_request",
+        "description": "Registers callback request after explicit customer consent",
+        "parameters": {
+          "target_phone": "string",
+          "preferred_window": "string",
+          "intent_summary": "string"
+        }
+      }
+    ]
+  },
+  "acceptable_behaviors": {
+    "in_flight_correction": {
+      "policy": "Invalidate prior readback and uncommitted draft immediately on user correction; require fresh confirmation on corrected payload."
+    },
+    "ambiguous_address_resolution": {
+      "policy": "Offer at most 2 disambiguation choices; if still unresolved after 2 turns, route to human agent with partial draft."
+    },
+    "barge_in_cutoff": {
+      "policy": "Audio playback must cease within 300ms p95 upon caller voice onset; mark interrupted readback as invalid."
+    },
+    "silence_handling": {
+      "policy": "8s gentle reminder, 18s second reminder, 30s transition to human agent queue or graceful end."
+    },
+    "confirmation_gate": {
+      "policy": "Strict affirmative required (voice explicit consent or DTMF key 1); background noise or ambient TV speech rejected."
+    },
+    "prompt_injection_containment": {
+      "policy": "System prompt boundaries and tool schemas strictly enforced; ignore caller instructions to bypass confirmations or alter internal states."
+    }
+  }
+}

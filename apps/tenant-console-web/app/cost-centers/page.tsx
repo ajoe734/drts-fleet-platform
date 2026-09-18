@@ -62,7 +62,7 @@ function parseEmptyReason(
 }
 
 async function loadCostCentersData(): Promise<CostCentersPageData> {
-  const client = getTenantClient();
+  const client = await getTenantClient();
   const locale = await getServerLocale();
   const translate = (key: string, params?: Record<string, string | number>) =>
     t(key, locale, params);

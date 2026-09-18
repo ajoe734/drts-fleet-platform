@@ -68,7 +68,7 @@ Verification:
 
 ```bash
 rg -n "DRV-MAT|/trip|/jobs|/settings" docs/02-architecture/driver-app-productization-design-plan-20260504.md
-python3 scripts/ai_status.py audit doc-sync
+python3 tools/development-orchestrator/bin/ai_status.py audit doc-sync
 ```
 
 ### `DRV-MAT-001` — Shared UI Foundation

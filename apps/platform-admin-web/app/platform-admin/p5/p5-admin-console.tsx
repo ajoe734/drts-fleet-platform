@@ -7,7 +7,6 @@ import { usePlatformAdminAuthority } from "@/lib/platform-admin-authority";
 import type {
   DriverPublicRegistrationCredential,
   MultiTaxiTripOperationalAdminView,
-  MultiTaxiTripOperationalExportRow,
   VehiclePassengerDisclosureProfile,
 } from "@drts/contracts";
 import {
@@ -314,44 +313,6 @@ function formatMonthLabel(month: string, locale: string) {
   return locale === "zh" ? `${year}-${value}` : `${year}-${value}`;
 }
 
-function buildRecordsCsv(rows: MultiTaxiTripOperationalExportRow[]) {
-  const header = [
-    "order_no_masked",
-    "plate_no_masked",
-    "reserved_at",
-    "pickup_at",
-    "dropoff_at",
-    "payable_fare_minor",
-    "actual_fare_minor",
-    "toll_minor",
-    "currency",
-    "fare_policy_version",
-    "charging_mode",
-    "generated_at",
-    "retain_until",
-  ];
-  const body = rows.map((row) =>
-    [
-      row.orderNoMasked,
-      row.plateNoMasked,
-      row.reservedAt,
-      row.pickupAt ?? "",
-      row.dropoffAt ?? "",
-      String(row.payableFareMinor),
-      String(row.actualFareMinor),
-      String(row.tollMinor),
-      row.currency,
-      row.farePolicyVersion,
-      row.chargingMode,
-      row.generatedAt,
-      row.retainUntil,
-    ]
-      .map((value) => `"${String(value).replaceAll('"', '""')}"`)
-      .join(","),
-  );
-  return [header.join(","), ...body].join("\n");
-}
-
 export function P5AdminConsole({ view }: { view: P5View }) {
   const { locale, t } = useTranslation();
   const client = usePlatformAdminClient();
@@ -364,9 +325,6 @@ export function P5AdminConsole({ view }: { view: P5View }) {
   const canReviewRegistry = requiresAnyScope(scopeSet, ["reg.review"]);
   const canReadTripRecords = requiresAnyScope(scopeSet, [
     "multi_taxi_records:read",
-  ]);
-  const canExportTripRecords = requiresAnyScope(scopeSet, [
-    "multi_taxi_records:export",
   ]);
   const [vehicle, setVehicle] =
     useState<VehiclePassengerDisclosureProfile>(fallbackVehicle);
@@ -383,7 +341,6 @@ export function P5AdminConsole({ view }: { view: P5View }) {
   const [recordsMonth, setRecordsMonth] = useState("");
   const [recordsLoading, setRecordsLoading] = useState(view === "records");
   const [recordsError, setRecordsError] = useState<string | null>(null);
-  const [recordsExporting, setRecordsExporting] = useState(false);
   const maskedRegistrationDisplay = getMaskedRegistrationDisplay(driver);
   const selectedQueueRow =
     queueRows.find((row) => row.id === selectedQueueId) ?? queueRows[0] ?? null;
@@ -510,36 +467,6 @@ export function P5AdminConsole({ view }: { view: P5View }) {
       ),
     );
     setSelectedQueueId(id);
-  }
-
-  async function exportRecords() {
-    setRecordsExporting(true);
-    setRecordsError(null);
-    try {
-      const params = new URLSearchParams();
-      if (recordsMonth) {
-        params.set("month", recordsMonth);
-      }
-      const exported = await client.get<{
-        filename: string;
-        rows: MultiTaxiTripOperationalExportRow[];
-      }>(
-        `/api/platform-admin/multi-taxi-trip-records/export${params.size > 0 ? `?${params.toString()}` : ""}`,
-      );
-      const blob = new Blob([buildRecordsCsv(exported.rows)], {
-        type: "text/csv;charset=utf-8",
-      });
-      const url = URL.createObjectURL(blob);
-      const anchor = document.createElement("a");
-      anchor.href = url;
-      anchor.download = exported.filename;
-      anchor.click();
-      URL.revokeObjectURL(url);
-    } catch (error) {
-      setRecordsError(error instanceof Error ? error.message : String(error));
-    } finally {
-      setRecordsExporting(false);
-    }
   }
 
   if (!canAccessView) {
@@ -1016,28 +943,9 @@ export function P5AdminConsole({ view }: { view: P5View }) {
               <CanvasPill theme={theme} tone="success" dot>
                 {t("p5.records.coverage", { percent: coveragePercent })}
               </CanvasPill>
-              <CanvasBtn
-                theme={theme}
-                variant="primary"
-                icon="export"
-                onClick={() => void exportRecords()}
-                disabled={!canExportTripRecords || recordsExporting}
-              >
-                {recordsExporting
-                  ? t("p5.records.exporting")
-                  : t("p5.records.export")}
-              </CanvasBtn>
             </div>
           }
         />
-        {!canExportTripRecords ? (
-          <CanvasBanner
-            theme={theme}
-            tone="info"
-            icon="lock"
-            body={t("p5.records.scope.exportOnly")}
-          />
-        ) : null}
         {recordsError ? (
           <CanvasBanner
             theme={theme}

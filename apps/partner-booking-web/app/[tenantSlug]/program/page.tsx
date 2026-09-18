@@ -20,8 +20,8 @@ export default async function ProgramFlowPage({ params }: PageProps) {
       : theme.kind === "card"
         ? theme.issuerLabel + " Bank"
         : theme.kind === "insurance"
-          ? "Fubon Insurance"
-          : "Lion Travel";
+          ? "Tailspin Insurance"
+          : "AdventureWorks Travel";
   const programLabel =
     locale === "zh"
       ? theme.programLabel

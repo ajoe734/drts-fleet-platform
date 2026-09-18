@@ -130,7 +130,7 @@ describe("partner-booking control-plane proxy", () => {
     const response = await POST(
       requestFor("POST", ["partner", "ingress", "handoff"], {
         body: JSON.stringify({
-          entrySlug: "ctbc",
+          entrySlug: "acme",
           apiKey: "pk_test",
           partnerUserRef: "user-001",
         }),

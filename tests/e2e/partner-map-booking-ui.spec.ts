@@ -15,7 +15,7 @@ async function selectPartnerMapCandidate(
 async function fillCardProgramFields(page: Page) {
   await page.getByLabel("乘客姓名").fill("王旅客");
   await page.getByLabel("乘客電話").fill("0911222333");
-  await page.getByLabel("卡別").fill("World Elite");
+  await page.getByLabel("卡別").fill("Elite Demo");
   await page.getByLabel("航班號碼").fill("CI-102");
   await page.getByLabel("航廈").fill("T1");
   await page.getByLabel("接送方向").selectOption("pickup");
@@ -26,7 +26,7 @@ test.describe("partner map booking UI", () => {
     page,
   }) => {
     const response = await page.goto(
-      "/ctbc/book?eligibilityVerificationId=elig-verified-001",
+      "/acme/book?eligibilityVerificationId=elig-verified-001",
     );
     expect(response?.status()).toBe(200);
 
@@ -55,7 +55,7 @@ test.describe("partner map booking UI", () => {
     page,
   }) => {
     const response = await page.goto(
-      "/ctbc/book?eligibilityVerificationId=elig-verified-002",
+      "/acme/book?eligibilityVerificationId=elig-verified-002",
     );
     expect(response?.status()).toBe(200);
 

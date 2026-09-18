@@ -40,7 +40,7 @@ Current working rule:
 - current execution truth lives in `ai-status.json` and `current-work.md`
 - if implementation discovers unresolved design semantics, the supervisor routes back into `discussion_planning` without restarting the control plane
 
-Dashboard mirror: `docs-site/index.html` (regenerated via `./scripts/sync-state.sh`).
+Dashboard: `tools/development-orchestrator/dashboard/index.html`, served by `./tools/development-orchestrator/bin/run-dashboard.sh`. It reads the live `ai-status.json`, `ai-activity-log.jsonl`, and `.orchestrator/state.json` directly; there is no generated copy to regenerate.
 
 Canonical starting points:
 
@@ -58,7 +58,7 @@ Canonical starting points:
 Machine-specific notes and scratch artifacts should not be written into tracked
 documentation.
 
-- Use `./scripts/init-local-workspace.sh` to create the local-only workspace
+- Use `./tools/local-development/init-local-workspace.sh` to create the local-only workspace
   scaffolding.
 - Use `docs/03-runbooks/local-development.local.md` for VM dev endpoint and
   review access notes.

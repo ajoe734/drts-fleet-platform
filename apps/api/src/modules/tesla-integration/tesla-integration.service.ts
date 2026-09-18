@@ -30,6 +30,7 @@ import type {
 import { TESLA_FLEET_REGIONS } from "@drts/contracts";
 
 import { ApiRequestError } from "../../common/api-envelope";
+import type { BootstrapRequestIdentity } from "../../common/auth";
 import { AuditNotificationService } from "../audit-notification/audit-notification.service";
 import { RegulatoryRegistryService } from "../regulatory-registry/regulatory-registry.service";
 import { TeslaIntegrationRepository } from "./tesla-integration.repository";
@@ -54,17 +55,35 @@ type DiscoveredVehicleSeed = {
 export class TeslaIntegrationService implements OnModuleInit {
   private readonly logger = new Logger(TeslaIntegrationService.name);
 
-  private readonly oauthConnections = new Map<string, TeslaOAuthConnectionRecord>();
-  private readonly discoveredVehiclesByVin = new Map<string, TeslaDiscoveredVehicle>();
+  private readonly oauthConnections = new Map<
+    string,
+    TeslaOAuthConnectionRecord
+  >();
+  private readonly discoveredVehiclesByVin = new Map<
+    string,
+    TeslaDiscoveredVehicle
+  >();
   private readonly discoveredVehicleOwners = new Map<string, string>();
-  private readonly bindingsByVehicleId = new Map<string, TeslaVehicleBindingRecord>();
-  private readonly virtualKeysByVehicleId = new Map<string, TeslaVirtualKeyRecord>();
-  private readonly telemetryByVehicleId = new Map<string, TeslaTelemetryStatusRecord>();
+  private readonly bindingsByVehicleId = new Map<
+    string,
+    TeslaVehicleBindingRecord
+  >();
+  private readonly virtualKeysByVehicleId = new Map<
+    string,
+    TeslaVirtualKeyRecord
+  >();
+  private readonly telemetryByVehicleId = new Map<
+    string,
+    TeslaTelemetryStatusRecord
+  >();
   private readonly publicSamplesByVehicleId = new Map<
     string,
     TeslaPublicTelemetrySample
   >();
-  private readonly snapshotsByVehicleId = new Map<string, TeslaVehicleStateSnapshot>();
+  private readonly snapshotsByVehicleId = new Map<
+    string,
+    TeslaVehicleStateSnapshot
+  >();
   private readonly receiptsByCommandId = new Map<string, CommandReceipt>();
   private readonly receiptsByIdempotencyKey = new Map<string, CommandReceipt>();
 
@@ -78,7 +97,10 @@ export class TeslaIntegrationService implements OnModuleInit {
   ) {
     for (const seed of this.buildDiscoveredVehicleSeeds()) {
       this.discoveredVehiclesByVin.set(seed.vehicle.vin, seed.vehicle);
-      this.discoveredVehicleOwners.set(seed.vehicle.vin, seed.businessAccountId);
+      this.discoveredVehicleOwners.set(
+        seed.vehicle.vin,
+        seed.businessAccountId,
+      );
     }
   }
 
@@ -105,7 +127,11 @@ export class TeslaIntegrationService implements OnModuleInit {
   beginOAuth(command: TeslaBeginOAuthCommand, requestId?: string) {
     const now = new Date().toISOString();
     const scopes = command.scopes?.length
-      ? [...new Set(command.scopes.map((scope) => scope.trim()).filter(Boolean))]
+      ? [
+          ...new Set(
+            command.scopes.map((scope) => scope.trim()).filter(Boolean),
+          ),
+        ]
       : ["vehicle_device_data", "vehicle_cmds", "offline_access"];
 
     if (!command.businessAccountId.trim()) {
@@ -131,15 +157,16 @@ export class TeslaIntegrationService implements OnModuleInit {
       scopes,
       status: "active",
       authorizedAt: now,
-      accessTokenExpiresAt: new Date(
-        Date.now() + 1000 * 60 * 60,
-      ).toISOString(),
+      accessTokenExpiresAt: new Date(Date.now() + 1000 * 60 * 60).toISOString(),
       refreshTokenExpiresAt: new Date(
         Date.now() + 1000 * 60 * 60 * 24 * 30,
       ).toISOString(),
       lastRefreshedAt: null,
       revokedAt: null,
-      source: this.buildSourceMetadata("tesla_fleet_api", command.businessAccountId),
+      source: this.buildSourceMetadata(
+        "tesla_fleet_api",
+        command.businessAccountId,
+      ),
     };
 
     this.oauthConnections.set(record.connectionId, record);
@@ -170,9 +197,7 @@ export class TeslaIntegrationService implements OnModuleInit {
 
     const refreshed: TeslaOAuthConnectionRecord = {
       ...current,
-      accessTokenExpiresAt: new Date(
-        Date.now() + 1000 * 60 * 60,
-      ).toISOString(),
+      accessTokenExpiresAt: new Date(Date.now() + 1000 * 60 * 60).toISOString(),
       refreshTokenExpiresAt: new Date(
         Date.now() + 1000 * 60 * 60 * 24 * 30,
       ).toISOString(),
@@ -229,7 +254,9 @@ export class TeslaIntegrationService implements OnModuleInit {
 
     return [...this.discoveredVehiclesByVin.values()]
       .filter((vehicle) =>
-        activeAccountIds.has(this.discoveredVehicleOwners.get(vehicle.vin) ?? ""),
+        activeAccountIds.has(
+          this.discoveredVehicleOwners.get(vehicle.vin) ?? "",
+        ),
       )
       .map((vehicle) => ({ ...vehicle, source: { ...vehicle.source } }));
   }
@@ -463,7 +490,8 @@ export class TeslaIntegrationService implements OnModuleInit {
     }
 
     const idempotencyKey =
-      command.idempotencyKey?.trim() || `tesla-cmd-${binding.vehicleId}-${commandType}`;
+      command.idempotencyKey?.trim() ||
+      `tesla-cmd-${binding.vehicleId}-${commandType}`;
     const existing = this.receiptsByIdempotencyKey.get(idempotencyKey);
     if (existing) {
       return existing;
@@ -526,6 +554,38 @@ export class TeslaIntegrationService implements OnModuleInit {
         source: { ...receipt.source },
       }))
       .sort((left, right) => right.issuedAt.localeCompare(left.issuedAt));
+  }
+
+  /** Enforce canonical driver-to-vehicle ownership at the Tesla boundary. */
+  assertIdentityCanAccessVehicle(
+    identity: BootstrapRequestIdentity,
+    vehicleId: string,
+  ) {
+    if (identity.realm !== "driver") {
+      return;
+    }
+
+    const normalizedVehicleId = vehicleId.trim();
+    const isAssigned =
+      Boolean(identity.actorId) &&
+      this.regulatoryRegistryService
+        ?.listSupplyPairs()
+        .some(
+          (pair) =>
+            pair.vehicleId === normalizedVehicleId &&
+            pair.driverId === identity.actorId,
+        );
+
+    if (isAssigned) {
+      return;
+    }
+
+    throw new ApiRequestError(
+      HttpStatus.FORBIDDEN,
+      "TESLA_VEHICLE_BINDING_DENIED",
+      "The current driver identity is not bound to this vehicle.",
+      { vehicleId: normalizedVehicleId },
+    );
   }
 
   private requireOAuthConnection(connectionId: string) {
@@ -607,7 +667,9 @@ export class TeslaIntegrationService implements OnModuleInit {
       autonomyState: "unknown",
       batteryLevelPct,
       batteryRangeKm:
-        batteryLevelPct === null ? null : Number((batteryLevelPct * 4.3).toFixed(1)),
+        batteryLevelPct === null
+          ? null
+          : Number((batteryLevelPct * 4.3).toFixed(1)),
       charging: false,
       online: sample.online ?? false,
       source: this.buildSourceMetadata(
@@ -715,7 +777,10 @@ export class TeslaIntegrationService implements OnModuleInit {
 
   private buildDiscoveredVehicle(
     overrides: Partial<TeslaDiscoveredVehicle> &
-      Pick<TeslaDiscoveredVehicle, "connectionId" | "externalVehicleRef" | "region" | "vin">,
+      Pick<
+        TeslaDiscoveredVehicle,
+        "connectionId" | "externalVehicleRef" | "region" | "vin"
+      >,
   ): TeslaDiscoveredVehicle {
     return {
       vin: overrides.vin,

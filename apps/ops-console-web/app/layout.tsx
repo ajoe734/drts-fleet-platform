@@ -16,6 +16,7 @@ import {
   resolveOpsAssistantIdentity,
   seedOpsAssistantHealth,
 } from "@/lib/ops-assistant-context.server";
+import { normalizeServerRuntimeEnv } from "@drts/ui-web";
 
 import "./globals.css";
 
@@ -42,6 +43,21 @@ export default async function RootLayout({
   const assistantIdentity = await resolveOpsAssistantIdentity();
   const assistantHealth = seedOpsAssistantHealth();
 
+  const envRaw = process.env.DRTS_ENV;
+  const envNormalized = normalizeServerRuntimeEnv(envRaw);
+  const envLabel =
+    envNormalized === "production"
+      ? t("app.environment.production", locale)
+      : envNormalized === "staging"
+        ? t("app.environment.staging", locale)
+        : envNormalized === "preview"
+          ? t("app.environment.preview", locale)
+          : envNormalized === "development"
+            ? t("app.environment.dev", locale)
+            : envNormalized === "test"
+              ? t("app.environment.mock", locale)
+              : t("app.environment.unknown", locale);
+
   return (
     <html lang={locale}>
       <body style={{ margin: 0 }}>
@@ -58,7 +74,7 @@ export default async function RootLayout({
               searchPlaceholder={t("common.search", locale)}
               avatarLabel={t("app.avatarLabel", locale)}
               versionLabel={t("app.versionLabel", locale)}
-              env={t("app.environment.production", locale)}
+              env={envLabel}
             >
               {children}
             </OpsShell>

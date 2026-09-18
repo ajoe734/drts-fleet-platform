@@ -741,9 +741,9 @@ function copyForLocale(locale: PartnerBookingLocale) {
       disputeBody:
         "Disputes can be raised within 30 days after trip completion. The partner concierge center and DRTS support will both be notified.",
       openDispute: "Open dispute",
-      pageTitle: "CTBC reference funnel · 7 screens",
+      pageTitle: "ACME reference funnel · 7 screens",
       pageDescription:
-        "White-label booking flow demo for partner entry. The content below uses PBK-UI-002 brand tokens and mock data while mirroring the CTBC Partner Booking artboards.",
+        "White-label booking flow demo for partner entry. The content below uses PBK-UI-002 brand tokens and mock data while mirroring the ACME Partner Booking artboards.",
       programSummary: "Program summary",
       entryHost: "Entry host",
       tenantCode: "Tenant code",
@@ -862,9 +862,9 @@ function copyForLocale(locale: PartnerBookingLocale) {
     disputeBody:
       "行程結束後 30 天內可提出爭議，將同時通知 partner 禮賓中心與 DRTS 平台客服。",
     openDispute: "提出爭議",
-    pageTitle: "CTBC 參考叫車流程 · 7 個畫面",
+    pageTitle: "ACME 參考叫車流程 · 7 個畫面",
     pageDescription:
-      "合作夥伴入口的白標叫車流程示範。以下內容使用 PBK-UI-002 品牌 token 與 mock data，並對齊 CTBC `Partner Booking.html` 設計稿。",
+      "合作夥伴入口的白標叫車流程示範。以下內容使用 PBK-UI-002 品牌 token 與 mock data，並對齊 ACME `Partner Booking.html` 設計稿。",
     programSummary: "方案摘要",
     entryHost: "入口網域",
     tenantCode: "租戶代碼",
@@ -887,9 +887,9 @@ function copyForLocale(locale: PartnerBookingLocale) {
 type FunnelProgramKind = "card" | "insurance" | "travel" | "hotel";
 
 function funnelProgramKind(code: string): FunnelProgramKind {
-  if (code === "FUBON") return "insurance";
-  if (code === "LION") return "travel";
-  if (code === "GRAND") return "hotel";
+  if (code === "TAILSPIN") return "insurance";
+  if (code === "ADVENTURE") return "travel";
+  if (code === "WINGTIP") return "hotel";
   return "card";
 }
 

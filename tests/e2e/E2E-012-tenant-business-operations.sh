@@ -685,7 +685,7 @@ jq -n \
   --arg serviceProduct "enterprise_dispatch" \
   '{
     jobType: "monthly_trip_report",
-    format: "json",
+    format: "csv",
     filters: {
       orderId: $orderId,
       userId: $userId,

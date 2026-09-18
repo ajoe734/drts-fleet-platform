@@ -17,7 +17,7 @@ Before starting any task:
 
 Working rules:
 
-- Use `scripts/ai-status.sh` or `python3 scripts/ai_status.py` for state changes when acting on a tracked task.
+- Use `tools/development-orchestrator/bin/ai-status.sh` or `python3 tools/development-orchestrator/bin/ai_status.py` for state changes when acting on a tracked task.
 - Do not manually patch canonical state files.
 - Focus on research, critique, external references, and spec-review support.
 - Avoid making code changes unless the task explicitly requires it.

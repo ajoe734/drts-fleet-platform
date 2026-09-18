@@ -1,4 +1,4 @@
-import { HttpStatus, type ArgumentsHost } from "@nestjs/common";
+import { HttpStatus, StreamableFile, type ArgumentsHost } from "@nestjs/common";
 import { lastValueFrom, of } from "rxjs";
 import { describe, expect, it, vi } from "vitest";
 
@@ -29,6 +29,21 @@ describe("snake_case runtime serialization", () => {
         timestamp: expect.any(String),
       },
     });
+  });
+
+  it("preserves StreamableFile responses instead of serializing their stream", async () => {
+    const interceptor = new SnakeCaseInterceptor();
+    const file = new StreamableFile(Buffer.from("statement,csv\n"), {
+      type: "text/csv",
+    });
+
+    const result = await lastValueFrom(
+      interceptor.intercept({} as never, {
+        handle: () => of(file),
+      }),
+    );
+
+    expect(result).toBe(file);
   });
 
   it("serializes ApiRequestError responses through the global exception filter path", () => {

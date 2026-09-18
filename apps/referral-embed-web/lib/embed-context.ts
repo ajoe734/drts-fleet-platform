@@ -1,20 +1,23 @@
 import { headers } from "next/headers";
 import type { PartnerChannelEntryRecord } from "@drts/contracts";
-import type { PartnerIngressHandoffSession } from "@drts/contracts";
+import type { ReferralEmbedSession } from "@drts/contracts";
 import {
   buildEmbedSecurityDecision,
   type EmbedSecurityDecision,
 } from "./embed-security";
+import { getReferralEmbedSession } from "./embed-partner-session";
 import { resolveAccent } from "./embed-presentation";
-import {
-  getPartnerEntry,
-  isEmbedAuthorityError,
-  issuePartnerIngressHandoff,
-} from "./embed-api";
+import { getPartnerEntry } from "./embed-api";
 import {
   EMBED_TRIP_FALLBACK_SCREENS,
   type EmbedTripFallbackScreen,
 } from "./embed-fixtures";
+import {
+  resolveStandaloneFallbackEntry,
+  type FallbackEntry,
+} from "./embed-fallback-entry";
+
+export { resolveStandaloneFallbackEntry, type FallbackEntry };
 
 export type EmbedState =
   | "handoff"
@@ -38,9 +41,10 @@ export type EmbedScreen =
 
 export type EmbedContext = {
   entry: PartnerChannelEntryRecord;
-  session: PartnerIngressHandoffSession | null;
+  session: ReferralEmbedSession | null;
   state: EmbedState;
   screen: EmbedScreen;
+  requestedScreen: string | null;
   handoff: {
     apiKey: string | null;
     partnerUserRef: string | null;
@@ -53,6 +57,7 @@ export type EmbedContext = {
     supportPhone: string;
   };
   issues: string[];
+  fallbackEntry: FallbackEntry | null;
 };
 
 function resolveDisplayName(entry: PartnerChannelEntryRecord) {
@@ -60,7 +65,7 @@ function resolveDisplayName(entry: PartnerChannelEntryRecord) {
 }
 
 function resolveAppName(entry: PartnerChannelEntryRecord) {
-  return `${resolveDisplayName(entry)} App`;
+  return resolveDisplayName(entry);
 }
 
 function resolveSupportPhone(entry: PartnerChannelEntryRecord) {
@@ -70,7 +75,7 @@ function resolveSupportPhone(entry: PartnerChannelEntryRecord) {
 function toEmbedState(
   requested: string | undefined,
   decision: EmbedSecurityDecision,
-  session: PartnerIngressHandoffSession | null,
+  session: ReferralEmbedSession | null,
   issues: string[],
   demo: boolean,
 ): EmbedState {
@@ -80,6 +85,7 @@ function toEmbedState(
   if (requested === "unsupported") return "unsupported";
   if (decision.block) return "unsupported";
   if (issues.some((issue) => issue.startsWith("reauth:"))) return "reauth";
+  if (session && !session.identityActive) return "consent";
   if (session && requested === "handoff") return "handoff";
   if (session && requested === "book") return "handoff";
   if (session) return "handoff";
@@ -131,7 +137,7 @@ export async function resolveEmbedContext(input: {
     url.searchParams.set("entryHost", input.entryHost);
   }
 
-  const decision = buildEmbedSecurityDecision({
+  const rawDecision = buildEmbedSecurityDecision({
     allowedEntryHostsEnv: process.env.REFERRAL_EMBED_ALLOWED_HOSTS,
     headers: new Headers(requestHeaders),
     requestUrl: url,
@@ -139,43 +145,52 @@ export async function resolveEmbedContext(input: {
 
   const entry = await getPartnerEntry(input.entrySlug);
   const issues: string[] = [];
-  let session: PartnerIngressHandoffSession | null = null;
+  let session = await getReferralEmbedSession();
 
-  if (!decision.block && input.apiKey && input.partnerUserRef) {
-    try {
-      session = await issuePartnerIngressHandoff({
-        entrySlug: input.entrySlug,
-        apiKey: input.apiKey,
-        partnerUserRef: input.partnerUserRef,
-        consentScope: "passenger_identity_link",
-      });
-    } catch (error) {
-      if (isEmbedAuthorityError(error)) {
-        if (
-          error.status === 401 ||
-          error.status === 403 ||
-          error.code === "PARTNER_USER_IDENTITY_REVOKED"
-        ) {
-          issues.push(`reauth:${error.code}`);
-        } else {
-          issues.push(`fallback:${error.code}`);
-        }
-      } else {
-        issues.push("fallback:unknown");
-      }
+  if (session) {
+    if (session.partnerEntrySlug !== input.entrySlug) {
+      issues.push("reauth:cross_entry_session");
+      session = null;
+    } else if (
+      rawDecision.requestedEntryHost &&
+      session.entryHost !== rawDecision.requestedEntryHost
+    ) {
+      issues.push("reauth:entry_host_session_mismatch");
+      session = null;
     }
-  } else if (!decision.block) {
-    issues.push("fallback:missing_handoff_credentials");
+  }
+
+  const decision =
+    session &&
+    rawDecision.block &&
+    rawDecision.requestedEntryHost &&
+    session.entryHost === rawDecision.requestedEntryHost
+      ? {
+          ...rawDecision,
+          block: false,
+          blockReason: null,
+          xFrameOptions: null,
+        }
+      : rawDecision;
+
+  if (!decision.block && !session) {
+    issues.push("fallback:missing_embed_session");
   }
 
   const demoMode = process.env.REFERRAL_EMBED_DEMO === "true";
   const state = toEmbedState(input.state, decision, session, issues, demoMode);
+  const fallbackEntry = resolveStandaloneFallbackEntry({
+    entrySlug: input.entrySlug,
+    entryHost: rawDecision.requestedEntryHost ?? session?.entryHost ?? null,
+    currentHost: host,
+  });
 
   return {
     entry,
     session,
     state,
     screen: toEmbedScreen(input.screen),
+    requestedScreen: input.screen ?? null,
     handoff: {
       apiKey: input.apiKey ?? null,
       partnerUserRef: input.partnerUserRef ?? null,
@@ -188,5 +203,6 @@ export async function resolveEmbedContext(input: {
       supportPhone: resolveSupportPhone(entry),
     },
     issues,
+    fallbackEntry,
   };
 }

@@ -1,11 +1,13 @@
 "use client";
 
 import Link from "next/link";
+import { resolveRuntimeHealth, type RuntimeHealthStatus } from "@drts/ui-web";
 import {
   PLATFORM_ADMIN_ROUTE_REGISTRY,
   PlatformAdminAssistantProvider,
 } from "@/components/assistant/route-context";
 import { PlatformAssistantOverlay } from "@/components/assistant/platform-assistant-overlay";
+import { BreakGlassBanner } from "@/components/break-glass-context";
 import { usePathname } from "next/navigation";
 import {
   Activity,
@@ -74,6 +76,7 @@ const theme = {
 
 type AdminShellProps = {
   children: ReactNode;
+  env?: string | undefined;
 };
 
 type NavRoute = {
@@ -88,7 +91,7 @@ type NavSection = {
   labelKey: string;
 };
 
-type ApiHealthStatus = "checking" | "healthy" | "degraded" | "down";
+type ApiHealthStatus = RuntimeHealthStatus;
 
 const sections: NavSection[] = [
   { key: "workspace", labelKey: "adminShell.section.workspace" },
@@ -162,6 +165,12 @@ const routes: NavRoute[] = [
     icon: Handshake,
     section: "fleet",
     labelKey: "adminShell.route.fleetPartners",
+  },
+  {
+    key: "supply-review",
+    icon: ClipboardList,
+    section: "fleet",
+    labelKey: "adminShell.route.supplyReview",
   },
   {
     key: "sandbox",
@@ -338,18 +347,7 @@ function normalizeHealthStatus(
   value: unknown,
   responseOk: boolean,
 ): ApiHealthStatus {
-  if (!responseOk) {
-    return "degraded";
-  }
-
-  const normalized = String(value ?? "healthy").toLowerCase();
-  if (normalized === "down" || normalized === "unhealthy") {
-    return "down";
-  }
-  if (normalized === "degraded" || normalized === "warning") {
-    return "degraded";
-  }
-  return "healthy";
+  return resolveRuntimeHealth({ status: value, responseOk });
 }
 
 function formatCheckedAt(date: Date | null, locale: Locale) {
@@ -411,6 +409,13 @@ function AdminHealthFooter({
     checking: {
       label: labelFor(locale, "adminShell.health.checking"),
       short: "checking",
+      fg: theme.textMuted,
+      bg: theme.neutralBg,
+      border: theme.neutralBorder,
+    },
+    unknown: {
+      label: labelFor(locale, "adminShell.health.unknown"),
+      short: "unknown",
       fg: theme.textMuted,
       bg: theme.neutralBg,
       border: theme.neutralBorder,
@@ -619,16 +624,53 @@ function SearchBox({ locale }: { locale: Locale }) {
   );
 }
 
-function IdentityChip({ locale }: { locale: Locale }) {
+function resolveAdminEnvLabel(env: string | undefined, locale: Locale): string {
+  const normalized = env ? env.trim().toLowerCase() : "";
+  if (normalized === "production" || normalized === "prod") {
+    return labelFor(locale, "adminShell.environment.production");
+  }
+  if (normalized === "staging" || normalized === "stage") {
+    return labelFor(locale, "adminShell.environment.staging");
+  }
+  if (normalized === "preview") {
+    return labelFor(locale, "adminShell.environment.preview");
+  }
+  if (normalized === "sandbox") {
+    return labelFor(locale, "adminShell.environment.sandbox");
+  }
+  if (normalized === "development" || normalized === "dev") {
+    return labelFor(locale, "adminShell.environment.dev");
+  }
+  if (normalized === "test" || normalized === "mock") {
+    return labelFor(locale, "adminShell.environment.mock");
+  }
+  if (normalized === "unknown") {
+    return labelFor(locale, "adminShell.environment.unknown");
+  }
+  return labelFor(locale, "adminShell.environment.unknown");
+}
+
+function IdentityChip({
+  locale,
+  env,
+}: {
+  locale: Locale;
+  env?: string | undefined;
+}) {
+  const envLabel = resolveAdminEnvLabel(env, locale);
   return (
-    <div style={identityChipStyle}>
+    <div style={identityChipStyle} data-testid="platform-admin-identity">
       <div style={realmChipStyle}>
         <span style={accentDotStyle} />
         {labelFor(locale, "adminShell.realm")}
       </div>
-      <div style={envChipStyle}>
+      <div
+        style={envChipStyle}
+        data-testid="platform-admin-env-chip"
+        data-environment={env ?? "unknown"}
+      >
         <span style={envDotStyle} />
-        {labelFor(locale, "adminShell.environment")}
+        {envLabel}
       </div>
       <div style={actorChipStyle}>
         <div style={actorAvatarStyle}>PA</div>
@@ -644,10 +686,12 @@ function Topbar({
   activeRoute,
   pathname,
   locale,
+  env,
 }: {
   activeRoute: NavRoute;
   pathname: string;
   locale: Locale;
+  env?: string | undefined;
 }) {
   const activeSection = sections.find(
     (section) => section.key === activeRoute.section,
@@ -697,12 +741,12 @@ function Topbar({
       >
         <Bell size={15} />
       </button>
-      <IdentityChip locale={locale} />
+      <IdentityChip locale={locale} env={env} />
     </header>
   );
 }
 
-export function AdminShell({ children }: AdminShellProps) {
+export function AdminShell({ children, env }: AdminShellProps) {
   const rawPathname = usePathname();
   const pathname = rawPathname || "/";
   const { locale, setLocale } = useTranslation();
@@ -710,15 +754,30 @@ export function AdminShell({ children }: AdminShellProps) {
 
   return (
     <PlatformAdminAssistantProvider>
-      <div style={shellStyle}>
-        <Sidebar
-          activeRoute={activeRoute}
-          locale={locale}
-          setLocale={setLocale}
-        />
-        <Topbar activeRoute={activeRoute} pathname={pathname} locale={locale} />
-        <main style={mainStyle}>{children}</main>
-        <PlatformAssistantOverlay />
+      <div
+        style={{
+          display: "flex",
+          flexDirection: "column",
+          height: "100dvh",
+          overflow: "hidden",
+        }}
+      >
+        <BreakGlassBanner />
+        <div style={shellStyle}>
+          <Sidebar
+            activeRoute={activeRoute}
+            locale={locale}
+            setLocale={setLocale}
+          />
+          <Topbar
+            activeRoute={activeRoute}
+            pathname={pathname}
+            locale={locale}
+            env={env}
+          />
+          <main style={mainStyle}>{children}</main>
+          <PlatformAssistantOverlay />
+        </div>
       </div>
     </PlatformAdminAssistantProvider>
   );

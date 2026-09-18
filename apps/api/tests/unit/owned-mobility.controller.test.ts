@@ -5,6 +5,51 @@ import { OwnedMobilityController } from "../../src/modules/owned-mobility/owned-
 import type { OwnedMobilityService } from "../../src/modules/owned-mobility/owned-mobility.service";
 
 describe("OwnedMobilityController tenant booking routes", () => {
+  it("awaits passenger cancellation and propagates transaction failures", async () => {
+    const cancelOwnedOrder = vi.fn().mockResolvedValue({
+      orderId: "order-cancel", status: "cancelled",
+    });
+    const controller = new OwnedMobilityController(
+      { cancelOwnedOrder } as unknown as OwnedMobilityService, {} as never,
+    );
+    expect((await controller.cancelOwnedOrder("order-cancel", {})).data)
+      .toEqual({ orderId: "order-cancel", status: "cancelled" });
+    const failure = new Error("transaction rolled back");
+    cancelOwnedOrder.mockRejectedValueOnce(failure);
+    await expect(controller.cancelOwnedOrder("order-cancel", {}))
+      .rejects.toBe(failure);
+  });
+
+  it("awaits referral ratings before wrapping the API envelope", async () => {
+    const service = {
+      submitReferralPassengerRating: vi.fn().mockResolvedValue({
+        orderId: "order-rating-001",
+        score: 5,
+        comment: null,
+        tags: [],
+        submittedAt: "2026-08-22T15:00:00.000Z",
+      }),
+    } as unknown as OwnedMobilityService;
+    const controller = new OwnedMobilityController(service, {} as never);
+
+    const response = await controller.submitReferralPassengerRating(
+      "order-rating-001",
+      { score: 5 } as never,
+      null,
+      "req-rating-001",
+    );
+
+    expect(response.data).toMatchObject({
+      orderId: "order-rating-001",
+      score: 5,
+    });
+    expect(service.submitReferralPassengerRating).toHaveBeenCalledWith(
+      "order-rating-001",
+      { score: 5 },
+      null,
+    );
+  });
+
   it("awaits tenant booking creation before wrapping the API envelope", async () => {
     const service = {
       createTenantBooking: vi.fn().mockResolvedValue({
@@ -16,7 +61,7 @@ describe("OwnedMobilityController tenant booking routes", () => {
         status: "created",
       }),
     } as unknown as OwnedMobilityService;
-    const controller = new OwnedMobilityController(service);
+    const controller = new OwnedMobilityController(service, {} as never);
 
     const response = await controller.createTenantBooking(
       {} as never,
@@ -36,6 +81,8 @@ describe("OwnedMobilityController tenant booking routes", () => {
       null,
       "req-e2e-create",
       undefined,
+      undefined,
+      { required: true },
     );
   });
 
@@ -80,6 +127,7 @@ describe("OwnedMobilityController tenant booking routes", () => {
     };
     const controller = new OwnedMobilityController(
       service,
+      {} as never,
       tenantPartnerService as never,
     );
 
@@ -111,6 +159,8 @@ describe("OwnedMobilityController tenant booking routes", () => {
       identity,
       "req-e2e-partner",
       undefined,
+      undefined,
+      { required: true },
     );
     expect(
       tenantPartnerService.hydratePartnerEligibilityVerification,
@@ -147,7 +197,7 @@ describe("OwnedMobilityController tenant booking routes", () => {
         status: "approval_required",
       }),
     } as unknown as OwnedMobilityService;
-    const controller = new OwnedMobilityController(service);
+    const controller = new OwnedMobilityController(service, {} as never);
 
     const response = await controller.updateTenantBooking(
       "booking-e2e-001",
@@ -184,7 +234,7 @@ describe("OwnedMobilityController tenant booking routes", () => {
         },
       ]),
     } as unknown as OwnedMobilityService;
-    const controller = new OwnedMobilityController(service);
+    const controller = new OwnedMobilityController(service, {} as never);
 
     const response = await controller.listDispatchCandidates(
       "job-e2e-001",
@@ -212,7 +262,7 @@ describe("OwnedMobilityController tenant booking routes", () => {
         taskId: "task-e2e-001",
       }),
     } as unknown as OwnedMobilityService;
-    const controller = new OwnedMobilityController(service);
+    const controller = new OwnedMobilityController(service, {} as never);
 
     const response = await controller.assignDispatch(
       {} as never,
@@ -224,7 +274,12 @@ describe("OwnedMobilityController tenant booking routes", () => {
       status: "assigned",
       taskId: "task-e2e-001",
     });
-    expect(service.assignDispatch).toHaveBeenCalledWith({}, "req-e2e-assign");
+    expect(service.assignDispatch).toHaveBeenCalledWith(
+      {},
+      "req-e2e-assign",
+      undefined,
+      { required: true },
+    );
   });
 
   it("awaits dispatch reassignment before wrapping the API envelope", async () => {
@@ -235,7 +290,7 @@ describe("OwnedMobilityController tenant booking routes", () => {
         taskId: "task-e2e-002",
       }),
     } as unknown as OwnedMobilityService;
-    const controller = new OwnedMobilityController(service);
+    const controller = new OwnedMobilityController(service, {} as never);
 
     const response = await controller.reassignDispatch(
       {} as never,
@@ -250,6 +305,8 @@ describe("OwnedMobilityController tenant booking routes", () => {
     expect(service.reassignDispatch).toHaveBeenCalledWith(
       {},
       "req-e2e-reassign",
+      undefined,
+      { required: true },
     );
   });
 
@@ -281,7 +338,7 @@ describe("OwnedMobilityController tenant booking routes", () => {
       listQueueEntries: vi.fn(() => [queueEntry]),
       getQueueEntry: vi.fn(() => queueEntry),
     } as unknown as OwnedMobilityService;
-    const controller = new OwnedMobilityController(service);
+    const controller = new OwnedMobilityController(service, {} as never);
 
     const listResponse = controller.listQueueEntries("req-queue-list");
     const detailResponse = controller.getQueueEntry(

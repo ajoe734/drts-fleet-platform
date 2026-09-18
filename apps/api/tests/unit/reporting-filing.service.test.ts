@@ -98,7 +98,8 @@ describe("ReportingFilingService sensitive-data governance", () => {
     const reportAccepted = service.createReportJob(
       {
         jobType: "revenue_summary",
-        format: "xlsx",
+        // xlsx has no renderer and is rejected at creation.
+        format: "csv",
       },
       "req-report-create-002",
     );
@@ -250,7 +251,9 @@ describe("ReportingFilingService sensitive-data governance", () => {
     const accepted = service.createReportJob(
       {
         jobType: "monthly_trip_report",
-        format: "json",
+        // Was "json", which ReportOutputFormat has never included. Nothing
+        // validated `format`, so the test passed on it.
+        format: "csv",
         filters: {
           orderId: "order-monthly-001",
           userId: "tenant-admin-001",

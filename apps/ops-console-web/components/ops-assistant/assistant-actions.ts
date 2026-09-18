@@ -1,13 +1,19 @@
 import type { CrossAppResourceLink } from "@drts/contracts";
 import {
-  crossAppHref,
   platformAdminPaymentsLink,
-} from "@/lib/ops-cross-app-links";
-import { t } from "@/lib/translations";
+} from "../../lib/ops-cross-app-links";
+import { t } from "../../lib/translations";
 import type {
   AssistantSelection,
   OpsAssistantContext,
 } from "./context-envelope";
+import {
+  resolveCrossAppHref,
+  resolvePlatformAdminOrigin,
+  buildPlatformAdminAuditUrl,
+  sanitizeAuditHref,
+  type PlatformAdminAuditContext,
+} from "./cross-app-url";
 
 export interface AssistantNavigationAction {
   kind: "navigate";
@@ -275,6 +281,30 @@ function buildRouteSpecificActions(
           },
         },
       ];
+    case "/incidents":
+      return [
+        {
+          kind: "cross_app",
+          label:
+            t("incidents.detail.actionPanel.openLatestAudit", context.locale) ||
+            "Platform Audit",
+          description:
+            t("incidents.detail.latestAudit.newTab", context.locale) ||
+            "Open platform-admin audit in a new tab",
+          link: {
+            targetApp: "platform-admin",
+            route: context.selectedEntity?.id
+              ? `/audit?resourceType=incident&resourceId=${encodeURIComponent(context.selectedEntity.id)}`
+              : "/audit",
+            resourceType: "incident",
+            resourceId: context.selectedEntity?.id ?? "",
+            openMode: "new_tab",
+            label:
+              t("incidents.detail.actionPanel.openLatestAudit", context.locale) ||
+              "Platform Audit",
+          },
+        },
+      ];
     default:
       return [];
   }
@@ -327,6 +357,14 @@ export function buildAssistantActions(
 
 export function resolveAssistantActionHref(action: AssistantAction): string {
   return action.kind === "cross_app"
-    ? crossAppHref(action.link)
+    ? resolveCrossAppHref(action.link)
     : buildAssistantNavigationHref(action);
 }
+
+export {
+  resolveCrossAppHref,
+  resolvePlatformAdminOrigin,
+  buildPlatformAdminAuditUrl,
+  sanitizeAuditHref,
+  type PlatformAdminAuditContext,
+};

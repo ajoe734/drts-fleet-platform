@@ -72,7 +72,7 @@ export default function ReferralRatePage() {
   }>({
     rateType: "percent",
     value: "",
-    currency: "NTD",
+    currency: "TWD",
     effectiveFrom: "",
     effectiveUntil: "",
   });
@@ -214,7 +214,7 @@ export default function ReferralRatePage() {
         partnerEntrySlug: entrySlug,
         rateType: form.rateType,
         value,
-        currency: form.currency.trim() || "NTD",
+        currency: form.currency.trim() || "TWD",
         ...(form.effectiveFrom ? { effectiveFrom: form.effectiveFrom } : {}),
         ...(form.effectiveUntil ? { effectiveUntil: form.effectiveUntil } : {}),
       });

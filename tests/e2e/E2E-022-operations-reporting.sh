@@ -46,10 +46,13 @@ SUMMARY_TO_DATE=$(
   date -u -d "${SUMMARY_FROM_DATE} +1 month -1 day" +"%Y-%m-%d" 2>/dev/null \
     || date -u -j -f "%Y-%m-%d" "${SUMMARY_FROM_DATE}" -v+1m -v-1d +"%Y-%m-%d"
 )
-PORTAL_WINDOW_START="$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
-PORTAL_WINDOW_END=$(
+PORTAL_WINDOW_START=$(
   date -u -d "+30 minutes" +"%Y-%m-%dT%H:%M:%SZ" 2>/dev/null \
     || date -u -v+30M +"%Y-%m-%dT%H:%M:%SZ"
+)
+PORTAL_WINDOW_END=$(
+  date -u -d "+60 minutes" +"%Y-%m-%dT%H:%M:%SZ" 2>/dev/null \
+    || date -u -v+60M +"%Y-%m-%dT%H:%M:%SZ"
 )
 TAIPEI_CORE_PICKUP_LAT="25.0375"
 TAIPEI_CORE_PICKUP_LNG="121.5637"
@@ -773,7 +776,7 @@ jq -n \
   --arg serviceDate "$SERVICE_DATE" \
   '{
     jobType: "daily_dispatch_record",
-    format: "json",
+    format: "csv",
     filters: {
       serviceDate: $serviceDate
     }
@@ -928,7 +931,7 @@ jq -n \
   --arg businessArea "$TAXI_BUSINESS_AREA" \
   '{
     jobType: "six_month_operations_summary",
-    format: "json",
+    format: "csv",
     filters: {
       from: $from,
       to: $to,

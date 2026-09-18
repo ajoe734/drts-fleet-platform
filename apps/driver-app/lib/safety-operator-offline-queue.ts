@@ -215,3 +215,7 @@ export async function clearSafetyOperatorSyncedQueueEntries(): Promise<void> {
     }),
   );
 }
+
+export async function clearSafetyOperatorQueue(): Promise<void> {
+  await SecureStore.deleteItemAsync(SAFETY_OPERATOR_QUEUE_KEY);
+}

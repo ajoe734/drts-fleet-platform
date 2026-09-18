@@ -1,5 +1,12 @@
+import type {
+  BookingRequirements,
+  BookingQualification,
+} from "./booking-requirements";
+export * from "./booking-requirements";
 import { PLATFORM_CODES } from "./platform-codes";
 import type { PlatformCode } from "./platform-codes";
+export * from "./iam-contracts";
+export * from "./idempotency";
 import type { EligibilityDecision } from "./phase1-delta-supply-eligibility";
 import type {
   SandboxAuthorizationStatus,
@@ -792,17 +799,38 @@ export interface IdentityContext {
     | "ops_user"
     | "driver_user"
     | "partner_api_key"
+    | "partner_user"
     | "referral_passenger";
   actorId: string | null;
   realm: "system" | "platform" | "tenant" | "ops" | "driver" | "partner";
-  authMode: "bootstrap_headers" | "jwt_bearer";
+  authMode:
+    | "bootstrap_headers"
+    | "jwt_bearer"
+    | "partner_api_key"
+    | "referral_bearer";
   roleFamilies: Array<"platform" | "tenant" | "ops" | "driver" | "partner">;
   roles: string[];
   scopes: string[];
   tenantId: string | null;
+  principalId?: string | null;
+  membershipId?: string | null;
+  sessionId?: string | null;
+  tokenId?: string | null;
+  tokenVersion?: number | null;
+  authTime?: string | null;
+  amr?: string[];
+  authMethods?: string[];
+  acr?: string | null;
+  policyVersion?: string | null;
+  issuer?: string | null;
+  audience?: string[] | null;
+  issuedAt?: string | null;
+  expiresAt?: string | null;
   partnerId?: string | null;
   partnerProgramId?: string | null;
   partnerEntrySlug?: string | null;
+  ipAddress?: string | null;
+  userAgent?: string | null;
   supportedExecutionModes: SupervisorExecutionMode[];
 }
 
@@ -899,6 +927,53 @@ export interface DriverDeviceBindingSummary {
   issuedAt: string;
   refreshedAt: string;
   revokedAt: string | null;
+}
+
+export interface DriverDeviceInvitationRecord {
+  invitationId: string;
+  driverId: string;
+  registrationCodeHash: string;
+  status: "pending" | "used" | "expired" | "revoked";
+  expiresAt: string;
+  acceptedAt: string | null;
+  revokedAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface DriverRefreshFamilyRecord {
+  familyId: string;
+  bindingId: string;
+  driverId: string;
+  currentTokenHash: string;
+  previousTokenHashes: string[];
+  rotationCounter: number;
+  status: "active" | "revoked" | "compromised" | "expired";
+  expiresAt: string;
+  revokedAt: string | null;
+  compromisedAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface DriverDeviceBindingRecord {
+  bindingId: string;
+  driverId: string;
+  deviceId: string;
+  deviceLabel: string | null;
+  status: "active" | "revoked";
+  issuedAt: string;
+  refreshedAt: string;
+  revokedAt: string | null;
+  reboundFromBindingId?: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface IssueDriverDeviceInvitationCommand {
+  driverId: string;
+  registrationCode?: string;
+  expiresInHours?: number;
 }
 
 export interface TenantPartnerSummary {
@@ -998,23 +1073,63 @@ export interface PartnerEligibilityManualFallbackRecord {
   notes: string | null;
 }
 
+export const INTEGRATION_CREDENTIAL_STATUSES = [
+  "active",
+  "overlap_active",
+  "revoked",
+  "expired",
+  "auto_revoked",
+] as const;
+export type IntegrationCredentialStatus =
+  (typeof INTEGRATION_CREDENTIAL_STATUSES)[number];
+
+export interface IntegrationCredentialSignals {
+  approachingExpiry: boolean;
+  dormant: boolean;
+  expired: boolean;
+  autoRevoked: boolean;
+  evaluatedAt: string;
+}
+
 export interface PartnerIngressCredentialRecord {
   keyId: string;
   entrySlug: string;
   keyPrefix: string;
   maskedSuffix: string;
-  source: "env_bootstrap" | "platform_admin";
+  source: "env_bootstrap" | "platform_admin" | "platform_issued";
+  ownerRef?: string | null;
+  ownerName?: string | null;
+  ownerType?: string | null;
+  purpose?: string | null;
+  realm?: "partner";
+  resourceScope?: string | null;
+  scopes?: string[] | undefined;
   createdAt: string;
   lastUsedAt: string | null;
+  lastUsedWorkload?: string | null;
+  expiresAt?: string | null;
+  status?: IntegrationCredentialStatus;
+  overlapEndsAt?: string | null;
+  autoRevokedAt?: string | null;
+  rotatedFromKeyId?: string | null;
+  supersededByKeyId?: string | null;
   revokedAt: string | null;
   issuedBy: string | null;
   revokedBy: string | null;
   rotationReason: string | null;
   revokeReason: string | null;
+  signals?: IntegrationCredentialSignals | undefined;
 }
 
 export interface IssuePartnerIngressCredentialCommand {
   rotationReason?: string | null;
+  ownerRef?: string | null;
+  ownerName?: string | null;
+  ownerType?: string | null;
+  purpose?: string | null;
+  scopes?: string[] | undefined;
+  expiresAt?: string | null;
+  overlapDays?: number | null;
 }
 
 export interface RevokePartnerIngressCredentialCommand {
@@ -1025,6 +1140,7 @@ export interface PartnerIngressCredentialIssued {
   credential: PartnerIngressCredentialRecord;
   plaintextKey: string;
   revokedCredentialId: string | null;
+  overlapEndsAt?: string | null;
 }
 
 export interface PartnerChannelEntryRecord {
@@ -1213,6 +1329,7 @@ export interface AuditLogRecord {
     | "tenant_admin"
     | "ops_user"
     | "partner_api_key"
+    | "partner_user"
     | "referral_passenger";
   tenantId: string | null;
   moduleName: string;
@@ -1225,6 +1342,85 @@ export interface AuditLogRecord {
   createdAt: string;
 }
 
+export const SECURITY_EVENT_FAMILIES = [
+  "auth",
+  "session",
+  "account",
+  "role",
+  "invitation",
+  "device",
+  "credential",
+  "policy",
+  "break_glass",
+] as const;
+export type SecurityEventFamily = (typeof SECURITY_EVENT_FAMILIES)[number];
+
+export const SECURITY_EVENT_OUTCOMES = [
+  "success",
+  "failure",
+  "denied",
+  "revoked",
+  "expired",
+] as const;
+export type SecurityEventOutcome = (typeof SECURITY_EVENT_OUTCOMES)[number];
+
+export const SECURITY_EVENT_SEVERITIES = [
+  "low",
+  "medium",
+  "high",
+  "critical",
+] as const;
+export type SecurityEventSeverity = (typeof SECURITY_EVENT_SEVERITIES)[number];
+
+export interface SecurityEventRecord {
+  eventId: string;
+  occurredAt: string;
+  eventType: string;
+  eventFamily: SecurityEventFamily;
+  outcome: SecurityEventOutcome;
+  severity: SecurityEventSeverity;
+  actorId: string | null;
+  actorType: IdentityContext["actorType"];
+  subjectIdHash: string | null;
+  realm: IdentityContext["realm"];
+  tenantId: string | null;
+  partnerId: string | null;
+  targetType: string | null;
+  targetId: string | null;
+  sessionId: string | null;
+  tokenIdHash: string | null;
+  authMethods: string[];
+  sourceIpPrefix: string | null;
+  userAgentHash: string | null;
+  requestId: string | null;
+  traceId: string | null;
+  reasonCode: string | null;
+  approvalId: string | null;
+  policyVersion: string | null;
+  beforeSummary: Record<string, unknown> | null;
+  afterSummary: Record<string, unknown> | null;
+  maskedContext: Record<string, unknown>;
+}
+
+export interface SecurityEventQuery {
+  tenantId?: string | null;
+  partnerId?: string | null;
+  actorId?: string | null;
+  eventFamily?: SecurityEventFamily | null;
+  eventType?: string | null;
+  outcome?: SecurityEventOutcome | null;
+  limit?: number | null;
+}
+
+export interface SecurityEventMatrixEntry {
+  eventType: string;
+  eventFamily: SecurityEventFamily;
+  description: string;
+  privileged: boolean;
+  tenantScoped: boolean;
+  requiredOutcomes: SecurityEventOutcome[];
+}
+
 export const EVIDENCE_RETENTION_FAMILIES = [
   "call_recording",
   "report_artifact",
@@ -1233,6 +1429,11 @@ export const EVIDENCE_RETENTION_FAMILIES = [
   "webhook_delivery",
   "eligibility_verification",
   "proof_bundle",
+  "voice_booking_evidence",
+  "voice_transcript",
+  "voice_recording_audio",
+  "voice_live_buffer",
+  "voice_telemetry",
 ] as const;
 export type EvidenceRetentionFamily =
   (typeof EVIDENCE_RETENTION_FAMILIES)[number];
@@ -1474,6 +1675,19 @@ export interface TenantWebhookSecretRotationRecord {
   rotatedAt: string;
   rotationReason: string | null;
   secretPreview: string;
+  status?: IntegrationCredentialStatus;
+  ownerRef?: string | null;
+  ownerName?: string | null;
+  ownerType?: string | null;
+  purpose?: string | null;
+  expiresAt?: string | null;
+  lastUsedAt?: string | null;
+  lastUsedWorkload?: string | null;
+  overlapEndsAt?: string | null;
+  autoRevokedAt?: string | null;
+  supersededByVersion?: number | null;
+  revokedAt?: string | null;
+  signals?: IntegrationCredentialSignals | undefined;
 }
 
 export interface TenantWebhookRuntimeMetadata {
@@ -1500,6 +1714,11 @@ export interface CreateTenantWebhookEndpointCommand {
   url: string;
   secret: string;
   events: string[];
+  ownerRef?: string | null;
+  ownerName?: string | null;
+  ownerType?: string | null;
+  purpose?: string | null;
+  expiresAt?: string | null;
 }
 
 export const TENANT_WEBHOOK_ENDPOINT_STATUSES = [
@@ -1516,8 +1735,19 @@ export interface TenantWebhookEndpoint {
   url: string;
   events: string[];
   status: TenantWebhookEndpointStatus;
+  ownerRef?: string | null;
+  ownerName?: string | null;
+  ownerType?: string | null;
+  purpose?: string | null;
+  resourceScope?: string | null;
   secretVersion: number;
   secretPreview: string;
+  secretExpiresAt?: string | null;
+  secretLastUsedAt?: string | null;
+  secretLastUsedWorkload?: string | null;
+  credentialStatus?: IntegrationCredentialStatus;
+  rotationOverlapEndsAt?: string | null;
+  credentialSignals?: IntegrationCredentialSignals | undefined;
   createdAt: string;
   updatedAt: string;
   availableActions?: ResourceActionDescriptor[];
@@ -2210,7 +2440,219 @@ export interface TenantBookingQuotaImpactPreview {
   combinedTriggered: "none" | "warn" | "approval" | "block";
 }
 
+// --- Canonical Identity & Membership ---
+export const CANONICAL_ACCOUNT_STATUSES = [
+  "invited",
+  "pending_verification",
+  "active",
+  "locked",
+  "suspended",
+  "disabled",
+  "deletion_pending",
+  "deleted",
+  "migration_pending",
+] as const;
+export type CanonicalAccountStatus =
+  (typeof CANONICAL_ACCOUNT_STATUSES)[number];
+
+export const CANONICAL_PRINCIPAL_TYPES = [
+  "human",
+  "service",
+  "device",
+  "partner_machine",
+] as const;
+export type CanonicalPrincipalType = (typeof CANONICAL_PRINCIPAL_TYPES)[number];
+
+export interface CanonicalIdentityPrincipalRecord {
+  principalId: string;
+  sourceRef: string | null;
+  issuer: string;
+  subject: string;
+  principalType: CanonicalPrincipalType;
+  email: string | null;
+  emailVerified: boolean;
+  displayName: string | null;
+  status: CanonicalAccountStatus;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface CanonicalIdentityMembershipRecord {
+  membershipId: string;
+  sourceRef: string | null;
+  principalId: string;
+  realm: string;
+  scopeRef: string;
+  tenantId: string | null;
+  partnerId: string | null;
+  status: CanonicalAccountStatus;
+  invitedByPrincipalId: string | null;
+  invitationId: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface CanonicalIdentityRoleBindingRecord {
+  roleBindingId: string;
+  sourceRef: string | null;
+  membershipId: string;
+  roleCode: string;
+  grantedByPrincipalId: string | null;
+  approvalId: string | null;
+  validFrom: string;
+  validTo: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export const CANONICAL_INVITATION_DELIVERY_STATUSES = [
+  "pending_delivery",
+  "delivered",
+  "legacy_backfill",
+  "delivery_failed",
+] as const;
+export type CanonicalInvitationDeliveryStatus =
+  (typeof CANONICAL_INVITATION_DELIVERY_STATUSES)[number];
+
+export interface CanonicalIdentityInvitationRecord {
+  invitationId: string;
+  sourceRef: string | null;
+  membershipId: string;
+  issuerPrincipalId: string | null;
+  realm: string;
+  scopeRef: string;
+  tenantId: string | null;
+  partnerId: string | null;
+  email: string;
+  roleCode: string;
+  tokenHash: string;
+  deliveryStatus: CanonicalInvitationDeliveryStatus;
+  expiresAt: string;
+  acceptedAt: string | null;
+  revokedAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface CanonicalTenantUserIdentitySnapshot {
+  principal: CanonicalIdentityPrincipalRecord;
+  membership: CanonicalIdentityMembershipRecord;
+  roleBinding: CanonicalIdentityRoleBindingRecord;
+  invitation: CanonicalIdentityInvitationRecord | null;
+}
+
+export function isCanonicalAccountActive(status: CanonicalAccountStatus) {
+  return status === "active";
+}
+
+// --- Canonical Identity Sessions & Refresh Families ---
+export const SESSION_STATUSES = [
+  "active",
+  "revoked",
+  "expired",
+  "compromised",
+] as const;
+export type SessionStatus = (typeof SESSION_STATUSES)[number];
+
+export const REFRESH_FAMILY_STATUSES = [
+  "active",
+  "revoked",
+  "expired",
+  "compromised",
+] as const;
+export type RefreshFamilyStatus = (typeof REFRESH_FAMILY_STATUSES)[number];
+
+export interface CanonicalIdentitySessionRecord {
+  sessionId: string;
+  sourceRef: string | null;
+  principalId: string;
+  membershipId: string | null;
+  realm: string;
+  actorType?: IdentityContext["actorType"];
+  actorId?: string | null;
+  tenantId?: string | null;
+  partnerId?: string | null;
+  partnerProgramId?: string | null;
+  partnerEntrySlug?: string | null;
+  currentTokenId?: string | null;
+  roles?: string[];
+  scopes?: string[] | undefined;
+  policyVersion?: string | null;
+  acr?: string | null;
+  audience?: string[] | null;
+  issuer?: string | null;
+  subject?: string | null;
+  status: SessionStatus;
+  authTime: string;
+  authMethods: string[];
+  tokenVersion: number;
+  idleExpiresAt: string | null;
+  absoluteExpiresAt: string;
+  revokedAt: string | null;
+  revokedByPrincipalId: string | null;
+  revokeReason: string | null;
+  deviceSummary: Record<string, unknown>;
+  riskSummary: Record<string, unknown>;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface CanonicalRefreshFamilyRecord {
+  familyId: string;
+  sourceRef: string | null;
+  sessionId: string;
+  currentTokenHash: string;
+  counter: number;
+  status: RefreshFamilyStatus;
+  expiresAt: string;
+  compromisedAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface ConsumeAndRotateRefreshTokenCommand {
+  familyId?: string;
+  oldTokenRaw?: string;
+  oldTokenHash?: string;
+  newTokenRaw?: string;
+  newTokenHash?: string;
+  newSessionTokenId: string;
+  newSessionTokenVersion: number;
+  newExpiresAt: string;
+  updatedAt?: string;
+}
+
+export interface ConsumeAndRotateRefreshTokenResult {
+  success: boolean;
+  session: CanonicalIdentitySessionRecord | null;
+  family: CanonicalRefreshFamilyRecord | null;
+  reason?:
+    | "INVALID_TOKEN"
+    | "EXPIRED"
+    | "REVOKED"
+    | "COMPROMISED"
+    | "REUSE_DETECTED"
+    | "CONCURRENCY_CONFLICT";
+}
+
 // --- Tenant User & Roles ---
+export interface TenantSessionInventoryRecord {
+  sessionId: string;
+  tenantId: string;
+  principalId: string;
+  subject: string | null;
+  authMethod: string;
+  status: SessionStatus;
+  createdAt: string;
+  lastSeenAt: string;
+  expiresAt: string;
+  revokedAt: string | null;
+}
+
+export interface RevokeTenantSessionCommand {
+  reason?: string;
+}
+
 export type TenantUserRoleStatus = "invited" | "active" | "suspended";
 
 export interface TenantUserRoleRecord {
@@ -2223,12 +2665,33 @@ export interface TenantUserRoleRecord {
   approvalNotificationOptOut: boolean;
   invitedAt: string;
   updatedAt: string;
+  subjectId?: string;
+  subject?: string;
 }
 
 export interface CreateTenantUserCommand {
   email: string;
   displayName: string;
   roleCode: string;
+}
+
+/** Public invitation state. Secret material and token hashes never cross this boundary. */
+export interface TenantInvitationView {
+  invitationId: string;
+  deliveryStatus: CanonicalInvitationDeliveryStatus;
+  expiresAt: string;
+  acceptedAt: string | null;
+  revokedAt: string | null;
+}
+
+export interface AcceptTenantInvitationCommand {
+  invitationToken: string;
+}
+
+export interface AcceptTenantInvitationResult {
+  user: TenantUserRoleRecord;
+  invitation: TenantInvitationView;
+  accepted: true;
 }
 
 export interface UpdateTenantRoleCommand {
@@ -2251,11 +2714,25 @@ export interface TenantApiKeyRecord {
   keyName: string;
   keyPrefix: string;
   maskedSuffix: string;
+  ownerRef?: string | null;
+  ownerName?: string | null;
+  ownerType?: string | null;
+  purpose?: string | null;
+  realm?: "tenant";
+  resourceScope?: string | null;
   scopes: string[];
   lastUsedAt: string | null;
+  lastUsedWorkload?: string | null;
   expiresAt: string | null;
+  status?: IntegrationCredentialStatus;
+  overlapEndsAt?: string | null;
+  autoRevokedAt?: string | null;
+  rotatedFromApiKeyId?: string | null;
+  supersededByApiKeyId?: string | null;
   revokedAt: string | null;
+  revokeReason?: string | null;
   createdAt: string;
+  signals?: IntegrationCredentialSignals | undefined;
 }
 
 export const TENANT_API_KEY_ALLOWED_SCOPES = [
@@ -2277,6 +2754,9 @@ export interface TenantApiKeyGovernancePolicy {
   compatibilityAliases: Record<string, string>;
   defaultLifetimeDays: number;
   maxLifetimeDays: number;
+  rotationOverlapDays: number;
+  approachingExpiryThresholdDays: number;
+  dormantUseThresholdDays: number;
   requireExpiry: boolean;
   breakGlassRequiresPlatformApproval: boolean;
   revokeEffect: "immediate";
@@ -2285,25 +2765,38 @@ export interface TenantApiKeyGovernancePolicy {
 export interface IssueTenantApiKeyCommand {
   keyName: string;
   scopes: string[];
+  ownerRef?: string | null;
+  ownerName?: string | null;
+  ownerType?: string | null;
+  purpose?: string | null;
   expiresAt?: string | null;
 }
 
 export interface RotateTenantApiKeyCommand {
   keyName?: string;
-  scopes?: string[];
+  scopes?: string[] | undefined;
+  ownerRef?: string | null;
+  ownerName?: string | null;
+  ownerType?: string | null;
+  purpose?: string | null;
   expiresAt?: string | null;
+  overlapDays?: number | null;
 }
 
 export interface TenantApiKeyIssued {
   apiKey: TenantApiKeyRecord;
   plaintextKey: string;
   revokedApiKeyId: string | null;
+  overlapEndsAt?: string | null;
 }
 
 // --- Tenant Webhooks ---
 export interface TenantWebhookGovernancePolicy {
   testEventType: string;
   autoDisableAfterConsecutiveFailures: number;
+  rotationOverlapDays: number;
+  approachingExpiryThresholdDays: number;
+  dormantUseThresholdDays: number;
   revalidationRequiredOnCreate: boolean;
   revalidationRequiredOnEndpointMutation: boolean;
   revalidationRequiredOnSecretRotation: boolean;
@@ -2390,6 +2883,43 @@ export const DRIVER_TASK_STATUSES = [
   "cancelled",
 ] as const;
 export type DriverTaskStatus = (typeof DRIVER_TASK_STATUSES)[number];
+
+/**
+ * Which task status may follow which.
+ *
+ * `DRIVER_TASK_STATUSES` was a list of names, and whether the order they imply
+ * was enforced depended on which function you landed in: `startDriverTask` and
+ * `completeDriverTask` checked, while `acceptDriverTask`, `rejectDriverTask`,
+ * `departDriverTask`, `arrivedPickup` and `markDriverTaskProofPending` did not.
+ * So accepting a task whose order had already been cancelled succeeded, and set
+ * the order back to `driver_accepted`.
+ *
+ * That needs no concurrency to happen -- a driver's phone coming back online
+ * after a cancellation is enough. `Record` over the union means a status added
+ * to the enum without deciding what may follow it fails to compile.
+ */
+export const DRIVER_TASK_TRANSITIONS: Record<
+  DriverTaskStatus,
+  readonly DriverTaskStatus[]
+> = {
+  pending_acceptance: ["accepted", "rejected", "cancelled"],
+  // `arrived_pickup` directly, because a driver already standing at the pickup
+  // point never departs for it. Both paths exist in the codebase and both
+  // passed before anything was enforced, so which one was intended could not be
+  // read off the code -- that ambiguity was part of what made the missing
+  // guards invisible.
+  accepted: ["enroute_pickup", "arrived_pickup", "cancelled"],
+  enroute_pickup: ["arrived_pickup", "cancelled"],
+  arrived_pickup: ["on_trip", "cancelled"],
+  on_trip: ["proof_pending", "completed", "cancelled"],
+  proof_pending: ["completed", "cancelled"],
+  // Terminal. A completed trip that can be re-cancelled is a refund nobody
+  // recorded, and a rejected task that can be accepted is a dispatch nobody
+  // made.
+  completed: [],
+  rejected: [],
+  cancelled: [],
+};
 
 export const BOOKING_TYPES = ["oneway", "roundtrip", "recurring"] as const;
 export type BookingType = (typeof BOOKING_TYPES)[number];
@@ -2728,6 +3258,8 @@ export interface CreateOwnedOrderCommand {
   rideType?: "immediate";
   servicePreferences?: Partial<ServicePreferences>;
   paymentMethod?: "cash" | "card";
+  idempotencyKey?: string;
+  tenantId?: string;
 }
 
 export interface CallCenterMapFallbackReview {
@@ -2738,6 +3270,7 @@ export interface CallCenterMapFallbackReview {
 }
 
 export interface CreateCallCenterOrderCommand {
+  bookingRequirements?: BookingRequirements;
   callId: string;
   agentId: string;
   recordingId?: string | null;
@@ -2752,6 +3285,7 @@ export interface CreateTenantBookingCommand {
   businessDispatchSubtype: BusinessDispatchSubtype;
   partnerEntrySlug?: string;
   eligibilityVerificationId?: string;
+  idempotencyKey?: string;
   passengerId?: string;
   pickupAddressId?: string;
   dropoffAddressId?: string;
@@ -2862,6 +3396,7 @@ export interface ApplyManualFareOverrideCommand {
 
 export interface DispatchOrderCommand {
   mode: "auto";
+  idempotencyKey?: string;
 }
 
 export interface AssignDispatchCommand {
@@ -2869,6 +3404,7 @@ export interface AssignDispatchCommand {
   vehicleId: string;
   driverId: string;
   sandboxDispatchSnapshot?: SandboxDispatchAssignmentSnapshot | null;
+  idempotencyKey?: string;
 }
 
 export interface ReassignDispatchCommand {
@@ -2877,6 +3413,7 @@ export interface ReassignDispatchCommand {
   driverId: string;
   reasonCode: string;
   reasonNote?: string;
+  idempotencyKey?: string;
 }
 
 export interface RedispatchOrderCommand {
@@ -2889,6 +3426,7 @@ export interface RedispatchOrderCommand {
   // event cannot cancel an assignment the caller never saw. Omit to redispatch
   // unconditionally.
   expectedAssignmentVersion?: number | null;
+  idempotencyKey?: string;
 }
 
 export interface CancelOwnedOrderCommand {
@@ -2941,6 +3479,8 @@ export interface DriverCompleteTaskCommand {
 }
 
 export interface OwnedOrderRecord {
+  bookingRequirements?: BookingRequirements;
+  bookingQualification?: BookingQualification;
   orderId: string;
   orderNo: string;
   orderSource: OwnedOrderSource;
@@ -2974,6 +3514,17 @@ export interface OwnedOrderRecord {
   bookingType: BookingType | null;
   etaSnapshot: EtaSnapshot | null;
   callId: string | null;
+  // Present only for orders created through the unattended voice-booking
+  // command path (SD §7.1/§7.2). Optional because it does not exist on
+  // orders persisted before that path landed; `ops.phase1_owned_orders`
+  // enforces `UNIQUE(voice_intent_id)` (non-null) on the DB side.
+  voiceIntentId?: string | null;
+  // Monotonic optimistic-concurrency version for the owned-order aggregate
+  // (SD §7.5: "voice aggregate 以 DB row 與單調 aggregateVersion 為權威").
+  // Absent on orders never written through a CAS-aware path; the DB column
+  // (`ops.phase1_owned_orders.aggregate_version`, a generated column derived
+  // from this same field) treats a missing value as version 1.
+  aggregateVersion?: number;
   recordingId: string | null;
   reservationWindowStart: string | null;
   reservationWindowEnd: string | null;
@@ -3024,6 +3575,17 @@ export interface OwnedOrderRecord {
   lastDispatchFailureReason: string | null;
   noSupplyEscalation: NoSupplyEscalationRecord | null;
   dispatchTimeout: DispatchTimeoutRecord | null;
+  referralPassengerLifecycle?: {
+    bookingIdempotencyKey?: string;
+    rating?: {
+      orderId: string;
+      score: 1 | 2 | 3 | 4 | 5;
+      comment?: string;
+      tags: string[];
+      idempotencyKey?: string;
+      submittedAt: string;
+    };
+  } | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -3076,6 +3638,136 @@ export interface BookingRecord {
   orderStatus: OwnedOrderStatus;
   createdAt: string;
   updatedAt: string;
+}
+
+export type TenantBookingDateField = "reservationStart" | "createdAt";
+export const TENANT_BOOKING_DATE_FIELDS = [
+  "reservationStart",
+  "createdAt",
+] as const;
+
+export interface TenantBookingListQuery {
+  q?: string;
+  passenger?: string;
+  passengerId?: string;
+  status?: BookingStatus | BookingStatus[] | string;
+  bookingStatus?: BookingStatus | BookingStatus[] | string;
+  orderStatus?: OwnedOrderStatus | OwnedOrderStatus[] | string;
+  fulfillmentStatus?: OwnedOrderStatus | OwnedOrderStatus[] | string;
+  dateField?: TenantBookingDateField;
+  dateFrom?: string;
+  dateTo?: string;
+  page?: number | string;
+  pageSize?: number | string;
+  serviceBucket?: string;
+  subtype?: string;
+}
+
+export interface TenantBookingsPageRecord {
+  items: BookingRecord[];
+  pagination: ApiPageInfo;
+  pageInfo?: ApiPageInfo;
+}
+
+export const DEFAULT_PRODUCT_TIMEZONE = "Asia/Taipei";
+
+export interface CalendarDateRangeOptions {
+  timeZone?: string;
+}
+
+/**
+ * Checks whether an ISO 8601 string contains explicit timezone information
+ * (e.g. trailing 'Z' or offset like '+08:00', '-05:00').
+ */
+export function isIso8601InstantWithTimezone(value: string): boolean {
+  if (!value || typeof value !== "string") {
+    return false;
+  }
+  const trimmed = value.trim();
+  const isoWithTimezoneRegex =
+    /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:?\d{2})$/;
+  if (!isoWithTimezoneRegex.test(trimmed)) {
+    return false;
+  }
+  const date = new Date(trimmed);
+  return !Number.isNaN(date.getTime());
+}
+
+/**
+ * Converts a calendar date range (YYYY-MM-DD to YYYY-MM-DD inclusive) into
+ * explicit ISO 8601 instants where dateFrom is start-of-day inclusive
+ * and dateTo is next-day start-of-day exclusive in the selected timezone.
+ */
+export function convertCalendarRangeToInstantRange(
+  dateFromDateOnly: string,
+  dateToDateOnly: string,
+  options?: CalendarDateRangeOptions,
+): {
+  dateFrom: string;
+  dateTo: string;
+  timeZone: string;
+} {
+  const timeZone = options?.timeZone || DEFAULT_PRODUCT_TIMEZONE;
+  const fromTrimmed = dateFromDateOnly.trim();
+  const toTrimmed = dateToDateOnly.trim();
+
+  const dateOnlyRegex = /^\d{4}-\d{2}-\d{2}$/;
+  if (!dateOnlyRegex.test(fromTrimmed)) {
+    throw new Error(
+      `Invalid dateFrom calendar date: expected YYYY-MM-DD, got ${dateFromDateOnly}`,
+    );
+  }
+  if (!dateOnlyRegex.test(toTrimmed)) {
+    throw new Error(
+      `Invalid dateTo calendar date: expected YYYY-MM-DD, got ${dateToDateOnly}`,
+    );
+  }
+
+  const parts = toTrimmed.split("-").map(Number);
+  const toY = parts[0] ?? 1970;
+  const toM = parts[1] ?? 1;
+  const toD = parts[2] ?? 1;
+  const nextDayDate = new Date(Date.UTC(toY, toM - 1, toD + 1));
+  const nextY = nextDayDate.getUTCFullYear();
+  const nextM = String(nextDayDate.getUTCMonth() + 1).padStart(2, "0");
+  const nextD = String(nextDayDate.getUTCDate()).padStart(2, "0");
+  const nextDateOnly = `${nextY}-${nextM}-${nextD}`;
+
+  const getOffsetString = (dateStr: string, tz: string): string => {
+    try {
+      const probe = new Date(`${dateStr}T12:00:00Z`);
+      const formatter = new Intl.DateTimeFormat("en-US", {
+        timeZone: tz,
+        timeZoneName: "longOffset",
+      });
+      const parts = formatter.formatToParts(probe);
+      const tzPart = parts.find((p) => p.type === "timeZoneName");
+      if (tzPart) {
+        const match = tzPart.value.match(/GMT([+-])(\d{1,2})(?::?(\d{2}))?/);
+        if (match) {
+          const sign = match[1] ?? "+";
+          const hours = (match[2] ?? "00").padStart(2, "0");
+          const mins = match[3] ?? "00";
+          return `${sign}${hours}:${mins}`;
+        }
+        if (tzPart.value === "GMT" || tzPart.value === "UTC") {
+          return "Z";
+        }
+      }
+    } catch {
+      // fallback
+    }
+    return "+08:00";
+  };
+
+  const fromOffset = getOffsetString(fromTrimmed, timeZone);
+  const toOffset = getOffsetString(nextDateOnly, timeZone);
+
+  return {
+    dateFrom: `${fromTrimmed}T00:00:00${fromOffset === "Z" ? "Z" : fromOffset}`,
+    dateTo: `${nextDateOnly}T00:00:00${toOffset === "Z" ? "Z" : toOffset}`,
+    timeZone,
+  };
 }
 
 // NOTE(integration 20260605): be-tenbiz-001 originally re-declared
@@ -3139,6 +3831,8 @@ export interface TenantOrderListQuery {
 }
 
 export interface DispatchCandidate {
+  bookingRequirements?: BookingRequirements;
+  bookingQualification?: BookingQualification;
   vehicleId: string;
   driverId: string;
   operatingArea: string;
@@ -3252,6 +3946,8 @@ export interface DispatchTimeoutRecord {
 }
 
 export interface DispatchAssignmentRecord {
+  bookingRequirements?: BookingRequirements;
+  bookingQualification?: BookingQualification;
   assignmentId: string;
   dispatchJobId: string;
   orderId: string;
@@ -3261,6 +3957,8 @@ export interface DispatchAssignmentRecord {
   driverId: string;
   assignmentType: "metered" | "fixed_price";
   status: DispatchAssignmentStatus;
+  /** Persisted offer deadline; absent legacy offers require reconciliation. */
+  acceptanceDeadline?: string | null;
   acceptedAt: string | null;
   rejectedAt: string | null;
   rejectReasonCode: string | null;
@@ -3279,6 +3977,8 @@ export interface WaypointRecord {
 }
 
 export interface DriverTaskRecord {
+  bookingRequirements?: BookingRequirements;
+  bookingQualification?: BookingQualification;
   taskId: string;
   orderId: string;
   dispatchJobId: string;
@@ -3604,6 +4304,14 @@ export interface VehicleSupplyLifecycleRecord {
 export interface VehicleRegistryRecord {
   vehicleId: string;
   plateNo: string;
+  /**
+   * When the vehicle entered the registry. `DriverRegistryRecord` has carried
+   * this since it existed; the vehicle record did not, so nothing above the
+   * database could say when a vehicle joined the fleet -- which is half of
+   * PRD 9.10.1's 每月車輛增減月報. The removal half was already recorded, in
+   * `supplyLifecycle.offboarding`.
+   */
+  createdAt: string;
   licenseType?: VehicleLicenseType | null;
   operatingArea: string;
   supportedServiceBuckets: Phase1ServiceBucket[];
@@ -3620,6 +4328,9 @@ export interface DriverRegistryRecord {
   supportedServiceBuckets: Phase1ServiceBucket[];
   workState: DriverWorkState;
   licensesValid: boolean;
+  licenseExpiry?: string | null;
+  professionalDriverLicenseExpiry?: string | null;
+  taxiDriverRegistrationExpiry?: string | null;
   lifecycleStatus: DriverMasterLifecycleStatus;
   eligibilityBlockedReasons: DriverEligibilityBlockReason[];
   dispatchEligible: boolean;
@@ -3678,11 +4389,38 @@ export interface CreateDriverMasterCommand {
   bankAccount?: DriverProfileBankAccount | null;
   supportedServiceBuckets?: Phase1ServiceBucket[];
   licensesValid?: boolean;
+  licenseExpiry?: string | null;
+  professionalDriverLicenseExpiry?: string | null;
+  taxiDriverRegistrationExpiry?: string | null;
   lifecycleStatus?: DriverMasterLifecycleStatus;
+}
+
+/**
+ * Which dispatch types a driver may be sent.
+ *
+ * `SD-DP-20260817-010` (PRD 11.4) settled that the platform decides this, not
+ * the driver. `CreateDriverMasterCommand` could set it at registration and
+ * nothing could change it afterwards, so a decision the platform owns was
+ * fixed at the one moment the platform was least likely to know it.
+ */
+export interface UpdateDriverServiceBucketsCommand {
+  supportedServiceBuckets: Phase1ServiceBucket[];
+  reason?: string;
 }
 
 export interface UpdateDriverMasterLifecycleCommand {
   lifecycleStatus: DriverMasterLifecycleStatus;
+  reason?: string | null;
+  licenseExpiry?: string | null;
+  professionalDriverLicenseExpiry?: string | null;
+  taxiDriverRegistrationExpiry?: string | null;
+}
+
+export interface UpdateDriverLicensesCommand {
+  licensesValid?: boolean;
+  licenseExpiry?: string | null;
+  professionalDriverLicenseExpiry?: string | null;
+  taxiDriverRegistrationExpiry?: string | null;
   reason?: string | null;
 }
 
@@ -4713,6 +5451,8 @@ export interface DriverStatementRecord {
   netAmount: MoneyAmount;
   feePlanVersion: string;
   lines: DriverStatementLineRecord[];
+  artifactUrl?: string | null;
+  artifactDownloadMetadata?: ControlledDownloadRecord | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -4868,8 +5608,101 @@ export interface ReconciliationIssueRecord {
 }
 
 // --- Reports ---
+/**
+ * The canonical identifiers `phase1_service_contracts_v1.md` section 2.1 names,
+ * and where each one lives.
+ *
+ * The list was prose in a specification, so "17 of 18 are present as contract
+ * types" was something a person had to establish by reading, and did. This
+ * makes it checkable: `tests/unit/canonical-ids.test.ts` asserts every id
+ * marked `in_use` appears as a field in this package, which is the property the
+ * prose was asserting informally.
+ *
+ * `call_point_id` is the eighteenth. It is not absent by oversight: the Call
+ * Point / Concierge surface is retired and serves HTTP 404 (PRD 9.1.3), so no
+ * command or record carries one. Adding a field nobody sets would make the
+ * count look right and mean less than it does now. `core.call_points` still
+ * exists in the database, and `call_point` is still a reserved root in
+ * `TenantPartnerSummary`.
+ */
+export const CANONICAL_IDS = [
+  { id: "tenant_id", field: "tenantId", status: "in_use" },
+  { id: "partner_id", field: "partnerId", status: "in_use" },
+  { id: "site_id", field: "siteId", status: "in_use" },
+  { id: "call_point_id", field: "callPointId", status: "retired_surface" },
+  { id: "passenger_id", field: "passengerId", status: "in_use" },
+  { id: "vehicle_id", field: "vehicleId", status: "in_use" },
+  { id: "driver_id", field: "driverId", status: "in_use" },
+  { id: "order_id", field: "orderId", status: "in_use" },
+  { id: "booking_id", field: "bookingId", status: "in_use" },
+  { id: "dispatch_job_id", field: "dispatchJobId", status: "in_use" },
+  { id: "attempt_id", field: "attemptId", status: "in_use" },
+  { id: "assignment_id", field: "assignmentId", status: "in_use" },
+  { id: "trip_id", field: "tripId", status: "in_use" },
+  { id: "call_id", field: "callId", status: "in_use" },
+  { id: "case_no", field: "caseNo", status: "in_use" },
+  { id: "invoice_id", field: "invoiceId", status: "in_use" },
+  { id: "statement_id", field: "statementId", status: "in_use" },
+  { id: "package_id", field: "packageId", status: "in_use" },
+] as const;
+
+export type CanonicalIdName = (typeof CANONICAL_IDS)[number]["id"];
+
+/**
+ * The currency the platform prices, settles and reports in.
+ *
+ * `TWD` is the ISO 4217 code for the New Taiwan Dollar. The platform used to
+ * write it two ways -- `NTD` in billing, fleet-partner, multi-taxi and
+ * certificate-support, `TWD` in platform-earnings and the tenant governance
+ * seeds -- from three module-local constants that each called themselves
+ * `DEFAULT_CURRENCY`. Nothing reconciled them, and nothing needed to, because
+ * no total spanned both halves. The first feature to cross that boundary would
+ * have added two amounts whose labels disagreed.
+ *
+ * `NTD` is a colloquial abbreviation, not an ISO code, and an external payment
+ * or accounting system will not recognise it.
+ */
+export const PLATFORM_CURRENCY = "TWD";
+
+/** Recognised while `NTD`-labelled rows written before `V0084` are still around. */
+export const LEGACY_PLATFORM_CURRENCY = "NTD";
+
+/**
+ * Reads a stored or inbound currency code as the platform currency.
+ *
+ * A migration shim, deliberately narrow: it maps only the one legacy spelling
+ * of the one currency the platform uses, and leaves anything else alone so that
+ * a genuinely foreign currency is still recognised as foreign rather than
+ * quietly relabelled.
+ */
+export function normalisePlatformCurrency(currency: string): string {
+  return currency === LEGACY_PLATFORM_CURRENCY ? PLATFORM_CURRENCY : currency;
+}
+
 export const REPORT_OUTPUT_FORMATS = ["csv", "xlsx", "pdf", "zip"] as const;
 export type ReportOutputFormat = (typeof REPORT_OUTPUT_FORMATS)[number];
+
+/**
+ * The formats a report can actually be rendered in.
+ *
+ * `REPORT_OUTPUT_FORMATS` says which formats the contract names. It used to say
+ * nothing about whether any of them produced a file: `format` was copied into
+ * the job record, the artifact payload and the view without ever reaching a
+ * renderer, so a job requested as `pdf` and one requested as `csv` came back
+ * identical -- no bytes either way. The API rejects the unrendered ones now, and
+ * a picker should offer only these.
+ *
+ * SR-REPORT-001 (N05 gap closure): xlsx and pdf renderers are now implemented
+ * via exceljs and pdfkit respectively. zip remains unimplemented (filing ZIP
+ * is explicitly out of scope for general reports).
+ */
+export const IMPLEMENTED_REPORT_OUTPUT_FORMATS = [
+  "csv",
+  "xlsx",
+  "pdf",
+] as const satisfies readonly ReportOutputFormat[];
+export type ImplementedReportOutputFormat =
+  (typeof IMPLEMENTED_REPORT_OUTPUT_FORMATS)[number];
 
 export const REGULATORY_REPORT_JOB_TYPES = [
   "vehicle_roster",
@@ -4900,6 +5733,43 @@ export const REPORT_JOB_TYPES = [
   ...REGULATORY_REPORT_JOB_TYPES,
 ] as const;
 export type ReportJobType = (typeof REPORT_JOB_TYPES)[number];
+
+/**
+ * The report types that actually produce rows today, and therefore the only
+ * ones a surface should offer or a caller should submit to `POST /reports/jobs`.
+ *
+ * Declaring a type in `REPORT_JOB_TYPES` says the report exists as a concept.
+ * It used to say nothing about whether anything was built: an unbuilt type
+ * reached `completed` with an empty result that looked exactly like a period
+ * with no data. The API rejects those now, and this list is what lets a picker
+ * avoid offering them in the first place.
+ *
+ * `multi_taxi_trip_records` is deliberately absent: it is built, but only
+ * through the dedicated export endpoint that captures an access purpose.
+ *
+ * The API's builder registry is asserted against this list in
+ * `tests/unit/reporting-filing.test.ts`, so the two cannot drift apart.
+ */
+export const IMPLEMENTED_REPORT_JOB_TYPES = [
+  "monthly_trip_report",
+  "revenue_summary",
+  "daily_dispatch_record",
+  "six_month_operations_summary",
+  "dispatch_recording_index",
+  "vehicle_roster",
+  "driver_roster",
+  "contract_roster",
+  "insurance_roster",
+  "complaint_case_detail",
+  "six_month_statistics",
+  "fare_version_history",
+  "vehicle_monthly_delta",
+  "trip_summary",
+  "incident_register",
+  "maintenance_overview",
+] as const satisfies readonly ReportJobType[];
+export type ImplementedReportJobType =
+  (typeof IMPLEMENTED_REPORT_JOB_TYPES)[number];
 
 export const REPORT_JOB_STATUSES = [
   "pending",
@@ -4980,6 +5850,239 @@ export interface DispatchRecordingIndexRowRecord {
   missingRecording: boolean;
   exportedAt: string;
 }
+
+/**
+ * PRD 9.10.1 regulatory report rows.
+ *
+ * Each row is a projection of a registry record as of `exportedAt`, not a
+ * stored artifact: the reports are produced on demand from current state.
+ * Fields are limited to what the application layer actually holds -- the
+ * database carries more about a vehicle (VIN, 車輛形式, 牌照種類) than
+ * `VehicleRegistryRecord` exposes, and a roster cannot report what its source
+ * does not surface.
+ */
+export interface VehicleRosterRowRecord {
+  vehicleId: string;
+  plateNo: string;
+  licenseType: string | null;
+  operatingArea: string;
+  supportedServiceBuckets: string[];
+  dispatchableFlag: boolean;
+  exclusivityApproved: boolean;
+  insuranceStatus: "valid" | "expired";
+  supplyLifecycleStatus: string;
+  blockedReasons: string[];
+  updatedAt: string;
+  exportedAt: string;
+}
+
+export interface DriverRosterRowRecord {
+  driverId: string;
+  name: string;
+  supportedServiceBuckets: string[];
+  workState: string;
+  lifecycleStatus: string;
+  licensesValid: boolean;
+  dispatchEligible: boolean;
+  eligibilityBlockedReasons: string[];
+  createdAt: string;
+  activatedAt: string | null;
+  suspendedAt: string | null;
+  retiredAt: string | null;
+  exportedAt: string;
+}
+
+export interface ContractRosterRowRecord {
+  contractId: string;
+  vehicleId: string;
+  partnerId: string;
+  partnerType: string;
+  contractType: string;
+  operatingAreaId: string | null;
+  serviceScope: string;
+  startAt: string;
+  endAt: string;
+  status: "draft" | "active" | "terminated";
+  lifecycleStatus: string;
+  approvedBy: string | null;
+  approvedAt: string | null;
+  exportedAt: string;
+}
+
+export interface InsuranceRosterRowRecord {
+  policyId: string;
+  vehicleId: string;
+  policyNo: string;
+  insuranceType: string;
+  insurerName: string;
+  coverageAmount: number;
+  startAt: string;
+  endAt: string;
+  status: "pending" | "active" | "expired" | "cancelled";
+  lifecycleStatus: string;
+  exportedAt: string;
+}
+
+/**
+ * Operational report rows.
+ *
+ * `trip_summary` aggregates; `monthly_trip_report` lists. Both read the same
+ * order feed, and keeping them distinct is the point -- a summary that is a
+ * listing under another name is a second thing to maintain for no answer the
+ * first does not already give.
+ */
+export interface TripSummaryRowRecord {
+  serviceProduct: string;
+  from: string | null;
+  to: string | null;
+  totalOrders: number;
+  completedTrips: number;
+  cancelledOrders: number;
+  inFlightOrders: number;
+  /** Completed as a share of total, rounded to four places. `null` when there were no orders. */
+  completionRate: number | null;
+  exportedAt: string;
+}
+
+export interface IncidentRegisterRowRecord {
+  incidentId: string;
+  title: string;
+  category: string;
+  severity: string;
+  status: string;
+  relatedOrderId: string | null;
+  relatedVehicleId: string | null;
+  relatedDriverId: string | null;
+  relatedComplaintCaseNo: string | null;
+  reportedBy: string;
+  assignedTo: string | null;
+  occurredAt: string | null;
+  location: string | null;
+  resolutionNote: string | null;
+  serviceRecoveryActionCount: number;
+  createdAt: string;
+  updatedAt: string;
+  exportedAt: string;
+}
+
+export interface MaintenanceOverviewRowRecord {
+  maintenanceId: string;
+  vehicleId: string;
+  type: string;
+  status: string;
+  description: string;
+  scheduledAt: string | null;
+  completedAt: string | null;
+  /** Positive when a scheduled job is past due and still not completed. */
+  overdueDays: number | null;
+  technician: string | null;
+  cost: number | null;
+  createdAt: string;
+  updatedAt: string;
+  exportedAt: string;
+}
+
+export interface VehicleMonthlyDeltaEntryRecord {
+  vehicleId: string;
+  plateNo: string;
+  occurredAt: string;
+  /** Present only on a removal: why the vehicle left the fleet. */
+  reason: string | null;
+}
+
+export interface VehicleMonthlyDeltaRowRecord {
+  /** `YYYY-MM`. */
+  periodMonth: string;
+  addedCount: number;
+  removedCount: number;
+  netChange: number;
+  /** Vehicles in the registry at the end of the month. */
+  closingCount: number;
+  added: VehicleMonthlyDeltaEntryRecord[];
+  removed: VehicleMonthlyDeltaEntryRecord[];
+  exportedAt: string;
+}
+
+export interface FareVersionHistoryRowRecord {
+  authorizationId: string;
+  operatorId: string;
+  authorityCode: string;
+  businessPlanVersion: string;
+  fareVersionId: string;
+  status: string;
+  serviceAreaCodes: string[];
+  effectiveFrom: string;
+  effectiveUntil: string | null;
+  createdAt: string;
+  updatedAt: string;
+  exportedAt: string;
+}
+
+export interface ComplaintCaseDetailRowRecord {
+  caseNo: string;
+  caseSource: "phone" | "web" | "app" | "ops";
+  category: string;
+  severity: "normal" | "high";
+  status: string;
+  description: string;
+  relatedOrderId: string | null;
+  /** Masked: the index into the call recording, not the recording itself. */
+  relatedCallId: string | null;
+  relatedIncidentId: string | null;
+  assigneeId: string | null;
+  slaDueAt: string;
+  slaBreach: boolean;
+  reopenCount: number;
+  resolutionCode: string | null;
+  closingNote: string | null;
+  createdAt: string;
+  updatedAt: string;
+  exportedAt: string;
+}
+
+export interface TenantMonthlyTripReportRowRecord {
+  orderId: string;
+  orderNo: string;
+  tenantId: string | null;
+  userId: string | null;
+  costCenterCode: string | null;
+  serviceProduct: string;
+  businessDispatchSubtype: string | null;
+  bookingId: string | null;
+  status: OwnedOrderRecord["status"];
+  completedAt: string | null;
+  sourceMarker: "owned_mobility_order_feed";
+  costCenterSourceMarker: "tenant_partner_cost_center_directory" | null;
+  sourceUpdatedAt: string;
+  producerRequestId: string | null;
+  exportedAt: string;
+}
+
+/**
+ * Every row shape a completed report job can carry.
+ *
+ * This union existed twice -- once in `reporting-filing.service.ts` and once in
+ * `reporting-filing.repository.ts` -- along with two of its members, copied
+ * field for field. Adding a report meant remembering both. It lives here now
+ * because the repository persists these rows and the service produces them, so
+ * neither owns it.
+ */
+export type ReportJobRowRecord =
+  | ComplaintCaseDetailRowRecord
+  | ContractRosterRowRecord
+  | import("./phase1-delta-supply-eligibility").DispatchDailyRecord
+  | FareVersionHistoryRowRecord
+  | IncidentRegisterRowRecord
+  | MaintenanceOverviewRowRecord
+  | TripSummaryRowRecord
+  | DispatchRecordingIndexRowRecord
+  | DriverRosterRowRecord
+  | InsuranceRosterRowRecord
+  | import("./phase1-p5-s3-multi-taxi").MultiTaxiTripOperationalExportRow
+  | import("./phase1-delta-supply-eligibility").SixMonthOperationsSummary
+  | TenantMonthlyTripReportRowRecord
+  | VehicleMonthlyDeltaRowRecord
+  | VehicleRosterRowRecord;
 
 export interface PartnerRevenueSummaryRowRecord {
   orderId: string;
@@ -6149,11 +7252,13 @@ export interface CreatePlatformAdminUserCommand {
   email: string;
   displayName: string;
   roleCode: PlatformAdminUserRole;
+  reason: string;
 }
 
 export interface UpdatePlatformAdminUserRoleCommand {
   roleCode: PlatformAdminUserRole;
   status?: PlatformAdminUserStatus;
+  reason: string;
 }
 
 export type PlatformNoticeSeverity = "info" | "warning" | "critical";
@@ -6485,8 +7590,15 @@ export interface ActionIntent {
 
 export * from "./platform-codes";
 export * from "./platform-adapter-registry";
+export * from "./iam-policy-catalog";
 export * from "./ui-runtime";
 export * from "./phase1-delta-supply-eligibility";
 export * from "./phase2-tesla-fsd-sandbox";
 export * from "./phase1-p5-s3-multi-taxi";
 export * from "./p5-fare-anomaly-admin";
+export * from "./unattended-voice";
+export * from "./voice-dialogue";
+export * from "./system-remediation";
+export * from "./remittance-proof";
+export * from "./passenger-push-delivery";
+export * from "./partner-passenger-notification";

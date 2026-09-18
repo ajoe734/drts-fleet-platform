@@ -50,7 +50,7 @@ describe("tenant partner repository quota persistence", () => {
   it("loads an eligibility verification by its authority id", async () => {
     const record = {
       eligibilityVerificationId: "eligibility-cross-instance-001",
-      entrySlug: "ctbc",
+      entrySlug: "acme",
       verificationStatus: "eligible",
     };
     const query = vi.fn().mockResolvedValue({ rows: [{ record }] });

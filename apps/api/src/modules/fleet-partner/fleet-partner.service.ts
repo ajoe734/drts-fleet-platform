@@ -1,3 +1,5 @@
+import { PLATFORM_CURRENCY } from "@drts/contracts";
+
 import { randomUUID } from "node:crypto";
 
 import { HttpStatus, Injectable, OnModuleInit, Optional } from "@nestjs/common";
@@ -25,6 +27,7 @@ import type {
 } from "@drts/contracts";
 
 import { ApiRequestError } from "../../common/api-envelope";
+import { sumMoney as sharedSumMoney } from "../../common/money";
 import {
   BillingSettlementService,
   type BillingSettlementTripRecord,
@@ -37,7 +40,7 @@ import {
   type PersistFleetPartnerChanges,
 } from "./fleet-partner.repository";
 
-const DEFAULT_CURRENCY = "NTD";
+const DEFAULT_CURRENCY = PLATFORM_CURRENCY;
 
 const FLEET_PARTNER_SEED: FleetPartnerRecord[] = [
   {
@@ -1468,13 +1471,7 @@ export class FleetPartnerService implements OnModuleInit {
   private sumMoney(
     amounts: ReadonlyArray<{ currency: string; amountMinor: number }>,
   ) {
-    return amounts.reduce(
-      (total, amount) => ({
-        currency: amount.currency,
-        amountMinor: total.amountMinor + amount.amountMinor,
-      }),
-      this.money(0),
-    );
+    return sharedSumMoney(amounts, DEFAULT_CURRENCY);
   }
 
   private toPeriodMonth(value: string) {

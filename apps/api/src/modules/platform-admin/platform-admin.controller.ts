@@ -5,7 +5,9 @@ import {
   Get,
   Headers,
   Param,
+  Patch,
   Post,
+  Res,
 } from "@nestjs/common";
 import { Throttle } from "@nestjs/throttler";
 
@@ -15,10 +17,12 @@ import type {
   CreatePlatformNoticeCommand,
   CreatePublicInfoVersionCommand,
   GeneratePlacardVersionCommand,
+  PlatformAdapter,
   PublishPlacardVersionCommand,
   PublishPlatformPricingRuleCommand,
   PublishPublicInfoVersionCommand,
   SetPlatformMaintenanceModeCommand,
+  UpdatePlatformAdapterCommand,
   UpdatePlatformAdminUserRoleCommand,
 } from "@drts/contracts";
 
@@ -28,6 +32,9 @@ import {
 } from "../../common/api-envelope";
 import { CurrentIdentity } from "../../common/auth";
 import type { BootstrapRequestIdentity } from "../../common/auth";
+import { IdempotencyService } from "../../common/idempotency";
+import type { PassthroughResponseLike } from "../../common/idempotency-http";
+import { applyIdempotentResponseHeaders } from "../../common/idempotency-http";
 import { READ_HEAVY_RATE_LIMIT } from "../../common/throttling/rate-limit.constants";
 import { PlatformAdminService } from "./platform-admin.service";
 
@@ -42,7 +49,10 @@ import { PlatformAdminService } from "./platform-admin.service";
 @Throttle(READ_HEAVY_RATE_LIMIT)
 @Controller("platform-admin")
 export class PlatformAdminController {
-  constructor(private readonly platformAdminService: PlatformAdminService) {}
+  constructor(
+    private readonly platformAdminService: PlatformAdminService,
+    private readonly idempotencyService?: IdempotencyService,
+  ) {}
 
   @Get("public-info")
   listPublicInfoVersions(@Headers("x-request-id") requestId?: string) {
@@ -141,35 +151,42 @@ export class PlatformAdminController {
   // ── Platform Admin Users ──────────────────────────────────────────────────
 
   @Get("users")
-  listPlatformAdminUsers(@Headers("x-request-id") requestId?: string) {
+  async listPlatformAdminUsers(@Headers("x-request-id") requestId?: string) {
     return toApiSuccessEnvelope(
-      { items: this.platformAdminService.listPlatformAdminUsers() },
+      { items: await this.platformAdminService.listPlatformAdminUsers() },
       requestId,
     );
   }
 
   @Post("users")
-  createPlatformAdminUser(
+  async createPlatformAdminUser(
     @Body() command: CreatePlatformAdminUserCommand,
+    @CurrentIdentity() identity: BootstrapRequestIdentity | null,
     @Headers("x-request-id") requestId?: string,
   ) {
     return toApiSuccessEnvelope(
-      this.platformAdminService.createPlatformAdminUser(command, requestId),
+      await this.platformAdminService.createPlatformAdminUser(
+        command,
+        requestId,
+        this.requireActorId(identity),
+      ),
       requestId,
     );
   }
 
   @Post("users/:userId/role")
-  updatePlatformAdminUserRole(
+  async updatePlatformAdminUserRole(
     @Param("userId") userId: string,
     @Body() command: UpdatePlatformAdminUserRoleCommand,
+    @CurrentIdentity() identity: BootstrapRequestIdentity | null,
     @Headers("x-request-id") requestId?: string,
   ) {
     return toApiSuccessEnvelope(
-      this.platformAdminService.updatePlatformAdminUserRole(
+      await this.platformAdminService.updatePlatformAdminUserRole(
         userId,
         command,
         requestId,
+        this.requireActorId(identity),
       ),
       requestId,
     );
@@ -273,6 +290,94 @@ export class PlatformAdminController {
       { items: this.platformAdminService.listPlatformInvoices() },
       requestId,
     );
+  }
+
+  // ── Platform Adapters ────────────────────────────────────────────────────
+
+  @Get("adapters")
+  listPlatformAdapters(@Headers("x-request-id") requestId?: string) {
+    return toApiSuccessEnvelope(
+      { items: this.platformAdminService.listPlatformAdapters() },
+      requestId,
+    );
+  }
+
+  @Get("adapters/:adapterId")
+  getPlatformAdapter(
+    @Param("adapterId") adapterId: string,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    const adapter = this.platformAdminService.getPlatformAdapter(adapterId);
+    if (!adapter) {
+      throw new ApiRequestError(
+        404,
+        "PLATFORM_ADAPTER_NOT_FOUND",
+        `Platform adapter ${adapterId} not found.`,
+      );
+    }
+    return toApiSuccessEnvelope(adapter, requestId);
+  }
+
+  @Get("adapters/:adapterId/credential-expiry-warning")
+  getPlatformAdapterCredentialExpiryWarning(
+    @Param("adapterId") adapterId: string,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    return toApiSuccessEnvelope(
+      this.platformAdminService.getPlatformAdapterCredentialExpiryWarning(
+        adapterId,
+      ),
+      requestId,
+    );
+  }
+
+  @Patch("adapters/:adapterId")
+  async updatePlatformAdapter(
+    @Param("adapterId") adapterId: string,
+    @Body() command: UpdatePlatformAdapterCommand,
+    @CurrentIdentity() identity: BootstrapRequestIdentity | null,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    const updated = await this.platformAdminService.updatePlatformAdapter(
+      adapterId,
+      command,
+      requestId,
+      identity?.actorId ?? null,
+    );
+    if (!updated) {
+      throw new ApiRequestError(
+        404,
+        "PLATFORM_ADAPTER_NOT_FOUND",
+        `Platform adapter ${adapterId} not found.`,
+      );
+    }
+    return toApiSuccessEnvelope(updated, requestId);
+  }
+
+  @Post("adapters")
+  async registerPlatformAdapter(
+    @Body() adapter: PlatformAdapter,
+    @Res({ passthrough: true }) response: PassthroughResponseLike,
+    @Headers("idempotency-key") idempotencyKey?: string,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    if (!this.idempotencyService) {
+      const data = this.platformAdminService.registerPlatformAdapter(adapter);
+      return toApiSuccessEnvelope(data, requestId);
+    }
+    const result = await this.idempotencyService.execute({
+      scope: `platform-admin:${adapter.id}:adapter_register`,
+      idempotencyKey,
+      requestPath: "platform-admin/adapters",
+      payload: adapter,
+      execute: async () => ({
+        data: this.platformAdminService.registerPlatformAdapter(adapter),
+        statusCode: 201,
+      }),
+    });
+
+    applyIdempotentResponseHeaders(response, result);
+    return toApiSuccessEnvelope(result.data, requestId);
   }
 
   private requireActorId(identity: BootstrapRequestIdentity | null): string {

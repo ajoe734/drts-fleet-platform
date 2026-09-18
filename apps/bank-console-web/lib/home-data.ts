@@ -188,8 +188,17 @@ export const QUOTA_ALL: QuotaRow = {
   total: QUOTA_PROGRAMS.reduce((sum, row) => sum + row.total, 0),
 };
 
-export function quotaPct(row: QuotaRow): number {
+export function quotaPct(row: QuotaRow): number | null {
+  if (row.total <= 0) {
+    return null;
+  }
   return Math.round((row.used / row.total) * 100);
+}
+
+export function toHomeRole(role: string): BankRole {
+  if (role === "bank_ops_viewer" || role === "ops") return "ops";
+  if (role === "bank_finance" || role === "finance") return "finance";
+  return "admin";
 }
 
 // ── SLA attainment vs contract target (DRTS authoritative). ──

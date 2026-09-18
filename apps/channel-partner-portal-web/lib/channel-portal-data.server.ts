@@ -192,13 +192,18 @@ function mapReferralUsagePeriod(
   };
 }
 
-export async function loadReferralDashboard(): Promise<ReferralDashboardView> {
+export async function loadReferralDashboard(
+  period?: string,
+): Promise<ReferralDashboardView> {
   const { client, requestEvidence } = await getServerReferralPartnerClient();
+  const normalizedPeriod = period?.trim();
+  const dashboardPath = normalizedPeriod
+    ? `/api/partner/referral/dashboard?periodMonth=${encodeURIComponent(normalizedPeriod)}`
+    : "/api/partner/referral/dashboard";
+
   try {
     const [summary, usageResponse] = await Promise.all([
-      client.get<PartnerReferralDashboardRecord>(
-        "/api/partner/referral/dashboard",
-      ),
+      client.get<PartnerReferralDashboardRecord>(dashboardPath),
       client.get<{ items: PartnerReferralUsagePeriodRecord[] }>(
         "/api/partner/referral/usage",
       ),
@@ -210,8 +215,52 @@ export async function loadReferralDashboard(): Promise<ReferralDashboardView> {
       evidence: { ...requestEvidence, source: "live" },
     };
   } catch {
+    const foundStatement = normalizedPeriod
+      ? FX_REFERRAL_STATEMENTS.find((item) => item.period === normalizedPeriod)
+      : null;
+    const foundUsage = normalizedPeriod
+      ? FX_REFERRAL_USAGE_PERIODS.find((item) => item.period === normalizedPeriod)
+      : null;
+    const fallbackSummary: ReferralDashboardFixture = foundStatement
+      ? {
+          period: foundStatement.period,
+          activeUsers: foundStatement.activeUsers,
+          trips: foundStatement.trips,
+          gmv: foundStatement.gmv,
+          estimatedShare: foundStatement.share,
+          statementId: foundStatement.id,
+          statementStatus: foundStatement.status,
+          latestStatementPeriod: FX_REFERRAL_DASHBOARD.period,
+          pendingStatementCount: FX_REFERRAL_DASHBOARD.pendingStatementCount,
+        }
+      : foundUsage
+        ? {
+            period: foundUsage.period,
+            activeUsers: foundUsage.activeUsers,
+            trips: foundUsage.trips,
+            gmv: foundUsage.gmv,
+            estimatedShare: "—",
+            statementId: `referral-statement-${foundUsage.period}`,
+            statementStatus: "due",
+            latestStatementPeriod: FX_REFERRAL_DASHBOARD.period,
+            pendingStatementCount: "1",
+          }
+        : normalizedPeriod
+          ? {
+              period: normalizedPeriod,
+              activeUsers: "0",
+              trips: "0",
+              gmv: "NT$ 0",
+              estimatedShare: "NT$ 0",
+              statementId: `referral-statement-${normalizedPeriod}`,
+              statementStatus: "due",
+              latestStatementPeriod: FX_REFERRAL_DASHBOARD.period,
+              pendingStatementCount: "0",
+            }
+          : FX_REFERRAL_DASHBOARD;
+
     return {
-      summary: FX_REFERRAL_DASHBOARD,
+      summary: fallbackSummary,
       periods: FX_REFERRAL_USAGE_PERIODS,
       source: "fallback",
       evidence: { ...requestEvidence, source: "fallback" },

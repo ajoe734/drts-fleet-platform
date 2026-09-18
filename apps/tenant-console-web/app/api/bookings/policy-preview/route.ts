@@ -5,8 +5,7 @@ import type {
   TenantBookingQuotaImpactPreview,
   TenantPassengerMasterRole,
 } from "@drts/contracts";
-import { createTenantClient } from "@drts/api-client";
-import { API_URL, DEMO_ACTOR_ID, DEMO_TENANT_ID } from "@/lib/api-client";
+import { getTenantClientForRouteHandler } from "@/lib/api-client";
 
 interface PolicyPreviewRequestBody {
   businessDispatchSubtype: BusinessDispatchSubtype;
@@ -27,8 +26,18 @@ interface PolicyPreviewRequestBody {
 
 export async function POST(request: NextRequest) {
   try {
+    const client = await getTenantClientForRouteHandler();
+    if (!client) {
+      return NextResponse.json(
+        {
+          error: "AUTHENTICATION_REQUIRED",
+          message: "Active tenant session required.",
+        },
+        { status: 401 },
+      );
+    }
+
     const body = (await request.json()) as PolicyPreviewRequestBody;
-    const client = createTenantClient(API_URL, DEMO_TENANT_ID, DEMO_ACTOR_ID);
 
     const quotaPreview = (await client.previewTenantBookingQuotaImpact({
       reservationWindowStart: body.reservationWindowStart,

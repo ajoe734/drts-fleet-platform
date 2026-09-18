@@ -3,12 +3,15 @@ import { Controller, Get, Headers } from "@nestjs/common";
 import type { Phase1FoundationManifest } from "@drts/contracts";
 
 import { toApiSuccessEnvelope } from "../../common/api-envelope";
+import { RequireRealms, RequireScopes } from "../../common/auth";
 import {
   CANONICAL_HARD_RULES,
   EXECUTION_MODE,
   FOUNDATION_MODULE_STATUSES,
 } from "./foundation.constants";
 
+@RequireRealms("system", "platform", "ops")
+@RequireScopes("foundation:read")
 @Controller("system/foundation")
 export class FoundationController {
   @Get("manifest")

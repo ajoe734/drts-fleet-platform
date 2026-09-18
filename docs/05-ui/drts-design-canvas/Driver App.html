@@ -38,6 +38,7 @@
 <script type="text/babel" src="driver-screens-2.jsx"></script>
 <script type="text/babel" src="driver-screens-3.jsx"></script>
 <script type="text/babel" src="driver-supply.jsx"></script>
+<script type="text/babel" src="driver-leave.jsx"></script>
 <script type="text/babel" src="driver-safety-operator.jsx"></script>
 <script type="text/babel" src="driver-sos.jsx"></script>
 
@@ -190,6 +191,68 @@ function App() {
           </DCArtboard>
           <DCArtboard id="state-model" label="狀態模型 · 定位節奏 (SA §6.2/6.8)" width={W} height={H}>
             {pad(<PhoneRaw tab="home"><DrvAppBar theme={t} zh="狀態模型" en="state-model" back /><DRV_StateModel theme={t} /></PhoneRaw>)}
+          </DCArtboard>
+        </DCSection>
+
+        <DCSection id="leave" title="10 · 請假申請與審核 Driver Leave Workflow · SR-LEAVE-FE-001-CANVAS" subtitle="N01 / C052 · 申請/撤回/詳情/班表連動/出勤衝突 5 類需求 (feature-contracts.md §2)">
+          <DCArtboard id="leave-list" label="1 · 我的請假 · 列表" width={W} height={H}>
+            {pad(<Phone tab="settings" zh="我的請假" en="my-leave"><DRV_LeaveList theme={t} /></Phone>)}
+          </DCArtboard>
+          <DCArtboard id="leave-list-empty" label="1 · 我的請假 · empty" width={W} height={H}>
+            {pad(<Phone tab="settings" zh="我的請假" en="my-leave"><DRV_LeaveList theme={t} variant="empty" /></Phone>)}
+          </DCArtboard>
+          <DCArtboard id="leave-form" label="2 · 申請請假 · 預設" width={W} height={H}>
+            {pad(<Phone tab="settings" zh="申請請假" en="new-leave-request"><DRV_LeaveForm theme={t} /></Phone>)}
+          </DCArtboard>
+          <DCArtboard id="leave-form-error-range" label="2 · 申請 · 400 LEAVE_INVALID_TIME_RANGE" width={W} height={H}>
+            {pad(<Phone tab="settings" zh="申請請假" en="new-leave-request"><DRV_LeaveForm theme={t} variant="error_range" /></Phone>)}
+          </DCArtboard>
+          <DCArtboard id="leave-form-error-overlap" label="2 · 申請 · 409 LEAVE_OVERLAPPING_REQUEST" width={W} height={H}>
+            {pad(<Phone tab="settings" zh="申請請假" en="new-leave-request"><DRV_LeaveForm theme={t} variant="error_overlap" /></Phone>)}
+          </DCArtboard>
+          <DCArtboard id="leave-form-error-order" label="2 · 申請 · 400 LEAVE_INVALID_TIME_RANGE (endTime<=startTime)" width={W} height={H}>
+            {pad(<Phone tab="settings" zh="申請請假" en="new-leave-request"><DRV_LeaveForm theme={t} variant="error_order" /></Phone>)}
+          </DCArtboard>
+          <DCArtboard id="leave-form-error-invalid" label="2 · 申請 · 400 LEAVE_INVALID_TIME_RANGE (無效日期格式)" width={W} height={H}>
+            {pad(<Phone tab="settings" zh="申請請假" en="new-leave-request"><DRV_LeaveForm theme={t} variant="error_invalid" /></Phone>)}
+          </DCArtboard>
+          {/* tabHidden: a real OS keyboard covers the bottom tab bar / home indicator,
+              so this pushed screen's chrome must not compete with the keyboard layer. */}
+          <DCArtboard id="leave-form-keyboard" label="2 · 申請 · 鍵盤焦點 safe-area" width={W} height={H}>
+            {pad(<Phone tab="settings" tabHidden zh="申請請假" en="new-leave-request"><DRV_LeaveForm theme={t} variant="keyboard" /></Phone>)}
+          </DCArtboard>
+          <DCArtboard id="leave-detail-pending" label="3 · 詳情 · pending · 可撤回" width={W} height={H}>
+            {pad(<Phone tab="settings" zh="請假詳情" en="leave-detail"><DRV_LeaveDetail theme={t} variant="pending" /></Phone>)}
+          </DCArtboard>
+          <DCArtboard id="leave-detail-approved" label="3 · 詳情 · approved · 終態" width={W} height={H}>
+            {pad(<Phone tab="settings" zh="請假詳情" en="leave-detail"><DRV_LeaveDetail theme={t} variant="approved" /></Phone>)}
+          </DCArtboard>
+          <DCArtboard id="leave-detail-rejected" label="3 · 詳情 · rejected · 終態" width={W} height={H}>
+            {pad(<Phone tab="settings" zh="請假詳情" en="leave-detail"><DRV_LeaveDetail theme={t} variant="rejected" /></Phone>)}
+          </DCArtboard>
+          <DCArtboard id="leave-detail-withdrawn" label="3 · 詳情 · withdrawn · 終態" width={W} height={H}>
+            {pad(<Phone tab="settings" zh="請假詳情" en="leave-detail"><DRV_LeaveDetail theme={t} variant="withdrawn" /></Phone>)}
+          </DCArtboard>
+          <DCArtboard id="leave-withdraw-conflict" label="3 · 撤回競爭 · 409 LEAVE_INVALID_STATE_TRANSITION" width={W} height={H}>
+            {pad(<PhoneRaw tabHidden><DrvAppBar theme={t} zh="撤回申請" en="withdraw" back /><DRV_LeaveConflict theme={t} variant="withdraw_conflict" /></PhoneRaw>)}
+          </DCArtboard>
+          <DCArtboard id="leave-missing-fields" label="3 · 400 LEAVE_MISSING_REQUIRED_FIELDS" width={W} height={H}>
+            {pad(<PhoneRaw tabHidden><DrvAppBar theme={t} zh="申請請假" en="new-leave-request" back /><DRV_LeaveConflict theme={t} variant="missing_fields" /></PhoneRaw>)}
+          </DCArtboard>
+          <DCArtboard id="leave-forbidden" label="3 · 403 LEAVE_FORBIDDEN_ACCESS" width={W} height={H}>
+            {pad(<PhoneRaw tabHidden><DrvAppBar theme={t} zh="請假詳情" en="leave-detail" back /><DRV_LeaveConflict theme={t} variant="forbidden" /></PhoneRaw>)}
+          </DCArtboard>
+          <DCArtboard id="leave-not-found" label="3 · 404 LEAVE_NOT_FOUND" width={W} height={H}>
+            {pad(<PhoneRaw tabHidden><DrvAppBar theme={t} zh="請假詳情" en="leave-detail" back /><DRV_LeaveConflict theme={t} variant="not_found" /></PhoneRaw>)}
+          </DCArtboard>
+          <DCArtboard id="leave-shift-impact" label="4 · 班表連動 · leaveReassigned" width={W} height={H}>
+            {pad(<Phone tab="settings" zh="班表連動" en="shift-reassignment-linkage"><DRV_LeaveShiftImpact theme={t} /></Phone>)}
+          </DCArtboard>
+          <DCArtboard id="leave-conflict-clockin" label="5 · 出勤衝突 · 409 DRIVER_ON_LEAVE (clock-in)" width={W} height={H}>
+            {pad(<PhoneRaw tabHidden><DrvAppBar theme={t} zh="打卡上班" en="clock-in" back /><DRV_LeaveDispatchConflict theme={t} variant="clock_in_blocked" /></PhoneRaw>)}
+          </DCArtboard>
+          <DCArtboard id="leave-conflict-online" label="5 · 出勤衝突 · 409 DRIVER_ON_LEAVE (online)" width={W} height={H}>
+            {pad(<PhoneRaw tabHidden><DrvAppBar theme={t} zh="上線接單" en="go-online" back /><DRV_LeaveDispatchConflict theme={t} variant="presence_ineligible" /></PhoneRaw>)}
           </DCArtboard>
         </DCSection>
 

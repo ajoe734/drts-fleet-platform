@@ -1,6 +1,12 @@
 import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import {
+  mkdtempSync,
+  readFileSync,
+  readdirSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
@@ -160,7 +166,7 @@ describe("db-apply legacy migration canonicalization", () => {
       ].join("\n"),
     );
 
-    bash("./scripts/db-apply.sh", {
+    bash("./operations/database/db-apply.sh", {
       DATABASE_URL: databaseUrl,
     });
 
@@ -183,7 +189,7 @@ DROP TABLE IF EXISTS ops.service_area_boundaries;
       ),
     );
 
-    bash("./scripts/db-apply.sh", {
+    bash("./operations/database/db-apply.sh", {
       DATABASE_URL: databaseUrl,
     });
 
@@ -270,7 +276,7 @@ WHERE table_schema = 'ops'
       ].join("\n"),
     );
 
-    bash("./scripts/db-apply.sh", {
+    bash("./operations/database/db-apply.sh", {
       DATABASE_URL: databaseUrl,
     });
 
@@ -355,5 +361,176 @@ WHERE schemaname = 'ops'
     expect(recoveryIndex).toContain(
       "(status = ANY (ARRAY['pending'::text, 'processing'::text]))",
     );
+  }, 180_000);
+
+  it("creates append-only security events that reject update and delete", () => {
+    const eventId = "33333333-3333-4333-8333-333333333333";
+
+    bash(
+      [
+        "if command -v psql >/dev/null 2>&1; then",
+        `  PGPASSWORD=postgres psql "${adminUrl}" -v ON_ERROR_STOP=1 -c "DROP DATABASE IF EXISTS ${dbName};" -c "CREATE DATABASE ${dbName};"`,
+        "else",
+        "  docker compose -f docker-compose.dev.yml exec -T -e PGPASSWORD=postgres postgres \\",
+        `    psql "${adminUrl}" -v ON_ERROR_STOP=1 -c "DROP DATABASE IF EXISTS ${dbName};" -c "CREATE DATABASE ${dbName};"`,
+        "fi",
+      ].join("\n"),
+    );
+
+    bash("./operations/database/db-apply.sh", {
+      DATABASE_URL: databaseUrl,
+    });
+
+    bash(
+      psqlCommand(
+        databaseUrl,
+        `
+INSERT INTO admin.security_events (
+  event_id,
+  occurred_at,
+  event_type,
+  event_family,
+  outcome,
+  severity,
+  actor_type,
+  realm,
+  tenant_id,
+  auth_methods,
+  masked_context
+) VALUES (
+  '${eventId}',
+  '2026-08-01T00:00:00.000Z',
+  'tenant_api_key.issued',
+  'credential',
+  'success',
+  'high',
+  'tenant_admin',
+  'tenant',
+  'tenant-demo-001',
+  ARRAY['jwt_bearer'],
+  '{"keyName":"Ops Key"}'::jsonb
+);
+        `,
+      ),
+    );
+
+    expect(() =>
+      bash(
+        psqlCommand(
+          databaseUrl,
+          `
+UPDATE admin.security_events
+SET outcome = 'failure'
+WHERE event_id = '${eventId}';
+          `,
+        ),
+      ),
+    ).toThrow();
+
+    expect(() =>
+      bash(
+        psqlCommand(
+          databaseUrl,
+          `
+DELETE FROM admin.security_events
+WHERE event_id = '${eventId}';
+          `,
+        ),
+      ),
+    ).toThrow();
+
+    const persisted = bash(
+      psqlCommand(
+        databaseUrl,
+        `
+SELECT count(*)::text || '|' || min(outcome)
+FROM admin.security_events
+WHERE event_id = '${eventId}';
+        `,
+      ),
+    ).trim();
+
+    expect(persisted).toBe("1|success");
+
+    const auditLogId = "55555555-5555-4555-8555-555555555555";
+    bash(
+      psqlCommand(
+        databaseUrl,
+        `
+INSERT INTO admin.audit_logs (
+  audit_id,
+  actor_id,
+  actor_type,
+  module_name,
+  action_name,
+  resource_type,
+  resource_id,
+  request_id,
+  created_at,
+  new_value
+) VALUES (
+  '${auditLogId}',
+  gen_random_uuid(),
+  'ops_user',
+  'db-apply-test',
+  'create_record',
+  'audit_record',
+  'rec-001',
+  'req-apply-001',
+  now(),
+  '{"status":"active"}'::jsonb
+);
+        `,
+      ),
+    );
+
+    expect(() =>
+      bash(
+        psqlCommand(
+          databaseUrl,
+          `
+UPDATE admin.audit_logs
+SET action_name = 'tampered'
+WHERE audit_id = '${auditLogId}';
+          `,
+        ),
+      ),
+    ).toThrow();
+
+    expect(() =>
+      bash(
+        psqlCommand(
+          databaseUrl,
+          `
+DELETE FROM admin.audit_logs
+WHERE audit_id = '${auditLogId}';
+          `,
+        ),
+      ),
+    ).toThrow();
+
+    expect(() =>
+      bash(
+        psqlCommand(
+          databaseUrl,
+          `
+TRUNCATE admin.audit_logs;
+          `,
+        ),
+      ),
+    ).toThrow();
+
+    const auditPersisted = bash(
+      psqlCommand(
+        databaseUrl,
+        `
+SELECT count(*)::text || '|' || min(action_name)
+FROM admin.audit_logs
+WHERE audit_id = '${auditLogId}';
+        `,
+      ),
+    ).trim();
+
+    expect(auditPersisted).toBe("1|create_record");
   }, 180_000);
 });

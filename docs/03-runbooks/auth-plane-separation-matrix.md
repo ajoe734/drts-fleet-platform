@@ -11,14 +11,14 @@ Decision anchor:
 
 ## Matrix
 
-| Realm      | Plane          | Primary path                                                                                               | Default Bearer header  | Default IAP target | Notes                                                                                         |
-| ---------- | -------------- | ---------------------------------------------------------------------------------------------------------- | ---------------------- | ------------------ | --------------------------------------------------------------------------------------------- |
-| `system`   | control-plane  | service-issued Bearer token, with `/api/auth/token` available for explicit token issuance                  | `authorization`        | yes                | `x-drts-internal-key` remains a local/direct-path fallback, not the production trust boundary |
-| `platform` | control-plane  | `platform-admin-web` -> `/control-plane-proxy/*` -> inner Bearer into API                                  | `x-drts-authorization` | yes                | outer `authorization` may carry IAP metadata token; app auth is the inner Bearer              |
-| `ops`      | control-plane  | `ops-console-web` -> `/control-plane-proxy/*` -> inner Bearer into API                                     | `x-drts-authorization` | yes                | same split as platform-admin                                                                  |
-| `tenant`   | business-plane | `/api/auth/tenant/bootstrap-session` issues invited-user Bearer session                                    | `authorization`        | no                 | tenant portal remains application-auth-first                                                  |
-| `partner`  | business-plane | `/api/auth/partner/bootstrap-session` exchanges `entrySlug` + API key for Bearer session                   | `authorization`        | no                 | partner ingress stays off the default IAP boundary                                            |
-| `driver`   | business-plane | `/api/auth/driver/device/register` and `/api/auth/driver/device/refresh` issue device-bound Bearer session | `authorization`        | no                 | revoked bindings must fail even if the JWT still parses                                       |
+| Realm      | Plane          | Primary path                                                                                               | Default Bearer header  | Default IAP target | Notes                                                                                                                                                                                                                                        |
+| ---------- | -------------- | ---------------------------------------------------------------------------------------------------------- | ---------------------- | ------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `system`   | control-plane  | service-issued Bearer token, with `/api/auth/token` available for explicit token issuance                  | `authorization`        | yes                | `x-drts-internal-key` remains a local/direct-path fallback, not the production trust boundary                                                                                                                                                |
+| `platform` | control-plane  | `platform-admin-web` -> `/control-plane-proxy/*` -> inner Bearer into API                                  | `x-drts-authorization` | yes                | outer `authorization` may carry IAP metadata token; app auth is the inner Bearer                                                                                                                                                             |
+| `ops`      | control-plane  | `ops-console-web` -> `/control-plane-proxy/*` -> inner Bearer into API                                     | `x-drts-authorization` | yes                | same split as platform-admin                                                                                                                                                                                                                 |
+| `tenant`   | business-plane | `GET /api/auth/tenant/login` -> `POST /api/auth/tenant/callback-session` (managed OIDC + PKCE)             | `authorization`        | no                 | tenant portal remains application-auth-first; legacy `/api/auth/tenant/bootstrap-session` (email-only) is `local`/`test` fixture-mode only since `IAM-P0-001` / `IAM-IDP-001` and returns `AUTH_SESSION_EXCHANGE_DENIED` in stage/production |
+| `partner`  | business-plane | `/api/auth/partner/bootstrap-session` exchanges `entrySlug` + API key for Bearer session                   | `authorization`        | no                 | partner ingress stays off the default IAP boundary                                                                                                                                                                                           |
+| `driver`   | business-plane | `/api/auth/driver/device/register` and `/api/auth/driver/device/refresh` issue device-bound Bearer session | `authorization`        | no                 | revoked bindings must fail even if the JWT still parses                                                                                                                                                                                      |
 
 ## Hard Rules
 
@@ -68,8 +68,11 @@ session) remain driver-realm only.
   - `/api/ops/*`
   - `/api/roc/*`
 - Business-plane:
-  - `/api/auth/tenant/bootstrap-session`
-  - `/api/auth/partner/bootstrap-session`
+  - `/api/auth/:realm/login` (`tenant` / `partner`, OIDC + PKCE authorization start)
+  - `/api/auth/tenant/callback-session` (OIDC + PKCE session exchange; primary tenant human path)
+  - `/api/auth/partner/callback-session` (OIDC + PKCE session exchange; primary partner human path)
+  - `/api/auth/tenant/bootstrap-session` (legacy email-only exchange; `local`/`test` fixture-mode only)
+  - `/api/auth/partner/bootstrap-session` (partner machine API-key exchange; still primary for partner machine callers)
   - `/api/auth/driver/device/register`
   - `/api/auth/driver/device/refresh`
   - `/api/tenant/*`

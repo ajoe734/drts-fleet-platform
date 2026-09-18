@@ -2,16 +2,20 @@
 
 import { useEffect, useState } from "react";
 import { Languages } from "lucide-react";
-import { buildCanvasTheme } from "@drts/ui-web";
+import {
+  buildCanvasTheme,
+  resolveRuntimeHealth,
+  type RuntimeHealthStatus,
+} from "@drts/ui-web";
 import { getRuntimeApiBaseUrl } from "@/lib/runtime-config";
 import { useTranslation } from "@/lib/i18n";
 
 // Sidebar footer required by the ops-console design packet §3.3: surface
-// API health (healthy / degraded / down) + lastCheckedAt from the backend
+// API health (healthy / degraded / down / unknown) + lastCheckedAt from the backend
 // UiHealthEnvelope, plus the zh/en locale toggle (§3.1). Mirrors the
 // platform-admin shell so the two consoles stay consistent.
 
-type ApiHealthStatus = "checking" | "healthy" | "degraded" | "down";
+type ApiHealthStatus = RuntimeHealthStatus;
 
 const theme = buildCanvasTheme({
   surface: "ops",
@@ -20,11 +24,7 @@ const theme = buildCanvasTheme({
 });
 
 function normalizeHealthStatus(value: unknown, ok: boolean): ApiHealthStatus {
-  if (!ok) return "down";
-  const normalized = String(value ?? "healthy").toLowerCase();
-  if (normalized === "down" || normalized === "unhealthy") return "down";
-  if (normalized === "degraded") return "degraded";
-  return "healthy";
+  return resolveRuntimeHealth({ status: value, responseOk: ok });
 }
 
 function useApiHealth() {
@@ -72,6 +72,12 @@ export function OpsHealthFooter() {
   > = {
     checking: {
       label: t("opsShell.health.checking"),
+      fg: theme.textMuted,
+      bg: theme.neutralBg,
+      border: theme.neutralBorder,
+    },
+    unknown: {
+      label: t("opsShell.health.unknown"),
       fg: theme.textMuted,
       bg: theme.neutralBg,
       border: theme.neutralBorder,

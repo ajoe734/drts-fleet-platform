@@ -1,0 +1,1219 @@
+import {
+  INTERNAL_KEY_EXCEPTION_REGISTRY,
+  isExceptionExpired,
+  isProductionAllowedBoundary,
+  validateExceptionMetadata,
+} from "../common/auth/internal-key-exception-registry";
+
+export type AuthEnvironment = "production" | "staging" | "local" | "test";
+
+export type AuthIssueCode =
+  | "MISSING_CONTROL"
+  | "UNSAFE_VALUE"
+  | "FORBIDDEN_MODE"
+  | "WEAK_SECRET"
+  | "INVALID_FORMAT";
+
+export interface AuthConfigurationIssue {
+  control: string;
+  issue: string;
+  code: AuthIssueCode;
+}
+
+
+export interface AuthStartupConfig {
+  environment: AuthEnvironment;
+  isStrictEnvironment: boolean;
+  issuer: string;
+  audience: string;
+  algorithms: string[];
+  signing: {
+    keyType: "symmetric" | "asymmetric";
+    secretConfigured: boolean;
+    asymmetricKeysConfigured: boolean;
+  };
+  cookie: {
+    secretConfigured: boolean;
+  };
+  csrf: {
+    secretConfigured: boolean;
+  };
+  origins: {
+    allowedOrigins: string[];
+  };
+  sessionStore: {
+    type: string;
+    configured: boolean;
+  };
+  auditStore: {
+    type: string;
+    configured: boolean;
+  };
+  internalKey: {
+    enforced: boolean;
+    configured: boolean;
+  };
+  workloadIdentity: {
+    configured: boolean;
+    issuerConfigured: boolean;
+    audienceConfigured: boolean;
+    keyConfigured: boolean;
+    registryConfigured: boolean;
+  };
+  peppers: {
+    passengerSubjectConfigured: boolean;
+    passengerRideTokenConfigured: boolean;
+  };
+  oidc: {
+    issuerConfigured: boolean;
+    clientIdConfigured: boolean;
+    tokenEndpointConfigured: boolean;
+    authorizationEndpointConfigured: boolean;
+    mockModeEnabled: boolean;
+  };
+}
+
+export interface AuthStartupConfigReport {
+  environment: AuthEnvironment;
+  isStrictEnvironment: boolean;
+  valid: boolean;
+  issues: AuthConfigurationIssue[];
+  warnings: string[];
+  config: AuthStartupConfig;
+}
+
+export class AuthConfigurationError extends Error {
+  public readonly issues: AuthConfigurationIssue[];
+  public readonly environment: AuthEnvironment;
+
+  constructor(environment: AuthEnvironment, issues: AuthConfigurationIssue[]) {
+    const summary = issues
+      .map((i) => `[${i.code}] ${i.control}: ${i.issue}`)
+      .join("; ");
+    super(
+      `Authentication startup validation failed in ${environment} environment: ${summary}`,
+    );
+    this.name = "AuthConfigurationError";
+    this.issues = issues;
+    this.environment = environment;
+  }
+}
+
+type EnvLike = Record<string, string | undefined>;
+type WorkloadServicePrincipalRegistryEntry = {
+  principalId?: string;
+  issuer?: string;
+  subject?: string;
+  allowedTokenAudiences?: Array<string | null> | null;
+  defaultTokenAudience?: string | null;
+};
+
+const INSECURE_DEFAULT_SECRETS = new Set([
+  "secret",
+  "jwt-secret",
+  "jwt_secret",
+  "dev-secret",
+  "dev_secret",
+  "dev_secret_key",
+  "123456",
+  "change-me",
+  "changeme",
+  "password",
+  "drts-secret",
+  "supersecret",
+  "test",
+  "default",
+  "admin",
+  "keyboardcat",
+  "12345678",
+  "abcdef",
+]);
+
+const ALLOWED_JWT_ALGORITHMS = new Set([
+  "HS256",
+  "HS384",
+  "HS512",
+  "RS256",
+  "RS384",
+  "RS512",
+  "ES256",
+  "ES384",
+  "ES512",
+  "PS256",
+  "PS384",
+  "PS512",
+]);
+const ALLOWED_WORKLOAD_IDENTITY_JWT_ALGORITHMS = new Set(
+  ALLOWED_JWT_ALGORITHMS,
+);
+
+export function detectAuthEnvironment(
+  env: EnvLike = process.env,
+): AuthEnvironment {
+  const raw = (env.DRTS_ENV ?? env.APP_ENV ?? env.NODE_ENV)
+    ?.trim()
+    .toLowerCase();
+
+  if (raw === "prod" || raw === "production") {
+    return "production";
+  }
+  if (raw === "stage" || raw === "staging") {
+    return "staging";
+  }
+  if (raw === "test" || raw === "testing" || raw === "ci") {
+    return "test";
+  }
+  if (
+    raw === "dev" ||
+    raw === "development" ||
+    raw === "local" ||
+    raw === "sandbox"
+  ) {
+    return "local";
+  }
+
+  if ((env.CI ?? "").trim().toLowerCase() === "true") {
+    return "test";
+  }
+
+  return "local";
+}
+
+export type OrdinaryLoginMfaPolicy = "v1_not_required" | "required";
+
+/**
+ * Named, auditable policy switch for the ordinary tenant/partner OIDC session
+ * exchange in `OidcPkceService` (`exchangeTenantCallbackSession` /
+ * `exchangePartnerCallbackSession`).
+ *
+ * Product decision (2026-09-15): v1 does not require an MFA-bearing `amr`
+ * claim for ordinary tenant/partner login. Restoring the requirement is a
+ * config-only change (`AUTH_REQUIRE_ORDINARY_LOGIN_MFA=true`); no code change
+ * is needed to flip it back.
+ *
+ * This switch is scoped ONLY to that blanket ordinary-login gate. It does not
+ * affect, and must never be wired into:
+ * - the `tenant_admin` / `tenant_ops_admin` trusted-MFA gate in
+ *   `auth.controller.ts` (`isHighPrivilegeTenantRole` + `hasTrustedMfa`)
+ * - the privileged-role-governance fresh step-up requirement
+ * - `STRICT_TRUSTED_AMR` / `NON_STRICT_TRUSTED_AMR` in
+ *   `step-up-proof.service.ts`, which continue to reject
+ *   `tenant_bootstrap_fixture` in production/staging regardless of this flag
+ */
+export function isOrdinaryLoginMfaRequired(env: EnvLike = process.env): boolean {
+  const override = normalizeString(
+    env.AUTH_REQUIRE_ORDINARY_LOGIN_MFA,
+  )?.toLowerCase();
+  if (override === "true") return true;
+  if (override === "false") return false;
+  return false;
+}
+
+export function resolveOrdinaryLoginMfaPolicy(
+  env: EnvLike = process.env,
+): OrdinaryLoginMfaPolicy {
+  return isOrdinaryLoginMfaRequired(env) ? "required" : "v1_not_required";
+}
+
+function normalizeString(value: string | undefined): string | undefined {
+  const normalized = value?.trim();
+  return normalized ? normalized : undefined;
+}
+
+function parseCsv(value: string | undefined): string[] {
+  const normalized = normalizeString(value);
+  if (!normalized) {
+    return [];
+  }
+
+  return normalized
+    .split(/[;,]/)
+    .map((item) => item.trim())
+    .filter((item) => item.length > 0);
+}
+
+function normalizeAudienceBindings(
+  entry: WorkloadServicePrincipalRegistryEntry,
+): string[] {
+  return [
+    ...new Set(
+      [
+        ...(entry.allowedTokenAudiences ?? []),
+        entry.defaultTokenAudience ?? undefined,
+      ]
+        .map((value) => value?.trim() ?? "")
+        .filter(Boolean),
+    ),
+  ];
+}
+
+function parseWorkloadServicePrincipalRegistry(
+  rawRegistry: string | undefined,
+): {
+  entries: WorkloadServicePrincipalRegistryEntry[];
+  parseError: string | null;
+} {
+  const normalized = normalizeString(rawRegistry);
+  if (!normalized) {
+    return { entries: [], parseError: null };
+  }
+
+  try {
+    const parsed = JSON.parse(normalized) as unknown;
+    if (!Array.isArray(parsed)) {
+      return {
+        entries: [],
+        parseError: "WORKLOAD_IDENTITY_SERVICE_PRINCIPALS must be a JSON array",
+      };
+    }
+
+    return {
+      entries: parsed as WorkloadServicePrincipalRegistryEntry[],
+      parseError: null,
+    };
+  } catch (error) {
+    return {
+      entries: [],
+      parseError: error instanceof Error ? error.message : String(error),
+    };
+  }
+}
+
+function isSymmetricJwtAlgorithm(algorithm: string): boolean {
+  return algorithm.toUpperCase().startsWith("HS");
+}
+
+function isAsymmetricJwtAlgorithm(algorithm: string): boolean {
+  return /^(RS|ES|PS)/.test(algorithm.toUpperCase());
+}
+
+function looksLikePem(value: string | undefined): boolean {
+  if (!value) {
+    return false;
+  }
+  return /BEGIN (PUBLIC KEY|CERTIFICATE|RSA PUBLIC KEY)/.test(value);
+}
+
+function parseAlgorithmList(
+  raw: string | undefined,
+  defaultAlgorithm: string,
+): string[] {
+  const parsed = parseCsv(raw).map((algorithm) => algorithm.toUpperCase());
+  return parsed.length > 0 ? parsed : [defaultAlgorithm];
+}
+
+function isStrictOidcUrl(value: string): boolean {
+  try {
+    const url = new URL(value);
+    const hostname = url.hostname.toLowerCase();
+    const isPlaceholderHost =
+      hostname === "example.com" ||
+      hostname.endsWith(".example.com") ||
+      hostname.includes("placeholder") ||
+      hostname.includes("changeme");
+
+    return (
+      url.protocol === "https:" &&
+      !url.username &&
+      !url.password &&
+      !url.search &&
+      !url.hash &&
+      hostname !== "localhost" &&
+      hostname !== "127.0.0.1" &&
+      hostname !== "::1" &&
+      !isPlaceholderHost
+    );
+  } catch {
+    return false;
+  }
+}
+
+export function isWeakSecret(value: string | undefined): boolean {
+  if (!value) return true;
+  const normalized = value.trim().toLowerCase();
+  if (INSECURE_DEFAULT_SECRETS.has(normalized)) return true;
+  if (/^0+$/.test(normalized) || /^1+$/.test(normalized)) return true;
+  if (/dev[-_]?secret/i.test(normalized) || /test[-_]?secret/i.test(normalized))
+    return true;
+  if (/change[-_]?me/i.test(normalized) || /super[-_]?secret/i.test(normalized))
+    return true;
+  return false;
+}
+
+export function buildAuthStartupConfigReport(
+  env: EnvLike = process.env,
+): AuthStartupConfigReport {
+  const environment = detectAuthEnvironment(env);
+  const isStrictEnvironment =
+    environment === "production" || environment === "staging";
+  const issues: AuthConfigurationIssue[] = [];
+  const warnings: string[] = [];
+
+  // 0. Check for forbidden dev flags in production/staging
+  const allowInsecureDev =
+    (env.ALLOW_INSECURE_DEV_AUTH ?? "").trim().toLowerCase() === "true";
+  if (isStrictEnvironment && allowInsecureDev) {
+    issues.push({
+      control: "ALLOW_INSECURE_DEV_AUTH",
+      issue:
+        "ALLOW_INSECURE_DEV_AUTH=true is strictly forbidden in staging/production environment",
+      code: "FORBIDDEN_MODE",
+    });
+  }
+
+  // Check explicit local/test mode requirement
+  const authMode = normalizeString(env.AUTH_MODE)?.toLowerCase();
+  if (!isStrictEnvironment) {
+    if (!authMode) {
+      issues.push({
+        control: "AUTH_MODE",
+        issue: `Missing required control: AUTH_MODE must be explicitly configured in ${environment} environment`,
+        code: "MISSING_CONTROL",
+      });
+    } else if (
+      !["local", "test", "dev", "explicit", "mock"].includes(authMode)
+    ) {
+      issues.push({
+        control: "AUTH_MODE",
+        issue: `Invalid AUTH_MODE "${authMode}" specified for ${environment} environment`,
+        code: "INVALID_FORMAT",
+      });
+    }
+  } else {
+    if (
+      authMode &&
+      ["local", "test", "dev", "explicit", "mock", "insecure"].includes(
+        authMode,
+      )
+    ) {
+      issues.push({
+        control: "AUTH_MODE",
+        issue: `AUTH_MODE="${authMode}" is strictly forbidden in ${environment} environment`,
+        code: "FORBIDDEN_MODE",
+      });
+    }
+  }
+
+  // 1. Issuer Validation
+  const rawIssuer = env.JWT_ISSUER ?? env.OIDC_ISSUER;
+  let issuer = normalizeString(rawIssuer);
+
+  if (isStrictEnvironment) {
+    if (!issuer) {
+      issues.push({
+        control: "JWT_ISSUER / OIDC_ISSUER",
+        issue:
+          "Missing required control: JWT_ISSUER or OIDC_ISSUER must be configured in staging/production",
+        code: "MISSING_CONTROL",
+      });
+      issuer = "";
+    } else {
+      if (!issuer.startsWith("https://")) {
+        issues.push({
+          control: "JWT_ISSUER / OIDC_ISSUER",
+          issue:
+            "Unsafe control value: JWT_ISSUER / OIDC_ISSUER must use secure HTTPS protocol in staging/production",
+          code: "UNSAFE_VALUE",
+        });
+      }
+      if (issuer.includes("localhost") || issuer.includes("127.0.0.1")) {
+        issues.push({
+          control: "JWT_ISSUER / OIDC_ISSUER",
+          issue:
+            "Unsafe control value: JWT_ISSUER / OIDC_ISSUER cannot reference localhost/127.0.0.1 in staging/production",
+          code: "UNSAFE_VALUE",
+        });
+      }
+    }
+  } else {
+    issuer = issuer ?? "https://auth.local.drts.internal";
+  }
+
+  // 2. Audience Validation
+  const rawAudience = env.JWT_AUDIENCE ?? env.OIDC_AUDIENCE;
+  let audience = normalizeString(rawAudience);
+
+  if (isStrictEnvironment) {
+    if (!audience) {
+      issues.push({
+        control: "JWT_AUDIENCE / OIDC_AUDIENCE",
+        issue:
+          "Missing required control: JWT_AUDIENCE or OIDC_AUDIENCE must be configured in staging/production",
+        code: "MISSING_CONTROL",
+      });
+      audience = "";
+    } else if (audience === "*" || audience.toLowerCase() === "all") {
+      issues.push({
+        control: "JWT_AUDIENCE / OIDC_AUDIENCE",
+        issue:
+          "Unsafe control value: JWT_AUDIENCE / OIDC_AUDIENCE cannot be wildcard '*'",
+        code: "UNSAFE_VALUE",
+      });
+    }
+  } else {
+    audience = audience ?? "https://api.local.drts.internal";
+  }
+
+  // The generic PKCE callback-session flow is the active browser login path.
+  // Its provider settings must be independently complete in strict deployments;
+  // JWT or legacy TENANT_OIDC settings must not mask a broken generic flow.
+  const oidcIssuer = normalizeString(env.OIDC_ISSUER);
+  const oidcClientId = normalizeString(env.OIDC_CLIENT_ID);
+  const oidcTokenEndpoint = normalizeString(env.OIDC_TOKEN_ENDPOINT);
+  const oidcAuthorizationEndpoint = normalizeString(
+    env.OIDC_AUTHORIZATION_ENDPOINT,
+  );
+  const oidcMockMode = normalizeString(env.OIDC_MOCK_MODE);
+
+  if (isStrictEnvironment) {
+    const requiredOidcUrls: Array<[string, string | undefined]> = [
+      ["OIDC_ISSUER", oidcIssuer],
+      ["OIDC_TOKEN_ENDPOINT", oidcTokenEndpoint],
+      ["OIDC_AUTHORIZATION_ENDPOINT", oidcAuthorizationEndpoint],
+    ];
+    for (const [control, value] of requiredOidcUrls) {
+      if (!value) {
+        issues.push({
+          control,
+          issue: `Missing required control: ${control} must be configured for generic PKCE in staging/production`,
+          code: "MISSING_CONTROL",
+        });
+      } else if (!isStrictOidcUrl(value)) {
+        issues.push({
+          control,
+          issue: `Unsafe control value: ${control} must be an absolute HTTPS provider URL without localhost, placeholders, credentials, query, or fragment in staging/production`,
+          code: "UNSAFE_VALUE",
+        });
+      }
+    }
+
+    if (!oidcClientId) {
+      issues.push({
+        control: "OIDC_CLIENT_ID",
+        issue:
+          "Missing required control: OIDC_CLIENT_ID must be configured for generic PKCE in staging/production",
+        code: "MISSING_CONTROL",
+      });
+    }
+
+    if (oidcMockMode !== undefined && oidcMockMode !== "false") {
+      issues.push({
+        control: "OIDC_MOCK_MODE",
+        issue:
+          "Forbidden mode: OIDC_MOCK_MODE must be absent or exactly false in staging/production",
+        code: "FORBIDDEN_MODE",
+      });
+    }
+  }
+
+  // Tenant workforce sessions are exchanged from an external OIDC ID token.
+  // Do not let a strict deployment start with only the legacy fixture login
+  // available (fixture login is separately forbidden outside local/test).
+  if (isStrictEnvironment) {
+    const tenantOidcIssuer = normalizeString(env.TENANT_OIDC_ISSUER);
+    const tenantOidcAudience = normalizeString(env.TENANT_OIDC_AUDIENCE);
+    const tenantOidcKey =
+      normalizeString(env.TENANT_OIDC_JWT_PUBLIC_KEY) ??
+      normalizeString(env.TENANT_OIDC_JWT_SECRET);
+    if (!tenantOidcIssuer || !tenantOidcIssuer.startsWith("https://")) {
+      issues.push({
+        control: "TENANT_OIDC_ISSUER",
+        issue:
+          "Missing or unsafe control: TENANT_OIDC_ISSUER must be an HTTPS issuer in staging/production",
+        code: tenantOidcIssuer ? "UNSAFE_VALUE" : "MISSING_CONTROL",
+      });
+    }
+    if (!tenantOidcAudience || tenantOidcAudience === "*") {
+      issues.push({
+        control: "TENANT_OIDC_AUDIENCE",
+        issue:
+          "Missing or unsafe control: TENANT_OIDC_AUDIENCE must be a concrete audience in staging/production",
+        code: tenantOidcAudience ? "UNSAFE_VALUE" : "MISSING_CONTROL",
+      });
+    }
+    if (!tenantOidcKey) {
+      issues.push({
+        control: "TENANT_OIDC_JWT_PUBLIC_KEY / TENANT_OIDC_JWT_SECRET",
+        issue:
+          "Missing required control: tenant OIDC verification key must be configured in staging/production",
+        code: "MISSING_CONTROL",
+      });
+    }
+  }
+
+  // 3. Algorithms Validation
+  const rawAlgo = env.JWT_ALGORITHMS ?? env.JWT_ALGORITHM;
+  const parsedAlgos = parseCsv(rawAlgo);
+  const jwtSecret = normalizeString(env.JWT_SECRET);
+  const privateKey = normalizeString(env.JWT_PRIVATE_KEY);
+  const publicKey = normalizeString(env.JWT_PUBLIC_KEY);
+
+  let keyRingJsonValid = true;
+  let keyRingUsesAsymmetric = false;
+  let hasKeyRingActiveKey = false;
+
+  if (env.JWT_KEY_RING_JSON && env.JWT_KEY_RING_JSON.trim().length > 0) {
+    try {
+      const parsed = JSON.parse(env.JWT_KEY_RING_JSON);
+      if (Array.isArray(parsed)) {
+        const activeItem = parsed.find(
+          (k: { status?: string }) => k && k.status === "active",
+        );
+        if (activeItem) {
+          hasKeyRingActiveKey = true;
+          const alg = String(activeItem.algorithm || "").toUpperCase();
+          if (
+            [
+              "RS256",
+              "RS384",
+              "RS512",
+              "PS256",
+              "PS384",
+              "PS512",
+              "ES256",
+              "ES384",
+              "ES512",
+            ].includes(alg)
+          ) {
+            keyRingUsesAsymmetric = true;
+          }
+        }
+      } else {
+        keyRingJsonValid = false;
+      }
+    } catch {
+      keyRingJsonValid = false;
+    }
+  }
+
+  if (env.JWT_KEY_RING_JSON && !keyRingJsonValid) {
+    issues.push({
+      control: "JWT_KEY_RING_JSON",
+      issue: "Unsafe control value: JWT_KEY_RING_JSON is set to invalid JSON",
+      code: "INVALID_FORMAT",
+    });
+  } else if (env.JWT_KEY_RING_JSON && !hasKeyRingActiveKey) {
+    issues.push({
+      control: "JWT_KEY_RING_JSON",
+      issue:
+        "Missing required control: JWT_KEY_RING_JSON must specify at least one active signing key",
+      code: "MISSING_CONTROL",
+    });
+  }
+
+  const runtimeUsesAsymmetricKey =
+    keyRingUsesAsymmetric || Boolean(privateKey || publicKey);
+  let algorithms: string[] = [];
+
+  if (parsedAlgos.length > 0) {
+    for (const algo of parsedAlgos) {
+      const upperAlgo = algo.toUpperCase();
+      if (algo.toLowerCase() === "none") {
+        issues.push({
+          control: "JWT_ALGORITHMS",
+          issue:
+            "Unsafe control value: JWT algorithm 'none' is strictly prohibited",
+          code: "UNSAFE_VALUE",
+        });
+      } else if (!ALLOWED_JWT_ALGORITHMS.has(upperAlgo)) {
+        issues.push({
+          control: "JWT_ALGORITHMS",
+          issue: `Unsafe control value: JWT algorithm '${algo}' is unsupported or insecure`,
+          code: "UNSAFE_VALUE",
+        });
+      } else {
+        algorithms.push(upperAlgo);
+      }
+    }
+  }
+
+  if (algorithms.length === 0) {
+    algorithms = [runtimeUsesAsymmetricKey ? "RS256" : "HS256"];
+  }
+
+  // 4. Signing Key Validation
+  const isAsymmetric = runtimeUsesAsymmetricKey;
+  const requestsSymmetricAlgorithms = algorithms.some(isSymmetricJwtAlgorithm);
+  const requestsAsymmetricAlgorithms = algorithms.some(
+    isAsymmetricJwtAlgorithm,
+  );
+
+  if (requestsAsymmetricAlgorithms && !isAsymmetric) {
+    issues.push({
+      control: "JWT_PRIVATE_KEY / JWT_PUBLIC_KEY",
+      issue:
+        "Missing required control: JWT_PRIVATE_KEY and JWT_PUBLIC_KEY must be configured when JWT_ALGORITHMS requests asymmetric signing (RS*/ES*/PS*)",
+      code: "MISSING_CONTROL",
+    });
+  }
+
+  if (requestsSymmetricAlgorithms && isAsymmetric) {
+    issues.push({
+      control: "JWT_ALGORITHMS",
+      issue:
+        "Unsafe control value: Symmetric algorithm (HS*) specified while runtime signing will use asymmetric key material",
+      code: "UNSAFE_VALUE",
+    });
+  }
+
+  if (isStrictEnvironment) {
+    if (!jwtSecret && !isAsymmetric && !hasKeyRingActiveKey) {
+      issues.push({
+        control: "JWT_SECRET / JWT_PRIVATE_KEY",
+        issue:
+          "Missing required control: JWT_SECRET or JWT_PRIVATE_KEY/JWT_PUBLIC_KEY must be configured in staging/production",
+        code: "MISSING_CONTROL",
+      });
+    } else if (isAsymmetric && !hasKeyRingActiveKey) {
+      if (!privateKey || !publicKey) {
+        issues.push({
+          control: "JWT_PRIVATE_KEY / JWT_PUBLIC_KEY",
+          issue:
+            "Missing required control: both JWT_PRIVATE_KEY and JWT_PUBLIC_KEY must be configured for asymmetric JWT signing",
+          code: "MISSING_CONTROL",
+        });
+      } else {
+        if (isWeakSecret(privateKey) || isWeakSecret(publicKey)) {
+          issues.push({
+            control: "JWT_PRIVATE_KEY / JWT_PUBLIC_KEY",
+            issue:
+              "Unsafe control value: JWT asymmetric key material is set to a known insecure default pattern",
+            code: "WEAK_SECRET",
+          });
+        }
+      }
+    } else if (jwtSecret && !hasKeyRingActiveKey) {
+      if (isWeakSecret(jwtSecret)) {
+        issues.push({
+          control: "JWT_SECRET",
+          issue:
+            "Unsafe control value: JWT_SECRET is set to a known insecure default pattern",
+          code: "WEAK_SECRET",
+        });
+      }
+      if (jwtSecret.length < 32) {
+        issues.push({
+          control: "JWT_SECRET",
+          issue: `Unsafe control value: JWT_SECRET length (${jwtSecret.length}) is below required minimum length of 32 characters in staging/production`,
+          code: "UNSAFE_VALUE",
+        });
+      }
+    }
+  } else {
+    if (jwtSecret && jwtSecret.toLowerCase() === "none") {
+      issues.push({
+        control: "JWT_SECRET",
+        issue: "Unsafe control value: JWT_SECRET cannot be 'none'",
+        code: "UNSAFE_VALUE",
+      });
+    }
+  }
+
+  // 5. Cookie & CSRF Key Validation
+  const cookieSecret = normalizeString(env.COOKIE_SECRET);
+  const csrfSecret =
+    normalizeString(env.CSRF_SECRET) ?? normalizeString(env.SESSION_SECRET);
+
+  if (isStrictEnvironment) {
+    if (!cookieSecret) {
+      issues.push({
+        control: "COOKIE_SECRET",
+        issue:
+          "Missing required control: COOKIE_SECRET must be configured in staging/production",
+        code: "MISSING_CONTROL",
+      });
+    } else {
+      if (isWeakSecret(cookieSecret)) {
+        issues.push({
+          control: "COOKIE_SECRET",
+          issue:
+            "Unsafe control value: COOKIE_SECRET is set to a known insecure default pattern",
+          code: "WEAK_SECRET",
+        });
+      }
+      if (cookieSecret.length < 32) {
+        issues.push({
+          control: "COOKIE_SECRET",
+          issue: `Unsafe control value: COOKIE_SECRET length (${cookieSecret.length}) is below required minimum length of 32 characters in staging/production`,
+          code: "UNSAFE_VALUE",
+        });
+      }
+    }
+
+    if (!csrfSecret) {
+      issues.push({
+        control: "CSRF_SECRET",
+        issue:
+          "Missing required control: CSRF_SECRET (or SESSION_SECRET) must be configured in staging/production",
+        code: "MISSING_CONTROL",
+      });
+    } else {
+      if (isWeakSecret(csrfSecret)) {
+        issues.push({
+          control: "CSRF_SECRET",
+          issue:
+            "Unsafe control value: CSRF_SECRET is set to a known insecure default pattern",
+          code: "WEAK_SECRET",
+        });
+      }
+      if (csrfSecret.length < 32) {
+        issues.push({
+          control: "CSRF_SECRET",
+          issue: `Unsafe control value: CSRF_SECRET length (${csrfSecret.length}) is below required minimum length of 32 characters in staging/production`,
+          code: "UNSAFE_VALUE",
+        });
+      }
+    }
+  }
+
+  // 6. Allowed Origins Validation
+  const rawOrigins = env.AUTH_ALLOWED_ORIGINS ?? env.CORS_ALLOWED_ORIGINS;
+  const allowedOrigins = parseCsv(rawOrigins);
+
+  if (isStrictEnvironment) {
+    if (allowedOrigins.length === 0) {
+      issues.push({
+        control: "AUTH_ALLOWED_ORIGINS / CORS_ALLOWED_ORIGINS",
+        issue:
+          "Missing required control: AUTH_ALLOWED_ORIGINS or CORS_ALLOWED_ORIGINS must be configured in staging/production",
+        code: "MISSING_CONTROL",
+      });
+    } else {
+      if (allowedOrigins.includes("*")) {
+        issues.push({
+          control: "AUTH_ALLOWED_ORIGINS / CORS_ALLOWED_ORIGINS",
+          issue:
+            "Unsafe control value: AUTH_ALLOWED_ORIGINS / CORS_ALLOWED_ORIGINS cannot contain wildcard '*' in staging/production",
+          code: "UNSAFE_VALUE",
+        });
+      }
+      if (environment === "production") {
+        for (const origin of allowedOrigins) {
+          if (origin.startsWith("http://")) {
+            issues.push({
+              control: "AUTH_ALLOWED_ORIGINS",
+              issue:
+                "Unsafe control value: AUTH_ALLOWED_ORIGINS contains non-HTTPS origin in production",
+              code: "UNSAFE_VALUE",
+            });
+            break;
+          }
+        }
+      }
+    }
+  } else {
+    if (allowedOrigins.length === 0) {
+      warnings.push(
+        "AUTH_ALLOWED_ORIGINS is empty; defaulting to local origins.",
+      );
+    }
+  }
+
+  // 7. Session Store Validation
+  const sessionStoreType =
+    normalizeString(env.SESSION_STORE_TYPE)?.toLowerCase() ??
+    (env.SESSION_STORE_URL || env.REDIS_URL || env.DATABASE_URL
+      ? "durable"
+      : "memory");
+
+  if (isStrictEnvironment) {
+    if (
+      sessionStoreType === "memory" ||
+      (!env.SESSION_STORE_URL && !env.REDIS_URL && !env.DATABASE_URL)
+    ) {
+      issues.push({
+        control: "SESSION_STORE_URL / REDIS_URL / DATABASE_URL",
+        issue:
+          "Missing required control: SESSION_STORE_URL, REDIS_URL, or DATABASE_URL required for durable session store in staging/production; in-memory sessions prohibited",
+        code: "MISSING_CONTROL",
+      });
+    }
+  }
+
+  // 8. Audit Store Validation
+  const auditStoreType =
+    normalizeString(env.AUDIT_STORE_TYPE)?.toLowerCase() ??
+    (env.AUDIT_STORE_URL || env.DATABASE_URL ? "durable" : "none");
+
+  if (isStrictEnvironment) {
+    if (
+      auditStoreType === "none" ||
+      auditStoreType === "noop" ||
+      (!env.AUDIT_STORE_URL && !env.DATABASE_URL)
+    ) {
+      issues.push({
+        control: "AUDIT_STORE_URL / DATABASE_URL",
+        issue:
+          "Missing required control: AUDIT_STORE_URL or DATABASE_URL required for durable audit persistence in staging/production",
+        code: "MISSING_CONTROL",
+      });
+    }
+  }
+
+  // 9. Internal Key & Pepper Secret References
+  const internalKeyEnforced = normalizeString(env.DRTS_INTERNAL_KEY_ENFORCED);
+  const internalKey = normalizeString(env.DRTS_INTERNAL_KEY);
+  const workloadIdentityIssuer = normalizeString(env.WORKLOAD_IDENTITY_ISSUER);
+  const workloadIdentityAudience = normalizeString(
+    env.WORKLOAD_IDENTITY_AUDIENCE ?? env.WORKLOAD_IDENTITY_EXCHANGE_AUDIENCE,
+  );
+  const workloadIdentityKey = normalizeString(
+    env.WORKLOAD_IDENTITY_JWT_SECRET_OR_PUBLIC_KEY,
+  );
+  const workloadIdentityRegistry = normalizeString(
+    env.WORKLOAD_IDENTITY_SERVICE_PRINCIPALS,
+  );
+  const workloadIdentityRegistryParse = parseWorkloadServicePrincipalRegistry(
+    workloadIdentityRegistry,
+  );
+  const workloadIdentityAlgorithms = parseAlgorithmList(
+    env.WORKLOAD_IDENTITY_JWT_ALGORITHMS,
+    looksLikePem(workloadIdentityKey) ? "RS256" : "HS256",
+  );
+  const workloadIdentityConfigured = Boolean(
+    workloadIdentityIssuer &&
+    workloadIdentityAudience &&
+    workloadIdentityKey &&
+    workloadIdentityRegistry,
+  );
+  const workloadIdentityAnyConfigured = Boolean(
+    workloadIdentityIssuer ||
+    workloadIdentityAudience ||
+    workloadIdentityKey ||
+    workloadIdentityRegistry,
+  );
+  const passengerSubjectPepper = normalizeString(env.PASSENGER_SUBJECT_PEPPER);
+  const passengerRideTokenPepper = normalizeString(
+    env.PASSENGER_RIDE_TOKEN_PEPPER,
+  );
+
+  if (isStrictEnvironment) {
+    if (internalKeyEnforced?.toLowerCase() === "false") {
+      issues.push({
+        control: "DRTS_INTERNAL_KEY_ENFORCED",
+        issue:
+          "Unsafe control value: DRTS_INTERNAL_KEY_ENFORCED cannot be set to false in staging/production",
+        code: "UNSAFE_VALUE",
+      });
+    }
+
+    if (
+      workloadIdentityAnyConfigured &&
+      (!workloadIdentityIssuer ||
+        !workloadIdentityAudience ||
+        !workloadIdentityKey ||
+        !workloadIdentityRegistry)
+    ) {
+      if (!workloadIdentityIssuer) {
+        issues.push({
+          control: "WORKLOAD_IDENTITY_ISSUER",
+          issue:
+            "Missing required control: WORKLOAD_IDENTITY_ISSUER must be configured when workload identity is enabled in staging/production",
+          code: "MISSING_CONTROL",
+        });
+      }
+      if (!workloadIdentityAudience) {
+        issues.push({
+          control:
+            "WORKLOAD_IDENTITY_AUDIENCE / WORKLOAD_IDENTITY_EXCHANGE_AUDIENCE",
+          issue:
+            "Missing required control: WORKLOAD_IDENTITY_AUDIENCE must be configured when workload identity is enabled in staging/production",
+          code: "MISSING_CONTROL",
+        });
+      }
+      if (!workloadIdentityKey) {
+        issues.push({
+          control: "WORKLOAD_IDENTITY_JWT_SECRET_OR_PUBLIC_KEY",
+          issue:
+            "Missing required control: WORKLOAD_IDENTITY_JWT_SECRET_OR_PUBLIC_KEY must be configured when workload identity is enabled in staging/production",
+          code: "MISSING_CONTROL",
+        });
+      }
+      if (!workloadIdentityRegistry) {
+        issues.push({
+          control: "WORKLOAD_IDENTITY_SERVICE_PRINCIPALS",
+          issue:
+            "Missing required control: WORKLOAD_IDENTITY_SERVICE_PRINCIPALS must be configured when workload identity is enabled in staging/production",
+          code: "MISSING_CONTROL",
+        });
+      }
+    }
+
+    if (
+      workloadIdentityConfigured &&
+      workloadIdentityKey &&
+      !looksLikePem(workloadIdentityKey) &&
+      (isWeakSecret(workloadIdentityKey) || workloadIdentityKey.length < 32)
+    ) {
+      issues.push({
+        control: "WORKLOAD_IDENTITY_JWT_SECRET_OR_PUBLIC_KEY",
+        issue:
+          "Unsafe control value: WORKLOAD_IDENTITY_JWT_SECRET_OR_PUBLIC_KEY must be a valid public key/certificate or a strong shared secret when workload identity is enabled in staging/production",
+        code: "UNSAFE_VALUE",
+      });
+    }
+
+    const invalidWorkloadAlgorithms = workloadIdentityAlgorithms.filter(
+      (algorithm) => !ALLOWED_WORKLOAD_IDENTITY_JWT_ALGORITHMS.has(algorithm),
+    );
+    if (invalidWorkloadAlgorithms.length > 0) {
+      issues.push({
+        control: "WORKLOAD_IDENTITY_JWT_ALGORITHMS",
+        issue: `Unsafe control value: WORKLOAD_IDENTITY_JWT_ALGORITHMS contains unsupported algorithms (${invalidWorkloadAlgorithms.join(", ")})`,
+        code: "UNSAFE_VALUE",
+      });
+    }
+
+    const requestsWorkloadSymmetricAlgorithms = workloadIdentityAlgorithms.some(
+      isSymmetricJwtAlgorithm,
+    );
+    const requestsWorkloadAsymmetricAlgorithms =
+      workloadIdentityAlgorithms.some(isAsymmetricJwtAlgorithm);
+    const workloadIdentityKeyLooksAsymmetric =
+      looksLikePem(workloadIdentityKey);
+
+    if (
+      requestsWorkloadSymmetricAlgorithms &&
+      requestsWorkloadAsymmetricAlgorithms
+    ) {
+      issues.push({
+        control: "WORKLOAD_IDENTITY_JWT_ALGORITHMS",
+        issue:
+          "Unsafe control value: WORKLOAD_IDENTITY_JWT_ALGORITHMS must not mix symmetric and asymmetric families",
+        code: "UNSAFE_VALUE",
+      });
+    }
+
+    if (
+      workloadIdentityConfigured &&
+      workloadIdentityKey &&
+      workloadIdentityKeyLooksAsymmetric &&
+      requestsWorkloadSymmetricAlgorithms
+    ) {
+      issues.push({
+        control:
+          "WORKLOAD_IDENTITY_JWT_ALGORITHMS / WORKLOAD_IDENTITY_JWT_SECRET_OR_PUBLIC_KEY",
+        issue:
+          "Unsafe control value: HMAC workload identity algorithms cannot be paired with PEM-encoded public key or certificate material",
+        code: "UNSAFE_VALUE",
+      });
+    }
+
+    if (
+      workloadIdentityConfigured &&
+      workloadIdentityKey &&
+      !workloadIdentityKeyLooksAsymmetric &&
+      requestsWorkloadAsymmetricAlgorithms
+    ) {
+      issues.push({
+        control:
+          "WORKLOAD_IDENTITY_JWT_ALGORITHMS / WORKLOAD_IDENTITY_JWT_SECRET_OR_PUBLIC_KEY",
+        issue:
+          "Missing required control: asymmetric workload identity algorithms require PEM-encoded public key or certificate material",
+        code: "MISSING_CONTROL",
+      });
+    }
+
+    if (workloadIdentityRegistryParse.parseError) {
+      issues.push({
+        control: "WORKLOAD_IDENTITY_SERVICE_PRINCIPALS",
+        issue: `Invalid WORKLOAD_IDENTITY_SERVICE_PRINCIPALS registry: ${workloadIdentityRegistryParse.parseError}`,
+        code: "INVALID_FORMAT",
+      });
+    } else if (
+      workloadIdentityConfigured &&
+      workloadIdentityRegistryParse.entries.some(
+        (entry) =>
+          !normalizeString(entry.principalId) ||
+          !normalizeString(entry.subject) ||
+          !normalizeString(entry.issuer) ||
+          normalizeAudienceBindings(entry).length === 0,
+      )
+    ) {
+      issues.push({
+        control: "WORKLOAD_IDENTITY_SERVICE_PRINCIPALS",
+        issue:
+          "Invalid WORKLOAD_IDENTITY_SERVICE_PRINCIPALS registry: each entry must declare principalId, subject, issuer, and at least one allowed or default token audience",
+        code: "INVALID_FORMAT",
+      });
+    }
+
+    if (!internalKey && !workloadIdentityConfigured) {
+      issues.push({
+        control:
+          "DRTS_INTERNAL_KEY / WORKLOAD_IDENTITY_{ISSUER,AUDIENCE,JWT_SECRET_OR_PUBLIC_KEY,SERVICE_PRINCIPALS}",
+        issue:
+          "Missing required control: configure DRTS_INTERNAL_KEY or the complete workload identity validation set in staging/production",
+        code: "MISSING_CONTROL",
+      });
+    } else if (internalKey) {
+      if (isWeakSecret(internalKey)) {
+        issues.push({
+          control: "DRTS_INTERNAL_KEY",
+          issue:
+            "Unsafe control value: DRTS_INTERNAL_KEY is set to a known insecure default pattern",
+          code: "WEAK_SECRET",
+        });
+      }
+      if (internalKey.length < 32) {
+        issues.push({
+          control: "DRTS_INTERNAL_KEY",
+          issue: `Unsafe control value: DRTS_INTERNAL_KEY length (${internalKey.length}) is below required minimum length of 32 characters in staging/production`,
+          code: "UNSAFE_VALUE",
+        });
+      }
+
+      const matchedExcps = INTERNAL_KEY_EXCEPTION_REGISTRY.filter(
+        (e) => e.envVar === "DRTS_INTERNAL_KEY",
+      );
+      if (matchedExcps.length === 0) {
+        issues.push({
+          control: "DRTS_INTERNAL_KEY",
+          issue:
+            "Missing required control: DRTS_INTERNAL_KEY is configured but lacks a documented exception entry in INTERNAL_KEY_EXCEPTION_REGISTRY",
+          code: "MISSING_CONTROL",
+        });
+      } else {
+        for (const matchedExcp of matchedExcps) {
+          try {
+            validateExceptionMetadata(matchedExcp);
+          } catch (err) {
+            issues.push({
+              control: "DRTS_INTERNAL_KEY",
+              issue: `Invalid exception metadata for DRTS_INTERNAL_KEY (${matchedExcp.exceptionId}): ${err instanceof Error ? err.message : String(err)}`,
+              code: "INVALID_FORMAT",
+            });
+          }
+
+          if (
+            environment === "production" &&
+            !isProductionAllowedBoundary(matchedExcp.networkBoundary)
+          ) {
+            continue;
+          }
+
+          if (isExceptionExpired(matchedExcp)) {
+            issues.push({
+              control: "DRTS_INTERNAL_KEY",
+              issue: `Unsafe control value: DRTS_INTERNAL_KEY exception (${matchedExcp.exceptionId}) expired on ${matchedExcp.expiresAt}`,
+              code: "UNSAFE_VALUE",
+            });
+          }
+        }
+      }
+    }
+
+    if (!passengerSubjectPepper) {
+      issues.push({
+        control: "PASSENGER_SUBJECT_PEPPER",
+        issue:
+          "Missing required control: PASSENGER_SUBJECT_PEPPER must be configured in staging/production",
+        code: "MISSING_CONTROL",
+      });
+    } else if (
+      isWeakSecret(passengerSubjectPepper) ||
+      passengerSubjectPepper.length < 32
+    ) {
+      issues.push({
+        control: "PASSENGER_SUBJECT_PEPPER",
+        issue:
+          "Unsafe control value: PASSENGER_SUBJECT_PEPPER must be at least 32 characters and not a weak secret",
+        code: "UNSAFE_VALUE",
+      });
+    }
+
+    if (!passengerRideTokenPepper) {
+      issues.push({
+        control: "PASSENGER_RIDE_TOKEN_PEPPER",
+        issue:
+          "Missing required control: PASSENGER_RIDE_TOKEN_PEPPER must be configured in staging/production",
+        code: "MISSING_CONTROL",
+      });
+    } else if (
+      isWeakSecret(passengerRideTokenPepper) ||
+      passengerRideTokenPepper.length < 32
+    ) {
+      issues.push({
+        control: "PASSENGER_RIDE_TOKEN_PEPPER",
+        issue:
+          "Unsafe control value: PASSENGER_RIDE_TOKEN_PEPPER must be at least 32 characters and not a weak secret",
+        code: "UNSAFE_VALUE",
+      });
+    }
+  }
+
+  const valid = issues.length === 0;
+
+  return {
+    environment,
+    isStrictEnvironment,
+    valid,
+    issues,
+    warnings,
+    config: {
+      environment,
+      isStrictEnvironment,
+      issuer,
+      audience,
+      algorithms,
+      signing: {
+        keyType: isAsymmetric ? "asymmetric" : "symmetric",
+        secretConfigured: Boolean(jwtSecret),
+        asymmetricKeysConfigured: Boolean(privateKey && publicKey),
+      },
+      cookie: {
+        secretConfigured: Boolean(cookieSecret),
+      },
+      csrf: {
+        secretConfigured: Boolean(csrfSecret),
+      },
+      origins: {
+        allowedOrigins,
+      },
+      sessionStore: {
+        type: sessionStoreType,
+        configured: Boolean(
+          env.SESSION_STORE_URL || env.REDIS_URL || env.DATABASE_URL,
+        ),
+      },
+      auditStore: {
+        type: auditStoreType,
+        configured: Boolean(env.AUDIT_STORE_URL || env.DATABASE_URL),
+      },
+      internalKey: {
+        enforced: internalKeyEnforced?.toLowerCase() !== "false",
+        configured: Boolean(internalKey),
+      },
+      workloadIdentity: {
+        configured: workloadIdentityConfigured,
+        issuerConfigured: Boolean(workloadIdentityIssuer),
+        audienceConfigured: Boolean(workloadIdentityAudience),
+        keyConfigured: Boolean(workloadIdentityKey),
+        registryConfigured: Boolean(workloadIdentityRegistry),
+      },
+      peppers: {
+        passengerSubjectConfigured: Boolean(passengerSubjectPepper),
+        passengerRideTokenConfigured: Boolean(passengerRideTokenPepper),
+      },
+      oidc: {
+        issuerConfigured: Boolean(oidcIssuer),
+        clientIdConfigured: Boolean(oidcClientId),
+        tokenEndpointConfigured: Boolean(oidcTokenEndpoint),
+        authorizationEndpointConfigured: Boolean(oidcAuthorizationEndpoint),
+        mockModeEnabled: oidcMockMode === "true",
+      },
+    },
+  };
+}
+
+export function validateAuthStartupConfig(
+  env: EnvLike = process.env,
+): AuthStartupConfigReport {
+  const report = buildAuthStartupConfigReport(env);
+
+  if (!report.valid) {
+    throw new AuthConfigurationError(report.environment, report.issues);
+  }
+
+  return report;
+}

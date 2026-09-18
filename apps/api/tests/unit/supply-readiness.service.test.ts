@@ -686,6 +686,37 @@ describe("SupplyReadinessService", () => {
     });
   });
 
+  it("reports dangling canonical records without failing the fleet readiness list", async () => {
+    const missingDriver = createApprovedSubmission("sub-orphan-driver", {
+      canonicalDriverId: "drv-orphan",
+    });
+    const missingVehicle = createApprovedSubmission("sub-orphan-vehicle", {
+      canonicalVehicleId: "veh-orphan",
+    });
+    const service = createReadinessService({
+      submissions: [missingDriver, missingVehicle],
+    });
+
+    await expect(
+      service.listFleetPartnerReadiness("fleet-demo-001"),
+    ).resolves.toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          subjectType: "driver",
+          subjectId: "drv-orphan",
+          state: "not_ready",
+          reasonCodes: ["DRIVER_REGISTRY_MISSING"],
+        }),
+        expect.objectContaining({
+          subjectType: "vehicle",
+          subjectId: "veh-orphan",
+          state: "not_ready",
+          reasonCodes: ["VEHICLE_REGISTRY_MISSING"],
+        }),
+      ]),
+    );
+  });
+
   it("marks readiness suspended when the fleet partner is inactive", async () => {
     const inactiveDriverSubmission = createApprovedSubmission(
       "sub-drv-inactive",

@@ -95,8 +95,8 @@ The `prod/v<date>` tag is created when `hourly-promote.yml` successfully merges 
 
 | Workflow                                | Trigger                                                   | What it does                                                                                                  |
 | --------------------------------------- | --------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------- |
-| `ci.yml` (3 named gates)                | PR to main / dev; push main                               | Commit trailers + Runtime mirror guard + Smoke acceptance                                                     |
-| `ci-integ.yml`                          | push to dev; workflow_dispatch                            | heavier integration suite (build, integration tests, orchestrator-tests) — prerequisite for `nightly-publish` |
+| `ci.yml` (3 named gates)                | PR to main / dev; push main                               | Commit trailers + Runtime mirror guard + scoped Smoke acceptance                                              |
+| `ci-integ.yml`                          | PR to dev; push dev; workflow_dispatch                    | scope-aware PR checks; full integration on dev push — prerequisite for `nightly-publish`                       |
 | `nightly-publish.yml`                   | cron `0 3 * * *`; workflow_dispatch                       | cut `publish/v<date>` + tag `release/v<date>` from dev HEAD                                                   |
 | `deploy-dev.yml`                        | push to `publish/v*`; workflow_dispatch                   | deploy to dev GCP (this is what makes dev VM roll)                                                            |
 | `hourly-promote.yml` (promote job)      | cron `15 * * * *`; workflow_dispatch                      | open auto-PR `publish/v<date> → main`, auto-merge                                                             |
@@ -110,7 +110,8 @@ The `prod/v<date>` tag is created when `hourly-promote.yml` successfully merges 
 
 ### Gate 1: feat → dev (every PR)
 
-- 3 named CI checks: `Commit trailers`, `Runtime mirror guard`, `Smoke acceptance`
+- 4 named CI checks: `Commit trailers`, `Runtime mirror guard`, `Smoke acceptance`, `ci-integ`
+- internal-tool-only PRs run orchestrator tests without product build/E2E; product and mixed PRs run product gates
 - 0 reviewers required
 - `auto-merge` enabled per PR
 
@@ -146,7 +147,7 @@ only stays conflict-free while **`main`'s content is an ancestor-state of
 `dev`**. Therefore:
 
 - **Any** commit that lands directly on `main` — a `hotfix/*`, an admin-bypass
-  fix, *or* a promote-rescue commit — **must be cherry-picked back into `dev`**
+  fix, _or_ a promote-rescue commit — **must be cherry-picked back into `dev`**
   as part of the same change. A direct-to-main commit that is not back-ported
   makes the next `publish → main` PR `CONFLICTING`, which silently deadlocks the
   whole promote rail (the required `pull_request` gates can never register on an
@@ -165,24 +166,30 @@ This was learned the hard way twice: #265 `PROMOTE-RESCUE-254` (2026-05-24) and
 
 ## 6. Branch protection
 
-Identical settings on `main` and `dev`:
+`main` and `dev` deliberately have different gates:
 
-| Setting                       | Value                                                         |
-| ----------------------------- | ------------------------------------------------------------- |
-| Required reviewers            | 0                                                             |
-| Required status checks        | `Commit trailers`, `Runtime mirror guard`, `Smoke acceptance` |
-| Strict (up-to-date with base) | yes                                                           |
-| Linear history                | yes                                                           |
-| Force-push                    | no                                                            |
-| Delete                        | no                                                            |
-| Enforce admins                | no                                                            |
+| Setting                       | `main`                                                        | `dev`                                                                     |
+| ----------------------------- | ------------------------------------------------------------- | ------------------------------------------------------------------------- |
+| Required reviewers            | 0                                                             | 0                                                                         |
+| Required status checks        | `Commit trailers`, `Runtime mirror guard`, `Smoke acceptance` | the same three checks plus `ci-integ`                                      |
+| Strict (up-to-date with base) | yes                                                           | no                                                                        |
+| Linear history                | yes                                                           | yes                                                                       |
+| Force-push                    | no                                                            | no                                                                        |
+| Delete                        | no                                                            | no                                                                        |
+| Enforce admins                | no                                                            | no                                                                        |
+
+The `dev` protection rule requires only the two policy checks and the two
+aggregates. Product implementation jobs such as `build`, `typecheck`, and
+`unit` remain mandatory through `ci-integ` when the shared scope classifier
+identifies a product or mixed diff; they are not duplicated as branch-level
+required contexts. `main` never uses the tool-only fast path.
 
 `publish/v*` branches are **not** protected by branch protection. They are protected by convention (immutable) and by the fact that nothing in the workflows writes to them after the initial nightly cut.
 
-Applied via `scripts/branch-strategy/apply-branch-protection.sh --apply`.
+Applied via `tools/local-development/apply-branch-protection.sh --apply`.
 
 Static GitHub labels used by the branch-strategy workflows are managed via
-`scripts/branch-strategy/ensure-github-labels.sh --apply`. `hourly-promote.yml`
+`tools/local-development/ensure-github-labels.sh --apply`. `hourly-promote.yml`
 also runs that script immediately before applying the `automated` and
 `auto-publish` labels to a promote PR, so missing repo metadata does not
 silently break the `Commit trailers` bypass path in `ci.yml`.
@@ -298,7 +305,7 @@ In a multi-worker repo, the working tree is a fragile asset. Supervisor reassign
 
 Anchor commit at the first describable middle state — do not wait for completion — when **any** of the following hold:
 
-- The change touches a **fragile surface**: `.orchestrator/supervisor.py` (esp. routing/dispatch), `.orchestrator/skills/*.md`, `.orchestrator/templates/*`, `.orchestrator/config*.json`, `.orchestrator/branch_routing.py`, `docs/ops/branch-strategy.md`, `docs/**`, `.github/workflows/**`, `.husky/*`.
+- The change touches a **fragile surface**: `tools/development-orchestrator/control_plane/runtime/supervisor_runtime.py` (esp. routing/dispatch), `tools/development-orchestrator/skills/*.md`, `tools/development-orchestrator/templates/*`, `.orchestrator/config*.json`, `.orchestrator/branch_routing.py`, `docs/ops/branch-strategy.md`, `docs/**`, `.github/workflows/**`, `.husky/*`.
 - The change spans **more than one file** with shared design intent.
 - The change is expected to take **more than one supervisor cycle** to land.
 - The worker is **about to yield** to another task (planned reassignment, blocker, end-of-shift).
@@ -317,7 +324,7 @@ git commit -m "wip(<TASK-ID>): anchor <scope>" \
   -m "LLM-Agent: <lane>" -m "Task-ID: <TASK-ID>" -m "Reviewer: <reviewer>"
 ```
 
-The anchor commit is **not the deliverable**; it is a flag that says "this lane has a claim on this surface." Closeout still requires the formal commit per [`task-closeout-finalization.md`](../../.orchestrator/skills/task-closeout-finalization.md).
+The anchor commit is **not the candidate**; it is a recoverability checkpoint that says "this lane has a claim on this surface." The owner locks the final pushed head with `CANDIDATE_SHA` at handoff; review, CI, and merge evidence are valid only for that exact SHA.
 
 ### 11.2 Do not stash design-intent diffs
 
@@ -343,14 +350,28 @@ Reviewer: <reviewer>
 
 The body lets the other lane (and future reviewers) tell at a glance whether the two patches are compatible.
 
-### 11.4 `dev` advances → rebase the branch, never `git stash pop` on top
+### 11.4 Preserve published history when `dev` advances
 
-When `dev` has advanced while a lane was paused:
+When `dev` has advanced while a lane was paused, fetch first and inspect the
+remote task branch, existing PR and candidate/CI state:
 
 ```bash
 git fetch origin
-git rebase origin/dev
 ```
+
+- A candidate under review or CI stays at its exact SHA while awaiting results.
+  Trunk movement alone does not require synchronization or restarting CI.
+- Published commits, including pushed anchors, must not be rebased, amended or
+  force-pushed. If synchronization is necessary before candidate handoff, merge
+  `origin/dev` in the owner task worktree, resolve conflicts, validate and push
+  normally. The resulting SHA requires new review and CI.
+- Only a branch confirmed never published, with no PR or candidate, may use
+  `git rebase origin/dev`.
+- If the local task branch is missing but its remote branch exists, recreate it
+  from that remote head, preserving published work rather than starting at trunk.
+- If local history has already diverged from the published head, preserve both
+  refs and report their SHAs and diff for history recovery. Do not reset,
+  force-push or rebase again to make the push succeed.
 
 Do **not** rely on `git stash pop` to recover paused work; the stash blob has no patch identity and almost always requires manual fixups against the moved trunk.
 
@@ -358,11 +379,11 @@ Do **not** rely on `git stash pop` to recover paused work; the stash blob has no
 
 The three surface classes most often overwritten by parallel lanes are:
 
-| Surface class                              | Examples                                                          | Why fragile                                      |
-| ------------------------------------------ | ----------------------------------------------------------------- | ------------------------------------------------ |
-| `docs/**`                                  | `docs/ops/branch-strategy.md`, `docs/03-runbooks/**`              | chair-review and supervisor lanes both edit them |
-| `.orchestrator/skills/**`                  | `task-closeout-finalization.md`, `chairman-operational-review.md` | supervisor/chair changes touch these             |
-| `.orchestrator/config*.json`, schema files | `config.example.json`, provider/capability schema                 | enabled-flag toggles by many lanes               |
+| Surface class                              | Examples                                                   | Why fragile                                      |
+| ------------------------------------------ | ---------------------------------------------------------- | ------------------------------------------------ |
+| `docs/**`                                  | `docs/ops/branch-strategy.md`, `docs/03-runbooks/**`       | chair-review and supervisor lanes both edit them |
+| `tools/development-orchestrator/skills/**` | `candidate-lifecycle.md`, `chairman-operational-review.md` | supervisor/chair changes touch these             |
+| `.orchestrator/config*.json`, schema files | `config.example.json`, provider/capability schema          | enabled-flag toggles by many lanes               |
 
 For these, **never** keep edits in the working tree across more than one supervisor cycle. The required flow:
 
@@ -376,44 +397,30 @@ git push -u origin <lane>/<topic>
 gh pr create --base dev --title "<TASK-ID>: <summary>" ...
 ```
 
-### 11.6 Branch closeout is not development closeout
+### 11.6 Candidate lifecycle is the development closeout
 
-The worker state `done` records a task lifecycle event. It does not, by itself,
-prove that the branch has passed PR CI, merged into `dev`, or reached the dev
-test machine.
+The task state machine has one completion path:
 
-After branch closeout, implementation and umbrella owners must continue or hand
-off the integration closeout:
+`backlog/todo -> in_progress -> review -> integrating -> acceptance -> done`
 
-- PR to `dev` exists and includes task evidence.
-- CI is green before merge; failing CI creates a blocker/progress note.
-- Delivered commit is reachable from `origin/dev`.
-- Dev publish/deploy is verified when the acceptance target is the shared dev environment.
+The owner may push anchor commits while working. Once implementation verification
+is complete, the owner records the pushed `CANDIDATE_SHA` and
+`CANDIDATE_BRANCH` with `ai-status.sh handoff`. The reviewer checks that exact
+SHA and records the same value as `REVIEWED_SHA`; reviewers never modify the
+candidate branch.
 
-Workers record the layer reached with `INTEGRATION_STATUS`:
+The GitHub bus is the sole adapter that records PR head, CI, and merge evidence.
+It accepts CI or merge only when the PR head equals `CANDIDATE_SHA`. A later push
+invalidates prior review and CI evidence and returns the task to `in_progress`.
+After same-SHA CI and merge, a task with `required_acceptance` enters
+`acceptance`; it becomes `done` only when all named evidence keys are recorded.
 
-- `branch_pushed`, `pr_open`, `ci_pending`, `ci_failed`
-- `merged_to_dev`
-- `deploy_blocked`, `dev_deployed`
-- `not_applicable` for sidecar/support-only work
-
-Only `dev_deployed` plus deploy run evidence may be described as "published to
-dev" or "ready on the dev test machine".
-
-**Enforcement (`INTEGRATION_GATE`).** The above is no longer convention-only.
-`.orchestrator/integration_gate.py` (opt-in via
-`branch_strategy.integration_gate.enabled`, with a `log_only` canary) refuses
-`scripts/ai_status.py done` when a task's `INTEGRATION_STATUS` is branch-only
-(`branch_pushed`/`pr_open`/`ci_pending`/`ci_failed`/`deploy_blocked`): the task
-stays at `review_approved` until its commit reaches `origin/dev`, at which point
-`apply_git_merge_reconciliation` flips it to `done`. Use
-`INTEGRATION_STATUS=not_applicable` for sidecar/support/externally-held tasks.
-This closes the recurring "done at branch, never merged to dev → work stranded"
-failure mode.
+This keeps code completion, integration, and external acceptance explicit
+without a second owner-closeout transition or git-log inference.
 
 ### 11.7 Trigger checklist (before each significant save)
 
-Worker prompts (wakeup + closeout skill) carry this checklist; it is reproduced here for human reference:
+Worker prompts (wakeup + candidate lifecycle skill) carry this checklist; it is reproduced here for human reference:
 
 1. Am I touching a fragile surface from §11.1?
 2. Will this take more than one supervisor cycle?
@@ -428,12 +435,12 @@ git switch -c <lane>/<task-id-kebab> origin/dev
 
 ### 11.8 Related artifacts
 
-- [`.orchestrator/skills/worker-anchor-commit.md`](../../.orchestrator/skills/worker-anchor-commit.md) — worker-facing operational skill for anchor commits (companion to closeout skill)
-- [`.orchestrator/skills/integration-closeout.md`](../../.orchestrator/skills/integration-closeout.md) — worker-facing protocol for PR / CI / merge / dev deploy evidence
-- [`.orchestrator/templates/wakeup.txt`](../../.orchestrator/templates/wakeup.txt) — supervisor wakeup template that injects branch context (target of OPS-GIT-WORKFLOW-005)
+- [`tools/development-orchestrator/skills/worker-anchor-commit.md`](../../tools/development-orchestrator/skills/worker-anchor-commit.md) — owner-only operational skill for recoverable checkpoints
+- [`tools/development-orchestrator/skills/candidate-lifecycle.md`](../../tools/development-orchestrator/skills/candidate-lifecycle.md) — locked SHA review, CI, merge, and acceptance protocol
+- [`tools/development-orchestrator/templates/wakeup.txt`](../../tools/development-orchestrator/templates/wakeup.txt) — supervisor wakeup template that injects branch context (target of OPS-GIT-WORKFLOW-005)
 - [`.orchestrator/worker_tree_guard.py`](../../.orchestrator/worker_tree_guard.py) — shared tree-guard primitives (extracted by OPS-GIT-WORKFLOW-007). Backs both surfaces:
   - `check_worker_tree_guard` — supervisor dispatch guard, gated by `branch_strategy.worker_tree_guard.enabled` (OPS-GIT-WORKFLOW-006, opt-in)
-  - `check_chatbox_tree_guard` — Claude-Code PreToolUse hook (via `.orchestrator/permission_broker.py`) for chatbox-driven `Edit`/`Write`/`MultiEdit`/`NotebookEdit`, gated by `branch_strategy.worker_tree_guard.chatbox_enabled` (OPS-GIT-WORKFLOW-007, opt-in)
+  - `check_chatbox_tree_guard` — Claude-Code PreToolUse hook (via `tools/development-orchestrator/permission_broker.py`) for chatbox-driven `Edit`/`Write`/`MultiEdit`/`NotebookEdit`, gated by `branch_strategy.worker_tree_guard.chatbox_enabled` (OPS-GIT-WORKFLOW-007, opt-in)
 
 ---
 
@@ -446,8 +453,8 @@ git switch -c <lane>/<task-id-kebab> origin/dev
 - `.github/workflows/deploy-dev.yml` — push-to-publish auto deploy
 - `.github/workflows/deploy-staging.yml` — operator manual
 - `.github/workflows/deploy-prod.yml` — operator manual, requires `prod/v<date>` tag
-- `scripts/git/check_commit_trailers.py` + `check_staged_generated_files.py` — shared by husky + CI
-- `scripts/branch-strategy/bootstrap-branches.sh` + `apply-branch-protection.sh` + `triage-branches.sh`
+- `tools/ci/git/check_commit_trailers.py` + `check_staged_generated_files.py` — shared by husky + CI
+- `tools/local-development/bootstrap-branches.sh` + `apply-branch-protection.sh` + `triage-branches.sh`
 - `.orchestrator/branch_routing.py` — single track now; both backend + frontend → `dev`
 - `.husky/pre-commit` + `commit-msg` — local gates mirroring CI
 - `docs/03-runbooks/promote-rail-rescue-runbook.md` — how to unblock a stuck `publish → main` promote

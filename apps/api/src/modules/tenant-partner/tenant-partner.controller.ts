@@ -1,23 +1,35 @@
 import {
   Body,
+  CanActivate,
   Controller,
   Delete,
+  ExecutionContext,
   Get,
   Headers,
+  HttpStatus,
+  Inject,
+  Injectable,
+  Optional,
   Param,
   Post,
   Put,
   Query,
   Req,
+  Res,
+  StreamableFile,
 } from "@nestjs/common";
 import { Throttle } from "@nestjs/throttler";
 
 import type {
+  AcceptTenantInvitationCommand,
   AcknowledgeOpsApprovalRequestBreachCommand,
   ApproveTenantBookingApprovalRequestCommand,
   CreatePartnerChannelEntryCommand,
   CreatePartnerIngressHandoffCommand,
+  CreateReferralEmbedHandoffArtifactCommand,
   IdentityContext,
+  RevokeTenantSessionCommand,
+  TenantSessionInventoryRecord,
   EscalateTenantBookingApprovalRequestCommand,
   IssuePartnerIngressCredentialCommand,
   CreateTenantUserCommand,
@@ -43,6 +55,9 @@ import type {
   PartnerEligibilityReviewResolution,
   PartnerEligibilityVerificationRecord,
   PartnerIngressHandoffSession,
+  RecordReferralEmbedConsentCommand,
+  ReferralEmbedHandoffArtifact,
+  ReferralEmbedSession,
   RecalculateTenantSlaBookingsCommand,
   ResolvePartnerEligibilityReviewCommand,
   RevokePartnerIngressCredentialCommand,
@@ -74,17 +89,33 @@ import type {
   UpsertTenantQuotaPolicyCommand,
   ReorderTenantApprovalRulesCommand,
   RejectTenantBookingApprovalRequestCommand,
+  TenantApiKeyRecord,
   VerifyPartnerEligibilityCommand,
+  ApiListData,
+  ApiSuccessEnvelope,
 } from "@drts/contracts";
 
+import { toCsv } from "../../common/csv";
 import {
   ApiRequestError,
   toApiListData,
   toApiSuccessEnvelope,
 } from "../../common/api-envelope";
 import { CurrentIdentity, OpenRoute, RequireRealms } from "../../common/auth";
-import { JwtAuthService } from "../../common/auth/jwt-auth.service";
-import { requireInternalKey } from "../../common/auth/internal-key.middleware";
+import { IdempotencyService } from "../../common/idempotency";
+import type { PassthroughResponseLike } from "../../common/idempotency-http";
+import { applyIdempotentResponseHeaders } from "../../common/idempotency-http";
+import { AuditNotificationService } from "../audit-notification/audit-notification.service";
+import { IdentityRepository } from "../identity/identity.repository";
+import {
+  isJwtKeyMaterialNotConfiguredError,
+  JwtAuthService,
+} from "../../common/auth/jwt-auth.service";
+import {
+  REFERRAL_EMBED_HANDOFF_KEY_HEADER,
+  requireInternalKey,
+  requireScopedInternalKey,
+} from "../../common/auth/internal-key.middleware";
 import {
   OPEN_ROUTE_RATE_LIMIT,
   READ_HEAVY_RATE_LIMIT,
@@ -111,13 +142,74 @@ type JwtExpiresIn = NonNullable<
 
 const PARTNER_INGRESS_HANDOFF_EXPIRES_IN: JwtExpiresIn = "15m";
 
+function isPromiseLike<T>(value: T | Promise<T>): value is Promise<T> {
+  return (
+    typeof value === "object" &&
+    value !== null &&
+    typeof (value as any).then === "function"
+  );
+}
+
+@Injectable()
+export class TenantApiKeyAuthGuard implements CanActivate {
+  constructor(
+    @Inject(TenantPartnerService)
+    private readonly tenantPartnerService: TenantPartnerService,
+  ) {}
+
+  async canActivate(context: ExecutionContext): Promise<boolean> {
+    const request = context.switchToHttp().getRequest<any>();
+    const headers = request.headers ?? {};
+    const rawKey =
+      headers["x-api-key"] ||
+      headers["x-tenant-api-key"] ||
+      (typeof headers["authorization"] === "string" &&
+      headers["authorization"].startsWith("Bearer ")
+        ? headers["authorization"].slice(7).trim()
+        : undefined);
+
+    if (!rawKey) {
+      throw new ApiRequestError(
+        HttpStatus.UNAUTHORIZED,
+        "TENANT_API_KEY_REQUIRED",
+        "Tenant API key must be provided in Authorization header (Bearer tk_...) or x-api-key / x-tenant-api-key header.",
+      );
+    }
+
+    const tenantId = headers["x-tenant-id"] || request.query?.tenantId;
+    const resolution = await Promise.resolve(
+      this.tenantPartnerService.authenticateTenantApiKey(rawKey, {
+        tenantId: typeof tenantId === "string" ? tenantId : undefined,
+        workload: "tenant_api_guard",
+        requestId: headers["x-request-id"],
+      }),
+    );
+
+    request.identity = resolution.identity;
+    request.authenticatedApiKey = resolution.apiKey;
+    return true;
+  }
+}
+
 @Controller()
 export class TenantPartnerController {
   constructor(
+    @Inject(TenantPartnerService)
     private readonly tenantPartnerService: TenantPartnerService,
+    @Inject(BillingSettlementService)
     private readonly billingSettlementService: BillingSettlementService,
+    @Inject(OwnedMobilityService)
     private readonly ownedMobilityService: OwnedMobilityService,
+    @Inject(JwtAuthService)
     private readonly jwtAuthService: JwtAuthService,
+    @Inject(IdempotencyService)
+    private readonly idempotencyService: IdempotencyService,
+    @Optional()
+    @Inject(IdentityRepository)
+    private readonly identityRepository?: IdentityRepository,
+    @Optional()
+    @Inject(AuditNotificationService)
+    private readonly auditNotificationService?: AuditNotificationService,
   ) {}
 
   private requireTenantId(tenantId?: string) {
@@ -150,23 +242,60 @@ export class TenantPartnerController {
     return identity?.roles?.[0] ?? null;
   }
 
-  private signJwt(
-    identity: Parameters<JwtAuthService["sign"]>[0],
-    expiresIn: JwtExpiresIn,
+  private requireTenantSessionAdmin(identity: IdentityContext | null) {
+    const role = identity?.roles?.map((value) => value.toLowerCase()) ?? [];
+    if (
+      !role.some((value) =>
+        [
+          "tenant_admin",
+          "tc_admin",
+          "tenant_integration_mgr",
+          "tc_integration_mgr",
+        ].includes(value),
+      )
+    ) {
+      throw new ApiRequestError(
+        403,
+        "TENANT_SESSION_ADMIN_REQUIRED",
+        "Tenant session administration is required.",
+      );
+    }
+  }
+
+  private toTenantSessionInventory(
+    session: Awaited<
+      ReturnType<IdentityRepository["listSessionsByTenant"]>
+    >[number],
+    tenantId: string,
+  ): TenantSessionInventoryRecord {
+    return {
+      sessionId: session.sessionId,
+      tenantId,
+      principalId: session.principalId,
+      subject: session.subject ?? null,
+      authMethod: session.authMethods[0] ?? "unknown",
+      status: session.status,
+      createdAt: session.createdAt,
+      lastSeenAt: session.updatedAt,
+      expiresAt: session.absoluteExpiresAt,
+      revokedAt: session.revokedAt,
+    };
+  }
+
+  private async issueJwtSession(
+    identity: Parameters<JwtAuthService["issueSessionToken"]>[0],
+    options?: Parameters<JwtAuthService["issueSessionToken"]>[1],
   ) {
     try {
-      return this.jwtAuthService.sign(identity, { expiresIn });
+      return await this.jwtAuthService.issueSessionToken(identity, options);
     } catch (error) {
-      if (
-        error instanceof Error &&
-        error.message.includes("JWT_SECRET environment variable is not set")
-      ) {
+      if (isJwtKeyMaterialNotConfiguredError(error)) {
         throw new ApiRequestError(
           503,
           "JWT_NOT_CONFIGURED",
           "JWT session issuance is not configured for this environment.",
           {
-            requiredEnv: "JWT_SECRET",
+            requiredEnv: error.requiredEnv.join(" or "),
           },
         );
       }
@@ -213,11 +342,14 @@ export class TenantPartnerController {
       requestId,
       { allowInternalBootstrap },
     );
-    const token = this.signJwt(
+    const issuedAt = new Date().toISOString();
+    const issued = await this.issueJwtSession(
       {
-        authMode: resolved.identity.authMode,
+        authMode: "jwt_bearer",
         actorType: resolved.identity.actorType,
         actorId: resolved.identity.actorId,
+        principalId: resolved.drtsPassengerId,
+        subject: resolved.drtsPassengerId,
         realm: resolved.identity.realm,
         tenantId: resolved.identity.tenantId,
         partnerId: resolved.identity.partnerId ?? null,
@@ -229,10 +361,19 @@ export class TenantPartnerController {
         drtsPassengerId: resolved.drtsPassengerId,
         requestId: requestId ?? null,
       },
-      PARTNER_INGRESS_HANDOFF_EXPIRES_IN,
+      {
+        expiresIn: PARTNER_INGRESS_HANDOFF_EXPIRES_IN,
+        principalId: resolved.drtsPassengerId,
+        subject: resolved.drtsPassengerId,
+        ensurePrincipal: true,
+        authTime: issuedAt,
+        amr: ["referral_handoff"],
+        acr: "aal1",
+        tokenVersion: Date.parse(resolved.partnerEntry.updatedAt),
+      },
     );
     const session: PartnerIngressHandoffSession = {
-      accessToken: token,
+      accessToken: issued.token,
       tokenType: "Bearer",
       expiresIn: PARTNER_INGRESS_HANDOFF_EXPIRES_IN,
       partnerEntrySlug: resolved.partnerEntry.entrySlug,
@@ -253,6 +394,99 @@ export class TenantPartnerController {
       },
     };
 
+    return toApiSuccessEnvelope(session, requestId);
+  }
+
+  @OpenRoute()
+  @Throttle(OPEN_ROUTE_RATE_LIMIT)
+  @Post("partner/ingress/referral-embed-handoff")
+  async issueReferralEmbedHandoffArtifact(
+    @Body() command: CreateReferralEmbedHandoffArtifactCommand,
+    @Req()
+    request?: {
+      headers?: Record<string, string | string[] | undefined>;
+      method?: string;
+      originalUrl?: string;
+      url?: string;
+    },
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    const allowInternalBootstrap = !command.apiKey?.trim();
+    requireScopedInternalKey(
+      request ?? {},
+      process.env.DRTS_REFERRAL_EMBED_HANDOFF_KEY,
+      {
+        header: REFERRAL_EMBED_HANDOFF_KEY_HEADER,
+        requiredEnv: "DRTS_REFERRAL_EMBED_HANDOFF_KEY",
+      },
+    );
+    const artifact: ReferralEmbedHandoffArtifact =
+      await this.tenantPartnerService.issueReferralEmbedHandoffArtifact(
+        command,
+        requestId,
+        { allowInternalBootstrap },
+      );
+    return toApiSuccessEnvelope(artifact, requestId);
+  }
+
+  @OpenRoute()
+  @Throttle(OPEN_ROUTE_RATE_LIMIT)
+  @Post("partner/ingress/referral-embed-handoff/consume")
+  async consumeReferralEmbedHandoffArtifact(
+    @Body()
+    command: {
+      artifact: string;
+      entrySlug: string;
+      entryHost: string;
+    },
+    @Req()
+    request?: {
+      headers?: Record<string, string | string[] | undefined>;
+      method?: string;
+      originalUrl?: string;
+      url?: string;
+    },
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    requireScopedInternalKey(
+      request ?? {},
+      process.env.DRTS_REFERRAL_EMBED_HANDOFF_KEY,
+      {
+        header: REFERRAL_EMBED_HANDOFF_KEY_HEADER,
+        requiredEnv: "DRTS_REFERRAL_EMBED_HANDOFF_KEY",
+      },
+    );
+    const session: ReferralEmbedSession =
+      await this.tenantPartnerService.consumeReferralEmbedHandoffArtifact(
+        command,
+      );
+    return toApiSuccessEnvelope(session, requestId);
+  }
+
+  @OpenRoute()
+  @Throttle(OPEN_ROUTE_RATE_LIMIT)
+  @Post("partner/ingress/referral-embed-handoff/consent")
+  async recordReferralEmbedConsent(
+    @Body() command: RecordReferralEmbedConsentCommand,
+    @Req()
+    request?: {
+      headers?: Record<string, string | string[] | undefined>;
+      method?: string;
+      originalUrl?: string;
+      url?: string;
+    },
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    requireScopedInternalKey(
+      request ?? {},
+      process.env.DRTS_REFERRAL_EMBED_HANDOFF_KEY,
+      {
+        header: REFERRAL_EMBED_HANDOFF_KEY_HEADER,
+        requiredEnv: "DRTS_REFERRAL_EMBED_HANDOFF_KEY",
+      },
+    );
+    const session =
+      await this.tenantPartnerService.recordReferralEmbedConsent(command);
     return toApiSuccessEnvelope(session, requestId);
   }
 
@@ -470,6 +704,30 @@ export class TenantPartnerController {
     return toApiSuccessEnvelope(toApiListData(items), requestId);
   }
 
+  @Get("partner/referral/statements/:period/artifact")
+  @RequireRealms("partner")
+  @Throttle(READ_HEAVY_RATE_LIMIT)
+  getPartnerReferralStatementArtifact(
+    @CurrentIdentity() identity: IdentityContext | null,
+    @Param("period") period: string,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    const statement = this.tenantPartnerService.getPartnerReferralStatement(
+      identity,
+      this.billingSettlementService,
+      period,
+      requestId,
+    );
+
+    return new StreamableFile(
+      Buffer.from(this.renderReferralStatementArtifact(statement), "utf8"),
+      {
+        type: "text/csv; charset=utf-8",
+        disposition: `attachment; filename="${statement.artifactRef.artifactId}.csv"`,
+      },
+    );
+  }
+
   @Get("partner/referral/statements/:period")
   @RequireRealms("partner")
   @Throttle(READ_HEAVY_RATE_LIMIT)
@@ -487,6 +745,40 @@ export class TenantPartnerController {
       ),
       requestId,
     );
+  }
+
+  private renderReferralStatementArtifact(statement: ReferralStatementRecord) {
+    const amount = (value: { amountMinor: number; currency: string }) =>
+      `${value.currency} ${(value.amountMinor / 100).toFixed(2)}`;
+
+    const rows = [
+      [
+        "Statement ID",
+        "Period",
+        "Trip ID",
+        "Completed at",
+        "Partner entry",
+        "Fare",
+        "Share rate type",
+        "Share rate value",
+        "Share amount",
+        "Manifest SHA-256",
+      ],
+      ...statement.lines.map((line) => [
+        statement.statementId,
+        statement.period,
+        line.tripId,
+        line.completedAt,
+        line.partnerEntrySlug,
+        amount(line.fare),
+        line.rateType,
+        line.rateValue,
+        amount(line.shareAmount),
+        statement.artifactRef.manifestHash,
+      ]),
+    ];
+
+    return toCsv(rows);
   }
 
   @Get("platform-admin/partner-entries")
@@ -1292,6 +1584,83 @@ export class TenantPartnerController {
     return toApiSuccessEnvelope(toApiListData(items), requestId);
   }
 
+  @Get("tenant/sessions")
+  @Throttle(READ_HEAVY_RATE_LIMIT)
+  listTenantSessions(
+    @CurrentIdentity() identity: IdentityContext | null,
+    @Headers("x-tenant-id") tenantId?: string,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    this.requireTenantSessionAdmin(identity);
+    const normalizedTenantId = this.requireTenantId(tenantId);
+    return this.identityRepository!.listSessionsByTenant(
+      normalizedTenantId,
+    ).then((sessions) =>
+      toApiSuccessEnvelope(
+        toApiListData(
+          sessions.map((session) =>
+            this.toTenantSessionInventory(session, normalizedTenantId),
+          ),
+        ),
+        requestId,
+      ),
+    );
+  }
+
+  @Post("tenant/sessions/:sessionId/revoke")
+  async revokeTenantSession(
+    @Param("sessionId") sessionId: string,
+    @Body() command: RevokeTenantSessionCommand,
+    @CurrentIdentity() identity: IdentityContext | null,
+    @Headers("x-tenant-id") tenantId?: string,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    this.requireTenantSessionAdmin(identity);
+    const normalizedTenantId = this.requireTenantId(tenantId);
+    const session = await this.identityRepository!.getSession(sessionId);
+    if (
+      !session ||
+      session.tenantId !== normalizedTenantId ||
+      session.realm !== "tenant"
+    ) {
+      throw new ApiRequestError(
+        404,
+        "TENANT_SESSION_NOT_FOUND",
+        "Tenant session was not found.",
+      );
+    }
+    const revoked = await this.identityRepository!.revokeSession(
+      sessionId,
+      command.reason?.trim() || "tenant_admin_revocation",
+      identity?.principalId ?? identity?.actorId ?? undefined,
+    );
+    if (revoked) {
+      this.auditNotificationService?.recordAuditLog({
+        actorId: identity?.actorId ?? null,
+        actorType:
+          identity?.actorType === "driver_user"
+            ? "system"
+            : (identity?.actorType ?? "system"),
+        tenantId: normalizedTenantId,
+        moduleName: "tenant-partner",
+        actionName: "tenant_session.revoke",
+        resourceType: "tenant_session",
+        resourceId: sessionId,
+        newValuesSummary: {
+          status: "revoked",
+          reason: command.reason?.trim() || "tenant_admin_revocation",
+        },
+        ...(requestId ? { requestId } : {}),
+      });
+    }
+    return toApiSuccessEnvelope(
+      revoked
+        ? this.toTenantSessionInventory(revoked, normalizedTenantId)
+        : null,
+      requestId,
+    );
+  }
+
   @Get("tenant/roles")
   @OpenRoute()
   @Throttle(READ_HEAVY_RATE_LIMIT)
@@ -1301,32 +1670,92 @@ export class TenantPartnerController {
   }
 
   @Post("tenant/users")
-  createTenantUser(
+  async createTenantUser(
     @Body() command: CreateTenantUserCommand,
+    @CurrentIdentity() identity: IdentityContext | null,
     @Headers("x-tenant-id") tenantId?: string,
     @Headers("x-request-id") requestId?: string,
   ) {
     return toApiSuccessEnvelope(
-      this.tenantPartnerService.createTenantUser(
-        this.requireTenantId(tenantId),
-        command,
-        requestId,
+      await Promise.resolve(
+        this.tenantPartnerService.createTenantUser(
+          this.requireTenantId(tenantId),
+          command,
+          requestId,
+          identity,
+        ),
       ),
       requestId,
     );
   }
 
   @Post("tenant/users/:userId/role")
-  updateTenantRole(
+  async updateTenantRole(
     @Param("userId") userId: string,
     @Body() command: UpdateTenantRoleCommand,
+    @CurrentIdentity() identity: IdentityContext | null,
     @Headers("x-tenant-id") tenantId?: string,
     @Headers("x-request-id") requestId?: string,
   ) {
     return toApiSuccessEnvelope(
-      this.tenantPartnerService.updateTenantUserRole(
+      await Promise.resolve(
+        this.tenantPartnerService.updateTenantUserRole(
+          this.requireTenantId(tenantId),
+          userId,
+          command,
+          requestId,
+          identity,
+        ),
+      ),
+      requestId,
+    );
+  }
+
+  @Post("tenant/users/:userId/invitation/resend")
+  async resendTenantInvitation(
+    @Param("userId") userId: string,
+    @CurrentIdentity() identity: IdentityContext | null,
+    @Headers("x-tenant-id") tenantId?: string,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    return toApiSuccessEnvelope(
+      await this.tenantPartnerService.resendTenantInvitation(
         this.requireTenantId(tenantId),
         userId,
+        requestId,
+        identity,
+      ),
+      requestId,
+    );
+  }
+
+  @Post("tenant/users/:userId/invitation/revoke")
+  async revokeTenantInvitation(
+    @Param("userId") userId: string,
+    @CurrentIdentity() identity: IdentityContext | null,
+    @Headers("x-tenant-id") tenantId?: string,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    return toApiSuccessEnvelope(
+      await this.tenantPartnerService.revokeTenantInvitation(
+        this.requireTenantId(tenantId),
+        userId,
+        requestId,
+        identity,
+      ),
+      requestId,
+    );
+  }
+
+  @OpenRoute()
+  @Throttle(OPEN_ROUTE_RATE_LIMIT)
+  @Post("tenant/invitations/accept")
+  async acceptTenantInvitation(
+    @Body() command: AcceptTenantInvitationCommand,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    return toApiSuccessEnvelope(
+      await this.tenantPartnerService.acceptTenantInvitation(
         command,
         requestId,
       ),
@@ -1334,63 +1763,221 @@ export class TenantPartnerController {
     );
   }
 
+  listApiKeys(
+    tenantId?: string,
+    requestId?: string,
+    identity?: IdentityContext | null,
+  ): ApiSuccessEnvelope<ApiListData<TenantApiKeyRecord & Record<string, unknown>>>;
+  listApiKeys(
+    tenantId?: string,
+    requestId?: string,
+    identity?: IdentityContext | null,
+    apiKeyHeader?: string,
+    tenantApiKeyHeader?: string,
+    authorizationHeader?: string,
+  ):
+    | ApiSuccessEnvelope<ApiListData<TenantApiKeyRecord & Record<string, unknown>>>
+    | Promise<ApiSuccessEnvelope<ApiListData<TenantApiKeyRecord & Record<string, unknown>>>>;
   @Get("tenant/api-keys")
   @Throttle(READ_HEAVY_RATE_LIMIT)
   listApiKeys(
     @Headers("x-tenant-id") tenantId?: string,
     @Headers("x-request-id") requestId?: string,
-  ) {
+    @CurrentIdentity() identity?: IdentityContext | null,
+    @Headers("x-api-key") apiKeyHeader?: string,
+    @Headers("x-tenant-api-key") tenantApiKeyHeader?: string,
+    @Headers("authorization") authorizationHeader?: string,
+  ):
+    | ApiSuccessEnvelope<ApiListData<TenantApiKeyRecord & Record<string, unknown>>>
+    | Promise<ApiSuccessEnvelope<ApiListData<TenantApiKeyRecord & Record<string, unknown>>>> {
+    const resolvedTenantId = this.requireTenantId(tenantId);
+    const resolvedIdentity =
+      identity ??
+      (typeof requestId === "object"
+        ? (requestId as IdentityContext | null)
+        : undefined);
+    const resolvedRequestId =
+      typeof requestId === "string" ? requestId : undefined;
+
+    const apiKey =
+      apiKeyHeader ||
+      tenantApiKeyHeader ||
+      (typeof authorizationHeader === "string" &&
+      authorizationHeader.startsWith("Bearer ") &&
+      authorizationHeader.includes("tk_")
+        ? authorizationHeader.slice(7).trim()
+        : undefined);
+
+    if (apiKey) {
+      const resolution = this.tenantPartnerService.authenticateTenantApiKey(
+        apiKey,
+        {
+          tenantId: resolvedTenantId,
+          requiredScopes: ["tenant:read"],
+          requestId: resolvedRequestId,
+          workload: "tenant_api_list",
+        },
+      );
+      if (isPromiseLike(resolution)) {
+        return resolution.then((res) => {
+          const items = this.tenantPartnerService.listApiKeys(
+            resolvedTenantId,
+            res.identity,
+          );
+          return toApiSuccessEnvelope(toApiListData(items), resolvedRequestId);
+        });
+      }
+      const items = this.tenantPartnerService.listApiKeys(
+        resolvedTenantId,
+        resolution.identity,
+      );
+      return toApiSuccessEnvelope(toApiListData(items), resolvedRequestId);
+    }
+
     const items = this.tenantPartnerService.listApiKeys(
-      this.requireTenantId(tenantId),
+      resolvedTenantId,
+      resolvedIdentity,
     );
-    return toApiSuccessEnvelope(toApiListData(items), requestId);
+    return toApiSuccessEnvelope(toApiListData(items), resolvedRequestId);
+  }
+
+  @Post("tenant/api-keys/authenticate")
+  async authenticateApiKey(
+    @Body() command?: { apiKey?: string; requiredScopes?: string[] },
+    @Headers("x-api-key") apiKeyHeader?: string,
+    @Headers("x-tenant-api-key") tenantApiKeyHeader?: string,
+    @Headers("authorization") authorizationHeader?: string,
+    @Headers("x-tenant-id") tenantId?: string,
+    @Headers("x-request-id") requestId?: string,
+    @Headers("idempotency-key") idempotencyKey?: string,
+  ) {
+    void idempotencyKey;
+    const rawKey =
+      command?.apiKey ||
+      apiKeyHeader ||
+      tenantApiKeyHeader ||
+      (typeof authorizationHeader === "string" &&
+      authorizationHeader.startsWith("Bearer ")
+        ? authorizationHeader.slice(7).trim()
+        : undefined);
+
+    const resolution = await Promise.resolve(
+      this.tenantPartnerService.authenticateTenantApiKey(rawKey ?? "", {
+        tenantId: tenantId ?? null,
+        requiredScopes: command?.requiredScopes,
+        workload: "tenant_api_authenticate",
+        requestId,
+      }),
+    );
+
+    return toApiSuccessEnvelope(
+      {
+        authenticated: true,
+        apiKey: this.tenantPartnerService.toApiKeyResponse(resolution.apiKey),
+        identity: resolution.identity,
+      },
+      requestId,
+    );
+  }
+
+  @Post("tenant/api-keys/exchange")
+  async exchangeApiKey(
+    @Body() command?: { apiKey?: string; requiredScopes?: string[] },
+    @Headers("x-api-key") apiKeyHeader?: string,
+    @Headers("x-tenant-api-key") tenantApiKeyHeader?: string,
+    @Headers("authorization") authorizationHeader?: string,
+    @Headers("x-tenant-id") tenantId?: string,
+    @Headers("x-request-id") requestId?: string,
+    @Headers("idempotency-key") idempotencyKey?: string,
+  ) {
+    void idempotencyKey;
+    const rawKey =
+      command?.apiKey ||
+      apiKeyHeader ||
+      tenantApiKeyHeader ||
+      (typeof authorizationHeader === "string" &&
+      authorizationHeader.startsWith("Bearer ")
+        ? authorizationHeader.slice(7).trim()
+        : undefined);
+
+    const resolution = await Promise.resolve(
+      this.tenantPartnerService.authenticateTenantApiKey(rawKey ?? "", {
+        tenantId: tenantId ?? null,
+        requiredScopes: command?.requiredScopes,
+        workload: "tenant_api_exchange",
+        requestId,
+      }),
+    );
+
+    return toApiSuccessEnvelope(
+      {
+        tokenType: "Bearer",
+        apiKeyId: resolution.apiKey.apiKeyId,
+        tenantId: resolution.apiKey.tenantId,
+        scopes: resolution.apiKey.scopes,
+        identity: resolution.identity,
+      },
+      requestId,
+    );
   }
 
   @Post("tenant/api-keys")
-  issueApiKey(
+  async issueApiKey(
     @Body() command: IssueTenantApiKeyCommand,
+    @CurrentIdentity() identity: IdentityContext | null,
     @Headers("x-tenant-id") tenantId?: string,
     @Headers("x-request-id") requestId?: string,
   ) {
     return toApiSuccessEnvelope(
-      this.tenantPartnerService.issueApiKey(
-        this.requireTenantId(tenantId),
-        command,
-        requestId,
+      await Promise.resolve(
+        this.tenantPartnerService.issueApiKey(
+          this.requireTenantId(tenantId),
+          command,
+          requestId,
+          identity,
+        ),
       ),
       requestId,
     );
   }
 
   @Post("tenant/api-keys/:apiKeyId/revoke")
-  revokeApiKey(
+  async revokeApiKey(
     @Param("apiKeyId") apiKeyId: string,
+    @CurrentIdentity() identity: IdentityContext | null,
     @Headers("x-tenant-id") tenantId?: string,
     @Headers("x-request-id") requestId?: string,
   ) {
     return toApiSuccessEnvelope(
-      this.tenantPartnerService.revokeApiKey(
-        this.requireTenantId(tenantId),
-        apiKeyId,
-        requestId,
+      await Promise.resolve(
+        this.tenantPartnerService.revokeApiKey(
+          this.requireTenantId(tenantId),
+          apiKeyId,
+          requestId,
+          identity,
+        ),
       ),
       requestId,
     );
   }
 
   @Post("tenant/api-keys/:apiKeyId/rotate")
-  rotateApiKey(
+  async rotateApiKey(
     @Param("apiKeyId") apiKeyId: string,
     @Body() command: RotateTenantApiKeyCommand,
+    @CurrentIdentity() identity: IdentityContext | null,
     @Headers("x-tenant-id") tenantId?: string,
     @Headers("x-request-id") requestId?: string,
   ) {
     return toApiSuccessEnvelope(
-      this.tenantPartnerService.rotateApiKey(
-        this.requireTenantId(tenantId),
-        apiKeyId,
-        command,
-        requestId,
+      await Promise.resolve(
+        this.tenantPartnerService.rotateApiKey(
+          this.requireTenantId(tenantId),
+          apiKeyId,
+          command,
+          requestId,
+          identity,
+        ),
       ),
       requestId,
     );
@@ -1485,21 +2072,33 @@ export class TenantPartnerController {
   @Post("tenant/webhooks/test")
   async sendTestWebhook(
     @Body() command: SendTestWebhookCommand,
+    @Res({ passthrough: true }) response: PassthroughResponseLike,
     @Headers("x-tenant-id") tenantId?: string,
+    @Headers("idempotency-key") idempotencyKey?: string,
     @Headers("x-request-id") requestId?: string,
   ) {
-    const result = await this.tenantPartnerService.sendTestWebhook(
-      this.requireTenantId(tenantId),
-      command,
-      requestId,
-    );
-    return toApiSuccessEnvelope(
-      result ?? {
-        deliveryId: null,
-        httpStatus: 404,
-      },
-      requestId,
-    );
+    const resolvedTenantId = this.requireTenantId(tenantId);
+    const result = await this.idempotencyService.execute({
+      scope: `tenant:${resolvedTenantId}:webhook_test_send`,
+      idempotencyKey,
+      tenantId: resolvedTenantId,
+      requestPath: "tenant/webhooks/test",
+      payload: command,
+      execute: async () => ({
+        data: (await this.tenantPartnerService.sendTestWebhook(
+          resolvedTenantId,
+          command,
+          requestId,
+        )) ?? {
+          deliveryId: null,
+          httpStatus: 404,
+        },
+        statusCode: HttpStatus.CREATED,
+      }),
+    });
+
+    applyIdempotentResponseHeaders(response, result);
+    return toApiSuccessEnvelope(result.data, requestId);
   }
 
   @Post("tenant/webhooks/:webhookId")
@@ -1653,6 +2252,7 @@ export class TenantPartnerController {
   @Post("tenant/sla")
   updateSlaProfile(
     @Body() command: UpdateTenantSlaProfileCommand,
+    @CurrentIdentity() identity: IdentityContext | null,
     @Headers("x-tenant-id") tenantId?: string,
     @Headers("x-actor-id") actorId?: string,
     @Headers("x-request-id") requestId?: string,
@@ -1663,6 +2263,7 @@ export class TenantPartnerController {
         command,
         actorId,
         requestId,
+        identity,
       ),
       requestId,
     );

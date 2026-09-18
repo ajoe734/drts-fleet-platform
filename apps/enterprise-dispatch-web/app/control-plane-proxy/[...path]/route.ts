@@ -1,4 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
+import {
+  ENTERPRISE_TENANT_SESSION_COOKIE,
+  verifyEnterpriseTenantSession,
+} from "@/lib/enterprise-session.server";
 
 const DEFAULT_API_BASE_URL = "http://localhost:3001";
 const DEFAULT_ENTERPRISE_DISPATCH_TENANT_ID =
@@ -69,15 +73,19 @@ function isAllowedEnterprisePath(path: string[], method: string) {
     return true;
   }
 
-  if (isTenantBookingPath(path) && path.length === 2 && method === "POST") {
-    return true;
+  if (!isTenantBookingPath(path)) {
+    return false;
   }
 
-  if (isTenantBookingPath(path) && path.length === 3 && method === "GET") {
-    return true;
+  // The client exposes exactly this tenant-booking lifecycle. Keep the BFF
+  // narrow while allowing every operation it deliberately publishes.
+  if (path.length === 2) {
+    return method === "GET" || method === "POST";
   }
-
-  return false;
+  if (path.length === 3) {
+    return method === "GET" || method === "PUT" || method === "PATCH";
+  }
+  return path.length === 4 && path[3] === "cancel" && method === "POST";
 }
 
 function buildTargetUrl(request: NextRequest, path: string[]) {
@@ -104,11 +112,48 @@ function resolveEnterpriseActorId(): string {
   );
 }
 
+function isGoogleOrCloudRunIdToken(token: string): boolean {
+  try {
+    const parts = token.split(".");
+    if (parts.length !== 3) return false;
+    const payloadPart = parts[1];
+    if (!payloadPart) return false;
+    const payload = JSON.parse(
+      Buffer.from(payloadPart, "base64url").toString("utf-8"),
+    );
+    if (
+      payload.iss === "https://accounts.google.com" ||
+      payload.iss === "accounts.google.com"
+    ) {
+      return true;
+    }
+    if (
+      typeof payload.aud === "string" &&
+      (payload.aud.includes(".a.run.app") || payload.aud.includes(".run.app"))
+    ) {
+      return true;
+    }
+    return false;
+  } catch {
+    return false;
+  }
+}
+
+function isCloudRunIngressAuthorization(headerValue: string): boolean {
+  const match = headerValue.match(/^Bearer\s+(.+)$/i);
+  if (!match || !match[1]) return false;
+  return isGoogleOrCloudRunIdToken(match[1].trim());
+}
+
 function copyRequestHeaders(request: NextRequest, path: string[]) {
   const headers = new Headers();
 
   request.headers.forEach((value, key) => {
-    if (REQUEST_HEADER_BLOCKLIST.has(key.toLowerCase())) {
+    const lowerKey = key.toLowerCase();
+    if (REQUEST_HEADER_BLOCKLIST.has(lowerKey)) {
+      return;
+    }
+    if (lowerKey === "authorization" && isCloudRunIngressAuthorization(value)) {
       return;
     }
     headers.set(key, value);
@@ -206,6 +251,30 @@ async function forward(
 
   const targetUrl = buildTargetUrl(request, path);
   const headers = copyRequestHeaders(request, path);
+  if (method === "GET" && isTenantBookingPath(path)) {
+    const verified = await verifyEnterpriseTenantSession(
+      request.cookies.get(ENTERPRISE_TENANT_SESSION_COOKIE)?.value,
+      resolveTargetOrigin(),
+    );
+    if (!verified.session) {
+      return NextResponse.json(
+        { error: "ENTERPRISE_TENANT_SESSION_REQUIRED" },
+        { status: verified.status },
+      );
+    }
+    const requestedTenant = request.headers.get("x-tenant-id")?.trim();
+    if (requestedTenant && requestedTenant !== verified.session.tenantId) {
+      return NextResponse.json(
+        { error: "TENANT_SCOPE_MISMATCH" },
+        { status: 403 },
+      );
+    }
+    for (const name of ["x-realm", "x-actor-type", "x-actor-id"])
+      headers.delete(name);
+    headers.delete("x-drts-authorization");
+    headers.set("authorization", `Bearer ${verified.session.accessToken}`);
+    headers.set("x-tenant-id", verified.session.tenantId);
+  }
   await applyUpstreamAuth(headers, targetUrl);
 
   const init: RequestInit = {
@@ -246,6 +315,13 @@ export async function GET(
 }
 
 export async function POST(
+  request: NextRequest,
+  context: { params: Promise<{ path: string[] }> },
+) {
+  return forward(request, context);
+}
+
+export async function PUT(
   request: NextRequest,
   context: { params: Promise<{ path: string[] }> },
 ) {

@@ -59,7 +59,7 @@ GOOGLE_MAPS_GEOCODING_API_KEY=... \
 GOOGLE_MAPS_ROUTES_API_KEY=... \
 GOOGLE_MAPS_BROWSER_KEY=... \
 MAP_PROVIDER_SMOKE_ORIGIN=https://ops.example.com \
-node scripts/verify-google-map-provider-live.mjs
+node operations/verification/verify-google-map-provider-live.mjs
 ```
 
 Expected result:

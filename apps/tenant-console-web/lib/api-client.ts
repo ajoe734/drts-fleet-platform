@@ -1,28 +1,55 @@
-import { ApiClient, createTenantClient } from "@drts/api-client";
+import { cookies } from "next/headers";
+import { redirect } from "next/navigation";
+import { ApiClient, createTenantBearerClient } from "@drts/api-client";
 import { getServerApiBaseUrl } from "./runtime-config";
+import {
+  TENANT_SESSION_COOKIE_NAME,
+  TENANT_LOGIN_PATH,
+} from "./auth/constants";
+import {
+  type VerifiedTenantSession,
+  verifyTenantSession,
+} from "./auth/verified-tenant-session.server";
 
-const API_URL = getServerApiBaseUrl();
-const DEFAULT_TENANT_ID = "tenant-demo-001";
-const DEMO_ACTOR_ID = "demo-tenant-user";
+export const API_URL = getServerApiBaseUrl();
 
-function resolveTenantId() {
-  return (
-    process.env.DRTS_TENANT_CONSOLE_TENANT_ID?.trim() ||
-    process.env.DRTS_TENANT_ID?.trim() ||
-    DEFAULT_TENANT_ID
+export async function getTenantSession(): Promise<VerifiedTenantSession | null> {
+  try {
+    const cookieStore = await cookies();
+    const token = cookieStore.get(TENANT_SESSION_COOKIE_NAME)?.value?.trim();
+    if (!token) {
+      return null;
+    }
+    return (await verifyTenantSession(token, API_URL)).session;
+  } catch {
+    return null;
+  }
+}
+
+export function createTenantBearerClientFromSession(
+  session: VerifiedTenantSession,
+): ApiClient {
+  return createTenantBearerClient(
+    API_URL,
+    session.accessToken,
+    session.tenantId,
   );
 }
 
-const DEMO_TENANT_ID = resolveTenantId();
-
-let client: ApiClient | null = null;
-
-export function getTenantClient(): ApiClient {
-  if (!client) {
-    client = createTenantClient(API_URL, DEMO_TENANT_ID, DEMO_ACTOR_ID);
+export async function getTenantClient(): Promise<ApiClient> {
+  const session = await getTenantSession();
+  if (!session) {
+    redirect(TENANT_LOGIN_PATH);
   }
-
-  return client;
+  return createTenantBearerClientFromSession(session);
 }
 
-export { API_URL, DEMO_ACTOR_ID, DEMO_TENANT_ID };
+export async function getTenantClientForRouteHandler(): Promise<ApiClient | null> {
+  const session = await getTenantSession();
+  if (!session) {
+    return null;
+  }
+  return createTenantBearerClientFromSession(session);
+}
+
+export { createBrowserApiClient } from "./browser-api-client";

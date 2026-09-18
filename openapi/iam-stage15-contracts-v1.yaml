@@ -1,0 +1,951 @@
+openapi: 3.1.0
+info:
+  title: DRTS IAM Stage 1.5 Contracts
+  version: 2026-08-01.v1
+  description: >
+    Canonical IAM session, account, membership, invitation, approval, access review,
+    break-glass, device, and credential contracts for Stage 1.5 hardening.
+  license:
+    name: Proprietary
+servers:
+  - url: https://api.dev.drts.example.com
+tags:
+  - name: IAM
+    description: Identity context, access review, and break-glass surfaces.
+  - name: Session
+    description: Session exchange, bootstrap, and refresh workflows.
+  - name: Account
+    description: Tenant membership and account administration workflows.
+  - name: Role
+    description: Tenant role catalog and role assignment mutations.
+  - name: Approval
+    description: Approval-request lifecycle and eligibility decision workflows.
+  - name: Credential
+    description: API key, device, and partner-ingress credential operations.
+security:
+  - BearerAuth: []
+paths:
+  /api/auth/tenant/callback-session:
+    post:
+      summary: Exchange a tenant identity-provider callback for an authenticated session.
+      operationId: exchangeTenantCallbackSession
+      tags: [Session]
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/IamCallbackSessionExchangeCommand"
+      responses:
+        "201":
+          description: Callback session exchanged.
+        "403":
+          $ref: "#/components/responses/IamPublicAuthDenied"
+  /api/auth/tenant/oidc-session:
+    post:
+      summary: Exchange a verified tenant OIDC ID token for an authenticated session.
+      operationId: exchangeTenantOidcSession
+      tags: [Session]
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/TenantOidcSessionExchangeCommand"
+      responses:
+        "201":
+          description: Tenant OIDC session exchanged.
+        "403":
+          $ref: "#/components/responses/IamPublicAuthDenied"
+  /api/auth/partner/callback-session:
+    post:
+      summary: Exchange a partner identity-provider callback for an authenticated session.
+      operationId: exchangePartnerCallbackSession
+      tags: [Session]
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/IamCallbackSessionExchangeCommand"
+      responses:
+        "201":
+          description: Partner callback session exchanged.
+        "403":
+          $ref: "#/components/responses/IamPublicAuthDenied"
+  /api/auth/{realm}/login:
+    get:
+      summary: Initiate OIDC authorization code flow with PKCE for tenant or partner realm.
+      operationId: getOidcLoginUrl
+      tags: [Session]
+      security: []
+      parameters:
+        - name: realm
+          in: path
+          required: true
+          schema:
+            type: string
+            enum: [tenant, partner]
+      responses:
+        "200":
+          description: Authorization URL returned.
+  /api/auth/{realm}/callback:
+    get:
+      summary: Handle OIDC authorization code callback redirect.
+      operationId: processOidcCallback
+      tags: [Session]
+      security: []
+      parameters:
+        - name: realm
+          in: path
+          required: true
+          schema:
+            type: string
+            enum: [tenant, partner]
+      responses:
+        "200":
+          description: Callback processed.
+  /api/auth/session:
+    get:
+      summary: Retrieve current authenticated session status and profile identity.
+      operationId: getAuthSession
+      tags: [Session]
+      responses:
+        "200":
+          description: Active session returned.
+  /api/auth/logout:
+    post:
+      summary: Revoke active HttpOnly session and clear authentication cookies.
+      operationId: revokeAuthSession
+      tags: [Session]
+      responses:
+        "200":
+          description: Session revoked and cookies cleared.
+  /api/auth/tenant/bootstrap-session:
+    post:
+      summary: Bootstrap a tenant-authenticated browser session.
+      operationId: createTenantBootstrapSession
+      tags: [Session]
+      security: []
+      responses:
+        "201":
+          description: Bootstrap session issued.
+        "403":
+          $ref: "#/components/responses/IamPublicAuthDenied"
+  /api/auth/partner/bootstrap-session:
+    post:
+      summary: Bootstrap a partner-authenticated browser session.
+      operationId: createPartnerBootstrapSession
+      tags: [Session]
+      security: []
+      responses:
+        "201":
+          description: Partner bootstrap session issued.
+        "401":
+          $ref: "#/components/responses/IamPublicCredentialDenied"
+  /api/auth/driver/device/register:
+    post:
+      summary: Register a driver device and issue its initial device session.
+      operationId: registerDriverDeviceSession
+      tags: [Session, Credential]
+      security: []
+  /api/auth/driver/device/refresh:
+    post:
+      summary: Refresh a driver device session without exposing registry state.
+      operationId: refreshDriverDeviceSession
+      tags: [Session, Credential]
+      security: []
+  /api/auth/driver/device/revoke:
+    post:
+      summary: Revoke a driver device binding using mutation metadata.
+      operationId: revokeDriverDeviceBinding
+      tags: [Session, Credential]
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/IamCredentialMutationCommand"
+  /api/auth/logout:
+    post:
+      summary: Revoke the active authenticated session for the caller.
+      operationId: logoutSelfSession
+      tags: [Session]
+  /api/auth/logout-all:
+    post:
+      summary: Revoke all active sessions belonging to the caller principal.
+      operationId: logoutAllSelfSessions
+      tags: [Session]
+  /api/auth/sessions:
+    get:
+      summary: Return masked self session inventory for the active principal.
+      operationId: listSelfSessions
+      tags: [Session]
+  /api/auth/sessions/{sid}/revoke:
+    post:
+      summary: Revoke a specific session with CSRF and concurrency checks.
+      operationId: revokeSelfSession
+      tags: [Session]
+      parameters:
+        - name: sid
+          in: path
+          required: true
+          schema:
+            type: string
+  /api/identity/sessions:
+    get:
+      summary: Return tenant/role-bounded admin session inventory with masked summaries.
+      operationId: listAdminSessions
+      tags: [Session, IAM]
+  /api/identity/sessions/{sid}/revoke:
+    post:
+      summary: Boundary-safe admin remote revoke of a target session.
+      operationId: revokeAdminSession
+      tags: [Session, IAM]
+      parameters:
+        - name: sid
+          in: path
+          required: true
+          schema:
+            type: string
+  /api/identity/context:
+    get:
+      summary: Return the caller identity context and active IAM authority.
+      operationId: getIdentityContext
+      tags: [IAM]
+  /api/identity/step-up-proofs:
+    post:
+      summary: Create a short-lived step-up proof for a privileged IAM action.
+      operationId: createStepUpProof
+      tags: [IAM]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateStepUpProofCommand"
+      responses:
+        "200":
+          description: Step-up proof evaluated and returned.
+        "403":
+          description: Trusted MFA or fresh step-up is required before proof issuance.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PublicErrorEnvelope"
+              examples:
+                mfaRequired:
+                  value:
+                    error:
+                      code: MFA_REQUIRED
+                      message: Trusted multi-factor authentication is required before step-up proof can be issued.
+                      retryable: false
+                freshStepUpRequired:
+                  value:
+                    error:
+                      code: STEP_UP_REQUIRED
+                      message: A fresh step-up verification is required for this privileged action.
+                      retryable: false
+  /api/tenant/users:
+    get:
+      summary: List tenant users and membership states for the active tenant.
+      operationId: listTenantUsers
+      tags: [Account]
+    post:
+      summary: Create or invite a tenant user under the active tenant.
+      operationId: createTenantUser
+      tags: [Account]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateTenantUserCommand"
+  /api/tenant/users/{userId}/role:
+    post:
+      summary: Update a tenant user's role assignment and membership status.
+      operationId: updateTenantUserRole
+      tags: [Role]
+      parameters:
+        - name: userId
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateTenantRoleCommand"
+  /api/tenant/roles:
+    get:
+      summary: List the canonical tenant role catalog.
+      operationId: listTenantRoles
+      tags: [Role]
+  /api/tenant/approval-requests:
+    get:
+      summary: List approval requests visible to the active tenant authority.
+      operationId: listTenantApprovalRequests
+      tags: [Approval]
+  /api/tenant/approval-requests/{approvalRequestId}:
+    get:
+      summary: Fetch a single tenant approval request.
+      operationId: getTenantApprovalRequest
+      tags: [Approval]
+      parameters:
+        - name: approvalRequestId
+          in: path
+          required: true
+          schema:
+            type: string
+  /api/tenant/approval-requests/{approvalRequestId}/approve:
+    post:
+      summary: Approve a tenant approval request with mutation metadata.
+      operationId: approveTenantApprovalRequest
+      tags: [Approval]
+      parameters:
+        - name: approvalRequestId
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/IamApprovalDecisionCommand"
+  /api/tenant/approval-requests/{approvalRequestId}/reject:
+    post:
+      summary: Reject a tenant approval request with mutation metadata.
+      operationId: rejectTenantApprovalRequest
+      tags: [Approval]
+      parameters:
+        - name: approvalRequestId
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/IamApprovalDecisionCommand"
+  /api/tenant/approval-requests/{approvalRequestId}/escalate:
+    post:
+      summary: Escalate a tenant approval request for higher-order review.
+      operationId: escalateTenantApprovalRequest
+      tags: [Approval]
+      parameters:
+        - name: approvalRequestId
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/IamApprovalDecisionCommand"
+  /api/ops/approval-requests:
+    get:
+      summary: List approval requests that require operations review.
+      operationId: listOpsApprovalRequests
+      tags: [Approval]
+  /api/ops/partner/eligibility/reviews/resolve:
+    post:
+      summary: Resolve a partner eligibility review outcome.
+      operationId: resolvePartnerEligibilityReview
+      tags: [Approval]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ResolvePartnerEligibilityReviewCommand"
+  /api/tenant/api-keys:
+    get:
+      summary: List tenant API keys available to the active tenant authority.
+      operationId: listTenantApiKeys
+      tags: [Credential]
+    post:
+      summary: Issue a tenant API key with optional expiry metadata.
+      operationId: issueTenantApiKey
+      tags: [Credential]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/IssueTenantApiKeyCommand"
+  /api/tenant/api-keys/{apiKeyId}/revoke:
+    post:
+      summary: Revoke a tenant API key with reason and concurrency metadata.
+      operationId: revokeTenantApiKey
+      tags: [Credential]
+      parameters:
+        - name: apiKeyId
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/IamCredentialMutationCommand"
+  /api/tenant/api-keys/{apiKeyId}/rotate:
+    post:
+      summary: Rotate a tenant API key and replace its active secret material.
+      operationId: rotateTenantApiKey
+      tags: [Credential]
+      parameters:
+        - name: apiKeyId
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RotateTenantApiKeyCommand"
+  /api/platform-admin/partner-entries/{entrySlug}/credentials/issue:
+    post:
+      summary: Issue a partner ingress credential for a published partner entry.
+      operationId: issuePartnerIngressCredential
+      tags: [Credential]
+      parameters:
+        - name: entrySlug
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/IssuePartnerIngressCredentialCommand"
+  /api/platform-admin/partner-entries/{entrySlug}/credentials/{keyId}/revoke:
+    post:
+      summary: Revoke a partner ingress credential for a published partner entry.
+      operationId: revokePartnerIngressCredential
+      tags: [Credential]
+      parameters:
+        - name: entrySlug
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: keyId
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RevokePartnerIngressCredentialCommand"
+  /api/platform-admin/access-reviews:
+    get:
+      summary: List platform access reviews that require administrative action.
+      operationId: listAccessReviews
+      tags: [IAM]
+  /api/platform-admin/access-reviews/{reviewId}/decision:
+    post:
+      summary: Decide a platform access review with auditable mutation metadata.
+      operationId: decideAccessReview
+      tags: [IAM]
+      parameters:
+        - name: reviewId
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/IamAccessReviewDecisionCommand"
+  /api/platform-admin/break-glass/requests:
+    post:
+      summary: Create a break-glass access request.
+      operationId: createBreakGlassRequest
+      tags: [IAM]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateBreakGlassRequestCommand"
+  /api/platform-admin/break-glass/requests/{requestId}/approve:
+    post:
+      summary: Approve a break-glass access request.
+      operationId: approveBreakGlassRequest
+      tags: [IAM]
+      parameters:
+        - name: requestId
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ApproveBreakGlassRequestCommand"
+  /api/platform-admin/break-glass/requests/{requestId}/activate:
+    post:
+      summary: Activate an independently approved break-glass request with a maximum 60-minute non-refreshable session.
+      operationId: activateBreakGlassRequest
+      tags: [IAM]
+      parameters:
+        - name: requestId
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/IamBreakGlassActivationCommand"
+  /api/platform-admin/break-glass/requests/{requestId}/close:
+    post:
+      summary: Close a break-glass grant, revoke its session, and require post-use review.
+      operationId: closeBreakGlassGrant
+      tags: [IAM]
+      parameters:
+        - name: requestId
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CloseBreakGlassGrantCommand"
+  /api/identity/privileged-role-requests:
+    post:
+      summary: Request a privileged role assignment.
+      operationId: createPrivilegedRoleRequest
+      tags: [Approval]
+    get:
+      summary: List privileged role requests.
+      operationId: listPrivilegedRoleRequests
+      tags: [Approval]
+  /api/identity/privileged-role-requests/{requestId}:
+    get:
+      summary: Get details of a privileged role request.
+      operationId: getPrivilegedRoleRequest
+      tags: [Approval]
+  /api/identity/privileged-role-requests/{requestId}/approve:
+    post:
+      summary: Approve a privileged role request.
+      operationId: approvePrivilegedRoleRequest
+      tags: [Approval]
+  /api/identity/privileged-role-requests/{requestId}/reject:
+    post:
+      summary: Reject a privileged role request.
+      operationId: rejectPrivilegedRoleRequest
+      tags: [Approval]
+  /api/identity/privileged-role-grants/remove:
+    post:
+      summary: Remove or demote a privileged role grant.
+      operationId: removePrivilegedRoleGrant
+      tags: [Approval]
+  /api/identity/privileged-role-grants/process-expiries:
+    post:
+      summary: Process expired privileged role grants.
+      operationId: processExpiredPrivilegedRoleGrants
+      tags: [Approval]
+components:
+  responses:
+    IamPublicAuthDenied:
+      description: Authentication exchange denied without revealing membership details.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/PublicErrorEnvelope"
+          examples:
+            denied:
+              value:
+                error:
+                  code: AUTH_SESSION_EXCHANGE_DENIED
+                  message: The authentication proof could not be matched to an active session exchange.
+                  retryable: false
+    IamPublicCredentialDenied:
+      description: Credential exchange denied without revealing registry details.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/PublicErrorEnvelope"
+          examples:
+            denied:
+              value:
+                error:
+                  code: AUTH_CREDENTIALS_INVALID
+                  message: The supplied authentication credentials are invalid for this exchange.
+                  retryable: false
+  schemas:
+    IamMutationMetadata:
+      type: object
+      required:
+        - reasonCode
+        - expectedVersion
+      properties:
+        reasonCode:
+          type: string
+        expectedVersion:
+          type: integer
+          minimum: 0
+        approvalId:
+          type: [string, "null"]
+        approvalRequestId:
+          type: [string, "null"]
+        stepUpReference:
+          type: [string, "null"]
+        note:
+          type: [string, "null"]
+    IamCallbackSessionExchangeCommand:
+      type: object
+      required:
+        - provider
+        - callbackUrl
+        - code
+        - state
+      properties:
+        provider:
+          type: string
+          enum: [oidc]
+        callbackUrl:
+          type: string
+        code:
+          type: string
+        state:
+          type: string
+          type: [string, "null"]
+        tenantId:
+          type: [string, "null"]
+        partnerId:
+          type: [string, "null"]
+    TenantOidcSessionExchangeCommand:
+      type: object
+      required:
+        - idToken
+      properties:
+        idToken:
+          description: OIDC ID token from the configured tenant workforce provider.
+        tenantId:
+          type: [string, "null"]
+    CreateStepUpProofCommand:
+      type: object
+      properties:
+        actionId:
+          type: [string, "null"]
+          enum:
+            - platform:users:create
+            - platform:users:role:update
+            - platform:access-reviews:decide
+            - platform:break-glass:request
+            - platform:break-glass:approve
+            - platform:partner-entries:create
+            - platform:partner-entries:update
+            - platform:partner-entries:activate
+            - platform:partner-entries:deactivate
+            - platform:partner-entries:revoke
+            - platform:partner-credentials:issue
+            - platform:partner-credentials:revoke
+            - platform:tenants:roles:invite
+            - platform:tenants:activate
+            - platform:multi-taxi-trip-records:export
+            - platform:evidence-exports:request
+            - platform:evidence-exports:approve
+            - platform:legal-holds:release-approve
+            - platform:regulatory-exclusivities:approve
+            - platform:regulatory-exclusivities:reject
+            - ops:partner-eligibility:reviews:resolve
+            - ops:approval-requests:acknowledge-breach
+            - ops:approval-requests:approve
+            - ops:approval-requests:reject
+            - ops:approval-requests:escalate
+            - ops:orders:manual-fare-override
+            - ops:orders:approve-override
+            - ops:orders:reject-override
+            - ops:driver-device:revoke
+            - finance:reimbursements:approve
+            - tenant:approval-requests:approve
+            - tenant:approval-requests:reject
+            - tenant:approval-requests:escalate
+            - tenant:users:create
+            - tenant:users:role:update
+            - tenant:api-keys:issue
+            - tenant:api-keys:revoke
+            - tenant:api-keys:rotate
+            - tenant:webhooks:create
+            - tenant:webhooks:update
+            - tenant:webhooks:delete
+            - tenant:webhooks:rotate-secret
+            - tenant:billing:profile:update
+        method:
+          type: [string, "null"]
+        path:
+          type: [string, "null"]
+    StepUpProof:
+      type: object
+      required:
+        - required
+        - actionId
+        - stepUpReference
+        - issuedAt
+        - expiresAt
+      properties:
+        required:
+          type: boolean
+        actionId:
+          type: [string, "null"]
+        stepUpReference:
+          type: [string, "null"]
+        issuedAt:
+          type: [string, "null"]
+          format: date-time
+        expiresAt:
+          type: [string, "null"]
+          format: date-time
+    IamApprovalDecisionCommand:
+      type: object
+      required:
+        - approvalRequestId
+        - decision
+        - mutation
+      properties:
+        approvalRequestId:
+          type: string
+        decision:
+          type: string
+          enum: [approve, reject, escalate]
+        mutation:
+          $ref: "#/components/schemas/IamMutationMetadata"
+    IamCredentialMutationCommand:
+      type: object
+      required:
+        - mutation
+      properties:
+        credentialId:
+          type: [string, "null"]
+        keyName:
+          type: [string, "null"]
+        scopes:
+          type: [array, "null"]
+          items:
+            type: string
+        expiresAt:
+          type: [string, "null"]
+          format: date-time
+        mutation:
+          $ref: "#/components/schemas/IamMutationMetadata"
+    IamAccessReviewDecisionCommand:
+      type: object
+      required:
+        - reviewId
+        - decision
+        - mutation
+      properties:
+        reviewId:
+          type: string
+        decision:
+          type: string
+          enum: [certify, revoke, defer]
+        mutation:
+          $ref: "#/components/schemas/IamMutationMetadata"
+    IamBreakGlassActivationCommand:
+      type: object
+      required:
+        - requestId
+        - requestedScope
+        - requestedDurationMinutes
+        - mutation
+      properties:
+        requestId:
+          type: string
+        requestedScope:
+          type: array
+          items:
+            type: string
+        requestedDurationMinutes:
+          type: integer
+          minimum: 1
+          maximum: 60
+        mutation:
+          $ref: "#/components/schemas/IamMutationMetadata"
+    CreateBreakGlassRequestCommand:
+      type: object
+      required:
+        [requestedScopes, reasonCode, reasonText, proofReference, mutation]
+      properties:
+        requestedScopes:
+          type: array
+          minItems: 1
+          items: { type: string }
+        reasonCode: { type: string }
+        reasonText: { type: string }
+        proofReference: { type: string }
+        mutation:
+          $ref: "#/components/schemas/IamMutationMetadata"
+    ApproveBreakGlassRequestCommand:
+      type: object
+      required: [mutation]
+      properties:
+        mutation:
+          $ref: "#/components/schemas/IamMutationMetadata"
+    CloseBreakGlassGrantCommand:
+      type: object
+      required: [mutation]
+      properties:
+        mutation:
+          $ref: "#/components/schemas/IamMutationMetadata"
+    CreateTenantUserCommand:
+      type: object
+      required:
+        - email
+        - displayName
+        - roleCode
+      properties:
+        email:
+          type: string
+        displayName:
+          type: string
+        roleCode:
+          type: string
+    UpdateTenantRoleCommand:
+      type: object
+      required:
+        - roleCode
+      properties:
+        roleCode:
+          type: string
+        status:
+          type: string
+          enum: [invited, active, suspended]
+        approvalNotificationOptOut:
+          type: boolean
+    IssueTenantApiKeyCommand:
+      type: object
+      required:
+        - keyName
+        - scopes
+      properties:
+        keyName:
+          type: string
+        scopes:
+          type: array
+          items:
+            type: string
+        expiresAt:
+          type: [string, "null"]
+          format: date-time
+    RotateTenantApiKeyCommand:
+      type: object
+      properties:
+        keyName:
+          type: string
+        scopes:
+          type: array
+          items:
+            type: string
+        expiresAt:
+          type: [string, "null"]
+          format: date-time
+    IssuePartnerIngressCredentialCommand:
+      type: object
+      properties:
+        rotationReason:
+          type: [string, "null"]
+    RevokePartnerIngressCredentialCommand:
+      type: object
+      properties:
+        revokeReason:
+          type: [string, "null"]
+    ResolvePartnerEligibilityReviewCommand:
+      type: object
+      required:
+        - eligibilityVerificationId
+        - decision
+        - reasonCode
+      properties:
+        eligibilityVerificationId:
+          type: string
+        decision:
+          type: string
+          enum: [approve, reject]
+        reasonCode:
+          type: string
+        notes:
+          type: [string, "null"]
+    PublicErrorEnvelope:
+      type: object
+      required:
+        - error
+      properties:
+        error:
+          type: object
+          required:
+            - code
+            - message
+            - retryable
+          properties:
+            code:
+              type: string
+              enum:
+                - AUTH_SESSION_EXCHANGE_DENIED
+                - AUTH_CREDENTIALS_INVALID
+                - AUTH_APPROVAL_REQUIRED
+                - AUTH_STEP_UP_REQUIRED
+                - MFA_REQUIRED
+                - STEP_UP_REQUIRED
+                - AUTHZ_SCOPE_DENIED
+                - AUTHZ_REALM_DENIED
+                - IAM_CONCURRENCY_CONFLICT
+                - IAM_REASON_REQUIRED
+                - IAM_APPROVAL_REFERENCE_REQUIRED
+                - IAM_STEP_UP_REQUIRED
+                - IAM_MEMBERSHIP_NOT_ACTIVE
+                - IAM_INVITATION_INVALID
+                - IAM_CREDENTIAL_NOT_FOUND
+                - IAM_ACCESS_REVIEW_NOT_FOUND
+                - IAM_ACCESS_REVIEW_CAMPAIGN_NOT_FOUND
+                - IAM_ACCESS_REVIEW_OVERDUE
+                - IAM_ACCESS_REVIEW_CROSS_TENANT_DENIED
+                - IAM_BREAK_GLASS_NOT_FOUND
+                - IAM_SOD_VIOLATION
+                - IAM_LAST_ADMIN_PROTECTION
+                - IAM_PRIVILEGED_APPROVAL_REQUIRED
+                - IAM_GRANT_EXPIRED
+            message:
+              type: string
+            retryable:
+              type: boolean
+            traceId:
+              type: [string, "null"]
+  securitySchemes:
+    BearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT

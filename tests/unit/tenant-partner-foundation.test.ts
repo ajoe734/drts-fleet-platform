@@ -12,6 +12,7 @@ beforeAll(() => {
 });
 
 import type {
+  IdentityContext,
   PartnerChannelEntryRecord,
   PartnerEligibilityVerificationRecord,
 } from "@drts/contracts";
@@ -187,12 +188,12 @@ describe("tenant partner foundation service", () => {
         "bank-demo-beta-airport",
         "referral-demo-community",
         "yuhe-residence",
-        "ctbc",
-        "cathay",
-        "taishin",
-        "dbs",
-        "fubon",
-        "lion",
+        "acme",
+        "contoso",
+        "fabrikam",
+        "northwind",
+        "tailspin",
+        "adventureworks",
       ]),
     );
     expect(alphaEntry).toMatchObject({
@@ -209,12 +210,12 @@ describe("tenant partner foundation service", () => {
       partnerType: "referral_channel",
       tenantId: TENANT_ID,
       programId: "program-referral-community",
-      entryHost: "app.yuhe-living.com.tw",
+      entryHost: "app.fabrikam-living.example",
       entryPath: "/embed/yuhe-residence",
-      displayName: "御和物業",
+      displayName: "法碧康物業",
       themeAccent: "#0F766E",
       brandingMetadata: {
-        displayName: "御和物業",
+        displayName: "法碧康物業",
         themeAccent: "#0F766E",
         supportEmail: null,
         supportPhone: "0800-911-200",
@@ -745,7 +746,7 @@ describe("tenant partner foundation service", () => {
     );
   });
 
-  it("manages passengers, addresses, tenant roles, and API keys as tenant source-of-truth records", () => {
+  it("manages passengers, addresses, tenant roles, and API keys as tenant source-of-truth records", async () => {
     const auditService = new AuditNotificationService();
     const tenantPartnerService = new TenantPartnerService(auditService);
 
@@ -770,7 +771,7 @@ describe("tenant partner foundation service", () => {
       },
       "address-upsert-request",
     );
-    const tenantUser = tenantPartnerService.createTenantUser(
+    const tenantUser = await tenantPartnerService.createTenantUser(
       TENANT_ID,
       {
         email: "ops-admin@example.com",
@@ -779,7 +780,7 @@ describe("tenant partner foundation service", () => {
       },
       "tenant-user-create-request",
     );
-    const updatedUser = tenantPartnerService.updateTenantUserRole(
+    const updatedUser = await tenantPartnerService.updateTenantUserRole(
       TENANT_ID,
       tenantUser.userId,
       {
@@ -788,7 +789,7 @@ describe("tenant partner foundation service", () => {
       },
       "tenant-user-update-request",
     );
-    const issuedApiKey = tenantPartnerService.issueApiKey(
+    const issuedApiKey = await tenantPartnerService.issueApiKey(
       TENANT_ID,
       {
         keyName: "Tenant Automation Key",
@@ -796,7 +797,7 @@ describe("tenant partner foundation service", () => {
       },
       "tenant-api-key-issue-request",
     );
-    const rotatedApiKey = tenantPartnerService.rotateApiKey(
+    const rotatedApiKey = await tenantPartnerService.rotateApiKey(
       TENANT_ID,
       issuedApiKey.apiKey.apiKeyId,
       {
@@ -1135,6 +1136,85 @@ describe("tenant partner foundation service", () => {
     ).toBe("Other Tenant HQ");
   });
 
+  it("rejects cross-tenant SLA update when identity tenant does not match target tenant", () => {
+    const auditService = new AuditNotificationService();
+    const tenantPartnerService = new TenantPartnerService(auditService);
+
+    const crossTenantIdentity: IdentityContext = {
+      actorType: "tenant_admin",
+      actorId: "admin-a",
+      realm: "tenant",
+      authMode: "jwt_bearer",
+      roleFamilies: ["tenant"],
+      roles: ["tenant_admin"],
+      scopes: ["tenant:sla:write"],
+      tenantId: TENANT_ID,
+      supportedExecutionModes: ["supervisor_managed_execution"],
+    };
+
+    let thrown: unknown;
+    try {
+      tenantPartnerService.updateSlaProfile(
+        OTHER_TENANT_ID,
+        { waitThresholdMin: 15 },
+        "admin-a",
+        "req-cross-sla",
+        crossTenantIdentity,
+      );
+    } catch (error) {
+      thrown = error;
+    }
+
+    expect(thrown).toBeDefined();
+    expect(
+      (
+        thrown as { getResponse?: () => { error?: { code?: string } } }
+      ).getResponse?.().error?.code,
+    ).toBe("TENANT_SCOPE_MISMATCH");
+  });
+
+  it("rejects SLA update when threshold minutes are negative", () => {
+    const auditService = new AuditNotificationService();
+    const tenantPartnerService = new TenantPartnerService(auditService);
+
+    const identity: IdentityContext = {
+      actorType: "tenant_admin",
+      actorId: "admin-a",
+      realm: "tenant",
+      authMode: "jwt_bearer",
+      roleFamilies: ["tenant"],
+      roles: ["tenant_admin"],
+      scopes: ["tenant:sla:write"],
+      tenantId: TENANT_ID,
+      supportedExecutionModes: ["supervisor_managed_execution"],
+    };
+
+    for (const field of [
+      "waitThresholdMin",
+      "arrivalThresholdMin",
+      "completionThresholdMin",
+    ] as const) {
+      let thrown: unknown;
+      try {
+        tenantPartnerService.updateSlaProfile(
+          TENANT_ID,
+          { [field]: -1 },
+          "admin-a",
+          "req-neg-sla",
+          identity,
+        );
+      } catch (error) {
+        thrown = error;
+      }
+      expect(thrown).toBeDefined();
+      expect(
+        (
+          thrown as { getResponse?: () => { error?: { code?: string } } }
+        ).getResponse?.().error?.code,
+      ).toBe("INVALID_SLA_THRESHOLD");
+    }
+  });
+
   it("publishes a tenant role catalog and rejects unsupported role assignments", () => {
     const auditService = new AuditNotificationService();
     const tenantPartnerService = new TenantPartnerService(auditService);
@@ -1308,6 +1388,16 @@ describe("tenant partner foundation service", () => {
             invitedAt: "2026-04-10T00:00:00Z",
             updatedAt: "2026-04-10T00:00:00Z",
           },
+          {
+            userId: "tenant-user-persisted-002",
+            tenantId: "tenant-demo-001",
+            email: "persisted.admin2@example.com",
+            displayName: "Persisted Admin 2",
+            roleCode: "tenant_admin",
+            status: "active",
+            invitedAt: "2026-04-10T00:00:00Z",
+            updatedAt: "2026-04-10T00:00:00Z",
+          },
         ],
         apiKeys: [persistedApiKey],
       })),
@@ -1418,9 +1508,13 @@ describe("tenant partner foundation service", () => {
     expect(persistChanges).toHaveBeenCalledWith(
       expect.objectContaining({
         apiKeys: expect.arrayContaining([
+          // Dual rotation keeps the outgoing key signing through the overlap
+          // window instead of revoking it inline; auto-revoke closes it later.
           expect.objectContaining({
             apiKeyId: "tenant-api-key-persisted-001",
-            revokedAt: expect.any(String),
+            status: "overlap_active",
+            revokedAt: null,
+            overlapEndsAt: expect.any(String),
           }),
           expect.objectContaining({
             keyName: "Persisted Tenant Key v2",
@@ -1441,9 +1535,9 @@ describe("tenant partner referral revenue-share rates (CRC-BE-006)", () => {
         partnerId: "partner_ead6bf3d-e858-47cc-bfe1-5a3742524118",
         partnerEntrySlug: "yuhe-residence",
         rateType: "percent",
-        value: 10,
+        value: 15,
         currency: "TWD",
-        effectiveFrom: "2026-07-01T00:00:00.000Z",
+        effectiveFrom: "2026-06-01T00:00:00.000Z",
         effectiveUntil: null,
         settlementDirection: "drts_pays_partner",
         channelKey: "partner_referral",
@@ -1455,6 +1549,26 @@ describe("tenant partner referral revenue-share rates (CRC-BE-006)", () => {
     expect(
       filtered.every((r) => r.partnerEntrySlug === "referral-demo-community"),
     ).toBe(true);
+  });
+
+  it("does not expose seeded referral rates in production", () => {
+    const originalAppEnv = process.env.APP_ENV;
+
+    process.env.APP_ENV = "production";
+    try {
+      const service = new TenantPartnerService(new AuditNotificationService());
+
+      expect(service.listReferralRevenueShareRules()).toEqual([]);
+      expect(
+        service.listReferralRevenueShareRules("referral-demo-community"),
+      ).toEqual([]);
+    } finally {
+      if (originalAppEnv === undefined) {
+        delete process.env.APP_ENV;
+      } else {
+        process.env.APP_ENV = originalAppEnv;
+      }
+    }
   });
 
   it("upserts a referral rate and writes an audit log", () => {

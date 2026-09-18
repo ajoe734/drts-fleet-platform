@@ -3,9 +3,11 @@ import { PlatformAdminAssistantProvider } from "@/components/assistant/route-con
 import { AdminShell } from "@/components/admin-shell";
 import { LanguageProvider } from "@/lib/i18n";
 import { PlatformAdminAuthorityProvider } from "@/lib/platform-admin-authority";
+import { BreakGlassProvider } from "@/components/break-glass-context";
 import { getServerLocale } from "@/lib/server-locale";
 import { getServerPlatformAdminAuthority } from "@/lib/server-platform-admin-authority";
 import { RuntimeConfigScript } from "@/lib/runtime-config";
+import { normalizeServerRuntimeEnv } from "@drts/ui-web";
 import "./globals.css";
 
 export const dynamic = "force-dynamic";
@@ -17,6 +19,7 @@ export default async function RootLayout({
 }) {
   const locale = await getServerLocale();
   const authority = await getServerPlatformAdminAuthority();
+  const env = normalizeServerRuntimeEnv(process.env.DRTS_ENV);
 
   return (
     <html lang={locale}>
@@ -25,7 +28,9 @@ export default async function RootLayout({
         <LanguageProvider defaultLocale={locale}>
           <PlatformAdminAuthorityProvider authority={authority}>
             <PlatformAdminAssistantProvider>
-              <AdminShell>{children}</AdminShell>
+              <BreakGlassProvider>
+                <AdminShell env={env}>{children}</AdminShell>
+              </BreakGlassProvider>
             </PlatformAdminAssistantProvider>
           </PlatformAdminAuthorityProvider>
         </LanguageProvider>

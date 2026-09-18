@@ -15,10 +15,10 @@ RUN apt-get update && \
 
 WORKDIR /app
 
-COPY scripts/db-apply.sh  scripts/db-apply.sh
-COPY scripts/db-common.sh scripts/db-common.sh
+COPY operations/database/db-apply.sh  operations/database/db-apply.sh
+COPY operations/database/db-common.sh operations/database/db-common.sh
 COPY infra/migrations/    infra/migrations/
 
-RUN chmod +x scripts/db-apply.sh scripts/db-common.sh
+RUN chmod +x operations/database/db-apply.sh operations/database/db-common.sh
 
-ENTRYPOINT ["bash", "scripts/db-apply.sh"]
+ENTRYPOINT ["bash", "operations/database/db-apply.sh"]

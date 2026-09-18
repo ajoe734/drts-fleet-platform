@@ -1,9 +1,13 @@
+import { bookingRequirementFailures } from "./booking-requirements";
+import type { BookingRequirements } from "@drts/contracts";
 import { randomUUID } from "node:crypto";
 
 import { Injectable, Optional } from "@nestjs/common";
 
 import type { AuditLogRecord } from "@drts/contracts";
 
+import { AcademyService } from "../driver-academy/academy.service";
+import { DriverLeaveService } from "../driver-leave/driver-leave.service";
 import { AuditNotificationService } from "../audit-notification/audit-notification.service";
 import type {
   ResolveRuntimeEligibilityContextCommand,
@@ -27,6 +31,7 @@ export type OverrideSoftEligibilityCommand = {
 
 export type EvaluateRuntimeEligibilityCommand =
   ResolveRuntimeEligibilityContextCommand & {
+    bookingRequirements?: BookingRequirements;
     softReasonCodes?: string[];
     missingRequirements?: string[];
     overrideSoftEligibility?: OverrideSoftEligibilityCommand;
@@ -61,7 +66,59 @@ export class RuntimeEligibilityEvaluator {
     @Optional()
     private readonly auditNotificationService?: AuditNotificationService,
     @Optional() private readonly repository?: VehicleEligibilityRepository,
+    // Nest resolves both authorities; optional TS arguments preserve direct
+    // construction in legacy unit tests, never an optional runtime DI edge.
+    private readonly academyService?: AcademyService,
+    private readonly driverLeaveService?: DriverLeaveService,
   ) {}
+
+  /** Read the feature authorities on every candidate/assignment operation.
+   * No cached eligibility flag or registry/AV capability is overwritten. */
+  async assessDriverRequirements(driverId: string) {
+    const [qualification, onLeave] = await Promise.all([
+      this.academyService?.evaluateDriverQualification(driverId),
+      this.driverLeaveService?.isDriverOnLeave(driverId) ??
+        Promise.resolve(false),
+    ]);
+    return {
+      onLeave,
+      trainingIncomplete: qualification?.trainingIncomplete ?? false,
+      trainingSatisfied: qualification?.trainingSatisfied ?? false,
+    };
+  }
+
+  /** No persistence or override inside the assignment transaction. Recompute
+   * all conditions from current registry facts before reserving supply. */
+  assessAutonomous(
+    command: EvaluateRuntimeEligibilityCommand,
+    deferTrainingToAsyncGate = false,
+  ): EligibilityDecision {
+    const context = this.eligibilityContextResolver.resolve(command);
+    const hard = this.collectHardReasonCodes(context);
+    if (command.bookingRequirements)
+      hard.push(
+        ...bookingRequirementFailures(
+          command.bookingRequirements,
+          context.vehicleCapability,
+        ),
+      );
+    if (hard.length) return "ineligible";
+    if (
+      context.vehicleCapability.conditionallyAllowed ||
+      this.collectSoftReasonCodes(
+        context,
+        this.classifyLocationState(context),
+        command.softReasonCodes ?? [],
+      ).length ||
+      this.collectMissingRequirements(
+        context,
+        command.missingRequirements ?? [],
+        deferTrainingToAsyncGate,
+      ).length
+    )
+      return "conditionally_eligible";
+    return "eligible";
+  }
 
   async evaluate(
     command: EvaluateRuntimeEligibilityCommand,
@@ -69,16 +126,34 @@ export class RuntimeEligibilityEvaluator {
     const context =
       command.resolvedContext ??
       this.eligibilityContextResolver.resolve(command);
+    const driverRequirements = await this.assessDriverRequirements(
+      context.driverId,
+    );
     const hardReasonCodes = this.collectHardReasonCodes(context);
+    if (driverRequirements.onLeave) hardReasonCodes.push("DRIVER_ON_LEAVE");
+    if (command.bookingRequirements)
+      hardReasonCodes.push(
+        ...bookingRequirementFailures(
+          command.bookingRequirements,
+          context.vehicleCapability,
+        ),
+      );
     const locationState = this.classifyLocationState(context);
     const softReasonCodes = this.collectSoftReasonCodes(
       context,
       locationState,
-      command.softReasonCodes ?? [],
+      [
+        ...(command.softReasonCodes ?? []),
+        ...(context.vehicleCapability.trainingRequired &&
+        driverRequirements.trainingIncomplete
+          ? ["DRIVER_TRAINING_INCOMPLETE"]
+          : []),
+      ],
     );
     const missingRequirements = this.collectMissingRequirements(
       context,
       command.missingRequirements ?? [],
+      driverRequirements.trainingSatisfied,
     );
 
     let decision: EligibilityDecision = "eligible";
@@ -178,7 +253,10 @@ export class RuntimeEligibilityEvaluator {
     const hardReasonCodes: string[] = [];
     if (!context.driverReadiness.ready) {
       hardReasonCodes.push(
-        ...this.normalizeReasons(context.driverReadiness.reasonCodes, "DRIVER_NOT_READY"),
+        ...this.normalizeReasons(
+          context.driverReadiness.reasonCodes,
+          "DRIVER_NOT_READY",
+        ),
       );
     }
     if (!context.vehicleReadiness.ready) {
@@ -293,18 +371,23 @@ export class RuntimeEligibilityEvaluator {
   private collectMissingRequirements(
     context: ResolvedRuntimeEligibilityContext,
     extraMissingRequirements: string[],
+    trainingSatisfied = false,
   ) {
     const missingRequirements = [...extraMissingRequirements];
 
     missingRequirements.push(...context.vehicleCapability.requiredDocuments);
-    if (context.vehicleCapability.trainingRequired) {
+    if (context.vehicleCapability.trainingRequired && !trainingSatisfied) {
       missingRequirements.push("training");
     }
     if (context.vehicleCapability.permitRequired) {
       missingRequirements.push("permit");
     }
 
-    return [...new Set(missingRequirements.map((item) => item.trim()).filter(Boolean))];
+    return [
+      ...new Set(
+        missingRequirements.map((item) => item.trim()).filter(Boolean),
+      ),
+    ];
   }
 
   private normalizeReasons(reasons: string[], fallback: string) {

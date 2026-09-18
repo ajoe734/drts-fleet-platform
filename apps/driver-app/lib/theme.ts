@@ -602,3 +602,32 @@ export const driverNavigationTheme = createNavigationTheme(
   DRIVER_THEME_DEFAULT_MODE,
 );
 export const driverDisplayStrings = DISPLAY_STRINGS;
+
+/**
+ * Scales a typography token's fontSize and lineHeight by a given fontScale factor
+ * (e.g. from PixelRatio.getFontScale() for iOS Dynamic Type or Android font scaling).
+ */
+export function scaleTypographyToken(
+  token: DriverTypographyToken,
+  fontScale = 1.0,
+): DriverTypographyToken {
+  return {
+    ...token,
+    fontSize: Math.round(token.fontSize * fontScale),
+    lineHeight: Math.round(token.lineHeight * fontScale),
+  };
+}
+
+/**
+ * Returns a full typography map with all token sizes scaled by fontScale.
+ */
+export function scaleTypographyMap(
+  typography: Record<string, DriverTypographyToken>,
+  fontScale = 1.0,
+): Record<string, DriverTypographyToken> {
+  const scaled: Record<string, DriverTypographyToken> = {};
+  for (const [key, token] of Object.entries(typography)) {
+    scaled[key] = scaleTypographyToken(token, fontScale);
+  }
+  return scaled;
+}

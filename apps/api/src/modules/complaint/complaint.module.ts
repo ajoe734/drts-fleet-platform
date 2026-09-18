@@ -1,6 +1,7 @@
 import { Module, forwardRef } from "@nestjs/common";
 
 import { DatabaseModule } from "../../common/db";
+import { IdempotencyModule } from "../../common/idempotency";
 import { AuditNotificationModule } from "../audit-notification/audit-notification.module";
 import { IncidentModule } from "../incident/incident.module";
 import { ComplaintController } from "./complaint.controller";
@@ -10,6 +11,7 @@ import { ComplaintService } from "./complaint.service";
 @Module({
   imports: [
     DatabaseModule,
+    IdempotencyModule,
     AuditNotificationModule,
     forwardRef(() => IncidentModule),
   ],

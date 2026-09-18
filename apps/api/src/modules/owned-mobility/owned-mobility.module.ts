@@ -1,7 +1,8 @@
 import { Module, OnModuleInit, forwardRef } from "@nestjs/common";
 
 import { DatabaseModule } from "../../common/db";
-import { OpsDispatchEventsService } from "../../common/ops-dispatch-events.service";
+import { IdempotencyModule } from "../../common/idempotency";
+import { OpsDispatchEventsModule } from "../../common/ops-dispatch-events.module";
 import { AuditNotificationModule } from "../audit-notification/audit-notification.module";
 import { CallcenterModule } from "../callcenter/callcenter.module";
 import { ProductRuleModule } from "../product-rule/product-rule.module";
@@ -9,18 +10,23 @@ import { RegulatoryRegistryModule } from "../regulatory-registry/regulatory-regi
 import { SandboxDispatchGateModule } from "../sandbox-dispatch-gate/sandbox-dispatch-gate.module";
 import { ServiceAreaModule } from "../service-area/service-area.module";
 import { ServiceProductModule } from "../service-product/service-product.module";
+import { PlatformPresenceModule } from "../platform-presence/platform-presence.module";
 import { TenantPartnerModule } from "../tenant-partner/tenant-partner.module";
 import { TenantPartnerService } from "../tenant-partner/tenant-partner.service";
 import { VehicleEligibilityModule } from "../vehicle-eligibility/vehicle-eligibility.module";
+import { VoiceBookingModule } from "../voice-booking/voice-booking.module";
 import { OwnedMobilityController } from "./owned-mobility.controller";
 import { OwnedMobilityRepository } from "./owned-mobility.repository";
 import { ReferralBindingScaffoldService } from "./referral-binding.scaffold.service";
 import { OwnedMobilityTaskEventsService } from "./owned-mobility-task-events.service";
 import { OwnedMobilityService } from "./owned-mobility.service";
+import { OwnedAutonomousDispatchExecutorService } from "./owned-autonomous-dispatch-executor.service";
 
 @Module({
   imports: [
     DatabaseModule,
+    IdempotencyModule,
+    OpsDispatchEventsModule,
     RegulatoryRegistryModule,
     ServiceAreaModule,
     ServiceProductModule,
@@ -28,8 +34,10 @@ import { OwnedMobilityService } from "./owned-mobility.service";
     AuditNotificationModule,
     CallcenterModule,
     ProductRuleModule,
+    VoiceBookingModule,
     forwardRef(() => SandboxDispatchGateModule),
     forwardRef(() => TenantPartnerModule),
+    forwardRef(() => PlatformPresenceModule),
   ],
   controllers: [OwnedMobilityController],
   providers: [
@@ -37,9 +45,13 @@ import { OwnedMobilityService } from "./owned-mobility.service";
     OwnedMobilityService,
     OwnedMobilityTaskEventsService,
     ReferralBindingScaffoldService,
-    OpsDispatchEventsService,
+    OwnedAutonomousDispatchExecutorService,
   ],
-  exports: [OwnedMobilityService, ReferralBindingScaffoldService],
+  exports: [
+    OwnedMobilityService,
+    ReferralBindingScaffoldService,
+    OwnedAutonomousDispatchExecutorService,
+  ],
 })
 export class OwnedMobilityModule implements OnModuleInit {
   constructor(

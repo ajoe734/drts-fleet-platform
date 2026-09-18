@@ -14,7 +14,18 @@ describe("driver service product labels", () => {
         businessDispatchSubtype: "enterprise_dispatch",
         dispatchSemantics: "reservation",
       }),
-    ).toBe("機場接送 · credit_card_airport_transfer");
+    ).toBe("機場接送");
+  });
+
+  it("never lets the raw service product code leak into the label", () => {
+    expect(
+      formatDriverServiceProductLabel({
+        serviceProductCode: "credit_card_airport_transfer",
+        serviceBucket: "business_dispatch",
+        businessDispatchSubtype: "enterprise_dispatch",
+        dispatchSemantics: "reservation",
+      }),
+    ).not.toMatch(/[a-z]+_[a-z_]+/);
   });
 
   it("falls back to standard taxi reservation when exact code is absent", () => {
@@ -39,6 +50,6 @@ describe("driver service product labels", () => {
         },
         "en",
       ),
-    ).toBe("Third-party Forwarded Order · third_party_forwarded_order");
+    ).toBe("Third-party Forwarded Order");
   });
 });

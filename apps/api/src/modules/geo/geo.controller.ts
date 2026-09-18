@@ -7,8 +7,12 @@ import type {
 } from "@drts/contracts";
 
 import { toApiSuccessEnvelope } from "../../common/api-envelope";
+import { RequireRealms } from "../../common/auth";
 import { GeoService } from "./geo.service";
 
+// Shared utility across realms; no catalogue scope maps to geocoding/routing,
+// so the boundary is realm membership plus existing provider/throttle limits.
+@RequireRealms("system", "platform", "tenant", "ops", "driver", "partner")
 @Controller("geo")
 export class GeoController {
   constructor(private readonly geoService: GeoService) {}

@@ -126,7 +126,7 @@ export async function issueTenantApiKeyAction(
       throw new ApiKeyActionError("keyNameRequired");
     }
 
-    const client = getTenantClient();
+    const client = await getTenantClient();
     const expiresAt = readTrimmedString(formData, "expiresAt");
     const issued = await client.issueApiKey({
       keyName,
@@ -164,7 +164,7 @@ export async function rotateTenantApiKeyAction(
       throw new ApiKeyActionError("apiKeySelectionRequired");
     }
 
-    const client = getTenantClient();
+    const client = await getTenantClient();
     const expiresAt = readTrimmedString(formData, "expiresAt");
     const issued = await client.rotateApiKey(apiKeyId, {
       ...(keyName ? { keyName } : {}),
@@ -207,7 +207,7 @@ export async function revokeTenantApiKeyAction(
       throw new ApiKeyActionError("revocationReasonRequired");
     }
 
-    const client = getTenantClient();
+    const client = await getTenantClient();
     await client.revokeApiKey(apiKeyId);
 
     payload = {

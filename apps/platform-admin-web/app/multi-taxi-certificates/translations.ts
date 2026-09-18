@@ -285,7 +285,7 @@ export function displayCertificateValue(
 export function formatCertificateMoney(
   locale: CertificateSupportLocale,
   value: number | null,
-  currency = "NTD",
+  currency = "TWD",
 ) {
   if (value === null) {
     return certificateSupportCopy(locale, "unavailableValue");

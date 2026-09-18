@@ -1031,7 +1031,7 @@ export default async function AuditPage({
   const locale = await getServerLocale();
   const query = parseAuditQuery(await searchParams);
   const generatedAt = new Date();
-  const client = getTenantClient();
+  const client = await getTenantClient();
 
   let logs: AuditLogRecord[] = [];
   let loadError: string | null = null;

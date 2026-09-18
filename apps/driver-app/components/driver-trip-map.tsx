@@ -522,7 +522,8 @@ const styles = StyleSheet.create({
     shadowColor: driverCanvasTheme.danger,
   },
   pinConnector: {
-    width: 128,
+    flex: 1,
+    maxWidth: 128,
     height: 2,
     borderTopWidth: 2,
     borderStyle: "dashed",

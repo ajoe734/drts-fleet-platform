@@ -26,6 +26,9 @@ import { BillingSettlementModule } from "./modules/billing-settlement/billing-se
 import { CallcenterModule } from "./modules/callcenter/callcenter.module";
 import { CertificateSupportModule } from "./modules/certificate-support/certificate-support.module";
 import { ComplaintModule } from "./modules/complaint/complaint.module";
+import { ControlledDownloadModule } from "./modules/controlled-download/controlled-download.module";
+import { DriverAcademyModule } from "./modules/driver-academy/driver-academy.module";
+import { DriverLeaveModule } from "./modules/driver-leave/driver-leave.module";
 import { DriverProfileModule } from "./modules/driver-profile/driver-profile.module";
 import { DriverSosModule } from "./modules/driver-sos/driver-sos.module";
 import { DriverSettingsModule } from "./modules/driver-settings/driver-settings.module";
@@ -34,6 +37,7 @@ import { FleetPartnerModule } from "./modules/fleet-partner/fleet-partner.module
 import { FoundationModule } from "./modules/foundation/foundation.module";
 import { ForwarderModule } from "./modules/forwarder/forwarder.module";
 import { GeoModule } from "./modules/geo/geo.module";
+import { HostViewModule } from "./modules/host-view/host-view.module";
 import { IdentityModule } from "./modules/identity/identity.module";
 import { IncidentModule } from "./modules/incident/incident.module";
 import { MaintenanceModule } from "./modules/maintenance/maintenance.module";
@@ -51,9 +55,11 @@ import { ReportingFilingModule } from "./modules/reporting-filing/reporting-fili
 import { ServiceAreaModule } from "./modules/service-area/service-area.module";
 import { ServiceProductModule } from "./modules/service-product/service-product.module";
 import { ShiftAttendanceModule } from "./modules/shift-attendance/shift-attendance.module";
+import { SecurityEventsModule } from "./modules/security-events/security-events.module";
 import { TenantPartnerModule } from "./modules/tenant-partner/tenant-partner.module";
 import { AuthModule } from "./modules/auth/auth.module";
 import { VehicleEligibilityModule } from "./modules/vehicle-eligibility/vehicle-eligibility.module";
+import { IamObservabilityModule } from "./observability/iam-observability.module";
 // Phase 2 — Tesla / FSD / AV sandbox scaffolds (phase2-tesla-fsd-sandbox-202606)
 import { TeslaIntegrationModule } from "./modules/tesla-integration/tesla-integration.module";
 import { TeslaTelemetryModule } from "./modules/tesla-telemetry/tesla-telemetry.module";
@@ -65,6 +71,8 @@ import { RocOperationsModule } from "./modules/roc-operations/roc-operations.mod
 import { VehicleEvidenceModule } from "./modules/vehicle-evidence/vehicle-evidence.module";
 import { AccidentInvestigationModule } from "./modules/accident-investigation/accident-investigation.module";
 import { RegulatoryReportingModule } from "./modules/regulatory-reporting/regulatory-reporting.module";
+
+import { CandidateShaMiddleware } from "./common/candidate-sha.middleware";
 
 @Module({
   imports: [
@@ -83,6 +91,7 @@ import { RegulatoryReportingModule } from "./modules/regulatory-reporting/regula
     CallcenterModule,
     CertificateSupportModule,
     ComplaintModule,
+    ControlledDownloadModule,
     DriverProfileModule,
     DriverSosModule,
     OwnedMobilityModule,
@@ -92,6 +101,7 @@ import { RegulatoryReportingModule } from "./modules/regulatory-reporting/regula
     BillingSettlementModule,
     ReportingModule,
     ReportingFilingModule,
+    SecurityEventsModule,
     ServiceAreaModule,
     ServiceProductModule,
     ForwarderModule,
@@ -102,10 +112,14 @@ import { RegulatoryReportingModule } from "./modules/regulatory-reporting/regula
     MaintenanceModule,
     MultiTaxiModule,
     ShiftAttendanceModule,
+    DriverLeaveModule,
+    DriverAcademyModule,
+    HostViewModule,
     DriverSettingsModule,
     PlatformPresenceModule,
     PlatformEarningsModule,
     VehicleEligibilityModule,
+    IamObservabilityModule,
     // Phase 2 — Tesla / FSD / AV sandbox scaffolds
     TeslaIntegrationModule,
     TeslaTelemetryModule,
@@ -145,10 +159,16 @@ import { RegulatoryReportingModule } from "./modules/regulatory-reporting/regula
 export class AppModule implements NestModule {
   configure(consumer: MiddlewareConsumer) {
     consumer
+      .apply(CandidateShaMiddleware)
+      .forRoutes({ path: "*", method: RequestMethod.ALL });
+
+    consumer
       .apply(InternalKeyMiddleware)
       .exclude(
         { path: "health", method: RequestMethod.ALL },
         { path: "api/health", method: RequestMethod.ALL },
+        { path: "auth/token", method: RequestMethod.POST },
+        { path: "api/auth/token", method: RequestMethod.POST },
       )
       .forRoutes({ path: "*", method: RequestMethod.ALL });
   }

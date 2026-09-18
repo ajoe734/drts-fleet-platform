@@ -53,10 +53,10 @@ const insuranceBlockedStates = [
 ] as const;
 
 const cardAirportEmbedIssuers = [
-  { slug: "ctbc", name: /中信|CTBC/i },
-  { slug: "cathay", name: /國泰|Cathay/i },
-  { slug: "taishin", name: /台新|Taishin/i },
-  { slug: "dbs", name: /星展|DBS/i },
+  { slug: "acme", name: /艾克米|ACME/i },
+  { slug: "contoso", name: /康拓索|Contoso/i },
+  { slug: "fabrikam", name: /法碧康|Fabrikam/i },
+  { slug: "northwind", name: /北風|NORTHWIND/i },
 ] as const;
 
 test.describe("partner booking program surfaces", () => {
@@ -82,13 +82,13 @@ test.describe("partner booking program surfaces", () => {
   test("keeps card website booking and bank-app embed identity states distinct", async ({
     page,
   }) => {
-    const siteResponse = await page.goto("/ctbc/program/site");
+    const siteResponse = await page.goto("/acme/program/site");
     expect(siteResponse?.status()).toBe(200);
     await expect(page.getByText("世界卡禮賓，從家門到登機門。")).toBeVisible();
     await expect(page.getByText("網銀 APP 內嵌 webview")).toHaveCount(0);
     await expect(page.getByText("ref_token")).toHaveCount(0);
 
-    const embedResponse = await page.goto("/ctbc/program/embed");
+    const embedResponse = await page.goto("/acme/program/embed");
     expect(embedResponse?.status()).toBe(200);
     await expect(page.locator("[data-program-surface='embed']")).toBeVisible();
     await expect(
@@ -101,13 +101,13 @@ test.describe("partner booking program surfaces", () => {
       page.getByRole("textbox", { name: /卡號|信用卡|card/i }),
     ).toHaveCount(0);
 
-    const reauthResponse = await page.goto("/ctbc/program/embed/embed-reauth");
+    const reauthResponse = await page.goto("/acme/program/embed/embed-reauth");
     expect(reauthResponse?.status()).toBe(200);
     await expect(page.getByText("issuer_session")).toBeVisible();
     await expect(page.getByText("expired", { exact: true })).toBeVisible();
 
     const unsupportedResponse = await page.goto(
-      "/ctbc/program/embed/embed-unsupported",
+      "/acme/program/embed/embed-unsupported",
     );
     expect(unsupportedResponse?.status()).toBe(200);
     await expect(page.getByText("unknown-host.example")).toBeVisible();
@@ -116,7 +116,7 @@ test.describe("partner booking program surfaces", () => {
   test("renders embed consent and standalone fallback without raw-card capture", async ({
     page,
   }) => {
-    const consentResponse = await page.goto("/ctbc/program/embed/consent");
+    const consentResponse = await page.goto("/acme/program/embed/consent");
     expect(consentResponse?.status()).toBe(200);
     await expect(page.locator("[data-program-surface='embed']")).toBeVisible();
     await expect(page.getByText("program: card · embed")).toBeVisible();
@@ -129,7 +129,7 @@ test.describe("partner booking program surfaces", () => {
       page.getByRole("textbox", { name: /卡號|信用卡|card/i }),
     ).toHaveCount(0);
 
-    const fallbackResponse = await page.goto("/ctbc/program/embed/fallback");
+    const fallbackResponse = await page.goto("/acme/program/embed/fallback");
     expect(fallbackResponse?.status()).toBe(200);
     await expect(page.locator("[data-program-surface='embed']")).toBeVisible();
     await expect(page.getByText("未偵測到銀行登入")).toBeVisible();
@@ -144,7 +144,7 @@ test.describe("partner booking program surfaces", () => {
   }) => {
     const requestRef = randomUUID();
     const response = await page.goto(
-      `/ctbc/program/embed?partnerUserRef=user-${requestRef}&referenceToken=token-${requestRef}&cardLast4=1234&cardholderName=%E7%8E%8B%E5%B0%8F%E6%98%8E&benefitReference=benefit-${requestRef}&flightNo=CI100`,
+      `/acme/program/embed?partnerUserRef=user-${requestRef}&referenceToken=token-${requestRef}&cardLast4=1234&cardholderName=%E7%8E%8B%E5%B0%8F%E6%98%8E&benefitReference=benefit-${requestRef}&flightNo=CI100`,
     );
     expect(response?.status()).toBe(200);
 
@@ -180,7 +180,7 @@ test.describe("partner booking program surfaces", () => {
     );
 
     const response = await page.goto(
-      "/ctbc/program/embed?partnerUserRef=failure-user&referenceToken=failure-token&cardLast4=1234&cardholderName=%E7%8E%8B%E5%B0%8F%E6%98%8E&benefitReference=force-error&flightNo=CI100",
+      "/acme/program/embed?partnerUserRef=failure-user&referenceToken=failure-token&cardLast4=1234&cardholderName=%E7%8E%8B%E5%B0%8F%E6%98%8E&benefitReference=force-error&flightNo=CI100",
     );
     expect(response?.status()).toBe(200);
 
@@ -201,7 +201,7 @@ test.describe("partner booking program surfaces", () => {
   test("keeps insurance and travel on site funnel states while blocking embed", async ({
     page,
   }) => {
-    const insuranceReview = await page.goto("/fubon/program/site/review");
+    const insuranceReview = await page.goto("/tailspin/program/site/review");
     expect(insuranceReview?.status()).toBe(200);
     await expect(page.locator("[data-program-kind='insurance']")).toBeVisible();
     await expect(page.getByText("program: insurance · site")).toBeVisible();
@@ -209,14 +209,14 @@ test.describe("partner booking program surfaces", () => {
     await expect(page.getByText("ref_token")).toHaveCount(0);
 
     const insurancePending = await page.goto(
-      "/fubon/program/site/insurance_pending",
+      "/tailspin/program/site/insurance_pending",
     );
     expect(insurancePending?.status()).toBe(200);
     await expect(page.getByText("insurance_pending")).toBeVisible();
     await expect(page.getByText("理賠額度")).toBeVisible();
 
     const travelManualReview = await page.goto(
-      "/lion/program/site/manual-review",
+      "/adventureworks/program/site/manual-review",
     );
     expect(travelManualReview?.status()).toBe(200);
     await expect(page.locator("[data-program-kind='travel']")).toBeVisible();
@@ -224,10 +224,10 @@ test.describe("partner booking program surfaces", () => {
     await expect(page.getByText("旅行社團體接送")).toBeVisible();
     await expect(page.getByText("團體席次")).toBeVisible();
 
-    const fubonEmbed = await page.goto("/fubon/program/embed");
-    expect(fubonEmbed?.status()).toBe(404);
+    const tailspinEmbed = await page.goto("/tailspin/program/embed");
+    expect(tailspinEmbed?.status()).toBe(404);
 
-    const lionEmbed = await page.goto("/lion/program/embed/embed-handoff");
+    const lionEmbed = await page.goto("/adventureworks/program/embed/embed-handoff");
     expect(lionEmbed?.status()).toBe(404);
   });
 
@@ -235,7 +235,7 @@ test.describe("partner booking program surfaces", () => {
     page,
   }) => {
     for (const state of insuranceBlockedStates) {
-      const response = await page.goto(`/fubon/program/site/${state.segment}`);
+      const response = await page.goto(`/tailspin/program/site/${state.segment}`);
       expect(response?.status(), state.segment).toBe(200);
       await expect(
         page.locator("[data-program-kind='insurance']"),
@@ -265,17 +265,17 @@ test.describe("partner booking program surfaces", () => {
   test("only card program selector offers the bank-app embed surface", async ({
     page,
   }) => {
-    const cardSelector = await page.goto("/ctbc/program");
+    const cardSelector = await page.goto("/acme/program");
     expect(cardSelector?.status()).toBe(200);
     await expect(page.getByRole("link", { name: /網銀|embed/i })).toBeVisible();
 
-    const insuranceSelector = await page.goto("/fubon/program");
+    const insuranceSelector = await page.goto("/tailspin/program");
     expect(insuranceSelector?.status()).toBe(200);
     await expect(page.getByRole("link", { name: /網銀|embed/i })).toHaveCount(
       0,
     );
 
-    const travelSelector = await page.goto("/lion/program");
+    const travelSelector = await page.goto("/adventureworks/program");
     expect(travelSelector?.status()).toBe(200);
     await expect(page.getByRole("link", { name: /網銀|embed/i })).toHaveCount(
       0,

@@ -9,7 +9,7 @@ import {
 } from "./partner-booking-funnel";
 
 const canvasBaseSrc = "/drts-design-canvas/Partner%20Booking.html";
-const ctbcBrand = BRAND_TEMPLATES.CTBC;
+const acmeBrand = BRAND_TEMPLATES.ACME;
 
 function ComparisonFrame({
   title,
@@ -83,7 +83,7 @@ function PartnerBookingStoryChrome({
         >
           <ComparisonFrame
             title="Built"
-            subtitle="Shared white-label component rendered with the CTBC brand token set."
+            subtitle="Shared white-label component rendered with the ACME brand token set."
           >
             <div
               style={{
@@ -125,13 +125,13 @@ function PartnerBookingStoryChrome({
 }
 
 const meta = {
-  title: "Partner Booking/CTBC Funnel",
+  title: "Partner Booking/ACME Funnel",
   parameters: {
     layout: "fullscreen",
     docs: {
       description: {
         component:
-          "PBK-UI-003 parity stories. Each story compares the built white-label CTBC funnel screen against `Partner Booking.html` artboard anchors.",
+          "PBK-UI-003 parity stories. Each story compares the built white-label ACME funnel screen against `Partner Booking.html` artboard anchors.",
       },
     },
   },
@@ -144,7 +144,7 @@ type Story = StoryObj<typeof meta>;
 function createStory(screen: PartnerBookingScreenId): Story {
   return {
     render: () => (
-      <PartnerBookingStoryChrome brand={ctbcBrand} screen={screen} />
+      <PartnerBookingStoryChrome brand={acmeBrand} screen={screen} />
     ),
     name: getPartnerBookingScreenMeta(screen).label,
   };

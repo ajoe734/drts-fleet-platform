@@ -1,16 +1,13 @@
 import { Injectable, Logger, Optional } from "@nestjs/common";
 
 import type {
-  DispatchDailyRecord,
   FilingPackageRecord,
-  MultiTaxiTripOperationalExportRow,
   MultiTaxiTripOperationalRecordQuery,
-  OwnedOrderRecord,
   PartnerRevenueSummaryRowRecord,
   ReportArtifactRecord,
   ReportJobRecord,
+  ReportJobRowRecord,
   SettlementMatrixRecord,
-  SixMonthOperationsSummary,
 } from "@drts/contracts";
 
 import { DatabaseService } from "../../common/db";
@@ -19,40 +16,6 @@ import type { ControlledDownloadMetadata } from "./download-signing.util";
 type JsonRecordRow = {
   record: unknown;
 };
-
-type DispatchRecordingIndexRow = {
-  orderId: string;
-  orderNo: string;
-  callId: string | null;
-  recordingId: string | null;
-  missingRecording: boolean;
-  exportedAt: string;
-};
-
-type TenantMonthlyTripReportRow = {
-  orderId: string;
-  orderNo: string;
-  tenantId: string | null;
-  userId: string | null;
-  costCenterCode: string | null;
-  serviceProduct: string;
-  businessDispatchSubtype: string | null;
-  bookingId: string | null;
-  status: OwnedOrderRecord["status"];
-  completedAt: string | null;
-  sourceMarker: "owned_mobility_order_feed";
-  costCenterSourceMarker: "tenant_partner_cost_center_directory" | null;
-  sourceUpdatedAt: string;
-  producerRequestId: string | null;
-  exportedAt: string;
-};
-
-type ReportJobRow =
-  | DispatchRecordingIndexRow
-  | DispatchDailyRecord
-  | MultiTaxiTripOperationalExportRow
-  | SixMonthOperationsSummary
-  | TenantMonthlyTripReportRow;
 
 export type MultiTaxiTripExportJobMetadata = {
   scope: MultiTaxiTripOperationalRecordQuery;
@@ -89,7 +52,7 @@ type FilingPackageDownloadMetadata = {
 
 export type StoredReportJobRecord = ReportJobRecord & {
   artifact: ReportArtifactView | null;
-  rows: ReportJobRow[];
+  rows: ReportJobRowRecord[];
   partnerRevenueRows?: PartnerRevenueSummaryRowRecord[];
   settlementMatrix?: SettlementMatrixRecord[];
   multiTaxiTripExport?: MultiTaxiTripExportJobMetadata;

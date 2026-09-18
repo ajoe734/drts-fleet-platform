@@ -12,7 +12,7 @@ const shouldStartLocalReferralEmbed =
 
 export default defineConfig({
   testDir: "./tests/e2e",
-  testMatch: /referral-embed-surfaces\.spec\.ts/,
+  testMatch: /referral-embed-(surfaces|parity)\.spec\.ts/,
   fullyParallel: true,
   retries: 0,
   workers: 1,
@@ -36,12 +36,13 @@ export default defineConfig({
           },
           {
             command:
-              "pnpm --filter @drts/contracts build && pnpm --filter @drts/ui-tokens build && pnpm --filter @drts/referral-embed-web build && pnpm --filter @drts/referral-embed-web exec next start --hostname 0.0.0.0 --port 3114",
+              "pnpm --filter @drts/contracts build && pnpm --filter @drts/ui-tokens build && pnpm --filter @drts/referral-embed-web exec next build --webpack && pnpm --filter @drts/referral-embed-web exec next start --hostname 0.0.0.0 --port 3114",
             url: localReferralEmbedBaseURL,
             env: {
               DRTS_API_URL: localReferralAuthorityBaseURL,
+              REFERRAL_EMBED_SESSION_SECRET: "referral-embed-e2e-secret",
               REFERRAL_EMBED_ALLOWED_HOSTS:
-                "127.0.0.1:3199 app.yuhe-living.com.tw app-stg.yuhe-living.com.tw",
+                "127.0.0.1:3199 app.fabrikam-living.example app-stg.fabrikam-living.example",
               REFERRAL_EMBED_DEMO: "true",
               REFERRAL_EMBED_DEFAULT_ENTRY_SLUG: "yuhe-residence",
             },

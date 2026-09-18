@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { BookingSubmitButton } from "@/components/booking-submit-button";
+import { BookingSubmitButton } from "./booking-submit-button";
 import {
   EBanner,
   EBtnContent,
@@ -13,18 +13,73 @@ import {
 import { EntParty, EntRoute } from "@/components/ent-screen-bits";
 import { EntPageHead } from "@/components/enterprise-shell";
 import {
-  enterpriseDriver,
-  getEnterpriseBookingDraft,
-} from "@/lib/enterprise-fixtures";
-import { enterpriseTheme as t } from "@/lib/enterprise-theme";
+  formatDefaultPlacard,
+  getEnterpriseBookingPreview,
+  getVehicleLabelFromDraft,
+  isEnterpriseDraftComplete,
+  parseEnterpriseBookingDraft,
+  resolveCopyByLocale,
+  serializeEnterpriseBookingDraft,
+  validateReservationWindow,
+} from "@/lib/enterprise-booking-draft";
+import { tenantEnterpriseTheme as t } from "@/components/booking-form/theme";
 import { getServerLocale } from "@/lib/server-locale";
 import { type TranslationKey, t as translate } from "@/lib/translations";
 
-export default async function ReviewBookingPage() {
+type ReviewSearchParams = Record<string, string | string[] | undefined>;
+
+function displayDraftValue(value: string) {
+  const trimmed = value.trim();
+  return trimmed.length > 0 ? trimmed : "—";
+}
+
+function formatLuggageLabel(
+  value: string,
+  tr: (key: TranslationKey, params?: Record<string, string | number>) => string,
+) {
+  const trimmed = value.trim();
+  if (!trimmed) {
+    return "—";
+  }
+
+  return tr("review.luggage.count", { count: trimmed });
+}
+
+export default async function ReviewBookingPage({
+  searchParams,
+}: {
+  searchParams?: Promise<ReviewSearchParams>;
+}) {
   const locale = await getServerLocale();
   const tr = (key: TranslationKey, params?: Record<string, string | number>) =>
     translate(key, params, locale);
-  const draft = getEnterpriseBookingDraft(locale);
+  const resolvedSearchParams = (await searchParams) ?? {};
+  const draft = parseEnterpriseBookingDraft(resolvedSearchParams, locale);
+  const bookingId = Array.isArray(resolvedSearchParams.bookingId)
+    ? resolvedSearchParams.bookingId[0]
+    : resolvedSearchParams.bookingId;
+
+  const preview = getEnterpriseBookingPreview(draft, locale);
+  const vehicleLabel = getVehicleLabelFromDraft(draft, locale);
+  const airportParts = [draft.flight.trim(), draft.terminal.trim()].filter(
+    Boolean,
+  );
+  const airportLabel =
+    airportParts.length > 0 ? airportParts.join(" · ") : undefined;
+
+  const now = new Date();
+  const timeValidation = validateReservationWindow(
+    draft.reservationDate,
+    draft.reservationTime,
+    now,
+    locale,
+  );
+  const canSubmit = timeValidation.isValid && isEnterpriseDraftComplete(draft, now);
+
+  const effectivePassenger =
+    draft.passengerMode === "self" ? draft.bookedBy : draft.passenger;
+  const effectivePlacard =
+    draft.placard?.trim() || formatDefaultPlacard(effectivePassenger);
 
   return (
     <>
@@ -45,14 +100,38 @@ export default async function ReviewBookingPage() {
         />
       </div>
 
-      <div
-        style={{
-          display: "grid",
-          gridTemplateColumns: "1fr 1.1fr",
-          gap: 18,
-          alignItems: "start",
-        }}
-      >
+      {!timeValidation.isValid ? (
+        <div style={{ marginBottom: 16 }}>
+          <EBanner
+            t={t}
+            tone="danger"
+            icon="alert"
+            title={
+              timeValidation.isPast
+                ? resolveCopyByLocale(
+                    locale,
+                    "用車時間無效：預約時間不能為過去時間",
+                    "Invalid Reservation: Time In Past",
+                  )
+                : resolveCopyByLocale(
+                    locale,
+                    "用車時間無效：未達最短提前時間（15分鐘）",
+                    "Invalid Reservation: Advance Lead Time Not Met",
+                  )
+            }
+            body={
+              timeValidation.errorMessage ??
+              resolveCopyByLocale(
+                locale,
+                `最早可預約時間為 ${timeValidation.earliestAllowedDisplay}，請返回修改用車時間。`,
+                `Earliest bookable time is ${timeValidation.earliestAllowedDisplay}. Please return and modify the reservation time.`,
+              )
+            }
+          />
+        </div>
+      ) : null}
+
+      <div className="ent-review-layout">
         <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
           <ECard
             t={t}
@@ -77,11 +156,11 @@ export default async function ReviewBookingPage() {
               </span>
               <div style={{ flex: 1 }}>
                 <div style={{ fontSize: 14, fontWeight: 700 }}>
-                  {draft.costCenter}
+                  {draft.costCenterLabel}
                 </div>
                 <div style={{ fontSize: 12, color: t.muted, marginTop: 1 }}>
                   {tr("review.approval.costNote", {
-                    remain: "NT$ 31,000 / 60,000",
+                    remain: preview.remainingBudgetLabel,
                   })}
                 </div>
               </div>
@@ -92,20 +171,24 @@ export default async function ReviewBookingPage() {
             <ERow
               t={t}
               k={tr("new.check.fare")}
-              v={tr("new.check.fareValue")}
+              v={preview.estimatedFareLabel}
               mono
             />
             <ERow
               t={t}
               k={tr("review.approval.quotaImpact")}
-              v={tr("review.approval.quotaImpactValue")}
+              v={preview.quotaImpactLabel}
             />
             <ERow
               t={t}
               k={tr("new.policy.approval")}
               v={
-                <EPill t={t} tone="warn" dot>
-                  {tr("review.approval.needs")}
+                <EPill
+                  t={t}
+                  tone={preview.approvalRequired ? "warn" : "success"}
+                  dot
+                >
+                  {preview.approvalLabel}
                 </EPill>
               }
               last
@@ -113,10 +196,14 @@ export default async function ReviewBookingPage() {
             <div style={{ marginTop: 12 }}>
               <EBanner
                 t={t}
-                tone="warn"
-                icon="shield"
-                title={tr("review.banner.title")}
-                body={tr("review.banner.body")}
+                tone={preview.bannerTone}
+                icon={preview.approvalRequired ? "shield" : "check"}
+                title={
+                  preview.approvalRequired
+                    ? tr("review.banner.title")
+                    : tr("new.check.title")
+                }
+                body={preview.bannerBody}
               />
             </div>
           </ECard>
@@ -128,22 +215,28 @@ export default async function ReviewBookingPage() {
           >
             <EntParty
               t={t}
-              passenger={draft.passenger}
+              passenger={effectivePassenger}
               passengerLabel={tr("party.passenger")}
               subline={
-                <div
-                  style={{
-                    fontSize: 12,
-                    color: t.warn,
-                    marginTop: 1,
-                    display: "flex",
-                    alignItems: "center",
-                    gap: 5,
-                  }}
-                >
-                  <EIcon name="users" size={13} />
-                  {tr("party.delegate", { name: draft.bookedBy })}
-                </div>
+                draft.passengerMode === "self" ? (
+                  <div style={{ fontSize: 12, color: t.muted, marginTop: 1 }}>
+                    {tr("party.self")}
+                  </div>
+                ) : (
+                  <div
+                    style={{
+                      fontSize: 12,
+                      color: t.warn,
+                      marginTop: 1,
+                      display: "flex",
+                      alignItems: "center",
+                      gap: 5,
+                    }}
+                  >
+                    <EIcon name="users" size={13} />
+                    {tr("party.delegate", { name: draft.bookedBy })}
+                  </div>
+                )
               }
             />
             <div
@@ -168,7 +261,7 @@ export default async function ReviewBookingPage() {
                 <div
                   style={{ fontSize: 13, fontWeight: 600, fontFamily: t.mono }}
                 >
-                  {draft.onsiteContact}
+                  {displayDraftValue(draft.onsiteContactPhone)}
                 </div>
               </div>
               <div
@@ -183,7 +276,7 @@ export default async function ReviewBookingPage() {
                   {tr("review.summary.placard")}
                 </div>
                 <div style={{ fontSize: 13, fontWeight: 600 }}>
-                  {enterpriseDriver.placard}
+                  {effectivePlacard}
                 </div>
               </div>
             </div>
@@ -200,13 +293,22 @@ export default async function ReviewBookingPage() {
               t={t}
               from={draft.pickup}
               to={draft.dropoff}
-              win={draft.reservationWindow}
-              airportLabel={`${draft.flight} · ${draft.terminal}`}
+              win={preview.reservationWindowLabel}
+              airportLabel={airportLabel}
             />
             <div style={{ marginTop: 16 }}>
-              <ERow t={t} k={tr("new.policy.vehicle")} v={draft.vehicle} />
-              <ERow t={t} k={tr("new.airport.luggage")} v={draft.luggage} />
-              <ERow t={t} k={tr("new.field.notes")} v={draft.notes} last />
+              <ERow t={t} k={tr("new.policy.vehicle")} v={vehicleLabel} />
+              <ERow
+                t={t}
+                k={tr("new.airport.luggage")}
+                v={formatLuggageLabel(draft.luggageCount, tr)}
+              />
+              <ERow
+                t={t}
+                k={tr("new.field.notes")}
+                v={displayDraftValue(draft.notes)}
+                last
+              />
             </div>
           </ECard>
           <ECard
@@ -251,12 +353,44 @@ export default async function ReviewBookingPage() {
           </ECard>
           <div style={{ display: "flex", gap: 12 }}>
             <Link
-              href="/bookings/new"
+              href={`/bookings/new?${serializeEnterpriseBookingDraft(draft).toString()}${bookingId ? `&bookingId=${encodeURIComponent(bookingId)}` : ""}`}
               style={entBtnStyle(t, { variant: "default", block: true })}
             >
               <EBtnContent>{tr("review.back")}</EBtnContent>
             </Link>
-            <BookingSubmitButton />
+            {canSubmit ? (
+              <BookingSubmitButton
+                draft={draft}
+                locale={locale}
+                approvalRequired={preview.approvalRequired}
+                {...(bookingId ? { bookingId } : {})}
+              />
+            ) : (
+              <button
+                type="button"
+                disabled
+                style={entBtnStyle(t, {
+                  variant: "primary",
+                  block: true,
+                  disabled: true,
+                })}
+                title={timeValidation.errorMessage}
+              >
+                <EBtnContent icon="check">
+                  {preview.approvalRequired
+                    ? resolveCopyByLocale(
+                        locale,
+                        "送出並送審（時間無效）",
+                        "Submit for Approval (Invalid Time)",
+                      )
+                    : resolveCopyByLocale(
+                        locale,
+                        "確認送出（時間無效）",
+                        "Confirm and Submit (Invalid Time)",
+                      )}
+                </EBtnContent>
+              </button>
+            )}
           </div>
         </div>
       </div>

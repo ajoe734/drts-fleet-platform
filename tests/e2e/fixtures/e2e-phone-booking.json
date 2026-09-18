@@ -1,5 +1,4 @@
 {
-  "businessDispatchSubtype": "enterprise_dispatch",
   "pickup": {
     "address": "5 Call Center Lane, Integration City",
     "lat": 25.0375,
@@ -10,8 +9,6 @@
     "lat": 25.06,
     "lng": 121.58
   },
-  "reservationWindowStart": "__WINDOW_START__",
-  "reservationWindowEnd": "__WINDOW_END__",
   "passenger": {
     "name": "E2E Phone Caller",
     "phone": "+886900000201"

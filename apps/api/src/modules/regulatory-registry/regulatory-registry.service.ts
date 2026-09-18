@@ -1,6 +1,13 @@
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 
-import { HttpStatus, Injectable, OnModuleInit, Optional } from "@nestjs/common";
+import {
+  HttpStatus,
+  Injectable,
+  Logger,
+  OnModuleDestroy,
+  OnModuleInit,
+  Optional,
+} from "@nestjs/common";
 
 import type {
   ActivateInsurancePolicyCommand,
@@ -36,7 +43,9 @@ import type {
   SupplyLifecycleTraceRecord,
   SupplySubmissionRecord,
   SubmitExclusivityReviewCommand,
+  UpdateDriverLicensesCommand,
   UpdateDriverMasterLifecycleCommand,
+  UpdateDriverServiceBucketsCommand,
   UpdateDriverWorkStateCommand,
   UpdateVehicleComplianceCommand,
   VehicleContractLifecycleStatus,
@@ -52,16 +61,26 @@ import type {
   DriverPublicRegistrationCredential,
 } from "@drts/contracts";
 
+import { PHASE1_SERVICE_BUCKETS } from "@drts/contracts";
+
 import { ApiRequestError } from "../../common/api-envelope";
 import { OpsDispatchEventsService } from "../../common/ops-dispatch-events.service";
 import { AuditNotificationService } from "../audit-notification/audit-notification.service";
 import { DriverProfileService } from "../driver-profile/driver-profile.service";
+import { AcademyService } from "../driver-academy/academy.service";
+import { NotificationDeliveryService } from "../notification-delivery/notification-delivery.service";
 import {
   RegulatoryRegistryRepository,
   type RegulatoryRegistryQueryExecutor,
   type DriverHeartbeatEventSnapshot,
   type PersistRegulatoryRegistryChanges,
   type RegulatorySupplyPair,
+  type ExpiryEntityType,
+  type ExpiryEventStatus,
+  type DeliveryIntentStatus,
+  type RegistryExpiryEventRow,
+  type RegistryExpiryDeliveryIntentRow,
+  type RegistryExpiryEventWithIntent,
 } from "./regulatory-registry.repository";
 
 const EARTH_RADIUS_KM = 6371;
@@ -95,6 +114,47 @@ export type SubmissionProvisioningResult = ProvisionedCanonicalRecordIds & {
   vehicleAffiliation: VehicleFleetAffiliationRecord | null;
 };
 
+export type ReconcileExpiryCommand = {
+  asOf?: string | undefined;
+  scope?: string | undefined;
+  limit?: number | undefined;
+};
+
+export type ReconcileExpiryResult = {
+  asOf: string;
+  scope: string;
+  scannedDrivers: number;
+  scannedPolicies: number;
+  expiredEventsCreated: number;
+  expiredEventsSuperseded: number;
+  deliveryIntentsCreated: number;
+  deliveryIntentsEnqueued: number;
+  events: RegistryExpiryEventWithIntent[];
+};
+
+function areDriverLicensesValid(
+  driver: DriverRegistryRecord,
+  referenceDateMs: number = Date.now(),
+): boolean {
+  if (driver.licensesValid === false) {
+    return false;
+  }
+  const dates = [
+    driver.licenseExpiry,
+    driver.professionalDriverLicenseExpiry,
+    driver.taxiDriverRegistrationExpiry,
+  ];
+  for (const d of dates) {
+    if (d) {
+      const time = Date.parse(d);
+      if (!Number.isNaN(time) && time <= referenceDateMs) {
+        return false;
+      }
+    }
+  }
+  return true;
+}
+
 function createSeedDriver(
   input: Pick<
     DriverRegistryRecord,
@@ -103,8 +163,17 @@ function createSeedDriver(
     | "supportedServiceBuckets"
     | "workState"
     | "licensesValid"
-  >,
+  > & {
+    licenseExpiry?: string | null;
+    professionalDriverLicenseExpiry?: string | null;
+    taxiDriverRegistrationExpiry?: string | null;
+  },
 ): DriverRegistryRecord {
+  const licenseExpiry = input.licenseExpiry ?? "2027-12-31T23:59:59.000Z";
+  const professionalDriverLicenseExpiry =
+    input.professionalDriverLicenseExpiry ?? "2027-12-31T23:59:59.000Z";
+  const taxiDriverRegistrationExpiry =
+    input.taxiDriverRegistrationExpiry ?? "2027-12-31T23:59:59.000Z";
   const lifecycleStatus: DriverMasterLifecycleStatus =
     input.workState === "suspended" ? "suspended" : "active";
   const eligibilityBlockedReasons: DriverEligibilityBlockReason[] = [];
@@ -122,6 +191,9 @@ function createSeedDriver(
 
   return {
     ...input,
+    licenseExpiry,
+    professionalDriverLicenseExpiry,
+    taxiDriverRegistrationExpiry,
     lifecycleStatus,
     eligibilityBlockedReasons,
     dispatchEligible: eligibilityBlockedReasons.length === 0,
@@ -197,6 +269,7 @@ const VEHICLE_SEED: VehicleRegistryRecord[] = [
     dispatchableFlag: true,
     exclusivityApproved: true,
     insuranceStatus: "valid",
+    createdAt: SEED_TIMESTAMP,
     updatedAt: SEED_TIMESTAMP,
     supplyLifecycle: createEmptySupplyLifecycle(SEED_TIMESTAMP),
   },
@@ -209,6 +282,7 @@ const VEHICLE_SEED: VehicleRegistryRecord[] = [
     dispatchableFlag: false,
     exclusivityApproved: false,
     insuranceStatus: "valid",
+    createdAt: SEED_TIMESTAMP,
     updatedAt: SEED_TIMESTAMP,
     supplyLifecycle: createEmptySupplyLifecycle(SEED_TIMESTAMP),
   },
@@ -221,6 +295,7 @@ const VEHICLE_SEED: VehicleRegistryRecord[] = [
     dispatchableFlag: true,
     exclusivityApproved: true,
     insuranceStatus: "expired",
+    createdAt: SEED_TIMESTAMP,
     updatedAt: "2026-03-31T23:59:59.000Z",
     supplyLifecycle: createEmptySupplyLifecycle("2026-03-31T23:59:59.000Z"),
   },
@@ -233,6 +308,7 @@ const VEHICLE_SEED: VehicleRegistryRecord[] = [
     dispatchableFlag: true,
     exclusivityApproved: true,
     insuranceStatus: "valid",
+    createdAt: SEED_TIMESTAMP,
     updatedAt: SEED_TIMESTAMP,
     supplyLifecycle: createEmptySupplyLifecycle(SEED_TIMESTAMP),
   },
@@ -245,6 +321,7 @@ const VEHICLE_SEED: VehicleRegistryRecord[] = [
     dispatchableFlag: true,
     exclusivityApproved: true,
     insuranceStatus: "valid",
+    createdAt: SEED_TIMESTAMP,
     updatedAt: SEED_TIMESTAMP,
     supplyLifecycle: createEmptySupplyLifecycle(SEED_TIMESTAMP),
   },
@@ -461,7 +538,11 @@ const EXCLUSIVITY_SEED: DispatchExclusivityRecord[] = [
 ];
 
 @Injectable()
-export class RegulatoryRegistryService implements OnModuleInit {
+export class RegulatoryRegistryService implements OnModuleInit, OnModuleDestroy {
+  private readonly logger = new Logger(RegulatoryRegistryService.name);
+  private expiryReconciliationTimer: NodeJS.Timeout | null = null;
+  private expiryReconciliationInFlight: Promise<unknown> | null = null;
+
   private vehicles = VEHICLE_SEED.map((vehicle) => ({ ...vehicle }));
 
   private drivers = DRIVER_SEED.map((driver) => ({ ...driver }));
@@ -534,7 +615,14 @@ export class RegulatoryRegistryService implements OnModuleInit {
     private readonly driverProfileService: DriverProfileService,
     @Optional()
     private readonly regulatoryRegistryRepository?: RegulatoryRegistryRepository,
+    @Optional()
+    private readonly notificationDeliveryService?: NotificationDeliveryService,
+    @Optional()
+    private readonly academyService?: AcademyService,
   ) {
+    if (!this.regulatoryRegistryRepository) {
+      this.regulatoryRegistryRepository = new RegulatoryRegistryRepository();
+    }
     this.reconcileSupplyLifecycleForAll({
       emitEvent: false,
       persistContext: null,
@@ -635,12 +723,68 @@ export class RegulatoryRegistryService implements OnModuleInit {
         emitEvent: false,
         persistContext: null,
       });
+
+      // Bounded startup catch-up for expired credentials and policies
+      try {
+        if (
+          typeof (this.regulatoryRegistryRepository as any)?.scanExpiredDrivers === "function" &&
+          typeof (this.regulatoryRegistryRepository as any)?.withTransaction === "function"
+        ) {
+          await this.reconcileExpiredCredentials({ limit: 100 });
+        }
+      } catch (err) {
+        this.logger.warn(
+          `Startup credential expiry catch-up skipped or failed: ${err instanceof Error ? err.message : String(err)}`,
+        );
+      }
+
+      if (
+        process.env.NODE_ENV !== "test" &&
+        process.env.ENABLE_EXPIRY_RECONCILIATION_LOOP === "true"
+      ) {
+        this.startExpiryReconciliationLoop();
+      }
     } catch (error) {
       this.regulatoryRegistryRepository.reportPersistenceFailure?.(
         error,
         "module init",
       );
     }
+  }
+
+  async onModuleDestroy() {
+    if (this.expiryReconciliationTimer) {
+      clearInterval(this.expiryReconciliationTimer);
+      this.expiryReconciliationTimer = null;
+    }
+    if (this.expiryReconciliationInFlight) {
+      try {
+        await this.expiryReconciliationInFlight;
+      } catch {
+        // ignore
+      }
+    }
+  }
+
+  private startExpiryReconciliationLoop() {
+    if (this.expiryReconciliationTimer) return;
+    const intervalMs =
+      Number(process.env.EXPIRY_RECONCILIATION_INTERVAL_MS) || 60_000;
+    this.expiryReconciliationTimer = setInterval(() => {
+      if (this.expiryReconciliationInFlight) return;
+      this.expiryReconciliationInFlight = this.reconcileExpiredCredentials({
+        limit: 100,
+      })
+        .catch((err) => {
+          this.logger.warn(
+            `Periodic credential expiry reconciliation failed: ${err instanceof Error ? err.message : String(err)}`,
+          );
+        })
+        .finally(() => {
+          this.expiryReconciliationInFlight = null;
+        });
+    }, intervalMs);
+    this.expiryReconciliationTimer.unref?.();
   }
 
   listVehicles() {
@@ -902,6 +1046,11 @@ export class RegulatoryRegistryService implements OnModuleInit {
         : ["standard_taxi"],
       workState: lifecycleStatus === "active" ? "available" : "offline",
       licensesValid: command.licensesValid ?? false,
+      licenseExpiry: command.licenseExpiry ?? null,
+      professionalDriverLicenseExpiry:
+        command.professionalDriverLicenseExpiry ?? null,
+      taxiDriverRegistrationExpiry:
+        command.taxiDriverRegistrationExpiry ?? null,
       lifecycleStatus,
       eligibilityBlockedReasons: [],
       dispatchEligible: false,
@@ -958,6 +1107,72 @@ export class RegulatoryRegistryService implements OnModuleInit {
     return this.cloneDriver(created);
   }
 
+  /**
+   * Adjusts a driver's dispatchable service buckets after registration.
+   *
+   * Audited with old and new values, like `updateDriverLifecycle`, because this
+   * changes what work the platform may send someone.
+   */
+  updateDriverServiceBuckets(
+    driverId: string,
+    command: UpdateDriverServiceBucketsCommand,
+    requestId?: string,
+  ) {
+    const driver = this.requireDriver(driverId);
+    const previous = this.decorateDriver(driver);
+    const buckets = command.supportedServiceBuckets;
+
+    if (!Array.isArray(buckets) || buckets.length === 0) {
+      throw new ApiRequestError(
+        HttpStatus.BAD_REQUEST,
+        "SERVICE_BUCKETS_REQUIRED",
+        "At least one service bucket is required; a driver with none can never be dispatched.",
+        { driverId },
+      );
+    }
+    const unknown = buckets.filter(
+      (bucket) => !PHASE1_SERVICE_BUCKETS.includes(bucket),
+    );
+    if (unknown.length > 0) {
+      throw new ApiRequestError(
+        HttpStatus.BAD_REQUEST,
+        "SERVICE_BUCKET_UNKNOWN",
+        `Unknown service bucket(s): ${unknown.join(", ")}.`,
+        { driverId, unknown, supported: [...PHASE1_SERVICE_BUCKETS] },
+      );
+    }
+
+    driver.supportedServiceBuckets = [...new Set(buckets)];
+    driver.updatedAt = new Date().toISOString();
+
+    const updated = this.decorateDriver(driver);
+    this.persistChanges(
+      { drivers: [this.cloneDriver(updated)] },
+      "update_driver_service_buckets",
+    );
+    this.recordAudit(
+      {
+        actorId: "platform-admin",
+        actorType: "platform_admin",
+        tenantId: null,
+        moduleName: "regulatory-registry",
+        actionName: "update_driver_service_buckets",
+        resourceType: "driver_master",
+        resourceId: driverId,
+        oldValuesSummary: {
+          supportedServiceBuckets: [...previous.supportedServiceBuckets],
+        },
+        newValuesSummary: {
+          supportedServiceBuckets: [...updated.supportedServiceBuckets],
+          reason: command.reason ?? null,
+        },
+      },
+      requestId,
+    );
+
+    return this.cloneDriver(updated);
+  }
+
   updateDriverLifecycle(
     driverId: string,
     command: UpdateDriverMasterLifecycleCommand,
@@ -991,6 +1206,18 @@ export class RegulatoryRegistryService implements OnModuleInit {
       driver.retiredAt = null;
     }
 
+    if (command.licenseExpiry !== undefined) {
+      driver.licenseExpiry = command.licenseExpiry;
+    }
+    if (command.professionalDriverLicenseExpiry !== undefined) {
+      driver.professionalDriverLicenseExpiry =
+        command.professionalDriverLicenseExpiry;
+    }
+    if (command.taxiDriverRegistrationExpiry !== undefined) {
+      driver.taxiDriverRegistrationExpiry =
+        command.taxiDriverRegistrationExpiry;
+    }
+
     const updated = this.decorateDriver(driver);
     this.persistChanges(
       { drivers: [this.cloneDriver(updated)] },
@@ -1013,6 +1240,61 @@ export class RegulatoryRegistryService implements OnModuleInit {
       },
       requestId,
     );
+
+    return this.cloneDriver(updated);
+  }
+
+  updateDriverLicenses(
+    driverId: string,
+    command: UpdateDriverLicensesCommand,
+    requestId?: string,
+  ): DriverRegistryRecord {
+    const driver = this.requireDriver(driverId);
+    const previous = this.decorateDriver(driver);
+    const now = new Date().toISOString();
+
+    if (command.licenseExpiry !== undefined) {
+      driver.licenseExpiry = command.licenseExpiry;
+    }
+    if (command.professionalDriverLicenseExpiry !== undefined) {
+      driver.professionalDriverLicenseExpiry =
+        command.professionalDriverLicenseExpiry;
+    }
+    if (command.taxiDriverRegistrationExpiry !== undefined) {
+      driver.taxiDriverRegistrationExpiry =
+        command.taxiDriverRegistrationExpiry;
+    }
+    if (command.licensesValid !== undefined) {
+      driver.licensesValid = command.licensesValid;
+    }
+    driver.updatedAt = now;
+
+    const updated = this.decorateDriver(driver);
+    this.persistChanges(
+      { drivers: [this.cloneDriver(updated)] },
+      "update_driver_licenses",
+    );
+    this.recordAudit(
+      {
+        actorId: "platform-admin",
+        actorType: "platform_admin",
+        tenantId: null,
+        moduleName: "regulatory-registry",
+        actionName: "update_driver_licenses",
+        resourceType: "driver_master",
+        resourceId: driverId,
+        oldValuesSummary: this.buildDriverAuditSummary(previous, null),
+        newValuesSummary: this.buildDriverAuditSummary(
+          updated,
+          command.reason ?? null,
+        ),
+      },
+      requestId,
+    );
+
+    if (this.regulatoryRegistryRepository) {
+      void this.handleDriverLicenseRenewal(driverId, command);
+    }
 
     return this.cloneDriver(updated);
   }
@@ -1421,6 +1703,30 @@ export class RegulatoryRegistryService implements OnModuleInit {
       .map((policy) => this.clonePolicy(policy));
   }
 
+  listExpiringDriverLicenses(
+    windowDays = 30,
+    referenceDateMs: number = Date.now(),
+  ): DriverRegistryRecord[] {
+    const cutoff = referenceDateMs + windowDays * 24 * 60 * 60 * 1000;
+
+    return this.drivers
+      .filter((driver) => driver.lifecycleStatus === "active")
+      .map((driver) => this.decorateDriver(driver, referenceDateMs))
+      .filter((driver) => {
+        const dates = [
+          driver.licenseExpiry,
+          driver.professionalDriverLicenseExpiry,
+          driver.taxiDriverRegistrationExpiry,
+        ]
+          .filter((d): d is string => Boolean(d && typeof d === "string"))
+          .map((d) => Date.parse(d))
+          .filter((t) => !Number.isNaN(t));
+
+        return dates.some((t) => t >= referenceDateMs && t <= cutoff);
+      })
+      .map((driver) => this.cloneDriver(driver));
+  }
+
   createInsurancePolicy(command: CreateInsurancePolicyCommand) {
     this.assertNonBlank(command.vehicleId, "vehicleId");
     this.assertNonBlank(command.policyNo, "policyNo");
@@ -1497,6 +1803,17 @@ export class RegulatoryRegistryService implements OnModuleInit {
       },
       "activate_insurance_policy",
     );
+
+    if (
+      this.regulatoryRegistryRepository?.supersedeActiveExpiryEventsForEntity &&
+      policy.status === "active"
+    ) {
+      void this.regulatoryRegistryRepository.supersedeActiveExpiryEventsForEntity(
+        "policy",
+        policy.policyId,
+        "insurance_policy",
+      );
+    }
 
     return this.clonePolicy(policy);
   }
@@ -1947,17 +2264,20 @@ export class RegulatoryRegistryService implements OnModuleInit {
 
   getVehicleDispatchability(
     vehicleId: string,
-    serviceBucket: Phase1ServiceBucket,
+    serviceBucket?: Phase1ServiceBucket,
   ) {
     this.reconcileSupplyLifecycleForAll({
       emitEvent: false,
       persistContext: null,
     });
     const vehicle = this.requireVehicle(vehicleId);
-    return (
-      vehicle.supplyLifecycle.dispatch.eligible &&
-      vehicle.supportedServiceBuckets.includes(serviceBucket)
-    );
+    if (!vehicle.supplyLifecycle.dispatch.eligible) {
+      return false;
+    }
+    if (serviceBucket) {
+      return vehicle.supportedServiceBuckets.includes(serviceBucket);
+    }
+    return vehicle.supportedServiceBuckets.length > 0;
   }
 
   getDriverAvailability(driverId: string, serviceBucket: Phase1ServiceBucket) {
@@ -2050,6 +2370,10 @@ export class RegulatoryRegistryService implements OnModuleInit {
       ),
       workState: "available",
       licensesValid: true,
+      licenseExpiry: draft.professionalDriverLicenseExpiry ?? null,
+      professionalDriverLicenseExpiry:
+        draft.professionalDriverLicenseExpiry ?? null,
+      taxiDriverRegistrationExpiry: draft.taxiDriverRegistrationExpiry ?? null,
       lifecycleStatus: "active",
       eligibilityBlockedReasons: [],
       dispatchEligible: false,
@@ -2082,6 +2406,7 @@ export class RegulatoryRegistryService implements OnModuleInit {
     };
     const created: VehicleRegistryRecord = {
       vehicleId: `veh_${randomUUID()}`,
+      createdAt: approvedAt,
       plateNo: draft.plateNo.trim(),
       licenseType: this.normalizeVehicleLicenseType(draft.licenseType),
       operatingArea: draft.businessArea.trim(),
@@ -2674,6 +2999,11 @@ export class RegulatoryRegistryService implements OnModuleInit {
       ...vehicle,
       licenseType: this.normalizeVehicleLicenseType(vehicle.licenseType),
       supportedServiceBuckets: [...vehicle.supportedServiceBuckets],
+      // A row persisted before `createdAt` existed cannot tell us when the
+      // vehicle joined. `updatedAt` is the earliest moment we can actually
+      // evidence, so the monthly delta counts such a vehicle from then rather
+      // than inventing a registration date it would report to a regulator.
+      createdAt: vehicle.createdAt ?? updatedAt,
       updatedAt,
       supplyLifecycle: {
         ...lifecycle,
@@ -2733,15 +3063,25 @@ export class RegulatoryRegistryService implements OnModuleInit {
     };
   }
 
-  private decorateDriver(driver: DriverRegistryRecord): DriverRegistryRecord {
+  private decorateDriver(
+    driver: DriverRegistryRecord,
+    referenceDateMs: number = Date.now(),
+  ): DriverRegistryRecord {
     const profile = this.driverProfileService.findProfileForDriver(
       driver.driverId,
     );
+    const licensesValid =
+      driver.licensesValid !== false &&
+      areDriverLicensesValid(driver, referenceDateMs);
+    const candidate: DriverRegistryRecord = {
+      ...driver,
+      licensesValid,
+    };
     const eligibilityBlockedReasons =
-      this.computeDriverEligibilityBlockedReasons(driver);
+      this.computeDriverEligibilityBlockedReasons(candidate);
 
     return {
-      ...driver,
+      ...candidate,
       supportedServiceBuckets: [...driver.supportedServiceBuckets],
       eligibilityBlockedReasons,
       dispatchEligible: eligibilityBlockedReasons.length === 0,
@@ -3402,5 +3742,484 @@ export class RegulatoryRegistryService implements OnModuleInit {
         }
       }
     }
+  }
+
+  async handleDriverLicenseRenewal(
+    driverId: string,
+    command: UpdateDriverLicensesCommand,
+  ): Promise<void> {
+    if (!this.regulatoryRegistryRepository?.supersedeActiveExpiryEventsForEntity) return;
+    const now = Date.now();
+    if (command.licenseExpiry && Date.parse(command.licenseExpiry) > now) {
+      await this.regulatoryRegistryRepository.supersedeActiveExpiryEventsForEntity(
+        "driver",
+        driverId,
+        "driver_license",
+      );
+    }
+    if (
+      command.professionalDriverLicenseExpiry &&
+      Date.parse(command.professionalDriverLicenseExpiry) > now
+    ) {
+      await this.regulatoryRegistryRepository.supersedeActiveExpiryEventsForEntity(
+        "driver",
+        driverId,
+        "professional_driver_license",
+      );
+    }
+    if (
+      command.taxiDriverRegistrationExpiry &&
+      Date.parse(command.taxiDriverRegistrationExpiry) > now
+    ) {
+      await this.regulatoryRegistryRepository.supersedeActiveExpiryEventsForEntity(
+        "driver",
+        driverId,
+        "taxi_driver_registration",
+      );
+    }
+  }
+
+  async getExpiryBacklog(filter?: {
+    scope?: string | undefined;
+    entityType?: ExpiryEntityType | undefined;
+    status?: ExpiryEventStatus | undefined;
+    limit?: number | undefined;
+  }): Promise<RegistryExpiryEventWithIntent[]> {
+    if (!this.regulatoryRegistryRepository?.listExpiryEvents) return [];
+    return this.regulatoryRegistryRepository.listExpiryEvents(filter);
+  }
+
+  async getExpiryReceipts(filter?: {
+    tenantId?: string | undefined;
+    deliveryStatus?: DeliveryIntentStatus | undefined;
+    limit?: number | undefined;
+  }): Promise<RegistryExpiryDeliveryIntentRow[]> {
+    if (!this.regulatoryRegistryRepository?.listDeliveryIntents) return [];
+    return this.regulatoryRegistryRepository.listDeliveryIntents(filter);
+  }
+
+  async getExpiryEvent(
+    eventId: string,
+  ): Promise<RegistryExpiryEventWithIntent | null> {
+    if (!this.regulatoryRegistryRepository?.getExpiryEventById) return null;
+    return this.regulatoryRegistryRepository.getExpiryEventById(eventId);
+  }
+
+  async reconcileExpiredCredentials(
+    command?: ReconcileExpiryCommand,
+  ): Promise<ReconcileExpiryResult> {
+    const asOf = command?.asOf
+      ? new Date(command.asOf).toISOString()
+      : new Date().toISOString();
+    const asOfMs = Date.parse(asOf);
+    const scope = command?.scope?.trim() || "default";
+    const limit = command?.limit ?? 100;
+
+    let scannedDrivers = 0;
+    let scannedPolicies = 0;
+    let expiredEventsCreated = 0;
+    let expiredEventsSuperseded = 0;
+    let deliveryIntentsCreated = 0;
+    let deliveryIntentsEnqueued = 0;
+
+    const repository = this.regulatoryRegistryRepository!;
+    if (typeof (repository as any)?.withTransaction !== "function") {
+      return {
+        asOf,
+        scope,
+        scannedDrivers: 0,
+        scannedPolicies: 0,
+        expiredEventsCreated: 0,
+        expiredEventsSuperseded: 0,
+        deliveryIntentsCreated: 0,
+        deliveryIntentsEnqueued: 0,
+        events: [],
+      };
+    }
+
+    // 1. Scan PostgreSQL or in-memory sources for candidate expired records
+    let driverCandidates: DriverRegistryRecord[] = [];
+
+    if (repository.isEnabled()) {
+      driverCandidates = await repository.scanExpiredDrivers(asOf, limit);
+    } else {
+      driverCandidates = this.drivers
+        .filter((d) => {
+          const dates = [
+            d.licenseExpiry,
+            d.professionalDriverLicenseExpiry,
+            d.taxiDriverRegistrationExpiry,
+          ];
+          const datesExpired = dates.some((dt) => {
+            if (!dt) return false;
+            const ms = Date.parse(dt);
+            return !Number.isNaN(ms) && ms <= asOfMs;
+          });
+          if (datesExpired) return true;
+          if (this.academyService) return true;
+          return false;
+        })
+        .slice(0, limit);
+    }
+    scannedDrivers = driverCandidates.length;
+
+    let policyCandidates: InsurancePolicyRecord[] = [];
+
+    if (repository.isEnabled()) {
+      policyCandidates = await repository.scanExpiredPolicies(asOf, limit);
+    } else {
+      policyCandidates = this.policies
+        .filter((p) => {
+          if (p.status === "cancelled") return false;
+          const endAtMs = Date.parse(p.endAt);
+          const startAtMs = Date.parse(p.startAt);
+          return (
+            !Number.isNaN(endAtMs) &&
+            endAtMs < asOfMs &&
+            !Number.isNaN(startAtMs) &&
+            startAtMs <= asOfMs
+          );
+        })
+        .slice(0, limit);
+    }
+    scannedPolicies = policyCandidates.length;
+
+    // Strict multi-row locking order: sorted by entity ID ASC
+    const sortedDriverIds = Array.from(
+      new Set(driverCandidates.map((d) => d.driverId)),
+    ).sort();
+    const sortedPolicyIds = Array.from(
+      new Set(policyCandidates.map((p) => p.policyId)),
+    ).sort();
+
+    // 2. Perform DB operations inside transaction
+    await repository.withTransaction(async (client) => {
+      // Process drivers
+      for (const driverId of sortedDriverIds) {
+        const locked = repository.isEnabled()
+          ? await repository.lockDriver(driverId, client)
+          : (this.drivers.find((d) => d.driverId === driverId) ?? null);
+        if (!locked) continue;
+
+        const checks: Array<{
+          fieldName: string;
+          expiry: string;
+          credentialType: string;
+        }> = [];
+
+        if (locked.licenseExpiry) {
+          const ms = Date.parse(locked.licenseExpiry);
+          if (!Number.isNaN(ms) && ms <= asOfMs) {
+            checks.push({
+              fieldName: "licenseExpiry",
+              expiry: locked.licenseExpiry,
+              credentialType: "driver_license",
+            });
+          }
+        }
+        if (locked.professionalDriverLicenseExpiry) {
+          const ms = Date.parse(locked.professionalDriverLicenseExpiry);
+          if (!Number.isNaN(ms) && ms <= asOfMs) {
+            checks.push({
+              fieldName: "professionalDriverLicenseExpiry",
+              expiry: locked.professionalDriverLicenseExpiry,
+              credentialType: "professional_driver_license",
+            });
+          }
+        }
+        if (locked.taxiDriverRegistrationExpiry) {
+          const ms = Date.parse(locked.taxiDriverRegistrationExpiry);
+          if (!Number.isNaN(ms) && ms <= asOfMs) {
+            checks.push({
+              fieldName: "taxiDriverRegistrationExpiry",
+              expiry: locked.taxiDriverRegistrationExpiry,
+              credentialType: "taxi_driver_registration",
+            });
+          }
+        }
+
+        // Academy qualification check
+        if (this.academyService) {
+          try {
+            const qual = await this.academyService.evaluateDriverQualification(
+              driverId,
+              new Date(asOf),
+            );
+            if (qual.regulatoryStatus === "expired") {
+              const overdue = qual.records.find((r) => r.isOverdue);
+              const expiry = overdue?.expiresAt ?? locked.updatedAt ?? asOf;
+              checks.push({
+                fieldName: "academyTraining",
+                expiry:
+                  typeof expiry === "string"
+                    ? expiry
+                    : new Date(expiry).toISOString(),
+                credentialType: "academy_qualification",
+              });
+            }
+          } catch {
+            // ignore Academy evaluation errors during driver expiry check
+          }
+        }
+
+        for (const check of checks) {
+          const fingerprintTuple = [
+            "credential-expiry/v1",
+            scope,
+            "driver",
+            driverId,
+            check.fieldName,
+            Date.parse(check.expiry),
+          ];
+          const fingerprint = createHash("sha256")
+            .update(JSON.stringify(fingerprintTuple))
+            .digest("hex");
+
+          const existingEvent = await repository.findExpiryEventByFingerprint(
+            fingerprint,
+            client,
+          );
+          let event: RegistryExpiryEventRow;
+
+          if (!existingEvent) {
+            event = await repository.insertExpiryEvent(
+              {
+                scope,
+                entityType: "driver",
+                entityId: driverId,
+                credentialType: check.credentialType,
+                sourceFingerprint: fingerprint,
+                sourceExpiryAt: check.expiry,
+                status: "pending",
+              },
+              client,
+            );
+            expiredEventsCreated++;
+
+            const superseded =
+              await repository.supersedeActiveExpiryEventsForEntity(
+                "driver",
+                driverId,
+                check.credentialType,
+                event.event_id,
+                client,
+              );
+            expiredEventsSuperseded += superseded;
+          } else {
+            event = existingEvent;
+          }
+
+          if (event.status !== "superseded") {
+            const recipientEmail =
+              process.env.REGULATORY_ALERT_RECIPIENT_EMAIL?.trim() ||
+              `driver-${driverId}@alerts.drts.local`;
+            const idempotencyKey = JSON.stringify([
+              "credential-alert/v1",
+              scope,
+              event.event_id,
+              recipientEmail,
+            ]);
+            const fromEmail =
+              process.env.NOTIFICATION_FROM_EMAIL?.trim() ||
+              "noreply@fleet.drts.local";
+            const subject = `[DRTS Alert] Credential Expired: ${check.credentialType} for driver ${driverId}`;
+            const body = `The credential ${check.credentialType} for driver ${driverId} expired at ${check.expiry}. Immediate renewal or suspension review required.`;
+
+            const intent = await repository.insertDeliveryIntent(
+              {
+                eventId: event.event_id,
+                scope,
+                idempotencyKey,
+                tenantId: scope,
+                recipientEmail,
+                fromEmail,
+                subject,
+                body,
+              },
+              client,
+            );
+            if (intent) {
+              deliveryIntentsCreated++;
+            }
+          }
+        }
+      }
+
+      // Process policies
+      for (const policyId of sortedPolicyIds) {
+        const locked = repository.isEnabled()
+          ? await repository.lockPolicy(policyId, client)
+          : (this.policies.find((p) => p.policyId === policyId) ?? null);
+        if (!locked) continue;
+
+        const policyNo = locked.policyNo || policyId;
+        const insuranceType =
+          locked.insuranceType || "commercial_liability";
+        const startAt = locked.startAt || locked.createdAt;
+        const endAt = locked.endAt;
+        const status = locked.status || "active";
+
+        if (status === "cancelled") continue;
+        const startAtMs = Date.parse(startAt);
+        const endAtMs = Date.parse(endAt);
+        if (Number.isNaN(endAtMs) || endAtMs >= asOfMs) continue;
+        if (!Number.isNaN(startAtMs) && startAtMs > asOfMs) continue;
+
+        const fingerprintTuple = [
+          "credential-expiry/v1",
+          scope,
+          "policy",
+          policyId,
+          locked.vehicleId,
+          policyNo,
+          insuranceType,
+          startAtMs,
+          endAtMs,
+          status,
+        ];
+        const fingerprint = createHash("sha256")
+          .update(JSON.stringify(fingerprintTuple))
+          .digest("hex");
+
+        const existingEvent = await repository.findExpiryEventByFingerprint(
+          fingerprint,
+          client,
+        );
+        let event: RegistryExpiryEventRow;
+
+        if (!existingEvent) {
+          event = await repository.insertExpiryEvent(
+            {
+              scope,
+              entityType: "policy",
+              entityId: policyId,
+              credentialType: "insurance_policy",
+              sourceFingerprint: fingerprint,
+              sourceExpiryAt: endAt,
+              status: "pending",
+            },
+            client,
+          );
+          expiredEventsCreated++;
+
+          const superseded =
+            await repository.supersedeActiveExpiryEventsForEntity(
+              "policy",
+              policyId,
+              "insurance_policy",
+              event.event_id,
+              client,
+            );
+          expiredEventsSuperseded += superseded;
+        } else {
+          event = existingEvent;
+        }
+
+        if (event.status !== "superseded") {
+          const recipientEmail =
+            process.env.REGULATORY_ALERT_RECIPIENT_EMAIL?.trim() ||
+            `policy-${policyId}@alerts.drts.local`;
+          const idempotencyKey = JSON.stringify([
+            "credential-alert/v1",
+            scope,
+            event.event_id,
+            recipientEmail,
+          ]);
+          const fromEmail =
+            process.env.NOTIFICATION_FROM_EMAIL?.trim() ||
+            "noreply@fleet.drts.local";
+          const subject = `[DRTS Alert] Insurance Policy Expired: policy ${policyNo} for vehicle ${locked.vehicleId}`;
+          const body = `Insurance policy ${policyNo} (type: ${insuranceType}) for vehicle ${locked.vehicleId} expired at ${endAt}. Immediate renewal required.`;
+
+          const intent = await repository.insertDeliveryIntent(
+            {
+              eventId: event.event_id,
+              scope,
+              idempotencyKey,
+              tenantId: scope,
+              recipientEmail,
+              fromEmail,
+              subject,
+              body,
+            },
+            client,
+          );
+          if (intent) {
+            deliveryIntentsCreated++;
+          }
+        }
+      }
+    });
+
+    // 3. Post-commit: delivery intent processing
+    const pendingIntents = await repository.findPendingDeliveryIntents(limit);
+    for (const intent of pendingIntents) {
+      // Pre-send source re-check: verify event hasn't been superseded
+      const eventWithIntent = await repository.getExpiryEventById(
+        intent.event_id,
+      );
+      if (!eventWithIntent || eventWithIntent.status === "superseded") {
+        await repository.updateDeliveryIntent({
+          intentId: intent.intent_id,
+          deliveryStatus: "superseded",
+        });
+        continue;
+      }
+
+      if (this.notificationDeliveryService) {
+        try {
+          const receipt = await this.notificationDeliveryService.enqueue({
+            tenantId: intent.tenant_id,
+            idempotencyKey: intent.idempotency_key,
+            recipientEmail: intent.recipient_email,
+            fromEmail: intent.from_email,
+            subject: intent.subject,
+            body: intent.body,
+          });
+          deliveryIntentsEnqueued++;
+
+          if (this.notificationDeliveryService.availability() === "available") {
+            try {
+              await this.notificationDeliveryService.dispatch(
+                intent.tenant_id,
+                receipt.deliveryId,
+              );
+            } catch {
+              // Dispatch transport error recorded in outbox attempt, doesn't abort enqueue
+            }
+          }
+
+          await repository.updateDeliveryIntent({
+            intentId: intent.intent_id,
+            deliveryStatus: "enqueued",
+            outboxDeliveryId: receipt.deliveryId,
+          });
+          await repository.updateExpiryEventStatus(
+            intent.event_id,
+            "completed",
+          );
+        } catch (err: any) {
+          await repository.updateDeliveryIntent({
+            intentId: intent.intent_id,
+            deliveryStatus: "failed",
+            lastError: err.message ?? String(err),
+          });
+        }
+      }
+    }
+
+    const events = await repository.listExpiryEvents({ scope, limit });
+
+    return {
+      asOf,
+      scope,
+      scannedDrivers,
+      scannedPolicies,
+      expiredEventsCreated,
+      expiredEventsSuperseded,
+      deliveryIntentsCreated,
+      deliveryIntentsEnqueued,
+      events,
+    };
   }
 }

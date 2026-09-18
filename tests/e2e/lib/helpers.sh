@@ -19,6 +19,10 @@ E2E_AUTH_BEARER_TOKEN="${E2E_AUTH_BEARER_TOKEN:-}"
 # Optional application bearer token. This uses x-drts-authorization so it does
 # not collide with Cloud Run / ingress Authorization headers.
 E2E_REQUEST_BEARER_TOKEN="${E2E_REQUEST_BEARER_TOKEN:-}"
+# Opt-in for runtime-minted bearer + step-up proof flow. Leave disabled by
+# default because workforce bootstrap tokens without durable memberships fail
+# platform/ops JWT validation in the generic hermetic suites.
+E2E_ENABLE_RUNTIME_STEP_UP="${E2E_ENABLE_RUNTIME_STEP_UP:-}"
 E2E_INTERNAL_KEY="${E2E_INTERNAL_KEY:-${SMOKE_INTERNAL_KEY:-${DRTS_INTERNAL_KEY:-}}}"
 
 # ── Bootstrap auth (overridden per surface leg via switch_actor) ───────────────
@@ -81,6 +85,7 @@ switch_actor() {
   E2E_ACTOR_ID="$2"
   E2E_TENANT_ID="${3:-}"
   E2E_REALM=""   # re-derived by http_call
+  E2E_REQUEST_BEARER_TOKEN=""
   E2E_PARTNER_ID=""
   E2E_PARTNER_PROGRAM_ID=""
   E2E_PARTNER_ENTRY_SLUG=""
@@ -96,6 +101,184 @@ set_partner_context() {
   log_info "Partner context → partnerId=${E2E_PARTNER_ID:-<empty>}, programId=${E2E_PARTNER_PROGRAM_ID:-<empty>}, entrySlug=${E2E_PARTNER_ENTRY_SLUG:-<empty>}"
 }
 
+mint_runtime_bearer_token() {
+  [[ -n "${E2E_ACTOR_TYPE:-}" ]] || return 1
+
+  local request_id="e2e-token-$(date +%s%N | head -c 16)"
+  local realm="${E2E_REALM:-}"
+  if [[ -z "$realm" ]]; then
+    case "${E2E_ACTOR_TYPE:-}" in
+      system)          realm="system"   ;;
+      platform_admin)  realm="platform" ;;
+      tenant_admin)    realm="tenant"   ;;
+      ops_user)        realm="ops"      ;;
+      driver_user)     realm="driver"   ;;
+      partner_api_key) realm="partner"  ;;
+      *)               realm="system"   ;;
+    esac
+  fi
+
+  local curl_args=(
+    --silent --show-error
+    --max-time "$E2E_TIMEOUT"
+    --write-out "\n__HTTP_STATUS__%{http_code}"
+    -X POST
+    -H "Content-Type: application/json"
+    -H "X-Request-ID: ${request_id}"
+    -H "Idempotency-Key: ${request_id}"
+    -H "x-actor-type: ${E2E_ACTOR_TYPE}"
+    -H "x-actor-id: ${E2E_ACTOR_ID:-e2e-actor-001}"
+    -H "x-realm: ${realm}"
+  )
+
+  if [[ -n "$E2E_AUTH_BEARER_TOKEN" ]]; then
+    curl_args+=(-H "Authorization: Bearer ${E2E_AUTH_BEARER_TOKEN}")
+  fi
+  if [[ -n "${E2E_INTERNAL_KEY:-}" ]]; then
+    curl_args+=(-H "x-drts-internal-key: ${E2E_INTERNAL_KEY}")
+  fi
+  if [[ -n "${E2E_TENANT_ID:-}" ]]; then
+    curl_args+=(-H "x-tenant-id: ${E2E_TENANT_ID}")
+  fi
+  if [[ -n "${E2E_PARTNER_ID:-}" ]]; then
+    curl_args+=(-H "x-partner-id: ${E2E_PARTNER_ID}")
+  fi
+  if [[ -n "${E2E_PARTNER_PROGRAM_ID:-}" ]]; then
+    curl_args+=(-H "x-partner-program-id: ${E2E_PARTNER_PROGRAM_ID}")
+  fi
+  if [[ -n "${E2E_PARTNER_ENTRY_SLUG:-}" ]]; then
+    curl_args+=(-H "x-partner-entry-slug: ${E2E_PARTNER_ENTRY_SLUG}")
+  fi
+  if [[ -n "${E2E_EXTRA_SCOPES:-}" ]]; then
+    curl_args+=(-H "x-scopes: ${E2E_EXTRA_SCOPES}")
+  fi
+
+  local raw status body token
+  raw=$(curl "${curl_args[@]}" "${E2E_API_URL}${E2E_API_PATH_PREFIX}/auth/token" 2>&1) || return 1
+  status=$(echo "$raw" | grep -o '__HTTP_STATUS__[0-9]*' | sed 's/__HTTP_STATUS__//')
+  body=$(echo "$raw" | sed '/^__HTTP_STATUS__/d')
+  if ! echo "$status" | grep -qE '^(200|201)$'; then
+    return 1
+  fi
+
+  token=$(echo "$body" | jq -r '.token // empty' 2>/dev/null || true)
+  [[ -n "$token" ]] || return 1
+  printf '%s' "$token"
+}
+
+resolve_step_up_reference() {
+  local app_bearer_token="$1"
+  local method="$2"
+  local path="$3"
+
+  local request_id="e2e-stepup-$(date +%s%N | head -c 16)"
+  local payload
+  payload=$(jq -nc --arg method "$method" --arg path "${E2E_API_PATH_PREFIX}${path}" \
+    '{ method: $method, path: $path }')
+
+  local curl_args=(
+    --silent --show-error
+    --max-time "$E2E_TIMEOUT"
+    --write-out "\n__HTTP_STATUS__%{http_code}"
+    -X POST
+    -H "Content-Type: application/json"
+    -H "X-Request-ID: ${request_id}"
+    -H "Idempotency-Key: ${request_id}"
+    --data "$payload"
+  )
+
+  if [[ -n "$app_bearer_token" ]]; then
+    curl_args+=(-H "x-drts-authorization: Bearer ${app_bearer_token}")
+  else
+    local realm="${E2E_REALM:-}"
+    if [[ -z "$realm" ]]; then
+      case "${E2E_ACTOR_TYPE:-}" in
+        system)         realm="system"   ;;
+        platform_admin) realm="platform" ;;
+        tenant_admin)   realm="tenant"   ;;
+        ops_user)       realm="ops"      ;;
+        driver_user)    realm="driver"   ;;
+        partner_api_key) realm="partner" ;;
+        *)              realm="system"   ;;
+      esac
+    fi
+    if [[ -n "${E2E_ACTOR_TYPE:-}" ]]; then
+      curl_args+=(
+        -H "x-actor-type: ${E2E_ACTOR_TYPE}"
+        -H "x-actor-id: ${E2E_ACTOR_ID:-e2e-actor-001}"
+        -H "x-realm: ${realm}"
+      )
+    fi
+    if [[ -n "${E2E_TENANT_ID:-}" ]]; then
+      curl_args+=(-H "x-tenant-id: ${E2E_TENANT_ID}")
+    fi
+  fi
+
+  if [[ -n "$E2E_AUTH_BEARER_TOKEN" ]]; then
+    curl_args+=(-H "Authorization: Bearer ${E2E_AUTH_BEARER_TOKEN}")
+  fi
+
+  local raw status body required reference
+  raw=$(curl "${curl_args[@]}" "${E2E_API_URL}${E2E_API_PATH_PREFIX}/identity/step-up-proofs" 2>&1) || return 1
+  status=$(echo "$raw" | grep -o '__HTTP_STATUS__[0-9]*' | sed 's/__HTTP_STATUS__//')
+  body=$(echo "$raw" | sed '/^__HTTP_STATUS__/d')
+  if ! echo "$status" | grep -qE '^(200|201)$'; then
+    return 1
+  fi
+
+  required=$(echo "$body" | jq -r '.data.required // false' 2>/dev/null || true)
+  if [[ "$required" != "true" ]]; then
+    return 0
+  fi
+
+  reference=$(echo "$body" | jq -r '.data.step_up_reference // .data.stepUpReference // empty | select(length > 0)' 2>/dev/null || true)
+  [[ -n "$reference" ]] || return 1
+  printf '%s' "$reference"
+}
+
+runtime_step_up_enabled() {
+  case "${E2E_ENABLE_RUNTIME_STEP_UP:-}" in
+    1|true|TRUE|yes|YES)
+      return 0
+      ;;
+    *)
+      return 1
+      ;;
+  esac
+}
+
+should_force_runtime_bearer() {
+  local method="$1"
+  local path="$2"
+
+  runtime_step_up_enabled || return 1
+
+  case "${E2E_ACTOR_TYPE:-}" in
+    platform_admin|ops_user)
+      ;;
+    *)
+      return 1
+      ;;
+  esac
+
+  case "$method" in
+    POST|PUT|PATCH|DELETE)
+      ;;
+    *)
+      return 1
+      ;;
+  esac
+
+  case "$path" in
+    /platform-admin/*|/ops/*)
+      return 0
+      ;;
+    *)
+      return 1
+      ;;
+  esac
+}
+
 # ── HTTP helper ───────────────────────────────────────────────────────────────
 # Usage: http_call METHOD PATH [BODY_FILE]
 # Sets global: RESP_BODY  RESP_STATUS
@@ -105,6 +288,12 @@ http_call() {
   local body_file="${3:-}"
   local request_id
   request_id="e2e-$(date +%s%N | head -c 16)"
+  local application_bearer="${E2E_REQUEST_BEARER_TOKEN:-}"
+  local step_up_reference=""
+
+  if should_force_runtime_bearer "$method" "$path"; then
+    application_bearer=""
+  fi
 
   local realm="${E2E_REALM:-}"
   if [[ -z "$realm" ]]; then
@@ -142,34 +331,48 @@ http_call() {
     curl_args+=(-H "x-drts-authorization: Bearer ${E2E_REQUEST_BEARER_TOKEN}")
   fi
 
+  if [[ "$method" =~ ^(POST|PUT|PATCH|DELETE)$ ]]; then
+    if runtime_step_up_enabled && [[ -z "$application_bearer" ]]; then
+      application_bearer=$(mint_runtime_bearer_token || true)
+    fi
+    step_up_reference=$(resolve_step_up_reference "$application_bearer" "$method" "$path" || true)
+  fi
+
+  if [[ -n "$application_bearer" && -z "${E2E_REQUEST_BEARER_TOKEN:-}" ]]; then
+    curl_args+=(-H "x-drts-authorization: Bearer ${application_bearer}")
+  fi
+  if [[ -n "$step_up_reference" ]]; then
+    curl_args+=(-H "x-drts-step-up-reference: ${step_up_reference}")
+  fi
+
   if [[ -n "$E2E_INTERNAL_KEY" ]]; then
     curl_args+=(-H "x-drts-internal-key: ${E2E_INTERNAL_KEY}")
   fi
 
-  if [[ -n "${E2E_ACTOR_TYPE:-}" ]]; then
+  if [[ -n "${E2E_ACTOR_TYPE:-}" && -z "$application_bearer" ]]; then
     curl_args+=(
       -H "x-actor-type: ${E2E_ACTOR_TYPE}"
       -H "x-actor-id: ${E2E_ACTOR_ID:-e2e-actor-001}"
       -H "x-realm: ${realm}"
     )
-    if [[ -n "${E2E_TENANT_ID:-}" ]]; then
-      curl_args+=(-H "x-tenant-id: ${E2E_TENANT_ID}")
-    fi
-    if [[ -n "${E2E_PARTNER_ID:-}" ]]; then
-      curl_args+=(-H "x-partner-id: ${E2E_PARTNER_ID}")
-    fi
-    if [[ -n "${E2E_PARTNER_PROGRAM_ID:-}" ]]; then
-      curl_args+=(-H "x-partner-program-id: ${E2E_PARTNER_PROGRAM_ID}")
-    fi
-    if [[ -n "${E2E_PARTNER_ENTRY_SLUG:-}" ]]; then
-      curl_args+=(-H "x-partner-entry-slug: ${E2E_PARTNER_ENTRY_SLUG}")
-    fi
-    if [[ -n "${E2E_FLEET_PARTNER_ID:-}" ]]; then
-      curl_args+=(-H "x-fleet-partner-id: ${E2E_FLEET_PARTNER_ID}")
-    fi
-    if [[ -n "${E2E_EXTRA_SCOPES:-}" ]]; then
-      curl_args+=(-H "x-scopes: ${E2E_EXTRA_SCOPES}")
-    fi
+  fi
+  if [[ -n "${E2E_TENANT_ID:-}" ]]; then
+    curl_args+=(-H "x-tenant-id: ${E2E_TENANT_ID}")
+  fi
+  if [[ -n "${E2E_PARTNER_ID:-}" ]]; then
+    curl_args+=(-H "x-partner-id: ${E2E_PARTNER_ID}")
+  fi
+  if [[ -n "${E2E_PARTNER_PROGRAM_ID:-}" ]]; then
+    curl_args+=(-H "x-partner-program-id: ${E2E_PARTNER_PROGRAM_ID}")
+  fi
+  if [[ -n "${E2E_PARTNER_ENTRY_SLUG:-}" ]]; then
+    curl_args+=(-H "x-partner-entry-slug: ${E2E_PARTNER_ENTRY_SLUG}")
+  fi
+  if [[ -n "${E2E_FLEET_PARTNER_ID:-}" ]]; then
+    curl_args+=(-H "x-fleet-partner-id: ${E2E_FLEET_PARTNER_ID}")
+  fi
+  if [[ -n "${E2E_EXTRA_SCOPES:-}" && -z "$application_bearer" ]]; then
+    curl_args+=(-H "x-scopes: ${E2E_EXTRA_SCOPES}")
   fi
 
   if [[ -n "$body_file" ]]; then

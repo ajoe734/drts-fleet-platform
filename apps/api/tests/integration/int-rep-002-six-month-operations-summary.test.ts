@@ -22,7 +22,9 @@ function createHarness() {
   const eventEmitter = new EventEmitter2();
   const auditNotificationService = new AuditNotificationService();
   const opsDispatchEventsService = new OpsDispatchEventsService(eventEmitter);
-  const driverProfileService = new DriverProfileService(auditNotificationService);
+  const driverProfileService = new DriverProfileService(
+    auditNotificationService,
+  );
   const regulatoryRegistryRepository = {
     isEnabled: () => true,
     upsertDriverLocation: async () => true,
@@ -240,9 +242,10 @@ describe("INT-REP-002 six-month summary aggregates snapshots", () => {
       new Date("2026-02-12T01:05:00.000Z"),
     );
 
-    const januaryRebuild = await reportingService.rebuildMonthlyOperationsSummaries(
-      { periodMonth: "2026-01" },
-    );
+    const januaryRebuild =
+      await reportingService.rebuildMonthlyOperationsSummaries({
+        periodMonth: "2026-01",
+      });
     const februaryRebuild =
       await reportingService.rebuildMonthlyOperationsSummaries({
         periodMonth: "2026-02",
@@ -281,7 +284,10 @@ describe("INT-REP-002 six-month summary aggregates snapshots", () => {
     const accepted = reportingFilingService.createReportJob(
       {
         jobType: "six_month_operations_summary",
-        format: "json",
+        // Was "json", which is not a value ReportOutputFormat has ever had.
+        // Nothing validated `format`, so the test passed on it. This case is
+        // about the six-month summary rows, not the rendering.
+        format: "csv",
         filters: {
           from: "2026-01-01",
           to: "2026-02-28",

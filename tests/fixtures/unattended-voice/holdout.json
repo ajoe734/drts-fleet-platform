@@ -1,0 +1,1808 @@
+{
+  "schema_version": "1.0.0",
+  "dataset_type": "holdout",
+  "total_count": 30,
+  "holdout_policy": "strictly_isolated_from_prompt_tuning",
+  "scenarios": [
+    {
+      "id": "UV-HOLD-001",
+      "title": "Holdout 獨立保留驗證情境 #01 (nan-TW)",
+      "language": "nan-TW",
+      "caller_type": "passenger",
+      "caller_phone": "0988000201",
+      "passenger_phone": "0988000201",
+      "intent": "book_instant",
+      "ac_ids": [
+        "UV-AC-002"
+      ],
+      "dialogue_turns": [
+        {
+          "turn": 1,
+          "speaker": "caller",
+          "text": "預約接送：自台北101世貿捷運站四號出口出發前往新北市立聯合醫院板橋院區。",
+          "audio_offset_ms": 1300
+        },
+        {
+          "turn": 2,
+          "speaker": "agent",
+          "text": "收到，為您核對：上車點台北101世貿捷運站四號出口，目的地新北市立聯合醫院板橋院區。請問正確嗎？",
+          "event": "readback"
+        },
+        {
+          "turn": 3,
+          "speaker": "caller",
+          "text": "確認無誤。",
+          "audio_offset_ms": 900
+        }
+      ],
+      "ground_truth": {
+        "pickup": {
+          "address": "台北市信義區",
+          "landmark": "台北101世貿捷運站四號出口",
+          "lat": 25.033,
+          "lng": 121.5645
+        },
+        "dropoff": {
+          "address": "新北市板橋區",
+          "landmark": "新北市立聯合醫院板橋院區",
+          "lat": 25.0191,
+          "lng": 121.4589
+        },
+        "passenger_count": 1,
+        "passenger_phone": "0988000201",
+        "expected_tools": [
+          "lookup_address",
+          "validate_service_eligibility",
+          "create_booking_receipt"
+        ],
+        "forbidden_tools": [
+          "handoff_to_human"
+        ],
+        "expected_clarifications": 0,
+        "in_flight_correction": false,
+        "barge_in_occurred": false,
+        "expected_outcome": "booked"
+      }
+    },
+    {
+      "id": "UV-HOLD-002",
+      "title": "Holdout 獨立保留驗證情境 #02 (hak-TW)",
+      "language": "hak-TW",
+      "caller_type": "passenger",
+      "caller_phone": "0988000202",
+      "passenger_phone": "0988000202",
+      "intent": "book_instant",
+      "ac_ids": [
+        "UV-AC-003"
+      ],
+      "dialogue_turns": [
+        {
+          "turn": 1,
+          "speaker": "caller",
+          "text": "預約接送：自菜寮捷運站二號出口出發前往淡水漁人碼頭福容大飯店門口。",
+          "audio_offset_ms": 1300
+        },
+        {
+          "turn": 2,
+          "speaker": "agent",
+          "text": "收到，為您核對：上車點菜寮捷運站二號出口，目的地淡水漁人碼頭福容大飯店門口。請問正確嗎？",
+          "event": "readback"
+        },
+        {
+          "turn": 3,
+          "speaker": "caller",
+          "text": "確認無誤。",
+          "audio_offset_ms": 900
+        }
+      ],
+      "ground_truth": {
+        "pickup": {
+          "address": "新北市三重區",
+          "landmark": "菜寮捷運站二號出口",
+          "lat": 25.0607,
+          "lng": 121.492
+        },
+        "dropoff": {
+          "address": "新北市淡水區",
+          "landmark": "淡水漁人碼頭福容大飯店門口",
+          "lat": 25.1824,
+          "lng": 121.4116
+        },
+        "passenger_count": 1,
+        "passenger_phone": "0988000202",
+        "expected_tools": [
+          "lookup_address",
+          "validate_service_eligibility",
+          "create_booking_receipt"
+        ],
+        "forbidden_tools": [
+          "handoff_to_human"
+        ],
+        "expected_clarifications": 0,
+        "in_flight_correction": false,
+        "barge_in_occurred": false,
+        "expected_outcome": "booked"
+      }
+    },
+    {
+      "id": "UV-HOLD-003",
+      "title": "Holdout 獨立保留驗證情境 #03 (en-mixed)",
+      "language": "en-mixed",
+      "caller_type": "passenger",
+      "caller_phone": "0988000203",
+      "passenger_phone": "0988000203",
+      "intent": "book_instant",
+      "ac_ids": [
+        "UV-AC-004"
+      ],
+      "dialogue_turns": [
+        {
+          "turn": 1,
+          "speaker": "caller",
+          "text": "預約接送：自中壢火車站前站圓環出發前往新竹科學園區科技生活館。",
+          "audio_offset_ms": 1300
+        },
+        {
+          "turn": 2,
+          "speaker": "agent",
+          "text": "收到，為您核對：上車點中壢火車站前站圓環，目的地新竹科學園區科技生活館。請問正確嗎？",
+          "event": "readback"
+        },
+        {
+          "turn": 3,
+          "speaker": "caller",
+          "text": "確認無誤。",
+          "audio_offset_ms": 900
+        }
+      ],
+      "ground_truth": {
+        "pickup": {
+          "address": "桃園市中壢區",
+          "landmark": "中壢火車站前站圓環",
+          "lat": 24.9536,
+          "lng": 121.2257
+        },
+        "dropoff": {
+          "address": "新竹市東區",
+          "landmark": "新竹科學園區科技生活館",
+          "lat": 24.7818,
+          "lng": 121.0069
+        },
+        "passenger_count": 1,
+        "passenger_phone": "0988000203",
+        "expected_tools": [
+          "lookup_address",
+          "validate_service_eligibility",
+          "create_booking_receipt"
+        ],
+        "forbidden_tools": [
+          "handoff_to_human"
+        ],
+        "expected_clarifications": 0,
+        "in_flight_correction": false,
+        "barge_in_occurred": false,
+        "expected_outcome": "booked"
+      }
+    },
+    {
+      "id": "UV-HOLD-004",
+      "title": "Holdout 獨立保留驗證情境 #04 (zh-TW)",
+      "language": "zh-TW",
+      "caller_type": "passenger",
+      "caller_phone": "0988000204",
+      "passenger_phone": "0988000204",
+      "intent": "book_instant",
+      "ac_ids": [
+        "UV-AC-005"
+      ],
+      "dialogue_turns": [
+        {
+          "turn": 1,
+          "speaker": "caller",
+          "text": "預約接送：自國立台灣美術館大門出發前往左營高鐵站二號出口。",
+          "audio_offset_ms": 1300
+        },
+        {
+          "turn": 2,
+          "speaker": "agent",
+          "text": "收到，為您核對：上車點國立台灣美術館大門，目的地左營高鐵站二號出口。請問正確嗎？",
+          "event": "readback"
+        },
+        {
+          "turn": 3,
+          "speaker": "caller",
+          "text": "確認無誤。",
+          "audio_offset_ms": 900
+        }
+      ],
+      "ground_truth": {
+        "pickup": {
+          "address": "台中市西區",
+          "landmark": "國立台灣美術館大門",
+          "lat": 24.1415,
+          "lng": 120.6631
+        },
+        "dropoff": {
+          "address": "高雄市左營區",
+          "landmark": "左營高鐵站二號出口",
+          "lat": 22.6874,
+          "lng": 120.3082
+        },
+        "passenger_count": 1,
+        "passenger_phone": "0988000204",
+        "expected_tools": [
+          "lookup_address",
+          "validate_service_eligibility",
+          "create_booking_receipt"
+        ],
+        "forbidden_tools": [
+          "handoff_to_human"
+        ],
+        "expected_clarifications": 0,
+        "in_flight_correction": false,
+        "barge_in_occurred": false,
+        "expected_outcome": "booked"
+      }
+    },
+    {
+      "id": "UV-HOLD-005",
+      "title": "Holdout 獨立保留驗證情境 #05 (nan-TW)",
+      "language": "nan-TW",
+      "caller_type": "passenger",
+      "caller_phone": "0988000205",
+      "passenger_phone": "0988000205",
+      "intent": "book_instant",
+      "ac_ids": [
+        "UV-AC-006"
+      ],
+      "dialogue_turns": [
+        {
+          "turn": 1,
+          "speaker": "caller",
+          "text": "預約接送：自台北車站東三門出發前往大安森林公園三號出口。",
+          "audio_offset_ms": 1300
+        },
+        {
+          "turn": 2,
+          "speaker": "agent",
+          "text": "收到，為您核對：上車點台北車站東三門，目的地大安森林公園三號出口。請問正確嗎？",
+          "event": "readback"
+        },
+        {
+          "turn": 3,
+          "speaker": "caller",
+          "text": "確認無誤。",
+          "audio_offset_ms": 900
+        }
+      ],
+      "ground_truth": {
+        "pickup": {
+          "address": "台北市中正區",
+          "landmark": "台北車站東三門",
+          "lat": 25.0478,
+          "lng": 121.5171
+        },
+        "dropoff": {
+          "address": "台北市大安區",
+          "landmark": "大安森林公園三號出口",
+          "lat": 25.0332,
+          "lng": 121.5358
+        },
+        "passenger_count": 1,
+        "passenger_phone": "0988000205",
+        "expected_tools": [
+          "lookup_address",
+          "validate_service_eligibility",
+          "create_booking_receipt"
+        ],
+        "forbidden_tools": [
+          "handoff_to_human"
+        ],
+        "expected_clarifications": 0,
+        "in_flight_correction": false,
+        "barge_in_occurred": false,
+        "expected_outcome": "booked"
+      }
+    },
+    {
+      "id": "UV-HOLD-006",
+      "title": "Holdout 獨立保留驗證情境 #06 (hak-TW)",
+      "language": "hak-TW",
+      "caller_type": "passenger",
+      "caller_phone": "0988000206",
+      "passenger_phone": "0988000206",
+      "intent": "book_instant",
+      "ac_ids": [
+        "UV-AC-007"
+      ],
+      "dialogue_turns": [
+        {
+          "turn": 1,
+          "speaker": "caller",
+          "text": "預約接送：自台北101世貿捷運站四號出口出發前往新北市立聯合醫院板橋院區。",
+          "audio_offset_ms": 1300
+        },
+        {
+          "turn": 2,
+          "speaker": "agent",
+          "text": "收到，為您核對：上車點台北101世貿捷運站四號出口，目的地新北市立聯合醫院板橋院區。請問正確嗎？",
+          "event": "readback"
+        },
+        {
+          "turn": 3,
+          "speaker": "caller",
+          "text": "確認無誤。",
+          "audio_offset_ms": 900
+        }
+      ],
+      "ground_truth": {
+        "pickup": {
+          "address": "台北市信義區",
+          "landmark": "台北101世貿捷運站四號出口",
+          "lat": 25.033,
+          "lng": 121.5645
+        },
+        "dropoff": {
+          "address": "新北市板橋區",
+          "landmark": "新北市立聯合醫院板橋院區",
+          "lat": 25.0191,
+          "lng": 121.4589
+        },
+        "passenger_count": 1,
+        "passenger_phone": "0988000206",
+        "expected_tools": [
+          "lookup_address",
+          "validate_service_eligibility",
+          "create_booking_receipt"
+        ],
+        "forbidden_tools": [
+          "handoff_to_human"
+        ],
+        "expected_clarifications": 0,
+        "in_flight_correction": false,
+        "barge_in_occurred": false,
+        "expected_outcome": "booked"
+      }
+    },
+    {
+      "id": "UV-HOLD-007",
+      "title": "Holdout 獨立保留驗證情境 #07 (en-mixed)",
+      "language": "en-mixed",
+      "caller_type": "passenger",
+      "caller_phone": "0988000207",
+      "passenger_phone": "0988000207",
+      "intent": "book_instant",
+      "ac_ids": [
+        "UV-AC-008"
+      ],
+      "dialogue_turns": [
+        {
+          "turn": 1,
+          "speaker": "caller",
+          "text": "預約接送：自菜寮捷運站二號出口出發前往淡水漁人碼頭福容大飯店門口。",
+          "audio_offset_ms": 1300
+        },
+        {
+          "turn": 2,
+          "speaker": "agent",
+          "text": "收到，為您核對：上車點菜寮捷運站二號出口，目的地淡水漁人碼頭福容大飯店門口。請問正確嗎？",
+          "event": "readback"
+        },
+        {
+          "turn": 3,
+          "speaker": "caller",
+          "text": "確認無誤。",
+          "audio_offset_ms": 900
+        }
+      ],
+      "ground_truth": {
+        "pickup": {
+          "address": "新北市三重區",
+          "landmark": "菜寮捷運站二號出口",
+          "lat": 25.0607,
+          "lng": 121.492
+        },
+        "dropoff": {
+          "address": "新北市淡水區",
+          "landmark": "淡水漁人碼頭福容大飯店門口",
+          "lat": 25.1824,
+          "lng": 121.4116
+        },
+        "passenger_count": 1,
+        "passenger_phone": "0988000207",
+        "expected_tools": [
+          "lookup_address",
+          "validate_service_eligibility",
+          "create_booking_receipt"
+        ],
+        "forbidden_tools": [
+          "handoff_to_human"
+        ],
+        "expected_clarifications": 0,
+        "in_flight_correction": false,
+        "barge_in_occurred": false,
+        "expected_outcome": "booked"
+      }
+    },
+    {
+      "id": "UV-HOLD-008",
+      "title": "Holdout 獨立保留驗證情境 #08 (zh-TW)",
+      "language": "zh-TW",
+      "caller_type": "passenger",
+      "caller_phone": "0988000208",
+      "passenger_phone": "0988000208",
+      "intent": "book_instant",
+      "ac_ids": [
+        "UV-AC-009"
+      ],
+      "dialogue_turns": [
+        {
+          "turn": 1,
+          "speaker": "caller",
+          "text": "預約接送：自中壢火車站前站圓環出發前往新竹科學園區科技生活館。",
+          "audio_offset_ms": 1300
+        },
+        {
+          "turn": 2,
+          "speaker": "agent",
+          "text": "收到，為您核對：上車點中壢火車站前站圓環，目的地新竹科學園區科技生活館。請問正確嗎？",
+          "event": "readback"
+        },
+        {
+          "turn": 3,
+          "speaker": "caller",
+          "text": "確認無誤。",
+          "audio_offset_ms": 900
+        }
+      ],
+      "ground_truth": {
+        "pickup": {
+          "address": "桃園市中壢區",
+          "landmark": "中壢火車站前站圓環",
+          "lat": 24.9536,
+          "lng": 121.2257
+        },
+        "dropoff": {
+          "address": "新竹市東區",
+          "landmark": "新竹科學園區科技生活館",
+          "lat": 24.7818,
+          "lng": 121.0069
+        },
+        "passenger_count": 1,
+        "passenger_phone": "0988000208",
+        "expected_tools": [
+          "lookup_address",
+          "validate_service_eligibility",
+          "create_booking_receipt"
+        ],
+        "forbidden_tools": [
+          "handoff_to_human"
+        ],
+        "expected_clarifications": 0,
+        "in_flight_correction": false,
+        "barge_in_occurred": false,
+        "expected_outcome": "booked"
+      }
+    },
+    {
+      "id": "UV-HOLD-009",
+      "title": "Holdout 獨立保留驗證情境 #09 (nan-TW)",
+      "language": "nan-TW",
+      "caller_type": "passenger",
+      "caller_phone": "0988000209",
+      "passenger_phone": "0988000209",
+      "intent": "book_instant",
+      "ac_ids": [
+        "UV-AC-010"
+      ],
+      "dialogue_turns": [
+        {
+          "turn": 1,
+          "speaker": "caller",
+          "text": "預約接送：自國立台灣美術館大門出發前往左營高鐵站二號出口。",
+          "audio_offset_ms": 1300
+        },
+        {
+          "turn": 2,
+          "speaker": "agent",
+          "text": "收到，為您核對：上車點國立台灣美術館大門，目的地左營高鐵站二號出口。請問正確嗎？",
+          "event": "readback"
+        },
+        {
+          "turn": 3,
+          "speaker": "caller",
+          "text": "確認無誤。",
+          "audio_offset_ms": 900
+        }
+      ],
+      "ground_truth": {
+        "pickup": {
+          "address": "台中市西區",
+          "landmark": "國立台灣美術館大門",
+          "lat": 24.1415,
+          "lng": 120.6631
+        },
+        "dropoff": {
+          "address": "高雄市左營區",
+          "landmark": "左營高鐵站二號出口",
+          "lat": 22.6874,
+          "lng": 120.3082
+        },
+        "passenger_count": 1,
+        "passenger_phone": "0988000209",
+        "expected_tools": [
+          "lookup_address",
+          "validate_service_eligibility",
+          "create_booking_receipt"
+        ],
+        "forbidden_tools": [
+          "handoff_to_human"
+        ],
+        "expected_clarifications": 0,
+        "in_flight_correction": false,
+        "barge_in_occurred": false,
+        "expected_outcome": "booked"
+      }
+    },
+    {
+      "id": "UV-HOLD-010",
+      "title": "Holdout 獨立保留驗證情境 #10 (hak-TW)",
+      "language": "hak-TW",
+      "caller_type": "passenger",
+      "caller_phone": "0988000210",
+      "passenger_phone": "0988000210",
+      "intent": "book_instant",
+      "ac_ids": [
+        "UV-AC-011"
+      ],
+      "dialogue_turns": [
+        {
+          "turn": 1,
+          "speaker": "caller",
+          "text": "預約接送：自台北車站東三門出發前往大安森林公園三號出口。",
+          "audio_offset_ms": 1300
+        },
+        {
+          "turn": 2,
+          "speaker": "agent",
+          "text": "收到，為您核對：上車點台北車站東三門，目的地大安森林公園三號出口。請問正確嗎？",
+          "event": "readback"
+        },
+        {
+          "turn": 3,
+          "speaker": "caller",
+          "text": "確認無誤。",
+          "audio_offset_ms": 900
+        }
+      ],
+      "ground_truth": {
+        "pickup": {
+          "address": "台北市中正區",
+          "landmark": "台北車站東三門",
+          "lat": 25.0478,
+          "lng": 121.5171
+        },
+        "dropoff": {
+          "address": "台北市大安區",
+          "landmark": "大安森林公園三號出口",
+          "lat": 25.0332,
+          "lng": 121.5358
+        },
+        "passenger_count": 1,
+        "passenger_phone": "0988000210",
+        "expected_tools": [
+          "lookup_address",
+          "validate_service_eligibility",
+          "create_booking_receipt"
+        ],
+        "forbidden_tools": [
+          "handoff_to_human"
+        ],
+        "expected_clarifications": 0,
+        "in_flight_correction": false,
+        "barge_in_occurred": false,
+        "expected_outcome": "booked"
+      }
+    },
+    {
+      "id": "UV-HOLD-011",
+      "title": "Holdout 獨立保留驗證情境 #11 (en-mixed)",
+      "language": "en-mixed",
+      "caller_type": "passenger",
+      "caller_phone": "0988000211",
+      "passenger_phone": "0988000211",
+      "intent": "book_instant",
+      "ac_ids": [
+        "UV-AC-012"
+      ],
+      "dialogue_turns": [
+        {
+          "turn": 1,
+          "speaker": "caller",
+          "text": "預約接送：自台北101世貿捷運站四號出口出發前往新北市立聯合醫院板橋院區。",
+          "audio_offset_ms": 1300
+        },
+        {
+          "turn": 2,
+          "speaker": "agent",
+          "text": "收到，為您核對：上車點台北101世貿捷運站四號出口，目的地新北市立聯合醫院板橋院區。請問正確嗎？",
+          "event": "readback"
+        },
+        {
+          "turn": 3,
+          "speaker": "caller",
+          "text": "確認無誤。",
+          "audio_offset_ms": 900
+        }
+      ],
+      "ground_truth": {
+        "pickup": {
+          "address": "台北市信義區",
+          "landmark": "台北101世貿捷運站四號出口",
+          "lat": 25.033,
+          "lng": 121.5645
+        },
+        "dropoff": {
+          "address": "新北市板橋區",
+          "landmark": "新北市立聯合醫院板橋院區",
+          "lat": 25.0191,
+          "lng": 121.4589
+        },
+        "passenger_count": 1,
+        "passenger_phone": "0988000211",
+        "expected_tools": [
+          "lookup_address",
+          "validate_service_eligibility",
+          "create_booking_receipt"
+        ],
+        "forbidden_tools": [
+          "handoff_to_human"
+        ],
+        "expected_clarifications": 0,
+        "in_flight_correction": false,
+        "barge_in_occurred": false,
+        "expected_outcome": "booked"
+      }
+    },
+    {
+      "id": "UV-HOLD-012",
+      "title": "Holdout 獨立保留驗證情境 #12 (zh-TW)",
+      "language": "zh-TW",
+      "caller_type": "passenger",
+      "caller_phone": "0988000212",
+      "passenger_phone": "0988000212",
+      "intent": "book_instant",
+      "ac_ids": [
+        "UV-AC-013"
+      ],
+      "dialogue_turns": [
+        {
+          "turn": 1,
+          "speaker": "caller",
+          "text": "預約接送：自菜寮捷運站二號出口出發前往淡水漁人碼頭福容大飯店門口。",
+          "audio_offset_ms": 1300
+        },
+        {
+          "turn": 2,
+          "speaker": "agent",
+          "text": "收到，為您核對：上車點菜寮捷運站二號出口，目的地淡水漁人碼頭福容大飯店門口。請問正確嗎？",
+          "event": "readback"
+        },
+        {
+          "turn": 3,
+          "speaker": "caller",
+          "text": "確認無誤。",
+          "audio_offset_ms": 900
+        }
+      ],
+      "ground_truth": {
+        "pickup": {
+          "address": "新北市三重區",
+          "landmark": "菜寮捷運站二號出口",
+          "lat": 25.0607,
+          "lng": 121.492
+        },
+        "dropoff": {
+          "address": "新北市淡水區",
+          "landmark": "淡水漁人碼頭福容大飯店門口",
+          "lat": 25.1824,
+          "lng": 121.4116
+        },
+        "passenger_count": 1,
+        "passenger_phone": "0988000212",
+        "expected_tools": [
+          "lookup_address",
+          "validate_service_eligibility",
+          "create_booking_receipt"
+        ],
+        "forbidden_tools": [
+          "handoff_to_human"
+        ],
+        "expected_clarifications": 0,
+        "in_flight_correction": false,
+        "barge_in_occurred": false,
+        "expected_outcome": "booked"
+      }
+    },
+    {
+      "id": "UV-HOLD-013",
+      "title": "Holdout 獨立保留驗證情境 #13 (nan-TW)",
+      "language": "nan-TW",
+      "caller_type": "passenger",
+      "caller_phone": "0988000213",
+      "passenger_phone": "0988000213",
+      "intent": "book_instant",
+      "ac_ids": [
+        "UV-AC-014"
+      ],
+      "dialogue_turns": [
+        {
+          "turn": 1,
+          "speaker": "caller",
+          "text": "預約接送：自中壢火車站前站圓環出發前往新竹科學園區科技生活館。",
+          "audio_offset_ms": 1300
+        },
+        {
+          "turn": 2,
+          "speaker": "agent",
+          "text": "收到，為您核對：上車點中壢火車站前站圓環，目的地新竹科學園區科技生活館。請問正確嗎？",
+          "event": "readback"
+        },
+        {
+          "turn": 3,
+          "speaker": "caller",
+          "text": "確認無誤。",
+          "audio_offset_ms": 900
+        }
+      ],
+      "ground_truth": {
+        "pickup": {
+          "address": "桃園市中壢區",
+          "landmark": "中壢火車站前站圓環",
+          "lat": 24.9536,
+          "lng": 121.2257
+        },
+        "dropoff": {
+          "address": "新竹市東區",
+          "landmark": "新竹科學園區科技生活館",
+          "lat": 24.7818,
+          "lng": 121.0069
+        },
+        "passenger_count": 1,
+        "passenger_phone": "0988000213",
+        "expected_tools": [
+          "lookup_address",
+          "validate_service_eligibility",
+          "create_booking_receipt"
+        ],
+        "forbidden_tools": [
+          "handoff_to_human"
+        ],
+        "expected_clarifications": 0,
+        "in_flight_correction": false,
+        "barge_in_occurred": false,
+        "expected_outcome": "booked"
+      }
+    },
+    {
+      "id": "UV-HOLD-014",
+      "title": "Holdout 獨立保留驗證情境 #14 (hak-TW)",
+      "language": "hak-TW",
+      "caller_type": "passenger",
+      "caller_phone": "0988000214",
+      "passenger_phone": "0988000214",
+      "intent": "book_instant",
+      "ac_ids": [
+        "UV-AC-015"
+      ],
+      "dialogue_turns": [
+        {
+          "turn": 1,
+          "speaker": "caller",
+          "text": "預約接送：自國立台灣美術館大門出發前往左營高鐵站二號出口。",
+          "audio_offset_ms": 1300
+        },
+        {
+          "turn": 2,
+          "speaker": "agent",
+          "text": "收到，為您核對：上車點國立台灣美術館大門，目的地左營高鐵站二號出口。請問正確嗎？",
+          "event": "readback"
+        },
+        {
+          "turn": 3,
+          "speaker": "caller",
+          "text": "確認無誤。",
+          "audio_offset_ms": 900
+        }
+      ],
+      "ground_truth": {
+        "pickup": {
+          "address": "台中市西區",
+          "landmark": "國立台灣美術館大門",
+          "lat": 24.1415,
+          "lng": 120.6631
+        },
+        "dropoff": {
+          "address": "高雄市左營區",
+          "landmark": "左營高鐵站二號出口",
+          "lat": 22.6874,
+          "lng": 120.3082
+        },
+        "passenger_count": 1,
+        "passenger_phone": "0988000214",
+        "expected_tools": [
+          "lookup_address",
+          "validate_service_eligibility",
+          "create_booking_receipt"
+        ],
+        "forbidden_tools": [
+          "handoff_to_human"
+        ],
+        "expected_clarifications": 0,
+        "in_flight_correction": false,
+        "barge_in_occurred": false,
+        "expected_outcome": "booked"
+      }
+    },
+    {
+      "id": "UV-HOLD-015",
+      "title": "Holdout 獨立保留驗證情境 #15 (en-mixed)",
+      "language": "en-mixed",
+      "caller_type": "passenger",
+      "caller_phone": "0988000215",
+      "passenger_phone": "0988000215",
+      "intent": "book_instant",
+      "ac_ids": [
+        "UV-AC-016"
+      ],
+      "dialogue_turns": [
+        {
+          "turn": 1,
+          "speaker": "caller",
+          "text": "預約接送：自台北車站東三門出發前往大安森林公園三號出口。",
+          "audio_offset_ms": 1300
+        },
+        {
+          "turn": 2,
+          "speaker": "agent",
+          "text": "收到，為您核對：上車點台北車站東三門，目的地大安森林公園三號出口。請問正確嗎？",
+          "event": "readback"
+        },
+        {
+          "turn": 3,
+          "speaker": "caller",
+          "text": "確認無誤。",
+          "audio_offset_ms": 900
+        }
+      ],
+      "ground_truth": {
+        "pickup": {
+          "address": "台北市中正區",
+          "landmark": "台北車站東三門",
+          "lat": 25.0478,
+          "lng": 121.5171
+        },
+        "dropoff": {
+          "address": "台北市大安區",
+          "landmark": "大安森林公園三號出口",
+          "lat": 25.0332,
+          "lng": 121.5358
+        },
+        "passenger_count": 1,
+        "passenger_phone": "0988000215",
+        "expected_tools": [
+          "lookup_address",
+          "validate_service_eligibility",
+          "create_booking_receipt"
+        ],
+        "forbidden_tools": [
+          "handoff_to_human"
+        ],
+        "expected_clarifications": 0,
+        "in_flight_correction": false,
+        "barge_in_occurred": false,
+        "expected_outcome": "booked"
+      }
+    },
+    {
+      "id": "UV-HOLD-016",
+      "title": "Holdout 獨立保留驗證情境 #16 (zh-TW)",
+      "language": "zh-TW",
+      "caller_type": "passenger",
+      "caller_phone": "0988000216",
+      "passenger_phone": "0988000216",
+      "intent": "book_instant",
+      "ac_ids": [
+        "UV-AC-017"
+      ],
+      "dialogue_turns": [
+        {
+          "turn": 1,
+          "speaker": "caller",
+          "text": "預約接送：自台北101世貿捷運站四號出口出發前往新北市立聯合醫院板橋院區。",
+          "audio_offset_ms": 1300
+        },
+        {
+          "turn": 2,
+          "speaker": "agent",
+          "text": "收到，為您核對：上車點台北101世貿捷運站四號出口，目的地新北市立聯合醫院板橋院區。請問正確嗎？",
+          "event": "readback"
+        },
+        {
+          "turn": 3,
+          "speaker": "caller",
+          "text": "確認無誤。",
+          "audio_offset_ms": 900
+        }
+      ],
+      "ground_truth": {
+        "pickup": {
+          "address": "台北市信義區",
+          "landmark": "台北101世貿捷運站四號出口",
+          "lat": 25.033,
+          "lng": 121.5645
+        },
+        "dropoff": {
+          "address": "新北市板橋區",
+          "landmark": "新北市立聯合醫院板橋院區",
+          "lat": 25.0191,
+          "lng": 121.4589
+        },
+        "passenger_count": 1,
+        "passenger_phone": "0988000216",
+        "expected_tools": [
+          "lookup_address",
+          "validate_service_eligibility",
+          "create_booking_receipt"
+        ],
+        "forbidden_tools": [
+          "handoff_to_human"
+        ],
+        "expected_clarifications": 0,
+        "in_flight_correction": false,
+        "barge_in_occurred": false,
+        "expected_outcome": "booked"
+      }
+    },
+    {
+      "id": "UV-HOLD-017",
+      "title": "Holdout 獨立保留驗證情境 #17 (nan-TW)",
+      "language": "nan-TW",
+      "caller_type": "passenger",
+      "caller_phone": "0988000217",
+      "passenger_phone": "0988000217",
+      "intent": "book_instant",
+      "ac_ids": [
+        "UV-AC-018"
+      ],
+      "dialogue_turns": [
+        {
+          "turn": 1,
+          "speaker": "caller",
+          "text": "預約接送：自菜寮捷運站二號出口出發前往淡水漁人碼頭福容大飯店門口。",
+          "audio_offset_ms": 1300
+        },
+        {
+          "turn": 2,
+          "speaker": "agent",
+          "text": "收到，為您核對：上車點菜寮捷運站二號出口，目的地淡水漁人碼頭福容大飯店門口。請問正確嗎？",
+          "event": "readback"
+        },
+        {
+          "turn": 3,
+          "speaker": "caller",
+          "text": "確認無誤。",
+          "audio_offset_ms": 900
+        }
+      ],
+      "ground_truth": {
+        "pickup": {
+          "address": "新北市三重區",
+          "landmark": "菜寮捷運站二號出口",
+          "lat": 25.0607,
+          "lng": 121.492
+        },
+        "dropoff": {
+          "address": "新北市淡水區",
+          "landmark": "淡水漁人碼頭福容大飯店門口",
+          "lat": 25.1824,
+          "lng": 121.4116
+        },
+        "passenger_count": 1,
+        "passenger_phone": "0988000217",
+        "expected_tools": [
+          "lookup_address",
+          "validate_service_eligibility",
+          "create_booking_receipt"
+        ],
+        "forbidden_tools": [
+          "handoff_to_human"
+        ],
+        "expected_clarifications": 0,
+        "in_flight_correction": false,
+        "barge_in_occurred": false,
+        "expected_outcome": "booked"
+      }
+    },
+    {
+      "id": "UV-HOLD-018",
+      "title": "Holdout 獨立保留驗證情境 #18 (hak-TW)",
+      "language": "hak-TW",
+      "caller_type": "passenger",
+      "caller_phone": "0988000218",
+      "passenger_phone": "0988000218",
+      "intent": "book_instant",
+      "ac_ids": [
+        "UV-AC-019"
+      ],
+      "dialogue_turns": [
+        {
+          "turn": 1,
+          "speaker": "caller",
+          "text": "預約接送：自中壢火車站前站圓環出發前往新竹科學園區科技生活館。",
+          "audio_offset_ms": 1300
+        },
+        {
+          "turn": 2,
+          "speaker": "agent",
+          "text": "收到，為您核對：上車點中壢火車站前站圓環，目的地新竹科學園區科技生活館。請問正確嗎？",
+          "event": "readback"
+        },
+        {
+          "turn": 3,
+          "speaker": "caller",
+          "text": "確認無誤。",
+          "audio_offset_ms": 900
+        }
+      ],
+      "ground_truth": {
+        "pickup": {
+          "address": "桃園市中壢區",
+          "landmark": "中壢火車站前站圓環",
+          "lat": 24.9536,
+          "lng": 121.2257
+        },
+        "dropoff": {
+          "address": "新竹市東區",
+          "landmark": "新竹科學園區科技生活館",
+          "lat": 24.7818,
+          "lng": 121.0069
+        },
+        "passenger_count": 1,
+        "passenger_phone": "0988000218",
+        "expected_tools": [
+          "lookup_address",
+          "validate_service_eligibility",
+          "create_booking_receipt"
+        ],
+        "forbidden_tools": [
+          "handoff_to_human"
+        ],
+        "expected_clarifications": 0,
+        "in_flight_correction": false,
+        "barge_in_occurred": false,
+        "expected_outcome": "booked"
+      }
+    },
+    {
+      "id": "UV-HOLD-019",
+      "title": "Holdout 獨立保留驗證情境 #19 (en-mixed)",
+      "language": "en-mixed",
+      "caller_type": "passenger",
+      "caller_phone": "0988000219",
+      "passenger_phone": "0988000219",
+      "intent": "book_instant",
+      "ac_ids": [
+        "UV-AC-020"
+      ],
+      "dialogue_turns": [
+        {
+          "turn": 1,
+          "speaker": "caller",
+          "text": "預約接送：自國立台灣美術館大門出發前往左營高鐵站二號出口。",
+          "audio_offset_ms": 1300
+        },
+        {
+          "turn": 2,
+          "speaker": "agent",
+          "text": "收到，為您核對：上車點國立台灣美術館大門，目的地左營高鐵站二號出口。請問正確嗎？",
+          "event": "readback"
+        },
+        {
+          "turn": 3,
+          "speaker": "caller",
+          "text": "確認無誤。",
+          "audio_offset_ms": 900
+        }
+      ],
+      "ground_truth": {
+        "pickup": {
+          "address": "台中市西區",
+          "landmark": "國立台灣美術館大門",
+          "lat": 24.1415,
+          "lng": 120.6631
+        },
+        "dropoff": {
+          "address": "高雄市左營區",
+          "landmark": "左營高鐵站二號出口",
+          "lat": 22.6874,
+          "lng": 120.3082
+        },
+        "passenger_count": 1,
+        "passenger_phone": "0988000219",
+        "expected_tools": [
+          "lookup_address",
+          "validate_service_eligibility",
+          "create_booking_receipt"
+        ],
+        "forbidden_tools": [
+          "handoff_to_human"
+        ],
+        "expected_clarifications": 0,
+        "in_flight_correction": false,
+        "barge_in_occurred": false,
+        "expected_outcome": "booked"
+      }
+    },
+    {
+      "id": "UV-HOLD-020",
+      "title": "Holdout 獨立保留驗證情境 #20 (zh-TW)",
+      "language": "zh-TW",
+      "caller_type": "passenger",
+      "caller_phone": "0988000220",
+      "passenger_phone": "0988000220",
+      "intent": "book_instant",
+      "ac_ids": [
+        "UV-AC-021"
+      ],
+      "dialogue_turns": [
+        {
+          "turn": 1,
+          "speaker": "caller",
+          "text": "預約接送：自台北車站東三門出發前往大安森林公園三號出口。",
+          "audio_offset_ms": 1300
+        },
+        {
+          "turn": 2,
+          "speaker": "agent",
+          "text": "收到，為您核對：上車點台北車站東三門，目的地大安森林公園三號出口。請問正確嗎？",
+          "event": "readback"
+        },
+        {
+          "turn": 3,
+          "speaker": "caller",
+          "text": "確認無誤。",
+          "audio_offset_ms": 900
+        }
+      ],
+      "ground_truth": {
+        "pickup": {
+          "address": "台北市中正區",
+          "landmark": "台北車站東三門",
+          "lat": 25.0478,
+          "lng": 121.5171
+        },
+        "dropoff": {
+          "address": "台北市大安區",
+          "landmark": "大安森林公園三號出口",
+          "lat": 25.0332,
+          "lng": 121.5358
+        },
+        "passenger_count": 1,
+        "passenger_phone": "0988000220",
+        "expected_tools": [
+          "lookup_address",
+          "validate_service_eligibility",
+          "create_booking_receipt"
+        ],
+        "forbidden_tools": [
+          "handoff_to_human"
+        ],
+        "expected_clarifications": 0,
+        "in_flight_correction": false,
+        "barge_in_occurred": false,
+        "expected_outcome": "booked"
+      }
+    },
+    {
+      "id": "UV-HOLD-021",
+      "title": "Holdout 獨立保留驗證情境 #21 (nan-TW)",
+      "language": "nan-TW",
+      "caller_type": "passenger",
+      "caller_phone": "0988000221",
+      "passenger_phone": "0988000221",
+      "intent": "book_instant",
+      "ac_ids": [
+        "UV-AC-022"
+      ],
+      "dialogue_turns": [
+        {
+          "turn": 1,
+          "speaker": "caller",
+          "text": "預約接送：自台北101世貿捷運站四號出口出發前往新北市立聯合醫院板橋院區。",
+          "audio_offset_ms": 1300
+        },
+        {
+          "turn": 2,
+          "speaker": "agent",
+          "text": "收到，為您核對：上車點台北101世貿捷運站四號出口，目的地新北市立聯合醫院板橋院區。請問正確嗎？",
+          "event": "readback"
+        },
+        {
+          "turn": 3,
+          "speaker": "caller",
+          "text": "確認無誤。",
+          "audio_offset_ms": 900
+        }
+      ],
+      "ground_truth": {
+        "pickup": {
+          "address": "台北市信義區",
+          "landmark": "台北101世貿捷運站四號出口",
+          "lat": 25.033,
+          "lng": 121.5645
+        },
+        "dropoff": {
+          "address": "新北市板橋區",
+          "landmark": "新北市立聯合醫院板橋院區",
+          "lat": 25.0191,
+          "lng": 121.4589
+        },
+        "passenger_count": 1,
+        "passenger_phone": "0988000221",
+        "expected_tools": [
+          "lookup_address",
+          "validate_service_eligibility",
+          "create_booking_receipt"
+        ],
+        "forbidden_tools": [
+          "handoff_to_human"
+        ],
+        "expected_clarifications": 0,
+        "in_flight_correction": false,
+        "barge_in_occurred": false,
+        "expected_outcome": "booked"
+      }
+    },
+    {
+      "id": "UV-HOLD-022",
+      "title": "Holdout 獨立保留驗證情境 #22 (hak-TW)",
+      "language": "hak-TW",
+      "caller_type": "passenger",
+      "caller_phone": "0988000222",
+      "passenger_phone": "0988000222",
+      "intent": "book_instant",
+      "ac_ids": [
+        "UV-AC-023"
+      ],
+      "dialogue_turns": [
+        {
+          "turn": 1,
+          "speaker": "caller",
+          "text": "預約接送：自菜寮捷運站二號出口出發前往淡水漁人碼頭福容大飯店門口。",
+          "audio_offset_ms": 1300
+        },
+        {
+          "turn": 2,
+          "speaker": "agent",
+          "text": "收到，為您核對：上車點菜寮捷運站二號出口，目的地淡水漁人碼頭福容大飯店門口。請問正確嗎？",
+          "event": "readback"
+        },
+        {
+          "turn": 3,
+          "speaker": "caller",
+          "text": "確認無誤。",
+          "audio_offset_ms": 900
+        }
+      ],
+      "ground_truth": {
+        "pickup": {
+          "address": "新北市三重區",
+          "landmark": "菜寮捷運站二號出口",
+          "lat": 25.0607,
+          "lng": 121.492
+        },
+        "dropoff": {
+          "address": "新北市淡水區",
+          "landmark": "淡水漁人碼頭福容大飯店門口",
+          "lat": 25.1824,
+          "lng": 121.4116
+        },
+        "passenger_count": 1,
+        "passenger_phone": "0988000222",
+        "expected_tools": [
+          "lookup_address",
+          "validate_service_eligibility",
+          "create_booking_receipt"
+        ],
+        "forbidden_tools": [
+          "handoff_to_human"
+        ],
+        "expected_clarifications": 0,
+        "in_flight_correction": false,
+        "barge_in_occurred": false,
+        "expected_outcome": "booked"
+      }
+    },
+    {
+      "id": "UV-HOLD-023",
+      "title": "Holdout 獨立保留驗證情境 #23 (en-mixed)",
+      "language": "en-mixed",
+      "caller_type": "passenger",
+      "caller_phone": "0988000223",
+      "passenger_phone": "0988000223",
+      "intent": "book_instant",
+      "ac_ids": [
+        "UV-AC-024"
+      ],
+      "dialogue_turns": [
+        {
+          "turn": 1,
+          "speaker": "caller",
+          "text": "預約接送：自中壢火車站前站圓環出發前往新竹科學園區科技生活館。",
+          "audio_offset_ms": 1300
+        },
+        {
+          "turn": 2,
+          "speaker": "agent",
+          "text": "收到，為您核對：上車點中壢火車站前站圓環，目的地新竹科學園區科技生活館。請問正確嗎？",
+          "event": "readback"
+        },
+        {
+          "turn": 3,
+          "speaker": "caller",
+          "text": "確認無誤。",
+          "audio_offset_ms": 900
+        }
+      ],
+      "ground_truth": {
+        "pickup": {
+          "address": "桃園市中壢區",
+          "landmark": "中壢火車站前站圓環",
+          "lat": 24.9536,
+          "lng": 121.2257
+        },
+        "dropoff": {
+          "address": "新竹市東區",
+          "landmark": "新竹科學園區科技生活館",
+          "lat": 24.7818,
+          "lng": 121.0069
+        },
+        "passenger_count": 1,
+        "passenger_phone": "0988000223",
+        "expected_tools": [
+          "lookup_address",
+          "validate_service_eligibility",
+          "create_booking_receipt"
+        ],
+        "forbidden_tools": [
+          "handoff_to_human"
+        ],
+        "expected_clarifications": 0,
+        "in_flight_correction": false,
+        "barge_in_occurred": false,
+        "expected_outcome": "booked"
+      }
+    },
+    {
+      "id": "UV-HOLD-024",
+      "title": "Holdout 獨立保留驗證情境 #24 (zh-TW)",
+      "language": "zh-TW",
+      "caller_type": "passenger",
+      "caller_phone": "0988000224",
+      "passenger_phone": "0988000224",
+      "intent": "book_instant",
+      "ac_ids": [
+        "UV-AC-025"
+      ],
+      "dialogue_turns": [
+        {
+          "turn": 1,
+          "speaker": "caller",
+          "text": "預約接送：自國立台灣美術館大門出發前往左營高鐵站二號出口。",
+          "audio_offset_ms": 1300
+        },
+        {
+          "turn": 2,
+          "speaker": "agent",
+          "text": "收到，為您核對：上車點國立台灣美術館大門，目的地左營高鐵站二號出口。請問正確嗎？",
+          "event": "readback"
+        },
+        {
+          "turn": 3,
+          "speaker": "caller",
+          "text": "確認無誤。",
+          "audio_offset_ms": 900
+        }
+      ],
+      "ground_truth": {
+        "pickup": {
+          "address": "台中市西區",
+          "landmark": "國立台灣美術館大門",
+          "lat": 24.1415,
+          "lng": 120.6631
+        },
+        "dropoff": {
+          "address": "高雄市左營區",
+          "landmark": "左營高鐵站二號出口",
+          "lat": 22.6874,
+          "lng": 120.3082
+        },
+        "passenger_count": 1,
+        "passenger_phone": "0988000224",
+        "expected_tools": [
+          "lookup_address",
+          "validate_service_eligibility",
+          "create_booking_receipt"
+        ],
+        "forbidden_tools": [
+          "handoff_to_human"
+        ],
+        "expected_clarifications": 0,
+        "in_flight_correction": false,
+        "barge_in_occurred": false,
+        "expected_outcome": "booked"
+      }
+    },
+    {
+      "id": "UV-HOLD-025",
+      "title": "Holdout 獨立保留驗證情境 #25 (nan-TW)",
+      "language": "nan-TW",
+      "caller_type": "passenger",
+      "caller_phone": "0988000225",
+      "passenger_phone": "0988000225",
+      "intent": "book_instant",
+      "ac_ids": [
+        "UV-AC-026"
+      ],
+      "dialogue_turns": [
+        {
+          "turn": 1,
+          "speaker": "caller",
+          "text": "預約接送：自台北車站東三門出發前往大安森林公園三號出口。",
+          "audio_offset_ms": 1300
+        },
+        {
+          "turn": 2,
+          "speaker": "agent",
+          "text": "收到，為您核對：上車點台北車站東三門，目的地大安森林公園三號出口。請問正確嗎？",
+          "event": "readback"
+        },
+        {
+          "turn": 3,
+          "speaker": "caller",
+          "text": "確認無誤。",
+          "audio_offset_ms": 900
+        }
+      ],
+      "ground_truth": {
+        "pickup": {
+          "address": "台北市中正區",
+          "landmark": "台北車站東三門",
+          "lat": 25.0478,
+          "lng": 121.5171
+        },
+        "dropoff": {
+          "address": "台北市大安區",
+          "landmark": "大安森林公園三號出口",
+          "lat": 25.0332,
+          "lng": 121.5358
+        },
+        "passenger_count": 1,
+        "passenger_phone": "0988000225",
+        "expected_tools": [
+          "lookup_address",
+          "validate_service_eligibility",
+          "create_booking_receipt"
+        ],
+        "forbidden_tools": [
+          "handoff_to_human"
+        ],
+        "expected_clarifications": 0,
+        "in_flight_correction": false,
+        "barge_in_occurred": false,
+        "expected_outcome": "booked"
+      }
+    },
+    {
+      "id": "UV-HOLD-026",
+      "title": "Holdout 獨立保留驗證情境 #26 (hak-TW)",
+      "language": "hak-TW",
+      "caller_type": "passenger",
+      "caller_phone": "0988000226",
+      "passenger_phone": "0988000226",
+      "intent": "book_instant",
+      "ac_ids": [
+        "UV-AC-027"
+      ],
+      "dialogue_turns": [
+        {
+          "turn": 1,
+          "speaker": "caller",
+          "text": "預約接送：自台北101世貿捷運站四號出口出發前往新北市立聯合醫院板橋院區。",
+          "audio_offset_ms": 1300
+        },
+        {
+          "turn": 2,
+          "speaker": "agent",
+          "text": "收到，為您核對：上車點台北101世貿捷運站四號出口，目的地新北市立聯合醫院板橋院區。請問正確嗎？",
+          "event": "readback"
+        },
+        {
+          "turn": 3,
+          "speaker": "caller",
+          "text": "確認無誤。",
+          "audio_offset_ms": 900
+        }
+      ],
+      "ground_truth": {
+        "pickup": {
+          "address": "台北市信義區",
+          "landmark": "台北101世貿捷運站四號出口",
+          "lat": 25.033,
+          "lng": 121.5645
+        },
+        "dropoff": {
+          "address": "新北市板橋區",
+          "landmark": "新北市立聯合醫院板橋院區",
+          "lat": 25.0191,
+          "lng": 121.4589
+        },
+        "passenger_count": 1,
+        "passenger_phone": "0988000226",
+        "expected_tools": [
+          "lookup_address",
+          "validate_service_eligibility",
+          "create_booking_receipt"
+        ],
+        "forbidden_tools": [
+          "handoff_to_human"
+        ],
+        "expected_clarifications": 0,
+        "in_flight_correction": false,
+        "barge_in_occurred": false,
+        "expected_outcome": "booked"
+      }
+    },
+    {
+      "id": "UV-HOLD-027",
+      "title": "Holdout 獨立保留驗證情境 #27 (en-mixed)",
+      "language": "en-mixed",
+      "caller_type": "passenger",
+      "caller_phone": "0988000227",
+      "passenger_phone": "0988000227",
+      "intent": "book_instant",
+      "ac_ids": [
+        "UV-AC-028"
+      ],
+      "dialogue_turns": [
+        {
+          "turn": 1,
+          "speaker": "caller",
+          "text": "預約接送：自菜寮捷運站二號出口出發前往淡水漁人碼頭福容大飯店門口。",
+          "audio_offset_ms": 1300
+        },
+        {
+          "turn": 2,
+          "speaker": "agent",
+          "text": "收到，為您核對：上車點菜寮捷運站二號出口，目的地淡水漁人碼頭福容大飯店門口。請問正確嗎？",
+          "event": "readback"
+        },
+        {
+          "turn": 3,
+          "speaker": "caller",
+          "text": "確認無誤。",
+          "audio_offset_ms": 900
+        }
+      ],
+      "ground_truth": {
+        "pickup": {
+          "address": "新北市三重區",
+          "landmark": "菜寮捷運站二號出口",
+          "lat": 25.0607,
+          "lng": 121.492
+        },
+        "dropoff": {
+          "address": "新北市淡水區",
+          "landmark": "淡水漁人碼頭福容大飯店門口",
+          "lat": 25.1824,
+          "lng": 121.4116
+        },
+        "passenger_count": 1,
+        "passenger_phone": "0988000227",
+        "expected_tools": [
+          "lookup_address",
+          "validate_service_eligibility",
+          "create_booking_receipt"
+        ],
+        "forbidden_tools": [
+          "handoff_to_human"
+        ],
+        "expected_clarifications": 0,
+        "in_flight_correction": false,
+        "barge_in_occurred": false,
+        "expected_outcome": "booked"
+      }
+    },
+    {
+      "id": "UV-HOLD-028",
+      "title": "Holdout 獨立保留驗證情境 #28 (zh-TW)",
+      "language": "zh-TW",
+      "caller_type": "passenger",
+      "caller_phone": "0988000228",
+      "passenger_phone": "0988000228",
+      "intent": "book_instant",
+      "ac_ids": [
+        "UV-AC-029"
+      ],
+      "dialogue_turns": [
+        {
+          "turn": 1,
+          "speaker": "caller",
+          "text": "預約接送：自中壢火車站前站圓環出發前往新竹科學園區科技生活館。",
+          "audio_offset_ms": 1300
+        },
+        {
+          "turn": 2,
+          "speaker": "agent",
+          "text": "收到，為您核對：上車點中壢火車站前站圓環，目的地新竹科學園區科技生活館。請問正確嗎？",
+          "event": "readback"
+        },
+        {
+          "turn": 3,
+          "speaker": "caller",
+          "text": "確認無誤。",
+          "audio_offset_ms": 900
+        }
+      ],
+      "ground_truth": {
+        "pickup": {
+          "address": "桃園市中壢區",
+          "landmark": "中壢火車站前站圓環",
+          "lat": 24.9536,
+          "lng": 121.2257
+        },
+        "dropoff": {
+          "address": "新竹市東區",
+          "landmark": "新竹科學園區科技生活館",
+          "lat": 24.7818,
+          "lng": 121.0069
+        },
+        "passenger_count": 1,
+        "passenger_phone": "0988000228",
+        "expected_tools": [
+          "lookup_address",
+          "validate_service_eligibility",
+          "create_booking_receipt"
+        ],
+        "forbidden_tools": [
+          "handoff_to_human"
+        ],
+        "expected_clarifications": 0,
+        "in_flight_correction": false,
+        "barge_in_occurred": false,
+        "expected_outcome": "booked"
+      }
+    },
+    {
+      "id": "UV-HOLD-029",
+      "title": "Holdout 獨立保留驗證情境 #29 (nan-TW)",
+      "language": "nan-TW",
+      "caller_type": "passenger",
+      "caller_phone": "0988000229",
+      "passenger_phone": "0988000229",
+      "intent": "book_instant",
+      "ac_ids": [
+        "UV-AC-030"
+      ],
+      "dialogue_turns": [
+        {
+          "turn": 1,
+          "speaker": "caller",
+          "text": "預約接送：自國立台灣美術館大門出發前往左營高鐵站二號出口。",
+          "audio_offset_ms": 1300
+        },
+        {
+          "turn": 2,
+          "speaker": "agent",
+          "text": "收到，為您核對：上車點國立台灣美術館大門，目的地左營高鐵站二號出口。請問正確嗎？",
+          "event": "readback"
+        },
+        {
+          "turn": 3,
+          "speaker": "caller",
+          "text": "確認無誤。",
+          "audio_offset_ms": 900
+        }
+      ],
+      "ground_truth": {
+        "pickup": {
+          "address": "台中市西區",
+          "landmark": "國立台灣美術館大門",
+          "lat": 24.1415,
+          "lng": 120.6631
+        },
+        "dropoff": {
+          "address": "高雄市左營區",
+          "landmark": "左營高鐵站二號出口",
+          "lat": 22.6874,
+          "lng": 120.3082
+        },
+        "passenger_count": 1,
+        "passenger_phone": "0988000229",
+        "expected_tools": [
+          "lookup_address",
+          "validate_service_eligibility",
+          "create_booking_receipt"
+        ],
+        "forbidden_tools": [
+          "handoff_to_human"
+        ],
+        "expected_clarifications": 0,
+        "in_flight_correction": false,
+        "barge_in_occurred": false,
+        "expected_outcome": "booked"
+      }
+    },
+    {
+      "id": "UV-HOLD-030",
+      "title": "Holdout 獨立保留驗證情境 #30 (hak-TW)",
+      "language": "hak-TW",
+      "caller_type": "passenger",
+      "caller_phone": "0988000230",
+      "passenger_phone": "0988000230",
+      "intent": "book_instant",
+      "ac_ids": [
+        "UV-AC-031"
+      ],
+      "dialogue_turns": [
+        {
+          "turn": 1,
+          "speaker": "caller",
+          "text": "預約接送：自台北車站東三門出發前往大安森林公園三號出口。",
+          "audio_offset_ms": 1300
+        },
+        {
+          "turn": 2,
+          "speaker": "agent",
+          "text": "收到，為您核對：上車點台北車站東三門，目的地大安森林公園三號出口。請問正確嗎？",
+          "event": "readback"
+        },
+        {
+          "turn": 3,
+          "speaker": "caller",
+          "text": "確認無誤。",
+          "audio_offset_ms": 900
+        }
+      ],
+      "ground_truth": {
+        "pickup": {
+          "address": "台北市中正區",
+          "landmark": "台北車站東三門",
+          "lat": 25.0478,
+          "lng": 121.5171
+        },
+        "dropoff": {
+          "address": "台北市大安區",
+          "landmark": "大安森林公園三號出口",
+          "lat": 25.0332,
+          "lng": 121.5358
+        },
+        "passenger_count": 1,
+        "passenger_phone": "0988000230",
+        "expected_tools": [
+          "lookup_address",
+          "validate_service_eligibility",
+          "create_booking_receipt"
+        ],
+        "forbidden_tools": [
+          "handoff_to_human"
+        ],
+        "expected_clarifications": 0,
+        "in_flight_correction": false,
+        "barge_in_occurred": false,
+        "expected_outcome": "booked"
+      }
+    }
+  ]
+}

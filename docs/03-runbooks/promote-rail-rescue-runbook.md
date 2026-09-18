@@ -67,12 +67,12 @@ to `dev` first (normal PR), then rescue.
    ```bash
    gh run list --workflow=ci-integ.yml --branch dev -L 3 --json conclusion,headSha
    ```
-2. **The 5 guarded `docs-site/` mirror files are identical `main`↔target-publish** —
+2. **The 5 guarded `tools/development-orchestrator/dashboard/` mirror files are identical `main`↔target-publish** —
    otherwise the rescue commit trips the Runtime mirror guard:
    ```bash
-   for f in docs-site/ai-status.json docs-site/ai-activity-log.jsonl \
-            docs-site/current-work.md docs-site/orchestrator-state.json \
-            docs-site/approval-queue.json; do
+   for f in tools/development-orchestrator/dashboard/ai-status.json tools/development-orchestrator/dashboard/ai-activity-log.jsonl \
+            tools/development-orchestrator/dashboard/current-work.md tools/development-orchestrator/dashboard/orchestrator-state.json \
+            tools/development-orchestrator/dashboard/approval-queue.json; do
      git diff --quiet origin/main origin/<target-publish> -- "$f" \
        && echo "SAME $f" || echo "DIFF $f  <-- must keep main's version in the rescue"
    done
@@ -114,8 +114,8 @@ Reviewer: <human>
 MSG
 
 # (d) Dry-run the gates locally, then push + open the PR
-python3 <repo>/scripts/git/check_commit_trailers.py --base origin/main --head HEAD
-python3 <repo>/scripts/git/check_staged_generated_files.py --range origin/main HEAD
+python3 <repo>/tools/ci/git/check_commit_trailers.py --base origin/main --head HEAD
+python3 <repo>/tools/ci/git/check_staged_generated_files.py --range origin/main HEAD
 git push -u origin rescue/promote-reconcile-<date>
 gh pr create --base main --title "PROMOTE-RESCUE-<date>: ..." --body "..."
 ```
@@ -155,7 +155,7 @@ git worktree remove /tmp/drts-rescue --force
 
 The rescue treats the symptom. The cause is `main`/`dev` divergence; prevent it
 per the reconciliation rule in [`branch-strategy.md` §5](../ops/branch-strategy.md):
-**any** commit that lands directly on `main` (hotfix *or* rescue) must be
+**any** commit that lands directly on `main` (hotfix _or_ rescue) must be
 cherry-picked back to `dev` in the same change. Periodically audit with
 `git cherry -v origin/dev origin/main`; a non-empty `+` list is early warning
 that the next promote will conflict.

@@ -13,7 +13,7 @@ wiring it up.
 - `V0030__feature_flags_tenant_override_constraint_fix.sql` — added by
   PR #701 (E2E-ALLLINE-VERIFY).
 
-`scripts/db-apply.sh` records applied migrations by the version token
+`operations/database/db-apply.sh` records applied migrations by the version token
 (`V0030`) parsed from the filename and skips any version already recorded. The
 feature-flags file sorts first, applies, records `V0030`, and the
 partner-user-identity-link file is then **silently skipped** — so its table is

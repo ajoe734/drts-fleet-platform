@@ -23,7 +23,7 @@ import {
   type CanvasTone,
   buildCanvasTheme,
 } from "@drts/ui-web";
-import { DEMO_TENANT_ID, getTenantClient } from "@/lib/api-client";
+import { getTenantClient } from "@/lib/api-client";
 import { getServerLocale } from "@/lib/server-locale";
 import { type Locale, t } from "@/lib/translations";
 
@@ -708,7 +708,7 @@ function resolveCrossAppHref(link: CrossAppResourceLink) {
 }
 
 async function loadUsersData(locale: Locale): Promise<UsersPageData> {
-  const client = getTenantClient();
+  const client = await getTenantClient();
   const [identityResult, usersResult, rolesResult] = await Promise.allSettled([
     client.getIdentityContext() as Promise<IdentityContext>,
     client.listTenantUsers(),
@@ -1099,7 +1099,7 @@ export default async function UsersPage({
   const refreshHref = buildQueryString(resolvedSearchParams, {
     refreshedAt: Date.now().toString(),
   });
-  const tenantId = identity?.tenantId ?? users[0]?.tenantId ?? DEMO_TENANT_ID;
+  const tenantId = identity?.tenantId ?? users[0]?.tenantId ?? "";
   const assignableRoles = roles.filter((role) => role.assignable);
   const roleFilter = normalizeRoleFilter(resolvedSearchParams.role, roles);
   const statusFilter = normalizeStatusFilter(resolvedSearchParams.status);

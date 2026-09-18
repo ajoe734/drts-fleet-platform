@@ -1,7 +1,7 @@
 # i18n Full-Sweep Remediation — 2026-06-14
 
 **Status:** dispatch wave (phase `i18n-fullsweep-20260614`)
-**Dispatcher:** `scripts/dispatch-i18n-fullsweep-20260614.py`
+**Dispatcher:** `tools/task-dispatch/dispatch-i18n-fullsweep-20260614.py`
 **Predecessor:** `docs/05-ui/i18n-multilingual-spec-20260604.md` (the 2026-06-04 ops-console + platform-admin wave; those two apps are now healthy).
 
 ## 0. Why this wave
@@ -19,20 +19,20 @@ the page layer** in two ways:
 
 ### Inventory result (13 apps)
 
-| App | Entry / role | Pages | i18n infra | Verdict |
-|---|---|---|---|---|
-| platform-admin-web | platform back-office | 22 | ✓ (1788 keys, parity) | healthy — `localized-labels.ts` is a proper `{en,zh}` map |
-| bank-console-web | bank back-office (Line A) | 11 | ✓ server-side `t()` + cookie `resolveLocale` | healthy |
-| ops-console-web | ops back-office | 21 | ✓ (3132 keys) | healthy; 2 detail pages use inline `copy()` (works, style only) |
-| enterprise-dispatch-web | corp employee front (Line B) | 21 | ✓ (156) | healthy; CJK only in fixtures |
-| partner-booking-web | bank cardholder (Line A) | 19 | ✓ (194) | healthy; CJK only in data/screens fixtures |
-| fleet-partner-portal-web | fleet partner | 11 | ✓ (241) | healthy; CJK only in fixtures/data |
-| **tenant-console-web** | **corp dispatch admin (Line B)** | **26** | ✓ (844, parity) **but pages bypass it** | **DEFECT B — 27 admin files hardcode zh-only** |
-| **passenger-web** | **passenger front** | **17** | **✗ none** | **DEFECT C — English-only, ~121 strings** |
-| **tenant-portal-web** | **tenant portal (staging-deployed)** | **17** | **✗ none** | **DEFECT C — English-only, ~274 strings** |
-| **concierge-portal-web** | **concierge desk** | **10** | **✗ none** (has a non-i18n provider) | **DEFECT C — English-only, ~86 strings** |
-| driver-app | driver (Expo RN) | — | ✗ | out of scope (native; separate wave) |
-| assisted-entry-web | placeholder | 0 | — | skip (README only) |
+| App                      | Entry / role                         | Pages  | i18n infra                                   | Verdict                                                         |
+| ------------------------ | ------------------------------------ | ------ | -------------------------------------------- | --------------------------------------------------------------- |
+| platform-admin-web       | platform back-office                 | 22     | ✓ (1788 keys, parity)                        | healthy — `localized-labels.ts` is a proper `{en,zh}` map       |
+| bank-console-web         | bank back-office (Line A)            | 11     | ✓ server-side `t()` + cookie `resolveLocale` | healthy                                                         |
+| ops-console-web          | ops back-office                      | 21     | ✓ (3132 keys)                                | healthy; 2 detail pages use inline `copy()` (works, style only) |
+| enterprise-dispatch-web  | corp employee front (Line B)         | 21     | ✓ (156)                                      | healthy; CJK only in fixtures                                   |
+| partner-booking-web      | bank cardholder (Line A)             | 19     | ✓ (194)                                      | healthy; CJK only in data/screens fixtures                      |
+| fleet-partner-portal-web | fleet partner                        | 11     | ✓ (241)                                      | healthy; CJK only in fixtures/data                              |
+| **tenant-console-web**   | **corp dispatch admin (Line B)**     | **26** | ✓ (844, parity) **but pages bypass it**      | **DEFECT B — 27 admin files hardcode zh-only**                  |
+| **passenger-web**        | **passenger front**                  | **17** | **✗ none**                                   | **DEFECT C — English-only, ~121 strings**                       |
+| **tenant-portal-web**    | **tenant portal (staging-deployed)** | **17** | **✗ none**                                   | **DEFECT C — English-only, ~274 strings**                       |
+| **concierge-portal-web** | **concierge desk**                   | **10** | **✗ none** (has a non-i18n provider)         | **DEFECT C — English-only, ~86 strings**                        |
+| driver-app               | driver (Expo RN)                     | —      | ✗                                            | out of scope (native; separate wave)                            |
+| assisted-entry-web       | placeholder                          | 0      | —                                            | skip (README only)                                              |
 
 All catalogs have **100 % en/zh key parity** — the problem is **pages not routed through
 `t()`**, not missing translations.
@@ -74,30 +74,30 @@ unsupported 不支援 · reauth 重新驗證 · read-only 唯讀.
   Each spoke depends ONLY on the HUB, owns a disjoint set of page files, and adds keys ONLY
   under its own domain header.
 - **VERIFY** depends on the whole set: lint + typecheck + build green for all 4 apps;
-  creates/runs `scripts/i18n-guard.mjs` (0 violations across the 4 apps); spot-checks en/zh.
+  creates/runs `tools/ci/i18n-guard.mjs` (0 violations across the 4 apps); spot-checks en/zh.
 
 ### Task list
 
-| ID | Owner→Reviewer | Scope | Dep |
-|---|---|---|---|
-| I18N2-FE-PASSENGER | full passenger-web stack + 17 pages + navigation.ts | — |
-| I18N2-FE-CONCIERGE | full concierge-portal-web stack + 10 routes (nest under existing provider) | — |
-| I18N2-FE-TENANTPORTAL | full tenant-portal-web stack + 17 pages (confirm intent vs tenant-console first) | — |
-| I18N2-TC-HUB | per-domain key-block headers in tenant-console translations.ts | — |
-| I18N2-TC-SETTINGS | app/settings/** | HUB |
-| I18N2-TC-WEBHOOKS | app/webhooks/** | HUB |
-| I18N2-TC-APIKEYS | app/api-keys/** | HUB |
-| I18N2-TC-COSTCENTERS | app/cost-centers/** | HUB |
-| I18N2-TC-REPORTS | app/reports/** | HUB |
-| I18N2-TC-RULES | app/rules/** | HUB |
-| I18N2-TC-SLA-AUDIT | app/sla/** + app/audit/** | HUB |
-| I18N2-TC-INVOICES-BILLING | app/invoices/** + app/billing/** | HUB |
-| I18N2-TC-PAX-ADDR | app/passengers/** + app/addresses/** | HUB |
-| I18N2-TC-USERS-INTGOV | app/users/** + app/integration-governance/** | HUB |
-| I18N2-TC-NOTIFICATIONS | app/notifications/** | HUB |
-| I18N2-TC-FEATUREFLAGS | app/feature-flags/** | HUB |
-| I18N2-TC-HOME-SHARED | app/page.tsx + lib/notification-canvas.tsx + lib/formatters.ts | HUB |
-| I18N2-VERIFY | lint/typecheck/build all 4 apps + i18n-guard | all |
+| ID                        | Owner→Reviewer                                                                   | Scope | Dep |
+| ------------------------- | -------------------------------------------------------------------------------- | ----- | --- |
+| I18N2-FE-PASSENGER        | full passenger-web stack + 17 pages + navigation.ts                              | —     |
+| I18N2-FE-CONCIERGE        | full concierge-portal-web stack + 10 routes (nest under existing provider)       | —     |
+| I18N2-FE-TENANTPORTAL     | full tenant-portal-web stack + 17 pages (confirm intent vs tenant-console first) | —     |
+| I18N2-TC-HUB              | per-domain key-block headers in tenant-console translations.ts                   | —     |
+| I18N2-TC-SETTINGS         | app/settings/\*\*                                                                | HUB   |
+| I18N2-TC-WEBHOOKS         | app/webhooks/\*\*                                                                | HUB   |
+| I18N2-TC-APIKEYS          | app/api-keys/\*\*                                                                | HUB   |
+| I18N2-TC-COSTCENTERS      | app/cost-centers/\*\*                                                            | HUB   |
+| I18N2-TC-REPORTS          | app/reports/\*\*                                                                 | HUB   |
+| I18N2-TC-RULES            | app/rules/\*\*                                                                   | HUB   |
+| I18N2-TC-SLA-AUDIT        | app/sla/** + app/audit/**                                                        | HUB   |
+| I18N2-TC-INVOICES-BILLING | app/invoices/** + app/billing/**                                                 | HUB   |
+| I18N2-TC-PAX-ADDR         | app/passengers/** + app/addresses/**                                             | HUB   |
+| I18N2-TC-USERS-INTGOV     | app/users/** + app/integration-governance/**                                     | HUB   |
+| I18N2-TC-NOTIFICATIONS    | app/notifications/\*\*                                                           | HUB   |
+| I18N2-TC-FEATUREFLAGS     | app/feature-flags/\*\*                                                           | HUB   |
+| I18N2-TC-HOME-SHARED      | app/page.tsx + lib/notification-canvas.tsx + lib/formatters.ts                   | HUB   |
+| I18N2-VERIFY              | lint/typecheck/build all 4 apps + i18n-guard                                     | all   |
 
 ## 4. Per-task acceptance (common)
 

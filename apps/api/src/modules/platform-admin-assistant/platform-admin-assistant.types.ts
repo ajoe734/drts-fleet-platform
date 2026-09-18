@@ -19,7 +19,11 @@ export const PLATFORM_ADMIN_ASSISTANT_PROVIDER =
   "PLATFORM_ADMIN_ASSISTANT_PROVIDER";
 
 export interface PlatformAdminAssistantControlPlaneIdentity {
-  authMode: "bootstrap_headers" | "jwt_bearer";
+  authMode:
+    | "bootstrap_headers"
+    | "jwt_bearer"
+    | "partner_api_key"
+    | "referral_bearer";
   actorType: "platform_admin";
   actorId: string;
   realm: "platform";

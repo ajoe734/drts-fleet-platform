@@ -302,4 +302,58 @@ describe("P5-EXPORT-001 controlled multi-taxi export", () => {
     ).toBe("failed");
     expect(persistedStatuses).toEqual(["pending", "running", "failed"]);
   });
+
+  it("keeps a completed export job unreachable through the generic reporting routes for a reports:read-only actor", async () => {
+    const audit = new AuditNotificationService();
+    const { repository } = createPersistingRepository();
+    const service = new ReportingFilingService(audit, repository as never);
+    const exporterIdentity = createIdentity();
+    const accepted = service.createMultiTaxiTripExportJob(
+      {
+        scope: { month: "2026-07" },
+        purpose: "Monthly statutory operations review",
+        idempotencyKey: "generic-route-leak-check",
+      },
+      [createExportRow()],
+      exporterIdentity,
+    );
+    await flushBackgroundWork();
+    expect(
+      service.getMultiTaxiTripExportJob(accepted.jobId, exporterIdentity)
+        .status,
+    ).toBe("completed");
+
+    function expectReportJobNotFound(run: () => unknown) {
+      try {
+        run();
+        expect.unreachable("expected REPORT_JOB_NOT_FOUND to be thrown");
+      } catch (error) {
+        expect(error).toBeInstanceOf(ApiRequestError);
+        expect((error as ApiRequestError).response.error.code).toBe(
+          "REPORT_JOB_NOT_FOUND",
+        );
+      }
+    }
+
+    for (const genericIdentity of [
+      createIdentity(["reports:read"]),
+      {
+        ...createIdentity(["reports:read"]),
+        actorType: "ops_user" as const,
+        realm: "ops" as const,
+      },
+    ]) {
+      expect(
+        service
+          .listReportJobs(undefined, genericIdentity)
+          .some((job) => job.jobId === accepted.jobId),
+      ).toBe(false);
+      expectReportJobNotFound(() =>
+        service.getReportJob(accepted.jobId, undefined, genericIdentity),
+      );
+      expectReportJobNotFound(() =>
+        service.renderReportArtifact(accepted.jobId, undefined, genericIdentity),
+      );
+    }
+  });
 });

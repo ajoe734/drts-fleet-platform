@@ -1,0 +1,235 @@
+name: Ops Proof Restore Acceptance (SR-OPS-PROOF-001)
+
+# Dedicated acceptance runner for SR-OPS-PROOF-001 capability C122: a real
+# pg_dump snapshot of a seeded, migrated, disposable PostgreSQL database,
+# an independently exported manifest from that same snapshot, and a real
+# pg_restore into a second empty disposable database, verified with a
+# byte-for-byte trip/billing/audit readback. Every command runs against
+# GitHub-hosted, loopback-only, drts_ops_proof_* databases that this
+# workflow creates and tears down; the tool never discovers or targets a
+# production or shared database. This workflow does not cover capacity
+# (C123) or deployment/rollback (C124) evidence; those remain separate,
+# unbuilt acceptance scope for this task.
+
+on:
+  workflow_dispatch:
+    inputs:
+      candidate_sha:
+        description: "Immutable candidate commit SHA to verify (full 40-char SHA)"
+        required: true
+  push:
+    branches:
+      - claude2/sr-ops-proof-001-recovery-20260911
+    paths:
+      - .github/workflows/ops-proof-acceptance.yml
+      - tools/ci/test_ops_proof_acceptance_workflow.py
+      - tools/system-remediation/ops-proof/**
+      - tests/unit/system-remediation/sr-ops-proof-001/**
+      - tests/integration/system-remediation/sr-ops-proof-001/**
+      - docs/04-uat/system-remediation-20260906/SR-OPS-PROOF-001.md
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ops-proof-acceptance-${{ github.event.inputs.candidate_sha || github.sha }}
+  cancel-in-progress: false
+
+env:
+  CI: true
+
+jobs:
+  acceptance:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    services:
+      postgres:
+        image: postgis/postgis:16-3.4
+        env:
+          POSTGRES_DB: drts_ops_proof_source
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      DATABASE_URL: postgresql://postgres:postgres@localhost:5432/drts_ops_proof_source
+      DRTS_OPS_PROOF_SOURCE_DATABASE_URL: postgresql://postgres:postgres@localhost:5432/drts_ops_proof_source
+      DRTS_OPS_PROOF_ISOLATED_DATABASE_URL: postgresql://postgres:postgres@localhost:5432/drts_ops_proof_isolated
+      PGPASSWORD: postgres
+      CANDIDATE_SHA: ${{ github.event.inputs.candidate_sha || github.sha }}
+      WORKFLOW_SHA: ${{ github.sha }}
+    steps:
+      - name: Validate candidate_sha input
+        run: |
+          sha="$CANDIDATE_SHA"
+          if ! [[ "$sha" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "::error::candidate_sha must be a full 40-character commit SHA, got: $sha"
+            exit 1
+          fi
+
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.inputs.candidate_sha || github.sha }}
+          fetch-depth: 0
+
+      - name: Verify checkout resolved the exact immutable candidate
+        run: |
+          resolved="$(git rev-parse HEAD)"
+          expected="$CANDIDATE_SHA"
+          echo "Resolved HEAD: $resolved"
+          echo "Expected candidate: $expected"
+          if [ "$resolved" != "$expected" ]; then
+            echo "::error::Checked-out HEAD ($resolved) does not match the requested candidate ($expected)."
+            exit 1
+          fi
+
+      - name: Prepare evidence directory
+        run: mkdir -p .artifacts/ops-proof-acceptance
+
+      - name: Require preinstalled PostgreSQL client tools (no apt-get; see ci.yml incident note)
+        run: |
+          set -o pipefail
+          for bin in psql pg_dump pg_restore; do
+            command -v "$bin" || { echo "::error::$bin is required and must be preinstalled on the runner image"; exit 1; }
+          done 2>&1 | tee -a .artifacts/ops-proof-acceptance/execution-log.txt
+
+      - uses: pnpm/action-setup@v4
+        with: { version: 10.33.0, run_install: false }
+      - uses: actions/setup-node@v4
+        with:
+          {
+            node-version: 22,
+            cache: pnpm,
+            cache-dependency-path: pnpm-lock.yaml,
+          }
+
+      - name: Install dependencies
+        id: install
+        run: |
+          set -o pipefail
+          pnpm install --frozen-lockfile 2>&1 | tee -a .artifacts/ops-proof-acceptance/execution-log.txt
+
+      - name: Create the second disposable isolated restore-target database
+        id: create_isolated_db
+        run: |
+          set -o pipefail
+          psql "postgresql://postgres:postgres@localhost:5432/drts_ops_proof_source" -X --set ON_ERROR_STOP=1 \
+            -c "CREATE DATABASE drts_ops_proof_isolated" 2>&1 | tee -a .artifacts/ops-proof-acceptance/execution-log.txt
+
+      - name: Apply migrations to the seeded source database
+        id: migrate
+        run: |
+          set -o pipefail
+          pnpm db:migrate 2>&1 | tee -a .artifacts/ops-proof-acceptance/execution-log.txt
+
+      - name: Run the SR-OPS-PROOF-001 unit regression suite
+        id: unit
+        run: |
+          set -o pipefail
+          pnpm exec vitest run tests/unit/system-remediation/sr-ops-proof-001 \
+            --reporter=default --reporter=json \
+            --outputFile.json=.artifacts/ops-proof-acceptance/unit-report.json \
+            2>&1 | tee -a .artifacts/ops-proof-acceptance/execution-log.txt
+
+      - name: Run the real snapshot restore and business readback acceptance harness
+        id: harness
+        run: |
+          set -o pipefail
+          pnpm exec vitest run \
+            tests/integration/system-remediation/sr-ops-proof-001/ops-proof-restore-acceptance.test.ts \
+            --no-file-parallelism --maxConcurrency=1 \
+            --reporter=default --reporter=json \
+            --outputFile.json=.artifacts/ops-proof-acceptance/restore-report.json \
+            2>&1 | tee -a .artifacts/ops-proof-acceptance/execution-log.txt
+
+      - name: Gate on zero skips and all tests passed
+        id: gate
+        if: always()
+        run: |
+          python3 - <<'PY_GATE'
+          import json
+          from pathlib import Path
+
+          def load(path):
+              p = Path(path)
+              if not p.exists():
+                  raise SystemExit(f"Acceptance gate: no test report was produced at {path}.")
+              return json.loads(p.read_text())
+
+          unit = load(".artifacts/ops-proof-acceptance/unit-report.json")
+          restore = load(".artifacts/ops-proof-acceptance/restore-report.json")
+
+          if unit.get("numPendingTests") or not unit.get("success") or unit.get("numTotalTests", 0) < 30:
+              raise SystemExit(f"Unit regression incomplete or skipped: {unit}")
+
+          if restore.get("numPendingTests", 0) != 0:
+              raise SystemExit(
+                  "Restore acceptance test was skipped: DRTS_OPS_PROOF_SOURCE_DATABASE_URL / "
+                  "DRTS_OPS_PROOF_ISOLATED_DATABASE_URL were not both honored by a real run."
+              )
+          if restore.get("numTotalTests", 0) != 1 or restore.get("numPassedTests", 0) != 1 or not restore.get("success"):
+              raise SystemExit(f"Restore acceptance did not pass: {restore}")
+
+          print("Ops proof acceptance: unit regression and real restore/readback both passed with zero skips.")
+          PY_GATE
+
+      - name: Record run status
+        if: always()
+        env:
+          INSTALL_OUTCOME: ${{ steps.install.outcome }}
+          MIGRATE_OUTCOME: ${{ steps.migrate.outcome }}
+          UNIT_OUTCOME: ${{ steps.unit.outcome }}
+          HARNESS_OUTCOME: ${{ steps.harness.outcome }}
+          GATE_OUTCOME: ${{ steps.gate.outcome }}
+        run: |
+          python3 - <<'PY_STATUS'
+          import json
+          import os
+          from pathlib import Path
+
+          status_path = Path(".artifacts/ops-proof-acceptance/run-status.json")
+          status_path.parent.mkdir(parents=True, exist_ok=True)
+
+          outcomes = {
+              "install": os.environ.get("INSTALL_OUTCOME", "unknown"),
+              "migrate": os.environ.get("MIGRATE_OUTCOME", "unknown"),
+              "unit": os.environ.get("UNIT_OUTCOME", "unknown"),
+              "harness": os.environ.get("HARNESS_OUTCOME", "unknown"),
+              "gate": os.environ.get("GATE_OUTCOME", "unknown"),
+          }
+
+          if all(value == "success" for value in outcomes.values()):
+              status = "passed"
+          elif outcomes["install"] != "success" or outcomes["migrate"] != "success":
+              status = "not_run"
+          else:
+              status = "failed"
+
+          status_path.write_text(json.dumps({
+              "taskId": "SR-OPS-PROOF-001",
+              "capability": "C122",
+              "candidate_sha": os.environ.get("CANDIDATE_SHA", ""),
+              "workflow_sha": os.environ.get("WORKFLOW_SHA", ""),
+              "status": status,
+              "outcomes": outcomes,
+              "scopeNote": "restore/readback (C122) only; capacity (C123) and deployment/rollback (C124) are not exercised by this workflow",
+          }, indent=2) + "\n")
+          print(f"Run status recorded: {status}")
+          PY_STATUS
+
+      - name: Upload execution log, test reports, and run status
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ops-proof-acceptance-${{ github.event.inputs.candidate_sha || github.sha }}
+          path: |
+            .artifacts/ops-proof-acceptance/execution-log.txt
+            .artifacts/ops-proof-acceptance/unit-report.json
+            .artifacts/ops-proof-acceptance/restore-report.json
+            .artifacts/ops-proof-acceptance/run-status.json
+          if-no-files-found: warn

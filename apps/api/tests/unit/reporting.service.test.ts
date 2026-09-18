@@ -214,6 +214,55 @@ function createService(sourceOverrides: Record<string, unknown> = {}) {
 }
 
 describe("ReportingService", () => {
+  it("starts the production snapshot scheduler unless it is explicitly disabled", () => {
+    const original = process.env.REPORTING_SNAPSHOT_SCHEDULER_ENABLED;
+    delete process.env.REPORTING_SNAPSHOT_SCHEDULER_ENABLED;
+    try {
+      const { service } = createService();
+      const startScheduler = vi.spyOn(
+        service as unknown as {
+          startDispatchableSupplySnapshotScheduler: () => void;
+        },
+        "startDispatchableSupplySnapshotScheduler",
+      );
+
+      service.onModuleInit();
+
+      expect(startScheduler).toHaveBeenCalledOnce();
+      service.onModuleDestroy();
+    } finally {
+      if (original === undefined) {
+        delete process.env.REPORTING_SNAPSHOT_SCHEDULER_ENABLED;
+      } else {
+        process.env.REPORTING_SNAPSHOT_SCHEDULER_ENABLED = original;
+      }
+    }
+  });
+
+  it("does not start the background snapshot scheduler in a hermetic run", () => {
+    const original = process.env.REPORTING_SNAPSHOT_SCHEDULER_ENABLED;
+    process.env.REPORTING_SNAPSHOT_SCHEDULER_ENABLED = "false";
+    try {
+      const { service } = createService();
+      const startScheduler = vi.spyOn(
+        service as unknown as {
+          startDispatchableSupplySnapshotScheduler: () => void;
+        },
+        "startDispatchableSupplySnapshotScheduler",
+      );
+
+      service.onModuleInit();
+
+      expect(startScheduler).not.toHaveBeenCalled();
+    } finally {
+      if (original === undefined) {
+        delete process.env.REPORTING_SNAPSHOT_SCHEDULER_ENABLED;
+      } else {
+        process.env.REPORTING_SNAPSHOT_SCHEDULER_ENABLED = original;
+      }
+    }
+  });
+
   it("returns rebuilt records when repository storage is enabled but the report table is empty", async () => {
     const { service, reportingRepository } = createService();
 

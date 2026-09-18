@@ -24,7 +24,7 @@ export default defineConfig({
     ? {
         webServer: {
           command:
-            "pnpm --filter @drts/contracts build && pnpm --filter @drts/ui-tokens build && MAP_GEOFENCE_OPS_UI_PORT=3006 MAP_GEOFENCE_OPS_MOCK_API_PORT=3106 node scripts/run-map-geofence-ops-ui-dev.mjs",
+            "pnpm --filter @drts/contracts build && pnpm --filter @drts/ui-tokens build && MAP_GEOFENCE_OPS_UI_PORT=3006 MAP_GEOFENCE_OPS_MOCK_API_PORT=3106 node tools/ci/run-map-geofence-ops-ui-dev.mjs",
           url: localOpsConsoleBaseURL,
           reuseExistingServer: !process.env.CI,
           timeout: 180_000,

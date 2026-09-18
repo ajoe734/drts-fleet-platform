@@ -12,7 +12,10 @@ import { spawnSync } from "node:child_process";
 import { afterEach, describe, expect, it } from "vitest";
 
 const repoRoot = path.resolve(__dirname, "../..");
-const deployScript = path.join(repoRoot, "scripts/deploy-cloud-run-service.sh");
+const deployScript = path.join(
+  repoRoot,
+  "operations/deployment/deploy-cloud-run-service.sh",
+);
 const temporaryDirectories: string[] = [];
 
 function runDeploy(options: {
@@ -125,10 +128,13 @@ describe("Cloud Run deploy quota retry", () => {
     );
 
     expect(
-      workflow.match(/scripts\/deploy-cloud-run-service\.sh/g),
+      workflow.match(/operations\/deployment\/deploy-cloud-run-service\.sh/g),
     ).toHaveLength(9);
     expect(workflow).not.toMatch(/^\s+gcloud run deploy/m);
-    expect(workflow).not.toContain("concierge-portal-web");
+    // Retired surfaces must never be built or deployed. The candidate-bound
+    // acceptance job may still derive their former service URLs to prove the
+    // retired/paused response contract against the deployed candidate.
+    expect(workflow).not.toMatch(/(?:Deploy|Build & push) — .*concierge/i);
     expect(
       workflow
         .split("\n")
@@ -137,7 +143,14 @@ describe("Cloud Run deploy quota retry", () => {
     ).toEqual([
       'description: "Fail-closed cleanup for the retired passenger service. Delete is allowed only when the regional Cloud Run inventory is exactly the intended 9 active services plus drts-passenger-web."',
       '- "delete-drts-passenger-web"',
+      'vapid_public_secret="${secret_prefix}-passenger-webpush-vapid-public-key"',
+      'vapid_private_secret="${secret_prefix}-passenger-webpush-vapid-private-key"',
+      'vapid_subject_secret="${secret_prefix}-passenger-webpush-vapid-subject"',
+      'export DRTS_DEV_PASSENGER_BASE_URL="https://drts-dev-passenger-web-${cloud_run_suffix}"',
     ]);
+    expect(workflow).toContain(
+      'export DRTS_DEV_CONCIERGE_BASE_URL="https://drts-dev-concierge-portal-web-${cloud_run_suffix}"',
+    );
     expect(workflow).not.toMatch(/Deploy — .*passenger/i);
     expect(workflow).not.toMatch(/Build & push — .*passenger/i);
 
@@ -148,10 +161,144 @@ describe("Cloud Run deploy quota retry", () => {
     expect(domainWorkflow).not.toContain("concierge.smarttransport.tw");
     expect(domainWorkflow).not.toContain("ride.smarttransport.tw");
     expect(domainWorkflow).toContain("uses: actions/checkout@v4");
-    expect(domainWorkflow).toContain("./scripts/map-domain-service.sh");
-    expect(domainWorkflow).not.toContain(
-      "./scripts/map-domain-service.sh book.smarttransport.tw",
+    expect(domainWorkflow).toContain(
+      "./operations/deployment/map-domain-service.sh",
     );
+    expect(domainWorkflow).not.toContain(
+      "./operations/deployment/map-domain-service.sh book.smarttransport.tw",
+    );
+  });
+
+  it("declares the explicit non-production auth mode required by API startup", () => {
+    const workflow = readFileSync(
+      path.join(repoRoot, ".github/workflows/deploy-dev.yml"),
+      "utf8",
+    );
+
+    const apiEnvStart = workflow.indexOf("- name: Build API env vars");
+    const apiEnvEnd = workflow.indexOf("\n      - name:", apiEnvStart + 1);
+    const apiEnv = workflow.slice(apiEnvStart, apiEnvEnd);
+
+    expect(apiEnv).toContain("DRTS_ENV=development");
+    expect(apiEnv).toContain("AUTH_MODE=explicit");
+  });
+
+  it("issues candidate Tenant sessions from durable roles without caller scopes", () => {
+    const workflow = readFileSync(
+      path.join(repoRoot, ".github/workflows/deploy-dev.yml"),
+      "utf8",
+    );
+    const sessionStart = workflow.indexOf(
+      "- name: Issue deployment-machine Tenant acceptance session",
+    );
+    const sessionEnd = workflow.indexOf("\n      - uses:", sessionStart);
+    const sessionStep = workflow.slice(sessionStart, sessionEnd);
+    expect(sessionStep).toContain(
+      "x-actor-id: 10000000-0000-0000-0000-000000000901",
+    );
+    expect(sessionStep).toContain(
+      "x-tenant-id: 10000000-0000-0000-0000-000000000201",
+    );
+    expect(sessionStep).not.toContain("x-scopes:");
+    expect(sessionStep).toContain("assert_tenant_session");
+    expect(sessionStep).toContain('"tenant_admin" "Tenant Admin"');
+    expect(sessionStep).toContain('"tenant_ops_admin" "Tenant Ops"');
+  });
+
+  it("does not configure a second Tenant Console identity authority", () => {
+    const workflow = readFileSync(
+      path.join(repoRoot, ".github/workflows/deploy-dev.yml"),
+      "utf8",
+    );
+    const durableTenantId = "10000000-0000-0000-0000-000000000201";
+
+    expect(workflow).toContain(
+      `DRTS_ENTERPRISE_DISPATCH_TENANT_ID=${durableTenantId}`,
+    );
+    expect(workflow).not.toContain("DRTS_TENANT_CONSOLE_TENANT_ID=");
+    expect(workflow).not.toContain(
+      "DRTS_ENTERPRISE_DISPATCH_TENANT_ID=tenant-demo-001",
+    );
+  });
+
+  it("enables public demo login only on the Bank Console deployment", () => {
+    const workflow = readFileSync(
+      path.join(repoRoot, ".github/workflows/deploy-dev.yml"),
+      "utf8",
+    );
+    const deploymentBlock = (service: string) => {
+      const start = workflow.indexOf(`- name: Deploy — ${service}`);
+      const end = workflow.indexOf("\n      - name:", start + 1);
+
+      expect(start, `${service} deploy step`).toBeGreaterThan(-1);
+      return workflow.slice(start, end);
+    };
+
+    expect(deploymentBlock("bank-console-web")).toContain(
+      "BANK_CONSOLE_DEMO_LOGIN=true",
+    );
+    for (const service of [
+      "platform-admin-web",
+      "ops-console-web",
+      "fleet-partner-portal-web",
+      "tenant-console-web",
+      "referral-embed-web",
+      "enterprise-dispatch-web",
+      "channel-partner-portal-web",
+    ]) {
+      expect(deploymentBlock(service), service).not.toContain(
+        "BANK_CONSOLE_DEMO_LOGIN",
+      );
+    }
+  });
+
+  it("mounts a stable Bank Console session secret in every Dev deploy entrypoint", () => {
+    const devWorkflow = readFileSync(
+      path.join(repoRoot, ".github/workflows/deploy-dev.yml"),
+      "utf8",
+    );
+    const deploymentBlock = (service: string) => {
+      const start = devWorkflow.indexOf(`- name: Deploy — ${service}`);
+      const end = devWorkflow.indexOf("\n      - name:", start + 1);
+
+      expect(start, `${service} deploy step`).toBeGreaterThan(-1);
+      return devWorkflow.slice(start, end);
+    };
+
+    expect(deploymentBlock("bank-console-web")).toContain(
+      "BANK_SESSION_SECRET=",
+    );
+    expect(devWorkflow.match(/BANK_SESSION_SECRET=/g)).toHaveLength(1);
+    expect(devWorkflow).not.toContain("DRTS_PARTNER_SESSION_SECRET=");
+
+    for (const service of [
+      "platform-admin-web",
+      "ops-console-web",
+      "fleet-partner-portal-web",
+      "tenant-console-web",
+      "referral-embed-web",
+      "enterprise-dispatch-web",
+      "channel-partner-portal-web",
+    ]) {
+      expect(deploymentBlock(service), service).not.toContain(
+        "BANK_SESSION_SECRET=",
+      );
+    }
+
+    const bankWorkflow = readFileSync(
+      path.join(repoRoot, ".github/workflows/deploy-bank-console.yml"),
+      "utf8",
+    );
+    expect(bankWorkflow).toContain("BANK_SESSION_SECRET=");
+
+    const genericWorkflow = readFileSync(
+      path.join(repoRoot, ".github/workflows/deploy-web-app.yml"),
+      "utf8",
+    );
+    expect(genericWorkflow).toContain(
+      'inputs.app_dir }}" == "apps/bank-console-web"',
+    );
+    expect(genericWorkflow).toContain("BANK_SESSION_SECRET=");
   });
 
   it("keeps every dev web revision usable within the low-quota profile", () => {
@@ -190,42 +337,52 @@ describe("Cloud Run deploy quota retry", () => {
     expect(workflow.slice(apiStart, apiEnd)).not.toContain("--concurrency 80");
   });
 
-  it("runs focused business-flow smoke before the high-volume matrix", () => {
+  it("uses candidate-bound operational acceptance as the sole deployed browser gate", () => {
     const workflow = readFileSync(
       path.join(repoRoot, ".github/workflows/deploy-dev.yml"),
       "utf8",
     );
-    const uiSmokeStart = workflow.indexOf(
-      "- name: Run UI smoke against deployed dev",
+    const retiredCleanupStart = workflow.indexOf("  retired-service-cleanup:");
+    const candidateAcceptanceStart = workflow.indexOf(
+      "  operational-candidate-acceptance:",
     );
-    const uiSmokeEnd = workflow.indexOf(
-      "- name: Upload Playwright report on failure",
-      uiSmokeStart,
-    );
-    const uiSmoke = workflow.slice(uiSmokeStart, uiSmokeEnd);
-    const matrixIndex = uiSmoke.indexOf(
-      "playwright.dev-runtime-matrix.config.ts",
-    );
-    const googleMapIndex = uiSmoke.indexOf(
-      "playwright.google-map-live.config.ts",
-    );
+    const candidateAcceptance = workflow.slice(candidateAcceptanceStart);
 
-    expect(googleMapIndex).toBeGreaterThan(-1);
-    expect(matrixIndex).toBeGreaterThan(
-      uiSmoke.indexOf("playwright.ops-console-parity.config.ts"),
+    expect(workflow).not.toContain("  ui-smoke:");
+    expect(workflow).not.toContain("Run UI smoke against deployed dev");
+    expect(workflow).not.toContain("playwright.dev-runtime-matrix.config.ts");
+    expect(retiredCleanupStart).toBeGreaterThan(-1);
+    expect(candidateAcceptanceStart).toBeGreaterThan(retiredCleanupStart);
+    expect(
+      workflow.slice(retiredCleanupStart, candidateAcceptanceStart),
+    ).toContain("needs: [prepare, health-check]");
+    expect(candidateAcceptance).toContain(
+      "needs: [prepare, build-push, health-check, retired-service-cleanup]",
     );
-    expect(matrixIndex).toBeGreaterThan(googleMapIndex);
-    expect(uiSmoke).not.toContain(
-      "playwright.partner-booking-surfaces.config.ts",
+    expect(candidateAcceptance).toContain(
+      "needs.retired-service-cleanup.result == 'success'",
     );
-    expect(uiSmoke).toContain("smoke_status=0");
-    expect(uiSmoke).toContain(
-      'PLAYWRIGHT_HTML_OUTPUT_DIR="playwright-report/${suite}"',
+    expect(candidateAcceptance).toContain(
+      "operations/verification/run-operational-browser-acceptance.sh",
     );
-    expect(uiSmoke).toContain("--reporter=list,html");
-    expect(uiSmoke).toContain('--output "test-results/${suite}"');
-    expect(uiSmoke).toContain('exit "${smoke_status}"');
-    expect(uiSmoke.match(/run_suite playwright\./g)).toHaveLength(11);
+    expect(candidateAcceptance).toContain(
+      "Issue deployment-machine Tenant acceptance session",
+    );
+    expect(candidateAcceptance).toContain(
+      "DRTS_OPERATIONAL_TENANT_SESSION_TOKEN",
+    );
+    expect(candidateAcceptance).toContain(
+      "x-actor-id: 10000000-0000-0000-0000-000000000901",
+    );
+    const lineContinuation = "\\";
+    expect(candidateAcceptance).toContain(
+      [
+        `--header 'x-actor-type: tenant_admin' ${lineContinuation}`,
+        `--header 'x-actor-id: 10000000-0000-0000-0000-000000000901' ${lineContinuation}`,
+      ].join("\n            "),
+    );
+    expect(workflow).toContain("DRTS_INTERNAL_KEY_ENFORCED=false");
+    expect(workflow).toContain("AUTH_ALLOWED_ORIGINS=${auth_allowed_origins}");
     expect(workflow).not.toContain(
       "Authenticate to GCP for failure diagnostics",
     );

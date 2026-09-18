@@ -14,9 +14,9 @@ import {
  * / error / manual-review) but must switch primary/accent palette and brand
  * wording per program:
  *
- *  - `card`      信用卡機場接送   · 中信銀行 (ride.ctbc.com.tw)
- *  - `insurance` 保險理賠代步     · 富邦產險 (claim.fubon-ins.com.tw)
- *  - `travel`    旅行社團體接送   · 雄獅旅遊 (booking.lion-travel.com.tw)
+ *  - `card`      信用卡機場接送   · 艾克米銀行 (ride.acme.example)
+ *  - `insurance` 保險理賠代步     · 泰思賓產險 (claim.tailspin.example)
+ *  - `travel`    旅行社團體接送   · 探索旅遊 (booking.adventure-works.example)
  *
  * The program kind is an app-level UI classification, not a backend contract
  * enum (`BusinessDispatchSubtype` only covers the dispatch bucket). It is
@@ -90,15 +90,15 @@ export interface PartnerProgramTheme {
   readonly hotline: PartnerProgramHotline;
 }
 
-const CTBC_BRAND = BRAND_TEMPLATES.CTBC;
-const FUBON_BRAND = BRAND_TEMPLATES.FUBON;
-const LION_BRAND = BRAND_TEMPLATES.LION;
+const ACME_BRAND = BRAND_TEMPLATES.ACME;
+const TAILSPIN_BRAND = BRAND_TEMPLATES.TAILSPIN;
+const LION_BRAND = BRAND_TEMPLATES.ADVENTURE;
 
 const CARD_AIRPORT_ISSUER_CODES = [
-  "CTBC",
-  "CATHAY",
-  "TAISHIN",
-  "DBS",
+  "ACME",
+  "CONTOSO",
+  "FABRIKAM",
+  "NORTHWIND",
 ] as const satisfies readonly PartnerBrandCode[];
 
 type CardAirportIssuerCode = (typeof CARD_AIRPORT_ISSUER_CODES)[number];
@@ -186,8 +186,8 @@ export function isPartnerProgramSurfaceBrand(
 ): boolean {
   return (
     isCardAirportIssuerBrand(brand) ||
-    brand.code === "FUBON" ||
-    brand.code === "LION"
+    brand.code === "TAILSPIN" ||
+    brand.code === "ADVENTURE"
   );
 }
 
@@ -209,24 +209,24 @@ export function getCardProgramThemeForBrand(
 }
 
 export const PARTNER_PROGRAM_THEMES = {
-  card: getCardProgramThemeForBrand(CTBC_BRAND),
+  card: getCardProgramThemeForBrand(ACME_BRAND),
   insurance: createProgramThemeFromBrand({
     kind: "insurance",
     slug: "insurance",
-    issuerName: "富邦產險",
-    issuerLabel: "Fubon",
+    issuerName: "泰思賓產險",
+    issuerLabel: "Tailspin",
     programLabel: "保險理賠代步",
     programName: "理賠代步接送",
     landingSubtitle: "車禍理賠期間代步服務",
     benefitNoun: "理賠額度",
     ctaLabel: "申請代步接送",
-    brand: FUBON_BRAND,
+    brand: TAILSPIN_BRAND,
   }),
   travel: createProgramThemeFromBrand({
     kind: "travel",
     slug: "travel",
-    issuerName: "雄獅旅遊",
-    issuerLabel: "Lion",
+    issuerName: "探索旅遊",
+    issuerLabel: "AdventureWorks",
     programLabel: "旅行社團體接送",
     programName: "團體接送",
     landingSubtitle: "旅行團機場 / 飯店接送",
@@ -240,9 +240,9 @@ export const PARTNER_PROGRAM_THEMES = {
 const PROGRAM_KIND_BY_TOKEN: ReadonlyArray<
   readonly [RegExp, PartnerProgramKind]
 > = [
-  [/insur|claim|fubon|理賠|代步/i, "insurance"],
-  [/travel|tour|group|lion|雄獅|團體|旅行/i, "travel"],
-  [/card|credit|ride|ctbc|信用卡|機場|禮賓/i, "card"],
+  [/insur|claim|tailspin|理賠|代步/i, "insurance"],
+  [/travel|tour|group|adventureworks|探索|團體|旅行/i, "travel"],
+  [/card|credit|ride|acme|信用卡|機場|禮賓/i, "card"],
 ];
 
 export const DEFAULT_PARTNER_PROGRAM_KIND: PartnerProgramKind = "card";
@@ -298,7 +298,7 @@ export function getProgramThemeForSlug(slug: string): PartnerProgramTheme {
 /**
  * Resolve the runtime theme for a tenant route. This intentionally separates
  * the program kind (`card` / `insurance` / `travel`) from the issuer brand:
- * bank tenants such as CTBC/Cathay/Taishin/DBS all stay in the card airport
+ * bank tenants such as ACME/Contoso/Fabrikam/NORTHWIND all stay in the card airport
  * transfer program, but render with their own white-label palette and copy.
  */
 export function getProgramThemeForTenantSlug(

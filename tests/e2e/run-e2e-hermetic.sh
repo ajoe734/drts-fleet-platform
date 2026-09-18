@@ -29,17 +29,22 @@ set -uo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 cd "$ROOT_DIR"
 
-# shellcheck source=../../scripts/db-common.sh
-source "$ROOT_DIR/scripts/db-common.sh"
+# shellcheck source=../../operations/database/db-common.sh
+source "$ROOT_DIR/operations/database/db-common.sh"
 
-export E2E_API_URL="${E2E_API_URL:-http://localhost:3001}"
+export API_PORT="${API_PORT:-3810}"
+export E2E_API_URL="${E2E_API_URL:-http://localhost:${API_PORT}}"
 export API_HOST="${API_HOST:-0.0.0.0}"
+export AUTH_MODE="${AUTH_MODE:-local}"
 export JWT_SECRET="${JWT_SECRET:-ci-e2e-secret}"
 export JWT_ISSUER="${JWT_ISSUER:-drts-local}"
 export JWT_AUDIENCE="${JWT_AUDIENCE:-drts-api}"
 export CONTROLLED_DOWNLOAD_SIGNING_SECRET="${CONTROLLED_DOWNLOAD_SIGNING_SECRET:-ci-e2e-controlled-download-secret}"
 export PARTNER_INGRESS_KEY_BANK_DEMO_ALPHA_AIRPORT="${PARTNER_INGRESS_KEY_BANK_DEMO_ALPHA_AIRPORT:-ci-e2e-alpha-ingress-key}"
 export PARTNER_INGRESS_KEY_BANK_DEMO_BETA_AIRPORT="${PARTNER_INGRESS_KEY_BANK_DEMO_BETA_AIRPORT:-ci-e2e-beta-ingress-key}"
+# Each scenario owns the exact snapshots it asserts. The production scheduler
+# would add a clock-boundary row and make the monthly-report test non-hermetic.
+export REPORTING_SNAPSHOT_SCHEDULER_ENABLED="${REPORTING_SNAPSHOT_SCHEDULER_ENABLED:-false}"
 DEFAULT_API_START_CMD="pnpm --filter @drts/api start"
 API_BUILD_CMD="${API_BUILD_CMD:-pnpm --filter @drts/api build}"
 API_START_CMD="${API_START_CMD:-$DEFAULT_API_START_CMD}"
@@ -52,7 +57,7 @@ HERMETIC_DB_SEED_TIMEOUT_SECONDS="${HERMETIC_DB_SEED_TIMEOUT_SECONDS:-180}"
 HERMETIC_API_BUILD_TIMEOUT_SECONDS="${HERMETIC_API_BUILD_TIMEOUT_SECONDS:-600}"
 HERMETIC_SUITE_TIMEOUT_SECONDS="${HERMETIC_SUITE_TIMEOUT_SECONDS:-300}"
 HERMETIC_AUTO_REPAIR_NODE_MODULES="${HERMETIC_AUTO_REPAIR_NODE_MODULES:-1}"
-HERMETIC_NODE_MODULES_HELPER="${HERMETIC_NODE_MODULES_HELPER:-$ROOT_DIR/scripts/ensure-local-node-modules.py}"
+HERMETIC_NODE_MODULES_HELPER="${HERMETIC_NODE_MODULES_HELPER:-$ROOT_DIR/tools/development-orchestrator/bin/ensure-local-node-modules.py}"
 
 mkdir -p "$HERMETIC_LOG_DIR"
 
@@ -76,6 +81,12 @@ DB_NAME="$(db_field name)"; DB_USER="$(db_field user)"; DB_PASS="$(db_field pass
 ADMIN_URL="postgresql://${DB_USER}:${DB_PASS}@${DB_HOST}:${DB_PORT}/postgres"
 DB_NAME_SQL_LITERAL="${DB_NAME//\'/\'\'}"
 DB_NAME_SQL_IDENTIFIER="${DB_NAME//\"/\"\"}"
+# Build migrations and seeds once, then clone this database for each scenario.
+# PostgreSQL templates retain hermetic isolation without making every scenario
+# repeat the same schema and fixture construction.
+BASELINE_DB_NAME="${DB_NAME}_e2e_baseline"
+BASELINE_DB_NAME_SQL_LITERAL="${BASELINE_DB_NAME//\'/\'\'}"
+BASELINE_DB_NAME_SQL_IDENTIFIER="${BASELINE_DB_NAME//\"/\"\"}"
 
 SUITES=("$@")
 EXPLICIT_SUITES=0
@@ -231,6 +242,34 @@ reset_db() {
     pnpm db:seed || return 1
 }
 
+terminate_database_connections() { # sql string literal
+  local database_literal="$1"
+  run_admin_psql -v ON_ERROR_STOP=1 -c \
+    "SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname='${database_literal}' AND pid<>pg_backend_pid();" >/dev/null 2>&1 || true
+}
+
+build_baseline_db() {
+  HERMETIC_SUITE_LABEL="baseline"
+  reset_db || return 1
+  terminate_database_connections "$DB_NAME_SQL_LITERAL"
+  terminate_database_connections "$BASELINE_DB_NAME_SQL_LITERAL"
+  run_admin_psql -v ON_ERROR_STOP=1 -c "DROP DATABASE IF EXISTS \"${BASELINE_DB_NAME_SQL_IDENTIFIER}\";" >/dev/null || return 1
+  run_admin_psql -v ON_ERROR_STOP=1 -c "CREATE DATABASE \"${BASELINE_DB_NAME_SQL_IDENTIFIER}\" TEMPLATE \"${DB_NAME_SQL_IDENTIFIER}\";" >/dev/null || return 1
+}
+
+restore_baseline_db() {
+  terminate_database_connections "$DB_NAME_SQL_LITERAL"
+  run_admin_psql -v ON_ERROR_STOP=1 -c "DROP DATABASE IF EXISTS \"${DB_NAME_SQL_IDENTIFIER}\";" >/dev/null || return 1
+  run_admin_psql -v ON_ERROR_STOP=1 -c "CREATE DATABASE \"${DB_NAME_SQL_IDENTIFIER}\" TEMPLATE \"${BASELINE_DB_NAME_SQL_IDENTIFIER}\";" >/dev/null || return 1
+  wait_for_db
+}
+
+cleanup_baseline_db() {
+  stop_api
+  terminate_database_connections "$BASELINE_DB_NAME_SQL_LITERAL"
+  run_admin_psql -v ON_ERROR_STOP=1 -c "DROP DATABASE IF EXISTS \"${BASELINE_DB_NAME_SQL_IDENTIFIER}\";" >/dev/null 2>&1 || true
+}
+
 ensure_api_build() {
   if [[ "$API_START_CMD" != "$DEFAULT_API_START_CMD" ]]; then
     return 0
@@ -262,7 +301,7 @@ if [[ "${HERMETIC_HARNESS_LIBRARY_ONLY:-0}" == "1" ]]; then
   return 0 2>/dev/null || exit 0
 fi
 
-trap stop_api EXIT
+trap cleanup_baseline_db EXIT
 
 if ! ensure_local_node_modules; then
   echo "[hermetic] local node_modules repair failed; aborting run"
@@ -274,12 +313,17 @@ if ! ensure_api_build; then
   exit 1
 fi
 
+if ! build_baseline_db; then
+  echo "[hermetic] failed to build the migrated and seeded baseline database"
+  exit 1
+fi
+
 PASS=(); FAIL=()
 for s in "${SUITES[@]}"; do
   echo "──────── hermetic E2E-${s} ────────"
   stop_api
   export HERMETIC_SUITE_LABEL="$s"
-  if ! reset_db; then FAIL+=("$s"); continue; fi
+  if ! restore_baseline_db; then FAIL+=("$s"); continue; fi
   if ! start_api; then FAIL+=("$s"); continue; fi
   if run_logged_timeout \
     "E2E-${s}" \

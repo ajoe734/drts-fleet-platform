@@ -8,7 +8,7 @@
 
 ## 0. Round 1 Synthesis（Codex / contracts-schema-dependencies）
 
-本輪 review 先用共享 canonical context 對齊目前 baton 狀態：專案目前處於 `discussion_planning`，本 workspace 為 `docs/02-architecture/consensus/gap-phase2-planning-20260417`，R1 baton owner 為 Codex，因此以下修正僅更新規劃與依賴，不啟動任何實作任務（`ai-status.json:3,69,93-105`; `current-work.md:27-35`; `ai-activity-log.jsonl` at `2026-04-17T14:33:25Z`; `docs-site/index.html:38-48`）。
+本輪 review 先用共享 canonical context 對齊目前 baton 狀態：專案目前處於 `discussion_planning`，本 workspace 為 `docs/02-architecture/consensus/gap-phase2-planning-20260417`，R1 baton owner 為 Codex，因此以下修正僅更新規劃與依賴，不啟動任何實作任務（`ai-status.json:3,69,93-105`; `current-work.md:27-35`; `ai-activity-log.jsonl` at `2026-04-17T14:33:25Z`; `tools/development-orchestrator/dashboard/index.html:38-48`）。
 
 - Driver App 完成流程仍在 `completeTask` 時硬寫 `actualDistanceKm: 0`、`actualDurationSec: 0`，且沒有送 `proof`；另一方面 `CompletionProofBundle` 與 `DriverCompleteTaskCommand.proof` 已存在於 contracts，所以 A-1/A-2/A-5 的核心不是改 contract，而是補齊 driver-app capability 與上傳/定位前置能力（`apps/driver-app/app/trip.tsx:85-89`; `packages/contracts/src/index.ts:471-614`）。
 - `apps/driver-app/package.json` 目前沒有 `expo-image-picker`、`expo-location`、`expo-task-manager` 等依賴，因此 proof bundle、距離/時間追蹤、GPS heartbeat 不應被視為三個完全獨立的零前置任務；至少要在 Sprint 2 明示同一組 capability bootstrap（`apps/driver-app/package.json`）。

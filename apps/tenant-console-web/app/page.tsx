@@ -50,7 +50,7 @@ type DashboardData = {
 };
 
 async function loadDashboardData(locale: Locale): Promise<DashboardData> {
-  const client = getTenantClient();
+  const client = await getTenantClient();
   const [
     identityResult,
     bookingsResult,

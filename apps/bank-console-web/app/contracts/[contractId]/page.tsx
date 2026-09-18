@@ -19,6 +19,7 @@ import {
   metricDelta,
   metricValue,
 } from "@/lib/contracts-data";
+import { loadBankContractsData } from "@/lib/bank-dev-read-models";
 import { t } from "@/lib/translations";
 
 export default async function ContractDetailPage({
@@ -37,7 +38,18 @@ export default async function ContractDetailPage({
     locale,
     resolvedSearchParams.role,
   );
-  const contract = getContractRecord(contractId);
+  const contractData = await loadBankContractsData(tenant.tenantId, session.role);
+  let contract =
+    contractData.data.contracts.find(
+      (item) =>
+        item.contractId === contractId ||
+        item.programId === contractId ||
+        item.programCode.toLowerCase() === contractId.toLowerCase(),
+    ) ?? null;
+
+  if (!contract) {
+    contract = getContractRecord(contractId) ?? null;
+  }
 
   if (!contract) {
     notFound();
@@ -53,6 +65,11 @@ export default async function ContractDetailPage({
       >
         {t("contracts.detail.back", locale)}
       </Link>
+      {contractData.degradedMessage ? (
+        <section className="surface-card">
+          <p>{contractData.degradedMessage}</p>
+        </section>
+      ) : null}
 
       <PageHero
         eyebrow={t("contracts.eyebrow", locale)}
@@ -60,14 +77,20 @@ export default async function ContractDetailPage({
           <span className="pending-title">
             {tenantDisplayText(contractRecord.displayName, tenant)}
             <ContractHealthBadge
-              health={contractRecord.health}
+              health={
+                contractRecord.status === "active"
+                  ? "healthy"
+                  : contractRecord.status === "at_risk"
+                    ? "at_risk"
+                    : "breached"
+              }
               locale={locale}
             />
             <IssuerBrandPill locale={locale} tenant={tenant} />
           </span>
         }
         description={tenantDisplayText(
-          contractRecord.attainmentSummary,
+          `${(contractRecord.exceptions ?? []).filter((item) => item.status === "open").length} open exceptions in ${contractRecord.periodAttainment?.period ?? ""}`,
           tenant,
         )}
       />
@@ -81,18 +104,18 @@ export default async function ContractDetailPage({
       <section className="surface-grid">
         <SurfaceCard
           kicker={t("contracts.detail.term", locale)}
-          title={formatPeriod(contractRecord.periodAttainment.period)}
-          description={`${contractRecord.term.startsAt.slice(0, 10)} - ${contractRecord.term.endsAt?.slice(0, 10) ?? t("contracts.detail.ongoing", locale)}`}
+          title={formatPeriod(contractRecord.periodAttainment?.period ?? "")}
+          description={`${contractRecord.term?.startsAt ? contractRecord.term.startsAt.slice(0, 10) : "—"} - ${contractRecord.term?.endsAt ? contractRecord.term.endsAt.slice(0, 10) : t("contracts.detail.ongoing", locale)}`}
         />
         <SurfaceCard
           kicker={t("contracts.detail.evaluatedAt", locale)}
-          title={formatDateTime(contractRecord.periodAttainment.evaluatedAt)}
+          title={formatDateTime(contractRecord.periodAttainment?.evaluatedAt)}
           description={t("contracts.readOnly", locale)}
         />
         <SurfaceCard
           kicker={t("contracts.detail.completedTrips", locale)}
-          title={`${contractRecord.periodAttainment.completedTrips}`}
-          description={`${t("contracts.detail.totalTrips", locale)} ${contractRecord.periodAttainment.totalTrips}`}
+          title={`${contractRecord.periodAttainment?.completedTrips ?? 0}`}
+          description={`${t("contracts.detail.totalTrips", locale)} ${contractRecord.periodAttainment?.totalTrips ?? 0}`}
         />
       </section>
 
@@ -113,7 +136,7 @@ export default async function ContractDetailPage({
               </tr>
             </thead>
             <tbody>
-              {contractRecord.slaTargets.map((target) => {
+              {(contractRecord.slaTargets ?? []).map((target) => {
                 const current = metricValue(
                   contractRecord.periodAttainment,
                   target.metric,
@@ -159,7 +182,7 @@ export default async function ContractDetailPage({
           <span className="status-chip">{t("contracts.readOnly", locale)}</span>
         </div>
 
-        {contractRecord.exceptions.length === 0 ? (
+        {(contractRecord.exceptions ?? []).length === 0 ? (
           <p className="contracts-empty-note">
             {t("contracts.detail.emptyExceptions", locale)}
           </p>
@@ -177,7 +200,7 @@ export default async function ContractDetailPage({
                 </tr>
               </thead>
               <tbody>
-                {contractRecord.exceptions.map((exception) => (
+                {(contractRecord.exceptions ?? []).map((exception) => (
                   <tr key={exception.exceptionId}>
                     <td>{exception.orderId}</td>
                     <td>{formatDateTime(exception.occurredAt)}</td>

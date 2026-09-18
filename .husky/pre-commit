@@ -1,4 +1,4 @@
 #!/usr/bin/env sh
 set -e
-python3 "$(git rev-parse --show-toplevel)/scripts/git/check_staged_generated_files.py" --staged
+python3 "$(git rev-parse --show-toplevel)/tools/ci/git/check_staged_generated_files.py" --staged
 pnpm lint-staged

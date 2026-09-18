@@ -242,7 +242,7 @@ export const FX_FLEET_TRIPS: FleetTrip[] = [
     id: "ord_8211",
     svc: "insurance",
     driver: "陳俊宏",
-    tenant: "CATHAY_LIFE",
+    tenant: "CONTOSO_LIFE",
     pickup: "台大醫院 西址",
     fare: "NT$ 640",
     commission: "NT$ 192",
@@ -254,7 +254,7 @@ export const FX_FLEET_TRIPS: FleetTrip[] = [
     svc: "travel",
     driver: "張育成",
     tenant: "TPE_HOTEL_GRP",
-    pickup: "凱撒飯店 台北館",
+    pickup: "翼尖飯店 台北館",
     fare: "NT$ 2,100",
     commission: "NT$ 630",
     status: "in_progress",
@@ -282,13 +282,20 @@ export type StatementLine = {
   reimbursement?: string | null;
 };
 
+function getCurrentPeriodMonth(): string {
+  const now = new Date();
+  const year = now.getUTCFullYear();
+  const month = String(now.getUTCMonth() + 1).padStart(2, "0");
+  return `${year}-${month}`;
+}
+
 export const FX_FLEET_STATEMENT: {
   period: string;
   status: string;
   payable: string;
   lines: StatementLine[];
 } = {
-  period: "2026-05",
+  period: getCurrentPeriodMonth(),
   status: "pending_confirm",
   payable: "NT$ 642,000",
   lines: [
@@ -313,12 +320,12 @@ export type FleetStatement = {
 
 export const FX_FLEET_STATEMENTS: FleetStatement[] = [
   {
-    id: "fst_2026_05",
-    period: "2026-05",
+    id: `fst_${getCurrentPeriodMonth().replace("-", "_")}`,
+    period: getCurrentPeriodMonth(),
     trips: 14280,
     payable: "NT$ 642,000",
     status: "pending_confirm",
-    issued: "2026-06-01",
+    issued: `${getCurrentPeriodMonth()}-01`,
   },
   {
     id: "fst_2026_04",

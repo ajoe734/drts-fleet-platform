@@ -3,7 +3,7 @@
 > 歸檔說明：本批文件由使用者於 2026-06-19 提供之 Phase 1「修正」SA/SD 正式文件，
 > 重新以正確 UTF-8（zh-TW）編碼歸檔；結構、表格、型別定義、SQL DDL、API 路徑、
 > 任務代號、驗收條件均忠實保留。對應執行波次見
-> `scripts/dispatch-phase1-delta-supply-eligibility-mobile-reporting-20260619.py`，
+> `tools/task-dispatch/dispatch-phase1-delta-supply-eligibility-mobile-reporting-20260619.py`，
 > 對應 UI 補充見 `docs/05-ui/*-20260619.md`（screen-requirements 交付，非 LLM 視覺設計）。
 
 **日期**：2026-06-19

@@ -11,6 +11,7 @@ import type {
 } from "@drts/contracts";
 
 import { ApiRequestError } from "../../common/api-envelope";
+import { normalizeDriverId } from "../../common/auth";
 import {
   maskEmail,
   maskName,
@@ -431,7 +432,7 @@ export class DriverProfileService implements OnModuleInit {
   }
 
   private resolveDriverId(actorId?: string | null): string {
-    const candidate = actorId?.trim();
+    const candidate = normalizeDriverId(actorId);
     this.assertDriverId(candidate);
     return DEMO_DRIVER_ALIASES[candidate!] ?? candidate!;
   }

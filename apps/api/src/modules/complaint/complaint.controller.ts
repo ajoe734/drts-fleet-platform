@@ -6,6 +6,7 @@ import {
   HttpStatus,
   Param,
   Post,
+  Res,
 } from "@nestjs/common";
 
 import type {
@@ -22,6 +23,9 @@ import {
   ApiRequestError,
   toApiSuccessEnvelope,
 } from "../../common/api-envelope";
+import { IdempotencyService } from "../../common/idempotency";
+import type { PassthroughResponseLike } from "../../common/idempotency-http";
+import { applyIdempotentResponseHeaders } from "../../common/idempotency-http";
 import { IncidentService } from "../incident/incident.service";
 import { ComplaintService } from "./complaint.service";
 
@@ -30,17 +34,29 @@ export class ComplaintController {
   constructor(
     private readonly complaintService: ComplaintService,
     private readonly incidentService: IncidentService,
+    private readonly idempotencyService: IdempotencyService,
   ) {}
 
   @Post()
-  createComplaintCase(
+  async createComplaintCase(
     @Body() command: CreateComplaintCaseCommand,
+    @Res({ passthrough: true }) response: PassthroughResponseLike,
+    @Headers("idempotency-key") idempotencyKey?: string,
     @Headers("x-request-id") requestId?: string,
   ) {
-    return toApiSuccessEnvelope(
-      this.complaintService.createComplaintCase(command, requestId),
-      requestId,
-    );
+    const result = await this.idempotencyService.execute({
+      scope: "crm:complaint:case_create",
+      idempotencyKey,
+      requestPath: "complaints",
+      payload: command,
+      execute: async () => ({
+        data: this.complaintService.createComplaintCase(command, requestId),
+        statusCode: HttpStatus.CREATED,
+      }),
+    });
+
+    applyIdempotentResponseHeaders(response, result);
+    return toApiSuccessEnvelope(result.data, requestId);
   }
 
   @Get()

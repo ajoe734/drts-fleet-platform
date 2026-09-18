@@ -2,6 +2,9 @@ import { describe, expect, it, vi } from "vitest";
 
 import {
   allowUnprovisionedDriverRoute,
+  isProtectedDriverRoute,
+  PROTECTED_DRIVER_ROUTES,
+  PUBLIC_DRIVER_ROUTES,
   resetDriverAppToOnboarding,
 } from "../../lib/driver-identity-routing";
 
@@ -36,15 +39,33 @@ describe("resetDriverAppToOnboarding", () => {
 });
 
 describe("allowUnprovisionedDriverRoute", () => {
-  it("keeps onboarding, index, and safety-operator routes accessible before provisioning", () => {
-    expect(allowUnprovisionedDriverRoute([])).toBe(true);
-    expect(allowUnprovisionedDriverRoute(["index"])).toBe(true);
+  it("only allows the onboarding route before provisioning", () => {
     expect(allowUnprovisionedDriverRoute(["onboarding"])).toBe(true);
-    expect(allowUnprovisionedDriverRoute(["safety-operator"])).toBe(true);
+    expect(allowUnprovisionedDriverRoute(["/onboarding"])).toBe(true);
   });
 
-  it("rejects other driver routes until provisioning is complete", () => {
-    expect(allowUnprovisionedDriverRoute(["trip"])).toBe(false);
+  it("strictly rejects all protected routes and empty segments until provisioning is complete", () => {
+    expect(allowUnprovisionedDriverRoute([])).toBe(false);
+    expect(allowUnprovisionedDriverRoute(["index"])).toBe(false);
     expect(allowUnprovisionedDriverRoute(["jobs"])).toBe(false);
+    expect(allowUnprovisionedDriverRoute(["trip"])).toBe(false);
+    expect(allowUnprovisionedDriverRoute(["platform-presence"])).toBe(false);
+    expect(allowUnprovisionedDriverRoute(["settings"])).toBe(false);
+    expect(allowUnprovisionedDriverRoute(["earnings"])).toBe(false);
+    expect(allowUnprovisionedDriverRoute(["shift"])).toBe(false);
+    expect(allowUnprovisionedDriverRoute(["sos"])).toBe(false);
+    expect(allowUnprovisionedDriverRoute(["incident"])).toBe(false);
+    expect(allowUnprovisionedDriverRoute(["safety-operator"])).toBe(false);
+  });
+});
+
+describe("route classification inventory", () => {
+  it("defines public and protected route inventories correctly", () => {
+    expect(PUBLIC_DRIVER_ROUTES).toContain("onboarding");
+    for (const route of PROTECTED_DRIVER_ROUTES) {
+      expect(isProtectedDriverRoute(route)).toBe(true);
+      expect(isProtectedDriverRoute(`/${route}`)).toBe(true);
+    }
+    expect(isProtectedDriverRoute("onboarding")).toBe(false);
   });
 });

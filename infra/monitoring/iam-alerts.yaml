@@ -1,0 +1,110 @@
+groups:
+  - name: iam_security_alerts
+    rules:
+      - alert: IAMRefreshTokenReuseDetected
+        expr: increase(drts_iam_refresh_token_reuse_total[1m]) >= 1
+        for: 0m
+        labels:
+          severity: critical
+          owner_team: security_ops
+          route_channel: security-pager-p1
+        annotations:
+          summary: "Refresh token reuse attempt detected and session family revoked"
+          description: "Refresh token reuse event detected on realm {{ $labels.realm }}. Immediate family revocation executed. Investigate potential credential theft."
+          runbook_url: "docs/03-runbooks/iam-alert-response.md#1-iamrefreshtokenreusedetected"
+
+      - alert: IAMAuditPipelineFailureBlocked
+        expr: increase(drts_iam_audit_pipeline_failures_total{outcome="write_blocked"}[1m]) >= 1
+        for: 0m
+        labels:
+          severity: critical
+          owner_team: sre
+          route_channel: security-pager-p1
+        annotations:
+          summary: "Audit log pipeline failure blocked privileged write"
+          description: "Privileged write operation on class {{ $labels.operation_class }} was blocked (fail-closed) because audit log persistence failed."
+          runbook_url: "docs/03-runbooks/iam-alert-response.md#2-iamauditpipelinefailureblocked"
+
+      - alert: IAMBreakGlassActivated
+        expr: increase(drts_iam_break_glass_total{action="activated"}[1m]) >= 1
+        for: 0m
+        labels:
+          severity: high
+          owner_team: security_lead
+          route_channel: security-pager-p1
+        annotations:
+          summary: "Emergency break-glass access activated"
+          description: "Break-glass short-lived session activated in realm {{ $labels.realm }}. Verification and post-use review required."
+          runbook_url: "docs/03-runbooks/iam-alert-response.md#3-iambreakglassactivated"
+
+      - alert: IAMCrossTenantAbuseSpike
+        expr: increase(drts_iam_cross_tenant_attempts_total[5m]) >= 3
+        for: 0m
+        labels:
+          severity: high
+          owner_team: security_ops
+          route_channel: security-oncall
+        annotations:
+          summary: "Spike in cross-tenant or wrong realm boundary attempts"
+          description: "Cross-tenant access attempts exceeded threshold (>=3 in 5m) for realm {{ $labels.realm }}. Review perimeter logs and isolation boundary."
+          runbook_url: "docs/03-runbooks/iam-alert-response.md#4-iamcrosstenantabusespike"
+
+      - alert: IAMUnapprovedPrivilegedChange
+        expr: increase(drts_iam_privileged_changes_total{outcome="unapproved_drill"}[5m]) >= 1 or increase(drts_iam_privileged_changes_total[1h]) > 5
+        for: 0m
+        labels:
+          severity: high
+          owner_team: platform_security
+          route_channel: security-platform-owner
+        annotations:
+          summary: "Unapproved or high-volume privileged role mutation"
+          description: "Privileged role or API key mutation (type: {{ $labels.change_type }}) flagged for review or exceeding hourly threshold."
+          runbook_url: "docs/03-runbooks/iam-alert-response.md#5-iamunapprovedprivilegedchange"
+
+      - alert: IAMAuthBruteForceSpike
+        expr: increase(drts_iam_auth_abuse_total[5m]) > 10
+        for: 0m
+        labels:
+          severity: warning
+          owner_team: security_ops
+          route_channel: security-oncall
+        annotations:
+          summary: "Brute-force authentication or invitation abuse detected"
+          description: "High rate of failed auth/invitation requests (type: {{ $labels.event_type }}) detected in realm {{ $labels.realm }}."
+          runbook_url: "docs/03-runbooks/iam-alert-response.md#6-iamauthbruteforcespike"
+
+      - alert: IAMCredentialExpiringSoon
+        expr: drts_iam_credential_expiry_warnings_total{days_remaining=~"7|1"} > 0
+        for: 1m
+        labels:
+          severity: warning
+          owner_team: credential_owner
+          route_channel: ops-ticket
+        annotations:
+          summary: "IAM credential nearing expiration"
+          description: "Credential of type {{ $labels.credential_type }} expires in {{ $labels.days_remaining }} days. Owner team: {{ $labels.owner_team }}."
+          runbook_url: "docs/03-runbooks/iam-alert-response.md#7-iamcredentialexpiringsoon"
+
+      - alert: IAMDormantCredentialUsed
+        expr: increase(drts_iam_dormant_credential_usage_total[15m]) >= 1
+        for: 0m
+        labels:
+          severity: warning
+          owner_team: security_ops
+          route_channel: security-oncall
+        annotations:
+          summary: "Dormant credential suddenly active"
+          description: "Credential of type {{ $labels.credential_type }} inactive >30 days was just used. Investigation signal triggered."
+          runbook_url: "docs/03-runbooks/iam-alert-response.md#8-iamdormantcredentialused"
+
+      - alert: IAMIdPGroupDriftDetected
+        expr: increase(drts_iam_idp_drift_total[10m]) >= 1
+        for: 0m
+        labels:
+          severity: warning
+          owner_team: iam_team
+          route_channel: iam-team
+        annotations:
+          summary: "IdP group assertion drift detected"
+          description: "Drift between IdP assertion claims and durable role bindings (type: {{ $labels.drift_type }}). Least privilege applied."
+          runbook_url: "docs/03-runbooks/iam-alert-response.md#9-iamidpgroupdriftdetected"

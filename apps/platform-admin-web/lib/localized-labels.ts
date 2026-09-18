@@ -79,6 +79,7 @@ const CODE_LABEL_KEYS = {
   missing: "platformCode.missing",
   mixed: "platformCode.mixed",
   none: "platformCode.none",
+  offboarding_pending_debranding: "platformCode.offboarding_pending_debranding",
   not_required: "platformCode.not_required",
   operator: "platformCode.operator",
   ops: "platformCode.ops",

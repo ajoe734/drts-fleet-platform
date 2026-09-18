@@ -34,13 +34,13 @@ The Enterprise Dispatch design response now defines a distinct frontstage produc
 
 ## Canonical Targets
 
-| Product surface | Canonical target |
-|---|---|
-| Enterprise Dispatch employee frontend | `apps/enterprise-dispatch-web` |
-| Tenant admin / governance console | `apps/tenant-console-web` |
-| Partner / cardholder booking | `apps/partner-booking-web` |
-| Bank issuer console | `apps/bank-console-web` |
-| Historical Lovable reference | external `tenant-commute-hub`, frozen |
+| Product surface                       | Canonical target                      |
+| ------------------------------------- | ------------------------------------- |
+| Enterprise Dispatch employee frontend | `apps/enterprise-dispatch-web`        |
+| Tenant admin / governance console     | `apps/tenant-console-web`             |
+| Partner / cardholder booking          | `apps/partner-booking-web`            |
+| Bank issuer console                   | `apps/bank-console-web`               |
+| Historical Lovable reference          | external `tenant-commute-hub`, frozen |
 
 ## Allowed Use Of Lovable / `tenant-commute-hub`
 

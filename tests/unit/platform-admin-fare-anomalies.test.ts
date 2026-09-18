@@ -46,7 +46,7 @@ function buildItem(): FareQuoteAnomalyAdminView {
       chargingMode: "fixed_quote",
       estimatedFareMinor: null,
       payableFareMinor: null,
-      currency: "NTD",
+      currency: "TWD",
       farePolicyId: "fare-policy-001",
       farePolicyVersion: "FARE-MTX-2026-07",
       fareChangeRuleId: "fare-change-001",
@@ -181,5 +181,21 @@ describe("Platform Admin fare anomaly response validation", () => {
     expect(source).not.toMatch(/type=["']number["']/);
     expect(source).not.toContain("manualFare");
     expect(source).not.toContain("fareOverride");
+  });
+
+  it("binds fare anomaly quote retry mutations to intent-bound Idempotency-Key", () => {
+    const source = readFileSync(
+      join(
+        process.cwd(),
+        "apps/platform-admin-web/app/p5-fare-anomalies/fare-anomaly-screen.tsx",
+      ),
+      "utf8",
+    );
+
+    expect(source).toContain(
+      'import { createIdempotencyKey } from "@drts/api-client"',
+    );
+    expect(source).toContain('createIdempotencyKey("fare-anomaly-retry")');
+    expect(source).toContain('"Idempotency-Key"');
   });
 });

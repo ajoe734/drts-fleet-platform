@@ -1,3 +1,4 @@
+import { PLATFORM_CURRENCY } from "@drts/contracts";
 import { randomUUID } from "node:crypto";
 
 import { Injectable, Optional } from "@nestjs/common";
@@ -28,7 +29,7 @@ export type PersistInitialCertificate = {
   orderId: string;
   receiptNo: string;
   amountMinor: number;
-  currency: "NTD";
+  currency: typeof PLATFORM_CURRENCY;
   issuedAt: string;
   record: Record<string, unknown>;
 };

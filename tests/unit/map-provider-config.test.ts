@@ -3,7 +3,10 @@ import { resolve } from "node:path";
 
 import { describe, expect, it } from "vitest";
 
-const script = resolve(process.cwd(), "scripts/check-map-provider-config.sh");
+const script = resolve(
+  process.cwd(),
+  "operations/verification/check-map-provider-config.sh",
+);
 
 function runPreflight(overrides: Record<string, string> = {}) {
   return spawnSync("bash", [script], {

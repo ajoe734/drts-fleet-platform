@@ -1,3 +1,4 @@
+import { PLATFORM_CURRENCY } from "@drts/contracts";
 import { createHash, randomBytes, randomUUID } from "node:crypto";
 
 import {
@@ -77,9 +78,52 @@ import {
   InjectPassengerPushPort,
   type PassengerPushPort,
 } from "./passenger-push.port";
+import {
+  PassengerPushRepository,
+  type RegisterPassengerPushSubscriptionCommand,
+} from "./passenger-push.repository";
+
+/**
+ * A live, unexpired lease is already held by another worker for this outbox
+ * row. Thrown instead of returning a fabricated `PassengerPushDeliveryOutcome`
+ * so a concurrent or restarted caller cannot mistake this for an attempt
+ * that actually ran.
+ */
+export class PassengerPushClaimConflictError extends Error {
+  constructor(outboxId: string) {
+    super(
+      `Passenger push delivery for outbox ${outboxId} is already claimed by another worker; skipping to avoid a duplicate send.`,
+    );
+    this.name = "PassengerPushClaimConflictError";
+  }
+}
+
+/**
+ * The push provider acknowledged (or rejected) the notification, but the
+ * durable receipt/outbox write did not commit. The real delivery outcome is
+ * unresolved: it must never be reported as `delivered`, since the provider
+ * step may have actually succeeded while a future retry — reading a stale
+ * `pending` outbox row — could send the passenger a duplicate notification.
+ */
+export class PassengerPushPersistenceUnknownError extends Error {
+  constructor(outboxId: string, cause?: unknown) {
+    super(
+      `Passenger push delivery outcome for outbox ${outboxId} could not be durably recorded after a provider acknowledgement; delivery state is unknown.`,
+      cause !== undefined ? { cause } : undefined,
+    );
+    this.name = "PassengerPushPersistenceUnknownError";
+  }
+}
 
 @Injectable()
 export class MultiTaxiService implements OnModuleInit {
+  /**
+   * Crash-safety ceiling for a claim lease. Normal completion (success or
+   * failure) always releases the claim promptly; this bound only protects
+   * against a worker that stalls or crashes mid-attempt.
+   */
+  private static readonly PUSH_DELIVERY_LEASE_SECONDS = 120;
+  private readonly pushDeliveryWorkerId = randomUUID();
   private authorizations: MultiTaxiOperatingAuthorizationRecord[] = [];
   private vehicles: MultiTaxiAuthorizedVehicleRecord[] = [];
   private readonly accessTokensByDigest = new Map<
@@ -122,6 +166,8 @@ export class MultiTaxiService implements OnModuleInit {
     @Optional()
     @InjectPassengerPushPort()
     private readonly passengerPushPort?: PassengerPushPort,
+    @Optional()
+    private readonly pushSubscriptionRepository?: PassengerPushRepository,
   ) {}
 
   async onModuleInit() {
@@ -379,7 +425,7 @@ export class MultiTaxiService implements OnModuleInit {
   ) {
     this.assertServiceProductPolicy();
     const authorization = this.resolveActiveAuthorization();
-    const order = this.ownedMobilityService.createMultiTaxiRide(
+    const order = await this.ownedMobilityService.createMultiTaxiRide(
       command,
       authorization,
       identity,
@@ -394,7 +440,7 @@ export class MultiTaxiService implements OnModuleInit {
   ) {
     this.assertServiceProductPolicy();
     const authorization = this.resolveActiveAuthorization();
-    const order = this.ownedMobilityService.createMultiTaxiRide(
+    const order = await this.ownedMobilityService.createMultiTaxiRide(
       command,
       authorization,
       null,
@@ -905,6 +951,18 @@ export class MultiTaxiService implements OnModuleInit {
    * Hands one consumer-notification outbox row to the push provider.
    * An unconfigured or failing provider leaves the row undelivered with an
    * explicit result rather than stamping `delivered`.
+   *
+   * Before a real send, this claims an exclusive, leased fence on the
+   * outbox row (`MultiTaxiRepository.claimPushDeliveryRow`) so a concurrent
+   * or restarted caller cannot send the same notification twice; an
+   * unconfigured provider never reaches this claim, preserving the previous
+   * fail-fast behavior for that path. After a successful send, the provider
+   * receipt is durably recorded together with the outbox row update and the
+   * claim release in one fence-checked transaction
+   * (`MultiTaxiRepository.recordPushDeliveryOutcome`); if that does not
+   * commit, this throws rather than resolving with a fabricated `delivered`
+   * outcome, since the retry that would otherwise follow a stale `pending`
+   * row could re-send to the passenger for real.
    */
   async deliverPassengerNotification(
     record: ConsumerNotificationOutboxRecord,
@@ -926,14 +984,38 @@ export class MultiTaxiService implements OnModuleInit {
       providerName: null,
     });
 
+    if (record.status === "delivered") {
+      return {
+        outboxId: record.outboxId,
+        status: "delivered",
+        result: "delivered",
+        attemptCount: record.attemptCount,
+        nextAttemptAt: record.nextAttemptAt,
+        deliveredAt: record.deliveredAt ?? attemptedAt.toISOString(),
+        providerName: null,
+      };
+    }
+
     if (!this.passengerPushPort?.isAvailable()) {
       return this.persistPassengerNotificationOutcome(
         failure("provider_not_configured"),
       );
     }
 
+    const claim = await this.repository?.claimPushDeliveryRow(
+      record.outboxId,
+      record.passengerSubjectRef,
+      this.pushDeliveryWorkerId,
+      MultiTaxiService.PUSH_DELIVERY_LEASE_SECONDS,
+    );
+    if (claim && !claim.claimed) {
+      throw new PassengerPushClaimConflictError(record.outboxId);
+    }
+    const fenceToken = claim?.claimed ? claim.fenceToken : 1;
+
+    let receipt: Awaited<ReturnType<PassengerPushPort["send"]>>;
     try {
-      const receipt = await this.passengerPushPort.send(
+      receipt = await this.passengerPushPort.send(
         {
           outboxId: record.outboxId,
           orderId: record.orderId,
@@ -944,20 +1026,60 @@ export class MultiTaxiService implements OnModuleInit {
         },
         { requestId },
       );
-      return this.persistPassengerNotificationOutcome({
-        outboxId: record.outboxId,
-        status: "delivered",
-        result: "delivered",
-        attemptCount,
-        nextAttemptAt: attemptedAt.toISOString(),
-        deliveredAt: attemptedAt.toISOString(),
-        providerName: receipt.providerName,
-      });
     } catch {
-      return this.persistPassengerNotificationOutcome(
+      const failedOutcome = await this.persistPassengerNotificationOutcome(
         failure("provider_error"),
       );
+      try {
+        await this.repository?.releasePushDeliveryClaim(
+          record.outboxId,
+          fenceToken,
+        );
+      } catch (releaseError) {
+        this.repository?.reportPersistenceFailure(
+          releaseError,
+          "push delivery claim release",
+        );
+      }
+      return failedOutcome;
     }
+
+    const outcome: PassengerPushDeliveryOutcome = {
+      outboxId: record.outboxId,
+      status: "delivered",
+      result: "delivered",
+      attemptCount,
+      nextAttemptAt: attemptedAt.toISOString(),
+      deliveredAt: attemptedAt.toISOString(),
+      providerName: receipt.providerName,
+    };
+
+    let recordResult:
+      | Awaited<ReturnType<MultiTaxiRepository["recordPushDeliveryOutcome"]>>
+      | undefined;
+    try {
+      recordResult = await this.repository?.recordPushDeliveryOutcome({
+        outboxId: record.outboxId,
+        passengerSubjectRef: record.passengerSubjectRef,
+        fenceToken,
+        providerName: receipt.providerName,
+        providerAckState: "provider_acknowledged",
+        providerMessageRef: receipt.providerMessageRef,
+        deliveryOutcome: outcome,
+      });
+    } catch (error) {
+      this.repository?.reportPersistenceFailure(
+        error,
+        "consumer notification outbox delivery",
+      );
+      throw new PassengerPushPersistenceUnknownError(record.outboxId, error);
+    }
+
+    if (recordResult && !recordResult.recorded) {
+      throw new PassengerPushPersistenceUnknownError(record.outboxId);
+    }
+
+    return outcome;
   }
 
   private async persistPassengerNotificationOutcome(
@@ -994,6 +1116,68 @@ export class MultiTaxiService implements OnModuleInit {
       );
     }
     return receipt;
+  }
+
+  /**
+   * Registers (or replaces) the passenger's Web Push subscription for this
+   * ride. Scoped to `ride:read` — the same scope that lets the passenger
+   * read ride status at all — rather than a dedicated scope, since a push
+   * subscription only ever carries the same ride-status updates the
+   * passenger can already read on this token.
+   */
+  async registerPassengerPushSubscription(
+    accessToken: string,
+    command: RegisterPassengerPushSubscriptionCommand,
+  ): Promise<{ registered: true }> {
+    const token = await this.requireAccessToken(accessToken, "ride:read");
+    const endpoint = command.endpoint?.trim();
+    const p256dh = command.keys?.p256dh?.trim();
+    const auth = command.keys?.auth?.trim();
+    if (!endpoint || !endpoint.startsWith("https://") || !p256dh || !auth) {
+      throw new ApiRequestError(
+        HttpStatus.BAD_REQUEST,
+        "PASSENGER_PUSH_SUBSCRIPTION_INVALID",
+        "A valid Web Push subscription endpoint and keys are required.",
+      );
+    }
+    if (!this.pushSubscriptionRepository) {
+      throw new ApiRequestError(
+        HttpStatus.SERVICE_UNAVAILABLE,
+        "PASSENGER_PUSH_SUBSCRIPTION_STORE_UNAVAILABLE",
+        "Push subscription storage is not available.",
+      );
+    }
+    this.pushSubscriptionRepository.upsertSubscription({
+      orderId: token.orderId,
+      passengerSubjectRef: token.passengerSubjectRef,
+      endpoint,
+      keys: { p256dh, auth },
+      accessTokenExpiresAt: token.expiresAt,
+    });
+    return { registered: true };
+  }
+
+  /** Token-scoped unsubscribe, called on explicit opt-out from the ride page. */
+  async unregisterPassengerPushSubscription(
+    accessToken: string,
+  ): Promise<{ revoked: boolean }> {
+    const token = await this.requireAccessToken(accessToken, "ride:read");
+    const revoked =
+      this.pushSubscriptionRepository?.revokeByOrderId(token.orderId) ?? false;
+    return { revoked };
+  }
+
+  /**
+   * Not a secret — this is the VAPID *public* key the browser needs to call
+   * `PushManager.subscribe({ applicationServerKey })`. Read directly from
+   * the environment (mirroring `resolveAccessTokenTtlHours` below) rather
+   * than via the injected push transport, since the port surface has no
+   * reason to expose a Web-Push-specific getter.
+   */
+  getPassengerPushVapidPublicKey(): { publicKey: string | null } {
+    return {
+      publicKey: process.env.PASSENGER_WEBPUSH_VAPID_PUBLIC_KEY?.trim() || null,
+    };
   }
 
   streamPassengerRide(accessToken: string): Observable<MessageEvent> {
@@ -1149,7 +1333,7 @@ export class MultiTaxiService implements OnModuleInit {
       process.env.NODE_ENV === "production" &&
       !this.repository?.isEnabled()
     ) {
-      this.failRideAccessCreation(order, passengerAccess, requestId);
+      return this.failRideAccessCreation(order, passengerAccess, requestId);
     }
     try {
       // Strip the raw token before it crosses the persistence boundary. The
@@ -1162,7 +1346,7 @@ export class MultiTaxiService implements OnModuleInit {
         this.digestAccessToken(accessToken),
       );
     } catch {
-      this.failRideAccessCreation(order, passengerAccess, requestId);
+      return this.failRideAccessCreation(order, passengerAccess, requestId);
     }
     return {
       ride: order,
@@ -1197,16 +1381,16 @@ export class MultiTaxiService implements OnModuleInit {
     };
   }
 
-  private failRideAccessCreation(
+  private async failRideAccessCreation(
     order: OwnedOrderRecord,
     passengerAccess: PassengerRideAccessGrant,
     requestId?: string,
-  ): never {
+  ): Promise<never> {
     this.accessTokensByDigest.delete(
       this.digestAccessToken(passengerAccess.accessToken),
     );
     try {
-      this.ownedMobilityService.cancelOwnedOrder(
+      await this.ownedMobilityService.cancelOwnedOrder(
         order.orderId,
         { reason: "passenger_access_token_persistence_failed" },
         requestId,
@@ -1408,7 +1592,7 @@ export class MultiTaxiService implements OnModuleInit {
       payableFareMinor,
       actualFareMinor,
       tollMinor: 0,
-      currency: "NTD",
+      currency: PLATFORM_CURRENCY,
       farePolicyVersion:
         assignment?.routeFare?.farePolicyVersion ??
         order.quotedFareRuleVersion ??

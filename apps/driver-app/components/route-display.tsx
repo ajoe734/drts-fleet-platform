@@ -90,7 +90,7 @@ export default function RouteDisplay({
     <View style={styles.card}>
       <View style={styles.headerRow}>
         <View style={styles.headerCopy}>
-          <Text style={styles.eyebrow}>Trip Route Summary</Text>
+          <Text style={styles.eyebrow}>行程路線</Text>
           <Text style={styles.sectionTitle}>路線資訊</Text>
           <Text style={styles.headerNote}>{routeHeaderNote}</Text>
         </View>

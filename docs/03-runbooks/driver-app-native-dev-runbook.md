@@ -15,7 +15,7 @@ than the Cloud IAP control-plane host.
 - runtime: Expo Router + React Native
 - native config: `apps/driver-app/app.json`
 - EAS profiles: `apps/driver-app/eas.json`
-- current dev GCP project: `drts-dev-ray-tw-20260730`
+- current dev GCP project: `nodal-alloy-503700-s3`
 - current dev direct API origin:
   `https://drts-dev-api-4t7rg6fmeq-uc.a.run.app`
 - operator rule: always set the direct API origin explicitly; do not rely on a
@@ -187,7 +187,7 @@ downstream external prerequisites once Expo authentication is available.
 
 ### Automation Readiness Snapshot (2026-07-31 UTC)
 
-The GCP side is ready: project `drts-dev-ray-tw-20260730` is active and
+The GCP side is ready: project `nodal-alloy-503700-s3` is active and
 `https://drts-dev-api-4t7rg6fmeq-uc.a.run.app/health` returns HTTP 200.
 
 The GitHub/EAS side is not yet credentialed:

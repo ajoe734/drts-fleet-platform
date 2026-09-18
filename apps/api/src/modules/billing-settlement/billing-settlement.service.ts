@@ -1,6 +1,14 @@
+import { PLATFORM_CURRENCY } from "@drts/contracts";
+
 import { createHash, randomUUID } from "node:crypto";
 
-import { HttpStatus, Injectable, OnModuleInit, Optional } from "@nestjs/common";
+import {
+  HttpStatus,
+  Inject,
+  Injectable,
+  OnModuleInit,
+  Optional,
+} from "@nestjs/common";
 import { OnEvent } from "@nestjs/event-emitter";
 
 import type {
@@ -20,6 +28,7 @@ import type {
   GenerateTenantInvoiceCommand,
   InvoiceLineRecord,
   MarkReimbursementPaidCommand,
+  MarkReimbursementPaidWithProofCommand,
   MoneyAmount,
   PassengerPaymentStatus,
   PublishDriverFeePlanCommand,
@@ -27,6 +36,10 @@ import type {
   ReconciliationIssueRecord,
   ReimbursementBatchRecord,
   ReimbursementItemRecord,
+  RemittanceProofPaymentReceipt,
+  RemittanceProofReadbackGrant,
+  RemittanceProofRecord,
+  RequestRemittanceProofReadbackCommand,
   ResourceActionDescriptor,
   SandboxBillingTreatmentRecord,
   ResolveReconciliationIssueCommand,
@@ -42,11 +55,18 @@ import type {
   UiRefreshMetadata,
   UpdateTenantBillingProfileCommand,
   ReferralRevenueShareRule,
+  UploadRemittanceProofCommand,
 } from "@drts/contracts";
 
 import { ApiRequestError } from "../../common/api-envelope";
+import { sumMoney as sharedSumMoney } from "../../common/money";
 import { toActionReceipt } from "../../common/action-receipt";
 import type { BootstrapRequestIdentity } from "../../common/auth";
+import {
+  DOCUMENT_ARTIFACT_STORE,
+  InMemoryDocumentArtifactStore,
+  type DocumentArtifactStore,
+} from "../../common/document-artifacts";
 import { AuditNotificationService } from "../audit-notification/audit-notification.service";
 import {
   BillingSettlementRepository,
@@ -63,6 +83,7 @@ import {
   type PaymentRecoveryPort,
   UnavailablePaymentRecoveryPort,
 } from "./payment-recovery.port";
+import { RemittanceProofService } from "./remittance-proof.service";
 import {
   DEFAULT_CONTROLLED_DOWNLOAD_HOST,
   DEFAULT_CONTROLLED_DOWNLOAD_KEY_ID,
@@ -96,9 +117,10 @@ import {
   type OwnedMobilityTripCompletedEvent,
 } from "../owned-mobility/owned-mobility-events";
 import { maskOpaqueToken } from "../../common/sensitive-data-policy";
+import { detectAuthEnvironment } from "../../config/auth-startup-config";
 
 const DEMO_TENANT_ID = "tenant-demo-001";
-const DEFAULT_CURRENCY = "NTD";
+const DEFAULT_CURRENCY = PLATFORM_CURRENCY;
 const LIVE_SETTLEMENT_PRICING_VERSION = "tenant-pricing-live";
 const TENANT_REFRESH_INTERVAL_MS = 30_000;
 const DEFAULT_TENANT_SERVICE_PROGRAM_ID = "tenant-program-enterprise-dispatch";
@@ -341,6 +363,60 @@ const SETTLEMENT_TRIP_SEED: BillingSettlementTripRecord[] = [
   // with a referral partnerEntrySlug. These settle drts_pays_partner — DRTS
   // owes the channel a revenue share per completed ride.
   {
+    settlementId: "settlement-referral-yuhe-202606-001",
+    tenantId: DEMO_TENANT_ID,
+    driverId: "drv-demo-002",
+    orderId: "order-referral-yuhe-001",
+    completedAt: "2026-06-04T08:15:00Z",
+    orderSource: "portal",
+    grossEarning: { currency: DEFAULT_CURRENCY, amountMinor: 60000 },
+    subsidy: { currency: DEFAULT_CURRENCY, amountMinor: 0 },
+    platformFundedDiscount: { currency: DEFAULT_CURRENCY, amountMinor: 0 },
+    pricingVersionSnapshot: "tenant-pricing-v1",
+    eligibleForTenantInvoice: true,
+    eligibleForDriverStatement: true,
+    serviceBucket: "business_dispatch",
+    businessDispatchSubtype: "enterprise_dispatch",
+    costCenterCode: null,
+    riderId: "rider-referral-001",
+    partnerId: "partner_ead6bf3d-e858-47cc-bfe1-5a3742524118",
+    partnerProgramId: null,
+    partnerEntrySlug: "yuhe-residence",
+    eligibilityVerificationId: null,
+    issuerAuthorizationRef: null,
+    benefitReference: null,
+    serviceProduct: "enterprise_dispatch",
+    tenantServiceProgramId: null,
+    sourcePlatform: "portal",
+  },
+  {
+    settlementId: "settlement-referral-yuhe-202606-002",
+    tenantId: DEMO_TENANT_ID,
+    driverId: "drv-demo-003",
+    orderId: "order-referral-yuhe-002",
+    completedAt: "2026-06-18T19:40:00Z",
+    orderSource: "portal",
+    grossEarning: { currency: DEFAULT_CURRENCY, amountMinor: 90000 },
+    subsidy: { currency: DEFAULT_CURRENCY, amountMinor: 0 },
+    platformFundedDiscount: { currency: DEFAULT_CURRENCY, amountMinor: 0 },
+    pricingVersionSnapshot: "tenant-pricing-v1",
+    eligibleForTenantInvoice: true,
+    eligibleForDriverStatement: true,
+    serviceBucket: "business_dispatch",
+    businessDispatchSubtype: "enterprise_dispatch",
+    costCenterCode: null,
+    riderId: "rider-referral-002",
+    partnerId: "partner_ead6bf3d-e858-47cc-bfe1-5a3742524118",
+    partnerProgramId: null,
+    partnerEntrySlug: "yuhe-residence",
+    eligibilityVerificationId: null,
+    issuerAuthorizationRef: null,
+    benefitReference: null,
+    serviceProduct: "enterprise_dispatch",
+    tenantServiceProgramId: null,
+    sourcePlatform: "portal",
+  },
+  {
     settlementId: "settlement-referral-202606-001",
     tenantId: DEMO_TENANT_ID,
     driverId: "drv-demo-002",
@@ -406,9 +482,9 @@ const REFERRAL_REVENUE_SHARE_RULE_SEED: readonly ReferralRevenueShareRule[] =
       partnerId: "partner_ead6bf3d-e858-47cc-bfe1-5a3742524118",
       partnerEntrySlug: "yuhe-residence",
       rateType: "percent" as const,
-      value: 10,
+      value: 15,
       currency: "TWD",
-      effectiveFrom: "2026-07-01T00:00:00.000Z",
+      effectiveFrom: "2026-06-01T00:00:00.000Z",
       effectiveUntil: null,
       settlementDirection: REFERRAL_STATEMENT_DIRECTION,
       channelKey: REFERRAL_STATEMENT_CHANNEL_KEY,
@@ -430,6 +506,190 @@ const REFERRAL_REVENUE_SHARE_RULE_SEED: readonly ReferralRevenueShareRule[] =
       updatedAt: "2026-06-01T00:00:00.000Z",
     }),
   ]);
+
+function isStrictAuthEnvironment(): boolean {
+  const environment = detectAuthEnvironment(process.env);
+  return environment === "production" || environment === "staging";
+}
+
+function cloneReferralRevenueShareRuleSeed(): ReferralRevenueShareRule[] {
+  return REFERRAL_REVENUE_SHARE_RULE_SEED.map((rule) => ({ ...rule }));
+}
+
+function createInitialReferralRevenueShareRules(): ReferralRevenueShareRule[] {
+  return isStrictAuthEnvironment() ? [] : cloneReferralRevenueShareRuleSeed();
+}
+
+// ── Tenant invoice PDF rendering (SR-INVOICE-001) ───────────────────────────
+// A dependency-free, hand-rolled minimal PDF writer. `pdfkit` resolves from
+// this workspace's node_modules but is absent from pnpm-lock.yaml -- a clean
+// `pnpm install` in CI would not produce it, so depending on it here would be
+// a phantom dependency that only happens to work in this checkout. Adding a
+// real dependency is also out of this task's write_scopes (`package.json` /
+// the lockfile belong to SR-DEPS-001). The tradeoff is base-14 Helvetica only
+// supports Latin-1: any non-ASCII byte in tenant-supplied text (a CJK
+// invoice title, say) is rendered as `?` rather than dropped or corrupting
+// the byte stream -- every order id, amount, date and channel key on the
+// statement itself is ASCII, so the audited line items are unaffected.
+
+const TENANT_INVOICE_PDF_LINES_PER_PAGE = 48;
+
+function toPdfAsciiText(value?: string | null): string {
+  return String(value ?? "").replace(/[^\x20-\x7e]/g, "?");
+}
+
+function escapePdfLiteralText(value: string): string {
+  return value
+    .replace(/\\/g, "\\\\")
+    .replace(/\(/g, "\\(")
+    .replace(/\)/g, "\\)");
+}
+
+function formatMoneyForPdf(amount: MoneyAmount): string {
+  const sign = amount.amountMinor < 0 ? "-" : "";
+  const absMinor = Math.abs(amount.amountMinor);
+  const whole = Math.floor(absMinor / 100);
+  const cents = String(absMinor % 100).padStart(2, "0");
+  return `${sign}${amount.currency} ${whole}.${cents}`;
+}
+
+function chunkPdfLines(lines: string[], size: number): string[][] {
+  const chunks: string[][] = [];
+  for (let index = 0; index < lines.length; index += size) {
+    chunks.push(lines.slice(index, index + size));
+  }
+  return chunks.length > 0 ? chunks : [[]];
+}
+
+function buildPdfPageContentStream(lines: string[]): string {
+  const operators: string[] = ["BT", "/F1 10 Tf", "40 760 Td"];
+  lines.forEach((line, index) => {
+    if (index > 0) {
+      operators.push("0 -14 Td");
+    }
+    operators.push(`(${escapePdfLiteralText(toPdfAsciiText(line))}) Tj`);
+  });
+  operators.push("ET");
+  return operators.join("\n");
+}
+
+/**
+ * Builds a minimal, valid, byte-real PDF (1.4, uncompressed, one Type1
+ * Helvetica text object per page) out of plain text rows. It is real bytes a
+ * PDF reader can open and a text-extraction tool can parse back into these
+ * same rows -- not a fixture standing in for a renderer.
+ */
+function buildMinimalPdf(lines: string[]): Buffer {
+  const pages = chunkPdfLines(lines, TENANT_INVOICE_PDF_LINES_PER_PAGE);
+  const pageCount = pages.length;
+  const fontId = 3 + pageCount * 2;
+  const totalObjects = fontId;
+  const objectBodies: string[] = new Array(totalObjects + 1).fill("");
+  const kids = Array.from(
+    { length: pageCount },
+    (_, index) => `${3 + index * 2} 0 R`,
+  ).join(" ");
+
+  objectBodies[1] = `1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n`;
+  objectBodies[2] = `2 0 obj\n<< /Type /Pages /Kids [${kids}] /Count ${pageCount} >>\nendobj\n`;
+
+  pages.forEach((pageLines, index) => {
+    const pageId = 3 + index * 2;
+    const contentId = 4 + index * 2;
+    const content = buildPdfPageContentStream(pageLines);
+    const contentByteLength = Buffer.byteLength(content, "latin1");
+    objectBodies[pageId] =
+      `${pageId} 0 obj\n<< /Type /Page /Parent 2 0 R /Resources << /Font << /F1 ${fontId} 0 R >> >> /MediaBox [0 0 612 792] /Contents ${contentId} 0 R >>\nendobj\n`;
+    objectBodies[contentId] =
+      `${contentId} 0 obj\n<< /Length ${contentByteLength} >>\nstream\n${content}\nendstream\nendobj\n`;
+  });
+
+  objectBodies[fontId] =
+    `${fontId} 0 obj\n<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>\nendobj\n`;
+
+  const header = "%PDF-1.4\n";
+  const offsets: number[] = new Array(totalObjects + 1).fill(0);
+  let offset = Buffer.byteLength(header, "latin1");
+  let body = "";
+  for (let id = 1; id <= totalObjects; id += 1) {
+    offsets[id] = offset;
+    const objectBody = objectBodies[id]!;
+    body += objectBody;
+    offset += Buffer.byteLength(objectBody, "latin1");
+  }
+
+  let xref = `xref\n0 ${totalObjects + 1}\n0000000000 65535 f \n`;
+  const xrefOffset = offset;
+  for (let id = 1; id <= totalObjects; id += 1) {
+    xref += `${String(offsets[id]).padStart(10, "0")} 00000 n \n`;
+  }
+  const trailer = `trailer\n<< /Size ${totalObjects + 1} /Root 1 0 R >>\nstartxref\n${xrefOffset}\n%%EOF`;
+
+  return Buffer.from(header + body + xref + trailer, "latin1");
+}
+
+function buildTenantInvoicePdfRows(input: {
+  invoiceId: string;
+  tenantId: string;
+  billingProfile: TenantBillingProfile;
+  periodStart: string;
+  periodEnd: string;
+  amount: MoneyAmount;
+  lines: InvoiceLineRecord[];
+  generatedAt: string;
+}): string[] {
+  return [
+    `Tenant Invoice ${input.invoiceId}`,
+    `Bill To: ${toPdfAsciiText(input.billingProfile.invoiceTitle)} (${input.tenantId})`,
+    ...(input.billingProfile.taxId
+      ? [`Tax ID: ${toPdfAsciiText(input.billingProfile.taxId)}`]
+      : []),
+    ...(input.billingProfile.address
+      ? [`Address: ${toPdfAsciiText(input.billingProfile.address)}`]
+      : []),
+    `Billing Period: ${input.periodStart} to ${input.periodEnd}`,
+    `Generated At: ${input.generatedAt}`,
+    "",
+    "Order ID | Description | Channel | Amount",
+    "----------------------------------------------------------------",
+    ...input.lines.map(
+      (line) =>
+        `${line.orderId} | ${toPdfAsciiText(line.description)} | ${
+          line.channelKey ?? "-"
+        } | ${formatMoneyForPdf(line.amount)}`,
+    ),
+    "----------------------------------------------------------------",
+    `Total (${input.lines.length} line${input.lines.length === 1 ? "" : "s"}): ${formatMoneyForPdf(input.amount)}`,
+  ];
+}
+
+function buildDriverStatementPdfRows(
+  statement: DriverStatementRecord,
+): string[] {
+  return [
+    `Driver Statement ${statement.statementId}`,
+    `Driver ID: ${statement.driverId}`,
+    `Period: ${statement.periodMonth}`,
+    `Receipt No: ${statement.receiptNo}`,
+    `Payout Status: ${statement.payoutStatus}`,
+    `Fee Plan Version: ${statement.feePlanVersion}`,
+    `Generated At: ${statement.createdAt}`,
+    "",
+    `Gross Earning: ${formatMoneyForPdf(statement.grossEarning)}`,
+    `Service Fee: ${formatMoneyForPdf(statement.serviceFee)}`,
+    `Subsidy: ${formatMoneyForPdf(statement.subsidy)}`,
+    `Net Amount: ${formatMoneyForPdf(statement.netAmount)}`,
+    "",
+    "Order ID | Channel | Net Amount | Reimbursement Required",
+    "----------------------------------------------------------------",
+    ...statement.lines.map(
+      (line) =>
+        `${line.orderId} | ${toPdfAsciiText(line.channelKey ?? "-")} | ${formatMoneyForPdf(line.netAmount)} | ${line.reimbursementRequired ? "yes" : "no"}`,
+    ),
+    "----------------------------------------------------------------",
+    `Total Lines: ${statement.lines.length}`,
+  ];
+}
 
 @Injectable()
 export class BillingSettlementService implements OnModuleInit {
@@ -485,6 +745,11 @@ export class BillingSettlementService implements OnModuleInit {
     @Optional()
     @InjectPaymentRecoveryPort()
     private readonly paymentRecoveryPort: PaymentRecoveryPort = new UnavailablePaymentRecoveryPort(),
+    @Optional()
+    @Inject(DOCUMENT_ARTIFACT_STORE)
+    private readonly documentArtifactStore: DocumentArtifactStore = new InMemoryDocumentArtifactStore(),
+    @Optional()
+    private readonly remittanceProofService: RemittanceProofService = new RemittanceProofService(),
   ) {}
 
   async getMultiTaxiPaymentException(
@@ -1057,7 +1322,9 @@ export class BillingSettlementService implements OnModuleInit {
         invoice.periodEnd === command.periodEnd,
     );
     if (existingInvoice) {
-      return this.cloneInvoice(existingInvoice);
+      return this.cloneInvoice(
+        this.ensureTenantInvoiceArtifact(existingInvoice),
+      );
     }
 
     const eligibleTrips = (
@@ -1100,17 +1367,32 @@ export class BillingSettlementService implements OnModuleInit {
     const amount = this.sumMoney(lines.map((line) => line.amount));
     const now = new Date().toISOString();
     const invoiceId = `invoice-${randomUUID()}`;
+    const billingProfile = this.requireTenantBillingProfile(command.tenantId);
+    const artifactRecord = this.documentArtifactStore.put({
+      kind: "tenant-invoice",
+      subjectId: invoiceId,
+      mimeType: "application/pdf",
+      bytes: buildMinimalPdf(
+        buildTenantInvoicePdfRows({
+          invoiceId,
+          tenantId: command.tenantId,
+          billingProfile,
+          periodStart: command.periodStart,
+          periodEnd: command.periodEnd,
+          amount,
+          lines,
+          generatedAt: now,
+        }),
+      ),
+    });
     const artifactDownloadMetadata = createControlledDownloadMetadata({
       kind: "tenant-invoice",
       subjectId: invoiceId,
-      manifestHash: this.computeHash({
-        invoiceId,
-        tenantId: command.tenantId,
-        periodStart: command.periodStart,
-        periodEnd: command.periodEnd,
-        amount,
-        lineCount: lines.length,
-      }),
+      // The signature must cover the hash of the bytes actually behind the
+      // link, not a separate metadata digest -- otherwise a verified,
+      // unexpired signature would still fail `resolveDocumentArtifact`'s
+      // content-mismatch check against the real stored artifact.
+      manifestHash: artifactRecord.sha256,
       createdAt: now,
       host: this.downloadHost,
       keyId: this.downloadSigningKeyId,
@@ -1197,17 +1479,24 @@ export class BillingSettlementService implements OnModuleInit {
     invoice: TenantInvoiceRecord,
   ): ResourceActionDescriptor[] {
     const artifactExpired = this.isInvoiceArtifactExpired(invoice.artifactUrl);
+    // `draft` is not produced by `generateTenantInvoice` today, but the
+    // contract's `BillingDocumentStatus` allows it and a not-yet-finalised
+    // bill must never be downloadable just because a link happens to exist.
+    const isUnfinalised = invoice.status === "draft";
 
     return [
       {
         action: "download_artifact",
-        enabled: Boolean(invoice.artifactUrl) && !artifactExpired,
+        enabled:
+          Boolean(invoice.artifactUrl) && !artifactExpired && !isUnfinalised,
         riskLevel: "low",
-        ...(!invoice.artifactUrl
-          ? { disabledReasonCode: "artifact_missing" }
-          : artifactExpired
-            ? { disabledReasonCode: "artifact_expired" }
-            : {}),
+        ...(isUnfinalised
+          ? { disabledReasonCode: "invoice_not_finalized" }
+          : !invoice.artifactUrl
+            ? { disabledReasonCode: "artifact_missing" }
+            : artifactExpired
+              ? { disabledReasonCode: "artifact_expired" }
+              : {}),
       },
       {
         action: "view_detail",
@@ -1298,7 +1587,14 @@ export class BillingSettlementService implements OnModuleInit {
     }
 
     try {
-      const parsed = new URL(artifactUrl);
+      // `artifactUrl` is host-relative by default (`DEFAULT_CONTROLLED_DOWNLOAD_HOST`
+      // is `/downloads`, not an absolute origin), and `new URL()` throws on a
+      // relative string with no base -- which silently made this method
+      // return "never expired" for every real invoice link. The dummy base is
+      // ignored by the URL parser whenever `artifactUrl` is already absolute
+      // (a deployment that sets `CONTROLLED_DOWNLOAD_HOST`), so this is safe
+      // either way.
+      const parsed = new URL(artifactUrl, "http://controlled-download.invalid");
       const expiresAt = parsed.searchParams.get("expires_at");
       if (!expiresAt) {
         return false;
@@ -1311,16 +1607,101 @@ export class BillingSettlementService implements OnModuleInit {
     }
   }
 
+  /**
+   * Makes a stored invoice's download link trustworthy before it is handed
+   * back to a caller: reissues the signed link if its time window has
+   * lapsed, and re-renders + re-stores the PDF from this invoice's own
+   * persisted snapshot if `DocumentArtifactStore` no longer has bytes
+   * matching the link's manifest hash (the store is in-memory only per
+   * SR-ARTIFACT-001, so a process restart empties it while the invoice
+   * record itself survives via the repository).
+   *
+   * Only the link is ever recomputed here -- `createdAt` (the invoice's
+   * actual issuance date), `lines`, and `amount` are read, never
+   * recalculated, so viewing this invoice on a later date can never change
+   * what it says was issued or owed.
+   */
+  private ensureTenantInvoiceArtifact(
+    invoice: StoredTenantInvoice,
+  ): StoredTenantInvoice {
+    const stored = this.documentArtifactStore.get(
+      "tenant-invoice",
+      invoice.invoiceId,
+    );
+    const materialised =
+      stored?.record.sha256 === invoice.artifactDownloadMetadata.manifestHash;
+    const expired = this.isInvoiceArtifactExpired(invoice.artifactUrl);
+
+    if (materialised && !expired) {
+      return invoice;
+    }
+
+    const record = materialised
+      ? stored!.record
+      : this.documentArtifactStore.put({
+          kind: "tenant-invoice",
+          subjectId: invoice.invoiceId,
+          mimeType: "application/pdf",
+          bytes: buildMinimalPdf(
+            buildTenantInvoicePdfRows({
+              invoiceId: invoice.invoiceId,
+              tenantId: invoice.tenantId,
+              billingProfile: this.requireTenantBillingProfile(
+                invoice.tenantId,
+              ),
+              periodStart: invoice.periodStart,
+              periodEnd: invoice.periodEnd,
+              amount: invoice.amount,
+              lines: invoice.lines,
+              generatedAt: invoice.createdAt,
+            }),
+          ),
+        });
+
+    const artifactDownloadMetadata = createControlledDownloadMetadata({
+      kind: "tenant-invoice",
+      subjectId: invoice.invoiceId,
+      manifestHash: record.sha256,
+      host: this.downloadHost,
+      keyId: this.downloadSigningKeyId,
+      signingSecret: this.downloadSigningSecret,
+      ttlMinutes: this.downloadExpiryMinutes,
+      signatureVersion: this.downloadSignatureVersion,
+    });
+
+    const refreshed: StoredTenantInvoice = {
+      ...invoice,
+      artifactUrl: artifactDownloadMetadata.downloadUrl,
+      artifactDownloadMetadata,
+    };
+
+    this.tenantInvoices = this.tenantInvoices.map((candidate) =>
+      candidate.invoiceId === refreshed.invoiceId ? refreshed : candidate,
+    );
+    this.persistChanges(
+      { tenantInvoices: [this.cloneInvoice(refreshed)] },
+      "reissue_tenant_invoice_artifact",
+    );
+
+    return refreshed;
+  }
+
   listTenantInvoices(tenantId: string) {
     return this.tenantInvoices
       .filter((invoice) => invoice.tenantId === tenantId)
-      .map((invoice) => this.cloneInvoice(invoice));
+      .map((invoice) =>
+        this.cloneInvoice(this.ensureTenantInvoiceArtifact(invoice)),
+      );
   }
 
   listTenantInvoicesRuntime(tenantId: string): TenantInvoiceListData {
     const items = this.tenantInvoices
       .filter((invoice) => invoice.tenantId === tenantId)
-      .map((invoice) => this.toTenantInvoiceRuntimeRecord(invoice));
+      .map((invoice) =>
+        this.toTenantInvoiceRuntimeRecord(
+          this.ensureTenantInvoiceArtifact(invoice),
+        ),
+      );
 
     const refresh: UiRefreshMetadata = {
       generatedAt: new Date().toISOString(),
@@ -1514,7 +1895,7 @@ export class BillingSettlementService implements OnModuleInit {
         },
       );
     }
-    return this.cloneInvoice(invoice);
+    return this.cloneInvoice(this.ensureTenantInvoiceArtifact(invoice));
   }
 
   async publishDriverFeePlan(
@@ -1682,6 +2063,26 @@ export class BillingSettlementService implements OnModuleInit {
         updatedAt: now,
       };
 
+      const artifactRecord = this.documentArtifactStore.put({
+        kind: "report",
+        subjectId: statementId,
+        mimeType: "application/pdf",
+        bytes: buildMinimalPdf(buildDriverStatementPdfRows(statement)),
+      });
+      const artifactDownloadMetadata = createControlledDownloadMetadata({
+        kind: "report",
+        subjectId: statementId,
+        manifestHash: artifactRecord.sha256,
+        createdAt: now,
+        host: this.downloadHost,
+        keyId: this.downloadSigningKeyId,
+        signingSecret: this.downloadSigningSecret,
+        ttlMinutes: this.downloadExpiryMinutes,
+        signatureVersion: this.downloadSignatureVersion,
+      });
+      statement.artifactUrl = artifactDownloadMetadata.downloadUrl;
+      statement.artifactDownloadMetadata = artifactDownloadMetadata;
+
       generatedStatements.push(statement);
       this.auditNotificationService.recordNotification({
         tenantId: null,
@@ -1782,16 +2183,76 @@ export class BillingSettlementService implements OnModuleInit {
     };
   }
 
-  listDriverStatements(periodMonth?: string) {
+  private ensureDriverStatementArtifact(
+    statement: DriverStatementRecord,
+  ): DriverStatementRecord {
+    const stored = this.documentArtifactStore.get(
+      "report",
+      statement.statementId,
+    );
+    const materialised =
+      Boolean(statement.artifactDownloadMetadata) &&
+      stored?.record.sha256 ===
+        statement.artifactDownloadMetadata?.manifestHash;
+    const expired = this.isInvoiceArtifactExpired(statement.artifactUrl ?? "");
+
+    if (materialised && !expired) {
+      return statement;
+    }
+
+    const record = materialised
+      ? stored!.record
+      : this.documentArtifactStore.put({
+          kind: "report",
+          subjectId: statement.statementId,
+          mimeType: "application/pdf",
+          bytes: buildMinimalPdf(buildDriverStatementPdfRows(statement)),
+        });
+
+    const now = new Date().toISOString();
+    const artifactDownloadMetadata = createControlledDownloadMetadata({
+      kind: "report",
+      subjectId: statement.statementId,
+      manifestHash: record.sha256,
+      createdAt: now,
+      host: this.downloadHost,
+      keyId: this.downloadSigningKeyId,
+      signingSecret: this.downloadSigningSecret,
+      ttlMinutes: this.downloadExpiryMinutes,
+      signatureVersion: this.downloadSignatureVersion,
+    });
+
+    const refreshed: DriverStatementRecord = {
+      ...statement,
+      artifactUrl: artifactDownloadMetadata.downloadUrl,
+      artifactDownloadMetadata,
+    };
+
+    this.driverStatements = this.driverStatements.map((candidate) =>
+      candidate.statementId === refreshed.statementId ? refreshed : candidate,
+    );
+    this.persistChanges(
+      { driverStatements: [this.cloneStatement(refreshed)] },
+      "reissue_driver_statement_artifact",
+    );
+
+    return refreshed;
+  }
+
+  listDriverStatements(periodMonth?: string, driverId?: string) {
     return this.driverStatements
       .filter(
         (statement) =>
-          !periodMonth || statement.periodMonth.trim() === periodMonth.trim(),
+          (!periodMonth ||
+            statement.periodMonth.trim() === periodMonth.trim()) &&
+          (!driverId || statement.driverId.trim() === driverId.trim()),
       )
-      .map((statement) => this.cloneStatement(statement));
+      .map((statement) =>
+        this.cloneStatement(this.ensureDriverStatementArtifact(statement)),
+      );
   }
 
-  getDriverStatement(statementId: string) {
+  getDriverStatement(statementId: string, requestingDriverId?: string) {
     const statement = this.driverStatements.find(
       (candidate) => candidate.statementId === statementId,
     );
@@ -1805,7 +2266,22 @@ export class BillingSettlementService implements OnModuleInit {
         },
       );
     }
-    return this.cloneStatement(statement);
+    if (
+      requestingDriverId &&
+      statement.driverId.trim() !== requestingDriverId.trim()
+    ) {
+      throw new ApiRequestError(
+        HttpStatus.FORBIDDEN,
+        "DRIVER_IDENTITY_MISMATCH",
+        "Driver cannot access another driver's statement.",
+        {
+          statementId,
+          requestedDriverId: statement.driverId,
+          actorDriverId: requestingDriverId,
+        },
+      );
+    }
+    return this.cloneStatement(this.ensureDriverStatementArtifact(statement));
   }
 
   async listSettlementTripsForPeriodMonth(
@@ -2342,6 +2818,212 @@ export class BillingSettlementService implements OnModuleInit {
     return this.cloneReimbursementBatch(batch);
   }
 
+  // ── Remittance Proof (SR-PROOF-001) ──
+  //
+  // `markReimbursementPaid` above stays untouched: it is exercised by an
+  // existing regression (`tests/unit/billing-settlement.test.ts`, outside
+  // this task's write_scopes) that marks a batch paid with a bare,
+  // never-uploaded `remittanceProofId` string, so gating it on a real proof
+  // record here would break out-of-scope, already-passing coverage. The
+  // proof-backed gate this task delivers is the new
+  // `markReimbursementPaidWithProof` method/`/pay-with-proof` route below --
+  // see `docs/04-uat/system-remediation-20260906/SR-PROOF-001.md` for the
+  // explicit boundary this records.
+
+  /**
+   * Test-only escape hatch onto the underlying `RemittanceProofService` --
+   * used to drive `attemptScan`/`markPaidWithProof` directly in unit tests,
+   * since neither is reachable over HTTP (no scan-completion callback route
+   * exists in this task's locked OpenAPI paths; see
+   * `docs/04-uat/system-remediation-20260906/SR-PROOF-001.md`).
+   */
+  get remittanceProofServiceForTest(): RemittanceProofService {
+    return this.remittanceProofService;
+  }
+
+  async stageRemittanceProofContent(bytes: Buffer, contentType: string) {
+    return this.remittanceProofService.stageContent(bytes, contentType);
+  }
+
+  async uploadRemittanceProof(
+    command: UploadRemittanceProofCommand,
+    identity: BootstrapRequestIdentity | null,
+    requestId?: string,
+  ): Promise<RemittanceProofRecord> {
+    const batch = this.requireReimbursementBatch(command.batchId);
+    const callerDriverId = identity?.actorId?.trim() || null;
+    if (
+      identity?.realm === "driver" &&
+      callerDriverId &&
+      callerDriverId !== batch.driverId
+    ) {
+      throw new ApiRequestError(
+        HttpStatus.FORBIDDEN,
+        "REMITTANCE_PROOF_BATCH_OWNERSHIP_VIOLATION",
+        "A driver may only upload a remittance proof against their own reimbursement batch.",
+        {
+          batchId: batch.batchId,
+          callerDriverId,
+          batchDriverId: batch.driverId,
+        },
+      );
+    }
+
+    const proof = await this.remittanceProofService.uploadProof({
+      batchId: batch.batchId,
+      // Denormalised from the batch, never from the command -- see
+      // `packages/contracts/src/remittance-proof.ts`.
+      driverId: batch.driverId,
+      originalFilename: command.originalFilename,
+      stagedContentRef: command.stagedContentRef,
+      uploadedByActorId: identity?.actorId ?? null,
+    });
+
+    this.recordAudit(
+      {
+        actorId: identity?.actorId ?? null,
+        actorType:
+          identity?.actorType === "driver_user"
+            ? "system"
+            : (identity?.actorType ?? "system"),
+        tenantId: identity?.tenantId ?? null,
+        moduleName: "billing-settlement",
+        actionName: "upload_remittance_proof",
+        resourceType: "remittance_proof",
+        resourceId: proof.proofId,
+        newValuesSummary: {
+          batchId: proof.batchId,
+          driverId: proof.driverId,
+          scanState: proof.scanState,
+        },
+      },
+      requestId,
+    );
+
+    return proof;
+  }
+
+  async getRemittanceProof(proofId: string): Promise<RemittanceProofRecord> {
+    return this.remittanceProofService.getProof(proofId);
+  }
+
+  async requestRemittanceProofReadback(
+    command: RequestRemittanceProofReadbackCommand,
+    identity: BootstrapRequestIdentity | null,
+    requestId?: string,
+  ): Promise<RemittanceProofReadbackGrant> {
+    const grant = await this.remittanceProofService.requestReadback(
+      command.proofId,
+    );
+    this.recordAudit(
+      {
+        actorId: identity?.actorId ?? null,
+        actorType:
+          identity?.actorType === "driver_user"
+            ? "system"
+            : (identity?.actorType ?? "system"),
+        tenantId: identity?.tenantId ?? null,
+        moduleName: "billing-settlement",
+        actionName: "request_remittance_proof_readback",
+        resourceType: "remittance_proof",
+        resourceId: grant.proofId,
+        newValuesSummary: { expiresAt: grant.expiresAt },
+      },
+      requestId,
+    );
+    return grant;
+  }
+
+  async markReimbursementPaidWithProof(
+    batchId: string,
+    command: MarkReimbursementPaidWithProofCommand,
+    identity: BootstrapRequestIdentity | null,
+    requestId?: string,
+  ): Promise<RemittanceProofPaymentReceipt> {
+    const batch = this.requireReimbursementBatch(batchId);
+    if (!batch.approvedAt) {
+      throw new ApiRequestError(
+        HttpStatus.CONFLICT,
+        "REMITTANCE_PROOF_BATCH_NOT_APPROVED",
+        "Reimbursement batch must be approved before it can be marked as paid.",
+        { batchId },
+      );
+    }
+
+    const paidAt = command.paidAt?.trim() || new Date().toISOString();
+    if (Number.isNaN(new Date(paidAt).getTime())) {
+      throw new ApiRequestError(
+        HttpStatus.BAD_REQUEST,
+        "VALIDATION_ERROR",
+        "paidAt must be a valid ISO timestamp.",
+        { batchId, paidAt },
+      );
+    }
+
+    const receipt = await this.remittanceProofService.markPaidWithProof({
+      batchId: batch.batchId,
+      proofId: command.proofId,
+      idempotencyKey: command.idempotencyKey,
+      driverId: batch.driverId,
+      amount: batch.totalAmount,
+      paidAt,
+    });
+
+    if (batch.status !== "paid") {
+      batch.status = "paid";
+      batch.paidAt = receipt.paidAt;
+      batch.remittanceProofId = receipt.proofId;
+
+      const relatedStatement = this.driverStatements.find(
+        (statement) => statement.statementId === batch.statementId,
+      );
+      if (relatedStatement) {
+        relatedStatement.payoutStatus = "paid";
+        relatedStatement.updatedAt = receipt.paidAt;
+      }
+
+      await this.persistChanges(
+        {
+          reimbursementBatches: [this.cloneReimbursementBatch(batch)],
+          ...(relatedStatement
+            ? { driverStatements: [this.cloneStatement(relatedStatement)] }
+            : {}),
+        },
+        "mark_reimbursement_paid_with_proof",
+      );
+      this.auditNotificationService.recordNotification({
+        tenantId: null,
+        channel: "ops_notice",
+        title: "Reimbursement batch paid",
+        message: `Reimbursement batch ${batch.batchId} was marked paid with remittance proof ${receipt.proofId}.`,
+        status: "unread",
+      });
+      this.recordAudit(
+        {
+          actorId: identity?.actorId ?? null,
+          actorType:
+            identity?.actorType === "driver_user"
+              ? "system"
+              : (identity?.actorType ?? "platform_admin"),
+          tenantId: identity?.tenantId ?? null,
+          moduleName: "billing-settlement",
+          actionName: "mark_reimbursement_paid_with_proof",
+          resourceType: "driver_reimbursement_batch",
+          resourceId: batch.batchId,
+          newValuesSummary: {
+            driverId: batch.driverId,
+            proofId: receipt.proofId,
+            receiptId: receipt.receiptId,
+            paidAt: receipt.paidAt,
+          },
+        },
+        requestId,
+      );
+    }
+
+    return receipt;
+  }
+
   /**
    * Card-benefit (CCAT) settlement statements for the issuer tenant, one
    * per period that has card-benefit airport-transfer trips. Each statement
@@ -2524,7 +3206,7 @@ export class BillingSettlementService implements OnModuleInit {
   // DRTS owes the channel a revenue share (percent of fare, or flat per-trip).
 
   private referralRevenueShareRules: ReferralRevenueShareRule[] =
-    REFERRAL_REVENUE_SHARE_RULE_SEED.map((rule) => ({ ...rule }));
+    createInitialReferralRevenueShareRules();
 
   /** Active referral revenue-share rule for an entry at a given completion time. */
   resolveReferralRevenueShareRule(
@@ -3226,10 +3908,8 @@ export class BillingSettlementService implements OnModuleInit {
     return settlementChannelKeyForTrip(trip);
   }
 
-  private sumMoney(amounts: MoneyAmount[]) {
-    return this.money(
-      amounts.reduce((sum, amount) => sum + amount.amountMinor, 0),
-    );
+  private sumMoney(amounts: MoneyAmount[]): MoneyAmount {
+    return sharedSumMoney(amounts, DEFAULT_CURRENCY) as MoneyAmount;
   }
 
   private money(amountMinor: number): MoneyAmount {
@@ -3346,6 +4026,9 @@ export class BillingSettlementService implements OnModuleInit {
       serviceFee: { ...statement.serviceFee },
       subsidy: { ...statement.subsidy },
       netAmount: { ...statement.netAmount },
+      artifactDownloadMetadata: statement.artifactDownloadMetadata
+        ? { ...statement.artifactDownloadMetadata }
+        : null,
       lines: statement.lines.map((line) => ({
         ...line,
         grossEarning: { ...line.grossEarning },

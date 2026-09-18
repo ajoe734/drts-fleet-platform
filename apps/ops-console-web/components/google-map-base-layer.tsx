@@ -2,17 +2,62 @@
 
 import type { GeoPoint, ServiceAreaGeoJsonFeature } from "@drts/contracts";
 import { importLibrary, setOptions } from "@googlemaps/js-api-loader";
-import { useEffect, useEffectEvent, useRef, useState } from "react";
+import { createElement, useEffect, useEffectEvent, useRef, useState } from "react";
 
-type GoogleMapStatus = "loading" | "ready" | "fallback" | "error";
+export type GoogleMapStatus = "loading" | "ready" | "fallback" | "error";
 
-type MapProviderConfig = {
+export type MapProviderConfig = {
   provider: "google" | "fallback";
   enabled: boolean;
   browserKey: string | null;
   mapId: string | null;
   reasonCode: string | null;
 };
+
+export interface GoogleMapBaseLayerResolution {
+  status: GoogleMapStatus;
+  provider: "google" | "fallback";
+  reasonCode: string | null;
+  isProductionReady: boolean;
+  requiresMockFallback: boolean;
+}
+
+export function resolveGoogleMapBaseLayerStatus(
+  config: MapProviderConfig | null | undefined,
+): GoogleMapBaseLayerResolution {
+  if (!config) {
+    return {
+      status: "fallback",
+      provider: "fallback",
+      reasonCode: "missing_config",
+      isProductionReady: false,
+      requiresMockFallback: true,
+    };
+  }
+
+  if (
+    config.enabled &&
+    config.provider === "google" &&
+    typeof config.browserKey === "string" &&
+    config.browserKey.trim().length > 0
+  ) {
+    return {
+      status: "ready",
+      provider: "google",
+      reasonCode: null,
+      isProductionReady: true,
+      requiresMockFallback: false,
+    };
+  }
+
+  return {
+    status: "fallback",
+    provider: "fallback",
+    reasonCode: config.reasonCode || "provider_not_configured",
+    isProductionReady: false,
+    requiresMockFallback: true,
+  };
+}
 
 export interface GoogleMapBaseLayerProps {
   center: GeoPoint;
@@ -22,23 +67,36 @@ export interface GoogleMapBaseLayerProps {
   features?: ServiceAreaGeoJsonFeature[];
   onPointSelect?: (point: GeoPoint) => void;
   ariaLabel: string;
+  config?: MapProviderConfig | null;
 }
 
 let loaderKey: string | null = null;
 let configPromise: Promise<MapProviderConfig> | null = null;
 
+export function resetGoogleMapConfigCache() {
+  loaderKey = null;
+  configPromise = null;
+}
+
 async function loadMapConfig() {
-  configPromise ??= fetch("/api/map-provider-config", {
-    cache: "no-store",
-    credentials: "same-origin",
-  }).then(async (response) => {
-    if (!response.ok) {
-      throw new Error(
-        `Map provider config failed with HTTP ${response.status}.`,
-      );
-    }
-    return (await response.json()) as MapProviderConfig;
-  });
+  if (!configPromise) {
+    configPromise = fetch("/api/map-provider-config", {
+      cache: "no-store",
+      credentials: "same-origin",
+    })
+      .then(async (response) => {
+        if (!response.ok) {
+          throw new Error(
+            `Map provider config failed with HTTP ${response.status}.`,
+          );
+        }
+        return (await response.json()) as MapProviderConfig;
+      })
+      .catch((error: unknown) => {
+        configPromise = null;
+        throw error;
+      });
+  }
   return configPromise;
 }
 
@@ -109,6 +167,7 @@ export function GoogleMapBaseLayer({
   features = [],
   onPointSelect,
   ariaLabel,
+  config,
 }: GoogleMapBaseLayerProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<google.maps.Map | null>(null);
@@ -116,6 +175,7 @@ export function GoogleMapBaseLayer({
   const selectedCircleRef = useRef<google.maps.Circle | null>(null);
   const clickListenerRef = useRef<google.maps.MapsEventListener | null>(null);
   const [status, setStatus] = useState<GoogleMapStatus>("loading");
+  const [provider, setProvider] = useState<"google" | "fallback">("fallback");
   const [reasonCode, setReasonCode] = useState<string | null>(null);
   const emitPointSelect = useEffectEvent((point: GeoPoint) => {
     onPointSelect?.(point);
@@ -123,23 +183,29 @@ export function GoogleMapBaseLayer({
 
   useEffect(() => {
     let active = true;
-    void loadMapConfig()
-      .then(async (config) => {
-        if (!active || !config.enabled) {
-          if (active) {
-            setReasonCode(config.reasonCode);
-            setStatus("fallback");
-          }
+    const fetchConfig =
+      config !== undefined ? Promise.resolve(config) : loadMapConfig();
+    void fetchConfig
+      .then(async (loadedConfig) => {
+        const resolution = resolveGoogleMapBaseLayerStatus(loadedConfig);
+        if (!active) {
           return;
         }
-        const library = await loadMapsLibrary(config);
+        setProvider(resolution.provider);
+        setReasonCode(resolution.reasonCode);
+        if (resolution.requiresMockFallback || !loadedConfig) {
+          setStatus(resolution.status);
+          return;
+        }
+
+        const library = await loadMapsLibrary(loadedConfig);
         if (!active || !library || !containerRef.current) {
           return;
         }
         mapRef.current = new library.Map(containerRef.current, {
           center,
           zoom,
-          ...(config.mapId ? { mapId: config.mapId } : {}),
+          ...(loadedConfig.mapId ? { mapId: loadedConfig.mapId } : {}),
           disableDefaultUI: true,
           clickableIcons: false,
           keyboardShortcuts: interactive,
@@ -150,7 +216,10 @@ export function GoogleMapBaseLayer({
       })
       .catch((error: unknown) => {
         if (active) {
-          setReasonCode(error instanceof Error ? error.name : "load_failed");
+          setProvider("fallback");
+          setReasonCode(
+            error instanceof Error ? error.name || error.message : "load_failed",
+          );
           setStatus("error");
         }
       });
@@ -162,7 +231,7 @@ export function GoogleMapBaseLayer({
       selectedCircleRef.current?.setMap(null);
       mapRef.current = null;
     };
-  }, []);
+  }, [config]);
 
   useEffect(() => {
     if (status !== "ready" || !mapRef.current) {
@@ -241,20 +310,19 @@ export function GoogleMapBaseLayer({
     return () => selectedCircleRef.current?.setMap(null);
   }, [selectedPoint?.lat, selectedPoint?.lng, status]);
 
-  return (
-    <div
-      ref={containerRef}
-      aria-label={ariaLabel}
-      data-google-map-base-layer
-      data-google-map-reason={reasonCode ?? ""}
-      data-google-map-status={status}
-      role="img"
-      style={{
-        position: "absolute",
-        inset: 0,
-        zIndex: 1,
-        pointerEvents: status === "ready" && interactive ? "auto" : "none",
-      }}
-    />
-  );
+  return createElement("div", {
+    ref: containerRef,
+    "aria-label": ariaLabel,
+    "data-google-map-base-layer": true,
+    "data-google-map-provider": provider,
+    "data-google-map-reason": reasonCode ?? "",
+    "data-google-map-status": status,
+    role: "img",
+    style: {
+      position: "absolute",
+      inset: 0,
+      zIndex: 1,
+      pointerEvents: status === "ready" && interactive ? "auto" : "none",
+    },
+  });
 }

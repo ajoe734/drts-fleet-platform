@@ -191,6 +191,11 @@ export type {
 } from "./address-map-picker-core";
 export { AppShellCard } from "./app-shell-card";
 export { AppSidebar } from "./app-sidebar";
+export {
+  getIamCapabilityHint,
+  listIamCapabilityHints,
+} from "./iam-capability-hints";
+export type { IamCapabilityHint } from "./iam-capability-hints";
 export type { AppSidebarProps, SidebarNavItem } from "./app-sidebar";
 export { ManagementSidebar } from "./management-sidebar";
 export type {
@@ -289,3 +294,28 @@ export type {
   PartnerBookingScreenId,
   PartnerBookingStateScreenId,
 } from "./partner-booking-funnel";
+export {
+  EnvironmentBadge,
+  normalizeServerRuntimeEnv,
+  resolveRuntimeEnvironment,
+  resolveRuntimeHealth,
+  resolveRuntimeEnvironmentTier,
+  getEnvironmentDisplay,
+  getHealthDisplay,
+  RUNTIME_ENVIRONMENT_TIERS,
+  RUNTIME_ENVIRONMENT_TIER_DISPLAY_STRINGS,
+  RUNTIME_ENVIRONMENT_TIER_TONE,
+} from "./environment-badge";
+export type {
+  AuthoritativeRuntimeEnv,
+  EnvironmentBadgeDensity,
+  EnvironmentBadgeMode,
+  EnvironmentBadgeProps,
+  EnvironmentDisplayMetadata,
+  EnvironmentResolutionInput,
+  HealthResolutionInput,
+  RuntimeEnvironment,
+  RuntimeEnvironmentSource,
+  RuntimeEnvironmentTier,
+  RuntimeHealthStatus,
+} from "./environment-badge";

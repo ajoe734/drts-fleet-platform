@@ -6,6 +6,7 @@ import { useEffect, useState, type CSSProperties } from "react";
 import { usePlatformAdminClient } from "@/lib/admin-client";
 import { useTranslation } from "@/lib/i18n";
 import { usePlatformAdminAuthority } from "@/lib/platform-admin-authority";
+import { createIdempotencyKey } from "@drts/api-client";
 import type {
   ActionReceipt,
   FareQuoteAnomaly,
@@ -71,6 +72,9 @@ export function FareAnomalyQueueScreen() {
   const [recoveringId, setRecoveringId] = useState<string | null>(null);
   const [receipt, setReceipt] = useState<ActionReceipt | null>(null);
   const [reloadToken, setReloadToken] = useState(0);
+  const [retryIntentKeys, setRetryIntentKeys] = useState<
+    Record<string, string>
+  >({});
 
   useEffect(() => {
     if (!canRead) {
@@ -110,6 +114,16 @@ export function FareAnomalyQueueScreen() {
     if (!descriptor?.enabled) return;
 
     const quoteSnapshotId = item.snapshot.quoteSnapshotId;
+    const retryKey =
+      retryIntentKeys[quoteSnapshotId] ??
+      createIdempotencyKey("fare-anomaly-retry");
+    if (!retryIntentKeys[quoteSnapshotId]) {
+      setRetryIntentKeys((prev) => ({
+        ...prev,
+        [quoteSnapshotId]: retryKey,
+      }));
+    }
+
     setRecoveringId(quoteSnapshotId);
     setError(null);
     try {
@@ -117,9 +131,19 @@ export function FareAnomalyQueueScreen() {
         `/api/product-rule/fare-anomalies/${encodeURIComponent(
           quoteSnapshotId,
         )}/actions/retry-quote`,
+        {
+          headers: {
+            "Idempotency-Key": retryKey,
+          },
+        },
       );
       setReceipt(nextReceipt);
       setConfirmingId(null);
+      setRetryIntentKeys((prev) => {
+        const next = { ...prev };
+        delete next[quoteSnapshotId];
+        return next;
+      });
       setReloadToken((token) => token + 1);
     } catch (recoveryError) {
       setError(errorMessage(recoveryError));
@@ -347,6 +371,9 @@ export function FareAnomalyDetailScreen({
   const [recovering, setRecovering] = useState(false);
   const [receipt, setReceipt] = useState<ActionReceipt | null>(null);
   const [reloadToken, setReloadToken] = useState(0);
+  const [actionIntentKeys, setActionIntentKeys] = useState<
+    Record<string, string>
+  >({});
 
   useEffect(() => {
     if (!canRead) {
@@ -381,6 +408,16 @@ export function FareAnomalyDetailScreen({
 
   async function recover() {
     if (!item || !resolveRetryAction(item, canWrite)?.enabled) return;
+    const retryKey =
+      actionIntentKeys[quoteSnapshotId] ??
+      createIdempotencyKey("fare-anomaly-retry");
+    if (!actionIntentKeys[quoteSnapshotId]) {
+      setActionIntentKeys((prev) => ({
+        ...prev,
+        [quoteSnapshotId]: retryKey,
+      }));
+    }
+
     setRecovering(true);
     setError(null);
     try {
@@ -388,9 +425,19 @@ export function FareAnomalyDetailScreen({
         `/api/product-rule/fare-anomalies/${encodeURIComponent(
           quoteSnapshotId,
         )}/actions/retry-quote`,
+        {
+          headers: {
+            "Idempotency-Key": retryKey,
+          },
+        },
       );
       setReceipt(nextReceipt);
       setConfirming(false);
+      setActionIntentKeys((prev) => {
+        const next = { ...prev };
+        delete next[quoteSnapshotId];
+        return next;
+      });
       setReloadToken((token) => token + 1);
     } catch (recoveryError) {
       setError(errorMessage(recoveryError));
