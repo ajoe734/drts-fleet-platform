@@ -1,3 +1,6 @@
+import { PartnerEntryNotificationBindingRepository } from "./partner-entry-notification-binding.repository";
+import { PartnerEntryNotificationBindingService } from "./partner-entry-notification-binding.service";
+import { PartnerEntryNotificationBindingController } from "./partner-entry-notification-binding.controller";
 import { Module, forwardRef } from "@nestjs/common";
 
 import { JwtAuthService } from "../../common/auth/jwt-auth.service";
@@ -53,8 +56,10 @@ export function createTenantInvitationNotificationDeliveryService(): Notificatio
     IdentityModule,
     forwardRef(() => OwnedMobilityModule),
   ],
-  controllers: [TenantPartnerController],
+  controllers: [TenantPartnerController, PartnerEntryNotificationBindingController],
   providers: [
+    PartnerEntryNotificationBindingService,
+    PartnerEntryNotificationBindingRepository,
     TenantPartnerService,
     JwtAuthService,
     TenantPartnerRepository,
@@ -86,6 +91,8 @@ export function createTenantInvitationNotificationDeliveryService(): Notificatio
     },
   ],
   exports: [
+    PartnerEntryNotificationBindingService,
+    PartnerEntryNotificationBindingRepository,
     TenantPartnerService,
     TenantPartnerRepository,
     PartnerUserIdentityLinkRepository,

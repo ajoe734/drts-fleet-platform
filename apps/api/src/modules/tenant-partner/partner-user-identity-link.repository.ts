@@ -218,6 +218,32 @@ export class PartnerUserIdentityLinkRepository {
     return result.rows[0] ? this.parseRecord(result.rows[0].record) : null;
   }
 
+  
+  async findByDrtsPassengerId(
+    entrySlug: string,
+    drtsPassengerId: string,
+  ): Promise<PartnerUserIdentityLinkRecord | null> {
+    if (!this.isEnabled()) {
+      for (const link of this.fallbackLinks.values()) {
+        if (link.entrySlug === entrySlug && link.drtsPassengerId === drtsPassengerId) {
+          return this.clone(link);
+        }
+      }
+      return null;
+    }
+    const result = await this.databaseService!.query<JsonRecordRow>(
+      `
+        SELECT record
+        FROM admin.phase1_partner_user_identity_links
+        WHERE entry_slug = $1
+          AND drts_passenger_id = $2
+        LIMIT 1
+      `,
+      [entrySlug, drtsPassengerId],
+    );
+    return result.rows[0] ? this.parseRecord(result.rows[0].record) : null;
+  }
+
   private parseRecord(record: unknown): PartnerUserIdentityLinkRecord {
     if (!record || typeof record !== "object") {
       throw new Error("Partner user identity link record must be an object.");

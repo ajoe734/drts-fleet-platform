@@ -204,13 +204,77 @@ type ElectronicReceiptRow = QueryResultRow & {
 };
 
 @Injectable()
+
+export interface OrderPartnerNotificationRoute {
+  orderId: string;
+  tenantId: string;
+  partnerId: string;
+  entrySlug: string;
+  partnerUserRef: string;
+  drtsPassengerId: string;
+  passengerSubjectRef: string;
+  identityLinkedAt: string;
+  consentBundleVersion: string;
+  notificationPolicyVersion: string;
+  rideRef: string;
+  createdAt: string;
+}
+
 export class MultiTaxiRepository {
+
+  async persistOrderPartnerNotificationRoute(route: OrderPartnerNotificationRoute): Promise<void> {
+    if (!this.isEnabled()) return;
+    await this.databaseService!.query(
+      `
+        INSERT INTO mobility.phase1_order_partner_notification_routes (
+          order_id, tenant_id, partner_id, entry_slug, partner_user_ref,
+          drts_passenger_id, passenger_subject_ref, identity_linked_at,
+          consent_bundle_version, notification_policy_version, ride_ref,
+          created_at, record
+        ) VALUES (
+          $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13::jsonb
+        )
+      `,
+      [
+        route.orderId,
+        route.tenantId,
+        route.partnerId,
+        route.entrySlug,
+        route.partnerUserRef,
+        route.drtsPassengerId,
+        route.passengerSubjectRef,
+        route.identityLinkedAt,
+        route.consentBundleVersion,
+        route.notificationPolicyVersion,
+        route.rideRef,
+        route.createdAt,
+        JSON.stringify(route),
+      ],
+    );
+  }
+
   private readonly logger = new Logger(MultiTaxiRepository.name);
 
   constructor(@Optional() private readonly databaseService?: DatabaseService) {}
 
   isEnabled() {
     return this.databaseService?.isEnabled() ?? false;
+  }
+
+  
+  async allocatePartnerNotificationSequence(orderId: string): Promise<number> {
+    if (!this.isEnabled()) return 1;
+    const result = await this.databaseService!.query(
+      `
+        INSERT INTO mobility.phase1_partner_notification_sequences (order_id, next_sequence)
+        VALUES ($1, 2)
+        ON CONFLICT (order_id) DO UPDATE SET next_sequence = phase1_partner_notification_sequences.next_sequence + 1
+        RETURNING next_sequence
+      `,
+      [orderId],
+    );
+    // returning the previous value which is next_sequence - 1
+    return parseInt(result.rows[0].next_sequence, 10) - 1;
   }
 
   async loadState() {

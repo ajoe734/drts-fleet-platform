@@ -1,3 +1,4 @@
+import { TenantPartnerModule } from "../tenant-partner/tenant-partner.module";
 import { Module, OnModuleInit } from "@nestjs/common";
 
 import { DatabaseModule } from "../../common/db";
@@ -27,6 +28,7 @@ import { WebPushTransport } from "./web-push.transport";
 
 @Module({
   imports: [
+    forwardRef(() => TenantPartnerModule),
     DatabaseModule,
     AuditNotificationModule,
     OwnedMobilityModule,
