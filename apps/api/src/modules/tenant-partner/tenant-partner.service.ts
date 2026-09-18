@@ -7684,6 +7684,14 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
     };
   }
 
+  getWebhookEndpoint(tenantId: string, webhookId: string) {
+    const endpoint = this.webhookEndpoints.find(
+      (candidate) =>
+        candidate.tenantId === tenantId && candidate.webhookId === webhookId,
+    );
+    return endpoint ? this.cloneStoredWebhookEndpoint(endpoint) : null;
+  }
+
   deleteWebhookEndpoint(
     tenantId: string,
     webhookId: string,

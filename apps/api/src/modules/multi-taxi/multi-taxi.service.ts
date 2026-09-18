@@ -1,3 +1,5 @@
+import { TenantPartnerService } from "../tenant-partner/tenant-partner.service";
+import { PartnerUserIdentityLinkRepository } from "../tenant-partner/partner-user-identity-link.repository";
 import { PLATFORM_CURRENCY } from "@drts/contracts";
 import { createHash, randomBytes, randomUUID } from "node:crypto";
 
@@ -168,6 +170,10 @@ export class MultiTaxiService implements OnModuleInit {
     private readonly passengerPushPort?: PassengerPushPort,
     @Optional()
     private readonly pushSubscriptionRepository?: PassengerPushRepository,
+    @Optional()
+    private readonly tenantPartnerService?: TenantPartnerService,
+    @Optional()
+    private readonly partnerUserIdentityLinkRepository?: PartnerUserIdentityLinkRepository,
   ) {}
 
   async onModuleInit() {
@@ -425,12 +431,59 @@ export class MultiTaxiService implements OnModuleInit {
   ) {
     this.assertServiceProductPolicy();
     const authorization = this.resolveActiveAuthorization();
+
+    let link: any = null;
+    let entry: any = null;
+    if (
+      identity?.realm === "partner" &&
+      identity.partnerEntrySlug &&
+      identity.drtsPassengerId
+    ) {
+      link =
+        await this.partnerUserIdentityLinkRepository?.findByDrtsPassengerId(
+          identity.partnerEntrySlug,
+          identity.drtsPassengerId,
+        );
+      entry = this.tenantPartnerService?.getPartnerEntry(
+        identity.partnerEntrySlug,
+      );
+    }
+
+    const partnerNotificationContextFactory =
+      link && link.status === "active" && entry
+        ? (orderId: string) => ({
+            route: {
+              orderId,
+              tenantId: entry.tenantId,
+              partnerId: entry.partnerId,
+              entrySlug: entry.entrySlug,
+              partnerUserRef: link.partnerUserRef,
+              drtsPassengerId: link.drtsPassengerId,
+              passengerSubjectRef:
+                identity!.subject || identity!.drtsPassengerId || "unknown",
+              identityLinkedAt: link.linkedAt,
+              consentBundleVersion:
+                link.consentScope || "passenger_identity_link",
+              notificationPolicyVersion: "partner_notification_v1",
+              rideRef: orderId,
+              createdAt: new Date().toISOString(),
+            },
+            sequence: {
+              orderId,
+              nextSequence: 1,
+            },
+          })
+        : undefined;
+
     const order = await this.ownedMobilityService.createMultiTaxiRide(
       command,
       authorization,
       identity,
       requestId,
+      undefined,
+      partnerNotificationContextFactory,
     );
+
     return this.createRideAccessResult(order, requestId);
   }
 
