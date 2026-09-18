@@ -1,6 +1,6 @@
 import { describe, expect, it, beforeAll, afterAll } from "vitest";
 import { createRequire } from "node:module";
-// @ts-expect-error test override
+
 const require = createRequire(
   new URL("../../../../apps/api/package.json", import.meta.url),
 );
