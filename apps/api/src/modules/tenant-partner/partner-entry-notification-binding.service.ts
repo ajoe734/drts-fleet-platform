@@ -6,7 +6,7 @@ import {
   PartnerPassengerEventType,
 } from "@drts/contracts";
 import { PartnerEntryNotificationBindingRepository } from "./partner-entry-notification-binding.repository";
-import { TenantPartnerRepository } from "./tenant-partner.repository";
+import { TenantPartnerService } from "./tenant-partner.service";
 
 export interface UpdateBindingDto {
   webhookId: string;
@@ -18,7 +18,7 @@ export interface UpdateBindingDto {
 export class PartnerEntryNotificationBindingService {
   constructor(
     private readonly bindingRepository: PartnerEntryNotificationBindingRepository,
-    private readonly tenantPartnerRepository: TenantPartnerRepository,
+    private readonly tenantPartnerService: TenantPartnerService,
   ) {}
 
   async getBinding(entrySlug: string): Promise<PartnerEntryNotificationBinding | null> {
@@ -29,7 +29,7 @@ export class PartnerEntryNotificationBindingService {
     entrySlug: string,
     dto: UpdateBindingDto,
   ): Promise<PartnerEntryNotificationBinding> {
-    const entry = await this.tenantPartnerRepository.loadPartnerChannelEntry(entrySlug);
+    const entry = await this.tenantPartnerService.getPartnerEntry(entrySlug);
     if (!entry) {
       throw new NotFoundException(`Entry not found: ${entrySlug}`);
     }

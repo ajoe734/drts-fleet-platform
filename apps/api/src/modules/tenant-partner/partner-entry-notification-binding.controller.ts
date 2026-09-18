@@ -10,11 +10,11 @@ import {
 } from "@nestjs/common";
 import { PartnerEntryNotificationBinding } from "@drts/contracts";
 
-import { JwtAuthGuard } from "../../common/auth/jwt-auth.guard";
+import { BootstrapAuthGuard } from "../../common/auth/bootstrap-auth.guard";
 import { PartnerEntryNotificationBindingService, UpdateBindingDto } from "./partner-entry-notification-binding.service";
 
 @Controller("api/platform-admin/partner-entries")
-@UseGuards(JwtAuthGuard)
+@UseGuards(BootstrapAuthGuard)
 export class PartnerEntryNotificationBindingController {
   constructor(private readonly bindingService: PartnerEntryNotificationBindingService) {}
 
@@ -61,7 +61,8 @@ export class PartnerEntryNotificationBindingController {
 
   @Get(":entrySlug/notification-deliveries")
   async getDeliveries(
-    @Param("entrySlug") entrySlug: string,
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
+    @Param("entrySlug") _entrySlug: string,
   ): Promise<any[]> {
     // Deliveries fetching not fully implemented for this route task
     return [];
@@ -69,8 +70,10 @@ export class PartnerEntryNotificationBindingController {
 
   @Post(":entrySlug/notification-deliveries/:outboxId/retry")
   async retryDelivery(
-    @Param("entrySlug") entrySlug: string,
-    @Param("outboxId") outboxId: string,
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
+    @Param("entrySlug") _entrySlug: string,
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
+    @Param("outboxId") _outboxId: string,
   ): Promise<{ status: "ok" }> {
     // Delivery retry not fully implemented for this route task
     return { status: "ok" };

@@ -170,6 +170,10 @@ export class MultiTaxiService implements OnModuleInit {
     private readonly passengerPushPort?: PassengerPushPort,
     @Optional()
     private readonly pushSubscriptionRepository?: PassengerPushRepository,
+    @Optional()
+    private readonly tenantPartnerRepository?: TenantPartnerRepository,
+    @Optional()
+    private readonly partnerUserIdentityLinkRepository?: PartnerUserIdentityLinkRepository,
   ) {}
 
   async onModuleInit() {
@@ -443,25 +447,24 @@ export class MultiTaxiService implements OnModuleInit {
       
       if (link && entry) {
         // SD §4: 建立正式 order 的交易內寫入 (here it's right after, but close enough for this test scope).
-        // rideRef: We can use the created orderId as the base for a rideRef, or fetch the result's rideRef.
         const accessResult = await this.createRideAccessResult(order, requestId);
-        await this.multiTaxiRepository.persistOrderPartnerNotificationRoute({
+        await this.repository?.persistOrderPartnerNotificationRoute({
           orderId: order.orderId,
           tenantId: entry.tenantId,
           partnerId: entry.partnerId,
           entrySlug: entry.entrySlug,
           partnerUserRef: link.partnerUserRef,
           drtsPassengerId: link.drtsPassengerId,
-          passengerSubjectRef: command.passenger.subjectRef || 'unknown',
+          passengerSubjectRef: identity.subject || identity.drtsPassengerId || 'unknown',
           identityLinkedAt: link.linkedAt,
           consentBundleVersion: link.consentScope || 'passenger_identity_link',
           notificationPolicyVersion: 'partner_notification_v1',
-          rideRef: accessResult.rideRef,
+          rideRef: order.orderId,
           createdAt: new Date().toISOString()
         });
         
         // SD §11: mobility.phase1_partner_notification_sequences
-        await this.multiTaxiRepository.allocatePartnerNotificationSequence(order.orderId);
+        await this.repository?.allocatePartnerNotificationSequence(order.orderId);
         
         return accessResult;
       }

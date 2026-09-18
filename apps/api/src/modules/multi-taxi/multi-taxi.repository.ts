@@ -203,8 +203,6 @@ type ElectronicReceiptRow = QueryResultRow & {
   record: unknown;
 };
 
-@Injectable()
-
 export interface OrderPartnerNotificationRoute {
   orderId: string;
   tenantId: string;
@@ -220,6 +218,7 @@ export interface OrderPartnerNotificationRoute {
   createdAt: string;
 }
 
+@Injectable()
 export class MultiTaxiRepository {
 
   async persistOrderPartnerNotificationRoute(route: OrderPartnerNotificationRoute): Promise<void> {

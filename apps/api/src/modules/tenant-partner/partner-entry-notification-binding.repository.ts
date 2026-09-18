@@ -32,7 +32,7 @@ export class PartnerEntryNotificationBindingRepository {
       return null;
     }
 
-    return result.rows[0].record;
+    return result.rows[0]?.record ?? null;
   }
 
   async persist(
