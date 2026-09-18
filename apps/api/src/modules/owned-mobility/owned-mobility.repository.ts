@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 
-import { Injectable, Logger, Optional } from "@nestjs/common";
+import { Injectable, Logger, Optional, Inject, forwardRef } from "@nestjs/common";
+import { MultiTaxiRepository } from "../multi-taxi/multi-taxi.repository";
 import type { PoolClient, QueryResult, QueryResultRow } from "pg";
 
 import type {
@@ -208,7 +209,10 @@ type DriverCompletionOutboxRow = QueryResultRow & {
 export class OwnedMobilityRepository {
   private readonly logger = new Logger(OwnedMobilityRepository.name);
 
-  constructor(@Optional() private readonly databaseService?: DatabaseService) {}
+  constructor(
+    @Optional() private readonly databaseService?: DatabaseService,
+    @Optional() @Inject(forwardRef(() => MultiTaxiRepository)) private readonly multiTaxiRepository?: MultiTaxiRepository,
+  ) {}
 
   isEnabled() {
     return this.databaseService?.isEnabled() ?? false;
@@ -1832,34 +1836,29 @@ export class OwnedMobilityRepository {
     }
 
     for (const outbox of changes.consumerNotificationOutbox ?? []) {
-      writes.push(() =>
-        executor.query(
-          /**
-           * design §5: "新增每 order 持久化 notification eventSequence，於生成
-           * outbox 同交易分配". `seq` is a CTE inside this single statement, so
-           * the allocation and the outbox row it belongs to always commit or
-           * roll back together without any separate round-trip or explicit
-           * transaction wrapper. `NOT EXISTS` guards the allocation itself: a
-           * retried write that ON CONFLICT DO NOTHING turns into a no-op must
-           * not still burn a sequence number, or a later retry of the *same*
-           * outbox row would observe a gap. Orders with no
-           * mobility.phase1_partner_notification_sequences row (anything that
-           * never got an OrderPartnerNotificationRoute -- most orders) leave
-           * `seq` empty and COALESCE falls back to the payload untouched; this
-           * is deliberately additive to the existing `payload` jsonb rather
-           * than a new column, so it needs no migration and no downstream
-           * outbox reader has to change to tolerate it.
-           */
-          `
-            WITH seq AS (
-              UPDATE mobility.phase1_partner_notification_sequences
-              SET next_sequence = next_sequence + 1
-              WHERE order_id = $2
-                AND NOT EXISTS (
-                  SELECT 1 FROM ops.consumer_notification_outbox WHERE outbox_id = $1
-                )
-              RETURNING next_sequence - 1 AS event_sequence
+      writes.push(async () => {
+        const checkResult = await executor.query(
+          `SELECT 1 FROM ops.consumer_notification_outbox WHERE outbox_id = $1`,
+          [outbox.outboxId]
+        );
+        if (checkResult.rows.length > 0) {
+          return;
+        }
+
+        const seq = this.multiTaxiRepository
+          ? await this.multiTaxiRepository.allocateNotificationEventSequence(
+              outbox.orderId,
+              executor,
             )
+          : null;
+
+        let finalPayload = outbox.payload;
+        if (seq != null) {
+          finalPayload = { ...(outbox.payload as any), eventSequence: seq };
+        }
+
+        await executor.query(
+          `
             INSERT INTO ops.consumer_notification_outbox (
               outbox_id,
               order_id,
@@ -1874,10 +1873,7 @@ export class OwnedMobilityRepository {
               delivered_at
             ) VALUES (
               $1, $2, $3, $4, $5,
-              COALESCE(
-                (SELECT jsonb_set($6::jsonb, '{eventSequence}', to_jsonb(event_sequence)) FROM seq),
-                $6::jsonb
-              ),
+              $6::jsonb,
               $7, $8, $9, $10, $11
             )
             ON CONFLICT (outbox_id) DO NOTHING
@@ -1888,15 +1884,15 @@ export class OwnedMobilityRepository {
             outbox.passengerSubjectRef,
             outbox.eventType,
             outbox.assignmentVersion,
-            JSON.stringify(outbox.payload),
+            JSON.stringify(finalPayload),
             outbox.status,
             outbox.attemptCount,
             outbox.nextAttemptAt,
             outbox.createdAt,
             outbox.deliveredAt,
           ],
-        ),
-      );
+        );
+      });
     }
 
     for (const write of writes) {

@@ -63,7 +63,7 @@ import { WebPushTransport } from "./web-push.transport";
     WebPushTransport,
     { provide: PASSENGER_PUSH_TRANSPORT, useClass: WebPushTransport },
   ],
-  exports: [MultiTaxiService],
+  exports: [MultiTaxiService, MultiTaxiRepository],
 })
 export class MultiTaxiModule implements OnModuleInit {
   constructor(

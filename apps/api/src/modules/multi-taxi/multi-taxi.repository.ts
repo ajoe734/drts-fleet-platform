@@ -517,11 +517,12 @@ export class MultiTaxiRepository {
    */
   async allocateNotificationEventSequence(
     orderId: string,
+    executor: { query: (text: string, values?: any[]) => Promise<any> } = this.databaseService!,
   ): Promise<number | null> {
     if (!this.isEnabled()) {
       return null;
     }
-    const result = await this.databaseService!.query<{
+    const result = await executor.query<{
       event_sequence: string | number;
     }>(
       `
