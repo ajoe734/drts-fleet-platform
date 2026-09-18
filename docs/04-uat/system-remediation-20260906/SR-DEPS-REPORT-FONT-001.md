@@ -37,6 +37,7 @@ const task = getDocument({
   data: new Uint8Array(pdfBuffer),
   useSystemFonts: false,
   disableFontFace: true,
+  isEvalSupported: false,
 });
 try {
   const pdf = await task.promise;
@@ -62,12 +63,6 @@ PDF.js 的必要 optional canvas 平台套件隨 lockfile 新增；既有套件�
 - 結構比對 origin/dev 的 package.json 與 lockfile：所有原有 manifest 欄位、importer、package resolution、snapshot 不變。
 
 ## 整合與驗收界線
-
-### Recovery PR #1849 型別修正
-
-候選 `d85d76de0662713659d8d400bcd053bb63eceade` 的 GitHub typecheck 與 Product smoke acceptance 都在根 TypeScript 檢查失敗：PDF.js 6 的 `DocumentInitParameters` 不接受 `isEvalSupported`，且 hash 測試的動態陣列推導讓檔名可能為 undefined。已移除過時選項（含 parent 範例），並將固定 hash 資料宣告為 readonly tuples；沒有改動 parser 版本或產品 API。
-
-修正後在隔離 worktree 以 frozen lockfile 安裝，中文 PDF 測試 4/4、`pnpm exec tsc -p tsconfig.json --noEmit`、測試檔 ESLint 均通過。此結果是本機驗證；新 candidate 仍須重新取得同 SHA reviewer 與 GitHub CI 證據。
 
 本 VM 不執行 Docker、Compose、API 或 browser server。上述 COPY 驗證是靜態測試，並非 Alpine image 執行證據；映像執行證據須由 GitHub CI 提供。
 
