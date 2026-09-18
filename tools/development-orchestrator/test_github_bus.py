@@ -21,6 +21,38 @@ class GitHubBusCommandTests(unittest.TestCase):
         }
         self.bus_state = {"tasks": {}}
 
+    def test_pr_head_drift_never_replaces_a_handoff_candidate(self) -> None:
+        task = {"id": "DRIFT-001", "status": "review", "candidate_sha": "reviewed-sha", "candidate_branch": "claude/drift"}
+        with (
+            mock.patch.object(github_bus, "candidate_pr_for_task", return_value=77),
+            mock.patch.object(github_bus, "candidate_pr_observation", return_value={"headRefOid": "later-wip-sha", "headRefName": "claude/drift"}),
+            mock.patch.object(github_bus, "run_ai_status") as reconcile,
+            mock.patch.object(github_bus, "write_activity_log") as activity_log,
+        ):
+            changed = github_bus.reconcile_candidate_lifecycle(self.config, self.bus_state, {"tasks": [task]}, "ajoe734/pantheon")
+
+        self.assertTrue(changed)
+        reconcile.assert_not_called()
+        self.assertEqual(
+            self.bus_state["tasks"]["DRIFT-001"]["candidate_head_mismatch"],
+            {"candidate_sha": "reviewed-sha", "head_sha": "later-wip-sha", "pr": 77},
+        )
+        self.assertEqual(activity_log.call_args.args[1]["type"], "github_candidate_head_mismatch")
+
+    def test_a_matching_head_clears_a_stale_drift_marker(self) -> None:
+        task = {"id": "DRIFT-002", "status": "review", "candidate_sha": "reviewed-sha", "candidate_branch": "claude/drift"}
+        self.bus_state["tasks"]["DRIFT-002"] = {"candidate_head_mismatch": {"candidate_sha": "reviewed-sha", "head_sha": "old", "pr": 77}}
+        observation = {"headRefOid": "reviewed-sha", "headRefName": "claude/drift", "state": "OPEN", "mergeStateStatus": "CLEAN", "mergeCommit": None, "statusCheckRollup": []}
+        with (
+            mock.patch.object(github_bus, "candidate_pr_for_task", return_value=77),
+            mock.patch.object(github_bus, "candidate_pr_observation", return_value=observation),
+            mock.patch.object(github_bus, "run_ai_status"),
+            mock.patch.object(github_bus, "write_activity_log"),
+        ):
+            github_bus.reconcile_candidate_lifecycle(self.config, self.bus_state, {"tasks": [task]}, "ajoe734/pantheon")
+
+        self.assertNotIn("candidate_head_mismatch", self.bus_state["tasks"]["DRIFT-002"])
+
     def test_apply_bus_command_review_approve_uses_reviewer_actor(self) -> None:
         status = {
             "tasks": [
@@ -646,6 +678,7 @@ class GitHubBusCommandTests(unittest.TestCase):
         }
         with (
             mock.patch.object(github_bus, "run_gh") as run_gh,
+            mock.patch.object(github_bus, "candidate_pr_observation", return_value={"headRefOid": "abc123"}),
             mock.patch.object(github_bus, "write_activity_log"),
         ):
             first = github_bus.request_candidate_auto_merge(
@@ -957,6 +990,7 @@ class PreMergeIntegrationGateTests(unittest.TestCase):
         bus_state = {"tasks": {}}
         with mock.patch.object(github_bus, "integrates_cleanly_with_dev", return_value=integrates), \
              mock.patch.object(github_bus, "candidate_pr_for_task", return_value=7), \
+             mock.patch.object(github_bus, "candidate_pr_observation", return_value={"headRefOid": "abc123"}), \
              mock.patch.object(github_bus, "write_activity_log") as log, \
              mock.patch.object(github_bus, "run_gh") as run_gh:
             github_bus.request_candidate_auto_merge(config, bus_state, status, "o/r")
@@ -980,6 +1014,7 @@ class PreMergeIntegrationGateTests(unittest.TestCase):
         bus_state = {"tasks": {}}
         with mock.patch.object(github_bus, "integrates_cleanly_with_dev", return_value=(False, "nope")), \
              mock.patch.object(github_bus, "candidate_pr_for_task", return_value=7), \
+             mock.patch.object(github_bus, "candidate_pr_observation", return_value={"headRefOid": "abc123"}), \
              mock.patch.object(github_bus, "write_activity_log") as log, \
              mock.patch.object(github_bus, "run_gh"):
             for _ in range(4):
@@ -988,6 +1023,24 @@ class PreMergeIntegrationGateTests(unittest.TestCase):
         failures = [c for c in log.call_args_list
                     if c.args[1].get("type") == "candidate_premerge_check_failed"]
         self.assertEqual(len(failures), 1, "a stuck candidate logged on every tick")
+
+    def test_auto_merge_refuses_a_pr_head_that_drifted_after_review(self) -> None:
+        config = {"github_bus": {"repo": "o/r", "auto_merge": {"enabled": True}}}
+        with (
+            mock.patch.object(github_bus, "candidate_pr_for_task", return_value=7),
+            mock.patch.object(github_bus, "candidate_pr_observation", return_value={"headRefOid": "later-wip"}),
+            mock.patch.object(github_bus, "integrates_cleanly_with_dev") as integrates,
+            mock.patch.object(github_bus, "write_activity_log") as log,
+            mock.patch.object(github_bus, "run_gh") as run_gh,
+        ):
+            changed = github_bus.request_candidate_auto_merge(
+                config, {"tasks": {}}, {"tasks": [self._task()]}, "o/r"
+            )
+
+        self.assertFalse(changed)
+        integrates.assert_not_called()
+        run_gh.assert_not_called()
+        self.assertEqual(log.call_args.args[1]["type"], "candidate_auto_merge_deferred")
 
     def test_the_gate_abstains_when_it_cannot_run(self) -> None:
         """A gate must never be the reason something else fails."""
