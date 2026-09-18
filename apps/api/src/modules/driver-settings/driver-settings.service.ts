@@ -1,4 +1,3 @@
-import { randomUUID } from "node:crypto";
 import { Injectable, OnModuleInit, Optional } from "@nestjs/common";
 
 import type {
@@ -17,11 +16,7 @@ export class DriverSettingsService implements OnModuleInit {
   constructor(
     private readonly auditNotificationService: AuditNotificationService,
     @Optional() private readonly repository?: DriverSettingsRepository,
-  ) {
-    if (this.auditNotificationService) {
-      this.attachNotificationInterception();
-    }
-  }
+  ) {}
 
   async onModuleInit() {
     if (!this.repository) return;
@@ -107,88 +102,7 @@ export class DriverSettingsService implements OnModuleInit {
     return this.settings.map((s) => this.clone(s));
   }
 
-  isNotificationEnabled(driverId: string): boolean {
-    const settings = this.getSettings(driverId);
-    return settings.notificationsEnabled !== false;
-  }
-
-  shouldDeliverNotification(
-    driverId: string,
-    channel?: string | null,
-  ): boolean {
-    if (!this.isNotificationEnabled(driverId)) {
-      if (
-        !channel ||
-        channel === "driver_task" ||
-        channel.startsWith("driver_")
-      ) {
-        return false;
-      }
-    }
-    return true;
-  }
-
   // --- Private helpers ---
-
-  private extractDriverId(input: {
-    recipientUserId?: string | null;
-    channel?: string | null;
-    title?: string | null;
-    message?: string | null;
-  }): string | null {
-    if (input.recipientUserId && input.recipientUserId.trim()) {
-      return input.recipientUserId.trim();
-    }
-    const text = `${input.title ?? ""} ${input.message ?? ""}`;
-    const forDriverMatch = text.match(/(?:for\s+driver\s+)([\w-]+)/i);
-    if (forDriverMatch && forDriverMatch[1]) {
-      return forDriverMatch[1];
-    }
-    const driverDrvMatch = text.match(/(?:driver\s+)(drv-[\w-]+)/i);
-    if (driverDrvMatch && driverDrvMatch[1]) {
-      return driverDrvMatch[1];
-    }
-    const drvPatternMatch = text.match(/\b(drv-(?!20\d{2})[\w-]+)\b/i);
-    if (drvPatternMatch && drvPatternMatch[1]) {
-      return drvPatternMatch[1];
-    }
-    return null;
-  }
-
-  private attachNotificationInterception() {
-    if (!this.auditNotificationService) return;
-    const target = this.auditNotificationService as any;
-    if (target.__driverSettingsFilterAttached) {
-      return;
-    }
-    target.__driverSettingsFilterAttached = true;
-
-    const originalRecordNotification = target.recordNotification.bind(
-      this.auditNotificationService,
-    );
-
-    target.recordNotification = (input: any) => {
-      const driverId = this.extractDriverId(input);
-      if (
-        driverId &&
-        (!input.channel ||
-          input.channel === "driver_task" ||
-          input.channel.startsWith("driver_"))
-      ) {
-        if (!this.shouldDeliverNotification(driverId, input.channel)) {
-          return {
-            ...input,
-            recipientUserId: input.recipientUserId ?? driverId,
-            notificationId: `notif-suppressed-${randomUUID()}`,
-            createdAt: new Date().toISOString(),
-            readAt: null,
-            status: "unread",
-          };
-        }
-      }
-      return originalRecordNotification(input);
-    };
-  }
 
   private clone(settings: DriverSettings) {
     return { ...settings };

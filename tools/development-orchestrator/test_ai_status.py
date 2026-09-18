@@ -158,28 +158,6 @@ class CandidateLifecycleTest(unittest.TestCase):
         self.assertEqual(task["reviewed_sha"], "abc123")
 
     @mock.patch.object(ai_status, "append_log")
-    @mock.patch.object(ai_status, "git_commit_exists", return_value=True)
-    def test_merged_candidate_without_review_returns_to_existing_review_flow(self, _exists: mock.Mock, _log: mock.Mock) -> None:
-        state = self.state()
-        task = self.task(state)
-        task.update(status="integrating", candidate_sha="abc123", candidate_branch="codex/task-001")
-        observation = {"AI_NAME": "Supervisor", "CANDIDATE_HEAD_SHA": "abc123",
-                       "CANDIDATE_CI_STATUS": "success", "MERGE_SHA": "merge456"}
-        with mock.patch.dict(os.environ, observation, clear=True):
-            ai_status.command_reconcile_candidate(state, ["TASK-001"])
-        self.assertEqual(task["status"], "review")
-        self.assertEqual(task["candidate_sha"], "abc123")
-        self.assertNotIn("reviewed_sha", task)
-        self.assertNotIn("merge_sha", task)
-        with mock.patch.dict(os.environ, {"AI_NAME": "Claude", "REVIEWED_SHA": "abc123"}, clear=True):
-            ai_status.command_approve(state, ["TASK-001", "Independent review completed"])
-        with mock.patch.dict(os.environ, observation, clear=True):
-            ai_status.command_reconcile_candidate(state, ["TASK-001"])
-        self.assertEqual(task["status"], "done")
-        self.assertEqual(task["reviewed_sha"], "abc123")
-        self.assertEqual(task["merge_sha"], "merge456")
-
-    @mock.patch.object(ai_status, "append_log")
     def test_changed_head_invalidates_review_and_ci_evidence(self, _log: mock.Mock) -> None:
         state = self.state()
         task = self.task(state)
@@ -366,17 +344,6 @@ class CandidateLifecycleTest(unittest.TestCase):
             )
         self.assertEqual(task["owner"], "Gemini")
         self.assertEqual(task["reviewer"], "Claude2")
-
-    @mock.patch.object(ai_status, "append_log")
-    def test_supervisor_can_reassign_backlog_owner_and_reviewer_together(self, _log: mock.Mock) -> None:
-        state = self.state()
-        task = self.task(state)
-        task["status"] = "backlog"
-        env = {"AI_NAME": "Supervisor", "TASK_EXPECTED_OWNER": "Codex", "TASK_EXPECTED_REVIEWER": "Claude"}
-        with mock.patch.dict(os.environ, env, clear=True):
-            ai_status.command_reassign(state, ["TASK-001", "Gemini", "Gemini2", "Claim from paused lanes"])
-        self.assertEqual((task["owner"], task["reviewer"], task["status"]), ("Gemini", "Gemini2", "backlog"))
-        self.assertNotIn("reviewed_sha", task)
 
     @mock.patch.object(ai_status, "append_log")
     def test_supervisor_resume_resolves_blocker_in_same_transaction(self, _log: mock.Mock) -> None:

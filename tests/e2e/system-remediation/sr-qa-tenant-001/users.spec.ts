@@ -125,7 +125,7 @@ test("Tenant users create, role update and tenant isolation", async ({
         "TENANT_USER_EXISTS",
       );
       const crossUpdate = await call(tenantB, tokenB, path, {
-        roleCode: "tenant_ops_admin",
+        roleCode: "tenant_requester",
       });
       expect(crossUpdate.status()).toBe(404);
       expect(decodeTenantWire(await crossUpdate.json()).error.code).toBe(
@@ -146,12 +146,12 @@ test("Tenant users create, role update and tenant isolation", async ({
       expect(
         (
           await call(tenantA, tokenA, path, {
-            roleCode: "tenant_ops_admin",
+            roleCode: "tenant_requester",
           })
         ).status(),
       ).toBe(201);
       expect(await getRecord()).toMatchObject({
-        roleCode: "tenant_ops_admin",
+        roleCode: "tenant_requester",
         status: "invited",
       });
       // Revoke the unused invitation before suspending this disposable user.

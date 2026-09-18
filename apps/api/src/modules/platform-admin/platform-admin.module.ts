@@ -1,7 +1,6 @@
 import { Module } from "@nestjs/common";
 
 import { DatabaseModule } from "../../common/db";
-import { IdempotencyModule } from "../../common/idempotency";
 import { AccidentInvestigationModule } from "../accident-investigation/accident-investigation.module";
 import { AuditNotificationModule } from "../audit-notification/audit-notification.module";
 import { IdentityModule } from "../identity/identity.module";
@@ -20,7 +19,6 @@ import { PlatformAdminService } from "./platform-admin.service";
 @Module({
   imports: [
     DatabaseModule,
-    IdempotencyModule,
     AuditNotificationModule,
     IdentityModule,
     TenantPartnerModule,

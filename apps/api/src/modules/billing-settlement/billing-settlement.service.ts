@@ -28,7 +28,6 @@ import type {
   GenerateTenantInvoiceCommand,
   InvoiceLineRecord,
   MarkReimbursementPaidCommand,
-  MarkReimbursementPaidWithProofCommand,
   MoneyAmount,
   PassengerPaymentStatus,
   PublishDriverFeePlanCommand,
@@ -36,10 +35,6 @@ import type {
   ReconciliationIssueRecord,
   ReimbursementBatchRecord,
   ReimbursementItemRecord,
-  RemittanceProofPaymentReceipt,
-  RemittanceProofReadbackGrant,
-  RemittanceProofRecord,
-  RequestRemittanceProofReadbackCommand,
   ResourceActionDescriptor,
   SandboxBillingTreatmentRecord,
   ResolveReconciliationIssueCommand,
@@ -55,7 +50,6 @@ import type {
   UiRefreshMetadata,
   UpdateTenantBillingProfileCommand,
   ReferralRevenueShareRule,
-  UploadRemittanceProofCommand,
 } from "@drts/contracts";
 
 import { ApiRequestError } from "../../common/api-envelope";
@@ -83,7 +77,6 @@ import {
   type PaymentRecoveryPort,
   UnavailablePaymentRecoveryPort,
 } from "./payment-recovery.port";
-import { RemittanceProofService } from "./remittance-proof.service";
 import {
   DEFAULT_CONTROLLED_DOWNLOAD_HOST,
   DEFAULT_CONTROLLED_DOWNLOAD_KEY_ID,
@@ -534,15 +527,12 @@ function createInitialReferralRevenueShareRules(): ReferralRevenueShareRule[] {
 
 const TENANT_INVOICE_PDF_LINES_PER_PAGE = 48;
 
-function toPdfAsciiText(value?: string | null): string {
-  return String(value ?? "").replace(/[^\x20-\x7e]/g, "?");
+function toPdfAsciiText(value: string): string {
+  return value.replace(/[^\x20-\x7e]/g, "?");
 }
 
 function escapePdfLiteralText(value: string): string {
-  return value
-    .replace(/\\/g, "\\\\")
-    .replace(/\(/g, "\\(")
-    .replace(/\)/g, "\\)");
+  return value.replace(/\\/g, "\\\\").replace(/\(/g, "\\(").replace(/\)/g, "\\)");
 }
 
 function formatMoneyForPdf(amount: MoneyAmount): string {
@@ -618,8 +608,8 @@ function buildMinimalPdf(lines: string[]): Buffer {
     offset += Buffer.byteLength(objectBody, "latin1");
   }
 
-  let xref = `xref\n0 ${totalObjects + 1}\n0000000000 65535 f \n`;
   const xrefOffset = offset;
+  let xref = `xref\n0 ${totalObjects + 1}\n0000000000 65535 f \n`;
   for (let id = 1; id <= totalObjects; id += 1) {
     xref += `${String(offsets[id]).padStart(10, "0")} 00000 n \n`;
   }
@@ -660,34 +650,6 @@ function buildTenantInvoicePdfRows(input: {
     ),
     "----------------------------------------------------------------",
     `Total (${input.lines.length} line${input.lines.length === 1 ? "" : "s"}): ${formatMoneyForPdf(input.amount)}`,
-  ];
-}
-
-function buildDriverStatementPdfRows(
-  statement: DriverStatementRecord,
-): string[] {
-  return [
-    `Driver Statement ${statement.statementId}`,
-    `Driver ID: ${statement.driverId}`,
-    `Period: ${statement.periodMonth}`,
-    `Receipt No: ${statement.receiptNo}`,
-    `Payout Status: ${statement.payoutStatus}`,
-    `Fee Plan Version: ${statement.feePlanVersion}`,
-    `Generated At: ${statement.createdAt}`,
-    "",
-    `Gross Earning: ${formatMoneyForPdf(statement.grossEarning)}`,
-    `Service Fee: ${formatMoneyForPdf(statement.serviceFee)}`,
-    `Subsidy: ${formatMoneyForPdf(statement.subsidy)}`,
-    `Net Amount: ${formatMoneyForPdf(statement.netAmount)}`,
-    "",
-    "Order ID | Channel | Net Amount | Reimbursement Required",
-    "----------------------------------------------------------------",
-    ...statement.lines.map(
-      (line) =>
-        `${line.orderId} | ${toPdfAsciiText(line.channelKey ?? "-")} | ${formatMoneyForPdf(line.netAmount)} | ${line.reimbursementRequired ? "yes" : "no"}`,
-    ),
-    "----------------------------------------------------------------",
-    `Total Lines: ${statement.lines.length}`,
   ];
 }
 
@@ -748,8 +710,6 @@ export class BillingSettlementService implements OnModuleInit {
     @Optional()
     @Inject(DOCUMENT_ARTIFACT_STORE)
     private readonly documentArtifactStore: DocumentArtifactStore = new InMemoryDocumentArtifactStore(),
-    @Optional()
-    private readonly remittanceProofService: RemittanceProofService = new RemittanceProofService(),
   ) {}
 
   async getMultiTaxiPaymentException(
@@ -1487,8 +1447,7 @@ export class BillingSettlementService implements OnModuleInit {
     return [
       {
         action: "download_artifact",
-        enabled:
-          Boolean(invoice.artifactUrl) && !artifactExpired && !isUnfinalised,
+        enabled: Boolean(invoice.artifactUrl) && !artifactExpired && !isUnfinalised,
         riskLevel: "low",
         ...(isUnfinalised
           ? { disabledReasonCode: "invoice_not_finalized" }
@@ -2063,26 +2022,6 @@ export class BillingSettlementService implements OnModuleInit {
         updatedAt: now,
       };
 
-      const artifactRecord = this.documentArtifactStore.put({
-        kind: "report",
-        subjectId: statementId,
-        mimeType: "application/pdf",
-        bytes: buildMinimalPdf(buildDriverStatementPdfRows(statement)),
-      });
-      const artifactDownloadMetadata = createControlledDownloadMetadata({
-        kind: "report",
-        subjectId: statementId,
-        manifestHash: artifactRecord.sha256,
-        createdAt: now,
-        host: this.downloadHost,
-        keyId: this.downloadSigningKeyId,
-        signingSecret: this.downloadSigningSecret,
-        ttlMinutes: this.downloadExpiryMinutes,
-        signatureVersion: this.downloadSignatureVersion,
-      });
-      statement.artifactUrl = artifactDownloadMetadata.downloadUrl;
-      statement.artifactDownloadMetadata = artifactDownloadMetadata;
-
       generatedStatements.push(statement);
       this.auditNotificationService.recordNotification({
         tenantId: null,
@@ -2183,76 +2122,16 @@ export class BillingSettlementService implements OnModuleInit {
     };
   }
 
-  private ensureDriverStatementArtifact(
-    statement: DriverStatementRecord,
-  ): DriverStatementRecord {
-    const stored = this.documentArtifactStore.get(
-      "report",
-      statement.statementId,
-    );
-    const materialised =
-      Boolean(statement.artifactDownloadMetadata) &&
-      stored?.record.sha256 ===
-        statement.artifactDownloadMetadata?.manifestHash;
-    const expired = this.isInvoiceArtifactExpired(statement.artifactUrl ?? "");
-
-    if (materialised && !expired) {
-      return statement;
-    }
-
-    const record = materialised
-      ? stored!.record
-      : this.documentArtifactStore.put({
-          kind: "report",
-          subjectId: statement.statementId,
-          mimeType: "application/pdf",
-          bytes: buildMinimalPdf(buildDriverStatementPdfRows(statement)),
-        });
-
-    const now = new Date().toISOString();
-    const artifactDownloadMetadata = createControlledDownloadMetadata({
-      kind: "report",
-      subjectId: statement.statementId,
-      manifestHash: record.sha256,
-      createdAt: now,
-      host: this.downloadHost,
-      keyId: this.downloadSigningKeyId,
-      signingSecret: this.downloadSigningSecret,
-      ttlMinutes: this.downloadExpiryMinutes,
-      signatureVersion: this.downloadSignatureVersion,
-    });
-
-    const refreshed: DriverStatementRecord = {
-      ...statement,
-      artifactUrl: artifactDownloadMetadata.downloadUrl,
-      artifactDownloadMetadata,
-    };
-
-    this.driverStatements = this.driverStatements.map((candidate) =>
-      candidate.statementId === refreshed.statementId ? refreshed : candidate,
-    );
-    this.persistChanges(
-      { driverStatements: [this.cloneStatement(refreshed)] },
-      "reissue_driver_statement_artifact",
-    );
-
-    return refreshed;
-  }
-
-  listDriverStatements(periodMonth?: string, driverId?: string) {
+  listDriverStatements(periodMonth?: string) {
     return this.driverStatements
       .filter(
         (statement) =>
-          (!periodMonth ||
-            statement.periodMonth.trim() === periodMonth.trim()) &&
-          (!driverId || statement.driverId.trim() === driverId.trim()),
+          !periodMonth || statement.periodMonth.trim() === periodMonth.trim(),
       )
-      .map((statement) =>
-        this.cloneStatement(this.ensureDriverStatementArtifact(statement)),
-      );
+      .map((statement) => this.cloneStatement(statement));
   }
 
-  getDriverStatement(statementId: string, requestingDriverId?: string) {
+  getDriverStatement(statementId: string) {
     const statement = this.driverStatements.find(
       (candidate) => candidate.statementId === statementId,
     );
@@ -2266,22 +2145,7 @@ export class BillingSettlementService implements OnModuleInit {
         },
       );
     }
-    if (
-      requestingDriverId &&
-      statement.driverId.trim() !== requestingDriverId.trim()
-    ) {
-      throw new ApiRequestError(
-        HttpStatus.FORBIDDEN,
-        "DRIVER_IDENTITY_MISMATCH",
-        "Driver cannot access another driver's statement.",
-        {
-          statementId,
-          requestedDriverId: statement.driverId,
-          actorDriverId: requestingDriverId,
-        },
-      );
-    }
-    return this.cloneStatement(this.ensureDriverStatementArtifact(statement));
+    return this.cloneStatement(statement);
   }
 
   async listSettlementTripsForPeriodMonth(
@@ -2816,212 +2680,6 @@ export class BillingSettlementService implements OnModuleInit {
   getReimbursementBatch(batchId: string) {
     const batch = this.requireReimbursementBatch(batchId);
     return this.cloneReimbursementBatch(batch);
-  }
-
-  // ── Remittance Proof (SR-PROOF-001) ──
-  //
-  // `markReimbursementPaid` above stays untouched: it is exercised by an
-  // existing regression (`tests/unit/billing-settlement.test.ts`, outside
-  // this task's write_scopes) that marks a batch paid with a bare,
-  // never-uploaded `remittanceProofId` string, so gating it on a real proof
-  // record here would break out-of-scope, already-passing coverage. The
-  // proof-backed gate this task delivers is the new
-  // `markReimbursementPaidWithProof` method/`/pay-with-proof` route below --
-  // see `docs/04-uat/system-remediation-20260906/SR-PROOF-001.md` for the
-  // explicit boundary this records.
-
-  /**
-   * Test-only escape hatch onto the underlying `RemittanceProofService` --
-   * used to drive `attemptScan`/`markPaidWithProof` directly in unit tests,
-   * since neither is reachable over HTTP (no scan-completion callback route
-   * exists in this task's locked OpenAPI paths; see
-   * `docs/04-uat/system-remediation-20260906/SR-PROOF-001.md`).
-   */
-  get remittanceProofServiceForTest(): RemittanceProofService {
-    return this.remittanceProofService;
-  }
-
-  async stageRemittanceProofContent(bytes: Buffer, contentType: string) {
-    return this.remittanceProofService.stageContent(bytes, contentType);
-  }
-
-  async uploadRemittanceProof(
-    command: UploadRemittanceProofCommand,
-    identity: BootstrapRequestIdentity | null,
-    requestId?: string,
-  ): Promise<RemittanceProofRecord> {
-    const batch = this.requireReimbursementBatch(command.batchId);
-    const callerDriverId = identity?.actorId?.trim() || null;
-    if (
-      identity?.realm === "driver" &&
-      callerDriverId &&
-      callerDriverId !== batch.driverId
-    ) {
-      throw new ApiRequestError(
-        HttpStatus.FORBIDDEN,
-        "REMITTANCE_PROOF_BATCH_OWNERSHIP_VIOLATION",
-        "A driver may only upload a remittance proof against their own reimbursement batch.",
-        {
-          batchId: batch.batchId,
-          callerDriverId,
-          batchDriverId: batch.driverId,
-        },
-      );
-    }
-
-    const proof = await this.remittanceProofService.uploadProof({
-      batchId: batch.batchId,
-      // Denormalised from the batch, never from the command -- see
-      // `packages/contracts/src/remittance-proof.ts`.
-      driverId: batch.driverId,
-      originalFilename: command.originalFilename,
-      stagedContentRef: command.stagedContentRef,
-      uploadedByActorId: identity?.actorId ?? null,
-    });
-
-    this.recordAudit(
-      {
-        actorId: identity?.actorId ?? null,
-        actorType:
-          identity?.actorType === "driver_user"
-            ? "system"
-            : (identity?.actorType ?? "system"),
-        tenantId: identity?.tenantId ?? null,
-        moduleName: "billing-settlement",
-        actionName: "upload_remittance_proof",
-        resourceType: "remittance_proof",
-        resourceId: proof.proofId,
-        newValuesSummary: {
-          batchId: proof.batchId,
-          driverId: proof.driverId,
-          scanState: proof.scanState,
-        },
-      },
-      requestId,
-    );
-
-    return proof;
-  }
-
-  async getRemittanceProof(proofId: string): Promise<RemittanceProofRecord> {
-    return this.remittanceProofService.getProof(proofId);
-  }
-
-  async requestRemittanceProofReadback(
-    command: RequestRemittanceProofReadbackCommand,
-    identity: BootstrapRequestIdentity | null,
-    requestId?: string,
-  ): Promise<RemittanceProofReadbackGrant> {
-    const grant = await this.remittanceProofService.requestReadback(
-      command.proofId,
-    );
-    this.recordAudit(
-      {
-        actorId: identity?.actorId ?? null,
-        actorType:
-          identity?.actorType === "driver_user"
-            ? "system"
-            : (identity?.actorType ?? "system"),
-        tenantId: identity?.tenantId ?? null,
-        moduleName: "billing-settlement",
-        actionName: "request_remittance_proof_readback",
-        resourceType: "remittance_proof",
-        resourceId: grant.proofId,
-        newValuesSummary: { expiresAt: grant.expiresAt },
-      },
-      requestId,
-    );
-    return grant;
-  }
-
-  async markReimbursementPaidWithProof(
-    batchId: string,
-    command: MarkReimbursementPaidWithProofCommand,
-    identity: BootstrapRequestIdentity | null,
-    requestId?: string,
-  ): Promise<RemittanceProofPaymentReceipt> {
-    const batch = this.requireReimbursementBatch(batchId);
-    if (!batch.approvedAt) {
-      throw new ApiRequestError(
-        HttpStatus.CONFLICT,
-        "REMITTANCE_PROOF_BATCH_NOT_APPROVED",
-        "Reimbursement batch must be approved before it can be marked as paid.",
-        { batchId },
-      );
-    }
-
-    const paidAt = command.paidAt?.trim() || new Date().toISOString();
-    if (Number.isNaN(new Date(paidAt).getTime())) {
-      throw new ApiRequestError(
-        HttpStatus.BAD_REQUEST,
-        "VALIDATION_ERROR",
-        "paidAt must be a valid ISO timestamp.",
-        { batchId, paidAt },
-      );
-    }
-
-    const receipt = await this.remittanceProofService.markPaidWithProof({
-      batchId: batch.batchId,
-      proofId: command.proofId,
-      idempotencyKey: command.idempotencyKey,
-      driverId: batch.driverId,
-      amount: batch.totalAmount,
-      paidAt,
-    });
-
-    if (batch.status !== "paid") {
-      batch.status = "paid";
-      batch.paidAt = receipt.paidAt;
-      batch.remittanceProofId = receipt.proofId;
-
-      const relatedStatement = this.driverStatements.find(
-        (statement) => statement.statementId === batch.statementId,
-      );
-      if (relatedStatement) {
-        relatedStatement.payoutStatus = "paid";
-        relatedStatement.updatedAt = receipt.paidAt;
-      }
-
-      await this.persistChanges(
-        {
-          reimbursementBatches: [this.cloneReimbursementBatch(batch)],
-          ...(relatedStatement
-            ? { driverStatements: [this.cloneStatement(relatedStatement)] }
-            : {}),
-        },
-        "mark_reimbursement_paid_with_proof",
-      );
-      this.auditNotificationService.recordNotification({
-        tenantId: null,
-        channel: "ops_notice",
-        title: "Reimbursement batch paid",
-        message: `Reimbursement batch ${batch.batchId} was marked paid with remittance proof ${receipt.proofId}.`,
-        status: "unread",
-      });
-      this.recordAudit(
-        {
-          actorId: identity?.actorId ?? null,
-          actorType:
-            identity?.actorType === "driver_user"
-              ? "system"
-              : (identity?.actorType ?? "platform_admin"),
-          tenantId: identity?.tenantId ?? null,
-          moduleName: "billing-settlement",
-          actionName: "mark_reimbursement_paid_with_proof",
-          resourceType: "driver_reimbursement_batch",
-          resourceId: batch.batchId,
-          newValuesSummary: {
-            driverId: batch.driverId,
-            proofId: receipt.proofId,
-            receiptId: receipt.receiptId,
-            paidAt: receipt.paidAt,
-          },
-        },
-        requestId,
-      );
-    }
-
-    return receipt;
   }
 
   /**
@@ -4026,9 +3684,6 @@ export class BillingSettlementService implements OnModuleInit {
       serviceFee: { ...statement.serviceFee },
       subsidy: { ...statement.subsidy },
       netAmount: { ...statement.netAmount },
-      artifactDownloadMetadata: statement.artifactDownloadMetadata
-        ? { ...statement.artifactDownloadMetadata }
-        : null,
       lines: statement.lines.map((line) => ({
         ...line,
         grossEarning: { ...line.grossEarning },

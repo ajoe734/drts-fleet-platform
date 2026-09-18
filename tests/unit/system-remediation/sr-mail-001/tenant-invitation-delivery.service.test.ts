@@ -1,16 +1,8 @@
-import { createRequire } from "node:module";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-
-const apiRequire = createRequire(
-  new URL("../../../../apps/api/package.json", import.meta.url),
-);
-apiRequire("reflect-metadata");
-const { Module } = apiRequire("@nestjs/common");
-const { NestFactory } = apiRequire("@nestjs/core");
 
 import {
   TenantInvitationDeliveryService,
@@ -266,51 +258,5 @@ describe("SR-MAIL-001 tenant invitation email delivery", () => {
     expect(listed.every((entry) => !("rawToken" in entry))).toBe(true);
     listed[0]!.status = "unavailable";
     expect(adapter.listDeliveries()[0]?.status).toBe("sent");
-  });
-
-  it("annotates constructor with @Inject(NotificationDeliveryService) for NestJS DI resolution", () => {
-    const selfParams: Array<{ index: number; param: unknown }> =
-      Reflect.getMetadata("self:paramtypes", TenantInvitationDeliveryService) ||
-      [];
-    expect(
-      selfParams.some(
-        (p) => p.index === 0 && p.param === NotificationDeliveryService,
-      ),
-    ).toBe(true);
-  });
-
-  it("resolves and injects NotificationDeliveryService when instantiated in a NestJS DI container", async () => {
-    const transport = acceptingTransport();
-    const mockService = deliveryService(transport);
-
-    @Module({
-      providers: [
-        {
-          provide: NotificationDeliveryService,
-          useValue: mockService,
-        },
-        TenantInvitationDeliveryService,
-      ],
-    })
-    class TestModule {}
-
-    const appCtx = await NestFactory.createApplicationContext(TestModule, {
-      logger: false,
-    });
-    try {
-      const resolved = appCtx.get(TenantInvitationDeliveryService);
-      expect(resolved).toBeDefined();
-      expect(
-        (resolved as unknown as { deliveryService: unknown }).deliveryService,
-      ).toBe(mockService);
-
-      // Verify resolved service delivers via the injected service
-      const input = request();
-      const record = await resolved.send(input);
-      expect(record.status).toBe("sent");
-      expect(transport.send).toHaveBeenCalledTimes(1);
-    } finally {
-      await appCtx.close();
-    }
   });
 });

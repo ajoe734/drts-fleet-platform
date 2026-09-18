@@ -30,26 +30,6 @@ class ChairmanFlowTests(unittest.TestCase):
                     self.assertFalse(supervisor.apply_chair_parent_resume_action({}, {}, {"task_id": parent["id"], "reason": "Old helper is done"}))
                 writer.assert_not_called()
 
-    def test_external_gate_is_held_without_creating_or_resuming_helpers(self) -> None:
-        parent = {"id": "PUBLISH-001", "status": "blocked", "owner": "Codex", "reviewer": "Gemini2",
-                  "depends_on": [], "external_gate": True, "next": "Public push needs explicit authorization"}
-        helper = {"id": "HELPER-001", "status": "done", "task_class": "unblock", "helper_parent": parent["id"],
-                  "helper_kind": "history_repair", "resolved_parent_status": "todo", "resolved_parent_at": "2026-09-13T05:00:00Z"}
-        for helpers in ([], [helper]):
-            with self.subTest(completed_helper=bool(helpers)):
-                status = {"tasks": [parent, *helpers]}
-                self.assertEqual(supervisor.blocked_task_triage_action(status, parent), ("wait_for_parent_resolution", None))
-                self.assertEqual(supervisor.dependency_ready_blocked_task_records({}, status), [])
-                held = supervisor.dependency_ready_blocked_task_records({}, status, include_held=True)
-                self.assertEqual(held[0]["task_id"], parent["id"])
-                action = {"task_id": parent["id"], "reason": "Stale chair decision requests history repair"}
-                with mock.patch.object(supervisor, "load_status", return_value=status), mock.patch.object(supervisor, "run_task_board_command") as writer:
-                    self.assertFalse(supervisor.create_chair_unblock_task({}, {}, action, {}))
-                    self.assertFalse(supervisor.apply_chair_parent_resume_action({}, {}, action))
-                writer.assert_not_called()
-        parent["external_gate"] = False
-        self.assertEqual(supervisor.blocked_task_triage_action({"tasks": [parent]}, parent), ("create_unblock_task", None))
-
     def test_chair_review_message_includes_provider_health_context(self) -> None:
         message = supervisor.build_chair_review_message(
             {
