@@ -139,12 +139,17 @@ import type {
   WebhookRetryPolicyRecord,
   UiRefreshMetadata,
   ReferralRevenueShareRule,
+  PartnerNotificationDispatchOutcome,
+  PartnerNotificationFailureReason,
+  PartnerPassengerNotificationTestWirePayload,
+  PartnerPassengerNotificationWirePayload,
 } from "@drts/contracts";
 import {
   PLATFORM_CURRENCY,
   REFERRAL_SETTLEMENT_DIRECTION_DRTS_PAYS_PARTNER,
   REFERRAL_EMBED_REQUIRED_CONSENT_SCOPES,
   PARTNER_REFERRAL_CHANNEL_KEY,
+  PARTNER_NOTIFICATION_FAILURE_REASON_RETRY_DISPOSITIONS,
 } from "@drts/contracts";
 
 /** Seed referral revenue-share rules (mirrors the WP0 referral scaffold seed). */
@@ -263,6 +268,8 @@ import {
 } from "./tenant-quota-ledger";
 import {
   WebhookDispatchService,
+  type PartnerAckV1RequestOptions,
+  type WebhookDispatchAttemptResult,
   type WebhookRetryPolicy,
 } from "./webhook-dispatch.service";
 import { evaluateTenantApprovalRules } from "./tenant-approval-rule-evaluator";
@@ -1244,6 +1251,24 @@ export type TenantQuotaConsumptionCommitResult = {
   ledgerEntries: TenantQuotaLedgerEntry[];
   updatedSnapshots: TenantQuotaMonthlySnapshotRecord[];
   auditEntries: TenantQuotaAuditEntryInput[];
+};
+
+/**
+ * Command for `TenantPartnerService.dispatchPartnerNotificationAttempt` —
+ * SR-PARTNER-NOTIFY-ACK-20260917 §8. `wirePayload` must be the exact,
+ * already-built contract envelope (never re-derived here): its
+ * `deliveryId` is the frozen logical delivery id reused across every retry
+ * attempt for this notification, and its `event`/`data.notificationId`/
+ * `data.partnerEntrySlug` drive endpoint-subscription and ack-correlation
+ * checks. `tenantId`/`webhookId` scope the lookup to exactly one endpoint —
+ * never a tenant-wide event scan.
+ */
+export type PartnerNotificationDispatchAttemptCommand = {
+  tenantId: string;
+  webhookId: string;
+  wirePayload:
+    | PartnerPassengerNotificationWirePayload
+    | PartnerPassengerNotificationTestWirePayload;
 };
 
 @Injectable()
@@ -8192,7 +8217,20 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
     endpoint: StoredWebhookEndpoint,
     delivery: StoredWebhookDelivery,
     payload: Record<string, unknown>,
-  ) {
+    options?: {
+      /** SR-PARTNER-NOTIFY-ACK-20260917 opt-in ack body validation. */
+      partnerAckV1?: PartnerAckV1RequestOptions;
+      /**
+       * Forces this attempt to be classified as terminal (never "queued")
+       * so the shared WebhookDispatchService never reports a retry and this
+       * method's own `scheduleWebhookRetry` branch is never reached — the
+       * partner-notification façade is the single automatic-retry owner for
+       * its own deliveries and must not also start the tenant webhook's
+       * internal retry timer.
+       */
+      forceSingleAttempt?: boolean;
+    },
+  ): Promise<WebhookDispatchAttemptResult> {
     const previousStatus = delivery.status;
     const previousEndpointValues = this.toWebhookResponse(endpoint);
     const signingSecret = this.resolveWebhookSecretMaterial(
@@ -8272,6 +8310,7 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
       };
     }
 
+    const attemptNumber = delivery.attempt + 1;
     const result = await this.webhookDispatchService.dispatchAttempt({
       url: endpoint.url,
       deliveryId: delivery.deliveryId,
@@ -8280,8 +8319,15 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
       secretValue: signingSecret.secretValue,
       secretVersion: signingSecret.secretVersion,
       payload,
-      attempt: delivery.attempt + 1,
+      attempt: attemptNumber,
+      // Always the endpoint's real, approved policy — §8: "使用 endpoint 已核准
+      // policy 的 snapshot". `forceSingleAttempt` only suppresses this
+      // method's own retry-timer side effect below; it must never distort
+      // the queued/delivery_failed classification, or a single transient
+      // failure would look "exhausted" and wrongly disable the endpoint on
+      // its very first attempt (see the scheduling guard below instead).
       retryPolicy: endpoint.retryPolicy,
+      ...(options?.partnerAckV1 ? { partnerAckV1: options.partnerAckV1 } : {}),
     });
 
     delivery.attempt = result.attempt;
@@ -8343,13 +8389,20 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
       "webhook_dispatch_attempt",
     );
 
-    if (result.status === "queued" && result.nextAttemptAt) {
+    if (
+      !options?.forceSingleAttempt &&
+      result.status === "queued" &&
+      result.nextAttemptAt
+    ) {
       this.scheduleWebhookRetry(
         endpoint.webhookId,
         delivery.deliveryId,
         result.nextAttemptAt,
       );
     } else {
+      // Idempotent hygiene clear, not a new timer — see the guard above:
+      // the partner-notification façade's caller is the single automatic
+      // retry owner for its own deliveries.
       this.clearWebhookRetry(delivery.deliveryId);
     }
 
@@ -8421,6 +8474,164 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
         >,
       });
     }
+  }
+
+  /**
+   * SR-PARTNER-NOTIFY-ACK-20260917 §8 — the single-attempt dispatch entry
+   * point exported (via `PartnerNotificationDispatchFacade`) as
+   * `dispatchNotificationAttemptByWebhookId`. Precise endpoint lookup by
+   * (tenantId, webhookId) — never a tenant-wide event scan — reuses the same
+   * active/expiry/secret-rotation governance as an ordinary tenant webhook,
+   * makes exactly one remote HTTP attempt, records the delivery/credential
+   * usage/failure count on the shared endpoint (deduped by this logical
+   * delivery id, same as `dispatchWebhookAttempt`), and returns a validated
+   * ack or a typed failure. It never schedules its own retry timer — the
+   * caller's own fence transaction owns retry timing and must reuse this
+   * exact deliveryId/payload for every attempt so the partner's durable
+   * dedupe can recognize a resend.
+   */
+  async dispatchPartnerNotificationAttempt(
+    command: PartnerNotificationDispatchAttemptCommand,
+  ): Promise<PartnerNotificationDispatchOutcome> {
+    this.assertNonBlank(command.tenantId, "tenantId");
+    this.assertNonBlank(command.webhookId, "webhookId");
+
+    const endpoint = this.requireWebhookEndpoint(
+      command.tenantId,
+      command.webhookId,
+    );
+
+    if (endpoint.status === "disabled") {
+      return this.partnerNotificationTypedFailure(
+        "endpoint_disabled",
+        null,
+        `webhook ${endpoint.webhookId} is disabled`,
+      );
+    }
+    if (endpoint.status !== "active") {
+      return this.partnerNotificationTypedFailure(
+        "configuration_blocked",
+        null,
+        `webhook ${endpoint.webhookId} status is ${endpoint.status}`,
+      );
+    }
+    if (!endpoint.events.includes(command.wirePayload.event)) {
+      return this.partnerNotificationTypedFailure(
+        "configuration_blocked",
+        null,
+        `webhook ${endpoint.webhookId} is not subscribed to ${command.wirePayload.event}`,
+      );
+    }
+
+    const expiresAt =
+      "expiresAt" in command.wirePayload.data
+        ? command.wirePayload.data.expiresAt
+        : null;
+    if (expiresAt && new Date(expiresAt).getTime() <= Date.now()) {
+      return this.partnerNotificationTypedFailure(
+        "notification_expired",
+        null,
+        `notification ${command.wirePayload.data.notificationId} expired at ${expiresAt}`,
+      );
+    }
+
+    const createdAt = new Date().toISOString();
+    const delivery = await this.enqueueWebhookDelivery(
+      endpoint,
+      command.wirePayload.event,
+      createdAt,
+      "partner_notification_dispatch",
+      command.wirePayload.deliveryId,
+    );
+
+    const signingSecret = this.resolveWebhookSecretMaterial(
+      endpoint,
+      delivery.secretVersion,
+    );
+    if (
+      !signingSecret ||
+      (signingSecret.status !== "active" &&
+        signingSecret.status !== "overlap_active")
+    ) {
+      return this.partnerNotificationTypedFailure(
+        "credential_rejected",
+        null,
+        "webhook signing credential is not usable",
+      );
+    }
+
+    const result = await this.dispatchWebhookAttempt(
+      endpoint,
+      delivery,
+      command.wirePayload as unknown as Record<string, unknown>,
+      {
+        forceSingleAttempt: true,
+        partnerAckV1: {
+          mode: "partner_ack_v1",
+          expected: {
+            notificationId: command.wirePayload.data.notificationId,
+            deliveryId: command.wirePayload.deliveryId,
+            partnerEntrySlug: command.wirePayload.data.partnerEntrySlug,
+          },
+        },
+      },
+    );
+
+    return this.classifyPartnerNotificationDispatchResult(result);
+  }
+
+  private partnerNotificationTypedFailure(
+    failureReason: PartnerNotificationFailureReason,
+    suggestedNextAttemptAt: string | null,
+    detail?: string,
+  ): PartnerNotificationDispatchOutcome {
+    return {
+      kind: "failed",
+      failure: {
+        failureReason,
+        retryDisposition:
+          PARTNER_NOTIFICATION_FAILURE_REASON_RETRY_DISPOSITIONS[failureReason],
+        suggestedNextAttemptAt,
+        ...(detail !== undefined ? { detail } : {}),
+      },
+    };
+  }
+
+  private classifyPartnerNotificationDispatchResult(
+    result: Awaited<ReturnType<TenantPartnerService["dispatchWebhookAttempt"]>>,
+  ): PartnerNotificationDispatchOutcome {
+    if (result.status === "delivered") {
+      if (result.partnerAckV1?.kind === "accepted") {
+        return { kind: "accepted", ack: result.partnerAckV1.ack };
+      }
+      // HTTP-level success but the ack body did not validate (204, empty,
+      // HTML, mismatched id, missing receipt, ...) — never a success here.
+      return this.partnerNotificationTypedFailure(
+        "partner_ack_invalid",
+        null,
+        result.partnerAckV1?.kind === "invalid"
+          ? result.partnerAckV1.reason
+          : "ack_not_validated",
+      );
+    }
+
+    if (result.httpStatus === 401 || result.httpStatus === 403) {
+      return this.partnerNotificationTypedFailure("credential_rejected", null);
+    }
+    if (result.httpStatus === 404 || result.httpStatus === 410) {
+      return this.partnerNotificationTypedFailure("endpoint_unavailable", null);
+    }
+
+    // 408/429/5xx/network-timeout and anything else not classified above:
+    // automatic, bounded by the endpoint's own approved retry policy.
+    // `result.nextAttemptAt` already reflects that policy (WebhookDispatch-
+    // Service computed it from the same, un-forced `endpoint.retryPolicy`)
+    // and is null once the policy considers this delivery exhausted — the
+    // caller's fence transaction, not a tenant-side timer, acts on this.
+    return this.partnerNotificationTypedFailure(
+      "provider_transient_error",
+      result.nextAttemptAt,
+    );
   }
 
   private markWebhookValidationPending(

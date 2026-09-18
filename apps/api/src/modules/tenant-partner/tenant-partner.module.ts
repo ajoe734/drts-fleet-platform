@@ -16,6 +16,7 @@ import { OwnedMobilityModule } from "../owned-mobility/owned-mobility.module";
 import { BankCardInlineEligibilityAdapter } from "./bank-card-inline-eligibility.adapter";
 import { PARTNER_ELIGIBILITY_ADAPTERS } from "./partner-eligibility-adapter.interface";
 import { ReferenceTokenEligibilityAdapter } from "./reference-token-eligibility.adapter";
+import { PartnerNotificationDispatchFacade } from "./partner-notification-dispatch.facade";
 import { PartnerUserIdentityLinkRepository } from "./partner-user-identity-link.repository";
 import { ReferralEmbedHandoffRepository } from "./referral-embed-handoff.repository";
 import { ReferralChannelScaffoldService } from "./referral-channel.scaffold.service";
@@ -72,6 +73,7 @@ export function createTenantInvitationNotificationDeliveryService(): Notificatio
     ReferralEmbedHandoffRepository,
     ReferralChannelScaffoldService,
     WebhookDispatchService,
+    PartnerNotificationDispatchFacade,
     BankCardInlineEligibilityAdapter,
     ReferenceTokenEligibilityAdapter,
     {
@@ -98,6 +100,7 @@ export function createTenantInvitationNotificationDeliveryService(): Notificatio
     PartnerUserIdentityLinkRepository,
     ReferralEmbedHandoffRepository,
     ReferralChannelScaffoldService,
+    PartnerNotificationDispatchFacade,
   ],
 })
 export class TenantPartnerModule {}
