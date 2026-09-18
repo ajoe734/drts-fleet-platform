@@ -50,8 +50,8 @@ export class PartnerEntryNotificationBindingRepository {
           version,
           state,
           event_types,
-          ack_policy,
-          endpoint_fingerprint,
+          acknowledgement_policy,
+          validated_endpoint_fingerprint,
           validated_at,
           updated_at,
           record
@@ -66,8 +66,8 @@ export class PartnerEntryNotificationBindingRepository {
           version = EXCLUDED.version,
           state = EXCLUDED.state,
           event_types = EXCLUDED.event_types,
-          ack_policy = EXCLUDED.ack_policy,
-          endpoint_fingerprint = EXCLUDED.endpoint_fingerprint,
+          acknowledgement_policy = EXCLUDED.acknowledgement_policy,
+          validated_endpoint_fingerprint = EXCLUDED.validated_endpoint_fingerprint,
           validated_at = EXCLUDED.validated_at,
           updated_at = EXCLUDED.updated_at,
           record = EXCLUDED.record
@@ -106,8 +106,8 @@ export class PartnerEntryNotificationBindingRepository {
           version = $6,
           state = $7,
           event_types = $8::jsonb,
-          ack_policy = $9,
-          endpoint_fingerprint = $10,
+          acknowledgement_policy = $9,
+          validated_endpoint_fingerprint = $10,
           validated_at = $11,
           updated_at = $12,
           record = $13::jsonb

@@ -241,6 +241,22 @@ export class MultiTaxiRepository {
     );
   }
 
+  async getOrderPartnerNotificationRoute(
+    orderId: string,
+  ): Promise<OrderPartnerNotificationRoute | null> {
+    if (!this.isEnabled()) return null;
+    const result = await this.databaseService!.query<{
+      record: OrderPartnerNotificationRoute;
+    }>(
+      `
+        SELECT record FROM mobility.phase1_order_partner_notification_routes
+        WHERE order_id = $1
+      `,
+      [orderId],
+    );
+    return result.rows[0]?.record ?? null;
+  }
+
   private readonly logger = new Logger(MultiTaxiRepository.name);
 
   constructor(@Optional() private readonly databaseService?: DatabaseService) {}
