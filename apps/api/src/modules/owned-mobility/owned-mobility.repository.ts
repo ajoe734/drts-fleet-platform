@@ -178,6 +178,8 @@ type PersistOwnedMobilityChanges = {
   dispatchTraceLogs?: readonly DispatchTraceLogRecord[];
   passengerDisclosureSnapshots?: readonly PassengerDispatchDisclosureSnapshot[];
   consumerNotificationOutbox?: readonly ConsumerNotificationOutboxRecord[];
+  orderPartnerNotificationRoutes?: readonly Record<string, any>[];
+  partnerNotificationSequences?: readonly Record<string, any>[];
 };
 
 export type DriverTaskCompletionBundleRecord = {
@@ -635,7 +637,9 @@ export class OwnedMobilityRepository {
       return;
     }
 
-    await this.persistChangesWithExecutor(this.databaseService!, changes);
+    await this.withTransaction((executor) =>
+      this.persistChangesWithExecutor(executor, changes),
+    );
   }
 
   async withTransaction<T>(work: (executor: PoolClient) => Promise<T>) {
@@ -1549,6 +1553,51 @@ export class OwnedMobilityRepository {
   ) {
     const writes: Array<() => Promise<unknown>> = [];
 
+    for (const route of changes.orderPartnerNotificationRoutes ?? []) {
+      writes.push(() =>
+        executor.query(
+          `
+            INSERT INTO mobility.phase1_order_partner_notification_routes (
+              order_id, tenant_id, partner_id, entry_slug, partner_user_ref,
+              drts_passenger_id, passenger_subject_ref, identity_linked_at,
+              consent_bundle_version, notification_policy_version, ride_ref,
+              created_at, record
+            ) VALUES (
+              $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13::jsonb
+            )
+          `,
+          [
+            route.orderId,
+            route.tenantId,
+            route.partnerId,
+            route.entrySlug,
+            route.partnerUserRef,
+            route.drtsPassengerId,
+            route.passengerSubjectRef,
+            route.identityLinkedAt,
+            route.consentBundleVersion,
+            route.notificationPolicyVersion,
+            route.rideRef,
+            route.createdAt,
+            JSON.stringify(route),
+          ],
+        ),
+      );
+    }
+
+    for (const seq of changes.partnerNotificationSequences ?? []) {
+      writes.push(() =>
+        executor.query(
+          `
+            INSERT INTO mobility.phase1_partner_notification_sequences (
+              order_id, next_sequence
+            ) VALUES ($1, $2)
+          `,
+          [seq.orderId, seq.nextSequence],
+        ),
+      );
+    }
+
     for (const order of changes.orders ?? []) {
       writes.push(() =>
         executor.query(
@@ -1835,6 +1884,13 @@ export class OwnedMobilityRepository {
       writes.push(() =>
         executor.query(
           `
+            WITH seq AS (
+              UPDATE mobility.phase1_partner_notification_sequences
+              SET next_sequence = next_sequence + 1
+              WHERE order_id = $2
+                AND NOT EXISTS (SELECT 1 FROM ops.consumer_notification_outbox WHERE outbox_id = $1)
+              RETURNING next_sequence - 1 AS event_sequence
+            )
             INSERT INTO ops.consumer_notification_outbox (
               outbox_id,
               order_id,
@@ -1847,7 +1903,14 @@ export class OwnedMobilityRepository {
               next_attempt_at,
               created_at,
               delivered_at
-            ) VALUES ($1, $2, $3, $4, $5, $6::jsonb, $7, $8, $9, $10, $11)
+            ) VALUES (
+              $1, $2, $3, $4, $5, 
+              COALESCE(
+                (SELECT jsonb_set($6::jsonb, '{eventSequence}', to_jsonb(event_sequence)) FROM seq),
+                $6::jsonb
+              ), 
+              $7, $8, $9, $10, $11
+            )
             ON CONFLICT (outbox_id) DO NOTHING
           `,
           [

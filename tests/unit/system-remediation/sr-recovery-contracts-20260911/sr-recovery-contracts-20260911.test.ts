@@ -161,6 +161,7 @@ describe("SR-RECOVERY-CONTRACTS-20260911: Proof, Push-Receipt & Adapter-Registry
         ...(content.allocations || []),
         ...(content.additional_allocations || []),
         ...(content.launch_allocations || []),
+        ...(content.partner_notification_allocations || []),
       ];
       const maxAllocated = Math.max(
         100,

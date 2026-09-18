@@ -1,8 +1,10 @@
 import { PLATFORM_CURRENCY } from "@drts/contracts";
 import { Injectable, Logger, Optional } from "@nestjs/common";
-import type { QueryResultRow } from "pg";
+import type {
+  QueryResultRow } from "pg";
 
 import type {
+  OrderPartnerNotificationRoute,
   DriverRatingSummary,
   MultiTaxiAuthorizedVehicleRecord,
   MultiTaxiElectronicReceipt,
@@ -203,14 +205,82 @@ type ElectronicReceiptRow = QueryResultRow & {
   record: unknown;
 };
 
+
 @Injectable()
 export class MultiTaxiRepository {
+  async persistOrderPartnerNotificationRoute(
+    route: OrderPartnerNotificationRoute,
+  ): Promise<void> {
+    if (!this.isEnabled()) return;
+    await this.databaseService!.query(
+      `
+        INSERT INTO mobility.phase1_order_partner_notification_routes (
+          order_id, tenant_id, partner_id, entry_slug, partner_user_ref,
+          drts_passenger_id, passenger_subject_ref, identity_linked_at,
+          consent_bundle_version, notification_policy_version, ride_ref,
+          created_at, record
+        ) VALUES (
+          $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13::jsonb
+        )
+      `,
+      [
+        route.orderId,
+        route.tenantId,
+        route.partnerId,
+        route.entrySlug,
+        route.partnerUserRef,
+        route.drtsPassengerId,
+        route.passengerSubjectRef,
+        route.identityLinkedAt,
+        route.consentBundleVersion,
+        route.notificationPolicyVersion,
+        route.rideRef,
+        route.createdAt,
+        JSON.stringify(route),
+      ],
+    );
+  }
+
+  async getOrderPartnerNotificationRoute(
+    orderId: string,
+  ): Promise<OrderPartnerNotificationRoute | null> {
+    if (!this.isEnabled()) return null;
+    const result = await this.databaseService!.query<{
+      record: OrderPartnerNotificationRoute;
+    }>(
+      `
+        SELECT record FROM mobility.phase1_order_partner_notification_routes
+        WHERE order_id = $1
+      `,
+      [orderId],
+    );
+    return result.rows[0]?.record ?? null;
+  }
+
   private readonly logger = new Logger(MultiTaxiRepository.name);
 
   constructor(@Optional() private readonly databaseService?: DatabaseService) {}
 
   isEnabled() {
     return this.databaseService?.isEnabled() ?? false;
+  }
+
+  async allocatePartnerNotificationSequence(orderId: string): Promise<number> {
+    if (!this.isEnabled()) return 1;
+    const result = await this.databaseService!.query(
+      `
+        INSERT INTO mobility.phase1_partner_notification_sequences (order_id, next_sequence)
+        VALUES ($1, 2)
+        ON CONFLICT (order_id) DO UPDATE SET next_sequence = phase1_partner_notification_sequences.next_sequence + 1
+        RETURNING next_sequence
+      `,
+      [orderId],
+    );
+    if (!result.rows[0]) {
+      return 0; // Or whatever fallback
+    }
+    // returning the previous value which is next_sequence - 1
+    return parseInt(result.rows[0].next_sequence, 10) - 1;
   }
 
   async loadState() {
