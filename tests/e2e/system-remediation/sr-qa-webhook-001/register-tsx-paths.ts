@@ -25,7 +25,6 @@ for (const pkg of ["contracts", "control-plane-auth"]) {
         path: path.dirname(dtsPath),
         isPreloading: false,
         require: requireMod,
-        parent: null,
       };
     }
   } catch {
