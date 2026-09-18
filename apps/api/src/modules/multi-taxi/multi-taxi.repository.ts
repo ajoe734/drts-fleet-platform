@@ -7,6 +7,7 @@ import type {
   MultiTaxiAuthorizedVehicleRecord,
   MultiTaxiElectronicReceipt,
   MultiTaxiOperatingAuthorizationRecord,
+  OrderPartnerNotificationRoute,
   PassengerPaymentStatus,
   PassengerRatingModerationAuditRecord,
   PassengerRatingReviewListItem,
@@ -203,6 +204,21 @@ type ElectronicReceiptRow = QueryResultRow & {
   record: unknown;
 };
 
+type OrderPartnerNotificationRouteRow = QueryResultRow & {
+  order_id: string;
+  tenant_id: string;
+  partner_id: string;
+  entry_slug: string;
+  partner_user_ref: string;
+  drts_passenger_id: string;
+  passenger_subject_ref: string;
+  identity_linked_at: Date | string;
+  consent_bundle_version: string;
+  notification_policy_version: string;
+  ride_ref: string;
+  created_at: Date | string;
+};
+
 @Injectable()
 export class MultiTaxiRepository {
   private readonly logger = new Logger(MultiTaxiRepository.name);
@@ -376,6 +392,168 @@ export class MultiTaxiRepository {
       );
     const row = result.rows[0];
     return row ? this.mapRideAccessToken(row) : null;
+  }
+
+  /**
+   * SR-PARTNER-NOTIFY-ROUTE-20260917 design §4/§11: writes the frozen
+   * order->partner-entry notification route and initializes its durable
+   * event-sequence counter (mobility.phase1_partner_notification_sequences)
+   * in the same DB transaction. `order_id` is the primary key on both
+   * tables, so this is idempotent — a route is immutable once created, and a
+   * repeated call for the same order is a no-op that returns the
+   * already-stored route rather than overwriting it.
+   */
+  async writeOrderPartnerNotificationRoute(
+    route: OrderPartnerNotificationRoute,
+  ): Promise<OrderPartnerNotificationRoute | null> {
+    if (!this.isEnabled()) {
+      return null;
+    }
+
+    const client = await this.databaseService!.connect();
+    try {
+      await client.query("BEGIN");
+      const insertResult = await client.query<OrderPartnerNotificationRouteRow>(
+        `
+          INSERT INTO mobility.phase1_order_partner_notification_routes (
+            order_id, tenant_id, partner_id, entry_slug, partner_user_ref,
+            drts_passenger_id, passenger_subject_ref, identity_linked_at,
+            consent_bundle_version, notification_policy_version, ride_ref,
+            created_at
+          ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+          ON CONFLICT (order_id) DO NOTHING
+          RETURNING order_id, tenant_id, partner_id, entry_slug,
+            partner_user_ref, drts_passenger_id, passenger_subject_ref,
+            identity_linked_at, consent_bundle_version,
+            notification_policy_version, ride_ref, created_at
+        `,
+        [
+          route.orderId,
+          route.tenantId,
+          route.partnerId,
+          route.entrySlug,
+          route.partnerUserRef,
+          route.drtsPassengerId,
+          route.passengerSubjectRef,
+          route.identityLinkedAt,
+          route.consentBundleVersion,
+          route.notificationPolicyVersion,
+          route.rideRef,
+          route.createdAt,
+        ],
+      );
+
+      let insertedRow = insertResult.rows[0];
+      if (!insertedRow) {
+        const existing = await client.query<OrderPartnerNotificationRouteRow>(
+          `
+            SELECT order_id, tenant_id, partner_id, entry_slug,
+              partner_user_ref, drts_passenger_id, passenger_subject_ref,
+              identity_linked_at, consent_bundle_version,
+              notification_policy_version, ride_ref, created_at
+            FROM mobility.phase1_order_partner_notification_routes
+            WHERE order_id = $1
+          `,
+          [route.orderId],
+        );
+        insertedRow = existing.rows[0];
+      } else {
+        await client.query(
+          `
+            INSERT INTO mobility.phase1_partner_notification_sequences (
+              order_id, next_sequence
+            ) VALUES ($1, 1)
+            ON CONFLICT (order_id) DO NOTHING
+          `,
+          [route.orderId],
+        );
+      }
+
+      await client.query("COMMIT");
+      return insertedRow ? this.mapOrderPartnerNotificationRoute(insertedRow) : null;
+    } catch (error) {
+      await client.query("ROLLBACK").catch(() => undefined);
+      this.logger.warn(
+        `Failed to persist partner notification route for order ${route.orderId}: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      );
+      return null;
+    } finally {
+      client.release();
+    }
+  }
+
+  async findOrderPartnerNotificationRoute(
+    orderId: string,
+  ): Promise<OrderPartnerNotificationRoute | null> {
+    if (!this.isEnabled()) {
+      return null;
+    }
+    const result = await this.databaseService!.query<OrderPartnerNotificationRouteRow>(
+      `
+        SELECT order_id, tenant_id, partner_id, entry_slug, partner_user_ref,
+          drts_passenger_id, passenger_subject_ref, identity_linked_at,
+          consent_bundle_version, notification_policy_version, ride_ref,
+          created_at
+        FROM mobility.phase1_order_partner_notification_routes
+        WHERE order_id = $1
+      `,
+      [orderId],
+    );
+    const row = result.rows[0];
+    return row ? this.mapOrderPartnerNotificationRoute(row) : null;
+  }
+
+  /**
+   * design §5/§11: the sole durable ordering authority for partner
+   * notifications — never the in-memory `passengerEventSequenceByOrder`
+   * counter on MultiTaxiService, which resets across process restarts. The
+   * `UPDATE ... RETURNING` is a single atomic statement, so concurrent
+   * callers for the same order always receive distinct sequence numbers;
+   * pass a transaction-scoped executor from the outbox-producing
+   * transaction (once one calls this) so the allocation commits or rolls
+   * back with that outbox row rather than independently.
+   */
+  async allocateNotificationEventSequence(
+    orderId: string,
+  ): Promise<number | null> {
+    if (!this.isEnabled()) {
+      return null;
+    }
+    const result = await this.databaseService!.query<{
+      event_sequence: string | number;
+    }>(
+      `
+        UPDATE mobility.phase1_partner_notification_sequences
+        SET next_sequence = next_sequence + 1
+        WHERE order_id = $1
+        RETURNING next_sequence - 1 AS event_sequence
+      `,
+      [orderId],
+    );
+    const row = result.rows[0];
+    return row ? Number(row.event_sequence) : null;
+  }
+
+  private mapOrderPartnerNotificationRoute(
+    row: OrderPartnerNotificationRouteRow,
+  ): OrderPartnerNotificationRoute {
+    return {
+      orderId: row.order_id,
+      tenantId: row.tenant_id,
+      partnerId: row.partner_id,
+      entrySlug: row.entry_slug,
+      partnerUserRef: row.partner_user_ref,
+      drtsPassengerId: row.drts_passenger_id,
+      passengerSubjectRef: row.passenger_subject_ref,
+      identityLinkedAt: new Date(row.identity_linked_at).toISOString(),
+      consentBundleVersion: row.consent_bundle_version,
+      notificationPolicyVersion:
+        row.notification_policy_version as OrderPartnerNotificationRoute["notificationPolicyVersion"],
+      rideRef: row.ride_ref,
+      createdAt: new Date(row.created_at).toISOString(),
+    };
   }
 
   /**

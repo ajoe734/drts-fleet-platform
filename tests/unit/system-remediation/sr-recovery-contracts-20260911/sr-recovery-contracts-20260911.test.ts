@@ -157,10 +157,20 @@ describe("SR-RECOVERY-CONTRACTS-20260911: Proof, Push-Receipt & Adapter-Registry
     it("keeps the highest migration on disk within the reserved allocation range (no unreserved version beyond the allocation)", () => {
       const migrationsDir = path.join(repoRoot, "infra/migrations");
       const content = JSON.parse(fs.readFileSync(allocationPath, "utf8"));
+      // This file is append-only across many tasks' schema allocations (see
+      // its own `amendments` entries); later tasks add their own top-level
+      // allocation arrays (e.g. `partner_notification_allocations` from
+      // SR-PARTNER-NOTIFY-CON-20260917) rather than editing these three.
+      // Excluding those from `maxAllocated` would make this assertion fail
+      // the moment a legitimately-allocated downstream task (e.g.
+      // SR-PARTNER-NOTIFY-ROUTE-20260917 writing its reserved V0104) writes
+      // its own migration file — this check's intent is "no *unreserved*
+      // version on disk", not "no allocation array younger than this task".
       const allAllocations = [
         ...(content.allocations || []),
         ...(content.additional_allocations || []),
         ...(content.launch_allocations || []),
+        ...(content.partner_notification_allocations || []),
       ];
       const maxAllocated = Math.max(
         100,
