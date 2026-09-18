@@ -28,7 +28,6 @@ import type {
   UpdateDriverWorkStateCommand,
   UpdateVehicleComplianceCommand,
   PassengerServiceRuntimeProfile,
-  SYSTEM_REMEDIATION_ERROR_CODES,
 } from "@drts/contracts";
 
 import {

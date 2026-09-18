@@ -3,12 +3,6 @@ import path from "node:path";
 import { createRequire } from "node:module";
 import { describe, expect, it } from "vitest";
 
-import type {
-  ContractOperationalDataStatus,
-  ContractOperationalTerms,
-  ContractOperationalViewRecord,
-  VehicleContractRecord,
-} from "@drts/contracts";
 import { SYSTEM_REMEDIATION_ERROR_CODES } from "@drts/contracts";
 
 import { ApiRequestError } from "../../../../apps/api/src/common/api-envelope";
