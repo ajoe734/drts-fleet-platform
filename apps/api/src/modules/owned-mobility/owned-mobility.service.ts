@@ -10813,6 +10813,8 @@ export class OwnedMobilityService
       dispatchAssignments?: readonly DispatchAssignmentRecord[];
       driverTasks?: readonly DriverTaskRecord[];
       dispatchTraceLogs?: readonly DispatchTraceLogRecord[];
+      orderPartnerNotificationRoutes?: readonly any[];
+      partnerNotificationSequences?: readonly any[];
     },
     context: string,
   ) {
@@ -10827,6 +10829,8 @@ export class OwnedMobilityService
       dispatchAssignments?: DispatchAssignmentRecord[];
       driverTasks?: DriverTaskRecord[];
       dispatchTraceLogs?: DispatchTraceLogRecord[];
+      orderPartnerNotificationRoutes?: any[];
+      partnerNotificationSequences?: any[];
     } = {};
 
     if (changes.orders) {
@@ -10860,6 +10864,12 @@ export class OwnedMobilityService
       persistPayload.dispatchTraceLogs = changes.dispatchTraceLogs.map(
         (traceLog) => this.cloneTraceLog(traceLog),
       );
+    }
+    if (changes.orderPartnerNotificationRoutes) {
+      persistPayload.orderPartnerNotificationRoutes = changes.orderPartnerNotificationRoutes.map((r) => ({ ...r }));
+    }
+    if (changes.partnerNotificationSequences) {
+      persistPayload.partnerNotificationSequences = changes.partnerNotificationSequences.map((s) => ({ ...s }));
     }
 
     const pending = this.ownedMobilityRepository.persistChanges(persistPayload);
@@ -10881,6 +10891,8 @@ export class OwnedMobilityService
       dispatchAssignments?: readonly DispatchAssignmentRecord[];
       driverTasks?: readonly DriverTaskRecord[];
       dispatchTraceLogs?: readonly DispatchTraceLogRecord[];
+      orderPartnerNotificationRoutes?: readonly any[];
+      partnerNotificationSequences?: readonly any[];
     },
     context: string,
   ) {
@@ -10895,6 +10907,8 @@ export class OwnedMobilityService
       dispatchAssignments?: DispatchAssignmentRecord[];
       driverTasks?: DriverTaskRecord[];
       dispatchTraceLogs?: DispatchTraceLogRecord[];
+      orderPartnerNotificationRoutes?: any[];
+      partnerNotificationSequences?: any[];
     } = {};
 
     if (changes.orders) {
@@ -10928,6 +10942,12 @@ export class OwnedMobilityService
       persistPayload.dispatchTraceLogs = changes.dispatchTraceLogs.map(
         (traceLog) => this.cloneTraceLog(traceLog),
       );
+    }
+    if (changes.orderPartnerNotificationRoutes) {
+      persistPayload.orderPartnerNotificationRoutes = changes.orderPartnerNotificationRoutes.map((r) => ({ ...r }));
+    }
+    if (changes.partnerNotificationSequences) {
+      persistPayload.partnerNotificationSequences = changes.partnerNotificationSequences.map((s) => ({ ...s }));
     }
 
     try {

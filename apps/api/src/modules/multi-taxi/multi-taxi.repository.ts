@@ -1,8 +1,10 @@
 import { PLATFORM_CURRENCY } from "@drts/contracts";
 import { Injectable, Logger, Optional } from "@nestjs/common";
-import type { QueryResultRow } from "pg";
+import type {
+  OrderPartnerNotificationRoute, QueryResultRow } from "pg";
 
 import type {
+  OrderPartnerNotificationRoute,
   DriverRatingSummary,
   MultiTaxiAuthorizedVehicleRecord,
   MultiTaxiElectronicReceipt,
@@ -203,20 +205,6 @@ type ElectronicReceiptRow = QueryResultRow & {
   record: unknown;
 };
 
-export interface OrderPartnerNotificationRoute {
-  orderId: string;
-  tenantId: string;
-  partnerId: string;
-  entrySlug: string;
-  partnerUserRef: string;
-  drtsPassengerId: string;
-  passengerSubjectRef: string;
-  identityLinkedAt: string;
-  consentBundleVersion: string;
-  notificationPolicyVersion: string;
-  rideRef: string;
-  createdAt: string;
-}
 
 @Injectable()
 export class MultiTaxiRepository {
