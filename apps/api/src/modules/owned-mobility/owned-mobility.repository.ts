@@ -637,7 +637,9 @@ export class OwnedMobilityRepository {
       return;
     }
 
-    await this.persistChangesWithExecutor(this.databaseService!, changes);
+    await this.withTransaction((executor) =>
+      this.persistChangesWithExecutor(executor, changes),
+    );
   }
 
   async withTransaction<T>(work: (executor: PoolClient) => Promise<T>) {
