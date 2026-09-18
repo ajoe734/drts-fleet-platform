@@ -1,4 +1,4 @@
-import { TenantPartnerRepository } from "../tenant-partner/tenant-partner.repository";
+import { TenantPartnerService } from "../tenant-partner/tenant-partner.service";
 import { PartnerUserIdentityLinkRepository } from "../tenant-partner/partner-user-identity-link.repository";
 import { PLATFORM_CURRENCY } from "@drts/contracts";
 import { createHash, randomBytes, randomUUID } from "node:crypto";
@@ -171,7 +171,7 @@ export class MultiTaxiService implements OnModuleInit {
     @Optional()
     private readonly pushSubscriptionRepository?: PassengerPushRepository,
     @Optional()
-    private readonly tenantPartnerRepository?: TenantPartnerRepository,
+    private readonly tenantPartnerService?: TenantPartnerService,
     @Optional()
     private readonly partnerUserIdentityLinkRepository?: PartnerUserIdentityLinkRepository,
   ) {}
@@ -437,17 +437,27 @@ export class MultiTaxiService implements OnModuleInit {
       identity,
       requestId,
     );
-    
-    if (identity?.realm === "partner" && identity.partnerEntrySlug && identity.drtsPassengerId) {
-      const link = await this.partnerUserIdentityLinkRepository.findByDrtsPassengerId(
+
+    if (
+      identity?.realm === "partner" &&
+      identity.partnerEntrySlug &&
+      identity.drtsPassengerId
+    ) {
+      const link =
+        await this.partnerUserIdentityLinkRepository?.findByDrtsPassengerId(
+          identity.partnerEntrySlug,
+          identity.drtsPassengerId,
+        );
+      const entry = this.tenantPartnerService?.getPartnerEntry(
         identity.partnerEntrySlug,
-        identity.drtsPassengerId
       );
-      const entry = await this.tenantPartnerRepository.loadPartnerChannelEntry(identity.partnerEntrySlug);
-      
+
       if (link && entry) {
         // SD §4: 建立正式 order 的交易內寫入 (here it's right after, but close enough for this test scope).
-        const accessResult = await this.createRideAccessResult(order, requestId);
+        const accessResult = await this.createRideAccessResult(
+          order,
+          requestId,
+        );
         await this.repository?.persistOrderPartnerNotificationRoute({
           orderId: order.orderId,
           tenantId: entry.tenantId,
@@ -455,17 +465,20 @@ export class MultiTaxiService implements OnModuleInit {
           entrySlug: entry.entrySlug,
           partnerUserRef: link.partnerUserRef,
           drtsPassengerId: link.drtsPassengerId,
-          passengerSubjectRef: identity.subject || identity.drtsPassengerId || 'unknown',
+          passengerSubjectRef:
+            identity.subject || identity.drtsPassengerId || "unknown",
           identityLinkedAt: link.linkedAt,
-          consentBundleVersion: link.consentScope || 'passenger_identity_link',
-          notificationPolicyVersion: 'partner_notification_v1',
+          consentBundleVersion: link.consentScope || "passenger_identity_link",
+          notificationPolicyVersion: "partner_notification_v1",
           rideRef: order.orderId,
-          createdAt: new Date().toISOString()
+          createdAt: new Date().toISOString(),
         });
-        
+
         // SD §11: mobility.phase1_partner_notification_sequences
-        await this.repository?.allocatePartnerNotificationSequence(order.orderId);
-        
+        await this.repository?.allocatePartnerNotificationSequence(
+          order.orderId,
+        );
+
         return accessResult;
       }
     }

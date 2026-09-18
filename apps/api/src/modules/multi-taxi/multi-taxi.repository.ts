@@ -220,8 +220,9 @@ export interface OrderPartnerNotificationRoute {
 
 @Injectable()
 export class MultiTaxiRepository {
-
-  async persistOrderPartnerNotificationRoute(route: OrderPartnerNotificationRoute): Promise<void> {
+  async persistOrderPartnerNotificationRoute(
+    route: OrderPartnerNotificationRoute,
+  ): Promise<void> {
     if (!this.isEnabled()) return;
     await this.databaseService!.query(
       `
@@ -260,7 +261,6 @@ export class MultiTaxiRepository {
     return this.databaseService?.isEnabled() ?? false;
   }
 
-  
   async allocatePartnerNotificationSequence(orderId: string): Promise<number> {
     if (!this.isEnabled()) return 1;
     const result = await this.databaseService!.query(
@@ -272,6 +272,9 @@ export class MultiTaxiRepository {
       `,
       [orderId],
     );
+    if (!result.rows[0]) {
+      return 0; // Or whatever fallback
+    }
     // returning the previous value which is next_sequence - 1
     return parseInt(result.rows[0].next_sequence, 10) - 1;
   }

@@ -1,4 +1,8 @@
-import { Injectable, NotFoundException, ConflictException } from "@nestjs/common";
+import {
+  Injectable,
+  NotFoundException,
+  ConflictException,
+} from "@nestjs/common";
 import { randomUUID } from "crypto";
 
 import {
@@ -8,9 +12,9 @@ import {
 import { PartnerEntryNotificationBindingRepository } from "./partner-entry-notification-binding.repository";
 import { TenantPartnerService } from "./tenant-partner.service";
 
-export interface UpdateBindingDto {
-  webhookId: string;
-  eventTypes: PartnerPassengerEventType[];
+export class UpdateBindingDto {
+  webhookId!: string;
+  eventTypes!: PartnerPassengerEventType[];
   expectedVersion?: number;
 }
 
@@ -21,7 +25,9 @@ export class PartnerEntryNotificationBindingService {
     private readonly tenantPartnerService: TenantPartnerService,
   ) {}
 
-  async getBinding(entrySlug: string): Promise<PartnerEntryNotificationBinding | null> {
+  async getBinding(
+    entrySlug: string,
+  ): Promise<PartnerEntryNotificationBinding | null> {
     return this.bindingRepository.findByEntrySlug(entrySlug);
   }
 
@@ -36,7 +42,10 @@ export class PartnerEntryNotificationBindingService {
 
     let binding = await this.bindingRepository.findByEntrySlug(entrySlug);
     if (binding) {
-      if (dto.expectedVersion !== undefined && binding.version !== dto.expectedVersion) {
+      if (
+        dto.expectedVersion !== undefined &&
+        binding.version !== dto.expectedVersion
+      ) {
         throw new ConflictException("Binding version mismatch");
       }
       binding.webhookId = dto.webhookId;
@@ -69,13 +78,15 @@ export class PartnerEntryNotificationBindingService {
     return binding;
   }
 
-  async enableBinding(entrySlug: string): Promise<PartnerEntryNotificationBinding> {
+  async enableBinding(
+    entrySlug: string,
+  ): Promise<PartnerEntryNotificationBinding> {
     const binding = await this.bindingRepository.findByEntrySlug(entrySlug);
     if (!binding) {
       throw new NotFoundException(`Binding not found for entry: ${entrySlug}`);
     }
     // "enable 需要該 binding version + 當前 endpoint fingerprint 的成功通知合約測試"
-    // Since we don't fully implement test logic in this task (transport/dispatch is next task), 
+    // Since we don't fully implement test logic in this task (transport/dispatch is next task),
     // we just do basic enable if it was validated.
     // Assuming it's validated for now or we just flip it since test is pending.
     binding.state = "ready";
@@ -84,7 +95,9 @@ export class PartnerEntryNotificationBindingService {
     return binding;
   }
 
-  async disableBinding(entrySlug: string): Promise<PartnerEntryNotificationBinding> {
+  async disableBinding(
+    entrySlug: string,
+  ): Promise<PartnerEntryNotificationBinding> {
     const binding = await this.bindingRepository.findByEntrySlug(entrySlug);
     if (!binding) {
       throw new NotFoundException(`Binding not found for entry: ${entrySlug}`);
