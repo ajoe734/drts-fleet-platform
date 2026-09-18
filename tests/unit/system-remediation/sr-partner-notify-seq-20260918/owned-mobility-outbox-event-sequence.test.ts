@@ -53,11 +53,21 @@ describe("OwnedMobilityRepository consumer notification outbox event sequence", 
     const orderId = `test-order-${randomUUID()}`;
     const outboxId = `outbox-seq-${randomUUID()}`;
 
+    // Disable FK checks for seed data
+    await pool.query(`SET session_replication_role = 'replica';`);
+    await pool.query(
+      `INSERT INTO mobility.phase1_order_partner_notification_routes (
+        order_id, tenant_id, partner_id, entry_slug, partner_user_ref, drts_passenger_id, passenger_subject_ref, identity_linked_at, consent_bundle_version, ride_ref, created_at
+      ) VALUES ($1, 'tenant', 'partner', 'entry', 'user', 'drts', 'subject', now(), 'v1', 'ride', now()) ON CONFLICT DO NOTHING`,
+      [orderId]
+    );
+
     // Seed sequence for this order
     await pool.query(
       `INSERT INTO mobility.phase1_partner_notification_sequences (order_id, next_sequence) VALUES ($1, 1)`,
       [orderId]
     );
+    await pool.query(`SET session_replication_role = 'origin';`);
 
     const outbox: any = {
       outboxId,
@@ -79,16 +89,21 @@ describe("OwnedMobilityRepository consumer notification outbox event sequence", 
       await ownedMobilityRepository.withTransaction(async (tx) => {
         // Mock the query to throw an error ONLY on INSERT to simulate insertion failure
         const originalQuery = tx.query.bind(tx);
-        (tx as any).query = async (text: string, values: any[]) => {
-          if (text.includes("INSERT INTO ops.consumer_notification_outbox")) {
-            throw new Error("Simulated insertion failure");
+        (tx as any).query = function(...args: any[]) {
+          const text = args[0];
+          if (typeof text === 'string' && text.includes("INSERT INTO ops.consumer_notification_outbox")) {
+            return Promise.reject(new Error("Simulated insertion failure"));
           }
-          return originalQuery(text, values);
+          return originalQuery.apply(tx, args as any);
         };
 
-        await ownedMobilityRepository.persistOrderWorkflow(tx as any, {
-          consumerNotificationOutbox: [outbox],
-        });
+        try {
+          await ownedMobilityRepository.persistOrderWorkflow(tx as any, {
+            consumerNotificationOutbox: [outbox],
+          });
+        } finally {
+          (tx as any).query = originalQuery;
+        }
       });
     } catch (err) {
       errorThrown = true;
