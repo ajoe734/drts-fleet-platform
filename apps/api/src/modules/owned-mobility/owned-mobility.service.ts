@@ -1039,6 +1039,10 @@ export class OwnedMobilityService
     identity?: BootstrapRequestIdentity | null,
     requestId?: string,
     callContext?: MultiTaxiCallContext,
+    partnerNotificationContextFactory?: (orderId: string) => {
+      route: Record<string, any>;
+      sequence: Record<string, any>;
+    },
   ): MaybePromise<OwnedOrderRecord> {
     this.assertNoCanonicalMultiTaxiContextOverrides(command);
     this.assertAddress(command.pickup?.address, "pickup.address");
@@ -1095,6 +1099,7 @@ export class OwnedMobilityService
           identity,
           requestId,
           callContext,
+          partnerNotificationContextFactory,
         ),
       );
     }
@@ -1106,6 +1111,7 @@ export class OwnedMobilityService
       identity,
       requestId,
       callContext,
+      partnerNotificationContextFactory,
     );
   }
 
@@ -1116,6 +1122,10 @@ export class OwnedMobilityService
     identity: BootstrapRequestIdentity | null | undefined,
     requestId: string | undefined,
     callContext: MultiTaxiCallContext | undefined,
+    partnerNotificationContextFactory?: (orderId: string) => {
+      route: Record<string, any>;
+      sequence: Record<string, any>;
+    },
   ): OwnedOrderRecord {
     const serviceProduct =
       this.serviceProductService?.getRuntimeServiceProductByType(
@@ -1239,7 +1249,20 @@ export class OwnedMobilityService
       },
     );
     this.persistChanges(
-      { orders: [order], dispatchTraceLogs: [traceLog] },
+      {
+        orders: [order],
+        dispatchTraceLogs: [traceLog],
+        ...(partnerNotificationContextFactory
+          ? {
+              orderPartnerNotificationRoutes: [
+                partnerNotificationContextFactory(order.orderId).route,
+              ],
+              partnerNotificationSequences: [
+                partnerNotificationContextFactory(order.orderId).sequence,
+              ],
+            }
+          : {}),
+      },
       "create_multi_taxi_ride",
     );
     this.recordAudit(

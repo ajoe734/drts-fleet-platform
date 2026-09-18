@@ -431,56 +431,61 @@ export class MultiTaxiService implements OnModuleInit {
   ) {
     this.assertServiceProductPolicy();
     const authorization = this.resolveActiveAuthorization();
-    const order = await this.ownedMobilityService.createMultiTaxiRide(
-      command,
-      authorization,
-      identity,
-      requestId,
-    );
 
+    let link: any = null;
+    let entry: any = null;
     if (
       identity?.realm === "partner" &&
       identity.partnerEntrySlug &&
       identity.drtsPassengerId
     ) {
-      const link =
+      link =
         await this.partnerUserIdentityLinkRepository?.findByDrtsPassengerId(
           identity.partnerEntrySlug,
           identity.drtsPassengerId,
         );
-      const entry = this.tenantPartnerService?.getPartnerEntry(
+      entry = this.tenantPartnerService?.getPartnerEntry(
         identity.partnerEntrySlug,
       );
+    }
 
-      if (link && entry) {
-        // SD §4: 建立正式 order 的交易內寫入 (here it's right after, but close enough for this test scope).
-        const accessResult = await this.createRideAccessResult(
-          order,
-          requestId,
-        );
-        await this.repository?.persistOrderPartnerNotificationRoute({
-          orderId: order.orderId,
-          tenantId: entry.tenantId,
-          partnerId: entry.partnerId,
-          entrySlug: entry.entrySlug,
-          partnerUserRef: link.partnerUserRef,
-          drtsPassengerId: link.drtsPassengerId,
-          passengerSubjectRef:
-            identity.subject || identity.drtsPassengerId || "unknown",
-          identityLinkedAt: link.linkedAt,
-          consentBundleVersion: link.consentScope || "passenger_identity_link",
-          notificationPolicyVersion: "partner_notification_v1",
-          rideRef: order.orderId,
-          createdAt: new Date().toISOString(),
-        });
+    const partnerNotificationContextFactory =
+      link && entry
+        ? (orderId: string) => ({
+            route: {
+              orderId,
+              tenantId: entry.tenantId,
+              partnerId: entry.partnerId,
+              entrySlug: entry.entrySlug,
+              partnerUserRef: link.partnerUserRef,
+              drtsPassengerId: link.drtsPassengerId,
+              passengerSubjectRef:
+                identity!.subject || identity!.drtsPassengerId || "unknown",
+              identityLinkedAt: link.linkedAt,
+              consentBundleVersion:
+                link.consentScope || "passenger_identity_link",
+              notificationPolicyVersion: "partner_notification_v1",
+              rideRef: orderId,
+              createdAt: new Date().toISOString(),
+            },
+            sequence: {
+              orderId,
+              nextSequence: 1,
+            },
+          })
+        : undefined;
 
-        // SD §11: mobility.phase1_partner_notification_sequences
-        await this.repository?.allocatePartnerNotificationSequence(
-          order.orderId,
-        );
+    const order = await this.ownedMobilityService.createMultiTaxiRide(
+      command,
+      authorization,
+      identity,
+      requestId,
+      undefined,
+      partnerNotificationContextFactory,
+    );
 
-        return accessResult;
-      }
+    if (link && entry) {
+      return this.createRideAccessResult(order, requestId);
     }
 
     return this.createRideAccessResult(order, requestId);

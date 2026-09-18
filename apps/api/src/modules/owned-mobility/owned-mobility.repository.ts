@@ -178,6 +178,8 @@ type PersistOwnedMobilityChanges = {
   dispatchTraceLogs?: readonly DispatchTraceLogRecord[];
   passengerDisclosureSnapshots?: readonly PassengerDispatchDisclosureSnapshot[];
   consumerNotificationOutbox?: readonly ConsumerNotificationOutboxRecord[];
+  orderPartnerNotificationRoutes?: readonly Record<string, any>[];
+  partnerNotificationSequences?: readonly Record<string, any>[];
 };
 
 export type DriverTaskCompletionBundleRecord = {
@@ -1549,6 +1551,51 @@ export class OwnedMobilityRepository {
   ) {
     const writes: Array<() => Promise<unknown>> = [];
 
+    for (const route of changes.orderPartnerNotificationRoutes ?? []) {
+      writes.push(() =>
+        executor.query(
+          `
+            INSERT INTO mobility.phase1_order_partner_notification_routes (
+              order_id, tenant_id, partner_id, entry_slug, partner_user_ref,
+              drts_passenger_id, passenger_subject_ref, identity_linked_at,
+              consent_bundle_version, notification_policy_version, ride_ref,
+              created_at, record
+            ) VALUES (
+              $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13::jsonb
+            )
+          `,
+          [
+            route.orderId,
+            route.tenantId,
+            route.partnerId,
+            route.entrySlug,
+            route.partnerUserRef,
+            route.drtsPassengerId,
+            route.passengerSubjectRef,
+            route.identityLinkedAt,
+            route.consentBundleVersion,
+            route.notificationPolicyVersion,
+            route.rideRef,
+            route.createdAt,
+            JSON.stringify(route),
+          ],
+        ),
+      );
+    }
+
+    for (const seq of changes.partnerNotificationSequences ?? []) {
+      writes.push(() =>
+        executor.query(
+          `
+            INSERT INTO mobility.phase1_partner_notification_sequences (
+              order_id, next_sequence
+            ) VALUES ($1, $2)
+          `,
+          [seq.orderId, seq.nextSequence],
+        ),
+      );
+    }
+
     for (const order of changes.orders ?? []) {
       writes.push(() =>
         executor.query(
@@ -1827,6 +1874,20 @@ export class OwnedMobilityRepository {
             snapshot.createdAt,
             snapshot.supersededAt,
           ],
+        ),
+      );
+    }
+
+    for (const outbox of changes.consumerNotificationOutbox ?? []) {
+      writes.push(() =>
+        executor.query(
+          `
+            UPDATE mobility.phase1_partner_notification_sequences
+            SET next_sequence = next_sequence + 1
+            WHERE order_id = $1
+            RETURNING next_sequence - 1 AS event_sequence
+          `,
+          [outbox.orderId],
         ),
       );
     }

@@ -85,10 +85,25 @@ export class PartnerEntryNotificationBindingService {
     if (!binding) {
       throw new NotFoundException(`Binding not found for entry: ${entrySlug}`);
     }
-    // "enable 需要該 binding version + 當前 endpoint fingerprint 的成功通知合約測試"
-    // Since we don't fully implement test logic in this task (transport/dispatch is next task),
-    // we just do basic enable if it was validated.
-    // Assuming it's validated for now or we just flip it since test is pending.
+
+    const endpoint = this.tenantPartnerService.getWebhookEndpoint(
+      binding.tenantId,
+      binding.webhookId,
+    );
+    if (!endpoint) {
+      throw new ConflictException("Webhook endpoint not found");
+    }
+
+    const currentFingerprint = `${endpoint.url}|${endpoint.secretVersion}`;
+    if (
+      binding.validatedEndpointFingerprint !== currentFingerprint ||
+      !binding.validatedAt
+    ) {
+      throw new ConflictException(
+        "Binding has not passed contract tests for the current endpoint configuration.",
+      );
+    }
+
     binding.state = "ready";
     binding.updatedAt = new Date().toISOString();
     await this.bindingRepository.persist(binding);
@@ -109,13 +124,21 @@ export class PartnerEntryNotificationBindingService {
   }
 
   async testBinding(entrySlug: string): Promise<void> {
-    // Tests the binding, updates fingerprint
     const binding = await this.bindingRepository.findByEntrySlug(entrySlug);
     if (!binding) {
       throw new NotFoundException(`Binding not found for entry: ${entrySlug}`);
     }
+
+    const endpoint = this.tenantPartnerService.getWebhookEndpoint(
+      binding.tenantId,
+      binding.webhookId,
+    );
+    if (!endpoint) {
+      throw new NotFoundException("Webhook endpoint not found");
+    }
+
     // Simulation for this task, would dispatch test payload
-    binding.validatedEndpointFingerprint = "mock-fingerprint";
+    binding.validatedEndpointFingerprint = `${endpoint.url}|${endpoint.secretVersion}`;
     binding.validatedAt = new Date().toISOString();
     binding.updatedAt = new Date().toISOString();
     await this.bindingRepository.persist(binding);
