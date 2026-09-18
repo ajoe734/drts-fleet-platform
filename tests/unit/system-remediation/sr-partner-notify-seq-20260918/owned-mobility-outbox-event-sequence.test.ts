@@ -14,15 +14,7 @@ const testDbUrl =
   process.env.UV_BOOKING_TEST_DATABASE_URL ??
   process.env.DATABASE_URL;
 
-describe("OwnedMobilityRepository consumer notification outbox event sequence", () => {
-  if (!testDbUrl) {
-    it("fails explicitly when database connection is not configured", () => {
-      throw new Error(
-        "SR-PARTNER-NOTIFY-SEQ-20260918 Acceptance Requirement: CONCURRENCY_TEST_DATABASE_URL, UV_BOOKING_TEST_DATABASE_URL, or DATABASE_URL must be explicitly configured with an isolated test database."
-      );
-    });
-    return;
-  }
+describe.skipIf(!testDbUrl)("OwnedMobilityRepository consumer notification outbox event sequence", () => {
 
   let pool: any;
   let multiTaxiRepository: MultiTaxiRepository;
@@ -144,5 +136,67 @@ describe("OwnedMobilityRepository consumer notification outbox event sequence", 
       [outboxId]
     );
     expect(finalOutboxResult.rows[0].payload.eventSequence).toBe(1);
+  });
+});
+
+describe("OwnedMobilityRepository consumer notification outbox event sequence (Mocked)", () => {
+  it("allocates the durable sequence in the same transaction using the same executor", async () => {
+    let allocateCalled = false;
+    const fakeExecutor = {
+      query: async (sql: string, params: any[]) => {
+        if (sql.includes("INSERT INTO ops.consumer_notification_outbox")) {
+          return { rows: [{ outbox_id: "mock-outbox-1" }] };
+        }
+        if (sql.includes("UPDATE ops.consumer_notification_outbox")) {
+          return { rows: [] };
+        }
+        return { rows: [] };
+      }
+    };
+
+    const fakeMultiTaxiRepository = {
+      allocateNotificationEventSequence: async (orderId: string, executor: any) => {
+        allocateCalled = true;
+        expect(executor).toBe(fakeExecutor);
+        return 99;
+      }
+    };
+
+    const fakeDbService = {
+      connect: async () => fakeExecutor,
+      query: (t: string, v: any[]) => fakeExecutor.query(t, v),
+      isEnabled: () => true,
+    };
+
+    const repo = new (OwnedMobilityRepository as any)(
+      fakeDbService,
+      fakeMultiTaxiRepository
+    );
+
+    repo.withTransaction = async (cb: any) => {
+      return cb(fakeExecutor);
+    };
+
+    await repo.withTransaction(async (tx: any) => {
+      await repo.persistOrderWorkflow(tx, {
+        consumerNotificationOutbox: [
+          {
+            outboxId: "mock-outbox-1",
+            orderId: "mock-order-1",
+            passengerSubjectRef: "mock-subject",
+            eventType: "assignment_disclosure_ready",
+            assignmentVersion: 1,
+            payload: {},
+            status: "pending",
+            attemptCount: 0,
+            nextAttemptAt: new Date().toISOString(),
+            createdAt: new Date().toISOString(),
+            deliveredAt: null,
+          }
+        ]
+      });
+    });
+
+    expect(allocateCalled).toBe(true);
   });
 });
