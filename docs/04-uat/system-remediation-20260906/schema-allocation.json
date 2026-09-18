@@ -119,6 +119,12 @@
       "amended_at": "2026-09-13",
       "scope": "Launch schema allocations V0101-V0103; pre-existing allocations and additional_allocations are preserved untouched",
       "reason": "SR-LAUNCH-SCHEMA-20260913 allocates three collision-free migrations (V0101__voice_work_recovery_audit.sql, V0102__registry_expiry_processing.sql, V0103__notification_mail_outbox.sql) for Phase 1 launch remediation per consensus-packet.md (B4, B5, B7) and user confirmation on 2026-09-13. Updated per Codex review to establish finite append-only attempt event contract with duplicate protection in V0101, concrete trigger-enforced immutability boundary in V0102, and single persisted attempt authority in V0103 with redundant table removed, preserving all existing rows and data without duplicate authorities."
+    },
+    {
+      "amended_by_task_id": "SR-PARTNER-NOTIFY-CON-20260917",
+      "amended_at": "2026-09-18",
+      "scope": "Appended `partner_notification_allocations` only; all prior allocations, amendments, additional_allocations and launch_allocations entries above are unchanged",
+      "reason": "SR-PARTNER-NOTIFY-CON-20260917 finalizes the wire contract, entry binding and order-route shapes for routing passenger notifications to the partner app's own native push (docs/02-architecture/partner-notification-20260917/01_system_sa_sd.md §11), and allocates migration numbers for that design's four new tables. At inspected base (origin/dev, fixed baseline 38a68a79959619faa5a10b9782e77dd7ca41f4c2) the highest canonical infra migration is V0103__notification_mail_outbox.sql (infra/migrations/); V0104-V0105 below are reserved by this task and were unclaimed by any other allocation entry in this file at allocation time. Per the SR-CONTRACT-001 / SR-RECOVERY-CONTRACTS-20260911 precedent, this task supplies typed contracts (packages/contracts/src/partner-passenger-notification.ts) and migration allocation only; it does not write the infra/migrations/*.sql files themselves, does not implement transport, and does not change DI wiring or webhook-dispatch.service.ts. The four tables are grouped into two migration files by which downstream backend task owns their write path: V0104 (binding + route + sequence counter) for SR-PARTNER-NOTIFY-ROUTE-20260917, and V0105 (delivery context) for SR-PARTNER-NOTIFY-TRANSPORT-20260917/SR-PARTNER-NOTIFY-ACK-20260917, mirroring how V0098-V0100 were grouped by consuming task rather than one file per table."
     }
   ],
   "additional_allocations": [
@@ -266,6 +272,81 @@
       "downstream_tasks": [
         "SR-QA-WEBHOOK-001",
         "SR-LIVE-MAIL-001"
+      ]
+    }
+  ],
+  "partner_notification_allocations": [
+    {
+      "task_id": "SR-PARTNER-NOTIFY-CON-20260917",
+      "version": "V0104",
+      "migration_filename": "V0104__sr_partner_notification_binding_and_routing.sql",
+      "domain": "partner_notification_binding_and_routing",
+      "target_schema": "admin + mobility",
+      "primary_tables": [
+        "admin.phase1_partner_notification_bindings",
+        "mobility.phase1_order_partner_notification_routes",
+        "mobility.phase1_partner_notification_sequences"
+      ],
+      "referenced_tables": [
+        "admin.phase1_partner_channel_entries",
+        "admin.phase1_tenant_webhook_endpoints",
+        "admin.phase1_partner_user_identity_links"
+      ],
+      "table_invariants": [
+        "admin.phase1_partner_notification_bindings: entry_slug varchar(150) PRIMARY KEY REFERENCES admin.phase1_partner_channel_entries(entry_slug) — one primary binding per entry in v1 (design §3.1); binding_id uuid NOT NULL DEFAULT gen_random_uuid() UNIQUE — the stable id later referenced from delivery contexts, never reused across entries.",
+        "tenant_id varchar(100) NOT NULL, partner_id varchar(100) NOT NULL, webhook_id varchar(100) NOT NULL REFERENCES admin.phase1_tenant_webhook_endpoints(webhook_id) — application code must additionally verify entry.tenant_id = binding.tenant_id = webhook.tenant_id and entry.partner_id = binding.partner_id before any dispatch (§3.1); this is not a DB-level CHECK because admin.phase1_tenant_webhook_endpoints carries no partner_id column today.",
+        "version integer NOT NULL DEFAULT 1 — optimistic concurrency: PUT is `WHERE entry_slug=$1 AND version=$expectedVersion` and the same statement sets version = version + 1; a URL/events/owner/secret rotation on the referenced endpoint requires this binding's state to return to test_pending and be re-validated (design §3.1) — the migration provides the column, the transition itself is application logic.",
+        "state varchar(20) NOT NULL DEFAULT 'test_pending' CHECK (state IN ('test_pending','ready','disabled')) — matches PartnerEntryNotificationBindingState in packages/contracts/src/partner-passenger-notification.ts.",
+        "purpose varchar(50) NOT NULL DEFAULT 'passenger_notification' CHECK (purpose = 'passenger_notification') — fixed for v1; event_types jsonb NOT NULL holds a subset of the five PartnerPassengerEventType values and must be a subset of the referenced webhook's own `events` allowlist at dispatch time, not enforced by a DB constraint.",
+        "acknowledgement_policy varchar(50) NOT NULL DEFAULT 'durable_partner_acceptance_v1' CHECK (acknowledgement_policy = 'durable_partner_acceptance_v1'); validated_endpoint_fingerprint text NULL, validated_at timestamptz NULL — both null until a passenger.notification.test.v1 binding test succeeds; enabling (state -> 'ready') requires validated_endpoint_fingerprint to match the endpoint's current fingerprint, never a stale one.",
+        "updated_at timestamptz NOT NULL DEFAULT now(). Binding mutation reuses the existing tenant-webhook audit path; no separate audit table is allocated by this migration.",
+        "mobility.phase1_order_partner_notification_routes: order_id varchar(255) PRIMARY KEY — one immutable route per order (design §4), no history table; tenant_id varchar(100) NOT NULL, partner_id varchar(100) NOT NULL, entry_slug varchar(150) NOT NULL REFERENCES admin.phase1_partner_channel_entries(entry_slug).",
+        "partner_user_ref varchar(255) NOT NULL, drts_passenger_id varchar(100) NOT NULL — both copied from the authenticated handoff / admin.phase1_partner_user_identity_links row inside the same transaction that creates the order, never re-derived from a later or self-asserted session; passenger_subject_ref varchar(255) NOT NULL is for internal reconciliation only and must never be copied into the outbound wire payload (design §6).",
+        "identity_linked_at timestamptz NOT NULL, consent_bundle_version varchar(50) NOT NULL, notification_policy_version varchar(50) NOT NULL DEFAULT 'partner_notification_v1' CHECK (notification_policy_version = 'partner_notification_v1'), ride_ref varchar(255) NOT NULL UNIQUE — not usable as a bearer credential; unique so a navigation resolve (design §10) cannot be replayed against a different order. created_at timestamptz NOT NULL DEFAULT now().",
+        "No route_missing/route_ambiguous/owner_changed row is ever inserted into this table — those are absence-of-route or stale-route outcomes recorded as failure_reason on V0105's delivery context, never a placeholder row here. When an entry's tenant_id later changes, this row is not rewritten; the owner_changed check compares this frozen tenant_id against the entry's current tenant_id at dispatch time.",
+        "mobility.phase1_partner_notification_sequences: order_id varchar(255) PRIMARY KEY REFERENCES mobility.phase1_order_partner_notification_routes(order_id), next_sequence bigint NOT NULL DEFAULT 1.",
+        "Allocation transaction: `UPDATE ... SET next_sequence = next_sequence + 1 WHERE order_id = $1 RETURNING next_sequence - 1 AS event_sequence`, executed in the same transaction that creates the outbox row (design §5); a retry of the same logical event reuses the previously allocated sequence and must not call this allocator a second time for one event. This table — not the existing in-memory SSE eventVersion counter on PassengerRideAuthorityView (phase1-p5-s3-multi-taxi.ts), which is not durable and resets across reconnects — is the sole durable ordering authority for partner notifications."
+      ],
+      "description": "夥伴通知綁定、訂單通知路由快照與每筆訂單序號配置 migration",
+      "downstream_tasks": [
+        "SR-PARTNER-NOTIFY-ROUTE-20260917",
+        "SR-PARTNER-NOTIFY-ACK-20260917",
+        "SR-PARTNER-NOTIFY-TRANSPORT-20260917",
+        "SR-PARTNER-NOTIFY-QA-20260917"
+      ]
+    },
+    {
+      "task_id": "SR-PARTNER-NOTIFY-CON-20260917",
+      "version": "V0105",
+      "migration_filename": "V0105__sr_partner_notification_delivery_context.sql",
+      "domain": "partner_notification_delivery_context",
+      "target_schema": "mobility",
+      "primary_tables": [
+        "mobility.phase1_partner_notification_delivery_contexts"
+      ],
+      "referenced_tables": [
+        "ops.consumer_notification_outbox",
+        "mobility.phase1_order_partner_notification_routes",
+        "admin.phase1_partner_notification_bindings",
+        "admin.phase1_tenant_webhook_endpoints"
+      ],
+      "table_invariants": [
+        "mobility.phase1_partner_notification_delivery_contexts: outbox_id varchar(255) PRIMARY KEY REFERENCES ops.consumer_notification_outbox(outbox_id) — one immutable context per outbox row, written before the first send attempt (design §4); never rewritten with a different route/binding/payload for a retry. delivery_id uuid NOT NULL DEFAULT gen_random_uuid() UNIQUE — the deliveryId on the WebhookEventPayload wire envelope, fixed at insert.",
+        "order_id varchar(255) NOT NULL REFERENCES mobility.phase1_order_partner_notification_routes(order_id), entry_slug varchar(150) NOT NULL, tenant_id varchar(100) NOT NULL, partner_id varchar(100) NOT NULL — denormalised from the route row at insert time for ownership checks without a join; these four columns must equal the referenced route's values and are never re-derived from caller input.",
+        "binding_id uuid NOT NULL REFERENCES admin.phase1_partner_notification_bindings(binding_id), binding_version integer NOT NULL, webhook_id varchar(100) NOT NULL, endpoint_fingerprint text NOT NULL — the binding/endpoint snapshot at first-attempt time; a later binding or endpoint rotation does not retroactively change an already-created context row.",
+        "wire_payload jsonb NOT NULL, wire_payload_hash text NOT NULL — the exact PartnerPassengerNotificationWirePayload (packages/contracts/src/partner-passenger-notification.ts) already sent or about to be sent; a retry re-sends these exact bytes, never regenerated content, so a hash mismatch is detectable. event_sequence bigint NOT NULL — copied once from phase1_partner_notification_sequences at allocation time, immutable afterward. expires_at timestamptz NOT NULL.",
+        "delivery_target varchar(20) NOT NULL DEFAULT 'partner_endpoint' CHECK (delivery_target = 'partner_endpoint'). delivery_stage varchar(20) NULL CHECK (delivery_stage IN ('outbox_persisted','partner_accepted','provider_accepted','device_received','opened')) — null until a completed attempt sets it; this design version's own code paths may only ever write 'partner_accepted' or leave it null on failure — 'provider_accepted'/'device_received'/'opened' are reserved for a future, separately versioned device-callback task and must not be written speculatively.",
+        "retry_disposition varchar(30) NULL CHECK (retry_disposition IN ('automatic','configuration_blocked','manual_only','terminal','none')), failure_reason varchar(50) NULL CHECK (failure_reason IN ('configuration_blocked','endpoint_disabled','route_missing','route_ambiguous','owner_changed','recipient_revoked','provider_transient_error','credential_rejected','endpoint_unavailable','partner_ack_invalid','notification_expired','notification_obsolete','notification_superseded')) — set together from one completed attempt's outcome, per PARTNER_NOTIFICATION_FAILURE_REASON_RETRY_DISPOSITIONS in packages/contracts/src/partner-passenger-notification.ts; a worker selecting rows to retry must filter on the existing outbox status, next_attempt_at, this retry_disposition and expires_at together — reading outbox status alone would let a generic worker infinitely re-scan configuration_blocked/manual_only/terminal rows (design §9).",
+        "receipt_id text NULL — must equal the partner's own response receipt_id (design §7); never a synthesized value such as 'receipt-' || outbox_id. A schema-reconciliation test should assert no row's receipt_id matches that synthetic pattern, since apps/api/src/modules/multi-taxi/passenger-push.adapter.ts:264's existing synthetic-receipt fallback is exactly the anti-pattern this column forbids for the partner transport (out of this task's write scope to fix; downstream transport task's job).",
+        "downstream_status varchar(20) NOT NULL DEFAULT 'unknown' CHECK (downstream_status = 'unknown') — first version never writes any other value; adding delivered/opened values is a future, separately versioned callback task's decision, not this migration's.",
+        "created_at timestamptz NOT NULL DEFAULT now(), delivered_at timestamptz NULL — delivered_at is set only when this transport's own ack validation completes (design §7), never the attempt's start time and never the partner's self-reported time.",
+        "Fencing ownership: ops.consumer_notification_outbox (existing, unchanged) retains sole claim/fence/retry-timer ownership; this table records receipt/outcome inside that same fence transaction (design §8 point 6) and introduces no second claim mechanism or independent retry timer."
+      ],
+      "description": "每筆 outbox 首次派送前寫入的不可變送達內文、酬載雜湊與失敗分類 migration",
+      "downstream_tasks": [
+        "SR-PARTNER-NOTIFY-ACK-20260917",
+        "SR-PARTNER-NOTIFY-TRANSPORT-20260917",
+        "SR-PARTNER-NOTIFY-QA-20260917"
       ]
     }
   ]
