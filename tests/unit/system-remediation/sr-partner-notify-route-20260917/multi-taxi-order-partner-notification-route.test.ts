@@ -140,7 +140,9 @@ describe("MultiTaxiService order-route creation (SR-PARTNER-NOTIFY-ROUTE-2026091
     );
     expect(tenantPartnerService.getPartnerEntry).toHaveBeenCalledWith(ENTRY_SLUG);
     expect(repository.writeOrderPartnerNotificationRoute).toHaveBeenCalledTimes(1);
-    const [route] = repository.writeOrderPartnerNotificationRoute.mock.calls[0];
+    const route = repository.writeOrderPartnerNotificationRoute.mock.calls[0]?.[0] as
+      | { passengerSubjectRef?: unknown }
+      | undefined;
     expect(route).toMatchObject({
       orderId: ORDER.orderId,
       tenantId: "tenant-route-001",
@@ -152,7 +154,7 @@ describe("MultiTaxiService order-route creation (SR-PARTNER-NOTIFY-ROUTE-2026091
       notificationPolicyVersion: "partner_notification_v1",
     });
     // never trusts a caller-suppliable field for the recipient reference
-    expect(route.passengerSubjectRef).not.toBe(ORDER.passenger.phone);
+    expect(route?.passengerSubjectRef).not.toBe(ORDER.passenger.phone);
   });
 
   it("does not write a route for a direct (non-partner) booking", async () => {
