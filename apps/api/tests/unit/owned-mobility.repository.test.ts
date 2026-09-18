@@ -263,7 +263,7 @@ describe("OwnedMobilityRepository", () => {
     expect(outboxSql).toContain("UPDATE mobility.phase1_partner_notification_sequences");
     expect(outboxSql).toContain("RETURNING next_sequence - 1 AS event_sequence");
     expect(outboxSql).toContain("INSERT INTO ops.consumer_notification_outbox");
-    expect(outboxSql).toContain("(SELECT event_sequence FROM seq)");
+    expect(outboxSql).toContain("(SELECT jsonb_set($6::jsonb, '{eventSequence}', to_jsonb(event_sequence)) FROM seq)");
   });
 
   it("serializes writes issued through one transaction client", async () => {
