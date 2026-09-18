@@ -1900,11 +1900,14 @@ export class OwnedMobilityRepository {
               attempt_count,
               next_attempt_at,
               created_at,
-              delivered_at,
-              event_sequence
+              delivered_at
             ) VALUES (
-              $1, $2, $3, $4, $5, $6::jsonb, $7, $8, $9, $10, $11,
-              (SELECT event_sequence FROM seq)
+              $1, $2, $3, $4, $5, 
+              COALESCE(
+                (SELECT jsonb_set($6::jsonb, '{eventSequence}', to_jsonb(event_sequence)) FROM seq),
+                $6::jsonb
+              ), 
+              $7, $8, $9, $10, $11
             )
             ON CONFLICT (outbox_id) DO NOTHING
           `,
