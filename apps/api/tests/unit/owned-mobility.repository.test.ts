@@ -259,7 +259,11 @@ describe("OwnedMobilityRepository", () => {
     ]);
 
     const [outboxSql] = query.mock.calls[1]!;
+    expect(outboxSql).toContain("WITH seq AS (");
+    expect(outboxSql).toContain("UPDATE mobility.phase1_partner_notification_sequences");
+    expect(outboxSql).toContain("RETURNING next_sequence - 1 AS event_sequence");
     expect(outboxSql).toContain("INSERT INTO ops.consumer_notification_outbox");
+    expect(outboxSql).toContain("(SELECT event_sequence FROM seq)");
   });
 
   it("serializes writes issued through one transaction client", async () => {

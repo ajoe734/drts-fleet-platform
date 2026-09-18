@@ -37,3 +37,4 @@ CREATE TABLE IF NOT EXISTS mobility.phase1_partner_notification_sequences (
     order_id varchar(255) PRIMARY KEY,
     next_sequence bigint NOT NULL
 );
+ALTER TABLE ops.consumer_notification_outbox ADD COLUMN event_sequence bigint;

@@ -618,6 +618,7 @@ export interface PassengerRideSseEventEnvelope {
 // ===========================================================================
 
 export interface ConsumerNotificationOutboxRecord {
+  eventSequence?: number;
   outboxId: string;
   orderId: string;
   passengerSubjectRef: string;

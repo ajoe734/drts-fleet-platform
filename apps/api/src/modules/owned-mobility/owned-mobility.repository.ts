@@ -1882,20 +1882,12 @@ export class OwnedMobilityRepository {
       writes.push(() =>
         executor.query(
           `
-            UPDATE mobility.phase1_partner_notification_sequences
-            SET next_sequence = next_sequence + 1
-            WHERE order_id = $1
-            RETURNING next_sequence - 1 AS event_sequence
-          `,
-          [outbox.orderId],
-        ),
-      );
-    }
-
-    for (const outbox of changes.consumerNotificationOutbox ?? []) {
-      writes.push(() =>
-        executor.query(
-          `
+            WITH seq AS (
+              UPDATE mobility.phase1_partner_notification_sequences
+              SET next_sequence = next_sequence + 1
+              WHERE order_id = $2
+              RETURNING next_sequence - 1 AS event_sequence
+            )
             INSERT INTO ops.consumer_notification_outbox (
               outbox_id,
               order_id,
@@ -1907,8 +1899,12 @@ export class OwnedMobilityRepository {
               attempt_count,
               next_attempt_at,
               created_at,
-              delivered_at
-            ) VALUES ($1, $2, $3, $4, $5, $6::jsonb, $7, $8, $9, $10, $11)
+              delivered_at,
+              event_sequence
+            ) VALUES (
+              $1, $2, $3, $4, $5, $6::jsonb, $7, $8, $9, $10, $11,
+              (SELECT event_sequence FROM seq)
+            )
             ON CONFLICT (outbox_id) DO NOTHING
           `,
           [
