@@ -143,7 +143,7 @@ describe("OwnedMobilityRepository consumer notification outbox event sequence (M
   it("allocates the durable sequence in the same transaction using the same executor", async () => {
     let allocateCalled = false;
     const fakeExecutor = {
-      query: async (sql: string, params: any[]) => {
+      query: async (sql: string) => {
         if (sql.includes("INSERT INTO ops.consumer_notification_outbox")) {
           return { rows: [{ outbox_id: "mock-outbox-1" }] };
         }
