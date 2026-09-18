@@ -43,4 +43,3 @@ CREATE TABLE IF NOT EXISTS mobility.phase1_partner_notification_sequences (
     CONSTRAINT fk_partner_notification_sequences_route FOREIGN KEY (order_id) REFERENCES mobility.phase1_order_partner_notification_routes(order_id)
 );
 
-ALTER TABLE ops.consumer_notification_outbox ADD COLUMN IF NOT EXISTS event_sequence bigint;

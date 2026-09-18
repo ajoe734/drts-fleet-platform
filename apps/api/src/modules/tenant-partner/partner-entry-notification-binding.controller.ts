@@ -103,21 +103,22 @@ export class PartnerEntryNotificationBindingController {
 
   @Get(":entrySlug/notification-deliveries")
   async getDeliveries(
-    // eslint-disable-next-line @typescript-eslint/no-unused-vars
     @Param("entrySlug") _entrySlug: string,
   ): Promise<any[]> {
-    // Deliveries fetching not fully implemented for this route task
-    return [];
+    // Descoped for SR-PARTNER-NOTIFY-ROUTE-20260917.
+    // Delivery tracking relies on delivery contexts and the outbox which
+    // is fully implemented in the subsequent TRANSPORT/ACK tasks (V0105).
+    throw new (require("@nestjs/common").NotImplementedException)("Notification delivery fetching is descoped to TRANSPORT task");
   }
 
   @Post(":entrySlug/notification-deliveries/:outboxId/retry")
   async retryDelivery(
-    // eslint-disable-next-line @typescript-eslint/no-unused-vars
     @Param("entrySlug") _entrySlug: string,
-    // eslint-disable-next-line @typescript-eslint/no-unused-vars
     @Param("outboxId") _outboxId: string,
   ): Promise<{ status: "ok" }> {
-    // Delivery retry not fully implemented for this route task
-    return { status: "ok" };
+    // Descoped for SR-PARTNER-NOTIFY-ROUTE-20260917.
+    // Delivery retries involve interaction with the new transport layer and
+    // delivery contexts, which will be implemented in the subsequent TRANSPORT/ACK tasks (V0105).
+    throw new (require("@nestjs/common").NotImplementedException)("Notification delivery retry is descoped to TRANSPORT task");
   }
 }
