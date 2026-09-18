@@ -6,6 +6,14 @@ import { OwnedMobilityModule } from "../owned-mobility/owned-mobility.module";
 import { ReportingFilingModule } from "../reporting-filing/reporting-filing.module";
 import { ReportingFilingService } from "../reporting-filing/reporting-filing.service";
 import { ServiceProductModule } from "../service-product/service-product.module";
+// SR-PARTNER-NOTIFY-ROUTE-20260917: order-route creation must resolve the
+// authenticated partner handoff's identity link, never a caller-asserted
+// one (design §4). TenantPartnerModule already exports this repository as a
+// singleton shared with the referral-embed-handoff flow that creates the
+// link in the first place; MultiTaxiModule -> TenantPartnerModule is a new,
+// one-way edge (TenantPartnerModule does not import MultiTaxiModule), so
+// this does not introduce a module cycle.
+import { TenantPartnerModule } from "../tenant-partner/tenant-partner.module";
 import {
   MASKED_CALL_PORT,
   UnavailableMaskedCallPort,
@@ -32,6 +40,7 @@ import { WebPushTransport } from "./web-push.transport";
     OwnedMobilityModule,
     ReportingFilingModule,
     ServiceProductModule,
+    TenantPartnerModule,
   ],
   controllers: [MultiTaxiController],
   providers: [

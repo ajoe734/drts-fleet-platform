@@ -68,6 +68,8 @@ import type { BootstrapRequestIdentity } from "../../common/auth";
 import { AuditNotificationService } from "../audit-notification/audit-notification.service";
 import { OwnedMobilityService } from "../owned-mobility/owned-mobility.service";
 import { ServiceProductService } from "../service-product/service-product.service";
+import { PartnerUserIdentityLinkRepository } from "../tenant-partner/partner-user-identity-link.repository";
+import { TenantPartnerService } from "../tenant-partner/tenant-partner.service";
 import { InjectMaskedCallPort, type MaskedCallPort } from "./masked-call.port";
 import {
   MultiTaxiRepository,
@@ -168,6 +170,10 @@ export class MultiTaxiService implements OnModuleInit {
     private readonly passengerPushPort?: PassengerPushPort,
     @Optional()
     private readonly pushSubscriptionRepository?: PassengerPushRepository,
+    @Optional()
+    private readonly partnerUserIdentityLinkRepository?: PartnerUserIdentityLinkRepository,
+    @Optional()
+    private readonly tenantPartnerService?: TenantPartnerService,
   ) {}
 
   async onModuleInit() {
@@ -431,6 +437,7 @@ export class MultiTaxiService implements OnModuleInit {
       identity,
       requestId,
     );
+    await this.writeOrderPartnerNotificationRouteIfApplicable(order, identity);
     return this.createRideAccessResult(order, requestId);
   }
 
@@ -452,6 +459,79 @@ export class MultiTaxiService implements OnModuleInit {
       },
     );
     return this.createRideAccessResult(order, requestId);
+  }
+
+  /**
+   * SR-PARTNER-NOTIFY-ROUTE-20260917 design §4: freezes "which partner app /
+   * which resident" for this order from the authenticated session and the
+   * existing identity link only — never from `command` (a caller could put
+   * anything in the request body). A call-center ride's `identity` is always
+   * `null` (see `createCallCenterRide` above), so it never reaches here.
+   *
+   * This is not literally inside the same DB transaction as the
+   * `phase1_owned_orders` INSERT (that transaction lives in
+   * `OwnedMobilityRepository`, outside this task's write scope) — it runs
+   * synchronously immediately after order creation returns, before any
+   * caller observes the order and before any assignment/outbox cycle can
+   * run, so "a route exists before the first outbox row" (design §4) still
+   * holds. A resolvable route write failure never fails ride creation
+   * (`writeOrderPartnerNotificationRoute` swallows and logs) — design §9:
+   * notification setup gaps must not become a ride-creation gate.
+   */
+  private async writeOrderPartnerNotificationRouteIfApplicable(
+    order: OwnedOrderRecord,
+    identity: BootstrapRequestIdentity | null,
+  ) {
+    const entrySlug = identity?.partnerEntrySlug?.trim();
+    const drtsPassengerId = identity?.drtsPassengerId?.trim();
+    if (!entrySlug || !drtsPassengerId || !this.partnerUserIdentityLinkRepository) {
+      return;
+    }
+    const link = await this.partnerUserIdentityLinkRepository
+      .findByDrtsPassengerId(entrySlug, drtsPassengerId)
+      .catch(() => null);
+    if (!link || link.status !== "active") {
+      return;
+    }
+    // tenantId/partnerId come from the platform partner-entry registry (the
+    // canonical source per design §3.1), not from the order record (multi-
+    // taxi standard-taxi orders are tenant-less by design) or from any
+    // caller-suppliable field.
+    let entry: { tenantId: string; partnerId: string } | null = null;
+    try {
+      entry = this.tenantPartnerService?.getPartnerEntry(entrySlug) ?? null;
+    } catch {
+      entry = null;
+    }
+    if (!entry) {
+      return;
+    }
+    const now = new Date().toISOString();
+    await this.repository
+      ?.writeOrderPartnerNotificationRoute({
+        orderId: order.orderId,
+        tenantId: entry.tenantId,
+        partnerId: entry.partnerId,
+        entrySlug,
+        partnerUserRef: link.partnerUserRef,
+        drtsPassengerId: link.drtsPassengerId,
+        passengerSubjectRef: this.resolvePassengerSubjectRef(order),
+        identityLinkedAt: link.linkedAt,
+        // No dedicated versioned consent-bundle store exists yet (design §6
+        // asks for one for the notification-consent notice, future work);
+        // the identity link's own consentScope is the closest existing
+        // record of what was granted and is reused here pending that.
+        consentBundleVersion: link.consentScope,
+        notificationPolicyVersion: "partner_notification_v1",
+        rideRef: order.orderId,
+        createdAt: now,
+      })
+      .catch((error) =>
+        this.repository?.reportPersistenceFailure(
+          error,
+          "write order partner notification route",
+        ),
+      );
   }
 
   async getPassengerRide(
