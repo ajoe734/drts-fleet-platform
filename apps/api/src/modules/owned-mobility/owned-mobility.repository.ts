@@ -639,7 +639,11 @@ export class OwnedMobilityRepository {
       return;
     }
 
-    await this.persistChangesWithExecutor(this.databaseService!, changes);
+    if (changes.consumerNotificationOutbox && changes.consumerNotificationOutbox.length > 0) {
+      await this.withTransaction((tx) => this.persistChangesWithExecutor(tx, changes));
+    } else {
+      await this.persistChangesWithExecutor(this.databaseService!, changes);
+    }
   }
 
   async withTransaction<T>(work: (executor: PoolClient) => Promise<T>) {
