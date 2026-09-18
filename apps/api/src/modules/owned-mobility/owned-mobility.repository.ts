@@ -640,7 +640,19 @@ export class OwnedMobilityRepository {
     }
 
     if (changes.consumerNotificationOutbox && changes.consumerNotificationOutbox.length > 0) {
-      await this.withTransaction((tx) => this.persistChangesWithExecutor(tx, changes));
+      const { consumerNotificationOutbox, ...otherChanges } = changes;
+      
+      await this.withTransaction((tx) =>
+        this.persistChangesWithExecutor(tx, { consumerNotificationOutbox }),
+      );
+      
+      const hasOtherChanges = Object.values(otherChanges).some(
+        (arr) => Array.isArray(arr) && arr.length > 0
+      );
+      
+      if (hasOtherChanges) {
+        await this.persistChangesWithExecutor(this.databaseService!, otherChanges);
+      }
     } else {
       await this.persistChangesWithExecutor(this.databaseService!, changes);
     }

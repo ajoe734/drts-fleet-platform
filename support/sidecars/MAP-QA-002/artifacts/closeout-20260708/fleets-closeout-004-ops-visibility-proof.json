@@ -1,6 +1,6 @@
 {
-  "generatedAt": "2026-09-18T16:34:40.101Z",
-  "branchSha": "gemini/sr-partner-notify-seq-20260918@a7d1d6feab1c",
+  "generatedAt": "2026-09-18T22:12:36.887Z",
+  "branchSha": "gemini/sr-partner-notify-seq-20260918@24ebc5aa4b4d",
   "closeoutTask": "FLEETS-CLOSEOUT-004",
   "scope": "repo-local Ops map model evidence; final E2E-MAP-006 promotion composes this model with FLEETS-CLOSEOUT-001 persisted snapshot proof, browser DOM screenshot evidence, backend/API readbacks, and MAP-OBS-001 final evidence.",
   "command": "pnpm exec vitest run tests/unit/map-geofence-ops-visibility-proof.test.ts --reporter=verbose",
