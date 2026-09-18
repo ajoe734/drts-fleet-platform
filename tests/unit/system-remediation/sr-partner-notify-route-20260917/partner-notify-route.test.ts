@@ -110,7 +110,7 @@ describe("SR-PARTNER-NOTIFY-ROUTE-20260917: Partner notification routing and del
 
     expect(mockOwnedMobilityService.createMultiTaxiRide).toHaveBeenCalled();
     const callArgs = mockOwnedMobilityService.createMultiTaxiRide.mock.calls[0];
-    const factory = callArgs[5];
+    const factory = callArgs?.[5];
     expect(factory).toBeDefined();
 
     const context = factory("order-123");
@@ -147,7 +147,7 @@ describe("SR-PARTNER-NOTIFY-ROUTE-20260917: Partner notification routing and del
     await service.createRide({}, identity as any);
 
     const callArgs = mockOwnedMobilityService.createMultiTaxiRide.mock.calls[0];
-    const factory = callArgs[5];
+    const factory = callArgs?.[5];
     const context = factory("order-123");
     expect(context.route.tenantId).toBe("t-2");
   });
@@ -181,7 +181,7 @@ describe("SR-PARTNER-NOTIFY-ROUTE-20260917: Partner notification routing and del
     await service.createRide({}, identity as any);
 
     const callArgs = mockOwnedMobilityService.createMultiTaxiRide.mock.calls[0];
-    const factory = callArgs[5];
+    const factory = callArgs?.[5];
     const context = factory("order-123");
 
     // The snapshot captures t-original
@@ -215,7 +215,7 @@ describe("SR-PARTNER-NOTIFY-ROUTE-20260917: Partner notification routing and del
     await service.createRide({}, identity as any);
 
     const callArgs = mockOwnedMobilityService.createMultiTaxiRide.mock.calls[0];
-    const factory = callArgs[5];
+    const factory = callArgs?.[5];
 
     // Factory should be undefined if link is missing
     expect(factory).toBeUndefined();
