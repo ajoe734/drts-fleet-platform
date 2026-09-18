@@ -42,9 +42,10 @@ export class PartnerEntryNotificationBindingService {
 
     let binding = await this.bindingRepository.findByEntrySlug(entrySlug);
     if (binding) {
+      const currentVersion = binding.version;
       if (
         dto.expectedVersion !== undefined &&
-        binding.version !== dto.expectedVersion
+        currentVersion !== dto.expectedVersion
       ) {
         throw new ConflictException("Binding version mismatch");
       }
@@ -55,6 +56,14 @@ export class PartnerEntryNotificationBindingService {
       binding.validatedEndpointFingerprint = null;
       binding.validatedAt = null;
       binding.updatedAt = new Date().toISOString();
+
+      const success = await this.bindingRepository.updateWithVersion(
+        binding,
+        currentVersion,
+      );
+      if (!success) {
+        throw new ConflictException("Binding version mismatch");
+      }
     } else {
       binding = {
         bindingId: randomUUID(),
@@ -72,9 +81,9 @@ export class PartnerEntryNotificationBindingService {
         validatedAt: null,
         updatedAt: new Date().toISOString(),
       };
+      await this.bindingRepository.persist(binding);
     }
 
-    await this.bindingRepository.persist(binding);
     return binding;
   }
 

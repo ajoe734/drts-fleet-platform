@@ -484,10 +484,6 @@ export class MultiTaxiService implements OnModuleInit {
       partnerNotificationContextFactory,
     );
 
-    if (link && entry) {
-      return this.createRideAccessResult(order, requestId);
-    }
-
     return this.createRideAccessResult(order, requestId);
   }
 

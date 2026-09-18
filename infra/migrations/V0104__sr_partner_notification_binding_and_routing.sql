@@ -7,14 +7,16 @@ CREATE TABLE IF NOT EXISTS admin.phase1_partner_notification_bindings (
     tenant_id varchar(255) NOT NULL,
     partner_id varchar(255) NOT NULL,
     webhook_id varchar(255) NOT NULL,
-    version integer NOT NULL,
+    version integer NOT NULL DEFAULT 1,
     state varchar(50) NOT NULL,
     event_types jsonb NOT NULL,
     ack_policy varchar(100) NOT NULL,
     endpoint_fingerprint varchar(255),
     validated_at timestamptz,
     updated_at timestamptz NOT NULL,
-    record jsonb NOT NULL
+    record jsonb NOT NULL,
+    CONSTRAINT fk_partner_notification_bindings_entry FOREIGN KEY (entry_slug) REFERENCES admin.phase1_partner_channel_entries(entry_slug),
+    CONSTRAINT fk_partner_notification_bindings_webhook FOREIGN KEY (webhook_id) REFERENCES admin.phase1_tenant_webhook_endpoints(webhook_id)
 );
 
 CREATE TABLE IF NOT EXISTS mobility.phase1_order_partner_notification_routes (
@@ -35,6 +37,7 @@ CREATE TABLE IF NOT EXISTS mobility.phase1_order_partner_notification_routes (
 
 CREATE TABLE IF NOT EXISTS mobility.phase1_partner_notification_sequences (
     order_id varchar(255) PRIMARY KEY,
-    next_sequence bigint NOT NULL
+    next_sequence bigint NOT NULL,
+    CONSTRAINT fk_partner_notification_sequences_route FOREIGN KEY (order_id) REFERENCES mobility.phase1_order_partner_notification_routes(order_id)
 );
 ALTER TABLE ops.consumer_notification_outbox ADD COLUMN event_sequence bigint;

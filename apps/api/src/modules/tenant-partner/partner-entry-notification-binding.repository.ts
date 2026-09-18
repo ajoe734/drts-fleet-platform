@@ -89,4 +89,48 @@ export class PartnerEntryNotificationBindingRepository {
       ],
     );
   }
+
+  async updateWithVersion(
+    binding: PartnerEntryNotificationBinding,
+    expectedVersion: number,
+    executor: PartnerEntryNotificationBindingQueryExecutor = this.db,
+  ): Promise<boolean> {
+    const result = await executor.query(
+      `
+        UPDATE admin.phase1_partner_notification_bindings
+        SET
+          binding_id = $2,
+          tenant_id = $3,
+          partner_id = $4,
+          webhook_id = $5,
+          version = $6,
+          state = $7,
+          event_types = $8::jsonb,
+          ack_policy = $9,
+          endpoint_fingerprint = $10,
+          validated_at = $11,
+          updated_at = $12,
+          record = $13::jsonb
+        WHERE entry_slug = $1 AND version = $14
+        RETURNING entry_slug
+      `,
+      [
+        binding.entrySlug,
+        binding.bindingId,
+        binding.tenantId,
+        binding.partnerId,
+        binding.webhookId,
+        binding.version,
+        binding.state,
+        JSON.stringify(binding.eventTypes),
+        binding.acknowledgementPolicy,
+        binding.validatedEndpointFingerprint,
+        binding.validatedAt,
+        binding.updatedAt,
+        JSON.stringify(binding),
+        expectedVersion,
+      ],
+    );
+    return result.rows.length > 0;
+  }
 }
