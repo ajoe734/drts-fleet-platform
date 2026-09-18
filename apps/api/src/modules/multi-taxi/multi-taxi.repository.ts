@@ -1,7 +1,7 @@
 import { PLATFORM_CURRENCY } from "@drts/contracts";
 import { Injectable, Logger, Optional } from "@nestjs/common";
 import type {
-  OrderPartnerNotificationRoute, QueryResultRow } from "pg";
+  QueryResultRow } from "pg";
 
 import type {
   OrderPartnerNotificationRoute,
