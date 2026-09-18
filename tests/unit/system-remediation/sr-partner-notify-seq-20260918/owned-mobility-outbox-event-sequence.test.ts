@@ -22,6 +22,47 @@ describe.skipIf(!testDbUrl)("OwnedMobilityRepository consumer notification outbo
 
   beforeAll(async () => {
     pool = new Pool({ connectionString: testDbUrl });
+
+    // Ensure schema and tables exist in the unit test db
+    await pool.query(`CREATE SCHEMA IF NOT EXISTS mobility`);
+    await pool.query(`CREATE SCHEMA IF NOT EXISTS ops`);
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS mobility.phase1_order_partner_notification_routes (
+        order_id TEXT PRIMARY KEY,
+        tenant_id TEXT,
+        partner_id TEXT,
+        entry_slug TEXT,
+        partner_user_ref TEXT,
+        drts_passenger_id TEXT,
+        passenger_subject_ref TEXT,
+        identity_linked_at TIMESTAMPTZ,
+        consent_bundle_version TEXT,
+        ride_ref TEXT,
+        created_at TIMESTAMPTZ
+      )
+    `);
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS mobility.phase1_partner_notification_sequences (
+        order_id TEXT PRIMARY KEY,
+        next_sequence INTEGER NOT NULL
+      )
+    `);
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS ops.consumer_notification_outbox (
+        outbox_id TEXT PRIMARY KEY,
+        order_id TEXT,
+        passenger_subject_ref TEXT,
+        event_type TEXT,
+        assignment_version INTEGER,
+        payload JSONB,
+        status TEXT,
+        attempt_count INTEGER,
+        next_attempt_at TIMESTAMPTZ,
+        created_at TIMESTAMPTZ,
+        delivered_at TIMESTAMPTZ
+      )
+    `);
+
     const fakeDbService = {
       connect: async () => pool.connect(),
       query: (t: string, v: any[]) => pool.query(t, v),
