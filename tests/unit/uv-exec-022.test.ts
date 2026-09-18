@@ -20,6 +20,11 @@ import {
   deriveDimensionalAlertPresentation,
   adaptCohortReportToUiView,
   mapVoiceUsageRecordToUiItem,
+  buildDefaultVoiceObservationWindow,
+  buildVoiceCohortQueryParams,
+  buildVoiceUsageQueryParams,
+  loadVoiceCohortAndUsage,
+  type VoiceMetricsTransportClient,
 } from "../../apps/ops-console-web/app/callcenter/callcenter-metrics-ledger";
 import * as fs from "fs";
 import * as path from "path";
@@ -1028,9 +1033,197 @@ describe("UV-EXEC-022 All-Call Metrics, Complete Cost Ledger & Dimensional Alert
   });
 
   // ============================================================================
-  // Suite 8: Codex2 Review Rejection Regression & Edge Case Guardrails
+  // Suite 8: Real Frontend Cohort+Usage Loader (frontend_query_nonzero_and_failure_evidence)
   // ============================================================================
-  describe("8. Codex2 Review Rejection Regression & Edge Case Guardrails", () => {
+  describe("8. Real Frontend Cohort+Usage Loader (frontend_query_nonzero_and_failure_evidence)", () => {
+    function makeClient(
+      handlers: Record<string, () => unknown>,
+    ): VoiceMetricsTransportClient & { calls: string[] } {
+      const calls: string[] = [];
+      return {
+        calls,
+        async get<T>(path: string): Promise<T> {
+          calls.push(path);
+          const key = path.split("?")[0]!;
+          if (!(key in handlers)) {
+            throw new Error(`unexpected path ${path}`);
+          }
+          return handlers[key]!() as T;
+        },
+      };
+    }
+
+    it("open trailing window ending 'now' is never reported as closed/settled", () => {
+      const window = buildDefaultVoiceObservationWindow(
+        new Date("2026-09-10T12:00:00.000Z"),
+      );
+      expect(window.windowEnd).toBe("2026-09-10T12:00:00.000Z");
+      expect(window.windowStart).toBe("2026-09-09T12:00:00.000Z");
+      expect(window.observationWindowClosed).toBe(false);
+    });
+
+    it("cohort and usage requests share the identical window and dimension filters", () => {
+      const window = buildDefaultVoiceObservationWindow(
+        new Date("2026-09-10T12:00:00.000Z"),
+      );
+      const dims = { language: "zh-TW", provider: "twm" };
+      const cohortParams = buildVoiceCohortQueryParams(window, dims);
+      const usageParams = buildVoiceUsageQueryParams(window, dims);
+
+      expect(cohortParams.get("windowStart")).toBe(window.windowStart);
+      expect(cohortParams.get("windowEnd")).toBe(window.windowEnd);
+      expect(usageParams.get("windowStart")).toBe(window.windowStart);
+      expect(usageParams.get("windowEnd")).toBe(window.windowEnd);
+      expect(cohortParams.get("language")).toBe("zh-TW");
+      expect(usageParams.get("language")).toBe("zh-TW");
+      expect(cohortParams.get("provider")).toBe("twm");
+      expect(usageParams.get("provider")).toBe("twm");
+      expect(cohortParams.get("observationWindowClosed")).toBe("false");
+    });
+
+    it("real typed loader populates non-zero serverCohort and usageRecords from actual endpoint responses", async () => {
+      const window = buildDefaultVoiceObservationWindow(
+        new Date("2026-09-10T12:00:00.000Z"),
+      );
+      const client = makeClient({
+        "/api/callcenter/voice/metrics/cohort": () => ({
+          cohortWindow: {
+            windowStart: window.windowStart,
+            windowEnd: window.windowEnd,
+            observationWindowClosed: false,
+          },
+          allCallCoverage: { rate: 90, numeratorEnteredAi: 90, denominatorRealIngress: 100 },
+          unattendedEffectiveIntake: { rate: 80, numeratorValidIntakes: 72 },
+          unattendedDispatchCompletion: { rate: 70, numeratorDriverAcceptedUniqueOrders: 56 },
+          humanTransfer: { rate: 10 },
+          errorBooking: { rate: 1 },
+          costPerEffectiveIntake: { cost: 15.5, denominatorValidIntakes: 72 },
+          costPerSuccessfulDispatch: {
+            cost: 19.93,
+            status: "pending_observation_window",
+            denominatorDriverAcceptedOrders: 56,
+          },
+        }),
+        "/api/callcenter/voice/usage/records": () => ({
+          items: [
+            {
+              serviceType: "llm",
+              provider: "gemini",
+              quantity: 5000,
+              billingUnit: "token",
+              estimatedCost: 0.75,
+              actualCost: 0.82,
+              currency: "TWD",
+              unverified: false,
+            },
+          ],
+        }),
+      });
+
+      const result = await loadVoiceCohortAndUsage(client, window, {}, {
+        serverCohort: null,
+        usageRecords: [],
+      });
+
+      expect(client.calls).toEqual([
+        `/api/callcenter/voice/metrics/cohort?${buildVoiceCohortQueryParams(window, {}).toString()}`,
+        `/api/callcenter/voice/usage/records?${buildVoiceUsageQueryParams(window, {}).toString()}`,
+      ]);
+      expect(result.cohortStatus).toBe("fresh");
+      expect(result.usageStatus).toBe("fresh");
+      expect(result.serverCohort?.effectiveIntakeCount).toBe(72);
+      expect(result.serverCohort?.driverAcceptedOrdersCount).toBe(56);
+      expect(result.usageRecords).toHaveLength(1);
+      expect(result.usageRecords[0]!.actualCost).toBe(0.82);
+      expect(result.cohortErrorMessage).toBeNull();
+      expect(result.usageErrorMessage).toBeNull();
+    });
+
+    it("does not silently convert a transport failure into a fresh/healthy state; retains previous data as explicitly stale", async () => {
+      const window = buildDefaultVoiceObservationWindow();
+      const client = makeClient({
+        "/api/callcenter/voice/metrics/cohort": () => {
+          throw new Error("upstream metrics unavailable");
+        },
+        "/api/callcenter/voice/usage/records": () => {
+          throw new Error("upstream ledger unavailable");
+        },
+      });
+
+      const previousCohort = {
+        windowLabel: "2026-09-09 ~ 2026-09-10",
+        observationWindowClosed: false,
+        totalIngressCalls: 99,
+        enteredAiCalls: 90,
+        coverageRateFormatted: "90.0%",
+        effectiveIntakeCount: 72,
+        effectiveIntakeRateFormatted: "80.0%",
+        driverAcceptedOrdersCount: 56,
+        dispatchRateFormatted: "70.0%",
+        humanTransferRateFormatted: "10.0%",
+        errorBookingRateFormatted: "1.00%",
+        costPerEffectiveIntakeFormatted: "15.50 TWD",
+        costPerSuccessfulDispatchFormatted: "19.93 TWD",
+        costPerSuccessfulDispatchStatus: "settled" as const,
+      };
+      const previousUsage = [
+        {
+          serviceType: "llm",
+          provider: "gemini",
+          quantity: 5000,
+          billingUnit: "token",
+          unitPrice: 0.00015,
+          estimatedCost: 0.75,
+          actualCost: 0.82,
+          variance: 0.07,
+          currency: "TWD",
+          unverified: false,
+        },
+      ];
+
+      const result = await loadVoiceCohortAndUsage(client, window, {}, {
+        serverCohort: previousCohort,
+        usageRecords: previousUsage,
+      });
+
+      // Real failure must be surfaced explicitly, never as error=null/healthy.
+      expect(result.cohortStatus).toBe("stale");
+      expect(result.usageStatus).toBe("stale");
+      expect(result.cohortErrorMessage).toBe("upstream metrics unavailable");
+      expect(result.usageErrorMessage).toBe("upstream ledger unavailable");
+      // Previous real data is retained (not fabricated back to zero/empty).
+      expect(result.serverCohort?.effectiveIntakeCount).toBe(72);
+      expect(result.usageRecords).toHaveLength(1);
+      expect(result.usageRecords[0]!.actualCost).toBe(0.82);
+    });
+
+    it("reports 'unavailable' (not fresh) when a transport failure occurs and there was no previous data to fall back on", async () => {
+      const window = buildDefaultVoiceObservationWindow();
+      const client = makeClient({
+        "/api/callcenter/voice/metrics/cohort": () => {
+          throw new Error("cohort endpoint down");
+        },
+        "/api/callcenter/voice/usage/records": () => {
+          throw new Error("usage endpoint down");
+        },
+      });
+
+      const result = await loadVoiceCohortAndUsage(client, window, {}, {
+        serverCohort: null,
+        usageRecords: [],
+      });
+
+      expect(result.cohortStatus).toBe("unavailable");
+      expect(result.usageStatus).toBe("unavailable");
+      expect(result.serverCohort).toBeNull();
+      expect(result.usageRecords).toEqual([]);
+    });
+  });
+
+  // ============================================================================
+  // Suite 9: Codex2 Review Rejection Regression & Edge Case Guardrails
+  // ============================================================================
+  describe("9. Codex2 Review Rejection Regression & Edge Case Guardrails", () => {
     const baseRecord: VoiceCallMetricRecord = {
       callId: "call-reg-base",
       providerCallId: "twm-prov-base",
