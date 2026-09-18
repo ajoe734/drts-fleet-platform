@@ -71,6 +71,8 @@ export class ReportingService implements OnModuleInit, OnModuleDestroy {
   private dailyDispatchRecords: DispatchDailyRecord[] = [];
   private dispatchableSupplySnapshots: DispatchableSupplySnapshotRecord[] = [];
   private monthlyOperationsSummaries: MonthlyOperationsSummaryRecord[] = [];
+  private readonly snapshotSchedulerEnabled =
+    process.env.REPORTING_SNAPSHOT_SCHEDULER_ENABLED !== "false";
   private snapshotScheduleDelay: ReturnType<typeof setTimeout> | null = null;
   private snapshotScheduleInterval: ReturnType<typeof setInterval> | null =
     null;
@@ -85,6 +87,9 @@ export class ReportingService implements OnModuleInit, OnModuleDestroy {
   ) {}
 
   onModuleInit() {
+    if (!this.snapshotSchedulerEnabled) {
+      return;
+    }
     this.startDispatchableSupplySnapshotScheduler();
   }
 
@@ -547,7 +552,9 @@ export class ReportingService implements OnModuleInit, OnModuleDestroy {
       tripCompletedAt: this.resolveEventTimestamp(
         sortedOrderTraceLogs,
         "driver.completed_trip",
-        finalTask?.completedAt ?? null,
+        // Cancellation also records task closure in completedAt. Only a
+        // completed trip may use that field as the reporting fallback.
+        finalTask?.status === "completed" ? finalTask.completedAt : null,
         finalTask?.taskId,
         true,
       ),

@@ -104,11 +104,8 @@ const DEFAULT_BRANCH_STRATEGY = {
 };
 
 const DEFAULT_TREE_GUARD_GLOBS = [
-  ".orchestrator/supervisor.py",
-  ".orchestrator/skills/**",
-  ".orchestrator/templates/*",
+  "tools/development-orchestrator/**",
   ".orchestrator/config*.json",
-  ".orchestrator/branch_routing.py",
   "docs/ops/branch-strategy.md",
   "docs/**",
   ".github/workflows/**",

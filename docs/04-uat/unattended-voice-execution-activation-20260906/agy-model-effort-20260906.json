@@ -1,0 +1,186 @@
+{
+  "schema_version": 1,
+  "title": "Antigravity model and reasoning effort read-only verification",
+  "verification_started_at_utc": "2026-09-06T03:33:00.191452Z",
+  "verification_completed_at_utc": "2026-09-06T03:33:22.234322Z",
+  "agy_cli_version": "1.1.27",
+  "method_notes": [
+    "Used each lane existing isolated runtime environment from the active Antigravity adapter without printing environment or credentials.",
+    "Queried agy models for account-visible model slugs.",
+    "Queried the read-only /effort command with an explicit --model slug; did not provide --effort.",
+    "The JSON command results report zero model turns, zero token usage and no conversation creation."
+  ],
+  "lanes": [
+    {
+      "lane": "gemini",
+      "configured_rotation_enabled": true,
+      "configured_primary": "gemini-3.1-pro-high",
+      "configured_fallback": "claude-sonnet-4-6",
+      "catalog_checked_at_utc": "2026-09-06T03:33:00.363166Z",
+      "primary_in_catalog": true,
+      "fallback_in_catalog": true,
+      "gemini_3_8_flash_available_variants": [
+        "gemini-3.8-flash-high",
+        "gemini-3.8-flash-low",
+        "gemini-3.8-flash-medium"
+      ],
+      "gemini_3_8_pro_available_variants": [],
+      "effort_checks": [
+        {
+          "started_at_utc": "2026-09-06T03:33:03.279189Z",
+          "completed_at_utc": "2026-09-06T03:33:06.160618Z",
+          "model": "gemini-3.1-pro-high",
+          "method": [
+            "agy",
+            "--model",
+            "gemini-3.1-pro-high",
+            "--output-format",
+            "json",
+            "--print",
+            "/effort"
+          ],
+          "status": "SUCCESS",
+          "current": "high",
+          "available": ["low", "high"],
+          "adjustable": true,
+          "num_turns": 0,
+          "usage": {
+            "input_tokens": 0,
+            "output_tokens": 0,
+            "thinking_tokens": 0,
+            "cache_read_tokens": 0,
+            "total_tokens": 0
+          },
+          "conversation_created": false
+        },
+        {
+          "started_at_utc": "2026-09-06T03:33:06.160671Z",
+          "completed_at_utc": "2026-09-06T03:33:11.310040Z",
+          "model": "gemini-3.8-flash-high",
+          "method": [
+            "agy",
+            "--model",
+            "gemini-3.8-flash-high",
+            "--output-format",
+            "json",
+            "--print",
+            "/effort"
+          ],
+          "status": "SUCCESS",
+          "current": "high",
+          "available": ["low", "medium", "high"],
+          "adjustable": true,
+          "num_turns": 0,
+          "usage": {
+            "input_tokens": 0,
+            "output_tokens": 0,
+            "thinking_tokens": 0,
+            "cache_read_tokens": 0,
+            "total_tokens": 0
+          },
+          "conversation_created": false
+        }
+      ]
+    },
+    {
+      "lane": "gemini2",
+      "configured_rotation_enabled": true,
+      "configured_primary": "gemini-3.1-pro-high",
+      "configured_fallback": "claude-sonnet-4-6",
+      "catalog_checked_at_utc": "2026-09-06T03:33:11.310353Z",
+      "primary_in_catalog": true,
+      "fallback_in_catalog": true,
+      "gemini_3_8_flash_available_variants": [
+        "gemini-3.8-flash-high",
+        "gemini-3.8-flash-low",
+        "gemini-3.8-flash-medium"
+      ],
+      "gemini_3_8_pro_available_variants": [],
+      "effort_checks": [
+        {
+          "started_at_utc": "2026-09-06T03:33:13.145665Z",
+          "completed_at_utc": "2026-09-06T03:33:18.104599Z",
+          "model": "gemini-3.1-pro-high",
+          "method": [
+            "agy",
+            "--model",
+            "gemini-3.1-pro-high",
+            "--output-format",
+            "json",
+            "--print",
+            "/effort"
+          ],
+          "status": "SUCCESS",
+          "current": "high",
+          "available": ["low", "high"],
+          "adjustable": true,
+          "num_turns": 0,
+          "usage": {
+            "input_tokens": 0,
+            "output_tokens": 0,
+            "thinking_tokens": 0,
+            "cache_read_tokens": 0,
+            "total_tokens": 0
+          },
+          "conversation_created": false
+        },
+        {
+          "started_at_utc": "2026-09-06T03:33:18.104631Z",
+          "completed_at_utc": "2026-09-06T03:33:22.234274Z",
+          "model": "gemini-3.8-flash-high",
+          "method": [
+            "agy",
+            "--model",
+            "gemini-3.8-flash-high",
+            "--output-format",
+            "json",
+            "--print",
+            "/effort"
+          ],
+          "status": "SUCCESS",
+          "current": "high",
+          "available": ["low", "medium", "high"],
+          "adjustable": true,
+          "num_turns": 0,
+          "usage": {
+            "input_tokens": 0,
+            "output_tokens": 0,
+            "thinking_tokens": 0,
+            "cache_read_tokens": 0,
+            "total_tokens": 0
+          },
+          "conversation_created": false
+        }
+      ]
+    }
+  ],
+  "conclusions": {
+    "configured_primary": "gemini-3.1-pro-high",
+    "configured_primary_current_effort": "high",
+    "configured_primary_available_efforts": ["low", "high"],
+    "configured_primary_uses_highest_available_effort": true,
+    "gemini_3_8_flash_available": true,
+    "gemini_3_8_flash_current_effort_when_explicitly_selected_for_read_only_diagnostic": "high",
+    "gemini_3_8_flash_available_efforts": ["low", "medium", "high"],
+    "gemini_3_8_pro_found_in_catalog": false,
+    "runtime_model_switched": false,
+    "runtime_or_user_configuration_modified": false,
+    "workers_started_or_reset": false
+  },
+  "limits": [
+    "This verifies available model slugs and CLI-resolved reasoning effort; it does not measure answer quality, latency or task success.",
+    "No numerical thinking-token budget was exposed by these diagnostics. High is not asserted equivalent to another provider reasoning level such as Codex Ultra.",
+    "The configured Claude fallback is recorded from runtime configuration and confirmed present in the model catalog; its reasoning effort was not tested.",
+    "Read-only CLI queries may maintain their ordinary local caches; no configuration or task-board changes were made."
+  ],
+  "official_sources": [
+    {
+      "url": "https://www.antigravity.google/docs/cli/headless/",
+      "supports": "Model slug pinning and low/medium/high reasoning effort options."
+    },
+    {
+      "url": "https://www.antigravity.google/changelog?tab=engine",
+      "supports": "The changelog documents read-only /model and /effort print commands without an agent turn, quota spending or a conversation, as well as effort variants and stable model slugs."
+    }
+  ]
+}

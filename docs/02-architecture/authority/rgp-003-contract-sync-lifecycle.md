@@ -34,7 +34,7 @@ Applies to:
 - `tenant-commute-hub/src/lib/drts-shim/generated/*`
 - `tenant-commute-hub/src/lib/drts-shim/contracts.ts`
 - `tenant-commute-hub/scripts/sync-drts-contract-snapshot.mjs`
-- `scripts/tenant-hub-contract-sync-smoke.sh`
+- `tools/ci/tenant-hub-contract-sync-smoke.sh`
 
 This lifecycle is about contract portability only. It does not grant
 `tenant-commute-hub` any authority to redefine DTOs, enums, state machines, or
@@ -51,7 +51,7 @@ backend semantics.
 5. If `tenant-commute-hub/src/lib/drts-shim` is already dirty, switch to a
    clean clone or clear that local drift before validation.
 6. Run the core-owned smoke command:
-   `scripts/tenant-hub-contract-sync-smoke.sh`.
+   `tools/ci/tenant-hub-contract-sync-smoke.sh`.
 7. Review the resulting diff in `tenant-commute-hub/src/lib/drts-shim/`.
 8. Land the contract change and the refreshed snapshot together, or explicitly
    document why the snapshot update is deferred.
@@ -135,7 +135,7 @@ Minimum evidence for `OPX-GV-001`-class changes:
 - contract diff in `packages/contracts/src/*`
 - refreshed snapshot diff in
   `tenant-commute-hub/src/lib/drts-shim/generated/*` when applicable
-- clean-target execution of `scripts/tenant-hub-contract-sync-smoke.sh`
+- clean-target execution of `tools/ci/tenant-hub-contract-sync-smoke.sh`
   - contract-refresh closeout expects exit `0`
   - guardrail-only proof may capture a non-zero drift result if the consumer
     snapshot is intentionally behind, but the diff must be attached
@@ -148,7 +148,7 @@ Minimum evidence for `OPX-GV-001`-class changes:
 Core repo operators should use:
 
 ```sh
-scripts/tenant-hub-contract-sync-smoke.sh
+tools/ci/tenant-hub-contract-sync-smoke.sh
 ```
 
 Behavior:

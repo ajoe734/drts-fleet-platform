@@ -226,7 +226,9 @@ describe("ReportJobAccepted wire contract", () => {
 
     const accepted: ReportJobAccepted = reportingFilingService.createReportJob({
       jobType: "monthly_trip_report",
-      format: "xlsx",
+      // xlsx has no renderer and is rejected at creation; this case is about
+      // the accepted-response wire shape, so any renderable format will do.
+      format: "csv",
       filters: { month: "2026-04" },
     });
 

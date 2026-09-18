@@ -1,5 +1,21 @@
-import { createTenantClient, type ApiClient } from "@drts/api-client";
-import type { BookingRecord, CrossAppResourceLink } from "@drts/contracts";
+import {
+  createTenantClient,
+  type ApiClient,
+  type RequestOptions,
+} from "@drts/api-client";
+import type {
+  AssignDispatchCommand,
+  BookingRecord,
+  CancelOwnedOrderCommand,
+  CreateTenantBookingCommand,
+  CrossAppResourceLink,
+  DispatchOrderCommand,
+  ReassignDispatchCommand,
+  TenantBookingListQuery,
+  TenantBookingsPageRecord,
+  TenantDashboardSummary,
+  UpdateTenantBookingCommand,
+} from "@drts/contracts";
 import {
   adaptBookingFixtureToCreateCommand,
   resolveDispatchEmbedDisposition,
@@ -10,6 +26,16 @@ import { getRuntimeApiBaseUrl } from "./runtime-config";
 import { ENTERPRISE_DISPATCH_TENANT_API_GAP_MAP } from "./tenant-api-gap-map";
 
 const DEFAULT_ACTOR_ID = "enterprise-dispatch-web";
+
+// SR-ENTERPRISE-SEARCH-001: the composable, testable search-query builder
+// lives in ./enterprise-booking-search (no @drts/api-client dependency) so
+// root Vitest can import it directly; re-exported here for callers that
+// already import the tenant client from this module.
+export * from "./enterprise-booking-search";
+
+// SR-ENTERPRISE-DATA-001: same rationale — pure home/trip status logic lives
+// in ./enterprise-trip-status so root Vitest can import it directly.
+export * from "./enterprise-trip-status";
 
 export type EnterpriseDispatchBookingSubmitResult = {
   orderId: string;
@@ -23,21 +49,102 @@ export type EnterpriseDispatchBookingSubmitResult = {
 export class EnterpriseDispatchTenantClient {
   constructor(private readonly client: ApiClient) {}
 
+  async createBooking(
+    command: CreateTenantBookingCommand,
+    options?: RequestOptions,
+  ): Promise<EnterpriseDispatchBookingSubmitResult> {
+    return this.client.createTenantBooking(
+      command,
+      options,
+    ) as Promise<EnterpriseDispatchBookingSubmitResult>;
+  }
+
   async createBookingFromFixture(
     fixture: EnterpriseDispatchBookingFixture,
   ): Promise<EnterpriseDispatchBookingSubmitResult> {
-    return this.client.createTenantBooking(
-      adaptBookingFixtureToCreateCommand(fixture),
-    ) as Promise<EnterpriseDispatchBookingSubmitResult>;
+    return this.createBooking(adaptBookingFixtureToCreateCommand(fixture));
   }
 
   async getBooking(bookingId: string): Promise<BookingRecord> {
     return this.client.getTenantBooking(bookingId) as Promise<BookingRecord>;
   }
 
+  async getDashboardSummary(): Promise<TenantDashboardSummary> {
+    return this.client.getTenantDashboardSummary();
+  }
+
+  async listBookings(): Promise<BookingRecord[]> {
+    return this.client.listTenantBookings();
+  }
+
+  async queryBookings(
+    query: TenantBookingListQuery,
+    options?: RequestOptions,
+  ): Promise<TenantBookingsPageRecord> {
+    return this.client.queryTenantBookings(query, options);
+  }
+
+  async updateBooking(
+    bookingId: string,
+    command: UpdateTenantBookingCommand,
+  ): Promise<BookingRecord> {
+    return this.client.updateTenantBooking(
+      bookingId,
+      command,
+    ) as Promise<BookingRecord>;
+  }
+
+  async cancelBooking(
+    bookingId: string,
+    command: CancelOwnedOrderCommand,
+  ): Promise<BookingRecord> {
+    return this.client.cancelTenantBooking(
+      bookingId,
+      command,
+    ) as Promise<BookingRecord>;
+  }
+
   async getBookingGateSnapshot(bookingId: string) {
     const booking = await this.getBooking(bookingId);
     return summarizeBookingGates(booking);
+  }
+
+  async dispatchOrder(
+    orderId: string,
+    command?: DispatchOrderCommand,
+    options?: RequestOptions,
+  ) {
+    return this.client.dispatchOrder(orderId, command, options);
+  }
+
+  async redispatchOrder(
+    orderId: string,
+    reasonCode = "operator_redispatch",
+    options?: {
+      reasonNote?: string;
+      operatorId?: string;
+      escalationTarget?: "ops_supervisor" | "dispatch_manager" | null;
+      expectedAssignmentVersion?: number | null;
+      idempotencyKey?: string;
+      headers?: Record<string, string>;
+      signal?: AbortSignal;
+    },
+  ) {
+    return this.client.redispatchOrder(orderId, reasonCode, options);
+  }
+
+  async assignDispatch(
+    command: AssignDispatchCommand,
+    options?: RequestOptions,
+  ) {
+    return this.client.assignDispatch(command, options);
+  }
+
+  async reassignDispatch(
+    command: ReassignDispatchCommand,
+    options?: RequestOptions,
+  ) {
+    return this.client.reassignDispatch(command, options);
   }
 
   getEmbedDisposition(link?: CrossAppResourceLink | null) {

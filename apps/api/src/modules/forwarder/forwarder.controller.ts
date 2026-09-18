@@ -25,7 +25,11 @@ import {
   ApiRequestError,
   toApiSuccessEnvelope,
 } from "../../common/api-envelope";
-import { CurrentIdentity } from "../../common/auth";
+import {
+  CurrentIdentity,
+  RequireRealms,
+  RequireScopes,
+} from "../../common/auth";
 import type { BootstrapRequestIdentity } from "../../common/auth";
 import { ForwarderService } from "./forwarder.service";
 
@@ -37,6 +41,10 @@ export class ForwarderController {
     identity: BootstrapRequestIdentity | null,
     requestedDriverId?: string,
   ) {
+    if (identity?.realm === "driver" && identity.actorId) {
+      return identity.actorId;
+    }
+
     if (identity?.actorType === "driver_user" && identity.actorId) {
       return identity.actorId;
     }
@@ -91,8 +99,10 @@ export class ForwarderController {
   }
 
   @Get("driver/task-views")
+  @RequireRealms("system", "driver")
+  @RequireScopes("dispatch:read")
   listDriverTaskViews(
-    @CurrentIdentity() identity: BootstrapRequestIdentity | null,
+    @CurrentIdentity() identity: BootstrapRequestIdentity | null = null,
     @Query("driverId") requestedDriverId?: string,
     @Headers("x-request-id") requestId?: string,
   ) {
@@ -106,9 +116,11 @@ export class ForwarderController {
   }
 
   @Get("driver/task-views/:taskId")
+  @RequireRealms("system", "driver")
+  @RequireScopes("dispatch:read")
   getDriverTaskView(
     @Param("taskId") taskId: string,
-    @CurrentIdentity() identity: BootstrapRequestIdentity | null,
+    @CurrentIdentity() identity: BootstrapRequestIdentity | null = null,
     @Query("driverId") requestedDriverId?: string,
     @Headers("x-request-id") requestId?: string,
   ) {
@@ -120,9 +132,11 @@ export class ForwarderController {
   }
 
   @Post("driver/forwarded-orders/:taskId/accept")
+  @RequireRealms("system", "driver")
+  @RequireScopes("driver:write")
   async acceptForwardedOrder(
     @Param("taskId") taskId: string,
-    @CurrentIdentity() identity: BootstrapRequestIdentity | null,
+    @CurrentIdentity() identity: BootstrapRequestIdentity | null = null,
     @Body() command: DriverForwardedOrderAcceptCommand,
     @Headers("x-request-id") requestId?: string,
   ) {
@@ -138,9 +152,11 @@ export class ForwarderController {
   }
 
   @Post("driver/forwarded-orders/:taskId/reject")
+  @RequireRealms("system", "driver")
+  @RequireScopes("driver:write")
   rejectForwardedOrder(
     @Param("taskId") taskId: string,
-    @CurrentIdentity() identity: BootstrapRequestIdentity | null,
+    @CurrentIdentity() identity: BootstrapRequestIdentity | null = null,
     @Body() command: DriverForwardedOrderRejectCommand,
     @Headers("x-request-id") requestId?: string,
   ) {

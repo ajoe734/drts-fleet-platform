@@ -4,10 +4,12 @@ import { AuditNotificationService } from "../../apps/api/src/modules/audit-notif
 import { BillingSettlementService } from "../../apps/api/src/modules/billing-settlement/billing-settlement.service";
 
 const DEMO_TENANT_ID = "tenant-demo-001";
+const ORIGINAL_ENV = { ...process.env };
 
 afterEach(() => {
   vi.useRealTimers();
   vi.restoreAllMocks();
+  process.env = { ...ORIGINAL_ENV };
 });
 
 function createService() {
@@ -122,6 +124,23 @@ describe("BillingSettlementService card-benefit settlement statements", () => {
     ]);
     expect(statements[0]!.lines).toHaveLength(1);
     expect(statements[0]!.lines[0]!.tripId).toBe("order-demo-032");
+  });
+
+  it("fails closed for seeded referral statements in staging", async () => {
+    process.env.APP_ENV = "staging";
+
+    const service = createService();
+    const statements = await service.listReferralStatements(
+      "referral-demo-community",
+    );
+
+    expect(statements).toEqual([]);
+    expect(
+      service.resolveReferralRevenueShareRule(
+        "referral-demo-community",
+        "2026-06-15T00:00:00.000Z",
+      ),
+    ).toBeNull();
   });
 
   it("rejects a malformed period", async () => {

@@ -99,6 +99,7 @@ describe("sos-view-model", () => {
           {
             vehicleId: "veh-1",
             plateNo: "BKR-2208",
+            createdAt: "2026-07-01T00:00:00.000Z",
             operatingArea: "Taipei",
             supportedServiceBuckets: ["standard_taxi"],
             dispatchableFlag: true,

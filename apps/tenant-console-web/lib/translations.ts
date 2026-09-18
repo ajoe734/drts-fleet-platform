@@ -1,5 +1,14 @@
 export type Locale = "en" | "zh";
 
+/**
+ * Compatibility label for callers without the server-provided environment.
+ * Translation catalogs never read deployment/build variables. The server
+ * layout supplies normalized DRTS_ENV to the shell for its explicit label.
+ */
+export function resolveAuthoritativeShellEnv(locale: Locale = "zh"): string {
+  return locale === "zh" ? "未知環境" : "unknown";
+}
+
 const en = {
   "app.title": "Tenant Console",
   "app.description": "Tenant administration workspace for DRTS Phase 1.",
@@ -7,7 +16,21 @@ const en = {
   "shell.search": "Search bookings, passengers, statements, reports...",
   "shell.brand.sub": "TENANT CONSOLE",
   "shell.context": "YAMATO Business Group",
-  "shell.env": "production",
+  "shell.env": resolveAuthoritativeShellEnv("en"),
+  "shell.env.production": "production",
+  "shell.env.staging": "staging",
+  "shell.env.preview": "preview",
+  "shell.env.sandbox": "sandbox",
+  "shell.env.dev": "development",
+  "shell.env.mock": "mock data",
+  "shell.env.unknown": "unknown",
+  "app.environment.production": "production",
+  "app.environment.staging": "staging",
+  "app.environment.preview": "preview",
+  "app.environment.sandbox": "sandbox",
+  "app.environment.dev": "development",
+  "app.environment.mock": "mock data",
+  "app.environment.unknown": "unknown",
   "shell.identity.actor": "Yamato",
   "shell.language.en": "English",
   "shell.language.zh": "繁體中文",
@@ -18,7 +41,13 @@ const en = {
   "shell.health.healthy": "API healthy",
   "shell.health.degraded": "API degraded",
   "shell.health.down": "API down",
+  "shell.health.unknown": "unknown",
   "shell.health.lastChecked": "last checked",
+  "status.order.dispatch_timeout": "Dispatch timeout",
+  "status.order.dispatch_failed": "Dispatch failed",
+  "status.order.exception_hold": "Exception hold",
+  "status.order.no_supply": "No available vehicle",
+  "status.order.redispatch_required": "Redispatch required",
   "shell.nav.aria": "Tenant Console navigation",
   "shell.nav.workspace": "Workspace",
   "shell.nav.directory": "Directory",
@@ -36,6 +65,26 @@ const en = {
   "nav.costCenters": "Cost centers",
   "nav.rules": "Approval & quota",
   "nav.users": "People & roles",
+  "nav.sessions": "Sessions",
+  "sessions.header.title": "Tenant sessions",
+  "sessions.header.subtitle":
+    "Review active tenant sessions and revoke access immediately when required. Tokens and credentials are never displayed.",
+  "sessions.empty": "No tenant sessions are currently available.",
+  "sessions.noAction": "No action",
+  "sessions.error.loadFailed": "Unable to load tenant sessions.",
+  "sessions.table.subject": "Subject",
+  "sessions.table.authMethod": "Auth method",
+  "sessions.table.status": "Status",
+  "sessions.table.lastSeen": "Last seen",
+  "sessions.table.expires": "Expires",
+  "sessions.table.action": "Action",
+  "sessions.action.revoke": "Revoke",
+  "sessions.action.reasonPlaceholder": "Reason",
+  "sessions.action.reasonAriaLabel": "Reason for revoking {subject}",
+  "sessions.status.active": "active",
+  "sessions.status.revoked": "revoked",
+  "sessions.status.expired": "expired",
+  "sessions.status.compromised": "compromised",
   "nav.notifications": "Notifications",
   "nav.sla": "SLA",
   "nav.billing": "Billing overview",
@@ -1703,7 +1752,10 @@ const en = {
   "webhooks.action.rotateSecret": "rotate secret",
   "webhooks.action.viewDeliveryLog": "delivery log",
   "webhooks.action.retryFailed": "retry failed",
+  "webhooks.action.sendTest": "send test",
   "webhooks.action.disabled": "Disabled",
+  "webhooks.success.testSubmitted":
+    "Test webhook delivery queued successfully.",
   "webhooks.tabLabel.replay": "Replay",
   "webhooks.tabLabel.deliveries": "Deliveries",
   "webhooks.tabLabel.endpoints": "Endpoints",
@@ -2385,6 +2437,8 @@ const en = {
   "reports.deepLinks.auditReceipt":
     "View the audit receipt for tenant-side report actions",
   "reports.deepLinks.open": "Open",
+  "reports.deepLinks.originUnavailable":
+    "This deployment has no origin configured for that app, so the deep link cannot be opened.",
 
   // ── rules (i18n-fullsweep 20260614) ──
   "rules.header.eyebrow": "Approval & quota",
@@ -3985,7 +4039,8 @@ const en = {
   "avFallback.billing.rebooking": "Rebooking",
   "avFallback.billing.noneBoolean": "No · false",
   "avFallback.billing.sameBooking": "No · same booking",
-  "avFallback.billing.slaUpdatedEta": "On-time performance uses the updated ETA",
+  "avFallback.billing.slaUpdatedEta":
+    "On-time performance uses the updated ETA",
   "avFallback.billing.note":
     "Billing differentiates AV and human fallback fulfillment internally, but the tenant is not charged extra and SLA uses the revised ETA.",
   "avFallback.billing.noSurcharge": "No",
@@ -4007,6 +4062,18 @@ const en = {
   "tenantMessageCode.sandbox_fulfillment.default":
     "Service status was updated for this booking. Use the tenant-safe fulfillment and ETA details shown on this page.",
 
+  // ── login page ──
+  "login.realm.tenant": "TENANT REALM",
+  "login.title": "Tenant Console Sign-In",
+  "login.subtitle":
+    "Sign in with your organization's managed OIDC identity to access tenant operations, billing, and fulfillment controls.",
+  "login.error.title": "Authentication Error:",
+  "login.tenantIdLabel": "Tenant ID / Hint (Optional)",
+  "login.tenantIdPlaceholder": "e.g. tenant-acme-001",
+  "login.submit": "Sign in with OIDC",
+  "login.securityNote":
+    "Managed HttpOnly session cookies and same-origin CSRF protection are enforced. Browser clients never receive readable bearer tokens.",
+
   // ── formatters (i18n-fullsweep 20260614 finish) ──
   "formatters.notAvailable": "Not available",
 } as const;
@@ -4018,7 +4085,21 @@ const zh: Record<keyof typeof en, string> = {
   "shell.search": "搜尋叫車、乘客、對帳單、報表…",
   "shell.brand.sub": "租戶後台",
   "shell.context": "YAMATO 大和商務集團",
-  "shell.env": "production",
+  "shell.env": resolveAuthoritativeShellEnv("zh"),
+  "shell.env.production": "正式環境",
+  "shell.env.staging": "預發環境",
+  "shell.env.preview": "預覽環境",
+  "shell.env.sandbox": "沙盒環境",
+  "shell.env.dev": "開發環境",
+  "shell.env.mock": "模擬資料",
+  "shell.env.unknown": "未知環境",
+  "app.environment.production": "正式環境",
+  "app.environment.staging": "預發環境",
+  "app.environment.preview": "預覽環境",
+  "app.environment.sandbox": "沙盒環境",
+  "app.environment.dev": "開發環境",
+  "app.environment.mock": "模擬資料",
+  "app.environment.unknown": "未知環境",
   "shell.identity.actor": "大和",
   "shell.language.en": "English",
   "shell.language.zh": "繁體中文",
@@ -4029,7 +4110,13 @@ const zh: Record<keyof typeof en, string> = {
   "shell.health.healthy": "API 正常",
   "shell.health.degraded": "API 降級",
   "shell.health.down": "API 中斷",
+  "shell.health.unknown": "API 未知",
   "shell.health.lastChecked": "最近檢查",
+  "status.order.dispatch_timeout": "派車逾時",
+  "status.order.dispatch_failed": "派車失敗",
+  "status.order.exception_hold": "異常暫留",
+  "status.order.no_supply": "無可用運能",
+  "status.order.redispatch_required": "需重新派車",
   "shell.nav.aria": "租戶後台導覽",
   "shell.nav.workspace": "工作面",
   "shell.nav.directory": "資料維護",
@@ -4047,6 +4134,26 @@ const zh: Record<keyof typeof en, string> = {
   "nav.costCenters": "成本中心",
   "nav.rules": "審批與配額",
   "nav.users": "人員與角色",
+  "nav.sessions": "工作階段",
+  "sessions.header.title": "租戶工作階段",
+  "sessions.header.subtitle":
+    "檢視租戶工作階段，必要時立即撤銷存取權限。系統不會顯示 token 或 credential。",
+  "sessions.empty": "目前沒有可用的租戶工作階段。",
+  "sessions.noAction": "無可用操作",
+  "sessions.error.loadFailed": "無法載入租戶工作階段。",
+  "sessions.table.subject": "主體",
+  "sessions.table.authMethod": "驗證方式",
+  "sessions.table.status": "狀態",
+  "sessions.table.lastSeen": "最後活動時間",
+  "sessions.table.expires": "到期時間",
+  "sessions.table.action": "操作",
+  "sessions.action.revoke": "撤銷",
+  "sessions.action.reasonPlaceholder": "原因",
+  "sessions.action.reasonAriaLabel": "撤銷 {subject} 的原因",
+  "sessions.status.active": "使用中",
+  "sessions.status.revoked": "已撤銷",
+  "sessions.status.expired": "已過期",
+  "sessions.status.compromised": "已被入侵",
   "nav.notifications": "通知",
   "nav.sla": "SLA",
   "nav.billing": "帳務概覽",
@@ -5598,7 +5705,9 @@ const zh: Record<keyof typeof en, string> = {
   "webhooks.action.rotateSecret": "輪替密鑰",
   "webhooks.action.viewDeliveryLog": "檢視投遞紀錄",
   "webhooks.action.retryFailed": "重試失敗投遞",
+  "webhooks.action.sendTest": "發送測試事件",
   "webhooks.action.disabled": "已停用",
+  "webhooks.success.testSubmitted": "測試 Webhook 已成功排入發送佇列。",
   "webhooks.tabLabel.replay": "重播",
   "webhooks.tabLabel.deliveries": "投遞",
   "webhooks.tabLabel.endpoints": "端點",
@@ -6236,6 +6345,8 @@ const zh: Record<keyof typeof en, string> = {
     "報表可導向檔案下載、租戶 audit 或外部營運後續。",
   "reports.deepLinks.auditReceipt": "查看租戶端報表操作的 audit 收據",
   "reports.deepLinks.open": "開啟",
+  "reports.deepLinks.originUnavailable":
+    "此環境未設定該應用程式的位址，無法開啟跨站深連結。",
 
   // ── rules (i18n-fullsweep 20260614) ──
   "rules.header.eyebrow": "審批與額度",
@@ -7702,7 +7813,8 @@ const zh: Record<keyof typeof en, string> = {
     "行程已在同一筆 booking 上繼續，請以更新後的履約模式與 ETA 為準。",
   "avFallback.value.etaMinutes": "{count} 分",
   "avFallback.value.etaPending": "ETA 待更新",
-  "avFallback.message.note": "文案由後端 messageCode 渲染，且僅顯示租戶可見內容。",
+  "avFallback.message.note":
+    "文案由後端 messageCode 渲染，且僅顯示租戶可見內容。",
   "avFallback.detail.title": "AV -> 人駕 fallback",
   "avFallback.detail.subtitle": "同一 booking 鏈 · 更新 ETA · 計費與 SLA 處理",
   "avFallback.detail.passenger": "乘客",
@@ -7754,6 +7866,18 @@ const zh: Record<keyof typeof en, string> = {
   "tenantMessageCode.sandbox_fulfillment.default":
     "此 booking 的服務狀態已更新。請以本頁顯示的租戶可見履約資訊與 ETA 為準。",
 
+  // ── login page ──
+  "login.realm.tenant": "租戶領域",
+  "login.title": "租戶後台登入",
+  "login.subtitle":
+    "使用貴組織的受控 OIDC 身分登入，以存取租戶營運、帳單與履約控制。",
+  "login.error.title": "驗證錯誤：",
+  "login.tenantIdLabel": "租戶 ID / 提示（選填）",
+  "login.tenantIdPlaceholder": "例如 tenant-acme-001",
+  "login.submit": "透過 OIDC 登入",
+  "login.securityNote":
+    "強制使用受控 HttpOnly session cookie 與同源 CSRF 保護。瀏覽器端永不接收可讀的 Bearer Token。",
+
   // ── formatters (i18n-fullsweep 20260614 finish) ──
   "formatters.notAvailable": "無資料",
 };
@@ -7766,6 +7890,9 @@ export function t(
   locale: Locale = "zh",
   params?: Record<string, string | number>,
 ): string {
+  if (key === "shell.env") {
+    return resolveAuthoritativeShellEnv(locale);
+  }
   const scoped = translations[locale] as Record<string, string>;
   const fallback = en as Record<string, string>;
   const template = scoped[key] ?? fallback[key] ?? key;

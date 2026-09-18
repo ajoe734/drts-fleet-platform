@@ -2,6 +2,7 @@ import type { ReactNode } from "react";
 import { Ionicons } from "@expo/vector-icons";
 import type { StyleProp, TextStyle, ViewStyle } from "react-native";
 import {
+  KeyboardAvoidingView,
   Platform,
   Pressable,
   ScrollView,
@@ -15,6 +16,7 @@ import {
   type CanvasTheme,
   type CanvasTone,
 } from "@drts/ui-web/canvas-tokens";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 export type DriverCanvasTheme = CanvasTheme;
 
@@ -127,14 +129,29 @@ function renderInlineText(
 
 export interface ShellProps {
   theme?: DriverCanvasTheme;
-  children: ReactNode;
+  children?: ReactNode;
   footer?: ReactNode;
   contentContainerStyle?: StyleProp<ViewStyle>;
 }
 
-function ShellStatusBar({ theme }: { theme: DriverCanvasTheme }) {
+function ShellStatusBar({
+  theme,
+  insets,
+}: {
+  theme: DriverCanvasTheme;
+  insets?: { top?: number };
+}) {
+  const topInset = Math.max(insets?.top ?? 0, 0);
   return (
-    <View style={[styles.statusBar, { backgroundColor: theme.bg }]}>
+    <View
+      style={[
+        styles.statusBar,
+        {
+          backgroundColor: theme.bg,
+          paddingTop: topInset > 0 ? topInset : 8,
+        },
+      ]}
+    >
       <Text
         style={[
           styles.statusBarTime,
@@ -166,40 +183,39 @@ export function Shell({
   contentContainerStyle,
 }: ShellProps) {
   const theme = resolveTheme(providedTheme);
-  const frame = (
+  const insets = useSafeAreaInsets();
+
+  return (
     <View
       style={[
         styles.shellFrame,
-        Platform.OS === "web" ? styles.shellFrameWeb : styles.shellFrameNative,
         {
           backgroundColor: theme.bg,
-          borderColor: Platform.OS === "web" ? "#0A0E14" : "transparent",
         },
       ]}
     >
-      {Platform.OS === "web" ? <View style={styles.phonePunchHole} /> : null}
-      <ShellStatusBar theme={theme} />
-      <ScrollView
+      <ShellStatusBar theme={theme} insets={insets} />
+      <KeyboardAvoidingView
         style={styles.shellScroll}
-        contentContainerStyle={[
-          styles.shellScrollContent,
-          contentContainerStyle,
-        ]}
-        showsVerticalScrollIndicator={false}
+        behavior={Platform.OS === "ios" ? "padding" : undefined}
       >
-        {children}
-      </ScrollView>
-      {footer ? <View style={styles.shellFooter}>{footer}</View> : null}
-    </View>
-  );
-
-  if (Platform.OS !== "web") {
-    return frame;
-  }
-
-  return (
-    <View style={styles.shellBackdrop}>
-      <View style={styles.shellWebCenter}>{frame}</View>
+        <ScrollView
+          style={styles.shellScroll}
+          contentContainerStyle={[
+            styles.shellScrollContent,
+            {
+              paddingBottom: Math.max(insets?.bottom ?? 0, 24),
+            },
+            contentContainerStyle,
+          ]}
+          showsVerticalScrollIndicator={false}
+          keyboardShouldPersistTaps="handled"
+          keyboardDismissMode={Platform.OS === "ios" ? "interactive" : "on-drag"}
+        >
+          {children}
+        </ScrollView>
+        {footer ? <View style={styles.shellFooter}>{footer}</View> : null}
+      </KeyboardAvoidingView>
     </View>
   );
 }
@@ -386,7 +402,7 @@ export interface CardProps {
   title?: ReactNode;
   subtitle?: ReactNode;
   actions?: ReactNode;
-  children: ReactNode;
+  children?: ReactNode;
   padding?: number;
   style?: StyleProp<ViewStyle>;
 }
@@ -879,15 +895,14 @@ export function Input({
 const styles = StyleSheet.create({
   shellBackdrop: {
     flex: 1,
-    backgroundColor: "#F0EEE9",
+    backgroundColor: "transparent",
     alignItems: "center",
     justifyContent: "center",
-    padding: 16,
   },
   shellWebCenter: {
-    width: 412,
-    maxWidth: "100%",
-    height: 892,
+    flex: 1,
+    width: "100%",
+    height: "100%",
   },
   shellFrame: {
     flex: 1,
@@ -897,30 +912,15 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   shellFrameWeb: {
-    borderWidth: 9,
-    borderRadius: 36,
-    shadowColor: "#000000",
-    shadowOffset: { width: 0, height: 24 },
-    shadowOpacity: 0.3,
-    shadowRadius: 40,
-    elevation: 8,
+    borderWidth: 0,
+    borderRadius: 0,
   },
   shellFrameNative: {
     borderRadius: 0,
   },
-  phonePunchHole: {
-    position: "absolute",
-    top: 8,
-    alignSelf: "center",
-    width: 22,
-    height: 22,
-    borderRadius: 11,
-    backgroundColor: "#0A0E14",
-    zIndex: 2,
-  },
   shellScrollContent: {
     paddingHorizontal: 20,
-    paddingTop: 18,
+    paddingTop: 12,
     paddingBottom: 24,
     gap: 14,
   },
@@ -932,7 +932,6 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "space-between",
     paddingHorizontal: 18,
-    paddingTop: Platform.OS === "web" ? 18 : 10,
     paddingBottom: 8,
   },
   statusBarTime: {
@@ -957,9 +956,11 @@ const styles = StyleSheet.create({
     alignItems: "flex-start",
     justifyContent: "space-between",
     gap: 12,
+    flexWrap: "wrap",
   },
   pageHeaderCopy: {
     flex: 1,
+    minWidth: 180,
     gap: 6,
   },
   pageHeaderTitle: {
@@ -976,6 +977,7 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     gap: 8,
+    flexWrap: "wrap",
   },
   pageHeaderTabs: {
     flexDirection: "row",
@@ -1040,6 +1042,7 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "space-between",
     gap: 12,
+    flexWrap: "wrap",
   },
   cardHeaderCopy: {
     flex: 1,

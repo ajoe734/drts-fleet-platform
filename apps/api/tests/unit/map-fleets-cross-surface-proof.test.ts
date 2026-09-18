@@ -2,7 +2,7 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import { resolve } from "node:path";
 
 import { EventEmitter2 } from "@nestjs/event-emitter";
-import { expect, it } from "vitest";
+import { afterEach, beforeEach, expect, it, vi } from "vitest";
 
 import type {
   AuditLogRecord,
@@ -182,6 +182,15 @@ function captureDispatchRefusal(
   };
 }
 
+beforeEach(() => {
+  vi.useFakeTimers();
+  vi.setSystemTime(new Date("2026-07-11T02:38:29.000Z"));
+});
+
+afterEach(() => {
+  vi.useRealTimers();
+});
+
 it("writes cross-surface persisted anti-bypass proof for fleets closeout", async () => {
   const tenantPartnerService = new TenantPartnerService(
     new AuditNotificationService(),
@@ -189,7 +198,7 @@ it("writes cross-surface persisted anti-bypass proof for fleets closeout", async
   const partnerVerification =
     await tenantPartnerService.verifyPartnerEligibility(
       {
-        entrySlug: "ctbc",
+        entrySlug: "acme",
         cardLast4: "2468",
         cardholderName: "Closeout Partner Rider",
       },
@@ -297,7 +306,7 @@ it("writes cross-surface persisted anti-bypass proof for fleets closeout", async
       businessDispatchSubtype: "credit_card_airport_transfer",
       reservationWindowStart: "2026-07-11T12:00:00.000Z",
       reservationWindowEnd: "2026-07-11T13:00:00.000Z",
-      partnerEntrySlug: "ctbc",
+      partnerEntrySlug: "acme",
       eligibilityVerificationId: partnerVerification.eligibilityVerificationId,
       pickup: {
         address: "Taoyuan Airport Terminal 1",
@@ -489,7 +498,7 @@ it("writes cross-surface persisted anti-bypass proof for fleets closeout", async
       businessDispatchSubtype: "credit_card_airport_transfer",
       reservationWindowStart: "2026-07-11T16:00:00.000Z",
       reservationWindowEnd: "2026-07-11T17:00:00.000Z",
-      partnerEntrySlug: "ctbc",
+      partnerEntrySlug: "acme",
       eligibilityVerificationId: partnerVerification.eligibilityVerificationId,
       pickup: {
         address: "Partner text-only pickup",

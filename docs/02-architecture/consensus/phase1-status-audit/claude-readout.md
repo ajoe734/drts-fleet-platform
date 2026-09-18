@@ -11,7 +11,7 @@ Status: complete
 
 ## source of truth / ownership
 
-- `ai-status.json`, `current-work.md`, and `docs-site/current-work.md` are currently synchronized. So the problem is not mirror drift; the problem is backlog completeness relative to the canonical target.
+- `ai-status.json`, `current-work.md`, and `tools/development-orchestrator/dashboard/current-work.md` are currently synchronized. So the problem is not mirror drift; the problem is backlog completeness relative to the canonical target.
 - The current task board accurately records the already-known productionization backlog W7/W8, but it does not yet cover all target-state gaps surfaced by the audit.
 - Canonical ownership for the audit comes from L1/L2 product truth, not from stale README summaries or bootstrap controller copy. That means stale local docs must yield to PRD, service contracts, migration plan, and execution rules when judging completeness.
 

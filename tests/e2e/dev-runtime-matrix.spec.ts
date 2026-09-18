@@ -203,7 +203,7 @@ const bankActors: ActorProfile[] = [
   {
     key: "bank-program-admin",
     actorType: "bank_program_admin",
-    tenantId: "tenant-ctbc-001",
+    tenantId: "tenant-acme-001",
   },
 ];
 
@@ -238,14 +238,14 @@ const enterpriseMarker =
 const channelPartnerMarker =
   /Channel Dashboard|渠道總覽|Referral Statements|分潤對帳單|Usage|用量明細/i;
 const referralEmbedMarker =
-  /社區叫車|御和物業|Referral Embed|轉介嵌入前台|\/embed\/yuhe-residence/i;
+  /社區叫車|法碧康物業|Referral Embed|轉介嵌入前台|\/embed\/yuhe-residence/i;
 const referralEmbedEntrySlug =
   process.env.DRTS_REFERRAL_EMBED_ENTRY_SLUG ?? "yuhe-residence";
 const currentDevHostSuffix = "4t7rg6fmeq-uc.a.run.app";
 const channelPartnerEvidenceMarkers = [
   /drts-data-source:live/i,
   /drts-e2e-actor-type:partner_api_key/i,
-  /drts-e2e-entry-slug:referral-demo-community/i,
+  /drts-e2e-entry-slug:yuhe-residence/i,
   /drts-e2e-scopes:billing:read/i,
 ] as const;
 
@@ -290,49 +290,49 @@ const surfaces: RuntimeSurface[] = [
     routes: [
       {
         key: "home",
-        path: "/?bank=ctbc",
+        path: "/?bank=acme",
         operation: "issuer dashboard",
         marker: /發卡行工作面|本期訂單|禮遇配額/i,
       },
       {
         key: "bookings",
-        path: "/bookings?bank=ctbc",
+        path: "/bookings?bank=acme",
         operation: "issuer booking list",
         marker: /發卡行訂單工作面|卡友訂單|唯讀履約視圖/i,
       },
       {
         key: "booking-detail",
-        path: "/bookings/ord_ctbc_240611_01?bank=ctbc",
+        path: "/bookings/ord_acme_240611_01?bank=acme",
         operation: "issuer booking detail",
         marker: /訂單詳情|機場履約|BK-240611-018/i,
       },
       {
         key: "users",
-        path: "/users?bank=cathay",
+        path: "/users?bank=contoso",
         operation: "issuer user governance",
         marker: /人員與角色|program_admin|使用者 Email/i,
       },
       {
         key: "programs",
-        path: "/programs?bank=ctbc",
+        path: "/programs?bank=acme",
         operation: "issuer benefit programs",
         marker: /方案與配額|禮遇|本月需關注/i,
       },
       {
         key: "contracts",
-        path: "/contracts?bank=ctbc",
+        path: "/contracts?bank=acme",
         operation: "issuer contract registry",
         marker: /合約與 SLA|服務水準|合約/i,
       },
       {
         key: "statement",
-        path: "/statements/2026-06?bank=fubon",
+        path: "/statements/2026-06?bank=tailspin",
         operation: "issuer statement detail",
-        marker: /結算對帳單|對帳|STM-FUBON/i,
+        marker: /結算對帳單|對帳|STM-TAILSPIN/i,
       },
       {
         key: "audit",
-        path: "/audit?bank=ctbc",
+        path: "/audit?bank=acme",
         operation: "issuer audit trail",
         marker: /稽核|Audit|事件/i,
       },
@@ -870,6 +870,12 @@ const surfaces: RuntimeSurface[] = [
         marker: tenantMarker,
       },
       {
+        key: "sessions",
+        path: "/sessions",
+        operation: "tenant session administration",
+        marker: tenantMarker,
+      },
+      {
         key: "notifications",
         path: "/notifications",
         operation: "notification preferences",
@@ -1084,7 +1090,7 @@ test.describe(`dev runtime ${TARGET_CASE_COUNT}-case end-to-end matrix`, () => {
           ? {
               "X-DRTS-E2E-Entry-Slug":
                 testCase.actor.partnerEntrySlug ?? referralEmbedEntrySlug,
-              "X-DRTS-E2E-Partner-Id": "partner-referral-demo-001",
+              "X-DRTS-E2E-Partner-Id": "partner_ead6bf3d-e858-47cc-bfe1-5a3742524118",
               "X-DRTS-E2E-Tenant-Id": "tenant-demo-001",
               "X-DRTS-E2E-Partner-Program-Id": "program-referral-community",
             }

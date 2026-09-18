@@ -6,9 +6,10 @@ import {
   TouchableOpacity,
   View,
 } from "react-native";
-import { useLocalSearchParams, useRouter } from "expo-router";
+import { Redirect, useLocalSearchParams, useRouter } from "expo-router";
 import {
   PLATFORM_CODE_REGISTRY,
+  type DriverSosLocationSnapshot,
   type DriverTaskRecord,
   type EmptyReason,
   type RefreshTier,
@@ -31,7 +32,22 @@ import {
   isUnifiedTaskPlatformClosed,
   summarizeWorkspaceTasks,
 } from "@/lib/driver-workspace-cockpit";
-import { getDriverClient } from "@/lib/api-client";
+import {
+  formatDriverError,
+  getDriverClient,
+  isDriverIdentityProvisioned,
+  recoverDriverSessionFromApiError,
+  registerProtectedCacheClearHandler,
+} from "@/lib/api-client";
+import { resetDriverAppToOnboarding } from "@/lib/driver-identity-routing";
+import { getLatestDriverLocationUpdate } from "@/lib/driver-location-heartbeat";
+import {
+  buildDriverSosSubmitCommand,
+  createDriverSosActiveCase,
+  mapSituationToDriverSosEventType,
+  markDriverSosCaseSubmitted,
+  saveDriverSosActiveCase,
+} from "@/lib/driver-sos-outbox";
 import {
   driverForwardedTaskStatusLabels,
   driverIncidentSituations,
@@ -118,11 +134,7 @@ const EMPTY_STATE_COPY: Record<EmptyReason, EmptyStateConfig> = {
 };
 
 function getErrorMessage(error: unknown): string {
-  if (error instanceof Error && error.message.trim()) {
-    return error.message.trim();
-  }
-
-  return "SOS 送出失敗，請稍後再試。";
+  return formatDriverError(error, "SOS 送出失敗，請稍後再試。");
 }
 
 function getSituationLabel(situationId: SosSituationId | null): string | null {
@@ -266,6 +278,10 @@ function pickForwardedTaskContext(
 }
 
 async function resolveIncidentPlatformContext(): Promise<IncidentPlatformContext | null> {
+  if (!isDriverIdentityProvisioned()) {
+    return null;
+  }
+
   const client = getDriverClient();
 
   try {
@@ -449,15 +465,32 @@ export default function IncidentScreen() {
   const entrySource = parseEntrySource(params.entry);
   const routeActions = parseAvailableActions(params.availableActions);
 
+  const isProvisioned = isDriverIdentityProvisioned();
+
   useEffect(() => {
+    const unregister = registerProtectedCacheClearHandler(() => {
+      setIncidentContextPreview(null);
+    });
+    return () => unregister();
+  }, []);
+
+  useEffect(() => {
+    if (!isProvisioned) {
+      return;
+    }
     const client = getDriverClient();
     client
       .isFeatureEnabled("driver-app.incidents")
       .then((enabled) => setIncidentsEnabled(enabled))
       .catch(() => setIncidentsEnabled(true));
-  }, []);
+  }, [isProvisioned]);
 
   const loadIncidentContext = async (manual = false) => {
+    if (!isDriverIdentityProvisioned()) {
+      setIncidentContextPreview(null);
+      setIncidentContextReady(true);
+      return;
+    }
     if (manual) {
       setRefreshingContext(true);
     }
@@ -523,31 +556,62 @@ export default function IncidentScreen() {
       setIncidentContextPreview(platformContext);
       setIncidentContextReady(true);
 
-      const created = await client.createIncident({
-        title: "司機 SOS 緊急通報",
+      const isOffline =
+        typeof navigator !== "undefined" &&
+        typeof navigator.onLine === "boolean" &&
+        !navigator.onLine;
+
+      const latestLocation = getLatestDriverLocationUpdate();
+      const locationSnapshot: DriverSosLocationSnapshot | null = latestLocation
+        ? {
+            lat: latestLocation.latitude,
+            lng: latestLocation.longitude,
+            accuracyM: latestLocation.accuracyM,
+            recordedAt: latestLocation.recordedAt,
+            reverseGeocodedAddress: null,
+            geocodeProvider: null,
+          }
+        : null;
+
+      const nextCase = createDriverSosActiveCase({
+        eventType: mapSituationToDriverSosEventType(selectedSituation),
+        situation: selectedSituation,
         description: buildIncidentDescription(
           details,
           platformContext,
           selectedSituation,
         ),
-        category: "safety",
-        severity: "critical",
-        ...(platformContext
-          ? { relatedOrderId: platformContext.mirrorOrderId }
-          : {}),
-        reportedBy: "driver",
+        attachments: [],
+        originalTriggeredAt: new Date().toISOString(),
+        offlineAtTrigger: isOffline,
+        location: locationSnapshot,
+        orderId: platformContext?.mirrorOrderId ?? null,
+        taskId: null,
       });
+      await saveDriverSosActiveCase(nextCase);
 
-      if (created?.incidentId) {
-        await client.updateIncident(created.incidentId, {
-          escalationTarget: "safety_officer",
-        });
+      if (!isOffline) {
+        const result = await client.submitDriverSosEvent(
+          buildDriverSosSubmitCommand(nextCase),
+          {
+            headers: {
+              "Idempotency-Key": nextCase.clientEventId,
+              "X-Request-Id": nextCase.clientEventId,
+            },
+          },
+        );
+        const submittedCase = markDriverSosCaseSubmitted(nextCase, result);
+        await saveDriverSosActiveCase(submittedCase);
       }
 
       setDetails("");
       setSelectedSituation(null);
       router.replace(returnRoute);
     } catch (error: unknown) {
+      if (await recoverDriverSessionFromApiError(error)) {
+        resetDriverAppToOnboarding(router);
+        return;
+      }
       setSubmissionError(getErrorMessage(error));
     } finally {
       setSubmitting(false);
@@ -637,6 +701,10 @@ export default function IncidentScreen() {
     resetHoldProgress();
     void submitIncident();
   };
+
+  if (!isProvisioned) {
+    return <Redirect href="/onboarding" />;
+  }
 
   if (incidentsEnabled === null) {
     return (

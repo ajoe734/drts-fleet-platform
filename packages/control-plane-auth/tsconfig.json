@@ -1,8 +1,16 @@
 {
   "extends": "../../tsconfig.base.json",
   "compilerOptions": {
-    "moduleResolution": "Bundler",
-    "noEmit": true
+    "outDir": "dist",
+    "rootDir": "src",
+    "declaration": true,
+    "module": "CommonJS",
+    "moduleResolution": "Node",
+    "noEmit": false,
+    "baseUrl": "../..",
+    "paths": {
+      "@drts/contracts": ["packages/contracts/dist/index.d.ts"]
+    }
   },
   "include": ["src/**/*.ts"]
 }

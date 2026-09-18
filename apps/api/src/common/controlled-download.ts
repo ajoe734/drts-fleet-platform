@@ -1,8 +1,22 @@
-import { createHmac } from "node:crypto";
+import { createHmac, timingSafeEqual } from "node:crypto";
 
 import { resolveControlledDownloadPolicy } from "./sensitive-data-policy";
 
-export const DEFAULT_CONTROLLED_DOWNLOAD_HOST = "https://downloads.drts.local";
+/**
+ * Where a controlled-download link points when nothing overrides it.
+ *
+ * This was `https://downloads.drts.local`, a host that does not resolve, with no
+ * route serving the path. Five modules handed callers a signed link to it and
+ * two consoles rendered that link for a person to click; following it failed at
+ * DNS, which reads as a network fault rather than as "this file was never
+ * produced".
+ *
+ * A relative prefix keeps the link on the API's own origin in every
+ * environment, where `ControlledDownloadController` answers it. Set
+ * `CONTROLLED_DOWNLOAD_HOST` to an absolute origin once artifacts are served
+ * from somewhere else.
+ */
+export const DEFAULT_CONTROLLED_DOWNLOAD_HOST = "/downloads";
 export const DEFAULT_CONTROLLED_DOWNLOAD_TTL_MINUTES = 15;
 export const DEFAULT_CONTROLLED_DOWNLOAD_KEY_ID =
   "phase1-controlled-download-key-v1";
@@ -81,6 +95,7 @@ export function createControlledDownloadMetadata(
       host,
       kind: command.kind,
       subjectId: command.subjectId,
+      manifestHash: command.manifestHash,
       signedAt,
       expiresAt,
       keyId,
@@ -103,6 +118,7 @@ function buildControlledDownloadUrl(input: {
   host: string;
   kind: string;
   subjectId: string;
+  manifestHash: string;
   signedAt: string;
   expiresAt: string;
   keyId: string;
@@ -113,6 +129,12 @@ function buildControlledDownloadUrl(input: {
     signed_at: input.signedAt,
     expires_at: input.expiresAt,
     key_id: input.keyId,
+    // The signature covers `manifestHash`. Without it in the link, the link
+    // could not be verified from itself -- every controlled download the
+    // platform issued was unverifiable for exactly this reason. Publishing the
+    // hash gives nothing away that the API response beside it does not already
+    // carry, and forging a signature still requires the secret.
+    manifest_hash: input.manifestHash,
     sig: input.signature,
     sig_v: String(input.signatureVersion),
   });
@@ -136,4 +158,75 @@ function stableSerialize(value: unknown): string {
       .join(",")}}`;
   }
   return JSON.stringify(value);
+}
+
+export interface ControlledDownloadClaims {
+  kind: string;
+  subjectId: string;
+  manifestHash: string;
+  signedAt: string;
+  expiresAt: string;
+  keyId: string;
+  signatureVersion: number;
+  signature: string;
+}
+
+export type ControlledDownloadVerification =
+  | { ok: true }
+  | { ok: false; reason: "signature_invalid" | "key_unknown" };
+
+/**
+ * Recomputes the signature over the claims a link carries and compares it to
+ * the one the link presents.
+ *
+ * Expiry is not checked here. A caller should verify the signature first and
+ * only then look at `expiresAt`: telling an unsigned or forged link that it is
+ * merely "expired" would answer a question it has not earned.
+ */
+export function verifyControlledDownloadSignature(
+  claims: ControlledDownloadClaims,
+  overrides: { keyId?: string; signingSecret?: string } = {},
+): ControlledDownloadVerification {
+  const policy = resolveControlledDownloadPolicy(overrides, {
+    host: DEFAULT_CONTROLLED_DOWNLOAD_HOST,
+    keyId: DEFAULT_CONTROLLED_DOWNLOAD_KEY_ID,
+    signingSecret: DEFAULT_CONTROLLED_DOWNLOAD_SECRET,
+    ttlMinutes: DEFAULT_CONTROLLED_DOWNLOAD_TTL_MINUTES,
+    signatureVersion: DEFAULT_CONTROLLED_DOWNLOAD_SIGNATURE_VERSION,
+  });
+
+  // A link signed under a key this deployment does not hold cannot be checked,
+  // and must not be treated as valid for want of a comparison.
+  if (claims.keyId !== policy.keyId) {
+    return { ok: false, reason: "key_unknown" };
+  }
+
+  const expected = createHmac("sha256", policy.signingSecret)
+    .update(
+      stableSerialize({
+        kind: claims.kind,
+        subjectId: claims.subjectId,
+        manifestHash: claims.manifestHash,
+        signedAt: claims.signedAt,
+        expiresAt: claims.expiresAt,
+        keyId: claims.keyId,
+        signatureVersion: claims.signatureVersion,
+      }),
+    )
+    .digest();
+
+  let presented: Buffer;
+  try {
+    presented = Buffer.from(claims.signature, "hex");
+  } catch {
+    return { ok: false, reason: "signature_invalid" };
+  }
+  // `timingSafeEqual` throws on a length mismatch, and comparing lengths first
+  // is not a leak: the digest length is fixed and public.
+  if (presented.length !== expected.length) {
+    return { ok: false, reason: "signature_invalid" };
+  }
+  return timingSafeEqual(presented, expected)
+    ? { ok: true }
+    : { ok: false, reason: "signature_invalid" };
 }

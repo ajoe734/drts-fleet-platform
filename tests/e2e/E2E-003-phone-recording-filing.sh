@@ -407,7 +407,11 @@ assert_status "200"
 PACKAGE_RETENTION_HOT=$(json_get_first ".data.hotRetentionDays" ".data.hot_retention_days")
 PACKAGE_RETENTION_ARCHIVE=$(json_get_first ".data.archiveRetentionDays" ".data.archive_retention_days")
 PACKAGE_AUDIT_ACTION=$(json_get_first ".data.auditAction" ".data.audit_action")
-if [[ "$PACKAGE_RETENTION_HOT" != "90" || "$PACKAGE_RETENTION_ARCHIVE" != "2555" ]]; then
+# 640, not 2555: COMP-RETENTION-001 sourced the period to 汽車運輸業管理規則
+# s91(4)'s two-year floor (90 hot + 640 archive = 730 total). This assertion is
+# what caught the change landing with the policy doc and the service out of step,
+# so it is deliberately a literal and not read from the service.
+if [[ "$PACKAGE_RETENTION_HOT" != "90" || "$PACKAGE_RETENTION_ARCHIVE" != "640" ]]; then
   log_fail "Unexpected filing_package retention policy: hot=${PACKAGE_RETENTION_HOT:-<empty>} archive=${PACKAGE_RETENTION_ARCHIVE:-<empty>}"
   exit 1
 fi

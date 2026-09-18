@@ -2,28 +2,28 @@ install:
 	pnpm install
 
 bootstrap:
-	./scripts/bootstrap.sh
+	./tools/local-development/bootstrap.sh
 
 check:
-	./scripts/check.sh
+	./tools/ci/check.sh
 
 db-init:
-	./scripts/db-init-local.sh
+	./operations/database/db-init-local.sh
 
 db-migrate:
-	./scripts/db-apply.sh
+	./operations/database/db-apply.sh
 
 db-seed:
-	./scripts/db-seed.sh all
+	./operations/database/db-seed.sh all
 
 db-verify:
-	./scripts/db-verify.sh
+	./operations/database/db-verify.sh
 
 dev-up:
-	./scripts/dev-up.sh
+	./tools/local-development/dev-up.sh
 
 dev-down:
-	./scripts/dev-down.sh
+	./tools/local-development/dev-down.sh
 
 dev-api:
 	pnpm dev:api

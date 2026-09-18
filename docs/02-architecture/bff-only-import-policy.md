@@ -37,7 +37,7 @@ Disallowed import targets include:
 
 CI enforces this policy with:
 
-- `scripts/ci/check-bff-only-imports.sh`
+- `tools/ci/check-bff-only-imports.sh`
 - `.github/workflows/ci.yml` job `bff-only-imports`
 
 The check is intentionally narrow and string-based:

@@ -25,12 +25,7 @@ import {
   type CanvasTone,
   buildCanvasTheme,
 } from "@drts/ui-web";
-import {
-  API_URL,
-  DEMO_ACTOR_ID,
-  DEMO_TENANT_ID,
-  getTenantClient,
-} from "@/lib/api-client";
+import { getTenantClient } from "@/lib/api-client";
 import { getServerLocale } from "@/lib/server-locale";
 import { t, type Locale } from "@/lib/translations";
 
@@ -352,7 +347,7 @@ function compareAddresses(
 }
 
 async function loadAddressesPageData(locale: Locale): Promise<AddressesPageData> {
-  const client = getTenantClient();
+  const client = await getTenantClient();
   const errors: string[] = [];
   const generatedAt = new Date().toISOString();
   const refreshConfig = REFRESH_TIER_CONFIG[ADDRESS_REFRESH_TIER];
@@ -428,19 +423,11 @@ async function loadAddressesPageData(locale: Locale): Promise<AddressesPageData>
 }
 
 async function fetchTenantAddressEnvelope(): Promise<AddressListEnvelope> {
-  const response = await fetch(`${API_URL}/api/tenant/addresses`, {
-    headers: {
-      "X-Tenant-Id": DEMO_TENANT_ID,
-      "X-Actor-Id": DEMO_ACTOR_ID,
-    },
-    cache: "no-store",
-  });
-
-  if (!response.ok) {
-    throw new Error(`HTTP ${response.status} when loading tenant addresses`);
-  }
-
-  const payload = (await response.json()) as
+  const client = await getTenantClient();
+  const payload = (await client.get<
+    | { data?: Partial<AddressListEnvelope> & { items?: AddressListRecord[] } }
+    | { items?: AddressListRecord[] }
+  >("/api/tenant/addresses")) as
     | { data?: Partial<AddressListEnvelope> & { items?: AddressListRecord[] } }
     | { items?: AddressListRecord[] };
 
@@ -1079,7 +1066,7 @@ export default async function AddressesPage({
           <>
             {exportDescriptor.enabled ? (
               <a
-                href={`${API_URL}/api/tenant/addresses/export-view`}
+                href="/control-plane-proxy/tenant/addresses/export-view"
                 style={{ textDecoration: "none" }}
                 target="_blank"
                 rel="noreferrer"
@@ -1700,7 +1687,7 @@ export default async function AddressesPage({
 async function upsertAddressAction(formData: FormData) {
   "use server";
 
-  const client = getTenantClient();
+  const client = await getTenantClient();
   const command = buildAddressCommand(formData);
   await client.upsertAddress(command);
   revalidatePath("/addresses");
@@ -1709,7 +1696,7 @@ async function upsertAddressAction(formData: FormData) {
 async function changeAddressLifecycleAction(formData: FormData) {
   "use server";
 
-  const client = getTenantClient();
+  const client = await getTenantClient();
   const command = buildAddressCommand(formData);
   command.activeFlag = formData.get("nextActiveFlag") === "true";
   await client.upsertAddress(command);

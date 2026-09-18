@@ -90,6 +90,7 @@ type HealthLoadResult = {
 
 type ContractRow = Record<string, unknown> & {
   contractId: string;
+  detailHref?: string;
   serviceScope: string;
   operatingAreaId: string | null;
   kindKey: string;
@@ -710,8 +711,7 @@ function synthesizeAvailableActions(
   const actions: ResourceActionDescriptor[] = [
     {
       action: "open_contract_detail",
-      enabled: false,
-      disabledReasonCode: "contract_detail_pending",
+      enabled: Boolean(contract.contractId),
       riskLevel: "low",
     },
   ];
@@ -1151,8 +1151,15 @@ export default async function ContractsPage({
     );
     const crossAppLinks = synthesizeCrossAppLinks(contract, kind.key, locale);
 
+    const currentQuery = buildHref(filters, {});
+    const detailHref =
+      currentQuery !== "/contracts"
+        ? `/contracts/${encodeURIComponent(contract.contractId)}?returnTo=${encodeURIComponent(currentQuery)}`
+        : `/contracts/${encodeURIComponent(contract.contractId)}`;
+
     const provisionalRow = {
       contractId: contract.contractId,
+      detailHref,
       serviceScope:
         contract.serviceScope ||
         formatOpsCodeLabel(locale, contract.contractType),
@@ -1189,7 +1196,20 @@ export default async function ContractsPage({
       ...provisionalRow,
       availableActions:
         contract.availableActions && contract.availableActions.length > 0
-          ? contract.availableActions
+          ? contract.availableActions.map((action) => {
+              if (
+                action.action === "open_contract_detail" &&
+                action.disabledReasonCode === "contract_detail_pending"
+              ) {
+                const { disabledReasonCode: _unused, ...rest } = action;
+                void _unused;
+                return {
+                  ...rest,
+                  enabled: true,
+                };
+              }
+              return action;
+            })
           : synthesizeAvailableActions(contract, {
               kindKey: kind.key,
               crossAppLinks,

@@ -4,6 +4,7 @@ import {
   Get,
   Headers,
   HttpStatus,
+  Optional,
   Param,
   Post,
   Query,
@@ -22,7 +23,9 @@ import type {
   RejectExclusivityCommand,
   RegulatoryRegistrySummary,
   SubmitExclusivityReviewCommand,
+  UpdateDriverLicensesCommand,
   UpdateDriverMasterLifecycleCommand,
+  UpdateDriverServiceBucketsCommand,
   UpdateDriverWorkStateCommand,
   UpdateVehicleComplianceCommand,
   PassengerServiceRuntimeProfile,
@@ -32,12 +35,23 @@ import {
   ApiRequestError,
   toApiSuccessEnvelope,
 } from "../../common/api-envelope";
-import { RegulatoryRegistryService } from "./regulatory-registry.service";
+import { ContractOperationalViewService } from "./contract-operational-view.service";
+import type {
+  DeliveryIntentStatus,
+  ExpiryEntityType,
+  ExpiryEventStatus,
+} from "./regulatory-registry.repository";
+import {
+  RegulatoryRegistryService,
+  type ReconcileExpiryCommand,
+} from "./regulatory-registry.service";
 
 @Controller("regulatory-registry")
 export class RegulatoryRegistryController {
   constructor(
     private readonly regulatoryRegistryService: RegulatoryRegistryService,
+    @Optional()
+    private readonly contractOperationalViewService?: ContractOperationalViewService,
   ) {}
 
   @Get("summary")
@@ -225,6 +239,25 @@ export class RegulatoryRegistryController {
     );
   }
 
+  // `SD-DP-20260817-010` (PRD 11.4) makes this the platform's call, but it could
+  // only ever be made at registration -- the one moment the platform knows least
+  // about the driver.
+  @Post("drivers/:driverId/service-buckets")
+  updateDriverServiceBuckets(
+    @Param("driverId") driverId: string,
+    @Body() command: UpdateDriverServiceBucketsCommand,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    return toApiSuccessEnvelope(
+      this.regulatoryRegistryService.updateDriverServiceBuckets(
+        driverId,
+        command,
+        requestId,
+      ),
+      requestId,
+    );
+  }
+
   @Post("drivers/:driverId/lifecycle")
   updateDriverLifecycle(
     @Param("driverId") driverId: string,
@@ -233,6 +266,38 @@ export class RegulatoryRegistryController {
   ) {
     return toApiSuccessEnvelope(
       this.regulatoryRegistryService.updateDriverLifecycle(
+        driverId,
+        command,
+        requestId,
+      ),
+      requestId,
+    );
+  }
+
+  @Get("drivers/expiring-licenses")
+  listExpiringDriverLicenses(
+    @Query("windowDays") windowDays?: string,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    const parsedDays = windowDays ? parseInt(windowDays, 10) : 30;
+    return toApiSuccessEnvelope(
+      {
+        items: this.regulatoryRegistryService.listExpiringDriverLicenses(
+          Number.isNaN(parsedDays) ? 30 : parsedDays,
+        ),
+      },
+      requestId,
+    );
+  }
+
+  @Post("drivers/:driverId/licenses")
+  updateDriverLicenses(
+    @Param("driverId") driverId: string,
+    @Body() command: UpdateDriverLicensesCommand,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    return toApiSuccessEnvelope(
+      this.regulatoryRegistryService.updateDriverLicenses(
         driverId,
         command,
         requestId,
@@ -272,6 +337,89 @@ export class RegulatoryRegistryController {
       this.regulatoryRegistryService.activateContract(contractId, command),
       requestId,
     );
+  }
+
+  @Get("contracts/:contractId/operational-view")
+  getContractOperationalView(
+    @Param("contractId") contractId: string,
+    @Headers("x-tenant-id") headerTenantId?: string,
+    @Headers("x-partner-id") headerPartnerId?: string,
+    @Headers("x-service-scope") headerServiceScope?: string,
+    @Query("tenantId") queryTenantId?: string,
+    @Query("partnerId") queryPartnerId?: string,
+    @Query("serviceScope") queryServiceScope?: string,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    const scopeContext = {
+      tenantId: headerTenantId || queryTenantId || undefined,
+      partnerId: headerPartnerId || queryPartnerId || undefined,
+      serviceScope: headerServiceScope || queryServiceScope || undefined,
+    };
+    const view =
+      this.requireContractOperationalViewService().getOperationalView(
+        contractId,
+        scopeContext,
+      );
+    return toApiSuccessEnvelope(view, requestId);
+  }
+
+  @Get("contracts/:contractId/operational-terms")
+  getContractOperationalTerms(
+    @Param("contractId") contractId: string,
+    @Headers("x-tenant-id") headerTenantId?: string,
+    @Headers("x-partner-id") headerPartnerId?: string,
+    @Headers("x-service-scope") headerServiceScope?: string,
+    @Query("tenantId") queryTenantId?: string,
+    @Query("partnerId") queryPartnerId?: string,
+    @Query("serviceScope") queryServiceScope?: string,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    const scopeContext = {
+      tenantId: headerTenantId || queryTenantId || undefined,
+      partnerId: headerPartnerId || queryPartnerId || undefined,
+      serviceScope: headerServiceScope || queryServiceScope || undefined,
+    };
+    const terms =
+      this.requireContractOperationalViewService().getOperationalTerms(
+        contractId,
+        scopeContext,
+      );
+    return toApiSuccessEnvelope(terms, requestId);
+  }
+
+  @Get("contracts/:contractId")
+  getContract(
+    @Param("contractId") contractId: string,
+    @Headers("x-tenant-id") headerTenantId?: string,
+    @Headers("x-partner-id") headerPartnerId?: string,
+    @Headers("x-service-scope") headerServiceScope?: string,
+    @Query("tenantId") queryTenantId?: string,
+    @Query("partnerId") queryPartnerId?: string,
+    @Query("serviceScope") queryServiceScope?: string,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    const scopeContext = {
+      tenantId: headerTenantId || queryTenantId || undefined,
+      partnerId: headerPartnerId || queryPartnerId || undefined,
+      serviceScope: headerServiceScope || queryServiceScope || undefined,
+    };
+    const contract =
+      this.requireContractOperationalViewService().validateContractScope(
+        contractId,
+        scopeContext,
+      );
+    return toApiSuccessEnvelope(contract, requestId);
+  }
+
+  private requireContractOperationalViewService(): ContractOperationalViewService {
+    if (!this.contractOperationalViewService) {
+      throw new ApiRequestError(
+        HttpStatus.INTERNAL_SERVER_ERROR,
+        "SERVICE_UNAVAILABLE",
+        "Contract operational view service is not available.",
+      );
+    }
+    return this.contractOperationalViewService;
   }
 
   @Get("policies/expiring")
@@ -406,6 +554,70 @@ export class RegulatoryRegistryController {
       registrationNo: credential.maskedDisplay,
     };
     return toApiSuccessEnvelope(projected, requestId);
+  }
+
+  @Post("credentials/reconcile-expiry")
+  async reconcileExpiry(
+    @Body() command?: ReconcileExpiryCommand,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    const result =
+      await this.regulatoryRegistryService.reconcileExpiredCredentials(command);
+    return toApiSuccessEnvelope(result, requestId);
+  }
+
+  @Get("expiry-backlog")
+  async getExpiryBacklog(
+    @Query("scope") scope?: string,
+    @Query("entityType") entityType?: ExpiryEntityType,
+    @Query("status") status?: ExpiryEventStatus,
+    @Query("limit") limitRaw?: string,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    const limit = limitRaw
+      ? this.parseFiniteQueryNumber(limitRaw, "limit")
+      : undefined;
+    const backlog = await this.regulatoryRegistryService.getExpiryBacklog({
+      ...(scope ? { scope } : {}),
+      ...(entityType ? { entityType } : {}),
+      ...(status ? { status } : {}),
+      ...(limit !== undefined ? { limit } : {}),
+    });
+    return toApiSuccessEnvelope(backlog, requestId);
+  }
+
+  @Get("expiry-receipts")
+  async getExpiryReceipts(
+    @Query("tenantId") tenantId?: string,
+    @Query("deliveryStatus") deliveryStatus?: DeliveryIntentStatus,
+    @Query("limit") limitRaw?: string,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    const limit = limitRaw
+      ? this.parseFiniteQueryNumber(limitRaw, "limit")
+      : undefined;
+    const receipts = await this.regulatoryRegistryService.getExpiryReceipts({
+      ...(tenantId ? { tenantId } : {}),
+      ...(deliveryStatus ? { deliveryStatus } : {}),
+      ...(limit !== undefined ? { limit } : {}),
+    });
+    return toApiSuccessEnvelope(receipts, requestId);
+  }
+
+  @Get("expiry-events/:eventId")
+  async getExpiryEvent(
+    @Param("eventId") eventId: string,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    const event = await this.regulatoryRegistryService.getExpiryEvent(eventId);
+    if (!event) {
+      throw new ApiRequestError(
+        HttpStatus.NOT_FOUND,
+        "CREDENTIAL_EXPIRY_EVENT_NOT_FOUND",
+        `Expiry event '${eventId}' not found.`,
+      );
+    }
+    return toApiSuccessEnvelope(event, requestId);
   }
 
   private parseFiniteQueryNumber(

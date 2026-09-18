@@ -31,5 +31,5 @@ spec:
                       key: latest
                       name: drts-staging-db-url
               # Migration image built from Dockerfile.migrate at repo root.
-              # Includes psql client, python3 (for URL parsing), scripts/, and infra/migrations/.
-              # ENTRYPOINT in the image already runs bash scripts/db-apply.sh.
+              # Includes psql client, python3 (for URL parsing), operations/database/, and infra/migrations/.
+              # ENTRYPOINT in the image already runs bash operations/database/db-apply.sh.

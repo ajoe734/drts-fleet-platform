@@ -3,11 +3,13 @@ import {
   Controller,
   Get,
   Headers,
+  HttpStatus,
   Optional,
   Param,
   Post,
   Put,
   Query,
+  Res,
   Sse,
 } from "@nestjs/common";
 import { Throttle } from "@nestjs/throttler";
@@ -37,6 +39,10 @@ import type {
   RequestExceptionOverrideCommand,
   ResolveExceptionHoldCommand,
   UpdateTenantBookingCommand,
+  CancelReferralPassengerTripCommand,
+  CreateReferralPassengerBookingCommand,
+  SubmitReferralPassengerRatingCommand,
+  TenantBookingListQuery,
 } from "@drts/contracts";
 
 import {
@@ -44,9 +50,22 @@ import {
   toApiListData,
   toApiSuccessEnvelope,
 } from "../../common/api-envelope";
-import { CurrentIdentity, RequireRealms } from "../../common/auth";
+import {
+  CurrentIdentity,
+  RequireRealms,
+  RequireScopes,
+  isDriverIdentityMatching,
+  normalizeDriverId,
+} from "../../common/auth";
 import type { BootstrapRequestIdentity } from "../../common/auth";
-import { READ_HEAVY_RATE_LIMIT } from "../../common/throttling/rate-limit.constants";
+import { IdempotencyService } from "../../common/idempotency";
+import {
+  BOOKING_INTAKE_RATE_LIMIT,
+  DISPATCH_RATE_LIMIT,
+  READ_HEAVY_RATE_LIMIT,
+} from "../../common/throttling/rate-limit.constants";
+import type { PassthroughResponseLike } from "../../common/idempotency-http";
+import { applyIdempotentResponseHeaders } from "../../common/idempotency-http";
 import { TenantPartnerService } from "../tenant-partner/tenant-partner.service";
 import { OwnedMobilityService } from "./owned-mobility.service";
 
@@ -54,6 +73,7 @@ import { OwnedMobilityService } from "./owned-mobility.service";
 export class OwnedMobilityController {
   constructor(
     private readonly ownedMobilityService: OwnedMobilityService,
+    private readonly idempotencyService: IdempotencyService,
     @Optional()
     private readonly tenantPartnerService?: TenantPartnerService,
   ) {}
@@ -62,8 +82,25 @@ export class OwnedMobilityController {
     identity: BootstrapRequestIdentity | null,
     requestedDriverId?: string,
   ) {
-    if (identity?.actorType === "driver_user" && identity.actorId) {
-      return identity.actorId;
+    if (identity?.realm === "driver" || identity?.actorType === "driver_user") {
+      const actorId = identity.actorId;
+      if (!actorId) {
+        throw new ApiRequestError(
+          HttpStatus.UNAUTHORIZED,
+          "DRIVER_IDENTITY_REQUIRED",
+          "Driver identity actorId is required.",
+        );
+      }
+      const normalized = requestedDriverId?.trim();
+      if (normalized && !isDriverIdentityMatching(actorId, normalized)) {
+        throw new ApiRequestError(
+          HttpStatus.FORBIDDEN,
+          "DRIVER_IDENTITY_MISMATCH",
+          "Driver identity may only stream its own task events.",
+          { actorId, requestedDriverId: normalized },
+        );
+      }
+      return normalizeDriverId(actorId)!;
     }
 
     const normalizedDriverId = requestedDriverId?.trim();
@@ -72,10 +109,29 @@ export class OwnedMobilityController {
     }
 
     throw new ApiRequestError(
-      400,
+      HttpStatus.BAD_REQUEST,
       "DRIVER_ID_REQUIRED",
       "driverId query is required when the caller is not a driver bootstrap identity.",
     );
+  }
+
+  private assertDriverTaskAccess(
+    taskId: string,
+    identity: BootstrapRequestIdentity | null,
+  ) {
+    const task = this.ownedMobilityService.getDriverTask(taskId);
+    if (identity?.realm === "driver" || identity?.actorType === "driver_user") {
+      const actorId = identity.actorId;
+      if (actorId && !isDriverIdentityMatching(actorId, task.driverId)) {
+        throw new ApiRequestError(
+          HttpStatus.FORBIDDEN,
+          "DRIVER_IDENTITY_MISMATCH",
+          "Driver identity cannot access another driver's task.",
+          { taskId, actorId, taskDriverId: task.driverId },
+        );
+      }
+    }
+    return task;
   }
 
   private resolveOpsDispatchStreamActorId(
@@ -105,18 +161,57 @@ export class OwnedMobilityController {
     return normalizedTenantId;
   }
 
+  private assertTenantAccessScope(
+    targetTenantId: string,
+    identity: BootstrapRequestIdentity | null | undefined,
+  ) {
+    if (!identity || !identity.actorId) {
+      throw new ApiRequestError(
+        HttpStatus.UNAUTHORIZED,
+        "AUTH_REQUIRED",
+        "Authenticated tenant identity is required.",
+      );
+    }
+
+    const isPlatformOrSystem =
+      identity.realm === "platform" ||
+      identity.realm === "system" ||
+      identity.actorType === "platform_admin" ||
+      identity.actorType === "system" ||
+      identity.roleFamilies?.includes("platform");
+
+    if (isPlatformOrSystem) {
+      return;
+    }
+
+    if (!identity.tenantId || identity.tenantId !== targetTenantId) {
+      throw new ApiRequestError(
+        HttpStatus.FORBIDDEN,
+        "TENANT_SCOPE_MISMATCH",
+        "Cross-tenant identity access is forbidden. Principal tenantId does not match target tenantId.",
+        {
+          targetTenantId,
+          principalTenantId: identity.tenantId ?? null,
+        },
+      );
+    }
+  }
+
   @Post("orders")
-  createOwnedOrder(
+  async createOwnedOrder(
     @Body() command: CreateOwnedOrderCommand,
     @CurrentIdentity() identity: BootstrapRequestIdentity | null,
     @Headers("x-request-id") requestId?: string,
     @Headers("x-runtime-profile-code") runtimeProfileCode?: string,
+    @Headers("idempotency-key") idempotencyKey?: string,
   ) {
-    const order = this.ownedMobilityService.createPassengerOrder(
+    const order = await this.ownedMobilityService.createPassengerOrder(
       command,
       identity,
       requestId,
       runtimeProfileCode,
+      idempotencyKey,
+      { required: true },
     );
     return toApiSuccessEnvelope(
       {
@@ -170,35 +265,52 @@ export class OwnedMobilityController {
   }
 
   @Post("call-center/orders")
-  createCallCenterOrder(
+  async createCallCenterOrder(
     @Body() command: CreateCallCenterOrderCommand,
+    @Res({ passthrough: true }) response: PassthroughResponseLike,
+    @Headers("idempotency-key") idempotencyKey?: string,
     @Headers("x-request-id") requestId?: string,
     @Headers("x-runtime-profile-code") runtimeProfileCode?: string,
+    @CurrentIdentity() identity?: BootstrapRequestIdentity | null,
   ) {
-    const order = this.ownedMobilityService.createCallCenterOrder(
-      command,
-      requestId,
-      runtimeProfileCode,
-    );
-    return toApiSuccessEnvelope(
-      {
-        orderId: order.orderId,
-        orderSource: order.orderSource,
-        callId: order.callId,
-        recordingId: order.recordingId,
-        status: order.status,
+    const result = await this.idempotencyService.execute({
+      scope: `crm:callcenter:session:${command.callId ?? ""}:order_create`,
+      idempotencyKey,
+      requestPath: "call-center/orders",
+      payload: command,
+      execute: async () => {
+        const order = await this.ownedMobilityService.createCallCenterOrder(
+          command,
+          requestId,
+          runtimeProfileCode,
+          identity,
+        );
+        return {
+          data: {
+            orderId: order.orderId,
+            orderSource: order.orderSource,
+            callId: order.callId,
+            recordingId: order.recordingId,
+            status: order.status,
+          },
+          statusCode: HttpStatus.CREATED,
+        };
       },
-      requestId,
-    );
+    });
+
+    applyIdempotentResponseHeaders(response, result);
+    return toApiSuccessEnvelope(result.data, requestId);
   }
 
   @Post("tenant/bookings")
+  @Throttle(BOOKING_INTAKE_RATE_LIMIT)
   async createTenantBooking(
     @Body() command: CreateTenantBookingCommand,
     @CurrentIdentity() identity: BootstrapRequestIdentity | null,
     @Headers("x-tenant-id") tenantId?: string,
     @Headers("x-request-id") requestId?: string,
     @Headers("x-runtime-profile-code") runtimeProfileCode?: string,
+    @Headers("idempotency-key") idempotencyKey?: string,
   ) {
     const result = await this.ownedMobilityService.createTenantBooking(
       command,
@@ -206,6 +318,8 @@ export class OwnedMobilityController {
       identity,
       requestId,
       runtimeProfileCode,
+      idempotencyKey,
+      { required: true },
     );
     return toApiSuccessEnvelope(result, requestId);
   }
@@ -217,6 +331,7 @@ export class OwnedMobilityController {
     @Headers("x-tenant-id") tenantId?: string,
     @Headers("x-request-id") requestId?: string,
     @Headers("x-runtime-profile-code") runtimeProfileCode?: string,
+    @Headers("idempotency-key") idempotencyKey?: string,
   ) {
     const resolvedTenantId = this.requireTenantId(tenantId);
     if (command.eligibilityVerificationId && this.tenantPartnerService) {
@@ -231,6 +346,8 @@ export class OwnedMobilityController {
       identity,
       requestId,
       runtimeProfileCode,
+      idempotencyKey,
+      { required: true },
     );
     return toApiSuccessEnvelope(
       {
@@ -277,17 +394,135 @@ export class OwnedMobilityController {
     );
   }
 
+  @Post("partner/referral/passenger/bookings")
+  async createReferralPassengerBooking(
+    @Body() command: CreateReferralPassengerBookingCommand,
+    @CurrentIdentity() identity: BootstrapRequestIdentity | null,
+    @Headers("x-request-id") requestId?: string,
+    @Headers("x-runtime-profile-code") runtimeProfileCode?: string,
+    @Headers("idempotency-key") idempotencyKey?: string,
+  ) {
+    const result =
+      await this.ownedMobilityService.createReferralPassengerBooking(
+        command,
+        identity,
+        requestId,
+        runtimeProfileCode,
+        idempotencyKey,
+      );
+    return toApiSuccessEnvelope(result, requestId);
+  }
+
+  @Get("partner/referral/passenger/active")
+  @Throttle(READ_HEAVY_RATE_LIMIT)
+  getReferralPassengerActiveTrip(
+    @CurrentIdentity() identity: BootstrapRequestIdentity | null,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    return toApiSuccessEnvelope(
+      this.ownedMobilityService.getReferralPassengerActiveTrip(identity),
+      requestId,
+    );
+  }
+
+  @Get("partner/referral/passenger/history")
+  @Throttle(READ_HEAVY_RATE_LIMIT)
+  listReferralPassengerHistory(
+    @CurrentIdentity() identity: BootstrapRequestIdentity | null,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    return toApiSuccessEnvelope(
+      this.ownedMobilityService.listReferralPassengerHistory(identity),
+      requestId,
+    );
+  }
+
+  @Get("partner/referral/passenger/orders/:orderId/receipt")
+  @Throttle(READ_HEAVY_RATE_LIMIT)
+  getReferralPassengerReceipt(
+    @Param("orderId") orderId: string,
+    @CurrentIdentity() identity: BootstrapRequestIdentity | null,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    return toApiSuccessEnvelope(
+      this.ownedMobilityService.getReferralPassengerReceipt(orderId, identity),
+      requestId,
+    );
+  }
+
+  @Get("partner/referral/passenger/orders/:orderId/receipt/download")
+  @Throttle(READ_HEAVY_RATE_LIMIT)
+  downloadReferralPassengerReceipt(
+    @Param("orderId") orderId: string,
+    @CurrentIdentity() identity: BootstrapRequestIdentity | null,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    return toApiSuccessEnvelope(
+      this.ownedMobilityService.getReferralPassengerReceipt(orderId, identity),
+      requestId,
+    );
+  }
+
+  @Post("partner/referral/passenger/orders/:orderId/cancel")
+  async cancelReferralPassengerTrip(
+    @Param("orderId") orderId: string,
+    @Body() command: CancelReferralPassengerTripCommand,
+    @CurrentIdentity() identity: BootstrapRequestIdentity | null,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    return toApiSuccessEnvelope(
+      await this.ownedMobilityService.cancelReferralPassengerTrip(
+        orderId,
+        command,
+        identity,
+        requestId,
+      ),
+      requestId,
+    );
+  }
+
+  @Post("partner/referral/passenger/orders/:orderId/rating")
+  async submitReferralPassengerRating(
+    @Param("orderId") orderId: string,
+    @Body() command: SubmitReferralPassengerRatingCommand,
+    @CurrentIdentity() identity: BootstrapRequestIdentity | null,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    return toApiSuccessEnvelope(
+      await this.ownedMobilityService.submitReferralPassengerRating(
+        orderId,
+        command,
+        identity,
+      ),
+      requestId,
+    );
+  }
+
   @Get("tenant/bookings")
   @Throttle(READ_HEAVY_RATE_LIMIT)
-  listTenantBookings(
+  async listTenantBookings(
+    @Query() query: TenantBookingListQuery,
+    @CurrentIdentity() identity: BootstrapRequestIdentity | null,
     @Headers("x-tenant-id") tenantId?: string,
     @Headers("x-request-id") requestId?: string,
   ) {
-    const bookings = this.ownedMobilityService.listTenantBookings(
-      this.requireTenantId(tenantId),
+    const resolvedTenantId = this.requireTenantId(tenantId);
+    this.assertTenantAccessScope(resolvedTenantId, identity);
+    const bookings = await this.ownedMobilityService.listTenantBookings(
+      resolvedTenantId,
+      {
+        ...query,
+        page: query?.page ?? 1,
+        pageSize: query?.pageSize ?? 20,
+      },
+      identity,
     );
     return toApiSuccessEnvelope(
-      toApiListData(bookings.items, bookings.pagination),
+      {
+        items: bookings.items,
+        pagination: bookings.pagination,
+        pageInfo: bookings.pagination,
+      },
       requestId,
     );
   }
@@ -345,14 +580,14 @@ export class OwnedMobilityController {
   }
 
   @Post("tenant/bookings/:bookingId/cancel")
-  cancelTenantBooking(
+  async cancelTenantBooking(
     @Param("bookingId") bookingId: string,
     @Body() command: CancelOwnedOrderCommand,
     @Headers("x-tenant-id") tenantId?: string,
     @Headers("x-request-id") requestId?: string,
   ) {
     return toApiSuccessEnvelope(
-      this.ownedMobilityService.cancelTenantBooking(
+      await this.ownedMobilityService.cancelTenantBooking(
         this.requireTenantId(tenantId),
         bookingId,
         command,
@@ -363,37 +598,52 @@ export class OwnedMobilityController {
   }
 
   @Post("passenger/orders/:orderId/cancel")
-  cancelOwnedOrder(
+  async cancelOwnedOrder(
     @Param("orderId") orderId: string,
     @Body() command: CancelOwnedOrderCommand,
     @Headers("x-request-id") requestId?: string,
   ) {
     return toApiSuccessEnvelope(
-      this.ownedMobilityService.cancelOwnedOrder(orderId, command, requestId),
+      await this.ownedMobilityService.cancelOwnedOrder(orderId, command, requestId),
       requestId,
     );
   }
 
   @Post("orders/:orderId/dispatch")
-  dispatchOrder(
+  @Throttle(DISPATCH_RATE_LIMIT)
+  async dispatchOrder(
     @Param("orderId") orderId: string,
     @Body() command: DispatchOrderCommand,
     @Headers("x-request-id") requestId?: string,
+    @Headers("idempotency-key") idempotencyKey?: string,
   ) {
     return toApiSuccessEnvelope(
-      this.ownedMobilityService.dispatchOrder(orderId, command, requestId),
+      await this.ownedMobilityService.dispatchOrder(
+        orderId,
+        command,
+        requestId,
+        idempotencyKey,
+        { required: true },
+      ),
       requestId,
     );
   }
 
   @Post("orders/:orderId/redispatch")
-  redispatchOrder(
+  async redispatchOrder(
     @Param("orderId") orderId: string,
     @Body() command: RedispatchOrderCommand,
     @Headers("x-request-id") requestId?: string,
+    @Headers("idempotency-key") idempotencyKey?: string,
   ) {
     return toApiSuccessEnvelope(
-      this.ownedMobilityService.redispatchOrder(orderId, command, requestId),
+      await this.ownedMobilityService.redispatchOrder(
+        orderId,
+        command,
+        requestId,
+        idempotencyKey,
+        { required: true },
+      ),
       requestId,
     );
   }
@@ -471,17 +721,23 @@ export class OwnedMobilityController {
   }
 
   @Post("orders/:orderId/dispatch-timeout")
-  handleDispatchTimeout(
+  async handleDispatchTimeout(
     @Param("orderId") orderId: string,
     @Body()
-    command: { timeoutReasonCode: "acceptance_timeout" | "matching_timeout" },
+    command: {
+      timeoutReasonCode: "acceptance_timeout" | "matching_timeout";
+      assignmentId?: string;
+    },
     @Headers("x-request-id") requestId?: string,
   ) {
     return toApiSuccessEnvelope(
-      this.ownedMobilityService.handleDispatchTimeout(
+      await this.ownedMobilityService.handleDispatchTimeout(
         orderId,
         command.timeoutReasonCode,
         requestId,
+        command.assignmentId
+          ? { targetAssignmentId: command.assignmentId }
+          : undefined,
       ),
       requestId,
     );
@@ -542,9 +798,15 @@ export class OwnedMobilityController {
   async assignDispatch(
     @Body() command: AssignDispatchCommand,
     @Headers("x-request-id") requestId?: string,
+    @Headers("idempotency-key") idempotencyKey?: string,
   ) {
     return toApiSuccessEnvelope(
-      await this.ownedMobilityService.assignDispatch(command, requestId),
+      await this.ownedMobilityService.assignDispatch(
+        command,
+        requestId,
+        idempotencyKey,
+        { required: true },
+      ),
       requestId,
     );
   }
@@ -553,9 +815,15 @@ export class OwnedMobilityController {
   async reassignDispatch(
     @Body() command: ReassignDispatchCommand,
     @Headers("x-request-id") requestId?: string,
+    @Headers("idempotency-key") idempotencyKey?: string,
   ) {
     return toApiSuccessEnvelope(
-      await this.ownedMobilityService.reassignDispatch(command, requestId),
+      await this.ownedMobilityService.reassignDispatch(
+        command,
+        requestId,
+        idempotencyKey,
+        { required: true },
+      ),
       requestId,
     );
   }
@@ -606,8 +874,35 @@ export class OwnedMobilityController {
   }
 
   @Get("driver/tasks")
+  @RequireRealms("system", "ops", "driver")
+  @RequireScopes("driver:read")
   @Throttle(READ_HEAVY_RATE_LIMIT)
-  listDriverTasks(@Headers("x-request-id") requestId?: string) {
+  listDriverTasks(
+    @CurrentIdentity() identity: BootstrapRequestIdentity | null = null,
+    @Query("driverId") requestedDriverId?: string,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    if (identity?.realm === "driver" || identity?.actorType === "driver_user") {
+      const actorId = identity.actorId;
+      if (
+        requestedDriverId &&
+        actorId &&
+        !isDriverIdentityMatching(actorId, requestedDriverId)
+      ) {
+        throw new ApiRequestError(
+          HttpStatus.FORBIDDEN,
+          "DRIVER_IDENTITY_MISMATCH",
+          "Driver identity may only view its own tasks.",
+          { actorId, requestedDriverId },
+        );
+      }
+      const driverId = normalizeDriverId(actorId) ?? requestedDriverId;
+      const allTasks = this.ownedMobilityService.listDriverTasks();
+      const items = driverId
+        ? allTasks.filter((t) => isDriverIdentityMatching(t.driverId, driverId))
+        : allTasks;
+      return toApiSuccessEnvelope({ items }, requestId);
+    }
     return toApiSuccessEnvelope(
       {
         items: this.ownedMobilityService.listDriverTasks(),
@@ -617,6 +912,8 @@ export class OwnedMobilityController {
   }
 
   @Sse("driver/task-events")
+  @RequireRealms("system", "ops", "driver")
+  @RequireScopes("driver:read")
   streamDriverTaskEvents(
     @CurrentIdentity() identity: BootstrapRequestIdentity | null,
     @Query("driverId") requestedDriverId?: string,
@@ -635,23 +932,28 @@ export class OwnedMobilityController {
   }
 
   @Get("driver/tasks/:taskId")
+  @RequireRealms("system", "ops", "driver")
+  @RequireScopes("driver:read")
   @Throttle(READ_HEAVY_RATE_LIMIT)
   getDriverTask(
     @Param("taskId") taskId: string,
+    @CurrentIdentity() identity: BootstrapRequestIdentity | null = null,
     @Headers("x-request-id") requestId?: string,
   ) {
-    return toApiSuccessEnvelope(
-      this.ownedMobilityService.getDriverTask(taskId),
-      requestId,
-    );
+    const task = this.assertDriverTaskAccess(taskId, identity);
+    return toApiSuccessEnvelope(task, requestId);
   }
 
   @Post("driver/tasks/:taskId/accept")
+  @RequireRealms("system", "driver")
+  @RequireScopes("driver:write")
   async acceptDriverTask(
     @Param("taskId") taskId: string,
     @Body() command: DriverAcceptTaskCommand,
+    @CurrentIdentity() identity: BootstrapRequestIdentity | null = null,
     @Headers("x-request-id") requestId?: string,
   ) {
+    this.assertDriverTaskAccess(taskId, identity);
     const task = await this.ownedMobilityService.acceptDriverTask(
       taskId,
       command,
@@ -661,11 +963,15 @@ export class OwnedMobilityController {
   }
 
   @Post("driver/tasks/:taskId/reject")
+  @RequireRealms("system", "driver")
+  @RequireScopes("driver:write")
   async rejectDriverTask(
     @Param("taskId") taskId: string,
     @Body() command: DriverRejectTaskCommand,
+    @CurrentIdentity() identity: BootstrapRequestIdentity | null = null,
     @Headers("x-request-id") requestId?: string,
   ) {
+    this.assertDriverTaskAccess(taskId, identity);
     const task = await this.ownedMobilityService.rejectDriverTask(
       taskId,
       command,
@@ -675,11 +981,15 @@ export class OwnedMobilityController {
   }
 
   @Post("driver/tasks/:taskId/depart")
+  @RequireRealms("system", "driver")
+  @RequireScopes("driver:write")
   async departDriverTask(
     @Param("taskId") taskId: string,
     @Body() command: DriverDepartTaskCommand,
+    @CurrentIdentity() identity: BootstrapRequestIdentity | null = null,
     @Headers("x-request-id") requestId?: string,
   ) {
+    this.assertDriverTaskAccess(taskId, identity);
     const task = await this.ownedMobilityService.departDriverTask(
       taskId,
       command,
@@ -689,11 +999,15 @@ export class OwnedMobilityController {
   }
 
   @Post("driver/tasks/:taskId/arrived_pickup")
+  @RequireRealms("system", "driver")
+  @RequireScopes("driver:write")
   async arrivePickup(
     @Param("taskId") taskId: string,
     @Body() command: DriverArrivedPickupCommand,
+    @CurrentIdentity() identity: BootstrapRequestIdentity | null = null,
     @Headers("x-request-id") requestId?: string,
   ) {
+    this.assertDriverTaskAccess(taskId, identity);
     const task = await this.ownedMobilityService.arrivedPickup(
       taskId,
       command,
@@ -703,11 +1017,15 @@ export class OwnedMobilityController {
   }
 
   @Post("driver/tasks/:taskId/start")
+  @RequireRealms("system", "driver")
+  @RequireScopes("driver:write")
   async startDriverTask(
     @Param("taskId") taskId: string,
     @Body() command: DriverStartTaskCommand,
+    @CurrentIdentity() identity: BootstrapRequestIdentity | null = null,
     @Headers("x-request-id") requestId?: string,
   ) {
+    this.assertDriverTaskAccess(taskId, identity);
     const task = await this.ownedMobilityService.startDriverTask(
       taskId,
       command,
@@ -717,11 +1035,15 @@ export class OwnedMobilityController {
   }
 
   @Post("driver/tasks/:taskId/complete")
+  @RequireRealms("system", "driver")
+  @RequireScopes("driver:write")
   async completeDriverTask(
     @Param("taskId") taskId: string,
     @Body() command: DriverCompleteTaskCommand,
+    @CurrentIdentity() identity: BootstrapRequestIdentity | null = null,
     @Headers("x-request-id") requestId?: string,
   ) {
+    this.assertDriverTaskAccess(taskId, identity);
     const completedTask = await this.ownedMobilityService.completeDriverTask(
       taskId,
       command,

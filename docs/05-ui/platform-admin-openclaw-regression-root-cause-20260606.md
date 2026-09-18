@@ -16,8 +16,8 @@ OpenClaw runtime path was replaced by the older mock-only assistant path.
 ## Evidence Chain
 
 1. PR `#519` merged commit `2ccccb448e2c64c68fa9ef944b6120b045fd75be`.
-   - Added `.orchestrator/bin/openclaw-*.sh`
-   - Added `.orchestrator/openclaw/*`
+   - Added `tools/development-orchestrator/bin/openclaw-*.sh`
+   - Added `tools/development-orchestrator/openclaw/*`
    - Added `platform-admin-assistant.orchestrator-bridge.ts`
    - Switched the assistant module to `LlmGatewayPlatformAdminAssistantProvider`
    - Added read-tool, knowledge, and orchestrator bridge tests
@@ -50,13 +50,13 @@ not by a later merge conflict or by a deliberate decision to remove OpenClaw.
 
 The regression removed or downgraded:
 
-- `.orchestrator/adapters/openclaw_drts_mcp.py`
-- `.orchestrator/bin/openclaw-bootstrap.sh`
-- `.orchestrator/bin/openclaw-launch.sh`
-- `.orchestrator/bin/openclaw-prepare-auth-bridge.sh`
-- `.orchestrator/bin/openclaw-smoke.sh`
-- `.orchestrator/openclaw/pin.json`
-- `.orchestrator/openclaw/runtime-profile.template.json`
+- `tools/development-orchestrator/adapters/openclaw_drts_mcp.py`
+- `tools/development-orchestrator/bin/openclaw-bootstrap.sh`
+- `tools/development-orchestrator/bin/openclaw-launch.sh`
+- `tools/development-orchestrator/bin/openclaw-prepare-auth-bridge.sh`
+- `tools/development-orchestrator/bin/openclaw-smoke.sh`
+- `tools/development-orchestrator/openclaw/pin.json`
+- `tools/development-orchestrator/openclaw/runtime-profile.template.json`
 - `apps/api/src/modules/platform-admin-assistant/platform-admin-assistant.orchestrator-bridge.ts`
 - `apps/api/src/modules/platform-admin-assistant/platform-admin-assistant-read-tools.service.ts`
 - `apps/api/src/modules/platform-admin-assistant/platform-admin-assistant.development.ts`
@@ -79,7 +79,7 @@ runtime.
 
 ## Preventive Follow-ups
 
-- Add an ownership/guard check for `.orchestrator/openclaw/*` and assistant
+- Add an ownership/guard check for `tools/development-orchestrator/openclaw/*` and assistant
   runtime bridge files in CI
 - Require scoped staging for docs-only PRs; avoid broad tree snapshots from
   mixed or stale worktrees

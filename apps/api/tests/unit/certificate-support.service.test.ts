@@ -84,6 +84,7 @@ describe("CertificateSupportService", () => {
       pdfUrl:
         "/control-plane-proxy/platform-admin/multi-taxi/certificates/receipt-001/artifacts/pdf",
       supersededByCertificateId: null,
+      artifactBlockers: [],
       regeneration: {
         enabled: false,
         reasonCode: "certificate_writer_unavailable",
@@ -305,5 +306,88 @@ describe("CertificateSupportController authorization", () => {
         CertificateSupportController.prototype.regenerate,
       ),
     ).toEqual(["foundation:write"]);
+  });
+});
+
+describe("why a certificate artifact is withheld", () => {
+  it("still issues a receipt for a row written before the currency migration", async () => {
+    // baseRow says NTD. V0084 renames stored rows to TWD, but a row written by
+    // an older image during rollout must not lose its receipt over a spelling.
+    const { service } = createService();
+
+    const view = await service.get("receipt-001");
+
+    expect(view.artifactBlockers).toEqual([]);
+    expect(view.pdfUrl).not.toBeNull();
+  });
+
+  it("names the currency rather than calling the record incomplete", async () => {
+    // The record is complete. Reporting it as incomplete sent whoever
+    // investigated looking for a missing field that was never missing.
+    const { service } = createService([{ ...baseRow, currency: "USD" }]);
+
+    const view = await service.get("receipt-001");
+
+    expect(view.htmlUrl).toBeNull();
+    expect(view.artifactBlockers).toEqual([
+      {
+        code: "unexpected_currency",
+        field: "currency",
+        detail: "expected TWD, found USD",
+      },
+    ]);
+    expect(view.regeneration.reasonCode).toBe(
+      "certificate_currency_unrecognised",
+    );
+  });
+
+  it("names which field is missing, not merely that one is", async () => {
+    const { service } = createService([
+      {
+        ...baseRow,
+        record: { ...(baseRow.record as object), plateNo: undefined },
+      },
+    ]);
+
+    const view = await service.get("receipt-001");
+
+    expect(view.artifactBlockers).toContainEqual({
+      code: "missing_field",
+      field: "plateNo",
+    });
+    expect(view.regeneration.reasonCode).toBe(
+      "certificate_canonical_record_incomplete",
+    );
+  });
+
+  it("reports every blocker at once rather than the first one found", async () => {
+    // Fixing one field and being told the record is still incomplete, with no
+    // more detail than before, is the loop this replaces.
+    const { service } = createService([
+      {
+        ...baseRow,
+        currency: "USD",
+        record: {
+          ...(baseRow.record as object),
+          plateNo: undefined,
+          routeSummary: undefined,
+        },
+      },
+    ]);
+
+    const view = await service.get("receipt-001");
+
+    expect(
+      view.artifactBlockers.map((blocker) => blocker.field).sort(),
+    ).toEqual(["currency", "plateNo", "routeSummary"]);
+  });
+
+  it("says nothing is blocking when the artifact is available", async () => {
+    const { service } = createService();
+
+    const view = await service.get("receipt-001");
+
+    expect(view.artifactBlockers).toEqual([]);
+    expect(view.htmlUrl).not.toBeNull();
   });
 });

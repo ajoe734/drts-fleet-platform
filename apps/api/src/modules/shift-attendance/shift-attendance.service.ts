@@ -9,7 +9,9 @@ import type {
 } from "@drts/contracts";
 
 import { ApiRequestError } from "../../common/api-envelope";
+import { DriverLeaveService } from "../driver-leave/driver-leave.service";
 import { AuditNotificationService } from "../audit-notification/audit-notification.service";
+import { RegulatoryRegistryService } from "../regulatory-registry/regulatory-registry.service";
 import { ShiftAttendanceRepository } from "./shift-attendance.repository";
 
 @Injectable()
@@ -22,6 +24,10 @@ export class ShiftAttendanceService implements OnModuleInit {
   constructor(
     private readonly auditNotificationService: AuditNotificationService,
     @Optional() private readonly repository?: ShiftAttendanceRepository,
+    @Optional()
+    private readonly regulatoryRegistryService?: RegulatoryRegistryService,
+    // Required by Nest; optional only for existing direct unit construction.
+    private readonly driverLeaveService?: DriverLeaveService,
   ) {}
 
   async onModuleInit() {
@@ -40,10 +46,97 @@ export class ShiftAttendanceService implements OnModuleInit {
     }
   }
 
-  clockIn(command: ClockInCommand, requestId?: string) {
+  async clockIn(
+    command: ClockInCommand,
+    requestId?: string,
+  ): Promise<ShiftRecord> {
     this.assertNonBlank(command.driverId, "driverId");
 
-    // Check for existing active shift
+    const verifyEligibility = async () => {
+      if (this.regulatoryRegistryService) {
+        if (
+          typeof this.regulatoryRegistryService.assertDriverAuthEligible ===
+          "function"
+        ) {
+          this.regulatoryRegistryService.assertDriverAuthEligible(
+            command.driverId,
+          );
+        }
+      }
+
+      if (command.vehicleId?.trim()) {
+        if (this.regulatoryRegistryService) {
+          const isDispatchable =
+            this.regulatoryRegistryService.getVehicleDispatchability(
+              command.vehicleId.trim(),
+            );
+          if (!isDispatchable) {
+            throw new ApiRequestError(
+              HttpStatus.BAD_REQUEST,
+              "VEHICLE_NOT_DISPATCHABLE",
+              "Vehicle is not eligible for dispatch.",
+              { vehicleId: command.vehicleId },
+            );
+          }
+        }
+      }
+
+      await this.driverLeaveService?.assertDriverCanClockIn(command.driverId);
+    };
+
+    const buildShift = (): ShiftRecord => {
+      const now = new Date().toISOString();
+      return {
+        shiftId: this.nextShiftId(),
+        driverId: command.driverId,
+        vehicleId: command.vehicleId ?? null,
+        status: "active",
+        clockedInAt: now,
+        clockedOutAt: null,
+        startLocation: command.location ?? null,
+        endLocation: null,
+        startOdometer: command.odometer ?? null,
+        endOdometer: null,
+        notes: null,
+        totalHours: null,
+      };
+    };
+
+    if (this.repository?.isEnabled()) {
+      const shift = await this.repository.executeClockInTransaction(
+        command.driverId,
+        async () => {
+          await verifyEligibility();
+          return buildShift();
+        },
+      );
+
+      this.shifts = [
+        shift,
+        ...this.shifts.filter((s) => s.shiftId !== shift.shiftId),
+      ];
+      this.recordAudit(
+        {
+          actorId: command.driverId,
+          actorType: "system",
+          tenantId: null,
+          moduleName: "shift-attendance",
+          actionName: "clock_in",
+          resourceType: "shift",
+          resourceId: shift.shiftId,
+          newValuesSummary: {
+            driverId: command.driverId,
+            vehicleId: command.vehicleId,
+            location: command.location,
+          },
+        },
+        requestId,
+      );
+
+      return this.cloneShift(shift);
+    }
+
+    // In-memory path (DB not enabled / direct unit tests)
     const activeShift = this.shifts.find(
       (s) => s.driverId === command.driverId && s.status === "active",
     );
@@ -56,22 +149,9 @@ export class ShiftAttendanceService implements OnModuleInit {
       );
     }
 
-    const now = new Date().toISOString();
-    const shift: ShiftRecord = {
-      shiftId: this.nextShiftId(),
-      driverId: command.driverId,
-      vehicleId: command.vehicleId ?? null,
-      status: "active",
-      clockedInAt: now,
-      clockedOutAt: null,
-      startLocation: command.location ?? null,
-      endLocation: null,
-      startOdometer: command.odometer ?? null,
-      endOdometer: null,
-      notes: null,
-      totalHours: null,
-    };
+    await verifyEligibility();
 
+    const shift = buildShift();
     this.shifts = [shift, ...this.shifts];
     this.persist({ shifts: [shift] }, "clock_in");
     this.recordAudit(
@@ -95,8 +175,80 @@ export class ShiftAttendanceService implements OnModuleInit {
     return this.cloneShift(shift);
   }
 
-  clockOut(command: ClockOutCommand, requestId?: string) {
+  async clockOut(
+    command: ClockOutCommand,
+    requestId?: string,
+  ): Promise<{ shift: ShiftRecord; attendance: AttendanceRecord }> {
     this.assertNonBlank(command.driverId, "driverId");
+
+    const buildUpdated = (activeShift: ShiftRecord) => {
+      const now = new Date();
+      const clockedInAt = new Date(activeShift.clockedInAt);
+      const totalHours =
+        Math.round(
+          ((now.getTime() - clockedInAt.getTime()) / 3600000) * 100,
+        ) / 100;
+
+      const updated: ShiftRecord = {
+        ...activeShift,
+        status: "completed",
+        clockedOutAt: now.toISOString(),
+        endLocation: command.location ?? null,
+        endOdometer: command.odometer ?? null,
+        notes: command.notes ?? activeShift.notes,
+        totalHours,
+      };
+
+      const attendance: AttendanceRecord = {
+        attendanceId: this.nextAttendanceId(),
+        driverId: command.driverId,
+        shiftId: updated.shiftId,
+        date: clockedInAt.toISOString().slice(0, 10),
+        clockedInAt: activeShift.clockedInAt,
+        clockedOutAt: now.toISOString(),
+        totalHours,
+        status: totalHours > 0 ? "present" : "partial",
+      };
+
+      return { shift: updated, attendance };
+    };
+
+    if (this.repository?.isEnabled()) {
+      const result = await this.repository.executeClockOutTransaction(
+        command.driverId,
+        buildUpdated,
+      );
+
+      this.replaceShift(result.shift);
+      this.attendance = [
+        result.attendance,
+        ...this.attendance.filter(
+          (a) => a.attendanceId !== result.attendance.attendanceId,
+        ),
+      ];
+
+      this.recordAudit(
+        {
+          actorId: command.driverId,
+          actorType: "system",
+          tenantId: null,
+          moduleName: "shift-attendance",
+          actionName: "clock_out",
+          resourceType: "shift",
+          resourceId: result.shift.shiftId,
+          newValuesSummary: {
+            totalHours: result.shift.totalHours,
+            status: result.shift.status,
+          },
+        },
+        requestId,
+      );
+
+      return {
+        shift: this.cloneShift(result.shift),
+        attendance: this.cloneAttendance(result.attendance),
+      };
+    }
 
     const activeShift = this.shifts.find(
       (s) => s.driverId === command.driverId && s.status === "active",
@@ -110,36 +262,9 @@ export class ShiftAttendanceService implements OnModuleInit {
       );
     }
 
-    const now = new Date();
-    const clockedInAt = new Date(activeShift.clockedInAt);
-    const totalHours =
-      Math.round(((now.getTime() - clockedInAt.getTime()) / 3600000) * 100) /
-      100;
-
-    const updated: ShiftRecord = {
-      ...activeShift,
-      status: "completed",
-      clockedOutAt: now.toISOString(),
-      endLocation: command.location ?? null,
-      endOdometer: command.odometer ?? null,
-      notes: command.notes ?? activeShift.notes,
-      totalHours,
-    };
+    const { shift: updated, attendance } = buildUpdated(activeShift);
 
     this.replaceShift(updated);
-
-    // Create attendance record
-    const attendance: AttendanceRecord = {
-      attendanceId: this.nextAttendanceId(),
-      driverId: command.driverId,
-      shiftId: updated.shiftId,
-      date: clockedInAt.toISOString().slice(0, 10),
-      clockedInAt: activeShift.clockedInAt,
-      clockedOutAt: now.toISOString(),
-      totalHours,
-      status: totalHours > 0 ? "present" : "partial",
-    };
-
     this.attendance = [attendance, ...this.attendance];
     this.persist({ shifts: [updated], attendance: [attendance] }, "clock_out");
     this.recordAudit(
@@ -151,7 +276,10 @@ export class ShiftAttendanceService implements OnModuleInit {
         actionName: "clock_out",
         resourceType: "shift",
         resourceId: updated.shiftId,
-        newValuesSummary: { totalHours, status: updated.status },
+        newValuesSummary: {
+          totalHours: updated.totalHours,
+          status: updated.status,
+        },
       },
       requestId,
     );

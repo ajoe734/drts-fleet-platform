@@ -20,7 +20,7 @@ export default defineConfig({
     trace: "retain-on-failure",
   },
   webServer: {
-    command: `MAP_GEOFENCE_OPS_UI_PORT=${targetPort} node scripts/run-map-geofence-ops-ui-dev.mjs`,
+    command: `MAP_GEOFENCE_OPS_UI_PORT=${targetPort} node tools/ci/run-map-geofence-ops-ui-dev.mjs`,
     url: opsConsoleBaseURL,
     reuseExistingServer: !process.env.CI,
     timeout: 120_000,

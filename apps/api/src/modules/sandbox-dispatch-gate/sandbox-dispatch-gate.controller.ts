@@ -1,7 +1,11 @@
 import { Body, Controller, Get, Headers, Param, Post } from "@nestjs/common";
 
 import { toApiSuccessEnvelope } from "../../common/api-envelope";
-import { CurrentIdentity } from "../../common/auth";
+import {
+  CurrentIdentity,
+  RequireRealms,
+  RequireScopes,
+} from "../../common/auth";
 import type { BootstrapRequestIdentity } from "../../common/auth";
 import type {
   UpsertPassengerDisclosureMessageCatalogEntryCommand,
@@ -14,12 +18,14 @@ import type {
 } from "./sandbox-dispatch-gate.types";
 
 @Controller("sandbox/dispatch")
+@RequireRealms("system", "platform", "ops")
 export class SandboxDispatchGateController {
   constructor(
     private readonly sandboxDispatchGateService: SandboxDispatchGateService,
   ) {}
 
   @Post("evaluate")
+  @RequireScopes("sandbox.compliance.read")
   async evaluate(
     @Body() command: SandboxDispatchGateInput,
     @Headers("x-request-id") requestId?: string,
@@ -34,6 +40,7 @@ export class SandboxDispatchGateController {
   }
 
   @Post("passenger-disclosure/policies")
+  @RequireScopes("sandbox.compliance.manage")
   async upsertPassengerDisclosurePolicy(
     @Body() command: UpsertPassengerDisclosurePolicyCommand,
     @Headers("x-request-id") requestId?: string,
@@ -47,6 +54,7 @@ export class SandboxDispatchGateController {
   }
 
   @Get("passenger-disclosure/policies/:policyId")
+  @RequireScopes("sandbox.compliance.read")
   async getPassengerDisclosurePolicy(
     @Param("policyId") policyId: string,
     @Headers("x-request-id") requestId?: string,
@@ -60,6 +68,7 @@ export class SandboxDispatchGateController {
   }
 
   @Post("passenger-disclosure/catalog")
+  @RequireScopes("sandbox.compliance.manage")
   async upsertPassengerDisclosureCatalogEntry(
     @Body() command: UpsertPassengerDisclosureMessageCatalogEntryCommand,
     @Headers("x-request-id") requestId?: string,
@@ -73,6 +82,7 @@ export class SandboxDispatchGateController {
   }
 
   @Get("passenger-disclosure/catalog")
+  @RequireScopes("sandbox.compliance.read")
   async listPassengerDisclosureCatalog(
     @Headers("x-request-id") requestId?: string,
   ) {
@@ -86,6 +96,7 @@ export class SandboxDispatchGateController {
   }
 
   @Post("manual-release")
+  @RequireScopes("sandbox.compliance.manage")
   async manualRelease(
     @Body()
     command: SandboxDispatchGateInput & SandboxDispatchManualReleaseCommand,

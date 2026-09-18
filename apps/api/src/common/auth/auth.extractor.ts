@@ -10,6 +10,12 @@ import {
   AUTH_ROLE_FAMILY_FROM_ACTOR_TYPE,
   AUTH_SCOPE_PRESETS,
 } from "./auth.constants";
+import { detectAuthEnvironment } from "../../config/auth-startup-config";
+
+function isStrictAuthEnvironment(): boolean {
+  const environment = detectAuthEnvironment(process.env);
+  return environment === "production" || environment === "staging";
+}
 
 interface ExtractIdentityOptions {
   allowAnonymous: boolean;
@@ -17,6 +23,9 @@ interface ExtractIdentityOptions {
   requestUrl?: string | undefined;
 }
 
+// x-tenant-id is a tenant *resource selector*, not proof of identity: a
+// caller who sends only that header (no Bearer token, no other bootstrap
+// identity header) must not be treated as an authenticated bootstrap actor.
 function hasAuthSignal(headers: AuthBootstrapHeaders): boolean {
   return [
     "x-actor-type",
@@ -26,7 +35,6 @@ function hasAuthSignal(headers: AuthBootstrapHeaders): boolean {
     "x-role-families",
     "x-scopes",
     "x-auth-mode",
-    "x-tenant-id",
     "x-partner-id",
     "x-partner-program-id",
     "x-partner-entry-slug",
@@ -84,6 +92,7 @@ function normalizeRealm(actorType: AuthActorType, rawRealm: string): AuthRealm {
     case "driver_user":
       return "driver";
     case "partner_api_key":
+    case "partner_user":
     case "referral_passenger":
       return "partner";
     default:
@@ -176,9 +185,55 @@ export function extractBootstrapRequestIdentity(
       normalizeHeaderValue(headers["x-partner-program-id"]) || null,
     partnerEntrySlug:
       normalizeHeaderValue(headers["x-partner-entry-slug"]) || null,
+    drtsPassengerId:
+      normalizeHeaderValue(headers["x-drts-passenger-id"]) ||
+      normalizeHeaderValue(headers["x-actor-id"]) ||
+      null,
     roleFamilies: normalizeRoleFamilies(explicitRoleFamilies, actorType),
     roles,
     scopes,
     requestId: normalizeHeaderValue(headers["x-request-id"]) || null,
+    authTime:
+      normalizeHeaderValue(headers["x-auth-time"]) ||
+      (isStrictAuthEnvironment() ? null : new Date().toISOString()),
+    amr:
+      splitDelimitedList(headers["x-amr"]).length > 0
+        ? splitDelimitedList(headers["x-amr"])
+        : isStrictAuthEnvironment()
+          ? []
+          : ["tenant_bootstrap_fixture"],
+    sessionId:
+      normalizeHeaderValue(headers["x-session-id"]) ||
+      (isStrictAuthEnvironment()
+        ? null
+        : actorTypeHeader
+          ? `bootstrap:${normalizeHeaderValue(headers["x-actor-id"]) || "anon"}`
+          : null),
   };
 }
+
+export function normalizeDriverId(
+  actorId: string | null | undefined,
+): string | null {
+  if (!actorId) {
+    return null;
+  }
+  const trimmed = actorId.trim();
+  if (trimmed.startsWith("e2e-driver-")) {
+    return trimmed.slice("e2e-driver-".length);
+  }
+  return trimmed;
+}
+
+export function isDriverIdentityMatching(
+  actorId: string | null | undefined,
+  targetDriverId: string | null | undefined,
+): boolean {
+  const normActor = normalizeDriverId(actorId);
+  const normTarget = normalizeDriverId(targetDriverId);
+  if (!normActor || !normTarget) {
+    return false;
+  }
+  return normActor === normTarget;
+}
+

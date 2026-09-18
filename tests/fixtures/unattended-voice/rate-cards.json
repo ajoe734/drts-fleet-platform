@@ -1,0 +1,52 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "version": "rate-card-20260906-v1",
+  "currency": "TWD",
+  "tax_included": true,
+  "valid_from": "2026-09-01T00:00:00Z",
+  "source_reference": "SA §12.1 / SD §14.3",
+  "rates": {
+    "telephony": {
+      "inbound_per_minute": 0.45,
+      "outbound_per_minute": 0.55,
+      "billing_increment_seconds": 6,
+      "notes": "Carrier PSTN / SIP trunk trunking leg cost"
+    },
+    "twm_speech": {
+      "realtime_asr_per_minute": 0.74,
+      "offline_asr_per_minute": 0.19,
+      "tts_per_million_chars": 625.0,
+      "notes": "Official Taiwan Mobile / Bronci quotation (tax inclusive)"
+    },
+    "text_llm": {
+      "provider": "anthropic",
+      "model": "claude-3-7-sonnet",
+      "input_per_million_tokens": 95.0,
+      "output_per_million_tokens": 475.0,
+      "notes": "Estimated converted to TWD at 31.5 USD/TWD"
+    },
+    "native_voice_realtime": {
+      "provider": "openai",
+      "model": "gpt-4o-realtime-preview",
+      "audio_input_per_million_tokens": 1900.0,
+      "audio_output_per_million_tokens": 6300.0,
+      "text_input_per_million_tokens": 150.0,
+      "text_output_per_million_tokens": 600.0,
+      "notes": "Native speech-to-speech token rates converted to TWD"
+    },
+    "storage_and_recording": {
+      "recording_checkpoint_per_session": 0.05,
+      "storage_per_gb_month": 0.7,
+      "notes": "Dual-channel audio recording and checkpoint index retention"
+    },
+    "human_agent_amortized": {
+      "labor_cost_per_minute": 5.0,
+      "notes": "Ops call center dispatch labor cost for exception handoff/callback"
+    }
+  },
+  "calculation_rules": {
+    "modular_call_cost": "telephony_leg + twm_realtime_asr + text_llm + twm_tts + storage_checkpoint + (handoff_minutes * human_agent_labor)",
+    "native_call_cost": "telephony_leg + native_voice_tokens + storage_checkpoint + (handoff_minutes * human_agent_labor)",
+    "denominator_rule": "SA §10.2: Cohort cost denominator must include all attempted calls establishing intent, including dropouts and failed dispatches."
+  }
+}

@@ -23,7 +23,7 @@ https://<referral-embed-host>/embed/<entrySlug>
 - **formal partner entry on the dev acceptance rail:** `https://refer.smarttransport.tw/embed/yuhe-residence`
 - **dev Cloud Run fallback:** `https://drts-dev-referral-embed-web-4t7rg6fmeq-uc.a.run.app/embed/yuhe-residence`
 - `<entrySlug>` is the partner channel entry slug provisioned in platform-admin
-  (`/partners`). `yuhe-residence` is the formal non-demo entry for 御和物業 on
+  (`/partners`). `yuhe-residence` is the formal non-demo entry for 法碧康物業 on
   the current dev acceptance authority. The legacy `referral-demo-community`
   seed remains test data only and is not the default or a partner-facing URL.
 - The `refer.smarttransport.tw` URL above is still a **dev acceptance URL**. It
@@ -58,6 +58,7 @@ by `playwright.referral-embed.config.ts`.
 | `REFERRAL_EMBED_ALLOWED_HOSTS`      | space/comma-separated allowlist of partner `entryHost`s permitted to iframe `/embed/*` |
 | `REFERRAL_EMBED_DEMO`               | `true` enables the deterministic demo handoff for dev/preview                          |
 | `REFERRAL_EMBED_DEFAULT_ENTRY_SLUG` | optional canonical entry opened from `/`; dev uses `yuhe-residence`                    |
+| `REFERRAL_EMBED_STANDALONE_URL`     | absolute URL of a real standalone booking entry offered from the fallback screen when the embed can't complete handoff. Must resolve to a different host than the embed itself; a same-host value is treated as unset (it would recreate the fallback → embed → blocked loop this exists to fix). When unset, the fallback screen reports an honest "no alternate entry configured" state instead of linking anywhere. `ref_source` / `ref_entry_slug` / `ref_entry_host` query params are appended for source attribution. |
 
 ## Local commands
 

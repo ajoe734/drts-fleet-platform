@@ -27,13 +27,15 @@ import type {
 import {
   FILING_PACKAGE_TYPES,
   OWNED_ORDER_STATUSES,
+  IMPLEMENTED_REPORT_JOB_TYPES,
+  IMPLEMENTED_REPORT_OUTPUT_FORMATS,
   REGULATORY_REPORT_JOB_TYPES,
   REPORT_JOB_TYPES,
-  REPORT_OUTPUT_FORMATS,
 } from "@drts/contracts";
-import type {
-  DailyDispatchRecordQuery,
-  OperationsSummaryPreviewQuery,
+import {
+  createIdempotencyKey,
+  type DailyDispatchRecordQuery,
+  type OperationsSummaryPreviewQuery,
 } from "@drts/api-client";
 import {
   CanvasBanner,
@@ -113,6 +115,13 @@ const th = buildCanvasTheme({
 
 const REGULATORY_JOB_TYPE_SET = new Set<ReportJobType>(
   REGULATORY_REPORT_JOB_TYPES,
+);
+
+// REPORT_JOB_TYPES names every report the platform recognises; only some are
+// built. Offering the rest handed the operator a job that completed with no
+// rows, which read as "nothing happened this period" rather than "not built".
+const OFFERABLE_REPORT_JOB_TYPES = REPORT_JOB_TYPES.filter((jobType) =>
+  (IMPLEMENTED_REPORT_JOB_TYPES as readonly ReportJobType[]).includes(jobType),
 );
 
 const pageStyle: CSSProperties = {
@@ -375,11 +384,12 @@ function artifactDownloadUrl(
     return null;
   }
 
-  const downloadMetadata = (
-    artifact as { downloadMetadata?: { downloadUrl?: unknown } }
-  ).downloadMetadata;
-  return typeof downloadMetadata?.downloadUrl === "string"
-    ? downloadMetadata.downloadUrl
+  // `downloadMetadata.downloadUrl` is the signed governance reference and points
+  // at a host that does not resolve. `artifact.downloadUrl` addresses the route
+  // that streams the file. This link is for a person to click, so it takes the
+  // one that serves bytes.
+  return typeof artifact.downloadUrl === "string" && artifact.downloadUrl
+    ? artifact.downloadUrl
     : null;
 }
 
@@ -635,7 +645,7 @@ function ReportJobComposerModal({
                 }
                 style={nativeSelectStyle}
               >
-                {REPORT_OUTPUT_FORMATS.map((value) => (
+                {IMPLEMENTED_REPORT_OUTPUT_FORMATS.map((value) => (
                   <option key={value} value={value}>
                     {value.toUpperCase()}
                   </option>
@@ -739,13 +749,18 @@ function OperationalReportsPanel() {
   const [periodTo, setPeriodTo] = useState("");
   const [format, setFormat] = useState<OperationalExportFormat>("csv");
 
-  const [dailyRows, setDailyRows] = useState<DispatchDailyRecord[] | null>(null);
+  const [dailyRows, setDailyRows] = useState<DispatchDailyRecord[] | null>(
+    null,
+  );
   const [summaryRows, setSummaryRows] = useState<
     SixMonthOperationsSummary[] | null
   >(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+  const [exportIntentKey, setExportIntentKey] = useState(() =>
+    createIdempotencyKey("ops-report"),
+  );
   const [pending, startTransition] = useTransition();
 
   const isDaily = reportType === "daily_dispatch_record";
@@ -796,9 +811,8 @@ function OperationalReportsPanel() {
         setDailyRows(rows);
         setSummaryRows(null);
       } else {
-        const rows = await client.previewSixMonthOperationsSummary(
-          buildSummaryQuery(),
-        );
+        const rows =
+          await client.previewSixMonthOperationsSummary(buildSummaryQuery());
         setSummaryRows(rows);
         setDailyRows(null);
       }
@@ -817,9 +831,8 @@ function OperationalReportsPanel() {
         try {
           const client = getOpsClient();
           if (isDaily) {
-            const result = await client.rebuildDailyDispatchRecords(
-              buildDailyQuery(),
-            );
+            const result =
+              await client.rebuildDailyDispatchRecords(buildDailyQuery());
             setNotice(
               t("reports.ops.regenerate.done", {
                 count: result.rebuiltCount,
@@ -827,9 +840,10 @@ function OperationalReportsPanel() {
               }),
             );
           } else {
-            const result = await client.rebuildMonthlyOperationsSummaries(
-              buildSummaryQuery(),
-            );
+            const result =
+              await client.rebuildMonthlyOperationsSummaries(
+                buildSummaryQuery(),
+              );
             setNotice(
               t("reports.ops.regenerate.done", {
                 count: result.rebuiltCount,
@@ -871,18 +885,24 @@ function OperationalReportsPanel() {
             );
             setSummaryRows(rows);
             setDailyRows(null);
-            setNotice(
-              t("reports.ops.export.jsonDone", { count: rows.length }),
-            );
+            setNotice(t("reports.ops.export.jsonDone", { count: rows.length }));
             return;
           }
 
           const filters = buildExportFilters();
-          const accepted = await getOpsClient().createReportJob({
-            jobType: reportType,
-            format: format as ReportOutputFormat,
-            ...(filters && Object.keys(filters).length > 0 ? { filters } : {}),
-          });
+          const accepted = await getOpsClient().createReportJob(
+            {
+              jobType: reportType,
+              format: format as ReportOutputFormat,
+              ...(filters && Object.keys(filters).length > 0
+                ? { filters }
+                : {}),
+            },
+            {
+              idempotencyKey: exportIntentKey,
+            },
+          );
+          setExportIntentKey(createIdempotencyKey("ops-report"));
           setNotice(
             t("reports.ops.export.accepted", { jobId: accepted.jobId }),
           );
@@ -1188,7 +1208,10 @@ function OperationalReportsPanel() {
                   style={nativeMonoInputStyle}
                 />
               </CanvasField>
-              <CanvasField theme={th} label={t("reports.ops.filter.orderSource")}>
+              <CanvasField
+                theme={th}
+                label={t("reports.ops.filter.orderSource")}
+              >
                 <select
                   value={orderSource}
                   onChange={(event) => setOrderSource(event.target.value)}
@@ -1571,7 +1594,18 @@ export default function ReportsPage() {
   const [pending, startTransition] = useTransition();
   const [showJobComposer, setShowJobComposer] = useState(false);
   const [showPackageComposer, setShowPackageComposer] = useState(false);
-  const [jobType, setJobType] = useState<ReportJobType>(REPORT_JOB_TYPES[0]!);
+  const [jobIntentKey, setJobIntentKey] = useState(() =>
+    createIdempotencyKey("ops-report-job"),
+  );
+  const [packageIntentKey, setPackageIntentKey] = useState(() =>
+    createIdempotencyKey("ops-filing-package"),
+  );
+  const [jobRetryIntentKeys, setJobRetryIntentKeys] = useState<
+    Record<string, string>
+  >({});
+  const [jobType, setJobType] = useState<ReportJobType>(
+    OFFERABLE_REPORT_JOB_TYPES[0]!,
+  );
   const [format, setFormat] = useState<ReportOutputFormat>("xlsx");
   const [periodLabel, setPeriodLabel] = useState("");
   const [vehicleId, setVehicleId] = useState("");
@@ -1672,11 +1706,17 @@ export default function ReportsPage() {
           if (vehicleId.trim()) {
             filters.vehicleId = vehicleId.trim();
           }
-          const accepted = await client.createReportJob({
-            jobType,
-            format,
-            ...(Object.keys(filters).length > 0 ? { filters } : {}),
-          });
+          const accepted = await client.createReportJob(
+            {
+              jobType,
+              format,
+              ...(Object.keys(filters).length > 0 ? { filters } : {}),
+            },
+            {
+              idempotencyKey: jobIntentKey,
+            },
+          );
+          setJobIntentKey(createIdempotencyKey("ops-report-job"));
           setShowJobComposer(false);
           await loadData();
           await inspectReportJob(accepted.jobId);
@@ -1692,11 +1732,19 @@ export default function ReportsPage() {
       void (async () => {
         try {
           const client = getOpsClient();
-          const accepted = await client.generateFilingPackage({
-            packageType,
-            period: packageMonth.trim() ? { month: packageMonth.trim() } : {},
-            scope: packageScope.trim() ? { channel: packageScope.trim() } : {},
-          });
+          const accepted = await client.generateFilingPackage(
+            {
+              packageType,
+              period: packageMonth.trim() ? { month: packageMonth.trim() } : {},
+              scope: packageScope.trim()
+                ? { channel: packageScope.trim() }
+                : {},
+            },
+            {
+              idempotencyKey: packageIntentKey,
+            },
+          );
+          setPackageIntentKey(createIdempotencyKey("ops-filing-package"));
           setShowPackageComposer(false);
           await loadData();
           await inspectFilingPackage(accepted.packageId);
@@ -1708,13 +1756,31 @@ export default function ReportsPage() {
   }
 
   function retryReportJob(job: ReportJobRecord) {
+    const retryKey =
+      jobRetryIntentKeys[job.jobId] ?? createIdempotencyKey("ops-report-retry");
+    if (!jobRetryIntentKeys[job.jobId]) {
+      setJobRetryIntentKeys((prev) => ({
+        ...prev,
+        [job.jobId]: retryKey,
+      }));
+    }
     startTransition(() => {
       void (async () => {
         try {
-          const accepted = await getOpsClient().createReportJob({
-            jobType: job.jobType as ReportJobType,
-            format: job.format,
-            filters: job.filters,
+          const accepted = await getOpsClient().createReportJob(
+            {
+              jobType: job.jobType as ReportJobType,
+              format: job.format,
+              filters: job.filters,
+            },
+            {
+              idempotencyKey: retryKey,
+            },
+          );
+          setJobRetryIntentKeys((prev) => {
+            const next = { ...prev };
+            delete next[job.jobId];
+            return next;
           });
           await loadData();
           await inspectReportJob(accepted.jobId);
@@ -1747,7 +1813,7 @@ export default function ReportsPage() {
   const expiringArtifacts = jobs.filter((job) =>
     expiresSoon(job.artifact?.expiresAt),
   ).length;
-  const reportTypeOptions = REPORT_JOB_TYPES.map((value) => ({
+  const reportTypeOptions = OFFERABLE_REPORT_JOB_TYPES.map((value) => ({
     value,
     label: t(`reports.type.${value}`),
   }));

@@ -1410,7 +1410,119 @@ paths:
     get:
       tags:
         - TenantBookings
-      summary: List tenant bookings
+      summary: List and filter tenant bookings with pagination and tenant isolation
+      description: >-
+        Queries authoritative tenant bookings with backend date, passenger, and status
+        filtering, strict tenant isolation (anonymous 401, mismatched 403), stable sort
+        (selected date DESC NULLS LAST, bookingId ASC), and authoritative filtered totals.
+      parameters:
+        - name: x-tenant-id
+          in: header
+          required: true
+          description: Tenant selector. Real identity must match this selector.
+          schema:
+            type: string
+        - name: q
+          in: query
+          required: false
+          description: Trimmed case-insensitive literal search across passenger name, phone, email, bookingId, orderId (SQL wildcards escaped).
+          schema:
+            type: string
+        - name: passenger
+          in: query
+          required: false
+          description: Alias for passenger search text.
+          schema:
+            type: string
+        - name: passengerId
+          in: query
+          required: false
+          description: Canonical passenger UUID exact match.
+          schema:
+            type: string
+        - name: status
+          in: query
+          required: false
+          description: Booking status (active, completed, cancelled) or comma-separated list.
+          schema:
+            type: string
+            enum:
+              - active
+              - completed
+              - cancelled
+        - name: bookingStatus
+          in: query
+          required: false
+          description: Explicit booking status filter.
+          schema:
+            type: string
+            enum:
+              - active
+              - completed
+              - cancelled
+        - name: fulfillmentStatus
+          in: query
+          required: false
+          description: Order fulfillment status from OwnedOrderStatus union.
+          schema:
+            type: string
+        - name: orderStatus
+          in: query
+          required: false
+          description: Alias for fulfillmentStatus.
+          schema:
+            type: string
+        - name: dateField
+          in: query
+          required: false
+          description: Target date field for date range filtering and sorting. Default is reservationStart.
+          schema:
+            type: string
+            enum:
+              - reservationStart
+              - createdAt
+            default: reservationStart
+        - name: dateFrom
+          in: query
+          required: false
+          description: Start instant inclusive (explicit ISO 8601 with timezone, e.g. 2026-09-10T00:00:00Z).
+          schema:
+            type: string
+            format: date-time
+        - name: dateTo
+          in: query
+          required: false
+          description: End instant exclusive (explicit ISO 8601 with timezone, e.g. 2026-09-11T00:00:00Z).
+          schema:
+            type: string
+            format: date-time
+        - name: page
+          in: query
+          required: false
+          description: 1-based page number (positive integer >= 1). Default 1.
+          schema:
+            type: integer
+            minimum: 1
+            default: 1
+        - name: pageSize
+          in: query
+          required: false
+          description: Page size (1 to 100). Default 20.
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 20
+        - name: serviceBucket
+          in: query
+          required: false
+          schema:
+            type: string
+        - name: subtype
+          in: query
+          required: false
+          schema:
+            type: string
       responses:
         "200":
           description: Success
@@ -1424,6 +1536,8 @@ paths:
                     items:
                       $ref: "#/components/schemas/Booking"
                   pagination:
+                    $ref: "#/components/schemas/Pagination"
+                  pageInfo:
                     $ref: "#/components/schemas/Pagination"
         "400":
           $ref: "#/components/responses/BadRequest"

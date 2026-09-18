@@ -80,31 +80,23 @@ describe("MultiTaxiController ride intake", () => {
     });
   });
 
-  it("wraps platform-admin trip records export payload after awaiting the service", async () => {
-    const result = {
-      exportedAt: "2026-07-23T00:00:00.000Z",
-      filename: "multi-taxi-trip-records-202607.csv",
-      rows: [
-        {
-          orderNoMasked: "ZX-240...86",
-          plateNoMasked: "BK...08",
-        },
-      ],
-    };
-    const service = {
-      exportTripOperationalRecords: vi.fn().mockResolvedValue(result),
-    } as unknown as MultiTaxiService;
-    const controller = new MultiTaxiController(service);
-
-    const response = await controller.exportTripOperationalRecords(
-      { month: "2026-07" },
-      "req-records-export-001",
+  it("retires the uncontrolled GET export route now that the scope is grantable", () => {
+    // multi_taxi_records:export could not be granted to any actor preset, so this
+    // raw GET handler was unreachable in production. Granting the scope (see
+    // packages/contracts/src/iam-policy-catalog.ts) would have made it live: a
+    // direct download with no purpose capture, no step-up freshness check, and no
+    // actor-bound export audit entry, unlike the export-jobs preview/create/
+    // download flow that ReportingFilingService enforces those controls for.
+    // The route must stay retired rather than reachable through this shortcut.
+    const controller = new MultiTaxiController(
+      {} as unknown as MultiTaxiService,
     );
 
-    expect(response.data).toEqual(result);
-    expect(service.exportTripOperationalRecords).toHaveBeenCalledWith({
-      month: "2026-07",
-    });
+    expect(
+      (controller as unknown as Record<string, unknown>)[
+        "exportTripOperationalRecords"
+      ],
+    ).toBeUndefined();
   });
 
   it("passes the authenticated actor and request ID to rating invalidation", async () => {

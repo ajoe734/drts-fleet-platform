@@ -1,5 +1,6 @@
 import { Injectable, Logger, Optional } from "@nestjs/common";
 import {
+  PLATFORM_CURRENCY,
   PLATFORM_CODE_FORWARDER_SANDBOX,
   PLATFORM_CODE_GRAB,
   PLATFORM_CODE_LINE_TAXI,
@@ -12,7 +13,7 @@ import type {
 } from "@drts/contracts";
 import { PlatformEarningsRepository } from "./platform-earnings.repository";
 
-const DEFAULT_CURRENCY = "TWD";
+const DEFAULT_CURRENCY = PLATFORM_CURRENCY;
 
 type PlatformEarningsSeedRecord = {
   driverId: string;

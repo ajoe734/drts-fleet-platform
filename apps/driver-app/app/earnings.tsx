@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { ActivityIndicator, StyleSheet, Text, View } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
+import { Redirect } from "expo-router";
 import {
   PLATFORM_CODE_REGISTRY,
   type DriverPayoutStatus,
@@ -24,7 +25,12 @@ import {
   isOwnedPlatformCode,
   isShadowOnlyPlatformCode,
 } from "@/components/earnings-by-platform";
-import { getDriverClient, isDriverIdentityProvisioned } from "@/lib/api-client";
+import {
+  formatDriverError,
+  getDriverClient,
+  isDriverIdentityProvisioned,
+  registerProtectedCacheClearHandler,
+} from "@/lib/api-client";
 import {
   formatAmountNumber,
   formatMoney,
@@ -42,10 +48,7 @@ const PERIOD_OPTIONS = driverEarningsPeriodOptions;
 const DEFAULT_CURRENCY = "TWD";
 
 function toErrorMessage(error: unknown): string {
-  if (error instanceof Error && error.message.trim()) {
-    return error.message.trim();
-  }
-  return "資料載入失敗，請稍後再試。";
+  return formatDriverError(error, "資料載入失敗，請稍後再試。");
 }
 
 function sumPlatformAmounts(
@@ -418,7 +421,23 @@ export default function EarningsScreen() {
 
   const isProvisioned = isDriverIdentityProvisioned();
 
+  useEffect(() => {
+    const unregister = registerProtectedCacheClearHandler(() => {
+      setSummary(null);
+      setPlatformItems([]);
+      setStatements([]);
+    });
+    return () => unregister();
+  }, []);
+
   const loadDashboard = async (period: PeriodKey) => {
+    if (!isDriverIdentityProvisioned()) {
+      setSummary(null);
+      setPlatformItems([]);
+      setStatements([]);
+      return;
+    }
+
     const client = getDriverClient();
 
     try {
@@ -449,6 +468,9 @@ export default function EarningsScreen() {
       );
       setError(null);
     } catch (nextError) {
+      setSummary(null);
+      setPlatformItems([]);
+      setStatements([]);
       setError(toErrorMessage(nextError));
     }
   };
@@ -494,22 +516,7 @@ export default function EarningsScreen() {
   };
 
   if (!isProvisioned) {
-    return (
-      <Shell theme={THEME} contentContainerStyle={styles.shellContent}>
-        <PageHeader
-          theme={THEME}
-          title={driverStrings.earnings.title}
-          subtitle="需要完成裝置綁定"
-        />
-        <Banner
-          theme={THEME}
-          tone="warn"
-          title="裝置尚未綁定司機身份"
-          body="完成裝置註冊後，才能查看平台收益與月結報表。"
-          icon={<Ionicons name="card-outline" size={16} color={THEME.warn} />}
-        />
-      </Shell>
-    );
+    return <Redirect href="/onboarding" />;
   }
 
   if (loading) {

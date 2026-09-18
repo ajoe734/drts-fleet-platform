@@ -1,15 +1,29 @@
 import { NextRequest, NextResponse } from "next/server";
+import {
+  TENANT_SESSION_COOKIE_NAME,
+  TENANT_CSRF_COOKIE_NAME,
+  TENANT_CSRF_HEADER_NAME,
+} from "../../../lib/auth/constants";
+import { verifyCsrfToken, verifySameOrigin } from "../../../lib/auth/session";
+import {
+  type VerifiedTenantSession,
+  verifyTenantSession,
+} from "../../../lib/auth/verified-tenant-session.server";
 
 const DEFAULT_API_BASE_URL = "http://localhost:3001";
 const METADATA_IDENTITY_TOKEN_URL =
   "http://metadata.google.internal/computeMetadata/v1/instance/service-accounts/default/identity";
 const RUN_APP_HOST_SUFFIX = ".a.run.app";
+
 const REQUEST_HEADER_BLOCKLIST = new Set([
+  "authorization",
   "connection",
   "content-length",
   "cookie",
   "host",
   "transfer-encoding",
+  "x-csrf-token",
+  "x-drts-csrf",
   "x-drts-internal-key",
   "x-actor-id",
   "x-actor-type",
@@ -22,6 +36,8 @@ const REQUEST_HEADER_BLOCKLIST = new Set([
   "x-role-families",
   "x-roles",
   "x-scopes",
+  "x-tenant-id",
+  "x-fleet-partner-id",
   "x-serverless-authorization",
 ]);
 
@@ -107,7 +123,10 @@ function buildTargetUrl(request: NextRequest, path: string[]) {
   return targetUrl;
 }
 
-function copyRequestHeaders(request: NextRequest) {
+function copyRequestHeaders(
+  request: NextRequest,
+  tenantSession: VerifiedTenantSession | null,
+) {
   const headers = new Headers();
 
   request.headers.forEach((value, key) => {
@@ -117,7 +136,11 @@ function copyRequestHeaders(request: NextRequest) {
     headers.set(key, value);
   });
 
-  headers.set("x-realm", "tenant");
+  if (tenantSession) {
+    headers.set("authorization", `Bearer ${tenantSession.accessToken}`);
+    headers.set("x-tenant-id", tenantSession.tenantId);
+  }
+
   return headers;
 }
 
@@ -198,8 +221,74 @@ async function forward(
     );
   }
 
+  // Enforce same-origin & CSRF for state-mutating requests
+  if (
+    method === "POST" ||
+    method === "PUT" ||
+    method === "PATCH" ||
+    method === "DELETE"
+  ) {
+    if (!verifySameOrigin(request)) {
+      return NextResponse.json(
+        {
+          error: "CSRF_ORIGIN_INVALID",
+          message: "Origin validation failed for mutation request.",
+        },
+        { status: 403 },
+      );
+    }
+
+    const csrfCookie = request.cookies.get(TENANT_CSRF_COOKIE_NAME)?.value;
+    const csrfHeader = request.headers.get(TENANT_CSRF_HEADER_NAME);
+
+    if (!verifyCsrfToken(csrfCookie, csrfHeader)) {
+      return NextResponse.json(
+        {
+          error: "CSRF_TOKEN_INVALID",
+          message: "CSRF verification failed for mutation request.",
+        },
+        { status: 403 },
+      );
+    }
+  }
+
+  let tenantSession: VerifiedTenantSession | null = null;
+  if (path[0] === "tenant") {
+    const accessToken = request.cookies
+      .get(TENANT_SESSION_COOKIE_NAME)
+      ?.value?.trim();
+    if (!accessToken) {
+      return NextResponse.json(
+        { error: "AUTHENTICATION_REQUIRED" },
+        { status: 401 },
+      );
+    }
+    try {
+      tenantSession = (
+        await verifyTenantSession(accessToken, resolveTargetOrigin())
+      ).session;
+    } catch (error) {
+      return NextResponse.json(
+        {
+          error: "AUTH_UPSTREAM_UNAVAILABLE",
+          message:
+            error instanceof Error
+              ? error.message
+              : "Session verification failed",
+        },
+        { status: 503 },
+      );
+    }
+    if (!tenantSession) {
+      return NextResponse.json(
+        { error: "AUTHENTICATION_REQUIRED" },
+        { status: 401 },
+      );
+    }
+  }
+
   const targetUrl = buildTargetUrl(request, path);
-  const headers = copyRequestHeaders(request);
+  const headers = copyRequestHeaders(request, tenantSession);
   await applyUpstreamAuth(headers, targetUrl);
 
   const init: RequestInit = {

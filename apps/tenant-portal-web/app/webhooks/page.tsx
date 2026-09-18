@@ -10,6 +10,7 @@ import type {
   WebhookDeliveryRecord,
 } from "@drts/contracts";
 import { AppShellCard } from "@drts/ui-web";
+import { createIdempotencyKey } from "@drts/api-client";
 import { getTenantClient } from "@/lib/api-client";
 import { getTenantRoleSnapshot, requireCapability } from "@/lib/rbac";
 import { ConfirmSubmitButton } from "@/components/confirm-submit-button";
@@ -179,6 +180,7 @@ export default async function WebhooksPage({
     deliveries?: string;
     error?: string;
     success?: string;
+    idempotencyKey?: string;
   }>;
 }) {
   const resolvedSearchParams = (await searchParams) ?? {};
@@ -186,6 +188,8 @@ export default async function WebhooksPage({
   const deliveryWebhookId = resolvedSearchParams.deliveries;
   const { webhooks, notifications, governance, deliveries, errors } =
     await loadPageData(deliveryWebhookId);
+  const boundTestKey =
+    resolvedSearchParams.idempotencyKey ?? createIdempotencyKey("webhook-test");
 
   const createMode = resolvedSearchParams.create === "true";
   const editWebhookId = resolvedSearchParams.edit;
@@ -404,6 +408,7 @@ export default async function WebhooksPage({
             <WebhookList
               webhooks={webhooks}
               canManage={roleSnapshot.capabilities.canWriteWebhooks}
+              testKey={boundTestKey}
             />
             <NotificationsList notifications={relevantNotifications} />
           </>
@@ -613,9 +618,11 @@ function EditWebhookForm({
 function WebhookList({
   webhooks,
   canManage,
+  testKey,
 }: {
   webhooks: TenantWebhookEndpoint[];
   canManage: boolean;
+  testKey?: string;
 }) {
   return (
     <div className="webhooks-section">
@@ -735,6 +742,36 @@ function WebhookList({
                           <Link href={`/webhooks?edit=${webhook.webhookId}`}>
                             Edit
                           </Link>
+                          {" | "}
+                          <form
+                            action={sendTestWebhook}
+                            style={{ display: "inline" }}
+                          >
+                            <input
+                              type="hidden"
+                              name="webhookId"
+                              value={webhook.webhookId}
+                            />
+                            <input
+                              type="hidden"
+                              name="idempotencyKey"
+                              value={testKey}
+                            />
+                            <button
+                              type="submit"
+                              style={{
+                                background: "none",
+                                border: "none",
+                                color: "inherit",
+                                cursor: "pointer",
+                                padding: 0,
+                                font: "inherit",
+                                textDecoration: "underline",
+                              }}
+                            >
+                              Test
+                            </button>
+                          </form>
                           {" | "}
                           <form
                             action={deleteWebhook}
@@ -1014,6 +1051,37 @@ async function updateWebhook(formData: FormData) {
   } catch (error) {
     const message = error instanceof Error ? error.message : "Unknown error";
     destination = `/webhooks?edit=${encodeURIComponent(webhookId)}&error=${encodeURIComponent(message)}`;
+  }
+
+  redirect(destination);
+}
+
+async function sendTestWebhook(formData: FormData) {
+  "use server";
+
+  const snapshot = await getTenantRoleSnapshot();
+  requireCapability(
+    snapshot.capabilities.canWriteWebhooks,
+    "Tenant webhook write authority required.",
+  );
+  const client = await getTenantClient();
+  const webhookId = String(formData.get("webhookId") ?? "").trim();
+  const idempotencyKey =
+    String(formData.get("idempotencyKey") ?? "").trim() ||
+    createIdempotencyKey("webhook-test");
+  let destination = "/webhooks";
+
+  try {
+    if (!webhookId) {
+      throw new Error("Webhook ID is required.");
+    }
+
+    await client.sendTestWebhook({ webhookId }, { idempotencyKey });
+    revalidatePath("/webhooks");
+    destination = `/webhooks?success=${encodeURIComponent("Test webhook delivery queued successfully.")}`;
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Unknown error";
+    destination = `/webhooks?error=${encodeURIComponent(message)}&idempotencyKey=${encodeURIComponent(idempotencyKey)}`;
   }
 
   redirect(destination);

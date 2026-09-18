@@ -18,7 +18,7 @@ import { ErrorBanner } from "@/components/ui/ErrorBanner";
 import { FormField } from "@/components/ui/FormField";
 import { StatusChip } from "@/components/ui/StatusChip";
 import { Tokens } from "@/components/ui/tokens";
-import { getDriverClient } from "@/lib/api-client";
+import { formatDriverError, getDriverClient } from "@/lib/api-client";
 
 interface PlatformBindingProps {
   showSectionTitle?: boolean;
@@ -57,10 +57,7 @@ const SUPPORTED_PLATFORM_HINT = PLATFORM_CODES.map(getPlatformOptionLabel).join(
 );
 
 function toErrorMessage(error: unknown): string {
-  if (error instanceof Error && error.message.trim()) {
-    return error.message.trim();
-  }
-  return "要求失敗";
+  return formatDriverError(error, "要求失敗");
 }
 
 export function PlatformBinding({

@@ -1,4 +1,5 @@
 import { CanvasPill, DataTable, Td, Tr } from "@drts/ui-web";
+import { cookies } from "next/headers";
 import { notFound } from "next/navigation";
 import type { CSSProperties } from "react";
 import {
@@ -7,9 +8,18 @@ import {
   SurfaceCard,
 } from "@/components/page-primitives";
 import { resolveBankDemoTenant, resolveLocale } from "@/lib/demo-tenants";
-import { bankConsoleHref, getBankConsoleSession } from "@/lib/session";
+import { loadBankStatementsData } from "@/lib/bank-dev-read-models";
+import {
+  BANK_CONSOLE_ROLE_COOKIE,
+  BANK_CONSOLE_SESSION_COOKIE,
+  bankConsoleHref,
+  canViewSettlementAmounts,
+  getBankConsoleSession,
+  resolveServerSessionRole,
+  type BankConsoleRole,
+} from "@/lib/session";
 import { tenantDisplayText } from "@/lib/tenant-display";
-import { getStatementByPeriod, type StatementStatus } from "@/lib/statements";
+import { type StatementStatus } from "@/lib/statements";
 import { t, type Locale } from "@/lib/translations";
 
 const statementStatusTone: Record<
@@ -32,6 +42,10 @@ const statementStatusLabelKey: Record<
   due: "statements.status.due",
 };
 
+function one(value: string | string[] | undefined): string | undefined {
+  return Array.isArray(value) ? value[0] : value;
+}
+
 function formatPeriod(period: string) {
   return `${period.slice(0, 4)} / ${period.slice(5, 7)}`;
 }
@@ -52,6 +66,20 @@ function formatCurrency(amount: number, locale: Locale) {
   }).format(amount);
 }
 
+// Non-digit placeholder so a restricted role can never infer a real figure's
+// length or shape from the rendered HTML.
+const RESTRICTED_AMOUNT_PLACEHOLDER = "••••••";
+
+function formatAmountForRole(
+  amount: number,
+  locale: Locale,
+  role: BankConsoleRole,
+) {
+  return canViewSettlementAmounts(role)
+    ? formatCurrency(amount, locale)
+    : RESTRICTED_AMOUNT_PLACEHOLDER;
+}
+
 export default async function StatementDetailPage({
   params,
   searchParams,
@@ -63,13 +91,26 @@ export default async function StatementDetailPage({
   const resolvedSearchParams = searchParams ? await searchParams : {};
   const locale = resolveLocale(resolvedSearchParams.locale);
   const tenant = resolveBankDemoTenant(resolvedSearchParams.bank);
+  let cookieRole: string | undefined;
+  try {
+    const cookieStore = await cookies();
+    cookieRole =
+      cookieStore.get(BANK_CONSOLE_SESSION_COOKIE)?.value ||
+      cookieStore.get(BANK_CONSOLE_ROLE_COOKIE)?.value;
+  } catch {
+    // Fallback for test / non-HTTP contexts
+  }
+  const roleParam = one(resolvedSearchParams.role);
+  const sessionRole = resolveServerSessionRole(cookieRole, roleParam).role;
   const session = getBankConsoleSession(
     tenant,
     locale,
-    resolvedSearchParams.role,
+    sessionRole,
   );
   const issuerBrand = tenant.template;
-  const statement = getStatementByPeriod(period);
+  const statementData = await loadBankStatementsData(tenant.tenantId, session.role);
+  const statement =
+    statementData.data.statements.find((item) => item.period === period) ?? null;
 
   if (!statement) {
     notFound();
@@ -101,6 +142,20 @@ export default async function StatementDetailPage({
         }
         description={t("statements.detail.purpose", locale)}
       />
+      {session.role === "bank_ops_viewer" ? (
+        <CalloutPanel
+          title={t("statements.unauthorized.title", locale)}
+          description={t("statements.unauthorized.description", locale)}
+          tone="warning"
+        />
+      ) : null}
+      {statementData.degradedMessage ? (
+        <CalloutPanel
+          title={t("common.apiDegraded", locale)}
+          description={statementData.degradedMessage}
+          tone="warning"
+        />
+      ) : null}
 
       <section className="statement-detail-topline">
         <a
@@ -109,30 +164,76 @@ export default async function StatementDetailPage({
         >
           {t("statements.detail.back", locale)}
         </a>
-        <a className="statement-link" href={statement.signedArtifactHref}>
-          {t("statements.actions.downloadSigned", locale)}
-        </a>
+        <div style={{ display: "flex", gap: "12px" }}>
+          {session.role === "bank_ops_viewer" ? (
+            <>
+              <span
+                className="statement-link is-disabled"
+                style={{ opacity: 0.5, pointerEvents: "none", cursor: "not-allowed" }}
+              >
+                {t("statements.actions.exportCsv", locale)}
+              </span>
+              <span
+                className="statement-link is-disabled"
+                style={{ opacity: 0.5, pointerEvents: "none", cursor: "not-allowed" }}
+              >
+                {t("statements.actions.downloadSigned", locale)}
+              </span>
+            </>
+          ) : (
+            <>
+              <a
+                className="statement-link"
+                href={`/api/statements/${statement.period}/export?bank=${tenant.code}&locale=${locale}&role=${session.role}`}
+              >
+                {t("statements.actions.exportCsv", locale)}
+              </a>
+              <a
+                className="statement-link"
+                href={`${statement.signedArtifactHref}?bank=${tenant.code}&locale=${locale}&role=${session.role}`}
+              >
+                {t("statements.actions.downloadSigned", locale)}
+              </a>
+            </>
+          )}
+        </div>
       </section>
 
       <section className="surface-grid surface-grid-wide">
         <SurfaceCard
           kicker={t("statements.metrics.kicker", locale)}
-          title={formatCurrency(statement.totalFareAmount, locale)}
+          title={formatAmountForRole(
+            statement.totalFareAmount,
+            locale,
+            session.role,
+          )}
           description={t("statements.detail.metrics.fare", locale)}
         />
         <SurfaceCard
           kicker={t("statements.metrics.kicker", locale)}
-          title={formatCurrency(statement.totalSubsidisedAmount, locale)}
+          title={formatAmountForRole(
+            statement.totalSubsidisedAmount,
+            locale,
+            session.role,
+          )}
           description={t("statements.detail.metrics.subsidised", locale)}
         />
         <SurfaceCard
           kicker={t("statements.metrics.kicker", locale)}
-          title={formatCurrency(statement.totalIssuerPayableAmount, locale)}
+          title={formatAmountForRole(
+            statement.totalIssuerPayableAmount,
+            locale,
+            session.role,
+          )}
           description={t("statements.detail.metrics.issuerPayable", locale)}
         />
         <SurfaceCard
           kicker={t("statements.metrics.kicker", locale)}
-          title={formatCurrency(statement.totalPaidAmount, locale)}
+          title={formatAmountForRole(
+            statement.totalPaidAmount,
+            locale,
+            session.role,
+          )}
           description={t("statements.detail.metrics.paid", locale)}
         />
         <SurfaceCard
@@ -271,24 +372,53 @@ export default async function StatementDetailPage({
                   <span>{formatDate(trip.tripDate)}</span>
                 </div>
               </Td>
-              <Td mono>{formatCurrency(trip.fareAmount, locale)}</Td>
-              <Td mono>{formatCurrency(trip.subsidisedAmount, locale)}</Td>
-              <Td mono>{formatCurrency(trip.paidAmount, locale)}</Td>
+              <Td mono>
+                {formatAmountForRole(trip.fareAmount, locale, session.role)}
+              </Td>
+              <Td mono>
+                {formatAmountForRole(
+                  trip.subsidisedAmount,
+                  locale,
+                  session.role,
+                )}
+              </Td>
+              <Td mono>
+                {formatAmountForRole(trip.paidAmount, locale, session.role)}
+              </Td>
               <Td mono>{trip.benefitReferenceMasked}</Td>
               <Td mono>{trip.cardholderReferenceMasked}</Td>
               <Td mono>{trip.cardReferenceMasked}</Td>
               <Td>{t("statements.direction", locale)}</Td>
               <Td>
-                <a className="statement-link" href={trip.artifactDownloadHref}>
-                  {t("statements.actions.download", locale)}
-                </a>
+                {session.role === "bank_ops_viewer" ? (
+                  <span
+                    className="statement-link is-disabled"
+                    style={{ opacity: 0.5, pointerEvents: "none", cursor: "not-allowed" }}
+                  >
+                    {t("statements.actions.download", locale)}
+                  </span>
+                ) : (
+                  <a
+                    className="statement-link"
+                    href={`${trip.artifactDownloadHref}?bank=${tenant.code}&locale=${locale}&role=${session.role}`}
+                  >
+                    {t("statements.actions.download", locale)}
+                  </a>
+                )}
               </Td>
               <Td>
-                <a className="statement-link" href={trip.disputeHref}>
-                  {trip.disputed
-                    ? t("statements.actions.disputed", locale)
-                    : t("statements.actions.reportDispute", locale)}
-                </a>
+                {trip.disputed ? (
+                  <CanvasPill tone="warn" dot>
+                    {t("statements.actions.disputed", locale)}
+                  </CanvasPill>
+                ) : (
+                  <span
+                    className="statement-link is-disabled"
+                    style={{ opacity: 0.5, pointerEvents: "none", cursor: "not-allowed" }}
+                  >
+                    {t("statements.actions.reportDispute", locale)}
+                  </span>
+                )}
               </Td>
             </Tr>
           ))}

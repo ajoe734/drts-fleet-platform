@@ -1,3 +1,13 @@
+import { OwnedAutonomousDispatchExecutorService } from "./owned-autonomous-dispatch-executor.service";
+import {
+  applyVoiceBookingQualification,
+  type QualifiedVoiceBookingSnapshot,
+} from "./voice-booking-qualification";
+import { assertAutonomousServiceArea } from "../service-area/autonomous-service-area";
+import {
+  bookingRequirementFailures,
+  validateBookingRequirements,
+} from "../vehicle-eligibility/booking-requirements";
 import { createHash, randomUUID } from "node:crypto";
 
 import { generateDeterministicUuid } from "../../common/durable-identity";
@@ -17,6 +27,7 @@ import {
 import { EventEmitter2 } from "@nestjs/event-emitter";
 
 import type {
+  DriverTaskStatus,
   AddressPayload,
   ApplyManualFareOverrideCommand,
   ApproveTenantBookingApprovalRequestCommand,
@@ -97,17 +108,37 @@ import type {
   DispatchQueueMode,
   RuntimeProfileCode,
   RouteFareDisclosureSnapshot,
+  CancelReferralPassengerTripCommand,
+  CreateReferralPassengerBookingCommand,
+  ReferralPassengerActiveTripResult,
+  ReferralPassengerHistoryItem,
+  ReferralPassengerReceipt,
+  SubmitReferralPassengerRatingCommand,
+  TenantBookingDateField,
+  TenantBookingListQuery,
+  TenantBookingsPageRecord,
 } from "@drts/contracts";
 
 import {
+  BOOKING_STATUSES,
+  OWNED_ORDER_STATUSES,
+  isIso8601InstantWithTimezone,
+  PLATFORM_CURRENCY,
+  normalisePlatformCurrency,
   QUEUE_ENTRY_POLICY_MAP,
   RESERVATION_HOLD_VALID_TRANSITIONS,
   hasAddressCoordinateProvenance,
   hasAddressCoordinates,
 } from "@drts/contracts";
 
+import { DRIVER_TASK_TRANSITIONS } from "@drts/contracts";
+
 import { ApiRequestError } from "../../common/api-envelope";
 import type { BootstrapRequestIdentity } from "../../common/auth";
+import {
+  IdempotencyRepository,
+  IdempotencyService,
+} from "../../common/idempotency";
 import { OpsDispatchEventsService } from "../../common/ops-dispatch-events.service";
 import { resolvePassengerSubjectRef } from "../../common/sensitive-data-policy";
 import { AuditNotificationService } from "../audit-notification/audit-notification.service";
@@ -115,6 +146,9 @@ import { CallcenterService } from "../callcenter/callcenter.service";
 import { FareAnomalyService } from "../product-rule/fare-anomaly.service";
 import {
   OwnedMobilityRepository,
+  OwnedOrderDuplicateVoiceLinkError,
+  OwnedOrderVersionConflictError,
+  DispatchResourceReservationConflictError,
   type DriverCompletionOutboxClaimResult,
   type DriverCompletionOutboxEffectType,
   type DriverCompletionOutboxRecord,
@@ -123,14 +157,25 @@ import {
 } from "./owned-mobility.repository";
 import { RegulatoryRegistryService } from "../regulatory-registry/regulatory-registry.service";
 import { SandboxDispatchGateService } from "../sandbox-dispatch-gate/sandbox-dispatch-gate.service";
+import { VoiceBookingRepository } from "../voice-booking/voice-booking.repository";
+import { resolveVoiceOrderFence } from "../voice-booking/voice-order-fence";
 import {
   TenantPartnerService,
   type TenantQuotaConsumptionCommitResult,
 } from "../tenant-partner/tenant-partner.service";
+import {
+  installTenantQuotaRelease,
+  releaseTenantQuota,
+  prepareTenantQuotaRelease,
+  applyCommittedQuotaRelease,
+} from "../tenant-partner/tenant-quota-ledger";
+
+installTenantQuotaRelease(TenantPartnerService);
 import { VehicleEligibilityService } from "../vehicle-eligibility/vehicle-eligibility.service";
 import { SandboxFallbackCostPolicyResolverService } from "../billing-settlement/sandbox-fallback-cost-policy-resolver.service";
 import { RuntimeEligibilityEvaluator } from "../vehicle-eligibility/runtime-eligibility-evaluator.service";
 import { ServiceAreaService } from "../service-area/service-area.service";
+import { PlatformPresenceService } from "../platform-presence/platform-presence.service";
 import {
   OWNED_MOBILITY_MULTI_TAXI_TRIP_COMPLETED_EVENT,
   OWNED_MOBILITY_TRIP_COMPLETED_EVENT,
@@ -151,7 +196,10 @@ type TenantBookingResult = {
   >;
   dispatchSemantics: "reservation";
   status: OwnedOrderRecord["status"];
+  replayed: boolean;
 };
+
+const REFERRAL_PASSENGER_CANCEL_WINDOW_MS = 2 * 60_000;
 
 type PartnerBookingContext = {
   partnerId: string;
@@ -282,6 +330,14 @@ type DriverCompletionOutboxPayload =
 
 type CreateDispatchAssignmentOptions = {
   dispatchAttemptSequence?: number;
+  /**
+   * SD §7.6: when a reassign supersedes an existing assignment, its shared
+   * driver+vehicle reservation must be released in the same transaction
+   * that reserves the new driver/vehicle -- otherwise the old reservation's
+   * unique-occupation row can block the new one, or a moment exists where
+   * neither the old nor the new assignment holds the resource.
+   */
+  previousAssignmentId?: string;
 };
 
 type MultiTaxiCallContext = {
@@ -360,7 +416,7 @@ const BASE64_DATA_URL_PREFIX = /^data:[^;]+;base64,/i;
 const BASE64_PAYLOAD_PATTERN =
   /^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/;
 const DEFAULT_PLATFORM_QUOTED_FARE: MoneyAmount = {
-  currency: "NTD",
+  currency: PLATFORM_CURRENCY,
   amountMinor: 150000,
 };
 const DEFAULT_PLATFORM_PRICING_RULE_VERSION = "enterprise_dispatch.default.v1";
@@ -372,6 +428,16 @@ const DRIVER_COMPLETION_OUTBOX_LEASE_MS = 60_000;
 const DRIVER_COMPLETION_OUTBOX_RETRY_MS = 5_000;
 const DRIVER_COMPLETION_OUTBOX_RECOVERY_POLL_MS = 15_000;
 const DRIVER_COMPLETION_OUTBOX_RECOVERY_BATCH_SIZE = 25;
+
+// SR-DISPATCH-SCHEDULER-001: background wall-clock sweep for dispatch-timeout
+// and reservation-hold escalation, mirroring the driver-completion-outbox
+// polling pattern above -- a plain setInterval that re-derives its work from
+// current persisted/in-memory state on every tick, so it is safe to restart
+// and safe to run from more than one instance (the underlying mutations
+// `handleDispatchTimeout` / `dispatchOrder` already fence themselves against
+// a stale or repeated call).
+const DISPATCH_SCHEDULER_SWEEP_INTERVAL_MS = 15_000;
+const DISPATCH_MATCHING_TIMEOUT_DEFAULT_MS = 90_000;
 
 // Hard eligibility reasons that must NEVER be re-admitted by the scarcity
 // fallback below. Dispatching a vehicle that failed the airport-permit gate to an
@@ -392,6 +458,7 @@ export class OwnedMobilityService
     OnApplicationShutdown
 {
   private readonly logger = new Logger(OwnedMobilityService.name);
+  private readonly pendingWorkflowWrites = new Set<Promise<void>>();
 
   private orders: OwnedOrderRecord[] = [];
 
@@ -437,6 +504,29 @@ export class OwnedMobilityService
   private driverCompletionOutboxDrainRequested = false;
   private driverCompletionOutboxStopping = false;
 
+  private dispatchSchedulerSweepTimer: ReturnType<typeof setInterval> | null =
+    null;
+  private dispatchSchedulerSweepRunning = false;
+
+  private minLeadTimeMinutes = 15;
+
+  getMinLeadTimeMinutes(): number {
+    const envVal =
+      process.env.SCHEDULED_BOOKING_MIN_LEAD_TIME_MINUTES ??
+      process.env.MULTI_TAXI_MIN_LEAD_TIME_MINUTES;
+    if (envVal !== undefined && envVal !== "") {
+      const parsed = Number(envVal);
+      if (!Number.isNaN(parsed) && parsed >= 0) {
+        return parsed;
+      }
+    }
+    return this.minLeadTimeMinutes;
+  }
+
+  setMinLeadTimeMinutes(minutes: number) {
+    this.minLeadTimeMinutes = Math.max(0, minutes);
+  }
+
   constructor(
     private readonly regulatoryRegistryService: RegulatoryRegistryService,
     private readonly auditNotificationService: AuditNotificationService,
@@ -468,7 +558,132 @@ export class OwnedMobilityService
     private readonly serviceAreaService?: ServiceAreaService,
     @Optional()
     private readonly fareAnomalyService?: FareAnomalyService,
+    @Optional()
+    private readonly idempotencyService?: IdempotencyService,
+    // Appended LAST (@Optional) for the same reason as the SVC params above:
+    // preserves every existing positional-arg unit-test harness.
+    @Optional()
+    private readonly voiceBookingRepository?: VoiceBookingRepository,
+    @Optional()
+    @Inject(forwardRef(() => OwnedAutonomousDispatchExecutorService))
+    private readonly autonomousDispatchExecutor?: OwnedAutonomousDispatchExecutorService,
+    // Appended LAST (@Optional) for the same reason as the other trailing
+    // params above: preserves every existing positional-arg unit-test
+    // harness that constructs this service directly.
+    @Optional()
+    private readonly platformPresenceService?: PlatformPresenceService,
   ) {}
+
+  private _fallbackIdempotencyService?: IdempotencyService;
+  private _fallbackAutonomousDispatchExecutor?: OwnedAutonomousDispatchExecutorService;
+
+  getIdempotencyService(): IdempotencyService {
+    if (this.idempotencyService) {
+      return this.idempotencyService;
+    }
+    if (!this._fallbackIdempotencyService) {
+      this._fallbackIdempotencyService = new IdempotencyService(
+        new IdempotencyRepository(),
+      );
+    }
+    return this._fallbackIdempotencyService;
+  }
+
+  getAutonomousDispatchExecutor(): OwnedAutonomousDispatchExecutorService {
+    if (this.autonomousDispatchExecutor) {
+      return this.autonomousDispatchExecutor;
+    }
+    if (!this._fallbackAutonomousDispatchExecutor) {
+      this._fallbackAutonomousDispatchExecutor =
+        new OwnedAutonomousDispatchExecutorService(
+          this,
+          this.ownedMobilityRepository,
+          this.ownedMobilityTaskEventsService,
+          this.opsDispatchEventsService,
+          this.getIdempotencyService(),
+        );
+    }
+    return this._fallbackAutonomousDispatchExecutor;
+  }
+
+  getDispatchJob(dispatchJobId: string): DispatchJobRecord | null {
+    return (
+      this.dispatchJobs.find(
+        (candidateJob) => candidateJob.dispatchJobId === dispatchJobId,
+      ) ?? null
+    );
+  }
+
+  getActiveDispatchJobForOrder(orderId: string): DispatchJobRecord | null {
+    return (
+      this.dispatchJobs.find(
+        (candidateJob) =>
+          candidateJob.orderId === orderId &&
+          ["matching", "assigned", "reserved"].includes(candidateJob.status),
+      ) ?? null
+    );
+  }
+
+  getLatestDispatchJobForOrder(orderId: string): DispatchJobRecord | null {
+    return (
+      this.dispatchJobs.find(
+        (candidateJob) => candidateJob.orderId === orderId,
+      ) ?? null
+    );
+  }
+
+  getActiveDispatchAssignmentForOrder(
+    orderId: string,
+  ): DispatchAssignmentRecord | null {
+    return (
+      this.dispatchAssignments.find(
+        (assignment) =>
+          assignment.orderId === orderId &&
+          ["assigned", "accepted"].includes(assignment.status),
+      ) ?? null
+    );
+  }
+
+  getActiveDriverTaskForAssignment(
+    assignmentId: string,
+  ): DriverTaskRecord | null {
+    return (
+      this.driverTasks.find(
+        (task) =>
+          task.assignmentId === assignmentId &&
+          !["completed", "cancelled", "rejected"].includes(task.status),
+      ) ?? null
+    );
+  }
+
+  getDispatchAssignmentsForOrder(orderId: string): DispatchAssignmentRecord[] {
+    return this.dispatchAssignments.filter(
+      (assignment) => assignment.orderId === orderId,
+    );
+  }
+
+  getDriverTasksForOrder(orderId: string): DriverTaskRecord[] {
+    return this.driverTasks.filter((task) => task.orderId === orderId);
+  }
+
+  async listEligibleDispatchCandidatesForOrder(
+    orderId: string,
+  ): Promise<DispatchCandidate[]> {
+    const order = this.requireOrder(orderId);
+    return this.excludePlatformPresenceBlockedCandidates(
+      this.listEligibleDispatchCandidates(order),
+    );
+  }
+
+  executeAutoDispatch(
+    orderId: string,
+    options?: { requestId?: string; idempotencyKey?: string },
+  ) {
+    return this.getAutonomousDispatchExecutor().requestDispatch(
+      orderId,
+      options,
+    );
+  }
 
   private callRecordingListenersRegistered = false;
 
@@ -543,6 +758,14 @@ export class OwnedMobilityService
 
   async onApplicationBootstrap() {
     this.driverCompletionOutboxStopping = false;
+    this.startDispatchSchedulerPolling();
+    void this.runDispatchSchedulerSweep().catch((error) => {
+      this.logger.error(
+        `Initial dispatch scheduler sweep failed: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      );
+    });
     if (!this.ownedMobilityRepository?.isEnabled()) {
       return;
     }
@@ -565,6 +788,10 @@ export class OwnedMobilityService
       clearInterval(this.driverCompletionRecoveryTimer);
       this.driverCompletionRecoveryTimer = null;
     }
+    if (this.dispatchSchedulerSweepTimer) {
+      clearInterval(this.dispatchSchedulerSweepTimer);
+      this.dispatchSchedulerSweepTimer = null;
+    }
     const activeDrain = this.driverCompletionOutboxDrainPromise;
     if (activeDrain) {
       await activeDrain;
@@ -572,6 +799,99 @@ export class OwnedMobilityService
   }
 
   createPassengerOrder(
+    command: CreateOwnedOrderCommand,
+    identity?: BootstrapRequestIdentity | null,
+    requestId?: string,
+    runtimeProfileCodeHeader?: string,
+  ): OwnedOrderRecord;
+  createPassengerOrder(
+    command: CreateOwnedOrderCommand,
+    identity: BootstrapRequestIdentity | null | undefined,
+    requestId: string | undefined,
+    runtimeProfileCodeHeader: string | undefined,
+    idempotencyKeyHeader: string | undefined,
+    options?: { required?: boolean },
+  ): Promise<OwnedOrderRecord>;
+  createPassengerOrder(
+    command: CreateOwnedOrderCommand,
+    identity?: BootstrapRequestIdentity | null,
+    requestId?: string,
+    runtimeProfileCodeHeader?: string,
+    idempotencyKeyHeader?: string,
+    options?: { required?: boolean },
+  ): MaybePromise<OwnedOrderRecord>;
+  createPassengerOrder(
+    command: CreateOwnedOrderCommand,
+    identity?: BootstrapRequestIdentity | null,
+    requestId?: string,
+    runtimeProfileCodeHeader?: string,
+    idempotencyKeyHeader?: string,
+    options?: { required?: boolean },
+  ): MaybePromise<OwnedOrderRecord> {
+    const resolvedKey =
+      idempotencyKeyHeader?.trim() ||
+      command.idempotencyKey?.trim() ||
+      undefined;
+
+    if (resolvedKey || options?.required) {
+      return this._executePassengerOrderIdempotent(
+        command,
+        resolvedKey,
+        identity,
+        requestId,
+        runtimeProfileCodeHeader,
+        options,
+      );
+    }
+
+    return this._executeCreatePassengerOrder(
+      command,
+      identity,
+      requestId,
+      runtimeProfileCodeHeader,
+    );
+  }
+
+  private async _executePassengerOrderIdempotent(
+    command: CreateOwnedOrderCommand,
+    resolvedKey?: string,
+    identity?: BootstrapRequestIdentity | null,
+    requestId?: string,
+    runtimeProfileCodeHeader?: string,
+    options?: { required?: boolean },
+  ): Promise<OwnedOrderRecord> {
+    const scope = "orders:passenger_create";
+    const idempotencyService = this.getIdempotencyService();
+
+    const result = await idempotencyService.execute<OwnedOrderRecord>({
+      scope,
+      idempotencyKey: resolvedKey,
+      tenantId: null,
+      actorId: identity?.actorId ?? command.passenger?.passengerId ?? null,
+      requestPath: "/owned-mobility/orders",
+      required: options?.required ?? false,
+      payload: {
+        ...command,
+        ...(command.idempotencyKey ? { idempotencyKey: resolvedKey } : {}),
+      },
+      execute: async () => {
+        const order = this._executeCreatePassengerOrder(
+          command,
+          identity,
+          requestId,
+          runtimeProfileCodeHeader,
+        );
+        return {
+          data: order,
+          statusCode: 201,
+        };
+      },
+    });
+
+    return result.data;
+  }
+
+  private _executeCreatePassengerOrder(
     command: CreateOwnedOrderCommand,
     identity?: BootstrapRequestIdentity | null,
     requestId?: string,
@@ -719,7 +1039,7 @@ export class OwnedMobilityService
     identity?: BootstrapRequestIdentity | null,
     requestId?: string,
     callContext?: MultiTaxiCallContext,
-  ) {
+  ): MaybePromise<OwnedOrderRecord> {
     this.assertNoCanonicalMultiTaxiContextOverrides(command);
     this.assertAddress(command.pickup?.address, "pickup.address");
     this.assertAddress(command.dropoff?.address, "dropoff.address");
@@ -734,15 +1054,22 @@ export class OwnedMobilityService
         "timingMode must be on_demand or scheduled.",
       );
     }
-    if (
-      command.timingMode === "scheduled" &&
-      Date.parse(requestedPickupAt) <= Date.now()
-    ) {
-      throw new ApiRequestError(
-        HttpStatus.BAD_REQUEST,
-        "SCHEDULED_PICKUP_MUST_BE_FUTURE",
-        "A scheduled multi-taxi ride must use a future pickup time.",
-      );
+    if (command.timingMode === "scheduled") {
+      const minLeadTimeMinutes = this.getMinLeadTimeMinutes();
+      const minAllowedPickupMs = Date.now() + minLeadTimeMinutes * 60 * 1000;
+      const requestedPickupMs = Date.parse(requestedPickupAt);
+      if (requestedPickupMs < minAllowedPickupMs) {
+        throw new ApiRequestError(
+          HttpStatus.BAD_REQUEST,
+          "TOO_SOON_TO_BOOK",
+          `A scheduled multi-taxi ride requires at least ${minLeadTimeMinutes} minutes advance notice.`,
+          {
+            requestedPickupAt,
+            minLeadTimeMinutes,
+            minimumAllowedPickupAt: new Date(minAllowedPickupMs).toISOString(),
+          },
+        );
+      }
     }
     if (callContext && !callContext.callId?.trim()) {
       throw new ApiRequestError(
@@ -752,6 +1079,44 @@ export class OwnedMobilityService
       );
     }
 
+    // SD §7.4: "`/call-center/multi-taxi/rides`...同樣依 callId 套用 §7.4
+    // fence,不能換入口繞過" -- the callcenter/multi-taxi entry point must not
+    // be usable to create a second order for a call a voice intent already
+    // owns (or has a pending AI command for).
+    if (callContext?.callId && this.voiceBookingRepository?.isEnabled()) {
+      return this.assertNoConflictingVoiceIntentForCall(
+        callContext.callId,
+        "create_multi_taxi_ride",
+      ).then(() =>
+        this.buildAndPersistMultiTaxiRide(
+          command,
+          authorization,
+          requestedPickupAt,
+          identity,
+          requestId,
+          callContext,
+        ),
+      );
+    }
+
+    return this.buildAndPersistMultiTaxiRide(
+      command,
+      authorization,
+      requestedPickupAt,
+      identity,
+      requestId,
+      callContext,
+    );
+  }
+
+  private buildAndPersistMultiTaxiRide(
+    command: CreateMultiTaxiRideCommand,
+    authorization: MultiTaxiOperatingAuthorizationRecord,
+    requestedPickupAt: string,
+    identity: BootstrapRequestIdentity | null | undefined,
+    requestId: string | undefined,
+    callContext: MultiTaxiCallContext | undefined,
+  ): OwnedOrderRecord {
     const serviceProduct =
       this.serviceProductService?.getRuntimeServiceProductByType(
         "taxi_reservation",
@@ -901,11 +1266,39 @@ export class OwnedMobilityService
     return this.cloneOrder(order);
   }
 
+  /**
+   * SD §7.4: the "另一電話建單入口" -- must apply the same fence as the voice
+   * commit path before creating a brand-new phone order for `command.callId`.
+   * Returns synchronously (legacy behavior, relied on by many unit-test
+   * harnesses that construct this service without a DB) when
+   * `voiceBookingRepository` is absent/disabled; only becomes a `Promise`
+   * when durable voice state actually needs to be consulted.
+   */
   createCallCenterOrder(
     command: CreateCallCenterOrderCommand,
     requestId?: string,
     runtimeProfileCodeHeader?: string,
-  ) {
+    identity?: BootstrapRequestIdentity | null,
+  ): MaybePromise<OwnedOrderRecord> {
+    for (const field of [
+      "bookingQualification",
+      "serviceProductCode",
+      "operatingAuthorizationId",
+      "acquisitionMode",
+      "timingMode",
+      "queueMode",
+      "requestedAt",
+      "reservationWindowStart",
+      "reservationWindowEnd",
+    ]) {
+      if (field in command)
+        throw new ApiRequestError(
+          409,
+          "CALL_CENTER_PRODUCT_ROUTE_REQUIRED",
+          "Product and scheduled requests require their dedicated booking route.",
+          { field },
+        );
+    }
     this.assertRuntimeProfileAllowances(command, runtimeProfileCodeHeader);
     this.assertAddress(command.pickup?.address, "pickup.address");
     this.assertAddress(command.dropoff?.address, "dropoff.address");
@@ -916,10 +1309,69 @@ export class OwnedMobilityService
         "Call center orders require call_id.",
       );
     }
+
+    if (this.voiceBookingRepository?.isEnabled()) {
+      return this.assertNoConflictingVoiceIntentForCall(
+        command.callId,
+        "create_call_center_order",
+      ).then(() =>
+        this.buildAndPersistCallCenterOrder(command, requestId, identity),
+      );
+    }
+
+    return this.buildAndPersistCallCenterOrder(command, requestId, identity);
+  }
+
+  /**
+   * SD §7.4/§7.5: shared fence for every legacy entry point that can create
+   * or rebind an order for a `callId` that a voice session may already own.
+   * A `bound` outcome means a succeeded AI command already produced an
+   * order for this call -- creating another one here would be the exact
+   * "第二筆有效 intent order" the SD forbids. A `pending` outcome means an AI
+   * command is still being reconciled and must not be raced by a manual
+   * create. `none` (no voice session, no intent, or a rejected intent with
+   * no order) falls through to existing legacy behavior unchanged.
+   */
+  private async assertNoConflictingVoiceIntentForCall(
+    callId: string,
+    context: string,
+  ) {
+    const outcome = await resolveVoiceOrderFence(
+      this.voiceBookingRepository,
+      callId,
+    );
+    if (outcome.kind === "bound") {
+      throw new ApiRequestError(
+        HttpStatus.CONFLICT,
+        "VOICE_ORDER_ALREADY_LINKED",
+        `Call ${callId} is already linked to an AI-originated order; use the existing order instead of creating a new one.`,
+        { callId, orderId: outcome.orderId, context },
+      );
+    }
+    if (outcome.kind === "pending") {
+      throw new ApiRequestError(
+        HttpStatus.CONFLICT,
+        "VOICE_ACTION_PENDING",
+        `An AI booking command for call ${callId} is still pending reconciliation; wait for it to resolve before creating a manual order.`,
+        { callId, intentId: outcome.intentId, context },
+      );
+    }
+  }
+
+  private buildAndPersistCallCenterOrder(
+    command: CreateCallCenterOrderCommand,
+    requestId: string | undefined,
+    identity: BootstrapRequestIdentity | null | undefined,
+  ): OwnedOrderRecord {
+    const bookingRequirements =
+      command.bookingRequirements === undefined
+        ? undefined
+        : validateBookingRequirements(command.bookingRequirements);
     const recordingId = command.recordingId?.trim() || null;
 
     const now = new Date().toISOString();
     const order: OwnedOrderRecord = {
+      ...(bookingRequirements ? { bookingRequirements } : {}),
       orderId: randomUUID(),
       orderNo: this.nextOrderNo(),
       orderSource: "phone",
@@ -965,7 +1417,7 @@ export class OwnedMobilityService
       direction: null,
       flightNo: null,
       terminal: null,
-      luggageCount: null,
+      luggageCount: bookingRequirements?.luggageCount ?? null,
       notes: command.notes?.trim() || null,
       fixedPrice: false,
       quotedFare: null,
@@ -1056,7 +1508,12 @@ export class OwnedMobilityService
     );
     this.recordAudit(
       {
-        actorId: command.agentId,
+        // SD §7.5: "actor 從 authenticated identity 注入,不能採 body.agentId" --
+        // command.agentId is retained only as descriptive call-session
+        // metadata (who staffed the call, used for spatial-audit/trace
+        // attribution above); the actor of record for this mutation is the
+        // authenticated caller when one is available.
+        actorId: identity?.actorId?.trim() || command.agentId,
         actorType: "ops_user",
         tenantId: null,
         moduleName: "callcenter",
@@ -1084,10 +1541,109 @@ export class OwnedMobilityService
     identity?: BootstrapRequestIdentity | null,
     requestId?: string,
     runtimeProfileCodeHeader?: string,
+    idempotencyKeyHeader?: string,
+    options?: {
+      required?: boolean;
+      isImmediateReferral?: boolean;
+    },
+  ): MaybePromise<TenantBookingResult> {
+    const resolvedKey =
+      idempotencyKeyHeader?.trim() ||
+      command.idempotencyKey?.trim() ||
+      undefined;
+
+    if (resolvedKey || options?.required) {
+      return this._executeTenantBookingIdempotent(
+        command,
+        tenantId,
+        resolvedKey,
+        identity,
+        requestId,
+        runtimeProfileCodeHeader,
+        options,
+      );
+    }
+
+    return this._executeCreateTenantBooking(
+      command,
+      tenantId,
+      identity,
+      requestId,
+      runtimeProfileCodeHeader,
+      options,
+    );
+  }
+
+  private async _executeTenantBookingIdempotent(
+    command: CreateTenantBookingCommand,
+    tenantId: string,
+    resolvedKey?: string,
+    identity?: BootstrapRequestIdentity | null,
+    requestId?: string,
+    runtimeProfileCodeHeader?: string,
+    options?: {
+      required?: boolean;
+      isImmediateReferral?: boolean;
+    },
+  ): Promise<TenantBookingResult> {
+    const scope = `tenant:${tenantId}:booking_create`;
+    const idempotencyService = this.getIdempotencyService();
+
+    const result = await idempotencyService.execute<TenantBookingResult>({
+      scope,
+      idempotencyKey: resolvedKey,
+      tenantId,
+      actorId:
+        identity?.actorId ??
+        command.passengerId ??
+        command.passenger?.passengerId ??
+        null,
+      requestPath: "/owned-mobility/tenant/bookings",
+      required: options?.required ?? false,
+      payload: {
+        ...command,
+        ...(command.idempotencyKey ? { idempotencyKey: resolvedKey } : {}),
+      },
+      execute: async () => {
+        const bookingResult = await this._executeCreateTenantBooking(
+          command,
+          tenantId,
+          identity,
+          requestId,
+          runtimeProfileCodeHeader,
+          options,
+        );
+        return {
+          data: {
+            ...bookingResult,
+            replayed: false,
+          },
+          statusCode: 201,
+        };
+      },
+    });
+
+    return {
+      ...result.data,
+      replayed: result.isReplay,
+    };
+  }
+
+  private _executeCreateTenantBooking(
+    command: CreateTenantBookingCommand,
+    tenantId: string,
+    identity?: BootstrapRequestIdentity | null,
+    requestId?: string,
+    runtimeProfileCodeHeader?: string,
+    options?: {
+      required?: boolean;
+      isImmediateReferral?: boolean;
+    },
   ): MaybePromise<TenantBookingResult> {
     this.assertRuntimeProfileAllowances(command, runtimeProfileCodeHeader);
     this.assertNonBlank(tenantId, "tenantId");
     this.assertTenantChannelCannotSetQuotedFare(command, identity);
+
     this.assertBookingRules(
       command.businessDispatchSubtype,
       command.direction,
@@ -1099,6 +1655,10 @@ export class OwnedMobilityService
       tenantId,
       identity,
     );
+
+    if (!options?.isImmediateReferral) {
+      this.assertBookingLeadTime(command.reservationWindowStart);
+    }
     const pickup = this.resolveTenantAddressPayload(
       tenantId,
       command.pickupAddressId ?? null,
@@ -1294,6 +1854,7 @@ export class OwnedMobilityService
         businessDispatchSubtype: order.businessDispatchSubtype!,
         dispatchSemantics: "reservation",
         status: order.status,
+        replayed: false,
       };
     };
 
@@ -1401,6 +1962,25 @@ export class OwnedMobilityService
       return;
     }
 
+    // Legacy callbacks contain no immutable manifest version or verified
+    // checkpoint. They cannot establish or replace voice evidence, nor open
+    // its dispatch gate. Final recording evidence has its own journal path.
+    if (order.voiceIntentId) {
+      const traceLog = this.appendTrace(
+        order.orderId,
+        "voice.recording_evidence_exception",
+        {
+          callId: event.callId,
+          reason: "unversioned_recording_callback",
+        },
+      );
+      this.persistChanges(
+        { dispatchTraceLogs: [traceLog] },
+        "sync_call_recording_attachment_voice_exception",
+      );
+      return;
+    }
+
     const now = new Date().toISOString();
     order.recordingId = event.recordingId;
     order.updatedAt = now;
@@ -1452,12 +2032,48 @@ export class OwnedMobilityService
     );
   }
 
-  handleCallRecordingStateChanged(event: CallRecordingStateChangeEvent) {
+  /**
+   * SD §8.4: the legacy recording-state callback cannot be applied blindly
+   * to a voice-originated order (`order.voiceIntentId` set) -- it must not
+   * clear a newer, already-bound recording index, and must never regress a
+   * dispatch-committed order back to `recording_pending` (only pre-dispatch
+   * demotion is meaningful; a mid-trip recording failure is an evidence
+   * exception, not an order-lifecycle rollback). Non-voice orders keep the
+   * exact original synchronous behavior (SD §7.4: "非 voice call 保留既有人工
+   * 行為").
+   */
+  handleCallRecordingStateChanged(
+    event: CallRecordingStateChangeEvent,
+  ): void | Promise<void> {
     const order = this.orders.find((candidateOrder) => {
       return candidateOrder.orderId === event.linkedOrderId;
     });
     if (!order) {
       return;
+    }
+
+    if (order.voiceIntentId) {
+      // Losing the durable repository must not fall through to the legacy
+      // in-memory writer and erase established voice evidence/order progress.
+      if (!this.ownedMobilityRepository?.isEnabled()) {
+        this.logger.warn(
+          "Voice recording callback deferred: durable repository unavailable",
+        );
+        return;
+      }
+      // Returned (not just fired) so callers that care -- e.g. tests -- can
+      // await completion; existing fire-and-forget callers (the
+      // synchronous callcenter listener wiring) simply ignore the return
+      // value, and the internal .catch means this never rejects.
+      return this.handleVoiceCallRecordingStateChanged(order, event).catch(
+        (error) => {
+          this.logger.warn(
+            `Voice-aware recording state sync failed for order ${order.orderId}: ${
+              error instanceof Error ? error.message : String(error)
+            }`,
+          );
+        },
+      );
     }
 
     const now = new Date().toISOString();
@@ -1499,6 +2115,102 @@ export class OwnedMobilityService
     );
   }
 
+  private static readonly PRE_DISPATCH_RECORDING_GATE_STATUSES = new Set<
+    OwnedOrderRecord["status"]
+  >(["created", "recording_pending", "ready_for_dispatch"]);
+
+  /**
+   * Voice-aware counterpart of the branch above, CAS-protected through
+   * `commitVoiceOrderMutation` (SD §7.5 UoW requirement). A cheap read of
+   * the in-memory snapshot decides whether this event can possibly apply
+   * before paying for a transaction; the authoritative decision is made
+   * again inside `prepare` against the row locked `FOR UPDATE`, so a
+   * concurrent writer between the two checks cannot cause an incorrect
+   * apply.
+   */
+  private async handleVoiceCallRecordingStateChanged(
+    order: OwnedOrderRecord,
+    event: CallRecordingStateChangeEvent,
+  ): Promise<void> {
+    if (event.recordingState === "ready") {
+      return;
+    }
+
+    const alreadyHasNewerIndex = (candidate: OwnedOrderRecord) =>
+      Boolean(candidate.recordingId) &&
+      candidate.complianceFlags.includes("recording_bound");
+    const isPastPreDispatch = (candidate: OwnedOrderRecord) =>
+      !OwnedMobilityService.PRE_DISPATCH_RECORDING_GATE_STATUSES.has(
+        candidate.status,
+      );
+
+    if (isPastPreDispatch(order) || alreadyHasNewerIndex(order)) {
+      const traceLog = this.appendTrace(
+        order.orderId,
+        "voice.recording_evidence_exception",
+        {
+          callId: event.callId,
+          recordingState: event.recordingState,
+          linkedOrderId: event.linkedOrderId,
+          reason: isPastPreDispatch(order)
+            ? "order_progressed"
+            : "newer_recording_bound",
+        },
+      );
+      this.persistChanges(
+        { dispatchTraceLogs: [traceLog] },
+        "sync_call_recording_state_voice_exception",
+      );
+      return;
+    }
+
+    const outcome = await this.commitVoiceOrderMutation<
+      "applied" | "order_progressed" | "newer_recording_bound"
+    >(order.orderId, "callcenter.recording_state_changed", (current) => {
+      if (isPastPreDispatch(current)) {
+        return { order: current, result: "order_progressed" };
+      }
+      if (alreadyHasNewerIndex(current)) {
+        return { order: current, result: "newer_recording_bound" };
+      }
+      const next: OwnedOrderRecord = {
+        ...current,
+        recordingId: null,
+        status: "recording_pending",
+        complianceFlags: [
+          ...current.complianceFlags.filter(
+            (flag) =>
+              flag !== "recording_bound" &&
+              flag !== "recording_pending" &&
+              flag !== "recording_missing",
+          ),
+          event.recordingState === "missing"
+            ? "recording_missing"
+            : "recording_pending",
+        ],
+        updatedAt: new Date().toISOString(),
+      };
+      return { order: next, result: "applied" };
+    });
+
+    const traceLog = this.appendTrace(
+      order.orderId,
+      outcome === "applied"
+        ? "callcenter.recording_state_changed"
+        : "voice.recording_evidence_exception",
+      {
+        callId: event.callId,
+        recordingState: event.recordingState,
+        linkedOrderId: event.linkedOrderId,
+        ...(outcome === "applied" ? {} : { reason: outcome }),
+      },
+    );
+    this.persistChanges(
+      { dispatchTraceLogs: [traceLog] },
+      "sync_call_recording_state_voice",
+    );
+  }
+
   listOrders() {
     return this.orders.map((order) => this.cloneOrder(order));
   }
@@ -1520,7 +2232,7 @@ export class OwnedMobilityService
       const persistedOrder =
         (await this.ownedMobilityRepository.findOrderById(orderId)) ??
         undefined;
-      order = this.pickNewestOrder(order, persistedOrder);
+      order = this.resolveAuthoritativeOrder(order, persistedOrder);
     }
     if (order) {
       const resolvedOrderId = order.orderId;
@@ -1559,21 +2271,425 @@ export class OwnedMobilityService
     return snapshot ? this.clonePassengerDisclosureSnapshot(snapshot) : null;
   }
 
-  listTenantBookings(tenantId: string) {
-    this.assertNonBlank(tenantId, "tenantId");
-    const items = this.orders
-      .filter((order) => order.bookingId && order.tenantId === tenantId)
-      .map((order) => this.mapOrderToBooking(order));
+  assertTenantAccessScope(
+    targetTenantId: string,
+    identity?: BootstrapRequestIdentity | null,
+  ) {
+    if (!identity) {
+      return;
+    }
+    if (!identity.actorId) {
+      throw new ApiRequestError(
+        HttpStatus.UNAUTHORIZED,
+        "AUTH_REQUIRED",
+        "Authenticated tenant identity is required.",
+      );
+    }
+
+    const isPlatformOrSystem =
+      identity.realm === "platform" ||
+      identity.realm === "system" ||
+      identity.actorType === "platform_admin" ||
+      identity.actorType === "system" ||
+      identity.roleFamilies?.includes("platform");
+
+    if (isPlatformOrSystem) {
+      return;
+    }
+
+    if (!identity.tenantId || identity.tenantId !== targetTenantId) {
+      throw new ApiRequestError(
+        HttpStatus.FORBIDDEN,
+        "TENANT_SCOPE_MISMATCH",
+        "Cross-tenant identity access is forbidden. Principal tenantId does not match target tenantId.",
+        {
+          targetTenantId,
+          principalTenantId: identity.tenantId ?? null,
+        },
+      );
+    }
+  }
+
+  private validateTenantBookingListQuery(rawQuery?: TenantBookingListQuery): {
+    q: string | undefined;
+    passenger: string | undefined;
+    passengerId: string | undefined;
+    bookingStatuses: string[] | undefined;
+    fulfillmentStatuses: string[] | undefined;
+    dateField: TenantBookingDateField;
+    fromInstant: Date | undefined;
+    toInstant: Date | undefined;
+    page: number;
+    pageSize: number;
+    serviceBucket: string | undefined;
+    subtype: string | undefined;
+  } {
+    const q = rawQuery?.q?.trim() || undefined;
+    const passenger = rawQuery?.passenger?.trim() || undefined;
+    const passengerId = rawQuery?.passengerId?.trim() || undefined;
+
+    // Date field
+    let dateField: TenantBookingDateField = "reservationStart";
+    if (rawQuery?.dateField) {
+      if (
+        rawQuery.dateField !== "reservationStart" &&
+        rawQuery.dateField !== "createdAt"
+      ) {
+        throw new ApiRequestError(
+          HttpStatus.BAD_REQUEST,
+          "INVALID_DATE_FIELD",
+          "dateField must be 'reservationStart' or 'createdAt'.",
+          { dateField: rawQuery.dateField },
+        );
+      }
+      dateField = rawQuery.dateField;
+    }
+
+    // Date from & to validation: require explicit ISO8601 instant with timezone
+    let fromInstant: Date | undefined;
+    if (rawQuery?.dateFrom?.trim()) {
+      const fromStr = rawQuery.dateFrom.trim();
+      if (!isIso8601InstantWithTimezone(fromStr)) {
+        throw new ApiRequestError(
+          HttpStatus.BAD_REQUEST,
+          "INVALID_DATE_BOUNDS",
+          "dateFrom must be an explicit ISO8601 instant with timezone (e.g. 2026-09-10T00:00:00Z). Ambiguous or server-local timestamps are rejected.",
+          { dateFrom: fromStr },
+        );
+      }
+      fromInstant = new Date(fromStr);
+    }
+
+    let toInstant: Date | undefined;
+    if (rawQuery?.dateTo?.trim()) {
+      const toStr = rawQuery.dateTo.trim();
+      if (!isIso8601InstantWithTimezone(toStr)) {
+        throw new ApiRequestError(
+          HttpStatus.BAD_REQUEST,
+          "INVALID_DATE_BOUNDS",
+          "dateTo must be an explicit ISO8601 instant with timezone (e.g. 2026-09-10T00:00:00Z). Ambiguous or server-local timestamps are rejected.",
+          { dateTo: toStr },
+        );
+      }
+      toInstant = new Date(toStr);
+    }
+
+    if (
+      fromInstant &&
+      toInstant &&
+      fromInstant.getTime() >= toInstant.getTime()
+    ) {
+      throw new ApiRequestError(
+        HttpStatus.BAD_REQUEST,
+        "INVALID_DATE_RANGE",
+        "dateFrom must be strictly before dateTo (start inclusive, end exclusive).",
+        { dateFrom: rawQuery?.dateFrom, dateTo: rawQuery?.dateTo },
+      );
+    }
+
+    // Status validation
+    const bookingStatusSet = new Set<string>(BOOKING_STATUSES);
+    const orderStatusSet = new Set<string>(OWNED_ORDER_STATUSES);
+
+    let bookingStatuses: string[] | undefined;
+    let fallbackOrderStatuses: string[] | undefined;
+    const rawBookingStatus = rawQuery?.bookingStatus ?? rawQuery?.status;
+    if (rawBookingStatus) {
+      const rawList = (
+        Array.isArray(rawBookingStatus)
+          ? rawBookingStatus
+          : String(rawBookingStatus).split(",")
+      )
+        .map((s) => String(s).trim())
+        .filter(Boolean);
+
+      const parsedBookingStatuses: string[] = [];
+      const orderFallbacks: string[] = [];
+      for (const s of rawList) {
+        if (bookingStatusSet.has(s)) {
+          parsedBookingStatuses.push(s);
+        } else if (orderStatusSet.has(s)) {
+          orderFallbacks.push(s);
+        } else {
+          throw new ApiRequestError(
+            HttpStatus.BAD_REQUEST,
+            "INVALID_STATUS",
+            `Invalid status '${s}'. Must be a valid booking status (${Array.from(bookingStatusSet).join(", ")}) or order fulfillment status.`,
+            { status: s },
+          );
+        }
+      }
+      if (parsedBookingStatuses.length > 0) {
+        bookingStatuses = parsedBookingStatuses;
+      }
+      if (orderFallbacks.length > 0) {
+        fallbackOrderStatuses = orderFallbacks;
+      }
+    }
+
+    let fulfillmentStatuses: string[] | undefined;
+    const rawFulfillmentStatus =
+      rawQuery?.fulfillmentStatus ?? rawQuery?.orderStatus;
+    if (rawFulfillmentStatus) {
+      const rawList = (
+        Array.isArray(rawFulfillmentStatus)
+          ? rawFulfillmentStatus
+          : String(rawFulfillmentStatus).split(",")
+      )
+        .map((s) => String(s).trim())
+        .filter(Boolean);
+      for (const s of rawList) {
+        if (!orderStatusSet.has(s)) {
+          throw new ApiRequestError(
+            HttpStatus.BAD_REQUEST,
+            "INVALID_STATUS",
+            `Invalid fulfillment/order status '${s}'. Must be one of: ${Array.from(orderStatusSet).join(", ")}.`,
+            { fulfillmentStatus: s },
+          );
+        }
+      }
+      fulfillmentStatuses = rawList;
+    } else if (fallbackOrderStatuses) {
+      fulfillmentStatuses = fallbackOrderStatuses;
+    }
+
+    // Pagination validation
+    let page = 1;
+    if (
+      rawQuery?.page !== undefined &&
+      rawQuery?.page !== null &&
+      String(rawQuery.page).trim() !== ""
+    ) {
+      const pageNum = Number(rawQuery.page);
+      if (!Number.isInteger(pageNum) || pageNum < 1) {
+        throw new ApiRequestError(
+          HttpStatus.BAD_REQUEST,
+          "INVALID_PAGE",
+          "page must be a positive integer >= 1.",
+          { page: rawQuery.page },
+        );
+      }
+      page = pageNum;
+    }
+
+    let pageSize = 20;
+    if (
+      rawQuery?.pageSize !== undefined &&
+      rawQuery?.pageSize !== null &&
+      String(rawQuery.pageSize).trim() !== ""
+    ) {
+      const sizeNum = Number(rawQuery.pageSize);
+      if (!Number.isInteger(sizeNum) || sizeNum < 1 || sizeNum > 100) {
+        throw new ApiRequestError(
+          HttpStatus.BAD_REQUEST,
+          "INVALID_PAGE_SIZE",
+          "pageSize must be an integer between 1 and 100.",
+          { pageSize: rawQuery.pageSize },
+        );
+      }
+      pageSize = sizeNum;
+    } else if (rawQuery === undefined) {
+      pageSize = 0;
+    }
 
     return {
+      q,
+      passenger,
+      passengerId,
+      bookingStatuses,
+      fulfillmentStatuses,
+      dateField,
+      fromInstant,
+      toInstant,
+      page,
+      pageSize,
+      serviceBucket: rawQuery?.serviceBucket?.trim() || undefined,
+      subtype: rawQuery?.subtype?.trim() || undefined,
+    };
+  }
+
+  listTenantBookings(
+    tenantId: string,
+    query?: TenantBookingListQuery,
+    identity?: BootstrapRequestIdentity | null,
+  ): Promise<TenantBookingsPageRecord> & TenantBookingsPageRecord {
+    this.assertNonBlank(tenantId, "tenantId");
+    if (identity) {
+      this.assertTenantAccessScope(tenantId, identity);
+    }
+
+    const validated = this.validateTenantBookingListQuery(query);
+
+    if (this.ownedMobilityRepository?.isEnabled()) {
+      const executeDb = async (): Promise<TenantBookingsPageRecord> => {
+        const dbResult =
+          await this.ownedMobilityRepository!.queryTenantBookings(tenantId, {
+            ...query,
+            page: validated.page,
+            pageSize: validated.pageSize > 0 ? validated.pageSize : 100,
+          });
+        const effectivePageSize =
+          validated.pageSize > 0
+            ? validated.pageSize
+            : Math.max(1, dbResult.total);
+        const totalPages =
+          dbResult.total > 0
+            ? Math.ceil(dbResult.total / effectivePageSize)
+            : 0;
+        const items = dbResult.items.map((order) =>
+          this.mapOrderToBooking(order),
+        );
+        return {
+          items,
+          pagination: {
+            page: validated.page,
+            pageSize: effectivePageSize,
+            totalItems: dbResult.total,
+            totalPages,
+          },
+          pageInfo: {
+            page: validated.page,
+            pageSize: effectivePageSize,
+            totalItems: dbResult.total,
+            totalPages,
+          },
+        };
+      };
+
+      const promise = executeDb();
+      return promise as unknown as Promise<TenantBookingsPageRecord> &
+        TenantBookingsPageRecord;
+    }
+
+    let filtered = this.orders.filter(
+      (order) => order.bookingId && order.tenantId === tenantId,
+    );
+
+    if (validated.passengerId) {
+      filtered = filtered.filter(
+        (o) => o.passenger?.passengerId === validated.passengerId,
+      );
+    }
+
+    const text = (validated.passenger ?? validated.q)?.toLowerCase();
+    if (text) {
+      filtered = filtered.filter((o) => {
+        const p = o.passenger;
+        return (
+          Boolean(p?.name?.toLowerCase().includes(text)) ||
+          Boolean(p?.phone?.toLowerCase().includes(text)) ||
+          Boolean(p?.passengerId?.toLowerCase().includes(text)) ||
+          Boolean(o.bookedBy?.email?.toLowerCase().includes(text)) ||
+          Boolean(o.bookedBy?.name?.toLowerCase().includes(text)) ||
+          Boolean(o.bookingId?.toLowerCase().includes(text)) ||
+          Boolean(o.orderId?.toLowerCase().includes(text)) ||
+          Boolean(o.costCenter?.toLowerCase().includes(text))
+        );
+      });
+    }
+
+    if (validated.bookingStatuses && validated.bookingStatuses.length > 0) {
+      const bs = new Set(validated.bookingStatuses);
+      filtered = filtered.filter((o) => {
+        const status =
+          o.status === "cancelled"
+            ? "cancelled"
+            : o.status === "completed"
+              ? "completed"
+              : "active";
+        return bs.has(status);
+      });
+    }
+
+    if (
+      validated.fulfillmentStatuses &&
+      validated.fulfillmentStatuses.length > 0
+    ) {
+      const fs = new Set(validated.fulfillmentStatuses);
+      filtered = filtered.filter((o) => fs.has(o.status));
+    }
+
+    if (validated.subtype && validated.subtype !== "all") {
+      filtered = filtered.filter(
+        (o) => o.businessDispatchSubtype === validated.subtype,
+      );
+    }
+    if (validated.serviceBucket && validated.serviceBucket !== "all") {
+      filtered = filtered.filter(
+        (o) => o.serviceBucket === validated.serviceBucket,
+      );
+    }
+
+    if (validated.fromInstant || validated.toInstant) {
+      filtered = filtered.filter((o) => {
+        const dateStr =
+          validated.dateField === "createdAt"
+            ? o.createdAt
+            : o.reservationWindowStart;
+        if (!dateStr) {
+          return false;
+        }
+        const t = new Date(dateStr).getTime();
+        if (validated.fromInstant && t < validated.fromInstant.getTime()) {
+          return false;
+        }
+        if (validated.toInstant && t >= validated.toInstant.getTime()) {
+          return false;
+        }
+        return true;
+      });
+    }
+
+    filtered.sort((a, b) => {
+      const dateA =
+        validated.dateField === "createdAt"
+          ? a.createdAt
+          : a.reservationWindowStart;
+      const dateB =
+        validated.dateField === "createdAt"
+          ? b.createdAt
+          : b.reservationWindowStart;
+      const timeA = dateA ? new Date(dateA).getTime() : -Infinity;
+      const timeB = dateB ? new Date(dateB).getTime() : -Infinity;
+      if (timeA !== timeB) {
+        return timeB - timeA;
+      }
+      return (a.bookingId ?? "").localeCompare(b.bookingId ?? "");
+    });
+
+    const totalItems = filtered.length;
+    const effectivePageSize =
+      validated.pageSize > 0 ? validated.pageSize : Math.max(1, totalItems);
+    const totalPages =
+      totalItems > 0 ? Math.ceil(totalItems / effectivePageSize) : 0;
+
+    let pagedOrders: OwnedOrderRecord[] = [];
+    const offset = (validated.page - 1) * effectivePageSize;
+    if (offset < totalItems) {
+      pagedOrders = filtered.slice(offset, offset + effectivePageSize);
+    }
+
+    const items = pagedOrders.map((order) => this.mapOrderToBooking(order));
+    const result: TenantBookingsPageRecord = {
       items,
       pagination: {
-        page: 1,
-        pageSize: items.length,
-        totalItems: items.length,
-        totalPages: items.length > 0 ? 1 : 0,
+        page: validated.page,
+        pageSize: effectivePageSize,
+        totalItems,
+        totalPages,
+      },
+      pageInfo: {
+        page: validated.page,
+        pageSize: effectivePageSize,
+        totalItems,
+        totalPages,
       },
     };
+
+    const promise = Promise.resolve(result);
+    Object.assign(promise, result);
+    return promise as unknown as Promise<TenantBookingsPageRecord> &
+      TenantBookingsPageRecord;
   }
 
   getTenantBooking(
@@ -1604,7 +2720,7 @@ export class OwnedMobilityService
           bookingId,
           tenantId,
         )) ?? undefined;
-      order = this.pickNewestOrder(order, persistedOrder);
+      order = this.resolveAuthoritativeOrder(order, persistedOrder);
     }
     if (order) {
       const resolvedOrderId = order.orderId;
@@ -1622,20 +2738,165 @@ export class OwnedMobilityService
     return this.mapOrderToBooking(order);
   }
 
-  private pickNewestOrder(
+  /**
+   * SD §7.5: "不得以 updatedAt 從 DB 與記憶體挑較新者，因為記憶體可能是未持久化
+   * 狀態" -- a persisted DB row is always authoritative over the in-memory
+   * copy once persistence is enabled, because the in-memory copy may reflect
+   * a mutation whose transaction never committed (it can carry a strictly
+   * newer `updatedAt` than the last durable write). Only fall back to the
+   * in-memory copy when the DB genuinely has no row yet.
+   */
+  private resolveAuthoritativeOrder(
     localOrder: OwnedOrderRecord | undefined,
     persistedOrder: OwnedOrderRecord | undefined,
   ) {
-    if (!localOrder) {
-      return persistedOrder;
+    return persistedOrder ?? localOrder;
+  }
+
+  /**
+   * Replaces the in-memory projection for `orderId` with a row that is
+   * already durably committed. Only ever called after a transaction commits
+   * (SD §7.5: "commit 後再投影...不在交易中呼叫會先改共享 arrays...的舊建單方
+   * 法") -- never before, and never on a failed/rolled-back attempt.
+   */
+  private applyAuthoritativeOrder(order: OwnedOrderRecord) {
+    const resolvedOrderId = order.orderId;
+    this.orders = [
+      this.cloneOrder(order),
+      ...this.orders.filter(
+        (candidateOrder) => candidateOrder.orderId !== resolvedOrderId,
+      ),
+    ];
+  }
+
+  prepareQualifiedVoiceOrder(
+    order: OwnedOrderRecord,
+    snapshot: QualifiedVoiceBookingSnapshot,
+  ): OwnedOrderRecord {
+    return applyVoiceBookingQualification(order, snapshot);
+  }
+
+  /**
+   * Creates a brand-new voice-linked order through the shared PoolClient
+   * UoW (SD §7.1/§7.5). Fails closed when durable storage is not
+   * configured -- a voice mutation with no DB must be rejected, not
+   * silently accepted into memory only, unlike the legacy
+   * `persistChanges`/`persistChangesRequired` fallback used by non-voice
+   * writers. A collision on `order_id`, or on the partial unique
+   * `voice_intent_id`/`call_id` indexes (V0088), surfaces as
+   * `VOICE_ORDER_DUPLICATE_LINK` so the caller can replay/look up the
+   * existing order instead of creating a second one for the same intent.
+   */
+  async createVoiceOrder(
+    order: OwnedOrderRecord,
+    context: string,
+  ): Promise<OwnedOrderRecord> {
+    if (order.bookingQualification) {
+      if (!order.bookingRequirements)
+        throw new ApiRequestError(
+          409,
+          "BOOKING_REQUIREMENTS_INVALID",
+          "A qualified voice order requires booking requirements.",
+        );
+      order = applyVoiceBookingQualification(order, {
+        bookingQualification: order.bookingQualification,
+        bookingRequirements: order.bookingRequirements,
+      });
     }
-    if (!persistedOrder) {
-      return localOrder;
+    const repository = this.requireVoiceCapableRepository(context);
+    const aggregateVersion = await repository
+      .withTransaction((client) => repository.insertVoiceOrder(client, order))
+      .catch((error) => {
+        if (error instanceof OwnedOrderDuplicateVoiceLinkError) {
+          throw new ApiRequestError(
+            HttpStatus.CONFLICT,
+            "VOICE_ORDER_DUPLICATE_LINK",
+            error.message,
+            { orderId: order.orderId },
+          );
+        }
+        throw error;
+      });
+    const committed: OwnedOrderRecord = { ...order, aggregateVersion };
+    this.applyAuthoritativeOrder(committed);
+    return this.cloneOrder(committed);
+  }
+
+  /**
+   * Pure-prepare + CAS transaction for mutating an existing voice-linked
+   * order (SD §7.1/§7.5). `prepare` receives the DB-authoritative current
+   * order and version, locked `FOR UPDATE` for the lifetime of the
+   * transaction, and must be pure: it only computes and returns the next
+   * order (and an arbitrary `result`), never mutating `this.orders`,
+   * `this.dispatchTraceLogs`, an event emitter, or the audit sink.
+   *
+   * Those side effects belong in the caller, applied only after this method
+   * resolves -- i.e. only after the CAS write has durably committed. A
+   * transaction that fails for any reason (stale `aggregateVersion`, a
+   * rejected precondition thrown by `prepare`, a dropped DB connection)
+   * leaves the in-memory cache, every event, and the audit sink exactly as
+   * they were: nothing here mutates shared state ahead of commit.
+   *
+   * Fails closed when durable storage is not configured, and translates a
+   * version conflict into `409 VOICE_ORDER_VERSION_CONFLICT` so two
+   * instances racing on the same stale snapshot cannot both "win".
+   */
+  async commitVoiceOrderMutation<TResult>(
+    orderId: string,
+    context: string,
+    prepare: (
+      current: OwnedOrderRecord,
+      currentVersion: number,
+    ) => { order: OwnedOrderRecord; result: TResult },
+  ): Promise<TResult> {
+    const repository = this.requireVoiceCapableRepository(context);
+    const { order, result } = await repository
+      .withTransaction(async (client) => {
+        const current = await repository.findOrderForUpdate(client, orderId);
+        if (!current) {
+          throw new ApiRequestError(
+            HttpStatus.NOT_FOUND,
+            "OWNED_ORDER_NOT_FOUND",
+            `Order ${orderId} was not found.`,
+            { orderId, context },
+          );
+        }
+        const prepared = prepare(current.order, current.aggregateVersion);
+        const aggregateVersion = await repository.updateOrderWithCas(
+          client,
+          prepared.order,
+          current.aggregateVersion,
+        );
+        return {
+          ...prepared,
+          order: { ...prepared.order, aggregateVersion },
+        };
+      })
+      .catch((error) => {
+        if (error instanceof OwnedOrderVersionConflictError) {
+          throw new ApiRequestError(
+            HttpStatus.CONFLICT,
+            "VOICE_ORDER_VERSION_CONFLICT",
+            error.message,
+            { orderId, context },
+          );
+        }
+        throw error;
+      });
+    this.applyAuthoritativeOrder(order);
+    return result;
+  }
+
+  private requireVoiceCapableRepository(context: string) {
+    if (!this.ownedMobilityRepository?.isEnabled()) {
+      throw new ApiRequestError(
+        HttpStatus.SERVICE_UNAVAILABLE,
+        "OWNED_MOBILITY_DB_REQUIRED",
+        `Voice order mutation "${context}" requires durable storage; DATABASE_URL is not configured.`,
+        { context },
+      );
     }
-    return Date.parse(persistedOrder.updatedAt) >=
-      Date.parse(localOrder.updatedAt)
-      ? persistedOrder
-      : localOrder;
+    return this.ownedMobilityRepository;
   }
 
   async approveTenantBookingApprovalRequest(
@@ -2116,7 +3377,7 @@ export class OwnedMobilityService
     );
   }
 
-  cancelTenantBooking(
+  async cancelTenantBooking(
     tenantId: string,
     bookingId: string,
     command: CancelOwnedOrderCommand,
@@ -2124,8 +3385,12 @@ export class OwnedMobilityService
   ) {
     this.assertNonBlank(tenantId, "tenantId");
     const order = this.requireBookingOrder(bookingId, tenantId);
-    this.cancelOwnedOrder(order.orderId, command, requestId);
-    return this.mapOrderToBooking(order);
+    const cancelled = await this.cancelOwnedOrder(
+      order.orderId,
+      command,
+      requestId,
+    );
+    return this.mapOrderToBooking(cancelled);
   }
 
   applyManualFareOverride(
@@ -2237,8 +3502,87 @@ export class OwnedMobilityService
     orderId: string,
     command: DispatchOrderCommand,
     requestId?: string,
-  ) {
+    idempotencyKeyHeader?: string,
+    options?: { required?: boolean },
+  ): MaybePromise<any> {
+    const resolvedKey =
+      idempotencyKeyHeader?.trim() ||
+      command.idempotencyKey?.trim() ||
+      undefined;
+
+    if (resolvedKey || options?.required) {
+      return this._executeDispatchOrderIdempotent(
+        orderId,
+        command,
+        resolvedKey,
+        requestId,
+        options,
+      );
+    }
+
+    return this._executeDispatchOrder(orderId, command, requestId);
+  }
+
+  private async _executeDispatchOrderIdempotent(
+    orderId: string,
+    command: DispatchOrderCommand,
+    resolvedKey?: string,
+    requestId?: string,
+    options?: { required?: boolean },
+  ): Promise<any> {
     const order = this.requireOrder(orderId);
+    const scope = `dispatch:order:${orderId}:assign`;
+    const idempotencyService = this.getIdempotencyService();
+
+    const result = await idempotencyService.execute<any>({
+      scope,
+      idempotencyKey: resolvedKey,
+      tenantId: order.tenantId,
+      actorId: null,
+      requestPath: `/owned-mobility/orders/${orderId}/dispatch`,
+      required: options?.required ?? false,
+      payload: {
+        ...command,
+        ...(command.idempotencyKey ? { idempotencyKey: resolvedKey } : {}),
+      },
+      execute: async () => {
+        const res = this._executeDispatchOrder(orderId, command, requestId);
+        return {
+          data: res,
+          statusCode: 200,
+        };
+      },
+    });
+
+    return result.data;
+  }
+
+  private _executeDispatchOrder(
+    orderId: string,
+    command: DispatchOrderCommand,
+    requestId?: string,
+  ) {
+    const prepared = this.prepareDispatchOrder(
+      this.cloneOrder(this.requireOrder(orderId)),
+      command,
+      requestId,
+    );
+    this.persistChanges(
+      {
+        ...prepared.changes,
+        orders: prepared.shouldPersistOrder ? prepared.changes.orders : [],
+      },
+      "dispatch_order",
+    );
+    return prepared.apply();
+  }
+
+  private prepareDispatchOrder(
+    order: OwnedOrderRecord,
+    command: DispatchOrderCommand,
+    requestId?: string,
+  ) {
+    const orderId = order.orderId;
     if (
       order.bookingId &&
       ["pending", "blocked", "rejected"].includes(order.approvalState)
@@ -2314,8 +3658,6 @@ export class OwnedMobilityService
       reasonCode: candidates.length > 0 ? null : exceptionHoldEval.reasonCode,
       createdAt: now,
     };
-    this.dispatchJobs = [dispatchJob, ...this.dispatchJobs];
-    this.dispatchAttempts = [dispatchAttempt, ...this.dispatchAttempts];
 
     const traceLogs: DispatchTraceLogRecord[] = [];
     let shouldPersistOrder = false;
@@ -2327,19 +3669,20 @@ export class OwnedMobilityService
         order.status = "redispatch_required";
         this.transitionReservationHold(order, "redispatch_queue");
         traceLogs.push(
-          this.appendTrace(orderId, "dispatch.failed", {
+          this.buildTraceLog(orderId, "dispatch.failed", {
             dispatchJobId: dispatchJob.dispatchJobId,
             reasonCode: exceptionHoldEval.reasonCode,
           }),
         );
         traceLogs.push(
-          this.appendTrace(orderId, "queue.entry.created", {
+          this.buildTraceLog(orderId, "queue.entry.created", {
             dispatchJobId: dispatchJob.dispatchJobId,
             queueType: "redispatch",
             reasonCode: exceptionHoldEval.reasonCode,
           }),
         );
       } else if (isReservation) {
+        shouldPersistOrder = true;
         order.status = "exception_hold";
         this.transitionReservationHold(order, "exception_hold");
         order.exceptionHold = this.createExceptionHoldRecord(
@@ -2354,13 +3697,13 @@ export class OwnedMobilityService
           },
         );
         traceLogs.push(
-          this.appendTrace(orderId, "dispatch.failed", {
+          this.buildTraceLog(orderId, "dispatch.failed", {
             dispatchJobId: dispatchJob.dispatchJobId,
             reasonCode: exceptionHoldEval.reasonCode,
           }),
         );
         traceLogs.push(
-          this.appendTrace(orderId, "order.exception_hold", {
+          this.buildTraceLog(orderId, "order.exception_hold", {
             dispatchJobId: dispatchJob.dispatchJobId,
             reasonCode: exceptionHoldEval.reasonCode,
             exceptionHoldCriteria: {
@@ -2387,7 +3730,7 @@ export class OwnedMobilityService
             resolvedAt: null,
           };
           traceLogs.push(
-            this.appendTrace(orderId, "dispatch.no_supply_delayed", {
+            this.buildTraceLog(orderId, "dispatch.no_supply_delayed", {
               dispatchJobId: dispatchJob.dispatchJobId,
               reasonCode: exceptionHoldEval.reasonCode,
               escalationAction,
@@ -2409,7 +3752,7 @@ export class OwnedMobilityService
             resolvedAt: null,
           };
           traceLogs.push(
-            this.appendTrace(orderId, "dispatch.no_supply_escalated", {
+            this.buildTraceLog(orderId, "dispatch.no_supply_escalated", {
               dispatchJobId: dispatchJob.dispatchJobId,
               reasonCode: exceptionHoldEval.reasonCode,
               escalationAction,
@@ -2419,7 +3762,7 @@ export class OwnedMobilityService
         } else {
           order.status = "dispatch_failed";
           traceLogs.push(
-            this.appendTrace(orderId, "dispatch.failed", {
+            this.buildTraceLog(orderId, "dispatch.failed", {
               dispatchJobId: dispatchJob.dispatchJobId,
               reasonCode: exceptionHoldEval.reasonCode,
             }),
@@ -2428,19 +3771,12 @@ export class OwnedMobilityService
         order.dispatchAttemptCount += 1;
         order.lastDispatchFailureReason = exceptionHoldEval.reasonCode;
       }
-
-      if (isReservation) {
-        this.recordReservationEscalationNotifications(
-          order,
-          dispatchJob.dispatchJobId,
-        );
-      }
     } else if (isReservation) {
       shouldPersistOrder = true;
       order.status = "preassigned";
       order.updatedAt = now;
       traceLogs.push(
-        this.appendTrace(orderId, "reservation.hold.created", {
+        this.buildTraceLog(orderId, "reservation.hold.created", {
           dispatchJobId: dispatchJob.dispatchJobId,
           reservationHoldId: order.reservationHoldId,
           candidateCount: candidates.length,
@@ -2449,48 +3785,61 @@ export class OwnedMobilityService
       );
     } else {
       traceLogs.push(
-        this.appendTrace(orderId, "dispatch.matching", {
+        this.buildTraceLog(orderId, "dispatch.matching", {
           dispatchJobId: dispatchJob.dispatchJobId,
           candidateCount: candidates.length,
         }),
       );
     }
 
-    this.recordAudit(
-      {
-        actorId: null,
-        actorType: "system",
-        tenantId: null,
-        moduleName: "dispatch",
-        actionName: "dispatch_order",
-        resourceType: "dispatch_job",
-        resourceId: dispatchJob.dispatchJobId,
-        newValuesSummary: {
-          orderId,
-          status: dispatchJob.status,
-          candidateCount: candidates.length,
-        },
-      },
-      requestId,
-    );
-    this.persistChanges(
-      {
-        ...(shouldPersistOrder ? { orders: [order] } : {}),
-        dispatchJobs: [dispatchJob],
-        dispatchAttempts: [dispatchAttempt],
-        dispatchTraceLogs: traceLogs,
-      },
-      "dispatch_order",
-    );
-    this.opsDispatchEventsService?.publishDispatchJobUpdated(
-      orderId,
-      dispatchJob,
-      requestId,
-    );
-
+    const changes = {
+      orders: [order],
+      dispatchJobs: [dispatchJob],
+      dispatchAttempts: [dispatchAttempt],
+      dispatchTraceLogs: traceLogs,
+    };
     return {
-      dispatchJobId: dispatchJob.dispatchJobId,
-      status: dispatchJob.status,
+      changes,
+      shouldPersistOrder,
+      apply: () => {
+        this.applyAuthoritativeOrder(order);
+        this.dispatchJobs = [dispatchJob, ...this.dispatchJobs];
+        this.dispatchAttempts = [dispatchAttempt, ...this.dispatchAttempts];
+        this.dispatchTraceLogs = [...traceLogs, ...this.dispatchTraceLogs];
+        if (isReservation && candidates.length === 0) {
+          this.recordReservationEscalationNotifications(
+            order,
+            dispatchJob.dispatchJobId,
+          );
+        }
+        this.recordAudit(
+          {
+            actorId: null,
+            actorType: "system",
+            tenantId: null,
+            moduleName: "dispatch",
+            actionName: "dispatch_order",
+            resourceType: "dispatch_job",
+            resourceId: dispatchJob.dispatchJobId,
+            newValuesSummary: {
+              orderId,
+              status: dispatchJob.status,
+              candidateCount: candidates.length,
+            },
+          },
+          requestId,
+        );
+        this.opsDispatchEventsService?.publishDispatchJobUpdated(
+          orderId,
+          dispatchJob,
+          requestId,
+        );
+
+        return {
+          dispatchJobId: dispatchJob.dispatchJobId,
+          status: dispatchJob.status,
+        };
+      },
     };
   }
 
@@ -2498,13 +3847,79 @@ export class OwnedMobilityService
     orderId: string,
     command: RedispatchOrderCommand,
     requestId?: string,
-  ) {
+    idempotencyKeyHeader?: string,
+    options?: { required?: boolean },
+  ): MaybePromise<any> {
+    const resolvedKey =
+      idempotencyKeyHeader?.trim() ||
+      command.idempotencyKey?.trim() ||
+      undefined;
+
+    if (resolvedKey || options?.required) {
+      return this._executeRedispatchOrderIdempotent(
+        orderId,
+        command,
+        resolvedKey,
+        requestId,
+        options,
+      );
+    }
+
+    return this._executeRedispatchOrder(orderId, command, requestId);
+  }
+
+  private async _executeRedispatchOrderIdempotent(
+    orderId: string,
+    command: RedispatchOrderCommand,
+    resolvedKey?: string,
+    requestId?: string,
+    options?: { required?: boolean },
+  ): Promise<any> {
+    const order = this.requireOrder(orderId);
+    const scope = `dispatch:order:${orderId}:assign`;
+    const idempotencyService = this.getIdempotencyService();
+
+    const result = await idempotencyService.execute<any>({
+      scope,
+      idempotencyKey: resolvedKey,
+      tenantId: order.tenantId,
+      actorId: null,
+      requestPath: `/owned-mobility/orders/${orderId}/redispatch`,
+      required: options?.required ?? false,
+      payload: {
+        ...command,
+        ...(command.idempotencyKey ? { idempotencyKey: resolvedKey } : {}),
+      },
+      execute: async () => {
+        const res = await this._executeRedispatchOrder(
+          orderId,
+          command,
+          requestId,
+        );
+        return {
+          data: res,
+          statusCode: 200,
+        };
+      },
+    });
+
+    return result.data;
+  }
+
+  private _executeRedispatchOrder(
+    orderId: string,
+    command: RedispatchOrderCommand,
+    requestId?: string,
+  ): MaybePromise<any> {
     if (!command.reasonCode?.trim()) {
       throw new ApiRequestError(
         HttpStatus.BAD_REQUEST,
         "REDISPATCH_REASON_REQUIRED",
         "Redispatch reason is required.",
       );
+    }
+    if (this.ownedMobilityRepository?.isEnabled()) {
+      return this.redispatchOrderDurably(orderId, command, requestId);
     }
     const order = this.requireOrder(orderId);
     if (
@@ -2549,6 +3964,7 @@ export class OwnedMobilityService
     }
 
     const now = new Date().toISOString();
+
     order.status = "redispatch_required";
     order.dispatchAttemptCount += 1;
     order.lastDispatchFailureReason = command.reasonCode;
@@ -2588,6 +4004,7 @@ export class OwnedMobilityService
       },
       "redispatch_order",
     );
+
     this.recordAudit(
       {
         actorId: command.operatorId ?? null,
@@ -2616,6 +4033,146 @@ export class OwnedMobilityService
     }
 
     return this.dispatchOrder(orderId, { mode: "auto" }, requestId);
+  }
+
+  private async redispatchOrderDurably(
+    orderId: string,
+    command: RedispatchOrderCommand,
+    requestId?: string,
+  ) {
+    const repository = this.ownedMobilityRepository!;
+    await Promise.all([...this.pendingWorkflowWrites]);
+    const committed = await repository.withTransaction(async (tx) => {
+      // Share cancellation's assignment -> task -> jobs -> order locks and
+      // discovery fence. No cached workflow may revive a terminal order.
+      const current = await repository.loadOrderCancellationForUpdate(
+        tx,
+        orderId,
+      );
+      const order = this.cloneOrder(current.order);
+      if (
+        order.status === "exception_hold" ||
+        order.reservationHoldStatus === "exception_hold"
+      ) {
+        throw new ApiRequestError(
+          HttpStatus.CONFLICT,
+          "EXCEPTION_HOLD_REQUIRES_RESOLUTION",
+          "Exception-hold orders require resolution before redispatch.",
+        );
+      }
+      if (["cancelled", "completed"].includes(order.status)) {
+        throw new ApiRequestError(
+          HttpStatus.CONFLICT,
+          "ORDER_NOT_READY_FOR_DISPATCH",
+          "Order cannot be redispatched.",
+        );
+      }
+      if (
+        command.expectedAssignmentVersion != null &&
+        current.assignmentVersion > command.expectedAssignmentVersion
+      ) {
+        throw new ApiRequestError(
+          HttpStatus.CONFLICT,
+          "STALE_REDISPATCH_EVENT",
+          "The redispatch request is stale.",
+        );
+      }
+      const now = new Date().toISOString();
+      const closed = current.assignment
+        ? await this.closeSupersededDispatchAssignment(
+            tx,
+            current.assignment.assignmentId,
+            now,
+          )
+        : null;
+      if (current.assignment && !closed) {
+        throw new ApiRequestError(
+          HttpStatus.CONFLICT,
+          "REDISPATCH_ASSIGNMENT_ALREADY_CLOSED",
+          "Assignment state requires reconciliation.",
+        );
+      }
+      order.status = "redispatch_required";
+      order.dispatchAttemptCount += 1;
+      order.lastDispatchFailureReason = command.reasonCode;
+      order.updatedAt = now;
+      const prepared = this.prepareDispatchOrder(
+        order,
+        { mode: "auto" },
+        requestId,
+      );
+      const closedJobs = current.dispatchJobs.map((job) => ({
+        ...job,
+        status: "closed" as const,
+        updatedAt: now,
+      }));
+      const trace = this.buildTraceLog(
+        orderId,
+        "dispatch.redispatch_required",
+        {
+          reasonCode: command.reasonCode,
+          reasonNote: command.reasonNote ?? null,
+          operatorId: command.operatorId ?? null,
+          escalationTarget: command.escalationTarget ?? null,
+          attemptCount: order.dispatchAttemptCount,
+        },
+      );
+      prepared.changes.dispatchTraceLogs.unshift(trace);
+      await repository.persistOrderWorkflow(tx, {
+        ...prepared.changes,
+        dispatchJobs: [...closedJobs, ...prepared.changes.dispatchJobs],
+      });
+      return { prepared, closed, closedJobs, order };
+    });
+    const { prepared, closed, closedJobs, order } = committed;
+    for (const job of closedJobs) {
+      this.dispatchJobs = [
+        job,
+        ...this.dispatchJobs.filter(
+          (item) => item.dispatchJobId !== job.dispatchJobId,
+        ),
+      ];
+    }
+    if (closed) {
+      this.dispatchAssignments = [
+        closed.assignment,
+        ...this.dispatchAssignments.filter(
+          (item) => item.assignmentId !== closed.assignment.assignmentId,
+        ),
+      ];
+      if (closed.task)
+        this.driverTasks = [
+          closed.task,
+          ...this.driverTasks.filter(
+            (item) => item.taskId !== closed.task!.taskId,
+          ),
+        ];
+    }
+    const result = prepared.apply();
+    this.recordAudit(
+      {
+        actorId: command.operatorId ?? null,
+        actorType: command.operatorId ? "ops_user" : "system",
+        tenantId: order.tenantId,
+        moduleName: "dispatch",
+        actionName: "redispatch_order",
+        resourceType: "order",
+        resourceId: orderId,
+        newValuesSummary: {
+          reasonCode: command.reasonCode,
+          status: order.status,
+          attemptCount: order.dispatchAttemptCount,
+        },
+      },
+      requestId,
+    );
+    if (closed?.task)
+      this.ownedMobilityTaskEventsService.publishTaskCancelled(
+        closed.task,
+        order,
+        requestId,
+      );
+    return result;
   }
 
   resolveExceptionHold(
@@ -3204,7 +4761,23 @@ export class OwnedMobilityService
   assignDispatch(
     command: AssignDispatchCommand,
     requestId?: string,
+    idempotencyKeyHeader?: string,
+    options?: { required?: boolean },
   ): MaybePromise<DispatchAssignmentResult> {
+    const resolvedKey =
+      idempotencyKeyHeader?.trim() ||
+      command.idempotencyKey?.trim() ||
+      undefined;
+
+    if (resolvedKey || options?.required) {
+      return this._executeAssignDispatchIdempotent(
+        command,
+        resolvedKey,
+        requestId,
+        options,
+      );
+    }
+
     const dispatchJob = this.requireDispatchJob(command.dispatchJobId);
     const order = this.requireOrder(dispatchJob.orderId);
 
@@ -3218,7 +4791,120 @@ export class OwnedMobilityService
     );
   }
 
+  private async _executeAssignDispatchIdempotent(
+    command: AssignDispatchCommand,
+    resolvedKey?: string,
+    requestId?: string,
+    options?: { required?: boolean },
+  ): Promise<DispatchAssignmentResult> {
+    const dispatchJob = this.requireDispatchJob(command.dispatchJobId);
+    const order = this.requireOrder(dispatchJob.orderId);
+    const scope = `dispatch:order:${order.orderId}:assign`;
+    const idempotencyService = this.getIdempotencyService();
+
+    const result = await idempotencyService.execute<DispatchAssignmentResult>({
+      scope,
+      idempotencyKey: resolvedKey,
+      tenantId: order.tenantId,
+      actorId: null,
+      requestPath: "/owned-mobility/dispatch/assign",
+      required: options?.required ?? false,
+      payload: {
+        ...command,
+        ...(command.idempotencyKey ? { idempotencyKey: resolvedKey } : {}),
+      },
+      execute: async () => {
+        const res = await this.createDispatchAssignment(
+          dispatchJob,
+          order,
+          command.vehicleId,
+          command.driverId,
+          command.sandboxDispatchSnapshot ?? null,
+          requestId,
+        );
+        return {
+          data: res,
+          statusCode: 200,
+        };
+      },
+    });
+
+    return result.data;
+  }
+
   reassignDispatch(
+    command: ReassignDispatchCommand,
+    requestId?: string,
+    idempotencyKeyHeader?: string,
+    options?: { required?: boolean },
+  ): MaybePromise<DispatchAssignmentResult> {
+    const resolvedKey =
+      idempotencyKeyHeader?.trim() ||
+      command.idempotencyKey?.trim() ||
+      undefined;
+
+    if (resolvedKey || options?.required) {
+      return this._executeReassignDispatchIdempotent(
+        command,
+        resolvedKey,
+        requestId,
+        options,
+      );
+    }
+
+    const dispatchJob = this.requireDispatchJob(command.dispatchJobId);
+    const order = this.requireOrder(dispatchJob.orderId);
+
+    return this._executeReassignDispatch(
+      dispatchJob,
+      order,
+      command,
+      requestId,
+    );
+  }
+
+  private async _executeReassignDispatchIdempotent(
+    command: ReassignDispatchCommand,
+    resolvedKey?: string,
+    requestId?: string,
+    options?: { required?: boolean },
+  ): Promise<DispatchAssignmentResult> {
+    const dispatchJob = this.requireDispatchJob(command.dispatchJobId);
+    const order = this.requireOrder(dispatchJob.orderId);
+    const scope = `dispatch:order:${order.orderId}:assign`;
+    const idempotencyService = this.getIdempotencyService();
+
+    const result = await idempotencyService.execute<DispatchAssignmentResult>({
+      scope,
+      idempotencyKey: resolvedKey,
+      tenantId: order.tenantId,
+      actorId: null,
+      requestPath: "/owned-mobility/dispatch/reassign",
+      required: options?.required ?? false,
+      payload: {
+        ...command,
+        ...(command.idempotencyKey ? { idempotencyKey: resolvedKey } : {}),
+      },
+      execute: async () => {
+        const res = await this._executeReassignDispatch(
+          dispatchJob,
+          order,
+          command,
+          requestId,
+        );
+        return {
+          data: res,
+          statusCode: 200,
+        };
+      },
+    });
+
+    return result.data;
+  }
+
+  private _executeReassignDispatch(
+    dispatchJob: DispatchJobRecord,
+    order: OwnedOrderRecord,
     command: ReassignDispatchCommand,
     requestId?: string,
   ): MaybePromise<DispatchAssignmentResult> {
@@ -3229,9 +4915,6 @@ export class OwnedMobilityService
         "Reassign reason is required.",
       );
     }
-
-    const dispatchJob = this.requireDispatchJob(command.dispatchJobId);
-    const order = this.requireOrder(dispatchJob.orderId);
 
     const activeAssignment = this.dispatchAssignments.find(
       (assignment) =>
@@ -3290,6 +4973,7 @@ export class OwnedMobilityService
         requestId,
         {
           dispatchAttemptSequence: reassignAttemptSequence + 1,
+          previousAssignmentId: activeAssignment.assignmentId,
         },
       ),
       (result) => {
@@ -3349,7 +5033,105 @@ export class OwnedMobilityService
     );
   }
 
-  private createDispatchAssignment(
+  /** SD §7.6: shared completion/rejection/cancellation/replacement fence. */
+  private isReconciledAssignmentTask(
+    assignment: DispatchAssignmentRecord,
+    task: DriverTaskRecord | null,
+  ): task is DriverTaskRecord {
+    return !!(
+      task &&
+      ["assigned", "accepted"].includes(assignment.status) &&
+      task.taskId === assignment.taskId &&
+      task.assignmentId === assignment.assignmentId &&
+      task.orderId === assignment.orderId &&
+      task.dispatchJobId === assignment.dispatchJobId &&
+      task.driverId === assignment.driverId &&
+      task.vehicleId === assignment.vehicleId &&
+      DRIVER_TASK_TRANSITIONS[task.status]?.includes("cancelled") &&
+      (assignment.status === "assigned") ===
+        (task.status === "pending_acceptance")
+    );
+  }
+
+  /**
+   * SD §7.6: atomically close one dispatch assignment (and its driver task,
+   * if still open) that a reassign/redispatch is superseding -- lock, verify
+   * it is still in an open (`assigned`/`accepted`) state, persist the
+   * cancellation, and release its shared reservation, all inside the
+   * caller's transaction. Returns `null` if the assignment was already
+   * terminal by the time this ran (raced closed by an accept, a driver
+   * reject/cancel, or a confirmed timeout); callers must treat that as a
+   * stale-state conflict rather than silently proceeding, since it means
+   * whatever in-memory snapshot triggered this close no longer matches the
+   * authoritative row.
+   */
+  private async closeSupersededDispatchAssignment(
+    tx: OwnedMobilityQueryExecutor,
+    assignmentId: string,
+    now: string,
+    allowedStatuses: readonly DispatchAssignmentRecord["status"][] = [
+      "assigned",
+      "accepted",
+    ],
+    requireExpiredPendingOffer = false,
+  ): Promise<{
+    assignment: DispatchAssignmentRecord;
+    task: DriverTaskRecord | null;
+  } | null> {
+    const locked =
+      await this.ownedMobilityRepository!.lockDispatchAssignmentForUpdate(
+        tx,
+        assignmentId,
+      );
+    if (!locked || !allowedStatuses.includes(locked.status)) {
+      return null;
+    }
+    const closedAssignment: DispatchAssignmentRecord = {
+      ...locked,
+      status: "cancelled",
+      updatedAt: now,
+    };
+    // An active assignment alone cannot authorize releasing shared supply.
+    // Missing or inconsistent task state must retain capacity for reconciliation.
+    if (!locked.taskId) {
+      return null;
+    }
+    const lockedTask =
+      await this.ownedMobilityRepository!.lockDriverTaskForUpdate(
+        tx,
+        locked.taskId,
+      );
+    if (!this.isReconciledAssignmentTask(locked, lockedTask)) {
+      return null;
+    }
+    const closedTask: DriverTaskRecord = {
+      ...lockedTask,
+      status: "cancelled",
+      completedAt: now,
+    };
+    if (requireExpiredPendingOffer) {
+      const deadline = Date.parse(locked.acceptanceDeadline ?? "");
+      // Unknown deadlines and inconsistent tasks retain capacity for reconciliation.
+      if (
+        !Number.isFinite(deadline) ||
+        Date.now() < deadline ||
+        lockedTask.status !== "pending_acceptance"
+      ) {
+        return null;
+      }
+    }
+    await this.ownedMobilityRepository!.persistOrderWorkflow(tx, {
+      dispatchAssignments: [closedAssignment],
+      ...(closedTask ? { driverTasks: [closedTask] } : {}),
+    });
+    await this.ownedMobilityRepository!.releaseDispatchResourceReservations(
+      assignmentId,
+      tx,
+    );
+    return { assignment: closedAssignment, task: closedTask };
+  }
+
+  createDispatchAssignment(
     dispatchJob: DispatchJobRecord,
     order: OwnedOrderRecord,
     vehicleId: string,
@@ -3359,8 +5141,43 @@ export class OwnedMobilityService
     options?: CreateDispatchAssignmentOptions,
   ): MaybePromise<DispatchAssignmentResult> {
     if (this.ownedMobilityRepository?.isEnabled()) {
-      return this.ownedMobilityRepository
-        .withTransaction(async (tx) => {
+      // Legacy creation/matching entry points return before their writes finish.
+      // Drain those writes before taking locks so they cannot race this snapshot.
+      return Promise.all([...this.pendingWorkflowWrites]).then(() =>
+        this.ownedMobilityRepository!.withTransaction(async (tx) => {
+          // All assignment writers take assignment -> task -> job -> order
+          // before any upsert, matching cancellation and completion.
+          const current =
+            await this.ownedMobilityRepository!.loadOrderCancellationForUpdate(
+              tx,
+              order.orderId,
+            );
+          if (
+            (current.assignment?.assignmentId ?? null) !==
+            (options?.previousAssignmentId ?? null)
+          ) {
+            throw new ApiRequestError(
+              HttpStatus.CONFLICT,
+              "SUPERSEDED_ASSIGNMENT_ALREADY_CLOSED",
+              "The active assignment changed before dispatch acquired its locks.",
+              { orderId: order.orderId },
+            );
+          }
+          const currentJob = current.dispatchJobs.find(
+            (job) => job.dispatchJobId === dispatchJob.dispatchJobId,
+          );
+          if (
+            !currentJob ||
+            ["cancelled", "completed"].includes(current.order.status)
+          ) {
+            throw new ApiRequestError(
+              HttpStatus.CONFLICT,
+              "DISPATCH_JOB_NOT_ASSIGNABLE",
+              "The dispatch job is no longer active.",
+            );
+          }
+          order = current.order;
+          dispatchJob = currentJob;
           if (
             order.runtimeProfileCode === "multi_taxi_direct" &&
             order.operatingAuthorizationId
@@ -3400,7 +5217,7 @@ export class OwnedMobilityService
             options,
             ratingSummary,
           );
-          this.assertAssignmentEligibilityRecheck(
+          await this.assertAssignmentEligibilityRecheck(
             bundle.order,
             dispatchJob.dispatchJobId,
             vehicleId,
@@ -3414,6 +5231,12 @@ export class OwnedMobilityService
             sandboxDispatchSnapshot,
             requestId,
           );
+          // SD §7.6: the new assignment row must exist before it can be
+          // referenced by `dispatch_resource_reservations.assignment_id`,
+          // which is an immediate (non-deferrable) FK against
+          // `phase1_dispatch_assignments` (V0087) -- reserving with the new,
+          // not-yet-inserted assignment id first would always roll back with
+          // a 23503. Insert first, then reserve, in the same transaction.
           await this.ownedMobilityRepository!.persistOrderWorkflow(tx, {
             orders: [this.cloneOrder(bundle.order)],
             dispatchJobs: [{ ...bundle.dispatchJob }],
@@ -3445,45 +5268,155 @@ export class OwnedMobilityService
                 }
               : {}),
           });
+          if (options?.previousAssignmentId) {
+            // SD §7.6: atomically close the superseded assignment (and its
+            // driver task) and release its reservation in the same
+            // transaction that takes the new one, so the old occupation
+            // never overlaps or gaps with the new one, and a crash between
+            // the two writes can never happen. A `null` result means the
+            // old assignment was already closed by something else (accept,
+            // reject/cancel, or a confirmed timeout) since the caller last
+            // observed it -- that snapshot is stale, so this reassign must
+            // not proceed as if it still owned that offer.
+            const closedPrevious = await this.closeSupersededDispatchAssignment(
+              tx,
+              options.previousAssignmentId,
+              new Date().toISOString(),
+            );
+            if (!closedPrevious) {
+              throw new ApiRequestError(
+                HttpStatus.CONFLICT,
+                "SUPERSEDED_ASSIGNMENT_ALREADY_CLOSED",
+                "The assignment being replaced was already closed by another operation.",
+                {
+                  assignmentId: options.previousAssignmentId,
+                },
+              );
+            }
+          }
+          try {
+            await this.ownedMobilityRepository!.reserveDispatchResources(tx, {
+              orderId: bundle.order.orderId,
+              assignmentId: bundle.assignment.assignmentId,
+              driverId,
+              vehicleId,
+              expiresAt: null,
+            });
+          } catch (error) {
+            if (
+              error instanceof DispatchResourceReservationConflictError ||
+              (error as { name?: string })?.name ===
+                "DispatchResourceReservationConflictError"
+            ) {
+              const conflict =
+                error as DispatchResourceReservationConflictError;
+              throw new ApiRequestError(
+                HttpStatus.CONFLICT,
+                "DISPATCH_RESOURCE_RESERVATION_CONFLICT",
+                `The ${conflict.resourceType} is already held or occupied by another dispatch assignment.`,
+                {
+                  resourceType: conflict.resourceType,
+                  resourceId: conflict.resourceId,
+                },
+              );
+            }
+            throw error;
+          }
           return bundle;
-        })
-        .then(async (bundle) => {
+        }).then(async (bundle) => {
           await this.resolveSuccessfulFareQuoteAnomalies(bundle);
           return this.applyDispatchAssignmentBundle(bundle, requestId, false);
-        });
+        }),
+      );
     }
 
-    this.assertAssignmentEligibilityRecheck(
+    const eligibilityRecheckResult = this.assertAssignmentEligibilityRecheck(
       order,
       dispatchJob.dispatchJobId,
       vehicleId,
       driverId,
     );
-    const sandboxGateResult = this.assertSandboxDispatchGate(
-      order,
-      dispatchJob.dispatchJobId,
-      vehicleId,
-      driverId,
-      sandboxDispatchSnapshot,
-      requestId,
-    );
-    return this.afterMaybePromise(sandboxGateResult, () =>
-      this.afterMaybePromise(
-        this.buildDispatchAssignmentBundle(
-          dispatchJob,
-          order,
-          vehicleId,
-          driverId,
-          sandboxDispatchSnapshot,
-          options,
-        ),
-        (bundle) =>
-          this.afterMaybePromise(
-            this.resolveSuccessfulFareQuoteAnomalies(bundle),
-            () => this.applyDispatchAssignmentBundle(bundle, requestId),
+    return this.afterMaybePromise(eligibilityRecheckResult, () => {
+      const sandboxGateResult = this.assertSandboxDispatchGate(
+        order,
+        dispatchJob.dispatchJobId,
+        vehicleId,
+        driverId,
+        sandboxDispatchSnapshot,
+        requestId,
+      );
+      return this.afterMaybePromise(sandboxGateResult, () =>
+        this.afterMaybePromise(
+          this.buildDispatchAssignmentBundle(
+            dispatchJob,
+            order,
+            vehicleId,
+            driverId,
+            sandboxDispatchSnapshot,
+            options,
           ),
-      ),
+          (bundle) =>
+            this.afterMaybePromise(
+              this.resolveSuccessfulFareQuoteAnomalies(bundle),
+              () => this.applyDispatchAssignmentBundle(bundle, requestId),
+            ),
+        ),
+      );
+    });
+  }
+
+  /**
+   * SD §7.6: Losing-transaction rollback in non-DB mode.
+   * Reverts mutations created by applyDispatchAssignmentBundle when an assignment fails or conflicts.
+   */
+  rollbackDispatchAssignmentInMem(
+    assignmentId: string,
+    previousOrderSnapshot?: OwnedOrderRecord,
+    previousJobSnapshot?: DispatchJobRecord,
+  ): void {
+    const assignment = this.dispatchAssignments.find(
+      (a) => a.assignmentId === assignmentId,
     );
+    if (!assignment) {
+      return;
+    }
+    this.dispatchAssignments = this.dispatchAssignments.filter(
+      (a) => a.assignmentId !== assignmentId,
+    );
+    this.driverTasks = this.driverTasks.filter(
+      (t) => t.assignmentId !== assignmentId,
+    );
+    this.dispatchTraceLogs = this.dispatchTraceLogs.filter(
+      (log) =>
+        (log.details as Record<string, unknown> | undefined)?.assignmentId !==
+        assignmentId,
+    );
+    this.passengerDisclosureSnapshots =
+      this.passengerDisclosureSnapshots.filter(
+        (snapshot) => snapshot.assignmentId !== assignmentId,
+      );
+    this.consumerNotificationOutbox = this.consumerNotificationOutbox.filter(
+      (record) =>
+        (record.payload as Record<string, unknown>)?.assignmentId !==
+        assignmentId,
+    );
+
+    if (previousOrderSnapshot) {
+      this.orders = [
+        this.cloneOrder(previousOrderSnapshot),
+        ...this.orders.filter(
+          (o) => o.orderId !== previousOrderSnapshot.orderId,
+        ),
+      ];
+    }
+    if (previousJobSnapshot) {
+      this.dispatchJobs = [
+        { ...previousJobSnapshot },
+        ...this.dispatchJobs.filter(
+          (j) => j.dispatchJobId !== previousJobSnapshot.dispatchJobId,
+        ),
+      ];
+    }
   }
 
   async cancelOwnedOrder(
@@ -3491,63 +5424,202 @@ export class OwnedMobilityService
     command: CancelOwnedOrderCommand,
     requestId?: string,
   ) {
-    const order = this.requireOrder(orderId);
-    this.assertOrderCancelable(order);
-
     const now = new Date().toISOString();
-    order.status = "cancelled";
-    order.cancelledAt = now;
-    order.cancelReason = this.normalizeNullableText(command.reason);
-    order.updatedAt = now;
-
-    const dispatchJob = this.findLatestOpenDispatchJob(orderId);
-    const assignment = this.findLatestActiveAssignment(orderId);
-    const task = assignment
-      ? this.findTaskByAssignmentId(assignment.assignmentId)
-      : null;
-
-    if (dispatchJob) {
-      dispatchJob.status = "closed";
-      dispatchJob.updatedAt = now;
-    }
-    if (assignment) {
-      assignment.status = "cancelled";
-      assignment.updatedAt = now;
-    }
-    if (task) {
-      task.status = "cancelled";
-    }
-
-    const traceLogs: DispatchTraceLogRecord[] = [];
-    if (
-      order.dispatchSemantics === "reservation" &&
-      ["requested", "redispatch_queue"].includes(order.reservationHoldStatus)
-    ) {
-      this.transitionReservationHold(order, "released");
-      order.reservationHoldExpiresAt = now;
+    const prepare = (bundle: {
+      order: OwnedOrderRecord;
+      assignment: DispatchAssignmentRecord | null | undefined;
+      task: DriverTaskRecord | null;
+      dispatchJobs: DispatchJobRecord[];
+    }) => {
+      const order = this.cloneOrder(bundle.order);
+      this.assertOrderCancelable(order);
+      const assignment = bundle.assignment ? { ...bundle.assignment } : null;
+      const task = bundle.task ? this.cloneTask(bundle.task) : null;
+      // The persisted branch prepares from assignment/task rows locked in the
+      // same transaction as cancellation and release. Unknown relationships or
+      // incoherent states must retain both resources for reconciliation.
+      if (
+        assignment &&
+        (assignment.orderId !== order.orderId ||
+          !this.isReconciledAssignmentTask(assignment, task))
+      ) {
+        throw new ApiRequestError(
+          HttpStatus.CONFLICT,
+          "REDISPATCH_ASSIGNMENT_ALREADY_CLOSED",
+          "Active assignment task requires reconciliation",
+        );
+      }
+      if (task) this.assertDriverTaskTransition(task, "cancelled");
+      order.status = "cancelled";
+      order.cancelledAt = now;
+      order.cancelReason = this.normalizeNullableText(command.reason);
+      order.updatedAt = now;
+      if (assignment) {
+        assignment.status = "cancelled";
+        assignment.updatedAt = now;
+      }
+      if (task) task.status = "cancelled";
+      const dispatchJobs = bundle.dispatchJobs.map((job) => ({
+        ...job,
+        status: "closed" as const,
+        updatedAt: now,
+      }));
+      const traceLogs: DispatchTraceLogRecord[] = [];
+      if (
+        order.dispatchSemantics === "reservation" &&
+        ["requested", "redispatch_queue"].includes(order.reservationHoldStatus)
+      ) {
+        this.transitionReservationHold(order, "released");
+        order.reservationHoldExpiresAt = now;
+        traceLogs.push(
+          this.buildTraceLog(orderId, "reservation.hold.released", {
+            reservationHoldId: order.reservationHoldId,
+            reason: "order_cancelled",
+          }),
+        );
+      }
       traceLogs.push(
-        this.appendTrace(order.orderId, "reservation.hold.released", {
-          reservationHoldId: order.reservationHoldId,
-          reason: "order_cancelled",
+        this.buildTraceLog(orderId, "order.cancelled", {
+          reason: order.cancelReason,
         }),
       );
+      return { order, assignment, task, dispatchJobs, traceLogs };
+    };
+    const repository = this.ownedMobilityRepository;
+    if (repository?.isEnabled()) {
+      // Creation/matching can return while their workflow snapshots are still
+      // being persisted. Drain them before reading and locking durable state,
+      // so cancellation sees the order and no preceding upsert resurrects it.
+      await Promise.all([...this.pendingWorkflowWrites]);
     }
-    traceLogs.push(
-      this.appendTrace(order.orderId, "order.cancelled", {
-        reason: order.cancelReason,
-      }),
-    );
-
-    this.persistChanges(
-      {
-        orders: [order],
-        ...(dispatchJob ? { dispatchJobs: [dispatchJob] } : {}),
-        ...(assignment ? { dispatchAssignments: [assignment] } : {}),
-        ...(task ? { driverTasks: [task] } : {}),
-        dispatchTraceLogs: traceLogs,
-      },
-      "cancel_owned_order",
-    );
+    const committed = repository?.isEnabled()
+      ? await repository.withTransaction(async (tx) => {
+          const prepared = prepare(
+            await repository.loadOrderCancellationForUpdate(tx, orderId),
+          );
+          await repository.persistOrderWorkflow(tx, {
+            orders: [prepared.order],
+            dispatchJobs: prepared.dispatchJobs,
+            dispatchAssignments: prepared.assignment
+              ? [prepared.assignment]
+              : [],
+            driverTasks: prepared.task ? [prepared.task] : [],
+            dispatchTraceLogs: prepared.traceLogs,
+          });
+          if (prepared.assignment) {
+            await repository.releaseDispatchResourceReservations(
+              prepared.assignment.assignmentId,
+              tx,
+            );
+          }
+          let quotaRelease: any = null;
+          if (
+            this.tenantPartnerService &&
+            prepared.order.tenantId &&
+            prepared.order.bookingId
+          ) {
+            if (
+              typeof this.tenantPartnerService.prepareTenantQuotaRelease ===
+              "function"
+            ) {
+              quotaRelease =
+                await this.tenantPartnerService.prepareTenantQuotaRelease(tx, {
+                  tenantId: prepared.order.tenantId,
+                  bookingId: prepared.order.bookingId,
+                });
+            } else if (typeof prepareTenantQuotaRelease === "function") {
+              quotaRelease = await prepareTenantQuotaRelease(
+                this.tenantPartnerService,
+                tx,
+                {
+                  tenantId: prepared.order.tenantId,
+                  bookingId: prepared.order.bookingId,
+                },
+              );
+            }
+          }
+          return { ...prepared, quotaRelease };
+        })
+      : {
+          ...prepare({
+            order: this.requireOrder(orderId),
+            assignment: this.findLatestActiveAssignment(orderId),
+            task: this.findLatestActiveAssignment(orderId)
+              ? this.findTaskByAssignmentId(
+                  this.findLatestActiveAssignment(orderId)!.assignmentId,
+                )
+              : null,
+            dispatchJobs: this.dispatchJobs.filter(
+              (job) => job.orderId === orderId && job.status !== "closed",
+            ),
+          }),
+          quotaRelease: null,
+        };
+    const { order, assignment, task, dispatchJobs, traceLogs } = committed;
+    if (
+      repository?.isEnabled() &&
+      committed.quotaRelease &&
+      this.tenantPartnerService
+    ) {
+      if (
+        typeof this.tenantPartnerService.applyCommittedQuotaRelease ===
+        "function"
+      ) {
+        this.tenantPartnerService.applyCommittedQuotaRelease(
+          committed.quotaRelease,
+        );
+      } else if (
+        typeof this.tenantPartnerService.applyCommittedQuotaConsumption ===
+        "function"
+      ) {
+        this.tenantPartnerService.applyCommittedQuotaConsumption(
+          committed.quotaRelease,
+        );
+      } else if (typeof applyCommittedQuotaRelease === "function") {
+        applyCommittedQuotaRelease(
+          this.tenantPartnerService,
+          committed.quotaRelease,
+        );
+      }
+    } else if (
+      !repository?.isEnabled() &&
+      this.tenantPartnerService &&
+      order.tenantId &&
+      order.bookingId
+    ) {
+      if (typeof this.tenantPartnerService.releaseTenantQuota === "function") {
+        await this.tenantPartnerService.releaseTenantQuota({
+          tenantId: order.tenantId,
+          bookingId: order.bookingId,
+        });
+      } else if (typeof releaseTenantQuota === "function") {
+        await releaseTenantQuota(this.tenantPartnerService, {
+          tenantId: order.tenantId,
+          bookingId: order.bookingId,
+        });
+      }
+    }
+    this.applyAuthoritativeOrder(order);
+    if (assignment)
+      this.dispatchAssignments = [
+        assignment,
+        ...this.dispatchAssignments.filter(
+          (item) => item.assignmentId !== assignment.assignmentId,
+        ),
+      ];
+    if (task)
+      this.driverTasks = [
+        task,
+        ...this.driverTasks.filter((item) => item.taskId !== task.taskId),
+      ];
+    for (const job of dispatchJobs)
+      this.dispatchJobs = [
+        job,
+        ...this.dispatchJobs.filter(
+          (item) => item.dispatchJobId !== job.dispatchJobId,
+        ),
+      ];
+    this.dispatchTraceLogs = [...traceLogs, ...this.dispatchTraceLogs];
     this.recordAudit(
       {
         actorId: null,
@@ -3933,6 +6005,20 @@ export class OwnedMobilityService
       dispatchJobs: this.dispatchJobs.map((job) => ({ ...job })),
       dispatchAssignments: this.dispatchAssignments.map((assignment) => ({
         ...assignment,
+        ...(assignment.bookingRequirements
+          ? {
+              bookingRequirements: structuredClone(
+                assignment.bookingRequirements,
+              ),
+            }
+          : {}),
+        ...(assignment.bookingQualification
+          ? {
+              bookingQualification: structuredClone(
+                assignment.bookingQualification,
+              ),
+            }
+          : {}),
       })),
       driverTasks: this.listDriverTasks(),
       dispatchTraceLogs: this.dispatchTraceLogs.map((traceLog) =>
@@ -3984,6 +6070,35 @@ export class OwnedMobilityService
     return clone;
   }
 
+  /**
+   * Refuses a task transition the lifecycle does not allow.
+   *
+   * Five of the eleven places that set `task.status` checked first and six did
+   * not, so the same rule held or did not depending on which endpoint the
+   * driver's phone happened to call.
+   */
+  private assertDriverTaskTransition(
+    task: { taskId: string; status: DriverTaskStatus },
+    next: DriverTaskStatus,
+  ) {
+    if (task.status === next) {
+      return;
+    }
+    if (!DRIVER_TASK_TRANSITIONS[task.status].includes(next)) {
+      throw new ApiRequestError(
+        HttpStatus.CONFLICT,
+        "DRIVER_TASK_TRANSITION_INVALID",
+        `A task that is ${task.status} cannot become ${next}.`,
+        {
+          taskId: task.taskId,
+          from: task.status,
+          to: next,
+          allowed: [...DRIVER_TASK_TRANSITIONS[task.status]],
+        },
+      );
+    }
+  }
+
   async acceptDriverTask(
     taskId: string,
     command: DriverAcceptTaskCommand,
@@ -3992,26 +6107,121 @@ export class OwnedMobilityService
     const task = this.requireTask(taskId);
     const assignment = this.requireAssignment(task.assignmentId);
     const order = this.requireOrder(task.orderId);
-    task.status = "accepted";
-    task.acceptedAt = command.acceptedAt;
-    assignment.status = "accepted";
-    assignment.acceptedAt = command.acceptedAt;
-    assignment.updatedAt = new Date().toISOString();
-    order.status = "driver_accepted";
-    order.updatedAt = assignment.updatedAt;
-    const traceLog = this.appendTrace(order.orderId, "driver.accepted", {
-      taskId,
-      assignmentId: assignment.assignmentId,
-    });
-    await this.persistChangesRequired(
-      {
-        orders: [order],
-        dispatchAssignments: [assignment],
-        driverTasks: [task],
-        dispatchTraceLogs: [traceLog],
-      },
-      "accept_driver_task",
-    );
+    const now = new Date().toISOString();
+
+    if (this.ownedMobilityRepository?.isEnabled()) {
+      // SD §7.6: accept must not blind-upsert the in-memory snapshot -- a
+      // concurrent timeout/reassign can have already closed this exact
+      // assignment (under `closeSupersededDispatchAssignment`'s lock) since
+      // this process last read it. Lock assignment then task, in the same
+      // fixed order `closeSupersededDispatchAssignment` uses, and re-check
+      // both against the authoritative DB row before committing the accept
+      // and occupying the reservation, all in one transaction.
+      const committed = await this.ownedMobilityRepository.withTransaction(
+        async (tx) => {
+          const lockedAssignment =
+            await this.ownedMobilityRepository!.lockDispatchAssignmentForUpdate(
+              tx,
+              assignment.assignmentId,
+            );
+          if (!lockedAssignment || lockedAssignment.status !== "assigned") {
+            throw new ApiRequestError(
+              HttpStatus.CONFLICT,
+              "ASSIGNMENT_NOT_AWAITING_ACCEPTANCE",
+              "This offer is no longer awaiting driver acceptance.",
+              {
+                assignmentId: assignment.assignmentId,
+                status: lockedAssignment?.status ?? null,
+              },
+            );
+          }
+          const lockedTask =
+            await this.ownedMobilityRepository!.lockDriverTaskForUpdate(
+              tx,
+              taskId,
+            );
+          if (!lockedTask) {
+            throw new ApiRequestError(
+              HttpStatus.NOT_FOUND,
+              "DRIVER_TASK_NOT_FOUND",
+              `Driver task ${taskId} was not found.`,
+              { taskId },
+            );
+          }
+          this.assertDriverTaskTransition(lockedTask, "accepted");
+
+          const updatedTask: DriverTaskRecord = {
+            ...lockedTask,
+            status: "accepted",
+            acceptedAt: command.acceptedAt,
+          };
+          const updatedAssignment: DispatchAssignmentRecord = {
+            ...lockedAssignment,
+            status: "accepted",
+            acceptedAt: command.acceptedAt,
+            updatedAt: now,
+          };
+          const updatedOrder: OwnedOrderRecord = {
+            ...order,
+            ...(order.bookingQualification
+              ? {
+                  bookingQualification: structuredClone(
+                    order.bookingQualification,
+                  ),
+                }
+              : {}),
+            status: "driver_accepted",
+            updatedAt: now,
+          };
+          const traceLog = this.appendTrace(order.orderId, "driver.accepted", {
+            taskId,
+            assignmentId: assignment.assignmentId,
+          });
+
+          await this.ownedMobilityRepository!.persistOrderWorkflow(tx, {
+            orders: [updatedOrder],
+            dispatchAssignments: [updatedAssignment],
+            driverTasks: [updatedTask],
+            dispatchTraceLogs: [traceLog],
+          });
+          // SD §7.6: "accepted 轉 occupied" -- the reservation stops being a
+          // soft hold once the driver actually accepts, atomically with the
+          // accept write.
+          await this.ownedMobilityRepository!.occupyDispatchResourceReservations(
+            assignment.assignmentId,
+            tx,
+          );
+
+          return { updatedTask, updatedAssignment, updatedOrder };
+        },
+      );
+
+      Object.assign(task, committed.updatedTask);
+      Object.assign(assignment, committed.updatedAssignment);
+      Object.assign(order, committed.updatedOrder);
+    } else {
+      this.assertDriverTaskTransition(task, "accepted");
+      task.status = "accepted";
+      task.acceptedAt = command.acceptedAt;
+      assignment.status = "accepted";
+      assignment.acceptedAt = command.acceptedAt;
+      assignment.updatedAt = now;
+      order.status = "driver_accepted";
+      order.updatedAt = now;
+      const traceLog = this.appendTrace(order.orderId, "driver.accepted", {
+        taskId,
+        assignmentId: assignment.assignmentId,
+      });
+      await this.persistChangesRequired(
+        {
+          orders: [order],
+          dispatchAssignments: [assignment],
+          driverTasks: [task],
+          dispatchTraceLogs: [traceLog],
+        },
+        "accept_driver_task",
+      );
+    }
     await this.recordAudit(
       {
         actorId: task.driverId,
@@ -4052,14 +6262,11 @@ export class OwnedMobilityService
     const assignment = this.requireAssignment(task.assignmentId);
     const order = this.requireOrder(task.orderId);
     const now = new Date().toISOString();
-    task.status = "rejected";
-    assignment.status = "rejected";
-    assignment.rejectReasonCode = command.reasonCode;
-    assignment.rejectedAt = now;
-    assignment.updatedAt = now;
-    order.status = "redispatch_required";
-    order.updatedAt = now;
-    const dispatchAttempt: DispatchAttemptRecord = {
+    // Built once so the same attempt row is both persisted and pushed into
+    // the in-memory cache -- but only after the lock (below) confirms this
+    // reject is actually legal, so a stale/superseded reject never leaves a
+    // phantom attempt behind in memory that was never durably persisted.
+    const buildDispatchAttempt = (): DispatchAttemptRecord => ({
       attemptId: randomUUID(),
       dispatchJobId: task.dispatchJobId,
       orderId: order.orderId,
@@ -4067,23 +6274,138 @@ export class OwnedMobilityService
       outcome: "rejected",
       reasonCode: command.reasonCode,
       createdAt: now,
-    };
-    this.dispatchAttempts = [dispatchAttempt, ...this.dispatchAttempts];
-    const traceLog = this.appendTrace(order.orderId, "driver.rejected", {
-      taskId,
-      reasonCode: command.reasonCode,
-      reasonNote: command.reasonNote ?? null,
     });
-    await this.persistChangesRequired(
-      {
-        orders: [order],
-        dispatchAssignments: [assignment],
-        driverTasks: [task],
-        dispatchAttempts: [dispatchAttempt],
-        dispatchTraceLogs: [traceLog],
-      },
-      "reject_driver_task",
-    );
+
+    if (this.ownedMobilityRepository?.isEnabled()) {
+      // SD §7.6: same authoritative-lock requirement as accept, plus the
+      // reject and its reservation release must land in the same
+      // transaction -- a crash between a separately-committed reject and a
+      // separately-committed release would strand a held/occupied
+      // reservation with no expiry and no path back to "released".
+      const committed = await this.ownedMobilityRepository.withTransaction(
+        async (tx) => {
+          const lockedAssignment =
+            await this.ownedMobilityRepository!.lockDispatchAssignmentForUpdate(
+              tx,
+              assignment.assignmentId,
+            );
+          if (!lockedAssignment || lockedAssignment.status !== "assigned") {
+            throw new ApiRequestError(
+              HttpStatus.CONFLICT,
+              "ASSIGNMENT_NOT_AWAITING_ACCEPTANCE",
+              "This offer is no longer awaiting driver acceptance.",
+              {
+                assignmentId: assignment.assignmentId,
+                status: lockedAssignment?.status ?? null,
+              },
+            );
+          }
+          const lockedTask =
+            await this.ownedMobilityRepository!.lockDriverTaskForUpdate(
+              tx,
+              taskId,
+            );
+          if (
+            lockedAssignment.orderId !== order.orderId ||
+            !this.isReconciledAssignmentTask(lockedAssignment, lockedTask)
+          ) {
+            throw new ApiRequestError(
+              HttpStatus.CONFLICT,
+              "ASSIGNMENT_TASK_RECONCILIATION_REQUIRED",
+              "Active assignment task requires reconciliation.",
+              { taskId },
+            );
+          }
+          this.assertDriverTaskTransition(lockedTask, "rejected");
+
+          const updatedTask: DriverTaskRecord = {
+            ...lockedTask,
+            status: "rejected",
+          };
+          const updatedAssignment: DispatchAssignmentRecord = {
+            ...lockedAssignment,
+            status: "rejected",
+            rejectReasonCode: command.reasonCode,
+            rejectedAt: now,
+            updatedAt: now,
+          };
+          const updatedOrder: OwnedOrderRecord = {
+            ...order,
+            ...(order.bookingQualification
+              ? {
+                  bookingQualification: structuredClone(
+                    order.bookingQualification,
+                  ),
+                }
+              : {}),
+            status: "redispatch_required",
+            updatedAt: now,
+          };
+          const dispatchAttempt = buildDispatchAttempt();
+          const traceLog = this.appendTrace(order.orderId, "driver.rejected", {
+            taskId,
+            reasonCode: command.reasonCode,
+            reasonNote: command.reasonNote ?? null,
+          });
+
+          await this.ownedMobilityRepository!.persistOrderWorkflow(tx, {
+            orders: [updatedOrder],
+            dispatchAssignments: [updatedAssignment],
+            driverTasks: [updatedTask],
+            dispatchAttempts: [dispatchAttempt],
+            dispatchTraceLogs: [traceLog],
+          });
+          // SD §7.6: a valid reject releases the shared reservation so
+          // another dispatch attempt can pick up the same driver/vehicle,
+          // atomically with the reject write.
+          await this.ownedMobilityRepository!.releaseDispatchResourceReservations(
+            assignment.assignmentId,
+            tx,
+          );
+
+          return {
+            updatedTask,
+            updatedAssignment,
+            updatedOrder,
+            dispatchAttempt,
+          };
+        },
+      );
+
+      this.dispatchAttempts = [
+        committed.dispatchAttempt,
+        ...this.dispatchAttempts,
+      ];
+      Object.assign(task, committed.updatedTask);
+      Object.assign(assignment, committed.updatedAssignment);
+      Object.assign(order, committed.updatedOrder);
+    } else {
+      this.assertDriverTaskTransition(task, "rejected");
+      const dispatchAttempt = buildDispatchAttempt();
+      this.dispatchAttempts = [dispatchAttempt, ...this.dispatchAttempts];
+      task.status = "rejected";
+      assignment.status = "rejected";
+      assignment.rejectReasonCode = command.reasonCode;
+      assignment.rejectedAt = now;
+      assignment.updatedAt = now;
+      order.status = "redispatch_required";
+      order.updatedAt = now;
+      const traceLog = this.appendTrace(order.orderId, "driver.rejected", {
+        taskId,
+        reasonCode: command.reasonCode,
+        reasonNote: command.reasonNote ?? null,
+      });
+      await this.persistChangesRequired(
+        {
+          orders: [order],
+          dispatchAssignments: [assignment],
+          driverTasks: [task],
+          dispatchAttempts: [dispatchAttempt],
+          dispatchTraceLogs: [traceLog],
+        },
+        "reject_driver_task",
+      );
+    }
     await this.recordAudit(
       {
         actorId: task.driverId,
@@ -4116,6 +6438,7 @@ export class OwnedMobilityService
   ) {
     const task = this.requireTask(taskId);
     const order = this.requireOrder(task.orderId);
+    this.assertDriverTaskTransition(task, "enroute_pickup");
     task.status = "enroute_pickup";
     task.departedAt = command.departedAt;
     order.status = "enroute_pickup";
@@ -4163,6 +6486,7 @@ export class OwnedMobilityService
   ) {
     const task = this.requireTask(taskId);
     const order = this.requireOrder(task.orderId);
+    this.assertDriverTaskTransition(task, "arrived_pickup");
     task.status = "arrived_pickup";
     task.arrivedPickupAt = command.arrivedAt;
     order.status = "arrived_pickup";
@@ -4539,6 +6863,19 @@ export class OwnedMobilityService
     const assignment = { ...params.bundle.assignment };
     const task = this.cloneTask(params.bundle.task);
 
+    // A terminal replay may return its prior result, but every new completion
+    // (including proof_pending writes) must reconcile before changing capacity.
+    if (
+      task.status !== "completed" &&
+      !this.isReconciledAssignmentTask(assignment, task)
+    ) {
+      throw new ApiRequestError(
+        HttpStatus.CONFLICT,
+        "ASSIGNMENT_TASK_RECONCILIATION_REQUIRED",
+        "Completion assignment task requires reconciliation.",
+      );
+    }
+
     if (params.requestId) {
       const replayedTask = await this.replayDriverCompletionFromRepository(
         tx,
@@ -4699,6 +7036,12 @@ export class OwnedMobilityService
       driverTasks: [this.cloneTask(task)],
       dispatchTraceLogs: [this.cloneTraceLog(traceLog)],
     });
+    // SD §7.6: a valid completion releases the shared reservation, in the
+    // same transaction as the completion write.
+    await this.ownedMobilityRepository!.releaseDispatchResourceReservations(
+      assignment.assignmentId,
+      tx,
+    );
     await this.persistDriverCompletionOutbox(tx, {
       order,
       dispatchJob,
@@ -4861,7 +7204,7 @@ export class OwnedMobilityService
       !task.startedAt ||
       !plateNo ||
       !fare ||
-      fare.currency !== "NTD" ||
+      normalisePlatformCurrency(fare.currency) !== PLATFORM_CURRENCY ||
       !Number.isFinite(fare.amountMinor) ||
       fare.amountMinor < 0 ||
       !Number.isFinite(command.actualDistanceKm) ||
@@ -4894,7 +7237,7 @@ export class OwnedMobilityService
       distanceMeters: Math.round(command.actualDistanceKm * 1000),
       fareMinor: fare.amountMinor,
       tollMinor,
-      currency: "NTD",
+      currency: PLATFORM_CURRENCY,
       consumerServicePhone:
         process.env.MULTI_TAXI_CERTIFICATE_SERVICE_PHONE ??
         DEFAULT_CERTIFICATE_SERVICE_PHONE,
@@ -4938,7 +7281,7 @@ export class OwnedMobilityService
 
     const grossEarning = task.fare ??
       order.quotedFare ?? {
-        currency: "NTD",
+        currency: PLATFORM_CURRENCY,
         amountMinor: 0,
       };
     const sandboxFulfillmentSegments = this.buildSandboxFulfillmentSegments(
@@ -5118,7 +7461,7 @@ export class OwnedMobilityService
       fallbackPolicyId,
       policyResolution,
       passengerExtraChargeAllowed: false,
-      passengerExtraCharge: { currency: "NTD", amountMinor: 0 },
+      passengerExtraCharge: { currency: PLATFORM_CURRENCY, amountMinor: 0 },
       internalAvCost: currentTaskIsAv ? { ...grossEarning } : null,
       internalHumanFallbackCost: humanFallbackApplied
         ? { ...grossEarning }
@@ -5352,6 +7695,184 @@ export class OwnedMobilityService
     ].join("-");
   }
 
+  private getDispatchMatchingTimeoutMs(): number {
+    const envVal = process.env.DISPATCH_MATCHING_TIMEOUT_MS;
+    if (envVal !== undefined && envVal !== "") {
+      const parsed = Number(envVal);
+      if (Number.isSafeInteger(parsed) && parsed > 0) {
+        return parsed;
+      }
+    }
+    return DISPATCH_MATCHING_TIMEOUT_DEFAULT_MS;
+  }
+
+  private startDispatchSchedulerPolling() {
+    if (this.dispatchSchedulerSweepTimer) {
+      return;
+    }
+    this.dispatchSchedulerSweepTimer = setInterval(() => {
+      void this.runDispatchSchedulerSweep().catch((error) => {
+        this.logger.error(
+          `Dispatch scheduler sweep tick failed: ${
+            error instanceof Error ? error.message : String(error)
+          }`,
+        );
+      });
+    }, DISPATCH_SCHEDULER_SWEEP_INTERVAL_MS);
+    this.dispatchSchedulerSweepTimer.unref?.();
+  }
+
+  private reportDispatchSchedulerSweepFailure(
+    error: unknown,
+    phase:
+      | "matching_timeout"
+      | "acceptance_timeout"
+      | "reservation_hold_escalation",
+    orderId: string,
+  ) {
+    const message = error instanceof Error ? error.message : String(error);
+    this.logger.error(
+      `Dispatch scheduler sweep failed for order ${orderId} during ${phase}: ${message}`,
+    );
+    const tenantId =
+      this.orders.find((candidateOrder) => candidateOrder.orderId === orderId)
+        ?.tenantId ?? null;
+    try {
+      this.auditNotificationService.recordNotification({
+        tenantId,
+        channel: "ops_notice",
+        title: "Dispatch scheduler sweep failure",
+        message: `Automatic ${phase} failed for order ${orderId}: ${message}`,
+        status: "unread",
+      });
+    } catch (notifyError) {
+      this.logger.error(
+        `Failed to record dispatch scheduler failure notification: ${
+          notifyError instanceof Error
+            ? notifyError.message
+            : String(notifyError)
+        }`,
+      );
+    }
+  }
+
+  // Real background trigger for dispatch-timeout and reservation-hold
+  // escalation (SR-DISPATCH-SCHEDULER-001). Re-derives its work from current
+  // state on every call rather than tracking "already handled" bookkeeping
+  // of its own, which is what makes it safe to call again after a restart or
+  // from more than one concurrently running instance: every mutation below
+  // (`handleDispatchTimeout`, `dispatchOrder`) re-validates the record it is
+  // about to change and is a safe no-op ("superseded", or simply no matching
+  // candidate left) if another call already resolved it first.
+  //
+  // Accepts an explicit `now` so tests can exercise "N minutes later"
+  // deterministically instead of depending on real wall-clock timers.
+  async runDispatchSchedulerSweep(now: Date = new Date()): Promise<{
+    skipped: boolean;
+    matchingTimeouts: number;
+    acceptanceTimeouts: number;
+    reservationHoldEscalations: number;
+    failures: number;
+  }> {
+    const summary = {
+      skipped: false,
+      matchingTimeouts: 0,
+      acceptanceTimeouts: 0,
+      reservationHoldEscalations: 0,
+      failures: 0,
+    };
+
+    if (this.dispatchSchedulerSweepRunning) {
+      summary.skipped = true;
+      return summary;
+    }
+
+    this.dispatchSchedulerSweepRunning = true;
+    try {
+      const nowMs = now.getTime();
+      const matchingTimeoutMs = this.getDispatchMatchingTimeoutMs();
+
+      const overdueMatchingJobs = this.dispatchJobs.filter(
+        (job) =>
+          job.status === "matching" &&
+          nowMs - Date.parse(job.createdAt) > matchingTimeoutMs,
+      );
+      for (const job of overdueMatchingJobs) {
+        try {
+          const result = await this.handleDispatchTimeout(
+            job.orderId,
+            "matching_timeout",
+          );
+          // "superseded" means something else (an accept, a fresh dispatch,
+          // another sweep tick) already resolved this before this call ran --
+          // a safe no-op, not a real timeout, so it must not be counted as one.
+          if (result.escalationAction !== "superseded") {
+            summary.matchingTimeouts += 1;
+          }
+        } catch (error) {
+          summary.failures += 1;
+          this.reportDispatchSchedulerSweepFailure(
+            error,
+            "matching_timeout",
+            job.orderId,
+          );
+        }
+      }
+
+      const overdueAssignments = this.dispatchAssignments.filter(
+        (assignment) =>
+          assignment.status === "assigned" &&
+          !!assignment.acceptanceDeadline &&
+          nowMs > Date.parse(assignment.acceptanceDeadline),
+      );
+      for (const assignment of overdueAssignments) {
+        try {
+          const result = await this.handleDispatchTimeout(
+            assignment.orderId,
+            "acceptance_timeout",
+            undefined,
+            { targetAssignmentId: assignment.assignmentId },
+          );
+          if (result.escalationAction !== "superseded") {
+            summary.acceptanceTimeouts += 1;
+          }
+        } catch (error) {
+          summary.failures += 1;
+          this.reportDispatchSchedulerSweepFailure(
+            error,
+            "acceptance_timeout",
+            assignment.orderId,
+          );
+        }
+      }
+
+      const nowIso = now.toISOString();
+      const staleReservationHolds = this.orders.filter(
+        (order) =>
+          order.dispatchSemantics === "reservation" &&
+          order.status === "redispatch_required" &&
+          this.isWithinConfirmationWindow(order, nowIso),
+      );
+      for (const order of staleReservationHolds) {
+        try {
+          await this.dispatchOrder(order.orderId, { mode: "auto" });
+          summary.reservationHoldEscalations += 1;
+        } catch (error) {
+          summary.failures += 1;
+          this.reportDispatchSchedulerSweepFailure(
+            error,
+            "reservation_hold_escalation",
+            order.orderId,
+          );
+        }
+      }
+    } finally {
+      this.dispatchSchedulerSweepRunning = false;
+    }
+
+    return summary;
+  }
+
   private startDriverCompletionOutboxRecoveryPolling() {
     if (
       this.driverCompletionRecoveryTimer ||
@@ -5459,9 +7980,33 @@ export class OwnedMobilityService
     leaseToken: string,
   ) {
     if (claimed.action === "dead_letter") {
+      // A dead letter is a trip-completion effect that has permanently failed.
+      // This used to be a log line and nothing else: no audit record, no
+      // operator surface, no endpoint that lists them. A failure recorded
+      // somewhere nobody reads is operationally the same as one never recorded,
+      // and the thing that failed here is the completion of a real trip.
+      //
+      // The audit log is the surface that already exists for this: immutable at
+      // the database level since V0080, retained 730 days, and queryable by
+      // platform and ops through `GET audit-logs`.
       this.logger.warn(
         `Driver completion outbox dead-lettered after lease recovery for ${claimed.record.effectType} on task ${claimed.record.taskId}.`,
       );
+      await this.recordAudit({
+        actorId: null,
+        actorType: "system",
+        tenantId: null,
+        moduleName: "owned-mobility",
+        actionName: "driver_completion_outbox_dead_lettered",
+        resourceType: "driver_completion_outbox",
+        resourceId: claimed.record.outboxId ?? claimed.record.taskId,
+        newValuesSummary: {
+          taskId: claimed.record.taskId,
+          effectType: claimed.record.effectType,
+          attemptCount: claimed.record.attemptCount ?? null,
+          status: "dead_letter",
+        },
+      });
       return;
     }
 
@@ -5926,6 +8471,39 @@ export class OwnedMobilityService
     return payload;
   }
 
+  private assertBookingLeadTime(reservationWindowStart?: string | null) {
+    if (!reservationWindowStart || typeof reservationWindowStart !== "string") {
+      throw new ApiRequestError(
+        HttpStatus.BAD_REQUEST,
+        "RESERVATION_WINDOW_START_REQUIRED",
+        "reservationWindowStart is required.",
+      );
+    }
+    const requestedPickupMs = Date.parse(reservationWindowStart);
+    if (Number.isNaN(requestedPickupMs)) {
+      throw new ApiRequestError(
+        HttpStatus.BAD_REQUEST,
+        "INVALID_RESERVATION_WINDOW_START",
+        "reservationWindowStart must be a valid ISO-8601 date string.",
+      );
+    }
+    const minLeadTimeMinutes = this.getMinLeadTimeMinutes();
+    const minAllowedPickupMs = Date.now() + minLeadTimeMinutes * 60 * 1000;
+    if (requestedPickupMs < minAllowedPickupMs) {
+      throw new ApiRequestError(
+        HttpStatus.BAD_REQUEST,
+        "TOO_SOON_TO_BOOK",
+        `A tenant booking requires at least ${minLeadTimeMinutes} minutes advance notice.`,
+        {
+          requestedPickupAt: reservationWindowStart,
+          reservationWindowStart,
+          minLeadTimeMinutes,
+          minimumAllowedPickupAt: new Date(minAllowedPickupMs).toISOString(),
+        },
+      );
+    }
+  }
+
   private assertBookingRules(
     businessDispatchSubtype: NonNullable<
       OwnedOrderRecord["businessDispatchSubtype"]
@@ -6350,7 +8928,7 @@ export class OwnedMobilityService
   }
 
   private assertOrderCancelable(order: OwnedOrderRecord) {
-    if (order.status === "cancelled") {
+    if (order.status === "cancelled" || order.status === "completed") {
       throw new ApiRequestError(
         HttpStatus.CONFLICT,
         "ORDER_NOT_CANCELABLE",
@@ -6360,6 +8938,16 @@ export class OwnedMobilityService
           status: order.status,
         },
       );
+    }
+
+    const createdAtMs = new Date(order.createdAt).getTime();
+    if (
+      order.partnerEntrySlug &&
+      order.status === "created" &&
+      Number.isFinite(createdAtMs) &&
+      Date.now() <= createdAtMs + REFERRAL_PASSENGER_CANCEL_WINDOW_MS
+    ) {
+      return;
     }
 
     if (order.dispatchSemantics === "reservation") {
@@ -6455,34 +9043,232 @@ export class OwnedMobilityService
     return "escalate_to_ops";
   }
 
-  handleDispatchTimeout(
+  async handleDispatchTimeout(
     orderId: string,
     timeoutReasonCode: "acceptance_timeout" | "matching_timeout",
     requestId?: string,
+    options?: { targetAssignmentId?: string },
   ) {
-    const order = this.requireOrder(orderId);
+    if (this.ownedMobilityRepository?.isEnabled()) {
+      await Promise.all([...this.pendingWorkflowWrites]);
+    }
+    const afterCommit: (() => void)[] = [];
+    const result = this.ownedMobilityRepository?.isEnabled()
+      ? await this.ownedMobilityRepository.withTransaction((tx) =>
+          this.applyDispatchTimeout(
+            orderId,
+            timeoutReasonCode,
+            requestId,
+            options,
+            afterCommit,
+            tx,
+          ),
+        )
+      : await this.applyDispatchTimeout(
+          orderId,
+          timeoutReasonCode,
+          requestId,
+          options,
+          afterCommit,
+        );
+    for (const publish of afterCommit) publish();
+    return result;
+  }
+
+  private async applyDispatchTimeout(
+    orderId: string,
+    timeoutReasonCode: "acceptance_timeout" | "matching_timeout",
+    requestId: string | undefined,
+    options: { targetAssignmentId?: string } | undefined,
+    afterCommit: (() => void)[],
+    tx?: OwnedMobilityQueryExecutor,
+  ) {
+    // Shared assignment -> task -> job -> order locks fence stale workers,
+    // including timers whose cache has never observed an assignment.
+    const current = tx
+      ? await this.ownedMobilityRepository!.loadOrderCancellationForUpdate(
+          tx,
+          orderId,
+        )
+      : null;
+    const order = current?.order ?? this.requireOrder(orderId);
     const now = new Date().toISOString();
 
-    const activeJob = this.dispatchJobs.find(
+    const activeJob = (current?.dispatchJobs ?? this.dispatchJobs).find(
       (job) =>
         job.orderId === orderId &&
         ["matching", "assigned"].includes(job.status),
     );
 
-    const latestAssignment = activeJob
-      ? this.dispatchAssignments.find(
-          (assignment) =>
-            assignment.dispatchJobId === activeJob.dispatchJobId &&
-            ["assigned", "accepted"].includes(assignment.status),
-        )
-      : null;
-    const latestTask = latestAssignment
-      ? this.driverTasks.find(
-          (task) =>
-            task.assignmentId === latestAssignment.assignmentId &&
-            !["completed", "cancelled", "rejected"].includes(task.status),
-        )
-      : null;
+    const latestAssignment = current
+      ? current.assignment
+      : activeJob
+        ? this.dispatchAssignments.find(
+            (assignment) =>
+              assignment.dispatchJobId === activeJob.dispatchJobId &&
+              ["assigned", "accepted"].includes(assignment.status),
+          )
+        : null;
+
+    // SD §7.6: an acceptance timeout is armed for one specific offer and
+    // must be able to name it -- without a target, there is nothing to fence
+    // the timer to "whatever assignment happens to be latest" (see below),
+    // which is exactly the unfenced case this guard exists to reject.
+    if (
+      timeoutReasonCode === "acceptance_timeout" &&
+      !options?.targetAssignmentId
+    ) {
+      throw new ApiRequestError(
+        HttpStatus.BAD_REQUEST,
+        "ACCEPTANCE_TIMEOUT_TARGET_REQUIRED",
+        "An acceptance timeout must name the assignment its timer was armed for.",
+        { orderId },
+      );
+    }
+
+    // SD §7.6: "不能直接沿用 handleDispatchTimeout(orderId) 再尋找最新
+    // assignment 取消" -- a timer set for one specific offer must not cancel
+    // whatever assignment happens to be latest by the time it fires (a
+    // reassign or a fresh dispatch attempt may have already replaced it),
+    // nor an offer that already left the "pending acceptance" state since
+    // the timer was armed -- an accepted offer is no longer waiting on this
+    // timeout, and cancelling it here would undo a driver's acceptance out
+    // from under them. Both cases are indistinguishable "this timer no
+    // longer applies" outcomes and resolve the same way: leave state and
+    // reservations untouched instead of closing a different, or no longer
+    // pending, assignment.
+    if (
+      options?.targetAssignmentId &&
+      (latestAssignment?.assignmentId !== options.targetAssignmentId ||
+        latestAssignment.status !== "assigned")
+    ) {
+      return {
+        orderId,
+        status: order.status,
+        timeoutReasonCode,
+        escalationAction: "superseded" as const,
+      };
+    }
+
+    // SD §7.6: a `matching_timeout` armed while the order had no assignment
+    // yet is allowed to omit a target (there is nothing to name). But if an
+    // assignment now exists, this timer predates it and is exactly as stale
+    // as an untargeted `acceptance_timeout` would be -- without this guard
+    // it would fall through to closing whatever offer is latest, including
+    // one made after this timer was armed. Treat it as superseded instead of
+    // resolving it against an assignment it was never armed for.
+    if (
+      timeoutReasonCode === "matching_timeout" &&
+      !options?.targetAssignmentId &&
+      latestAssignment
+    ) {
+      return {
+        orderId,
+        status: order.status,
+        timeoutReasonCode,
+        escalationAction: "superseded" as const,
+      };
+    }
+
+    // SD §7.6 / Review Round 4: Stale-worker and timer fencing.
+    // Pre-trip matching and offer acceptance states are timeoutable:
+    // ["created", "ready_for_dispatch", "redispatch_required", "assigned", "preassigned", "delayed_queue"].
+    // Note: "preassigned" (unmatched reservation hold) and "delayed_queue" (unassigned order awaiting supply retry)
+    // are explicitly validated by canonical test suites (SR-QA-DRIVER-001 C053, SR-QA-DISPATCH-001 C038)
+    // to transition to dispatch_timeout and enter the redispatch priority queue upon matching_timeout.
+    // All other statuses are non-timeoutable and must be treated as superseded:
+    // - Terminal states: "completed", "cancelled"
+    // - Active in-trip execution states: "driver_accepted", "enroute_pickup", "arrived_pickup", "on_trip", "proof_pending"
+    // - Already timed out: "dispatch_timeout"
+    // - Operator manual-intervention / held exception states: "no_supply", "exception_hold", "dispatch_failed", "recording_pending"
+    const nonTimeoutableStatuses = [
+      "completed",
+      "cancelled",
+      "driver_accepted",
+      "enroute_pickup",
+      "arrived_pickup",
+      "on_trip",
+      "proof_pending",
+      "dispatch_timeout",
+      "no_supply",
+      "exception_hold",
+      "dispatch_failed",
+      "recording_pending",
+    ];
+    const timeoutableStatuses = [
+      "created",
+      "ready_for_dispatch",
+      "redispatch_required",
+      "assigned",
+      "preassigned",
+      "delayed_queue",
+    ];
+    if (
+      nonTimeoutableStatuses.includes(order.status) ||
+      !timeoutableStatuses.includes(order.status)
+    ) {
+      return {
+        orderId,
+        status: order.status,
+        timeoutReasonCode,
+        escalationAction: "superseded" as const,
+      };
+    }
+
+    let closedPrevious: {
+      assignment: DispatchAssignmentRecord;
+      task: DriverTaskRecord | null;
+    } | null = null;
+    if (latestAssignment && this.ownedMobilityRepository?.isEnabled()) {
+      // SD §7.6: re-verify under a row lock, shared with accept's own write
+      // path, immediately before acting -- the in-memory check above can be
+      // stale (e.g. this process's cache lagging another pod's accept), and
+      // this is the authoritative fence against a timeout racing an accept.
+      // A `null` result means the row already left "assigned" (accepted, or
+      // already closed by something else) since the in-memory check above;
+      // treat it exactly like the superseded case.
+      closedPrevious = await this.closeSupersededDispatchAssignment(
+        tx!,
+        latestAssignment.assignmentId,
+        now,
+        ["assigned"],
+        true,
+      );
+      if (!closedPrevious) {
+        return {
+          orderId,
+          status: order.status,
+          timeoutReasonCode,
+          escalationAction: "superseded" as const,
+        };
+      }
+    }
+
+    const latestTask = current
+      ? current.task
+      : latestAssignment
+        ? this.driverTasks.find(
+            (task) =>
+              task.assignmentId === latestAssignment.assignmentId &&
+              !["completed", "cancelled", "rejected"].includes(task.status),
+          )
+        : null;
+
+    if (latestAssignment && !this.ownedMobilityRepository?.isEnabled()) {
+      const deadline = Date.parse(latestAssignment.acceptanceDeadline ?? "");
+      if (
+        !Number.isFinite(deadline) ||
+        Date.now() < deadline ||
+        latestTask?.status !== "pending_acceptance"
+      ) {
+        return {
+          orderId,
+          status: order.status,
+          timeoutReasonCode,
+          escalationAction: "superseded" as const,
+        };
+      }
+    }
 
     if (latestAssignment) {
       latestAssignment.status = "cancelled";
@@ -6521,56 +9307,88 @@ export class OwnedMobilityService
       reasonCode: timeoutReasonCode,
       createdAt: now,
     };
-    this.dispatchAttempts = [dispatchAttempt, ...this.dispatchAttempts];
 
-    const traceLog = this.appendTrace(orderId, "dispatch.timeout", {
+    const traceLog = this.buildTraceLog(orderId, "dispatch.timeout", {
       dispatchJobId: activeJob?.dispatchJobId ?? null,
       timeoutReasonCode,
       previousAssignmentId: latestAssignment?.assignmentId ?? null,
       attemptCount: order.dispatchAttemptCount,
     });
 
-    this.persistChanges(
-      {
-        orders: [order],
-        ...(activeJob ? { dispatchJobs: [activeJob] } : {}),
-        ...(latestAssignment
-          ? { dispatchAssignments: [latestAssignment] }
-          : {}),
-        ...(latestTask ? { driverTasks: [latestTask] } : {}),
-        dispatchAttempts: [dispatchAttempt],
-        dispatchTraceLogs: [traceLog],
-      },
-      "dispatch_timeout",
-    );
+    const changes = {
+      orders: [order],
+      ...(activeJob ? { dispatchJobs: [activeJob] } : {}),
+      // Already durably persisted atomically by closeSupersededDispatchAssignment
+      // above when closedPrevious is set; re-including it here would just be a
+      // redundant (harmless, but pointless) re-upsert of identical values.
+      ...(latestAssignment && !closedPrevious
+        ? { dispatchAssignments: [latestAssignment] }
+        : {}),
+      ...(latestTask && !closedPrevious ? { driverTasks: [latestTask] } : {}),
+      dispatchAttempts: [dispatchAttempt],
+      dispatchTraceLogs: [traceLog],
+    };
+    if (tx)
+      await this.ownedMobilityRepository!.persistOrderWorkflow(tx, changes);
+    else this.persistChanges(changes, "dispatch_timeout");
 
-    this.recordAudit(
-      {
-        actorId: null,
-        actorType: "system",
-        tenantId: order.tenantId,
-        moduleName: "dispatch",
-        actionName: "dispatch_timeout",
-        resourceType: "order",
-        resourceId: orderId,
-        newValuesSummary: {
-          timeoutReasonCode,
-          status: order.status,
-          attemptCount: order.dispatchAttemptCount,
-        },
-      },
-      requestId,
-    );
-
-    if (latestTask) {
-      this.ownedMobilityTaskEventsService.publishTaskCancelled(
-        latestTask,
+    afterCommit.push(() => {
+      this.orders = [
         order,
+        ...this.orders.filter((item) => item.orderId !== orderId),
+      ];
+      if (activeJob)
+        this.dispatchJobs = [
+          activeJob,
+          ...this.dispatchJobs.filter(
+            (item) => item.dispatchJobId !== activeJob.dispatchJobId,
+          ),
+        ];
+      if (latestAssignment)
+        this.dispatchAssignments = [
+          latestAssignment,
+          ...this.dispatchAssignments.filter(
+            (item) => item.assignmentId !== latestAssignment.assignmentId,
+          ),
+        ];
+      if (latestTask)
+        this.driverTasks = [
+          latestTask,
+          ...this.driverTasks.filter(
+            (item) => item.taskId !== latestTask.taskId,
+          ),
+        ];
+      this.dispatchAttempts = [dispatchAttempt, ...this.dispatchAttempts];
+      this.dispatchTraceLogs = [traceLog, ...this.dispatchTraceLogs];
+
+      this.recordAudit(
+        {
+          actorId: null,
+          actorType: "system",
+          tenantId: order.tenantId,
+          moduleName: "dispatch",
+          actionName: "dispatch_timeout",
+          resourceType: "order",
+          resourceId: orderId,
+          newValuesSummary: {
+            timeoutReasonCode,
+            status: order.status,
+            attemptCount: order.dispatchAttemptCount,
+          },
+        },
         requestId,
       );
-    }
 
-    this.opsDispatchEventsService?.publishOrderUpdated(order, requestId);
+      if (latestTask) {
+        this.ownedMobilityTaskEventsService.publishTaskCancelled(
+          latestTask,
+          order,
+          requestId,
+        );
+      }
+
+      this.opsDispatchEventsService?.publishOrderUpdated(order, requestId);
+    });
 
     return {
       orderId,
@@ -6840,51 +9658,158 @@ export class OwnedMobilityService
     return traceLog;
   }
 
-  private assertAssignmentEligibilityRecheck(
-    order: Pick<
-      OwnedOrderRecord,
-      "orderId" | "serviceBucket" | "businessDispatchSubtype"
-    >,
+  private assertQualifiedVoiceDispatch(
+    order: OwnedOrderRecord,
     dispatchJobId: string,
     vehicleId: string,
     driverId: string,
   ) {
+    if (order.bookingQualification) {
+      const qualification = order.bookingQualification;
+      if (
+        order.runtimeProfileCode !== qualification.runtimeProfileCode ||
+        order.serviceProductCode !== qualification.serviceProductCode ||
+        order.dispatchSemantics !== "realtime" ||
+        order.operatingAuthorizationId ||
+        ["pickup", "dropoff"].some((stop) => {
+          const key = stop as "pickup" | "dropoff";
+          return (
+            order[key].lat !== qualification[key].address.lat ||
+            order[key].lng !== qualification[key].address.lng ||
+            order[key].placeId !== qualification[key].address.placeId
+          );
+        })
+      )
+        throw new ApiRequestError(
+          409,
+          "VOICE_QUALIFICATION_STALE",
+          "Order locations or product no longer match the qualified draft.",
+        );
+      if (
+        !order.bookingRequirements ||
+        !this.serviceAreaService ||
+        !this.runtimeEligibilityEvaluator ||
+        !this.serviceProductService
+      )
+        throw new ApiRequestError(
+          409,
+          "VOICE_DISPATCH_POLICY_UNAVAILABLE",
+          "Voice dispatch requires complete qualification services.",
+        );
+      this.serviceProductService.assertRuntimeProfileServiceProductActive(
+        "ordinary_taxi",
+        "taxi_realtime",
+      );
+      const product =
+        this.serviceProductService.getRuntimeServiceProductByType(
+          "taxi_realtime",
+        );
+      if (!product?.active || product.timing !== "realtime")
+        throw new ApiRequestError(
+          409,
+          "VOICE_PRODUCT_HANDOFF_REQUIRED",
+          "The immediate product is not active.",
+        );
+      assertAutonomousServiceArea(
+        this.serviceAreaService.evaluate({
+          serviceProductType: "taxi_realtime",
+          pickup: order.bookingQualification.pickup.address,
+          dropoff: order.bookingQualification.dropoff.address,
+          requestedAt: new Date().toISOString(),
+        }),
+      );
+      // This synchronous preliminary filter evaluates location/capability.
+      // Training and leave are read asynchronously from their authorities in
+      // both published candidate filtering and the final assignment recheck.
+      if (
+        this.runtimeEligibilityEvaluator.assessAutonomous(
+          {
+            orderId: order.orderId,
+            dispatchJobId,
+            driverId,
+            vehicleId,
+            serviceProductCode: "taxi_realtime",
+            bookingRequirements: order.bookingRequirements,
+          },
+          true,
+        ) !== "eligible"
+      )
+        throw new ApiRequestError(
+          409,
+          "BOOKING_REQUIREMENTS_NOT_MET",
+          "All runtime conditions must be satisfied before autonomous assignment.",
+        );
+    }
+  }
+
+  private qualifiedVoiceCandidateAllowed(
+    order: OwnedOrderRecord,
+    vehicleId: string,
+    driverId: string,
+  ): boolean {
     try {
+      this.assertQualifiedVoiceDispatch(
+        order,
+        `precheck:${order.orderId}`,
+        vehicleId,
+        driverId,
+      );
+      return true;
+    } catch (error) {
+      if (error instanceof ApiRequestError) return false;
+      throw error;
+    }
+  }
+
+  private assertAssignmentEligibilityRecheck(
+    order: OwnedOrderRecord,
+    dispatchJobId: string,
+    vehicleId: string,
+    driverId: string,
+  ): MaybePromise<void> {
+    try {
+      this.assertBookingRequirementCandidate(order, vehicleId);
+      this.assertQualifiedVoiceDispatch(
+        order,
+        dispatchJobId,
+        vehicleId,
+        driverId,
+      );
+
       if (this.vehicleEligibilityService) {
         this.vehicleEligibilityService.assertDispatchAssignmentEligible(
           order,
           vehicleId,
           driverId,
         );
-        return;
-      }
+      } else {
+        if (
+          !this.regulatoryRegistryService.getVehicleDispatchability(
+            vehicleId,
+            order.serviceBucket,
+          )
+        ) {
+          throw new ApiRequestError(
+            HttpStatus.BAD_REQUEST,
+            "VEHICLE_NOT_DISPATCHABLE",
+            "Vehicle is not eligible for dispatch.",
+            { vehicleId },
+          );
+        }
 
-      if (
-        !this.regulatoryRegistryService.getVehicleDispatchability(
-          vehicleId,
-          order.serviceBucket,
-        )
-      ) {
-        throw new ApiRequestError(
-          HttpStatus.BAD_REQUEST,
-          "VEHICLE_NOT_DISPATCHABLE",
-          "Vehicle is not eligible for dispatch.",
-          { vehicleId },
-        );
-      }
-
-      if (
-        !this.regulatoryRegistryService.getDriverAvailability(
-          driverId,
-          order.serviceBucket,
-        )
-      ) {
-        throw new ApiRequestError(
-          HttpStatus.BAD_REQUEST,
-          "DRIVER_NOT_AVAILABLE",
-          "Driver is not eligible for dispatch.",
-          { driverId },
-        );
+        if (
+          !this.regulatoryRegistryService.getDriverAvailability(
+            driverId,
+            order.serviceBucket,
+          )
+        ) {
+          throw new ApiRequestError(
+            HttpStatus.BAD_REQUEST,
+            "DRIVER_NOT_AVAILABLE",
+            "Driver is not eligible for dispatch.",
+            { driverId },
+          );
+        }
       }
     } catch (error) {
       if (!(error instanceof ApiRequestError)) {
@@ -6919,6 +9844,72 @@ export class OwnedMobilityService
         },
       );
     }
+
+    // Vehicle/driver eligibility passed. Also re-check the driver's
+    // cross-platform presence right before committing the assignment: it can
+    // change between candidate listing and assignment just like the checks
+    // above, and reuses the same "refresh and retry" contract.
+    if (!this.platformPresenceService && !this.runtimeEligibilityEvaluator) {
+      return;
+    }
+    return this.assertCurrentDriverAvailability(
+      order,
+      dispatchJobId,
+      vehicleId,
+      driverId,
+    );
+  }
+
+  private async assertCurrentDriverAvailability(
+    order: OwnedOrderRecord,
+    dispatchJobId: string,
+    vehicleId: string,
+    driverId: string,
+  ): Promise<void> {
+    const driverReasons = await this.currentDriverRequirementBlocks(
+      driverId,
+      vehicleId,
+    );
+    if (driverReasons.length) {
+      throw new ApiRequestError(
+        HttpStatus.CONFLICT,
+        "ELIGIBILITY_CHANGED_BEFORE_ASSIGNMENT",
+        "Driver leave or training eligibility changed. Refresh candidates and retry.",
+        {
+          dispatchJobId,
+          orderId: order.orderId,
+          vehicleId,
+          driverId,
+          reasonCodes: driverReasons,
+        },
+      );
+    }
+    const block =
+      await this.platformPresenceService?.findDispatchBlockingPresence(
+        driverId,
+      );
+    if (!block) {
+      return;
+    }
+
+    throw new ApiRequestError(
+      HttpStatus.CONFLICT,
+      "ELIGIBILITY_CHANGED_BEFORE_ASSIGNMENT",
+      "Eligibility changed before assignment. Refresh candidates and retry.",
+      {
+        dispatchJobId,
+        orderId: order.orderId,
+        vehicleId,
+        driverId,
+        serviceProductCode: this.resolveServiceProductCodeForOrder(order),
+        reasonCodes: [
+          block.reason === "busy"
+            ? "DRIVER_BUSY_ON_OTHER_PLATFORM"
+            : "DRIVER_DISCONNECTED_ON_OTHER_PLATFORM",
+        ],
+        latestEligibility: { platformPresence: block },
+      },
+    );
   }
 
   private normalizeAssignmentEligibilityReasonCode(code?: string) {
@@ -7037,6 +10028,9 @@ export class OwnedMobilityService
     }
     return {
       ...order,
+      ...(order.bookingQualification
+        ? { bookingQualification: structuredClone(order.bookingQualification) }
+        : {}),
       serviceProductCode: this.resolveServiceProductCodeForOrder(order),
     };
   }
@@ -7055,7 +10049,24 @@ export class OwnedMobilityService
     const nextDispatchJob = { ...dispatchJob };
     const taskId = randomUUID();
     const serviceProductCode = this.resolveServiceProductCodeForOrder(order);
+    const acceptanceTimeoutMs = Number(
+      process.env.DISPATCH_ACCEPTANCE_TIMEOUT_MS ?? 60_000,
+    );
+    if (
+      !Number.isSafeInteger(acceptanceTimeoutMs) ||
+      acceptanceTimeoutMs <= 0
+    ) {
+      throw new Error(
+        "DISPATCH_ACCEPTANCE_TIMEOUT_MS must be a positive integer",
+      );
+    }
     const assignment: DispatchAssignmentRecord = {
+      ...(order.bookingQualification
+        ? { bookingQualification: structuredClone(order.bookingQualification) }
+        : {}),
+      ...(order.bookingRequirements
+        ? { bookingRequirements: structuredClone(order.bookingRequirements) }
+        : {}),
       assignmentId: randomUUID(),
       dispatchJobId: dispatchJob.dispatchJobId,
       orderId: order.orderId,
@@ -7065,6 +10076,9 @@ export class OwnedMobilityService
       driverId,
       assignmentType: order.fixedPrice ? "fixed_price" : "metered",
       status: "assigned",
+      acceptanceDeadline: new Date(
+        Date.parse(now) + acceptanceTimeoutMs,
+      ).toISOString(),
       acceptedAt: null,
       rejectedAt: null,
       rejectReasonCode: null,
@@ -7072,6 +10086,12 @@ export class OwnedMobilityService
       updatedAt: now,
     };
     const task: DriverTaskRecord = {
+      ...(order.bookingQualification
+        ? { bookingQualification: structuredClone(order.bookingQualification) }
+        : {}),
+      ...(order.bookingRequirements
+        ? { bookingRequirements: structuredClone(order.bookingRequirements) }
+        : {}),
       taskId,
       orderId: order.orderId,
       dispatchJobId: dispatchJob.dispatchJobId,
@@ -7379,7 +10399,7 @@ export class OwnedMobilityService
       chargingMode: order.fixedPrice ? "fixed_quote" : "meter_estimate",
       estimatedFareMinor: fareMinor,
       payableFareMinor: fareMinor,
-      currency: "NTD",
+      currency: PLATFORM_CURRENCY,
       farePolicyId: order.operatingAuthorizationId?.trim() ?? "",
       farePolicyVersion: order.quotedFareRuleVersion?.trim() ?? "",
       fareChangeRuleId: "multi_taxi_passenger_confirmation",
@@ -7426,7 +10446,10 @@ export class OwnedMobilityService
     ) {
       return "quote_out_of_range";
     }
-    if (order.quotedFare && order.quotedFare.currency !== "NTD") {
+    if (
+      order.quotedFare &&
+      normalisePlatformCurrency(order.quotedFare.currency) !== PLATFORM_CURRENCY
+    ) {
       return "calculation_mismatch";
     }
     return null;
@@ -7816,11 +10839,15 @@ export class OwnedMobilityService
       );
     }
 
-    void this.ownedMobilityRepository
-      .persistChanges(persistPayload)
-      .catch((error: unknown) => {
+    const pending = this.ownedMobilityRepository.persistChanges(persistPayload);
+    this.pendingWorkflowWrites.add(pending);
+    void pending.then(
+      () => this.pendingWorkflowWrites.delete(pending),
+      (error: unknown) => {
+        this.pendingWorkflowWrites.delete(pending);
         this.ownedMobilityRepository!.reportPersistenceFailure(error, context);
-      });
+      },
+    );
   }
 
   private async persistChangesRequired(
@@ -8368,14 +11395,26 @@ export class OwnedMobilityService
   }
 
   private mapOrderToBooking(order: OwnedOrderRecord): BookingRecord {
-    if (
-      !order.bookingId ||
-      !order.tenantId ||
-      !order.bookingType ||
-      !order.businessDispatchSubtype ||
-      !order.reservationWindowStart ||
-      !order.reservationWindowEnd
-    ) {
+    if (!order.bookingId || !order.tenantId) {
+      throw new ApiRequestError(
+        HttpStatus.NOT_FOUND,
+        "BOOKING_NOT_FOUND",
+        "Booking was not found.",
+        {
+          orderId: order.orderId,
+        },
+      );
+    }
+
+    const bookingType = order.bookingType ?? "oneway";
+    const businessDispatchSubtype =
+      order.businessDispatchSubtype ?? "enterprise_dispatch";
+    const reservationWindowStart =
+      order.reservationWindowStart ?? order.createdAt;
+    const reservationWindowEnd =
+      order.reservationWindowEnd ?? reservationWindowStart;
+
+    if (!reservationWindowStart || !reservationWindowEnd) {
       throw new ApiRequestError(
         HttpStatus.NOT_FOUND,
         "BOOKING_NOT_FOUND",
@@ -8391,12 +11430,12 @@ export class OwnedMobilityService
       bookingId: order.bookingId,
       orderId: order.orderId,
       tenantId: order.tenantId,
-      partnerId: order.partnerId,
-      partnerProgramId: order.partnerProgramId,
-      partnerEntrySlug: order.partnerEntrySlug,
-      eligibilityVerificationId: order.eligibilityVerificationId,
-      issuerAuthorizationRef: order.issuerAuthorizationRef,
-      passengerDisclosure: order.passengerDisclosure,
+      partnerId: order.partnerId ?? null,
+      partnerProgramId: order.partnerProgramId ?? null,
+      partnerEntrySlug: order.partnerEntrySlug ?? null,
+      eligibilityVerificationId: order.eligibilityVerificationId ?? null,
+      issuerAuthorizationRef: order.issuerAuthorizationRef ?? null,
+      passengerDisclosure: order.passengerDisclosure ?? null,
       status:
         order.status === "cancelled"
           ? "cancelled"
@@ -8404,42 +11443,46 @@ export class OwnedMobilityService
             ? "completed"
             : "active",
       serviceBucket: "business_dispatch",
-      businessDispatchSubtype: order.businessDispatchSubtype,
-      bookingType: order.bookingType,
-      reservationWindowStart: order.reservationWindowStart,
-      reservationWindowEnd: order.reservationWindowEnd,
-      recurrenceRule: order.recurrenceRule,
-      modifiableUntil: order.modifiableUntil,
-      cancelableUntil: order.cancelableUntil,
-      pickup: { ...order.pickup },
-      dropoff: { ...order.dropoff },
-      passenger: { ...order.passenger },
+      businessDispatchSubtype,
+      bookingType,
+      reservationWindowStart,
+      reservationWindowEnd,
+      recurrenceRule: order.recurrenceRule ?? null,
+      modifiableUntil: order.modifiableUntil ?? null,
+      cancelableUntil: order.cancelableUntil ?? null,
+      pickup: order.pickup ? { ...order.pickup } : { address: "" },
+      dropoff: order.dropoff ? { ...order.dropoff } : { address: "" },
+      passenger: order.passenger
+        ? { ...order.passenger }
+        : { name: "", phone: "" },
       bookedBy: order.bookedBy ? { ...order.bookedBy } : null,
       onsiteContact: order.onsiteContact ? { ...order.onsiteContact } : null,
-      costCenter: order.costCenter,
-      vehiclePreference: order.vehiclePreference,
-      benefitReference: order.benefitReference,
-      direction: order.direction,
-      flightNo: order.flightNo,
-      terminal: order.terminal,
-      luggageCount: order.luggageCount,
-      notes: order.notes,
+      costCenter: order.costCenter ?? null,
+      vehiclePreference: order.vehiclePreference ?? null,
+      benefitReference: order.benefitReference ?? null,
+      direction: order.direction ?? null,
+      flightNo: order.flightNo ?? null,
+      terminal: order.terminal ?? null,
+      luggageCount: order.luggageCount ?? null,
+      notes: order.notes ?? null,
       quotedFare: order.quotedFare ? { ...order.quotedFare } : null,
-      quotedFareSource: order.quotedFareSource,
-      quotedFareRuleVersion: order.quotedFareRuleVersion,
+      quotedFareSource: order.quotedFareSource ?? null,
+      quotedFareRuleVersion: order.quotedFareRuleVersion ?? null,
       manualFareOverride: order.manualFareOverride
         ? { ...order.manualFareOverride }
         : null,
-      approvalState: order.approvalState,
-      approvalRequestIds: [...order.approvalRequestIds],
+      approvalState: order.approvalState ?? "not_required",
+      approvalRequestIds: Array.isArray(order.approvalRequestIds)
+        ? [...order.approvalRequestIds]
+        : [],
       complianceGates,
       orderStatus: order.status,
       createdAt: order.createdAt,
-      updatedAt: order.updatedAt,
+      updatedAt: order.updatedAt ?? order.createdAt,
     };
   }
 
-  private requireOrder(orderId: string) {
+  requireOrder(orderId: string) {
     const order = this.orders.find(
       (candidateOrder) => candidateOrder.orderId === orderId,
     );
@@ -8476,7 +11519,7 @@ export class OwnedMobilityService
     return order;
   }
 
-  private requireDispatchJob(dispatchJobId: string) {
+  requireDispatchJob(dispatchJobId: string) {
     const dispatchJob = this.dispatchJobs.find(
       (candidateJob) => candidateJob.dispatchJobId === dispatchJobId,
     );
@@ -8493,7 +11536,7 @@ export class OwnedMobilityService
     return dispatchJob;
   }
 
-  private requireAssignment(assignmentId: string) {
+  requireAssignment(assignmentId: string) {
     const assignment = this.dispatchAssignments.find(
       (candidateAssignment) =>
         candidateAssignment.assignmentId === assignmentId,
@@ -8511,7 +11554,7 @@ export class OwnedMobilityService
     return assignment;
   }
 
-  private requireTask(taskId: string) {
+  requireTask(taskId: string) {
     const task = this.driverTasks.find(
       (candidateTask) => candidateTask.taskId === taskId,
     );
@@ -8550,9 +11593,38 @@ export class OwnedMobilityService
     );
   }
 
+  private bookingRequirementCandidateAllowed(
+    order: Pick<OwnedOrderRecord, "bookingRequirements">,
+    vehicleId: string,
+  ): boolean {
+    if (!order.bookingRequirements) return true;
+    const capability =
+      this.vehicleEligibilityService?.resolveRuntimeVehicleCapability(
+        vehicleId,
+      ) ?? null;
+    return (
+      bookingRequirementFailures(order.bookingRequirements, capability)
+        .length === 0
+    );
+  }
+
+  private assertBookingRequirementCandidate(
+    order: Pick<OwnedOrderRecord, "bookingRequirements">,
+    vehicleId: string,
+  ) {
+    if (!this.bookingRequirementCandidateAllowed(order, vehicleId)) {
+      throw new ApiRequestError(
+        409,
+        "BOOKING_REQUIREMENTS_NOT_MET",
+        "Vehicle no longer satisfies booking requirements.",
+        { vehicleId },
+      );
+    }
+  }
+
   private listEligibleDispatchCandidates(order: OwnedOrderRecord) {
     const destination = this.resolvePickupEtaDestination(order);
-    return this.vehicleEligibilityService
+    const candidates = this.vehicleEligibilityService
       ? this.vehicleEligibilityService.listEligibleSupply(
           this.vehicleEligibilityService.resolveServiceProductForOwnedOrder(
             order,
@@ -8563,9 +11635,99 @@ export class OwnedMobilityService
           order.serviceBucket,
           destination,
         );
+    return candidates
+      .filter(
+        (candidate) =>
+          this.bookingRequirementCandidateAllowed(order, candidate.vehicleId) &&
+          this.qualifiedVoiceCandidateAllowed(
+            order,
+            candidate.vehicleId,
+            candidate.driverId,
+          ),
+      )
+      .map((candidate) => ({
+        ...candidate,
+        ...(order.bookingQualification
+          ? {
+              bookingQualification: structuredClone(order.bookingQualification),
+            }
+          : {}),
+        ...(order.bookingRequirements
+          ? { bookingRequirements: structuredClone(order.bookingRequirements) }
+          : {}),
+      }));
   }
 
   private async listDispatchCandidatesWithEligibility(
+    dispatchJob: DispatchJobRecord,
+    order: OwnedOrderRecord,
+    includeIneligible: boolean,
+  ): Promise<DispatchCandidate[]> {
+    const candidates =
+      await this.listDispatchCandidatesWithEligibilityUnfiltered(
+        dispatchJob,
+        order,
+        includeIneligible,
+      );
+    return this.excludePlatformPresenceBlockedCandidates(candidates);
+  }
+
+  // Multi-platform driver presence (busy elsewhere, or disconnected) is not
+  // part of the runtime eligibility evaluator's own decision -- it is a
+  // dispatch-scoped concern layered on top of whatever candidate list comes
+  // back, so it is applied once here regardless of which branch below
+  // produced the list.
+  private async excludePlatformPresenceBlockedCandidates(
+    candidates: DispatchCandidate[],
+  ): Promise<DispatchCandidate[]> {
+    if (candidates.length === 0) return candidates;
+    const blocks = await Promise.all(
+      candidates.map(async (candidate) => {
+        const [presence, driverReasons] = await Promise.all([
+          this.platformPresenceService?.findDispatchBlockingPresence(
+            candidate.driverId,
+          ),
+          this.currentDriverRequirementBlocks(
+            candidate.driverId,
+            candidate.vehicleId,
+          ),
+        ]);
+        return Boolean(presence) || driverReasons.length > 0;
+      }),
+    );
+    // Applied after the scarcity fallback as well: neither fallback nor
+    // includeIneligible can offer a driver currently on leave or untrained.
+    return candidates.filter((_candidate, index) => !blocks[index]);
+  }
+
+  private async currentDriverRequirementBlocks(
+    driverId: string,
+    vehicleId: string,
+  ): Promise<string[]> {
+    if (
+      !this.runtimeEligibilityEvaluator ||
+      typeof this.runtimeEligibilityEvaluator.assessDriverRequirements !==
+        "function"
+    ) {
+      return [];
+    }
+    const current =
+      await this.runtimeEligibilityEvaluator.assessDriverRequirements(driverId);
+    const capability =
+      this.vehicleEligibilityService?.resolveRuntimeVehicleCapability(
+        vehicleId,
+      );
+    const trainingRequired = capability ? capability.trainingRequired : true;
+    return [
+      ...(current.onLeave ? ["DRIVER_ON_LEAVE"] : []),
+      ...(trainingRequired &&
+      (current.trainingIncomplete || !current.trainingSatisfied)
+        ? ["DRIVER_TRAINING_INCOMPLETE"]
+        : []),
+    ];
+  }
+
+  private async listDispatchCandidatesWithEligibilityUnfiltered(
     dispatchJob: DispatchJobRecord,
     order: OwnedOrderRecord,
     includeIneligible: boolean,
@@ -8584,33 +11746,68 @@ export class OwnedMobilityService
     const sourcePlatform = this.forwarderSourceMap.get(order.orderId) ?? null;
 
     const evaluatedCandidates = await Promise.all(
-      candidates.map(async (candidate) => {
-        const decision = await this.runtimeEligibilityEvaluator!.evaluate({
-          orderId: order.orderId,
-          dispatchJobId: dispatchJob.dispatchJobId,
-          driverId: candidate.driverId,
-          vehicleId: candidate.vehicleId,
-          serviceProductCode: serviceProduct,
-          sourcePlatform,
-          currentLocation: candidate.currentLocation ?? null,
-        });
+      candidates
+        .filter(
+          (candidate) =>
+            this.bookingRequirementCandidateAllowed(
+              order,
+              candidate.vehicleId,
+            ) &&
+            this.qualifiedVoiceCandidateAllowed(
+              order,
+              candidate.vehicleId,
+              candidate.driverId,
+            ),
+        )
+        .map(async (candidate) => {
+          const decision = await this.runtimeEligibilityEvaluator!.evaluate({
+            orderId: order.orderId,
+            dispatchJobId: dispatchJob.dispatchJobId,
+            driverId: candidate.driverId,
+            vehicleId: candidate.vehicleId,
+            serviceProductCode: serviceProduct,
+            sourcePlatform,
+            currentLocation: candidate.currentLocation ?? null,
+            ...(order.bookingRequirements
+              ? { bookingRequirements: order.bookingRequirements }
+              : {}),
+          });
 
-        return {
-          ...candidate,
-          serviceProductContext: {
-            serviceProductId: decision.serviceProductId,
-            serviceProductCode: decision.serviceProductCode,
-            policyVersion: decision.policyVersion,
-            evaluatedAt: decision.evaluatedAt,
-          },
-          eligibilityDecision: decision.decision,
-          hardReasonCodes: [...decision.hardReasonCodes],
-          softReasonCodes: [...decision.softReasonCodes],
-          missingRequirements: [...decision.missingRequirements],
-          locationState: decision.locationState,
-        } satisfies DispatchCandidate;
-      }),
+          return {
+            ...candidate,
+            ...(order.bookingRequirements
+              ? {
+                  bookingRequirements: structuredClone(
+                    order.bookingRequirements,
+                  ),
+                }
+              : {}),
+            ...(order.bookingQualification
+              ? {
+                  bookingQualification: structuredClone(
+                    order.bookingQualification,
+                  ),
+                }
+              : {}),
+            serviceProductContext: {
+              serviceProductId: decision.serviceProductId,
+              serviceProductCode: decision.serviceProductCode,
+              policyVersion: decision.policyVersion,
+              evaluatedAt: decision.evaluatedAt,
+            },
+            eligibilityDecision: decision.decision,
+            hardReasonCodes: [...decision.hardReasonCodes],
+            softReasonCodes: [...decision.softReasonCodes],
+            missingRequirements: [...decision.missingRequirements],
+            locationState: decision.locationState,
+          } satisfies DispatchCandidate;
+        }),
     );
+
+    if (order.bookingRequirements)
+      return evaluatedCandidates.filter(
+        (candidate) => candidate.eligibilityDecision === "eligible",
+      );
 
     if (includeIneligible) {
       return evaluatedCandidates;
@@ -9293,7 +12490,7 @@ export class OwnedMobilityService
 
     const hasRecording = Boolean(order.recordingId);
     const recordingMissing =
-      order.complianceFlags.includes("recording_missing");
+      order.complianceFlags?.includes("recording_missing") ?? false;
     const state: ComplianceGateState = hasRecording ? "clear" : "blocked";
     return {
       gateType: "recording",
@@ -9341,8 +12538,13 @@ export class OwnedMobilityService
     order: OwnedOrderRecord,
     task: DriverTaskRecord | null,
   ): ComplianceGateRecord | null {
+    const proofRequirements = order.proofRequirements ?? {
+      minPhotoCount: 0,
+      signoffRequired: false,
+      expenseProofRequired: false,
+    };
     const { minPhotoCount, signoffRequired, expenseProofRequired } =
-      order.proofRequirements;
+      proofRequirements;
     const required =
       minPhotoCount > 0 || signoffRequired || expenseProofRequired;
     const hasProof = this.hasCompletionProofEvidence(task?.proof);
@@ -9924,12 +13126,24 @@ export class OwnedMobilityService
     }
 
     const mismatch =
-      (identity.actorType !== "partner_api_key" &&
-        identity.actorType !== "referral_passenger") ||
-      identity.tenantId !== entry.tenantId ||
-      identity.partnerId !== entry.partnerId ||
-      identity.partnerProgramId !== entry.programId ||
-      identity.partnerEntrySlug !== entry.entrySlug;
+      identity.actorType === "referral_passenger"
+        ? identity.tenantId !== entry.tenantId ||
+          identity.partnerId !== entry.partnerId ||
+          identity.partnerProgramId !== entry.programId ||
+          identity.partnerEntrySlug !== entry.entrySlug
+        : identity.actorType !== "partner_api_key" ||
+          (identity.tenantId !== null &&
+            identity.tenantId !== undefined &&
+            identity.tenantId !== entry.tenantId) ||
+          (identity.partnerId !== null &&
+            identity.partnerId !== undefined &&
+            identity.partnerId !== entry.partnerId) ||
+          (identity.partnerProgramId !== null &&
+            identity.partnerProgramId !== undefined &&
+            identity.partnerProgramId !== entry.programId) ||
+          (identity.partnerEntrySlug !== null &&
+            identity.partnerEntrySlug !== undefined &&
+            identity.partnerEntrySlug !== entry.entrySlug);
 
     if (mismatch) {
       throw new ApiRequestError(
@@ -9944,6 +13158,77 @@ export class OwnedMobilityService
     }
   }
 
+  private normalizeReferralRatingTags(value: string[] | undefined) {
+    if (value === undefined) {
+      return [];
+    }
+    if (!Array.isArray(value) || value.length > 10) {
+      throw new ApiRequestError(
+        HttpStatus.BAD_REQUEST,
+        "PASSENGER_RATING_TAGS_INVALID",
+        "tags must contain at most 10 values.",
+      );
+    }
+    return [
+      ...new Set(
+        value.map((item) => item?.trim()).filter((item) => item.length > 0),
+      ),
+    ].sort();
+  }
+
+  private assertIdempotentReferralRating(
+    existing: {
+      orderId: string;
+      score: 1 | 2 | 3 | 4 | 5;
+      comment?: string;
+      tags: string[];
+      submittedAt: string;
+    },
+    score: 1 | 2 | 3 | 4 | 5,
+    tags: string[],
+    comment: string | null,
+  ) {
+    if (
+      existing.score !== score ||
+      (existing.comment ?? null) !== comment ||
+      JSON.stringify([...existing.tags].sort()) !== JSON.stringify(tags)
+    ) {
+      throw new ApiRequestError(
+        HttpStatus.CONFLICT,
+        "PASSENGER_RATING_ALREADY_SUBMITTED",
+        "A different rating has already been submitted for this trip.",
+        { orderId: existing.orderId },
+      );
+    }
+  }
+
+  private getReferralLifecycle(order: OwnedOrderRecord) {
+    return order.referralPassengerLifecycle ?? null;
+  }
+
+  private updateReferralLifecycle(
+    order: OwnedOrderRecord,
+    patch: NonNullable<OwnedOrderRecord["referralPassengerLifecycle"]>,
+  ) {
+    const nextOrder: OwnedOrderRecord = {
+      ...order,
+      ...(order.bookingQualification
+        ? { bookingQualification: structuredClone(order.bookingQualification) }
+        : {}),
+      referralPassengerLifecycle: {
+        ...(this.getReferralLifecycle(order) ?? {}),
+        ...patch,
+      },
+      updatedAt: new Date().toISOString(),
+    };
+
+    this.orders = this.orders.map((candidate) =>
+      candidate.orderId === order.orderId ? nextOrder : candidate,
+    );
+
+    return nextOrder;
+  }
+
   private assertPartnerOrderIdentity(
     identity: BootstrapRequestIdentity | null | undefined,
     order: OwnedOrderRecord,
@@ -9952,20 +13237,27 @@ export class OwnedMobilityService
       return;
     }
 
+    const passengerId = identity.drtsPassengerId ?? identity.actorId;
+
     const mismatch =
       (identity.actorType !== "partner_api_key" &&
         identity.actorType !== "referral_passenger") ||
       !order.partnerEntrySlug ||
-      identity.tenantId !== order.tenantId ||
-      identity.partnerId !== order.partnerId ||
-      identity.partnerProgramId !== order.partnerProgramId ||
-      identity.partnerEntrySlug !== order.partnerEntrySlug;
+      (identity.tenantId && identity.tenantId !== order.tenantId) ||
+      (identity.partnerId && identity.partnerId !== order.partnerId) ||
+      (identity.partnerProgramId &&
+        identity.partnerProgramId !== order.partnerProgramId) ||
+      identity.partnerEntrySlug !== order.partnerEntrySlug ||
+      (identity.actorType === "referral_passenger" &&
+        passengerId &&
+        order.passenger?.passengerId &&
+        passengerId !== order.passenger.passengerId);
 
     if (mismatch) {
       throw new ApiRequestError(
         HttpStatus.FORBIDDEN,
         "PARTNER_SCOPE_MISMATCH",
-        "Authenticated partner identity cannot read another partner booking.",
+        "Authenticated partner identity cannot access another partner/passenger booking.",
         {
           orderId: order.orderId,
           tenantId: order.tenantId,
@@ -9974,11 +13266,665 @@ export class OwnedMobilityService
     }
   }
 
+  async createReferralPassengerBooking(
+    command: CreateReferralPassengerBookingCommand,
+    identity?: BootstrapRequestIdentity | null,
+    requestId?: string,
+    runtimeProfileCodeHeader?: string,
+    idempotencyKeyHeader?: string,
+  ): Promise<TenantBookingResult> {
+    if (
+      !identity ||
+      identity.realm !== "partner" ||
+      identity.actorType !== "referral_passenger"
+    ) {
+      throw new ApiRequestError(
+        HttpStatus.FORBIDDEN,
+        "REFERRAL_PASSENGER_IDENTITY_REQUIRED",
+        "Creating a referral passenger booking requires an active referral_passenger identity.",
+      );
+    }
+
+    if (identity.partnerEntrySlug !== command.entrySlug) {
+      throw new ApiRequestError(
+        HttpStatus.FORBIDDEN,
+        "PARTNER_SCOPE_MISMATCH",
+        "Referral passenger identity cannot book for a different entrySlug.",
+      );
+    }
+
+    const tenantId = identity.tenantId;
+    if (!tenantId) {
+      throw new ApiRequestError(
+        HttpStatus.BAD_REQUEST,
+        "TENANT_ID_REQUIRED",
+        "Referral passenger identity missing tenantId.",
+      );
+    }
+
+    const passengerId =
+      identity.drtsPassengerId ?? identity.actorId ?? "pax-ref-anon";
+
+    if (!this.tenantPartnerService) {
+      throw new ApiRequestError(
+        HttpStatus.SERVICE_UNAVAILABLE,
+        "PARTNER_ENTRY_UNAVAILABLE",
+        "Partner entry services are unavailable for this booking flow.",
+        { tenantId, entrySlug: command.entrySlug },
+      );
+    }
+    const partnerEntry = this.tenantPartnerService.getPartnerEntry(
+      command.entrySlug,
+    );
+
+    if (command.scheduledAt) {
+      this.assertBookingLeadTime(command.scheduledAt);
+    }
+
+    try {
+      this.tenantPartnerService.getPassengerMasterRecord(tenantId, passengerId);
+    } catch {
+      this.tenantPartnerService.upsertPassenger(tenantId, {
+        passengerId,
+        fullName: command.passengerName || "Referral Passenger",
+        mobile: command.passengerPhone || "0912345678",
+      });
+    }
+
+    // Reconcile header and body idempotency key with documented precedence:
+    // HTTP Header `Idempotency-Key` takes precedence over body field `idempotencyKey`.
+    const resolvedIdempotencyKey =
+      idempotencyKeyHeader?.trim() ||
+      command.idempotencyKey?.trim() ||
+      undefined;
+
+    if (resolvedIdempotencyKey) {
+      const existing = Array.from(this.orders.values()).find(
+        (o) =>
+          o.tenantId === tenantId &&
+          o.partnerEntrySlug === identity.partnerEntrySlug &&
+          o.passenger?.passengerId === passengerId &&
+          this.getReferralLifecycle(o)?.bookingIdempotencyKey ===
+            resolvedIdempotencyKey,
+      );
+      if (existing) {
+        return {
+          orderId: existing.orderId,
+          bookingId: existing.bookingId ?? existing.orderId,
+          serviceBucket: "business_dispatch",
+          businessDispatchSubtype:
+            existing.businessDispatchSubtype ?? "enterprise_dispatch",
+          dispatchSemantics: "reservation",
+          status: existing.status,
+          replayed: true,
+        };
+      }
+
+      const scope = `tenant:${tenantId}:booking_create`;
+      const idempotencyService = this.getIdempotencyService();
+
+      const result = await idempotencyService.execute<TenantBookingResult>({
+        scope,
+        idempotencyKey: resolvedIdempotencyKey,
+        tenantId,
+        actorId: passengerId,
+        requestPath: "/partner/referral/passenger/bookings",
+        required: false,
+        payload: {
+          ...command,
+          ...(command.idempotencyKey
+            ? { idempotencyKey: resolvedIdempotencyKey }
+            : {}),
+        },
+        execute: async () => {
+          if (command.scheduledAt) {
+            this.assertBookingLeadTime(command.scheduledAt);
+          }
+          const isImmediateReferral = !command.scheduledAt;
+          const reservationWindowStart =
+            command.scheduledAt ?? new Date().toISOString();
+          const tenantBookingCommand: CreateTenantBookingCommand = {
+            businessDispatchSubtype: partnerEntry.businessDispatchSubtype,
+            direction: "pickup",
+            pickup: {
+              address: command.pickupAddress,
+              lat: 25.033,
+              lng: 121.565,
+            },
+            dropoff: {
+              address: command.dropoffAddress,
+              lat: 25.048,
+              lng: 121.517,
+            },
+            reservationWindowStart,
+            reservationWindowEnd: new Date(
+              new Date(reservationWindowStart).getTime() + 3600000,
+            ).toISOString(),
+            passengerId,
+            passenger: {
+              passengerId,
+              name: command.passengerName || "Referral Passenger",
+              phone: command.passengerPhone || "0912345678",
+            },
+            ...(identity.partnerEntrySlug
+              ? { partnerEntrySlug: identity.partnerEntrySlug }
+              : {}),
+          };
+
+          const bookingResult = await this.createTenantBooking(
+            tenantBookingCommand,
+            tenantId,
+            identity,
+            requestId,
+            runtimeProfileCodeHeader,
+            undefined,
+            { isImmediateReferral },
+          );
+
+          if (
+            typeof bookingResult === "object" &&
+            bookingResult &&
+            "orderId" in bookingResult
+          ) {
+            const order = this.orders.find(
+              (o) => o.orderId === bookingResult.orderId,
+            );
+            if (order) {
+              const nextOrder = this.updateReferralLifecycle(order, {
+                bookingIdempotencyKey: resolvedIdempotencyKey,
+              });
+              await this.persistChangesRequired(
+                { orders: [nextOrder] },
+                "referral.booking.idempotency",
+              );
+            }
+          }
+
+          return {
+            data: {
+              ...bookingResult,
+              replayed: false,
+            },
+            statusCode: 201,
+          };
+        },
+      });
+
+      return {
+        ...result.data,
+        replayed: result.isReplay,
+      };
+    }
+
+    if (command.scheduledAt) {
+      this.assertBookingLeadTime(command.scheduledAt);
+    }
+    const isImmediateReferral = !command.scheduledAt;
+    const reservationWindowStart =
+      command.scheduledAt ?? new Date().toISOString();
+    const tenantBookingCommand: CreateTenantBookingCommand = {
+      // The partner entry owns the service product. VehicleType is a passenger
+      // display preference, not an authorization to select a product.
+      businessDispatchSubtype: partnerEntry.businessDispatchSubtype,
+      direction: "pickup",
+      pickup: {
+        address: command.pickupAddress,
+        lat: 25.033,
+        lng: 121.565,
+      },
+      dropoff: {
+        address: command.dropoffAddress,
+        lat: 25.048,
+        lng: 121.517,
+      },
+      reservationWindowStart,
+      reservationWindowEnd: new Date(
+        new Date(reservationWindowStart).getTime() + 3600000,
+      ).toISOString(),
+      passengerId,
+      passenger: {
+        passengerId,
+        name: command.passengerName || "Referral Passenger",
+        phone: command.passengerPhone || "0912345678",
+      },
+      ...(identity.partnerEntrySlug
+        ? { partnerEntrySlug: identity.partnerEntrySlug }
+        : {}),
+    };
+
+    const result = await this.createTenantBooking(
+      tenantBookingCommand,
+      tenantId,
+      identity,
+      requestId,
+      runtimeProfileCodeHeader,
+      undefined,
+      { isImmediateReferral },
+    );
+
+    return result;
+  }
+
+  private resolveReferralTripDetails(order: OwnedOrderRecord) {
+    const assignment = this.dispatchAssignments.find(
+      (a) =>
+        a.orderId === order.orderId &&
+        ["assigned", "accepted"].includes(a.status),
+    );
+    const task = this.driverTasks.find(
+      (t) =>
+        t.orderId === order.orderId &&
+        !["cancelled", "rejected"].includes(t.status),
+    );
+
+    const candidate = (order as unknown as Record<string, unknown>)
+      .dispatchCandidate as
+      | {
+          driverName?: string;
+          plateNumber?: string;
+          driverPhoneMasked?: string;
+        }
+      | undefined;
+
+    let driverName: string | null = candidate?.driverName ?? null;
+    let plateNumber: string | null = candidate?.plateNumber ?? null;
+    let driverPhoneMasked: string | null = candidate?.driverPhoneMasked ?? null;
+
+    const driverId = task?.driverId ?? assignment?.driverId;
+    const vehicleId = task?.vehicleId ?? assignment?.vehicleId;
+
+    if (driverId && this.regulatoryRegistryService) {
+      const driver = this.regulatoryRegistryService
+        .listDrivers()
+        .find((d) => d.driverId === driverId);
+      if (driver?.name) {
+        driverName = driver.name;
+      }
+    }
+
+    if (vehicleId && this.regulatoryRegistryService) {
+      const vehicle = this.regulatoryRegistryService
+        .listVehicles()
+        .find((v) => v.vehicleId === vehicleId);
+      if (vehicle?.plateNo) {
+        plateNumber = vehicle.plateNo;
+      }
+    }
+
+    if (driverName && !driverPhoneMasked) {
+      driverPhoneMasked = "0912-***-888";
+    }
+
+    let fareTotal = 0;
+    if (order.status !== "cancelled") {
+      if (
+        task?.fare?.amountMinor !== undefined &&
+        task.fare.amountMinor !== null
+      ) {
+        fareTotal = Math.round(task.fare.amountMinor / 100);
+      } else if (
+        order.quotedFare?.amountMinor !== undefined &&
+        order.quotedFare.amountMinor !== null
+      ) {
+        fareTotal = Math.round(order.quotedFare.amountMinor / 100);
+      } else {
+        fareTotal = 290;
+      }
+    }
+
+    return {
+      assignment,
+      task,
+      driverName,
+      plateNumber,
+      driverPhoneMasked,
+      fareTotal,
+    };
+  }
+
+  getReferralPassengerActiveTrip(
+    identity?: BootstrapRequestIdentity | null,
+  ): ReferralPassengerActiveTripResult {
+    if (
+      !identity ||
+      identity.realm !== "partner" ||
+      identity.actorType !== "referral_passenger"
+    ) {
+      throw new ApiRequestError(
+        HttpStatus.FORBIDDEN,
+        "REFERRAL_PASSENGER_IDENTITY_REQUIRED",
+        "Referral passenger active trip lookup requires an active referral_passenger identity.",
+      );
+    }
+
+    const passengerId = identity.drtsPassengerId ?? identity.actorId;
+
+    const activeOrder = Array.from(this.orders.values()).find(
+      (o) =>
+        o.tenantId === identity.tenantId &&
+        o.partnerEntrySlug === identity.partnerEntrySlug &&
+        o.passenger?.passengerId === passengerId &&
+        o.status !== "completed" &&
+        o.status !== "cancelled",
+    );
+
+    if (!activeOrder) {
+      return { active: false, trip: null };
+    }
+
+    const details = this.resolveReferralTripDetails(activeOrder);
+    const isRated = Boolean(this.getReferralLifecycle(activeOrder)?.rating);
+
+    return {
+      active: true,
+      trip: {
+        orderId: activeOrder.orderId,
+        orderNo: activeOrder.orderNo,
+        status: activeOrder.status,
+        statusCode: activeOrder.status,
+        etaMin: activeOrder.etaSnapshot?.etaMinutes ?? 5,
+        cancelWindowMin: 2,
+        pickupAddress: activeOrder.pickup.address,
+        dropoffAddress: activeOrder.dropoff.address,
+        driverName: details.driverName,
+        driverPhoneMasked: details.driverPhoneMasked,
+        plateNumber: details.plateNumber,
+        vehicleType:
+          activeOrder.serviceProductCode ??
+          activeOrder.businessDispatchSubtype ??
+          "standard",
+        estimatedFare: details.fareTotal,
+        createdAt: activeOrder.createdAt ?? new Date().toISOString(),
+        updatedAt: activeOrder.updatedAt ?? new Date().toISOString(),
+        rated: isRated,
+      },
+    };
+  }
+
+  listReferralPassengerHistory(identity?: BootstrapRequestIdentity | null): {
+    items: ReferralPassengerHistoryItem[];
+  } {
+    if (
+      !identity ||
+      identity.realm !== "partner" ||
+      identity.actorType !== "referral_passenger"
+    ) {
+      throw new ApiRequestError(
+        HttpStatus.FORBIDDEN,
+        "REFERRAL_PASSENGER_IDENTITY_REQUIRED",
+        "Referral passenger history lookup requires an active referral_passenger identity.",
+      );
+    }
+
+    const passengerId = identity.drtsPassengerId ?? identity.actorId;
+
+    const passengerOrders = Array.from(this.orders.values())
+      .filter(
+        (o) =>
+          o.tenantId === identity.tenantId &&
+          o.partnerEntrySlug === identity.partnerEntrySlug &&
+          o.passenger?.passengerId === passengerId,
+      )
+      .sort((a, b) => (b.createdAt || "").localeCompare(a.createdAt || ""));
+
+    return {
+      items: passengerOrders.map((o) => {
+        const details = this.resolveReferralTripDetails(o);
+        const completedAt = (o as unknown as Record<string, unknown>)
+          .completedAt as string | undefined;
+        return {
+          orderId: o.orderId,
+          orderNo: o.orderNo,
+          status: o.status,
+          pickupAddress: o.pickup.address,
+          dropoffAddress: o.dropoff.address,
+          fareTotal: details.fareTotal,
+          formattedFare: `NT$ ${details.fareTotal}`,
+          completedAt:
+            completedAt ??
+            o.cancelledAt ??
+            o.createdAt ??
+            new Date().toISOString(),
+          createdAt: o.createdAt ?? new Date().toISOString(),
+        };
+      }),
+    };
+  }
+
+  getReferralPassengerReceipt(
+    orderId: string,
+    identity?: BootstrapRequestIdentity | null,
+  ): ReferralPassengerReceipt {
+    if (
+      !identity ||
+      identity.realm !== "partner" ||
+      identity.actorType !== "referral_passenger"
+    ) {
+      throw new ApiRequestError(
+        HttpStatus.FORBIDDEN,
+        "REFERRAL_PASSENGER_IDENTITY_REQUIRED",
+        "Receipt lookup requires an active referral_passenger identity.",
+      );
+    }
+
+    const passengerId = identity.drtsPassengerId ?? identity.actorId;
+
+    const order = this.getOrder(orderId, identity);
+    this.assertPartnerOrderIdentity(identity, order);
+
+    if (
+      order.passenger?.passengerId &&
+      order.passenger.passengerId !== passengerId
+    ) {
+      throw new ApiRequestError(
+        HttpStatus.FORBIDDEN,
+        "PASSENGER_SCOPE_MISMATCH",
+        "Authenticated referral passenger cannot view receipt of another passenger.",
+      );
+    }
+
+    const details = this.resolveReferralTripDetails(order);
+
+    const maskName = (name?: string | null) => {
+      if (!name) return "L. Tsai";
+      const parts = name.trim().split(/\s+/);
+      if (parts.length > 1 && parts[0] && parts[parts.length - 1]) {
+        return `${parts[0][0]}. ${parts[parts.length - 1]}`;
+      }
+      return name.length > 0 ? `${name[0]}*` : "L. Tsai";
+    };
+
+    const maskPhone = (phone?: string | null) => {
+      if (!phone) return "0912-***-820";
+      const cleaned = phone.replace(/[^\d+]/g, "");
+      if (cleaned.length >= 10) {
+        return `${cleaned.slice(0, 4)}-***-${cleaned.slice(-3)}`;
+      }
+      return "0912-***-820";
+    };
+
+    const total = details.fareTotal;
+    const fareBase = total > 0 ? Math.round(total * 0.35) : 0;
+    const fareDistance = total > 0 ? Math.round(total * 0.45) : 0;
+    const fareTime = total > 0 ? total - fareBase - fareDistance : 0;
+    const completedAt = (order as unknown as Record<string, unknown>)
+      .completedAt as string | undefined;
+
+    return {
+      orderId: order.orderId,
+      orderNo: order.orderNo,
+      status: order.status,
+      completedAt:
+        completedAt ??
+        order.cancelledAt ??
+        order.createdAt ??
+        new Date().toISOString(),
+      passengerNameMasked: maskName(order.passenger?.name),
+      passengerPhoneMasked: maskPhone(order.passenger?.phone),
+      driverName: details.driverName,
+      plateNumber: details.plateNumber,
+      vehicleType:
+        order.serviceProductCode ?? order.businessDispatchSubtype ?? "standard",
+      pickupAddress: order.pickup.address,
+      dropoffAddress: order.dropoff.address,
+      fareBase,
+      fareDistance,
+      fareTime,
+      totalFare: total,
+      formattedTotal: `NT$ ${total}`,
+      paymentChannel: `${identity.partnerEntrySlug} (月結)`,
+      downloadUrl: `/api/referral/receipt/${order.orderId}/download`,
+    };
+  }
+
+  async cancelReferralPassengerTrip(
+    orderId: string,
+    command: CancelReferralPassengerTripCommand,
+    identity?: BootstrapRequestIdentity | null,
+    requestId?: string,
+  ): Promise<OwnedOrderRecord> {
+    if (
+      !identity ||
+      identity.realm !== "partner" ||
+      identity.actorType !== "referral_passenger"
+    ) {
+      throw new ApiRequestError(
+        HttpStatus.FORBIDDEN,
+        "REFERRAL_PASSENGER_IDENTITY_REQUIRED",
+        "Cancelling a referral trip requires an active referral_passenger identity.",
+      );
+    }
+
+    const passengerId = identity.drtsPassengerId ?? identity.actorId;
+
+    const order = this.getOrder(orderId, identity);
+    this.assertPartnerOrderIdentity(identity, order);
+
+    if (
+      order.passenger?.passengerId &&
+      order.passenger.passengerId !== passengerId
+    ) {
+      throw new ApiRequestError(
+        HttpStatus.FORBIDDEN,
+        "PASSENGER_SCOPE_MISMATCH",
+        "Authenticated referral passenger cannot cancel another passenger's trip.",
+      );
+    }
+
+    if (order.status === "cancelled") {
+      return order;
+    }
+
+    return await this.cancelOwnedOrder(
+      orderId,
+      {
+        reason: command.reason || "Cancelled by referral passenger",
+      },
+      requestId,
+    );
+  }
+
+  async submitReferralPassengerRating(
+    orderId: string,
+    command: SubmitReferralPassengerRatingCommand,
+    identity?: BootstrapRequestIdentity | null,
+  ) {
+    if (
+      !identity ||
+      identity.realm !== "partner" ||
+      identity.actorType !== "referral_passenger"
+    ) {
+      throw new ApiRequestError(
+        HttpStatus.FORBIDDEN,
+        "REFERRAL_PASSENGER_IDENTITY_REQUIRED",
+        "Rating a referral trip requires an active referral_passenger identity.",
+      );
+    }
+
+    const passengerId = identity.drtsPassengerId ?? identity.actorId;
+
+    const order = this.getOrder(orderId, identity);
+    this.assertPartnerOrderIdentity(identity, order);
+
+    if (
+      order.passenger?.passengerId &&
+      order.passenger.passengerId !== passengerId
+    ) {
+      throw new ApiRequestError(
+        HttpStatus.FORBIDDEN,
+        "PASSENGER_SCOPE_MISMATCH",
+        "Authenticated referral passenger cannot rate another passenger's trip.",
+      );
+    }
+
+    if (order.status !== "completed") {
+      throw new ApiRequestError(
+        HttpStatus.CONFLICT,
+        "PASSENGER_RATING_TRIP_NOT_COMPLETED",
+        "A passenger rating can only be submitted after trip completion.",
+        { orderId: order.orderId, status: order.status },
+      );
+    }
+
+    const score = command.score;
+    const tags = this.normalizeReferralRatingTags(command.tags);
+    const comment = command.comment?.trim() || null;
+
+    const existing = this.getReferralLifecycle(order)?.rating;
+    if (existing) {
+      this.assertIdempotentReferralRating(existing, score, tags, comment);
+      return {
+        orderId,
+        score: existing.score,
+        comment: existing.comment ?? null,
+        tags: existing.tags ?? [],
+        submittedAt: existing.submittedAt,
+      };
+    }
+
+    const ratingRecord: NonNullable<
+      NonNullable<OwnedOrderRecord["referralPassengerLifecycle"]>["rating"]
+    > = {
+      orderId,
+      score,
+      tags,
+      submittedAt: new Date().toISOString(),
+    };
+    if (comment) {
+      ratingRecord.comment = comment;
+    }
+    if (command.idempotencyKey) {
+      ratingRecord.idempotencyKey = command.idempotencyKey;
+    }
+
+    const nextOrder = this.updateReferralLifecycle(order, {
+      rating: ratingRecord,
+    });
+    await this.persistChangesRequired(
+      { orders: [nextOrder] },
+      "referral.rating.idempotency",
+    );
+
+    return {
+      orderId,
+      score: ratingRecord.score,
+      comment: ratingRecord.comment ?? null,
+      tags: ratingRecord.tags,
+      submittedAt: ratingRecord.submittedAt,
+    };
+  }
+
   private cloneOrder(order: OwnedOrderRecord): OwnedOrderRecord {
     const complianceGates = this.listComplianceGatesForOrder(order);
     const queueState = this.resolveDispatchQueueState(order, complianceGates);
     return {
       ...order,
+      ...(order.bookingQualification
+        ? { bookingQualification: structuredClone(order.bookingQualification) }
+        : {}),
+      ...(order.bookingRequirements
+        ? { bookingRequirements: structuredClone(order.bookingRequirements) }
+        : {}),
       pickup: { ...order.pickup },
       dropoff: { ...order.dropoff },
       passenger: { ...order.passenger },
@@ -10016,6 +13962,19 @@ export class OwnedMobilityService
         : null,
       dispatchTimeout: order.dispatchTimeout
         ? { ...order.dispatchTimeout }
+        : null,
+      referralPassengerLifecycle: order.referralPassengerLifecycle
+        ? {
+            ...order.referralPassengerLifecycle,
+            ...(order.referralPassengerLifecycle.rating
+              ? {
+                  rating: {
+                    ...order.referralPassengerLifecycle.rating,
+                    tags: [...order.referralPassengerLifecycle.rating.tags],
+                  },
+                }
+              : {}),
+          }
         : null,
     };
   }
@@ -10132,6 +14091,12 @@ export class OwnedMobilityService
     );
     return {
       ...task,
+      ...(task.bookingQualification
+        ? { bookingQualification: structuredClone(task.bookingQualification) }
+        : {}),
+      ...(task.bookingRequirements
+        ? { bookingRequirements: structuredClone(task.bookingRequirements) }
+        : {}),
       fare: task.fare ? { ...task.fare } : null,
       proof: task.proof
         ? {

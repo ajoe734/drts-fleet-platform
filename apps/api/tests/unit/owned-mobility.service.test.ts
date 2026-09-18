@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { buildOrderFixture } from "../integration/voice-order-fixture";
 
 import { EventEmitter2 } from "@nestjs/event-emitter";
 import { HttpStatus, Logger } from "@nestjs/common";
@@ -19,12 +20,25 @@ import { OpsDispatchEventsService } from "../../src/common/ops-dispatch-events.s
 import { AuditNotificationService } from "../../src/modules/audit-notification/audit-notification.service";
 import { OwnedMobilityTaskEventsService } from "../../src/modules/owned-mobility/owned-mobility-task-events.service";
 import { OwnedMobilityService } from "../../src/modules/owned-mobility/owned-mobility.service";
+import {
+  OwnedOrderDuplicateVoiceLinkError,
+  OwnedOrderVersionConflictError,
+} from "../../src/modules/owned-mobility/owned-mobility.repository";
 import { FareAnomalyRepository } from "../../src/modules/product-rule/fare-anomaly.repository";
 import { FareAnomalyService } from "../../src/modules/product-rule/fare-anomaly.service";
 import { ServiceAreaService } from "../../src/modules/service-area/service-area.service";
 import { ServiceProductService } from "../../src/modules/service-product/service-product.service";
 import { TenantPartnerService } from "../../src/modules/tenant-partner/tenant-partner.service";
 import { VehicleEligibilityService } from "../../src/modules/vehicle-eligibility/vehicle-eligibility.service";
+
+function defaultReservationWindowStart(offsetHours = 2): string {
+  return new Date(Date.now() + offsetHours * 3600_000).toISOString();
+}
+
+function defaultReservationWindowEnd(offsetHours = 3): string {
+  return new Date(Date.now() + offsetHours * 3600_000).toISOString();
+}
+
 
 const SAMPLE_PROOF_PHOTO = "cHJvb2YtcGhvdG8tMDAx";
 const DEFAULT_VEHICLE_LICENSE_TYPES: Record<string, string> = {
@@ -98,6 +112,7 @@ function createOwnedMobilityService(options?: {
     persistDriverCompletionOutbox?: (...args: any[]) => Promise<unknown>;
     withTransaction: <T>(work: (tx: unknown) => Promise<T>) => Promise<T>;
     loadState?: (...args: any[]) => Promise<unknown>;
+    loadOrderCancellationForUpdate?: (...args: any[]) => Promise<unknown>;
     loadDriverTaskCompletionBundleForUpdate?: (
       ...args: any[]
     ) => Promise<unknown>;
@@ -233,12 +248,46 @@ function createOwnedMobilityService(options?: {
     vehicleEligibilityService,
     serviceProductService,
     undefined,
-    options?.runtimeEligibilityEvaluator as never,
+    (options?.runtimeEligibilityEvaluator
+      ? {
+          // These pre-existing decoration fixtures model available, trained
+          // drivers; SR-WIRE-001 tests exercise blocked/recovered authorities.
+          assessDriverRequirements: vi.fn().mockResolvedValue({
+            onLeave: false,
+            trainingIncomplete: false,
+            trainingSatisfied: true,
+          }),
+          ...options.runtimeEligibilityEvaluator,
+        }
+      : undefined) as never,
     undefined,
     undefined,
     options?.serviceAreaService,
     options?.fareAnomalyService,
   );
+
+  if (
+    options?.repository &&
+    !options.repository.loadOrderCancellationForUpdate
+  ) {
+    options.repository.loadOrderCancellationForUpdate = vi.fn(
+      async (_tx, orderId) => {
+        const snapshot = service.getReportingSnapshot();
+        return {
+          order: service.getOrder(orderId),
+          assignment:
+            snapshot.dispatchAssignments.find(
+              (assignment) =>
+                assignment.orderId === orderId &&
+                ["assigned", "accepted"].includes(assignment.status),
+            ) ?? null,
+          dispatchJobs: snapshot.dispatchJobs.filter(
+            (job) => job.orderId === orderId,
+          ),
+        };
+      },
+    );
+  }
 
   return {
     service,
@@ -412,7 +461,7 @@ describe("OwnedMobilityService queue and reservation orchestration", () => {
     }
   });
 
-  it("routes manual-review service-area stops away from normal dispatch", () => {
+  it("routes manual-review service-area stops away from normal dispatch", async () => {
     const { service } = createOwnedMobilityService({
       serviceAreaService: new ServiceAreaService(),
       candidates: [
@@ -426,7 +475,7 @@ describe("OwnedMobilityService queue and reservation orchestration", () => {
       ],
     });
 
-    const order = service.createCallCenterOrder({
+    const order = await service.createCallCenterOrder({
       callId: "call-map-review-001",
       agentId: "ops-agent-001",
       recordingId: "recording-map-review-001",
@@ -479,7 +528,7 @@ describe("OwnedMobilityService queue and reservation orchestration", () => {
     }
   });
 
-  it("keeps provider-outage call-center capture in manual review instead of normal ready", () => {
+  it("keeps provider-outage call-center capture in manual review instead of normal ready", async () => {
     const { service } = createOwnedMobilityService({
       serviceAreaService: new ServiceAreaService(),
       candidates: [
@@ -493,7 +542,7 @@ describe("OwnedMobilityService queue and reservation orchestration", () => {
       ],
     });
 
-    const order = service.createCallCenterOrder({
+    const order = await service.createCallCenterOrder({
       callId: "call-map-provider-001",
       agentId: "ops-agent-001",
       recordingId: "recording-map-provider-001",
@@ -558,12 +607,12 @@ describe("OwnedMobilityService queue and reservation orchestration", () => {
     }
   });
 
-  it("persists service-area snapshots and emits spatial audit events for coordinate-bearing phone orders", () => {
+  it("persists service-area snapshots and emits spatial audit events for coordinate-bearing phone orders", async () => {
     const { service, auditNotificationService } = createOwnedMobilityService({
       serviceAreaService: new ServiceAreaService(),
     });
 
-    const order = service.createCallCenterOrder(
+    const order = await service.createCallCenterOrder(
       {
         callId: "call-map-audit-001",
         agentId: "ops-agent-geo-001",
@@ -748,8 +797,8 @@ describe("OwnedMobilityService queue and reservation orchestration", () => {
     const booking = await service.createTenantBooking(
       {
         businessDispatchSubtype: "insurance_replacement_vehicle",
-        reservationWindowStart: "2026-06-05T10:00:00.000Z",
-        reservationWindowEnd: "2026-06-05T11:00:00.000Z",
+        reservationWindowStart: defaultReservationWindowStart(),
+        reservationWindowEnd: defaultReservationWindowEnd(),
         pickup: {
           address: "Some place outside any service area",
           lat: 24.15,
@@ -1022,8 +1071,8 @@ describe("OwnedMobilityService queue and reservation orchestration", () => {
     const booking = await service.createTenantBooking(
       {
         businessDispatchSubtype: "enterprise_dispatch",
-        reservationWindowStart: "2026-06-05T10:00:00.000Z",
-        reservationWindowEnd: "2026-06-05T11:00:00.000Z",
+        reservationWindowStart: defaultReservationWindowStart(),
+        reservationWindowEnd: defaultReservationWindowEnd(),
         pickup: { address: "台中市西屯區台灣大道 1 號" },
         dropoff: { address: "台中市南屯區公益路 2 號" },
         passenger: { name: "測試乘客", phone: "0911222333" },
@@ -1071,8 +1120,8 @@ describe("OwnedMobilityService queue and reservation orchestration", () => {
     const booking = service.createTenantBooking(
       {
         businessDispatchSubtype: "enterprise_dispatch",
-        reservationWindowStart: "2026-06-05T10:00:00.000Z",
-        reservationWindowEnd: "2026-06-05T11:00:00.000Z",
+        reservationWindowStart: defaultReservationWindowStart(),
+        reservationWindowEnd: defaultReservationWindowEnd(),
         pickup: { address: "台中市西屯區台灣大道 1 號" },
         dropoff: { address: "台中市南屯區公益路 2 號" },
         passenger: { name: "測試乘客", phone: "0911222333" },
@@ -1187,8 +1236,8 @@ describe("OwnedMobilityService queue and reservation orchestration", () => {
     const booking = await service.createTenantBooking(
       {
         businessDispatchSubtype: "credit_card_airport_transfer",
-        reservationWindowStart: "2026-06-20T14:00:00.000Z",
-        reservationWindowEnd: "2026-06-20T15:00:00.000Z",
+        reservationWindowStart: defaultReservationWindowStart(),
+        reservationWindowEnd: defaultReservationWindowEnd(),
         pickup: { address: "Pickup" },
         dropoff: { address: "Dropoff" },
         passenger: { name: "Rider One", phone: "0912000000" },
@@ -1227,8 +1276,8 @@ describe("OwnedMobilityService queue and reservation orchestration", () => {
     const booking = await service.createTenantBooking(
       {
         businessDispatchSubtype: "credit_card_airport_transfer",
-        reservationWindowStart: "2026-06-20T14:00:00.000Z",
-        reservationWindowEnd: "2026-06-20T15:00:00.000Z",
+        reservationWindowStart: defaultReservationWindowStart(),
+        reservationWindowEnd: defaultReservationWindowEnd(),
         pickup: { address: "Pickup" },
         dropoff: { address: "Dropoff" },
         passenger: { name: "Rider One", phone: "0912000000" },
@@ -1259,14 +1308,21 @@ describe("OwnedMobilityService queue and reservation orchestration", () => {
 
   it("uses repository transactions for assignment-time recheck when persistence is enabled", async () => {
     let vehicleDispatchable = true;
+    let finishPendingWrites!: () => void;
+    const pendingWrites = new Promise<void>((resolve) => {
+      finishPendingWrites = resolve;
+    });
     const repository = {
       isEnabled: () => true,
-      persistChanges: vi.fn(async () => undefined),
+      persistChanges: vi.fn(() => pendingWrites),
       persistOrderWorkflow: vi.fn(async () => undefined),
       withTransaction: vi.fn(async (work: (tx: unknown) => Promise<unknown>) =>
         work({}),
       ),
       reportPersistenceFailure: vi.fn(),
+      reserveDispatchResources: vi.fn(async () => []),
+      releaseDispatchResourceReservations: vi.fn(async () => 0),
+      occupyDispatchResourceReservations: vi.fn(async () => 0),
     };
     const { service } = createOwnedMobilityService({
       candidates: [
@@ -1292,13 +1348,15 @@ describe("OwnedMobilityService queue and reservation orchestration", () => {
     });
     vehicleDispatchable = false;
 
-    await expect(
-      service.assignDispatch({
-        dispatchJobId: dispatchResult.dispatchJobId,
-        vehicleId: "vehicle-001",
-        driverId: "driver-001",
-      }),
-    ).rejects.toMatchObject({
+    const assignment = service.assignDispatch({
+      dispatchJobId: dispatchResult.dispatchJobId,
+      vehicleId: "vehicle-001",
+      driverId: "driver-001",
+    });
+    await Promise.resolve();
+    expect(repository.withTransaction).not.toHaveBeenCalled();
+    finishPendingWrites();
+    await expect(assignment).rejects.toMatchObject({
       response: {
         error: {
           code: "ELIGIBILITY_CHANGED_BEFORE_ASSIGNMENT",
@@ -1425,8 +1483,8 @@ describe("OwnedMobilityService queue and reservation orchestration", () => {
     const booking = await service.createTenantBooking(
       {
         businessDispatchSubtype: "enterprise_dispatch",
-        reservationWindowStart: "2026-06-20T13:00:00.000Z",
-        reservationWindowEnd: "2026-06-20T14:00:00.000Z",
+        reservationWindowStart: defaultReservationWindowStart(),
+        reservationWindowEnd: defaultReservationWindowEnd(),
         pickup: { address: "HQ", lat: 25.033, lng: 121.5654 },
         dropoff: { address: "Airport" },
         passenger: { name: "Rider", phone: "0912000000" },
@@ -1491,8 +1549,8 @@ describe("OwnedMobilityService queue and reservation orchestration", () => {
     const booking = await service.createTenantBooking(
       {
         businessDispatchSubtype: "enterprise_dispatch",
-        reservationWindowStart: "2026-06-20T13:00:00.000Z",
-        reservationWindowEnd: "2026-06-20T14:00:00.000Z",
+        reservationWindowStart: defaultReservationWindowStart(),
+        reservationWindowEnd: defaultReservationWindowEnd(),
         pickup: { address: "HQ", lat: 25.033, lng: 121.5654 },
         dropoff: { address: "Airport" },
         passenger: { name: "Rider", phone: "0912000000" },
@@ -1550,8 +1608,8 @@ describe("OwnedMobilityService queue and reservation orchestration", () => {
     const booking = await service.createTenantBooking(
       {
         businessDispatchSubtype: "credit_card_airport_transfer",
-        reservationWindowStart: "2026-06-20T13:00:00.000Z",
-        reservationWindowEnd: "2026-06-20T14:00:00.000Z",
+        reservationWindowStart: defaultReservationWindowStart(),
+        reservationWindowEnd: defaultReservationWindowEnd(),
         pickup: { address: "HQ", lat: 25.033, lng: 121.5654 },
         dropoff: { address: "Taoyuan Airport" },
         passenger: { name: "Rider", phone: "0912000000" },
@@ -1629,8 +1687,8 @@ describe("OwnedMobilityService queue and reservation orchestration", () => {
         passengerId: passenger.passengerId,
         pickupAddressId: pickupAddress.addressId,
         dropoffAddressId: dropoffAddress.addressId,
-        reservationWindowStart: "2026-04-29T14:00:00.000Z",
-        reservationWindowEnd: "2026-04-29T15:00:00.000Z",
+        reservationWindowStart: defaultReservationWindowStart(),
+        reservationWindowEnd: defaultReservationWindowEnd(),
         pickup: { address: "ignored pickup" },
         dropoff: { address: "ignored dropoff" },
         passenger: { name: "ignored passenger", phone: "0900000000" },
@@ -1785,6 +1843,53 @@ describe("OwnedMobilityService queue and reservation orchestration", () => {
     );
   });
 
+  it("allows unscoped partner_api_key callers to create partner-entry bookings", async () => {
+    const tenantPartnerService = new TenantPartnerService(
+      new AuditNotificationService(),
+    );
+    const verification = await tenantPartnerService.verifyPartnerEligibility({
+      entrySlug: "bank-demo-alpha-airport",
+      cardLast4: "2468",
+    });
+    const { service } = createOwnedMobilityService({
+      candidates: [],
+      tenantPartnerService,
+    });
+
+    const created = await service.createTenantBooking(
+      {
+        businessDispatchSubtype: "credit_card_airport_transfer",
+        partnerEntrySlug: "bank-demo-alpha-airport",
+        eligibilityVerificationId: verification.eligibilityVerificationId,
+        direction: "pickup",
+        pickup: { address: "桃園機場第二航廈" },
+        dropoff: { address: "台北市信義區松高路11號" },
+        reservationWindowStart: defaultReservationWindowStart(),
+        reservationWindowEnd: defaultReservationWindowEnd(),
+        passenger: { name: "測試乘客", phone: "0911222333" },
+        flightNo: "CI-001",
+      },
+      "tenant-demo-001",
+      {
+        authMode: "bootstrap_headers",
+        actorType: "partner_api_key",
+        actorId: "partner-key-alpha-demo",
+        realm: "partner",
+        roleFamilies: ["partner"],
+        roles: ["partner"],
+        scopes: ["partner:book"],
+      } as never,
+    );
+
+    expect(service.getOrder(created.orderId)).toMatchObject({
+      tenantId: "tenant-demo-001",
+      partnerId: "partner-bank-demo-001",
+      partnerProgramId: "program-airport-alpha",
+      partnerEntrySlug: "bank-demo-alpha-airport",
+      eligibilityVerificationId: verification.eligibilityVerificationId,
+    });
+  });
+
   it("validates costCenter against the tenant cost-center directory on create and update", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-05-13T12:00:00.000Z"));
@@ -1799,8 +1904,8 @@ describe("OwnedMobilityService queue and reservation orchestration", () => {
     const booking = await service.createTenantBooking(
       {
         businessDispatchSubtype: "enterprise_dispatch",
-        reservationWindowStart: "2026-05-13T14:00:00.000Z",
-        reservationWindowEnd: "2026-05-13T15:00:00.000Z",
+        reservationWindowStart: defaultReservationWindowStart(),
+        reservationWindowEnd: defaultReservationWindowEnd(),
         pickup: { address: "Pickup" },
         dropoff: { address: "Dropoff" },
         passenger: { name: "Rider One", phone: "0912000000" },
@@ -1884,8 +1989,8 @@ describe("OwnedMobilityService queue and reservation orchestration", () => {
     const created = await service.createTenantBooking(
       {
         businessDispatchSubtype: "enterprise_dispatch",
-        reservationWindowStart: "2026-05-13T14:00:00.000Z",
-        reservationWindowEnd: "2026-05-13T15:00:00.000Z",
+        reservationWindowStart: defaultReservationWindowStart(),
+        reservationWindowEnd: defaultReservationWindowEnd(),
         pickup: { address: "Pickup" },
         dropoff: { address: "Dropoff" },
         passenger: { name: "Rider One", phone: "0912000000" },
@@ -1952,8 +2057,8 @@ describe("OwnedMobilityService queue and reservation orchestration", () => {
     const created = await service.createTenantBooking(
       {
         businessDispatchSubtype: "enterprise_dispatch",
-        reservationWindowStart: "2026-05-13T16:00:00.000Z",
-        reservationWindowEnd: "2026-05-13T17:00:00.000Z",
+        reservationWindowStart: defaultReservationWindowStart(),
+        reservationWindowEnd: defaultReservationWindowEnd(),
         pickup: { address: "Pickup" },
         dropoff: { address: "Dropoff" },
         passenger: { name: "Rider Two", phone: "0912000001" },
@@ -2049,8 +2154,8 @@ describe("OwnedMobilityService queue and reservation orchestration", () => {
     const created = await service.createTenantBooking(
       {
         businessDispatchSubtype: "enterprise_dispatch",
-        reservationWindowStart: "2026-05-13T18:00:00.000Z",
-        reservationWindowEnd: "2026-05-13T19:00:00.000Z",
+        reservationWindowStart: defaultReservationWindowStart(),
+        reservationWindowEnd: defaultReservationWindowEnd(),
         pickup: { address: "Pickup" },
         dropoff: { address: "Dropoff" },
         passenger: { name: "Exec Rider", phone: "0912000002" },
@@ -2100,8 +2205,8 @@ describe("OwnedMobilityService queue and reservation orchestration", () => {
     const created = await service.createTenantBooking(
       {
         businessDispatchSubtype: "enterprise_dispatch",
-        reservationWindowStart: "2026-05-13T20:00:00.000Z",
-        reservationWindowEnd: "2026-05-13T21:00:00.000Z",
+        reservationWindowStart: defaultReservationWindowStart(),
+        reservationWindowEnd: defaultReservationWindowEnd(),
         pickup: { address: "Pickup" },
         dropoff: { address: "Dropoff" },
         passenger: { name: "Rider Three", phone: "0912000003" },
@@ -2165,8 +2270,8 @@ describe("OwnedMobilityService queue and reservation orchestration", () => {
       service.createTenantBooking(
         {
           businessDispatchSubtype: "enterprise_dispatch",
-          reservationWindowStart: "2026-05-13T22:00:00.000Z",
-          reservationWindowEnd: "2026-05-13T23:00:00.000Z",
+          reservationWindowStart: defaultReservationWindowStart(),
+          reservationWindowEnd: defaultReservationWindowEnd(),
           pickup: { address: "Pickup" },
           dropoff: { address: "Dropoff" },
           passenger: { name: "Blocked Rider", phone: "0912000004" },
@@ -2203,8 +2308,8 @@ describe("OwnedMobilityService queue and reservation orchestration", () => {
     const created = await service.createTenantBooking(
       {
         businessDispatchSubtype: "enterprise_dispatch",
-        reservationWindowStart: "2026-05-14T00:00:00.000Z",
-        reservationWindowEnd: "2026-05-14T01:00:00.000Z",
+        reservationWindowStart: defaultReservationWindowStart(),
+        reservationWindowEnd: defaultReservationWindowEnd(),
         pickup: { address: "Pickup" },
         dropoff: { address: "Dropoff" },
         passenger: { name: "Escalation Rider", phone: "0912000005" },
@@ -2249,8 +2354,8 @@ describe("OwnedMobilityService queue and reservation orchestration", () => {
       service.createTenantBooking(
         {
           businessDispatchSubtype: "enterprise_dispatch",
-          reservationWindowStart: "2026-04-29T14:00:00.000Z",
-          reservationWindowEnd: "2026-04-29T15:00:00.000Z",
+          reservationWindowStart: defaultReservationWindowStart(),
+          reservationWindowEnd: defaultReservationWindowEnd(),
           pickup: { address: "Pickup" },
           dropoff: { address: "Dropoff" },
           passenger: { name: "Rider One", phone: "0912000000" },
@@ -2270,8 +2375,8 @@ describe("OwnedMobilityService queue and reservation orchestration", () => {
       service.createTenantBooking(
         {
           businessDispatchSubtype: "enterprise_dispatch",
-          reservationWindowStart: "2026-04-29T14:00:00.000Z",
-          reservationWindowEnd: "2026-04-29T15:00:00.000Z",
+          reservationWindowStart: defaultReservationWindowStart(),
+          reservationWindowEnd: defaultReservationWindowEnd(),
           pickup: { address: "Pickup" },
           dropoff: { address: "Dropoff" },
           passenger: { name: "Rider One", phone: "0912000000" },
@@ -2301,8 +2406,8 @@ describe("OwnedMobilityService queue and reservation orchestration", () => {
     const booking = service.createTenantBooking(
       {
         businessDispatchSubtype: "enterprise_dispatch",
-        reservationWindowStart: "2026-04-29T14:00:00.000Z",
-        reservationWindowEnd: "2026-04-29T15:00:00.000Z",
+        reservationWindowStart: defaultReservationWindowStart(),
+        reservationWindowEnd: defaultReservationWindowEnd(),
         pickup: { address: "Pickup" },
         dropoff: { address: "Dropoff" },
         passenger: { name: "Rider One", phone: "0912000000" },
@@ -2380,8 +2485,8 @@ describe("OwnedMobilityService queue and reservation orchestration", () => {
     const booking = service.createTenantBooking(
       {
         businessDispatchSubtype: "enterprise_dispatch",
-        reservationWindowStart: "2026-04-29T14:00:00.000Z",
-        reservationWindowEnd: "2026-04-29T15:00:00.000Z",
+        reservationWindowStart: defaultReservationWindowStart(),
+        reservationWindowEnd: defaultReservationWindowEnd(),
         pickup: { address: "Pickup" },
         dropoff: { address: "Dropoff" },
         passenger: { name: "Rider One", phone: "0912000000" },
@@ -2471,8 +2576,8 @@ describe("OwnedMobilityService queue and reservation orchestration", () => {
     const booking = service.createTenantBooking(
       {
         businessDispatchSubtype: "enterprise_dispatch",
-        reservationWindowStart: "2026-04-29T14:00:00.000Z",
-        reservationWindowEnd: "2026-04-29T15:00:00.000Z",
+        reservationWindowStart: defaultReservationWindowStart(),
+        reservationWindowEnd: defaultReservationWindowEnd(),
         pickup: { address: "Pickup" },
         dropoff: { address: "Dropoff" },
         passenger: { name: "Rider One", phone: "0912000000" },
@@ -3278,8 +3383,8 @@ describe("OwnedMobilityService queue and reservation orchestration", () => {
     const reservationBooking = service.createTenantBooking(
       {
         businessDispatchSubtype: "enterprise_dispatch",
-        reservationWindowStart: "2026-04-29T14:00:00.000Z",
-        reservationWindowEnd: "2026-04-29T15:00:00.000Z",
+        reservationWindowStart: defaultReservationWindowStart(),
+        reservationWindowEnd: defaultReservationWindowEnd(),
         pickup: { address: "Reservation A" },
         dropoff: { address: "Reservation B" },
         passenger: { name: "Reservation Rider", phone: "0933000000" },
@@ -3450,8 +3555,8 @@ describe("OwnedMobilityService queue and reservation orchestration", () => {
     const booking = service.createTenantBooking(
       {
         businessDispatchSubtype: "enterprise_dispatch",
-        reservationWindowStart: "2026-04-29T14:00:00.000Z",
-        reservationWindowEnd: "2026-04-29T15:00:00.000Z",
+        reservationWindowStart: defaultReservationWindowStart(),
+        reservationWindowEnd: defaultReservationWindowEnd(),
         pickup: { address: "Pickup" },
         dropoff: { address: "Dropoff" },
         passenger: { name: "Rider", phone: "0912000000" },
@@ -3504,8 +3609,8 @@ describe("OwnedMobilityService queue and reservation orchestration", () => {
     const booking = service.createTenantBooking(
       {
         businessDispatchSubtype: "enterprise_dispatch",
-        reservationWindowStart: "2026-04-29T14:00:00.000Z",
-        reservationWindowEnd: "2026-04-29T15:00:00.000Z",
+        reservationWindowStart: defaultReservationWindowStart(),
+        reservationWindowEnd: defaultReservationWindowEnd(),
         pickup: { address: "Pickup" },
         dropoff: { address: "Dropoff" },
         passenger: { name: "Rider", phone: "0912000000" },
@@ -3642,6 +3747,9 @@ describe("OwnedMobilityService queue and reservation orchestration", () => {
         work({}),
       ),
       reportPersistenceFailure: vi.fn(),
+      reserveDispatchResources: vi.fn(async () => []),
+      releaseDispatchResourceReservations: vi.fn(async () => 0),
+      occupyDispatchResourceReservations: vi.fn(async () => 0),
     };
     const { service } = createOwnedMobilityService({
       candidates: [
@@ -3798,8 +3906,8 @@ describe("OwnedMobilityService queue and reservation orchestration", () => {
     const booking = service.createTenantBooking(
       {
         businessDispatchSubtype: "enterprise_dispatch",
-        reservationWindowStart: "2026-04-29T14:00:00.000Z",
-        reservationWindowEnd: "2026-04-29T15:00:00.000Z",
+        reservationWindowStart: defaultReservationWindowStart(),
+        reservationWindowEnd: defaultReservationWindowEnd(),
         pickup: { address: "Pickup" },
         dropoff: { address: "Dropoff" },
         passenger: { name: "Rider One", phone: "0912000000" },
@@ -3844,8 +3952,8 @@ describe("OwnedMobilityService queue and reservation orchestration", () => {
     const booking = service.createTenantBooking(
       {
         businessDispatchSubtype: "enterprise_dispatch",
-        reservationWindowStart: "2026-04-29T14:00:00.000Z",
-        reservationWindowEnd: "2026-04-29T15:00:00.000Z",
+        reservationWindowStart: defaultReservationWindowStart(),
+        reservationWindowEnd: defaultReservationWindowEnd(),
         pickup: { address: "Pickup" },
         dropoff: { address: "Dropoff" },
         passenger: { name: "Rider One", phone: "0912000000" },
@@ -3924,8 +4032,8 @@ describe("OwnedMobilityService queue and reservation orchestration", () => {
     const booking = service.createTenantBooking(
       {
         businessDispatchSubtype: "credit_card_airport_transfer",
-        reservationWindowStart: "2026-04-29T14:00:00.000Z",
-        reservationWindowEnd: "2026-04-29T15:00:00.000Z",
+        reservationWindowStart: defaultReservationWindowStart(),
+        reservationWindowEnd: defaultReservationWindowEnd(),
         pickup: { address: "Pickup" },
         dropoff: { address: "Dropoff" },
         passenger: { name: "Rider One", phone: "0912000000" },
@@ -4022,8 +4130,8 @@ describe("OwnedMobilityService queue and reservation orchestration", () => {
     const booking = service.createTenantBooking(
       {
         businessDispatchSubtype: "enterprise_dispatch",
-        reservationWindowStart: "2026-04-29T14:00:00.000Z",
-        reservationWindowEnd: "2026-04-29T15:00:00.000Z",
+        reservationWindowStart: defaultReservationWindowStart(),
+        reservationWindowEnd: defaultReservationWindowEnd(),
         pickup: { address: "Pickup" },
         dropoff: { address: "Dropoff" },
         passenger: { name: "Rider One", phone: "0912000000" },
@@ -4161,6 +4269,7 @@ describe("OwnedMobilityService queue and reservation orchestration", () => {
         return record ? { action: "dispatch", record } : null;
       }),
       reportPersistenceFailure: vi.fn(),
+      releaseDispatchResourceReservations: vi.fn(async () => 0),
     };
 
     const { service, auditNotificationService } = createOwnedMobilityService({
@@ -4192,8 +4301,8 @@ describe("OwnedMobilityService queue and reservation orchestration", () => {
     const booking = seedService.createTenantBooking(
       {
         businessDispatchSubtype: "enterprise_dispatch",
-        reservationWindowStart: "2026-04-29T14:00:00.000Z",
-        reservationWindowEnd: "2026-04-29T15:00:00.000Z",
+        reservationWindowStart: defaultReservationWindowStart(),
+        reservationWindowEnd: defaultReservationWindowEnd(),
         pickup: { address: "Pickup" },
         dropoff: { address: "Dropoff" },
         passenger: { name: "Rider One", phone: "0912000000" },
@@ -4341,6 +4450,7 @@ describe("OwnedMobilityService queue and reservation orchestration", () => {
       })),
       hasDriverTaskTraceRequestId: vi.fn(async () => false),
       reportPersistenceFailure: vi.fn(),
+      releaseDispatchResourceReservations: vi.fn(async () => 0),
     };
 
     const { service } = createOwnedMobilityService({
@@ -4372,8 +4482,8 @@ describe("OwnedMobilityService queue and reservation orchestration", () => {
     const booking = seedService.createTenantBooking(
       {
         businessDispatchSubtype: "enterprise_dispatch",
-        reservationWindowStart: "2026-04-29T14:00:00.000Z",
-        reservationWindowEnd: "2026-04-29T15:00:00.000Z",
+        reservationWindowStart: defaultReservationWindowStart(),
+        reservationWindowEnd: defaultReservationWindowEnd(),
         pickup: { address: "Pickup" },
         dropoff: { address: "Dropoff" },
         passenger: { name: "Rider One", phone: "0912000000" },
@@ -4475,6 +4585,7 @@ describe("OwnedMobilityService queue and reservation orchestration", () => {
       hasDriverTaskTraceRequestId: vi.fn(async () => false),
       claimNextRecoverableDriverCompletionOutbox: vi.fn(async () => null),
       reportPersistenceFailure: vi.fn(),
+      releaseDispatchResourceReservations: vi.fn(async () => 0),
     };
 
     const { service } = createOwnedMobilityService({
@@ -4506,8 +4617,8 @@ describe("OwnedMobilityService queue and reservation orchestration", () => {
     const booking = seedService.createTenantBooking(
       {
         businessDispatchSubtype: "enterprise_dispatch",
-        reservationWindowStart: "2026-04-29T14:00:00.000Z",
-        reservationWindowEnd: "2026-04-29T15:00:00.000Z",
+        reservationWindowStart: defaultReservationWindowStart(),
+        reservationWindowEnd: defaultReservationWindowEnd(),
         pickup: { address: "Pickup" },
         dropoff: { address: "Dropoff" },
         passenger: { name: "Rider One", phone: "0912000000" },
@@ -4637,8 +4748,8 @@ describe("OwnedMobilityService queue and reservation orchestration", () => {
     const booking = seedService.createTenantBooking(
       {
         businessDispatchSubtype: "enterprise_dispatch",
-        reservationWindowStart: "2026-04-29T14:00:00.000Z",
-        reservationWindowEnd: "2026-04-29T15:00:00.000Z",
+        reservationWindowStart: defaultReservationWindowStart(),
+        reservationWindowEnd: defaultReservationWindowEnd(),
         pickup: { address: "Pickup" },
         dropoff: { address: "Dropoff" },
         passenger: { name: "Rider One", phone: "0912000000" },
@@ -4773,6 +4884,7 @@ describe("OwnedMobilityService queue and reservation orchestration", () => {
       })),
       hasDriverTaskTraceRequestId: vi.fn(async () => false),
       reportPersistenceFailure: vi.fn(),
+      releaseDispatchResourceReservations: vi.fn(async () => 0),
     };
 
     const { service, auditNotificationService } = createOwnedMobilityService({
@@ -4805,8 +4917,8 @@ describe("OwnedMobilityService queue and reservation orchestration", () => {
     const booking = seedService.createTenantBooking(
       {
         businessDispatchSubtype: "enterprise_dispatch",
-        reservationWindowStart: "2026-04-29T14:00:00.000Z",
-        reservationWindowEnd: "2026-04-29T15:00:00.000Z",
+        reservationWindowStart: defaultReservationWindowStart(),
+        reservationWindowEnd: defaultReservationWindowEnd(),
         pickup: { address: "Pickup" },
         dropoff: { address: "Dropoff" },
         passenger: { name: "Rider One", phone: "0912000000" },
@@ -4901,6 +5013,41 @@ describe("OwnedMobilityService queue and reservation orchestration", () => {
     expect(
       tenantPartnerService.applyCommittedQuotaConsumption,
     ).not.toHaveBeenCalled();
+  });
+
+  it("hydrates voice database fixtures without aborting shared state loading", async () => {
+    const order = buildOrderFixture({
+      orderId: "voice-fixture-hydration",
+      callId: "call-fixture-hydration",
+      voiceIntentId: "intent-fixture-hydration",
+    });
+    const repository = {
+      isEnabled: () => true,
+      loadState: vi.fn(async () => ({
+        orders: [JSON.parse(JSON.stringify(order))],
+        dispatchJobs: [],
+        dispatchAttempts: [],
+        dispatchAssignments: [],
+        driverTasks: [],
+        dispatchTraceLogs: [],
+        passengerDisclosureSnapshots: [],
+        consumerNotificationOutbox: [],
+      })),
+      persistChanges: vi.fn(async () => {}),
+      persistOrderWorkflow: vi.fn(async () => {}),
+      withTransaction: vi.fn(async (work) => work({} as never)),
+      reportPersistenceFailure: vi.fn(),
+    };
+    const { service } = createOwnedMobilityService({ repository });
+    await service.onModuleInit();
+    expect(repository.reportPersistenceFailure).not.toHaveBeenCalled();
+    expect(service.getOrder(order.orderId)).toMatchObject({
+      orderId: order.orderId,
+      callId: order.callId,
+      voiceIntentId: order.voiceIntentId,
+      approvalRequestIds: [],
+      complianceFlags: [],
+    });
   });
 
   it("recovers pending driver-completion outbox work on module init", async () => {
@@ -5261,8 +5408,8 @@ describe("OwnedMobilityService queue and reservation orchestration", () => {
     const booking = service.createTenantBooking(
       {
         businessDispatchSubtype: "enterprise_dispatch",
-        reservationWindowStart: "2026-04-29T14:00:00.000Z",
-        reservationWindowEnd: "2026-04-29T15:00:00.000Z",
+        reservationWindowStart: defaultReservationWindowStart(),
+        reservationWindowEnd: defaultReservationWindowEnd(),
         pickup: { address: "Pickup" },
         dropoff: { address: "Dropoff" },
         passenger: { name: "Rider One", phone: "0912000000" },
@@ -5336,8 +5483,8 @@ describe("OwnedMobilityService queue and reservation orchestration", () => {
     const booking = service.createTenantBooking(
       {
         businessDispatchSubtype: "enterprise_dispatch",
-        reservationWindowStart: "2026-04-29T14:00:00.000Z",
-        reservationWindowEnd: "2026-04-29T15:00:00.000Z",
+        reservationWindowStart: defaultReservationWindowStart(),
+        reservationWindowEnd: defaultReservationWindowEnd(),
         pickup: { address: "Pickup" },
         dropoff: { address: "Dropoff" },
         passenger: { name: "Rider One", phone: "0912000000" },
@@ -5434,8 +5581,8 @@ describe("OwnedMobilityService queue and reservation orchestration", () => {
       service.createTenantBooking(
         {
           businessDispatchSubtype: "credit_card_airport_transfer",
-          reservationWindowStart: "2026-06-05T10:00:00.000Z",
-          reservationWindowEnd: "2026-06-05T11:00:00.000Z",
+          reservationWindowStart: defaultReservationWindowStart(),
+          reservationWindowEnd: defaultReservationWindowEnd(),
           pickup: { address: "台中市西屯區台灣大道 1 號" },
           dropoff: { address: "桃園機場第一航廈" },
           passenger: { name: "測試乘客", phone: "0911222333" },
@@ -5490,8 +5637,8 @@ describe("OwnedMobilityService queue and reservation orchestration", () => {
       service.createTenantBooking(
         {
           businessDispatchSubtype: "credit_card_airport_transfer",
-          reservationWindowStart: "2026-06-05T10:00:00.000Z",
-          reservationWindowEnd: "2026-06-05T11:00:00.000Z",
+          reservationWindowStart: defaultReservationWindowStart(),
+          reservationWindowEnd: defaultReservationWindowEnd(),
           pickup: { address: "台中市西屯區台灣大道 1 號" },
           dropoff: { address: "桃園機場第一航廈" },
           passenger: { name: "測試乘客", phone: "0911222333" },
@@ -5508,8 +5655,8 @@ describe("OwnedMobilityService queue and reservation orchestration", () => {
       service.createTenantBooking(
         {
           businessDispatchSubtype: "credit_card_airport_transfer",
-          reservationWindowStart: "2026-06-05T10:00:00.000Z",
-          reservationWindowEnd: "2026-06-05T11:00:00.000Z",
+          reservationWindowStart: defaultReservationWindowStart(),
+          reservationWindowEnd: defaultReservationWindowEnd(),
           pickup: { address: "台中市西屯區台灣大道 1 號" },
           dropoff: { address: "桃園機場第一航廈" },
           passenger: { name: "測試乘客", phone: "0911222333" },
@@ -5967,7 +6114,9 @@ describe("OwnedMobilityService queue and reservation orchestration", () => {
       await createFareAnomalyAuthority(databaseService);
     const recordSpy = vi.spyOn(fareAnomalyService, "recordQuoteAnomaly");
     const service = createMultiTaxiFareProducerService(fareAnomalyService);
-    const order = createFareProducerOrder(service, { resolvedRoute: false });
+    const order = await createFareProducerOrder(service, {
+      resolvedRoute: false,
+    });
     const dispatch = service.dispatchOrder(order.orderId, { mode: "auto" });
 
     await expect(
@@ -6011,7 +6160,7 @@ describe("OwnedMobilityService queue and reservation orchestration", () => {
     const fareAnomalyService = await createFareAnomalyAuthority();
     const recordSpy = vi.spyOn(fareAnomalyService, "recordQuoteAnomaly");
     const service = createMultiTaxiFareProducerService(fareAnomalyService);
-    const order = createFareProducerOrder(service, {
+    const order = await createFareProducerOrder(service, {
       activeFareVersionId: " ",
     });
     const dispatch = service.dispatchOrder(order.orderId, { mode: "auto" });
@@ -6041,7 +6190,7 @@ describe("OwnedMobilityService queue and reservation orchestration", () => {
     const fareAnomalyService = await createFareAnomalyAuthority();
     const resolveSpy = vi.spyOn(fareAnomalyService, "resolveOrderAnomalies");
     const service = createMultiTaxiFareProducerService(fareAnomalyService);
-    const order = createFareProducerOrder(service);
+    const order = await createFareProducerOrder(service);
     await fareAnomalyService.recordQuoteAnomaly({
       reason: "route_unresolved",
       snapshot: {
@@ -6100,7 +6249,7 @@ describe("OwnedMobilityService queue and reservation orchestration", () => {
       new Error("fare anomaly store unavailable"),
     );
     const service = createMultiTaxiFareProducerService(fareAnomalyService);
-    const order = createFareProducerOrder(service);
+    const order = await createFareProducerOrder(service);
     const dispatch = service.dispatchOrder(order.orderId, { mode: "auto" });
 
     await expect(
@@ -6268,7 +6417,7 @@ describe("ORX-DP-002: reassign / redispatch / timeout / no-supply workflow", () 
     expect(updatedOrder.noSupplyEscalation!.resolvedAt).not.toBeNull();
   });
 
-  it("handles dispatch timeout and places order in redispatch priority queue", () => {
+  it("handles dispatch timeout and places order in redispatch priority queue", async () => {
     const { service } = createOwnedMobilityService({
       candidates: [
         {
@@ -6289,13 +6438,17 @@ describe("ORX-DP-002: reassign / redispatch / timeout / no-supply workflow", () 
 
     service.dispatchOrder(order.orderId, { mode: "auto" });
 
-    const timeoutResult = service.handleDispatchTimeout(
+    // No assignment has been made yet at this point (only `dispatchOrder`,
+    // not `assignDispatch`, has run), so this is a matching-stage timeout --
+    // `acceptance_timeout` now requires a `targetAssignmentId` (SD §7.6) and
+    // there is no assignment yet for this test to name.
+    const timeoutResult = await service.handleDispatchTimeout(
       order.orderId,
-      "acceptance_timeout",
+      "matching_timeout",
     );
 
     expect(timeoutResult.status).toBe("dispatch_timeout");
-    expect(timeoutResult.timeoutReasonCode).toBe("acceptance_timeout");
+    expect(timeoutResult.timeoutReasonCode).toBe("matching_timeout");
 
     const updatedOrder = service.getOrder(order.orderId);
     expect(updatedOrder.status).toBe("dispatch_timeout");
@@ -6303,7 +6456,7 @@ describe("ORX-DP-002: reassign / redispatch / timeout / no-supply workflow", () 
     expect(updatedOrder.queueEntryReason).toBe("dispatch_timeout_retry");
     expect(updatedOrder.dispatchTimeout).not.toBeNull();
     expect(updatedOrder.dispatchTimeout!.timeoutReasonCode).toBe(
-      "acceptance_timeout",
+      "matching_timeout",
     );
     expect(updatedOrder.dispatchAttemptCount).toBe(1);
   });
@@ -6515,6 +6668,85 @@ describe("OwnedMobilityService referral attribution (CRC-BE-003)", () => {
     const order2 = service.createPassengerOrder(baseCommand as any, null);
     expect(order2.partnerEntrySlug).toBeNull();
   });
+
+  it("derives referral booking subtype from the verified partner entry", async () => {
+    const tenantPartnerService = new TenantPartnerService(
+      new AuditNotificationService(),
+    );
+    const { service } = createOwnedMobilityService({
+      tenantPartnerService,
+    });
+
+    const booking = await service.createReferralPassengerBooking(
+      {
+        entrySlug: "yuhe-residence",
+        pickupAddress: "Taipei Main Station",
+        dropoffAddress: "Taoyuan Airport T2",
+        // This is the UI's vehicle label and must never be treated as a
+        // backend service-product identifier.
+        vehicleType: "comfort",
+      },
+      {
+        actorType: "referral_passenger",
+        actorId: "referral-passenger-001",
+        realm: "partner",
+        tenantId: "tenant-demo-001",
+        partnerId: "partner_ead6bf3d-e858-47cc-bfe1-5a3742524118",
+        partnerProgramId: "program-referral-community",
+        partnerEntrySlug: "yuhe-residence",
+        drtsPassengerId: "referral-passenger-001",
+      } as never,
+    );
+
+    expect(booking.businessDispatchSubtype).toBe("enterprise_dispatch");
+    expect(service.getOrder(booking.orderId).businessDispatchSubtype).toBe(
+      "enterprise_dispatch",
+    );
+    const cancelled = await service.cancelReferralPassengerTrip(
+      booking.orderId,
+      { orderId: booking.orderId, reason: "Passenger changed plans" },
+      {
+        actorType: "referral_passenger",
+        actorId: "referral-passenger-001",
+        realm: "partner",
+        tenantId: "tenant-demo-001",
+        partnerId: "partner_ead6bf3d-e858-47cc-bfe1-5a3742524118",
+        partnerProgramId: "program-referral-community",
+        partnerEntrySlug: "yuhe-residence",
+        drtsPassengerId: "referral-passenger-001",
+      } as never,
+    );
+    expect(cancelled.status).toBe("cancelled");
+  });
+
+  it("uses the requested referral schedule for the reservation window", async () => {
+    const tenantPartnerService = new TenantPartnerService(
+      new AuditNotificationService(),
+    );
+    const { service } = createOwnedMobilityService({ tenantPartnerService });
+    const scheduledAt = new Date(Date.now() + 4 * 60 * 60_000).toISOString();
+    const booking = await service.createReferralPassengerBooking(
+      {
+        entrySlug: "yuhe-residence",
+        pickupAddress: "Taipei Main Station",
+        dropoffAddress: "Taoyuan Airport T2",
+        scheduledAt,
+      },
+      {
+        actorType: "referral_passenger",
+        actorId: "referral-passenger-002",
+        realm: "partner",
+        tenantId: "tenant-demo-001",
+        partnerId: "partner_ead6bf3d-e858-47cc-bfe1-5a3742524118",
+        partnerProgramId: "program-referral-community",
+        partnerEntrySlug: "yuhe-residence",
+        drtsPassengerId: "referral-passenger-002",
+      } as never,
+    );
+    expect(service.getOrder(booking.orderId).reservationWindowStart).toBe(
+      scheduledAt,
+    );
+  });
 });
 
 // P5-RATE-001 (Fleet D) acceptance. Three criteria had no test at any level
@@ -6632,7 +6864,7 @@ describe("P5-RATE-001: Fleet D assignment authority acceptance", () => {
         missingFieldCodes: ["color", "doorCount"],
       },
     });
-    const order = createFareProducerOrder(service);
+    const order = await createFareProducerOrder(service);
     const dispatch = service.dispatchOrder(order.orderId, { mode: "auto" });
 
     const error = await captureApiError(() =>
@@ -6698,7 +6930,7 @@ describe("P5-RATE-001: Fleet D assignment authority acceptance", () => {
         missingFieldCodes: ["color"],
       },
     });
-    const order = createFareProducerOrder(service);
+    const order = await createFareProducerOrder(service);
     const dispatch = service.dispatchOrder(order.orderId, { mode: "auto" });
     const outboxBefore = readOutbox(service).length;
 
@@ -6741,7 +6973,7 @@ describe("P5-RATE-001: Fleet D assignment authority acceptance", () => {
   it("rejects a stale redispatch that would replace a newer assignment", async () => {
     const fareAnomalyService = await createFareAnomalyAuthority();
     const { service } = createFleetDService({ fareAnomalyService });
-    const order = createFareProducerOrder(service);
+    const order = await createFareProducerOrder(service);
 
     // Assignment v1. The version the passenger is told is the one the guard
     // must compare against, so read it from the disclosure snapshot rather
@@ -6819,7 +7051,7 @@ describe("P5-RATE-001: Fleet D assignment authority acceptance", () => {
   it("still redispatches unconditionally when no expected version is supplied", async () => {
     const fareAnomalyService = await createFareAnomalyAuthority();
     const { service } = createFleetDService({ fareAnomalyService });
-    const order = createFareProducerOrder(service);
+    const order = await createFareProducerOrder(service);
 
     // Reach assignment version 2 the only way production allows: assign,
     // redispatch, assign again.
@@ -6848,5 +7080,268 @@ describe("P5-RATE-001: Fleet D assignment authority acceptance", () => {
       reasonCode: "driver_unreachable",
     });
     expect(service.getOrder(order.orderId).status).toBe("redispatch_required");
+  });
+});
+
+describe("UV-EXEC-004: owned-order UoW / CAS transaction primitives", () => {
+  async function captureApiError(run: () => unknown): Promise<ApiRequestError> {
+    let caught: unknown;
+    let threw = false;
+    try {
+      await run();
+    } catch (error) {
+      threw = true;
+      caught = error;
+    }
+    expect(threw, "expected the call to be rejected").toBe(true);
+    expect(caught).toBeInstanceOf(ApiRequestError);
+    return caught as ApiRequestError;
+  }
+
+  function buildVoiceOrderFixture(
+    service: OwnedMobilityService,
+    overrides: Record<string, unknown> = {},
+  ) {
+    const created = service.createPassengerOrder({
+      pickup: { address: "Voice pickup landmark" },
+      dropoff: { address: "Voice dropoff landmark" },
+      passenger: { name: "Voice Rider", phone: "0911000111" },
+    });
+    const order = service.getOrder(created.orderId);
+    return {
+      ...order,
+      callId: "call-uv-exec-004-001",
+      voiceIntentId: "11111111-1111-1111-1111-111111111111",
+      ...overrides,
+    };
+  }
+
+  it("fails closed for createVoiceOrder when durable storage is not configured", async () => {
+    const { service } = createOwnedMobilityService({ candidates: [] });
+    const order = buildVoiceOrderFixture(service);
+
+    const error = await captureApiError(() =>
+      service.createVoiceOrder(order, "test_create_voice_order"),
+    );
+    expect(error.getStatus()).toBe(HttpStatus.SERVICE_UNAVAILABLE);
+    expect(error.code).toBe("OWNED_MOBILITY_DB_REQUIRED");
+  });
+
+  it("fails closed for commitVoiceOrderMutation when durable storage is not configured", async () => {
+    const { service } = createOwnedMobilityService({ candidates: [] });
+    const order = buildVoiceOrderFixture(service);
+
+    const error = await captureApiError(() =>
+      service.commitVoiceOrderMutation(
+        order.orderId,
+        "test_commit_mutation",
+        (current) => ({
+          order: { ...current, status: "cancelled" as const },
+          result: undefined,
+        }),
+      ),
+    );
+    expect(error.getStatus()).toBe(HttpStatus.SERVICE_UNAVAILABLE);
+    expect(error.code).toBe("OWNED_MOBILITY_DB_REQUIRED");
+  });
+
+  it("creates a durable voice order and applies the committed row to the in-memory projection", async () => {
+    const repository = {
+      isEnabled: () => true,
+      persistChanges: vi.fn(async () => undefined),
+      persistOrderWorkflow: vi.fn(async () => undefined),
+      withTransaction: vi.fn(async (work: (tx: unknown) => Promise<unknown>) =>
+        work({}),
+      ),
+      reportPersistenceFailure: vi.fn(),
+      insertVoiceOrder: vi.fn(async () => 1),
+    };
+    const { service } = createOwnedMobilityService({
+      candidates: [],
+      repository: repository as never,
+    });
+    const order = buildVoiceOrderFixture(service);
+
+    const committed = await service.createVoiceOrder(
+      order,
+      "test_create_voice_order",
+    );
+
+    expect(committed.aggregateVersion).toBe(1);
+    expect(repository.insertVoiceOrder).toHaveBeenCalledTimes(1);
+    // The commit already replaced the in-memory projection -- a reader does
+    // not need a DB round trip to see the version this method just committed.
+    expect(service.getOrder(order.orderId).aggregateVersion).toBe(1);
+  });
+
+  it("translates a duplicate voice_intent_id/call_id collision into 409 VOICE_ORDER_DUPLICATE_LINK", async () => {
+    const repository = {
+      isEnabled: () => true,
+      persistChanges: vi.fn(async () => undefined),
+      persistOrderWorkflow: vi.fn(async () => undefined),
+      withTransaction: vi.fn(async (work: (tx: unknown) => Promise<unknown>) =>
+        work({}),
+      ),
+      reportPersistenceFailure: vi.fn(),
+      insertVoiceOrder: vi.fn(
+        async (_tx: unknown, order: { orderId: string }) => {
+          throw new OwnedOrderDuplicateVoiceLinkError(
+            order.orderId,
+            new Error("23505"),
+          );
+        },
+      ),
+    };
+    const { service } = createOwnedMobilityService({
+      candidates: [],
+      repository: repository as never,
+    });
+    const order = buildVoiceOrderFixture(service);
+
+    const error = await captureApiError(() =>
+      service.createVoiceOrder(order, "test_create_voice_order"),
+    );
+    expect(error.getStatus()).toBe(HttpStatus.CONFLICT);
+    expect(error.code).toBe("VOICE_ORDER_DUPLICATE_LINK");
+  });
+
+  it("commits a CAS-protected mutation and only then updates the in-memory projection", async () => {
+    let stored = { status: "ready_for_dispatch", aggregateVersion: 1 };
+    const repository = {
+      isEnabled: () => true,
+      persistChanges: vi.fn(async () => undefined),
+      persistOrderWorkflow: vi.fn(async () => undefined),
+      withTransaction: vi.fn(async (work: (tx: unknown) => Promise<unknown>) =>
+        work({}),
+      ),
+      reportPersistenceFailure: vi.fn(),
+      findOrderForUpdate: vi.fn(async (_tx: unknown, orderId: string) => ({
+        order: { ...seededOrder, ...stored, orderId },
+        aggregateVersion: stored.aggregateVersion,
+      })),
+      updateOrderWithCas: vi.fn(
+        async (
+          _tx: unknown,
+          order: { status: string },
+          expectedVersion: number,
+        ) => {
+          if (expectedVersion !== stored.aggregateVersion) {
+            throw new OwnedOrderVersionConflictError(
+              "order-id",
+              expectedVersion,
+            );
+          }
+          stored = {
+            status: order.status,
+            aggregateVersion: expectedVersion + 1,
+          };
+          return stored.aggregateVersion;
+        },
+      ),
+    };
+    const { service } = createOwnedMobilityService({
+      candidates: [],
+      repository: repository as never,
+    });
+    const seededOrder = buildVoiceOrderFixture(service);
+
+    const result = await service.commitVoiceOrderMutation(
+      seededOrder.orderId,
+      "test_commit_mutation",
+      (current, currentVersion) => ({
+        order: { ...current, status: "cancelled" as const },
+        result: { status: current.status, currentVersion },
+      }),
+    );
+
+    expect(result).toEqual({ status: "ready_for_dispatch", currentVersion: 1 });
+    expect(stored).toEqual({ status: "cancelled", aggregateVersion: 2 });
+    // Post-commit, the in-memory projection reflects the durable write.
+    expect(service.getOrder(seededOrder.orderId).status).toBe("cancelled");
+    expect(service.getOrder(seededOrder.orderId).aggregateVersion).toBe(2);
+  });
+
+  it("rejects a stale-snapshot mutation with 409 and leaves the in-memory projection untouched", async () => {
+    const repository = {
+      isEnabled: () => true,
+      persistChanges: vi.fn(async () => undefined),
+      persistOrderWorkflow: vi.fn(async () => undefined),
+      withTransaction: vi.fn(async (work: (tx: unknown) => Promise<unknown>) =>
+        work({}),
+      ),
+      reportPersistenceFailure: vi.fn(),
+      findOrderForUpdate: vi.fn(async (_tx: unknown, orderId: string) => ({
+        order: { ...seededOrder, orderId, status: "ready_for_dispatch" },
+        aggregateVersion: 2,
+      })),
+      updateOrderWithCas: vi.fn(
+        async (_tx: unknown, order: { orderId: string }) => {
+          // Someone else committed in between: the CAS write in the real
+          // repository would see aggregate_version has already moved on.
+          throw new OwnedOrderVersionConflictError(order.orderId, 1);
+        },
+      ),
+    };
+    const { service } = createOwnedMobilityService({
+      candidates: [],
+      repository: repository as never,
+    });
+    const seededOrder = buildVoiceOrderFixture(service);
+    const beforeStatus = service.getOrder(seededOrder.orderId).status;
+
+    const error = await captureApiError(() =>
+      service.commitVoiceOrderMutation(
+        seededOrder.orderId,
+        "test_commit_mutation",
+        (current) => ({
+          order: { ...current, status: "cancelled" as const },
+          result: undefined,
+        }),
+      ),
+    );
+
+    expect(error.getStatus()).toBe(HttpStatus.CONFLICT);
+    expect(error.code).toBe("VOICE_ORDER_VERSION_CONFLICT");
+    // A rejected CAS write must not have touched the in-memory projection:
+    // no array pollution ahead of a commit that never happened (SD §7.5).
+    expect(service.getOrder(seededOrder.orderId).status).toBe(beforeStatus);
+  });
+
+  it("does not mutate the in-memory projection when the transaction rolls back for any other reason", async () => {
+    const repository = {
+      isEnabled: () => true,
+      persistChanges: vi.fn(async () => undefined),
+      persistOrderWorkflow: vi.fn(async () => undefined),
+      withTransaction: vi.fn(async (work: (tx: unknown) => Promise<unknown>) =>
+        work({}),
+      ),
+      reportPersistenceFailure: vi.fn(),
+      findOrderForUpdate: vi.fn(async (_tx: unknown, orderId: string) => ({
+        order: { ...seededOrder, orderId },
+        aggregateVersion: 1,
+      })),
+      updateOrderWithCas: vi.fn(async () => {
+        throw new Error("connection reset");
+      }),
+    };
+    const { service } = createOwnedMobilityService({
+      candidates: [],
+      repository: repository as never,
+    });
+    const seededOrder = buildVoiceOrderFixture(service);
+    const beforeStatus = service.getOrder(seededOrder.orderId).status;
+
+    await expect(
+      service.commitVoiceOrderMutation(
+        seededOrder.orderId,
+        "test_commit_mutation",
+        (current) => ({
+          order: { ...current, status: "cancelled" as const },
+          result: undefined,
+        }),
+      ),
+    ).rejects.toThrow("connection reset");
+
+    expect(service.getOrder(seededOrder.orderId).status).toBe(beforeStatus);
   });
 });

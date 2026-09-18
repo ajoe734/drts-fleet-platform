@@ -29,9 +29,9 @@ Pure function. No I/O. Safe to call from any code path.
 
 ## 2. Hook point A — worker dispatch (supervisor)
 
-**Where:** `.orchestrator/supervisor.py`, wherever a worker is created and its
+**Where:** `tools/development-orchestrator/control_plane/runtime/supervisor_runtime.py`, wherever a worker is created and its
 `base_branch` is set. (Search for `base_branch` — currently only
-`.orchestrator/adapters/copilot_cloud.py` honours it; other adapters default
+`tools/development-orchestrator/adapters/copilot_cloud.py` honours it; other adapters default
 to `main`.)
 
 **What to add:**
@@ -56,57 +56,53 @@ change the checkout to use this value.
 
 **Where:**
 
-- `.orchestrator/adapters/copilot_cloud.py` — already accepts `base_branch`
+- `tools/development-orchestrator/adapters/copilot_cloud.py` — already accepts `base_branch`
   via `cloud.get("base_branch")`. Make sure the supervisor populates the
   cloud config block with the routed value (or override at call site).
-- `.orchestrator/adapters/codex.py`, `.orchestrator/adapters/gemini.py`,
-  `.orchestrator/adapters/claude*.py` — when invoking `gh pr create`, add
+- `tools/development-orchestrator/adapters/codex.py`, `tools/development-orchestrator/adapters/gemini.py`,
+  `tools/development-orchestrator/adapters/claude*.py` — when invoking `gh pr create`, add
   `--base "$BASE_BRANCH"` from the worker record.
 
 The orchestrator already shells out for PR creation; no new dependency.
 
 ---
 
-## 4. Hook point C — ai-status.json `gate_layer` field
+## 4. Candidate evidence in ai-status.json
 
-Workers move through layers: `merge → publish → release → main`. Adding a
-`gate_layer` field per task lets the dashboard and any consumers see at a
-glance which integration layer a given task is currently in.
+The candidate lifecycle already exposes the integration facts required by the
+dashboard. Do not add a second `gate_layer` state machine.
 
-**Where:** wherever task status is written into `ai-status.json` (search
-`scripts/ai_status.py` and `.orchestrator/runtime_state.py`).
+**Where:** `tools/development-orchestrator/bin/ai_status.py`, written by the candidate transaction and the
+GitHub bus reconciliation path.
 
-**What to add:** an optional `gate_layer` string per task entry:
+**Fields:**
 
 ```jsonc
 {
   "tasks": {
     "BE-APR-NOTIFY-001": {
-      "status": "review_approved",
+      "status": "integrating",
       "owner": "Codex",
-      "gate_layer": "merge", // <-- new
-      "track": "backend", // <-- new
-      "base_branch": "backend-dev",
+      "candidate_sha": "<immutable reviewed SHA>",
+      "candidate_branch": "codex/be-apr-notify-001",
+      "reviewed_sha": "<same SHA>",
+      "ci_sha": "<same SHA>",
+      "ci_status": "running",
+      "pr_url": "https://github.com/org/repo/pull/123",
       // ...
     },
   },
 }
 ```
 
-Suggested state machine for `gate_layer`:
+The only transition sequence is `review -> integrating -> acceptance -> done`.
+Any new PR head returns the task to `in_progress`; CI or merge evidence from a
+different SHA is never reused.
 
-| When                                  | Set to       |
-| ------------------------------------- | ------------ |
-| Worker dispatched, PR not yet open    | `feat`       |
-| PR open against `merge/*`             | `merge`      |
-| Squashed into `merge/*`               | `integrated` |
-| Promotion PR open against `*-publish` | `publish-pr` |
-| Merged into `*-publish`               | `publish`    |
-| Pulled into a `release/*` branch      | `release`    |
-| Merged to `main`                      | `main`       |
-
-The orchestrator already polls PR state via the GitHub bus; extending it to
-update this field is a small additive change.
+At the start of reconciliation, the supervisor migrates only task records that
+do not yet carry `candidate_lifecycle_version=1`. The migration uses the same
+status transaction, reopens unbound legacy approvals, and does not run again
+for already migrated or newly created tasks.
 
 ---
 
@@ -190,4 +186,4 @@ with `matched_rule_index: -1` — a signal to add a rule or rename the task.
   routed branch.
 - The legacy `merge/W1a..W3f` wave branches are not in the routing table.
   Any worker still pointing at them must be manually migrated using
-  `scripts/branch-strategy/triage-branches.sh` as the source of truth.
+  `tools/local-development/triage-branches.sh` as the source of truth.

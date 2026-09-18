@@ -1,8 +1,10 @@
 import { describe, expect, it, vi } from "vitest";
 import { EventEmitter } from "node:events";
 
+import { ApiRequestError } from "../../apps/api/src/common/api-envelope";
 import { AuditNotificationService } from "../../apps/api/src/modules/audit-notification/audit-notification.service";
 import type { BootstrapRequestIdentity } from "../../apps/api/src/common/auth";
+import type { MultiTaxiOperatingAuthorizationRecord } from "@drts/contracts";
 import { OpsDispatchEventsService } from "../../apps/api/src/common/ops-dispatch-events.service";
 import { CallcenterService } from "../../apps/api/src/modules/callcenter/callcenter.service";
 import { DriverProfileService } from "../../apps/api/src/modules/driver-profile/driver-profile.service";
@@ -17,6 +19,14 @@ import {
 } from "../../apps/api/src/modules/tenant-partner/tenant-partner.repository";
 import { TenantPartnerService } from "../../apps/api/src/modules/tenant-partner/tenant-partner.service";
 import { WebhookDispatchService } from "../../apps/api/src/modules/tenant-partner/webhook-dispatch.service";
+
+function defaultReservationWindowStart(offsetHours = 2): string {
+  return new Date(Date.now() + offsetHours * 3600_000).toISOString();
+}
+
+function defaultReservationWindowEnd(offsetHours = 3): string {
+  return new Date(Date.now() + offsetHours * 3600_000).toISOString();
+}
 
 function createService(
   repository?: OwnedMobilityRepository,
@@ -46,6 +56,76 @@ function createService(
     regulatoryRegistryService,
     ownedMobilityService,
   };
+}
+
+function createMemoryOwnedMobilityRepository() {
+  const state = {
+    orders: [] as Record<string, unknown>[],
+    dispatchJobs: [] as Record<string, unknown>[],
+    dispatchAttempts: [] as Record<string, unknown>[],
+    dispatchAssignments: [] as Record<string, unknown>[],
+    driverTasks: [] as Record<string, unknown>[],
+    dispatchTraceLogs: [] as Record<string, unknown>[],
+  };
+
+  const replaceByKey = <T extends Record<string, unknown>>(
+    current: T[],
+    incoming: readonly T[] | undefined,
+    key: keyof T,
+  ) => {
+    if (!incoming) {
+      return current;
+    }
+
+    const next = new Map<string, T>(
+      current.map((item) => [
+        String(item[key]),
+        JSON.parse(JSON.stringify(item)) as T,
+      ]),
+    );
+    for (const item of incoming) {
+      next.set(String(item[key]), JSON.parse(JSON.stringify(item)) as T);
+    }
+    return [...next.values()];
+  };
+
+  return {
+    isEnabled: () => true,
+    loadState: vi.fn(async () => JSON.parse(JSON.stringify(state))),
+    persistChanges: vi.fn(async (changes: Record<string, unknown>) => {
+      state.orders = replaceByKey(
+        state.orders,
+        changes.orders as Record<string, unknown>[] | undefined,
+        "orderId",
+      );
+      state.dispatchJobs = replaceByKey(
+        state.dispatchJobs,
+        changes.dispatchJobs as Record<string, unknown>[] | undefined,
+        "dispatchJobId",
+      );
+      state.dispatchAttempts = replaceByKey(
+        state.dispatchAttempts,
+        changes.dispatchAttempts as Record<string, unknown>[] | undefined,
+        "attemptId",
+      );
+      state.dispatchAssignments = replaceByKey(
+        state.dispatchAssignments,
+        changes.dispatchAssignments as Record<string, unknown>[] | undefined,
+        "assignmentId",
+      );
+      state.driverTasks = replaceByKey(
+        state.driverTasks,
+        changes.driverTasks as Record<string, unknown>[] | undefined,
+        "taskId",
+      );
+      state.dispatchTraceLogs = replaceByKey(
+        state.dispatchTraceLogs,
+        changes.dispatchTraceLogs as Record<string, unknown>[] | undefined,
+        "traceLogId",
+      );
+    }),
+    reportPersistenceFailure: vi.fn(),
+  } as unknown as OwnedMobilityRepository;
 }
 
 const TENANT_ACME = "tenant-acme-001";
@@ -195,6 +275,44 @@ function getErrorCode(error: unknown) {
   return response?.error?.code ?? null;
 }
 
+async function completeOrderForRating(
+  ownedMobilityService: OwnedMobilityService,
+  orderId: string,
+) {
+  const orderStore = (
+    ownedMobilityService as unknown as {
+      orders:
+        | Map<
+            string,
+            {
+              orderId?: string;
+              status: string;
+              completedAt?: string;
+              updatedAt?: string;
+            }
+          >
+        | Array<{
+            orderId: string;
+            status: string;
+            completedAt?: string;
+            updatedAt?: string;
+          }>;
+    }
+  ).orders;
+
+  const order = Array.isArray(orderStore)
+    ? orderStore.find((item) => item.orderId === orderId)
+    : orderStore.get(orderId);
+
+  if (!order) {
+    throw new Error(`Missing order ${orderId}`);
+  }
+
+  order.status = "completed";
+  order.completedAt = "2026-04-10T09:45:00Z";
+  order.updatedAt = "2026-04-10T09:45:00Z";
+}
+
 async function flushWebhookDispatch() {
   await Promise.resolve();
   await Promise.resolve();
@@ -279,7 +397,7 @@ describe("owned mobility service", () => {
 
   it("creates a phone order without recording_id and binds it later", async () => {
     const { callcenterService, ownedMobilityService } = createService();
-    const order = ownedMobilityService.createCallCenterOrder({
+    const order = await ownedMobilityService.createCallCenterOrder({
       callId: "CALL-20260410-000120",
       agentId: "AGENT-0088",
       pickup: {
@@ -328,6 +446,51 @@ describe("owned mobility service", () => {
       ownedMobilityService.getOrder(order.orderId).complianceFlags,
     ).toEqual(["recording_bound"]);
   });
+
+  it.each(["recording_pending", "on_trip"] as const)(
+    "UV-EXEC-010 unversioned callbacks preserve voice evidence in %s, including DB loss",
+    async (status) => {
+      const { ownedMobilityService } = createService();
+      const created = await ownedMobilityService.createCallCenterOrder({
+        callId: "voice-call",
+        agentId: "agent",
+        pickup: { address: "台中市梧棲區中二路一段9號" },
+        dropoff: { address: "台中市大安區興安路378號" },
+        passenger: { name: "李先生", phone: "0911222333" },
+      });
+      const pinned = {
+        ...created,
+        status,
+        voiceIntentId: "voice-intent",
+        recordingId: "verified-recording",
+        complianceFlags: ["recording_bound"],
+      };
+      // Seed the persisted voice aggregate without using a legacy creation DTO.
+      Object.assign(ownedMobilityService, { orders: [pinned] });
+      const original = ownedMobilityService.getOrder(created.orderId);
+      const common = {
+        callId: "voice-call",
+        linkedOrderId: created.orderId,
+        providerRecordingRef: null,
+        recordingUrl: null,
+        startedAt: null,
+        endedAt: null,
+        agentId: null,
+      };
+      ownedMobilityService.handleCallRecordingAttached({
+        ...common,
+        recordingId: "unverified-old",
+      });
+      for (const recordingState of ["pending", "missing", "ready"] as const) {
+        await ownedMobilityService.handleCallRecordingStateChanged({
+          ...common,
+          recordingState,
+          recordingId: null,
+        });
+      }
+      expect(ownedMobilityService.getOrder(created.orderId)).toEqual(original);
+    },
+  );
 
   it("prevents trip start before arrived_pickup", async () => {
     const { ownedMobilityService } = createService();
@@ -387,8 +550,8 @@ describe("owned mobility service", () => {
           dropoff: {
             address: "台中市梧棲區中二路一段9號",
           },
-          reservationWindowStart: "2026-04-18T10:00:00Z",
-          reservationWindowEnd: "2026-04-18T10:20:00Z",
+          reservationWindowStart: defaultReservationWindowStart(),
+          reservationWindowEnd: defaultReservationWindowEnd(),
           passenger: {
             name: "陳小姐",
             phone: "0900123456",
@@ -412,8 +575,8 @@ describe("owned mobility service", () => {
         dropoff: {
           address: "桃園機場第二航廈",
         },
-        reservationWindowStart: "2026-04-15T08:30:00Z",
-        reservationWindowEnd: "2026-04-15T08:45:00Z",
+        reservationWindowStart: defaultReservationWindowStart(),
+        reservationWindowEnd: defaultReservationWindowEnd(),
         passenger: {
           name: "王小明",
           phone: "0912000111",
@@ -534,8 +697,8 @@ describe("owned mobility service", () => {
         dropoff: {
           address: "台北市信義區松高路11號",
         },
-        reservationWindowStart: "2026-04-18T10:00:00Z",
-        reservationWindowEnd: "2026-04-18T10:20:00Z",
+        reservationWindowStart: defaultReservationWindowStart(),
+        reservationWindowEnd: defaultReservationWindowEnd(),
         passenger: {
           name: "陳小姐",
           phone: "0900123456",
@@ -644,8 +807,8 @@ describe("owned mobility service", () => {
         dropoff: {
           address: "台北市信義區松高路11號",
         },
-        reservationWindowStart: "2026-04-18T10:00:00Z",
-        reservationWindowEnd: "2026-04-18T10:20:00Z",
+        reservationWindowStart: defaultReservationWindowStart(),
+        reservationWindowEnd: defaultReservationWindowEnd(),
         passenger: {
           name: "陳小姐",
           phone: "0900123456",
@@ -683,8 +846,8 @@ describe("owned mobility service", () => {
           dropoff: {
             address: "台北市信義區松高路11號",
           },
-          reservationWindowStart: "2026-04-18T10:00:00Z",
-          reservationWindowEnd: "2026-04-18T10:20:00Z",
+          reservationWindowStart: defaultReservationWindowStart(),
+          reservationWindowEnd: defaultReservationWindowEnd(),
           passenger: {
             name: "陳小姐",
             phone: "0900123456",
@@ -712,8 +875,8 @@ describe("owned mobility service", () => {
         dropoff: {
           address: "桃園機場第二航廈",
         },
-        reservationWindowStart: "2026-04-15T08:30:00Z",
-        reservationWindowEnd: "2026-04-15T08:45:00Z",
+        reservationWindowStart: defaultReservationWindowStart(),
+        reservationWindowEnd: defaultReservationWindowEnd(),
         passenger: {
           name: "王小明",
           phone: "0912000111",
@@ -859,8 +1022,8 @@ describe("owned mobility service", () => {
         dropoff: {
           address: "桃園機場第二航廈",
         },
-        reservationWindowStart: "2026-04-16T10:00:00Z",
-        reservationWindowEnd: "2026-04-16T10:20:00Z",
+        reservationWindowStart: defaultReservationWindowStart(2),
+        reservationWindowEnd: defaultReservationWindowEnd(3),
         passenger: {
           name: "ACME Admin",
           phone: "0912000001",
@@ -877,8 +1040,8 @@ describe("owned mobility service", () => {
         dropoff: {
           address: "台北南港展覽館",
         },
-        reservationWindowStart: "2026-04-16T11:00:00Z",
-        reservationWindowEnd: "2026-04-16T11:20:00Z",
+        reservationWindowStart: defaultReservationWindowStart(3),
+        reservationWindowEnd: defaultReservationWindowEnd(4),
         passenger: {
           name: "NEWCO Admin",
           phone: "0912000002",
@@ -923,7 +1086,7 @@ describe("owned mobility service", () => {
     }
 
     try {
-      ownedMobilityService.cancelTenantBooking(
+      await ownedMobilityService.cancelTenantBooking(
         TENANT_ACME,
         newcoBooking.bookingId,
         {
@@ -951,8 +1114,8 @@ describe("owned mobility service", () => {
         dropoff: {
           address: "台中市梧棲區中二路一段9號",
         },
-        reservationWindowStart: "2026-04-16T10:00:00Z",
-        reservationWindowEnd: "2026-04-16T10:20:00Z",
+        reservationWindowStart: defaultReservationWindowStart(),
+        reservationWindowEnd: defaultReservationWindowEnd(),
         passenger: {
           name: "企業旅客",
           phone: "0912000003",
@@ -1096,7 +1259,7 @@ describe("owned mobility service", () => {
           .filter((delivery) => delivery.eventType !== "tenant.webhook.test"),
       ).toEqual([]);
 
-      ownedMobilityService.cancelTenantBooking(
+      await ownedMobilityService.cancelTenantBooking(
         TENANT_ACME,
         acmeBooking.bookingId,
         {
@@ -1194,8 +1357,8 @@ describe("owned mobility service", () => {
         dropoff: {
           address: "桃園機場第二航廈",
         },
-        reservationWindowStart: "2026-04-16T10:00:00Z",
-        reservationWindowEnd: "2026-04-16T10:20:00Z",
+        reservationWindowStart: defaultReservationWindowStart(),
+        reservationWindowEnd: defaultReservationWindowEnd(),
         passenger: {
           name: "王小明",
           phone: "0912000111",
@@ -1670,5 +1833,750 @@ describe("owned mobility service", () => {
         }),
       }),
     );
+  });
+
+  describe("referral passenger authority and lifecycle endpoints", () => {
+    it("idempotent create replay returns TenantBookingResult shape without PII leak", async () => {
+      const tenantPartnerService = new TenantPartnerService(
+        new AuditNotificationService(),
+      );
+      const { ownedMobilityService } = createService(
+        undefined,
+        tenantPartnerService,
+      );
+      const identity: BootstrapRequestIdentity = {
+        authMode: "jwt_bearer",
+        actorType: "referral_passenger",
+        actorId: "pax-ref-001",
+        realm: "partner",
+        tenantId: "tenant-demo-001",
+        partnerId: "partner_ead6bf3d-e858-47cc-bfe1-5a3742524118",
+        partnerProgramId: "program-referral-community",
+        partnerEntrySlug: "yuhe-residence",
+        drtsPassengerId: "pax-ref-001",
+        roleFamilies: ["partner"],
+        roles: ["referral_passenger"],
+        scopes: [],
+        requestId: "req-ref-001",
+      };
+
+      const bookingCommand = {
+        entrySlug: "yuhe-residence",
+        pickupAddress: "123 Main St",
+        dropoffAddress: "456 Market St",
+        idempotencyKey: "idemp-test-key-100",
+      };
+
+      const result1 = await ownedMobilityService.createReferralPassengerBooking(
+        bookingCommand,
+        identity,
+      );
+
+      expect(result1.orderId).toBeDefined();
+      expect(result1.bookingId).toBeDefined();
+      expect(result1.serviceBucket).toBe("business_dispatch");
+      expect(result1.replayed).toBe(false);
+
+      const result2 = await ownedMobilityService.createReferralPassengerBooking(
+        bookingCommand,
+        identity,
+      );
+
+      expect(result2.orderId).toBe(result1.orderId);
+      expect(result2.replayed).toBe(true);
+      expect((result2 as any).passenger).toBeUndefined();
+      expect((result2 as any).passengerName).toBeUndefined();
+      expect((result2 as any).passengerPhone).toBeUndefined();
+    });
+
+    it("allows partner_api_key identities to create bookings within the same partner entry scope", async () => {
+      const tenantPartnerService = new TenantPartnerService(
+        new AuditNotificationService(),
+      );
+      const verification = await tenantPartnerService.verifyPartnerEligibility({
+        entrySlug: "bank-demo-alpha-airport",
+        cardLast4: "2468",
+      });
+      const { ownedMobilityService } = createService(
+        undefined,
+        tenantPartnerService,
+      );
+      const identity: BootstrapRequestIdentity = {
+        authMode: "partner_api_key",
+        actorType: "partner_api_key",
+        actorId: "partner-key-001",
+        realm: "partner",
+        tenantId: PARTNER_TENANT,
+        partnerId: "partner-bank-demo-001",
+        partnerProgramId: "program-airport-alpha",
+        partnerEntrySlug: "bank-demo-alpha-airport",
+        roleFamilies: ["partner"],
+        roles: ["partner_api_key"],
+        scopes: ["partner:book"],
+        requestId: "req-partner-api-booking-001",
+      };
+
+      const created = await ownedMobilityService.createTenantBooking(
+        {
+          businessDispatchSubtype: "credit_card_airport_transfer",
+          partnerEntrySlug: "bank-demo-alpha-airport",
+          eligibilityVerificationId: verification.eligibilityVerificationId,
+          direction: "pickup",
+          pickup: {
+            address: "桃園機場第二航廈",
+          },
+          dropoff: {
+            address: "台北市信義區松高路11號",
+          },
+          reservationWindowStart: defaultReservationWindowStart(),
+          reservationWindowEnd: defaultReservationWindowEnd(),
+          passenger: {
+            name: "陳小姐",
+            phone: "0900123456",
+          },
+          flightNo: "CI-001",
+        },
+        PARTNER_TENANT,
+        identity,
+      );
+
+      expect(created).toMatchObject({
+        orderId: expect.any(String),
+        bookingId: expect.any(String),
+        replayed: false,
+      });
+      expect(
+        ownedMobilityService.getOrder(created.orderId, identity),
+      ).toMatchObject({
+        partnerId: "partner-bank-demo-001",
+        partnerProgramId: "program-airport-alpha",
+        partnerEntrySlug: "bank-demo-alpha-airport",
+        eligibilityVerificationId: verification.eligibilityVerificationId,
+      });
+    });
+
+    it("prevents cross-passenger and cross-partner access", async () => {
+      const tenantPartnerService = new TenantPartnerService(
+        new AuditNotificationService(),
+      );
+      const { ownedMobilityService } = createService(
+        undefined,
+        tenantPartnerService,
+      );
+      const identity1: BootstrapRequestIdentity = {
+        authMode: "jwt_bearer",
+        actorType: "referral_passenger",
+        actorId: "pax-ref-001",
+        realm: "partner",
+        tenantId: "tenant-demo-001",
+        partnerId: "partner_ead6bf3d-e858-47cc-bfe1-5a3742524118",
+        partnerProgramId: "program-referral-community",
+        partnerEntrySlug: "yuhe-residence",
+        drtsPassengerId: "pax-ref-001",
+        roleFamilies: ["partner"],
+        roles: ["referral_passenger"],
+        scopes: [],
+        requestId: "req-ref-001",
+      };
+
+      const identity2: BootstrapRequestIdentity = {
+        authMode: "jwt_bearer",
+        actorType: "referral_passenger",
+        actorId: "pax-ref-002",
+        realm: "partner",
+        tenantId: "tenant-demo-001",
+        partnerId: "partner_ead6bf3d-e858-47cc-bfe1-5a3742524118",
+        partnerProgramId: "program-referral-community",
+        partnerEntrySlug: "yuhe-residence",
+        drtsPassengerId: "pax-ref-002",
+        roleFamilies: ["partner"],
+        roles: ["referral_passenger"],
+        scopes: [],
+        requestId: "req-ref-002",
+      };
+
+      const booking = await ownedMobilityService.createReferralPassengerBooking(
+        {
+          entrySlug: "yuhe-residence",
+          pickupAddress: "Pickup Spot",
+          dropoffAddress: "Dropoff Spot",
+        },
+        identity1,
+      );
+
+      let caught: any = null;
+      try {
+        ownedMobilityService.getReferralPassengerReceipt(
+          booking.orderId,
+          identity2,
+        );
+      } catch (err) {
+        caught = err;
+      }
+      expect(caught).not.toBeNull();
+      expect(caught.getStatus()).toBe(403);
+      expect(caught.getResponse().error.code).toMatch(
+        /PASSENGER_SCOPE_MISMATCH|PARTNER_SCOPE_MISMATCH/,
+      );
+    });
+
+    it("returns dynamic trip details and downloadUrl in receipt", async () => {
+      const tenantPartnerService = new TenantPartnerService(
+        new AuditNotificationService(),
+      );
+      const { ownedMobilityService } = createService(
+        undefined,
+        tenantPartnerService,
+      );
+      const identity: BootstrapRequestIdentity = {
+        authMode: "jwt_bearer",
+        actorType: "referral_passenger",
+        actorId: "pax-ref-001",
+        realm: "partner",
+        tenantId: "tenant-demo-001",
+        partnerId: "partner_ead6bf3d-e858-47cc-bfe1-5a3742524118",
+        partnerProgramId: "program-referral-community",
+        partnerEntrySlug: "yuhe-residence",
+        drtsPassengerId: "pax-ref-001",
+        roleFamilies: ["partner"],
+        roles: ["referral_passenger"],
+        scopes: [],
+        requestId: "req-ref-001",
+      };
+
+      const booking = await ownedMobilityService.createReferralPassengerBooking(
+        {
+          entrySlug: "yuhe-residence",
+          pickupAddress: "Pickup Spot",
+          dropoffAddress: "Dropoff Spot",
+        },
+        identity,
+      );
+
+      const activeTrip =
+        ownedMobilityService.getReferralPassengerActiveTrip(identity);
+      expect(activeTrip.active).toBe(true);
+      expect(activeTrip.trip?.orderId).toBe(booking.orderId);
+
+      const history =
+        ownedMobilityService.listReferralPassengerHistory(identity);
+      expect(history.items.length).toBeGreaterThan(0);
+      expect(history.items[0]?.orderId).toBe(booking.orderId);
+
+      const receipt = ownedMobilityService.getReferralPassengerReceipt(
+        booking.orderId,
+        identity,
+      );
+      expect(receipt.orderId).toBe(booking.orderId);
+      expect(receipt.downloadUrl).toBe(
+        `/api/referral/receipt/${booking.orderId}/download`,
+      );
+    });
+
+    it("only allows referral ratings after completion and keeps duplicates idempotent", async () => {
+      const tenantPartnerService = new TenantPartnerService(
+        new AuditNotificationService(),
+      );
+      const { ownedMobilityService } = createService(
+        undefined,
+        tenantPartnerService,
+      );
+      const identity: BootstrapRequestIdentity = {
+        authMode: "jwt_bearer",
+        actorType: "referral_passenger",
+        actorId: "pax-ref-001",
+        realm: "partner",
+        tenantId: "tenant-demo-001",
+        partnerId: "partner_ead6bf3d-e858-47cc-bfe1-5a3742524118",
+        partnerProgramId: "program-referral-community",
+        partnerEntrySlug: "yuhe-residence",
+        drtsPassengerId: "pax-ref-001",
+        roleFamilies: ["partner"],
+        roles: ["referral_passenger"],
+        scopes: [],
+        requestId: "req-ref-rating-001",
+      };
+
+      const booking = await ownedMobilityService.createReferralPassengerBooking(
+        {
+          entrySlug: "yuhe-residence",
+          pickupAddress: "Pickup Spot",
+          dropoffAddress: "Dropoff Spot",
+        },
+        identity,
+      );
+
+      try {
+        await ownedMobilityService.submitReferralPassengerRating(
+          booking.orderId,
+          {
+            orderId: booking.orderId,
+            score: 5,
+            comment: " Great ride ",
+            tags: [" polite ", "fast", "fast"],
+          },
+          identity,
+        );
+        expect.unreachable("rating before completion should fail");
+      } catch (error) {
+        expect(getErrorCode(error)).toBe("PASSENGER_RATING_TRIP_NOT_COMPLETED");
+      }
+
+      await completeOrderForRating(ownedMobilityService, booking.orderId);
+
+      const firstRating =
+        await ownedMobilityService.submitReferralPassengerRating(
+          booking.orderId,
+          {
+            orderId: booking.orderId,
+            score: 5,
+            comment: " Great ride ",
+            tags: [" polite ", "fast", "fast"],
+            idempotencyKey: "rating-idemp-001",
+          },
+          identity,
+        );
+      expect(firstRating).toMatchObject({
+        orderId: booking.orderId,
+        score: 5,
+        comment: "Great ride",
+        tags: ["fast", "polite"],
+      });
+
+      const replayRating =
+        await ownedMobilityService.submitReferralPassengerRating(
+          booking.orderId,
+          {
+            orderId: booking.orderId,
+            score: 5,
+            comment: "Great ride",
+            tags: ["fast", "polite"],
+            idempotencyKey: "rating-idemp-002",
+          },
+          identity,
+        );
+      expect(replayRating).toEqual(firstRating);
+
+      try {
+        await ownedMobilityService.submitReferralPassengerRating(
+          booking.orderId,
+          {
+            orderId: booking.orderId,
+            score: 4,
+            comment: "Different payload",
+            tags: ["slow"],
+          },
+          identity,
+        );
+        expect.unreachable("different duplicate rating should conflict");
+      } catch (error) {
+        expect(getErrorCode(error)).toBe("PASSENGER_RATING_ALREADY_SUBMITTED");
+      }
+    });
+
+    it("replays referral booking and rating after repository reload", async () => {
+      const repository = createMemoryOwnedMobilityRepository();
+      const tenantPartnerService = new TenantPartnerService(
+        new AuditNotificationService(),
+      );
+      const identity: BootstrapRequestIdentity = {
+        authMode: "jwt_bearer",
+        actorType: "referral_passenger",
+        actorId: "pax-ref-001",
+        realm: "partner",
+        tenantId: "tenant-demo-001",
+        partnerId: "partner_ead6bf3d-e858-47cc-bfe1-5a3742524118",
+        partnerProgramId: "program-referral-community",
+        partnerEntrySlug: "yuhe-residence",
+        drtsPassengerId: "pax-ref-001",
+        roleFamilies: ["partner"],
+        roles: ["referral_passenger"],
+        scopes: [],
+        requestId: "req-ref-reload-001",
+      };
+      const bookingCommand = {
+        entrySlug: "yuhe-residence",
+        pickupAddress: "Pickup Spot",
+        dropoffAddress: "Dropoff Spot",
+        idempotencyKey: "referral-create-reload-001",
+      };
+
+      const { ownedMobilityService: firstService } = createService(
+        repository,
+        tenantPartnerService,
+      );
+      await firstService.onModuleInit();
+
+      const created = await firstService.createReferralPassengerBooking(
+        bookingCommand,
+        identity,
+      );
+      await completeOrderForRating(firstService, created.orderId);
+      const firstRating = await firstService.submitReferralPassengerRating(
+        created.orderId,
+        {
+          orderId: created.orderId,
+          score: 5,
+          comment: "Smooth ride",
+          tags: ["clean", "on-time"],
+          idempotencyKey: "referral-rating-reload-001",
+        },
+        identity,
+      );
+
+      const { ownedMobilityService: reloadedService } = createService(
+        repository,
+        tenantPartnerService,
+      );
+      await reloadedService.onModuleInit();
+
+      const replayed = await reloadedService.createReferralPassengerBooking(
+        bookingCommand,
+        identity,
+      );
+      expect(replayed.orderId).toBe(created.orderId);
+      expect(replayed.replayed).toBe(true);
+
+      const replayedRating =
+        await reloadedService.submitReferralPassengerRating(
+          created.orderId,
+          {
+            orderId: created.orderId,
+            score: 5,
+            comment: "Smooth ride",
+            tags: ["clean", "on-time"],
+            idempotencyKey: "referral-rating-reload-002",
+          },
+          identity,
+        );
+      expect(replayedRating).toEqual(firstRating);
+    });
+  });
+
+  describe("GAP-CONF-06 minimum lead time validation and configuration", () => {
+    const dummyAuth: MultiTaxiOperatingAuthorizationRecord = {
+      authorizationId: "auth-leadtime-001",
+      operatorId: "operator-001",
+      authorityCode: "TPE-MTX-001",
+      businessPlanVersion: "1.0",
+      status: "approved",
+      serviceAreaCodes: ["TPE"],
+      activeFareVersionId: "fare-ver-001",
+      effectiveFrom: "2026-01-01T00:00:00.000Z",
+      effectiveUntil: "2027-01-01T00:00:00.000Z",
+      createdAt: "2026-01-01T00:00:00.000Z",
+      updatedAt: "2026-01-01T00:00:00.000Z",
+    };
+
+    it("rejects scheduled booking inside default 15-minute lead time with TOO_SOON_TO_BOOK", () => {
+      const { ownedMobilityService } = createService();
+      const fiveMinutesFromNow = new Date(
+        Date.now() + 5 * 60 * 1000,
+      ).toISOString();
+
+      try {
+        ownedMobilityService.createMultiTaxiRide(
+          {
+            pickup: { address: "台北車站" },
+            dropoff: { address: "松山機場" },
+            passenger: { name: "測試乘客", phone: "0911222333" },
+            requestedPickupAt: fiveMinutesFromNow,
+            timingMode: "scheduled",
+            paymentMethodTokenRef: null,
+          },
+          dummyAuth,
+        );
+        expect.unreachable("should have thrown ApiRequestError");
+      } catch (error) {
+        expect(error).toBeInstanceOf(ApiRequestError);
+        const apiError = error as ApiRequestError;
+        expect(apiError.code).toBe("TOO_SOON_TO_BOOK");
+        expect(apiError.getStatus()).toBe(400);
+        const response = apiError.getResponse() as {
+          error: { details?: Record<string, unknown> };
+        };
+        expect(response.error.details).toMatchObject({
+          requestedPickupAt: fiveMinutesFromNow,
+          minLeadTimeMinutes: 15,
+        });
+      }
+    });
+
+    it("rejects scheduled booking with pickup in the past with TOO_SOON_TO_BOOK", () => {
+      const { ownedMobilityService } = createService();
+      const pastTime = new Date(Date.now() - 5 * 60 * 1000).toISOString();
+
+      try {
+        ownedMobilityService.createMultiTaxiRide(
+          {
+            pickup: { address: "台北車站" },
+            dropoff: { address: "松山機場" },
+            passenger: { name: "測試乘客", phone: "0911222333" },
+            requestedPickupAt: pastTime,
+            timingMode: "scheduled",
+            paymentMethodTokenRef: null,
+          },
+          dummyAuth,
+        );
+        expect.unreachable("should have thrown ApiRequestError");
+      } catch (error) {
+        expect(error).toBeInstanceOf(ApiRequestError);
+        const apiError = error as ApiRequestError;
+        expect(apiError.code).toBe("TOO_SOON_TO_BOOK");
+        expect(apiError.getStatus()).toBe(400);
+      }
+    });
+
+    it("accepts scheduled booking with pickup beyond minimum lead time", async () => {
+      const { ownedMobilityService } = createService();
+      const thirtyMinutesFromNow = new Date(
+        Date.now() + 30 * 60 * 1000,
+      ).toISOString();
+
+      const order = await ownedMobilityService.createMultiTaxiRide(
+        {
+          pickup: { address: "台北車站" },
+          dropoff: { address: "松山機場" },
+          passenger: { name: "測試乘客", phone: "0911222333" },
+          requestedPickupAt: thirtyMinutesFromNow,
+          timingMode: "scheduled",
+          paymentMethodTokenRef: null,
+        },
+        dummyAuth,
+      );
+
+      expect(order).toBeDefined();
+      expect(order.timingMode).toBe("scheduled");
+      expect(order.dispatchSemantics).toBe("reservation");
+      expect(order.reservationWindowStart).toBe(thirtyMinutesFromNow);
+    });
+
+    it("allows dynamically reconfiguring lead time via setMinLeadTimeMinutes", async () => {
+      const { ownedMobilityService } = createService();
+      ownedMobilityService.setMinLeadTimeMinutes(60); // 60 minutes minimum
+
+      const fortyMinutesFromNow = new Date(
+        Date.now() + 40 * 60 * 1000,
+      ).toISOString();
+
+      // 40 minutes is now inside 60-minute lead time -> rejected
+      expect(() =>
+        ownedMobilityService.createMultiTaxiRide(
+          {
+            pickup: { address: "台北車站" },
+            dropoff: { address: "松山機場" },
+            passenger: { name: "測試乘客", phone: "0911222333" },
+            requestedPickupAt: fortyMinutesFromNow,
+            timingMode: "scheduled",
+            paymentMethodTokenRef: null,
+          },
+          dummyAuth,
+        ),
+      ).toThrowError();
+
+      // 70 minutes is beyond 60-minute lead time -> accepted
+      const seventyMinutesFromNow = new Date(
+        Date.now() + 70 * 60 * 1000,
+      ).toISOString();
+      const order = await ownedMobilityService.createMultiTaxiRide(
+        {
+          pickup: { address: "台北車站" },
+          dropoff: { address: "松山機場" },
+          passenger: { name: "測試乘客", phone: "0911222333" },
+          requestedPickupAt: seventyMinutesFromNow,
+          timingMode: "scheduled",
+          paymentMethodTokenRef: null,
+        },
+        dummyAuth,
+      );
+      expect(order.timingMode).toBe("scheduled");
+    });
+
+    it("allows immediate future scheduled booking when minLeadTimeMinutes is 0", async () => {
+      const { ownedMobilityService } = createService();
+      ownedMobilityService.setMinLeadTimeMinutes(0);
+
+      const oneMinuteFromNow = new Date(Date.now() + 60 * 1000).toISOString();
+      const order = await ownedMobilityService.createMultiTaxiRide(
+        {
+          pickup: { address: "台北車站" },
+          dropoff: { address: "松山機場" },
+          passenger: { name: "測試乘客", phone: "0911222333" },
+          requestedPickupAt: oneMinuteFromNow,
+          timingMode: "scheduled",
+          paymentMethodTokenRef: null,
+        },
+        dummyAuth,
+      );
+      expect(order.timingMode).toBe("scheduled");
+    });
+
+    it("allows on-demand rides with immediate pickup time without lead time restriction", async () => {
+      const { ownedMobilityService } = createService();
+      const nowIso = new Date().toISOString();
+
+      const order = await ownedMobilityService.createMultiTaxiRide(
+        {
+          pickup: { address: "台北車站" },
+          dropoff: { address: "松山機場" },
+          passenger: { name: "測試乘客", phone: "0911222333" },
+          requestedPickupAt: nowIso,
+          timingMode: "on_demand",
+          paymentMethodTokenRef: null,
+        },
+        dummyAuth,
+      );
+      expect(order.timingMode).toBe("on_demand");
+      expect(order.dispatchSemantics).toBe("realtime");
+    });
+
+    it("respects SCHEDULED_BOOKING_MIN_LEAD_TIME_MINUTES environment variable", () => {
+      const originalEnv = process.env.SCHEDULED_BOOKING_MIN_LEAD_TIME_MINUTES;
+      try {
+        process.env.SCHEDULED_BOOKING_MIN_LEAD_TIME_MINUTES = "45";
+        const { ownedMobilityService } = createService();
+        expect(ownedMobilityService.getMinLeadTimeMinutes()).toBe(45);
+
+        const thirtyMinutesFromNow = new Date(
+          Date.now() + 30 * 60 * 1000,
+        ).toISOString();
+        expect(() =>
+          ownedMobilityService.createMultiTaxiRide(
+            {
+              pickup: { address: "台北車站" },
+              dropoff: { address: "松山機場" },
+              passenger: { name: "測試乘客", phone: "0911222333" },
+              requestedPickupAt: thirtyMinutesFromNow,
+              timingMode: "scheduled",
+              paymentMethodTokenRef: null,
+            },
+            dummyAuth,
+          ),
+        ).toThrowError();
+      } finally {
+        if (originalEnv === undefined) {
+          delete process.env.SCHEDULED_BOOKING_MIN_LEAD_TIME_MINUTES;
+        } else {
+          process.env.SCHEDULED_BOOKING_MIN_LEAD_TIME_MINUTES = originalEnv;
+        }
+      }
+    });
+  });
+});
+
+describe("driver task lifecycle is enforced everywhere, not in some places", () => {
+  async function assignedTask() {
+    const { ownedMobilityService } = createService();
+    const order = ownedMobilityService.createPassengerOrder({
+      pickup: { address: "台中市梧棲區中二路一段9號" },
+      dropoff: { address: "台中市大安區興安路378號" },
+      passenger: { name: "李先生", phone: "0911222333" },
+    });
+    const dispatchJob = ownedMobilityService.dispatchOrder(order.orderId, {
+      mode: "auto",
+    });
+    const candidate = (
+      await ownedMobilityService.listDispatchCandidates(
+        dispatchJob.dispatchJobId,
+      )
+    )[0]!;
+    const assignment = await ownedMobilityService.assignDispatch({
+      dispatchJobId: dispatchJob.dispatchJobId,
+      vehicleId: candidate.vehicleId,
+      driverId: candidate.driverId,
+    });
+    return { ownedMobilityService, order, taskId: assignment.taskId };
+  }
+
+  async function codeOf(call: () => unknown): Promise<string> {
+    try {
+      await call();
+    } catch (error) {
+      return (error as ApiRequestError).code;
+    }
+    throw new Error("expected the call to throw");
+  }
+
+  it("refuses to accept a task the driver already rejected", async () => {
+    const { ownedMobilityService, taskId } = await assignedTask();
+    await ownedMobilityService.rejectDriverTask(taskId, {
+      reasonCode: "driver_unavailable",
+    });
+
+    expect(
+      await codeOf(() =>
+        ownedMobilityService.acceptDriverTask(taskId, {
+          acceptedAt: "2026-04-10T09:02:00Z",
+        }),
+      ),
+    ).toBe("DRIVER_TASK_TRANSITION_INVALID");
+  });
+
+  it("refuses to depart before accepting", async () => {
+    // The lifecycle says pending_acceptance -> accepted -> enroute_pickup.
+    // `departDriverTask` never checked, so a phone that skipped a step was
+    // taken at its word.
+    const { ownedMobilityService, taskId } = await assignedTask();
+
+    expect(
+      await codeOf(() =>
+        ownedMobilityService.departDriverTask(taskId, {
+          departedAt: "2026-04-10T09:03:00Z",
+          currentLocation: { lat: 24.266, lng: 120.522 },
+        }),
+      ),
+    ).toBe("DRIVER_TASK_TRANSITION_INVALID");
+  });
+
+  it("refuses a late acceptance after the order was cancelled", async () => {
+    // This is the case that needs no concurrency at all: a driver's phone
+    // comes back online after the passenger cancelled, and the old code
+    // accepted the task and set the order to driver_accepted -- reviving it.
+    const { ownedMobilityService, order, taskId } = await assignedTask();
+    await ownedMobilityService.cancelOwnedOrder(order.orderId, {
+      reasonCode: "passenger_cancelled",
+      cancelledBy: "passenger",
+    } as never);
+
+    expect(
+      await codeOf(() =>
+        ownedMobilityService.acceptDriverTask(taskId, {
+          acceptedAt: "2026-04-10T09:02:00Z",
+        }),
+      ),
+    ).toBe("DRIVER_TASK_TRANSITION_INVALID");
+  });
+
+  it("still allows the whole legal path", async () => {
+    const { ownedMobilityService, taskId } = await assignedTask();
+
+    await ownedMobilityService.acceptDriverTask(taskId, {
+      acceptedAt: "2026-04-10T09:02:00Z",
+    });
+    await ownedMobilityService.departDriverTask(taskId, {
+      departedAt: "2026-04-10T09:03:00Z",
+      currentLocation: { lat: 24.266, lng: 120.522 },
+    });
+    const task = await ownedMobilityService.arrivedPickup(taskId, {
+      arrivedAt: "2026-04-10T09:10:00Z",
+      currentLocation: { lat: 24.266, lng: 120.522 },
+    } as never);
+
+    expect(task.status).toBe("arrived_pickup");
+  });
+
+  it("treats a repeated call as the state it already reached", async () => {
+    // A retry that lands twice should not be a conflict; the task is already
+    // where the caller wanted it.
+    const { ownedMobilityService, taskId } = await assignedTask();
+    await ownedMobilityService.acceptDriverTask(taskId, {
+      acceptedAt: "2026-04-10T09:02:00Z",
+    });
+
+    await expect(
+      ownedMobilityService.acceptDriverTask(taskId, {
+        acceptedAt: "2026-04-10T09:02:00Z",
+      }),
+    ).resolves.toMatchObject({ status: "accepted" });
   });
 });

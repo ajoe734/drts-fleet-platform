@@ -20,6 +20,21 @@ const nextConfig: NextConfig = {
 
     return config;
   },
+  async headers() {
+    const candidateSha =
+      process.env.DRTS_CANDIDATE_SHA?.trim() || "unconfigured";
+    return [
+      {
+        source: "/:path*",
+        headers: [
+          {
+            key: "x-drts-candidate-sha",
+            value: candidateSha,
+          },
+        ],
+      },
+    ];
+  },
 };
 
 export default nextConfig;

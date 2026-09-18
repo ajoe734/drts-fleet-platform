@@ -9,11 +9,15 @@
 // the server pages pass only the serializable `rows`.
 
 import {
-  CanvasActionButton,
   CanvasPill,
   CanvasTable,
   type CanvasTableColumn,
 } from "@drts/ui-web";
+import { FleetActionButton } from "@/components/fleet-action-button";
+import {
+  FleetStatementActions,
+  StatementDecisionNote,
+} from "@/components/fleet-statement-actions";
 import { buildFleetTheme } from "@/lib/fleet-portal-theme";
 import {
   type FleetCase,
@@ -340,7 +344,13 @@ export function RecentTripsTable({ rows }: { rows: FleetTrip[] }) {
   return <CanvasTable theme={theme} columns={columns} rows={rows} />;
 }
 
-export function StatementsTable({ rows }: { rows: FleetStatement[] }) {
+export function StatementsTable({
+  fleetPartnerId,
+  rows,
+}: {
+  fleetPartnerId: string;
+  rows: FleetStatement[];
+}) {
   const theme = buildFleetTheme();
   const { locale, t } = useTranslation();
   const columns: CanvasTableColumn<FleetStatement>[] = [
@@ -358,6 +368,10 @@ export function StatementsTable({ rows }: { rows: FleetStatement[] }) {
           >
             {r.id}
           </div>
+          <StatementDecisionNote
+            fleetPartnerId={fleetPartnerId}
+            statementId={r.id}
+          />
           {(r.sponsorFundedTrips || r.reimbursement) && (
             <div style={{ fontSize: 11, color: theme.textDim }}>
               {t("table.statementSponsorSummary", {
@@ -388,31 +402,8 @@ export function StatementsTable({ rows }: { rows: FleetStatement[] }) {
     { h: t("table.issued"), k: "issued", w: 130, mono: true },
     {
       h: t("table.actions"),
-      w: 180,
-      r: (r) => (
-        <div style={{ display: "flex", gap: 4 }}>
-          <CanvasActionButton
-            theme={theme}
-            size="xs"
-            descriptor={{ action: "download", enabled: true, riskLevel: "low" }}
-            label={t("actions.download")}
-            en={locale === "zh" ? "download" : undefined}
-          />
-          <CanvasActionButton
-            theme={theme}
-            size="xs"
-            descriptor={{
-              action: "confirm",
-              enabled: r.status !== "paid",
-              disabledReasonCode: "already_paid",
-              riskLevel: "high",
-              requiresReason: true,
-            }}
-            label={t("actions.confirm")}
-            en={locale === "zh" ? "confirm" : undefined}
-          />
-        </div>
-      ),
+      w: 260,
+      r: (r) => <FleetStatementActions fleetPartnerId={fleetPartnerId} statement={r} />,
     },
   ];
   return <CanvasTable theme={theme} columns={columns} rows={rows} />;
@@ -489,24 +480,30 @@ export function DocumentsTable({ rows }: { rows: FleetDoc[] }) {
       w: 200,
       r: (r) => (
         <div style={{ display: "flex", gap: 4 }}>
-          <CanvasActionButton
-            theme={theme}
-            size="xs"
-            descriptor={{ action: "remind", enabled: true, riskLevel: "low" }}
+          <FleetActionButton
+            descriptor={{
+              action: "remind",
+              enabled: false,
+              disabledReasonCode: t("actions.reason.documentReminderPending"),
+              riskLevel: "low",
+            }}
             label={t("actions.remindDriver")}
-            en={locale === "zh" ? "remind" : undefined}
-          />
-          <CanvasActionButton
-            theme={theme}
+            {...(locale === "zh" ? { en: "remind" } : {})}
             size="xs"
+          />
+          <FleetActionButton
             descriptor={{
               action: "upload",
-              enabled: r.owner === "fleet",
-              disabledReasonCode: "driver_owned",
+              enabled: false,
+              disabledReasonCode:
+                r.owner === "fleet"
+                  ? t("actions.reason.documentUploadPending")
+                  : t("actions.reason.documentDriverOwned"),
               riskLevel: "medium",
             }}
             label={t("actions.upload")}
-            en={locale === "zh" ? "upload" : undefined}
+            {...(locale === "zh" ? { en: "upload" } : {})}
+            size="xs"
           />
         </div>
       ),
@@ -619,17 +616,19 @@ export function CasesTable({ rows }: { rows: FleetCase[] }) {
       h: t("table.actions"),
       w: 160,
       r: (r) => (
-        <CanvasActionButton
-          theme={theme}
-          size="xs"
+        <FleetActionButton
           descriptor={{
             action: "respond",
-            enabled: r.responsibility !== "platform",
-            disabledReasonCode: "platform_owned",
+            enabled: false,
+            disabledReasonCode:
+              r.responsibility === "platform"
+                ? t("actions.reason.casePlatformOwned")
+                : t("actions.reason.caseResponsePending"),
             riskLevel: "medium",
           }}
           label={t("cases.action.respond")}
-          en={locale === "zh" ? "respond" : undefined}
+          {...(locale === "zh" ? { en: "respond" } : {})}
+          size="xs"
         />
       ),
     },

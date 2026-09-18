@@ -1,0 +1,22 @@
+ RUN  v4.1.4 /home/lupin/drts-fleet-platform/.artifacts/worktrees/auto/gemini-iam-obs-001
+
+ ✓ tests/integration/iam-observability-alerts.integration.test.ts (9 tests) 20ms
+   ✓ IAM Observability & Alert Policy Integration (9)
+     ✓ 1. Label Sanitization & Zero PII Guarantee (2)
+       ✓ redacts sensitive email, token, IP, and raw identity values from metric labels 3ms
+       ✓ preserves canonical low-cardinality enum labels 1ms
+     ✓ 2. Security Signal Metrics Recording (1)
+       ✓ records all 8 required security metrics signals into Prometheus telemetry 5ms
+     ✓ 3. Security Alert Drills (3)
+       ✓ triggers critical alert and page on refresh token reuse drill 1ms
+       ✓ triggers high severity alert on unapproved privileged change drill 1ms
+       ✓ triggers critical alert on audit failure drill 1ms
+     ✓ 4. Audit Pipeline Fail-Closed Enforcement (3)
+       ✓ allows privileged mutation to proceed when audit recording succeeds 1ms
+       ✓ pages security and BLOCKS privileged mutation (throws AuditPipelineException) when audit fails 2ms
+       ✓ allows non-privileged write to proceed with log warning when audit fails 2ms
+
+ Test Files  1 passed (1)
+      Tests  9 passed (9)
+   Start at  12:10:37
+   Duration  819ms

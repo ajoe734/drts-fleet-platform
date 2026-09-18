@@ -1,4 +1,4 @@
-import { randomUUID } from "node:crypto";
+import { randomUUID } from "crypto";
 import { NextRequest, NextResponse } from "next/server";
 import type {
   ActionReceipt,
@@ -6,12 +6,11 @@ import type {
   CreateTenantBookingCommand,
   CrossAppResourceLink,
 } from "@drts/contracts";
-import { createTenantClient } from "@drts/api-client";
-import { API_URL, DEMO_ACTOR_ID, DEMO_TENANT_ID } from "@/lib/api-client";
+import { getTenantClientForRouteHandler } from "@/lib/api-client";
 
 type TenantBookingCommandResponse = {
-  bookingId: string;
-  orderId: string;
+  booking_id: string;
+  order_id: string;
   status: string;
   businessDispatchSubtype: string;
   dispatchSemantics: string;
@@ -44,21 +43,36 @@ function buildCrossAppLinks(
 
 export async function POST(request: NextRequest) {
   try {
-    const body = (await request.json()) as CreateTenantBookingCommand;
-    const client = createTenantClient(API_URL, DEMO_TENANT_ID, DEMO_ACTOR_ID);
+    const client = await getTenantClientForRouteHandler();
+    if (!client) {
+      return NextResponse.json(
+        {
+          error: "AUTHENTICATION_REQUIRED",
+          message: "Active tenant session required.",
+        },
+        { status: 401 },
+      );
+    }
+
+    const body = (await request.json()) as CreateTenantBookingCommand & {
+      idempotencyKey?: string;
+    };
     const requestId = randomUUID();
+    const idempotencyKey =
+      request.headers.get("idempotency-key") || body.idempotencyKey || undefined;
+
     const booking = await client.post<TenantBookingCommandResponse>(
       "/api/tenant/bookings",
       {
         body,
         headers: {
           "X-Request-Id": requestId,
-          "Idempotency-Key": randomUUID(),
+          ...(idempotencyKey ? { "Idempotency-Key": idempotencyKey } : {}),
         },
       },
     );
 
-    if (!booking?.bookingId) {
+    if (!booking?.booking_id) {
       return NextResponse.json(
         { error: "Backend did not return a booking identifier." },
         { status: 502 },
@@ -80,7 +94,7 @@ export async function POST(request: NextRequest) {
           (entry) =>
             entry.requestId === requestId &&
             entry.resourceType === "booking" &&
-            entry.resourceId === booking.bookingId,
+            entry.resourceId === booking.booking_id,
         ) ?? null;
     } catch {
       auditEntry = null;
@@ -92,7 +106,7 @@ export async function POST(request: NextRequest) {
       actionId: requestId,
       auditId: auditEntry?.auditId ?? requestId,
       resourceType: "booking",
-      resourceId: booking.bookingId,
+      resourceId: booking.booking_id,
       status: receiptStatus,
       message:
         receiptStatus === "accepted"
@@ -103,14 +117,14 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({
       ok: true,
       booking: {
-        bookingId: booking.bookingId,
+        bookingId: booking.booking_id,
         status: booking.status,
       },
       receipt,
       auditHref: auditEntry
         ? `/audit?auditId=${encodeURIComponent(auditEntry.auditId)}`
         : null,
-      crossAppLinks: buildCrossAppLinks(booking.bookingId, requestId),
+      crossAppLinks: buildCrossAppLinks(booking.booking_id, requestId),
     });
   } catch (error) {
     return NextResponse.json(

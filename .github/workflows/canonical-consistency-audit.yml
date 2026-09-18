@@ -1,0 +1,65 @@
+# Runs the repository-wide consistency audit on a schedule.
+#
+# Every defect the 2026-08-17 conformance audit found was caught because a human
+# thought to ask for an audit. That is the part worth fixing: the detection
+# mechanism worked, its trigger did not. This runs the same checks weekly and
+# files what it finds, so the next class of drift does not wait for someone to
+# wonder about it.
+#
+# Reports only. The blocking, diff-scoped version is the `Canonical consistency`
+# job in ci.yml.
+name: Canonical consistency audit
+
+on:
+  schedule:
+    - cron: "17 2 * * 1" # Mondays 02:17 UTC
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  audit:
+    name: Audit
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Run the repository-wide consistency audit
+        id: audit
+        run: |
+          set -o pipefail
+          python3 tools/ci/git/check_canonical_consistency.py --audit | tee audit.txt
+          {
+            echo "count=$(grep -c 'cites missing path\|no accepted decision packet\|has no packet' audit.txt || true)"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Publish to the run summary
+        run: |
+          {
+            echo "## Canonical consistency audit"
+            echo
+            echo '```'
+            head -200 audit.txt
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: File or update the tracking issue
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          count="${{ steps.audit.outputs.count }}"
+          title="Canonical consistency audit: ${count} finding(s)"
+          body="$(printf '%s\n\n```\n%s\n```\n' \
+            "Repository-wide audit from \`${GITHUB_SHA}\`. Reports only; the blocking check is diff-scoped in CI." \
+            "$(head -200 audit.txt)")"
+          existing="$(gh issue list --state open --search 'in:title "Canonical consistency audit"' \
+            --json number --jq '.[0].number' 2>/dev/null || true)"
+          if [ -n "$existing" ]; then
+            gh issue edit "$existing" --title "$title" --body "$body"
+            echo "Updated issue #$existing"
+          else
+            gh issue create --title "$title" --body "$body" --label automated
+            echo "Filed a new issue"
+          fi

@@ -7,6 +7,501 @@ import type {
 
 export type Locale = "en" | "zh";
 
+/**
+ * Compatibility label for callers without the server-provided environment.
+ * Translation catalogs never read deployment/build variables. The server
+ * layout supplies normalized DRTS_ENV to the shell for its explicit label.
+ */
+export function resolveAuthoritativeAdminShellEnv(
+  locale: Locale = "zh",
+): string {
+  return locale === "zh" ? "未知環境" : "unknown";
+}
+
+const supplyReviewEn = {
+  // ── Supply Review Queue & Detail (S1F-ADM-001) ──
+  "supplyReview.status.draft": "Draft",
+  "supplyReview.status.submitted": "Submitted",
+  "supplyReview.status.in_review": "In Review",
+  "supplyReview.status.needs_revision": "Needs Revision",
+  "supplyReview.status.approved": "Approved",
+  "supplyReview.status.rejected": "Rejected",
+  "supplyReview.status.withdrawn": "Withdrawn",
+
+  "supplyReview.queue.title": "Supply Review Queue",
+  "supplyReview.queue.subtitle":
+    "Fleet submission → Review → Approve into canonical registry",
+  "supplyReview.queue.moreFilters": "More Filters",
+  "supplyReview.queue.tabPending": "Pending",
+  "supplyReview.queue.tabMine": "Under My Review",
+  "supplyReview.queue.tabHistory": "History",
+  "supplyReview.queue.missingCount": "Missing {count}",
+  "supplyReview.queue.startReview": "Start Review",
+  "supplyReview.queue.openDetail": "Open Detail",
+  "supplyReview.queue.loadFailed": "Failed to load queue",
+  "supplyReview.queue.refresh": "Refresh",
+
+  "supplyReview.filter.fleetAll": "Fleet Partner: All",
+  "supplyReview.filter.fleetMetropolitan": "Metropolitan Fleet",
+  "supplyReview.filter.fleetLanyang": "Lanyang Passenger",
+  "supplyReview.filter.fleetCoastal": "Coastal Fleet",
+  "supplyReview.filter.typeAll": "Type: All",
+  "supplyReview.filter.typeVehicle": "Vehicle",
+  "supplyReview.filter.typeDriver": "Driver",
+  "supplyReview.filter.typeInsurance": "Insurance",
+  "supplyReview.filter.serviceAll": "Service Product: All",
+  "supplyReview.filter.serviceRealtime": "Real-time Dispatch",
+  "supplyReview.filter.serviceAirport": "Airport Transfer",
+  "supplyReview.filter.serviceBusiness": "Business Charter",
+  "supplyReview.filter.areaAll": "Business Area: All",
+  "supplyReview.filter.areaTaipei": "Taipei City",
+  "supplyReview.filter.areaYilan": "Yilan County",
+  "supplyReview.filter.areaTaichung": "Taichung City",
+  "supplyReview.filter.statusAll": "Status: All",
+  "supplyReview.filter.statusSubmitted": "Submitted",
+  "supplyReview.filter.statusInReview": "In Review",
+  "supplyReview.filter.statusNeedsRevision": "Needs Revision",
+  "supplyReview.filter.statusApproved": "Approved",
+  "supplyReview.filter.statusRejected": "Rejected",
+  "supplyReview.filter.missingAll": "Missing Items: All",
+  "supplyReview.filter.missingHasMissing": "Has Missing Items",
+  "supplyReview.filter.missingNoMissing": "No Missing Items",
+  "supplyReview.filter.dateAll": "Submitted Date: All",
+  "supplyReview.filter.dateToday": "Submitted Today",
+  "supplyReview.filter.dateRecent": "Past 7 Days",
+
+  "supplyReview.detail.loadingTitle": "Loading",
+  "supplyReview.detail.backToQueue": "Back to Queue",
+  "supplyReview.detail.loadFailedTitle": "Failed to Load Detail",
+  "supplyReview.detail.retry": "Retry",
+  "supplyReview.detail.reviewHeader": "{type} Review",
+  "supplyReview.detail.startReview": "Start Review",
+  "supplyReview.detail.requestRevision": "Request Revision",
+  "supplyReview.detail.reject": "Reject",
+  "supplyReview.detail.approveProvision": "Approve & Provision",
+  "supplyReview.detail.reload": "Reload",
+  "supplyReview.detail.opError": "Operation Error",
+  "supplyReview.detail.diffTitle":
+    "Side-by-side Diff · submission vs canonical",
+  "supplyReview.detail.diffSubtitle": "VQ-1 · Changed fields highlighted",
+  "supplyReview.detail.viewAll": "View All",
+  "supplyReview.detail.viewDiffOnly": "View Diff Only",
+  "supplyReview.detail.noDiffData": "No diff data available",
+  "supplyReview.detail.colField": "Field",
+  "supplyReview.detail.colSubmitted": "Submitted Value",
+  "supplyReview.detail.colCanonical": "Current (Canonical)",
+  "supplyReview.detail.docTitle": "Document Review",
+  "supplyReview.detail.docSubtitle":
+    "VQ-2 · Type / Filename / Validity / Status",
+  "supplyReview.detail.noDocuments": "No attached documents",
+  "supplyReview.detail.docPreview": "Preview",
+  "supplyReview.detail.validationTitle": "Integrity Check · validation",
+  "supplyReview.detail.reviewerNoteTitle": "Reviewer Note",
+  "supplyReview.detail.noteSubtitle":
+    "VQ-3 · Reason code required for revision / rejection",
+  "supplyReview.detail.approveNoNote": "— N/A for Approval —",
+  "supplyReview.detail.commentPlaceholder":
+    "Enter reviewer comment for fleet partner...",
+  "supplyReview.detail.canonicalPreviewTitle": "Canonical Provision Preview",
+  "supplyReview.detail.previewSubtitle":
+    "VQ-4 · Approval mutates registry (irreversible)",
+  "supplyReview.detail.previewWarn":
+    "Approval is a single transaction: provision canonical + affiliation + readiness + audit. Integrity check failures prevent approval.",
+  "supplyReview.detail.guardrailTitle": "Guardrail",
+  "supplyReview.detail.guardrailBody":
+    "Reviewers cannot approve self-submitted fleet data (REVIEWER_SELF_APPROVAL_DENIED) and cannot bypass required documents.",
+  "supplyReview.detail.auditReceiptTitle": "Audit Receipt",
+  "supplyReview.detail.confirmApproveTitle":
+    "Confirm Approval and Provision Canonical?",
+  "supplyReview.detail.confirmApproveIntro":
+    "This action will approve submission ({submissionId}) and within a single transaction:",
+  "supplyReview.detail.confirmApproveStep1":
+    "1. Provision / update canonical record",
+  "supplyReview.detail.confirmApproveStep2":
+    "2. Bind fleet partner affiliation relationship",
+  "supplyReview.detail.confirmApproveStep3": "3. Recalculate readiness",
+  "supplyReview.detail.confirmApproveStep4":
+    "4. Write audit log and send notifications",
+  "supplyReview.detail.cancel": "Cancel",
+  "supplyReview.detail.selectReason": "— Select Reason —",
+  "supplyReview.detail.actionCommentPlaceholder":
+    "Specify revision requirements or rejection reasons...",
+  "supplyReview.detail.previewDocTitle": "Document Preview ·",
+  "supplyReview.detail.docId": "• Document ID: ",
+  "supplyReview.detail.fileKey": "• File Key: ",
+  "supplyReview.detail.contentType": "• Content-Type: ",
+  "supplyReview.detail.fileSize": "• Size: ",
+  "supplyReview.detail.checksum": "• SHA-256 Checksum: ",
+  "supplyReview.detail.effectivePeriod": "• Effective Period: ",
+  "supplyReview.detail.reviewStatus": "• Review Status: ",
+  "supplyReview.detail.closePreview": "Close Preview",
+
+  // Queue Columns
+  "supplyReview.col.id": "ID",
+  "supplyReview.col.type": "Type",
+  "supplyReview.col.fleet": "Fleet Partner",
+  "supplyReview.col.subject": "Subject",
+  "supplyReview.col.area": "Business Area",
+  "supplyReview.col.rev": "Rev",
+  "supplyReview.col.status": "Status",
+  "supplyReview.col.submittedAt": "Submitted",
+  "supplyReview.col.missingOrLock": "Missing / Locked",
+  "supplyReview.col.actions": "Actions",
+
+  // Document Table Columns
+  "supplyReview.docCol.type": "Type",
+  "supplyReview.docCol.filename": "Filename",
+  "supplyReview.docCol.period": "Effective Period",
+  "supplyReview.docCol.status": "Status",
+
+  // Submission Types
+  "supplyReview.type.driver": "Driver",
+  "supplyReview.type.vehicle": "Vehicle",
+  "supplyReview.type.insurance": "Insurance",
+  "supplyReview.type.contract": "Contract",
+  "supplyReview.type.object": "Item",
+
+  // Reason Codes
+  "supplyReview.reason.manual_screening": "Manual Screening · manual_screening",
+  "supplyReview.reason.all_documents_valid":
+    "All Documents Valid · all_documents_valid",
+  "supplyReview.reason.document_expired": "Document Expired · document_expired",
+  "supplyReview.reason.document_missing": "Document Missing · document_missing",
+  "supplyReview.reason.information_mismatch":
+    "Information Mismatch · information_mismatch",
+  "supplyReview.reason.vehicle_unsupported":
+    "Vehicle Unsupported · vehicle_unsupported",
+  "supplyReview.reason.license_invalid": "License Invalid · license_invalid",
+  "supplyReview.reason.other_revision_required":
+    "Other Revision Required · other_revision_required",
+  "supplyReview.reason.other_rejection_reason":
+    "Other Rejection Reason · other_rejection_reason",
+
+  // Diff Row Labels & Values
+  "supplyReview.diff.plateNo": "Plate Number · plate no",
+  "supplyReview.diff.licenseType": "License Type · license type",
+  "supplyReview.diff.brandModel": "Brand / Model · brand/model",
+  "supplyReview.diff.seatCount": "Seat Count · seat count",
+  "supplyReview.diff.luggage": "Luggage Capacity · luggage",
+  "supplyReview.diff.businessArea": "Business Area · business area",
+  "supplyReview.diff.products": "Supported Products · products",
+  "supplyReview.diff.insuranceUntil": "Insurance Expiry · insurance until",
+  "supplyReview.diff.driverName": "Driver Name · name",
+  "supplyReview.diff.mobile": "Mobile Phone · mobile",
+  "supplyReview.diff.licenseNo": "Pro License No. · license no",
+  "supplyReview.diff.licenseExpiry": "License Expiry · license expiry",
+  "supplyReview.diff.registrationNo": "Taxi Reg. No. · registration no",
+  "supplyReview.diff.registrationArea": "Taxi Reg. Area · registration area",
+  "supplyReview.diff.notCreated": "— (Not created)",
+  "supplyReview.diff.expired": "Expired",
+
+  // Document Types & Statuses
+  "supplyReview.docType.doc": "Document · document",
+  "supplyReview.docType.registration": "Vehicle Registration · registration",
+  "supplyReview.docType.insurance": "Insurance Policy · insurance",
+  "supplyReview.docType.contract": "Affiliation Contract · contract",
+  "supplyReview.docType.driver_license": "Pro Driver License · license",
+  "supplyReview.docType.taxi_registration": "Taxi Reg. Permit · taxi reg",
+  "supplyReview.docStatus.approved": "Approved",
+  "supplyReview.docStatus.rejected": "Rejected",
+  "supplyReview.docStatus.expired": "Expired",
+  "supplyReview.docStatus.pending": "Pending",
+
+  // Errors & Banners
+  "supplyReview.err.defaultFailed": "Operation failed. Please try again later.",
+  "supplyReview.err.invalidId": "Invalid submissionId",
+  "supplyReview.err.notFound": "Supply submission record not found",
+  "supplyReview.err.startReviewFailed":
+    "Failed to start review for submission {id}: {msg}",
+  "supplyReview.err.loadQueueFailed": "Failed to load queue: {msg}",
+  "supplyReview.err.loadDetailFailed": "Failed to load detail: {msg}",
+  "supplyReview.err.selectReasonRequired":
+    "Reason code is required for requesting revision",
+  "supplyReview.err.commentRequired":
+    "Comment is required for requesting revision",
+  "supplyReview.err.rejectReasonRequired":
+    "Reason code is required for rejection",
+  "supplyReview.err.rejectCommentRequired": "Comment is required for rejection",
+  "supplyReview.banner.conflictTitle": "SUBMISSION_REVISION_CONFLICT · 409",
+  "supplyReview.banner.conflictBody":
+    "This submission has been updated (revision {rev}). Please reload before reviewing.",
+  "supplyReview.banner.selfApprovalTitle": "REVIEWER_SELF_APPROVAL_DENIED",
+  "supplyReview.banner.selfApprovalBody":
+    "Reviewers cannot approve submissions submitted by themselves as fleet partners (REVIEWER_SELF_APPROVAL_DENIED).",
+  "supplyReview.banner.loadingBody":
+    "Loading submission details from server...",
+  "supplyReview.banner.processing": "Processing, please wait...",
+  "supplyReview.banner.loadDetailFailedSubtitle":
+    "Unable to read this supply submission record",
+
+  // Validations
+  "supplyReview.validation.completeBody":
+    "All required fields complete · Document types complete · No duplicate targets.",
+  "supplyReview.validation.completeInfo":
+    "Insurance policies and affiliation contracts verified. Approving will sync canonical records and readiness.",
+  "supplyReview.validation.missingDocs":
+    "Missing required documents (Vehicle Registration / Insurance Policy). Integrity check failed, cannot approve.",
+  "supplyReview.validation.docExpired":
+    "Document expired: {name} expired on {until}. Revision required.",
+
+  // DL items & Modal
+  "supplyReview.dl.createUpdateVehicle": "Create / Update vehicle",
+  "supplyReview.dl.createUpdateDriver": "Create / Update driver",
+  "supplyReview.dl.affiliation": "Affiliation",
+  "supplyReview.dl.recalcReadiness": "Recalculate readiness",
+  "supplyReview.dl.notifications": "Notifications",
+  "supplyReview.dl.notifyTargets": "Fleet Partner + Driver",
+  "supplyReview.modal.confirmRevisionTitle":
+    "Confirm Request Revision from Fleet Partner?",
+  "supplyReview.modal.confirmRejectTitle": "Confirm Reject Submission?",
+  "supplyReview.modal.reasonLabel": "Reason Code (Required)",
+  "supplyReview.modal.commentLabel": "Comment (Required)",
+  "supplyReview.modal.processing": "Processing...",
+  "supplyReview.modal.confirmApproveBtn": "Confirm Approval · provision",
+  "supplyReview.modal.confirmRevisionBtn": "Confirm Revision",
+  "supplyReview.modal.confirmRejectBtn": "Confirm Reject",
+  "supplyReview.defaultCommentStart": "Platform reviewer starting review",
+  "supplyReview.defaultCommentApprove":
+    "Approve and provision canonical registry",
+  "supplyReview.unspecifiedFleet": "Unspecified Fleet",
+  "supplyReview.fleetWithId": "Fleet ({id})",
+  "supplyReview.areaTaipei": "Taipei City",
+  "supplyReview.areaYilan": "Yilan County",
+  "supplyReview.areaTaichung": "Taichung City",
+  "supplyReview.reviewerDisplay": "Lin Pei-Hsuan",
+};
+
+const supplyReviewZh: Record<keyof typeof supplyReviewEn, string> = {
+  "supplyReview.status.draft": "草稿",
+  "supplyReview.status.submitted": "待受理",
+  "supplyReview.status.in_review": "審核中",
+  "supplyReview.status.needs_revision": "已退補正",
+  "supplyReview.status.approved": "已核可",
+  "supplyReview.status.rejected": "已駁回",
+  "supplyReview.status.withdrawn": "已撤回",
+
+  "supplyReview.queue.title": "供給審核佇列 · Supply Review",
+  "supplyReview.queue.subtitle":
+    "車行送件 → 審核 → 核可寫入 canonical registry",
+  "supplyReview.queue.moreFilters": "更多篩選",
+  "supplyReview.queue.tabPending": "待審",
+  "supplyReview.queue.tabMine": "我審核中",
+  "supplyReview.queue.tabHistory": "歷史",
+  "supplyReview.queue.missingCount": "缺 {count}",
+  "supplyReview.queue.startReview": "受理審核",
+  "supplyReview.queue.openDetail": "開啟",
+  "supplyReview.queue.loadFailed": "載入佇列失敗",
+  "supplyReview.queue.refresh": "重新整理",
+
+  "supplyReview.filter.fleetAll": "車行：全部",
+  "supplyReview.filter.fleetMetropolitan": "大都會車隊",
+  "supplyReview.filter.fleetLanyang": "蘭陽小客車",
+  "supplyReview.filter.fleetCoastal": "海線車隊",
+  "supplyReview.filter.typeAll": "類型：全部",
+  "supplyReview.filter.typeVehicle": "車輛",
+  "supplyReview.filter.typeDriver": "司機",
+  "supplyReview.filter.typeInsurance": "保險",
+  "supplyReview.filter.serviceAll": "服務產品：全部",
+  "supplyReview.filter.serviceRealtime": "即時派車",
+  "supplyReview.filter.serviceAirport": "機場接送",
+  "supplyReview.filter.serviceBusiness": "商務包車",
+  "supplyReview.filter.areaAll": "營業區：全部",
+  "supplyReview.filter.areaTaipei": "台北市",
+  "supplyReview.filter.areaYilan": "宜蘭縣",
+  "supplyReview.filter.areaTaichung": "台中市",
+  "supplyReview.filter.statusAll": "狀態：全部",
+  "supplyReview.filter.statusSubmitted": "待受理 submitted",
+  "supplyReview.filter.statusInReview": "審核中 in_review",
+  "supplyReview.filter.statusNeedsRevision": "已退補正 needs_revision",
+  "supplyReview.filter.statusApproved": "已核可 approved",
+  "supplyReview.filter.statusRejected": "已駁回 rejected",
+  "supplyReview.filter.missingAll": "缺件狀態：全部",
+  "supplyReview.filter.missingHasMissing": "有缺件",
+  "supplyReview.filter.missingNoMissing": "無缺件",
+  "supplyReview.filter.dateAll": "送審日期：全部",
+  "supplyReview.filter.dateToday": "今日送審",
+  "supplyReview.filter.dateRecent": "近 7 日",
+
+  "supplyReview.detail.loadingTitle": "載入中",
+  "supplyReview.detail.backToQueue": "返回佇列",
+  "supplyReview.detail.loadFailedTitle": "載入詳情失敗",
+  "supplyReview.detail.retry": "重新嘗試",
+  "supplyReview.detail.reviewHeader": "{type}審核",
+  "supplyReview.detail.startReview": "受理審核 · start review",
+  "supplyReview.detail.requestRevision": "退回補正",
+  "supplyReview.detail.reject": "駁回",
+  "supplyReview.detail.approveProvision": "核可 · provision",
+  "supplyReview.detail.reload": "重新載入",
+  "supplyReview.detail.opError": "操作錯誤",
+  "supplyReview.detail.diffTitle": "逐欄位對照 · submission vs canonical",
+  "supplyReview.detail.diffSubtitle": "VQ-1 · 變更欄位以強調色標示",
+  "supplyReview.detail.viewAll": "看全部",
+  "supplyReview.detail.viewDiffOnly": "只看差異",
+  "supplyReview.detail.noDiffData": "無欄位對照資料",
+  "supplyReview.detail.colField": "欄位",
+  "supplyReview.detail.colSubmitted": "提交值 · submission",
+  "supplyReview.detail.colCanonical": "目前 · canonical",
+  "supplyReview.detail.docTitle": "文件檢視 · documents",
+  "supplyReview.detail.docSubtitle": "VQ-2 · 類型 / 檔名 / 生效 / 審核狀態",
+  "supplyReview.detail.noDocuments": "無附隨文件",
+  "supplyReview.detail.docPreview": "預覽",
+  "supplyReview.detail.validationTitle": "完整性檢核 · validation",
+  "supplyReview.detail.reviewerNoteTitle": "審核意見 · reviewer note",
+  "supplyReview.detail.noteSubtitle": "VQ-3 · 退補 / 駁回需填 reason code",
+  "supplyReview.detail.approveNoNote": "— 核可免填 —",
+  "supplyReview.detail.commentPlaceholder": "輸入給車行的審核說明…",
+  "supplyReview.detail.canonicalPreviewTitle": "核可將寫入 · canonical preview",
+  "supplyReview.detail.previewSubtitle":
+    "VQ-4 · approve 會改動 registry（不可逆）",
+  "supplyReview.detail.previewWarn":
+    "核可為單一交易：provision canonical + affiliation + readiness + audit。完整性未過則 SUBMISSION_INCOMPLETE，不可核可。",
+  "supplyReview.detail.guardrailTitle": "把關 · guardrail",
+  "supplyReview.detail.guardrailBody":
+    "審核人不得核可自己以車行身分提交的資料（REVIEWER_SELF_APPROVAL_DENIED），不得繞過必填文件。",
+  "supplyReview.detail.auditReceiptTitle": "審核憑證 · audit receipt",
+  "supplyReview.detail.confirmApproveTitle": "確認核可並寫入 canonical？",
+  "supplyReview.detail.confirmApproveIntro":
+    "此動作將把該筆 submission ({submissionId}) 核可，並在單一交易內：",
+  "supplyReview.detail.confirmApproveStep1":
+    "1. Provision / 更新 canonical 紀錄",
+  "supplyReview.detail.confirmApproveStep2": "2. 綁定車行 affiliation 關係",
+  "supplyReview.detail.confirmApproveStep3": "3. 重新計算 readiness",
+  "supplyReview.detail.confirmApproveStep4": "4. 寫入 audit log 並發送通知",
+  "supplyReview.detail.cancel": "取消",
+  "supplyReview.detail.selectReason": "— 請選擇 —",
+  "supplyReview.detail.actionCommentPlaceholder": "說明具體補正要求或駁回原因…",
+  "supplyReview.detail.previewDocTitle": "文件預覽 ·",
+  "supplyReview.detail.docId": "• Document ID: ",
+  "supplyReview.detail.fileKey": "• File Key: ",
+  "supplyReview.detail.contentType": "• Content-Type: ",
+  "supplyReview.detail.fileSize": "• 大小: ",
+  "supplyReview.detail.checksum": "• SHA-256 Checksum: ",
+  "supplyReview.detail.effectivePeriod": "• 生效起迄: ",
+  "supplyReview.detail.reviewStatus": "• 審核狀態: ",
+  "supplyReview.detail.closePreview": "關閉預覽",
+
+  // Queue Columns
+  "supplyReview.col.id": "ID",
+  "supplyReview.col.type": "類型",
+  "supplyReview.col.fleet": "車行 · fleet",
+  "supplyReview.col.subject": "subject",
+  "supplyReview.col.area": "營業區",
+  "supplyReview.col.rev": "rev",
+  "supplyReview.col.status": "狀態",
+  "supplyReview.col.submittedAt": "送審",
+  "supplyReview.col.missingOrLock": "缺件 / 鎖定",
+  "supplyReview.col.actions": "操作",
+
+  // Document Table Columns
+  "supplyReview.docCol.type": "類型",
+  "supplyReview.docCol.filename": "檔名",
+  "supplyReview.docCol.period": "生效起迄",
+  "supplyReview.docCol.status": "狀態",
+
+  // Submission Types
+  "supplyReview.type.driver": "司機",
+  "supplyReview.type.vehicle": "車輛",
+  "supplyReview.type.insurance": "保險",
+  "supplyReview.type.contract": "合約",
+  "supplyReview.type.object": "物件",
+
+  // Reason Codes
+  "supplyReview.reason.manual_screening": "人工初審",
+  "supplyReview.reason.all_documents_valid": "文件齊全且合規",
+  "supplyReview.reason.document_expired": "文件過期需更新",
+  "supplyReview.reason.document_missing": "缺必要文件",
+  "supplyReview.reason.information_mismatch": "資料與證件不符",
+  "supplyReview.reason.vehicle_unsupported": "車款不符合資格",
+  "supplyReview.reason.license_invalid": "執照失效",
+  "supplyReview.reason.other_revision_required": "其他需補正事項",
+  "supplyReview.reason.other_rejection_reason": "其他駁回原因",
+
+  // Diff Row Labels & Values
+  "supplyReview.diff.plateNo": "車牌號碼",
+  "supplyReview.diff.licenseType": "牌照類型",
+  "supplyReview.diff.brandModel": "廠牌車型",
+  "supplyReview.diff.seatCount": "座位數",
+  "supplyReview.diff.luggage": "行李容量",
+  "supplyReview.diff.businessArea": "營業區域",
+  "supplyReview.diff.products": "支援產品",
+  "supplyReview.diff.insuranceUntil": "保險到期",
+  "supplyReview.diff.driverName": "司機姓名",
+  "supplyReview.diff.mobile": "行動電話",
+  "supplyReview.diff.licenseNo": "職業駕照號碼",
+  "supplyReview.diff.licenseExpiry": "駕照到期日",
+  "supplyReview.diff.registrationNo": "執照號碼",
+  "supplyReview.diff.registrationArea": "執照區域",
+  "supplyReview.diff.notCreated": "— (未建立)",
+  "supplyReview.diff.expired": "已過期",
+
+  // Document Types & Statuses
+  "supplyReview.docType.doc": "文件",
+  "supplyReview.docType.registration": "行照",
+  "supplyReview.docType.insurance": "保險保單",
+  "supplyReview.docType.contract": "加盟合約",
+  "supplyReview.docType.driver_license": "職業駕照",
+  "supplyReview.docType.taxi_registration": "執照登記證",
+  "supplyReview.docStatus.approved": "已核可",
+  "supplyReview.docStatus.rejected": "已駁回",
+  "supplyReview.docStatus.expired": "已過期",
+  "supplyReview.docStatus.pending": "待審",
+
+  // Errors & Banners
+  "supplyReview.err.defaultFailed": "操作失敗，請稍後重試。",
+  "supplyReview.err.invalidId": "無效的申請編號",
+  "supplyReview.err.notFound": "找不到該筆供給審核紀錄",
+  "supplyReview.err.startReviewFailed": "無法開始審核申請 {id}: {msg}",
+  "supplyReview.err.loadQueueFailed": "載入佇列失敗: {msg}",
+  "supplyReview.err.loadDetailFailed": "載入詳情失敗: {msg}",
+  "supplyReview.err.selectReasonRequired": "退回補正需選擇原因代碼",
+  "supplyReview.err.commentRequired": "退回補正需填寫說明",
+  "supplyReview.err.rejectReasonRequired": "駁回需選擇原因代碼",
+  "supplyReview.err.rejectCommentRequired": "駁回需填寫說明",
+  "supplyReview.banner.conflictTitle": "版本衝突 · 請重新載入",
+  "supplyReview.banner.conflictBody":
+    "此申請已被更新（版本 {rev}）。請重新載入後再審，系統不允許盲蓋。",
+  "supplyReview.banner.selfApprovalTitle": "拒絕自身審核",
+  "supplyReview.banner.selfApprovalBody":
+    "審核人不得核可自己以車行身分提交的資料（拒絕利益衝突審核）。",
+  "supplyReview.banner.loadingBody": "正在從伺服器載入供給審核詳情...",
+  "supplyReview.banner.processing": "正在處理，請稍候...",
+  "supplyReview.banner.loadDetailFailedSubtitle": "無法讀取此筆供給審核資料",
+
+  // Validations
+  "supplyReview.validation.completeBody":
+    "必填欄位齊全 · 文件類型完整 · 無重複標的。",
+  "supplyReview.validation.completeInfo":
+    "保險保單與加盟合約已完成校對，核可後將同步更新 canonical 紀錄與 readiness。",
+  "supplyReview.validation.missingDocs":
+    "缺必要文件（行照 / 保險保單），完整性未過，不可核可。",
+  "supplyReview.validation.docExpired":
+    "文件過期：{name} 已於 {until} 到期，需要求車行補正。",
+
+  // DL items & Modal
+  "supplyReview.dl.createUpdateVehicle": "建立 / 更新 vehicle",
+  "supplyReview.dl.createUpdateDriver": "建立 / 更新 driver",
+  "supplyReview.dl.affiliation": "affiliation",
+  "supplyReview.dl.recalcReadiness": "重算 readiness",
+  "supplyReview.dl.notifications": "通知",
+  "supplyReview.dl.notifyTargets": "車行 + 司機",
+  "supplyReview.modal.confirmRevisionTitle": "確認退回車行補正？",
+  "supplyReview.modal.confirmRejectTitle": "確認駁回此送審案？",
+  "supplyReview.modal.reasonLabel": "reason code（必填）",
+  "supplyReview.modal.commentLabel": "說明 / comment（必填）",
+  "supplyReview.modal.processing": "處理中…",
+  "supplyReview.modal.confirmApproveBtn": "確認核可 · provision",
+  "supplyReview.modal.confirmRevisionBtn": "確認退補",
+  "supplyReview.modal.confirmRejectBtn": "確認駁回",
+  "supplyReview.defaultCommentStart": "平台審核人受理審核",
+  "supplyReview.defaultCommentApprove": "核可並寫入 canonical registry",
+  "supplyReview.unspecifiedFleet": "未指定車行",
+  "supplyReview.fleetWithId": "車行 ({id})",
+  "supplyReview.areaTaipei": "台北市",
+  "supplyReview.areaYilan": "宜蘭縣",
+  "supplyReview.areaTaichung": "台中市",
+  "supplyReview.reviewerDisplay": "林佩璇",
+};
+
 const cmpEn = {
   // ── Compliance Console Codes ──
   "cmp.code.accepted": "Accepted",
@@ -1173,6 +1668,7 @@ const en = {
   "platformCode.invited": "Invited",
   "platformCode.issued": "Issued",
   "platformCode.manual_hold": "Manual Hold",
+  "platformCode.offboarding_pending_debranding": "Debranding Outstanding",
   "platformCode.missing": "Missing",
   "platformCode.mixed": "Mixed",
   "platformCode.none": "None",
@@ -1314,6 +1810,8 @@ const en = {
   "adminShell.route.multiTaxiAuthorizations": "Multi-Taxi Authorizations",
   "adminShell.route.vehicleEligibility": "Vehicle Eligibility Matrix",
   "adminShell.route.fleetPartners": "Fleet Partners",
+  "adminShell.route.supplyReview": "Supply Review",
+  "adminShell.route.supplyReviewDetail": "Supply Review Detail",
   "adminShell.route.p5Disclosure": "P5 Disclosure Review",
   "adminShell.route.p5Corrections": "P5 Correction Queue",
   "adminShell.route.p5Records": "P5 Trip Records",
@@ -1566,6 +2064,7 @@ const en = {
   "adminShell.refresh.governance": "medium_slow · governance",
   "adminShell.health.notChecked": "not checked",
   "adminShell.health.checking": "API checking",
+  "adminShell.health.unknown": "API unknown",
   "adminShell.health.healthy": "API healthy",
   "adminShell.health.degraded": "API degraded",
   "adminShell.health.down": "API down",
@@ -1579,7 +2078,14 @@ const en = {
   "adminShell.breadcrumb.detail": "Detail",
   "adminShell.notifications": "Notifications",
   "adminShell.realm": "PLATFORM",
-  "adminShell.environment": "production",
+  "adminShell.environment": resolveAuthoritativeAdminShellEnv("en"),
+  "adminShell.environment.production": "production",
+  "adminShell.environment.staging": "staging",
+  "adminShell.environment.preview": "preview",
+  "adminShell.environment.sandbox": "sandbox",
+  "adminShell.environment.dev": "development",
+  "adminShell.environment.mock": "mock data",
+  "adminShell.environment.unknown": "unknown",
   "adminShell.language.zh": "中文",
   "adminShell.language.en": "English",
 
@@ -1855,6 +2361,75 @@ const en = {
   "users.form.role": "Role",
   "users.form.emailPlaceholder": "staff@platform.drts",
   "users.empty": "No users found.",
+
+  // ── Users: Account & Session Governance (IAM-UI-PLAT-001) ──
+  "users.governance.detail.accountTitle": "Account & Membership Authority",
+  "users.governance.detail.roleBindingLabel": "Role Binding:",
+  "users.governance.detail.mfaStatusLabel": "MFA Status:",
+  "users.governance.detail.sessionsTitle": "Active & Historical Sessions",
+  "users.governance.detail.sessionsLoading": "Loading sessions…",
+  "users.governance.detail.sessionsEmpty": "No active sessions recorded",
+
+  "users.governance.roleApproval.reviewStepUp": "Review / Step-Up",
+  "users.governance.roleApproval.viewDetail": "View Detail",
+  "users.governance.roleApproval.title":
+    "Privileged Role Approvals & SoD Governance",
+  "users.governance.roleApproval.requestButton": "Request Privileged Role",
+  "users.governance.roleApproval.loading": "Loading requests…",
+  "users.governance.roleApproval.empty": "No privileged role requests recorded",
+  "users.governance.roleApproval.modalTitle":
+    "Request Privileged Role Elevation",
+  "users.governance.roleApproval.roleSuperadmin":
+    "platform_super_admin (High Risk)",
+  "users.governance.roleApproval.roleAdmin": "platform_admin (Medium Risk)",
+  "users.governance.roleApproval.roleOperator": "platform_operator (Low Risk)",
+  "users.governance.roleApproval.justificationPlaceholder":
+    "e.g. Incident response INC-9921 requiring superadmin emergency fix",
+  "users.governance.roleApproval.reviewModalTitle":
+    "Review Role Elevation Request:",
+  "users.governance.roleApproval.stepUpTitle": "Step-Up Approval Required",
+  "users.governance.roleApproval.reasonPlaceholder":
+    "Provide audit reason for approval or rejection",
+
+  "users.governance.accessReview.campaignsTitle":
+    "Periodic Access Review Campaigns",
+  "users.governance.accessReview.sweepOverdue": "Sweep Overdue",
+  "users.governance.accessReview.newCampaign": "New Review Campaign",
+  "users.governance.accessReview.loadingCampaigns": "Loading campaigns…",
+  "users.governance.accessReview.campaignsEmpty":
+    "No access review campaigns configured",
+  "users.governance.accessReview.evidenceTitle":
+    "Access Review Audit Evidence Log",
+  "users.governance.accessReview.evidenceEmpty":
+    "No certification evidence entries logged",
+  "users.governance.accessReview.createCampaignModalTitle":
+    "Create Access Review Campaign",
+  "users.governance.accessReview.titlePlaceholder":
+    "e.g. Q3 Platform Admin Access Certification",
+
+  "users.governance.breakGlass.manageGrant": "Manage Grant",
+  "users.governance.breakGlass.activeSessionTitle":
+    "ACTIVE EMERGENCY BREAK-GLASS SESSION IN PROGRESS",
+  "users.governance.breakGlass.surfaceTitle":
+    "Break-Glass Emergency Access Surface",
+  "users.governance.breakGlass.requestButton": "Request Emergency Access",
+  "users.governance.breakGlass.empty":
+    "No active or recent emergency break-glass requests recorded",
+  "users.governance.breakGlass.requestModalTitle":
+    "Request Break-Glass Emergency Access",
+  "users.governance.breakGlass.escalationWarningTitle":
+    "Emergency Escalation Warning",
+  "users.governance.breakGlass.justificationPlaceholder":
+    "Describe severe incident justification requiring emergency access",
+  "users.governance.breakGlass.proofReferenceLabel": "Proof Reference",
+  "users.governance.breakGlass.proofReferencePlaceholder":
+    "e.g. ticket link or screenshot hash supporting the request",
+  "users.governance.breakGlass.grantModalTitle": "Emergency Grant:",
+  "users.governance.breakGlass.reasonCodeLabel": "Reason Code:",
+  "users.governance.breakGlass.postUseAuditLabel": "Post-Use Audit:",
+
+  "breakGlass.banner.activeLabel": "BREAK-GLASS EMERGENCY ACCESS ACTIVE",
+  "breakGlass.banner.expiresInLabel": "Expires in:",
 
   // ── Fleet ──
   "fleet.title": "Fleet & Devices",
@@ -3689,6 +4264,15 @@ const en = {
     "Every transition needs timestamp · actor · evidence · audit",
   "fleetUi.refreshTierSubtitle": "Refresh tier {tier} / 30s · {freshness}",
   "fleetUi.refreshTab": "Refresh tab",
+  "fleetUi.actionFailedTitle": "Action not applied: {action}",
+  "fleetUi.vehicleNotDispatchable":
+    "This vehicle cannot be released for dispatch until every compliance blocker is cleared.",
+  "fleetUi.blockedReasonsLabel": "Blockers",
+  "fleetUi.actionBlockedBy": "Blocked by {reason}",
+  "fleetUi.traceLabel": "Trace",
+  "fleetUi.dismiss": "Dismiss",
+  "fleetUi.opsConsoleNotConfigured":
+    "This deployment has no Ops Console origin configured, so the deep link cannot be opened.",
   "partnerDetail.eligibility.contractId": "Contract ID",
   "partnerDetail.eligibility.adapter": "Adapter",
   "partnerDetail.eligibility.adapterPosture": "Adapter posture",
@@ -3713,7 +4297,6 @@ const en = {
   "partnerDetail.action.deactivateEntry": "Deactivate",
   "partnerDetail.action.activateEntry": "Activate",
   "partnerDetail.action.revokeEntry": "Revoke entry",
-  "partnerDetail.previewFixtureMode": "Preview fixture mode",
   "partnerDetail.governance.title": "Governance actions",
   "partnerDetail.governance.subtitle":
     "State transitions and high-risk lifecycle controls.",
@@ -4009,6 +4592,7 @@ const en = {
   "sandbox.suspend.effects.audit": "Audit",
   "sandbox.suspend.effects.auditValue": "append-only audit record",
   ...cmpEn,
+  ...supplyReviewEn,
 };
 
 const zh: typeof en = {
@@ -4156,6 +4740,7 @@ const zh: typeof en = {
   "platformCode.invited": "已邀請",
   "platformCode.issued": "已開立",
   "platformCode.manual_hold": "人工停派",
+  "platformCode.offboarding_pending_debranding": "除標識未完成",
   "platformCode.missing": "缺漏",
   "platformCode.mixed": "混合",
   "platformCode.none": "未設定",
@@ -4285,6 +4870,8 @@ const zh: typeof en = {
   "adminShell.route.multiTaxiAuthorizations": "多元計程車營運許可",
   "adminShell.route.vehicleEligibility": "車輛資格矩陣",
   "adminShell.route.fleetPartners": "車隊夥伴",
+  "adminShell.route.supplyReview": "供給審核",
+  "adminShell.route.supplyReviewDetail": "供給審核詳情",
   "adminShell.route.p5Disclosure": "P5 揭露審核",
   "adminShell.route.p5Corrections": "P5 補正佇列",
   "adminShell.route.p5Records": "P5 行程紀錄",
@@ -4523,6 +5110,7 @@ const zh: typeof en = {
   "adminShell.refresh.governance": "治理節奏",
   "adminShell.health.notChecked": "尚未檢查",
   "adminShell.health.checking": "API 檢查中",
+  "adminShell.health.unknown": "API 未知",
   "adminShell.health.healthy": "API 健康",
   "adminShell.health.degraded": "API 降級",
   "adminShell.health.down": "API 失聯",
@@ -4535,7 +5123,14 @@ const zh: typeof en = {
   "adminShell.breadcrumb.detail": "詳情",
   "adminShell.notifications": "通知",
   "adminShell.realm": "平台",
-  "adminShell.environment": "正式環境",
+  "adminShell.environment": resolveAuthoritativeAdminShellEnv("zh"),
+  "adminShell.environment.production": "正式環境",
+  "adminShell.environment.staging": "預發環境",
+  "adminShell.environment.preview": "預覽環境",
+  "adminShell.environment.sandbox": "沙盒環境",
+  "adminShell.environment.dev": "開發環境",
+  "adminShell.environment.mock": "模擬資料",
+  "adminShell.environment.unknown": "未知環境",
   "adminShell.language.zh": "中文",
   "adminShell.language.en": "English",
 
@@ -4906,6 +5501,63 @@ const zh: typeof en = {
   "users.form.role": "角色",
   "users.form.emailPlaceholder": "staff@platform.drts",
   "users.empty": "沒有使用者。",
+
+  // ── Users: Account & Session Governance (IAM-UI-PLAT-001) ──
+  "users.governance.detail.accountTitle": "帳號與成員資格權限",
+  "users.governance.detail.roleBindingLabel": "角色綁定：",
+  "users.governance.detail.mfaStatusLabel": "MFA 狀態：",
+  "users.governance.detail.sessionsTitle": "現有與歷史工作階段",
+  "users.governance.detail.sessionsLoading": "載入工作階段中…",
+  "users.governance.detail.sessionsEmpty": "尚無現行工作階段紀錄",
+
+  "users.governance.roleApproval.reviewStepUp": "審核 / 二次驗證",
+  "users.governance.roleApproval.viewDetail": "檢視詳情",
+  "users.governance.roleApproval.title": "特權角色審批與職責分離治理",
+  "users.governance.roleApproval.requestButton": "申請特權角色",
+  "users.governance.roleApproval.loading": "載入申請中…",
+  "users.governance.roleApproval.empty": "尚無特權角色申請紀錄",
+  "users.governance.roleApproval.modalTitle": "申請特權角色提升",
+  "users.governance.roleApproval.roleSuperadmin":
+    "platform_super_admin（高風險）",
+  "users.governance.roleApproval.roleAdmin": "platform_admin（中風險）",
+  "users.governance.roleApproval.roleOperator": "platform_operator（低風險）",
+  "users.governance.roleApproval.justificationPlaceholder":
+    "例如：INC-9921 事件回應需要超級管理員緊急修復",
+  "users.governance.roleApproval.reviewModalTitle": "審核角色提升申請：",
+  "users.governance.roleApproval.stepUpTitle": "需要二次驗證核准",
+  "users.governance.roleApproval.reasonPlaceholder":
+    "請提供核准或拒絕的稽核理由",
+
+  "users.governance.accessReview.campaignsTitle": "定期存取審查活動",
+  "users.governance.accessReview.sweepOverdue": "掃描逾期項目",
+  "users.governance.accessReview.newCampaign": "新增審查活動",
+  "users.governance.accessReview.loadingCampaigns": "載入活動中…",
+  "users.governance.accessReview.campaignsEmpty": "尚未設定存取審查活動",
+  "users.governance.accessReview.evidenceTitle": "存取審查稽核證據紀錄",
+  "users.governance.accessReview.evidenceEmpty": "尚無認證證據紀錄",
+  "users.governance.accessReview.createCampaignModalTitle": "建立存取審查活動",
+  "users.governance.accessReview.titlePlaceholder":
+    "例如：Q3 平台管理員存取認證",
+
+  "users.governance.breakGlass.manageGrant": "管理授權",
+  "users.governance.breakGlass.activeSessionTitle":
+    "緊急破窗存取工作階段進行中",
+  "users.governance.breakGlass.surfaceTitle": "緊急破窗存取介面",
+  "users.governance.breakGlass.requestButton": "申請緊急存取",
+  "users.governance.breakGlass.empty": "尚無現行或近期的緊急破窗申請紀錄",
+  "users.governance.breakGlass.requestModalTitle": "申請緊急破窗存取",
+  "users.governance.breakGlass.escalationWarningTitle": "緊急升級警告",
+  "users.governance.breakGlass.justificationPlaceholder":
+    "請描述需要緊急存取的嚴重事故理由",
+  "users.governance.breakGlass.proofReferenceLabel": "佐證依據",
+  "users.governance.breakGlass.proofReferencePlaceholder":
+    "例如：支援此申請的工單連結或截圖雜湊值",
+  "users.governance.breakGlass.grantModalTitle": "緊急授權：",
+  "users.governance.breakGlass.reasonCodeLabel": "理由代碼：",
+  "users.governance.breakGlass.postUseAuditLabel": "使用後稽核：",
+
+  "breakGlass.banner.activeLabel": "緊急破窗存取進行中",
+  "breakGlass.banner.expiresInLabel": "剩餘時間：",
 
   // ── Fleet ──
   "fleet.title": "車隊與裝置",
@@ -6530,6 +7182,15 @@ const zh: typeof en = {
     "每一步狀態轉換都需要時間戳、操作人、證據與稽核紀錄",
   "fleetUi.refreshTierSubtitle": "更新層級 {tier} / 30 秒 · {freshness}",
   "fleetUi.refreshTab": "重新整理",
+  "fleetUi.actionFailedTitle": "「{action}」未執行",
+  "fleetUi.vehicleNotDispatchable":
+    "所有合規阻擋原因解除前，這台車無法恢復派遣。",
+  "fleetUi.blockedReasonsLabel": "阻擋原因",
+  "fleetUi.actionBlockedBy": "受「{reason}」阻擋",
+  "fleetUi.traceLabel": "追蹤編號",
+  "fleetUi.dismiss": "關閉",
+  "fleetUi.opsConsoleNotConfigured":
+    "此環境未設定營運主控台位址，無法開啟跨站深連結。",
   "partnerDetail.eligibility.contractId": "契約 ID",
   "partnerDetail.eligibility.adapter": "轉接器",
   "partnerDetail.eligibility.adapterPosture": "轉接器狀態",
@@ -6553,7 +7214,6 @@ const zh: typeof en = {
   "partnerDetail.action.deactivateEntry": "停用 entry",
   "partnerDetail.action.activateEntry": "啟用 entry",
   "partnerDetail.action.revokeEntry": "撤銷 entry",
-  "partnerDetail.previewFixtureMode": "Preview fixture 模式",
   "partnerDetail.governance.title": "治理動作",
   "partnerDetail.governance.subtitle":
     "集中執行狀態切換與高風險 lifecycle 控制。",
@@ -6842,6 +7502,7 @@ const zh: typeof en = {
   "sandbox.suspend.effects.audit": "稽核",
   "sandbox.suspend.effects.auditValue": "append-only 稽核記錄",
   ...cmpZh,
+  ...supplyReviewZh,
 };
 
 export const translations: Record<Locale, typeof en> = { en, zh };
@@ -7224,6 +7885,9 @@ export function t(
   locale: Locale,
   params?: Record<string, string | number>,
 ): string {
+  if (key === "adminShell.environment") {
+    return resolveAuthoritativeAdminShellEnv(locale);
+  }
   const dict = translations[locale] ?? translations.en;
   let value =
     (dict as Record<string, string>)[key] ??

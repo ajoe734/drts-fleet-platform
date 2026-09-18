@@ -80,7 +80,7 @@ Operational rules:
   mock provider and must spend zero live-provider quota.
 - Staging / production `MAP_PROVIDER_BACKEND=google` must fail closed unless
   both server credentials are present and quota/alert metadata is configured.
-- `scripts/check-map-provider-config.sh` is the shared preflight for local, CI,
+- `operations/verification/check-map-provider-config.sh` is the shared preflight for local, CI,
   and deploy rails.
 - Provider health and quota readiness are surfaced through `/health`,
   `/api/health`, and `GET /api/geo/health`.
@@ -101,11 +101,11 @@ without creating incompatible map implementations.
 Dispatch command:
 
 ```bash
-AI_NAME=Codex python3 scripts/dispatch-map-geofence-production-wave.py
+AI_NAME=Codex python3 tools/task-dispatch/dispatch-map-geofence-production-wave.py
 ```
 
 The script registers the task family in `ai-status.json` using the existing
-`scripts/ai-status.sh assign` flow.
+`tools/development-orchestrator/bin/ai-status.sh assign` flow.
 
 ## Production Done Definition
 
@@ -960,7 +960,7 @@ All implementation tasks
 
 ## Dispatch Notes
 
-- Run `python3 scripts/dispatch-map-geofence-production-wave.py` only when the
+- Run `python3 tools/task-dispatch/dispatch-map-geofence-production-wave.py` only when the
   supervisor board should receive the tasks.
 - The script is idempotent for ownership/title/metadata updates, but it should
   not be used to overwrite in-progress human changes without checking

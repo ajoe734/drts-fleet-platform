@@ -10,6 +10,7 @@ import {
   type TenantAddressRecord,
   type TenantPassengerRecord,
 } from "@drts/contracts";
+import { createIdempotencyKey } from "@drts/api-client";
 import { AppShellCard } from "@drts/ui-web";
 import { getTenantClient } from "@/lib/api-client";
 import { getTenantRoleSnapshot, requireCapability } from "@/lib/rbac";
@@ -76,8 +77,12 @@ function parseOptionalInteger(value: FormDataEntryValue | null) {
   return Number.isNaN(parsed) ? Number.NaN : parsed;
 }
 
-function redirectWithError(message: string) {
-  redirect(`/bookings/new?error=${encodeURIComponent(message)}`);
+function redirectWithError(message: string, idempotencyKey?: string) {
+  const query = new URLSearchParams({ error: message });
+  if (idempotencyKey) {
+    query.set("idempotencyKey", idempotencyKey);
+  }
+  redirect(`/bookings/new?${query.toString()}`);
 }
 
 function getSubtypeLabel(subtype: BusinessDispatchSubtype) {
@@ -298,12 +303,14 @@ const mutedNoteStyle: React.CSSProperties = {
 export default async function NewBookingPage({
   searchParams,
 }: {
-  searchParams: Promise<{ error?: string }>;
+  searchParams: Promise<{ error?: string; idempotencyKey?: string }>;
 }) {
   const client = await getTenantClient();
   const roleSnapshot = await getTenantRoleSnapshot();
   const params = await searchParams;
   const formError = params.error ?? null;
+  const boundIdempotencyKey =
+    params.idempotencyKey ?? createIdempotencyKey("tenant-booking");
 
   const [identityResult, passengersResult, addressesResult, catalogResult] =
     await Promise.allSettled([
@@ -371,6 +378,9 @@ export default async function NewBookingPage({
       "Tenant write authority required to create bookings.",
     );
     const client = await getTenantClient();
+    const idempotencyKey =
+      trimFormValue(formData.get("idempotencyKey")) ||
+      createIdempotencyKey("tenant-booking");
     const businessDispatchSubtype = trimFormValue(
       formData.get("businessDispatchSubtype"),
     ) as BusinessDispatchSubtype;
@@ -484,7 +494,7 @@ export default async function NewBookingPage({
     }
 
     if (validationErrors.length > 0) {
-      redirectWithError(validationErrors.join(" "));
+      redirectWithError(validationErrors.join(" "), idempotencyKey);
     }
 
     const command: CreateTenantBookingCommand = {
@@ -521,13 +531,13 @@ export default async function NewBookingPage({
     };
 
     try {
-      await client.createTenantBooking(command);
+      await client.createTenantBooking(command, { idempotencyKey });
       revalidatePath("/booking-list");
       redirect("/booking-list");
     } catch (error) {
       const message =
         error instanceof Error ? error.message : "Unknown booking error";
-      redirectWithError(message);
+      redirectWithError(message, idempotencyKey);
     }
   }
 
@@ -610,6 +620,11 @@ export default async function NewBookingPage({
         </div>
 
         <form action={createBooking} style={formStyle}>
+          <input
+            type="hidden"
+            name="idempotencyKey"
+            value={boundIdempotencyKey}
+          />
           <section style={sectionStyle}>
             <div style={sectionHeaderStyle}>
               <h2 style={sectionTitleStyle}>Service And Schedule</h2>

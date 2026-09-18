@@ -43,16 +43,18 @@ The reusable deploy workflow resolves configuration in this order:
 
 Required values:
 
-| Name                                  | Kind               | Purpose                                             |
-| ------------------------------------- | ------------------ | --------------------------------------------------- |
-| `STAGING_GCP_PROJECT_ID`              | variable           | Staging GCP project ID                              |
-| `STAGING_GCP_REGION`                  | variable           | Staging Cloud Run / Cloud SQL region                |
-| `STAGING_GCP_CLOUDSQL_INSTANCE`       | variable           | Staging Cloud SQL instance connection name          |
-| `STAGING_GCP_RUNTIME_SERVICE_ACCOUNT` | variable or secret | Runtime identity attached to Cloud Run job/services |
-| `STAGING_WIF_PROVIDER`                | secret             | Workload Identity Federation provider resource      |
-| `STAGING_WIF_SERVICE_ACCOUNT`         | secret             | GitHub Actions deployer identity                    |
-| `STAGING_CONTROL_PLANE_API_ORIGIN`    | variable           | Protected staging API origin                        |
-| `STAGING_IAP_CLIENT_ID`               | variable           | IAP audience used for post-deploy verification      |
+| Name                                  | Kind               | Purpose                                               |
+| ------------------------------------- | ------------------ | ----------------------------------------------------- |
+| `STAGING_GCP_PROJECT_ID`              | variable           | Staging GCP project ID                                |
+| `STAGING_GCP_REGION`                  | variable           | Staging Cloud Run / Cloud SQL region                  |
+| `STAGING_GCP_CLOUDSQL_INSTANCE`       | variable           | Staging Cloud SQL instance connection name            |
+| `STAGING_GCP_RUNTIME_SERVICE_ACCOUNT` | variable or secret | Runtime identity attached to Cloud Run job/services   |
+| `STAGING_WIF_PROVIDER`                | secret             | Workload Identity Federation provider resource        |
+| `STAGING_WIF_SERVICE_ACCOUNT`         | secret             | GitHub Actions deployer identity                      |
+| `STAGING_CONTROL_PLANE_API_ORIGIN`    | variable           | Protected staging API origin                          |
+| `STAGING_IAP_CLIENT_ID`               | variable           | IAP audience used for post-deploy verification        |
+| `STAGING_WORKLOAD_IDENTITY_ISSUER`    | variable           | Expected issuer for runtime workload proof exchange   |
+| `STAGING_WORKLOAD_IDENTITY_AUDIENCE`  | variable           | Expected audience for runtime workload proof exchange |
 
 Optional but recommended:
 
@@ -81,7 +83,16 @@ GCP project:
 - `drts-staging-api-key-salt`
 - `drts-staging-jwt-secret`
 - `drts-staging-controlled-download-signing-secret`
-- `drts-staging-internal-key` (optional)
+- `drts-staging-workload-identity-jwt-public-key`
+- `drts-staging-workload-identity-service-principals`
+- `drts-staging-internal-key` (optional break-glass only)
+
+When `drts-staging-internal-key` is omitted, the API runtime must still receive:
+
+- `WORKLOAD_IDENTITY_ISSUER`
+- `WORKLOAD_IDENTITY_AUDIENCE`
+- `WORKLOAD_IDENTITY_JWT_SECRET_OR_PUBLIC_KEY`
+- `WORKLOAD_IDENTITY_SERVICE_PRINCIPALS`
 
 Set `STAGING_SECRET_PREFIX` if your secret names differ.
 
@@ -117,12 +128,23 @@ registry that staging reads from.
 
 ## Service Map Defaults
 
-| Variable                             | Default service / job     |
-| ------------------------------------ | ------------------------- |
-| `STAGING_GCP_API_SERVICE`            | `drts-api`                |
-| `STAGING_GCP_PLATFORM_ADMIN_SERVICE` | `drts-platform-admin-web` |
-| `STAGING_GCP_OPS_CONSOLE_SERVICE`    | `drts-ops-console-web`    |
-| `STAGING_GCP_MIGRATION_JOB`          | `drts-migrate`            |
+| Variable                                 | Default service / job     |
+| ---------------------------------------- | ------------------------- |
+| `STAGING_GCP_API_SERVICE`                | `drts-api`                |
+| `STAGING_GCP_VOICE_MEDIA_WORKER_SERVICE` | `drts-voice-media-worker` |
+| `STAGING_GCP_PLATFORM_ADMIN_SERVICE`     | `drts-platform-admin-web` |
+| `STAGING_GCP_OPS_CONSOLE_SERVICE`        | `drts-ops-console-web`    |
+| `STAGING_GCP_MIGRATION_JOB`              | `drts-migrate`            |
+
+### Voice Runtime Deployment Prerequisites (SD §3.4)
+
+1. `drts-voice-media-worker`:
+   - Dedicated service for media streaming, ASR, TTS, and WebSocket framing.
+   - Configured with `minScale: 1`, `cpu-throttling: false`, `sessionAffinity: true`, and `timeoutSeconds: 3600`.
+   - Health probes: `/health` (liveness), `/ready` (readiness; returns 503 during drain).
+
+2. `drts-api`:
+   - Configured with `minScale: 1` and `cpu-throttling: false` (instance-based billing) so the persistent voice command runner continues processing pending booking receipts, driver deadlines, recording finalization, and callbacks even when 0 active HTTP calls exist.
 
 If `dev` and `staging` share the same GCP project, override one environment’s
 names so the two tiers do not collide.

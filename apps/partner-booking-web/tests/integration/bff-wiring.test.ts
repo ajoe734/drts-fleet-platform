@@ -23,24 +23,24 @@ import {
 
 const activeEntry = {
   partnerId: "partner-001",
-  partnerCode: "ctbc",
+  partnerCode: "acme",
   partnerType: "bank",
   programId: "program-001",
   programCode: "WORLD_ELITE",
   tenantId: "tenant-001",
-  bankCode: "CTBC",
-  entrySlug: "ctbc",
-  displayName: "CTBC World Elite",
+  bankCode: "ACME",
+  entrySlug: "acme",
+  displayName: "ACME Elite Demo",
   businessDispatchSubtype: "credit_card_airport_transfer",
   authMode: "partner_api_key",
   eligibilityMode: "bank_card_inline",
-  entryHost: "ride.ctbc.com.tw",
+  entryHost: "ride.acme.example",
   entryPath: "/partner",
   themeAccent: "#0047AB",
   brandingMetadata: {
-    displayName: "CTBC Premier Ride",
+    displayName: "ACME Premier Ride",
     themeAccent: "#0047AB",
-    supportEmail: "vip@ctbc.example",
+    supportEmail: "vip@acme.example",
     supportPhone: "0800-000-001",
   },
   eligibilityContract: null,
@@ -109,7 +109,7 @@ const session = {
     tenantId: "tenant-001",
     partnerId: "partner-001",
     partnerProgramId: "program-001",
-    partnerEntrySlug: "ctbc",
+    partnerEntrySlug: "acme",
     roleFamilies: ["partner"],
     roles: ["partner_booking"],
     scopes: ["partner:book"],
@@ -154,8 +154,8 @@ describe("partner-booking-web BFF wiring", () => {
       );
     vi.stubGlobal("fetch", fetchMock);
 
-    await expect(getPublicPartnerEntry("ctbc")).resolves.toEqual(activeEntry);
-    await expect(getPartnerRouteContext("ctbc")).resolves.toMatchObject({
+    await expect(getPublicPartnerEntry("acme")).resolves.toEqual(activeEntry);
+    await expect(getPartnerRouteContext("acme")).resolves.toMatchObject({
       entry: activeEntry,
       inactive: false,
       provenance: {
@@ -170,7 +170,7 @@ describe("partner-booking-web BFF wiring", () => {
       },
     });
     expect(fetchMock).toHaveBeenCalledWith(
-      `${API_URL}/api/partner/entries/ctbc`,
+      `${API_URL}/api/partner/entries/acme`,
       expect.objectContaining({ cache: "no-store" }),
     );
   });
@@ -188,7 +188,7 @@ describe("partner-booking-web BFF wiring", () => {
     );
     vi.stubGlobal("fetch", fetchMock);
 
-    await expect(getPartnerRouteContext("ctbc")).resolves.toMatchObject({
+    await expect(getPartnerRouteContext("acme")).resolves.toMatchObject({
       entry: activeEntry,
       provenance: {
         source: "authority",
@@ -199,7 +199,7 @@ describe("partner-booking-web BFF wiring", () => {
       },
     });
     await expect(
-      getPartnerRouteContext("ctbc", { allowInactive: true }),
+      getPartnerRouteContext("acme", { allowInactive: true }),
     ).resolves.toMatchObject({
       entry: activeEntry,
       provenance: {
@@ -213,7 +213,7 @@ describe("partner-booking-web BFF wiring", () => {
 
     expect(fetchMock).toHaveBeenCalledTimes(1);
     expect(fetchMock).toHaveBeenCalledWith(
-      API_URL + "/api/partner/entries/ctbc",
+      API_URL + "/api/partner/entries/acme",
       expect.objectContaining({
         headers: expect.objectContaining({
           "x-drts-internal-key": "dev-internal-key",
@@ -284,7 +284,7 @@ describe("partner-booking-web BFF wiring", () => {
             access_token: "signed-partner-token",
             token_type: "Bearer",
             expires_in: "15m",
-            partner_entry_slug: "ctbc",
+            partner_entry_slug: "acme",
             drts_passenger_id: "passenger-001",
             identity: {
               actor_type: "referral_passenger",
@@ -297,7 +297,7 @@ describe("partner-booking-web BFF wiring", () => {
               tenant_id: "tenant-001",
               partner_id: "partner-001",
               partner_program_id: "program-001",
-              partner_entry_slug: "ctbc",
+              partner_entry_slug: "acme",
               drts_passenger_id: "passenger-001",
             },
           },
@@ -322,7 +322,7 @@ describe("partner-booking-web BFF wiring", () => {
     vi.stubGlobal("fetch", fetchMock);
 
     const handoff = await createPartnerIngressHandoff({
-      entrySlug: "ctbc",
+      entrySlug: "acme",
       partnerUserRef: "partner-user-001",
     });
     const normalizedSession = createPartnerSessionFromIngressHandoff(
@@ -394,7 +394,7 @@ describe("partner-booking-web BFF wiring", () => {
             error: {
               code: "PARTNER_ENTRY_INACTIVE",
               message: "The partner entry is inactive and cannot be used.",
-              details: { entrySlug: "ctbc", status: "inactive" },
+              details: { entrySlug: "acme", status: "inactive" },
               retryable: false,
             },
           },
@@ -417,13 +417,13 @@ describe("partner-booking-web BFF wiring", () => {
     vi.stubGlobal("fetch", fetchMock);
 
     await expect(
-      getPartnerRouteContext("ctbc", { allowInactive: true }),
+      getPartnerRouteContext("acme", { allowInactive: true }),
     ).resolves.toMatchObject({
       inactive: true,
       entry: null,
       brand: expect.objectContaining({
-        displayName: "CTBC World Elite",
-        slug: "ctbc",
+        displayName: "ACME Elite Demo",
+        slug: "acme",
         tagline:
           "卡友禮賓接送 · 行動銀行內嵌 · 7 步驟漏斗 · 等待後端合作入口啟用",
       }),
@@ -442,7 +442,7 @@ describe("partner-booking-web BFF wiring", () => {
           error: {
             code: "PARTNER_ENTRY_NOT_FOUND",
             message: "The partner entry could not be found.",
-            details: { entrySlug: "ctbc" },
+            details: { entrySlug: "acme" },
             retryable: false,
           },
         },
@@ -452,18 +452,18 @@ describe("partner-booking-web BFF wiring", () => {
     vi.stubGlobal("fetch", fetchMock);
 
     await expect(
-      getPartnerRouteContext("ctbc", { allowInactive: true }),
+      getPartnerRouteContext("acme", { allowInactive: true }),
     ).resolves.toMatchObject({
       inactive: true,
       entry: null,
       brand: expect.objectContaining({
-        displayName: "CTBC World Elite",
-        slug: "ctbc",
+        displayName: "ACME Elite Demo",
+        slug: "acme",
         tagline:
           "卡友禮賓接送 · 行動銀行內嵌 · 7 步驟漏斗 · 等待後端合作入口啟用",
       }),
     });
-    await expect(getPartnerRouteContext("ctbc")).rejects.toMatchObject({
+    await expect(getPartnerRouteContext("acme")).rejects.toMatchObject({
       code: "PARTNER_ENTRY_NOT_FOUND",
       status: 404,
     });
@@ -478,7 +478,7 @@ describe("partner-booking-web BFF wiring", () => {
             message:
               "x-drts-internal-key header is required for this environment.",
             details: {
-              route: "/api/partner/entries/ctbc",
+              route: "/api/partner/entries/acme",
               method: "GET",
             },
             retryable: false,
@@ -490,16 +490,16 @@ describe("partner-booking-web BFF wiring", () => {
     vi.stubGlobal("fetch", fetchMock);
 
     await expect(
-      getPartnerRouteContext("ctbc", { allowMissing: true }),
+      getPartnerRouteContext("acme", { allowMissing: true }),
     ).resolves.toMatchObject({
       inactive: true,
       entry: null,
       brand: expect.objectContaining({
-        displayName: "CTBC World Elite",
-        slug: "ctbc",
+        displayName: "ACME Elite Demo",
+        slug: "acme",
       }),
     });
-    await expect(getPartnerRouteContext("ctbc")).rejects.toMatchObject({
+    await expect(getPartnerRouteContext("acme")).rejects.toMatchObject({
       code: "INTERNAL_KEY_REQUIRED",
       status: 401,
     });
@@ -515,7 +515,7 @@ describe("partner-booking-web BFF wiring", () => {
             message:
               "x-drts-internal-key header is invalid for this environment.",
             details: {
-              route: "/api/partner/entries/ctbc",
+              route: "/api/partner/entries/acme",
               method: "GET",
             },
             retryable: false,
@@ -527,24 +527,24 @@ describe("partner-booking-web BFF wiring", () => {
     vi.stubGlobal("fetch", fetchMock);
 
     await expect(
-      getPartnerRouteContext("ctbc", { allowInactive: true }),
+      getPartnerRouteContext("acme", { allowInactive: true }),
     ).resolves.toMatchObject({
       inactive: true,
       entry: null,
       brand: expect.objectContaining({
-        displayName: "CTBC World Elite",
-        slug: "ctbc",
+        displayName: "ACME Elite Demo",
+        slug: "acme",
       }),
     });
     expect(fetchMock).toHaveBeenCalledWith(
-      `${API_URL}/api/partner/entries/ctbc`,
+      `${API_URL}/api/partner/entries/acme`,
       expect.objectContaining({
         headers: expect.objectContaining({
           "x-drts-internal-key": "stale-dev-key",
         }),
       }),
     );
-    await expect(getPartnerRouteContext("ctbc")).rejects.toMatchObject({
+    await expect(getPartnerRouteContext("acme")).rejects.toMatchObject({
       code: "INTERNAL_KEY_INVALID",
       status: 401,
     });
@@ -555,16 +555,16 @@ describe("partner-booking-web BFF wiring", () => {
     vi.stubGlobal("fetch", fetchMock);
 
     await expect(
-      getPartnerRouteContext("ctbc", { allowMissing: true }),
+      getPartnerRouteContext("acme", { allowMissing: true }),
     ).resolves.toMatchObject({
       inactive: true,
       entry: null,
       brand: expect.objectContaining({
-        displayName: "CTBC World Elite",
-        slug: "ctbc",
+        displayName: "ACME Elite Demo",
+        slug: "acme",
       }),
     });
-    await expect(getPartnerRouteContext("ctbc")).rejects.toMatchObject({
+    await expect(getPartnerRouteContext("acme")).rejects.toMatchObject({
       code: "PARTNER_AUTHORITY_UNAVAILABLE",
       status: 503,
     });
@@ -575,13 +575,13 @@ describe("partner-booking-web BFF wiring", () => {
     vi.stubGlobal("fetch", fetchMock);
 
     await expect(
-      getPartnerRouteContext("ctbc", { allowAuthorityOutage: true }),
+      getPartnerRouteContext("acme", { allowAuthorityOutage: true }),
     ).resolves.toMatchObject({
       inactive: true,
       entry: null,
       brand: expect.objectContaining({
-        displayName: "CTBC World Elite",
-        slug: "ctbc",
+        displayName: "ACME Elite Demo",
+        slug: "acme",
       }),
       provenance: expect.objectContaining({
         source: "local_fallback",
@@ -590,7 +590,7 @@ describe("partner-booking-web BFF wiring", () => {
       }),
     });
 
-    await expect(getPartnerRouteContext("ctbc")).rejects.toMatchObject({
+    await expect(getPartnerRouteContext("acme")).rejects.toMatchObject({
       code: "PARTNER_AUTHORITY_UNAVAILABLE",
       status: 503,
     });
@@ -604,7 +604,7 @@ describe("partner-booking-web BFF wiring", () => {
           error: {
             code: "PARTNER_AUTHORITY_REQUEST_FAILED",
             message: "Partner authority failed while resolving the entry.",
-            details: { entrySlug: "lion" },
+            details: { entrySlug: "adventureworks" },
             retryable: false,
           },
         },
@@ -614,13 +614,13 @@ describe("partner-booking-web BFF wiring", () => {
     vi.stubGlobal("fetch", fetchMock);
 
     await expect(
-      getPartnerRouteContext("lion", { allowInactive: true }),
+      getPartnerRouteContext("adventureworks", { allowInactive: true }),
     ).resolves.toMatchObject({
       inactive: true,
       entry: null,
       brand: expect.objectContaining({
-        displayName: "Lion Group Transfer",
-        slug: "lion",
+        displayName: "Adventure Works Transfer",
+        slug: "adventureworks",
       }),
       provenance: {
         source: "local_fallback",
@@ -634,14 +634,14 @@ describe("partner-booking-web BFF wiring", () => {
       },
     });
     expect(fetchMock).toHaveBeenCalledWith(
-      API_URL + "/api/partner/entries/lion",
+      API_URL + "/api/partner/entries/adventureworks",
       expect.objectContaining({
         headers: expect.objectContaining({
           "x-drts-internal-key": "dev-internal-key",
         }),
       }),
     );
-    await expect(getPartnerRouteContext("lion")).rejects.toMatchObject({
+    await expect(getPartnerRouteContext("adventureworks")).rejects.toMatchObject({
       code: "PARTNER_AUTHORITY_REQUEST_FAILED",
       status: 500,
     });
@@ -656,7 +656,7 @@ describe("partner-booking-web BFF wiring", () => {
             error: {
               code: "PARTNER_ENTRY_NOT_FOUND",
               message: "The partner entry could not be found.",
-              details: { entrySlug: "ctbc" },
+              details: { entrySlug: "acme" },
               retryable: false,
             },
           },
@@ -669,7 +669,7 @@ describe("partner-booking-web BFF wiring", () => {
             error: {
               code: "PARTNER_ENTRY_INACTIVE",
               message: "The partner entry is inactive and cannot be used.",
-              details: { entrySlug: "ctbc", status: "inactive" },
+              details: { entrySlug: "acme", status: "inactive" },
               retryable: false,
             },
           },
@@ -679,19 +679,19 @@ describe("partner-booking-web BFF wiring", () => {
     vi.stubGlobal("fetch", fetchMock);
 
     await expect(
-      getPartnerRouteContext("ctbc", { allowMissing: true }),
+      getPartnerRouteContext("acme", { allowMissing: true }),
     ).resolves.toMatchObject({
       inactive: true,
       entry: null,
       brand: expect.objectContaining({
-        displayName: "CTBC World Elite",
-        slug: "ctbc",
+        displayName: "ACME Elite Demo",
+        slug: "acme",
         tagline:
           "卡友禮賓接送 · 行動銀行內嵌 · 7 步驟漏斗 · 等待後端合作入口啟用",
       }),
     });
     await expect(
-      getPartnerRouteContext("ctbc", { allowMissing: true }),
+      getPartnerRouteContext("acme", { allowMissing: true }),
     ).rejects.toMatchObject({
       code: "PARTNER_ENTRY_INACTIVE",
       status: 404,
@@ -705,7 +705,7 @@ describe("partner-booking-web BFF wiring", () => {
           error: {
             code: "ELIGIBILITY_VERIFICATION_REQUIRED",
             message: "Eligibility verification id is required.",
-            details: { entrySlug: "ctbc" },
+            details: { entrySlug: "acme" },
             retryable: false,
           },
         },
@@ -738,10 +738,10 @@ describe("partner-booking-web BFF wiring", () => {
     );
     vi.stubGlobal("fetch", fetchMock);
 
-    await expect(getPublicPartnerEntry("ctbc")).resolves.toEqual(activeEntry);
+    await expect(getPublicPartnerEntry("acme")).resolves.toEqual(activeEntry);
 
     expect(fetchMock).toHaveBeenCalledWith(
-      `${API_URL}/api/partner/entries/ctbc`,
+      `${API_URL}/api/partner/entries/acme`,
       expect.objectContaining({
         headers: expect.objectContaining({
           "x-drts-internal-key": "dev-internal-key",
@@ -752,33 +752,33 @@ describe("partner-booking-web BFF wiring", () => {
 
   it("overlays backend branding metadata on top of the local template", () => {
     const brand = resolvePartnerBrand(activeEntry);
-    expect(brand.displayName).toBe("CTBC Premier Ride");
+    expect(brand.displayName).toBe("ACME Premier Ride");
     expect(brand.hotline.phone).toBe("0800-000-001");
-    expect(brand.tagline).toContain("vip@ctbc.example");
+    expect(brand.tagline).toContain("vip@acme.example");
     expect(brand.primary).toBe("#0047AB");
   });
 
-  it("matches lion travel branding from host and subtype hints", () => {
+  it("matches adventureworks travel branding from host and subtype hints", () => {
     const brand = resolvePartnerBrand({
       ...activeEntry,
-      entrySlug: "lion-group-landing",
-      displayName: "雄獅團體接送",
+      entrySlug: "adventureworks-group-landing",
+      displayName: "探索團體接送",
       programCode: "GROUP_TRANSFER",
-      bankCode: "LION",
+      bankCode: "ADVENTURE",
       businessDispatchSubtype: "travel_agency_transfer",
-      entryHost: "booking.lion-travel.com.tw",
+      entryHost: "booking.adventure-works.example",
       themeAccent: "#B0420E",
       brandingMetadata: {
-        displayName: "雄獅團體接送",
+        displayName: "探索團體接送",
         themeAccent: "#B0420E",
         supportEmail: "group@liontravel.example",
-        supportPhone: "0800-090-068",
+        supportPhone: "0800-000-105",
       },
     });
 
-    expect(brand.code).toBe("LION");
-    expect(brand.host).toBe("booking.lion-travel.com.tw");
-    expect(brand.hotline.label).toBe("雄獅團體服務專線");
+    expect(brand.code).toBe("ADVENTURE");
+    expect(brand.host).toBe("booking.adventure-works.example");
+    expect(brand.hotline.label).toBe("探索團體服務專線");
   });
 
   it("uses backend authority clients for booking confirmation, trip, and receipt", async () => {
@@ -788,7 +788,7 @@ describe("partner-booking-web BFF wiring", () => {
       tenantId: "tenant-001",
       partnerId: "partner-001",
       partnerProgramId: "program-001",
-      partnerEntrySlug: "ctbc",
+      partnerEntrySlug: "acme",
       eligibilityVerificationId: "elig-001",
       issuerAuthorizationRef: null,
       status: "active",
@@ -893,7 +893,7 @@ describe("partner-booking-web BFF wiring", () => {
     await expect(
       createPartnerBooking(session, {
         businessDispatchSubtype: "credit_card_airport_transfer",
-        partnerEntrySlug: "ctbc",
+        partnerEntrySlug: "acme",
         eligibilityVerificationId: "elig-001",
         pickup: { address: "A", lat: 25, lng: 121 },
         dropoff: { address: "B", lat: 25.1, lng: 121.1 },

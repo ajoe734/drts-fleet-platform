@@ -17,14 +17,18 @@ import {
 
 import type {
   AcknowledgeOpsApprovalRequestBreachCommand,
+  AcceptTenantInvitationCommand,
+  AcceptTenantInvitationResult,
   ActionReceipt,
   AuditLogRecord,
   ApproveTenantBookingApprovalRequestCommand,
   CreatePartnerChannelEntryCommand,
   CreatePartnerBootstrapSessionCommand,
+  CreateReferralEmbedHandoffArtifactCommand,
   CreatePartnerIngressHandoffCommand,
   PartnerEntryBrandingMetadata,
   CreateTenantUserCommand,
+  CanonicalIdentityInvitationRecord,
   EscalateTenantBookingApprovalRequestCommand,
   IdentityContext,
   CreateTenantWebhookEndpointCommand,
@@ -32,6 +36,8 @@ import type {
   EmptyStateEnvelope,
   IssueTenantApiKeyCommand,
   IssuePartnerIngressCredentialCommand,
+  IntegrationCredentialSignals,
+  IntegrationCredentialStatus,
   IssuerContractExceptionRecord,
   IssuerContractPeriodAttainment,
   IssuerContractSlaMetric,
@@ -52,6 +58,10 @@ import type {
   PartnerEligibilityReviewQueueItem,
   PartnerEligibilityReviewResolution,
   PartnerEligibilityVerificationRecord,
+  RecordReferralEmbedConsentCommand,
+  ReferralEmbedConsentBundle,
+  ReferralEmbedHandoffArtifact,
+  ReferralEmbedSession,
   ResolvePartnerEligibilityReviewCommand,
   ResourceActionDescriptor,
   RevokePartnerIngressCredentialCommand,
@@ -79,6 +89,7 @@ import type {
   TenantDashboardSummary,
   TenantApiKeyGovernancePolicy,
   TenantApiKeyIssued,
+  TenantApiKeyRecord,
   OwnedOrderRecord,
   RecalculateTenantSlaBookingsCommand,
   ReorderTenantApprovalRulesCommand,
@@ -94,6 +105,7 @@ import type {
   TenantPassengerQualityIssue,
   TenantPassengerRecord,
   TenantIntegrationGovernancePackage,
+  TenantInvitationView,
   TenantOrderListQuery,
   TenantProgramUsageRecord,
   TenantQuotaLedgerEntry,
@@ -127,10 +139,17 @@ import type {
   WebhookRetryPolicyRecord,
   UiRefreshMetadata,
   ReferralRevenueShareRule,
+  PartnerNotificationDispatchOutcome,
+  PartnerNotificationFailureReason,
+  PartnerPassengerNotificationTestWirePayload,
+  PartnerPassengerNotificationWirePayload,
 } from "@drts/contracts";
 import {
+  PLATFORM_CURRENCY,
   REFERRAL_SETTLEMENT_DIRECTION_DRTS_PAYS_PARTNER,
+  REFERRAL_EMBED_REQUIRED_CONSENT_SCOPES,
   PARTNER_REFERRAL_CHANNEL_KEY,
+  PARTNER_NOTIFICATION_FAILURE_REASON_RETRY_DISPOSITIONS,
 } from "@drts/contracts";
 
 /** Seed referral revenue-share rules (mirrors the WP0 referral scaffold seed). */
@@ -141,9 +160,9 @@ const REFERRAL_REVENUE_SHARE_RULE_SEED: readonly ReferralRevenueShareRule[] =
       partnerId: "partner_ead6bf3d-e858-47cc-bfe1-5a3742524118",
       partnerEntrySlug: "yuhe-residence",
       rateType: "percent" as const,
-      value: 10,
+      value: 15,
       currency: "TWD",
-      effectiveFrom: "2026-07-01T00:00:00.000Z",
+      effectiveFrom: "2026-06-01T00:00:00.000Z",
       effectiveUntil: null,
       settlementDirection: REFERRAL_SETTLEMENT_DIRECTION_DRTS_PAYS_PARTNER,
       channelKey: PARTNER_REFERRAL_CHANNEL_KEY,
@@ -156,7 +175,7 @@ const REFERRAL_REVENUE_SHARE_RULE_SEED: readonly ReferralRevenueShareRule[] =
       partnerEntrySlug: "referral-demo-community",
       rateType: "percent" as const,
       value: 15,
-      currency: "NTD",
+      currency: PLATFORM_CURRENCY,
       effectiveFrom: "2026-06-01T00:00:00.000Z",
       effectiveUntil: null,
       settlementDirection: REFERRAL_SETTLEMENT_DIRECTION_DRTS_PAYS_PARTNER,
@@ -178,6 +197,7 @@ export interface UpsertReferralRevenueShareRuleCommand {
 }
 
 import { ApiRequestError } from "../../common/api-envelope";
+import type { CreateSecurityEventInput } from "../../common/audit/security-event-sanitizer";
 import { generateDeterministicUuid } from "../../common/durable-identity";
 import type { BillingSettlementService } from "../billing-settlement/billing-settlement.service";
 import {
@@ -196,6 +216,7 @@ import {
   AuditNotificationService,
   type ApprovalNotificationRecipient,
 } from "../audit-notification/audit-notification.service";
+import { SecurityEventsService } from "../security-events/security-events.service";
 import type { ApprovalNotificationTemplateKey } from "../audit-notification/templates/approval-notification.templates";
 import {
   BANK_CARD_INLINE_ELIGIBILITY_ADAPTER_CODE,
@@ -212,12 +233,19 @@ import {
   REFERENCE_TOKEN_ELIGIBILITY_ADAPTER_CODE,
   ReferenceTokenEligibilityAdapter,
 } from "./reference-token-eligibility.adapter";
+import { IdentityRepository } from "../identity/identity.repository";
 import { PartnerUserIdentityLinkRepository } from "./partner-user-identity-link.repository";
 import {
+  ReferralEmbedHandoffRepository,
+  type PersistReferralEmbedHandoffCommand,
+} from "./referral-embed-handoff.repository";
+import {
   TenantPartnerRepository,
+  type IdentityGovernanceChanges,
   type PersistTenantPartnerChanges,
   type StoredPartnerIngressCredentialRecord,
   type StoredTenantApiKeyRecord,
+  type TenantPartnerState,
   type TenantPartnerQueryExecutor,
   type TenantQuotaMonthlySnapshotRecord,
   type StoredWebhookDeliveryRecord,
@@ -240,18 +268,35 @@ import {
 } from "./tenant-quota-ledger";
 import {
   WebhookDispatchService,
+  type PartnerAckV1RequestOptions,
+  type WebhookDispatchAttemptResult,
   type WebhookRetryPolicy,
 } from "./webhook-dispatch.service";
 import { evaluateTenantApprovalRules } from "./tenant-approval-rule-evaluator";
+import { TenantInvitationDeliveryService } from "./tenant-invitation-delivery.service";
 import type {
   PartnerReferralDashboardRecord,
   PartnerReferralRevenuePeriodRecord,
   PartnerReferralUsagePeriodRecord,
 } from "./partner-referral-portal.types";
 import type { ReferralStatementRecord } from "../billing-settlement/referral-statement.types";
+import { detectAuthEnvironment } from "../../config/auth-startup-config";
 
 const DEMO_TENANT_ID = "tenant-demo-001";
 const DEFAULT_TENANT_SERVICE_PROGRAM_ID = "tenant-program-enterprise-dispatch";
+
+function isStrictAuthEnvironment(): boolean {
+  const environment = detectAuthEnvironment(process.env);
+  return environment === "production" || environment === "staging";
+}
+
+function cloneReferralRevenueShareRuleSeed(): ReferralRevenueShareRule[] {
+  return REFERRAL_REVENUE_SHARE_RULE_SEED.map((rule) => ({ ...rule }));
+}
+
+function createInitialReferralRevenueShareRules(): ReferralRevenueShareRule[] {
+  return isStrictAuthEnvironment() ? [] : cloneReferralRevenueShareRuleSeed();
+}
 
 type WebhookSecretRotationRecord = TenantWebhookSecretRotationRecord;
 
@@ -260,8 +305,35 @@ type WebhookRuntimeMetadata = TenantWebhookRuntimeMetadata & {
   disableReason: TenantWebhookDisableReason | null;
 };
 
+type StoredWebhookSecretMaterial = WebhookSecretRotationRecord & {
+  createdAt: string;
+  secretValue: string;
+  ownerRef: string | null;
+  ownerName: string | null;
+  ownerType: string | null;
+  purpose: string | null;
+  expiresAt: string | null;
+  lastUsedAt: string | null;
+  lastUsedWorkload: string | null;
+  status: IntegrationCredentialStatus;
+  overlapEndsAt: string | null;
+  autoRevokedAt: string | null;
+  supersededByVersion: number | null;
+  revokedAt: string | null;
+  signals: IntegrationCredentialSignals;
+};
+
+/**
+ * What a rotation history entry is allowed to publish. `createdAt` is carried
+ * beyond the shared contract because tenant reads have always exposed it.
+ */
+type PublishedWebhookSecretRotationRecord = WebhookSecretRotationRecord & {
+  createdAt: string;
+};
+
 type StoredWebhookEndpoint = TenantWebhookEndpoint & {
   secretValue: string;
+  secretCredentials?: StoredWebhookSecretMaterial[];
   retryPolicy: WebhookRetryPolicy;
   runtimeMetadata: WebhookRuntimeMetadata;
   secretHistory: WebhookSecretRotationRecord[];
@@ -281,6 +353,12 @@ type RotateWebhookSecretCommand = {
   webhookId: string;
   secret: string;
   rotationReason?: string;
+  ownerRef?: string | null;
+  ownerName?: string | null;
+  ownerType?: string | null;
+  purpose?: string | null;
+  expiresAt?: string | null;
+  overlapDays?: number | null;
 };
 
 type PartnerIngressCredentialSeed = {
@@ -307,6 +385,27 @@ type PartnerIngressResolution = {
 type PartnerIngressHandoffResolution = PartnerIngressResolution & {
   drtsPassengerId: string;
 };
+
+type ReferralEmbedHandoffResolution = PartnerIngressHandoffResolution & {
+  entryHost: string;
+  consentRequired: boolean;
+  consentBundleVersion: string | null;
+  consentGrantedAt: string | null;
+};
+
+export type TenantApiKeyResolution = {
+  apiKey: StoredTenantApiKeyRecord;
+  identity: IdentityContext;
+};
+
+export interface AuthenticateTenantApiKeyOptions {
+  requiredScopes?: string[] | undefined;
+  tenantId?: string | null | undefined;
+  workload?: string | undefined;
+  requestId?: string | undefined;
+}
+
+export type { StoredTenantApiKeyRecord };
 
 type PartnerEligibilityIdentity = Pick<
   IdentityContext,
@@ -416,6 +515,15 @@ const DEFAULT_PARTNER_ELIGIBILITY_SENSITIVE_DATA_POLICY: PartnerEligibilitySensi
 
 const DEFAULT_TENANT_API_KEY_LIFETIME_DAYS = 60;
 const MAX_TENANT_API_KEY_LIFETIME_DAYS = 90;
+const DEFAULT_CREDENTIAL_ROTATION_OVERLAP_DAYS = 7;
+const MAX_CREDENTIAL_ROTATION_OVERLAP_DAYS = 7;
+const CREDENTIAL_APPROACHING_EXPIRY_THRESHOLD_DAYS = 14;
+const CREDENTIAL_DORMANT_THRESHOLD_DAYS = 30;
+const DEFAULT_PARTNER_INGRESS_CREDENTIAL_LIFETIME_DAYS = 90;
+const MAX_PARTNER_INGRESS_CREDENTIAL_LIFETIME_DAYS = 90;
+const DEFAULT_WEBHOOK_SECRET_LIFETIME_DAYS = 90;
+const MAX_WEBHOOK_SECRET_LIFETIME_DAYS = 90;
+const REFERRAL_EMBED_HANDOFF_EXPIRES_IN_SECONDS = 120;
 
 const CANONICAL_TENANT_API_KEY_SCOPES = new Set<string>([
   "audit:read",
@@ -563,6 +671,8 @@ const USER_ROLE_SEED: TenantUserRoleRecord[] = [
     approvalNotificationOptOut: false,
     invitedAt: "2026-04-10T00:00:00.000Z",
     updatedAt: "2026-04-10T00:00:00.000Z",
+    subjectId: "sub_oidc_admin_acme",
+    subject: "sub_oidc_admin_acme",
   },
   {
     userId: "tenant-user-demo-002",
@@ -574,6 +684,8 @@ const USER_ROLE_SEED: TenantUserRoleRecord[] = [
     approvalNotificationOptOut: false,
     invitedAt: "2026-04-10T00:10:00.000Z",
     updatedAt: "2026-04-10T00:10:00.000Z",
+    subjectId: "sub_oidc_ops_acme",
+    subject: "sub_oidc_ops_acme",
   },
   {
     userId: "tenant-user-demo-003",
@@ -585,6 +697,8 @@ const USER_ROLE_SEED: TenantUserRoleRecord[] = [
     approvalNotificationOptOut: false,
     invitedAt: "2026-04-10T00:20:00.000Z",
     updatedAt: "2026-04-10T00:20:00.000Z",
+    subjectId: "sub_oidc_finance_acme",
+    subject: "sub_oidc_finance_acme",
   },
   {
     userId: "tenant-user-demo-004",
@@ -596,6 +710,34 @@ const USER_ROLE_SEED: TenantUserRoleRecord[] = [
     approvalNotificationOptOut: false,
     invitedAt: "2026-04-10T00:30:00.000Z",
     updatedAt: "2026-04-10T00:30:00.000Z",
+    subjectId: "sub_oidc_viewer_acme",
+    subject: "sub_oidc_viewer_acme",
+  },
+  {
+    userId: "tenant-user-demo-invited",
+    tenantId: DEMO_TENANT_ID,
+    email: "invited@acme.example",
+    displayName: "Acme Tenant Invited User",
+    roleCode: "tenant_viewer",
+    status: "invited",
+    approvalNotificationOptOut: false,
+    invitedAt: "2026-04-10T00:00:00.000Z",
+    updatedAt: "2026-04-10T00:00:00.000Z",
+    subjectId: "sub_invited",
+    subject: "sub_invited",
+  },
+  {
+    userId: "tenant-user-demo-suspended",
+    tenantId: DEMO_TENANT_ID,
+    email: "suspended@acme.example",
+    displayName: "Acme Tenant Suspended User",
+    roleCode: "tenant_viewer",
+    status: "suspended",
+    approvalNotificationOptOut: false,
+    invitedAt: "2026-04-10T00:00:00.000Z",
+    updatedAt: "2026-04-10T00:00:00.000Z",
+    subjectId: "sub_suspended",
+    subject: "sub_suspended",
   },
 ];
 
@@ -656,15 +798,15 @@ const PARTNER_ENTRY_SEED: PartnerChannelEntryRecord[] = [
     tenantId: DEMO_TENANT_ID,
     bankCode: null,
     entrySlug: "yuhe-residence",
-    displayName: "御和物業",
+    displayName: "法碧康物業",
     businessDispatchSubtype: "enterprise_dispatch",
     authMode: "partner_api_key",
     eligibilityMode: "none",
-    entryHost: "app.yuhe-living.com.tw",
+    entryHost: "app.fabrikam-living.example",
     entryPath: "/embed/yuhe-residence",
     themeAccent: "#0F766E",
     brandingMetadata: {
-      displayName: "御和物業",
+      displayName: "法碧康物業",
       themeAccent: "#0F766E",
       supportEmail: null,
       supportPhone: "0800-911-200",
@@ -796,26 +938,26 @@ const PARTNER_ENTRY_SEED: PartnerChannelEntryRecord[] = [
     },
   },
   {
-    partnerId: "partner-ctbc-card-001",
-    partnerCode: "ctbc",
+    partnerId: "partner-acme-card-001",
+    partnerCode: "acme",
     partnerType: "bank_partner",
-    programId: "program-ctbc-world-elite",
+    programId: "program-acme-world-elite",
     programCode: "WORLD_ELITE",
     tenantId: DEMO_TENANT_ID,
-    bankCode: "CTBC",
-    entrySlug: "ctbc",
-    displayName: "CTBC World Elite",
+    bankCode: "ACME",
+    entrySlug: "acme",
+    displayName: "ACME Elite Demo",
     businessDispatchSubtype: "credit_card_airport_transfer",
     authMode: "partner_api_key",
     eligibilityMode: "bank_card_inline",
-    entryHost: "ride.ctbc.com.tw",
-    entryPath: "/ctbc/program/site",
+    entryHost: "ride.acme.example",
+    entryPath: "/acme/program/site",
     themeAccent: "#0B2D5C",
     brandingMetadata: {
-      displayName: "CTBC World Elite",
+      displayName: "ACME Elite Demo",
       themeAccent: "#0B2D5C",
-      supportEmail: "world-elite@ctbc.example",
-      supportPhone: "0800-024-365",
+      supportEmail: "world-elite@acme.example",
+      supportPhone: "0800-000-101",
     },
     eligibilityContract: null,
     status: "active",
@@ -827,32 +969,32 @@ const PARTNER_ENTRY_SEED: PartnerChannelEntryRecord[] = [
     updatedAt: "2026-06-16T00:00:00.000Z",
     auditMetadata: {
       source: "dev_seed_partner_booking_surface",
-      requestId: "seed-partner-booking-ctbc",
+      requestId: "seed-partner-booking-acme",
       createdBy: "system:seed",
       updatedBy: "system:seed",
     },
   },
   {
-    partnerId: "partner-cathay-card-001",
-    partnerCode: "cathay",
+    partnerId: "partner-contoso-card-001",
+    partnerCode: "contoso",
     partnerType: "bank_partner",
-    programId: "program-cathay-cube-world",
+    programId: "program-contoso-cube-world",
     programCode: "CUBE_WORLD",
     tenantId: DEMO_TENANT_ID,
-    bankCode: "CATHAY",
-    entrySlug: "cathay",
-    displayName: "Cathay CUBE World",
+    bankCode: "CONTOSO",
+    entrySlug: "contoso",
+    displayName: "Contoso Prism World",
     businessDispatchSubtype: "credit_card_airport_transfer",
     authMode: "partner_api_key",
     eligibilityMode: "bank_card_inline",
-    entryHost: "ride.cathaybk.com.tw",
-    entryPath: "/cathay/program/site",
+    entryHost: "ride.contoso.example",
+    entryPath: "/contoso/program/site",
     themeAccent: "#0A3621",
     brandingMetadata: {
-      displayName: "Cathay CUBE World",
+      displayName: "Contoso Prism World",
       themeAccent: "#0A3621",
-      supportEmail: "cube-world@cathay.example",
-      supportPhone: "0800-818-001",
+      supportEmail: "cube-world@contoso.example",
+      supportPhone: "0800-000-102",
     },
     eligibilityContract: null,
     status: "active",
@@ -864,32 +1006,32 @@ const PARTNER_ENTRY_SEED: PartnerChannelEntryRecord[] = [
     updatedAt: "2026-07-27T00:00:00.000Z",
     auditMetadata: {
       source: "dev_seed_partner_booking_surface",
-      requestId: "seed-partner-booking-cathay",
+      requestId: "seed-partner-booking-contoso",
       createdBy: "system:seed",
       updatedBy: "system:seed",
     },
   },
   {
-    partnerId: "partner-taishin-card-001",
-    partnerCode: "taishin",
+    partnerId: "partner-fabrikam-card-001",
+    partnerCode: "fabrikam",
     partnerType: "bank_partner",
-    programId: "program-taishin-infinite",
-    programCode: "TAISHIN_INFINITE",
+    programId: "program-fabrikam-infinite",
+    programCode: "FABRIKAM_SIGNATURE",
     tenantId: DEMO_TENANT_ID,
-    bankCode: "TAISHIN",
-    entrySlug: "taishin",
-    displayName: "Taishin Infinite",
+    bankCode: "FABRIKAM",
+    entrySlug: "fabrikam",
+    displayName: "Fabrikam Signature",
     businessDispatchSubtype: "credit_card_airport_transfer",
     authMode: "partner_api_key",
     eligibilityMode: "bank_card_inline",
-    entryHost: "ride.taishinbank.com.tw",
-    entryPath: "/taishin/program/site",
+    entryHost: "ride.fabrikam.example",
+    entryPath: "/fabrikam/program/site",
     themeAccent: "#7C2241",
     brandingMetadata: {
-      displayName: "Taishin Infinite",
+      displayName: "Fabrikam Signature",
       themeAccent: "#7C2241",
-      supportEmail: "infinite@taishin.example",
-      supportPhone: "0800-023-123",
+      supportEmail: "infinite@fabrikam.example",
+      supportPhone: "0800-000-103",
     },
     eligibilityContract: null,
     status: "active",
@@ -901,31 +1043,31 @@ const PARTNER_ENTRY_SEED: PartnerChannelEntryRecord[] = [
     updatedAt: "2026-07-27T00:05:00.000Z",
     auditMetadata: {
       source: "dev_seed_partner_booking_surface",
-      requestId: "seed-partner-booking-taishin",
+      requestId: "seed-partner-booking-fabrikam",
       createdBy: "system:seed",
       updatedBy: "system:seed",
     },
   },
   {
-    partnerId: "partner-dbs-card-001",
-    partnerCode: "dbs",
+    partnerId: "partner-northwind-card-001",
+    partnerCode: "northwind",
     partnerType: "bank_partner",
-    programId: "program-dbs-insignia",
-    programCode: "DBS_INSIGNIA",
+    programId: "program-northwind-signature",
+    programCode: "NORTHWIND_SIGNATURE",
     tenantId: DEMO_TENANT_ID,
-    bankCode: "DBS",
-    entrySlug: "dbs",
-    displayName: "DBS Insignia",
+    bankCode: "NORTHWIND",
+    entrySlug: "northwind",
+    displayName: "Northwind Signature",
     businessDispatchSubtype: "credit_card_airport_transfer",
     authMode: "partner_api_key",
     eligibilityMode: "bank_card_inline",
-    entryHost: "ride.dbs.com.tw",
-    entryPath: "/dbs/program/site",
+    entryHost: "ride.northwind.example",
+    entryPath: "/northwind/program/site",
     themeAccent: "#9B1B22",
     brandingMetadata: {
-      displayName: "DBS Insignia",
+      displayName: "Northwind Signature",
       themeAccent: "#9B1B22",
-      supportEmail: "insignia@dbs.example",
+      supportEmail: "signature@northwind.example",
       supportPhone: "0800-808-889",
     },
     eligibilityContract: null,
@@ -938,32 +1080,32 @@ const PARTNER_ENTRY_SEED: PartnerChannelEntryRecord[] = [
     updatedAt: "2026-07-27T00:10:00.000Z",
     auditMetadata: {
       source: "dev_seed_partner_booking_surface",
-      requestId: "seed-partner-booking-dbs",
+      requestId: "seed-partner-booking-northwind",
       createdBy: "system:seed",
       updatedBy: "system:seed",
     },
   },
   {
-    partnerId: "partner-fubon-claim-001",
-    partnerCode: "fubon",
+    partnerId: "partner-tailspin-claim-001",
+    partnerCode: "tailspin",
     partnerType: "bank_partner",
-    programId: "program-fubon-claim-mobility",
+    programId: "program-tailspin-claim-mobility",
     programCode: "CLAIM_MOBILITY",
     tenantId: DEMO_TENANT_ID,
-    bankCode: "FUBON",
-    entrySlug: "fubon",
-    displayName: "Fubon Claim Mobility",
+    bankCode: "TAILSPIN",
+    entrySlug: "tailspin",
+    displayName: "Tailspin Claim Mobility",
     businessDispatchSubtype: "insurance_replacement_vehicle",
     authMode: "partner_api_key",
     eligibilityMode: "reference_required",
-    entryHost: "claim.fubon-ins.com.tw",
-    entryPath: "/fubon/program/site",
+    entryHost: "claim.tailspin.example",
+    entryPath: "/tailspin/program/site",
     themeAccent: "#0E6E50",
     brandingMetadata: {
-      displayName: "Fubon Claim Mobility",
+      displayName: "Tailspin Claim Mobility",
       themeAccent: "#0E6E50",
-      supportEmail: "claim-mobility@fubon.example",
-      supportPhone: "0800-073-588",
+      supportEmail: "claim-mobility@tailspin.example",
+      supportPhone: "0800-000-104",
     },
     eligibilityContract: null,
     status: "active",
@@ -975,32 +1117,32 @@ const PARTNER_ENTRY_SEED: PartnerChannelEntryRecord[] = [
     updatedAt: "2026-06-16T00:05:00.000Z",
     auditMetadata: {
       source: "dev_seed_partner_booking_surface",
-      requestId: "seed-partner-booking-fubon",
+      requestId: "seed-partner-booking-tailspin",
       createdBy: "system:seed",
       updatedBy: "system:seed",
     },
   },
   {
-    partnerId: "partner-lion-travel-001",
-    partnerCode: "lion",
+    partnerId: "partner-adventure-works-001",
+    partnerCode: "adventureworks",
     partnerType: "bank_partner",
-    programId: "program-lion-group-transfer",
+    programId: "program-adventureworks-group-transfer",
     programCode: "GROUP_TRANSFER",
     tenantId: DEMO_TENANT_ID,
-    bankCode: "LION",
-    entrySlug: "lion",
-    displayName: "Lion Group Transfer",
+    bankCode: "ADVENTURE",
+    entrySlug: "adventureworks",
+    displayName: "Adventure Works Transfer",
     businessDispatchSubtype: "travel_agency_transfer",
     authMode: "partner_api_key",
     eligibilityMode: "reference_required",
-    entryHost: "booking.lion-travel.com.tw",
-    entryPath: "/lion/program/site",
+    entryHost: "booking.adventure-works.example",
+    entryPath: "/adventureworks/program/site",
     themeAccent: "#B0420E",
     brandingMetadata: {
-      displayName: "Lion Group Transfer",
+      displayName: "Adventure Works Transfer",
       themeAccent: "#B0420E",
       supportEmail: "group-transfer@liontravel.example",
-      supportPhone: "0800-090-068",
+      supportPhone: "0800-000-105",
     },
     eligibilityContract: null,
     status: "active",
@@ -1012,7 +1154,7 @@ const PARTNER_ENTRY_SEED: PartnerChannelEntryRecord[] = [
     updatedAt: "2026-06-16T00:10:00.000Z",
     auditMetadata: {
       source: "dev_seed_partner_booking_surface",
-      requestId: "seed-partner-booking-lion",
+      requestId: "seed-partner-booking-adventureworks",
       createdBy: "system:seed",
       updatedBy: "system:seed",
     },
@@ -1032,24 +1174,29 @@ const PARTNER_INGRESS_CREDENTIAL_BOOTSTRAPS: readonly PartnerIngressCredentialBo
       envVarName: "PARTNER_INGRESS_KEY_BANK_DEMO_BETA_AIRPORT",
     },
     {
-      entrySlug: "ctbc",
-      keyId: "partner-key-ctbc-dev",
-      envVarName: "PARTNER_INGRESS_KEY_CTBC",
+      entrySlug: "acme",
+      keyId: "partner-key-acme-dev",
+      envVarName: "PARTNER_INGRESS_KEY_ACME",
     },
     {
-      entrySlug: "cathay",
-      keyId: "partner-key-cathay-dev",
-      envVarName: "PARTNER_INGRESS_KEY_CATHAY",
+      entrySlug: "contoso",
+      keyId: "partner-key-contoso-dev",
+      envVarName: "PARTNER_INGRESS_KEY_CONTOSO",
     },
     {
-      entrySlug: "taishin",
-      keyId: "partner-key-taishin-dev",
-      envVarName: "PARTNER_INGRESS_KEY_TAISHIN",
+      entrySlug: "yuhe-residence",
+      keyId: "partner-key-yuhe-residence-dev",
+      envVarName: "PARTNER_INGRESS_KEY_YUHE_RESIDENCE",
     },
     {
-      entrySlug: "dbs",
-      keyId: "partner-key-dbs-dev",
-      envVarName: "PARTNER_INGRESS_KEY_DBS",
+      entrySlug: "fabrikam",
+      keyId: "partner-key-fabrikam-dev",
+      envVarName: "PARTNER_INGRESS_KEY_FABRIKAM",
+    },
+    {
+      entrySlug: "northwind",
+      keyId: "partner-key-northwind-dev",
+      envVarName: "PARTNER_INGRESS_KEY_NORTHWIND",
     },
   ];
 
@@ -1104,6 +1251,24 @@ export type TenantQuotaConsumptionCommitResult = {
   ledgerEntries: TenantQuotaLedgerEntry[];
   updatedSnapshots: TenantQuotaMonthlySnapshotRecord[];
   auditEntries: TenantQuotaAuditEntryInput[];
+};
+
+/**
+ * Command for `TenantPartnerService.dispatchPartnerNotificationAttempt` —
+ * SR-PARTNER-NOTIFY-ACK-20260917 §8. `wirePayload` must be the exact,
+ * already-built contract envelope (never re-derived here): its
+ * `deliveryId` is the frozen logical delivery id reused across every retry
+ * attempt for this notification, and its `event`/`data.notificationId`/
+ * `data.partnerEntrySlug` drive endpoint-subscription and ack-correlation
+ * checks. `tenantId`/`webhookId` scope the lookup to exactly one endpoint —
+ * never a tenant-wide event scan.
+ */
+export type PartnerNotificationDispatchAttemptCommand = {
+  tenantId: string;
+  webhookId: string;
+  wirePayload:
+    | PartnerPassengerNotificationWirePayload
+    | PartnerPassengerNotificationTestWirePayload;
 };
 
 @Injectable()
@@ -1186,11 +1351,18 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
 
   private approvalNotificationPollInFlight = false;
 
+  private readonly securityEventsService: SecurityEventsService | undefined;
+
+  private readonly identityRepository: IdentityRepository | undefined;
+
   constructor(
+    @Inject(AuditNotificationService)
     private readonly auditNotificationService: AuditNotificationService,
     @Optional()
+    @Inject(TenantPartnerRepository)
     private readonly tenantPartnerRepository?: TenantPartnerRepository,
     @Optional()
+    @Inject(WebhookDispatchService)
     private readonly webhookDispatchService: WebhookDispatchService = new WebhookDispatchService(),
     @Optional()
     @Inject(PARTNER_INGRESS_CREDENTIAL_SEEDS)
@@ -1202,11 +1374,39 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
       new ReferenceTokenEligibilityAdapter(),
     ],
     @Optional()
+    @Inject(PartnerUserIdentityLinkRepository)
     private readonly partnerUserIdentityLinkRepository: PartnerUserIdentityLinkRepository = new PartnerUserIdentityLinkRepository(),
+    @Optional()
+    @Inject(ReferralEmbedHandoffRepository)
+    private readonly referralEmbedHandoffRepository: ReferralEmbedHandoffRepository = new ReferralEmbedHandoffRepository(),
+    @Optional()
+    @Inject(SecurityEventsService)
+    securityEventsService?: SecurityEventsService | IdentityRepository,
+    @Optional()
+    @Inject(IdentityRepository)
+    identityRepository?: IdentityRepository,
+    @Optional()
+    @Inject(TenantInvitationDeliveryService)
+    private readonly tenantInvitationDelivery: TenantInvitationDeliveryService = new TenantInvitationDeliveryService(),
   ) {
+    this.securityEventsService =
+      securityEventsService instanceof SecurityEventsService
+        ? securityEventsService
+        : undefined;
+    this.identityRepository =
+      identityRepository ??
+      (securityEventsService instanceof IdentityRepository
+        ? securityEventsService
+        : undefined);
+    if (isStrictAuthEnvironment()) {
+      this.clearDemoSeedState();
+    }
     this.partnerIngressCredentials = this.partnerIngressCredentialSeeds.map(
       (seed) => createBootstrapPartnerIngressCredential(seed),
     );
+    if (isStrictAuthEnvironment()) {
+      this.partnerIngressCredentials = [];
+    }
     this.startApprovalNotificationPolling();
   }
 
@@ -1238,25 +1438,34 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
       const quotaMonthlySnapshots = persistedState.quotaMonthlySnapshots ?? [];
       const userRoles = persistedState.userRoles ?? [];
       const apiKeys = persistedState.apiKeys ?? [];
-      const hasPersistedState =
-        notificationPreferences.length > 0 ||
-        slaProfiles.length > 0 ||
-        webhookEndpoints.length > 0 ||
-        webhookDeliveries.length > 0 ||
-        partnerEntries.length > 0 ||
-        partnerIngressCredentials.length > 0 ||
-        partnerEligibilityVerifications.length > 0 ||
-        approvalRules.length > 0 ||
-        approvalRequests.length > 0 ||
-        approvalDecisions.length > 0 ||
-        passengers.length > 0 ||
-        addresses.length > 0 ||
-        costCenters.length > 0 ||
-        quotaPolicies.length > 0 ||
-        quotaLedger.length > 0 ||
-        quotaMonthlySnapshots.length > 0 ||
-        userRoles.length > 0 ||
-        apiKeys.length > 0;
+      const persistedStateSnapshot: TenantPartnerState = {
+        notificationPreferences,
+        webhookEndpoints,
+        webhookDeliveries,
+        slaProfiles,
+        partnerEntries,
+        partnerIngressCredentials,
+        partnerEligibilityVerifications,
+        approvalRules,
+        approvalRequests,
+        approvalDecisions,
+        passengers,
+        addresses,
+        costCenters,
+        quotaPolicies,
+        quotaLedger,
+        quotaMonthlySnapshots,
+        userRoles,
+        apiKeys,
+      };
+      const sanitizedState = this.sanitizePersistedState(
+        persistedStateSnapshot,
+      );
+      const hasPersistedState = this.hasPersistedState(persistedStateSnapshot);
+      const strictSanitizeChanges = this.buildStrictSanitizeChanges(
+        persistedStateSnapshot,
+        sanitizedState,
+      );
 
       if (!hasPersistedState) {
         this.persistChanges(
@@ -1293,56 +1502,75 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
           },
           "module init bootstrap",
         );
+        this.syncIdentityTenantUserRoles("module init bootstrap");
         return;
       }
 
       this.notificationPreferences = new Map(
-        notificationPreferences.map((preferences) => [
+        sanitizedState.notificationPreferences.map((preferences) => [
           preferences.tenantId,
           this.cloneNotificationPreferences(preferences),
         ]),
       );
       this.slaProfiles = new Map(
-        slaProfiles.map((profile) => [
+        sanitizedState.slaProfiles.map((profile) => [
           profile.tenantId,
           this.cloneSlaProfile(profile),
         ]),
       );
       this.partnerEntries =
-        partnerEntries.length > 0
-          ? partnerEntries.map((entry) => this.clonePartnerEntry(entry))
-          : PARTNER_ENTRY_SEED.map((entry) => this.clonePartnerEntry(entry));
+        sanitizedState.partnerEntries.length > 0
+          ? sanitizedState.partnerEntries.map((entry) =>
+              this.clonePartnerEntry(entry),
+            )
+          : isStrictAuthEnvironment()
+            ? []
+            : PARTNER_ENTRY_SEED.map((entry) => this.clonePartnerEntry(entry));
       this.reconcilePartnerEntrySeeds();
       this.partnerIngressCredentials =
-        partnerIngressCredentials.length > 0
-          ? partnerIngressCredentials.map((credential) =>
+        sanitizedState.partnerIngressCredentials.length > 0
+          ? sanitizedState.partnerIngressCredentials.map((credential) =>
               this.cloneStoredPartnerIngressCredential(credential),
             )
-          : this.partnerIngressCredentialSeeds.map((seed) =>
-              createBootstrapPartnerIngressCredential(seed),
-            );
+          : isStrictAuthEnvironment()
+            ? []
+            : this.partnerIngressCredentialSeeds.map((seed) =>
+                createBootstrapPartnerIngressCredential(seed),
+              );
       this.reconcilePartnerIngressCredentialSeeds();
       this.normalizePartnerEntryAuthModes();
+      if (
+        isStrictAuthEnvironment() &&
+        this.didSanitizePersistedState(persistedStateSnapshot, sanitizedState)
+      ) {
+        this.persistChanges(
+          strictSanitizeChanges,
+          "module init strict auth sanitize",
+        );
+      }
       this.partnerEligibilityVerifications = new Map(
-        partnerEligibilityVerifications.map((verification) => [
+        sanitizedState.partnerEligibilityVerifications.map((verification) => [
           verification.eligibilityVerificationId,
           this.clonePartnerEligibilityVerification(verification),
         ]),
       );
-      this.approvalRules = approvalRules.map((rule) =>
+      this.approvalRules = sanitizedState.approvalRules.map((rule) =>
         this.cloneApprovalRule(rule),
       );
-      this.approvalRuleVersions = approvalRules.reduce((versions, rule) => {
-        versions.set(
-          rule.tenantId,
-          Math.max(versions.get(rule.tenantId) ?? 0, 1),
-        );
-        return versions;
-      }, new Map<string, number>());
-      this.approvalDecisions = approvalDecisions.map((decision) =>
-        this.cloneApprovalDecision(decision),
+      this.approvalRuleVersions = sanitizedState.approvalRules.reduce(
+        (versions, rule) => {
+          versions.set(
+            rule.tenantId,
+            Math.max(versions.get(rule.tenantId) ?? 0, 1),
+          );
+          return versions;
+        },
+        new Map<string, number>(),
       );
-      this.approvalRequests = approvalRequests.map((request) =>
+      this.approvalDecisions = sanitizedState.approvalDecisions.map(
+        (decision) => this.cloneApprovalDecision(decision),
+      );
+      this.approvalRequests = sanitizedState.approvalRequests.map((request) =>
         this.cloneApprovalRequest(
           this.mergeApprovalRequestDecisions(
             request,
@@ -1353,24 +1581,30 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
           ),
         ),
       );
-      this.webhookEndpoints = webhookEndpoints.map((endpoint) =>
+      this.webhookEndpoints = sanitizedState.webhookEndpoints.map((endpoint) =>
         this.cloneStoredWebhookEndpoint(endpoint),
       );
-      this.webhookDeliveries = webhookDeliveries.map((delivery) =>
-        this.cloneStoredWebhookDelivery(delivery),
+      this.webhookDeliveries = sanitizedState.webhookDeliveries.map(
+        (delivery) => this.cloneStoredWebhookDelivery(delivery),
       );
-      this.passengers = passengers.map((passenger) =>
+      this.passengers = sanitizedState.passengers.map((passenger) =>
         this.clonePassenger(passenger),
       );
-      this.addresses = addresses.map((address) => this.cloneAddress(address));
+      this.addresses = sanitizedState.addresses.map((address) =>
+        this.cloneAddress(address),
+      );
       this.costCenters =
-        costCenters.length > 0
-          ? costCenters.map((costCenter) => this.cloneCostCenter(costCenter))
-          : COST_CENTER_SEED.map((costCenter) =>
+        sanitizedState.costCenters.length > 0
+          ? sanitizedState.costCenters.map((costCenter) =>
               this.cloneCostCenter(costCenter),
-            );
+            )
+          : isStrictAuthEnvironment()
+            ? []
+            : COST_CENTER_SEED.map((costCenter) =>
+                this.cloneCostCenter(costCenter),
+              );
       this.quotaPolicies = new Map(
-        quotaPolicies.map((policy) => [
+        sanitizedState.quotaPolicies.map((policy) => [
           this.buildQuotaPolicyKey(
             policy.tenantId,
             policy.costCenterCode,
@@ -1379,11 +1613,11 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
           this.cloneQuotaPolicy(policy),
         ]),
       );
-      this.quotaLedger = quotaLedger.map((entry) =>
+      this.quotaLedger = sanitizedState.quotaLedger.map((entry) =>
         this.cloneQuotaLedgerEntry(entry),
       );
       this.quotaMonthlySnapshots = new Map(
-        quotaMonthlySnapshots.map((snapshot) => [
+        sanitizedState.quotaMonthlySnapshots.map((snapshot) => [
           this.buildQuotaSnapshotKey(
             snapshot.tenantId,
             snapshot.costCenterCode,
@@ -1394,11 +1628,21 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
         ]),
       );
       this.userRoles =
-        userRoles.length > 0
-          ? userRoles.map((userRole) => this.cloneUserRole(userRole))
-          : USER_ROLE_SEED.map((userRole) => this.cloneUserRole(userRole));
-      this.apiKeys = apiKeys.map((apiKey) => this.cloneStoredApiKey(apiKey));
-      if (partnerEntries.length === 0) {
+        sanitizedState.userRoles.length > 0
+          ? sanitizedState.userRoles.map((userRole) =>
+              this.cloneUserRole(userRole),
+            )
+          : isStrictAuthEnvironment()
+            ? []
+            : USER_ROLE_SEED.map((userRole) => this.cloneUserRole(userRole));
+      this.apiKeys = sanitizedState.apiKeys.map((apiKey) =>
+        this.cloneStoredApiKey(apiKey),
+      );
+      this.syncIdentityTenantUserRoles("module init rehydrate");
+      if (
+        sanitizedState.partnerEntries.length === 0 &&
+        !isStrictAuthEnvironment()
+      ) {
         this.persistChanges(
           {
             partnerEntries: this.partnerEntries.map((entry) =>
@@ -1408,7 +1652,10 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
           "module init partner entry bootstrap",
         );
       }
-      if (partnerIngressCredentials.length === 0) {
+      if (
+        sanitizedState.partnerIngressCredentials.length === 0 &&
+        !isStrictAuthEnvironment()
+      ) {
         this.persistChanges(
           {
             partnerIngressCredentials: this.partnerIngressCredentials.map(
@@ -1419,7 +1666,10 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
           "module init partner ingress credential bootstrap",
         );
       }
-      if (costCenters.length === 0) {
+      if (
+        sanitizedState.costCenters.length === 0 &&
+        !isStrictAuthEnvironment()
+      ) {
         this.persistChanges(
           {
             costCenters: this.costCenters.map((costCenter) =>
@@ -1429,7 +1679,7 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
           "module init tenant cost-center bootstrap",
         );
       }
-      if (userRoles.length === 0) {
+      if (sanitizedState.userRoles.length === 0 && !isStrictAuthEnvironment()) {
         this.persistChanges(
           {
             userRoles: this.userRoles.map((userRole) =>
@@ -4204,6 +4454,13 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
   }
 
   getDefaultTenantId() {
+    if (isStrictAuthEnvironment()) {
+      throw new ApiRequestError(
+        HttpStatus.FORBIDDEN,
+        "DEFAULT_TENANT_FORBIDDEN",
+        "Default tenant authority is disabled in strict auth environments.",
+      );
+    }
     return DEMO_TENANT_ID;
   }
 
@@ -4223,6 +4480,68 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
     return userRole ? this.cloneUserRole(userRole) : null;
   }
 
+  findTenantUserBySubject(subjectId: string) {
+    const trimmed = subjectId.trim();
+    if (!trimmed) {
+      return null;
+    }
+
+    const userRole = this.userRoles.find(
+      (candidate) =>
+        (candidate as any).subjectId === trimmed ||
+        (candidate as any).subject === trimmed,
+    );
+    return userRole ? this.cloneUserRole(userRole) : null;
+  }
+
+  bindTenantUserSubject(
+    tenantId: string | null | undefined,
+    userId: string,
+    subjectId: string,
+  ) {
+    const targetUser = userId?.trim();
+    const trimmedSubject = subjectId?.trim();
+    if (!targetUser || !trimmedSubject) {
+      return null;
+    }
+
+    const targetTenant = tenantId?.trim();
+    const userRole = this.userRoles.find(
+      (candidate) =>
+        (!targetTenant || candidate.tenantId === targetTenant) &&
+        candidate.userId === targetUser,
+    );
+    if (!userRole) {
+      return null;
+    }
+
+    const previousUserRoles = this.userRoles.map((entry) =>
+      this.cloneUserRole(entry),
+    );
+
+    (userRole as any).subjectId = trimmedSubject;
+    (userRole as any).subject = trimmedSubject;
+
+    try {
+      this.persistChanges(
+        {
+          userRoles: this.userRoles.map((entry) => this.cloneUserRole(entry)),
+        },
+        `bind subject ${trimmedSubject} to user ${targetUser}`,
+      );
+    } catch {
+      this.userRoles = previousUserRoles;
+      throw new ApiRequestError(
+        500,
+        "PERSISTENCE_FAILED",
+        "Failed to persist subject binding.",
+      );
+    }
+
+    this.syncIdentityTenantUserRoles(`bind subject ${trimmedSubject}`);
+    return this.cloneUserRole(userRole);
+  }
+
   findTenantUser(tenantId: string, userId: string) {
     const userRole = this.userRoles.find(
       (candidate) =>
@@ -4231,9 +4550,15 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
     return userRole ? this.cloneUserRole(userRole) : null;
   }
 
-  listPartnerEntries() {
+  listPartnerEntries(entrySlug?: string) {
+    const slug = entrySlug?.trim();
     return this.partnerEntries
-      .filter((entry) => entry.activeFlag && entry.status === "active")
+      .filter(
+        (entry) =>
+          entry.activeFlag &&
+          entry.status === "active" &&
+          (!slug || entry.entrySlug === slug || entry.partnerId === slug),
+      )
       .map((entry) => this.clonePartnerEntry(entry));
   }
 
@@ -4243,7 +4568,7 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
 
   // ── Referral revenue-share rate config (CRC-BE-006) ──────────────────────
   private referralRevenueShareRules: ReferralRevenueShareRule[] =
-    REFERRAL_REVENUE_SHARE_RULE_SEED.map((rule) => ({ ...rule }));
+    createInitialReferralRevenueShareRules();
 
   listReferralRevenueShareRules(
     entrySlug?: string,
@@ -4299,7 +4624,7 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
       currency:
         this.normalizeNullableText(command.currency ?? null) ??
         existing?.currency ??
-        "NTD",
+        PLATFORM_CURRENCY,
       effectiveFrom:
         this.normalizeNullableText(command.effectiveFrom ?? null) ??
         existing?.effectiveFrom ??
@@ -4350,6 +4675,10 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
     this.requirePlatformPartnerEntry(entrySlug);
     return this.partnerIngressCredentials
       .filter((credential) => credential.entrySlug === entrySlug)
+      .map((credential) => {
+        this.reconcileStoredPartnerIngressCredential(credential);
+        return credential;
+      })
       .sort((left, right) => {
         if (left.revokedAt && !right.revokedAt) {
           return 1;
@@ -4867,23 +5196,66 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
     const issued = this.buildIssuedPartnerIngressCredential(
       entry.entrySlug,
       command.rotationReason ?? null,
+      {
+        ownerRef: command.ownerRef ?? null,
+        ownerName: command.ownerName ?? null,
+        ownerType: command.ownerType ?? null,
+        purpose: command.purpose ?? null,
+        scopes: command.scopes ?? undefined,
+        expiresAt: command.expiresAt ?? null,
+      },
+    );
+    const rotatedAt = issued.credential.createdAt;
+    const overlapEndsAt = this.resolveCredentialOverlapEndsAt(
+      rotatedAt,
+      command.overlapDays,
     );
     let revokedCredentialId: string | null = null;
+    let preservedOverlap = false;
+    // A rotation pass touches every live credential on the entry, not only the
+    // new key and the one held open for overlap. On a second rotation the
+    // remaining historical credentials are retired here too, so they all have
+    // to reach the snapshot or they come back live on the next reload.
+    const mutatedCredentialIds = new Set<string>([
+      issued.storedCredential.keyId,
+    ]);
     this.partnerIngressCredentials = this.partnerIngressCredentials.map(
       (credential) => {
-        if (
-          credential.entrySlug !== entry.entrySlug ||
-          credential.revokedAt !== null
-        ) {
+        if (credential.entrySlug !== entry.entrySlug || credential.revokedAt) {
           return credential;
         }
-        revokedCredentialId = credential.keyId;
-        return {
-          ...credential,
-          revokedAt: issued.credential.createdAt,
-          revokedBy: "platform_admin",
-          revokeReason: command.rotationReason ?? "credential_rotated",
-        };
+
+        mutatedCredentialIds.add(credential.keyId);
+        this.reconcileStoredPartnerIngressCredential(credential, rotatedAt);
+        if (
+          !preservedOverlap &&
+          (credential.status === "active" ||
+            credential.status === "overlap_active")
+        ) {
+          preservedOverlap = true;
+          revokedCredentialId = credential.keyId;
+          credential.overlapEndsAt = overlapEndsAt;
+          credential.supersededByKeyId = issued.storedCredential.keyId;
+          credential.autoRevokedAt = null;
+          credential.status = "overlap_active";
+          credential.revokedAt = null;
+          credential.revokeReason = null;
+          credential.signals = this.buildCredentialSignals(
+            credential.lastUsedAt,
+            credential.expiresAt ?? null,
+            null,
+            rotatedAt,
+          );
+          return this.cloneStoredPartnerIngressCredential(credential);
+        }
+
+        credential.revokedAt = rotatedAt;
+        credential.revokedBy = "platform_admin";
+        credential.revokeReason =
+          command.rotationReason ?? "credential_rotated";
+        credential.status = "revoked";
+        credential.overlapEndsAt = null;
+        return this.cloneStoredPartnerIngressCredential(credential);
       },
     );
     this.partnerIngressCredentials = [
@@ -4891,10 +5263,7 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
       ...this.partnerIngressCredentials,
     ];
     const persistedCredentials = this.partnerIngressCredentials.filter(
-      (credential) =>
-        credential.entrySlug === entry.entrySlug &&
-        (credential.keyId === issued.storedCredential.keyId ||
-          credential.keyId === revokedCredentialId),
+      (credential) => mutatedCredentialIds.has(credential.keyId),
     );
 
     this.persistChanges(
@@ -4929,6 +5298,7 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
       credential: issued.credential,
       plaintextKey: issued.plaintextKey,
       revokedCredentialId,
+      overlapEndsAt: revokedCredentialId ? overlapEndsAt : null,
     };
   }
 
@@ -4943,6 +5313,7 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
       entry.entrySlug,
       keyId,
     );
+    this.reconcileStoredPartnerIngressCredential(credential);
     if (credential.revokedAt) {
       return this.toPartnerIngressCredentialResponse(credential);
     }
@@ -4952,6 +5323,8 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
     credential.revokedBy = "platform_admin";
     credential.revokeReason =
       this.normalizeNullableText(command.revokeReason) ?? "manual_revoke";
+    credential.status = "revoked";
+    credential.overlapEndsAt = null;
 
     this.persistChanges(
       {
@@ -5016,27 +5389,30 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
       );
     }
 
-    const credential = this.resolvePartnerIngressCredential(entry.entrySlug);
-    if (!credential) {
-      this.recordPartnerIngressAttempt(entry, requestId, "rejected", {
-        reason: "credential_not_configured",
-      });
-      throw new ApiRequestError(
-        HttpStatus.FORBIDDEN,
-        "PARTNER_AUTH_NOT_CONFIGURED",
-        "Partner ingress authentication is not configured for this entry.",
-        {
-          entrySlug: entry.entrySlug,
-        },
+    const matchingCredential = this.findPartnerIngressCredentialByApiKey(
+      entry.entrySlug,
+      apiKey,
+    );
+    if (!matchingCredential) {
+      const activeCredential = this.resolvePartnerIngressCredential(
+        entry.entrySlug,
       );
-    }
-
-    const providedHash = this.hashPartnerApiKey(apiKey);
-    const expectedHash = credential.keyHash;
-    if (!this.hashesMatch(providedHash, expectedHash)) {
+      if (!activeCredential) {
+        this.recordPartnerIngressAttempt(entry, requestId, "rejected", {
+          reason: "credential_not_configured",
+        });
+        throw new ApiRequestError(
+          HttpStatus.FORBIDDEN,
+          "PARTNER_AUTH_NOT_CONFIGURED",
+          "Partner ingress authentication is not configured for this entry.",
+          {
+            entrySlug: entry.entrySlug,
+          },
+        );
+      }
       this.recordPartnerIngressAttempt(entry, requestId, "rejected", {
         reason: "api_key_invalid",
-        keyId: credential.keyId,
+        keyId: activeCredential.keyId,
       });
       throw new ApiRequestError(
         HttpStatus.UNAUTHORIZED,
@@ -5048,18 +5424,43 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
       );
     }
 
+    if (matchingCredential.status === "expired") {
+      this.recordPartnerIngressAttempt(entry, requestId, "rejected", {
+        reason: "api_key_expired",
+        keyId: matchingCredential.keyId,
+      });
+      throw new ApiRequestError(
+        HttpStatus.UNAUTHORIZED,
+        "PARTNER_API_KEY_EXPIRED",
+        "Partner API key expired for this entry.",
+        {
+          entrySlug: entry.entrySlug,
+        },
+      );
+    }
+    if (matchingCredential.revokedAt) {
+      this.recordPartnerIngressAttempt(entry, requestId, "rejected", {
+        reason: "api_key_revoked",
+        keyId: matchingCredential.keyId,
+      });
+      throw new ApiRequestError(
+        HttpStatus.UNAUTHORIZED,
+        "PARTNER_API_KEY_REVOKED",
+        "Partner API key is revoked for this entry.",
+        {
+          entrySlug: entry.entrySlug,
+        },
+      );
+    }
+
     const identity: IdentityContext = {
       actorType: "partner_api_key",
-      actorId: credential.keyId,
+      actorId: matchingCredential.keyId,
       realm: "partner",
       authMode: "bootstrap_headers",
       roleFamilies: ["partner"],
       roles: ["partner_ingress"],
-      scopes: [
-        "partner:entries:read",
-        "partner:eligibility:read",
-        "partner:eligibility:write",
-      ],
+      scopes: [...(matchingCredential.scopes ?? [])],
       tenantId: entry.tenantId,
       partnerId: entry.partnerId,
       partnerProgramId: entry.programId,
@@ -5071,9 +5472,33 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
     };
 
     this.recordPartnerIngressAttempt(entry, requestId, "accepted", {
-      keyId: credential.keyId,
+      keyId: matchingCredential.keyId,
     });
-    credential.lastUsedAt = new Date().toISOString();
+    const previousLastUsedAt = matchingCredential.lastUsedAt;
+    matchingCredential.lastUsedAt = new Date().toISOString();
+    matchingCredential.lastUsedWorkload = "partner_bootstrap";
+    matchingCredential.signals = this.buildCredentialSignals(
+      matchingCredential.lastUsedAt,
+      matchingCredential.expiresAt ?? null,
+      matchingCredential.autoRevokedAt ?? null,
+      matchingCredential.lastUsedAt,
+    );
+    this.maybeRecordDormantCredentialUse({
+      tenantId: entry.tenantId,
+      channel: "ops_notice",
+      title: "Dormant partner credential used",
+      message: `Partner credential ${matchingCredential.keyId} for ${entry.entrySlug} was used after dormancy.`,
+      previousLastUsedAt,
+      createdAt: matchingCredential.createdAt,
+    });
+    this.persistChanges(
+      {
+        partnerIngressCredentials: [
+          this.cloneStoredPartnerIngressCredential(matchingCredential),
+        ],
+      },
+      "authenticate_partner_bootstrap",
+    );
 
     return {
       partnerEntry: this.clonePartnerEntry(entry),
@@ -5112,11 +5537,7 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
       authMode: "bootstrap_headers",
       roleFamilies: ["partner"],
       roles: ["partner_ingress"],
-      scopes: [
-        "partner:entries:read",
-        "partner:eligibility:read",
-        "partner:eligibility:write",
-      ],
+      scopes: [...(credential.scopes ?? [])],
       tenantId: entry.tenantId,
       partnerId: entry.partnerId,
       partnerProgramId: entry.programId,
@@ -5131,7 +5552,31 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
       keyId: credential.keyId,
       authSource: "internal_resolved_credential",
     });
+    const previousLastUsedAt = credential.lastUsedAt;
     credential.lastUsedAt = new Date().toISOString();
+    credential.lastUsedWorkload = "internal_resolved_credential";
+    credential.signals = this.buildCredentialSignals(
+      credential.lastUsedAt,
+      credential.expiresAt ?? null,
+      credential.autoRevokedAt ?? null,
+      credential.lastUsedAt,
+    );
+    this.maybeRecordDormantCredentialUse({
+      tenantId: entry.tenantId,
+      channel: "ops_notice",
+      title: "Dormant partner credential used",
+      message: `Partner credential ${credential.keyId} for ${entry.entrySlug} was used after dormancy.`,
+      previousLastUsedAt,
+      createdAt: credential.createdAt,
+    });
+    this.persistChanges(
+      {
+        partnerIngressCredentials: [
+          this.cloneStoredPartnerIngressCredential(credential),
+        ],
+      },
+      "authenticate_partner_bootstrap_internal",
+    );
 
     return {
       partnerEntry: this.clonePartnerEntry(entry),
@@ -5228,6 +5673,192 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
         ],
       },
     };
+  }
+
+  async issueReferralEmbedHandoffArtifact(
+    command: CreateReferralEmbedHandoffArtifactCommand,
+    requestId?: string,
+    options?: {
+      allowInternalBootstrap?: boolean;
+    },
+  ): Promise<ReferralEmbedHandoffArtifact> {
+    const resolved = await this.resolveReferralEmbedHandoff(
+      command,
+      requestId,
+      options,
+    );
+    const issuedAt = new Date();
+    const expiresAt = new Date(
+      issuedAt.getTime() + REFERRAL_EMBED_HANDOFF_EXPIRES_IN_SECONDS * 1000,
+    );
+    const artifact = randomBytes(24).toString("base64url");
+    const persistence: PersistReferralEmbedHandoffCommand = {
+      artifact,
+      entrySlug: resolved.partnerEntry.entrySlug,
+      entryHost: resolved.entryHost,
+      partnerUserRef: command.partnerUserRef.trim(),
+      drtsPassengerId: resolved.drtsPassengerId,
+      tenantId: resolved.identity.tenantId,
+      partnerId: resolved.identity.partnerId ?? null,
+      partnerProgramId: resolved.identity.partnerProgramId ?? null,
+      consentRequired: resolved.consentRequired,
+      consentBundleVersion: resolved.consentBundleVersion,
+      consentGrantedAt: resolved.consentGrantedAt,
+      issuedAt: issuedAt.toISOString(),
+      expiresAt: expiresAt.toISOString(),
+    };
+    const record = await this.referralEmbedHandoffRepository.issue(persistence);
+    return {
+      handoffId: record.handoffId,
+      artifact,
+      tokenType: "SingleUse",
+      expiresIn: "120s",
+      expiresAt: record.expiresAt,
+      partnerEntrySlug: record.entrySlug,
+      entryHost: record.entryHost,
+      drtsPassengerId: record.drtsPassengerId,
+      consentRequired: record.consentRequired,
+      consentBundleVersion: record.consentBundleVersion,
+    };
+  }
+
+  async consumeReferralEmbedHandoffArtifact(command: {
+    artifact: string;
+    entrySlug: string;
+    entryHost: string;
+  }): Promise<ReferralEmbedSession> {
+    const result = await this.referralEmbedHandoffRepository.consume(command);
+    if (result.outcome === "consumed") {
+      return result.session;
+    }
+    if (result.outcome === "replayed") {
+      throw new ApiRequestError(
+        HttpStatus.CONFLICT,
+        "REFERRAL_HANDOFF_REPLAYED",
+        "The referral handoff artifact has already been consumed.",
+      );
+    }
+    if (result.outcome === "expired") {
+      throw new ApiRequestError(
+        HttpStatus.GONE,
+        "REFERRAL_HANDOFF_EXPIRED",
+        "The referral handoff artifact has expired.",
+      );
+    }
+    if (result.outcome === "wrong_host") {
+      throw new ApiRequestError(
+        HttpStatus.FORBIDDEN,
+        "REFERRAL_HANDOFF_HOST_MISMATCH",
+        "The referral handoff artifact is not valid for this entry host.",
+      );
+    }
+    throw new ApiRequestError(
+      HttpStatus.NOT_FOUND,
+      "REFERRAL_HANDOFF_NOT_FOUND",
+      "The referral handoff artifact is invalid.",
+    );
+  }
+
+  async recordReferralEmbedConsent(
+    command: RecordReferralEmbedConsentCommand,
+  ): Promise<ReferralEmbedSession> {
+    this.assertExactReferralEmbedConsentBundle(command.consentBundle);
+    const result =
+      await this.referralEmbedHandoffRepository.recordConsent(command);
+    if (result.outcome === "recorded" || result.outcome === "replayed") {
+      return result.session;
+    }
+    if (result.outcome === "wrong_host") {
+      throw new ApiRequestError(
+        HttpStatus.FORBIDDEN,
+        "REFERRAL_HANDOFF_HOST_MISMATCH",
+        "The referral embed consent can only be recorded for the original entry host.",
+      );
+    }
+    throw new ApiRequestError(
+      HttpStatus.NOT_FOUND,
+      "REFERRAL_HANDOFF_NOT_FOUND",
+      "The referral embed handoff no longer exists.",
+    );
+  }
+
+  private async resolveReferralEmbedHandoff(
+    command: CreateReferralEmbedHandoffArtifactCommand,
+    requestId?: string,
+    options?: {
+      allowInternalBootstrap?: boolean;
+    },
+  ): Promise<ReferralEmbedHandoffResolution> {
+    const handoff = await this.issuePartnerIngressHandoff(
+      Object.assign(
+        {
+          entrySlug: command.entrySlug,
+          partnerUserRef: command.partnerUserRef,
+          consentScope: "passenger_identity_link" as const,
+        },
+        command.apiKey?.trim() ? { apiKey: command.apiKey } : null,
+      ),
+      requestId,
+      options,
+    );
+    const entryHost = command.entryHost?.trim().toLowerCase();
+    if (!entryHost) {
+      throw new ApiRequestError(
+        HttpStatus.BAD_REQUEST,
+        "ENTRY_HOST_REQUIRED",
+        "entryHost is required for referral embed handoff issuance.",
+      );
+    }
+    if (handoff.partnerEntry.entryHost?.trim().toLowerCase() !== entryHost) {
+      throw new ApiRequestError(
+        HttpStatus.FORBIDDEN,
+        "ENTRY_HOST_MISMATCH",
+        "entryHost must match the configured partner entry host exactly.",
+        {
+          entrySlug: handoff.partnerEntry.entrySlug,
+          expectedEntryHost: handoff.partnerEntry.entryHost,
+          receivedEntryHost: entryHost,
+        },
+      );
+    }
+
+    const consentBundle = command.consentBundle ?? null;
+    if (consentBundle) {
+      this.assertExactReferralEmbedConsentBundle(consentBundle);
+    }
+
+    return {
+      ...handoff,
+      entryHost,
+      consentRequired: !consentBundle,
+      consentBundleVersion: consentBundle?.bundleVersion ?? null,
+      consentGrantedAt: consentBundle?.grantedAt ?? null,
+    };
+  }
+
+  private assertExactReferralEmbedConsentBundle(
+    consentBundle: ReferralEmbedConsentBundle,
+  ) {
+    const grantedScopes = [...consentBundle.grantedScopes].sort();
+    const requiredScopes = [...REFERRAL_EMBED_REQUIRED_CONSENT_SCOPES].sort();
+    if (JSON.stringify(grantedScopes) !== JSON.stringify(requiredScopes)) {
+      throw new ApiRequestError(
+        HttpStatus.BAD_REQUEST,
+        "REFERRAL_CONSENT_SCOPE_MISMATCH",
+        "The referral embed consent bundle must include the exact required scopes.",
+        {
+          requiredScopes,
+          grantedScopes,
+        },
+      );
+    }
+    if (!consentBundle.bundleVersion?.trim()) {
+      throw new ApiRequestError(
+        HttpStatus.BAD_REQUEST,
+        "REFERRAL_CONSENT_VERSION_REQUIRED",
+        "The referral embed consent bundle version is required.",
+      );
+    }
   }
 
   async verifyPartnerEligibility(
@@ -5375,6 +6006,7 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
         actorId: identity?.actorId ?? null,
         actorType:
           identity?.actorType === "partner_api_key" ||
+          identity?.actorType === "partner_user" ||
           identity?.actorType === "referral_passenger"
             ? identity.actorType
             : "system",
@@ -5991,7 +6623,9 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
     tenantId: string,
     command: CreateTenantUserCommand,
     requestId?: string,
+    identity?: IdentityContext | null,
   ) {
+    this.assertTenantMutationScope(tenantId, identity);
     this.assertNonBlank(command.email, "email");
     this.assertNonBlank(command.displayName, "displayName");
     this.assertNonBlank(command.roleCode, "roleCode");
@@ -6014,6 +6648,10 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
       );
     }
 
+    const securityActor = this.requireSecurityEventActor(identity, tenantId);
+    const previousUserRoles = this.userRoles.map((userRole) =>
+      this.cloneUserRole(userRole),
+    );
     const now = new Date().toISOString();
     const userRole: TenantUserRoleRecord = {
       userId: `tenant_user_${randomUUID()}`,
@@ -6028,27 +6666,252 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
     };
 
     this.userRoles = [this.cloneUserRole(userRole), ...this.userRoles];
-    this.persistChanges(
-      {
+    const persisted = this.persistIdentityGovernanceMutation({
+      changes: {
         userRoles: [this.cloneUserRole(userRole)],
       },
-      "create_tenant_user",
+      context: "create_tenant_user",
+      rollback: () => {
+        this.userRoles = previousUserRoles.map((entry) =>
+          this.cloneUserRole(entry),
+        );
+      },
+      event: securityActor
+        ? {
+            actorId: securityActor.actorId,
+            actorType: securityActor.actorType,
+            subjectId: userRole.email,
+            realm: securityActor.realm,
+            tenantId,
+            partnerId: null,
+            eventType: "tenant_user.invited",
+            eventFamily: "invitation",
+            outcome: "success",
+            severity: "medium",
+            targetType: "tenant_user_role",
+            targetId: userRole.userId,
+            sessionId: null,
+            tokenId: null,
+            authMethods: [securityActor.authMode],
+            sourceIp: null,
+            userAgent: null,
+            requestId: requestId ?? null,
+            traceId: null,
+            reasonCode: null,
+            approvalId: null,
+            beforeSummary: null,
+            afterSummary: this.buildTenantUserAuditSummary(userRole),
+            maskedContext: {
+              email: userRole.email,
+            },
+          }
+        : null,
+    });
+
+    return this.afterPersistence(persisted, async () => {
+      const identitySnapshot = await this.syncIdentityTenantUserRole(
+        userRole,
+        "create_tenant_user",
+      );
+      await this.issueTenantInvitation(
+        userRole,
+        identitySnapshot?.membership.membershipId ?? null,
+        securityActor?.actorId ?? null,
+        "initial",
+      );
+      this.recordTenantAudit(
+        {
+          actorId: null,
+          actorType: "tenant_admin",
+          tenantId,
+          moduleName: "tenant-partner",
+          actionName: "create_tenant_user",
+          resourceType: "tenant_user_role",
+          resourceId: userRole.userId,
+          newValuesSummary: this.buildTenantUserAuditSummary(userRole),
+        },
+        requestId,
+      );
+
+      return this.cloneUserRole(userRole);
+    });
+  }
+
+  async resendTenantInvitation(
+    tenantId: string,
+    userId: string,
+    requestId?: string,
+    identity?: IdentityContext | null,
+  ): Promise<TenantInvitationView> {
+    const userRole = this.requireTenantUser(tenantId, userId);
+    if (userRole.status !== "invited") {
+      throw new ApiRequestError(
+        HttpStatus.CONFLICT,
+        "TENANT_INVITATION_NOT_PENDING",
+        "Only an invited tenant user can receive a replacement invitation.",
+        { tenantId, userId },
+      );
+    }
+    const securityActor = this.requireSecurityEventActor(identity, tenantId);
+    const identitySnapshot = await this.syncIdentityTenantUserRole(
+      userRole,
+      "resend_tenant_invitation",
     );
+    const current = identitySnapshot
+      ? await this.identityRepository?.findInvitationByMembershipId(
+          identitySnapshot.membership.membershipId,
+        )
+      : null;
+    if (current && !current.acceptedAt && !current.revokedAt) {
+      await this.identityRepository?.upsertInvitationRecord({
+        ...current,
+        revokedAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      });
+    }
+    const invitation = await this.issueTenantInvitation(
+      userRole,
+      identitySnapshot?.membership.membershipId ?? null,
+      securityActor?.actorId ?? null,
+      "resend",
+    );
+    if (!invitation) {
+      throw new ApiRequestError(
+        HttpStatus.SERVICE_UNAVAILABLE,
+        "IDENTITY_AUTHORITY_UNAVAILABLE",
+        "Tenant invitation delivery requires the identity authority.",
+        { tenantId, userId },
+      );
+    }
     this.recordTenantAudit(
       {
-        actorId: null,
+        actorId: securityActor?.actorId ?? null,
         actorType: "tenant_admin",
         tenantId,
         moduleName: "tenant-partner",
-        actionName: "create_tenant_user",
+        actionName: "resend_tenant_invitation",
+        resourceType: "tenant_user_role",
+        resourceId: userId,
+        newValuesSummary: this.buildTenantUserAuditSummary(userRole),
+      },
+      requestId,
+    );
+    return this.toTenantInvitationView(invitation);
+  }
+
+  async revokeTenantInvitation(
+    tenantId: string,
+    userId: string,
+    requestId?: string,
+    identity?: IdentityContext | null,
+  ): Promise<TenantInvitationView> {
+    const userRole = this.requireTenantUser(tenantId, userId);
+    const securityActor = this.requireSecurityEventActor(identity, tenantId);
+    const identitySnapshot = await this.syncIdentityTenantUserRole(
+      userRole,
+      "revoke_tenant_invitation",
+    );
+    const invitation = identitySnapshot
+      ? await this.identityRepository?.findPendingInvitationByMembershipId(
+          identitySnapshot.membership.membershipId,
+        )
+      : null;
+    if (!invitation || invitation.acceptedAt || invitation.revokedAt) {
+      throw new ApiRequestError(
+        HttpStatus.CONFLICT,
+        "TENANT_INVITATION_NOT_PENDING",
+        "There is no pending invitation to revoke.",
+        { tenantId, userId },
+      );
+    }
+    const revokedAt = new Date().toISOString();
+    const revoked = await this.identityRepository!.upsertInvitationRecord({
+      ...invitation,
+      revokedAt,
+      updatedAt: revokedAt,
+    });
+    this.recordTenantAudit(
+      {
+        actorId: securityActor?.actorId ?? null,
+        actorType: "tenant_admin",
+        tenantId,
+        moduleName: "tenant-partner",
+        actionName: "revoke_tenant_invitation",
+        resourceType: "tenant_user_role",
+        resourceId: userId,
+        newValuesSummary: this.buildTenantUserAuditSummary(userRole),
+      },
+      requestId,
+    );
+    return this.toTenantInvitationView(revoked);
+  }
+
+  async acceptTenantInvitation(
+    command: AcceptTenantInvitationCommand,
+    requestId?: string,
+  ): Promise<AcceptTenantInvitationResult> {
+    this.assertNonBlank(command.invitationToken, "invitationToken");
+    const invitation = await this.identityRepository?.consumeInvitationToken(
+      createHash("sha256").update(command.invitationToken).digest("hex"),
+    );
+    if (!invitation) {
+      throw new ApiRequestError(
+        HttpStatus.FORBIDDEN,
+        "TENANT_INVITATION_ACCEPTANCE_DENIED",
+        "The invitation cannot be accepted.",
+        {},
+      );
+    }
+    const userRole = this.userRoles.find(
+      (candidate) =>
+        candidate.tenantId === invitation.tenantId &&
+        candidate.email === invitation.email,
+    );
+    if (!userRole || userRole.status !== "invited") {
+      throw new ApiRequestError(
+        HttpStatus.FORBIDDEN,
+        "TENANT_INVITATION_ACCEPTANCE_DENIED",
+        "The invitation cannot be accepted.",
+        {},
+      );
+    }
+    const before = this.cloneUserRole(userRole);
+    userRole.status = "active";
+    userRole.updatedAt = new Date().toISOString();
+    try {
+      await this.persistChangesRequired(
+        { userRoles: [this.cloneUserRole(userRole)] },
+        "accept_tenant_invitation",
+      );
+      await this.syncIdentityTenantUserRole(
+        userRole,
+        "accept_tenant_invitation",
+      );
+      await this.identityRepository?.activateTenantInvitation(
+        invitation.invitationId,
+      );
+    } catch (error) {
+      Object.assign(userRole, before);
+      throw error;
+    }
+    this.recordTenantAudit(
+      {
+        actorId: null,
+        actorType: "system",
+        tenantId: userRole.tenantId,
+        moduleName: "tenant-partner",
+        actionName: "accept_tenant_invitation",
         resourceType: "tenant_user_role",
         resourceId: userRole.userId,
         newValuesSummary: this.buildTenantUserAuditSummary(userRole),
       },
       requestId,
     );
-
-    return this.cloneUserRole(userRole);
+    return {
+      user: this.cloneUserRole(userRole),
+      invitation: this.toTenantInvitationView(invitation),
+      accepted: true,
+    };
   }
 
   updateTenantUserRole(
@@ -6056,58 +6919,470 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
     userId: string,
     command: UpdateTenantRoleCommand,
     requestId?: string,
+    identity?: IdentityContext | null,
   ) {
+    this.assertTenantMutationScope(tenantId, identity);
     this.assertNonBlank(command.roleCode, "roleCode");
     this.assertSupportedTenantRoleCode(command.roleCode);
 
     const userRole = this.requireTenantUser(tenantId, userId);
-    userRole.roleCode = command.roleCode.trim();
-    userRole.status = command.status ?? userRole.status;
+    const targetRoleCode = command.roleCode.trim();
+    const targetStatus = command.status ?? userRole.status;
+
+    if (identity) {
+      const callerActorId = identity.actorId?.trim();
+      if (
+        callerActorId &&
+        (callerActorId === userId ||
+          callerActorId === userRole.userId ||
+          callerActorId.toLowerCase() === userRole.email.toLowerCase())
+      ) {
+        const getRoleRank = (role: string) => {
+          const normalized = role.trim().toLowerCase();
+          if (
+            normalized === "admin" ||
+            normalized === "tenant_admin" ||
+            normalized === "tc_admin"
+          ) {
+            return 4;
+          }
+          if (
+            normalized === "approver" ||
+            normalized === "tenant_approver" ||
+            normalized === "tenant_ops_admin" ||
+            normalized === "ops_admin" ||
+            normalized === "operator" ||
+            normalized === "tc_operator" ||
+            normalized === "tenant_finance_admin" ||
+            normalized === "finance_admin" ||
+            normalized === "finance" ||
+            normalized === "tc_finance"
+          ) {
+            return 3;
+          }
+          if (normalized === "requester" || normalized === "tenant_requester") {
+            return 2;
+          }
+          if (
+            normalized === "viewer" ||
+            normalized === "tenant_viewer" ||
+            normalized === "tc_viewer"
+          ) {
+            return 1;
+          }
+          return 0;
+        };
+
+        const currentRank = getRoleRank(userRole.roleCode);
+        const targetRank = getRoleRank(targetRoleCode);
+
+        if (targetRank > currentRank) {
+          throw new ApiRequestError(
+            403,
+            "SELF_ELEVATION_FORBIDDEN",
+            "Self-elevation of roles is forbidden.",
+            {
+              tenantId,
+              userId,
+              currentRole: userRole.roleCode,
+              targetRole: targetRoleCode,
+            },
+          );
+        }
+      }
+    }
+
+    // Canonical identity callers receive the proof-aware denial before the
+    // legacy compatibility guard below.  Legacy calls preserve their existing
+    // error contract while the authority-backed path cannot mask a self-change
+    // as merely a last-admin transition.
+    if (identity) {
+      this.assertTenantUserRoleChangeIsSafe({
+        tenantId,
+        userRole,
+        nextRoleCode: targetRoleCode,
+        nextStatus: targetStatus,
+        identity,
+      });
+    }
+
+    const isCurrentlyActiveAdmin =
+      (userRole.roleCode === "admin" || userRole.roleCode === "tenant_admin") &&
+      userRole.status === "active";
+
+    const willBeActiveAdmin =
+      (targetRoleCode === "admin" || targetRoleCode === "tenant_admin") &&
+      targetStatus === "active";
+
+    if (isCurrentlyActiveAdmin && !willBeActiveAdmin) {
+      const activeAdminCount = this.userRoles.filter(
+        (u) =>
+          u.tenantId === tenantId &&
+          (u.roleCode === "admin" || u.roleCode === "tenant_admin") &&
+          u.status === "active",
+      ).length;
+
+      if (activeAdminCount <= 1) {
+        throw new ApiRequestError(
+          400,
+          "CANNOT_REMOVE_LAST_ADMIN",
+          "Cannot remove or demote the last active administrator for this tenant.",
+          { tenantId, userId, activeAdminCount },
+        );
+      }
+    }
+
+    const before = this.cloneUserRole(userRole);
+    const securityActor = this.requireSecurityEventActor(identity, tenantId);
+    const nextRoleCode = command.roleCode.trim();
+    const nextStatus = command.status ?? userRole.status;
+    const previousUserRoles = this.userRoles.map((entry) =>
+      this.cloneUserRole(entry),
+    );
+    userRole.roleCode = nextRoleCode;
+    userRole.status = nextStatus;
     userRole.approvalNotificationOptOut =
       command.approvalNotificationOptOut ?? userRole.approvalNotificationOptOut;
     userRole.updatedAt = new Date().toISOString();
 
-    this.persistChanges(
-      {
+    const persisted = this.persistIdentityGovernanceMutation({
+      changes: {
         userRoles: [this.cloneUserRole(userRole)],
       },
-      "update_tenant_role",
-    );
-    this.recordTenantAudit(
-      {
-        actorId: null,
-        actorType: "tenant_admin",
-        tenantId,
-        moduleName: "tenant-partner",
-        actionName: "update_tenant_role",
-        resourceType: "tenant_user_role",
-        resourceId: userRole.userId,
-        newValuesSummary: this.buildTenantUserAuditSummary(userRole),
+      context: "update_tenant_role",
+      rollback: () => {
+        this.userRoles = previousUserRoles.map((entry) =>
+          this.cloneUserRole(entry),
+        );
       },
-      requestId,
-    );
+      event: securityActor
+        ? {
+            actorId: securityActor.actorId,
+            actorType: securityActor.actorType,
+            subjectId: userRole.email,
+            realm: securityActor.realm,
+            tenantId,
+            partnerId: null,
+            eventType: "tenant_user.role_updated",
+            eventFamily: "role",
+            outcome: "success",
+            severity: "high",
+            targetType: "tenant_user_role",
+            targetId: userRole.userId,
+            sessionId: null,
+            tokenId: null,
+            authMethods: [securityActor.authMode],
+            sourceIp: null,
+            userAgent: null,
+            requestId: requestId ?? null,
+            traceId: null,
+            reasonCode: null,
+            approvalId: null,
+            beforeSummary: this.buildTenantUserAuditSummary(before),
+            afterSummary: this.buildTenantUserAuditSummary(userRole),
+            maskedContext: {
+              email: userRole.email,
+            },
+          }
+        : null,
+    });
 
-    return this.cloneUserRole(userRole);
+    return this.afterPersistence(persisted, async () => {
+      const identitySnapshot = await this.syncIdentityTenantUserRole(
+        userRole,
+        "update_tenant_role",
+      );
+      if (
+        userRole.status !== "invited" &&
+        identitySnapshot?.invitation &&
+        !identitySnapshot.invitation.acceptedAt &&
+        !identitySnapshot.invitation.revokedAt
+      ) {
+        const revokedAt = new Date().toISOString();
+        await this.identityRepository?.upsertInvitationRecord({
+          ...identitySnapshot.invitation,
+          revokedAt,
+          updatedAt: revokedAt,
+        });
+      }
+      if (
+        before.roleCode !== userRole.roleCode ||
+        before.status !== userRole.status
+      ) {
+        await this.revokeTenantUserSessions(
+          userRole,
+          identitySnapshot?.principal.principalId ?? null,
+          before.status !== "active" || userRole.status !== "active"
+            ? "TENANT_ACCOUNT_STATUS_CHANGED"
+            : "TENANT_ROLE_CHANGED",
+          securityActor?.actorId,
+        );
+      }
+      this.recordTenantAudit(
+        {
+          actorId: null,
+          actorType: "tenant_admin",
+          tenantId,
+          moduleName: "tenant-partner",
+          actionName: "update_tenant_role",
+          resourceType: "tenant_user_role",
+          resourceId: userRole.userId,
+          newValuesSummary: this.buildTenantUserAuditSummary(userRole),
+        },
+        requestId,
+      );
+
+      return this.cloneUserRole(userRole);
+    });
   }
 
-  listApiKeys(tenantId: string) {
+  listApiKeys(tenantId: string, identity?: IdentityContext | null) {
+    this.assertTenantAccessScope(tenantId, identity, "read");
     return this.apiKeys
       .filter((apiKey) => apiKey.tenantId === tenantId)
+      .map((apiKey) => {
+        this.reconcileStoredApiKey(apiKey);
+        return apiKey;
+      })
       .map((apiKey) => this.toApiKeyResponse(apiKey));
+  }
+
+  findStoredApiKeyByPlaintext(
+    plaintextKey: string,
+  ): StoredTenantApiKeyRecord | null {
+    if (!plaintextKey || typeof plaintextKey !== "string") {
+      return null;
+    }
+    const trimmed = plaintextKey.trim();
+    if (!trimmed) {
+      return null;
+    }
+    const providedHash = this.hashSecret(trimmed);
+    const found = this.apiKeys.find((candidate) =>
+      this.hashesMatch(providedHash, candidate.keyHash),
+    );
+    if (!found) {
+      return null;
+    }
+    this.reconcileStoredApiKey(found);
+    return this.cloneStoredApiKey(found);
+  }
+
+  authenticateTenantApiKey(
+    apiKey: string,
+    options?: AuthenticateTenantApiKeyOptions,
+  ): MaybePromise<TenantApiKeyResolution> {
+    const rawKey = apiKey?.trim();
+    if (!rawKey) {
+      throw new ApiRequestError(
+        HttpStatus.UNAUTHORIZED,
+        "TENANT_API_KEY_REQUIRED",
+        "apiKey is required for tenant API key authentication.",
+        {
+          tenantId: options?.tenantId ?? null,
+        },
+      );
+    }
+
+    const providedHash = this.hashSecret(rawKey);
+    const matchingKey = this.apiKeys.find((candidate) =>
+      this.hashesMatch(providedHash, candidate.keyHash),
+    );
+
+    if (!matchingKey) {
+      throw new ApiRequestError(
+        HttpStatus.UNAUTHORIZED,
+        "TENANT_API_KEY_INVALID",
+        "Tenant API key is invalid.",
+        {
+          tenantId: options?.tenantId ?? null,
+        },
+      );
+    }
+
+    if (options?.tenantId && matchingKey.tenantId !== options.tenantId) {
+      throw new ApiRequestError(
+        HttpStatus.FORBIDDEN,
+        "TENANT_API_KEY_TENANT_MISMATCH",
+        "Tenant API key does not match the requested tenant.",
+        {
+          apiKeyId: matchingKey.apiKeyId,
+          tenantId: options.tenantId,
+          expectedTenantId: matchingKey.tenantId,
+        },
+      );
+    }
+
+    this.reconcileStoredApiKey(matchingKey);
+
+    if (
+      matchingKey.autoRevokedAt ||
+      matchingKey.status === "auto_revoked" ||
+      matchingKey.revokeReason === "rotation_overlap_elapsed"
+    ) {
+      throw new ApiRequestError(
+        HttpStatus.UNAUTHORIZED,
+        "TENANT_API_KEY_AUTO_REVOKED",
+        "Tenant API key was auto-revoked after rotation overlap elapsed.",
+        {
+          apiKeyId: matchingKey.apiKeyId,
+          tenantId: matchingKey.tenantId,
+          autoRevokedAt: matchingKey.autoRevokedAt,
+          revokeReason: matchingKey.revokeReason,
+        },
+      );
+    }
+
+    if (matchingKey.revokedAt || matchingKey.status === "revoked") {
+      throw new ApiRequestError(
+        HttpStatus.UNAUTHORIZED,
+        "TENANT_API_KEY_REVOKED",
+        "Tenant API key is revoked.",
+        {
+          apiKeyId: matchingKey.apiKeyId,
+          tenantId: matchingKey.tenantId,
+          revokedAt: matchingKey.revokedAt,
+          revokeReason: matchingKey.revokeReason ?? "revoked",
+        },
+      );
+    }
+
+    const now = Date.now();
+    const expiresAtMs = matchingKey.expiresAt
+      ? Date.parse(matchingKey.expiresAt)
+      : Number.NaN;
+    if (
+      matchingKey.status === "expired" ||
+      (!Number.isNaN(expiresAtMs) && expiresAtMs <= now)
+    ) {
+      matchingKey.status = "expired";
+      throw new ApiRequestError(
+        HttpStatus.UNAUTHORIZED,
+        "TENANT_API_KEY_EXPIRED",
+        "Tenant API key has expired.",
+        {
+          apiKeyId: matchingKey.apiKeyId,
+          tenantId: matchingKey.tenantId,
+          expiresAt: matchingKey.expiresAt,
+        },
+      );
+    }
+
+    if (options?.requiredScopes && options.requiredScopes.length > 0) {
+      const normalizedRequired = this.normalizeTenantApiKeyScopes(
+        options.requiredScopes,
+      );
+      const missingScopes = normalizedRequired.filter(
+        (required) => !matchingKey.scopes.includes(required),
+      );
+      if (missingScopes.length > 0) {
+        throw new ApiRequestError(
+          HttpStatus.FORBIDDEN,
+          "INSUFFICIENT_SCOPE",
+          "Tenant API key lacks the required scopes.",
+          {
+            apiKeyId: matchingKey.apiKeyId,
+            tenantId: matchingKey.tenantId,
+            requiredScopes: normalizedRequired,
+            missingScopes,
+            grantedScopes: matchingKey.scopes,
+          },
+        );
+      }
+    }
+
+    const nowIso = new Date().toISOString();
+    const previousLastUsedAt = matchingKey.lastUsedAt;
+    matchingKey.lastUsedAt = nowIso;
+    matchingKey.lastUsedWorkload = options?.workload ?? "tenant_api";
+    matchingKey.signals = this.buildCredentialSignals(
+      matchingKey.lastUsedAt,
+      matchingKey.expiresAt ?? null,
+      matchingKey.autoRevokedAt ?? null,
+      nowIso,
+    );
+
+    this.maybeRecordDormantCredentialUse({
+      tenantId: matchingKey.tenantId,
+      channel: "ops_notice",
+      title: "Dormant tenant API key used",
+      message: `Tenant API key ${matchingKey.apiKeyId} (${matchingKey.keyName}) was used after dormancy.`,
+      previousLastUsedAt,
+      createdAt: matchingKey.createdAt,
+    });
+
+    this.recordTenantAudit(
+      {
+        actorId: matchingKey.ownerRef ?? matchingKey.apiKeyId,
+        actorType: "tenant_admin",
+        tenantId: matchingKey.tenantId,
+        moduleName: "tenant-partner",
+        actionName: "use_api_key",
+        resourceType: "tenant_api_key",
+        resourceId: matchingKey.apiKeyId,
+        newValuesSummary: {
+          apiKeyId: matchingKey.apiKeyId,
+          keyName: matchingKey.keyName,
+          lastUsedAt: matchingKey.lastUsedAt,
+          lastUsedWorkload: matchingKey.lastUsedWorkload,
+          workload: matchingKey.lastUsedWorkload,
+        },
+      },
+      options?.requestId,
+    );
+
+    const persisted = this.persistChanges(
+      {
+        apiKeys: [this.cloneStoredApiKey(matchingKey)],
+      },
+      "authenticate_tenant_api_key",
+    );
+
+    const identity: IdentityContext = {
+      actorType: "tenant_admin",
+      actorId: matchingKey.apiKeyId,
+      realm: "tenant",
+      authMode: "bootstrap_headers",
+      roleFamilies: ["tenant"],
+      roles: ["tenant_admin", "tc_integration_mgr"],
+      scopes: [...matchingKey.scopes],
+      tenantId: matchingKey.tenantId,
+      principalId: matchingKey.ownerRef ?? matchingKey.apiKeyId,
+      tokenId: matchingKey.apiKeyId,
+      supportedExecutionModes: [
+        "discussion_planning",
+        "supervisor_managed_execution",
+      ],
+    };
+
+    return this.afterPersistence(persisted, () => ({
+      apiKey: this.cloneStoredApiKey(matchingKey),
+      identity,
+    }));
   }
 
   issueApiKey(
     tenantId: string,
     command: IssueTenantApiKeyCommand,
     requestId?: string,
-  ): TenantApiKeyIssued {
+    identity?: IdentityContext | null,
+  ): MaybePromise<TenantApiKeyIssued> {
+    this.assertTenantMutationScope(tenantId, identity);
     this.assertNonBlank(command.keyName, "keyName");
 
+    const securityActor = this.requireSecurityEventActor(identity, tenantId);
+    const previousApiKeys = this.apiKeys.map((apiKey) =>
+      this.cloneStoredApiKey(apiKey),
+    );
     const issued = this.buildIssuedApiKey(
       tenantId,
       {
         keyName: command.keyName,
         scopes: command.scopes,
+        ownerRef: command.ownerRef ?? securityActor?.actorId ?? null,
+        ownerName: command.ownerName ?? securityActor?.actorId ?? null,
+        ownerType: command.ownerType ?? securityActor?.actorType ?? "unknown",
+        purpose: command.purpose ?? null,
         expiresAt: command.expiresAt ?? null,
       },
       null,
@@ -6116,31 +7391,70 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
       this.cloneStoredApiKey(issued.storedApiKey),
       ...this.apiKeys,
     ];
-    this.persistChanges(
-      {
+    const persisted = this.persistIdentityGovernanceMutation({
+      changes: {
         apiKeys: [this.cloneStoredApiKey(issued.storedApiKey)],
       },
-      "issue_api_key",
-    );
-    this.recordTenantAudit(
-      {
-        actorId: null,
-        actorType: "tenant_admin",
-        tenantId,
-        moduleName: "tenant-partner",
-        actionName: "issue_api_key",
-        resourceType: "tenant_api_key",
-        resourceId: issued.storedApiKey.apiKeyId,
-        newValuesSummary: this.toApiKeyResponse(issued.storedApiKey),
+      context: "issue_api_key",
+      rollback: () => {
+        this.apiKeys = previousApiKeys.map((apiKey) =>
+          this.cloneStoredApiKey(apiKey),
+        );
       },
-      requestId,
-    );
+      event: securityActor
+        ? {
+            actorId: securityActor.actorId,
+            actorType: securityActor.actorType,
+            subjectId: securityActor.actorId,
+            realm: securityActor.realm,
+            tenantId,
+            partnerId: null,
+            eventType: "tenant_api_key.issued",
+            eventFamily: "credential",
+            outcome: "success",
+            severity: "high",
+            targetType: "tenant_api_key",
+            targetId: issued.storedApiKey.apiKeyId,
+            sessionId: null,
+            tokenId: issued.plaintextKey,
+            authMethods: [securityActor.authMode],
+            sourceIp: null,
+            userAgent: null,
+            requestId: requestId ?? null,
+            traceId: null,
+            reasonCode: null,
+            approvalId: null,
+            beforeSummary: null,
+            afterSummary: this.toApiKeyResponse(issued.storedApiKey),
+            maskedContext: {
+              plaintextKey: issued.plaintextKey,
+            },
+          }
+        : null,
+    });
 
-    return {
-      apiKey: this.toApiKeyResponse(issued.storedApiKey),
-      plaintextKey: issued.plaintextKey,
-      revokedApiKeyId: null,
-    };
+    return this.afterPersistence(persisted, () => {
+      this.recordTenantAudit(
+        {
+          actorId: null,
+          actorType: "tenant_admin",
+          tenantId,
+          moduleName: "tenant-partner",
+          actionName: "issue_api_key",
+          resourceType: "tenant_api_key",
+          resourceId: issued.storedApiKey.apiKeyId,
+          newValuesSummary: this.toApiKeyResponse(issued.storedApiKey),
+        },
+        requestId,
+      );
+
+      return {
+        apiKey: this.toApiKeyResponse(issued.storedApiKey),
+        plaintextKey: issued.plaintextKey,
+        revokedApiKeyId: null,
+        overlapEndsAt: null,
+      };
+    });
   }
 
   rotateApiKey(
@@ -6148,10 +7462,37 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
     apiKeyId: string,
     command: RotateTenantApiKeyCommand,
     requestId?: string,
-  ): TenantApiKeyIssued {
+    identity?: IdentityContext | null,
+  ): MaybePromise<TenantApiKeyIssued> {
+    this.assertTenantMutationScope(tenantId, identity);
     const currentApiKey = this.requireApiKey(tenantId, apiKeyId);
+    // Rotation reopens a signing window on the outgoing key, so a credential
+    // that is already revoked, auto-revoked, or expired must never be rotated
+    // back into service.
+    if (
+      currentApiKey.status !== "active" &&
+      currentApiKey.status !== "overlap_active"
+    ) {
+      throw new ApiRequestError(
+        HttpStatus.CONFLICT,
+        "TENANT_API_KEY_NOT_ROTATABLE",
+        "Only a live tenant API key can be rotated.",
+        {
+          apiKeyId: currentApiKey.apiKeyId,
+          status: currentApiKey.status,
+        },
+      );
+    }
+    const before = this.cloneStoredApiKey(currentApiKey);
+    const securityActor = this.requireSecurityEventActor(identity, tenantId);
+    const previousApiKeys = this.apiKeys.map((apiKey) =>
+      this.cloneStoredApiKey(apiKey),
+    );
     const rotatedAt = new Date().toISOString();
-    currentApiKey.revokedAt = rotatedAt;
+    const overlapEndsAt = this.resolveCredentialOverlapEndsAt(
+      rotatedAt,
+      command.overlapDays,
+    );
 
     const issued = this.buildIssuedApiKey(
       tenantId,
@@ -6161,55 +7502,147 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
           command.scopes && command.scopes.length > 0
             ? command.scopes
             : currentApiKey.scopes,
+        ownerRef:
+          command.ownerRef ??
+          currentApiKey.ownerRef ??
+          securityActor?.actorId ??
+          null,
+        ownerName:
+          command.ownerName ??
+          currentApiKey.ownerName ??
+          securityActor?.actorId ??
+          null,
+        ownerType:
+          command.ownerType ??
+          currentApiKey.ownerType ??
+          securityActor?.actorType ??
+          "unknown",
+        purpose: command.purpose ?? currentApiKey.purpose ?? null,
         expiresAt:
           command.expiresAt !== undefined
             ? command.expiresAt
             : currentApiKey.expiresAt,
       },
-      currentApiKey.apiKeyId,
+      currentApiKey,
     );
+    currentApiKey.overlapEndsAt = overlapEndsAt;
+    currentApiKey.supersededByApiKeyId = issued.storedApiKey.apiKeyId;
+    currentApiKey.autoRevokedAt = null;
+    currentApiKey.status = "overlap_active";
+    currentApiKey.revokedAt = null;
+    currentApiKey.signals = this.buildCredentialSignals(
+      currentApiKey.lastUsedAt,
+      currentApiKey.expiresAt ?? null,
+      currentApiKey.autoRevokedAt ?? null,
+      rotatedAt,
+    );
+    const retiredApiKeys = this.apiKeys
+      .filter(
+        (apiKey) =>
+          apiKey.tenantId === tenantId &&
+          apiKey.apiKeyId !== currentApiKey.apiKeyId &&
+          apiKey.revokedAt === null,
+      )
+      .map((apiKey) => {
+        apiKey.revokedAt = rotatedAt;
+        apiKey.autoRevokedAt = null;
+        apiKey.overlapEndsAt = null;
+        apiKey.status = "revoked";
+        apiKey.revokeReason = "credential_rotated";
+        return this.cloneStoredApiKey(apiKey);
+      });
 
     this.apiKeys = [
       this.cloneStoredApiKey(issued.storedApiKey),
       this.cloneStoredApiKey(currentApiKey),
+      ...retiredApiKeys,
       ...this.apiKeys.filter(
-        (apiKey) => apiKey.apiKeyId !== currentApiKey.apiKeyId,
+        (apiKey) =>
+          apiKey.apiKeyId !== currentApiKey.apiKeyId &&
+          !retiredApiKeys.some(
+            (retiredApiKey) => retiredApiKey.apiKeyId === apiKey.apiKeyId,
+          ),
       ),
     ];
-    this.persistChanges(
-      {
+    const persisted = this.persistIdentityGovernanceMutation({
+      changes: {
         apiKeys: [
           this.cloneStoredApiKey(currentApiKey),
           this.cloneStoredApiKey(issued.storedApiKey),
+          ...retiredApiKeys,
         ],
       },
-      "rotate_api_key",
-    );
-    this.recordTenantAudit(
-      {
-        actorId: null,
-        actorType: "tenant_admin",
-        tenantId,
-        moduleName: "tenant-partner",
-        actionName: "rotate_api_key",
-        resourceType: "tenant_api_key",
-        resourceId: issued.storedApiKey.apiKeyId,
-        oldValuesSummary: this.toApiKeyResponse(currentApiKey),
-        newValuesSummary: this.toApiKeyResponse(issued.storedApiKey),
+      context: "rotate_api_key",
+      rollback: () => {
+        this.apiKeys = previousApiKeys.map((apiKey) =>
+          this.cloneStoredApiKey(apiKey),
+        );
       },
-      requestId,
-    );
+      event: securityActor
+        ? {
+            actorId: securityActor.actorId,
+            actorType: securityActor.actorType,
+            subjectId: securityActor.actorId,
+            realm: securityActor.realm,
+            tenantId,
+            partnerId: null,
+            eventType: "tenant_api_key.rotated",
+            eventFamily: "credential",
+            outcome: "success",
+            severity: "high",
+            targetType: "tenant_api_key",
+            targetId: issued.storedApiKey.apiKeyId,
+            sessionId: null,
+            tokenId: issued.plaintextKey,
+            authMethods: [securityActor.authMode],
+            sourceIp: null,
+            userAgent: null,
+            requestId: requestId ?? null,
+            traceId: null,
+            reasonCode: null,
+            approvalId: null,
+            beforeSummary: this.toApiKeyResponse(before),
+            afterSummary: this.toApiKeyResponse(issued.storedApiKey),
+            maskedContext: {
+              plaintextKey: issued.plaintextKey,
+              revokedApiKeyId: currentApiKey.apiKeyId,
+            },
+          }
+        : null,
+    });
 
-    return {
-      apiKey: this.toApiKeyResponse(issued.storedApiKey),
-      plaintextKey: issued.plaintextKey,
-      revokedApiKeyId: currentApiKey.apiKeyId,
-    };
+    return this.afterPersistence(persisted, () => {
+      this.recordTenantAudit(
+        {
+          actorId: null,
+          actorType: "tenant_admin",
+          tenantId,
+          moduleName: "tenant-partner",
+          actionName: "rotate_api_key",
+          resourceType: "tenant_api_key",
+          resourceId: issued.storedApiKey.apiKeyId,
+          oldValuesSummary: this.toApiKeyResponse(before),
+          newValuesSummary: this.toApiKeyResponse(issued.storedApiKey),
+        },
+        requestId,
+      );
+
+      return {
+        apiKey: this.toApiKeyResponse(issued.storedApiKey),
+        plaintextKey: issued.plaintextKey,
+        revokedApiKeyId: currentApiKey.apiKeyId,
+        overlapEndsAt,
+      };
+    });
   }
 
   listWebhookEndpoints(tenantId: string, identity?: IdentityContext | null) {
     return this.webhookEndpoints
       .filter((endpoint) => endpoint.tenantId === tenantId)
+      .map((endpoint) => {
+        this.reconcileStoredWebhookEndpoint(endpoint);
+        return endpoint;
+      })
       .map((endpoint) => this.toWebhookResponse(endpoint, identity));
   }
 
@@ -6314,17 +7747,63 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
     const normalizedUrl = command.url.trim();
 
     const now = new Date().toISOString();
+    const webhookId = `wh_${randomUUID()}`;
+    const owner = this.resolveCredentialOwner(command, {
+      ownerRef: null,
+      ownerName: "Tenant webhook integration owner",
+      ownerType: "tenant_admin",
+    });
     const secretPreview = this.secretPreview(command.secret);
+    const secretExpiresAt = this.resolveWebhookSecretExpiry(
+      command.expiresAt ?? null,
+      now,
+    );
+    const initialSecret: StoredWebhookSecretMaterial = {
+      createdAt: now,
+      secretVersion: 1,
+      rotatedAt: now,
+      rotationReason: "initial_secret",
+      secretPreview,
+      secretValue: command.secret,
+      ownerRef: owner.ownerRef,
+      ownerName: owner.ownerName,
+      ownerType: owner.ownerType,
+      purpose: this.resolveCredentialPurpose(
+        command.purpose,
+        "tenant webhook signing secret",
+      ),
+      expiresAt: secretExpiresAt,
+      lastUsedAt: null,
+      lastUsedWorkload: null,
+      status: "active",
+      overlapEndsAt: null,
+      autoRevokedAt: null,
+      supersededByVersion: null,
+      revokedAt: null,
+      signals: this.buildCredentialSignals(null, secretExpiresAt, null, now),
+    };
     const webhookEndpoint: StoredWebhookEndpoint = {
-      webhookId: `wh_${randomUUID()}`,
+      webhookId,
       tenantId,
       url: normalizedUrl,
       events: normalizedEvents,
       status: "test_pending",
+      ownerRef: owner.ownerRef,
+      ownerName: owner.ownerName,
+      ownerType: owner.ownerType,
+      purpose: initialSecret.purpose,
+      resourceScope: `tenant:${tenantId}:webhook:${webhookId}`,
       secretVersion: 1,
       secretPreview,
+      secretExpiresAt: initialSecret.expiresAt,
+      secretLastUsedAt: null,
+      secretLastUsedWorkload: null,
+      credentialStatus: "active",
+      rotationOverlapEndsAt: null,
+      credentialSignals: this.toCredentialSignals(initialSecret.signals),
       secretValue: command.secret,
-      retryPolicy: { ...DEFAULT_WEBHOOK_RETRY_POLICY },
+      secretCredentials: [{ ...initialSecret }],
+      retryPolicy: this.toWebhookRetryPolicy(DEFAULT_WEBHOOK_RETRY_POLICY),
       runtimeMetadata: {
         deliveryCount: 0,
         failedDeliveryCount: 0,
@@ -6336,32 +7815,19 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
         disabledAt: null,
         disableReason: null,
         disableReasonNote: null,
-        retryPolicy: { ...DEFAULT_WEBHOOK_RETRY_POLICY },
+        retryPolicy: this.toWebhookRetryPolicy(DEFAULT_WEBHOOK_RETRY_POLICY),
         secretRotation: {
           currentVersion: 1,
           rotatedAt: now,
           rotationCount: 1,
-          history: [
-            {
-              secretVersion: 1,
-              rotatedAt: now,
-              rotationReason: "initial_secret",
-              secretPreview,
-            },
-          ],
+          history: [this.toWebhookSecretHistoryRecord(initialSecret)],
         },
       },
-      secretHistory: [
-        {
-          secretVersion: 1,
-          rotatedAt: now,
-          rotationReason: "initial_secret",
-          secretPreview,
-        },
-      ],
+      secretHistory: [this.toWebhookSecretHistoryRecord(initialSecret)],
       createdAt: now,
       updatedAt: now,
     };
+    this.reconcileStoredWebhookEndpoint(webhookEndpoint, now);
 
     this.webhookEndpoints = [
       this.cloneStoredWebhookEndpoint(webhookEndpoint),
@@ -6383,9 +7849,12 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
         resourceType: "webhook_endpoint",
         resourceId: webhookEndpoint.webhookId,
         newValuesSummary: {
+          ownerName: webhookEndpoint.ownerName,
+          purpose: webhookEndpoint.purpose,
           url: webhookEndpoint.url,
           events: webhookEndpoint.events,
           secretVersion: webhookEndpoint.secretVersion,
+          secretExpiresAt: webhookEndpoint.secretExpiresAt,
           retryPolicy: webhookEndpoint.retryPolicy,
         },
       },
@@ -6690,6 +8159,7 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
     context: string,
     deliveryIdOverride?: string,
   ): Promise<StoredWebhookDelivery> {
+    this.reconcileStoredWebhookEndpoint(endpoint, createdAt);
     const deliveryId = deliveryIdOverride ?? `wd_${randomUUID()}`;
     const existingIndex = this.webhookDeliveries.findIndex(
       (d) => d.deliveryId === deliveryId,
@@ -6713,24 +8183,24 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
       signatureHeader: "",
       signatureVersion: endpoint.secretVersion,
       secretVersion: endpoint.secretVersion,
-      retryPolicySnapshot: { ...endpoint.retryPolicy },
+      retryPolicySnapshot: this.toWebhookRetryPolicy(endpoint.retryPolicy),
       rawBody: {},
     };
 
     this.webhookDeliveries = [delivery, ...this.webhookDeliveries];
-    endpoint.runtimeMetadata = {
-      ...endpoint.runtimeMetadata,
-      deliveryCount: endpoint.runtimeMetadata.deliveryCount + 1,
-      secretRotation: {
+    endpoint.runtimeMetadata = this.toWebhookRuntimeMetadata(
+      {
+        ...endpoint.runtimeMetadata,
+        deliveryCount: endpoint.runtimeMetadata.deliveryCount + 1,
+        retryPolicy: endpoint.retryPolicy,
+      },
+      {
         currentVersion: endpoint.secretVersion,
         rotatedAt: endpoint.runtimeMetadata.secretRotation.rotatedAt,
         rotationCount: endpoint.runtimeMetadata.secretRotation.rotationCount,
-        history: endpoint.runtimeMetadata.secretRotation.history.map(
-          (record) => ({ ...record }),
-        ),
+        history: endpoint.runtimeMetadata.secretRotation.history,
       },
-      retryPolicy: { ...endpoint.retryPolicy },
-    };
+    );
 
     await this.persistChangesRequired(
       {
@@ -6747,19 +8217,117 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
     endpoint: StoredWebhookEndpoint,
     delivery: StoredWebhookDelivery,
     payload: Record<string, unknown>,
-  ) {
+    options?: {
+      /** SR-PARTNER-NOTIFY-ACK-20260917 opt-in ack body validation. */
+      partnerAckV1?: PartnerAckV1RequestOptions;
+      /**
+       * Forces this attempt to be classified as terminal (never "queued")
+       * so the shared WebhookDispatchService never reports a retry and this
+       * method's own `scheduleWebhookRetry` branch is never reached — the
+       * partner-notification façade is the single automatic-retry owner for
+       * its own deliveries and must not also start the tenant webhook's
+       * internal retry timer.
+       */
+      forceSingleAttempt?: boolean;
+    },
+  ): Promise<WebhookDispatchAttemptResult> {
     const previousStatus = delivery.status;
     const previousEndpointValues = this.toWebhookResponse(endpoint);
+    const signingSecret = this.resolveWebhookSecretMaterial(
+      endpoint,
+      delivery.secretVersion,
+    );
+    if (
+      !signingSecret ||
+      (signingSecret.status !== "active" &&
+        signingSecret.status !== "overlap_active")
+    ) {
+      const attemptedAt = new Date().toISOString();
+      delivery.attempt += 1;
+      delivery.status = "delivery_failed";
+      delivery.httpStatus = null;
+      delivery.signature = "";
+      delivery.attemptedAt = attemptedAt;
+      delivery.nextAttemptAt = null;
+      delivery.signatureHeader = "";
+      delivery.signatureVersion = delivery.secretVersion;
+      delivery.rawBody = {
+        errorCode: "WEBHOOK_SECRET_UNAVAILABLE",
+        secretVersion: delivery.secretVersion,
+      };
+      endpoint.runtimeMetadata = this.toWebhookRuntimeMetadata(
+        {
+          ...endpoint.runtimeMetadata,
+          failedDeliveryCount: endpoint.runtimeMetadata.failedDeliveryCount + 1,
+          lastAttemptAt: attemptedAt,
+          nextAttemptAt: null,
+          lastSignaturePreview: null,
+          retryPolicy: endpoint.retryPolicy,
+        },
+        {
+          currentVersion: endpoint.secretVersion,
+          rotatedAt: endpoint.runtimeMetadata.secretRotation.rotatedAt,
+          rotationCount: endpoint.runtimeMetadata.secretRotation.rotationCount,
+          history: endpoint.runtimeMetadata.secretRotation.history,
+        },
+      );
+      this.applyWebhookPostDispatchPolicy(
+        endpoint,
+        delivery,
+        {
+          attempt: delivery.attempt,
+          status: delivery.status,
+          httpStatus: null,
+          signature: "",
+          attemptedAt,
+          nextAttemptAt: null,
+          signatureHeader: "",
+          signatureVersion: delivery.secretVersion,
+          secretVersion: delivery.secretVersion,
+          rawBody: { ...delivery.rawBody },
+        },
+        previousEndpointValues,
+      );
+      await this.persistChangesRequired(
+        {
+          webhookEndpoints: [this.cloneStoredWebhookEndpoint(endpoint)],
+          webhookDeliveries: [this.cloneStoredWebhookDelivery(delivery)],
+        },
+        "webhook_dispatch_secret_unavailable",
+      );
+      this.clearWebhookRetry(delivery.deliveryId);
+      return {
+        attempt: delivery.attempt,
+        status: delivery.status,
+        httpStatus: null,
+        signature: "",
+        attemptedAt,
+        nextAttemptAt: null,
+        signatureHeader: "",
+        signatureVersion: delivery.secretVersion,
+        secretVersion: delivery.secretVersion,
+        rawBody: { ...delivery.rawBody },
+      };
+    }
+
+    const attemptNumber = delivery.attempt + 1;
     const result = await this.webhookDispatchService.dispatchAttempt({
       url: endpoint.url,
       deliveryId: delivery.deliveryId,
       eventType: delivery.eventType,
       tenantId: endpoint.tenantId,
-      secretValue: endpoint.secretValue,
-      secretVersion: endpoint.secretVersion,
+      secretValue: signingSecret.secretValue,
+      secretVersion: signingSecret.secretVersion,
       payload,
-      attempt: delivery.attempt + 1,
+      attempt: attemptNumber,
+      // Always the endpoint's real, approved policy — §8: "使用 endpoint 已核准
+      // policy 的 snapshot". `forceSingleAttempt` only suppresses this
+      // method's own retry-timer side effect below; it must never distort
+      // the queued/delivery_failed classification, or a single transient
+      // failure would look "exhausted" and wrongly disable the endpoint on
+      // its very first attempt (see the scheduling guard below instead).
       retryPolicy: endpoint.retryPolicy,
+      ...(options?.partnerAckV1 ? { partnerAckV1: options.partnerAckV1 } : {}),
     });
 
     delivery.attempt = result.attempt;
@@ -6771,36 +8339,41 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
     delivery.signatureHeader = result.signatureHeader;
     delivery.signatureVersion = result.signatureVersion;
     delivery.secretVersion = result.secretVersion;
-    delivery.retryPolicySnapshot = { ...endpoint.retryPolicy };
+    delivery.retryPolicySnapshot = this.toWebhookRetryPolicy(
+      endpoint.retryPolicy,
+    );
     delivery.rawBody = { ...result.rawBody };
+    this.markWebhookSecretUsed(
+      endpoint,
+      signingSecret,
+      `webhook_dispatch:${delivery.eventType}`,
+      result.attemptedAt,
+    );
 
-    endpoint.runtimeMetadata = {
-      ...endpoint.runtimeMetadata,
-      failedDeliveryCount:
-        result.status === "delivery_failed" &&
-        previousStatus !== "delivery_failed"
-          ? endpoint.runtimeMetadata.failedDeliveryCount + 1
-          : endpoint.runtimeMetadata.failedDeliveryCount,
-      lastAttemptAt: result.attemptedAt,
-      lastDeliveredAt:
-        result.status === "delivered"
-          ? result.attemptedAt
-          : endpoint.runtimeMetadata.lastDeliveredAt,
-      nextAttemptAt: result.nextAttemptAt,
-      lastSignaturePreview: (result.signature ?? "").slice(0, 16),
-      disabledAt: endpoint.runtimeMetadata.disabledAt,
-      disableReason: endpoint.runtimeMetadata.disableReason,
-      disableReasonNote: endpoint.runtimeMetadata.disableReasonNote ?? null,
-      secretRotation: {
+    endpoint.runtimeMetadata = this.toWebhookRuntimeMetadata(
+      {
+        ...endpoint.runtimeMetadata,
+        failedDeliveryCount:
+          result.status === "delivery_failed" &&
+          previousStatus !== "delivery_failed"
+            ? endpoint.runtimeMetadata.failedDeliveryCount + 1
+            : endpoint.runtimeMetadata.failedDeliveryCount,
+        lastAttemptAt: result.attemptedAt,
+        lastDeliveredAt:
+          result.status === "delivered"
+            ? result.attemptedAt
+            : endpoint.runtimeMetadata.lastDeliveredAt,
+        nextAttemptAt: result.nextAttemptAt,
+        lastSignaturePreview: (result.signature ?? "").slice(0, 16),
+        retryPolicy: endpoint.retryPolicy,
+      },
+      {
         currentVersion: endpoint.secretVersion,
         rotatedAt: endpoint.runtimeMetadata.secretRotation.rotatedAt,
         rotationCount: endpoint.runtimeMetadata.secretRotation.rotationCount,
-        history: endpoint.runtimeMetadata.secretRotation.history.map(
-          (record) => ({ ...record }),
-        ),
+        history: endpoint.runtimeMetadata.secretRotation.history,
       },
-      retryPolicy: { ...endpoint.retryPolicy },
-    };
+    );
     this.applyWebhookPostDispatchPolicy(
       endpoint,
       delivery,
@@ -6816,13 +8389,20 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
       "webhook_dispatch_attempt",
     );
 
-    if (result.status === "queued" && result.nextAttemptAt) {
+    if (
+      !options?.forceSingleAttempt &&
+      result.status === "queued" &&
+      result.nextAttemptAt
+    ) {
       this.scheduleWebhookRetry(
         endpoint.webhookId,
         delivery.deliveryId,
         result.nextAttemptAt,
       );
     } else {
+      // Idempotent hygiene clear, not a new timer — see the guard above:
+      // the partner-notification façade's caller is the single automatic
+      // retry owner for its own deliveries.
       this.clearWebhookRetry(delivery.deliveryId);
     }
 
@@ -6894,6 +8474,164 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
         >,
       });
     }
+  }
+
+  /**
+   * SR-PARTNER-NOTIFY-ACK-20260917 §8 — the single-attempt dispatch entry
+   * point exported (via `PartnerNotificationDispatchFacade`) as
+   * `dispatchNotificationAttemptByWebhookId`. Precise endpoint lookup by
+   * (tenantId, webhookId) — never a tenant-wide event scan — reuses the same
+   * active/expiry/secret-rotation governance as an ordinary tenant webhook,
+   * makes exactly one remote HTTP attempt, records the delivery/credential
+   * usage/failure count on the shared endpoint (deduped by this logical
+   * delivery id, same as `dispatchWebhookAttempt`), and returns a validated
+   * ack or a typed failure. It never schedules its own retry timer — the
+   * caller's own fence transaction owns retry timing and must reuse this
+   * exact deliveryId/payload for every attempt so the partner's durable
+   * dedupe can recognize a resend.
+   */
+  async dispatchPartnerNotificationAttempt(
+    command: PartnerNotificationDispatchAttemptCommand,
+  ): Promise<PartnerNotificationDispatchOutcome> {
+    this.assertNonBlank(command.tenantId, "tenantId");
+    this.assertNonBlank(command.webhookId, "webhookId");
+
+    const endpoint = this.requireWebhookEndpoint(
+      command.tenantId,
+      command.webhookId,
+    );
+
+    if (endpoint.status === "disabled") {
+      return this.partnerNotificationTypedFailure(
+        "endpoint_disabled",
+        null,
+        `webhook ${endpoint.webhookId} is disabled`,
+      );
+    }
+    if (endpoint.status !== "active") {
+      return this.partnerNotificationTypedFailure(
+        "configuration_blocked",
+        null,
+        `webhook ${endpoint.webhookId} status is ${endpoint.status}`,
+      );
+    }
+    if (!endpoint.events.includes(command.wirePayload.event)) {
+      return this.partnerNotificationTypedFailure(
+        "configuration_blocked",
+        null,
+        `webhook ${endpoint.webhookId} is not subscribed to ${command.wirePayload.event}`,
+      );
+    }
+
+    const expiresAt =
+      "expiresAt" in command.wirePayload.data
+        ? command.wirePayload.data.expiresAt
+        : null;
+    if (expiresAt && new Date(expiresAt).getTime() <= Date.now()) {
+      return this.partnerNotificationTypedFailure(
+        "notification_expired",
+        null,
+        `notification ${command.wirePayload.data.notificationId} expired at ${expiresAt}`,
+      );
+    }
+
+    const createdAt = new Date().toISOString();
+    const delivery = await this.enqueueWebhookDelivery(
+      endpoint,
+      command.wirePayload.event,
+      createdAt,
+      "partner_notification_dispatch",
+      command.wirePayload.deliveryId,
+    );
+
+    const signingSecret = this.resolveWebhookSecretMaterial(
+      endpoint,
+      delivery.secretVersion,
+    );
+    if (
+      !signingSecret ||
+      (signingSecret.status !== "active" &&
+        signingSecret.status !== "overlap_active")
+    ) {
+      return this.partnerNotificationTypedFailure(
+        "credential_rejected",
+        null,
+        "webhook signing credential is not usable",
+      );
+    }
+
+    const result = await this.dispatchWebhookAttempt(
+      endpoint,
+      delivery,
+      command.wirePayload as unknown as Record<string, unknown>,
+      {
+        forceSingleAttempt: true,
+        partnerAckV1: {
+          mode: "partner_ack_v1",
+          expected: {
+            notificationId: command.wirePayload.data.notificationId,
+            deliveryId: command.wirePayload.deliveryId,
+            partnerEntrySlug: command.wirePayload.data.partnerEntrySlug,
+          },
+        },
+      },
+    );
+
+    return this.classifyPartnerNotificationDispatchResult(result);
+  }
+
+  private partnerNotificationTypedFailure(
+    failureReason: PartnerNotificationFailureReason,
+    suggestedNextAttemptAt: string | null,
+    detail?: string,
+  ): PartnerNotificationDispatchOutcome {
+    return {
+      kind: "failed",
+      failure: {
+        failureReason,
+        retryDisposition:
+          PARTNER_NOTIFICATION_FAILURE_REASON_RETRY_DISPOSITIONS[failureReason],
+        suggestedNextAttemptAt,
+        ...(detail !== undefined ? { detail } : {}),
+      },
+    };
+  }
+
+  private classifyPartnerNotificationDispatchResult(
+    result: Awaited<ReturnType<TenantPartnerService["dispatchWebhookAttempt"]>>,
+  ): PartnerNotificationDispatchOutcome {
+    if (result.status === "delivered") {
+      if (result.partnerAckV1?.kind === "accepted") {
+        return { kind: "accepted", ack: result.partnerAckV1.ack };
+      }
+      // HTTP-level success but the ack body did not validate (204, empty,
+      // HTML, mismatched id, missing receipt, ...) — never a success here.
+      return this.partnerNotificationTypedFailure(
+        "partner_ack_invalid",
+        null,
+        result.partnerAckV1?.kind === "invalid"
+          ? result.partnerAckV1.reason
+          : "ack_not_validated",
+      );
+    }
+
+    if (result.httpStatus === 401 || result.httpStatus === 403) {
+      return this.partnerNotificationTypedFailure("credential_rejected", null);
+    }
+    if (result.httpStatus === 404 || result.httpStatus === 410) {
+      return this.partnerNotificationTypedFailure("endpoint_unavailable", null);
+    }
+
+    // 408/429/5xx/network-timeout and anything else not classified above:
+    // automatic, bounded by the endpoint's own approved retry policy.
+    // `result.nextAttemptAt` already reflects that policy (WebhookDispatch-
+    // Service computed it from the same, un-forced `endpoint.retryPolicy`)
+    // and is null once the policy considers this delivery exhausted — the
+    // caller's fence transaction, not a tenant-side timer, acts on this.
+    return this.partnerNotificationTypedFailure(
+      "provider_transient_error",
+      result.nextAttemptAt,
+    );
   }
 
   private markWebhookValidationPending(
@@ -7175,26 +8913,118 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
     const rotatedAt = new Date().toISOString();
     const secretPreview = this.secretPreview(command.secret);
     const rotationReason = command.rotationReason?.trim() || null;
-    const rotationRecord: WebhookSecretRotationRecord = {
+    const overlapEndsAt = this.resolveCredentialOverlapEndsAt(
+      rotatedAt,
+      command.overlapDays,
+    );
+    const currentSecret = this.resolveWebhookSecretMaterial(
+      endpoint,
+      endpoint.secretVersion,
+      rotatedAt,
+    );
+    if (!currentSecret) {
+      throw new ApiRequestError(
+        HttpStatus.CONFLICT,
+        "WEBHOOK_SECRET_NOT_CONFIGURED",
+        "The current webhook secret could not be resolved.",
+        {
+          webhookId: endpoint.webhookId,
+          secretVersion: endpoint.secretVersion,
+        },
+      );
+    }
+
+    // Recovering from an expired or revoked secret is a legitimate reason to
+    // rotate, but the dead secret is retired outright: only a still-live secret
+    // earns an overlap window, so signing material is never resurrected.
+    const currentSecretIsLive =
+      currentSecret.status === "active" ||
+      currentSecret.status === "overlap_active";
+    const grantedOverlapEndsAt = currentSecretIsLive ? overlapEndsAt : null;
+    currentSecret.overlapEndsAt = grantedOverlapEndsAt;
+    currentSecret.supersededByVersion = endpoint.secretVersion + 1;
+    if (currentSecretIsLive) {
+      currentSecret.autoRevokedAt = null;
+      currentSecret.status = "overlap_active";
+      currentSecret.revokedAt = null;
+    }
+    currentSecret.signals = this.buildCredentialSignals(
+      currentSecret.lastUsedAt,
+      currentSecret.expiresAt ?? null,
+      currentSecret.autoRevokedAt ?? null,
+      rotatedAt,
+    );
+
+    const owner = this.resolveCredentialOwner(command, {
+      ownerRef: endpoint.ownerRef ?? null,
+      ownerName: endpoint.ownerName ?? "Tenant webhook integration owner",
+      ownerType: endpoint.ownerType ?? "tenant_admin",
+    });
+    const nextSecretExpiresAt = this.resolveWebhookSecretExpiry(
+      command.expiresAt ?? null,
+      rotatedAt,
+    );
+    const nextSecret: StoredWebhookSecretMaterial = {
+      createdAt: rotatedAt,
       secretVersion: endpoint.secretVersion + 1,
       rotatedAt,
       rotationReason,
       secretPreview,
+      secretValue: command.secret,
+      ownerRef: owner.ownerRef,
+      ownerName: owner.ownerName,
+      ownerType: owner.ownerType,
+      purpose: this.resolveCredentialPurpose(
+        command.purpose ?? endpoint.purpose,
+        "tenant webhook signing secret",
+      ),
+      expiresAt: nextSecretExpiresAt,
+      lastUsedAt: null,
+      lastUsedWorkload: null,
+      status: "active",
+      overlapEndsAt: null,
+      autoRevokedAt: null,
+      supersededByVersion: null,
+      revokedAt: null,
+      signals: this.buildCredentialSignals(
+        null,
+        nextSecretExpiresAt,
+        null,
+        rotatedAt,
+      ),
     };
 
-    endpoint.secretVersion = rotationRecord.secretVersion;
+    endpoint.secretVersion = nextSecret.secretVersion;
     endpoint.secretValue = command.secret;
     endpoint.secretPreview = secretPreview;
-    endpoint.secretHistory = [...endpoint.secretHistory, rotationRecord];
-    endpoint.runtimeMetadata = {
-      ...endpoint.runtimeMetadata,
-      secretRotation: {
-        currentVersion: endpoint.secretVersion,
-        rotatedAt,
-        rotationCount: endpoint.secretHistory.length,
-        history: endpoint.secretHistory.map((record) => ({ ...record })),
-      },
-    };
+    endpoint.secretCredentials = [
+      nextSecret,
+      ...(endpoint.secretCredentials ?? []).map(
+        (record): StoredWebhookSecretMaterial => ({
+          ...record,
+          createdAt: record.createdAt ?? record.rotatedAt,
+          status: record.status ?? "active",
+          signals:
+            record.signals ??
+            this.buildCredentialSignals(
+              record.lastUsedAt ?? null,
+              record.expiresAt ??
+                this.addDaysToIso(
+                  rotatedAt,
+                  DEFAULT_WEBHOOK_SECRET_LIFETIME_DAYS,
+                ),
+              record.autoRevokedAt ?? null,
+              rotatedAt,
+            ),
+        }),
+      ),
+    ];
+    endpoint.ownerRef = owner.ownerRef;
+    endpoint.ownerName = owner.ownerName;
+    endpoint.ownerType = owner.ownerType;
+    endpoint.purpose = nextSecret.purpose;
+    endpoint.updatedAt = rotatedAt;
+    this.reconcileStoredWebhookEndpoint(endpoint, rotatedAt);
     this.markWebhookValidationPending(endpoint, rotatedAt);
     this.persistChanges(
       {
@@ -7218,6 +9048,8 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
           rotationCount: endpoint.secretHistory.length,
           rotationReason,
           secretPreview: endpoint.secretPreview,
+          secretExpiresAt: endpoint.secretExpiresAt,
+          overlapEndsAt: grantedOverlapEndsAt,
           status: endpoint.status,
         },
       },
@@ -7230,6 +9062,7 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
       secretPreview: endpoint.secretPreview,
       rotationCount: endpoint.secretHistory.length,
       rotatedAt,
+      overlapEndsAt: grantedOverlapEndsAt,
     };
   }
 
@@ -7312,7 +9145,26 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
     command: UpdateTenantSlaProfileCommand,
     actorId?: string,
     requestId?: string,
+    identity?: IdentityContext | null,
   ): ActionReceipt {
+    this.assertTenantMutationScope(tenantId, identity);
+    for (const [field, value] of [
+      ["waitThresholdMin", command.waitThresholdMin],
+      ["arrivalThresholdMin", command.arrivalThresholdMin],
+      ["completionThresholdMin", command.completionThresholdMin],
+    ] as const) {
+      if (
+        value !== undefined &&
+        (typeof value !== "number" || Number.isNaN(value) || value < 0)
+      ) {
+        throw new ApiRequestError(
+          HttpStatus.BAD_REQUEST,
+          "INVALID_SLA_THRESHOLD",
+          `SLA threshold '${field}' must be a non-negative number.`,
+          { field, value },
+        );
+      }
+    }
     const currentProfile = this.getOrCreateSlaProfile(tenantId);
     const slaProfile: TenantSlaProfile = {
       tenantId,
@@ -7334,7 +9186,7 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
 
     this.recordTenantAudit(
       {
-        actorId: actorId ?? null,
+        actorId: actorId ?? identity?.actorId ?? null,
         actorType: "tenant_admin",
         tenantId,
         moduleName: "tenant-partner",
@@ -7404,27 +9256,81 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
     };
   }
 
-  revokeApiKey(tenantId: string, apiKeyId: string, requestId?: string) {
+  revokeApiKey(
+    tenantId: string,
+    apiKeyId: string,
+    requestId?: string,
+    identity?: IdentityContext | null,
+  ) {
+    this.assertTenantMutationScope(tenantId, identity);
     const apiKey = this.requireApiKey(tenantId, apiKeyId);
     if (!apiKey.revokedAt) {
+      const before = this.cloneStoredApiKey(apiKey);
+      const previousApiKeys = this.apiKeys.map((entry) =>
+        this.cloneStoredApiKey(entry),
+      );
+      const securityActor = this.requireSecurityEventActor(identity, tenantId);
       apiKey.revokedAt = new Date().toISOString();
-      this.persistChanges(
-        { apiKeys: [this.cloneStoredApiKey(apiKey)] },
-        "revoke_api_key",
-      );
-      this.recordTenantAudit(
-        {
-          actorId: null,
-          actorType: "tenant_admin",
-          tenantId,
-          moduleName: "tenant-partner",
-          actionName: "revoke_api_key",
-          resourceType: "tenant_api_key",
-          resourceId: apiKey.apiKeyId,
-          newValuesSummary: this.toApiKeyResponse(apiKey),
+      apiKey.revokeReason = "manual_revoke";
+      apiKey.status = "revoked";
+      apiKey.overlapEndsAt = null;
+      const persisted = this.persistIdentityGovernanceMutation({
+        changes: { apiKeys: [this.cloneStoredApiKey(apiKey)] },
+        context: "revoke_api_key",
+        rollback: () => {
+          this.apiKeys = previousApiKeys.map((entry) =>
+            this.cloneStoredApiKey(entry),
+          );
         },
-        requestId,
-      );
+        event: securityActor
+          ? {
+              actorId: securityActor.actorId,
+              actorType: securityActor.actorType,
+              subjectId: securityActor.actorId,
+              realm: securityActor.realm,
+              tenantId,
+              partnerId: null,
+              eventType: "tenant_api_key.revoked",
+              eventFamily: "credential",
+              outcome: "revoked",
+              severity: "high",
+              targetType: "tenant_api_key",
+              targetId: apiKey.apiKeyId,
+              sessionId: null,
+              tokenId: null,
+              authMethods: [securityActor.authMode],
+              sourceIp: null,
+              userAgent: null,
+              requestId: requestId ?? null,
+              traceId: null,
+              reasonCode: null,
+              approvalId: null,
+              beforeSummary: this.toApiKeyResponse(before),
+              afterSummary: this.toApiKeyResponse(apiKey),
+              maskedContext: {
+                keyPrefix: apiKey.keyPrefix,
+              },
+            }
+          : null,
+      });
+
+      return this.afterPersistence(persisted, () => {
+        this.recordTenantAudit(
+          {
+            actorId: null,
+            actorType: "tenant_admin",
+            tenantId,
+            moduleName: "tenant-partner",
+            actionName: "revoke_api_key",
+            resourceType: "tenant_api_key",
+            resourceId: apiKey.apiKeyId,
+            newValuesSummary: this.toApiKeyResponse(apiKey),
+          },
+          requestId,
+        );
+
+        return { status: "revoked", apiKeyId };
+      });
     }
     return { status: "revoked", apiKeyId };
   }
@@ -7467,32 +9373,58 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
     input: {
       keyName: string;
       scopes: string[];
+      ownerRef?: string | null;
+      ownerName?: string | null;
+      ownerType?: string | null;
+      purpose?: string | null;
       expiresAt: string | null;
     },
-    revokedApiKeyId: string | null,
+    previousApiKey: StoredTenantApiKeyRecord | null,
   ) {
     const now = new Date().toISOString();
     const plaintextKey = `tk_${randomBytes(18).toString("hex")}`;
     const normalizedScopes = this.normalizeTenantApiKeyScopes(input.scopes);
     const expiresAt = this.resolveTenantApiKeyExpiry(input.expiresAt);
+    const owner = this.resolveCredentialOwner(input, {
+      ownerRef: null,
+      ownerName: "Unassigned tenant integration owner",
+      ownerType: "unknown",
+    });
     const storedApiKey: StoredTenantApiKeyRecord = {
       apiKeyId: `api_key_${randomUUID()}`,
       tenantId,
       keyName: input.keyName.trim(),
       keyPrefix: plaintextKey.slice(0, 12),
       maskedSuffix: this.maskedSuffix(plaintextKey),
+      ownerRef: owner.ownerRef,
+      ownerName: owner.ownerName,
+      ownerType: owner.ownerType,
+      purpose: this.resolveCredentialPurpose(
+        input.purpose,
+        `${input.keyName.trim()} integration credential`,
+      ),
+      realm: "tenant",
+      resourceScope: `tenant:${tenantId}`,
       scopes: normalizedScopes,
       lastUsedAt: null,
+      lastUsedWorkload: null,
       expiresAt,
+      status: "active",
+      overlapEndsAt: null,
+      autoRevokedAt: null,
+      rotatedFromApiKeyId: previousApiKey?.apiKeyId ?? null,
+      supersededByApiKeyId: null,
       revokedAt: null,
+      revokeReason: null,
       createdAt: now,
+      signals: this.buildCredentialSignals(null, expiresAt, null, now),
       keyHash: this.hashSecret(plaintextKey),
     };
 
     return {
       storedApiKey,
       plaintextKey,
-      revokedApiKeyId,
+      revokedApiKeyId: previousApiKey?.apiKeyId ?? null,
     };
   }
 
@@ -7502,6 +9434,10 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
       compatibilityAliases: { ...TENANT_API_KEY_SCOPE_ALIASES },
       defaultLifetimeDays: DEFAULT_TENANT_API_KEY_LIFETIME_DAYS,
       maxLifetimeDays: MAX_TENANT_API_KEY_LIFETIME_DAYS,
+      rotationOverlapDays: DEFAULT_CREDENTIAL_ROTATION_OVERLAP_DAYS,
+      approachingExpiryThresholdDays:
+        CREDENTIAL_APPROACHING_EXPIRY_THRESHOLD_DAYS,
+      dormantUseThresholdDays: CREDENTIAL_DORMANT_THRESHOLD_DAYS,
       requireExpiry: true,
       breakGlassRequiresPlatformApproval: true,
       revokeEffect: "immediate",
@@ -7513,6 +9449,10 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
       testEventType: "tenant.webhook.test",
       autoDisableAfterConsecutiveFailures:
         DEFAULT_WEBHOOK_RETRY_POLICY.maxAttempts,
+      rotationOverlapDays: DEFAULT_CREDENTIAL_ROTATION_OVERLAP_DAYS,
+      approachingExpiryThresholdDays:
+        CREDENTIAL_APPROACHING_EXPIRY_THRESHOLD_DAYS,
+      dormantUseThresholdDays: CREDENTIAL_DORMANT_THRESHOLD_DAYS,
       revalidationRequiredOnCreate: true,
       revalidationRequiredOnEndpointMutation: true,
       revalidationRequiredOnSecretRotation: true,
@@ -7734,28 +9674,29 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
       url: endpoint.url,
       events: [...endpoint.events],
       status: endpoint.status,
+      ownerRef: endpoint.ownerRef ?? null,
+      ownerName: endpoint.ownerName ?? null,
+      ownerType: endpoint.ownerType ?? null,
+      purpose: endpoint.purpose ?? null,
+      resourceScope: endpoint.resourceScope ?? null,
       secretVersion: endpoint.secretVersion,
       secretPreview: endpoint.secretPreview,
+      secretExpiresAt: endpoint.secretExpiresAt ?? null,
+      secretLastUsedAt: endpoint.secretLastUsedAt ?? null,
+      secretLastUsedWorkload: endpoint.secretLastUsedWorkload ?? null,
+      credentialStatus: endpoint.credentialStatus ?? "active",
+      rotationOverlapEndsAt: endpoint.rotationOverlapEndsAt ?? null,
+      credentialSignals: this.toCredentialSignals(endpoint.credentialSignals),
       createdAt: endpoint.createdAt,
       updatedAt: endpoint.updatedAt,
       availableActions: this.buildWebhookEndpointActions(endpoint, identity),
-      retryPolicy: { ...endpoint.retryPolicy },
-      runtimeMetadata: {
-        ...endpoint.runtimeMetadata,
-        retryPolicy: { ...endpoint.runtimeMetadata.retryPolicy },
-        secretRotation: {
-          currentVersion:
-            endpoint.runtimeMetadata.secretRotation.currentVersion,
-          rotatedAt: endpoint.runtimeMetadata.secretRotation.rotatedAt,
-          rotationCount: endpoint.runtimeMetadata.secretRotation.rotationCount,
-          history: (endpoint.runtimeMetadata.secretRotation.history ?? []).map(
-            (record) => ({ ...record }),
-          ),
-        },
-      },
-      secretHistory: (endpoint.secretHistory ?? []).map((record) => ({
-        ...record,
-      })),
+      retryPolicy: this.toWebhookRetryPolicy(endpoint.retryPolicy),
+      // Projected, not spread: a webhook read must never carry secret material
+      // even if a stored record was hydrated with it.
+      runtimeMetadata: this.toWebhookRuntimeMetadata(endpoint.runtimeMetadata),
+      secretHistory: (endpoint.secretHistory ?? []).map((record) =>
+        this.toWebhookSecretHistoryRecord(record),
+      ),
     };
   }
 
@@ -7781,18 +9722,40 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
     };
   }
 
-  private toApiKeyResponse(apiKey: StoredTenantApiKeyRecord) {
+  toApiKeyResponse(
+    apiKey: StoredTenantApiKeyRecord,
+  ): TenantApiKeyRecord & Record<string, unknown> {
+    const signals = this.materializeCredentialSignals(
+      apiKey.signals,
+      apiKey.lastUsedAt,
+      apiKey.expiresAt ?? null,
+      apiKey.autoRevokedAt ?? null,
+    );
     return {
       apiKeyId: apiKey.apiKeyId,
       tenantId: apiKey.tenantId,
       keyName: apiKey.keyName,
       keyPrefix: apiKey.keyPrefix,
       maskedSuffix: apiKey.maskedSuffix,
+      ownerRef: apiKey.ownerRef ?? null,
+      ownerName: apiKey.ownerName ?? null,
+      ownerType: apiKey.ownerType ?? null,
+      purpose: apiKey.purpose ?? null,
+      realm: apiKey.realm ?? "tenant",
+      resourceScope: apiKey.resourceScope ?? null,
       scopes: [...apiKey.scopes],
       lastUsedAt: apiKey.lastUsedAt,
+      lastUsedWorkload: apiKey.lastUsedWorkload ?? null,
       expiresAt: apiKey.expiresAt,
+      status: apiKey.status ?? "active",
+      overlapEndsAt: apiKey.overlapEndsAt ?? null,
+      autoRevokedAt: apiKey.autoRevokedAt ?? null,
+      rotatedFromApiKeyId: apiKey.rotatedFromApiKeyId ?? null,
+      supersededByApiKeyId: apiKey.supersededByApiKeyId ?? null,
       revokedAt: apiKey.revokedAt,
+      revokeReason: apiKey.revokeReason ?? null,
       createdAt: apiKey.createdAt,
+      signals,
     };
   }
 
@@ -7861,6 +9824,126 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
       invitedAt: userRole.invitedAt,
       updatedAt: userRole.updatedAt,
     };
+  }
+
+  private assertTenantAccessScope(
+    targetTenantId: string,
+    identity?: IdentityContext | null,
+    action: "read" | "mutation" | "access" = "access",
+  ) {
+    if (!identity) {
+      return;
+    }
+
+    const isPlatformOrSystem =
+      identity.realm === "platform" ||
+      identity.realm === "system" ||
+      identity.actorType === "platform_admin" ||
+      identity.actorType === "system" ||
+      identity.roleFamilies?.includes("platform");
+
+    if (isPlatformOrSystem) {
+      return;
+    }
+
+    if (!identity.tenantId || identity.tenantId !== targetTenantId) {
+      throw new ApiRequestError(
+        HttpStatus.FORBIDDEN,
+        "TENANT_SCOPE_MISMATCH",
+        action === "read"
+          ? "Cross-tenant identity access is forbidden. Principal tenantId does not match target tenantId."
+          : "Cross-tenant identity mutation is forbidden. Principal tenantId does not match target tenantId.",
+        {
+          targetTenantId,
+          principalTenantId: identity.tenantId ?? null,
+        },
+      );
+    }
+  }
+
+  private assertTenantMutationScope(
+    targetTenantId: string,
+    identity?: IdentityContext | null,
+  ) {
+    this.assertTenantAccessScope(targetTenantId, identity, "mutation");
+  }
+
+  private requireSecurityEventActor(
+    identity: IdentityContext | null | undefined,
+    tenantId: string,
+  ) {
+    if (!this.securityEventsService) {
+      return null;
+    }
+    if (!identity?.actorId) {
+      throw new ApiRequestError(
+        HttpStatus.UNAUTHORIZED,
+        "AUTHENTICATION_REQUIRED",
+        "Authenticated actor identity is required for privileged identity mutations.",
+        {
+          tenantId,
+        },
+      );
+    }
+
+    return {
+      actorId: identity.actorId,
+      actorType: identity.actorType,
+      realm: identity.realm,
+      authMode: identity.authMode,
+      tenantId: identity.tenantId ?? tenantId,
+      partnerId: identity.partnerId ?? null,
+    };
+  }
+
+  private persistIdentityGovernanceMutation(params: {
+    changes: IdentityGovernanceChanges;
+    context: string;
+    rollback: () => void;
+    event: CreateSecurityEventInput | null;
+  }): MaybePromise<void> {
+    const event = params.event;
+
+    if (!this.securityEventsService || !event) {
+      this.persistChanges(params.changes, params.context);
+      return;
+    }
+
+    const canUseTransaction =
+      Boolean(this.tenantPartnerRepository?.isEnabled()) &&
+      this.securityEventsService.isEnabled();
+
+    if (canUseTransaction && this.tenantPartnerRepository) {
+      return this.tenantPartnerRepository
+        .withTransaction(async (executor) => {
+          await this.tenantPartnerRepository!.persistIdentityGovernanceChanges(
+            executor,
+            params.changes,
+          );
+          await this.securityEventsService!.recordEventRequired(
+            event,
+            executor,
+          );
+        })
+        .catch((error) => {
+          this.tenantPartnerRepository?.reportPersistenceFailure(
+            error,
+            params.context,
+          );
+          params.rollback();
+          throw error;
+        });
+    }
+
+    return this.securityEventsService
+      .recordEventRequired(event)
+      .then(() => {
+        this.persistChanges(params.changes, params.context);
+      })
+      .catch((error) => {
+        params.rollback();
+        throw error;
+      });
   }
 
   private cloneNotificationPreferences(
@@ -7977,27 +10060,59 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
   private cloneStoredPartnerIngressCredential(
     credential: StoredPartnerIngressCredentialRecord,
   ): StoredPartnerIngressCredentialRecord {
-    return {
+    const nowIso = new Date().toISOString();
+    const cloned: StoredPartnerIngressCredentialRecord = {
       ...credential,
+      scopes: [...(credential.scopes ?? [])],
+      signals: this.materializeCredentialSignals(
+        credential.signals,
+        credential.lastUsedAt,
+        credential.expiresAt ?? null,
+        credential.autoRevokedAt ?? null,
+        nowIso,
+      ),
     };
+    this.reconcileStoredPartnerIngressCredential(cloned, nowIso);
+    return cloned;
   }
 
   private toPartnerIngressCredentialResponse(
     credential: StoredPartnerIngressCredentialRecord,
   ): PartnerIngressCredentialRecord {
+    const signals = this.materializeCredentialSignals(
+      credential.signals,
+      credential.lastUsedAt,
+      credential.expiresAt ?? null,
+      credential.autoRevokedAt ?? null,
+    );
     return {
       keyId: credential.keyId,
       entrySlug: credential.entrySlug,
       keyPrefix: credential.keyPrefix,
       maskedSuffix: credential.maskedSuffix,
       source: credential.source,
+      ownerRef: credential.ownerRef ?? null,
+      ownerName: credential.ownerName ?? null,
+      ownerType: credential.ownerType ?? null,
+      purpose: credential.purpose ?? null,
+      realm: credential.realm ?? "partner",
+      resourceScope: credential.resourceScope ?? null,
+      scopes: [...(credential.scopes ?? [])],
       createdAt: credential.createdAt,
       lastUsedAt: credential.lastUsedAt,
+      lastUsedWorkload: credential.lastUsedWorkload ?? null,
+      expiresAt: credential.expiresAt ?? null,
+      status: credential.status ?? "active",
+      overlapEndsAt: credential.overlapEndsAt ?? null,
+      autoRevokedAt: credential.autoRevokedAt ?? null,
+      rotatedFromKeyId: credential.rotatedFromKeyId ?? null,
+      supersededByKeyId: credential.supersededByKeyId ?? null,
       revokedAt: credential.revokedAt,
       issuedBy: credential.issuedBy,
       revokedBy: credential.revokedBy,
       rotationReason: credential.rotationReason,
       revokeReason: credential.revokeReason,
+      signals,
     };
   }
 
@@ -8075,41 +10190,943 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
     };
   }
 
+  private addDaysToIso(baseIso: string, days: number) {
+    return new Date(
+      Date.parse(baseIso) + days * 24 * 60 * 60 * 1_000,
+    ).toISOString();
+  }
+
+  private resolveCredentialOverlapDays(overlapDays?: number | null) {
+    if (overlapDays === undefined || overlapDays === null) {
+      return DEFAULT_CREDENTIAL_ROTATION_OVERLAP_DAYS;
+    }
+    if (
+      !Number.isInteger(overlapDays) ||
+      overlapDays < 0 ||
+      overlapDays > MAX_CREDENTIAL_ROTATION_OVERLAP_DAYS
+    ) {
+      throw new ApiRequestError(
+        HttpStatus.BAD_REQUEST,
+        "CREDENTIAL_ROTATION_OVERLAP_INVALID",
+        "Credential rotation overlap must be an integer between 0 and 7 days.",
+        {
+          overlapDays,
+          maxOverlapDays: MAX_CREDENTIAL_ROTATION_OVERLAP_DAYS,
+        },
+      );
+    }
+    return overlapDays;
+  }
+
+  private resolveCredentialOverlapEndsAt(
+    rotatedAt: string,
+    overlapDays?: number | null,
+  ) {
+    const resolvedOverlapDays = this.resolveCredentialOverlapDays(overlapDays);
+    return this.addDaysToIso(rotatedAt, resolvedOverlapDays);
+  }
+
+  private buildCredentialSignals(
+    lastUsedAt: string | null,
+    expiresAt: string | null,
+    autoRevokedAt: string | null,
+    nowIso: string,
+  ): IntegrationCredentialSignals {
+    const nowMs = Date.parse(nowIso);
+    const expiresMs = expiresAt ? Date.parse(expiresAt) : Number.NaN;
+    const lastUsedMs = lastUsedAt ? Date.parse(lastUsedAt) : Number.NaN;
+    const approachingExpiry =
+      Number.isFinite(expiresMs) &&
+      expiresMs > nowMs &&
+      expiresMs - nowMs <=
+        CREDENTIAL_APPROACHING_EXPIRY_THRESHOLD_DAYS * 24 * 60 * 60 * 1_000;
+    const dormant = Number.isFinite(lastUsedMs)
+      ? nowMs - lastUsedMs >=
+        CREDENTIAL_DORMANT_THRESHOLD_DAYS * 24 * 60 * 60 * 1_000
+      : false;
+    const expired = Number.isFinite(expiresMs) ? expiresMs <= nowMs : false;
+
+    return {
+      approachingExpiry,
+      dormant,
+      expired,
+      autoRevoked: autoRevokedAt !== null,
+      evaluatedAt: nowIso,
+    };
+  }
+
+  private materializeCredentialSignals(
+    signals: IntegrationCredentialSignals | null | undefined,
+    lastUsedAt: string | null,
+    expiresAt: string | null,
+    autoRevokedAt: string | null,
+    nowIso = new Date().toISOString(),
+  ): IntegrationCredentialSignals {
+    if (signals) {
+      return this.toCredentialSignals(signals);
+    }
+
+    return this.buildCredentialSignals(
+      lastUsedAt,
+      expiresAt,
+      autoRevokedAt,
+      nowIso,
+    );
+  }
+
+  private resolveCredentialStatus(params: {
+    revokedAt: string | null;
+    expiresAt?: string | null;
+    overlapEndsAt?: string | null;
+    autoRevokedAt?: string | null;
+    nowIso: string;
+  }): IntegrationCredentialStatus {
+    if (params.revokedAt) {
+      return params.autoRevokedAt ? "auto_revoked" : "revoked";
+    }
+
+    const nowMs = Date.parse(params.nowIso);
+    const expiresMs = params.expiresAt
+      ? Date.parse(params.expiresAt)
+      : Number.NaN;
+    if (Number.isFinite(expiresMs) && expiresMs <= nowMs) {
+      return "expired";
+    }
+
+    const overlapMs = params.overlapEndsAt
+      ? Date.parse(params.overlapEndsAt)
+      : Number.NaN;
+    if (Number.isFinite(overlapMs) && overlapMs > nowMs) {
+      return "overlap_active";
+    }
+
+    return "active";
+  }
+
+  private reconcileCredentialLifecycle<
+    T extends {
+      createdAt: string;
+      lastUsedAt: string | null;
+      lastUsedWorkload?: string | null;
+      expiresAt?: string | null;
+      status?: IntegrationCredentialStatus;
+      overlapEndsAt?: string | null;
+      autoRevokedAt?: string | null;
+      revokedAt: string | null;
+      revokeReason?: string | null;
+      signals?: IntegrationCredentialSignals | undefined;
+    },
+  >(
+    record: T,
+    params: {
+      nowIso: string;
+      defaultExpiresAt: string | null;
+      autoRevokeReason: string;
+    },
+  ) {
+    let changed = false;
+
+    if (record.lastUsedWorkload === undefined) {
+      record.lastUsedWorkload = null;
+      changed = true;
+    }
+    if (record.expiresAt === undefined || record.expiresAt === null) {
+      record.expiresAt = params.defaultExpiresAt;
+      changed = true;
+    }
+    if (record.overlapEndsAt === undefined) {
+      record.overlapEndsAt = null;
+      changed = true;
+    }
+    if (record.autoRevokedAt === undefined) {
+      record.autoRevokedAt = null;
+      changed = true;
+    }
+
+    if (
+      !record.revokedAt &&
+      record.overlapEndsAt &&
+      Date.parse(record.overlapEndsAt) <= Date.parse(params.nowIso)
+    ) {
+      record.revokedAt = record.overlapEndsAt;
+      record.autoRevokedAt = record.overlapEndsAt;
+      if ("revokeReason" in record && !record.revokeReason) {
+        record.revokeReason = params.autoRevokeReason;
+      }
+      changed = true;
+    }
+
+    const nextStatus = this.resolveCredentialStatus({
+      revokedAt: record.revokedAt,
+      expiresAt: record.expiresAt ?? null,
+      overlapEndsAt: record.overlapEndsAt ?? null,
+      autoRevokedAt: record.autoRevokedAt ?? null,
+      nowIso: params.nowIso,
+    });
+    if (record.status !== nextStatus) {
+      record.status = nextStatus;
+      changed = true;
+    }
+
+    const nextSignals = this.buildCredentialSignals(
+      record.lastUsedAt,
+      record.expiresAt ?? null,
+      record.autoRevokedAt ?? null,
+      params.nowIso,
+    );
+    if (
+      JSON.stringify(record.signals ?? null) !== JSON.stringify(nextSignals)
+    ) {
+      record.signals = nextSignals;
+      changed = true;
+    }
+
+    return changed;
+  }
+
+  private resolveCredentialOwner(
+    input: {
+      ownerRef?: string | null;
+      ownerName?: string | null;
+      ownerType?: string | null;
+    },
+    fallback: {
+      ownerRef: string | null;
+      ownerName: string;
+      ownerType: string;
+    },
+  ) {
+    return {
+      ownerRef: this.normalizeNullableText(input.ownerRef) ?? fallback.ownerRef,
+      ownerName:
+        this.normalizeNullableText(input.ownerName) ?? fallback.ownerName,
+      ownerType:
+        this.normalizeNullableText(input.ownerType) ?? fallback.ownerType,
+    };
+  }
+
+  private resolveCredentialPurpose(
+    purpose: string | null | undefined,
+    fallback: string,
+  ) {
+    return this.normalizeNullableText(purpose) ?? fallback;
+  }
+
+  private resolvePartnerIngressCredentialExpiry(
+    expiresAt: string | null | undefined,
+    nowIso: string,
+  ) {
+    const fallbackExpiry = this.addDaysToIso(
+      nowIso,
+      DEFAULT_PARTNER_INGRESS_CREDENTIAL_LIFETIME_DAYS,
+    );
+    if (!expiresAt) {
+      return fallbackExpiry;
+    }
+
+    const parsed = Date.parse(expiresAt);
+    if (Number.isNaN(parsed)) {
+      throw new ApiRequestError(
+        HttpStatus.BAD_REQUEST,
+        "PARTNER_INGRESS_CREDENTIAL_EXPIRY_INVALID",
+        "expiresAt must be a valid ISO timestamp.",
+        { expiresAt },
+      );
+    }
+    if (parsed <= Date.parse(nowIso)) {
+      throw new ApiRequestError(
+        HttpStatus.BAD_REQUEST,
+        "PARTNER_INGRESS_CREDENTIAL_EXPIRY_PAST",
+        "expiresAt must be in the future.",
+        { expiresAt },
+      );
+    }
+    const maxExpiry =
+      Date.parse(nowIso) +
+      MAX_PARTNER_INGRESS_CREDENTIAL_LIFETIME_DAYS * 24 * 60 * 60 * 1_000;
+    if (parsed > maxExpiry) {
+      throw new ApiRequestError(
+        HttpStatus.BAD_REQUEST,
+        "PARTNER_INGRESS_CREDENTIAL_EXPIRY_TOO_FAR",
+        "expiresAt exceeds the partner credential maximum lifetime.",
+        {
+          expiresAt,
+          maxLifetimeDays: MAX_PARTNER_INGRESS_CREDENTIAL_LIFETIME_DAYS,
+        },
+      );
+    }
+
+    return new Date(parsed).toISOString();
+  }
+
+  private resolveWebhookSecretExpiry(
+    expiresAt: string | null | undefined,
+    nowIso: string,
+  ) {
+    const fallbackExpiry = this.addDaysToIso(
+      nowIso,
+      DEFAULT_WEBHOOK_SECRET_LIFETIME_DAYS,
+    );
+    if (!expiresAt) {
+      return fallbackExpiry;
+    }
+
+    const parsed = Date.parse(expiresAt);
+    if (Number.isNaN(parsed)) {
+      throw new ApiRequestError(
+        HttpStatus.BAD_REQUEST,
+        "WEBHOOK_SECRET_EXPIRY_INVALID",
+        "expiresAt must be a valid ISO timestamp.",
+        { expiresAt },
+      );
+    }
+    if (parsed <= Date.parse(nowIso)) {
+      throw new ApiRequestError(
+        HttpStatus.BAD_REQUEST,
+        "WEBHOOK_SECRET_EXPIRY_PAST",
+        "expiresAt must be in the future.",
+        { expiresAt },
+      );
+    }
+    const maxExpiry =
+      Date.parse(nowIso) +
+      MAX_WEBHOOK_SECRET_LIFETIME_DAYS * 24 * 60 * 60 * 1_000;
+    if (parsed > maxExpiry) {
+      throw new ApiRequestError(
+        HttpStatus.BAD_REQUEST,
+        "WEBHOOK_SECRET_EXPIRY_TOO_FAR",
+        "expiresAt exceeds the webhook credential maximum lifetime.",
+        {
+          expiresAt,
+          maxLifetimeDays: MAX_WEBHOOK_SECRET_LIFETIME_DAYS,
+        },
+      );
+    }
+
+    return new Date(parsed).toISOString();
+  }
+
+  private reconcileStoredApiKey(
+    apiKey: StoredTenantApiKeyRecord,
+    nowIso = new Date().toISOString(),
+  ) {
+    let changed = false;
+    const owner = this.resolveCredentialOwner(apiKey, {
+      ownerRef: null,
+      ownerName: "Unassigned tenant integration owner",
+      ownerType: "unknown",
+    });
+    if (apiKey.ownerRef !== owner.ownerRef) {
+      apiKey.ownerRef = owner.ownerRef;
+      changed = true;
+    }
+    if (apiKey.ownerName !== owner.ownerName) {
+      apiKey.ownerName = owner.ownerName;
+      changed = true;
+    }
+    if (apiKey.ownerType !== owner.ownerType) {
+      apiKey.ownerType = owner.ownerType;
+      changed = true;
+    }
+    if (apiKey.realm !== "tenant") {
+      apiKey.realm = "tenant";
+      changed = true;
+    }
+    const resourceScope = apiKey.resourceScope ?? `tenant:${apiKey.tenantId}`;
+    if (apiKey.resourceScope !== resourceScope) {
+      apiKey.resourceScope = resourceScope;
+      changed = true;
+    }
+    const purpose = this.resolveCredentialPurpose(
+      apiKey.purpose,
+      `${apiKey.keyName} integration credential`,
+    );
+    if (apiKey.purpose !== purpose) {
+      apiKey.purpose = purpose;
+      changed = true;
+    }
+    if (apiKey.rotatedFromApiKeyId === undefined) {
+      apiKey.rotatedFromApiKeyId = null;
+      changed = true;
+    }
+    if (apiKey.supersededByApiKeyId === undefined) {
+      apiKey.supersededByApiKeyId = null;
+      changed = true;
+    }
+    changed =
+      this.reconcileCredentialLifecycle(apiKey, {
+        nowIso,
+        defaultExpiresAt:
+          apiKey.expiresAt ??
+          this.addDaysToIso(nowIso, DEFAULT_TENANT_API_KEY_LIFETIME_DAYS),
+        autoRevokeReason: "rotation_overlap_elapsed",
+      }) || changed;
+    return changed;
+  }
+
+  private reconcileStoredPartnerIngressCredential(
+    credential: StoredPartnerIngressCredentialRecord,
+    nowIso = new Date().toISOString(),
+  ) {
+    let changed = false;
+    const owner = this.resolveCredentialOwner(credential, {
+      ownerRef: null,
+      ownerName:
+        credential.source === "env_bootstrap"
+          ? "Bootstrap partner credential owner"
+          : "Platform partner credential owner",
+      ownerType:
+        credential.source === "env_bootstrap" ? "system" : "platform_admin",
+    });
+    if (credential.ownerRef !== owner.ownerRef) {
+      credential.ownerRef = owner.ownerRef;
+      changed = true;
+    }
+    if (credential.ownerName !== owner.ownerName) {
+      credential.ownerName = owner.ownerName;
+      changed = true;
+    }
+    if (credential.ownerType !== owner.ownerType) {
+      credential.ownerType = owner.ownerType;
+      changed = true;
+    }
+    if (credential.realm !== "partner") {
+      credential.realm = "partner";
+      changed = true;
+    }
+    const resourceScope =
+      credential.resourceScope ?? `partner_entry:${credential.entrySlug}`;
+    if (credential.resourceScope !== resourceScope) {
+      credential.resourceScope = resourceScope;
+      changed = true;
+    }
+    const purpose = this.resolveCredentialPurpose(
+      credential.purpose,
+      `partner ingress for ${credential.entrySlug}`,
+    );
+    if (credential.purpose !== purpose) {
+      credential.purpose = purpose;
+      changed = true;
+    }
+    const scopes = credential.scopes ?? [
+      "partner:entries:read",
+      "partner:eligibility:read",
+      "partner:eligibility:write",
+    ];
+    if (JSON.stringify(credential.scopes ?? null) !== JSON.stringify(scopes)) {
+      credential.scopes = [...scopes];
+      changed = true;
+    }
+    if (credential.rotatedFromKeyId === undefined) {
+      credential.rotatedFromKeyId = null;
+      changed = true;
+    }
+    if (credential.supersededByKeyId === undefined) {
+      credential.supersededByKeyId = null;
+      changed = true;
+    }
+    const defaultExpiresAt =
+      credential.expiresAt ??
+      (credential.source === "env_bootstrap"
+        ? this.addDaysToIso(
+            nowIso,
+            DEFAULT_PARTNER_INGRESS_CREDENTIAL_LIFETIME_DAYS,
+          )
+        : this.addDaysToIso(
+            nowIso,
+            DEFAULT_PARTNER_INGRESS_CREDENTIAL_LIFETIME_DAYS,
+          ));
+    changed =
+      this.reconcileCredentialLifecycle(credential, {
+        nowIso,
+        defaultExpiresAt,
+        autoRevokeReason: "rotation_overlap_elapsed",
+      }) || changed;
+    return changed;
+  }
+
+  private reconcileWebhookSecretMaterial(
+    secret: StoredWebhookSecretMaterial,
+    nowIso = new Date().toISOString(),
+  ) {
+    return this.reconcileCredentialLifecycle(secret, {
+      nowIso,
+      defaultExpiresAt:
+        secret.expiresAt ??
+        this.addDaysToIso(nowIso, DEFAULT_WEBHOOK_SECRET_LIFETIME_DAYS),
+      autoRevokeReason: "rotation_overlap_elapsed",
+    });
+  }
+
+  private reconcileStoredWebhookEndpoint(
+    endpoint: StoredWebhookEndpoint,
+    nowIso = new Date().toISOString(),
+  ) {
+    let changed = false;
+    const owner = this.resolveCredentialOwner(endpoint, {
+      ownerRef: null,
+      ownerName: "Tenant webhook integration owner",
+      ownerType: "tenant_admin",
+    });
+    if (endpoint.ownerRef !== owner.ownerRef) {
+      endpoint.ownerRef = owner.ownerRef;
+      changed = true;
+    }
+    if (endpoint.ownerName !== owner.ownerName) {
+      endpoint.ownerName = owner.ownerName;
+      changed = true;
+    }
+    if (endpoint.ownerType !== owner.ownerType) {
+      endpoint.ownerType = owner.ownerType;
+      changed = true;
+    }
+    const purpose = this.resolveCredentialPurpose(
+      endpoint.purpose,
+      `tenant webhook signing for ${endpoint.webhookId}`,
+    );
+    if (endpoint.purpose !== purpose) {
+      endpoint.purpose = purpose;
+      changed = true;
+    }
+    const resourceScope =
+      endpoint.resourceScope ??
+      `tenant:${endpoint.tenantId}:webhook:${endpoint.webhookId}`;
+    if (endpoint.resourceScope !== resourceScope) {
+      endpoint.resourceScope = resourceScope;
+      changed = true;
+    }
+
+    const secretCredentials: StoredWebhookSecretMaterial[] =
+      endpoint.secretCredentials && endpoint.secretCredentials.length > 0
+        ? endpoint.secretCredentials.map(
+            (record): StoredWebhookSecretMaterial => ({
+              ...record,
+              createdAt: record.createdAt ?? record.rotatedAt,
+              status: record.status ?? "active",
+              signals:
+                record.signals ??
+                this.buildCredentialSignals(
+                  record.lastUsedAt ?? null,
+                  record.expiresAt ??
+                    this.addDaysToIso(
+                      nowIso,
+                      DEFAULT_WEBHOOK_SECRET_LIFETIME_DAYS,
+                    ),
+                  record.autoRevokedAt ?? null,
+                  nowIso,
+                ),
+            }),
+          )
+        : [
+            {
+              createdAt:
+                endpoint.runtimeMetadata?.secretRotation?.rotatedAt ??
+                endpoint.createdAt,
+              secretVersion: endpoint.secretVersion,
+              rotatedAt:
+                endpoint.runtimeMetadata?.secretRotation?.rotatedAt ??
+                endpoint.updatedAt,
+              rotationReason:
+                endpoint.secretHistory?.at(-1)?.rotationReason ??
+                "initial_secret",
+              secretPreview: endpoint.secretPreview,
+              secretValue: endpoint.secretValue,
+              ownerRef: owner.ownerRef,
+              ownerName: owner.ownerName,
+              ownerType: owner.ownerType,
+              purpose,
+              expiresAt:
+                endpoint.secretExpiresAt ??
+                this.addDaysToIso(nowIso, DEFAULT_WEBHOOK_SECRET_LIFETIME_DAYS),
+              lastUsedAt: endpoint.secretLastUsedAt ?? null,
+              lastUsedWorkload: endpoint.secretLastUsedWorkload ?? null,
+              status: "active",
+              overlapEndsAt: endpoint.rotationOverlapEndsAt ?? null,
+              autoRevokedAt: null,
+              supersededByVersion: null,
+              revokedAt: null,
+              signals: this.buildCredentialSignals(
+                endpoint.secretLastUsedAt ?? null,
+                endpoint.secretExpiresAt ??
+                  this.addDaysToIso(
+                    nowIso,
+                    DEFAULT_WEBHOOK_SECRET_LIFETIME_DAYS,
+                  ),
+                null,
+                nowIso,
+              ),
+            },
+          ];
+
+    const reconciledSecrets = secretCredentials
+      .map((record) => {
+        const secret: StoredWebhookSecretMaterial = {
+          ...record,
+          createdAt: record.createdAt ?? record.rotatedAt,
+          status: record.status ?? "active",
+          ownerRef: record.ownerRef ?? owner.ownerRef,
+          ownerName: record.ownerName ?? owner.ownerName,
+          ownerType: record.ownerType ?? owner.ownerType,
+          purpose: this.resolveCredentialPurpose(record.purpose, purpose),
+          lastUsedWorkload: record.lastUsedWorkload ?? null,
+          overlapEndsAt: record.overlapEndsAt ?? null,
+          autoRevokedAt: record.autoRevokedAt ?? null,
+          supersededByVersion: record.supersededByVersion ?? null,
+          revokedAt: record.revokedAt ?? null,
+          signals: this.materializeCredentialSignals(
+            record.signals,
+            record.lastUsedAt ?? null,
+            record.expiresAt ??
+              this.addDaysToIso(nowIso, DEFAULT_WEBHOOK_SECRET_LIFETIME_DAYS),
+            record.autoRevokedAt ?? null,
+            nowIso,
+          ),
+        };
+        changed =
+          this.reconcileWebhookSecretMaterial(secret, nowIso) || changed;
+        return secret;
+      })
+      .sort((left, right) => right.secretVersion - left.secretVersion);
+
+    endpoint.secretCredentials = reconciledSecrets;
+    const currentSecret =
+      reconciledSecrets.find(
+        (record) => record.secretVersion === endpoint.secretVersion,
+      ) ?? reconciledSecrets[0];
+
+    if (currentSecret) {
+      if (endpoint.secretVersion !== currentSecret.secretVersion) {
+        endpoint.secretVersion = currentSecret.secretVersion;
+        changed = true;
+      }
+      if (endpoint.secretValue !== currentSecret.secretValue) {
+        endpoint.secretValue = currentSecret.secretValue;
+        changed = true;
+      }
+      if (endpoint.secretPreview !== currentSecret.secretPreview) {
+        endpoint.secretPreview = currentSecret.secretPreview;
+        changed = true;
+      }
+      if (endpoint.secretExpiresAt !== currentSecret.expiresAt) {
+        endpoint.secretExpiresAt = currentSecret.expiresAt;
+        changed = true;
+      }
+      if (endpoint.secretLastUsedAt !== currentSecret.lastUsedAt) {
+        endpoint.secretLastUsedAt = currentSecret.lastUsedAt;
+        changed = true;
+      }
+      if (endpoint.secretLastUsedWorkload !== currentSecret.lastUsedWorkload) {
+        endpoint.secretLastUsedWorkload = currentSecret.lastUsedWorkload;
+        changed = true;
+      }
+      if (endpoint.credentialStatus !== currentSecret.status) {
+        endpoint.credentialStatus = currentSecret.status;
+        changed = true;
+      }
+      if (endpoint.rotationOverlapEndsAt !== currentSecret.overlapEndsAt) {
+        endpoint.rotationOverlapEndsAt = currentSecret.overlapEndsAt;
+        changed = true;
+      }
+      if (
+        JSON.stringify(endpoint.credentialSignals ?? null) !==
+        JSON.stringify(currentSecret.signals)
+      ) {
+        endpoint.credentialSignals = this.toCredentialSignals(
+          currentSecret.signals,
+        );
+        changed = true;
+      }
+    }
+
+    // `reconciledSecrets` is newest-first so the active secret resolves cheaply,
+    // but tenant-facing rotation history stays oldest-first as it always has.
+    const secretHistory: WebhookSecretRotationRecord[] = reconciledSecrets
+      .slice()
+      .reverse()
+      .map((record) => this.toWebhookSecretHistoryRecord(record));
+    if (
+      JSON.stringify(endpoint.secretHistory ?? null) !==
+      JSON.stringify(secretHistory)
+    ) {
+      endpoint.secretHistory = secretHistory;
+      changed = true;
+    }
+
+    endpoint.runtimeMetadata = this.toWebhookRuntimeMetadata(
+      endpoint.runtimeMetadata,
+      {
+        currentVersion: endpoint.secretVersion,
+        rotatedAt:
+          currentSecret?.rotatedAt ??
+          endpoint.runtimeMetadata.secretRotation.rotatedAt,
+        rotationCount: reconciledSecrets.length,
+        history: endpoint.secretHistory,
+      },
+    );
+
+    return changed;
+  }
+
+  /**
+   * Rotation history is tenant-facing, so it is projected field by field out of
+   * the stored credential instead of spread. Raw secret material and any future
+   * field added to `StoredWebhookSecretMaterial` stay internal until they are
+   * listed here on purpose.
+   */
+  private toWebhookSecretHistoryRecord(
+    secret: WebhookSecretRotationRecord & {
+      createdAt?: string;
+      // Declared so the input type admits stored material; never projected out.
+      secretValue?: string;
+    },
+  ): PublishedWebhookSecretRotationRecord {
+    return {
+      createdAt: secret.createdAt ?? secret.rotatedAt,
+      secretVersion: secret.secretVersion,
+      rotatedAt: secret.rotatedAt,
+      rotationReason: secret.rotationReason,
+      secretPreview: secret.secretPreview,
+      ownerRef: secret.ownerRef ?? null,
+      ownerName: secret.ownerName ?? null,
+      ownerType: secret.ownerType ?? null,
+      purpose: secret.purpose ?? null,
+      expiresAt: secret.expiresAt ?? null,
+      lastUsedAt: secret.lastUsedAt ?? null,
+      lastUsedWorkload: secret.lastUsedWorkload ?? null,
+      status: secret.status ?? "active",
+      overlapEndsAt: secret.overlapEndsAt ?? null,
+      autoRevokedAt: secret.autoRevokedAt ?? null,
+      supersededByVersion: secret.supersededByVersion ?? null,
+      revokedAt: secret.revokedAt ?? null,
+      signals: this.toCredentialSignals(secret.signals),
+    };
+  }
+
+  /**
+   * Signals ride along on tenant-facing credential reads, so they are projected
+   * field by field for the same reason rotation history is: a legacy persisted
+   * row can carry keys this type no longer declares.
+   */
+  private toCredentialSignals(
+    signals: IntegrationCredentialSignals,
+  ): IntegrationCredentialSignals;
+  private toCredentialSignals(
+    signals: IntegrationCredentialSignals | null | undefined,
+  ): IntegrationCredentialSignals | undefined;
+  private toCredentialSignals(
+    signals: IntegrationCredentialSignals | null | undefined,
+  ): IntegrationCredentialSignals | undefined {
+    if (!signals) {
+      return undefined;
+    }
+    return {
+      approachingExpiry: signals.approachingExpiry,
+      dormant: signals.dormant,
+      expired: signals.expired,
+      autoRevoked: signals.autoRevoked,
+      evaluatedAt: signals.evaluatedAt,
+    };
+  }
+
+  /**
+   * Projected rather than spread so hydrated rows cannot republish stray keys,
+   * and so `retryableStatusCodes` is copied instead of aliased into the clone.
+   * A spread used to silently tolerate a missing or partial persisted policy,
+   * so each field falls back to the platform default rather than projecting
+   * `undefined` into a fully required contract shape.
+   */
+  private toWebhookRetryPolicy(
+    retryPolicy: Partial<WebhookRetryPolicyRecord> | null | undefined,
+  ): WebhookRetryPolicyRecord {
+    const fallback = DEFAULT_WEBHOOK_RETRY_POLICY;
+    return {
+      maxAttempts: retryPolicy?.maxAttempts ?? fallback.maxAttempts,
+      initialBackoffSeconds:
+        retryPolicy?.initialBackoffSeconds ?? fallback.initialBackoffSeconds,
+      backoffMultiplier:
+        retryPolicy?.backoffMultiplier ?? fallback.backoffMultiplier,
+      maxBackoffSeconds:
+        retryPolicy?.maxBackoffSeconds ?? fallback.maxBackoffSeconds,
+      retryableStatusCodes: [
+        ...(retryPolicy?.retryableStatusCodes ?? fallback.retryableStatusCodes),
+      ],
+    };
+  }
+
+  /**
+   * Runtime metadata is tenant-facing and is rebuilt field by field rather than
+   * spread. Persisted rows are loaded through an unchecked JSONB cast, so a
+   * legacy endpoint that carried extra keys under `runtimeMetadata` cannot
+   * republish them through a webhook read.
+   */
+  private toWebhookRuntimeMetadata(
+    metadata: WebhookRuntimeMetadata,
+    secretRotation?: WebhookRuntimeMetadata["secretRotation"],
+  ): WebhookRuntimeMetadata {
+    const rotation = secretRotation ?? metadata.secretRotation;
+    return {
+      deliveryCount: metadata.deliveryCount,
+      failedDeliveryCount: metadata.failedDeliveryCount,
+      lastAttemptAt: metadata.lastAttemptAt,
+      lastDeliveredAt: metadata.lastDeliveredAt,
+      lastValidatedAt: metadata.lastValidatedAt,
+      nextAttemptAt: metadata.nextAttemptAt,
+      lastSignaturePreview: metadata.lastSignaturePreview,
+      disabledAt: metadata.disabledAt,
+      disableReason: metadata.disableReason,
+      disableReasonNote: metadata.disableReasonNote ?? null,
+      retryPolicy: this.toWebhookRetryPolicy(metadata.retryPolicy),
+      secretRotation: {
+        currentVersion: rotation.currentVersion,
+        rotatedAt: rotation.rotatedAt,
+        rotationCount: rotation.rotationCount,
+        history: (rotation.history ?? []).map((record) =>
+          this.toWebhookSecretHistoryRecord(record),
+        ),
+      },
+    };
+  }
+
   private cloneStoredApiKey(
     apiKey: StoredTenantApiKeyRecord,
   ): StoredTenantApiKeyRecord {
-    return {
+    const nowIso = new Date().toISOString();
+    const cloned: StoredTenantApiKeyRecord = {
       ...apiKey,
       scopes: [...apiKey.scopes],
+      signals: this.materializeCredentialSignals(
+        apiKey.signals,
+        apiKey.lastUsedAt,
+        apiKey.expiresAt ?? null,
+        apiKey.autoRevokedAt ?? null,
+        nowIso,
+      ),
     };
+    this.reconcileStoredApiKey(cloned, nowIso);
+    return cloned;
+  }
+
+  private maybeRecordDormantCredentialUse(params: {
+    tenantId: string | null;
+    channel: "ops_notice";
+    title: string;
+    message: string;
+    previousLastUsedAt: string | null;
+    createdAt: string;
+  }) {
+    const baseline = params.previousLastUsedAt ?? params.createdAt;
+    const baselineMs = Date.parse(baseline);
+    if (
+      !Number.isFinite(baselineMs) ||
+      Date.now() - baselineMs <
+        CREDENTIAL_DORMANT_THRESHOLD_DAYS * 24 * 60 * 60 * 1_000
+    ) {
+      return;
+    }
+
+    this.auditNotificationService.recordNotification({
+      tenantId: params.tenantId,
+      recipientUserId: null,
+      channel: params.channel,
+      title: params.title,
+      message: params.message,
+      status: "unread",
+    });
+  }
+
+  private resolveWebhookSecretMaterial(
+    endpoint: StoredWebhookEndpoint,
+    secretVersion: number,
+    nowIso = new Date().toISOString(),
+  ) {
+    this.reconcileStoredWebhookEndpoint(endpoint, nowIso);
+    return (
+      endpoint.secretCredentials?.find(
+        (candidate) => candidate.secretVersion === secretVersion,
+      ) ?? null
+    );
+  }
+
+  private markWebhookSecretUsed(
+    endpoint: StoredWebhookEndpoint,
+    secret: StoredWebhookSecretMaterial,
+    workload: string,
+    usedAt: string,
+  ) {
+    const previousLastUsedAt = secret.lastUsedAt;
+    secret.lastUsedAt = usedAt;
+    secret.lastUsedWorkload = workload;
+    secret.signals = this.buildCredentialSignals(
+      secret.lastUsedAt,
+      secret.expiresAt ?? null,
+      secret.autoRevokedAt ?? null,
+      usedAt,
+    );
+    this.maybeRecordDormantCredentialUse({
+      tenantId: endpoint.tenantId,
+      channel: "ops_notice",
+      title: "Dormant webhook credential used",
+      message: `Webhook secret v${secret.secretVersion} for ${endpoint.webhookId} was used after dormancy.`,
+      previousLastUsedAt,
+      createdAt: secret.rotatedAt,
+    });
+    this.reconcileStoredWebhookEndpoint(endpoint, usedAt);
   }
 
   private cloneStoredWebhookEndpoint(
     endpoint: StoredWebhookEndpointRecord,
   ): StoredWebhookEndpoint {
-    return {
+    const defaultOwnerName =
+      endpoint.ownerName ?? "Tenant webhook integration owner";
+    const defaultOwnerType = endpoint.ownerType ?? "tenant_admin";
+    const defaultPurpose =
+      endpoint.purpose ?? `tenant webhook signing for ${endpoint.webhookId}`;
+    const cloned: StoredWebhookEndpoint = {
       ...endpoint,
       events: [...endpoint.events],
-      retryPolicy: { ...endpoint.retryPolicy },
-      runtimeMetadata: {
-        ...endpoint.runtimeMetadata,
-        retryPolicy: { ...endpoint.runtimeMetadata.retryPolicy },
-        secretRotation: {
-          currentVersion:
-            endpoint.runtimeMetadata.secretRotation.currentVersion,
-          rotatedAt: endpoint.runtimeMetadata.secretRotation.rotatedAt,
-          rotationCount: endpoint.runtimeMetadata.secretRotation.rotationCount,
-          history: (endpoint.runtimeMetadata.secretRotation.history ?? []).map(
-            (record) => ({
-              ...record,
-            }),
+      retryPolicy: this.toWebhookRetryPolicy(endpoint.retryPolicy),
+      runtimeMetadata: this.toWebhookRuntimeMetadata(endpoint.runtimeMetadata),
+      // Live secret material belongs to `secretCredentials` only; history is
+      // re-projected so hydrated rows cannot smuggle it back in.
+      secretHistory: (endpoint.secretHistory ?? []).map((record) =>
+        this.toWebhookSecretHistoryRecord(record),
+      ),
+      secretCredentials: (endpoint.secretCredentials ?? []).map(
+        (record): StoredWebhookSecretMaterial => ({
+          ...record,
+          createdAt: record.createdAt ?? record.rotatedAt,
+          ownerRef: record.ownerRef ?? endpoint.ownerRef ?? null,
+          ownerName: record.ownerName ?? defaultOwnerName,
+          ownerType: record.ownerType ?? defaultOwnerType,
+          purpose: this.resolveCredentialPurpose(
+            record.purpose,
+            defaultPurpose,
           ),
-        },
-      },
-      secretHistory: (endpoint.secretHistory ?? []).map((record) => ({
-        ...record,
-      })),
+          expiresAt: record.expiresAt ?? endpoint.secretExpiresAt ?? null,
+          lastUsedAt: record.lastUsedAt ?? null,
+          lastUsedWorkload: record.lastUsedWorkload ?? null,
+          status: record.status ?? "active",
+          overlapEndsAt: record.overlapEndsAt ?? null,
+          autoRevokedAt: record.autoRevokedAt ?? null,
+          supersededByVersion: record.supersededByVersion ?? null,
+          revokedAt: record.revokedAt ?? null,
+          signals: this.materializeCredentialSignals(
+            record.signals,
+            record.lastUsedAt ?? null,
+            record.expiresAt ?? endpoint.secretExpiresAt ?? null,
+            record.autoRevokedAt ?? null,
+          ),
+        }),
+      ),
+      credentialSignals: this.materializeCredentialSignals(
+        endpoint.credentialSignals,
+        endpoint.secretLastUsedAt ?? null,
+        endpoint.secretExpiresAt ?? null,
+        null,
+      ),
     };
+    this.reconcileStoredWebhookEndpoint(cloned);
+    return cloned;
   }
 
   private cloneStoredWebhookDelivery(
@@ -8118,7 +11135,9 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
     return {
       ...delivery,
       rawBody: { ...delivery.rawBody },
-      retryPolicySnapshot: { ...delivery.retryPolicySnapshot },
+      retryPolicySnapshot: this.toWebhookRetryPolicy(
+        delivery.retryPolicySnapshot,
+      ),
     };
   }
 
@@ -8334,6 +11353,9 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
   }
 
   private reconcilePartnerEntrySeeds() {
+    if (isStrictAuthEnvironment()) {
+      return;
+    }
     const existingSlugs = new Set(
       this.partnerEntries.map((entry) => entry.entrySlug),
     );
@@ -8381,6 +11403,9 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
   }
 
   private reconcilePartnerIngressCredentialSeeds() {
+    if (isStrictAuthEnvironment()) {
+      return;
+    }
     const configuredEntrySlugs = new Set(
       this.partnerIngressCredentials.map((credential) => credential.entrySlug),
     );
@@ -8407,10 +11432,276 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
   }
 
   private resolvePartnerIngressCredential(entrySlug: string) {
-    return this.partnerIngressCredentials.find(
-      (credential) =>
-        credential.entrySlug === entrySlug && credential.revokedAt === null,
+    return this.partnerIngressCredentials
+      .filter((credential) => credential.entrySlug === entrySlug)
+      .map((credential) => {
+        this.reconcileStoredPartnerIngressCredential(credential);
+        return credential;
+      })
+      .filter(
+        (credential) =>
+          credential.status === "active" ||
+          credential.status === "overlap_active",
+      )
+      .sort((left, right) => {
+        if (left.status === right.status) {
+          return right.createdAt.localeCompare(left.createdAt);
+        }
+        return left.status === "active" ? -1 : 1;
+      })[0];
+  }
+
+  private findPartnerIngressCredentialByApiKey(
+    entrySlug: string,
+    apiKey: string,
+  ) {
+    const providedHash = this.hashPartnerApiKey(apiKey);
+    return this.partnerIngressCredentials
+      .filter((credential) => credential.entrySlug === entrySlug)
+      .map((credential) => {
+        this.reconcileStoredPartnerIngressCredential(credential);
+        return credential;
+      })
+      .find((credential) => this.hashesMatch(providedHash, credential.keyHash));
+  }
+
+  private clearDemoSeedState() {
+    this.notificationPreferences = new Map();
+    this.slaProfiles = new Map();
+    this.passengers = [];
+    this.addresses = [];
+    this.costCenters = [];
+    this.userRoles = [];
+    this.apiKeys = [];
+    this.partnerEntries = [];
+    this.referralRevenueShareRules = [];
+  }
+
+  private sanitizePersistedState(
+    state: TenantPartnerState,
+  ): TenantPartnerState {
+    if (!isStrictAuthEnvironment()) {
+      return {
+        ...state,
+        notificationPreferences: state.notificationPreferences.map((value) => ({
+          ...value,
+        })),
+        webhookEndpoints: state.webhookEndpoints.map((value) =>
+          this.cloneStoredWebhookEndpoint(value),
+        ),
+        webhookDeliveries: state.webhookDeliveries.map((value) =>
+          this.cloneStoredWebhookDelivery(value),
+        ),
+        slaProfiles: state.slaProfiles.map((value) =>
+          this.cloneSlaProfile(value),
+        ),
+        partnerEntries: state.partnerEntries.map((value) =>
+          this.clonePartnerEntry(value),
+        ),
+        partnerIngressCredentials: state.partnerIngressCredentials.map(
+          (value) => this.cloneStoredPartnerIngressCredential(value),
+        ),
+        partnerEligibilityVerifications:
+          state.partnerEligibilityVerifications.map((value) =>
+            this.clonePartnerEligibilityVerification(value),
+          ),
+        approvalRules: state.approvalRules.map((value) =>
+          this.cloneApprovalRule(value),
+        ),
+        approvalRequests: state.approvalRequests.map((value) =>
+          this.cloneApprovalRequest(value),
+        ),
+        approvalDecisions: state.approvalDecisions.map((value) =>
+          this.cloneApprovalDecision(value),
+        ),
+        passengers: state.passengers.map((value) => this.clonePassenger(value)),
+        addresses: state.addresses.map((value) => this.cloneAddress(value)),
+        costCenters: state.costCenters.map((value) =>
+          this.cloneCostCenter(value),
+        ),
+        quotaPolicies: state.quotaPolicies.map((value) =>
+          this.cloneQuotaPolicy(value),
+        ),
+        quotaLedger: state.quotaLedger.map((value) =>
+          this.cloneQuotaLedgerEntry(value),
+        ),
+        quotaMonthlySnapshots: state.quotaMonthlySnapshots.map((value) =>
+          this.cloneQuotaMonthlySnapshot(value),
+        ),
+        userRoles: state.userRoles.map((value) => this.cloneUserRole(value)),
+        apiKeys: state.apiKeys.map((value) => this.cloneStoredApiKey(value)),
+      };
+    }
+
+    const retainedPartnerEntries = state.partnerEntries
+      .filter((entry) => entry.tenantId !== DEMO_TENANT_ID)
+      .map((entry) => this.clonePartnerEntry(entry));
+    const retainedPartnerEntrySlugs = new Set(
+      retainedPartnerEntries.map((entry) => entry.entrySlug),
     );
+    const retainIfNotDemoTenant = <T>(values: readonly T[]) =>
+      values.filter((value) => {
+        if (!value || typeof value !== "object" || !("tenantId" in value)) {
+          return true;
+        }
+        return (value as { tenantId?: string }).tenantId !== DEMO_TENANT_ID;
+      });
+
+    return {
+      notificationPreferences: retainIfNotDemoTenant(
+        state.notificationPreferences,
+      ).map((value) => ({ ...value })),
+      webhookEndpoints: retainIfNotDemoTenant(state.webhookEndpoints).map(
+        (value) => this.cloneStoredWebhookEndpoint(value),
+      ),
+      webhookDeliveries: retainIfNotDemoTenant(state.webhookDeliveries).map(
+        (value) => this.cloneStoredWebhookDelivery(value),
+      ),
+      slaProfiles: retainIfNotDemoTenant(state.slaProfiles).map((value) =>
+        this.cloneSlaProfile(value),
+      ),
+      partnerEntries: retainedPartnerEntries,
+      partnerIngressCredentials: state.partnerIngressCredentials
+        .filter((value) => retainedPartnerEntrySlugs.has(value.entrySlug))
+        .map((value) => this.cloneStoredPartnerIngressCredential(value)),
+      partnerEligibilityVerifications: retainIfNotDemoTenant(
+        state.partnerEligibilityVerifications,
+      ).map((value) => this.clonePartnerEligibilityVerification(value)),
+      approvalRules: retainIfNotDemoTenant(state.approvalRules).map((value) =>
+        this.cloneApprovalRule(value),
+      ),
+      approvalRequests: retainIfNotDemoTenant(state.approvalRequests).map(
+        (value) => this.cloneApprovalRequest(value),
+      ),
+      approvalDecisions: retainIfNotDemoTenant(state.approvalDecisions).map(
+        (value) => this.cloneApprovalDecision(value),
+      ),
+      passengers: retainIfNotDemoTenant(state.passengers).map((value) =>
+        this.clonePassenger(value),
+      ),
+      addresses: retainIfNotDemoTenant(state.addresses).map((value) =>
+        this.cloneAddress(value),
+      ),
+      costCenters: retainIfNotDemoTenant(state.costCenters).map((value) =>
+        this.cloneCostCenter(value),
+      ),
+      quotaPolicies: retainIfNotDemoTenant(state.quotaPolicies).map((value) =>
+        this.cloneQuotaPolicy(value),
+      ),
+      quotaLedger: retainIfNotDemoTenant(state.quotaLedger).map((value) =>
+        this.cloneQuotaLedgerEntry(value),
+      ),
+      quotaMonthlySnapshots: retainIfNotDemoTenant(
+        state.quotaMonthlySnapshots,
+      ).map((value) => this.cloneQuotaMonthlySnapshot(value)),
+      userRoles: retainIfNotDemoTenant(state.userRoles).map((value) =>
+        this.cloneUserRole(value),
+      ),
+      apiKeys: retainIfNotDemoTenant(state.apiKeys).map((value) =>
+        this.cloneStoredApiKey(value),
+      ),
+    };
+  }
+
+  private didSanitizePersistedState(
+    original: TenantPartnerState,
+    sanitized: TenantPartnerState,
+  ): boolean {
+    return JSON.stringify(original) !== JSON.stringify(sanitized);
+  }
+
+  private hasPersistedState(state: TenantPartnerState) {
+    return (
+      state.notificationPreferences.length > 0 ||
+      state.slaProfiles.length > 0 ||
+      state.webhookEndpoints.length > 0 ||
+      state.webhookDeliveries.length > 0 ||
+      state.partnerEntries.length > 0 ||
+      state.partnerIngressCredentials.length > 0 ||
+      state.partnerEligibilityVerifications.length > 0 ||
+      state.approvalRules.length > 0 ||
+      state.approvalRequests.length > 0 ||
+      state.approvalDecisions.length > 0 ||
+      state.passengers.length > 0 ||
+      state.addresses.length > 0 ||
+      state.costCenters.length > 0 ||
+      state.quotaPolicies.length > 0 ||
+      state.quotaLedger.length > 0 ||
+      state.quotaMonthlySnapshots.length > 0 ||
+      state.userRoles.length > 0 ||
+      state.apiKeys.length > 0
+    );
+  }
+
+  private buildStrictSanitizeChanges(
+    original: TenantPartnerState,
+    sanitized: TenantPartnerState,
+  ): PersistTenantPartnerChanges {
+    return {
+      ...sanitized,
+      deletedTenantIds: this.hasDemoTenantState(original)
+        ? [DEMO_TENANT_ID]
+        : [],
+      deletedPartnerEntrySlugs: this.collectRemovedKeys(
+        original.partnerEntries,
+        sanitized.partnerEntries,
+        (value) => value.entrySlug,
+      ),
+      deletedPartnerIngressCredentialIds: this.collectRemovedKeys(
+        original.partnerIngressCredentials,
+        sanitized.partnerIngressCredentials,
+        (value) => value.keyId,
+      ),
+      deletedApprovalRequestIds: this.collectRemovedKeys(
+        original.approvalRequests,
+        sanitized.approvalRequests,
+        (value) => value.approvalRequestId,
+      ),
+      deletedApprovalDecisionIds: this.collectRemovedKeys(
+        original.approvalDecisions,
+        sanitized.approvalDecisions,
+        (value) => value.decisionId,
+      ),
+    };
+  }
+
+  private hasDemoTenantState(state: TenantPartnerState) {
+    const addTenantIds = <T extends { tenantId: string }>(
+      values: readonly T[],
+      target: Set<string>,
+    ) => {
+      for (const value of values) {
+        target.add(value.tenantId);
+      }
+    };
+
+    const tenantIds = new Set<string>();
+    addTenantIds(state.notificationPreferences, tenantIds);
+    addTenantIds(state.webhookEndpoints, tenantIds);
+    addTenantIds(state.webhookDeliveries, tenantIds);
+    addTenantIds(state.slaProfiles, tenantIds);
+    addTenantIds(state.partnerEntries, tenantIds);
+    addTenantIds(state.partnerEligibilityVerifications, tenantIds);
+    addTenantIds(state.approvalRules, tenantIds);
+    addTenantIds(state.approvalRequests, tenantIds);
+    addTenantIds(state.passengers, tenantIds);
+    addTenantIds(state.addresses, tenantIds);
+    addTenantIds(state.costCenters, tenantIds);
+    addTenantIds(state.quotaPolicies, tenantIds);
+    addTenantIds(state.quotaLedger, tenantIds);
+    addTenantIds(state.quotaMonthlySnapshots, tenantIds);
+    addTenantIds(state.userRoles, tenantIds);
+    addTenantIds(state.apiKeys, tenantIds);
+    return tenantIds.has(DEMO_TENANT_ID);
+  }
+
+  private collectRemovedKeys<T>(
+    original: readonly T[],
+    sanitized: readonly T[],
+    keyOf: (value: T) => string,
+  ) {
+    const sanitizedKeys = new Set(sanitized.map(keyOf));
+    return original.map(keyOf).filter((key) => !sanitizedKeys.has(key));
   }
 
   private requirePartnerIngressCredential(entrySlug: string, keyId: string) {
@@ -8429,6 +11720,7 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
         },
       );
     }
+    this.reconcileStoredPartnerIngressCredential(credential);
     return credential;
   }
 
@@ -8455,13 +11747,26 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
     }
 
     const partnerMismatch =
-      (identity.actorType !== "partner_api_key" &&
-        identity.actorType !== "referral_passenger") ||
       identity.realm !== "partner" ||
-      identity.tenantId !== entry.tenantId ||
-      identity.partnerId !== entry.partnerId ||
-      identity.partnerProgramId !== entry.programId ||
-      identity.partnerEntrySlug !== entry.entrySlug;
+      (identity.actorType === "referral_passenger"
+        ? identity.tenantId !== entry.tenantId ||
+          identity.partnerId !== entry.partnerId ||
+          identity.partnerProgramId !== entry.programId ||
+          identity.partnerEntrySlug !== entry.entrySlug
+        : (identity.actorType !== "partner_api_key" &&
+            identity.actorType !== "partner_user") ||
+          (identity.tenantId !== null &&
+            identity.tenantId !== undefined &&
+            identity.tenantId !== entry.tenantId) ||
+          (identity.partnerId !== null &&
+            identity.partnerId !== undefined &&
+            identity.partnerId !== entry.partnerId) ||
+          (identity.partnerProgramId !== null &&
+            identity.partnerProgramId !== undefined &&
+            identity.partnerProgramId !== entry.programId) ||
+          (identity.partnerEntrySlug !== null &&
+            identity.partnerEntrySlug !== undefined &&
+            identity.partnerEntrySlug !== entry.entrySlug));
 
     if (!partnerMismatch) {
       return;
@@ -8496,13 +11801,26 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
     }
 
     const partnerMismatch =
-      (identity.actorType !== "partner_api_key" &&
-        identity.actorType !== "referral_passenger") ||
       identity.realm !== "partner" ||
-      identity.tenantId !== verification.tenantId ||
-      identity.partnerId !== verification.partnerId ||
-      identity.partnerProgramId !== verification.partnerProgramId ||
-      identity.partnerEntrySlug !== verification.partnerEntrySlug;
+      (identity.actorType === "referral_passenger"
+        ? identity.tenantId !== verification.tenantId ||
+          identity.partnerId !== verification.partnerId ||
+          identity.partnerProgramId !== verification.partnerProgramId ||
+          identity.partnerEntrySlug !== verification.partnerEntrySlug
+        : (identity.actorType !== "partner_api_key" &&
+            identity.actorType !== "partner_user") ||
+          (identity.tenantId !== null &&
+            identity.tenantId !== undefined &&
+            identity.tenantId !== verification.tenantId) ||
+          (identity.partnerId !== null &&
+            identity.partnerId !== undefined &&
+            identity.partnerId !== verification.partnerId) ||
+          (identity.partnerProgramId !== null &&
+            identity.partnerProgramId !== undefined &&
+            identity.partnerProgramId !== verification.partnerProgramId) ||
+          (identity.partnerEntrySlug !== null &&
+            identity.partnerEntrySlug !== undefined &&
+            identity.partnerEntrySlug !== verification.partnerEntrySlug));
 
     if (!partnerMismatch) {
       return;
@@ -8545,7 +11863,8 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
   ) {
     if (
       !identity ||
-      identity.actorType !== "partner_api_key" ||
+      (identity.actorType !== "partner_api_key" &&
+        identity.actorType !== "partner_user") ||
       identity.realm !== "partner" ||
       !identity.partnerEntrySlug
     ) {
@@ -8625,22 +11944,63 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
   private buildIssuedPartnerIngressCredential(
     entrySlug: string,
     rotationReason: string | null,
+    input: {
+      ownerRef?: string | null;
+      ownerName?: string | null;
+      ownerType?: string | null;
+      purpose?: string | null;
+      scopes?: string[] | undefined;
+      expiresAt?: string | null;
+    },
   ) {
     const now = new Date().toISOString();
     const plaintextKey = `pk_${randomBytes(18).toString("hex")}`;
+    const owner = this.resolveCredentialOwner(input, {
+      ownerRef: null,
+      ownerName: "Platform partner credential owner",
+      ownerType: "platform_admin",
+    });
+    const expiresAt = this.resolvePartnerIngressCredentialExpiry(
+      input.expiresAt ?? null,
+      now,
+    );
     const storedCredential: StoredPartnerIngressCredentialRecord = {
       keyId: `partner_key_${randomUUID()}`,
       entrySlug,
       keyPrefix: plaintextKey.slice(0, 12),
       maskedSuffix: this.maskedSuffix(plaintextKey),
       source: "platform_admin",
+      ownerRef: owner.ownerRef,
+      ownerName: owner.ownerName,
+      ownerType: owner.ownerType,
+      purpose: this.resolveCredentialPurpose(
+        input.purpose,
+        `partner ingress for ${entrySlug}`,
+      ),
+      realm: "partner",
+      resourceScope: `partner_entry:${entrySlug}`,
+      scopes: [
+        ...(input.scopes ?? [
+          "partner:entries:read",
+          "partner:eligibility:read",
+          "partner:eligibility:write",
+        ]),
+      ],
       createdAt: now,
       lastUsedAt: null,
+      lastUsedWorkload: null,
+      expiresAt,
+      status: "active",
+      overlapEndsAt: null,
+      autoRevokedAt: null,
+      rotatedFromKeyId: null,
+      supersededByKeyId: null,
       revokedAt: null,
       issuedBy: "platform_admin",
       revokedBy: null,
       rotationReason,
       revokeReason: null,
+      signals: this.buildCredentialSignals(null, expiresAt, null, now),
       keyHash: this.hashPartnerApiKey(plaintextKey),
     };
 
@@ -8672,6 +12032,7 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
         },
       );
     }
+    this.reconcileStoredApiKey(apiKey);
     return apiKey;
   }
 
@@ -8690,6 +12051,7 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
         },
       );
     }
+    this.reconcileStoredWebhookEndpoint(endpoint);
     return endpoint;
   }
 
@@ -9432,7 +12794,7 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
 
   private afterPersistence<T>(
     persisted: MaybePromise<void>,
-    onSuccess: () => T,
+    onSuccess: () => MaybePromise<T>,
   ): MaybePromise<T> {
     if (persisted instanceof Promise) {
       return persisted.then(() => onSuccess());
@@ -11501,7 +14863,7 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
   private persistChanges(
     changes: PersistTenantPartnerChanges,
     context: string,
-  ) {
+  ): MaybePromise<void> {
     if (
       !this.tenantPartnerRepository ||
       typeof (this.tenantPartnerRepository as any).persistChanges !== "function"
@@ -11509,19 +14871,208 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
       return;
     }
 
-    void this.tenantPartnerRepository
-      .persistChanges(changes)
-      .catch((error: unknown) => {
-        if (
-          typeof (this.tenantPartnerRepository as any)
-            .reportPersistenceFailure === "function"
-        ) {
-          (this.tenantPartnerRepository as any).reportPersistenceFailure(
-            error,
-            context,
-          );
-        }
+    const result = this.tenantPartnerRepository.persistChanges(changes);
+    if (result && typeof (result as any).catch === "function") {
+      return (result as Promise<unknown>)
+        .then(() => undefined)
+        .catch((error: unknown) => {
+          if (
+            typeof (this.tenantPartnerRepository as any)
+              .reportPersistenceFailure === "function"
+          ) {
+            (this.tenantPartnerRepository as any).reportPersistenceFailure(
+              error,
+              context,
+            );
+          }
+        });
+    }
+  }
+
+  private syncIdentityTenantUserRoles(context: string) {
+    for (const userRole of this.userRoles) {
+      void this.syncIdentityTenantUserRole(userRole, context).catch(() => {
+        // Startup backfill is best-effort; request mutations await this path.
       });
+    }
+  }
+
+  private async issueTenantInvitation(
+    userRole: TenantUserRoleRecord,
+    membershipId: string | null,
+    issuerPrincipalId: string | null,
+    kind: "initial" | "resend",
+  ): Promise<CanonicalIdentityInvitationRecord | null> {
+    if (!this.identityRepository || !membershipId) {
+      // Legacy fixture-only service construction has no canonical identity authority.
+      return null;
+    }
+
+    const now = new Date().toISOString();
+    const rawToken = `ti_${randomBytes(32).toString("base64url")}`;
+    const expiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString();
+    const invitation: CanonicalIdentityInvitationRecord = {
+      invitationId: `invitation_${randomUUID()}`,
+      sourceRef:
+        kind === "initial"
+          ? `tenant_user_role:${userRole.userId}:invitation`
+          : `tenant_user_role:${userRole.userId}:invitation:resend:${randomUUID()}`,
+      membershipId,
+      issuerPrincipalId,
+      realm: "tenant",
+      scopeRef: `tenant:${userRole.tenantId}`,
+      tenantId: userRole.tenantId,
+      partnerId: null,
+      email: userRole.email,
+      roleCode: userRole.roleCode,
+      tokenHash: createHash("sha256").update(rawToken).digest("hex"),
+      deliveryStatus: "pending_delivery",
+      expiresAt,
+      acceptedAt: null,
+      revokedAt: null,
+      createdAt: now,
+      updatedAt: now,
+    };
+    const stored =
+      await this.identityRepository.upsertInvitationRecord(invitation);
+
+    // The delivery adapter never throws; only its reported status may ever
+    // be treated as a real, provider-acknowledged send. A failed/unavailable
+    // outcome still leaves the invitation resendable, never fabricated as
+    // delivered.
+    const delivery = await this.tenantInvitationDelivery.send({
+      invitationId: stored.invitationId,
+      tenantId: userRole.tenantId,
+      recipientEmail: userRole.email,
+      displayName: userRole.displayName,
+      expiresAt: stored.expiresAt,
+      rawToken,
+    });
+    return await this.identityRepository.upsertInvitationRecord({
+      ...stored,
+      deliveryStatus:
+        delivery.status === "sent" ? "delivered" : "delivery_failed",
+      updatedAt: new Date().toISOString(),
+    });
+  }
+
+  private toTenantInvitationView(
+    invitation: CanonicalIdentityInvitationRecord,
+  ): TenantInvitationView {
+    return {
+      invitationId: invitation.invitationId,
+      deliveryStatus: invitation.deliveryStatus,
+      expiresAt: invitation.expiresAt,
+      acceptedAt: invitation.acceptedAt,
+      revokedAt: invitation.revokedAt,
+    };
+  }
+
+  private async syncIdentityTenantUserRole(
+    userRole: TenantUserRoleRecord,
+    context: string,
+  ) {
+    const identityRepository = this.identityRepository;
+    if (
+      !identityRepository ||
+      typeof identityRepository.syncLegacyTenantUserRole !== "function"
+    ) {
+      return null;
+    }
+
+    try {
+      return await identityRepository.syncLegacyTenantUserRole(
+        this.cloneUserRole(userRole),
+      );
+    } catch (error) {
+      if (typeof identityRepository.reportPersistenceFailure === "function") {
+        identityRepository.reportPersistenceFailure(error, context);
+      }
+      throw error;
+    }
+  }
+
+  private assertTenantUserRoleChangeIsSafe(params: {
+    tenantId: string;
+    userRole: TenantUserRoleRecord;
+    nextRoleCode: string;
+    nextStatus: TenantUserRoleRecord["status"];
+    identity: IdentityContext | null | undefined;
+  }) {
+    const { tenantId, userRole, nextRoleCode, nextStatus, identity } = params;
+    if (
+      identity?.actorId === userRole.userId &&
+      (nextRoleCode !== userRole.roleCode || nextStatus !== userRole.status)
+    ) {
+      throw new ApiRequestError(
+        HttpStatus.FORBIDDEN,
+        "TENANT_SELF_ROLE_CHANGE_DENIED",
+        "Tenant users cannot change their own role or account status.",
+        { tenantId },
+      );
+    }
+
+    const removesActiveTenantAdmin =
+      Boolean(this.identityRepository) &&
+      userRole.roleCode === "tenant_admin" &&
+      userRole.status === "active" &&
+      (nextRoleCode !== "tenant_admin" || nextStatus !== "active");
+    if (!removesActiveTenantAdmin) {
+      return;
+    }
+
+    const activeReplacementCount = this.userRoles.filter(
+      (candidate) =>
+        candidate.tenantId === tenantId &&
+        candidate.userId !== userRole.userId &&
+        candidate.roleCode === "tenant_admin" &&
+        candidate.status === "active",
+    ).length;
+    if (activeReplacementCount > 0) {
+      return;
+    }
+
+    throw new ApiRequestError(
+      HttpStatus.CONFLICT,
+      "TENANT_LAST_ADMIN_REQUIRED",
+      "At least one other active tenant administrator is required.",
+      { tenantId },
+    );
+  }
+
+  private async revokeTenantUserSessions(
+    userRole: TenantUserRoleRecord,
+    canonicalPrincipalId: string | null,
+    reason: string,
+    revokedByPrincipalId?: string,
+  ) {
+    const identityRepository = this.identityRepository;
+    if (!identityRepository) {
+      return;
+    }
+
+    const principalIds = Array.from(
+      new Set(
+        [userRole.userId, canonicalPrincipalId].filter(
+          (principalId): principalId is string => Boolean(principalId?.trim()),
+        ),
+      ),
+    );
+    for (const principalId of principalIds) {
+      const sessions =
+        await identityRepository.listSessionsByPrincipal(principalId);
+      await Promise.all(
+        sessions
+          .filter((session) => session.status === "active")
+          .map((session) =>
+            identityRepository.revokeSession(
+              session.sessionId,
+              reason,
+              revokedByPrincipalId,
+            ),
+          ),
+      );
+    }
   }
 
   private async persistChangesRequired(

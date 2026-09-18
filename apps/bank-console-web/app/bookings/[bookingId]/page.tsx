@@ -5,10 +5,10 @@ import { REALM_COLORS } from "@drts/ui-tokens";
 import { CanvasPill } from "@drts/ui-web";
 import { CalloutPanel, PageHero } from "@/components/page-primitives";
 import { resolveBankDemoTenant, resolveLocale } from "@/lib/demo-tenants";
+import { loadBankBookingsData } from "@/lib/bank-dev-read-models";
 import { bankConsoleHref, getBankConsoleSession } from "@/lib/session";
 import { tenantDisplayText, tenantIssuerVars } from "@/lib/tenant-display";
 import {
-  getBookingDetail,
   type BookingActorRealm,
   type BookingDirection,
   type BookingOpsLinkState,
@@ -139,7 +139,8 @@ export default async function BookingDetailPage({
     locale,
     resolvedSearchParams.role,
   );
-  const booking = getBookingDetail(bookingId);
+  const bookingData = await loadBankBookingsData(tenant.tenantId, session.role);
+  const booking = bookingData.data.detailById.get(bookingId);
 
   if (!booking) {
     notFound();
@@ -200,6 +201,13 @@ export default async function BookingDetailPage({
           title={t("bookings.detail.readonlyTitle", locale)}
           description={t("bookings.detail.readonlyBody", locale)}
         />
+        {bookingData.degradedMessage ? (
+          <CalloutPanel
+            title={t("common.apiDegraded", locale)}
+            description={bookingData.degradedMessage}
+            tone="warning"
+          />
+        ) : null}
 
         <div className="booking-ops-card">
           <span className="surface-kicker">

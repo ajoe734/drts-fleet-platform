@@ -23,11 +23,6 @@ const ACCOUNT_PERSONAS = [
   },
 ] as const;
 
-function homeHref(bank: string, locale: string, role: string) {
-  const params = new URLSearchParams({ bank, locale, role });
-  return `/?${params.toString()}`;
-}
-
 export default async function LoginPage({
   searchParams,
 }: {
@@ -79,16 +74,17 @@ export default async function LoginPage({
           </span>
           <div className="login-account-grid">
             {ACCOUNT_PERSONAS.map((persona) => (
-              <a
-                className="login-account-card"
-                href={homeHref(activeBank.code, locale, persona.role)}
-                key={persona.key}
-              >
-                <span>{getBankTenantShortName(activeBank, locale)}</span>
-                <strong>{t(`login.${persona.key}`, locale)}</strong>
-                <small>{t("login.demoPersona", locale)}</small>
-                <em>{t("login.signIn", locale)}</em>
-              </a>
+              <form action="/api/auth/login" method="POST" key={persona.key}>
+                <input type="hidden" name="bank" value={activeBank.code} />
+                <input type="hidden" name="locale" value={locale} />
+                <input type="hidden" name="role" value={persona.role} />
+                <button type="submit" className="login-account-card">
+                  <span>{getBankTenantShortName(activeBank, locale)}</span>
+                  <strong>{t(`login.${persona.key}`, locale)}</strong>
+                  <small>{t("login.demoPersona", locale)}</small>
+                  <em>{t("login.signIn", locale)}</em>
+                </button>
+              </form>
             ))}
           </div>
         </article>

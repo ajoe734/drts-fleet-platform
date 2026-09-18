@@ -23,6 +23,8 @@ This file defines how collaboration state, Phase 1 product truth, execution rule
 - `docs/02-architecture/phase1-operational-sa-gap-supplement-20260429.md`
 - `docs/02-architecture/phase1-role-scenario-and-negative-flow-matrix-20260430.md`
 - `docs/02-architecture/phase1-operational-complete-remediation-plan-20260430.md`
+- `docs/02-architecture/stage1-dev-functional-completeness-gap-20260808.md`
+- `docs/02-architecture/stage1-5-identity-access-account-security-hardening-plan-20260801.md`
 - `phase1_prd_detailed_v1.md`
 - `phase1_service_contracts_v1.md`
 - `phase1_migration_plan_v1.md`
@@ -37,6 +39,14 @@ the canonical PRD / SA files in the same wave.
 - `docs/01-decisions/SD-DP-20260422-002-identity-cutover-topology.md`
 - `docs/01-decisions/SD-DP-20260422-003-design-truth-supersession-rule.md`
 - `docs/01-decisions/SD-DP-20260429-001-plane-separation-auth-matrix.md`
+- `docs/01-decisions/SD-DP-20260817-009-domain-event-contract-and-write-authority.md`
+- `docs/01-decisions/SD-DP-20260817-010-state-models-conformance-resolution.md`
+- `docs/01-decisions/SD-DP-20260819-011-canonical-single-source-rule.md`
+- `docs/01-decisions/SD-DP-20260820-012-phase1-regulatory-output-scope.md`
+
+A packet enters this layer only once a human has accepted it, which `SD-DP-20260422-003` makes the
+precondition for superseding L1 wording. A packet still marked `proposed` or
+`pending-human-acceptance` supersedes nothing, however well argued.
 
 Optional future addition beyond the accepted packets above:
 
@@ -45,6 +55,22 @@ Optional future addition beyond the accepted packets above:
 Dedicated system design supplement introduced for operational closeout:
 
 - `docs/02-architecture/phase1-operational-system-design-blueprint-20260429.md`
+
+### Accepted Unattended Voice Booking Execution Supplement
+
+- [Execution authority and scoped decisions](docs/01-decisions/SD-DP-20260906-013-unattended-voice-execution.md)
+- [SA: requirements and business acceptance](docs/02-architecture/phase1-unattended-voice-booking-sa-20260906.md)
+- [SD: technical states, interfaces and transaction rules](docs/02-architecture/phase1-unattended-voice-booking-sd-20260906.md)
+- [Two-pass feasibility audit](docs/02-architecture/phase1-unattended-voice-booking-two-pass-audit-20260906.md)
+- [Supervisor execution packet](docs/03-runbooks/unattended-voice-booking-execution-tasks-20260906.md)
+
+The user authorized materialization and execution after the two-pass review.
+The scoped decision establishes the v0.2 engineering baseline; live provider,
+procurement, numeric operating thresholds and rollout evidence remain gated.
+The versioned task manifest owns task definitions and traceability. The live
+`ai-status.json` owns scheduling and completion; generated summaries mirror it.
+AI handles normal bookings and humans handle exceptions. Accepted design does
+not claim implemented or deployed capability.
 
 ### L2 Execution Rules
 
@@ -98,6 +124,8 @@ These files are intentionally editable and reviewable. They are inputs to consen
 
 Important:
 
+- a fact belongs in one canonical document; where two would carry it, one links to the
+  other, and it is kept where it changes (`SD-DP-20260819-011`)
 - provisional design docs must not override product truth
 - accepted decision packets may temporarily supersede older L1 wording, but
   only within the scope they name explicitly
@@ -137,9 +165,13 @@ into backlog and later be reflected back into durable docs:
    - `docs/02-architecture/phase1-role-scenario-and-negative-flow-matrix-20260430.md`
    - `docs/02-architecture/phase1-operational-complete-remediation-plan-20260430.md`
    - `docs/02-architecture/phase1-operational-system-design-blueprint-20260429.md`
+   - `docs/02-architecture/stage1-dev-functional-completeness-gap-20260808.md`
+   - `docs/02-architecture/stage1-5-identity-access-account-security-hardening-plan-20260801.md`
    - `docs/01-decisions/*`
 2. Backlog materialization packet:
    - `docs/03-runbooks/phase1-operational-blueprint-execution-packet-20260429.md`
+   - `docs/03-runbooks/stage1-dev-functional-completion-execution-tasks-20260808.md`
+   - `docs/03-runbooks/stage1-5-identity-access-account-security-execution-tasks-20260801.md`
 3. Live machine truth and human mirror:
    - `ai-status.json`
    - `current-work.md`
@@ -154,6 +186,10 @@ Working rule:
 - execution packets materialize that change into concrete task IDs and acceptance
 - `ai-status.json` is the machine truth once tasks are opened
 - code-backed audits are where implementation reality is written back for drift checks
+- **execution tasks must not edit the L1 files in section 2.** `SD-DP-20260422-003` reserves L1
+  rewrites for a controlled revision a human has accepted, so execution packets must not list an L1
+  file under a task's owned artifacts. A wave that measures the distance between specification and
+  implementation must not be able to close it by moving the specification
 
 ## 7. Working Rule
 

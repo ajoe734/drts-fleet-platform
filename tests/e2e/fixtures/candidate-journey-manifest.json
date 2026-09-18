@@ -1,0 +1,94 @@
+{
+  "schemaVersion": 1,
+  "taskId": "S1F-REL-001-PREDEPLOY",
+  "candidateSha": "__DRTS_CANDIDATE_SHA__",
+  "responseHeader": "x-drts-candidate-sha",
+  "activeSurfaces": [
+    {
+      "id": "api",
+      "urlEnv": "DRTS_OPERATIONAL_API_URL",
+      "path": "/api/health",
+      "expectedStatus": 200,
+      "kind": "api"
+    },
+    {
+      "id": "platform-admin-web",
+      "urlEnv": "DRTS_OPERATIONAL_PLATFORM_ADMIN_URL",
+      "path": "/",
+      "expectedStatus": 200,
+      "kind": "web"
+    },
+    {
+      "id": "ops-console-web",
+      "urlEnv": "DRTS_OPERATIONAL_OPS_CONSOLE_URL",
+      "path": "/",
+      "expectedStatus": 200,
+      "kind": "web"
+    },
+    {
+      "id": "fleet-partner-portal-web",
+      "urlEnv": "DRTS_OPERATIONAL_FLEET_PARTNER_PORTAL_URL",
+      "path": "/",
+      "expectedStatus": 200,
+      "kind": "web"
+    },
+    {
+      "id": "tenant-console-web",
+      "urlEnv": "DRTS_OPERATIONAL_TENANT_CONSOLE_URL",
+      "path": "/",
+      "expectedStatus": 200,
+      "kind": "web"
+    },
+    {
+      "id": "bank-console-web",
+      "urlEnv": "DRTS_OPERATIONAL_BANK_CONSOLE_URL",
+      "path": "/",
+      "expectedStatus": 200,
+      "kind": "web"
+    },
+    {
+      "id": "referral-embed-web",
+      "urlEnv": "DRTS_OPERATIONAL_REFERRAL_EMBED_URL",
+      "path": "/embed/yuhe-residence",
+      "expectedStatus": 200,
+      "kind": "web"
+    },
+    {
+      "id": "enterprise-dispatch-web",
+      "urlEnv": "DRTS_OPERATIONAL_ENTERPRISE_DISPATCH_URL",
+      "path": "/",
+      "expectedStatus": 200,
+      "kind": "web"
+    },
+    {
+      "id": "channel-partner-portal-web",
+      "urlEnv": "DRTS_OPERATIONAL_CHANNEL_PARTNER_PORTAL_URL",
+      "path": "/dashboard",
+      "expectedStatus": 200,
+      "kind": "web"
+    }
+  ],
+  "retiredSurfaces": [
+    {
+      "id": "partner-booking-web",
+      "urlEnv": "DRTS_OPERATIONAL_PARTNER_BOOKING_URL",
+      "path": "/",
+      "expectedStatus": 404,
+      "state": "paused"
+    },
+    {
+      "id": "concierge-portal-web",
+      "urlEnv": "DRTS_OPERATIONAL_CONCIERGE_PORTAL_URL",
+      "path": "/",
+      "expectedStatus": 404,
+      "state": "retired"
+    },
+    {
+      "id": "passenger-web",
+      "urlEnv": "DRTS_OPERATIONAL_PASSENGER_WEB_URL",
+      "path": "/",
+      "expectedStatus": 404,
+      "state": "retired"
+    }
+  ]
+}

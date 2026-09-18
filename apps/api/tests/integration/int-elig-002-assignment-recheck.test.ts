@@ -62,6 +62,14 @@ function createHarness() {
   };
 }
 
+function defaultReservationWindowStart(offsetHours = 2): string {
+  return new Date(Date.now() + offsetHours * 3600_000).toISOString();
+}
+
+function defaultReservationWindowEnd(offsetHours = 3): string {
+  return new Date(Date.now() + offsetHours * 3600_000).toISOString();
+}
+
 describe("INT-ELIG-002 assignment rechecks", () => {
   const cleanups: Array<() => Promise<void>> = [];
 
@@ -79,8 +87,8 @@ describe("INT-ELIG-002 assignment rechecks", () => {
     const booking = await ownedMobilityService.createTenantBooking(
       {
         businessDispatchSubtype: "credit_card_airport_transfer",
-        reservationWindowStart: "2026-06-20T14:00:00.000Z",
-        reservationWindowEnd: "2026-06-20T15:00:00.000Z",
+        reservationWindowStart: defaultReservationWindowStart(),
+        reservationWindowEnd: defaultReservationWindowEnd(),
         pickup: { address: "Taoyuan Airport" },
         dropoff: { address: "Taipei Main Station" },
         passenger: { name: "Rider One", phone: "0912000000" },

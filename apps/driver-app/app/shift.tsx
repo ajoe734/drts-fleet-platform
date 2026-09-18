@@ -20,9 +20,11 @@ import {
   getPlatformHealthSeverity,
 } from "@/components/platform-status-card";
 import {
+  formatDriverError,
   getDriverClient,
   getDriverId,
   isDriverIdentityProvisioned,
+  registerProtectedCacheClearHandler,
 } from "@/lib/api-client";
 import {
   getActiveDriverHeartbeatWorkState,
@@ -105,11 +107,7 @@ function formatOdometer(value: number | null) {
 }
 
 function getErrorMessage(error: unknown, fallback: string): string {
-  if (error instanceof Error && error.message.trim()) {
-    return error.message.trim();
-  }
-
-  return fallback;
+  return formatDriverError(error, fallback);
 }
 
 function getElapsedMinutes(shift: ShiftRecord, now: number) {
@@ -387,8 +385,21 @@ export default function ShiftScreen() {
     }
   };
 
+  useEffect(() => {
+    const unregister = registerProtectedCacheClearHandler(() => {
+      setActiveShift(null);
+      setPresenceSummary(null);
+      setPresenceError(null);
+    });
+    return () => unregister();
+  }, []);
+
   const loadShifts = async ({ manual = false }: { manual?: boolean } = {}) => {
-    if (!isProvisioned) {
+    if (!isDriverIdentityProvisioned()) {
+      setActiveShift(null);
+      setPresenceSummary(null);
+      setLoading(false);
+      setRefreshing(false);
       return;
     }
 
@@ -420,6 +431,8 @@ export default function ShiftScreen() {
       setScreenError(null);
       setNow(Date.now());
     } catch (error: unknown) {
+      setActiveShift(null);
+      setPresenceSummary(null);
       setScreenError(getErrorMessage(error, "班次資料載入失敗，請稍後再試。"));
     } finally {
       setLoading(false);
@@ -648,7 +661,41 @@ export default function ShiftScreen() {
 
   return (
     <View style={styles.screen}>
-      <AppScreen contentContainerStyle={styles.screenContent}>
+      <AppScreen
+        contentContainerStyle={styles.screenContent}
+        footer={
+          <BottomActionBar
+            notice={
+              activeShift
+                ? "完成下線打卡前，可先更新里程與位置。"
+                : gateBlocked
+                  ? (gate?.blockingReason?.title ?? "尚未符合上線條件。")
+                  : "上線打卡後才會建立班次紀錄。"
+            }
+          >
+            {activeShift ? (
+              <ActionButton
+                title={driverStrings.shift.punchOut}
+                onPress={handleClockOut}
+                variant="secondary"
+                loading={submitting}
+                disabled={hasValidationError}
+                style={[styles.bottomAction, styles.bottomDangerAction]}
+                textStyle={styles.bottomDangerText}
+              />
+            ) : (
+              <ActionButton
+                title={driverStrings.shift.punchIn}
+                onPress={handleClockIn}
+                variant="primary"
+                loading={submitting}
+                disabled={hasValidationError || gateBlocked}
+                style={styles.bottomAction}
+              />
+            )}
+          </BottomActionBar>
+        }
+      >
         <PageHeader
           title={driverStrings.shift.title}
           subtitle={activeShift ? "今日打卡記錄" : "準備開始班次"}
@@ -828,7 +875,7 @@ export default function ShiftScreen() {
           subtitle={
             activeShift
               ? "下線前可補充目前里程與位置。"
-              : "這些欄位皆為選填，不影響班次 guardrails。"
+              : "這些欄位皆為選填，不影響班次的保護機制。"
           }
         >
           {activeShift ? (
@@ -884,7 +931,7 @@ export default function ShiftScreen() {
           subtitle={
             availabilityItems.length > 0
               ? `${onlinePlatforms} 個平台上線中，${readyPlatforms} 個平台目前可接單。`
-              : "沿用既有 platform presence 資料來源，只讀顯示目前可接單狀態。"
+              : "沿用既有平台狀態資料來源，僅供顯示目前可接單狀態。"
           }
         >
           {presenceError ? <ErrorBanner message={presenceError} /> : null}
@@ -983,7 +1030,7 @@ export default function ShiftScreen() {
           ) : (
             <EmptyState
               title="尚無平台可接單狀態"
-              description="目前沒有可顯示的平台 presence 資料，可前往平台狀態頁確認綁定與上線狀態。"
+              description="目前沒有可顯示的平台狀態資料，可前往平台狀態頁確認綁定與上線狀態。"
               icon="swap-horizontal-outline"
               actionTitle="查看平台狀態"
               onAction={() => router.push("/platform-presence")}
@@ -993,44 +1040,13 @@ export default function ShiftScreen() {
         </SectionCard>
 
         <AuthorityBanner
-          title="班次資料 guardrails"
-          authorityLabel="不變更定位心跳、provisioning 與上下線 API"
+          title="班次資料保護原則"
+          authorityLabel="不會變更定位回報、裝置啟用與上下線相關功能"
           description="這個畫面只調整呈現方式；資料寫入仍沿用現有班次與出勤流程。"
           tone="owned"
           icon="shield-checkmark"
         />
       </AppScreen>
-
-      <BottomActionBar
-        notice={
-          activeShift
-            ? "完成下線打卡前，可先更新里程與位置。"
-            : gateBlocked
-              ? (gate?.blockingReason?.title ?? "尚未符合上線條件。")
-              : "上線打卡後才會建立 active shift。"
-        }
-      >
-        {activeShift ? (
-          <ActionButton
-            title={driverStrings.shift.punchOut}
-            onPress={handleClockOut}
-            variant="secondary"
-            loading={submitting}
-            disabled={hasValidationError}
-            style={[styles.bottomAction, styles.bottomDangerAction]}
-            textStyle={styles.bottomDangerText}
-          />
-        ) : (
-          <ActionButton
-            title={driverStrings.shift.punchIn}
-            onPress={handleClockIn}
-            variant="primary"
-            loading={submitting}
-            disabled={hasValidationError || gateBlocked}
-            style={styles.bottomAction}
-          />
-        )}
-      </BottomActionBar>
     </View>
   );
 }

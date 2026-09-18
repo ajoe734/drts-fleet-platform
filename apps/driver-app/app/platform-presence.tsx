@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { Ionicons } from "@expo/vector-icons";
 import * as Linking from "expo-linking";
-import { useRouter } from "expo-router";
+import { Redirect, useRouter } from "expo-router";
 import {
   ActivityIndicator,
   Alert,
@@ -30,7 +30,12 @@ import {
   Shell,
   driverCanvasTheme,
 } from "@/components/canvas-primitives";
-import { getDriverClient, isDriverIdentityProvisioned } from "@/lib/api-client";
+import {
+  formatDriverError,
+  getDriverClient,
+  isDriverIdentityProvisioned,
+  registerProtectedCacheClearHandler,
+} from "@/lib/api-client";
 import {
   canReceiveOrders,
   deriveBlockingReasons,
@@ -47,7 +52,13 @@ import { driverStrings } from "@/lib/strings";
 
 const THEME = driverCanvasTheme;
 const REFRESH_INTERVAL_MS = 15_000;
-const REFRESH_TIER_LABEL = "T3 · 每 15 秒輪詢";
+const REFRESH_TIER_LABEL = "每 15 秒自動更新";
+const DATA_SOURCE_LABELS: Record<string, string> = {
+  live: "即時",
+  cache: "快取",
+  sandbox: "測試環境",
+  static: "靜態資料",
+};
 
 type EnrichedPresence = {
   record: PlatformPresenceViewRecord;
@@ -70,10 +81,7 @@ type ManualReauthState = {
 };
 
 function toErrorMessage(error: unknown): string {
-  if (error instanceof Error && error.message.trim()) {
-    return error.message.trim();
-  }
-  return driverStrings.common.requestFailed;
+  return formatDriverError(error, driverStrings.common.requestFailed);
 }
 
 function isPermissionDeniedError(error: string | null): boolean {
@@ -270,7 +278,7 @@ function emptyStateCopy(reason: EmptyReason): {
     case "external_unavailable":
       return {
         title: "外部平台同步異常",
-        body: "所有外部平台目前都處於 degraded/down，請先查看需處理平台或聯絡派車台。",
+        body: "所有外部平台目前都無法正常運作，請先查看需處理平台或聯絡派車台。",
         tone: "warn",
       };
     case "driver_not_eligible":
@@ -346,7 +354,7 @@ function MechanismLegend() {
     <Card
       theme={THEME}
       title="重新授權方式"
-      subtitle="平台 capability flag 可配置 4 種處理流程"
+      subtitle="不同平台會依情況使用以下四種方式之一"
     >
       <View style={styles.legendList}>
         {[
@@ -390,7 +398,7 @@ function ManualReauthCard({
     <Card
       theme={THEME}
       title={`${state.displayName} 手動重新授權`}
-      subtitle="依 Q-DRV05，這個平台使用 manual credential 流程"
+      subtitle="這個平台需要手動輸入驗證資料才能重新授權"
     >
       <View style={styles.manualCardBody}>
         <Text style={[styles.manualHint, { color: THEME.textMuted }]}>
@@ -690,10 +698,18 @@ export default function PlatformPresenceScreen() {
 
   const isProvisioned = isDriverIdentityProvisioned();
 
+  useEffect(() => {
+    const unregister = registerProtectedCacheClearHandler(() => {
+      setSummary(null);
+    });
+    return () => unregister();
+  }, []);
+
   const loadPresence = async ({
     silent = false,
   }: { silent?: boolean } = {}) => {
-    if (!isProvisioned) {
+    if (!isDriverIdentityProvisioned()) {
+      setSummary(null);
       setLoading(false);
       return;
     }
@@ -721,12 +737,16 @@ export default function PlatformPresenceScreen() {
   };
 
   useEffect(() => {
-    void loadPresence();
-    const timer = setInterval(() => {
-      void loadPresence({ silent: true });
-    }, REFRESH_INTERVAL_MS);
-    return () => clearInterval(timer);
-  }, []);
+    if (isProvisioned) {
+      void loadPresence();
+      const timer = setInterval(() => {
+        void loadPresence({ silent: true });
+      }, REFRESH_INTERVAL_MS);
+      return () => clearInterval(timer);
+    } else {
+      setLoading(false);
+    }
+  }, [isProvisioned]);
 
   const onRefresh = async () => {
     setRefreshing(true);
@@ -939,6 +959,10 @@ export default function PlatformPresenceScreen() {
     }
   };
 
+  if (!isProvisioned) {
+    return <Redirect href="/onboarding" />;
+  }
+
   const emptyState = emptyReason ? emptyStateCopy(emptyReason) : null;
 
   if (loading && !summary && !emptyState) {
@@ -981,14 +1005,14 @@ export default function PlatformPresenceScreen() {
 
       <Card
         theme={THEME}
-        title="Platform Health Center"
-        subtitle="依 spec §5.6 / Q-DRV05 / Q-DRV07 顯示平台派單可用性"
+        title="平台健康中心"
+        subtitle="顯示目前可接單平台的即時狀態"
       >
         <DL
           theme={THEME}
           cols={2}
           items={[
-            { label: "Refresh tier", value: REFRESH_TIER_LABEL },
+            { label: "更新頻率", value: REFRESH_TIER_LABEL },
             {
               label: "最後更新",
               value: formatCompactDateTime(
@@ -997,11 +1021,11 @@ export default function PlatformPresenceScreen() {
             },
             {
               label: "資料來源",
-              value: summary?.refreshMeta?.source ?? "live",
+              value: DATA_SOURCE_LABELS[summary?.refreshMeta?.source ?? "live"] ?? "即時",
             },
             {
-              label: "Binding 管理",
-              value: "設定 / Settings",
+              label: "帳號綁定管理",
+              value: "前往設定",
             },
           ]}
         />

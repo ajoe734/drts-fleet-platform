@@ -45,10 +45,12 @@ const styles = StyleSheet.create({
   valueContainer: {
     flexDirection: "row",
     alignItems: "baseline",
+    flexWrap: "wrap",
   },
   value: {
     ...Tokens.type.sectionTitle,
     color: Tokens.colors.text,
+    flexShrink: 1,
   },
   unit: {
     ...Tokens.type.micro,

@@ -50,6 +50,7 @@ import {
   useAssistantSelection,
 } from "@/components/ops-assistant";
 import { useTranslation } from "@/lib/i18n";
+import { createIdempotencyKey } from "@drts/api-client";
 import { formatOpsCodeLabel, getOpsLabel } from "@/lib/localized-labels";
 
 // ── canvas theme + per-page operating context ──────────────────────────────
@@ -472,6 +473,9 @@ export default function ComplaintsPage() {
   // create form
   const [showCreate, setShowCreate] = useState(false);
   const [createForm, setCreateForm] = useState(INITIAL_CREATE_FORM);
+  const [complaintIntentKey, setComplaintIntentKey] = useState(() =>
+    createIdempotencyKey("complaint-case"),
+  );
 
   // modal + receipt
   const [modal, setModal] = useState<ModalState>(null);
@@ -781,14 +785,20 @@ export default function ComplaintsPage() {
 
   async function submitCreate() {
     await runAction("create-complaint", async () => {
-      const created = await getOpsClient().createComplaint({
-        ...createForm,
-        relatedOrderId: createForm.relatedOrderId || null,
-        relatedCallId: createForm.relatedCallId || null,
-      });
+      const created = await getOpsClient().createComplaint(
+        {
+          ...createForm,
+          relatedOrderId: createForm.relatedOrderId || null,
+          relatedCallId: createForm.relatedCallId || null,
+        },
+        {
+          idempotencyKey: complaintIntentKey,
+        },
+      );
       emitReceipt("create", created);
       setCreateForm(INITIAL_CREATE_FORM);
       setShowCreate(false);
+      setComplaintIntentKey(createIdempotencyKey("complaint-case"));
       await loadRecords(created.caseNo, true);
     });
   }

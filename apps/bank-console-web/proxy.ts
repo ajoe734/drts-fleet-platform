@@ -1,6 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
+import {
+  BANK_CONSOLE_ROLE_COOKIE,
+  BANK_CONSOLE_SESSION_COOKIE,
+} from "./lib/session";
 
 const LOGIN_PATH = "/login";
+const LOGIN_API_PATH = "/api/auth/login";
 const SIGNED_OUT_COOKIE = "drts_bank_console_signed_out";
 
 const signedOutCookieOptions = {
@@ -18,11 +23,12 @@ function withNoStore(response: NextResponse) {
 
 function setSignedOut(response: NextResponse) {
   response.cookies.set(SIGNED_OUT_COOKIE, "1", signedOutCookieOptions);
-  return withNoStore(response);
-}
-
-function clearSignedOut(response: NextResponse) {
-  response.cookies.set(SIGNED_OUT_COOKIE, "", {
+  response.cookies.set(BANK_CONSOLE_ROLE_COOKIE, "", {
+    ...signedOutCookieOptions,
+    expires: new Date(0),
+    maxAge: 0,
+  });
+  response.cookies.set(BANK_CONSOLE_SESSION_COOKIE, "", {
     ...signedOutCookieOptions,
     expires: new Date(0),
     maxAge: 0,
@@ -73,18 +79,21 @@ function redirectToSignedOutLogin(
 export function proxy(request: NextRequest) {
   const { nextUrl } = request;
   const isLoginPath = nextUrl.pathname === LOGIN_PATH;
+  const isLoginApiRequest =
+    nextUrl.pathname === LOGIN_API_PATH && request.method === "POST";
   const isSignedOutRequest = nextUrl.searchParams.get("signedOut") === "1";
   const isPrefetch = isPrefetchRequest(request);
-  const isDemoSignInRequest =
-    nextUrl.pathname === "/" && nextUrl.searchParams.has("role");
   const isSignedOutCookie =
     request.cookies.get(SIGNED_OUT_COOKIE)?.value === "1";
 
-  if (isDemoSignInRequest) {
-    if (isPrefetch) {
-      return redirectToSignedOutLogin(request, { persistCookie: false });
-    }
-    return clearSignedOut(NextResponse.next());
+  const hasSessionCookie =
+    Boolean(request.cookies.get(BANK_CONSOLE_SESSION_COOKIE)?.value) ||
+    Boolean(request.cookies.get(BANK_CONSOLE_ROLE_COOKIE)?.value);
+
+  // A signed-out browser must still be able to submit the login form. The
+  // handler clears the signed-out marker and issues the new session cookies.
+  if (isLoginApiRequest) {
+    return withNoStore(NextResponse.next());
   }
 
   if (isSignedOutRequest) {
@@ -97,7 +106,7 @@ export function proxy(request: NextRequest) {
     return redirectToSignedOutLogin(request, { persistCookie: !isPrefetch });
   }
 
-  if (isSignedOutCookie) {
+  if (isSignedOutCookie && !hasSessionCookie) {
     return redirectToSignedOutLogin(request, {
       persistCookie: !isPrefetch,
     });
@@ -109,3 +118,5 @@ export function proxy(request: NextRequest) {
 export const config = {
   matcher: ["/((?!_next/static|_next/image|favicon.ico).*)"],
 };
+
+export default proxy;

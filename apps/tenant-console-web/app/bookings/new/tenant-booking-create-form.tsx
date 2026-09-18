@@ -52,6 +52,7 @@ import {
   type TenantBookingValidationMessages,
 } from "./tenant-booking-create-form-utils";
 import { useTranslation } from "@/lib/i18n";
+import { createIdempotencyKey } from "@drts/api-client";
 import { createTenantConsoleGeoProvider } from "@/lib/geo-map-provider";
 import {
   TENANT_CONSOLE_MAP_SURFACE,
@@ -865,6 +866,9 @@ export function TenantBookingCreateForm({
   >([]);
   const [redirectTarget, setRedirectTarget] = useState<string | null>(null);
   const [redirectDelayMs, setRedirectDelayMs] = useState(0);
+  const [bookingIntentKey] = useState(() =>
+    createIdempotencyKey("tenant-booking"),
+  );
 
   const estimatedAmountMinor = parseAmountMajor(estimatedAmount);
   // Booking-command coordinate fields are derived from the picker payloads so
@@ -1195,8 +1199,14 @@ export function TenantBookingCreateForm({
 
       const response = await fetch("/api/bookings/create", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(command),
+        headers: {
+          "Content-Type": "application/json",
+          "Idempotency-Key": bookingIntentKey,
+        },
+        body: JSON.stringify({
+          ...command,
+          idempotencyKey: bookingIntentKey,
+        }),
       });
       const result = (await response.json()) as SubmitResponse;
 

@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useState, useTransition } from "react";
+import { useMemo, useState, useTransition } from "react";
 import type {
   EmptyReason,
   ReportJobRecord,
@@ -12,8 +12,9 @@ import type {
   ResourceActionDescriptor,
 } from "@drts/contracts";
 import {
+  IMPLEMENTED_REPORT_JOB_TYPES,
   OPERATIONAL_REPORT_JOB_TYPES,
-  REPORT_OUTPUT_FORMATS,
+  IMPLEMENTED_REPORT_OUTPUT_FORMATS,
 } from "@drts/contracts";
 import {
   CanvasBanner,
@@ -28,7 +29,12 @@ import {
   type CanvasTone,
   buildCanvasTheme,
 } from "@drts/ui-web";
-import { getTenantClient } from "@/lib/api-client";
+import { createBrowserApiClient } from "@/lib/browser-api-client";
+import {
+  getRuntimeCrossAppOrigin,
+  type CrossAppTarget,
+} from "@/lib/runtime-config";
+import { createIdempotencyKey } from "@drts/api-client";
 import { useTranslation } from "@/lib/i18n";
 
 type Translate = (
@@ -86,7 +92,8 @@ type ReportRow = {
 
 type CrossAppLink = {
   label: string;
-  href: string;
+  /** null when this deployment has no origin for the target app. */
+  href: string | null;
 };
 
 type ReportTypeOption = { value: ReportJobType; label: string };
@@ -107,8 +114,18 @@ const MANUAL_EMPTY_REASONS: readonly EmptyReason[] = [
   "filtered_empty",
 ] as const;
 
+// Offering a report the API has no builder for produced a completed job with
+// zero rows; it now produces a 501. Either way the option was never usable, so
+// the picker shows only what IMPLEMENTED_REPORT_JOB_TYPES says exists.
+const OFFERABLE_REPORT_JOB_TYPES = OPERATIONAL_REPORT_JOB_TYPES.filter(
+  (jobType: ReportJobType) =>
+    (IMPLEMENTED_REPORT_JOB_TYPES as readonly ReportJobType[]).includes(
+      jobType,
+    ),
+);
+
 function getReportTypeOptions(t: Translate): ReportTypeOption[] {
-  return OPERATIONAL_REPORT_JOB_TYPES.map((jobType: ReportJobType) => ({
+  return OFFERABLE_REPORT_JOB_TYPES.map((jobType: ReportJobType) => ({
     value: jobType,
     label:
       jobType === "trip_summary"
@@ -389,41 +406,27 @@ function getEmptyStateCopy(reason: EmptyReason | null, t: Translate) {
   }
 }
 
-function resolveAppOrigin(targetApp: "ops-console" | "platform-admin") {
-  const envCandidates =
-    targetApp === "platform-admin"
-      ? [
-          process.env.NEXT_PUBLIC_PLATFORM_ADMIN_ORIGIN,
-          process.env.PLATFORM_ADMIN_ORIGIN,
-          process.env.DEV_PLATFORM_ADMIN_ORIGIN,
-          process.env.STAGING_PLATFORM_ADMIN_ORIGIN,
-          process.env.PROD_PLATFORM_ADMIN_ORIGIN,
-        ]
-      : [
-          process.env.NEXT_PUBLIC_OPS_CONSOLE_ORIGIN,
-          process.env.OPS_CONSOLE_ORIGIN,
-          process.env.DEV_OPS_CONSOLE_ORIGIN,
-          process.env.STAGING_OPS_CONSOLE_ORIGIN,
-          process.env.PROD_OPS_CONSOLE_ORIGIN,
-        ];
-  const resolved = envCandidates.find(
-    (candidate) => typeof candidate === "string" && candidate.trim().length > 0,
-  );
-
-  if (resolved) {
-    return resolved.replace(/\/$/, "");
-  }
-
-  return targetApp === "platform-admin"
-    ? "http://localhost:3002"
-    : "http://localhost:3003";
-}
-
+/**
+ * Absolute href for a deep link into another app, or null when this deployment
+ * has no origin configured for it.
+ *
+ * This used to read `process.env` from inside a client component and fall back
+ * to `http://localhost:3002`. Only `NEXT_PUBLIC_` vars reach the browser at
+ * all, and those are inlined at image build time -- before the deployed URLs
+ * exist -- so every deployed tenant console linked its operators to localhost.
+ * The origin now comes from the runtime config, resolved on the server per
+ * request; when it is absent the caller renders a disabled affordance instead
+ * of a link that goes nowhere.
+ */
 function buildCrossAppHref(
-  targetApp: "ops-console" | "platform-admin",
+  targetApp: CrossAppTarget,
   route: string,
-) {
-  return `${resolveAppOrigin(targetApp)}${route.startsWith("/") ? route : `/${route}`}`;
+): string | null {
+  const origin = getRuntimeCrossAppOrigin(targetApp);
+  if (!origin) {
+    return null;
+  }
+  return `${origin}${route.startsWith("/") ? route : `/${route}`}`;
 }
 
 function ActionButton({
@@ -472,12 +475,18 @@ export function ReportsManager({
 }: ReportsManagerProps) {
   const router = useRouter();
   const { t } = useTranslation();
-  const client = getTenantClient();
+  const client = useMemo(() => createBrowserApiClient(), []);
   const [pending, startTransition] = useTransition();
   const [flash, setFlash] = useState<ReportsFlash | null>(null);
   const [statusFilter, setStatusFilter] = useState<ReportStatusFilter>("all");
   const [typeFilter, setTypeFilter] = useState<string>("all");
   const [periodFilter, setPeriodFilter] = useState("");
+  const [createJobIntentKey, setCreateJobIntentKey] = useState(() =>
+    createIdempotencyKey("tenant-report"),
+  );
+  const [rerunIntentKeys, setRerunIntentKeys] = useState<
+    Record<string, string>
+  >({});
   const [draft, setDraft] = useState<ReportDraft>({
     jobType: "monthly_trip_report",
     format: "xlsx",
@@ -651,12 +660,18 @@ export function ReportsManager({
       if (costCenterCode) filters.costCenterCode = costCenterCode;
       if (passengerUserId) filters.passengerUserId = passengerUserId;
 
-      const result = await client.createTenantReportJob({
-        jobType: draft.jobType,
-        format: draft.format,
-        filters,
-      });
+      const result = await client.createTenantReportJob(
+        {
+          jobType: draft.jobType,
+          format: draft.format,
+          filters,
+        },
+        {
+          idempotencyKey: createJobIntentKey,
+        },
+      );
 
+      setCreateJobIntentKey(createIdempotencyKey("tenant-report"));
       setFlash({
         title: t("reports.flash.jobQueued.title"),
         description: t("reports.flash.jobQueued.description", {
@@ -678,11 +693,31 @@ export function ReportsManager({
       return;
     }
 
+    const rerunKey =
+      rerunIntentKeys[job.jobId] ?? createIdempotencyKey("tenant-report-rerun");
+    if (!rerunIntentKeys[job.jobId]) {
+      setRerunIntentKeys((prev) => ({
+        ...prev,
+        [job.jobId]: rerunKey,
+      }));
+    }
+
     runTransition(async () => {
-      const result = await client.createTenantReportJob({
-        jobType: job.jobType,
-        format: job.format,
-        filters: job.filters,
+      const result = await client.createTenantReportJob(
+        {
+          jobType: job.jobType,
+          format: job.format,
+          filters: job.filters,
+        },
+        {
+          idempotencyKey: rerunKey,
+        },
+      );
+
+      setRerunIntentKeys((prev) => {
+        const next = { ...prev };
+        delete next[job.jobId];
+        return next;
       });
 
       setFlash({
@@ -833,7 +868,7 @@ export function ReportsManager({
           body={t("reports.crossAppBanner.body")}
           actions={
             <>
-              {opsReportingAction ? (
+              {opsReportingAction && opsReportingLink.href ? (
                 <a
                   href={opsReportingLink.href}
                   target="_blank"
@@ -843,7 +878,7 @@ export function ReportsManager({
                   {t("reports.crossAppBanner.openOps")}
                 </a>
               ) : null}
-              {platformAuditAction ? (
+              {platformAuditAction && platformAuditLink.href ? (
                 <a
                   href={platformAuditLink.href}
                   target="_blank"
@@ -1057,11 +1092,13 @@ export function ReportsManager({
                   }
                   style={filterInputStyle}
                 >
-                  {REPORT_OUTPUT_FORMATS.map((format: ReportOutputFormat) => (
-                    <option key={format} value={format}>
-                      {format}
-                    </option>
-                  ))}
+                  {IMPLEMENTED_REPORT_OUTPUT_FORMATS.map(
+                    (format: ReportOutputFormat) => (
+                      <option key={format} value={format}>
+                        {format}
+                      </option>
+                    ),
+                  )}
                 </select>
               </CanvasField>
 
@@ -1165,14 +1202,23 @@ export function ReportsManager({
                     <span style={{ color: th.text, fontSize: 12.5 }}>
                       {link.label}
                     </span>
-                    <a
-                      href={link.href}
-                      target="_blank"
-                      rel="noreferrer"
-                      style={buttonAnchorStyle}
-                    >
-                      {t("reports.deepLinks.open")}
-                    </a>
+                    {link.href ? (
+                      <a
+                        href={link.href}
+                        target="_blank"
+                        rel="noreferrer"
+                        style={buttonAnchorStyle}
+                      >
+                        {t("reports.deepLinks.open")}
+                      </a>
+                    ) : (
+                      <span
+                        title={t("reports.deepLinks.originUnavailable")}
+                        style={{ ...buttonAnchorStyle, opacity: 0.5 }}
+                      >
+                        {t("reports.deepLinks.open")}
+                      </span>
+                    )}
                   </div>
                 ))}
                 <div style={linkItemStyle}>

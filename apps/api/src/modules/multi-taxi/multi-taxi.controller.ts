@@ -1,6 +1,7 @@
 import {
   Body,
   Controller,
+  Delete,
   Get,
   Headers,
   HttpStatus,
@@ -43,6 +44,7 @@ import {
 import type { BootstrapRequestIdentity } from "../../common/auth";
 import { ReportingFilingService } from "../reporting-filing/reporting-filing.service";
 import { MultiTaxiService } from "./multi-taxi.service";
+import type { RegisterPassengerPushSubscriptionCommand } from "./passenger-push.repository";
 
 @Controller()
 export class MultiTaxiController {
@@ -147,6 +149,45 @@ export class MultiTaxiController {
   ) {
     return toApiSuccessEnvelope(
       await this.multiTaxiService.getPassengerReceipt(accessToken),
+      requestId,
+    );
+  }
+
+  @Post("passenger-rides/:accessToken/push-subscriptions")
+  @OpenRoute()
+  async registerPassengerPushSubscription(
+    @Param("accessToken") accessToken: string,
+    @Body() command: RegisterPassengerPushSubscriptionCommand,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    return toApiSuccessEnvelope(
+      await this.multiTaxiService.registerPassengerPushSubscription(
+        accessToken,
+        command,
+      ),
+      requestId,
+    );
+  }
+
+  @Delete("passenger-rides/:accessToken/push-subscriptions")
+  @OpenRoute()
+  async unregisterPassengerPushSubscription(
+    @Param("accessToken") accessToken: string,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    return toApiSuccessEnvelope(
+      await this.multiTaxiService.unregisterPassengerPushSubscription(
+        accessToken,
+      ),
+      requestId,
+    );
+  }
+
+  @Get("multi-taxi/push/vapid-public-key")
+  @OpenRoute()
+  getPassengerPushVapidPublicKey(@Headers("x-request-id") requestId?: string) {
+    return toApiSuccessEnvelope(
+      this.multiTaxiService.getPassengerPushVapidPublicKey(),
       requestId,
     );
   }
@@ -360,19 +401,6 @@ export class MultiTaxiController {
         totalItems: items.length,
         totalPages: items.length === 0 ? 0 : 1,
       }),
-      requestId,
-    );
-  }
-
-  @Get("platform-admin/multi-taxi-trip-records/export")
-  @RequireRealms("platform")
-  @RequireScopes("multi_taxi_records:export")
-  async exportTripOperationalRecords(
-    @Query() query: MultiTaxiTripOperationalRecordQuery,
-    @Headers("x-request-id") requestId?: string,
-  ) {
-    return toApiSuccessEnvelope(
-      await this.multiTaxiService.exportTripOperationalRecords(query),
       requestId,
     );
   }

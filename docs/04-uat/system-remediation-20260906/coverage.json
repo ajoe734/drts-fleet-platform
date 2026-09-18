@@ -1,0 +1,991 @@
+{
+  "C001": {
+    "state_at_audit": "故障",
+    "capability": "從正式公開網址進入服務",
+    "implementation_tasks": ["SR-READINESS-001", "SR-PUBLIC-001"],
+    "verification_tasks": ["SR-QA-IDENTITY-001", "SR-LIVE-ENTRY-001"],
+    "source_refs": ["R01", "R29"]
+  },
+  "C002": {
+    "state_at_audit": "故障",
+    "capability": "OIDC 登入及返回業務頁",
+    "implementation_tasks": ["SR-TENANT-LOGIN-001"],
+    "verification_tasks": ["SR-QA-IDENTITY-001"],
+    "source_refs": ["R02"]
+  },
+  "C003": {
+    "state_at_audit": "待驗證",
+    "capability": "IAP／SSO 與 MFA 正式登入",
+    "implementation_tasks": [],
+    "verification_tasks": ["SR-QA-IDENTITY-001", "SR-LIVE-ENTRY-001"],
+    "source_refs": []
+  },
+  "C004": {
+    "state_at_audit": "故障",
+    "capability": "登入後進入正確首頁",
+    "implementation_tasks": ["SR-BANK-001"],
+    "verification_tasks": ["SR-QA-IDENTITY-001"],
+    "source_refs": ["R06"]
+  },
+  "C005": {
+    "state_at_audit": "故障",
+    "capability": "金額欄位依角色隔離",
+    "implementation_tasks": ["SR-BANK-002", "SR-IAM-001"],
+    "verification_tasks": ["SR-QA-IDENTITY-001"],
+    "source_refs": ["R15"]
+  },
+  "C006": {
+    "state_at_audit": "實作缺口",
+    "capability": "邀請→收到信→啟用→重寄／撤銷",
+    "implementation_tasks": ["SR-NOTIFY-001", "SR-MAIL-001"],
+    "verification_tasks": ["SR-QA-IDENTITY-001", "SR-LIVE-MAIL-001"],
+    "source_refs": ["N06"]
+  },
+  "C007": {
+    "state_at_audit": "故障",
+    "capability": "人員查詢與工作階段管理",
+    "implementation_tasks": ["SR-IAM-001"],
+    "verification_tasks": ["SR-QA-IDENTITY-001"],
+    "source_refs": ["R05"]
+  },
+  "C008": {
+    "state_at_audit": "待驗證",
+    "capability": "角色最小權限與選單／API 一致",
+    "implementation_tasks": [],
+    "verification_tasks": ["SR-QA-IDENTITY-001"],
+    "source_refs": []
+  },
+  "C009": {
+    "state_at_audit": "待驗證",
+    "capability": "資源歸屬隔離與匯出隔離",
+    "implementation_tasks": [],
+    "verification_tasks": ["SR-QA-IDENTITY-001"],
+    "source_refs": []
+  },
+  "C010": {
+    "state_at_audit": "待驗證",
+    "capability": "停權／離職立即失效與金鑰輪替",
+    "implementation_tasks": [],
+    "verification_tasks": ["SR-QA-IDENTITY-001"],
+    "source_refs": []
+  },
+  "C011": {
+    "state_at_audit": "待驗證",
+    "capability": "臨時角色、四眼核准、到期回收",
+    "implementation_tasks": [],
+    "verification_tasks": ["SR-QA-IDENTITY-001"],
+    "source_refs": []
+  },
+  "C012": {
+    "state_at_audit": "未完整落地",
+    "capability": "只看自有車輛收益／維保／任務／案件",
+    "implementation_tasks": [
+      "SR-DESIGN-001",
+      "SR-CONTRACT-001",
+      "SR-HOST-BE-001",
+      "SR-HOST-FE-001",
+      "SR-WIRE-001"
+    ],
+    "verification_tasks": ["SR-QA-NEWFEATURES-001"],
+    "source_refs": ["N03"]
+  },
+  "C013": {
+    "state_at_audit": "已測片段",
+    "capability": "查看歷史與既有預約詳情",
+    "implementation_tasks": [
+      "SR-FLEET-DATA-001",
+      "SR-ENTERPRISE-DATA-001",
+      "SR-ENTERPRISE-SEARCH-001"
+    ],
+    "verification_tasks": ["SR-QA-BOOKING-001"],
+    "source_refs": ["R08", "R24"]
+  },
+  "C014": {
+    "state_at_audit": "已測片段",
+    "capability": "填寫預約、必填檢核、最後確認",
+    "implementation_tasks": [],
+    "verification_tasks": ["SR-QA-BOOKING-001"],
+    "source_refs": []
+  },
+  "C015": {
+    "state_at_audit": "故障",
+    "capability": "乘客資料、聯絡人與舉牌同步",
+    "implementation_tasks": ["SR-ENTERPRISE-FORM-001"],
+    "verification_tasks": ["SR-QA-BOOKING-001"],
+    "source_refs": ["R20"]
+  },
+  "C016": {
+    "state_at_audit": "故障",
+    "capability": "過去日期、最短提前時間與改期限制",
+    "implementation_tasks": ["SR-ENTERPRISE-FORM-001"],
+    "verification_tasks": ["SR-QA-BOOKING-001"],
+    "source_refs": ["R21"]
+  },
+  "C017": {
+    "state_at_audit": "故障",
+    "capability": "首頁／行程／詳情與實際訂單一致",
+    "implementation_tasks": ["SR-ENTERPRISE-DATA-001"],
+    "verification_tasks": ["SR-QA-BOOKING-001"],
+    "source_refs": ["R08"]
+  },
+  "C018": {
+    "state_at_audit": "故障",
+    "capability": "聯絡司機、企業客服及求助",
+    "implementation_tasks": ["SR-ENTERPRISE-DATA-001"],
+    "verification_tasks": ["SR-QA-BOOKING-001"],
+    "source_refs": ["R09"]
+  },
+  "C019": {
+    "state_at_audit": "故障",
+    "capability": "手機填單、確認與可讀排版",
+    "implementation_tasks": ["SR-ENTERPRISE-FORM-001"],
+    "verification_tasks": ["SR-QA-BOOKING-001"],
+    "source_refs": ["R22"]
+  },
+  "C020": {
+    "state_at_audit": "故障",
+    "capability": "合法 signed handoff 進入嵌入叫車",
+    "implementation_tasks": ["SR-REFERRAL-001"],
+    "verification_tasks": ["SR-QA-BOOKING-001"],
+    "source_refs": ["R07"]
+  },
+  "C021": {
+    "state_at_audit": "故障",
+    "capability": "嵌入失敗的獨立叫車 fallback",
+    "implementation_tasks": ["SR-REFERRAL-001"],
+    "verification_tasks": ["SR-QA-BOOKING-001"],
+    "source_refs": ["R07"]
+  },
+  "C022": {
+    "state_at_audit": "待驗證",
+    "capability": "即時報價→送單→續接→取消→評分／收據",
+    "implementation_tasks": [],
+    "verification_tasks": ["SR-QA-BOOKING-001"],
+    "source_refs": []
+  },
+  "C023": {
+    "state_at_audit": "外部待完成",
+    "capability": "派車／到達／異動通知實際送達",
+    "implementation_tasks": ["SR-PUSH-001", "SR-READINESS-001"],
+    "verification_tasks": ["SR-QA-BOOKING-001", "SR-LIVE-PUSH-001"],
+    "source_refs": ["N10"]
+  },
+  "C024": {
+    "state_at_audit": "待驗證",
+    "capability": "租戶建單／修改／取消與歷程",
+    "implementation_tasks": [],
+    "verification_tasks": ["SR-QA-BOOKING-001"],
+    "source_refs": []
+  },
+  "C025": {
+    "state_at_audit": "待驗證",
+    "capability": "送審→核准／駁回→人工升級",
+    "implementation_tasks": [],
+    "verification_tasks": ["SR-QA-BOOKING-001"],
+    "source_refs": []
+  },
+  "C026": {
+    "state_at_audit": "實作缺口",
+    "capability": "收到新申請／接近逾時／決定 Email",
+    "implementation_tasks": ["SR-NOTIFY-001", "SR-MAIL-002"],
+    "verification_tasks": ["SR-QA-BOOKING-001", "SR-LIVE-MAIL-001"],
+    "source_refs": ["N07"]
+  },
+  "C027": {
+    "state_at_audit": "待驗證",
+    "capability": "預約乘客、常用地址與成本中心",
+    "implementation_tasks": [],
+    "verification_tasks": ["SR-QA-BOOKING-001"],
+    "source_refs": []
+  },
+  "C028": {
+    "state_at_audit": "待驗證",
+    "capability": "額度、用車規則、服務方案、SLA",
+    "implementation_tasks": [],
+    "verification_tasks": ["SR-QA-BOOKING-001"],
+    "source_refs": []
+  },
+  "C029": {
+    "state_at_audit": "外部待完成",
+    "capability": "卡友資格／權益／人工審查",
+    "implementation_tasks": [],
+    "verification_tasks": ["SR-QA-BOOKING-001", "SR-LIVE-FINANCE-001"],
+    "source_refs": []
+  },
+  "C030": {
+    "state_at_audit": "已測片段",
+    "capability": "卡友預約列表與狀態篩選",
+    "implementation_tasks": [],
+    "verification_tasks": ["SR-QA-BOOKING-001"],
+    "source_refs": []
+  },
+  "C031": {
+    "state_at_audit": "待驗證",
+    "capability": "航班異動、等待、加價與取消規則",
+    "implementation_tasks": [],
+    "verification_tasks": ["SR-QA-BOOKING-001"],
+    "source_refs": []
+  },
+  "C032": {
+    "state_at_audit": "待驗證",
+    "capability": "非核心產品的獨立業務閉環",
+    "implementation_tasks": [],
+    "verification_tasks": ["SR-QA-BOOKING-001"],
+    "source_refs": []
+  },
+  "C033": {
+    "state_at_audit": "外部待完成",
+    "capability": "轉派單接入／接受／拒絕／完成回傳",
+    "implementation_tasks": [],
+    "verification_tasks": ["SR-QA-BOOKING-001", "SR-LIVE-FORWARD-001"],
+    "source_refs": []
+  },
+  "C034": {
+    "state_at_audit": "待驗證",
+    "capability": "取消競態、失去搶單與第三方收據歸屬",
+    "implementation_tasks": [],
+    "verification_tasks": ["SR-QA-BOOKING-001", "SR-LIVE-FORWARD-001"],
+    "source_refs": []
+  },
+  "C035": {
+    "state_at_audit": "已測片段",
+    "capability": "任務清單→詳情→候選車查詢",
+    "implementation_tasks": [],
+    "verification_tasks": ["SR-QA-DISPATCH-001"],
+    "source_refs": []
+  },
+  "C036": {
+    "state_at_audit": "待驗證",
+    "capability": "人工派車、改派、撤回及並發占用",
+    "implementation_tasks": [],
+    "verification_tasks": ["SR-QA-DISPATCH-001"],
+    "source_refs": []
+  },
+  "C037": {
+    "state_at_audit": "驗收缺口",
+    "capability": "時間到自動釋放預約／提醒／升級",
+    "implementation_tasks": [],
+    "verification_tasks": ["SR-QA-DISPATCH-001"],
+    "source_refs": []
+  },
+  "C038": {
+    "state_at_audit": "驗收缺口",
+    "capability": "自動匹配、超時、無供給與恢復",
+    "implementation_tasks": [],
+    "verification_tasks": ["SR-QA-DISPATCH-001"],
+    "source_refs": []
+  },
+  "C039": {
+    "state_at_audit": "待驗證",
+    "capability": "排班佇列 check-in／out、順序與例外",
+    "implementation_tasks": [],
+    "verification_tasks": ["SR-QA-DISPATCH-001"],
+    "source_refs": []
+  },
+  "C040": {
+    "state_at_audit": "故障",
+    "capability": "可讀地圖、位置與車輛態勢",
+    "implementation_tasks": ["SR-OPS-MAP-001"],
+    "verification_tasks": ["SR-QA-DISPATCH-001"],
+    "source_refs": ["R17"]
+  },
+  "C041": {
+    "state_at_audit": "待驗證",
+    "capability": "presence 占用與回復可派狀態",
+    "implementation_tasks": [],
+    "verification_tasks": ["SR-QA-DISPATCH-001"],
+    "source_refs": []
+  },
+  "C042": {
+    "state_at_audit": "已測片段",
+    "capability": "出勤、營收、維保看板",
+    "implementation_tasks": [],
+    "verification_tasks": ["SR-QA-DISPATCH-001"],
+    "source_refs": []
+  },
+  "C043": {
+    "state_at_audit": "待驗證",
+    "capability": "通話建檔、caller 查找、轉訂單／客訴",
+    "implementation_tasks": [],
+    "verification_tasks": ["SR-QA-CALL-001"],
+    "source_refs": []
+  },
+  "C044": {
+    "state_at_audit": "外部待完成",
+    "capability": "真電話接入、排隊、錄音與補件",
+    "implementation_tasks": [],
+    "verification_tasks": ["SR-QA-CALL-001", "UV-EXEC-028"],
+    "source_refs": []
+  },
+  "C045": {
+    "state_at_audit": "待驗證",
+    "capability": "分類→指派→調查→回覆→結案／重開",
+    "implementation_tasks": [],
+    "verification_tasks": ["SR-QA-CALL-001"],
+    "source_refs": []
+  },
+  "C046": {
+    "state_at_audit": "待驗證",
+    "capability": "事故→責任／附件→限制派車→恢復",
+    "implementation_tasks": [],
+    "verification_tasks": ["SR-QA-CALL-001"],
+    "source_refs": []
+  },
+  "C047": {
+    "state_at_audit": "待驗證",
+    "capability": "收警→認領→處置→解除與回執",
+    "implementation_tasks": [],
+    "verification_tasks": ["SR-QA-CALL-001"],
+    "source_refs": []
+  },
+  "C048": {
+    "state_at_audit": "故障",
+    "capability": "跨應用追查與助理工作協作",
+    "implementation_tasks": ["SR-OPS-SHELL-001"],
+    "verification_tasks": ["SR-QA-DISPATCH-001"],
+    "source_refs": ["R18", "R19"]
+  },
+  "C049": {
+    "state_at_audit": "待驗證",
+    "capability": "文件建檔、送審與核准後開通",
+    "implementation_tasks": ["SR-DRIVER-WEB-001"],
+    "verification_tasks": ["SR-QA-DRIVER-001", "SR-LIVE-DRIVER-001"],
+    "source_refs": ["R30"]
+  },
+  "C050": {
+    "state_at_audit": "待驗證",
+    "capability": "裝置綁定、解綁、復原與 session 更新",
+    "implementation_tasks": [],
+    "verification_tasks": ["SR-QA-DRIVER-001", "SR-LIVE-DRIVER-001"],
+    "source_refs": []
+  },
+  "C051": {
+    "state_at_audit": "待驗證",
+    "capability": "上／下線、班次歷史與出勤計時",
+    "implementation_tasks": [],
+    "verification_tasks": ["SR-QA-DRIVER-001", "SR-LIVE-DRIVER-001"],
+    "source_refs": []
+  },
+  "C052": {
+    "state_at_audit": "實作缺口",
+    "capability": "請假申請、審核與班表聯動",
+    "implementation_tasks": [
+      "SR-DESIGN-001",
+      "SR-CONTRACT-001",
+      "SR-LEAVE-BE-001",
+      "SR-LEAVE-FE-001",
+      "SR-WIRE-001"
+    ],
+    "verification_tasks": ["SR-QA-NEWFEATURES-001"],
+    "source_refs": ["N01"]
+  },
+  "C053": {
+    "state_at_audit": "待驗證",
+    "capability": "收新任務、接受／拒絕與逾時",
+    "implementation_tasks": [],
+    "verification_tasks": ["SR-QA-DRIVER-001", "SR-LIVE-DRIVER-001"],
+    "source_refs": []
+  },
+  "C054": {
+    "state_at_audit": "待驗證",
+    "capability": "出發→到達→開始→完成／取消",
+    "implementation_tasks": [],
+    "verification_tasks": ["SR-QA-DRIVER-001", "SR-LIVE-DRIVER-001"],
+    "source_refs": []
+  },
+  "C055": {
+    "state_at_audit": "待驗證",
+    "capability": "照片／簽收證明與完成條件",
+    "implementation_tasks": [],
+    "verification_tasks": ["SR-QA-DRIVER-001", "SR-LIVE-DRIVER-001"],
+    "source_refs": []
+  },
+  "C056": {
+    "state_at_audit": "待驗證",
+    "capability": "背景定位、導航、離線排隊與重連",
+    "implementation_tasks": [],
+    "verification_tasks": ["SR-QA-DRIVER-001", "SR-LIVE-DRIVER-001"],
+    "source_refs": []
+  },
+  "C057": {
+    "state_at_audit": "待驗證",
+    "capability": "收益日週月、服務費與補助追溯",
+    "implementation_tasks": [],
+    "verification_tasks": ["SR-QA-DRIVER-001", "SR-LIVE-DRIVER-001"],
+    "source_refs": []
+  },
+  "C058": {
+    "state_at_audit": "驗收缺口",
+    "capability": "下載自己的 statement／收據",
+    "implementation_tasks": ["SR-ARTIFACT-001", "SR-INVOICE-001"],
+    "verification_tasks": ["SR-QA-DRIVER-001", "SR-LIVE-DRIVER-001"],
+    "source_refs": ["N04"]
+  },
+  "C059": {
+    "state_at_audit": "實作缺口",
+    "capability": "教學影片、SOP、測驗與完訓紀錄",
+    "implementation_tasks": [
+      "SR-DESIGN-001",
+      "SR-CONTRACT-001",
+      "SR-ACADEMY-BE-001",
+      "SR-ACADEMY-FE-001",
+      "SR-WIRE-001"
+    ],
+    "verification_tasks": ["SR-QA-NEWFEATURES-001"],
+    "source_refs": ["N02"]
+  },
+  "C060": {
+    "state_at_audit": "待驗證",
+    "capability": "個資、通知偏好與裝置自檢",
+    "implementation_tasks": [],
+    "verification_tasks": ["SR-QA-DRIVER-001", "SR-LIVE-DRIVER-001"],
+    "source_refs": []
+  },
+  "C061": {
+    "state_at_audit": "待驗證",
+    "capability": "到期提醒與禁止接單",
+    "implementation_tasks": ["SR-NOTIFY-001", "SR-MAIL-002"],
+    "verification_tasks": ["SR-QA-DRIVER-001", "SR-LIVE-DRIVER-001"],
+    "source_refs": ["N07"]
+  },
+  "C062": {
+    "state_at_audit": "故障",
+    "capability": "Web 預覽作為基本巡檢入口",
+    "implementation_tasks": ["SR-DRIVER-WEB-001"],
+    "verification_tasks": ["SR-QA-DRIVER-001", "SR-LIVE-DRIVER-001"],
+    "source_refs": ["R30"]
+  },
+  "C063": {
+    "state_at_audit": "故障",
+    "capability": "總覽 KPI 與司機／車輛清單一致",
+    "implementation_tasks": ["SR-FLEET-DATA-001"],
+    "verification_tasks": ["SR-QA-SUPPLY-001"],
+    "source_refs": ["R10"]
+  },
+  "C064": {
+    "state_at_audit": "故障",
+    "capability": "新增司機／車輛與主要操作入口",
+    "implementation_tasks": ["SR-FLEET-DATA-001"],
+    "verification_tasks": ["SR-QA-SUPPLY-001"],
+    "source_refs": ["R11"]
+  },
+  "C065": {
+    "state_at_audit": "待驗證",
+    "capability": "文件上傳→檢查→送件→退補／重送",
+    "implementation_tasks": [],
+    "verification_tasks": ["SR-QA-SUPPLY-001"],
+    "source_refs": []
+  },
+  "C066": {
+    "state_at_audit": "已測片段",
+    "capability": "受理／核可／駁回／revision 衝突",
+    "implementation_tasks": [],
+    "verification_tasks": ["SR-QA-SUPPLY-001"],
+    "source_refs": []
+  },
+  "C067": {
+    "state_at_audit": "實作缺口",
+    "capability": "回覆事故／申訴與 SLA",
+    "implementation_tasks": ["SR-FLEET-CASE-001"],
+    "verification_tasks": ["SR-QA-SUPPLY-001"],
+    "source_refs": ["R12"]
+  },
+  "C068": {
+    "state_at_audit": "故障",
+    "capability": "statement 查詢／確認／爭議處理",
+    "implementation_tasks": ["SR-FLEET-SETTLE-001"],
+    "verification_tasks": ["SR-QA-FINANCE-001"],
+    "source_refs": ["R13"]
+  },
+  "C069": {
+    "state_at_audit": "故障",
+    "capability": "有效狀態／趟次篩選與匯出",
+    "implementation_tasks": ["SR-FLEET-DATA-001", "SR-ENTERPRISE-SEARCH-001"],
+    "verification_tasks": ["SR-QA-SUPPLY-001"],
+    "source_refs": ["R24", "R11"]
+  },
+  "C070": {
+    "state_at_audit": "故障",
+    "capability": "可讀表單、欄位標籤與離頁保護",
+    "implementation_tasks": ["SR-FLEET-FORM-001"],
+    "verification_tasks": ["SR-QA-SUPPLY-001"],
+    "source_refs": ["R23", "R25"]
+  },
+  "C071": {
+    "state_at_audit": "實作缺口",
+    "capability": "看真完訓率與逾期名單",
+    "implementation_tasks": [
+      "SR-DESIGN-001",
+      "SR-CONTRACT-001",
+      "SR-ACADEMY-BE-001",
+      "SR-ACADEMY-FE-001",
+      "SR-WIRE-001"
+    ],
+    "verification_tasks": ["SR-QA-NEWFEATURES-001"],
+    "source_refs": ["N02"]
+  },
+  "C072": {
+    "state_at_audit": "待驗證",
+    "capability": "保險、證照、委託合約與排他性",
+    "implementation_tasks": [],
+    "verification_tasks": ["SR-QA-SUPPLY-001"],
+    "source_refs": []
+  },
+  "C073": {
+    "state_at_audit": "待驗證",
+    "capability": "終止委託、下架與 debranding 閉環",
+    "implementation_tasks": [],
+    "verification_tasks": ["SR-QA-SUPPLY-001"],
+    "source_refs": []
+  },
+  "C074": {
+    "state_at_audit": "已測片段",
+    "capability": "支付訂單與 reconciliation 案件查詢",
+    "implementation_tasks": [],
+    "verification_tasks": ["SR-QA-FINANCE-001"],
+    "source_refs": []
+  },
+  "C075": {
+    "state_at_audit": "外部待完成",
+    "capability": "重新收款／退款／作廢真實執行",
+    "implementation_tasks": [],
+    "verification_tasks": ["SR-QA-FINANCE-001", "SR-LIVE-FINANCE-001"],
+    "source_refs": []
+  },
+  "C076": {
+    "state_at_audit": "已測片段",
+    "capability": "費率草稿、比較、發布與不可變快照",
+    "implementation_tasks": [],
+    "verification_tasks": ["SR-QA-FINANCE-001"],
+    "source_refs": []
+  },
+  "C077": {
+    "state_at_audit": "待驗證",
+    "capability": "抬頭、統編、請款設定及期間結算",
+    "implementation_tasks": [],
+    "verification_tasks": ["SR-QA-FINANCE-001"],
+    "source_refs": []
+  },
+  "C078": {
+    "state_at_audit": "實作缺口",
+    "capability": "可下載真正的帳單 PDF",
+    "implementation_tasks": ["SR-ARTIFACT-001", "SR-INVOICE-001"],
+    "verification_tasks": ["SR-QA-FINANCE-001", "SR-LIVE-DOC-001"],
+    "source_refs": ["N04"]
+  },
+  "C079": {
+    "state_at_audit": "驗收缺口",
+    "capability": "月結帳單寄送與失敗追蹤",
+    "implementation_tasks": [
+      "SR-NOTIFY-001",
+      "SR-ARTIFACT-001",
+      "SR-MAIL-002",
+      "SR-INVOICE-001"
+    ],
+    "verification_tasks": ["SR-QA-FINANCE-001", "SR-LIVE-MAIL-001"],
+    "source_refs": ["N04", "N07"]
+  },
+  "C080": {
+    "state_at_audit": "待驗證",
+    "capability": "代墊批次、核准、匯出與付款狀態",
+    "implementation_tasks": [],
+    "verification_tasks": ["SR-QA-FINANCE-001"],
+    "source_refs": []
+  },
+  "C081": {
+    "state_at_audit": "實作缺口",
+    "capability": "上傳與查驗匯款證明原檔",
+    "implementation_tasks": ["SR-PROOF-001"],
+    "verification_tasks": ["SR-QA-FINANCE-001"],
+    "source_refs": ["N09"]
+  },
+  "C082": {
+    "state_at_audit": "已測片段",
+    "capability": "真 statement CSV 下載與資料一致",
+    "implementation_tasks": [],
+    "verification_tasks": ["SR-QA-FINANCE-001"],
+    "source_refs": []
+  },
+  "C083": {
+    "state_at_audit": "故障",
+    "capability": "摘要／簽章真實可驗證",
+    "implementation_tasks": ["SR-BANK-003"],
+    "verification_tasks": ["SR-QA-FINANCE-001", "SR-LIVE-DOC-001"],
+    "source_refs": ["R14"]
+  },
+  "C084": {
+    "state_at_audit": "故障",
+    "capability": "正確開立日、到期日與帳期",
+    "implementation_tasks": ["SR-BANK-001"],
+    "verification_tasks": ["SR-QA-FINANCE-001"],
+    "source_refs": ["R28"]
+  },
+  "C085": {
+    "state_at_audit": "故障",
+    "capability": "合約、使用量、方案與人員管理",
+    "implementation_tasks": ["SR-BANK-001"],
+    "verification_tasks": ["SR-QA-FINANCE-001"],
+    "source_refs": ["R06"]
+  },
+  "C086": {
+    "state_at_audit": "已測片段",
+    "capability": "用量→分潤→對帳明細→CSV",
+    "implementation_tasks": [],
+    "verification_tasks": ["SR-QA-FINANCE-001"],
+    "source_refs": []
+  },
+  "C087": {
+    "state_at_audit": "故障",
+    "capability": "總覽匯出",
+    "implementation_tasks": ["SR-CHANNEL-001"],
+    "verification_tasks": ["SR-QA-FINANCE-001"],
+    "source_refs": ["R26"]
+  },
+  "C088": {
+    "state_at_audit": "待驗證",
+    "capability": "取消、退款、爭議的跨帳一致性",
+    "implementation_tasks": [],
+    "verification_tasks": ["SR-QA-FINANCE-001"],
+    "source_refs": []
+  },
+  "C089": {
+    "state_at_audit": "驗收缺口",
+    "capability": "批次跨月、重跑、失敗續跑與對帳",
+    "implementation_tasks": [],
+    "verification_tasks": ["SR-QA-CONCURRENCY-001"],
+    "source_refs": []
+  },
+  "C090": {
+    "state_at_audit": "待驗證",
+    "capability": "營運報表查詢、產生與 CSV 下載",
+    "implementation_tasks": [],
+    "verification_tasks": ["SR-QA-REPORTS-001"],
+    "source_refs": []
+  },
+  "C091": {
+    "state_at_audit": "實作缺口",
+    "capability": "一般報表 PDF／Excel 輸出",
+    "implementation_tasks": ["SR-REPORT-001", "SR-DEPS-001"],
+    "verification_tasks": ["SR-QA-REPORTS-001"],
+    "source_refs": ["N05"]
+  },
+  "C092": {
+    "state_at_audit": "待驗證",
+    "capability": "九項 PRD 9.10.1 監理資料報表",
+    "implementation_tasks": [],
+    "verification_tasks": ["SR-QA-REPORTS-001"],
+    "source_refs": []
+  },
+  "C093": {
+    "state_at_audit": "故障",
+    "capability": "行程紀錄、資料保存與查詢",
+    "implementation_tasks": [
+      "SR-BANK-001",
+      "SR-IAM-001",
+      "SR-ADMIN-VERIFY-001",
+      "SR-ENTERPRISE-DATA-001"
+    ],
+    "verification_tasks": ["SR-QA-REPORTS-001"],
+    "source_refs": ["R03", "R16"]
+  },
+  "C094": {
+    "state_at_audit": "待驗證",
+    "capability": "乘客揭露／公開車資版本審核",
+    "implementation_tasks": [],
+    "verification_tasks": ["SR-QA-REPORTS-001"],
+    "source_refs": []
+  },
+  "C095": {
+    "state_at_audit": "待驗證",
+    "capability": "車資異常處理、評價與補正",
+    "implementation_tasks": [],
+    "verification_tasks": ["SR-QA-REPORTS-001"],
+    "source_refs": []
+  },
+  "C096": {
+    "state_at_audit": "已測片段",
+    "capability": "公開電話、車資、版本與歷史治理",
+    "implementation_tasks": [],
+    "verification_tasks": ["SR-QA-REPORTS-001"],
+    "source_refs": []
+  },
+  "C097": {
+    "state_at_audit": "實作缺口",
+    "capability": "下載可列印車內牌貼",
+    "implementation_tasks": ["SR-ARTIFACT-001", "SR-PLACARD-001"],
+    "verification_tasks": ["SR-QA-REPORTS-001", "SR-LIVE-DOC-001"],
+    "source_refs": ["N08"]
+  },
+  "C098": {
+    "state_at_audit": "待驗證",
+    "capability": "多元計程車電子證明 HTML／PDF",
+    "implementation_tasks": [],
+    "verification_tasks": ["SR-QA-REPORTS-001"],
+    "source_refs": []
+  },
+  "C099": {
+    "state_at_audit": "待驗證",
+    "capability": "證據清單、匯出授權、法律保留",
+    "implementation_tasks": [],
+    "verification_tasks": ["SR-QA-REPORTS-001"],
+    "source_refs": []
+  },
+  "C100": {
+    "state_at_audit": "待驗證",
+    "capability": "不可變 audit、保存、封存與刪除邊界",
+    "implementation_tasks": [],
+    "verification_tasks": ["SR-QA-REPORTS-001"],
+    "source_refs": []
+  },
+  "C101": {
+    "state_at_audit": "故障",
+    "capability": "車隊夥伴主檔列表與管理",
+    "implementation_tasks": ["SR-ADMIN-VERIFY-001"],
+    "verification_tasks": ["SR-QA-GOVERNANCE-001"],
+    "source_refs": ["R04"]
+  },
+  "C102": {
+    "state_at_audit": "待驗證",
+    "capability": "租戶生命週期與跨租戶治理",
+    "implementation_tasks": [],
+    "verification_tasks": ["SR-QA-GOVERNANCE-001"],
+    "source_refs": []
+  },
+  "C103": {
+    "state_at_audit": "待驗證",
+    "capability": "方案、入口、價格、來源歸屬",
+    "implementation_tasks": [],
+    "verification_tasks": ["SR-QA-GOVERNANCE-001"],
+    "source_refs": []
+  },
+  "C104": {
+    "state_at_audit": "故障",
+    "capability": "查詢／註冊／停用／憑證治理",
+    "implementation_tasks": ["SR-ADMIN-ADAPTER-001"],
+    "verification_tasks": ["SR-QA-GOVERNANCE-001"],
+    "source_refs": ["N11"]
+  },
+  "C105": {
+    "state_at_audit": "故障",
+    "capability": "憑證到期提醒正確性",
+    "implementation_tasks": ["SR-ADMIN-ADAPTER-001"],
+    "verification_tasks": ["SR-QA-GOVERNANCE-001"],
+    "source_refs": ["N12"]
+  },
+  "C106": {
+    "state_at_audit": "已測片段",
+    "capability": "區域草稿、審核、發布、停靠規則",
+    "implementation_tasks": [],
+    "verification_tasks": ["SR-QA-GOVERNANCE-001"],
+    "source_refs": []
+  },
+  "C107": {
+    "state_at_audit": "待驗證",
+    "capability": "產品型別、資格、時間與結算模式",
+    "implementation_tasks": [],
+    "verification_tasks": ["SR-QA-GOVERNANCE-001"],
+    "source_refs": []
+  },
+  "C108": {
+    "state_at_audit": "已測片段",
+    "capability": "health、告警、通道與積壓可觀測性",
+    "implementation_tasks": ["SR-BANK-001", "SR-ENTERPRISE-DATA-001"],
+    "verification_tasks": ["SR-QA-GOVERNANCE-001"],
+    "source_refs": ["R16"]
+  },
+  "C109": {
+    "state_at_audit": "待驗證",
+    "capability": "公告／維護通知與功能旗標",
+    "implementation_tasks": [],
+    "verification_tasks": ["SR-QA-GOVERNANCE-001"],
+    "source_refs": []
+  },
+  "C110": {
+    "state_at_audit": "故障",
+    "capability": "環境、資料來源與文案可信度",
+    "implementation_tasks": ["SR-ENV-COPY-001"],
+    "verification_tasks": ["SR-QA-GOVERNANCE-001"],
+    "source_refs": ["R27"]
+  },
+  "C111": {
+    "state_at_audit": "待驗證",
+    "capability": "API keys、輪替、撤銷與使用量",
+    "implementation_tasks": [],
+    "verification_tasks": ["SR-QA-WEBHOOK-001"],
+    "source_refs": []
+  },
+  "C112": {
+    "state_at_audit": "待驗證",
+    "capability": "簽章、重試、停用、回放與密鑰輪替",
+    "implementation_tasks": [],
+    "verification_tasks": ["SR-QA-WEBHOOK-001"],
+    "source_refs": []
+  },
+  "C113": {
+    "state_at_audit": "外部待完成",
+    "capability": "ERP／企業 SSO／銀行帳本同步",
+    "implementation_tasks": [],
+    "verification_tasks": ["SR-QA-WEBHOOK-001", "SR-LIVE-FINANCE-001"],
+    "source_refs": []
+  },
+  "C114": {
+    "state_at_audit": "外部待完成",
+    "capability": "真地圖、地理编碼、路由／ETA",
+    "implementation_tasks": [],
+    "verification_tasks": ["SR-QA-WEBHOOK-001", "SR-LIVE-MAP-001"],
+    "source_refs": []
+  },
+  "C115": {
+    "state_at_audit": "驗收缺口",
+    "capability": "背景補件、到期掃描與告警回執",
+    "implementation_tasks": [],
+    "verification_tasks": ["SR-QA-WEBHOOK-001"],
+    "source_refs": []
+  },
+  "C116": {
+    "state_at_audit": "驗收缺口",
+    "capability": "排程多實例互斥、重啟恢復與重試",
+    "implementation_tasks": [],
+    "verification_tasks": ["SR-QA-CONCURRENCY-001"],
+    "source_refs": []
+  },
+  "C117": {
+    "state_at_audit": "待驗證",
+    "capability": "同一請求重送不重複建單／扣款／派車",
+    "implementation_tasks": [],
+    "verification_tasks": ["SR-QA-UX-001"],
+    "source_refs": []
+  },
+  "C118": {
+    "state_at_audit": "驗收缺口",
+    "capability": "同一訂單跨角色的完整業務閉環",
+    "implementation_tasks": [],
+    "verification_tasks": ["SR-RELEASE-001"],
+    "source_refs": []
+  },
+  "C119": {
+    "state_at_audit": "故障",
+    "capability": "失敗、空清單、過期、429與重試恢復",
+    "implementation_tasks": [
+      "SR-BANK-001",
+      "SR-IAM-001",
+      "SR-ENTERPRISE-DATA-001"
+    ],
+    "verification_tasks": ["SR-QA-UX-001"],
+    "source_refs": ["R05", "R08", "R16"]
+  },
+  "C120": {
+    "state_at_audit": "驗收缺口",
+    "capability": "全域可及性、焦點、對比與響應式",
+    "implementation_tasks": ["SR-FLEET-FORM-001", "SR-ENTERPRISE-FORM-001"],
+    "verification_tasks": ["SR-QA-UX-001"],
+    "source_refs": ["R22", "R23"]
+  },
+  "C121": {
+    "state_at_audit": "待驗證",
+    "capability": "繁中／英文、一致時間與貨幣格式",
+    "implementation_tasks": [],
+    "verification_tasks": ["SR-QA-UX-001"],
+    "source_refs": []
+  },
+  "C122": {
+    "state_at_audit": "驗收缺口",
+    "capability": "備份、還原、RPO／RTO及災難演练",
+    "implementation_tasks": [],
+    "verification_tasks": ["SR-OPS-PROOF-001", "SR-LIVE-OPS-001"],
+    "source_refs": []
+  },
+  "C123": {
+    "state_at_audit": "驗收缺口",
+    "capability": "負載、延遲、容量與限流",
+    "implementation_tasks": [],
+    "verification_tasks": ["SR-OPS-PROOF-001", "SR-LIVE-OPS-001"],
+    "source_refs": []
+  },
+  "C124": {
+    "state_at_audit": "驗收缺口",
+    "capability": "部署版本、health、業務驗收與回滾",
+    "implementation_tasks": ["SR-READINESS-001", "SR-PUBLIC-001"],
+    "verification_tasks": ["SR-OPS-PROOF-001", "SR-LIVE-OPS-001"],
+    "source_refs": ["R29"]
+  },
+  "C125": {
+    "state_at_audit": "驗收缺口",
+    "capability": "檔案 bytes、掃描、歸屬、到期與真下載",
+    "implementation_tasks": [
+      "SR-ARTIFACT-001",
+      "SR-INVOICE-001",
+      "SR-PLACARD-001",
+      "SR-PROOF-001"
+    ],
+    "verification_tasks": ["SR-QA-UX-001", "SR-LIVE-DOC-001"],
+    "source_refs": ["N04", "N08", "N09"]
+  },
+  "C126": {
+    "state_at_audit": "範圍排除",
+    "capability": "獨立 Partner Booking 網站",
+    "implementation_tasks": [],
+    "verification_tasks": ["SR-SCOPE-001"],
+    "source_refs": []
+  },
+  "C127": {
+    "state_at_audit": "範圍排除",
+    "capability": "舊 Passenger／Concierge／Assisted 入口",
+    "implementation_tasks": [],
+    "verification_tasks": ["SR-SCOPE-001"],
+    "source_refs": []
+  },
+  "C128": {
+    "state_at_audit": "範圍排除",
+    "capability": "AV／ODD／Tesla 接管與远端营运",
+    "implementation_tasks": [],
+    "verification_tasks": ["SR-SCOPE-001"],
+    "source_refs": []
+  },
+  "C129": {
+    "state_at_audit": "範圍排除",
+    "capability": "Phase1 filing PDF 主報告與ZIP送件包",
+    "implementation_tasks": [],
+    "verification_tasks": ["SR-SCOPE-001"],
+    "source_refs": []
+  },
+  "C130": {
+    "state_at_audit": "範圍排除",
+    "capability": "獨立 regulator realm 與正式監理入口",
+    "implementation_tasks": [],
+    "verification_tasks": ["SR-SCOPE-001"],
+    "source_refs": []
+  },
+  "C131": {
+    "state_at_audit": "範圍排除",
+    "capability": "獨立事件匯流排與13態轉單模型",
+    "implementation_tasks": [],
+    "verification_tasks": ["SR-SCOPE-001"],
+    "source_refs": []
+  },
+  "C132": {
+    "state_at_audit": "範圍排除",
+    "capability": "逾時自動升級",
+    "implementation_tasks": [],
+    "verification_tasks": ["SR-SCOPE-001"],
+    "source_refs": []
+  },
+  "C133": {
+    "state_at_audit": "外部待完成",
+    "capability": "提領、商店公開上架與商用簽章",
+    "implementation_tasks": [],
+    "verification_tasks": ["SR-READINESS-001", "SR-SCOPE-001"],
+    "source_refs": []
+  },
+  "C134": {
+    "state_at_audit": "實作缺口",
+    "capability": "合約詳情可進入並提供執行條款",
+    "implementation_tasks": [
+      "SR-CONTRACT-READ-001",
+      "SR-OPS-CONTRACT-001",
+      "SR-CONTRACT-001"
+    ],
+    "verification_tasks": ["SR-QA-DISPATCH-001"],
+    "source_refs": ["N13", "N14"]
+  }
+}

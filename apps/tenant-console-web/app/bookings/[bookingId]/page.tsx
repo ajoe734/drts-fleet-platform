@@ -708,7 +708,7 @@ export default async function BookingDetailPage({
     return renderEmptyState(emptyReason, bookingId, locale);
   }
 
-  const client = getTenantClient();
+  const client = await getTenantClient();
   const [bookingResult, invoicesResult, statementsResult, auditLogsResult] =
     await Promise.allSettled([
       client.getTenantBooking(bookingId) as Promise<BookingDetailRecord>,

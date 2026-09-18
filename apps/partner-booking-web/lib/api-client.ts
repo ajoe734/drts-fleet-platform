@@ -445,7 +445,7 @@ function fallbackBrandTemplate(slug: string): PartnerBrandTemplate {
         brand.slug.toLowerCase() === normalizedSlug ||
         brand.code.toLowerCase() === normalizedSlug
       );
-    }) ?? BRAND_TEMPLATES.CTBC;
+    }) ?? BRAND_TEMPLATES.ACME;
   const isKnownBrand =
     base.slug.toLowerCase() === normalizedSlug ||
     base.code.toLowerCase() === normalizedSlug;

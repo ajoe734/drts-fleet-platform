@@ -1,0 +1,835 @@
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import path from "node:path";
+import { expect, test, type Page } from "@playwright/test";
+
+type HttpMethod = "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
+type TemplateVariables = Record<string, unknown>;
+type SetupRequest = {
+  baseUrlEnv?: string;
+  path: string;
+  method: HttpMethod;
+  body?: unknown;
+  headers?: Record<string, string>;
+  capture?: Record<string, string>;
+};
+type JourneyStep =
+  | { kind: "navigate"; path: string }
+  | { kind: "click"; control: string }
+  | { kind: "fill"; control: string; value: string };
+type BrowserSession = {
+  cookieName: string;
+  tokenEnv: string;
+  templateVariable: string;
+};
+type Readback = {
+  url: string;
+  idPath: string;
+  statePath: string;
+  expectedState: string | number | boolean;
+};
+type RequestOperation = {
+  kind: "request";
+  name: string;
+  control: string;
+  requestUrlIncludes: string;
+  requestMethod: HttpMethod;
+  responseKind: "json" | "download";
+  before?: JourneyStep[];
+  resultIdPath?: string;
+  resultIdQueryParam?: string;
+  readback?: Readback;
+  expectedContentTypeIncludes?: string;
+};
+type NavigationOperation = {
+  kind: "navigation";
+  name: string;
+  control: string;
+  before?: JourneyStep[];
+  expectedPath: string;
+  expectedQuery: Record<string, string>;
+  readback?: Readback;
+};
+type IntentOperation = {
+  kind: "intent";
+  name: string;
+  control: string;
+  targetBaseUrlEnv: string;
+  expectedPathPattern: string;
+};
+type AbsenceOperation = {
+  kind: "absence";
+  name: string;
+  control: string;
+};
+type Operation =
+  | RequestOperation
+  | NavigationOperation
+  | IntentOperation
+  | AbsenceOperation;
+type Journey = {
+  id: string;
+  surface: string;
+  baseUrlEnv: string;
+  route: string;
+  actorScope: string;
+  environmentVariables?: Record<string, string>;
+  browserSession?: BrowserSession;
+  setup?: SetupRequest[];
+  operations: Operation[];
+};
+type RetiredSurface = { id: string; baseUrlEnv: string; path: string };
+type Manifest = {
+  version: number;
+  candidateSha: string;
+  journeys: Journey[];
+  retiredSurfaces: RetiredSurface[];
+};
+
+const manifestPath =
+  process.env.DRTS_OPERATIONAL_BROWSER_JOURNEYS_FILE ??
+  path.join(
+    process.cwd(),
+    "tests/e2e/fixtures/operational-browser-journeys.json",
+  );
+const manifest = JSON.parse(readFileSync(manifestPath, "utf8")) as Manifest;
+const candidateSha = process.env.DRTS_CANDIDATE_SHA?.trim();
+const evidenceDir =
+  process.env.DRTS_OPERATIONAL_EVIDENCE_DIR ??
+  path.join(process.cwd(), "test-results/operational-browser");
+const evidence: Array<Record<string, unknown>> = [];
+const interactionTimeoutMs = 10_000;
+
+function requiredOrigin(envName: string) {
+  const value = process.env[envName]?.trim();
+  if (!value) {
+    throw new Error(
+      `${envName} is required: release acceptance must target a deployed candidate URL.`,
+    );
+  }
+  return new URL(value).toString();
+}
+
+function requiredEnvironmentValue(envName: string) {
+  const value = process.env[envName]?.trim();
+  if (!value) {
+    throw new Error(
+      `${envName} is required for this browser session's deployed candidate evidence.`,
+    );
+  }
+  return value;
+}
+
+function getIdentityToken(baseUrlEnv?: string): string | undefined {
+  if (!baseUrlEnv) return undefined;
+  if (
+    baseUrlEnv === "DRTS_OPERATIONAL_TENANT_CONSOLE_URL" ||
+    baseUrlEnv === "DRTS_DEV_TENANT_CONSOLE_BASE_URL"
+  ) {
+    return (
+      process.env.DRTS_OPERATIONAL_TENANT_CONSOLE_ID_TOKEN ||
+      process.env.DRTS_DEV_TENANT_CONSOLE_ID_TOKEN
+    );
+  }
+  if (
+    baseUrlEnv === "DRTS_OPERATIONAL_BANK_CONSOLE_URL" ||
+    baseUrlEnv === "DRTS_DEV_BANK_CONSOLE_BASE_URL"
+  ) {
+    return (
+      process.env.DRTS_OPERATIONAL_BANK_CONSOLE_ID_TOKEN ||
+      process.env.DRTS_DEV_BANK_CONSOLE_ID_TOKEN
+    );
+  }
+  if (
+    baseUrlEnv === "DRTS_OPERATIONAL_ENTERPRISE_DISPATCH_URL" ||
+    baseUrlEnv === "DRTS_DEV_ENTERPRISE_DISPATCH_BASE_URL"
+  ) {
+    return (
+      process.env.DRTS_OPERATIONAL_ENTERPRISE_DISPATCH_ID_TOKEN ||
+      process.env.DRTS_DEV_ENTERPRISE_DISPATCH_ID_TOKEN
+    );
+  }
+  return undefined;
+}
+
+function record(entry: Record<string, unknown>) {
+  evidence.push({
+    candidateSha,
+    recordedAt: new Date().toISOString(),
+    ...entry,
+  });
+}
+
+function expectCandidateRevision(
+  headers: Record<string, string>,
+  evidenceLabel: string,
+) {
+  expect(
+    headers["x-drts-candidate-sha"],
+    `${evidenceLabel} must report the deployed immutable candidate SHA`,
+  ).toBe(candidateSha);
+}
+
+function valueAtPath(value: unknown, dotPath: string): unknown {
+  return dotPath.split(".").reduce<unknown>((current, key) => {
+    if (!current || typeof current !== "object") return undefined;
+    return (current as Record<string, unknown>)[key];
+  }, value);
+}
+
+function variableValue(name: string, variables: TemplateVariables) {
+  const value = variables[name];
+  expect(value, `template variable ${name}`).not.toBeUndefined();
+  return value;
+}
+
+function materializeString(template: string, variables: TemplateVariables) {
+  return template.replace(/\{\{([a-zA-Z][a-zA-Z0-9_]*)\}\}/g, (_, name) =>
+    String(variableValue(name, variables)),
+  );
+}
+
+function materializeValue(
+  value: unknown,
+  variables: TemplateVariables,
+): unknown {
+  if (typeof value === "string") {
+    const wholeVariable = value.match(/^\{\{([a-zA-Z][a-zA-Z0-9_]*)\}\}$/);
+    return wholeVariable
+      ? variableValue(wholeVariable[1]!, variables)
+      : materializeString(value, variables);
+  }
+  if (Array.isArray(value)) {
+    return value.map((item) => materializeValue(item, variables));
+  }
+  if (value && typeof value === "object") {
+    return Object.fromEntries(
+      Object.entries(value as Record<string, unknown>).map(([key, item]) => [
+        key,
+        materializeValue(item, variables),
+      ]),
+    );
+  }
+  return value;
+}
+
+function interpolatePath(
+  template: string,
+  resultId: unknown,
+  variables: TemplateVariables,
+) {
+  const materialized = materializeString(template, variables);
+  if (!materialized.includes("{resultId}")) return materialized;
+  expect(
+    resultId,
+    `${materialized} requires a prior operation result ID`,
+  ).toBeTruthy();
+  return materialized.replaceAll(
+    "{resultId}",
+    encodeURIComponent(String(resultId)),
+  );
+}
+
+async function navigate(page: Page, origin: string, route: string) {
+  await page.goto(new URL(route, origin).toString(), {
+    waitUntil: "domcontentloaded",
+  });
+}
+
+function interpolateOperationValue(
+  value: string,
+  resultId: unknown,
+  variables: TemplateVariables,
+) {
+  const materialized = materializeString(value, variables);
+  if (!materialized.includes("{resultId}")) return materialized;
+  expect(
+    resultId,
+    `${value} requires a prior operation result ID`,
+  ).toBeTruthy();
+  return materialized.replaceAll("{resultId}", String(resultId));
+}
+
+async function assertReadback(
+  page: Page,
+  origin: string,
+  journey: Journey,
+  operationName: string,
+  requestUrl: string,
+  resultId: unknown,
+  readback: Readback,
+  variables: TemplateVariables,
+) {
+  const readbackPath = interpolatePath(readback.url, resultId, variables);
+  const idToken = getIdentityToken(journey.baseUrlEnv);
+  const readbackHeaders: Record<string, string> = {};
+  if (idToken) {
+    readbackHeaders["Authorization"] = `Bearer ${idToken}`;
+  }
+  const readbackResponse = await page
+    .context()
+    .request.get(new URL(readbackPath, origin).toString(), {
+      ...(idToken ? { headers: readbackHeaders } : {}),
+    });
+  expect(
+    readbackResponse.ok(),
+    `${journey.id}/${operationName} readback`,
+  ).toBeTruthy();
+  expectCandidateRevision(
+    readbackResponse.headers(),
+    `${journey.id}/${operationName} readback`,
+  );
+  const readbackBody = (await readbackResponse.json()) as unknown;
+  expect(valueAtPath(readbackBody, readback.idPath)).toBe(resultId);
+  const readbackState = valueAtPath(readbackBody, readback.statePath);
+  expect(readbackState, `${journey.id}/${operationName} readback state`).toBe(
+    readback.expectedState,
+  );
+  record({
+    kind: "mutation-readback",
+    journey: journey.id,
+    surface: journey.surface,
+    actorScope: journey.actorScope,
+    operation: operationName,
+    requestUrl,
+    resultId,
+    readbackUrl: readbackResponse.url(),
+    readbackState,
+  });
+}
+
+async function runSteps(
+  page: Page,
+  origin: string,
+  steps: JourneyStep[],
+  lastResultId: unknown,
+  variables: TemplateVariables,
+) {
+  for (const step of steps) {
+    if (step.kind === "navigate") {
+      await navigate(
+        page,
+        origin,
+        interpolatePath(step.path, lastResultId, variables),
+      );
+      continue;
+    }
+
+    const control = page.locator(step.control).first();
+    await expect(control, `${step.control} must be visible`).toBeVisible({
+      timeout: interactionTimeoutMs,
+    });
+    if (step.kind === "fill") {
+      await control.fill(materializeString(step.value, variables));
+    } else {
+      await control.click();
+    }
+  }
+}
+
+async function runSetup(
+  page: Page,
+  journey: Journey,
+  variables: TemplateVariables,
+) {
+  for (const setup of journey.setup ?? []) {
+    const setupBaseUrlEnv = setup.baseUrlEnv ?? journey.baseUrlEnv;
+    const origin = requiredOrigin(setupBaseUrlEnv);
+    const body = setup.body
+      ? materializeValue(setup.body, variables)
+      : undefined;
+    const rawHeaders = setup.headers
+      ? (materializeValue(setup.headers, variables) as Record<string, string>)
+      : undefined;
+    const headers: Record<string, string> = { ...(rawHeaders ?? {}) };
+    const setupIdToken = getIdentityToken(setupBaseUrlEnv);
+    if (
+      setupIdToken &&
+      !Object.keys(headers).some((k) => k.toLowerCase() === "authorization")
+    ) {
+      headers["Authorization"] = `Bearer ${setupIdToken}`;
+    }
+    const response = await page
+      .context()
+      .request.fetch(
+        new URL(materializeString(setup.path, variables), origin).toString(),
+        {
+          method: setup.method,
+          maxRedirects: 0,
+          ...(body
+            ? {
+                data: body,
+                headers: { "Content-Type": "application/json", ...headers },
+              }
+            : Object.keys(headers).length > 0
+              ? { headers }
+              : {}),
+        },
+      );
+    expect(response.status(), `${journey.id} setup ${setup.path}`).toBeLessThan(
+      400,
+    );
+    expectCandidateRevision(
+      response.headers(),
+      `${journey.id} setup ${setup.path}`,
+    );
+    if (setup.capture) {
+      const responseBody = (await response.json()) as unknown;
+      for (const [name, valuePath] of Object.entries(setup.capture)) {
+        const value = valueAtPath(responseBody, valuePath);
+        expect(
+          value,
+          `${journey.id} setup ${setup.path} capture ${name}`,
+        ).toBeTruthy();
+        variables[name] = value;
+      }
+    }
+    record({
+      kind: "setup",
+      journey: journey.id,
+      surface: journey.surface,
+      actorScope: journey.actorScope,
+      method: setup.method,
+      url: response.url(),
+      status: response.status(),
+      captures: setup.capture ? Object.keys(setup.capture) : [],
+    });
+  }
+}
+
+async function installBrowserSession(
+  page: Page,
+  journey: Journey,
+  origin: string,
+  variables: TemplateVariables,
+) {
+  const session = journey.browserSession;
+  if (!session) {
+    return;
+  }
+
+  const token = requiredEnvironmentValue(session.tokenEnv);
+  variables[session.templateVariable] = token;
+  await page.context().addCookies([
+    {
+      name: session.cookieName,
+      value: token,
+      url: origin,
+      httpOnly: true,
+      sameSite: "Lax",
+    },
+  ]);
+  record({
+    kind: "browser-session",
+    journey: journey.id,
+    surface: journey.surface,
+    actorScope: journey.actorScope,
+    tokenSource: session.tokenEnv,
+  });
+}
+
+function installEnvironmentVariables(
+  journey: Journey,
+  variables: TemplateVariables,
+) {
+  for (const [name, envName] of Object.entries(
+    journey.environmentVariables ?? {},
+  )) {
+    variables[name] = requiredEnvironmentValue(envName);
+  }
+}
+
+test.afterAll(() => {
+  mkdirSync(evidenceDir, { recursive: true });
+  writeFileSync(
+    path.join(evidenceDir, "operational-browser-evidence.json"),
+    `${JSON.stringify(
+      { candidateSha, manifest: path.basename(manifestPath), evidence },
+      null,
+      2,
+    )}\n`,
+  );
+});
+
+test("requires a single immutable candidate SHA and complete formal journey manifest", () => {
+  expect(
+    candidateSha,
+    "DRTS_CANDIDATE_SHA is mandatory; URL-only smoke is not release evidence.",
+  ).toMatch(/^[0-9a-f]{7,64}$/i);
+  expect(manifest.version).toBe(2);
+  expect(
+    manifest.candidateSha,
+    "candidate manifest must bind its executable operations to one SHA",
+  ).toBe(candidateSha);
+  expect(manifest.journeys.map(({ id }) => id)).toEqual([
+    "referral-create-read-cancel-receipt",
+    "enterprise-create-read-update-cancel",
+    "fleet-submit-read-withdraw-resubmit",
+    "admin-review-approve-readback",
+    "tenant-ops-dispatch-intent",
+    "bank-statement-download",
+    "channel-statement-download",
+  ]);
+
+  for (const journey of manifest.journeys) {
+    expect(journey.actorScope, `${journey.id} actor scope`).not.toEqual("");
+    if (journey.browserSession) {
+      expect(journey.browserSession.cookieName).not.toEqual("");
+      expect(journey.browserSession.tokenEnv).not.toEqual("");
+      expect(journey.browserSession.templateVariable).not.toEqual("");
+    }
+    expect(
+      journey.operations.length,
+      `${journey.id} operations`,
+    ).toBeGreaterThan(0);
+    for (const operation of journey.operations) {
+      expect(operation.name, `${journey.id} operation name`).not.toEqual("");
+      expect(operation.control, `${journey.id} operation control`).not.toEqual(
+        "",
+      );
+      if (operation.kind === "intent") {
+        expect(operation.targetBaseUrlEnv).not.toEqual("");
+        expect(operation.expectedPathPattern).not.toEqual("");
+        continue;
+      }
+
+      if (operation.kind === "absence") {
+        continue;
+      }
+
+      if (operation.kind === "navigation") {
+        expect(operation.expectedPath).not.toEqual("");
+        expect(Object.keys(operation.expectedQuery).length).toBeGreaterThan(0);
+        if (operation.readback) {
+          expect(operation.readback.url).not.toEqual("");
+          expect(operation.readback.idPath).not.toEqual("");
+          expect(operation.readback.statePath).not.toEqual("");
+          expect(operation.readback.expectedState).not.toBeUndefined();
+        }
+        continue;
+      }
+
+      expect(operation.requestUrlIncludes).not.toEqual("");
+      expect(operation.requestMethod).not.toEqual("");
+      if (operation.responseKind === "download") {
+        expect(operation.expectedContentTypeIncludes).not.toEqual("");
+        continue;
+      }
+
+      expect(
+        operation.resultIdPath || operation.resultIdQueryParam,
+      ).not.toEqual("");
+      expect(operation.readback).toBeDefined();
+      expect(operation.readback?.url).not.toEqual("");
+      expect(operation.readback?.idPath).not.toEqual("");
+      expect(operation.readback?.statePath).not.toEqual("");
+      expect(operation.readback?.expectedState).not.toBeUndefined();
+    }
+  }
+});
+
+for (const journey of manifest.journeys) {
+  test(`${journey.id} executes its declared operational contract`, async ({
+    page,
+  }) => {
+    const origin = requiredOrigin(journey.baseUrlEnv);
+    const variables: TemplateVariables = {
+      runId: `${journey.id}-${Date.now().toString(36)}`,
+    };
+    installEnvironmentVariables(journey, variables);
+    const idToken = getIdentityToken(journey.baseUrlEnv);
+    if (idToken) {
+      await page.context().setExtraHTTPHeaders({
+        Authorization: `Bearer ${idToken}`,
+      });
+    }
+    await installBrowserSession(page, journey, origin, variables);
+    await runSetup(page, journey, variables);
+    await navigate(
+      page,
+      origin,
+      interpolatePath(journey.route, null, variables),
+    );
+
+    let lastResultId: unknown = null;
+    for (const operation of journey.operations) {
+      if (operation.kind === "intent") {
+        const control = page.locator(operation.control).first();
+        await expect(
+          control,
+          `${journey.id}/${operation.name} control`,
+        ).toBeVisible({
+          timeout: interactionTimeoutMs,
+        });
+        const href = await control.getAttribute("href");
+        expect(href, `${journey.id}/${operation.name} target`).toBeTruthy();
+        const target = new URL(href as string, origin);
+        expect(
+          target.origin,
+          `${journey.id}/${operation.name} target origin`,
+        ).toBe(new URL(requiredOrigin(operation.targetBaseUrlEnv)).origin);
+        expect(
+          target.pathname,
+          `${journey.id}/${operation.name} target path`,
+        ).toMatch(new RegExp(operation.expectedPathPattern));
+        record({
+          kind: "cross-app-intent",
+          journey: journey.id,
+          surface: journey.surface,
+          actorScope: journey.actorScope,
+          operation: operation.name,
+          target: target.toString(),
+        });
+        continue;
+      }
+
+      if (operation.kind === "absence") {
+        await expect(
+          page.locator(operation.control),
+          `${journey.id}/${operation.name} must not be offered`,
+        ).toHaveCount(0);
+        record({
+          kind: "control-absence",
+          journey: journey.id,
+          surface: journey.surface,
+          actorScope: journey.actorScope,
+          operation: operation.name,
+          control: operation.control,
+        });
+        continue;
+      }
+
+      await runSteps(
+        page,
+        origin,
+        operation.before ?? [],
+        lastResultId,
+        variables,
+      );
+      const activeControl = page.locator(operation.control).first();
+      await expect(
+        activeControl,
+        `${journey.id}/${operation.name} control after preconditions`,
+      ).toBeVisible({ timeout: interactionTimeoutMs });
+
+      if (operation.kind === "navigation") {
+        const expectedQuery = Object.fromEntries(
+          Object.entries(operation.expectedQuery).map(([key, value]) => [
+            key,
+            interpolateOperationValue(value, lastResultId, variables),
+          ]),
+        );
+        const navigation = page.waitForURL(
+          (url) => {
+            if (
+              url.origin !== new URL(origin).origin ||
+              url.pathname !== operation.expectedPath
+            ) {
+              return false;
+            }
+            return Object.entries(expectedQuery).every(
+              ([key, value]) => url.searchParams.get(key) === value,
+            );
+          },
+          { timeout: interactionTimeoutMs },
+        );
+        await activeControl.click({ noWaitAfter: true });
+        await navigation;
+        // URL convergence plus authority readback is the contract. Some target
+        // screens keep background requests open and never become network-idle.
+        const target = page.url();
+        if (operation.readback) {
+          await assertReadback(
+            page,
+            origin,
+            journey,
+            operation.name,
+            target,
+            lastResultId,
+            operation.readback,
+            variables,
+          );
+        }
+        record({
+          kind: "navigation",
+          journey: journey.id,
+          surface: journey.surface,
+          actorScope: journey.actorScope,
+          operation: operation.name,
+          target,
+        });
+        continue;
+      }
+
+      if (operation.responseKind === "download") {
+        const downloadPromise = page.waitForEvent("download", {
+          timeout: interactionTimeoutMs,
+        });
+        await activeControl.click({ noWaitAfter: true });
+        const download = await downloadPromise;
+        expect(
+          await download.failure(),
+          `${journey.id}/${operation.name} download failure`,
+        ).toBeNull();
+        expect(
+          (await download.createReadStream()) !== null,
+          `${journey.id}/${operation.name} artifact stream`,
+        ).toBeTruthy();
+
+        const downloadUrl = download.url();
+        const opIdToken = getIdentityToken(journey.baseUrlEnv);
+        const downloadHeaders: Record<string, string> = {};
+        if (opIdToken) {
+          downloadHeaders["Authorization"] = `Bearer ${opIdToken}`;
+        }
+        const downloadResponse = await page.context().request.get(downloadUrl, {
+          ...(opIdToken ? { headers: downloadHeaders } : {}),
+        });
+        expect(
+          downloadResponse.ok(),
+          `${journey.id}/${operation.name} download response ok`,
+        ).toBeTruthy();
+        expectCandidateRevision(
+          downloadResponse.headers(),
+          `${journey.id}/${operation.name} download candidate revision`,
+        );
+        expect(
+          downloadResponse.headers()["content-type"] ?? "",
+          `${journey.id}/${operation.name} content type`,
+        ).toContain(operation.expectedContentTypeIncludes as string);
+        expect(
+          downloadResponse.headers()["content-disposition"] ?? "",
+          `${journey.id}/${operation.name} attachment`,
+        ).toContain("attachment");
+
+        record({
+          kind: "download",
+          journey: journey.id,
+          surface: journey.surface,
+          actorScope: journey.actorScope,
+          operation: operation.name,
+          requestUrl: downloadUrl,
+          contentType: downloadResponse.headers()["content-type"],
+        });
+        continue;
+      }
+
+      const resultIdLocationPromise = operation.resultIdQueryParam
+        ? page.waitForURL(
+            (url) => url.searchParams.has(operation.resultIdQueryParam!),
+            { timeout: interactionTimeoutMs },
+          )
+        : null;
+      const responsePromise = page.waitForResponse(
+        (response) =>
+          response.request().method() === operation.requestMethod &&
+          response.url().includes(operation.requestUrlIncludes),
+        { timeout: interactionTimeoutMs },
+      );
+      // Begin reading before a mutation-triggered navigation can detach the
+      // Chromium response body from its request identifier.
+      const responseBodyPromise =
+        operation.responseKind === "json" && !operation.resultIdQueryParam
+          ? responsePromise.then(
+              (response) => response.json() as Promise<unknown>,
+            )
+          : null;
+      // Mutations can navigate the page. Do not wait for that navigation before
+      // reading JSON, otherwise Chromium may discard the response body.
+      await activeControl.click({ noWaitAfter: true });
+      const response = await responsePromise;
+      expect(
+        response.ok(),
+        `${journey.id}/${operation.name} response`,
+      ).toBeTruthy();
+      expectCandidateRevision(
+        response.headers(),
+        `${journey.id}/${operation.name} response`,
+      );
+
+      const resultId = operation.resultIdQueryParam
+        ? await resultIdLocationPromise!.then(() =>
+            new URL(page.url()).searchParams.get(operation.resultIdQueryParam!),
+          )
+        : valueAtPath(
+            await responseBodyPromise!,
+            operation.resultIdPath as string,
+          );
+      expect(
+        resultId,
+        `${journey.id}/${operation.name} result ID`,
+      ).toBeTruthy();
+      lastResultId = resultId;
+      await assertReadback(
+        page,
+        origin,
+        journey,
+        operation.name,
+        response.url(),
+        resultId,
+        operation.readback as Readback,
+        variables,
+      );
+    }
+  });
+}
+
+for (const journey of manifest.journeys) {
+  test(`${journey.id} route serves the candidate without fixture fallback`, async ({
+    page,
+  }) => {
+    const origin = requiredOrigin(journey.baseUrlEnv);
+    const variables: TemplateVariables = {
+      runId: `${journey.id}-route-${Date.now().toString(36)}`,
+    };
+    installEnvironmentVariables(journey, variables);
+    const idToken = getIdentityToken(journey.baseUrlEnv);
+    if (idToken) {
+      await page.context().setExtraHTTPHeaders({
+        Authorization: `Bearer ${idToken}`,
+      });
+    }
+    await installBrowserSession(page, journey, origin, variables);
+    await runSetup(page, journey, variables);
+    const response = await page.goto(
+      new URL(
+        interpolatePath(journey.route, null, variables),
+        origin,
+      ).toString(),
+      {
+        waitUntil: "domcontentloaded",
+      },
+    );
+    expect(response?.status(), `${journey.id} route`).toBeLessThan(400);
+    expectCandidateRevision(response?.headers() ?? {}, `${journey.id} route`);
+    await expect(
+      page.locator("body"),
+      `${journey.id} must not substitute a plausible fixture`,
+    ).not.toContainText(
+      /design sample data|preview fixture mode|fixture mode|demo fallback/i,
+    );
+    record({
+      kind: "route",
+      journey: journey.id,
+      surface: journey.surface,
+      url: page.url(),
+      actorScope: journey.actorScope,
+    });
+  });
+}
+
+test("paused Partner Booking and retired Concierge remain unreachable", async ({
+  request,
+}) => {
+  for (const retired of manifest.retiredSurfaces) {
+    const response = await request.get(
+      new URL(retired.path, requiredOrigin(retired.baseUrlEnv)).toString(),
+    );
+    expect(response.status(), `${retired.id} must remain retired`).toBe(404);
+    record({
+      kind: "retired-surface",
+      surface: retired.id,
+      url: response.url(),
+      status: response.status(),
+    });
+  }
+});

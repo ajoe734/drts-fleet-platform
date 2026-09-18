@@ -6,6 +6,9 @@
  */
 
 import type {
+  AcademyCourseDetail,
+  AcademyCourseSummary,
+  ApiListData,
   AccidentCaseRecord,
   AccidentTimelineEntry,
   AcknowledgeOpsApprovalRequestBreachCommand,
@@ -26,6 +29,9 @@ import type {
   ApiSuccessEnvelope,
   AttendanceRecord,
   BookingRecord,
+  TenantBookingDateField,
+  TenantBookingListQuery,
+  TenantBookingsPageRecord,
   CallbackTaskRecord,
   CallSessionRecord,
   ClockInCommand,
@@ -37,6 +43,7 @@ import type {
   CompleteCallbackTaskCommand,
   ComputeGeoRouteCommand,
   CreateDriverMasterCommand,
+  CreateDriverLeaveCommand,
   CreateDriverFleetAffiliationCommand,
   CreateEvidenceDeletionExceptionCommand,
   CreateEvidenceLegalHoldCommand,
@@ -74,8 +81,10 @@ import type {
   CreateTenantUserCommand,
   CreateTenantWebhookEndpointCommand,
   DeleteTenantWebhookEndpointCommand,
+  SendTestWebhookCommand,
   DispatchCandidate,
   DispatchJobRecord,
+  DispatchOrderCommand,
   DispatchQueueEntryReadRecord,
   DispatchTraceLogRecord,
   DisableTenantCostCenterCommand,
@@ -96,8 +105,14 @@ import type {
   DriverStartTaskCommand,
   DriverStatementRecord,
   DriverTaskRecord,
+  DriverLeaveQueryFilter,
+  DriverLeaveRecord,
+  DriverQuizAttemptDetail,
+  DriverTrainingRecord,
   UnifiedDriverTaskView,
   EmptyStateEnvelope,
+  FleetDriverRosterItem,
+  FleetTrainingView,
   FleetPartnerRecord,
   FleetPartnerPortalDashboardRecord,
   FleetPartnerPortalDriverRecord,
@@ -105,7 +120,17 @@ import type {
   FleetPartnerPortalTripRecord,
   FleetPartnerPortalVehicleRecord,
   FleetPartnerRevenueShareRuleRecord,
+  DriverSupplyDraft,
   FleetPartnerStatementRecord,
+  HostVehicleCaseItem,
+  HostVehicleEarningsSummary,
+  HostVehicleMaintenanceItem,
+  HostVehicleSummary,
+  HostVehicleTripItem,
+  QuizResultRecord,
+  QuizSubmissionCommand,
+  ReviewDriverLeaveCommand,
+  WithdrawDriverLeaveCommand,
   ForwardedDriverActionResponse,
   EvidenceDeletionExceptionRecord,
   EvidenceDiscrepancyCase,
@@ -205,8 +230,15 @@ import type {
   SetPlatformTenantRolloutStageCommand,
   SetPlatformOfflineCommand,
   SetPlatformOnlineCommand,
+  AdapterCredentialExpiryWarning,
   PlatformAdapter,
   UpdatePlatformAdapterCommand,
+  MarkReimbursementPaidWithProofCommand,
+  RemittanceProofPaymentReceipt,
+  RemittanceProofReadbackGrant,
+  RemittanceProofRecord,
+  RequestRemittanceProofReadbackCommand,
+  UploadRemittanceProofCommand,
   SettlementMatrixRecord,
   ShiftRecord,
   SearchGeoQuery,
@@ -218,6 +250,13 @@ import type {
   TenantAddressRecord,
   TenantAddressExportViewRecord,
   TenantApiKeyRecord,
+  SupplyDocumentRecord,
+  SupplyReadinessRecord,
+  SupplyReviewActionCommand,
+  SupplySubmissionRecord,
+  SupplySubmissionStatus,
+  SupplySubmissionType,
+  VehicleSupplyDraft,
   TenantApiKeyIssued,
   TenantBillingProfile,
   TenantBootstrapSession,
@@ -258,6 +297,8 @@ import type {
   TenantServiceProgramRecord,
   TenantSlaProfileView,
   TenantUserRoleRecord,
+  TenantSessionInventoryRecord,
+  RevokeTenantSessionCommand,
   TenantWebhookEndpoint,
   TransferCallToComplaintCommand,
   TransferCallToIncidentCommand,
@@ -357,9 +398,10 @@ export interface ApiClientConfig {
 }
 
 export interface RequestOptions {
-  headers?: Record<string, string>;
+  headers?: Record<string, string> | undefined;
   body?: unknown;
-  signal?: AbortSignal;
+  signal?: AbortSignal | undefined;
+  idempotencyKey?: string | undefined;
 }
 
 export class ApiClientError extends Error {
@@ -449,6 +491,32 @@ function buildReportQuery(query: Record<string, string | undefined>): string {
   return serialized ? `?${serialized}` : "";
 }
 
+function buildTenantBookingQueryParams(
+  query?: TenantBookingListQuery,
+): string {
+  if (!query) {
+    return "";
+  }
+  const params = new URLSearchParams();
+  for (const [key, value] of Object.entries(query)) {
+    if (value === undefined || value === null) {
+      continue;
+    }
+    if (Array.isArray(value)) {
+      if (value.length > 0) {
+        params.set(key, value.join(","));
+      }
+    } else {
+      const strVal = String(value).trim();
+      if (strVal) {
+        params.set(key, strVal);
+      }
+    }
+  }
+  const serialized = params.toString();
+  return serialized ? `?${serialized}` : "";
+}
+
 interface ListEnvelope<T> {
   items: T[];
 }
@@ -492,7 +560,17 @@ function deepToCamelCase(value: unknown): unknown {
   return value;
 }
 
-function createRequestToken(): string {
+export function createIdempotencyKey(prefix?: string): string {
+  const token =
+    typeof globalThis.crypto !== "undefined" &&
+    typeof globalThis.crypto.randomUUID === "function"
+      ? globalThis.crypto.randomUUID()
+      : `key-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+
+  return prefix ? `${prefix}-${token}` : token;
+}
+
+export function createRequestToken(): string {
   if (
     typeof globalThis.crypto !== "undefined" &&
     typeof globalThis.crypto.randomUUID === "function"
@@ -604,12 +682,19 @@ export class ApiClient {
     return this.requestEnvelope<ListEnvelope<T>>("GET", path, options);
   }
 
-  private async getList<T>(
-    path: string,
-    options?: RequestOptions,
-  ): Promise<T[]> {
-    const result = await this.get<T[] | ListEnvelope<T>>(path, options);
-    return Array.isArray(result) ? result : (result.items ?? []);
+  /**
+   * Generic GET for list routes. Unwraps the success envelope and then
+   * tolerates both list shapes the API emits: a bare array payload, and the
+   * `toApiListData` payload (`{ items, pageInfo }`). Callers must use this
+   * rather than `get<T[]>`, which resolves to the `{ items, pageInfo }` object
+   * on any route wrapped with `toApiListData` and breaks on `.map`.
+   */
+  async getList<T>(path: string, options?: RequestOptions): Promise<T[]> {
+    const result = await this.get<T[] | ListEnvelope<T> | null>(path, options);
+    if (Array.isArray(result)) {
+      return result;
+    }
+    return result?.items ?? [];
   }
 
   private async requestEnvelope<T>(
@@ -648,11 +733,8 @@ export class ApiClient {
       if (!hasHeader(headers, "x-request-id")) {
         headers["X-Request-Id"] = createRequestToken();
       }
-      if (
-        method.toUpperCase() === "POST" &&
-        !hasHeader(headers, "idempotency-key")
-      ) {
-        headers["Idempotency-Key"] = createRequestToken();
+      if (options?.idempotencyKey && !hasHeader(headers, "idempotency-key")) {
+        headers["Idempotency-Key"] = options.idempotencyKey;
       }
 
       const init: RequestInit = {
@@ -1070,8 +1152,14 @@ export class ApiClient {
 
   // ── Owned Mobility: Orders ──
 
-  async createOrder(command: CreateOwnedOrderCommand) {
-    return this.post("/api/orders", { body: command });
+  async createOrder(
+    command: CreateOwnedOrderCommand,
+    options?: RequestOptions,
+  ) {
+    return this.post("/api/orders", {
+      ...options,
+      body: command,
+    });
   }
 
   async listOrders(): Promise<OwnedOrderRecord[]> {
@@ -1090,21 +1178,37 @@ export class ApiClient {
     );
   }
 
-  async cancelOrder(id: string, command: CancelOwnedOrderCommand) {
-    return this.post(`/api/orders/${id}/cancel`, { body: command });
+  async cancelOrder(
+    id: string,
+    command: CancelOwnedOrderCommand,
+    options?: RequestOptions,
+  ) {
+    return this.post(`/api/orders/${id}/cancel`, {
+      ...options,
+      body: command,
+    });
   }
 
-  async updateOrder(id: string, command: UpdateTenantBookingCommand) {
-    return this.patch(`/api/orders/${id}`, { body: command });
+  async updateOrder(
+    id: string,
+    command: UpdateTenantBookingCommand,
+    options?: RequestOptions,
+  ) {
+    return this.patch(`/api/orders/${id}`, {
+      ...options,
+      body: command,
+    });
   }
 
   async applyManualFareOverride(
     orderId: string,
     command: ApplyManualFareOverrideCommand,
+    options?: RequestOptions,
   ) {
     return this.post<OwnedOrderRecord>(
       `/api/orders/${encodeURIComponent(orderId)}/manual-fare-override`,
       {
+        ...options,
         body: command,
       },
     );
@@ -1112,24 +1216,74 @@ export class ApiClient {
 
   // ── Owned Mobility: Call Center ──
 
-  async createCallCenterOrder(command: CreateCallCenterOrderCommand) {
+  async createCallCenterOrder(
+    command: CreateCallCenterOrderCommand,
+    options?: RequestOptions,
+  ) {
     return this.post<{
       orderId: string;
       orderSource: string;
       callId: string;
       recordingId: string | null;
       status: string;
-    }>("/api/call-center/orders", { body: command });
+    }>("/api/call-center/orders", {
+      ...options,
+      body: command,
+    });
   }
 
   // ── Owned Mobility: Tenant Bookings ──
 
-  async createTenantBooking(command: CreateTenantBookingCommand) {
-    return this.post("/api/tenant/bookings", { body: command });
+  async createTenantBooking(
+    command: CreateTenantBookingCommand,
+    options?: RequestOptions,
+  ) {
+    return this.post("/api/tenant/bookings", {
+      ...options,
+      body: command,
+    });
   }
 
-  async listTenantBookings(): Promise<BookingRecord[]> {
-    return this.getList<BookingRecord>("/api/tenant/bookings");
+  async listTenantBookings(
+    query?: TenantBookingListQuery,
+    options?: RequestOptions,
+  ): Promise<BookingRecord[]> {
+    if (!query) {
+      // Legacy callers pass no query: page through all results to prevent silent truncation
+      let page = 1;
+      const allItems: BookingRecord[] = [];
+      while (true) {
+        const paged = await this.queryTenantBookings(
+          { page, pageSize: 100 },
+          options,
+        );
+        allItems.push(...paged.items);
+        if (
+          !paged.pagination ||
+          page >= paged.pagination.totalPages ||
+          paged.items.length === 0
+        ) {
+          break;
+        }
+        page += 1;
+      }
+      return allItems;
+    }
+
+    const paged = await this.queryTenantBookings(query, options);
+    return paged.items;
+  }
+
+  async queryTenantBookings(
+    query?: TenantBookingListQuery,
+    options?: RequestOptions,
+  ): Promise<TenantBookingsPageRecord> {
+    const search = buildTenantBookingQueryParams(query);
+    return this.request<TenantBookingsPageRecord>(
+      "GET",
+      `/api/tenant/bookings${search}`,
+      options,
+    );
   }
 
   async getTenantBooking(bookingId: string) {
@@ -1139,21 +1293,29 @@ export class ApiClient {
   async updateTenantBooking(
     bookingId: string,
     command: UpdateTenantBookingCommand,
+    options?: RequestOptions,
   ) {
     return this.request(
       "PUT",
       `/api/tenant/bookings/${encodeURIComponent(bookingId)}`,
-      { body: command },
+      {
+        ...options,
+        body: command,
+      },
     );
   }
 
   async cancelTenantBooking(
     bookingId: string,
     command: CancelOwnedOrderCommand,
+    options?: RequestOptions,
   ) {
     return this.post(
       `/api/tenant/bookings/${encodeURIComponent(bookingId)}/cancel`,
-      { body: command },
+      {
+        ...options,
+        body: command,
+      },
     );
   }
 
@@ -1257,8 +1419,15 @@ export class ApiClient {
 
   // ── Owned Mobility: Dispatch ──
 
-  async dispatchOrder(orderId: string) {
-    return this.post(`/api/orders/${orderId}/dispatch`);
+  async dispatchOrder(
+    orderId: string,
+    command?: DispatchOrderCommand,
+    options?: RequestOptions,
+  ) {
+    return this.post(`/api/orders/${encodeURIComponent(orderId)}/dispatch`, {
+      ...options,
+      body: command ?? { mode: "auto" },
+    });
   }
 
   async redispatchOrder(
@@ -1272,9 +1441,15 @@ export class ApiClient {
       // STALE_REDISPATCH_EVENT when the order has already advanced past this
       // assignment version. Omit to redispatch unconditionally.
       expectedAssignmentVersion?: number | null;
+      idempotencyKey?: string;
+      headers?: Record<string, string>;
+      signal?: AbortSignal;
     },
   ) {
-    return this.post(`/api/orders/${orderId}/redispatch`, {
+    return this.post(`/api/orders/${encodeURIComponent(orderId)}/redispatch`, {
+      headers: options?.headers,
+      signal: options?.signal,
+      idempotencyKey: options?.idempotencyKey,
       body: {
         reasonCode,
         reasonNote: options?.reasonNote,
@@ -1364,12 +1539,18 @@ export class ApiClient {
     return res.items ?? [];
   }
 
-  async assignDispatch(command: AssignDispatchCommand) {
-    return this.post("/api/dispatch/assign", { body: command });
+  async assignDispatch(
+    command: AssignDispatchCommand,
+    options?: RequestOptions,
+  ) {
+    return this.post("/api/dispatch/assign", { ...options, body: command });
   }
 
-  async reassignDispatch(command: ReassignDispatchCommand) {
-    return this.post("/api/dispatch/reassign", { body: command });
+  async reassignDispatch(
+    command: ReassignDispatchCommand,
+    options?: RequestOptions,
+  ) {
+    return this.post("/api/dispatch/reassign", { ...options, body: command });
   }
 
   async listDispatchQueueEntries(): Promise<DispatchQueueEntryReadRecord[]> {
@@ -1753,6 +1934,51 @@ export class ApiClient {
     );
   }
 
+  async claimCallbackTask(
+    callbackTaskId: string,
+    command: { operatorId: string; expectedVersion?: number },
+  ) {
+    return this.post<CallbackTaskRecord>(
+      `/api/callcenter/callbacks/${encodeURIComponent(callbackTaskId)}/claim`,
+      { body: command },
+    );
+  }
+
+  async recordCallbackAttempt(
+    callbackTaskId: string,
+    command: {
+      operatorId: string;
+      outcome: string;
+      notes?: string;
+      hangupConfirmed?: boolean;
+    },
+  ) {
+    return this.post<CallbackTaskRecord>(
+      `/api/callcenter/callbacks/${encodeURIComponent(callbackTaskId)}/attempt`,
+      { body: command },
+    );
+  }
+
+  async cancelCallbackTask(
+    callbackTaskId: string,
+    command: { reason: string; expectedVersion?: number; operatorId?: string },
+  ) {
+    return this.post<CallbackTaskRecord>(
+      `/api/callcenter/callbacks/${encodeURIComponent(callbackTaskId)}/cancel`,
+      { body: command },
+    );
+  }
+
+  async takeoverAiCallSession(
+    callId: string,
+    command: { operatorId: string; reason?: string },
+  ) {
+    return this.post<CallSessionRecord>(
+      `/api/callcenter/sessions/${encodeURIComponent(callId)}/takeover`,
+      { body: command },
+    );
+  }
+
   async transferCallToComplaint(
     callId: string,
     command: TransferCallToComplaintCommand,
@@ -1785,8 +2011,14 @@ export class ApiClient {
     return this.getList<ComplaintCaseRecord>("/api/complaints");
   }
 
-  async createComplaint(command: CreateComplaintCaseCommand) {
-    return this.post<ComplaintCaseRecord>("/api/complaints", { body: command });
+  async createComplaint(
+    command: CreateComplaintCaseCommand,
+    options?: RequestOptions,
+  ) {
+    return this.post<ComplaintCaseRecord>("/api/complaints", {
+      ...options,
+      body: command,
+    });
   }
 
   async getComplaint(caseNo: string) {
@@ -1803,17 +2035,31 @@ export class ApiClient {
     );
   }
 
-  async assignComplaint(caseNo: string, command: AssignComplaintCaseCommand) {
+  async assignComplaint(
+    caseNo: string,
+    command: AssignComplaintCaseCommand,
+    options?: RequestOptions,
+  ) {
     return this.post<ComplaintCaseRecord>(
       `/api/complaints/${encodeURIComponent(caseNo)}/assign`,
-      { body: command },
+      {
+        ...options,
+        body: command,
+      },
     );
   }
 
-  async addComplaintNote(caseNo: string, command: AddComplaintCaseNoteCommand) {
+  async addComplaintNote(
+    caseNo: string,
+    command: AddComplaintCaseNoteCommand,
+    options?: RequestOptions,
+  ) {
     return this.post<ComplaintCaseRecord>(
       `/api/complaints/${encodeURIComponent(caseNo)}/notes`,
-      { body: command },
+      {
+        ...options,
+        body: command,
+      },
     );
   }
 
@@ -1825,17 +2071,31 @@ export class ApiClient {
     );
   }
 
-  async reopenComplaint(caseNo: string, command: ReopenComplaintCaseCommand) {
+  async reopenComplaint(
+    caseNo: string,
+    command: ReopenComplaintCaseCommand,
+    options?: RequestOptions,
+  ) {
     return this.post<ComplaintCaseRecord>(
       `/api/complaints/${encodeURIComponent(caseNo)}/reopen`,
-      { body: command },
+      {
+        ...options,
+        body: command,
+      },
     );
   }
 
-  async resolveComplaint(caseNo: string, command: ResolveComplaintCaseCommand) {
+  async resolveComplaint(
+    caseNo: string,
+    command: ResolveComplaintCaseCommand,
+    options?: RequestOptions,
+  ) {
     return this.post<ComplaintCaseRecord>(
       `/api/complaints/${encodeURIComponent(caseNo)}/resolve`,
-      { body: command },
+      {
+        ...options,
+        body: command,
+      },
     );
   }
 
@@ -1959,12 +2219,24 @@ export class ApiClient {
     return this.getList<DriverFeePlanRecord>("/api/driver-fee-plans");
   }
 
-  async publishDriverFeePlan(command: PublishDriverFeePlanCommand) {
-    return this.post("/api/driver-fee-plans/publish", { body: command });
+  async publishDriverFeePlan(
+    command: PublishDriverFeePlanCommand,
+    options?: RequestOptions,
+  ) {
+    return this.post("/api/driver-fee-plans/publish", {
+      ...options,
+      body: command,
+    });
   }
 
-  async generateDriverStatements(command: GenerateDriverStatementCommand) {
-    return this.post("/api/driver-statements/generate", { body: command });
+  async generateDriverStatements(
+    command: GenerateDriverStatementCommand,
+    options?: RequestOptions,
+  ) {
+    return this.post("/api/driver-statements/generate", {
+      ...options,
+      body: command,
+    });
   }
 
   async listFleetPartnerStatements(
@@ -2013,6 +2285,132 @@ export class ApiClient {
     );
   }
 
+  async listFleetPortalSupplySubmissions(filters?: {
+    status?: SupplySubmissionStatus;
+    submissionType?: SupplySubmissionType;
+    subjectDriverId?: string;
+    subjectVehicleId?: string;
+  }): Promise<
+    {
+      submission: SupplySubmissionRecord;
+      driverDraft: DriverSupplyDraft | null;
+      vehicleDraft: VehicleSupplyDraft | null;
+      documents: SupplyDocumentRecord[];
+      reviewEvents: {
+        eventId: string;
+        submissionId: string;
+        eventType: string;
+        actorId: string;
+        actorType: string;
+        reasonCode: string | null;
+        comment: string | null;
+        createdAt: string;
+      }[];
+    }[]
+  > {
+    const params = new URLSearchParams();
+    if (filters?.status) params.set("status", filters.status);
+    if (filters?.submissionType) {
+      params.set("submissionType", filters.submissionType);
+    }
+    if (filters?.subjectDriverId) {
+      params.set("subjectDriverId", filters.subjectDriverId);
+    }
+    if (filters?.subjectVehicleId) {
+      params.set("subjectVehicleId", filters.subjectVehicleId);
+    }
+    const query = params.toString();
+    return this.getList(
+      query
+        ? `/api/fleet-partner/supply-submissions?${query}`
+        : "/api/fleet-partner/supply-submissions",
+    );
+  }
+
+  async getFleetPortalSupplySubmission(submissionId: string): Promise<{
+    submission: SupplySubmissionRecord;
+    driverDraft: DriverSupplyDraft | null;
+    vehicleDraft: VehicleSupplyDraft | null;
+    documents: SupplyDocumentRecord[];
+    reviewEvents: {
+      eventId: string;
+      submissionId: string;
+      eventType: string;
+      actorId: string;
+      actorType: string;
+      reasonCode: string | null;
+      comment: string | null;
+      createdAt: string;
+    }[];
+  }> {
+    return this.get(
+      `/api/fleet-partner/supply-submissions/${encodeURIComponent(submissionId)}`,
+    );
+  }
+
+  async listAdminSupplyReviewSubmissions(): Promise<SupplySubmissionRecord[]> {
+    return this.getList<SupplySubmissionRecord>(
+      "/api/admin/supply-review/submissions",
+    );
+  }
+
+  async getAdminSupplyReviewSubmission(submissionId: string): Promise<
+    {
+      submission: SupplySubmissionRecord;
+      driverDraft: DriverSupplyDraft | null;
+      vehicleDraft: VehicleSupplyDraft | null;
+      documents: SupplyDocumentRecord[];
+    } & SupplySubmissionRecord
+  > {
+    return this.get(
+      `/api/admin/supply-review/submissions/${encodeURIComponent(submissionId)}`,
+    );
+  }
+
+  async startAdminSupplyReview(
+    submissionId: string,
+    command: SupplyReviewActionCommand,
+  ): Promise<SupplySubmissionRecord> {
+    return this.post<SupplySubmissionRecord>(
+      `/api/admin/supply-review/submissions/${encodeURIComponent(submissionId)}/start`,
+      { body: command },
+    );
+  }
+
+  async requestAdminSupplyRevision(
+    submissionId: string,
+    command: SupplyReviewActionCommand,
+  ): Promise<SupplySubmissionRecord> {
+    return this.post<SupplySubmissionRecord>(
+      `/api/admin/supply-review/submissions/${encodeURIComponent(submissionId)}/request-revision`,
+      { body: command },
+    );
+  }
+
+  async approveAdminSupplySubmission(
+    submissionId: string,
+    command: SupplyReviewActionCommand,
+  ): Promise<SupplySubmissionRecord> {
+    return this.post<SupplySubmissionRecord>(
+      `/api/admin/supply-review/submissions/${encodeURIComponent(submissionId)}/approve`,
+      { body: command },
+    );
+  }
+
+  async rejectAdminSupplySubmission(
+    submissionId: string,
+    command: SupplyReviewActionCommand,
+  ): Promise<SupplySubmissionRecord> {
+    return this.post<SupplySubmissionRecord>(
+      `/api/admin/supply-review/submissions/${encodeURIComponent(submissionId)}/reject`,
+      { body: command },
+    );
+  }
+
+  async listFleetPortalReadiness(): Promise<SupplyReadinessRecord[]> {
+    return this.getList<SupplyReadinessRecord>("/api/fleet-partner/readiness");
+  }
+
   async listFleetPortalTrips(
     periodMonth?: string,
   ): Promise<FleetPartnerPortalTripRecord[]> {
@@ -2054,20 +2452,73 @@ export class ApiClient {
   async approveReimbursementBatch(
     batchId: string,
     command: ApproveReimbursementBatchCommand,
+    options?: RequestOptions,
   ): Promise<ReimbursementBatchRecord> {
     return this.post<ReimbursementBatchRecord>(
       `/api/reimbursements/${encodeURIComponent(batchId)}/approve`,
-      { body: command },
+      {
+        ...options,
+        body: command,
+      },
     );
   }
 
   async markReimbursementPaid(
     batchId: string,
     command: MarkReimbursementPaidCommand,
+    options?: RequestOptions,
   ): Promise<ReimbursementBatchRecord> {
     return this.post<ReimbursementBatchRecord>(
       `/api/reimbursements/${encodeURIComponent(batchId)}/pay`,
-      { body: command },
+      {
+        ...options,
+        body: command,
+      },
+    );
+  }
+
+  // ── Remittance Proof (SR-RECOVERY-CONTRACTS-20260911) ──
+
+  async uploadRemittanceProof(
+    command: UploadRemittanceProofCommand,
+    options?: RequestOptions,
+  ): Promise<RemittanceProofRecord> {
+    return this.post<RemittanceProofRecord>("/api/reimbursements/proofs", {
+      ...options,
+      body: command,
+    });
+  }
+
+  async getRemittanceProof(
+    proofId: string,
+    options?: RequestOptions,
+  ): Promise<RemittanceProofRecord> {
+    return this.get<RemittanceProofRecord>(
+      `/api/reimbursements/proofs/${encodeURIComponent(proofId)}`,
+      options,
+    );
+  }
+
+  async requestRemittanceProofReadback(
+    command: RequestRemittanceProofReadbackCommand,
+    options?: RequestOptions,
+  ): Promise<RemittanceProofReadbackGrant> {
+    return this.post<RemittanceProofReadbackGrant>(
+      `/api/reimbursements/proofs/${encodeURIComponent(command.proofId)}/readback`,
+      options,
+    );
+  }
+
+  async markReimbursementPaidWithProof(
+    command: MarkReimbursementPaidWithProofCommand,
+    options?: RequestOptions,
+  ): Promise<RemittanceProofPaymentReceipt> {
+    return this.post<RemittanceProofPaymentReceipt>(
+      `/api/reimbursements/${encodeURIComponent(command.batchId)}/pay-with-proof`,
+      {
+        ...options,
+        body: command,
+      },
     );
   }
 
@@ -2199,8 +2650,12 @@ export class ApiClient {
 
   async createReportJob(
     command: CreateReportJobCommand,
+    options?: RequestOptions,
   ): Promise<ReportJobAccepted> {
-    return this.post<ReportJobAccepted>("/api/reports/jobs", { body: command });
+    return this.post<ReportJobAccepted>("/api/reports/jobs", {
+      ...options,
+      body: command,
+    });
   }
 
   async listReportJobs(): Promise<ReportJobRecord[]> {
@@ -2213,8 +2668,10 @@ export class ApiClient {
 
   async createTenantReportJob(
     command: CreateReportJobCommand,
+    options?: RequestOptions,
   ): Promise<ReportJobAccepted> {
     return this.post<ReportJobAccepted>("/api/tenant/reports/jobs", {
+      ...options,
       body: command,
     });
   }
@@ -2231,8 +2688,10 @@ export class ApiClient {
 
   async createRegulatoryReportJob(
     command: CreateRegulatoryReportJobCommand,
+    options?: RequestOptions,
   ): Promise<ReportJobAccepted> {
     return this.post<ReportJobAccepted>("/api/regulatory/reports/jobs", {
+      ...options,
       body: command,
     });
   }
@@ -2253,8 +2712,10 @@ export class ApiClient {
 
   async generateFilingPackage(
     command: GenerateFilingPackageCommand,
+    options?: RequestOptions,
   ): Promise<FilingPackageAccepted> {
     return this.post<FilingPackageAccepted>("/api/filing-packages/generate", {
+      ...options,
       body: command,
     });
   }
@@ -2600,15 +3061,23 @@ export class ApiClient {
     return this.getList<TenantWebhookEndpoint>("/api/tenant/webhooks");
   }
 
-  async createWebhookEndpoint(command: CreateTenantWebhookEndpointCommand) {
-    return this.post("/api/tenant/webhooks", { body: command });
+  async createWebhookEndpoint(
+    command: CreateTenantWebhookEndpointCommand,
+    options?: RequestOptions,
+  ) {
+    return this.post("/api/tenant/webhooks", {
+      ...options,
+      body: command,
+    });
   }
 
   async updateWebhookEndpoint(
     webhookId: string,
     command: UpdateTenantWebhookEndpointCommand,
+    options?: RequestOptions,
   ): Promise<TenantWebhookEndpoint> {
     return this.post(`/api/tenant/webhooks/${encodeURIComponent(webhookId)}`, {
+      ...options,
       body: command,
     });
   }
@@ -2618,12 +3087,14 @@ export class ApiClient {
     command?: {
       reason?: string;
     },
+    options?: RequestOptions,
   ): Promise<TenantWebhookEndpoint> {
     const body: UpdateTenantWebhookEndpointCommand = {
       status: "disabled",
       ...(command?.reason ? { disableReason: command.reason } : {}),
     };
     return this.post(`/api/tenant/webhooks/${encodeURIComponent(webhookId)}`, {
+      ...options,
       body,
     });
   }
@@ -2631,10 +3102,25 @@ export class ApiClient {
   async deleteWebhookEndpoint(
     webhookId: string,
     command: DeleteTenantWebhookEndpointCommand,
+    options?: RequestOptions,
   ) {
     return this.delete(
       `/api/tenant/webhooks/${encodeURIComponent(webhookId)}`,
       {
+        ...options,
+        body: command,
+      },
+    );
+  }
+
+  async sendTestWebhook(
+    command: SendTestWebhookCommand,
+    options?: RequestOptions,
+  ): Promise<{ deliveryId: string | null; httpStatus: number }> {
+    return this.post<{ deliveryId: string | null; httpStatus: number }>(
+      "/api/tenant/webhooks/test",
+      {
+        ...options,
         body: command,
       },
     );
@@ -2651,9 +3137,13 @@ export class ApiClient {
   async retryWebhookDelivery(
     webhookId: string,
     deliveryId: string,
+    options?: RequestOptions,
   ): Promise<WebhookDeliveryRecord> {
     return this.post<WebhookDeliveryRecord>(
       `/api/tenant/webhooks/${encodeURIComponent(webhookId)}/deliveries/${encodeURIComponent(deliveryId)}/retry`,
+      {
+        ...options,
+      },
     );
   }
 
@@ -2716,6 +3206,20 @@ export class ApiClient {
   > {
     return this.get<TenantUsersListEnvelope | TenantUserRoleRecord[]>(
       "/api/tenant/users",
+    );
+  }
+
+  async listTenantSessions(): Promise<TenantSessionInventoryRecord[]> {
+    return this.getList<TenantSessionInventoryRecord>("/api/tenant/sessions");
+  }
+
+  async revokeTenantSession(
+    sessionId: string,
+    command: RevokeTenantSessionCommand = {},
+  ): Promise<TenantSessionInventoryRecord> {
+    return this.post<TenantSessionInventoryRecord>(
+      `/api/tenant/sessions/${encodeURIComponent(sessionId)}/revoke`,
+      { body: command },
     );
   }
 
@@ -3707,6 +4211,19 @@ export class ApiClient {
     });
   }
 
+  /**
+   * Throws on request failure rather than resolving — an API failure is not
+   * a successful "ok"/"unknown" expiry warning and callers must not treat it
+   * as one.
+   */
+  async getPlatformAdapterCredentialExpiryWarning(
+    id: string,
+  ): Promise<AdapterCredentialExpiryWarning> {
+    return this.get<AdapterCredentialExpiryWarning>(
+      `/api/platform-admin/adapters/${id}/credential-expiry-warning`,
+    );
+  }
+
   // ── Regulatory Registry ──
 
   async listVehicles(): Promise<VehicleRegistryRecord[]> {
@@ -4079,6 +4596,271 @@ export class ApiClient {
       body: command,
     });
   }
+
+  // ============================================================================
+  // System Remediation (SR-CONTRACT-001): Driver Leave Workflow
+  // ============================================================================
+
+  async createDriverLeave(
+    command: CreateDriverLeaveCommand,
+    options?: RequestOptions,
+  ): Promise<DriverLeaveRecord> {
+    return this.post<DriverLeaveRecord>("/api/driver-leave/requests", {
+      ...options,
+      body: command,
+    });
+  }
+
+  async listDriverLeaves(
+    query?: DriverLeaveQueryFilter,
+    options?: RequestOptions,
+  ): Promise<ApiListData<DriverLeaveRecord>> {
+    const params = new URLSearchParams();
+    if (query?.driverId) params.set("driverId", query.driverId);
+    if (query?.status) params.set("status", query.status);
+    if (query?.startTimeFrom) params.set("startTimeFrom", query.startTimeFrom);
+    if (query?.endTimeTo) params.set("endTimeTo", query.endTimeTo);
+    if (query?.page !== undefined) params.set("page", String(query.page));
+    if (query?.pageSize !== undefined)
+      params.set("pageSize", String(query.pageSize));
+    const qs = params.toString();
+    return this.get<ApiListData<DriverLeaveRecord>>(
+      `/api/driver-leave/requests${qs ? `?${qs}` : ""}`,
+      options,
+    );
+  }
+
+  async listDriverLeavesEnvelope(
+    query?: DriverLeaveQueryFilter,
+    options?: RequestOptions,
+  ): Promise<ApiSuccessEnvelope<ApiListData<DriverLeaveRecord>>> {
+    const params = new URLSearchParams();
+    if (query?.driverId) params.set("driverId", query.driverId);
+    if (query?.status) params.set("status", query.status);
+    if (query?.startTimeFrom) params.set("startTimeFrom", query.startTimeFrom);
+    if (query?.endTimeTo) params.set("endTimeTo", query.endTimeTo);
+    if (query?.page !== undefined) params.set("page", String(query.page));
+    if (query?.pageSize !== undefined)
+      params.set("pageSize", String(query.pageSize));
+    const qs = params.toString();
+    return this.getEnvelope<ApiListData<DriverLeaveRecord>>(
+      `/api/driver-leave/requests${qs ? `?${qs}` : ""}`,
+      options,
+    );
+  }
+
+  async withdrawDriverLeave(
+    leaveId: string,
+    command?: WithdrawDriverLeaveCommand,
+    options?: RequestOptions,
+  ): Promise<DriverLeaveRecord> {
+    return this.post<DriverLeaveRecord>(
+      `/api/driver-leave/requests/${encodeURIComponent(leaveId)}/withdraw`,
+      {
+        ...options,
+        body: command ?? {},
+      },
+    );
+  }
+
+  async reviewDriverLeave(
+    leaveId: string,
+    command: ReviewDriverLeaveCommand,
+    options?: RequestOptions,
+  ): Promise<DriverLeaveRecord> {
+    return this.post<DriverLeaveRecord>(
+      `/api/driver-leave/requests/${encodeURIComponent(leaveId)}/review`,
+      {
+        ...options,
+        body: command,
+      },
+    );
+  }
+
+  // ============================================================================
+  // System Remediation (SR-CONTRACT-001): Driver Academy & Fleet Training
+  // ============================================================================
+
+  async listAcademyCourses(
+    query?: { page?: number; pageSize?: number },
+    options?: RequestOptions,
+  ): Promise<ApiListData<AcademyCourseSummary>> {
+    const params = new URLSearchParams();
+    if (query?.page !== undefined) params.set("page", String(query.page));
+    if (query?.pageSize !== undefined)
+      params.set("pageSize", String(query.pageSize));
+    const qs = params.toString();
+    return this.get<ApiListData<AcademyCourseSummary>>(
+      `/api/driver-academy/courses${qs ? `?${qs}` : ""}`,
+      options,
+    );
+  }
+
+  async getAcademyCourse(
+    courseId: string,
+    options?: RequestOptions,
+  ): Promise<AcademyCourseDetail> {
+    return this.get<AcademyCourseDetail>(
+      `/api/driver-academy/courses/${encodeURIComponent(courseId)}`,
+      options,
+    );
+  }
+
+  async submitQuiz(
+    courseId: string,
+    command: QuizSubmissionCommand,
+    options?: RequestOptions,
+  ): Promise<QuizResultRecord> {
+    return this.post<QuizResultRecord>(
+      `/api/driver-academy/courses/${encodeURIComponent(courseId)}/quiz/submit`,
+      {
+        ...options,
+        body: command,
+      },
+    );
+  }
+
+  async listDriverTrainingRecords(
+    query?: { page?: number; pageSize?: number },
+    options?: RequestOptions,
+  ): Promise<ApiListData<DriverTrainingRecord>> {
+    const params = new URLSearchParams();
+    if (query?.page !== undefined) params.set("page", String(query.page));
+    if (query?.pageSize !== undefined)
+      params.set("pageSize", String(query.pageSize));
+    const qs = params.toString();
+    return this.get<ApiListData<DriverTrainingRecord>>(
+      `/api/driver-academy/records${qs ? `?${qs}` : ""}`,
+      options,
+    );
+  }
+
+  async getDriverQuizAttempt(
+    courseId: string,
+    attemptId: string,
+    options?: RequestOptions,
+  ): Promise<DriverQuizAttemptDetail> {
+    return this.get<DriverQuizAttemptDetail>(
+      `/api/driver-academy/courses/${encodeURIComponent(courseId)}/attempts/${encodeURIComponent(attemptId)}`,
+      options,
+    );
+  }
+
+  async getFleetTrainingSummary(
+    options?: RequestOptions,
+  ): Promise<FleetTrainingView> {
+    return this.get<FleetTrainingView>(
+      "/api/fleet-partner/training/summary",
+      options,
+    );
+  }
+
+  async listFleetDriverRoster(
+    query?: { page?: number; pageSize?: number },
+    options?: RequestOptions,
+  ): Promise<ApiListData<FleetDriverRosterItem>> {
+    const params = new URLSearchParams();
+    if (query?.page !== undefined) params.set("page", String(query.page));
+    if (query?.pageSize !== undefined)
+      params.set("pageSize", String(query.pageSize));
+    const qs = params.toString();
+    return this.get<ApiListData<FleetDriverRosterItem>>(
+      `/api/fleet-partner/training/roster${qs ? `?${qs}` : ""}`,
+      options,
+    );
+  }
+
+  async getFleetDriverQuizAttempt(
+    driverId: string,
+    attemptId: string,
+    options?: RequestOptions,
+  ): Promise<DriverQuizAttemptDetail> {
+    return this.get<DriverQuizAttemptDetail>(
+      `/api/fleet-partner/training/drivers/${encodeURIComponent(driverId)}/attempts/${encodeURIComponent(attemptId)}`,
+      options,
+    );
+  }
+
+  // ============================================================================
+  // System Remediation (SR-CONTRACT-001): Host Vehicle Restricted Projection
+  // ============================================================================
+
+  async listHostVehicles(
+    query?: { page?: number; pageSize?: number },
+    options?: RequestOptions,
+  ): Promise<ApiListData<HostVehicleSummary>> {
+    const params = new URLSearchParams();
+    if (query?.page !== undefined) params.set("page", String(query.page));
+    if (query?.pageSize !== undefined)
+      params.set("pageSize", String(query.pageSize));
+    const qs = params.toString();
+    return this.get<ApiListData<HostVehicleSummary>>(
+      `/api/host/vehicles${qs ? `?${qs}` : ""}`,
+      options,
+    );
+  }
+
+  async getHostVehicleEarnings(
+    vehicleId: string,
+    query?: { month?: string },
+    options?: RequestOptions,
+  ): Promise<HostVehicleEarningsSummary> {
+    const params = new URLSearchParams();
+    if (query?.month) params.set("month", query.month);
+    const qs = params.toString();
+    return this.get<HostVehicleEarningsSummary>(
+      `/api/host/vehicles/${encodeURIComponent(vehicleId)}/earnings${qs ? `?${qs}` : ""}`,
+      options,
+    );
+  }
+
+  async listHostVehicleMaintenance(
+    vehicleId: string,
+    query?: { page?: number; pageSize?: number },
+    options?: RequestOptions,
+  ): Promise<ApiListData<HostVehicleMaintenanceItem>> {
+    const params = new URLSearchParams();
+    if (query?.page !== undefined) params.set("page", String(query.page));
+    if (query?.pageSize !== undefined)
+      params.set("pageSize", String(query.pageSize));
+    const qs = params.toString();
+    return this.get<ApiListData<HostVehicleMaintenanceItem>>(
+      `/api/host/vehicles/${encodeURIComponent(vehicleId)}/maintenance${qs ? `?${qs}` : ""}`,
+      options,
+    );
+  }
+
+  async listHostVehicleTrips(
+    vehicleId: string,
+    query?: { page?: number; pageSize?: number },
+    options?: RequestOptions,
+  ): Promise<ApiListData<HostVehicleTripItem>> {
+    const params = new URLSearchParams();
+    if (query?.page !== undefined) params.set("page", String(query.page));
+    if (query?.pageSize !== undefined)
+      params.set("pageSize", String(query.pageSize));
+    const qs = params.toString();
+    return this.get<ApiListData<HostVehicleTripItem>>(
+      `/api/host/vehicles/${encodeURIComponent(vehicleId)}/trips${qs ? `?${qs}` : ""}`,
+      options,
+    );
+  }
+
+  async listHostVehicleCases(
+    vehicleId: string,
+    query?: { page?: number; pageSize?: number },
+    options?: RequestOptions,
+  ): Promise<ApiListData<HostVehicleCaseItem>> {
+    const params = new URLSearchParams();
+    if (query?.page !== undefined) params.set("page", String(query.page));
+    if (query?.pageSize !== undefined)
+      params.set("pageSize", String(query.pageSize));
+    const qs = params.toString();
+    return this.get<ApiListData<HostVehicleCaseItem>>(
+      `/api/host/vehicles/${encodeURIComponent(vehicleId)}/cases${qs ? `?${qs}` : ""}`,
+      options,
+    );
+  }
 }
 
 /**
@@ -4197,3 +4979,78 @@ export function createPlatformAdminClient(
     ...(options?.pathTransform ? { pathTransform: options.pathTransform } : {}),
   });
 }
+
+export function createHostClient(
+  baseUrl: string,
+  partnerId: string,
+  defaultHeaders?: Record<string, string>,
+): ApiClient {
+  return new ApiClient({
+    baseUrl,
+    defaultHeaders: {
+      "x-actor-type": "ops_user",
+      "x-realm": "partner",
+      "x-partner-id": partnerId,
+      ...defaultHeaders,
+    },
+  });
+}
+export type {
+  VoiceSession,
+  VoiceDraft,
+  VoiceDraftSlot,
+  VoiceDraftRevision,
+  VoiceProof,
+  SpeechVoiceProof,
+  DtmfVoiceProof,
+  VoiceProofUnion,
+  VoiceReceipt,
+  VoiceReceiptStatus,
+  VoicePendingReceipt,
+  VoiceSucceededReceipt,
+  VoiceRejectedReceipt,
+  VoiceReceiptRecord,
+  VoicePendingReceiptRecord,
+  VoiceSucceededReceiptRecord,
+  VoiceRejectedReceiptRecord,
+  VoiceActionKeyRecord,
+  VoiceCallback,
+  VoiceCallbackStatus,
+  VoiceCallbackTerminalStatus,
+  VoiceCallbackAttempt,
+  VoiceCallbackAttemptOutcome,
+  VoiceControlCutoff,
+  VoiceSpeechEvidence,
+  VoiceDtmfEvidence,
+  BookingActor,
+  BookingActorType,
+  VoiceAgentBookingActor,
+  HumanBookingActor,
+  VoiceCapability,
+  VoiceCapabilityScope,
+  VoiceCapabilityTokenClaims,
+  VoiceCapabilityClaims,
+  VoiceCapabilityTokenEnvelope,
+  VoiceErrorCode,
+  VoiceScopeProfile,
+  VoiceDialogState,
+  VoiceMediaState,
+  VoiceControlOwner,
+  VoiceCommitStatus,
+  VoiceRecordingState,
+  VoiceConfirmationState,
+  VoiceOutcome,
+  SpeechProof,
+  DtmfProof,
+  TenantBookingDateField,
+  TenantBookingListQuery,
+  TenantBookingsPageRecord,
+  DEFAULT_PRODUCT_TIMEZONE,
+  convertCalendarRangeToInstantRange,
+  isIso8601InstantWithTimezone,
+} from "@drts/contracts";
+
+export * from "./system-remediation";
+export * from "./remittance-proof";
+export * from "./platform-adapter-registry";
+export { ApiClient as DrtsApiClient };

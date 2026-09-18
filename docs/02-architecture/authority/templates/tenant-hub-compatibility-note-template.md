@@ -31,7 +31,7 @@ external tenant consumer.
 
 1. Refresh snapshot with `npm run sync:contracts`.
 2. Update consumer code paths listed above.
-3. Re-run `scripts/tenant-hub-contract-sync-smoke.sh` from the core repo.
+3. Re-run `tools/ci/tenant-hub-contract-sync-smoke.sh` from the core repo.
 
 ## Rollout / Compatibility Window
 

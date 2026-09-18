@@ -1,0 +1,31 @@
+[Unit]
+Description=DRTS Claude OAuth lane keepalive — every 30 min
+Documentation=file:@REPO_ROOT@/tools/development-orchestrator/systemd/README-oauth-hardening.md
+# Drives drts-claude-keepalive.service on a 30-min cadence. Designed to
+# replace the legacy crontab entry installed by hand (see commit
+# a8f4364a / PR #292 which introduced the original claude2 keepalive). The
+# crontab entry should be removed after this timer is verified —
+# tools/development-orchestrator/bin/install-claude-keepalive-systemd.sh has an option to do that
+# safely.
+
+[Timer]
+# Fire 60s after boot so we exercise the lanes before any backend
+# dispatch would, AND every 30 min thereafter.
+#
+# OnCalendar= rather than OnUnitActiveSec=: see drts-health.timer. A
+# monotonic-only timer whose OnBootSec has already lapsed when the user manager
+# starts never gets a next elapse, which disarmed this keepalive for eight hours
+# on 2026-08-16 — the same window in which the codex2 lane sat 401-paused with
+# nothing exercising it.
+# It also makes Persistent= real: per systemd.timer(5) that setting only has an
+# effect on OnCalendar= timers, so the catch-up promised above was never in
+# force on this unit.
+OnBootSec=60s
+OnCalendar=*:0/30
+Persistent=true
+AccuracySec=30s
+
+Unit=drts-claude-keepalive.service
+
+[Install]
+WantedBy=timers.target

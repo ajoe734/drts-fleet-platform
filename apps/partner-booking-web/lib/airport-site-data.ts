@@ -4,13 +4,13 @@
 // Numbers / 權益 are design placeholders, not real published programs.
 // Operated by 智慧運輸科技 (Smart Transport Technology); banks are program owners.
 
-export type AirportBankId = "ctbc" | "cathay" | "taishin" | "dbs";
+export type AirportBankId = "acme" | "contoso" | "fabrikam" | "northwind";
 
 export const AIRPORT_BANK_ORDER: AirportBankId[] = [
-  "ctbc",
-  "cathay",
-  "taishin",
-  "dbs",
+  "acme",
+  "contoso",
+  "fabrikam",
+  "northwind",
 ];
 
 export interface AirportBankColors {
@@ -43,12 +43,12 @@ export interface AirportBank {
 }
 
 export const AIRPORT_BANKS: Record<AirportBankId, AirportBank> = {
-  ctbc: {
-    id: "ctbc",
-    host: "ride.ctbc.com.tw",
-    nameZh: "中國信託",
-    nameEn: "CTBC Bank",
-    mark: "中信",
+  acme: {
+    id: "acme",
+    host: "ride.acme.example",
+    nameZh: "艾克米銀行",
+    nameEn: "Acme Bank",
+    mark: "艾克米",
     co: {
       primary: "#12428B",
       primaryDark: "#0A2A5E",
@@ -57,14 +57,14 @@ export const AIRPORT_BANKS: Record<AirportBankId, AirportBank> = {
       tint: "#EEF2FA",
     },
     serif: true,
-    card: "World Elite 世界卡",
-    tier: "WORLD ELITE",
-    tierEn: "WORLD ELITE PRIVILEGE",
+    card: "Elite Demo 世界卡",
+    tier: "ELITE DEMO",
+    tierEn: "ELITE DEMO PRIVILEGE",
     quota: { used: 3, total: 12 },
     hero: "世界卡禮賓，從家門到登機門。",
     heroSub:
-      "專屬 World Elite 卡友的機場接送禮遇。專業司機、航班動態追蹤、費用合併入帳，無須現場付款。",
-    support: "0800-024-365",
+      "專屬 Elite Demo 卡友的機場接送禮遇。專業司機、航班動態追蹤、費用合併入帳，無須現場付款。",
+    support: "0800-000-101",
     holder: { name: "陳〇明", last4: "8842", nameEn: "CHEN, M." },
     airports: ["桃園 TPE", "松山 TSA"],
     regions: [
@@ -79,12 +79,12 @@ export const AIRPORT_BANKS: Record<AirportBankId, AirportBank> = {
       "航班延誤免費等候 60 分",
     ],
   },
-  cathay: {
-    id: "cathay",
-    host: "ride.cathaybk.com.tw",
-    nameZh: "國泰世華",
-    nameEn: "Cathay United Bank",
-    mark: "國泰",
+  contoso: {
+    id: "contoso",
+    host: "ride.contoso.example",
+    nameZh: "康拓索銀行",
+    nameEn: "Contoso Bank",
+    mark: "康拓索",
     co: {
       primary: "#0B7A4B",
       primaryDark: "#075235",
@@ -93,14 +93,14 @@ export const AIRPORT_BANKS: Record<AirportBankId, AirportBank> = {
       tint: "#EAF4EE",
     },
     serif: true,
-    card: "CUBE 世界卡",
+    card: "Prism 世界卡",
     tier: "WORLD CARD",
     tierEn: "CUBE WORLD CARD",
     quota: { used: 2, total: 8 },
     hero: "樹我視界，接送每一段安心旅程。",
     heroSub:
-      "CUBE 世界卡專屬接送禮遇，從你出發那一刻就開始照顧。準時、安全、全程可追蹤。",
-    support: "0800-818-001",
+      "Prism 世界卡專屬接送禮遇，從你出發那一刻就開始照顧。準時、安全、全程可追蹤。",
+    support: "0800-000-102",
     holder: { name: "林〇芸", last4: "6071", nameEn: "LIN, Y." },
     airports: ["桃園 TPE", "松山 TSA"],
     regions: [
@@ -111,12 +111,12 @@ export const AIRPORT_BANKS: Record<AirportBankId, AirportBank> = {
     ],
     perks: ["全年 8 趟免費接送", "都會區優先派車", "航班延誤免費等候 60 分"],
   },
-  taishin: {
-    id: "taishin",
-    host: "ride.taishinbank.com.tw",
-    nameZh: "台新銀行",
-    nameEn: "Taishin Bank",
-    mark: "台新",
+  fabrikam: {
+    id: "fabrikam",
+    host: "ride.fabrikam.example",
+    nameZh: "法碧康銀行",
+    nameEn: "Fabrikam Bank",
+    mark: "法碧康",
     co: {
       primary: "#B0335F",
       primaryDark: "#7C2241",
@@ -125,13 +125,13 @@ export const AIRPORT_BANKS: Record<AirportBankId, AirportBank> = {
       tint: "#F7EDF1",
     },
     serif: true,
-    card: "太陽無限卡",
+    card: "星軌無限卡",
     tier: "INFINITE",
     tierEn: "INFINITE PRIVILEGE",
     quota: { used: 1, total: 6 },
     hero: "以太陽之名，照亮你的每段旅程。",
-    heroSub: "太陽無限卡尊榮接送，專屬司機與商務車型，讓出發與返家都從容優雅。",
-    support: "0800-023-123",
+    heroSub: "星軌無限卡尊榮接送，專屬司機與商務車型，讓出發與返家都從容優雅。",
+    support: "0800-000-103",
     holder: { name: "王〇婷", last4: "3308", nameEn: "WANG, T." },
     airports: ["桃園 TPE", "松山 TSA"],
     regions: [
@@ -142,12 +142,12 @@ export const AIRPORT_BANKS: Record<AirportBankId, AirportBank> = {
     ],
     perks: ["全年 6 趟免費接送", "商務車型免費升等 1 趟", "24 小時尊榮客服"],
   },
-  dbs: {
-    id: "dbs",
-    host: "ride.dbs.com.tw",
-    nameZh: "星展銀行",
-    nameEn: "DBS Bank",
-    mark: "DBS",
+  northwind: {
+    id: "northwind",
+    host: "ride.northwind.example",
+    nameZh: "北風銀行",
+    nameEn: "Northwind Bank",
+    mark: "NORTHWIND",
     co: {
       primary: "#D72631",
       primaryDark: "#9B1B22",
@@ -156,13 +156,13 @@ export const AIRPORT_BANKS: Record<AirportBankId, AirportBank> = {
       tint: "#FBEDEE",
     },
     serif: false,
-    card: "DBS Insignia 御璽卡",
-    tier: "INSIGNIA",
-    tierEn: "DBS INSIGNIA",
+    card: "Northwind Signature 尊榮卡",
+    tier: "SIGNATURE",
+    tierEn: "NORTHWIND SIGNATURE",
     quota: { used: 4, total: 10 },
     hero: "Live more, Bank less — 從容啟程。",
     heroSub:
-      "DBS Insignia 專屬機場接送，全程禮遇，從登機到入境都有人為你打點。",
+      "Northwind Signature 專屬機場接送，全程禮遇，從登機到入境都有人為你打點。",
     support: "0800-808-889",
     holder: { name: "張〇豪", last4: "1205", nameEn: "CHANG, H." },
     airports: ["桃園 TPE", "松山 TSA"],

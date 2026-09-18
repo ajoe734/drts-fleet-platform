@@ -25,6 +25,7 @@ import {
 import { DriverSosService } from "./driver-sos.service";
 
 @RequireRealms("driver")
+@RequireScopes("incident:write")
 @Controller("driver/sos-events")
 export class DriverSosController {
   constructor(private readonly driverSosService: DriverSosService) {}

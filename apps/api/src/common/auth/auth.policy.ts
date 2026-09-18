@@ -45,6 +45,121 @@ export function resolveRouteAuthPolicy(
     };
   }
 
+  if (routePath === "auth/session" && upperMethod === "GET") {
+    return {
+      routeKey: "auth:session:read",
+      requiredScopes: [],
+      allowedRealms: baseAllowedRealms(
+        "platform",
+        "tenant",
+        "ops",
+        "driver",
+        "partner",
+      ),
+      description:
+        "Caller reads its own session; the route returns 401 when there is no identity and discloses nothing about any other",
+    };
+  }
+
+  if (routePath === "auth/token" && upperMethod === "POST") {
+    return {
+      routeKey: "auth:token:exchange",
+      requiredScopes: [],
+      allowedRealms: baseAllowedRealms("platform", "ops"),
+      description: "Private token exchange for verified control-plane callers",
+    };
+  }
+
+  if (routePath === "auth/logout" && upperMethod === "POST") {
+    return {
+      routeKey: "auth:logout",
+      requiredScopes: [],
+      allowedRealms: baseAllowedRealms(
+        "platform",
+        "ops",
+        "tenant",
+        "partner",
+        "driver",
+      ),
+      description: "Authenticated self session logout",
+    };
+  }
+
+  if (routePath === "auth/logout-all" && upperMethod === "POST") {
+    return {
+      routeKey: "auth:logout-all",
+      requiredScopes: [],
+      allowedRealms: baseAllowedRealms(
+        "platform",
+        "ops",
+        "tenant",
+        "partner",
+        "driver",
+      ),
+      description: "Authenticated self session logout-all",
+    };
+  }
+
+  if (routePath === "auth/sessions" && upperMethod === "GET") {
+    return {
+      routeKey: "auth:sessions:list",
+      requiredScopes: [],
+      allowedRealms: baseAllowedRealms(
+        "platform",
+        "ops",
+        "tenant",
+        "partner",
+        "driver",
+      ),
+      description: "Authenticated self session inventory listing",
+    };
+  }
+
+  if (
+    upperMethod === "POST" &&
+    routePath.startsWith("auth/sessions/") &&
+    routePath.endsWith("/revoke")
+  ) {
+    return {
+      routeKey: "auth:sessions:revoke",
+      requiredScopes: [],
+      allowedRealms: baseAllowedRealms(
+        "platform",
+        "ops",
+        "tenant",
+        "partner",
+        "driver",
+      ),
+      description: "Authenticated self session revocation",
+    };
+  }
+
+  if (routePath === "identity/sessions" && upperMethod === "GET") {
+    return {
+      routeKey: "identity:sessions:list",
+      requiredScopes: methodScope(
+        "identity:sessions:read",
+        "identity:sessions:write",
+        upperMethod,
+      ),
+      allowedRealms: baseAllowedRealms("platform", "ops", "tenant"),
+      description: "Administrative session inventory query",
+    };
+  }
+
+  if (
+    upperMethod === "POST" &&
+    routePath.startsWith("identity/sessions/") &&
+    routePath.endsWith("/revoke")
+  ) {
+    return {
+      routeKey: "identity:sessions:revoke",
+      requiredScopes: ["identity:sessions:write"],
+      allowedRealms: baseAllowedRealms("platform", "ops", "tenant"),
+      description: "Administrative session revocation",
+    };
+  }
+
   if (routePath === "notifications") {
     return {
       routeKey: `notifications:${upperMethod}`,
@@ -55,6 +170,15 @@ export function resolveRouteAuthPolicy(
       ),
       allowedRealms: baseAllowedRealms("platform", "ops"),
       description: "Notification inbox management",
+    };
+  }
+
+  if (routePath === "notifications/read" && upperMethod === "POST") {
+    return {
+      routeKey: "notifications:read:post",
+      requiredScopes: ["notifications:write"],
+      allowedRealms: baseAllowedRealms("platform", "ops", "driver"),
+      description: "Mark notifications as read",
     };
   }
 
@@ -109,12 +233,68 @@ export function resolveRouteAuthPolicy(
     };
   }
 
+  if (routePath === "auth/logout" && upperMethod === "POST") {
+    return {
+      routeKey: "auth:logout",
+      requiredScopes: [],
+      allowedRealms: baseAllowedRealms(
+        "platform",
+        "tenant",
+        "ops",
+        "driver",
+        "partner",
+      ),
+      description: "Authenticated session logout for current device",
+    };
+  }
+
+  if (routePath === "auth/logout-all" && upperMethod === "POST") {
+    return {
+      routeKey: "auth:logout-all",
+      requiredScopes: [],
+      allowedRealms: baseAllowedRealms(
+        "platform",
+        "tenant",
+        "ops",
+        "driver",
+        "partner",
+      ),
+      description: "Authenticated session logout for all active devices",
+    };
+  }
+
+  if (routePath === "auth/sessions/revoke" && upperMethod === "POST") {
+    return {
+      routeKey: "auth:sessions:revoke",
+      requiredScopes: [],
+      allowedRealms: baseAllowedRealms(
+        "platform",
+        "tenant",
+        "ops",
+        "driver",
+        "partner",
+      ),
+      description: "Self-service session revocation endpoint",
+    };
+  }
+
   if (routePath.startsWith("partner/eligibility/")) {
     return {
       routeKey: "partner:eligibility:get",
       requiredScopes: ["partner:eligibility:read"],
       allowedRealms: baseAllowedRealms("partner"),
       description: "Partner eligibility verification lookup",
+    };
+  }
+
+  if (routePath.startsWith("partner/referral/passenger/")) {
+    const routeSuffix =
+      routePath.slice("partner/referral/passenger/".length) || "root";
+    return {
+      routeKey: `partner:referral-passenger:${routeSuffix}:${upperMethod}`,
+      requiredScopes: ["partner:book"],
+      allowedRealms: baseAllowedRealms("partner"),
+      description: "Referral passenger self-service access",
     };
   }
 
@@ -239,7 +419,8 @@ export function resolveRouteAuthPolicy(
     }
     if (
       routePath.startsWith("tenant/billing") ||
-      routePath.startsWith("tenant/invoices")
+      routePath.startsWith("tenant/invoices") ||
+      routePath.startsWith("tenant/settlement-statements")
     ) {
       return {
         routeKey: `tenant:billing:${upperMethod}`,
@@ -249,7 +430,7 @@ export function resolveRouteAuthPolicy(
           upperMethod,
         ),
         allowedRealms: baseAllowedRealms("platform", "tenant"),
-        description: "Tenant billing and invoices",
+        description: "Tenant billing, invoices, and settlement statements",
       };
     }
     if (
@@ -325,6 +506,18 @@ export function resolveRouteAuthPolicy(
   }
 
   if (
+    routePath === "passenger/orders/:orderId/cancel" &&
+    upperMethod === "POST"
+  ) {
+    return {
+      routeKey: "passenger:orders:cancel",
+      requiredScopes: [],
+      allowedRealms: baseAllowedRealms(),
+      description: "Passenger order cancellation bridge",
+    };
+  }
+
+  if (
     routePath === "ops/dispatch-events" ||
     routePath === "driver/task-events" ||
     routePath.startsWith("driver/tasks")
@@ -388,6 +581,103 @@ export function resolveRouteAuthPolicy(
       description: isOpsView
         ? "Ops driver location tracking status access"
         : "Driver location heartbeat ingest + self tracking status",
+    };
+  }
+
+  if (
+    routePath === "driver-settings" ||
+    routePath.startsWith("driver-settings/")
+  ) {
+    const isPatch = upperMethod === "PATCH";
+    return {
+      routeKey: `driver-settings:${upperMethod}`,
+      requiredScopes: isPatch ? ["driver:write"] : ["driver:read"],
+      allowedRealms: isPatch
+        ? baseAllowedRealms("driver")
+        : baseAllowedRealms("platform", "ops", "driver"),
+      description: isPatch
+        ? "Driver settings mutation"
+        : "Driver settings read access",
+    };
+  }
+
+  if (
+    routePath.startsWith("shift-attendance/") ||
+    routePath === "shift-attendance"
+  ) {
+    const isWrite = upperMethod === "POST";
+    return {
+      routeKey: `shift-attendance:${upperMethod}`,
+      requiredScopes: isWrite ? ["driver:write"] : ["driver:read"],
+      allowedRealms: isWrite
+        ? baseAllowedRealms("driver")
+        : baseAllowedRealms("platform", "ops", "driver"),
+      description: isWrite
+        ? "Shift attendance clock-in/out and mutation"
+        : "Shift attendance read access",
+    };
+  }
+
+  if (
+    routePath === "platform-presence" ||
+    routePath.startsWith("platform-presence/")
+  ) {
+    const isWrite = upperMethod === "POST";
+    return {
+      routeKey: `platform-presence:${upperMethod}`,
+      requiredScopes: isWrite ? ["driver:write"] : ["driver:read"],
+      allowedRealms: baseAllowedRealms("platform", "ops", "driver"),
+      description: isWrite
+        ? "Platform presence status mutation"
+        : "Platform presence summary access",
+    };
+  }
+
+  if (
+    routePath === "platform-earnings" ||
+    routePath.startsWith("platform-earnings/")
+  ) {
+    return {
+      routeKey: `platform-earnings:${upperMethod}`,
+      requiredScopes: ["driver:read"],
+      allowedRealms: baseAllowedRealms("platform", "ops", "driver"),
+      description: "Driver platform earnings read access",
+    };
+  }
+
+  if (
+    routePath === "safety-operator" ||
+    routePath.startsWith("safety-operator/")
+  ) {
+    const isWrite = !isReadMethod(upperMethod);
+    return {
+      routeKey: `safety-operator:${upperMethod}`,
+      requiredScopes: isWrite ? ["driver:write"] : ["driver:read"],
+      allowedRealms: baseAllowedRealms("ops", "driver"),
+      description: isWrite
+        ? "Safety operator assignment and shift management"
+        : "Safety operator read access",
+    };
+  }
+
+  if (
+    routePath === "driver/task-views" ||
+    routePath.startsWith("driver/task-views/")
+  ) {
+    return {
+      routeKey: `driver:task-views:${upperMethod}`,
+      requiredScopes: ["dispatch:read"],
+      allowedRealms: baseAllowedRealms("driver"),
+      description: "Driver forwarded task view read access",
+    };
+  }
+
+  if (routePath.startsWith("driver/forwarded-orders/")) {
+    return {
+      routeKey: `driver:forwarded-orders:${upperMethod}`,
+      requiredScopes: ["driver:write"],
+      allowedRealms: baseAllowedRealms("driver"),
+      description: "Driver forwarded order acceptance/rejection",
     };
   }
 
@@ -592,6 +882,46 @@ export function resolveRouteAuthPolicy(
       ),
       allowedRealms: baseAllowedRealms("ops"),
       description: "Forwarder relay access",
+    };
+  }
+
+  if (
+    routePath === "identity/privileged-role-grants/process-expiries" &&
+    upperMethod === "POST"
+  ) {
+    return {
+      routeKey: "identity:privileged-role-grants:process-expiries",
+      requiredScopes: ["identity:write"],
+      allowedRealms: ["system"],
+      description: "Internal scheduler execution of privileged role expiries",
+    };
+  }
+
+  if (routePath === "identity/step-up-proofs" && upperMethod === "POST") {
+    return {
+      routeKey: "identity:step-up-proofs:create",
+      requiredScopes: [],
+      allowedRealms: baseAllowedRealms(
+        "platform",
+        "tenant",
+        "ops",
+        "partner",
+        "driver",
+      ),
+      description: "Creation of step-up proof for privileged action",
+    };
+  }
+
+  if (routePath.startsWith("identity/") || routePath === "identity") {
+    return {
+      routeKey: `identity:${upperMethod}`,
+      requiredScopes: methodScope(
+        "identity:read",
+        "identity:write",
+        upperMethod,
+      ),
+      allowedRealms: baseAllowedRealms("platform", "tenant", "ops"),
+      description: "Identity and privileged role governance access",
     };
   }
 

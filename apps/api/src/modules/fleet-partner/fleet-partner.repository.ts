@@ -1,3 +1,4 @@
+import { PLATFORM_CURRENCY } from "@drts/contracts";
 import { Injectable, Logger, Optional } from "@nestjs/common";
 
 import type {
@@ -439,6 +440,6 @@ export class FleetPartnerRepository {
         currency,
       };
     }
-    return fallback ?? { amountMinor: 0, currency: "NTD" };
+    return fallback ?? { amountMinor: 0, currency: PLATFORM_CURRENCY };
   }
 }

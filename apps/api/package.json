@@ -4,7 +4,8 @@
   "private": true,
   "type": "commonjs",
   "scripts": {
-    "build": "pnpm --filter @drts/contracts build && tsc -p tsconfig.json",
+    "prebuild": "pnpm --filter @drts/contracts build && pnpm --filter @drts/control-plane-auth build",
+    "build": "tsc -p tsconfig.json",
     "dev": "node --watch -r ts-node/register src/main.ts",
     "lint": "eslint src --max-warnings=0",
     "start": "node dist/main.js",
@@ -14,28 +15,33 @@
     "test:integration:quota-concurrency": "vitest run tests/integration/tenant-quota-db-concurrency.integration.test.ts --no-file-parallelism --maxConcurrency=1",
     "test": "vitest run --passWithNoTests",
     "test:tenant-governance-negative": "pnpm --dir ../.. exec vitest run tests/integ/tenant-governance-negative.test.ts",
-    "typecheck": "pnpm --filter @drts/contracts build && tsc -p tsconfig.json --noEmit"
+    "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1094.0",
     "@aws-sdk/s3-request-presigner": "^3.1094.0",
     "@drts/contracts": "workspace:*",
+    "@drts/control-plane-auth": "workspace:*",
     "@nestjs/common": "^11.1.18",
     "@nestjs/core": "^11.1.18",
     "@nestjs/event-emitter": "^3.0.1",
     "@nestjs/platform-express": "^11.1.18",
     "@nestjs/throttler": "^6.5.0",
     "eventemitter2": "^6.4.9",
+    "exceljs": "^4.4.0",
     "jsonwebtoken": "^9.0.3",
     "openclaw": "2026.6.1",
+    "pdfkit": "^0.20.2",
     "pg": "^8.20.0",
     "reflect-metadata": "^0.2.2",
     "rxjs": "^7.8.2"
   },
   "devDependencies": {
     "@types/jsonwebtoken": "^9.0.10",
+    "@types/pdfkit": "^0.17.6",
     "@types/pg": "^8.20.0",
     "ts-node": "^10.9.2",
+    "typescript": "^5.9.3",
     "tsx": "^4.20.6"
   }
 }

@@ -1,0 +1,80 @@
+groups:
+  - name: iam_security_alerts
+    rules:
+      - alert: IAMRefreshTokenReuseDetected
+        expr: increase(drts_iam_refresh_token_reuse_total[1m]) >= 1
+        for: 0m
+        labels:
+          severity: critical
+          owner_team: security_ops
+          route_channel: security-pager-p1
+        annotations:
+          summary: "Refresh token reuse attempt detected and session family revoked"
+          runbook_url: "docs/03-runbooks/iam-alert-response.md#1-iamrefreshtokenreusedetected"
+
+      - alert: IAMAuditPipelineFailureBlocked
+        expr: increase(drts_iam_audit_pipeline_failures_total{outcome="write_blocked"}[1m]) >= 1
+        for: 0m
+        labels:
+          severity: critical
+          owner_team: sre
+          route_channel: security-pager-p1
+        annotations:
+          summary: "Audit log pipeline failure blocked privileged write"
+          runbook_url: "docs/03-runbooks/iam-alert-response.md#2-iamauditpipelinefailureblocked"
+
+      - alert: IAMBreakGlassActivated
+        expr: increase(drts_iam_break_glass_total{action="activated"}[1m]) >= 1
+        for: 0m
+        labels:
+          severity: high
+          owner_team: security_lead
+          route_channel: security-pager-p1
+
+      - alert: IAMCrossTenantAbuseSpike
+        expr: increase(drts_iam_cross_tenant_attempts_total[5m]) >= 3
+        for: 0m
+        labels:
+          severity: high
+          owner_team: security_ops
+          route_channel: security-oncall
+
+      - alert: IAMUnapprovedPrivilegedChange
+        expr: increase(drts_iam_privileged_changes_total{outcome="unapproved_drill"}[5m]) >= 1 or increase(drts_iam_privileged_changes_total[1h]) > 5
+        for: 0m
+        labels:
+          severity: high
+          owner_team: platform_security
+          route_channel: security-platform-owner
+
+      - alert: IAMAuthBruteForceSpike
+        expr: increase(drts_iam_auth_abuse_total[5m]) > 10
+        for: 0m
+        labels:
+          severity: warning
+          owner_team: security_ops
+          route_channel: security-oncall
+
+      - alert: IAMCredentialExpiringSoon
+        expr: drts_iam_credential_expiry_warnings_total{days_remaining=~"7|1"} > 0
+        for: 1m
+        labels:
+          severity: warning
+          owner_team: credential_owner
+          route_channel: ops-ticket
+
+      - alert: IAMDormantCredentialUsed
+        expr: increase(drts_iam_dormant_credential_usage_total[15m]) >= 1
+        for: 0m
+        labels:
+          severity: warning
+          owner_team: security_ops
+          route_channel: security-oncall
+
+      - alert: IAMIdPGroupDriftDetected
+        expr: increase(drts_iam_idp_drift_total[10m]) >= 1
+        for: 0m
+        labels:
+          severity: warning
+          owner_team: iam_team
+          route_channel: iam-team

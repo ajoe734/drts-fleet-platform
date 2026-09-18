@@ -1,0 +1,1808 @@
+{
+  "schema_version": "1.0.0",
+  "wave_id": "unattended-voice-booking-20260906",
+  "title": "Unattended Voice Booking Acceptance & Traceability Manifest",
+  "planning_ref": "docs/02-architecture/phase1-unattended-voice-booking-sa-20260906.md",
+  "system_design_ref": "docs/02-architecture/phase1-unattended-voice-booking-sd-20260906.md",
+  "execution_ref": "docs/03-runbooks/unattended-voice-booking-execution-tasks-20260906.md",
+  "generated_by_task": "UV-EXEC-025",
+  "summary": {
+    "total_functional_requirements": 32,
+    "total_acceptance_criteria": 48,
+    "total_execution_tasks": 29,
+    "status_counts": {
+      "conditional": 6,
+      "live": 4,
+      "pending": 36,
+      "pass": 2
+    },
+    "governance_assertion": "Each of the 48 ACs is mapped to genuine task owners and reviewers. UV-EXEC-025 provides harness and manifest, and does not fraudulently claim full AC coverage."
+  },
+  "status_category_definitions": {
+    "conditional": "Feature is conditionally enabled via capability switches; fallback/rejection/routing verified when disabled.",
+    "live": "Requires external live PSTN telephony, carrier connection, or operational UAT gates (UV-EXEC-028/029).",
+    "pending": "Under active development within the dependency DAG of implementation tasks (UV-EXEC-001..024).",
+    "pass": "Fully verified by hermetic evaluation harness, metrics accounting, and test suites in UV-EXEC-025."
+  },
+  "functional_requirements": [
+    {
+      "fr_id": "UV-FR-001",
+      "title": "接聽時建立唯一通話，播報 AI 身份、服務與錄音告知，保存播報結果",
+      "priority": "P0",
+      "associated_acs": [
+        "UV-AC-001",
+        "UV-AC-026"
+      ],
+      "associated_tasks": [
+        "UV-EXEC-008",
+        "UV-EXEC-015",
+        "UV-EXEC-021",
+        "UV-EXEC-027"
+      ]
+    },
+    {
+      "fr_id": "UV-FR-002",
+      "title": "支援電話雙向音訊、回音處理、斷線區分及播放完成狀態",
+      "priority": "P0",
+      "associated_acs": [
+        "UV-AC-001",
+        "UV-AC-008",
+        "UV-AC-027",
+        "UV-AC-031",
+        "UV-AC-041",
+        "UV-AC-044",
+        "UV-AC-045"
+      ],
+      "associated_tasks": [
+        "UV-EXEC-007",
+        "UV-EXEC-008",
+        "UV-EXEC-009",
+        "UV-EXEC-010",
+        "UV-EXEC-011",
+        "UV-EXEC-014",
+        "UV-EXEC-015",
+        "UV-EXEC-017",
+        "UV-EXEC-024",
+        "UV-EXEC-028"
+      ]
+    },
+    {
+      "fr_id": "UV-FR-003",
+      "title": "提供語言選擇、混講辨識、語言切換與相應 TTS 路由",
+      "priority": "P0",
+      "associated_acs": [
+        "UV-AC-002",
+        "UV-AC-033",
+        "UV-AC-044"
+      ],
+      "associated_tasks": [
+        "UV-EXEC-011",
+        "UV-EXEC-025",
+        "UV-EXEC-026",
+        "UV-EXEC-027",
+        "UV-EXEC-028"
+      ]
+    },
+    {
+      "fr_id": "UV-FR-004",
+      "title": "辨識叫車、查單、取消、投訴、遺失物與其他意圖，按授權範圍路由",
+      "priority": "P0",
+      "associated_acs": [
+        "UV-AC-001",
+        "UV-AC-018",
+        "UV-AC-024",
+        "UV-AC-038"
+      ],
+      "associated_tasks": [
+        "UV-EXEC-008",
+        "UV-EXEC-012",
+        "UV-EXEC-013",
+        "UV-EXEC-015",
+        "UV-EXEC-017",
+        "UV-EXEC-020"
+      ]
+    },
+    {
+      "fr_id": "UV-FR-005",
+      "title": "抽取及補齊叫車欄位，分開來電人、代叫人、乘客與聯絡窗口",
+      "priority": "P0",
+      "associated_acs": [
+        "UV-AC-001",
+        "UV-AC-005",
+        "UV-AC-006",
+        "UV-AC-039"
+      ],
+      "associated_tasks": [
+        "UV-EXEC-008",
+        "UV-EXEC-012",
+        "UV-EXEC-013",
+        "UV-EXEC-015",
+        "UV-EXEC-018"
+      ]
+    },
+    {
+      "fr_id": "UV-FR-006",
+      "title": "以地址／地標服務核對地點、入口、服務區及歧義候選",
+      "priority": "P0",
+      "associated_acs": [
+        "UV-AC-003",
+        "UV-AC-004",
+        "UV-AC-039"
+      ],
+      "associated_tasks": [
+        "UV-EXEC-013"
+      ]
+    },
+    {
+      "fr_id": "UV-FR-007",
+      "title": "提交前驗證商品、時間、運能規格及既有 eligibility／policy gate",
+      "priority": "P0",
+      "associated_acs": [
+        "UV-AC-003",
+        "UV-AC-004",
+        "UV-AC-013",
+        "UV-AC-018",
+        "UV-AC-025",
+        "UV-AC-033",
+        "UV-AC-035",
+        "UV-AC-036",
+        "UV-AC-038",
+        "UV-AC-039",
+        "UV-AC-048"
+      ],
+      "associated_tasks": [
+        "UV-EXEC-001",
+        "UV-EXEC-003",
+        "UV-EXEC-006",
+        "UV-EXEC-012",
+        "UV-EXEC-013",
+        "UV-EXEC-016",
+        "UV-EXEC-020",
+        "UV-EXEC-024",
+        "UV-EXEC-025",
+        "UV-EXEC-026",
+        "UV-EXEC-027",
+        "UV-EXEC-028"
+      ]
+    },
+    {
+      "fr_id": "UV-FR-008",
+      "title": "對電話、門牌、時間與重要數字正規化、分組讀回及修正",
+      "priority": "P0",
+      "associated_acs": [
+        "UV-AC-005",
+        "UV-AC-006",
+        "UV-AC-017"
+      ],
+      "associated_tasks": [
+        "UV-EXEC-012",
+        "UV-EXEC-013",
+        "UV-EXEC-018",
+        "UV-EXEC-020"
+      ]
+    },
+    {
+      "fr_id": "UV-FR-009",
+      "title": "保存草稿版本與欄位來源；乘客更正後使舊確認與舊待執行工作失效",
+      "priority": "P0",
+      "associated_acs": [
+        "UV-AC-007",
+        "UV-AC-016",
+        "UV-AC-021",
+        "UV-AC-037",
+        "UV-AC-041",
+        "UV-AC-045"
+      ],
+      "associated_tasks": [
+        "UV-EXEC-002",
+        "UV-EXEC-004",
+        "UV-EXEC-005",
+        "UV-EXEC-007",
+        "UV-EXEC-009",
+        "UV-EXEC-010",
+        "UV-EXEC-014",
+        "UV-EXEC-017",
+        "UV-EXEC-020",
+        "UV-EXEC-024",
+        "UV-EXEC-028"
+      ]
+    },
+    {
+      "fr_id": "UV-FR-010",
+      "title": "完整回讀必要欄位並取得乘客對最新版本的明確確認",
+      "priority": "P0",
+      "associated_acs": [
+        "UV-AC-001",
+        "UV-AC-003",
+        "UV-AC-005",
+        "UV-AC-007",
+        "UV-AC-008",
+        "UV-AC-023",
+        "UV-AC-025",
+        "UV-AC-033",
+        "UV-AC-041",
+        "UV-AC-044",
+        "UV-AC-045"
+      ],
+      "associated_tasks": [
+        "UV-EXEC-001",
+        "UV-EXEC-003",
+        "UV-EXEC-007",
+        "UV-EXEC-008",
+        "UV-EXEC-009",
+        "UV-EXEC-010",
+        "UV-EXEC-011",
+        "UV-EXEC-012",
+        "UV-EXEC-013",
+        "UV-EXEC-014",
+        "UV-EXEC-015",
+        "UV-EXEC-017",
+        "UV-EXEC-024",
+        "UV-EXEC-025",
+        "UV-EXEC-026",
+        "UV-EXEC-027",
+        "UV-EXEC-028"
+      ]
+    },
+    {
+      "fr_id": "UV-FR-011",
+      "title": "派遣前持久化確認片段及不可變索引，完整通話結束後封存補綁",
+      "priority": "P0",
+      "associated_acs": [
+        "UV-AC-011",
+        "UV-AC-012",
+        "UV-AC-033",
+        "UV-AC-037",
+        "UV-AC-041"
+      ],
+      "associated_tasks": [
+        "UV-EXEC-002",
+        "UV-EXEC-004",
+        "UV-EXEC-005",
+        "UV-EXEC-009",
+        "UV-EXEC-010",
+        "UV-EXEC-014",
+        "UV-EXEC-024",
+        "UV-EXEC-025",
+        "UV-EXEC-026",
+        "UV-EXEC-027",
+        "UV-EXEC-028"
+      ]
+    },
+    {
+      "fr_id": "UV-FR-012",
+      "title": "透過既有業務域完成單次建單，對重送、逾時與重複確認保持冪等",
+      "priority": "P0",
+      "associated_acs": [
+        "UV-AC-001",
+        "UV-AC-009",
+        "UV-AC-010",
+        "UV-AC-023",
+        "UV-AC-035",
+        "UV-AC-037",
+        "UV-AC-042",
+        "UV-AC-043",
+        "UV-AC-047"
+      ],
+      "associated_tasks": [
+        "UV-EXEC-001",
+        "UV-EXEC-002",
+        "UV-EXEC-003",
+        "UV-EXEC-004",
+        "UV-EXEC-005",
+        "UV-EXEC-007",
+        "UV-EXEC-008",
+        "UV-EXEC-015",
+        "UV-EXEC-016",
+        "UV-EXEC-023",
+        "UV-EXEC-024"
+      ]
+    },
+    {
+      "fr_id": "UV-FR-013",
+      "title": "自動申請派遣、追蹤結果並依真值播報訂單、司機及 ETA",
+      "priority": "P0",
+      "associated_acs": [
+        "UV-AC-001",
+        "UV-AC-010",
+        "UV-AC-012",
+        "UV-AC-013",
+        "UV-AC-035",
+        "UV-AC-036",
+        "UV-AC-042",
+        "UV-AC-047",
+        "UV-AC-048"
+      ],
+      "associated_tasks": [
+        "UV-EXEC-006",
+        "UV-EXEC-008",
+        "UV-EXEC-010",
+        "UV-EXEC-015",
+        "UV-EXEC-016",
+        "UV-EXEC-023",
+        "UV-EXEC-024"
+      ]
+    },
+    {
+      "fr_id": "UV-FR-014",
+      "title": "查單前核對身份與訂單歸屬，僅揭露該操作必要資料",
+      "priority": "conditional",
+      "associated_acs": [
+        "UV-AC-006",
+        "UV-AC-014",
+        "UV-AC-015",
+        "UV-AC-019",
+        "UV-AC-040"
+      ],
+      "associated_tasks": [
+        "UV-EXEC-003",
+        "UV-EXEC-018",
+        "UV-EXEC-019",
+        "UV-EXEC-020"
+      ]
+    },
+    {
+      "fr_id": "UV-FR-015",
+      "title": "取消／改單需能力開通、最新狀態檢查、費用告知與再次確認",
+      "priority": "conditional",
+      "associated_acs": [
+        "UV-AC-015",
+        "UV-AC-016"
+      ],
+      "associated_tasks": [
+        "UV-EXEC-020"
+      ]
+    },
+    {
+      "fr_id": "UV-FR-016",
+      "title": "辨識預約及特殊服務需求，僅向已開通的對應商品／工具提交",
+      "priority": "conditional",
+      "associated_acs": [
+        "UV-AC-017",
+        "UV-AC-018",
+        "UV-AC-038",
+        "UV-AC-039"
+      ],
+      "associated_tasks": [
+        "UV-EXEC-013",
+        "UV-EXEC-020"
+      ]
+    },
+    {
+      "fr_id": "UV-FR-017",
+      "title": "辨識已有訂單、重複來電與多車需求，避免重複下單",
+      "priority": "P0",
+      "associated_acs": [
+        "UV-AC-009",
+        "UV-AC-019",
+        "UV-AC-036",
+        "UV-AC-043",
+        "UV-AC-047",
+        "UV-AC-048"
+      ],
+      "associated_tasks": [
+        "UV-EXEC-001",
+        "UV-EXEC-002",
+        "UV-EXEC-003",
+        "UV-EXEC-005",
+        "UV-EXEC-006",
+        "UV-EXEC-015",
+        "UV-EXEC-016",
+        "UV-EXEC-020",
+        "UV-EXEC-024"
+      ]
+    },
+    {
+      "fr_id": "UV-FR-018",
+      "title": "對辨識、地址與數字歧義實施有限修復，保留每次失敗原因",
+      "priority": "P0",
+      "associated_acs": [
+        "UV-AC-002",
+        "UV-AC-004",
+        "UV-AC-008",
+        "UV-AC-020",
+        "UV-AC-039",
+        "UV-AC-044"
+      ],
+      "associated_tasks": [
+        "UV-EXEC-011",
+        "UV-EXEC-012",
+        "UV-EXEC-013",
+        "UV-EXEC-014",
+        "UV-EXEC-019",
+        "UV-EXEC-027",
+        "UV-EXEC-028"
+      ]
+    },
+    {
+      "fr_id": "UV-FR-019",
+      "title": "支援插話停止播放、輪次取消及已提交操作的更正處理",
+      "priority": "P0",
+      "associated_acs": [
+        "UV-AC-007",
+        "UV-AC-008",
+        "UV-AC-016",
+        "UV-AC-021",
+        "UV-AC-027",
+        "UV-AC-031",
+        "UV-AC-041",
+        "UV-AC-045"
+      ],
+      "associated_tasks": [
+        "UV-EXEC-007",
+        "UV-EXEC-008",
+        "UV-EXEC-009",
+        "UV-EXEC-010",
+        "UV-EXEC-011",
+        "UV-EXEC-014",
+        "UV-EXEC-017",
+        "UV-EXEC-020",
+        "UV-EXEC-024",
+        "UV-EXEC-028"
+      ]
+    },
+    {
+      "fr_id": "UV-FR-020",
+      "title": "轉真人時傳遞完整接手摘要並原子移交控制權",
+      "priority": "P0",
+      "associated_acs": [
+        "UV-AC-010",
+        "UV-AC-011",
+        "UV-AC-019",
+        "UV-AC-020",
+        "UV-AC-021",
+        "UV-AC-024",
+        "UV-AC-029",
+        "UV-AC-034",
+        "UV-AC-040",
+        "UV-AC-043",
+        "UV-AC-045",
+        "UV-AC-046"
+      ],
+      "associated_tasks": [
+        "UV-EXEC-001",
+        "UV-EXEC-002",
+        "UV-EXEC-003",
+        "UV-EXEC-005",
+        "UV-EXEC-007",
+        "UV-EXEC-009",
+        "UV-EXEC-010",
+        "UV-EXEC-012",
+        "UV-EXEC-014",
+        "UV-EXEC-015",
+        "UV-EXEC-017",
+        "UV-EXEC-018",
+        "UV-EXEC-019",
+        "UV-EXEC-020",
+        "UV-EXEC-024",
+        "UV-EXEC-028",
+        "UV-EXEC-029"
+      ]
+    },
+    {
+      "fr_id": "UV-FR-021",
+      "title": "管理真人佇列、等待提示、無人接聽與經乘客同意的回撥任務",
+      "priority": "P0",
+      "associated_acs": [
+        "UV-AC-022",
+        "UV-AC-024",
+        "UV-AC-030",
+        "UV-AC-034",
+        "UV-AC-040",
+        "UV-AC-046"
+      ],
+      "associated_tasks": [
+        "UV-EXEC-012",
+        "UV-EXEC-017",
+        "UV-EXEC-018",
+        "UV-EXEC-019",
+        "UV-EXEC-021",
+        "UV-EXEC-023",
+        "UV-EXEC-024",
+        "UV-EXEC-027",
+        "UV-EXEC-029"
+      ]
+    },
+    {
+      "fr_id": "UV-FR-022",
+      "title": "分辨掛斷前後的交易結果，對已確認未回覆、未知結果及未確認草稿執行不同補償",
+      "priority": "P0",
+      "associated_acs": [
+        "UV-AC-009",
+        "UV-AC-022",
+        "UV-AC-023",
+        "UV-AC-027",
+        "UV-AC-040",
+        "UV-AC-042",
+        "UV-AC-046"
+      ],
+      "associated_tasks": [
+        "UV-EXEC-002",
+        "UV-EXEC-007",
+        "UV-EXEC-008",
+        "UV-EXEC-011",
+        "UV-EXEC-015",
+        "UV-EXEC-018",
+        "UV-EXEC-019",
+        "UV-EXEC-023",
+        "UV-EXEC-024",
+        "UV-EXEC-028"
+      ]
+    },
+    {
+      "fr_id": "UV-FR-023",
+      "title": "管理暫態／最終逐字稿、對話時間線及回讀／錄音關聯",
+      "priority": "P0",
+      "associated_acs": [
+        "UV-AC-011",
+        "UV-AC-012",
+        "UV-AC-020",
+        "UV-AC-028",
+        "UV-AC-037"
+      ],
+      "associated_tasks": [
+        "UV-EXEC-002",
+        "UV-EXEC-004",
+        "UV-EXEC-005",
+        "UV-EXEC-010",
+        "UV-EXEC-012",
+        "UV-EXEC-014",
+        "UV-EXEC-019",
+        "UV-EXEC-021",
+        "UV-EXEC-024"
+      ]
+    },
+    {
+      "fr_id": "UV-FR-024",
+      "title": "使用獨立 AI actor、最小權限、入口隔離、工具參數驗證及敏感資料遮罩",
+      "priority": "P0",
+      "associated_acs": [
+        "UV-AC-014",
+        "UV-AC-015",
+        "UV-AC-021",
+        "UV-AC-025",
+        "UV-AC-026",
+        "UV-AC-028",
+        "UV-AC-043"
+      ],
+      "associated_tasks": [
+        "UV-EXEC-001",
+        "UV-EXEC-002",
+        "UV-EXEC-003",
+        "UV-EXEC-005",
+        "UV-EXEC-007",
+        "UV-EXEC-012",
+        "UV-EXEC-017",
+        "UV-EXEC-019",
+        "UV-EXEC-020",
+        "UV-EXEC-021",
+        "UV-EXEC-024",
+        "UV-EXEC-027"
+      ]
+    },
+    {
+      "fr_id": "UV-FR-025",
+      "title": "提供通話監控、例外處理、接手及追查畫面",
+      "priority": "P0",
+      "associated_acs": [
+        "UV-AC-020",
+        "UV-AC-022",
+        "UV-AC-028",
+        "UV-AC-029",
+        "UV-AC-040",
+        "UV-AC-046"
+      ],
+      "associated_tasks": [
+        "UV-EXEC-012",
+        "UV-EXEC-018",
+        "UV-EXEC-019",
+        "UV-EXEC-021",
+        "UV-EXEC-024"
+      ]
+    },
+    {
+      "fr_id": "UV-FR-026",
+      "title": "提供入口／商品／語言／供應商／政策版本與功能開關",
+      "priority": "P0",
+      "associated_acs": [
+        "UV-AC-002",
+        "UV-AC-015",
+        "UV-AC-017",
+        "UV-AC-030",
+        "UV-AC-031",
+        "UV-AC-034",
+        "UV-AC-038",
+        "UV-AC-042",
+        "UV-AC-044",
+        "UV-AC-048"
+      ],
+      "associated_tasks": [
+        "UV-EXEC-006",
+        "UV-EXEC-011",
+        "UV-EXEC-013",
+        "UV-EXEC-020",
+        "UV-EXEC-021",
+        "UV-EXEC-023",
+        "UV-EXEC-024",
+        "UV-EXEC-027",
+        "UV-EXEC-028",
+        "UV-EXEC-029"
+      ]
+    },
+    {
+      "fr_id": "UV-FR-027",
+      "title": "對 ASR、LLM、TTS、電話、地址及交易服務故障採分級降級與恢復",
+      "priority": "P0",
+      "associated_acs": [
+        "UV-AC-009",
+        "UV-AC-010",
+        "UV-AC-012",
+        "UV-AC-016",
+        "UV-AC-023",
+        "UV-AC-027",
+        "UV-AC-030",
+        "UV-AC-031",
+        "UV-AC-034",
+        "UV-AC-035",
+        "UV-AC-036",
+        "UV-AC-037",
+        "UV-AC-041",
+        "UV-AC-042",
+        "UV-AC-045",
+        "UV-AC-046",
+        "UV-AC-047",
+        "UV-AC-048"
+      ],
+      "associated_tasks": [
+        "UV-EXEC-002",
+        "UV-EXEC-004",
+        "UV-EXEC-005",
+        "UV-EXEC-006",
+        "UV-EXEC-007",
+        "UV-EXEC-008",
+        "UV-EXEC-009",
+        "UV-EXEC-010",
+        "UV-EXEC-011",
+        "UV-EXEC-014",
+        "UV-EXEC-015",
+        "UV-EXEC-016",
+        "UV-EXEC-017",
+        "UV-EXEC-018",
+        "UV-EXEC-020",
+        "UV-EXEC-021",
+        "UV-EXEC-023",
+        "UV-EXEC-024",
+        "UV-EXEC-027",
+        "UV-EXEC-028",
+        "UV-EXEC-029"
+      ]
+    },
+    {
+      "fr_id": "UV-FR-028",
+      "title": "量測每通狀態、延遲、修復、無人完成、錯單、轉接與失敗原因",
+      "priority": "P0",
+      "associated_acs": [
+        "UV-AC-013",
+        "UV-AC-022",
+        "UV-AC-029",
+        "UV-AC-031",
+        "UV-AC-032",
+        "UV-AC-034"
+      ],
+      "associated_tasks": [
+        "UV-EXEC-016",
+        "UV-EXEC-018",
+        "UV-EXEC-019",
+        "UV-EXEC-022",
+        "UV-EXEC-025",
+        "UV-EXEC-028",
+        "UV-EXEC-029"
+      ]
+    },
+    {
+      "fr_id": "UV-FR-029",
+      "title": "計算電話、辨識、生成、模型及人工接手成本並設額度警戒",
+      "priority": "P0",
+      "associated_acs": [
+        "UV-AC-032"
+      ],
+      "associated_tasks": [
+        "UV-EXEC-022",
+        "UV-EXEC-025"
+      ]
+    },
+    {
+      "fr_id": "UV-FR-030",
+      "title": "處理乘客要求真人、投訴、緊急／安全意圖及服務不符的明確轉交",
+      "priority": "P0",
+      "associated_acs": [
+        "UV-AC-004",
+        "UV-AC-014",
+        "UV-AC-018",
+        "UV-AC-024",
+        "UV-AC-026"
+      ],
+      "associated_tasks": [
+        "UV-EXEC-003",
+        "UV-EXEC-012",
+        "UV-EXEC-013",
+        "UV-EXEC-017",
+        "UV-EXEC-020",
+        "UV-EXEC-021",
+        "UV-EXEC-027"
+      ]
+    },
+    {
+      "fr_id": "UV-FR-031",
+      "title": "以代表性電話資料及完整情境比較方案，按語言／場景分批開通",
+      "priority": "P0",
+      "associated_acs": [
+        "UV-AC-002",
+        "UV-AC-032",
+        "UV-AC-033",
+        "UV-AC-034",
+        "UV-AC-044"
+      ],
+      "associated_tasks": [
+        "UV-EXEC-011",
+        "UV-EXEC-022",
+        "UV-EXEC-025",
+        "UV-EXEC-026",
+        "UV-EXEC-027",
+        "UV-EXEC-028",
+        "UV-EXEC-029"
+      ]
+    },
+    {
+      "fr_id": "UV-FR-032",
+      "title": "依核准政策保存、查閱、封存、刪除與依法保留證據及稽核軌跡",
+      "priority": "P0",
+      "associated_acs": [
+        "UV-AC-011",
+        "UV-AC-012",
+        "UV-AC-025",
+        "UV-AC-026",
+        "UV-AC-028",
+        "UV-AC-030",
+        "UV-AC-043"
+      ],
+      "associated_tasks": [
+        "UV-EXEC-001",
+        "UV-EXEC-002",
+        "UV-EXEC-003",
+        "UV-EXEC-005",
+        "UV-EXEC-010",
+        "UV-EXEC-012",
+        "UV-EXEC-014",
+        "UV-EXEC-019",
+        "UV-EXEC-021",
+        "UV-EXEC-023",
+        "UV-EXEC-024",
+        "UV-EXEC-027"
+      ]
+    }
+  ],
+  "acceptance_criteria": [
+    {
+      "ac_id": "UV-AC-001",
+      "title": "國語正常來電，資訊一次完整",
+      "expected_behavior": "播報 AI／錄音告知，乘客確認後無人工批准即完成受理並告知真實派遣狀態",
+      "fr_ids": [
+        "UV-FR-001",
+        "UV-FR-002",
+        "UV-FR-004",
+        "UV-FR-005",
+        "UV-FR-010",
+        "UV-FR-012",
+        "UV-FR-013"
+      ],
+      "primary_task_id": "UV-EXEC-015",
+      "all_task_ids": [
+        "UV-EXEC-008",
+        "UV-EXEC-015"
+      ],
+      "implementation_owner": "Claude",
+      "reviewer": "Codex",
+      "status_category": "pending",
+      "non_025_coverage_confirmed": true,
+      "verification_type": "task_unit_or_db"
+    },
+    {
+      "ac_id": "UV-AC-002",
+      "title": "台語、客語及國台英混講",
+      "expected_behavior": "已開通語言可完成全流程；未開通語言明確切換或轉接，保留草稿與原話",
+      "fr_ids": [
+        "UV-FR-003",
+        "UV-FR-018",
+        "UV-FR-026",
+        "UV-FR-031"
+      ],
+      "primary_task_id": "UV-EXEC-011",
+      "all_task_ids": [
+        "UV-EXEC-011",
+        "UV-EXEC-027",
+        "UV-EXEC-028"
+      ],
+      "implementation_owner": "Gemini2",
+      "reviewer": "Codex",
+      "status_category": "pending",
+      "non_025_coverage_confirmed": true,
+      "verification_type": "task_unit_or_db"
+    },
+    {
+      "ac_id": "UV-AC-003",
+      "title": "同名醫院／車站、多個院區與出口",
+      "expected_behavior": "追問候選，不猜測座標；乘客選定後用已核對入口建單",
+      "fr_ids": [
+        "UV-FR-006",
+        "UV-FR-007",
+        "UV-FR-010"
+      ],
+      "primary_task_id": "UV-EXEC-013",
+      "all_task_ids": [
+        "UV-EXEC-013"
+      ],
+      "implementation_owner": "Claude",
+      "reviewer": "Codex",
+      "status_category": "pending",
+      "non_025_coverage_confirmed": true,
+      "verification_type": "task_unit_or_db"
+    },
+    {
+      "ac_id": "UV-AC-004",
+      "title": "地址不存在、偏鄉地標或服務區外",
+      "expected_behavior": "有限追問後轉接或回覆不支援；不以近似地址擅自下單",
+      "fr_ids": [
+        "UV-FR-006",
+        "UV-FR-007",
+        "UV-FR-018",
+        "UV-FR-030"
+      ],
+      "primary_task_id": "UV-EXEC-013",
+      "all_task_ids": [
+        "UV-EXEC-013"
+      ],
+      "implementation_owner": "Claude",
+      "reviewer": "Codex",
+      "status_category": "pending",
+      "non_025_coverage_confirmed": true,
+      "verification_type": "task_unit_or_db"
+    },
+    {
+      "ac_id": "UV-AC-005",
+      "title": "電話零／一、門牌段巷弄與樓層易混淆",
+      "expected_behavior": "分組讀回並依更正結果更新；不能自動補出缺少數字",
+      "fr_ids": [
+        "UV-FR-005",
+        "UV-FR-008",
+        "UV-FR-010"
+      ],
+      "primary_task_id": "UV-EXEC-012",
+      "all_task_ids": [
+        "UV-EXEC-012"
+      ],
+      "implementation_owner": "Claude2",
+      "reviewer": "Codex2",
+      "status_category": "pending",
+      "non_025_coverage_confirmed": true,
+      "verification_type": "task_unit_or_db"
+    },
+    {
+      "ac_id": "UV-AC-006",
+      "title": "代長者叫車，來電電話不同於接車窗口",
+      "expected_behavior": "分開記錄本人與代叫關係，司機聯絡方式正確，回讀必要資訊",
+      "fr_ids": [
+        "UV-FR-005",
+        "UV-FR-008",
+        "UV-FR-014"
+      ],
+      "primary_task_id": "UV-EXEC-018",
+      "all_task_ids": [
+        "UV-EXEC-018"
+      ],
+      "implementation_owner": "Claude2",
+      "reviewer": "Codex2",
+      "status_category": "pending",
+      "non_025_coverage_confirmed": true,
+      "verification_type": "task_unit_or_db"
+    },
+    {
+      "ac_id": "UV-AC-007",
+      "title": "回讀中插話更換目的地",
+      "expected_behavior": "舊語音停止、舊確認失效；重新核對並確認新版後只下一筆單",
+      "fr_ids": [
+        "UV-FR-009",
+        "UV-FR-010",
+        "UV-FR-019"
+      ],
+      "primary_task_id": "UV-EXEC-014",
+      "all_task_ids": [
+        "UV-EXEC-007",
+        "UV-EXEC-014"
+      ],
+      "implementation_owner": "Claude2",
+      "reviewer": "Codex2",
+      "status_category": "pending",
+      "non_025_coverage_confirmed": true,
+      "verification_type": "task_unit_or_db"
+    },
+    {
+      "ac_id": "UV-AC-008",
+      "title": "乘客靜音、背景電視說「好」或回讀未完成",
+      "expected_behavior": "不視為確認；按靜音／修復策略處理",
+      "fr_ids": [
+        "UV-FR-002",
+        "UV-FR-010",
+        "UV-FR-018",
+        "UV-FR-019"
+      ],
+      "primary_task_id": "UV-EXEC-014",
+      "all_task_ids": [
+        "UV-EXEC-014"
+      ],
+      "implementation_owner": "Claude2",
+      "reviewer": "Codex2",
+      "status_category": "pending",
+      "non_025_coverage_confirmed": true,
+      "verification_type": "task_unit_or_db"
+    },
+    {
+      "ac_id": "UV-AC-009",
+      "title": "同一確認送出兩次、webhook 重複或回覆遺失",
+      "expected_behavior": "回到同一有效訂單；重試不重複派遣或建立第二筆單",
+      "fr_ids": [
+        "UV-FR-012",
+        "UV-FR-017",
+        "UV-FR-022",
+        "UV-FR-027"
+      ],
+      "primary_task_id": "UV-EXEC-002",
+      "all_task_ids": [
+        "UV-EXEC-002",
+        "UV-EXEC-015",
+        "UV-EXEC-024"
+      ],
+      "implementation_owner": "Claude",
+      "reviewer": "Codex2",
+      "status_category": "pending",
+      "non_025_coverage_confirmed": true,
+      "verification_type": "task_unit_or_db"
+    },
+    {
+      "ac_id": "UV-AC-010",
+      "title": "提交後工具逾時且結果未知",
+      "expected_behavior": "先查既有操作，清楚告知正在確認；接手摘要標示未知結果",
+      "fr_ids": [
+        "UV-FR-012",
+        "UV-FR-013",
+        "UV-FR-020",
+        "UV-FR-027"
+      ],
+      "primary_task_id": "UV-EXEC-015",
+      "all_task_ids": [
+        "UV-EXEC-015",
+        "UV-EXEC-024"
+      ],
+      "implementation_owner": "Claude",
+      "reviewer": "Codex",
+      "status_category": "pending",
+      "non_025_coverage_confirmed": true,
+      "verification_type": "task_unit_or_db"
+    },
+    {
+      "ac_id": "UV-AC-011",
+      "title": "證據片段未落盤或索引存在但不能取回",
+      "expected_behavior": "不放行派遣，不假造 recording ID；產生可追查例外",
+      "fr_ids": [
+        "UV-FR-011",
+        "UV-FR-020",
+        "UV-FR-023",
+        "UV-FR-032"
+      ],
+      "primary_task_id": "UV-EXEC-010",
+      "all_task_ids": [
+        "UV-EXEC-010",
+        "UV-EXEC-014"
+      ],
+      "implementation_owner": "Gemini",
+      "reviewer": "Codex2",
+      "status_category": "pending",
+      "non_025_coverage_confirmed": true,
+      "verification_type": "task_unit_or_db"
+    },
+    {
+      "ac_id": "UV-AC-012",
+      "title": "確認片段完成，整通錄音稍後封存或 callback 亂序",
+      "expected_behavior": "通過已驗證的新 gate 才可當通派遣；最終封存關聯完整且不倒退已確立事實",
+      "fr_ids": [
+        "UV-FR-011",
+        "UV-FR-013",
+        "UV-FR-023",
+        "UV-FR-027",
+        "UV-FR-032"
+      ],
+      "primary_task_id": "UV-EXEC-010",
+      "all_task_ids": [
+        "UV-EXEC-010"
+      ],
+      "implementation_owner": "Gemini",
+      "reviewer": "Codex2",
+      "status_category": "pending",
+      "non_025_coverage_confirmed": true,
+      "verification_type": "task_unit_or_db"
+    },
+    {
+      "ac_id": "UV-AC-013",
+      "title": "派遣回覆無車、拒絕或 ETA 不可得",
+      "expected_behavior": "如實提供已核准選項；無固定假 ETA、不說已有司機接單",
+      "fr_ids": [
+        "UV-FR-007",
+        "UV-FR-013",
+        "UV-FR-028"
+      ],
+      "primary_task_id": "UV-EXEC-016",
+      "all_task_ids": [
+        "UV-EXEC-016"
+      ],
+      "implementation_owner": "Claude2",
+      "reviewer": "Codex2",
+      "status_category": "pending",
+      "non_025_coverage_confirmed": true,
+      "verification_type": "task_unit_or_db"
+    },
+    {
+      "ac_id": "UV-AC-014",
+      "title": "隱藏來電號碼，要求查他人訂單",
+      "expected_behavior": "未核對身份不揭露行程；採替代驗證或轉接",
+      "fr_ids": [
+        "UV-FR-014",
+        "UV-FR-024",
+        "UV-FR-030"
+      ],
+      "primary_task_id": "UV-EXEC-003",
+      "all_task_ids": [
+        "UV-EXEC-003",
+        "UV-EXEC-020"
+      ],
+      "implementation_owner": "Claude2",
+      "reviewer": "Codex",
+      "status_category": "pending",
+      "non_025_coverage_confirmed": true,
+      "verification_type": "task_unit_or_db"
+    },
+    {
+      "ac_id": "UV-AC-015",
+      "title": "取消能力關閉；開啟後取消存在費用",
+      "expected_behavior": "關閉時轉接；開啟時核對身份、費用與新確認後才執行，後端結果為準",
+      "fr_ids": [
+        "UV-FR-014",
+        "UV-FR-015",
+        "UV-FR-024",
+        "UV-FR-026"
+      ],
+      "primary_task_id": "UV-EXEC-020",
+      "all_task_ids": [
+        "UV-EXEC-020"
+      ],
+      "implementation_owner": "Claude",
+      "reviewer": "Codex2",
+      "status_category": "conditional",
+      "non_025_coverage_confirmed": true,
+      "verification_type": "conditional_policy"
+    },
+    {
+      "ac_id": "UV-AC-016",
+      "title": "取消確認後司機／訂單狀態競態變更",
+      "expected_behavior": "重新依業務域規則回覆，不假報取消、不另建訂單補救",
+      "fr_ids": [
+        "UV-FR-009",
+        "UV-FR-015",
+        "UV-FR-019",
+        "UV-FR-027"
+      ],
+      "primary_task_id": "UV-EXEC-020",
+      "all_task_ids": [
+        "UV-EXEC-020"
+      ],
+      "implementation_owner": "Claude",
+      "reviewer": "Codex2",
+      "status_category": "conditional",
+      "non_025_coverage_confirmed": true,
+      "verification_type": "conditional_policy"
+    },
+    {
+      "ac_id": "UV-AC-017",
+      "title": "說「明天凌晨零點」或「下週五下午三點」",
+      "expected_behavior": "以營運時區讀回絕對日期時間；預約未開通時不建立即時單",
+      "fr_ids": [
+        "UV-FR-008",
+        "UV-FR-016",
+        "UV-FR-026"
+      ],
+      "primary_task_id": "UV-EXEC-013",
+      "all_task_ids": [
+        "UV-EXEC-013",
+        "UV-EXEC-020"
+      ],
+      "implementation_owner": "Claude",
+      "reviewer": "Codex",
+      "status_category": "conditional",
+      "non_025_coverage_confirmed": true,
+      "verification_type": "conditional_policy"
+    },
+    {
+      "ac_id": "UV-AC-018",
+      "title": "輪椅、嬰兒座椅、多人行李或未支援商品",
+      "expected_behavior": "查對應資格；沒有可承諾商品則轉接，不僅填備註後派普通車",
+      "fr_ids": [
+        "UV-FR-004",
+        "UV-FR-007",
+        "UV-FR-016",
+        "UV-FR-030"
+      ],
+      "primary_task_id": "UV-EXEC-013",
+      "all_task_ids": [
+        "UV-EXEC-013",
+        "UV-EXEC-020"
+      ],
+      "implementation_owner": "Claude",
+      "reviewer": "Codex",
+      "status_category": "conditional",
+      "non_025_coverage_confirmed": true,
+      "verification_type": "conditional_policy"
+    },
+    {
+      "ac_id": "UV-AC-019",
+      "title": "已有一筆訂單又來電，或同通要兩輛車",
+      "expected_behavior": "核對既有需求與身份，不重複下單；初期多車需求轉接",
+      "fr_ids": [
+        "UV-FR-014",
+        "UV-FR-017",
+        "UV-FR-020"
+      ],
+      "primary_task_id": "UV-EXEC-020",
+      "all_task_ids": [
+        "UV-EXEC-020"
+      ],
+      "implementation_owner": "Claude",
+      "reviewer": "Codex2",
+      "status_category": "pending",
+      "non_025_coverage_confirmed": true,
+      "verification_type": "task_unit_or_db"
+    },
+    {
+      "ac_id": "UV-AC-020",
+      "title": "兩輪地址修復仍失敗",
+      "expected_behavior": "轉接包含原話、候選與已確認資料，真人不用重問全部資訊",
+      "fr_ids": [
+        "UV-FR-018",
+        "UV-FR-020",
+        "UV-FR-023",
+        "UV-FR-025"
+      ],
+      "primary_task_id": "UV-EXEC-012",
+      "all_task_ids": [
+        "UV-EXEC-012",
+        "UV-EXEC-019"
+      ],
+      "implementation_owner": "Claude2",
+      "reviewer": "Codex2",
+      "status_category": "pending",
+      "non_025_coverage_confirmed": true,
+      "verification_type": "task_unit_or_db"
+    },
+    {
+      "ac_id": "UV-AC-021",
+      "title": "真人接手的同時 AI 收到舊工具結果",
+      "expected_behavior": "只有一方持有控制權；舊結果可入稽核但不可再執行寫單",
+      "fr_ids": [
+        "UV-FR-009",
+        "UV-FR-019",
+        "UV-FR-020",
+        "UV-FR-024"
+      ],
+      "primary_task_id": "UV-EXEC-007",
+      "all_task_ids": [
+        "UV-EXEC-007",
+        "UV-EXEC-017",
+        "UV-EXEC-024"
+      ],
+      "implementation_owner": "Claude2",
+      "reviewer": "Codex",
+      "status_category": "pending",
+      "non_025_coverage_confirmed": true,
+      "verification_type": "task_unit_or_db"
+    },
+    {
+      "ac_id": "UV-AC-022",
+      "title": "真人滿線、無人值班或排隊掛斷",
+      "expected_behavior": "提供真實選項；回撥須乘客同意，任務有 owner／SLA／終態",
+      "fr_ids": [
+        "UV-FR-021",
+        "UV-FR-022",
+        "UV-FR-025",
+        "UV-FR-028"
+      ],
+      "primary_task_id": "UV-EXEC-018",
+      "all_task_ids": [
+        "UV-EXEC-018"
+      ],
+      "implementation_owner": "Claude2",
+      "reviewer": "Codex2",
+      "status_category": "pending",
+      "non_025_coverage_confirmed": true,
+      "verification_type": "task_unit_or_db"
+    },
+    {
+      "ac_id": "UV-AC-023",
+      "title": "明確確認前掛斷；已提交後掛斷",
+      "expected_behavior": "前者不建單；後者查明結果與通知能力，再按已核准規則續處理",
+      "fr_ids": [
+        "UV-FR-010",
+        "UV-FR-012",
+        "UV-FR-022",
+        "UV-FR-027"
+      ],
+      "primary_task_id": "UV-EXEC-015",
+      "all_task_ids": [
+        "UV-EXEC-007",
+        "UV-EXEC-015",
+        "UV-EXEC-024"
+      ],
+      "implementation_owner": "Claude",
+      "reviewer": "Codex",
+      "status_category": "pending",
+      "non_025_coverage_confirmed": true,
+      "verification_type": "task_unit_or_db"
+    },
+    {
+      "ac_id": "UV-AC-024",
+      "title": "乘客要求真人、投訴、遺失物或緊急協助",
+      "expected_behavior": "即時路由至相應責任單位；不繼續強推叫車、不作責任與賠償判定",
+      "fr_ids": [
+        "UV-FR-004",
+        "UV-FR-020",
+        "UV-FR-021",
+        "UV-FR-030"
+      ],
+      "primary_task_id": "UV-EXEC-017",
+      "all_task_ids": [
+        "UV-EXEC-012",
+        "UV-EXEC-017"
+      ],
+      "implementation_owner": "Claude",
+      "reviewer": "Codex",
+      "status_category": "pending",
+      "non_025_coverage_confirmed": true,
+      "verification_type": "task_unit_or_db"
+    },
+    {
+      "ac_id": "UV-AC-025",
+      "title": "乘客用語音要求繞過確認或修改其他租戶訂單",
+      "expected_behavior": "工具授權與隔離拒絕操作；保留事件且不洩露敏感資料",
+      "fr_ids": [
+        "UV-FR-007",
+        "UV-FR-010",
+        "UV-FR-024",
+        "UV-FR-032"
+      ],
+      "primary_task_id": "UV-EXEC-001",
+      "all_task_ids": [
+        "UV-EXEC-001",
+        "UV-EXEC-003",
+        "UV-EXEC-012"
+      ],
+      "implementation_owner": "Gemini",
+      "reviewer": "Codex",
+      "status_category": "pending",
+      "non_025_coverage_confirmed": true,
+      "verification_type": "task_unit_or_db"
+    },
+    {
+      "ac_id": "UV-AC-026",
+      "title": "乘客拒絕錄音或直接念卡號／密碼",
+      "expected_behavior": "依核准替代流程處理；不把敏感資料送進一般日誌或質檢輸出",
+      "fr_ids": [
+        "UV-FR-001",
+        "UV-FR-024",
+        "UV-FR-030",
+        "UV-FR-032"
+      ],
+      "primary_task_id": "UV-EXEC-021",
+      "all_task_ids": [
+        "UV-EXEC-021",
+        "UV-EXEC-027"
+      ],
+      "implementation_owner": "Gemini",
+      "reviewer": "Codex",
+      "status_category": "pending",
+      "non_025_coverage_confirmed": true,
+      "verification_type": "task_unit_or_db"
+    },
+    {
+      "ac_id": "UV-AC-027",
+      "title": "ASR、LLM、TTS 或電話連線中斷",
+      "expected_behavior": "分辨供應商與乘客掛斷，保留狀態；安全降級／交接且不重複副作用",
+      "fr_ids": [
+        "UV-FR-002",
+        "UV-FR-019",
+        "UV-FR-022",
+        "UV-FR-027"
+      ],
+      "primary_task_id": "UV-EXEC-008",
+      "all_task_ids": [
+        "UV-EXEC-008",
+        "UV-EXEC-011",
+        "UV-EXEC-028"
+      ],
+      "implementation_owner": "Gemini",
+      "reviewer": "Codex2",
+      "status_category": "pending",
+      "non_025_coverage_confirmed": true,
+      "verification_type": "task_unit_or_db"
+    },
+    {
+      "ac_id": "UV-AC-028",
+      "title": "調閱通話／錄音與執行保存期刪除",
+      "expected_behavior": "角色權限、遮罩、操作稽核、保留例外及刪除結果可驗證",
+      "fr_ids": [
+        "UV-FR-023",
+        "UV-FR-024",
+        "UV-FR-025",
+        "UV-FR-032"
+      ],
+      "primary_task_id": "UV-EXEC-019",
+      "all_task_ids": [
+        "UV-EXEC-019",
+        "UV-EXEC-021"
+      ],
+      "implementation_owner": "Gemini2",
+      "reviewer": "Codex",
+      "status_category": "live",
+      "non_025_coverage_confirmed": true,
+      "verification_type": "live_gate"
+    },
+    {
+      "ac_id": "UV-AC-029",
+      "title": "真人查看正常 AI 通話及異常通話",
+      "expected_behavior": "正常單無審批等待，異常單顯示下一步、真值、控制權與未知操作",
+      "fr_ids": [
+        "UV-FR-020",
+        "UV-FR-025",
+        "UV-FR-028"
+      ],
+      "primary_task_id": "UV-EXEC-019",
+      "all_task_ids": [
+        "UV-EXEC-019"
+      ],
+      "implementation_owner": "Gemini2",
+      "reviewer": "Codex",
+      "status_category": "pending",
+      "non_025_coverage_confirmed": true,
+      "verification_type": "task_unit_or_db"
+    },
+    {
+      "ac_id": "UV-AC-030",
+      "title": "切換版本、限流或緊急停用新的 AI 受理",
+      "expected_behavior": "已提交交易可查明及交接，新來電有可用路由，所有通話保留版本",
+      "fr_ids": [
+        "UV-FR-021",
+        "UV-FR-026",
+        "UV-FR-027",
+        "UV-FR-032"
+      ],
+      "primary_task_id": "UV-EXEC-021",
+      "all_task_ids": [
+        "UV-EXEC-021",
+        "UV-EXEC-023",
+        "UV-EXEC-027"
+      ],
+      "implementation_owner": "Gemini",
+      "reviewer": "Codex",
+      "status_category": "pending",
+      "non_025_coverage_confirmed": true,
+      "verification_type": "task_unit_or_db"
+    },
+    {
+      "ac_id": "UV-AC-031",
+      "title": "以 N 與 1.5N 同時電話進行壓測",
+      "expected_behavior": "量測實際端到端延遲、停播、可用性及退化；超載不丟失例外",
+      "fr_ids": [
+        "UV-FR-002",
+        "UV-FR-019",
+        "UV-FR-026",
+        "UV-FR-027",
+        "UV-FR-028"
+      ],
+      "primary_task_id": "UV-EXEC-028",
+      "all_task_ids": [
+        "UV-EXEC-028"
+      ],
+      "implementation_owner": "Gemini2",
+      "reviewer": "Codex2",
+      "status_category": "live",
+      "non_025_coverage_confirmed": true,
+      "verification_type": "live_gate"
+    },
+    {
+      "ac_id": "UV-AC-032",
+      "title": "以含無車、掛斷、轉接及故障的固定資料集算報表",
+      "expected_behavior": "分母符合 §10.2、去重正確、各語言分開、失敗成本納入且可追算",
+      "fr_ids": [
+        "UV-FR-028",
+        "UV-FR-029",
+        "UV-FR-031"
+      ],
+      "primary_task_id": "UV-EXEC-025",
+      "all_task_ids": [
+        "UV-EXEC-022",
+        "UV-EXEC-025"
+      ],
+      "implementation_owner": "Gemini",
+      "reviewer": "Codex",
+      "status_category": "pass",
+      "non_025_coverage_confirmed": true,
+      "verification_type": "hermetic_fixture"
+    },
+    {
+      "ac_id": "UV-AC-033",
+      "title": "TWM 與原生語音候選跑相同電話情境",
+      "expected_behavior": "共享工具與驗收門檻，報無人受理／錯單／延遲／成本；不宣稱單獨 ASR 即完整客服",
+      "fr_ids": [
+        "UV-FR-003",
+        "UV-FR-007",
+        "UV-FR-010",
+        "UV-FR-011",
+        "UV-FR-031"
+      ],
+      "primary_task_id": "UV-EXEC-025",
+      "all_task_ids": [
+        "UV-EXEC-025",
+        "UV-EXEC-026",
+        "UV-EXEC-027",
+        "UV-EXEC-028"
+      ],
+      "implementation_owner": "Gemini",
+      "reviewer": "Codex",
+      "status_category": "pass",
+      "non_025_coverage_confirmed": true,
+      "verification_type": "hermetic_fixture"
+    },
+    {
+      "ac_id": "UV-AC-034",
+      "title": "正式小量運轉中某語言／供應商品質明顯惡化",
+      "expected_behavior": "依版本與語言停用或降級，真人例外接續，回退無雙重建單",
+      "fr_ids": [
+        "UV-FR-020",
+        "UV-FR-021",
+        "UV-FR-026",
+        "UV-FR-027",
+        "UV-FR-028",
+        "UV-FR-031"
+      ],
+      "primary_task_id": "UV-EXEC-029",
+      "all_task_ids": [
+        "UV-EXEC-029"
+      ],
+      "implementation_owner": "Claude",
+      "reviewer": "Codex",
+      "status_category": "live",
+      "non_025_coverage_confirmed": true,
+      "verification_type": "live_gate"
+    },
+    {
+      "ac_id": "UV-AC-035",
+      "title": "有合格車但沒有任何 ops 人工指派操作",
+      "expected_behavior": "自動建立 offer／driver task；只有 driver acceptance 才回覆已接單，不能停在 matching 卻算完成",
+      "fr_ids": [
+        "UV-FR-007",
+        "UV-FR-012",
+        "UV-FR-013",
+        "UV-FR-027"
+      ],
+      "primary_task_id": "UV-EXEC-016",
+      "all_task_ids": [
+        "UV-EXEC-016"
+      ],
+      "implementation_owner": "Claude2",
+      "reviewer": "Codex2",
+      "status_category": "pending",
+      "non_025_coverage_confirmed": true,
+      "verification_type": "task_unit_or_db"
+    },
+    {
+      "ac_id": "UV-AC-036",
+      "title": "兩單搶同車、司機拒接／逾時、舊 offer 接受或 timeout 遲到",
+      "expected_behavior": "只有合法有效保留／assignment，按政策再選，不重複通知或把舊接受當新單成功",
+      "fr_ids": [
+        "UV-FR-007",
+        "UV-FR-013",
+        "UV-FR-017",
+        "UV-FR-027"
+      ],
+      "primary_task_id": "UV-EXEC-016",
+      "all_task_ids": [
+        "UV-EXEC-006",
+        "UV-EXEC-016"
+      ],
+      "implementation_owner": "Claude2",
+      "reviewer": "Codex2",
+      "status_category": "pending",
+      "non_025_coverage_confirmed": true,
+      "verification_type": "task_unit_or_db"
+    },
+    {
+      "ac_id": "UV-AC-037",
+      "title": "DB commit 後 cache 未更新、舊 recording callback／driver writer 抵達",
+      "expected_behavior": "從實際 runtime 表查原單；版本 CAS 保護主關聯，錄音失敗不倒退行程狀態",
+      "fr_ids": [
+        "UV-FR-009",
+        "UV-FR-011",
+        "UV-FR-012",
+        "UV-FR-023",
+        "UV-FR-027"
+      ],
+      "primary_task_id": "UV-EXEC-004",
+      "all_task_ids": [
+        "UV-EXEC-002",
+        "UV-EXEC-004",
+        "UV-EXEC-005",
+        "UV-EXEC-024"
+      ],
+      "implementation_owner": "Claude",
+      "reviewer": "Codex2",
+      "status_category": "pending",
+      "non_025_coverage_confirmed": true,
+      "verification_type": "task_unit_or_db"
+    },
+    {
+      "ac_id": "UV-AC-038",
+      "title": "多元計程車號碼來電說「現在叫車」",
+      "expected_behavior": "按其 runtime／商品／營運授權辨識路由；未開通時不能建普通電話即時單",
+      "fr_ids": [
+        "UV-FR-004",
+        "UV-FR-007",
+        "UV-FR-016",
+        "UV-FR-026"
+      ],
+      "primary_task_id": "UV-EXEC-013",
+      "all_task_ids": [
+        "UV-EXEC-013"
+      ],
+      "implementation_owner": "Claude",
+      "reviewer": "Codex",
+      "status_category": "conditional",
+      "non_025_coverage_confirmed": true,
+      "verification_type": "conditional_policy"
+    },
+    {
+      "ac_id": "UV-AC-039",
+      "title": "五人／超規行李或醫院入口 manual_review",
+      "expected_behavior": "需求貫穿候選及 assignment；有條件／review 不當作自動可用，無強制匹配能力就轉例外",
+      "fr_ids": [
+        "UV-FR-005",
+        "UV-FR-006",
+        "UV-FR-007",
+        "UV-FR-016",
+        "UV-FR-018"
+      ],
+      "primary_task_id": "UV-EXEC-013",
+      "all_task_ids": [
+        "UV-EXEC-013"
+      ],
+      "implementation_owner": "Claude",
+      "reviewer": "Codex",
+      "status_category": "conditional",
+      "non_025_coverage_confirmed": true,
+      "verification_type": "conditional_policy"
+    },
+    {
+      "ac_id": "UV-AC-040",
+      "title": "A 替 B 代叫，轉人工忙線，A 同意回撥後掛斷",
+      "expected_behavior": "司機聯絡 B、回撥 A；handoff coordinator 可建回撥，call closed 後仍可領取／聯繫／結案",
+      "fr_ids": [
+        "UV-FR-014",
+        "UV-FR-020",
+        "UV-FR-021",
+        "UV-FR-022",
+        "UV-FR-025"
+      ],
+      "primary_task_id": "UV-EXEC-018",
+      "all_task_ids": [
+        "UV-EXEC-018",
+        "UV-EXEC-019"
+      ],
+      "implementation_owner": "Claude2",
+      "reviewer": "Codex2",
+      "status_category": "pending",
+      "non_025_coverage_confirmed": true,
+      "verification_type": "task_unit_or_db"
+    },
+    {
+      "ac_id": "UV-AC-041",
+      "title": "clear 後舊 mark、ASR斷線重播「對」、DTMF 沒有錄音tone",
+      "expected_behavior": "舊回執不復活確認、重播不形成同意；DTMF 依回讀音訊與可信按鍵事件驗證",
+      "fr_ids": [
+        "UV-FR-002",
+        "UV-FR-009",
+        "UV-FR-010",
+        "UV-FR-011",
+        "UV-FR-019",
+        "UV-FR-027"
+      ],
+      "primary_task_id": "UV-EXEC-009",
+      "all_task_ids": [
+        "UV-EXEC-009",
+        "UV-EXEC-010",
+        "UV-EXEC-014",
+        "UV-EXEC-028"
+      ],
+      "implementation_owner": "Gemini2",
+      "reviewer": "Codex",
+      "status_category": "pending",
+      "non_025_coverage_confirmed": true,
+      "verification_type": "task_unit_or_db"
+    },
+    {
+      "ac_id": "UV-AC-042",
+      "title": "最後一通掛斷、worker／API重啟或發布跨revision",
+      "expected_behavior": "pending命令、司機接受期限及錄音finalize持續可恢復；背景工作不依賴還有HTTP來電",
+      "fr_ids": [
+        "UV-FR-012",
+        "UV-FR-013",
+        "UV-FR-022",
+        "UV-FR-026",
+        "UV-FR-027"
+      ],
+      "primary_task_id": "UV-EXEC-023",
+      "all_task_ids": [
+        "UV-EXEC-023"
+      ],
+      "implementation_owner": "Gemini",
+      "reviewer": "Codex",
+      "status_category": "pending",
+      "non_025_coverage_confirmed": true,
+      "verification_type": "task_unit_or_db"
+    },
+    {
+      "ac_id": "UV-AC-043",
+      "title": "改走另一電話建單入口、重綁call或跨品牌legacy查詢",
+      "expected_behavior": "共用intent／scope限制；未認證body.agentId不能成為actor；bound proof不信任任意linkedOrderId",
+      "fr_ids": [
+        "UV-FR-012",
+        "UV-FR-017",
+        "UV-FR-020",
+        "UV-FR-024",
+        "UV-FR-032"
+      ],
+      "primary_task_id": "UV-EXEC-005",
+      "all_task_ids": [
+        "UV-EXEC-001",
+        "UV-EXEC-002",
+        "UV-EXEC-003",
+        "UV-EXEC-005",
+        "UV-EXEC-024"
+      ],
+      "implementation_owner": "Claude2",
+      "reviewer": "Codex",
+      "status_category": "pending",
+      "non_025_coverage_confirmed": true,
+      "verification_type": "task_unit_or_db"
+    },
+    {
+      "ac_id": "UV-AC-044",
+      "title": "純客語開口、長告知無人聲或VAD丟靜音封包",
+      "expected_behavior": "有可用語言選擇；句末／缺包／no-speech分別處理，模型切換不沿用舊確認",
+      "fr_ids": [
+        "UV-FR-002",
+        "UV-FR-003",
+        "UV-FR-010",
+        "UV-FR-018",
+        "UV-FR-026",
+        "UV-FR-031"
+      ],
+      "primary_task_id": "UV-EXEC-028",
+      "all_task_ids": [
+        "UV-EXEC-011",
+        "UV-EXEC-028"
+      ],
+      "implementation_owner": "Gemini2",
+      "reviewer": "Codex2",
+      "status_category": "live",
+      "non_025_coverage_confirmed": true,
+      "verification_type": "live_gate"
+    },
+    {
+      "ac_id": "UV-AC-045",
+      "title": "API 失聯／DB鎖等待、control event缺號，後續DTMF先抵達",
+      "expected_behavior": "媒體立即本地停播；缺號與未解析輸入阻止新確認／提交，handoff清舊buffer，不能按HTTP到達順序放行",
+      "fr_ids": [
+        "UV-FR-002",
+        "UV-FR-009",
+        "UV-FR-010",
+        "UV-FR-019",
+        "UV-FR-020",
+        "UV-FR-027"
+      ],
+      "primary_task_id": "UV-EXEC-007",
+      "all_task_ids": [
+        "UV-EXEC-007",
+        "UV-EXEC-009",
+        "UV-EXEC-014",
+        "UV-EXEC-017",
+        "UV-EXEC-024",
+        "UV-EXEC-028"
+      ],
+      "implementation_owner": "Claude2",
+      "reviewer": "Codex",
+      "status_category": "pending",
+      "non_025_coverage_confirmed": true,
+      "verification_type": "task_unit_or_db"
+    },
+    {
+      "ac_id": "UV-AC-046",
+      "title": "已同意回撥但task建立回覆遺失，call.ended先到；取消與完成競態",
+      "expected_behavior": "同意＋可恢復command同交易，掛斷後查同receipt完成；回放真實終態，不丟任務或重新開啟已取消工作",
+      "fr_ids": [
+        "UV-FR-020",
+        "UV-FR-021",
+        "UV-FR-022",
+        "UV-FR-025",
+        "UV-FR-027"
+      ],
+      "primary_task_id": "UV-EXEC-018",
+      "all_task_ids": [
+        "UV-EXEC-018",
+        "UV-EXEC-024"
+      ],
+      "implementation_owner": "Claude2",
+      "reviewer": "Codex2",
+      "status_category": "pending",
+      "non_025_coverage_confirmed": true,
+      "verification_type": "task_unit_or_db"
+    },
+    {
+      "ac_id": "UV-AC-047",
+      "title": "A offer已接受或已由B取代，A的timeout才執行",
+      "expected_behavior": "timeout綁target assignment/version/deadline，過時事件no-op，不取消有效接受或B派遣",
+      "fr_ids": [
+        "UV-FR-012",
+        "UV-FR-013",
+        "UV-FR-017",
+        "UV-FR-027"
+      ],
+      "primary_task_id": "UV-EXEC-016",
+      "all_task_ids": [
+        "UV-EXEC-016",
+        "UV-EXEC-024"
+      ],
+      "implementation_owner": "Claude2",
+      "reviewer": "Codex2",
+      "status_category": "pending",
+      "non_025_coverage_confirmed": true,
+      "verification_type": "task_unit_or_db"
+    },
+    {
+      "ac_id": "UV-AC-048",
+      "title": "Voice與非voice人工／企業單、不同API revision同搶一台車",
+      "expected_behavior": "所有入口取得共同DB資源保留；未升級入口被限制使用隔離供給池，不能同時成功占用",
+      "fr_ids": [
+        "UV-FR-007",
+        "UV-FR-013",
+        "UV-FR-017",
+        "UV-FR-026",
+        "UV-FR-027"
+      ],
+      "primary_task_id": "UV-EXEC-006",
+      "all_task_ids": [
+        "UV-EXEC-006",
+        "UV-EXEC-024"
+      ],
+      "implementation_owner": "Claude",
+      "reviewer": "Codex2",
+      "status_category": "pending",
+      "non_025_coverage_confirmed": true,
+      "verification_type": "task_unit_or_db"
+    }
+  ]
+}

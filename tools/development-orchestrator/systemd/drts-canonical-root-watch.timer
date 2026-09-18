@@ -1,0 +1,21 @@
+[Unit]
+Description=DRTS canonical-root branch watchdog — every 60s
+Documentation=file:@REPO_ROOT@/tools/development-orchestrator/ops/canonical-root-lock/README.md
+
+[Timer]
+# Fast cadence — drift should be caught within ~1 min, not 5. Cheap
+# enough to run frequently (one `git rev-parse` + `git status`).
+#
+# OnCalendar= rather than OnUnitActiveSec=: see drts-health.timer. A
+# monotonic-only timer whose OnBootSec has already lapsed when the user manager
+# starts never gets a next elapse, which silently disarmed this watchdog for
+# eight hours on 2026-08-16.
+OnBootSec=15s
+OnCalendar=minutely
+Persistent=true
+AccuracySec=10s
+
+Unit=drts-canonical-root-watch.service
+
+[Install]
+WantedBy=timers.target

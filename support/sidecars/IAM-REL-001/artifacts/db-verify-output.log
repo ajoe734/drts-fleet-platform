@@ -1,0 +1,19 @@
+
+> drts-fleet-platform@0.1.0 db:verify /home/lupin/drts-fleet-platform/.artifacts/worktrees/auto/gemini2-iam-rel-001
+> ./scripts/db-verify.sh
+
+[info] DATABASE_URL not set; defaulting to postgresql://postgres:postgres@localhost:5432/drts_fleet_platform
+DO
+      metric       | value 
+-------------------+-------
+ complaints        |     1
+ drivers           |     3
+ driver_statements |     1
+ orders            |     3
+ schema_migrations |    76
+ seed_runs         |     2
+ tenants           |     2
+ vehicles          |     3
+(8 rows)
+
+[done] schema verification passed

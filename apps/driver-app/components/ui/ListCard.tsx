@@ -81,12 +81,15 @@ const styles = StyleSheet.create({
     justifyContent: "space-between",
     alignItems: "center",
     marginBottom: 2,
+    flexWrap: "wrap",
+    gap: Tokens.spacing.xs,
   },
   title: {
     ...Tokens.type.title,
     fontWeight: "600",
     color: Tokens.colors.text,
     flex: 1,
+    minWidth: 120,
     marginRight: Tokens.spacing.sm,
   },
   subtitle: {

@@ -33,10 +33,10 @@ describe("channel partner portal control-plane proxy", () => {
   });
 
   it("overrides hostile auth headers with canonical partner bootstrap identity", async () => {
-    process.env.DRTS_PARTNER_ID = "partner-referral-demo-001";
+    process.env.DRTS_PARTNER_ID = "partner_ead6bf3d-e858-47cc-bfe1-5a3742524118";
     process.env.DRTS_TENANT_ID = "tenant-demo-001";
     process.env.DRTS_PARTNER_PROGRAM_ID = "program-referral-community";
-    process.env.DRTS_PARTNER_ENTRY_SLUG = "referral-demo-community";
+    process.env.DRTS_PARTNER_ENTRY_SLUG = "yuhe-residence";
 
     const fetchMock = vi.fn().mockResolvedValue(
       new Response(JSON.stringify({ items: [] }), {
@@ -74,13 +74,13 @@ describe("channel partner portal control-plane proxy", () => {
       "http://localhost:3001/api/partner/referral/dashboard",
     );
     expect(headers.get("x-actor-type")).toBe("partner_api_key");
-    expect(headers.get("x-actor-id")).toBe("partner-referral-demo-001");
-    expect(headers.get("x-partner-id")).toBe("partner-referral-demo-001");
+    expect(headers.get("x-actor-id")).toBe("partner_ead6bf3d-e858-47cc-bfe1-5a3742524118");
+    expect(headers.get("x-partner-id")).toBe("partner_ead6bf3d-e858-47cc-bfe1-5a3742524118");
     expect(headers.get("x-tenant-id")).toBe("tenant-demo-001");
     expect(headers.get("x-partner-program-id")).toBe(
       "program-referral-community",
     );
-    expect(headers.get("x-partner-entry-slug")).toBe("referral-demo-community");
+    expect(headers.get("x-partner-entry-slug")).toBe("yuhe-residence");
     expect(headers.get("x-scopes")).toBe("billing:read");
     expect(headers.get("x-realm")).toBe("partner");
     expect(headers.get("x-roles")).toBe("partner");

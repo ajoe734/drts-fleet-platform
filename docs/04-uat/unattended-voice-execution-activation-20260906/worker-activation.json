@@ -1,0 +1,102 @@
+{
+  "task_id": "UV-DISPATCH-001",
+  "recorded_at": "2026-09-06T03:30:27.467020+00:00",
+  "source_commit": "a0bd9066dfb25ef609506668139052f835da7240",
+  "materialized_task_count": 29,
+  "initial_backlog": 27,
+  "initial_external_gates": 2,
+  "root_tasks": ["UV-EXEC-001", "UV-EXEC-027"],
+  "cause": "All six agents omitted adapter; runtime defaults missing agent.adapter to file_inbox even when provider.delivery_mode names an automatic CLI. UV root tasks therefore reached manual_pending without a process.",
+  "adapter_before": {
+    "gemini": null,
+    "gemini2": null,
+    "claude": null,
+    "claude2": null,
+    "codex": null,
+    "codex2": null
+  },
+  "adapter_after": {
+    "gemini": "antigravity",
+    "gemini2": "antigravity",
+    "claude": "claude_cli",
+    "claude2": "claude_cli",
+    "codex": "codex",
+    "codex2": "codex"
+  },
+  "permission_changes": false,
+  "config_sha256_after": "e3793de990c72168e0af1552f7f69cbe73fb145784b4563323b9050894c22f5b",
+  "supervisor_pid_before": 1380682,
+  "activation": "supervisor_restarted_automatic_workers_verified",
+  "verified_at": "2026-09-06T03:33:00.545953+00:00",
+  "supervisor_after": {
+    "pid": 1396130,
+    "started_at": "2026-09-06T03:30:27Z",
+    "last_heartbeat_at": "2026-09-06T03:32:40Z",
+    "lifecycle": "running",
+    "focus_mode": "execution"
+  },
+  "config_sha256_verified": "e3793de990c72168e0af1552f7f69cbe73fb145784b4563323b9050894c22f5b",
+  "task_status_counts": {
+    "in_progress": 2,
+    "backlog": 25,
+    "blocked": 2
+  },
+  "workers_verified": [
+    {
+      "run_id": "gemini-20260906T033028Z-64ce8734",
+      "task_id": "UV-EXEC-001",
+      "agent_id": "gemini",
+      "role": "worker",
+      "mode": "antigravity",
+      "status": "running",
+      "pid": 1396140,
+      "worker_unit": "drts-worker-gemini-20260906T033028Z-64ce8734.service",
+      "workspace_root": "/home/lupin/drts-fleet-platform/.artifacts/worktrees/auto/gemini-uv-exec-001",
+      "task_branch": "gemini/uv-exec-001",
+      "process_exists": true,
+      "process_executable": "/home/lupin/.local/bin/agy",
+      "command_model": "gemini-3.1-pro-high",
+      "rotation_model": "gemini-3.1-pro-high",
+      "systemd_active": "active"
+    },
+    {
+      "run_id": "gemini2-20260906T033028Z-318c743d",
+      "task_id": "UV-EXEC-027",
+      "agent_id": "gemini2",
+      "role": "worker",
+      "mode": "antigravity",
+      "status": "running",
+      "pid": 1396157,
+      "worker_unit": "drts-worker-gemini2-20260906T033028Z-318c743d.service",
+      "workspace_root": "/home/lupin/drts-fleet-platform/.artifacts/worktrees/auto/gemini2-uv-exec-027",
+      "task_branch": "gemini2/uv-exec-027",
+      "process_exists": true,
+      "process_executable": "/home/lupin/.local/bin/agy",
+      "command_model": "gemini-3.1-pro-high",
+      "rotation_model": "gemini-3.1-pro-high",
+      "systemd_active": "active"
+    }
+  ],
+  "recovery": "Existing supervisor recovery reaped interrupted inbox fallbacks and dispatched task workspaces through configured automatic adapters; no task reset or direct runtime-state edit.",
+  "limits": "Point-in-time activation evidence. Worker execution is not task acceptance, successful live telephone validation, or production rollout.",
+  "codex_runtime_observation": [
+    {
+      "verified_at": "2026-09-06T03:33:46.921582+00:00",
+      "task_id": "FIX-P5-RECORDS-001",
+      "run_id": "codex-20260906T033028Z-f07996f9",
+      "pid": 1396180,
+      "mode": "codex",
+      "process_exists": true,
+      "process_executable": "/home/lupin/.local/lib/codex/0.153.0/codex",
+      "cli_version": "codex-cli 0.153.0",
+      "command_model": "gpt-6-astra",
+      "effective_codex_home": "/home/lupin/.codex",
+      "configured_reasoning_effort": "ultra",
+      "command_config_override_present": true,
+      "scope": "Read-only observation of an existing review worker; this unrelated task was not changed.",
+      "command_config_override_keys": ["ask_for_approval"],
+      "command_reasoning_effort_override_present": false
+    }
+  ],
+  "codex2_verification_limit": "Configured model/effort and account catalog verified; no live Codex2 process observed at activation."
+}

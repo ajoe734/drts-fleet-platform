@@ -67,6 +67,8 @@ export function toApiErrorEnvelope(
 }
 
 export class ApiRequestError extends HttpException {
+  public readonly code: string;
+
   constructor(
     statusCode: number,
     code: string,
@@ -75,5 +77,6 @@ export class ApiRequestError extends HttpException {
     retryable = false,
   ) {
     super(toApiErrorEnvelope(code, message, details, retryable), statusCode);
+    this.code = code;
   }
 }

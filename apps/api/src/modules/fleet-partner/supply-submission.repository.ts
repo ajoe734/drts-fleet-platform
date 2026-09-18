@@ -519,6 +519,15 @@ export class SupplySubmissionRepository {
     };
   }
 
+  async loadApprovalArtifactsForSubmission(
+    submissionId: string,
+  ): Promise<SubmissionApprovalArtifacts> {
+    if (!this.databaseService) {
+      throw new Error("DatabaseService is not initialized");
+    }
+    return this.loadApprovalArtifacts(this.databaseService, submissionId);
+  }
+
   async assertVehiclePlateAvailable(
     executor: SupplySubmissionQueryExecutor,
     fleetPartnerId: string,
@@ -675,7 +684,9 @@ export class SupplySubmissionRepository {
     }
 
     const incomingIds = new Set(
-      incoming.map((item) => String((item as Record<string, unknown>)[key as string])),
+      incoming.map((item) =>
+        String((item as Record<string, unknown>)[key as string]),
+      ),
     );
     return [
       ...incoming.map((item) => this.cloneItem(item)),
@@ -699,7 +710,12 @@ export class SupplySubmissionRepository {
     text: string,
     values?: readonly unknown[],
   ): Promise<QueryResult<T> | MissingRelationFallback> {
-    return this.loadExecutorQuery(this.databaseService!, relationName, text, values);
+    return this.loadExecutorQuery(
+      this.databaseService!,
+      relationName,
+      text,
+      values,
+    );
   }
 
   private async loadExecutorQuery<T extends QueryResultRow>(
@@ -1146,8 +1162,7 @@ export class SupplySubmissionRepository {
       licenseType: row.license_type,
       brand: row.brand,
       model: row.model,
-      modelYear:
-        row.model_year === null ? null : Number(row.model_year),
+      modelYear: row.model_year === null ? null : Number(row.model_year),
       seatCount: Number(row.seat_count),
       luggageCapacity: Number(row.luggage_capacity),
       businessArea: row.business_area,
@@ -1157,7 +1172,10 @@ export class SupplySubmissionRepository {
       airportTransferEligible: row.airport_transfer_eligible,
       fixedFareAllowed: row.fixed_fare_allowed,
       currentDriverSubmissionId: row.current_driver_submission_id,
-      doorCount: row.door_count === null || row.door_count === undefined ? null : Number(row.door_count),
+      doorCount:
+        row.door_count === null || row.door_count === undefined
+          ? null
+          : Number(row.door_count),
       color: row.color,
     };
   }
@@ -1182,7 +1200,9 @@ export class SupplySubmissionRepository {
     };
   }
 
-  private mapReviewEventRow(row: SupplyReviewEventRow): SupplyReviewEventRecord {
+  private mapReviewEventRow(
+    row: SupplyReviewEventRow,
+  ): SupplyReviewEventRecord {
     return {
       eventId: row.event_id,
       submissionId: row.submission_id,
@@ -1217,11 +1237,15 @@ export class SupplySubmissionRepository {
       return null;
     }
 
-    return value instanceof Date ? value.toISOString() : new Date(value).toISOString();
+    return value instanceof Date
+      ? value.toISOString()
+      : new Date(value).toISOString();
   }
 
   private requireIsoString(value: string | Date): string {
-    return value instanceof Date ? value.toISOString() : new Date(value).toISOString();
+    return value instanceof Date
+      ? value.toISOString()
+      : new Date(value).toISOString();
   }
 
   private toDateOnlyString(value: string | Date | null): string | null {
@@ -1229,7 +1253,10 @@ export class SupplySubmissionRepository {
       return null;
     }
 
-    const iso = value instanceof Date ? value.toISOString() : new Date(value).toISOString();
+    const iso =
+      value instanceof Date
+        ? value.toISOString()
+        : new Date(value).toISOString();
     return iso.slice(0, 10);
   }
 
@@ -1259,6 +1286,11 @@ export class SupplySubmissionRepository {
   }
 
   private notFound(message: string, details?: Record<string, unknown>) {
-    return new ApiRequestError(HttpStatus.NOT_FOUND, "NOT_FOUND", message, details);
+    return new ApiRequestError(
+      HttpStatus.NOT_FOUND,
+      "NOT_FOUND",
+      message,
+      details,
+    );
   }
 }

@@ -14,7 +14,7 @@ import { afterEach, describe, expect, it } from "vitest";
 const repoRoot = path.resolve(__dirname, "../..");
 const cleanupScript = path.join(
   repoRoot,
-  "scripts/cleanup-retired-dev-service.sh",
+  "operations/deployment/cleanup-retired-dev-service.sh",
 );
 const deployWorkflow = path.join(repoRoot, ".github/workflows/deploy-dev.yml");
 const temporaryDirectories: string[] = [];
@@ -65,7 +65,7 @@ exit 99
 
   const result = spawnSync(
     "bash",
-    [cleanupScript, action, "drts-dev-ray-tw-20260730", "us-central1"],
+    [cleanupScript, action, "nodal-alloy-503700-s3", "us-central1"],
     {
       cwd: repoRoot,
       encoding: "utf8",
@@ -98,22 +98,28 @@ describe("retired Cloud Run service cleanup", () => {
     expect(source).toMatch(
       /retired_service_cleanup:\n[\s\S]*?default: "none"[\s\S]*?options:\n\s+- "none"\n\s+- "delete-drts-passenger-web"/,
     );
-    expect(source).toContain("./scripts/cleanup-retired-dev-service.sh");
+    expect(source).toContain(
+      "./operations/deployment/cleanup-retired-dev-service.sh",
+    );
     expect(source).toContain(
       "RETIRED_SERVICE_CLEANUP: ${{ inputs.retired_service_cleanup || 'none' }}",
     );
-    const uiSmokeJob = source.indexOf("\n  ui-smoke:");
     const cleanupJob = source.indexOf("\n  retired-service-cleanup:");
-    expect(uiSmokeJob).toBeGreaterThan(-1);
-    expect(cleanupJob).toBeGreaterThan(uiSmokeJob);
-    expect(source.slice(uiSmokeJob, cleanupJob)).toContain(
+    const candidateAcceptanceJob = source.indexOf(
+      "\n  operational-candidate-acceptance:",
+    );
+    expect(source).not.toContain("\n  ui-smoke:");
+    expect(cleanupJob).toBeGreaterThan(-1);
+    expect(candidateAcceptanceJob).toBeGreaterThan(cleanupJob);
+    expect(source.slice(cleanupJob, candidateAcceptanceJob)).toContain(
       "needs: [prepare, health-check]",
     );
-    expect(source.slice(cleanupJob)).toContain(
-      "needs: [prepare, health-check, ui-smoke]",
+    const candidateAcceptance = source.slice(candidateAcceptanceJob);
+    expect(candidateAcceptance).toContain(
+      "needs: [prepare, build-push, health-check, retired-service-cleanup]",
     );
-    expect(source.slice(cleanupJob)).toContain(
-      "needs.ui-smoke.result == 'success'",
+    expect(candidateAcceptance).toContain(
+      "needs.retired-service-cleanup.result == 'success'",
     );
     expect(
       source
@@ -123,7 +129,14 @@ describe("retired Cloud Run service cleanup", () => {
     ).toEqual([
       'description: "Fail-closed cleanup for the retired passenger service. Delete is allowed only when the regional Cloud Run inventory is exactly the intended 9 active services plus drts-passenger-web."',
       '- "delete-drts-passenger-web"',
+      'vapid_public_secret="${secret_prefix}-passenger-webpush-vapid-public-key"',
+      'vapid_private_secret="${secret_prefix}-passenger-webpush-vapid-private-key"',
+      'vapid_subject_secret="${secret_prefix}-passenger-webpush-vapid-subject"',
+      'export DRTS_DEV_PASSENGER_BASE_URL="https://drts-dev-passenger-web-${cloud_run_suffix}"',
     ]);
+    expect(source).toContain(
+      'export DRTS_DEV_CONCIERGE_BASE_URL="https://drts-dev-concierge-portal-web-${cloud_run_suffix}"',
+    );
   });
 
   it("does not query or delete anything for none", () => {
@@ -142,8 +155,8 @@ describe("retired Cloud Run service cleanup", () => {
 
     expect(result.status).toBe(0);
     expect(result.commands).toEqual([
-      "run services list --platform=managed --region us-central1 --project drts-dev-ray-tw-20260730 --format=value(metadata.name)",
-      "run services delete drts-passenger-web --platform=managed --region us-central1 --project drts-dev-ray-tw-20260730 --quiet",
+      "run services list --platform=managed --region us-central1 --project nodal-alloy-503700-s3 --format=value(metadata.name)",
+      "run services delete drts-passenger-web --platform=managed --region us-central1 --project nodal-alloy-503700-s3 --quiet",
     ]);
   });
 

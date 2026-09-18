@@ -2,18 +2,29 @@
   "name": "@drts/control-plane-auth",
   "version": "0.1.0",
   "private": true,
-  "type": "module",
+  "type": "commonjs",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
   "exports": {
-    ".": "./src/index.ts"
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "require": "./dist/index.js",
+      "default": "./dist/index.js"
+    }
   },
+  "files": [
+    "dist"
+  ],
   "dependencies": {
+    "@drts/contracts": "workspace:*",
     "jsonwebtoken": "^9.0.3"
   },
   "devDependencies": {
     "@types/jsonwebtoken": "^9.0.10"
   },
   "scripts": {
-    "build": "tsc -p tsconfig.json --noEmit",
+    "build": "tsc -p tsconfig.json",
     "lint": "eslint src --max-warnings=0",
     "test": "vitest run --passWithNoTests",
     "typecheck": "tsc -p tsconfig.json --noEmit"

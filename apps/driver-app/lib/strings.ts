@@ -11,7 +11,16 @@ export const driverRouteTitles = {
   platformPresence: "平台上線狀態",
   shift: "班次與出勤",
   settings: "設定",
+  leave: "請假",
+  academy: "學院",
   safetyOperator: "安全員模式",
+} as const;
+
+export const driverWorkforceStrings = {
+  sectionTitle: "出勤與學習",
+  sectionDescription: "管理請假、課程與接單所需的訓練。",
+  leaveDetail: "申請請假、查看審核與撤回申請",
+  academyDetail: "查看課程、完成學習與確認訓練資格",
 } as const;
 
 export const driverTaskActionLabels: Record<DriverTaskAction, string> = {
@@ -230,7 +239,7 @@ export const driverStrings = {
     },
     sections: {
       drtsRecon: "DRTS 對帳與撥款",
-      financeAuthority: "外部平台 finance authority",
+      financeAuthority: "外部平台財務主導",
       platformBreakdown: "平台分項",
       monthlyStatements: "月結報表",
     },
@@ -261,7 +270,7 @@ export const driverStrings = {
   },
   components: {
     routeDisplay: {
-      eyebrow: "Trip Route Summary",
+      eyebrow: "行程路線",
       title: "路線資訊",
       locked: "路線鎖定",
       pickup: "上車點",
@@ -283,5 +292,52 @@ export const driverStrings = {
       serviceFee: "抽成",
       subsidy: "補助",
     },
+  },
+} as const;
+
+export const driverAuthStrings = {
+  states: {
+    not_provisioned: {
+      title: "裝置未啟用",
+      badge: "未配置",
+      description: "連線車隊管理系統，啟用後此裝置可接收派單與平台訂單。",
+      action: "註冊此裝置",
+    },
+    session_expired: {
+      title: "裝置憑證已過期",
+      badge: "憑證失效",
+      description:
+        "此裝置的司機連線授權已過期，請重新輸入註冊代碼進行重新綁定。",
+      action: "重新綁定裝置",
+    },
+    device_revoked: {
+      title: "裝置綁定已撤銷",
+      badge: "憑證撤銷",
+      description:
+        "此裝置的司機綁定已遭遠端撤銷或偵測到憑證重複使用。未同步的離線完單佐證已妥善保存，請重新註冊綁定。",
+      action: "重新註冊裝置",
+    },
+    driver_suspended: {
+      title: "司機帳號已被停權",
+      badge: "帳號停權",
+      description:
+        "此司機帳號目前處於停權或證件審查無效狀態，暫時無法接單與使用工作台。請聯絡平台管理員。",
+      action: "聯絡車隊管理員",
+    },
+  },
+  devices: {
+    title: "裝置與身份綁定",
+    subtitle: "管理目前裝置的登入與綁定狀態",
+    activeDevice: "目前綁定裝置",
+    deviceIdLabel: "裝置識別碼",
+    bindingIdLabel: "綁定識別碼",
+    driverIdLabel: "司機帳號",
+    statusLabel: "綁定狀態",
+    issuedAtLabel: "核發時間",
+    rebindAction: "重新綁定裝置",
+    revokeAction: "登出並撤銷裝置",
+    rebindModalTitle: "重新綁定裝置",
+    rebindModalDesc: "請輸入車隊發放的新註冊代碼，以更換裝置連線憑證。",
+    offlineProofNotice: "提示：撤銷與重新綁定不會刪除未同步的離線完單佐證。",
   },
 } as const;

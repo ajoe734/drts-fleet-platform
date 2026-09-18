@@ -1,5 +1,5 @@
 import { EventEmitter2 } from "@nestjs/event-emitter";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { buildMockRecorderFixture } from "../../../../packages/shared-test-fixtures/src";
 
@@ -386,7 +386,13 @@ async function expectApiError(
 const cleanups: Array<() => Promise<void>> = [];
 
 describe("E2E-P2-008 human fallback", () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-06-26T12:00:00.000Z"));
+  });
+
   afterEach(async () => {
+    vi.useRealTimers();
     while (cleanups.length > 0) {
       await cleanups.pop()?.();
     }

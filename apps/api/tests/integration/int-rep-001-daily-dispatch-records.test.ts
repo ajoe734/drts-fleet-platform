@@ -207,7 +207,7 @@ describe("INT-REP-001 daily record joins dispatch/task data", () => {
       },
       "req-int-rep-assign-003",
     );
-    ownedMobilityService.cancelOwnedOrder(
+    await ownedMobilityService.cancelOwnedOrder(
       redispatchedOrder.orderId,
       { reason: "passenger_cancelled" },
       "req-int-rep-cancel-001",
@@ -267,7 +267,10 @@ describe("INT-REP-001 daily record joins dispatch/task data", () => {
     const accepted = reportingFilingService.createReportJob(
       {
         jobType: "daily_dispatch_record",
-        format: "json",
+        // Was "json", which is not a value ReportOutputFormat has ever had.
+        // Nothing validated `format`, so the test passed on it. This case is
+        // about the daily dispatch rows, not the rendering.
+        format: "csv",
         filters: { serviceDate },
       },
       "req-int-rep-report-job-001",

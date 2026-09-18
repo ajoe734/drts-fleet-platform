@@ -6,8 +6,10 @@ function requestFor(
   path: string,
   cookie?: string,
   headers?: Record<string, string>,
+  method = "GET",
 ) {
   return new NextRequest(`https://bank-console.test${path}`, {
+    method,
     headers: { ...headers, ...(cookie ? { cookie } : {}) },
   });
 }
@@ -15,12 +17,12 @@ function requestFor(
 describe("bank-console proxy auth boundary", () => {
   it("redirects signed-out demo access away from management data routes", () => {
     const response = proxy(
-      requestFor("/programs?bank=fubon&locale=zh&signedOut=1"),
+      requestFor("/programs?bank=tailspin&locale=zh&signedOut=1"),
     );
 
     expect(response.status).toBe(307);
     expect(response.headers.get("location")).toBe(
-      "https://bank-console.test/login?bank=fubon&locale=zh&signedOut=1",
+      "https://bank-console.test/login?bank=tailspin&locale=zh&signedOut=1",
     );
     expect(response.headers.get("set-cookie")).toContain(
       "drts_bank_console_signed_out=1",
@@ -30,7 +32,7 @@ describe("bank-console proxy auth boundary", () => {
 
   it("allows the signed-out login page to render", () => {
     const response = proxy(
-      requestFor("/login?bank=fubon&locale=zh&signedOut=1"),
+      requestFor("/login?bank=tailspin&locale=zh&signedOut=1"),
     );
 
     expect(response.status).toBe(200);
@@ -40,43 +42,59 @@ describe("bank-console proxy auth boundary", () => {
   });
 
   it("allows normal signed-in demo routes", () => {
-    const response = proxy(requestFor("/programs?bank=fubon&locale=zh"));
+    const response = proxy(requestFor("/programs?bank=tailspin&locale=zh"));
 
     expect(response.status).toBe(200);
+  });
+
+  it("allows the login form POST to clear an existing signed-out marker", () => {
+    const response = proxy(
+      requestFor(
+        "/api/auth/login",
+        "drts_bank_console_signed_out=1",
+        undefined,
+        "POST",
+      ),
+    );
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get("location")).toBeNull();
+    expect(response.headers.get("set-cookie")).toBeNull();
+    expect(response.headers.get("cache-control")).toBe("no-store, max-age=0");
   });
 
   it("keeps deep links blocked after sign-out even when the query param is gone", () => {
     const response = proxy(
       requestFor(
-        "/bookings?bank=ctbc&locale=zh",
+        "/bookings?bank=acme&locale=zh",
         "drts_bank_console_signed_out=1",
       ),
     );
 
     expect(response.status).toBe(307);
     expect(response.headers.get("location")).toBe(
-      "https://bank-console.test/login?bank=ctbc&locale=zh&signedOut=1",
+      "https://bank-console.test/login?bank=acme&locale=zh&signedOut=1",
     );
   });
 
   it("normalizes signed-out login URLs when only the cookie is present", () => {
     const response = proxy(
       requestFor(
-        "/login?bank=cathay&locale=en",
+        "/login?bank=contoso&locale=en",
         "drts_bank_console_signed_out=1",
       ),
     );
 
     expect(response.status).toBe(307);
     expect(response.headers.get("location")).toBe(
-      "https://bank-console.test/login?bank=cathay&locale=en&signedOut=1",
+      "https://bank-console.test/login?bank=contoso&locale=en&signedOut=1",
     );
   });
 
   it("does not refresh sign-out state from a cookie-only RSC prefetch", () => {
     const response = proxy(
       requestFor(
-        "/login?bank=cathay&locale=en",
+        "/login?bank=contoso&locale=en",
         "drts_bank_console_signed_out=1",
         {
           rsc: "1",
@@ -88,93 +106,38 @@ describe("bank-console proxy auth boundary", () => {
 
     expect(response.status).toBe(307);
     expect(response.headers.get("location")).toBe(
-      "https://bank-console.test/login?bank=cathay&locale=en&signedOut=1",
+      "https://bank-console.test/login?bank=contoso&locale=en&signedOut=1",
     );
     expect(response.headers.get("set-cookie")).toBeNull();
     expect(response.headers.get("cache-control")).toBe("no-store, max-age=0");
   });
 
-  it("clears the signed-out cookie when a demo persona signs in", () => {
+  it("regression: GET /?role=bank_finance cannot mint drts_bank_console_role session cookie", () => {
     const response = proxy(
-      requestFor(
-        "/?bank=ctbc&locale=zh&role=bank_program_admin",
-        "drts_bank_console_signed_out=1",
-      ),
+      requestFor("/?bank=acme&locale=zh&role=bank_finance"),
     );
 
     expect(response.status).toBe(200);
-    const setCookie = response.headers.get("set-cookie");
-    expect(setCookie).toContain("drts_bank_console_signed_out=");
-    expect(setCookie).toContain("Max-Age=0");
-    expect(setCookie).toContain("Path=/");
-    expect(setCookie).toContain("Expires=Thu, 01 Jan 1970 00:00:00 GMT");
+    expect(response.headers.get("set-cookie")).toBeNull();
   });
 
-  it("does not clear sign-out state during demo sign-in prefetch", () => {
-    const response = proxy(
+  it("does not write or mutate drts_bank_console_role cookie on any GET route when ?role= is present", () => {
+    const responseHome = proxy(
+      requestFor("/?bank=acme&locale=zh&role=bank_finance"),
+    );
+    expect(responseHome.headers.get("set-cookie")).toBeNull();
+
+    const responseStmt = proxy(
+      requestFor("/statements?bank=acme&locale=zh&role=bank_finance"),
+    );
+    expect(responseStmt.headers.get("set-cookie")).toBeNull();
+
+    const responseApi = proxy(
       requestFor(
-        "/?bank=ctbc&locale=zh&role=bank_program_admin",
-        "drts_bank_console_signed_out=1",
-        { "next-router-prefetch": "1" },
+        "/api/statements/export?bank=acme&role=bank_finance",
+        "drts_bank_console_role=bank_ops_viewer",
       ),
     );
-
-    expect(response.status).toBe(307);
-    expect(response.headers.get("location")).toBe(
-      "https://bank-console.test/login?bank=ctbc&locale=zh&signedOut=1",
-    );
-    expect(response.headers.get("set-cookie")).toBeNull();
-    expect(response.headers.get("cache-control")).toBe("no-store, max-age=0");
-  });
-
-  it("does not clear sign-out state during demo sign-in RSC rendering", () => {
-    const response = proxy(
-      requestFor(
-        "/?bank=ctbc&locale=zh&role=bank_program_admin",
-        "drts_bank_console_signed_out=1",
-        { rsc: "1" },
-      ),
-    );
-
-    expect(response.status).toBe(307);
-    expect(response.headers.get("location")).toBe(
-      "https://bank-console.test/login?bank=ctbc&locale=zh&signedOut=1",
-    );
-    expect(response.headers.get("set-cookie")).toBeNull();
-    expect(response.headers.get("cache-control")).toBe("no-store, max-age=0");
-  });
-
-  it("does not persist sign-out state for router prefetch requests", () => {
-    const response = proxy(
-      requestFor(
-        "/users?bank=ctbc&locale=zh&role=bank_program_admin&signedOut=1",
-        undefined,
-        { "next-router-prefetch": "1" },
-      ),
-    );
-
-    expect(response.status).toBe(307);
-    expect(response.headers.get("location")).toBe(
-      "https://bank-console.test/login?bank=ctbc&locale=zh&signedOut=1",
-    );
-    expect(response.headers.get("set-cookie")).toBeNull();
-    expect(response.headers.get("cache-control")).toBe("no-store, max-age=0");
-  });
-
-  it("does not persist sign-out state for RSC rendering requests", () => {
-    const response = proxy(
-      requestFor(
-        "/users?bank=ctbc&locale=zh&role=bank_program_admin&signedOut=1",
-        undefined,
-        { rsc: "1" },
-      ),
-    );
-
-    expect(response.status).toBe(307);
-    expect(response.headers.get("location")).toBe(
-      "https://bank-console.test/login?bank=ctbc&locale=zh&signedOut=1",
-    );
-    expect(response.headers.get("set-cookie")).toBeNull();
-    expect(response.headers.get("cache-control")).toBe("no-store, max-age=0");
+    expect(responseApi.headers.get("set-cookie")).toBeNull();
   });
 });

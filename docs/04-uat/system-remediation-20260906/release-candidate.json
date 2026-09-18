@@ -1,0 +1,1726 @@
+{
+  "task_id": "SR-RELEASE-001",
+  "generated_at": "2026-09-15T02:25:54Z",
+  "owner": "Claude2",
+  "reviewer": "Claude",
+  "dispatch_base_sha": "acfe53f6533ca2d74379c3b2b4dd7ff0c92d1bfc",
+  "synced_dev_sha": "c189ee2da29eefb31fc2de0c1b787c4e843c317c",
+  "sync_note": "Two sync rounds. Round 1: origin/dev advanced from acfe53f65 to 4b62cf4d7 (merges SR-QA-BOOKING-001 v2, PR #2031) while this task was in_progress and before any candidate was locked; fast-forward merged via `git merge origin/dev` (no conflicts). Round 2 (this session): after candidate a4acf6877 was reviewed/approved and reconciled onto PR #2033, full CI ran and reported `ci_status: failure` (unit / Product smoke acceptance / Smoke acceptance / ci-integ all failed), which bounced the task back to `in_progress`. Root cause: origin/dev had advanced again, from 4b62cf4d7 to c189ee2da, merging SR-QA-BOOKING-001-FIX-QUOTA-RELEASE-STALE-GAP-ASSERTIONS (PR #2032, done, owner Gemini/reviewer Gemini2) -- the exact followup task this doc's `known_stale_regression_found_during_this_integration` entry below had already flagged. This task's branch predated that merge, so it still carried the file with pre-fix stale assertions, and CI failed on it (out of this task's write_scopes). Merged `git merge origin/dev` again in the owner task worktree (candidate was unlocked/bounced back, not actively under review; no conflicts, write_scopes don't overlap) to pick up the fix. Re-ran the previously-failing file after merge: `pnpm exec vitest run tests/unit/system-remediation/sr-qa-booking-001/c028-tenant-quota-reservation-and-cancellation-gap.test.ts` -> 5/5 passed (was 3/5 failing pre-merge). Re-ran this task's own scope: `pnpm exec vitest run tests/unit/system-remediation/sr-release-001/` -> 1/1 passed; `git diff --check` -> clean.",
+  "dependencies_confirmed_done_at_dispatch": [
+    "SR-QA-IDENTITY-001",
+    "SR-QA-TENANT-001",
+    "SR-QA-BOOKING-001",
+    "SR-QA-DISPATCH-001",
+    "SR-QA-CALL-001",
+    "SR-QA-DRIVER-001",
+    "SR-QA-SUPPLY-001",
+    "SR-QA-FINANCE-001",
+    "SR-QA-REPORTS-001",
+    "SR-QA-GOVERNANCE-001",
+    "SR-QA-WEBHOOK-001",
+    "SR-QA-CONCURRENCY-001",
+    "SR-QA-UX-001",
+    "SR-QA-NEWFEATURES-001",
+    "SR-SCOPE-001"
+  ],
+  "task_board_snapshot": {
+    "note": "Full ai-status.json is ~2MB and was never read whole; this snapshot was assembled from `ai-status.sh list --status <status>` and `ai-status.sh show <task-id>` calls at generation time.",
+    "known_open_gap_in_progress": {
+      "SR-QA-BOOKING-001-FIX-TENANT-LEAD-TIME": {
+        "capability_id": "C016",
+        "status": "in_progress",
+        "candidate_sha": "8980696bdf3519a14b80b21ceff079a18bb0f5ef",
+        "ci_status": "failure",
+        "pr_url": "https://github.com/ajoe734/drts-fleet-platform/pull/2030",
+        "note": "Re-ran tests/unit/system-remediation/sr-qa-booking-001/c016-c024-tenant-booking-cutoff-and-lead-time.test.ts on the merged dev tree at 4b62cf4d7: 12/12 passed, confirming the gap-1/gap-2/gap-3 reproductions still reproduce the C016 defect (fix not yet merged). As of this session's re-check (dev synced to c189ee2da), still `in_progress`/`ci_status: failure` on a newer candidate SHA -- disposition unchanged, remains open_gap_in_progress."
+      }
+    },
+    "known_stale_regression_found_during_this_integration": {
+      "tests/unit/system-remediation/sr-qa-booking-001/c028-tenant-quota-reservation-and-cancellation-gap.test.ts": {
+        "capability_id": "C028",
+        "finding": "gap-1/gap-2/gap-3 in this file assert the PRE-fix broken behavior (no quota release on cancel). SR-QA-BOOKING-001-FIX-QUOTA-RELEASE (merged acfe53f65, before this task's dispatch) already fixed the underlying defect. Re-running this file on the current merged tree: 3/5 tests now fail because the bug they were written to reproduce no longer exists -- confirms the FIX is genuinely effective, but leaves this specific test file's assertions stale.",
+        "not_fixed_here_because": "tests/unit/system-remediation/sr-qa-booking-001/ is not in SR-RELEASE-001's write_scopes.",
+        "followup_task_created": "SR-QA-BOOKING-001-FIX-QUOTA-RELEASE-STALE-GAP-ASSERTIONS",
+        "followup_task_resolution": "Task completed (owner Gemini, reviewer Gemini2, PR #2032, merge_sha c189ee2da29eefb31fc2de0c1b787c4e843c317c, merged to origin/dev). This task's candidate a4acf6877 had already been approved and reconciled to PR #2033 before that merge landed, so full CI on PR #2033 failed against the stale pre-fix file. Resolved in this session by `git merge origin/dev` (round 2, see `sync_note` above): re-ran the file post-merge, 5/5 passing."
+      }
+    },
+    "external_gate_blocked_intentionally_excluded_from_done": [
+      "SR-LIVE-ENTRY-001",
+      "SR-LIVE-MAIL-001",
+      "SR-LIVE-PUSH-001",
+      "SR-LIVE-DOC-001",
+      "SR-LIVE-FINANCE-001",
+      "SR-LIVE-MAP-001",
+      "SR-LIVE-DRIVER-001",
+      "SR-LIVE-FORWARD-001",
+      "SR-LIVE-OPS-001",
+      "UV-EXEC-028"
+    ],
+    "historical_superseded_excluded_from_done": [
+      "SR-QA-WEBHOOK-001-FIX-TENANT-BINDING (superseded by SR-AUTH-SELECTOR-001 and SR-QA-WEBHOOK-001-ACCEPTANCE-RUNNER, both done)"
+    ],
+    "out_of_scope_withdrawn": [
+      "SR-CALL-MULTIORDER-20260913 (explicitly withdrawn per user launch-scope decision; not part of one-call/one-order launch)"
+    ],
+    "downstream_gate_not_started": [
+      "SR-ACCEPT-001 (todo; depends on SR-RELEASE-001 plus all SR-LIVE-* tasks; final full-system acceptance is out of this task's scope)"
+    ]
+  },
+  "closed_loop_regression": {
+    "path": "tests/unit/system-remediation/sr-release-001/same-order-cross-role-closed-loop.test.ts",
+    "command": "pnpm exec vitest run tests/unit/system-remediation/sr-release-001/",
+    "result": "1 test file, 1 test passed",
+    "covers": [
+      "建單 (createTenantBooking, 企業/租戶通道)",
+      "簽核 (approveTenantBookingApprovalRequest; dispatch correctly rejected pre-approval with BOOKING_APPROVAL_PENDING)",
+      "派車 (dispatchOrder + assignDispatch, same orderId)",
+      "driver 完成 (accept -> depart -> arrive -> start -> complete, same taskId/orderId)",
+      "帳務 (generateTenantInvoice; invoice.lines contains a line with this same orderId)",
+      "文件 (ControlledDownloadController.resolve() against the real signed link; real PDF bytes read back, '%PDF-' header confirmed, not just a URL string)",
+      "客訴結案 (ComplaintService.createComplaintCase with relatedOrderId = same orderId, then resolveComplaintCase -> closeComplaintCase)"
+    ],
+    "final_assertion": "a single Set built from the orderId at booking creation, driver task assignment, completed order, the matching invoice line, and the closed complaint's relatedOrderId collapses to exactly one value.",
+    "not_covered_live_boundary": "No live/real-device verification (real browser, real push delivery, real deployed environment) -- this is an in-process service-layer regression only, consistent with this VM's restrictions and with how every dependency SR-QA-* task already verified its own domain."
+  },
+  "capabilities_disposition_summary": {
+    "blocked_external_live_gate": 32,
+    "resolved_pending_release_verification": 92,
+    "open_gap_in_progress": 1,
+    "resolved_via_successor_pending_release_verification": 1,
+    "self": 1,
+    "confirmed_scope_excluded": 7
+  },
+  "capabilities_total": 134,
+  "findings_disposition_summary": {
+    "blocked_external_live_gate": 10,
+    "resolved_pending_release_verification": 33,
+    "open_gap_in_progress": 1
+  },
+  "findings_total": 44,
+  "capabilities": {
+    "C001": {
+      "capability": "從正式公開網址進入服務",
+      "state_at_9_6_audit": "故障",
+      "current_disposition": "blocked_external_live_gate",
+      "task_states": {
+        "SR-READINESS-001": "done",
+        "SR-PUBLIC-001": "done",
+        "SR-QA-IDENTITY-001": "done",
+        "SR-LIVE-ENTRY-001": "blocked_external_gate"
+      },
+      "source_refs": ["R01", "R29"]
+    },
+    "C002": {
+      "capability": "OIDC 登入及返回業務頁",
+      "state_at_9_6_audit": "故障",
+      "current_disposition": "resolved_pending_release_verification",
+      "task_states": {
+        "SR-TENANT-LOGIN-001": "historical_merged_untracked",
+        "SR-QA-IDENTITY-001": "done"
+      },
+      "source_refs": ["R02"]
+    },
+    "C003": {
+      "capability": "IAP／SSO 與 MFA 正式登入",
+      "state_at_9_6_audit": "待驗證",
+      "current_disposition": "blocked_external_live_gate",
+      "task_states": {
+        "SR-QA-IDENTITY-001": "done",
+        "SR-LIVE-ENTRY-001": "blocked_external_gate"
+      },
+      "source_refs": []
+    },
+    "C004": {
+      "capability": "登入後進入正確首頁",
+      "state_at_9_6_audit": "故障",
+      "current_disposition": "resolved_pending_release_verification",
+      "task_states": {
+        "SR-BANK-001": "historical_merged_untracked",
+        "SR-QA-IDENTITY-001": "done"
+      },
+      "source_refs": ["R06"]
+    },
+    "C005": {
+      "capability": "金額欄位依角色隔離",
+      "state_at_9_6_audit": "故障",
+      "current_disposition": "resolved_pending_release_verification",
+      "task_states": {
+        "SR-BANK-002": "historical_merged_untracked",
+        "SR-IAM-001": "historical_merged_untracked",
+        "SR-QA-IDENTITY-001": "done"
+      },
+      "source_refs": ["R15"]
+    },
+    "C006": {
+      "capability": "邀請→收到信→啟用→重寄／撤銷",
+      "state_at_9_6_audit": "實作缺口",
+      "current_disposition": "blocked_external_live_gate",
+      "task_states": {
+        "SR-NOTIFY-001": "historical_merged_untracked",
+        "SR-MAIL-001": "historical_merged_untracked",
+        "SR-QA-IDENTITY-001": "done",
+        "SR-LIVE-MAIL-001": "blocked_external_gate"
+      },
+      "source_refs": ["N06"]
+    },
+    "C007": {
+      "capability": "人員查詢與工作階段管理",
+      "state_at_9_6_audit": "故障",
+      "current_disposition": "resolved_pending_release_verification",
+      "task_states": {
+        "SR-IAM-001": "historical_merged_untracked",
+        "SR-QA-IDENTITY-001": "done"
+      },
+      "source_refs": ["R05"]
+    },
+    "C008": {
+      "capability": "角色最小權限與選單／API 一致",
+      "state_at_9_6_audit": "待驗證",
+      "current_disposition": "resolved_pending_release_verification",
+      "task_states": {
+        "SR-QA-IDENTITY-001": "done"
+      },
+      "source_refs": []
+    },
+    "C009": {
+      "capability": "資源歸屬隔離與匯出隔離",
+      "state_at_9_6_audit": "待驗證",
+      "current_disposition": "resolved_pending_release_verification",
+      "task_states": {
+        "SR-QA-IDENTITY-001": "done"
+      },
+      "source_refs": []
+    },
+    "C010": {
+      "capability": "停權／離職立即失效與金鑰輪替",
+      "state_at_9_6_audit": "待驗證",
+      "current_disposition": "resolved_pending_release_verification",
+      "task_states": {
+        "SR-QA-IDENTITY-001": "done"
+      },
+      "source_refs": []
+    },
+    "C011": {
+      "capability": "臨時角色、四眼核准、到期回收",
+      "state_at_9_6_audit": "待驗證",
+      "current_disposition": "resolved_pending_release_verification",
+      "task_states": {
+        "SR-QA-IDENTITY-001": "done"
+      },
+      "source_refs": []
+    },
+    "C012": {
+      "capability": "只看自有車輛收益／維保／任務／案件",
+      "state_at_9_6_audit": "未完整落地",
+      "current_disposition": "resolved_pending_release_verification",
+      "task_states": {
+        "SR-DESIGN-001": "historical_merged_untracked",
+        "SR-CONTRACT-001": "historical_merged_untracked",
+        "SR-HOST-BE-001": "done",
+        "SR-HOST-FE-001": "done",
+        "SR-WIRE-001": "done",
+        "SR-QA-NEWFEATURES-001": "done"
+      },
+      "source_refs": ["N03"]
+    },
+    "C013": {
+      "capability": "查看歷史與既有預約詳情",
+      "state_at_9_6_audit": "已測片段",
+      "current_disposition": "resolved_pending_release_verification",
+      "task_states": {
+        "SR-FLEET-DATA-001": "historical_merged_untracked",
+        "SR-ENTERPRISE-DATA-001": "done",
+        "SR-ENTERPRISE-SEARCH-001": "done",
+        "SR-QA-BOOKING-001": "done"
+      },
+      "source_refs": ["R08", "R24"]
+    },
+    "C014": {
+      "capability": "填寫預約、必填檢核、最後確認",
+      "state_at_9_6_audit": "已測片段",
+      "current_disposition": "resolved_pending_release_verification",
+      "task_states": {
+        "SR-QA-BOOKING-001": "done"
+      },
+      "source_refs": []
+    },
+    "C015": {
+      "capability": "乘客資料、聯絡人與舉牌同步",
+      "state_at_9_6_audit": "故障",
+      "current_disposition": "resolved_pending_release_verification",
+      "task_states": {
+        "SR-ENTERPRISE-FORM-001": "done",
+        "SR-QA-BOOKING-001": "done"
+      },
+      "source_refs": ["R20"]
+    },
+    "C016": {
+      "capability": "過去日期、最短提前時間與改期限制",
+      "state_at_9_6_audit": "故障",
+      "current_disposition": "open_gap_in_progress",
+      "task_states": {
+        "SR-ENTERPRISE-FORM-001": "done",
+        "SR-QA-BOOKING-001": "done",
+        "SR-QA-BOOKING-001-FIX-TENANT-LEAD-TIME": "in_progress_open_gap"
+      },
+      "source_refs": ["R21"]
+    },
+    "C017": {
+      "capability": "首頁／行程／詳情與實際訂單一致",
+      "state_at_9_6_audit": "故障",
+      "current_disposition": "resolved_pending_release_verification",
+      "task_states": {
+        "SR-ENTERPRISE-DATA-001": "done",
+        "SR-QA-BOOKING-001": "done"
+      },
+      "source_refs": ["R08"]
+    },
+    "C018": {
+      "capability": "聯絡司機、企業客服及求助",
+      "state_at_9_6_audit": "故障",
+      "current_disposition": "resolved_pending_release_verification",
+      "task_states": {
+        "SR-ENTERPRISE-DATA-001": "done",
+        "SR-QA-BOOKING-001": "done"
+      },
+      "source_refs": ["R09"]
+    },
+    "C019": {
+      "capability": "手機填單、確認與可讀排版",
+      "state_at_9_6_audit": "故障",
+      "current_disposition": "resolved_pending_release_verification",
+      "task_states": {
+        "SR-ENTERPRISE-FORM-001": "done",
+        "SR-QA-BOOKING-001": "done"
+      },
+      "source_refs": ["R22"]
+    },
+    "C020": {
+      "capability": "合法 signed handoff 進入嵌入叫車",
+      "state_at_9_6_audit": "故障",
+      "current_disposition": "resolved_pending_release_verification",
+      "task_states": {
+        "SR-REFERRAL-001": "historical_merged_untracked",
+        "SR-QA-BOOKING-001": "done"
+      },
+      "source_refs": ["R07"]
+    },
+    "C021": {
+      "capability": "嵌入失敗的獨立叫車 fallback",
+      "state_at_9_6_audit": "故障",
+      "current_disposition": "resolved_pending_release_verification",
+      "task_states": {
+        "SR-REFERRAL-001": "historical_merged_untracked",
+        "SR-QA-BOOKING-001": "done"
+      },
+      "source_refs": ["R07"]
+    },
+    "C022": {
+      "capability": "即時報價→送單→續接→取消→評分／收據",
+      "state_at_9_6_audit": "待驗證",
+      "current_disposition": "resolved_pending_release_verification",
+      "task_states": {
+        "SR-QA-BOOKING-001": "done"
+      },
+      "source_refs": []
+    },
+    "C023": {
+      "capability": "派車／到達／異動通知實際送達",
+      "state_at_9_6_audit": "外部待完成",
+      "current_disposition": "blocked_external_live_gate",
+      "task_states": {
+        "SR-PUSH-001": "done",
+        "SR-READINESS-001": "done",
+        "SR-QA-BOOKING-001": "done",
+        "SR-LIVE-PUSH-001": "blocked_external_gate"
+      },
+      "source_refs": ["N10"]
+    },
+    "C024": {
+      "capability": "租戶建單／修改／取消與歷程",
+      "state_at_9_6_audit": "待驗證",
+      "current_disposition": "resolved_pending_release_verification",
+      "task_states": {
+        "SR-QA-BOOKING-001": "done"
+      },
+      "source_refs": []
+    },
+    "C025": {
+      "capability": "送審→核准／駁回→人工升級",
+      "state_at_9_6_audit": "待驗證",
+      "current_disposition": "resolved_pending_release_verification",
+      "task_states": {
+        "SR-QA-BOOKING-001": "done"
+      },
+      "source_refs": []
+    },
+    "C026": {
+      "capability": "收到新申請／接近逾時／決定 Email",
+      "state_at_9_6_audit": "實作缺口",
+      "current_disposition": "blocked_external_live_gate",
+      "task_states": {
+        "SR-NOTIFY-001": "historical_merged_untracked",
+        "SR-MAIL-002": "historical_merged_untracked",
+        "SR-QA-BOOKING-001": "done",
+        "SR-LIVE-MAIL-001": "blocked_external_gate"
+      },
+      "source_refs": ["N07"]
+    },
+    "C027": {
+      "capability": "預約乘客、常用地址與成本中心",
+      "state_at_9_6_audit": "待驗證",
+      "current_disposition": "resolved_pending_release_verification",
+      "task_states": {
+        "SR-QA-BOOKING-001": "done"
+      },
+      "source_refs": []
+    },
+    "C028": {
+      "capability": "額度、用車規則、服務方案、SLA",
+      "state_at_9_6_audit": "待驗證",
+      "current_disposition": "resolved_pending_release_verification",
+      "task_states": {
+        "SR-QA-BOOKING-001": "done",
+        "SR-QA-BOOKING-001-FIX-QUOTA-RELEASE": "done"
+      },
+      "source_refs": []
+    },
+    "C029": {
+      "capability": "卡友資格／權益／人工審查",
+      "state_at_9_6_audit": "外部待完成",
+      "current_disposition": "blocked_external_live_gate",
+      "task_states": {
+        "SR-QA-BOOKING-001": "done",
+        "SR-LIVE-FINANCE-001": "blocked_external_gate"
+      },
+      "source_refs": []
+    },
+    "C030": {
+      "capability": "卡友預約列表與狀態篩選",
+      "state_at_9_6_audit": "已測片段",
+      "current_disposition": "resolved_pending_release_verification",
+      "task_states": {
+        "SR-QA-BOOKING-001": "done"
+      },
+      "source_refs": []
+    },
+    "C031": {
+      "capability": "航班異動、等待、加價與取消規則",
+      "state_at_9_6_audit": "待驗證",
+      "current_disposition": "resolved_pending_release_verification",
+      "task_states": {
+        "SR-QA-BOOKING-001": "done"
+      },
+      "source_refs": []
+    },
+    "C032": {
+      "capability": "非核心產品的獨立業務閉環",
+      "state_at_9_6_audit": "待驗證",
+      "current_disposition": "resolved_pending_release_verification",
+      "task_states": {
+        "SR-QA-BOOKING-001": "done"
+      },
+      "source_refs": []
+    },
+    "C033": {
+      "capability": "轉派單接入／接受／拒絕／完成回傳",
+      "state_at_9_6_audit": "外部待完成",
+      "current_disposition": "blocked_external_live_gate",
+      "task_states": {
+        "SR-QA-BOOKING-001": "done",
+        "SR-LIVE-FORWARD-001": "blocked_external_gate"
+      },
+      "source_refs": []
+    },
+    "C034": {
+      "capability": "取消競態、失去搶單與第三方收據歸屬",
+      "state_at_9_6_audit": "待驗證",
+      "current_disposition": "blocked_external_live_gate",
+      "task_states": {
+        "SR-QA-BOOKING-001": "done",
+        "SR-LIVE-FORWARD-001": "blocked_external_gate"
+      },
+      "source_refs": []
+    },
+    "C035": {
+      "capability": "任務清單→詳情→候選車查詢",
+      "state_at_9_6_audit": "已測片段",
+      "current_disposition": "resolved_pending_release_verification",
+      "task_states": {
+        "SR-QA-DISPATCH-001": "done"
+      },
+      "source_refs": []
+    },
+    "C036": {
+      "capability": "人工派車、改派、撤回及並發占用",
+      "state_at_9_6_audit": "待驗證",
+      "current_disposition": "resolved_pending_release_verification",
+      "task_states": {
+        "SR-QA-DISPATCH-001": "done"
+      },
+      "source_refs": []
+    },
+    "C037": {
+      "capability": "時間到自動釋放預約／提醒／升級",
+      "state_at_9_6_audit": "驗收缺口",
+      "current_disposition": "resolved_pending_release_verification",
+      "task_states": {
+        "SR-QA-DISPATCH-001": "done"
+      },
+      "source_refs": []
+    },
+    "C038": {
+      "capability": "自動匹配、超時、無供給與恢復",
+      "state_at_9_6_audit": "驗收缺口",
+      "current_disposition": "resolved_pending_release_verification",
+      "task_states": {
+        "SR-QA-DISPATCH-001": "done"
+      },
+      "source_refs": []
+    },
+    "C039": {
+      "capability": "排班佇列 check-in／out、順序與例外",
+      "state_at_9_6_audit": "待驗證",
+      "current_disposition": "resolved_pending_release_verification",
+      "task_states": {
+        "SR-QA-DISPATCH-001": "done"
+      },
+      "source_refs": []
+    },
+    "C040": {
+      "capability": "可讀地圖、位置與車輛態勢",
+      "state_at_9_6_audit": "故障",
+      "current_disposition": "resolved_pending_release_verification",
+      "task_states": {
+        "SR-OPS-MAP-001": "historical_merged_untracked",
+        "SR-QA-DISPATCH-001": "done"
+      },
+      "source_refs": ["R17"]
+    },
+    "C041": {
+      "capability": "presence 占用與回復可派狀態",
+      "state_at_9_6_audit": "待驗證",
+      "current_disposition": "resolved_pending_release_verification",
+      "task_states": {
+        "SR-QA-DISPATCH-001": "done"
+      },
+      "source_refs": []
+    },
+    "C042": {
+      "capability": "出勤、營收、維保看板",
+      "state_at_9_6_audit": "已測片段",
+      "current_disposition": "resolved_pending_release_verification",
+      "task_states": {
+        "SR-QA-DISPATCH-001": "done"
+      },
+      "source_refs": []
+    },
+    "C043": {
+      "capability": "通話建檔、caller 查找、轉訂單／客訴",
+      "state_at_9_6_audit": "待驗證",
+      "current_disposition": "resolved_pending_release_verification",
+      "task_states": {
+        "SR-QA-CALL-001": "done"
+      },
+      "source_refs": []
+    },
+    "C044": {
+      "capability": "真電話接入、排隊、錄音與補件",
+      "state_at_9_6_audit": "外部待完成",
+      "current_disposition": "blocked_external_live_gate",
+      "task_states": {
+        "SR-QA-CALL-001": "done",
+        "UV-EXEC-028": "blocked_external_gate"
+      },
+      "source_refs": []
+    },
+    "C045": {
+      "capability": "分類→指派→調查→回覆→結案／重開",
+      "state_at_9_6_audit": "待驗證",
+      "current_disposition": "resolved_pending_release_verification",
+      "task_states": {
+        "SR-QA-CALL-001": "done"
+      },
+      "source_refs": []
+    },
+    "C046": {
+      "capability": "事故→責任／附件→限制派車→恢復",
+      "state_at_9_6_audit": "待驗證",
+      "current_disposition": "resolved_pending_release_verification",
+      "task_states": {
+        "SR-QA-CALL-001": "done"
+      },
+      "source_refs": []
+    },
+    "C047": {
+      "capability": "收警→認領→處置→解除與回執",
+      "state_at_9_6_audit": "待驗證",
+      "current_disposition": "resolved_pending_release_verification",
+      "task_states": {
+        "SR-QA-CALL-001": "done"
+      },
+      "source_refs": []
+    },
+    "C048": {
+      "capability": "跨應用追查與助理工作協作",
+      "state_at_9_6_audit": "故障",
+      "current_disposition": "resolved_pending_release_verification",
+      "task_states": {
+        "SR-OPS-SHELL-001": "historical_merged_untracked",
+        "SR-QA-DISPATCH-001": "done"
+      },
+      "source_refs": ["R18", "R19"]
+    },
+    "C049": {
+      "capability": "文件建檔、送審與核准後開通",
+      "state_at_9_6_audit": "待驗證",
+      "current_disposition": "blocked_external_live_gate",
+      "task_states": {
+        "SR-DRIVER-WEB-001": "done",
+        "SR-QA-DRIVER-001": "done",
+        "SR-LIVE-DRIVER-001": "blocked_external_gate"
+      },
+      "source_refs": ["R30"]
+    },
+    "C050": {
+      "capability": "裝置綁定、解綁、復原與 session 更新",
+      "state_at_9_6_audit": "待驗證",
+      "current_disposition": "blocked_external_live_gate",
+      "task_states": {
+        "SR-QA-DRIVER-001": "done",
+        "SR-LIVE-DRIVER-001": "blocked_external_gate"
+      },
+      "source_refs": []
+    },
+    "C051": {
+      "capability": "上／下線、班次歷史與出勤計時",
+      "state_at_9_6_audit": "待驗證",
+      "current_disposition": "blocked_external_live_gate",
+      "task_states": {
+        "SR-QA-DRIVER-001": "done",
+        "SR-LIVE-DRIVER-001": "blocked_external_gate"
+      },
+      "source_refs": []
+    },
+    "C052": {
+      "capability": "請假申請、審核與班表聯動",
+      "state_at_9_6_audit": "實作缺口",
+      "current_disposition": "resolved_pending_release_verification",
+      "task_states": {
+        "SR-DESIGN-001": "historical_merged_untracked",
+        "SR-CONTRACT-001": "historical_merged_untracked",
+        "SR-LEAVE-BE-001": "done",
+        "SR-LEAVE-FE-001": "done",
+        "SR-WIRE-001": "done",
+        "SR-QA-NEWFEATURES-001": "done"
+      },
+      "source_refs": ["N01"]
+    },
+    "C053": {
+      "capability": "收新任務、接受／拒絕與逾時",
+      "state_at_9_6_audit": "待驗證",
+      "current_disposition": "blocked_external_live_gate",
+      "task_states": {
+        "SR-QA-DRIVER-001": "done",
+        "SR-LIVE-DRIVER-001": "blocked_external_gate"
+      },
+      "source_refs": []
+    },
+    "C054": {
+      "capability": "出發→到達→開始→完成／取消",
+      "state_at_9_6_audit": "待驗證",
+      "current_disposition": "blocked_external_live_gate",
+      "task_states": {
+        "SR-QA-DRIVER-001": "done",
+        "SR-LIVE-DRIVER-001": "blocked_external_gate"
+      },
+      "source_refs": []
+    },
+    "C055": {
+      "capability": "照片／簽收證明與完成條件",
+      "state_at_9_6_audit": "待驗證",
+      "current_disposition": "blocked_external_live_gate",
+      "task_states": {
+        "SR-QA-DRIVER-001": "done",
+        "SR-LIVE-DRIVER-001": "blocked_external_gate"
+      },
+      "source_refs": []
+    },
+    "C056": {
+      "capability": "背景定位、導航、離線排隊與重連",
+      "state_at_9_6_audit": "待驗證",
+      "current_disposition": "blocked_external_live_gate",
+      "task_states": {
+        "SR-QA-DRIVER-001": "done",
+        "SR-LIVE-DRIVER-001": "blocked_external_gate"
+      },
+      "source_refs": []
+    },
+    "C057": {
+      "capability": "收益日週月、服務費與補助追溯",
+      "state_at_9_6_audit": "待驗證",
+      "current_disposition": "blocked_external_live_gate",
+      "task_states": {
+        "SR-QA-DRIVER-001": "done",
+        "SR-LIVE-DRIVER-001": "blocked_external_gate"
+      },
+      "source_refs": []
+    },
+    "C058": {
+      "capability": "下載自己的 statement／收據",
+      "state_at_9_6_audit": "驗收缺口",
+      "current_disposition": "blocked_external_live_gate",
+      "task_states": {
+        "SR-ARTIFACT-001": "historical_merged_untracked",
+        "SR-INVOICE-001": "historical_merged_untracked",
+        "SR-QA-DRIVER-001": "done",
+        "SR-LIVE-DRIVER-001": "blocked_external_gate"
+      },
+      "source_refs": ["N04"]
+    },
+    "C059": {
+      "capability": "教學影片、SOP、測驗與完訓紀錄",
+      "state_at_9_6_audit": "實作缺口",
+      "current_disposition": "resolved_pending_release_verification",
+      "task_states": {
+        "SR-DESIGN-001": "historical_merged_untracked",
+        "SR-CONTRACT-001": "historical_merged_untracked",
+        "SR-ACADEMY-BE-001": "done",
+        "SR-ACADEMY-FE-001": "done",
+        "SR-WIRE-001": "done",
+        "SR-QA-NEWFEATURES-001": "done"
+      },
+      "source_refs": ["N02"]
+    },
+    "C060": {
+      "capability": "個資、通知偏好與裝置自檢",
+      "state_at_9_6_audit": "待驗證",
+      "current_disposition": "blocked_external_live_gate",
+      "task_states": {
+        "SR-QA-DRIVER-001": "done",
+        "SR-LIVE-DRIVER-001": "blocked_external_gate"
+      },
+      "source_refs": []
+    },
+    "C061": {
+      "capability": "到期提醒與禁止接單",
+      "state_at_9_6_audit": "待驗證",
+      "current_disposition": "blocked_external_live_gate",
+      "task_states": {
+        "SR-NOTIFY-001": "historical_merged_untracked",
+        "SR-MAIL-002": "historical_merged_untracked",
+        "SR-QA-DRIVER-001": "done",
+        "SR-LIVE-DRIVER-001": "blocked_external_gate"
+      },
+      "source_refs": ["N07"]
+    },
+    "C062": {
+      "capability": "Web 預覽作為基本巡檢入口",
+      "state_at_9_6_audit": "故障",
+      "current_disposition": "blocked_external_live_gate",
+      "task_states": {
+        "SR-DRIVER-WEB-001": "done",
+        "SR-QA-DRIVER-001": "done",
+        "SR-LIVE-DRIVER-001": "blocked_external_gate"
+      },
+      "source_refs": ["R30"]
+    },
+    "C063": {
+      "capability": "總覽 KPI 與司機／車輛清單一致",
+      "state_at_9_6_audit": "故障",
+      "current_disposition": "resolved_pending_release_verification",
+      "task_states": {
+        "SR-FLEET-DATA-001": "historical_merged_untracked",
+        "SR-QA-SUPPLY-001": "done"
+      },
+      "source_refs": ["R10"]
+    },
+    "C064": {
+      "capability": "新增司機／車輛與主要操作入口",
+      "state_at_9_6_audit": "故障",
+      "current_disposition": "resolved_pending_release_verification",
+      "task_states": {
+        "SR-FLEET-DATA-001": "historical_merged_untracked",
+        "SR-QA-SUPPLY-001": "done"
+      },
+      "source_refs": ["R11"]
+    },
+    "C065": {
+      "capability": "文件上傳→檢查→送件→退補／重送",
+      "state_at_9_6_audit": "待驗證",
+      "current_disposition": "resolved_pending_release_verification",
+      "task_states": {
+        "SR-QA-SUPPLY-001": "done"
+      },
+      "source_refs": []
+    },
+    "C066": {
+      "capability": "受理／核可／駁回／revision 衝突",
+      "state_at_9_6_audit": "已測片段",
+      "current_disposition": "resolved_pending_release_verification",
+      "task_states": {
+        "SR-QA-SUPPLY-001": "done"
+      },
+      "source_refs": []
+    },
+    "C067": {
+      "capability": "回覆事故／申訴與 SLA",
+      "state_at_9_6_audit": "實作缺口",
+      "current_disposition": "resolved_pending_release_verification",
+      "task_states": {
+        "SR-FLEET-CASE-001": "done",
+        "SR-QA-SUPPLY-001": "done"
+      },
+      "source_refs": ["R12"]
+    },
+    "C068": {
+      "capability": "statement 查詢／確認／爭議處理",
+      "state_at_9_6_audit": "故障",
+      "current_disposition": "resolved_pending_release_verification",
+      "task_states": {
+        "SR-FLEET-SETTLE-001": "done",
+        "SR-QA-FINANCE-001": "done"
+      },
+      "source_refs": ["R13"]
+    },
+    "C069": {
+      "capability": "有效狀態／趟次篩選與匯出",
+      "state_at_9_6_audit": "故障",
+      "current_disposition": "resolved_pending_release_verification",
+      "task_states": {
+        "SR-FLEET-DATA-001": "historical_merged_untracked",
+        "SR-ENTERPRISE-SEARCH-001": "done",
+        "SR-QA-SUPPLY-001": "done"
+      },
+      "source_refs": ["R24", "R11"]
+    },
+    "C070": {
+      "capability": "可讀表單、欄位標籤與離頁保護",
+      "state_at_9_6_audit": "故障",
+      "current_disposition": "resolved_pending_release_verification",
+      "task_states": {
+        "SR-FLEET-FORM-001": "historical_merged_untracked",
+        "SR-QA-SUPPLY-001": "done"
+      },
+      "source_refs": ["R23", "R25"]
+    },
+    "C071": {
+      "capability": "看真完訓率與逾期名單",
+      "state_at_9_6_audit": "實作缺口",
+      "current_disposition": "resolved_pending_release_verification",
+      "task_states": {
+        "SR-DESIGN-001": "historical_merged_untracked",
+        "SR-CONTRACT-001": "historical_merged_untracked",
+        "SR-ACADEMY-BE-001": "done",
+        "SR-ACADEMY-FE-001": "done",
+        "SR-WIRE-001": "done",
+        "SR-QA-NEWFEATURES-001": "done"
+      },
+      "source_refs": ["N02"]
+    },
+    "C072": {
+      "capability": "保險、證照、委託合約與排他性",
+      "state_at_9_6_audit": "待驗證",
+      "current_disposition": "resolved_pending_release_verification",
+      "task_states": {
+        "SR-QA-SUPPLY-001": "done"
+      },
+      "source_refs": []
+    },
+    "C073": {
+      "capability": "終止委託、下架與 debranding 閉環",
+      "state_at_9_6_audit": "待驗證",
+      "current_disposition": "resolved_pending_release_verification",
+      "task_states": {
+        "SR-QA-SUPPLY-001": "done"
+      },
+      "source_refs": []
+    },
+    "C074": {
+      "capability": "支付訂單與 reconciliation 案件查詢",
+      "state_at_9_6_audit": "已測片段",
+      "current_disposition": "resolved_pending_release_verification",
+      "task_states": {
+        "SR-QA-FINANCE-001": "done"
+      },
+      "source_refs": []
+    },
+    "C075": {
+      "capability": "重新收款／退款／作廢真實執行",
+      "state_at_9_6_audit": "外部待完成",
+      "current_disposition": "blocked_external_live_gate",
+      "task_states": {
+        "SR-QA-FINANCE-001": "done",
+        "SR-LIVE-FINANCE-001": "blocked_external_gate"
+      },
+      "source_refs": []
+    },
+    "C076": {
+      "capability": "費率草稿、比較、發布與不可變快照",
+      "state_at_9_6_audit": "已測片段",
+      "current_disposition": "resolved_pending_release_verification",
+      "task_states": {
+        "SR-QA-FINANCE-001": "done"
+      },
+      "source_refs": []
+    },
+    "C077": {
+      "capability": "抬頭、統編、請款設定及期間結算",
+      "state_at_9_6_audit": "待驗證",
+      "current_disposition": "resolved_pending_release_verification",
+      "task_states": {
+        "SR-QA-FINANCE-001": "done"
+      },
+      "source_refs": []
+    },
+    "C078": {
+      "capability": "可下載真正的帳單 PDF",
+      "state_at_9_6_audit": "實作缺口",
+      "current_disposition": "blocked_external_live_gate",
+      "task_states": {
+        "SR-ARTIFACT-001": "historical_merged_untracked",
+        "SR-INVOICE-001": "historical_merged_untracked",
+        "SR-QA-FINANCE-001": "done",
+        "SR-LIVE-DOC-001": "blocked_external_gate"
+      },
+      "source_refs": ["N04"]
+    },
+    "C079": {
+      "capability": "月結帳單寄送與失敗追蹤",
+      "state_at_9_6_audit": "驗收缺口",
+      "current_disposition": "blocked_external_live_gate",
+      "task_states": {
+        "SR-NOTIFY-001": "historical_merged_untracked",
+        "SR-ARTIFACT-001": "historical_merged_untracked",
+        "SR-MAIL-002": "historical_merged_untracked",
+        "SR-INVOICE-001": "historical_merged_untracked",
+        "SR-QA-FINANCE-001": "done",
+        "SR-LIVE-MAIL-001": "blocked_external_gate"
+      },
+      "source_refs": ["N04", "N07"]
+    },
+    "C080": {
+      "capability": "代墊批次、核准、匯出與付款狀態",
+      "state_at_9_6_audit": "待驗證",
+      "current_disposition": "resolved_pending_release_verification",
+      "task_states": {
+        "SR-QA-FINANCE-001": "done"
+      },
+      "source_refs": []
+    },
+    "C081": {
+      "capability": "上傳與查驗匯款證明原檔",
+      "state_at_9_6_audit": "實作缺口",
+      "current_disposition": "resolved_pending_release_verification",
+      "task_states": {
+        "SR-PROOF-001": "historical_merged_untracked",
+        "SR-QA-FINANCE-001": "done"
+      },
+      "source_refs": ["N09"]
+    },
+    "C082": {
+      "capability": "真 statement CSV 下載與資料一致",
+      "state_at_9_6_audit": "已測片段",
+      "current_disposition": "resolved_pending_release_verification",
+      "task_states": {
+        "SR-QA-FINANCE-001": "done"
+      },
+      "source_refs": []
+    },
+    "C083": {
+      "capability": "摘要／簽章真實可驗證",
+      "state_at_9_6_audit": "故障",
+      "current_disposition": "blocked_external_live_gate",
+      "task_states": {
+        "SR-BANK-003": "historical_merged_untracked",
+        "SR-QA-FINANCE-001": "done",
+        "SR-LIVE-DOC-001": "blocked_external_gate"
+      },
+      "source_refs": ["R14"]
+    },
+    "C084": {
+      "capability": "正確開立日、到期日與帳期",
+      "state_at_9_6_audit": "故障",
+      "current_disposition": "resolved_pending_release_verification",
+      "task_states": {
+        "SR-BANK-001": "historical_merged_untracked",
+        "SR-QA-FINANCE-001": "done"
+      },
+      "source_refs": ["R28"]
+    },
+    "C085": {
+      "capability": "合約、使用量、方案與人員管理",
+      "state_at_9_6_audit": "故障",
+      "current_disposition": "resolved_pending_release_verification",
+      "task_states": {
+        "SR-BANK-001": "historical_merged_untracked",
+        "SR-QA-FINANCE-001": "done"
+      },
+      "source_refs": ["R06"]
+    },
+    "C086": {
+      "capability": "用量→分潤→對帳明細→CSV",
+      "state_at_9_6_audit": "已測片段",
+      "current_disposition": "resolved_pending_release_verification",
+      "task_states": {
+        "SR-QA-FINANCE-001": "done"
+      },
+      "source_refs": []
+    },
+    "C087": {
+      "capability": "總覽匯出",
+      "state_at_9_6_audit": "故障",
+      "current_disposition": "resolved_pending_release_verification",
+      "task_states": {
+        "SR-CHANNEL-001": "historical_merged_untracked",
+        "SR-QA-FINANCE-001": "done"
+      },
+      "source_refs": ["R26"]
+    },
+    "C088": {
+      "capability": "取消、退款、爭議的跨帳一致性",
+      "state_at_9_6_audit": "待驗證",
+      "current_disposition": "resolved_pending_release_verification",
+      "task_states": {
+        "SR-QA-FINANCE-001": "done"
+      },
+      "source_refs": []
+    },
+    "C089": {
+      "capability": "批次跨月、重跑、失敗續跑與對帳",
+      "state_at_9_6_audit": "驗收缺口",
+      "current_disposition": "resolved_pending_release_verification",
+      "task_states": {
+        "SR-QA-CONCURRENCY-001": "done"
+      },
+      "source_refs": []
+    },
+    "C090": {
+      "capability": "營運報表查詢、產生與 CSV 下載",
+      "state_at_9_6_audit": "待驗證",
+      "current_disposition": "resolved_pending_release_verification",
+      "task_states": {
+        "SR-QA-REPORTS-001": "done"
+      },
+      "source_refs": []
+    },
+    "C091": {
+      "capability": "一般報表 PDF／Excel 輸出",
+      "state_at_9_6_audit": "實作缺口",
+      "current_disposition": "resolved_pending_release_verification",
+      "task_states": {
+        "SR-REPORT-001": "historical_merged_untracked",
+        "SR-DEPS-001": "historical_merged_untracked",
+        "SR-QA-REPORTS-001": "done"
+      },
+      "source_refs": ["N05"]
+    },
+    "C092": {
+      "capability": "九項 PRD 9.10.1 監理資料報表",
+      "state_at_9_6_audit": "待驗證",
+      "current_disposition": "resolved_pending_release_verification",
+      "task_states": {
+        "SR-QA-REPORTS-001": "done"
+      },
+      "source_refs": []
+    },
+    "C093": {
+      "capability": "行程紀錄、資料保存與查詢",
+      "state_at_9_6_audit": "故障",
+      "current_disposition": "resolved_pending_release_verification",
+      "task_states": {
+        "SR-BANK-001": "historical_merged_untracked",
+        "SR-IAM-001": "historical_merged_untracked",
+        "SR-ADMIN-VERIFY-001": "historical_merged_untracked",
+        "SR-ENTERPRISE-DATA-001": "done",
+        "SR-QA-REPORTS-001": "done"
+      },
+      "source_refs": ["R03", "R16"]
+    },
+    "C094": {
+      "capability": "乘客揭露／公開車資版本審核",
+      "state_at_9_6_audit": "待驗證",
+      "current_disposition": "resolved_pending_release_verification",
+      "task_states": {
+        "SR-QA-REPORTS-001": "done"
+      },
+      "source_refs": []
+    },
+    "C095": {
+      "capability": "車資異常處理、評價與補正",
+      "state_at_9_6_audit": "待驗證",
+      "current_disposition": "resolved_pending_release_verification",
+      "task_states": {
+        "SR-QA-REPORTS-001": "done"
+      },
+      "source_refs": []
+    },
+    "C096": {
+      "capability": "公開電話、車資、版本與歷史治理",
+      "state_at_9_6_audit": "已測片段",
+      "current_disposition": "resolved_pending_release_verification",
+      "task_states": {
+        "SR-QA-REPORTS-001": "done"
+      },
+      "source_refs": []
+    },
+    "C097": {
+      "capability": "下載可列印車內牌貼",
+      "state_at_9_6_audit": "實作缺口",
+      "current_disposition": "blocked_external_live_gate",
+      "task_states": {
+        "SR-ARTIFACT-001": "historical_merged_untracked",
+        "SR-PLACARD-001": "historical_merged_untracked",
+        "SR-QA-REPORTS-001": "done",
+        "SR-LIVE-DOC-001": "blocked_external_gate"
+      },
+      "source_refs": ["N08"]
+    },
+    "C098": {
+      "capability": "多元計程車電子證明 HTML／PDF",
+      "state_at_9_6_audit": "待驗證",
+      "current_disposition": "resolved_pending_release_verification",
+      "task_states": {
+        "SR-QA-REPORTS-001": "done"
+      },
+      "source_refs": []
+    },
+    "C099": {
+      "capability": "證據清單、匯出授權、法律保留",
+      "state_at_9_6_audit": "待驗證",
+      "current_disposition": "resolved_pending_release_verification",
+      "task_states": {
+        "SR-QA-REPORTS-001": "done"
+      },
+      "source_refs": []
+    },
+    "C100": {
+      "capability": "不可變 audit、保存、封存與刪除邊界",
+      "state_at_9_6_audit": "待驗證",
+      "current_disposition": "resolved_pending_release_verification",
+      "task_states": {
+        "SR-QA-REPORTS-001": "done"
+      },
+      "source_refs": []
+    },
+    "C101": {
+      "capability": "車隊夥伴主檔列表與管理",
+      "state_at_9_6_audit": "故障",
+      "current_disposition": "resolved_pending_release_verification",
+      "task_states": {
+        "SR-ADMIN-VERIFY-001": "historical_merged_untracked",
+        "SR-QA-GOVERNANCE-001": "done"
+      },
+      "source_refs": ["R04"]
+    },
+    "C102": {
+      "capability": "租戶生命週期與跨租戶治理",
+      "state_at_9_6_audit": "待驗證",
+      "current_disposition": "resolved_pending_release_verification",
+      "task_states": {
+        "SR-QA-GOVERNANCE-001": "done"
+      },
+      "source_refs": []
+    },
+    "C103": {
+      "capability": "方案、入口、價格、來源歸屬",
+      "state_at_9_6_audit": "待驗證",
+      "current_disposition": "resolved_pending_release_verification",
+      "task_states": {
+        "SR-QA-GOVERNANCE-001": "done"
+      },
+      "source_refs": []
+    },
+    "C104": {
+      "capability": "查詢／註冊／停用／憑證治理",
+      "state_at_9_6_audit": "故障",
+      "current_disposition": "resolved_pending_release_verification",
+      "task_states": {
+        "SR-ADMIN-ADAPTER-001": "historical_merged_untracked",
+        "SR-QA-GOVERNANCE-001": "done"
+      },
+      "source_refs": ["N11"]
+    },
+    "C105": {
+      "capability": "憑證到期提醒正確性",
+      "state_at_9_6_audit": "故障",
+      "current_disposition": "resolved_pending_release_verification",
+      "task_states": {
+        "SR-ADMIN-ADAPTER-001": "historical_merged_untracked",
+        "SR-QA-GOVERNANCE-001": "done"
+      },
+      "source_refs": ["N12"]
+    },
+    "C106": {
+      "capability": "區域草稿、審核、發布、停靠規則",
+      "state_at_9_6_audit": "已測片段",
+      "current_disposition": "resolved_pending_release_verification",
+      "task_states": {
+        "SR-QA-GOVERNANCE-001": "done"
+      },
+      "source_refs": []
+    },
+    "C107": {
+      "capability": "產品型別、資格、時間與結算模式",
+      "state_at_9_6_audit": "待驗證",
+      "current_disposition": "resolved_pending_release_verification",
+      "task_states": {
+        "SR-QA-GOVERNANCE-001": "done"
+      },
+      "source_refs": []
+    },
+    "C108": {
+      "capability": "health、告警、通道與積壓可觀測性",
+      "state_at_9_6_audit": "已測片段",
+      "current_disposition": "resolved_pending_release_verification",
+      "task_states": {
+        "SR-BANK-001": "historical_merged_untracked",
+        "SR-ENTERPRISE-DATA-001": "done",
+        "SR-QA-GOVERNANCE-001": "done"
+      },
+      "source_refs": ["R16"]
+    },
+    "C109": {
+      "capability": "公告／維護通知與功能旗標",
+      "state_at_9_6_audit": "待驗證",
+      "current_disposition": "resolved_pending_release_verification",
+      "task_states": {
+        "SR-QA-GOVERNANCE-001": "done"
+      },
+      "source_refs": []
+    },
+    "C110": {
+      "capability": "環境、資料來源與文案可信度",
+      "state_at_9_6_audit": "故障",
+      "current_disposition": "resolved_pending_release_verification",
+      "task_states": {
+        "SR-ENV-COPY-001": "done",
+        "SR-QA-GOVERNANCE-001": "done"
+      },
+      "source_refs": ["R27"]
+    },
+    "C111": {
+      "capability": "API keys、輪替、撤銷與使用量",
+      "state_at_9_6_audit": "待驗證",
+      "current_disposition": "resolved_via_successor_pending_release_verification",
+      "task_states": {
+        "SR-QA-WEBHOOK-001": "done",
+        "SR-QA-WEBHOOK-001-FIX-TENANT-BINDING": "blocked_superseded_historical",
+        "SR-AUTH-SELECTOR-001": "done",
+        "SR-QA-WEBHOOK-001-ACCEPTANCE-RUNNER": "done"
+      },
+      "source_refs": []
+    },
+    "C112": {
+      "capability": "簽章、重試、停用、回放與密鑰輪替",
+      "state_at_9_6_audit": "待驗證",
+      "current_disposition": "resolved_pending_release_verification",
+      "task_states": {
+        "SR-QA-WEBHOOK-001": "done"
+      },
+      "source_refs": []
+    },
+    "C113": {
+      "capability": "ERP／企業 SSO／銀行帳本同步",
+      "state_at_9_6_audit": "外部待完成",
+      "current_disposition": "blocked_external_live_gate",
+      "task_states": {
+        "SR-QA-WEBHOOK-001": "done",
+        "SR-LIVE-FINANCE-001": "blocked_external_gate"
+      },
+      "source_refs": []
+    },
+    "C114": {
+      "capability": "真地圖、地理编碼、路由／ETA",
+      "state_at_9_6_audit": "外部待完成",
+      "current_disposition": "blocked_external_live_gate",
+      "task_states": {
+        "SR-QA-WEBHOOK-001": "done",
+        "SR-LIVE-MAP-001": "blocked_external_gate"
+      },
+      "source_refs": []
+    },
+    "C115": {
+      "capability": "背景補件、到期掃描與告警回執",
+      "state_at_9_6_audit": "驗收缺口",
+      "current_disposition": "resolved_pending_release_verification",
+      "task_states": {
+        "SR-QA-WEBHOOK-001": "done"
+      },
+      "source_refs": []
+    },
+    "C116": {
+      "capability": "排程多實例互斥、重啟恢復與重試",
+      "state_at_9_6_audit": "驗收缺口",
+      "current_disposition": "resolved_pending_release_verification",
+      "task_states": {
+        "SR-QA-CONCURRENCY-001": "done"
+      },
+      "source_refs": []
+    },
+    "C117": {
+      "capability": "同一請求重送不重複建單／扣款／派車",
+      "state_at_9_6_audit": "待驗證",
+      "current_disposition": "resolved_pending_release_verification",
+      "task_states": {
+        "SR-QA-UX-001": "done"
+      },
+      "source_refs": []
+    },
+    "C118": {
+      "capability": "同一訂單跨角色的完整業務閉環",
+      "state_at_9_6_audit": "驗收缺口",
+      "current_disposition": "self",
+      "task_states": {
+        "SR-RELEASE-001": "self"
+      },
+      "source_refs": []
+    },
+    "C119": {
+      "capability": "失敗、空清單、過期、429與重試恢復",
+      "state_at_9_6_audit": "故障",
+      "current_disposition": "resolved_pending_release_verification",
+      "task_states": {
+        "SR-BANK-001": "historical_merged_untracked",
+        "SR-IAM-001": "historical_merged_untracked",
+        "SR-ENTERPRISE-DATA-001": "done",
+        "SR-QA-UX-001": "done"
+      },
+      "source_refs": ["R05", "R08", "R16"]
+    },
+    "C120": {
+      "capability": "全域可及性、焦點、對比與響應式",
+      "state_at_9_6_audit": "驗收缺口",
+      "current_disposition": "resolved_pending_release_verification",
+      "task_states": {
+        "SR-FLEET-FORM-001": "historical_merged_untracked",
+        "SR-ENTERPRISE-FORM-001": "done",
+        "SR-QA-UX-001": "done"
+      },
+      "source_refs": ["R22", "R23"]
+    },
+    "C121": {
+      "capability": "繁中／英文、一致時間與貨幣格式",
+      "state_at_9_6_audit": "待驗證",
+      "current_disposition": "resolved_pending_release_verification",
+      "task_states": {
+        "SR-QA-UX-001": "done"
+      },
+      "source_refs": []
+    },
+    "C122": {
+      "capability": "備份、還原、RPO／RTO及災難演练",
+      "state_at_9_6_audit": "驗收缺口",
+      "current_disposition": "blocked_external_live_gate",
+      "task_states": {
+        "SR-OPS-PROOF-001": "done",
+        "SR-LIVE-OPS-001": "blocked_external_gate"
+      },
+      "source_refs": []
+    },
+    "C123": {
+      "capability": "負載、延遲、容量與限流",
+      "state_at_9_6_audit": "驗收缺口",
+      "current_disposition": "blocked_external_live_gate",
+      "task_states": {
+        "SR-OPS-PROOF-001": "done",
+        "SR-LIVE-OPS-001": "blocked_external_gate"
+      },
+      "source_refs": []
+    },
+    "C124": {
+      "capability": "部署版本、health、業務驗收與回滾",
+      "state_at_9_6_audit": "驗收缺口",
+      "current_disposition": "blocked_external_live_gate",
+      "task_states": {
+        "SR-READINESS-001": "done",
+        "SR-PUBLIC-001": "done",
+        "SR-OPS-PROOF-001": "done",
+        "SR-LIVE-OPS-001": "blocked_external_gate"
+      },
+      "source_refs": ["R29"]
+    },
+    "C125": {
+      "capability": "檔案 bytes、掃描、歸屬、到期與真下載",
+      "state_at_9_6_audit": "驗收缺口",
+      "current_disposition": "blocked_external_live_gate",
+      "task_states": {
+        "SR-ARTIFACT-001": "historical_merged_untracked",
+        "SR-INVOICE-001": "historical_merged_untracked",
+        "SR-PLACARD-001": "historical_merged_untracked",
+        "SR-PROOF-001": "historical_merged_untracked",
+        "SR-QA-UX-001": "done",
+        "SR-LIVE-DOC-001": "blocked_external_gate"
+      },
+      "source_refs": ["N04", "N08", "N09"]
+    },
+    "C126": {
+      "capability": "獨立 Partner Booking 網站",
+      "state_at_9_6_audit": "範圍排除",
+      "current_disposition": "confirmed_scope_excluded",
+      "task_states": {
+        "SR-SCOPE-001": "done"
+      },
+      "source_refs": []
+    },
+    "C127": {
+      "capability": "舊 Passenger／Concierge／Assisted 入口",
+      "state_at_9_6_audit": "範圍排除",
+      "current_disposition": "confirmed_scope_excluded",
+      "task_states": {
+        "SR-SCOPE-001": "done"
+      },
+      "source_refs": []
+    },
+    "C128": {
+      "capability": "AV／ODD／Tesla 接管與远端营运",
+      "state_at_9_6_audit": "範圍排除",
+      "current_disposition": "confirmed_scope_excluded",
+      "task_states": {
+        "SR-SCOPE-001": "done"
+      },
+      "source_refs": []
+    },
+    "C129": {
+      "capability": "Phase1 filing PDF 主報告與ZIP送件包",
+      "state_at_9_6_audit": "範圍排除",
+      "current_disposition": "confirmed_scope_excluded",
+      "task_states": {
+        "SR-SCOPE-001": "done"
+      },
+      "source_refs": []
+    },
+    "C130": {
+      "capability": "獨立 regulator realm 與正式監理入口",
+      "state_at_9_6_audit": "範圍排除",
+      "current_disposition": "confirmed_scope_excluded",
+      "task_states": {
+        "SR-SCOPE-001": "done"
+      },
+      "source_refs": []
+    },
+    "C131": {
+      "capability": "獨立事件匯流排與13態轉單模型",
+      "state_at_9_6_audit": "範圍排除",
+      "current_disposition": "confirmed_scope_excluded",
+      "task_states": {
+        "SR-SCOPE-001": "done"
+      },
+      "source_refs": []
+    },
+    "C132": {
+      "capability": "逾時自動升級",
+      "state_at_9_6_audit": "範圍排除",
+      "current_disposition": "confirmed_scope_excluded",
+      "task_states": {
+        "SR-SCOPE-001": "done"
+      },
+      "source_refs": []
+    },
+    "C133": {
+      "capability": "提領、商店公開上架與商用簽章",
+      "state_at_9_6_audit": "外部待完成",
+      "current_disposition": "resolved_pending_release_verification",
+      "task_states": {
+        "SR-READINESS-001": "done",
+        "SR-SCOPE-001": "done"
+      },
+      "source_refs": []
+    },
+    "C134": {
+      "capability": "合約詳情可進入並提供執行條款",
+      "state_at_9_6_audit": "實作缺口",
+      "current_disposition": "resolved_pending_release_verification",
+      "task_states": {
+        "SR-CONTRACT-READ-001": "historical_merged_untracked",
+        "SR-OPS-CONTRACT-001": "historical_merged_untracked",
+        "SR-CONTRACT-001": "historical_merged_untracked",
+        "SR-QA-DISPATCH-001": "done"
+      },
+      "source_refs": ["N13", "N14"]
+    }
+  },
+  "findings": {
+    "N01": {
+      "priority": "P2",
+      "issue": "請假申請沒有完整工作流程",
+      "current_disposition": "resolved_pending_release_verification",
+      "related_capability_ids": ["C052"]
+    },
+    "N02": {
+      "priority": "P2",
+      "issue": "學院、測驗、完訓證據未落地",
+      "current_disposition": "resolved_pending_release_verification",
+      "related_capability_ids": ["C059", "C071"]
+    },
+    "N03": {
+      "priority": "P2",
+      "issue": "車主的受限自助入口尚未產品化",
+      "current_disposition": "resolved_pending_release_verification",
+      "related_capability_ids": ["C012"]
+    },
+    "N04": {
+      "priority": "P1",
+      "issue": "帳單建立了下載中繼資料，但沒有真正帳單檔案",
+      "current_disposition": "blocked_external_live_gate",
+      "related_capability_ids": ["C058", "C078", "C079", "C125"],
+      "empirical_reverification": {
+        "method": "Directly executed generateTenantInvoice() then ControlledDownloadController.resolve() with the real signed link in tests/unit/system-remediation/sr-release-001/same-order-cross-role-closed-loop.test.ts (not code-reading).",
+        "result": "N04 as originally worded ('帳單建立了下載中繼資料，但沒有真正帳單檔案') is no longer true on this SHA: generateTenantInvoice() calls documentArtifactStore.put(...) with real PDF bytes (buildMinimalPdf), and the signed download link resolves to those bytes (observed: 5-byte header == '%PDF-', content-type application/pdf).",
+        "caveat": "This confirms the artifact-materialization defect only. It does not confirm live delivery/download through a real browser or a real deployed environment -- that remains within the still-blocked_external_live_gate scope of C078/SR-LIVE-DOC-001."
+      }
+    },
+    "N05": {
+      "priority": "P2",
+      "issue": "一般報表沒有 PDF／Excel renderer",
+      "current_disposition": "resolved_pending_release_verification",
+      "related_capability_ids": ["C091"]
+    },
+    "N06": {
+      "priority": "P1",
+      "issue": "邀請寄送只有記憶體紀錄，卻標示 delivered",
+      "current_disposition": "blocked_external_live_gate",
+      "related_capability_ids": ["C006"]
+    },
+    "N07": {
+      "priority": "P1",
+      "issue": "簽核 Email 沒有真正送出，但紀錄已送達人員",
+      "current_disposition": "blocked_external_live_gate",
+      "related_capability_ids": ["C026", "C061", "C079"]
+    },
+    "N08": {
+      "priority": "P1",
+      "issue": "牌貼下載無可用檔案，連結也過期",
+      "current_disposition": "blocked_external_live_gate",
+      "related_capability_ids": ["C097", "C125"]
+    },
+    "N09": {
+      "priority": "P1",
+      "issue": "匯款證明缺少上傳、存在性與關聯查驗",
+      "current_disposition": "blocked_external_live_gate",
+      "related_capability_ids": ["C081", "C125"]
+    },
+    "N10": {
+      "priority": "P1（正式服務前）",
+      "issue": "派車／到達推播 provider 尚未接通",
+      "current_disposition": "blocked_external_live_gate",
+      "related_capability_ids": ["C023"]
+    },
+    "N11": {
+      "priority": "P1",
+      "issue": "轉接器管理頁的資料 API 404",
+      "current_disposition": "resolved_pending_release_verification",
+      "related_capability_ids": ["C104"]
+    },
+    "N12": {
+      "priority": "P2",
+      "issue": "憑證到期警告使用過期固定資料",
+      "current_disposition": "resolved_pending_release_verification",
+      "related_capability_ids": ["C105"]
+    },
+    "N13": {
+      "priority": "P2",
+      "issue": "合約列表仍停用詳情入口",
+      "current_disposition": "resolved_pending_release_verification",
+      "related_capability_ids": ["C134"]
+    },
+    "N14": {
+      "priority": "P1",
+      "issue": "合約詳情缺少執行派車所需營運條款",
+      "current_disposition": "resolved_pending_release_verification",
+      "related_capability_ids": ["C134"]
+    },
+    "R01": {
+      "priority": "P0",
+      "issue": "9個自訂網址無法建立HTTPS連線",
+      "current_disposition": "blocked_external_live_gate",
+      "related_capability_ids": ["C001"]
+    },
+    "R02": {
+      "priority": "P1",
+      "issue": "正常登入按鈕產生localhost callback並被拒絕",
+      "current_disposition": "resolved_pending_release_verification",
+      "related_capability_ids": ["C002"]
+    },
+    "R03": {
+      "priority": "P1",
+      "issue": "P5營運紀錄缺授權",
+      "current_disposition": "resolved_pending_release_verification",
+      "related_capability_ids": ["C093"]
+    },
+    "R04": {
+      "priority": "P1",
+      "issue": "車隊夥伴清單程式錯誤",
+      "current_disposition": "resolved_pending_release_verification",
+      "related_capability_ids": ["C101"]
+    },
+    "R05": {
+      "priority": "P1",
+      "issue": "人員工作階段403無限重試",
+      "current_disposition": "resolved_pending_release_verification",
+      "related_capability_ids": ["C007", "C119"]
+    },
+    "R06": {
+      "priority": "P1",
+      "issue": "首頁與合約頁服務端崩潰",
+      "current_disposition": "resolved_pending_release_verification",
+      "related_capability_ids": ["C004", "C085"]
+    },
+    "R07": {
+      "priority": "P1",
+      "issue": "開始叫車與替代入口都到403白頁",
+      "current_disposition": "resolved_pending_release_verification",
+      "related_capability_ids": ["C020", "C021"]
+    },
+    "R08": {
+      "priority": "P1",
+      "issue": "首頁與行程顯示示意資料，詳情查無該筆",
+      "current_disposition": "resolved_pending_release_verification",
+      "related_capability_ids": ["C013", "C017", "C119"]
+    },
+    "R09": {
+      "priority": "P1",
+      "issue": "聯絡司機與企業客服按鈕沒有動作",
+      "current_disposition": "resolved_pending_release_verification",
+      "related_capability_ids": ["C018"]
+    },
+    "R10": {
+      "priority": "P1",
+      "issue": "總覽示意數字與已連線清單混用",
+      "current_disposition": "resolved_pending_release_verification",
+      "related_capability_ids": ["C063"]
+    },
+    "R11": {
+      "priority": "P1",
+      "issue": "主要按鈕可點但未接線",
+      "current_disposition": "resolved_pending_release_verification",
+      "related_capability_ids": ["C064", "C069"]
+    },
+    "R12": {
+      "priority": "P1",
+      "issue": "事故申訴要求回覆卻未提供流程",
+      "current_disposition": "resolved_pending_release_verification",
+      "related_capability_ids": ["C067"]
+    },
+    "R13": {
+      "priority": "P1",
+      "issue": "對帳狀態自相矛盾",
+      "current_disposition": "resolved_pending_release_verification",
+      "related_capability_ids": ["C068"]
+    },
+    "R14": {
+      "priority": "P1",
+      "issue": "下載簽名檔使用假摘要與固定簽名字串",
+      "current_disposition": "blocked_external_live_gate",
+      "related_capability_ids": ["C083"]
+    },
+    "R15": {
+      "priority": "P1",
+      "issue": "結算金額可見性違反頁面角色定義",
+      "current_disposition": "resolved_pending_release_verification",
+      "related_capability_ids": ["C005"]
+    },
+    "R16": {
+      "priority": "P1",
+      "issue": "資料讀取失敗仍呈現可信統計",
+      "current_disposition": "resolved_pending_release_verification",
+      "related_capability_ids": ["C093", "C108", "C119"]
+    },
+    "R17": {
+      "priority": "P1",
+      "issue": "空間派車看板地圖圖磚404",
+      "current_disposition": "resolved_pending_release_verification",
+      "related_capability_ids": ["C040"]
+    },
+    "R18": {
+      "priority": "P2",
+      "issue": "跨系統稽核連結導至錯誤位置",
+      "current_disposition": "resolved_pending_release_verification",
+      "related_capability_ids": ["C048"]
+    },
+    "R19": {
+      "priority": "P2",
+      "issue": "預設助理遮擋工作控制項",
+      "current_disposition": "resolved_pending_release_verification",
+      "related_capability_ids": ["C048"]
+    },
+    "R20": {
+      "priority": "P2",
+      "issue": "自訂情境與乘客資料未一致帶入",
+      "current_disposition": "resolved_pending_release_verification",
+      "related_capability_ids": ["C015"]
+    },
+    "R21": {
+      "priority": "P2",
+      "issue": "過去日期可進最後確認頁",
+      "current_disposition": "open_gap_in_progress",
+      "related_capability_ids": ["C016"]
+    },
+    "R22": {
+      "priority": "P2",
+      "issue": "行動版橫向溢出",
+      "current_disposition": "resolved_pending_release_verification",
+      "related_capability_ids": ["C019", "C120"]
+    },
+    "R23": {
+      "priority": "P1",
+      "issue": "新增表單暗色文字難以閱讀且缺欄位關聯",
+      "current_disposition": "resolved_pending_release_verification",
+      "related_capability_ids": ["C070", "C120"]
+    },
+    "R24": {
+      "priority": "P2",
+      "issue": "查詢工具不足、頁籤不會篩選",
+      "current_disposition": "resolved_pending_release_verification",
+      "related_capability_ids": ["C013", "C069"]
+    },
+    "R25": {
+      "priority": "P2",
+      "issue": "未儲存輸入離頁直接丟失",
+      "current_disposition": "resolved_pending_release_verification",
+      "related_capability_ids": ["C070"]
+    },
+    "R26": {
+      "priority": "P2",
+      "issue": "總覽匯出未接線，但對帳CSV可下載",
+      "current_disposition": "resolved_pending_release_verification",
+      "related_capability_ids": ["C087"]
+    },
+    "R27": {
+      "priority": "P2",
+      "issue": "環境標示與使用者文案混入工程資訊",
+      "current_disposition": "resolved_pending_release_verification",
+      "related_capability_ids": ["C110"]
+    },
+    "R28": {
+      "priority": "P2",
+      "issue": "對帳開立日晚於到期日",
+      "current_disposition": "resolved_pending_release_verification",
+      "related_capability_ids": ["C084"]
+    },
+    "R29": {
+      "priority": "P2",
+      "issue": "文件入口與實際部署版本不一致",
+      "current_disposition": "blocked_external_live_gate",
+      "related_capability_ids": ["C001", "C124"]
+    },
+    "R30": {
+      "priority": "P2",
+      "issue": "司機web預覽在載入時崩潰",
+      "current_disposition": "blocked_external_live_gate",
+      "related_capability_ids": ["C049", "C062"]
+    }
+  },
+  "followup_tasks_created_by_this_task": [
+    {
+      "id": "SR-QA-BOOKING-001-FIX-QUOTA-RELEASE-STALE-GAP-ASSERTIONS",
+      "reason": "Stale gap-reproduction assertions in a file outside this task's write_scopes; see task_board_snapshot above.",
+      "owner": "Codex2",
+      "reviewer": "Codex"
+    }
+  ],
+  "acceptance_disclosure": {
+    "not_all_done": "This release candidate intentionally does NOT report the whole system as done: 1 capability (C016) has a genuinely open, in-progress gap with a failing CI candidate; 32 capabilities remain blocked_external_live_gate pending real domain/credentials/telephony this VM cannot provide; 7 capabilities are confirmed_scope_excluded (Phase 1 launch scope, not a defect); C118 (this task's own capability) is verified via the new closed-loop regression above, not via a live end-to-end run.",
+    "no_fabrication": "No fixture, fixed percentage, fake signature, or fake delivery was substituted for real verification anywhere in this task. Every disposition above is derived from either (a) a real ai-status.sh task-state lookup, (b) direct source-code inspection with a cited line reference, or (c) an actually-executed command with a captured exit code / pass count."
+  }
+}

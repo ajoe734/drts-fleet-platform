@@ -3,17 +3,20 @@ import "reflect-metadata";
 import { NestFactory } from "@nestjs/core";
 
 import { AppModule } from "./app.module";
+import { getCandidateSha } from "./common/candidate-sha.middleware";
 import { resolveMapProviderRuntimeConfig } from "./common/map-provider";
+import { validateAuthStartupConfig } from "./config/auth-startup-config";
 import { buildHealthPayload } from "./health/health.controller";
 
 async function bootstrap() {
+  validateAuthStartupConfig(process.env);
   resolveMapProviderRuntimeConfig(process.env);
 
   const app = await NestFactory.create(AppModule, {
     cors: true,
   });
   app.setGlobalPrefix("api", {
-    exclude: ["health"],
+    exclude: ["health", "metrics"],
   });
 
   app
@@ -23,8 +26,12 @@ async function bootstrap() {
       "/api/health",
       (
         _req: unknown,
-        res: { json: (body: ReturnType<typeof buildHealthPayload>) => void },
+        res: {
+          setHeader: (key: string, value: string) => void;
+          json: (body: ReturnType<typeof buildHealthPayload>) => void;
+        },
       ) => {
+        res.setHeader("x-drts-candidate-sha", getCandidateSha());
         res.json(buildHealthPayload());
       },
     );

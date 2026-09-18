@@ -2,8 +2,7 @@ import type { CanvasTone } from "@drts/ui-web";
 import { t as defaultTranslate } from "@/lib/translations";
 
 export const TENANT_CONSOLE_BRAND = "DRTS";
-export const TENANT_CONSOLE_ENV =
-  process.env.NEXT_PUBLIC_TENANT_CONSOLE_ENV ?? "production";
+export const TENANT_CONSOLE_ENV = "unknown";
 export const TENANT_CONSOLE_VERSION = "v0.1.0";
 
 type Translate = (key: string) => string;
@@ -91,6 +90,12 @@ export function createTenantNavEntries(t: Translate): TenantNavEntry[] {
       href: "/users",
       icon: "users",
       label: t("nav.users"),
+    },
+    {
+      key: "sessions",
+      href: "/sessions",
+      icon: "users",
+      label: t("nav.sessions"),
     },
     { divider: t("shell.nav.notifications") },
     {

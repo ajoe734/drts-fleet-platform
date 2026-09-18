@@ -1,0 +1,30 @@
+[Unit]
+Description=DRTS local orchestrator dashboard
+Documentation=file:@RELEASE_ROOT@/tools/development-orchestrator/systemd/README.md
+# Ordered after the supervisor so the first page load reads a heartbeat that
+# has already been written. Deliberately not After=default.target: this unit is
+# WantedBy that target, and naming it in both closes a loop systemd resolves by
+# deleting a job from the boot transaction. That is exactly how this service
+# spent four days enabled and never started. See ORCH-BOOT-CYCLE-001.
+After=network.target drts-supervisor.service
+
+[Service]
+Type=simple
+# The code runs from the pinned release; WorkingDirectory stays the canonical
+# root so machine truth is read where it lives. See systemd/install-common.sh.
+WorkingDirectory=@REPO_ROOT@
+Environment=HOST=127.0.0.1
+Environment=PORT=@DASHBOARD_PORT@
+Environment=PATH=%h/.local/bin:/usr/local/bin:/usr/bin:/bin
+ExecStart=/usr/bin/env bash @RELEASE_ROOT@/tools/development-orchestrator/bin/run-dashboard.sh
+Restart=on-failure
+RestartSec=5
+
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=drts-dashboard
+
+NoNewPrivileges=true
+
+[Install]
+WantedBy=default.target

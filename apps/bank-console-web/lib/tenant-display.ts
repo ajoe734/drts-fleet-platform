@@ -13,11 +13,14 @@ export function tenantDisplayText(
   value: string,
   tenant: BankDemoTenant,
 ): string {
+  if (!value || typeof value !== "string") {
+    return value ?? "";
+  }
   return value
-    .replaceAll("中信銀行", getBankTenantName(tenant, "zh"))
-    .replaceAll("中信", getBankTenantShortName(tenant, "zh"))
-    .replaceAll("CTBC", tenant.issuerCode)
-    .replaceAll("ctbc", tenant.code)
+    .replaceAll("艾克米銀行", getBankTenantName(tenant, "zh"))
+    .replaceAll("艾克米", getBankTenantShortName(tenant, "zh"))
+    .replaceAll("ACME", tenant.issuerCode)
+    .replaceAll("acme", tenant.code)
     .replace(/\bCTB(?=[-_A-Z0-9])/g, issuerShortCode(tenant));
 }
 

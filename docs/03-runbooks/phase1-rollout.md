@@ -52,7 +52,7 @@ approval.
 - `pnpm phase1:verify:production`
 - `pnpm phase1:verify:all`
 
-All commands route to `./scripts/phase1-rollout-verify.sh`.
+All commands route to `./operations/verification/phase1-rollout-verify.sh`.
 
 ## DB-Enabled Runtime Persistence Proof
 
@@ -64,7 +64,7 @@ not be over-claimed as durable.
 
 Local DB-enabled boot path:
 
-1. Start dependencies with `./scripts/dev-up.sh`.
+1. Start dependencies with `./tools/local-development/dev-up.sh`.
 2. Run `pnpm db:init` to apply `infra/migrations/` and `infra/seeds/`.
 3. Run `pnpm db:verify`.
 4. Run `pnpm phase1:verify:backfill`.
@@ -79,10 +79,10 @@ Executable anchors:
 
 - `apps/api/src/common/db/database.service.ts` reads `process.env.DATABASE_URL`
   and exposes `isEnabled()` for repository-backed modules.
-- `scripts/db-common.sh` supplies the local default `DATABASE_URL` when unset
+- `operations/database/db-common.sh` supplies the local default `DATABASE_URL` when unset
   and wraps `psql` execution for migration, seed, and verification scripts.
-- `scripts/db-apply.sh`, `scripts/db-seed.sh`, `scripts/db-verify.sh`, and
-  `scripts/phase1-rollout-verify.sh` are the command path.
+- `operations/database/db-apply.sh`, `operations/database/db-seed.sh`, `operations/database/db-verify.sh`, and
+  `operations/verification/phase1-rollout-verify.sh` are the command path.
 
 ### Evidence Status
 
@@ -133,7 +133,7 @@ If the verifier cannot provide a running local Postgres instance or an explicit
 `DATABASE_URL`, DEPLOY-001 is not "passed"; it is blocked with this exact
 requirement:
 
-`Start local Postgres with ./scripts/dev-up.sh or export DATABASE_URL, then run pnpm db:init, pnpm db:verify, and pnpm phase1:verify:backfill.`
+`Start local Postgres with ./tools/local-development/dev-up.sh or export DATABASE_URL, then run pnpm db:init, pnpm db:verify, and pnpm phase1:verify:backfill.`
 
 ## Pack 1: Backfill
 
@@ -147,7 +147,7 @@ requirement:
 
 ### Procedure
 
-1. Start local dependencies with `./scripts/dev-up.sh`.
+1. Start local dependencies with `./tools/local-development/dev-up.sh`.
 2. Initialize the canonical database with `pnpm db:init`.
 3. Copy the CSV templates from `infra/seeds/templates/` and fill them with UTF-8 data exported from the approved source systems.
 4. Load source files into staging tables or review queues first. Do not write raw source files directly into the service-owned truth tables.
