@@ -1834,7 +1834,32 @@ export class OwnedMobilityRepository {
     for (const outbox of changes.consumerNotificationOutbox ?? []) {
       writes.push(() =>
         executor.query(
+          /**
+           * design §5: "新增每 order 持久化 notification eventSequence，於生成
+           * outbox 同交易分配". `seq` is a CTE inside this single statement, so
+           * the allocation and the outbox row it belongs to always commit or
+           * roll back together without any separate round-trip or explicit
+           * transaction wrapper. `NOT EXISTS` guards the allocation itself: a
+           * retried write that ON CONFLICT DO NOTHING turns into a no-op must
+           * not still burn a sequence number, or a later retry of the *same*
+           * outbox row would observe a gap. Orders with no
+           * mobility.phase1_partner_notification_sequences row (anything that
+           * never got an OrderPartnerNotificationRoute -- most orders) leave
+           * `seq` empty and COALESCE falls back to the payload untouched; this
+           * is deliberately additive to the existing `payload` jsonb rather
+           * than a new column, so it needs no migration and no downstream
+           * outbox reader has to change to tolerate it.
+           */
           `
+            WITH seq AS (
+              UPDATE mobility.phase1_partner_notification_sequences
+              SET next_sequence = next_sequence + 1
+              WHERE order_id = $2
+                AND NOT EXISTS (
+                  SELECT 1 FROM ops.consumer_notification_outbox WHERE outbox_id = $1
+                )
+              RETURNING next_sequence - 1 AS event_sequence
+            )
             INSERT INTO ops.consumer_notification_outbox (
               outbox_id,
               order_id,
@@ -1847,7 +1872,14 @@ export class OwnedMobilityRepository {
               next_attempt_at,
               created_at,
               delivered_at
-            ) VALUES ($1, $2, $3, $4, $5, $6::jsonb, $7, $8, $9, $10, $11)
+            ) VALUES (
+              $1, $2, $3, $4, $5,
+              COALESCE(
+                (SELECT jsonb_set($6::jsonb, '{eventSequence}', to_jsonb(event_sequence)) FROM seq),
+                $6::jsonb
+              ),
+              $7, $8, $9, $10, $11
+            )
             ON CONFLICT (outbox_id) DO NOTHING
           `,
           [
