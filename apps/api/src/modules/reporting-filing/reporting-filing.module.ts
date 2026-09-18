@@ -1,4 +1,4 @@
-import { Module, OnModuleInit } from "@nestjs/common";
+import { Module, OnModuleInit, forwardRef } from "@nestjs/common";
 
 import { DatabaseModule } from "../../common/db";
 import { IdempotencyModule } from "../../common/idempotency";
@@ -29,7 +29,7 @@ import { ReportingFilingService } from "./reporting-filing.service";
     ComplaintModule,
     IncidentModule,
     MaintenanceModule,
-    OwnedMobilityModule,
+    forwardRef(() => OwnedMobilityModule),
     RegulatoryRegistryModule,
     ReportingModule,
     TenantPartnerModule,

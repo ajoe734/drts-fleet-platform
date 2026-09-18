@@ -1,4 +1,4 @@
-import { Module } from "@nestjs/common";
+import { Module, forwardRef } from "@nestjs/common";
 
 import { DatabaseModule } from "../../common/db";
 import { ComplaintModule } from "../complaint/complaint.module";
@@ -13,7 +13,7 @@ import { ReportingService } from "./reporting.service";
   imports: [
     DatabaseModule,
     ComplaintModule,
-    OwnedMobilityModule,
+    forwardRef(() => OwnedMobilityModule),
     RegulatoryRegistryModule,
     VehicleEligibilityModule,
   ],

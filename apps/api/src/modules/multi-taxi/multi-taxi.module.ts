@@ -1,4 +1,4 @@
-import { Module, OnModuleInit } from "@nestjs/common";
+import { Module, OnModuleInit, forwardRef } from "@nestjs/common";
 
 import { DatabaseModule } from "../../common/db";
 import { AuditNotificationModule } from "../audit-notification/audit-notification.module";
@@ -37,7 +37,7 @@ import { WebPushTransport } from "./web-push.transport";
   imports: [
     DatabaseModule,
     AuditNotificationModule,
-    OwnedMobilityModule,
+    forwardRef(() => OwnedMobilityModule),
     ReportingFilingModule,
     ServiceProductModule,
     TenantPartnerModule,
