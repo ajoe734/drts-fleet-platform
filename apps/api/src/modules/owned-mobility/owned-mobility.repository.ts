@@ -1837,27 +1837,7 @@ export class OwnedMobilityRepository {
 
     for (const outbox of changes.consumerNotificationOutbox ?? []) {
       writes.push(async () => {
-        const checkResult = await executor.query(
-          `SELECT 1 FROM ops.consumer_notification_outbox WHERE outbox_id = $1`,
-          [outbox.outboxId]
-        );
-        if (checkResult.rows.length > 0) {
-          return;
-        }
-
-        const seq = this.multiTaxiRepository
-          ? await this.multiTaxiRepository.allocateNotificationEventSequence(
-              outbox.orderId,
-              executor,
-            )
-          : null;
-
-        let finalPayload = outbox.payload;
-        if (seq != null) {
-          finalPayload = { ...(outbox.payload as any), eventSequence: seq };
-        }
-
-        await executor.query(
+        const insertResult = await executor.query(
           `
             INSERT INTO ops.consumer_notification_outbox (
               outbox_id,
@@ -1877,6 +1857,7 @@ export class OwnedMobilityRepository {
               $7, $8, $9, $10, $11
             )
             ON CONFLICT (outbox_id) DO NOTHING
+            RETURNING outbox_id
           `,
           [
             outbox.outboxId,
@@ -1884,7 +1865,7 @@ export class OwnedMobilityRepository {
             outbox.passengerSubjectRef,
             outbox.eventType,
             outbox.assignmentVersion,
-            JSON.stringify(finalPayload),
+            JSON.stringify(outbox.payload),
             outbox.status,
             outbox.attemptCount,
             outbox.nextAttemptAt,
@@ -1892,6 +1873,29 @@ export class OwnedMobilityRepository {
             outbox.deliveredAt,
           ],
         );
+
+        if (insertResult.rows.length === 0) {
+          return;
+        }
+
+        const seq = this.multiTaxiRepository
+          ? await this.multiTaxiRepository.allocateNotificationEventSequence(
+              outbox.orderId,
+              executor,
+            )
+          : null;
+
+        if (seq != null) {
+          const finalPayload = { ...(outbox.payload as any), eventSequence: seq };
+          await executor.query(
+            `
+              UPDATE ops.consumer_notification_outbox
+              SET payload = $2::jsonb
+              WHERE outbox_id = $1
+            `,
+            [outbox.outboxId, JSON.stringify(finalPayload)],
+          );
+        }
       });
     }
 
