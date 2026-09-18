@@ -1,6 +1,6 @@
 import { describe, expect, it, beforeAll, afterAll } from "vitest";
 import { createRequire } from "node:module";
-// @ts-ignore
+// @ts-expect-error test override
 const require = createRequire(
   new URL("../../../../apps/api/package.json", import.meta.url),
 );
@@ -8,7 +8,6 @@ const { Pool } = require("pg");
 import { randomUUID } from "node:crypto";
 import { MultiTaxiRepository } from "../../../../apps/api/src/modules/multi-taxi/multi-taxi.repository";
 import { OwnedMobilityRepository } from "../../../../apps/api/src/modules/owned-mobility/owned-mobility.repository";
-import type { ConsumerNotificationOutboxRecord } from "@drts/contracts";
 
 const testDbUrl =
   process.env.CONCURRENCY_TEST_DATABASE_URL ??
@@ -105,7 +104,7 @@ describe("OwnedMobilityRepository consumer notification outbox event sequence", 
           (tx as any).query = originalQuery;
         }
       });
-    } catch (err) {
+    } catch {
       errorThrown = true;
     }
 
