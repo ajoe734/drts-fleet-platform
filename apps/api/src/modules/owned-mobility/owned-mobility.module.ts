@@ -12,6 +12,7 @@ import { ServiceAreaModule } from "../service-area/service-area.module";
 import { ServiceProductModule } from "../service-product/service-product.module";
 import { PlatformPresenceModule } from "../platform-presence/platform-presence.module";
 import { TenantPartnerModule } from "../tenant-partner/tenant-partner.module";
+import { MultiTaxiModule } from "../multi-taxi/multi-taxi.module";
 import { TenantPartnerService } from "../tenant-partner/tenant-partner.service";
 import { VehicleEligibilityModule } from "../vehicle-eligibility/vehicle-eligibility.module";
 import { VoiceBookingModule } from "../voice-booking/voice-booking.module";
@@ -38,6 +39,7 @@ import { OwnedAutonomousDispatchExecutorService } from "./owned-autonomous-dispa
     forwardRef(() => SandboxDispatchGateModule),
     forwardRef(() => TenantPartnerModule),
     forwardRef(() => PlatformPresenceModule),
+    forwardRef(() => MultiTaxiModule),
   ],
   controllers: [OwnedMobilityController],
   providers: [
