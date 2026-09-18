@@ -100,9 +100,10 @@ export class ShiftAttendanceController {
       driverId: effectiveDriverId,
     };
 
-    return Promise.resolve(
+    return toApiSuccessEnvelope(
       this.shiftAttendanceService.clockOut(effectiveCommand, requestId),
-    ).then((result) => toApiSuccessEnvelope(result, requestId));
+      requestId,
+    );
   }
 
   @Get("shifts")

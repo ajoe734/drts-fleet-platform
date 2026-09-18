@@ -1,6 +1,4 @@
-import { cookies } from "next/headers";
 import Link from "next/link";
-import { EnterpriseGatePage } from "@/components/enterprise-state-page";
 import {
   EBtnContent,
   ECard,
@@ -11,17 +9,9 @@ import {
 } from "@/components/ent-kit";
 import { EntParty, EntRoute } from "@/components/ent-screen-bits";
 import {
-  classifyEnterpriseDashboardFetchError,
-  formatEnterpriseBookingTime,
-  getEnterpriseDispatchTenantClient,
-  getEnterpriseOrderStatusTone,
-  selectActiveEnterpriseTrip,
-} from "@/lib/api-client";
-import {
-  ENTERPRISE_TENANT_SESSION_COOKIE,
-  verifyEnterpriseTenantSession,
-} from "@/lib/enterprise-session.server";
-import {
+  enterpriseQuotaSummary,
+  getBookingStateMeta,
+  getEnterpriseBookings,
   getEnterpriseTenant,
   getEnterpriseUser,
   getPolicyNotes,
@@ -29,7 +19,6 @@ import {
 import { enterpriseTheme as t } from "@/lib/enterprise-theme";
 import { getServerLocale } from "@/lib/server-locale";
 import { type TranslationKey, t as translate } from "@/lib/translations";
-import type { TenantDashboardSummary } from "@drts/contracts";
 
 const POLICY_ICONS = ["bolt", "building", "clock"] as const;
 
@@ -37,31 +26,20 @@ export default async function HomePage() {
   const locale = await getServerLocale();
   const tr = (key: TranslationKey, params?: Record<string, string | number>) =>
     translate(key, params, locale);
-
-  const cookieStore = await cookies();
-  const verified = await verifyEnterpriseTenantSession(
-    cookieStore.get(ENTERPRISE_TENANT_SESSION_COOKIE)?.value,
-  );
-  if (!verified.session) {
-    return <EnterpriseGatePage kind="auth-required" />;
-  }
-
-  let summary: TenantDashboardSummary | null = null;
-  try {
-    summary = await getEnterpriseDispatchTenantClient(
-      verified.session.tenantId,
-    ).getDashboardSummary();
-  } catch (error) {
-    return <EnterpriseGatePage kind={classifyEnterpriseDashboardFetchError(error)} />;
-  }
-
+  const bookings = getEnterpriseBookings(locale);
+  const stateMeta = getBookingStateMeta(locale);
   const user = getEnterpriseUser(locale);
   const tenant = getEnterpriseTenant(locale);
   const policyNotes = getPolicyNotes(locale);
 
-  const upcoming = summary.upcomingBookings;
-  const active = selectActiveEnterpriseTrip(upcoming);
-  const upcomingPreview = upcoming.slice(0, 3);
+  const active = bookings.find(
+    (b) => b.state === "enroute" || b.state === "assigned",
+  );
+  const upcoming = bookings
+    .filter((b) =>
+      ["assigned", "enroute", "approval", "reserved"].includes(b.state),
+    )
+    .slice(0, 3);
 
   return (
     <>
@@ -104,7 +82,7 @@ export default async function HomePage() {
         </Link>
       </div>
 
-      {/* KPI strip — driven by the authoritative tenant dashboard summary */}
+      {/* KPI strip */}
       <div
         style={{
           display: "grid",
@@ -117,23 +95,23 @@ export default async function HomePage() {
           t={t}
           label={tr("home.kpi.quota")}
           en="quota"
-          value={summary.bookingCount}
-          sub={tr("home.kpi.quotaSub", { period: summary.periodMonth })}
+          value={enterpriseQuotaSummary.rides}
+          sub={enterpriseQuotaSummary.amount}
         />
         <EKpi
           t={t}
           label={tr("home.kpi.approval")}
           en="approval"
-          value={summary.pendingApprovalCount}
-          sub={tr("home.kpi.approvalSub2")}
-          {...(summary.pendingApprovalCount > 0 ? { tone: "warn" as const } : {})}
+          value={tr("home.kpi.approvalValue")}
+          sub={tr("home.kpi.approvalSub")}
+          tone="warn"
         />
         <EKpi
           t={t}
           label={tr("home.kpi.trips")}
           en="trips"
-          value={summary.completedTripCount}
-          sub={tr("home.kpi.tripsSub2")}
+          value={tr("home.kpi.tripsValue")}
+          sub={tr("home.kpi.tripsSub")}
         />
       </div>
 
@@ -162,19 +140,44 @@ export default async function HomePage() {
                 <div style={{ flex: 1, minWidth: 200 }}>
                   <EntParty
                     t={t}
-                    passenger={active.passengerName}
+                    passenger={active.passenger}
                     passengerLabel={tr("party.passenger")}
                     compact
-                    subline={null}
+                    subline={
+                      active.self ? (
+                        <div
+                          style={{ fontSize: 12, color: t.muted, marginTop: 1 }}
+                        >
+                          {tr("party.self")}
+                        </div>
+                      ) : (
+                        <div
+                          style={{
+                            fontSize: 12,
+                            color: t.warn,
+                            marginTop: 1,
+                            display: "flex",
+                            alignItems: "center",
+                            gap: 5,
+                          }}
+                        >
+                          <EIcon name="users" size={13} />
+                          {tr("party.delegate", { name: active.bookedBy })}
+                        </div>
+                      )
+                    }
                   />
                   <div style={{ marginTop: 14 }}>
                     <EntRoute
                       t={t}
-                      from={active.pickupAddress}
-                      to={active.dropoffAddress}
-                      win={formatEnterpriseBookingTime(
-                        active.reservationWindowStart,
-                      )}
+                      from={active.from}
+                      to={active.to}
+                      win={active.window}
+                      airportLabel={
+                        active.flight
+                          ? `${active.flight} · ${active.terminal}`
+                          : undefined
+                      }
                     />
                   </div>
                 </div>
@@ -189,8 +192,8 @@ export default async function HomePage() {
                     alignSelf: "flex-start",
                   }}
                 >
-                  <EPill t={t} tone={getEnterpriseOrderStatusTone(active.status)} dot>
-                    {tr(`status.order.${active.status}` as TranslationKey)}
+                  <EPill t={t} tone={stateMeta[active.state].tone} dot>
+                    {stateMeta[active.state].label}
                   </EPill>
                   <div
                     style={{
@@ -201,10 +204,10 @@ export default async function HomePage() {
                       margin: "10px 0 0",
                     }}
                   >
-                    {"—"}
+                    {active.etaMinutes ?? "—"}
                   </div>
                   <div style={{ fontSize: 11, color: t.muted }}>
-                    {tr("home.activeTrip.etaUnavailable")}
+                    {tr("home.activeTrip.etaSuffix")}
                   </div>
                 </div>
               </div>
@@ -227,93 +230,84 @@ export default async function HomePage() {
               </Link>
             }
           >
-            {upcomingPreview.length === 0 ? (
-              <div
-                data-testid="enterprise-home-upcoming-empty"
-                style={{ padding: 18, color: t.muted, fontSize: 13 }}
-              >
-                {tr("home.upcoming.empty")}
-              </div>
-            ) : (
-              <div>
-                {upcomingPreview.map((b, i) => (
-                  <Link
-                    key={b.bookingId}
-                    href={`/bookings/${encodeURIComponent(b.bookingId)}`}
-                    data-testid={`enterprise-home-upcoming-${b.bookingId}`}
+            <div>
+              {upcoming.map((b, i) => (
+                <div
+                  key={b.id}
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    gap: 14,
+                    padding: "14px 18px",
+                    borderTop: i ? "1px solid " + t.lineSoft : "none",
+                  }}
+                >
+                  <span
                     style={{
-                      display: "flex",
+                      width: 36,
+                      height: 36,
+                      borderRadius: 14,
+                      background: b.self ? t.primaryBg : t.surfaceLo,
+                      color: b.self ? t.primary : t.muted,
+                      border: "1px solid " + (b.self ? t.primaryBd : t.line),
+                      display: "inline-flex",
                       alignItems: "center",
-                      gap: 14,
-                      padding: "14px 18px",
-                      borderTop: i ? "1px solid " + t.lineSoft : "none",
-                      textDecoration: "none",
-                      color: t.ink,
+                      justifyContent: "center",
+                      fontSize: 14,
+                      fontWeight: 700,
+                      flexShrink: 0,
                     }}
                   >
-                    <span
+                    {b.passenger.slice(0, 1)}
+                  </span>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div
+                      style={{ display: "flex", alignItems: "center", gap: 7 }}
+                    >
+                      <span style={{ fontSize: 13.5, fontWeight: 600 }}>
+                        {b.passenger}
+                      </span>
+                      {!b.self && (
+                        <span style={{ fontSize: 11, color: t.warn }}>
+                          ·{" "}
+                          {tr("home.upcoming.delegateShort", {
+                            name: b.bookedBy,
+                          })}
+                        </span>
+                      )}
+                    </div>
+                    <div
                       style={{
-                        width: 36,
-                        height: 36,
-                        borderRadius: 14,
-                        background: t.surfaceLo,
+                        fontSize: 12,
                         color: t.muted,
-                        border: "1px solid " + t.line,
-                        display: "inline-flex",
-                        alignItems: "center",
-                        justifyContent: "center",
-                        fontSize: 14,
-                        fontWeight: 700,
-                        flexShrink: 0,
+                        marginTop: 1,
+                        whiteSpace: "nowrap",
+                        overflow: "hidden",
+                        textOverflow: "ellipsis",
                       }}
                     >
-                      {b.passengerName.slice(0, 1)}
-                    </span>
-                    <div style={{ flex: 1, minWidth: 0 }}>
-                      <div
-                        style={{
-                          display: "flex",
-                          alignItems: "center",
-                          gap: 7,
-                        }}
-                      >
-                        <span style={{ fontSize: 13.5, fontWeight: 600 }}>
-                          {b.passengerName}
-                        </span>
-                      </div>
-                      <div
-                        style={{
-                          fontSize: 12,
-                          color: t.muted,
-                          marginTop: 1,
-                          whiteSpace: "nowrap",
-                          overflow: "hidden",
-                          textOverflow: "ellipsis",
-                        }}
-                      >
-                        {b.pickupAddress} → {b.dropoffAddress}
-                      </div>
+                      {b.from} → {b.to}
                     </div>
-                    <div style={{ textAlign: "right", flexShrink: 0 }}>
-                      <div
-                        style={{
-                          fontSize: 12.5,
-                          fontFamily: t.mono,
-                          color: t.ink2,
-                        }}
-                      >
-                        {formatEnterpriseBookingTime(b.reservationWindowStart)}
-                      </div>
-                      <div style={{ marginTop: 4 }}>
-                        <EPill t={t} tone={getEnterpriseOrderStatusTone(b.status)} dot>
-                          {tr(`status.order.${b.status}` as TranslationKey)}
-                        </EPill>
-                      </div>
+                  </div>
+                  <div style={{ textAlign: "right", flexShrink: 0 }}>
+                    <div
+                      style={{
+                        fontSize: 12.5,
+                        fontFamily: t.mono,
+                        color: t.ink2,
+                      }}
+                    >
+                      {b.window}
                     </div>
-                  </Link>
-                ))}
-              </div>
-            )}
+                    <div style={{ marginTop: 4 }}>
+                      <EPill t={t} tone={stateMeta[b.state].tone} dot>
+                        {stateMeta[b.state].label}
+                      </EPill>
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
           </ECard>
         </div>
 

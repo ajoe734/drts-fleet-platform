@@ -23,7 +23,6 @@ import type {
   RejectExclusivityCommand,
   RegulatoryRegistrySummary,
   SubmitExclusivityReviewCommand,
-  UpdateDriverLicensesCommand,
   UpdateDriverMasterLifecycleCommand,
   UpdateDriverServiceBucketsCommand,
   UpdateDriverWorkStateCommand,
@@ -258,38 +257,6 @@ export class RegulatoryRegistryController {
   ) {
     return toApiSuccessEnvelope(
       this.regulatoryRegistryService.updateDriverLifecycle(
-        driverId,
-        command,
-        requestId,
-      ),
-      requestId,
-    );
-  }
-
-  @Get("drivers/expiring-licenses")
-  listExpiringDriverLicenses(
-    @Query("windowDays") windowDays?: string,
-    @Headers("x-request-id") requestId?: string,
-  ) {
-    const parsedDays = windowDays ? parseInt(windowDays, 10) : 30;
-    return toApiSuccessEnvelope(
-      {
-        items: this.regulatoryRegistryService.listExpiringDriverLicenses(
-          Number.isNaN(parsedDays) ? 30 : parsedDays,
-        ),
-      },
-      requestId,
-    );
-  }
-
-  @Post("drivers/:driverId/licenses")
-  updateDriverLicenses(
-    @Param("driverId") driverId: string,
-    @Body() command: UpdateDriverLicensesCommand,
-    @Headers("x-request-id") requestId?: string,
-  ) {
-    return toApiSuccessEnvelope(
-      this.regulatoryRegistryService.updateDriverLicenses(
         driverId,
         command,
         requestId,

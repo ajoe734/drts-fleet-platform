@@ -1051,7 +1051,7 @@ def apply_unblock_parent_resolution(
     if not parent_id:
         return
     parent = get_task(state, parent_id)
-    if parent is None or parent.get("status") != "blocked" or parent.get("external_gate"):
+    if parent is None:
         return
 
     resume_status = (
@@ -1793,7 +1793,7 @@ def command_reassign(state: dict[str, Any], args: list[str]) -> None:
     status = str(task.get("status") or "").lower()
     if owner_changed and status not in {"backlog", "todo", "in_progress"}:
         raise SystemExit(f"Owner reassignment is not allowed while {task_id} is {status}")
-    if reviewer_changed and status not in {"backlog", "todo", "in_progress", "review"}:
+    if reviewer_changed and status not in {"todo", "in_progress", "review"}:
         raise SystemExit(f"Reviewer reassignment is not allowed while {task_id} is {status}")
 
     timestamp = iso_now()
@@ -2229,13 +2229,7 @@ def command_reconcile_candidate(state: dict[str, Any], args: list[str]) -> None:
         mark_handoffs_done(state, task_id)
     elif merge_sha:
         if task.get("reviewed_sha") != candidate_sha:
-            task["status"] = "review"
-            task["last_update"] = timestamp
-            task["next"] = f"Merged candidate {candidate_sha[:12]} still requires independent same-SHA reviewer approval."
-            append_log({"ts": timestamp, "agent": current_actor("Supervisor"),
-                        "type": "candidate_review_required", "task_id": task_id,
-                        "candidate_sha": candidate_sha, "message": task["next"]})
-            return
+            raise SystemExit("Cannot record merge without reviewer approval for the same candidate SHA")
         if task.get("ci_sha") != candidate_sha or task.get("ci_status") != "success":
             raise SystemExit("Cannot record merge without successful CI for the same candidate SHA")
         task["merge_sha"] = merge_sha

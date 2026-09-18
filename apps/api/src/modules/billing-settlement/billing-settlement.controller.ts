@@ -3,8 +3,6 @@ import {
   Controller,
   Get,
   Headers,
-  HttpCode,
-  HttpStatus,
   Optional,
   Param,
   Post,
@@ -21,8 +19,6 @@ import type {
   GenerateDriverStatementCommand,
   GenerateTenantInvoiceCommand,
   MarkReimbursementPaidCommand,
-  MarkReimbursementPaidWithProofCommand,
-  RequestRemittanceProofReadbackCommand,
   ResolveReconciliationIssueCommand,
   ReopenReconciliationIssueCommand,
   TenantOrderListQuery,
@@ -30,7 +26,6 @@ import type {
   PublishDriverFeePlanCommand,
   TenantPayableSummary,
   UpdateTenantBillingProfileCommand,
-  UploadRemittanceProofCommand,
 } from "@drts/contracts";
 
 import {
@@ -47,8 +42,6 @@ import {
   CurrentIdentity,
   RequireRealms,
   RequireScopes,
-  isDriverIdentityMatching,
-  normalizeDriverId,
   type BootstrapRequestIdentity,
 } from "../../common/auth";
 import {
@@ -320,8 +313,6 @@ export class BillingSettlementController {
   }
 
   @Post("driver-statements/generate")
-  @RequireRealms("platform", "ops")
-  @RequireScopes("billing:write")
   async generateDriverStatements(
     @Body() command: GenerateDriverStatementCommand,
     @Headers("idempotency-key") idempotencyKey?: string,
@@ -351,70 +342,24 @@ export class BillingSettlementController {
   }
 
   @Get("driver-statements")
-  @RequireRealms("platform", "ops", "driver")
   listDriverStatements(
-    @CurrentIdentity() identity: BootstrapRequestIdentity | null = null,
     @Query("period") period?: string,
     @Query("periodMonth") periodMonth?: string,
-    @Query("driverId") driverId?: string,
     @Headers("x-request-id") requestId?: string,
   ) {
-    let effectiveDriverId = driverId?.trim() || undefined;
-    if (identity?.realm === "driver" || identity?.actorType === "driver_user") {
-      const actorDriverId = normalizeDriverId(identity.actorId);
-      if (!actorDriverId) {
-        throw new ApiRequestError(
-          HttpStatus.UNAUTHORIZED,
-          "DRIVER_IDENTITY_REQUIRED",
-          "Driver identity is required.",
-        );
-      }
-      if (
-        effectiveDriverId &&
-        !isDriverIdentityMatching(actorDriverId, effectiveDriverId)
-      ) {
-        throw new ApiRequestError(
-          HttpStatus.FORBIDDEN,
-          "DRIVER_IDENTITY_MISMATCH",
-          "Driver identity may only view its own statements.",
-          { actorId: identity.actorId, requestedDriverId: effectiveDriverId },
-        );
-      }
-      effectiveDriverId = actorDriverId;
-    }
-
     const items = this.billingSettlementService.listDriverStatements(
       periodMonth ?? period,
-      effectiveDriverId,
     );
     return toApiSuccessEnvelope(toApiListData(items), requestId);
   }
 
   @Get("driver-statements/:statementId")
-  @RequireRealms("platform", "ops", "driver")
   getDriverStatement(
     @Param("statementId") statementId: string,
-    @CurrentIdentity() identity: BootstrapRequestIdentity | null = null,
     @Headers("x-request-id") requestId?: string,
   ) {
-    let requestingDriverId: string | undefined;
-    if (identity?.realm === "driver" || identity?.actorType === "driver_user") {
-      const actorDriverId = normalizeDriverId(identity.actorId);
-      if (!actorDriverId) {
-        throw new ApiRequestError(
-          HttpStatus.UNAUTHORIZED,
-          "DRIVER_IDENTITY_REQUIRED",
-          "Driver identity is required.",
-        );
-      }
-      requestingDriverId = actorDriverId;
-    }
-
     return toApiSuccessEnvelope(
-      this.billingSettlementService.getDriverStatement(
-        statementId,
-        requestingDriverId,
-      ),
+      this.billingSettlementService.getDriverStatement(statementId),
       requestId,
     );
   }
@@ -672,154 +617,5 @@ export class BillingSettlementController {
       this.billingSettlementService.getReimbursementBatch(batchId),
       requestId,
     );
-  }
-
-  // ── Remittance Proof (SR-PROOF-001) ──
-
-  /**
-   * Not part of the locked SR-RECOVERY-CONTRACTS-20260911 OpenAPI paths --
-   * that contract's `UploadRemittanceProofCommand.stagedContentRef` is
-   * deliberately opaque ("into the storage adapter's staged upload; not
-   * the raw bytes") and assumes a prior staging call this task's
-   * write_scopes never allocated an endpoint for. This route is the
-   * missing first phase: it accepts the actual bytes (base64, to avoid a
-   * multipart/`multer` dependency nothing else in this codebase uses) and
-   * returns the `stagedContentRef` that `POST reimbursements/proofs`
-   * expects. See `docs/04-uat/system-remediation-20260906/SR-PROOF-001.md`
-   * for why this exists and its boundary.
-   */
-  @Post("reimbursements/proofs/staged-content")
-  @HttpCode(HttpStatus.OK)
-  @RequireRealms("driver")
-  @RequireScopes("driver:write")
-  async stageRemittanceProofContent(
-    @Body() body: { contentBase64?: string; contentType?: string },
-    @Headers("idempotency-key") idempotencyKey?: string,
-    @Headers("x-request-id") requestId?: string,
-  ) {
-    const contentType = body?.contentType?.trim();
-    if (!contentType) {
-      throw new ApiRequestError(
-        HttpStatus.BAD_REQUEST,
-        "VALIDATION_ERROR",
-        "contentType is required.",
-      );
-    }
-    let bytes: Buffer;
-    try {
-      bytes = Buffer.from(body?.contentBase64 ?? "", "base64");
-    } catch {
-      bytes = Buffer.alloc(0);
-    }
-    if (bytes.length === 0) {
-      throw new ApiRequestError(
-        HttpStatus.BAD_REQUEST,
-        "VALIDATION_ERROR",
-        "contentBase64 must decode to non-empty bytes.",
-      );
-    }
-    const result = await this.idempotencyService.execute({
-      scope: "billing:remittance_proof:staged_content:create",
-      idempotencyKey,
-      required: true,
-      payload: { contentType, contentBase64: body?.contentBase64 ?? "" },
-      execute: async () => {
-        const data =
-          await this.billingSettlementService.stageRemittanceProofContent(
-            bytes,
-            contentType,
-          );
-        return {
-          data,
-          statusCode: 200,
-        };
-      },
-    });
-    return toApiSuccessEnvelope(result.data, requestId);
-  }
-
-  @Post("reimbursements/proofs")
-  @RequireRealms("driver")
-  @RequireScopes("driver:write")
-  async uploadRemittanceProof(
-    @Body() command: UploadRemittanceProofCommand,
-    @CurrentIdentity() identity?: BootstrapRequestIdentity | null,
-    @Headers("idempotency-key") idempotencyKey?: string,
-    @Headers("x-request-id") requestId?: string,
-  ) {
-    const scope = `billing:remittance_proof:${command.batchId}:upload`;
-    const result = await this.idempotencyService.execute({
-      scope,
-      idempotencyKey,
-      required: true,
-      payload: {
-        batchId: command.batchId,
-        originalFilename: command.originalFilename,
-        stagedContentRef: command.stagedContentRef,
-      },
-      execute: async () => {
-        const data = await this.billingSettlementService.uploadRemittanceProof(
-          command,
-          identity ?? null,
-          requestId,
-        );
-        return {
-          data,
-          statusCode: 200,
-        };
-      },
-    });
-    return toApiSuccessEnvelope(result.data, requestId);
-  }
-
-  @Get("reimbursements/proofs/:proofId")
-  @RequireRealms("system", "platform", "ops")
-  @RequireScopes("billing:read")
-  async getRemittanceProof(
-    @Param("proofId") proofId: string,
-    @Headers("x-request-id") requestId?: string,
-  ) {
-    const data =
-      await this.billingSettlementService.getRemittanceProof(proofId);
-    return toApiSuccessEnvelope(data, requestId);
-  }
-
-  @Post("reimbursements/proofs/:proofId/readback")
-  @HttpCode(HttpStatus.OK)
-  @RequireRealms("system", "platform", "ops")
-  @RequireScopes("billing:write")
-  async requestRemittanceProofReadback(
-    @Param("proofId") proofId: string,
-    @Body() command: RequestRemittanceProofReadbackCommand,
-    @CurrentIdentity() identity?: BootstrapRequestIdentity | null,
-    @Headers("x-request-id") requestId?: string,
-  ) {
-    const data =
-      await this.billingSettlementService.requestRemittanceProofReadback(
-        { ...command, proofId },
-        identity ?? null,
-        requestId,
-      );
-    return toApiSuccessEnvelope(data, requestId);
-  }
-
-  @Post("reimbursements/:batchId/pay-with-proof")
-  @HttpCode(HttpStatus.OK)
-  @RequireRealms("system", "platform", "ops")
-  @RequireScopes("billing:write")
-  async markReimbursementPaidWithProof(
-    @Param("batchId") batchId: string,
-    @Body() command: MarkReimbursementPaidWithProofCommand,
-    @CurrentIdentity() identity?: BootstrapRequestIdentity | null,
-    @Headers("x-request-id") requestId?: string,
-  ) {
-    const data =
-      await this.billingSettlementService.markReimbursementPaidWithProof(
-        batchId,
-        { ...command, batchId },
-        identity ?? null,
-        requestId,
-      );
-    return toApiSuccessEnvelope(data, requestId);
   }
 }

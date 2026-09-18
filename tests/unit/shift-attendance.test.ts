@@ -65,7 +65,7 @@ describe("shift attendance service", () => {
     // Wait a tiny bit so totalHours > 0
     await new Promise((r) => setTimeout(r, 10));
 
-    const result = await service.clockOut({
+    const result = service.clockOut({
       driverId: "driver-003",
       location: "Depot B",
       odometer: 50150,
@@ -83,7 +83,7 @@ describe("shift attendance service", () => {
   it("rejects clock-out without active shift", async () => {
     const { service } = createService();
 
-    await expect(service.clockOut({ driverId: "driver-nonexistent" })).rejects.toThrow(
+    expect(() => service.clockOut({ driverId: "driver-nonexistent" })).toThrow(
       "Api Request Error",
     );
   });
@@ -92,7 +92,7 @@ describe("shift attendance service", () => {
     const { service } = createService();
 
     await service.clockIn({ driverId: "driver-004" });
-    await service.clockOut({ driverId: "driver-004" });
+    service.clockOut({ driverId: "driver-004" });
 
     const attendance = service.listAttendance("driver-004");
     expect(attendance).toHaveLength(1);
@@ -119,7 +119,7 @@ describe("shift attendance service", () => {
     const { service } = createService();
 
     await service.clockIn({ driverId: "driver-006" });
-    await service.clockOut({ driverId: "driver-006" });
+    service.clockOut({ driverId: "driver-006" });
 
     const shifts = service.listShifts("driver-006");
     expect(() => service.abandonShift(shifts[0]!.shiftId, "reason")).toThrow(

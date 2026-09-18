@@ -9,15 +9,7 @@ import type {
 } from "@drts/contracts";
 
 import { DatabaseService } from "../../common/db";
-import type { PoolClient, QueryResult, QueryResultRow } from "pg";
 import type { AcademyCourseVersion } from "./academy-domain";
-
-type QueryExecutor = {
-  query<R extends QueryResultRow = any>(
-    queryText: string,
-    values?: any[],
-  ): Promise<QueryResult<R>>;
-};
 
 interface CourseRow {
   course_id: string;
@@ -78,60 +70,6 @@ export class AcademyRepository {
     return this.databaseService?.isEnabled() ?? false;
   }
 
-  async executeSerializableTransaction<T>(
-    work: (client: PoolClient) => Promise<T>,
-    maxRetries = 5,
-  ): Promise<T> {
-    if (!this.isEnabled()) {
-      throw new Error("DatabaseService is not enabled");
-    }
-
-    for (let attempt = 1; attempt <= maxRetries; attempt++) {
-      const client = await this.databaseService!.connect();
-      try {
-        await client.query("BEGIN TRANSACTION ISOLATION LEVEL SERIALIZABLE");
-        const result = await work(client);
-        await client.query("COMMIT");
-        return result;
-      } catch (error: any) {
-        try {
-          await client.query("ROLLBACK");
-        } catch {
-          // ignore rollback error
-        }
-        if (error?.code === "40001" && attempt < maxRetries) {
-          await new Promise((resolve) =>
-            setTimeout(resolve, Math.random() * 50 + 20 * attempt),
-          );
-          continue;
-        }
-        throw error;
-      } finally {
-        client.release();
-      }
-    }
-    throw new Error("Serialization retries exhausted");
-  }
-
-  private getExecutor(client?: PoolClient): QueryExecutor {
-    return (client ?? this.databaseService!) as unknown as QueryExecutor;
-  }
-
-  async getDriverTrainingProfileStatus(
-    driverId: string,
-    client?: PoolClient,
-  ): Promise<string | null> {
-    if (!this.isEnabled()) {
-      return null;
-    }
-    const executor = this.getExecutor(client);
-    const result = await executor.query<{ training_status: string }>(
-      `SELECT training_status FROM reg.driver_reg_profiles WHERE driver_id = $1`,
-      [driverId],
-    );
-    return result.rows[0]?.training_status ?? null;
-  }
-
   private toCourseVersion(
     course: CourseRow,
     modules: ModuleRow[],
@@ -171,11 +109,9 @@ export class AcademyRepository {
   private async loadModulesAndQuestions(
     courseId: string,
     courseVersion: number,
-    client?: PoolClient,
   ) {
-    const executor = this.getExecutor(client);
     const [modulesResult, questionsResult] = await Promise.all([
-      executor.query<ModuleRow>(
+      this.databaseService!.query<ModuleRow>(
         `
           SELECT module_id, title, module_type, content_url, duration_minutes
           FROM reg.phase1_driver_academy_modules
@@ -184,7 +120,7 @@ export class AcademyRepository {
         `,
         [courseId, courseVersion],
       ),
-      executor.query<QuestionRow>(
+      this.databaseService!.query<QuestionRow>(
         `
           SELECT question_id, prompt, options, correct_option_id
           FROM reg.phase1_driver_quiz_questions
@@ -227,14 +163,11 @@ export class AcademyRepository {
   }
 
   /** The current (highest-version) published snapshot of every known course. */
-  async listCurrentCourses(
-    client?: PoolClient,
-  ): Promise<AcademyCourseVersion[]> {
+  async listCurrentCourses(): Promise<AcademyCourseVersion[]> {
     if (!this.isEnabled()) {
       return [];
     }
-    const executor = this.getExecutor(client);
-    const latestResult = await executor.query<CourseRow>(
+    const latestResult = await this.databaseService!.query<CourseRow>(
       `
         SELECT c.course_id, c.course_version, c.course_code, c.title, c.category,
                c.is_required, c.validity_days, c.passing_score, c.description
@@ -254,7 +187,6 @@ export class AcademyRepository {
         const { modules, questions } = await this.loadModulesAndQuestions(
           course.course_id,
           course.course_version,
-          client,
         );
         return this.toCourseVersion(course, modules, questions);
       }),
@@ -268,11 +200,11 @@ export class AcademyRepository {
       courseVersion: row.course_version,
       driverId: row.driver_id,
       attemptedAt:
-        typeof row.attempted_at === "string"
-          ? row.attempted_at
-          : row.attempted_at.toISOString(),
+        row.attempted_at instanceof Date
+          ? row.attempted_at.toISOString()
+          : new Date(row.attempted_at).toISOString(),
       score: Number(row.score),
-      passed: Boolean(row.passed),
+      passed: row.passed,
       answersSummary: row.answers_summary,
     };
   }
@@ -304,13 +236,11 @@ export class AcademyRepository {
 
   async listAttempts(
     filter: { driverId?: string; courseId?: string } = {},
-    client?: PoolClient,
   ): Promise<DriverQuizAttemptDetail[]> {
     if (!this.isEnabled()) {
       return [];
     }
-    const executor = this.getExecutor(client);
-    const result = await executor.query<AttemptRow>(
+    const result = await this.databaseService!.query<AttemptRow>(
       `
         SELECT attempt_id, course_id, course_version, driver_id,
                attempted_at, score, passed, answers_summary
@@ -382,22 +312,19 @@ export class AcademyRepository {
 
   /**
    * Upsert restricted to the training_status column, driven only by
-   * required-course pass/expiry/pending transitions (academy-identity-decision.md §2.3).
+   * required-course pass/expiry transitions (academy-identity-decision.md §2.3).
    * reg.driver_reg_profiles has no pre-existing row for any runtime driver, so
-   * this must not assume one exists. Manually waived records are preserved and
-   * not overwritten by Academy.
+   * this must not assume one exists.
    */
   async upsertTrainingStatus(
     driverId: string,
-    status: TrainingStatus | "pending" | "waived",
-    lastTrainingAt: string | null = null,
-    client?: PoolClient,
+    status: Extract<TrainingStatus, "passed" | "expired">,
+    lastTrainingAt: string,
   ): Promise<void> {
     if (!this.isEnabled()) {
       return;
     }
-    const executor = this.getExecutor(client);
-    await executor.query(
+    await this.databaseService!.query(
       `
         INSERT INTO reg.driver_reg_profiles (
           driver_id, training_status, last_training_at, updated_at
@@ -406,7 +333,6 @@ export class AcademyRepository {
           training_status = EXCLUDED.training_status,
           last_training_at = EXCLUDED.last_training_at,
           updated_at = now()
-        WHERE reg.driver_reg_profiles.training_status IS DISTINCT FROM 'waived'
       `,
       [driverId, status, lastTrainingAt],
     );

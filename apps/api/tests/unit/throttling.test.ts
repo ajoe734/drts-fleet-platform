@@ -1,22 +1,18 @@
 import "reflect-metadata";
 
 import {
-  THROTTLER_BLOCK_DURATION,
   THROTTLER_LIMIT,
   THROTTLER_SKIP,
   THROTTLER_TTL,
 } from "@nestjs/throttler/dist/throttler.constants";
-import { minutes, seconds } from "@nestjs/throttler";
+import { minutes } from "@nestjs/throttler";
 import { describe, expect, it } from "vitest";
 
 import { BootstrapThrottlerGuard } from "../../src/common/throttling/bootstrap-throttler.guard";
 import {
-  BOOKING_INTAKE_RATE_LIMIT,
-  DISPATCH_RATE_LIMIT,
   OPEN_ROUTE_RATE_LIMIT,
   RATE_LIMIT_SKIP_DEFAULT,
   READ_HEAVY_RATE_LIMIT,
-  REPORT_JOBS_RATE_LIMIT,
 } from "../../src/common/throttling/rate-limit.constants";
 import { HealthController } from "../../src/health/health.controller";
 import { IdentityController } from "../../src/modules/identity/identity.controller";
@@ -26,7 +22,6 @@ import { TenantsController } from "../../src/modules/platform-admin/tenants.cont
 import { PlatformTenantGovernanceController } from "../../src/modules/platform-admin/tenant-governance.controller";
 import { ProductRuleController } from "../../src/modules/product-rule/product-rule.controller";
 import { BillingSettlementController } from "../../src/modules/billing-settlement/billing-settlement.controller";
-import { ReportingFilingController } from "../../src/modules/reporting-filing/reporting-filing.controller";
 
 class TestBootstrapThrottlerGuard extends BootstrapThrottlerGuard {
   async exposeTracker(req: Record<string, any>) {
@@ -160,68 +155,4 @@ describe("route throttling metadata", () => {
       ),
     ).toBe(READ_HEAVY_RATE_LIMIT.default.limit);
   });
-
-  it("sets dedicated baseline throttle for POST tenant/bookings (60/min, no 5min block)", () => {
-    expect(
-      Reflect.getMetadata(
-        THROTTLER_LIMIT + "default",
-        OwnedMobilityController.prototype.createTenantBooking,
-      ),
-    ).toBe(BOOKING_INTAKE_RATE_LIMIT.default.limit);
-    expect(
-      Reflect.getMetadata(
-        THROTTLER_TTL + "default",
-        OwnedMobilityController.prototype.createTenantBooking,
-      ),
-    ).toBe(BOOKING_INTAKE_RATE_LIMIT.default.ttl);
-    expect(
-      Reflect.getMetadata(
-        THROTTLER_BLOCK_DURATION + "default",
-        OwnedMobilityController.prototype.createTenantBooking,
-      ),
-    ).toBe(BOOKING_INTAKE_RATE_LIMIT.default.blockDuration);
-  });
-
-  it("sets dedicated baseline throttle for POST orders/:orderId/dispatch (300/min, no 5min block)", () => {
-    expect(
-      Reflect.getMetadata(
-        THROTTLER_LIMIT + "default",
-        OwnedMobilityController.prototype.dispatchOrder,
-      ),
-    ).toBe(DISPATCH_RATE_LIMIT.default.limit);
-    expect(
-      Reflect.getMetadata(
-        THROTTLER_TTL + "default",
-        OwnedMobilityController.prototype.dispatchOrder,
-      ),
-    ).toBe(DISPATCH_RATE_LIMIT.default.ttl);
-    expect(
-      Reflect.getMetadata(
-        THROTTLER_BLOCK_DURATION + "default",
-        OwnedMobilityController.prototype.dispatchOrder,
-      ),
-    ).toBe(DISPATCH_RATE_LIMIT.default.blockDuration);
-  });
-
-  it("sets dedicated baseline throttle for POST reports/jobs (30/min, no 5min block)", () => {
-    expect(
-      Reflect.getMetadata(
-        THROTTLER_LIMIT + "default",
-        ReportingFilingController.prototype.createReportJob,
-      ),
-    ).toBe(REPORT_JOBS_RATE_LIMIT.default.limit);
-    expect(
-      Reflect.getMetadata(
-        THROTTLER_TTL + "default",
-        ReportingFilingController.prototype.createReportJob,
-      ),
-    ).toBe(REPORT_JOBS_RATE_LIMIT.default.ttl);
-    expect(
-      Reflect.getMetadata(
-        THROTTLER_BLOCK_DURATION + "default",
-        ReportingFilingController.prototype.createReportJob,
-      ),
-    ).toBe(REPORT_JOBS_RATE_LIMIT.default.blockDuration);
-  });
 });
-

@@ -8,7 +8,6 @@ import {
   Post,
   StreamableFile,
 } from "@nestjs/common";
-import { Throttle } from "@nestjs/throttler";
 
 import type {
   CreateReportJobCommand,
@@ -26,7 +25,6 @@ import {
   IdempotencyRepository,
   IdempotencyService,
 } from "../../common/idempotency";
-import { REPORT_JOBS_RATE_LIMIT } from "../../common/throttling/rate-limit.constants";
 import { ReportingFilingService } from "./reporting-filing.service";
 
 @Controller()
@@ -52,7 +50,6 @@ export class ReportingFilingController {
   }
 
   @Post("reports/jobs")
-  @Throttle(REPORT_JOBS_RATE_LIMIT)
   @RequireRealms("platform", "ops")
   async createReportJob(
     @Body() command: CreateReportJobCommand,

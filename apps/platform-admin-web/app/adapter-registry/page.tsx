@@ -170,6 +170,8 @@ type Copy = {
   loading: string;
   empty: string;
   unavailable: string;
+  bannerFallbackTitle: string;
+  bannerFallbackBody: string;
   bannerTitle: (adapter: PlatformAdapter) => string;
   bannerBody: (adapter: PlatformAdapter) => string;
   rotateNow: string;
@@ -222,7 +224,6 @@ type Copy = {
   disableReasonPrompt: (adapter: PlatformAdapter) => string;
   auditReceiptPrefix: string;
   notConfigured: string;
-  credentialExpiryLabel: string;
 };
 
 function healthTone(
@@ -273,18 +274,12 @@ function booleanTone(value: boolean): CanvasTone {
   return value ? "success" : "neutral";
 }
 
-function isCredentialExpiryConcerning(adapter: PlatformAdapter) {
-  const state = adapter.credentialExpiryWarning?.state;
-  return state === "warning" || state === "expired";
-}
-
 function findAttentionAdapter(adapters: PlatformAdapter[]) {
   return adapters.find(
     (adapter) =>
       adapter.credentialStatus !== "VALID" ||
       adapter.healthStatus.status !== "HEALTHY" ||
-      adapter.warn === true ||
-      isCredentialExpiryConcerning(adapter),
+      adapter.warn === true,
   );
 }
 
@@ -370,6 +365,8 @@ export default function AdapterRegistryPage() {
         loading: t("adapterRegistry.loading"),
         empty: t("adapterRegistry.empty"),
         unavailable: t("adapterRegistry.unavailable"),
+        bannerFallbackTitle: t("adapterRegistry.banner.fallbackTitle"),
+        bannerFallbackBody: t("adapterRegistry.banner.fallbackBody"),
         bannerTitle: (adapter) =>
           t("adapterRegistry.banner.title", {
             platformCode: adapter.platformCode.toLowerCase(),
@@ -460,7 +457,6 @@ export default function AdapterRegistryPage() {
           }),
         auditReceiptPrefix: t("adapterRegistry.auditReceiptPrefix"),
         notConfigured: t("adapterRegistry.notConfigured"),
-        credentialExpiryLabel: t("audit.exceptions.expiresAt"),
       }) satisfies Copy,
     [locale, t],
   );
@@ -499,6 +495,11 @@ export default function AdapterRegistryPage() {
   const attentionAdapter = useMemo(
     () => findAttentionAdapter(adapters),
     [adapters],
+  );
+
+  const bannerAdapter = useMemo(
+    () => attentionAdapter ?? adapters[0] ?? null,
+    [adapters, attentionAdapter],
   );
 
   const sortedAdapters = useMemo(
@@ -547,10 +548,6 @@ export default function AdapterRegistryPage() {
     try {
       const updated = await client.updatePlatformAdapter(adapter.id, {
         config: { isEnabled: nextEnabled },
-        ...(adapter.revision !== undefined
-          ? { expectedRevision: adapter.revision }
-          : {}),
-        ...(reason ? { reason } : {}),
       });
       setAdapters((current) =>
         current.map((entry) => (entry.id === adapter.id ? updated : entry)),
@@ -606,28 +603,36 @@ export default function AdapterRegistryPage() {
       />
 
       <div style={pageBodyStyle}>
-        {attentionAdapter ? (
-          <CanvasBanner
-            theme={theme}
-            tone="danger"
-            icon="warn"
-            title={copy.bannerTitle(attentionAdapter)}
-            body={copy.bannerBody(attentionAdapter)}
-            actions={
+        <CanvasBanner
+          theme={theme}
+          tone="danger"
+          icon="warn"
+          title={
+            bannerAdapter && attentionAdapter
+              ? copy.bannerTitle(bannerAdapter)
+              : copy.bannerFallbackTitle
+          }
+          body={
+            bannerAdapter && attentionAdapter
+              ? copy.bannerBody(bannerAdapter)
+              : copy.bannerFallbackBody
+          }
+          actions={
+            bannerAdapter ? (
               <CanvasBtn
                 theme={theme}
                 variant="primary"
                 danger
                 icon="refresh"
                 onClick={() =>
-                  queueGovernedAction(copy.rotateCredential, attentionAdapter)
+                  queueGovernedAction(copy.rotateCredential, bannerAdapter)
                 }
               >
                 {copy.rotateNow}
               </CanvasBtn>
-            }
-          />
-        ) : null}
+            ) : undefined
+          }
+        />
 
         {flash ? (
           <div style={flashStyle(flash.tone)}>{flash.message}</div>
@@ -752,24 +757,6 @@ export default function AdapterRegistryPage() {
                       <p style={metadataLabelStyle}>{copy.operationalPause}</p>
                       <p style={metadataValueStyle}>{copy.noPause}</p>
                       <p style={metadataSubValueStyle}>{copy.pauseUnknown}</p>
-                    </div>
-                    <div style={metadataBlockStyle}>
-                      <p style={metadataLabelStyle}>
-                        {copy.credentialExpiryLabel}
-                      </p>
-                      <p style={metadataValueStyle}>
-                        {adapter.credentialExpiryWarning
-                          ? formatPlatformCodeLabel(
-                              locale as LabelLocale,
-                              adapter.credentialExpiryWarning.state,
-                            )
-                          : copy.notConfigured}
-                      </p>
-                      <p style={metadataSubValueStyle}>
-                        {adapter.credentialExpiry?.expiresAt
-                          ? formatDateTime(adapter.credentialExpiry.expiresAt)
-                          : copy.notConfigured}
-                      </p>
                     </div>
                   </div>
 

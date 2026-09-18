@@ -11547,24 +11547,17 @@ export class OwnedMobilityService
     driverId: string,
     vehicleId: string,
   ): Promise<string[]> {
-    if (
-      !this.runtimeEligibilityEvaluator ||
-      typeof this.runtimeEligibilityEvaluator.assessDriverRequirements !==
-        "function"
-    ) {
-      return [];
-    }
+    if (!this.runtimeEligibilityEvaluator) return [];
     const current =
       await this.runtimeEligibilityEvaluator.assessDriverRequirements(driverId);
     const capability =
       this.vehicleEligibilityService?.resolveRuntimeVehicleCapability(
         vehicleId,
       );
-    const trainingRequired = capability ? capability.trainingRequired : true;
     return [
       ...(current.onLeave ? ["DRIVER_ON_LEAVE"] : []),
-      ...(trainingRequired &&
-      (current.trainingIncomplete || !current.trainingSatisfied)
+      ...(current.trainingIncomplete ||
+      (capability?.trainingRequired && !current.trainingSatisfied)
         ? ["DRIVER_TRAINING_INCOMPLETE"]
         : []),
     ];

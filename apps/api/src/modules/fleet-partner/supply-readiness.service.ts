@@ -83,14 +83,11 @@ export class SupplyReadinessService {
   ): Promise<SupplyReadinessRecord[]> {
     const context = await this.buildPartnerContext(fleetPartnerId);
 
-    const driverReadiness: SupplyReadinessRecord[] = [];
-    for (const driverId of [...context.scopedDriverIds].sort((left, right) =>
-      left.localeCompare(right),
-    )) {
-      driverReadiness.push(
-        await this.evaluateDriverReadiness(driverId, context),
-      );
-    }
+    const driverReadiness = await Promise.all(
+      [...context.scopedDriverIds]
+        .sort((left, right) => left.localeCompare(right))
+        .map((driverId) => this.evaluateDriverReadiness(driverId, context)),
+    );
     const vehicleReadiness = [...context.scopedVehicleIds]
       .sort((left, right) => left.localeCompare(right))
       .map((vehicleId) => this.evaluateVehicleReadiness(vehicleId, context));
@@ -344,10 +341,7 @@ export class SupplyReadinessService {
     if (!this.supportsAnyServiceBucket(driver.supportedServiceBuckets)) {
       this.pushReason(reasonCodes, "SERVICE_PRODUCT_NOT_SUPPORTED");
     }
-    if (
-      !artifacts?.driverDraft &&
-      (await this.isDriverTrainingIncomplete(driverId))
-    ) {
+    if (await this.isDriverTrainingIncomplete(driverId)) {
       this.pushReason(reasonCodes, "TRAINING_REQUIRED");
     }
 
@@ -369,11 +363,6 @@ export class SupplyReadinessService {
   private async isDriverTrainingIncomplete(driverId: string): Promise<boolean> {
     if (!this.academyService) {
       return false;
-    }
-    if (typeof this.academyService.evaluateDriverQualification === "function") {
-      const qualification =
-        await this.academyService.evaluateDriverQualification(driverId);
-      return qualification.trainingIncomplete;
     }
     const courses = await this.academyService.listCourses(driverId);
     return courses.some(
