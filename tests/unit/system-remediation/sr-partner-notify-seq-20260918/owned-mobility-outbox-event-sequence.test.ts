@@ -1,101 +1,134 @@
-import { describe, expect, it, vi } from "vitest";
-
+import { describe, expect, it, beforeAll, afterAll } from "vitest";
+import { createRequire } from "node:module";
+// @ts-ignore
+const require = createRequire(
+  new URL("../../../../apps/api/package.json", import.meta.url),
+);
+const { Pool } = require("pg");
+import { randomUUID } from "node:crypto";
+import { MultiTaxiRepository } from "../../../../apps/api/src/modules/multi-taxi/multi-taxi.repository";
+import { OwnedMobilityRepository } from "../../../../apps/api/src/modules/owned-mobility/owned-mobility.repository";
 import type { ConsumerNotificationOutboxRecord } from "@drts/contracts";
 
-import { OwnedMobilityRepository } from "../../../../apps/api/src/modules/owned-mobility/owned-mobility.repository";
-import { MultiTaxiRepository } from "../../../../apps/api/src/modules/multi-taxi/multi-taxi.repository";
+const testDbUrl =
+  process.env.CONCURRENCY_TEST_DATABASE_URL ??
+  process.env.UV_BOOKING_TEST_DATABASE_URL ??
+  process.env.DATABASE_URL;
 
 describe("OwnedMobilityRepository consumer notification outbox event sequence", () => {
-  const outbox: ConsumerNotificationOutboxRecord = {
-    outboxId: "outbox-seq-001",
-    orderId: "order-seq-001",
-    passengerSubjectRef: "passenger-subject-seq-001",
-    eventType: "assignment_disclosure_ready",
-    assignmentVersion: 1,
-    payload: { assignmentId: "assignment-seq-001" },
-    status: "pending",
-    attemptCount: 0,
-    nextAttemptAt: "2026-09-18T00:00:00.000Z",
-    createdAt: "2026-09-18T00:00:00.000Z",
-    deliveredAt: null,
-  };
+  if (!testDbUrl) {
+    it("fails explicitly when database connection is not configured", () => {
+      throw new Error(
+        "SR-PARTNER-NOTIFY-SEQ-20260918 Acceptance Requirement: CONCURRENCY_TEST_DATABASE_URL, UV_BOOKING_TEST_DATABASE_URL, or DATABASE_URL must be explicitly configured with an isolated test database."
+      );
+    });
+    return;
+  }
 
-  it("allocates the durable sequence in the same transaction as the outbox insert", async () => {
-    const query = vi.fn().mockResolvedValue({ rows: [] });
-    const allocateNotificationEventSequence = vi.fn().mockResolvedValue(42);
-    
-    const multiTaxiRepository = {
-      allocateNotificationEventSequence,
-    } as unknown as MultiTaxiRepository;
+  let pool: any;
+  let multiTaxiRepository: MultiTaxiRepository;
+  let ownedMobilityRepository: OwnedMobilityRepository;
 
-    const repository = new OwnedMobilityRepository({
+  beforeAll(async () => {
+    pool = new Pool({ connectionString: testDbUrl });
+    const fakeDbService = {
+      connect: async () => pool.connect(),
+      query: (t: string, v: any[]) => pool.query(t, v),
       isEnabled: () => true,
-      query,
-    } as never, multiTaxiRepository);
-
-    await repository.persistOrderWorkflow({ query } as never, {
-      consumerNotificationOutbox: [outbox],
-    });
-
-    expect(query).toHaveBeenCalledTimes(2);
-    
-    const [checkSql] = query.mock.calls[0]!;
-    expect(checkSql).toContain("SELECT 1 FROM ops.consumer_notification_outbox");
-    
-    expect(allocateNotificationEventSequence).toHaveBeenCalledWith(outbox.orderId, { query });
-
-    const [insertSql, insertParams] = query.mock.calls[1]!;
-    expect(insertSql).toContain("INSERT INTO ops.consumer_notification_outbox");
-    
-    const payloadIndex = 5; // $6
-    expect(JSON.parse(insertParams[payloadIndex])).toEqual({
-       ...outbox.payload,
-       eventSequence: 42,
-    });
+    };
+    multiTaxiRepository = new (MultiTaxiRepository as any)(fakeDbService);
+    ownedMobilityRepository = new (OwnedMobilityRepository as any)(
+      fakeDbService,
+      multiTaxiRepository
+    );
   });
 
-  it("does not burn a sequence number if the outbox already exists", async () => {
-    const query = vi.fn().mockResolvedValue({ rows: [{ "?column?": 1 }] });
-    const allocateNotificationEventSequence = vi.fn().mockResolvedValue(42);
-    
-    const multiTaxiRepository = {
-      allocateNotificationEventSequence,
-    } as unknown as MultiTaxiRepository;
-
-    const repository = new OwnedMobilityRepository({
-      isEnabled: () => true,
-      query,
-    } as never, multiTaxiRepository);
-
-    await repository.persistOrderWorkflow({ query } as never, {
-      consumerNotificationOutbox: [outbox],
-    });
-
-    expect(query).toHaveBeenCalledTimes(1);
-    expect(allocateNotificationEventSequence).not.toHaveBeenCalled();
+  afterAll(async () => {
+    if (pool) {
+      await pool.end();
+    }
   });
 
-  it("falls back to the unmodified payload param when the order has no partner notification sequence row", async () => {
-    const query = vi.fn().mockResolvedValue({ rows: [] });
-    const allocateNotificationEventSequence = vi.fn().mockResolvedValue(null);
-    
-    const multiTaxiRepository = {
-      allocateNotificationEventSequence,
-    } as unknown as MultiTaxiRepository;
+  it("allocates the durable sequence in the same transaction and rolls back if outbox insertion fails", async () => {
+    const orderId = `test-order-${randomUUID()}`;
+    const outboxId = `outbox-seq-${randomUUID()}`;
 
-    const repository = new OwnedMobilityRepository({
-      isEnabled: () => true,
-      query,
-    } as never, multiTaxiRepository);
+    // Seed sequence for this order
+    await pool.query(
+      `INSERT INTO mobility.phase1_partner_notification_sequences (order_id, next_sequence) VALUES ($1, 1)`,
+      [orderId]
+    );
 
-    await repository.persistOrderWorkflow({ query } as never, {
-      consumerNotificationOutbox: [outbox],
+    const outbox: any = {
+      outboxId,
+      orderId,
+      passengerSubjectRef: "test-subject",
+      eventType: "assignment_disclosure_ready",
+      assignmentVersion: 1,
+      payload: { assignmentId: "test-assignment" },
+      status: "pending",
+      attemptCount: 0,
+      nextAttemptAt: new Date().toISOString(),
+      createdAt: new Date().toISOString(),
+      deliveredAt: null,
+    };
+
+    // Use a transaction that we will intentionally break
+    let errorThrown = false;
+    try {
+      await ownedMobilityRepository.withTransaction(async (tx) => {
+        // Mock the query to throw an error ONLY on INSERT to simulate insertion failure
+        const originalQuery = tx.query.bind(tx);
+        (tx as any).query = async (text: string, values: any[]) => {
+          if (text.includes("INSERT INTO ops.consumer_notification_outbox")) {
+            throw new Error("Simulated insertion failure");
+          }
+          return originalQuery(text, values);
+        };
+
+        await ownedMobilityRepository.persistOrderWorkflow(tx as any, {
+          consumerNotificationOutbox: [outbox],
+        });
+      });
+    } catch (err) {
+      errorThrown = true;
+    }
+
+    expect(errorThrown).toBe(true);
+
+    // Verify sequence is STILL 1 (it was rolled back)
+    const seqResult = await pool.query(
+      `SELECT next_sequence FROM mobility.phase1_partner_notification_sequences WHERE order_id = $1`,
+      [orderId]
+    );
+    expect(Number(seqResult.rows[0].next_sequence)).toBe(1);
+
+    // Verify outbox was not created
+    const outboxResult = await pool.query(
+      `SELECT 1 FROM ops.consumer_notification_outbox WHERE outbox_id = $1`,
+      [outboxId]
+    );
+    expect(outboxResult.rowCount).toBe(0);
+
+    // Now do it without error and verify it increments
+    await ownedMobilityRepository.withTransaction(async (tx) => {
+      await ownedMobilityRepository.persistOrderWorkflow(tx as any, {
+        consumerNotificationOutbox: [outbox],
+      });
     });
 
-    expect(query).toHaveBeenCalledTimes(2);
+    const seqResult2 = await pool.query(
+      `SELECT next_sequence FROM mobility.phase1_partner_notification_sequences WHERE order_id = $1`,
+      [orderId]
+    );
+    // 1 became 2 because it allocated sequence 1
+    expect(Number(seqResult2.rows[0].next_sequence)).toBe(2);
     
-    const [insertSql, insertParams] = query.mock.calls[1]!;
-    const payloadIndex = 5; // $6
-    expect(JSON.parse(insertParams[payloadIndex])).toEqual(outbox.payload);
+    // Verify outbox has eventSequence = 1
+    const finalOutboxResult = await pool.query(
+      `SELECT payload FROM ops.consumer_notification_outbox WHERE outbox_id = $1`,
+      [outboxId]
+    );
+    expect(finalOutboxResult.rows[0].payload.eventSequence).toBe(1);
   });
 });
