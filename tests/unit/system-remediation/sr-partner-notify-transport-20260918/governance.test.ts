@@ -335,6 +335,90 @@ describe("current durable notification governance", () => {
     },
   );
 
+  it.each(["disable", "rotate"] as const)(
+    "preserves concurrent %s even when the old attempt exhausts its policy",
+    async (change) => {
+      const h = await setup();
+      h.row.attemptCount = 4;
+      h.fetch.mockImplementationOnce(async () => {
+        h[change]();
+        return { ok: false, status: 503, text: async () => "" };
+      });
+      expect(await h.service.deliverPassengerNotification(h.row)).toMatchObject(
+        {
+          failureReason: "provider_transient_error",
+          retryDisposition: "terminal",
+        },
+      );
+      expect(h.durableEndpoint()).toMatchObject({
+        status: change === "disable" ? "disabled" : "test_pending",
+        runtimeMetadata: {
+          nextAttemptAt: null,
+          failedDeliveryCount: 1,
+          deliveryCount: 1,
+        },
+      });
+      if (change === "disable")
+        expect(h.durableEndpoint().runtimeMetadata.disableReason).toBe(
+          "manual_disable",
+        );
+      else expect(h.durableEndpoint().secretValue).toBe("rotated-secret");
+    },
+  );
+
+  it("does not replace a deleted durable entry with its cached public entry", async () => {
+    const h = await setup();
+    h.database.tables
+      .get("admin.phase1_partner_channel_entries")!
+      .delete(h.route.entrySlug);
+    expect(h.b.getPartnerEntry(h.route.entrySlug).activeFlag).toBe(true);
+    expect(await h.service.deliverPassengerNotification(h.row)).toMatchObject({
+      failureReason: "route_missing",
+      result: "provider_error",
+      retryDisposition: "manual_only",
+    });
+    expect(h.fetch).not.toHaveBeenCalled();
+  });
+
+  it("reads an expired current credential even when the worker's cached credential is valid", async () => {
+    const h = await setup();
+    const endpoint = structuredClone(h.durableEndpoint());
+    endpoint.secretCredentials![0]!.expiresAt = new Date(
+      Date.now() - 1000,
+    ).toISOString();
+    // Credential expiry can be reconciled by a separate governance worker.
+    await new TenantPartnerRepository(h.database as never).persistChanges({
+      webhookEndpoints: [endpoint],
+    });
+    expect(await h.service.deliverPassengerNotification(h.row)).toMatchObject({
+      failureReason: "credential_rejected",
+      retryDisposition: "configuration_blocked",
+    });
+    expect(h.fetch).not.toHaveBeenCalled();
+  });
+
+  it("rolls back endpoint usage and delivery writes together if recording the delivery fails", async () => {
+    const h = await setup();
+    const query = h.database.query.getMockImplementation()!;
+    h.database.query.mockImplementation(async (sql, values) => {
+      if (sql.includes("INSERT INTO admin.phase1_tenant_webhook_deliveries"))
+        throw new Error("delivery write failed");
+      return query(sql, values);
+    });
+    await expect(
+      h.service.deliverPassengerNotification(h.row),
+    ).rejects.toThrow();
+    const sql = h.database.query.mock.calls.map(([text]) => text);
+    const transaction = sql.slice(sql.indexOf("BEGIN"));
+    expect(transaction[1]).toContain("webhook_endpoints");
+    expect(transaction[1]).toContain("FOR UPDATE");
+    expect(transaction[2]).toContain("webhook_deliveries");
+    expect(transaction[2]).toContain("FOR UPDATE");
+    expect(transaction.at(-1)).toBe("ROLLBACK");
+    expect(transaction).not.toContain("COMMIT");
+    expect(h.row.status).not.toBe("delivered");
+  });
+
   it("fails closed on durable read failure instead of using the active startup snapshot", async () => {
     const h = await setup();
     h.database.failReads();
