@@ -21,8 +21,32 @@
 // PartnerNotificationTransport port) and does not touch the consumer outbox
 // state machine.
 
-import { Injectable } from "@nestjs/common";
-import type { PartnerNotificationDispatchOutcome } from "@drts/contracts";
+import { Injectable, Optional } from "@nestjs/common";
+import type {
+  OrderPartnerNotificationRoute,
+  PartnerEntryNotificationBinding,
+  PartnerNotificationDispatchOutcome,
+  PartnerNotificationFailureReason,
+  PartnerNotificationTypedFailure,
+  PartnerPassengerEventType,
+  WebhookRetryPolicyRecord,
+} from "@drts/contracts";
+import {
+  PARTNER_NOTIFICATION_FAILURE_REASON_RETRY_DISPOSITIONS,
+  PARTNER_PASSENGER_EVENT_TO_EXTERNAL_NAME,
+} from "@drts/contracts";
+import { PartnerEntryNotificationBindingRepository } from "./partner-entry-notification-binding.repository";
+import { PartnerUserIdentityLinkRepository } from "./partner-user-identity-link.repository";
+import { computeEndpointFingerprint } from "./partner-notification-fingerprint";
+
+export type PartnerRouteReadiness =
+  | {
+      ready: true;
+      binding: PartnerEntryNotificationBinding;
+      endpointFingerprint: string;
+      retryPolicy: WebhookRetryPolicyRecord;
+    }
+  | { ready: false; failure: PartnerNotificationTypedFailure };
 
 import {
   TenantPartnerService,
@@ -33,7 +57,98 @@ export type { PartnerNotificationDispatchAttemptCommand };
 
 @Injectable()
 export class PartnerNotificationDispatchFacade {
-  constructor(private readonly tenantPartnerService: TenantPartnerService) {}
+  constructor(
+    private readonly tenantPartnerService: TenantPartnerService,
+    @Optional()
+    private readonly bindings?: PartnerEntryNotificationBindingRepository,
+    @Optional() private readonly identities?: PartnerUserIdentityLinkRepository,
+  ) {}
+
+  /** Read-only entry-scoped governance gate; never guesses or fans out a recipient. */
+  async resolveNotificationRoute(
+    route: OrderPartnerNotificationRoute,
+    eventType: PartnerPassengerEventType,
+  ): Promise<PartnerRouteReadiness> {
+    const failed = (
+      failureReason: PartnerNotificationFailureReason,
+    ): PartnerRouteReadiness => ({
+      ready: false,
+      failure: {
+        failureReason,
+        retryDisposition:
+          PARTNER_NOTIFICATION_FAILURE_REASON_RETRY_DISPOSITIONS[failureReason],
+        suggestedNextAttemptAt: null,
+      },
+    });
+    const entry = await this.tenantPartnerService.findNotificationPartnerEntry(
+      route.entrySlug,
+    );
+    if (!entry) return failed("route_missing");
+    if (
+      entry.tenantId !== route.tenantId ||
+      entry.partnerId !== route.partnerId
+    )
+      return failed("owner_changed");
+    if (!entry.activeFlag || entry.status !== "active")
+      return failed("endpoint_disabled");
+    const link = await this.identities?.find(
+      route.entrySlug,
+      route.partnerUserRef,
+    );
+    if (
+      !link ||
+      link.status !== "active" ||
+      link.drtsPassengerId !== route.drtsPassengerId
+    )
+      return failed("recipient_revoked");
+    const binding = await this.bindings?.findByEntrySlug(route.entrySlug);
+    if (!binding) return failed("configuration_blocked");
+    if (
+      binding.tenantId !== route.tenantId ||
+      binding.partnerId !== route.partnerId
+    )
+      return failed("owner_changed");
+    if (binding.state === "disabled") return failed("endpoint_disabled");
+    if (binding.state !== "ready" || !binding.eventTypes.includes(eventType))
+      return failed("configuration_blocked");
+    const endpoint =
+      await this.tenantPartnerService.findNotificationWebhookEndpoint(
+        route.tenantId,
+        binding.webhookId,
+      );
+    if (!endpoint) return failed("endpoint_unavailable");
+    if (endpoint.status === "disabled") return failed("endpoint_disabled");
+    if (
+      endpoint.status !== "active" ||
+      !endpoint.events.includes(
+        PARTNER_PASSENGER_EVENT_TO_EXTERNAL_NAME[eventType],
+      )
+    )
+      return failed("configuration_blocked");
+    if (
+      endpoint.credentialStatus &&
+      !["active", "overlap_active"].includes(endpoint.credentialStatus)
+    )
+      return failed("credential_rejected");
+    if (
+      endpoint.secretExpiresAt &&
+      Date.parse(endpoint.secretExpiresAt) <= Date.now()
+    )
+      return failed("credential_rejected");
+    const endpointFingerprint = computeEndpointFingerprint(endpoint);
+    if (
+      !binding.validatedAt ||
+      binding.validatedEndpointFingerprint !== endpointFingerprint ||
+      !endpoint.retryPolicy
+    )
+      return failed("configuration_blocked");
+    return {
+      ready: true,
+      binding,
+      endpointFingerprint,
+      retryPolicy: structuredClone(endpoint.retryPolicy),
+    };
+  }
 
   /**
    * Attempts exactly one remote HTTP delivery for the given webhook and

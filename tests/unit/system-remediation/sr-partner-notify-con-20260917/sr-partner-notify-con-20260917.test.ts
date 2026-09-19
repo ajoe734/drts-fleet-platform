@@ -120,7 +120,7 @@ describe("SR-PARTNER-NOTIFY-CON-20260917: Partner Passenger Notification Contrac
         "passenger.notification.test.v1",
       );
       expect(
-        (PARTNER_PASSENGER_NOTIFICATION_EXTERNAL_EVENTS as readonly string[]),
+        PARTNER_PASSENGER_NOTIFICATION_EXTERNAL_EVENTS as readonly string[],
       ).not.toContain(PARTNER_NOTIFICATION_TEST_EXTERNAL_EVENT);
     });
   });
@@ -480,29 +480,14 @@ describe("SR-PARTNER-NOTIFY-CON-20260917: Partner Passenger Notification Contrac
       }
     });
 
-    it("this task itself wrote no infra/migrations files (allocation-only; no DDL executed by SR-PARTNER-NOTIFY-CON-20260917) — a later-authorized owner may write its own allocation", () => {
-      // V0104 is reserved for SR-PARTNER-NOTIFY-ROUTE-20260917 ("entry
-      // binding + order route + counters" per this allocation's own
-      // `downstream_tasks`) and has since been written by that task's own
-      // migration (infra/migrations/V0104__sr_partner_notification_binding_and_routing.sql).
-      // That is the allocation working as designed, not a violation of this
-      // CON task's own scope statement ("不寫 infra/migrations/*.sql") — this
-      // assertion only reflects this task's own commit, not downstream state.
-      const stillUnwrittenByAnyDownstreamTask = ["V0105"];
-      const migrationsDir = path.join(repoRoot, "infra/migrations");
-      const content = readAllocation();
-      const diskFiles = fs.existsSync(migrationsDir)
-        ? fs.readdirSync(migrationsDir)
-        : [];
-      for (const alloc of content.partner_notification_allocations) {
-        if (!stillUnwrittenByAnyDownstreamTask.includes(alloc.version)) {
-          continue;
-        }
-        const prefix = `${alloc.version}_`;
-        const matchingFiles = diskFiles.filter((f: string) =>
-          f.startsWith(prefix),
-        );
-        expect(matchingFiles).toHaveLength(0);
+    it("downstream migrations use each reserved filename exactly once", () => {
+      // ROUTE owns V0104; TRANSPORT now owns V0105. The CON task remains
+      // allocation-only, while downstream DDL must match its allocation.
+      const diskFiles = fs.readdirSync(path.join(repoRoot, "infra/migrations"));
+      for (const alloc of readAllocation().partner_notification_allocations) {
+        expect(
+          diskFiles.filter((file) => file.startsWith(`${alloc.version}_`)),
+        ).toEqual([alloc.migration_filename]);
       }
     });
 

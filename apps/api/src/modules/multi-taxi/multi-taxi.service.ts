@@ -1,3 +1,9 @@
+import {
+  PartnerNotificationFailure,
+  type PartnerDeliveryMetadata,
+  type PartnerPushOutcome,
+} from "./partner-notification.types";
+import { notificationExpiresAt } from "./partner-notification.transport";
 import { PLATFORM_CURRENCY } from "@drts/contracts";
 import { createHash, randomBytes, randomUUID } from "node:crypto";
 
@@ -484,7 +490,11 @@ export class MultiTaxiService implements OnModuleInit {
   ) {
     const entrySlug = identity?.partnerEntrySlug?.trim();
     const drtsPassengerId = identity?.drtsPassengerId?.trim();
-    if (!entrySlug || !drtsPassengerId || !this.partnerUserIdentityLinkRepository) {
+    if (
+      !entrySlug ||
+      !drtsPassengerId ||
+      !this.partnerUserIdentityLinkRepository
+    ) {
       return;
     }
     const link = await this.partnerUserIdentityLinkRepository
@@ -1048,6 +1058,9 @@ export class MultiTaxiService implements OnModuleInit {
     record: ConsumerNotificationOutboxRecord,
     requestId?: string,
   ): Promise<PassengerPushDeliveryOutcome> {
+    if (this.passengerPushPort?.transportMode === "partner_webhook") {
+      return this.deliverPartnerNotification(record.outboxId, requestId);
+    }
     const attemptCount = record.attemptCount + 1;
     const attemptedAt = new Date();
     const failure = (
@@ -1159,6 +1172,147 @@ export class MultiTaxiService implements OnModuleInit {
       throw new PassengerPushPersistenceUnknownError(record.outboxId);
     }
 
+    return outcome;
+  }
+
+  private async deliverPartnerNotification(
+    outboxId: string,
+    requestId?: string,
+  ): Promise<PartnerPushOutcome> {
+    const claim = await this.repository?.claimPartnerNotification(
+      outboxId,
+      this.pushDeliveryWorkerId,
+      MultiTaxiService.PUSH_DELIVERY_LEASE_SECONDS,
+    );
+    if (!claim) throw new PassengerPushClaimConflictError(outboxId);
+    const { record, fenceToken } = claim;
+    const message = { ...record, payload: { ...record.payload } };
+    let receipt: Awaited<ReturnType<PassengerPushPort["send"]>> | undefined;
+    let metadata: PartnerDeliveryMetadata;
+    let outcome: PartnerPushOutcome;
+    try {
+      if (claim.attemptLimitReached) {
+        throw new PartnerNotificationFailure(
+          {
+            failureReason: "provider_transient_error",
+            retryDisposition: "terminal",
+            suggestedNextAttemptAt: null,
+          },
+          await this.repository!.findPartnerNotificationContext(outboxId),
+        );
+      }
+      receipt = await this.passengerPushPort!.send(message, {
+        requestId,
+        fenceToken,
+      });
+      if (!receipt.deliveryContext || !receipt.deliveredAt)
+        throw new Error("Partner receipt context missing");
+      const c = receipt.deliveryContext;
+      metadata = {
+        deliveryTarget: c.deliveryTarget,
+        deliveryStage: c.deliveryStage,
+        retryDisposition: c.retryDisposition,
+        failureReason: c.failureReason,
+        expiresAt: c.expiresAt,
+        receiptId: c.receiptId,
+        downstreamStatus: c.downstreamStatus,
+      };
+      outcome = {
+        ...metadata,
+        outboxId,
+        status: "delivered",
+        result: "delivered",
+        attemptCount: record.attemptCount,
+        nextAttemptAt: receipt.deliveredAt,
+        deliveredAt: receipt.deliveredAt,
+        providerName: receipt.providerName,
+      };
+    } catch (error) {
+      // Unknown errors (including DB writes before/after IO) must retain the claim
+      // and reserved attempt. Lease recovery uses the same stored context.
+      if (!(error instanceof PartnerNotificationFailure))
+        throw new PassengerPushPersistenceUnknownError(outboxId, error);
+      const failure = error.failure;
+      const context = error.deliveryContext;
+      const now = Date.now();
+      let expiresAt: string;
+      try {
+        expiresAt = context?.expiresAt ?? notificationExpiresAt(message);
+      } catch {
+        expiresAt = record.createdAt;
+      }
+      const policy = context?.retryPolicySnapshot;
+      let retryDisposition = failure.retryDisposition;
+      let nextAttemptAt = failure.suggestedNextAttemptAt;
+      if (retryDisposition === "automatic") {
+        // The approved snapshot is authoritative even if the endpoint policy changed.
+        nextAttemptAt = policy
+          ? new Date(
+              now +
+                Math.min(
+                  policy.initialBackoffSeconds *
+                    policy.backoffMultiplier ** (record.attemptCount - 1),
+                  policy.maxBackoffSeconds,
+                ) *
+                  1000,
+            ).toISOString()
+          : null;
+        if (
+          !nextAttemptAt ||
+          (policy && record.attemptCount >= policy.maxAttempts) ||
+          Date.parse(nextAttemptAt) >= Date.parse(expiresAt)
+        ) {
+          retryDisposition = "terminal";
+          nextAttemptAt = null;
+        }
+      }
+      metadata = {
+        deliveryTarget: "partner_endpoint",
+        deliveryStage: null,
+        failureReason: failure.failureReason,
+        retryDisposition,
+        expiresAt,
+        receiptId: null,
+        downstreamStatus: "unknown",
+      };
+      outcome = {
+        ...metadata,
+        outboxId,
+        status: "failed",
+        result: ["configuration_blocked", "endpoint_disabled"].includes(
+          failure.failureReason,
+        )
+          ? "provider_not_configured"
+          : "provider_error",
+        attemptCount: policy
+          ? Math.min(record.attemptCount, policy.maxAttempts)
+          : record.attemptCount,
+        nextAttemptAt: nextAttemptAt ?? new Date(now).toISOString(),
+        deliveredAt: null,
+        providerName: "partner_webhook",
+      };
+    }
+    try {
+      const persisted = await this.repository!.recordPushDeliveryOutcome({
+        outboxId,
+        passengerSubjectRef: record.passengerSubjectRef,
+        fenceToken,
+        providerName: outcome.providerName,
+        providerMessageRef: metadata.receiptId,
+        providerAckState:
+          outcome.result === "delivered"
+            ? "provider_acknowledged"
+            : outcome.result === "provider_not_configured"
+              ? "provider_not_configured"
+              : "provider_rejected",
+        deliveryOutcome: outcome,
+        partnerMetadata: metadata,
+      });
+      if (!persisted.recorded)
+        throw new Error("Partner notification fence lost");
+    } catch (error) {
+      throw new PassengerPushPersistenceUnknownError(outboxId, error);
+    }
     return outcome;
   }
 

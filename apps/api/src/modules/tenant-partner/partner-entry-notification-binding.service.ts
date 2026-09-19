@@ -8,7 +8,7 @@
 // already-implemented `PartnerNotificationDispatchFacade`
 // (SR-PARTNER-NOTIFY-ACK-20260917), never reimplemented here.
 
-import { createHash, randomUUID } from "node:crypto";
+import { randomUUID } from "node:crypto";
 
 import { HttpStatus, Injectable, Optional } from "@nestjs/common";
 
@@ -53,26 +53,8 @@ export type TestPartnerEntryNotificationBindingResult =
   | { kind: "accepted"; ack: PartnerNotificationAcceptedAck }
   | { kind: "failed"; failure: PartnerNotificationTypedFailure };
 
-/**
- * A binding is only enable-able when its endpoint hasn't drifted since the
- * last successful test: URL, event allowlist, owner and secret version are
- * all folded in, so any of the rotations design §3.1 calls out
- * (URL/events/owner/secret) invalidates a stale validation.
- */
-export function computeEndpointFingerprint(
-  endpoint: Pick<
-    TenantWebhookEndpoint,
-    "url" | "events" | "secretVersion" | "ownerRef" | "status"
-  >,
-): string {
-  const material = JSON.stringify({
-    url: endpoint.url,
-    events: [...endpoint.events].sort(),
-    secretVersion: endpoint.secretVersion,
-    ownerRef: endpoint.ownerRef ?? null,
-  });
-  return createHash("sha256").update(material).digest("hex");
-}
+import { computeEndpointFingerprint } from "./partner-notification-fingerprint";
+export { computeEndpointFingerprint } from "./partner-notification-fingerprint";
 
 @Injectable()
 export class PartnerEntryNotificationBindingService {
@@ -115,7 +97,10 @@ export class PartnerEntryNotificationBindingService {
         "webhookId is required.",
       );
     }
-    const endpoint = this.requireTenantWebhookEndpoint(entry.tenantId, webhookId);
+    const endpoint = this.requireTenantWebhookEndpoint(
+      entry.tenantId,
+      webhookId,
+    );
     this.requireEventsSubscribable(endpoint, eventTypes);
 
     const outcome = await this.repository.put({
@@ -171,13 +156,12 @@ export class PartnerEntryNotificationBindingService {
       },
     };
 
-    const outcome = await this.dispatchFacade.dispatchNotificationAttemptByWebhookId(
-      {
+    const outcome =
+      await this.dispatchFacade.dispatchNotificationAttemptByWebhookId({
         tenantId: entry.tenantId,
         webhookId: binding.webhookId,
         wirePayload,
-      },
-    );
+      });
 
     if (outcome.kind === "accepted") {
       const fingerprint = computeEndpointFingerprint(endpoint);
@@ -221,7 +205,11 @@ export class PartnerEntryNotificationBindingService {
         HttpStatus.CONFLICT,
         "PARTNER_NOTIFICATION_BINDING_VERSION_CONFLICT",
         "The binding was modified concurrently.",
-        { entrySlug: entry.entrySlug, expectedVersion, actualVersion: binding.version },
+        {
+          entrySlug: entry.entrySlug,
+          expectedVersion,
+          actualVersion: binding.version,
+        },
       );
     }
     const endpoint = this.requireTenantWebhookEndpoint(
@@ -376,7 +364,9 @@ export class PartnerEntryNotificationBindingService {
     const endpointEvents = new Set(endpoint.events);
     const missing = eventTypes.filter(
       (eventType) =>
-        !endpointEvents.has(PARTNER_PASSENGER_EVENT_TO_EXTERNAL_NAME[eventType]),
+        !endpointEvents.has(
+          PARTNER_PASSENGER_EVENT_TO_EXTERNAL_NAME[eventType],
+        ),
     );
     if (missing.length > 0) {
       throw new ApiRequestError(

@@ -23,15 +23,13 @@ import { MultiTaxiRepository } from "./multi-taxi.repository";
 import { MultiTaxiService } from "./multi-taxi.service";
 import { PASSENGER_PUSH_PORT } from "./passenger-push.port";
 import {
-  PASSENGER_DEVICE_RESOLVER,
+  PASSENGER_PUSH_ADAPTER_CONFIG,
   PASSENGER_PUSH_TRANSPORT,
   PassengerPushAdapter,
 } from "./passenger-push.adapter";
-import {
-  PassengerPushDeviceResolver,
-  PassengerPushRepository,
-} from "./passenger-push.repository";
-import { WebPushTransport } from "./web-push.transport";
+import { PassengerPushRepository } from "./passenger-push.repository";
+import { PartnerNotificationTransport } from "./partner-notification.transport";
+import { PartnerNotificationWorker } from "./partner-notification.worker";
 
 @Module({
   imports: [
@@ -46,22 +44,26 @@ import { WebPushTransport } from "./web-push.transport";
   providers: [
     MultiTaxiRepository,
     MultiTaxiService,
+    PartnerNotificationWorker,
     // P5-CALL-001 stays `blocked_ext`: until a provider contract
     // and credentials land, the only binding is the one that reports absence.
     { provide: MASKED_CALL_PORT, useClass: UnavailableMaskedCallPort },
-    // P5-PUSH-001: real adapter with safe absence detection. Absence of credentials
-    // falls safe to unavailable without faking success.
     PassengerPushAdapter,
     { provide: PASSENGER_PUSH_PORT, useClass: PassengerPushAdapter },
-    // SR-PUSH-WEBPUSH-20260915: passenger receiver is the existing
-    // passenger-web app via browser Web Push (VAPID) — no external push
-    // vendor. The transport carries the VAPID signing + aes128gcm
-    // encryption; the resolver reads the subscription store below.
+    {
+      provide: PASSENGER_PUSH_ADAPTER_CONFIG,
+      useValue: {
+        transportMode: "partner_webhook",
+        providerName: "partner_webhook",
+      },
+    },
+    PartnerNotificationTransport,
+    {
+      provide: PASSENGER_PUSH_TRANSPORT,
+      useExisting: PartnerNotificationTransport,
+    },
+    // Retained for subscription API compatibility, not injected as a receiver.
     PassengerPushRepository,
-    PassengerPushDeviceResolver,
-    { provide: PASSENGER_DEVICE_RESOLVER, useClass: PassengerPushDeviceResolver },
-    WebPushTransport,
-    { provide: PASSENGER_PUSH_TRANSPORT, useClass: WebPushTransport },
   ],
   exports: [MultiTaxiService],
 })

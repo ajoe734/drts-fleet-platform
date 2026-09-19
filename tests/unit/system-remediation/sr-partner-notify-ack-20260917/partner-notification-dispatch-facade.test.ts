@@ -1,7 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 
 import { AuditNotificationService } from "../../../../apps/api/src/modules/audit-notification/audit-notification.service";
-import { ApiRequestError } from "../../../../apps/api/src/common/api-envelope";
 import { PartnerNotificationDispatchFacade } from "../../../../apps/api/src/modules/tenant-partner/partner-notification-dispatch.facade";
 import { TenantPartnerService } from "../../../../apps/api/src/modules/tenant-partner/tenant-partner.service";
 import {
@@ -402,7 +401,7 @@ describe("SR-PARTNER-NOTIFY-ACK-20260917: dispatchNotificationAttemptByWebhookId
     expect(fetchImpl).not.toHaveBeenCalled();
   });
 
-  it("throws ApiRequestError NOT_FOUND for an unknown webhookId, never a silent tenant-wide scan", async () => {
+  it("returns typed endpoint_unavailable for an unknown webhookId, never a tenant-wide scan", async () => {
     const fetchImpl = vi.fn();
     const { facade } = await createHarness(fetchImpl);
 
@@ -415,7 +414,13 @@ describe("SR-PARTNER-NOTIFY-ACK-20260917: dispatchNotificationAttemptByWebhookId
           notificationId: "notif_missing",
         }),
       }),
-    ).rejects.toBeInstanceOf(ApiRequestError);
+    ).resolves.toMatchObject({
+      kind: "failed",
+      failure: {
+        failureReason: "endpoint_unavailable",
+        retryDisposition: "configuration_blocked",
+      },
+    });
     expect(fetchImpl).not.toHaveBeenCalled();
   });
 
