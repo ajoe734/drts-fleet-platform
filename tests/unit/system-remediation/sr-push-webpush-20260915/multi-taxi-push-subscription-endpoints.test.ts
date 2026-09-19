@@ -1,10 +1,8 @@
 // SR-PUSH-WEBPUSH-20260915 -- passenger push-subscription registration
 // bound to the ride access token, and end-to-end proof that an absent
 // subscription is never reported as `delivered`.
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { createECDH, randomBytes } from "node:crypto";
-
-import type { ConsumerNotificationOutboxRecord } from "@drts/contracts";
 
 import { ApiRequestError } from "../../../../apps/api/src/common/api-envelope";
 import { UnavailableMaskedCallPort } from "../../../../apps/api/src/modules/multi-taxi/masked-call.port";
@@ -16,21 +14,6 @@ import {
 import { WebPushTransport } from "../../../../apps/api/src/modules/multi-taxi/web-push.transport";
 
 type MutableOrder = { status: string; [key: string]: unknown };
-
-function vapidEnv() {
-  const ecdh = createECDH("prime256v1");
-  ecdh.generateKeys();
-  const privateKeyRaw = ecdh.getPrivateKey();
-  const privateKey32 = Buffer.concat([
-    Buffer.alloc(Math.max(0, 32 - privateKeyRaw.length)),
-    privateKeyRaw,
-  ]).subarray(-32);
-  return {
-    PASSENGER_WEBPUSH_VAPID_PUBLIC_KEY: ecdh.getPublicKey().toString("base64url"),
-    PASSENGER_WEBPUSH_VAPID_PRIVATE_KEY: privateKey32.toString("base64url"),
-    PASSENGER_WEBPUSH_VAPID_SUBJECT: "mailto:ops@example.com",
-  };
-}
 
 function browserSubscription() {
   const ecdh = createECDH("prime256v1");
@@ -88,7 +71,7 @@ function createHarness() {
   };
 
   const pushSubscriptionRepository = new PassengerPushRepository();
-  
+
   const transport = new WebPushTransport();
   const pushAdapter = new PassengerPushAdapter(null, transport, null);
 
@@ -126,25 +109,6 @@ async function issueAccessToken(service: MultiTaxiService, order: MutableOrder) 
     },
     null,
   );
-}
-
-function outboxRecord(
-  overrides?: Partial<ConsumerNotificationOutboxRecord>,
-): ConsumerNotificationOutboxRecord {
-  return {
-    outboxId: "outbox-001",
-    orderId: "order-001",
-    passengerSubjectRef: "passenger-001",
-    eventType: "driver_arrived",
-    assignmentVersion: 1,
-    payload: { snapshotId: "snap-001" },
-    status: "pending",
-    attemptCount: 0,
-    nextAttemptAt: "2026-09-15T00:00:00.000Z",
-    createdAt: "2026-09-15T00:00:00.000Z",
-    deliveredAt: null,
-    ...overrides,
-  };
 }
 
 const originalEnv = { ...process.env };
@@ -228,4 +192,3 @@ describe("SR-PUSH-WEBPUSH-20260915: registerPassengerPushSubscription / unregist
     expect(pushSubscriptionRepository.findActiveByOrderId("some-other-order")).toBeNull();
   });
 });
-

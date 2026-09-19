@@ -9,7 +9,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
-  
+
   PassengerPushRepository,
 } from "../../../../apps/api/src/modules/multi-taxi/passenger-push.repository";
 
@@ -81,4 +81,3 @@ describe("SR-PUSH-WEBPUSH-20260915: PassengerPushRepository", () => {
     expect(repository.revokeByOrderId("order-never-subscribed")).toBe(false);
   });
 });
-
