@@ -21,6 +21,7 @@ import { ReferralBindingScaffoldService } from "./referral-binding.scaffold.serv
 import { OwnedMobilityTaskEventsService } from "./owned-mobility-task-events.service";
 import { OwnedMobilityService } from "./owned-mobility.service";
 import { OwnedAutonomousDispatchExecutorService } from "./owned-autonomous-dispatch-executor.service";
+import { MultiTaxiModule } from "../multi-taxi/multi-taxi.module";
 
 @Module({
   imports: [
@@ -38,6 +39,7 @@ import { OwnedAutonomousDispatchExecutorService } from "./owned-autonomous-dispa
     forwardRef(() => SandboxDispatchGateModule),
     forwardRef(() => TenantPartnerModule),
     forwardRef(() => PlatformPresenceModule),
+    forwardRef(() => MultiTaxiModule),
   ],
   controllers: [OwnedMobilityController],
   providers: [

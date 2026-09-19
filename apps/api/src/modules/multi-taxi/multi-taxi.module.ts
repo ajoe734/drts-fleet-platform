@@ -59,11 +59,14 @@ import { WebPushTransport } from "./web-push.transport";
     // encryption; the resolver reads the subscription store below.
     PassengerPushRepository,
     PassengerPushDeviceResolver,
-    { provide: PASSENGER_DEVICE_RESOLVER, useClass: PassengerPushDeviceResolver },
+    {
+      provide: PASSENGER_DEVICE_RESOLVER,
+      useClass: PassengerPushDeviceResolver,
+    },
     WebPushTransport,
     { provide: PASSENGER_PUSH_TRANSPORT, useClass: WebPushTransport },
   ],
-  exports: [MultiTaxiService],
+  exports: [MultiTaxiService, MultiTaxiRepository],
 })
 export class MultiTaxiModule implements OnModuleInit {
   constructor(
