@@ -5053,4 +5053,33 @@ export type {
 export * from "./system-remediation";
 export * from "./remittance-proof";
 export * from "./platform-adapter-registry";
-export { ApiClient as DrtsApiClient };
+export { ApiClient as DrtsApiClient 
+  public async getPartnerEntryNotificationBinding(entrySlug: string): Promise<any> {
+    return this.get<any>(`/api/platform-admin/partner-entries/${encodeURIComponent(entrySlug)}/notification-binding`);
+  }
+
+  public async updatePartnerEntryNotificationBinding(entrySlug: string, command: any): Promise<any> {
+    return this.put(`/api/platform-admin/partner-entries/${encodeURIComponent(entrySlug)}/notification-binding`, { body: command });
+  }
+
+  public async testPartnerEntryNotificationBinding(entrySlug: string): Promise<any> {
+    return this.post(`/api/platform-admin/partner-entries/${encodeURIComponent(entrySlug)}/notification-binding/test`);
+  }
+
+  public async enablePartnerEntryNotificationBinding(entrySlug: string): Promise<any> {
+    return this.post(`/api/platform-admin/partner-entries/${encodeURIComponent(entrySlug)}/notification-binding/enable`);
+  }
+
+  public async disablePartnerEntryNotificationBinding(entrySlug: string): Promise<any> {
+    return this.post(`/api/platform-admin/partner-entries/${encodeURIComponent(entrySlug)}/notification-binding/disable`);
+  }
+
+  public async listPartnerNotificationDeliveries(entrySlug: string, query?: any): Promise<ApiListData<any>> {
+    return this.getList<any>(`/api/platform-admin/partner-entries/${encodeURIComponent(entrySlug)}/notification-deliveries`, { query: query as Record<string, string> });
+  }
+
+  public async retryPartnerNotificationDelivery(entrySlug: string, outboxId: string): Promise<any> {
+    return this.post(`/api/platform-admin/partner-entries/${encodeURIComponent(entrySlug)}/notification-deliveries/${encodeURIComponent(outboxId)}/retry`);
+  }
+
+};

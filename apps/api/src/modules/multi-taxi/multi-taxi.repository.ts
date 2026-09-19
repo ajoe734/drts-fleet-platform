@@ -1719,4 +1719,82 @@ export class MultiTaxiRepository {
   private escapeLike(value: string) {
     return value.replace(/[\\%_]/g, (character) => `\\${character}`);
   }
+
+
+  async listPartnerNotificationDeliveries(entrySlug: string, query: any) {
+    if (!this.isEnabled()) return { rows: [], total: 0 };
+    const page = Number(query.page) || 1;
+    const pageSize = Number(query.pageSize) || 50;
+    const offset = (page - 1) * pageSize;
+    
+    const countResult = await this.databaseService!.query(`
+      SELECT COUNT(*) as cnt
+      FROM mobility.phase1_partner_notification_delivery_contexts ctx
+      WHERE ctx.entry_slug = $1
+    `, [entrySlug]);
+
+    const result = await this.databaseService!.query(`
+      SELECT 
+        ctx.outbox_id as "outboxId",
+        ctx.order_id as "orderId",
+        ctx.entry_slug as "entrySlug",
+        ctx.tenant_id as "tenantId",
+        ctx.partner_id as "partnerId",
+        ctx.binding_id as "bindingId",
+        ctx.binding_version as "bindingVersion",
+        ctx.webhook_id as "webhookId",
+        ctx.endpoint_fingerprint as "endpointFingerprint",
+        ctx.wire_payload as "wirePayload",
+        ctx.wire_payload_hash as "wirePayloadHash",
+        ctx.event_sequence as "eventSequence",
+        ctx.expires_at as "expiresAt",
+        ctx.delivery_target as "deliveryTarget",
+        ctx.delivery_stage as "deliveryStage",
+        ctx.retry_disposition as "retryDisposition",
+        ctx.failure_reason as "failureReason",
+        ctx.receipt_id as "receiptId",
+        ctx.downstream_status as "downstreamStatus",
+        ctx.created_at as "createdAt",
+        ctx.delivered_at as "deliveredAt",
+        o.status,
+        o.result,
+        o.attempts,
+        o.max_attempts as "maxAttempts",
+        o.next_attempt_at as "nextAttemptAt"
+      FROM mobility.phase1_partner_notification_delivery_contexts ctx
+      JOIN mobility.phase1_passenger_notification_outbox o ON ctx.outbox_id = o.id
+      WHERE ctx.entry_slug = $1
+      ORDER BY ctx.created_at DESC
+      LIMIT $2 OFFSET $3
+    `, [entrySlug, pageSize, offset]);
+
+    return { rows: result.rows, total: parseInt(countResult.rows[0].cnt, 10) };
+  }
+
+  async retryPartnerNotificationDelivery(entrySlug: string, outboxId: string) {
+    if (!this.isEnabled()) return { success: false };
+    const result = await this.databaseService!.query(`
+      UPDATE mobility.phase1_passenger_notification_outbox
+      SET 
+        status = 'pending',
+        next_attempt_at = NOW(),
+        claim_id = NULL,
+        claim_expires_at = NULL
+      FROM mobility.phase1_partner_notification_delivery_contexts ctx
+      WHERE mobility.phase1_passenger_notification_outbox.id = $1 
+        AND ctx.outbox_id = mobility.phase1_passenger_notification_outbox.id
+        AND ctx.entry_slug = $2
+        AND mobility.phase1_passenger_notification_outbox.status = 'failed'
+        AND ctx.retry_disposition IN ('manual_only', 'automatic', 'configuration_blocked')
+        AND ctx.expires_at > NOW()
+        AND ctx.failure_reason NOT IN ('notification_superseded', 'notification_expired', 'notification_obsolete', 'recipient_revoked')
+      RETURNING mobility.phase1_passenger_notification_outbox.id
+    `, [outboxId, entrySlug]);
+
+    if (result.rows.length === 0) {
+      throw new Error("Cannot retry this notification.");
+    }
+    return { success: true };
+  }
+
 }

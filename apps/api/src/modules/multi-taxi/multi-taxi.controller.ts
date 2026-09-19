@@ -503,4 +503,38 @@ export class MultiTaxiController {
     }
     return this.reportingFilingService;
   }
+
+
+  @Get("platform-admin/partner-entries/:entrySlug/notification-deliveries")
+  @RequireRealms("platform")
+  async listPartnerNotificationDeliveries(
+    @Param("entrySlug") entrySlug: string,
+    @Query() query: any,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    const items = await this.multiTaxiService.listPartnerNotificationDeliveries(entrySlug, query);
+    return toApiSuccessEnvelope(
+      toApiListData(items.rows, {
+        page: query.page ?? 1,
+        pageSize: query.pageSize ?? 50,
+        totalItems: items.total,
+        totalPages: Math.ceil(items.total / (query.pageSize ?? 50)),
+      }),
+      requestId,
+    );
+  }
+
+  @Post("platform-admin/partner-entries/:entrySlug/notification-deliveries/:outboxId/retry")
+  @RequireRealms("platform")
+  async retryPartnerNotificationDelivery(
+    @Param("entrySlug") entrySlug: string,
+    @Param("outboxId") outboxId: string,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    return toApiSuccessEnvelope(
+      await this.multiTaxiService.retryPartnerNotificationDelivery(entrySlug, outboxId),
+      requestId,
+    );
+  }
+
 }

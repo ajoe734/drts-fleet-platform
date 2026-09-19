@@ -407,3 +407,20 @@ export interface PartnerNotificationDeliveryContext {
 
 export const PARTNER_NOTIFICATION_ATTEMPT_TIMEOUT_MS = 10_000;
 export const PARTNER_NOTIFICATION_MAX_ACK_BODY_BYTES = 4096;
+
+// ===========================================================================
+// §15 UI API Read Models
+// ===========================================================================
+
+export interface PartnerNotificationDeliveryRecord extends PartnerNotificationDeliveryContext {
+  status: "pending" | "sending" | "delivered" | "failed";
+  result: "delivered" | "provider_not_configured" | "provider_error" | null;
+  attempts: number;
+  maxAttempts: number;
+  nextAttemptAt: string | null;
+}
+
+export interface PartnerNotificationDeliveryQuery {
+  page?: number;
+  pageSize?: number;
+}

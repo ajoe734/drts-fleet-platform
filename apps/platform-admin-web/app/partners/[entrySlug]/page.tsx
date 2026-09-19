@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { PartnerNotificationPanel } from "@/components/partner-notification-panel";
 import { useParams } from "next/navigation";
 import React, {
   useCallback,
@@ -51,7 +52,8 @@ type TabKey =
   | "auth"
   | "eligibility"
   | "credentials"
-  | "audit";
+  | "audit"
+  | "notifications";
 
 type CredentialRow = Record<string, unknown> & {
   keyId: string;
@@ -842,6 +844,7 @@ export default function PartnerDetailPage() {
             eligibility: "Eligibility",
             credentials: "Credentials",
             audit: "Audit",
+            notifications: "Notifications",
           },
           preview: "Preview entry",
           issueCredential: "Issue credential",
@@ -955,6 +958,7 @@ export default function PartnerDetailPage() {
             eligibility: "Eligibility",
             credentials: "Credentials",
             audit: "Audit",
+            notifications: "Notifications",
           },
           preview: "預覽 entry",
           issueCredential: "發行 credential",
@@ -1255,6 +1259,7 @@ export default function PartnerDetailPage() {
           ["eligibility", copy.tabs.eligibility],
           ["credentials", copy.tabs.credentials],
           ["audit", copy.tabs.audit],
+          ["notifications", copy.tabs.notifications],
         ] as const
       ).map(([key, label]) => ({
         key,
@@ -2355,6 +2360,10 @@ export default function PartnerDetailPage() {
                     }
                   />
                 ) : null}
+        {activeTab === "notifications" ? (
+          <PartnerNotificationPanel entrySlug={entrySlug} />
+        ) : null}
+
 
                 <DL
                   theme={theme}
