@@ -1,3 +1,4 @@
+import { PartnerNotificationNavigationRepository } from "./partner-notification-navigation.repository";
 import {
   Body,
   CanActivate,
@@ -194,6 +195,7 @@ export class TenantApiKeyAuthGuard implements CanActivate {
 @Controller()
 export class TenantPartnerController {
   constructor(
+    @Inject(PartnerNotificationNavigationRepository) private readonly partnerNotificationNavigationRepository: PartnerNotificationNavigationRepository,
     @Inject(TenantPartnerService)
     private readonly tenantPartnerService: TenantPartnerService,
     @Inject(BillingSettlementService)
@@ -2300,5 +2302,69 @@ export class TenantPartnerController {
       identity,
     );
     return toApiSuccessEnvelope(toApiListData(items), requestId);
+  }
+
+  @OpenRoute()
+  @Throttle(OPEN_ROUTE_RATE_LIMIT)
+  @Post("partner/entries/:entrySlug/notification-navigation/resolve")
+  async resolvePartnerNotificationNavigation(
+    @Param("entrySlug") entrySlug: string,
+    @Body() command: { rideRef: string; partnerUserRef: string },
+    @Req() request?: any,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    const { rideRef, partnerUserRef } = command;
+    if (!rideRef || !partnerUserRef) {
+      throw new ApiRequestError(400, "BAD_REQUEST", "rideRef and partnerUserRef are required");
+    }
+
+    const apiKey = request?.headers?.["x-api-key"] || request?.headers?.["x-tenant-api-key"];
+    const allowInternalBootstrap = !apiKey?.trim();
+    if (allowInternalBootstrap) {
+      requireScopedInternalKey(
+        request ?? {},
+        process.env.DRTS_REFERRAL_EMBED_HANDOFF_KEY,
+        {
+          header: REFERRAL_EMBED_HANDOFF_KEY_HEADER,
+          requiredEnv: "DRTS_REFERRAL_EMBED_HANDOFF_KEY",
+        },
+      );
+    }
+
+    const route = await this.partnerNotificationNavigationRepository.resolveRoute(
+      entrySlug,
+      rideRef,
+      partnerUserRef,
+    );
+
+    if (!route) {
+      throw new ApiRequestError(403, "FORBIDDEN", "Notification link is invalid or expired.");
+    }
+
+    const partnerEntry = await this.tenantPartnerService.getPartnerEntry(entrySlug);
+    const entryHost = partnerEntry?.entryHost;
+    
+    if (!entryHost) {
+      throw new ApiRequestError(403, "FORBIDDEN", "Partner entry not configured for embedded navigation.");
+    }
+
+    const artifactCommand = {
+      entrySlug,
+      entryHost,
+      partnerUserRef,
+      apiKey,
+    };
+    
+    const handoffArtifact = await this.tenantPartnerService.issueReferralEmbedHandoffArtifact(
+      artifactCommand,
+      requestId,
+      { allowInternalBootstrap }
+    );
+
+    const isActive = ["created", "driver_assigned", "driver_arrived", "passenger_boarded"].includes(route.status);
+    const screen = isActive ? "trip" : "receipt";
+    const destinationUrl = `https://${entryHost}/api/referral/notification-navigation?artifact=${handoffArtifact.artifact}&entrySlug=${entrySlug}&screen=${screen}&orderId=${route.orderId}`;
+
+    return toApiSuccessEnvelope({ handoffArtifact, destinationUrl }, requestId);
   }
 }

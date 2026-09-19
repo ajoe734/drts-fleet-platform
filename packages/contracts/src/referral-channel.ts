@@ -253,3 +253,14 @@ export interface ReferralPassengerReceipt {
   paymentChannel: string;
   downloadUrl?: string;
 }
+
+export interface ResolvePartnerNotificationNavigationCommand {
+  entrySlug: string;
+  rideRef: string;
+  partnerUserRef: string;
+}
+
+export interface PartnerNotificationNavigationResolution {
+  handoffArtifact: ReferralEmbedHandoffArtifact;
+  destinationUrl: string;
+}
