@@ -3,6 +3,7 @@ import { Injectable, Logger, Optional } from "@nestjs/common";
 import type { QueryResultRow } from "pg";
 
 import type {
+  ConsumerNotificationOutboxRecord,
   DriverRatingSummary,
   MultiTaxiAuthorizedVehicleRecord,
   MultiTaxiElectronicReceipt,
@@ -16,6 +17,8 @@ import type {
   PassengerTripRatingRecord,
   PushProviderAckState,
 } from "@drts/contracts";
+
+import type { PartnerDeliveryMetadata, StoredPartnerNotificationContext } from "./partner-notification.types";
 
 import { DatabaseService } from "../../common/db";
 
@@ -149,6 +152,7 @@ export interface RecordPushDeliveryOutcomeInput {
   providerAckState: PushProviderAckState;
   providerMessageRef: string | null;
   deliveryOutcome: PassengerPushDeliveryOutcome;
+  partnerMetadata?: PartnerDeliveryMetadata;
 }
 
 export type RecordPushDeliveryOutcomeResult =
@@ -559,6 +563,122 @@ export class MultiTaxiRepository {
    * for a `delivered` outcome, so a row whose provider was never provisioned
    * stays queryable as undelivered instead of looking like a sent notification.
    */
+  /** Durable selection; blocked/manual/terminal rows never become automatic retries. */
+  async listDuePartnerNotifications(limit = 100): Promise<ConsumerNotificationOutboxRecord[]> {
+    if (!this.isEnabled()) return [];
+    const result = await this.databaseService!.query<{ record: ConsumerNotificationOutboxRecord }>(`
+      SELECT to_jsonb(o) AS record FROM ops.consumer_notification_outbox o
+      LEFT JOIN mobility.phase1_partner_notification_delivery_contexts c USING (outbox_id)
+      WHERE o.status IN ('pending','sending','failed') AND o.next_attempt_at <= now()
+        AND COALESCE(c.retry_disposition, o.payload->'partnerNotification'->>'retryDisposition', 'automatic') = 'automatic'
+        AND NOT EXISTS (SELECT 1 FROM ops.phase1_push_delivery_claims l
+          WHERE l.outbox_id=o.outbox_id AND l.claim_state='claimed' AND l.lease_expires_at > now())
+      ORDER BY o.next_attempt_at LIMIT $1
+    `, [Math.max(1, Math.min(limit, 1000))]);
+    // Expired rows are selected once to persist a terminal outcome, never sent.
+    return result.rows.map(row => this.mapNotificationOutbox(row.record));
+  }
+
+  /** Re-read authoritative state under lock: callers may hold a stale outbox copy. */
+  async claimPartnerNotification(outboxId: string, workerId: string, leaseSeconds: number): Promise<
+    { record: ConsumerNotificationOutboxRecord; fenceToken: number } | null
+  > {
+    if (!this.isEnabled()) throw new Error("Partner notification persistence unavailable");
+    const client = await this.databaseService!.connect();
+    try {
+      await client.query("BEGIN");
+      const rows = await client.query(`SELECT * FROM ops.consumer_notification_outbox WHERE outbox_id=$1 FOR UPDATE`, [outboxId]);
+      const row = rows.rows[0];
+      if (!row) { await client.query("ROLLBACK"); return null; }
+      const record = this.mapNotificationOutbox(row);
+      const context = await client.query(`SELECT retry_disposition FROM mobility.phase1_partner_notification_delivery_contexts WHERE outbox_id=$1`, [outboxId]);
+      const metadata = record.payload.partnerNotification as PartnerDeliveryMetadata | undefined;
+      const disposition = context.rows[0]?.retry_disposition ?? metadata?.retryDisposition;
+      if (record.status === "delivered" || Date.parse(record.nextAttemptAt) > Date.now() || (disposition && disposition !== "automatic")) {
+        await client.query("ROLLBACK"); return null;
+      }
+      const claim = await client.query<PushDeliveryClaimRow>(`
+        INSERT INTO ops.phase1_push_delivery_claims (outbox_id, passenger_subject_ref, worker_id, claim_state, fence_token, lease_expires_at, claimed_at)
+        VALUES ($1,$2,$3,'claimed',1,now()+($4 * interval '1 second'),now())
+        ON CONFLICT (outbox_id) DO UPDATE SET worker_id=EXCLUDED.worker_id, claim_state='claimed',
+          fence_token=ops.phase1_push_delivery_claims.fence_token+1, lease_expires_at=EXCLUDED.lease_expires_at, claimed_at=now()
+        WHERE ops.phase1_push_delivery_claims.claim_state != 'claimed' OR ops.phase1_push_delivery_claims.lease_expires_at <= now()
+        RETURNING fence_token
+      `, [outboxId, record.passengerSubjectRef, workerId, leaseSeconds]);
+      if (!claim.rows[0]) { await client.query("ROLLBACK"); return null; }
+      // Reserve an attempt durably before IO, so a crash/ack-write failure cannot reset maxAttempts.
+      await client.query(`UPDATE ops.consumer_notification_outbox SET status='sending', attempt_count=attempt_count+1, next_attempt_at=now()+($2 * interval '1 second') WHERE outbox_id=$1`, [outboxId, leaseSeconds]);
+      await client.query("COMMIT");
+      return { record: { ...record, attemptCount: record.attemptCount + 1 }, fenceToken: claim.rows[0].fence_token };
+    } catch (error) { await client.query("ROLLBACK"); throw error; }
+    finally { client.release(); }
+  }
+
+  private mapNotificationOutbox(row: Record<string, unknown>): ConsumerNotificationOutboxRecord {
+    return {
+      outboxId: String(row.outbox_id), orderId: String(row.order_id), passengerSubjectRef: String(row.passenger_subject_ref),
+      eventType: row.event_type as ConsumerNotificationOutboxRecord["eventType"], assignmentVersion: row.assignment_version as number | null,
+      payload: row.payload as Record<string, unknown>, status: row.status as ConsumerNotificationOutboxRecord["status"],
+      attemptCount: Number(row.attempt_count), nextAttemptAt: new Date(row.next_attempt_at as string).toISOString(),
+      createdAt: new Date(row.created_at as string).toISOString(), deliveredAt: row.delivered_at ? new Date(row.delivered_at as string).toISOString() : null,
+    };
+  }
+
+  async findPartnerNotificationContext(outboxId: string): Promise<StoredPartnerNotificationContext | null> {
+    if (!this.isEnabled()) return null;
+    const result = await this.databaseService!.query(`SELECT * FROM mobility.phase1_partner_notification_delivery_contexts WHERE outbox_id=$1`, [outboxId]);
+    return result.rows[0] ? this.mapPartnerNotificationContext(result.rows[0]) : null;
+  }
+
+  private mapPartnerNotificationContext(row: Record<string, unknown>): StoredPartnerNotificationContext {
+    return {
+      outboxId: String(row.outbox_id), deliveryId: String(row.delivery_id), orderId: String(row.order_id), entrySlug: String(row.entry_slug),
+      tenantId: String(row.tenant_id), partnerId: String(row.partner_id), bindingId: String(row.binding_id), bindingVersion: Number(row.binding_version),
+      webhookId: String(row.webhook_id), endpointFingerprint: String(row.endpoint_fingerprint),
+      wirePayload: row.wire_payload as StoredPartnerNotificationContext["wirePayload"], wirePayloadHash: String(row.wire_payload_hash),
+      eventSequence: Number(row.event_sequence), expiresAt: new Date(row.expires_at as string).toISOString(),
+      retryPolicySnapshot: row.retry_policy_snapshot as StoredPartnerNotificationContext["retryPolicySnapshot"],
+      deliveryTarget: "partner_endpoint", deliveryStage: row.delivery_stage as StoredPartnerNotificationContext["deliveryStage"],
+      retryDisposition: row.retry_disposition as StoredPartnerNotificationContext["retryDisposition"],
+      failureReason: row.failure_reason as StoredPartnerNotificationContext["failureReason"], receiptId: row.receipt_id as string | null,
+      downstreamStatus: "unknown", createdAt: new Date(row.created_at as string).toISOString(),
+      deliveredAt: row.delivered_at ? new Date(row.delivered_at as string).toISOString() : null,
+    };
+  }
+
+  async preparePartnerNotificationContext(context: StoredPartnerNotificationContext, fenceToken: number): Promise<StoredPartnerNotificationContext> {
+    if (!this.isEnabled()) throw new Error("Partner notification persistence unavailable");
+    const client = await this.databaseService!.connect();
+    try {
+      await client.query("BEGIN");
+      const claim = await client.query(`SELECT fence_token FROM ops.phase1_push_delivery_claims WHERE outbox_id=$1 AND fence_token=$2 AND claim_state='claimed' AND lease_expires_at > clock_timestamp() FOR UPDATE`, [context.outboxId, fenceToken]);
+      if (!claim.rows.length) throw new Error("Partner notification fence lost before preparation");
+      await client.query(`
+        INSERT INTO mobility.phase1_partner_notification_delivery_contexts (
+          outbox_id, delivery_id, order_id, entry_slug, tenant_id, partner_id, binding_id, binding_version, webhook_id,
+          endpoint_fingerprint, wire_payload, wire_payload_hash, event_sequence, expires_at, retry_policy_snapshot, created_at)
+        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11::jsonb,$12,$13,$14,$15::jsonb,$16)
+        ON CONFLICT (outbox_id) DO NOTHING
+      `, [context.outboxId, context.deliveryId, context.orderId, context.entrySlug, context.tenantId, context.partnerId, context.bindingId,
+        context.bindingVersion, context.webhookId, context.endpointFingerprint, JSON.stringify(context.wirePayload), context.wirePayloadHash,
+        context.eventSequence, context.expiresAt, JSON.stringify(context.retryPolicySnapshot), context.createdAt]);
+      const result = await client.query(`SELECT * FROM mobility.phase1_partner_notification_delivery_contexts WHERE outbox_id=$1`, [context.outboxId]);
+      await client.query("COMMIT");
+      return this.mapPartnerNotificationContext(result.rows[0]!);
+    } catch (error) { await client.query("ROLLBACK"); throw error; }
+    finally { client.release(); }
+  }
+
+  async findPartnerNotificationRelevance(orderId: string): Promise<{ status: string; assignmentVersion: number } | null> {
+    if (!this.isEnabled()) return null;
+    const result = await this.databaseService!.query<{ status: string; assignment_version: number }>(`
+      SELECT o.status, COALESCE((SELECT MAX(assignment_version) FROM ops.passenger_dispatch_disclosure_snapshots s WHERE s.order_id=o.order_id), 0) AS assignment_version
+      FROM ops.phase1_owned_orders o WHERE o.order_id=$1
+    `, [orderId]);
+    const row = result.rows[0];
+    return row ? { status: row.status, assignmentVersion: Number(row.assignment_version) } : null;
+  }
+
   async updateConsumerNotificationOutboxDelivery(
     outcome: PassengerPushDeliveryOutcome,
   ) {
@@ -672,14 +792,19 @@ export class MultiTaxiRepository {
     const client = await this.databaseService!.connect();
     try {
       await client.query("BEGIN");
+      if (input.partnerMetadata) {
+        // Same lock order as claimPartnerNotification avoids a claim/outbox deadlock.
+        await client.query("SELECT outbox_id FROM ops.consumer_notification_outbox WHERE outbox_id=$1 FOR UPDATE", [input.outboxId]);
+      }
       const claimResult = await client.query<PushDeliveryClaimRow>(
         `
           SELECT fence_token
           FROM ops.phase1_push_delivery_claims
           WHERE outbox_id = $1
+            AND ($2::boolean = false OR (claim_state = 'claimed' AND lease_expires_at > clock_timestamp()))
           FOR UPDATE
         `,
-        [input.outboxId],
+        [input.outboxId, Boolean(input.partnerMetadata)],
       );
       const claimRow = claimResult.rows[0];
       if (!claimRow || claimRow.fence_token !== input.fenceToken) {
@@ -707,6 +832,18 @@ export class MultiTaxiRepository {
           input.providerMessageRef,
         ],
       );
+
+      if (input.partnerMetadata) {
+        const m = input.partnerMetadata;
+        await client.query(`
+          UPDATE mobility.phase1_partner_notification_delivery_contexts
+          SET delivery_stage=$2, retry_disposition=$3, failure_reason=$4, receipt_id=$5, delivered_at=$6
+          WHERE outbox_id=$1
+        `, [input.outboxId, m.deliveryStage, m.retryDisposition, m.failureReason, m.receiptId, input.deliveryOutcome.deliveredAt]);
+        // A missing route/binding cannot populate a non-null immutable context.
+        // Keep its typed outcome on the existing outbox row under the same fence.
+        await client.query(`UPDATE ops.consumer_notification_outbox SET payload=jsonb_set(payload, '{partnerNotification}', $2::jsonb) WHERE outbox_id=$1`, [input.outboxId, JSON.stringify(m)]);
+      }
 
       await client.query(
         `

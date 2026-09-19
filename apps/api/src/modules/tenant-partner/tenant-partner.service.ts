@@ -1264,6 +1264,8 @@ export type TenantQuotaConsumptionCommitResult = {
  * never a tenant-wide event scan.
  */
 export type PartnerNotificationDispatchAttemptCommand = {
+  attemptNumber?: number;
+  retryPolicySnapshot?: WebhookRetryPolicyRecord;
   tenantId: string;
   webhookId: string;
   wirePayload:
@@ -8229,6 +8231,8 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
        * internal retry timer.
        */
       forceSingleAttempt?: boolean;
+      attemptNumber?: number;
+      retryPolicySnapshot?: WebhookRetryPolicyRecord;
     },
   ): Promise<WebhookDispatchAttemptResult> {
     const previousStatus = delivery.status;
@@ -8310,7 +8314,7 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
       };
     }
 
-    const attemptNumber = delivery.attempt + 1;
+    const attemptNumber = options?.attemptNumber ?? delivery.attempt + 1;
     const result = await this.webhookDispatchService.dispatchAttempt({
       url: endpoint.url,
       deliveryId: delivery.deliveryId,
@@ -8326,7 +8330,7 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
       // the queued/delivery_failed classification, or a single transient
       // failure would look "exhausted" and wrongly disable the endpoint on
       // its very first attempt (see the scheduling guard below instead).
-      retryPolicy: endpoint.retryPolicy,
+      retryPolicy: options?.retryPolicySnapshot ?? endpoint.retryPolicy,
       ...(options?.partnerAckV1 ? { partnerAckV1: options.partnerAckV1 } : {}),
     });
 
@@ -8340,7 +8344,7 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
     delivery.signatureVersion = result.signatureVersion;
     delivery.secretVersion = result.secretVersion;
     delivery.retryPolicySnapshot = this.toWebhookRetryPolicy(
-      endpoint.retryPolicy,
+      options?.retryPolicySnapshot ?? endpoint.retryPolicy,
     );
     delivery.rawBody = { ...result.rawBody };
     this.markWebhookSecretUsed(
@@ -8490,6 +8494,13 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
    * exact deliveryId/payload for every attempt so the partner's durable
    * dedupe can recognize a resend.
    */
+  findNotificationWebhookEndpoint(tenantId: string, webhookId: string): TenantWebhookEndpoint | null {
+    const endpoint = this.webhookEndpoints.find(item => item.tenantId === tenantId && item.webhookId === webhookId);
+    if (!endpoint) return null;
+    this.reconcileStoredWebhookEndpoint(endpoint, new Date().toISOString());
+    return this.toWebhookResponse(endpoint);
+  }
+
   async dispatchPartnerNotificationAttempt(
     command: PartnerNotificationDispatchAttemptCommand,
   ): Promise<PartnerNotificationDispatchOutcome> {
@@ -8566,6 +8577,8 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
       command.wirePayload as unknown as Record<string, unknown>,
       {
         forceSingleAttempt: true,
+        ...(command.attemptNumber !== undefined ? { attemptNumber: command.attemptNumber } : {}),
+        ...(command.retryPolicySnapshot ? { retryPolicySnapshot: command.retryPolicySnapshot } : {}),
         partnerAckV1: {
           mode: "partner_ack_v1",
           expected: {
@@ -8628,10 +8641,9 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
     // Service computed it from the same, un-forced `endpoint.retryPolicy`)
     // and is null once the policy considers this delivery exhausted — the
     // caller's fence transaction, not a tenant-side timer, acts on this.
-    return this.partnerNotificationTypedFailure(
-      "provider_transient_error",
-      result.nextAttemptAt,
-    );
+    const outcome = this.partnerNotificationTypedFailure("provider_transient_error", result.nextAttemptAt);
+    if (outcome.kind === "failed" && !result.nextAttemptAt) outcome.failure.retryDisposition = "terminal";
+    return outcome;
   }
 
   private markWebhookValidationPending(
@@ -8648,7 +8660,7 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
 
   private schedulePersistedWebhookRetries() {
     for (const delivery of this.webhookDeliveries) {
-      if (delivery.status !== "queued" || !delivery.nextAttemptAt) {
+      if (delivery.eventType.startsWith("passenger.") || delivery.status !== "queued" || !delivery.nextAttemptAt) {
         continue;
       }
 
@@ -8735,6 +8747,9 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
         `Webhook delivery ${deliveryId} was not found for endpoint ${webhookId}.`,
       );
     }
+    if (delivery.eventType.startsWith("passenger.")) {
+      throw new ApiRequestError(HttpStatus.CONFLICT, "PASSENGER_NOTIFICATION_RETRY_OWNER", "Retry passenger notifications through the consumer outbox.");
+    }
     if (delivery.status !== "delivery_failed") {
       throw new ApiRequestError(
         HttpStatus.CONFLICT,
@@ -8801,6 +8816,8 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
       return this.toDeliveryResponse(delivery, identity);
     }
 
+    // Passenger deliveries are owned exclusively by the consumer outbox, including after restart/manual retry.
+    if (delivery.eventType.startsWith("passenger.")) return;
     await this.dispatchWebhookAttempt(endpoint, delivery, delivery.rawBody);
 
     this.recordTenantAudit(

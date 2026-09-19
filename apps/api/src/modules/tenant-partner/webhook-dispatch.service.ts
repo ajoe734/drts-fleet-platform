@@ -4,6 +4,8 @@ import { Inject, Injectable, Optional } from "@nestjs/common";
 
 import { PARTNER_NOTIFICATION_MAX_ACK_BODY_BYTES } from "@drts/contracts";
 
+import { partnerNotificationWireBytes } from "./partner-notification-wire";
+
 import { deepToSnakeCase } from "../../common/snake-case.interceptor";
 
 export const WEBHOOK_FETCH = Symbol("WEBHOOK_FETCH");
@@ -177,7 +179,7 @@ export class WebhookDispatchService {
   ): Promise<WebhookDispatchAttemptResult> {
     const attemptedAt = new Date().toISOString();
     const rawBody = this.normalizePayload(command.payload);
-    const rawBodyString = JSON.stringify(rawBody);
+    const rawBodyString = command.partnerAckV1 ? partnerNotificationWireBytes(command.payload) : JSON.stringify(rawBody);
     const signature = createHmac("sha256", command.secretValue)
       .update(`${attemptedAt}.${rawBodyString}`)
       .digest("hex");
@@ -195,6 +197,7 @@ export class WebhookDispatchService {
     try {
       const response = await this.fetchImpl(command.url, {
         method: "POST",
+        ...(command.partnerAckV1 ? { redirect: "error" as const } : {}),
         headers: {
           "content-type": "application/json",
           "user-agent": "drts-webhook-dispatch/1.0",
