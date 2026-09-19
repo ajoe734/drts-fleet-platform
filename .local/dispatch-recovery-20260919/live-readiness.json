@@ -7,8 +7,8 @@
   ],
   "source_run": "35430134402",
   "deployed_sha": "98e251cdc809467b16a158fc2f285e4296206f5f",
-  "deployment_note": "Deployed SHA 98e251cdc809467b16a158fc2f285e4296206f5f was deployed before the SR-PARTNER-NOTIFY-SEQ-20260918 and SR-PARTNER-NOTIFY-TRANSPORT-20260918 commits. Thus, the currently deployed environment does NOT include the latest SEQ/TRANSPORT features.",
-  "resources": [
+  "deployment_note": "Deployed SHA 98e251cdc809467b16a158fc2f285e4296206f5f was deployed before the SR-PARTNER-NOTIFY-SEQ-20260918 and SR-PARTNER-NOTIFY-TRANSPORT-20260918 commits. Thus, the currently deployed environment does NOT include the latest SEQ/TRANSPORT features. PUSH A controlled, B true partner endpoint, C native pilot are separate and gates are preserved.",
+  "prepared_resources": [
     {
       "task": "AGY-SANDBOX-RECOVERY",
       "resource": "agy_sandbox_write_access",
@@ -16,64 +16,141 @@
       "reason": "AppArmor userns fixed. Verified write/read/delete via run_command with --sandbox intact (evidence: agy-shell-after-profile-v2.json)."
     },
     {
+      "task": "SR-DEV-HEALTHCHECK-IDENTITY-20260915",
+      "resource": "dev_health_check",
+      "status": "done",
+      "merge_sha": "8901d8386e8fba0bb9dff18c9ab659809e1d8b00",
+      "reason": "Deploy 35430134402 Dev health check / Candidate SHA operational acceptance is success. Old healthcheck blockers are resolved, existing deployment base is present."
+    }
+  ],
+  "producers": [
+    {
+      "task": "SR-LIVE-ENTRY-MAP-RUNNER-001",
+      "status": "done",
+      "merge_sha": "25ecae6295898d80883f03a9f5a1276fab03ab24",
+      "capabilities": "Executes live entry map acceptance",
+      "inputs": "Based on docs/04-uat/system-remediation-20260906/live-entry-map-acceptance-runner.md",
+      "reusable_commands": "Live runner script for entry map acceptance",
+      "next_step": "Run existing runner when auth/inputs are provided by operator"
+    },
+    {
+      "task": "SR-LIVE-DOC-RUNNER-001",
+      "status": "done",
+      "merge_sha": "f1731dfdd892b10a2831ceec94512db87694e976",
+      "capabilities": "Executes live document acceptance",
+      "inputs": "Based on docs/04-uat/system-remediation-20260906/live-document-acceptance-runner.md",
+      "reusable_commands": "Live runner script for document acceptance",
+      "next_step": "Run existing runner when auth/inputs are provided by operator"
+    },
+    {
+      "task": "UV-EXEC-029-PILOT-RUNNER",
+      "status": "done",
+      "merge_sha": "dc84431eed6ee3fd778e828c030ae77db661df54",
+      "capabilities": "Pilot reuse runner for unattended voice",
+      "inputs": "Based on docs/04-uat/unattended-voice-pilot-acceptance.md",
+      "reusable_commands": "operations/verification/check-unattended-voice-pilot.mjs --evidence <evidence> --expected-sha <sha>",
+      "next_step": "Run existing runner when structured authorization/drill schema and inputs are provided by operator"
+    }
+  ],
+  "parents": [
+    {
       "task": "SR-LIVE-OPS-001",
       "resource": "authorized_isolated_ops_target",
-      "status": "unavailable",
-      "reason": "Although DEV_GCP_PROJECT_ID and credentials exist, it is missing real evidence for backup_restore_readback, rpo_rto_capacity_baseline, scheduled_job_restart_proof, and live_candidate_sha. Task remains blocked."
+      "status": "blocked",
+      "reason": "Pending acceptance evidence. backup_restore_readback, rpo_rto_capacity_baseline, scheduled_job_restart_proof are missing.",
+      "missing_items": "Acceptance evidence execution (this is pending execution evidence, not proof that target doesn't exist)",
+      "responsible_party": "Operator/DevOps",
+      "next_step": "Execute live evidence run when authorized"
     },
     {
       "task": "SR-LIVE-ENTRY-001",
       "resource": "authorized_environment_change",
-      "status": "unavailable",
-      "reason": "DEV_IAP_CLIENT_ID is empty. Missing public_dns_tls_readback, legitimate_role_accounts, and live_candidate_sha. Task remains blocked."
+      "status": "blocked",
+      "reason": "Missing authorization. DEV_IAP_CLIENT_ID is not the sole gate. Missing DRTS_LIVE_ENTRY_* (allowlist/targets/role/routing), DRTS_LIVE_ENTRY_ROLE_SESSION_TOKEN and deployed candidate auth.",
+      "missing_items": "DRTS_LIVE_ENTRY_* allowlist/targets/role/routing, DRTS_LIVE_ENTRY_ROLE_SESSION_TOKEN, and deployed candidate authorization",
+      "responsible_party": "Operator/Security",
+      "next_step": "Operator to provide DRTS_LIVE_ENTRY_* auth. Keep gates until provided. Do not authorize restore/load/restart/env change without it."
     },
     {
       "task": "SR-LIVE-PUSH-001",
       "resource": "partner_endpoint",
-      "status": "unavailable",
-      "reason": "Lacks external partner HTTPS webhook endpoint and partner App for native delivery."
+      "status": "blocked",
+      "reason": "Lacks external partner HTTPS webhook endpoint and partner App for native delivery. PUSH A controlled, B true partner endpoint, C native pilot are separate and gates are preserved.",
+      "missing_items": "True partner endpoint and native pilot auth",
+      "responsible_party": "External Partner",
+      "next_step": "Wait for partner endpoint provisioning"
     },
     {
       "task": "SR-LIVE-MAIL-001",
       "resource": "configured_mail_provider",
-      "status": "unavailable",
-      "reason": "No mail provider credentials found in GitHub secrets."
+      "status": "blocked",
+      "reason": "No mail provider credentials found in GitHub secrets.",
+      "missing_items": "Mail provider credentials",
+      "responsible_party": "Platform Admin",
+      "next_step": "Provide SMTP/third-party mail credentials"
     },
     {
       "task": "SR-LIVE-FINANCE-001",
       "resource": "authorized_financial_sandbox",
-      "status": "unavailable",
-      "reason": "No financial sandbox credentials found."
+      "status": "blocked",
+      "reason": "No financial sandbox credentials found.",
+      "missing_items": "Financial sandbox credentials",
+      "responsible_party": "Finance/External Provider",
+      "next_step": "Provide sandbox credentials"
     },
     {
       "task": "SR-LIVE-MAP-001",
       "resource": "configured_map_credentials",
-      "status": "unavailable",
-      "reason": "PROD_MAP_PROVIDER_BACKEND is set to mock, no real map API keys found."
+      "status": "not_verified",
+      "reason": "deploy-dev.yml uses GCP Secret Manager. Cannot deduce true map resources are missing based on PROD_MAP_PROVIDER_BACKEND=mock and GitHub secrets.",
+      "missing_items": "Verification of GCP Secret Manager keys for map provider",
+      "responsible_party": "Operator",
+      "next_step": "Check GCP Secret Manager (deploy-dev.yml:645-746) for true map API keys"
     },
     {
       "task": "SR-LIVE-DRIVER-001",
       "resource": "authorized_android_ios_devices",
-      "status": "unavailable",
-      "reason": "No physical devices or device farm access provided."
+      "status": "blocked",
+      "reason": "No physical devices or device farm access provided.",
+      "missing_items": "Android/iOS devices",
+      "responsible_party": "QA",
+      "next_step": "Provide physical devices or device farm access"
     },
     {
       "task": "UV-EXEC-028",
       "resource": "pstn_cti_credentials",
-      "status": "unavailable",
-      "reason": "No PSTN numbers or CTI/SIP credentials found."
+      "status": "acceptance",
+      "reason": "Requires acceptance execution for CTI/SIP credentials.",
+      "missing_items": "Acceptance execution",
+      "responsible_party": "Operator/QA",
+      "next_step": "Run acceptance process"
+    },
+    {
+      "task": "UV-EXEC-029",
+      "resource": "unattended_voice_pilot",
+      "status": "blocked",
+      "reason": "Requires structured authorization/drill schema and inputs for pilot execution.",
+      "missing_items": "Structured authorization/drill schema, inputs",
+      "responsible_party": "Operator",
+      "next_step": "Provide drill schema and run UV-EXEC-029-PILOT-RUNNER"
     },
     {
       "task": "SR-LIVE-FORWARD-001",
       "resource": "authorized_forwarder_sandbox",
-      "status": "unavailable",
-      "reason": "No external fleet forwarder credentials found."
+      "status": "blocked",
+      "reason": "No external fleet forwarder credentials found.",
+      "missing_items": "Forwarder sandbox credentials",
+      "responsible_party": "External Partner",
+      "next_step": "Provide sandbox credentials"
     },
     {
       "task": "SR-LIVE-DOC-001",
       "resource": "authorized_storage_and_signer",
-      "status": "unavailable",
-      "reason": "No cryptographic signer credentials found."
+      "status": "blocked",
+      "reason": "Cannot deduce signer missing based on GitHub secret names. Deploy 35430134402 successful Resolve API secret mounts proves smoke state, but not that all resources are missing.",
+      "missing_items": "SR_LIVE_DOC_LIVE_SESSION_COOKIE, SR_LIVE_DOC_LIVE_PUBLIC_KEY_PEM (public key, not private key), authorization target/bank/path",
+      "responsible_party": "Security/Operations",
+      "next_step": "Provide specific cookie, public key, and target/bank/path authorization. Existing DOC-RUNNER can be used once provided."
     }
   ]
 }
