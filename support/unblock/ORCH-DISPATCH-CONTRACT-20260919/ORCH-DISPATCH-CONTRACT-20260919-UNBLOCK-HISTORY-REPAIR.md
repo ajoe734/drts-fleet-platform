@@ -95,9 +95,9 @@ the hold.
 
 ## Canonical parent disposition
 
-Before candidate handoff, record these helper fields using the current
-canonical-root `ai-status.sh assign` with `TASK_METADATA_JSON`, preserving its
-existing owner/reviewer and task metadata:
+Recorded these helper fields using the current canonical-root `ai-status.sh
+assign` with `TASK_METADATA_JSON`, preserving its existing owner/reviewer and
+task metadata:
 
 ```json
 {
@@ -107,8 +107,8 @@ existing owner/reviewer and task metadata:
 }
 ```
 
-Use `ai-status.sh note` to put the evidence and this concrete next step on the
-parent without changing `blocked`. Do not manufacture `resolved_parent_at`:
+Recorded the evidence and concrete next step on the parent with `ai-status.sh
+note`, preserving `blocked`. No `resolved_parent_at` was manufactured:
 the helper's same-candidate merge transaction records the resolution time and
 preserves the blocked disposition. `parent_resume_blocker()` then returns
 `helper keeps parent blocked`, preventing this helper from becoming automatic
@@ -137,6 +137,13 @@ python3 -m unittest -v \
 Result: **2 tests passed**. No runtime implementation was changed and no product
 development server was started. Parent regression/release/live-handoff gates
 remain outstanding under the parent task.
+
+The first checkpoint, `9b4a01ab0`, was committed with the helper's task ID,
+`LLM-Agent: codex`, and `Reviewer: Codex2`, then pushed normally to `origin`.
+The staged generated-file guard and commit-trailer check passed. The workspace's
+shared `node_modules/prettier` symlink points at an unavailable package, so
+formatting used isolated `pnpm dlx prettier@3.6.2` (the repository's declared
+minimum version) without changing shared dependencies.
 
 This report is the only helper-owned repository change. Delivery uses the
 assigned `codex/orch-dispatch-contract-20260919-unblock-history-repair` branch,
