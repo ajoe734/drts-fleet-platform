@@ -36,17 +36,26 @@ history.
 
 Snapshot after `git fetch origin`:
 
-| Surface                                 | Observed evidence                                                                                                                                                                                                      |
-| --------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `origin/dev`                            | `d6177129eeb1ad6844a7c28252bec178e48cb5f6`                                                                                                                                                                             |
-| `codex/orch-dispatch-contract-20260919` | Same SHA; reflog has only creation from `refs/remotes/origin/dev` at `2026-09-19 22:55:53 +0000`                                                                                                                       |
-| Parent versus `origin/dev`              | `git rev-list --left-right --count origin/dev...codex/orch-dispatch-contract-20260919` returns `0 0`; `git diff --exit-code` succeeds                                                                                  |
-| Remote parent refs                      | `git ls-remote --heads origin 'codex/orch-dispatch-contract-20260919*' dev` returns only `dev` before helper publication                                                                                               |
-| Parent PR/candidate                     | `gh pr list --state all --head codex/orch-dispatch-contract-20260919` returns `[]`; canonical `show` has no candidate/review/CI/merge fields                                                                           |
-| Parent worktree                         | No registered worktree has `branch refs/heads/codex/orch-dispatch-contract-20260919`                                                                                                                                   |
-| Parent commits/spec                     | No task-matching commit from `git log --all --grep`; no history for `tools/development-orchestrator/docs/dispatch-contract.md`; that referenced spec is absent in both the assigned helper worktree and canonical root |
-| Helper's initial state                  | Assigned branch/worktree starts at `d6177129eeb1ad6844a7c28252bec178e48cb5f6`, clean; no existing remote branch or PR                                                                                                  |
-| Canonical root                          | Still on local `dev` at `3982bbbae1d257c266b8a6d63ea4e6d6cf52acf9`; `git rev-list --left-right --count dev...origin/dev` returns `0 9` (behind, not divergent)                                                         |
+| Surface                                 | Observed evidence                                                                                                                                                                         |
+| --------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `origin/dev`                            | `d6177129eeb1ad6844a7c28252bec178e48cb5f6`                                                                                                                                                |
+| `codex/orch-dispatch-contract-20260919` | Same SHA; reflog has only creation from `refs/remotes/origin/dev` at `2026-09-19 22:55:53 +0000`                                                                                          |
+| Parent versus `origin/dev`              | `git rev-list --left-right --count origin/dev...codex/orch-dispatch-contract-20260919` returns `0 0`; `git diff --exit-code` succeeds                                                     |
+| Remote parent refs                      | `git ls-remote --heads origin 'codex/orch-dispatch-contract-20260919*' dev` returns only `dev` before helper publication                                                                  |
+| Parent PR/candidate                     | `gh pr list --state all --head codex/orch-dispatch-contract-20260919` returns `[]`; canonical `show` has no candidate/review/CI/merge fields                                              |
+| Parent worktree                         | No registered worktree has `branch refs/heads/codex/orch-dispatch-contract-20260919`                                                                                                      |
+| Parent commits/spec                     | No task-matching commit from `git log --all --grep`; no history for the parent's `task_spec_ref` value below; that spec is absent in both the assigned helper worktree and canonical root |
+| Helper's initial state                  | Assigned branch/worktree starts at `d6177129eeb1ad6844a7c28252bec178e48cb5f6`, clean; no existing remote branch or PR                                                                     |
+| Canonical root                          | Still on local `dev` at `3982bbbae1d257c266b8a6d63ea4e6d6cf52acf9`; `git rev-list --left-right --count dev...origin/dev` returns `0 9` (behind, not divergent)                            |
+
+The parent contains this metadata value, whose target is **missing**, rather
+than an existing repository document citation:
+
+```json
+{
+  "task_spec_ref": "tools/development-orchestrator/docs/dispatch-contract.md"
+}
+```
 
 The canonical root contains unrelated tracked edits in:
 
@@ -74,9 +83,9 @@ The interactive Codex owner can proceed with the existing parent branch:
    isolated owner worktree with `git worktree add <new-owner-path>
 codex/orch-dispatch-contract-20260919`. Stay out of the dirty canonical root;
    this helper's worker remains in its assigned helper worktree.
-3. Restore/author the parent-owned task specification at
-   `tools/development-orchestrator/docs/dispatch-contract.md` from the interactive
-   session's authorized requirements before dispatch implementation. The task
+3. Restore/author the parent-owned task specification named by `task_spec_ref`
+   above from the interactive session's authorized requirements before dispatch
+   implementation. The task
    record names that file, but no version exists in the audited refs. Do not
    reconstruct detailed requirements from the helper's history-repair label.
 4. Implement and anchor the parent-owned tool changes, run dispatch regressions,
@@ -144,6 +153,13 @@ The staged generated-file guard and commit-trailer check passed. The workspace's
 shared `node_modules/prettier` symlink points at an unavailable package, so
 formatting used isolated `pnpm dlx prettier@3.6.2` (the repository's declared
 minimum version) without changing shared dependencies.
+
+Delivery PR: [#2085](https://github.com/ajoe734/drts-fleet-platform/pull/2085).
+Its first candidate, `f7f34fee0`, failed the canonical cited-path check because
+the missing specification was formatted as an existing file citation. The owner
+reopened the helper and represented the missing value explicitly as task
+metadata above. The correction is an appended commit, followed by a fresh
+same-SHA handoff and CI; the parent specification remains the parent's work.
 
 This report is the only helper-owned repository change. Delivery uses the
 assigned `codex/orch-dispatch-contract-20260919-unblock-history-repair` branch,
