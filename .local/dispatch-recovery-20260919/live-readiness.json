@@ -12,14 +12,14 @@
     {
       "task": "SR-LIVE-OPS-001",
       "resource": "authorized_isolated_ops_target",
-      "status": "available",
-      "evidence": "GitHub variables DEV_GCP_PROJECT_ID (drts-dev-devcc-20260825), STAGING_GCP_PROJECT_ID and associated WIF/CloudSQL credentials exist."
+      "status": "unavailable",
+      "reason": "Although DEV_GCP_PROJECT_ID and credentials exist, it is missing real evidence for backup_restore_readback, rpo_rto_capacity_baseline, scheduled_job_restart_proof, and live_candidate_sha. Task remains blocked."
     },
     {
       "task": "SR-LIVE-ENTRY-001",
       "resource": "authorized_environment_change",
-      "status": "available",
-      "evidence": "Workload Identity and DEV/STAGING environment credentials exist in GitHub."
+      "status": "unavailable",
+      "reason": "DEV_IAP_CLIENT_ID is empty. Missing public_dns_tls_readback, legitimate_role_accounts, and live_candidate_sha. Task remains blocked."
     },
     {
       "task": "SR-LIVE-PUSH-001",
