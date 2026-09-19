@@ -1929,11 +1929,9 @@ function RideContent({
 function PassengerScreen({
   fixture,
   token,
-  kind,
 }: {
   fixture: PassengerRideFixture;
   token: string;
-  kind: "ride" | "fares" | "receipt";
 }) {
   return (
     <>
@@ -2065,7 +2063,7 @@ export function PassengerRidePage({
 
   return (
     <Shell token={token} sourceMode={sourceMode}>
-      <PassengerScreen fixture={fixture} token={token} kind={kind} />
+      <PassengerScreen fixture={fixture} token={token} />
     </Shell>
   );
 }

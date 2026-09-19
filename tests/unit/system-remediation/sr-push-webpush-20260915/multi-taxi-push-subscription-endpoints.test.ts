@@ -1,6 +1,6 @@
-// SR-PUSH-WEBPUSH-20260915 -- passenger push-subscription registration
-// bound to the ride access token, and end-to-end proof that an absent
-// subscription is never reported as `delivered`.
+// Retained subscription API compatibility: registration remains bound to the
+// ride access token. Partner delivery and no-fallback behavior are covered by
+// sr-partner-notify-transport-20260918/transport.test.ts.
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createECDH, randomBytes } from "node:crypto";
 

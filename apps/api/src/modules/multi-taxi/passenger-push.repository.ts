@@ -1,6 +1,5 @@
 import { Injectable } from "@nestjs/common";
 
-
 export interface WebPushSubscriptionKeysInput {
   p256dh: string;
   auth: string;
