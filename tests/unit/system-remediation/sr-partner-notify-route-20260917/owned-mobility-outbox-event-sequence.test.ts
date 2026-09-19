@@ -2,17 +2,12 @@ import { describe, expect, it, vi } from "vitest";
 
 import type { ConsumerNotificationOutboxRecord } from "@drts/contracts";
 
+import { MultiTaxiRepository } from "../../../../apps/api/src/modules/multi-taxi/multi-taxi.repository";
 import { OwnedMobilityRepository } from "../../../../apps/api/src/modules/owned-mobility/owned-mobility.repository";
 
-/**
- * design §5: "新增每 order 持久化 notification eventSequence，於生成 outbox 同交易
- * 分配". These tests cover the CTE added to
- * OwnedMobilityRepository#persistChangesWithExecutor's consumer notification
- * outbox INSERT -- the sole real outbox producer in the codebase today (the
- * other, in owned-autonomous-dispatch-executor.service.ts, writes
- * driver-facing rows that never have a partner notification route/sequence,
- * and is exercised implicitly by the "no matching sequence row" case below).
- */
+// Design §5: preserve ROUTE's atomic allocation, deduplication, payload and
+// no-route coverage as SEQ replaces its inline CTE with the shared allocator.
+// Real rollback and concurrency are additionally covered by SEQ's Postgres suite.
 describe("OwnedMobilityRepository consumer notification outbox event sequence", () => {
   const outbox: ConsumerNotificationOutboxRecord = {
     outboxId: "outbox-seq-001",
@@ -28,42 +23,66 @@ describe("OwnedMobilityRepository consumer notification outbox event sequence", 
     deliveredAt: null,
   };
 
-  it("allocates the durable sequence atomically in the same statement as the outbox insert", async () => {
-    const query = vi.fn().mockResolvedValue({ rows: [] });
-    const repository = new OwnedMobilityRepository({
-      isEnabled: () => true,
-      query,
-    } as never);
-
-    await repository.persistOrderWorkflow({ query } as never, {
-      consumerNotificationOutbox: [outbox],
+  function harness(sequence: number | null = 7, duplicate = false) {
+    const query = vi.fn(async (sql: string) => {
+      if (sql.includes("INSERT INTO ops.consumer_notification_outbox")) {
+        return { rows: duplicate ? [] : [{ outbox_id: outbox.outboxId }] };
+      }
+      if (
+        sql.includes("UPDATE mobility.phase1_partner_notification_sequences")
+      ) {
+        return {
+          rows: sequence === null ? [] : [{ event_sequence: String(sequence) }],
+        };
+      }
+      return { rows: [] };
     });
+    const client = { query, release: vi.fn() };
+    const poolQuery = vi.fn(() => {
+      throw new Error("must use transaction client");
+    });
+    const database = {
+      isEnabled: () => true,
+      query: poolQuery,
+      connect: vi.fn(async () => client),
+    };
+    const allocator = new MultiTaxiRepository(database as never);
+    const allocate = vi.spyOn(allocator, "allocateNotificationEventSequence");
+    return {
+      repository: new OwnedMobilityRepository(database as never, allocator),
+      query,
+      client,
+      database,
+      allocate,
+    };
+  }
 
-    expect(query).toHaveBeenCalledTimes(1);
-    const [sql, params] = query.mock.calls[0]!;
-
-    // Single statement: the sequence UPDATE is a CTE of the outbox INSERT,
-    // not a second query -- so there is no separate transaction boundary to
-    // get wrong.
-    expect(sql).toContain("WITH seq AS");
-    expect(sql).toContain(
-      "UPDATE mobility.phase1_partner_notification_sequences",
+  it("allocates the durable sequence in the same transaction as the outbox insert", async () => {
+    const { repository, query, client, database, allocate } = harness();
+    await repository.withTransaction((tx) =>
+      repository.persistOrderWorkflow(tx, {
+        consumerNotificationOutbox: [outbox],
+      }),
     );
-    expect(sql).toContain("RETURNING next_sequence - 1 AS event_sequence");
-    expect(sql).toContain("INSERT INTO ops.consumer_notification_outbox");
-
-    // A retried write for the same outbox_id must not burn a sequence number
-    // once it has become a no-op via ON CONFLICT DO NOTHING.
-    expect(sql).toContain("NOT EXISTS");
-    expect(sql).toContain(
-      "SELECT 1 FROM ops.consumer_notification_outbox WHERE outbox_id = $1",
-    );
-
-    // Additive to the existing payload jsonb column, not a new column: no
-    // migration required, no other outbox reader has to change.
-    expect(sql).toContain("jsonb_set($6::jsonb, '{eventSequence}'");
-    expect(sql).toContain("ON CONFLICT (outbox_id) DO NOTHING");
-
+    const calls = query.mock.calls as unknown as [string, unknown[]][];
+    expect(calls.map(([sql]) => sql.trim())).toEqual([
+      "BEGIN",
+      "SET LOCAL lock_timeout = '3s'",
+      "SET LOCAL statement_timeout = '8s'",
+      expect.stringContaining("INSERT INTO ops.consumer_notification_outbox"),
+      expect.stringContaining(
+        "UPDATE mobility.phase1_partner_notification_sequences",
+      ),
+      expect.stringContaining("UPDATE ops.consumer_notification_outbox"),
+      "COMMIT",
+    ]);
+    expect(allocate).toHaveBeenCalledExactlyOnceWith(outbox.orderId, client);
+    expect(database.query).not.toHaveBeenCalled();
+    expect(database.connect).toHaveBeenCalledTimes(1);
+    expect(client.release).toHaveBeenCalledTimes(1);
+    const [insert, params] = calls[3]!;
+    expect(insert).toContain("ON CONFLICT (outbox_id) DO NOTHING");
+    expect(insert).toContain("RETURNING outbox_id");
     expect(params).toEqual([
       outbox.outboxId,
       outbox.orderId,
@@ -77,29 +96,35 @@ describe("OwnedMobilityRepository consumer notification outbox event sequence", 
       outbox.createdAt,
       outbox.deliveredAt,
     ]);
+    expect(calls[4]![0]).toContain(
+      "RETURNING next_sequence - 1 AS event_sequence",
+    );
+    expect(calls[4]![1]).toEqual([outbox.orderId]);
+    expect(calls[5]![0]).toContain("jsonb_set(payload, '{eventSequence}'");
+    expect(calls[5]![1]).toEqual([outbox.outboxId, 7]);
+    expect(outbox.payload).toEqual({ assignmentId: "assignment-seq-001" });
   });
 
-  it("falls back to the unmodified payload param when the order has no partner notification sequence row", async () => {
-    // Orders without an OrderPartnerNotificationRoute (the vast majority --
-    // direct/call-center bookings, or multi-taxi orders with no linked
-    // partner identity) never get a phase1_partner_notification_sequences
-    // row, so `seq` is empty. COALESCE must fall back to the plain $6
-    // payload param rather than erroring or writing a null eventSequence, so
-    // the same bound payload parameter has to appear on both branches of the
-    // fallback.
-    const query = vi.fn().mockResolvedValue({ rows: [] });
-    const repository = new OwnedMobilityRepository({
-      isEnabled: () => true,
-      query,
-    } as never);
+  it("keeps the unmodified payload when the order has no partner notification sequence row", async () => {
+    const { repository, query, allocate } = harness(null);
+    await repository.persistChanges({ consumerNotificationOutbox: [outbox] });
+    const calls = query.mock.calls as unknown as [string, unknown[]][];
+    expect(allocate).toHaveBeenCalledTimes(1);
+    expect(calls[3]![1][5]).toBe(JSON.stringify(outbox.payload));
+    expect(
+      calls.some(([sql]) =>
+        sql.includes("UPDATE ops.consumer_notification_outbox"),
+      ),
+    ).toBe(false);
+    expect(calls.at(-1)![0]).toBe("COMMIT");
+  });
 
-    await repository.persistOrderWorkflow({ query } as never, {
-      consumerNotificationOutbox: [outbox],
-    });
-
-    const [sql] = query.mock.calls[0]!;
-    expect(sql).toContain("COALESCE(");
-    expect(sql.match(/\$6::jsonb/g)?.length).toBe(2);
-    expect(sql).toContain("FROM seq");
+  it("does not allocate or overwrite the payload when an event is retried", async () => {
+    const { repository, query, allocate } = harness(7, true);
+    await repository.persistChanges({ consumerNotificationOutbox: [outbox] });
+    expect(allocate).not.toHaveBeenCalled();
+    expect(query.mock.calls.some(([sql]) => sql.includes("UPDATE"))).toBe(
+      false,
+    );
   });
 });

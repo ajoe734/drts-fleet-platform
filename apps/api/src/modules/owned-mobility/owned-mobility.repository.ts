@@ -18,6 +18,7 @@ import type {
 
 import { ApiRequestError } from "../../common/api-envelope";
 import { DatabaseService } from "../../common/db";
+import { MultiTaxiRepository } from "../multi-taxi/multi-taxi.repository";
 
 type JsonRecordRow = {
   record: unknown;
@@ -208,7 +209,13 @@ type DriverCompletionOutboxRow = QueryResultRow & {
 export class OwnedMobilityRepository {
   private readonly logger = new Logger(OwnedMobilityRepository.name);
 
-  constructor(@Optional() private readonly databaseService?: DatabaseService) {}
+  constructor(
+    @Optional() private readonly databaseService?: DatabaseService,
+    @Optional()
+    private readonly multiTaxiRepository: MultiTaxiRepository = new MultiTaxiRepository(
+      databaseService,
+    ),
+  ) {}
 
   isEnabled() {
     return this.databaseService?.isEnabled() ?? false;
@@ -635,7 +642,13 @@ export class OwnedMobilityRepository {
       return;
     }
 
-    await this.persistChangesWithExecutor(this.databaseService!, changes);
+    if (changes.consumerNotificationOutbox?.length) {
+      await this.withTransaction((executor) =>
+        this.persistChangesWithExecutor(executor, changes),
+      );
+    } else {
+      await this.persistChangesWithExecutor(this.databaseService!, changes);
+    }
   }
 
   async withTransaction<T>(work: (executor: PoolClient) => Promise<T>) {
@@ -1832,34 +1845,13 @@ export class OwnedMobilityRepository {
     }
 
     for (const outbox of changes.consumerNotificationOutbox ?? []) {
-      writes.push(() =>
-        executor.query(
-          /**
-           * design §5: "新增每 order 持久化 notification eventSequence，於生成
-           * outbox 同交易分配". `seq` is a CTE inside this single statement, so
-           * the allocation and the outbox row it belongs to always commit or
-           * roll back together without any separate round-trip or explicit
-           * transaction wrapper. `NOT EXISTS` guards the allocation itself: a
-           * retried write that ON CONFLICT DO NOTHING turns into a no-op must
-           * not still burn a sequence number, or a later retry of the *same*
-           * outbox row would observe a gap. Orders with no
-           * mobility.phase1_partner_notification_sequences row (anything that
-           * never got an OrderPartnerNotificationRoute -- most orders) leave
-           * `seq` empty and COALESCE falls back to the payload untouched; this
-           * is deliberately additive to the existing `payload` jsonb rather
-           * than a new column, so it needs no migration and no downstream
-           * outbox reader has to change to tolerate it.
-           */
+      writes.push(async () => {
+        // Insert first: the unique key serializes concurrent retries of the
+        // same event. Only the winner allocates; NOT EXISTS before an insert
+        // can race and consume a sequence even when the insert is a no-op.
+        // Both entry points use the caller's transaction for this whole write.
+        const inserted = await executor.query<{ outbox_id: string }>(
           `
-            WITH seq AS (
-              UPDATE mobility.phase1_partner_notification_sequences
-              SET next_sequence = next_sequence + 1
-              WHERE order_id = $2
-                AND NOT EXISTS (
-                  SELECT 1 FROM ops.consumer_notification_outbox WHERE outbox_id = $1
-                )
-              RETURNING next_sequence - 1 AS event_sequence
-            )
             INSERT INTO ops.consumer_notification_outbox (
               outbox_id,
               order_id,
@@ -1873,14 +1865,11 @@ export class OwnedMobilityRepository {
               created_at,
               delivered_at
             ) VALUES (
-              $1, $2, $3, $4, $5,
-              COALESCE(
-                (SELECT jsonb_set($6::jsonb, '{eventSequence}', to_jsonb(event_sequence)) FROM seq),
-                $6::jsonb
-              ),
+              $1, $2, $3, $4, $5, $6::jsonb,
               $7, $8, $9, $10, $11
             )
             ON CONFLICT (outbox_id) DO NOTHING
+            RETURNING outbox_id
           `,
           [
             outbox.outboxId,
@@ -1895,8 +1884,26 @@ export class OwnedMobilityRepository {
             outbox.createdAt,
             outbox.deliveredAt,
           ],
-        ),
-      );
+        );
+        if (!inserted.rows.length) return;
+
+        const eventSequence =
+          await this.multiTaxiRepository.allocateNotificationEventSequence(
+            outbox.orderId,
+            executor,
+          );
+        // Non-partner orders have no sequence row and keep their payload.
+        if (eventSequence !== null) {
+          await executor.query(
+            `
+              UPDATE ops.consumer_notification_outbox
+              SET payload = jsonb_set(payload, '{eventSequence}', to_jsonb($2::bigint))
+              WHERE outbox_id = $1
+            `,
+            [outbox.outboxId, eventSequence],
+          );
+        }
+      });
     }
 
     for (const write of writes) {
