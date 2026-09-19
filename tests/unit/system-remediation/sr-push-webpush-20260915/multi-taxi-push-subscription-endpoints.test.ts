@@ -8,9 +8,7 @@ import { ApiRequestError } from "../../../../apps/api/src/common/api-envelope";
 import { UnavailableMaskedCallPort } from "../../../../apps/api/src/modules/multi-taxi/masked-call.port";
 import { MultiTaxiService } from "../../../../apps/api/src/modules/multi-taxi/multi-taxi.service";
 import { PassengerPushAdapter } from "../../../../apps/api/src/modules/multi-taxi/passenger-push.adapter";
-import {
-  PassengerPushRepository,
-} from "../../../../apps/api/src/modules/multi-taxi/passenger-push.repository";
+import { PassengerPushRepository } from "../../../../apps/api/src/modules/multi-taxi/passenger-push.repository";
 import { WebPushTransport } from "../../../../apps/api/src/modules/multi-taxi/web-push.transport";
 
 type MutableOrder = { status: string; [key: string]: unknown };
@@ -97,7 +95,10 @@ function createHarness() {
   return { service, order, pushSubscriptionRepository };
 }
 
-async function issueAccessToken(service: MultiTaxiService, order: MutableOrder) {
+async function issueAccessToken(
+  service: MultiTaxiService,
+  order: MutableOrder,
+) {
   return service.createRide(
     {
       pickup: { address: "台北車站" },
@@ -168,7 +169,10 @@ describe("SR-PUSH-WEBPUSH-20260915: registerPassengerPushSubscription / unregist
     const { service, order, pushSubscriptionRepository } = createHarness();
     const ride = await issueAccessToken(service, order);
     const token = ride.passengerAccess.accessToken;
-    await service.registerPassengerPushSubscription(token, browserSubscription());
+    await service.registerPassengerPushSubscription(
+      token,
+      browserSubscription(),
+    );
 
     expect(await service.unregisterPassengerPushSubscription(token)).toEqual({
       revoked: true,
@@ -189,6 +193,8 @@ describe("SR-PUSH-WEBPUSH-20260915: registerPassengerPushSubscription / unregist
       browserSubscription(),
     );
 
-    expect(pushSubscriptionRepository.findActiveByOrderId("some-other-order")).toBeNull();
+    expect(
+      pushSubscriptionRepository.findActiveByOrderId("some-other-order"),
+    ).toBeNull();
   });
 });
