@@ -233,6 +233,7 @@ import {
   REFERENCE_TOKEN_ELIGIBILITY_ADAPTER_CODE,
   ReferenceTokenEligibilityAdapter,
 } from "./reference-token-eligibility.adapter";
+import { computeEndpointFingerprint } from "./partner-notification-fingerprint";
 import { IdentityRepository } from "../identity/identity.repository";
 import { PartnerUserIdentityLinkRepository } from "./partner-user-identity-link.repository";
 import {
@@ -1264,6 +1265,8 @@ export type TenantQuotaConsumptionCommitResult = {
  * never a tenant-wide event scan.
  */
 export type PartnerNotificationDispatchAttemptCommand = {
+  expectedPartnerId?: string;
+  expectedEndpointFingerprint?: string;
   attemptNumber?: number;
   retryPolicySnapshot?: WebhookRetryPolicyRecord;
   tenantId: string;
@@ -8235,7 +8238,6 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
       retryPolicySnapshot?: WebhookRetryPolicyRecord;
     },
   ): Promise<WebhookDispatchAttemptResult> {
-    const previousStatus = delivery.status;
     const previousEndpointValues = this.toWebhookResponse(endpoint);
     const signingSecret = this.resolveWebhookSecretMaterial(
       endpoint,
@@ -8334,54 +8336,12 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
       ...(options?.partnerAckV1 ? { partnerAckV1: options.partnerAckV1 } : {}),
     });
 
-    delivery.attempt = result.attempt;
-    delivery.status = result.status;
-    delivery.httpStatus = result.httpStatus;
-    delivery.signature = result.signature;
-    delivery.attemptedAt = result.attemptedAt;
-    delivery.nextAttemptAt = result.nextAttemptAt;
-    delivery.signatureHeader = result.signatureHeader;
-    delivery.signatureVersion = result.signatureVersion;
-    delivery.secretVersion = result.secretVersion;
-    delivery.retryPolicySnapshot = this.toWebhookRetryPolicy(
-      options?.retryPolicySnapshot ?? endpoint.retryPolicy,
-    );
-    delivery.rawBody = { ...result.rawBody };
-    this.markWebhookSecretUsed(
-      endpoint,
-      signingSecret,
-      `webhook_dispatch:${delivery.eventType}`,
-      result.attemptedAt,
-    );
-
-    endpoint.runtimeMetadata = this.toWebhookRuntimeMetadata(
-      {
-        ...endpoint.runtimeMetadata,
-        failedDeliveryCount:
-          result.status === "delivery_failed" &&
-          previousStatus !== "delivery_failed"
-            ? endpoint.runtimeMetadata.failedDeliveryCount + 1
-            : endpoint.runtimeMetadata.failedDeliveryCount,
-        lastAttemptAt: result.attemptedAt,
-        lastDeliveredAt:
-          result.status === "delivered"
-            ? result.attemptedAt
-            : endpoint.runtimeMetadata.lastDeliveredAt,
-        nextAttemptAt: result.nextAttemptAt,
-        lastSignaturePreview: (result.signature ?? "").slice(0, 16),
-        retryPolicy: endpoint.retryPolicy,
-      },
-      {
-        currentVersion: endpoint.secretVersion,
-        rotatedAt: endpoint.runtimeMetadata.secretRotation.rotatedAt,
-        rotationCount: endpoint.runtimeMetadata.secretRotation.rotationCount,
-        history: endpoint.runtimeMetadata.secretRotation.history,
-      },
-    );
-    this.applyWebhookPostDispatchPolicy(
+    this.applyWebhookDispatchResult(
       endpoint,
       delivery,
       result,
+      signingSecret,
+      options?.retryPolicySnapshot ?? endpoint.retryPolicy,
       previousEndpointValues,
     );
 
@@ -8411,6 +8371,68 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
     }
 
     return result;
+  }
+
+  private applyWebhookDispatchResult(
+    endpoint: StoredWebhookEndpoint,
+    delivery: StoredWebhookDelivery,
+    result: WebhookDispatchAttemptResult,
+    signingSecret: StoredWebhookSecretMaterial | null,
+    retryPolicy: WebhookRetryPolicyRecord,
+    previousEndpointValues: Record<string, unknown>,
+    applyGovernance = true,
+  ) {
+    const previousStatus = delivery.status;
+    delivery.attempt = result.attempt;
+    delivery.status = result.status;
+    delivery.httpStatus = result.httpStatus;
+    delivery.signature = result.signature;
+    delivery.attemptedAt = result.attemptedAt;
+    delivery.nextAttemptAt = result.nextAttemptAt;
+    delivery.signatureHeader = result.signatureHeader;
+    delivery.signatureVersion = result.signatureVersion;
+    delivery.secretVersion = result.secretVersion;
+    delivery.retryPolicySnapshot = this.toWebhookRetryPolicy(retryPolicy);
+    delivery.rawBody = { ...result.rawBody };
+    if (signingSecret)
+      this.markWebhookSecretUsed(
+        endpoint,
+        signingSecret,
+        `webhook_dispatch:${delivery.eventType}`,
+        result.attemptedAt,
+      );
+
+    endpoint.runtimeMetadata = this.toWebhookRuntimeMetadata(
+      {
+        ...endpoint.runtimeMetadata,
+        failedDeliveryCount:
+          result.status === "delivery_failed" &&
+          previousStatus !== "delivery_failed"
+            ? endpoint.runtimeMetadata.failedDeliveryCount + 1
+            : endpoint.runtimeMetadata.failedDeliveryCount,
+        lastAttemptAt: result.attemptedAt,
+        lastDeliveredAt:
+          result.status === "delivered"
+            ? result.attemptedAt
+            : endpoint.runtimeMetadata.lastDeliveredAt,
+        nextAttemptAt: result.nextAttemptAt,
+        lastSignaturePreview: (result.signature ?? "").slice(0, 16),
+        retryPolicy: endpoint.retryPolicy,
+      },
+      {
+        currentVersion: endpoint.secretVersion,
+        rotatedAt: endpoint.runtimeMetadata.secretRotation.rotatedAt,
+        rotationCount: endpoint.runtimeMetadata.secretRotation.rotationCount,
+        history: endpoint.runtimeMetadata.secretRotation.history,
+      },
+    );
+    if (applyGovernance)
+      this.applyWebhookPostDispatchPolicy(
+        endpoint,
+        delivery,
+        result,
+        previousEndpointValues,
+      );
   }
 
   private applyWebhookPostDispatchPolicy(
@@ -8494,16 +8516,43 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
    * exact deliveryId/payload for every attempt so the partner's durable
    * dedupe can recognize a resend.
    */
-  findNotificationWebhookEndpoint(
+  async findNotificationPartnerEntry(
+    entrySlug: string,
+  ): Promise<PartnerChannelEntryRecord | null> {
+    if (this.tenantPartnerRepository?.isEnabled()) {
+      return this.tenantPartnerRepository.findNotificationPartnerEntry(
+        entrySlug,
+      );
+    }
+    // Internal lookup deliberately includes inactive/revoked entries; the public
+    // ingress lookup hides them, which would erase endpoint_disabled classification.
+    return this.findPartnerEntryBySlug(entrySlug) ?? null;
+  }
+
+  private async loadNotificationWebhookEndpoint(
     tenantId: string,
     webhookId: string,
-  ): TenantWebhookEndpoint | null {
-    const endpoint = this.webhookEndpoints.find(
-      (item) => item.tenantId === tenantId && item.webhookId === webhookId,
+  ) {
+    const endpoint = this.tenantPartnerRepository?.isEnabled()
+      ? await this.tenantPartnerRepository.findNotificationWebhookEndpoint(
+          tenantId,
+          webhookId,
+        )
+      : this.webhookEndpoints.find(
+          (item) => item.tenantId === tenantId && item.webhookId === webhookId,
+        );
+    return endpoint ? this.cloneStoredWebhookEndpoint(endpoint) : null;
+  }
+
+  async findNotificationWebhookEndpoint(
+    tenantId: string,
+    webhookId: string,
+  ): Promise<TenantWebhookEndpoint | null> {
+    const endpoint = await this.loadNotificationWebhookEndpoint(
+      tenantId,
+      webhookId,
     );
-    if (!endpoint) return null;
-    this.reconcileStoredWebhookEndpoint(endpoint, new Date().toISOString());
-    return this.toWebhookResponse(endpoint);
+    return endpoint ? this.toWebhookResponse(endpoint) : null;
   }
 
   async dispatchPartnerNotificationAttempt(
@@ -8512,10 +8561,28 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
     this.assertNonBlank(command.tenantId, "tenantId");
     this.assertNonBlank(command.webhookId, "webhookId");
 
-    const endpoint = this.requireWebhookEndpoint(
+    const entry = await this.findNotificationPartnerEntry(
+      command.wirePayload.data.partnerEntrySlug,
+    );
+    if (!entry)
+      return this.partnerNotificationTypedFailure("route_missing", null);
+    if (
+      entry.tenantId !== command.tenantId ||
+      command.wirePayload.tenantId !== command.tenantId ||
+      (command.expectedPartnerId !== undefined &&
+        entry.partnerId !== command.expectedPartnerId)
+    ) {
+      return this.partnerNotificationTypedFailure("owner_changed", null);
+    }
+    if (!entry.activeFlag || entry.status !== "active") {
+      return this.partnerNotificationTypedFailure("endpoint_disabled", null);
+    }
+    const endpoint = await this.loadNotificationWebhookEndpoint(
       command.tenantId,
       command.webhookId,
     );
+    if (!endpoint)
+      return this.partnerNotificationTypedFailure("endpoint_unavailable", null);
 
     if (endpoint.status === "disabled") {
       return this.partnerNotificationTypedFailure(
@@ -8551,53 +8618,139 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
       );
     }
 
-    const createdAt = new Date().toISOString();
-    const delivery = await this.enqueueWebhookDelivery(
-      endpoint,
-      command.wirePayload.event,
-      createdAt,
-      "partner_notification_dispatch",
-      command.wirePayload.deliveryId,
-    );
-
+    if (
+      command.expectedEndpointFingerprint !== undefined &&
+      computeEndpointFingerprint(endpoint) !==
+        command.expectedEndpointFingerprint
+    ) {
+      return this.partnerNotificationTypedFailure(
+        "configuration_blocked",
+        null,
+      );
+    }
     const signingSecret = this.resolveWebhookSecretMaterial(
       endpoint,
-      delivery.secretVersion,
+      endpoint.secretVersion,
     );
     if (
       !signingSecret ||
-      (signingSecret.status !== "active" &&
-        signingSecret.status !== "overlap_active")
+      !["active", "overlap_active"].includes(signingSecret.status)
     ) {
-      return this.partnerNotificationTypedFailure(
-        "credential_rejected",
-        null,
-        "webhook signing credential is not usable",
-      );
+      return this.partnerNotificationTypedFailure("credential_rejected", null);
     }
 
-    const result = await this.dispatchWebhookAttempt(
-      endpoint,
-      delivery,
-      command.wirePayload as unknown as Record<string, unknown>,
-      {
-        forceSingleAttempt: true,
-        ...(command.attemptNumber !== undefined
-          ? { attemptNumber: command.attemptNumber }
-          : {}),
-        ...(command.retryPolicySnapshot
-          ? { retryPolicySnapshot: command.retryPolicySnapshot }
-          : {}),
-        partnerAckV1: {
-          mode: "partner_ack_v1",
-          expected: {
-            notificationId: command.wirePayload.data.notificationId,
-            deliveryId: command.wirePayload.deliveryId,
-            partnerEntrySlug: command.wirePayload.data.partnerEntrySlug,
-          },
+    const previous = this.tenantPartnerRepository?.isEnabled()
+      ? await this.tenantPartnerRepository.findNotificationWebhookDelivery(
+          command.wirePayload.deliveryId,
+        )
+      : (this.webhookDeliveries.find(
+          (item) => item.deliveryId === command.wirePayload.deliveryId,
+        ) ?? null);
+    if (
+      previous &&
+      (previous.tenantId !== command.tenantId ||
+        previous.webhookId !== command.webhookId)
+    ) {
+      return this.partnerNotificationTypedFailure("owner_changed", null);
+    }
+    const retryPolicy = command.retryPolicySnapshot ?? endpoint.retryPolicy;
+    const result = await this.webhookDispatchService.dispatchAttempt({
+      url: endpoint.url,
+      deliveryId: command.wirePayload.deliveryId,
+      eventType: command.wirePayload.event,
+      tenantId: command.tenantId,
+      secretValue: signingSecret.secretValue,
+      secretVersion: signingSecret.secretVersion,
+      payload: command.wirePayload as unknown as Record<string, unknown>,
+      attempt: command.attemptNumber ?? (previous?.attempt ?? 0) + 1,
+      retryPolicy,
+      partnerAckV1: {
+        mode: "partner_ack_v1",
+        expected: {
+          notificationId: command.wirePayload.data.notificationId,
+          deliveryId: command.wirePayload.deliveryId,
+          partnerEntrySlug: command.wirePayload.data.partnerEntrySlug,
         },
       },
+    });
+
+    // The consumer already durably reserved this attempt. Only its outbox owns
+    // recovery; do not enqueue another tenant job or hold a DB lock during HTTP.
+    const update = (
+      current: StoredWebhookEndpointRecord,
+      prior: StoredWebhookDeliveryRecord | null,
+    ) => {
+      const latest = this.cloneStoredWebhookEndpoint(current);
+      const delivery = prior
+        ? this.cloneStoredWebhookDelivery(prior)
+        : {
+            deliveryId: command.wirePayload.deliveryId,
+            webhookId: command.webhookId,
+            tenantId: command.tenantId,
+            eventType: command.wirePayload.event,
+            attempt: 0,
+            status: "queued" as const,
+            httpStatus: null,
+            signature: "",
+            createdAt: result.attemptedAt,
+            attemptedAt: result.attemptedAt,
+            nextAttemptAt: null,
+            signatureHeader: "",
+            signatureVersion: signingSecret.secretVersion,
+            secretVersion: signingSecret.secretVersion,
+            retryPolicySnapshot: retryPolicy,
+            rawBody: {},
+          };
+      // A late response from an expired worker cannot roll back a newer attempt.
+      if (prior && prior.attempt > result.attempt)
+        return { endpoint: latest, delivery };
+      const sameOwner = latest.tenantId === command.tenantId;
+      const target = sameOwner
+        ? latest
+        : this.cloneStoredWebhookEndpoint(endpoint);
+      const before = this.toWebhookResponse(target);
+      if (!prior) target.runtimeMetadata.deliveryCount += 1;
+      this.applyWebhookDispatchResult(
+        target,
+        delivery,
+        result,
+        target.secretCredentials?.find(
+          (secret) => secret.secretVersion === signingSecret.secretVersion,
+        ) ?? null,
+        retryPolicy,
+        before,
+        sameOwner &&
+          latest.status === "active" &&
+          latest.updatedAt === endpoint.updatedAt &&
+          computeEndpointFingerprint(latest) ===
+            computeEndpointFingerprint(endpoint) &&
+          prior?.status !== "delivery_failed",
+      );
+      return { endpoint: latest, delivery };
+    };
+    const records = this.tenantPartnerRepository?.isEnabled()
+      ? await this.tenantPartnerRepository.recordNotificationAttempt(
+          command.webhookId,
+          command.wirePayload.deliveryId,
+          update,
+        )
+      : update(
+          this.webhookEndpoints.find(
+            (item) => item.webhookId === command.webhookId,
+          )!,
+          previous,
+        );
+    this.webhookEndpoints = this.webhookEndpoints.map((item) =>
+      item.webhookId === records.endpoint.webhookId
+        ? this.cloneStoredWebhookEndpoint(records.endpoint)
+        : item,
     );
+    this.webhookDeliveries = [
+      records.delivery,
+      ...this.webhookDeliveries.filter(
+        (item) => item.deliveryId !== records.delivery.deliveryId,
+      ),
+    ];
 
     return this.classifyPartnerNotificationDispatchResult(result);
   }

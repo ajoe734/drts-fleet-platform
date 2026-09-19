@@ -80,18 +80,17 @@ export class PartnerNotificationDispatchFacade {
         suggestedNextAttemptAt: null,
       },
     });
-    let entry;
-    try {
-      entry = this.tenantPartnerService.getPartnerEntry(route.entrySlug);
-    } catch {
-      return failed("route_missing");
-    }
+    const entry = await this.tenantPartnerService.findNotificationPartnerEntry(
+      route.entrySlug,
+    );
+    if (!entry) return failed("route_missing");
     if (
       entry.tenantId !== route.tenantId ||
       entry.partnerId !== route.partnerId
     )
       return failed("owner_changed");
-    if (!entry.activeFlag) return failed("endpoint_disabled");
+    if (!entry.activeFlag || entry.status !== "active")
+      return failed("endpoint_disabled");
     const link = await this.identities?.find(
       route.entrySlug,
       route.partnerUserRef,
@@ -112,10 +111,11 @@ export class PartnerNotificationDispatchFacade {
     if (binding.state === "disabled") return failed("endpoint_disabled");
     if (binding.state !== "ready" || !binding.eventTypes.includes(eventType))
       return failed("configuration_blocked");
-    const endpoint = this.tenantPartnerService.findNotificationWebhookEndpoint(
-      route.tenantId,
-      binding.webhookId,
-    );
+    const endpoint =
+      await this.tenantPartnerService.findNotificationWebhookEndpoint(
+        route.tenantId,
+        binding.webhookId,
+      );
     if (!endpoint) return failed("endpoint_unavailable");
     if (endpoint.status === "disabled") return failed("endpoint_disabled");
     if (

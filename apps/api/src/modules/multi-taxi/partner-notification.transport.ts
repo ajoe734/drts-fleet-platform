@@ -242,6 +242,8 @@ export class PartnerNotificationTransport implements PassengerPushTransport {
     await this.resolve(message, context);
     const outcome = await this.facade.dispatchNotificationAttemptByWebhookId({
       tenantId: context.tenantId,
+      expectedPartnerId: context.partnerId,
+      expectedEndpointFingerprint: context.endpointFingerprint,
       webhookId: context.webhookId,
       wirePayload: context.wirePayload,
       attemptNumber: attemptCount,
