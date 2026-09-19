@@ -31,6 +31,7 @@ type ReferralEmbedHandoffRecord = {
   issuedAt: string;
   expiresAt: string;
   consumedAt: string | null;
+  navigationContext?: { orderId: string; screen: string };
 };
 
 type ReferralEmbedConsentLedgerRecord = {
@@ -70,8 +71,14 @@ const REQUIRED_SCOPES: ReferralEmbedRequiredConsentScope[] = [
 
 @Injectable()
 export class ReferralEmbedHandoffRepository {
-  private readonly fallbackHandoffs = new Map<string, ReferralEmbedHandoffRecord>();
-  private readonly fallbackConsents = new Map<string, ReferralEmbedConsentLedgerRecord>();
+  private readonly fallbackHandoffs = new Map<
+    string,
+    ReferralEmbedHandoffRecord
+  >();
+  private readonly fallbackConsents = new Map<
+    string,
+    ReferralEmbedConsentLedgerRecord
+  >();
 
   constructor(@Optional() private readonly databaseService?: DatabaseService) {}
 
@@ -99,6 +106,9 @@ export class ReferralEmbedHandoffRepository {
       issuedAt: now,
       expiresAt: command.expiresAt,
       consumedAt: null,
+      ...(command.navigationContext
+        ? { navigationContext: command.navigationContext }
+        : {}),
     };
 
     if (!this.isEnabled()) {
@@ -431,6 +441,9 @@ export class ReferralEmbedHandoffRepository {
         partnerEntrySlug: record.entrySlug,
         drtsPassengerId: record.drtsPassengerId,
       },
+      ...(record.navigationContext
+        ? { navigationContext: record.navigationContext }
+        : {}),
     };
   }
 
@@ -444,7 +457,9 @@ export class ReferralEmbedHandoffRepository {
       `,
       [this.hashArtifact(artifact)],
     );
-    return result.rows[0] ? this.parseHandoffRecord(result.rows[0].record) : null;
+    return result.rows[0]
+      ? this.parseHandoffRecord(result.rows[0].record)
+      : null;
   }
 
   private async findByHandoffId(client: PoolClient, handoffId: string) {
@@ -457,7 +472,9 @@ export class ReferralEmbedHandoffRepository {
       `,
       [handoffId],
     );
-    return result.rows[0] ? this.parseHandoffRecord(result.rows[0].record) : null;
+    return result.rows[0]
+      ? this.parseHandoffRecord(result.rows[0].record)
+      : null;
   }
 
   private parseHandoffRecord(value: unknown): ReferralEmbedHandoffRecord {

@@ -5711,6 +5711,9 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
       consentGrantedAt: resolved.consentGrantedAt,
       issuedAt: issuedAt.toISOString(),
       expiresAt: expiresAt.toISOString(),
+      ...(command.navigationContext
+        ? { navigationContext: command.navigationContext }
+        : {}),
     };
     const record = await this.referralEmbedHandoffRepository.issue(persistence);
     return {
@@ -5734,6 +5737,18 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
   }): Promise<ReferralEmbedSession> {
     const result = await this.referralEmbedHandoffRepository.consume(command);
     if (result.outcome === "consumed") {
+      const link =
+        await this.partnerUserIdentityLinkRepository.findByDrtsPassengerId(
+          result.session.partnerEntrySlug,
+          result.session.drtsPassengerId,
+        );
+      if (!link || link.status !== "active") {
+        throw new ApiRequestError(
+          HttpStatus.FORBIDDEN,
+          "REFERRAL_HANDOFF_REVOKED",
+          "The partner user identity link is no longer active.",
+        );
+      }
       return result.session;
     }
     if (result.outcome === "replayed") {
