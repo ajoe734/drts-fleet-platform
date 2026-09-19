@@ -372,6 +372,8 @@ jobs:
             "Smoke acceptance" \
             "Running lint, typecheck, and unit tests on the promote snapshot." \
             env DATABASE_URL=postgresql://postgres:postgres@127.0.0.1:5432/drts_fleet_platform \
+            PARTNER_NOTIFY_SEQ_TEST_DATABASE_URL=postgresql://postgres:postgres@127.0.0.1:5432/drts_fleet_platform \
+            PARTNER_NOTIFY_TRANSPORT_TEST_DATABASE_URL=postgresql://postgres:postgres@127.0.0.1:5432/drts_fleet_platform \
             bash -lc 'pnpm install --frozen-lockfile && pnpm run lint && pnpm run typecheck && pnpm run test:unit'
 
           echo "run_url=$run_url" >> "$GITHUB_OUTPUT"

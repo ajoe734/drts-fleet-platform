@@ -167,6 +167,8 @@ jobs:
           --health-retries 10
     env:
       DATABASE_URL: postgresql://postgres:postgres@localhost:5432/drts_fleet_platform
+      PARTNER_NOTIFY_SEQ_TEST_DATABASE_URL: postgresql://postgres:postgres@localhost:5432/drts_fleet_platform
+      PARTNER_NOTIFY_TRANSPORT_TEST_DATABASE_URL: postgresql://postgres:postgres@localhost:5432/drts_fleet_platform
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
@@ -200,7 +202,9 @@ jobs:
         # failure. Smoke acceptance runs the same suite without one.
         env:
           DRTS_REQUIRE_API_TEST_IMAGE: "1"
-        run: pnpm run test:unit
+        run: |
+          pnpm run test:unit --reporter=default --reporter=json --outputFile.json=unit-test-results.json
+          python3 tools/ci/test_partner_notification_postgres_gate.py unit-test-results.json
 
   integration:
     needs: [candidate, changes]
