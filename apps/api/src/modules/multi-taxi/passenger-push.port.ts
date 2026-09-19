@@ -2,7 +2,13 @@ import { Inject, Injectable } from "@nestjs/common";
 
 import type { ConsumerNotificationOutboxRecord } from "@drts/contracts";
 
+import type { StoredPartnerNotificationContext } from "./partner-notification.types";
+
+export type PassengerPushSendContext = { requestId?: string | undefined; fenceToken?: number | undefined };
+
 export type PassengerPushMessage = {
+  createdAt?: string;
+  attemptCount?: number;
   outboxId: string;
   orderId: string;
   /** Pseudonymous subject reference; never a raw phone number. */
@@ -15,15 +21,19 @@ export type PassengerPushMessage = {
 export type PassengerPushReceipt = {
   providerName: string;
   providerMessageRef: string;
+  deliveredAt?: string;
+  deliveryContext?: StoredPartnerNotificationContext;
 };
 
 export interface PassengerPushPort {
+  readonly transportMode?: "partner_webhook" | "legacy";
+  isAvailableFor?(message: PassengerPushMessage): Promise<boolean>;
   /** False whenever provider credentials are absent. */
   isAvailable(): boolean;
   providerName(): string | null;
   send(
     message: PassengerPushMessage,
-    context: { requestId?: string | undefined },
+    context: PassengerPushSendContext,
   ): Promise<PassengerPushReceipt>;
 }
 
