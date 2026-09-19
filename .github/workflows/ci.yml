@@ -233,6 +233,8 @@ jobs:
           --health-retries 10
     env:
       DATABASE_URL: postgresql://postgres:postgres@localhost:5432/drts_fleet_platform
+      PARTNER_NOTIFY_SEQ_TEST_DATABASE_URL: postgresql://postgres:postgres@localhost:5432/drts_fleet_platform
+      PARTNER_NOTIFY_TRANSPORT_TEST_DATABASE_URL: postgresql://postgres:postgres@localhost:5432/drts_fleet_platform
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
@@ -251,7 +253,16 @@ jobs:
       - name: Typecheck
         run: pnpm run typecheck
       - name: Unit tests
-        run: pnpm run test:unit
+        run: |
+          pnpm run test:unit --reporter=default --reporter=json --outputFile.json=unit-test-results.json
+          python3 tools/ci/verify_partner_notification_postgres_gate.py unit-test-results.json
+      - name: Upload unit test report
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: unit-test-results
+          path: unit-test-results.json
+          retention-days: 14
       - name: Apply migrations
         run: pnpm db:migrate
       - name: API unit tests
@@ -262,7 +273,15 @@ jobs:
         # another test's background outbox consumer claim the Stage1 gate's rows,
         # changing its replay snapshot or consuming its delivery without a sink.
         # Keep every test and assertion, but serialize access to the shared DB.
-        run: pnpm --filter @drts/api test --no-file-parallelism --maxConcurrency=1
+        run: |
+          pnpm --filter @drts/api test --no-file-parallelism --maxConcurrency=1 --reporter=default --reporter=json --outputFile.json=api-test-results.json
+      - name: Upload API test report
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: api-test-results
+          path: api-test-results.json
+          retention-days: 14
 
   smoke-acceptance:
     name: Smoke acceptance
