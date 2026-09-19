@@ -15,7 +15,7 @@ import {
 
 export function PartnerNotificationPanel({ entrySlug }: { entrySlug: string }) {
   const client = usePlatformAdminClient();
-  const theme = buildCanvasTheme("platform");
+  const theme = buildCanvasTheme({ surface: "platform" });
   const [binding, setBinding] = useState<any>(null);
   const [deliveries, setDeliveries] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
@@ -27,8 +27,8 @@ export function PartnerNotificationPanel({ entrySlug }: { entrySlug: string }) {
     try {
       const b = await client.getPartnerEntryNotificationBinding(entrySlug).catch(() => null);
       setBinding(b);
-      const d = await client.listPartnerNotificationDeliveries(entrySlug, { pageSize: 10 }).catch(() => ({ rows: [] as any[], total: 0 }));
-      setDeliveries(d.rows || []);
+      const d = await client.listPartnerNotificationDeliveries(entrySlug, { pageSize: 10 }).catch(() => ({ items: [] as any[], pageInfo: { page: 1, pageSize: 10, totalItems: 0, totalPages: 0 } }));
+      setDeliveries(d.items || []);
     } catch (e: any) {
       setError(e.message || String(e));
     } finally {
