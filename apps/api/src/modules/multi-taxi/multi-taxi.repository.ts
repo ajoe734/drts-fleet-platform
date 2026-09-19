@@ -1,6 +1,6 @@
 import { PLATFORM_CURRENCY } from "@drts/contracts";
 import { Injectable, Logger, Optional } from "@nestjs/common";
-import type { QueryResultRow } from "pg";
+import type { PoolClient, QueryResultRow } from "pg";
 
 import type {
   DriverRatingSummary,
@@ -512,16 +512,14 @@ export class MultiTaxiRepository {
    * `UPDATE ... RETURNING` is a single atomic statement, so concurrent
    * callers for the same order always receive distinct sequence numbers;
    * pass a transaction-scoped executor from the outbox-producing
-   * transaction (once one calls this) so the allocation commits or rolls
+   * transaction so the allocation commits or rolls
    * back with that outbox row rather than independently.
    */
   async allocateNotificationEventSequence(
     orderId: string,
+    executor: Pick<PoolClient, "query">,
   ): Promise<number | null> {
-    if (!this.isEnabled()) {
-      return null;
-    }
-    const result = await this.databaseService!.query<{
+    const result = await executor.query<{
       event_sequence: string | number;
     }>(
       `
