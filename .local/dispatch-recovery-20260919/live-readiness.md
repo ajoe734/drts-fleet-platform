@@ -1,7 +1,7 @@
 # SR-LIVE-READINESS-20260919 盤點報告
 
 ## 1. 查核資訊
-- **時間**: 2026-09-19T14:21:00Z
+- **時間**: 2026-09-19T15:40:55Z
 - **指令**: `gh run view 35430134402 --log`, `gh secret list`, `gh variable list`
 - **來源 run**: 35430134402
 - **真實 Deployed SHA**: `98e251cdc809467b16a158fc2f285e4296206f5f`
@@ -11,7 +11,9 @@
 ## 2. 資源狀態
 
 ### 🟢 已具備資源 (可直接恢復，解除舊 blocker)
-*(無。所有要求 Live 驗證的任務均缺乏必要的真實環境證據或資源)*
+1. **AGY-SANDBOX-RECOVERY** (agy_sandbox_write_access)
+   - **狀態**: 已恢復 (available)
+   - **說明**: 2026-09-19 已授權的 agy AppArmor userns 修復完成；保留 `--sandbox`，實測 `run_command` 寫入/讀回/刪除成功。證據位於 `.local/dispatch-recovery-20260919/agy-shell-after-profile-v2.json`。
 
 ### 🔴 仍缺外部依賴資源 (維持 Blocked)
 下列事項未具備外部真實資源或憑證，需等待相關負責方提供，或實作 Live 驗證步驟，維持 Blocked 狀態。未做 live 項不可宣稱通過。

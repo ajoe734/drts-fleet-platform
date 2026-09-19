@@ -1,5 +1,5 @@
 {
-  "check_time": "2026-09-19T14:21:00Z",
+  "check_time": "2026-09-19T15:40:55Z",
   "check_commands": [
     "gh run view 35430134402 --log",
     "gh secret list",
@@ -9,6 +9,12 @@
   "deployed_sha": "98e251cdc809467b16a158fc2f285e4296206f5f",
   "deployment_note": "Deployed SHA 98e251cdc809467b16a158fc2f285e4296206f5f was deployed before the SR-PARTNER-NOTIFY-SEQ-20260918 and SR-PARTNER-NOTIFY-TRANSPORT-20260918 commits. Thus, the currently deployed environment does NOT include the latest SEQ/TRANSPORT features.",
   "resources": [
+    {
+      "task": "AGY-SANDBOX-RECOVERY",
+      "resource": "agy_sandbox_write_access",
+      "status": "available",
+      "reason": "AppArmor userns fixed. Verified write/read/delete via run_command with --sandbox intact (evidence: agy-shell-after-profile-v2.json)."
+    },
     {
       "task": "SR-LIVE-OPS-001",
       "resource": "authorized_isolated_ops_target",
