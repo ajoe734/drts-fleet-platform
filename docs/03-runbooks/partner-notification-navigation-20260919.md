@@ -46,7 +46,7 @@ If the request is unauthorized, the trip does not exist, or the user does not ma
 
 ### 2. Client Redirection
 
-Once your backend receives the \`destinationUrl\`, it should instruct your mobile application (or frontend) to open this URL inside the webview that hosts the DRTS embed. 
+Once your backend receives the \`destinationUrl\`, it should instruct your mobile application (or frontend) to open this URL inside the webview that hosts the DRTS embed.
 
 The BFF will automatically consume the \`artifact\`, establish a fresh HttpOnly session, and seamlessly redirect the passenger to the correct screen (e.g., active trip tracking or receipt page) based on the trip's current status.
 

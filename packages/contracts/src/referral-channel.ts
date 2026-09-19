@@ -54,6 +54,7 @@ export type PartnerUserIdentityConsentScope =
 export interface PartnerUserIdentityLinkRecord {
   entrySlug: string;
   partnerUserRef: string;
+  navigationContext?: { orderId: string; screen: string };
   drtsPassengerId: string;
   status: PartnerUserIdentityLinkStatus;
   consentScope: PartnerUserIdentityConsentScope;
@@ -67,6 +68,7 @@ export interface CreatePartnerIngressHandoffCommand {
   entrySlug: string;
   apiKey?: string;
   partnerUserRef: string;
+  navigationContext?: { orderId: string; screen: string };
   consentScope?: PartnerUserIdentityConsentScope;
 }
 
@@ -91,6 +93,7 @@ export interface CreateReferralEmbedHandoffArtifactCommand {
   entryHost: string;
   apiKey?: string;
   partnerUserRef: string;
+  navigationContext?: { orderId: string; screen: string };
   consentBundle?: ReferralEmbedConsentBundle | null;
 }
 
@@ -258,6 +261,7 @@ export interface ResolvePartnerNotificationNavigationCommand {
   entrySlug: string;
   rideRef: string;
   partnerUserRef: string;
+  navigationContext?: { orderId: string; screen: string };
 }
 
 export interface PartnerNotificationNavigationResolution {

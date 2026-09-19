@@ -15,7 +15,21 @@ Validate the partner notification navigation resolution API and embed BFF redire
 
 ### 3. navigation_reads_current_trip_without_creating_orders
 - **Scenario:** The passenger's client webview loads the redirected embed page.
-- **Expected:** 
+- **Expected:**
   - If the trip is active (e.g., driver_assigned), the screen renders the live tracking view.
   - If the trip is completed/cancelled, the screen renders the receipt or history view.
   - No new order is automatically created during this navigation flow.
+
+## Test Evidence
+```bash
+$ pnpm vitest run tests/unit/system-remediation/sr-partner-notify-nav-20260917/partner-notification-navigation.test.ts
+ RUN  v4.1.4 /home/lupin/workspace/drts-fleet-platform/.artifacts/worktrees/auto/gemini-sr-partner-notify-nav-20260917
+
+[Nest] 79  - 09/19/2026, 3:48:28 PM     LOG [InternalKeyMiddleware] [AUTH_SCOPED_INTERNAL_KEY_USED] exceptionId=INTERNAL_KEY_EXCP_001 keyState=active owner=referral-team header=x-drts-referral-handoff-key route=GET 
+
+ Test Files  1 passed (1)
+      Tests  5 passed (5)
+
+$ echo $?
+0
+```
