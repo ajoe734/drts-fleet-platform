@@ -55,6 +55,7 @@ export const partnerNotificationHttpsFetch: WebhookFetch = async (
   )
     throw new Error("partner_endpoint_not_public_https");
   return new Promise((resolve, reject) => {
+    let rejectBody: ((error: Error) => void) | undefined;
     const req = request(
       url,
       {
@@ -85,32 +86,52 @@ export const partnerNotificationHttpsFetch: WebhookFetch = async (
       },
       (response) => {
         const status = response.statusCode ?? 0;
-        const chunks: Buffer[] = [];
-        let size = 0;
-        // Never follows redirects. Retain at most 4 KiB; an oversized ack is invalid.
-        response.on("data", (chunk: Buffer) => {
-          size += chunk.length;
-          if (size > PARTNER_NOTIFICATION_MAX_ACK_BODY_BYTES) {
-            resolve({
-              ok: status >= 200 && status < 300,
-              status,
-              text: async () =>
+        const ok = status >= 200 && status < 300;
+        // Preserve headers immediately. Non-ack responses need no body; a
+        // reset/stall must not turn a known credential/endpoint error into a
+        // status-less automatic retry. Redirects are never followed.
+        if (![200, 201, 202].includes(status)) {
+          response.on("error", () => {});
+          resolve({ ok, status });
+          response.destroy();
+          return;
+        }
+        const body = new Promise<string>((resolveText, rejectText) => {
+          rejectBody = rejectText;
+          const chunks: Buffer[] = [];
+          let size = 0;
+          // Retain at most 4 KiB; an oversized ack is invalid.
+          response.on("data", (chunk: Buffer) => {
+            size += chunk.length;
+            if (size > PARTNER_NOTIFICATION_MAX_ACK_BODY_BYTES) {
+              resolveText(
                 " ".repeat(PARTNER_NOTIFICATION_MAX_ACK_BODY_BYTES + 1),
-            });
-            response.destroy();
-          } else chunks.push(chunk);
+              );
+              response.destroy();
+            } else chunks.push(chunk);
+          });
+          response.on("end", () =>
+            resolveText(Buffer.concat(chunks).toString("utf8")),
+          );
+          response.on("error", rejectText);
+          response.on("aborted", () =>
+            rejectText(new Error("partner_ack_body_aborted")),
+          );
+          response.on("close", () => {
+            if (!response.complete)
+              rejectText(new Error("partner_ack_body_incomplete"));
+          });
         });
-        response.on("end", () =>
-          resolve({
-            ok: status >= 200 && status < 300,
-            status,
-            text: async () => Buffer.concat(chunks).toString("utf8"),
-          }),
-        );
-        response.on("error", reject);
+        // A socket can fail before dispatch starts reading text(). Keep that
+        // rejection handled while preserving it for the body reader.
+        void body.catch(() => {});
+        resolve({ ok, status, text: () => body });
       },
     );
-    req.on("error", reject);
+    req.on("error", (error: Error) => {
+      reject(error);
+      rejectBody?.(error);
+    });
     req.end(typeof init?.body === "string" ? init.body : undefined);
   });
 };
