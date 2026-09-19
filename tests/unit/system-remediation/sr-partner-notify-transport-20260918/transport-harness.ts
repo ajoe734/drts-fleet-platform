@@ -91,17 +91,17 @@ export function harness(productionHttps = false) {
   tenant.updateWebhookEndpoint(route.tenantId, endpoint.webhookId, {
     status: "active",
   });
-  const activeEndpoint = tenant.findNotificationWebhookEndpoint(
-    route.tenantId,
-    endpoint.webhookId,
-  )!;
+  const activeEndpoint = tenant.listWebhookEndpoints(route.tenantId)[0]!;
   const entry = {
     entrySlug: route.entrySlug,
     tenantId: route.tenantId,
     partnerId: route.partnerId,
     activeFlag: true,
+    status: "active",
   };
-  vi.spyOn(tenant, "getPartnerEntry").mockImplementation(() => entry as never);
+  vi.spyOn(tenant, "findNotificationPartnerEntry").mockImplementation(
+    async () => entry as never,
+  );
   const binding: PartnerEntryNotificationBinding = {
     bindingId: "binding-1",
     entrySlug: route.entrySlug,

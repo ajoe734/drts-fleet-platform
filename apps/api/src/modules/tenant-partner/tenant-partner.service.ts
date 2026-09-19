@@ -8502,20 +8502,6 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
     }
   }
 
-  /**
-   * SR-PARTNER-NOTIFY-ACK-20260917 §8 — the single-attempt dispatch entry
-   * point exported (via `PartnerNotificationDispatchFacade`) as
-   * `dispatchNotificationAttemptByWebhookId`. Precise endpoint lookup by
-   * (tenantId, webhookId) — never a tenant-wide event scan — reuses the same
-   * active/expiry/secret-rotation governance as an ordinary tenant webhook,
-   * makes exactly one remote HTTP attempt, records the delivery/credential
-   * usage/failure count on the shared endpoint (deduped by this logical
-   * delivery id, same as `dispatchWebhookAttempt`), and returns a validated
-   * ack or a typed failure. It never schedules its own retry timer — the
-   * caller's own fence transaction owns retry timing and must reuse this
-   * exact deliveryId/payload for every attempt so the partner's durable
-   * dedupe can recognize a resend.
-   */
   async findNotificationPartnerEntry(
     entrySlug: string,
   ): Promise<PartnerChannelEntryRecord | null> {
@@ -8555,12 +8541,40 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
     return endpoint ? this.toWebhookResponse(endpoint) : null;
   }
 
+  /**
+   * SR-PARTNER-NOTIFY-ACK-20260917 §8 — the single-attempt dispatch entry
+   * point exported (via `PartnerNotificationDispatchFacade`) as
+   * `dispatchNotificationAttemptByWebhookId`. Precise endpoint lookup by
+   * (tenantId, webhookId) — never a tenant-wide event scan — reuses the same
+   * active/expiry/secret-rotation governance as an ordinary tenant webhook,
+   * makes exactly one remote HTTP attempt, records the delivery/credential
+   * usage/failure count on the shared endpoint (deduped by this logical
+   * delivery id, same as `dispatchWebhookAttempt`), and returns a validated
+   * ack or a typed failure. It never schedules its own retry timer — the
+   * caller's own fence transaction owns retry timing and must reuse this
+   * exact deliveryId/payload for every attempt so the partner's durable
+   * dedupe can recognize a resend.
+   */
   async dispatchPartnerNotificationAttempt(
     command: PartnerNotificationDispatchAttemptCommand,
   ): Promise<PartnerNotificationDispatchOutcome> {
     this.assertNonBlank(command.tenantId, "tenantId");
     this.assertNonBlank(command.webhookId, "webhookId");
 
+    const previous = this.tenantPartnerRepository?.isEnabled()
+      ? await this.tenantPartnerRepository.findNotificationWebhookDelivery(
+          command.wirePayload.deliveryId,
+        )
+      : (this.webhookDeliveries.find(
+          (item) => item.deliveryId === command.wirePayload.deliveryId,
+        ) ?? null);
+    if (
+      previous &&
+      (previous.tenantId !== command.tenantId ||
+        previous.webhookId !== command.webhookId)
+    ) {
+      return this.partnerNotificationTypedFailure("owner_changed", null);
+    }
     const entry = await this.findNotificationPartnerEntry(
       command.wirePayload.data.partnerEntrySlug,
     );
@@ -8639,20 +8653,6 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
       return this.partnerNotificationTypedFailure("credential_rejected", null);
     }
 
-    const previous = this.tenantPartnerRepository?.isEnabled()
-      ? await this.tenantPartnerRepository.findNotificationWebhookDelivery(
-          command.wirePayload.deliveryId,
-        )
-      : (this.webhookDeliveries.find(
-          (item) => item.deliveryId === command.wirePayload.deliveryId,
-        ) ?? null);
-    if (
-      previous &&
-      (previous.tenantId !== command.tenantId ||
-        previous.webhookId !== command.webhookId)
-    ) {
-      return this.partnerNotificationTypedFailure("owner_changed", null);
-    }
     const retryPolicy = command.retryPolicySnapshot ?? endpoint.retryPolicy;
     const result = await this.webhookDispatchService.dispatchAttempt({
       url: endpoint.url,
@@ -8710,6 +8710,13 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
         : this.cloneStoredWebhookEndpoint(endpoint);
       const before = this.toWebhookResponse(target);
       if (!prior) target.runtimeMetadata.deliveryCount += 1;
+      const sameGovernance =
+        sameOwner &&
+        latest.status === "active" &&
+        latest.updatedAt === endpoint.updatedAt &&
+        computeEndpointFingerprint(latest) ===
+          computeEndpointFingerprint(endpoint);
+      const governedNextAttemptAt = target.runtimeMetadata.nextAttemptAt;
       this.applyWebhookDispatchResult(
         target,
         delivery,
@@ -8719,13 +8726,10 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
         ) ?? null,
         retryPolicy,
         before,
-        sameOwner &&
-          latest.status === "active" &&
-          latest.updatedAt === endpoint.updatedAt &&
-          computeEndpointFingerprint(latest) ===
-            computeEndpointFingerprint(endpoint) &&
-          prior?.status !== "delivery_failed",
+        sameGovernance && prior?.status !== "delivery_failed",
       );
+      if (!sameGovernance)
+        target.runtimeMetadata.nextAttemptAt = governedNextAttemptAt;
       return { endpoint: latest, delivery };
     };
     const records = this.tenantPartnerRepository?.isEnabled()

@@ -347,10 +347,10 @@ describe("immutable partner retry context", () => {
     });
     h.binding.webhookId = nextEndpoint.webhookId;
     h.binding.validatedEndpointFingerprint = computeEndpointFingerprint(
-      h.tenant.findNotificationWebhookEndpoint(
+      (await h.tenant.findNotificationWebhookEndpoint(
         h.route.tenantId,
         nextEndpoint.webhookId,
-      )!,
+      ))!,
     );
     await vi.advanceTimersByTimeAsync(
       Date.parse(first.nextAttemptAt) - Date.now(),
