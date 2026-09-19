@@ -27,8 +27,8 @@ export function PartnerNotificationPanel({ entrySlug }: { entrySlug: string }) {
     try {
       const b = await client.getPartnerEntryNotificationBinding(entrySlug).catch(() => null);
       setBinding(b);
-      const d = await client.listPartnerNotificationDeliveries(entrySlug, { pageSize: 10 }).catch(() => ({ data: [] }));
-      setDeliveries(d.data || d.items || d.rows || []);
+      const d = await client.listPartnerNotificationDeliveries(entrySlug, { pageSize: 10 }).catch(() => ({ rows: [] as any[], total: 0 }));
+      setDeliveries(d.rows || []);
     } catch (e: any) {
       setError(e.message || String(e));
     } finally {
@@ -58,16 +58,16 @@ export function PartnerNotificationPanel({ entrySlug }: { entrySlug: string }) {
   };
 
   const deliveryColumns: CanvasTableColumn<any>[] = [
-    { key: "outboxId", title: "Outbox ID", render: (r) => r.outboxId },
-    { key: "status", title: "Status", render: (r) => (
-      <Pill theme={theme} tone={r.status === "failed" ? "danger" : r.status === "delivered" ? "success" : "neutral"}>
-        {r.status}
+    { k: "outboxId", h: "Outbox ID", r: (row: any) => row.outboxId },
+    { k: "status", h: "Status", r: (row: any) => (
+      <Pill theme={theme} tone={row.status === "failed" ? "danger" : row.status === "delivered" ? "success" : "neutral"}>
+        {row.status}
       </Pill>
     )},
-    { key: "stage", title: "Delivery Stage", render: (r) => r.deliveryStage || "unknown" },
-    { key: "reason", title: "Failure Reason", render: (r) => r.failureReason || "—" },
-    { key: "retry", title: "Retry", render: (r) => (
-      <Btn theme={theme} size="xs" disabled={r.status !== 'failed'} onClick={() => handleRetry(r.outboxId)}>Retry</Btn>
+    { k: "stage", h: "Delivery Stage", r: (row: any) => row.deliveryStage || "unknown" },
+    { h: "Failure Reason", r: (row: any) => row.failureReason || "—" },
+    { h: "Retry", r: (row: any) => (
+      <Btn theme={theme} size="xs" disabled={row.status !== 'failed'} onClick={() => handleRetry(row.outboxId)}>Retry</Btn>
     )}
   ];
 
@@ -84,7 +84,7 @@ export function PartnerNotificationPanel({ entrySlug }: { entrySlug: string }) {
             <div style={{ display: "flex", gap: 8, marginTop: 12 }}>
               <Btn theme={theme} onClick={handleTest}>Test Binding</Btn>
               <Btn theme={theme} onClick={handleEnable} disabled={binding.state === "ready"}>Enable</Btn>
-              <Btn theme={theme} onClick={handleDisable} variant="danger" disabled={binding.state === "disabled"}>Disable</Btn>
+              <Btn theme={theme} onClick={handleDisable} variant="secondary" disabled={binding.state === "disabled"}>Disable</Btn>
             </div>
           </div>
         ) : (

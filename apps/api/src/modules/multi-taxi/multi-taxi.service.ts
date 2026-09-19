@@ -2587,11 +2587,11 @@ export class MultiTaxiService implements OnModuleInit {
 
 
   async listPartnerNotificationDeliveries(entrySlug: string, query: any) {
-    return this.multiTaxiRepository.listPartnerNotificationDeliveries(entrySlug, query);
+    return this.repository!.listPartnerNotificationDeliveries(entrySlug, query);
   }
 
   async retryPartnerNotificationDelivery(entrySlug: string, outboxId: string) {
-    return this.multiTaxiRepository.retryPartnerNotificationDelivery(entrySlug, outboxId);
+    return this.repository!.retryPartnerNotificationDelivery(entrySlug, outboxId);
   }
 
 }

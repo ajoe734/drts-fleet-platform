@@ -2336,6 +2336,10 @@ export default function PartnerDetailPage() {
           </div>
         ) : null}
 
+        {activeTab === "notifications" ? (
+          <PartnerNotificationPanel entrySlug={entrySlug} />
+        ) : null}
+
         {activeTab === "audit" ? (
           <div style={{ display: "grid", gap: 16 }}>
             <Card
@@ -2360,10 +2364,6 @@ export default function PartnerDetailPage() {
                     }
                   />
                 ) : null}
-        {activeTab === "notifications" ? (
-          <PartnerNotificationPanel entrySlug={entrySlug} />
-        ) : null}
-
 
                 <DL
                   theme={theme}

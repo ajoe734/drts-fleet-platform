@@ -1768,7 +1768,7 @@ export class MultiTaxiRepository {
       LIMIT $2 OFFSET $3
     `, [entrySlug, pageSize, offset]);
 
-    return { rows: result.rows, total: parseInt(countResult.rows[0].cnt, 10) };
+    return { rows: result.rows, total: parseInt(countResult.rows[0]?.cnt || "0", 10) };
   }
 
   async retryPartnerNotificationDelivery(entrySlug: string, outboxId: string) {
