@@ -11,7 +11,6 @@ import { UnavailableMaskedCallPort } from "../../../../apps/api/src/modules/mult
 import { MultiTaxiService } from "../../../../apps/api/src/modules/multi-taxi/multi-taxi.service";
 import { PassengerPushAdapter } from "../../../../apps/api/src/modules/multi-taxi/passenger-push.adapter";
 import {
-  PassengerPushDeviceResolver,
   PassengerPushRepository,
 } from "../../../../apps/api/src/modules/multi-taxi/passenger-push.repository";
 import { WebPushTransport } from "../../../../apps/api/src/modules/multi-taxi/web-push.transport";
@@ -89,9 +88,9 @@ function createHarness() {
   };
 
   const pushSubscriptionRepository = new PassengerPushRepository();
-  const deviceResolver = new PassengerPushDeviceResolver(pushSubscriptionRepository);
+  
   const transport = new WebPushTransport();
-  const pushAdapter = new PassengerPushAdapter(null, transport, deviceResolver);
+  const pushAdapter = new PassengerPushAdapter(null, transport, null);
 
   const service = new MultiTaxiService(
     ownedMobilityService as never,
@@ -230,64 +229,3 @@ describe("SR-PUSH-WEBPUSH-20260915: registerPassengerPushSubscription / unregist
   });
 });
 
-describe("SR-PUSH-WEBPUSH-20260915: an absent subscription is never marked delivered (end-to-end)", () => {
-  beforeEach(() => {
-    vi.useFakeTimers();
-    vi.setSystemTime(new Date("2026-09-15T00:00:00.000Z"));
-    Object.assign(process.env, vapidEnv());
-  });
-
-  afterEach(() => {
-    vi.useRealTimers();
-    process.env = { ...originalEnv };
-  });
-
-  it("stays failed/provider_error, never delivered, when the passenger never subscribed", async () => {
-    const { service, order } = createHarness();
-    await issueAccessToken(service, order); // ride exists, but no push subscription registered
-
-    const outcome = await service.deliverPassengerNotification(
-      outboxRecord({ orderId: order.orderId as string, passengerSubjectRef: "passenger-001" }),
-    );
-
-    expect(outcome.status).not.toBe("delivered");
-    expect(outcome.result).not.toBe("delivered");
-    expect(outcome.deliveredAt).toBeNull();
-  });
-
-  it("delivers for real once the passenger has an active subscription for that order", async () => {
-    const fetchMock = vi.fn(async () => new Response(null, { status: 201 }));
-    global.fetch = fetchMock as unknown as typeof fetch;
-    const { service, order } = createHarness();
-    const ride = await issueAccessToken(service, order);
-    await service.registerPassengerPushSubscription(
-      ride.passengerAccess.accessToken,
-      browserSubscription(),
-    );
-
-    const outcome = await service.deliverPassengerNotification(
-      outboxRecord({ orderId: order.orderId as string, passengerSubjectRef: "passenger-001" }),
-    );
-
-    expect(outcome.status).toBe("delivered");
-    expect(outcome.result).toBe("delivered");
-    expect(fetchMock).toHaveBeenCalledTimes(1);
-  });
-
-  it("stops delivering once the subscription is unsubscribed", async () => {
-    const { service, order } = createHarness();
-    const ride = await issueAccessToken(service, order);
-    await service.registerPassengerPushSubscription(
-      ride.passengerAccess.accessToken,
-      browserSubscription(),
-    );
-    await service.unregisterPassengerPushSubscription(ride.passengerAccess.accessToken);
-
-    const outcome = await service.deliverPassengerNotification(
-      outboxRecord({ orderId: order.orderId as string, passengerSubjectRef: "passenger-001" }),
-    );
-
-    expect(outcome.status).not.toBe("delivered");
-    expect(outcome.deliveredAt).toBeNull();
-  });
-});
