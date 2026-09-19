@@ -212,7 +212,9 @@ export class OwnedMobilityRepository {
   constructor(
     @Optional() private readonly databaseService?: DatabaseService,
     @Optional()
-    private readonly multiTaxiRepository: MultiTaxiRepository = new MultiTaxiRepository(databaseService),
+    private readonly multiTaxiRepository: MultiTaxiRepository = new MultiTaxiRepository(
+      databaseService,
+    ),
   ) {}
 
   isEnabled() {

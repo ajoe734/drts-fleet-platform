@@ -1,6 +1,6 @@
 import { PLATFORM_CURRENCY } from "@drts/contracts";
 import { Injectable, Logger, Optional } from "@nestjs/common";
-import type { PoolClient, QueryResultRow } from "pg";
+import type { QueryResultRow } from "pg";
 
 import type {
   DriverRatingSummary,
@@ -517,7 +517,7 @@ export class MultiTaxiRepository {
    */
   async allocateNotificationEventSequence(
     orderId: string,
-    executor: Pick<PoolClient, "query">,
+    executor: Pick<DatabaseService, "query">,
   ): Promise<number | null> {
     const result = await executor.query<{
       event_sequence: string | number;
