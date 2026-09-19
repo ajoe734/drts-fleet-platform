@@ -22,10 +22,15 @@ Validate the partner notification navigation resolution API and embed BFF redire
 
 ## Test Evidence
 ```bash
+$ CANDIDATE_SHA=$(git rev-parse HEAD)
+$ echo $CANDIDATE_SHA
+d8e7ff8269e07d04a3a94fe5464c1ad07094bc1c
+
 $ pnpm vitest run tests/unit/system-remediation/sr-partner-notify-nav-20260917/partner-notification-navigation.test.ts
+
  RUN  v4.1.4 /home/lupin/workspace/drts-fleet-platform/.artifacts/worktrees/auto/gemini-sr-partner-notify-nav-20260917
 
-[Nest] 79  - 09/19/2026, 3:48:28 PM     LOG [InternalKeyMiddleware] [AUTH_SCOPED_INTERNAL_KEY_USED] exceptionId=INTERNAL_KEY_EXCP_001 keyState=active owner=referral-team header=x-drts-referral-handoff-key route=GET 
+[Nest] 3545072  - 09/19/2026, 3:54:43 PM     LOG [InternalKeyMiddleware] [AUTH_SCOPED_INTERNAL_KEY_USED] exceptionId=INTERNAL_KEY_EXCP_001 keyState=active owner=referral-team header=x-drts-referral-handoff-key route=GET
 
  Test Files  1 passed (1)
       Tests  5 passed (5)
