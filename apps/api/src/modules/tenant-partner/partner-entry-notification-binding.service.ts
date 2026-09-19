@@ -97,7 +97,10 @@ export class PartnerEntryNotificationBindingService {
         "webhookId is required.",
       );
     }
-    const endpoint = this.requireTenantWebhookEndpoint(entry.tenantId, webhookId);
+    const endpoint = this.requireTenantWebhookEndpoint(
+      entry.tenantId,
+      webhookId,
+    );
     this.requireEventsSubscribable(endpoint, eventTypes);
 
     const outcome = await this.repository.put({
@@ -153,13 +156,12 @@ export class PartnerEntryNotificationBindingService {
       },
     };
 
-    const outcome = await this.dispatchFacade.dispatchNotificationAttemptByWebhookId(
-      {
+    const outcome =
+      await this.dispatchFacade.dispatchNotificationAttemptByWebhookId({
         tenantId: entry.tenantId,
         webhookId: binding.webhookId,
         wirePayload,
-      },
-    );
+      });
 
     if (outcome.kind === "accepted") {
       const fingerprint = computeEndpointFingerprint(endpoint);
@@ -203,7 +205,11 @@ export class PartnerEntryNotificationBindingService {
         HttpStatus.CONFLICT,
         "PARTNER_NOTIFICATION_BINDING_VERSION_CONFLICT",
         "The binding was modified concurrently.",
-        { entrySlug: entry.entrySlug, expectedVersion, actualVersion: binding.version },
+        {
+          entrySlug: entry.entrySlug,
+          expectedVersion,
+          actualVersion: binding.version,
+        },
       );
     }
     const endpoint = this.requireTenantWebhookEndpoint(
@@ -358,7 +364,9 @@ export class PartnerEntryNotificationBindingService {
     const endpointEvents = new Set(endpoint.events);
     const missing = eventTypes.filter(
       (eventType) =>
-        !endpointEvents.has(PARTNER_PASSENGER_EVENT_TO_EXTERNAL_NAME[eventType]),
+        !endpointEvents.has(
+          PARTNER_PASSENGER_EVENT_TO_EXTERNAL_NAME[eventType],
+        ),
     );
     if (missing.length > 0) {
       throw new ApiRequestError(

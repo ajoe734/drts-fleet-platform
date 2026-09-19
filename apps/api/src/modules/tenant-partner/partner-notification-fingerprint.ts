@@ -21,4 +21,3 @@ export function computeEndpointFingerprint(
   });
   return createHash("sha256").update(material).digest("hex");
 }
-

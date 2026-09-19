@@ -167,7 +167,11 @@ export class PassengerPushAdapter implements PassengerPushPort {
   ): Promise<PassengerPushReceipt> {
     if (this.transportMode === "partner_webhook") {
       if (!this.transport) throw partnerFailure("configuration_blocked");
-      return this.transport.send({ providerName: "partner_webhook", message, context });
+      return this.transport.send({
+        providerName: "partner_webhook",
+        message,
+        context,
+      });
     }
     if (!this.isAvailable()) {
       throw new Error(

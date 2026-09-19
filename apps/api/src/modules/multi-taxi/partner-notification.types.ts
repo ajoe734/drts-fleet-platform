@@ -7,16 +7,24 @@ import type {
 } from "@drts/contracts";
 import { PARTNER_NOTIFICATION_FAILURE_REASON_RETRY_DISPOSITIONS } from "@drts/contracts";
 
-export type StoredPartnerNotificationContext = PartnerNotificationDeliveryContext & {
-  retryPolicySnapshot: WebhookRetryPolicyRecord;
-};
+export type StoredPartnerNotificationContext =
+  PartnerNotificationDeliveryContext & {
+    retryPolicySnapshot: WebhookRetryPolicyRecord;
+  };
 
-export type PartnerDeliveryMetadata = Pick<PartnerNotificationDeliveryContext,
-  "deliveryTarget" | "deliveryStage" | "retryDisposition" | "failureReason" |
-  "receiptId" | "downstreamStatus" | "expiresAt"
+export type PartnerDeliveryMetadata = Pick<
+  PartnerNotificationDeliveryContext,
+  | "deliveryTarget"
+  | "deliveryStage"
+  | "retryDisposition"
+  | "failureReason"
+  | "receiptId"
+  | "downstreamStatus"
+  | "expiresAt"
 >;
 
-export type PartnerPushOutcome = PassengerPushDeliveryOutcome & PartnerDeliveryMetadata;
+export type PartnerPushOutcome = PassengerPushDeliveryOutcome &
+  PartnerDeliveryMetadata;
 
 export class PartnerNotificationFailure extends Error {
   constructor(
@@ -32,9 +40,13 @@ export function partnerFailure(
   failureReason: PartnerNotificationFailureReason,
   deliveryContext: StoredPartnerNotificationContext | null = null,
 ): PartnerNotificationFailure {
-  return new PartnerNotificationFailure({
-    failureReason,
-    retryDisposition: PARTNER_NOTIFICATION_FAILURE_REASON_RETRY_DISPOSITIONS[failureReason],
-    suggestedNextAttemptAt: null,
-  }, deliveryContext);
+  return new PartnerNotificationFailure(
+    {
+      failureReason,
+      retryDisposition:
+        PARTNER_NOTIFICATION_FAILURE_REASON_RETRY_DISPOSITIONS[failureReason],
+      suggestedNextAttemptAt: null,
+    },
+    deliveryContext,
+  );
 }

@@ -5,7 +5,11 @@ export function partnerNotificationWireBytes(payload: unknown): string {
   const sort = (value: unknown): unknown => {
     if (Array.isArray(value)) return value.map(sort);
     if (value && typeof value === "object") {
-      return Object.fromEntries(Object.entries(value).sort(([a], [b]) => a.localeCompare(b)).map(([key, item]) => [key, sort(item)]));
+      return Object.fromEntries(
+        Object.entries(value)
+          .sort(([a], [b]) => a.localeCompare(b))
+          .map(([key, item]) => [key, sort(item)]),
+      );
     }
     return value;
   };

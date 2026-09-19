@@ -4,7 +4,10 @@ import type { ConsumerNotificationOutboxRecord } from "@drts/contracts";
 
 import type { StoredPartnerNotificationContext } from "./partner-notification.types";
 
-export type PassengerPushSendContext = { requestId?: string | undefined; fenceToken?: number | undefined };
+export type PassengerPushSendContext = {
+  requestId?: string | undefined;
+  fenceToken?: number | undefined;
+};
 
 export type PassengerPushMessage = {
   createdAt?: string;

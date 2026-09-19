@@ -2,8 +2,12 @@ import { createHmac } from "node:crypto";
 
 import { Inject, Injectable, Optional } from "@nestjs/common";
 
-import { PARTNER_NOTIFICATION_MAX_ACK_BODY_BYTES } from "@drts/contracts";
+import {
+  PARTNER_NOTIFICATION_ATTEMPT_TIMEOUT_MS,
+  PARTNER_NOTIFICATION_MAX_ACK_BODY_BYTES,
+} from "@drts/contracts";
 
+import { partnerNotificationHttpsFetch } from "./partner-notification-https";
 import { partnerNotificationWireBytes } from "./partner-notification-wire";
 
 import { deepToSnakeCase } from "../../common/snake-case.interceptor";
@@ -112,6 +116,7 @@ export type PartnerAckV1InvalidReason =
   | "id_mismatch"
   | "status_invalid"
   | "receipt_missing"
+  | "schema_version_invalid"
   | "read_aborted";
 
 export type PartnerAckV1AcceptedAck = {
@@ -164,9 +169,7 @@ export class WebhookDispatchService {
   constructor(
     @Optional()
     @Inject(WEBHOOK_FETCH)
-    private readonly fetchImpl: WebhookFetch = globalThis.fetch.bind(
-      globalThis,
-    ),
+    private readonly fetchImpl?: WebhookFetch,
     @Optional()
     @Inject(WEBHOOK_DISPATCH_TIMEOUT_MS)
     timeoutMsOverride?: number,
@@ -179,7 +182,9 @@ export class WebhookDispatchService {
   ): Promise<WebhookDispatchAttemptResult> {
     const attemptedAt = new Date().toISOString();
     const rawBody = this.normalizePayload(command.payload);
-    const rawBodyString = command.partnerAckV1 ? partnerNotificationWireBytes(command.payload) : JSON.stringify(rawBody);
+    const rawBodyString = command.partnerAckV1
+      ? partnerNotificationWireBytes(command.payload)
+      : JSON.stringify(rawBody);
     const signature = createHmac("sha256", command.secretValue)
       .update(`${attemptedAt}.${rawBodyString}`)
       .digest("hex");
@@ -190,25 +195,52 @@ export class WebhookDispatchService {
     let partnerAckV1: PartnerAckV1Outcome | undefined;
 
     const controller = new AbortController();
-    const timeoutTimer = setTimeout(() => {
-      controller.abort(new Error("webhook_dispatch_transport_timeout"));
-    }, this.timeoutMs);
+    const timeoutTimer = setTimeout(
+      () => {
+        controller.abort(new Error("webhook_dispatch_transport_timeout"));
+      },
+      command.partnerAckV1
+        ? Math.min(this.timeoutMs, PARTNER_NOTIFICATION_ATTEMPT_TIMEOUT_MS)
+        : this.timeoutMs,
+    );
+
+    const withinDeadline = async <T>(work: Promise<T>): Promise<T> => {
+      if (!command.partnerAckV1) return work;
+      let abort: () => void;
+      const deadline = new Promise<never>((_resolve, reject) => {
+        abort = () => reject(new Error("partner_notification_deadline"));
+        controller.signal.addEventListener("abort", abort, { once: true });
+        if (controller.signal.aborted) abort();
+      });
+      try {
+        return await Promise.race([work, deadline]);
+      } finally {
+        controller.signal.removeEventListener("abort", abort!);
+      }
+    };
 
     try {
-      const response = await this.fetchImpl(command.url, {
-        method: "POST",
-        ...(command.partnerAckV1 ? { redirect: "error" as const } : {}),
-        headers: {
-          "content-type": "application/json",
-          "user-agent": "drts-webhook-dispatch/1.0",
-          "x-drts-event-type": command.eventType,
-          "x-drts-tenant-id": command.tenantId,
-          "x-drts-webhook-delivery-id": command.deliveryId,
-          "x-drts-webhook-signature": signatureHeader,
-        },
-        body: rawBodyString,
-        signal: controller.signal,
-      });
+      const fetchImpl =
+        this.fetchImpl ??
+        (command.partnerAckV1
+          ? partnerNotificationHttpsFetch
+          : globalThis.fetch.bind(globalThis));
+      const response = await withinDeadline(
+        fetchImpl(command.url, {
+          method: "POST",
+          ...(command.partnerAckV1 ? { redirect: "error" as const } : {}),
+          headers: {
+            "content-type": "application/json",
+            "user-agent": "drts-webhook-dispatch/1.0",
+            "x-drts-event-type": command.eventType,
+            "x-drts-tenant-id": command.tenantId,
+            "x-drts-webhook-delivery-id": command.deliveryId,
+            "x-drts-webhook-signature": signatureHeader,
+          },
+          body: rawBodyString,
+          signal: controller.signal,
+        }),
+      );
 
       httpStatus = response.status;
 
@@ -216,10 +248,12 @@ export class WebhookDispatchService {
       // and only when the caller opted in — an ordinary tenant webhook must
       // never pay for a body read it did not ask for.
       if (command.partnerAckV1) {
-        partnerAckV1 = await this.readPartnerAckV1(
-          response,
-          httpStatus,
-          command.partnerAckV1.expected,
+        partnerAckV1 = await withinDeadline(
+          this.readPartnerAckV1(
+            response,
+            httpStatus,
+            command.partnerAckV1.expected,
+          ),
         );
       }
 
@@ -308,6 +342,8 @@ export class WebhookDispatchService {
     }
 
     const body = parsed as Record<string, unknown>;
+    if (body.schema_version !== undefined && body.schema_version !== "1.0")
+      return { kind: "invalid", reason: "schema_version_invalid" };
     if (
       body.notification_id !== expected.notificationId ||
       body.delivery_id !== expected.deliveryId ||
@@ -318,7 +354,10 @@ export class WebhookDispatchService {
     if (body.status !== "accepted" && body.status !== "duplicate") {
       return { kind: "invalid", reason: "status_invalid" };
     }
-    if (typeof body.receipt_id !== "string" || body.receipt_id.length === 0) {
+    if (
+      typeof body.receipt_id !== "string" ||
+      body.receipt_id.trim().length === 0
+    ) {
       return { kind: "invalid", reason: "receipt_missing" };
     }
 

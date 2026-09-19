@@ -27,9 +27,7 @@ import {
   PASSENGER_PUSH_TRANSPORT,
   PassengerPushAdapter,
 } from "./passenger-push.adapter";
-import {
-  PassengerPushRepository,
-} from "./passenger-push.repository";
+import { PassengerPushRepository } from "./passenger-push.repository";
 import { PartnerNotificationTransport } from "./partner-notification.transport";
 
 @Module({
@@ -49,10 +47,19 @@ import { PartnerNotificationTransport } from "./partner-notification.transport";
     // and credentials land, the only binding is the one that reports absence.
     { provide: MASKED_CALL_PORT, useClass: UnavailableMaskedCallPort },
     PassengerPushAdapter,
-    { provide: PASSENGER_PUSH_PORT, useExisting: PassengerPushAdapter },
-    { provide: PASSENGER_PUSH_ADAPTER_CONFIG, useValue: { transportMode: "partner_webhook", providerName: "partner_webhook" } },
+    { provide: PASSENGER_PUSH_PORT, useClass: PassengerPushAdapter },
+    {
+      provide: PASSENGER_PUSH_ADAPTER_CONFIG,
+      useValue: {
+        transportMode: "partner_webhook",
+        providerName: "partner_webhook",
+      },
+    },
     PartnerNotificationTransport,
-    { provide: PASSENGER_PUSH_TRANSPORT, useExisting: PartnerNotificationTransport },
+    {
+      provide: PASSENGER_PUSH_TRANSPORT,
+      useExisting: PartnerNotificationTransport,
+    },
     // Retained for subscription API compatibility, not injected as a receiver.
     PassengerPushRepository,
   ],

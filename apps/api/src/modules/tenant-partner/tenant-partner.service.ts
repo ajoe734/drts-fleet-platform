@@ -8494,8 +8494,13 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
    * exact deliveryId/payload for every attempt so the partner's durable
    * dedupe can recognize a resend.
    */
-  findNotificationWebhookEndpoint(tenantId: string, webhookId: string): TenantWebhookEndpoint | null {
-    const endpoint = this.webhookEndpoints.find(item => item.tenantId === tenantId && item.webhookId === webhookId);
+  findNotificationWebhookEndpoint(
+    tenantId: string,
+    webhookId: string,
+  ): TenantWebhookEndpoint | null {
+    const endpoint = this.webhookEndpoints.find(
+      (item) => item.tenantId === tenantId && item.webhookId === webhookId,
+    );
     if (!endpoint) return null;
     this.reconcileStoredWebhookEndpoint(endpoint, new Date().toISOString());
     return this.toWebhookResponse(endpoint);
@@ -8577,8 +8582,12 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
       command.wirePayload as unknown as Record<string, unknown>,
       {
         forceSingleAttempt: true,
-        ...(command.attemptNumber !== undefined ? { attemptNumber: command.attemptNumber } : {}),
-        ...(command.retryPolicySnapshot ? { retryPolicySnapshot: command.retryPolicySnapshot } : {}),
+        ...(command.attemptNumber !== undefined
+          ? { attemptNumber: command.attemptNumber }
+          : {}),
+        ...(command.retryPolicySnapshot
+          ? { retryPolicySnapshot: command.retryPolicySnapshot }
+          : {}),
         partnerAckV1: {
           mode: "partner_ack_v1",
           expected: {
@@ -8641,8 +8650,12 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
     // Service computed it from the same, un-forced `endpoint.retryPolicy`)
     // and is null once the policy considers this delivery exhausted — the
     // caller's fence transaction, not a tenant-side timer, acts on this.
-    const outcome = this.partnerNotificationTypedFailure("provider_transient_error", result.nextAttemptAt);
-    if (outcome.kind === "failed" && !result.nextAttemptAt) outcome.failure.retryDisposition = "terminal";
+    const outcome = this.partnerNotificationTypedFailure(
+      "provider_transient_error",
+      result.nextAttemptAt,
+    );
+    if (outcome.kind === "failed" && !result.nextAttemptAt)
+      outcome.failure.retryDisposition = "terminal";
     return outcome;
   }
 
@@ -8660,7 +8673,11 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
 
   private schedulePersistedWebhookRetries() {
     for (const delivery of this.webhookDeliveries) {
-      if (delivery.eventType.startsWith("passenger.") || delivery.status !== "queued" || !delivery.nextAttemptAt) {
+      if (
+        delivery.eventType.startsWith("passenger.") ||
+        delivery.status !== "queued" ||
+        !delivery.nextAttemptAt
+      ) {
         continue;
       }
 
@@ -8748,7 +8765,11 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
       );
     }
     if (delivery.eventType.startsWith("passenger.")) {
-      throw new ApiRequestError(HttpStatus.CONFLICT, "PASSENGER_NOTIFICATION_RETRY_OWNER", "Retry passenger notifications through the consumer outbox.");
+      throw new ApiRequestError(
+        HttpStatus.CONFLICT,
+        "PASSENGER_NOTIFICATION_RETRY_OWNER",
+        "Retry passenger notifications through the consumer outbox.",
+      );
     }
     if (delivery.status !== "delivery_failed") {
       throw new ApiRequestError(
