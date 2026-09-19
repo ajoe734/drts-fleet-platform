@@ -2584,4 +2584,14 @@ export class MultiTaxiService implements OnModuleInit {
       serviceAreaCodes: [...authorization.serviceAreaCodes],
     };
   }
+
+
+  async listPartnerNotificationDeliveries(entrySlug: string, query: any) {
+    return this.repository!.listPartnerNotificationDeliveries(entrySlug, query);
+  }
+
+  async retryPartnerNotificationDelivery(entrySlug: string, outboxId: string) {
+    return this.repository!.retryPartnerNotificationDelivery(entrySlug, outboxId);
+  }
+
 }
