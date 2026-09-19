@@ -1,0 +1,73 @@
+{
+  "check_time": "2026-09-19T14:21:00Z",
+  "check_commands": [
+    "gh run view 35430134402 --log",
+    "gh secret list",
+    "gh variable list"
+  ],
+  "source_run": "35430134402",
+  "deployed_sha": "98e251cdc809467b16a158fc2f285e4296206f5f",
+  "deployment_note": "Deployed SHA 98e251cdc809467b16a158fc2f285e4296206f5f was deployed before the SR-PARTNER-NOTIFY-SEQ-20260918 and SR-PARTNER-NOTIFY-TRANSPORT-20260918 commits. Thus, the currently deployed environment does NOT include the latest SEQ/TRANSPORT features.",
+  "resources": [
+    {
+      "task": "SR-LIVE-OPS-001",
+      "resource": "authorized_isolated_ops_target",
+      "status": "available",
+      "evidence": "GitHub variables DEV_GCP_PROJECT_ID (drts-dev-devcc-20260825), STAGING_GCP_PROJECT_ID and associated WIF/CloudSQL credentials exist."
+    },
+    {
+      "task": "SR-LIVE-ENTRY-001",
+      "resource": "authorized_environment_change",
+      "status": "available",
+      "evidence": "Workload Identity and DEV/STAGING environment credentials exist in GitHub."
+    },
+    {
+      "task": "SR-LIVE-PUSH-001",
+      "resource": "partner_endpoint",
+      "status": "unavailable",
+      "reason": "Lacks external partner HTTPS webhook endpoint and partner App for native delivery."
+    },
+    {
+      "task": "SR-LIVE-MAIL-001",
+      "resource": "configured_mail_provider",
+      "status": "unavailable",
+      "reason": "No mail provider credentials found in GitHub secrets."
+    },
+    {
+      "task": "SR-LIVE-FINANCE-001",
+      "resource": "authorized_financial_sandbox",
+      "status": "unavailable",
+      "reason": "No financial sandbox credentials found."
+    },
+    {
+      "task": "SR-LIVE-MAP-001",
+      "resource": "configured_map_credentials",
+      "status": "unavailable",
+      "reason": "PROD_MAP_PROVIDER_BACKEND is set to mock, no real map API keys found."
+    },
+    {
+      "task": "SR-LIVE-DRIVER-001",
+      "resource": "authorized_android_ios_devices",
+      "status": "unavailable",
+      "reason": "No physical devices or device farm access provided."
+    },
+    {
+      "task": "UV-EXEC-028",
+      "resource": "pstn_cti_credentials",
+      "status": "unavailable",
+      "reason": "No PSTN numbers or CTI/SIP credentials found."
+    },
+    {
+      "task": "SR-LIVE-FORWARD-001",
+      "resource": "authorized_forwarder_sandbox",
+      "status": "unavailable",
+      "reason": "No external fleet forwarder credentials found."
+    },
+    {
+      "task": "SR-LIVE-DOC-001",
+      "resource": "authorized_storage_and_signer",
+      "status": "unavailable",
+      "reason": "No cryptographic signer credentials found."
+    }
+  ]
+}
