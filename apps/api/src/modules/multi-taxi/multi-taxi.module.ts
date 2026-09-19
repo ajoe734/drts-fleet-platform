@@ -29,6 +29,7 @@ import {
 } from "./passenger-push.adapter";
 import { PassengerPushRepository } from "./passenger-push.repository";
 import { PartnerNotificationTransport } from "./partner-notification.transport";
+import { PartnerNotificationWorker } from "./partner-notification.worker";
 
 @Module({
   imports: [
@@ -43,6 +44,7 @@ import { PartnerNotificationTransport } from "./partner-notification.transport";
   providers: [
     MultiTaxiRepository,
     MultiTaxiService,
+    PartnerNotificationWorker,
     // P5-CALL-001 stays `blocked_ext`: until a provider contract
     // and credentials land, the only binding is the one that reports absence.
     { provide: MASKED_CALL_PORT, useClass: UnavailableMaskedCallPort },
