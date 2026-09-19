@@ -257,6 +257,13 @@ export class WebhookDispatchService {
         );
       }
 
+      if (response.ok && partnerAckV1?.kind === "invalid") {
+        status =
+          partnerAckV1.reason === "read_aborted" &&
+          this.shouldRetry(command.retryPolicy, command.attempt, null)
+            ? "queued"
+            : "delivery_failed";
+      }
       if (!response.ok) {
         status = this.shouldRetry(
           command.retryPolicy,

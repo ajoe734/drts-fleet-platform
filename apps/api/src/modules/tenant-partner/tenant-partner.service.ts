@@ -8622,6 +8622,19 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
   private classifyPartnerNotificationDispatchResult(
     result: Awaited<ReturnType<TenantPartnerService["dispatchWebhookAttempt"]>>,
   ): PartnerNotificationDispatchOutcome {
+    if (
+      result.partnerAckV1?.kind === "invalid" &&
+      result.partnerAckV1.reason !== "read_aborted" &&
+      result.httpStatus !== null &&
+      result.httpStatus >= 200 &&
+      result.httpStatus < 300
+    ) {
+      return this.partnerNotificationTypedFailure(
+        "partner_ack_invalid",
+        null,
+        result.partnerAckV1.reason,
+      );
+    }
     if (result.status === "delivered") {
       if (result.partnerAckV1?.kind === "accepted") {
         return { kind: "accepted", ack: result.partnerAckV1.ack };

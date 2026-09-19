@@ -493,6 +493,11 @@ describe("partner transport and consumer retry owner", () => {
         { failureReason, retryDisposition, receiptId: null, deliveredAt: null },
       );
       expect(h.getContext()?.deliveryStage).toBeNull();
+      expect(
+        h.tenant
+          .listWebhookDeliveriesByWebhook(h.route.tenantId, h.binding.webhookId)
+          .some((delivery) => delivery.status === "delivered"),
+      ).toBe(false);
     },
   );
 
@@ -513,5 +518,88 @@ describe("partner transport and consumer retry owner", () => {
         h.getContext()!.deliveryId,
       ),
     ).toThrow();
+  });
+});
+
+describe("immutable partner retry context", () => {
+  it("policy changes cannot shorten the frozen attempt budget or replace its backoff", async () => {
+    vi.useFakeTimers();
+    const h = harness();
+    h.row.eventType = "receipt_ready";
+    h.fetch.mockResolvedValue({ ok: false, status: 503, text: async () => "" });
+    const first = await h.service.deliverPassengerNotification(h.row);
+    const frozen = h.getContext()!.retryPolicySnapshot;
+    const internal = h.tenant as unknown as {
+      webhookEndpoints: { retryPolicy: typeof frozen }[];
+    };
+    internal.webhookEndpoints[0]!.retryPolicy = {
+      ...frozen,
+      maxAttempts: 1,
+      initialBackoffSeconds: 999,
+    };
+    await vi.advanceTimersByTimeAsync(
+      Date.parse(first.nextAttemptAt) - Date.now(),
+    );
+    const second = await h.service.deliverPassengerNotification(h.row);
+    expect(second).toMatchObject({
+      attemptCount: 2,
+      retryDisposition: "automatic",
+    });
+    expect(Date.parse(second.nextAttemptAt) - Date.now()).toBe(
+      Math.min(
+        frozen.initialBackoffSeconds * frozen.backoffMultiplier,
+        frozen.maxBackoffSeconds,
+      ) * 1000,
+    );
+    expect(h.dispatch.mock.calls[1]![0].retryPolicySnapshot).toEqual(frozen);
+  });
+
+  it("changed endpoint/binding cannot silently retarget an already prepared notification", async () => {
+    vi.useFakeTimers();
+    const h = harness();
+    h.fetch.mockResolvedValue({ ok: false, status: 503, text: async () => "" });
+    const first = await h.service.deliverPassengerNotification(h.row);
+    const frozen = structuredClone(h.getContext());
+    h.binding.webhookId = "another-webhook";
+    const nextEndpoint = h.tenant.createWebhookEndpoint(h.route.tenantId, {
+      url: "https://other.example.test/notify",
+      secret: "secret",
+      events: Object.values(PARTNER_PASSENGER_EVENT_TO_EXTERNAL_NAME),
+    });
+    h.tenant.updateWebhookEndpoint(h.route.tenantId, nextEndpoint.webhookId, {
+      status: "active",
+    });
+    h.binding.webhookId = nextEndpoint.webhookId;
+    h.binding.validatedEndpointFingerprint = computeEndpointFingerprint(
+      h.tenant.findNotificationWebhookEndpoint(
+        h.route.tenantId,
+        nextEndpoint.webhookId,
+      )!,
+    );
+    await vi.advanceTimersByTimeAsync(
+      Date.parse(first.nextAttemptAt) - Date.now(),
+    );
+    expect(await h.service.deliverPassengerNotification(h.row)).toMatchObject({
+      failureReason: "owner_changed",
+      retryDisposition: "manual_only",
+    });
+    expect(h.getContext()?.wirePayload).toEqual(frozen?.wirePayload);
+    expect(h.fetch).toHaveBeenCalledTimes(1);
+  });
+
+  it("deliveredAt is local ack validation time, with no route/wire data on the returned outcome", async () => {
+    vi.useFakeTimers();
+    const h = harness();
+    const started = Date.now();
+    const normal = h.fetch.getMockImplementation()!;
+    h.fetch.mockImplementationOnce(async (...args) => {
+      const response = await normal(...args);
+      vi.setSystemTime(started + 321);
+      return response;
+    });
+    const result = await h.service.deliverPassengerNotification(h.row);
+    expect(result.deliveredAt).toBe(new Date(started + 321).toISOString());
+    expect(result).not.toHaveProperty("wirePayload");
+    expect(result).not.toHaveProperty("partnerId");
   });
 });
