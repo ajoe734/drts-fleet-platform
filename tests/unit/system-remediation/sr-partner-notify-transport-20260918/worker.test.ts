@@ -1,5 +1,4 @@
-import { Module, type INestApplicationContext } from "@nestjs/common";
-import { NestFactory } from "@nestjs/core";
+import { createRequire } from "node:module";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { MultiTaxiModule } from "../../../../apps/api/src/modules/multi-taxi/multi-taxi.module";
 import { MultiTaxiRepository } from "../../../../apps/api/src/modules/multi-taxi/multi-taxi.repository";
@@ -8,10 +7,17 @@ import { PartnerNotificationWorker } from "../../../../apps/api/src/modules/mult
 import { PASSENGER_PUSH_PORT } from "../../../../apps/api/src/modules/multi-taxi/passenger-push.port";
 import { harness } from "./transport-harness";
 
+// Nest is an API package dependency, not a root test dependency.
+const apiRequire = createRequire(
+  new URL("../../../../apps/api/package.json", import.meta.url),
+);
+const { Module } = apiRequire("@nestjs/common");
+const { NestFactory } = apiRequire("@nestjs/core");
+
 @Module({})
 class WorkerTestModule {}
 
-const apps: INestApplicationContext[] = [];
+const apps: { close(): Promise<void> }[] = [];
 async function boot(h: ReturnType<typeof harness>) {
   // Real Nest bootstrap/shutdown invokes the production provider. Only durable
   // storage and the partner socket are replaced; no delivery method is called

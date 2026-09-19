@@ -1,4 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { PARTNER_PASSENGER_EVENT_TO_EXTERNAL_NAME } from "@drts/contracts";
+import { computeEndpointFingerprint } from "../../../../apps/api/src/modules/tenant-partner/partner-notification-fingerprint";
 import { harness } from "./transport-harness";
 import { MultiTaxiModule } from "../../../../apps/api/src/modules/multi-taxi/multi-taxi.module";
 import {
