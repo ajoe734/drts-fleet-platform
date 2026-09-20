@@ -4878,12 +4878,12 @@ export class ApiClient {
     return this.post(`/api/platform-admin/partner-entries/${encodeURIComponent(entrySlug)}/notification-binding/test`, options);
   }
 
-  public async enablePartnerEntryNotificationBinding(entrySlug: string, options?: RequestOptions): Promise<any> {
-    return this.post(`/api/platform-admin/partner-entries/${encodeURIComponent(entrySlug)}/notification-binding/enable`, options);
+  public async enablePartnerEntryNotificationBinding(entrySlug: string, expectedVersion: number, options?: RequestOptions): Promise<any> {
+    return this.post(`/api/platform-admin/partner-entries/${encodeURIComponent(entrySlug)}/notification-binding/enable`, { ...options, body: { expectedVersion } });
   }
 
-  public async disablePartnerEntryNotificationBinding(entrySlug: string, options?: RequestOptions): Promise<any> {
-    return this.post(`/api/platform-admin/partner-entries/${encodeURIComponent(entrySlug)}/notification-binding/disable`, options);
+  public async disablePartnerEntryNotificationBinding(entrySlug: string, expectedVersion: number, options?: RequestOptions): Promise<any> {
+    return this.post(`/api/platform-admin/partner-entries/${encodeURIComponent(entrySlug)}/notification-binding/disable`, { ...options, body: { expectedVersion } });
   }
 
   public async listPartnerNotificationDeliveries(entrySlug: string, query?: any, options?: RequestOptions): Promise<ApiListData<any>> {

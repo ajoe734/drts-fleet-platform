@@ -510,9 +510,10 @@ export class MultiTaxiController {
   async listPartnerNotificationDeliveries(
     @Param("entrySlug") entrySlug: string,
     @Query() query: any,
+    @CurrentIdentity() identity: BootstrapRequestIdentity,
     @Headers("x-request-id") requestId?: string,
   ) {
-    const items = await this.multiTaxiService.listPartnerNotificationDeliveries(entrySlug, query);
+    const items = await this.multiTaxiService.listPartnerNotificationDeliveries(entrySlug, query, identity);
     return toApiSuccessEnvelope(
       toApiListData(items.rows, {
         page: query.page ?? 1,
@@ -529,10 +530,11 @@ export class MultiTaxiController {
   async retryPartnerNotificationDelivery(
     @Param("entrySlug") entrySlug: string,
     @Param("outboxId") outboxId: string,
+    @CurrentIdentity() identity: BootstrapRequestIdentity,
     @Headers("x-request-id") requestId?: string,
   ) {
     return toApiSuccessEnvelope(
-      await this.multiTaxiService.retryPartnerNotificationDelivery(entrySlug, outboxId),
+      await this.multiTaxiService.retryPartnerNotificationDelivery(entrySlug, outboxId, identity),
       requestId,
     );
   }

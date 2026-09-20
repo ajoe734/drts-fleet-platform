@@ -2586,12 +2586,46 @@ export class MultiTaxiService implements OnModuleInit {
   }
 
 
-  async listPartnerNotificationDeliveries(entrySlug: string, query: any) {
+  async listPartnerNotificationDeliveries(
+    entrySlug: string,
+    query: any,
+    identity: BootstrapRequestIdentity,
+  ) {
+    this.requireEntryInScope(entrySlug, identity);
     return this.repository!.listPartnerNotificationDeliveries(entrySlug, query);
   }
 
-  async retryPartnerNotificationDelivery(entrySlug: string, outboxId: string) {
+  async retryPartnerNotificationDelivery(
+    entrySlug: string,
+    outboxId: string,
+    identity: BootstrapRequestIdentity,
+  ) {
+    this.requireEntryInScope(entrySlug, identity);
     return this.repository!.retryPartnerNotificationDelivery(entrySlug, outboxId);
+  }
+
+  private requireEntryInScope(
+    entrySlugInput: string,
+    identity: BootstrapRequestIdentity | null,
+  ) {
+    const entrySlug = entrySlugInput?.trim();
+    if (!entrySlug) {
+      throw new ApiRequestError(
+        HttpStatus.BAD_REQUEST,
+        "PARTNER_NOTIFICATION_BINDING_ENTRY_SLUG_REQUIRED",
+        "entrySlug is required.",
+      );
+    }
+    const entry = this.tenantPartnerService!.getPartnerEntry(entrySlug);
+    if (identity?.tenantId && identity.tenantId !== entry.tenantId) {
+      throw new ApiRequestError(
+        HttpStatus.FORBIDDEN,
+        "PARTNER_NOTIFICATION_BINDING_TENANT_SCOPE_DENIED",
+        "The caller's tenant scope does not include this partner entry.",
+        { entrySlug, tenantId: identity.tenantId },
+      );
+    }
+    return entry;
   }
 
 }

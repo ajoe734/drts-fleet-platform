@@ -6,10 +6,6 @@ This document describes the UI changes to the partner entry management page to s
 - **Tab Name**: Notifications
 - **Location**: Added as a new tab next to 'Audit' in the `Platform Admin.html` partner details page.
 - **Components**:
-  1. **Notification Binding Card**:
-     - Shows the current binding status and webhook ID.
-     - Action buttons to test, enable, and disable the binding.
-  2. **Recent Deliveries Card**:
-     - Displays a privacy notice stating that device delivery status is unknown.
-     - A table showing `outboxId`, `status`, `deliveryStage`, `failureReason`, and an action button to `Retry`.
-     - The `Retry` button is only enabled for failed notifications that are allowed to be retried manually.
+  Currently, the notification layout lacks canonical canvas coverage in `Platform Admin.html`.
+  Following the design contract, we have recorded the explicit required states in `docs/05-ui/drts-design-canvas/partner-notification-screen-requirements-20260920.md` and are awaiting design handoff. 
+  The UI component `partner-notification-panel.tsx` is temporarily a placeholder to avoid inventing a layout.
