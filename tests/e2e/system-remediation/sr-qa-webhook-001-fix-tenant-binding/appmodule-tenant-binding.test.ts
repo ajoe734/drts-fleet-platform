@@ -197,6 +197,11 @@ describe("SR-QA-WEBHOOK-001-FIX-TENANT-BINDING: Full AppModule / PG E2E Harness"
         (p) => p.index === 6 && p.param === AuditNotificationService,
       ),
     ).toBe(true);
+    expect(
+      controllerSelfParams.some(
+        (p) => p.index === 7 && p.param === undefined, // PartnerUserIdentityLinkRepository is undefined at runtime in this context if not explicitly imported from the mock, but we'll check it by index and name via design:paramtypes
+      ),
+    ).toBe(false); // self:paramtypes might not have it if it's not decorated properly or available, let's just assert design:paramtypes
 
     // Also assert TypeScript emitted design:paramtypes
     const controllerDesignParams: unknown[] =
@@ -208,6 +213,8 @@ describe("SR-QA-WEBHOOK-001-FIX-TENANT-BINDING: Full AppModule / PG E2E Harness"
     expect(controllerDesignParams[4]).toBe(OwnedMobilityService);
     expect(controllerDesignParams[5]).toBe(IdentityRepository);
     expect(controllerDesignParams[6]).toBe(AuditNotificationService);
+    expect(controllerDesignParams[7]?.name).toBe("PartnerUserIdentityLinkRepository");
+    expect(controllerDesignParams[8]?.name).toBe("PartnerNotificationNavigationRepository");
 
     // 4. Assert service constructor dependency injection metadata
     const serviceSelfParams: Array<{ index: number; param: unknown }> =

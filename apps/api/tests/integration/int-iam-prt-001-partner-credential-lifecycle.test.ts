@@ -146,6 +146,8 @@ async function createCredentialSurface(
     undefined as never,
     undefined as never,
     undefined as never,
+    undefined as never,
+    undefined as never,
   );
 
   return { service, controller };
