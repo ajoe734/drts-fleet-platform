@@ -100,7 +100,7 @@ describe("JWT controller error mapping", () => {
       })),
     } as unknown as TenantPartnerService;
 
-    const controller = new TenantPartnerController(
+    const controller = new TenantPartnerController(null as any, null as any, 
       tenantPartnerService,
       {} as never,
       {} as never,

@@ -455,7 +455,7 @@ describe("CONF-IDEM-005: Client Intent Idempotency Integration", () => {
           }),
         ),
       };
-      controller = new TenantPartnerController(
+      controller = new TenantPartnerController(null as any, null as any, 
         mockTenantService as unknown as TenantPartnerService,
         {} as never,
         {} as never,

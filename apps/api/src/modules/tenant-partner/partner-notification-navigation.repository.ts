@@ -39,6 +39,8 @@ export class PartnerNotificationNavigationRepository {
         WHERE r.entry_slug = $1
           AND r.ride_ref = $2
           AND r.partner_user_ref = $3
+          AND o.record->>'tenantId' = r.tenant_id
+          AND o.record->'passenger'->>'passengerId' = r.drts_passenger_id
         `,
         [entrySlug, rideRef, partnerUserRef],
       );

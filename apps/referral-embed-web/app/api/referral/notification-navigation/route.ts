@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { consumeReferralEmbedHandoffArtifact } from "@/lib/embed-api";
+import { consumeReferralEmbedHandoffArtifact, getPartnerEntry } from "@/lib/embed-api";
 import {
   clearReferralEmbedSession,
   writeReferralEmbedSession,
@@ -9,11 +9,6 @@ export async function GET(request: Request) {
   const url = new URL(request.url);
   const artifact = url.searchParams.get("artifact");
   const entrySlug = url.searchParams.get("entrySlug");
-  const entryHost =
-    request.headers.get("x-drts-entry-host") ||
-    request.headers.get("host") ||
-    "";
-
   if (!artifact || !entrySlug) {
     return NextResponse.json(
       { ok: false, message: "Missing required parameters." },
@@ -22,6 +17,12 @@ export async function GET(request: Request) {
   }
 
   try {
+    const partnerEntry = await getPartnerEntry(entrySlug);
+    const entryHost = partnerEntry.entryHost;
+    if (!entryHost) {
+      throw new Error("Entry host not configured");
+    }
+
     const session = await consumeReferralEmbedHandoffArtifact({
       artifact,
       entrySlug,

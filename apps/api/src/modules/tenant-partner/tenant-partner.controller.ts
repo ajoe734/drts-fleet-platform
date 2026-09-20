@@ -2359,12 +2359,13 @@ export class TenantPartnerController {
           await this.tenantPartnerService.getPartnerEntry(entrySlug);
         if (!partnerEntry) throw new Error("Entry not found");
 
-        await this.tenantPartnerService.authenticateTenantApiKey(apiKey, {
-          tenantId: partnerEntry.tenantId,
-          requiredScopes: ["partner:handoff"],
-          workload: "partner_notification_navigation",
+        this.tenantPartnerService.authenticatePartnerBootstrap(
+          {
+            entrySlug,
+            apiKey: apiKey ?? "",
+          },
           requestId,
-        });
+        );
       }
 
       const route =
@@ -2408,16 +2409,26 @@ export class TenantPartnerController {
         throw new Error("Partner entry not configured for embedded navigation");
       }
 
-      const isActive = ["assigned", "arrived_pickup", "on_trip"].includes(
-        route.status,
-      );
-      const screen = isActive ? "trip" : "receipt";
+      const isTerminal = [
+        "completed",
+        "cancelled",
+        "dispatch_failed",
+        "dispatch_timeout",
+        "no_supply",
+      ].includes(route.status);
+      const screen = isTerminal ? "receipt" : "trip";
 
-      const consentBundle = route.consentBundleVersion
+      const consentRecord =
+        await this.tenantPartnerService.getLatestReferralEmbedConsent(
+          entrySlug,
+          route.drtsPassengerId,
+        );
+
+      const consentBundle = consentRecord
         ? {
-            bundleVersion: route.consentBundleVersion,
-            grantedScopes: ["trip.manage", "pii.trip", "identity.bind"] as any,
-            grantedAt: new Date().toISOString(),
+            bundleVersion: consentRecord.bundleVersion,
+            grantedScopes: consentRecord.grantedScopes,
+            grantedAt: consentRecord.grantedAt,
           }
         : null;
 

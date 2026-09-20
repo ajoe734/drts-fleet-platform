@@ -247,7 +247,7 @@ describe("CONF-IDEM-004: CRM & webhook command idempotency", () => {
       const idempotencyService = new IdempotencyService(
         new IdempotencyRepository(),
       );
-      controller = new TenantPartnerController(
+      controller = new TenantPartnerController(null as any, null as any, 
         tenantPartnerService,
         {} as never,
         {} as never,

@@ -1753,7 +1753,31 @@ function TripScreen({
   const theme = buildEmbedTheme(context.accent);
   const [error, setError] = useState<string | null>(null);
   const [isPending, startTransition] = useTransition();
+  const requestedOrderId = liveData?.selectedOrderId;
   const activeTrip = liveData?.activeTrip?.trip;
+  const isRequestedTripActive =
+    !requestedOrderId || activeTrip?.orderId === requestedOrderId;
+
+  if (requestedOrderId && !isRequestedTripActive) {
+    return (
+      <AppShell context={context} badgeTone="idle">
+        <div style={{ padding: 32, textAlign: "center", color: theme.ink }}>
+          <div style={{ fontSize: 18, fontWeight: 700, marginBottom: 8 }}>
+            行程已結束或更新
+          </div>
+          <div style={{ fontSize: 14, color: theme.muted, marginBottom: 24 }}>
+            您查詢的行程目前不在進行中，可能已完成或取消。
+          </div>
+          <ActionButton
+            href={buildHref(context, { state: "handoff", screen: "trips" })}
+            label="查看歷史行程"
+            theme={theme}
+          />
+        </div>
+      </AppShell>
+    );
+  }
+
   const trip = activeTrip
     ? {
         id: activeTrip.orderNo,

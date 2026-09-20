@@ -20,6 +20,8 @@ describe("SR-PARTNER-NOTIFY-NAV-20260917", () => {
     mockTenantPartnerService = {
       getPartnerEntry: vi.fn(),
       authenticateTenantApiKey: vi.fn(),
+      authenticatePartnerBootstrap: vi.fn(),
+      getLatestReferralEmbedConsent: vi.fn(),
       issueReferralEmbedHandoffArtifact: vi.fn(),
       consumeReferralEmbedHandoffArtifact: vi.fn(),
     };
@@ -124,6 +126,9 @@ describe("SR-PARTNER-NOTIFY-NAV-20260917", () => {
       mockIdentityLinkRepo.find.mockResolvedValue({
         status: "active",
         drtsPassengerId: "p1",
+      });
+      mockTenantPartnerService.authenticatePartnerBootstrap.mockResolvedValue({
+        success: true,
       });
       mockTenantPartnerService.issueReferralEmbedHandoffArtifact.mockResolvedValue({
         artifact: "artifact1",

@@ -221,6 +221,35 @@ export class ReferralEmbedHandoffRepository {
     }
   }
 
+
+  async findLatestConsent(
+    entrySlug: string,
+    drtsPassengerId: string,
+  ): Promise<ReferralEmbedConsentLedgerRecord | null> {
+    if (!this.isEnabled()) {
+      const records = Array.from(this.fallbackConsents.values()).filter(
+        (c) => c.entrySlug === entrySlug && c.drtsPassengerId === drtsPassengerId
+      ).sort((a, b) => new Date(b.grantedAt).getTime() - new Date(a.grantedAt).getTime());
+      return records[0] ?? null;
+    }
+
+    const result = await this.databaseService!.query<JsonRecordRow>(
+      `
+        SELECT record
+        FROM admin.phase1_referral_embed_consent_ledger
+        WHERE entry_slug = $1 AND drts_passenger_id = $2
+        ORDER BY granted_at DESC
+        LIMIT 1
+      `,
+      [entrySlug, drtsPassengerId]
+    );
+
+    if (result.rows.length === 0) {
+      return null;
+    }
+    return (result.rows[0]?.record as ReferralEmbedConsentLedgerRecord) ?? null;
+  }
+
   async recordConsent(input: {
     handoffId: string;
     entrySlug: string;

@@ -215,7 +215,7 @@ describe("IAM-OP-AUTH-E2E-001: Production-Mode Hermetic Tenant Console OIDC & Ac
       oidcService,
     );
 
-    tenantPartnerController = new TenantPartnerController(
+    tenantPartnerController = new TenantPartnerController(null as any, null as any, 
       tenantPartnerService,
       {} as never,
       {} as never,

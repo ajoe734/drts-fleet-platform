@@ -8,15 +8,15 @@ To resolve a notification navigation attempt, the partner service must call the 
 
 ### 1. Resolve Navigation Destination (Backend to Backend)
 
-When a passenger clicks a notification inside your native application, your application should call your backend, passing the \`rideRef\` (provided in the webhook payload) and the \`partnerUserRef\` (the ID of the passenger in your system).
+When a passenger clicks a notification inside your native application, your application should call your backend, passing only the \`rideRef\` (provided in the webhook payload).
 
-Your backend then calls the DRTS Core API to obtain a securely signed navigation artifact and destination URL.
+Your backend must then derive the passenger's subject (\`partnerUserRef\`) from their verified login session, and call the DRTS Core API to obtain a securely signed navigation artifact and destination URL using your entry-scoped ingress credential.
 
 **Endpoint:**
 \`POST /api/partner/entries/{entrySlug}/notification-navigation/resolve\`
 
 **Headers:**
-\`x-api-key\`: Your Tenant API Key
+\`x-api-key\`: Your Partner API Key
 
 **Body:**
 \`\`\`json
@@ -36,7 +36,7 @@ Your backend then calls the DRTS Core API to obtain a securely signed navigation
       "tokenType": "SingleUse",
       "expiresIn": "120s"
     },
-    "destinationUrl": "https://{entryHost}/api/referral/notification-navigation?artifact=...&entrySlug=...&screen=trip&orderId=..."
+    "destinationUrl": "https://refer.smarttransport.tw/api/referral/notification-navigation?artifact=...&entrySlug=..."
   }
 }
 \`\`\`
