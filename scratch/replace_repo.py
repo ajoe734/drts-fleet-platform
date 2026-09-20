@@ -10,7 +10,7 @@ old_block = """  async listPartnerNotificationDeliveries(entrySlug: string, quer
     `, [entrySlug]);
 
     const result = await this.databaseService!.query(`
-      SELECT 
+      SELECT
         ctx.outbox_id as "outboxId",
         ctx.order_id as "orderId",
         ctx.entry_slug as "entrySlug",
@@ -51,13 +51,13 @@ old_block = """  async listPartnerNotificationDeliveries(entrySlug: string, quer
     if (!this.isEnabled()) return { success: false };
     const result = await this.databaseService!.query(`
       UPDATE mobility.phase1_passenger_notification_outbox
-      SET 
+      SET
         status = 'pending',
         next_attempt_at = NOW(),
         claim_id = NULL,
         claim_expires_at = NULL
       FROM mobility.phase1_partner_notification_delivery_contexts ctx
-      WHERE mobility.phase1_passenger_notification_outbox.id = $1 
+      WHERE mobility.phase1_passenger_notification_outbox.id = $1
         AND ctx.outbox_id = mobility.phase1_passenger_notification_outbox.id
         AND ctx.entry_slug = $2
         AND mobility.phase1_passenger_notification_outbox.status = 'failed'
@@ -82,7 +82,7 @@ new_block = """  async listPartnerNotificationDeliveries(entrySlug: string, quer
     `, [entrySlug]);
 
     const result = await this.databaseService!.query(`
-      SELECT 
+      SELECT
         o.outbox_id as "outboxId",
         COALESCE(ctx.order_id, o.payload->'partnerNotification'->>'orderId') as "orderId",
         $1 as "entrySlug",
@@ -146,7 +146,7 @@ new_block = """  async listPartnerNotificationDeliveries(entrySlug: string, quer
         await client.query("ROLLBACK");
         return { kind: "failed", failure: { failureReason: "route_missing", retryDisposition: "none" } };
       }
-      
+
       const retryDisp = ctx ? ctx.retry_disposition : outbox.payload?.partnerNotification?.retryDisposition;
       if (!retryDisp || !['manual_only', 'automatic', 'configuration_blocked'].includes(retryDisp)) {
         await client.query("ROLLBACK");

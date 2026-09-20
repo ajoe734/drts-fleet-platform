@@ -12,7 +12,7 @@
 - Browser/live gates have NOT been performed because no local product/API/browser/receiver/DB server was started and no live partner/device verification is available in this environment.
 
 ## Handoff Evidence (Gemini2)
-- **Candidate SHA**: aaee6a8c73a87c38f07beab89490f55378109ad0
+- **Candidate SHA**: 44971d5ff
 - **Candidate Branch**: gemini2/sr-partner-notify-ui-20260917
 - **Commands Run**: `npx vitest run tests/unit/system-remediation/sr-partner-notify-ui-20260917`, `node tools/ci/i18n-guard.mjs`, `pnpm --filter platform-admin-web exec eslint components/partner-notification-panel.tsx`
 - **Exit Codes**: All 0
