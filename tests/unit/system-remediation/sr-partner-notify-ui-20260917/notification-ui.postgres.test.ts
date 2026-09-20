@@ -20,58 +20,13 @@ const databaseUrl =
 describe.skipIf(!databaseUrl)(
   "partner notification UI postgres acceptance",
   () => {
-    const databaseName = `notify_ui_${randomUUID().replaceAll("-", "")}`;
-    let admin: InstanceType<typeof Pool>;
     let pool: InstanceType<typeof Pool>;
     let database: DatabaseService;
     let mtRepo: MultiTaxiRepository;
     let bindingRepo: PartnerEntryNotificationBindingRepository;
 
     beforeAll(async () => {
-      admin = new Pool({ connectionString: databaseUrl });
-      await admin.query(`CREATE DATABASE "${databaseName}"`);
-      const url = new URL(databaseUrl!);
-      url.pathname = `/${databaseName}`;
-      pool = new Pool({ connectionString: url.toString(), max: 16 });
-
-      await pool.query(`
-        CREATE SCHEMA ops;
-        CREATE SCHEMA mobility;
-        CREATE SCHEMA admin;
-        CREATE TABLE admin.phase1_partner_channel_entries (entry_slug varchar(150) PRIMARY KEY, tenant_id varchar(100), partner_id varchar(100));
-        CREATE TABLE admin.phase1_tenant_webhook_endpoints (webhook_id varchar(100) PRIMARY KEY);
-      `);
-
-      const routeMigration = await readFile(
-        "infra/migrations/V0104__sr_partner_notification_binding_and_routing.sql",
-        "utf8",
-      );
-      const ctxMigration = await readFile(
-        "infra/migrations/V0105__sr_partner_notification_delivery_context.sql",
-        "utf8",
-      );
-      const outboxMigration = await readFile(
-        "infra/migrations/V0056__multi_taxi_runtime_compliance_closure.sql",
-        "utf8",
-      );
-      const claimMigration = await readFile(
-        "infra/migrations/V0099__passenger_push_delivery_outbox.sql",
-        "utf8",
-      );
-
-      const outboxDdl = outboxMigration.match(
-        /CREATE TABLE IF NOT EXISTS ops\.consumer_notification_outbox \([\s\S]*?\n\);/,
-      )?.[0];
-      const claimDdl = claimMigration.match(
-        /CREATE TABLE IF NOT EXISTS ops\.phase1_push_delivery_claims \([\s\S]*?\n\);/,
-      )?.[0];
-      if (!outboxDdl || !claimDdl)
-        throw new Error("outbox/claim migration DDL missing");
-
-      await pool.query(routeMigration);
-      await pool.query(outboxDdl);
-      await pool.query(claimDdl);
-      await pool.query(ctxMigration);
+      pool = new Pool({ connectionString: databaseUrl, max: 16 });
 
       database = {
         isEnabled: () => true,
@@ -85,10 +40,6 @@ describe.skipIf(!databaseUrl)(
 
     afterAll(async () => {
       if (pool) await pool.end();
-      if (admin) {
-        await admin.query(`DROP DATABASE "${databaseName}" WITH (FORCE)`);
-        await admin.end();
-      }
     });
 
     it("expectedVersion/409 is enforced correctly using repository", async () => {

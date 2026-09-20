@@ -5,7 +5,7 @@
 - `entry_notification_admin_uses_real_binding_and_delivery_data`:
   Verified via DB schema and queries using UUIDs and joining with routing tables for authoritative ownership check.
 - `manual_retry_preserves_single_outbox_owner_and_fence`:
-  Verified via scoped unit tests in `notification-ui.postgres.test.ts` (using production schemas and real Postgres setup with UUID bindings, etc).
+  未驗 (Unverified locally). Awaits hosted CI to run `notification-ui.postgres.test.ts` against the actual production schema.
 - `ui_states_do_not_claim_device_delivery_and_no_secret_disclosure`:
   Addressed by replacing invented interactive layout with a CanvasEmptyState (placeholder) because canonical design canvas is pending handoff. This prevents incorrect claims and secret disclosure.
 
