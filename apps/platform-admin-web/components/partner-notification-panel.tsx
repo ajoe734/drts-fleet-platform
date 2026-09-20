@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback } from "react";
 import { usePlatformAdminClient } from "@/lib/admin-client";
 import { useTranslation } from "@/lib/i18n";
 import {
@@ -93,7 +93,7 @@ export function PartnerNotificationPanel({ entrySlug }: { entrySlug: string }) {
     if (!binding) return;
     setActionInFlight(true);
     try {
-      await client.enablePartnerEntryNotificationBinding(entrySlug, { expectedVersion: binding.version });
+      await client.enablePartnerEntryNotificationBinding(entrySlug, binding.version);
       await fetchState();
     } catch (e: any) {
       setError({ kind: e.status === 409 ? "409" : "error", message: e.message });
@@ -106,7 +106,7 @@ export function PartnerNotificationPanel({ entrySlug }: { entrySlug: string }) {
     if (!binding) return;
     setActionInFlight(true);
     try {
-      await client.disablePartnerEntryNotificationBinding(entrySlug, { expectedVersion: binding.version });
+      await client.disablePartnerEntryNotificationBinding(entrySlug, binding.version);
       await fetchState();
     } catch (e: any) {
       setError({ kind: e.status === 409 ? "409" : "error", message: e.message });
@@ -162,7 +162,7 @@ export function PartnerNotificationPanel({ entrySlug }: { entrySlug: string }) {
         </Pill>
       );
     }},
-    { k: "stage", h: t("partnerNotification.stage"), r: (row: any) => row.deliveryStage || "unknown" },
+    { k: "stage", h: t("partnerNotification.stage"), r: (row: any) => row.deliveryStage || t("cmp.code.unknown") },
     { h: t("partnerNotification.reason"), r: (row: any) => row.failureReason || "—" },
     { h: t("partnerNotification.retry"), r: (row: any) => {
       const canRetry = row.status === "failed" &&
@@ -177,7 +177,7 @@ export function PartnerNotificationPanel({ entrySlug }: { entrySlug: string }) {
   ];
 
   if (loading) {
-    return <div data-testid="loading-state">Loading...</div>;
+    return <div data-testid="loading-state">{t("partnerNotification.loading")}</div>;
   }
 
   return (
@@ -186,7 +186,7 @@ export function PartnerNotificationPanel({ entrySlug }: { entrySlug: string }) {
         <Banner
           theme={theme}
           tone="danger"
-          title={error.kind === "409" ? "Conflict" : "Error"}
+          title={error.kind === "409" ? t("partnerNotification.conflict") : t("partnerNotification.error")}
           body={error.message}
         />
       )}

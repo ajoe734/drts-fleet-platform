@@ -1730,7 +1730,7 @@ export class MultiTaxiRepository {
     `, [entrySlug]);
 
     const result = await this.databaseService!.query(`
-      SELECT 
+      SELECT
         o.outbox_id as "outboxId",
         COALESCE(ctx.order_id, o.payload->'partnerNotification'->>'orderId') as "orderId",
         $1 as "entrySlug",
@@ -1794,7 +1794,7 @@ export class MultiTaxiRepository {
         await client.query("ROLLBACK");
         return { kind: "failed", failure: { failureReason: "route_missing", retryDisposition: "none" } };
       }
-      
+
       const retryDisp = ctx ? ctx.retry_disposition : outbox.payload?.partnerNotification?.retryDisposition;
       if (!retryDisp || !['manual_only', 'automatic', 'configuration_blocked'].includes(retryDisp)) {
         await client.query("ROLLBACK");
@@ -1861,7 +1861,7 @@ export class MultiTaxiRepository {
         );
       } else {
         await client.query(
-          "UPDATE ops.consumer_notification_outbox SET payload = jsonb_set(payload, '{partnerNotification,retryDisposition}', '"automatic"'::jsonb) WHERE outbox_id = $1",
+          "UPDATE ops.consumer_notification_outbox SET payload = jsonb_set(payload, '{partnerNotification,retryDisposition}', '\"automatic\"'::jsonb) WHERE outbox_id = $1",
           [outboxId]
         );
       }
@@ -1874,29 +1874,6 @@ export class MultiTaxiRepository {
     } finally {
       client.release();
     }
-  };
-    const result = await this.databaseService!.query(`
-      UPDATE mobility.phase1_passenger_notification_outbox
-      SET 
-        status = 'pending',
-        next_attempt_at = NOW(),
-        claim_id = NULL,
-        claim_expires_at = NULL
-      FROM mobility.phase1_partner_notification_delivery_contexts ctx
-      WHERE mobility.phase1_passenger_notification_outbox.id = $1 
-        AND ctx.outbox_id = mobility.phase1_passenger_notification_outbox.id
-        AND ctx.entry_slug = $2
-        AND mobility.phase1_passenger_notification_outbox.status = 'failed'
-        AND ctx.retry_disposition IN ('manual_only', 'automatic', 'configuration_blocked')
-        AND ctx.expires_at > NOW()
-        AND ctx.failure_reason NOT IN ('notification_superseded', 'notification_expired', 'notification_obsolete', 'recipient_revoked')
-      RETURNING mobility.phase1_passenger_notification_outbox.id
-    `, [outboxId, entrySlug]);
-
-    if (result.rows.length === 0) {
-      throw new Error("Cannot retry this notification.");
-    }
-    return { success: true };
   }
 
 }
