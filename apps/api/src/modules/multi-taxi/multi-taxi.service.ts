@@ -2585,14 +2585,13 @@ export class MultiTaxiService implements OnModuleInit {
     };
   }
 
-
   async listPartnerNotificationDeliveries(
     entrySlug: string,
     query: any,
     identity: BootstrapRequestIdentity,
   ) {
-    this.requireEntryInScope(entrySlug, identity);
-    return this.repository!.listPartnerNotificationDeliveries(entrySlug, query);
+    const entry = this.requireEntryInScope(entrySlug, identity);
+    return this.repository!.listPartnerNotificationDeliveries(entry, query);
   }
 
   async retryPartnerNotificationDelivery(
@@ -2600,8 +2599,8 @@ export class MultiTaxiService implements OnModuleInit {
     outboxId: string,
     identity: BootstrapRequestIdentity,
   ) {
-    this.requireEntryInScope(entrySlug, identity);
-    return this.repository!.retryPartnerNotificationDelivery(entrySlug, outboxId);
+    const entry = this.requireEntryInScope(entrySlug, identity);
+    return this.repository!.retryPartnerNotificationDelivery(entry, outboxId);
   }
 
   private requireEntryInScope(
@@ -2627,5 +2626,4 @@ export class MultiTaxiService implements OnModuleInit {
     }
     return entry;
   }
-
 }
