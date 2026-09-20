@@ -3,6 +3,7 @@ import { describe, it, beforeAll, afterAll, expect } from "vitest";
 import { createRequire } from "node:module";
 
 const customRequire = createRequire(
+  // @ts-ignore
   new URL("../../../../apps/api/package.json", import.meta.url)
 );
 
