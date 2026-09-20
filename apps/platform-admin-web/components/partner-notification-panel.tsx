@@ -11,6 +11,8 @@ import {
   CanvasPill as Pill,
   CanvasTable as Table,
   buildCanvasTheme,
+  CanvasField as Field,
+  CanvasInput as Input,
   type CanvasTableColumn,
 } from "@drts/ui-web";
 
@@ -18,12 +20,14 @@ export function PartnerNotificationPanel({ entrySlug }: { entrySlug: string }) {
   const client = usePlatformAdminClient();
   const theme = buildCanvasTheme({ surface: "platform" });
   const { t } = useTranslation();
-  
+
   const [binding, setBinding] = useState<any>(null);
   const [deliveries, setDeliveries] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<{ kind: "error" | "404" | "403" | "409", message: string } | null>(null);
   const [actionInFlight, setActionInFlight] = useState(false);
+  const [isEditing, setIsEditing] = useState(false);
+  const [editWebhookId, setEditWebhookId] = useState("");
 
   const fetchState = useCallback(async () => {
     setLoading(true);
@@ -33,7 +37,7 @@ export function PartnerNotificationPanel({ entrySlug }: { entrySlug: string }) {
         client.getPartnerEntryNotificationBinding(entrySlug),
         client.listPartnerNotificationDeliveries(entrySlug, { pageSize: 10 })
       ]);
-      
+
       if (bReq.status === 'rejected') {
         const status = bReq.reason?.status;
         if (status === 404) {
@@ -47,6 +51,7 @@ export function PartnerNotificationPanel({ entrySlug }: { entrySlug: string }) {
         }
       } else {
         setBinding(bReq.value);
+        setEditWebhookId(bReq.value?.webhookId || "");
       }
 
       if (dReq.status === 'rejected') {
@@ -83,12 +88,12 @@ export function PartnerNotificationPanel({ entrySlug }: { entrySlug: string }) {
       setActionInFlight(false);
     }
   };
-  
+
   const handleEnable = async () => {
     if (!binding) return;
     setActionInFlight(true);
     try {
-      await client.enablePartnerEntryNotificationBinding(entrySlug, binding.version);
+      await client.enablePartnerEntryNotificationBinding(entrySlug, { expectedVersion: binding.version });
       await fetchState();
     } catch (e: any) {
       setError({ kind: e.status === 409 ? "409" : "error", message: e.message });
@@ -96,12 +101,12 @@ export function PartnerNotificationPanel({ entrySlug }: { entrySlug: string }) {
       setActionInFlight(false);
     }
   };
-  
+
   const handleDisable = async () => {
     if (!binding) return;
     setActionInFlight(true);
     try {
-      await client.disablePartnerEntryNotificationBinding(entrySlug, binding.version);
+      await client.disablePartnerEntryNotificationBinding(entrySlug, { expectedVersion: binding.version });
       await fetchState();
     } catch (e: any) {
       setError({ kind: e.status === 409 ? "409" : "error", message: e.message });
@@ -109,7 +114,25 @@ export function PartnerNotificationPanel({ entrySlug }: { entrySlug: string }) {
       setActionInFlight(false);
     }
   };
-  
+
+  const handleUpdate = async () => {
+    setActionInFlight(true);
+    try {
+      const payload = {
+        webhookId: editWebhookId,
+        eventTypes: ["*"],
+        expectedVersion: binding?.version || 0
+      };
+      await client.updatePartnerEntryNotificationBinding(entrySlug, payload);
+      setIsEditing(false);
+      await fetchState();
+    } catch (e: any) {
+      setError({ kind: e.status === 409 ? "409" : "error", message: e.message });
+    } finally {
+      setActionInFlight(false);
+    }
+  };
+
   const handleRetry = async (outboxId: string) => {
     setActionInFlight(true);
     try {
@@ -142,7 +165,7 @@ export function PartnerNotificationPanel({ entrySlug }: { entrySlug: string }) {
     { k: "stage", h: t("partnerNotification.stage"), r: (row: any) => row.deliveryStage || "unknown" },
     { h: t("partnerNotification.reason"), r: (row: any) => row.failureReason || "—" },
     { h: t("partnerNotification.retry"), r: (row: any) => {
-      const canRetry = row.status === "failed" && 
+      const canRetry = row.status === "failed" &&
                        ["automatic", "manual_only", "configuration_blocked"].includes(row.retryDisposition) &&
                        new Date(row.expiresAt) > new Date();
       return (
@@ -160,15 +183,26 @@ export function PartnerNotificationPanel({ entrySlug }: { entrySlug: string }) {
   return (
     <div style={{ display: "grid", gap: 16 }}>
       {error && (
-        <Banner 
-          theme={theme} 
-          tone="danger" 
-          title={error.kind === "409" ? "Conflict" : "Error"} 
-          body={error.message} 
+        <Banner
+          theme={theme}
+          tone="danger"
+          title={error.kind === "409" ? "Conflict" : "Error"}
+          body={error.message}
         />
       )}
       <Card theme={theme} title={t("partnerNotification.title")} subtitle={t("partnerNotification.subtitle")}>
         {binding ? (
+          isEditing ? (
+            <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+              <Field theme={theme} label={t("partnerNotification.webhookId")}>
+                <Input theme={theme} value={editWebhookId} onChange={(e: any) => setEditWebhookId(e.target.value)} disabled={actionInFlight} />
+              </Field>
+              <div style={{ display: "flex", gap: 8 }}>
+                <Btn theme={theme} onClick={handleUpdate} disabled={actionInFlight}>{t("partnerNotification.save")}</Btn>
+                <Btn theme={theme} variant="secondary" onClick={() => setIsEditing(false)} disabled={actionInFlight}>{t("partnerNotification.cancel")}</Btn>
+              </div>
+            </div>
+          ) : (
           <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
             <DL theme={theme} cols={2} items={[
               { label: t("partnerNotification.state"), value: binding.state },
@@ -178,10 +212,22 @@ export function PartnerNotificationPanel({ entrySlug }: { entrySlug: string }) {
               <Btn theme={theme} onClick={handleTest} disabled={actionInFlight}>{t("partnerNotification.test")}</Btn>
               <Btn theme={theme} onClick={handleEnable} disabled={binding.state === "ready" || actionInFlight}>{t("partnerNotification.enable")}</Btn>
               <Btn theme={theme} onClick={handleDisable} variant="secondary" disabled={binding.state === "disabled" || actionInFlight}>{t("partnerNotification.disable")}</Btn>
+              <Btn theme={theme} onClick={() => setIsEditing(true)} variant="secondary" disabled={actionInFlight}>{t("partnerNotification.edit")}</Btn>
             </div>
           </div>
+          )
         ) : (
-          <Banner theme={theme} tone="warn" title={t("partnerNotification.noBinding")} body={t("partnerNotification.noBindingBody")} />
+          <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+            <Banner theme={theme} tone="warn" title={t("partnerNotification.noBinding")} body={t("partnerNotification.noBindingBody")} />
+            <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+              <Field theme={theme} label={t("partnerNotification.webhookId")}>
+                <Input theme={theme} value={editWebhookId} onChange={(e: any) => setEditWebhookId(e.target.value)} disabled={actionInFlight} />
+              </Field>
+              <div style={{ display: "flex", gap: 8 }}>
+                <Btn theme={theme} onClick={handleUpdate} disabled={actionInFlight}>{t("partnerNotification.create")}</Btn>
+              </div>
+            </div>
+          </div>
         )}
       </Card>
       <Card theme={theme} title={t("partnerNotification.recent")} subtitle={t("partnerNotification.recentSubtitle")}>

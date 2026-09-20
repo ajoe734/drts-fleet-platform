@@ -1550,6 +1550,10 @@ const en = {
   // ── Common ──
 
   // Partner Notification
+  "partnerNotification.save": "Save",
+  "partnerNotification.cancel": "Cancel",
+  "partnerNotification.create": "Create",
+  "partnerNotification.edit": "Edit",
   "partnerNotification.title": "Notification Binding",
   "partnerNotification.subtitle": "Manage webhook bindings for passenger notifications",
   "partnerNotification.test": "Test Binding",
@@ -4643,6 +4647,10 @@ const zh: typeof en = {
   // ── Common ──
 
   // Partner Notification
+  "partnerNotification.save": "儲存",
+  "partnerNotification.cancel": "取消",
+  "partnerNotification.create": "建立",
+  "partnerNotification.edit": "編輯",
   "partnerNotification.title": "通知綁定",
   "partnerNotification.subtitle": "管理乘客通知的 Webhook 綁定",
   "partnerNotification.test": "測試綁定",
