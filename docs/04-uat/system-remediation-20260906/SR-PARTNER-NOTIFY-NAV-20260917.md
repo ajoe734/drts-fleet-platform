@@ -24,13 +24,15 @@ Validate the partner notification navigation resolution API and embed BFF redire
 ```bash
 $ CANDIDATE_SHA=$(git rev-parse HEAD)
 $ echo $CANDIDATE_SHA
-# Will be updated to the latest HEAD upon push
-
-$ pnpm --filter @drts/api typecheck
-Done in 2.1s
+2a2450a5186adbb90e9c6ac22ce79840de33f49c
 
 $ pnpm vitest run tests/unit/system-remediation/sr-partner-notify-nav-20260917/partner-notification-navigation.test.ts
+
+ RUN  v4.1.4 /home/lupin/workspace/drts-fleet-platform/.artifacts/worktrees/auto/gemini-sr-partner-notify-nav-20260917
+
  Test Files  1 passed (1)
       Tests  5 passed (5)
+   Start at  06:55:11
+   Duration  4.82s (transform 3.21s, setup 0ms, import 4.52s, tests 15ms, environment 0ms)
 ```
 Note: The integration test `tests/integration/sr-partner-notify-nav-20260917.integration.test.ts` requires a database connection and is executed in the GitHub-hosted PG CI pipeline.
