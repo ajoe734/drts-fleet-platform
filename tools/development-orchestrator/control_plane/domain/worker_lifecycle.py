@@ -125,19 +125,49 @@ def redispatch_is_deferred(
 # resolve_dispatch_target, which live in infra and usecases. Bringing them here
 # would have inverted the layering this package keeps.
 def worker_reported_outcome(worker: dict[str, Any]) -> dict[str, Any] | None:
+    payload = None
     result_path = str(worker.get("result_path") or "").strip()
-    if not result_path:
-        return None
     try:
-        payload = json.loads(Path(result_path).read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
+        if result_path:
+            payload = json.loads(Path(result_path).read_text(encoding="utf-8"))
+        elif worker.get("mode") == "antigravity" and worker.get("log_path"):
+            # Native final result, same schema/consumer as the Codex result file.
+            with Path(worker["log_path"]).open("rb") as handle:
+                handle.seek(0, 2)
+                handle.seek(max(0, handle.tell() - 1024 * 1024))
+                lines = handle.read().decode("utf-8", errors="replace").splitlines()
+            for line in reversed(lines):
+                try:
+                    event = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+                if isinstance(event, dict) and event.get("event") == "result":
+                    result = event.get("result") or {}
+                    if result.get("status") != "SUCCESS":
+                        return None
+                    response = result.get("response")
+                    payload = result.get("structured_output")
+                    if payload is None:
+                        payload = json.loads(response) if isinstance(response, str) else response
+                    break
+    except (OSError, ValueError, TypeError):
         return None
-    if not isinstance(payload, dict) or str(payload.get("outcome") or "").lower() not in {
-        "advanced",
-        "progress",
-        "blocked",
-        "failed",
+    # Enforce worker-result.schema.json even when a provider ignores its schema.
+    if not isinstance(payload, dict) or set(payload) != {
+        "outcome", "summary", "task_status_written", "blocker", "verification"
     }:
+        return None
+    if payload["outcome"] not in ("advanced", "progress", "blocked", "failed"):
+        return None
+    if not isinstance(payload["summary"], str) or not 1 <= len(payload["summary"]) <= 2000:
+        return None
+    for key in ("task_status_written", "blocker"):
+        value = payload[key]
+        if value is not None and (not isinstance(value, str) or (key == "blocker" and len(value) > 2000)):
+            return None
+    verification = payload["verification"]
+    if verification is not None and (not isinstance(verification, list) or len(verification) > 20
+                                    or any(not isinstance(v, str) or len(v) > 1000 for v in verification)):
         return None
     return payload
 

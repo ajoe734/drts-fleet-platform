@@ -112,7 +112,14 @@ def task_index_from_status(config: dict[str, Any], status: dict[str, Any]) -> di
     }
 
 
-def task_is_dispatch_eligible_for_agent(task: dict[str, Any], agent_name: str) -> bool:
+def task_is_dispatch_eligible_for_agent(
+    task: dict[str, Any], agent_name: str, role: str | None = None,
+) -> bool:
+    """Stable, role-aware eligibility shared by dispatch and reassignment.
+
+    Legacy lists constrain both roles. Explicit empty role lists permit nobody;
+    malformed maps fail closed rather than granting every lane access.
+    """
     raw = task.get("eligible_agents")
     if raw is None:
         raw = task.get("eligibility")
@@ -122,11 +129,36 @@ def task_is_dispatch_eligible_for_agent(task: dict[str, Any], agent_name: str) -
         allowed = {str(item).strip() for item in raw if str(item).strip()}
         return not allowed or agent_name in allowed
     if isinstance(raw, dict):
-        allowed = raw.get("agents")
+        if set(raw) == {"owner", "reviewer"}:
+            if any(not isinstance(v, list) or any(not isinstance(a, str) or not a.strip() for a in v)
+                   for v in raw.values()):
+                return False
+            role = role or ("reviewer" if task.get("status") == "review" else "owner")
+            allowed = raw.get(role)
+            return isinstance(allowed, list) and agent_name in allowed
+        allowed = raw.get("agents") if set(raw) == {"agents"} else None
         if isinstance(allowed, list):
             normalized = {str(item).strip() for item in allowed if str(item).strip()}
             return not normalized or agent_name in normalized
-    return True
+    return False
+
+
+def validate_task_eligibility(task: dict[str, Any]) -> None:
+    """Validate new role contracts without changing legacy list semantics."""
+    raw = task.get("eligible_agents")
+    if raw is None:
+        raw = task.get("eligibility")
+    if raw is None or isinstance(raw, list):
+        return
+    if not isinstance(raw, dict) or set(raw) not in ({"agents"}, {"owner", "reviewer"}):
+        raise ValueError("eligibility keys must be agents, or owner and reviewer")
+    if any(not isinstance(v, list) or any(not isinstance(a, str) or not a.strip() for a in v)
+           for v in raw.values()):
+        raise ValueError("eligibility must contain agent-name lists")
+    if set(raw) == {"owner", "reviewer"}:
+        for role in ("owner", "reviewer"):
+            if not task_is_dispatch_eligible_for_agent(task, str(task.get(role) or ""), role):
+                raise ValueError(f"assigned {role} is outside task eligibility")
 
 
 def task_role_for_dispatch_reason(reason: str | None) -> str | None:

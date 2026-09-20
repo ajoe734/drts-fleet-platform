@@ -4,6 +4,8 @@ import tempfile
 import unittest
 from pathlib import Path
 
+from orchestrator_test_support import DispatchEnvironmentIsolation
+
 from control_plane.usecases.task_board_commands import (
     TaskBoardCommandExecutor,
     TaskBoardCommandRuntime,
@@ -11,8 +13,9 @@ from control_plane.usecases.task_board_commands import (
 )
 
 
-class TaskBoardCommandExecutorTests(unittest.TestCase):
+class TaskBoardCommandExecutorTests(DispatchEnvironmentIsolation, unittest.TestCase):
     def setUp(self) -> None:
+        super().setUp()
         self.temp_dir = tempfile.TemporaryDirectory()
         self.status_file = Path(self.temp_dir.name) / "ai-status.json"
         self.status_file.write_text("{}", encoding="utf-8")
