@@ -1,19 +1,23 @@
 # UAT: SR-PARTNER-NOTIFY-NAV-20260917
 
 ## Scope
+
 Validate the partner notification navigation resolution API and embed BFF redirection logic.
 
 ## Acceptance Criteria
 
 ### 1. entry_scoped_navigation_denies_cross_subject_tenant_entry
+
 - **Scenario:** Partner backend calls `POST /api/partner/entries/{entrySlug}/notification-navigation/resolve` with a valid `rideRef` but a mismatched `partnerUserRef` or wrong `entrySlug`.
 - **Expected:** API returns 403 Forbidden with a generic "invalid or expired" message to prevent enumeration.
 
 ### 2. fresh_single_use_handoff_and_http_only_session_reuse
+
 - **Scenario:** Partner backend resolves navigation successfully. The returned `destinationUrl` is opened in a client webview.
 - **Expected:** The BFF route `/api/referral/notification-navigation` consumes the single-use artifact, establishes a fresh HttpOnly session cookie, and issues a 302 redirect to the embed page. A second request with the same artifact fails.
 
 ### 3. navigation_reads_current_trip_without_creating_orders
+
 - **Scenario:** The passenger's client webview loads the redirected embed page.
 - **Expected:**
   - If the trip is active (e.g., driver_assigned), the screen renders the live tracking view.
@@ -21,10 +25,11 @@ Validate the partner notification navigation resolution API and embed BFF redire
   - No new order is automatically created during this navigation flow.
 
 ## Test Evidence
+
 ```bash
 $ CANDIDATE_SHA=$(git rev-parse HEAD)
 $ echo $CANDIDATE_SHA
-$(git rev-parse HEAD)
+d2facd065aabcedbf96c0bcb7962ca83d451ba57
 
 $ pnpm vitest run tests/unit/system-remediation/sr-partner-notify-nav-20260917/partner-notification-navigation.test.ts
 
@@ -32,7 +37,8 @@ $ pnpm vitest run tests/unit/system-remediation/sr-partner-notify-nav-20260917/p
 
  Test Files  1 passed (1)
       Tests  5 passed (5)
-   Start at  06:55:11
-   Duration  4.82s (transform 3.21s, setup 0ms, import 4.52s, tests 15ms, environment 0ms)
+   Start at  08:16:55
+   Duration  7.36s (transform 4.84s, setup 0ms, import 6.89s, tests 25ms, environment 0ms)
 ```
+
 Note: The integration test `tests/integration/sr-partner-notify-nav-20260917.integration.test.ts` requires a database connection and is executed in the GitHub-hosted PG CI pipeline.
