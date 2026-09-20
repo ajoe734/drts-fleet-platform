@@ -2,11 +2,10 @@ import { randomUUID } from "node:crypto";
 import { describe, it, beforeAll, afterAll, expect } from "vitest";
 import { createRequire } from "node:module";
 
-// @ts-ignore
 const customRequire = createRequire(
+  // @ts-ignore
   new URL("../../../../apps/api/package.json", import.meta.url)
 );
-
 const { NestFactory } = customRequire("@nestjs/core");
 const { Pool } = customRequire("pg");
 
@@ -18,7 +17,7 @@ import { ApiRequestError } from "../../../../apps/api/src/common/api-envelope";
 
 // Use the database URL specifically meant for this UI test.
 // We expect the CI hosted workflow to provide this after migrating the schema.
-const testDbUrl = process.env.PARTNER_NOTIFY_UI_TEST_DATABASE_URL;
+const testDbUrl = process.env.PARTNER_NOTIFY_UI_TEST_DATABASE_URL || process.env.DATABASE_URL;
 
 describe.skipIf(!testDbUrl)("partner notification UI postgres acceptance", () => {
   let pool: any;
