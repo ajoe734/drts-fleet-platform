@@ -47,7 +47,7 @@ describe.skipIf(!databaseUrl)(
       const partnerId = "partner-1";
       const webhookId = "webhook-409";
       await pool.query(
-        "INSERT INTO admin.phase1_partner_channel_entries (entry_slug, tenant_id, partner_id, created_at, updated_at) VALUES ($1, $2, $3, now(), now()) ON CONFLICT DO NOTHING",
+        "INSERT INTO admin.phase1_partner_channel_entries (entry_slug, tenant_id, partner_id, created_at, updated_at, program_id, status, record) VALUES ($1, $2, $3, now(), now(), 'program1', 'active', '{}'::jsonb) ON CONFLICT DO NOTHING",
         [entrySlug, tenantId, partnerId],
       );
       await pool.query(
@@ -87,7 +87,7 @@ describe.skipIf(!databaseUrl)(
     it("retry idempotence/lease/fence/expiry/supersession are verified via DB state", async () => {
       const entrySlug = "entry-retry-test";
       await pool.query(
-        "INSERT INTO admin.phase1_partner_channel_entries (entry_slug, tenant_id, partner_id, created_at, updated_at) VALUES ($1, 't', 'p', now(), now()) ON CONFLICT DO NOTHING",
+        "INSERT INTO admin.phase1_partner_channel_entries (entry_slug, tenant_id, partner_id, created_at, updated_at, program_id, status, record) VALUES ($1, 't', 'p', now(), now(), 'program1', 'active', '{}'::jsonb) ON CONFLICT DO NOTHING",
         [entrySlug],
       );
       await pool.query(
@@ -112,9 +112,9 @@ describe.skipIf(!databaseUrl)(
       await pool.query(
         `
         INSERT INTO mobility.phase1_order_partner_notification_routes (
-          order_id, tenant_id, partner_id, entry_slug, partner_user_ref, drts_passenger_id, passenger_subject_ref, identity_linked_at, consent_bundle_version
+          order_id, tenant_id, partner_id, entry_slug, partner_user_ref, drts_passenger_id, passenger_subject_ref, identity_linked_at, consent_bundle_version, ride_ref
         ) VALUES (
-          $1, 't', 'p', $2, 'u', 'd', 's', now(), '1'
+          $1, 't', 'p', $2, 'u', 'd', 's', now(), '1', 'ride'
         )
       `,
         [orderId, entrySlug],
@@ -165,7 +165,7 @@ describe.skipIf(!databaseUrl)(
       const mockedTenantService = {
         getPartnerEntry: (slug: string) => {
           if (slug === entrySlug) {
-            return { tenantId: "tenant-a" };
+            return { tenantId: "tenant-a", activeFlag: true, partnerId: "partner-1" };
           }
           throw new Error("Not found");
         },

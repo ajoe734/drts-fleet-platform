@@ -387,6 +387,9 @@ import type {
   SubmitSafetyOperatorTakeoverReportResult,
   UpdateServiceAreaBoundaryCommand,
   UpdateStopPolicyCommand,
+  PartnerNotificationDispatchOutcome,
+  PartnerNotificationDeliveryQuery,
+  PartnerNotificationDeliveryRecord,
 } from "@drts/contracts";
 
 export interface ApiClientConfig {
@@ -4876,8 +4879,8 @@ export class ApiClient {
     return this.put<PartnerEntryNotificationBinding>(`/api/platform-admin/partner-entries/${encodeURIComponent(entrySlug)}/notification-binding`, { ...options, body: command });
   }
 
-  public async testPartnerEntryNotificationBinding(entrySlug: string, options?: RequestOptions): Promise<void> {
-    return this.post<void>(`/api/platform-admin/partner-entries/${encodeURIComponent(entrySlug)}/notification-binding/test`, options);
+  public async testPartnerEntryNotificationBinding(entrySlug: string, options?: RequestOptions): Promise<PartnerNotificationDispatchOutcome> {
+    return this.post<PartnerNotificationDispatchOutcome>(`/api/platform-admin/partner-entries/${encodeURIComponent(entrySlug)}/notification-binding/test`, options);
   }
 
   public async enablePartnerEntryNotificationBinding(entrySlug: string, expectedVersion: number, options?: RequestOptions): Promise<PartnerEntryNotificationBinding> {
@@ -4888,16 +4891,16 @@ export class ApiClient {
     return this.post<PartnerEntryNotificationBinding>(`/api/platform-admin/partner-entries/${encodeURIComponent(entrySlug)}/notification-binding/disable`, { ...options, body: { expectedVersion } });
   }
 
-  public async listPartnerNotificationDeliveries(entrySlug: string, query?: any, options?: RequestOptions): Promise<ApiListData<any>> {
+  public async listPartnerNotificationDeliveries(entrySlug: string, query?: PartnerNotificationDeliveryQuery, options?: RequestOptions): Promise<ApiListData<PartnerNotificationDeliveryRecord>> {
     const params = new URLSearchParams();
     if (query?.page !== undefined) params.set("page", String(query.page));
     if (query?.pageSize !== undefined) params.set("pageSize", String(query.pageSize));
     const qs = params.toString();
-    return this.get<ApiListData<any>>(`/api/platform-admin/partner-entries/${encodeURIComponent(entrySlug)}/notification-deliveries${qs ? `?${qs}` : ""}`, options);
+    return this.get<ApiListData<PartnerNotificationDeliveryRecord>>(`/api/platform-admin/partner-entries/${encodeURIComponent(entrySlug)}/notification-deliveries${qs ? `?${qs}` : ""}`, options);
   }
 
-  public async retryPartnerNotificationDelivery(entrySlug: string, outboxId: string, options?: RequestOptions): Promise<any> {
-    return this.post(`/api/platform-admin/partner-entries/${encodeURIComponent(entrySlug)}/notification-deliveries/${encodeURIComponent(outboxId)}/retry`, options);
+  public async retryPartnerNotificationDelivery(entrySlug: string, outboxId: string, options?: RequestOptions): Promise<PartnerNotificationDispatchOutcome> {
+    return this.post<PartnerNotificationDispatchOutcome>(`/api/platform-admin/partner-entries/${encodeURIComponent(entrySlug)}/notification-deliveries/${encodeURIComponent(outboxId)}/retry`, options);
   }
 }
 
