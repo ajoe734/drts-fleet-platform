@@ -26,13 +26,15 @@ describe("SR-PARTNER-NOTIFY-NAV-20260917", () => {
     };
 
     controller = new TenantPartnerController(
-      mockIdentityLinkRepo,
-      mockNavRepo,
       mockTenantPartnerService,
       {} as any,
       {} as any,
       {} as any,
-      {} as any
+      {} as any,
+      {} as any,
+      {} as any,
+      mockIdentityLinkRepo,
+      mockNavRepo,
     );
   });
 
@@ -42,14 +44,16 @@ describe("SR-PARTNER-NOTIFY-NAV-20260917", () => {
 
   describe("resolvePartnerNotificationNavigation", () => {
     it("returns 403 when navigation route does not exist", async () => {
-      mockTenantPartnerService.getPartnerEntry.mockResolvedValue({ tenantId: "tenant1" });
+      mockTenantPartnerService.getPartnerEntry.mockResolvedValue({
+        tenantId: "tenant1",
+      });
       mockNavRepo.resolveRoute.mockResolvedValue(null);
 
       try {
         await controller.resolvePartnerNotificationNavigation(
           "entry1",
           { rideRef: "invalid", partnerUserRef: "user1" },
-          { headers: { "x-api-key": "test-key" } }
+          { headers: { "x-api-key": "test-key" } },
         );
         expect.fail("Should have thrown");
       } catch (err: any) {
@@ -71,7 +75,7 @@ describe("SR-PARTNER-NOTIFY-NAV-20260917", () => {
         await controller.resolvePartnerNotificationNavigation(
           "entry1",
           { rideRef: "ride1", partnerUserRef: "user1" },
-          { headers: { "x-api-key": "test-key" } }
+          { headers: { "x-api-key": "test-key" } },
         );
         expect.fail("Should have thrown");
       } catch (err: any) {
@@ -97,7 +101,7 @@ describe("SR-PARTNER-NOTIFY-NAV-20260917", () => {
         await controller.resolvePartnerNotificationNavigation(
           "entry1",
           { rideRef: "ride1", partnerUserRef: "user1" },
-          { headers: { "x-api-key": "test-key" } }
+          { headers: { "x-api-key": "test-key" } },
         );
         expect.fail("Should have thrown");
       } catch (err: any) {
@@ -124,7 +128,7 @@ describe("SR-PARTNER-NOTIFY-NAV-20260917", () => {
         await controller.resolvePartnerNotificationNavigation(
           "entry1",
           { rideRef: "ride1", partnerUserRef: "user1" },
-          { headers: { "x-api-key": "test-key" } }
+          { headers: { "x-api-key": "test-key" } },
         );
         expect.fail("Should have thrown");
       } catch (err: any) {
@@ -153,23 +157,27 @@ describe("SR-PARTNER-NOTIFY-NAV-20260917", () => {
       mockTenantPartnerService.authenticatePartnerBootstrap.mockResolvedValue({
         success: true,
       });
-      mockTenantPartnerService.issueReferralEmbedHandoffArtifact.mockResolvedValue({
-        artifact: "artifact1",
-      });
+      mockTenantPartnerService.issueReferralEmbedHandoffArtifact.mockResolvedValue(
+        {
+          artifact: "artifact1",
+        },
+      );
 
       const response = await controller.resolvePartnerNotificationNavigation(
         "entry1",
         { rideRef: "ride1", partnerUserRef: "user1" },
-        { headers: { "x-api-key": "test-key" } }
+        { headers: { "x-api-key": "test-key" } },
       );
 
       expect(response.data.destinationUrl).toContain("artifact=artifact1");
-      expect(mockTenantPartnerService.issueReferralEmbedHandoffArtifact).toHaveBeenCalledWith(
+      expect(
+        mockTenantPartnerService.issueReferralEmbedHandoffArtifact,
+      ).toHaveBeenCalledWith(
         expect.objectContaining({
           navigationContext: { orderId: "order1", screen: "trip" },
         }),
         undefined,
-        { allowInternalBootstrap: false }
+        { allowInternalBootstrap: false },
       );
     });
   });

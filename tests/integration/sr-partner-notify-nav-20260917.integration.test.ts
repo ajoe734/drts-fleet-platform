@@ -1,6 +1,7 @@
 import { describe, expect, it, beforeAll, afterAll } from "vitest";
 import { DatabaseService } from "../../apps/api/src/common/db";
 import { PartnerNotificationNavigationRepository } from "../../apps/api/src/modules/tenant-partner/partner-notification-navigation.repository";
+import { randomUUID } from "crypto";
 
 describe("SR-PARTNER-NOTIFY-NAV-20260917 Integration", () => {
   let db: DatabaseService;
@@ -15,11 +16,147 @@ describe("SR-PARTNER-NOTIFY-NAV-20260917 Integration", () => {
     await db.onModuleDestroy();
   });
 
-  it("should reject resolving route when ownership mismatches", async () => {
-    // This is a negative test for order ownership checking
-    // Since the database in test env might be empty or missing this specific mock data,
-    // we just ensure the query executes and returns null instead of failing or returning a bad match.
-    const result = await navRepo.resolveRoute("invalid-entry", "ref1", "user1");
-    expect(result).toBeNull();
+  const setupMockData = async (client: any, data: any) => {
+    const {
+      orderId,
+      entrySlug,
+      partnerId,
+      tenantId,
+      passengerId,
+      userRef,
+      rideRef,
+      passengerSubjectRef,
+      orderTenantId,
+      orderPartnerId,
+    } = data;
+
+    // Seed partner entry (FK)
+    await client.query(
+      `
+      INSERT INTO admin.phase1_partner_channel_entries (entry_slug, partner_id, tenant_id, status, entry_host, created_at, updated_at)
+      VALUES ($1, $2, $3, 'active', 'test.host', NOW(), NOW())
+      ON CONFLICT (entry_slug) DO NOTHING;
+    `,
+      [entrySlug, partnerId, tenantId || "default-tenant"],
+    );
+
+    // Seed owned order
+    const orderRecord = JSON.stringify({
+      tenantId: orderTenantId,
+      partnerId: orderPartnerId,
+      partnerEntrySlug: entrySlug,
+      status: "driver_assigned",
+      passenger: { passengerId },
+    });
+
+    await client.query(
+      `
+      INSERT INTO ops.phase1_owned_orders 
+        (order_id, order_no, record, status, order_source, service_bucket, dispatch_semantics, created_at, updated_at)
+      VALUES 
+        ($1, 'NO123', $2::jsonb, 'driver_assigned', 'app', 'standard', 'immediate', NOW(), NOW())
+      ON CONFLICT DO NOTHING;
+    `,
+      [orderId, orderRecord],
+    );
+
+    // Seed notification route
+    await client.query(
+      `
+      INSERT INTO mobility.phase1_order_partner_notification_routes
+        (order_id, tenant_id, partner_id, entry_slug, partner_user_ref, drts_passenger_id, ride_ref, passenger_subject_ref, identity_linked_at, consent_bundle_version)
+      VALUES 
+        ($1, $2, $3, $4, $5, $6, $7, $8, NOW(), '1.0.0')
+      ON CONFLICT DO NOTHING;
+    `,
+      [
+        orderId,
+        tenantId,
+        partnerId,
+        entrySlug,
+        userRef,
+        passengerId,
+        rideRef,
+        passengerSubjectRef,
+      ],
+    );
+  };
+
+  const cleanupMockData = async (client: any, data: any) => {
+    await client.query(
+      `DELETE FROM mobility.phase1_order_partner_notification_routes WHERE order_id = $1`,
+      [data.orderId],
+    );
+    await client.query(
+      `DELETE FROM ops.phase1_owned_orders WHERE order_id = $1`,
+      [data.orderId],
+    );
+    await client.query(
+      `DELETE FROM admin.phase1_partner_channel_entries WHERE entry_slug = $1`,
+      [data.entrySlug],
+    );
+  };
+
+  it("should successfully resolve a null-tenant multi-taxi order route (positive)", async () => {
+    const client = await db.connect();
+    const data = {
+      orderId: randomUUID(),
+      entrySlug: `entry-${randomUUID()}`,
+      partnerId: `partner-${randomUUID()}`,
+      tenantId: `tenant-${randomUUID()}`,
+      orderTenantId: null,
+      orderPartnerId: `partner-${randomUUID()}`,
+      passengerId: `pass-${randomUUID()}`,
+      userRef: `user-${randomUUID()}`,
+      rideRef: `ride-${randomUUID()}`,
+      passengerSubjectRef: `subj-${randomUUID()}`,
+    };
+    data.orderPartnerId = data.partnerId; // Valid match
+
+    try {
+      await setupMockData(client, data);
+
+      const result = await navRepo.resolveRoute(
+        data.entrySlug,
+        data.rideRef,
+        data.userRef,
+      );
+      expect(result).not.toBeNull();
+      expect(result?.orderId).toBe(data.orderId);
+      expect(result?.tenantId).toBe(data.tenantId);
+    } finally {
+      await cleanupMockData(client, data);
+      client.release();
+    }
+  });
+
+  it("should reject resolving route when ownership mismatches for null-tenant (negative cross-tenant/partner)", async () => {
+    const client = await db.connect();
+    const data = {
+      orderId: randomUUID(),
+      entrySlug: `entry-${randomUUID()}`,
+      partnerId: `partner-${randomUUID()}`,
+      tenantId: `tenant-${randomUUID()}`,
+      orderTenantId: null,
+      orderPartnerId: `different-partner-${randomUUID()}`, // Mismatch!
+      passengerId: `pass-${randomUUID()}`,
+      userRef: `user-${randomUUID()}`,
+      rideRef: `ride-${randomUUID()}`,
+      passengerSubjectRef: `subj-${randomUUID()}`,
+    };
+
+    try {
+      await setupMockData(client, data);
+
+      const result = await navRepo.resolveRoute(
+        data.entrySlug,
+        data.rideRef,
+        data.userRef,
+      );
+      expect(result).toBeNull();
+    } finally {
+      await cleanupMockData(client, data);
+      client.release();
+    }
   });
 });

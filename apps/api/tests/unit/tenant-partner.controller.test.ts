@@ -22,8 +22,6 @@ function createController(jwtAuthService = new JwtAuthService()) {
     jwtAuthService,
     tenantPartnerService,
     controller: new TenantPartnerController(
-      {} as any,
-      {} as any,
       tenantPartnerService,
       {} as BillingSettlementService,
       {} as OwnedMobilityService,
@@ -387,8 +385,6 @@ describe("tenant partner ingress handoff controller", () => {
       getPartnerReferralStatement: () => statement,
     } as unknown as TenantPartnerService;
     const controller = new TenantPartnerController(
-      {} as any,
-      {} as any,
       tenantPartnerService,
       {} as BillingSettlementService,
       {} as OwnedMobilityService,

@@ -13601,7 +13601,10 @@ export class OwnedMobilityService
 
     const activeOrder = Array.from(this.orders.values()).find(
       (o) =>
-        o.tenantId === identity.tenantId &&
+        (o.tenantId === identity.tenantId ||
+          (o.tenantId === null &&
+            o.partnerEntrySlug === identity.partnerEntrySlug &&
+            o.partnerId === identity.partnerId)) &&
         o.partnerEntrySlug === identity.partnerEntrySlug &&
         o.passenger?.passengerId === passengerId &&
         o.status !== "completed" &&
@@ -13661,7 +13664,10 @@ export class OwnedMobilityService
     const passengerOrders = Array.from(this.orders.values())
       .filter(
         (o) =>
-          o.tenantId === identity.tenantId &&
+          (o.tenantId === identity.tenantId ||
+            (o.tenantId === null &&
+              o.partnerEntrySlug === identity.partnerEntrySlug &&
+              o.partnerId === identity.partnerId)) &&
           o.partnerEntrySlug === identity.partnerEntrySlug &&
           o.passenger?.passengerId === passengerId,
       )

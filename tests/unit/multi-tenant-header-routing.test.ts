@@ -167,7 +167,7 @@ describe("multi-tenant header controller routing", () => {
     const tenantPartnerService = {
       listPassengers: vi.fn(),
     } as unknown as TenantPartnerService;
-    const controller = new TenantPartnerController(null as any, null as any,
+    const controller = new TenantPartnerController(
       tenantPartnerService,
       {} as never,
       {} as never,
@@ -213,7 +213,7 @@ describe("multi-tenant header controller routing", () => {
         },
       ]),
     } as unknown as TenantPartnerService;
-    const controller = new TenantPartnerController(null as any, null as any,
+    const controller = new TenantPartnerController(
       tenantPartnerService,
       {} as never,
       {} as never,

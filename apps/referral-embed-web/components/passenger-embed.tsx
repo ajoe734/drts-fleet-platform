@@ -1148,19 +1148,52 @@ function ConsentScreen({ context }: { context: EmbedContext }) {
       context={context}
       badgeTone="live"
       footer={
-        <>
-          <ActionButton
-            href={buildHref(context, { state: "handoff", screen: "book" })}
-            label="同意並開始"
-            theme={theme}
+        <form
+          action="/api/referral/session"
+          method="POST"
+          style={{ display: "contents" }}
+        >
+          <input type="hidden" name="action" value="grant-consent" />
+          {context.session && (
+            <input
+              type="hidden"
+              name="handoffId"
+              value={context.session.handoffId}
+            />
+          )}
+          <input
+            type="hidden"
+            name="entrySlug"
+            value={context.entry.entrySlug}
           />
+          <input
+            type="hidden"
+            name="entryHost"
+            value={
+              context.decision.requestedEntryHost ||
+              context.session?.entryHost ||
+              getEntryHost(context.entry)
+            }
+          />
+          <input
+            type="hidden"
+            name="returnTo"
+            value={buildHref(context, {
+              state: "handoff",
+              screen: context.session?.navigationContext?.screen ?? "book",
+              ...(context.session?.navigationContext?.orderId
+                ? { orderId: context.session.navigationContext.orderId }
+                : {}),
+            })}
+          />
+          <ActionButton type="submit" label="同意並開始" theme={theme} />
           <ActionButton
             href={buildHref(context, { state: "fallback" })}
             label="暫不使用"
             theme={theme}
             variant="ghost"
           />
-        </>
+        </form>
       }
     >
       <div style={{ display: "grid", gap: 4, padding: "6px 0 2px" }}>
@@ -1297,10 +1330,16 @@ function FallbackScreen({ context }: { context: EmbedContext }) {
         <Card theme={theme} title="目前沒有可用的替代入口">
           <div style={{ fontSize: 13, lineHeight: 1.6, color: theme.ink2 }}>
             此入口尚未設定可用的獨立叫車網站，暫時無法在此完成叫車。請透過{" "}
-            <b>{context.strings.displayName}</b> 的社區窗口協助，或稍後點選「回社區
-            App」再試一次。
+            <b>{context.strings.displayName}</b>{" "}
+            的社區窗口協助，或稍後點選「回社區 App」再試一次。
           </div>
-          <DetailRow theme={theme} label="來源入口" value={sourceLabel} mono last />
+          <DetailRow
+            theme={theme}
+            label="來源入口"
+            value={sourceLabel}
+            mono
+            last
+          />
         </Card>
       )}
       <Card theme={theme}>

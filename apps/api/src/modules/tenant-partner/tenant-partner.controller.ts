@@ -196,10 +196,6 @@ export class TenantApiKeyAuthGuard implements CanActivate {
 @Controller()
 export class TenantPartnerController {
   constructor(
-    @Inject(PartnerUserIdentityLinkRepository)
-    private readonly partnerUserIdentityLinkRepository: PartnerUserIdentityLinkRepository,
-    @Inject(PartnerNotificationNavigationRepository)
-    private readonly partnerNotificationNavigationRepository: PartnerNotificationNavigationRepository,
     @Inject(TenantPartnerService)
     private readonly tenantPartnerService: TenantPartnerService,
     @Inject(BillingSettlementService)
@@ -216,6 +212,12 @@ export class TenantPartnerController {
     @Optional()
     @Inject(AuditNotificationService)
     private readonly auditNotificationService?: AuditNotificationService,
+    @Optional()
+    @Inject(PartnerUserIdentityLinkRepository)
+    private readonly partnerUserIdentityLinkRepository?: PartnerUserIdentityLinkRepository,
+    @Optional()
+    @Inject(PartnerNotificationNavigationRepository)
+    private readonly partnerNotificationNavigationRepository?: PartnerNotificationNavigationRepository,
   ) {}
 
   private requireTenantId(tenantId?: string) {
@@ -2368,6 +2370,9 @@ export class TenantPartnerController {
         );
       }
 
+      if (!this.partnerNotificationNavigationRepository) {
+        throw new Error("PartnerNotificationNavigationRepository is required");
+      }
       const route =
         await this.partnerNotificationNavigationRepository.resolveRoute(
           entrySlug,
@@ -2391,7 +2396,9 @@ export class TenantPartnerController {
         throw new Error("Route does not belong to the active tenant/partner");
       }
 
-      // Check if identity link is still active and matches the route's passenger
+      if (!this.partnerUserIdentityLinkRepository) {
+        throw new Error("PartnerUserIdentityLinkRepository is required");
+      }
       const link = await this.partnerUserIdentityLinkRepository.find(
         entrySlug,
         partnerUserRef,
