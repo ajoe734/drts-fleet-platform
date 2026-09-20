@@ -1760,7 +1760,7 @@ function TripScreen({
 
   if (requestedOrderId && !isRequestedTripActive) {
     return (
-      <AppShell context={context} badgeTone="idle">
+      <AppShell context={context} badgeTone="neutral">
         <div style={{ padding: 32, textAlign: "center", color: theme.ink }}>
           <div style={{ fontSize: 18, fontWeight: 700, marginBottom: 8 }}>
             行程已結束或更新

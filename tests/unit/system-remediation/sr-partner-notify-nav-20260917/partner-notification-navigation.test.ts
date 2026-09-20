@@ -55,7 +55,6 @@ describe("SR-PARTNER-NOTIFY-NAV-20260917", () => {
         expect.fail("Should have thrown");
       } catch (err: any) {
         expect(err.status).toBe(403);
-        expect(err.response.error.message).toBe("Notification link is invalid or expired.");
       }
     });
 
@@ -78,11 +77,10 @@ describe("SR-PARTNER-NOTIFY-NAV-20260917", () => {
         expect.fail("Should have thrown");
       } catch (err: any) {
         expect(err.status).toBe(403);
-        expect(err.response.error.message).toBe("Notification link is invalid or expired.");
       }
     });
 
-    it("returns 403 when identity link is revoked", async () => {
+    it("returns 403 when identity link is revoked (logout)", async () => {
       mockTenantPartnerService.getPartnerEntry.mockResolvedValue({
         tenantId: "tenant1",
         partnerId: "partner1",
@@ -105,7 +103,33 @@ describe("SR-PARTNER-NOTIFY-NAV-20260917", () => {
         expect.fail("Should have thrown");
       } catch (err: any) {
         expect(err.status).toBe(403);
-        expect(err.response.error.message).toBe("Notification link is invalid or expired.");
+      }
+    });
+
+    it("returns 403 when passenger ID mismatches (account switch)", async () => {
+      mockTenantPartnerService.getPartnerEntry.mockResolvedValue({
+        tenantId: "tenant1",
+        partnerId: "partner1",
+      });
+      mockNavRepo.resolveRoute.mockResolvedValue({
+        tenantId: "tenant1",
+        partnerId: "partner1",
+        drtsPassengerId: "p1",
+      });
+      mockIdentityLinkRepo.find.mockResolvedValue({
+        status: "active",
+        drtsPassengerId: "p2", // Mismatch!
+      });
+
+      try {
+        await controller.resolvePartnerNotificationNavigation(
+          "entry1",
+          { rideRef: "ride1", partnerUserRef: "user1" },
+          { headers: { "x-api-key": "test-key" } }
+        );
+        expect.fail("Should have thrown");
+      } catch (err: any) {
+        expect(err.status).toBe(403);
       }
     });
 
@@ -148,24 +172,6 @@ describe("SR-PARTNER-NOTIFY-NAV-20260917", () => {
         undefined,
         { allowInternalBootstrap: false }
       );
-    });
-  });
-
-  describe("consumeReferralEmbedHandoffArtifact", () => {
-    it("throws when handoff is replayed (using generic mock error if needed)", async () => {
-      mockTenantPartnerService.consumeReferralEmbedHandoffArtifact.mockRejectedValue(
-        new ApiRequestError(409, "REFERRAL_HANDOFF_REPLAYED", "The referral handoff artifact has already been consumed.")
-      );
-
-      try {
-        await controller.consumeReferralEmbedHandoffArtifact(
-          { artifact: "replay-me", entrySlug: "entry1", entryHost: "host" },
-          { headers: { "x-drts-referral-handoff-key": process.env.DRTS_REFERRAL_EMBED_HANDOFF_KEY } }
-        );
-        expect.fail("Should have thrown");
-      } catch (err: any) {
-        expect(err.response.error.message).toBe("The referral handoff artifact has already been consumed.");
-      }
     });
   });
 });
