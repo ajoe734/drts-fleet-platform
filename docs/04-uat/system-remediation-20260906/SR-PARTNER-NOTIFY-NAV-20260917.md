@@ -24,7 +24,7 @@ Validate the partner notification navigation resolution API and embed BFF redire
 ```bash
 $ CANDIDATE_SHA=$(git rev-parse HEAD)
 $ echo $CANDIDATE_SHA
-03c52a55092a21b6f8d59f3d65cc8cf706953917
+# Will be updated to the latest HEAD upon push
 
 $ pnpm --filter @drts/api typecheck
 Done in 2.1s
@@ -32,8 +32,5 @@ Done in 2.1s
 $ pnpm vitest run tests/unit/system-remediation/sr-partner-notify-nav-20260917/partner-notification-navigation.test.ts
  Test Files  1 passed (1)
       Tests  5 passed (5)
-
-$ pnpm vitest run tests/integration/sr-partner-notify-nav-20260917.integration.test.ts
- Test Files  1 passed (1)
-      Tests  1 passed (1)
 ```
+Note: The integration test `tests/integration/sr-partner-notify-nav-20260917.integration.test.ts` requires a database connection and is executed in the GitHub-hosted PG CI pipeline.
