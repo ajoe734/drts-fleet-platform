@@ -2624,6 +2624,14 @@ export class MultiTaxiService implements OnModuleInit {
         { entrySlug, tenantId: identity.tenantId },
       );
     }
+    if (!entry.activeFlag) {
+      throw new ApiRequestError(
+        HttpStatus.CONFLICT,
+        "PARTNER_NOTIFICATION_BINDING_ENTRY_INACTIVE",
+        "The partner entry is not active.",
+        { entrySlug },
+      );
+    }
     return entry;
   }
 }

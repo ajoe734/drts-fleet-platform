@@ -9,11 +9,10 @@ import { PartnerEntryNotificationBindingRepository } from "../../../../apps/api/
 import { MultiTaxiService } from "../../../../apps/api/src/modules/multi-taxi/multi-taxi.service";
 import { ApiRequestError } from "../../../../apps/api/src/common/api-envelope";
 import type { BootstrapRequestIdentity } from "../../../../apps/api/src/common/auth/auth.types";
-
-const require = createRequire(
-  new URL("../../../../apps/api/package.json", import.meta.url),
+const customRequire = createRequire(
+  typeof __filename !== "undefined" ? __filename : import.meta.url
 );
-const { Pool } = require("pg") as typeof import("pg");
+const { Pool } = customRequire("../../../../apps/api/node_modules/pg");
 const databaseUrl =
   process.env.PARTNER_NOTIFY_UI_TEST_DATABASE_URL || process.env.DATABASE_URL;
 
@@ -48,12 +47,12 @@ describe.skipIf(!databaseUrl)(
       const partnerId = "partner-1";
       const webhookId = "webhook-409";
       await pool.query(
-        "INSERT INTO admin.phase1_partner_channel_entries (entry_slug, tenant_id, partner_id) VALUES ($1, $2, $3)",
+        "INSERT INTO admin.phase1_partner_channel_entries (entry_slug, tenant_id, partner_id, created_at, updated_at) VALUES ($1, $2, $3, now(), now()) ON CONFLICT DO NOTHING",
         [entrySlug, tenantId, partnerId],
       );
       await pool.query(
-        "INSERT INTO admin.phase1_tenant_webhook_endpoints VALUES ($1)",
-        [webhookId],
+        "INSERT INTO admin.phase1_tenant_webhook_endpoints (webhook_id, tenant_id, status, created_at, updated_at, record) VALUES ($1, $2, 'active', now(), now(), '{}'::jsonb) ON CONFLICT DO NOTHING",
+        [webhookId, tenantId],
       );
 
       const res1 = await bindingRepo.put({
@@ -88,11 +87,11 @@ describe.skipIf(!databaseUrl)(
     it("retry idempotence/lease/fence/expiry/supersession are verified via DB state", async () => {
       const entrySlug = "entry-retry-test";
       await pool.query(
-        "INSERT INTO admin.phase1_partner_channel_entries (entry_slug, tenant_id, partner_id) VALUES ($1, 't', 'p') ON CONFLICT DO NOTHING",
+        "INSERT INTO admin.phase1_partner_channel_entries (entry_slug, tenant_id, partner_id, created_at, updated_at) VALUES ($1, 't', 'p', now(), now()) ON CONFLICT DO NOTHING",
         [entrySlug],
       );
       await pool.query(
-        "INSERT INTO admin.phase1_tenant_webhook_endpoints VALUES ('w') ON CONFLICT DO NOTHING",
+        "INSERT INTO admin.phase1_tenant_webhook_endpoints (webhook_id, tenant_id, status, created_at, updated_at, record) VALUES ('w', 't', 'active', now(), now(), '{}'::jsonb) ON CONFLICT DO NOTHING",
       );
 
       const outboxId = randomUUID();
@@ -102,9 +101,9 @@ describe.skipIf(!databaseUrl)(
       await pool.query(
         `
         INSERT INTO admin.phase1_partner_notification_bindings (
-          entry_slug, binding_id, tenant_id, partner_id, webhook_id, version, state, event_types
+          entry_slug, binding_id, tenant_id, partner_id, webhook_id, version, state, purpose, event_types, schema_version, acknowledgement_policy, updated_at
         ) VALUES (
-          $1, $2, 't', 'p', 'w', 1, 'ready', '["eta_changed"]'::jsonb
+          $1, $2, 't', 'p', 'w', 1, 'ready', 'passenger_notification', '["eta_changed"]'::jsonb, '1.0', 'durable_partner_acceptance_v1', now()
         )
       `,
         [entrySlug, bindingId],
@@ -137,7 +136,7 @@ describe.skipIf(!databaseUrl)(
         INSERT INTO mobility.phase1_partner_notification_delivery_contexts (
           outbox_id, delivery_id, order_id, entry_slug, tenant_id, partner_id, binding_id, binding_version, webhook_id, endpoint_fingerprint, wire_payload, wire_payload_hash, event_sequence, expires_at, retry_policy_snapshot, delivery_target, retry_disposition, failure_reason, created_at
         ) VALUES (
-          $1, gen_random_uuid(), $2, $3, 't', 'p', $4, 1, 'w', 'fingerprint', '{}', 'hash', 1, now() + interval '1 day', '{"maxAttempts": 3}', 'partner_endpoint', 'manual_only', 'provider_transient_error', now()
+          $1, gen_random_uuid(), $2, $3, 't', 'p', $4, 1, 'w', 'fingerprint', '{"event": "passenger.eta_changed.v1"}'::jsonb, 'hash', 1, now() + interval '1 day', '{"maxAttempts": 3}'::jsonb, 'partner_endpoint', 'manual_only', 'provider_transient_error', now()
         )
       `,
         [outboxId, orderId, entrySlug, bindingId],

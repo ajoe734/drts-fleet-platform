@@ -1933,8 +1933,8 @@ export class MultiTaxiRepository {
 
       if (ctx) {
         const newerCtxRows = await client.query(
-          "SELECT 1 FROM mobility.phase1_partner_notification_delivery_contexts WHERE order_id = $1 AND event_sequence > $2",
-          [ctx.order_id, ctx.event_sequence],
+          "SELECT 1 FROM mobility.phase1_partner_notification_delivery_contexts WHERE order_id = $1 AND event_sequence > $2 AND wire_payload->>'event' = $3",
+          [ctx.order_id, ctx.event_sequence, ctx.wire_payload?.event],
         );
         if (newerCtxRows.rows.length > 0) {
           await client.query("ROLLBACK");
