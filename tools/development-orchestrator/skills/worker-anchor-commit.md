@@ -58,7 +58,7 @@ Working tree is **not** a staging area for design intent. Stash is **not** an al
    ```bash
    git push -u origin <lane>/<task-id-kebab>
    ```
-7. Continue the task. Subsequent anchors on the same branch are allowed and encouraged. When the implementation is ready, run the required checks, push the final SHA, then hand off that exact SHA as the candidate.
+7. Continue the task. Subsequent anchors on the same branch are allowed and encouraged. When the implementation is ready, apply [AI Collaboration Guide §0.7](../../../AI_COLLABORATION_GUIDE.md#07-交付品質與退修規範), run the required checks, push the final SHA, then hand off that exact SHA with its verification evidence as the candidate.
 
 ## Rules
 
