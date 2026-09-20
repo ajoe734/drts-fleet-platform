@@ -1,10 +1,5 @@
 import { Injectable } from "@nestjs/common";
 
-import type {
-  PassengerDeviceRecord,
-  PassengerDeviceResolver,
-} from "./passenger-push.adapter";
-
 export interface WebPushSubscriptionKeysInput {
   p256dh: string;
   auth: string;
@@ -108,52 +103,5 @@ export class PassengerPushRepository {
       updatedAt: revokedAt,
     });
     return true;
-  }
-}
-
-/**
- * P5-PUSH-001 shipped `PassengerDeviceResolver` as an interface only, with
- * nothing implementing or registering it — so `PassengerPushAdapter` never
- * had a device to resolve and always sent (or attempted to send) without
- * one. This binds it to the subscription store above: no subscription (or
- * a subscription for a different passenger than the one being notified, or
- * one whose access token has since expired) resolves to `null`, which
- * `WebPushTransport.send` turns into `PassengerPushNoSubscriptionError`
- * rather than a fabricated `delivered` outcome.
- */
-@Injectable()
-export class PassengerPushDeviceResolver implements PassengerDeviceResolver {
-  constructor(private readonly repository: PassengerPushRepository) {}
-
-  resolveDevice(
-    passengerSubjectRef: string,
-    context?: {
-      tenantId?: string | undefined;
-      requestId?: string | undefined;
-      orderId?: string | undefined;
-    },
-  ): PassengerDeviceRecord | null {
-    if (!context?.orderId) {
-      return null;
-    }
-    const subscription = this.repository.findActiveByOrderId(context.orderId);
-    if (!subscription || subscription.passengerSubjectRef !== passengerSubjectRef) {
-      return null;
-    }
-    return {
-      deviceId: subscription.endpoint,
-      passengerSubjectRef: subscription.passengerSubjectRef,
-      deviceToken: "",
-      status: "active",
-      tenantId: subscription.tenantId,
-      // Reusing the adapter's existing expiry check ties a Web Push
-      // subscription's lifecycle to its ride access token without adding a
-      // second, parallel expiry mechanism.
-      expiresAt: subscription.accessTokenExpiresAt,
-      webPushSubscription: {
-        endpoint: subscription.endpoint,
-        keys: { ...subscription.keys },
-      },
-    };
   }
 }

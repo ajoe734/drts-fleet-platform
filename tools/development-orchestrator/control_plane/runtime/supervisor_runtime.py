@@ -1821,6 +1821,21 @@ def start_worker_for_request(
 ) -> tuple[bool, str | None, dict[str, Any] | None]:
     agent = agent_config_for(config, request.agent_id)
     request_metadata = request.metadata if isinstance(request.metadata, dict) else {}
+    role = task_role_for_dispatch_reason(request.reason)
+    if request.task_id and role:
+        task = task_index_from_status(config, load_status(config)).get(request.task_id)
+        if task is not None:
+            target = display_name_for(config, agent["id"])
+            if task.get(role) != target or not task_is_dispatch_eligible_for_agent(task, target, role):
+                return False, "dispatch_role_contract_changed", None
+            snapshot_task = request_metadata.get("task") or {}
+            if role == "reviewer" and any(snapshot_task.get(key) != task.get(key)
+                                          for key in ("candidate_sha", "candidate_generation")):
+                return False, "dispatch_candidate_changed", None
+            request.metadata.update({"dispatch_role": role, "dispatch_task_id": request.task_id,
+                                     "dispatch_agent": target,
+                                     "dispatch_candidate_sha": task.get("candidate_sha") or "",
+                                     "dispatch_candidate_generation": task.get("candidate_generation") or ""})
     admission = resource_admission_decision(config, state, request_metadata, agent_id=agent["id"])
     if not admission.allowed:
         reason = f"resource_admission:{admission.reason}"
@@ -3366,6 +3381,8 @@ def first_viable_agent(
     state: dict[str, Any] | None = None,
     *,
     provider_report: dict[str, Any] | None = None,
+    task: dict[str, Any] | None = None,
+    role: str | None = None,
 ) -> str | None:
     known = known_agent_display_names(config)
     seen: set[str] = set()
@@ -3377,6 +3394,8 @@ def first_viable_agent(
         if not name or name in seen or name in exclude or display_name_is_legacy_alias(name):
             continue
         seen.add(name)
+        if task is not None and not task_is_dispatch_eligible_for_agent(task, name, role):
+            continue
         if name in known:
             if lane_dispatch_disabled(config, name):
                 continue
@@ -3620,6 +3639,9 @@ def proactive_claim_plan_for_idle_agent(
     counterpart_agent = str(task.get("owner") or "") if reason == "review_ready_dispatch" else str(task.get("reviewer") or "")
     claim_role = "reviewer" if reason == "review_ready_dispatch" else "owner"
 
+    if not task_is_dispatch_eligible_for_agent(task, idle_agent_name, claim_role):
+        return None
+
     if chair_reassignment_guard_active(state, str(task.get("id") or ""), claim_role, assigned_agent):
         return None
 
@@ -3675,7 +3697,7 @@ def proactive_claim_plan_for_idle_agent(
         config,
         candidate_order,
         exclude={assigned_agent, counterpart_agent} if claim_role == "reviewer" else {assigned_agent},
-        state=state,
+        state=state, task=task, role=claim_role,
     )
     if best_agent != idle_agent_name:
         return None
@@ -3701,23 +3723,9 @@ def proactive_claim_plan_for_idle_agent(
     if helper_settings.get("availability_first", True) or helper_settings.get("allow_any_idle_lane", True):
         reviewer_candidates.extend(ordered_idle)
 
-    # Keep the reviewer separate from the claiming lane. Ask for a distinct one
-    # first, every time, and only accept self-review when there is no other
-    # viable reviewer at all — that is the deadlock this fallback exists for:
-    # one healthy lane, an owner that can be reclaimed, and a review that
-    # otherwise can never be reassigned.
-    #
-    # Deciding on idle-lane count instead would give up separation too early. A
-    # lane that is busy running a worker is still a viable reviewer, so with one
-    # idle lane and one busy lane the count says "deadlock" while a perfectly
-    # good reviewer is standing there.
     new_reviewer = first_viable_agent(
-        config, reviewer_candidates, exclude={idle_agent_name}, state=state
+        config, reviewer_candidates, exclude={idle_agent_name}, state=state, task=task, role="reviewer"
     )
-    if not new_reviewer:
-        new_reviewer = first_viable_agent(
-            config, reviewer_candidates, exclude=set(), state=state
-        )
     if not new_reviewer:
         return None
     return {
@@ -3876,6 +3884,7 @@ def maybe_reassign_task_after_worker_failure(
         new_reviewer = first_viable_agent(
             config,
             candidates,
+            task=task, role="reviewer" if task_status in review_statuses else "owner",
             exclude={owner, reviewer},
             state=state,
             provider_report=provider_report,
@@ -3918,6 +3927,7 @@ def maybe_reassign_task_after_worker_failure(
         new_owner = first_viable_agent(
             config,
             candidates,
+            task=task, role="reviewer" if task_status in review_statuses else "owner",
             exclude={owner, reviewer},
             state=state,
             provider_report=provider_report,
@@ -3930,6 +3940,7 @@ def maybe_reassign_task_after_worker_failure(
         new_reviewer = first_viable_agent(
             config,
             reviewer_candidates,
+            task=task, role="reviewer",
             exclude={new_owner},
             state=state,
             provider_report=provider_report,
@@ -4342,6 +4353,8 @@ def apply_worker_reported_block(
             "AI_STATUS_PRODUCER": "worker_result_recovery",
             "ORCH_RUN_ID": str(worker.get("run_id") or ""),
             "EVIDENCE_REF": evidence_ref,
+            **{f"ORCH_DISPATCH_{key.upper()}": str(((worker.get("request_snapshot") or {}).get("metadata") or {}).get(f"dispatch_{key}") or "")
+               for key in ("task_id", "role", "agent", "candidate_sha", "candidate_generation")},
         },
     )
     return result.ok
@@ -4672,6 +4685,21 @@ def finalize_exited_worker(
     if is_terminal_worker(worker) or worker.get("status") == "manual_pending":
         return False
 
+    fresh_task = task_index_from_status(config, load_status(config)).get(worker.get("task_id")) or {}
+    requires_receipt = bool(((worker.get("request_snapshot") or {}).get("metadata") or {}).get("dispatch_role"))
+    receipt = (fresh_task.get("worker_outcomes") or {}).get(worker.get("run_id"))
+    if receipt and receipt.get("outcome") in {"advanced", "blocked", "progress"}:
+        if receipt["outcome"] == "progress":
+            consume_progress_outcome(config, worker, receipt, now=now)
+        else:
+            consume_worker_result(worker, receipt, completed_at=utc_now())
+        finalize_queue_event_record(config, state, worker, "completed")
+        clear_lane_failure(state, worker.get("agent_id") or worker.get("provider"))
+        write_activity_log(config, {"type": "worker_completed", "task_id": worker.get("task_id"),
+                                   "worker_run_id": worker["run_id"],
+                                   "message": "Consumed committed attempt outcome: " + receipt["command"]})
+        return True
+
     if current_mode in {"planning", "coordination"}:
         undelivered = undelivered_declared_outputs(worker)
         if undelivered:
@@ -4697,7 +4725,7 @@ def finalize_exited_worker(
             },
         )
         finalize_queue_event_record(config, state, worker, "completed")
-    elif task_status in expected_completion_statuses:
+    elif task_status in expected_completion_statuses and not requires_receipt:
         worker["status"] = "completed"
         worker["last_event_at"] = utc_now()
         write_activity_log(
@@ -4730,7 +4758,8 @@ def finalize_exited_worker(
                 },
             )
             return True
-        if outcome and outcome.get("outcome") in {"advanced", "progress"}:
+        if (outcome and outcome.get("outcome") in {"advanced", "progress"}
+                and not (worker.get("request_snapshot", {}).get("metadata") or {}).get("dispatch_role")):
             if not consume_progress_outcome(config, worker, outcome, now=now):
                 return False
             finalize_queue_event_record(config, state, worker, "completed")
@@ -4748,9 +4777,8 @@ def finalize_exited_worker(
             return True
 
         # The cached task snapshot can predate a worker's final status write.
-        fresh_task = task_index_from_status(config, load_status(config)).get(worker.get("task_id")) or {}
         fresh_status = str(fresh_task.get("status") or "").lower()
-        if fresh_status and fresh_status != task_status and fresh_status in expected_completion_statuses:
+        if not requires_receipt and fresh_status and fresh_status != task_status and fresh_status in expected_completion_statuses:
             worker["status"] = "completed"
             worker["last_event_at"] = utc_now()
             write_activity_log(
@@ -6634,7 +6662,7 @@ def apply_chair_reassignment_action(
             f"{task_id} is not on the task board. Check that the id is a board task id "
             "and not a worker run label or a dispatch-pause record."
         )
-    if not task_is_dispatch_eligible_for_agent(task, to_agent):
+    if not task_is_dispatch_eligible_for_agent(task, to_agent, role):
         return reject(f"{task_id} is not dispatch-eligible for {to_agent}.")
     current_owner = str(task.get("owner") or "").strip()
     current_reviewer = str(task.get("reviewer") or "").strip()
