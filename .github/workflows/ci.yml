@@ -255,7 +255,13 @@ jobs:
       - name: Unit tests
         run: |
           pnpm run test:unit --reporter=default --reporter=json --outputFile.json=unit-test-results.json
-          python3 tools/ci/test_partner_notification_postgres_gate.py unit-test-results.json
+          python3 tools/ci/verify_partner_notification_postgres_gate.py unit-test-results.json
+      - name: Upload unit test reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: unit-test-reports
+          path: unit-test-results.json
       - name: Apply migrations
         run: pnpm db:migrate
       - name: API unit tests
@@ -268,6 +274,12 @@ jobs:
         # Keep every test and assertion, but serialize access to the shared DB.
         run: |
           pnpm --filter @drts/api test --no-file-parallelism --maxConcurrency=1 --reporter=default --reporter=json --outputFile.json=api-test-results.json
+      - name: Upload API test reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: api-test-reports
+          path: api-test-results.json
 
   smoke-acceptance:
     name: Smoke acceptance
