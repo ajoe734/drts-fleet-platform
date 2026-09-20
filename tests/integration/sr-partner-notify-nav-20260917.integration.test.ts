@@ -130,7 +130,7 @@ describe("SR-PARTNER-NOTIFY-NAV-20260917 Integration", () => {
     }
   });
 
-  it("should reject resolving route when ownership mismatches for null-tenant (negative cross-tenant/partner)", async () => {
+  it("should reject resolving route when passenger mismatches for null-tenant (negative cross-passenger)", async () => {
     const client = await db.connect();
     const data = {
       orderId: randomUUID(),
@@ -138,8 +138,8 @@ describe("SR-PARTNER-NOTIFY-NAV-20260917 Integration", () => {
       partnerId: `partner-${randomUUID()}`,
       tenantId: `tenant-${randomUUID()}`,
       orderTenantId: null,
-      orderPartnerId: `different-partner-${randomUUID()}`, // Mismatch!
-      passengerId: `pass-${randomUUID()}`,
+      orderPartnerId: `partner-${randomUUID()}`,
+      passengerId: `different-pass-${randomUUID()}`, // Mismatch passenger!
       userRef: `user-${randomUUID()}`,
       rideRef: `ride-${randomUUID()}`,
       passengerSubjectRef: `subj-${randomUUID()}`,

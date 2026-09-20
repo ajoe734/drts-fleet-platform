@@ -1,7 +1,11 @@
 import { NextResponse } from "next/server";
-import { consumeReferralEmbedHandoffArtifact, getPartnerEntry } from "@/lib/embed-api";
+import {
+  consumeReferralEmbedHandoffArtifact,
+  getPartnerEntry,
+} from "@/lib/embed-api";
 import {
   clearReferralEmbedSession,
+  getReferralEmbedSession,
   writeReferralEmbedSession,
 } from "@/lib/embed-partner-session";
 
@@ -28,6 +32,15 @@ export async function GET(request: Request) {
       entrySlug,
       entryHost,
     });
+
+    const existingSession = await getReferralEmbedSession();
+    if (
+      existingSession &&
+      (existingSession.drtsPassengerId !== session.drtsPassengerId ||
+        existingSession.partnerEntrySlug !== session.partnerEntrySlug)
+    ) {
+      throw new Error("Session mismatch during artifact consumption");
+    }
 
     await writeReferralEmbedSession(session);
 

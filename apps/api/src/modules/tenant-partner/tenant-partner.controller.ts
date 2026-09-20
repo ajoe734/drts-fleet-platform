@@ -96,6 +96,7 @@ import type {
   ApiListData,
   ApiSuccessEnvelope,
 } from "@drts/contracts";
+import { REFERRAL_EMBED_REQUIRED_CONSENT_SCOPES } from "@drts/contracts";
 
 import { toCsv } from "../../common/csv";
 import {
@@ -198,14 +199,14 @@ export class TenantPartnerController {
   constructor(
     @Inject(TenantPartnerService)
     private readonly tenantPartnerService: TenantPartnerService,
-    @Inject(BillingSettlementService)
-    private readonly billingSettlementService: BillingSettlementService,
-    @Inject(OwnedMobilityService)
-    private readonly ownedMobilityService: OwnedMobilityService,
     @Inject(JwtAuthService)
     private readonly jwtAuthService: JwtAuthService,
     @Inject(IdempotencyService)
     private readonly idempotencyService: IdempotencyService,
+    @Inject(BillingSettlementService)
+    private readonly billingSettlementService: BillingSettlementService,
+    @Inject(OwnedMobilityService)
+    private readonly ownedMobilityService: OwnedMobilityService,
     @Optional()
     @Inject(IdentityRepository)
     private readonly identityRepository?: IdentityRepository,
@@ -2437,7 +2438,13 @@ export class TenantPartnerController {
             grantedScopes: consentRecord.grantedScopes,
             grantedAt: consentRecord.grantedAt,
           }
-        : null;
+        : route.consentBundleVersion
+          ? {
+              bundleVersion: route.consentBundleVersion,
+              grantedScopes: [...REFERRAL_EMBED_REQUIRED_CONSENT_SCOPES],
+              grantedAt: new Date().toISOString(), // Fallback if no ledger record exists but route was authorized
+            }
+          : null;
 
       const artifactCommand = {
         entrySlug,

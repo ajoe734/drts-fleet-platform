@@ -137,7 +137,9 @@ const { getTenantRoleScopes } = apiRequire(
 // Acceptance must explicitly select a migrated, dedicated test database.
 const acceptanceDatabaseUrl = process.env.DRTS_TENANT_BINDING_DATABASE_URL;
 if (process.env.DRTS_WEBHOOK_AUTH_EVIDENCE && !acceptanceDatabaseUrl) {
-  throw new Error("Acceptance evidence requires DRTS_TENANT_BINDING_DATABASE_URL");
+  throw new Error(
+    "Acceptance evidence requires DRTS_TENANT_BINDING_DATABASE_URL",
+  );
 }
 
 describe("SR-QA-WEBHOOK-001-FIX-TENANT-BINDING: Full AppModule / PG E2E Harness", () => {
@@ -167,22 +169,22 @@ describe("SR-QA-WEBHOOK-001-FIX-TENANT-BINDING: Full AppModule / PG E2E Harness"
     ).toBe(true);
     expect(
       controllerSelfParams.some(
-        (p) => p.index === 1 && p.param === BillingSettlementService,
+        (p) => p.index === 1 && p.param === JwtAuthService,
       ),
     ).toBe(true);
     expect(
       controllerSelfParams.some(
-        (p) => p.index === 2 && p.param === OwnedMobilityService,
+        (p) => p.index === 2 && p.param === IdempotencyService,
       ),
     ).toBe(true);
     expect(
       controllerSelfParams.some(
-        (p) => p.index === 3 && p.param === JwtAuthService,
+        (p) => p.index === 3 && p.param === BillingSettlementService,
       ),
     ).toBe(true);
     expect(
       controllerSelfParams.some(
-        (p) => p.index === 4 && p.param === IdempotencyService,
+        (p) => p.index === 4 && p.param === OwnedMobilityService,
       ),
     ).toBe(true);
     expect(
@@ -200,10 +202,10 @@ describe("SR-QA-WEBHOOK-001-FIX-TENANT-BINDING: Full AppModule / PG E2E Harness"
     const controllerDesignParams: unknown[] =
       Reflect.getMetadata("design:paramtypes", TenantPartnerController) || [];
     expect(controllerDesignParams[0]).toBe(TenantPartnerService);
-    expect(controllerDesignParams[1]).toBe(BillingSettlementService);
-    expect(controllerDesignParams[2]).toBe(OwnedMobilityService);
-    expect(controllerDesignParams[3]).toBe(JwtAuthService);
-    expect(controllerDesignParams[4]).toBe(IdempotencyService);
+    expect(controllerDesignParams[1]).toBe(JwtAuthService);
+    expect(controllerDesignParams[2]).toBe(IdempotencyService);
+    expect(controllerDesignParams[3]).toBe(BillingSettlementService);
+    expect(controllerDesignParams[4]).toBe(OwnedMobilityService);
     expect(controllerDesignParams[5]).toBe(IdentityRepository);
     expect(controllerDesignParams[6]).toBe(AuditNotificationService);
 
@@ -344,7 +346,10 @@ describe("SR-QA-WEBHOOK-001-FIX-TENANT-BINDING: Full AppModule / PG E2E Harness"
           return service.findTenantUser(tenantId, created.userId)!;
         };
 
-        const victimUser = await seedActiveTenantAdmin(victimTenantId, "victim");
+        const victimUser = await seedActiveTenantAdmin(
+          victimTenantId,
+          "victim",
+        );
         const otherUser = await seedActiveTenantAdmin(otherTenantId, "other");
         const victimPrincipalId = victimUser.userId;
         const otherPrincipalId = otherUser.userId;
@@ -606,9 +611,7 @@ describe("SR-QA-WEBHOOK-001-FIX-TENANT-BINDING: Full AppModule / PG E2E Harness"
         // TenantPartnerService#rotateApiKey. This is a distinct, later,
         // same-tenant mutation and does not affect the attack-phase
         // immutability already proven by `dbStateAfterAttacks` above.
-        const stateAfterRotate = (
-          await repository.loadState()
-        ).apiKeys.filter(
+        const stateAfterRotate = (await repository.loadState()).apiKeys.filter(
           (k: StoredTenantApiKeyRecord) => k.tenantId === victimTenantId,
         );
         const rotatedKeyAfterRotate = stateAfterRotate.find(

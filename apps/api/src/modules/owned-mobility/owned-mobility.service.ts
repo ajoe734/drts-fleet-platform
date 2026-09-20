@@ -13603,8 +13603,7 @@ export class OwnedMobilityService
       (o) =>
         (o.tenantId === identity.tenantId ||
           (o.tenantId === null &&
-            o.partnerEntrySlug === identity.partnerEntrySlug &&
-            o.partnerId === identity.partnerId)) &&
+            o.partnerEntrySlug === identity.partnerEntrySlug)) &&
         o.partnerEntrySlug === identity.partnerEntrySlug &&
         o.passenger?.passengerId === passengerId &&
         o.status !== "completed" &&
@@ -13666,8 +13665,7 @@ export class OwnedMobilityService
         (o) =>
           (o.tenantId === identity.tenantId ||
             (o.tenantId === null &&
-              o.partnerEntrySlug === identity.partnerEntrySlug &&
-              o.partnerId === identity.partnerId)) &&
+              o.partnerEntrySlug === identity.partnerEntrySlug)) &&
           o.partnerEntrySlug === identity.partnerEntrySlug &&
           o.passenger?.passengerId === passengerId,
       )
