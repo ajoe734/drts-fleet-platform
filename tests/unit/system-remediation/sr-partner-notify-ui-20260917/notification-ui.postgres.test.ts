@@ -3,7 +3,6 @@ import { describe, it, beforeAll, afterAll, expect } from "vitest";
 import { createRequire } from "node:module";
 
 const customRequire = createRequire(
-  // @ts-ignore
   new URL("../../../../apps/api/package.json", import.meta.url)
 );
 
@@ -14,7 +13,6 @@ import { AppModule } from "../../../../apps/api/src/app.module";
 import { MultiTaxiRepository } from "../../../../apps/api/src/modules/multi-taxi/multi-taxi.repository";
 import { MultiTaxiService } from "../../../../apps/api/src/modules/multi-taxi/multi-taxi.service";
 import { PartnerEntryNotificationBindingRepository } from "../../../../apps/api/src/modules/tenant-partner/partner-entry-notification-binding.repository";
-import { TenantPartnerService } from "../../../../apps/api/src/modules/tenant-partner/tenant-partner.service";
 import { ApiRequestError } from "../../../../apps/api/src/common/api-envelope";
 
 // Use the database URL specifically meant for this UI test.
@@ -27,7 +25,6 @@ describe.skipIf(!testDbUrl)("partner notification UI postgres acceptance", () =>
   let mtRepo: any;
   let mtService: any;
   let bindingRepo: any;
-  let tenantPartnerService: any;
 
   beforeAll(async () => {
     // Set environment for NestJS AppModule boot
@@ -41,7 +38,6 @@ describe.skipIf(!testDbUrl)("partner notification UI postgres acceptance", () =>
     mtRepo = app.get(MultiTaxiRepository);
     mtService = app.get(MultiTaxiService);
     bindingRepo = app.get(PartnerEntryNotificationBindingRepository);
-    tenantPartnerService = app.get(TenantPartnerService);
     
     pool = new Pool({ connectionString: testDbUrl, max: 16 });
   }, 60000);
