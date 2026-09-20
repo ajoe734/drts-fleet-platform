@@ -4861,6 +4861,42 @@ export class ApiClient {
       options,
     );
   }
+
+  // ===========================================================================
+  // SR-PARTNER-NOTIFY-UI-20260917
+  // ===========================================================================
+
+  public async getPartnerEntryNotificationBinding(entrySlug: string, options?: RequestOptions): Promise<any> {
+    return this.get<any>(`/api/platform-admin/partner-entries/${encodeURIComponent(entrySlug)}/notification-binding`, options);
+  }
+
+  public async updatePartnerEntryNotificationBinding(entrySlug: string, command: any, options?: RequestOptions): Promise<any> {
+    return this.put(`/api/platform-admin/partner-entries/${encodeURIComponent(entrySlug)}/notification-binding`, { ...options, body: command });
+  }
+
+  public async testPartnerEntryNotificationBinding(entrySlug: string, options?: RequestOptions): Promise<any> {
+    return this.post(`/api/platform-admin/partner-entries/${encodeURIComponent(entrySlug)}/notification-binding/test`, options);
+  }
+
+  public async enablePartnerEntryNotificationBinding(entrySlug: string, expectedVersion: number, options?: RequestOptions): Promise<any> {
+    return this.post(`/api/platform-admin/partner-entries/${encodeURIComponent(entrySlug)}/notification-binding/enable`, { ...options, body: { expectedVersion } });
+  }
+
+  public async disablePartnerEntryNotificationBinding(entrySlug: string, expectedVersion: number, options?: RequestOptions): Promise<any> {
+    return this.post(`/api/platform-admin/partner-entries/${encodeURIComponent(entrySlug)}/notification-binding/disable`, { ...options, body: { expectedVersion } });
+  }
+
+  public async listPartnerNotificationDeliveries(entrySlug: string, query?: any, options?: RequestOptions): Promise<ApiListData<any>> {
+    const params = new URLSearchParams();
+    if (query?.page !== undefined) params.set("page", String(query.page));
+    if (query?.pageSize !== undefined) params.set("pageSize", String(query.pageSize));
+    const qs = params.toString();
+    return this.get<ApiListData<any>>(`/api/platform-admin/partner-entries/${encodeURIComponent(entrySlug)}/notification-deliveries${qs ? `?${qs}` : ""}`, options);
+  }
+
+  public async retryPartnerNotificationDelivery(entrySlug: string, outboxId: string, options?: RequestOptions): Promise<any> {
+    return this.post(`/api/platform-admin/partner-entries/${encodeURIComponent(entrySlug)}/notification-deliveries/${encodeURIComponent(outboxId)}/retry`, options);
+  }
 }
 
 /**
