@@ -17,6 +17,7 @@ from common import (
     new_runtime_id,
     runtime_env_overrides,
     runtime_log_path,
+    worker_result_schema_path,
     select_rotation_model,
     spawn_background_process,
     to_bool,
@@ -224,8 +225,7 @@ class AntigravityAdapter(BaseAdapter):
             model = str(request.metadata.get("model_preference") or settings.get("model") or "").strip()
         if model:
             command.extend(["--model", model])
-        # agy --print defaults to a 5m timeout which kills long agentic tasks;
-        # allow a per-provider override (default 1h).
+        # Bound unattended tasks; CLI itself defaults to no print timeout.
         print_timeout = str(settings.get("print_timeout") or "1h").strip()
         if print_timeout:
             command.extend(["--print-timeout", print_timeout])
@@ -239,6 +239,8 @@ class AntigravityAdapter(BaseAdapter):
         output_format = str(settings.get("output_format") or "stream-json").strip()
         if output_format:
             command.extend(["--output-format", output_format])
+        if request.task_id:
+            command.extend(["--json-schema", str(worker_result_schema_path())])
         workspace_root = delivery_workspace_root(self.config, request.metadata)
         for directory in _include_directories(self.config, settings, Path(str(workspace_root))):
             command.extend(["--add-dir", directory])

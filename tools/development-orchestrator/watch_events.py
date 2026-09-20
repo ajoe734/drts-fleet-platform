@@ -354,6 +354,7 @@ def render_wakeup_message(
             f"(repo-external artifacts omitted: {skipped_external_targets}; do not stage paths outside this repository)"
         )
     is_reviewer_dispatch = str(event.get("reason") or "") == "review_ready_dispatch"
+    mutates_canonical = task_payload.get("mutates_canonical") is not False
     status_cli = str(task_board_cli_path())
     review_guardrails = ""
     if is_reviewer_dispatch:
@@ -372,7 +373,7 @@ def render_wakeup_message(
     else:
         base_branch = ""
     branch_protocol = ""
-    if not is_reviewer_dispatch:
+    if not is_reviewer_dispatch and mutates_canonical:
         branch_protocol = build_branch_protocol_block(
             task_id=raw_task_id,
             lane=lane,
@@ -380,7 +381,7 @@ def render_wakeup_message(
             base_branch=base_branch,
         )
     task_commit_guardrails = ""
-    if raw_task_id:
+    if raw_task_id and mutates_canonical and not is_reviewer_dispatch:
         task_commit_guardrails = (
             "\n若本次變更碰到 `docs/ops/branch-strategy.md` §11.1 的 fragile surface，或跨多檔共享 design intent，"
             "不能把 diff 只留在 working tree；在 yield / 換 task / 結束 session 前，"
@@ -390,7 +391,15 @@ def render_wakeup_message(
             "完成實作時，先用 `CANDIDATE_SHA=$(git rev-parse HEAD)` 與 `CANDIDATE_BRANCH=$(git branch --show-current)` handoff；"
             "不要呼叫 `done`。CI、merge 與外部 acceptance 由 candidate lifecycle 寫入。"
         )
+    completion_protocol = (
+        "審查已鎖定的 candidate；通過用 approve，不通過用 reopen，兩者都要帶 REVIEWED_SHA。"
+        if is_reviewer_dispatch else
+        ("完成實作及檢查後 commit、普通 non-force push，再以 CANDIDATE_SHA 與 CANDIDATE_BRANCH handoff 給指定 reviewer。"
+         if mutates_canonical else
+         "本任務不修改 canonical source；產出指定 evidence/report，完成後直接 handoff 給 reviewer，不建立 commit、branch 或 PR。")
+    )
     variables = {
+        "completion_protocol": completion_protocol,
         "shared_files": shared_files,
         "task_id": raw_task_id or "(none)",
         "task_id_kebab": task_id_kebab,

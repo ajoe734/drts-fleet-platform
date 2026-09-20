@@ -13,6 +13,7 @@ from types import ModuleType
 from typing import Any, Callable, Iterator, Mapping
 
 from control_plane.infra.task_board_repo import task_board_transaction
+from control_plane.domain.task_records import task_is_dispatch_eligible_for_agent
 
 
 TaskBoardHandler = Callable[[dict[str, Any], list[str]], Any]
@@ -57,8 +58,8 @@ class TaskBoardCommandExecutor:
     def execute_with_result(self, command: str, args: list[str]) -> Any:
         handler = self.runtime.read_only_commands.get(command)
         if handler is not None:
-            with task_board_transaction(self.runtime.status_file):
-                return handler(self.runtime.load_state(), args)
+            # The repository replaces the JSON atomically; readers need no writable lock.
+            return handler(self.runtime.load_state(), args)
 
         handler = self.runtime.mutation_commands.get(command)
         if handler is None:
@@ -67,13 +68,60 @@ class TaskBoardCommandExecutor:
         with task_board_transaction(self.runtime.status_file):
             state = self.runtime.load_state()
             state_before = deepcopy(state)
+            self._guard_worker_command(state, command, args)
             result = handler(state, args)
+            self._record_worker_outcome(state, command, args)
             try:
                 self.runtime.sync_all(state)
             except Exception:
                 self.runtime.save_state(state_before)
                 raise
         return result
+
+    @staticmethod
+    def _guard_worker_command(state: dict[str, Any], command: str, args: list[str]) -> None:
+        role = os.environ.get("ORCH_DISPATCH_ROLE", "")
+        if role not in {"owner", "reviewer"} or not os.environ.get("ORCH_RUN_ID"):
+            return
+        task_id = os.environ.get("ORCH_DISPATCH_TASK_ID", "")
+        if command not in {"start", "progress", "note", "handoff", "approve", "reopen", "blocker", "system-block"}:
+            raise SystemExit("Dispatched workers must use their assigned task lifecycle commands")
+        if not args or args[0] != task_id:
+            raise SystemExit("Dispatched worker cannot mutate a different task")
+        task = next((t for t in state.get("tasks", []) if t.get("id") == task_id), {})
+        agent = os.environ.get("ORCH_DISPATCH_AGENT", "")
+        if task.get(role) != agent or not task_is_dispatch_eligible_for_agent(task, agent, role):
+            raise SystemExit("Worker assignment changed; discard stale attempt")
+        if role == "reviewer":
+            for key in ("candidate_sha", "candidate_generation"):
+                if str(task.get(key) or "") != os.environ.get(f"ORCH_DISPATCH_{key.upper()}", ""):
+                    raise SystemExit("Review candidate changed; discard stale attempt")
+
+    @staticmethod
+    def _record_worker_outcome(state: dict[str, Any], command: str, args: list[str]) -> None:
+        # Store evidence with the canonical transaction, never infer success from
+        # the activity log (which may survive a rolled-back command).
+        outcomes = {"handoff": "advanced", "approve": "advanced", "reopen": "advanced",
+                    "progress": "progress", "blocker": "blocked", "system-block": "blocked"}
+        run_id = os.environ.get("ORCH_RUN_ID", "")
+        if not run_id or command not in outcomes or not args:
+            return
+        task = next((t for t in state.get("tasks", []) if t.get("id") == args[0]), None)
+        if task is None:
+            return
+        receipts = task.setdefault("worker_outcomes", {})
+        previous = receipts.get(run_id) or {}
+        if previous.get("outcome") == "advanced":
+            return
+        receipts[run_id] = {"outcome": outcomes[command], "command": command,
+                            "agent": os.environ.get("ORCH_DISPATCH_AGENT") or os.environ.get("AI_NAME", ""),
+                            "role": os.environ.get("ORCH_DISPATCH_ROLE", ""),
+                            "candidate_sha": task.get("candidate_sha"),
+                            "candidate_generation": task.get("candidate_generation"),
+                            "summary": str(args[-1]), "at": task.get("last_update")}
+        # Bound task history; one receipt per run, newer entries survive restart.
+        while len(receipts) > 32:
+            receipts.pop(next(iter(receipts)))
 
 
 _MODULE_CACHE: dict[tuple[str, str], ModuleType] = {}
