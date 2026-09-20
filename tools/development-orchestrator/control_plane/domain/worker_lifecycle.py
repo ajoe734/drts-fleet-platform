@@ -146,7 +146,9 @@ def worker_reported_outcome(worker: dict[str, Any]) -> dict[str, Any] | None:
                     if result.get("status") != "SUCCESS":
                         return None
                     response = result.get("response")
-                    payload = json.loads(response) if isinstance(response, str) else response
+                    payload = result.get("structured_output")
+                    if payload is None:
+                        payload = json.loads(response) if isinstance(response, str) else response
                     break
     except (OSError, ValueError, TypeError):
         return None

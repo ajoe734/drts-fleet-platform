@@ -4686,6 +4686,7 @@ def finalize_exited_worker(
         return False
 
     fresh_task = task_index_from_status(config, load_status(config)).get(worker.get("task_id")) or {}
+    requires_receipt = bool(((worker.get("request_snapshot") or {}).get("metadata") or {}).get("dispatch_role"))
     receipt = (fresh_task.get("worker_outcomes") or {}).get(worker.get("run_id"))
     if receipt and receipt.get("outcome") in {"advanced", "blocked", "progress"}:
         if receipt["outcome"] == "progress":
@@ -4724,7 +4725,7 @@ def finalize_exited_worker(
             },
         )
         finalize_queue_event_record(config, state, worker, "completed")
-    elif task_status in expected_completion_statuses:
+    elif task_status in expected_completion_statuses and not requires_receipt:
         worker["status"] = "completed"
         worker["last_event_at"] = utc_now()
         write_activity_log(
@@ -4777,7 +4778,7 @@ def finalize_exited_worker(
 
         # The cached task snapshot can predate a worker's final status write.
         fresh_status = str(fresh_task.get("status") or "").lower()
-        if fresh_status and fresh_status != task_status and fresh_status in expected_completion_statuses:
+        if not requires_receipt and fresh_status and fresh_status != task_status and fresh_status in expected_completion_statuses:
             worker["status"] = "completed"
             worker["last_event_at"] = utc_now()
             write_activity_log(

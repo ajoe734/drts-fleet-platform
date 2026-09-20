@@ -99,6 +99,20 @@ class DispatchContractTests(unittest.TestCase):
         with mock.patch.dict(os.environ, self.env), self.assertRaisesRegex(SystemExit, 'assignment changed'):
             self.executor('progress', mock.Mock()).execute('progress', ['TEST', 'stale'])
 
+    def test_chair_cannot_turn_a_task_failure_into_indefinite_manual_lane_pause(self):
+        self.assertFalse(runtime.chair_provider_pause_reason_is_actionable(
+            'manual', 'UI worker exited before task reached terminal status twice'))
+
+    def test_new_worker_cannot_claim_completion_from_another_attempts_task_status(self):
+        task = {**self.task, 'status': 'review'}
+        worker = {'run_id': 'run-2', 'task_id': 'TEST', 'status': 'running',
+                  'request_snapshot': {'metadata': {'dispatch_role': 'owner'}}}
+        with (mock.patch.object(runtime, 'load_status', return_value={'tasks': [task]}),
+              mock.patch.object(runtime, 'finalize_terminal_worker_outcome') as failed):
+            runtime.finalize_exited_worker({}, {}, worker, current_mode='execution', task_status='review',
+                                          expected_completion_statuses={'review'}, now=datetime.now(timezone.utc))
+        failed.assert_called_once()
+
     def test_read_only_board_access_does_not_require_a_write_lock(self):
         executor = TaskBoardCommandExecutor(TaskBoardCommandRuntime(
             self.root / 'ai-status.json', lambda: self.state, mock.Mock(), mock.Mock(),
@@ -116,6 +130,10 @@ class DispatchContractTests(unittest.TestCase):
         result = {'outcome': 'progress', 'summary': 'Tests pending', 'task_status_written': 'in_progress',
                   'blocker': None, 'verification': []}
         path.write_text(json.dumps({'event': 'result', 'result': {'status': 'SUCCESS', 'response': json.dumps(result)}}))
+        self.assertEqual(worker_reported_outcome(worker), result)
+        path.write_text(json.dumps({'event': 'result', 'result': {'status': 'SUCCESS',
+                        'response': json.dumps({**result, 'toolAction': 'provider annotation'}),
+                        'structured_output': result}}))
         self.assertEqual(worker_reported_outcome(worker), result)
 
     def test_brief_preserves_full_live_feedback_and_execution_contract(self):

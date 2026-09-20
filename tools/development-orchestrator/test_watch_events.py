@@ -212,6 +212,22 @@ class RenderWakeupMessageTests(unittest.TestCase):
             "providers": {agent_id: {"delivery_mode": "claude_cli"}},
         }
 
+    def test_report_only_dispatch_has_no_source_commit_workflow(self) -> None:
+        config = self._config(agent_id="gemini")
+        event = {"task_id": "REPORT-001", "reason": "owned_in_progress_dispatch",
+                 "task": {"id": "REPORT-001", "mutates_canonical": False}}
+        with mock.patch.object(watch_events, "selected_shared_files", return_value=[]):
+            rendered = watch_events.render_wakeup_message(config, event, "gemini")
+        self.assertNotIn("git worktree list", rendered)
+        self.assertNotIn("先 commit", rendered)
+        self.assertIn("不建立 commit、branch 或 PR", rendered)
+        event["reason"] = "review_ready_dispatch"
+        event["task"]["candidate_sha"] = "not_applicable"
+        with mock.patch.object(watch_events, "selected_shared_files", return_value=[]):
+            rendered = watch_events.render_wakeup_message(config, event, "gemini")
+        self.assertNotIn("git rev-parse HEAD", rendered)
+        self.assertIn("REVIEWED_SHA=not_applicable", rendered)
+
     def test_backend_task_emits_concrete_branch_block(self) -> None:
         config = self._config(agent_id="claude")
         event = {

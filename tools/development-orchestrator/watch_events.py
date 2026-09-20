@@ -365,6 +365,11 @@ def render_wakeup_message(
             "- 不要修改檔案、commit、push、amend、rebase 或切換 task branch。發現問題時用 `reopen`，不要直接修。\n"
             f"- 通過時用 `REVIEWED_SHA=<candidate sha> {status_cli} approve`；之後由 GitHub bus 對同一 SHA 記錄 CI 與 merge。\n"
         )
+    if is_reviewer_dispatch and not mutates_canonical:
+        review_guardrails = (
+            "\n這是 evidence/report 審查；檢查 brief 指定產出與驗收證據，不以 git HEAD 比對 not_applicable。\n"
+            f"通過用 `REVIEWED_SHA=not_applicable {status_cli} approve`，不通過用相同 REVIEWED_SHA 執行 reopen。\n"
+        )
     lane = str(agent.get("id") or target_agent or "").strip()
     task_id_kebab = raw_task_id.lower() if raw_task_id else ""
     if raw_task_id:
