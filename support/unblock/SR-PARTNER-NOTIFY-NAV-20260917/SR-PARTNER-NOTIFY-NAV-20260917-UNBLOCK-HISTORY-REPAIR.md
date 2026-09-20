@@ -92,7 +92,7 @@ do not regenerate or overwrite canonical MAP evidence.
 Comparing fixed SHAs `226be214..8435ecef` establishes:
 
 - The 91-line, five-case
-  `tests/unit/system-remediation/sr-partner-notify-nav-20260917/notification-navigation-route.test.ts`
+  [notification-navigation-route.test.ts at legacy SHA 226be214](https://github.com/ajoe734/drts-fleet-platform/blob/226be2143e0a7d1e44387da1525a509527b1cbc7/tests/unit/system-remediation/sr-partner-notify-nav-20260917/notification-navigation-route.test.ts)
   is absent from the recovery tree. Recover its intent and adapt it to the final
   production contract, including GET and alternate POST exchange, rather than
   dropping BFF coverage or copying stale assertions blindly.
@@ -256,6 +256,12 @@ and PR, avoiding a self-referential commit hash in the committed document.
   `python3 tools/ci/git/check_commit_trailers.py --base origin/dev --head HEAD`.
   The anchor checks passed; final checks and exact remote/PR identity must be
   read back before handoff and recorded in the machine receipt.
+- At `44bf3276b4c7458edc0615fdfdaa90e4e202e7fa`, the canonical consistency
+  check correctly rejected the historical BFF test citation as a missing current
+  checkout path. The citation now links to its exact historical GitHub blob.
+  Recheck with
+  `python3 tools/ci/git/check_canonical_consistency.py --ci --base origin/dev --head HEAD`;
+  no gate or product file was changed to resolve the report's citation error.
 - The existing CI classifier treats `support/` as product scope, even for this
   documentation-only report. Hosted checks are reported under this helper's
   actual SHA; neither a helper pass nor a shared-baseline failure establishes
