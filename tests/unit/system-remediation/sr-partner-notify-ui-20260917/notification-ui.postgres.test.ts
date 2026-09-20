@@ -14,7 +14,8 @@ const require = createRequire(
   new URL("../../../../apps/api/package.json", import.meta.url),
 );
 const { Pool } = require("pg") as typeof import("pg");
-const databaseUrl = process.env.PARTNER_NOTIFY_UI_TEST_DATABASE_URL;
+const databaseUrl =
+  process.env.PARTNER_NOTIFY_UI_TEST_DATABASE_URL || process.env.DATABASE_URL;
 
 describe.skipIf(!databaseUrl)(
   "partner notification UI postgres acceptance",
