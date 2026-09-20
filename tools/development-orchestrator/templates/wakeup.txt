@@ -4,6 +4,9 @@
 {{shared_files}}
 {{task_brief_inline}}
 
+Owner、reviewer 與 Supervisor 都必須遵守 `AI_COLLABORATION_GUIDE.md` §0.7「交付品質與退修規範」。
+沿用原 task artifact 記錄逐項修復與驗證證據；相同缺陷連續兩輪退修，先補最小重現／定位與修正邊界，再由原 owner 續做。
+
 找出目前分配給你、等待你回應或剛交接給你的 task，然後直接繼續工作。
 {{branch_protocol}}
 {{task_commit_guardrails}}
