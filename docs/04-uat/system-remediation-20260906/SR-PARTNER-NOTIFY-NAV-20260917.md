@@ -14,7 +14,7 @@ Validate the partner notification navigation resolution API and embed BFF redire
 ### 2. fresh_single_use_handoff_and_http_only_session_reuse
 
 - **Scenario:** Partner backend resolves navigation successfully. The returned `destinationUrl` is opened in a client webview.
-- **Expected:** The BFF route `/api/referral/notification-navigation` consumes the single-use artifact, establishes a fresh HttpOnly session cookie, and issues a 302 redirect to the embed page. A second request with the same artifact fails.
+- **Expected:** The BFF route `/api/referral/notification-navigation` consumes the single-use artifact, establishes a fresh HttpOnly session cookie, and issues a 307 redirect to the embed page. A second request with the same artifact fails.
 
 ### 3. navigation_reads_current_trip_without_creating_orders
 
@@ -27,18 +27,23 @@ Validate the partner notification navigation resolution API and embed BFF redire
 ## Test Evidence
 
 ```bash
-$ CANDIDATE_SHA=$(git rev-parse HEAD)
-$ echo $CANDIDATE_SHA
-d2facd065aabcedbf96c0bcb7962ca83d451ba57
+$ npx vitest run tests/integration/sr-partner-notify-nav-20260917.integration.test.ts
 
-$ pnpm vitest run tests/unit/system-remediation/sr-partner-notify-nav-20260917/partner-notification-navigation.test.ts
+ RUN  v4.1.4 /home/lupin/workspace/drts-fleet-platform/.artifacts/worktrees/auto/gemini-sr-partner-notify-nav-20260917
+
+ Test Files  1 passed (1)
+      Tests  2 passed (2)
+   Start at  08:30:30
+   Duration  790ms (transform 112ms, setup 0ms, import 442ms, tests 10ms, environment 0ms)
+
+$ npx vitest run tests/unit/system-remediation/sr-partner-notify-nav-20260917/notification-navigation-route.test.ts
 
  RUN  v4.1.4 /home/lupin/workspace/drts-fleet-platform/.artifacts/worktrees/auto/gemini-sr-partner-notify-nav-20260917
 
  Test Files  1 passed (1)
       Tests  5 passed (5)
-   Start at  08:16:55
-   Duration  7.36s (transform 4.84s, setup 0ms, import 6.89s, tests 25ms, environment 0ms)
+   Start at  08:34:51
+   Duration  458ms (transform 70ms, setup 0ms, import 184ms, tests 14ms, environment 0ms)
 ```
 
-Note: The integration test `tests/integration/sr-partner-notify-nav-20260917.integration.test.ts` requires a database connection and is executed in the GitHub-hosted PG CI pipeline.
+Note: The integration test `tests/integration/sr-partner-notify-nav-20260917.integration.test.ts` includes seeded ownership positive/negative lookup tests for null-tenant multi-taxi orders, executed in the GitHub-hosted PG CI pipeline.
