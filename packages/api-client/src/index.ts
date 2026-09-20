@@ -325,6 +325,8 @@ import type {
   UpdatePlatformAdminUserRoleCommand,
   UpdatePlatformTenantOnboardingCommand,
   UpdatePartnerChannelEntryCommand,
+  UpdatePartnerEntryNotificationBindingCommand,
+  PartnerEntryNotificationBinding,
   UpdatePlatformTenantSettingsCommand,
   UpdateTenantNotificationsCommand,
   UpdateTenantRoleCommand,
@@ -4866,24 +4868,24 @@ export class ApiClient {
   // SR-PARTNER-NOTIFY-UI-20260917
   // ===========================================================================
 
-  public async getPartnerEntryNotificationBinding(entrySlug: string, options?: RequestOptions): Promise<any> {
-    return this.get<any>(`/api/platform-admin/partner-entries/${encodeURIComponent(entrySlug)}/notification-binding`, options);
+  public async getPartnerEntryNotificationBinding(entrySlug: string, options?: RequestOptions): Promise<PartnerEntryNotificationBinding> {
+    return this.get<PartnerEntryNotificationBinding>(`/api/platform-admin/partner-entries/${encodeURIComponent(entrySlug)}/notification-binding`, options);
   }
 
-  public async updatePartnerEntryNotificationBinding(entrySlug: string, command: any, options?: RequestOptions): Promise<any> {
-    return this.put(`/api/platform-admin/partner-entries/${encodeURIComponent(entrySlug)}/notification-binding`, { ...options, body: command });
+  public async updatePartnerEntryNotificationBinding(entrySlug: string, command: UpdatePartnerEntryNotificationBindingCommand, options?: RequestOptions): Promise<PartnerEntryNotificationBinding> {
+    return this.put<PartnerEntryNotificationBinding>(`/api/platform-admin/partner-entries/${encodeURIComponent(entrySlug)}/notification-binding`, { ...options, body: command });
   }
 
-  public async testPartnerEntryNotificationBinding(entrySlug: string, options?: RequestOptions): Promise<any> {
-    return this.post(`/api/platform-admin/partner-entries/${encodeURIComponent(entrySlug)}/notification-binding/test`, options);
+  public async testPartnerEntryNotificationBinding(entrySlug: string, options?: RequestOptions): Promise<void> {
+    return this.post<void>(`/api/platform-admin/partner-entries/${encodeURIComponent(entrySlug)}/notification-binding/test`, options);
   }
 
-  public async enablePartnerEntryNotificationBinding(entrySlug: string, expectedVersion: number, options?: RequestOptions): Promise<any> {
-    return this.post(`/api/platform-admin/partner-entries/${encodeURIComponent(entrySlug)}/notification-binding/enable`, { ...options, body: { expectedVersion } });
+  public async enablePartnerEntryNotificationBinding(entrySlug: string, expectedVersion: number, options?: RequestOptions): Promise<PartnerEntryNotificationBinding> {
+    return this.post<PartnerEntryNotificationBinding>(`/api/platform-admin/partner-entries/${encodeURIComponent(entrySlug)}/notification-binding/enable`, { ...options, body: { expectedVersion } });
   }
 
-  public async disablePartnerEntryNotificationBinding(entrySlug: string, expectedVersion: number, options?: RequestOptions): Promise<any> {
-    return this.post(`/api/platform-admin/partner-entries/${encodeURIComponent(entrySlug)}/notification-binding/disable`, { ...options, body: { expectedVersion } });
+  public async disablePartnerEntryNotificationBinding(entrySlug: string, expectedVersion: number, options?: RequestOptions): Promise<PartnerEntryNotificationBinding> {
+    return this.post<PartnerEntryNotificationBinding>(`/api/platform-admin/partner-entries/${encodeURIComponent(entrySlug)}/notification-binding/disable`, { ...options, body: { expectedVersion } });
   }
 
   public async listPartnerNotificationDeliveries(entrySlug: string, query?: any, options?: RequestOptions): Promise<ApiListData<any>> {

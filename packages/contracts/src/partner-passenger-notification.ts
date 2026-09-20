@@ -110,6 +110,13 @@ export const PARTNER_NOTIFICATION_ACKNOWLEDGEMENT_POLICY =
  * ordinary tenant webhook subscription does not implicitly gain
  * `passenger.*` events; only a `ready` binding does.
  */
+
+export interface UpdatePartnerEntryNotificationBindingCommand {
+  webhookId: string;
+  eventTypes: PartnerPassengerEventType[];
+  expectedVersion: number;
+}
+
 export interface PartnerEntryNotificationBinding {
   bindingId: string;
   entrySlug: string;
