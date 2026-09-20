@@ -36,3 +36,5 @@
 | 5. PG test fixture missing fields | **FIXED** | `notification-ui.postgres.test.ts` - Added `program_id`, `status`, `record` to V0021 insert; added `ride_ref` to V0104 insert. | Statically verified; Awaits hosted CI test pass. |
 | 6. UAT incomplete evidence | **FIXED** | `SR-PARTNER-NOTIFY-UI-20260917.md` - Updated to explicitly state pass/fail/skip/blocked statuses. | This document. |
 | 7. Commit trailers failed | **FIXED** | `.git` commits - New candidate will be pushed as a single or appropriately appended commit without amending history. | `git log` verification |
+| 8. Test mocks repository | **FIXED** | `notification-ui.postgres.test.ts` - Rewritten to use `Test.createTestingModule({ imports: [AppModule] })` and boot the real application instead of mocking `TenantPartnerService` | Statically verified; Awaits hosted CI test pass with actual DB schema |
+| 9. Test builds its own table/SQL | **FIXED** | `notification-ui.postgres.test.ts` - Removed manual CREATE TABLE statements. The test now requires the CI to supply a migrated schema via `PARTNER_NOTIFY_UI_TEST_DATABASE_URL` | Statically verified; Awaits hosted CI test pass with actual DB schema |
