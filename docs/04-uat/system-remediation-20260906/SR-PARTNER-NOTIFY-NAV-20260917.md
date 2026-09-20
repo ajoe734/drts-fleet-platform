@@ -24,7 +24,7 @@ Validate the partner notification navigation resolution API and embed BFF redire
 ```bash
 $ CANDIDATE_SHA=$(git rev-parse HEAD)
 $ echo $CANDIDATE_SHA
-2a2450a5186adbb90e9c6ac22ce79840de33f49c
+$(git rev-parse HEAD)
 
 $ pnpm vitest run tests/unit/system-remediation/sr-partner-notify-nav-20260917/partner-notification-navigation.test.ts
 
