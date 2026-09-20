@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import { describe, it, beforeAll, afterAll, expect } from "vitest";
 import { createRequire } from "node:module";
 
+// @ts-ignore
 const customRequire = createRequire(
   new URL("../../../../apps/api/package.json", import.meta.url)
 );
