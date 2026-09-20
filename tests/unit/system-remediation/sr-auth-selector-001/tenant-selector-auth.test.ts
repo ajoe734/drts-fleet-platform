@@ -211,7 +211,7 @@ describe("SR-AUTH-SELECTOR-001: end-to-end guard + tenant-partner controller acc
   function createHarness() {
     const auditService = new AuditNotificationService();
     const service = new TenantPartnerService(auditService);
-    const controller = new TenantPartnerController(null as any, null as any, 
+    const controller = new TenantPartnerController(null as any, null as any,
       service,
       undefined as never,
       undefined as never,

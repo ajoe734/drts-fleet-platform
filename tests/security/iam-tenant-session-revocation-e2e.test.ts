@@ -226,7 +226,7 @@ describe("IAM-OP-AUTH-E2E-001: Session Revocation, Downgrade, Suspension & Isola
       oidcService,
     );
 
-    tenantPartnerController = new TenantPartnerController(null as any, null as any, 
+    tenantPartnerController = new TenantPartnerController(null as any, null as any,
       tenantPartnerService,
       {} as never,
       {} as never,

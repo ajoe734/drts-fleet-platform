@@ -129,7 +129,7 @@ function createFullPlatformHarness() {
     idempotencyService,
   );
 
-  const tenantPartnerController = new TenantPartnerController(null as any, null as any, 
+  const tenantPartnerController = new TenantPartnerController(null as any, null as any,
     tenantPartnerService,
     {} as never,
     {} as never,

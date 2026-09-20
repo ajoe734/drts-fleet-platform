@@ -64,7 +64,7 @@ describe("SR-QA-WEBHOOK-001-FIX-TENANT-BINDING: C111 API key tenant header bindi
   function createHarness() {
     const auditService = new AuditNotificationService();
     const service = new TenantPartnerService(auditService);
-    const controller = new TenantPartnerController(null as any, null as any, 
+    const controller = new TenantPartnerController(null as any, null as any,
       service,
       undefined as never,
       undefined as never,

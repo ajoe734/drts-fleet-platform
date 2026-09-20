@@ -1,6 +1,5 @@
 import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
 import { TenantPartnerController } from "../../../../apps/api/src/modules/tenant-partner/tenant-partner.controller";
-import { ApiRequestError } from "../../../../apps/api/src/common/api-envelope";
 
 describe("SR-PARTNER-NOTIFY-NAV-20260917", () => {
   let controller: TenantPartnerController;
