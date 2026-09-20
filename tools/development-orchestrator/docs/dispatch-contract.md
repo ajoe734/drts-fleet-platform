@@ -61,3 +61,28 @@ handoff followed by CI reopening, rollback, idempotence, stale review generation
 reassignment fencing, writable-lock-free reads, schema validation, full briefs,
 and rejection of unproven completion and chair manual lane bans. Existing tool
 and control-plane suites remain required.
+
+Transaction and materializer fixtures use `DispatchEnvironmentIsolation` to
+remove inherited `ORCH_RUN_ID` and `ORCH_DISPATCH_*` for each test, restoring the
+environment through unittest cleanup. The executor, system-remediation and
+unattended-voice fixtures otherwise inherit the invoking worker's restrictions.
+Production fencing is unchanged; an explicit owner/reviewer regression verifies
+that a temporary status path still rejects non-lifecycle mutation commands.
+
+On 2026-09-20, both dispatch environments passed 939 orchestrator tests and
+47 control-plane tests each. Reproduce from the repository root:
+
+```bash
+set -e
+for role in owner reviewer; do
+  if [ "$role" = owner ]; then agent=Codex; else agent=Codex2; fi
+  for suite in tools/development-orchestrator tools/development-orchestrator/control_plane/tests; do
+    env PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=tools/development-orchestrator \
+      ORCH_RUN_ID="$role-isolation-probe" ORCH_DISPATCH_ROLE="$role" \
+      ORCH_DISPATCH_TASK_ID=ORCH-DISPATCH-CONTRACT-20260919 ORCH_DISPATCH_AGENT="$agent" \
+      ORCH_DISPATCH_CANDIDATE_SHA=96e030d70e66a47056f8bf1269f2cc46ae21b39f \
+      ORCH_DISPATCH_CANDIDATE_GENERATION=isolation-probe-generation \
+      python3 -m unittest discover -s "$suite" -p 'test_*.py' -q
+  done
+done
+```
