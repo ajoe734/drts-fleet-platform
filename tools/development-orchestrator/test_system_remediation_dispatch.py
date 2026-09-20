@@ -18,6 +18,7 @@ sys.modules[spec.name] = dispatch
 spec.loader.exec_module(dispatch)
 sys.path.insert(0, str(REPO / 'tools/development-orchestrator'))
 from control_plane.usecases.task_board_commands import TaskBoardCommandExecutor, TaskBoardCommandRuntime
+from orchestrator_test_support import DispatchEnvironmentIsolation
 
 
 class MemoryBoard:
@@ -56,8 +57,9 @@ class MemoryBoard:
         return TaskBoardCommandRuntime(self.path, lambda: copy.deepcopy(self.state), self.save, self.sync, {}, {})
 
 
-class WaveTests(unittest.TestCase):
+class WaveTests(DispatchEnvironmentIsolation, unittest.TestCase):
     def setUp(self):
+        super().setUp()
         self.m = json.loads((REPO / dispatch.MANIFEST_REF).read_text())
         self.source = 'a' * 40
 
