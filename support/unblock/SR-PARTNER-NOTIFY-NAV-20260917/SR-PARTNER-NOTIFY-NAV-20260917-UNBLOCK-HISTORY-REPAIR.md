@@ -242,3 +242,21 @@ The helper changes only this report. Its final full SHA, normal push and PR head
 must match the `CANDIDATE_SHA`, `CANDIDATE_BRANCH`, and `PR_URL` supplied to the
 release CLI handoff to Gemini. Exact delivery evidence belongs in that receipt
 and PR, avoiding a self-referential commit hash in the committed document.
+
+## 7. Helper publication
+
+- Published anchor: `821f23836f74672b33ba851e374ba32cda5396f9`; ordinary
+  `git push -u origin codex2/sr-partner-notify-nav-20260917-unblock-history-repair`
+  completed with exit 0, and `git ls-remote` returned that exact SHA.
+- Review artifact: [draft PR #2093](https://github.com/ajoe734/drts-fleet-platform/pull/2093)
+  targets `dev`; only this report is changed. The final candidate follows the
+  anchor with a normal commit/push; no existing history is rewritten.
+- Local report verification: `pnpm exec prettier --check <this-report>` and
+  `git diff --check origin/dev...HEAD`; commit verification:
+  `python3 tools/ci/git/check_commit_trailers.py --base origin/dev --head HEAD`.
+  The anchor checks passed; final checks and exact remote/PR identity must be
+  read back before handoff and recorded in the machine receipt.
+- The existing CI classifier treats `support/` as product scope, even for this
+  documentation-only report. Hosted checks are reported under this helper's
+  actual SHA; neither a helper pass nor a shared-baseline failure establishes
+  the parent product's acceptance.
