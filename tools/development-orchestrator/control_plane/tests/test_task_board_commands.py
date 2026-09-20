@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+import os
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 from control_plane.usecases.task_board_commands import (
     TaskBoardCommandExecutor,
@@ -13,6 +15,16 @@ from control_plane.usecases.task_board_commands import (
 
 class TaskBoardCommandExecutorTests(unittest.TestCase):
     def setUp(self) -> None:
+        # These transaction fixtures are not the invoking worker's task. Keep
+        # its dispatch context out of the tests and restore it after each one.
+        environ = {
+            key: value
+            for key, value in os.environ.items()
+            if key != "ORCH_RUN_ID" and not key.startswith("ORCH_DISPATCH_")
+        }
+        env_patch = mock.patch.dict(os.environ, environ, clear=True)
+        env_patch.start()
+        self.addCleanup(env_patch.stop)
         self.temp_dir = tempfile.TemporaryDirectory()
         self.status_file = Path(self.temp_dir.name) / "ai-status.json"
         self.status_file.write_text("{}", encoding="utf-8")

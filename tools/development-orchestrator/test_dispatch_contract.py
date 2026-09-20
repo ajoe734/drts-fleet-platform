@@ -99,6 +99,17 @@ class DispatchContractTests(unittest.TestCase):
         with mock.patch.dict(os.environ, self.env), self.assertRaisesRegex(SystemExit, 'assignment changed'):
             self.executor('progress', mock.Mock()).execute('progress', ['TEST', 'stale'])
 
+    def test_dispatch_fencing_rejects_non_lifecycle_commands_even_with_temporary_status(self):
+        for role, agent in (('owner', 'Gemini'), ('reviewer', 'Codex')):
+            with self.subTest(role=role):
+                env = {**self.env, 'ORCH_DISPATCH_ROLE': role, 'ORCH_DISPATCH_AGENT': agent}
+                handler = mock.Mock()
+                sync = mock.Mock()
+                with mock.patch.dict(os.environ, env), self.assertRaisesRegex(SystemExit, 'assigned task lifecycle'):
+                    self.executor('change', handler, sync).execute('change', ['TEST'])
+                handler.assert_not_called()
+                sync.assert_not_called()
+
     def test_chair_cannot_turn_a_task_failure_into_indefinite_manual_lane_pause(self):
         self.assertFalse(runtime.chair_provider_pause_reason_is_actionable(
             'manual', 'UI worker exited before task reached terminal status twice'))
