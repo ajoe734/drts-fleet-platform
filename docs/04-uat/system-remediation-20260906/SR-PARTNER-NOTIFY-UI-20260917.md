@@ -19,7 +19,7 @@
 
 ## Handoff Evidence (Gemini)
 
-- **Candidate SHA**: (To be filled by handoff)
+- **Candidate SHA**: (See commit SHA)
 - **Candidate Branch**: gemini/sr-partner-notify-ui-20260917
 - **Evidence**:
   - Unit tests run: `npx vitest run tests/unit/system-remediation/sr-partner-notify-ui-20260917` (Exit 0, with PG test skipped locally).
