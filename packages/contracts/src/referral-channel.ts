@@ -91,6 +91,7 @@ export interface CreateReferralEmbedHandoffArtifactCommand {
   entryHost: string;
   apiKey?: string;
   partnerUserRef: string;
+  navigationContext?: { orderId: string; screen: string };
   consentBundle?: ReferralEmbedConsentBundle | null;
 }
 
@@ -141,6 +142,7 @@ export interface ReferralEmbedSession {
   entryHost: string;
   drtsPassengerId: string;
   identityActive: boolean;
+  navigationContext?: { orderId: string; screen: string };
   consent: {
     requiredScopes: ReferralEmbedRequiredConsentScope[];
     bundleVersion: string | null;
@@ -252,4 +254,15 @@ export interface ReferralPassengerReceipt {
   formattedTotal: string;
   paymentChannel: string;
   downloadUrl?: string;
+}
+
+export interface ResolvePartnerNotificationNavigationCommand {
+  entrySlug: string;
+  rideRef: string;
+  partnerUserRef: string;
+}
+
+export interface PartnerNotificationNavigationResolution {
+  handoffArtifact: ReferralEmbedHandoffArtifact;
+  destinationUrl: string;
 }

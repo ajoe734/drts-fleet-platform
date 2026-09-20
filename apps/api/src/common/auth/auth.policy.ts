@@ -925,5 +925,18 @@ export function resolveRouteAuthPolicy(
     };
   }
 
+  if (
+    routePath.startsWith("partner/entries/") &&
+    routePath.endsWith("/notification-navigation/resolve") &&
+    upperMethod === "POST"
+  ) {
+    return {
+      routeKey: "partner:notification-navigation:resolve",
+      requiredScopes: [],
+      allowedRealms: baseAllowedRealms("partner"),
+      description: "Partner notification navigation resolution",
+    };
+  }
+
   return null;
 }
