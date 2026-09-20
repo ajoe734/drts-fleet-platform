@@ -1794,6 +1794,7 @@ export class MultiTaxiRepository {
   async retryPartnerNotificationDelivery(
     entry: { entrySlug: string; tenantId: string; partnerId: string },
     outboxId: string,
+    identity?: any,
   ) {
     const entrySlug = entry.entrySlug;
     if (!this.isEnabled())
@@ -1840,6 +1841,11 @@ export class MultiTaxiRepository {
           kind: "failed",
           failure: { failureReason: "route_missing", retryDisposition: "none" },
         };
+      }
+
+      if (outbox.status === "pending" || outbox.status === "sending") {
+        await client.query("ROLLBACK");
+        return { kind: "accepted" };
       }
 
       const retryDisp = ctx
@@ -1963,8 +1969,8 @@ export class MultiTaxiRepository {
       }
 
       await client.query(
-        "UPDATE ops.consumer_notification_outbox SET status = 'pending', next_attempt_at = NOW() WHERE outbox_id = $1",
-        [outboxId],
+        "UPDATE ops.consumer_notification_outbox SET status = 'pending', attempt_count = 0, next_attempt_at = NOW(), payload = jsonb_set(COALESCE(payload, '{}'::jsonb), '{retryAudit}', $2::jsonb) WHERE outbox_id = $1",
+        [outboxId, JSON.stringify({ actorId: identity?.actorId, actorType: identity?.actorType, retriedAt: new Date().toISOString() })],
       );
 
       if (ctx) {
