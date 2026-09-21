@@ -389,6 +389,8 @@ type PartnerIngressHandoffResolution = PartnerIngressResolution & {
 
 type ReferralEmbedHandoffResolution = PartnerIngressHandoffResolution & {
   entryHost: string;
+  currentDrtsPassengerId?: string;
+  currentPartnerEntrySlug?: string;
   consentRequired: boolean;
   consentBundleVersion: string | null;
   consentGrantedAt: string | null;
@@ -5711,6 +5713,9 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
       consentGrantedAt: resolved.consentGrantedAt,
       issuedAt: issuedAt.toISOString(),
       expiresAt: expiresAt.toISOString(),
+      ...(command.navigationContext
+        ? { navigationContext: command.navigationContext }
+        : {}),
     };
     const record = await this.referralEmbedHandoffRepository.issue(persistence);
     return {
@@ -5731,9 +5736,62 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
     artifact: string;
     entrySlug: string;
     entryHost: string;
+    currentDrtsPassengerId?: string;
+    currentPartnerEntrySlug?: string;
   }): Promise<ReferralEmbedSession> {
     const result = await this.referralEmbedHandoffRepository.consume(command);
+    if (result.outcome === "session_mismatch") {
+      throw new ApiRequestError(
+        HttpStatus.FORBIDDEN,
+        "SESSION_MISMATCH",
+        "The session mismatch during artifact consumption.",
+      );
+    }
     if (result.outcome === "consumed") {
+      const entry = await this.getPartnerEntry(result.session.partnerEntrySlug);
+      if (!entry || entry.status !== "active") {
+        throw new ApiRequestError(
+          HttpStatus.FORBIDDEN,
+          "PARTNER_ENTRY_INACTIVE",
+          "The partner entry is inactive or missing.",
+        );
+      }
+      if (
+        entry.tenantId !== result.session.identity.tenantId ||
+        entry.partnerId !== (result.session.identity.partnerId || null)
+      ) {
+        throw new ApiRequestError(
+          HttpStatus.FORBIDDEN,
+          "OWNERSHIP_MISMATCH",
+          "The partner entry ownership has changed.",
+        );
+      }
+
+      const link =
+        await this.partnerUserIdentityLinkRepository.findByDrtsPassengerId(
+          result.session.partnerEntrySlug,
+          result.session.drtsPassengerId,
+        );
+      if (!link || link.status !== "active") {
+        throw new ApiRequestError(
+          HttpStatus.FORBIDDEN,
+          "REFERRAL_HANDOFF_REVOKED",
+          "The partner user identity link is no longer active.",
+        );
+      }
+
+      if (!result.session.identityActive) {
+        const latestConsent = await this.referralEmbedHandoffRepository.findLatestConsent(
+          result.session.partnerEntrySlug,
+          result.session.drtsPassengerId,
+        );
+        if (latestConsent) {
+          result.session.identityActive = true;
+          result.session.consent.bundleVersion = latestConsent.bundleVersion;
+          result.session.consent.grantedAt = latestConsent.grantedAt;
+        }
+      }
+
       return result.session;
     }
     if (result.outcome === "replayed") {
@@ -5764,6 +5822,16 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
     );
   }
 
+  async getLatestReferralEmbedConsent(
+    entrySlug: string,
+    drtsPassengerId: string,
+  ) {
+    return this.referralEmbedHandoffRepository.findLatestConsent(
+      entrySlug,
+      drtsPassengerId,
+    );
+  }
+
   async recordReferralEmbedConsent(
     command: RecordReferralEmbedConsentCommand,
   ): Promise<ReferralEmbedSession> {
@@ -5772,6 +5840,13 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
       await this.referralEmbedHandoffRepository.recordConsent(command);
     if (result.outcome === "recorded" || result.outcome === "replayed") {
       return result.session;
+    }
+    if (result.outcome === "session_mismatch") {
+      throw new ApiRequestError(
+        HttpStatus.FORBIDDEN,
+        "SESSION_MISMATCH",
+        "The session mismatch during consent recording.",
+      );
     }
     if (result.outcome === "wrong_host") {
       throw new ApiRequestError(

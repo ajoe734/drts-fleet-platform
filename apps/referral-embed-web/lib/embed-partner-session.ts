@@ -116,6 +116,8 @@ export function buildReferralEmbedConsentCommand(input: {
   handoffId: string;
   entrySlug: string;
   entryHost: string;
+  currentDrtsPassengerId?: string;
+  currentPartnerEntrySlug?: string;
   actorIp?: string | null;
   userAgent?: string | null;
 }): RecordReferralEmbedConsentCommand {
@@ -123,6 +125,12 @@ export function buildReferralEmbedConsentCommand(input: {
     handoffId: input.handoffId,
     entrySlug: input.entrySlug,
     entryHost: input.entryHost,
+    ...(input.currentDrtsPassengerId
+      ? { currentDrtsPassengerId: input.currentDrtsPassengerId }
+      : {}),
+    ...(input.currentPartnerEntrySlug
+      ? { currentPartnerEntrySlug: input.currentPartnerEntrySlug }
+      : {}),
     consentBundle: {
       bundleVersion: REFERRAL_EMBED_CONSENT_BUNDLE_VERSION,
       grantedScopes: [...REFERRAL_EMBED_REQUIRED_CONSENT_SCOPES],

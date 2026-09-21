@@ -919,7 +919,7 @@ export class OwnedMobilityService
       orderDomain: "owned",
       tenantId: null,
       partnerId: identity?.partnerId ?? null,
-      partnerProgramId: null,
+      partnerProgramId: identity?.partnerProgramId ?? null,
       partnerEntrySlug,
       eligibilityVerificationId: null,
       issuerAuthorizationRef: null,
@@ -1141,7 +1141,7 @@ export class OwnedMobilityService
       orderDomain: "owned",
       tenantId: null,
       partnerId: identity?.partnerId ?? null,
-      partnerProgramId: null,
+      partnerProgramId: identity?.partnerProgramId ?? null,
       partnerEntrySlug: identity?.partnerEntrySlug?.trim() || null,
       eligibilityVerificationId: null,
       issuerAuthorizationRef: null,
@@ -13601,11 +13601,33 @@ export class OwnedMobilityService
 
     const activeOrder = Array.from(this.orders.values()).find(
       (o) =>
-        o.tenantId === identity.tenantId &&
+        // Multi-taxi standard-taxi orders are tenant-less by design
+        // (owned-mobility.service.ts buildAndPersistMultiTaxiRide sets
+        // tenantId: null); frozen partnerId/partnerProgramId/entrySlug are
+        // the authoritative ownership boundary for those, not tenantId.
+        //
+        // Known residual gap (SR-PARTNER-NOTIFY-NAV-20260917 review): if the
+        // same entrySlug is later reassigned to a different tenant (SD §4's
+        // "entry 更換 tenantId" case), a null-tenant order created under the
+        // old tenant stays visible to the new tenant's identity, because
+        // OwnedOrderRecord has no field that freezes the tenant that was
+        // active at booking time and this method is synchronous (no query
+        // against the frozen mobility.phase1_order_partner_notification_routes
+        // route). Closing it fully needs either a new frozen field on
+        // OwnedOrderRecord (packages/contracts/src/index.ts) or making this
+        // method async against that route table, both of which require
+        // widening this task's write_scope to owned-mobility.controller.ts /
+        // packages/contracts/src/index.ts. Not done here — out of scope.
+        (o.tenantId === null || o.tenantId === identity.tenantId) &&
+        (o.partnerId || null) === (identity.partnerId || null) &&
+        (o.partnerProgramId || null) === (identity.partnerProgramId || null) &&
         o.partnerEntrySlug === identity.partnerEntrySlug &&
         o.passenger?.passengerId === passengerId &&
         o.status !== "completed" &&
-        o.status !== "cancelled",
+        o.status !== "cancelled" &&
+        o.status !== "dispatch_failed" &&
+        o.status !== "dispatch_timeout" &&
+        o.status !== "no_supply",
     );
 
     if (!activeOrder) {
@@ -13661,7 +13683,11 @@ export class OwnedMobilityService
     const passengerOrders = Array.from(this.orders.values())
       .filter(
         (o) =>
-          o.tenantId === identity.tenantId &&
+          // See getReferralPassengerActiveTrip: null tenantId is the
+          // tenant-less multi-taxi design, not an unauthorized wildcard.
+          (o.tenantId === null || o.tenantId === identity.tenantId) &&
+          (o.partnerId || null) === (identity.partnerId || null) &&
+          (o.partnerProgramId || null) === (identity.partnerProgramId || null) &&
           o.partnerEntrySlug === identity.partnerEntrySlug &&
           o.passenger?.passengerId === passengerId,
       )
