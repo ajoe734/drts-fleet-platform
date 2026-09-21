@@ -121,6 +121,17 @@ describe.skipIf(!testDbUrl)("partner notification UI postgres acceptance", () =>
 
     await pool.query(
       `
+      INSERT INTO ops.phase1_owned_orders (
+        order_id, tenant_id, status, created_at, updated_at
+      ) VALUES (
+        $1, $2, 'assigned', now(), now()
+      )
+    `,
+      [orderId, tenantId],
+    );
+
+    await pool.query(
+      `
       INSERT INTO mobility.phase1_order_partner_notification_routes (
         order_id, tenant_id, partner_id, entry_slug, partner_user_ref, drts_passenger_id, passenger_subject_ref, identity_linked_at, consent_bundle_version, ride_ref
       ) VALUES (

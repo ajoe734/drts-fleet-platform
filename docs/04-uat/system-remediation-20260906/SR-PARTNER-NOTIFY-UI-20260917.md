@@ -36,6 +36,6 @@
 | 5. tenantId/partnerId ownership check | PASS | `multi-taxi.repository.ts` | Filter/reject historical ownership mismatches. |
 | 6. Manual retry budget, readiness | PASS | `multi-taxi.repository.ts` | Added maxAttempts check, readiness facade verification, supersession. |
 | 7. fetchState infinite loop, 409 | STOP (Awaits Design) | `partner-notification-panel.tsx` | Removed from placeholder. |
-| 8. Postgres test fixtures & env var | SKIP (Awaits CI) | `notification-ui.postgres.test.ts` | Lint fixed. PG tests left skipped locally, wired into CI package.json integration test. |
+| 8. Postgres test fixtures & env var | SKIP (Awaits CI) | `notification-ui.postgres.test.ts` | Lint and missing phase1_owned_orders fixture fixed. PG tests left skipped locally, wired into CI package.json integration test. |
 | 9. UAT claims/ApiClient tests | PASS | `SR-PARTNER-NOTIFY-UI-20260917.md` | UAT updated to reflect actual status (skip/unverified). |
 | 10. Incidental Scope changes / UI | PASS | `03_ui_design_delta.md`, `partner-notification-panel.tsx` | Invented layout removed, replaced with placeholder. Canvas gap handed off. |
