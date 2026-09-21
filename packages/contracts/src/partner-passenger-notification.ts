@@ -369,6 +369,10 @@ export interface PartnerNotificationTypedFailure {
   detail?: string;
 }
 
+export type PartnerNotificationRequeueOutcome =
+  | { kind: "requeued" }
+  | { kind: "failed"; failure: PartnerNotificationTypedFailure };
+
 export type PartnerNotificationDispatchOutcome =
   | { kind: "accepted"; ack: PartnerNotificationAcceptedAck }
   | { kind: "failed"; failure: PartnerNotificationTypedFailure };
@@ -419,12 +423,14 @@ export const PARTNER_NOTIFICATION_MAX_ACK_BODY_BYTES = 4096;
 // §15 UI API Read Models
 // ===========================================================================
 
-export interface PartnerNotificationDeliveryRecord extends PartnerNotificationDeliveryContext {
+export interface PartnerNotificationDeliveryRecord extends Partial<PartnerNotificationDeliveryContext> {
+  outboxId: string;
   status: "pending" | "sending" | "delivered" | "failed";
   result: "delivered" | "provider_not_configured" | "provider_error" | null;
   attempts: number;
   maxAttempts: number;
   nextAttemptAt: string | null;
+  createdAt?: string;
 }
 
 export interface PartnerNotificationDeliveryQuery {

@@ -2598,9 +2598,10 @@ export class MultiTaxiService implements OnModuleInit {
     entrySlug: string,
     outboxId: string,
     identity: BootstrapRequestIdentity,
+    requestId?: string,
   ) {
     const entry = this.requireEntryInScope(entrySlug, identity);
-    return this.repository!.retryPartnerNotificationDelivery(entry, outboxId, identity);
+    return this.repository!.retryPartnerNotificationDelivery(entry, outboxId, identity, requestId);
   }
 
   private requireEntryInScope(

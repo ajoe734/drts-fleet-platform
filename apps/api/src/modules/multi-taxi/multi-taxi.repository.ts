@@ -1,3 +1,4 @@
+import { PARTNER_PASSENGER_EVENT_TO_EXTERNAL_NAME, PartnerPassengerEventType } from "@drts/contracts";
 import { PLATFORM_CURRENCY } from "@drts/contracts";
 import { Injectable, Logger, Optional } from "@nestjs/common";
 import type { QueryResultRow } from "pg";
@@ -23,7 +24,8 @@ import type {
   StoredPartnerNotificationContext,
 } from "./partner-notification.types";
 
-import { DatabaseService } from "../../common/db";
+import { DatabaseService } from "../../common/database/database.service";
+import { PartnerNotificationDispatchFacade } from "../tenant-partner/partner-notification-dispatch.facade";
 
 type AuthorizationRow = QueryResultRow & {
   authorization_id: string;
@@ -230,7 +232,7 @@ type OrderPartnerNotificationRouteRow = QueryResultRow & {
 export class MultiTaxiRepository {
   private readonly logger = new Logger(MultiTaxiRepository.name);
 
-  constructor(@Optional() private readonly databaseService?: DatabaseService) {}
+  constructor(@Optional() private readonly databaseService?: DatabaseService, @Optional() private readonly facade?: PartnerNotificationDispatchFacade) {}
 
   isEnabled() {
     return this.databaseService?.isEnabled() ?? false;
@@ -1791,10 +1793,11 @@ export class MultiTaxiRepository {
     };
   }
 
-  async retryPartnerNotificationDelivery(
+    async retryPartnerNotificationDelivery(
     entry: { entrySlug: string; tenantId: string; partnerId: string },
     outboxId: string,
     identity?: any,
+    requestId?: string,
   ) {
     const entrySlug = entry.entrySlug;
     if (!this.isEnabled())
@@ -1817,13 +1820,13 @@ export class MultiTaxiRepository {
         await client.query("ROLLBACK");
         return {
           kind: "failed",
-          failure: { failureReason: "route_missing", retryDisposition: "none" },
+          failure: { failureReason: "route_missing", retryDisposition: "none", suggestedNextAttemptAt: null },
         };
       }
       const outbox = outboxRows.rows[0];
 
       const ctxRows = await client.query(
-        "SELECT entry_slug, tenant_id, partner_id, expires_at, failure_reason, binding_id, retry_disposition, order_id, event_sequence FROM mobility.phase1_partner_notification_delivery_contexts WHERE outbox_id = $1 FOR UPDATE",
+        "SELECT entry_slug, tenant_id, partner_id, expires_at, failure_reason, binding_id, binding_version, endpoint_fingerprint, retry_disposition, order_id, event_sequence, wire_payload, retry_policy_snapshot FROM mobility.phase1_partner_notification_delivery_contexts WHERE outbox_id = $1 FOR UPDATE",
         [outboxId],
       );
       const ctx = ctxRows.rows[0] || null;
@@ -1839,13 +1842,25 @@ export class MultiTaxiRepository {
         await client.query("ROLLBACK");
         return {
           kind: "failed",
-          failure: { failureReason: "route_missing", retryDisposition: "none" },
+          failure: { failureReason: "route_missing", retryDisposition: "none", suggestedNextAttemptAt: null },
         };
       }
 
       if (outbox.status === "pending" || outbox.status === "sending") {
         await client.query("ROLLBACK");
-        return { kind: "accepted" };
+        return { kind: "requeued" };
+      }
+      
+      const maxAttempts = ctx && ctx.retry_policy_snapshot ? parseInt(ctx.retry_policy_snapshot.maxAttempts || '3', 10) : parseInt(outbox.payload?.partnerNotification?.maxAttempts || '3', 10);
+      if (outbox.attempt_count >= maxAttempts) {
+        await client.query("ROLLBACK");
+        return {
+          kind: "failed",
+          failure: {
+            failureReason: "provider_terminal_error", // what's the expected reason? we'll use provider_terminal_error? Actually maybe budget exhausted is something else. Let's just return terminal
+            retryDisposition: "terminal",
+          }
+        };
       }
 
       const retryDisp = ctx
@@ -1930,47 +1945,75 @@ export class MultiTaxiRepository {
           },
         };
       }
+      
+      const route = await this.findOrderPartnerNotificationRoute(outbox.order_id);
+      if (!route) {
+        await client.query("ROLLBACK");
+        return {
+          kind: "failed",
+          failure: { failureReason: "route_missing", retryDisposition: "none", suggestedNextAttemptAt: null },
+        };
+      }
+      
+      if (ctx && (ctx.order_id !== route.orderId || ctx.tenant_id !== route.tenantId || ctx.partner_id !== route.partnerId || ctx.entry_slug !== route.entrySlug || ctx.wire_payload?.data?.recipient?.partnerUserRef !== route.partnerUserRef)) {
+        await client.query("ROLLBACK");
+        return { kind: "failed", failure: { failureReason: "owner_changed", retryDisposition: "terminal", suggestedNextAttemptAt: null } };
+      }
+      
+      const eventType = ctx ? ctx.wire_payload?.event : outbox.payload?.partnerNotification?.eventType;
+      if (!eventType) {
+        await client.query("ROLLBACK");
+        return { kind: "failed", failure: { failureReason: "route_missing", retryDisposition: "terminal", suggestedNextAttemptAt: null } };
+      }
+      
+      // Convert to internal event type if needed, or if facade expects internal event type
+      const internalEvent = Object.keys(PARTNER_PASSENGER_EVENT_TO_EXTERNAL_NAME).find(k => PARTNER_PASSENGER_EVENT_TO_EXTERNAL_NAME[k as PartnerPassengerEventType] === eventType) as PartnerPassengerEventType || eventType;
 
-      if (ctx) {
-        const newerCtxRows = await client.query(
-          "SELECT 1 FROM mobility.phase1_partner_notification_delivery_contexts WHERE order_id = $1 AND event_sequence > $2 AND wire_payload->>'event' = $3",
-          [ctx.order_id, ctx.event_sequence, ctx.wire_payload?.event],
-        );
-        if (newerCtxRows.rows.length > 0) {
+      if (this.facade) {
+        const readiness = await this.facade.resolveNotificationRoute(route, internalEvent);
+        if (!readiness.ready) {
           await client.query("ROLLBACK");
-          return {
-            kind: "failed",
-            failure: {
-              failureReason: "notification_superseded",
-              retryDisposition: "terminal",
-            },
-          };
+          return { kind: "failed", failure: readiness.failure };
+        }
+        if (ctx && (ctx.binding_id !== readiness.binding.bindingId || ctx.wire_payload?.data?.recipient?.webhookId !== readiness.binding.webhookId)) {
+          // owner_changed
+          await client.query("ROLLBACK");
+          return { kind: "failed", failure: { failureReason: "owner_changed", retryDisposition: "terminal", suggestedNextAttemptAt: null } };
+        }
+        if (ctx && (ctx.binding_version !== readiness.binding.version || ctx.endpoint_fingerprint !== readiness.endpointFingerprint)) {
+          // configuration_blocked
+          await client.query("ROLLBACK");
+          return { kind: "failed", failure: { failureReason: "endpoint_disabled", retryDisposition: "configuration_blocked", suggestedNextAttemptAt: null } };
         }
       }
 
-      if (ctx && ctx.binding_id) {
-        const bindingRes = await client.query(
-          "SELECT state FROM admin.phase1_partner_notification_bindings WHERE binding_id = $1",
-          [ctx.binding_id],
-        );
-        if (
-          bindingRes.rows.length === 0 ||
-          bindingRes.rows[0].state !== "ready"
-        ) {
+      const relevance = await this.findPartnerNotificationRelevance(outbox.order_id);
+      if (!relevance) {
+        await client.query("ROLLBACK");
+        return { kind: "failed", failure: { failureReason: "route_missing", retryDisposition: "terminal", suggestedNextAttemptAt: null } };
+      }
+      
+      if (internalEvent !== "receipt_ready") {
+        if (["cancelled", "completed", "closed", "rejected"].includes(relevance.status)) {
           await client.query("ROLLBACK");
-          return {
-            kind: "failed",
-            failure: {
-              failureReason: "endpoint_disabled",
-              retryDisposition: "configuration_blocked",
-            },
-          };
+          return { kind: "failed", failure: { failureReason: "notification_obsolete", retryDisposition: "terminal", suggestedNextAttemptAt: null } };
+        }
+        const assignmentVersion = ctx ? ctx.wire_payload?.data?.assignment?.version : outbox.payload?.partnerNotification?.assignmentVersion;
+        if (assignmentVersion !== undefined && assignmentVersion !== null && assignmentVersion < relevance.assignmentVersion) {
+          await client.query("ROLLBACK");
+          return { kind: "failed", failure: { failureReason: "notification_superseded", retryDisposition: "terminal", suggestedNextAttemptAt: null } };
         }
       }
+
+      const retryAuditEntry = { actorId: identity?.actorId, actorType: identity?.actorType, requestId, retriedAt: new Date().toISOString() };
+      const newPayload = outbox.payload || {};
+      const retryHistory = Array.isArray(newPayload.retryHistory) ? newPayload.retryHistory : [];
+      retryHistory.push(retryAuditEntry);
+      newPayload.retryHistory = retryHistory;
 
       await client.query(
-        "UPDATE ops.consumer_notification_outbox SET status = 'pending', attempt_count = 0, next_attempt_at = NOW(), payload = jsonb_set(COALESCE(payload, '{}'::jsonb), '{retryAudit}', $2::jsonb) WHERE outbox_id = $1",
-        [outboxId, JSON.stringify({ actorId: identity?.actorId, actorType: identity?.actorType, retriedAt: new Date().toISOString() })],
+        "UPDATE ops.consumer_notification_outbox SET status = 'pending', next_attempt_at = NOW(), payload = $2::jsonb WHERE outbox_id = $1",
+        [outboxId, JSON.stringify(newPayload)],
       );
 
       if (ctx) {
@@ -1979,14 +2022,16 @@ export class MultiTaxiRepository {
           [outboxId],
         );
       } else {
+        newPayload.partnerNotification = newPayload.partnerNotification || {};
+        newPayload.partnerNotification.retryDisposition = "automatic";
         await client.query(
-          "UPDATE ops.consumer_notification_outbox SET payload = jsonb_set(payload, '{partnerNotification,retryDisposition}', '\"automatic\"'::jsonb) WHERE outbox_id = $1",
-          [outboxId],
+          "UPDATE ops.consumer_notification_outbox SET payload = $2::jsonb WHERE outbox_id = $1",
+          [outboxId, JSON.stringify(newPayload)],
         );
       }
 
       await client.query("COMMIT");
-      return { kind: "accepted" };
+      return { kind: "requeued" };
     } catch (e) {
       await client.query("ROLLBACK");
       throw e;

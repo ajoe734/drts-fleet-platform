@@ -75,6 +75,7 @@ export class PartnerNotificationDispatchFacade {
       ready: false,
       failure: {
         failureReason,
+        suggestedNextAttemptAt: null,
         retryDisposition:
           PARTNER_NOTIFICATION_FAILURE_REASON_RETRY_DISPOSITIONS[failureReason],
         suggestedNextAttemptAt: null,

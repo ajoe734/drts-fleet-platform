@@ -10,11 +10,6 @@
       "path": "apps/referral-embed-web/components/passenger-embed.tsx",
       "rules": ["jsx-text", "jsx-copy-attribute"],
       "reason": "Referral embed UI canvas mock surface."
-    },
-    {
-      "path": "apps/platform-admin-web/components/partner-notification-panel.tsx",
-      "rules": ["jsx-text"],
-      "reason": "Pending design canvas placeholder layout."
     }
   ]
 }

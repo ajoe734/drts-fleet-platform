@@ -12,7 +12,7 @@
     "skipLibCheck": true,
     "forceConsistentCasingInFileNames": true,
     "outDir": "dist",
-    
+    "rootDir": "src",
     "paths": {
       "@drts/contracts": ["../contracts/src/index.ts"]
     }

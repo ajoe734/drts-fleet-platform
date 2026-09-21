@@ -3,7 +3,6 @@ import { describe, it, beforeAll, afterAll, expect } from "vitest";
 import { createRequire } from "node:module";
 
 const customRequire = createRequire(
-  // @ts-ignore
   new URL("../../../../apps/api/package.json", import.meta.url)
 );
 const { NestFactory } = customRequire("@nestjs/core");
@@ -159,13 +158,13 @@ describe.skipIf(!testDbUrl)("partner notification UI postgres acceptance", () =>
       entryObj,
       outboxId,
     );
-    expect(res1.kind).toBe("accepted");
+    expect(res1.kind).toBe("requeued");
 
     const res2 = await mtRepo.retryPartnerNotificationDelivery(
       entryObj,
       outboxId,
     );
-    expect(res2.kind).toBe("accepted");
+    expect(res2.kind).toBe("requeued");
   });
 
   it("same-tenant vs cross-tenant logic is validated using real TenantPartnerService", async () => {

@@ -534,7 +534,7 @@ export class MultiTaxiController {
     @Headers("x-request-id") requestId?: string,
   ) {
     return toApiSuccessEnvelope(
-      await this.multiTaxiService.retryPartnerNotificationDelivery(entrySlug, outboxId, identity),
+      await this.multiTaxiService.retryPartnerNotificationDelivery(entrySlug, outboxId, identity, requestId),
       requestId,
     );
   }
