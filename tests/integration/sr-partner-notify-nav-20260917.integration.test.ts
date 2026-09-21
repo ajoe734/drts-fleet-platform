@@ -103,12 +103,12 @@ describe.skipIf(!seedDatabaseUrl)(
       await client.query(
         `
       INSERT INTO ops.phase1_owned_orders
-        (order_id, order_no, tenant_id, record, status, order_source, service_bucket, dispatch_semantics, created_at, updated_at)
+        (order_id, order_no, record, status, order_source, service_bucket, dispatch_semantics, created_at, updated_at)
       VALUES
-        ($1, 'NO123', $3, $2::jsonb, 'driver_assigned', 'app', 'standard', 'immediate', NOW(), NOW())
+        ($1, 'NO123', $2::jsonb, 'driver_assigned', 'app', 'standard', 'immediate', NOW(), NOW())
       ON CONFLICT DO NOTHING;
     `,
-        [orderId, orderRecord, orderTenantId],
+        [orderId, orderRecord],
       );
 
       // Seed notification route

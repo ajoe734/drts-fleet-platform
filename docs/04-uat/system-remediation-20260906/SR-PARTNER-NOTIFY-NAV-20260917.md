@@ -187,6 +187,51 @@ smoke acceptance`, `Smoke acceptance`, and `ci-integ` job results are what must 
 actually passes; do not treat this section as that confirmation. Record those job
 URLs/exit-codes here once available for this candidate's new SHA.
 
+## Hosted CI on `6ca8521bb39bfea779409d56afc50ff8522f3c6c` (PR #2100) — migration replay confirmed, new generated-column bug found and fixed
+
+Same SHA, PR #2100 head at review time
+(https://github.com/ajoe734/drts-fleet-platform/actions/runs/35640860341,
+https://github.com/ajoe734/drts-fleet-platform/actions/runs/35640860323). `candidate`,
+`Change scope`, `Commit trailers`, `lint`, `typecheck`, `Canonical consistency`,
+`BFF-only imports`, `integration`, `Verify Internal Key Exceptions`,
+`iam-negative-matrix`, `No real financial-institution identifiers`, `build`,
+`Runtime mirror guard`, `i18n-guard`/`i18n guard`, `cross-surface-e2e`, `ui-route-e2e`, and
+`e2e` all `SUCCESS`. `unit` (job 106469715160), `Product smoke acceptance` (job
+106469686603), `Smoke acceptance` (job 106472593950), and `ci-integ` (job 106472347480)
+still failed, but with a **new** root cause — proof the self-provisioned-database/migration-
+replay fix from the previous round works: the suite's `beforeAll` now successfully creates its
+throwaway database and replays every migration, and the 3 non-NAV Postgres-opt-in suites that
+ran alongside it (`db-apply.test.ts` and friends) passed. The NAV suite's own 5 cases then all
+failed in `setupMockData` with Postgres error `428C9 cannot insert a non-DEFAULT value into
+column "tenant_id"` / `Column "tenant_id" is a generated column`, thrown from the `INSERT INTO
+ops.phase1_owned_orders` statement.
+
+Root cause: migration `V0064__owned_booking_cross_instance_identity.sql` adds
+`ops.phase1_owned_orders.tenant_id` as `GENERATED ALWAYS AS (NULLIF(record ->> 'tenantId',
+'')) STORED` — a real, previously-undetected schema fact this suite never exercised against
+real Postgres before this round (the prior unmigrated-DB failure never got far enough to hit
+it). The test's `setupMockData` was writing `orderTenantId` into both the JSONB `record` column
+(correctly) **and** directly into the generated `tenant_id` column (rejected by Postgres),
+because the column list still assumed `tenant_id` was a plain writable column.
+
+Fix applied in this candidate: dropped `tenant_id` from the `INSERT INTO
+ops.phase1_owned_orders` column list and parameter list in `setupMockData`
+(`tests/integration/sr-partner-notify-nav-20260917.integration.test.ts`). `record.tenantId` was
+already being set from `orderTenantId` in every call site, so the generated column now derives
+itself from the JSONB payload exactly as `V0064` intends, with no change to any test's
+input data or assertions.
+
+**Verification of this fix in this session:** `node --experimental-strip-types --check
+tests/integration/sr-partner-notify-nav-20260917.integration.test.ts` (exit 0, syntax only);
+`git diff --check` clean. Attempts to run this worktree's `vitest` binary directly (it now
+resolves to the canonical root's real install rather than a dangling symlink) were blocked by
+this session's sandbox policy before reaching a real Postgres instance, and no local Postgres
+is available in this VM, so the fix could **not** be executed locally against a live database
+in this session. The new candidate SHA's hosted `unit`, `Product smoke acceptance`, `Smoke
+acceptance`, and `ci-integ` job results are what must confirm it actually passes; do not treat
+this section as that confirmation. Record those job URLs/exit-codes here once available for
+this candidate's new SHA.
+
 ## Production Requirements Checked
 
 - [ ] entry_scoped_navigation_denies_cross_subject_tenant_entry — code present for findings #1/#2/#3/#5/#7; entry-reassignment edge case (finding #4) still open (see "Known residual gap"); not live-verified this session
