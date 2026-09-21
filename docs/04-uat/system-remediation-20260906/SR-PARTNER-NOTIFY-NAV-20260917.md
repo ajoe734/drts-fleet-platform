@@ -122,6 +122,71 @@ not treat this section's local checks as a substitute for that.
 receipt/outcome-screen flows remain unverified** — no product/API/PG/browser/server was
 started in this session, consistent with this VM's repository-checks-only constraint.
 
+## Hosted CI on `92ac938e809195879799f1a147742c5a8ded85fb` (PR #2100) — first real product-check pass
+
+This is the first round in this task's 10+-round history where the pushed candidate reached
+and passed the product-level checks: `Commit trailers`, `Change scope`, `Canonical
+consistency`, `BFF-only imports`, `No real financial-institution identifiers`, `Runtime mirror
+guard`, `Spec source archive`, `Verify Internal Key Exceptions`, `lint`, `typecheck`, `build`,
+`i18n-guard`/`i18n guard`, `integration`, `iam-negative-matrix`, `cross-surface-e2e`,
+`ui-route-e2e`, and `e2e` all reported `SUCCESS` on this exact SHA
+(https://github.com/ajoe734/drts-fleet-platform/actions/runs/35639003861,
+https://github.com/ajoe734/drts-fleet-platform/actions/runs/35639003862). That is real,
+hosted confirmation that findings #1–#8 above hold up under `tsc`/`eslint`/the full API build,
+not just this owner's local `node --check` syntax pass.
+
+Four checks failed, all with the identical root cause:
+
+- `unit` (`CI (integration trunk)`, job 106463592064)
+- `Product smoke acceptance` (`CI`, job 106463560127)
+- `Smoke acceptance` (`CI`, job 106466443635 — downstream aggregate of `Product smoke
+  acceptance`)
+- `ci-integ` (`CI (integration trunk)`, job 106466506164 — downstream aggregate that requires
+  `unit` to succeed)
+
+Root cause (not a regression from findings #1–#8's fixes; a pre-existing gap in this file's
+own CI wiring, first surfaced now that the candidate finally got past `typecheck`): the root
+`vitest.config.ts` `include` glob picks up `tests/integration/sr-partner-notify-nav-20260917.integration.test.ts`
+under `pnpm run test:unit`. That script runs in two places that hit shared, job-scoped
+Postgres services *before* migrations are applied to them: `ci-integ.yml`'s `unit` job has no
+migration step at all, and `ci.yml`'s `Product smoke acceptance` job runs its `Unit tests` step
+before its later `Apply migrations` step. The test connected straight to that ambient,
+unmigrated `DATABASE_URL` via `DatabaseService`/`PartnerNotificationNavigationRepository`, so
+every one of its 5 cases failed in `cleanupMockData` with `relation
+"mobility.phase1_order_partner_notification_routes" does not exist` (5 failed / 3946 passed
+in `unit`'s Vitest run). This is exactly the gap the immediately-prior review round
+(`codex-20260921T131444Z-cce68d43`, finding #7) flagged when it said the existing green
+`integration` job only proves the `apps/api`-scoped package suite, not this root-level file.
+
+Fix applied in this candidate: rewrote
+`tests/integration/sr-partner-notify-nav-20260917.integration.test.ts` to follow the same
+self-provisioning pattern already established and CI-proven elsewhere in this repo
+(`tests/unit/system-remediation/sr-partner-notify-transport-20260918/transport.postgres.test.ts`,
+`tests/unit/system-remediation/sr-partner-notify-seq-20260918/notification-sequence.postgres.test.ts`,
+`tests/unit/db-apply.test.ts`): `beforeAll` now creates its own throwaway database off the
+ambient `DATABASE_URL`'s admin connection and replays the **entire** real migration ledger
+against it via `./operations/database/db-apply.sh` (the same runner `pnpm db:migrate` uses),
+rather than hand-rolling a subset schema — `mobility.phase1_order_partner_notification_routes`
+alone spans migrations V0104/V0105, and its FK/JSONB dependencies
+(`admin.phase1_partner_channel_entries`, `ops.phase1_owned_orders`) are touched by 1 and 13
+separate migrations respectively, so a hand-rolled subset would have been exactly the kind of
+schema-drift risk this task has already been burned by once (see finding #7's original PG
+fixture defect). The suite's own Postgres pool is passed directly into
+`PartnerNotificationNavigationRepository` as a `connect`-shaped shim rather than mutating
+`process.env.DATABASE_URL`, so it cannot race with other test files' `DatabaseService`
+instances reading that same shared env var in the same job. `afterAll` drops the throwaway
+database. The suite `skipIf`s entirely when no `DATABASE_URL` is present (e.g. a bare
+`node --check`/no-DB dev shell), matching the other opt-in Postgres suites' convention.
+
+**Verification of this fix in this session:** `node --experimental-strip-types --check
+tests/integration/sr-partner-notify-nav-20260917.integration.test.ts` (exit 0, syntax only);
+`git diff --check` clean. This worktree's `vitest`/`tsc` are unavailable for the same reason
+documented above (dangling symlink into a reaped sibling worktree), so the fix could **not**
+be executed locally against a real Postgres — the new candidate SHA's hosted `unit`, `Product
+smoke acceptance`, `Smoke acceptance`, and `ci-integ` job results are what must confirm it
+actually passes; do not treat this section as that confirmation. Record those job
+URLs/exit-codes here once available for this candidate's new SHA.
+
 ## Production Requirements Checked
 
 - [ ] entry_scoped_navigation_denies_cross_subject_tenant_entry — code present for findings #1/#2/#3/#5/#7; entry-reassignment edge case (finding #4) still open (see "Known residual gap"); not live-verified this session
