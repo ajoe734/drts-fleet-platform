@@ -66,7 +66,9 @@ function createFakeResponse() {
 function createFullPlatformHarness() {
   const auditService = new AuditNotificationService();
   const callcenterService = new CallcenterService(auditService);
-  const opsDispatchEvents = new OpsDispatchEventsService(new EventEmitter() as never);
+  const opsDispatchEvents = new OpsDispatchEventsService(
+    new EventEmitter() as never,
+  );
   const driverProfileService = new DriverProfileService(auditService);
   const regulatoryRegistryService = new RegulatoryRegistryService(
     opsDispatchEvents,
@@ -372,7 +374,9 @@ describe("CONF-VERIFY-001: Genuine Concurrency & Idempotency Verification", () =
         initialDispatchJobs.length,
       );
 
-      const assignedJob = ownedMobilityService.getDispatchJob(dispatchJob.dispatchJobId);
+      const assignedJob = ownedMobilityService.getDispatchJob(
+        dispatchJob.dispatchJobId,
+      );
       expect(assignedJob?.status).toBe("assigned");
     });
 
@@ -416,22 +420,30 @@ describe("CONF-VERIFY-001: Genuine Concurrency & Idempotency Verification", () =
       }
 
       // CRITICAL ACCEPTANCE CHECK: Exactly one set of driver statements generated
-      const statements = billingSettlementService.listDriverStatements("2026-03");
-      expect(statements.filter((s) => s.driverId === "drv-demo-001")).toHaveLength(1);
+      const statements =
+        billingSettlementService.listDriverStatements("2026-03");
+      expect(
+        statements.filter((s) => s.driverId === "drv-demo-001"),
+      ).toHaveLength(1);
     });
 
     // -------------------------------------------------------------------------
     // Command 5: Billing & Settlement - Reimbursement Batch Approval (POST /reimbursements/:batchId/approve)
     // -------------------------------------------------------------------------
     it("Command 5: executes exactly 1 reimbursement batch approval under parallel submission", async () => {
-      const { billingSettlementController, billingSettlementService, auditService } =
-        createFullPlatformHarness();
+      const {
+        billingSettlementController,
+        billingSettlementService,
+        auditService,
+      } = createFullPlatformHarness();
 
       // Seed driver statements and reimbursement batch first
-      const genResult = await billingSettlementService.generateDriverStatements({
-        periodMonth: "2026-03",
-        driverId: "drv-demo-001",
-      });
+      const genResult = await billingSettlementService.generateDriverStatements(
+        {
+          periodMonth: "2026-03",
+          driverId: "drv-demo-001",
+        },
+      );
       const batchId = genResult.reimbursementBatchIds[0]!;
       const batch = billingSettlementService.getReimbursementBatch(batchId);
 
@@ -469,7 +481,8 @@ describe("CONF-VERIFY-001: Genuine Concurrency & Idempotency Verification", () =
         .filter((l) => l.actionName === "approve_reimbursement_batch");
       expect(approveAudits).toHaveLength(1);
 
-      const updatedBatch = billingSettlementService.getReimbursementBatch(batchId);
+      const updatedBatch =
+        billingSettlementService.getReimbursementBatch(batchId);
       expect(updatedBatch.approvedAt).toBeTruthy();
     });
 
@@ -520,13 +533,15 @@ describe("CONF-VERIFY-001: Genuine Concurrency & Idempotency Verification", () =
         period: { month: "2026-08" },
       };
 
-      const filingTasks = Array.from({ length: CONCURRENT_REQUESTS }, (_, idx) =>
-        reportingFilingController.generateFilingPackage(
-          filingCommand,
-          null,
-          filingKey,
-          `req-filing-${idx}`,
-        ),
+      const filingTasks = Array.from(
+        { length: CONCURRENT_REQUESTS },
+        (_, idx) =>
+          reportingFilingController.generateFilingPackage(
+            filingCommand,
+            null,
+            filingKey,
+            `req-filing-${idx}`,
+          ),
       );
 
       const filingResults = await Promise.allSettled(filingTasks);
@@ -750,33 +765,36 @@ describe("CONF-VERIFY-001: Genuine Concurrency & Idempotency Verification", () =
       // When UNIQUE(scope, idempotency_key) is absent, concurrent inserts both succeed (inserted: true)
       // without conflict detection.
       const unconstrainedDefectiveRepo = new IdempotencyRepository();
-      vi.spyOn(unconstrainedDefectiveRepo, "createProcessing").mockImplementation(
-        async (input) => {
-          // Simulates database without UNIQUE constraint: duplicate rows allowed, inserted always true!
-          return {
-            record: {
-              recordId: `dup-${Math.random()}`,
-              scope: input.scope,
-              idempotencyKey: input.idempotencyKey,
-              tenantId: input.tenantId ?? null,
-              actorId: input.actorId ?? null,
-              requestPath: input.requestPath ?? null,
-              payloadHash: input.payloadHash,
-              status: "processing",
-              statusCode: null,
-              responseBody: null,
-              actionReceipt: null,
-              errorMessage: null,
-              createdAt: new Date().toISOString(),
-              updatedAt: new Date().toISOString(),
-              expiresAt: null,
-            },
-            inserted: true, // Crucial defect: no unique constraint prevents duplicate insert!
-          };
-        },
-      );
+      vi.spyOn(
+        unconstrainedDefectiveRepo,
+        "createProcessing",
+      ).mockImplementation(async (input) => {
+        // Simulates database without UNIQUE constraint: duplicate rows allowed, inserted always true!
+        return {
+          record: {
+            recordId: `dup-${Math.random()}`,
+            scope: input.scope,
+            idempotencyKey: input.idempotencyKey,
+            tenantId: input.tenantId ?? null,
+            actorId: input.actorId ?? null,
+            requestPath: input.requestPath ?? null,
+            payloadHash: input.payloadHash,
+            status: "processing",
+            statusCode: null,
+            responseBody: null,
+            actionReceipt: null,
+            errorMessage: null,
+            createdAt: new Date().toISOString(),
+            updatedAt: new Date().toISOString(),
+            expiresAt: null,
+          },
+          inserted: true, // Crucial defect: no unique constraint prevents duplicate insert!
+        };
+      });
 
-      const defectiveService = new IdempotencyService(unconstrainedDefectiveRepo);
+      const defectiveService = new IdempotencyService(
+        unconstrainedDefectiveRepo,
+      );
 
       domainRecordsCreated = 0;
       const defectiveTasks = Array.from({ length: 5 }, () =>

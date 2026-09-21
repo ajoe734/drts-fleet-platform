@@ -13601,11 +13601,20 @@ export class OwnedMobilityService
 
     const activeOrder = Array.from(this.orders.values()).find(
       (o) =>
-        o.tenantId === identity.tenantId &&
+        // Multi-taxi standard-taxi orders are tenant-less by design
+        // (owned-mobility.service.ts buildAndPersistMultiTaxiRide sets
+        // tenantId: null); frozen partnerId/partnerProgramId/entrySlug are
+        // the authoritative ownership boundary for those, not tenantId.
+        (o.tenantId === null || o.tenantId === identity.tenantId) &&
+        (o.partnerId || null) === (identity.partnerId || null) &&
+        (o.partnerProgramId || null) === (identity.partnerProgramId || null) &&
         o.partnerEntrySlug === identity.partnerEntrySlug &&
         o.passenger?.passengerId === passengerId &&
         o.status !== "completed" &&
-        o.status !== "cancelled",
+        o.status !== "cancelled" &&
+        o.status !== "dispatch_failed" &&
+        o.status !== "dispatch_timeout" &&
+        o.status !== "no_supply",
     );
 
     if (!activeOrder) {
@@ -13661,7 +13670,11 @@ export class OwnedMobilityService
     const passengerOrders = Array.from(this.orders.values())
       .filter(
         (o) =>
-          o.tenantId === identity.tenantId &&
+          // See getReferralPassengerActiveTrip: null tenantId is the
+          // tenant-less multi-taxi design, not an unauthorized wildcard.
+          (o.tenantId === null || o.tenantId === identity.tenantId) &&
+          (o.partnerId || null) === (identity.partnerId || null) &&
+          (o.partnerProgramId || null) === (identity.partnerProgramId || null) &&
           o.partnerEntrySlug === identity.partnerEntrySlug &&
           o.passenger?.passengerId === passengerId,
       )

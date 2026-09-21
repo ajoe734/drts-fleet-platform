@@ -9,6 +9,7 @@ import {
 import {
   buildReferralEmbedConsentCommand,
   clearReferralEmbedSession,
+  getReferralEmbedSession,
   writeReferralEmbedSession,
 } from "@/lib/embed-partner-session";
 
@@ -131,7 +132,10 @@ export async function POST(request: Request) {
   try {
     const action = await parseAction(request);
     if (action.action === "demo-bootstrap") {
-      const session = await buildDemoSession(action.entrySlug, action.entryHost);
+      const session = await buildDemoSession(
+        action.entrySlug,
+        action.entryHost,
+      );
       await writeReferralEmbedSession(session);
       return jsonResponse({ ok: true, session });
     }
@@ -148,33 +152,49 @@ export async function POST(request: Request) {
       );
       await writeReferralEmbedSession(session);
       if (
-        request.headers.get("content-type")?.toLowerCase().includes(
-          "application/json",
-        )
+        request.headers
+          .get("content-type")
+          ?.toLowerCase()
+          .includes("application/json")
       ) {
         return jsonResponse({ ok: true, session });
       }
       return redirectResponse(request, action.returnTo);
     }
 
+    const existingSession = await getReferralEmbedSession();
     const session = await consumeReferralEmbedHandoffArtifact({
       artifact: action.artifact,
       entrySlug: action.entrySlug,
       entryHost: action.entryHost,
+      ...(existingSession?.drtsPassengerId
+        ? { currentDrtsPassengerId: existingSession.drtsPassengerId }
+        : {}),
+      ...(existingSession?.partnerEntrySlug
+        ? { currentPartnerEntrySlug: existingSession.partnerEntrySlug }
+        : {}),
     });
     await writeReferralEmbedSession(session);
     if (
-      request.headers.get("content-type")?.toLowerCase().includes(
-        "application/json",
-      )
+      request.headers
+        .get("content-type")
+        ?.toLowerCase()
+        .includes("application/json")
     ) {
       return jsonResponse({ ok: true, session });
     }
     return redirectResponse(request, action.returnTo);
   } catch (error) {
-    await clearReferralEmbedSession();
+    if (
+      !(error instanceof Error) ||
+      !error.message.includes("session mismatch")
+    ) {
+      await clearReferralEmbedSession();
+    }
     const message =
-      error instanceof Error ? error.message : "Referral session exchange failed.";
+      error instanceof Error
+        ? error.message
+        : "Referral session exchange failed.";
     return jsonResponse({ ok: false, message }, 400);
   }
 }

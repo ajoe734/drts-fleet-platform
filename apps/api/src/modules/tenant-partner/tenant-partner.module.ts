@@ -18,6 +18,7 @@ import { PartnerEntryNotificationBindingRepository } from "./partner-entry-notif
 import { PartnerEntryNotificationBindingService } from "./partner-entry-notification-binding.service";
 import { PartnerNotificationDispatchFacade } from "./partner-notification-dispatch.facade";
 import { PartnerUserIdentityLinkRepository } from "./partner-user-identity-link.repository";
+import { PartnerNotificationNavigationRepository } from "./partner-notification-navigation.repository";
 import { ReferralEmbedHandoffRepository } from "./referral-embed-handoff.repository";
 import { ReferralChannelScaffoldService } from "./referral-channel.scaffold.service";
 import { TenantPartnerController } from "./tenant-partner.controller";
@@ -57,7 +58,10 @@ export function createTenantInvitationNotificationDeliveryService(): Notificatio
     IdentityModule,
     forwardRef(() => OwnedMobilityModule),
   ],
-  controllers: [TenantPartnerController, PartnerEntryNotificationBindingController],
+  controllers: [
+    TenantPartnerController,
+    PartnerEntryNotificationBindingController,
+  ],
   providers: [
     TenantPartnerService,
     JwtAuthService,
@@ -69,6 +73,7 @@ export function createTenantInvitationNotificationDeliveryService(): Notificatio
     TenantInvitationDeliveryService,
     PartnerUserIdentityLinkRepository,
     ReferralEmbedHandoffRepository,
+    PartnerNotificationNavigationRepository,
     ReferralChannelScaffoldService,
     WebhookDispatchService,
     PartnerNotificationDispatchFacade,
@@ -97,6 +102,7 @@ export function createTenantInvitationNotificationDeliveryService(): Notificatio
     TenantPartnerRepository,
     PartnerUserIdentityLinkRepository,
     ReferralEmbedHandoffRepository,
+    PartnerNotificationNavigationRepository,
     ReferralChannelScaffoldService,
     PartnerNotificationDispatchFacade,
   ],
