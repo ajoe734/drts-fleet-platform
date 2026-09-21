@@ -1,53 +1,65 @@
-"use client";
+import React, { useState, useCallback, useEffect } from "react";
+import { Banner, useTheme } from "@drts/ui-web";
+import { usePlatformAdminClient } from "../lib/admin-client";
+import { PartnerEntryNotificationBinding } from "@drts/contracts";
 
-import React from "react";
-import { CanvasEmptyState, buildCanvasTheme } from "@drts/ui-web";
-import { useTranslation } from "@/lib/i18n";
+export function usePartnerNotificationData(entrySlug: string) {
+  const client = usePlatformAdminClient();
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<{ kind: "error" | "409" | "404" | "403"; message: string } | null>(null);
+  const [binding, setBinding] = useState<PartnerEntryNotificationBinding | null>(null);
+
+  const fetchState = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const b = await client.getPartnerEntryNotificationBinding(entrySlug);
+      setBinding(b);
+    } catch (e: any) {
+      const statusCode = e.statusCode;
+      if (statusCode === 404) {
+        setBinding(null);
+      } else if (statusCode === 403) {
+        setError({ kind: "403", message: "Forbidden: You do not have access to this entry." });
+      } else if (statusCode === 409) {
+        setError({ kind: "409", message: "Version conflict or state conflict." });
+      } else {
+        setError({ kind: "error", message: e.message || "Unknown error fetching binding." });
+      }
+    } finally {
+      setLoading(false);
+    }
+  }, [client, entrySlug]);
+
+  useEffect(() => {
+    fetchState();
+  }, [fetchState]);
+
+  return { loading, error, binding, fetchState };
+}
 
 export function PartnerNotificationPanel({ entrySlug }: { entrySlug: string }) {
-  const { t } = useTranslation();
-  const theme = buildCanvasTheme({ surface: "platform", density: "compact" });
+  const theme = useTheme();
+  const { error } = usePartnerNotificationData(entrySlug);
 
   return (
-    <div
-      style={{
-        minHeight: "100%",
-        background: theme.bg,
-        color: theme.text,
-        padding: 24,
-        display: "grid",
-        gap: 12,
-      }}
-    >
-      <CanvasEmptyState
-        theme={theme}
-        tone="warn"
-        title={t("partnerNotification.title")}
-        body="Design Canvas is pending handoff. Implementation is paused as per dispatch contract."
+    <div data-testid="partner-notification-placeholder" style={{ padding: 16 }}>
+      {error && (
+        <div style={{ marginBottom: 16 }} data-testid={`error-banner-${error.kind}`}>
+          <Banner
+            theme={theme}
+            tone="danger"
+            title={`Error (${error.kind})`}
+            body={error.message}
+          />
+        </div>
+      )}
+      <Banner 
+        theme={theme} 
+        tone="info" 
+        title="Pending Design Handoff" 
+        body={`The canonical notification canvas for partner ${entrySlug} is currently missing. Screen requirements have been documented.`} 
       />
-      <div style={{ color: theme.textMuted, fontSize: 12.5, lineHeight: 1.6 }}>
-        The visual design for this screen has not been provided in the canonical
-        packages/ui-tokens or docs/05-ui/drts-design-canvas.
-      </div>
-      <div
-        style={{
-          fontFamily: theme.monoFamily,
-          fontSize: 11.5,
-          color: theme.textDim,
-        }}
-      >
-        Route: /partners/{entrySlug}?tab=notifications
-      </div>
-      <div
-        style={{
-          fontFamily: theme.monoFamily,
-          fontSize: 11.5,
-          color: theme.textDim,
-        }}
-      >
-        See
-        docs/02-architecture/partner-notification-20260917/03_ui_design_delta.md
-      </div>
     </div>
   );
 }
