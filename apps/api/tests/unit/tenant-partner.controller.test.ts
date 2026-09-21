@@ -634,7 +634,9 @@ describe("tenant API key authoritative consumer and usage tracking", () => {
       actorId: issued.apiKey.apiKeyId,
       tenantId: "tenant-demo-001",
     });
-    expect(mockRequest1.authenticatedApiKey.lastUsedWorkload).toBe("tenant_api_guard");
+    expect(mockRequest1.authenticatedApiKey.lastUsedWorkload).toBe(
+      "tenant_api_guard",
+    );
 
     // Valid header via Authorization: Bearer tk_...
     const mockRequest2: any = {

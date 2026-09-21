@@ -31,6 +31,7 @@ type ReferralEmbedHandoffRecord = {
   issuedAt: string;
   expiresAt: string;
   consumedAt: string | null;
+  navigationContext?: { orderId: string; screen: string };
 };
 
 type ReferralEmbedConsentLedgerRecord = {
@@ -56,7 +57,7 @@ export type PersistReferralEmbedHandoffCommand = Omit<
 
 export type ConsumeReferralEmbedHandoffResult =
   | { outcome: "consumed"; session: ReferralEmbedSession }
-  | { outcome: "replayed" | "expired" | "wrong_host" | "missing" };
+  | { outcome: "replayed" | "expired" | "wrong_host" | "missing" | "session_mismatch" };
 
 export type RecordReferralEmbedConsentResult =
   | { outcome: "recorded" | "replayed"; session: ReferralEmbedSession }
@@ -70,8 +71,14 @@ const REQUIRED_SCOPES: ReferralEmbedRequiredConsentScope[] = [
 
 @Injectable()
 export class ReferralEmbedHandoffRepository {
-  private readonly fallbackHandoffs = new Map<string, ReferralEmbedHandoffRecord>();
-  private readonly fallbackConsents = new Map<string, ReferralEmbedConsentLedgerRecord>();
+  private readonly fallbackHandoffs = new Map<
+    string,
+    ReferralEmbedHandoffRecord
+  >();
+  private readonly fallbackConsents = new Map<
+    string,
+    ReferralEmbedConsentLedgerRecord
+  >();
 
   constructor(@Optional() private readonly databaseService?: DatabaseService) {}
 
@@ -99,6 +106,9 @@ export class ReferralEmbedHandoffRepository {
       issuedAt: now,
       expiresAt: command.expiresAt,
       consumedAt: null,
+      ...(command.navigationContext
+        ? { navigationContext: command.navigationContext }
+        : {}),
     };
 
     if (!this.isEnabled()) {
@@ -155,6 +165,8 @@ export class ReferralEmbedHandoffRepository {
     artifact: string;
     entrySlug: string;
     entryHost: string;
+    currentDrtsPassengerId?: string;
+    currentPartnerEntrySlug?: string;
   }): Promise<ConsumeReferralEmbedHandoffResult> {
     if (!this.isEnabled()) {
       return this.consumeFallback(input);
@@ -190,6 +202,12 @@ export class ReferralEmbedHandoffRepository {
       if (result.rows[0]) {
         const record = this.parseHandoffRecord(result.rows[0].record);
         await client.query("COMMIT");
+        if (
+          (input.currentDrtsPassengerId && record.drtsPassengerId !== input.currentDrtsPassengerId) ||
+          (input.currentPartnerEntrySlug && record.partnerEntrySlug !== input.currentPartnerEntrySlug)
+        ) {
+          return { outcome: "session_mismatch" };
+        }
         return { outcome: "consumed", session: this.toSession(record) };
       }
 
@@ -209,6 +227,40 @@ export class ReferralEmbedHandoffRepository {
     } finally {
       client.release();
     }
+  }
+
+  async findLatestConsent(
+    entrySlug: string,
+    drtsPassengerId: string,
+  ): Promise<ReferralEmbedConsentLedgerRecord | null> {
+    if (!this.isEnabled()) {
+      const records = Array.from(this.fallbackConsents.values())
+        .filter(
+          (c) =>
+            c.entrySlug === entrySlug && c.drtsPassengerId === drtsPassengerId,
+        )
+        .sort(
+          (a, b) =>
+            new Date(b.grantedAt).getTime() - new Date(a.grantedAt).getTime(),
+        );
+      return records[0] ?? null;
+    }
+
+    const result = await this.databaseService!.query<JsonRecordRow>(
+      `
+        SELECT record
+        FROM admin.phase1_referral_embed_consent_ledger
+        WHERE entry_slug = $1 AND drts_passenger_id = $2
+        ORDER BY granted_at DESC
+        LIMIT 1
+      `,
+      [entrySlug, drtsPassengerId],
+    );
+
+    if (result.rows.length === 0) {
+      return null;
+    }
+    return (result.rows[0]?.record as ReferralEmbedConsentLedgerRecord) ?? null;
   }
 
   async recordConsent(input: {
@@ -316,6 +368,8 @@ export class ReferralEmbedHandoffRepository {
     artifact: string;
     entrySlug: string;
     entryHost: string;
+    currentDrtsPassengerId?: string;
+    currentPartnerEntrySlug?: string;
   }): ConsumeReferralEmbedHandoffResult {
     const record = Array.from(this.fallbackHandoffs.values()).find(
       (value) => value.artifactHash === this.hashArtifact(input.artifact),
@@ -326,6 +380,12 @@ export class ReferralEmbedHandoffRepository {
       record.entryHost !== input.entryHost.trim().toLowerCase()
     ) {
       return { outcome: "wrong_host" };
+    }
+    if (
+      (input.currentDrtsPassengerId && record.drtsPassengerId !== input.currentDrtsPassengerId) ||
+      (input.currentPartnerEntrySlug && record.partnerEntrySlug !== input.currentPartnerEntrySlug)
+    ) {
+      return { outcome: "session_mismatch" };
     }
     if (record.expiresAt <= new Date().toISOString()) {
       return { outcome: "expired" };
@@ -431,6 +491,9 @@ export class ReferralEmbedHandoffRepository {
         partnerEntrySlug: record.entrySlug,
         drtsPassengerId: record.drtsPassengerId,
       },
+      ...(record.navigationContext
+        ? { navigationContext: record.navigationContext }
+        : {}),
     };
   }
 
@@ -444,7 +507,9 @@ export class ReferralEmbedHandoffRepository {
       `,
       [this.hashArtifact(artifact)],
     );
-    return result.rows[0] ? this.parseHandoffRecord(result.rows[0].record) : null;
+    return result.rows[0]
+      ? this.parseHandoffRecord(result.rows[0].record)
+      : null;
   }
 
   private async findByHandoffId(client: PoolClient, handoffId: string) {
@@ -457,7 +522,9 @@ export class ReferralEmbedHandoffRepository {
       `,
       [handoffId],
     );
-    return result.rows[0] ? this.parseHandoffRecord(result.rows[0].record) : null;
+    return result.rows[0]
+      ? this.parseHandoffRecord(result.rows[0].record)
+      : null;
   }
 
   private parseHandoffRecord(value: unknown): ReferralEmbedHandoffRecord {
