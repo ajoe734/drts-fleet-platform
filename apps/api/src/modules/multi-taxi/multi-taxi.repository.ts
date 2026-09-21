@@ -24,7 +24,7 @@ import type {
   StoredPartnerNotificationContext,
 } from "./partner-notification.types";
 
-import { DatabaseService } from "../../common/database/database.service";
+import { DatabaseService } from "../../common/db/database.service";
 import { PartnerNotificationDispatchFacade } from "../tenant-partner/partner-notification-dispatch.facade";
 
 type AuthorizationRow = QueryResultRow & {
@@ -257,10 +257,10 @@ export class MultiTaxiRepository {
     ]);
 
     return {
-      authorizations: authorizationResult.rows.map((row) =>
+      authorizations: authorizationResult.rows.map((row: any) =>
         this.mapAuthorization(row),
       ),
-      vehicles: vehicleResult.rows.map((row) => this.mapVehicle(row)),
+      vehicles: vehicleResult.rows.map((row: any) => this.mapVehicle(row)),
     };
   }
 
@@ -591,7 +591,7 @@ export class MultiTaxiRepository {
       [Math.max(1, Math.min(limit, 1000))],
     );
     // Expired rows are selected once to persist a terminal outcome, never sent.
-    return result.rows.map((row) => this.mapNotificationOutbox(row.record));
+    return result.rows.map((row: any) => this.mapNotificationOutbox(row.record));
   }
 
   /** Re-read authoritative state under lock: callers may hold a stale outbox copy. */
@@ -1157,7 +1157,7 @@ export class MultiTaxiRepository {
       );
 
     return {
-      items: result.rows.map((row) => this.mapPassengerRatingReviewRow(row)),
+      items: result.rows.map((row: any) => this.mapPassengerRatingReviewRow(row)),
       totalItems,
     };
   }
@@ -1217,7 +1217,7 @@ export class MultiTaxiRepository {
       summary: summaryResult.rows[0]
         ? this.mapDriverRatingSummary(summaryResult.rows[0])
         : null,
-      moderationHistory: auditResult.rows.map((audit) =>
+      moderationHistory: auditResult.rows.map((audit: any) =>
         this.mapPassengerRatingModerationAudit(audit),
       ),
     };
