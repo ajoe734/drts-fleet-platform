@@ -1,0 +1,8 @@
+{
+  "schema_version": "1.0",
+  "notification_id": "outbox_sample_001",
+  "delivery_id": "pn_sample_001",
+  "partner_entry_slug": "yuhe-residence",
+  "receipt_id": "partner_receipt_sample_001",
+  "status": "accepted"
+}

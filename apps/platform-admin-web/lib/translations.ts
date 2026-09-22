@@ -1548,6 +1548,10 @@ const en = {
   "nav.featureFlags": "Feature Flags",
 
   // ── Common ──
+  "partnerNotification.reason": "Failure Reason",
+  "partnerNotification.conflict": "Conflict",
+  "partnerNotification.error": "Error",
+  "partnerNotification.loading": "Loading...",
   "common.enabled": "Enabled",
   "common.disabled": "Disabled",
   "common.active": "Active",

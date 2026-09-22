@@ -1,0 +1,27 @@
+{
+  "event": "passenger.driver_arrived.v1",
+  "delivery_id": "pn_sample_001",
+  "occurred_at": "2026-09-17T14:30:00Z",
+  "tenant_id": "tenant_sample",
+  "data": {
+    "schema_version": "1.0",
+    "notification_id": "outbox_sample_001",
+    "partner_entry_slug": "yuhe-residence",
+    "recipient": {
+      "partner_user_ref": "usr_opaque_sample"
+    },
+    "ride_ref": "ride_opaque_sample",
+    "event_sequence": 42,
+    "assignment_version": 2,
+    "expires_at": "2026-09-17T14:35:00Z",
+    "message": {
+      "template_key": "driver_arrived",
+      "title": "乘車通知",
+      "body": "司機已抵達，請開啟 App 查看上車資訊。"
+    },
+    "navigation": {
+      "type": "ride",
+      "ride_ref": "ride_opaque_sample"
+    }
+  }
+}

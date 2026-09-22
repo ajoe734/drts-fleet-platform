@@ -92,6 +92,7 @@ export interface CreateReferralEmbedHandoffArtifactCommand {
   apiKey?: string;
   partnerUserRef: string;
   consentBundle?: ReferralEmbedConsentBundle | null;
+  navigationContext?: { orderId: string; screen: string };
 }
 
 export interface ReferralEmbedHandoffArtifact {
@@ -147,6 +148,7 @@ export interface ReferralEmbedSession {
     grantedAt: string | null;
   };
   identity: ReferralEmbedSessionIdentity;
+  navigationContext?: { orderId: string; screen: string };
 }
 
 export interface PartnerIngressHandoffSession {
