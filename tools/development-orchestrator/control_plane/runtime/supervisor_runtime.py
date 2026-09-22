@@ -6110,6 +6110,19 @@ def chair_review_reason(
     if config is not None and dependency_ready_blocked_task_records(config, status, limit=1):
         return "blocked_task_triage"
     if active_provider_pause_records(state) or actionable_dispatch_pause_records(state, status, limit=1):
+        # A pause is a standing condition, not an event. Returning the triage
+        # unconditionally while any pause existed meant the 900s cooldown was
+        # the only throttle: with four lanes quota-paused on 2026-09-21 the
+        # chair ran provider_health_triage 88 times in a day, ~145s each with
+        # the supervisor loop held for the duration, and every verdict carried
+        # empty provider_actions because the pauses were accurate and nothing
+        # had changed. The same digest that gates operational_review already
+        # covers provider and dispatch pauses, failure streaks, approvals and
+        # task routing, so an unchanged digest means an unchanged briefing; a
+        # new or lifted pause changes it and brings the triage straight back,
+        # and the idle floor still returns the chair once a day regardless.
+        if operational_review_is_redundant(state, status, approval_state, config=config):
+            return None
         return "provider_health_triage"
     if operational_review_is_redundant(state, status, approval_state, config=config):
         return None
@@ -6386,7 +6399,9 @@ def queue_chair_review(
     # An attempt is a look, whatever its outcome: this is the watermark that
     # keeps already-seen pauses and approvals from re-triggering forever.
     chair_state["last_attempt_at"] = utc_now()
-    if reason == "operational_review":
+    if reason in {"operational_review", "provider_health_triage"}:
+        # Both reasons report on the same digest, so both stamp the watermark
+        # that lets chair_review_reason skip an unchanged fleet.
         chair_state["last_operational_fingerprint"] = operational_review_fingerprint(
             status, approval_state, state
         )
