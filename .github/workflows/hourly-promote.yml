@@ -142,6 +142,9 @@ jobs:
           # leaves main's tree equal to the snapshot. The five guarded
           # dashboard mirror files stay as main has them when they differ, the
           # same rule the manual rescue follows.
+          # The publish branch itself is untouched. Rule kept from the old gate:
+          # immutable publish branches are never rewritten; the promote commit
+          # merely reuses their tree.
           src="${{ steps.pick.outputs.branch }}"
           sha="${{ steps.pick.outputs.sha }}"
           ver="${{ steps.pick.outputs.version }}"
