@@ -18,6 +18,7 @@ import type {
 
 import { ApiRequestError } from "../../common/api-envelope";
 import { DatabaseService } from "../../common/db";
+import { MultiTaxiRepository } from "../multi-taxi/multi-taxi.repository";
 
 type JsonRecordRow = {
   record: unknown;
@@ -208,7 +209,13 @@ type DriverCompletionOutboxRow = QueryResultRow & {
 export class OwnedMobilityRepository {
   private readonly logger = new Logger(OwnedMobilityRepository.name);
 
-  constructor(@Optional() private readonly databaseService?: DatabaseService) {}
+  constructor(
+    @Optional() private readonly databaseService?: DatabaseService,
+    @Optional()
+    private readonly multiTaxiRepository: MultiTaxiRepository = new MultiTaxiRepository(
+      databaseService,
+    ),
+  ) {}
 
   isEnabled() {
     return this.databaseService?.isEnabled() ?? false;
@@ -635,7 +642,13 @@ export class OwnedMobilityRepository {
       return;
     }
 
-    await this.persistChangesWithExecutor(this.databaseService!, changes);
+    if (changes.consumerNotificationOutbox?.length) {
+      await this.withTransaction((executor) =>
+        this.persistChangesWithExecutor(executor, changes),
+      );
+    } else {
+      await this.persistChangesWithExecutor(this.databaseService!, changes);
+    }
   }
 
   async withTransaction<T>(work: (executor: PoolClient) => Promise<T>) {
@@ -1832,8 +1845,12 @@ export class OwnedMobilityRepository {
     }
 
     for (const outbox of changes.consumerNotificationOutbox ?? []) {
-      writes.push(() =>
-        executor.query(
+      writes.push(async () => {
+        // Insert first: the unique key serializes concurrent retries of the
+        // same event. Only the winner allocates; NOT EXISTS before an insert
+        // can race and consume a sequence even when the insert is a no-op.
+        // Both entry points use the caller's transaction for this whole write.
+        const inserted = await executor.query<{ outbox_id: string }>(
           `
             INSERT INTO ops.consumer_notification_outbox (
               outbox_id,
@@ -1847,8 +1864,12 @@ export class OwnedMobilityRepository {
               next_attempt_at,
               created_at,
               delivered_at
-            ) VALUES ($1, $2, $3, $4, $5, $6::jsonb, $7, $8, $9, $10, $11)
+            ) VALUES (
+              $1, $2, $3, $4, $5, $6::jsonb,
+              $7, $8, $9, $10, $11
+            )
             ON CONFLICT (outbox_id) DO NOTHING
+            RETURNING outbox_id
           `,
           [
             outbox.outboxId,
@@ -1863,8 +1884,26 @@ export class OwnedMobilityRepository {
             outbox.createdAt,
             outbox.deliveredAt,
           ],
-        ),
-      );
+        );
+        if (!inserted.rows.length) return;
+
+        const eventSequence =
+          await this.multiTaxiRepository.allocateNotificationEventSequence(
+            outbox.orderId,
+            executor,
+          );
+        // Non-partner orders have no sequence row and keep their payload.
+        if (eventSequence !== null) {
+          await executor.query(
+            `
+              UPDATE ops.consumer_notification_outbox
+              SET payload = jsonb_set(payload, '{eventSequence}', to_jsonb($2::bigint))
+              WHERE outbox_id = $1
+            `,
+            [outbox.outboxId, eventSequence],
+          );
+        }
+      });
     }
 
     for (const write of writes) {

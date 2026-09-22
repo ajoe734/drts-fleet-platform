@@ -188,6 +188,49 @@ export class PartnerUserIdentityLinkRepository {
     return record?.status ?? null;
   }
 
+  /**
+   * Reverse lookup by the trusted `drtsPassengerId` on the caller's
+   * authenticated session (`BootstrapRequestIdentity.drtsPassengerId`) rather
+   * than a caller-asserted `partnerUserRef` — used by
+   * SR-PARTNER-NOTIFY-ROUTE-20260917 order-route creation, which must never
+   * trust a query/body-supplied identity (design §4).
+   */
+  async findByDrtsPassengerId(
+    entrySlugInput: string,
+    drtsPassengerIdInput: string,
+  ): Promise<PartnerUserIdentityLinkRecord | null> {
+    const entrySlug = this.requireNonBlank(entrySlugInput, "entrySlug");
+    const drtsPassengerId = this.requireNonBlank(
+      drtsPassengerIdInput,
+      "drtsPassengerId",
+    );
+
+    if (!this.isEnabled()) {
+      for (const existing of this.fallbackLinks.values()) {
+        if (
+          existing.entrySlug === entrySlug &&
+          existing.drtsPassengerId === drtsPassengerId
+        ) {
+          return this.clone(existing);
+        }
+      }
+      return null;
+    }
+
+    const result = await this.databaseService!.query<JsonRecordRow>(
+      `
+        SELECT record
+        FROM admin.phase1_partner_user_identity_links
+        WHERE entry_slug = $1
+          AND drts_passenger_id = $2
+        LIMIT 1
+      `,
+      [entrySlug, drtsPassengerId],
+    );
+
+    return result.rows[0] ? this.parseRecord(result.rows[0].record) : null;
+  }
+
   async find(
     entrySlugInput: string,
     partnerUserRefInput: string,

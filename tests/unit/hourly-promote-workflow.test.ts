@@ -13,16 +13,67 @@ function workflow() {
 }
 
 describe("hourly publish promotion safety", () => {
-  it("rejects conflicting immutable snapshots before opening a promote PR", () => {
+  it("promotes the snapshot as a tree commit on main instead of a history merge", () => {
+    // Every promotion lands as a squash, so main and dev share no recent
+    // history and a merge of the publish branch head conflicts on everything
+    // both sides touched since the old merge-base (41 files by 2026-09-21).
+    // The gate therefore builds ONE commit: parent = main HEAD, tree = the
+    // snapshot. Its merge-base is main, so it cannot conflict.
     const source = workflow();
     const reconciliationGate = source.indexOf("- name: Reconciliation gate");
     const openPromotePr = source.indexOf("- name: Open promote PR");
+    const gate = source.slice(reconciliationGate, openPromotePr);
 
     expect(reconciliationGate).toBeGreaterThan(-1);
     expect(reconciliationGate).toBeLessThan(openPromotePr);
-    expect(source).toContain('git merge-tree --write-tree origin/main "$sha"');
-    expect(source).toContain("immutable publish branches are never rewritten");
+    expect(gate).not.toContain("git merge-tree");
+    expect(gate).toContain('git read-tree "$sha"');
+    expect(gate).toContain('git commit-tree "$tree" -p "$main_sha"');
+    expect(gate).toContain('promote_branch="promote/$ver"');
+    expect(gate).toContain("immutable publish branches are never rewritten");
+    expect(gate).toContain('echo "promote_sha=$promote_sha" >> "$GITHUB_OUTPUT"');
     expect(source).toContain("steps.reconcile.outputs.skip != 'true'");
+  });
+
+  it("keeps main's guarded dashboard mirror files when the snapshot differs", () => {
+    // The runbook's §4.2 rule: a tree replacement must not clobber the five
+    // generated mirror files that main is allowed to carry differently.
+    const source = workflow();
+    const gate = source.slice(
+      source.indexOf("- name: Reconciliation gate"),
+      source.indexOf("- name: Open promote PR"),
+    );
+
+    for (const file of [
+      "ai-status.json",
+      "ai-activity-log.jsonl",
+      "current-work.md",
+      "orchestrator-state.json",
+      "approval-queue.json",
+    ]) {
+      expect(gate).toContain(file);
+    }
+    expect(gate).toContain('path="tools/development-orchestrator/dashboard/$f"');
+    expect(gate).toContain('git update-index --cacheinfo "100644,$blob,$path"');
+  });
+
+  it("opens, checks and merges the promote commit, never the publish head", () => {
+    const source = workflow();
+    const openPromotePr = source.slice(
+      source.indexOf("- name: Open promote PR"),
+      source.indexOf("- name: Publish required checks on promote SHA"),
+    );
+    const publishChecks = source.slice(
+      source.indexOf("- name: Publish required checks on promote SHA"),
+      source.indexOf("- name: Wait for required PR checks to register"),
+    );
+
+    expect(openPromotePr).toContain('--head "$promote_branch"');
+    expect(openPromotePr).not.toContain('--head "$src"');
+    expect(publishChecks).toContain('sha="${{ steps.reconcile.outputs.promote_sha }}"');
+    expect(publishChecks).not.toContain('sha="${{ steps.pick.outputs.sha }}"');
+    // A PAT is what lets the promote branch carry dev's workflow edits.
+    expect(source).toContain("token: ${{ secrets.PUBLISH_TOKEN || secrets.GITHUB_TOKEN }}");
   });
 
   it("requires the latest exact-SHA dev deployment to be successful", () => {

@@ -35,6 +35,7 @@ from control_plane.usecases.task_board_commands import (  # noqa: E402
     TaskBoardCommandExecutor,
     TaskBoardCommandRuntime,
 )
+from control_plane.domain.task_records import validate_task_eligibility
 from control_plane.domain.unblock_resolution import parent_resume_blocker  # noqa: E402
 
 
@@ -1775,6 +1776,7 @@ def command_assign(state: dict[str, Any], args: list[str]) -> None:
         }
         task.update(metadata)
         validate_task_spec(task)
+        validate_task_eligibility(task)
         state["tasks"].append(task)
     else:
         task["owner"] = owner
@@ -1793,9 +1795,10 @@ def command_assign(state: dict[str, Any], args: list[str]) -> None:
         if metadata:
             task.update(metadata)
         task["last_update"] = timestamp
-        task["next"] = "Ownership updated"
+        task.setdefault("next", "Ownership updated")
         task.setdefault("candidate_lifecycle_version", 1)
         validate_task_spec(task)
+        validate_task_eligibility(task)
 
     agent = get_agent(state, owner)
     if os.environ.get("TASK_BRANCH"):
@@ -1839,6 +1842,7 @@ def command_reassign(state: dict[str, Any], args: list[str]) -> None:
     if expected_reviewer and expected_reviewer != old_reviewer:
         raise SystemExit(f"{task_id} reviewer changed before reassignment")
 
+    validate_task_eligibility({**task, "owner": owner, "reviewer": reviewer})
     owner_changed = owner != old_owner
     reviewer_changed = reviewer != old_reviewer
     status = str(task.get("status") or "").lower()
@@ -2017,6 +2021,9 @@ def command_reopen(state: dict[str, Any], args: list[str]) -> None:
         raise SystemExit(f"Only the owner ({owner}) or reviewer ({reviewer}) can reopen {task_id}")
     if task.get("status") in {"acceptance", "done"} and actor != reviewer:
         raise SystemExit(f"Only the reviewer ({reviewer}) can reopen {task_id} from {task['status']}")
+    reviewed_sha = os.environ.get("REVIEWED_SHA", "").strip()
+    if reviewed_sha and reviewed_sha != str(task.get("candidate_sha") or ""):
+        raise SystemExit("REVIEWED_SHA must match the candidate being reopened")
     timestamp = iso_now()
     task["status"] = "in_progress"
     clear_candidate_evidence(task)
@@ -2075,6 +2082,7 @@ def command_handoff(state: dict[str, Any], args: list[str]) -> None:
 
     timestamp = iso_now()
     clear_candidate_evidence(task)
+    task["candidate_generation"] = uuid.uuid4().hex
     task["candidate_sha"] = candidate_sha
     task["candidate_branch"] = candidate_branch
     pr_url = os.environ.get("PR_URL", "").strip()

@@ -13,6 +13,9 @@ import { OwnedMobilityModule } from "../owned-mobility/owned-mobility.module";
 import { BankCardInlineEligibilityAdapter } from "./bank-card-inline-eligibility.adapter";
 import { PARTNER_ELIGIBILITY_ADAPTERS } from "./partner-eligibility-adapter.interface";
 import { ReferenceTokenEligibilityAdapter } from "./reference-token-eligibility.adapter";
+import { PartnerEntryNotificationBindingController } from "./partner-entry-notification-binding.controller";
+import { PartnerEntryNotificationBindingRepository } from "./partner-entry-notification-binding.repository";
+import { PartnerEntryNotificationBindingService } from "./partner-entry-notification-binding.service";
 import { PartnerNotificationDispatchFacade } from "./partner-notification-dispatch.facade";
 import { PartnerUserIdentityLinkRepository } from "./partner-user-identity-link.repository";
 import { ReferralEmbedHandoffRepository } from "./referral-embed-handoff.repository";
@@ -54,7 +57,7 @@ export function createTenantInvitationNotificationDeliveryService(): Notificatio
     IdentityModule,
     forwardRef(() => OwnedMobilityModule),
   ],
-  controllers: [TenantPartnerController],
+  controllers: [TenantPartnerController, PartnerEntryNotificationBindingController],
   providers: [
     TenantPartnerService,
     JwtAuthService,
@@ -69,6 +72,8 @@ export function createTenantInvitationNotificationDeliveryService(): Notificatio
     ReferralChannelScaffoldService,
     WebhookDispatchService,
     PartnerNotificationDispatchFacade,
+    PartnerEntryNotificationBindingRepository,
+    PartnerEntryNotificationBindingService,
     BankCardInlineEligibilityAdapter,
     ReferenceTokenEligibilityAdapter,
     {

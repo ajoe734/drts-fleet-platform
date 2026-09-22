@@ -7,6 +7,11 @@ The status transaction is the only lifecycle authority:
 The supervisor automatically migrates older task records once before it can
 dispatch them. Do not repair legacy lifecycle fields manually.
 
+Owners, reviewers and Supervisor must apply the delivery-quality and repeated
+rework rules in [AI Collaboration Guide §0.7](../../../AI_COLLABORATION_GUIDE.md#07-交付品質與退修規範).
+Keep finding-level verification evidence in the existing task artifact and
+reference it at handoff; use the lifecycle below without extra transitions.
+
 1. The owner works on its task branch and may push checkpoint commits. Checkpoints are recoverability evidence, not review candidates.
 2. The owner runs scoped verification, pushes the final branch head, then records `CANDIDATE_SHA` and `CANDIDATE_BRANCH` with `ai-status.sh handoff`.
 3. The reviewer checks that exact SHA. Reviewers do not edit, commit, push, amend, rebase, or change the candidate branch. Approval records `REVIEWED_SHA`, which must exactly equal `CANDIDATE_SHA`.

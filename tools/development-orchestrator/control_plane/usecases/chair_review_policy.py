@@ -74,6 +74,10 @@ def validate_chair_review_payload(payload: Any) -> str | None:
 
 
 def chair_provider_pause_reason_is_actionable(kind: str, reason: str) -> bool:
+    # Manual lane holds belong to the operator; task failures already have
+    # task-scoped dispatch pauses and must not become an indefinite lane ban.
+    if kind == "manual":
+        return False
     if kind != "auth":
         return True
     lowered = reason.lower()
