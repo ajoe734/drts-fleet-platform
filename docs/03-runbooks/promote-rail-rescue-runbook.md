@@ -1,6 +1,6 @@
 # Promote-rail rescue runbook — unblocking a stuck `publish → main` promote
 
-**Status:** Adopted 2026-06-08
+**Status:** Adopted 2026-06-08 · Manual rescue superseded by automation on 2026-09-22 (see §9)
 **Owner:** Release engineering
 **Applies to:** the v4 branch strategy (`docs/ops/branch-strategy.md`)
 
@@ -159,3 +159,34 @@ per the reconciliation rule in [`branch-strategy.md` §5](../ops/branch-strategy
 cherry-picked back to `dev` in the same change. Periodically audit with
 `git cherry -v origin/dev origin/main`; a non-empty `+` list is early warning
 that the next promote will conflict.
+
+## 9. Automated since 2026-09-22 — when a rescue is still needed
+
+`CI-PROMOTE-TREE-COMMIT-20260922` (#2102, carried onto `main` by
+`PROMOTE-RESCUE-20260922` #2104) made `hourly-promote.yml` do §5 by itself:
+its Reconciliation gate builds `promote/<version>` as **one commit whose parent
+is `main` HEAD and whose tree is the publish snapshot** (the five guarded
+`tools/development-orchestrator/dashboard/*` mirror files kept as `main` has
+them), pushes it with `PUBLISH_TOKEN`, opens the PR from that branch, publishes
+the required checks on that commit and squash-merges it. Its merge-base is
+always `main`, so the §2 conflict cannot occur, and the merge leaves `main`'s
+tree equal to the snapshot for the next round.
+
+What that changes for operators:
+
+- **Do not expect `git merge-tree` in the gate any more.**
+  `tests/unit/hourly-promote-workflow.test.ts` pins the tree-commit shape.
+- **Content that lands on `main` without reaching `dev` is overwritten at the
+  next promotion**, by design: `main` is a projection of the verified `dev`
+  snapshot. §8 is therefore no longer "the next promote will conflict" but "the
+  next promote will silently drop it". A hotfix on `main` must still be ported
+  to `dev` in the same change.
+- A manual rescue is now only needed when the promote workflow on `main`
+  itself is broken (the scheduled run executes `main`'s copy of the file, so a
+  fix merged to `dev` reaches it only through one promotion). In that case §5
+  still applies verbatim; the 2026-09-22 rescue is the worked example.
+- Symptom check stays the same: a green hourly run that promoted nothing shows
+  `Verified dev deployment gate -> skipped` right after `Reconciliation gate`;
+  `git rev-list --count origin/main..origin/dev` growing day over day is the
+  early warning.
+
