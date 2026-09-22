@@ -1370,10 +1370,23 @@ def queue_resume_for_agent(config: dict[str, Any], status: dict[str, Any], agent
     return queue_resume_for_task(config, prioritized[0])
 
 
+# A PR review can only move a task that is still inside the candidate
+# lifecycle: approve needs `review`, reopen and notes act on a live candidate.
+# Polling every PR the bus has ever tracked meant one serial `gh api
+# .../pulls/<n>/reviews` per board task -- 147 of them for done tasks alone on
+# 2026-09-22, ~2s each, inside the supervisor tick. That was the 104s stall the
+# loop showed every poll interval, with nothing to act on at the end of it.
+REVIEW_POLL_STATUSES = frozenset({"review", "integrating", "acceptance"})
+
+
 def poll_issue_comments(config: dict[str, Any], bus_state: dict[str, Any], status: dict[str, Any], repo: str) -> bool:
     changed = False
     seen = set(bus_state.get("processed_comment_ids", []))
     for task in status.get("tasks", []):
+        # Issue commands (approve, reopen, note, resume) all act on a task that
+        # is still open; a done task's issue thread is history.
+        if str(task.get("status") or "").lower() == "done":
+            continue
         entry = (bus_state.get("tasks", {}) or {}).get(task["id"]) or {}
         issue_ref = entry.get("ops_issue") or {}
         number = issue_ref.get("number")
@@ -1413,6 +1426,8 @@ def poll_pr_reviews(config: dict[str, Any], bus_state: dict[str, Any], status: d
     changed = False
     seen = set(bus_state.get("processed_review_ids", []))
     for task in status.get("tasks", []):
+        if str(task.get("status") or "").lower() not in REVIEW_POLL_STATUSES:
+            continue
         entry = (bus_state.get("tasks", {}) or {}).get(task["id"]) or {}
         pr_ref = entry.get("review_pr") or {}
         number = pr_ref.get("number")
