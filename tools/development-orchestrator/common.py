@@ -789,6 +789,9 @@ def apply_worker_unit_env(
     run_id: str,
     metadata: dict[str, Any] | None = None,
 ) -> str:
+    env["ORCH_RUN_ID"] = run_id
+    for field in ("role", "task_id", "agent", "candidate_sha", "candidate_generation"):
+        env[f"ORCH_DISPATCH_{field.upper()}"] = str((metadata or {}).get(f"dispatch_{field}") or "")
     unit_name = worker_unit_name(run_id)
     env["ORCH_WORKER_UNIT"] = unit_name
     env["ORCH_WORKER_UNIT_PROPERTIES"] = "\n".join(worker_unit_properties(config, metadata))
@@ -931,6 +934,13 @@ def snapshot_task(task: dict[str, Any], schema: dict[str, Any]) -> dict[str, Any
         "helper_parent",
         "helper_kind",
         "mutates_canonical",
+        "candidate_generation",
+        "candidate_sha",
+        "candidate_branch",
+        "task_spec_ref",
+        "write_scopes",
+        "required_acceptance",
+        "eligible_agents",
         "auto_created_by",
         "planning_ref",
     ):
@@ -989,9 +999,9 @@ def _merge_task_payload(
     live_task = _status_task_by_id(config, resolved_status, task_id or ((task or {}).get("id")))
     if not live_task and not task:
         return None
-    merged = deepcopy(live_task or {})
-    if task:
-        merged.update({key: value for key, value in task.items() if value not in (None, "", [], {})})
+    merged = deepcopy(task or {})
+    if live_task:
+        merged.update(deepcopy(live_task))
     return merged
 
 
@@ -1056,7 +1066,7 @@ def build_task_brief(
     status_value = str(task.get("status") or "").strip() or "-"
     owner = str(task.get("owner") or "").strip() or "-"
     reviewer = str(task.get("reviewer") or "").strip() or "-"
-    next_text = _normalize_summary(task.get("next") or "No short handoff yet.")
+    next_text = str(task.get("next") or "No short handoff yet.").strip()
     summary_zh = _normalize_summary(task.get("summary_zh") or "")
     planning_ref = str(task.get("planning_ref") or "").strip()
     artifacts = [str(item) for item in task.get("artifacts", []) if str(item).strip()]
@@ -1090,6 +1100,10 @@ def build_task_brief(
             f"- Reviewer: `{reviewer}`",
         ]
     )
+    for field in ("task_spec_ref", "candidate_sha", "candidate_generation", "mutates_canonical",
+                  "write_scopes", "required_acceptance", "eligible_agents"):
+        if field in task:
+            lines.append(f"- {field}: `{json.dumps(task[field], ensure_ascii=False)}`")
     if planning_ref:
         lines.append(f"- Planning Ref: `{planning_ref}`")
     if task.get("last_update"):

@@ -120,7 +120,7 @@ describe("SR-PARTNER-NOTIFY-CON-20260917: Partner Passenger Notification Contrac
         "passenger.notification.test.v1",
       );
       expect(
-        (PARTNER_PASSENGER_NOTIFICATION_EXTERNAL_EVENTS as readonly string[]),
+        PARTNER_PASSENGER_NOTIFICATION_EXTERNAL_EVENTS as readonly string[],
       ).not.toContain(PARTNER_NOTIFICATION_TEST_EXTERNAL_EVENT);
     });
   });
@@ -480,18 +480,14 @@ describe("SR-PARTNER-NOTIFY-CON-20260917: Partner Passenger Notification Contrac
       }
     });
 
-    it("has not written the reserved infra/migrations files (allocation-only; no DDL executed by this task)", () => {
-      const migrationsDir = path.join(repoRoot, "infra/migrations");
-      const content = readAllocation();
-      const diskFiles = fs.existsSync(migrationsDir)
-        ? fs.readdirSync(migrationsDir)
-        : [];
-      for (const alloc of content.partner_notification_allocations) {
-        const prefix = `${alloc.version}_`;
-        const matchingFiles = diskFiles.filter((f: string) =>
-          f.startsWith(prefix),
-        );
-        expect(matchingFiles).toHaveLength(0);
+    it("downstream migrations use each reserved filename exactly once", () => {
+      // ROUTE owns V0104; TRANSPORT now owns V0105. The CON task remains
+      // allocation-only, while downstream DDL must match its allocation.
+      const diskFiles = fs.readdirSync(path.join(repoRoot, "infra/migrations"));
+      for (const alloc of readAllocation().partner_notification_allocations) {
+        expect(
+          diskFiles.filter((file) => file.startsWith(`${alloc.version}_`)),
+        ).toEqual([alloc.migration_filename]);
       }
     });
 

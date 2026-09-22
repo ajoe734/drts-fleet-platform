@@ -977,6 +977,33 @@ def reconcile_candidate_lifecycle(
             continue
         observation = candidate_pr_observation(repo, number)
         head_sha = str(observation.get("headRefOid") or "").strip()
+        if head_sha != candidate_sha:
+            # A PR branch remains mutable after handoff.  Its next ordinary
+            # push is an owner checkpoint, not a new candidate: candidate
+            # lineage changes only through a fresh handoff transaction.
+            # Otherwise a WIP anchor can silently replace a reviewed SHA and
+            # cause CI or auto-merge to describe the wrong commit.
+            entry = task_bus_entry(bus_state, str(task["id"]))
+            mismatch = {"candidate_sha": candidate_sha, "head_sha": head_sha, "pr": number}
+            if entry.get("candidate_head_mismatch") != mismatch:
+                entry["candidate_head_mismatch"] = mismatch
+                write_activity_log(
+                    config,
+                    {
+                        "type": "github_candidate_head_mismatch",
+                        "task_id": task.get("id"),
+                        "candidate_sha": candidate_sha,
+                        "message": (
+                            f"PR #{number} head {head_sha[:12] or '-'} differs from handoff "
+                            f"candidate {candidate_sha[:12]}; awaiting a fresh handoff."
+                        ),
+                        "github_pr": number,
+                    },
+                )
+                changed = True
+            continue
+        # The head matches the handoff again: the drift marker, if any, is stale.
+        task_bus_entry(bus_state, str(task["id"])).pop("candidate_head_mismatch", None)
         ci_status, ci_run_url = candidate_ci_status(observation)
         merge = observation.get("mergeCommit") or {}
         merge_sha = str(merge.get("oid") or "").strip() if isinstance(merge, dict) else ""
@@ -1046,6 +1073,33 @@ def request_candidate_auto_merge(
             continue
         entry = task_bus_entry(bus_state, str(task["id"]))
         if entry.get("auto_merge_candidate_sha") == candidate_sha:
+            continue
+        try:
+            observation = candidate_pr_observation(repo, number)
+        except GitHubBusError as exc:
+            write_activity_log(
+                config,
+                {
+                    "type": "candidate_auto_merge_deferred",
+                    "task_id": task.get("id"),
+                    "message": trim_text(f"Cannot verify PR head: {exc}", 600),
+                    "github_pr": number,
+                },
+            )
+            continue
+        if str(observation.get("headRefOid") or "") != candidate_sha:
+            write_activity_log(
+                config,
+                {
+                    "type": "candidate_auto_merge_deferred",
+                    "task_id": task.get("id"),
+                    "message": (
+                        f"PR #{number} head no longer matches reviewed candidate "
+                        f"{candidate_sha[:12]}; awaiting a fresh handoff."
+                    ),
+                    "github_pr": number,
+                },
+            )
             continue
         # Everything above establishes that the candidate was green on its own
         # head. This asks the question those gates cannot: is it still green on
@@ -1316,10 +1370,23 @@ def queue_resume_for_agent(config: dict[str, Any], status: dict[str, Any], agent
     return queue_resume_for_task(config, prioritized[0])
 
 
+# A PR review can only move a task that is still inside the candidate
+# lifecycle: approve needs `review`, reopen and notes act on a live candidate.
+# Polling every PR the bus has ever tracked meant one serial `gh api
+# .../pulls/<n>/reviews` per board task -- 147 of them for done tasks alone on
+# 2026-09-22, ~2s each, inside the supervisor tick. That was the 104s stall the
+# loop showed every poll interval, with nothing to act on at the end of it.
+REVIEW_POLL_STATUSES = frozenset({"review", "integrating", "acceptance"})
+
+
 def poll_issue_comments(config: dict[str, Any], bus_state: dict[str, Any], status: dict[str, Any], repo: str) -> bool:
     changed = False
     seen = set(bus_state.get("processed_comment_ids", []))
     for task in status.get("tasks", []):
+        # Issue commands (approve, reopen, note, resume) all act on a task that
+        # is still open; a done task's issue thread is history.
+        if str(task.get("status") or "").lower() == "done":
+            continue
         entry = (bus_state.get("tasks", {}) or {}).get(task["id"]) or {}
         issue_ref = entry.get("ops_issue") or {}
         number = issue_ref.get("number")
@@ -1359,6 +1426,8 @@ def poll_pr_reviews(config: dict[str, Any], bus_state: dict[str, Any], status: d
     changed = False
     seen = set(bus_state.get("processed_review_ids", []))
     for task in status.get("tasks", []):
+        if str(task.get("status") or "").lower() not in REVIEW_POLL_STATUSES:
+            continue
         entry = (bus_state.get("tasks", {}) or {}).get(task["id"]) or {}
         pr_ref = entry.get("review_pr") or {}
         number = pr_ref.get("number")

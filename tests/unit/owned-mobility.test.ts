@@ -314,8 +314,9 @@ async function completeOrderForRating(
 }
 
 async function flushWebhookDispatch() {
-  await Promise.resolve();
-  await Promise.resolve();
+  // Drain the async dispatch chain without assuming a fixed microtask count.
+  // Zero elapsed time keeps this from firing any backoff retry.
+  await vi.advanceTimersByTimeAsync(0);
 }
 
 describe("owned mobility service", () => {

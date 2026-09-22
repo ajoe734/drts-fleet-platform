@@ -11,6 +11,8 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
+from orchestrator_test_support import DispatchEnvironmentIsolation
+
 REPO = Path(__file__).resolve().parents[2]
 SCRIPT = REPO / "tools/task-dispatch/dispatch-unattended-voice-booking-20260906.py"
 SPEC = importlib.util.spec_from_file_location("voice_materializer", SCRIPT)
@@ -20,8 +22,9 @@ SPEC.loader.exec_module(wave)
 SOURCE = "1" * 40
 
 
-class MaterializerTests(unittest.TestCase):
+class MaterializerTests(DispatchEnvironmentIsolation, unittest.TestCase):
     def setUp(self):
+        super().setUp()
         self.temp = tempfile.TemporaryDirectory()
         self.root = Path(self.temp.name)
         refs = {}

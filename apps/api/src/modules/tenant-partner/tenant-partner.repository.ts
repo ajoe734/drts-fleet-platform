@@ -204,6 +204,81 @@ export class TenantPartnerRepository {
     return this.databaseService?.isEnabled() ?? false;
   }
 
+  /** Notification dispatch must observe governance committed by other instances. */
+  async findNotificationPartnerEntry(entrySlug: string) {
+    const result = await this.databaseService!.query<JsonRecordRow>(
+      `SELECT record FROM admin.phase1_partner_channel_entries WHERE entry_slug = $1`,
+      [entrySlug],
+    );
+    return (
+      (result.rows[0]?.record as PartnerChannelEntryRecord | undefined) ?? null
+    );
+  }
+
+  async findNotificationWebhookEndpoint(tenantId: string, webhookId: string) {
+    const result = await this.databaseService!.query<JsonRecordRow>(
+      `SELECT record FROM admin.phase1_tenant_webhook_endpoints
+       WHERE tenant_id = $1 AND webhook_id = $2`,
+      [tenantId, webhookId],
+    );
+    return (
+      (result.rows[0]?.record as StoredWebhookEndpointRecord | undefined) ??
+      null
+    );
+  }
+
+  async findNotificationWebhookDelivery(deliveryId: string) {
+    const result = await this.databaseService!.query<JsonRecordRow>(
+      `SELECT record FROM admin.phase1_tenant_webhook_deliveries WHERE delivery_id = $1`,
+      [deliveryId],
+    );
+    return (
+      (result.rows[0]?.record as StoredWebhookDeliveryRecord | undefined) ??
+      null
+    );
+  }
+
+  /** No HTTP under this lock. Apply usage/outcomes to the current row, never a send snapshot. */
+  async recordNotificationAttempt(
+    webhookId: string,
+    deliveryId: string,
+    update: (
+      endpoint: StoredWebhookEndpointRecord,
+      delivery: StoredWebhookDeliveryRecord | null,
+    ) => {
+      endpoint: StoredWebhookEndpointRecord;
+      delivery: StoredWebhookDeliveryRecord;
+    },
+  ) {
+    return this.withTransaction(async (executor) => {
+      const endpoints = await executor.query<JsonRecordRow>(
+        `SELECT record FROM admin.phase1_tenant_webhook_endpoints
+         WHERE webhook_id = $1 FOR UPDATE`,
+        [webhookId],
+      );
+      if (!endpoints.rows[0])
+        throw new Error("Notification endpoint disappeared during dispatch");
+      const deliveries = await executor.query<JsonRecordRow>(
+        `SELECT record FROM admin.phase1_tenant_webhook_deliveries
+         WHERE delivery_id = $1 FOR UPDATE`,
+        [deliveryId],
+      );
+      const records = update(
+        endpoints.rows[0].record as StoredWebhookEndpointRecord,
+        (deliveries.rows[0]?.record as
+          | StoredWebhookDeliveryRecord
+          | undefined) ?? null,
+      );
+      await this.persistWebhookEndpointsWithExecutor(executor, [
+        records.endpoint,
+      ]);
+      await this.persistWebhookDeliveriesWithExecutor(executor, [
+        records.delivery,
+      ]);
+      return records;
+    });
+  }
+
   async findPartnerEligibilityVerification(
     eligibilityVerificationId: string,
   ): Promise<PartnerEligibilityVerificationRecord | null> {
@@ -1009,38 +1084,11 @@ export class TenantPartnerRepository {
       );
     }
 
-    for (const delivery of changes.webhookDeliveries ?? []) {
+    if ((changes.webhookDeliveries?.length ?? 0) > 0) {
       writes.push(
-        this.databaseService!.query(
-          `
-            INSERT INTO admin.phase1_tenant_webhook_deliveries (
-              delivery_id,
-              webhook_id,
-              tenant_id,
-              event_type,
-              status,
-              created_at,
-              record
-            ) VALUES (
-              $1, $2, $3, $4, $5, $6, $7::jsonb
-            )
-            ON CONFLICT (delivery_id) DO UPDATE SET
-              webhook_id = EXCLUDED.webhook_id,
-              tenant_id = EXCLUDED.tenant_id,
-              event_type = EXCLUDED.event_type,
-              status = EXCLUDED.status,
-              created_at = EXCLUDED.created_at,
-              record = EXCLUDED.record
-          `,
-          [
-            delivery.deliveryId,
-            delivery.webhookId,
-            delivery.tenantId,
-            delivery.eventType,
-            delivery.status,
-            delivery.createdAt,
-            JSON.stringify(delivery),
-          ],
+        this.persistWebhookDeliveriesWithExecutor(
+          this.databaseService!,
+          changes.webhookDeliveries ?? [],
         ),
       );
     }
@@ -1296,7 +1344,10 @@ export class TenantPartnerRepository {
     }
 
     await Promise.all([
-      this.persistTenantUserRolesWithExecutor(executor, changes.userRoles ?? []),
+      this.persistTenantUserRolesWithExecutor(
+        executor,
+        changes.userRoles ?? [],
+      ),
       this.persistTenantApiKeysWithExecutor(executor, changes.apiKeys ?? []),
       this.persistPartnerIngressCredentialsWithExecutor(
         executor,
@@ -1895,6 +1946,45 @@ export class TenantPartnerRepository {
         ),
       ),
     );
+  }
+
+  private async persistWebhookDeliveriesWithExecutor(
+    executor: TenantPartnerQueryExecutor,
+    deliveries: readonly StoredWebhookDeliveryRecord[],
+  ) {
+    for (const delivery of deliveries) {
+      await executor.query(
+        `
+            INSERT INTO admin.phase1_tenant_webhook_deliveries (
+              delivery_id,
+              webhook_id,
+              tenant_id,
+              event_type,
+              status,
+              created_at,
+              record
+            ) VALUES (
+              $1, $2, $3, $4, $5, $6, $7::jsonb
+            )
+            ON CONFLICT (delivery_id) DO UPDATE SET
+              webhook_id = EXCLUDED.webhook_id,
+              tenant_id = EXCLUDED.tenant_id,
+              event_type = EXCLUDED.event_type,
+              status = EXCLUDED.status,
+              created_at = EXCLUDED.created_at,
+              record = EXCLUDED.record
+          `,
+        [
+          delivery.deliveryId,
+          delivery.webhookId,
+          delivery.tenantId,
+          delivery.eventType,
+          delivery.status,
+          delivery.createdAt,
+          JSON.stringify(delivery),
+        ],
+      );
+    }
   }
 
   private async persistWebhookEndpointsWithExecutor(

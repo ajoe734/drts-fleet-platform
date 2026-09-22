@@ -1,11 +1,29 @@
 """Shared isolation fixtures for orchestrator runtime tests."""
 from __future__ import annotations
 
+import os
 import tempfile
 from pathlib import Path
 from unittest import mock
 
 from control_plane.infra import worker_evidence
+
+
+class DispatchEnvironmentIsolation:
+    """Keep the invoking worker's dispatch context out of isolated test boards."""
+
+    def setUp(self) -> None:
+        super().setUp()
+        environ = {
+            key: value
+            for key, value in os.environ.items()
+            if key != "ORCH_RUN_ID" and not key.startswith("ORCH_DISPATCH_")
+        }
+        # Restore the inherited context even after setup or test failure. Tests
+        # for dispatch fencing can still supply their own explicit context.
+        env_patch = mock.patch.dict(os.environ, environ, clear=True)
+        env_patch.start()
+        self.addCleanup(env_patch.stop)
 
 
 class EvidenceOutputIsolation:

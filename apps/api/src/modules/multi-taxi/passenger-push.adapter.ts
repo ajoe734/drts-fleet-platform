@@ -1,4 +1,5 @@
 import { Inject, Injectable, Logger, Optional } from "@nestjs/common";
+import { partnerFailure } from "./partner-notification.types";
 
 import {
   PassengerPushDeviceExpiredError,
@@ -6,6 +7,7 @@ import {
   PassengerPushProviderError,
   PassengerPushTenantMismatchError,
   type PassengerPushMessage,
+  type PassengerPushSendContext,
   type PassengerPushPort,
   type PassengerPushReceipt,
 } from "./passenger-push.port";
@@ -53,7 +55,7 @@ export interface PassengerPushTransportRequest {
   providerName: string;
   message: PassengerPushMessage;
   device?: PassengerDeviceRecord | null | undefined;
-  context: { requestId?: string | undefined };
+  context: PassengerPushSendContext;
 }
 
 export interface PassengerPushTransport {
@@ -65,9 +67,11 @@ export interface PassengerPushTransport {
    * keys configured) must not be reported as deliverable.
    */
   isAvailable?(): boolean;
+  isAvailableFor?(message: PassengerPushMessage): Promise<boolean>;
 }
 
 export interface PassengerPushAdapterConfig {
+  transportMode?: "partner_webhook" | "legacy";
   providerName?: string | undefined;
   endpointUrl?: string | undefined;
   apiKey?: string | undefined;
@@ -104,7 +108,20 @@ export class PassengerPushAdapter implements PassengerPushPort {
     private readonly deviceResolver?: PassengerDeviceResolver | null,
   ) {}
 
+  get transportMode() {
+    return this.config?.transportMode ?? "legacy";
+  }
+
+  async isAvailableFor(message: PassengerPushMessage): Promise<boolean> {
+    if (this.transportMode === "partner_webhook") {
+      return (await this.transport?.isAvailableFor?.(message)) ?? false;
+    }
+    return this.isAvailable();
+  }
+
   isAvailable(): boolean {
+    // A partner route is required; object presence is not entry readiness.
+    if (this.transportMode === "partner_webhook") return false;
     if (this.transport) {
       // An injected transport's mere presence is not proof it can actually
       // send: Web Push, for example, still needs VAPID keys. Defer to the
@@ -133,6 +150,7 @@ export class PassengerPushAdapter implements PassengerPushPort {
   }
 
   providerName(): string | null {
+    if (this.transportMode === "partner_webhook") return "partner_webhook";
     if (!this.isAvailable()) {
       return null;
     }
@@ -145,8 +163,16 @@ export class PassengerPushAdapter implements PassengerPushPort {
 
   async send(
     message: PassengerPushMessage,
-    context: { requestId?: string | undefined },
+    context: PassengerPushSendContext,
   ): Promise<PassengerPushReceipt> {
+    if (this.transportMode === "partner_webhook") {
+      if (!this.transport) throw partnerFailure("configuration_blocked");
+      return this.transport.send({
+        providerName: "partner_webhook",
+        message,
+        context,
+      });
+    }
     if (!this.isAvailable()) {
       throw new Error(
         "Passenger push provider is not provisioned; no notification can be delivered.",
