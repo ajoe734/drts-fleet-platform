@@ -3464,6 +3464,62 @@ class IdleOperationalReviewTests(unittest.TestCase):
 
         self.assertIsNone(self._reason(state, config=config))
 
+    PAUSED_STATE_PAUSES = {
+        "gemini": {
+            "schema": 3,
+            "scope": "lane",
+            "lane_id": "gemini",
+            "kind": "quota",
+            "reason": "Individual quota reached",
+            "paused_at": "2026-09-21T11:31:06Z",
+            "resume_at": None,
+        }
+    }
+
+    def test_the_first_health_triage_always_runs(self) -> None:
+        state = self._state()
+        state["provider_pauses"] = dict(self.PAUSED_STATE_PAUSES)
+
+        self.assertEqual(self._reason(state), "provider_health_triage")
+
+    def test_an_unchanged_pause_set_does_not_get_a_second_health_triage(self) -> None:
+        """Four quota-paused lanes produced 88 identical, action-less triages in a day.
+
+        A pause is a standing condition; re-briefing the chair on the same
+        pauses every cooldown held the supervisor loop for ~145s each time and
+        spent the only lanes still working on a verdict that changed nothing.
+        """
+        state = self._state(last_operational_review_at=supervisor.utc_now())
+        state["provider_pauses"] = dict(self.PAUSED_STATE_PAUSES)
+        state["chair_review"]["last_operational_fingerprint"] = self._fingerprint(state)
+
+        self.assertIsNone(self._reason(state))
+
+    def test_a_new_pause_brings_health_triage_back(self) -> None:
+        state = self._state(last_operational_review_at=supervisor.utc_now())
+        state["provider_pauses"] = dict(self.PAUSED_STATE_PAUSES)
+        state["chair_review"]["last_operational_fingerprint"] = self._fingerprint(state)
+        state["provider_pauses"]["codex"] = dict(self.PAUSED_STATE_PAUSES["gemini"], lane_id="codex")
+
+        self.assertEqual(self._reason(state), "provider_health_triage")
+
+    def test_a_lifted_pause_brings_health_triage_back(self) -> None:
+        """Lifting is as much news as pausing: the chair should see the lane return."""
+        state = self._state(last_operational_review_at=supervisor.utc_now())
+        state["provider_pauses"] = dict(self.PAUSED_STATE_PAUSES)
+        state["provider_pauses"]["codex"] = dict(self.PAUSED_STATE_PAUSES["gemini"], lane_id="codex")
+        state["chair_review"]["last_operational_fingerprint"] = self._fingerprint(state)
+        del state["provider_pauses"]["codex"]
+
+        self.assertEqual(self._reason(state), "provider_health_triage")
+
+    def test_the_floor_returns_health_triage_even_with_nothing_moving(self) -> None:
+        state = self._state(last_operational_review_at="2026-08-20T00:00:00Z")
+        state["provider_pauses"] = dict(self.PAUSED_STATE_PAUSES)
+        state["chair_review"]["last_operational_fingerprint"] = self._fingerprint(state)
+
+        self.assertEqual(self._reason(state), "provider_health_triage")
+
     def test_a_missing_review_timestamp_does_not_suppress(self) -> None:
         """A fingerprint with no time beside it cannot be aged, so it defers."""
         state = self._state()
