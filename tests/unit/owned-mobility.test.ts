@@ -2012,7 +2012,7 @@ describe("owned mobility service", () => {
 
       let caught: any = null;
       try {
-        ownedMobilityService.getReferralPassengerReceipt(
+        await ownedMobilityService.getReferralPassengerReceipt(
           booking.orderId,
           identity2,
         );
@@ -2069,7 +2069,7 @@ describe("owned mobility service", () => {
       expect(history.items.length).toBeGreaterThan(0);
       expect(history.items[0]?.orderId).toBe(booking.orderId);
 
-      const receipt = ownedMobilityService.getReferralPassengerReceipt(
+      const receipt = await ownedMobilityService.getReferralPassengerReceipt(
         booking.orderId,
         identity,
       );

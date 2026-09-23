@@ -283,6 +283,10 @@ export class ReferralEmbedHandoffRepository {
         await client.query("COMMIT");
         return { outcome: "missing" };
       }
+      if (!handoff.consumedAt) {
+        await client.query("COMMIT");
+        return { outcome: "not_consumed" };
+      }
       if (
         handoff.entrySlug !== input.entrySlug.trim() ||
         handoff.entryHost !== input.entryHost.trim().toLowerCase()
@@ -417,6 +421,7 @@ export class ReferralEmbedHandoffRepository {
   }): RecordReferralEmbedConsentResult {
     const handoff = this.fallbackHandoffs.get(input.handoffId);
     if (!handoff) return { outcome: "missing" };
+    if (!handoff.consumedAt) return { outcome: "not_consumed" };
     if (
       handoff.entrySlug !== input.entrySlug.trim() ||
       handoff.entryHost !== input.entryHost.trim().toLowerCase()

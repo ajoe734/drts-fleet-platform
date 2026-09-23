@@ -5839,7 +5839,33 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
     const result =
       await this.referralEmbedHandoffRepository.recordConsent(command);
     if (result.outcome === "recorded" || result.outcome === "replayed") {
+      const entry = await this.getPartnerEntry(result.session.partnerEntrySlug);
+      if (!entry || entry.status !== "active") {
+        throw new ApiRequestError(
+          HttpStatus.FORBIDDEN,
+          "PARTNER_ENTRY_INACTIVE",
+          "The partner entry is inactive or missing.",
+        );
+      }
+      const link = await this.partnerUserIdentityLinkRepository.findByDrtsPassengerId(
+        result.session.partnerEntrySlug,
+        result.session.drtsPassengerId,
+      );
+      if (!link || link.status !== "active") {
+        throw new ApiRequestError(
+          HttpStatus.FORBIDDEN,
+          "REFERRAL_HANDOFF_REVOKED",
+          "The partner user identity link is no longer active.",
+        );
+      }
       return result.session;
+    }
+    if (result.outcome === "not_consumed") {
+      throw new ApiRequestError(
+        HttpStatus.FORBIDDEN,
+        "REFERRAL_HANDOFF_NOT_CONSUMED",
+        "The referral handoff artifact has not been consumed yet.",
+      );
     }
     if (result.outcome === "session_mismatch") {
       throw new ApiRequestError(

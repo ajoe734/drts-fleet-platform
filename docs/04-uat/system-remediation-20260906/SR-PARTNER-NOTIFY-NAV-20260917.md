@@ -75,3 +75,12 @@ Live/native-device browser E2E for the account-switch, consent, click-through, a
 ## Hosted CI on `871d398d12e6f4eeeb7e40e244fe262ea6406242` and current head
 
 The previous candidate `871d398d12e6f4eeeb7e40e244fe262ea6406242` fully addressed the residual gap (null-tenant active/history read leak) but was blocked from publication due to GitHub credential isolation, which is now repaired. The current commit incorporates all fixes including the test runner fix.
+
+## New Findings Addressed (2026-09-23)
+
+| Defect | Root Cause | Fix | Verification |
+|---|---|---|---|
+| P1: grant-consent accepts unconsumed/expired artifacts | `recordConsent` in `referral-embed-handoff.repository.ts` didn't verify `consumedAt`, allowing bypass of the initial consume expiry check. `route.ts` allowed `grant-consent` without a valid existing session, making it a blind bearer token. | Modified `recordConsent` and `recordConsentFallback` to return `not_consumed` if `consumedAt` is missing. Modified `tenant-partner.service.ts` to throw `REFERRAL_HANDOFF_NOT_CONSUMED` and to verify active `partnerEntry` and identity link. Modified `session/route.ts` to require a valid existing session for `grant-consent`. | `vitest` unit tests passed. Code inspection confirms expiration/consumption requirements and session dependency. |
+| P2: returnTo open redirect | `sanitizeReturnTo` only checked string prefixes (`/`, `//`, `/\`), allowing URLs like `/\t/malicious.site` to bypass the check and redirect off-site. | Replaced `sanitizeReturnTo` with a secure `URL` parser check in `redirectResponse` that strictly enforces same-origin against `request.url`. | Code inspection confirms `new URL(returnTo, request.url).origin === request.url.origin`. |
+| P2: getReferralPassengerReceipt denies null-tenant | `assertPartnerOrderIdentity` synchronously rejected multi-taxi (null tenant) orders for referral passengers because it couldn't query the frozen route. | Made `getReferralPassengerReceipt`, `cancelReferralPassengerTrip`, and `rateReferralPassengerTrip` async. Introduced `getOrderAsync` and `assertPartnerOrderIdentityAsync` which query `partnerNotificationNavigationRepository` to securely validate the frozen tenant for null-tenant orders. | `tests/unit/owned-mobility.test.ts` passed, confirming active/history/receipt paths correctly validate frozen route tenant boundaries. |
+

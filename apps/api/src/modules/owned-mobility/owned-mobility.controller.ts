@@ -439,26 +439,26 @@ export class OwnedMobilityController {
 
   @Get("partner/referral/passenger/orders/:orderId/receipt")
   @Throttle(READ_HEAVY_RATE_LIMIT)
-  getReferralPassengerReceipt(
+  async getReferralPassengerReceipt(
     @Param("orderId") orderId: string,
     @CurrentIdentity() identity: BootstrapRequestIdentity | null,
     @Headers("x-request-id") requestId?: string,
   ) {
     return toApiSuccessEnvelope(
-      this.ownedMobilityService.getReferralPassengerReceipt(orderId, identity),
+      await this.ownedMobilityService.async getReferralPassengerReceipt(orderId, identity),
       requestId,
     );
   }
 
   @Get("partner/referral/passenger/orders/:orderId/receipt/download")
   @Throttle(READ_HEAVY_RATE_LIMIT)
-  downloadReferralPassengerReceipt(
+  async downloadReferralPassengerReceipt(
     @Param("orderId") orderId: string,
     @CurrentIdentity() identity: BootstrapRequestIdentity | null,
     @Headers("x-request-id") requestId?: string,
   ) {
     return toApiSuccessEnvelope(
-      this.ownedMobilityService.getReferralPassengerReceipt(orderId, identity),
+      await this.ownedMobilityService.async getReferralPassengerReceipt(orderId, identity),
       requestId,
     );
   }

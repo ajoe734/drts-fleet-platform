@@ -13234,6 +13234,64 @@ export class OwnedMobilityService
     return nextOrder;
   }
 
+
+  async getOrderAsync(orderId: string, identity?: BootstrapRequestIdentity | null) {
+    const order = this.requireOrder(orderId);
+    await this.assertPartnerOrderIdentityAsync(identity, order);
+    return this.cloneOrder(order);
+  }
+
+  private async assertPartnerOrderIdentityAsync(
+    identity: BootstrapRequestIdentity | null | undefined,
+    order: OwnedOrderRecord,
+  ) {
+    if (!identity || identity.realm !== "partner") {
+      return;
+    }
+
+    const passengerId = identity.drtsPassengerId ?? identity.actorId;
+
+    let mismatch =
+      (identity.actorType !== "partner_api_key" &&
+        identity.actorType !== "referral_passenger") ||
+      !order.partnerEntrySlug ||
+      (identity.partnerId && identity.partnerId !== order.partnerId) ||
+      (identity.partnerProgramId &&
+        identity.partnerProgramId !== order.partnerProgramId) ||
+      identity.partnerEntrySlug !== order.partnerEntrySlug ||
+      (identity.actorType === "referral_passenger" &&
+        passengerId &&
+        order.passenger?.passengerId &&
+        identity.actorType === "referral_passenger" &&
+        order.passenger?.passengerId !== passengerId);
+
+    if (!mismatch) {
+      if (order.tenantId === null && this.tenantPartnerService) {
+        const route =
+          await this.partnerNotificationNavigationRepository?.findByOrderId(
+            order.orderId,
+          );
+        if (
+          route &&
+          (route.tenantId !== identity.tenantId ||
+            route.partnerId !== (identity.partnerId || null))
+        ) {
+          mismatch = true;
+        }
+      } else if (identity.tenantId && identity.tenantId !== order.tenantId) {
+        mismatch = true;
+      }
+    }
+
+    if (mismatch) {
+      throw new ApiRequestError(
+        HttpStatus.FORBIDDEN,
+        "PARTNER_SCOPE_MISMATCH",
+        "Partner API key or referral passenger cannot access resources of another entry, tenant, or passenger.",
+      );
+    }
+  }
+
   private assertPartnerOrderIdentity(
     identity: BootstrapRequestIdentity | null | undefined,
     order: OwnedOrderRecord,
@@ -13753,10 +13811,10 @@ export class OwnedMobilityService
     };
   }
 
-  getReferralPassengerReceipt(
+  async getReferralPassengerReceipt(
     orderId: string,
     identity?: BootstrapRequestIdentity | null,
-  ): ReferralPassengerReceipt {
+  ): Promise<ReferralPassengerReceipt> {
     if (
       !identity ||
       identity.realm !== "partner" ||
@@ -13771,8 +13829,7 @@ export class OwnedMobilityService
 
     const passengerId = identity.drtsPassengerId ?? identity.actorId;
 
-    const order = this.getOrder(orderId, identity);
-    this.assertPartnerOrderIdentity(identity, order);
+    const order = await this.getOrderAsync(orderId, identity);
 
     if (
       order.passenger?.passengerId &&
@@ -13859,8 +13916,7 @@ export class OwnedMobilityService
 
     const passengerId = identity.drtsPassengerId ?? identity.actorId;
 
-    const order = this.getOrder(orderId, identity);
-    this.assertPartnerOrderIdentity(identity, order);
+    const order = await this.getOrderAsync(orderId, identity);
 
     if (
       order.passenger?.passengerId &&
@@ -13905,8 +13961,7 @@ export class OwnedMobilityService
 
     const passengerId = identity.drtsPassengerId ?? identity.actorId;
 
-    const order = this.getOrder(orderId, identity);
-    this.assertPartnerOrderIdentity(identity, order);
+    const order = await this.getOrderAsync(orderId, identity);
 
     if (
       order.passenger?.passengerId &&

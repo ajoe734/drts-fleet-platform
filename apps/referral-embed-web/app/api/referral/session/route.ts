@@ -42,20 +42,19 @@ function jsonResponse(body: unknown, status = 200) {
   });
 }
 
-function sanitizeReturnTo(returnTo: string | undefined): string {
-  if (
-    !returnTo ||
-    !returnTo.startsWith("/") ||
-    returnTo.startsWith("//") ||
-    returnTo.startsWith("/\\")
-  ) {
-    return "/";
-  }
-  return returnTo;
-}
-
 function redirectResponse(request: Request, returnTo: string | undefined) {
-  const url = new URL(sanitizeReturnTo(returnTo), request.url);
+  let url: URL;
+  try {
+    const rawUrl = new URL(returnTo || "/", request.url);
+    const requestUrl = new URL(request.url);
+    if (rawUrl.origin !== requestUrl.origin) {
+      url = new URL("/", request.url);
+    } else {
+      url = rawUrl;
+    }
+  } catch {
+    url = new URL("/", request.url);
+  }
   const response = NextResponse.redirect(url);
   response.headers.set("Cache-Control", "no-store, max-age=0");
   return response;
@@ -153,17 +152,16 @@ export async function POST(request: Request) {
 
     if (action.action === "grant-consent") {
       const existingSession = await getReferralEmbedSession();
+      if (!existingSession) {
+        return jsonResponse({ ok: false, message: "Missing session." }, 403);
+      }
       const session = await recordReferralEmbedConsent(
         buildReferralEmbedConsentCommand({
           handoffId: action.handoffId,
           entrySlug: action.entrySlug,
           entryHost: action.entryHost,
-          ...(existingSession?.drtsPassengerId
-            ? { currentDrtsPassengerId: existingSession.drtsPassengerId }
-            : {}),
-          ...(existingSession?.partnerEntrySlug
-            ? { currentPartnerEntrySlug: existingSession.partnerEntrySlug }
-            : {}),
+          currentDrtsPassengerId: existingSession.drtsPassengerId,
+          currentPartnerEntrySlug: existingSession.partnerEntrySlug,
           actorIp: request.headers.get("x-forwarded-for"),
           userAgent: request.headers.get("user-agent"),
         }),
