@@ -395,7 +395,12 @@ describe.skipIf(!seedDatabaseUrl)(
       expect(consumeRes.outcome).toBe("consumed");
 
       // Record consent
-      const consentRes = await handoffRepo.recordConsent({
+      const linkRepo = { findByDrtsPassengerId: async () => ({ status: 'active' }) };
+      const tenantPartnerRepo = { getPartnerEntry: async () => ({ status: 'active', tenantId: null, partnerId: null }) };
+      const { TenantPartnerService } = require("../../apps/api/src/modules/tenant-partner/tenant-partner.service");
+      const service = new TenantPartnerService({} as any, tenantPartnerRepo as any, undefined, undefined, undefined, linkRepo as any, handoffRepo);
+      
+      const consentSession = await service.recordReferralEmbedConsent({
         handoffId: handoff.handoffId,
         entrySlug: "demo-slug",
         entryHost: "demo-host.com",
@@ -407,7 +412,7 @@ describe.skipIf(!seedDatabaseUrl)(
           grantedAt: new Date().toISOString(),
         },
       });
-      expect(consentRes.outcome).toBe("recorded");
+      expect(consentSession.handoffId).toBe(handoff.handoffId);
 
       // Verify ledger persistence
       const ledger = await handoffRepo.findLatestConsent("demo-slug", "pass-1");
@@ -449,7 +454,7 @@ describe.skipIf(!seedDatabaseUrl)(
       const client = await db.connect();
       try {
         await client.query(
-          "UPDATE admin.phase1_referral_embed_handoffs SET expires_at = $1 WHERE handoff_id = $2",
+          "UPDATE admin.phase1_referral_embed_handoffs SET expires_at = $1, record = jsonb_set(record, '{expiresAt}', to_jsonb($1::text), true) WHERE handoff_id = $2",
           [past, handoff.handoffId],
         );
       } finally {
@@ -457,7 +462,12 @@ describe.skipIf(!seedDatabaseUrl)(
       }
 
       // Record consent (should succeed even if handoff is expired, because the session outlives the artifact)
-      const consentRes = await handoffRepo.recordConsent({
+      const linkRepo = { findByDrtsPassengerId: async () => ({ status: 'active' }) };
+      const tenantPartnerRepo = { getPartnerEntry: async () => ({ status: 'active', tenantId: null, partnerId: null }) };
+      const { TenantPartnerService } = require("../../apps/api/src/modules/tenant-partner/tenant-partner.service");
+      const service = new TenantPartnerService({} as any, tenantPartnerRepo as any, undefined, undefined, undefined, linkRepo as any, handoffRepo);
+      
+      const consentSession = await service.recordReferralEmbedConsent({
         handoffId: handoff.handoffId,
         entrySlug: "demo-slug-exp",
         entryHost: "demo-host.com",
@@ -469,7 +479,60 @@ describe.skipIf(!seedDatabaseUrl)(
           grantedAt: new Date().toISOString(),
         },
       });
-      expect(consentRes.outcome).toBe("recorded");
+      expect(consentSession.handoffId).toBe(handoff.handoffId);
+    });
+
+    it("rejects consent if session is older than 8 hours", async () => {
+      const now = Date.now();
+      const past = new Date(now - 9 * 60 * 60 * 1000).toISOString(); // 9 hours ago
+
+      // Issue and consume an artifact 9 hours ago
+      const handoff = await handoffRepo.issue({
+        artifact: "artifact_expired_session",
+        entrySlug: "demo-slug-exp-sess",
+        entryHost: "demo-host.com",
+        partnerUserRef: "user-2",
+        drtsPassengerId: "pass-2",
+        tenantId: null,
+        partnerId: null,
+        partnerProgramId: null,
+        consentRequired: true,
+        consentBundleVersion: null,
+        consentGrantedAt: null,
+        issuedAt: new Date(now - 10 * 60 * 60 * 1000).toISOString(),
+        expiresAt: new Date(now - 9.5 * 60 * 60 * 1000).toISOString(), 
+      });
+
+      // Instead of consuming via repo, we inject it directly with consumed_at > 8 hours ago
+      const client = await db.connect();
+      try {
+        await client.query(
+          "UPDATE admin.phase1_referral_embed_handoffs SET consumed_at = $1, expires_at = $1, record = jsonb_set(jsonb_set(record, '{consumedAt}', to_jsonb($1::text), true), '{expiresAt}', to_jsonb($1::text), true) WHERE handoff_id = $2",
+          [past, handoff.handoffId],
+        );
+      } finally {
+        client.release();
+      }
+
+      const linkRepo = { findByDrtsPassengerId: async () => ({ status: 'active' }) };
+      const tenantPartnerRepo = { getPartnerEntry: async () => ({ status: 'active', tenantId: null, partnerId: null }) };
+      const { TenantPartnerService } = require("../../apps/api/src/modules/tenant-partner/tenant-partner.service");
+      const service = new TenantPartnerService({} as any, tenantPartnerRepo as any, undefined, undefined, undefined, linkRepo as any, handoffRepo);
+      
+      await expect(
+        service.recordReferralEmbedConsent({
+          handoffId: handoff.handoffId,
+          entrySlug: "demo-slug-exp-sess",
+          entryHost: "demo-host.com",
+          currentDrtsPassengerId: "pass-2",
+          currentPartnerEntrySlug: "demo-slug-exp-sess",
+          consentBundle: {
+            bundleVersion: "v1",
+            grantedScopes: ["trip.manage", "pii.trip", "identity.bind"],
+            grantedAt: new Date().toISOString(),
+          },
+        })
+      ).rejects.toThrowError("The referral handoff artifact has expired.");
     });
   },
 );

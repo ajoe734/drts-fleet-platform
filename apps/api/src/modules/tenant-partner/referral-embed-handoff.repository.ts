@@ -302,13 +302,13 @@ export class ReferralEmbedHandoffRepository {
         await client.query("COMMIT");
         return { outcome: "missing" };
       }
-      if (handoff.expiresAt <= new Date().toISOString()) {
-        await client.query("COMMIT");
-        return { outcome: "expired" };
-      }
       if (!handoff.consumedAt) {
         await client.query("COMMIT");
         return { outcome: "not_consumed" };
+      }
+      if (new Date(handoff.consumedAt).getTime() + 8 * 60 * 60 * 1000 < Date.now()) {
+        await client.query("COMMIT");
+        return { outcome: "expired" };
       }
       if (
         handoff.entrySlug !== input.entrySlug.trim() ||
@@ -460,9 +460,9 @@ export class ReferralEmbedHandoffRepository {
   ): Promise<RecordReferralEmbedConsentResult> {
     const handoff = this.fallbackHandoffs.get(input.handoffId);
     if (!handoff) return { outcome: "missing" };
-    if (handoff.expiresAt <= new Date().toISOString())
-      return { outcome: "expired" };
     if (!handoff.consumedAt) return { outcome: "not_consumed" };
+    if (new Date(handoff.consumedAt).getTime() + 8 * 60 * 60 * 1000 < Date.now())
+      return { outcome: "expired" };
     if (
       handoff.entrySlug !== input.entrySlug.trim() ||
       handoff.entryHost !== input.entryHost.trim().toLowerCase()
