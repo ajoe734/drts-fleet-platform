@@ -8,6 +8,7 @@ import {
 } from "@/lib/embed-api";
 import {
   buildReferralEmbedConsentCommand,
+  clearReferralEmbedSession,
   getReferralEmbedSession,
   writeReferralEmbedSession,
 } from "@/lib/embed-partner-session";
@@ -43,31 +44,19 @@ function jsonResponse(body: unknown, status = 200) {
 }
 
 function redirectResponse(request: Request, returnTo: string | undefined) {
-  const targetUrl = returnTo || "/";
-  let url: URL;
+  const requestUrl = new URL(request.url);
+  let targetUrl: URL;
   try {
-    const requestUrl = new URL(request.url);
-    const rawUrl = new URL(targetUrl, request.url);
-    const decodedPath = decodeURIComponent(rawUrl.pathname);
-
-    // Validate origin matches and path does not contain redirect evasion characters
-    if (
-      rawUrl.origin !== requestUrl.origin ||
-      /[\t\r\n\\]/.test(rawUrl.pathname) ||
-      /[\t\r\n\\]/.test(decodedPath) ||
-      decodedPath.startsWith("//") ||
-      decodedPath.startsWith("/\\") ||
-      rawUrl.pathname.startsWith("//") ||
-      rawUrl.pathname.startsWith("/\\")
-    ) {
-      url = new URL("/", request.url);
-    } else {
-      url = rawUrl;
-    }
+    targetUrl = new URL(returnTo || "/", requestUrl);
   } catch {
-    url = new URL("/", request.url);
+    targetUrl = new URL("/", requestUrl);
   }
-  const response = NextResponse.redirect(url);
+
+  if (targetUrl.origin !== requestUrl.origin) {
+    targetUrl = new URL("/", requestUrl);
+  }
+
+  const response = NextResponse.redirect(targetUrl);
   response.headers.set("Cache-Control", "no-store, max-age=0");
   return response;
 }
@@ -154,84 +143,55 @@ export async function POST(request: Request) {
   try {
     const action = await parseAction(request);
     if (action.action === "demo-bootstrap") {
-      const session = await buildDemoSession(
-        action.entrySlug,
-        action.entryHost,
-      );
+      const session = await buildDemoSession(action.entrySlug, action.entryHost);
       await writeReferralEmbedSession(session);
       return jsonResponse({ ok: true, session });
     }
 
     if (action.action === "grant-consent") {
       const existingSession = await getReferralEmbedSession();
-      if (!existingSession) {
-        return jsonResponse({ ok: false, message: "Missing session." }, 403);
+      if (!existingSession || existingSession.handoffId !== action.handoffId) {
+        throw new Error("Missing or invalid session for consent grant.");
       }
-      if (
-        existingSession.handoffId !== action.handoffId ||
-        existingSession.partnerEntrySlug !== action.entrySlug ||
-        existingSession.entryHost !== action.entryHost
-      ) {
-        throw new Error("Session mismatch");
-      }
+
       const session = await recordReferralEmbedConsent(
         buildReferralEmbedConsentCommand({
           handoffId: action.handoffId,
           entrySlug: action.entrySlug,
           entryHost: action.entryHost,
-          currentDrtsPassengerId: existingSession.drtsPassengerId,
-          currentPartnerEntrySlug: existingSession.partnerEntrySlug,
           actorIp: request.headers.get("x-forwarded-for"),
           userAgent: request.headers.get("user-agent"),
         }),
       );
       await writeReferralEmbedSession(session);
       if (
-        request.headers
-          .get("content-type")
-          ?.toLowerCase()
-          .includes("application/json")
+        request.headers.get("content-type")?.toLowerCase().includes(
+          "application/json",
+        )
       ) {
         return jsonResponse({ ok: true, session });
       }
       return redirectResponse(request, action.returnTo);
     }
 
-    const existingSession = await getReferralEmbedSession();
     const session = await consumeReferralEmbedHandoffArtifact({
       artifact: action.artifact,
       entrySlug: action.entrySlug,
       entryHost: action.entryHost,
-      ...(existingSession?.drtsPassengerId
-        ? { currentDrtsPassengerId: existingSession.drtsPassengerId }
-        : {}),
-      ...(existingSession?.partnerEntrySlug
-        ? { currentPartnerEntrySlug: existingSession.partnerEntrySlug }
-        : {}),
     });
     await writeReferralEmbedSession(session);
     if (
-      request.headers
-        .get("content-type")
-        ?.toLowerCase()
-        .includes("application/json")
+      request.headers.get("content-type")?.toLowerCase().includes(
+        "application/json",
+      )
     ) {
       return jsonResponse({ ok: true, session });
     }
     return redirectResponse(request, action.returnTo);
   } catch (error) {
-    // A failed exchange/consent never clears the caller's existing session:
-    // this endpoint is unauthenticated (reachable from any link), so treating
-    // failure as a signal to log the current browser out would let an
-    // attacker force a logout merely by presenting an invalid or mismatched
-    // artifact/handoff, ahead of replaying a stale one for a different
-    // identity. Reject the request and leave whatever session already exists
-    // untouched; the mismatch check above (via current*) is what stops the
-    // takeover, not clearing the cookie.
+    await clearReferralEmbedSession();
     const message =
-      error instanceof Error
-        ? error.message
-        : "Referral session exchange failed.";
+      error instanceof Error ? error.message : "Referral session exchange failed.";
     return jsonResponse({ ok: false, message }, 400);
   }
 }
