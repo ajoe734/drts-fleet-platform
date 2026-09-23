@@ -1586,6 +1586,82 @@ class ExecutionWorkspaceTests(unittest.TestCase):
             self.assertEqual(request.metadata["workspace_source"], "fallback_canonical")
             self.assertEqual(owner_status_before, _git(owner, "status", "--porcelain").stdout)
 
+    def test_retry_after_workspace_drift_refreshes_stale_notice(self) -> None:
+        """SR-ORCH-REVIEW-WORKTREE-ISOLATION-20260923 R6-N1 regression (7th rejection round).
+
+        `retry_due_workers` reconstructs the retried `DeliveryRequest` from a
+        worker's `request_snapshot` (`request_for_worker` ->
+        `request_from_snapshot`), which carries forward whatever
+        `Supervisor-assigned workspace:` notice was rendered for the
+        *original* dispatch. If that original reviewer workspace has since
+        drifted (a branch got attached -- see R3-N1/R4-N1's drift scenario),
+        `ensure_execution_workspace` safely reallocates a fresh, still-
+        detached workspace on retry, but before this fix
+        `attach_workspace_metadata` refused to overwrite the notice because
+        the heading was already present in the reconstructed message --
+        leaving the dispatched prompt naming the stale, now-branch-attached
+        old path/workspace instead of the one the worker is actually placed
+        in.
+        """
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir) / "repo"
+            root.mkdir()
+            self._init_repo(root)
+            config = self._repo_config(root)
+            sha = _git(root, "rev-parse", "HEAD").stdout.strip()
+
+            task = {
+                "owner": "gemini",
+                "reviewer": "codex2",
+                "candidate_sha": sha,
+            }
+            started, _adapter, request, _state = self._start_review_dispatch(config, task)
+            self.assertTrue(started[0], f"initial review dispatch was refused: {started[1]}")
+            first_workspace = Path(request.metadata["workspace_root"])
+            self.assertEqual(request.metadata["workspace_source"], "created_review_worktree")
+            self.assertIn(f"`{first_workspace}`", request.message)
+            self.assertIn("no branch is checked out here", request.message)
+
+            # Drift: a branch gets attached to the still-clean, still-on-
+            # candidate workspace after delivery (mirrors R3-N1's scenario),
+            # making it unsafe to reuse on retry.
+            _git(first_workspace, "checkout", "-b", "drift-branch")
+
+            # Reconstruct the retry request through the exact production
+            # mechanism `retry_due_workers` uses -- carries the stale,
+            # already-rendered notice for `first_workspace` forward.
+            snapshot = supervisor.request_snapshot(request)
+            retry_request = supervisor.request_from_snapshot(snapshot)
+            self.assertIn(f"`{first_workspace}`", retry_request.message)
+
+            full_task = dict(request.metadata["task"])
+            state2: dict = {}
+            result = DeliveryResult(
+                ok=True, adapter="test_sink", mode="codex", target="Codex2",
+                auto_delivered=True, manual_confirmation_required=False,
+                run_id="fixture-review-retry",
+            )
+            adapter2 = mock.Mock()
+            adapter2.deliver.return_value = result
+            with mock.patch.object(supervisor, "load_status", return_value={"tasks": [full_task]}), \
+                 mock.patch.object(supervisor, "ensure_task_brief", return_value=None), \
+                 mock.patch.object(supervisor, "build_adapter", return_value=adapter2):
+                retried = supervisor.start_worker_for_request(
+                    config, state2, {}, retry_request, queue_event_id=None,
+                    attempt_count=2, event_id_for_log=None,
+                )
+
+            self.assertTrue(retried[0], f"retry after safe reallocation was refused: {retried[1]}")
+            second_workspace = Path(retry_request.metadata["workspace_root"])
+            self.assertNotEqual(second_workspace, first_workspace)
+            self.assertEqual(retry_request.metadata["workspace_source"], "created_review_worktree")
+
+            # The rendered message must reflect the NEW allocation, not the
+            # stale one carried over from the reconstructed snapshot.
+            self.assertIn(f"`{second_workspace}`", retry_request.message)
+            self.assertNotIn(f"`{first_workspace}`", retry_request.message)
+            self.assertEqual(retry_request.message.count("Supervisor-assigned workspace:"), 1)
+
     def _start_report_review_dispatch(self, config: dict, extra_task: dict | None = None) -> tuple:
         """Same production path as `_start_review_dispatch`, for a report task.
 
@@ -1633,7 +1709,8 @@ class ExecutionWorkspaceTests(unittest.TestCase):
             self.assertIn("report/evidence review", request.message)
 
     def test_report_review_with_owner_branch_still_delivers(self) -> None:
-        """SR-ORCH-REVIEW-WORKTREE-ISOLATION-20260923 R5-N1 positive control.
+        """SR-ORCH-REVIEW-WORKTREE-ISOLATION-20260923 R5-N1 positive control,
+        and R6-N2 regression (7th rejection round).
 
         Same report task, but the owner happens to have a branch too (e.g.
         a mixed-role owner who also does implementation work elsewhere), so
@@ -1643,6 +1720,13 @@ class ExecutionWorkspaceTests(unittest.TestCase):
         subject to the R4 gate (it isn't `fallback_canonical` or
         `unresolvable_pinned_candidate`), so this is a control confirming
         the R5-N1 fix does not disturb it.
+
+        Before the R6-N2 fix, `attach_workspace_metadata` selected its
+        "no Git candidate to isolate" notice for *any*
+        `task_is_noncanonical_report` task regardless of what workspace was
+        actually assigned, so this genuinely-isolated worktree was falsely
+        labelled "(canonical workspace; ...)" even though
+        `workspace_root != canonical_root`.
         """
         with tempfile.TemporaryDirectory() as tmpdir:
             root = Path(tmpdir) / "repo"
@@ -1663,6 +1747,9 @@ class ExecutionWorkspaceTests(unittest.TestCase):
                 request.metadata["workspace_source"],
                 ("unresolvable_pinned_candidate", "fallback_canonical"),
             )
+            self.assertNotEqual(Path(request.metadata["workspace_root"]), root.resolve())
+            self.assertIn("isolated, detached review workspace", request.message)
+            self.assertNotIn("canonical workspace; this is a report/evidence review", request.message)
 
 
 class RunOnceSupervisorStateTests(unittest.TestCase):

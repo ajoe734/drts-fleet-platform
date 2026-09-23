@@ -1448,13 +1448,24 @@ def attach_workspace_metadata(
     status_cli = task_board_cli_path()
     task_payload = request.metadata.get("task")
     task_payload = task_payload if isinstance(task_payload, dict) else {}
-    if request.task_id and is_reviewer and task_is_noncanonical_report(task_payload):
+    if (
+        request.task_id
+        and is_reviewer
+        and task_is_noncanonical_report(task_payload)
+        and workspace_root == canonical_root
+    ):
         # No Git candidate exists to isolate for an explicit
         # `mutates_canonical=false` report/verification review --
         # `workspace_source` is `fallback_canonical` by construction here,
         # not a provisioning failure. Say so honestly instead of reusing the
         # "isolated review workspace could not be created" wording below
-        # (see SR-ORCH-REVIEW-WORKTREE-ISOLATION-20260923 R5-N1).
+        # (see SR-ORCH-REVIEW-WORKTREE-ISOLATION-20260923 R5-N1). If the
+        # report task's owner branch happens to exist, `_reviewer_candidate_commit`
+        # resolves a real commit and this task gets an actual isolated
+        # worktree instead (`workspace_root != canonical_root`); that case
+        # falls through to the ordinary isolated-workspace notice below
+        # rather than falsely claiming "canonical workspace" here (see
+        # SR-ORCH-REVIEW-WORKTREE-ISOLATION-20260923 R6-N2).
         notice = (
             "\n\nSupervisor-assigned workspace:\n"
             f"- Worker cwd: `{workspace_root}` (canonical workspace; this is a report/evidence review "
@@ -1527,8 +1538,19 @@ def attach_workspace_metadata(
         )
     else:
         return
-    if "Supervisor-assigned workspace:" not in request.message:
-        request.message = request.message.rstrip() + notice
+    # Retries reconstruct `request` from a worker's `request_snapshot`
+    # (`request_for_worker` -> `retry_due_workers`), which already carries a
+    # previously-rendered notice for whatever workspace that earlier attempt
+    # was assigned. `ensure_execution_workspace` may legitimately reallocate
+    # a *different* workspace this time (e.g. the prior reviewer checkout
+    # went dirty or had a branch attached, see `_reusable_review_worktree`).
+    # Always replace any prior notice with the one reflecting the current
+    # allocation instead of leaving a stale heading/path/branch in place
+    # (see SR-ORCH-REVIEW-WORKTREE-ISOLATION-20260923 R6-N1).
+    marker = "\n\nSupervisor-assigned workspace:"
+    marker_index = request.message.find(marker)
+    base_message = request.message[:marker_index] if marker_index != -1 else request.message
+    request.message = base_message.rstrip() + notice
 
 
 def summarize_runtime(state: dict[str, Any], approval_state: dict[str, Any]) -> dict[str, Any]:

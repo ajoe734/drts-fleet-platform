@@ -599,3 +599,98 @@ carry it; it has to come from the task record.
   R4-N1 implementation-candidate failure cases (`unresolvable_pinned_candidate`,
   `fallback_canonical`-from-`git worktree add` failure), which remain fixed and independently
   reconfirmed passing above.
+
+## 10. Round 7 — R6-N1 / R6-N2 (Codex `reopen`, reviewed SHA `92064ed68a69af3b5743aa52c691fcb097b6af0d`)
+
+### 10.1 Findings
+
+Codex reopened candidate `92064ed68` (PR #2114) confirming R5-N1 and R4-N1 remain fixed, but raised
+two new boundaries in `attach_workspace_metadata`'s notice-rendering, both `2126587e2b83`:
+
+- **R6-N1 [P2, approval blocking]**: a retry that safely reallocates the review workspace (e.g. the
+  prior detached checkout drifted -- a branch got attached to it, see R3-N1/R4-N1's scenario) still
+  delivers the *stale* workspace notice from the original dispatch. `retry_due_workers` reconstructs
+  the retried `DeliveryRequest` from the worker's `request_snapshot` via `request_for_worker` ->
+  `request_from_snapshot`, which carries the previously-rendered `Supervisor-assigned workspace:`
+  block (naming the OLD path/branch) forward as `request.message`. `attach_workspace_metadata`
+  updates `request.metadata["workspace_root"]` to the newly (correctly) reallocated path, but its
+  final guard -- `if "Supervisor-assigned workspace:" not in request.message` -- saw the heading
+  already present from the reconstructed snapshot and skipped rendering the new notice entirely,
+  leaving the dispatched prompt telling the reviewer to use the stale, now-branch-attached old
+  workspace while the actual delivered `cwd` is the new one.
+- **R6-N2 [P3, same narrow rendering repair]**: a report/evidence review (`task_is_noncanonical_report`)
+  whose owner happens to have a resolvable Git branch does not fall back to the canonical root at
+  all -- `_reviewer_candidate_commit` resolves the owner branch tip as an ordinary commit and
+  `ensure_reviewer_review_workspace` provisions a genuine isolated, detached worktree under
+  `base/review/` (`workspace_source="created_review_worktree"`, `workspace_root != canonical_root`).
+  But the R5-N1 notice branch matched on `task_is_noncanonical_report(task_payload)` alone, so this
+  genuinely-isolated workspace was still labelled "(canonical workspace; this is a report/evidence
+  review with no Git candidate to isolate)" -- a false statement about where the reviewer actually
+  landed.
+
+Both are narrow rendering defects in `attach_workspace_metadata` only; no isolation, refusal, or
+allocation logic from Rounds 1-6 was implicated or touched.
+
+### 10.2 Root cause
+
+- R6-N1: the guard that decided *whether* to render a fresh notice looked only at whether a notice of
+  any kind was already present in `request.message`, not at whether that notice still matched the
+  *current* allocation. A retry-reconstructed request always already has one (from the prior attempt),
+  so the guard was permanently `False` on every retry, regardless of whether the workspace had
+  actually changed underneath it.
+- R6-N2: the R5-N1 fix (§9.3) added the report-review notice branch keyed purely on
+  `task_is_noncanonical_report(task_payload)`, without checking what `ensure_reviewer_review_workspace`
+  had actually returned for `workspace_root` in that specific dispatch. `task_is_noncanonical_report`
+  correctly identifies "this task has no *pinned* Git candidate to isolate", but does not mean "this
+  dispatch necessarily fell back to canonical" -- those are different questions, and only the R4/R5
+  gate (`workspace_source in (...)`, §8.3/§9.3) needed the task-level predicate; the *notice text*
+  needs the per-dispatch `workspace_root` outcome instead.
+
+### 10.3 Fix
+
+`tools/development-orchestrator/control_plane/runtime/supervisor_runtime.py`, `attach_workspace_metadata`
+only, same file/scope, no new write-scope files needed:
+
+- R6-N2: the `task_is_noncanonical_report(task_payload)` notice branch now additionally requires
+  `workspace_root == canonical_root`. When a report review's owner branch resolves to a real commit
+  and an isolated worktree is actually created, this branch no longer matches; control falls through
+  to the existing `workspace_root != canonical_root` branch just below it (unchanged), which already
+  renders the correct "isolated, detached review workspace" / "Reviewing candidate `<commit>`" text --
+  the same wording every non-report isolated reviewer dispatch already gets.
+- R6-N1: the final render guard no longer asks "is a notice already present" (skip-if-present); it
+  now always replaces any existing `Supervisor-assigned workspace:` block with the freshly-computed
+  `notice` for the current call's `workspace_root`/`branch`/`workspace_source`. Implementation: find
+  the `"\n\nSupervisor-assigned workspace:"` marker in `request.message`, truncate the message to
+  everything before it (or leave the whole message if the marker is absent, e.g. first dispatch), then
+  append the current `notice`. This is idempotent for the ordinary non-retry, non-drifted case (the
+  old and new notices are byte-identical, so the net message is unchanged) and correct for the retry-
+  after-drift case (the old notice for the stale path is discarded, the new notice for the actual
+  allocation is appended).
+
+Neither change touches `ensure_execution_workspace`, `ensure_reviewer_review_workspace`,
+`_reusable_review_worktree`, `_candidate_reviewer_worktree_path`, or any Round 1-6 allocation/refusal
+gate -- both fixes are confined to which notice text `attach_workspace_metadata` selects and whether it
+overwrites a stale one, never to what workspace is actually assigned or whether a dispatch is refused.
+
+### 10.4 Verification
+
+| Finding／驗收項 | 原始碼依據與修改位置 | 舊版重現 → 修正版結果 | 命令、退出碼、執行版本與證據位置 | 未驗項與具體限制 |
+| --- | --- | --- | --- | --- |
+| R6-N1 / `rendered_branch_matches_assigned_review_workspace` | `attach_workspace_metadata`, final render guard (marker-based truncate-and-replace, replacing skip-if-present) | New test `test_retry_after_workspace_drift_refreshes_stale_notice` reproduces Codex's exact scenario: a first reviewer dispatch is delivered into a clean detached workspace; a branch is then attached to it (drift); the request is reconstructed via the real `supervisor.request_snapshot`/`request_from_snapshot` retry mechanism (same one `retry_due_workers` uses), carrying the old notice forward; a retried `start_worker_for_request` call safely reallocates a new, distinctly-suffixed detached workspace. Pre-fix: `retried[0]` is `True` (safe reallocation itself already worked) but the message still names the stale first path/branch and never mentions the second. Post-fix: message names only the new path, contains exactly one `Supervisor-assigned workspace:` heading. | `python3 -B -m unittest test_supervisor.ExecutionWorkspaceTests.test_retry_after_workspace_drift_refreshes_stale_notice -v` -> `ok` with the fix; confirmed regression by stashing only `supervisor_runtime.py`'s changes (`git stash push -u -- control_plane/runtime/supervisor_runtime.py`) and rerunning -- `FAIL` on `assertIn(f"\`{second_workspace}\`", ...)`, old path still present, then restored (`git stash pop`). Python 3.12.3, this worktree, real `git worktree add`/`checkout`, no mocks of Git/allocation/rendering. | None. |
+| R6-N2 / `rendered_branch_matches_assigned_review_workspace` | `attach_workspace_metadata`, report-review notice branch (added `workspace_root == canonical_root` condition) | Extended existing positive-control test `test_report_review_with_owner_branch_still_delivers` (report task, owner branch exists, resolves to a real isolated worktree) with new assertions: `workspace_root != canonical_root`, message contains "isolated, detached review workspace", message does not contain "canonical workspace; this is a report/evidence review". Pre-fix: the added assertions fail -- message says "(canonical workspace; this is a report/evidence review with no Git candidate to isolate)" despite `workspace_root` being a genuine isolated worktree path. Post-fix: passes. | `python3 -B -m unittest test_supervisor.ExecutionWorkspaceTests.test_report_review_with_owner_branch_still_delivers -v` -> `ok` with the fix; `FAIL` on the same stash/rerun/restore cycle as above. Same environment. | None. |
+| R5-N1 / R4-N1 regression check (not reopened this round, reconfirmed) | Unchanged gate/predicate logic from Rounds 5-6 | `test_report_review_without_owner_ref_still_delivers`, `test_unresolvable_pinned_candidate_stops_reviewer_dispatch`, `test_worktree_add_failure_stops_reviewer_dispatch` all still pass unchanged -- this round's fix only widens/corrects notice *text* selection, never the R4/R5 delivery gate's `workspace_source`/`task_is_noncanonical_report` condition itself. | Full suite run below. | None. |
+| `owner_successor_and_wip_preserved` | No owner-path code touched this round | Unaffected -- all owner-path tests (`test_owner_dispatch_still_resumes_execution_branch_override` etc.) still pass. | Full suite run below. | None. |
+| Full regression | All Round 1-7 `ExecutionWorkspaceTests` (19, up from 18: one new test, one existing test extended in place) plus the rest of the orchestrator unit suite | No regressions. | `python3 -B -m unittest test_supervisor test_watch_events test_runtime_module_boundaries` -> 183 tests, OK, exit 0, Python 3.12.3, this worktree (`.artifacts/worktrees/auto/claude2-sr-orch-review-worktree-isolation-20260923`), reviewed base `92064ed68a69af3b5743aa52c691fcb097b6af0d`. | Not exercised against a live supervisor tick, real dispatch queue, or GitHub PR/CI (VM services not started per task-spec constraint); unit-level only, same limitation as Rounds 1-6. |
+
+- No product/UI/NAV source touched. No `.orchestrator` runtime services started or restarted on this
+  VM.
+- `watch_events.py` and `control_plane/domain/task_records.py` were re-inspected for Round 7 and still
+  require no change: both findings were entirely about which notice text
+  `attach_workspace_metadata` in `supervisor_runtime.py` selects/refreshes for the *actual* per-
+  dispatch workspace outcome, not about how `watch_events.render_wakeup_message` builds its own
+  independent review-guardrail text (unaffected, still candidate-SHA-based) or how task records
+  classify a report task (`task_is_noncanonical_report`'s definition itself is unchanged -- only where
+  its result is combined with `workspace_root` changed).
+- This closes both P2/P3 findings from the same round; neither is a reopening of R5-N1 (report reviews
+  still deliver, confirmed above) or R4-N1 (genuine implementation-candidate provisioning failures
+  still refuse delivery, confirmed above).
