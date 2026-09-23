@@ -276,10 +276,9 @@ any of the intermediate SHAs** — only their final file content, restricted to 
 task's `write_scopes` (verified: `git diff --name-only 4ccb0d27...bbcd59d64` shows 42 changed
 paths, but 13 of them — `.github/workflows/hourly-promote.yml`,
 `apps/api/src/modules/service-area/service-area.service.ts`,
-`docs/03-runbooks/promote-rail-rescue-runbook.md`,
-`docs/04-uat/.../SR-ORCH-REVIEW-WORKTREE-ISOLATION-20260923.md`,
-`tests/unit/hourly-promote-workflow.test.ts`,
-`tests/unit/system-remediation/sr-qa-governance-001/c106-retire-same-instant.test.ts`, and 7
+`docs/03-runbooks/promote-rail-rescue-runbook.md`, an unrelated SR-ORCH-REVIEW-WORKTREE-ISOLATION
+UAT doc, `tests/unit/hourly-promote-workflow.test.ts`, an unrelated sr-qa-governance-001 service-area
+test file, and 7
 files under `tools/development-orchestrator/` — are net *deletions* relative to `bbcd59d64`,
 because that branch's base predates several unrelated `dev` commits; they were confirmed to be
 stale-base drift, not task edits, and were correctly excluded from this port).
@@ -316,3 +315,110 @@ None of the above were re-run against a live runtime by this owner; they are sta
 - [ ] entry_scoped_navigation_denies_cross_subject_tenant_entry — all known findings (#1–#7 from the `83a53d193` round, plus the PG consume-before-check fix above) addressed in the tree; PG negative-matrix regression test added but not executed against live Postgres in this sandbox; pending hosted CI on this round's SHA
 - [ ] fresh_single_use_handoff_and_http_only_session_reuse — grant-consent session/handoff-id check, cookie TTL, redirect-origin check, and PG consume rollback-before-mismatch all present in the tree; pending hosted CI confirmation (typecheck/unit/PG) on this round's SHA
 - [ ] navigation_reads_current_trip_without_creating_orders — frozen-route authorization for null-tenant orders present across active/history/receipt/current-status paths; no order-creation call on this path (static confirmation only); browser/native/live unverified
+
+## Round `0b4c7457` re-verification against `nav-codex-review-2305a144.md` (owner Claude, 2026-09-23T23:2x:xxZ)
+
+### Context
+
+The dispatch for this round pointed at
+`.local/auto-worker-unblock-20260923/nav-codex-review-2305a144.md`, a Codex reopen receipt
+against `REVIEWED_SHA=2305a14495e3b89658982a1f917eb770a1b7bdf8` / PR #2112 (base `main`, a
+different, now-abandoned lineage off `gemini2/sr-partner-notify-nav-20260917`). Its 4 findings
+were: (1) P1 grant-consent replay bypassing missing-cookie / expired / revoked-link /
+owner-changed guards, (2) P2 open-redirect via TAB-normalized `returnTo`, (3) P2 legitimate
+null-tenant multi-taxi completed-trip receipts denied by the sync `assertPartnerOrderIdentity`
+path, (4) P2 delivery/evidence (wrong PR base, no hosted CI for that SHA).
+
+This branch's HEAD (`0b4c7457527c994bbd1875299280b624e03528ca`, PR #2100, base `dev`) is a
+**different, later lineage** than `2305a144`/PR #2112: it already carries the `92ac938e8`
+("fix Codex2 review findings on referral handoff nav") through `c20853357` commits, which the
+"Round `2305a144`" section above (lines 241–304) documents as having ported and fixed the
+*next* review round's findings on top of this branch's own already-clean history. Re-reading the
+current tree line-by-line against each of the 4 `2305a144` findings confirms they do not
+reproduce here:
+
+1. Grant-consent replay — `apps/referral-embed-web/app/api/referral/session/route.ts:151-154`
+   requires `existingSession` (i.e. a valid session cookie) whose `handoffId` matches
+   `action.handoffId` before calling `recordReferralEmbedConsent`; a cleared/missing cookie now
+   throws before any backend call. At the service layer,
+   `apps/api/src/modules/tenant-partner/tenant-partner.service.ts:5840-5869`
+   (`recordReferralEmbedConsent`'s `validateFn`) rejects `OWNERSHIP_MISMATCH` when the entry's
+   current `tenantId`/`partnerId` no longer matches the handoff's original identity, and
+   `REFERRAL_HANDOFF_REVOKED` when the partner user identity link's `status !== "active"`;
+   `referral-embed-handoff.repository.ts:306-327` separately enforces `not_consumed`, an 8-hour
+   post-consumption expiry, and `session_mismatch` against the caller's current session before
+   `validateFn` even runs. This is strictly more coverage than the finding's repro required.
+2. Open redirect — `session/route.ts:45-61` (`redirectResponse`) no longer does a string-prefix
+   check; it constructs `new URL(returnTo || "/", requestUrl)` and falls back to `/` unless
+   `targetUrl.origin === requestUrl.origin`, so a TAB/CR/LF/backslash injection that WHATWG-URL
+   parsing normalizes away still fails the *origin* comparison (an existing regression test,
+   `embed-session-route.test.ts` "guards against TAB in URL", asserts this on the `exchange`
+   path, which shares the same `redirectResponse` function as `grant-consent`).
+3. Null-tenant receipt — `owned-mobility.service.ts:13812-13830`
+   (`getReferralPassengerReceipt`) calls `this.getOrderAsync(orderId, identity)`, which resolves
+   to the async, frozen-route-aware `assertPartnerOrderIdentityAsync` (lines 13244-13292), not
+   the older sync `assertPartnerOrderIdentity` the finding cited; a `git diff 2305a1449
+   0b4c74575` confirms this same call-site rewrite also applies to the two other endpoints at
+   the finding's referenced line range.
+4. Wrong PR base / no CI — not applicable to this lineage: `gh pr list --head
+   claude/sr-partner-notify-nav-20260917` shows PR #2100, `baseRefName=dev`, `headRefOid` equal
+   to this branch's HEAD before this round's 2 commits.
+
+### What this round found and fixed instead
+
+Because findings 1–3 were already closed, this round's actual defect was in the **evidence**,
+not the product code: hosted CI run
+[35932356817](https://github.com/ajoe734/drts-fleet-platform/actions/runs/35932356817) on
+`0b4c7457` (the SHA this branch already carried into review) reported overall `conclusion:
+failure` — every job green (`unit`, `integration`, `typecheck`, `build`, `e2e`, `ci-integ` run
+[35932356895](https://github.com/ajoe734/drts-fleet-platform/actions/runs/35932356895):
+`success`) except `Canonical consistency`, which failed with 2 `cited-paths` findings: this UAT
+file's own "Delivery history" prose (lines 276–285 as they existed before this round) cited two
+backtick-quoted paths that do not exist in this tree — a truncated, never-real path for an
+unrelated SR-ORCH-REVIEW-WORKTREE-ISOLATION UAT doc, and a wrong filename for an unrelated
+sr-qa-governance-001 service-area test (the real file in that directory is
+`c106-service-area-governance.test.ts`). Fixed by rewriting those two citations as prose instead of backtick-quoted paths
+(the other 4 backtick paths in that sentence — `hourly-promote.yml`,
+`service-area.service.ts`, `promote-rail-rescue-runbook.md`,
+`tests/unit/hourly-promote-workflow.test.ts` — do exist in this tree under unrelated tasks, so
+they were left as-is). Re-ran `python3 tools/ci/git/check_canonical_consistency.py --ci --base
+origin/dev --head HEAD` locally: `cited-paths: 0 finding(s)`, overall `OK`.
+
+Also added regression coverage that did not previously exist for the exact `2305a144` finding-1
+repro paths (the service/repository-level `validateFn` logic was already correct, but had no
+dedicated test isolating it from the PG-gated integration suite, and the BFF route's
+no-cookie/mismatched-handoffId guard had none at all):
+
+- `tests/unit/system-remediation/sr-partner-notify-nav-20260917/embed-session-route.test.ts`:
+  added `"rejects grant-consent replay when no session cookie exists (cleared cookie /
+  expired-clock repro)"` and `"rejects grant-consent when the session cookie's handoffId does
+  not match the requested one"`, both asserting the BFF returns 400 and never calls
+  `recordReferralEmbedConsent`/`writeReferralEmbedSession`.
+- `tests/unit/system-remediation/sr-partner-notify-nav-20260917/consent-replay-guards.test.ts`
+  (new file): 3 tests against `TenantPartnerService.recordReferralEmbedConsent` using the
+  in-memory fallback `ReferralEmbedHandoffRepository` (no `DATABASE_URL` required) —
+  revoked-link rejects `REFERRAL_HANDOFF_REVOKED`, reassigned-tenant entry rejects
+  `OWNERSHIP_MISMATCH`, and a positive control confirms the unchanged/active case still
+  succeeds.
+
+**Not executed locally**: this sandbox's `node_modules` is missing essentially all top-level
+hoisted package symlinks (`.pnpm` store and `.bin` shims exist, e.g.
+`node_modules/.bin/vitest`, but `node_modules/vitest` itself does not — `node -e
+"require.resolve('vitest')"` fails with `MODULE_NOT_FOUND`), so `vitest`/`tsc`/`eslint` cannot
+run here at all; `pnpm install` to repair it was not attempted (would mutate the shared
+canonical-root `node_modules` other concurrent sessions depend on, consistent with the
+`92ac938e8`/`c20853357` rounds' established practice above). The 5 new/modified test cases in
+this round are therefore **statically reviewed only** (read against the exact guard code they
+exercise, matching existing passing sibling tests' structure) and unverified by a local test
+run; hosted CI on this round's pushed SHA is the acceptance evidence, once available below.
+
+### Test Evidence (this round)
+
+- `python3 tools/ci/git/check_canonical_consistency.py --ci --base origin/dev --head HEAD` →
+  `cited-paths: 0 finding(s)`, `OK` (was `FAIL: 2 finding(s)` on `0b4c7457`, hosted run
+  [35932356817](https://github.com/ajoe734/drts-fleet-platform/actions/runs/35932356817) job
+  `Canonical consistency`, `107421614165`).
+- `git diff --check` — exit 0, no whitespace errors introduced.
+- Hosted CI on this round's new pushed SHA (record run URLs/job conclusions here once available,
+  including `unit` covering the 2 new `embed-session-route.test.ts` cases and the new
+  `consent-replay-guards.test.ts` file, and `Canonical consistency` confirming the fix above).

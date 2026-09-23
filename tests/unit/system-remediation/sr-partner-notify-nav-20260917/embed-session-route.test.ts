@@ -1,8 +1,12 @@
 import { describe, expect, it, vi, beforeEach } from "vitest";
 import { POST } from "../../../../apps/referral-embed-web/app/api/referral/session/route";
-import { consumeReferralEmbedHandoffArtifact } from "../../../../apps/referral-embed-web/lib/embed-api";
+import {
+  consumeReferralEmbedHandoffArtifact,
+  recordReferralEmbedConsent,
+} from "../../../../apps/referral-embed-web/lib/embed-api";
 import {
   getReferralEmbedSession,
+  writeReferralEmbedSession,
 } from "../../../../apps/referral-embed-web/lib/embed-partner-session";
 
 vi.mock("../../../../apps/referral-embed-web/lib/embed-api");
@@ -69,5 +73,57 @@ describe("POST /api/referral/session", () => {
     const res = await POST(req);
     expect(res.status).toBe(307);
     expect(res.headers.get("Location")).toBe("https://test.com/");
+  });
+
+  it("rejects grant-consent replay when no session cookie exists (cleared cookie / expired-clock repro)", async () => {
+    // Regression for the P1 finding: a caller with no existing session
+    // cookie must not be able to bootstrap or replay a handoffId's consent
+    // via grant-consent. This is the exact minimal repro: cookie empty,
+    // POST grant-consent with a bare handoffId.
+    vi.mocked(getReferralEmbedSession).mockResolvedValue(null);
+
+    const req = new Request("https://test.com/api/referral/session", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        action: "grant-consent",
+        handoffId: "ref_handoff_stolen",
+        entrySlug: "slug1",
+        entryHost: "host1",
+      }),
+    });
+
+    const res = await POST(req);
+    expect(res.status).toBe(400);
+    const body = await res.json();
+    expect(body.ok).toBe(false);
+    expect(recordReferralEmbedConsent).not.toHaveBeenCalled();
+    expect(writeReferralEmbedSession).not.toHaveBeenCalled();
+  });
+
+  it("rejects grant-consent when the session cookie's handoffId does not match the requested one", async () => {
+    // A caller holding a valid session for handoff B must not be able to
+    // grant consent for a different handoffId A merely by naming it.
+    vi.mocked(getReferralEmbedSession).mockResolvedValue({
+      handoffId: "ref_handoff_B",
+      drtsPassengerId: "pass-b",
+      partnerEntrySlug: "slug1",
+    } as any);
+
+    const req = new Request("https://test.com/api/referral/session", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        action: "grant-consent",
+        handoffId: "ref_handoff_A",
+        entrySlug: "slug1",
+        entryHost: "host1",
+      }),
+    });
+
+    const res = await POST(req);
+    expect(res.status).toBe(400);
+    expect(recordReferralEmbedConsent).not.toHaveBeenCalled();
+    expect(writeReferralEmbedSession).not.toHaveBeenCalled();
   });
 });
