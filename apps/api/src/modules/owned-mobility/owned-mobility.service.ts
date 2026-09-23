@@ -462,6 +462,9 @@ export class OwnedMobilityService
   private readonly pendingWorkflowWrites = new Set<Promise<void>>();
 
   private orders: OwnedOrderRecord[] = [];
+  @Optional()
+  @Inject(PartnerNotificationNavigationRepository)
+  private partnerNotificationNavigationRepository?: PartnerNotificationNavigationRepository;
 
   private dispatchJobs: DispatchJobRecord[] = [];
 
@@ -539,9 +542,7 @@ export class OwnedMobilityService
     private readonly ownedMobilityRepository?: OwnedMobilityRepository,
     @Optional()
     private readonly tenantPartnerService?: TenantPartnerService,
-    @Optional()
-    @Inject(PartnerNotificationNavigationRepository)
-    private readonly partnerNotificationNavigationRepository?: PartnerNotificationNavigationRepository,
+
     // NOTE(integration 20260605): the two SVC params below are appended LAST
     // (both @Optional) so the original 7-param positional order is preserved for
     // unit-test harnesses. e2e-svc-013 had inserted vehicleEligibilityService at
@@ -13620,9 +13621,9 @@ export class OwnedMobilityService
               o.orderId,
             );
           if (
-            route &&
-            (route.tenantId !== identity.tenantId ||
-              route.partnerId !== (identity.partnerId || null))
+            !route ||
+            route.tenantId !== identity.tenantId ||
+            route.partnerId !== (identity.partnerId || null)
           ) {
             continue;
           }
@@ -13674,9 +13675,9 @@ export class OwnedMobilityService
     };
   }
 
-  listReferralPassengerHistory(identity?: BootstrapRequestIdentity | null): {
-    items: ReferralPassengerHistoryItem[];
-  } {
+  async listReferralPassengerHistory(
+    identity?: BootstrapRequestIdentity | null,
+  ): Promise<{ items: ReferralPassengerHistoryItem[] }> {
     if (
       !identity ||
       identity.realm !== "partner" ||
@@ -13691,19 +13692,42 @@ export class OwnedMobilityService
 
     const passengerId = identity.drtsPassengerId ?? identity.actorId;
 
-    const passengerOrders = Array.from(this.orders.values())
-      .filter(
-        (o) =>
-          // See getReferralPassengerActiveTrip: null tenantId is the
-          // tenant-less multi-taxi design, not an unauthorized wildcard.
-          (o.tenantId === null || o.tenantId === identity.tenantId) &&
-          (o.partnerId || null) === (identity.partnerId || null) &&
-          (o.partnerProgramId || null) ===
-            (identity.partnerProgramId || null) &&
-          o.partnerEntrySlug === identity.partnerEntrySlug &&
-          o.passenger?.passengerId === passengerId,
-      )
-      .sort((a, b) => (b.createdAt || "").localeCompare(a.createdAt || ""));
+    const passengerOrders: OwnedOrderRecord[] = [];
+    for (const o of Array.from(this.orders.values()).sort((a, b) =>
+      (b.createdAt || "").localeCompare(a.createdAt || "")
+    )) {
+      if (
+        o.partnerEntrySlug !== identity.partnerEntrySlug ||
+        o.passenger?.passengerId !== passengerId
+      ) {
+        continue;
+      }
+
+      if (o.tenantId === null && this.tenantPartnerService) {
+        const route =
+          await this.partnerNotificationNavigationRepository?.findByOrderId(
+            o.orderId,
+          );
+        if (
+          !route ||
+          route.tenantId !== identity.tenantId ||
+          route.partnerId !== (identity.partnerId || null)
+        ) {
+          continue;
+        }
+      } else if (o.tenantId !== null && o.tenantId !== identity.tenantId) {
+        continue;
+      }
+
+      if (
+        (o.partnerId || null) !== (identity.partnerId || null) ||
+        (o.partnerProgramId || null) !== (identity.partnerProgramId || null)
+      ) {
+        continue;
+      }
+
+      passengerOrders.push(o);
+    }
 
     return {
       items: passengerOrders.map((o) => {
