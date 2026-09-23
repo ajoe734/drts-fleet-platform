@@ -57,11 +57,25 @@ export type PersistReferralEmbedHandoffCommand = Omit<
 
 export type ConsumeReferralEmbedHandoffResult =
   | { outcome: "consumed"; session: ReferralEmbedSession }
-  | { outcome: "replayed" | "expired" | "wrong_host" | "missing" | "session_mismatch" };
+  | {
+      outcome:
+        | "replayed"
+        | "expired"
+        | "wrong_host"
+        | "missing"
+        | "session_mismatch";
+    };
 
 export type RecordReferralEmbedConsentResult =
   | { outcome: "recorded" | "replayed"; session: ReferralEmbedSession }
-  | { outcome: "wrong_host" | "missing" | "session_mismatch" | "not_consumed" | "expired" };
+  | {
+      outcome:
+        | "wrong_host"
+        | "missing"
+        | "session_mismatch"
+        | "not_consumed"
+        | "expired";
+    };
 
 const REQUIRED_SCOPES: ReferralEmbedRequiredConsentScope[] = [
   "trip.manage",
@@ -203,8 +217,10 @@ export class ReferralEmbedHandoffRepository {
         const record = this.parseHandoffRecord(result.rows[0].record);
         await client.query("COMMIT");
         if (
-          (input.currentDrtsPassengerId && record.drtsPassengerId !== input.currentDrtsPassengerId) ||
-          (input.currentPartnerEntrySlug && record.entrySlug !== input.currentPartnerEntrySlug)
+          (input.currentDrtsPassengerId &&
+            record.drtsPassengerId !== input.currentDrtsPassengerId) ||
+          (input.currentPartnerEntrySlug &&
+            record.entrySlug !== input.currentPartnerEntrySlug)
         ) {
           return { outcome: "session_mismatch" };
         }
@@ -289,6 +305,10 @@ export class ReferralEmbedHandoffRepository {
       if (!handoff.consumedAt) {
         await client.query("COMMIT");
         return { outcome: "not_consumed" };
+      }
+      if (handoff.expiresAt <= new Date().toISOString()) {
+        await client.query("COMMIT");
+        return { outcome: "expired" };
       }
       if (
         handoff.entrySlug !== input.entrySlug.trim() ||
@@ -409,8 +429,10 @@ export class ReferralEmbedHandoffRepository {
       return { outcome: "wrong_host" };
     }
     if (
-      (input.currentDrtsPassengerId && record.drtsPassengerId !== input.currentDrtsPassengerId) ||
-      (input.currentPartnerEntrySlug && record.entrySlug !== input.currentPartnerEntrySlug)
+      (input.currentDrtsPassengerId &&
+        record.drtsPassengerId !== input.currentDrtsPassengerId) ||
+      (input.currentPartnerEntrySlug &&
+        record.entrySlug !== input.currentPartnerEntrySlug)
     ) {
       return { outcome: "session_mismatch" };
     }
@@ -439,6 +461,8 @@ export class ReferralEmbedHandoffRepository {
     const handoff = this.fallbackHandoffs.get(input.handoffId);
     if (!handoff) return { outcome: "missing" };
     if (!handoff.consumedAt) return { outcome: "not_consumed" };
+    if (handoff.expiresAt <= new Date().toISOString())
+      return { outcome: "expired" };
     if (
       handoff.entrySlug !== input.entrySlug.trim() ||
       handoff.entryHost !== input.entryHost.trim().toLowerCase()
