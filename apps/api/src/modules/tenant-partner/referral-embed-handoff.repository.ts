@@ -268,8 +268,8 @@ export class ReferralEmbedHandoffRepository {
       handoffId: string;
       entrySlug: string;
       entryHost: string;
-      currentDrtsPassengerId?: string;
-      currentPartnerEntrySlug?: string;
+      currentDrtsPassengerId: string;
+      currentPartnerEntrySlug: string;
       consentBundle: ReferralEmbedConsentBundle;
     },
     validateFn?: (session: ReferralEmbedSession) => Promise<void>,
@@ -298,8 +298,8 @@ export class ReferralEmbedHandoffRepository {
         return { outcome: "wrong_host" };
       }
       if (
-        (input.currentDrtsPassengerId && handoff.drtsPassengerId !== input.currentDrtsPassengerId) ||
-        (input.currentPartnerEntrySlug && handoff.entrySlug !== input.currentPartnerEntrySlug)
+        handoff.drtsPassengerId !== input.currentDrtsPassengerId ||
+        handoff.entrySlug !== input.currentPartnerEntrySlug
       ) {
         await client.query("COMMIT");
         return { outcome: "session_mismatch" };
@@ -430,8 +430,8 @@ export class ReferralEmbedHandoffRepository {
       handoffId: string;
       entrySlug: string;
       entryHost: string;
-      currentDrtsPassengerId?: string;
-      currentPartnerEntrySlug?: string;
+      currentDrtsPassengerId: string;
+      currentPartnerEntrySlug: string;
       consentBundle: ReferralEmbedConsentBundle;
     },
     validateFn?: (session: ReferralEmbedSession) => Promise<void>,
@@ -446,8 +446,8 @@ export class ReferralEmbedHandoffRepository {
       return { outcome: "wrong_host" };
     }
     if (
-      (input.currentDrtsPassengerId && handoff.drtsPassengerId !== input.currentDrtsPassengerId) ||
-      (input.currentPartnerEntrySlug && handoff.entrySlug !== input.currentPartnerEntrySlug)
+      handoff.drtsPassengerId !== input.currentDrtsPassengerId ||
+      handoff.entrySlug !== input.currentPartnerEntrySlug
     ) {
       return { outcome: "session_mismatch" };
     }

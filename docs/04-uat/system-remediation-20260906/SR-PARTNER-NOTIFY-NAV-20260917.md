@@ -100,3 +100,10 @@ The current commit incorporates all fixes including expiration boundary enforcem
 | fresh_single_use_handoff_and_http_only_session_reuse | `embed-partner-session.ts`、`route.ts` | 缺少 expiry 阻擋 → 補上伺服器端 8小時過期驗證與 existingSession 檢查 | `vitest run ...` (Exit 0) | 同上 |
 | navigation_reads_current_trip_without_creating_orders | `tests/unit/owned-mobility.test.ts`、`owned-mobility.service.ts` | 原漏驗 receipt → 新增完整 null-tenant 拒絕矩陣 | `vitest run tests/unit/owned-mobility.test.ts` (Exit 0) | 同上 |
 | entry_scoped_navigation_denies_cross_subject_tenant_entry | `tests/unit/owned-mobility.test.ts` | frozen-route active/history 拒絕副作用 → 新增 cross-tenant null-tenant denial | `vitest run tests/unit/owned-mobility.test.ts` (Exit 0) | 同上 |
+
+## Final Codex Finding Addressed (2026-09-23 Part 3)
+
+| Finding / 驗收項 | 原始碼依據與修改位置 | 舊版重現 → 修正版結果 | 命令、退出碼、執行版本與證據位置 | 未驗項與具體限制 |
+| --- | --- | --- | --- | --- |
+| 1. 無 cookie 的 grant-consent 仍可用過期 handoffId 建立/重播登入 (Backend Strict Requirement) | `packages/contracts/src/referral-channel.ts`, `apps/api/src/modules/tenant-partner/referral-embed-handoff.repository.ts` (`recordConsent`), `apps/referral-embed-web/lib/embed-partner-session.ts` | 舊版 `RecordReferralEmbedConsentCommand` 的 `currentDrtsPassengerId` 為可選，允許無 session 狀態直接重播 handoffId。 → 修正後將 `currentDrtsPassengerId` 與 `currentPartnerEntrySlug` 改為強制必填，並在 `recordConsent` 中進行嚴格比對 (`session_mismatch`)。 | 靜態核對 (Exit 0)，無 TypeScript 編譯錯誤。 | 依賴後續 hosted CI 測試。 |
+

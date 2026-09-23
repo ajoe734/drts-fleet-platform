@@ -124,8 +124,8 @@ export interface RecordReferralEmbedConsentCommand {
   handoffId: string;
   entrySlug: string;
   entryHost: string;
-  currentDrtsPassengerId?: string;
-  currentPartnerEntrySlug?: string;
+  currentDrtsPassengerId: string;
+  currentPartnerEntrySlug: string;
   consentBundle: ReferralEmbedConsentBundle;
 }
 

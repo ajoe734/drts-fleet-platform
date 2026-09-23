@@ -2251,7 +2251,7 @@ export class OwnedMobilityService
     if (!order) {
       order = this.requireOrder(orderId);
     }
-    this.assertPartnerOrderIdentity(identity, order);
+    await this.assertPartnerOrderIdentityAsync(identity, order);
     return this.cloneOrder(order);
   }
 
@@ -2739,7 +2739,7 @@ export class OwnedMobilityService
     if (!order) {
       order = this.requireBookingOrder(bookingId, tenantId);
     }
-    this.assertPartnerOrderIdentity(identity, order);
+    await this.assertPartnerOrderIdentityAsync(identity, order);
     return this.mapOrderToBooking(order);
   }
 
