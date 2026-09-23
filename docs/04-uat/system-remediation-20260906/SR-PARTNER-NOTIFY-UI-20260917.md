@@ -31,12 +31,12 @@
 ## Handoff Evidence (Gemini)
 
 - **Candidate Identity**:
-  - SHA: a14820850962275a2d9a88c70d20ddb40f172efa (baseline) + current modifications
+  - SHA: c06be8a2c4d28d46c8dc47fdf77b6f0cd6d62b8a
   - Branch: gemini/sr-partner-notify-ui-20260917-successor-4
 - **Verification Commands**:
   - `pnpm exec tsc -p apps/platform-admin-web/tsconfig.json --noEmit --incremental false` => Exit 0
   - `pnpm exec tsc -p tsconfig.json --noEmit --incremental false` => Exit 0
-  - `pnpm exec vitest run tests/unit/system-remediation/sr-partner-notify-ui-20260917/notification-ui.test.ts tests/unit/system-remediation/sr-partner-notify-ui-20260917/notification-ui.postgres.test.ts` => Exit 0, client PASS + PG PASS
+  - `pnpm exec vitest run tests/unit/system-remediation/sr-partner-notify-ui-20260917/notification-ui.test.ts tests/unit/system-remediation/sr-partner-notify-ui-20260917/notification-ui.postgres.test.ts` => Exit 0, client PASS + PG SKIP locally, pending CI
 - **State Limits**:
   - Design: Pending approved canvas handoff.
   - Live/Browser: Unperformed.
