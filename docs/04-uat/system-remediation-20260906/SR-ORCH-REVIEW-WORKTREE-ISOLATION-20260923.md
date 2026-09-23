@@ -10,7 +10,9 @@ Date: 2026-09-23 UTC
 - **Branch**: `claude2/sr-orch-review-worktree-isolation-20260923`
 - **task_spec_ref**: `.local/auto-worker-unblock-20260923/SR-ORCH-REVIEW-WORKTREE-ISOLATION-20260923.md`
 - **Write scopes**: `tools/development-orchestrator/control_plane/runtime/supervisor_runtime.py`, `tools/development-orchestrator/test_supervisor.py`, this doc.
-  `watch_events.py` and `control_plane/domain/task_records.py` were inspected but did not require changes (see §2.3).
+  `watch_events.py` was inspected but did not require changes through Round 6 (see §2.3, §9.4).
+  `control_plane/domain/task_records.py` was inspected and did not require changes through Round 5; Round 6
+  (§9) adds one new predicate, `task_is_noncanonical_report`, to it (see §9.3).
 
 ## 2. Root Cause Analysis (RCA)
 
@@ -499,3 +501,101 @@ unconditional delivery path as an ordinary successful workspace.
   of a previously-unresolvable candidate later succeeds). Adding path-reallocation logic for a
   registered-but-missing worktree was judged out of scope for this repair unit to avoid re-widening the
   fragile-surface diff this task has already required five rounds to close.
+
+## 9. Round 6 — R5-N1 (Codex `reopen`, reviewed SHA `c60609885bcb84165fc5145558d2c47d84b7accd`)
+
+### 9.1 Finding
+
+- **R5-N1 [P2]**: the Round 5 gate (`role == "reviewer" and workspace_source in
+  ("unresolvable_pinned_candidate", "fallback_canonical")`) fired unconditionally, including for
+  legitimate `mutates_canonical=false` report/verification reviews. Those tasks always have
+  `candidate_sha == candidate_branch == "not_applicable"` (the `not_applicable` sentinel
+  `candidate_required()` in `bin/ai_status.py` uses for them) and are reviewed by artifact path/hash,
+  not by Git candidate — `_reviewer_candidate_commit` already intentionally skips the `not_applicable`
+  sentinel and falls back to resolving *the owner's Git branch* instead, which does not exist for a
+  report task that never creates one. `ensure_reviewer_review_workspace` therefore always resolved
+  `commit == ""` for these tasks and returned `workspace_source = "fallback_canonical"` — not a
+  transient provisioning failure, but the permanent, structural shape of every report review. The Round
+  5 gate could not tell the two apart, so it deferred every report review with `waiting_capacity`
+  forever: no owner Git ref was ever going to appear to make `ensure_reviewer_review_workspace` resolve
+  a commit.
+
+Codex's reproduction (`ExecutionWorkspaceTests`-style fixture, real Git, no mocks of Git, allocation,
+metadata rendering, task eligibility, candidate identity or dispatch-decision logic; only
+`load_status`/`ensure_task_brief`/`build_adapter` mocked): a valid in-memory review task
+(`owner=gemini`, `reviewer=Codex2`, `mutates_canonical=false`, `task_class=report`,
+`candidate_sha=candidate_branch=not_applicable`, no `execution_branch`, matching
+`candidate_generation`) dispatched through the real `process_queue -> build_request ->
+start_worker_for_request -> ensure_execution_workspace` path: `queue status=waiting_capacity`,
+`blocked_reason`/`error=reviewer_workspace_unavailable:fallback_canonical`, adapter never called, no
+worker record, even though the report artifact existed and was readable. A positive control with the
+same report task but an existing owner branch delivered successfully, isolating the defect to the
+absent-owner-Git-ref case specifically (not a provider/fixture/role/eligibility failure).
+
+### 9.2 Root cause
+
+The Round 5 gate keyed only on `workspace_source`, which conflates two structurally different
+situations under the same string: (a) a Git candidate exists and should have been isolatable, but
+provisioning it failed (Round 5's actual target), and (b) no Git candidate exists at all because the
+task is explicitly `mutates_canonical=false` and was never expected to have one. `AI_COLLABORATION_GUIDE.md`
+§5 ("Candidate evidence and integration") and `candidate-lifecycle.md` both explicitly carve out
+`mutates_canonical=false` report/verification tasks as using `not_applicable` candidate identity with
+the *same* handoff/review/approve commands, never inventing empty commits/branches/PRs. `watch_events.py`
+already reflects this at the prompt layer — `render_wakeup_message` reviews the artifact rather than
+Git HEAD for these tasks and explicitly tells report owners not to create a commit, branch or PR
+(`watch_events.py:368-371`, `:404`) — but Round 5's delivery gate in `supervisor_runtime.py` had no
+equivalent awareness of the distinction, because a workspace-provisioning outcome by itself doesn't
+carry it; it has to come from the task record.
+
+### 9.3 Fix
+
+- `tools/development-orchestrator/control_plane/domain/task_records.py`: new pure predicate
+  `task_is_noncanonical_report(task)` — mirrors `candidate_required()` in `bin/ai_status.py`
+  (`task.get("mutates_canonical") is not False`) and additionally requires `candidate_sha` and
+  `candidate_branch` to both be absent or `not_applicable`, so a task that merely sets
+  `mutates_canonical=false` but has somehow already been handed off with a real candidate identity
+  (not expected in practice, but not assumed away) does not match.
+- `tools/development-orchestrator/control_plane/runtime/supervisor_runtime.py`:
+  - `start_worker_for_request`: the Round 5 gate now also requires
+    `not task_is_noncanonical_report(task_payload)`, where `task_payload` is read from
+    `request.metadata["task"]` (the same snapshot every other check in this function already uses —
+    see the `dispatch_candidate_changed` check just above it). Report reviews fall through to ordinary
+    delivery in the canonical workspace exactly as they did before Round 4 ever introduced the gate;
+    every other `workspace_source` value (including the two genuine Round 5 failure cases) is
+    untouched, so an implementation candidate that fails to provision is still refused exactly as
+    before.
+  - `attach_workspace_metadata`: added a dedicated notice branch, checked first among the
+    reviewer-specific branches, for `task_is_noncanonical_report(task_payload)` — states plainly that
+    this is a report/evidence review with no Git candidate to isolate, instead of falling into the
+    generic `workspace_root == canonical_root` branch's "isolated review workspace could not be
+    created" wording, which would misrepresent an expected, permanent state as a failure.
+- No change to `_reviewer_candidate_commit`, `ensure_reviewer_review_workspace`, or any Round 1-5
+  isolation/refusal logic for actual Git candidates: this fix only widens the Round 5 gate's exemption,
+  it does not touch what the gate protects against.
+
+### 9.4 Verification
+
+| Finding／驗收項 | 原始碼依據與修改位置 | 舊版重現 → 修正版結果 | 命令、退出碼、執行版本與證據位置 | 未驗項與具體限制 |
+| --- | --- | --- | --- | --- |
+| R5-N1 / `reviewer_workspace_isolated_from_owner_successor` | `task_is_noncanonical_report` (`task_records.py`) + gate exemption in `start_worker_for_request` (`supervisor_runtime.py`) | New test `test_report_review_without_owner_ref_still_delivers` reproduces Codex's exact scenario (report task, `mutates_canonical=false`, `candidate_sha=candidate_branch=not_applicable`, no owner worktree/branch created) via the real `start_worker_for_request` path (only `load_status`/`ensure_task_brief`/`build_adapter` mocked, matching Codex's stated mock boundary). Confirmed regression: with the exemption removed (gate condition reverted to Round 5's), the test fails on `assertTrue(started[0], ...)` — delivery is refused with `reviewer_workspace_unavailable:fallback_canonical`. With the fix, `started == (True, "fixture-review-run", {...})`, `adapter.deliver.assert_called_once()` passes, `workspace_source == "fallback_canonical"`, `workspace_root == <canonical root>`. | `python3 -B -m unittest test_supervisor.ExecutionWorkspaceTests.test_report_review_without_owner_ref_still_delivers -v` → `ok` with the fix; `FAIL` on `assertTrue` with the gate exemption reverted. Python 3.12.3, this worktree. | None. |
+| R5-N1 / positive control (implementation candidates still gated) | Same gate, unchanged condition ordering | New test `test_report_review_with_owner_branch_still_delivers` (report task, owner branch exists too) still delivers — this path was never `fallback_canonical`/`unresolvable_pinned_candidate` to begin with, so it is an unaffected control. Rounds 1-5's `test_unresolvable_pinned_candidate_stops_reviewer_dispatch` and `test_worktree_add_failure_stops_reviewer_dispatch` (genuine implementation-candidate provisioning failures, `mutates_canonical` unset/true) both still refuse delivery unchanged — `task_is_noncanonical_report` returns `False` for them since `candidate_sha` is a real pinned SHA, not `not_applicable`. | Same full-suite run below; both R4-N1 tests individually reconfirmed `ok`. | None. |
+| `owner_successor_and_wip_preserved` | Gate/predicate scoped to `role == "reviewer"` reviewer-only metadata; no owner code path touched | Unaffected — no owner-path code was changed in this round. | Existing `test_owner_dispatch_still_resumes_execution_branch_override` still `ok` in the full run below. | None. |
+| `rendered_branch_matches_assigned_review_workspace` | New `attach_workspace_metadata` notice branch for `task_is_noncanonical_report` | Report-review prompt notice now says "report/evidence review with no Git candidate to isolate" instead of the generic "isolated review workspace could not be created" wording, which would have misrepresented an expected state as a failure; asserted via `self.assertIn("report/evidence review", request.message)` in the new test. Delivered implementation-candidate reviews (isolated or canonical-fallback-with-failure) keep their exact Round 3-5 wording, unaffected. | Same test run as above. | None. |
+| Full regression | All Round 1-6 `ExecutionWorkspaceTests` (18, up from 16) plus the rest of the orchestrator unit suite | No regressions. | `python3 -B -m unittest test_supervisor test_watch_events test_runtime_module_boundaries` → 182 tests, OK, exit 0, Python 3.12.3, this worktree (`.artifacts/worktrees/auto/claude2-sr-orch-review-worktree-isolation-20260923`), reviewed base `c60609885bcb84165fc5145558d2c47d84b7accd`. | Not exercised against a live supervisor tick, real dispatch queue, or GitHub PR/CI (VM services not started per task-spec constraint); unit-level only, same limitation as Rounds 1-5. Codex's independently-authored boundary-probe script referenced in the reopen (`.local/codex-review-isolation-r5-RgEp9O-boundary-probes.py`) was not re-run verbatim in this environment (path is under this task's own `.local/`, not fetched from elsewhere); the equivalent scenarios it describes (`test_report_without_git_candidate_still_delivers`, `test_report_with_owner_branch_still_delivers`, plus the already-passing healthy-delivery/queue-defer-recovery cases) are covered instead by the new committed tests above and the unchanged Round 4/5 tests, run directly against production `start_worker_for_request`/`process_queue` code paths. |
+
+- No product/UI/NAV source touched. No `.orchestrator` runtime services started or restarted on this
+  VM.
+- `watch_events.py` was re-inspected for Round 6 and still requires no change: its report-review
+  guardrail text and `mutates_canonical`-based branching (`watch_events.py:357-371`, `:404`) already
+  correctly describe the no-Git-candidate report path; the defect was entirely in
+  `supervisor_runtime.py`'s delivery gate not recognizing that same distinction using the same
+  `mutates_canonical`/`not_applicable` fields already on the task record.
+- `task_is_noncanonical_report` was added to `task_records.py` (not moved from `supervisor_runtime.py`,
+  since it never existed there) and is imported normally; `test_runtime_module_boundaries`'s
+  `MOVED_FROM_RUNTIME` manifest intentionally lists only names that were relocated out of the runtime
+  module during the original extraction; it is unaffected and still passes (confirmed in the full run
+  above), since it does not assert an exhaustive/closed list of `task_records.py`'s current exports.
+- This is a newly introduced report-review regression from Round 5's fix, not a reopening of the two
+  R4-N1 implementation-candidate failure cases (`unresolvable_pinned_candidate`,
+  `fallback_canonical`-from-`git worktree add` failure), which remain fixed and independently
+  reconfirmed passing above.

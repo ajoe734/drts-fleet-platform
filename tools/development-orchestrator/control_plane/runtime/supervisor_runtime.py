@@ -76,6 +76,7 @@ from control_plane.domain.task_records import (
     ready_dispatch_signature,
     task_index_from_status,
     task_is_dispatch_eligible_for_agent,
+    task_is_noncanonical_report,
     task_role_for_dispatch_reason,
     workspace_baseline_cover_task_ids,
 )
@@ -1445,7 +1446,23 @@ def attach_workspace_metadata(
     mode = str(request.metadata.get("mode") or "").strip().lower()
     is_reviewer = task_role_for_dispatch_reason(request.reason) == "reviewer"
     status_cli = task_board_cli_path()
-    if request.task_id and is_reviewer and workspace_source == "unresolvable_pinned_candidate":
+    task_payload = request.metadata.get("task")
+    task_payload = task_payload if isinstance(task_payload, dict) else {}
+    if request.task_id and is_reviewer and task_is_noncanonical_report(task_payload):
+        # No Git candidate exists to isolate for an explicit
+        # `mutates_canonical=false` report/verification review --
+        # `workspace_source` is `fallback_canonical` by construction here,
+        # not a provisioning failure. Say so honestly instead of reusing the
+        # "isolated review workspace could not be created" wording below
+        # (see SR-ORCH-REVIEW-WORKTREE-ISOLATION-20260923 R5-N1).
+        notice = (
+            "\n\nSupervisor-assigned workspace:\n"
+            f"- Worker cwd: `{workspace_root}` (canonical workspace; this is a report/evidence review "
+            "with no Git candidate to isolate).\n"
+            f"- Canonical machine-truth root: `{canonical_root}`.\n"
+            "- Do not `git switch` the canonical root for task code.\n"
+        )
+    elif request.task_id and is_reviewer and workspace_source == "unresolvable_pinned_candidate":
         # The task locked a candidate_sha we could not resolve to any local
         # object (see `_reviewer_candidate_commit`). Report that honestly
         # instead of quietly handing back some other commit under the
@@ -2216,7 +2233,13 @@ def start_worker_for_request(
     )
     attach_workspace_metadata(config, request, workspace_root, task_branch, base_branch, workspace_source)
 
-    if role == "reviewer" and workspace_source in ("unresolvable_pinned_candidate", "fallback_canonical"):
+    task_payload = request_metadata.get("task")
+    task_payload = task_payload if isinstance(task_payload, dict) else {}
+    if (
+        role == "reviewer"
+        and workspace_source in ("unresolvable_pinned_candidate", "fallback_canonical")
+        and not task_is_noncanonical_report(task_payload)
+    ):
         # Provisioning the reviewer's isolated workspace failed outright --
         # either the locked `candidate_sha` could not be resolved locally
         # even after `git fetch origin`, or `git worktree add` itself
@@ -2227,6 +2250,14 @@ def start_worker_for_request(
         # was created for it (see SR-ORCH-REVIEW-WORKTREE-ISOLATION-20260923
         # R4-N1). Defer through the same queue/retry path `resource_admission`
         # already uses instead of ever delivering a review there.
+        #
+        # Explicit `mutates_canonical=false` report/verification reviews are
+        # exempt: they have no Git candidate to isolate at all (candidate_sha
+        # and candidate_branch are `not_applicable`), so `workspace_source`
+        # is *always* `fallback_canonical` for them by construction, never a
+        # transient failure. Gating on it here would defer these reviews
+        # forever, since no owner Git ref will ever appear to resolve
+        # (see SR-ORCH-REVIEW-WORKTREE-ISOLATION-20260923 R5-N1).
         reason = f"reviewer_workspace_unavailable:{workspace_source}"
         write_activity_log(
             config,

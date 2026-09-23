@@ -1586,6 +1586,83 @@ class ExecutionWorkspaceTests(unittest.TestCase):
             self.assertEqual(request.metadata["workspace_source"], "fallback_canonical")
             self.assertEqual(owner_status_before, _git(owner, "status", "--porcelain").stdout)
 
+    def _start_report_review_dispatch(self, config: dict, extra_task: dict | None = None) -> tuple:
+        """Same production path as `_start_review_dispatch`, for a report task.
+
+        `mutates_canonical=false`, `candidate_sha`/`candidate_branch`
+        `not_applicable` -- the `not_applicable` sentinel from
+        `candidate_required()` (bin/ai_status.py), not a Git ref.
+        """
+        task = {
+            "owner": "gemini",
+            "reviewer": "codex2",
+            "task_class": "report",
+            "mutates_canonical": False,
+            "candidate_sha": "not_applicable",
+            "candidate_branch": "not_applicable",
+        }
+        if extra_task:
+            task.update(extra_task)
+        return self._start_review_dispatch(config, task)
+
+    def test_report_review_without_owner_ref_still_delivers(self) -> None:
+        """SR-ORCH-REVIEW-WORKTREE-ISOLATION-20260923 R5-N1 regression.
+
+        A `mutates_canonical=false` report review has no Git candidate to
+        isolate at all, so `ensure_reviewer_review_workspace` resolving no
+        commit (no owner branch exists, none is expected) must not be
+        treated as the R4-N1 provisioning failure. Before this fix, the R4
+        gate refused delivery unconditionally on `fallback_canonical`,
+        deferring these reviews with `waiting_capacity` forever since no
+        owner Git ref will ever appear.
+        """
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir) / "repo"
+            root.mkdir()
+            self._init_repo(root)
+            config = self._repo_config(root)
+
+            # No owner worktree/branch is created -- report reviews never
+            # require one.
+            started, adapter, request, state = self._start_report_review_dispatch(config)
+
+            self.assertTrue(started[0], f"report review was refused: {started[1]}")
+            adapter.deliver.assert_called_once()
+            self.assertEqual(request.metadata["workspace_source"], "fallback_canonical")
+            self.assertEqual(Path(request.metadata["workspace_root"]), root.resolve())
+            self.assertIn("report/evidence review", request.message)
+
+    def test_report_review_with_owner_branch_still_delivers(self) -> None:
+        """SR-ORCH-REVIEW-WORKTREE-ISOLATION-20260923 R5-N1 positive control.
+
+        Same report task, but the owner happens to have a branch too (e.g.
+        a mixed-role owner who also does implementation work elsewhere), so
+        `ensure_reviewer_review_workspace` resolves it as an ordinary Git
+        commit and provisions an isolated worktree rather than falling back.
+        Delivery must still succeed either way -- this path was never
+        subject to the R4 gate (it isn't `fallback_canonical` or
+        `unresolvable_pinned_candidate`), so this is a control confirming
+        the R5-N1 fix does not disturb it.
+        """
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir) / "repo"
+            root.mkdir()
+            self._init_repo(root)
+            config = self._repo_config(root)
+
+            owner = root / ".artifacts/worktrees/auto/gemini-iam-ses-002"
+            _git(root, "worktree", "add", "-b", "gemini/iam-ses-002", str(owner), "dev")
+
+            started, adapter, request, state = self._start_report_review_dispatch(
+                config, {"execution_branch": "gemini/iam-ses-002"},
+            )
+
+            self.assertTrue(started[0], f"report review was refused: {started[1]}")
+            adapter.deliver.assert_called_once()
+            self.assertNotIn(
+                request.metadata["workspace_source"],
+                ("unresolvable_pinned_candidate", "fallback_canonical"),
+            )
 
 
 class RunOnceSupervisorStateTests(unittest.TestCase):
