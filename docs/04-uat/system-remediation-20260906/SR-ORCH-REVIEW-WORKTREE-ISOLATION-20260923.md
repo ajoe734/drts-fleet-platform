@@ -397,3 +397,105 @@ still resolves on the first `rev-parse`, before the fetch attempt is ever reache
   (previously absent), because the new `pin_unresolvable` path calls `write_activity_log`, which raises
   `KeyError` without it — this is a test-fixture completeness fix, not a production-code behavior
   change (`write_activity_log`'s config contract was already unchanged from Round 1-3).
+
+## 8. Round 5 — R4-N1 (Codex `reopen`, reviewed SHA `81035a9c132254595eb29b7027ca54d452c2d729`)
+
+### 8.1 Finding
+
+- **R4-N1 [P1]**: a *workspace provisioning failure* for a reviewer dispatch — `workspace_source ==
+  "unresolvable_pinned_candidate"` (locked `candidate_sha` unresolvable even after the Round 4
+  `git fetch origin` attempt) or `workspace_source == "fallback_canonical"` (the isolated
+  `git worktree add --detach` itself failed, e.g. a stale "missing but already registered worktree"
+  registration from a partially-cleaned-up prior path) — was reported honestly in the wake-up prompt
+  (Round 4's fix) but was **not** treated as a failed dispatch. `start_worker_for_request` called
+  `attach_workspace_metadata` and then unconditionally proceeded to `adapter.deliver(request)` and
+  recorded a `status: "running"` worker entry, regardless of `workspace_source`. A prompt warning is
+  not a failed dispatch: the reviewer was still actually launched with `workspace_root == repo_root`
+  (the canonical/owner-shared tree), exactly the shared-mutable-workspace outcome every prior round of
+  this task exists to prevent — just reached via a provisioning failure instead of a naming collision
+  or reuse bug.
+
+Codex's exact reproductions (`ExecutionWorkspaceTests`-style fixtures, real Git, no mocks of Git,
+allocation, metadata rendering or dispatch-decision logic; only provider delivery, `load_status`, and
+`ensure_task_brief` were mocked as external/artifact-IO boundaries):
+1. **Unavailable lock**: owner workspace dirtied to `"owner wip\n"`; a distinct candidate `D` exists
+   only in a separate, never-fetched local clone and is pinned as `task.candidate_sha`; canonical root
+   independently dirtied to `"canonical concurrent wip\n"`. `review_ready_dispatch` via
+   `start_worker_for_request`: `started=True`, `adapter.deliver` called,
+   `workspace_source=unresolvable_pinned_candidate`, `workspace_root=canonical root`, actual `HEAD !=
+   D`, and a `status: "running"` worker record was created.
+2. **Worktree creation failure**: a normal detached reviewer workspace is created at candidate `C`,
+   then only its fixture directory is removed (`shutil.rmtree`) while Git's worktree registration for
+   that path is left intact, so the next `git worktree add --detach <path> C` fails for real with
+   `"is a missing but already registered worktree"`; canonical root independently dirtied. Dispatch:
+   `started=True`, `adapter.deliver` called, `workspace_source=fallback_canonical`,
+   `workspace_root=canonical root`, and a `status: "running"` worker record was created — `HEAD == C`
+   by coincidence (the canonical root's own branch tip), but the on-disk content was the dirtied
+   canonical README, not `C`'s actual content.
+
+Owner dirty content/status remained intact in both cases; the defect was specifically that the
+reviewer dispatch was accepted as delivered instead of deferred/rejected.
+
+### 8.2 Root cause
+
+`ensure_reviewer_review_workspace`'s two failure branches (`unresolvable_pinned_candidate`,
+`fallback_canonical`) already existed from Rounds 3-4 and already logged an honest
+`worker_workspace_fallback` activity-log entry and an honest prompt notice via
+`attach_workspace_metadata`. But `start_worker_for_request` — the function that actually calls
+`ensure_execution_workspace` and `attach_workspace_metadata` — had no gate between that workspace
+result and `adapter.deliver(request)`. Every other terminal dispatch-refusal condition already present
+in `start_worker_for_request` (`dispatch_role_contract_changed`, `dispatch_candidate_changed`,
+`resource_admission:*`, `dispatch_blocked_dirty_tree`) returns `(False, reason, None)` *before*
+building the adapter and delivering; the reviewer-workspace-provisioning-failure case was the one
+result of `ensure_execution_workspace` with no corresponding gate, so it fell through to the same
+unconditional delivery path as an ordinary successful workspace.
+
+### 8.3 Fix
+
+`tools/development-orchestrator/control_plane/runtime/supervisor_runtime.py`, same file/scope:
+
+- `start_worker_for_request`: immediately after `attach_workspace_metadata`, a new check —
+  `if role == "reviewer" and workspace_source in ("unresolvable_pinned_candidate",
+  "fallback_canonical")` — logs a `worker_dispatch_deferred` activity-log entry and returns
+  `(False, f"reviewer_workspace_unavailable:{workspace_source}", None)` **before** `build_adapter`/
+  `adapter.deliver` are ever reached and before any `state["workers"][...]` entry is written. The
+  locked `candidate_sha` is untouched (nothing resolves or substitutes it here); the task remains
+  dispatchable again on the next queue pass, at which point `ensure_execution_workspace` re-attempts
+  resolution/provisioning from scratch (e.g. a later `git fetch origin` succeeding, or the stale
+  worktree registration having been cleared by an operator).
+- `process_queue`: the existing `deferred = str(outcome or "").startswith("resource_admission:")`
+  check — which routes a refused dispatch to `waiting_capacity` + a scheduled `next_retry_at` instead
+  of a terminal `failed` queue-record status — now also matches the
+  `"reviewer_workspace_unavailable:"` prefix, so this new refusal reuses the exact same queue/retry
+  path `resource_admission` already uses, per the task-spec's "existing queue/retry path" repair
+  boundary, rather than introducing a parallel mechanism.
+- Owner dispatches are unaffected: the gate is scoped to `role == "reviewer"` only.
+  `ensure_execution_workspace`'s *owner*-path `"fallback_canonical"` (worktree-add failure while
+  resuming/creating an owner's branch worktree) is pre-existing, intentional behavior — the owner still
+  gets delivered into the canonical root rather than being blocked — and is untouched by this fix.
+
+### 8.4 Verification
+
+| Finding／驗收項 | 原始碼依據與修改位置 | 舊版重現 → 修正版結果 | 命令、退出碼、執行版本與證據位置 | 未驗項與具體限制 |
+| --- | --- | --- | --- | --- |
+| R4-N1 / `reviewer_workspace_isolated_from_owner_successor` | `start_worker_for_request` new gate (after `attach_workspace_metadata`, before `build_adapter`/`adapter.deliver`) | New tests `test_unresolvable_pinned_candidate_stops_reviewer_dispatch` and `test_worktree_add_failure_stops_reviewer_dispatch` reproduce Codex's exact two scenarios via the real `start_worker_for_request` path (only `load_status`/`ensure_task_brief`/`build_adapter` mocked). Confirmed regression: with the gate manually disabled (`if False and role == ...`), both fail on `assertFalse(started[0], ...)` — `started[0]` is `True`. With the gate active, both pass: `started == (False, "reviewer_workspace_unavailable:<source>", None)`, `adapter.deliver.assert_not_called()` passes, and `state.get("workers", {})` contains no `"fixture-review-run"` entry. | `python3 -B -m unittest test_supervisor.ExecutionWorkspaceTests.test_unresolvable_pinned_candidate_stops_reviewer_dispatch test_supervisor.ExecutionWorkspaceTests.test_worktree_add_failure_stops_reviewer_dispatch -v` → both `ok` with the fix; both `FAIL` on `assertFalse` with the gate condition forced to `False`. Python 3.12.3, this worktree. | None. |
+| R4-N1 / `owner_successor_and_wip_preserved` | Gate scoped to `role == "reviewer"`; owner code paths unchanged | Owner dirty content/status (`git status --porcelain`) byte-identical before/after the reviewer dispatch attempt in both new tests; existing `test_owner_dispatch_still_resumes_execution_branch_override` still passes. | Same test run as above plus full suite below. | None. |
+| R4-N1 / `rendered_branch_matches_assigned_review_workspace` | No change needed here beyond Round 4's existing honest prompt text; this round's fix is the *delivery* gate, not the prompt | The Round 4 prompt text (naming the unresolvable candidate SHA, or the canonical-fallback notice) is now paired with an actual refusal to deliver, so the prompt's implicit claim ("do NOT review this workspace's HEAD as if it were that candidate") is never contradicted by a worker actually running there. | Same test run as above. | None. |
+| Full regression | All Round 1-5 `ExecutionWorkspaceTests` (16, up from 14) plus the rest of the orchestrator unit suite | No regressions. | `python3 -B -m unittest test_supervisor test_watch_events test_runtime_module_boundaries` → 180 tests, OK, exit 0, Python 3.12.3, this worktree (`.artifacts/worktrees/auto/claude2-sr-orch-review-worktree-isolation-20260923`), reviewed base `81035a9c132254595eb29b7027ca54d452c2d729`. | Not exercised against a live supervisor tick, real dispatch queue, or GitHub PR/CI (VM services not started per task-spec constraint); unit-level only, same limitation as Rounds 1-4. |
+| Cross-check against Codex's own R4 probes | — | Codex's `.local/codex-review-isolation-r4-WPljaH-probes.py` (`ReviewBoundaryProbes`, `DispatchFailureProbes`) re-run manually against this fix, with only the top-of-file exact-SHA byte-equality assertion stripped (it necessarily fails once the file changes; it is not a test assertion, just a pre-check that the reviewer's snapshot matched the reviewed SHA). All 14 probe cases pass, including the two previously-failing `test_unresolvable_pin_stops_dispatch` and `test_worktree_add_failure_stops_dispatch`, which now report `started: false, adapter_called: false, worker_record_status: null` for both scenarios; all previously-passing Round 3/4 probes (`test_clean_detached_reuse`, `test_dirty_and_head_drift_preserved`, `test_attached_branch_drift_must_not_rejoin_owner`, `test_unavailable_pinned_candidate_must_not_substitute_branch_tip`, `test_fetch_exact_candidate_from_local_remote`, `test_suffixed_attached_drift_preserved`) remain passing. | `PYTHONPATH=tools/development-orchestrator python3 -B .local/r4-probes-rerun-claude2.py -v` (reconstructed from the reviewer's evidence file with only the SHA-pinning header stripped) → 14 tests, OK, exit 0. Not part of the committed suite. | Re-run manually as an independent cross-check only, not added to `test_supervisor.py` verbatim (the new committed tests above cover the same two scenarios directly against `start_worker_for_request`). |
+
+- No product/UI/NAV source touched. No `.orchestrator` runtime services started or restarted on this
+  VM.
+- `watch_events.py` and `control_plane/domain/task_records.py` were re-inspected for Round 5 and still
+  require no change: the defect was entirely in `start_worker_for_request`'s missing gate between
+  workspace provisioning and delivery, not in how the task branch/candidate identity is rendered or
+  looked up.
+- The task brief's "optionally allocate another safe detached path" suggestion for the missing-but-
+  registered-worktree case (reproduction 2) was **not** implemented: it is explicitly optional in the
+  brief, the mandatory safety requirement ("if provisioning remains impossible do not deliver a review
+  in canonical/owner workspaces") is fully met by the delivery gate above, and the existing
+  `waiting_capacity`/`next_retry_at` retry path already gives a later dispatch attempt a chance to
+  succeed (e.g. after an operator clears the stale registration with `git worktree prune`, or a fetch
+  of a previously-unresolvable candidate later succeeds). Adding path-reallocation logic for a
+  registered-but-missing worktree was judged out of scope for this repair unit to avoid re-widening the
+  fragile-surface diff this task has already required five rounds to close.

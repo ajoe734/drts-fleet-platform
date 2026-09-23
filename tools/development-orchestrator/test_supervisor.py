@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import shutil
 import signal
 import subprocess
 import tempfile
@@ -12,6 +13,7 @@ import os
 from pathlib import Path
 from unittest import mock
 
+from adapters.base import DeliveryResult
 from control_plane.runtime import supervisor_runtime as supervisor
 from orchestrator_test_support import EvidenceOutputIsolation
 from common import load_rotation_cooldowns
@@ -1431,7 +1433,158 @@ class ExecutionWorkspaceTests(unittest.TestCase):
             self.assertIn(pinned, reviewer_request.message)
             self.assertNotIn(owner_tip, reviewer_request.message)
 
+    def _start_review_dispatch(self, config: dict, task: dict) -> tuple:
+        """Drive the real `start_worker_for_request` review dispatch path.
 
+        Mocks only the external delivery adapter and the machine-truth/
+        artifact-IO boundaries (`load_status`, `ensure_task_brief`) -- Git,
+        workspace allocation, metadata rendering and dispatch decision logic
+        all run unmocked, matching the reviewer's R4 verification boundary.
+        """
+        request = supervisor.DeliveryRequest(
+            agent_id="codex2",
+            provider="codex2",
+            delivery_mode="codex",
+            message="wake",
+            task_id="IAM-SES-002",
+            reason="review_ready_dispatch",
+            metadata={"mode": "execution", "task": dict(task)},
+        )
+        full_task = dict(
+            task,
+            id="IAM-SES-002",
+            status="review",
+            reviewer="Codex2",
+            candidate_generation="fixture-generation",
+        )
+        request.metadata["task"] = full_task
+        state: dict = {}
+        result = DeliveryResult(
+            ok=True,
+            adapter="test_sink",
+            mode="codex",
+            target="Codex2",
+            auto_delivered=True,
+            manual_confirmation_required=False,
+            run_id="fixture-review-run",
+        )
+        adapter = mock.Mock()
+        adapter.deliver.return_value = result
+        with mock.patch.object(supervisor, "load_status", return_value={"tasks": [full_task]}), \
+             mock.patch.object(supervisor, "ensure_task_brief", return_value=None), \
+             mock.patch.object(supervisor, "build_adapter", return_value=adapter):
+            started = supervisor.start_worker_for_request(
+                config, state, {}, request, queue_event_id=None,
+                attempt_count=1, event_id_for_log=None,
+            )
+        return started, adapter, request, state
+
+    def test_unresolvable_pinned_candidate_stops_reviewer_dispatch(self) -> None:
+        """SR-ORCH-REVIEW-WORKTREE-ISOLATION-20260923 R4-N1 regression (5th rejection round).
+
+        An `unresolvable_pinned_candidate` workspace result is a fallback to
+        the mutable canonical workspace, not a safe review. Before this fix,
+        `start_worker_for_request` accepted it anyway: the adapter was
+        called and a "running" worker record was created in the canonical
+        workspace despite `ensure_reviewer_review_workspace`'s own comment
+        saying "fail this dispatch".
+        """
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir) / "repo"
+            root.mkdir()
+            self._init_repo(root)
+            config = self._repo_config(root)
+
+            owner = root / ".artifacts/worktrees/auto/gemini-iam-ses-002-successor-4"
+            _git(root, "worktree", "add", "-b", "gemini/iam-ses-002-successor-4", str(owner), "dev")
+            (owner / "README.md").write_text("owner wip\n", encoding="utf-8")
+            owner_status_before = _git(owner, "status", "--porcelain").stdout
+
+            remote = Path(tmpdir) / "remote-clone"
+            _git(root, "clone", str(root), str(remote))
+            _git(remote, "config", "user.email", "test@example.com")
+            _git(remote, "config", "user.name", "Test User")
+            (remote / "README.md").write_text("remote pinned candidate\n", encoding="utf-8")
+            _git(remote, "add", "README.md")
+            _git(remote, "commit", "-m", "candidate available remotely only")
+            pinned = _git(remote, "rev-parse", "HEAD").stdout.strip()
+
+            # Concurrent dirty state in the canonical root, which the fix
+            # must never deliver a review into.
+            (root / "README.md").write_text("canonical concurrent wip\n", encoding="utf-8")
+
+            task = {
+                "owner": "gemini",
+                "reviewer": "codex2",
+                "execution_branch": "gemini/iam-ses-002-successor-4",
+                "candidate_sha": pinned,
+            }
+            started, adapter, request, state = self._start_review_dispatch(config, task)
+
+            self.assertFalse(started[0], "unprovisionable review was accepted as a running worker")
+            self.assertEqual(started[1], "reviewer_workspace_unavailable:unresolvable_pinned_candidate")
+            adapter.deliver.assert_not_called()
+            self.assertNotIn("fixture-review-run", state.get("workers", {}))
+            self.assertEqual(request.metadata["workspace_source"], "unresolvable_pinned_candidate")
+            self.assertEqual(owner_status_before, _git(owner, "status", "--porcelain").stdout)
+
+    def test_worktree_add_failure_stops_reviewer_dispatch(self) -> None:
+        """SR-ORCH-REVIEW-WORKTREE-ISOLATION-20260923 R4-N1 regression (5th rejection round).
+
+        A `fallback_canonical` workspace result from a failed
+        `git worktree add` (e.g. a stale registration for a manually-removed
+        fixture directory) must also stop the dispatch rather than deliver a
+        review into the canonical workspace.
+        """
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir) / "repo"
+            root.mkdir()
+            self._init_repo(root)
+            config = self._repo_config(root)
+            sha = _git(root, "rev-parse", "HEAD").stdout.strip()
+
+            owner = root / ".artifacts/worktrees/auto/gemini-iam-ses-002-successor-4"
+            _git(root, "worktree", "add", "-b", "gemini/iam-ses-002-successor-4", str(owner), "dev")
+            (owner / "README.md").write_text("owner wip\n", encoding="utf-8")
+            owner_status_before = _git(owner, "status", "--porcelain").stdout
+
+            task = {
+                "owner": "gemini",
+                "reviewer": "codex2",
+                "execution_branch": "gemini/iam-ses-002-successor-4",
+                "candidate_sha": sha,
+            }
+
+            # Create a normal detached reviewer workspace once, then remove
+            # only the disposable fixture directory while Git keeps the
+            # worktree registration -- simulating partial cleanup. The next
+            # `git worktree add` for the same commit fails for real, with no
+            # Git mocking involved.
+            first_request = supervisor.DeliveryRequest(
+                agent_id="codex2",
+                provider="codex2",
+                delivery_mode="codex",
+                message="wake",
+                task_id="IAM-SES-002",
+                reason="review_ready_dispatch",
+                metadata={"mode": "execution", "task": dict(task)},
+            )
+            first_workspace, _branch, _base, first_source = supervisor.ensure_execution_workspace(
+                config, first_request, supervisor.route_task("IAM-SES-002"),
+            )
+            self.assertEqual(first_source, "created_review_worktree")
+            shutil.rmtree(first_workspace)
+
+            (root / "README.md").write_text("canonical concurrent wip\n", encoding="utf-8")
+
+            started, adapter, request, state = self._start_review_dispatch(config, task)
+
+            self.assertFalse(started[0], "failed isolated worktree was accepted as a running worker")
+            self.assertEqual(started[1], "reviewer_workspace_unavailable:fallback_canonical")
+            adapter.deliver.assert_not_called()
+            self.assertNotIn("fixture-review-run", state.get("workers", {}))
+            self.assertEqual(request.metadata["workspace_source"], "fallback_canonical")
+            self.assertEqual(owner_status_before, _git(owner, "status", "--porcelain").stdout)
 
 
 

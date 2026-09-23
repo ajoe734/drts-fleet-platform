@@ -2216,6 +2216,35 @@ def start_worker_for_request(
     )
     attach_workspace_metadata(config, request, workspace_root, task_branch, base_branch, workspace_source)
 
+    if role == "reviewer" and workspace_source in ("unresolvable_pinned_candidate", "fallback_canonical"):
+        # Provisioning the reviewer's isolated workspace failed outright --
+        # either the locked `candidate_sha` could not be resolved locally
+        # even after `git fetch origin`, or `git worktree add` itself
+        # failed. `attach_workspace_metadata` already put an honest warning
+        # in the wake-up prompt, but a prompt warning is not a failed
+        # dispatch: without this gate the reviewer was still launched in the
+        # mutable canonical/owner workspace and a "running" worker record
+        # was created for it (see SR-ORCH-REVIEW-WORKTREE-ISOLATION-20260923
+        # R4-N1). Defer through the same queue/retry path `resource_admission`
+        # already uses instead of ever delivering a review there.
+        reason = f"reviewer_workspace_unavailable:{workspace_source}"
+        write_activity_log(
+            config,
+            {
+                "type": "worker_dispatch_deferred",
+                "task_id": request.task_id,
+                "provider": request.provider,
+                "target_agent": display_name_for(config, agent["id"]),
+                "queue_event_id": event_id_for_log,
+                "message": (
+                    "Reviewer dispatch deferred: could not provision an isolated review "
+                    f"workspace ({workspace_source}). Refusing to deliver into the canonical/owner "
+                    "workspace."
+                ),
+            },
+        )
+        return False, reason, None
+
     adapter_name = delivery_mode_override or agent.get("adapter", "file_inbox")
     adapter = build_adapter(adapter_name, config=config, provider_capabilities=provider_report)
     result = adapter.deliver(request)
@@ -2391,7 +2420,7 @@ def process_queue(config: dict[str, Any], state: dict[str, Any], provider_report
             event_id_for_log=event_id,
         )
         if not ok:
-            deferred = str(outcome or "").startswith("resource_admission:")
+            deferred = str(outcome or "").startswith(("resource_admission:", "reviewer_workspace_unavailable:"))
             record["status"] = "waiting_capacity" if deferred else "failed"
             record["error"] = outcome
             if deferred:
