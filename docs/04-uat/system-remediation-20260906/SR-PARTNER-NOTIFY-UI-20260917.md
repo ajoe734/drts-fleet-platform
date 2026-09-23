@@ -27,15 +27,23 @@
 
 ## Review Findings & Acceptance Criteria Resolution
 
-| Finding / 驗收項 | 狀態 (Status) | 修改位置與說明 | 證據 (Evidence) |
-| --- | --- | --- | --- |
-| 1. Functional UI absent, CanvasInput | STOP (Awaits Design) | `partner-notification-panel.tsx` | Replaced invented layout with placeholder banner. |
-| 2. Hardcoded eventTypes=["*"] | STOP (Awaits Design) | `partner-notification-panel.tsx` | Removed from placeholder. |
-| 3. COALESCE combines UUID with text | PASS | `multi-taxi.repository.ts:1743` | Casted explicitly to `::uuid`. |
-| 4. Missing route fields / payload | PASS | `multi-taxi.repository.ts` | Joined `phase1_order_partner_notification_routes` in list and retry. |
-| 5. tenantId/partnerId ownership check | PASS | `multi-taxi.repository.ts` | Filter/reject historical ownership mismatches. |
-| 6. Manual retry budget, readiness | PASS | `multi-taxi.repository.ts` | Added maxAttempts check, readiness facade verification, supersession. |
-| 7. fetchState infinite loop, 409 | STOP (Awaits Design) | `partner-notification-panel.tsx` | Removed from placeholder. |
-| 8. Postgres test fixtures & env var | SKIP (Awaits CI) | `notification-ui.postgres.test.ts` | Lint and missing phase1_owned_orders fixture fixed. PG tests left skipped locally, wired into CI package.json integration test. |
-| 9. UAT claims/ApiClient tests | PASS | `SR-PARTNER-NOTIFY-UI-20260917.md` | UAT updated to reflect actual status (skip/unverified). |
-| 10. Incidental Scope changes / UI | PASS | `03_ui_design_delta.md`, `partner-notification-panel.tsx` | Invented layout removed, replaced with placeholder. Canvas gap handed off. |
+| Finding / 驗收項                      | 狀態 (Status)        | 修改位置與說明                                            | 證據 (Evidence)                                                                                                                 |
+| ------------------------------------- | -------------------- | --------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------- |
+| 1. Functional UI absent, CanvasInput  | STOP (Awaits Design) | `partner-notification-panel.tsx`                          | Replaced invented layout with placeholder banner.                                                                               |
+| 2. Hardcoded eventTypes=["*"]         | STOP (Awaits Design) | `partner-notification-panel.tsx`                          | Removed from placeholder.                                                                                                       |
+| 3. COALESCE combines UUID with text   | PASS                 | `multi-taxi.repository.ts:1743`                           | Casted explicitly to `::uuid`.                                                                                                  |
+| 4. Missing route fields / payload     | PASS                 | `multi-taxi.repository.ts`                                | Joined `phase1_order_partner_notification_routes` in list and retry.                                                            |
+| 5. tenantId/partnerId ownership check | PASS                 | `multi-taxi.repository.ts`                                | Filter/reject historical ownership mismatches.                                                                                  |
+| 6. Manual retry budget, readiness     | PASS                 | `multi-taxi.repository.ts`                                | Added maxAttempts check, readiness facade verification, supersession.                                                           |
+| 7. fetchState infinite loop, 409      | STOP (Awaits Design) | `partner-notification-panel.tsx`                          | Removed from placeholder.                                                                                                       |
+| 8. Postgres test fixtures & env var   | SKIP (Awaits CI)     | `notification-ui.postgres.test.ts`                        | Lint and missing phase1_owned_orders fixture fixed. PG tests left skipped locally, wired into CI package.json integration test. |
+| 9. UAT claims/ApiClient tests         | PASS                 | `SR-PARTNER-NOTIFY-UI-20260917.md`                        | UAT updated to reflect actual status (skip/unverified).                                                                         |
+| 10. Incidental Scope changes / UI     | PASS                 | `03_ui_design_delta.md`, `partner-notification-panel.tsx` | Invented layout removed, replaced with placeholder. Canvas gap handed off.                                                      |
+
+## Handoff Evidence (Gemini Verified)
+
+- **Verifier**: Gemini
+- **Action**: Confirmed local build and tests pass for Gemini2's fixes. Verified absence of out-of-scope scratch files.
+- **Evidence**:
+  - `pnpm build`: Exit 0
+  - `pnpm test`: Exit 0
