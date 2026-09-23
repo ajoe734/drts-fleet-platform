@@ -1005,46 +1005,174 @@ def _candidate_worktree_path(base: Path, agent_id: str, task_id: str, branch: st
     return base / f"{slug}-{new_runtime_id('wt')}"
 
 
-def _worktree_belongs_to_slug(path: Path, base: Path, slug: str) -> bool:
-    try:
-        rel = path.resolve().relative_to(base.resolve())
-    except ValueError:
-        return False
-    name = rel.parts[0] if rel.parts else ""
-    return name == slug or name.startswith(f"{slug}-")
+def _owner_override_branch(repo_root: Path, request: DeliveryRequest) -> str | None:
+    """The ref a task's owner-authored `execution_branch` override currently names, if valid.
 
-
-def _foreign_worktree_for_branch(repo_root: Path, base: Path, branch: str, slug: str) -> Path | None:
-    """Find a worktree checked out on `branch` that isn't this agent/task's own."""
-    match = _worktree_for_branch(repo_root, branch)
-    if match is None or _worktree_belongs_to_slug(match, base, slug):
-        return None
-    return match
-
-
-def _reviewer_isolated_branch(agent_id: str, task_id: str) -> str:
-    return f"{_agent_task_slug(agent_id, task_id)}-isolated-review"
-
-
-def _reviewer_safe_branch(repo_root: Path, base: Path, request: DeliveryRequest, branch: str) -> str:
-    """Never let a reviewer land on a branch someone else already owns.
-
-    A reviewer's default branch is deterministic from (agent_id, task_id), but
-    an owner-authored `execution_branch` override (see `_execution_branch`) is
-    an arbitrary Git ref and can coincidentally match it. Reusing -- or
-    force-checking-out -- that branch would hand the reviewer the owner's
-    live, mutable worktree even though `_execution_branch` already refuses to
-    let the reviewer inherit the override string itself (see
-    SR-ORCH-REVIEW-WORKTREE-ISOLATION-20260923). If the branch is already
-    checked out by a worktree outside this reviewer/task's own slug, fork a
-    branch namespaced to this reviewer/task pair instead.
+    Mirrors the same `check-ref-format` validation `_execution_branch` applies
+    for the owner role.
     """
-    if task_role_for_dispatch_reason(request.reason) != "reviewer":
-        return branch
-    slug = _agent_task_slug(request.agent_id, request.task_id or "")
-    if _foreign_worktree_for_branch(repo_root, base, branch, slug) is None:
-        return branch
-    return _reviewer_isolated_branch(request.agent_id, request.task_id or "")
+    metadata = request.metadata if isinstance(request.metadata, dict) else {}
+    task = metadata.get("task") if isinstance(metadata.get("task"), dict) else {}
+    configured_branch = task.get("execution_branch")
+    if not isinstance(configured_branch, str) or not configured_branch.strip():
+        return None
+    result = _git_capture(
+        repo_root,
+        ["check-ref-format", "--branch", configured_branch.strip()],
+    )
+    if result.returncode != 0:
+        return None
+    return (result.stdout or "").strip() or None
+
+
+def _reviewer_workspace_base(base: Path) -> Path:
+    """Dedicated namespace reviewer workspaces live in, and owner workspaces never do.
+
+    Owner and coordination worktrees are always allocated directly under
+    `base` (see `_candidate_worktree_path`, `_candidate_coordination_worktree_path`);
+    neither one ever descends into a `review/` subdirectory. Giving reviewers
+    their own subtree therefore rules out ever landing on an owner's path by
+    construction, instead of by comparing branch names or directory slugs
+    after the fact and hoping every edge case was enumerated -- the exact
+    class of bug this closed, reopened, and closed again (see
+    SR-ORCH-REVIEW-WORKTREE-ISOLATION-20260923 F1, F1.a, F1.b): an owner's
+    `execution_branch` override is an arbitrary Git ref an owner can (by
+    coincidence or design) set equal to whatever name a reviewer-branch
+    picker would ever choose. No name comparison can close that off for
+    good; a disjoint namespace does.
+    """
+    return base / "review"
+
+
+def _reviewer_owner_branch(repo_root: Path, request: DeliveryRequest) -> str:
+    """The branch the task's *owner* is actually working from.
+
+    Used only as a last-resort source of commit content when the task has no
+    `candidate_sha` pinned yet -- never to pick the reviewer's own worktree
+    path or branch, and never surfaced verbatim in reviewer-facing metadata
+    or messages (see `_reviewer_candidate_commit`, which resolves this down
+    to a commit before it goes anywhere near reviewer output).
+    """
+    metadata = request.metadata if isinstance(request.metadata, dict) else {}
+    task = metadata.get("task") if isinstance(metadata.get("task"), dict) else {}
+    owner_agent = str(task.get("owner") or "").strip() or request.agent_id
+    default_branch = _task_branch(owner_agent, request.task_id or "")
+    return _owner_override_branch(repo_root, request) or default_branch
+
+
+def _reviewer_candidate_commit(repo_root: Path, request: DeliveryRequest, owner_branch: str) -> str:
+    """Resolve the exact, immutable commit a reviewer dispatch must examine.
+
+    Prefers the owner's pinned `candidate_sha` handoff -- the same value the
+    wake-up prompt's review guardrails already tell the reviewer to check
+    `git rev-parse HEAD` against (see `watch_events.render_wakeup_message`).
+    All worktrees of one repository share a single object database, so any
+    commit any worktree has made -- pushed or not -- is resolvable here
+    without a network fetch. Falls back to the current tip of the owner's
+    branch only when no candidate has been pinned yet. Returns "" if neither
+    resolves locally (e.g. before the owner's first commit).
+    """
+    metadata = request.metadata if isinstance(request.metadata, dict) else {}
+    task = metadata.get("task") if isinstance(metadata.get("task"), dict) else {}
+    raw_sha = task.get("candidate_sha")
+    if isinstance(raw_sha, str) and raw_sha.strip() and raw_sha.strip().lower() != "not_applicable":
+        result = _git_capture(repo_root, ["rev-parse", "--verify", "--quiet", f"{raw_sha.strip()}^{{commit}}"])
+        resolved = (result.stdout or "").strip()
+        if result.returncode == 0 and resolved:
+            return resolved
+    for ref in (f"refs/heads/{owner_branch}", f"refs/remotes/origin/{owner_branch}"):
+        result = _git_capture(repo_root, ["rev-parse", "--verify", "--quiet", ref])
+        resolved = (result.stdout or "").strip()
+        if result.returncode == 0 and resolved:
+            return resolved
+    return ""
+
+
+def _current_commit(path: Path) -> str | None:
+    result = _git_capture(path, ["rev-parse", "--verify", "--quiet", "HEAD"])
+    value = (result.stdout or "").strip()
+    return value if result.returncode == 0 and value else None
+
+
+def _worktree_is_dirty(path: Path) -> bool:
+    result = _git_capture(path, ["status", "--porcelain"])
+    return result.returncode != 0 or bool((result.stdout or "").strip())
+
+
+def _candidate_reviewer_worktree_path(review_base: Path, agent_id: str, task_id: str, commit: str) -> Path:
+    """Pick a path for a reviewer's detached workspace, reusing a clean one already on `commit`.
+
+    Never resets or force-checks-out an existing path: if something already
+    occupies the natural slug and isn't already a clean checkout of this
+    exact commit (e.g. earlier drift/WIP left by a prior review round), a
+    fresh, distinctly-suffixed path is allocated instead -- the existing
+    workspace is left untouched (see SR-ORCH-REVIEW-WORKTREE-ISOLATION-20260923).
+    """
+    slug = f"{_agent_task_slug(agent_id, task_id)}-{commit[:12]}"
+    candidate = review_base / slug
+    if not candidate.exists() or (_current_commit(candidate) == commit and not _worktree_is_dirty(candidate)):
+        return candidate
+    for index in range(2, 20):
+        suffixed = review_base / f"{slug}-{index}"
+        if not suffixed.exists() or (_current_commit(suffixed) == commit and not _worktree_is_dirty(suffixed)):
+            return suffixed
+    return review_base / f"{slug}-{new_runtime_id('rev')}"
+
+
+def ensure_reviewer_review_workspace(
+    config: dict[str, Any],
+    repo_root: Path,
+    request: DeliveryRequest,
+    base: Path,
+    base_branch: str,
+) -> tuple[Path, str | None, str | None, str | None]:
+    """Give a reviewer a workspace that can never be -- or become -- the owner's.
+
+    Detached at the resolved candidate commit, inside a namespace
+    (`_reviewer_workspace_base`) the owner's own path allocator can never
+    write into. No branch is ever checked out here, so there is no ref for a
+    future owner override to coincidentally collide with.
+    """
+    owner_branch = _reviewer_owner_branch(repo_root, request)
+    commit = _reviewer_candidate_commit(repo_root, request, owner_branch)
+    if not commit:
+        write_activity_log(
+            config,
+            {
+                "type": "worker_workspace_fallback",
+                "task_id": request.task_id,
+                "target_agent": display_name_for(config, request.agent_id),
+                "message": (
+                    "Could not resolve any locally-reachable commit for reviewer candidate; "
+                    f"falling back to canonical workspace. owner_branch={owner_branch}"
+                ),
+            },
+        )
+        return repo_root, None, base_branch, "fallback_canonical"
+
+    review_base = _reviewer_workspace_base(base)
+    review_base.mkdir(parents=True, exist_ok=True)
+    destination = _candidate_reviewer_worktree_path(review_base, request.agent_id, request.task_id or "", commit)
+    if _is_git_worktree(destination) and _current_commit(destination) == commit:
+        return destination.resolve(), commit, base_branch, "existing_review_worktree"
+
+    result = _git_capture(repo_root, ["worktree", "add", "--detach", str(destination), commit], timeout=90.0)
+    if result.returncode != 0:
+        write_activity_log(
+            config,
+            {
+                "type": "worker_workspace_fallback",
+                "task_id": request.task_id,
+                "target_agent": display_name_for(config, request.agent_id),
+                "message": (
+                    "Could not create isolated reviewer worktree; falling back to canonical workspace. "
+                    f"commit={commit} stderr={(result.stderr or result.stdout or '').strip()}"
+                ),
+            },
+        )
+        return repo_root, commit, base_branch, "fallback_canonical"
+    _provision_worktree_node_modules(repo_root, destination)
+    return destination.resolve(), commit, base_branch, "created_review_worktree"
 
 
 def _coordination_workspace_key(request: DeliveryRequest) -> str:
@@ -1175,10 +1303,13 @@ def ensure_execution_workspace(
     if not request.task_id or mode == "planning":
         return repo_root, None, None, None
 
-    branch = _execution_branch(repo_root, request)
     base_branch = routing.base_branch if routing else "dev"
     base = _worker_worktree_base(config, repo_root)
-    branch = _reviewer_safe_branch(repo_root, base, request, branch)
+
+    if task_role_for_dispatch_reason(request.reason) == "reviewer":
+        return ensure_reviewer_review_workspace(config, repo_root, request, base, base_branch)
+
+    branch = _execution_branch(repo_root, request)
     existing = _worktree_for_branch(repo_root, branch, exclude=repo_root, within=base)
     if existing is not None:
         return existing, branch, base_branch, "existing_worktree"
@@ -1238,8 +1369,31 @@ def attach_workspace_metadata(
         request.metadata["workspace_source"] = workspace_source
 
     mode = str(request.metadata.get("mode") or "").strip().lower()
-    if request.task_id and branch:
-        status_cli = task_board_cli_path()
+    is_reviewer = task_role_for_dispatch_reason(request.reason) == "reviewer"
+    status_cli = task_board_cli_path()
+    if request.task_id and is_reviewer and workspace_root != canonical_root:
+        # `branch` is actually the resolved candidate commit here (see
+        # `ensure_reviewer_review_workspace`) -- no branch is ever checked
+        # out in a reviewer workspace, so the prompt must say so honestly
+        # instead of implying a branch exists to `git switch` to (see
+        # SR-ORCH-REVIEW-WORKTREE-ISOLATION-20260923).
+        notice = (
+            "\n\nSupervisor-assigned workspace:\n"
+            f"- Worker cwd: `{workspace_root}` (isolated, detached review workspace).\n"
+            f"- Reviewing candidate `{branch}`; no branch is checked out here -- do not `git switch`.\n"
+            f"- Canonical machine-truth root: `{canonical_root}`.\n"
+            f"- Use `{status_cli}` for state changes; it runs current release code and writes through "
+            "`ORCH_STATUS_ROOT` / `AI_STATUS_ROOT` to canonical machine truth.\n"
+        )
+    elif request.task_id and is_reviewer and workspace_root == canonical_root:
+        notice = (
+            "\n\nSupervisor-assigned workspace:\n"
+            f"- Worker cwd: `{workspace_root}` (canonical workspace fallback; isolated review workspace "
+            "could not be created).\n"
+            f"- Canonical machine-truth root: `{canonical_root}`.\n"
+            "- Do not `git switch` the canonical root for task code.\n"
+        )
+    elif request.task_id and branch:
         if workspace_root == canonical_root:
             workspace_line = (
                 f"- Worker cwd: `{workspace_root}` (canonical workspace fallback; avoid switching it to another task branch)."

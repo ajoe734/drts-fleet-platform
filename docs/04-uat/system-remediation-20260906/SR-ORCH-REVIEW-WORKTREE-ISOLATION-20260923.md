@@ -168,3 +168,116 @@ returns `branch` unchanged, so Round 1's behavior and its regression test are pr
   unaffected by this round), and `task_role_for_dispatch_reason` needed no new predicate — slug
   ownership is a worktree-path concern local to `supervisor_runtime.py`.
 - No product/UI/NAV source touched. No `.orchestrator` runtime services started or restarted.
+
+## 6. Round 3 — F1.a / F1.b (Codex `reopen`, reviewed SHA `101c61f2785dfba684aaf31dab1e70c55885adae`)
+
+### 6.1 Finding
+
+Codex reopened candidate `101c61f2` (PR #2114) with **F1.a** and **F1.b** (see
+`.local/auto-worker-unblock-20260923/isolation-review-second-candidate.md`,
+`isolation-reviewer-r2-probes.json` for the reviewer's own verbatim probes):
+
+- **F1.a**: `_worktree_belongs_to_slug` matches by *directory name*, but a task takeover does not
+  rename the directory — `ensure_execution_workspace` reuses whatever path already has the target
+  branch checked out. If today's reviewer was the task's *original* owner, its own agent/task slug
+  still names that directory, so `_worktree_belongs_to_slug` wrongly says "this is my own
+  workspace" even though the directory is now the *new* owner's live, dirty tree (because the
+  branch handed over as the new owner's `execution_branch` override happens to equal the old
+  owner's — now reviewer's — deterministic default branch).
+- **F1.b**: once a reviewer's plain default branch is redirected to the deterministic
+  `{slug}-isolated-review` fallback (Round 2's `_reviewer_isolated_branch`), nothing checked *that
+  fallback name itself* against the owner's `execution_branch` override. An override chosen to
+  equal that exact fallback string sends the reviewer straight back to the owner's live worktree.
+
+Both are instances of the same underlying problem the reviewer flagged explicitly: **`execution_branch`
+is an arbitrary, owner-authored Git ref**, and Round 2's fix (`_reviewer_safe_branch`) was still a
+finite set of name comparisons (default branch, then one fallback name) against it. Any fix that
+picks the reviewer's branch/path by *name* is chasing an owner-controlled string and will always
+have one more name left to collide with — as demonstrated twice now (Round 1's plain default,
+Round 2's `-isolated-review` fallback).
+
+### 6.2 Root cause
+
+Reviewer workspace *identity* (which path/branch a reviewer lands on) and *content* (what the
+reviewer is actually meant to look at) were both being decided as "some Git ref name", drawn from
+the same namespace an owner's `execution_branch` override is free to point anywhere in. As long as
+reviewer isolation depends on that name not coinciding with whatever the owner chose, it is a
+matching game the owner (or a stale directory left over from a prior role handoff) can always win.
+
+Separately — and independent of F1.a/F1.b — the Round 1/2 design never actually populated a
+reviewer's workspace with the owner's real candidate content in the first place: on the
+non-colliding path, `ensure_execution_workspace` forks a **brand-new, empty branch off `dev`**
+for the reviewer (`_branch_exists`/`_remote_branch_exists` both false for a synthetic
+`{agent}/{task_id}` or `{slug}-isolated-review` name), never the owner's actual commits. Reviewers
+were expected to `git fetch`/`checkout` the pinned `candidate_sha` themselves inside that empty
+workspace. That already worked operationally (the wake-up prompt's review guardrails instruct
+exactly that, `watch_events.py:360-367`), but it means the supervisor's own workspace-provisioning
+code was never actually pinning content to the reviewed candidate — only providing an isolated (if
+collidable) empty directory.
+
+### 6.3 Fix — structural isolation, not name comparison
+
+`tools/development-orchestrator/control_plane/runtime/supervisor_runtime.py`: reviewer dispatch no
+longer goes through `_execution_branch`/`_worktree_for_branch`/`_candidate_worktree_path` (the
+owner-path machinery) at all. `ensure_execution_workspace` now branches on
+`task_role_for_dispatch_reason(request.reason) == "reviewer"` immediately after resolving
+`base`/`base_branch`, and hands off to a new, independent `ensure_reviewer_review_workspace`:
+
+- `_reviewer_workspace_base(base)`: returns `base / "review"`. Owner and coordination worktrees
+  are *always* allocated directly under `base` (`_candidate_worktree_path`,
+  `_candidate_coordination_worktree_path` — both build `base / slug`, never `base / "review" /
+  ...`). Reviewers living exclusively under `base/review/` therefore cannot land on an owner's path
+  **by construction** — there is no name for an owner's `execution_branch` override to be that
+  would ever cause a collision, because owner paths and reviewer paths are disjoint subtrees, not
+  disjoint by comparison.
+- `_reviewer_candidate_commit(repo_root, request, owner_branch)`: resolves the exact commit a
+  reviewer must examine — the task's pinned `candidate_sha` if present and locally resolvable
+  (`git rev-parse --verify <sha>^{commit}`; every worktree of one repository shares one object
+  database, so this needs no network fetch even for an unpushed commit), else the current tip of
+  the owner's branch (`_reviewer_owner_branch`, itself only `_owner_override_branch(...)` or the
+  agent-scoped default — used *only* as a content source, never as the reviewer's own path/branch
+  identity).
+- `_candidate_reviewer_worktree_path(review_base, agent_id, task_id, commit)`: same
+  never-reset-someone-else's-tree discipline as `_candidate_worktree_path` — reuses an existing
+  path only if it is already a clean checkout of that exact `commit`; otherwise allocates a
+  distinctly-suffixed new path, never force-checks-out over drift/WIP left by a prior review round.
+- `ensure_reviewer_review_workspace`: `git worktree add --detach <path> <commit>`. **Detached**, on
+  purpose — a reviewer workspace never has any branch checked out, so there is no ref left for a
+  future owner override to ever coincidentally equal.
+- `attach_workspace_metadata`: the reviewer-specific "Supervisor-assigned workspace" notice now
+  says "Reviewing candidate `<sha>`; no branch is checked out here — do not `git switch`" instead
+  of the old owner-shaped "Task branch: `<branch>` from base `<base>`" line — the rendered text now
+  states what is actually true of a detached workspace (this closes the third required-acceptance
+  item, `rendered_branch_matches_assigned_review_workspace`, honestly rather than incidentally).
+
+`_reviewer_safe_branch`, `_reviewer_isolated_branch`, `_foreign_worktree_for_branch`, and
+`_worktree_belongs_to_slug` (all of Round 2's name-comparison machinery) are removed — dead code
+once reviewer workspace selection no longer goes through branch names at all.
+`_owner_override_branch` (added in this round's earlier draft) is kept and reused by
+`_reviewer_owner_branch` as the fallback content source described above.
+
+The owner code path (`_execution_branch`, `_worktree_for_branch`, `_candidate_worktree_path`,
+`ensure_execution_workspace`'s non-reviewer branch) is untouched byte-for-byte in control flow —
+only reached when `task_role_for_dispatch_reason(request.reason) != "reviewer"`, exactly as before.
+
+### 6.4 Verification
+
+| Finding／驗收項 | 原始碼依據與修改位置 | 舊版重現 → 修正版結果 | 命令、退出碼、執行版本與證據位置 | 未驗項與具體限制 |
+| --- | --- | --- | --- | --- |
+| F1.a / `reviewer_workspace_isolated_from_owner_successor` | `ensure_reviewer_review_workspace` + `_reviewer_workspace_base` (disjoint `review/` namespace) | New test `test_reviewer_isolated_from_owner_workspace_wearing_reviewers_old_slug` reproduces Codex's exact scenario (reviewer's own slug names a directory that is now the new owner's live tree after takeover): reviewer resolves to `base/review/<slug>-<sha12>`, never the owner's `base/<old-slug>` path; owner `README.md`/branch untouched. | `python3 -B -m unittest test_supervisor.ExecutionWorkspaceTests.test_reviewer_isolated_from_owner_workspace_wearing_reviewers_old_slug -v` → `ok`. Python 3.12.3, this worktree, real `git worktree add`, no mocks. | None. |
+| F1.b / `reviewer_workspace_isolated_from_owner_successor` | Same — reviewer never resolves any branch name at all, so there is no `-isolated-review` fallback name left for an override to preempt | New test `test_reviewer_isolated_when_override_preempts_isolated_fallback_name` reproduces Codex's exact scenario (owner's `execution_branch` override deliberately equals the old `{slug}-isolated-review` fallback string): reviewer still resolves under `base/review/`, distinct from both the owner's worktree and an unrelated foreign worktree occupying the reviewer's old plain-default branch name. | `python3 -B -m unittest test_supervisor.ExecutionWorkspaceTests.test_reviewer_isolated_when_override_preempts_isolated_fallback_name -v` → `ok`. Same environment. | None. |
+| `owner_successor_and_wip_preserved` | Owner code path unreached/unchanged for reviewer dispatch (`task_role_for_dispatch_reason` gate at top of `ensure_execution_workspace`) | Owner dispatch (`reason="owned_ready_dispatch"`) still resumes its `execution_branch` override and existing worktree in every test above and in `test_owner_dispatch_still_resumes_execution_branch_override`; owner `git status --porcelain` and `HEAD` byte-identical before/after every reviewer dispatch alongside it, including after the owner keeps committing/drifting post-handoff. | `python3 -B -m unittest test_supervisor.ExecutionWorkspaceTests -v` → 12 tests, `ok`. | None. |
+| `rendered_branch_matches_assigned_review_workspace` | `attach_workspace_metadata` reviewer-specific notice branch | Reviewer `Supervisor-assigned workspace:` notice says `Reviewing candidate `<sha>`` and `detached`, contains neither the owner's worktree path nor the owner's override/default branch string, in all four reviewer regression tests. | Assertions in `test_review_dispatch_ignores_owner_execution_branch_override`, `test_reviewer_default_branch_colliding_with_owner_override_gets_isolated`, `test_reviewer_isolated_from_owner_workspace_wearing_reviewers_old_slug`, `test_reviewer_isolated_when_override_preempts_isolated_fallback_name`, `test_reviewer_workspace_pins_candidate_sha_despite_owner_drift` — all `ok`. | None. |
+| Content correctness (new, beyond the three required items) | `_reviewer_candidate_commit` prefers `task.candidate_sha`, resolved via local object database, over the owner's live branch tip | New test `test_reviewer_workspace_pins_candidate_sha_despite_owner_drift` reproduces the original production incident directly: owner commits a candidate, hands it off (`candidate_sha` pinned), then keeps committing (a concurrent "CI repair") plus further uncommitted drift on the same branch. Reviewer workspace's `HEAD` and file content are pinned to the **pre-drift** `candidate_sha`, not the owner's later commits or dirty state — the property Round 1/2's empty-branch-off-`dev` design never actually delivered (see §6.2). | `python3 -B -m unittest test_supervisor.ExecutionWorkspaceTests.test_reviewer_workspace_pins_candidate_sha_despite_owner_drift -v` → `ok`. | Resolution is local-object-database only (no `git fetch`); if a `candidate_sha` has been pushed but the canonical root's local ODB doesn't yet have it for some other reason, falls back to the owner's branch tip rather than failing the dispatch. This mirrors the existing `_execution_branch`/`_remote_branch_exists` fallback pattern elsewhere in this file and was true of the pre-existing design too. |
+| Full regression | All Round 1/2 `ExecutionWorkspaceTests` plus five new/updated tests above | No regressions across the whole orchestrator unit suite. | `python3 -B -m unittest test_supervisor -v` → 158 tests, OK. `python3 -B -m unittest test_watch_events -v` → 12 tests, OK. `python3 -B -m unittest test_runtime_module_boundaries -v` → 6 tests, OK. Combined: 176 tests, exit 0, Python 3.12.3, this worktree. | Not exercised against a live supervisor tick / real dispatch queue or GitHub PR/CI (VM services not started per task-spec constraint); unit-level only, same limitation as Rounds 1–2. |
+
+- `watch_events.py` and `control_plane/domain/task_records.py` were re-inspected for Round 3 and
+  still require no change, for the same reason as §2.3/§5.4: reviewer dispatches never render a
+  branch-protocol block, and the review-guardrails block (`candidate_sha`-based, unchanged) already
+  matches this round's design intent — it was the actual workspace *and* its rendered notice that
+  needed to become detached-candidate-shaped, both fixed entirely inside `supervisor_runtime.py`.
+- No product/UI/NAV source touched. No `.orchestrator` runtime services started or restarted on this VM.
+- `ORCH_TASK_BRANCH` (env var stamped from `task_branch` metadata, `common.py:475-477`) is not
+  consumed anywhere else in this repository (verified by repo-wide grep); for reviewer dispatches it
+  now carries the resolved candidate commit SHA instead of a branch name, which is a strictly more
+  precise identity and has no other in-repo reader to break.
