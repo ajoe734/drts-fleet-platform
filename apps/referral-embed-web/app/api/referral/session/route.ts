@@ -43,15 +43,23 @@ function jsonResponse(body: unknown, status = 200) {
 }
 
 function redirectResponse(request: Request, returnTo: string | undefined) {
-  let targetUrl = returnTo || "/";
-  if (targetUrl.match(/[\t\r\n\\]/)) {
-    targetUrl = "/";
-  }
+  const targetUrl = returnTo || "/";
   let url: URL;
   try {
-    const rawUrl = new URL(targetUrl, request.url);
     const requestUrl = new URL(request.url);
-    if (rawUrl.origin !== requestUrl.origin) {
+    const rawUrl = new URL(targetUrl, request.url);
+    const decodedPath = decodeURIComponent(rawUrl.pathname);
+
+    // Validate origin matches and path does not contain redirect evasion characters
+    if (
+      rawUrl.origin !== requestUrl.origin ||
+      /[\t\r\n\\]/.test(rawUrl.pathname) ||
+      /[\t\r\n\\]/.test(decodedPath) ||
+      decodedPath.startsWith("//") ||
+      decodedPath.startsWith("/\\") ||
+      rawUrl.pathname.startsWith("//") ||
+      rawUrl.pathname.startsWith("/\\")
+    ) {
       url = new URL("/", request.url);
     } else {
       url = rawUrl;
