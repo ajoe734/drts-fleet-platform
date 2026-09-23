@@ -2055,12 +2055,12 @@ describe("owned mobility service", () => {
       );
 
       const activeTrip =
-        ownedMobilityService.getReferralPassengerActiveTrip(identity);
+        await ownedMobilityService.getReferralPassengerActiveTrip(identity);
       expect(activeTrip.active).toBe(true);
       expect(activeTrip.trip?.orderId).toBe(booking.orderId);
 
       const history =
-        ownedMobilityService.listReferralPassengerHistory(identity);
+        await ownedMobilityService.listReferralPassengerHistory(identity);
       expect(history.items.length).toBeGreaterThan(0);
       expect(history.items[0]?.orderId).toBe(booking.orderId);
 

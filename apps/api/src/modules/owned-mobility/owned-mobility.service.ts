@@ -1,3 +1,4 @@
+import { PartnerNotificationNavigationRepository } from "../tenant-partner/partner-notification-navigation.repository";
 import { OwnedAutonomousDispatchExecutorService } from "./owned-autonomous-dispatch-executor.service";
 import {
   applyVoiceBookingQualification,
@@ -538,6 +539,9 @@ export class OwnedMobilityService
     private readonly ownedMobilityRepository?: OwnedMobilityRepository,
     @Optional()
     private readonly tenantPartnerService?: TenantPartnerService,
+    @Optional()
+    @Inject(PartnerNotificationNavigationRepository)
+    private readonly partnerNotificationNavigationRepository?: PartnerNotificationNavigationRepository,
     // NOTE(integration 20260605): the two SVC params below are appended LAST
     // (both @Optional) so the original 7-param positional order is preserved for
     // unit-test harnesses. e2e-svc-013 had inserted vehicleEligibilityService at
@@ -13582,9 +13586,9 @@ export class OwnedMobilityService
     };
   }
 
-  getReferralPassengerActiveTrip(
+  async getReferralPassengerActiveTrip(
     identity?: BootstrapRequestIdentity | null,
-  ): ReferralPassengerActiveTripResult {
+  ): Promise<ReferralPassengerActiveTripResult> {
     if (
       !identity ||
       identity.realm !== "partner" ||
@@ -13599,36 +13603,43 @@ export class OwnedMobilityService
 
     const passengerId = identity.drtsPassengerId ?? identity.actorId;
 
-    const activeOrder = Array.from(this.orders.values()).find(
-      (o) =>
-        // Multi-taxi standard-taxi orders are tenant-less by design
-        // (owned-mobility.service.ts buildAndPersistMultiTaxiRide sets
-        // tenantId: null); frozen partnerId/partnerProgramId/entrySlug are
-        // the authoritative ownership boundary for those, not tenantId.
-        //
-        // Known residual gap (SR-PARTNER-NOTIFY-NAV-20260917 review): if the
-        // same entrySlug is later reassigned to a different tenant (SD §4's
-        // "entry 更換 tenantId" case), a null-tenant order created under the
-        // old tenant stays visible to the new tenant's identity, because
-        // OwnedOrderRecord has no field that freezes the tenant that was
-        // active at booking time and this method is synchronous (no query
-        // against the frozen mobility.phase1_order_partner_notification_routes
-        // route). Closing it fully needs either a new frozen field on
-        // OwnedOrderRecord (packages/contracts/src/index.ts) or making this
-        // method async against that route table, both of which require
-        // widening this task's write_scope to owned-mobility.controller.ts /
-        // packages/contracts/src/index.ts. Not done here — out of scope.
-        (o.tenantId === null || o.tenantId === identity.tenantId) &&
-        (o.partnerId || null) === (identity.partnerId || null) &&
-        (o.partnerProgramId || null) === (identity.partnerProgramId || null) &&
+    let activeOrder: OwnedOrderRecord | undefined;
+    for (const o of this.orders.values()) {
+      if (
         o.partnerEntrySlug === identity.partnerEntrySlug &&
         o.passenger?.passengerId === passengerId &&
         o.status !== "completed" &&
         o.status !== "cancelled" &&
         o.status !== "dispatch_failed" &&
         o.status !== "dispatch_timeout" &&
-        o.status !== "no_supply",
-    );
+        o.status !== "no_supply"
+      ) {
+        if (o.tenantId === null && this.tenantPartnerService) {
+          const route =
+            await this.partnerNotificationNavigationRepository?.findByOrderId(
+              o.orderId,
+            );
+          if (
+            route &&
+            (route.tenantId !== identity.tenantId ||
+              route.partnerId !== (identity.partnerId || null))
+          ) {
+            continue;
+          }
+        } else if (o.tenantId !== null && o.tenantId !== identity.tenantId) {
+          continue;
+        }
+
+        if (
+          (o.partnerId || null) !== (identity.partnerId || null) ||
+          (o.partnerProgramId || null) !== (identity.partnerProgramId || null)
+        ) {
+          continue;
+        }
+        activeOrder = o;
+        break;
+      }
+    }
 
     if (!activeOrder) {
       return { active: false, trip: null };
@@ -13687,7 +13698,8 @@ export class OwnedMobilityService
           // tenant-less multi-taxi design, not an unauthorized wildcard.
           (o.tenantId === null || o.tenantId === identity.tenantId) &&
           (o.partnerId || null) === (identity.partnerId || null) &&
-          (o.partnerProgramId || null) === (identity.partnerProgramId || null) &&
+          (o.partnerProgramId || null) ===
+            (identity.partnerProgramId || null) &&
           o.partnerEntrySlug === identity.partnerEntrySlug &&
           o.passenger?.passengerId === passengerId,
       )
