@@ -1550,6 +1550,8 @@ const en = {
   // ── Common ──
 
   // Partner Notification
+  "partnerNotification.pendingDesignTitle": "Pending Design Handoff",
+  "partnerNotification.pendingDesignBody": "The canonical notification canvas for partner {entrySlug} is currently missing. Awaiting supervisor design coverage.",
   "partnerNotification.save": "Save",
   "partnerNotification.cancel": "Cancel",
   "partnerNotification.create": "Create",
@@ -4675,6 +4677,8 @@ const zh: typeof en = {
   // ── Common ──
 
   // Partner Notification
+  "partnerNotification.pendingDesignTitle": "等待設計圖",
+  "partnerNotification.pendingDesignBody": "夥伴 {entrySlug} 的通知介面目前缺乏設計圖。等待 supervisor 提供設計覆蓋。",
   "partnerNotification.save": "儲存",
   "partnerNotification.cancel": "取消",
   "partnerNotification.create": "建立",

@@ -4879,8 +4879,8 @@ export class ApiClient {
     return this.put<PartnerEntryNotificationBinding>(`/api/platform-admin/partner-entries/${encodeURIComponent(entrySlug)}/notification-binding`, { ...options, body: command });
   }
 
-  public async testPartnerEntryNotificationBinding(entrySlug: string, options?: RequestOptions): Promise<import('@drts/contracts').PartnerNotificationRequeueOutcome> {
-    return this.post<import('@drts/contracts').PartnerNotificationRequeueOutcome>(`/api/platform-admin/partner-entries/${encodeURIComponent(entrySlug)}/notification-binding/test`, options);
+  public async testPartnerEntryNotificationBinding(entrySlug: string, options?: RequestOptions): Promise<import('@drts/contracts').PartnerNotificationDispatchOutcome> {
+    return this.post<import('@drts/contracts').PartnerNotificationDispatchOutcome>(`/api/platform-admin/partner-entries/${encodeURIComponent(entrySlug)}/notification-binding/test`, options);
   }
 
   public async enablePartnerEntryNotificationBinding(entrySlug: string, expectedVersion: number, options?: RequestOptions): Promise<PartnerEntryNotificationBinding> {

@@ -22,7 +22,7 @@ describe("SR-PARTNER-NOTIFY-UI-20260917 API client contracts", () => {
     const payload = {
       webhookId: "w",
       expectedVersion: 2,
-      eventTypes: ["eta_changed", "ride_assigned"] as any,
+      eventTypes: ["eta_changed", "assignment_disclosure_ready"] as any,
     };
 
     let error: any;

@@ -1813,7 +1813,7 @@ export class MultiTaxiRepository {
       await client.query("BEGIN");
 
       const outboxRows = await client.query(
-        "SELECT o.status, o.next_attempt_at, o.payload, o.attempt_count, o.order_id, r.entry_slug as route_entry_slug, r.tenant_id as route_tenant_id, r.partner_id as route_partner_id FROM ops.consumer_notification_outbox o LEFT JOIN mobility.phase1_order_partner_notification_routes r ON r.order_id = o.order_id WHERE o.outbox_id = $1 FOR UPDATE OF o",
+        "SELECT o.status, o.next_attempt_at, o.payload, o.attempt_count, o.order_id, o.event_type, o.assignment_version, r.entry_slug as route_entry_slug, r.tenant_id as route_tenant_id, r.partner_id as route_partner_id FROM ops.consumer_notification_outbox o LEFT JOIN mobility.phase1_order_partner_notification_routes r ON r.order_id = o.order_id WHERE o.outbox_id = $1 FOR UPDATE OF o",
         [outboxId],
       );
       if (outboxRows.rows.length === 0) {
@@ -1826,7 +1826,7 @@ export class MultiTaxiRepository {
       const outbox = outboxRows.rows[0];
 
       const ctxRows = await client.query(
-        "SELECT entry_slug, tenant_id, partner_id, expires_at, failure_reason, binding_id, binding_version, endpoint_fingerprint, retry_disposition, order_id, event_sequence, wire_payload, retry_policy_snapshot FROM mobility.phase1_partner_notification_delivery_contexts WHERE outbox_id = $1 FOR UPDATE",
+        "SELECT entry_slug, tenant_id, partner_id, expires_at, failure_reason, binding_id, binding_version, webhook_id, endpoint_fingerprint, retry_disposition, order_id, event_sequence, wire_payload, retry_policy_snapshot FROM mobility.phase1_partner_notification_delivery_contexts WHERE outbox_id = $1 FOR UPDATE",
         [outboxId],
       );
       const ctx = ctxRows.rows[0] || null;
@@ -1842,54 +1842,7 @@ export class MultiTaxiRepository {
         await client.query("ROLLBACK");
         return {
           kind: "failed",
-          failure: { failureReason: "route_missing", retryDisposition: "none", suggestedNextAttemptAt: null },
-        };
-      }
-
-      if (outbox.status === "pending" || outbox.status === "sending") {
-        await client.query("ROLLBACK");
-        return { kind: "requeued" };
-      }
-      
-      const maxAttempts = ctx && ctx.retry_policy_snapshot ? parseInt(ctx.retry_policy_snapshot.maxAttempts || '3', 10) : parseInt(outbox.payload?.partnerNotification?.maxAttempts || '3', 10);
-      if (outbox.attempt_count >= maxAttempts) {
-        await client.query("ROLLBACK");
-        return {
-          kind: "failed",
-          failure: {
-            failureReason: "provider_terminal_error", // what's the expected reason? we'll use provider_terminal_error? Actually maybe budget exhausted is something else. Let's just return terminal
-            retryDisposition: "terminal",
-          }
-        };
-      }
-
-      const retryDisp = ctx
-        ? ctx.retry_disposition
-        : outbox.payload?.partnerNotification?.retryDisposition;
-      if (
-        !retryDisp ||
-        !["manual_only", "automatic", "configuration_blocked"].includes(
-          retryDisp,
-        )
-      ) {
-        await client.query("ROLLBACK");
-        return {
-          kind: "failed",
-          failure: {
-            failureReason: "notification_obsolete",
-            retryDisposition: "terminal",
-          },
-        };
-      }
-
-      if (outbox.status === "delivered") {
-        await client.query("ROLLBACK");
-        return {
-          kind: "failed",
-          failure: {
-            failureReason: "notification_superseded",
-            retryDisposition: "terminal",
-          },
+          failure: { failureReason: "owner_changed", retryDisposition: "terminal", suggestedNextAttemptAt: null },
         };
       }
 
@@ -1931,21 +1884,17 @@ export class MultiTaxiRepository {
         };
       }
 
-      const claimRows = await client.query(
-        "SELECT 1 FROM ops.phase1_push_delivery_claims WHERE outbox_id = $1 AND claim_state = 'claimed' AND lease_expires_at > now()",
-        [outboxId],
-      );
-      if (claimRows.rows.length > 0) {
+      if (outbox.status === "delivered") {
         await client.query("ROLLBACK");
         return {
           kind: "failed",
           failure: {
-            failureReason: "provider_transient_error",
-            retryDisposition: "automatic",
+            failureReason: "notification_superseded",
+            retryDisposition: "terminal",
           },
         };
       }
-      
+
       const route = await this.findOrderPartnerNotificationRoute(outbox.order_id);
       if (!route) {
         await client.query("ROLLBACK");
@@ -1954,19 +1903,18 @@ export class MultiTaxiRepository {
           failure: { failureReason: "route_missing", retryDisposition: "none", suggestedNextAttemptAt: null },
         };
       }
-      
+
       if (ctx && (ctx.order_id !== route.orderId || ctx.tenant_id !== route.tenantId || ctx.partner_id !== route.partnerId || ctx.entry_slug !== route.entrySlug || ctx.wire_payload?.data?.recipient?.partnerUserRef !== route.partnerUserRef)) {
         await client.query("ROLLBACK");
         return { kind: "failed", failure: { failureReason: "owner_changed", retryDisposition: "terminal", suggestedNextAttemptAt: null } };
       }
-      
-      const eventType = ctx ? ctx.wire_payload?.event : outbox.payload?.partnerNotification?.eventType;
+
+      const eventType = ctx ? ctx.wire_payload?.event : outbox.event_type;
       if (!eventType) {
         await client.query("ROLLBACK");
         return { kind: "failed", failure: { failureReason: "route_missing", retryDisposition: "terminal", suggestedNextAttemptAt: null } };
       }
-      
-      // Convert to internal event type if needed, or if facade expects internal event type
+
       const internalEvent = Object.keys(PARTNER_PASSENGER_EVENT_TO_EXTERNAL_NAME).find(k => PARTNER_PASSENGER_EVENT_TO_EXTERNAL_NAME[k as PartnerPassengerEventType] === eventType) as PartnerPassengerEventType || eventType;
 
       if (this.facade) {
@@ -1975,13 +1923,11 @@ export class MultiTaxiRepository {
           await client.query("ROLLBACK");
           return { kind: "failed", failure: readiness.failure };
         }
-        if (ctx && (ctx.binding_id !== readiness.binding.bindingId || ctx.wire_payload?.data?.recipient?.webhookId !== readiness.binding.webhookId)) {
-          // owner_changed
+        if (ctx && (ctx.binding_id !== readiness.binding.bindingId || ctx.webhook_id !== readiness.binding.webhookId)) {
           await client.query("ROLLBACK");
           return { kind: "failed", failure: { failureReason: "owner_changed", retryDisposition: "terminal", suggestedNextAttemptAt: null } };
         }
         if (ctx && (ctx.binding_version !== readiness.binding.version || ctx.endpoint_fingerprint !== readiness.endpointFingerprint)) {
-          // configuration_blocked
           await client.query("ROLLBACK");
           return { kind: "failed", failure: { failureReason: "endpoint_disabled", retryDisposition: "configuration_blocked", suggestedNextAttemptAt: null } };
         }
@@ -1992,17 +1938,48 @@ export class MultiTaxiRepository {
         await client.query("ROLLBACK");
         return { kind: "failed", failure: { failureReason: "route_missing", retryDisposition: "terminal", suggestedNextAttemptAt: null } };
       }
-      
+
       if (internalEvent !== "receipt_ready") {
         if (["cancelled", "completed", "closed", "rejected"].includes(relevance.status)) {
           await client.query("ROLLBACK");
           return { kind: "failed", failure: { failureReason: "notification_obsolete", retryDisposition: "terminal", suggestedNextAttemptAt: null } };
         }
-        const assignmentVersion = ctx ? ctx.wire_payload?.data?.assignment?.version : outbox.payload?.partnerNotification?.assignmentVersion;
+        const assignmentVersion = ctx ? ctx.wire_payload?.data?.assignmentVersion : outbox.assignment_version;
         if (assignmentVersion !== undefined && assignmentVersion !== null && assignmentVersion < relevance.assignmentVersion) {
           await client.query("ROLLBACK");
           return { kind: "failed", failure: { failureReason: "notification_superseded", retryDisposition: "terminal", suggestedNextAttemptAt: null } };
         }
+      }
+
+      const maxAttempts = ctx && ctx.retry_policy_snapshot?.maxAttempts !== undefined
+        ? parseInt(ctx.retry_policy_snapshot.maxAttempts, 10)
+        : outbox.payload?.partnerNotification?.maxAttempts !== undefined
+          ? parseInt(outbox.payload.partnerNotification.maxAttempts, 10)
+          : null;
+
+      if (maxAttempts !== null && outbox.attempt_count >= maxAttempts) {
+        await client.query("ROLLBACK");
+        return {
+          kind: "failed",
+          failure: {
+            failureReason: failureReason || "provider_transient_error",
+            retryDisposition: "terminal",
+          }
+        };
+      }
+
+      if (outbox.status === "pending" || outbox.status === "sending") {
+        await client.query("ROLLBACK");
+        return { kind: "requeued" };
+      }
+
+      const claimRows = await client.query(
+        "SELECT 1 FROM ops.phase1_push_delivery_claims WHERE outbox_id = $1 AND claim_state = 'claimed' AND lease_expires_at > now()",
+        [outboxId],
+      );
+      if (claimRows.rows.length > 0) {
+        await client.query("ROLLBACK");
+        return { kind: "requeued" };
       }
 
       const retryAuditEntry = { actorId: identity?.actorId, actorType: identity?.actorType, requestId, retriedAt: new Date().toISOString() };

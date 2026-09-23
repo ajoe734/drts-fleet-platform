@@ -122,12 +122,12 @@ describe.skipIf(!testDbUrl)("partner notification UI postgres acceptance", () =>
     await pool.query(
       `
       INSERT INTO ops.phase1_owned_orders (
-        order_id, tenant_id, status, created_at, updated_at
+        order_id, order_no, order_source, service_bucket, dispatch_semantics, status, created_at, updated_at, record
       ) VALUES (
-        $1, $2, 'assigned', now(), now()
+        $1, 'TEST-ORDER-1', 'partner_api', 'test_bucket', 'fleet_managed', 'assigned', now(), now(), $2::jsonb
       )
     `,
-      [orderId, tenantId],
+      [orderId, JSON.stringify({ tenantId })],
     );
 
     await pool.query(
