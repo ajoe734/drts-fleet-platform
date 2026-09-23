@@ -5,6 +5,7 @@ import { randomUUID } from "node:crypto";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import type { DatabaseService } from "../../apps/api/src/common/db";
 import { PartnerNotificationNavigationRepository } from "../../apps/api/src/modules/tenant-partner/partner-notification-navigation.repository";
+import { ReferralEmbedHandoffRepository } from "../../apps/api/src/modules/tenant-partner/referral-embed-handoff.repository";
 
 const require = createRequire(
   new URL("../../apps/api/package.json", import.meta.url),
@@ -41,6 +42,7 @@ describe.skipIf(!seedDatabaseUrl)(
     let pool: InstanceType<typeof Pool>;
     let db: DatabaseService;
     let navRepo: PartnerNotificationNavigationRepository;
+    let handoffRepo: ReferralEmbedHandoffRepository;
 
     beforeAll(async () => {
       admin = new Pool({ connectionString: adminUrl.toString() });
@@ -60,6 +62,7 @@ describe.skipIf(!seedDatabaseUrl)(
       pool = new Pool({ connectionString: databaseUrl, max: 8 });
       db = { connect: pool.connect.bind(pool) } as unknown as DatabaseService;
       navRepo = new PartnerNotificationNavigationRepository(db);
+      handoffRepo = new ReferralEmbedHandoffRepository(db);
     }, 120_000);
 
     afterAll(async () => {
@@ -324,15 +327,141 @@ describe.skipIf(!seedDatabaseUrl)(
           client.release();
         }
       }
+    });
 
-      it("resolves route by orderId (findByOrderId)", async () => {
-        const result = await navRepo.findByOrderId("order_nav_999");
+    it("resolves route by orderId (findByOrderId)", async () => {
+      const client = await db.connect();
+      const tenantId = `tenant-${randomUUID()}`;
+      const data = {
+        orderId: `order_nav_${randomUUID()}`,
+        entrySlug: `entry-${randomUUID()}`,
+        partnerId: `partner-1`,
+        tenantId: tenantId,
+        orderTenantId: tenantId,
+        orderPartnerId: `partner-1`,
+        orderPassengerId: "pass-1",
+        routePassengerId: "pass-1",
+        userRef: `user-${randomUUID()}`,
+        rideRef: `ride-${randomUUID()}`,
+        passengerSubjectRef: `subj-${randomUUID()}`,
+      };
+
+      try {
+        await setupMockData(client, data);
+
+        const result = await navRepo.findByOrderId(data.orderId);
         expect(result).not.toBeNull();
-        expect(result!.orderId).toBe("order_nav_999");
+        expect(result!.orderId).toBe(data.orderId);
 
         const missing = await navRepo.findByOrderId("order_nav_missing");
         expect(missing).toBeNull();
+      } finally {
+        try {
+          await cleanupMockData(client, data);
+        } finally {
+          client.release();
+        }
+      }
+    });
+
+    it("successfully records referral embed consent and persists to ledger (positive)", async () => {
+      // Issue a handoff artifact
+      const handoff = await handoffRepo.issue({
+        artifact: "artifact_123",
+        entrySlug: "demo-slug",
+        entryHost: "demo-host.com",
+        partnerUserRef: "user-1",
+        drtsPassengerId: "pass-1",
+        tenantId: null,
+        partnerId: null,
+        partnerProgramId: null,
+        consentRequired: true,
+        consentBundleVersion: null,
+        consentGrantedAt: null,
+        issuedAt: new Date().toISOString(),
+        expiresAt: new Date(Date.now() + 120_000).toISOString(),
       });
+
+      // Consume it
+      const consumeRes = await handoffRepo.consume({
+        artifact: "artifact_123",
+        entrySlug: "demo-slug",
+        entryHost: "demo-host.com",
+      });
+      expect(consumeRes.outcome).toBe("consumed");
+
+      // Record consent
+      const consentRes = await handoffRepo.recordConsent({
+        handoffId: handoff.handoffId,
+        entrySlug: "demo-slug",
+        entryHost: "demo-host.com",
+        consentBundle: {
+          bundleVersion: "v1",
+          grantedScopes: ["trip.manage", "pii.trip", "identity.bind"],
+          grantedAt: new Date().toISOString(),
+        },
+      });
+      expect(consentRes.outcome).toBe("recorded");
+
+      // Verify ledger persistence
+      const ledger = await handoffRepo.findLatestConsent("demo-slug", "pass-1");
+      expect(ledger).not.toBeNull();
+      expect(ledger?.handoffId).toBe(handoff.handoffId);
+    });
+
+    it("allows consent after handoff expiration as long as it was consumed (positive replay)", async () => {
+      const now = Date.now();
+      const past = new Date(now - 300_000).toISOString(); // 5 minutes ago
+
+      // Issue an ALREADY EXPIRED handoff (expiresAt is in the past)
+      // but simulate that it was already consumed in time by directly injecting it or just consuming it (but consume would fail if expired).
+      // So we issue it with future expiry, consume it, then update its expiresAt to past via PG client for the test.
+      const handoff = await handoffRepo.issue({
+        artifact: "artifact_expired",
+        entrySlug: "demo-slug-exp",
+        entryHost: "demo-host.com",
+        partnerUserRef: "user-1",
+        drtsPassengerId: "pass-1",
+        tenantId: null,
+        partnerId: null,
+        partnerProgramId: null,
+        consentRequired: true,
+        consentBundleVersion: null,
+        consentGrantedAt: null,
+        issuedAt: new Date(now - 400_000).toISOString(),
+        expiresAt: new Date(now + 100_000).toISOString(), // valid for consumption
+      });
+
+      const consumeRes = await handoffRepo.consume({
+        artifact: "artifact_expired",
+        entrySlug: "demo-slug-exp",
+        entryHost: "demo-host.com",
+      });
+      expect(consumeRes.outcome).toBe("consumed");
+
+      // Update expires_at to be in the past to simulate the handoff artifact TTL expiring
+      const client = await db.connect();
+      try {
+        await client.query(
+          "UPDATE admin.phase1_referral_embed_handoffs SET expires_at = $1 WHERE handoff_id = $2",
+          [past, handoff.handoffId]
+        );
+      } finally {
+        client.release();
+      }
+
+      // Record consent (should succeed even if handoff is expired, because the session outlives the artifact)
+      const consentRes = await handoffRepo.recordConsent({
+        handoffId: handoff.handoffId,
+        entrySlug: "demo-slug-exp",
+        entryHost: "demo-host.com",
+        consentBundle: {
+          bundleVersion: "v1",
+          grantedScopes: ["trip.manage", "pii.trip", "identity.bind"],
+          grantedAt: new Date().toISOString(),
+        },
+      });
+      expect(consentRes.outcome).toBe("recorded");
     });
   },
 );

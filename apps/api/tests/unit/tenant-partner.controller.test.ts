@@ -733,4 +733,45 @@ describe("tenant API key authoritative consumer and usage tracking", () => {
     expect(response.data.handoffId).toBe("handoff-123");
     expect(mockRecord).toHaveBeenCalledWith(command);
   });
+
+  it("rejects referral embed consent when internal key is missing or invalid", async () => {
+    process.env.JWT_SECRET = "test-secret";
+    process.env.DRTS_REFERRAL_EMBED_HANDOFF_KEY = "referral-handoff-key";
+
+    const { controller } = createController();
+    const command = {
+      handoffId: "handoff-123",
+      entrySlug: "demo-slug",
+      entryHost: "demo-host",
+      consentBundle: {
+        bundleVersion: "v1",
+        grantedScopes: ["trip.manage", "pii.trip", "identity.bind"] as any,
+        grantedAt: new Date().toISOString(),
+      },
+    };
+
+    await expect(
+      controller.recordReferralEmbedConsent(
+        command,
+        {
+          headers: {}, // Missing key
+          method: "POST",
+          originalUrl: "/api/partner/ingress/referral-embed-handoff/consent",
+        } as any,
+        "req-record-consent-missing-key",
+      ),
+    ).rejects.toMatchObject({ code: "INTERNAL_KEY_REQUIRED" });
+
+    await expect(
+      controller.recordReferralEmbedConsent(
+        command,
+        {
+          headers: { "x-drts-referral-handoff-key": "invalid-key" },
+          method: "POST",
+          originalUrl: "/api/partner/ingress/referral-embed-handoff/consent",
+        } as any,
+        "req-record-consent-invalid-key",
+      ),
+    ).rejects.toMatchObject({ code: "INTERNAL_KEY_INVALID" });
+  });
 });
