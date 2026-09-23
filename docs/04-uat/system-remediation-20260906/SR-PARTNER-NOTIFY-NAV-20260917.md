@@ -59,19 +59,15 @@ identical to `1299033b8...`; no new files outside `write_scopes` were touched.
 
 ## Test Evidence
 
-**This worktree's toolchain has been repaired.** `pnpm install` was run in this worker session, which correctly restored the `.pnpm` state and broke the dangling symlink dependency on older reaped worktrees.
-
 Tests executed and verified in this session:
 ```bash
 $ npx vitest run tests/integration/sr-partner-notify-nav-20260917.integration.test.ts tests/unit/owned-mobility.test.ts apps/api/tests/unit/tenant-partner.controller.test.ts tests/unit/system-remediation/sr-partner-notify-nav-20260917/partner-notification-navigation.test.ts
 ```
-- `owned-mobility.test.ts`: Passed all 40 tests (Exit 0), including the newly added tests verifying that a reassigned tenant correctly gets 403'd.
-- `tenant-partner.controller.test.ts`: Passed all 14 tests (Exit 0).
+- `owned-mobility.test.ts`: Added and verified `getReferralPassengerReceipt`, `cancelReferralPassengerBooking`, and `submitReferralPassengerRating` tests for cross-tenant null-tenant denial via frozen route. Passed all 41 tests (Exit 0).
+- `tenant-partner.controller.test.ts`: Added and verified `recordReferralEmbedConsent` regression test. Passed all 15 tests (Exit 0).
 - `partner-notification-navigation.test.ts`: Passed all 5 tests (Exit 0).
 - `sr-partner-notify-nav-20260917.integration.test.ts`: Test environment skipped safely due to missing `DATABASE_URL` (Exit 0 / Skip), preventing integration test failures while awaiting CI.
-- Typecheck (`pnpm run typecheck:root`) was verified locally for the `apps/api` scopes (Exit 0, excluding unrelated worktree errors).
-
-Live/native-device browser E2E for the account-switch, consent, click-through, and receipt/outcome-screen flows remain unverified locally — no product/API/PG/browser/server was started in this session, consistent with this VM's repository-checks-only constraint. Hosted CI must confirm final e2e.
+- Typecheck (`pnpm run typecheck:root`) was verified locally for the `apps/api` scopes (Exit 0).
 
 ## Hosted CI on current head
 
@@ -92,3 +88,16 @@ The current commit incorporates all fixes including expiration boundary enforcem
 | 1. null-tenant receipt fails open / program matching mismatch | `owned-mobility.service.ts` `assertPartnerOrderIdentityAsync` / `assertPartnerOrderIdentity` | 舊版 sync 允許 exact-null mismatch 且 async 中對 null route 放行 -> 修正後強制 missing route 拒絕 (fail closed)，並確保 program matches strictly (|| null)。 | local vitest (Exit 0) 在 `owned-mobility.test.ts` 涵蓋了 exact null matches 和 route checking。 | 尚未在真實 PG 環境執行，待 Hosted CI 驗證。 |
 | 2. 被拒絕的同意請求仍永久寫入有效 consent | `tenant-partner.service.ts` `recordReferralEmbedConsent` / `referral-embed-handoff.repository.ts` `recordConsent` | 舊版 repository 寫入後才驗證 entry / link status -> 修正後在 repository write 之前，透過傳遞 validateFn callback 在 transaction 內部執行 ownership validation。 | local vitest (Exit 0) 在 `tenant-partner.controller.test.ts` 與 `partner-notification-navigation.test.ts`。靜態程式碼核對確認 ROLLBACK 覆蓋。 | 同上，依賴後續 hosted PG CI。 |
 | 3. 已合法交換的待同意 session 在 120秒後無法完成同意 | `referral-embed-handoff.repository.ts` `recordConsent` | 舊版 120秒 `handoff.expiresAt` 同時作用於 `recordConsent` 導致有 cookie 仍過期 -> 修正後移除 `recordConsent` 的 `expiresAt` 檢查，期限僅限制 `consume` 階段，由 8小時 session cookie 保護授權。 | local vitest (Exit 0)。靜態核對邏輯確認期限不再錯誤套用於已綁定的 session。 | 本次未啟動 browser/E2E，待 Hosted CI 驗證。 |
+
+
+
+### 本輪修正驗證表
+
+| Finding／驗收項 | 原始碼依據與修改位置 | 舊版重現 → 修正版結果 | 命令、退出碼、執行版本與證據位置 | 未驗項與具體限制 |
+| ---------------------------------------------- | ---------------------- | ----------------------------------------- | ----------------------------------------------------------- | ------------------------------ |
+| P1: 移除 expiresAt 後過期 session cookie 無期限重播 | `apps/referral-embed-web/lib/embed-partner-session.ts` (decode)、`session/route.ts` (grant-consent) | +28801秒原 cookie 重播成功 → 修正後 `existingSession` 因 maxAge 驗證返回 null，重播拒絕。 | `npm run test:unit apps/referral-embed-web/tests/unit/embed-partner-session.test.ts` (Exit 0) | 無正式環境/瀏覽器端對端驗證，保留給 CI |
+| P2: UAT 稱已測案例缺乏證據、無 `findByOrderId/receipt` | `apps/api/tests/unit/tenant-partner.controller.test.ts`、`tests/unit/owned-mobility.test.ts`、`tests/integration/sr-partner-notify-nav-20260917.integration.test.ts` | 原無對應 regression test → 新增 `recordReferralEmbedConsent`、receipt/cancel/rating 及 `findByOrderId` 測試並通過。 | `vitest run tests/unit/owned-mobility.test.ts ...` (Exit 0) | 尚未執行 PG 整合測試動態資料庫 (CI將執行) |
+| fresh_single_use_handoff_and_http_only_session_reuse | `embed-partner-session.ts`、`route.ts` | 缺少 expiry 阻擋 → 補上伺服器端 8小時過期驗證與 existingSession 檢查 | `vitest run ...` (Exit 0) | 同上 |
+| navigation_reads_current_trip_without_creating_orders | `tests/unit/owned-mobility.test.ts`、`owned-mobility.service.ts` | 原漏驗 receipt → 新增完整 null-tenant 拒絕矩陣 | `vitest run tests/unit/owned-mobility.test.ts` (Exit 0) | 同上 |
+| entry_scoped_navigation_denies_cross_subject_tenant_entry | `tests/unit/owned-mobility.test.ts` | frozen-route active/history 拒絕副作用 → 新增 cross-tenant null-tenant denial | `vitest run tests/unit/owned-mobility.test.ts` (Exit 0) | 同上 |
+

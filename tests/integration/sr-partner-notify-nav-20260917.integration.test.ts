@@ -324,6 +324,15 @@ describe.skipIf(!seedDatabaseUrl)(
           client.release();
         }
       }
+
+      it("resolves route by orderId (findByOrderId)", async () => {
+        const result = await navRepo.findByOrderId("order_nav_999");
+        expect(result).not.toBeNull();
+        expect(result!.orderId).toBe("order_nav_999");
+        
+        const missing = await navRepo.findByOrderId("order_nav_missing");
+        expect(missing).toBeNull();
+      });
     });
   },
 );

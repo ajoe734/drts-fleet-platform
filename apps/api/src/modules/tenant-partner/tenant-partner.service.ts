@@ -5836,7 +5836,7 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
     command: RecordReferralEmbedConsentCommand,
   ): Promise<ReferralEmbedSession> {
     this.assertExactReferralEmbedConsentBundle(command.consentBundle);
-    
+
     const validateFn = async (session: ReferralEmbedSession) => {
       const entry = await this.getPartnerEntry(session.partnerEntrySlug);
       if (!entry || entry.status !== "active") {
@@ -5871,7 +5871,7 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
 
     const result =
       await this.referralEmbedHandoffRepository.recordConsent(command, validateFn);
-    
+
     if (result.outcome === "recorded" || result.outcome === "replayed") {
       return result.session;
     }

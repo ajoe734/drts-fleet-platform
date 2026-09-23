@@ -2175,6 +2175,46 @@ describe("owned mobility service", () => {
       mockNavRepo.findByOrderId.mockResolvedValueOnce(null); // route missing
       const missingRouteHistory = await ownedMobilityService.listReferralPassengerHistory(originalIdentity);
       expect(missingRouteHistory.items.length).toBe(0);
+
+      // ---- Added for receipt/cancel/rating cross-tenant null-tenant denial ----
+      const orderId = originalActive.trip?.orderId;
+      if (!orderId) throw new Error("Missing active trip orderId");
+
+      mockNavRepo.findByOrderId.mockResolvedValueOnce({
+        tenantId: "tenant-demo-001",
+        partnerId: "partner_ead6bf3d-e858-47cc-bfe1-5a3742524118",
+      });
+      let caughtReceipt: any = null;
+      try {
+        await ownedMobilityService.getReferralPassengerReceipt(orderId, reassignedIdentity);
+      } catch (err) { caughtReceipt = err; }
+      expect(caughtReceipt).not.toBeNull();
+      expect(caughtReceipt.getStatus()).toBe(403);
+      expect(caughtReceipt.getResponse().error.code).toBe("PARTNER_SCOPE_MISMATCH");
+
+      mockNavRepo.findByOrderId.mockResolvedValueOnce({
+        tenantId: "tenant-demo-001",
+        partnerId: "partner_ead6bf3d-e858-47cc-bfe1-5a3742524118",
+      });
+      let caughtCancel: any = null;
+      try {
+        await ownedMobilityService.cancelReferralPassengerBooking(orderId, reassignedIdentity);
+      } catch (err) { caughtCancel = err; }
+      expect(caughtCancel).not.toBeNull();
+      expect(caughtCancel.getStatus()).toBe(403);
+      expect(caughtCancel.getResponse().error.code).toBe("PARTNER_SCOPE_MISMATCH");
+
+      mockNavRepo.findByOrderId.mockResolvedValueOnce({
+        tenantId: "tenant-demo-001",
+        partnerId: "partner_ead6bf3d-e858-47cc-bfe1-5a3742524118",
+      });
+      let caughtRating: any = null;
+      try {
+        await ownedMobilityService.submitReferralPassengerRating(orderId, 5, reassignedIdentity);
+      } catch (err) { caughtRating = err; }
+      expect(caughtRating).not.toBeNull();
+      expect(caughtRating.getStatus()).toBe(403);
+      expect(caughtRating.getResponse().error.code).toBe("PARTNER_SCOPE_MISMATCH");
     });
 
     it("only allows referral ratings after completion and keeps duplicates idempotent", async () => {
