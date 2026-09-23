@@ -943,16 +943,20 @@ def _worktree_for_branch(
     *,
     exclude: Path | None = None,
     within: Path | None = None,
+    exclude_within: Path | None = None,
 ) -> Path | None:
     ref = f"refs/heads/{branch}"
     excluded = exclude.resolve() if exclude else None
     required_parent = within.resolve() if within else None
+    excluded_parent = exclude_within.resolve() if exclude_within else None
     for entry in _worktree_entries(repo_root):
         if entry.get("branch") == ref and entry.get("worktree"):
             path = Path(entry["worktree"]).resolve()
             if excluded is not None and path == excluded:
                 continue
             if required_parent is not None and not _path_is_within(path, required_parent):
+                continue
+            if excluded_parent is not None and _path_is_within(path, excluded_parent):
                 continue
             return path
     return None
@@ -1060,7 +1064,9 @@ def _reviewer_owner_branch(repo_root: Path, request: DeliveryRequest) -> str:
     return _owner_override_branch(repo_root, request) or default_branch
 
 
-def _reviewer_candidate_commit(repo_root: Path, request: DeliveryRequest, owner_branch: str) -> str:
+def _reviewer_candidate_commit(
+    repo_root: Path, request: DeliveryRequest, owner_branch: str
+) -> tuple[str, bool]:
     """Resolve the exact, immutable commit a reviewer dispatch must examine.
 
     Prefers the owner's pinned `candidate_sha` handoff -- the same value the
@@ -1069,23 +1075,39 @@ def _reviewer_candidate_commit(repo_root: Path, request: DeliveryRequest, owner_
     All worktrees of one repository share a single object database, so any
     commit any worktree has made -- pushed or not -- is resolvable here
     without a network fetch. Falls back to the current tip of the owner's
-    branch only when no candidate has been pinned yet. Returns "" if neither
-    resolves locally (e.g. before the owner's first commit).
+    branch only when no candidate has been pinned yet.
+
+    Returns `(commit, pin_unresolvable)`. `pin_unresolvable` is True only
+    when the task pinned an explicit `candidate_sha` that could not be
+    resolved locally even after an attempted `git fetch origin` for that
+    exact object -- in that case `commit` is the pinned SHA itself (not "",
+    and never a substituted owner-branch tip), so callers can report the
+    locked candidate's identity instead of silently reviewing something
+    else (see SR-ORCH-REVIEW-WORKTREE-ISOLATION-20260923 R3-N2). When no
+    candidate is pinned at all and the owner branch also doesn't resolve,
+    `commit` is "" and `pin_unresolvable` is False.
     """
     metadata = request.metadata if isinstance(request.metadata, dict) else {}
     task = metadata.get("task") if isinstance(metadata.get("task"), dict) else {}
     raw_sha = task.get("candidate_sha")
     if isinstance(raw_sha, str) and raw_sha.strip() and raw_sha.strip().lower() != "not_applicable":
-        result = _git_capture(repo_root, ["rev-parse", "--verify", "--quiet", f"{raw_sha.strip()}^{{commit}}"])
+        pinned = raw_sha.strip()
+        result = _git_capture(repo_root, ["rev-parse", "--verify", "--quiet", f"{pinned}^{{commit}}"])
         resolved = (result.stdout or "").strip()
         if result.returncode == 0 and resolved:
-            return resolved
+            return resolved, False
+        _git_capture(repo_root, ["fetch", "origin", pinned], timeout=60.0)
+        result = _git_capture(repo_root, ["rev-parse", "--verify", "--quiet", f"{pinned}^{{commit}}"])
+        resolved = (result.stdout or "").strip()
+        if result.returncode == 0 and resolved:
+            return resolved, False
+        return pinned, True
     for ref in (f"refs/heads/{owner_branch}", f"refs/remotes/origin/{owner_branch}"):
         result = _git_capture(repo_root, ["rev-parse", "--verify", "--quiet", ref])
         resolved = (result.stdout or "").strip()
         if result.returncode == 0 and resolved:
-            return resolved
-    return ""
+            return resolved, False
+    return "", False
 
 
 def _current_commit(path: Path) -> str | None:
@@ -1099,22 +1121,42 @@ def _worktree_is_dirty(path: Path) -> bool:
     return result.returncode != 0 or bool((result.stdout or "").strip())
 
 
+def _reusable_review_worktree(path: Path, commit: str) -> bool:
+    """True only when `path` is still exactly what a fresh reviewer allocation would be.
+
+    Detached at `commit`, clean, and -- critically -- still detached (no
+    branch checked out). A path that used to satisfy the commit/clean checks
+    but has since had a branch attached (e.g. an owner's `execution_branch`
+    override coincidentally checked out there, or any other drift) is no
+    longer safe to hand back as "the reviewer's existing workspace": a
+    branch ref there is exactly what let an owner's branch lookup steal it
+    back before (see SR-ORCH-REVIEW-WORKTREE-ISOLATION-20260923 R3-N1). Such
+    a path is left untouched and a fresh one is allocated instead.
+    """
+    return (
+        _current_commit(path) == commit
+        and not _worktree_is_dirty(path)
+        and _current_branch(path) is None
+    )
+
+
 def _candidate_reviewer_worktree_path(review_base: Path, agent_id: str, task_id: str, commit: str) -> Path:
     """Pick a path for a reviewer's detached workspace, reusing a clean one already on `commit`.
 
     Never resets or force-checks-out an existing path: if something already
-    occupies the natural slug and isn't already a clean checkout of this
-    exact commit (e.g. earlier drift/WIP left by a prior review round), a
-    fresh, distinctly-suffixed path is allocated instead -- the existing
-    workspace is left untouched (see SR-ORCH-REVIEW-WORKTREE-ISOLATION-20260923).
+    occupies the natural slug and isn't already a clean, still-detached
+    checkout of this exact commit (e.g. earlier drift/WIP, or a branch
+    checked out there, left by a prior review round), a fresh,
+    distinctly-suffixed path is allocated instead -- the existing workspace
+    is left untouched (see SR-ORCH-REVIEW-WORKTREE-ISOLATION-20260923).
     """
     slug = f"{_agent_task_slug(agent_id, task_id)}-{commit[:12]}"
     candidate = review_base / slug
-    if not candidate.exists() or (_current_commit(candidate) == commit and not _worktree_is_dirty(candidate)):
+    if not candidate.exists() or _reusable_review_worktree(candidate, commit):
         return candidate
     for index in range(2, 20):
         suffixed = review_base / f"{slug}-{index}"
-        if not suffixed.exists() or (_current_commit(suffixed) == commit and not _worktree_is_dirty(suffixed)):
+        if not suffixed.exists() or _reusable_review_worktree(suffixed, commit):
             return suffixed
     return review_base / f"{slug}-{new_runtime_id('rev')}"
 
@@ -1134,7 +1176,28 @@ def ensure_reviewer_review_workspace(
     future owner override to coincidentally collide with.
     """
     owner_branch = _reviewer_owner_branch(repo_root, request)
-    commit = _reviewer_candidate_commit(repo_root, request, owner_branch)
+    commit, pin_unresolvable = _reviewer_candidate_commit(repo_root, request, owner_branch)
+    if pin_unresolvable:
+        # A candidate_sha was explicitly pinned but no local object (even
+        # after `git fetch origin`) matches it. Never substitute the owner's
+        # branch tip for a present, locked candidate -- that would silently
+        # review the wrong commit under the pinned SHA's name (see
+        # SR-ORCH-REVIEW-WORKTREE-ISOLATION-20260923 R3-N2). Report the
+        # exact identity we could not provision and fail this dispatch.
+        write_activity_log(
+            config,
+            {
+                "type": "worker_workspace_fallback",
+                "task_id": request.task_id,
+                "target_agent": display_name_for(config, request.agent_id),
+                "message": (
+                    f"Pinned reviewer candidate_sha `{commit}` could not be resolved locally or via "
+                    "`git fetch origin`; refusing to substitute the owner branch tip. Falling back to "
+                    f"canonical workspace. owner_branch={owner_branch}"
+                ),
+            },
+        )
+        return repo_root, commit, base_branch, "unresolvable_pinned_candidate"
     if not commit:
         write_activity_log(
             config,
@@ -1153,7 +1216,7 @@ def ensure_reviewer_review_workspace(
     review_base = _reviewer_workspace_base(base)
     review_base.mkdir(parents=True, exist_ok=True)
     destination = _candidate_reviewer_worktree_path(review_base, request.agent_id, request.task_id or "", commit)
-    if _is_git_worktree(destination) and _current_commit(destination) == commit:
+    if _is_git_worktree(destination) and _reusable_review_worktree(destination, commit):
         return destination.resolve(), commit, base_branch, "existing_review_worktree"
 
     result = _git_capture(repo_root, ["worktree", "add", "--detach", str(destination), commit], timeout=90.0)
@@ -1310,7 +1373,18 @@ def ensure_execution_workspace(
         return ensure_reviewer_review_workspace(config, repo_root, request, base, base_branch)
 
     branch = _execution_branch(repo_root, request)
-    existing = _worktree_for_branch(repo_root, branch, exclude=repo_root, within=base)
+    # Never let an owner's branch lookup resolve into the reviewer namespace:
+    # if a reviewer workspace has drifted onto a branch that happens to equal
+    # the owner's execution_branch override, it must stay the reviewer's --
+    # not get claimed here as the owner's "existing_worktree" (see
+    # SR-ORCH-REVIEW-WORKTREE-ISOLATION-20260923 R3-N1).
+    existing = _worktree_for_branch(
+        repo_root,
+        branch,
+        exclude=repo_root,
+        within=base,
+        exclude_within=_reviewer_workspace_base(base),
+    )
     if existing is not None:
         return existing, branch, base_branch, "existing_worktree"
 
@@ -1371,7 +1445,23 @@ def attach_workspace_metadata(
     mode = str(request.metadata.get("mode") or "").strip().lower()
     is_reviewer = task_role_for_dispatch_reason(request.reason) == "reviewer"
     status_cli = task_board_cli_path()
-    if request.task_id and is_reviewer and workspace_root != canonical_root:
+    if request.task_id and is_reviewer and workspace_source == "unresolvable_pinned_candidate":
+        # The task locked a candidate_sha we could not resolve to any local
+        # object (see `_reviewer_candidate_commit`). Report that honestly
+        # instead of quietly handing back some other commit under the
+        # locked SHA's name (see SR-ORCH-REVIEW-WORKTREE-ISOLATION-20260923
+        # R3-N2).
+        notice = (
+            "\n\nSupervisor-assigned workspace:\n"
+            f"- Worker cwd: `{workspace_root}` (canonical workspace fallback; locked candidate could not "
+            "be provisioned).\n"
+            f"- Locked candidate `{branch}` is not resolvable in this repository, even after an "
+            "attempted `git fetch origin` -- do NOT review this workspace's HEAD as if it were that "
+            "candidate. Report `blocker`/`progress` and wait for the object to become available.\n"
+            f"- Canonical machine-truth root: `{canonical_root}`.\n"
+            "- Do not `git switch` the canonical root for task code.\n"
+        )
+    elif request.task_id and is_reviewer and workspace_root != canonical_root:
         # `branch` is actually the resolved candidate commit here (see
         # `ensure_reviewer_review_workspace`) -- no branch is ever checked
         # out in a reviewer workspace, so the prompt must say so honestly

@@ -281,3 +281,119 @@ only reached when `task_role_for_dispatch_reason(request.reason) != "reviewer"`,
   consumed anywhere else in this repository (verified by repo-wide grep); for reviewer dispatches it
   now carries the resolved candidate commit SHA instead of a branch name, which is a strictly more
   precise identity and has no other in-repo reader to break.
+
+## 7. Round 4 — R3-N1 / R3-N2 (Codex `reopen`, reviewed SHA `af509ef4b4499b6d83b304dfd8a3ab650f17e31e`)
+
+### 7.1 Findings
+
+Codex reopened candidate `af509ef4b` (PR #2114) confirming Round 3's F1/F1.a/F1.b are fixed, but
+raised two new boundaries in the structural-isolation design itself (evidence snapshot
+`.local/codex-review-isolation-r3-00AI8x`, probes `.local/codex-review-isolation-r3-00AI8x-probes.py`):
+
+- **R3-N1 [P1]**: `_candidate_reviewer_worktree_path`'s reuse check (pre-fix:
+  `_current_commit(candidate) == commit and not _worktree_is_dirty(candidate)`) never checked
+  whether the path was still *detached*. If something attached a branch to an existing review
+  workspace after it was created (e.g. an owner's `execution_branch` override happening to name a
+  branch checked out there — the drift scenario Round 3 already anticipated in general but didn't
+  close for this specific path), the workspace still "passed" the commit/clean checks and was handed
+  back as `existing_review_worktree` with a branch attached — contradicting `attach_workspace_metadata`'s
+  "no branch is checked out here" claim. Separately, the owner-side lookup
+  (`ensure_execution_workspace`'s `_worktree_for_branch(repo_root, branch, exclude=repo_root,
+  within=base)`, pre-fix) searched *all* of `base`, including `base/review/` — so once a reviewer
+  workspace had that branch attached, an owner dispatch whose `execution_branch` override named the
+  same branch resolved straight back to the reviewer's exact path, reintroducing the shared-mutable-
+  worktree bug Round 3 was supposed to close by construction (`_reviewer_workspace_base` was meant to
+  be a disjoint namespace the owner's allocator "can never write into" — true for *allocation*, but
+  the *lookup* wasn't excluded from it).
+- **R3-N2 [P2]**: `_reviewer_candidate_commit` (pre-fix) fell through silently from an unresolvable
+  pinned `candidate_sha` to the owner branch tip, returning that substituted commit as if it were the
+  reviewed candidate. `ensure_reviewer_review_workspace`/`attach_workspace_metadata` then reported the
+  substitute as "Reviewing candidate `<substitute>`" — contradicting `watch_events.render_wakeup_message`'s
+  fixed-candidate-SHA review guardrail, which always names the task's actual `candidate_sha`
+  (`watch_events.py:361-367`, unchanged). A present, locked candidate that happens not to be locally
+  resolvable is not equivalent to "no candidate pinned yet" and must never be treated as such.
+
+Codex's exact reproductions (`ExecutionWorkspaceTests` fixtures + adversarial probes, real Git, no
+mocks): task `IAM-SES-002`, owner `gemini`, reviewer `codex2`. R3-N1: a first reviewer dispatch
+creates a clean detached review workspace; a `git checkout -b <owner's execution_branch>` inside that
+*same disposable fixture* workspace simulates drift; a subsequent owner dispatch then resolved to
+that exact reviewer path (`owner[0] == reviewer[0]`), and a further reviewer dispatch reused it too,
+with the owner's later write immediately visible to the reviewer. R3-N2: a distinct valid candidate
+commit created in a separate local clone (never fetched into the supervisor's repo) was pinned as
+`candidate_sha`; the returned workspace silently resolved to the owner's locally-resolvable branch tip
+instead, reported as the reviewed candidate.
+
+### 7.2 Root cause
+
+Round 3 closed collisions caused by *allocating* an owner or reviewer workspace into the wrong
+namespace, but left two adjacent gaps: (1) the reuse check for an *existing* reviewer path verified
+content (commit, cleanliness) but not the detachment invariant that "no branch checked out here" is
+predicated on, and (2) the owner-side *lookup* (as opposed to allocation) was never taught that
+`base/review/` is off-limits, so a reviewer path that had — through drift — acquired a branch was
+still discoverable by the owner's branch search. Independently, `_reviewer_candidate_commit`'s
+"fall back to owner tip" behavior was written for the *no-candidate-pinned-yet* case and was reused
+unconditionally for the *pinned-but-unresolvable* case, which needs the opposite response (preserve
+identity, don't substitute) rather than the same fallback.
+
+### 7.3 Fix
+
+`tools/development-orchestrator/control_plane/runtime/supervisor_runtime.py`, same file/scope, no new
+write-scope files needed:
+
+- `_worktree_for_branch(...)` gains an `exclude_within: Path | None` parameter: any candidate whose
+  path falls inside it is skipped. `ensure_execution_workspace`'s owner-side lookup now passes
+  `exclude_within=_reviewer_workspace_base(base)`, so the reviewer namespace is structurally
+  unreachable from the owner's branch search too — not just from allocation, closing the second half
+  of R3-N1. The `--force` worktree-add fallback later in the same function (used to decide whether
+  `git worktree add` needs `--force` because the branch is checked out *somewhere*) intentionally
+  keeps searching the whole tree: if an owner's branch is genuinely stuck attached inside a drifted
+  reviewer path, the owner still needs its own new worktree on that branch (`--force` permits two
+  worktrees on one branch), without ever touching or reusing the reviewer's path.
+- `_reusable_review_worktree(path, commit)`: new helper — true only when `path` is at `commit`, clean,
+  **and** `_current_branch(path) is None` (still detached). Replaces the ad-hoc commit/clean check
+  inline in both `_candidate_reviewer_worktree_path`'s reuse loop and
+  `ensure_reviewer_review_workspace`'s existing-workspace short-circuit. A path that has had a branch
+  attached no longer satisfies reuse; a fresh, distinctly-suffixed path is allocated instead and the
+  drifted path is left completely untouched (same never-reset discipline as Round 3's dirty-content
+  case).
+- `_reviewer_candidate_commit` now returns `(commit, pin_unresolvable)` instead of a bare string. When
+  a `candidate_sha` is pinned and doesn't resolve locally, it now attempts one `git fetch origin
+  <sha>` and re-checks before giving up (satisfying the brief's "resolve via an authorized fetch"
+  option); if still unresolved, it returns `(pinned_sha, True)` — the *pinned identity itself*, not
+  "" and never a substituted owner tip. The owner-branch fallback is reached only when no
+  `candidate_sha` was pinned at all (the original, still-correct "no candidate yet" case).
+- `ensure_reviewer_review_workspace`: a new `if pin_unresolvable:` branch (checked before the existing
+  `if not commit:` branch) logs a diagnostic activity-log entry naming the exact unresolvable SHA and
+  returns `(repo_root, pinned_sha, base_branch, "unresolvable_pinned_candidate")` — never creating or
+  reusing any workspace under that identity.
+- `attach_workspace_metadata`: a new branch for `workspace_source == "unresolvable_pinned_candidate"`
+  renders an honest notice naming the exact locked candidate SHA, states it could not be provisioned
+  even after an attempted fetch, and instructs the dispatch to report `blocker`/`progress` rather than
+  review anything — instead of falling into the generic "isolated review workspace could not be
+  created" canonical-fallback message, which said nothing about *which* candidate was at stake.
+
+Ordinary paths are unaffected: a reviewer path that stays clean and detached across repeated
+dispatches (Round 3's already-passing `test_clean_detached_reuse`-equivalent case) still reuses it;
+an ordinary same-repo `candidate_sha` handoff (Round 3's `test_reviewer_workspace_pins_candidate_sha_despite_owner_drift`)
+still resolves on the first `rev-parse`, before the fetch attempt is ever reached.
+
+### 7.4 Verification
+
+| Finding／驗收項 | 原始碼依據與修改位置 | 舊版重現 → 修正版結果 | 命令、退出碼、執行版本與證據位置 | 未驗項與具體限制 |
+| --- | --- | --- | --- | --- |
+| R3-N1 / `reviewer_workspace_isolated_from_owner_successor` | `_worktree_for_branch` (`exclude_within` param) + owner lookup call site in `ensure_execution_workspace` | New test `test_reviewer_workspace_reuse_requires_detached_head` reproduces Codex's exact drift scenario in-repo (branch attached to an existing clean detached review workspace, then an owner dispatch whose override names that branch): owner now resolves to its own distinct new worktree (`created_worktree`), never the reviewer's path; the drifted review path is left untouched (branch/HEAD unchanged). | `python3 -B -m unittest test_supervisor.ExecutionWorkspaceTests.test_reviewer_workspace_reuse_requires_detached_head -v` → `ok`. Python 3.12.3, this worktree, real `git worktree add`/`checkout`, no mocks. | None. |
+| R3-N1 / `rendered_branch_matches_assigned_review_workspace` | `_reusable_review_worktree` (detachment check) wired into both `_candidate_reviewer_worktree_path` and `ensure_reviewer_review_workspace`'s reuse short-circuit | Same test: a further reviewer dispatch after the drift does not reuse the branch-attached path — it allocates a new, genuinely detached workspace, so `attach_workspace_metadata`'s "no branch is checked out here" claim is asserted true (`_git(... "branch","--show-current")` == `""`) instead of silently false. | Same test run as above; also reran full `test_supervisor.ExecutionWorkspaceTests` (14 tests) → all `ok`, confirming Round 3's already-passing detached-reuse/dirty-drift cases are unaffected by the added detachment check. | None. |
+| R3-N2 / fixed-candidate identity (not a listed required-acceptance key, but the review's explicit boundary) | `_reviewer_candidate_commit` (fetch-then-report-identity) + new `ensure_reviewer_review_workspace`/`attach_workspace_metadata` branches for `unresolvable_pinned_candidate` | New test `test_reviewer_pinned_candidate_unresolvable_preserves_identity` reproduces Codex's exact scenario (candidate committed only in a separate, never-fetched local clone): returned `(path, commit, source)` is `(repo_root, pinned_sha, "unresolvable_pinned_candidate")` — never the owner's resolvable branch tip; rendered notice contains the pinned SHA and not the owner tip SHA. | `python3 -B -m unittest test_supervisor.ExecutionWorkspaceTests.test_reviewer_pinned_candidate_unresolvable_preserves_identity -v` → `ok`. Same environment. | The one `git fetch origin <sha>` attempt is against whatever "origin" already resolves to in the dispatch's own repo; there is no live/reachable "origin" configured in this sandbox for either the unit tests or this repair, so the fetch path itself (as opposed to its failure handling) was exercised only via its fast local no-such-remote failure, not against a real remote that could actually serve the object. Production behavior when "origin" is real and the object is fetchable was not separately verified — same limitation the task-spec's "resolve via authorized fetch" alternative inherently has without a live remote in this environment. |
+| `owner_successor_and_wip_preserved` | Owner code path reached only via the (now correctly `exclude_within`-scoped) branch lookup, unchanged otherwise | Owner dispatch still resumes its `execution_branch` override and existing worktree, with `git status --porcelain`/`HEAD` byte-identical before/after every reviewer dispatch in both new tests and all Round 1-3 tests. | Full `test_supervisor.ExecutionWorkspaceTests` run above; also `test_owner_dispatch_still_resumes_execution_branch_override` still `ok`. | None. |
+| Full regression | All Round 1-3 tests (14 `ExecutionWorkspaceTests`, now 12→14 after the two new tests above) plus the rest of the orchestrator unit suite | No regressions. | `python3 -B -m unittest test_supervisor -v` → 160 tests, OK. `python3 -B -m unittest test_watch_events -v` → 12 tests, OK. `python3 -B -m unittest test_runtime_module_boundaries -v` → 6 tests, OK. Combined: 178 tests, exit 0, Python 3.12.3, this worktree (`.artifacts/worktrees/auto/claude2-sr-orch-review-worktree-isolation-20260923`), reviewed base `af509ef4b4499b6d83b304dfd8a3ab650f17e31e`. | Not exercised against a live supervisor tick, real dispatch queue, or GitHub PR/CI (VM services not started per task-spec constraint); unit-level only, same limitation as Rounds 1-3. Codex's own R3 probes (`.local/codex-review-isolation-r3-00AI8x-probes.py`) were re-run manually (with only their SHA-pinning guard assertion stripped, since it necessarily fails once the file changes) against this fix as an independent cross-check, not as part of the committed suite: both previously-failing cases (`test_attached_branch_drift_must_not_rejoin_owner`, `test_unavailable_pinned_candidate_must_not_substitute_branch_tip`) now pass alongside their own already-passing `test_clean_detached_reuse`/`test_dirty_and_head_drift_preserved`. |
+
+- `watch_events.py` and `control_plane/domain/task_records.py` were re-inspected for Round 4 and
+  still require no change: `render_wakeup_message`'s review guardrails already name
+  `task.candidate_sha` directly from the task record (`watch_events.py:361`), independent of whatever
+  `ensure_execution_workspace` resolves — the contradiction Codex found was purely in the *workspace*
+  notice `attach_workspace_metadata` renders, now fixed entirely inside `supervisor_runtime.py`.
+- No product/UI/NAV source touched. No `.orchestrator` runtime services started or restarted on this VM.
+- `_repo_config` in `test_supervisor.py`'s `ExecutionWorkspaceTests` now also sets `paths.activity_log`
+  (previously absent), because the new `pin_unresolvable` path calls `write_activity_log`, which raises
+  `KeyError` without it — this is a test-fixture completeness fix, not a production-code behavior
+  change (`write_activity_log`'s config contract was already unchanged from Round 1-3).

@@ -590,7 +590,10 @@ class ExecutionWorkspaceTests(unittest.TestCase):
     def _repo_config(self, root: Path) -> dict:
         (root / "ai-status.json").write_text('{"tasks":[]}\n', encoding="utf-8")
         return {
-            "paths": {"status_file": str(root / "ai-status.json")},
+            "paths": {
+                "status_file": str(root / "ai-status.json"),
+                "activity_log": str(root / "ai-activity-log.jsonl"),
+            },
             "agents": {
                 "codex2": {
                     "id": "codex2",
@@ -1247,6 +1250,186 @@ class ExecutionWorkspaceTests(unittest.TestCase):
             self.assertIn(f"`{reviewer_workspace}`", reviewer_request.message)
             self.assertNotIn(str(owner_worktree.resolve()), reviewer_request.message)
 
+    def test_reviewer_workspace_reuse_requires_detached_head(self) -> None:
+        """SR-ORCH-REVIEW-WORKTREE-ISOLATION-20260923 R3-N1 regression (4th rejection round).
+
+        A reviewer workspace that satisfies the commit/clean checks but has
+        since had a branch attached to it (e.g. a later owner dispatch whose
+        `execution_branch` override happens to name a branch, checked out
+        directly in the reviewer's own detached workspace by whatever put it
+        there) is no longer a safe "existing_review_worktree" to hand back --
+        that attached branch is exactly what let an owner's branch lookup
+        claim the same path as its own worktree before this fix. Both
+        directions of the bug are covered here: the owner dispatch must not
+        resolve into the reviewer's namespace, and a later reviewer dispatch
+        must not reuse the now-attached path either.
+        """
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir) / "repo"
+            root.mkdir()
+            self._init_repo(root)
+            dev_tip = _git(root, "rev-parse", "dev").stdout.strip()
+            config = self._repo_config(root)
+            task_metadata = {
+                "owner": "gemini",
+                "reviewer": "codex2",
+                "execution_branch": "gemini/iam-ses-002-successor-4",
+                # Pinned so the reviewer's candidate resolves independent of
+                # dispatch order -- the owner's override branch doesn't exist
+                # yet at the point of the first reviewer dispatch below.
+                "candidate_sha": dev_tip,
+            }
+
+            first_reviewer_request = supervisor.DeliveryRequest(
+                agent_id="codex2",
+                provider="codex2",
+                delivery_mode="codex",
+                message="wake",
+                task_id="IAM-SES-002",
+                reason="review_ready_dispatch",
+                metadata={"mode": "execution", "task": task_metadata},
+            )
+            first_review_workspace, _branch, _base, first_source = supervisor.ensure_execution_workspace(
+                config, first_reviewer_request, supervisor.route_task("IAM-SES-002"),
+            )
+            self.assertEqual(first_source, "created_review_worktree")
+            self.assertEqual(_git(first_review_workspace, "branch", "--show-current").stdout.strip(), "")
+
+            # Simulated drift: something attaches the owner's future
+            # execution_branch to the reviewer's still-clean, still-on-candidate
+            # workspace (no content change, no dirt -- only a branch ref).
+            _git(first_review_workspace, "checkout", "-b", task_metadata["execution_branch"])
+
+            owner_request = supervisor.DeliveryRequest(
+                agent_id="gemini",
+                provider="gemini",
+                delivery_mode="antigravity",
+                message="wake",
+                task_id="IAM-SES-002",
+                reason="owned_ready_dispatch",
+                metadata={"mode": "execution", "task": task_metadata},
+            )
+            owner_workspace, owner_branch, _owner_base, owner_source = supervisor.ensure_execution_workspace(
+                config, owner_request, supervisor.route_task("IAM-SES-002"),
+            )
+            # The owner must get its own workspace, never the reviewer's
+            # namespace, even though the reviewer's workspace now carries
+            # exactly the branch the owner's override names.
+            self.assertNotEqual(owner_workspace, first_review_workspace)
+            self.assertEqual(owner_branch, task_metadata["execution_branch"])
+            self.assertEqual(owner_source, "created_worktree")
+            self.assertEqual(_git(owner_workspace, "branch", "--show-current").stdout.strip(), owner_branch)
+
+            second_reviewer_request = supervisor.DeliveryRequest(
+                agent_id="codex2",
+                provider="codex2",
+                delivery_mode="codex",
+                message="wake",
+                task_id="IAM-SES-002",
+                reason="review_ready_dispatch",
+                metadata={"mode": "execution", "task": task_metadata},
+            )
+            second_review_workspace, second_branch, second_base, second_source = supervisor.ensure_execution_workspace(
+                config, second_reviewer_request, supervisor.route_task("IAM-SES-002"),
+            )
+            # A fresh reviewer dispatch must not reuse the now-attached path;
+            # it must allocate another safe, still-detached workspace instead.
+            self.assertNotEqual(second_review_workspace, first_review_workspace)
+            self.assertNotEqual(second_review_workspace, owner_workspace)
+            self.assertEqual(second_source, "created_review_worktree")
+            self.assertEqual(second_branch, dev_tip)
+            self.assertEqual(second_base, "dev")
+            self.assertEqual(_git(second_review_workspace, "branch", "--show-current").stdout.strip(), "")
+            self.assertEqual((second_review_workspace / "README.md").read_text(encoding="utf-8"), "test\n")
+
+            # The first (now branch-attached) review workspace is left
+            # completely untouched -- not reset, not reclaimed.
+            self.assertEqual(
+                _git(first_review_workspace, "branch", "--show-current").stdout.strip(),
+                task_metadata["execution_branch"],
+            )
+            self.assertEqual(_git(first_review_workspace, "rev-parse", "HEAD").stdout.strip(), dev_tip)
+
+            # Owner concurrent WIP after the fact must not leak into the
+            # reviewer's actual (second) workspace.
+            (owner_workspace / "README.md").write_text("owner concurrent wip\n", encoding="utf-8")
+            self.assertEqual((second_review_workspace / "README.md").read_text(encoding="utf-8"), "test\n")
+
+            supervisor.attach_workspace_metadata(
+                config, second_reviewer_request, second_review_workspace, second_branch, second_base, second_source,
+            )
+            self.assertIn(f"`{second_review_workspace}`", second_reviewer_request.message)
+            self.assertIn("no branch is checked out here", second_reviewer_request.message)
+            self.assertNotIn(str(owner_workspace.resolve()), second_reviewer_request.message)
+            self.assertNotIn(task_metadata["execution_branch"], second_reviewer_request.message)
+
+    def test_reviewer_pinned_candidate_unresolvable_preserves_identity(self) -> None:
+        """SR-ORCH-REVIEW-WORKTREE-ISOLATION-20260923 R3-N2 regression (4th rejection round).
+
+        A task can pin a `candidate_sha` that this repository's object
+        database cannot resolve yet (e.g. it exists only in a not-yet-fetched
+        clone). Before this fix, `_reviewer_candidate_commit` silently fell
+        through to the owner branch tip and reported *that* commit as the
+        reviewed candidate -- exactly the "present lock silently substituted"
+        failure mode this task's brief called out, and a direct contradiction
+        of `watch_events.render_wakeup_message`'s locked-candidate guardrail
+        text, which always names the task's actual `candidate_sha`.
+        """
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir) / "repo"
+            root.mkdir()
+            self._init_repo(root)
+            config = self._repo_config(root)
+
+            owner_worktree = root / ".artifacts/worktrees/auto/gemini-iam-ses-002"
+            _git(root, "worktree", "add", "-b", "gemini/iam-ses-002", str(owner_worktree), "dev")
+            owner_tip = _git(owner_worktree, "rev-parse", "HEAD").stdout.strip()
+
+            # A distinct, valid candidate commit exists only in a separate
+            # clone -- never fetched into the supervisor's own repo, so it is
+            # genuinely unresolvable there (ordinary same-repo handoffs, as
+            # covered by test_reviewer_workspace_pins_candidate_sha_despite_owner_drift,
+            # remain resolvable and unaffected by this case).
+            remote = Path(tmpdir) / "remote-clone"
+            _git(root, "clone", str(root), str(remote))
+            _git(remote, "config", "user.email", "test@example.com")
+            _git(remote, "config", "user.name", "Test User")
+            (remote / "README.md").write_text("remote pinned candidate\n", encoding="utf-8")
+            _git(remote, "add", "README.md")
+            _git(remote, "commit", "-m", "candidate available remotely only")
+            pinned = _git(remote, "rev-parse", "HEAD").stdout.strip()
+
+            task_metadata = {
+                "owner": "gemini",
+                "reviewer": "codex2",
+                "execution_branch": "gemini/iam-ses-002",
+                "candidate_sha": pinned,
+            }
+            reviewer_request = supervisor.DeliveryRequest(
+                agent_id="codex2",
+                provider="codex2",
+                delivery_mode="codex",
+                message="wake",
+                task_id="IAM-SES-002",
+                reason="review_ready_dispatch",
+                metadata={"mode": "execution", "task": task_metadata},
+            )
+            reviewer_workspace, reviewer_branch, _base, reviewer_source = supervisor.ensure_execution_workspace(
+                config, reviewer_request, supervisor.route_task("IAM-SES-002"),
+            )
+
+            # The locked candidate's identity must be preserved and reported
+            # -- never silently replaced by the owner's resolvable branch tip.
+            self.assertEqual(reviewer_branch, pinned)
+            self.assertNotEqual(reviewer_branch, owner_tip)
+            self.assertEqual(reviewer_source, "unresolvable_pinned_candidate")
+            self.assertEqual(reviewer_workspace, root.resolve())
+
+            supervisor.attach_workspace_metadata(
+                config, reviewer_request, reviewer_workspace, reviewer_branch, None, reviewer_source,
+            )
+            self.assertIn(pinned, reviewer_request.message)
+            self.assertNotIn(owner_tip, reviewer_request.message)
 
 
 
