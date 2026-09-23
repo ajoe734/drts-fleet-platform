@@ -1379,9 +1379,29 @@ def queue_resume_for_agent(config: dict[str, Any], status: dict[str, Any], agent
 REVIEW_POLL_STATUSES = frozenset({"review", "integrating", "acceptance"})
 
 
+COMMENT_POLL_SINCE_MARGIN = timedelta(minutes=10)
+
+
+def comment_poll_since(bus_state: dict[str, Any]) -> str | None:
+    """ISO `since` for the comments API, or None on the first sync.
+
+    GitHub filters issue comments by `updated_at >= since`, so after the first
+    full read each sync only has to look at what moved since the previous one.
+    The margin covers clock skew between GitHub and this host and a comment
+    updated during the previous sync; `processed_comment_ids` still de-dups
+    anything the window re-delivers, so a generous margin costs nothing.
+    """
+    last = _parse_iso(bus_state.get("last_sync_at"))
+    if last is None:
+        return None
+    return (last - COMMENT_POLL_SINCE_MARGIN).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
 def poll_issue_comments(config: dict[str, Any], bus_state: dict[str, Any], status: dict[str, Any], repo: str) -> bool:
     changed = False
     seen = set(bus_state.get("processed_comment_ids", []))
+    since = comment_poll_since(bus_state)
+    since_query = f"&since={since}" if since else ""
     for task in status.get("tasks", []):
         # Issue commands (approve, reopen, note, resume) all act on a task that
         # is still open; a done task's issue thread is history.
@@ -1392,7 +1412,7 @@ def poll_issue_comments(config: dict[str, Any], bus_state: dict[str, Any], statu
         number = issue_ref.get("number")
         if not number:
             continue
-        comments = gh_json(["api", f"repos/{repo}/issues/{number}/comments?per_page=100"])
+        comments = gh_json(["api", f"repos/{repo}/issues/{number}/comments?per_page=100{since_query}"])
         if not isinstance(comments, list):
             continue
         allowed = allowed_logins(config, task)

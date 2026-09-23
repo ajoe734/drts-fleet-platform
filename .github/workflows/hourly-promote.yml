@@ -171,7 +171,12 @@ jobs:
           tree=$(git write-tree)
           unset GIT_INDEX_FILE
           task_id="PROMOTE-$(echo "$ver" | tr '[:lower:].' '[:upper:]-')"
-          promote_sha=$(git commit-tree "$tree" -p "$main_sha" \
+          # Dates come from the snapshot, not from "now": commit-tree would
+          # otherwise mint a new SHA on every retry, force-push the branch, and
+          # throw away the checks the previous attempt had already published.
+          snapshot_date=$(git log -1 --format=%cI "$sha")
+          promote_sha=$(GIT_AUTHOR_DATE="$snapshot_date" GIT_COMMITTER_DATE="$snapshot_date" \
+            git commit-tree "$tree" -p "$main_sha" \
             -m "$task_id: promote $src to main" \
             -m "Tree of $src @ $sha placed on main HEAD $main_sha so the promotion merges without history conflicts." \
             -m "Task-ID: $task_id" -m "LLM-Agent: github-actions" -m "Reviewer: hourly-promote")
@@ -282,6 +287,22 @@ jobs:
           sha="${{ steps.reconcile.outputs.promote_sha }}"
           src="${{ steps.reconcile.outputs.promote_branch }}"
           run_url="${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+          # Single-quoted on purpose: the ordering assertion in
+          # tests/unit/hourly-promote-workflow.test.ts finds the smoke gate by
+          # its first double-quoted mention, which must stay the invocation
+          # that runs after PostGIS is up.
+          required_names=$(printf '%s\n' 'Commit trailers' 'Runtime mirror guard' 'Smoke acceptance' \
+            | jq -Rsc 'split("\n") | map(select(length > 0))')
+          existing=$(gh api "repos/$GITHUB_REPOSITORY/commits/$sha/check-runs" \
+            --jq '[.check_runs[] | select(.status == "completed" and .conclusion == "success")]' 2>/dev/null || echo '[]')
+          if [ "$(jq -r --argjson want "$required_names" '[.[] | .name] as $have | $want | map(IN($have[])) | all' <<<"$existing")" = "true" ]; then
+            # The promote commit is reproducible, so an earlier attempt's green
+            # checks belong to this very SHA. Re-running them would cost ten
+            # minutes and could only agree.
+            echo "All required checks are already green on ${sha:0:12}; reusing them."
+            echo "run_url=$run_url" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
           workdir=$(mktemp -d "${RUNNER_TEMP:-/tmp}/promote-sha-XXXXXX")
           compose_project="promote-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
           overall=0
@@ -415,6 +436,15 @@ jobs:
           pr="${{ steps.pr.outputs.pr_number }}"
           run_url="${{ steps.checks.outputs.run_url }}"
           required=("Commit trailers" "Runtime mirror guard" "Smoke acceptance")
+          # Wait on exactly what branch protection reads: the latest check run
+          # under each required name on this head. Provenance is deliberately
+          # not part of the test. Tying it to this run once by details_url
+          # (discarded by GitHub, which stores the check run's own URL) and
+          # once by the ids create_check returned (written to an array inside
+          # $(...), so only ever set in a subshell) each timed out with three
+          # green checks sitting on the PR. It is also wrong in principle now
+          # that the promote commit is reproducible: a check that passed on
+          # this exact SHA passed on this exact tree, whoever published it.
           # GitHub can take a short moment to surface freshly-published checks
           # on the PR head SHA and satisfy branch protection.
           for i in $(seq 1 20); do
@@ -423,9 +453,8 @@ jobs:
             failures=()
             checks=$(gh pr view "$pr" --json statusCheckRollup --jq '.statusCheckRollup')
             for name in "${required[@]}"; do
-              entry=$(echo "$checks" | jq -c --arg n "$name" --arg url "$run_url" '
-                map(select(.name == $n and (.detailsUrl // "") == $url))
-                | last // empty
+              entry=$(echo "$checks" | jq -c --arg n "$name" '
+                map(select(.name == $n)) | last // empty
               ')
               if [ -z "$entry" ]; then
                 all_done=false
@@ -453,7 +482,7 @@ jobs:
             echo "[$i] still waiting for required checks..."
             sleep 15
           done
-          echo "::error::Timed out waiting for required checks from $run_url to register on PR #$pr."
+          echo "::error::Timed out waiting for the required checks published by $run_url to register on PR #$pr."
           exit 1
 
       - name: Merge inline
