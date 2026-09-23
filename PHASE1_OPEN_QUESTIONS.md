@@ -4,6 +4,25 @@ These questions are intentionally isolated here so the repo does not silently in
 
 ## Open Items
 
+### Q-SR-PARTNER-NOTIFY-UI-20260917 — approved notification canvas handoff
+
+Supervisor/Claude must identify the design owner and reviewer, authorize the
+Platform Admin partner-detail notification canvas scope, and record its approved
+revision before parent owner Gemini implements the screen. The existing canvas
+has no notification tab; the parent's screen-requirements note is a request,
+not an approved design. Keep the parent blocked for UI work and preserve Codex
+as its reviewer and all three required acceptance keys. There is no product
+scope cut: endpoint acceptance still does not establish device delivery, and
+manual retry still returns work to the sole consumer outbox worker.
+
+This is follow-up on the existing parent, not a new unregistered implementation
+task. Supervisor must also coordinate the remaining shared test scopes and
+history-preserving candidate recovery from the latest review. The helper worker
+cannot write the parent or helper disposition metadata through its dispatch
+guard; Supervisor must record `resolved_parent_status: blocked` before helper
+merge so routing this question cannot silently resume the parent. See the
+[decision, screen requirements, evidence, and exact next steps](support/unblock/SR-PARTNER-NOTIFY-UI-20260917/SR-PARTNER-NOTIFY-UI-20260917-UNBLOCK-PLANNING-DECISION.md).
+
 ### Q-SR-QA-WEBHOOK-TENANT-BINDING-001 — repair scope authorization pending
 
 Supervisor/Claude must authorize product write scopes and IAM/tenant overlap
