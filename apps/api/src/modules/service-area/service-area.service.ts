@@ -491,7 +491,7 @@ export class ServiceAreaService implements OnModuleInit {
     record.status = "retired";
     record.effectiveUntil =
       this.normalizeEffectiveUntil(command.effectiveUntil) ??
-      this.retirementInstantAfter(record.effectiveFrom);
+      new Date().toISOString();
     this.assertEffectiveWindow(record.effectiveFrom, record.effectiveUntil);
     record.metadata = this.withLifecycleMetadata(record.metadata, {
       retiredAt: new Date().toISOString(),
@@ -768,7 +768,7 @@ export class ServiceAreaService implements OnModuleInit {
     record.status = "retired";
     record.effectiveUntil =
       this.normalizeEffectiveUntil(command.effectiveUntil) ??
-      this.retirementInstantAfter(record.effectiveFrom);
+      new Date().toISOString();
     this.assertEffectiveWindow(record.effectiveFrom, record.effectiveUntil);
     record.metadata = this.withLifecycleMetadata(record.metadata, {
       retiredAt: new Date().toISOString(),
@@ -1087,24 +1087,6 @@ export class ServiceAreaService implements OnModuleInit {
       return fallback;
     }
     return this.normalizeIsoTimestamp(value, "effectiveFrom");
-  }
-
-  /**
-   * Default `effectiveUntil` for a retirement with no explicit end.
-   *
-   * "Now" is the natural answer, but `effectiveFrom` also defaults to "now"
-   * at creation, and a boundary (or stop policy) created, published and
-   * retired within the same millisecond then fails `assertEffectiveWindow`,
-   * which requires a strictly positive window. That is not hypothetical: the
-   * C106 acceptance test does exactly that and failed on fast CI runners.
-   * Retiring something that was never effective is a legitimate zero-length
-   * lifecycle, so the end is clamped to one millisecond after the start.
-   */
-  private retirementInstantAfter(effectiveFrom: string) {
-    const now = Date.now();
-    const from = Date.parse(effectiveFrom);
-    const earliestEnd = Number.isNaN(from) ? now : from + 1;
-    return new Date(Math.max(now, earliestEnd)).toISOString();
   }
 
   private normalizeEffectiveUntil(value: string | null | undefined) {

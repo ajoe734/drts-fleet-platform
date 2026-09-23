@@ -47,10 +47,6 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-          # The promote branch is a fresh commit whose tree usually includes
-          # dev's .github/workflows changes; GITHUB_TOKEN cannot push those
-          # ("workflows scope"). Same token strategy as nightly-publish.yml.
-          token: ${{ secrets.PUBLISH_TOKEN || secrets.GITHUB_TOKEN }}
 
       - name: Find publish to promote
         id: pick
@@ -130,64 +126,34 @@ jobs:
         if: steps.pick.outputs.skip != 'true' && steps.soak.outputs.skip != 'true' && steps.regression.outputs.skip != 'true' && steps.already.outputs.skip != 'true'
         id: reconcile
         run: |
-          # main and dev do not share recent history: every promotion lands as
-          # a squash commit, so a history-based merge of the next publish sees
-          # a merge-base months old and conflicts on everything both sides
-          # touched since. That is what turned eight rescues into a routine.
-          # Promotion is a tree replacement, not a merge: the promote branch is
-          # ONE commit whose parent is main HEAD and whose tree is the publish
-          # snapshot, which is exactly what promote-rail-rescue-runbook.md §5
-          # does by hand. Its merge-base is main itself, so it can never
-          # conflict, the required gates register, and the squash that follows
-          # leaves main's tree equal to the snapshot. The five guarded
-          # dashboard mirror files stay as main has them when they differ, the
-          # same rule the manual rescue follows.
-          # The publish branch itself is untouched. Rule kept from the old gate:
-          # immutable publish branches are never rewritten; the promote commit
-          # merely reuses their tree.
           src="${{ steps.pick.outputs.branch }}"
           sha="${{ steps.pick.outputs.sha }}"
-          ver="${{ steps.pick.outputs.version }}"
-          promote_branch="promote/$ver"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git config user.name "github-actions[bot]"
-          git fetch origin main --quiet
-          main_sha=$(git rev-parse origin/main)
-          export GIT_INDEX_FILE="${RUNNER_TEMP:-/tmp}/promote.index"
-          rm -f "$GIT_INDEX_FILE"
-          git read-tree "$sha"
-          for f in ai-status.json ai-activity-log.jsonl current-work.md orchestrator-state.json approval-queue.json; do
-            path="tools/development-orchestrator/dashboard/$f"
-            if ! git diff --quiet "$main_sha" "$sha" -- "$path"; then
-              if blob=$(git rev-parse --verify -q "$main_sha:$path"); then
-                git update-index --cacheinfo "100644,$blob,$path"
-                echo "kept main's $path"
-              else
-                git update-index --force-remove "$path"
-                echo "removed $path (main has none)"
-              fi
-            fi
-          done
-          tree=$(git write-tree)
-          unset GIT_INDEX_FILE
-          task_id="PROMOTE-$(echo "$ver" | tr '[:lower:].' '[:upper:]-')"
-          # Dates come from the snapshot, not from "now": commit-tree would
-          # otherwise mint a new SHA on every retry, force-push the branch, and
-          # throw away the checks the previous attempt had already published.
-          snapshot_date=$(git log -1 --format=%cI "$sha")
-          promote_sha=$(GIT_AUTHOR_DATE="$snapshot_date" GIT_COMMITTER_DATE="$snapshot_date" \
-            git commit-tree "$tree" -p "$main_sha" \
-            -m "$task_id: promote $src to main" \
-            -m "Tree of $src @ $sha placed on main HEAD $main_sha so the promotion merges without history conflicts." \
-            -m "Task-ID: $task_id" -m "LLM-Agent: github-actions" -m "Reviewer: hourly-promote")
-          # Retries within the hour rebuild the same tree on the same parent;
-          # --force-with-lease keeps a stale branch from a previous attempt
-          # from blocking that while never clobbering a branch that moved.
-          git push --force-with-lease origin "$promote_sha:refs/heads/$promote_branch"
-          echo "Built $promote_branch @ ${promote_sha:0:12} (parent main ${main_sha:0:12}, tree from $src)"
-          echo "promote_branch=$promote_branch" >> "$GITHUB_OUTPUT"
-          echo "promote_sha=$promote_sha" >> "$GITHUB_OUTPUT"
-          echo "skip=false" >> "$GITHUB_OUTPUT"
+          conflict_log="${RUNNER_TEMP:-/tmp}/promote-merge-tree.log"
+
+          # A conflicting publish PR can never produce refs/pull/<n>/merge and
+          # therefore can never satisfy strict branch protection. Detect that
+          # before opening (or retaining) a permanently blocked PR.
+          if git merge-tree --write-tree origin/main "$sha" >"$conflict_log" 2>&1; then
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          existing=$(gh pr list \
+            --base main \
+            --head "$src" \
+            --state open \
+            --json number \
+            --jq '.[0].number // empty')
+          if [ -n "$existing" ]; then
+            gh pr close "$existing" \
+              --comment "Closed automatically: \`$src\` conflicts with \`main\`. Reconcile main-only changes back to dev and cut a fresh publish snapshot; immutable publish branches are never rewritten."
+          fi
+
+          echo "::error::$src cannot merge cleanly into main. No promotion PR will be opened."
+          echo "::error::Follow docs/03-runbooks/promote-rail-rescue-runbook.md after porting all wanted main-only content back to dev."
+          tail -n 80 "$conflict_log" || true
+          echo "skip=true" >> "$GITHUB_OUTPUT"
+
       - name: Verified dev deployment gate
         if: steps.pick.outputs.skip != 'true' && steps.soak.outputs.skip != 'true' && steps.regression.outputs.skip != 'true' && steps.already.outputs.skip != 'true' && steps.reconcile.outputs.skip != 'true'
         id: deployed
@@ -235,7 +201,6 @@ jobs:
           Hourly auto-promotion (T9 of v4 branch strategy).
 
           - Snapshot: \`$src\` @ \`${{ steps.pick.outputs.sha }}\`
-          - Promote commit: \`${{ steps.reconcile.outputs.promote_sha }}\` (snapshot tree on main HEAD)
           - Soak passed: ${{ env.SOAK_MINUTES }}+ minutes since cut
           - No open \`regression:$ver\` issue
           - main does not yet contain this content
@@ -247,13 +212,12 @@ jobs:
           Block this promotion: open an issue labeled \`regression:$ver\`.
           EOF
           )
-          promote_branch="${{ steps.reconcile.outputs.promote_branch }}"
-          existing=$(gh pr list --base main --head "$promote_branch" --state open --json number --jq '.[0].number // empty')
+          existing=$(gh pr list --base main --head "$src" --state open --json number --jq '.[0].number // empty')
           if [ -n "$existing" ]; then
             gh pr edit "$existing" --title "$title" --body "$body" || true
             pr_number="$existing"
           else
-            pr_url=$(gh pr create --base main --head "$promote_branch" --title "$title" --body "$body")
+            pr_url=$(gh pr create --base main --head "$src" --title "$title" --body "$body")
             pr_number=$(basename "$pr_url")
           fi
           # These labels drive the Commit trailers bypass in ci.yml. Provision
@@ -284,25 +248,9 @@ jobs:
           # GITHUB_TOKEN-triggered PR events no longer fan out into ci.yml
           # reliably, and publish/* snapshots should stay immutable. Run the
           # required branch-protection gates directly on the promote SHA.
-          sha="${{ steps.reconcile.outputs.promote_sha }}"
-          src="${{ steps.reconcile.outputs.promote_branch }}"
+          sha="${{ steps.pick.outputs.sha }}"
+          src="${{ steps.pick.outputs.branch }}"
           run_url="${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
-          # Single-quoted on purpose: the ordering assertion in
-          # tests/unit/hourly-promote-workflow.test.ts finds the smoke gate by
-          # its first double-quoted mention, which must stay the invocation
-          # that runs after PostGIS is up.
-          required_names=$(printf '%s\n' 'Commit trailers' 'Runtime mirror guard' 'Smoke acceptance' \
-            | jq -Rsc 'split("\n") | map(select(length > 0))')
-          existing=$(gh api "repos/$GITHUB_REPOSITORY/commits/$sha/check-runs" \
-            --jq '[.check_runs[] | select(.status == "completed" and .conclusion == "success")]' 2>/dev/null || echo '[]')
-          if [ "$(jq -r --argjson want "$required_names" '[.[] | .name] as $have | $want | map(IN($have[])) | all' <<<"$existing")" = "true" ]; then
-            # The promote commit is reproducible, so an earlier attempt's green
-            # checks belong to this very SHA. Re-running them would cost ten
-            # minutes and could only agree.
-            echo "All required checks are already green on ${sha:0:12}; reusing them."
-            echo "run_url=$run_url" >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
           workdir=$(mktemp -d "${RUNNER_TEMP:-/tmp}/promote-sha-XXXXXX")
           compose_project="promote-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
           overall=0
@@ -436,15 +384,6 @@ jobs:
           pr="${{ steps.pr.outputs.pr_number }}"
           run_url="${{ steps.checks.outputs.run_url }}"
           required=("Commit trailers" "Runtime mirror guard" "Smoke acceptance")
-          # Wait on exactly what branch protection reads: the latest check run
-          # under each required name on this head. Provenance is deliberately
-          # not part of the test. Tying it to this run once by details_url
-          # (discarded by GitHub, which stores the check run's own URL) and
-          # once by the ids create_check returned (written to an array inside
-          # $(...), so only ever set in a subshell) each timed out with three
-          # green checks sitting on the PR. It is also wrong in principle now
-          # that the promote commit is reproducible: a check that passed on
-          # this exact SHA passed on this exact tree, whoever published it.
           # GitHub can take a short moment to surface freshly-published checks
           # on the PR head SHA and satisfy branch protection.
           for i in $(seq 1 20); do
@@ -453,8 +392,9 @@ jobs:
             failures=()
             checks=$(gh pr view "$pr" --json statusCheckRollup --jq '.statusCheckRollup')
             for name in "${required[@]}"; do
-              entry=$(echo "$checks" | jq -c --arg n "$name" '
-                map(select(.name == $n)) | last // empty
+              entry=$(echo "$checks" | jq -c --arg n "$name" --arg url "$run_url" '
+                map(select(.name == $n and (.detailsUrl // "") == $url))
+                | last // empty
               ')
               if [ -z "$entry" ]; then
                 all_done=false
@@ -482,7 +422,7 @@ jobs:
             echo "[$i] still waiting for required checks..."
             sleep 15
           done
-          echo "::error::Timed out waiting for the required checks published by $run_url to register on PR #$pr."
+          echo "::error::Timed out waiting for required checks from $run_url to register on PR #$pr."
           exit 1
 
       - name: Merge inline

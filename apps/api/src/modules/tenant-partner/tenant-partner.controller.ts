@@ -1,3 +1,5 @@
+import { PartnerNotificationNavigationRepository } from "./partner-notification-navigation.repository";
+import { PartnerUserIdentityLinkRepository } from "./partner-user-identity-link.repository";
 import {
   Body,
   CanActivate,
@@ -210,6 +212,12 @@ export class TenantPartnerController {
     @Optional()
     @Inject(AuditNotificationService)
     private readonly auditNotificationService?: AuditNotificationService,
+    @Optional()
+    @Inject(PartnerUserIdentityLinkRepository)
+    private readonly partnerUserIdentityLinkRepository?: PartnerUserIdentityLinkRepository,
+    @Optional()
+    @Inject(PartnerNotificationNavigationRepository)
+    private readonly partnerNotificationNavigationRepository?: PartnerNotificationNavigationRepository,
   ) {}
 
   private requireTenantId(tenantId?: string) {
@@ -438,6 +446,8 @@ export class TenantPartnerController {
       artifact: string;
       entrySlug: string;
       entryHost: string;
+      currentDrtsPassengerId?: string;
+      currentPartnerEntrySlug?: string;
     },
     @Req()
     request?: {
@@ -1767,7 +1777,9 @@ export class TenantPartnerController {
     tenantId?: string,
     requestId?: string,
     identity?: IdentityContext | null,
-  ): ApiSuccessEnvelope<ApiListData<TenantApiKeyRecord & Record<string, unknown>>>;
+  ): ApiSuccessEnvelope<
+    ApiListData<TenantApiKeyRecord & Record<string, unknown>>
+  >;
   listApiKeys(
     tenantId?: string,
     requestId?: string,
@@ -1776,8 +1788,14 @@ export class TenantPartnerController {
     tenantApiKeyHeader?: string,
     authorizationHeader?: string,
   ):
-    | ApiSuccessEnvelope<ApiListData<TenantApiKeyRecord & Record<string, unknown>>>
-    | Promise<ApiSuccessEnvelope<ApiListData<TenantApiKeyRecord & Record<string, unknown>>>>;
+    | ApiSuccessEnvelope<
+        ApiListData<TenantApiKeyRecord & Record<string, unknown>>
+      >
+    | Promise<
+        ApiSuccessEnvelope<
+          ApiListData<TenantApiKeyRecord & Record<string, unknown>>
+        >
+      >;
   @Get("tenant/api-keys")
   @Throttle(READ_HEAVY_RATE_LIMIT)
   listApiKeys(
@@ -1788,8 +1806,14 @@ export class TenantPartnerController {
     @Headers("x-tenant-api-key") tenantApiKeyHeader?: string,
     @Headers("authorization") authorizationHeader?: string,
   ):
-    | ApiSuccessEnvelope<ApiListData<TenantApiKeyRecord & Record<string, unknown>>>
-    | Promise<ApiSuccessEnvelope<ApiListData<TenantApiKeyRecord & Record<string, unknown>>>> {
+    | ApiSuccessEnvelope<
+        ApiListData<TenantApiKeyRecord & Record<string, unknown>>
+      >
+    | Promise<
+        ApiSuccessEnvelope<
+          ApiListData<TenantApiKeyRecord & Record<string, unknown>>
+        >
+      > {
     const resolvedTenantId = this.requireTenantId(tenantId);
     const resolvedIdentity =
       identity ??
@@ -2300,5 +2324,140 @@ export class TenantPartnerController {
       identity,
     );
     return toApiSuccessEnvelope(toApiListData(items), requestId);
+  }
+
+  @OpenRoute()
+  @Throttle(OPEN_ROUTE_RATE_LIMIT)
+  @Post("partner/entries/:entrySlug/notification-navigation/resolve")
+  async resolvePartnerNotificationNavigation(
+    @Param("entrySlug") entrySlug: string,
+    @Body() command: { rideRef: string; partnerUserRef: string },
+    @Req() request?: any,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    const { rideRef, partnerUserRef } = command;
+    if (!rideRef || !partnerUserRef) {
+      throw new ApiRequestError(
+        400,
+        "BAD_REQUEST",
+        "rideRef and partnerUserRef are required",
+      );
+    }
+
+    const apiKey =
+      request?.headers?.["x-api-key"] || request?.headers?.["x-tenant-api-key"];
+    const allowInternalBootstrap = !apiKey?.trim();
+
+    try {
+      if (allowInternalBootstrap) {
+        requireScopedInternalKey(
+          request ?? {},
+          process.env.DRTS_REFERRAL_EMBED_HANDOFF_KEY,
+          {
+            header: REFERRAL_EMBED_HANDOFF_KEY_HEADER,
+            requiredEnv: "DRTS_REFERRAL_EMBED_HANDOFF_KEY",
+          },
+        );
+      } else {
+        const partnerEntry =
+          await this.tenantPartnerService.getPartnerEntry(entrySlug);
+        if (!partnerEntry) throw new Error("Entry not found");
+
+        this.tenantPartnerService.authenticatePartnerBootstrap(
+          {
+            entrySlug,
+            apiKey: apiKey ?? "",
+          },
+          requestId,
+        );
+      }
+
+      if (!this.partnerNotificationNavigationRepository) {
+        throw new Error("PartnerNotificationNavigationRepository is required");
+      }
+      const route =
+        await this.partnerNotificationNavigationRepository.resolveRoute(
+          entrySlug,
+          rideRef,
+          partnerUserRef,
+        );
+
+      if (!route) {
+        throw new Error("Route not found");
+      }
+
+      const partnerEntry =
+        await this.tenantPartnerService.getPartnerEntry(entrySlug);
+      if (!partnerEntry) throw new Error("Entry not found");
+
+      // Cross-tenant bounds check
+      if (
+        route.tenantId !== partnerEntry.tenantId ||
+        route.partnerId !== partnerEntry.partnerId
+      ) {
+        throw new Error("Route does not belong to the active tenant/partner");
+      }
+
+      if (!this.partnerUserIdentityLinkRepository) {
+        throw new Error("PartnerUserIdentityLinkRepository is required");
+      }
+      const link = await this.partnerUserIdentityLinkRepository.find(
+        entrySlug,
+        partnerUserRef,
+      );
+      if (
+        !link ||
+        link.status !== "active" ||
+        link.drtsPassengerId !== route.drtsPassengerId
+      ) {
+        throw new Error("Identity link revoked or passenger mismatch");
+      }
+
+      const entryHost = partnerEntry.entryHost;
+      if (!entryHost) {
+        throw new Error("Partner entry not configured for embedded navigation");
+      }
+
+      const screen =
+        route.status === "completed"
+          ? "receipt"
+          : route.status === "cancelled" ||
+              route.status === "dispatch_failed" ||
+              route.status === "dispatch_timeout" ||
+              route.status === "no_supply"
+            ? "cancelled"
+            : "trip";
+
+      const artifactCommand = {
+        entrySlug,
+        entryHost,
+        partnerUserRef,
+        apiKey,
+        navigationContext: { orderId: route.orderId, screen },
+      };
+
+      const handoffArtifact =
+        await this.tenantPartnerService.issueReferralEmbedHandoffArtifact(
+          artifactCommand,
+          requestId,
+          { allowInternalBootstrap },
+        );
+
+      const bffBaseUrl =
+        process.env.DRTS_REFERRAL_EMBED_BASE_URL ||
+        `https://refer.smarttransport.tw`;
+      const destinationUrl = `${bffBaseUrl}/api/referral/notification-navigation?artifact=${handoffArtifact.artifact}&entrySlug=${entrySlug}`;
+
+      return toApiSuccessEnvelope(
+        { handoffArtifact, destinationUrl },
+        requestId,
+      );
+    } catch {
+      throw new ApiRequestError(
+        403,
+        "FORBIDDEN",
+        "Notification link is invalid or expired.",
+      );
+    }
   }
 }

@@ -1670,24 +1670,3 @@ class ProcessQueueDispatchGuardTests(EvidenceOutputIsolation, unittest.TestCase)
         record = state["queue"]["events"]["evt-current"]
         self.assertEqual(record["status"], "started")
         self.assertEqual(record["run_id"], "gemini-run-1")
-
-class ActiveWorkerDetectionTests(unittest.TestCase):
-    def test_active_worker_agent_counts_normalizes_case(self) -> None:
-        from control_plane.usecases import dispatch_runtime
-        
-        state = {
-            "workers": {
-                "w1": {"status": "running", "agent_id": "Gemini2", "task_id": "T1"},
-                "w2": {"status": "running", "agent_id": "gemini2", "task_id": "T2"},
-            }
-        }
-        active_statuses = {"running"}
-        
-        # Test active_worker_agent_counts
-        counts = dispatch_runtime.active_worker_agent_counts(state, active_statuses)
-        self.assertEqual(counts, {"gemini2": 2})
-
-        # Test active_worker_indexes
-        agents, task_agents = dispatch_runtime.active_worker_indexes(state, active_statuses)
-        self.assertEqual(agents, {"gemini2"})
-        self.assertEqual(task_agents, {("T1", "gemini2"), ("T2", "gemini2")})

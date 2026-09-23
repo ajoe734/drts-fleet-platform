@@ -1370,49 +1370,16 @@ def queue_resume_for_agent(config: dict[str, Any], status: dict[str, Any], agent
     return queue_resume_for_task(config, prioritized[0])
 
 
-# A PR review can only move a task that is still inside the candidate
-# lifecycle: approve needs `review`, reopen and notes act on a live candidate.
-# Polling every PR the bus has ever tracked meant one serial `gh api
-# .../pulls/<n>/reviews` per board task -- 147 of them for done tasks alone on
-# 2026-09-22, ~2s each, inside the supervisor tick. That was the 104s stall the
-# loop showed every poll interval, with nothing to act on at the end of it.
-REVIEW_POLL_STATUSES = frozenset({"review", "integrating", "acceptance"})
-
-
-COMMENT_POLL_SINCE_MARGIN = timedelta(minutes=10)
-
-
-def comment_poll_since(bus_state: dict[str, Any]) -> str | None:
-    """ISO `since` for the comments API, or None on the first sync.
-
-    GitHub filters issue comments by `updated_at >= since`, so after the first
-    full read each sync only has to look at what moved since the previous one.
-    The margin covers clock skew between GitHub and this host and a comment
-    updated during the previous sync; `processed_comment_ids` still de-dups
-    anything the window re-delivers, so a generous margin costs nothing.
-    """
-    last = _parse_iso(bus_state.get("last_sync_at"))
-    if last is None:
-        return None
-    return (last - COMMENT_POLL_SINCE_MARGIN).strftime("%Y-%m-%dT%H:%M:%SZ")
-
-
 def poll_issue_comments(config: dict[str, Any], bus_state: dict[str, Any], status: dict[str, Any], repo: str) -> bool:
     changed = False
     seen = set(bus_state.get("processed_comment_ids", []))
-    since = comment_poll_since(bus_state)
-    since_query = f"&since={since}" if since else ""
     for task in status.get("tasks", []):
-        # Issue commands (approve, reopen, note, resume) all act on a task that
-        # is still open; a done task's issue thread is history.
-        if str(task.get("status") or "").lower() == "done":
-            continue
         entry = (bus_state.get("tasks", {}) or {}).get(task["id"]) or {}
         issue_ref = entry.get("ops_issue") or {}
         number = issue_ref.get("number")
         if not number:
             continue
-        comments = gh_json(["api", f"repos/{repo}/issues/{number}/comments?per_page=100{since_query}"])
+        comments = gh_json(["api", f"repos/{repo}/issues/{number}/comments?per_page=100"])
         if not isinstance(comments, list):
             continue
         allowed = allowed_logins(config, task)
@@ -1446,8 +1413,6 @@ def poll_pr_reviews(config: dict[str, Any], bus_state: dict[str, Any], status: d
     changed = False
     seen = set(bus_state.get("processed_review_ids", []))
     for task in status.get("tasks", []):
-        if str(task.get("status") or "").lower() not in REVIEW_POLL_STATUSES:
-            continue
         entry = (bus_state.get("tasks", {}) or {}).get(task["id"]) or {}
         pr_ref = entry.get("review_pr") or {}
         number = pr_ref.get("number")

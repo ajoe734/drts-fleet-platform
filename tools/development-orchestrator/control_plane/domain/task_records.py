@@ -175,20 +175,3 @@ def workspace_baseline_cover_task_ids(task: dict[str, Any]) -> set[str]:
     if not isinstance(raw, list):
         return set()
     return {str(item).strip() for item in raw if str(item).strip()}
-
-
-def task_is_noncanonical_report(task: dict[str, Any]) -> bool:
-    """True for explicit `mutates_canonical=false` report/verification tasks.
-
-    Mirrors `candidate_required()` in bin/ai_status.py: these tasks are
-    reviewed and handed off with `not_applicable` candidate identity (no
-    Git commit/branch ever exists for them), so any reviewer-workspace
-    provisioning step that resolves a Git candidate must treat their
-    absence as expected, not as a failure to defer forever (see
-    SR-ORCH-REVIEW-WORKTREE-ISOLATION-20260923 R5-N1).
-    """
-    if task.get("mutates_canonical") is not False:
-        return False
-    candidate_sha = str(task.get("candidate_sha") or "").strip().lower()
-    candidate_branch = str(task.get("candidate_branch") or "").strip().lower()
-    return candidate_sha in ("", "not_applicable") and candidate_branch in ("", "not_applicable")

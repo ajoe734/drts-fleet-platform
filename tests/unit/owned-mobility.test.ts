@@ -31,6 +31,7 @@ function defaultReservationWindowEnd(offsetHours = 3): string {
 function createService(
   repository?: OwnedMobilityRepository,
   tenantPartnerService?: TenantPartnerService,
+  partnerNotificationNavigationRepository?: any,
 ) {
   const auditService = new AuditNotificationService();
   const callcenterService = new CallcenterService(auditService);
@@ -48,6 +49,10 @@ function createService(
     repository,
     tenantPartnerService,
   );
+  if (partnerNotificationNavigationRepository) {
+    (ownedMobilityService as any).partnerNotificationNavigationRepository =
+      partnerNotificationNavigationRepository;
+  }
 
   ownedMobilityService.registerCallRecordingListeners();
   return {
@@ -2007,7 +2012,7 @@ describe("owned mobility service", () => {
 
       let caught: any = null;
       try {
-        ownedMobilityService.getReferralPassengerReceipt(
+        await ownedMobilityService.getReferralPassengerReceipt(
           booking.orderId,
           identity2,
         );
@@ -2055,22 +2060,218 @@ describe("owned mobility service", () => {
       );
 
       const activeTrip =
-        ownedMobilityService.getReferralPassengerActiveTrip(identity);
+        await ownedMobilityService.getReferralPassengerActiveTrip(identity);
       expect(activeTrip.active).toBe(true);
       expect(activeTrip.trip?.orderId).toBe(booking.orderId);
 
       const history =
-        ownedMobilityService.listReferralPassengerHistory(identity);
+        await ownedMobilityService.listReferralPassengerHistory(identity);
       expect(history.items.length).toBeGreaterThan(0);
       expect(history.items[0]?.orderId).toBe(booking.orderId);
 
-      const receipt = ownedMobilityService.getReferralPassengerReceipt(
+      const receipt = await ownedMobilityService.getReferralPassengerReceipt(
         booking.orderId,
         identity,
       );
       expect(receipt.orderId).toBe(booking.orderId);
       expect(receipt.downloadUrl).toBe(
         `/api/referral/receipt/${booking.orderId}/download`,
+      );
+    });
+    it("denies access to historical null-tenant trips when the entry tenant is reassigned", async () => {
+      const mockNavRepo = {
+        findByOrderId: vi.fn(),
+        resolveRoute: vi.fn(),
+      } as any;
+      const tenantPartnerService = new TenantPartnerService(
+        new AuditNotificationService(),
+      );
+      const { ownedMobilityService } = createService(
+        undefined,
+        tenantPartnerService,
+        mockNavRepo,
+      );
+
+      const originalIdentity: BootstrapRequestIdentity = {
+        authMode: "jwt_bearer",
+        actorType: "referral_passenger",
+        actorId: "pax-ref-002",
+        realm: "partner",
+        tenantId: "tenant-demo-001",
+        partnerId: "partner_ead6bf3d-e858-47cc-bfe1-5a3742524118",
+        partnerProgramId: "program-referral-community",
+        partnerEntrySlug: "yuhe-residence",
+        drtsPassengerId: "pax-ref-002",
+        roleFamilies: ["partner"],
+        roles: ["referral_passenger"],
+        scopes: [],
+        requestId: "req-ref-002",
+      };
+
+      await ownedMobilityService.createMultiTaxiRide(
+        {
+          pickup: { address: "Pickup Spot 2" },
+          dropoff: { address: "Dropoff Spot 2" },
+          passenger: {
+            passengerId: "pax-ref-002",
+            name: "Pass",
+            phone: "0900",
+          },
+          requestedPickupAt: new Date().toISOString(),
+          timingMode: "on_demand",
+          paymentMethodTokenRef: null,
+        },
+        {
+          authorized: true,
+          authorizedTypes: ["standard"],
+          authorizationId: "auth-1",
+          activeFareVersionId: "v1",
+        } as any,
+        originalIdentity,
+      );
+
+      // Verify the active trip is visible to the original identity
+      mockNavRepo.findByOrderId.mockResolvedValueOnce({
+        tenantId: "tenant-demo-001",
+        partnerId: "partner_ead6bf3d-e858-47cc-bfe1-5a3742524118",
+      });
+      const originalActive =
+        await ownedMobilityService.getReferralPassengerActiveTrip(
+          originalIdentity,
+        );
+      expect(originalActive.active).toBe(true);
+
+      // Verify history is visible to the original identity
+      mockNavRepo.findByOrderId.mockResolvedValueOnce({
+        tenantId: "tenant-demo-001",
+        partnerId: "partner_ead6bf3d-e858-47cc-bfe1-5a3742524118",
+      });
+      const originalHistory =
+        await ownedMobilityService.listReferralPassengerHistory(
+          originalIdentity,
+        );
+      expect(originalHistory.items.length).toBeGreaterThan(0);
+
+      // Now create a new identity with the same partner but a different tenantId
+      const reassignedIdentity: BootstrapRequestIdentity = {
+        ...originalIdentity,
+        tenantId: "tenant-demo-002", // Changed tenant!
+      };
+
+      // Verify active trip is NO LONGER visible to the reassigned identity
+      mockNavRepo.findByOrderId.mockResolvedValueOnce({
+        tenantId: "tenant-demo-001",
+        partnerId: "partner_ead6bf3d-e858-47cc-bfe1-5a3742524118",
+      });
+      const reassignedActive =
+        await ownedMobilityService.getReferralPassengerActiveTrip(
+          reassignedIdentity,
+        );
+      expect(reassignedActive.active).toBe(false);
+
+      // Verify history is NO LONGER visible to the reassigned identity
+      mockNavRepo.findByOrderId.mockResolvedValueOnce({
+        tenantId: "tenant-demo-001",
+        partnerId: "partner_ead6bf3d-e858-47cc-bfe1-5a3742524118",
+      });
+      const reassignedHistory =
+        await ownedMobilityService.listReferralPassengerHistory(
+          reassignedIdentity,
+        );
+      expect(reassignedHistory.items.length).toBe(0);
+
+      // Also verify wrong partnerId
+      const wrongPartnerIdentity: BootstrapRequestIdentity = {
+        ...originalIdentity,
+        partnerId: "partner_wrong",
+      };
+      const wrongPartnerActive =
+        await ownedMobilityService.getReferralPassengerActiveTrip(
+          wrongPartnerIdentity,
+        );
+      expect(wrongPartnerActive.active).toBe(false);
+      const wrongPartnerHistory =
+        await ownedMobilityService.listReferralPassengerHistory(
+          wrongPartnerIdentity,
+        );
+      expect(wrongPartnerHistory.items.length).toBe(0);
+
+      // Also verify missing route denial
+      mockNavRepo.findByOrderId.mockResolvedValueOnce(null); // route missing
+      const missingRouteActive =
+        await ownedMobilityService.getReferralPassengerActiveTrip(
+          originalIdentity,
+        );
+      expect(missingRouteActive.active).toBe(false);
+
+      mockNavRepo.findByOrderId.mockResolvedValueOnce(null); // route missing
+      const missingRouteHistory =
+        await ownedMobilityService.listReferralPassengerHistory(
+          originalIdentity,
+        );
+      expect(missingRouteHistory.items.length).toBe(0);
+
+      // ---- Added for receipt/cancel/rating cross-tenant null-tenant denial ----
+      const orderId = originalActive.trip?.orderId;
+      if (!orderId) throw new Error("Missing active trip orderId");
+
+      mockNavRepo.findByOrderId.mockResolvedValueOnce({
+        tenantId: "tenant-demo-001",
+        partnerId: "partner_ead6bf3d-e858-47cc-bfe1-5a3742524118",
+      });
+      let caughtReceipt: any = null;
+      try {
+        await ownedMobilityService.getReferralPassengerReceipt(
+          orderId,
+          reassignedIdentity,
+        );
+      } catch (err) {
+        caughtReceipt = err;
+      }
+      expect(caughtReceipt).not.toBeNull();
+      expect(caughtReceipt.getStatus()).toBe(403);
+      expect(caughtReceipt.getResponse().error.code).toBe(
+        "PARTNER_SCOPE_MISMATCH",
+      );
+
+      mockNavRepo.findByOrderId.mockResolvedValueOnce({
+        tenantId: "tenant-demo-001",
+        partnerId: "partner_ead6bf3d-e858-47cc-bfe1-5a3742524118",
+      });
+      let caughtCancel: any = null;
+      try {
+        await ownedMobilityService.cancelReferralPassengerTrip(
+          orderId,
+          { orderId, reason: "test" },
+          reassignedIdentity,
+        );
+      } catch (err) {
+        caughtCancel = err;
+      }
+      expect(caughtCancel).not.toBeNull();
+      expect(caughtCancel.getStatus()).toBe(403);
+      expect(caughtCancel.getResponse().error.code).toBe(
+        "PARTNER_SCOPE_MISMATCH",
+      );
+
+      mockNavRepo.findByOrderId.mockResolvedValueOnce({
+        tenantId: "tenant-demo-001",
+        partnerId: "partner_ead6bf3d-e858-47cc-bfe1-5a3742524118",
+      });
+      let caughtRating: any = null;
+      try {
+        await ownedMobilityService.submitReferralPassengerRating(
+          orderId,
+          { orderId, score: 5 },
+          reassignedIdentity,
+        );
+      } catch (err) {
+        caughtRating = err;
+      }
+      expect(caughtRating).not.toBeNull();
+      expect(caughtRating.getStatus()).toBe(403);
+      expect(caughtRating.getResponse().error.code).toBe(
+        "PARTNER_SCOPE_MISMATCH",
       );
     });
 

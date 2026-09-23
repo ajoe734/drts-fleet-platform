@@ -415,50 +415,56 @@ export class OwnedMobilityController {
 
   @Get("partner/referral/passenger/active")
   @Throttle(READ_HEAVY_RATE_LIMIT)
-  getReferralPassengerActiveTrip(
+  async getReferralPassengerActiveTrip(
     @CurrentIdentity() identity: BootstrapRequestIdentity | null,
     @Headers("x-request-id") requestId?: string,
   ) {
     return toApiSuccessEnvelope(
-      this.ownedMobilityService.getReferralPassengerActiveTrip(identity),
+      await this.ownedMobilityService.getReferralPassengerActiveTrip(identity),
       requestId,
     );
   }
 
   @Get("partner/referral/passenger/history")
   @Throttle(READ_HEAVY_RATE_LIMIT)
-  listReferralPassengerHistory(
+  async listReferralPassengerHistory(
     @CurrentIdentity() identity: BootstrapRequestIdentity | null,
     @Headers("x-request-id") requestId?: string,
   ) {
     return toApiSuccessEnvelope(
-      this.ownedMobilityService.listReferralPassengerHistory(identity),
+      await this.ownedMobilityService.listReferralPassengerHistory(identity),
       requestId,
     );
   }
 
   @Get("partner/referral/passenger/orders/:orderId/receipt")
   @Throttle(READ_HEAVY_RATE_LIMIT)
-  getReferralPassengerReceipt(
+  async getReferralPassengerReceipt(
     @Param("orderId") orderId: string,
     @CurrentIdentity() identity: BootstrapRequestIdentity | null,
     @Headers("x-request-id") requestId?: string,
   ) {
     return toApiSuccessEnvelope(
-      this.ownedMobilityService.getReferralPassengerReceipt(orderId, identity),
+      await this.ownedMobilityService.getReferralPassengerReceipt(
+        orderId,
+        identity,
+      ),
       requestId,
     );
   }
 
   @Get("partner/referral/passenger/orders/:orderId/receipt/download")
   @Throttle(READ_HEAVY_RATE_LIMIT)
-  downloadReferralPassengerReceipt(
+  async downloadReferralPassengerReceipt(
     @Param("orderId") orderId: string,
     @CurrentIdentity() identity: BootstrapRequestIdentity | null,
     @Headers("x-request-id") requestId?: string,
   ) {
     return toApiSuccessEnvelope(
-      this.ownedMobilityService.getReferralPassengerReceipt(orderId, identity),
+      await this.ownedMobilityService.getReferralPassengerReceipt(
+        orderId,
+        identity,
+      ),
       requestId,
     );
   }
@@ -604,7 +610,11 @@ export class OwnedMobilityController {
     @Headers("x-request-id") requestId?: string,
   ) {
     return toApiSuccessEnvelope(
-      await this.ownedMobilityService.cancelOwnedOrder(orderId, command, requestId),
+      await this.ownedMobilityService.cancelOwnedOrder(
+        orderId,
+        command,
+        requestId,
+      ),
       requestId,
     );
   }
