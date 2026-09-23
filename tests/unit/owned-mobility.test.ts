@@ -18,7 +18,6 @@ import {
   type TenantPartnerRepository,
 } from "../../apps/api/src/modules/tenant-partner/tenant-partner.repository";
 import { TenantPartnerService } from "../../apps/api/src/modules/tenant-partner/tenant-partner.service";
-import { PartnerNotificationNavigationRepository } from "../../apps/api/src/modules/tenant-partner/partner-notification-navigation.repository";
 import { WebhookDispatchService } from "../../apps/api/src/modules/tenant-partner/webhook-dispatch.service";
 
 function defaultReservationWindowStart(offsetHours = 2): string {
@@ -2108,7 +2107,7 @@ describe("owned mobility service", () => {
         requestId: "req-ref-002",
       };
 
-      const booking = await ownedMobilityService.createMultiTaxiRide(
+      await ownedMobilityService.createMultiTaxiRide(
         {
           pickup: { address: "Pickup Spot 2" },
           dropoff: { address: "Dropoff Spot 2" },
