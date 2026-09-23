@@ -100,4 +100,3 @@ The current commit incorporates all fixes including expiration boundary enforcem
 | fresh_single_use_handoff_and_http_only_session_reuse | `embed-partner-session.ts`、`route.ts` | 缺少 expiry 阻擋 → 補上伺服器端 8小時過期驗證與 existingSession 檢查 | `vitest run ...` (Exit 0) | 同上 |
 | navigation_reads_current_trip_without_creating_orders | `tests/unit/owned-mobility.test.ts`、`owned-mobility.service.ts` | 原漏驗 receipt → 新增完整 null-tenant 拒絕矩陣 | `vitest run tests/unit/owned-mobility.test.ts` (Exit 0) | 同上 |
 | entry_scoped_navigation_denies_cross_subject_tenant_entry | `tests/unit/owned-mobility.test.ts` | frozen-route active/history 拒絕副作用 → 新增 cross-tenant null-tenant denial | `vitest run tests/unit/owned-mobility.test.ts` (Exit 0) | 同上 |
-

@@ -46,7 +46,7 @@ describe("embed-partner-session", () => {
     vi.setSystemTime(now + 8 * 60 * 60 * 1000 + 1000);
     session = await getReferralEmbedSession();
     expect(session).toBeNull();
-    
+
     vi.useRealTimers();
   });
 });

@@ -675,9 +675,9 @@ describe("tenant API key authoritative consumer and usage tracking", () => {
   it("records referral embed consent successfully via dedicated internal key endpoint", async () => {
     process.env.JWT_SECRET = "test-secret";
     process.env.DRTS_REFERRAL_EMBED_HANDOFF_KEY = "referral-handoff-key";
-    
+
     const { controller, tenantPartnerService } = createController();
-    
+
     // Mock the service method
     const mockRecord = vi.fn().mockResolvedValue({
       handoffId: "handoff-123",

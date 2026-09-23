@@ -56,7 +56,7 @@ function decode(value: string | undefined): ReferralEmbedSessionCookie | null {
     const parsed = JSON.parse(
       Buffer.from(body, "base64url").toString("utf8"),
     ) as ReferralEmbedSessionCookie;
-    
+
     if (!parsed.issuedAt || typeof parsed.issuedAt !== "string") {
       return null;
     }
@@ -68,7 +68,7 @@ function decode(value: string | undefined): ReferralEmbedSessionCookie | null {
     if (ageSeconds < 0 || ageSeconds > REFERRAL_EMBED_SESSION_MAX_AGE_SECONDS) {
       return null;
     }
-    
+
     return parsed;
   } catch {
     return null;
