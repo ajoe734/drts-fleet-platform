@@ -286,10 +286,6 @@ export class ReferralEmbedHandoffRepository {
         await client.query("COMMIT");
         return { outcome: "missing" };
       }
-      if (handoff.expiresAt <= new Date().toISOString()) {
-        await client.query("COMMIT");
-        return { outcome: "expired" };
-      }
       if (!handoff.consumedAt) {
         await client.query("COMMIT");
         return { outcome: "not_consumed" };
@@ -442,9 +438,6 @@ export class ReferralEmbedHandoffRepository {
   ): Promise<RecordReferralEmbedConsentResult> {
     const handoff = this.fallbackHandoffs.get(input.handoffId);
     if (!handoff) return { outcome: "missing" };
-    if (handoff.expiresAt <= new Date().toISOString()) {
-      return { outcome: "expired" };
-    }
     if (!handoff.consumedAt) return { outcome: "not_consumed" };
     if (
       handoff.entrySlug !== input.entrySlug.trim() ||
