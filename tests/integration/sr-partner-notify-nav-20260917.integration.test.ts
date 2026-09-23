@@ -605,7 +605,7 @@ describe.skipIf(!seedDatabaseUrl)(
             grantedAt: new Date().toISOString(),
           },
         }),
-      ).rejects.toThrowError("The referral handoff artifact has expired.");
+      ).rejects.toMatchObject({ code: "REFERRAL_HANDOFF_EXPIRED" });
     });
   },
 );
