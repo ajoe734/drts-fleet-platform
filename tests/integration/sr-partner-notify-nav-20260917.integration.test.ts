@@ -60,7 +60,10 @@ describe.skipIf(!seedDatabaseUrl)(
       // process.env.DATABASE_URL that other concurrently-running test files
       // and their DatabaseService instances rely on.
       pool = new Pool({ connectionString: databaseUrl, max: 8 });
-      db = { connect: pool.connect.bind(pool) } as unknown as DatabaseService;
+      db = {
+        connect: pool.connect.bind(pool),
+        isEnabled: () => true,
+      } as unknown as DatabaseService;
       navRepo = new PartnerNotificationNavigationRepository(db);
       handoffRepo = new ReferralEmbedHandoffRepository(db);
     }, 120_000);
