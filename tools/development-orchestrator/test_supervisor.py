@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import shutil
 import signal
 import subprocess
 import tempfile
@@ -12,6 +13,7 @@ import os
 from pathlib import Path
 from unittest import mock
 
+from adapters.base import DeliveryResult
 from control_plane.runtime import supervisor_runtime as supervisor
 from orchestrator_test_support import EvidenceOutputIsolation
 from common import load_rotation_cooldowns
@@ -590,7 +592,10 @@ class ExecutionWorkspaceTests(unittest.TestCase):
     def _repo_config(self, root: Path) -> dict:
         (root / "ai-status.json").write_text('{"tasks":[]}\n', encoding="utf-8")
         return {
-            "paths": {"status_file": str(root / "ai-status.json")},
+            "paths": {
+                "status_file": str(root / "ai-status.json"),
+                "activity_log": str(root / "ai-activity-log.jsonl"),
+            },
             "agents": {
                 "codex2": {
                     "id": "codex2",
@@ -795,11 +800,956 @@ class ExecutionWorkspaceTests(unittest.TestCase):
             self.assertIn("isolated coordination worktree", request.message)
             self.assertEqual(request.metadata["workspace_root"], str(workspace))
 
+    def test_review_dispatch_ignores_owner_execution_branch_override(self) -> None:
+        """SR-ORCH-REVIEW-WORKTREE-ISOLATION-20260923 regression.
 
+        Before the fix: a reviewer dispatch for a task carrying an owner-authored
+        `execution_branch` successor override resolved to the exact same branch
+        (and therefore the exact same, possibly-dirty, worktree) as the owner.
+        A reviewer must always land in its own isolated, detached workspace
+        (see `ensure_reviewer_review_workspace`), and the owner's existing
+        worktree/WIP must be left untouched.
+        """
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir) / "repo"
+            root.mkdir()
+            self._init_repo(root)
+            dev_tip = _git(root, "rev-parse", "dev").stdout.strip()
 
+            owner_worktree = root / ".artifacts/worktrees/auto/gemini-iam-ses-002"
+            _git(root, "worktree", "add", "-b", "codex/iam-ses-002-post-p0-successor-4", str(owner_worktree), "dev")
+            (owner_worktree / "README.md").write_text("owner wip\n", encoding="utf-8")
+            owner_dirty_status_before = _git(owner_worktree, "status", "--porcelain").stdout
 
+            task_metadata = {"execution_branch": "codex/iam-ses-002-post-p0-successor-4"}
+            config = self._repo_config(root)
 
+            owner_request = supervisor.DeliveryRequest(
+                agent_id="gemini",
+                provider="gemini",
+                delivery_mode="antigravity",
+                message="wake",
+                task_id="IAM-SES-002",
+                reason="owned_ready_dispatch",
+                metadata={"mode": "execution", "task": task_metadata},
+            )
+            owner_workspace, owner_branch, owner_base_branch, owner_source = supervisor.ensure_execution_workspace(
+                config, owner_request, supervisor.route_task("IAM-SES-002"),
+            )
+            self.assertEqual(owner_workspace, owner_worktree.resolve())
+            self.assertEqual(owner_branch, "codex/iam-ses-002-post-p0-successor-4")
+            self.assertEqual(owner_source, "existing_worktree")
 
+            reviewer_request = supervisor.DeliveryRequest(
+                agent_id="codex2",
+                provider="codex2",
+                delivery_mode="codex",
+                message="wake",
+                task_id="IAM-SES-002",
+                reason="review_ready_dispatch",
+                metadata={"mode": "execution", "task": task_metadata},
+            )
+            reviewer_workspace, reviewer_branch, reviewer_base_branch, reviewer_source = supervisor.ensure_execution_workspace(
+                config, reviewer_request, supervisor.route_task("IAM-SES-002"),
+            )
+
+            # No candidate_sha is pinned yet, so the reviewer falls back to
+            # the owner's branch tip -- which, since the owner made no new
+            # commit (only a dirty working tree), is just the dev tip.
+            self.assertNotEqual(reviewer_workspace, owner_worktree.resolve())
+            self.assertNotEqual(reviewer_branch, "codex/iam-ses-002-post-p0-successor-4")
+            self.assertEqual(reviewer_branch, dev_tip)
+            self.assertEqual(reviewer_base_branch, "dev")
+            self.assertEqual(reviewer_source, "created_review_worktree")
+            self.assertEqual(
+                reviewer_workspace,
+                (root / ".artifacts/worktrees/auto/review" / f"codex2-iam-ses-002-{dev_tip[:12]}").resolve(),
+            )
+            self.assertEqual(_git(reviewer_workspace, "rev-parse", "--verify", "HEAD").stdout.strip(), dev_tip)
+            self.assertEqual(_git(reviewer_workspace, "branch", "--show-current").stdout.strip(), "")
+
+            # Owner worktree/WIP must be untouched by the reviewer dispatch.
+            self.assertEqual(_git(owner_worktree, "status", "--porcelain").stdout, owner_dirty_status_before)
+            self.assertEqual(
+                _git(owner_worktree, "branch", "--show-current").stdout.strip(),
+                "codex/iam-ses-002-post-p0-successor-4",
+            )
+
+            supervisor.attach_workspace_metadata(
+                config, reviewer_request, reviewer_workspace, reviewer_branch, reviewer_base_branch, reviewer_source,
+            )
+            self.assertIn(f"`{reviewer_workspace}`", reviewer_request.message)
+            self.assertIn(f"Reviewing candidate `{reviewer_branch}`", reviewer_request.message)
+            self.assertIn("detached", reviewer_request.message)
+            self.assertNotIn(str(owner_worktree.resolve()), reviewer_request.message)
+            self.assertNotIn("codex/iam-ses-002-post-p0-successor-4", reviewer_request.message)
+
+    def test_reviewer_default_branch_colliding_with_owner_override_gets_isolated(self) -> None:
+        """SR-ORCH-REVIEW-WORKTREE-ISOLATION-20260923 F1 regression (2nd rejection round).
+
+        `_execution_branch` already refuses to hand the reviewer the owner's
+        override *string*, but the reviewer's own deterministic default branch
+        (`{agent}/{task_id}`) can coincidentally equal a branch the owner's
+        override already put an active, dirty worktree on. Before this fix,
+        `ensure_execution_workspace` then resolved that coincidental match via
+        `_worktree_for_branch` straight back to the owner's mutable worktree.
+        """
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir) / "repo"
+            root.mkdir()
+            self._init_repo(root)
+
+            # Owner's execution_branch override happens to equal the reviewer's
+            # own default branch for this task ("codex2/iam-ses-002").
+            owner_worktree = root / ".artifacts/worktrees/auto/gemini-iam-ses-002"
+            _git(root, "worktree", "add", "-b", "codex2/iam-ses-002", str(owner_worktree), "dev")
+            (owner_worktree / "README.md").write_text("owner wip\n", encoding="utf-8")
+            owner_dirty_status_before = _git(owner_worktree, "status", "--porcelain").stdout
+
+            task_metadata = {"execution_branch": "codex2/iam-ses-002"}
+            config = self._repo_config(root)
+
+            owner_request = supervisor.DeliveryRequest(
+                agent_id="gemini",
+                provider="gemini",
+                delivery_mode="antigravity",
+                message="wake",
+                task_id="IAM-SES-002",
+                reason="owned_ready_dispatch",
+                metadata={"mode": "execution", "task": task_metadata},
+            )
+            owner_workspace, owner_branch, _owner_base_branch, owner_source = supervisor.ensure_execution_workspace(
+                config, owner_request, supervisor.route_task("IAM-SES-002"),
+            )
+            self.assertEqual(owner_workspace, owner_worktree.resolve())
+            self.assertEqual(owner_branch, "codex2/iam-ses-002")
+            self.assertEqual(owner_source, "existing_worktree")
+
+            reviewer_request = supervisor.DeliveryRequest(
+                agent_id="codex2",
+                provider="codex2",
+                delivery_mode="codex",
+                message="wake",
+                task_id="IAM-SES-002",
+                reason="review_ready_dispatch",
+                metadata={"mode": "execution", "task": task_metadata},
+            )
+            reviewer_workspace, reviewer_branch, reviewer_base_branch, reviewer_source = supervisor.ensure_execution_workspace(
+                config, reviewer_request, supervisor.route_task("IAM-SES-002"),
+            )
+
+            # The reviewer must never land on the owner's branch/worktree, even
+            # though its own default branch name collided with it.
+            self.assertNotEqual(reviewer_workspace, owner_worktree.resolve())
+            self.assertNotEqual(reviewer_branch, owner_branch)
+            self.assertEqual(reviewer_base_branch, "dev")
+            self.assertEqual((reviewer_workspace / "README.md").read_text(encoding="utf-8"), "test\n")
+
+            # Owner worktree/WIP must be untouched by the reviewer dispatch.
+            self.assertEqual(_git(owner_worktree, "status", "--porcelain").stdout, owner_dirty_status_before)
+            self.assertEqual(
+                _git(owner_worktree, "branch", "--show-current").stdout.strip(),
+                "codex2/iam-ses-002",
+            )
+
+            supervisor.attach_workspace_metadata(
+                config, reviewer_request, reviewer_workspace, reviewer_branch, reviewer_base_branch, reviewer_source,
+            )
+            self.assertIn(f"`{reviewer_workspace}`", reviewer_request.message)
+            self.assertIn(f"Reviewing candidate `{reviewer_branch}`", reviewer_request.message)
+            self.assertNotIn(str(owner_worktree.resolve()), reviewer_request.message)
+            self.assertNotIn("codex2/iam-ses-002", reviewer_request.message)
+
+    def test_owner_dispatch_still_resumes_execution_branch_override(self) -> None:
+        """Owner-role regression guard alongside the reviewer isolation fix above."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir) / "repo"
+            root.mkdir()
+            self._init_repo(root)
+            existing = root / ".artifacts/worktrees/auto/gemini-iam-ses-002"
+            _git(root, "worktree", "add", "-b", "codex/iam-ses-002-post-p0", str(existing), "dev")
+
+            request = supervisor.DeliveryRequest(
+                agent_id="gemini",
+                provider="gemini",
+                delivery_mode="antigravity",
+                message="wake",
+                task_id="IAM-SES-002",
+                reason="owned_ready_dispatch",
+                metadata={
+                    "mode": "execution",
+                    "task": {"execution_branch": "codex/iam-ses-002-post-p0"},
+                },
+            )
+            workspace, branch, base_branch, source = supervisor.ensure_execution_workspace(
+                self._repo_config(root), request, supervisor.route_task("IAM-SES-002"),
+            )
+
+            self.assertEqual(workspace, existing.resolve())
+            self.assertEqual(branch, "codex/iam-ses-002-post-p0")
+            self.assertEqual(base_branch, "dev")
+            self.assertEqual(source, "existing_worktree")
+
+    def test_reviewer_workspace_pins_candidate_sha_despite_owner_drift(self) -> None:
+        """SR-ORCH-REVIEW-WORKTREE-ISOLATION-20260923: reviewer sees the pinned candidate, not live drift.
+
+        Production incident this task's brief traces the bug to: owner
+        Gemini published a candidate, handed it to reviewer Codex, and then
+        kept committing a concurrent CI repair on the same branch. A
+        branch-based reviewer workspace (this task's earlier, since-reopened
+        candidates) never actually checked out the owner's real content at
+        all -- it just forked a fresh, empty branch off `dev`. This proves
+        the fix actually delivers the *pinned* `candidate_sha` content, even
+        while the owner's branch keeps moving past it.
+        """
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir) / "repo"
+            root.mkdir()
+            self._init_repo(root)
+
+            owner_worktree = root / ".artifacts/worktrees/auto/gemini-iam-ses-002"
+            _git(root, "worktree", "add", "-b", "gemini/iam-ses-002-successor-4", str(owner_worktree), "dev")
+            (owner_worktree / "candidate.txt").write_text("v1\n", encoding="utf-8")
+            _git(owner_worktree, "add", "candidate.txt")
+            _git(owner_worktree, "commit", "-m", "candidate v1")
+            candidate_sha = _git(owner_worktree, "rev-parse", "HEAD").stdout.strip()
+
+            # Owner keeps drifting after the handoff: a concurrent commit
+            # plus uncommitted work, same as the Gemini CI-repair scenario.
+            (owner_worktree / "candidate.txt").write_text("v2\n", encoding="utf-8")
+            _git(owner_worktree, "add", "candidate.txt")
+            _git(owner_worktree, "commit", "-m", "concurrent CI repair, post-handoff")
+            (owner_worktree / "candidate.txt").write_text("v3-dirty\n", encoding="utf-8")
+            owner_status_before = _git(owner_worktree, "status", "--porcelain").stdout
+            owner_head_before = _git(owner_worktree, "rev-parse", "HEAD").stdout.strip()
+
+            task_metadata = {
+                "owner": "gemini",
+                "reviewer": "codex2",
+                "execution_branch": "gemini/iam-ses-002-successor-4",
+                "candidate_sha": candidate_sha,
+            }
+            config = self._repo_config(root)
+
+            reviewer_request = supervisor.DeliveryRequest(
+                agent_id="codex2",
+                provider="codex2",
+                delivery_mode="codex",
+                message="wake",
+                task_id="IAM-SES-002",
+                reason="review_ready_dispatch",
+                metadata={"mode": "execution", "task": task_metadata},
+            )
+            reviewer_workspace, reviewer_branch, reviewer_base_branch, reviewer_source = supervisor.ensure_execution_workspace(
+                config, reviewer_request, supervisor.route_task("IAM-SES-002"),
+            )
+
+            self.assertEqual(reviewer_branch, candidate_sha)
+            self.assertEqual(reviewer_base_branch, "dev")
+            self.assertEqual(reviewer_source, "created_review_worktree")
+            self.assertNotEqual(reviewer_workspace, owner_worktree.resolve())
+            self.assertEqual(_git(reviewer_workspace, "rev-parse", "HEAD").stdout.strip(), candidate_sha)
+            self.assertEqual((reviewer_workspace / "candidate.txt").read_text(encoding="utf-8"), "v1\n")
+            self.assertEqual(_git(reviewer_workspace, "branch", "--show-current").stdout.strip(), "")
+
+            # The owner's post-handoff drift (both the CI-repair commit and
+            # the further dirty write) must be completely untouched.
+            self.assertEqual(_git(owner_worktree, "rev-parse", "HEAD").stdout.strip(), owner_head_before)
+            self.assertEqual(_git(owner_worktree, "status", "--porcelain").stdout, owner_status_before)
+
+            supervisor.attach_workspace_metadata(
+                config, reviewer_request, reviewer_workspace, reviewer_branch, reviewer_base_branch, reviewer_source,
+            )
+            self.assertIn(f"Reviewing candidate `{candidate_sha}`", reviewer_request.message)
+            self.assertIn("detached", reviewer_request.message)
+            self.assertNotIn(str(owner_worktree.resolve()), reviewer_request.message)
+
+    def test_reviewer_isolated_from_owner_workspace_wearing_reviewers_old_slug(self) -> None:
+        """SR-ORCH-REVIEW-WORKTREE-ISOLATION-20260923 F1.a regression (3rd rejection round).
+
+        Codex F1.a: `_worktree_belongs_to_slug` matches by *directory name*,
+        but a takeover does not rename the directory -- it only changes the
+        task's `owner`/`reviewer`/`execution_branch` fields while the branch
+        stays checked out wherever it already was. So when today's reviewer
+        (codex2) was the *original* owner and its own slug ("codex2-iam-ses-002")
+        named that directory, the slug check wrongly says "this is my own
+        workspace" even though the directory is now the new owner's (gemini's)
+        live, dirty tree -- because the branch that got handed over as
+        gemini's `execution_branch` override happens to equal codex2's
+        deterministic reviewer-default branch too.
+        """
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir) / "repo"
+            root.mkdir()
+            self._init_repo(root)
+            config = self._repo_config(root)
+
+            # 1. codex2 is originally the owner: this creates branch
+            #    codex2/iam-ses-002 at auto/codex2-iam-ses-002.
+            original_owner_request = supervisor.DeliveryRequest(
+                agent_id="codex2",
+                provider="codex2",
+                delivery_mode="codex",
+                message="wake",
+                task_id="IAM-SES-002",
+                reason="owned_ready_dispatch",
+                metadata={
+                    "mode": "execution",
+                    "task": {"owner": "codex2", "reviewer": "gemini"},
+                },
+            )
+            original_workspace, original_branch, _base, original_source = supervisor.ensure_execution_workspace(
+                config, original_owner_request, supervisor.route_task("IAM-SES-002"),
+            )
+            self.assertEqual(original_branch, "codex2/iam-ses-002")
+            self.assertEqual(original_source, "created_worktree")
+            owner_worktree = original_workspace
+            (owner_worktree / "README.md").write_text("owner wip\n", encoding="utf-8")
+            owner_dirty_status_before = _git(owner_worktree, "status", "--porcelain").stdout
+
+            # 2. Legitimate takeover: gemini becomes owner, codex2 becomes
+            #    reviewer, and gemini's execution_branch override points at
+            #    the exact branch codex2's old directory is still checked
+            #    out on.
+            handed_off_task = {
+                "owner": "gemini",
+                "reviewer": "codex2",
+                "execution_branch": "codex2/iam-ses-002",
+            }
+
+            owner_request = supervisor.DeliveryRequest(
+                agent_id="gemini",
+                provider="gemini",
+                delivery_mode="antigravity",
+                message="wake",
+                task_id="IAM-SES-002",
+                reason="owned_ready_dispatch",
+                metadata={"mode": "execution", "task": handed_off_task},
+            )
+            owner_workspace, owner_branch, _owner_base, owner_source = supervisor.ensure_execution_workspace(
+                config, owner_request, supervisor.route_task("IAM-SES-002"),
+            )
+            self.assertEqual(owner_workspace, owner_worktree.resolve())
+            self.assertEqual(owner_branch, "codex2/iam-ses-002")
+            self.assertEqual(owner_source, "existing_worktree")
+
+            reviewer_request = supervisor.DeliveryRequest(
+                agent_id="codex2",
+                provider="codex2",
+                delivery_mode="codex",
+                message="wake",
+                task_id="IAM-SES-002",
+                reason="review_ready_dispatch",
+                metadata={"mode": "execution", "task": handed_off_task},
+            )
+            reviewer_workspace, reviewer_branch, reviewer_base_branch, reviewer_source = supervisor.ensure_execution_workspace(
+                config, reviewer_request, supervisor.route_task("IAM-SES-002"),
+            )
+
+            # The reviewer must land somewhere else entirely, despite its own
+            # agent/task slug matching the owner's (inherited) directory name.
+            self.assertNotEqual(reviewer_workspace, owner_worktree.resolve())
+            self.assertNotEqual(reviewer_branch, "codex2/iam-ses-002")
+            self.assertEqual(reviewer_base_branch, "dev")
+            self.assertEqual((reviewer_workspace / "README.md").read_text(encoding="utf-8"), "test\n")
+
+            # Owner worktree/WIP must be untouched by the reviewer dispatch.
+            self.assertEqual(_git(owner_worktree, "status", "--porcelain").stdout, owner_dirty_status_before)
+            self.assertEqual(
+                _git(owner_worktree, "branch", "--show-current").stdout.strip(),
+                "codex2/iam-ses-002",
+            )
+
+            supervisor.attach_workspace_metadata(
+                config, reviewer_request, reviewer_workspace, reviewer_branch, reviewer_base_branch, reviewer_source,
+            )
+            self.assertIn(f"`{reviewer_workspace}`", reviewer_request.message)
+            self.assertNotIn(f"`{owner_worktree.resolve()}`", reviewer_request.message)
+
+    def test_reviewer_isolated_when_override_preempts_isolated_fallback_name(self) -> None:
+        """SR-ORCH-REVIEW-WORKTREE-ISOLATION-20260923 F1.b regression (3rd rejection round).
+
+        Codex F1.b: once a reviewer's plain default branch is redirected to
+        the deterministic `{slug}-isolated-review` fallback, nothing checked
+        that fallback itself against the owner's `execution_branch` override.
+        An override chosen (by design or coincidence) to equal that exact
+        fallback name lets the reviewer's "isolated" branch resolve straight
+        back to the owner's live worktree.
+        """
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir) / "repo"
+            root.mkdir()
+            self._init_repo(root)
+            config = self._repo_config(root)
+
+            # A genuinely foreign worktree occupies the reviewer's plain
+            # default branch (codex2/iam-ses-002), forcing the fallback path.
+            foreign_worktree = root / ".artifacts/worktrees/auto/gemini-iam-ses-002-old"
+            _git(root, "worktree", "add", "-b", "codex2/iam-ses-002", str(foreign_worktree), "dev")
+
+            # The owner's execution_branch override is chosen to equal the
+            # deterministic isolated-review fallback name codex2 (as
+            # reviewer) would otherwise be redirected to.
+            override_branch = "codex2-iam-ses-002-isolated-review"
+            owner_worktree = root / ".artifacts/worktrees/auto/gemini-iam-ses-002"
+            _git(root, "worktree", "add", "-b", override_branch, str(owner_worktree), "dev")
+            (owner_worktree / "README.md").write_text("owner wip\n", encoding="utf-8")
+            owner_dirty_status_before = _git(owner_worktree, "status", "--porcelain").stdout
+
+            task_metadata = {
+                "owner": "gemini",
+                "reviewer": "codex2",
+                "execution_branch": override_branch,
+            }
+
+            owner_request = supervisor.DeliveryRequest(
+                agent_id="gemini",
+                provider="gemini",
+                delivery_mode="antigravity",
+                message="wake",
+                task_id="IAM-SES-002",
+                reason="owned_ready_dispatch",
+                metadata={"mode": "execution", "task": task_metadata},
+            )
+            owner_workspace, owner_branch, _owner_base, owner_source = supervisor.ensure_execution_workspace(
+                config, owner_request, supervisor.route_task("IAM-SES-002"),
+            )
+            self.assertEqual(owner_workspace, owner_worktree.resolve())
+            self.assertEqual(owner_branch, override_branch)
+            self.assertEqual(owner_source, "existing_worktree")
+
+            reviewer_request = supervisor.DeliveryRequest(
+                agent_id="codex2",
+                provider="codex2",
+                delivery_mode="codex",
+                message="wake",
+                task_id="IAM-SES-002",
+                reason="review_ready_dispatch",
+                metadata={"mode": "execution", "task": task_metadata},
+            )
+            reviewer_workspace, reviewer_branch, reviewer_base_branch, reviewer_source = supervisor.ensure_execution_workspace(
+                config, reviewer_request, supervisor.route_task("IAM-SES-002"),
+            )
+
+            # The reviewer's fallback must not land on the owner's branch,
+            # even though the deterministic fallback name coincides with it.
+            self.assertNotEqual(reviewer_branch, override_branch)
+            self.assertNotEqual(reviewer_workspace, owner_worktree.resolve())
+            self.assertNotEqual(reviewer_workspace, foreign_worktree.resolve())
+            self.assertEqual(reviewer_base_branch, "dev")
+            self.assertEqual((reviewer_workspace / "README.md").read_text(encoding="utf-8"), "test\n")
+
+            # Owner worktree/WIP must be untouched by the reviewer dispatch.
+            self.assertEqual(_git(owner_worktree, "status", "--porcelain").stdout, owner_dirty_status_before)
+            self.assertEqual(
+                _git(owner_worktree, "branch", "--show-current").stdout.strip(),
+                override_branch,
+            )
+
+            supervisor.attach_workspace_metadata(
+                config, reviewer_request, reviewer_workspace, reviewer_branch, reviewer_base_branch, reviewer_source,
+            )
+            self.assertIn(f"`{reviewer_workspace}`", reviewer_request.message)
+            self.assertNotIn(str(owner_worktree.resolve()), reviewer_request.message)
+
+    def test_reviewer_workspace_reuse_requires_detached_head(self) -> None:
+        """SR-ORCH-REVIEW-WORKTREE-ISOLATION-20260923 R3-N1 regression (4th rejection round).
+
+        A reviewer workspace that satisfies the commit/clean checks but has
+        since had a branch attached to it (e.g. a later owner dispatch whose
+        `execution_branch` override happens to name a branch, checked out
+        directly in the reviewer's own detached workspace by whatever put it
+        there) is no longer a safe "existing_review_worktree" to hand back --
+        that attached branch is exactly what let an owner's branch lookup
+        claim the same path as its own worktree before this fix. Both
+        directions of the bug are covered here: the owner dispatch must not
+        resolve into the reviewer's namespace, and a later reviewer dispatch
+        must not reuse the now-attached path either.
+        """
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir) / "repo"
+            root.mkdir()
+            self._init_repo(root)
+            dev_tip = _git(root, "rev-parse", "dev").stdout.strip()
+            config = self._repo_config(root)
+            task_metadata = {
+                "owner": "gemini",
+                "reviewer": "codex2",
+                "execution_branch": "gemini/iam-ses-002-successor-4",
+                # Pinned so the reviewer's candidate resolves independent of
+                # dispatch order -- the owner's override branch doesn't exist
+                # yet at the point of the first reviewer dispatch below.
+                "candidate_sha": dev_tip,
+            }
+
+            first_reviewer_request = supervisor.DeliveryRequest(
+                agent_id="codex2",
+                provider="codex2",
+                delivery_mode="codex",
+                message="wake",
+                task_id="IAM-SES-002",
+                reason="review_ready_dispatch",
+                metadata={"mode": "execution", "task": task_metadata},
+            )
+            first_review_workspace, _branch, _base, first_source = supervisor.ensure_execution_workspace(
+                config, first_reviewer_request, supervisor.route_task("IAM-SES-002"),
+            )
+            self.assertEqual(first_source, "created_review_worktree")
+            self.assertEqual(_git(first_review_workspace, "branch", "--show-current").stdout.strip(), "")
+
+            # Simulated drift: something attaches the owner's future
+            # execution_branch to the reviewer's still-clean, still-on-candidate
+            # workspace (no content change, no dirt -- only a branch ref).
+            _git(first_review_workspace, "checkout", "-b", task_metadata["execution_branch"])
+
+            owner_request = supervisor.DeliveryRequest(
+                agent_id="gemini",
+                provider="gemini",
+                delivery_mode="antigravity",
+                message="wake",
+                task_id="IAM-SES-002",
+                reason="owned_ready_dispatch",
+                metadata={"mode": "execution", "task": task_metadata},
+            )
+            owner_workspace, owner_branch, _owner_base, owner_source = supervisor.ensure_execution_workspace(
+                config, owner_request, supervisor.route_task("IAM-SES-002"),
+            )
+            # The owner must get its own workspace, never the reviewer's
+            # namespace, even though the reviewer's workspace now carries
+            # exactly the branch the owner's override names.
+            self.assertNotEqual(owner_workspace, first_review_workspace)
+            self.assertEqual(owner_branch, task_metadata["execution_branch"])
+            self.assertEqual(owner_source, "created_worktree")
+            self.assertEqual(_git(owner_workspace, "branch", "--show-current").stdout.strip(), owner_branch)
+
+            second_reviewer_request = supervisor.DeliveryRequest(
+                agent_id="codex2",
+                provider="codex2",
+                delivery_mode="codex",
+                message="wake",
+                task_id="IAM-SES-002",
+                reason="review_ready_dispatch",
+                metadata={"mode": "execution", "task": task_metadata},
+            )
+            second_review_workspace, second_branch, second_base, second_source = supervisor.ensure_execution_workspace(
+                config, second_reviewer_request, supervisor.route_task("IAM-SES-002"),
+            )
+            # A fresh reviewer dispatch must not reuse the now-attached path;
+            # it must allocate another safe, still-detached workspace instead.
+            self.assertNotEqual(second_review_workspace, first_review_workspace)
+            self.assertNotEqual(second_review_workspace, owner_workspace)
+            self.assertEqual(second_source, "created_review_worktree")
+            self.assertEqual(second_branch, dev_tip)
+            self.assertEqual(second_base, "dev")
+            self.assertEqual(_git(second_review_workspace, "branch", "--show-current").stdout.strip(), "")
+            self.assertEqual((second_review_workspace / "README.md").read_text(encoding="utf-8"), "test\n")
+
+            # The first (now branch-attached) review workspace is left
+            # completely untouched -- not reset, not reclaimed.
+            self.assertEqual(
+                _git(first_review_workspace, "branch", "--show-current").stdout.strip(),
+                task_metadata["execution_branch"],
+            )
+            self.assertEqual(_git(first_review_workspace, "rev-parse", "HEAD").stdout.strip(), dev_tip)
+
+            # Owner concurrent WIP after the fact must not leak into the
+            # reviewer's actual (second) workspace.
+            (owner_workspace / "README.md").write_text("owner concurrent wip\n", encoding="utf-8")
+            self.assertEqual((second_review_workspace / "README.md").read_text(encoding="utf-8"), "test\n")
+
+            supervisor.attach_workspace_metadata(
+                config, second_reviewer_request, second_review_workspace, second_branch, second_base, second_source,
+            )
+            self.assertIn(f"`{second_review_workspace}`", second_reviewer_request.message)
+            self.assertIn("no branch is checked out here", second_reviewer_request.message)
+            self.assertNotIn(str(owner_workspace.resolve()), second_reviewer_request.message)
+            self.assertNotIn(task_metadata["execution_branch"], second_reviewer_request.message)
+
+    def test_reviewer_pinned_candidate_unresolvable_preserves_identity(self) -> None:
+        """SR-ORCH-REVIEW-WORKTREE-ISOLATION-20260923 R3-N2 regression (4th rejection round).
+
+        A task can pin a `candidate_sha` that this repository's object
+        database cannot resolve yet (e.g. it exists only in a not-yet-fetched
+        clone). Before this fix, `_reviewer_candidate_commit` silently fell
+        through to the owner branch tip and reported *that* commit as the
+        reviewed candidate -- exactly the "present lock silently substituted"
+        failure mode this task's brief called out, and a direct contradiction
+        of `watch_events.render_wakeup_message`'s locked-candidate guardrail
+        text, which always names the task's actual `candidate_sha`.
+        """
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir) / "repo"
+            root.mkdir()
+            self._init_repo(root)
+            config = self._repo_config(root)
+
+            owner_worktree = root / ".artifacts/worktrees/auto/gemini-iam-ses-002"
+            _git(root, "worktree", "add", "-b", "gemini/iam-ses-002", str(owner_worktree), "dev")
+            owner_tip = _git(owner_worktree, "rev-parse", "HEAD").stdout.strip()
+
+            # A distinct, valid candidate commit exists only in a separate
+            # clone -- never fetched into the supervisor's own repo, so it is
+            # genuinely unresolvable there (ordinary same-repo handoffs, as
+            # covered by test_reviewer_workspace_pins_candidate_sha_despite_owner_drift,
+            # remain resolvable and unaffected by this case).
+            remote = Path(tmpdir) / "remote-clone"
+            _git(root, "clone", str(root), str(remote))
+            _git(remote, "config", "user.email", "test@example.com")
+            _git(remote, "config", "user.name", "Test User")
+            (remote / "README.md").write_text("remote pinned candidate\n", encoding="utf-8")
+            _git(remote, "add", "README.md")
+            _git(remote, "commit", "-m", "candidate available remotely only")
+            pinned = _git(remote, "rev-parse", "HEAD").stdout.strip()
+
+            task_metadata = {
+                "owner": "gemini",
+                "reviewer": "codex2",
+                "execution_branch": "gemini/iam-ses-002",
+                "candidate_sha": pinned,
+            }
+            reviewer_request = supervisor.DeliveryRequest(
+                agent_id="codex2",
+                provider="codex2",
+                delivery_mode="codex",
+                message="wake",
+                task_id="IAM-SES-002",
+                reason="review_ready_dispatch",
+                metadata={"mode": "execution", "task": task_metadata},
+            )
+            reviewer_workspace, reviewer_branch, _base, reviewer_source = supervisor.ensure_execution_workspace(
+                config, reviewer_request, supervisor.route_task("IAM-SES-002"),
+            )
+
+            # The locked candidate's identity must be preserved and reported
+            # -- never silently replaced by the owner's resolvable branch tip.
+            self.assertEqual(reviewer_branch, pinned)
+            self.assertNotEqual(reviewer_branch, owner_tip)
+            self.assertEqual(reviewer_source, "unresolvable_pinned_candidate")
+            self.assertEqual(reviewer_workspace, root.resolve())
+
+            supervisor.attach_workspace_metadata(
+                config, reviewer_request, reviewer_workspace, reviewer_branch, None, reviewer_source,
+            )
+            self.assertIn(pinned, reviewer_request.message)
+            self.assertNotIn(owner_tip, reviewer_request.message)
+
+    def _start_review_dispatch(self, config: dict, task: dict) -> tuple:
+        """Drive the real `start_worker_for_request` review dispatch path.
+
+        Mocks only the external delivery adapter and the machine-truth/
+        artifact-IO boundaries (`load_status`, `ensure_task_brief`) -- Git,
+        workspace allocation, metadata rendering and dispatch decision logic
+        all run unmocked, matching the reviewer's R4 verification boundary.
+        """
+        request = supervisor.DeliveryRequest(
+            agent_id="codex2",
+            provider="codex2",
+            delivery_mode="codex",
+            message="wake",
+            task_id="IAM-SES-002",
+            reason="review_ready_dispatch",
+            metadata={"mode": "execution", "task": dict(task)},
+        )
+        full_task = dict(
+            task,
+            id="IAM-SES-002",
+            status="review",
+            reviewer="Codex2",
+            candidate_generation="fixture-generation",
+        )
+        request.metadata["task"] = full_task
+        state: dict = {}
+        result = DeliveryResult(
+            ok=True,
+            adapter="test_sink",
+            mode="codex",
+            target="Codex2",
+            auto_delivered=True,
+            manual_confirmation_required=False,
+            run_id="fixture-review-run",
+        )
+        adapter = mock.Mock()
+        adapter.deliver.return_value = result
+        with mock.patch.object(supervisor, "load_status", return_value={"tasks": [full_task]}), \
+             mock.patch.object(supervisor, "ensure_task_brief", return_value=None), \
+             mock.patch.object(supervisor, "build_adapter", return_value=adapter):
+            started = supervisor.start_worker_for_request(
+                config, state, {}, request, queue_event_id=None,
+                attempt_count=1, event_id_for_log=None,
+            )
+        return started, adapter, request, state
+
+    def test_unresolvable_pinned_candidate_stops_reviewer_dispatch(self) -> None:
+        """SR-ORCH-REVIEW-WORKTREE-ISOLATION-20260923 R4-N1 regression (5th rejection round).
+
+        An `unresolvable_pinned_candidate` workspace result is a fallback to
+        the mutable canonical workspace, not a safe review. Before this fix,
+        `start_worker_for_request` accepted it anyway: the adapter was
+        called and a "running" worker record was created in the canonical
+        workspace despite `ensure_reviewer_review_workspace`'s own comment
+        saying "fail this dispatch".
+        """
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir) / "repo"
+            root.mkdir()
+            self._init_repo(root)
+            config = self._repo_config(root)
+
+            owner = root / ".artifacts/worktrees/auto/gemini-iam-ses-002-successor-4"
+            _git(root, "worktree", "add", "-b", "gemini/iam-ses-002-successor-4", str(owner), "dev")
+            (owner / "README.md").write_text("owner wip\n", encoding="utf-8")
+            owner_status_before = _git(owner, "status", "--porcelain").stdout
+
+            remote = Path(tmpdir) / "remote-clone"
+            _git(root, "clone", str(root), str(remote))
+            _git(remote, "config", "user.email", "test@example.com")
+            _git(remote, "config", "user.name", "Test User")
+            (remote / "README.md").write_text("remote pinned candidate\n", encoding="utf-8")
+            _git(remote, "add", "README.md")
+            _git(remote, "commit", "-m", "candidate available remotely only")
+            pinned = _git(remote, "rev-parse", "HEAD").stdout.strip()
+
+            # Concurrent dirty state in the canonical root, which the fix
+            # must never deliver a review into.
+            (root / "README.md").write_text("canonical concurrent wip\n", encoding="utf-8")
+
+            task = {
+                "owner": "gemini",
+                "reviewer": "codex2",
+                "execution_branch": "gemini/iam-ses-002-successor-4",
+                "candidate_sha": pinned,
+            }
+            started, adapter, request, state = self._start_review_dispatch(config, task)
+
+            self.assertFalse(started[0], "unprovisionable review was accepted as a running worker")
+            self.assertEqual(started[1], "reviewer_workspace_unavailable:unresolvable_pinned_candidate")
+            adapter.deliver.assert_not_called()
+            self.assertNotIn("fixture-review-run", state.get("workers", {}))
+            self.assertEqual(request.metadata["workspace_source"], "unresolvable_pinned_candidate")
+            self.assertEqual(owner_status_before, _git(owner, "status", "--porcelain").stdout)
+
+    def test_worktree_add_failure_stops_reviewer_dispatch(self) -> None:
+        """SR-ORCH-REVIEW-WORKTREE-ISOLATION-20260923 R4-N1 regression (5th rejection round).
+
+        A `fallback_canonical` workspace result from a failed
+        `git worktree add` (e.g. a stale registration for a manually-removed
+        fixture directory) must also stop the dispatch rather than deliver a
+        review into the canonical workspace.
+        """
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir) / "repo"
+            root.mkdir()
+            self._init_repo(root)
+            config = self._repo_config(root)
+            sha = _git(root, "rev-parse", "HEAD").stdout.strip()
+
+            owner = root / ".artifacts/worktrees/auto/gemini-iam-ses-002-successor-4"
+            _git(root, "worktree", "add", "-b", "gemini/iam-ses-002-successor-4", str(owner), "dev")
+            (owner / "README.md").write_text("owner wip\n", encoding="utf-8")
+            owner_status_before = _git(owner, "status", "--porcelain").stdout
+
+            task = {
+                "owner": "gemini",
+                "reviewer": "codex2",
+                "execution_branch": "gemini/iam-ses-002-successor-4",
+                "candidate_sha": sha,
+            }
+
+            # Create a normal detached reviewer workspace once, then remove
+            # only the disposable fixture directory while Git keeps the
+            # worktree registration -- simulating partial cleanup. The next
+            # `git worktree add` for the same commit fails for real, with no
+            # Git mocking involved.
+            first_request = supervisor.DeliveryRequest(
+                agent_id="codex2",
+                provider="codex2",
+                delivery_mode="codex",
+                message="wake",
+                task_id="IAM-SES-002",
+                reason="review_ready_dispatch",
+                metadata={"mode": "execution", "task": dict(task)},
+            )
+            first_workspace, _branch, _base, first_source = supervisor.ensure_execution_workspace(
+                config, first_request, supervisor.route_task("IAM-SES-002"),
+            )
+            self.assertEqual(first_source, "created_review_worktree")
+            shutil.rmtree(first_workspace)
+
+            (root / "README.md").write_text("canonical concurrent wip\n", encoding="utf-8")
+
+            started, adapter, request, state = self._start_review_dispatch(config, task)
+
+            self.assertFalse(started[0], "failed isolated worktree was accepted as a running worker")
+            self.assertEqual(started[1], "reviewer_workspace_unavailable:fallback_canonical")
+            adapter.deliver.assert_not_called()
+            self.assertNotIn("fixture-review-run", state.get("workers", {}))
+            self.assertEqual(request.metadata["workspace_source"], "fallback_canonical")
+            self.assertEqual(owner_status_before, _git(owner, "status", "--porcelain").stdout)
+
+    def test_retry_after_workspace_drift_refreshes_stale_notice(self) -> None:
+        """SR-ORCH-REVIEW-WORKTREE-ISOLATION-20260923 R6-N1 regression (7th rejection round).
+
+        `retry_due_workers` reconstructs the retried `DeliveryRequest` from a
+        worker's `request_snapshot` (`request_for_worker` ->
+        `request_from_snapshot`), which carries forward whatever
+        `Supervisor-assigned workspace:` notice was rendered for the
+        *original* dispatch. If that original reviewer workspace has since
+        drifted (a branch got attached -- see R3-N1/R4-N1's drift scenario),
+        `ensure_execution_workspace` safely reallocates a fresh, still-
+        detached workspace on retry, but before this fix
+        `attach_workspace_metadata` refused to overwrite the notice because
+        the heading was already present in the reconstructed message --
+        leaving the dispatched prompt naming the stale, now-branch-attached
+        old path/workspace instead of the one the worker is actually placed
+        in.
+        """
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir) / "repo"
+            root.mkdir()
+            self._init_repo(root)
+            config = self._repo_config(root)
+            sha = _git(root, "rev-parse", "HEAD").stdout.strip()
+
+            task = {
+                "owner": "gemini",
+                "reviewer": "codex2",
+                "candidate_sha": sha,
+            }
+            started, _adapter, request, _state = self._start_review_dispatch(config, task)
+            self.assertTrue(started[0], f"initial review dispatch was refused: {started[1]}")
+            first_workspace = Path(request.metadata["workspace_root"])
+            self.assertEqual(request.metadata["workspace_source"], "created_review_worktree")
+            self.assertIn(f"`{first_workspace}`", request.message)
+            self.assertIn("no branch is checked out here", request.message)
+
+            # Drift: a branch gets attached to the still-clean, still-on-
+            # candidate workspace after delivery (mirrors R3-N1's scenario),
+            # making it unsafe to reuse on retry.
+            _git(first_workspace, "checkout", "-b", "drift-branch")
+
+            # Reconstruct the retry request through the exact production
+            # mechanism `retry_due_workers` uses -- carries the stale,
+            # already-rendered notice for `first_workspace` forward.
+            snapshot = supervisor.request_snapshot(request)
+            retry_request = supervisor.request_from_snapshot(snapshot)
+            self.assertIn(f"`{first_workspace}`", retry_request.message)
+
+            full_task = dict(request.metadata["task"])
+            state2: dict = {}
+            result = DeliveryResult(
+                ok=True, adapter="test_sink", mode="codex", target="Codex2",
+                auto_delivered=True, manual_confirmation_required=False,
+                run_id="fixture-review-retry",
+            )
+            adapter2 = mock.Mock()
+            adapter2.deliver.return_value = result
+            with mock.patch.object(supervisor, "load_status", return_value={"tasks": [full_task]}), \
+                 mock.patch.object(supervisor, "ensure_task_brief", return_value=None), \
+                 mock.patch.object(supervisor, "build_adapter", return_value=adapter2):
+                retried = supervisor.start_worker_for_request(
+                    config, state2, {}, retry_request, queue_event_id=None,
+                    attempt_count=2, event_id_for_log=None,
+                )
+
+            self.assertTrue(retried[0], f"retry after safe reallocation was refused: {retried[1]}")
+            second_workspace = Path(retry_request.metadata["workspace_root"])
+            self.assertNotEqual(second_workspace, first_workspace)
+            self.assertEqual(retry_request.metadata["workspace_source"], "created_review_worktree")
+
+            # The rendered message must reflect the NEW allocation, not the
+            # stale one carried over from the reconstructed snapshot.
+            self.assertIn(f"`{second_workspace}`", retry_request.message)
+            self.assertNotIn(f"`{first_workspace}`", retry_request.message)
+            self.assertEqual(retry_request.message.count("Supervisor-assigned workspace:"), 1)
+
+    def _start_report_review_dispatch(self, config: dict, extra_task: dict | None = None) -> tuple:
+        """Same production path as `_start_review_dispatch`, for a report task.
+
+        `mutates_canonical=false`, `candidate_sha`/`candidate_branch`
+        `not_applicable` -- the `not_applicable` sentinel from
+        `candidate_required()` (bin/ai_status.py), not a Git ref.
+        """
+        task = {
+            "owner": "gemini",
+            "reviewer": "codex2",
+            "task_class": "report",
+            "mutates_canonical": False,
+            "candidate_sha": "not_applicable",
+            "candidate_branch": "not_applicable",
+        }
+        if extra_task:
+            task.update(extra_task)
+        return self._start_review_dispatch(config, task)
+
+    def test_report_review_without_owner_ref_still_delivers(self) -> None:
+        """SR-ORCH-REVIEW-WORKTREE-ISOLATION-20260923 R5-N1 regression.
+
+        A `mutates_canonical=false` report review has no Git candidate to
+        isolate at all, so `ensure_reviewer_review_workspace` resolving no
+        commit (no owner branch exists, none is expected) must not be
+        treated as the R4-N1 provisioning failure. Before this fix, the R4
+        gate refused delivery unconditionally on `fallback_canonical`,
+        deferring these reviews with `waiting_capacity` forever since no
+        owner Git ref will ever appear.
+        """
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir) / "repo"
+            root.mkdir()
+            self._init_repo(root)
+            config = self._repo_config(root)
+
+            # No owner worktree/branch is created -- report reviews never
+            # require one.
+            started, adapter, request, state = self._start_report_review_dispatch(config)
+
+            self.assertTrue(started[0], f"report review was refused: {started[1]}")
+            adapter.deliver.assert_called_once()
+            self.assertEqual(request.metadata["workspace_source"], "fallback_canonical")
+            self.assertEqual(Path(request.metadata["workspace_root"]), root.resolve())
+            self.assertIn("report/evidence review", request.message)
+
+    def test_report_review_with_owner_branch_still_delivers(self) -> None:
+        """SR-ORCH-REVIEW-WORKTREE-ISOLATION-20260923 R5-N1 positive control,
+        and R6-N2 regression (7th rejection round).
+
+        Same report task, but the owner happens to have a branch too (e.g.
+        a mixed-role owner who also does implementation work elsewhere), so
+        `ensure_reviewer_review_workspace` resolves it as an ordinary Git
+        commit and provisions an isolated worktree rather than falling back.
+        Delivery must still succeed either way -- this path was never
+        subject to the R4 gate (it isn't `fallback_canonical` or
+        `unresolvable_pinned_candidate`), so this is a control confirming
+        the R5-N1 fix does not disturb it.
+
+        Before the R6-N2 fix, `attach_workspace_metadata` selected its
+        "no Git candidate to isolate" notice for *any*
+        `task_is_noncanonical_report` task regardless of what workspace was
+        actually assigned, so this genuinely-isolated worktree was falsely
+        labelled "(canonical workspace; ...)" even though
+        `workspace_root != canonical_root`.
+        """
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir) / "repo"
+            root.mkdir()
+            self._init_repo(root)
+            config = self._repo_config(root)
+
+            owner = root / ".artifacts/worktrees/auto/gemini-iam-ses-002"
+            _git(root, "worktree", "add", "-b", "gemini/iam-ses-002", str(owner), "dev")
+
+            started, adapter, request, state = self._start_report_review_dispatch(
+                config, {"execution_branch": "gemini/iam-ses-002"},
+            )
+
+            self.assertTrue(started[0], f"report review was refused: {started[1]}")
+            adapter.deliver.assert_called_once()
+            self.assertNotIn(
+                request.metadata["workspace_source"],
+                ("unresolvable_pinned_candidate", "fallback_canonical"),
+            )
+            self.assertNotEqual(Path(request.metadata["workspace_root"]), root.resolve())
+            self.assertIn("isolated, detached review workspace", request.message)
+            self.assertNotIn("canonical workspace; this is a report/evidence review", request.message)
 
 
 class RunOnceSupervisorStateTests(unittest.TestCase):
