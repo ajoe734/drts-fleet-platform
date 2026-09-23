@@ -125,9 +125,9 @@ describe.skipIf(!testDbUrl)(
       await pool.query(
         `
       INSERT INTO ops.phase1_owned_orders (
-        order_id, tenant_id, status, created_at, updated_at
+        order_id, order_no, tenant_id, status, order_source, service_bucket, dispatch_semantics, created_at, updated_at, record, aggregate_version, idempotency_key
       ) VALUES (
-        $1, $2, 'assigned', now(), now()
+        $1, $1, $2, 'assigned', 'partner_api', 'default', 'default', now(), now(), '{}'::jsonb, 1, $1
       )
     `,
         [orderId, tenantId],
