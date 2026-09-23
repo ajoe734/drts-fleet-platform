@@ -1,12 +1,12 @@
 import React from "react";
-import { Banner, useTheme } from "@drts/ui-web";
+import { CanvasBanner, buildCanvasTheme } from "@drts/ui-web";
 
 export function PartnerNotificationPanel({ entrySlug }: { entrySlug: string }) {
-  const theme = useTheme();
+  const theme = buildCanvasTheme({ surface: "platform" });
 
   return (
     <div data-testid="partner-notification-placeholder" style={{ padding: 16 }}>
-      <Banner 
+      <CanvasBanner 
         theme={theme} 
         tone="info" 
         title="Pending Design Handoff" 
