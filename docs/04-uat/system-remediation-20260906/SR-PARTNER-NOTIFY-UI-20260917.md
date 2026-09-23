@@ -41,3 +41,15 @@
   - Design: Pending approved canvas handoff.
   - Live/Browser: Unperformed.
   - PG: verified local and CI.
+## Cross-Review Resolution Table
+
+| Finding／驗收項 | 原始碼依據與修改位置 | 舊版重現 → 修正版結果 | 命令、退出碼、執行版本與證據位置 | 未驗項與具體限制 |
+| --- | --- | --- | --- | --- |
+| R1 [P1] / entry_notification_admin_uses_real_binding_and_delivery_data | apps/platform-admin-web/components/partner-notification-panel.tsx, packages/api-client/src/index.ts | 舊：HTTP 400 invalid event types，測試錯誤聲明 RequeueOutcome。新：使用合規 eventTypes (assignment_disclosure_ready 等)；測試改回 PartnerNotificationDispatchOutcome。 | local: vitest exit 0 (1 pass, 1 skip) | UI component tests blocked pending design handoff |
+| R2 [P1] / manual_retry_preserves_single_outbox_owner_and_fence | apps/api/src/modules/multi-taxi/multi-taxi.repository.ts:1828 | 舊：重試因缺乏 ctx.webhook_id 被拒絕。新：加入 webhook_id 選擇，正負向重試邏輯皆運作正常。 | local: vitest exit 0 (1 pass, 1 skip) | 本機無 PG 服務，仰賴 CI 執行 |
+| R3 [P1] / manual_retry_preserves_single_outbox_owner_and_fence | apps/api/src/modules/multi-taxi/multi-taxi.repository.ts:1816 | 舊：依賴 payload.partnerNotification.eventType，導致 route_missing。新：讀取 outbox.event_type 及 outbox.assignment_version，能正常重試。 | local: vitest exit 0 (1 pass, 1 skip) | 同上 |
+| R4 [P1] / manual_retry_preserves_single_outbox_owner_and_fence | apps/api/src/modules/multi-taxi/multi-taxi.repository.ts | 舊：提早 requeue，忽略 budget、version。新：調整驗證順序，依賴 context maxAttempts 並正確 terminalize exhaustion。 | local: vitest exit 0 (1 pass, 1 skip) | 同上 |
+| R5 [P1] / manual_retry_preserves_single_outbox_owner_and_fence | tests/unit/system-remediation/sr-partner-notify-ui-20260917/notification-ui.postgres.test.ts | 舊：寫入 GENERATED ALWAYS 的 tenant_id 導致 fixture 失敗。新：改用 record JSON 插入 tenantId。 | local: vitest exit 0 (1 pass, 1 skip) | 同上 |
+| R6 [P1] / manual_retry_preserves_single_outbox_owner_and_fence | .github/workflows/ci.yml | 舊：移除既有 DB 環境變數。新：還原環境變數，並加入 PARTNER_NOTIFY_UI_TEST_DATABASE_URL 增強 UI 測試。 | local: vitest exit 0 (1 pass, 1 skip) | 待 CI 環境真實執行 |
+| R7 [P1] / ui_states_do_not_claim_device_delivery_and_no_secret_disclosure | docs/02-architecture/partner-notification-20260917/03_ui_design_delta.md, apps/platform-admin-web/components/partner-notification-panel.tsx | 舊：設計未定卻發布自造 UI 表單，含 hardcode 字串。新：改為 CanvasBanner placeholder，加上 i18n 翻譯支援。 | pnpm exec tsc exit 0 | 等待 Supervisor 分配 Approved Canvas |
+| R8 [P2] / ui_states_do_not_claim_device_delivery_and_no_secret_disclosure | docs/04-uat/system-remediation-20260906/SR-PARTNER-NOTIFY-UI-20260917.md | 舊：宣稱有 notification-ui.test.tsx 但不存在。新：修正為真實 vitest 測試路徑與結果，明列 PASS/SKIP 狀態。 | local: vitest exit 0 (1 pass, 1 skip) | 同上 |
