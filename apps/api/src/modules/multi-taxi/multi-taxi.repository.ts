@@ -1765,9 +1765,14 @@ export class MultiTaxiRepository {
         o.created_at as "createdAt",
         ctx.delivered_at as "deliveredAt",
         o.status,
-        NULL as result,
+        CASE
+          WHEN o.status = 'delivered' THEN 'delivered'
+          WHEN o.status = 'failed' AND COALESCE(ctx.failure_reason, o.payload->'partnerNotification'->>'failureReason') IN ('configuration_blocked', 'endpoint_disabled') THEN 'provider_not_configured'
+          WHEN o.status = 'failed' THEN 'provider_error'
+          ELSE NULL
+        END as result,
         o.attempt_count as attempts,
-        COALESCE((ctx.retry_policy_snapshot->>'maxAttempts')::int, 3) as "maxAttempts",
+        COALESCE((ctx.retry_policy_snapshot->>'maxAttempts')::int, 1) as "maxAttempts",
         o.next_attempt_at as "nextAttemptAt"
       FROM ops.consumer_notification_outbox o
       LEFT JOIN mobility.phase1_partner_notification_delivery_contexts ctx ON ctx.outbox_id = o.outbox_id
@@ -1813,7 +1818,7 @@ export class MultiTaxiRepository {
       await client.query("BEGIN");
 
       const outboxRows = await client.query(
-        "SELECT o.status, o.next_attempt_at, o.payload, o.attempt_count, o.order_id, o.event_type, o.assignment_version, r.entry_slug as route_entry_slug, r.tenant_id as route_tenant_id, r.partner_id as route_partner_id FROM ops.consumer_notification_outbox o LEFT JOIN mobility.phase1_order_partner_notification_routes r ON r.order_id = o.order_id WHERE o.outbox_id = $1 FOR UPDATE OF o",
+        "SELECT o.status, o.next_attempt_at, o.payload, o.attempt_count, o.order_id, o.event_type, o.assignment_version, o.created_at, r.entry_slug as route_entry_slug, r.tenant_id as route_tenant_id, r.partner_id as route_partner_id FROM ops.consumer_notification_outbox o LEFT JOIN mobility.phase1_order_partner_notification_routes r ON r.order_id = o.order_id WHERE o.outbox_id = $1 FOR UPDATE OF o",
         [outboxId],
       );
       if (outboxRows.rows.length === 0) {
@@ -1848,9 +1853,13 @@ export class MultiTaxiRepository {
 
       const expiresAt = ctx
         ? new Date(ctx.expires_at)
-        : outbox.payload?.partnerNotification?.expiresAt
-          ? new Date(outbox.payload.partnerNotification.expiresAt)
-          : null;
+        : new Date(notificationExpiresAt({
+            eventType: outbox.event_type as any,
+            createdAt: outbox.created_at,
+            payload: outbox.payload || {},
+            assignmentVersion: outbox.assignment_version,
+            orderId: outbox.order_id,
+          } as any));
       if (expiresAt && expiresAt < new Date()) {
         await client.query("ROLLBACK");
         return {
@@ -1951,11 +1960,15 @@ export class MultiTaxiRepository {
         }
       }
 
-      const maxAttempts = ctx && ctx.retry_policy_snapshot?.maxAttempts !== undefined
-        ? parseInt(ctx.retry_policy_snapshot.maxAttempts, 10)
-        : outbox.payload?.partnerNotification?.maxAttempts !== undefined
-          ? parseInt(outbox.payload.partnerNotification.maxAttempts, 10)
-          : null;
+      let maxAttempts = null;
+      if (ctx && ctx.retry_policy_snapshot?.maxAttempts !== undefined) {
+        maxAttempts = parseInt(ctx.retry_policy_snapshot.maxAttempts, 10);
+      } else if (this.facade) {
+        const readiness = await this.facade.resolveNotificationRoute(route, internalEvent);
+        if (readiness.ready) {
+           maxAttempts = readiness.retryPolicy.maxAttempts;
+        }
+      }
 
       if (maxAttempts !== null && outbox.attempt_count >= maxAttempts) {
         await client.query("ROLLBACK");
