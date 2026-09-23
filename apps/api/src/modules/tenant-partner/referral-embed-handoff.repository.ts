@@ -263,16 +263,19 @@ export class ReferralEmbedHandoffRepository {
     return (result.rows[0]?.record as ReferralEmbedConsentLedgerRecord) ?? null;
   }
 
-  async recordConsent(input: {
-    handoffId: string;
-    entrySlug: string;
-    entryHost: string;
-    currentDrtsPassengerId?: string;
-    currentPartnerEntrySlug?: string;
-    consentBundle: ReferralEmbedConsentBundle;
-  }): Promise<RecordReferralEmbedConsentResult> {
+  async recordConsent(
+    input: {
+      handoffId: string;
+      entrySlug: string;
+      entryHost: string;
+      currentDrtsPassengerId?: string;
+      currentPartnerEntrySlug?: string;
+      consentBundle: ReferralEmbedConsentBundle;
+    },
+    validateFn?: (session: ReferralEmbedSession) => Promise<void>,
+  ): Promise<RecordReferralEmbedConsentResult> {
     if (!this.isEnabled()) {
-      return this.recordConsentFallback(input);
+      return this.recordConsentFallback(input, validateFn);
     }
 
     const client = await this.databaseService!.connect();
@@ -282,10 +285,6 @@ export class ReferralEmbedHandoffRepository {
       if (!handoff) {
         await client.query("COMMIT");
         return { outcome: "missing" };
-      }
-      if (handoff.expiresAt <= new Date().toISOString()) {
-        await client.query("COMMIT");
-        return { outcome: "expired" };
       }
       if (!handoff.consumedAt) {
         await client.query("COMMIT");
@@ -304,6 +303,18 @@ export class ReferralEmbedHandoffRepository {
       ) {
         await client.query("COMMIT");
         return { outcome: "session_mismatch" };
+      }
+
+      const updated = this.withConsent(handoff, input.consentBundle);
+      const sessionToReturn = this.toSession(updated);
+
+      if (validateFn) {
+        try {
+          await validateFn(sessionToReturn);
+        } catch (err) {
+          await client.query("ROLLBACK");
+          throw err;
+        }
       }
 
       const existing = await client.query<JsonRecordRow>(
@@ -354,7 +365,6 @@ export class ReferralEmbedHandoffRepository {
         );
       }
 
-      const updated = this.withConsent(handoff, input.consentBundle);
       await client.query(
         `
           UPDATE admin.phase1_referral_embed_handoffs
@@ -374,7 +384,7 @@ export class ReferralEmbedHandoffRepository {
       await client.query("COMMIT");
       return {
         outcome: existing.rows[0] ? "replayed" : "recorded",
-        session: this.toSession(updated),
+        session: sessionToReturn,
       };
     } finally {
       client.release();
@@ -415,19 +425,19 @@ export class ReferralEmbedHandoffRepository {
     return { outcome: "consumed", session: this.toSession(updated) };
   }
 
-  private recordConsentFallback(input: {
-    handoffId: string;
-    entrySlug: string;
-    entryHost: string;
-    currentDrtsPassengerId?: string;
-    currentPartnerEntrySlug?: string;
-    consentBundle: ReferralEmbedConsentBundle;
-  }): RecordReferralEmbedConsentResult {
+  async recordConsentFallback(
+    input: {
+      handoffId: string;
+      entrySlug: string;
+      entryHost: string;
+      currentDrtsPassengerId?: string;
+      currentPartnerEntrySlug?: string;
+      consentBundle: ReferralEmbedConsentBundle;
+    },
+    validateFn?: (session: ReferralEmbedSession) => Promise<void>,
+  ): Promise<RecordReferralEmbedConsentResult> {
     const handoff = this.fallbackHandoffs.get(input.handoffId);
     if (!handoff) return { outcome: "missing" };
-    if (handoff.expiresAt <= new Date().toISOString()) {
-      return { outcome: "expired" };
-    }
     if (!handoff.consumedAt) return { outcome: "not_consumed" };
     if (
       handoff.entrySlug !== input.entrySlug.trim() ||
@@ -442,6 +452,13 @@ export class ReferralEmbedHandoffRepository {
       return { outcome: "session_mismatch" };
     }
 
+    const updated = this.withConsent(handoff, input.consentBundle);
+    const sessionToReturn = this.toSession(updated);
+
+    if (validateFn) {
+      await validateFn(sessionToReturn);
+    }
+
     const key = `${handoff.handoffId}\0${input.consentBundle.bundleVersion}`;
     const exists = this.fallbackConsents.has(key);
     if (!exists) {
@@ -450,11 +467,10 @@ export class ReferralEmbedHandoffRepository {
         this.buildConsentRecord(handoff, input.consentBundle),
       );
     }
-    const updated = this.withConsent(handoff, input.consentBundle);
     this.fallbackHandoffs.set(updated.handoffId, updated);
     return {
       outcome: exists ? "replayed" : "recorded",
-      session: this.toSession(updated),
+      session: sessionToReturn,
     };
   }
 

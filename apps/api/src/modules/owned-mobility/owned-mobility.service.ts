@@ -13255,9 +13255,8 @@ export class OwnedMobilityService
       (identity.actorType !== "partner_api_key" &&
         identity.actorType !== "referral_passenger") ||
       !order.partnerEntrySlug ||
-      (identity.partnerId && identity.partnerId !== order.partnerId) ||
-      (identity.partnerProgramId &&
-        identity.partnerProgramId !== order.partnerProgramId) ||
+      (identity.partnerId || null) !== (order.partnerId || null) ||
+      (identity.partnerProgramId || null) !== (order.partnerProgramId || null) ||
       identity.partnerEntrySlug !== order.partnerEntrySlug ||
       (identity.actorType === "referral_passenger" &&
         passengerId &&
@@ -13272,9 +13271,9 @@ export class OwnedMobilityService
             order.orderId,
           );
         if (
-          route &&
-          (route.tenantId !== identity.tenantId ||
-            route.partnerId !== (identity.partnerId || null))
+          !route ||
+          route.tenantId !== identity.tenantId ||
+          route.partnerId !== (identity.partnerId || null)
         ) {
           mismatch = true;
         }
@@ -13307,9 +13306,8 @@ export class OwnedMobilityService
         identity.actorType !== "referral_passenger") ||
       !order.partnerEntrySlug ||
       (identity.tenantId && identity.tenantId !== order.tenantId) ||
-      (identity.partnerId && identity.partnerId !== order.partnerId) ||
-      (identity.partnerProgramId &&
-        identity.partnerProgramId !== order.partnerProgramId) ||
+      (identity.partnerId || null) !== (order.partnerId || null) ||
+      (identity.partnerProgramId || null) !== (order.partnerProgramId || null) ||
       identity.partnerEntrySlug !== order.partnerEntrySlug ||
       (identity.actorType === "referral_passenger" &&
         passengerId &&

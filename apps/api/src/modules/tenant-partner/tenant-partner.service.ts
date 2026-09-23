@@ -5836,10 +5836,9 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
     command: RecordReferralEmbedConsentCommand,
   ): Promise<ReferralEmbedSession> {
     this.assertExactReferralEmbedConsentBundle(command.consentBundle);
-    const result =
-      await this.referralEmbedHandoffRepository.recordConsent(command);
-    if (result.outcome === "recorded" || result.outcome === "replayed") {
-      const entry = await this.getPartnerEntry(result.session.partnerEntrySlug);
+    
+    const validateFn = async (session: ReferralEmbedSession) => {
+      const entry = await this.getPartnerEntry(session.partnerEntrySlug);
       if (!entry || entry.status !== "active") {
         throw new ApiRequestError(
           HttpStatus.FORBIDDEN,
@@ -5848,8 +5847,8 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
         );
       }
       if (
-        entry.tenantId !== result.session.identity.tenantId ||
-        entry.partnerId !== (result.session.identity.partnerId || null)
+        entry.tenantId !== session.identity.tenantId ||
+        entry.partnerId !== (session.identity.partnerId || null)
       ) {
         throw new ApiRequestError(
           HttpStatus.FORBIDDEN,
@@ -5858,8 +5857,8 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
         );
       }
       const link = await this.partnerUserIdentityLinkRepository.findByDrtsPassengerId(
-        result.session.partnerEntrySlug,
-        result.session.drtsPassengerId,
+        session.partnerEntrySlug,
+        session.drtsPassengerId,
       );
       if (!link || link.status !== "active") {
         throw new ApiRequestError(
@@ -5868,6 +5867,12 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
           "The partner user identity link is no longer active.",
         );
       }
+    };
+
+    const result =
+      await this.referralEmbedHandoffRepository.recordConsent(command, validateFn);
+    
+    if (result.outcome === "recorded" || result.outcome === "replayed") {
       return result.session;
     }
     if (result.outcome === "expired") {
