@@ -2,7 +2,7 @@
 
 ## 夥伴通知點擊返回正確行程與安全 fresh handoff
 
-**Candidate SHA:** 45a2b7c60cc72661c9abfc1ab0d43a758d4a1cf6
+**Candidate SHA:** a2ffa03ba38e945e82ac69deceb1d6561b54380f
 **Branch:** gemini2/sr-partner-notify-nav-20260917
 **Base:** dev
 
