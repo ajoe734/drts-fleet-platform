@@ -5870,6 +5870,13 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
       }
       return result.session;
     }
+    if (result.outcome === "expired") {
+      throw new ApiRequestError(
+        HttpStatus.FORBIDDEN,
+        "REFERRAL_HANDOFF_EXPIRED",
+        "The referral handoff artifact has expired.",
+      );
+    }
     if (result.outcome === "not_consumed") {
       throw new ApiRequestError(
         HttpStatus.FORBIDDEN,
