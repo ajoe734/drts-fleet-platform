@@ -29,7 +29,7 @@
 
 | Finding / 驗收項                      | 狀態 (Status)        | 修改位置與說明                                            | 證據 (Evidence)                                                                                                                 |
 | ------------------------------------- | -------------------- | --------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------- |
-| 1. Functional UI absent, CanvasInput  | STOP (Awaits Design) | `partner-notification-panel.tsx`                          | Replaced invented layout with placeholder banner.                                                                               |
+| 1. Functional UI absent, CanvasInput  | STOP (Awaits Design) | `partner-notification-panel.tsx`                          | Replaced invented layout with placeholder banner. Fixed CanvasBanner export error to use proper Banner component to pass build. |
 | 2. Hardcoded eventTypes=["*"]         | STOP (Awaits Design) | `partner-notification-panel.tsx`                          | Removed from placeholder.                                                                                                       |
 | 3. COALESCE combines UUID with text   | PASS                 | `multi-taxi.repository.ts:1743`                           | Casted explicitly to `::uuid`.                                                                                                  |
 | 4. Missing route fields / payload     | PASS                 | `multi-taxi.repository.ts`                                | Joined `phase1_order_partner_notification_routes` in list and retry.                                                            |
