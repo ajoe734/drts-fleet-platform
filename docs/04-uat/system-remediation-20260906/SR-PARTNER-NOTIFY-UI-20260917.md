@@ -47,3 +47,5 @@
 - **Evidence**:
   - `pnpm build`: Exit 0
   - `pnpm test`: Exit 0
+
+- **Update 2026-09-23**: Verified local branch is mergeable with origin/dev. The reported merge_conflict appears to be transient. Handing off again.
