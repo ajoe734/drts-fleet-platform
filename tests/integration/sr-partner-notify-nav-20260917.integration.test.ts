@@ -63,6 +63,7 @@ describe.skipIf(!seedDatabaseUrl)(
       db = {
         connect: pool.connect.bind(pool),
         isEnabled: () => true,
+        query: pool.query.bind(pool),
       } as unknown as DatabaseService;
       navRepo = new PartnerNotificationNavigationRepository(db);
       handoffRepo = new ReferralEmbedHandoffRepository(db);
