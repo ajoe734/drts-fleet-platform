@@ -795,7 +795,110 @@ class ExecutionWorkspaceTests(unittest.TestCase):
             self.assertIn("isolated coordination worktree", request.message)
             self.assertEqual(request.metadata["workspace_root"], str(workspace))
 
+    def test_review_dispatch_ignores_owner_execution_branch_override(self) -> None:
+        """SR-ORCH-REVIEW-WORKTREE-ISOLATION-20260923 regression.
 
+        Before the fix: a reviewer dispatch for a task carrying an owner-authored
+        `execution_branch` successor override resolved to the exact same branch
+        (and therefore the exact same, possibly-dirty, worktree) as the owner.
+        A reviewer must always land in its own isolated workspace, and the
+        owner's existing worktree/WIP must be left untouched.
+        """
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir) / "repo"
+            root.mkdir()
+            self._init_repo(root)
+
+            owner_worktree = root / ".artifacts/worktrees/auto/gemini-iam-ses-002"
+            _git(root, "worktree", "add", "-b", "codex/iam-ses-002-post-p0-successor-4", str(owner_worktree), "dev")
+            (owner_worktree / "README.md").write_text("owner wip\n", encoding="utf-8")
+            owner_dirty_status_before = _git(owner_worktree, "status", "--porcelain").stdout
+
+            task_metadata = {"execution_branch": "codex/iam-ses-002-post-p0-successor-4"}
+            config = self._repo_config(root)
+
+            owner_request = supervisor.DeliveryRequest(
+                agent_id="gemini",
+                provider="gemini",
+                delivery_mode="antigravity",
+                message="wake",
+                task_id="IAM-SES-002",
+                reason="owned_ready_dispatch",
+                metadata={"mode": "execution", "task": task_metadata},
+            )
+            owner_workspace, owner_branch, owner_base_branch, owner_source = supervisor.ensure_execution_workspace(
+                config, owner_request, supervisor.route_task("IAM-SES-002"),
+            )
+            self.assertEqual(owner_workspace, owner_worktree.resolve())
+            self.assertEqual(owner_branch, "codex/iam-ses-002-post-p0-successor-4")
+            self.assertEqual(owner_source, "existing_worktree")
+
+            reviewer_request = supervisor.DeliveryRequest(
+                agent_id="codex2",
+                provider="codex2",
+                delivery_mode="codex",
+                message="wake",
+                task_id="IAM-SES-002",
+                reason="review_ready_dispatch",
+                metadata={"mode": "execution", "task": task_metadata},
+            )
+            reviewer_workspace, reviewer_branch, reviewer_base_branch, reviewer_source = supervisor.ensure_execution_workspace(
+                config, reviewer_request, supervisor.route_task("IAM-SES-002"),
+            )
+
+            self.assertNotEqual(reviewer_workspace, owner_worktree.resolve())
+            self.assertNotEqual(reviewer_branch, "codex/iam-ses-002-post-p0-successor-4")
+            self.assertEqual(reviewer_branch, "codex2/iam-ses-002")
+            self.assertEqual(reviewer_base_branch, "dev")
+            self.assertEqual(reviewer_source, "created_worktree")
+            self.assertEqual(
+                reviewer_workspace, (root / ".artifacts/worktrees/auto/codex2-iam-ses-002").resolve(),
+            )
+
+            # Owner worktree/WIP must be untouched by the reviewer dispatch.
+            self.assertEqual(_git(owner_worktree, "status", "--porcelain").stdout, owner_dirty_status_before)
+            self.assertEqual(
+                _git(owner_worktree, "branch", "--show-current").stdout.strip(),
+                "codex/iam-ses-002-post-p0-successor-4",
+            )
+
+            supervisor.attach_workspace_metadata(
+                config, reviewer_request, reviewer_workspace, reviewer_branch, reviewer_base_branch, reviewer_source,
+            )
+            self.assertIn(f"`{reviewer_workspace}`", reviewer_request.message)
+            self.assertIn(f"Task branch: `{reviewer_branch}`", reviewer_request.message)
+            self.assertNotIn(str(owner_worktree.resolve()), reviewer_request.message)
+            self.assertNotIn("codex/iam-ses-002-post-p0-successor-4", reviewer_request.message)
+
+    def test_owner_dispatch_still_resumes_execution_branch_override(self) -> None:
+        """Owner-role regression guard alongside the reviewer isolation fix above."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir) / "repo"
+            root.mkdir()
+            self._init_repo(root)
+            existing = root / ".artifacts/worktrees/auto/gemini-iam-ses-002"
+            _git(root, "worktree", "add", "-b", "codex/iam-ses-002-post-p0", str(existing), "dev")
+
+            request = supervisor.DeliveryRequest(
+                agent_id="gemini",
+                provider="gemini",
+                delivery_mode="antigravity",
+                message="wake",
+                task_id="IAM-SES-002",
+                reason="owned_ready_dispatch",
+                metadata={
+                    "mode": "execution",
+                    "task": {"execution_branch": "codex/iam-ses-002-post-p0"},
+                },
+            )
+            workspace, branch, base_branch, source = supervisor.ensure_execution_workspace(
+                self._repo_config(root), request, supervisor.route_task("IAM-SES-002"),
+            )
+
+            self.assertEqual(workspace, existing.resolve())
+            self.assertEqual(branch, "codex/iam-ses-002-post-p0")
+            self.assertEqual(base_branch, "dev")
+            self.assertEqual(source, "existing_worktree")
 
 
 

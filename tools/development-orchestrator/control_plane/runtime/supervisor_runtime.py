@@ -882,8 +882,19 @@ def _git_capture(repo_root: Path, args: list[str], *, timeout: float = 30.0) -> 
 
 
 def _execution_branch(repo_root: Path, request: DeliveryRequest) -> str:
-    """Prefer a task-scoped branch override only when Git accepts it."""
+    """Prefer a task-scoped branch override only when Git accepts it.
+
+    The override is owner-authored (e.g. a successor branch published after a
+    CI repair) and names the owner's own in-progress branch. A reviewer
+    dispatch for the same task must never inherit it: doing so makes
+    `_worktree_for_branch` resolve to the owner's existing, possibly-dirty
+    worktree instead of an isolated review workspace (see
+    SR-ORCH-REVIEW-WORKTREE-ISOLATION-20260923). Reviewers always get their
+    own agent-scoped default branch, which cannot collide with the owner's.
+    """
     default_branch = _task_branch(request.agent_id, request.task_id or "")
+    if task_role_for_dispatch_reason(request.reason) == "reviewer":
+        return default_branch
     metadata = request.metadata if isinstance(request.metadata, dict) else {}
     task = metadata.get("task") if isinstance(metadata.get("task"), dict) else {}
     configured_branch = task.get("execution_branch")
