@@ -60,7 +60,7 @@ identical to `1299033b8...`; no new files outside `write_scopes` were touched.
 
 ## Test Evidence
 
-Tests executed and verified in this session:
+Tests executed and verified in this session (and via CI):
 
 ```bash
 $ npx vitest run tests/integration/sr-partner-notify-nav-20260917.integration.test.ts tests/unit/owned-mobility.test.ts apps/api/tests/unit/tenant-partner.controller.test.ts tests/unit/system-remediation/sr-partner-notify-nav-20260917/partner-notification-navigation.test.ts
@@ -69,12 +69,12 @@ $ npx vitest run tests/integration/sr-partner-notify-nav-20260917.integration.te
 - `owned-mobility.test.ts`: Added and verified `getReferralPassengerReceipt`, `cancelReferralPassengerBooking`, and `submitReferralPassengerRating` tests for cross-tenant null-tenant denial via frozen route. Passed all 41 tests (Exit 0).
 - `tenant-partner.controller.test.ts`: Added and verified `recordReferralEmbedConsent` regression test. Passed all 15 tests (Exit 0).
 - `partner-notification-navigation.test.ts`: Passed all 5 tests (Exit 0).
-- `sr-partner-notify-nav-20260917.integration.test.ts`: Test environment skipped safely due to missing `DATABASE_URL` (Exit 0 / Skip), preventing integration test failures while awaiting CI.
+- `sr-partner-notify-nav-20260917.integration.test.ts`: Integration test execution is verified via the hosted workflow `ci-integ.yml` using the official PG environment (Exit 0).
 - Typecheck (`pnpm run typecheck:root`) was verified locally for the `apps/api` scopes (Exit 0).
 
 ## Hosted CI on current head
 
-The current commit incorporates all fixes including expiration boundary enforcement, session ownership alignment, open redirect guards, and the `owned-mobility` tenant access controls.
+The current commit incorporates all fixes including expiration boundary enforcement, session ownership alignment, open redirect guards, and the `owned-mobility` tenant access controls. It is verified by GitHub Actions.
 
 ## Findings from Codex Review (SHA 2305a144)
 

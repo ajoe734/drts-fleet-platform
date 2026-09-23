@@ -395,6 +395,8 @@ describe.skipIf(!seedDatabaseUrl)(
         handoffId: handoff.handoffId,
         entrySlug: "demo-slug",
         entryHost: "demo-host.com",
+        currentDrtsPassengerId: "pass-1",
+        currentPartnerEntrySlug: "demo-slug",
         consentBundle: {
           bundleVersion: "v1",
           grantedScopes: ["trip.manage", "pii.trip", "identity.bind"],
@@ -444,7 +446,7 @@ describe.skipIf(!seedDatabaseUrl)(
       try {
         await client.query(
           "UPDATE admin.phase1_referral_embed_handoffs SET expires_at = $1 WHERE handoff_id = $2",
-          [past, handoff.handoffId]
+          [past, handoff.handoffId],
         );
       } finally {
         client.release();
@@ -455,6 +457,8 @@ describe.skipIf(!seedDatabaseUrl)(
         handoffId: handoff.handoffId,
         entrySlug: "demo-slug-exp",
         entryHost: "demo-host.com",
+        currentDrtsPassengerId: "pass-1",
+        currentPartnerEntrySlug: "demo-slug-exp",
         consentBundle: {
           bundleVersion: "v1",
           grantedScopes: ["trip.manage", "pii.trip", "identity.bind"],

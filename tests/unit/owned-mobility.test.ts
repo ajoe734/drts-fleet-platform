@@ -2242,7 +2242,7 @@ describe("owned mobility service", () => {
       try {
         await ownedMobilityService.cancelReferralPassengerTrip(
           orderId,
-          { reason: "test" },
+          { orderId, reason: "test" },
           reassignedIdentity,
         );
       } catch (err) {
@@ -2262,7 +2262,7 @@ describe("owned mobility service", () => {
       try {
         await ownedMobilityService.submitReferralPassengerRating(
           orderId,
-          { score: 5 },
+          { orderId, score: 5 },
           reassignedIdentity,
         );
       } catch (err) {
