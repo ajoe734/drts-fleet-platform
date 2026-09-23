@@ -987,8 +987,12 @@ def _worker_worktrees_enabled(config: dict[str, Any]) -> bool:
     return settings.get("enabled", True) is not False
 
 
+def _agent_task_slug(agent_id: str, task_id: str) -> str:
+    return re.sub(r"[^a-z0-9._-]+", "-", f"{normalize_agent_id(agent_id)}-{task_id.lower()}").strip("-")
+
+
 def _candidate_worktree_path(base: Path, agent_id: str, task_id: str, branch: str) -> Path:
-    slug = re.sub(r"[^a-z0-9._-]+", "-", f"{normalize_agent_id(agent_id)}-{task_id.lower()}").strip("-")
+    slug = _agent_task_slug(agent_id, task_id)
     candidate = base / slug
     if not candidate.exists():
         return candidate
@@ -999,6 +1003,48 @@ def _candidate_worktree_path(base: Path, agent_id: str, task_id: str, branch: st
         if not suffixed.exists() or _current_branch(suffixed) == branch:
             return suffixed
     return base / f"{slug}-{new_runtime_id('wt')}"
+
+
+def _worktree_belongs_to_slug(path: Path, base: Path, slug: str) -> bool:
+    try:
+        rel = path.resolve().relative_to(base.resolve())
+    except ValueError:
+        return False
+    name = rel.parts[0] if rel.parts else ""
+    return name == slug or name.startswith(f"{slug}-")
+
+
+def _foreign_worktree_for_branch(repo_root: Path, base: Path, branch: str, slug: str) -> Path | None:
+    """Find a worktree checked out on `branch` that isn't this agent/task's own."""
+    match = _worktree_for_branch(repo_root, branch)
+    if match is None or _worktree_belongs_to_slug(match, base, slug):
+        return None
+    return match
+
+
+def _reviewer_isolated_branch(agent_id: str, task_id: str) -> str:
+    return f"{_agent_task_slug(agent_id, task_id)}-isolated-review"
+
+
+def _reviewer_safe_branch(repo_root: Path, base: Path, request: DeliveryRequest, branch: str) -> str:
+    """Never let a reviewer land on a branch someone else already owns.
+
+    A reviewer's default branch is deterministic from (agent_id, task_id), but
+    an owner-authored `execution_branch` override (see `_execution_branch`) is
+    an arbitrary Git ref and can coincidentally match it. Reusing -- or
+    force-checking-out -- that branch would hand the reviewer the owner's
+    live, mutable worktree even though `_execution_branch` already refuses to
+    let the reviewer inherit the override string itself (see
+    SR-ORCH-REVIEW-WORKTREE-ISOLATION-20260923). If the branch is already
+    checked out by a worktree outside this reviewer/task's own slug, fork a
+    branch namespaced to this reviewer/task pair instead.
+    """
+    if task_role_for_dispatch_reason(request.reason) != "reviewer":
+        return branch
+    slug = _agent_task_slug(request.agent_id, request.task_id or "")
+    if _foreign_worktree_for_branch(repo_root, base, branch, slug) is None:
+        return branch
+    return _reviewer_isolated_branch(request.agent_id, request.task_id or "")
 
 
 def _coordination_workspace_key(request: DeliveryRequest) -> str:
@@ -1132,6 +1178,7 @@ def ensure_execution_workspace(
     branch = _execution_branch(repo_root, request)
     base_branch = routing.base_branch if routing else "dev"
     base = _worker_worktree_base(config, repo_root)
+    branch = _reviewer_safe_branch(repo_root, base, request, branch)
     existing = _worktree_for_branch(repo_root, branch, exclude=repo_root, within=base)
     if existing is not None:
         return existing, branch, base_branch, "existing_worktree"

@@ -97,3 +97,74 @@ consistent with what was actually assigned.
 - No product/UI/NAV source touched — scope confined to `supervisor_runtime.py` and its regression
   tests, per task-spec constraint.
 - No `.orchestrator` runtime services were started or restarted on this VM.
+
+## 5. Round 2 — F1 (Codex `reopen`, reviewed SHA `50f55f7a383dfd5b6ca04536579eda28557ff464`)
+
+### 5.1 Finding
+
+Codex reopened candidate `50f55f7a3` (PR #2114) with finding **F1 [P1]**: the Round‑1 fix makes
+`_execution_branch()` skip the *override string* for reviewers, but the reviewer's own
+deterministic default branch (`_task_branch(agent_id, task_id)` = `f"{agent_id}/{task_id.lower()}"`)
+is an ordinary, unrestricted Git ref name. Nothing stops an owner's `execution_branch` override
+from being set to that exact string — coincidentally or because a prior successor branch happened
+to be named after another agent. When that happens, `_worktree_for_branch()` in
+`ensure_execution_workspace()` (supervisor_runtime.py:1178-1180, pre-fix) still resolves the
+reviewer's own default branch to the *owner's* already-checked-out worktree, because branch
+identity — not workspace/agent identity — is the only thing `_worktree_for_branch()` checks. The
+mutable-worktree collision the task exists to close therefore survives Round 1 for this case.
+
+Codex's exact reproduction (`ExecutionWorkspaceTests` fixtures): task `IAM-SES-002`, owner
+`gemini`, reviewer `codex2`, `execution_branch="codex2/iam-ses-002"` (== the reviewer's own default
+branch). Owner worktree created at `.artifacts/worktrees/auto/gemini-iam-ses-002` on that branch,
+`README.md` dirtied to `"owner wip\n"`. Calling `ensure_execution_workspace()` for the owner then
+the reviewer returned the **same workspace** for both, with `workspace_source="existing_worktree"`
+for the reviewer and the owner's dirty `README.md` content visible to it.
+
+### 5.2 Root cause
+
+`_execution_branch()` only decides the branch *name*; nothing downstream distinguished "a branch
+name that happens to match" from "a branch this reviewer/task actually owns" before reusing an
+already-checked-out worktree for it.
+
+### 5.3 Fix
+
+`supervisor_runtime.py`, same file/scope, no new write-scope files needed:
+
+- `_agent_task_slug(agent_id, task_id)`: factored out of `_candidate_worktree_path` (same
+  normalization, no behavior change) so it can be reused to identify "this reviewer/task's own"
+  worktree naming.
+- `_worktree_belongs_to_slug(path, base, slug)`: true iff `path` sits under `base` and its
+  top-level directory name is `slug` or `slug-<suffix>` (matches the existing
+  `_candidate_worktree_path` collision-suffix scheme).
+- `_foreign_worktree_for_branch(repo_root, base, branch, slug)`: returns the worktree already
+  checked out on `branch`, but only if it does **not** belong to `slug` — i.e. it's someone else's.
+- `_reviewer_isolated_branch(agent_id, task_id)`: a branch name namespaced to this reviewer/task
+  pair (`{slug}-isolated-review`) that cannot collide with any agent-scoped default branch.
+- `_reviewer_safe_branch(repo_root, base, request, branch)`: no-op for non-reviewer dispatches;
+  for reviewer dispatches, if `branch` is already checked out by a worktree that isn't this
+  reviewer/task's own, returns `_reviewer_isolated_branch(...)` instead of `branch`.
+- `ensure_execution_workspace()`: `branch = _reviewer_safe_branch(repo_root, base, request, branch)`
+  inserted immediately after the existing `branch = _execution_branch(repo_root, request)` call
+  (supervisor_runtime.py:1178), before the `_worktree_for_branch()` existing-worktree lookup. When
+  redirected, the reviewer gets a brand-new worktree/branch forked from `base_branch` (same
+  fallback path `ensure_execution_workspace()` already uses for any new branch), never the
+  collided-with branch.
+
+The ordinary (non-colliding) reviewer path — `_task_branch(agent, task)` distinct from whatever the
+owner is on — is unaffected: `_foreign_worktree_for_branch` finds no match, `_reviewer_safe_branch`
+returns `branch` unchanged, so Round 1's behavior and its regression test are preserved exactly.
+
+### 5.4 Verification
+
+| Finding／驗收項 | 原始碼依據與修改位置 | 舊版重現 → 修正版結果 | 命令、退出碼、執行版本與證據位置 | 未驗項與具體限制 |
+| --- | --- | --- | --- | --- |
+| F1 / `reviewer_workspace_isolated_from_owner_successor` (collision case) | `supervisor_runtime.py::_reviewer_safe_branch` + `_foreign_worktree_for_branch` + `_worktree_belongs_to_slug`, wired into `ensure_execution_workspace` at the `branch = _execution_branch(...)` call site | New test `test_reviewer_default_branch_colliding_with_owner_override_gets_isolated`: with the `_reviewer_safe_branch` call temporarily removed (candidate `50f55f7a3` behavior), the test fails with `reviewer_workspace == owner_worktree` (`AssertionError` at `assertNotEqual`); with the fix restored, it passes — reviewer gets its own new worktree/branch, `README.md` reads `"test\n"` (fresh from `dev`), not `"owner wip\n"`. | `python3 -B -m unittest test_supervisor.ExecutionWorkspaceTests.test_reviewer_default_branch_colliding_with_owner_override_gets_isolated -v` → FAIL pre-fix (verified by temporarily stripping the `_reviewer_safe_branch` call, rerunning, restoring), PASS post-fix. Python 3, this worktree, no mocks — calls the production `ensure_execution_workspace`/`_git_capture` (real `git worktree add`) path. | Not exercised against a live supervisor tick or real dispatch queue; VM services not started per task-spec constraint. Unit-level only. |
+| `owner_successor_and_wip_preserved` (collision case) | Same test: asserts owner worktree `git status --porcelain` byte-identical before/after the reviewer dispatch, and owner stays on its override branch | Owner dispatch before and after the reviewer's colliding dispatch resolves to the same existing worktree/branch/dirty content; unaffected by the reviewer redirect. | Same test run as above. | None. |
+| `rendered_branch_matches_assigned_review_workspace` (collision case) | `attach_workspace_metadata` fed the corrected `(reviewer_workspace, reviewer_branch)` pair | Reviewer's `Supervisor-assigned workspace:` notice names its own isolated path/branch; asserted to not contain the owner's worktree path. | Same test: `assertIn` reviewer path/branch in `reviewer_request.message`, `assertNotIn` owner path. | None. |
+| Full regression | All existing `ExecutionWorkspaceTests` (incl. Round 1's `test_review_dispatch_ignores_owner_execution_branch_override`, non-colliding case) plus new test | No regressions; Round 1 behavior unchanged for the non-colliding case. | `python3 -B -m unittest test_supervisor test_watch_events -v` → 167 tests, OK, exit 0 (was 166 pre-Round-2). `python3 -B -m unittest test_runtime_module_boundaries -v` → 6 tests, OK. | None observed; scoped to this repo's Python unit tests, no DB/browser/runtime involved. |
+
+- `watch_events.py` and `control_plane/domain/task_records.py` were re-inspected for F1 and still
+  require no change: reviewer dispatches never render a branch-protocol block at all (§2.3,
+  unaffected by this round), and `task_role_for_dispatch_reason` needed no new predicate — slug
+  ownership is a worktree-path concern local to `supervisor_runtime.py`.
+- No product/UI/NAV source touched. No `.orchestrator` runtime services started or restarted.
