@@ -175,10 +175,17 @@ export async function POST(request: Request) {
       return redirectResponse(request, action.returnTo);
     }
 
+    const existingSession = await getReferralEmbedSession();
     const session = await consumeReferralEmbedHandoffArtifact({
       artifact: action.artifact,
       entrySlug: action.entrySlug,
       entryHost: action.entryHost,
+      ...(existingSession?.drtsPassengerId
+        ? { currentDrtsPassengerId: existingSession.drtsPassengerId }
+        : {}),
+      ...(existingSession?.partnerEntrySlug
+        ? { currentPartnerEntrySlug: existingSession.partnerEntrySlug }
+        : {}),
     });
     await writeReferralEmbedSession(session);
     if (
