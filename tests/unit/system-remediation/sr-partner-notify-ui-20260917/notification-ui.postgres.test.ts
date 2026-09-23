@@ -176,6 +176,16 @@ describe.skipIf(!testDbUrl)("partner notification UI postgres acceptance", () =>
       outboxId,
     );
     expect(res2.kind).toBe("requeued");
+
+    const entryObjWrongOwner = { entrySlug: "entry-wrong", tenantId: "tenant-wrong", partnerId: "partner-wrong" };
+    const resWrong = await mtRepo.retryPartnerNotificationDelivery(
+      entryObjWrongOwner,
+      outboxId,
+    );
+    expect(resWrong.kind).toBe("failed");
+    if (resWrong.kind === "failed") {
+      expect(resWrong.failure.failureReason).toBe("owner_changed");
+    }
   });
 
   it("same-tenant vs cross-tenant logic is validated using real TenantPartnerService", async () => {
