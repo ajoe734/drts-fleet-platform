@@ -419,6 +419,25 @@ run; hosted CI on this round's pushed SHA is the acceptance evidence, once avail
   [35932356817](https://github.com/ajoe734/drts-fleet-platform/actions/runs/35932356817) job
   `Canonical consistency`, `107421614165`).
 - `git diff --check` — exit 0, no whitespace errors introduced.
+- Correction to the "Not executed locally" claim two paragraphs above: hosted CI's `unit` job
+  (`pnpm run test:unit`, i.e. root `vitest run`) **does** set `DATABASE_URL` (a real
+  `postgis/postgis:16-3.4` service container, `.github/workflows/ci-integ.yml` `unit:` job env)
+  and this task's PG integration file lives at root `tests/integration/` (not
+  `apps/api/tests/integration/`, which is a different directory only covered by the separate
+  `integration` job's `pnpm run test:integration`), so root `test:unit`'s default glob picks it
+  up and `describe.skipIf(!seedDatabaseUrl)` evaluates truthy there. Confirmed directly from the
+  `unit` job's raw log (job
+  [107427167813](https://github.com/ajoe734/drts-fleet-platform/actions/runs/35934074338/job/107427167813)):
+  `✓ tests/integration/sr-partner-notify-nav-20260917.integration.test.ts (10 tests) 68910ms` (the
+  ~69s runtime and the file's own `beforeAll` — provisioning a throwaway database and replaying
+  the full migration ledger via `db-apply.sh` — confirm this ran against a real, freshly-migrated
+  Postgres, not a mock), plus `✓ consent-replay-guards.test.ts (3 tests)`,
+  `✓ partner-notification-navigation.test.ts (5 tests)`,
+  `✓ embed-session-route.test.ts (4 tests)`, `✓ embed-partner-session.test.ts (1 test)` — all
+  passing. This is real hosted-Postgres confirmation of the finding-1 regression matrix (PG
+  consume-before-check rollback, revoked-link/owner-changed consent rejection, 8-hour expiry,
+  session-mismatch zero-write), not merely a static/syntax check as the paragraph above (written
+  before this log was read) understated.
 - Hosted CI on this round's pushed SHA `9b0e5d824ff05c7d2b983e809ee01351221bd38e` (PR #2100), run
   [35934074338](https://github.com/ajoe734/drts-fleet-platform/actions/runs/35934074338): `unit`,
   `integration`, `typecheck`, `lint`, `build`, `i18n-guard`, `iam-negative-matrix`, `ui-route-e2e`,
