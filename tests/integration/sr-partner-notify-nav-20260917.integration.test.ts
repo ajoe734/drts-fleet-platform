@@ -399,7 +399,7 @@ describe.skipIf(!seedDatabaseUrl)(
       const tenantPartnerRepo = { getPartnerEntry: async () => ({ status: 'active', tenantId: null, partnerId: null }) };
       const { TenantPartnerService } = require("../../apps/api/src/modules/tenant-partner/tenant-partner.service");
       const service = new TenantPartnerService({} as any, tenantPartnerRepo as any, undefined, undefined, undefined, linkRepo as any, handoffRepo);
-      
+
       const consentSession = await service.recordReferralEmbedConsent({
         handoffId: handoff.handoffId,
         entrySlug: "demo-slug",
@@ -466,7 +466,7 @@ describe.skipIf(!seedDatabaseUrl)(
       const tenantPartnerRepo = { getPartnerEntry: async () => ({ status: 'active', tenantId: null, partnerId: null }) };
       const { TenantPartnerService } = require("../../apps/api/src/modules/tenant-partner/tenant-partner.service");
       const service = new TenantPartnerService({} as any, tenantPartnerRepo as any, undefined, undefined, undefined, linkRepo as any, handoffRepo);
-      
+
       const consentSession = await service.recordReferralEmbedConsent({
         handoffId: handoff.handoffId,
         entrySlug: "demo-slug-exp",
@@ -500,7 +500,7 @@ describe.skipIf(!seedDatabaseUrl)(
         consentBundleVersion: null,
         consentGrantedAt: null,
         issuedAt: new Date(now - 10 * 60 * 60 * 1000).toISOString(),
-        expiresAt: new Date(now - 9.5 * 60 * 60 * 1000).toISOString(), 
+        expiresAt: new Date(now - 9.5 * 60 * 60 * 1000).toISOString(),
       });
 
       // Instead of consuming via repo, we inject it directly with consumed_at > 8 hours ago
@@ -518,7 +518,7 @@ describe.skipIf(!seedDatabaseUrl)(
       const tenantPartnerRepo = { getPartnerEntry: async () => ({ status: 'active', tenantId: null, partnerId: null }) };
       const { TenantPartnerService } = require("../../apps/api/src/modules/tenant-partner/tenant-partner.service");
       const service = new TenantPartnerService({} as any, tenantPartnerRepo as any, undefined, undefined, undefined, linkRepo as any, handoffRepo);
-      
+
       await expect(
         service.recordReferralEmbedConsent({
           handoffId: handoff.handoffId,
