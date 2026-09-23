@@ -1,9 +1,8 @@
-import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
+import { describe, expect, it, vi, beforeEach } from "vitest";
 import { POST } from "../../../../apps/referral-embed-web/app/api/referral/session/route";
 import { consumeReferralEmbedHandoffArtifact } from "../../../../apps/referral-embed-web/lib/embed-api";
 import {
   getReferralEmbedSession,
-  writeReferralEmbedSession,
 } from "../../../../apps/referral-embed-web/lib/embed-partner-session";
 
 vi.mock("../../../../apps/referral-embed-web/lib/embed-api");
