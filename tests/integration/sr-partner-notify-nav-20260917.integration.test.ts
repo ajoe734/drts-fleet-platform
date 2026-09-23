@@ -25,12 +25,14 @@ describe.skipIf(!seedDatabaseUrl)(
   () => {
     const dbName = `sr_partner_notify_nav_${process.pid}_${Date.now()}`;
     const adminUrl = (() => {
-      const url = new URL(seedDatabaseUrl!);
+      if (!seedDatabaseUrl) return new URL("postgres://localhost");
+      const url = new URL(seedDatabaseUrl);
       url.pathname = "/postgres";
       return url;
     })();
     const databaseUrl = (() => {
-      const url = new URL(seedDatabaseUrl!);
+      if (!seedDatabaseUrl) return "postgres://localhost";
+      const url = new URL(seedDatabaseUrl);
       url.pathname = `/${dbName}`;
       return url.toString();
     })();
