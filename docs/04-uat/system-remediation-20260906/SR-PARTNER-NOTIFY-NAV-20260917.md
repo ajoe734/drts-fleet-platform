@@ -1,0 +1,19 @@
+# UAT: SR-PARTNER-NOTIFY-NAV-20260917
+
+## 夥伴通知點擊返回正確行程與安全 fresh handoff
+
+**Candidate SHA:** 9e56d446fcfd96df6f1196feece8f58584cab8e4
+**Branch:** gemini2/sr-partner-notify-nav-20260917
+**Base:** dev
+
+### 最新退修修復與驗收 (針對 Codex review 0d8e2887372c)
+
+| Finding／驗收項 | 原始碼依據與修改位置 | 舊版重現 → 修正版結果 | 命令、退出碼、執行版本與證據位置 | 未驗項與具體限制 |
+| --- | --- | --- | --- | --- |
+| 1. [P1] POST exchange 仍跨subject/entry覆蓋既有登入 | `apps/referral-embed-web/app/api/referral/session/route.ts:178` | 舊版未讀取 `existingSession` 導致攻擊者可覆蓋他人登入。修正版在 `POST exchange` 時傳入 `currentDrtsPassengerId` 與 `currentPartnerEntrySlug`，由底層 `consume` 防禦。 | 本機加入 `tests/unit/system-remediation/sr-partner-notify-nav-20260917/embed-session-route.test.ts` ; hosted typecheck pass | 完整 PG / browser 待 hosted CI 執行 |
+| 2. [P2] 六筆祖先 commit 仍使 CI gate 失敗 | 歷史 commits subject 與 trailers 不合規 | 舊版 CI `check_commit_trailers.py` 報錯。修正版由 Supervisor 核對並將透過合規 commit history 正常 push，不放寬 gate。 | `tools/ci/git/check_commit_trailers.py` pending push 後驗證 | CI 執行待 push 後觸發 |
+| 3. [P2] 原 UAT 漏掉最新退修與已知失敗，BFF/PG 缺口未補 | `docs/04-uat/system-remediation-20260906/SR-PARTNER-NOTIFY-NAV-20260917.md` 及 `apps/api/tests/` 測試 | 舊版 UAT 聲稱 Fully closed 掩蓋已知未修。修正版補回 `embed-session-route.test.ts` 最小回歸，並如實標記 PG/browser 等未驗項目。 | 本文件已修正；測試已加入 | 完整 PG/Browser 測試保留 pending 待 CI |
+| 4. [P2] MAP sidecar 未按授權 base blob 恢復 | `tests/unit/map-geofence-ops-visibility-proof.test.ts` 與 `support/sidecars/...` | 舊版 candidate 仍包含被汙染的 generatedAt/branchSha。修正版已將 json 從 base blob `f992de49e4abc94e63e070643d163c6fc6588aed` 恢復。 | `git diff --check` 與 file inspection | 無 |
+| Acceptance: entry_scoped_navigation_denies_cross_subject_tenant_entry | `tenant-partner.service.ts` 增強 `validateFn` | 同意重播與 POST 跨帳戶覆蓋已修正。支援正確驗證 route 的 tenant/partner/passenger。 | `embed-session-route.test.ts` added; unit tests passing | 完整 PG / 正式 authority 矩陣待 CI |
+| Acceptance: fresh_single_use_handoff_and_http_only_session_reuse | `route.ts` 的 `current*` 檢查與 `consumedAt`。 | HTTP Only/Secure session reuse 及 single-use 重播給予拒絕。 | node probe exit 0 (pass); PG tests pending | 完整 POST/GET / cookie suite 待 CI |
+| Acceptance: navigation_reads_current_trip_without_creating_orders | `owned-mobility.service.ts` frozen route async receipt 查詢 | receipt 正負向與 current status 靜態確認。無新增 order creation 呼叫。 | unit test exit 0 (pass) | browser/native/live flow 待驗證 |
