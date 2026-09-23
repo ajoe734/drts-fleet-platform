@@ -5847,6 +5847,16 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
           "The partner entry is inactive or missing.",
         );
       }
+      if (
+        entry.tenantId !== result.session.identity.tenantId ||
+        entry.partnerId !== (result.session.identity.partnerId || null)
+      ) {
+        throw new ApiRequestError(
+          HttpStatus.FORBIDDEN,
+          "OWNERSHIP_MISMATCH",
+          "The partner entry ownership has changed.",
+        );
+      }
       const link = await this.partnerUserIdentityLinkRepository.findByDrtsPassengerId(
         result.session.partnerEntrySlug,
         result.session.drtsPassengerId,

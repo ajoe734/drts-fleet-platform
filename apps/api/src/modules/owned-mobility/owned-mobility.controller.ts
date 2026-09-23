@@ -445,7 +445,7 @@ export class OwnedMobilityController {
     @Headers("x-request-id") requestId?: string,
   ) {
     return toApiSuccessEnvelope(
-      await this.ownedMobilityService.async getReferralPassengerReceipt(orderId, identity),
+      await this.ownedMobilityService.getReferralPassengerReceipt(orderId, identity),
       requestId,
     );
   }
@@ -458,7 +458,7 @@ export class OwnedMobilityController {
     @Headers("x-request-id") requestId?: string,
   ) {
     return toApiSuccessEnvelope(
-      await this.ownedMobilityService.async getReferralPassengerReceipt(orderId, identity),
+      await this.ownedMobilityService.getReferralPassengerReceipt(orderId, identity),
       requestId,
     );
   }

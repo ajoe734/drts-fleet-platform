@@ -61,7 +61,7 @@ export type ConsumeReferralEmbedHandoffResult =
 
 export type RecordReferralEmbedConsentResult =
   | { outcome: "recorded" | "replayed"; session: ReferralEmbedSession }
-  | { outcome: "wrong_host" | "missing" | "session_mismatch" };
+  | { outcome: "wrong_host" | "missing" | "session_mismatch" | "not_consumed" };
 
 const REQUIRED_SCOPES: ReferralEmbedRequiredConsentScope[] = [
   "trip.manage",

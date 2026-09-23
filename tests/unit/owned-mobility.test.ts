@@ -2091,7 +2091,7 @@ describe("owned mobility service", () => {
         tenantPartnerService,
         mockNavRepo,
       );
-      
+
       const originalIdentity: BootstrapRequestIdentity = {
         authMode: "jwt_bearer",
         actorType: "referral_passenger",
@@ -2157,7 +2157,7 @@ describe("owned mobility service", () => {
       });
       const reassignedHistory = await ownedMobilityService.listReferralPassengerHistory(reassignedIdentity);
       expect(reassignedHistory.items.length).toBe(0);
-      
+
       // Also verify wrong partnerId
       const wrongPartnerIdentity: BootstrapRequestIdentity = {
         ...originalIdentity,
@@ -2167,12 +2167,12 @@ describe("owned mobility service", () => {
       expect(wrongPartnerActive.active).toBe(false);
       const wrongPartnerHistory = await ownedMobilityService.listReferralPassengerHistory(wrongPartnerIdentity);
       expect(wrongPartnerHistory.items.length).toBe(0);
-      
+
       // Also verify missing route denial
       mockNavRepo.findByOrderId.mockResolvedValueOnce(null); // route missing
       const missingRouteActive = await ownedMobilityService.getReferralPassengerActiveTrip(originalIdentity);
       expect(missingRouteActive.active).toBe(false);
-      
+
       mockNavRepo.findByOrderId.mockResolvedValueOnce(null); // route missing
       const missingRouteHistory = await ownedMobilityService.listReferralPassengerHistory(originalIdentity);
       expect(missingRouteHistory.items.length).toBe(0);
