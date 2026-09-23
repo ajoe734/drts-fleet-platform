@@ -8,7 +8,6 @@ import {
 } from "@/lib/embed-api";
 import {
   buildReferralEmbedConsentCommand,
-  clearReferralEmbedSession,
   getReferralEmbedSession,
   writeReferralEmbedSession,
 } from "@/lib/embed-partner-session";
@@ -191,7 +190,14 @@ export async function POST(request: Request) {
     }
     return redirectResponse(request, action.returnTo);
   } catch (error) {
-    await clearReferralEmbedSession();
+    // A failed exchange/consent never clears the caller's existing session:
+    // this endpoint is unauthenticated (reachable from any link), so treating
+    // failure as a signal to log the current browser out would let an
+    // attacker force a logout merely by presenting an invalid or mismatched
+    // artifact/handoff, ahead of replaying a stale one for a different
+    // identity. Reject the request and leave whatever session already exists
+    // untouched; the mismatch check above (via current*) is what stops the
+    // takeover, not clearing the cookie.
     const message =
       error instanceof Error ? error.message : "Referral session exchange failed.";
     return jsonResponse({ ok: false, message }, 400);
