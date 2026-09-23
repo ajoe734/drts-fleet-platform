@@ -187,10 +187,34 @@ it does not claim the parent state write succeeded.
 | Finding / acceptance | Change and source | Old → new evidence | Command / result / revision | Unverified or blocked |
 | --- | --- | --- | --- | --- |
 | Resolve or route missing decision | Open question and this decision artifact; canvas and contract references above | Implicit design hold → named Supervisor route and resume gate | Source inspection and task/PR slices completed on revisions above | Canvas remains unapproved. |
-| Record decision, scope cut or follow-up | No scope cut; behavioral requirements, responsibilities and repair order above | No documented helper disposition → explicit follow-up | Content/reference checks pending final closeout | Parent product acceptance unchanged. |
-| Task-scoped commit/push/PR | Only this artifact and the open-question entry | No helper candidate → publication evidence to be recorded below | Commit/push/PR pending | No integration claim. |
+| Record decision, scope cut or follow-up | No scope cut; behavioral requirements, responsibilities and repair order above | No documented helper disposition → explicit follow-up | Content inspection, 11 local link targets and canonical consistency PASS, exit 0, anchor below | Parent product acceptance unchanged. |
+| Task-scoped commit/push/PR | Only this artifact and the open-question entry | No helper publication → ordinary push and draft PR #2119 | Anchor commit/push/PR creation exit 0, details below | Candidate handoff awaits state-write blocker; no integration claim. |
 | Update parent next step | Exact desired message and metadata above | Parent note attempted → rejected by dispatch guard | Both denied CLI operations exit 1; helper progress exit 0 | Supervisor must write parent and helper metadata; this acceptance remains blocked. |
 
-Documentation-only checks and final publication evidence will be appended after
-they finish. Product tests are not applicable to these two Markdown changes;
-no additional mirror tests or services are introduced.
+### Completed documentation verification and publication
+
+Anchor revision: `51f96c4d4d974a759ebcf1ba6fdb58f2d608b8ed`.
+All commands below completed and their results were read before recording them.
+
+| Check / operation | Result at anchor |
+| --- | --- |
+| `git diff --check origin/dev...HEAD` | PASS, exit 0. |
+| `python3 tools/ci/git/check_commit_trailers.py --base origin/dev --head HEAD` | PASS, exit 0; one task-scoped commit. |
+| `python3 tools/ci/git/check_canonical_consistency.py --ci --base origin/dev --head HEAD` | PASS, exit 0; zero findings for L1 authority, cited paths/decisions and task claims. |
+| One-off Python Markdown link inspection | PASS, exit 0; 11 local targets across this artifact and the new question section exist. URL-decoded link paths resolved relative to each file; remote URLs excluded. |
+| `git push -u origin codex/sr-partner-notify-ui-20260917-unblock-planning-decision` | PASS, exit 0; ordinary new-branch push, no history rewriting. |
+| `gh pr create --draft --base dev --head codex/sr-partner-notify-ui-20260917-unblock-planning-decision --body-file /tmp/sr-partner-notify-ui-planning-pr.md` (with task-scoped title) | PASS, exit 0; [PR #2119](https://github.com/ajoe734/drts-fleet-platform/pull/2119). |
+| `gh pr view 2119` and canonical task slices | Anchor PR head matched full local SHA. Parent still blocked; helper disposition fields still absent. |
+
+The evidence update is a subsequent commit on the same branch. Final full SHA,
+local/remote/PR identity, repeated scoped checks and hosted check outcomes are
+recorded in PR #2119 and the helper's canonical progress/blocker receipt; the
+document does not attempt to embed its own commit hash. Hosted checks were
+pending when this evidence section was written. The draft must stay out of
+candidate handoff until Supervisor records the required disposition and parent
+next step; then use the verified branch head as `CANDIDATE_SHA`, this branch as
+`CANDIDATE_BRANCH`, and PR #2119 as `PR_URL`, handing off to Claude2.
+
+Product tests are not applicable to these two Markdown changes. No product,
+runtime, PG, browser, live or deployment pass is claimed; no additional mirror
+tests or services are introduced.
