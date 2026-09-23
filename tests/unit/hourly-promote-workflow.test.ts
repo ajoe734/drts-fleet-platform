@@ -76,6 +76,47 @@ describe("hourly publish promotion safety", () => {
     expect(source).toContain("token: ${{ secrets.PUBLISH_TOKEN || secrets.GITHUB_TOKEN }}");
   });
 
+  it("identifies its published checks by id, not by a details_url GitHub discards", () => {
+    // GitHub stores the check run's own URL in details_url and drops the one
+    // we send, so the old `detailsUrl == run_url` filter matched nothing: on
+    // 2026-09-23 run 35854884063 timed out with all three checks green on
+    // PR #2110.
+    const source = workflow();
+    const publishChecks = source.slice(
+      source.indexOf("- name: Publish required checks on promote SHA"),
+      source.indexOf("- name: Wait for required PR checks to register"),
+    );
+    const wait = source.slice(
+      source.indexOf("- name: Wait for required PR checks to register"),
+      source.indexOf("- name: Merge inline"),
+    );
+
+    expect(publishChecks).toContain('CHECK_IDS["$name"]="$id"');
+    expect(publishChecks).toContain('echo "check_ids=$check_ids_json" >> "$GITHUB_OUTPUT"');
+    expect(wait).toContain("check_ids='${{ steps.checks.outputs.check_ids }}'");
+    expect(wait).toContain('endswith("/runs/" + $id)');
+    expect(wait).not.toContain('(.detailsUrl // "") == $url');
+  });
+
+  it("builds a reproducible promote commit so a retry keeps the checks it already has", () => {
+    const source = workflow();
+    const gate = source.slice(
+      source.indexOf("- name: Reconciliation gate"),
+      source.indexOf("- name: Open promote PR"),
+    );
+    const publishChecks = source.slice(
+      source.indexOf("- name: Publish required checks on promote SHA"),
+      source.indexOf("- name: Wait for required PR checks to register"),
+    );
+
+    expect(gate).toContain('snapshot_date=$(git log -1 --format=%cI "$sha")');
+    expect(gate).toContain('GIT_AUTHOR_DATE="$snapshot_date" GIT_COMMITTER_DATE="$snapshot_date"');
+    // …and having made it reproducible, do not pay ten minutes to re-derive
+    // checks that already passed on this very SHA.
+    expect(publishChecks).toContain("are already green on ${sha:0:12}; reusing them.");
+    expect(publishChecks).toContain('repos/$GITHUB_REPOSITORY/commits/$sha/check-runs');
+  });
+
   it("requires the latest exact-SHA dev deployment to be successful", () => {
     const source = workflow();
     const deployGate = source.indexOf("- name: Verified dev deployment gate");

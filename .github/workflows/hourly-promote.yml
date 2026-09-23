@@ -171,7 +171,12 @@ jobs:
           tree=$(git write-tree)
           unset GIT_INDEX_FILE
           task_id="PROMOTE-$(echo "$ver" | tr '[:lower:].' '[:upper:]-')"
-          promote_sha=$(git commit-tree "$tree" -p "$main_sha" \
+          # Dates come from the snapshot, not from "now": commit-tree would
+          # otherwise mint a new SHA on every retry, force-push the branch, and
+          # throw away the checks the previous attempt had already published.
+          snapshot_date=$(git log -1 --format=%cI "$sha")
+          promote_sha=$(GIT_AUTHOR_DATE="$snapshot_date" GIT_COMMITTER_DATE="$snapshot_date" \
+            git commit-tree "$tree" -p "$main_sha" \
             -m "$task_id: promote $src to main" \
             -m "Tree of $src @ $sha placed on main HEAD $main_sha so the promotion merges without history conflicts." \
             -m "Task-ID: $task_id" -m "LLM-Agent: github-actions" -m "Reviewer: hourly-promote")
@@ -282,6 +287,24 @@ jobs:
           sha="${{ steps.reconcile.outputs.promote_sha }}"
           src="${{ steps.reconcile.outputs.promote_branch }}"
           run_url="${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+          # Single-quoted on purpose: the ordering assertion in
+          # tests/unit/hourly-promote-workflow.test.ts finds the smoke gate by
+          # its first double-quoted mention, which must stay the invocation
+          # that runs after PostGIS is up.
+          required_names=$(printf '%s\n' 'Commit trailers' 'Runtime mirror guard' 'Smoke acceptance' \
+            | jq -Rsc 'split("\n") | map(select(length > 0))')
+          existing=$(gh api "repos/$GITHUB_REPOSITORY/commits/$sha/check-runs" \
+            --jq '[.check_runs[] | select(.status == "completed" and .conclusion == "success")]' 2>/dev/null || echo '[]')
+          if [ "$(jq -r --argjson want "$required_names" '[.[] | .name] as $have | $want | map(IN($have[])) | all' <<<"$existing")" = "true" ]; then
+            # The promote commit is reproducible, so an earlier attempt's green
+            # checks belong to this very SHA. Re-running them would cost ten
+            # minutes and could only agree.
+            echo "All required checks are already green on ${sha:0:12}; reusing them."
+            jq -c --argjson want "$required_names" 'map(select(.name | IN($want[]))) | map({key: .name, value: .id}) | from_entries' <<<"$existing" \
+              | sed 's/^/check_ids=/' >> "$GITHUB_OUTPUT"
+            echo "run_url=$run_url" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
           workdir=$(mktemp -d "${RUNNER_TEMP:-/tmp}/promote-sha-XXXXXX")
           compose_project="promote-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
           overall=0
@@ -298,6 +321,7 @@ jobs:
           git fetch origin main "$src" --quiet
           git worktree add --detach "$workdir" "$sha"
 
+          declare -A CHECK_IDS
           create_check() {
             name="$1"
             summary="$2"
@@ -316,7 +340,9 @@ jobs:
                   summary: $summary
                 }
               }')
-            gh api "repos/$GITHUB_REPOSITORY/check-runs" -X POST --input - --jq '.id' <<<"$payload"
+            id=$(gh api "repos/$GITHUB_REPOSITORY/check-runs" -X POST --input - --jq '.id' <<<"$payload")
+            CHECK_IDS["$name"]="$id"
+            echo "$id"
           }
 
           complete_check() {
@@ -405,6 +431,10 @@ jobs:
             env DATABASE_URL=postgresql://postgres:postgres@127.0.0.1:5432/drts_fleet_platform \
             bash -lc 'pnpm install --frozen-lockfile && pnpm run lint && pnpm run typecheck && pnpm run test:unit'
 
+          check_ids_json=$(for name in "${!CHECK_IDS[@]}"; do
+            jq -n --arg n "$name" --argjson id "${CHECK_IDS[$name]}" '{key: $n, value: $id}'
+          done | jq -sc 'from_entries')
+          echo "check_ids=$check_ids_json" >> "$GITHUB_OUTPUT"
           echo "run_url=$run_url" >> "$GITHUB_OUTPUT"
           exit "$overall"
 
@@ -414,7 +444,17 @@ jobs:
         run: |
           pr="${{ steps.pr.outputs.pr_number }}"
           run_url="${{ steps.checks.outputs.run_url }}"
+          check_ids='${{ steps.checks.outputs.check_ids }}'
           required=("Commit trailers" "Runtime mirror guard" "Smoke acceptance")
+          # Identify our checks by the ids the API returned when we created
+          # them. The details_url we send is discarded by GitHub -- it stores
+          # the check run's own URL -- so a details_url comparison matched
+          # nothing and this step timed out with all three checks green on the
+          # PR (2026-09-23, run 35854884063, PR #2110).
+          if [ -z "$check_ids" ] || [ "$check_ids" = "null" ]; then
+            echo "::error::The publish step reported no check ids; cannot identify this run's checks."
+            exit 1
+          fi
           # GitHub can take a short moment to surface freshly-published checks
           # on the PR head SHA and satisfy branch protection.
           for i in $(seq 1 20); do
@@ -423,8 +463,13 @@ jobs:
             failures=()
             checks=$(gh pr view "$pr" --json statusCheckRollup --jq '.statusCheckRollup')
             for name in "${required[@]}"; do
-              entry=$(echo "$checks" | jq -c --arg n "$name" --arg url "$run_url" '
-                map(select(.name == $n and (.detailsUrl // "") == $url))
+              want_id=$(jq -r --arg n "$name" '.[$n] // empty' <<<"$check_ids")
+              if [ -z "$want_id" ]; then
+                echo "::error::No check id recorded for '"'"'$name'"'"'."
+                exit 1
+              fi
+              entry=$(echo "$checks" | jq -c --arg n "$name" --arg id "$want_id" '
+                map(select(.name == $n and ((.detailsUrl // "") | endswith("/runs/" + $id))))
                 | last // empty
               ')
               if [ -z "$entry" ]; then
@@ -453,7 +498,7 @@ jobs:
             echo "[$i] still waiting for required checks..."
             sleep 15
           done
-          echo "::error::Timed out waiting for required checks from $run_url to register on PR #$pr."
+          echo "::error::Timed out waiting for required checks $check_ids from $run_url to register on PR #$pr."
           exit 1
 
       - name: Merge inline
