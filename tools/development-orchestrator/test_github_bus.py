@@ -177,6 +177,31 @@ class GitHubBusCommandTests(unittest.TestCase):
             ["repos/ajoe734/pantheon/pulls/4/reviews?per_page=100", "repos/ajoe734/pantheon/pulls/5/reviews?per_page=100"],
         )
 
+    def test_poll_issue_comments_asks_github_only_for_comments_since_the_previous_sync(self) -> None:
+        """16 open tasks' issue threads were re-read in full every sync, ~2s each, inside the tick."""
+        status = {"tasks": [{"id": "BLOCKED-001", "status": "blocked"}]}
+        bus_state = {
+            "processed_comment_ids": [],
+            "last_sync_at": "2026-09-22T05:30:00Z",
+            "tasks": {"BLOCKED-001": {"ops_issue": {"number": 8}}},
+        }
+        with mock.patch.object(github_bus, "gh_json", return_value=[]) as gh_json:
+            github_bus.poll_issue_comments(self.config, bus_state, status, "ajoe734/pantheon")
+
+        self.assertEqual(
+            [call.args[0][1] for call in gh_json.call_args_list],
+            ["repos/ajoe734/pantheon/issues/8/comments?per_page=100&since=2026-09-22T05:20:00Z"],
+        )
+
+    def test_the_first_sync_reads_every_comment(self) -> None:
+        status = {"tasks": [{"id": "BLOCKED-001", "status": "blocked"}]}
+        bus_state = {"processed_comment_ids": [], "tasks": {"BLOCKED-001": {"ops_issue": {"number": 8}}}}
+        with mock.patch.object(github_bus, "gh_json", return_value=[]) as gh_json:
+            github_bus.poll_issue_comments(self.config, bus_state, status, "ajoe734/pantheon")
+
+        self.assertEqual([call.args[0][1] for call in gh_json.call_args_list],
+                         ["repos/ajoe734/pantheon/issues/8/comments?per_page=100"])
+
     def test_poll_issue_comments_skips_done_tasks(self) -> None:
         status = {
             "tasks": [
