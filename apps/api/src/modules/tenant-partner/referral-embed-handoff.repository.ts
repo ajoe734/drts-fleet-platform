@@ -57,11 +57,25 @@ export type PersistReferralEmbedHandoffCommand = Omit<
 
 export type ConsumeReferralEmbedHandoffResult =
   | { outcome: "consumed"; session: ReferralEmbedSession }
-  | { outcome: "replayed" | "expired" | "wrong_host" | "missing" | "session_mismatch" };
+  | {
+      outcome:
+        | "replayed"
+        | "expired"
+        | "wrong_host"
+        | "missing"
+        | "session_mismatch";
+    };
 
 export type RecordReferralEmbedConsentResult =
   | { outcome: "recorded" | "replayed"; session: ReferralEmbedSession }
-  | { outcome: "wrong_host" | "missing" | "session_mismatch" };
+  | {
+      outcome:
+        | "wrong_host"
+        | "missing"
+        | "session_mismatch"
+        | "not_consumed"
+        | "expired";
+    };
 
 const REQUIRED_SCOPES: ReferralEmbedRequiredConsentScope[] = [
   "trip.manage",
@@ -201,13 +215,16 @@ export class ReferralEmbedHandoffRepository {
 
       if (result.rows[0]) {
         const record = this.parseHandoffRecord(result.rows[0].record);
-        await client.query("COMMIT");
         if (
-          (input.currentDrtsPassengerId && record.drtsPassengerId !== input.currentDrtsPassengerId) ||
-          (input.currentPartnerEntrySlug && record.entrySlug !== input.currentPartnerEntrySlug)
+          (input.currentDrtsPassengerId &&
+            record.drtsPassengerId !== input.currentDrtsPassengerId) ||
+          (input.currentPartnerEntrySlug &&
+            record.entrySlug !== input.currentPartnerEntrySlug)
         ) {
+          await client.query("ROLLBACK");
           return { outcome: "session_mismatch" };
         }
+        await client.query("COMMIT");
         return { outcome: "consumed", session: this.toSession(record) };
       }
 
@@ -263,16 +280,19 @@ export class ReferralEmbedHandoffRepository {
     return (result.rows[0]?.record as ReferralEmbedConsentLedgerRecord) ?? null;
   }
 
-  async recordConsent(input: {
-    handoffId: string;
-    entrySlug: string;
-    entryHost: string;
-    currentDrtsPassengerId?: string;
-    currentPartnerEntrySlug?: string;
-    consentBundle: ReferralEmbedConsentBundle;
-  }): Promise<RecordReferralEmbedConsentResult> {
+  async recordConsent(
+    input: {
+      handoffId: string;
+      entrySlug: string;
+      entryHost: string;
+      currentDrtsPassengerId: string;
+      currentPartnerEntrySlug: string;
+      consentBundle: ReferralEmbedConsentBundle;
+    },
+    validateFn?: (session: ReferralEmbedSession) => Promise<void>,
+  ): Promise<RecordReferralEmbedConsentResult> {
     if (!this.isEnabled()) {
-      return this.recordConsentFallback(input);
+      return this.recordConsentFallback(input, validateFn);
     }
 
     const client = await this.databaseService!.connect();
@@ -283,6 +303,14 @@ export class ReferralEmbedHandoffRepository {
         await client.query("COMMIT");
         return { outcome: "missing" };
       }
+      if (!handoff.consumedAt) {
+        await client.query("COMMIT");
+        return { outcome: "not_consumed" };
+      }
+      if (new Date(handoff.consumedAt).getTime() + 8 * 60 * 60 * 1000 < Date.now()) {
+        await client.query("COMMIT");
+        return { outcome: "expired" };
+      }
       if (
         handoff.entrySlug !== input.entrySlug.trim() ||
         handoff.entryHost !== input.entryHost.trim().toLowerCase()
@@ -291,11 +319,23 @@ export class ReferralEmbedHandoffRepository {
         return { outcome: "wrong_host" };
       }
       if (
-        (input.currentDrtsPassengerId && handoff.drtsPassengerId !== input.currentDrtsPassengerId) ||
-        (input.currentPartnerEntrySlug && handoff.entrySlug !== input.currentPartnerEntrySlug)
+        handoff.drtsPassengerId !== input.currentDrtsPassengerId ||
+        handoff.entrySlug !== input.currentPartnerEntrySlug
       ) {
         await client.query("COMMIT");
         return { outcome: "session_mismatch" };
+      }
+
+      const updated = this.withConsent(handoff, input.consentBundle);
+      const sessionToReturn = this.toSession(updated);
+
+      if (validateFn) {
+        try {
+          await validateFn(sessionToReturn);
+        } catch (err) {
+          await client.query("ROLLBACK");
+          throw err;
+        }
       }
 
       const existing = await client.query<JsonRecordRow>(
@@ -346,7 +386,6 @@ export class ReferralEmbedHandoffRepository {
         );
       }
 
-      const updated = this.withConsent(handoff, input.consentBundle);
       await client.query(
         `
           UPDATE admin.phase1_referral_embed_handoffs
@@ -366,7 +405,7 @@ export class ReferralEmbedHandoffRepository {
       await client.query("COMMIT");
       return {
         outcome: existing.rows[0] ? "replayed" : "recorded",
-        session: this.toSession(updated),
+        session: sessionToReturn,
       };
     } finally {
       client.release();
@@ -391,8 +430,10 @@ export class ReferralEmbedHandoffRepository {
       return { outcome: "wrong_host" };
     }
     if (
-      (input.currentDrtsPassengerId && record.drtsPassengerId !== input.currentDrtsPassengerId) ||
-      (input.currentPartnerEntrySlug && record.entrySlug !== input.currentPartnerEntrySlug)
+      (input.currentDrtsPassengerId &&
+        record.drtsPassengerId !== input.currentDrtsPassengerId) ||
+      (input.currentPartnerEntrySlug &&
+        record.entrySlug !== input.currentPartnerEntrySlug)
     ) {
       return { outcome: "session_mismatch" };
     }
@@ -407,16 +448,22 @@ export class ReferralEmbedHandoffRepository {
     return { outcome: "consumed", session: this.toSession(updated) };
   }
 
-  private recordConsentFallback(input: {
-    handoffId: string;
-    entrySlug: string;
-    entryHost: string;
-    currentDrtsPassengerId?: string;
-    currentPartnerEntrySlug?: string;
-    consentBundle: ReferralEmbedConsentBundle;
-  }): RecordReferralEmbedConsentResult {
+  async recordConsentFallback(
+    input: {
+      handoffId: string;
+      entrySlug: string;
+      entryHost: string;
+      currentDrtsPassengerId: string;
+      currentPartnerEntrySlug: string;
+      consentBundle: ReferralEmbedConsentBundle;
+    },
+    validateFn?: (session: ReferralEmbedSession) => Promise<void>,
+  ): Promise<RecordReferralEmbedConsentResult> {
     const handoff = this.fallbackHandoffs.get(input.handoffId);
     if (!handoff) return { outcome: "missing" };
+    if (!handoff.consumedAt) return { outcome: "not_consumed" };
+    if (new Date(handoff.consumedAt).getTime() + 8 * 60 * 60 * 1000 < Date.now())
+      return { outcome: "expired" };
     if (
       handoff.entrySlug !== input.entrySlug.trim() ||
       handoff.entryHost !== input.entryHost.trim().toLowerCase()
@@ -424,10 +471,17 @@ export class ReferralEmbedHandoffRepository {
       return { outcome: "wrong_host" };
     }
     if (
-      (input.currentDrtsPassengerId && handoff.drtsPassengerId !== input.currentDrtsPassengerId) ||
-      (input.currentPartnerEntrySlug && handoff.entrySlug !== input.currentPartnerEntrySlug)
+      handoff.drtsPassengerId !== input.currentDrtsPassengerId ||
+      handoff.entrySlug !== input.currentPartnerEntrySlug
     ) {
       return { outcome: "session_mismatch" };
+    }
+
+    const updated = this.withConsent(handoff, input.consentBundle);
+    const sessionToReturn = this.toSession(updated);
+
+    if (validateFn) {
+      await validateFn(sessionToReturn);
     }
 
     const key = `${handoff.handoffId}\0${input.consentBundle.bundleVersion}`;
@@ -438,11 +492,10 @@ export class ReferralEmbedHandoffRepository {
         this.buildConsentRecord(handoff, input.consentBundle),
       );
     }
-    const updated = this.withConsent(handoff, input.consentBundle);
     this.fallbackHandoffs.set(updated.handoffId, updated);
     return {
       outcome: exists ? "replayed" : "recorded",
-      session: this.toSession(updated),
+      session: sessionToReturn,
     };
   }
 

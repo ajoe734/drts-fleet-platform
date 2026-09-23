@@ -1,3 +1,4 @@
+import { PartnerNotificationNavigationRepository } from "../tenant-partner/partner-notification-navigation.repository";
 import { OwnedAutonomousDispatchExecutorService } from "./owned-autonomous-dispatch-executor.service";
 import {
   applyVoiceBookingQualification,
@@ -461,6 +462,9 @@ export class OwnedMobilityService
   private readonly pendingWorkflowWrites = new Set<Promise<void>>();
 
   private orders: OwnedOrderRecord[] = [];
+  @Optional()
+  @Inject(PartnerNotificationNavigationRepository)
+  private partnerNotificationNavigationRepository?: PartnerNotificationNavigationRepository;
 
   private dispatchJobs: DispatchJobRecord[] = [];
 
@@ -538,6 +542,7 @@ export class OwnedMobilityService
     private readonly ownedMobilityRepository?: OwnedMobilityRepository,
     @Optional()
     private readonly tenantPartnerService?: TenantPartnerService,
+
     // NOTE(integration 20260605): the two SVC params below are appended LAST
     // (both @Optional) so the original 7-param positional order is preserved for
     // unit-test harnesses. e2e-svc-013 had inserted vehicleEligibilityService at
@@ -2246,7 +2251,7 @@ export class OwnedMobilityService
     if (!order) {
       order = this.requireOrder(orderId);
     }
-    this.assertPartnerOrderIdentity(identity, order);
+    await this.assertPartnerOrderIdentityAsync(identity, order);
     return this.cloneOrder(order);
   }
 
@@ -2734,7 +2739,7 @@ export class OwnedMobilityService
     if (!order) {
       order = this.requireBookingOrder(bookingId, tenantId);
     }
-    this.assertPartnerOrderIdentity(identity, order);
+    await this.assertPartnerOrderIdentityAsync(identity, order);
     return this.mapOrderToBooking(order);
   }
 
@@ -13229,6 +13234,63 @@ export class OwnedMobilityService
     return nextOrder;
   }
 
+
+  async getOrderAsync(orderId: string, identity?: BootstrapRequestIdentity | null) {
+    const order = this.requireOrder(orderId);
+    await this.assertPartnerOrderIdentityAsync(identity, order);
+    return this.cloneOrder(order);
+  }
+
+  private async assertPartnerOrderIdentityAsync(
+    identity: BootstrapRequestIdentity | null | undefined,
+    order: OwnedOrderRecord,
+  ) {
+    if (!identity || identity.realm !== "partner") {
+      return;
+    }
+
+    const passengerId = identity.drtsPassengerId ?? identity.actorId;
+
+    let mismatch =
+      (identity.actorType !== "partner_api_key" &&
+        identity.actorType !== "referral_passenger") ||
+      !order.partnerEntrySlug ||
+      (identity.partnerId || null) !== (order.partnerId || null) ||
+      (identity.partnerProgramId || null) !== (order.partnerProgramId || null) ||
+      identity.partnerEntrySlug !== order.partnerEntrySlug ||
+      (identity.actorType === "referral_passenger" &&
+        passengerId &&
+        order.passenger?.passengerId &&
+        identity.actorType === "referral_passenger" &&
+        order.passenger?.passengerId !== passengerId);
+
+    if (!mismatch) {
+      if (order.tenantId === null && this.tenantPartnerService) {
+        const route =
+          await this.partnerNotificationNavigationRepository?.findByOrderId(
+            order.orderId,
+          );
+        if (
+          !route ||
+          route.tenantId !== identity.tenantId ||
+          route.partnerId !== (identity.partnerId || null)
+        ) {
+          mismatch = true;
+        }
+      } else if (identity.tenantId && identity.tenantId !== order.tenantId) {
+        mismatch = true;
+      }
+    }
+
+    if (mismatch) {
+      throw new ApiRequestError(
+        HttpStatus.FORBIDDEN,
+        "PARTNER_SCOPE_MISMATCH",
+        "Partner API key or referral passenger cannot access resources of another entry, tenant, or passenger.",
+      );
+    }
+  }
+
   private assertPartnerOrderIdentity(
     identity: BootstrapRequestIdentity | null | undefined,
     order: OwnedOrderRecord,
@@ -13244,9 +13306,8 @@ export class OwnedMobilityService
         identity.actorType !== "referral_passenger") ||
       !order.partnerEntrySlug ||
       (identity.tenantId && identity.tenantId !== order.tenantId) ||
-      (identity.partnerId && identity.partnerId !== order.partnerId) ||
-      (identity.partnerProgramId &&
-        identity.partnerProgramId !== order.partnerProgramId) ||
+      (identity.partnerId || null) !== (order.partnerId || null) ||
+      (identity.partnerProgramId || null) !== (order.partnerProgramId || null) ||
       identity.partnerEntrySlug !== order.partnerEntrySlug ||
       (identity.actorType === "referral_passenger" &&
         passengerId &&
@@ -13582,9 +13643,9 @@ export class OwnedMobilityService
     };
   }
 
-  getReferralPassengerActiveTrip(
+  async getReferralPassengerActiveTrip(
     identity?: BootstrapRequestIdentity | null,
-  ): ReferralPassengerActiveTripResult {
+  ): Promise<ReferralPassengerActiveTripResult> {
     if (
       !identity ||
       identity.realm !== "partner" ||
@@ -13599,36 +13660,43 @@ export class OwnedMobilityService
 
     const passengerId = identity.drtsPassengerId ?? identity.actorId;
 
-    const activeOrder = Array.from(this.orders.values()).find(
-      (o) =>
-        // Multi-taxi standard-taxi orders are tenant-less by design
-        // (owned-mobility.service.ts buildAndPersistMultiTaxiRide sets
-        // tenantId: null); frozen partnerId/partnerProgramId/entrySlug are
-        // the authoritative ownership boundary for those, not tenantId.
-        //
-        // Known residual gap (SR-PARTNER-NOTIFY-NAV-20260917 review): if the
-        // same entrySlug is later reassigned to a different tenant (SD §4's
-        // "entry 更換 tenantId" case), a null-tenant order created under the
-        // old tenant stays visible to the new tenant's identity, because
-        // OwnedOrderRecord has no field that freezes the tenant that was
-        // active at booking time and this method is synchronous (no query
-        // against the frozen mobility.phase1_order_partner_notification_routes
-        // route). Closing it fully needs either a new frozen field on
-        // OwnedOrderRecord (packages/contracts/src/index.ts) or making this
-        // method async against that route table, both of which require
-        // widening this task's write_scope to owned-mobility.controller.ts /
-        // packages/contracts/src/index.ts. Not done here — out of scope.
-        (o.tenantId === null || o.tenantId === identity.tenantId) &&
-        (o.partnerId || null) === (identity.partnerId || null) &&
-        (o.partnerProgramId || null) === (identity.partnerProgramId || null) &&
+    let activeOrder: OwnedOrderRecord | undefined;
+    for (const o of this.orders.values()) {
+      if (
         o.partnerEntrySlug === identity.partnerEntrySlug &&
         o.passenger?.passengerId === passengerId &&
         o.status !== "completed" &&
         o.status !== "cancelled" &&
         o.status !== "dispatch_failed" &&
         o.status !== "dispatch_timeout" &&
-        o.status !== "no_supply",
-    );
+        o.status !== "no_supply"
+      ) {
+        if (o.tenantId === null && this.tenantPartnerService) {
+          const route =
+            await this.partnerNotificationNavigationRepository?.findByOrderId(
+              o.orderId,
+            );
+          if (
+            !route ||
+            route.tenantId !== identity.tenantId ||
+            route.partnerId !== (identity.partnerId || null)
+          ) {
+            continue;
+          }
+        } else if (o.tenantId !== null && o.tenantId !== identity.tenantId) {
+          continue;
+        }
+
+        if (
+          (o.partnerId || null) !== (identity.partnerId || null) ||
+          (o.partnerProgramId || null) !== (identity.partnerProgramId || null)
+        ) {
+          continue;
+        }
+        activeOrder = o;
+        break;
+      }
+    }
 
     if (!activeOrder) {
       return { active: false, trip: null };
@@ -13663,9 +13731,9 @@ export class OwnedMobilityService
     };
   }
 
-  listReferralPassengerHistory(identity?: BootstrapRequestIdentity | null): {
-    items: ReferralPassengerHistoryItem[];
-  } {
+  async listReferralPassengerHistory(
+    identity?: BootstrapRequestIdentity | null,
+  ): Promise<{ items: ReferralPassengerHistoryItem[] }> {
     if (
       !identity ||
       identity.realm !== "partner" ||
@@ -13680,18 +13748,42 @@ export class OwnedMobilityService
 
     const passengerId = identity.drtsPassengerId ?? identity.actorId;
 
-    const passengerOrders = Array.from(this.orders.values())
-      .filter(
-        (o) =>
-          // See getReferralPassengerActiveTrip: null tenantId is the
-          // tenant-less multi-taxi design, not an unauthorized wildcard.
-          (o.tenantId === null || o.tenantId === identity.tenantId) &&
-          (o.partnerId || null) === (identity.partnerId || null) &&
-          (o.partnerProgramId || null) === (identity.partnerProgramId || null) &&
-          o.partnerEntrySlug === identity.partnerEntrySlug &&
-          o.passenger?.passengerId === passengerId,
-      )
-      .sort((a, b) => (b.createdAt || "").localeCompare(a.createdAt || ""));
+    const passengerOrders: OwnedOrderRecord[] = [];
+    for (const o of Array.from(this.orders.values()).sort((a, b) =>
+      (b.createdAt || "").localeCompare(a.createdAt || "")
+    )) {
+      if (
+        o.partnerEntrySlug !== identity.partnerEntrySlug ||
+        o.passenger?.passengerId !== passengerId
+      ) {
+        continue;
+      }
+
+      if (o.tenantId === null && this.tenantPartnerService) {
+        const route =
+          await this.partnerNotificationNavigationRepository?.findByOrderId(
+            o.orderId,
+          );
+        if (
+          !route ||
+          route.tenantId !== identity.tenantId ||
+          route.partnerId !== (identity.partnerId || null)
+        ) {
+          continue;
+        }
+      } else if (o.tenantId !== null && o.tenantId !== identity.tenantId) {
+        continue;
+      }
+
+      if (
+        (o.partnerId || null) !== (identity.partnerId || null) ||
+        (o.partnerProgramId || null) !== (identity.partnerProgramId || null)
+      ) {
+        continue;
+      }
+
+      passengerOrders.push(o);
+    }
 
     return {
       items: passengerOrders.map((o) => {
@@ -13717,10 +13809,10 @@ export class OwnedMobilityService
     };
   }
 
-  getReferralPassengerReceipt(
+  async getReferralPassengerReceipt(
     orderId: string,
     identity?: BootstrapRequestIdentity | null,
-  ): ReferralPassengerReceipt {
+  ): Promise<ReferralPassengerReceipt> {
     if (
       !identity ||
       identity.realm !== "partner" ||
@@ -13735,8 +13827,7 @@ export class OwnedMobilityService
 
     const passengerId = identity.drtsPassengerId ?? identity.actorId;
 
-    const order = this.getOrder(orderId, identity);
-    this.assertPartnerOrderIdentity(identity, order);
+    const order = await this.getOrderAsync(orderId, identity);
 
     if (
       order.passenger?.passengerId &&
@@ -13823,8 +13914,7 @@ export class OwnedMobilityService
 
     const passengerId = identity.drtsPassengerId ?? identity.actorId;
 
-    const order = this.getOrder(orderId, identity);
-    this.assertPartnerOrderIdentity(identity, order);
+    const order = await this.getOrderAsync(orderId, identity);
 
     if (
       order.passenger?.passengerId &&
@@ -13869,8 +13959,7 @@ export class OwnedMobilityService
 
     const passengerId = identity.drtsPassengerId ?? identity.actorId;
 
-    const order = this.getOrder(orderId, identity);
-    this.assertPartnerOrderIdentity(identity, order);
+    const order = await this.getOrderAsync(orderId, identity);
 
     if (
       order.passenger?.passengerId &&

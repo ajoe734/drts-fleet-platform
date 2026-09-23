@@ -5,6 +5,8 @@ import { randomUUID } from "node:crypto";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import type { DatabaseService } from "../../apps/api/src/common/db";
 import { PartnerNotificationNavigationRepository } from "../../apps/api/src/modules/tenant-partner/partner-notification-navigation.repository";
+import { ReferralEmbedHandoffRepository } from "../../apps/api/src/modules/tenant-partner/referral-embed-handoff.repository";
+import { TenantPartnerService } from "../../apps/api/src/modules/tenant-partner/tenant-partner.service";
 
 const require = createRequire(
   new URL("../../apps/api/package.json", import.meta.url),
@@ -25,12 +27,14 @@ describe.skipIf(!seedDatabaseUrl)(
   () => {
     const dbName = `sr_partner_notify_nav_${process.pid}_${Date.now()}`;
     const adminUrl = (() => {
-      const url = new URL(seedDatabaseUrl!);
+      if (!seedDatabaseUrl) return new URL("postgres://localhost");
+      const url = new URL(seedDatabaseUrl);
       url.pathname = "/postgres";
       return url;
     })();
     const databaseUrl = (() => {
-      const url = new URL(seedDatabaseUrl!);
+      if (!seedDatabaseUrl) return "postgres://localhost";
+      const url = new URL(seedDatabaseUrl);
       url.pathname = `/${dbName}`;
       return url.toString();
     })();
@@ -39,6 +43,7 @@ describe.skipIf(!seedDatabaseUrl)(
     let pool: InstanceType<typeof Pool>;
     let db: DatabaseService;
     let navRepo: PartnerNotificationNavigationRepository;
+    let handoffRepo: ReferralEmbedHandoffRepository;
 
     beforeAll(async () => {
       admin = new Pool({ connectionString: adminUrl.toString() });
@@ -56,8 +61,13 @@ describe.skipIf(!seedDatabaseUrl)(
       // process.env.DATABASE_URL that other concurrently-running test files
       // and their DatabaseService instances rely on.
       pool = new Pool({ connectionString: databaseUrl, max: 8 });
-      db = { connect: pool.connect.bind(pool) } as unknown as DatabaseService;
+      db = {
+        connect: pool.connect.bind(pool),
+        isEnabled: () => true,
+        query: pool.query.bind(pool),
+      } as unknown as DatabaseService;
       navRepo = new PartnerNotificationNavigationRepository(db);
+      handoffRepo = new ReferralEmbedHandoffRepository(db);
     }, 120_000);
 
     afterAll(async () => {
@@ -322,6 +332,334 @@ describe.skipIf(!seedDatabaseUrl)(
           client.release();
         }
       }
+    });
+
+    it("resolves route by orderId (findByOrderId)", async () => {
+      const client = await db.connect();
+      const tenantId = `tenant-${randomUUID()}`;
+      const data = {
+        orderId: `order_nav_${randomUUID()}`,
+        entrySlug: `entry-${randomUUID()}`,
+        partnerId: `partner-1`,
+        tenantId: tenantId,
+        orderTenantId: tenantId,
+        orderPartnerId: `partner-1`,
+        orderPassengerId: "pass-1",
+        routePassengerId: "pass-1",
+        userRef: `user-${randomUUID()}`,
+        rideRef: `ride-${randomUUID()}`,
+        passengerSubjectRef: `subj-${randomUUID()}`,
+      };
+
+      try {
+        await setupMockData(client, data);
+
+        const result = await navRepo.findByOrderId(data.orderId);
+        expect(result).not.toBeNull();
+        expect(result!.orderId).toBe(data.orderId);
+
+        const missing = await navRepo.findByOrderId("order_nav_missing");
+        expect(missing).toBeNull();
+      } finally {
+        try {
+          await cleanupMockData(client, data);
+        } finally {
+          client.release();
+        }
+      }
+    });
+
+    it("successfully records referral embed consent and persists to ledger (positive)", async () => {
+      // Issue a handoff artifact
+      const handoff = await handoffRepo.issue({
+        artifact: "artifact_123",
+        entrySlug: "demo-slug",
+        entryHost: "demo-host.com",
+        partnerUserRef: "user-1",
+        drtsPassengerId: "pass-1",
+        tenantId: null,
+        partnerId: null,
+        partnerProgramId: null,
+        consentRequired: true,
+        consentBundleVersion: null,
+        consentGrantedAt: null,
+        issuedAt: new Date().toISOString(),
+        expiresAt: new Date(Date.now() + 120_000).toISOString(),
+      });
+
+      // Consume it
+      const consumeRes = await handoffRepo.consume({
+        artifact: "artifact_123",
+        entrySlug: "demo-slug",
+        entryHost: "demo-host.com",
+      });
+      expect(consumeRes.outcome).toBe("consumed");
+
+      // Record consent
+      const linkRepo = {
+        findByDrtsPassengerId: async () => ({ status: "active" }),
+      };
+      const tenantPartnerRepo = {
+        loadState: async () => ({
+          partnerEntries: [
+            {
+              entrySlug: "demo-slug",
+              status: "active",
+              tenantId: null,
+              partnerId: null,
+              activeFlag: true,
+              authMode: "partner_api_key",
+            },
+          ],
+        }),
+      };
+      const auditNotificationService = { recordTenantAudit: () => {} };
+      const service = new TenantPartnerService(
+        auditNotificationService as any,
+        tenantPartnerRepo as any,
+        undefined,
+        undefined,
+        undefined,
+        linkRepo as any,
+        handoffRepo,
+      );
+      await service.onModuleInit();
+
+      const consentSession = await service.recordReferralEmbedConsent({
+        handoffId: handoff.handoffId,
+        entrySlug: "demo-slug",
+        entryHost: "demo-host.com",
+        currentDrtsPassengerId: "pass-1",
+        currentPartnerEntrySlug: "demo-slug",
+        consentBundle: {
+          bundleVersion: "v1",
+          grantedScopes: ["trip.manage", "pii.trip", "identity.bind"],
+          grantedAt: new Date().toISOString(),
+        },
+      });
+      expect(consentSession.handoffId).toBe(handoff.handoffId);
+
+      // Verify ledger persistence
+      const ledger = await handoffRepo.findLatestConsent("demo-slug", "pass-1");
+      expect(ledger).not.toBeNull();
+      expect(ledger?.handoffId).toBe(handoff.handoffId);
+    });
+
+    it("allows consent after handoff expiration as long as it was consumed (positive replay)", async () => {
+      const now = Date.now();
+      const past = new Date(now - 300_000).toISOString(); // 5 minutes ago
+
+      // Issue an ALREADY EXPIRED handoff (expiresAt is in the past)
+      // but simulate that it was already consumed in time by directly injecting it or just consuming it (but consume would fail if expired).
+      // So we issue it with future expiry, consume it, then update its expiresAt to past via PG client for the test.
+      const handoff = await handoffRepo.issue({
+        artifact: "artifact_expired",
+        entrySlug: "demo-slug-exp",
+        entryHost: "demo-host.com",
+        partnerUserRef: "user-1",
+        drtsPassengerId: "pass-1",
+        tenantId: null,
+        partnerId: null,
+        partnerProgramId: null,
+        consentRequired: true,
+        consentBundleVersion: null,
+        consentGrantedAt: null,
+        issuedAt: new Date(now - 400_000).toISOString(),
+        expiresAt: new Date(now + 100_000).toISOString(), // valid for consumption
+      });
+
+      const consumeRes = await handoffRepo.consume({
+        artifact: "artifact_expired",
+        entrySlug: "demo-slug-exp",
+        entryHost: "demo-host.com",
+      });
+      expect(consumeRes.outcome).toBe("consumed");
+
+      // Update expires_at to be in the past to simulate the handoff artifact TTL expiring
+      const client = await db.connect();
+      try {
+        await client.query(
+          "UPDATE admin.phase1_referral_embed_handoffs SET expires_at = $1::timestamptz, record = jsonb_set(record, '{expiresAt}', to_jsonb($1::text), true) WHERE handoff_id = $2",
+          [past, handoff.handoffId],
+        );
+      } finally {
+        client.release();
+      }
+
+      // Record consent (should succeed even if handoff is expired, because the session outlives the artifact)
+      const linkRepo = {
+        findByDrtsPassengerId: async () => ({ status: "active" }),
+      };
+      const tenantPartnerRepo = {
+        loadState: async () => ({
+          partnerEntries: [
+            {
+              entrySlug: "demo-slug-exp",
+              status: "active",
+              tenantId: null,
+              partnerId: null,
+              activeFlag: true,
+              authMode: "partner_api_key",
+            },
+          ],
+        }),
+      };
+      const auditNotificationService = { recordTenantAudit: () => {} };
+      const service = new TenantPartnerService(
+        auditNotificationService as any,
+        tenantPartnerRepo as any,
+        undefined,
+        undefined,
+        undefined,
+        linkRepo as any,
+        handoffRepo,
+      );
+      await service.onModuleInit();
+
+      const consentSession = await service.recordReferralEmbedConsent({
+        handoffId: handoff.handoffId,
+        entrySlug: "demo-slug-exp",
+        entryHost: "demo-host.com",
+        currentDrtsPassengerId: "pass-1",
+        currentPartnerEntrySlug: "demo-slug-exp",
+        consentBundle: {
+          bundleVersion: "v1",
+          grantedScopes: ["trip.manage", "pii.trip", "identity.bind"],
+          grantedAt: new Date().toISOString(),
+        },
+      });
+      expect(consentSession.handoffId).toBe(handoff.handoffId);
+    });
+
+    it("rejects consent if session is older than 8 hours", async () => {
+      const now = Date.now();
+      const past = new Date(now - 9 * 60 * 60 * 1000).toISOString(); // 9 hours ago
+
+      // Issue and consume an artifact 9 hours ago
+      const handoff = await handoffRepo.issue({
+        artifact: "artifact_expired_session",
+        entrySlug: "demo-slug-exp-sess",
+        entryHost: "demo-host.com",
+        partnerUserRef: "user-2",
+        drtsPassengerId: "pass-2",
+        tenantId: null,
+        partnerId: null,
+        partnerProgramId: null,
+        consentRequired: true,
+        consentBundleVersion: null,
+        consentGrantedAt: null,
+        issuedAt: new Date(now - 10 * 60 * 60 * 1000).toISOString(),
+        expiresAt: new Date(now - 9.5 * 60 * 60 * 1000).toISOString(),
+      });
+
+      // Instead of consuming via repo, we inject it directly with consumed_at > 8 hours ago
+      const client = await db.connect();
+      try {
+        await client.query(
+          "UPDATE admin.phase1_referral_embed_handoffs SET consumed_at = $1::timestamptz, expires_at = $1::timestamptz, record = jsonb_set(jsonb_set(record, '{consumedAt}', to_jsonb($1::text), true), '{expiresAt}', to_jsonb($1::text), true) WHERE handoff_id = $2",
+          [past, handoff.handoffId],
+        );
+      } finally {
+        client.release();
+      }
+
+      const linkRepo = {
+        findByDrtsPassengerId: async () => ({ status: "active" }),
+      };
+      const tenantPartnerRepo = {
+        loadState: async () => ({
+          partnerEntries: [
+            {
+              entrySlug: "demo-slug-exp-sess",
+              status: "active",
+              tenantId: null,
+              partnerId: null,
+              activeFlag: true,
+              authMode: "partner_api_key",
+            },
+          ],
+        }),
+      };
+      const auditNotificationService = { recordTenantAudit: () => {} };
+      const service = new TenantPartnerService(
+        auditNotificationService as any,
+        tenantPartnerRepo as any,
+        undefined,
+        undefined,
+        undefined,
+        linkRepo as any,
+        handoffRepo,
+      );
+      await service.onModuleInit();
+
+      await expect(
+        service.recordReferralEmbedConsent({
+          handoffId: handoff.handoffId,
+          entrySlug: "demo-slug-exp-sess",
+          entryHost: "demo-host.com",
+          currentDrtsPassengerId: "pass-2",
+          currentPartnerEntrySlug: "demo-slug-exp-sess",
+          consentBundle: {
+            bundleVersion: "v1",
+            grantedScopes: ["trip.manage", "pii.trip", "identity.bind"],
+            grantedAt: new Date().toISOString(),
+          },
+        }),
+      ).rejects.toMatchObject({ code: "REFERRAL_HANDOFF_EXPIRED" });
+    });
+
+    it("rejects consume on session mismatch without consuming the handoff (negative cross-subject zero-write)", async () => {
+      const artifact = "artifact_cross_subject";
+      const handoff = await handoffRepo.issue({
+        artifact,
+        entrySlug: "demo-slug",
+        entryHost: "demo-host.com",
+        partnerUserRef: "user-a",
+        drtsPassengerId: "pass-a",
+        tenantId: null,
+        partnerId: null,
+        partnerProgramId: null,
+        consentRequired: true,
+        consentBundleVersion: null,
+        consentGrantedAt: null,
+        issuedAt: new Date().toISOString(),
+        expiresAt: new Date(Date.now() + 120_000).toISOString(),
+      });
+
+      // Rejected consume by the wrong subject must not commit the UPDATE (regression
+      // guard for the commit-before-mismatch-check bug: the transaction must roll
+      // back so the handoff is still available for the rightful subject).
+      const consumeB = await handoffRepo.consume({
+        artifact,
+        entrySlug: "demo-slug",
+        entryHost: "demo-host.com",
+        currentDrtsPassengerId: "pass-b",
+      });
+      expect(consumeB.outcome).toBe("session_mismatch");
+
+      const client = await db.connect();
+      try {
+        const res = await client.query("SELECT consumed_at FROM admin.phase1_referral_embed_handoffs WHERE handoff_id = $1", [handoff.handoffId]);
+        expect(res.rows[0].consumed_at).toBeNull();
+      } finally {
+        client.release();
+      }
+
+      const consumeA = await handoffRepo.consume({
+        artifact,
+        entrySlug: "demo-slug",
+        entryHost: "demo-host.com",
+        currentDrtsPassengerId: "pass-a",
+      });
+      expect(consumeA.outcome).toBe("consumed");
+
+      const consumeBReplay = await handoffRepo.consume({
+        artifact,
+        entrySlug: "demo-slug",
+        entryHost: "demo-host.com",
+        currentDrtsPassengerId: "pass-b",
+      });
+      expect(consumeBReplay.outcome).toBe("replayed");
     });
   },
 );

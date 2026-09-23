@@ -5836,10 +5836,58 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
     command: RecordReferralEmbedConsentCommand,
   ): Promise<ReferralEmbedSession> {
     this.assertExactReferralEmbedConsentBundle(command.consentBundle);
+
+    const validateFn = async (session: ReferralEmbedSession) => {
+      const entry = await this.getPartnerEntry(session.partnerEntrySlug);
+      if (!entry || entry.status !== "active") {
+        throw new ApiRequestError(
+          HttpStatus.FORBIDDEN,
+          "PARTNER_ENTRY_INACTIVE",
+          "The partner entry is inactive or missing.",
+        );
+      }
+      if (
+        entry.tenantId !== session.identity.tenantId ||
+        entry.partnerId !== (session.identity.partnerId || null)
+      ) {
+        throw new ApiRequestError(
+          HttpStatus.FORBIDDEN,
+          "OWNERSHIP_MISMATCH",
+          "The partner entry ownership has changed.",
+        );
+      }
+      const link = await this.partnerUserIdentityLinkRepository.findByDrtsPassengerId(
+        session.partnerEntrySlug,
+        session.drtsPassengerId,
+      );
+      if (!link || link.status !== "active") {
+        throw new ApiRequestError(
+          HttpStatus.FORBIDDEN,
+          "REFERRAL_HANDOFF_REVOKED",
+          "The partner user identity link is no longer active.",
+        );
+      }
+    };
+
     const result =
-      await this.referralEmbedHandoffRepository.recordConsent(command);
+      await this.referralEmbedHandoffRepository.recordConsent(command, validateFn);
+
     if (result.outcome === "recorded" || result.outcome === "replayed") {
       return result.session;
+    }
+    if (result.outcome === "expired") {
+      throw new ApiRequestError(
+        HttpStatus.FORBIDDEN,
+        "REFERRAL_HANDOFF_EXPIRED",
+        "The referral handoff artifact has expired.",
+      );
+    }
+    if (result.outcome === "not_consumed") {
+      throw new ApiRequestError(
+        HttpStatus.FORBIDDEN,
+        "REFERRAL_HANDOFF_NOT_CONSUMED",
+        "The referral handoff artifact has not been consumed yet.",
+      );
     }
     if (result.outcome === "session_mismatch") {
       throw new ApiRequestError(

@@ -5,12 +5,12 @@ import {
   consumeReferralEmbedHandoffArtifact,
   getPartnerEntry,
   recordReferralEmbedConsent,
-} from "@/lib/embed-api";
+} from "../../../../lib/embed-api";
 import {
   buildReferralEmbedConsentCommand,
   getReferralEmbedSession,
   writeReferralEmbedSession,
-} from "@/lib/embed-partner-session";
+} from "../../../../lib/embed-partner-session";
 
 type SessionAction =
   | {
@@ -42,21 +42,20 @@ function jsonResponse(body: unknown, status = 200) {
   });
 }
 
-function sanitizeReturnTo(returnTo: string | undefined): string {
-  if (
-    !returnTo ||
-    !returnTo.startsWith("/") ||
-    returnTo.startsWith("//") ||
-    returnTo.startsWith("/\\")
-  ) {
-    return "/";
-  }
-  return returnTo;
-}
-
 function redirectResponse(request: Request, returnTo: string | undefined) {
-  const url = new URL(sanitizeReturnTo(returnTo), request.url);
-  const response = NextResponse.redirect(url);
+  const requestUrl = new URL(request.url);
+  let targetUrl: URL;
+  try {
+    targetUrl = new URL(returnTo || "/", requestUrl);
+  } catch {
+    targetUrl = new URL("/", requestUrl);
+  }
+
+  if (targetUrl.origin !== requestUrl.origin) {
+    targetUrl = new URL("/", requestUrl);
+  }
+
+  const response = NextResponse.redirect(targetUrl);
   response.headers.set("Cache-Control", "no-store, max-age=0");
   return response;
 }
@@ -143,37 +142,33 @@ export async function POST(request: Request) {
   try {
     const action = await parseAction(request);
     if (action.action === "demo-bootstrap") {
-      const session = await buildDemoSession(
-        action.entrySlug,
-        action.entryHost,
-      );
+      const session = await buildDemoSession(action.entrySlug, action.entryHost);
       await writeReferralEmbedSession(session);
       return jsonResponse({ ok: true, session });
     }
 
     if (action.action === "grant-consent") {
       const existingSession = await getReferralEmbedSession();
+      if (!existingSession || existingSession.handoffId !== action.handoffId) {
+        throw new Error("Missing or invalid session for consent grant.");
+      }
+
       const session = await recordReferralEmbedConsent(
         buildReferralEmbedConsentCommand({
           handoffId: action.handoffId,
           entrySlug: action.entrySlug,
           entryHost: action.entryHost,
-          ...(existingSession?.drtsPassengerId
-            ? { currentDrtsPassengerId: existingSession.drtsPassengerId }
-            : {}),
-          ...(existingSession?.partnerEntrySlug
-            ? { currentPartnerEntrySlug: existingSession.partnerEntrySlug }
-            : {}),
+          currentDrtsPassengerId: existingSession.drtsPassengerId,
+          currentPartnerEntrySlug: existingSession.partnerEntrySlug,
           actorIp: request.headers.get("x-forwarded-for"),
           userAgent: request.headers.get("user-agent"),
         }),
       );
       await writeReferralEmbedSession(session);
       if (
-        request.headers
-          .get("content-type")
-          ?.toLowerCase()
-          .includes("application/json")
+        request.headers.get("content-type")?.toLowerCase().includes(
+          "application/json",
+        )
       ) {
         return jsonResponse({ ok: true, session });
       }
@@ -194,10 +189,9 @@ export async function POST(request: Request) {
     });
     await writeReferralEmbedSession(session);
     if (
-      request.headers
-        .get("content-type")
-        ?.toLowerCase()
-        .includes("application/json")
+      request.headers.get("content-type")?.toLowerCase().includes(
+        "application/json",
+      )
     ) {
       return jsonResponse({ ok: true, session });
     }
@@ -212,9 +206,7 @@ export async function POST(request: Request) {
     // untouched; the mismatch check above (via current*) is what stops the
     // takeover, not clearing the cookie.
     const message =
-      error instanceof Error
-        ? error.message
-        : "Referral session exchange failed.";
+      error instanceof Error ? error.message : "Referral session exchange failed.";
     return jsonResponse({ ok: false, message }, 400);
   }
 }

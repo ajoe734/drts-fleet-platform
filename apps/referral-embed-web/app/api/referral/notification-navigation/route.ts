@@ -2,11 +2,11 @@ import { NextResponse } from "next/server";
 import {
   consumeReferralEmbedHandoffArtifact,
   getPartnerEntry,
-} from "@/lib/embed-api";
+} from "../../../../lib/embed-api";
 import {
   getReferralEmbedSession,
   writeReferralEmbedSession,
-} from "@/lib/embed-partner-session";
+} from "../../../../lib/embed-partner-session";
 
 export async function GET(request: Request) {
   const url = new URL(request.url);
