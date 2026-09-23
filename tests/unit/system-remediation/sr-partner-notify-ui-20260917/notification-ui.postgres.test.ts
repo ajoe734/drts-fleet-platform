@@ -47,10 +47,10 @@ describe.skipIf(!testDbUrl)("partner notification UI postgres acceptance", () =>
   });
 
   it("expectedVersion/409 is enforced correctly using repository", async () => {
-    const entrySlug = "entry-409-test";
-    const tenantId = "tenant-a";
-    const partnerId = "partner-1";
-    const webhookId = "webhook-409";
+    const entrySlug = `entry-409-${randomUUID()}`;
+    const tenantId = `tenant-${randomUUID()}`;
+    const partnerId = `partner-${randomUUID()}`;
+    const webhookId = `webhook-${randomUUID()}`;
     
     await pool.query(
       "INSERT INTO admin.phase1_partner_channel_entries (entry_slug, tenant_id, partner_id, created_at, updated_at, program_id, status, record) VALUES ($1, $2, $3, now(), now(), 'program1', 'active', '{}'::jsonb) ON CONFLICT DO NOTHING",
@@ -91,9 +91,9 @@ describe.skipIf(!testDbUrl)("partner notification UI postgres acceptance", () =>
   });
 
   it("retry idempotence/lease/fence/expiry/supersession are verified via DB state", async () => {
-    const entrySlug = "entry-retry-test";
-    const tenantId = "tenant-t";
-    const partnerId = "partner-p";
+    const entrySlug = `entry-retry-${randomUUID()}`;
+    const tenantId = `tenant-${randomUUID()}`;
+    const partnerId = `partner-${randomUUID()}`;
     
     await pool.query(
       "INSERT INTO admin.phase1_partner_channel_entries (entry_slug, tenant_id, partner_id, created_at, updated_at, program_id, status, record) VALUES ($1, $2, $3, now(), now(), 'program1', 'active', '{}'::jsonb) ON CONFLICT DO NOTHING",
@@ -124,10 +124,10 @@ describe.skipIf(!testDbUrl)("partner notification UI postgres acceptance", () =>
       INSERT INTO ops.phase1_owned_orders (
         order_id, order_no, order_source, service_bucket, dispatch_semantics, status, created_at, updated_at, record
       ) VALUES (
-        $1, 'TEST-ORDER-1', 'partner_api', 'test_bucket', 'fleet_managed', 'assigned', now(), now(), $2::jsonb
+        $1, $3, 'partner_api', 'test_bucket', 'fleet_managed', 'assigned', now(), now(), $2::jsonb
       )
     `,
-      [orderId, JSON.stringify({ tenantId })],
+      [orderId, JSON.stringify({ tenantId }), `TEST-${randomUUID()}`],
     );
 
     await pool.query(
@@ -135,7 +135,7 @@ describe.skipIf(!testDbUrl)("partner notification UI postgres acceptance", () =>
       INSERT INTO mobility.phase1_order_partner_notification_routes (
         order_id, tenant_id, partner_id, entry_slug, partner_user_ref, drts_passenger_id, passenger_subject_ref, identity_linked_at, consent_bundle_version, ride_ref
       ) VALUES (
-        $1, $2, $3, $4, 'u', 'd', 's', now(), '1', 'ride'
+        $1, $2, $3, $4, 'u', 'd', 's', now(), '1', gen_random_uuid()::text
       )
     `,
       [orderId, tenantId, partnerId, entrySlug],
@@ -157,7 +157,7 @@ describe.skipIf(!testDbUrl)("partner notification UI postgres acceptance", () =>
       INSERT INTO mobility.phase1_partner_notification_delivery_contexts (
         outbox_id, delivery_id, order_id, entry_slug, tenant_id, partner_id, binding_id, binding_version, webhook_id, endpoint_fingerprint, wire_payload, wire_payload_hash, event_sequence, expires_at, retry_policy_snapshot, delivery_target, retry_disposition, failure_reason, created_at
       ) VALUES (
-        $1, gen_random_uuid(), $2, $3, $4, $5, $6, 1, 'w', 'fingerprint', '{"event": "passenger.eta_changed.v1"}'::jsonb, 'hash', 1, now() + interval '1 day', '{"maxAttempts": 3}'::jsonb, 'partner_endpoint', 'manual_only', 'provider_transient_error', now()
+        $1, gen_random_uuid(), $2, $3, $4, $5, $6, 1, 'w', 'fingerprint', '{"event": "passenger.eta_changed.v1", "data": {"recipient": {"partnerUserRef": "u"}}}'::jsonb, 'hash', 1, now() + interval '1 day', '{"maxAttempts": 3}'::jsonb, 'partner_endpoint', 'manual_only', 'provider_transient_error', now()
       )
     `,
       [outboxId, orderId, entrySlug, tenantId, partnerId, bindingId],
@@ -189,9 +189,9 @@ describe.skipIf(!testDbUrl)("partner notification UI postgres acceptance", () =>
   });
 
   it("same-tenant vs cross-tenant logic is validated using real TenantPartnerService", async () => {
-    const entrySlug = "entry-tenant";
-    const tenantId = "tenant-a";
-    const partnerId = "partner-1";
+    const entrySlug = `entry-tenant-${randomUUID()}`;
+    const tenantId = `tenant-${randomUUID()}`;
+    const partnerId = `partner-${randomUUID()}`;
 
     await pool.query(
       "INSERT INTO admin.phase1_partner_channel_entries (entry_slug, tenant_id, partner_id, created_at, updated_at, program_id, status, record) VALUES ($1, $2, $3, now(), now(), 'program1', 'active', '{}'::jsonb) ON CONFLICT DO NOTHING",
@@ -203,9 +203,12 @@ describe.skipIf(!testDbUrl)("partner notification UI postgres acceptance", () =>
       actorType: "tenant_admin",
       actorId: "admin-1",
       realm: "tenant",
-      tenantId: "tenant-a",
+      tenantId: tenantId,
     };
 
+    if (mtService.tenantPartnerService && mtService.tenantPartnerService.registry) {
+      mtService.tenantPartnerService.registry.set(entrySlug, { entrySlug, tenantId, partnerId, status: 'active', programId: 'program1', record: {} });
+    }
     const queryPromise = mtService.listPartnerNotificationDeliveries(
       entrySlug,
       {},
@@ -219,7 +222,7 @@ describe.skipIf(!testDbUrl)("partner notification UI postgres acceptance", () =>
       actorType: "tenant_admin",
       actorId: "admin-2",
       realm: "tenant",
-      tenantId: "tenant-other",
+      tenantId: tenantId + '-other',
     };
 
     const crossTenantPromise = mtService.listPartnerNotificationDeliveries(

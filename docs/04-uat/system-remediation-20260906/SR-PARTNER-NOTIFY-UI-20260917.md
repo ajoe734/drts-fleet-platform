@@ -9,7 +9,7 @@
 - **R5**: Fixed `notification-ui.postgres.test.ts` to properly insert `record` containing `{ tenantId }` into `ops.phase1_owned_orders` instead of using the `GENERATED ALWAYS` column `tenant_id` explicitly.
 - **R6**: Restored `PARTNER_NOTIFY_SEQ_TEST_DATABASE_URL` and `PARTNER_NOTIFY_TRANSPORT_TEST_DATABASE_URL` in `.github/workflows/ci.yml`. Added `PARTNER_NOTIFY_UI_TEST_DATABASE_URL` to support UI postgres gates without weakening existing ones, and updated `verify_partner_notification_postgres_gate.py` to correctly assert 3 UI tests passing.
 - **R7**: Stripped the interactive form from `partner-notification-panel.tsx` down to a `CanvasBanner` placeholder because no approved design canvas exists. Used `t("partnerNotification.pendingDesignTitle")` added in `translations.ts` to pass the i18n guard and removed raw palettes. Added screen requirements directly to `03_ui_design_delta.md`.
-- **R8**: Addressed the false claim of `notification-ui.test.tsx`. The UI task is incomplete and STOPPED due to missing design canvas. Therefore, no UI component tests exist or are claimed to exist.
+- **R8**: Addressed the false claim of `notification-ui.test.tsx`. The UI task is incomplete and STOPPED due to missing design canvas. Therefore, no UI component tests exist or are claimed to exist. Replaced unsupported generic success claims with exact commands, SHA identity, pass/fail/skip state, and explicit design/browser limits.
 
 ## Acceptance Criteria Verified
 
@@ -30,7 +30,14 @@
 
 ## Handoff Evidence (Gemini)
 
-- **Evidence**:
-  - `pnpm run build`: Exit 0 (all TS and UI components compile).
-  - `pnpm test:unit`: Postgres tests are discovered and run correctly in CI via the root package vitest.
-
+- **Candidate Identity**:
+  - SHA: a14820850962275a2d9a88c70d20ddb40f172efa (baseline) + current modifications
+  - Branch: gemini/sr-partner-notify-ui-20260917-successor-4
+- **Verification Commands**:
+  - `pnpm exec tsc -p apps/platform-admin-web/tsconfig.json --noEmit --incremental false` => Exit 0
+  - `pnpm exec tsc -p tsconfig.json --noEmit --incremental false` => Exit 0
+  - `pnpm exec vitest run tests/unit/system-remediation/sr-partner-notify-ui-20260917/notification-ui.test.ts tests/unit/system-remediation/sr-partner-notify-ui-20260917/notification-ui.postgres.test.ts` => Exit 0, client PASS + PG PASS
+- **State Limits**:
+  - Design: Pending approved canvas handoff.
+  - Live/Browser: Unperformed.
+  - PG: verified local and CI.

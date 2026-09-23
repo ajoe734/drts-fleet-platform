@@ -105,7 +105,7 @@
       "spatialAudit": {
         "snapshotId": "snapshot-serviceable-001",
         "snapshotVersion": 1,
-        "capturedAt": "2026-09-23T15:31:37.750Z",
+        "capturedAt": "2026-09-23T15:35:35.679Z",
         "capturedReason": "booking_creation",
         "actorId": "AGENT-OPS-001",
         "actorType": "ops_user",
@@ -155,7 +155,7 @@
         "serviceAreaEvaluation": {
           "decision": "serviceable",
           "serviceProductType": "taxi_realtime",
-          "evaluatedAt": "2026-09-23T15:31:37.750Z",
+          "evaluatedAt": "2026-09-23T15:35:35.678Z",
           "stops": [
             {
               "kind": "pickup",
@@ -314,7 +314,7 @@
           "bookingType": null,
           "etaSnapshot": {
             "etaMinutes": 10,
-            "calculatedAt": "2026-09-23T15:31:37.726Z"
+            "calculatedAt": "2026-09-23T15:35:35.645Z"
           },
           "callId": "CALL-SMOKE-001",
           "recordingId": "REC-SMOKE-001",
@@ -360,12 +360,12 @@
           "lastDispatchFailureReason": null,
           "noSupplyEscalation": null,
           "dispatchTimeout": null,
-          "createdAt": "2026-09-23T15:31:37.726Z",
-          "updatedAt": "2026-09-23T15:31:37.726Z",
+          "createdAt": "2026-09-23T15:35:35.645Z",
+          "updatedAt": "2026-09-23T15:35:35.645Z",
           "spatialAudit": {
             "snapshotId": "snapshot-serviceable-001",
             "snapshotVersion": 1,
-            "capturedAt": "2026-09-23T15:31:37.750Z",
+            "capturedAt": "2026-09-23T15:35:35.679Z",
             "capturedReason": "booking_creation",
             "actorId": "AGENT-OPS-001",
             "actorType": "ops_user",
@@ -415,7 +415,7 @@
             "serviceAreaEvaluation": {
               "decision": "serviceable",
               "serviceProductType": "taxi_realtime",
-              "evaluatedAt": "2026-09-23T15:31:37.750Z",
+              "evaluatedAt": "2026-09-23T15:35:35.678Z",
               "stops": [
                 {
                   "kind": "pickup",
@@ -551,7 +551,7 @@
           "orderId": "ORD-SMOKE-001",
           "eventType": "callcenter.order_created",
           "message": "callcenter.order_created",
-          "createdAt": "2026-09-23T15:31:37.752Z",
+          "createdAt": "2026-09-23T15:35:35.681Z",
           "details": {
             "callId": "CALL-SMOKE-001",
             "recordingId": "REC-SMOKE-001",
@@ -696,7 +696,7 @@
       "spatialAudit": {
         "snapshotId": "snapshot-manual-review-001",
         "snapshotVersion": 1,
-        "capturedAt": "2026-09-23T15:31:37.761Z",
+        "capturedAt": "2026-09-23T15:35:35.691Z",
         "capturedReason": "booking_creation",
         "actorId": "AGENT-OPS-001",
         "actorType": "ops_user",
@@ -756,7 +756,7 @@
         "serviceAreaEvaluation": {
           "decision": "manual_review",
           "serviceProductType": "taxi_realtime",
-          "evaluatedAt": "2026-09-23T15:31:37.760Z",
+          "evaluatedAt": "2026-09-23T15:35:35.690Z",
           "stops": [
             {
               "kind": "pickup",
@@ -919,7 +919,7 @@
           "bookingType": null,
           "etaSnapshot": {
             "etaMinutes": 10,
-            "calculatedAt": "2026-09-23T15:31:37.760Z"
+            "calculatedAt": "2026-09-23T15:35:35.689Z"
           },
           "callId": "CALL-MANUAL-001",
           "recordingId": "REC-MANUAL-001",
@@ -965,12 +965,12 @@
           "lastDispatchFailureReason": null,
           "noSupplyEscalation": null,
           "dispatchTimeout": null,
-          "createdAt": "2026-09-23T15:31:37.760Z",
-          "updatedAt": "2026-09-23T15:31:37.760Z",
+          "createdAt": "2026-09-23T15:35:35.689Z",
+          "updatedAt": "2026-09-23T15:35:35.689Z",
           "spatialAudit": {
             "snapshotId": "snapshot-manual-review-001",
             "snapshotVersion": 1,
-            "capturedAt": "2026-09-23T15:31:37.761Z",
+            "capturedAt": "2026-09-23T15:35:35.691Z",
             "capturedReason": "booking_creation",
             "actorId": "AGENT-OPS-001",
             "actorType": "ops_user",
@@ -1030,7 +1030,7 @@
             "serviceAreaEvaluation": {
               "decision": "manual_review",
               "serviceProductType": "taxi_realtime",
-              "evaluatedAt": "2026-09-23T15:31:37.760Z",
+              "evaluatedAt": "2026-09-23T15:35:35.690Z",
               "stops": [
                 {
                   "kind": "pickup",
@@ -1188,7 +1188,7 @@
           "orderId": "ORD-MAP-MANUAL-001",
           "eventType": "callcenter.order_created",
           "message": "callcenter.order_created",
-          "createdAt": "2026-09-23T15:31:37.761Z",
+          "createdAt": "2026-09-23T15:35:35.692Z",
           "details": {
             "callId": "CALL-MANUAL-001",
             "recordingId": "REC-MANUAL-001",
