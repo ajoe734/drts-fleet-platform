@@ -6,6 +6,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import type { DatabaseService } from "../../apps/api/src/common/db";
 import { PartnerNotificationNavigationRepository } from "../../apps/api/src/modules/tenant-partner/partner-notification-navigation.repository";
 import { ReferralEmbedHandoffRepository } from "../../apps/api/src/modules/tenant-partner/referral-embed-handoff.repository";
+import { TenantPartnerService } from "../../apps/api/src/modules/tenant-partner/tenant-partner.service";
 
 const require = createRequire(
   new URL("../../apps/api/package.json", import.meta.url),
@@ -395,10 +396,34 @@ describe.skipIf(!seedDatabaseUrl)(
       expect(consumeRes.outcome).toBe("consumed");
 
       // Record consent
-      const linkRepo = { findByDrtsPassengerId: async () => ({ status: 'active' }) };
-      const tenantPartnerRepo = { getPartnerEntry: async () => ({ status: 'active', tenantId: null, partnerId: null }) };
-      const { TenantPartnerService } = require("../../apps/api/src/modules/tenant-partner/tenant-partner.service");
-      const service = new TenantPartnerService({} as any, tenantPartnerRepo as any, undefined, undefined, undefined, linkRepo as any, handoffRepo);
+      const linkRepo = {
+        findByDrtsPassengerId: async () => ({ status: "active" }),
+      };
+      const tenantPartnerRepo = {
+        loadState: async () => ({
+          partnerEntries: [
+            {
+              entrySlug: "demo-slug",
+              status: "active",
+              tenantId: null,
+              partnerId: null,
+              activeFlag: true,
+              authMode: "partner_api_key",
+            },
+          ],
+        }),
+      };
+      const auditNotificationService = { recordTenantAudit: () => {} };
+      const service = new TenantPartnerService(
+        auditNotificationService as any,
+        tenantPartnerRepo as any,
+        undefined,
+        undefined,
+        undefined,
+        linkRepo as any,
+        handoffRepo,
+      );
+      await service.onModuleInit();
 
       const consentSession = await service.recordReferralEmbedConsent({
         handoffId: handoff.handoffId,
@@ -454,7 +479,7 @@ describe.skipIf(!seedDatabaseUrl)(
       const client = await db.connect();
       try {
         await client.query(
-          "UPDATE admin.phase1_referral_embed_handoffs SET expires_at = $1, record = jsonb_set(record, '{expiresAt}', to_jsonb($1::text), true) WHERE handoff_id = $2",
+          "UPDATE admin.phase1_referral_embed_handoffs SET expires_at = $1::timestamptz, record = jsonb_set(record, '{expiresAt}', to_jsonb($1::text), true) WHERE handoff_id = $2",
           [past, handoff.handoffId],
         );
       } finally {
@@ -462,10 +487,34 @@ describe.skipIf(!seedDatabaseUrl)(
       }
 
       // Record consent (should succeed even if handoff is expired, because the session outlives the artifact)
-      const linkRepo = { findByDrtsPassengerId: async () => ({ status: 'active' }) };
-      const tenantPartnerRepo = { getPartnerEntry: async () => ({ status: 'active', tenantId: null, partnerId: null }) };
-      const { TenantPartnerService } = require("../../apps/api/src/modules/tenant-partner/tenant-partner.service");
-      const service = new TenantPartnerService({} as any, tenantPartnerRepo as any, undefined, undefined, undefined, linkRepo as any, handoffRepo);
+      const linkRepo = {
+        findByDrtsPassengerId: async () => ({ status: "active" }),
+      };
+      const tenantPartnerRepo = {
+        loadState: async () => ({
+          partnerEntries: [
+            {
+              entrySlug: "demo-slug-exp",
+              status: "active",
+              tenantId: null,
+              partnerId: null,
+              activeFlag: true,
+              authMode: "partner_api_key",
+            },
+          ],
+        }),
+      };
+      const auditNotificationService = { recordTenantAudit: () => {} };
+      const service = new TenantPartnerService(
+        auditNotificationService as any,
+        tenantPartnerRepo as any,
+        undefined,
+        undefined,
+        undefined,
+        linkRepo as any,
+        handoffRepo,
+      );
+      await service.onModuleInit();
 
       const consentSession = await service.recordReferralEmbedConsent({
         handoffId: handoff.handoffId,
@@ -507,17 +556,41 @@ describe.skipIf(!seedDatabaseUrl)(
       const client = await db.connect();
       try {
         await client.query(
-          "UPDATE admin.phase1_referral_embed_handoffs SET consumed_at = $1, expires_at = $1, record = jsonb_set(jsonb_set(record, '{consumedAt}', to_jsonb($1::text), true), '{expiresAt}', to_jsonb($1::text), true) WHERE handoff_id = $2",
+          "UPDATE admin.phase1_referral_embed_handoffs SET consumed_at = $1::timestamptz, expires_at = $1::timestamptz, record = jsonb_set(jsonb_set(record, '{consumedAt}', to_jsonb($1::text), true), '{expiresAt}', to_jsonb($1::text), true) WHERE handoff_id = $2",
           [past, handoff.handoffId],
         );
       } finally {
         client.release();
       }
 
-      const linkRepo = { findByDrtsPassengerId: async () => ({ status: 'active' }) };
-      const tenantPartnerRepo = { getPartnerEntry: async () => ({ status: 'active', tenantId: null, partnerId: null }) };
-      const { TenantPartnerService } = require("../../apps/api/src/modules/tenant-partner/tenant-partner.service");
-      const service = new TenantPartnerService({} as any, tenantPartnerRepo as any, undefined, undefined, undefined, linkRepo as any, handoffRepo);
+      const linkRepo = {
+        findByDrtsPassengerId: async () => ({ status: "active" }),
+      };
+      const tenantPartnerRepo = {
+        loadState: async () => ({
+          partnerEntries: [
+            {
+              entrySlug: "demo-slug-exp-sess",
+              status: "active",
+              tenantId: null,
+              partnerId: null,
+              activeFlag: true,
+              authMode: "partner_api_key",
+            },
+          ],
+        }),
+      };
+      const auditNotificationService = { recordTenantAudit: () => {} };
+      const service = new TenantPartnerService(
+        auditNotificationService as any,
+        tenantPartnerRepo as any,
+        undefined,
+        undefined,
+        undefined,
+        linkRepo as any,
+        handoffRepo,
+      );
+      await service.onModuleInit();
 
       await expect(
         service.recordReferralEmbedConsent({
@@ -531,7 +604,7 @@ describe.skipIf(!seedDatabaseUrl)(
             grantedScopes: ["trip.manage", "pii.trip", "identity.bind"],
             grantedAt: new Date().toISOString(),
           },
-        })
+        }),
       ).rejects.toThrowError("The referral handoff artifact has expired.");
     });
   },

@@ -8,7 +8,7 @@ import { cookies } from "next/headers";
 import {
   getReferralEmbedSession,
   writeReferralEmbedSession,
-} from "../../lib/embed-partner-session";
+} from "../../../../apps/referral-embed-web/lib/embed-partner-session";
 
 describe("embed-partner-session", () => {
   beforeEach(() => {
