@@ -76,26 +76,25 @@ describe("hourly publish promotion safety", () => {
     expect(source).toContain("token: ${{ secrets.PUBLISH_TOKEN || secrets.GITHUB_TOKEN }}");
   });
 
-  it("identifies its published checks by id, not by a details_url GitHub discards", () => {
-    // GitHub stores the check run's own URL in details_url and drops the one
-    // we send, so the old `detailsUrl == run_url` filter matched nothing: on
-    // 2026-09-23 run 35854884063 timed out with all three checks green on
-    // PR #2110.
+  it("waits on what branch protection reads, not on who published the check", () => {
+    // Two attempts to tie the wait to this run both timed out with three green
+    // checks on the PR: details_url (GitHub stores the check run's own URL and
+    // discards ours) and the ids create_check returned (assigned to an array
+    // inside $(...), so only ever set in a subshell). With a reproducible
+    // promote commit the question is simply whether the required names are
+    // green on this head.
     const source = workflow();
-    const publishChecks = source.slice(
-      source.indexOf("- name: Publish required checks on promote SHA"),
-      source.indexOf("- name: Wait for required PR checks to register"),
-    );
     const wait = source.slice(
       source.indexOf("- name: Wait for required PR checks to register"),
       source.indexOf("- name: Merge inline"),
     );
 
-    expect(publishChecks).toContain('CHECK_IDS["$name"]="$id"');
-    expect(publishChecks).toContain('echo "check_ids=$check_ids_json" >> "$GITHUB_OUTPUT"');
-    expect(wait).toContain("check_ids='${{ steps.checks.outputs.check_ids }}'");
-    expect(wait).toContain('endswith("/runs/" + $id)');
-    expect(wait).not.toContain('(.detailsUrl // "") == $url');
+    expect(wait).toContain("map(select(.name == $n)) | last // empty");
+    expect(wait).not.toContain(".detailsUrl");
+    expect(wait).not.toContain("check_ids");
+    expect(wait).toContain('required=("Commit trailers" "Runtime mirror guard" "Smoke acceptance")');
+    expect(wait).toContain('if [ "$status" != "COMPLETED" ]');
+    expect(wait).toContain('elif [ "$conclusion" != "SUCCESS" ]');
   });
 
   it("builds a reproducible promote commit so a retry keeps the checks it already has", () => {
