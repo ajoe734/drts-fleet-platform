@@ -5,7 +5,10 @@ vi.mock("next/headers", () => ({
 }));
 
 import { cookies } from "next/headers";
-import { getReferralEmbedSession, writeReferralEmbedSession } from "../../lib/embed-partner-session";
+import {
+  getReferralEmbedSession,
+  writeReferralEmbedSession,
+} from "../../lib/embed-partner-session";
 
 describe("embed-partner-session", () => {
   beforeEach(() => {
@@ -19,7 +22,9 @@ describe("embed-partner-session", () => {
   it("rejects cookies older than 8 hours", async () => {
     let storedCookie = "";
     vi.mocked(cookies).mockReturnValue({
-      set: (name: string, value: string) => { storedCookie = value; },
+      set: (name: string, value: string) => {
+        storedCookie = value;
+      },
       get: () => ({ value: storedCookie }),
     } as any);
 
@@ -32,7 +37,9 @@ describe("embed-partner-session", () => {
       identityActive: true,
       partnerEntrySlug: "yuhe",
       drtsPassengerId: "pax1",
-      handoffs: [],
+      handoffId: "test",
+      entryHost: "test.com",
+      consent: {} as any,
       identity: {} as any,
     });
 

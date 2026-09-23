@@ -50,7 +50,8 @@ function createService(
     tenantPartnerService,
   );
   if (partnerNotificationNavigationRepository) {
-    (ownedMobilityService as any).partnerNotificationNavigationRepository = partnerNotificationNavigationRepository;
+    (ownedMobilityService as any).partnerNotificationNavigationRepository =
+      partnerNotificationNavigationRepository;
   }
 
   ownedMobilityService.registerCallRecordingListeners();
@@ -2111,11 +2112,21 @@ describe("owned mobility service", () => {
         {
           pickup: { address: "Pickup Spot 2" },
           dropoff: { address: "Dropoff Spot 2" },
-          passenger: { passengerId: "pax-ref-002", name: "Pass", phone: "0900" },
+          passenger: {
+            passengerId: "pax-ref-002",
+            name: "Pass",
+            phone: "0900",
+          },
           requestedPickupAt: new Date().toISOString(),
-          timingMode: "on_demand", paymentMethodTokenRef: null,
+          timingMode: "on_demand",
+          paymentMethodTokenRef: null,
         },
-        { authorized: true, authorizedTypes: ["standard"], authorizationId: "auth-1", activeFareVersionId: "v1" } as any,
+        {
+          authorized: true,
+          authorizedTypes: ["standard"],
+          authorizationId: "auth-1",
+          activeFareVersionId: "v1",
+        } as any,
         originalIdentity,
       );
 
@@ -2124,7 +2135,10 @@ describe("owned mobility service", () => {
         tenantId: "tenant-demo-001",
         partnerId: "partner_ead6bf3d-e858-47cc-bfe1-5a3742524118",
       });
-      const originalActive = await ownedMobilityService.getReferralPassengerActiveTrip(originalIdentity);
+      const originalActive =
+        await ownedMobilityService.getReferralPassengerActiveTrip(
+          originalIdentity,
+        );
       expect(originalActive.active).toBe(true);
 
       // Verify history is visible to the original identity
@@ -2132,7 +2146,10 @@ describe("owned mobility service", () => {
         tenantId: "tenant-demo-001",
         partnerId: "partner_ead6bf3d-e858-47cc-bfe1-5a3742524118",
       });
-      const originalHistory = await ownedMobilityService.listReferralPassengerHistory(originalIdentity);
+      const originalHistory =
+        await ownedMobilityService.listReferralPassengerHistory(
+          originalIdentity,
+        );
       expect(originalHistory.items.length).toBeGreaterThan(0);
 
       // Now create a new identity with the same partner but a different tenantId
@@ -2146,7 +2163,10 @@ describe("owned mobility service", () => {
         tenantId: "tenant-demo-001",
         partnerId: "partner_ead6bf3d-e858-47cc-bfe1-5a3742524118",
       });
-      const reassignedActive = await ownedMobilityService.getReferralPassengerActiveTrip(reassignedIdentity);
+      const reassignedActive =
+        await ownedMobilityService.getReferralPassengerActiveTrip(
+          reassignedIdentity,
+        );
       expect(reassignedActive.active).toBe(false);
 
       // Verify history is NO LONGER visible to the reassigned identity
@@ -2154,7 +2174,10 @@ describe("owned mobility service", () => {
         tenantId: "tenant-demo-001",
         partnerId: "partner_ead6bf3d-e858-47cc-bfe1-5a3742524118",
       });
-      const reassignedHistory = await ownedMobilityService.listReferralPassengerHistory(reassignedIdentity);
+      const reassignedHistory =
+        await ownedMobilityService.listReferralPassengerHistory(
+          reassignedIdentity,
+        );
       expect(reassignedHistory.items.length).toBe(0);
 
       // Also verify wrong partnerId
@@ -2162,18 +2185,30 @@ describe("owned mobility service", () => {
         ...originalIdentity,
         partnerId: "partner_wrong",
       };
-      const wrongPartnerActive = await ownedMobilityService.getReferralPassengerActiveTrip(wrongPartnerIdentity);
+      const wrongPartnerActive =
+        await ownedMobilityService.getReferralPassengerActiveTrip(
+          wrongPartnerIdentity,
+        );
       expect(wrongPartnerActive.active).toBe(false);
-      const wrongPartnerHistory = await ownedMobilityService.listReferralPassengerHistory(wrongPartnerIdentity);
+      const wrongPartnerHistory =
+        await ownedMobilityService.listReferralPassengerHistory(
+          wrongPartnerIdentity,
+        );
       expect(wrongPartnerHistory.items.length).toBe(0);
 
       // Also verify missing route denial
       mockNavRepo.findByOrderId.mockResolvedValueOnce(null); // route missing
-      const missingRouteActive = await ownedMobilityService.getReferralPassengerActiveTrip(originalIdentity);
+      const missingRouteActive =
+        await ownedMobilityService.getReferralPassengerActiveTrip(
+          originalIdentity,
+        );
       expect(missingRouteActive.active).toBe(false);
 
       mockNavRepo.findByOrderId.mockResolvedValueOnce(null); // route missing
-      const missingRouteHistory = await ownedMobilityService.listReferralPassengerHistory(originalIdentity);
+      const missingRouteHistory =
+        await ownedMobilityService.listReferralPassengerHistory(
+          originalIdentity,
+        );
       expect(missingRouteHistory.items.length).toBe(0);
 
       // ---- Added for receipt/cancel/rating cross-tenant null-tenant denial ----
@@ -2186,11 +2221,18 @@ describe("owned mobility service", () => {
       });
       let caughtReceipt: any = null;
       try {
-        await ownedMobilityService.getReferralPassengerReceipt(orderId, reassignedIdentity);
-      } catch (err) { caughtReceipt = err; }
+        await ownedMobilityService.getReferralPassengerReceipt(
+          orderId,
+          reassignedIdentity,
+        );
+      } catch (err) {
+        caughtReceipt = err;
+      }
       expect(caughtReceipt).not.toBeNull();
       expect(caughtReceipt.getStatus()).toBe(403);
-      expect(caughtReceipt.getResponse().error.code).toBe("PARTNER_SCOPE_MISMATCH");
+      expect(caughtReceipt.getResponse().error.code).toBe(
+        "PARTNER_SCOPE_MISMATCH",
+      );
 
       mockNavRepo.findByOrderId.mockResolvedValueOnce({
         tenantId: "tenant-demo-001",
@@ -2198,11 +2240,19 @@ describe("owned mobility service", () => {
       });
       let caughtCancel: any = null;
       try {
-        await ownedMobilityService.cancelReferralPassengerBooking(orderId, reassignedIdentity);
-      } catch (err) { caughtCancel = err; }
+        await ownedMobilityService.cancelReferralPassengerTrip(
+          orderId,
+          { reason: "test" },
+          reassignedIdentity,
+        );
+      } catch (err) {
+        caughtCancel = err;
+      }
       expect(caughtCancel).not.toBeNull();
       expect(caughtCancel.getStatus()).toBe(403);
-      expect(caughtCancel.getResponse().error.code).toBe("PARTNER_SCOPE_MISMATCH");
+      expect(caughtCancel.getResponse().error.code).toBe(
+        "PARTNER_SCOPE_MISMATCH",
+      );
 
       mockNavRepo.findByOrderId.mockResolvedValueOnce({
         tenantId: "tenant-demo-001",
@@ -2210,11 +2260,19 @@ describe("owned mobility service", () => {
       });
       let caughtRating: any = null;
       try {
-        await ownedMobilityService.submitReferralPassengerRating(orderId, 5, reassignedIdentity);
-      } catch (err) { caughtRating = err; }
+        await ownedMobilityService.submitReferralPassengerRating(
+          orderId,
+          { score: 5 },
+          reassignedIdentity,
+        );
+      } catch (err) {
+        caughtRating = err;
+      }
       expect(caughtRating).not.toBeNull();
       expect(caughtRating.getStatus()).toBe(403);
-      expect(caughtRating.getResponse().error.code).toBe("PARTNER_SCOPE_MISMATCH");
+      expect(caughtRating.getResponse().error.code).toBe(
+        "PARTNER_SCOPE_MISMATCH",
+      );
     });
 
     it("only allows referral ratings after completion and keeps duplicates idempotent", async () => {
@@ -2565,7 +2623,8 @@ describe("owned mobility service", () => {
           dropoff: { address: "松山機場" },
           passenger: { name: "測試乘客", phone: "0911222333" },
           requestedPickupAt: nowIso,
-          timingMode: "on_demand", paymentMethodTokenRef: null,
+          timingMode: "on_demand",
+          paymentMethodTokenRef: null,
         },
         dummyAuth,
       );

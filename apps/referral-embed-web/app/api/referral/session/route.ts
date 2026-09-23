@@ -43,9 +43,13 @@ function jsonResponse(body: unknown, status = 200) {
 }
 
 function redirectResponse(request: Request, returnTo: string | undefined) {
+  let targetUrl = returnTo || "/";
+  if (targetUrl.match(/[\t\r\n\\]/)) {
+    targetUrl = "/";
+  }
   let url: URL;
   try {
-    const rawUrl = new URL(returnTo || "/", request.url);
+    const rawUrl = new URL(targetUrl, request.url);
     const requestUrl = new URL(request.url);
     if (rawUrl.origin !== requestUrl.origin) {
       url = new URL("/", request.url);
@@ -154,6 +158,13 @@ export async function POST(request: Request) {
       const existingSession = await getReferralEmbedSession();
       if (!existingSession) {
         return jsonResponse({ ok: false, message: "Missing session." }, 403);
+      }
+      if (
+        existingSession.handoffId !== action.handoffId ||
+        existingSession.partnerEntrySlug !== action.entrySlug ||
+        existingSession.entryHost !== action.entryHost
+      ) {
+        throw new Error("Session mismatch");
       }
       const session = await recordReferralEmbedConsent(
         buildReferralEmbedConsentCommand({
