@@ -159,6 +159,8 @@ export async function POST(request: Request) {
           handoffId: action.handoffId,
           entrySlug: action.entrySlug,
           entryHost: action.entryHost,
+          currentDrtsPassengerId: existingSession.drtsPassengerId,
+          currentPartnerEntrySlug: existingSession.partnerEntrySlug,
           actorIp: request.headers.get("x-forwarded-for"),
           userAgent: request.headers.get("user-agent"),
         }),
