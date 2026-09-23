@@ -419,6 +419,49 @@ run; hosted CI on this round's pushed SHA is the acceptance evidence, once avail
   [35932356817](https://github.com/ajoe734/drts-fleet-platform/actions/runs/35932356817) job
   `Canonical consistency`, `107421614165`).
 - `git diff --check` — exit 0, no whitespace errors introduced.
-- Hosted CI on this round's new pushed SHA (record run URLs/job conclusions here once available,
-  including `unit` covering the 2 new `embed-session-route.test.ts` cases and the new
-  `consent-replay-guards.test.ts` file, and `Canonical consistency` confirming the fix above).
+- Hosted CI on this round's pushed SHA `9b0e5d824ff05c7d2b983e809ee01351221bd38e` (PR #2100), run
+  [35934074338](https://github.com/ajoe734/drts-fleet-platform/actions/runs/35934074338): `unit`,
+  `integration`, `typecheck`, `lint`, `build`, `i18n-guard`, `iam-negative-matrix`, `ui-route-e2e`,
+  `changes`, `candidate` all `success` (confirms the 2 new `embed-session-route.test.ts` cases and
+  the new `consent-replay-guards.test.ts` file, and the `Canonical consistency` fix from the prior
+  round). Overall run `conclusion: failure` only because of `cross-surface-e2e` (aggregated into
+  the `e2e`/`ci-integ` gate jobs) — see root-cause analysis below; this is not a product
+  regression from this round's diff.
+
+### `cross-surface-e2e` failure on `9b0e5d824` — root cause and why it is unrelated to this candidate
+
+`cross-surface-e2e` job
+[107427167800](https://github.com/ajoe734/drts-fleet-platform/actions/runs/35934074338/job/107427167800)
+failed at `E2E-022-operations-reporting` (`tests/e2e/E2E-022-operations-reporting.sh`, not in this
+task's `write_scopes`) with `[FAIL] daily rebuild count expected 3, got 2`. Re-ran the failed jobs
+once (`gh run rerun 35934074338 --failed`); the rerun
+([job 107429351053](https://github.com/ajoe734/drts-fleet-platform/actions/runs/35934074338/job/107429351053))
+reproduced the identical failure a second time, ruling out a one-off scheduler blip.
+
+Root-caused instead of assumed: `git diff 0b4c74575..9b0e5d824 --stat` shows only 3 changed files
+— this UAT doc, `consent-replay-guards.test.ts`, and `embed-session-route.test.ts` — zero product
+code changed. `0b4c74575`'s own hosted `cross-surface-e2e` run
+([35932356895](https://github.com/ajoe734/drts-fleet-platform/actions/runs/35932356895)) was
+`success` on identical product code, confirming this is not a regression introduced by this
+round. Reading `tests/e2e/E2E-022-operations-reporting.sh:42` (`SERVICE_DATE="$(date -u
++"%Y-%m-%d")"`, captured once at script start) against `:49-51`
+(`PORTAL_WINDOW_START=$(date -u -d "+30 minutes" ...)`, the tenant-portal booking's
+`reservationWindowStart`) and `reporting.service.ts:571-573`
+(`resolveServiceDate(order) { return (order.reservationWindowStart ?? order.createdAt).slice(0,
+10); }`, used as the `serviceDate` the rebuild endpoint filters on) shows a latent day-boundary
+bug: whenever this script happens to run within the last ~30 minutes of the UTC day, `now +
+30 minutes` rolls over to the next UTC calendar date while `SERVICE_DATE` (captured earlier, at
+script start) is still "today" — so the portal order's `resolveServiceDate()` no longer equals
+the query's `serviceDate`, and it is silently excluded from the rebuild's 3-order count. Both
+failing runs here executed at `23:33` and `23:41–23:45 UTC` on 2026-09-23 (inside that window);
+the passing `0b4c74575` run executed at `23:11–23:20 UTC` (outside it). This bug lives entirely in
+`reporting.service.ts` and `E2E-022-operations-reporting.sh`, neither of which is in this task's
+`write_scopes`, and is a pure wall-clock/UTC-midnight coincidence — it would reproduce on *any*
+candidate's CI run (including `dev`) that happens to execute in that ~30–60 minute daily window,
+independent of this task's diff. Per `AI_COLLABORATION_GUIDE.md` §0.7 / this task's
+`integration_notes` ("禁止擅改平行任務範圍；額外共用修改必須先協調"), this owner did not touch
+either out-of-scope file to patch it; recommend Supervisor open a separate follow-up task (e.g.
+have `resolveServiceDate` prefer `order.createdAt` for the rebuild-count comparison, or have the
+E2E script recompute `SERVICE_DATE` from the actual booking window) and, for this candidate,
+re-run CI after `00:00 UTC` (i.e. outside the affected window) to obtain a clean confirmation run
+on this exact `9b0e5d824` SHA before merge.
