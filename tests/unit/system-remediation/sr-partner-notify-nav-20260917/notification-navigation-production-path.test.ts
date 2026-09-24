@@ -127,7 +127,7 @@ function buildService(
   const tenantPartnerRepo = {
     loadState: async () => ({ partnerEntries: entries }),
   };
-  const auditNotificationService = { recordTenantAudit: () => {} };
+  const auditNotificationService = { recordAuditLog: () => {} };
   return new TenantPartnerService(
     auditNotificationService as any,
     tenantPartnerRepo as any,
@@ -165,6 +165,7 @@ function decodeCookie(): { drtsPassengerId: string; partnerEntrySlug: string; id
   const raw = cookieJar.get("drts_referral_embed_session");
   if (!raw) return null;
   const [body] = raw.split(".");
+  if (!body) return null;
   return JSON.parse(Buffer.from(body, "base64url").toString("utf8"));
 }
 

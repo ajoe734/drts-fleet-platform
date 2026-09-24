@@ -413,7 +413,7 @@ describe.skipIf(!seedDatabaseUrl)(
           ],
         }),
       };
-      const auditNotificationService = { recordTenantAudit: () => {} };
+      const auditNotificationService = { recordAuditLog: () => {} };
       const service = new TenantPartnerService(
         auditNotificationService as any,
         tenantPartnerRepo as any,
@@ -504,7 +504,7 @@ describe.skipIf(!seedDatabaseUrl)(
           ],
         }),
       };
-      const auditNotificationService = { recordTenantAudit: () => {} };
+      const auditNotificationService = { recordAuditLog: () => {} };
       const service = new TenantPartnerService(
         auditNotificationService as any,
         tenantPartnerRepo as any,
@@ -580,7 +580,7 @@ describe.skipIf(!seedDatabaseUrl)(
           ],
         }),
       };
-      const auditNotificationService = { recordTenantAudit: () => {} };
+      const auditNotificationService = { recordAuditLog: () => {} };
       const service = new TenantPartnerService(
         auditNotificationService as any,
         tenantPartnerRepo as any,
@@ -732,7 +732,7 @@ describe.skipIf(!seedDatabaseUrl)(
           ],
         }),
       };
-      const auditNotificationService = { recordTenantAudit: () => {} };
+      const auditNotificationService = { recordAuditLog: () => {} };
       const service = new TenantPartnerService(
         auditNotificationService as any,
         tenantPartnerRepo as any,
@@ -838,7 +838,7 @@ describe.skipIf(!seedDatabaseUrl)(
           ],
         }),
       });
-      const auditNotificationService = { recordTenantAudit: () => {} };
+      const auditNotificationService = { recordAuditLog: () => {} };
       const serviceAtGrantTime = new TenantPartnerService(
         auditNotificationService as any,
         buildTenantPartnerRepo(null) as any,
@@ -953,7 +953,7 @@ describe.skipIf(!seedDatabaseUrl)(
           ],
         }),
       };
-      const auditNotificationService = { recordTenantAudit: () => {} };
+      const auditNotificationService = { recordAuditLog: () => {} };
       const service = new TenantPartnerService(
         auditNotificationService as any,
         tenantPartnerRepo as any,

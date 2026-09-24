@@ -45,7 +45,7 @@ describe("SR-PARTNER-NOTIFY-NAV-20260917 consent replay guards (fallback repo)",
         partnerEntries: [buildEntry(entryOverrides)],
       }),
     };
-    const auditNotificationService = { recordTenantAudit: () => {} };
+    const auditNotificationService = { recordAuditLog: () => {} };
     return new TenantPartnerService(
       auditNotificationService as any,
       tenantPartnerRepo as any,

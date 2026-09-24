@@ -653,3 +653,46 @@ this round's pushed candidate SHA is the acceptance evidence, to be recorded bel
 Handing off to reviewer Codex once pushed, against the new `CANDIDATE_SHA`/`CANDIDATE_BRANCH`
 recorded in the task's `handoff` — do not reuse `ef3e4540782962d661bdb8dff3fe0e75eb02b219` as the
 reviewed SHA for this round's changes.
+
+## Round `052c06f66` → hosted CI failures found and fixed (owner Claude, 2026-09-24)
+
+### Context
+
+`052c06f6625521b9f87333adffd14c016d210f6a` was handed off to Codex at 2026-09-24T00:52:16Z before
+its own hosted CI had finished, because local `pnpm run typecheck`/`pnpm run test:unit` were not
+executable in this worktree (see the "Local execution limits" note under the `034671c53` round's
+Test Evidence table). Hosted CI on that exact SHA (`CI (integration trunk)` run `35940272964`,
+`CI` run `35940272885`) completed after handoff with `typecheck`, `unit`, `Product smoke
+acceptance`, `Smoke acceptance`, and `ci-integ` all failing. This round reads those hosted logs,
+fixes both underlying bugs, and re-verifies before the next handoff — per §0.7 this repairs the
+same candidate lineage rather than re-litigating already-closed findings.
+
+### What hosted CI found and how it is fixed
+
+| # | Failing job(s) | Root cause | Fix |
+| --- | --- | --- | --- |
+| 1 | `typecheck`, `Product smoke acceptance` | `notification-navigation-production-path.test.ts:168` — this repo's `tsconfig.base.json` sets `noUncheckedIndexedAccess: true`, which types `const [body] = raw.split(".")` as `body: string \| undefined`, not `string`. The helper passed `body` straight into `Buffer.from(body, "base64url")` without the `if (!body) return null` guard that the production cookie decoder (`embed-partner-session.ts:44-45`, `:80-81`) already uses for the identical destructuring pattern — `error TS2769: No overload matches this call.` | Added the missing `if (!body) return null;` guard in `decodeCookie()`, matching the existing production convention. |
+| 2 | `unit` | `consent-replay-guards.test.ts`'s "…partner entry has been deactivated…" case (one of the 3 cases added this task): the test's local `auditNotificationService` mock only implemented `recordTenantAudit`, but the real `TenantPartnerService.recordTenantAudit()` (a *private* wrapper method, not the injected dependency's method) calls `this.auditNotificationService.recordAuditLog(...)` (`tenant-partner.service.ts:13253`). The inactive-entry path (`requireAccessiblePartnerEntry` → `recordPartnerIngressAttempt` → `recordTenantAudit` → `auditNotificationService.recordAuditLog`) hit the mock and threw `TypeError: this.auditNotificationService.recordAuditLog is not a function` instead of the expected `ApiRequestError{code:"PARTNER_ENTRY_INACTIVE"}`. Every other `TenantPartnerService` unit test in this repo (e.g. `apps/api/tests/unit/owned-mobility.service.test.ts:191-193`) already mocks `recordAuditLog`, confirming this was a naming mistake introduced when these mocks were added this task, not an established alternate convention. | Renamed the mock method from `recordTenantAudit` to `recordAuditLog` in all 3 files that had it wrong: `consent-replay-guards.test.ts` (1 occurrence), `notification-navigation-production-path.test.ts` (1 occurrence), `sr-partner-notify-nav-20260917.integration.test.ts` (6 occurrences, none of which currently exercise the audit-logging branch — their rejection paths are `OWNERSHIP_MISMATCH`/`REFERRAL_HANDOFF_REVOKED`/`not_consumed`, which do not call `recordPartnerIngressAttempt` — but the wrong name was still a latent bug fixed for correctness/consistency). |
+
+### Verification this round
+
+- `node --check` on all 3 edited files — exit 0 (syntax only; this VM cannot run `tsc`/`vitest`
+  directly, per the same local-execution limits documented in the `034671c53` round above).
+- Read the exact hosted failure logs for both jobs on `052c06f66` (`typecheck` job `107446531362`,
+  `unit` job `107446531339`) and traced each to its root cause by reading the cited production
+  code (`embed-partner-session.ts`, `tenant-partner.service.ts:5835-5873,13238-13445,11589-11656`)
+  and an existing correctly-mocked sibling test (`owned-mobility.service.test.ts:191-193`) rather
+  than guessing.
+- Not verified locally: full `tsc`/`vitest` run. The next candidate's hosted CI on the pushed SHA
+  is the acceptance evidence for both fixes; unrelated jobs on `052c06f66` (`build`, `lint`,
+  `integration`, `cross-surface-e2e`, `iam-negative-matrix`, `ui-route-e2e`, `e2e`, `candidate`,
+  `changes`, `i18n-guard`, and the separate `CI` workflow's `Canonical consistency`/`Commit
+  trailers`/`Change scope`/`BFF-only imports`/etc. checks) already passed on this SHA and are not
+  re-litigated here.
+
+### Production Requirements Checked (updated, this round)
+
+Unchanged from the `034671c53` round above — this round is a CI-infra bug fix (test-file mock
+naming and a TS strictness violation in a test helper), not a change to product authorization
+logic, route handlers, or repository code. No file under `apps/api/src/**` or
+`apps/referral-embed-web/**` changed in this round.
