@@ -157,9 +157,8 @@ this history-repair task does not have write scope to fix:
 The reviewer reopened this helper task citing a `Canonical consistency` failure
 on candidate `68a868162` (PR #2138, run `35978693533`/job `107565162826`):
 `tools/ci/git/check_canonical_consistency.py`'s cited-paths check flagged this
-artifact's inline backtick reference to
-`docs/04-uat/ui17-handoff-20260924/UI17-FLEET-ERROR-20260924.md` as a
-repo-rooted path claim, but that path exists only on
+artifact's inline backtick reference to the `v2`-branch-only UAT doc path (see
+"Still open" above) as a repo-rooted path claim, but that path exists only on
 `gemini/ui17-fleet-error-20260924-v2`, not on this task's own branch tree.
 
 Fix (commit `a237cfd56`, already pushed to
