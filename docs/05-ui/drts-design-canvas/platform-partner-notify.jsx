@@ -194,8 +194,6 @@ function PA_PartnerNotifyRecoveryBoards({ theme:th }) {
         <Card theme={th} title="操作進行中 · Ongoing Action" padding={14}><Banner theme={th} tone="neutral" icon="refresh" title="儲存/測試/啟用/停用 進行中" body="請稍候，操作正在處理中..." actions={<Btn theme={th} size="xs" disabled>處理中...</Btn>}/></Card>
         <Card theme={th} title="操作成功 · Action Success" padding={14}><Banner theme={th} tone="success" icon="check" title="操作已完成" body="綁定狀態已成功更新。"/></Card>
         <Card theme={th} title="操作失敗 · Action Failure" padding={14}><Banner theme={th} tone="danger" icon="warn" title="儲存/測試/啟用/停用 失敗" body="處理要求時發生錯誤，請重試。" actions={<Btn theme={th} size="xs" variant="primary" icon="refresh">重試</Btn>}/></Card>
-        <Card theme={th} title="409 · 夥伴入口停用 (PARTNER_NOTIFICATION_BINDING_ENTRY_INACTIVE)" padding={14}><Banner theme={th} tone="danger" icon="warn" title="夥伴入口已停用" body="無法進行綁定操作，因為對應的夥伴入口已停用。"/></Card>
-        <Card theme={th} title="409 · 缺少事件訂閱 (PARTNER_NOTIFICATION_BINDING_ENDPOINT_EVENTS_MISSING)" padding={14}><Banner theme={th} tone="danger" icon="warn" title="Webhook 事件訂閱不足" body="目標 Webhook 未訂閱必要的事件類型，請先至 Webhook 管理介面補充。"/></Card>
       </div>
     </PnShell>
   );

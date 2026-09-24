@@ -31,4 +31,4 @@ Based on UI17-NOTIFY-CANVAS-20260924 audit findings D1-D6.
 ## D6: Error States
 - 403 means no read/write access (requires `foundation:read/write` resource scope for binding and `tenant:webhooks:read` for endpoint list).
 - 404 means `PARTNER_NOTIFICATION_BINDING_NOT_FOUND` or `WEBHOOK_NOT_FOUND`.
-- 409 includes `PARTNER_NOTIFICATION_BINDING_VERSION_CONFLICT`, `PARTNER_NOTIFICATION_BINDING_NOT_VALIDATED` (stale validation), `PARTNER_NOTIFICATION_BINDING_ENTRY_INACTIVE`, and `PARTNER_NOTIFICATION_BINDING_ENDPOINT_EVENTS_MISSING`.
+- 409 includes `VERSION_CONFLICT`, `NOT_VALIDATED` (stale validation), `ENTRY_INACTIVE`, and `ENDPOINT_EVENTS_MISSING`.

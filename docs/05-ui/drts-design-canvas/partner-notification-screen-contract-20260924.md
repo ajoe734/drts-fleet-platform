@@ -25,10 +25,10 @@
 | **Error: 403** | Scope rejection | Requires `foundation:read/write` and `tenant:webhooks:read` for endpoint list | Mapped to Access Denied board. |
 | **Error: 404** | `PARTNER_NOTIFICATION_BINDING_NOT_FOUND` | Missing Binding. | Mapped to creation prompt. |
 | **Error: 404** | `WEBHOOK_NOT_FOUND` | Missing Webhook. | Mapped to Webhook setup. |
-| **Error: 409** | `PARTNER_NOTIFICATION_BINDING_VERSION_CONFLICT` | Version Conflict. | Mapped to refresh prompt. |
-| **Error: 409** | `PARTNER_NOTIFICATION_BINDING_NOT_VALIDATED` | Validation Conflict. | Mapped to retest prompt. |
-| **Error: 409** | `PARTNER_NOTIFICATION_BINDING_ENTRY_INACTIVE` | Entry Inactive. | Mapped to entry requirement UI. |
-| **Error: 409** | `PARTNER_NOTIFICATION_BINDING_ENDPOINT_EVENTS_MISSING` | Endpoint Events Missing. | Mapped to authorized webhook management. |
+| **Error: 409** | `VERSION_CONFLICT` | Version Conflict. | Mapped to refresh prompt. |
+| **Error: 409** | `NOT_VALIDATED` | Validation Conflict. | Mapped to retest prompt. |
+| **Error: 409** | `ENTRY_INACTIVE` | Entry Inactive. | Mapped to entry requirement UI. |
+| **Error: 409** | `ENDPOINT_EVENTS_MISSING` | Endpoint Events Missing. | Mapped to authorized webhook management. |
 
 ## Backend Route Disclosure
 While the UI states are modeled against the formal contracts (`packages/contracts/src/partner-passenger-notification.ts`), the following backend routes are **currently unavailable (not implemented in this PR)** and integration is limited to design-canvas mocks:

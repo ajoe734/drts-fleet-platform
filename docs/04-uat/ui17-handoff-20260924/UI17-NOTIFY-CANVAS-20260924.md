@@ -143,3 +143,19 @@ $ git diff --check HEAD
 ```
 - **Preserved**: All originally approved artboards from R4 were retained and updated.
 - Acceptance keys status: Both `ui17-notify-canvas-20260924_source_and_state_coverage` and `ui17-notify-canvas-20260924_scoped_verification_and_preservation` remain explicitly MET.
+
+## R6 Gemini2 Final Consensus Fixes (2026-09-24)
+
+### Fixes & Integration
+| Acceptance Key | Location | Fix & Evidence |
+| :--- | :--- | :--- |
+| **Error Mapping** | `platform-partner-notify.jsx` | Removed leftover duplicate `PARTNER_NOTIFICATION_BINDING_ENTRY_INACTIVE` and `PARTNER_NOTIFICATION_BINDING_ENDPOINT_EVENTS_MISSING` from `PA_PartnerNotifyRecoveryBoards` since they are already correctly mounted in `PA_PartnerNotifyErrors` without the incorrect prefix. |
+| **Contract Mapping** | `partner-notification-screen-contract-20260924.md`, `partner-notification-screen-requirements-20260923.md` | Stripped `PARTNER_NOTIFICATION_BINDING_` prefix from `VERSION_CONFLICT`, `NOT_VALIDATED`, `ENTRY_INACTIVE`, and `ENDPOINT_EVENTS_MISSING` to exactly match the formal backend codes as per R4 findings. |
+
+### Source Preservation and Static Parse Checks
+```bash
+$ git diff --check HEAD
+(Exit 0)
+```
+- **Preserved**: All originally approved artboards from R5 were retained.
+- **Acceptance keys status**: Both `ui17-notify-canvas-20260924_source_and_state_coverage` and `ui17-notify-canvas-20260924_scoped_verification_and_preservation` remain explicitly MET.
