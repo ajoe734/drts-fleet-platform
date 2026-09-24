@@ -439,3 +439,78 @@ Output (Failing Old vs Passing New):
 **Acceptance Status Verification:**
 - `ui17-notify-canvas-20260924_source_and_state_coverage`: **PASS** (Actual runtime component probe confirmed exact R1 negative enforcement along with 89 UI states and R5-C negative enforcement via durable probe commands).
 - `ui17-notify-canvas-20260924_scoped_verification_and_preservation`: **PASS** (Scope check verified 0 files outside scope, exact 5 authorized paths modified. Previous candidate R6-E regression repaired).
+
+## R17 Codex Reopen Record (2026-09-24T19:23:30Z)
+- Previous independently reviewed candidate: 176e87cfb553ff6e26d678370ce1b1238f0441cf (PR #2151).
+- Current candidate review round REOPEN SHA: efecc9b20b380abf9d8180b8808fef35e3c81ab4 (PR #2152).
+
+### Open Findings
+- R6-A [P2, REPEATED]: Traceability and evidence misidentification in the R16 block. The R16 block mislabeled the REOPEN SHA as `aba796ccd897c3e44bd00c1e565ef5e5e8da41f0` (which was an assigned stale checkout), falsely claimed exit 0 for a command that naturally exits 1 due to old failures, misattributed the 10 PASS/2 FAIL results to `8ed37c825d2a71cb69741d5464f02f29bac52460` instead of `176e87cfb553ff6e26d678370ce1b1238f0441cf`, and failed to use actual commit SHAs instead of `HEAD`. Publication identity matching was also lacking.
+
+## R17 Repair Evidence (2026-09-24)
+
+| Finding / Acceptance Key | Location | Fix & Evidence |
+| :--- | :--- | :--- |
+| **PUBLICATION / REVIEW IDENTITY** | Git worktree | Updated canonical branch to exact intended R16 candidate `efecc9b20b380abf9d8180b8808fef35e3c81ab4` matching PR #2152. |
+| **R6-A** | `UI17-NOTIFY-CANVAS-20260924.md` | Executed the exact actual R1-validation-recovery component probe with immutable refs (`176e87cfb553ff6e26d678370ce1b1238f0441cf` and `efecc9b20b380abf9d8180b8808fef35e3c81ab4`), recording the combined exit code 1 demonstrating the old candidate's failure and the new candidate's 12 PASS / 0 FAIL. Corrected all misattributed SHAs in this R17 evidence block. |
+
+### Source Preservation and Executable Verification
+
+**Exact Executable Component Probe for R1-validation-recovery:**
+Execution Environment: Node v22.23.2, TypeScript 5.9.3.
+Result: Exit 1 (due to old candidate failure demonstration)
+Command:
+```bash
+node -e 'const cp=require("node:child_process"),vm=require("node:vm"),ts=require("typescript");
+function walk(n){if(!n||typeof n!=="object")return [];if(Array.isArray(n))return n.flatMap(walk);return [n,...walk(n.props.children)];}
+for(const sha of process.argv.slice(1)){
+ const c={React:{Fragment:"fragment"}};c.React.createElement=(type,p,...ch)=>({type,props:{...p,...(ch.length?{children:ch.length===1?ch[0]:ch}:{})}});c.window=c;vm.createContext(c);
+ for(const f of ["mgmt-tokens.jsx","mgmt-primitives.jsx","mgmt-auth.jsx","platform-partner-notify.jsx"])vm.runInContext(ts.transpileModule(cp.execFileSync("git",["show",sha+":docs/05-ui/drts-design-canvas/"+f],{encoding:"utf8"}),{fileName:f,compilerOptions:{jsx:ts.JsxEmit.React,target:ts.ScriptTarget.ES2022}}).outputText,c);
+ let pass=0,fail=0;
+ for(const test of ["none","passed_stale","passed_current"])for(const access of ["write","read_only"])for(const pending of [false,true]){
+ const tree=c.PA_PartnerNotify({theme:{},bind:"test_pending",test,bindingAccess:access,enableState:"failed",inflight:pending});
+ const life=walk(tree).find(n=>n.type===c.PnLifecycle),body=c.PnLifecycle(life.props);
+ const banner=walk(body).find(n=>n.type===c.Banner&&n.props.title==="啟用失敗");
+ const recovery=c.Btn(banner.props.actions.props);
+ const main=walk(body).find(n=>n.type===c.ActionButton&&n.props.descriptor.action==="enable");
+ const allowed=access==="write"&&test==="passed_current"&&!pending,actual=!recovery.props.disabled;
+ const ok=actual===allowed;
+ console.log(JSON.stringify({sha,test,access,pending,primaryEnabled:main.props.descriptor.enabled,recoveryEnabled:actual,expectedEnabled:allowed,result:ok?"PASS":"FAIL"})); if(ok)pass++;else fail++;
+ }
+ console.log(JSON.stringify({sha,pass,fail,node:process.version,ts:ts.version})); if(fail)process.exitCode=1;
+}' 176e87cfb553ff6e26d678370ce1b1238f0441cf efecc9b20b380abf9d8180b8808fef35e3c81ab4
+```
+
+Output (Failing Old vs Passing New):
+```json
+{"sha":"176e87cfb553ff6e26d678370ce1b1238f0441cf","test":"none","access":"write","pending":false,"primaryEnabled":false,"recoveryEnabled":true,"expectedEnabled":false,"result":"FAIL"}
+{"sha":"176e87cfb553ff6e26d678370ce1b1238f0441cf","test":"none","access":"write","pending":true,"primaryEnabled":false,"recoveryEnabled":false,"expectedEnabled":false,"result":"PASS"}
+{"sha":"176e87cfb553ff6e26d678370ce1b1238f0441cf","test":"none","access":"read_only","pending":false,"primaryEnabled":false,"recoveryEnabled":false,"expectedEnabled":false,"result":"PASS"}
+{"sha":"176e87cfb553ff6e26d678370ce1b1238f0441cf","test":"none","access":"read_only","pending":true,"primaryEnabled":false,"recoveryEnabled":false,"expectedEnabled":false,"result":"PASS"}
+{"sha":"176e87cfb553ff6e26d678370ce1b1238f0441cf","test":"passed_stale","access":"write","pending":false,"primaryEnabled":false,"recoveryEnabled":true,"expectedEnabled":false,"result":"FAIL"}
+{"sha":"176e87cfb553ff6e26d678370ce1b1238f0441cf","test":"passed_stale","access":"write","pending":true,"primaryEnabled":false,"recoveryEnabled":false,"expectedEnabled":false,"result":"PASS"}
+{"sha":"176e87cfb553ff6e26d678370ce1b1238f0441cf","test":"passed_stale","access":"read_only","pending":false,"primaryEnabled":false,"recoveryEnabled":false,"expectedEnabled":false,"result":"PASS"}
+{"sha":"176e87cfb553ff6e26d678370ce1b1238f0441cf","test":"passed_stale","access":"read_only","pending":true,"primaryEnabled":false,"recoveryEnabled":false,"expectedEnabled":false,"result":"PASS"}
+{"sha":"176e87cfb553ff6e26d678370ce1b1238f0441cf","test":"passed_current","access":"write","pending":false,"primaryEnabled":true,"recoveryEnabled":true,"expectedEnabled":true,"result":"PASS"}
+{"sha":"176e87cfb553ff6e26d678370ce1b1238f0441cf","test":"passed_current","access":"write","pending":true,"primaryEnabled":false,"recoveryEnabled":false,"expectedEnabled":false,"result":"PASS"}
+{"sha":"176e87cfb553ff6e26d678370ce1b1238f0441cf","test":"passed_current","access":"read_only","pending":false,"primaryEnabled":false,"recoveryEnabled":false,"expectedEnabled":false,"result":"PASS"}
+{"sha":"176e87cfb553ff6e26d678370ce1b1238f0441cf","test":"passed_current","access":"read_only","pending":true,"primaryEnabled":false,"recoveryEnabled":false,"expectedEnabled":false,"result":"PASS"}
+{"sha":"176e87cfb553ff6e26d678370ce1b1238f0441cf","pass":10,"fail":2,"node":"v22.23.2","ts":"5.9.3"}
+{"sha":"efecc9b20b380abf9d8180b8808fef35e3c81ab4","test":"none","access":"write","pending":false,"primaryEnabled":false,"recoveryEnabled":false,"expectedEnabled":false,"result":"PASS"}
+{"sha":"efecc9b20b380abf9d8180b8808fef35e3c81ab4","test":"none","access":"write","pending":true,"primaryEnabled":false,"recoveryEnabled":false,"expectedEnabled":false,"result":"PASS"}
+{"sha":"efecc9b20b380abf9d8180b8808fef35e3c81ab4","test":"none","access":"read_only","pending":false,"primaryEnabled":false,"recoveryEnabled":false,"expectedEnabled":false,"result":"PASS"}
+{"sha":"efecc9b20b380abf9d8180b8808fef35e3c81ab4","test":"none","access":"read_only","pending":true,"primaryEnabled":false,"recoveryEnabled":false,"expectedEnabled":false,"result":"PASS"}
+{"sha":"efecc9b20b380abf9d8180b8808fef35e3c81ab4","test":"passed_stale","access":"write","pending":false,"primaryEnabled":false,"recoveryEnabled":false,"expectedEnabled":false,"result":"PASS"}
+{"sha":"efecc9b20b380abf9d8180b8808fef35e3c81ab4","test":"passed_stale","access":"write","pending":true,"primaryEnabled":false,"recoveryEnabled":false,"expectedEnabled":false,"result":"PASS"}
+{"sha":"efecc9b20b380abf9d8180b8808fef35e3c81ab4","test":"passed_stale","access":"read_only","pending":false,"primaryEnabled":false,"recoveryEnabled":false,"expectedEnabled":false,"result":"PASS"}
+{"sha":"efecc9b20b380abf9d8180b8808fef35e3c81ab4","test":"passed_stale","access":"read_only","pending":true,"primaryEnabled":false,"recoveryEnabled":false,"expectedEnabled":false,"result":"PASS"}
+{"sha":"efecc9b20b380abf9d8180b8808fef35e3c81ab4","test":"passed_current","access":"write","pending":false,"primaryEnabled":true,"recoveryEnabled":true,"expectedEnabled":true,"result":"PASS"}
+{"sha":"efecc9b20b380abf9d8180b8808fef35e3c81ab4","test":"passed_current","access":"write","pending":true,"primaryEnabled":false,"recoveryEnabled":false,"expectedEnabled":false,"result":"PASS"}
+{"sha":"efecc9b20b380abf9d8180b8808fef35e3c81ab4","test":"passed_current","access":"read_only","pending":false,"primaryEnabled":false,"recoveryEnabled":false,"expectedEnabled":false,"result":"PASS"}
+{"sha":"efecc9b20b380abf9d8180b8808fef35e3c81ab4","test":"passed_current","access":"read_only","pending":true,"primaryEnabled":false,"recoveryEnabled":false,"expectedEnabled":false,"result":"PASS"}
+{"sha":"efecc9b20b380abf9d8180b8808fef35e3c81ab4","pass":12,"fail":0,"node":"v22.23.2","ts":"5.9.3"}
+```
+
+**Acceptance Status Verification:**
+- `ui17-notify-canvas-20260924_source_and_state_coverage`: **PASS** (Actual runtime component probe confirmed exact R1 negative enforcement mapping against correct candidate SHAs without conflation).
+- `ui17-notify-canvas-20260924_scoped_verification_and_preservation`: **PASS** (Scope check preserved, traceability gaps resolved).
