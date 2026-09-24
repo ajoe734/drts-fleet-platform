@@ -4,7 +4,12 @@ Owner: Codex · Reviewer: Claude2 · 2026-09-24
 
 ## 比對基準與交付邊界
 
-- `dev`: `c2d94aaa42b7042cd0d44d2114fea2096c18e617`。
+- 初始 `dev`: `c2d94aaa42b7042cd0d44d2114fea2096c18e617`。
+- 交審前 `dev` 前進至 `aba796ccd897c3e44bd00c1e565ef5e5e8da41f0`；
+  PR #2125 尚未鎖候選且無 CI checks，Q-001 文字發生衝突。
+  以普通 merge `39a314d1cef209d102083226110c5072bd7cb1a9` 同步，完整保留
+  dev 的 `PHASE1_OPEN_QUESTIONS.md`。新 dev 已涵蓋 Q-001 決策，最終不再移植
+  本輪較早的 Q-001 文字改動；下列 30/346 是初始落後數，更新後為 32/348。
 - [PR #2058](https://github.com/ajoe734/drts-fleet-platform/pull/2058):
   `150d9d32e6feae69b7d85d94948dddf59175a16c`，7 檔 +509/-30；
   merge-base `3dc74999338b94c22deb9d41899e04d641f2ef4c`，獨有 1 / 落後 30 commits。
@@ -48,16 +53,16 @@ T4/T5 是拒絕舊修法的靜態邊界判定，不是「已被 #2101 取代」�
   #2058 沒有改此檔，無直接 hunk 重疊。
 - 以現行 dev 挑選差異。`git diff --exit-code <dev SHA> HEAD --` 上述 runtime、
   `dispatch_runtime.py`、`github_bus.py` 及 `config.example.json` 回傳 0，保留逐位元內容。
-  970 項完整 orchestrator 回歸包含 `IdleOperationalReviewTests` 的 unchanged/new/lifted
+  同步後 972 項完整 orchestrator 回歸包含 `IdleOperationalReviewTests` 的 unchanged/new/lifted
   pause/floor cases，及 bus 的 live candidate、done issue、首次／增量 comment cases。
 
 ## #1523 逐項分流
 
 | 原始差異 | 現行證據 | 結論 |
 | --- | --- | --- |
-| Q-001 改成 Phase 1 一通電話最多一單 | `ai-status.sh show SR-CALL-MULTIORDER-20260913`：2026-09-13 使用者撤回、多單非 operational backlog；`docs/04-uat/system-remediation-20260906/closed-loop-evidence.md` 亦引用撤回 | **移植決策意思**：只同步 `PHASE1_OPEN_QUESTIONS.md` 的 Q-001，採較新 2026-09-13 決策與現行引用；不照搬舊 2026-08-19 日期 |
-| 新增「完全沒有 server-side enforcement」backlog | `infra/migrations/V0082__call_session_order_cardinality.sql` 已有重複 precheck 與 `ops_orders_call_id_unique` partial unique index；現行 backlog 已記 closed 2026-08-23 | 舊敘述被取代，不移植、不重新開啟多單工作 |
-| 表格 separator 修復 | 現行 Resolved Items 已是三欄標頭；Q-001 舊列卻有額外欄位 | separator 已被取代；只將 Q-001 同步成三欄，不整份覆蓋 346 commits 前的文件 |
+| Q-001 改成 Phase 1 一通電話最多一單 | `ai-status.sh show SR-CALL-MULTIORDER-20260913`：2026-09-13 使用者撤回、多單非 operational backlog；`docs/04-uat/system-remediation-20260906/closed-loop-evidence.md` 亦引用撤回 | 初始 dev 有過期多單列，本輪曾同步；**最終已被 dev `aba796ccd` 取代**，採其 Q-001 與 `docs/02-architecture/consensus/phase1/product-remediation-sa-sd-20260913.md` §3.7–3.8，不另移植決策文字 |
+| 新增「完全沒有 server-side enforcement」backlog | `infra/migrations/V0082__call_session_order_cardinality.sql` 已有重複 precheck 與 `ops_orders_call_id_unique` partial unique index；初始 dev backlog 已記 closed 2026-08-23，新 dev 明列保留 V0082/V0088 約束並撤回多單 | 舊敘述被取代，不移植、不重新開啟多單工作 |
+| 表格 separator 修復 | Resolved Items 已是三欄 separator，舊 PR 的 separator 修復已被取代 | 不移植；保留新 dev 整份文件（其 Q-001 另含 owner/action 欄位，排版整理不屬決策移植） |
 
 資料庫 migration 存在是靜態證據，不代表本輪已驗證部署、套用情況或 API
 在每種 repository mode 的錯誤映射。此次只分流舊 PR／同步既有決策。
@@ -70,8 +75,9 @@ T4/T5 是拒絕舊修法的靜態邊界判定，不是「已被 #2101 取代」�
 | 只移植未被取代且經驗證的改動：T1/T2 | `permission_broker.py`; `WorkerCwdMergeTests` | 原碼 8 tests 有 10 個 assertion failures（含 subtests），沒有 fixture errors → 修正版通過；49 個 broker tests 全通過 | 舊碼＋測試 anchor `478e0d78c`，修正版 `6a3807e4c`；下方命令 A/B，exit 1 → 0 | 僅測正式 classifier/hook，沒有執行真實 merge；approval/log/tree 外部狀態 mock |
 | T1/T2 整體回歸與後續修正保留 | `test_provider_permissions.py` 的 2 個 canonical cwd fixture 隨 caller 語意調整 | 首輪 970 tests 有 2 個 fixture 假設失敗 → 明確指定 canonical cwd 後 970/970 pass | `2dda550b246ef552e8d9c387746ad76381421248`；下方命令 C，exit 0（24.517s）；provider permissions 單跑 79/79 pass | 第一輪 full suite exit 1 如實保留；新 fixture 不放寬拒絕斷言 |
 | T3 拒絕的 parser 反例 | 舊 `permission_broker.py:_is_safe_status_sync_command` | 兩個 unsafe body 都回 allow；原修法不通過安全邊界 | `150d9d32e6feae69b7d85d94948dddf59175a16c`；下方唯分類 probe，exit 0 表示反例成功重現 | 不執行 substitution body；沒有把舊 parser 放進候選 |
-| 只移植未被取代且經驗證的改動：Q-001 | `PHASE1_OPEN_QUESTIONS.md` 單列；V0082、withdrawn task、closed-loop evidence | 舊列多單與新決策相反 → 單筆、三欄、引用存在；舊 enforcement backlog 不搬 | `2dda550b246ef552e8d9c387746ad76381421248` 的單列 diff 與上列文件／task slice 靜態核對 | 文件變更，不適用產品測試；PG/API 動態驗收未執行 |
-| 同候選SHA CI通過 | 最終 PR head | **pending at document commit** | handoff 摘要、PR checks URL 與 GitHub bus 的 candidate CI 記錄必須同 SHA | 本地 970 pass 不冒充 hosted CI；不接受舊 PR 綠燈 |
+| #1523 已由現行文件涵蓋 | `PHASE1_OPEN_QUESTIONS.md`; V0082、withdrawn task、closed-loop evidence、現行 SA/SD §3.7–3.8 | 初始 dev 過期 → 本輪曾修 → 新 dev 同步後採 trunk 全文，避免重複移植 | 原修正 `2dda550b246ef552e8d9c387746ad76381421248`；merge `39a314d1cef209d102083226110c5072bd7cb1a9` 與 `aba796ccd` 的該檔 diff 為空（exit 0） | PG/API 動態驗收未執行；不得把文件同步稱為新產品實作 |
+| dev 前進後重新驗證 | merge 後的完整 tree；新 dev 帶入 2 個 provider-pause tests | 972/972 pass | `39a314d1cef209d102083226110c5072bd7cb1a9`；命令 C exit 0（27.856s） | 先前 `918d3501d` 未交審且因衝突沒有 CI；不沿用其候選證據 |
+| 同候選SHA CI通過 | 最終 PR head | **pending at document commit** | handoff 摘要、[PR #2125 checks](https://github.com/ajoe734/drts-fleet-platform/pull/2125/checks) 與 GitHub bus 的 candidate CI 記錄必須同 SHA | 本地 972 pass 不冒充 hosted CI；不接受舊 PR 綠燈 |
 | 獨立reviewer審查同一候選 | Claude2 | **pending** | 最終 `CANDIDATE_SHA` / branch / PR 透過 canonical CLI handoff | Owner 不 approve、不 done；reviewer read-only 核對候選 |
 
 可重跑檢查（repository root）：
@@ -103,7 +109,10 @@ CANDIDATE_SHA=$(date -s 2030-01-01) && AI_NAME=Codex <script> handoff TASK Claud
 
 ## 舊 PR 處置與候選交接
 
-兩個舊 PR 均以本 task 的 replacement candidate 取代，應關閉並引用本逐項結論；
+兩個舊 PR 均由 [replacement PR #2125](https://github.com/ajoe734/drts-fleet-platform/pull/2125)
+的分流結論與已合併的 dev 決策取代，2026-09-24 已關閉並留言引用本逐項結論；
+`gh pr view` 確認兩者 CLOSED，head 仍分別為 `150d9d32e6feae69b7d85d94948dddf59175a16c`
+及 `90182fa3b2700663a539d78ab3779191c5ab3ba8`。
 保留原 branches 與 commits，不 merge／刪除／重寫它們。舊 PR 的關閉不是本 task
 的驗收結案；本 task 必須等 Claude2 的同 SHA review、CI、merge 及 acceptance。
 
