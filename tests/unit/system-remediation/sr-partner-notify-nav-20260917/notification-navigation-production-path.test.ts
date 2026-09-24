@@ -486,7 +486,12 @@ describe("SR-PARTNER-NOTIFY-NAV-20260917 BFF production-path regression", () => 
         },
       );
       const followupRes = await POST(followupReq);
-      expect(followupRes.status).toBe(307);
+      // JSON requests get a 200 jsonResponse (not a redirect) on success;
+      // only form submissions hit redirectResponse. See grant-consent's
+      // "form submit" case above for the 307 path.
+      expect(followupRes.status).toBe(200);
+      const followupBody = await followupRes.json();
+      expect(followupBody.ok).toBe(true);
       expect(decodeCookie()?.drtsPassengerId).toBe("pass-1");
     });
   });
