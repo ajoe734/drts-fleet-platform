@@ -753,19 +753,59 @@ matrix gap Codex identified as still partial on `052c06f66`:
   are testing a real "reject-then-no-write" invariant already enforced by the production control
   flow, not asserting something the code doesn't actually guarantee.
 
+### Hosted CI on `2f417ba48` found one real bug in this round's own new test
+
+`2f417ba48` (this round's first push) was watched to completion before any handoff attempt, per
+§0.7. `CI (integration trunk)` run
+[35941771680](https://github.com/ajoe734/drts-fleet-platform/actions/runs/35941771680):
+`typecheck`, `integration`, `build`, `lint`, `cross-surface-e2e`, `ui-route-e2e` all `success`;
+`unit` **failed** with exactly 1 of 4044 tests failing — the new "invalid artifact then legitimate
+exchange" case asserted `307` for a JSON-content-type follow-up request, but `session/route.ts`
+returns a `200` `jsonResponse` on success for JSON requests (only form submissions hit
+`redirectResponse`). This was a test-assertion bug, not a production-code issue. Fixed in
+`92cdeb9d2` (expectation corrected to `200` + `body.ok === true`, matching the route's existing
+JSON-vs-form branching used by the pre-existing "form submit" grant-consent case above it). The
+other two new POST-exchange cases (JSON cross-entry, form cross-subject), the rewritten GET
+cross-entry isolation case, and both rewritten PG snapshot-equality cases all passed on `2f417ba48`
+already, so only the test-assertion fix was needed, not a re-review of the added coverage's logic.
+
+### Hosted CI on `92cdeb9d2` (this candidate) — clean
+
+- [CI (integration trunk) run 35942461428](https://github.com/ajoe734/drts-fleet-platform/actions/runs/35942461428):
+  `conclusion: success`. `candidate`, `changes`, `lint`, `unit`, `build`, `i18n-guard`,
+  `cross-surface-e2e`, `iam-negative-matrix`, `integration`, `ui-route-e2e`, `typecheck`, `e2e`,
+  `ci-integ` all `success` (`orchestrator-tests` `skipped` as expected for a product/test-only
+  change). `unit` now passes all 4044 tests including the 3 new POST-exchange cases, the rewritten
+  GET cross-entry isolation case, and the 2 rewritten PG revoked-link/owner-changed
+  snapshot-equality cases.
+- [CI run 35942461379](https://github.com/ajoe734/drts-fleet-platform/actions/runs/35942461379):
+  `conclusion: success`. `BFF-only imports`, `Spec source archive`, `Canonical consistency`,
+  `Commit trailers`, `Change scope`, `Runtime mirror guard`,
+  `No real financial-institution identifiers`, `Verify Internal Key Exceptions`, `i18n guard`,
+  `Product smoke acceptance`, `Smoke acceptance` all `success`.
+- `gh pr view 2100` at the time of this update: `headRefOid = 92cdeb9d2fe0c76fa3aa6f8cb2c0b6bd905f2f16`,
+  `baseRefName = dev`, `state = OPEN` — matches this round's pushed `CANDIDATE_SHA` exactly.
+
 ### Production Requirements Checked (updated, this round)
 
-- [ ] entry_scoped_navigation_denies_cross_subject_tenant_entry — GET cross-entry case now isolates
+- [x] entry_scoped_navigation_denies_cross_subject_tenant_entry — GET cross-entry case now isolates
       entry-only mismatch (same passenger); POST exchange cross-entry/cross-subject cases added;
-      pending hosted CI on this round's SHA
-- [ ] fresh_single_use_handoff_and_http_only_session_reuse — POST exchange production-path
+      hosted CI on `92cdeb9d2` green (`unit`, `integration`, `typecheck`, `ui-route-e2e`,
+      `iam-negative-matrix`). Browser/native/live end-to-end still unverified in this sandbox.
+- [x] fresh_single_use_handoff_and_http_only_session_reuse — POST exchange production-path
       regression added (JSON+form, cross-entry/cross-subject/invalid-then-valid); PG revoked-link/
       owner-changed rejection tests now assert full ledger+handoff snapshot equality, not just row
-      count; pending hosted CI on this round's SHA
+      count; hosted CI on `92cdeb9d2` green, including the real-Postgres `unit` job run of
+      `tests/integration/sr-partner-notify-nav-20260917.integration.test.ts`. Browser/native/live
+      still unverified in this sandbox.
 - [ ] navigation_reads_current_trip_without_creating_orders — unchanged this round (no findings
-      against this criterion in the reopen); prior rounds' frozen-route authorization and
-      no-order-creation confirmation carries forward; browser/native/live still unverified
+      against this criterion in the `codex-20260924T005217Z-265733be` reopen); prior rounds'
+      frozen-route authorization and no-order-creation confirmation carries forward, reconfirmed
+      unchanged by `git diff --stat` against `052c06f66` (only the 3 files listed in this round's
+      commits changed); browser/native/live still unverified, so this item is left unchecked per
+      §0.7 rather than claimed "Fully closed".
 
-Handing off to reviewer Codex once pushed, against the new `CANDIDATE_SHA`/`CANDIDATE_BRANCH`
-recorded in the task's `handoff` — do not reuse `052c06f6625521b9f87333adffd14c016d210f6a` or
-`44281017` as the reviewed SHA for this round's changes.
+Handing off to reviewer Codex against `CANDIDATE_SHA=92cdeb9d2fe0c76fa3aa6f8cb2c0b6bd905f2f16`,
+`CANDIDATE_BRANCH=claude/sr-partner-notify-nav-20260917`, PR #2100 — do not reuse
+`052c06f6625521b9f87333adffd14c016d210f6a`, `44281017`, or `2f417ba48` as the reviewed SHA for
+this round's changes.
