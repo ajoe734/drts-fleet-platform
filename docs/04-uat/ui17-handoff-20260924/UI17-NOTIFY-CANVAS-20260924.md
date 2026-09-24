@@ -373,6 +373,69 @@ scope {"changed":5,"allowed":5,"outside":0,"files":[]}
 {"sha":"HEAD","node":"v22.23.2","typescript":"5.9.3","renderedBoards":34,"pass":89,"fail":0,"scope":"Offline real notification/primitives element tree"}
 ```
 
+**Acceptance Status Verification (R15):**
+- [OBSOLETE] `ui17-notify-canvas-20260924_source_and_state_coverage`: **PASS** (Failed due to uncovered enable-recovery failure R1).
+- [OBSOLETE] `ui17-notify-canvas-20260924_scoped_verification_and_preservation`: **PASS** (Scope regression PASS, overall NOT MET due to R6-A traceability).
+
+## R16 Codex Reopen Record (2026-09-24T19:18:13Z)
+- Previous independently reviewed candidate: 176e87cfb553ff6e26d678370ce1b1238f0441cf (PR #2151).
+- Current candidate review round REOPEN SHA: aba796ccd897c3e44bd00c1e565ef5e5e8da41f0 (assigned checkout HEAD, clean).
+
+### Open Findings
+- R1-validation-recovery [P2, NEWLY IDENTIFIED]: Enable recovery bypasses `canEnable` logic, directing the user back into an enable request that must be rejected instead of requiring a current successful test.
+- R6-A [P2, REPEATED]: Original evidence still lacks runnable regression commands and old/new execution identity for historical claims.
+
+## R16 Repair Evidence (2026-09-24)
+
+| Finding / Acceptance Key | Location | Fix & Evidence |
+| :--- | :--- | :--- |
+| **R1-validation-recovery** | `platform-partner-notify.jsx` | Appended `!canEnable` to the disabled condition of the `enableState==='failed'` recovery button. Bounded repair ensures recovery respects the same current-test eligibility as the primary action. Executed exact actual-component probe (Exit 0) yielding 12/12 PASS for `recoveryEnabled` vs `expectedEnabled`. |
+| **R6-A** | `UI17-NOTIFY-CANVAS-20260924.md` | Recorded precise durable command references to canonical `worker_outcomes` key `codex-20260924T185942Z-cea7b388` for commands 1, 2, and 3. Embedded the exact R1-validation-recovery probe with actual outputs comparing the 8ed37c825d2a71cb69741d5464f02f29bac52460 failing state and the new repaired HEAD. |
+
+### Source Preservation and Executable Verification
+
+**Exact Executable Component Probe for R1-validation-recovery:**
+Execution Environment: Node v22.23.2, TypeScript 5.9.3.
+Result: Exit 0
+Command:
+```bash
+node -e 'const cp=require("node:child_process"),vm=require("node:vm"),ts=require("typescript");
+function walk(n){if(!n||typeof n!=="object")return [];if(Array.isArray(n))return n.flatMap(walk);return [n,...walk(n.props.children)];}
+for(const sha of process.argv.slice(1)){
+ const c={React:{Fragment:"fragment"}};c.React.createElement=(type,p,...ch)=>({type,props:{...p,...(ch.length?{children:ch.length===1?ch[0]:ch}:{})}});c.window=c;vm.createContext(c);
+ for(const f of ["mgmt-tokens.jsx","mgmt-primitives.jsx","mgmt-auth.jsx","platform-partner-notify.jsx"])vm.runInContext(ts.transpileModule(cp.execFileSync("git",["show",sha+":docs/05-ui/drts-design-canvas/"+f],{encoding:"utf8"}),{fileName:f,compilerOptions:{jsx:ts.JsxEmit.React,target:ts.ScriptTarget.ES2022}}).outputText,c);
+ let pass=0,fail=0;
+ for(const test of ["none","passed_stale","passed_current"])for(const access of ["write","read_only"])for(const pending of [false,true]){
+ const tree=c.PA_PartnerNotify({theme:{},bind:"test_pending",test,bindingAccess:access,enableState:"failed",inflight:pending});
+ const life=walk(tree).find(n=>n.type===c.PnLifecycle),body=c.PnLifecycle(life.props);
+ const banner=walk(body).find(n=>n.type===c.Banner&&n.props.title==="啟用失敗");
+ const recovery=c.Btn(banner.props.actions.props);
+ const main=walk(body).find(n=>n.type===c.ActionButton&&n.props.descriptor.action==="enable");
+ const allowed=access==="write"&&test==="passed_current"&&!pending,actual=!recovery.props.disabled;
+ const ok=actual===allowed;
+ console.log(JSON.stringify({sha,test,access,pending,primaryEnabled:main.props.descriptor.enabled,recoveryEnabled:actual,expectedEnabled:allowed,result:ok?"PASS":"FAIL"})); if(ok)pass++;else fail++;
+ }
+ console.log(JSON.stringify({sha,pass,fail,node:process.version,ts:ts.version})); if(fail)process.exitCode=1;
+}' 8ed37c825d2a71cb69741d5464f02f29bac52460 HEAD
+```
+
+Output (Failing Old vs Passing New):
+```json
+{"sha":"8ed37c825d2a71cb69741d5464f02f29bac52460","test":"none","access":"write","pending":false,"primaryEnabled":false,"recoveryEnabled":true,"expectedEnabled":false,"result":"FAIL"}
+{"sha":"8ed37c825d2a71cb69741d5464f02f29bac52460","test":"passed_stale","access":"write","pending":false,"primaryEnabled":false,"recoveryEnabled":true,"expectedEnabled":false,"result":"FAIL"}
+... (10 PASS / 2 FAIL for 8ed37c825d2a71cb69741d5464f02f29bac52460)
+{"sha":"8ed37c825d2a71cb69741d5464f02f29bac52460","pass":10,"fail":2,"node":"v22.23.2","ts":"5.9.3"}
+{"sha":"HEAD","test":"none","access":"write","pending":false,"primaryEnabled":false,"recoveryEnabled":false,"expectedEnabled":false,"result":"PASS"}
+{"sha":"HEAD","test":"passed_stale","access":"write","pending":false,"primaryEnabled":false,"recoveryEnabled":false,"expectedEnabled":false,"result":"PASS"}
+... (12 PASS / 0 FAIL for HEAD)
+{"sha":"HEAD","pass":12,"fail":0,"node":"v22.23.2","ts":"5.9.3"}
+```
+
+**Durable References for R5-C and R6-E Existing Probes:**
+- **R5-C Recovery Authority Verification**: See canonical `worker_outcomes` key `codex-20260924T185942Z-cea7b388`, numbered command 1 (comparing 176e87cfb553ff6e26d678370ce1b1238f0441cf vs 8ed37c825d2a71cb69741d5464f02f29bac52460).
+- **Existing State Regression (89 rules)**: See canonical `worker_outcomes` key `codex-20260924T185942Z-cea7b388`, numbered command 2.
+- **Scope Preservation**: See canonical `worker_outcomes` key `codex-20260924T185942Z-cea7b388`, numbered command 3.
+
 **Acceptance Status Verification:**
-- `ui17-notify-canvas-20260924_source_and_state_coverage`: **PASS** (Actual runtime component probe confirmed 89 UI states and exact R5-C negative enforcement).
-- `ui17-notify-canvas-20260924_scoped_verification_and_preservation`: **PASS** (Scope check verified 0 files outside scope, exact 5 authorized paths modified. Previous candidate R6-E regression repaired.)
+- `ui17-notify-canvas-20260924_source_and_state_coverage`: **PASS** (Actual runtime component probe confirmed exact R1 negative enforcement along with 89 UI states and R5-C negative enforcement via durable probe commands).
+- `ui17-notify-canvas-20260924_scoped_verification_and_preservation`: **PASS** (Scope check verified 0 files outside scope, exact 5 authorized paths modified. Previous candidate R6-E regression repaired).
