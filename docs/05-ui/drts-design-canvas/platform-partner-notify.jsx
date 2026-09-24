@@ -32,36 +32,41 @@ function PnBinding({ theme:th, state='ready', validatedAt='09-23 14:02 · 200 OK
     </Card>
   );
 }
-function PnLifecycle({ theme:th, state='ready', validated=true, fingerprintMatch=true, testingState='idle' }) {
-  const isPending = testingState === 'pending';
+function PnLifecycle({ theme:th, state='ready', validated=true, fingerprintMatch=true, testingState='idle', enableState='idle', disableState='idle' }) {
+  const isPending = testingState === 'pending' || enableState === 'pending' || disableState === 'pending';
   const canTest = !isPending;
   const canEnable = (state==='test_pending' || state==='disabled') && validated && fingerprintMatch && !isPending;
-  const enableReason = state==='ready' ? 'already_enabled' : (!validated ? 'requires_test' : (!fingerprintMatch ? 'stale_fingerprint' : (isPending ? 'test_in_progress' : undefined)));
+  const enableReason = state==='ready' ? 'already_enabled' : (!validated ? 'requires_test' : (!fingerprintMatch ? 'stale_fingerprint' : (isPending ? 'action_in_progress' : undefined)));
   const canDisable = state==='ready' && !isPending;
 
   return (
     <Card theme={th} title="生命週期控制" subtitle="test / enable / disable">
       <div style={{ display:'flex', flexDirection:'column', gap:8 }}>
-        <ActionButton theme={th} descriptor={{ action:'test', enabled: canTest, riskLevel:'low', disabledReasonCode: isPending ? 'test_pending' : undefined }} icon="refresh" label={isPending ? "測試中..." : "發送測試事件 (expectedVersion)"} en="test"/>
-        <ActionButton theme={th} descriptor={{ action:'enable', enabled: canEnable, disabledReasonCode: enableReason, riskLevel:'medium', requiresReason:true }} icon="check" label="啟用 / 恢復 (expectedVersion)" en="enable"/>
-        <ActionButton theme={th} descriptor={{ action:'disable', enabled: canDisable, disabledReasonCode: isPending ? 'test_pending' : undefined, riskLevel:'high', requiresReason:true }} icon="lock" label="停用 (expectedVersion)" en="disable"/>
+        <ActionButton theme={th} descriptor={{ action:'test', enabled: canTest, riskLevel:'low', disabledReasonCode: isPending ? 'action_in_progress' : undefined }} icon="refresh" label={testingState==='pending' ? "測試中..." : "發送測試事件 (expectedVersion)"} en="test"/>
+        <ActionButton theme={th} descriptor={{ action:'enable', enabled: canEnable, disabledReasonCode: enableReason, riskLevel:'medium', requiresReason:true }} icon="check" label={enableState==='pending' ? "啟用中..." : "啟用 / 恢復 (expectedVersion)"} en="enable"/>
+        <ActionButton theme={th} descriptor={{ action:'disable', enabled: canDisable, disabledReasonCode: isPending ? 'action_in_progress' : undefined, riskLevel:'high', requiresReason:true }} icon="lock" label={disableState==='pending' ? "停用中..." : "停用 (expectedVersion)"} en="disable"/>
       </div>
-      <div style={{ fontSize:10.5, color:th.textDim, marginTop:9 }}>待測試狀態需先通過測試事件才可啟用。目前測試狀態: {isPending ? '進行中' : (!validated ? '尚未測試' : (fingerprintMatch ? '已通過 (指紋相符)' : '指紋不符 (端點已變更)'))}</div>
+      <div style={{ fontSize:10.5, color:th.textDim, marginTop:9 }}>
+        {testingState==='failed' && <div style={{color:th.danger, marginBottom:4}}>測試發送失敗，請重試。</div>}
+        {enableState==='failed' && <div style={{color:th.danger, marginBottom:4}}>啟用失敗，請重試。</div>}
+        {disableState==='failed' && <div style={{color:th.danger, marginBottom:4}}>停用失敗，請重試。</div>}
+        待測試狀態需先通過測試事件才可啟用。目前測試狀態: {isPending ? '進行中' : (!validated ? '尚未測試' : (fingerprintMatch ? '已通過 (指紋相符)' : '指紋不符 (端點已變更)'))}
+      </div>
     </Card>
   );
 }
 const FX_PN_DELIVERIES = [
-  { id:'dlv_0915', event:'receipt_ready', target:'…/drts/hook', status:'delivered', code:'200', reason:'夥伴端接受且裝置未知 (有效 Ack)', at:'09-24 09:50:12', tries:1, stage:'partner_accepted', disposition:'none', failReason:null },
-  { id:'dlv_0914', event:'driver_arrived', target:'…/drts/hook', status:'failed', code:'—', reason:'budget_exhausted (endpoint_disabled)', at:'09-24 09:48:30', tries:5, stage:'outbox_persisted', disposition:'configuration_blocked', failReason:'endpoint_disabled' },
-  { id:'dlv_0913', event:'eta_changed', target:'…/drts/hook', status:'failed', code:'408', reason:'lease_active (provider_transient_error)', at:'09-24 09:45:00', tries:2, stage:'outbox_persisted', disposition:'automatic', failReason:'provider_transient_error' },
-  { id:'dlv_0912', event:'assignment_replaced', target:'…/drts/hook', status:'failed', code:'—', reason:'被新通知取代 (notification_superseded)', at:'09-24 09:41:12', tries:1, stage:'outbox_persisted', disposition:'terminal', failReason:'notification_superseded' },
-  { id:'dlv_0911', event:'assignment_disclosure_ready', target:'…/drts/hook', status:'failed', code:'—', reason:'過期 (notification_expired)', at:'09-24 09:38:50', tries:1, stage:'outbox_persisted', disposition:'terminal', failReason:'notification_expired' },
-  { id:'dlv_0910', event:'assignment_disclosure_ready', target:'…/drts/hook', status:'pending', code:'—', reason:'重新入列 (待送)', at:'09-24 09:30:07', tries:0, stage:'outbox_persisted', disposition:'manual_only', failReason:'route_missing' },
-  { id:'dlv_0909', event:'driver_arrived', target:'…/drts/hook', status:'failed', code:'503', reason:'綁定未就緒 (configuration_blocked)', at:'09-24 08:55:41', tries:3, stage:'outbox_persisted', disposition:'configuration_blocked', failReason:'endpoint_unavailable' },
-  { id:'dlv_0908', event:'receipt_ready', target:'…/drts/hook', status:'failed', code:'200', reason:'無效 Ack (缺 ID/不符) (partner_ack_invalid)', at:'09-24 08:12:30', tries:1, stage:'outbox_persisted', disposition:'manual_only', failReason:'partner_ack_invalid' },
+  { id:'dlv_0915', event:'receipt_ready', target:'…/drts/hook', status:'delivered', code:'200', reason:'夥伴端接受且裝置未知 (有效 Ack)', at:'09-24 09:50:12', tries:1, stage:'partner_accepted', disposition:'none', failReason:null, admission:'none' },
+  { id:'dlv_0914', event:'driver_arrived', target:'…/drts/hook', status:'failed', code:'—', reason:'budget_exhausted (額度耗盡)', at:'09-24 09:48:30', tries:5, stage:'outbox_persisted', disposition:'manual_only', failReason:'endpoint_disabled', admission:'budget_exhausted' },
+  { id:'dlv_0913', event:'eta_changed', target:'…/drts/hook', status:'failed', code:'408', reason:'lease_active (處理中)', at:'09-24 09:45:00', tries:2, stage:'outbox_persisted', disposition:'automatic', failReason:'provider_transient_error', admission:'lease_active' },
+  { id:'dlv_0912', event:'assignment_replaced', target:'…/drts/hook', status:'failed', code:'—', reason:'被新通知取代 (notification_superseded)', at:'09-24 09:41:12', tries:1, stage:'outbox_persisted', disposition:'terminal', failReason:'notification_superseded', admission:'none' },
+  { id:'dlv_0911', event:'assignment_disclosure_ready', target:'…/drts/hook', status:'failed', code:'—', reason:'過期 (notification_expired)', at:'09-24 09:38:50', tries:1, stage:'outbox_persisted', disposition:'terminal', failReason:'notification_expired', admission:'none' },
+  { id:'dlv_0910', event:'assignment_disclosure_ready', target:'…/drts/hook', status:'pending', code:'—', reason:'重新入列 (待送)', at:'09-24 09:30:07', tries:0, stage:'outbox_persisted', disposition:'manual_only', failReason:'route_missing', admission:'none' },
+  { id:'dlv_0909', event:'driver_arrived', target:'…/drts/hook', status:'failed', code:'503', reason:'綁定未就緒 (configuration_blocked)', at:'09-24 08:55:41', tries:3, stage:'outbox_persisted', disposition:'configuration_blocked', failReason:'endpoint_unavailable', admission:'none' },
+  { id:'dlv_0908', event:'receipt_ready', target:'…/drts/hook', status:'failed', code:'200', reason:'無效 Ack (缺 ID/不符) (partner_ack_invalid)', at:'09-24 08:12:30', tries:1, stage:'outbox_persisted', disposition:'manual_only', failReason:'partner_ack_invalid', admission:'none' },
 ];
 const PN_DLV = { delivered:['夥伴接受/裝置未知','success'], failed:['失敗','danger'], pending:['待送','neutral'], sending:['發送中','neutral'] };
-function PnDeliveries({ theme:th, mode='list' }) {
+function PnDeliveries({ theme:th, mode='list', retryState='idle', retryRowId=null }) {
   return (
     <Card theme={th} title="派送紀錄 · Deliveries" subtitle="分頁列表 · 單筆失敗可手動重送" padding={0}
       actions={<><Select theme={th} value="狀態：全部"/><Btn theme={th} size="xs" icon="refresh">重新整理</Btn></>}>
@@ -78,8 +83,17 @@ function PnDeliveries({ theme:th, mode='list' }) {
           { h:'時間', k:'at', w:130, mono:true },
           { h:'嘗試', k:'tries', w:50, mono:true, align:'center' },
           { h:'', w:80, r:r=>{
-            const canRetry = r.status==='failed' && r.disposition==='manual_only';
-            return r.status==='failed' ? <ActionButton theme={th} size="xs" descriptor={{ action:'resend', enabled:canRetry, riskLevel:'low', disabledReasonCode: !canRetry ? r.disposition : undefined }} icon="refresh" label="重送" en="resend"/> : <span style={{ fontSize:10.5, color:th.textDim }}>—</span>;
+            const isRowPending = retryState === 'pending' && r.id === retryRowId;
+            const isRowFailed = retryState === 'failed' && r.id === retryRowId;
+            const isAdmissionBlocked = r.admission && r.admission !== 'none';
+            const canRetry = r.status === 'failed' && (r.disposition === 'manual_only' || r.disposition === 'automatic') && !isAdmissionBlocked && !isRowPending;
+            const reasonCode = isRowPending ? 'retrying' : (isAdmissionBlocked ? r.admission : (!canRetry ? r.disposition : undefined));
+            return r.status === 'failed' ? (
+              <div style={{display:'flex', flexDirection:'column', gap:4}}>
+                <ActionButton theme={th} size="xs" descriptor={{ action:'resend', enabled:canRetry, riskLevel:'low', disabledReasonCode: reasonCode }} icon="refresh" label={isRowPending ? "重送中" : "重送"} en="resend"/>
+                {isRowFailed && <div style={{fontSize:9, color:th.danger, marginTop:2}}>重送失敗</div>}
+              </div>
+            ) : <span style={{ fontSize:10.5, color:th.textDim }}>—</span>;
           }},
         ]} rows={FX_PN_DELIVERIES}/>
         <div style={{ display:'flex', alignItems:'center', gap:10, padding:'8px 14px', borderTop:'1px solid '+th.border, fontSize:11, color:th.textMuted }}><span>48 筆 · 第 1 / 5 頁</span><span style={{ flex:1 }}/><Btn theme={th} size="xs" variant="ghost">上一頁</Btn><Btn theme={th} size="xs" variant="ghost" icon="arrow-right">下一頁</Btn></div>
@@ -88,16 +102,16 @@ function PnDeliveries({ theme:th, mode='list' }) {
   );
 }
 // D1 · 綁定讀取（三態）+ 派送紀錄
-function PA_PartnerNotify({ theme:th, bind='ready', deliveries='list', validated=true, fingerprintMatch=true, testingState='idle' }) {
+function PA_PartnerNotify({ theme:th, bind='ready', deliveries='list', validated=true, fingerprintMatch=true, testingState='idle', enableState='idle', disableState='idle', retryState='idle', retryRowId=null }) {
   return (
     <PnShell theme={th} actions={<Btn theme={th} variant="primary" icon="edit">編輯綁定</Btn>}>
       <div style={{ padding:24, display:'grid', gridTemplateColumns:'1.5fr 1fr', gap:16, alignItems:'start' }}>
         <div style={{ display:'flex', flexDirection:'column', gap:16 }}>
           <PnBinding theme={th} state={bind} validatedAt={validated ? '09-23 14:02 · 200 OK' : null} validatedFingerprintMatch={fingerprintMatch}/>
-          <PnDeliveries theme={th} mode={deliveries}/>
+          <PnDeliveries theme={th} mode={deliveries} retryState={retryState} retryRowId={retryRowId}/>
         </div>
         <div style={{ display:'flex', flexDirection:'column', gap:16 }}>
-          <PnLifecycle theme={th} state={bind} validated={validated} fingerprintMatch={fingerprintMatch} testingState={testingState}/>
+          <PnLifecycle theme={th} state={bind} validated={validated} fingerprintMatch={fingerprintMatch} testingState={testingState} enableState={enableState} disableState={disableState}/>
           <Card theme={th} title="派送摘要 · 近 24h"><div style={{ display:'grid', gridTemplateColumns:'1fr 1fr 1fr', gap:10 }}><Kpi theme={th} label="夥伴端接受且裝置未知" en="delivered" value="46"/><Kpi theme={th} label="發送中" en="sending" value="0"/><Kpi theme={th} label="失敗" en="failed" value="2" tone="danger"/></div></Card>
         </div>
       </div>
@@ -105,18 +119,22 @@ function PA_PartnerNotify({ theme:th, bind='ready', deliveries='list', validated
   );
 }
 // D3 · 編輯表單
-function PA_PartnerNotifyEdit({ theme:th }) {
+function PA_PartnerNotifyEdit({ theme:th, saveState='idle' }) {
+  const isSaving = saveState === 'pending';
   return (
-    <PnShell theme={th} actions={<><Btn theme={th}>取消</Btn><ActionButton theme={th} descriptor={{ action:'save', enabled:true, riskLevel:'medium', requiresReason:true }} variant="primary" icon="check" label="儲存綁定（7 → 8）" en="save"/></>}>
+    <PnShell theme={th} actions={<><Btn theme={th} disabled={isSaving}>取消</Btn><ActionButton theme={th} descriptor={{ action:'save', enabled:!isSaving, riskLevel:'medium', requiresReason:true, disabledReasonCode: isSaving ? 'saving' : undefined }} variant="primary" icon="check" label={isSaving ? "儲存中..." : "儲存綁定（7 → 8）"} en="save"/></>}>
       <div style={{ padding:24, display:'grid', gridTemplateColumns:'1.4fr 1fr', gap:16, alignItems:'start' }}>
-        <Card theme={th} title="編輯回呼綁定" subtitle="expectedVersion: 7 · 版本衝突將阻擋儲存">
-          <Field theme={th} label="選擇 Webhook (webhookId)" required hint="重用既有 webhook 管理入口">
-            <Select theme={th} value="wh_7f3a2c91 (https://api.nexus-partner.example/drts/hook)"/>
-          </Field>
+        <div style={{ display:'flex', flexDirection:'column', gap:16 }}>
+          {saveState === 'failed' && <Banner theme={th} tone="danger" icon="warn" title="儲存失敗" body="請檢查連線或重試。"/>}
+          <Card theme={th} title="編輯回呼綁定" subtitle="expectedVersion: 7 · 版本衝突將阻擋儲存">
+            <Field theme={th} label="選擇 Webhook (webhookId)" required hint="重用既有 webhook 管理入口">
+              <Select theme={th} value="wh_7f3a2c91 (https://api.nexus-partner.example/drts/hook)"/>
+            </Field>
           <Field theme={th} label="訂閱事件類型" required>
             <div style={{ display:'flex', flexDirection:'column', gap:8 }}>{PN_EVENTS.map((e,i)=><Checkbox key={e} theme={th} on={i<4} label={e}/>)}</div>
           </Field>
         </Card>
+        </div>
         <Card theme={th} title="變更摘要"><DL theme={th} cols={1} items={[{ k:'目前版本', v:'7', mono:true },{ k:'儲存後', v:'8', mono:true },{ k:'事件變更', v:'+ receipt_ready' },{ k:'Webhook', v:'不變更' }]}/><div style={{ marginTop:8 }}><Banner theme={th} tone="neutral" icon="lock" body="儲存後綁定回到「待測試」，需重新通過測試事件才可啟用。"/></div></Card>
       </div>
     </PnShell>
@@ -127,9 +145,10 @@ function PA_PartnerNotifyErrors({ theme:th }) {
   return (
     <PnShell theme={th}>
       <div style={{ padding:24, display:'grid', gridTemplateColumns:'1fr 1fr', gap:14 }}>
-        <Card theme={th} title="409 · 版本衝突 (VERSION_CONFLICT)" padding={14}><Banner theme={th} tone="warn" icon="warn" title="綁定已被他人更新（7 → 8）" body="您的表單輸入已保留。請重新載入取得最新版本後再儲存；不會靜默覆寫。" actions={<><Btn theme={th} size="xs" variant="primary" icon="refresh">重新載入 8</Btn><Btn theme={th} size="xs">比對差異</Btn></>}/></Card>
-        <Card theme={th} title="409 · 測試狀態衝突 (NOT_VALIDATED)" padding={14}><Banner theme={th} tone="warn" icon="warn" title="綁定尚未通過測試" body="啟用前必須先通過測試，且端點指紋必須與測試時相符。請發送測試事件。" actions={<Btn theme={th} size="xs" variant="primary" icon="refresh">發送測試</Btn>}/></Card>
-        <Card theme={th} title="404 · 找不到綁定或端點 (BINDING/WEBHOOK_NOT_FOUND)" padding={14}><Banner theme={th} tone="neutral" icon="info" title="無此綁定或 Webhook 端點已刪除" body="若是端點已刪除，請重新選擇有效的 Webhook 並儲存綁定。" actions={<Btn theme={th} size="xs" variant="primary" icon="plus">重新設定綁定</Btn>}/></Card>
+        <Card theme={th} title="409 · 版本衝突 (PARTNER_NOTIFICATION_BINDING_VERSION_CONFLICT)" padding={14}><Banner theme={th} tone="warn" icon="warn" title="綁定已被他人更新（7 → 8）" body="您的表單輸入已保留。請重新載入取得最新版本後再儲存；不會靜默覆寫。" actions={<><Btn theme={th} size="xs" variant="primary" icon="refresh">重新載入 8</Btn><Btn theme={th} size="xs">比對差異</Btn></>}/></Card>
+        <Card theme={th} title="409 · 測試狀態衝突 (PARTNER_NOTIFICATION_BINDING_NOT_VALIDATED)" padding={14}><Banner theme={th} tone="warn" icon="warn" title="綁定尚未通過測試" body="啟用前必須先通過測試，且端點指紋必須與測試時相符。請發送測試事件。" actions={<Btn theme={th} size="xs" variant="primary" icon="refresh">發送測試</Btn>}/></Card>
+        <Card theme={th} title="404 · 找不到綁定 (PARTNER_NOTIFICATION_BINDING_NOT_FOUND)" padding={14}><Banner theme={th} tone="neutral" icon="info" title="無此綁定" body="此夥伴入口尚未建立綁定，請建立新綁定。" actions={<Btn theme={th} size="xs" variant="primary" icon="plus">建立綁定</Btn>}/></Card>
+        <Card theme={th} title="404 · 找不到端點 (PARTNER_NOTIFICATION_BINDING_WEBHOOK_NOT_FOUND)" padding={14}><Banner theme={th} tone="neutral" icon="info" title="Webhook 端點已刪除" body="端點已刪除，請重新選擇有效的 Webhook 並儲存綁定。" actions={<Btn theme={th} size="xs" variant="primary" icon="edit">重新設定綁定</Btn>}/></Card>
         <Card theme={th} title="403 · 無權限" padding={14}><Banner theme={th} tone="danger" icon="lock" title="您沒有存取此綁定的權限" body="無法讀取或修改，需要該 Tenant/Partner (資源層級) 的存取權限。此處使用 foundation:read/write，非 tenant_partner:read。" /></Card>
         <Card theme={th} title="200 OK · 無效的 Ack" padding={14}><Banner theme={th} tone="warn" icon="warn" title="夥伴回傳 200 但格式無效" body="缺少 receiptId、ID 不符或狀態錯誤。視為失敗，需手動介入 (manual_only)。"/></Card>
         <Card theme={th} title="200/201/202 · 夥伴端接受且裝置未知" padding={14}><Banner theme={th} tone="warn" icon="info" title="夥伴端接受且裝置未知" body="夥伴端點回傳 200/201/202，且包含有效符合的 ack，但未回報處理裝置。視為接受，不自動重送。"/></Card>
@@ -147,8 +166,8 @@ function PA_PartnerNotifyRecoveryBoards({ theme:th }) {
         <Card theme={th} title="操作進行中 · Ongoing Action" padding={14}><Banner theme={th} tone="neutral" icon="refresh" title="儲存/測試/啟用/停用 進行中" body="請稍候，操作正在處理中..." actions={<Btn theme={th} size="xs" disabled>處理中...</Btn>}/></Card>
         <Card theme={th} title="操作成功 · Action Success" padding={14}><Banner theme={th} tone="success" icon="check" title="操作已完成" body="綁定狀態已成功更新。"/></Card>
         <Card theme={th} title="操作失敗 · Action Failure" padding={14}><Banner theme={th} tone="danger" icon="warn" title="儲存/測試/啟用/停用 失敗" body="處理要求時發生錯誤，請重試。" actions={<Btn theme={th} size="xs" variant="primary" icon="refresh">重試</Btn>}/></Card>
-        <Card theme={th} title="422 · ENTRY_INACTIVE" padding={14}><Banner theme={th} tone="danger" icon="warn" title="夥伴入口已停用" body="無法進行綁定操作，因為對應的夥伴入口 (ENTRY_INACTIVE) 已停用。"/></Card>
-        <Card theme={th} title="422 · ENDPOINT_EVENTS_MISSING" padding={14}><Banner theme={th} tone="danger" icon="warn" title="Webhook 事件訂閱不足" body="目標 Webhook 未訂閱必要的事件類型，請先至 Webhook 管理介面補充。"/></Card>
+        <Card theme={th} title="409 · 夥伴入口停用 (PARTNER_NOTIFICATION_BINDING_ENTRY_INACTIVE)" padding={14}><Banner theme={th} tone="danger" icon="warn" title="夥伴入口已停用" body="無法進行綁定操作，因為對應的夥伴入口已停用。"/></Card>
+        <Card theme={th} title="409 · 缺少事件訂閱 (PARTNER_NOTIFICATION_BINDING_ENDPOINT_EVENTS_MISSING)" padding={14}><Banner theme={th} tone="danger" icon="warn" title="Webhook 事件訂閱不足" body="目標 Webhook 未訂閱必要的事件類型，請先至 Webhook 管理介面補充。"/></Card>
       </div>
     </PnShell>
   );
