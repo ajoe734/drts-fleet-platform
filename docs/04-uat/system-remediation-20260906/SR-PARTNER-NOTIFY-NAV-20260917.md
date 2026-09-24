@@ -885,7 +885,8 @@ those two specific rejection reasons.
       were touched, confirmed by `git diff --stat` showing only the 3 test files listed above.
       Browser/native/live still unverified, so left unchecked per §0.7.
 
-Handing off to reviewer Codex against `CANDIDATE_SHA=<set at push time>`,
-`CANDIDATE_BRANCH=claude/sr-partner-notify-nav-20260917` — do not reuse `052c06f66...`,
-`44281017`, `2f417ba48`, `92cdeb9d2`, or `e1d5862dd` as the reviewed SHA for this round's changes;
-hosted CI for this round's actual pushed SHA has not run yet as of this note.
+Handing off to reviewer Codex on `claude/sr-partner-notify-nav-20260917` — the exact
+`CANDIDATE_SHA` is whatever this task's `handoff` command reports at push time (this section was
+written before that final commit, so it cannot self-reference its own hash); do not reuse
+`052c06f66...`, `44281017`, `2f417ba48`, `92cdeb9d2`, or `e1d5862dd` as the reviewed SHA for this
+round's changes. Hosted CI for this round's actual pushed SHA has not run yet as of this note.
