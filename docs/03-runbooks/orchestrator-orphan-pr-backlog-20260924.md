@@ -453,3 +453,112 @@ SQL 建立等其他段落做任何改動。`db_secret_exists` 的 NOT_FOUND 偵�
 `grep -qi 'not found' <<<"$secret_describe_err"`，這依賴 gcloud 錯誤訊息文字
 格式；若未來 gcloud 改變錯誤文案，最壞情況是退化成「所有 describe 失敗都
 fail closed」（安全方向的退化，不會導致誤判為不存在），不是新的不安全窗口。
+
+## Codex 第四輪退修（`d74caf654`）與修正
+
+Codex 於 2026-09-24T09:29:39Z 對候選 `d74caf65404af85fa36a522bf1f65da7cc59c903`
+唯讀審查後退修，確認 Scenario A/B、list-error 與四組正向情境已修正並保留不
+重測，但指出兩個新的 P1：F1-A（查詢 fail-closed 邊界仍漏「非零但 stderr
+空白」）與 F1-C（`secrets create` 不是原子操作，resource 建立成功但版本寫入
+失敗會留下無版本的 secret，被下次重跑誤判為 `kept`）。完整 finding 文字見
+`ai-status.sh show ORCH-ORPHAN-PR-LAND-20260924` 的
+`codex-...-f81f059d`／後續唯讀複審條目，本節記錄定位、修正與回歸證據。
+
+### F1-A — `secrets describe` 非零但 stderr 空白會繞過 FATAL
+
+`infra/gcp/dev/provision-dev-project.sh:214-215`（`d74caf654` 版）用
+`[[ -n "$secret_describe_err" ]]` 判斷「是否需要看這段錯誤文字」；若
+`describe` 非零但沒有任何 stderr 輸出（例如被信號中止、或某些 API 失敗模式
+不寫診斷文字），這個條件為假，FATAL 分支被跳過，腳本直接把它當成「確認不
+存在」繼續往下走密碼輪替。這違反本檔案本來聲稱的「只有明確 NOT_FOUND 才視
+為不存在，其他非零一律 FATAL」。
+
+**修正**：改用 `if secret_describe_err="$(...)"; then db_secret_exists=true;
+elif ! grep -qi 'not found' <<<"$secret_describe_err"; then FATAL; fi`——用
+`if` 直接測試指令自身的 exit code（而不是事後檢查 stderr 是否為空字串）來
+判斷是否成功，於 `set -e` 下不會誤觸發、也不再有「空 stderr 繞過 FATAL」的
+分支存在。同一模式也用於新增的版本存在檢查（見 F1-C）。
+
+### F1-C — `secrets create` 非原子操作，partial-create 殘留被誤判為已完成
+
+`gcloud secrets create --data-file=-` 內部是先 `Secrets.Create` 建立資源、
+再 `Secrets.AddVersion` 寫入版本，兩個分開的 API 呼叫，中途失敗不會回滾。
+若腳本在 `elif $db_user_exists && ! $db_secret_exists`（原路徑）分支跑到一半
+於 `AddVersion` 失敗，會留下「secret 資源存在、但沒有可用版本」的殘留狀態；
+下次重跑時 `secrets describe` 成功（資源確實存在）就被判定為
+`db_secret_exists=true`，直接落入 `kept` 分支印出「已存在，不輪替」，但實
+際上沒有任何版本可讀，且 DB 使用者密碼已經在上次跑到一半時被 `set-password`
+換過，形成「宣稱已保留但實際不可用」的假陽性。
+
+**修正**（`infra/gcp/dev/provision-dev-project.sh:213-296`）：
+
+1. 新增 `db_secret_has_version`：在 `db_secret_exists=true` 之後，額外用
+   `gc secrets versions access latest --secret="$DB_URL_SECRET"`（輸出丟
+   `/dev/null`，只看 exit code，不印出/不保留明文）確認「有可讀版本」，同一
+   套 fail-closed 判斷方式（非 NOT_FOUND 的任何錯誤一律 FATAL）。
+2. 「是否需要輪替」的四路分支改用 `db_secret_has_version`（而非
+   `db_secret_exists`）判斷是否可以 `kept`；resource 存在但無版本，等同
+   「不可用」，會落入需要重新寫入密碼的分支。
+3. 該分支寫入 secret 時，依 `db_secret_exists` 判斷要 `gcloud secrets create`
+   （resource 真的不存在）還是 `gcloud secrets versions add`（resource 已存
+   在但缺版本；對已存在的 secret 呼叫 `create` 會回 ALREADY_EXISTS 失敗），
+   避免對已存在的 partial-create 殘留重複 `create`。
+4. `! $db_user_exists && $db_secret_exists` 分支與「兩者皆缺」的 `else`
+   分支不需要改動：前者本就對已存在的 secret 做 `versions add`（不受
+   has_version 影響，寫入語意本來就是覆蓋）；經真值表窮舉，`else` 分支只會
+   在「user 缺、secret 資源也缺」時到達，`secrets create` 維持原樣正確。
+
+### 回歸驗證（非雲端，僅 mock `gc`/未 mock 本地 `openssl`）
+
+方法與第三輪一致：從工作樹 `sed` 擷取
+`infra/gcp/dev/provision-dev-project.sh:191-289`（`random_token()` 起到
+`db_url`/if-elif-else 收尾的 `fi`，`for name in` 之前）交真正 bash
+`source` 執行；`gc`（gcloud wrapper）與 `openssl` 皆 mock（`openssl` 只固定
+輸出，不呼叫真隨機/雲端），狀態存在檔案而非 shell 變數，理由同前——避免管線
+右側（`... | gc secrets create ...`）在子 shell 中遺失狀態。
+
+**本輪額外發現並修正的 harness 缺陷**：第一版 harness 用
+`( set -euo pipefail; source block.sh ) || rc=$?` 擷取候選腳本的 exit
+code。這個寫法本身有 bug：在外層腳本已 `set -e` 的情況下，把一個複合指令
+（子 shell）放在 `||` 左邊，bash 會對整個複合指令抑制 `errexit`
+的觸發，即使子 shell 內又顯式 `set -e` 也一樣——導致 F1-C 的 live-failure
+情境（`secrets create` 真的在 `AddVersion` 階段失敗）被誤判為「exit 0、
+繼續印 `recovered`」，掩蓋了原本應該有的 loud failure。用一個最小重現
+（`f() { return 42; }; ( set -euo pipefail; echo x | f ) || rc=$?` →
+`rc=0`，`echo after` 仍執行）確認這不是候選腳本本身的問題，而是測試工具
+的問題；改為把候選片段丟給獨立的 `bash --noprofile --norc -c '...'` 子
+行程執行、用 `set +e; ...; rc=$?; set -e` 只包裹這次呼叫（不再用 `||`
+包住複合指令）後，同一個 fixture 正確回報 `rc=42`。所有下表數字都是修正
+後 harness 的輸出；此前用舊 harness 得到的任何「exit 0」讀數在本輪一律
+視為不可信、重新驗證。
+
+新增／重跑情境（狀態：`user_exists` / `secret_resource_exists` /
+`secret_has_version`，皆為修正後 `d74caf654`+本輪修正之候選程式碼）：
+
+| 情境 | 初始狀態 | 故障注入 | 階段 | exit | 結果訊息 | 結束狀態 |
+| --- | --- | --- | --- | --- | --- | --- |
+| F1-A 空 stderr | user=T,secret=T,ver=T | `describe` 回 137、stdout/stderr 皆空 | first | **1（FATAL）** | 無 mutation | 不變 |
+| F1-A 有文字（迴歸） | user=T,secret=F,ver=F | `describe` 回 1，stderr 含 `PERMISSION_DENIED` 文字 | first | 1（FATAL） | 無 mutation | 不變 |
+| F1-A NOT_FOUND（迴歸） | user=T,secret=F,ver=F | 無 | first | 0 | `recovered`（secret missing） | secret=T,ver=T |
+| F1-C partial-create 即時失敗 | user=T,secret=F,ver=F | `secrets create` 建立 resource 成功後 exit 42 | first | **42** | 無成功訊息（`gc secrets create` 那行讓管線+pipefail 中止腳本） | secret=T,ver=F（殘留） |
+| F1-C partial-create 重跑（承接上列殘留） | 同上結束狀態 | 移除故障 | retry | 0 | `recovered`（secret was missing or unusable） | secret=T,ver=T |
+| F1-C user 缺、secret 有殘留 | user=F,secret=T,ver=F | 無 | first | 0 | `recovered`（user was missing） | user=T,secret=T,ver=T |
+| Scenario A（第三輪，迴歸） | user=T,secret=T,ver=T | `describe` 回 1 帶文字 | first | 1（FATAL） | 無 mutation | 不變 |
+| Scenario B（第三輪，迴歸） | user=F,secret=T,ver=T | `versions add` 回 42 | first→retry | 42→0 | 無→`recovered`（user was missing） | user 由 F 變 T，全程 ver=T |
+| list-error（迴歸） | 無 | `sql users list` 回 1 | first | 1（FATAL） | 無 mutation | 不變 |
+| 四組正向情境（首次建立/完整既有/缺user/缺secret，迴歸） | 各組 | 無 | first | 0 | `created`/`kept`/`recovered`×2 | 皆 has_version=T |
+
+Harness、擷取的程式碼片段與各情境 state 留存於執行本輪任務的 sandbox
+`/tmp/f1cregress/`（harness.sh + block.sh + 各 `v2_*`/`state_*` 狀態目
+錄），未寫入本 repo；上表為實際執行輸出的忠實轉錄。`bash -n
+infra/gcp/dev/provision-dev-project.sh` 與 `git diff --check` 均額外
+`exit 0`。
+
+### 修正邊界（呼應第四輪退修要求，未擴大範圍）
+
+只處理 F1-A（查詢 fail-closed 邊界的空 stderr 漏洞）與 F1-C（partial-create
+殘留被誤判為完成）兩個明確 finding。未要求、也未嘗試讀回 secret 明文比對內
+容；未做真實雲端輪替；未改動 preflight/APIs/IAM/WIF/SQL 建立/其餘 secrets
+迴圈等其他段落。新增的 `gc secrets versions access latest` 呼叫只讀一次、
+輸出導向 `/dev/null`，不落地、不列印明文，且只在 `db_secret_exists=true`
+時才執行（secret 確認不存在時不需要多打一次 API）。

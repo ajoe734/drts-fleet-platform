@@ -211,31 +211,61 @@ users_list_output="$(gc sql users list --instance="$SQL_INSTANCE" --format='valu
 grep -qx "$DB_USER" <<<"$users_list_output" && db_user_exists=true
 
 db_secret_exists=false
-secret_describe_err="$(gc secrets describe "$DB_URL_SECRET" 2>&1 >/dev/null)" && db_secret_exists=true
-if ! $db_secret_exists && [[ -n "$secret_describe_err" ]] && ! grep -qi 'not found' <<<"$secret_describe_err"; then
+if secret_describe_err="$(gc secrets describe "$DB_URL_SECRET" 2>&1 >/dev/null)"; then
+  db_secret_exists=true
+elif ! grep -qi 'not found' <<<"$secret_describe_err"; then
   echo "FATAL: could not determine whether secret ${DB_URL_SECRET} exists (unexpected gcloud error):" >&2
   echo "$secret_describe_err" >&2
   exit 1
+fi
+
+# `secrets describe` succeeding only confirms the secret resource exists, not
+# that it holds a version: `gcloud secrets create --data-file=-` creates the
+# resource and adds the first version as two separate API calls, so a run
+# that dies between them (quota, transient API error) leaves a resource with
+# no version behind. Treating that leftover as "present" would print "kept"
+# on the next rerun while the secret has no readable value, so a resource
+# only counts as present once it has an accessible version. Same fail-closed
+# rule as above: only a confirmed NOT_FOUND on the version means "no value";
+# anything else aborts instead of guessing.
+db_secret_has_version=false
+if $db_secret_exists; then
+  if secret_version_err="$(gc secrets versions access latest --secret="$DB_URL_SECRET" 2>&1 >/dev/null)"; then
+    db_secret_has_version=true
+  elif ! grep -qi 'not found' <<<"$secret_version_err"; then
+    echo "FATAL: could not determine whether secret ${DB_URL_SECRET} has an accessible version (unexpected gcloud error):" >&2
+    echo "$secret_version_err" >&2
+    exit 1
+  fi
 fi
 
 # A rerun must not invalidate a credential that a deployed service is already
 # using: deploy-dev.yml injects this secret's value as DATABASE_URL, and
 # apps/api/src/common/db/database.service.ts caches it in its constructor, so
 # nothing picks up a rotated password until the next deploy. Only touch the
-# password when we've confirmed (not guessed) which piece is missing.
-if $db_user_exists && $db_secret_exists; then
+# password when we've confirmed (not guessed) which piece is missing or
+# unusable.
+if $db_user_exists && $db_secret_has_version; then
   echo "kept     ${DB_USER} / ${DB_URL_SECRET} (already present; not rotating)"
-elif $db_user_exists && ! $db_secret_exists; then
-  # Secret is confirmed gone so the current password is unrecoverable; rotate
-  # it and (re)create the secret together so the two never disagree. The user
-  # already exists and stays that way no matter what happens next, so if the
-  # secret write below fails, a rerun lands back in this same branch instead
-  # of a state that looks "kept" but isn't.
+elif $db_user_exists && ! $db_secret_has_version; then
+  # The secret is confirmed gone, or its resource exists with no usable
+  # version (a partial `secrets create` from an earlier failed run), so
+  # whatever password the DB user currently has cannot be recovered from it
+  # either way. Rotate the password and write a fresh version; reuse the
+  # existing resource with `versions add` instead of `create` when it's
+  # already there, since `create` on an existing secret fails with
+  # ALREADY_EXISTS. The user already exists and stays that way no matter what
+  # happens next, so if the secret write below fails, a rerun lands back in
+  # this same branch instead of a state that looks "kept" but isn't.
   DB_PASSWORD="$(new_db_password)"
   gc sql users set-password "$DB_USER" --instance="$SQL_INSTANCE" --password="$DB_PASSWORD"
-  db_url "$DB_PASSWORD" | gc secrets create "$DB_URL_SECRET" --replication-policy=automatic --data-file=- >/dev/null
+  if $db_secret_exists; then
+    db_url "$DB_PASSWORD" | gc secrets versions add "$DB_URL_SECRET" --data-file=- >/dev/null
+  else
+    db_url "$DB_PASSWORD" | gc secrets create "$DB_URL_SECRET" --replication-policy=automatic --data-file=- >/dev/null
+  fi
   unset DB_PASSWORD
-  echo "recovered ${DB_USER} / ${DB_URL_SECRET} (secret was missing; password rotated, secret created)"
+  echo "recovered ${DB_USER} / ${DB_URL_SECRET} (secret was missing or unusable; password rotated, version written)"
 elif ! $db_user_exists && $db_secret_exists; then
   # User is confirmed gone so whatever password the secret currently holds is
   # stale. Rotate the secret *before* creating the user: the secret already
