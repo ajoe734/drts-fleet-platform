@@ -164,10 +164,7 @@ class ProviderPermissionsTest(unittest.TestCase):
     def test_canonical_root_pnpm_install_requires_review(self) -> None:
         command = "pnpm install --frozen-lockfile"
 
-        # The test is a canonical invocation even when the suite itself runs
-        # in an isolated worker worktree.
-        with mock.patch.object(permission_broker, "_HOOK_CWD", permission_broker.workspace_root()):
-            self.assertEqual(permission_broker.classify_command(command), "defer")
+        self.assertEqual(permission_broker.classify_command(command), "defer")
 
     def test_canonical_root_pnpm_install_via_cd_requires_review(self) -> None:
         command = f"cd {ROOT} && pnpm install --frozen-lockfile"
@@ -471,10 +468,7 @@ class CanonicalCheckoutHeadGuardTests(unittest.TestCase):
         self.root = root.resolve()
         self.worktree = (self.root / ".artifacts" / "worktrees" / "session").resolve()
         run("worktree", "add", "--detach", "-q", str(self.worktree))
-        self._env = mock.patch.dict(os.environ, {
-            "ORCH_CANONICAL_ROOT": str(self.root),
-            "ORCH_WORKSPACE_ROOT": str(self.root),
-        }, clear=False)
+        self._env = mock.patch.dict(os.environ, {"ORCH_CANONICAL_ROOT": str(self.root)}, clear=False)
         self._env.start()
         permission_broker._WORKSPACE_ROOTS_CACHE = None
 

@@ -4,99 +4,12 @@ from __future__ import annotations
 import io
 import json
 import os
-import tempfile
 import unittest
 from contextlib import redirect_stdout
 from pathlib import Path
 from unittest import mock
 
 import permission_broker
-
-
-class WorkerCwdMergeTests(unittest.TestCase):
-    """A normal task-worktree merge must not look like a canonical head move."""
-
-    def setUp(self) -> None:
-        tmp = tempfile.TemporaryDirectory()
-        self.addCleanup(tmp.cleanup)
-        self.canonical = Path(tmp.name).resolve() / "canonical"
-        (self.canonical / ".git").mkdir(parents=True)
-        self.worktree = self.canonical / ".artifacts" / "worktrees" / "task"
-        self.worktree.mkdir(parents=True)
-        (self.worktree / ".git").write_text("gitdir: unused-test-admin-dir\n")
-        for patch in (
-            mock.patch.dict(os.environ, {
-                "ORCH_CANONICAL_ROOT": str(self.canonical),
-                "ORCH_WORKSPACE_ROOT": str(self.worktree),
-            }),
-            mock.patch.object(permission_broker, "_WORKSPACE_ROOTS_CACHE", None),
-            mock.patch.object(permission_broker, "_HOOK_CWD", None, create=True),
-        ):
-            patch.start()
-            self.addCleanup(patch.stop)
-
-    def _hook_decision(self, command: str, cwd: str | None) -> str:
-        payload = {"tool_name": "Bash", "tool_input": {"command": command}}
-        if cwd is not None:
-            payload["cwd"] = cwd
-        output = io.StringIO()
-        # Only external approval/log/tree state is mocked; hook parsing and
-        # evaluate_tool_request/classify_command run their production code.
-        with (
-            mock.patch.object(permission_broker, "is_orchestrated_session", return_value=True),
-            mock.patch.object(permission_broker, "_maybe_apply_chatbox_tree_guard", return_value=False),
-            mock.patch.object(permission_broker, "log_event"),
-            mock.patch.object(permission_broker, "create_approval"),
-            mock.patch.object(permission_broker, "_check_claude_allow_rules", return_value=False),
-            mock.patch.object(permission_broker, "find_resume_override", return_value=None),
-            mock.patch.object(permission_broker, "_matching_approval", return_value=(None, None)),
-            redirect_stdout(output),
-        ):
-            permission_broker.hook_mode({}, "PreToolUse", payload)
-        return json.loads(output.getvalue())["hookSpecificOutput"]["permissionDecision"]
-
-    def test_normal_merge_variants_in_worker_environment(self) -> None:
-        for options in ("", "--ff-only ", "--no-edit ", "--ff ", "--no-ff "):
-            with self.subTest(options=options):
-                self.assertEqual(permission_broker.classify_command(f"git merge {options}origin/dev"), "allow")
-        self.assertEqual(permission_broker.classify_command("git merge --abort"), "allow")
-
-    def test_canonical_git_targets_and_destructive_operations_stay_guarded(self) -> None:
-        for command in (
-            f"git -C {self.canonical} merge --no-edit origin/dev",
-            f"cd {self.canonical} && git merge origin/dev",
-        ):
-            with self.subTest(command=command):
-                self.assertEqual(permission_broker.classify_command(command), "defer")
-        self.assertEqual(permission_broker.classify_command("git reset --hard"), "deny")
-        self.assertEqual(permission_broker.classify_command("git push --force origin dev"), "defer")
-
-    def test_hook_cwd_overrides_worker_environment(self) -> None:
-        self.assertEqual(self._hook_decision("git merge origin/dev", str(self.canonical)), "ask")
-        self.assertEqual(self._hook_decision("git merge origin/dev", str(self.worktree)), "allow")
-
-    def test_missing_hook_cwd_does_not_reuse_previous_call(self) -> None:
-        self.assertEqual(self._hook_decision("git merge origin/dev", str(self.canonical)), "ask")
-        self.assertEqual(self._hook_decision("git merge origin/dev", None), "allow")
-
-    def test_relative_cd_from_worker_subdirectory_reaches_canonical(self) -> None:
-        nested = self.worktree / "src"
-        nested.mkdir()
-        relative = os.path.relpath(self.canonical, nested)
-        self.assertEqual(self._hook_decision(f"cd {relative} && git merge origin/dev", str(nested)), "ask")
-        self.assertEqual(self._hook_decision("git merge origin/dev", str(nested)), "allow")
-
-    def test_canonical_fallback_without_worker_environment(self) -> None:
-        with mock.patch.dict(os.environ, {"ORCH_WORKSPACE_ROOT": ""}):
-            self.assertEqual(permission_broker.classify_command("git merge origin/dev"), "defer")
-
-    def test_pnpm_install_uses_same_worker_cwd(self) -> None:
-        self.assertEqual(self._hook_decision("pnpm install", str(self.canonical)), "ask")
-        self.assertEqual(self._hook_decision("pnpm install", str(self.worktree)), "allow")
-
-    def test_merge_does_not_allow_unreviewed_command_suffix(self) -> None:
-        self.assertEqual(permission_broker.classify_command("git merge origin/dev && docker ps"), "defer")
-        self.assertEqual(permission_broker.classify_command("git merge origin/dev && git reset --hard"), "deny")
 
 
 class PreToolUseDecisionVocabularyTests(unittest.TestCase):

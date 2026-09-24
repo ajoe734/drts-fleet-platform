@@ -12,7 +12,7 @@ const P5_ICONS = {
   doc:'M6 3h9l4 4v14H6zM14 3v5h5', share:'M12 3v12M8 7l4-4 4 4M5 13v7h14v-7', download:'M12 3v12M8 11l4 4 4-4M5 19h14', clock:'M12 3a9 9 0 100 18 9 9 0 000-18zM12 7v5l3 2', refresh:'M20 8A8 8 0 105 5.3M20 3v5h-5',
 };
 function P5Icon({ name, size=15, style={} }) { return <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round" style={{flexShrink:0,...style}}><path d={P5_ICONS[name]||P5_ICONS.info}/></svg>; }
-function P5Phone({ children, url='(App Domain Pending)/r/••••K2' }) {
+function P5Phone({ children, url='ride.zhixing.tw/r/••••K2' }) {
   return (
     <div style={{ width:390, height:844, background:P5.bg, borderRadius:38, border:'10px solid #10161d', overflow:'hidden', display:'flex', flexDirection:'column', fontFamily:'"Inter","Noto Sans TC",system-ui,sans-serif', color:P5.ink }}>
       <div style={{ height:40, background:P5.brandDark, color:'#fff', display:'flex', alignItems:'flex-end', justifyContent:'space-between', padding:'0 20px 5px', fontSize:12, fontWeight:600, flexShrink:0 }}><span style={{fontFamily:P5.mono}}>14:29</span><span style={{opacity:.85, fontSize:10.5, fontFamily:P5.mono}}>{url}</span><span style={{fontFamily:P5.mono}}>5G ▮▮▮</span></div>
@@ -143,7 +143,7 @@ function P5Seatbelt() {
     </div>
   );
 }
-function P5Notice({ csNumber = '0800-090-000' } = {}) {
-  return <div style={{ margin:'auto 14px 14px', paddingTop:6, fontSize:10.5, color:P5.dim, textAlign:'center', flexShrink:0 }}>客服 {csNumber} · 主管機關申訴 1999<br/>本服務僅提供預約叫車</div>;
+function P5Notice() {
+  return <div style={{ margin:'auto 14px 14px', paddingTop:6, fontSize:10.5, color:P5.dim, textAlign:'center', flexShrink:0 }}>客服 0800-090-000 · 主管機關申訴 1999<br/>本服務僅提供預約叫車</div>;
 }
 Object.assign(window, { P5, P5Icon, P5Phone, P5Header, P5Card, P5Map, P5Eta, P5VehicleCard, P5RouteFare, P5Btn, P5Actions, P5Seatbelt, P5Notice });
