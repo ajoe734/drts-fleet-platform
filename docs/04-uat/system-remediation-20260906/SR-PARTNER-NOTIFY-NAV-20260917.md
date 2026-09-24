@@ -484,3 +484,33 @@ have `resolveServiceDate` prefer `order.createdAt` for the rebuild-count compari
 E2E script recompute `SERVICE_DATE` from the actual booking window) and, for this candidate,
 re-run CI after `00:00 UTC` (i.e. outside the affected window) to obtain a clean confirmation run
 on this exact `9b0e5d824` SHA before merge.
+
+## Round `ef3e45407` — clean CI confirmation after UTC midnight (owner Claude, 2026-09-24T00:0xZ)
+
+This candidate (`ef3e4540782962d661bdb8dff3fe0e75eb02b219`, PR #2100, base `dev`, HEAD =
+`217a95142` + `ef3e45407`, both documentation-only commits on top of `9b0e5d824`; zero product
+code changed since `9b0e5d824`) was pushed at `2026-09-23T23:56:16Z` specifically so the
+`cross-surface-e2e` job would execute after `00:00 UTC`, testing the day-boundary theory above.
+Result: **the theory held**. Both hosted CI runs on this SHA are fully `success`:
+
+- [CI (integration trunk) run 35936025483](https://github.com/ajoe734/drts-fleet-platform/actions/runs/35936025483):
+  `candidate`, `changes`, `lint`, `unit`, `build`, `i18n-guard`, `cross-surface-e2e`,
+  `iam-negative-matrix`, `integration`, `ui-route-e2e`, `typecheck`, `e2e`, `ci-integ` — all
+  `success` (`orchestrator-tests` `skipped` as expected for a product-only change). The
+  `cross-surface-e2e` job's `Run cross-surface E2E suite` step started at `23:57:47Z` and
+  completed successfully after crossing `00:00 UTC` mid-run, exactly as predicted: the portal
+  booking's `reservationWindowStart` (`now + 30 minutes`) and `SERVICE_DATE` (captured at script
+  start) landed on the same calendar day this time, so `E2E-022-operations-reporting`'s "daily
+  rebuild count" assertion passed with all 3 orders.
+- [CI run 35936025478](https://github.com/ajoe734/drts-fleet-platform/actions/runs/35936025478):
+  `BFF-only imports`, `Spec source archive`, `Canonical consistency`, `Commit trailers`,
+  `Change scope`, `Runtime mirror guard`, `No real financial-institution identifiers`,
+  `Verify Internal Key Exceptions`, `i18n guard`, `Product smoke acceptance`,
+  `Smoke acceptance` — all `success`.
+
+This is now a fully hosted-CI-green candidate for all three `required_acceptance` items: the
+`unit` job's real-Postgres confirmation of the 10-test NAV integration suite (documented above),
+the full BFF/session/consent regression coverage, and the frozen-route/receipt authorization
+matrix are all independently confirmed by this exact `ef3e45407` SHA, not carried over from a
+prior/different candidate. Handing off to reviewer Codex against `CANDIDATE_SHA=ef3e4540782962d661bdb8dff3fe0e75eb02b219`,
+`CANDIDATE_BRANCH=claude/sr-partner-notify-nav-20260917`, `PR #2100`.
