@@ -164,13 +164,15 @@ function App() {
         </DCSection>
 
         <DCSection id="partner-notify" title="03l · 夥伴通知分頁 · D · partner-notification-20260923" subtitle="夥伴詳情頁新增「通知」分頁 · 6 組狀態 · 密鑰遮罩 · 硬性文案「端點已接受，但裝置未知」">
-          <DCArtboard id="pn-ready" label="D1/D2/D4 · 綁定就緒 + 派送紀錄 + 生命週期" width={W} height={H}><Hero url="/partners/ctbc-airport?tab=notify"><PA_PartnerNotify theme={th} /></Hero></DCArtboard>
-          <DCArtboard id="pn-pending" label="D1 · 綁定待測試（需先測試才可啟用）" width={W} height={H}><Bare><PA_PartnerNotify theme={th} bind="test_pending" /></Bare></DCArtboard>
-          <DCArtboard id="pn-disabled" label="D1 · 綁定已停用" width={W} height={H}><Bare><PA_PartnerNotify theme={th} bind="disabled" /></Bare></DCArtboard>
+          <DCArtboard id="pn-ready" label="D1/D2/D4 · 綁定就緒 + 派送紀錄 + 生命週期" width={W} height={H}><Hero url="/partners/nexus-premium?tab=notify"><PA_PartnerNotify theme={th} /></Hero></DCArtboard>
+          <DCArtboard id="pn-pending" label="D1 · 綁定待測試（尚未測試）" width={W} height={H}><Bare><PA_PartnerNotify theme={th} bind="test_pending" validated={false} fingerprintMatch={false} /></Bare></DCArtboard>
+          <DCArtboard id="pn-pending-tested" label="D1 · 綁定待測試（測試成功，可啟用）" width={W} height={H}><Bare><PA_PartnerNotify theme={th} bind="test_pending" validated={true} fingerprintMatch={true} /></Bare></DCArtboard>
+          <DCArtboard id="pn-disabled" label="D1 · 綁定已停用 (指紋相符，可直接恢復)" width={W} height={H}><Bare><PA_PartnerNotify theme={th} bind="disabled" validated={true} fingerprintMatch={true} /></Bare></DCArtboard>
+          <DCArtboard id="pn-stale" label="D1 · 綁定已停用 (指紋變更，需重測)" width={W} height={H}><Bare><PA_PartnerNotify theme={th} bind="disabled" validated={true} fingerprintMatch={false} /></Bare></DCArtboard>
           <DCArtboard id="pn-loading" label="D2 · 派送紀錄載入中" width={W} height={H}><Bare><PA_PartnerNotify theme={th} deliveries="loading" /></Bare></DCArtboard>
           <DCArtboard id="pn-empty" label="D2 · 派送紀錄空清單" width={W} height={H}><Bare><PA_PartnerNotify theme={th} deliveries="empty" /></Bare></DCArtboard>
           <DCArtboard id="pn-edit" label="D3 · 編輯回呼綁定與事件類型" width={W} height={H}><Bare><PA_PartnerNotifyEdit theme={th} /></Bare></DCArtboard>
-          <DCArtboard id="pn-errors" label="D6 · 錯誤與復原 · 409/404/403 + 202 硬性文案" width={W} height={H}><Bare><PA_PartnerNotifyErrors theme={th} /></Bare></DCArtboard>
+          <DCArtboard id="pn-errors" label="D6 · 錯誤與復原 · 409/404/403 + 200/202" width={W} height={H}><Bare><PA_PartnerNotifyErrors theme={th} /></Bare></DCArtboard>
         </DCSection>
 
         <DCSection id="fleet" title="04 · 車隊與法遵 · 多 tab (Q-ADM08/09)">          <DCArtboard id="fleet-vehicles" label="Vehicles" width={W} height={H}><Hero url="/fleet?tab=vehicles"><PA_Fleet theme={th} tab="vehicles" /></Hero></DCArtboard>
