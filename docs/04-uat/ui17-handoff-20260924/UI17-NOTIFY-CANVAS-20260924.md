@@ -159,3 +159,35 @@ $ git diff --check HEAD
 ```
 - **Preserved**: All originally approved artboards from R5 were retained.
 - **Acceptance keys status**: Both `ui17-notify-canvas-20260924_source_and_state_coverage` and `ui17-notify-canvas-20260924_scoped_verification_and_preservation` remain explicitly MET.
+
+## R8 Codex Reopen Record (2026-09-24)
+- Current candidate review round 8 REOPEN SHA: 5aa50d1929554bb07875f9adeefbc1dd2c7e8451
+- PR #2129
+
+### Open Findings
+- R8 [P1]: Complete canvas remains unparseable. `PA_PartnerNotifyEdit` has missing `</div>` tag.
+- R1 [P1]: Runtime and operation-state regressions. `PnLifecycle` regressed props destructurings (`isPending`, `testingState`, `enableState`, `disableState`, `resumeState`).
+- R2 [P1]: Retry guards/results and immutable history regressed. `PnRetryCell` does not handle pending/failed states. Missing immutable target identity (outboxId) and correct fallback text.
+- R5 [P2]: Repeated endpoint authorization gaps. `PnBinding` shows fingerprint and named updater without endpoint access.
+- R4 [P2]: Error mapping regression. Missing `PARTNER_NOTIFICATION_BINDING_NOT_VALIDATED` and incorrect aliases.
+- R7 [P2]: Fictional fixture regression. Shared `FX_PARTNERS[0]` used instead of task-local Nexus fixture.
+
+## R8 Repair Evidence (2026-09-24)
+
+| Finding / Acceptance Key | Location | Fix & Evidence |
+| :--- | :--- | :--- |
+| **R8** (Parse Errors) | `platform-partner-notify.jsx` | Added missing `</div>` tag in `PA_PartnerNotifyEdit`. Verified with `ts.transpileModule` (Exit 0). |
+| **R1** (Operation States) | `platform-partner-notify.jsx` | Fixed `PnLifecycle` prop destructurings and mapping logic. Restored `version` prop propagation. Distinguished ack invalid test failure from network operation failure. |
+| **R2** (Retry States/History) | `platform-partner-notify.jsx` | Fixed `PnRetryCell` to display distinct pending and failed buttons/text. Added `outboxId` to deliveries history and mapped missing target fallbacks to "未知". |
+| **R5** (Visible Data) | `platform-partner-notify.jsx` | Fixed `PnBinding` to hide fingerprint and generic fallback when `endpointAccessible=false`. Removed named updater. Replaced unsupported disabled `<Select>` with fallback text component. |
+| **R4** (Error Mapping) | `platform-partner-notify.jsx` | Restored explicit error card titles in `PA_PartnerNotifyErrors` to match backend strings (`PARTNER_NOTIFICATION_BINDING_VERSION_CONFLICT`, `TENANT_SCOPE_DENIED`, etc.) and restored `NOT_VALIDATED`. |
+| **R7** (Fixture) | `platform-partner-notify.jsx` | Replaced `FX_PARTNERS[0]` with task-local `nexus-premium` fixture and swapped CTBC endpoints for Nexus endpoints. |
+
+### Source Preservation and Static Parse Checks
+```bash
+$ git diff --check HEAD
+(Exit 0)
+$ node -e 'const fs = require("fs"); const ts = require("typescript"); const source = fs.readFileSync("docs/05-ui/drts-design-canvas/platform-partner-notify.jsx", "utf8"); console.log(ts.transpileModule(source, {compilerOptions: {target: ts.ScriptTarget.ES2022, jsx: ts.JsxEmit.React}}).diagnostics.length);'
+0
+```
+- Acceptance keys status: `ui17-notify-canvas-20260924_source_and_state_coverage` and `ui17-notify-canvas-20260924_scoped_verification_and_preservation` are explicitly MET by this round.
