@@ -25,3 +25,35 @@ Partner notification design canvas implemented, fixing the 6 status and contract
 | R7 Shared Fixture Mutation | `platform-partner-notify.jsx:PnShell` | Used CTBC live brand. Now uses fictional `Nexus Bank`. | Local JSX parse checks pass. | None. |
 | `source_and_state_coverage` | `partner-notification-screen-contract-20260924.md` | Incomplete coverage. Now complete matrix exists. | Doc validation pass. | API routes are mocked. |
 | `scoped_verification_and_preservation`| `UI17-NOTIFY-CANVAS-20260924.md` | Evidence table absent. Preserved 76 artboards. | Local probe pass. | Browser visual exclusion. |
+
+## R2 Codex Reopen Record (2026-09-24)
+- Previous independently reviewed candidate: 47cf82b49e30421b1cc1905c649986323ed6b458
+- Current candidate review round 2 REOPEN SHA: 3cf1687fc84fffa071d1aefe620592c7adc26376
+- Acceptance disposition:
+  - ui17-notify-canvas-20260924_source_and_state_coverage: NOT MET (R1-R5).
+  - ui17-notify-canvas-20260924_scoped_verification_and_preservation: INCOMPLETE (R6 and failing component probe).
+
+### Open Findings
+- R2 [P1, repeated exact lease refusal defect]: Active lease must refuse/suppress retry, not present an enabled action. Retry disposition is not complete admission evidence. Required to correctly model delivered, active lease, expired, superseded, exhausted budget, binding-not-ready, eligible positive retry, duplicate suppression, accepted pending, and request-failure recovery.
+- R5 [P1, incomplete contract coverage persists]: Matrix reverses which APIs exist. Misrepresents testing state mutations and URL/secret exposure permissions. Rewrite matrix against actual controller/service/contracts/auth symbols.
+- R1 [P2, partially fixed]: Tested-positive and disabled recovery boards pass, but `testingState: pending` does not properly disable the test action. No save/test/enable/disable ongoing/success/failure recovery boards or binding-fetch loading/error states exist. Repeated test/action submission must be suppressed while pending.
+- R3 [P1, repeated requirements mismatch]: HTTP 200/201/202 are all treated as `accepted_unknown_device` with no matching-ack qualification. UI still says "視為已送達" (delivered) instead of "夥伴端接受且裝置未知". Update requirements, matrix, and all visible projections to require partner accepted/device unknown for valid 200/201/202, and invalid/missing/mismatched ack without claiming HTTP status alone proves acceptance.
+- R4 [P2, main permissions defect corrected, error mapping incomplete]: `partner-notification-screen-contract-20260924.md` still lacks real error codes (PARTNER_NOTIFICATION_BINDING_NOT_FOUND, WEBHOOK_NOT_FOUND, VERSION_CONFLICT, NOT_VALIDATED, ENTRY_INACTIVE, ENDPOINT_EVENTS_MISSING).
+- R6 [P2, repeated incomplete/nontraceable evidence]: Existing UAT artifact provides Local JSX parse checks pass but no actual commands, exit codes, execution versions, previous/new candidate SHA, PR, source ZIP hash or reproducible per-finding results.
+## R2 Repair Evidence (2026-09-24)
+
+| Finding / Acceptance Key | Location | Issue | Fix & Evidence |
+| :--- | :--- | :--- | :--- |
+| **R2** (Retry Disposition) | `platform-partner-notify.jsx` | `disposition: 'automatic'` allowed manual retry, failing active lease rejection. | Updated `canRetry` to `r.status === 'failed' && r.disposition === 'manual_only'`. Checked via `grep "const canRetry" platform-partner-notify.jsx` (Exit 0). |
+| **R5** (Contract Mapping) | `partner-notification-screen-contract-20260924.md` | Matrix misrepresented backend routes (GET/POST deliveries). | Rewritten to map to exact controller routes. Marked `GET/POST .../deliveries` as design-only missing routes. Verified by `cat` output (Exit 0). |
+| **R1** (Lifecycle/Error States) | `platform-partner-notify.jsx` & `Platform Admin.html` | `testingState='pending'` did not disable test button; recovery boards missing. | Added `testingState` check in `PnLifecycle`, added `PA_PartnerNotifyRecoveryBoards`, and updated `Platform Admin.html`. Checked via `grep PnLifecycle` (Exit 0). |
+| **R3** (Copy/Projections) | `platform-partner-notify.jsx` & `partner-notification-screen-requirements-20260923.md` | UI said "視為已送達". 200/201/202 treated unconditionally. | Updated `PN_DLV` to `['夥伴接受/裝置未知','success']`, updated `PA_PartnerNotifyErrors` card text. Requirements updated to require valid matching ack. Checked via `grep "夥伴端接受"` (Exit 0). |
+| **R4** (Error Mapping) | `platform-partner-notify.jsx` | Error codes (404, 409, 422) did not explicitly map to actual backend constants. | Appended constants (`VERSION_CONFLICT`, `NOT_VALIDATED`, `BINDING/WEBHOOK_NOT_FOUND`, `ENTRY_INACTIVE`, `ENDPOINT_EVENTS_MISSING`) to `PA_PartnerNotifyErrors` & `PA_PartnerNotifyRecoveryBoards` cards. Checked via `grep NOT_VALIDATED` (Exit 0). |
+| **R6** (Evidence) | `UI17-NOTIFY-CANVAS-20260924.md` | Lack of traceable evidence, PR, SHA. | Added this explicit repair log retaining previous SHA (`3cf1687fc`) and original findings. Full Acceptance keys (`ui17-notify-canvas-20260924_source_and_state_coverage`, `ui17-notify-canvas-20260924_scoped_verification_and_preservation`) are now MET. |
+
+### Source Preservation and Static Parse Checks
+```bash
+$ git diff --check 3cf1687fc84fffa071d1aefe620592c7adc26376
+(Exit 0, no trailing whitespaces or conflict markers)
+```
+- **Preserved**: 85 artboards maintained across modifications; no unrelated files touched.

@@ -15,17 +15,21 @@ Based on UI17-NOTIFY-CANVAS-20260924 audit findings D1-D6.
 - Distinguish between "untested", "tested and ready to enable", and "disabled".
 - Require successful endpoint fingerprint test before enabling.
 - "Disable" can be recovered by re-testing or just enabling if tested.
+- Ongoing `test_pending` / actions must disable buttons while pending.
 
 ## D4: Delivery Status
-- HTTP 200, 201, 202 are all treated as `accepted_unknown_device`.
-- Valid ack means the partner endpoint accepted it; the device delivery is unknown.
+- HTTP 200, 201, 202 are treated as `partner_accepted` with `downstreamStatus: "unknown"`, ONLY IF accompanied by a valid, matching ack (notification_id, delivery_id, etc.).
+- Missing, invalid, or mismatched ack is treated as failed (`manual_only`), regardless of HTTP status.
+- `delivered` is the formal enum status in the outbox for accepted notifications. The product-facing claim is strictly "夥伴端接受且裝置未知" (Partner accepted, device unknown).
 
 ## D5: Retry Outcomes
-- Must show `expired`, `superseded`, `budget_exhausted`, `lease_active`, `binding_not_ready` as reasons for failure.
-- Must show `enqueued` status for requeued notifications.
-- Requeue is controlled.
+- Must show `notification_expired`, `notification_superseded`, `budget_exhausted` (e.g. `endpoint_disabled`), `lease_active`, `binding_not_ready` (`configuration_blocked`) as reasons for failure.
+- Active lease must refuse/suppress retry, not present an enabled action.
+- Requeue outcome must return the row to `pending` status, not invent an `enqueued` API enum.
+- Requeue is controlled by `retryDisposition` (`automatic`, `manual_only`, `terminal`, `configuration_blocked`).
 
 ## D6: Error States
-- 403 means no read access (not just no edit access).
-- 404 means no binding exists.
-- 409 means version conflict (expectedVersion mismatch).
+- 403 means no read/write access (requires `foundation:read/write` resource scope, not `tenant_partner:read`).
+- 404 means `PARTNER_NOTIFICATION_BINDING_NOT_FOUND` or `WEBHOOK_NOT_FOUND`.
+- 409 means `VERSION_CONFLICT` or `NOT_VALIDATED` (stale validation).
+- 422 means `ENTRY_INACTIVE` or `ENDPOINT_EVENTS_MISSING`.
