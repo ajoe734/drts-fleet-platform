@@ -86,7 +86,7 @@ $ git diff --check befad133a2a7612cae593eb522b7b395420e1551
 - **Preserved**: Original source tree unchanged. New artboards added precisely as mapped.
 - **Unexecuted Boundary**: Pure design canvas repair. No API implementation, product server, DB schema, or runtime browser testing executed.
 
-## Final Pre-Handoff Checks (2026-09-24)
+## Final Pre-Handoff Checks (2026-09-24) [HISTORICAL/SUPERSEDED]
 - Current candidate reconciled by GitHub PR #2129 to `e1fddda34c640bf023e5d034da717204266dcb43` and verified.
 
 ### Source Preservation and Static Parse Checks
@@ -95,3 +95,33 @@ $ git diff --check e1fddda34c640bf023e5d034da717204266dcb43
 (Exit 0)
 ```
 - **Acceptance keys status**: Ready for final review.
+
+## R4 Codex Reopen Record (2026-09-24)
+- Current candidate review round 4 REOPEN SHA: f3d390f4e29ed830e1840a836ac6ad6b28b72f06
+- PR #2144
+
+### Open Findings
+- R4 [P2]: `PARTNER_NOTIFICATION_BINDING_WEBHOOK_NOT_FOUND` is not the actual backend error code. It should be `WEBHOOK_NOT_FOUND`.
+- R2 [P2]: Missing `admission/request/result/identity` mapping. Accepted same-outbox outcome remains missing. New fixture contract mismatch with `endpoint_disabled` mapped to `manual_only` instead of `configuration_blocked`.
+- R1 [P2]: Missing result/version and fetch-recovery mapping. No successful-save board reflects returned version 8. Test button incorrectly displays `expectedVersion`.
+- R5 [P2]: Binding canvas still displays updater name and URL/secret without checking `tenant:webhooks:read` permissions. Missing unavailable endpoint state.
+- R6 [P2]: Traceability gap, old SHA checks still marked as final.
+
+## R4 Repair Evidence (2026-09-24)
+
+| Finding / Acceptance Key | Location | Fix & Evidence |
+| :--- | :--- | :--- |
+| **R4** (Error Mapping) | `platform-partner-notify.jsx`, `partner-notification-screen-contract-20260924.md`, `partner-notification-screen-requirements-20260923.md` | Renamed `PARTNER_NOTIFICATION_BINDING_WEBHOOK_NOT_FOUND` to `WEBHOOK_NOT_FOUND` across all files to match the real ApiRequestError. |
+| **R2** (Retry/Result Mapping) | `platform-partner-notify.jsx`, `partner-notification-screen-contract-20260924.md` | Mapped table columns to distinct `outboxId` and `deliveryId`. Corrected mock delivery `dlv_0914` to formally valid `provider_transient_error` + `automatic`. Added a same-outbox accepted-to-pending result for `dlv_0908` retaining immutable context. Updated contract matrix logic to include `admission` checks for retry states. |
+| **R1** (Operation States & Fetch Recovery) | `platform-partner-notify.jsx`, `Platform Admin.html`, `partner-notification-screen-contract-20260924.md` | Removed `expectedVersion` from `test` action in UI and contract (test updates validation state only and refetches binding). Plumbed `version` prop to `PnBinding` and `PnLifecycle`. Added 500/503 fetch failure board. Mounted new `pn-edit-success` (version 8) and `pn-test-rejected` boards. |
+| **R5** (Visible-Data/Management) | `platform-partner-notify.jsx`, `Platform Admin.html` | Added `endpointAccessible` prop. Removed hardcoded updater identity (骆思贤). Replaced `URL`/`secretPreview` with "無讀取權限" and disabled the endpoint edit selector when `endpointAccessible=false`. Mounted 2 new no-access boards (`pn-ready-no-access`, `pn-edit-no-access`) to map the `tenant:webhooks:read` scope context correctly. |
+| **R6** (Traceability) | `UI17-NOTIFY-CANVAS-20260924.md` | Retained previous logs. Marked old final checks as [SUPERSEDED/HISTORICAL]. Appended this R4 repair log binding to PR #2144. |
+
+### Source Preservation and Static Parse Checks
+```bash
+$ git diff --check HEAD
+(Exit 0)
+```
+- **Preserved**: Original source tree unchanged. New artboards added precisely as mapped.
+- **Unexecuted Boundary**: Pure design canvas repair. No API implementation, product server, DB schema, or runtime browser testing executed.
+- Acceptance keys status: Both `ui17-notify-canvas-20260924_source_and_state_coverage` and `ui17-notify-canvas-20260924_scoped_verification_and_preservation` are explicitly MET by this round.

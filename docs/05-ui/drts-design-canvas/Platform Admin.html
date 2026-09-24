@@ -174,10 +174,14 @@ function App() {
           <DCArtboard id="pn-empty" label="D2 · 派送紀錄空清單" width={W} height={H}><Bare><PA_PartnerNotify theme={th} deliveries="empty" /></Bare></DCArtboard>
           <DCArtboard id="pn-retry-pending" label="D2 · 派送紀錄單筆重送中" width={W} height={H}><Bare><PA_PartnerNotify theme={th} retryState="pending" retryRowId="dlv_0908" /></Bare></DCArtboard>
           <DCArtboard id="pn-retry-failed" label="D2 · 派送紀錄單筆重送失敗" width={W} height={H}><Bare><PA_PartnerNotify theme={th} retryState="failed" retryRowId="dlv_0908" /></Bare></DCArtboard>
+          <DCArtboard id="pn-ready-no-access" label="D1 · 綁定就緒 (無 tenant:webhooks:read 權限)" width={W} height={H}><Bare><PA_PartnerNotify theme={th} endpointAccessible={false} /></Bare></DCArtboard>
           <DCArtboard id="pn-edit" label="D3 · 編輯回呼綁定與事件類型" width={W} height={H}><Bare><PA_PartnerNotifyEdit theme={th} /></Bare></DCArtboard>
+          <DCArtboard id="pn-edit-no-access" label="D3 · 編輯回呼綁定 (無 tenant:webhooks:read 權限)" width={W} height={H}><Bare><PA_PartnerNotifyEdit theme={th} endpointAccessible={false} /></Bare></DCArtboard>
           <DCArtboard id="pn-edit-pending" label="D3 · 編輯儲存中" width={W} height={H}><Bare><PA_PartnerNotifyEdit theme={th} saveState="pending" /></Bare></DCArtboard>
           <DCArtboard id="pn-edit-failed" label="D3 · 編輯儲存失敗" width={W} height={H}><Bare><PA_PartnerNotifyEdit theme={th} saveState="failed" /></Bare></DCArtboard>
-          <DCArtboard id="pn-test-failed" label="D1 · 綁定測試失敗" width={W} height={H}><Bare><PA_PartnerNotify theme={th} bind="test_pending" validated={false} fingerprintMatch={false} testingState="failed" /></Bare></DCArtboard>
+          <DCArtboard id="pn-edit-success" label="D3 · 編輯儲存成功 (返回綁定頁，version: 8，尚未測試)" width={W} height={H}><Bare><PA_PartnerNotify theme={th} bind="test_pending" version={8} validated={false} fingerprintMatch={false} /></Bare></DCArtboard>
+          <DCArtboard id="pn-test-failed" label="D1 · 綁定測試失敗 (網路異常)" width={W} height={H}><Bare><PA_PartnerNotify theme={th} bind="test_pending" validated={false} fingerprintMatch={false} testingState="failed" /></Bare></DCArtboard>
+          <DCArtboard id="pn-test-rejected" label="D1 · 綁定測試遭拒 (夥伴端回傳失敗)" width={W} height={H}><Bare><PA_PartnerNotify theme={th} bind="test_pending" validated={false} fingerprintMatch={false} testingState="rejected" /></Bare></DCArtboard>
           <DCArtboard id="pn-enable-pending" label="D1 · 綁定啟用中" width={W} height={H}><Bare><PA_PartnerNotify theme={th} bind="test_pending" validated={true} fingerprintMatch={true} enableState="pending" /></Bare></DCArtboard>
           <DCArtboard id="pn-enable-failed" label="D1 · 綁定啟用失敗" width={W} height={H}><Bare><PA_PartnerNotify theme={th} bind="test_pending" validated={true} fingerprintMatch={true} enableState="failed" /></Bare></DCArtboard>
           <DCArtboard id="pn-disable-pending" label="D1 · 綁定停用中" width={W} height={H}><Bare><PA_PartnerNotify theme={th} bind="ready" disableState="pending" /></Bare></DCArtboard>
