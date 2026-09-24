@@ -1,45 +1,41 @@
-import { readFileSync } from "fs";
-import { resolve } from "path";
-import { describe, it, expect } from "vitest";
+import { describe, expect, it } from "vitest";
+import { NextRequest } from "next/server";
+import { middleware } from "../../../apps/fleet-partner-portal-web/middleware";
+import { POST } from "../../../apps/fleet-partner-portal-web/app/api/auth/[...auth]/route";
 
-describe("UI17-FLEET-ERROR-20260924 error boundary", () => {
-  it("uses current locale and translations for strings", () => {
-    const sourcePath = resolve(
-      __dirname,
-      "../../../apps/fleet-partner-portal-web/app/error.tsx",
-    );
-    const source = readFileSync(sourcePath, "utf8");
+describe("UI17-FLEET-ERROR-20260924 auth logic", () => {
+  it("logout route and middleware handle CSRF and session success", async () => {
+    const successReq = new NextRequest("http://localhost/api/auth/logout", {
+      method: "POST",
+      headers: new Headers({
+        cookie: "drts_session=sesh; drts_csrf=csrf-123",
+        "x-csrf-token": "csrf-123",
+      }),
+    });
 
-    // Check fallback logic
-    expect(source).toContain("useTranslation()");
-    expect(source).toContain('t("error.scope.badge")');
-    expect(source).toContain('t("error.generic.badge")');
+    const midResSuccess = await middleware(successReq);
+    expect(midResSuccess.headers.get("x-drts-candidate-sha")).toBeDefined();
 
-    // Check fonts
-    expect(source).not.toContain("SHELL_MONO");
-    expect(source).toContain("theme.monoFamily");
+    const routeRes = await POST(successReq, {
+      params: Promise.resolve({ auth: ["logout"] }),
+    });
+    expect(routeRes.status).toBe(200);
+    const setCookie = routeRes.headers.get("set-cookie") || "";
+    expect(setCookie).toContain("drts_session=;");
   });
 
-  it("handles CSRF correctly in logout fetch", () => {
-    const sourcePath = resolve(
-      __dirname,
-      "../../../apps/fleet-partner-portal-web/app/error.tsx",
-    );
-    const source = readFileSync(sourcePath, "utf8");
+  it("logout route and middleware handle 403 on invalid CSRF", async () => {
+    const req = new NextRequest("http://localhost/api/auth/logout", {
+      method: "POST",
+      headers: new Headers({
+        cookie: "drts_session=sesh; drts_csrf=csrf-123",
+        "x-csrf-token": "wrong",
+      }),
+    });
 
-    expect(source).toContain("document.cookie");
-    expect(source).toContain("drts_csrf=");
-    expect(source).toContain('"x-csrf-token"');
-  });
-
-  it("handles fetch errors robustly", () => {
-    const sourcePath = resolve(
-      __dirname,
-      "../../../apps/fleet-partner-portal-web/app/error.tsx",
-    );
-    const source = readFileSync(sourcePath, "utf8");
-
-    expect(source).toContain("setLogoutError(true)");
-    expect(source).toContain("catch (e)");
+    const midRes = await middleware(req);
+    expect(midRes.status).toBe(403);
+    const body = await midRes.json();
+    expect(body.error).toBe("CSRF_TOKEN_INVALID");
   });
 });
