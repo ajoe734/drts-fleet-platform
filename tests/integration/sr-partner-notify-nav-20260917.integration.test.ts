@@ -781,13 +781,28 @@ describe.skipIf(!seedDatabaseUrl)(
 
       const client = await db.connect();
       let rowCountAfterGrant: number;
+      let ledgerRecordAfterGrant: unknown;
+      let handoffConsentAfterGrant: {
+        consent_bundle_version: string | null;
+        consent_granted_at: string | null;
+        record: unknown;
+      };
       try {
         const res = await client.query(
-          "SELECT COUNT(*)::int AS count FROM admin.phase1_referral_embed_consent_ledger WHERE handoff_id = $1",
+          "SELECT COUNT(*)::int AS count, (array_agg(record))[1] AS record FROM admin.phase1_referral_embed_consent_ledger WHERE handoff_id = $1",
           [handoff.handoffId],
         );
         rowCountAfterGrant = res.rows[0].count;
+        ledgerRecordAfterGrant = res.rows[0].record;
         expect(rowCountAfterGrant).toBe(1);
+        expect(ledgerRecordAfterGrant).toBeTruthy();
+
+        const handoffRes = await client.query(
+          "SELECT consent_bundle_version, consent_granted_at, record FROM admin.phase1_referral_embed_handoffs WHERE handoff_id = $1",
+          [handoff.handoffId],
+        );
+        handoffConsentAfterGrant = handoffRes.rows[0];
+        expect(handoffConsentAfterGrant.consent_bundle_version).toBe("v1");
       } finally {
         client.release();
       }
@@ -802,20 +817,33 @@ describe.skipIf(!seedDatabaseUrl)(
           currentDrtsPassengerId: "pass-pg-revoked",
           currentPartnerEntrySlug: entrySlug,
           consentBundle: {
-            bundleVersion: "v1",
+            bundleVersion: "v2-replay-attempt",
             grantedScopes: ["trip.manage", "pii.trip", "identity.bind"],
             grantedAt: new Date().toISOString(),
           },
         }),
       ).rejects.toMatchObject({ code: "REFERRAL_HANDOFF_REVOKED" });
 
+      // Not just "row count unchanged": confirm the *existing* ledger row and
+      // the handoffs row's consent snapshot are byte-identical to what they
+      // were right after the original grant, i.e. the rejected replay (which
+      // used a different bundleVersion, so it cannot be conflated with an
+      // idempotent same-bundle replay) neither inserted a new row nor
+      // mutated the existing one via some other code path.
       const clientAfter = await db.connect();
       try {
         const res = await clientAfter.query(
-          "SELECT COUNT(*)::int AS count FROM admin.phase1_referral_embed_consent_ledger WHERE handoff_id = $1",
+          "SELECT COUNT(*)::int AS count, (array_agg(record))[1] AS record FROM admin.phase1_referral_embed_consent_ledger WHERE handoff_id = $1",
           [handoff.handoffId],
         );
         expect(res.rows[0].count).toBe(rowCountAfterGrant);
+        expect(res.rows[0].record).toEqual(ledgerRecordAfterGrant);
+
+        const handoffRes = await clientAfter.query(
+          "SELECT consent_bundle_version, consent_granted_at, record FROM admin.phase1_referral_embed_handoffs WHERE handoff_id = $1",
+          [handoff.handoffId],
+        );
+        expect(handoffRes.rows[0]).toEqual(handoffConsentAfterGrant);
       } finally {
         clientAfter.release();
       }
@@ -887,13 +915,28 @@ describe.skipIf(!seedDatabaseUrl)(
 
       const client = await db.connect();
       let rowCountAfterGrant: number;
+      let ledgerRecordAfterGrant: unknown;
+      let handoffConsentAfterGrant: {
+        consent_bundle_version: string | null;
+        consent_granted_at: string | null;
+        record: unknown;
+      };
       try {
         const res = await client.query(
-          "SELECT COUNT(*)::int AS count FROM admin.phase1_referral_embed_consent_ledger WHERE handoff_id = $1",
+          "SELECT COUNT(*)::int AS count, (array_agg(record))[1] AS record FROM admin.phase1_referral_embed_consent_ledger WHERE handoff_id = $1",
           [handoff.handoffId],
         );
         rowCountAfterGrant = res.rows[0].count;
+        ledgerRecordAfterGrant = res.rows[0].record;
         expect(rowCountAfterGrant).toBe(1);
+        expect(ledgerRecordAfterGrant).toBeTruthy();
+
+        const handoffRes = await client.query(
+          "SELECT consent_bundle_version, consent_granted_at, record FROM admin.phase1_referral_embed_handoffs WHERE handoff_id = $1",
+          [handoff.handoffId],
+        );
+        handoffConsentAfterGrant = handoffRes.rows[0];
+        expect(handoffConsentAfterGrant.consent_bundle_version).toBe("v1");
       } finally {
         client.release();
       }
@@ -917,20 +960,32 @@ describe.skipIf(!seedDatabaseUrl)(
           currentDrtsPassengerId: "pass-pg-owner-changed",
           currentPartnerEntrySlug: entrySlug,
           consentBundle: {
-            bundleVersion: "v1",
+            bundleVersion: "v2-replay-attempt",
             grantedScopes: ["trip.manage", "pii.trip", "identity.bind"],
             grantedAt: new Date().toISOString(),
           },
         }),
       ).rejects.toMatchObject({ code: "OWNERSHIP_MISMATCH" });
 
+      // Not just "row count unchanged": confirm the existing ledger row and
+      // the handoffs row's consent snapshot are byte-identical to right
+      // after the original grant, so the rejected reassigned-tenant replay
+      // (a different bundleVersion, so not an idempotent same-bundle replay)
+      // neither inserted a row nor mutated the existing one.
       const clientAfter = await db.connect();
       try {
         const res = await clientAfter.query(
-          "SELECT COUNT(*)::int AS count FROM admin.phase1_referral_embed_consent_ledger WHERE handoff_id = $1",
+          "SELECT COUNT(*)::int AS count, (array_agg(record))[1] AS record FROM admin.phase1_referral_embed_consent_ledger WHERE handoff_id = $1",
           [handoff.handoffId],
         );
         expect(res.rows[0].count).toBe(rowCountAfterGrant);
+        expect(res.rows[0].record).toEqual(ledgerRecordAfterGrant);
+
+        const handoffRes = await clientAfter.query(
+          "SELECT consent_bundle_version, consent_granted_at, record FROM admin.phase1_referral_embed_handoffs WHERE handoff_id = $1",
+          [handoff.handoffId],
+        );
+        expect(handoffRes.rows[0]).toEqual(handoffConsentAfterGrant);
       } finally {
         clientAfter.release();
       }

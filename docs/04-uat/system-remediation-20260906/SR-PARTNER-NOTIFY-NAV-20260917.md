@@ -434,10 +434,22 @@ run; hosted CI on this round's pushed SHA is the acceptance evidence, once avail
   Postgres, not a mock), plus `✓ consent-replay-guards.test.ts (3 tests)`,
   `✓ partner-notification-navigation.test.ts (5 tests)`,
   `✓ embed-session-route.test.ts (4 tests)`, `✓ embed-partner-session.test.ts (1 test)` — all
-  passing. This is real hosted-Postgres confirmation of the finding-1 regression matrix (PG
-  consume-before-check rollback, revoked-link/owner-changed consent rejection, 8-hour expiry,
-  session-mismatch zero-write), not merely a static/syntax check as the paragraph above (written
-  before this log was read) understated.
+  passing.
+  **Correction (2026-09-24, per Codex reopen `codex-20260924T001719Z-eefae1fc`)**: only the first
+  file — `sr-partner-notify-nav-20260917.integration.test.ts`'s 10 tests — actually runs against
+  real hosted Postgres; it is the sole source of PG-backed confirmation for the finding-1 matrix's
+  **PG consume-before-check rollback** and **8-hour expiry / session-mismatch zero-write** cases.
+  `consent-replay-guards.test.ts`, `embed-session-route.test.ts`, and `embed-partner-session.test.ts`
+  are unit-level tests against `TenantPartnerService` wired to the **fallback in-memory
+  `ReferralEmbedHandoffRepository`** (no `DatabaseService`, see `consent-replay-guards.test.ts`'s
+  own setup), so their **revoked-link / owner-changed consent rejection** coverage is real and
+  passing but is fallback/in-memory coverage, not "hosted-Postgres confirmation" as this paragraph
+  previously (incorrectly) stated by lumping all five files' results under one PG claim. The
+  Postgres-backed revoked-link and owner-changed rejection cases are the two dedicated
+  `it("rejects a real-Postgres grant-consent replay once...")` tests added in a later round (see
+  "Round `052c06f66` → this candidate" below), which additionally assert the existing ledger row
+  and handoffs-table consent snapshot are byte-identical after the rejection, not just that the row
+  count is unchanged.
 - Hosted CI on this round's pushed SHA `9b0e5d824ff05c7d2b983e809ee01351221bd38e` (PR #2100), run
   [35934074338](https://github.com/ajoe734/drts-fleet-platform/actions/runs/35934074338): `unit`,
   `integration`, `typecheck`, `lint`, `build`, `i18n-guard`, `iam-negative-matrix`, `ui-route-e2e`,
@@ -696,3 +708,64 @@ Unchanged from the `034671c53` round above — this round is a CI-infra bug fix 
 naming and a TS strictness violation in a test helper), not a change to product authorization
 logic, route handlers, or repository code. No file under `apps/api/src/**` or
 `apps/referral-embed-web/**` changed in this round.
+
+## Round `44281017` → this candidate — finding-3 regression-matrix gaps (owner Claude, 2026-09-24)
+
+### Context
+
+Codex reopened against `REVIEWED_SHA=052c06f6625521b9f87333adffd14c016d210f6a`
+(`candidate_generation=17ff581421da46bd93036d99fc246f43`, PR #2100) with 3 findings; findings #1
+(`decodeCookie` TS2769) and #2 (`auditNotificationService` mock missing `recordAuditLog`) were
+already fixed and pushed as `44281017` before this round started (see the prior "Waiting on this
+SHA's hosted CI" progress note). This round addresses finding #3, the carried-forward regression-
+matrix gap Codex identified as still partial on `052c06f66`:
+
+| Gap (from `codex-20260924T005217Z-265733be`) | Fix this round |
+| --- | --- |
+| No `action: "exchange"` production-path case anywhere in the suite — only `grant-consent` was covered by the new BFF suite, and `embed-session-route.test.ts`'s two exchange cases fully mock `embed-api`/session-reader. | Added a new `describe("POST /api/referral/session (exchange, JSON and form)")` block to `notification-navigation-production-path.test.ts` with 3 cases against the real service+repository+cookie stack: JSON exchange rejected cross-entry (same passenger, different entry), form exchange rejected cross-subject (same entry, different passenger), and a JSON exchange for a nonexistent artifact rejected without clearing the existing session, followed by a legitimate exchange for a different handoff still succeeding. All three assert the existing cookie is left byte-identical on rejection and that the rejected handoff remains consumable by its rightful caller. |
+| The GET cross-entry case changed *both* `entrySlug` and `drtsPassengerId` between the two handoffs, so it could not isolate the entry-mismatch branch of the `currentPartnerEntrySlug` guard from the separate cross-subject case. | Rewrote the case to hold `drtsPassengerId` fixed at `"pass-1"` for both the entry-B bootstrap and the entry-A attempt, so only `entrySlug` differs; added an explicit assertion (`decodeCookie()?.drtsPassengerId === "pass-1"`) that the isolation is real. |
+| PG revoked-link / owner-changed replay tests only compared `COUNT(*)` on the consent ledger before/after rejection, which cannot distinguish "no write happened" from "the existing row's content was silently mutated by some other path". | Both tests now snapshot the full ledger row (`record` column) and the handoffs row's `consent_bundle_version`/`consent_granted_at`/`record` columns immediately after the original grant, then assert `toEqual` (not just count) after the rejected replay. Also changed the rejected replay's `bundleVersion` from the original grant's `"v1"` to `"v2-replay-attempt"`, so the assertion cannot be satisfied by an idempotent same-bundle replay silently succeeding instead of genuinely being rejected. |
+| UAT (lines ~422-440, `9b0e5d824` round) attributed `consent-replay-guards.test.ts`'s revoked-link/owner-changed coverage — which runs against the **fallback in-memory** repository, not Postgres — to "real hosted-Postgres confirmation" by lumping it in with the PG integration file's results. | Corrected that paragraph above to separate the one PG-backed file (`sr-partner-notify-nav-20260917.integration.test.ts`) from the four fallback/unit-level files, and to point at this round's two dedicated PG revoked-link/owner-changed tests as the actual PG-backed source for that specific coverage. |
+
+### Verification this round
+
+- Syntax/type-level check via `ts.transpileModule` (TypeScript 5.9.3, resolved from a sibling
+  worktree's pnpm store — this worktree's own `node_modules` is not fully hoisted, per every prior
+  round's documented VM limitation) on both edited test files: 0 diagnostics on each. This is a
+  per-file syntactic/transpile check, not a full-project `tsc --noEmit` (which needs the whole
+  dependency graph and is what caught finding #1's TS2769 in the prior round) — it does not by
+  itself prove there is no project-level type error, but it does rule out a syntax mistake, and the
+  new code avoids the specific pattern (destructuring array elements under
+  `noUncheckedIndexedAccess` without a definedness guard) that caused finding #1.
+- Not executed locally: `vitest`, full `tsc -p tsconfig.json --noEmit`, and the PG integration
+  suite (needs a live Postgres). This VM's `node_modules` remains missing top-level hoisted
+  symlinks for this worktree (unchanged from every prior round); `pnpm install` was not run, to
+  avoid mutating the shared canonical-root install other locked worktrees depend on. Hosted CI on
+  this round's pushed `CANDIDATE_SHA` is the acceptance evidence for: the 3 new BFF exchange cases,
+  the rewritten GET cross-entry isolation case, and the 2 rewritten PG snapshot-comparison cases.
+- Manually re-read `session/route.ts:141-212` (`action: "exchange"` falls through to the same
+  `consumeReferralEmbedHandoffArtifact` call as `GET`, forwarding `current*` from the existing
+  session and returning `400` via the shared catch block on any rejection) and
+  `referral-embed-handoff.repository.ts:283-413` (`recordConsent`'s PG path `COMMIT`s and returns
+  early on every rejection branch — `missing`/`not_consumed`/`expired`/`wrong_host`/
+  `session_mismatch` — strictly before the `INSERT`/`UPDATE` at lines 341-404, and `validateFn`
+  rejections `ROLLBACK` before reaching them too) to confirm the new snapshot-equality assertions
+  are testing a real "reject-then-no-write" invariant already enforced by the production control
+  flow, not asserting something the code doesn't actually guarantee.
+
+### Production Requirements Checked (updated, this round)
+
+- [ ] entry_scoped_navigation_denies_cross_subject_tenant_entry — GET cross-entry case now isolates
+      entry-only mismatch (same passenger); POST exchange cross-entry/cross-subject cases added;
+      pending hosted CI on this round's SHA
+- [ ] fresh_single_use_handoff_and_http_only_session_reuse — POST exchange production-path
+      regression added (JSON+form, cross-entry/cross-subject/invalid-then-valid); PG revoked-link/
+      owner-changed rejection tests now assert full ledger+handoff snapshot equality, not just row
+      count; pending hosted CI on this round's SHA
+- [ ] navigation_reads_current_trip_without_creating_orders — unchanged this round (no findings
+      against this criterion in the reopen); prior rounds' frozen-route authorization and
+      no-order-creation confirmation carries forward; browser/native/live still unverified
+
+Handing off to reviewer Codex once pushed, against the new `CANDIDATE_SHA`/`CANDIDATE_BRANCH`
+recorded in the task's `handoff` — do not reuse `052c06f6625521b9f87333adffd14c016d210f6a` or
+`44281017` as the reviewed SHA for this round's changes.

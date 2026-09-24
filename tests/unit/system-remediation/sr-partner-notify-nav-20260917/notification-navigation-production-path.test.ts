@@ -226,18 +226,23 @@ describe("SR-PARTNER-NOTIFY-NAV-20260917 BFF production-path regression", () => 
       void handoff;
     });
 
-    it("rejects a cross-entry consume when the caller's cookie belongs to a different partner entry, leaving that cookie and the new handoff untouched", async () => {
+    it("rejects a cross-entry consume when the caller's cookie belongs to a different partner entry, for the *same* passenger, leaving that cookie and the new handoff untouched", async () => {
       harness.service = buildService([ENTRY_A, ENTRY_B], {}, handoffRepo);
       await harness.service.onModuleInit();
 
-      // Establish a real, cookie-store-backed session for entry B first.
+      // Establish a real, cookie-store-backed session for entry B first,
+      // using the *same* drtsPassengerId ("pass-1", issueHandoff's default)
+      // that the entry-A handoff below will carry. Keeping the subject fixed
+      // and varying only entrySlug isolates the entry-mismatch branch of the
+      // repository's `currentPartnerEntrySlug` guard from the separate
+      // cross-subject case above/below, which instead holds entry fixed and
+      // varies drtsPassengerId.
       await issueHandoff(handoffRepo, {
         artifact: "art-entry-b",
         entrySlug: ENTRY_B.entrySlug,
         entryHost: ENTRY_B.entryHost,
         tenantId: ENTRY_B.tenantId,
         partnerId: ENTRY_B.partnerId,
-        drtsPassengerId: "pass-b",
       });
       const bootstrap = await GET(
         getRequest({ artifact: "art-entry-b", entrySlug: ENTRY_B.entrySlug }),
@@ -245,11 +250,13 @@ describe("SR-PARTNER-NOTIFY-NAV-20260917 BFF production-path regression", () => 
       expect(bootstrap.status).toBe(307);
       const cookieAfterB = cookieJar.get("drts_referral_embed_session");
       expect(cookieAfterB).toBeTruthy();
+      expect(decodeCookie()?.drtsPassengerId).toBe("pass-1");
 
-      // Now try to consume a fresh entry-A handoff while presenting entry B's
-      // cookie: the BFF forwards the cookie's partnerEntrySlug as
-      // currentPartnerEntrySlug, and the repository must reject the
-      // cross-entry mismatch instead of switching the caller into entry A.
+      // Now try to consume a fresh entry-A handoff (same passenger, "pass-1")
+      // while presenting entry B's cookie: the BFF forwards the cookie's
+      // partnerEntrySlug as currentPartnerEntrySlug, and the repository must
+      // reject the cross-entry mismatch instead of switching the caller into
+      // entry A, even though the subject identity is unchanged.
       await issueHandoff(handoffRepo, { artifact: "art-entry-a" });
       const res = await GET(
         getRequest({ artifact: "art-entry-a", entrySlug: ENTRY_A.entrySlug }),
@@ -336,6 +343,151 @@ describe("SR-PARTNER-NOTIFY-NAV-20260917 BFF production-path regression", () => 
       );
       expect(res.status).toBe(403);
       expect(cookieJar.has("drts_referral_embed_session")).toBe(false);
+    });
+  });
+
+  // The GET handler above and this POST `action: "exchange"` handler both
+  // resolve to the same consumeReferralEmbedHandoffArtifact() call with the
+  // same current*-forwarding guard, but they are two independently reachable
+  // entry points (a plain link vs. a JS/form-submitted request), so the
+  // cross-entry/cross-subject/invalid rejections need their own production-
+  // path coverage here rather than being assumed from the GET cases.
+  describe("POST /api/referral/session (exchange, JSON and form)", () => {
+    it("rejects a JSON exchange for a different partner entry when the caller's cookie belongs to the same passenger at another entry, leaving that cookie and the new handoff untouched", async () => {
+      harness.service = buildService([ENTRY_A, ENTRY_B], {}, handoffRepo);
+      await harness.service.onModuleInit();
+
+      await issueHandoff(handoffRepo, {
+        artifact: "art-post-exchange-entry-b",
+        entrySlug: ENTRY_B.entrySlug,
+        entryHost: ENTRY_B.entryHost,
+        tenantId: ENTRY_B.tenantId,
+        partnerId: ENTRY_B.partnerId,
+      });
+      const bootstrap = await GET(
+        getRequest({
+          artifact: "art-post-exchange-entry-b",
+          entrySlug: ENTRY_B.entrySlug,
+        }),
+      );
+      expect(bootstrap.status).toBe(307);
+      const cookieAfterB = cookieJar.get("drts_referral_embed_session");
+      expect(cookieAfterB).toBeTruthy();
+
+      await issueHandoff(handoffRepo, { artifact: "art-post-exchange-entry-a" });
+      const req = new Request("https://entry-a.example.com/api/referral/session", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          action: "exchange",
+          artifact: "art-post-exchange-entry-a",
+          entrySlug: ENTRY_A.entrySlug,
+          entryHost: ENTRY_A.entryHost,
+        }),
+      });
+      const res = await POST(req);
+      expect(res.status).toBe(400);
+      expect(cookieJar.get("drts_referral_embed_session")).toBe(cookieAfterB);
+
+      const rightfulConsume = await handoffRepo.consume({
+        artifact: "art-post-exchange-entry-a",
+        entrySlug: ENTRY_A.entrySlug,
+        entryHost: ENTRY_A.entryHost,
+      });
+      expect(rightfulConsume.outcome).toBe("consumed");
+    });
+
+    it("rejects a form exchange for a different passenger when the caller's cookie belongs to another subject at the same entry, leaving that cookie and the new handoff untouched", async () => {
+      harness.service = buildService([ENTRY_A], {}, handoffRepo);
+      await harness.service.onModuleInit();
+
+      await issueHandoff(handoffRepo, {
+        artifact: "art-post-exchange-subject-2",
+        drtsPassengerId: "pass-2",
+      });
+      const bootstrap = await GET(
+        getRequest({
+          artifact: "art-post-exchange-subject-2",
+          entrySlug: ENTRY_A.entrySlug,
+        }),
+      );
+      expect(bootstrap.status).toBe(307);
+      const cookieForPass2 = cookieJar.get("drts_referral_embed_session");
+      expect(cookieForPass2).toBeTruthy();
+
+      await issueHandoff(handoffRepo, {
+        artifact: "art-post-exchange-subject-1",
+        drtsPassengerId: "pass-1",
+      });
+      const formData = new FormData();
+      formData.append("artifact", "art-post-exchange-subject-1");
+      formData.append("entrySlug", ENTRY_A.entrySlug);
+      formData.append("entryHost", ENTRY_A.entryHost);
+      const req = new Request("https://entry-a.example.com/api/referral/session", {
+        method: "POST",
+        body: formData,
+      });
+      const res = await POST(req);
+      expect(res.status).toBe(400);
+      expect(cookieJar.get("drts_referral_embed_session")).toBe(cookieForPass2);
+
+      const rightfulConsume = await handoffRepo.consume({
+        artifact: "art-post-exchange-subject-1",
+        entrySlug: ENTRY_A.entrySlug,
+        entryHost: ENTRY_A.entryHost,
+      });
+      expect(rightfulConsume.outcome).toBe("consumed");
+    });
+
+    it("rejects a JSON exchange for a nonexistent artifact without clearing an existing session, and a subsequent legitimate exchange for a different handoff still succeeds", async () => {
+      harness.service = buildService([ENTRY_A], {}, handoffRepo);
+      await harness.service.onModuleInit();
+
+      await issueHandoff(handoffRepo, { artifact: "art-post-exchange-legit-first" });
+      const bootstrap = await GET(
+        getRequest({
+          artifact: "art-post-exchange-legit-first",
+          entrySlug: ENTRY_A.entrySlug,
+        }),
+      );
+      expect(bootstrap.status).toBe(307);
+      const cookieBeforeInvalid = cookieJar.get("drts_referral_embed_session");
+      expect(cookieBeforeInvalid).toBeTruthy();
+
+      const invalidReq = new Request(
+        "https://entry-a.example.com/api/referral/session",
+        {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            action: "exchange",
+            artifact: "art-does-not-exist",
+            entrySlug: ENTRY_A.entrySlug,
+            entryHost: ENTRY_A.entryHost,
+          }),
+        },
+      );
+      const invalidRes = await POST(invalidReq);
+      expect(invalidRes.status).toBe(400);
+      expect(cookieJar.get("drts_referral_embed_session")).toBe(cookieBeforeInvalid);
+
+      await issueHandoff(handoffRepo, { artifact: "art-post-exchange-legit-second" });
+      const followupReq = new Request(
+        "https://entry-a.example.com/api/referral/session",
+        {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            action: "exchange",
+            artifact: "art-post-exchange-legit-second",
+            entrySlug: ENTRY_A.entrySlug,
+            entryHost: ENTRY_A.entryHost,
+          }),
+        },
+      );
+      const followupRes = await POST(followupReq);
+      expect(followupRes.status).toBe(307);
+      expect(decodeCookie()?.drtsPassengerId).toBe("pass-1");
     });
   });
 
