@@ -42,11 +42,11 @@ function P5_E18({ stars=4 }) {
     </P5Card>
     <div style={{ margin:'0 14px 8px' }}><P5Btn kind="primary" icon="check">送出評分</P5Btn></div>
     <div style={{ margin:'0 22px 12px', fontSize:10.5, color:P5.mut, textAlign:'center', lineHeight:1.55 }}>評分送出後不可修改；評分以匿名方式提供駕駛，並用於駕駛服務品質管理</div>
-    <P5Notice/></P5Phone>;
+    <P5Notice csNumber="02-2944-0985"/></P5Phone>;
 }
 // E-19a 首頁費用與優惠說明
 function P5_E19a() {
-  return <P5Phone url="ride.zhixing.tw/fares"><P5Header status="費用與優惠說明" order="公開資訊"/>
+  return <P5Phone url="(App Domain Pending)/fares"><P5Header status="費用與優惠說明" order="公開資訊"/>
     <div style={{ margin:'12px 14px 10px', fontSize:12.5, color:P5.mut }}>下單前請確認以下收費規則</div>
     <P5Card>
       {E_FEES.map(([k,v],i)=>(
@@ -59,12 +59,12 @@ function P5_E19a() {
     <div style={{ margin:'0 14px 12px', fontSize:10.5, color:P5.dim }}>版本 F-2026-01 · 生效日 2026/10/01 · 依主管機關核定運價及備查優惠辦理</div>
     <div style={{ margin:'0 14px 8px' }}><P5Btn kind="primary" icon="check">我已閱讀並同意</P5Btn></div>
     <div style={{ margin:'0 14px 12px', fontSize:10.5, color:P5.mut, textAlign:'center' }}>下單前將再次顯示費用摘要供您確認</div>
-    <P5Notice/></P5Phone>;
+    <P5Notice csNumber="02-2944-0985"/></P5Phone>;
 }
 // E-19b 下單前確認（bottom sheet）
 function P5_E19b({ checked=true }) {
   const R=(k,v,mono)=><div style={{ display:'flex', justifyContent:'space-between', gap:12, padding:'6px 0', fontSize:12.5 }}><span style={{ color:P5.mut }}>{k}</span><span style={{ fontWeight:600, fontFamily:mono?P5.mono:'inherit', textAlign:'right' }}>{v}</span></div>;
-  return <P5Phone url="ride.zhixing.tw/r/••••K2"><P5Header status="建立乘車需求"/>
+  return <P5Phone url="(App Domain Pending)/r/••••K2"><P5Header status="建立乘車需求"/>
     <div style={{ flex:1, position:'relative', display:'flex', flexDirection:'column' }}>
       <div style={{ flex:1, background:'rgba(22,33,44,.45)' }}/>
       <div style={{ background:P5.surface, borderRadius:'20px 20px 0 0', padding:'10px 14px 14px', boxShadow:'0 -8px 30px rgba(0,0,0,.18)' }}>

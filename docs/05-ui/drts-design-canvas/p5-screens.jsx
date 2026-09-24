@@ -55,7 +55,7 @@ function P5_S10({ detail=true }){ // E-04 電子乘車證明（修正版 §91-6�
       <div style={{ display:'flex', justifyContent:'space-between', gap:12, padding:'8px 0', fontSize:12.5 }}><span style={{ color:P5.mut }}>主管機關申訴電話</span><span style={{ fontWeight:600, fontFamily:P5.mono }}>1999</span></div>
       <div style={{ fontSize:10, color:P5.dim, marginTop:4 }}>證明編號 RC-2607••-0186 · 個資已遮碼</div>
     </P5Card>
-    <div style={{ margin:'0 14px 12px', display:'flex', flexDirection:'column', gap:8 }}><P5Btn kind="primary" icon="download">下載 PDF</P5Btn><P5Btn icon="share">分享</P5Btn><P5Btn kind="ghost">返回行程</P5Btn></div><P5Notice/></P5Phone>;
+    <div style={{ margin:'0 14px 12px', display:'flex', flexDirection:'column', gap:8 }}><P5Btn kind="primary" icon="download">下載 PDF</P5Btn><P5Btn icon="share">分享</P5Btn><P5Btn kind="ghost">返回行程</P5Btn></div><P5Notice csNumber="02-2944-0985"/></P5Phone>;
 }
 function P5_S11(){ // Disclosure unavailable — fail closed
   return <P5Phone><P5Header status="正在安排車輛"/>

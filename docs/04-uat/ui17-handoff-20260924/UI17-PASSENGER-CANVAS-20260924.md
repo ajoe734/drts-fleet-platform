@@ -8,22 +8,18 @@
 
 ## 審查發現對照與修正
 
-| 缺陷/Finding | 實際修改與原因 |
-|-------------|--------------|
-| E-04/E-18 預設網址與 E-19 不一致 | 修正 E-19a/E-19b，與現有 `p5-ui.jsx` 預設一致使用 `ride.zhixing.tw`。 |
-| E-19 未勾選畫面按鈕只有灰色樣式，沒有 disabled | 於 `P5_E19b` 修改為 `disabled={!checked}`，符合原有的狀態與游標約束。 |
-| 整併新設計覆寫舊檔遺失既有入口 | 使用選擇性合併，僅將 `P5_S10` 更新為 E-04 規格，新增 `P5_E18` 與 `P5_E19` 系列元件至 `p5-e-screens.jsx`，並附加於 `智行叫車 Passenger.html` 中既有畫板之後，保留原所有 P5 流程展示。 |
-
-## 驗收項目檢查
-
-| 驗收項 (Acceptance Key) | 結果 | 驗證證據與限制 |
-|---------------------|------|---------------|
-| `ui17-passenger-canvas-20260924_source_and_state_coverage` | Pass (Pending) | 本地確認 E-04、E-18 (4星/≤2星)、E-19 (勾選/未勾選) 皆有獨立畫板與邏輯，符合 audit 缺口；E-04/E-18 真機一致性需 UAT 核實。 |
-| `ui17-passenger-canvas-20260924_scoped_verification_and_preservation` | Pass | 確認 `docs/05-ui/drts-design-canvas/智行叫車 Passenger.html` 仍保留原有 `P5_S01`~`P5_S09`、`P5_S11`~`P5_S12` 及 `P5_A03`~`P5_A04` 畫面；JSX 無語法錯誤。 |
+| Finding／驗收項 | 原始碼依據與修改位置 | 舊版重現 → 修正版結果 | 命令、退出碼、執行版本與證據位置 | 未驗項與具體限制 |
+| --- | --- | --- | --- | --- |
+| F1: PR targets the wrong integration branch | PR #2127 | 舊版 PR base 為 `main` → 修正版使用 `gh pr edit 2127 --base dev` 改為 `dev` | 執行 `gh pr view 2127 --json baseRefName` 確認改為 `dev` | (無) |
+| F2: E-screen customer-service number remains inconsistent | `docs/05-ui/drts-design-canvas/p5-ui.jsx` (P5Notice), `p5-e-screens.jsx`, `p5-screens.jsx` | 舊版 P5Notice 寫死 `0800-090-000` → 修正版新增 `csNumber` props，並在 E-04、E-18 等畫面帶入 `02-2944-0985` | 靜態文件核對，JSX 語法正常 | 未執行 Hosted CI 與實際真機渲染。 |
+| F3: Unconfirmed example URLs promoted into contract | `docs/05-ui/drts-design-canvas/p5-ui.jsx`, `p5-e-screens.jsx`, `passenger-e-screen-contract-20260924.md` | 舊版使用 `ride.zhixing.tw` → 修正版改為 `(App Domain Pending)` 佔位符 | 靜態文件核對，JSX 語法正常 | 未執行 Hosted CI 與實際真機渲染。 |
+| F4: Required fee/policy crosswalk and auditable evidence are missing | `docs/05-ui/drts-design-canvas/passenger-e-screen-contract-20260924.md` | 舊版僅宣稱定稿 → 修正版增補 `phase1_prd_detailed_v1.md` 比對說明，解釋指派前與抵達後的取消費無矛盾，並標明附件 metadata 日期僅為參考。 | 靜態文件核對，Markdown 語法正常 | (無) |
+| `ui17-passenger-canvas-20260924_source_and_state_coverage` | E-04、E-18、E-19 畫板元件 | 確認畫板與邏輯，符合 audit 缺口；E-04/E-18 真機一致性需 UAT 核實。 | 靜態文件核對，JSX 語法正常 | E-04/E-18 真機一致性待驗。 |
+| `ui17-passenger-canvas-20260924_scoped_verification_and_preservation` | `docs/05-ui/drts-design-canvas/智行叫車 Passenger.html` | 確認仍保留原有 `P5_S01`~`P5_S09`、`P5_S11`~`P5_S12` 及 `P5_A03`~`P5_A04` 畫面；JSX 無語法錯誤。 | 靜態文件核對，JSX 語法正常 | 未執行 Hosted CI 與實際真機渲染。 |
 
 ## 命令與檢查
 - 因 sandbox 限制與無 Node 環境 `pnpm install` 狀態，跳過自動化 `eslint` 檢查，採靜態文件結構與語法比對確認無誤。
-- `p5-e-screens.jsx`、`p5-screens.jsx` 與 `passenger-e-screen-contract-20260924.md` 變更與 `智行叫車 Passenger.html` 完成儲存。
+- `p5-e-screens.jsx`、`p5-screens.jsx`、`p5-ui.jsx` 與 `passenger-e-screen-contract-20260924.md` 變更與 `智行叫車 Passenger.html` 完成儲存。
 
 ## 待驗
 - E-04/E-18 真機一致性確認。
