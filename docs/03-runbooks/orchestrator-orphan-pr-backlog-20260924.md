@@ -199,9 +199,16 @@ Owner: Claude2（由 Claude 改派，因 owner lane Claude 達 2/2 終端 worker
   commit 皆無 trailers，僅有 cherry-pick 附註）。
 - 衝突原因：`SR-ORCH-REVIEW-WORKTREE-ISOLATION-20260923`（#2114）重構了
   `attach_workspace_metadata()`，在 #2059 觸及的行之前插入新的 reviewer-workspace
-  分支，造成 3-way merge 因行號上下文漂移而失敗，非語意衝突。以
-  `git diff aba796ccd..HEAD -- <這兩個檔案>` 確認自 PR base 到本次 handoff
-  前，`dev` 對這兩個檔案沒有進一步變更（diff 為空），因此原內容仍可直接套用。
+  分支，造成 3-way merge 因行號上下文漂移而失敗。**更正**：這不只是行號漂移的
+  文字衝突——Codex 在第二輪複審的 F2 finding（見下方「Codex 第二輪退修」章節）
+  指出，#2114 新增的四個 `is_reviewer` 分支（isolated detached、canonical
+  fallback、unresolvable pinned candidate、noncanonical report/evidence）
+  當時確實都沒有帶上 #2059 的 VM restriction notice，是移植 #2059 時遺漏的
+  真實語意缺口，已在 F2 修正（commit `ab84480a62de5c88ef1a3e6e062c4c53159686c6`）
+  補齊並有回歸覆蓋。以 `git diff aba796ccd..HEAD -- <這兩個檔案>` 確認自 PR
+  base 到本次 handoff 前，`dev` 對這兩個檔案沒有進一步變更（diff 為空），因此
+  #2059 原內容仍可直接套用；F2 修正的是 #2114 重構後才出現的新分支缺口，不是
+  #2059 本身的內容有誤。
 - grep 現行 `dev` 的 `VM restriction`／`playwright`／`docker compose`：無比對，
   未被取代，值得保留。
 - 修法：在本任務分支上以**新 commit**，對現行函式形狀重新套用同樣的
@@ -351,3 +358,98 @@ Codex 於 2026-09-24T08:03:30Z 對候選 `a34dfe8aa51c195c4b016bf2af70a3a82cfac8
   checkpoint 路徑。
 - CI 證據：見下方「候選交接與驗收」表格與 PR #2132 checks 連結；本節不預先
   宣稱通過，實際結論由 handoff 當下讀到的 hosted 結果記錄。
+
+## Codex 第三輪退修（`80dc58a93`）與修正
+
+Codex 於 2026-09-24T09:02:27Z 對候選 `80dc58a934ab74e0c5fa25801a9a759a0dd9b137`
+唯讀審查後退修，確認 F2/F3 已通過、不要重開，但指出 F1「部分修正、錯誤路徑仍
+未收斂」。完整 finding 文字見 `ai-status.sh show ORCH-ORPHAN-PR-LAND-20260924`
+的 `codex-20260924T085540Z-992acb0c` 條目，本節記錄定位、修正與可重跑回歸證據。
+
+### 缺陷重述
+
+`infra/gcp/dev/provision-dev-project.sh:198-233`（`4a2e3c89f`/`ab84480a6` 版）
+修正了「兩者都存在時不再輪替」，但兩個錯誤路徑仍不安全：
+
+- (A) `db_secret_exists` 只靠 `gc secrets describe ... && db_secret_exists=true`
+  判斷；`describe` 因任何非零結果（含暫時性服務/權限錯誤，不只是
+  NOT_FOUND）都會被當成「secret 不存在」。若此時兩資源其實都在且密碼一致，
+  腳本會先 `sql users set-password` 換掉正在服務中的密碼，再對已存在的
+  secret 呼叫 `secrets create`（衝突失敗），把新密碼留在孤兒狀態；下次重跑
+  只看到「兩者都存在」就印 `kept` 並 exit 0，永遠無法偵測這個錯配。
+- (B) `! $db_user_exists && $db_secret_exists` 分支（user 遺失、secret 尚在）
+  原本先 `sql users create`（缺的資源，可靠地當作完成信號）再
+  `secrets versions add`（已存在的資源，即使這次寫入失敗，secret 仍然「存
+  在」，無法反映未完成）。若 `versions add` 失敗，下次重跑會看到「兩者都存
+  在」直接 `kept`，但 secret 的最新版本內容其實不是這個新 user 的密碼。
+
+### 修正
+
+Commit（本輪）改動同一段程式碼，分兩部分：
+
+1. **查詢失敗 fail closed**：`sql users list` 失敗直接 `FATAL` + `exit 1`，不
+   再靜默視為「user 不存在」（原本 `cmd | grep -qx ... && x=true` 這種寫法在
+   `set -e` 下，左式失敗並不會中止腳本，會被吞掉）。`secrets describe` 失敗
+   時檢查 stderr 是否包含 `not found`；只有確認是 NOT_FOUND 才視為「secret
+   不存在」，其他任何非零結果（含 fixture 用的假錯誤碼）一律 `FATAL` +
+   `exit 1`，且此時尚未執行任何 `set-password`/`create` 動作。
+2. **不完整恢復可安全重跑**：`! $db_user_exists && $db_secret_exists` 分支
+   反轉寫入順序——先 `secrets versions add`（已存在資源，寫入失敗不改變
+   「存在」狀態，不會誤導下次判斷），再 `sql users create`（真正缺的資源，
+   維持「未完成則不存在」的可靠信號）。`$db_user_exists && ! $db_secret_exists`
+   分支的既有順序（先 `set-password` 再 `secrets create`）本來就符合這個
+   「先動已存在的資源、缺的資源留到最後當完成信號」原則，未變動。
+
+程式碼見 `infra/gcp/dev/provision-dev-project.sh:198-252`。
+
+### 回歸驗證（非雲端，僅 mock `gc`/未 mock 本地 `openssl`）
+
+本任務沒有雲端存取權限，此輪不再只用 `bash -n`/手動讀碼；改為把腳本
+198-259 行的真實文字（`sed` 從工作樹擷取，以及用 `git show HEAD:...` 擷取
+修正前 `80dc58a93` 的對應段落 190-233 行作為對照基準）交給真正的 bash
+`source` 執行，只 mock `gc`（gcloud wrapper）本身，本地 `openssl` 是真實
+呼叫（純亂數，非雲端）。Mock 狀態存在檔案而非 shell 變數，因為部分 `gc`
+呼叫是管線右側（`db_url ... | gc secrets create ...`），管線各階段預設在
+子 shell 執行，變數型 mock 會静默遺失那些呼叫造成的狀態變更——先用變數版
+mock 跑過一次，發現「新密碼寫入但 secret 值仍是舊值」的假陽性後改寫為
+檔案型 mock 才具代表性。
+
+**Scenario A**（兩資源真實存在且密碼配對正確；`secrets describe` 回應非
+NOT_FOUND 的錯誤碼 42；`secrets create` 對已存在的 secret 回應
+ALREADY_EXISTS 衝突，如真實 gcloud）：
+
+| 版本 | 階段 | exit | trace | pair_matches |
+| --- | --- | --- | --- | --- |
+| 舊（`80dc58a93`） | first | 1 | `list;describe;set-password;create`（create 因衝突失敗） | **false**（密碼已換，secret 未變） |
+| 舊 | retry（describe 恢復正常） | 0，印 `kept` | `list;describe` | **false**（`kept` 說謊） |
+| 新（本輪） | first | 1，尚未做任何 mutation | `list;describe` | true（未觸碰，維持原配對） |
+| 新 | retry（describe 恢復正常） | 0，印 `kept` | `list;describe` | **true** |
+
+**Scenario B**（user 遺失、secret 尚在且為舊值；`secrets versions add`
+回應 42）：
+
+| 版本 | 階段 | exit | trace | pair_matches |
+| --- | --- | --- | --- | --- |
+| 舊 | first | 42 | `list;describe;create（user）;versions add`（user 已建立，密碼孤兒） | **false** |
+| 舊 | retry（add 恢復正常） | 0，印 `kept` | `list;describe` | **false**（`kept` 說謊，secret 仍是舊值） |
+| 新（本輪） | first | 42，user 尚未建立 | `list;describe;versions add`（在 create user 之前失敗） | false（僅因 user 仍缺，非配對錯誤） |
+| 新 | retry（add 恢復正常） | 0，走 `recovered` 分支 | `list;describe;versions add;create（user）` | **true** |
+
+另外四組正向情境（首次建立、完整既有重跑、缺 user、缺 secret，皆無故障
+注入）在新版程式碼下 first/retry 皆 `exit 0`、`pair_matches=true`，覆蓋
+`kept`/`recovered`/`created` 三種訊息路徑，確認修正沒有破壞既有正常路徑。
+
+Harness 與擷取的新舊程式碼片段留存於執行本輪任務的 sandbox
+`/tmp/f1regress/`（harness.sh + old_block.sh + new_block.sh），未寫入本
+repo；上表數字為實際執行輸出的忠實轉錄，不是預期值。`bash -n
+infra/gcp/dev/provision-dev-project.sh` 與 `git diff --check` 均額外
+`exit 0`。
+
+### 修正邊界（呼應第二輪退修要求，未擴大範圍）
+
+只處理 Codex 本輪明確指出的兩個錯誤路徑（查詢失敗誤判、恢復分支寫入順序），
+未新增雲端輪替邏輯、未嘗試讀回 secret 明文比對、未對 preflight/APIs/IAM/WIF/
+SQL 建立等其他段落做任何改動。`db_secret_exists` 的 NOT_FOUND 偵測靠
+`grep -qi 'not found' <<<"$secret_describe_err"`，這依賴 gcloud 錯誤訊息文字
+格式；若未來 gcloud 改變錯誤文案，最壞情況是退化成「所有 describe 失敗都
+fail closed」（安全方向的退化，不會導致誤判為不存在），不是新的不安全窗口。

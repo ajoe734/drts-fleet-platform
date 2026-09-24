@@ -196,34 +196,60 @@ new_db_password() { openssl rand -base64 32 | tr -dc 'A-Za-z0-9' | head -c 32; }
 db_url() { printf 'postgresql://%s:%s@/%s?host=/cloudsql/%s' "$DB_USER" "$1" "$DB_NAME" "$CONNECTION_NAME"; }
 
 DB_URL_SECRET="${SECRET_PREFIX}-db-url"
+
+# Existence checks must fail closed: a query error (permission hiccup,
+# transient API error) is not the same as a confirmed "does not exist", and
+# treating it as one is what let a previous version of this script rotate a
+# live password out from under a deployed service just because `secrets
+# describe` returned a non-NOT_FOUND error. So each check aborts loudly
+# instead of guessing whenever the query itself doesn't give a clean answer.
 db_user_exists=false
-gc sql users list --instance="$SQL_INSTANCE" --format='value(name)' | grep -qx "$DB_USER" && db_user_exists=true
+users_list_output="$(gc sql users list --instance="$SQL_INSTANCE" --format='value(name)')" || {
+  echo "FATAL: could not list Cloud SQL users on ${SQL_INSTANCE}; refusing to guess whether ${DB_USER} exists." >&2
+  exit 1
+}
+grep -qx "$DB_USER" <<<"$users_list_output" && db_user_exists=true
+
 db_secret_exists=false
-gc secrets describe "$DB_URL_SECRET" >/dev/null 2>&1 && db_secret_exists=true
+secret_describe_err="$(gc secrets describe "$DB_URL_SECRET" 2>&1 >/dev/null)" && db_secret_exists=true
+if ! $db_secret_exists && [[ -n "$secret_describe_err" ]] && ! grep -qi 'not found' <<<"$secret_describe_err"; then
+  echo "FATAL: could not determine whether secret ${DB_URL_SECRET} exists (unexpected gcloud error):" >&2
+  echo "$secret_describe_err" >&2
+  exit 1
+fi
 
 # A rerun must not invalidate a credential that a deployed service is already
 # using: deploy-dev.yml injects this secret's value as DATABASE_URL, and
 # apps/api/src/common/db/database.service.ts caches it in its constructor, so
 # nothing picks up a rotated password until the next deploy. Only touch the
-# password when we are missing the piece needed to reconstruct it.
+# password when we've confirmed (not guessed) which piece is missing.
 if $db_user_exists && $db_secret_exists; then
   echo "kept     ${DB_USER} / ${DB_URL_SECRET} (already present; not rotating)"
 elif $db_user_exists && ! $db_secret_exists; then
-  # Secret is gone so the current password is unrecoverable; rotate it and
-  # (re)create the secret together so the two never disagree.
+  # Secret is confirmed gone so the current password is unrecoverable; rotate
+  # it and (re)create the secret together so the two never disagree. The user
+  # already exists and stays that way no matter what happens next, so if the
+  # secret write below fails, a rerun lands back in this same branch instead
+  # of a state that looks "kept" but isn't.
   DB_PASSWORD="$(new_db_password)"
   gc sql users set-password "$DB_USER" --instance="$SQL_INSTANCE" --password="$DB_PASSWORD"
   db_url "$DB_PASSWORD" | gc secrets create "$DB_URL_SECRET" --replication-policy=automatic --data-file=- >/dev/null
   unset DB_PASSWORD
   echo "recovered ${DB_USER} / ${DB_URL_SECRET} (secret was missing; password rotated, secret created)"
 elif ! $db_user_exists && $db_secret_exists; then
-  # User is gone so whatever password the secret holds is stale; recreate the
-  # user with a fresh password and rotate the secret to match.
+  # User is confirmed gone so whatever password the secret currently holds is
+  # stale. Rotate the secret *before* creating the user: the secret already
+  # exists either way, so its presence can't signal whether this recovery
+  # finished, but user creation is atomic (it either lands or it doesn't) and
+  # the user is genuinely missing, so it stays a reliable signal. If the
+  # secret write here succeeds but the user create below fails, a rerun still
+  # sees "user missing" and safely redoes both with a fresh password, instead
+  # of landing on "kept" with a secret that matches no user.
   DB_PASSWORD="$(new_db_password)"
-  gc sql users create "$DB_USER" --instance="$SQL_INSTANCE" --password="$DB_PASSWORD"
   db_url "$DB_PASSWORD" | gc secrets versions add "$DB_URL_SECRET" --data-file=- >/dev/null
+  gc sql users create "$DB_USER" --instance="$SQL_INSTANCE" --password="$DB_PASSWORD"
   unset DB_PASSWORD
-  echo "recovered ${DB_USER} / ${DB_URL_SECRET} (user was missing; user created, secret rotated)"
+  echo "recovered ${DB_USER} / ${DB_URL_SECRET} (user was missing; secret rotated, user created)"
 else
   DB_PASSWORD="$(new_db_password)"
   gc sql users create "$DB_USER" --instance="$SQL_INSTANCE" --password="$DB_PASSWORD"
