@@ -238,8 +238,30 @@ CONFLICTING`）。Claude2 在自己的 task branch
 | --- | --- | --- |
 | 每個 PR 有明確處置與可取回證據 | 上表五列 + 逐項細節 | 完成；#1860/#2017 為 `gh pr view` 的 `mergedAt`/merge SHA，#2055/#2059 為本 candidate 的 commit SHA 與 blob/diff 核對，#2056 為逐位元檔案比對 |
 | 補正 trailers 未 force push 已發布分支 | #2055/#2059 均為本分支上的新 commit | 完成；`claude/infra-dev-gcp-provision-20260908`、`claude/orch-worker-prompt-lineage-20260908`、`claude/orch-orphan-pr-land-20260924` 三個既有分支未被改寫 |
-| 同候選 SHA CI 通過 | 最終 `CANDIDATE_SHA` | **待 handoff 後由 GitHub bus 記錄**；本機 972/972 通過不冒充 hosted CI |
+| 同候選 SHA CI 通過 | 最終 `CANDIDATE_SHA` `ab84480a62de5c88ef1a3e6e062c4c53159686c6`（PR #2132） | **見下方「F3 hosted CI 結果」**；本機 973/973 通過不冒充 hosted CI |
 | 獨立 reviewer 審查同一候選 | Codex | **待**；owner 不 approve、不 done，只讀 handoff |
+
+### F3 hosted CI 結果（候選 `ab84480a6`）
+
+`gh pr checks 2132` 於一般（非 draft）`pull_request` 事件下逐一收斂：
+
+兩個 `pull_request` 事件觸發的 run（非 draft checkpoint、非 workflow_dispatch）
+均在候選 SHA 上跑完並讀過結論：
+
+- `CI` run [`35973990608`](https://github.com/ajoe734/drts-fleet-platform/actions/runs/35973990608) — `conclusion=success`。
+- `CI (integration trunk)` run [`35973990648`](https://github.com/ajoe734/drts-fleet-platform/actions/runs/35973990648) — `conclusion=success`。
+
+`gh pr checks 2132`（最後讀值）全部 25 項 check 皆 `pass`，含
+`ci-integ`、`Smoke acceptance`、`e2e`、`Product smoke acceptance`、`build`、
+`unit`、`ui-route-e2e`、`Commit trailers`、`candidate` 等，沒有任何
+SKIPPED／pending。`gh pr view 2132` 讀回 `headRefOid=ab84480a6...`、
+`mergeable=MERGEABLE`、`mergeStateStatus=CLEAN`。這是一般 push 觸發的完整
+CI，不是 F3 指出的 draft owner-checkpoint 路徑（該路徑對應的是前一個候選
+`a34dfe8aa5` 底下已 cancelled 的 `35973728719` workflow_dispatch run，本輪
+未沿用其結果）。另有一個 `workflow_dispatch` 觸發的 `CI (integration
+trunk)` run（`35973997583`）在候選 SHA 上仍執行中，屬於候選生命週期的額外
+bookkeeping trigger，不在 PR 必要 checks 之列（`mergeStateStatus` 已是
+`CLEAN`），不影響本節的驗收結論。
 
 可重跑檢查：
 
@@ -248,3 +270,62 @@ cd tools/development-orchestrator
 python3 -m unittest test_supervisor -q
 python3 -m unittest discover -s . -p 'test_*.py'
 ```
+
+## Codex 第二輪退修（`a34dfe8aa5`）與修正
+
+Codex 於 2026-09-24T08:03:30Z 對候選 `a34dfe8aa51c195c4b016bf2af70a3a82cfac862`
+唯讀審查後退修，提出 F1、F2 兩個缺陷與 F3 acceptance 缺口；完整 finding 文字見
+`ai-status.sh show ORCH-ORPHAN-PR-LAND-20260924` 的
+`codex-20260924T075642Z-f81f059d` 條目。逐項回應如下。
+
+### F1 — provision-dev-project.sh 無條件輪替既有 DB 憑證
+
+- 缺陷：`put_secret`／密碼產生流程在 DB user 與 `db-url` secret 都已存在時，
+  仍無條件 `sql users set-password` 再 `secrets versions add`，會讓已部署服務
+  快取的舊連線字串失效（`deploy-dev.yml` 注入 `DATABASE_URL`，
+  `apps/api/src/common/db/database.service.ts` 在 constructor 快取，不會跟著
+  輪替更新）。
+- 修正：commit `4a2e3c89fb6f44035395a91c915be1a607b7e464`。改為先各自檢查
+  `db_user_exists`／`db_secret_exists`，四種組合分流：
+  - 兩者都在 → `kept`，完全不碰密碼／secret（修正 F1 的核心情境）。
+  - 只有 secret 遺失 → 視為不可回收，輪替密碼並重建 secret。
+  - 只有 user 遺失 → 視為不可回收，重建 user 並輪替 secret。
+  - 兩者都不在 → 原有的全新建立路徑，不變。
+  程式碼與註解見 `infra/gcp/dev/provision-dev-project.sh:198-233`。
+- 驗證：此腳本呼叫真實 `gcloud`／`openssl`，本任務沒有雲端存取權限，未執行
+  端到端 provisioning；已用 `bash -n infra/gcp/dev/provision-dev-project.sh`
+  （exit 0）驗證語法，並手動逐行核對四個分支的 shell 邏輯與 F1 finding 描述的
+  兩個 mock 情境（既有資源重跑 → 不動；缺一資源 → 走對應 recovered 分支）一致。
+  未新增 CI 覆蓋此腳本；沿用既有「不執行雲端變更」邊界。
+
+### F2 — attach_workspace_metadata 的 VM restriction notice 漏 reviewer 分支
+
+- 缺陷：`vm_restriction_notice` 只接在 owner-isolated 與 coordination-isolated
+  兩支，`#2114` 重構後新增的四個 `is_reviewer` 分支（isolated detached、
+  canonical fallback、unresolvable pinned candidate、noncanonical
+  report/evidence）都沒有這段提示，review_ready_dispatch 的 VM worker 完全收
+  不到限制。
+- 修正：commit `ab84480a62de5c88ef1a3e6e062c4c53159686c6`。在
+  `tools/development-orchestrator/control_plane/runtime/supervisor_runtime.py`
+  的四個 reviewer 分支各補上 `f"{vm_restriction_notice}"`，共六個分支都會帶
+  這段提示。新增
+  `test_supervisor.py::ExecutionWorkspaceTests::test_vm_restriction_notice_present_on_every_reviewer_workspace_branch`，
+  直接呼叫正式 `attach_workspace_metadata`，對四個 reviewer 分支各斷言訊息含
+  `VM restriction` 與 `pnpm exec playwright` 字樣。
+- 驗證：`python3 -m unittest test_supervisor -q` 與
+  `python3 -m unittest discover -s tools/development-orchestrator -p 'test_*.py'`
+  於候選 `ab84480a62de5c88ef1a3e6e062c4c53159686c6`（本檔案提交時的
+  `HEAD`）本機執行，973/973 pass（972 既有 + 本輪新增 1 個），exit 0，
+  27.753s。
+
+### F3 — 同 SHA hosted CI 證據
+
+- Codex 指出 draft 狀態下 `ci-integ` 只是 owner checkpoint（`PR_DRAFT=true`、
+  `run_full_ci=false`），大量 job SKIPPED，不能當作候選驗收；一般 `CI` run
+  `35972446435` 在退修當下仍 pending，不構成通過證據。
+- 本輪動作：F1/F2 的兩個修正 commit 直接以一般（非 draft）push 推上既有 PR
+  #2132（head 已是 `ab84480a62de5c88ef1a3e6e062c4c53159686c6`，未新開 PR、
+  未 force push），觸發正常 `pull_request` 事件的完整 CI，而非 draft
+  checkpoint 路徑。
+- CI 證據：見下方「候選交接與驗收」表格與 PR #2132 checks 連結；本節不預先
+  宣稱通過，實際結論由 handoff 當下讀到的 hosted 結果記錄。
