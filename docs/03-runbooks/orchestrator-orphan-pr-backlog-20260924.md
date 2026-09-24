@@ -238,7 +238,7 @@ CONFLICTING`）。Claude2 在自己的 task branch
 | --- | --- | --- |
 | 每個 PR 有明確處置與可取回證據 | 上表五列 + 逐項細節 | 完成；#1860/#2017 為 `gh pr view` 的 `mergedAt`/merge SHA，#2055/#2059 為本 candidate 的 commit SHA 與 blob/diff 核對，#2056 為逐位元檔案比對 |
 | 補正 trailers 未 force push 已發布分支 | #2055/#2059 均為本分支上的新 commit | 完成；`claude/infra-dev-gcp-provision-20260908`、`claude/orch-worker-prompt-lineage-20260908`、`claude/orch-orphan-pr-land-20260924` 三個既有分支未被改寫 |
-| 同候選 SHA CI 通過 | 最終 `CANDIDATE_SHA` `ab84480a62de5c88ef1a3e6e062c4c53159686c6`（PR #2132） | **見下方「F3 hosted CI 結果」**；本機 973/973 通過不冒充 hosted CI |
+| 同候選 SHA CI 通過 | 最終 `CANDIDATE_SHA` `afc7d255dea2f86280401aac9549dc34bd7984a5`（PR #2132） | **見下方「F3 hosted CI 結果」與「最終候選 SHA 更新」**；本機 973/973 通過不冒充 hosted CI |
 | 獨立 reviewer 審查同一候選 | Codex | **待**；owner 不 approve、不 done，只讀 handoff |
 
 ### F3 hosted CI 結果（候選 `ab84480a6`）
@@ -270,6 +270,28 @@ cd tools/development-orchestrator
 python3 -m unittest test_supervisor -q
 python3 -m unittest discover -s . -p 'test_*.py'
 ```
+
+### 最終候選 SHA 更新（`afc7d255d`）
+
+本檔案（即這份 runbook 的 F1/F2/F3 章節）本身以一個純文件 commit
+`afc7d255dea2f86280401aac9549dc34bd7984a5` 疊在 `ab84480a6` 之上推上
+PR #2132（一般 push，未 force push、未開新 PR）；因此 PR #2132 實際
+`headRefOid` 現為 `afc7d255d`，不是上面記錄 CI 結果時的 `ab84480a6`。此
+commit 只改動這份 `.md`，未觸及任何程式碼，但驗收要求「同候選 SHA 的 CI
+必須通過」是指最終要交給 reviewer／合併的那個 SHA，所以在此補記 `afc7d255d`
+自己的 hosted CI 結果，不沿用 `ab84480a6` 的舊結果代替：
+
+- `CI` run [`35975004317`](https://github.com/ajoe734/drts-fleet-platform/actions/runs/35975004317)（`pull_request` 事件，`headSha=afc7d255d`）— `conclusion=success`，含
+  `Commit trailers`、`Product smoke acceptance`、`Smoke acceptance` 等 12 項 check 全 `success`。
+- `CI (integration trunk)` run [`35975004480`](https://github.com/ajoe734/drts-fleet-platform/actions/runs/35975004480)（`pull_request` 事件，`headSha=afc7d255d`）— `conclusion=success`，含
+  `ci-integ`、`build`、`typecheck`、`unit`、`integration`、`iam-negative-matrix`、
+  `cross-surface-e2e`、`ui-route-e2e`、`e2e`、`orchestrator-tests` 等全 `success`，
+  無任何 SKIPPED。
+- `gh pr view 2132` 讀回：`headRefOid=afc7d255dea2f86280401aac9549dc34bd7984a5`、
+  `isDraft=false`、`mergeable=MERGEABLE`、`mergeStateStatus=CLEAN`。
+
+**最終 `CANDIDATE_SHA=afc7d255dea2f86280401aac9549dc34bd7984a5`**，交
+Codex 對此 SHA 審查（不是 `ab84480a6`）。
 
 ## Codex 第二輪退修（`a34dfe8aa5`）與修正
 
