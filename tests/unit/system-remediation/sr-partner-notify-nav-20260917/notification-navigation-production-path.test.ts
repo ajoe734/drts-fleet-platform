@@ -494,6 +494,188 @@ describe("SR-PARTNER-NOTIFY-NAV-20260917 BFF production-path regression", () => 
       expect(followupBody.ok).toBe(true);
       expect(decodeCookie()?.drtsPassengerId).toBe("pass-1");
     });
+
+    // The GET suite above covers expired/replayed artifacts, but only ever
+    // starting from an empty cookie jar (replay clears the jar first;
+    // expired never had one). Neither proves what happens when a caller who
+    // is *already logged in* (has a real, cookie-store-backed session) POSTs
+    // an expired or already-consumed artifact to the exchange action: the
+    // route's catch-all must leave that existing session byte-for-byte
+    // untouched rather than clearing it, since this endpoint is
+    // unauthenticated and a cleared cookie on failure would let an attacker
+    // force a logout merely by presenting a stale artifact.
+    it("rejects a POST exchange for an expired handoff artifact without clearing the caller's existing session", async () => {
+      harness.service = buildService([ENTRY_A], {}, handoffRepo);
+      await harness.service.onModuleInit();
+
+      const now = Date.now();
+      vi.useFakeTimers();
+      vi.setSystemTime(now);
+
+      await issueHandoff(handoffRepo, { artifact: "art-post-expired-bootstrap" });
+      const bootstrap = await GET(
+        getRequest({
+          artifact: "art-post-expired-bootstrap",
+          entrySlug: ENTRY_A.entrySlug,
+        }),
+      );
+      expect(bootstrap.status).toBe(307);
+      const cookieAfterBootstrap = cookieJar.get("drts_referral_embed_session");
+      expect(cookieAfterBootstrap).toBeTruthy();
+
+      await issueHandoff(handoffRepo, {
+        artifact: "art-post-expired-target",
+        issuedAt: new Date(now).toISOString(),
+        expiresAt: new Date(now + 120_000).toISOString(),
+      });
+      vi.setSystemTime(now + 121_000);
+
+      const req = new Request("https://entry-a.example.com/api/referral/session", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          action: "exchange",
+          artifact: "art-post-expired-target",
+          entrySlug: ENTRY_A.entrySlug,
+          entryHost: ENTRY_A.entryHost,
+        }),
+      });
+      const res = await POST(req);
+      expect(res.status).toBe(400);
+      expect(cookieJar.get("drts_referral_embed_session")).toBe(cookieAfterBootstrap);
+
+      // A different subject presenting a fresh artifact must still be
+      // rejected as a cross-subject takeover attempt: the expired-artifact
+      // failure above did not clear or weaken the caller's original session.
+      await issueHandoff(handoffRepo, {
+        artifact: "art-post-expired-cross-subject",
+        drtsPassengerId: "pass-2",
+      });
+      const crossSubjectReq = new Request(
+        "https://entry-a.example.com/api/referral/session",
+        {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            action: "exchange",
+            artifact: "art-post-expired-cross-subject",
+            entrySlug: ENTRY_A.entrySlug,
+            entryHost: ENTRY_A.entryHost,
+          }),
+        },
+      );
+      const crossSubjectRes = await POST(crossSubjectReq);
+      expect(crossSubjectRes.status).toBe(400);
+      expect(cookieJar.get("drts_referral_embed_session")).toBe(cookieAfterBootstrap);
+
+      // Same-subject fresh exchange still succeeds afterward: the failed
+      // attempts above did not corrupt the exchange path itself.
+      await issueHandoff(handoffRepo, {
+        artifact: "art-post-expired-legit-followup",
+      });
+      const followupReq = new Request(
+        "https://entry-a.example.com/api/referral/session",
+        {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            action: "exchange",
+            artifact: "art-post-expired-legit-followup",
+            entrySlug: ENTRY_A.entrySlug,
+            entryHost: ENTRY_A.entryHost,
+          }),
+        },
+      );
+      const followupRes = await POST(followupReq);
+      expect(followupRes.status).toBe(200);
+      expect(decodeCookie()?.drtsPassengerId).toBe("pass-1");
+    });
+
+    it("rejects a POST exchange for an already-consumed (replayed) handoff artifact without clearing the caller's existing session", async () => {
+      harness.service = buildService([ENTRY_A], {}, handoffRepo);
+      await harness.service.onModuleInit();
+
+      await issueHandoff(handoffRepo, { artifact: "art-post-replay-bootstrap" });
+      const bootstrap = await GET(
+        getRequest({
+          artifact: "art-post-replay-bootstrap",
+          entrySlug: ENTRY_A.entrySlug,
+        }),
+      );
+      expect(bootstrap.status).toBe(307);
+      const cookieAfterBootstrap = cookieJar.get("drts_referral_embed_session");
+      expect(cookieAfterBootstrap).toBeTruthy();
+
+      // Consume the target artifact out-of-band (e.g. a second tab, or a
+      // link already followed once) so the caller's own POST below hits the
+      // real "already consumed" outcome rather than "missing".
+      await issueHandoff(handoffRepo, { artifact: "art-post-replay-target" });
+      const outOfBandConsume = await handoffRepo.consume({
+        artifact: "art-post-replay-target",
+        entrySlug: ENTRY_A.entrySlug,
+        entryHost: ENTRY_A.entryHost,
+      });
+      expect(outOfBandConsume.outcome).toBe("consumed");
+
+      const req = new Request("https://entry-a.example.com/api/referral/session", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          action: "exchange",
+          artifact: "art-post-replay-target",
+          entrySlug: ENTRY_A.entrySlug,
+          entryHost: ENTRY_A.entryHost,
+        }),
+      });
+      const res = await POST(req);
+      expect(res.status).toBe(400);
+      expect(cookieJar.get("drts_referral_embed_session")).toBe(cookieAfterBootstrap);
+
+      // A different subject presenting a fresh artifact must still be
+      // rejected as a cross-subject takeover attempt after the replay
+      // failure above.
+      await issueHandoff(handoffRepo, {
+        artifact: "art-post-replay-cross-subject",
+        drtsPassengerId: "pass-2",
+      });
+      const crossSubjectReq = new Request(
+        "https://entry-a.example.com/api/referral/session",
+        {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            action: "exchange",
+            artifact: "art-post-replay-cross-subject",
+            entrySlug: ENTRY_A.entrySlug,
+            entryHost: ENTRY_A.entryHost,
+          }),
+        },
+      );
+      const crossSubjectRes = await POST(crossSubjectReq);
+      expect(crossSubjectRes.status).toBe(400);
+      expect(cookieJar.get("drts_referral_embed_session")).toBe(cookieAfterBootstrap);
+
+      // Same-subject fresh exchange still succeeds afterward.
+      await issueHandoff(handoffRepo, {
+        artifact: "art-post-replay-legit-followup",
+      });
+      const followupReq = new Request(
+        "https://entry-a.example.com/api/referral/session",
+        {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            action: "exchange",
+            artifact: "art-post-replay-legit-followup",
+            entrySlug: ENTRY_A.entrySlug,
+            entryHost: ENTRY_A.entryHost,
+          }),
+        },
+      );
+      const followupRes = await POST(followupReq);
+      expect(followupRes.status).toBe(200);
+      expect(decodeCookie()?.drtsPassengerId).toBe("pass-1");
+    });
   });
 
   describe("POST /api/referral/session (grant-consent, JSON and form)", () => {
@@ -518,7 +700,7 @@ describe("SR-PARTNER-NOTIFY-NAV-20260917 BFF production-path regression", () => 
       const now = Date.now();
       vi.useFakeTimers();
       vi.setSystemTime(now);
-      const { handoff } = await consumeToCookie("art-ttl");
+      const { handoff, cookie: cookieBeforeAttempt } = await consumeToCookie("art-ttl");
       vi.setSystemTime(now + 8 * 60 * 60 * 1000 + 1000);
 
       const req = new Request("https://entry-a.example.com/api/referral/session", {
@@ -533,6 +715,9 @@ describe("SR-PARTNER-NOTIFY-NAV-20260917 BFF production-path regression", () => 
       });
       const res = await POST(req);
       expect(res.status).toBe(400);
+      // The rejected attempt must not silently log the caller out or mutate
+      // the still-pending-consent cookie it started with.
+      expect(cookieJar.get("drts_referral_embed_session")).toBe(cookieBeforeAttempt);
 
       const ledger = await handoffRepo.findLatestConsent(
         ENTRY_A.entrySlug,

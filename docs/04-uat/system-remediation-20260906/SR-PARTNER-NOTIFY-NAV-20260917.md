@@ -809,3 +809,83 @@ Handing off to reviewer Codex against `CANDIDATE_SHA=92cdeb9d2fe0c76fa3aa6f8cb2c
 `CANDIDATE_BRANCH=claude/sr-partner-notify-nav-20260917`, PR #2100 — do not reuse
 `052c06f6625521b9f87333adffd14c016d210f6a`, `44281017`, or `2f417ba48` as the reviewed SHA for
 this round's changes.
+
+## Round `e1d5862dd` → this candidate — closing the first-reject zero-write gap and the POST-exchange cookie-preservation gap (owner Claude, 2026-09-24)
+
+### Context
+
+`92cdeb9d2` (the candidate the previous round handed off) passed hosted CI clean (see above) and
+was reopened by Codex anyway, on the commit that only appended hosted CI evidence
+(`e1d5862dd`, no product/test diff vs. `92cdeb9d2`). The reopen (`codex-20260924T014923Z`,
+`candidate_generation=b2eed76b08144b6a9d473f6fc57f0a32`) is **not** a new product finding — it is
+a single carried-forward P2 gap in the *previous* round's own regression-matrix fix (the same
+gap as `codex-20260924T005217Z-265733be`'s finding #3, one round earlier): the prior round's PG
+revoked-link/owner-changed tests compare the ledger/handoff snapshot before vs. after a
+**second** (replay) grant attempt, which only proves "unchanged from an already-granted state".
+It does not prove the stronger, actually-required invariant: that a handoff revoked/reassigned
+**before its first-ever grant attempt** writes zero ledger rows and leaves `consent_required`
+`true`. Separately, the prior round's new POST-exchange coverage had 3 cases (cross-entry,
+cross-subject, nonexistent-artifact) but none for expired/replayed artifacts specifically while
+the caller already holds a real session cookie — the GET suite's expired/replayed cases start
+from an empty cookie jar, so they cannot show the POST path preserves an *existing* session on
+those two specific rejection reasons.
+
+### What this round adds
+
+| Gap (from `codex-20260924T014923Z`) | Fix this round |
+| --- | --- |
+| A. PG revoked-link/owner-changed rejection tests only proved the zero-write invariant across a *second* (replay) attempt, not the first-ever attempt. `referral-embed-handoff.repository.ts`'s `recordConsent()` (lines 389-405) writes `consent_required = false` + the consent snapshot only after `validateFn` passes and always `COMMIT`s/`ROLLBACK`s before it on every rejection branch — but that production invariant had no first-attempt regression test. | Added two new PG-backed tests to `sr-partner-notify-nav-20260917.integration.test.ts`: issue+consume a handoff, snapshot the handoffs row (`consent_required`/`consent_bundle_version`/`consent_granted_at`/`record`) and confirm the ledger has zero rows *before* any grant is ever attempted, then attempt the first-ever grant with the link already revoked (resp. the entry's tenant already reassigned), assert the specific rejection code, then re-snapshot and assert `toEqual` against the pre-grant snapshot plus zero ledger rows. Also added the equivalent zero-write-on-first-attempt checks to the existing PG "expired" and "not consumed" tests (which previously only asserted the rejection error, not the handoff's untouched state), and added two matching first-attempt tests to the fallback-repo suite (`consent-replay-guards.test.ts`), using that repo's existing public `findLatestConsent()` accessor (no new repository surface added; the in-memory repo has no equivalent handoff-row read accessor for a byte-level snapshot, so the fallback tests assert the ledger side of the same invariant while the PG tests assert both ledger and handoff snapshot). |
+| B. No POST-exchange production-path case for an expired or already-consumed (replayed) artifact while the caller already has a real session cookie, so nothing proved the route's shared `catch` block (which never clears cookies on any failure — `session/route.ts:199-211`) actually holds for these two specific rejection reasons via the POST path, as opposed to GET (which always starts from an empty jar in the existing expired/replayed cases). | Added two new cases to `notification-navigation-production-path.test.ts`'s `POST /api/referral/session (exchange...)` block: (1) bootstrap a real cookie via GET, then POST-exchange a separately-issued artifact after advancing fake time past its `expiresAt`, asserting `400` and the cookie unchanged; (2) bootstrap a real cookie, consume a second artifact out-of-band (simulating a second tab/already-followed link) so the target artifact is genuinely already-consumed, then POST-exchange the same artifact, asserting `400` and the cookie unchanged. Both cases additionally verify (a) a cross-subject artifact presented immediately afterward is still rejected (the failed attempt did not weaken the mismatch guard) and (b) a same-subject fresh artifact still exchanges successfully afterward (the failed attempts did not corrupt the exchange path). Also added a cookie-preservation assertion to the existing 8-hour-TTL grant-consent rejection test, which previously only asserted `400` without checking the cookie was left untouched. |
+
+### Verification this round
+
+- Syntax-level check via `ts.transpileModule` (TypeScript, resolved from the canonical root's own
+  `node_modules/typescript`, which — unlike `@nestjs/common` — is a real installed package rather
+  than a symlink) on all three edited test files: 0 diagnostics on each. This rules out a syntax
+  mistake in the new test code; it is not a full project-wide `tsc --noEmit` or a `vitest` run.
+- **Not executed locally**: `vitest`, `tsc -p tsconfig.json --noEmit`, and the PG integration suite.
+  This worktree's `apps/api/node_modules/@nestjs/*` symlinks point at
+  `.artifacts/worktrees/auto/gemini2-sr-partner-notify-nav-20260917-3/node_modules/.pnpm/...`, a
+  sibling worktree that the supervisor has since reaped (path no longer exists) — a new failure
+  mode not documented by any prior round on this task, which instead reported an *unhoisted*
+  (not broken-symlink) `node_modules`. Repairing the symlink requires `rm`/`ln`, and repairing it
+  properly requires `pnpm install`; all three were submitted this session and every one was
+  returned by this session's tool layer as `Bash command classified as defer` with no output —
+  consistent with this session's `orchestrator_approval_broker` MCP connection having failed
+  (`CONNECT_TIMEOUT`, reported at session start), since simple non-destructive reads/writes
+  (`ls`, `cat`, `grep`, `git diff`, `touch <new file>`) all completed normally in the same
+  session. This is a session/environment blocker, not a code issue; hosted CI on the pushed
+  `CANDIDATE_SHA` is, as in every prior round, the actual acceptance evidence for whether the new
+  and modified tests pass.
+- Manually re-read `referral-embed-handoff.repository.ts:283-413` (`recordConsent`'s PG path) and
+  `:451-500` (`recordConsentFallback`) line-by-line against the two new first-attempt tests to
+  confirm every rejection branch (`missing`/`not_consumed`/`expired`/`wrong_host`/
+  `session_mismatch`, and `validateFn`'s `REFERRAL_HANDOFF_REVOKED`/`OWNERSHIP_MISMATCH`/
+  `PARTNER_ENTRY_INACTIVE`) returns/throws strictly before the `INSERT`/`UPDATE` (PG) or the
+  `fallbackConsents.set`/`fallbackHandoffs.set` calls (fallback), so the new assertions test an
+  invariant the production code actually already enforces, not a check the tests assume without
+  grounding in the control flow.
+- Manually re-read `session/route.ts:141-212` end-to-end to confirm the `catch` block (lines
+  199-211) has no cookie-clearing call on any path (it was removed entirely in an earlier round,
+  per finding #2 in the very first table on this page) — the new expired/replayed POST-exchange
+  cases are exercising an already-true invariant, not asking for a new one.
+
+### Production Requirements Checked (updated, this round)
+
+- [x] entry_scoped_navigation_denies_cross_subject_tenant_entry — first-ever-attempt PG zero-write
+      tests added for revoked-link and owner-changed rejection; carries forward all prior rounds'
+      cross-entry/cross-subject coverage. Browser/native/live end-to-end still unverified in this
+      sandbox; hosted CI on this round's `CANDIDATE_SHA` is pending at handoff time.
+- [x] fresh_single_use_handoff_and_http_only_session_reuse — POST-exchange expired/replayed cookie-
+      preservation cases added; 8-hour-TTL grant-consent rejection now also asserts cookie
+      preservation; PG first-attempt zero-write tests added. Browser/native/live still unverified.
+      Hosted CI on this round's `CANDIDATE_SHA` is pending at handoff time.
+- [ ] navigation_reads_current_trip_without_creating_orders — unchanged this round (no findings
+      against this criterion in `codex-20260924T014923Z`); no files under this criterion's scope
+      were touched, confirmed by `git diff --stat` showing only the 3 test files listed above.
+      Browser/native/live still unverified, so left unchecked per §0.7.
+
+Handing off to reviewer Codex against `CANDIDATE_SHA=<set at push time>`,
+`CANDIDATE_BRANCH=claude/sr-partner-notify-nav-20260917` — do not reuse `052c06f66...`,
+`44281017`, `2f417ba48`, `92cdeb9d2`, or `e1d5862dd` as the reviewed SHA for this round's changes;
+hosted CI for this round's actual pushed SHA has not run yet as of this note.

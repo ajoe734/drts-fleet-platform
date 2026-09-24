@@ -606,6 +606,27 @@ describe.skipIf(!seedDatabaseUrl)(
           },
         }),
       ).rejects.toMatchObject({ code: "REFERRAL_HANDOFF_EXPIRED" });
+
+      // Zero-write invariant: the expired-session rejection must not create
+      // a ledger row or mutate the handoff's still-pending consent fields.
+      const clientAfter = await db.connect();
+      try {
+        const ledgerRes = await clientAfter.query(
+          "SELECT COUNT(*)::int AS count FROM admin.phase1_referral_embed_consent_ledger WHERE handoff_id = $1",
+          [handoff.handoffId],
+        );
+        expect(ledgerRes.rows[0].count).toBe(0);
+
+        const handoffRes = await clientAfter.query(
+          "SELECT consent_required, consent_bundle_version, consent_granted_at FROM admin.phase1_referral_embed_handoffs WHERE handoff_id = $1",
+          [handoff.handoffId],
+        );
+        expect(handoffRes.rows[0].consent_required).toBe(true);
+        expect(handoffRes.rows[0].consent_bundle_version).toBeNull();
+        expect(handoffRes.rows[0].consent_granted_at).toBeNull();
+      } finally {
+        clientAfter.release();
+      }
     });
 
     it("rejects consume on session mismatch without consuming the handoff (negative cross-subject zero-write)", async () => {
@@ -1059,8 +1080,253 @@ describe.skipIf(!seedDatabaseUrl)(
           [handoff.handoffId],
         );
         expect(res.rows[0].count).toBe(0);
+
+        const handoffRes = await client.query(
+          "SELECT consent_required, consent_bundle_version, consent_granted_at, consumed_at FROM admin.phase1_referral_embed_handoffs WHERE handoff_id = $1",
+          [handoff.handoffId],
+        );
+        expect(handoffRes.rows[0].consent_required).toBe(true);
+        expect(handoffRes.rows[0].consent_bundle_version).toBeNull();
+        expect(handoffRes.rows[0].consent_granted_at).toBeNull();
+        expect(handoffRes.rows[0].consumed_at).toBeNull();
       } finally {
         client.release();
+      }
+    });
+
+    // The two "replay" tests above only prove the ledger/handoff snapshot is
+    // unchanged by a *second* attempt after a real grant already succeeded
+    // (i.e. an already-false consent_required, an already-populated ledger
+    // row). They cannot show that a handoff which was revoked/reassigned
+    // *before* it was ever granted stays byte-identical on its rejected
+    // *first* attempt, because "still equal to what it was after a prior
+    // grant" is a different, weaker invariant than "still equal to what it
+    // was right after issue+consume, with consent_required still true and
+    // zero ledger rows ever written". These two tests close that gap.
+    it("rejects the first-ever grant-consent attempt when the identity link was revoked before any consent was granted, writing zero ledger rows and leaving the handoff's pending-consent state untouched", async () => {
+      const entrySlug = "demo-slug-pg-revoked-first";
+      const linkRepo = {
+        findByDrtsPassengerId: async () => ({ status: "revoked" as const }),
+      };
+      const tenantPartnerRepo = {
+        loadState: async () => ({
+          partnerEntries: [
+            {
+              entrySlug,
+              status: "active",
+              tenantId: null,
+              partnerId: null,
+              activeFlag: true,
+              authMode: "partner_api_key",
+            },
+          ],
+        }),
+      };
+      const auditNotificationService = { recordAuditLog: () => {} };
+      const service = new TenantPartnerService(
+        auditNotificationService as any,
+        tenantPartnerRepo as any,
+        undefined,
+        undefined,
+        undefined,
+        linkRepo as any,
+        handoffRepo,
+      );
+      await service.onModuleInit();
+
+      const handoff = await handoffRepo.issue({
+        artifact: "artifact_pg_revoked_first",
+        entrySlug,
+        entryHost: "demo-host.com",
+        partnerUserRef: "user-1",
+        drtsPassengerId: "pass-pg-revoked-first",
+        tenantId: null,
+        partnerId: null,
+        partnerProgramId: null,
+        consentRequired: true,
+        consentBundleVersion: null,
+        consentGrantedAt: null,
+        issuedAt: new Date().toISOString(),
+        expiresAt: new Date(Date.now() + 120_000).toISOString(),
+      });
+      const consumeRes = await handoffRepo.consume({
+        artifact: "artifact_pg_revoked_first",
+        entrySlug,
+        entryHost: "demo-host.com",
+      });
+      expect(consumeRes.outcome).toBe("consumed");
+
+      const client = await db.connect();
+      let handoffSnapshotBeforeGrant: {
+        consent_required: boolean;
+        consent_bundle_version: string | null;
+        consent_granted_at: string | null;
+        record: unknown;
+      };
+      try {
+        const preRes = await client.query(
+          "SELECT COUNT(*)::int AS count FROM admin.phase1_referral_embed_consent_ledger WHERE handoff_id = $1",
+          [handoff.handoffId],
+        );
+        expect(preRes.rows[0].count).toBe(0);
+
+        const handoffRes = await client.query(
+          "SELECT consent_required, consent_bundle_version, consent_granted_at, record FROM admin.phase1_referral_embed_handoffs WHERE handoff_id = $1",
+          [handoff.handoffId],
+        );
+        handoffSnapshotBeforeGrant = handoffRes.rows[0];
+        expect(handoffSnapshotBeforeGrant.consent_required).toBe(true);
+        expect(handoffSnapshotBeforeGrant.consent_bundle_version).toBeNull();
+        expect(handoffSnapshotBeforeGrant.consent_granted_at).toBeNull();
+      } finally {
+        client.release();
+      }
+
+      await expect(
+        service.recordReferralEmbedConsent({
+          handoffId: handoff.handoffId,
+          entrySlug,
+          entryHost: "demo-host.com",
+          currentDrtsPassengerId: "pass-pg-revoked-first",
+          currentPartnerEntrySlug: entrySlug,
+          consentBundle: {
+            bundleVersion: "v1",
+            grantedScopes: ["trip.manage", "pii.trip", "identity.bind"],
+            grantedAt: new Date().toISOString(),
+          },
+        }),
+      ).rejects.toMatchObject({ code: "REFERRAL_HANDOFF_REVOKED" });
+
+      const clientAfter = await db.connect();
+      try {
+        const res = await clientAfter.query(
+          "SELECT COUNT(*)::int AS count FROM admin.phase1_referral_embed_consent_ledger WHERE handoff_id = $1",
+          [handoff.handoffId],
+        );
+        expect(res.rows[0].count).toBe(0);
+
+        const handoffRes = await clientAfter.query(
+          "SELECT consent_required, consent_bundle_version, consent_granted_at, record FROM admin.phase1_referral_embed_handoffs WHERE handoff_id = $1",
+          [handoff.handoffId],
+        );
+        expect(handoffRes.rows[0]).toEqual(handoffSnapshotBeforeGrant);
+      } finally {
+        clientAfter.release();
+      }
+    });
+
+    it("rejects the first-ever grant-consent attempt when the entry's tenant ownership changed before any consent was granted, writing zero ledger rows and leaving the handoff's pending-consent state untouched", async () => {
+      const entrySlug = "demo-slug-pg-owner-changed-first";
+      const linkRepo = { findByDrtsPassengerId: async () => ({ status: "active" }) };
+      const tenantPartnerRepoReassigned = {
+        loadState: async () => ({
+          partnerEntries: [
+            {
+              entrySlug,
+              status: "active",
+              tenantId: "tenant-reassigned",
+              partnerId: null,
+              activeFlag: true,
+              authMode: "partner_api_key",
+            },
+          ],
+        }),
+      };
+      const auditNotificationService = { recordAuditLog: () => {} };
+      const service = new TenantPartnerService(
+        auditNotificationService as any,
+        tenantPartnerRepoReassigned as any,
+        undefined,
+        undefined,
+        undefined,
+        linkRepo as any,
+        handoffRepo,
+      );
+      await service.onModuleInit();
+
+      // The handoff itself was issued while the entry still belonged to
+      // tenantId: null; the service instance above (its tenant-partner
+      // directory reflecting the *already-reassigned* state) is the
+      // real-world equivalent of the directory being updated before the
+      // passenger ever completes consent.
+      const handoff = await handoffRepo.issue({
+        artifact: "artifact_pg_owner_changed_first",
+        entrySlug,
+        entryHost: "demo-host.com",
+        partnerUserRef: "user-1",
+        drtsPassengerId: "pass-pg-owner-changed-first",
+        tenantId: null,
+        partnerId: null,
+        partnerProgramId: null,
+        consentRequired: true,
+        consentBundleVersion: null,
+        consentGrantedAt: null,
+        issuedAt: new Date().toISOString(),
+        expiresAt: new Date(Date.now() + 120_000).toISOString(),
+      });
+      const consumeRes = await handoffRepo.consume({
+        artifact: "artifact_pg_owner_changed_first",
+        entrySlug,
+        entryHost: "demo-host.com",
+      });
+      expect(consumeRes.outcome).toBe("consumed");
+
+      const client = await db.connect();
+      let handoffSnapshotBeforeGrant: {
+        consent_required: boolean;
+        consent_bundle_version: string | null;
+        consent_granted_at: string | null;
+        record: unknown;
+      };
+      try {
+        const preRes = await client.query(
+          "SELECT COUNT(*)::int AS count FROM admin.phase1_referral_embed_consent_ledger WHERE handoff_id = $1",
+          [handoff.handoffId],
+        );
+        expect(preRes.rows[0].count).toBe(0);
+
+        const handoffRes = await client.query(
+          "SELECT consent_required, consent_bundle_version, consent_granted_at, record FROM admin.phase1_referral_embed_handoffs WHERE handoff_id = $1",
+          [handoff.handoffId],
+        );
+        handoffSnapshotBeforeGrant = handoffRes.rows[0];
+        expect(handoffSnapshotBeforeGrant.consent_required).toBe(true);
+        expect(handoffSnapshotBeforeGrant.consent_bundle_version).toBeNull();
+        expect(handoffSnapshotBeforeGrant.consent_granted_at).toBeNull();
+      } finally {
+        client.release();
+      }
+
+      await expect(
+        service.recordReferralEmbedConsent({
+          handoffId: handoff.handoffId,
+          entrySlug,
+          entryHost: "demo-host.com",
+          currentDrtsPassengerId: "pass-pg-owner-changed-first",
+          currentPartnerEntrySlug: entrySlug,
+          consentBundle: {
+            bundleVersion: "v1",
+            grantedScopes: ["trip.manage", "pii.trip", "identity.bind"],
+            grantedAt: new Date().toISOString(),
+          },
+        }),
+      ).rejects.toMatchObject({ code: "OWNERSHIP_MISMATCH" });
+
+      const clientAfter = await db.connect();
+      try {
+        const res = await clientAfter.query(
+          "SELECT COUNT(*)::int AS count FROM admin.phase1_referral_embed_consent_ledger WHERE handoff_id = $1",
+          [handoff.handoffId],
+        );
+        expect(res.rows[0].count).toBe(0);
+
+        const handoffRes = await clientAfter.query(
+          "SELECT consent_required, consent_bundle_version, consent_granted_at, record FROM admin.phase1_referral_embed_handoffs WHERE handoff_id = $1",
+          [handoff.handoffId],
+        );
+        expect(handoffRes.rows[0]).toEqual(handoffSnapshotBeforeGrant);
+      } finally {
+        clientAfter.release();
       }
     });
   },

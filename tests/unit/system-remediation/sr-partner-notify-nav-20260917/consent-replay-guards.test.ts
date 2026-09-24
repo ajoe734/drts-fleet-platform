@@ -290,6 +290,70 @@ describe("SR-PARTNER-NOTIFY-NAV-20260917 consent replay guards (fallback repo)",
     expect(ledger).toBeNull();
   });
 
+  it("rejects the first-ever grant-consent attempt when the identity link was already revoked before any consent was granted, writing zero ledger entries", async () => {
+    const handoffRepo = new ReferralEmbedHandoffRepository();
+    const linkRepo = {
+      findByDrtsPassengerId: async () => ({ status: "revoked" as const }),
+    };
+    const service = buildService({}, linkRepo, handoffRepo);
+    await service.onModuleInit();
+
+    const handoff = await issueAndConsume(handoffRepo, {
+      artifact: "artifact_revoked_before_first_grant",
+    });
+
+    // Sanity check: nothing has ever been granted for this passenger yet,
+    // distinct from the "revoked after a real grant" case above where a
+    // ledger row already exists by this point.
+    expect(await handoffRepo.findLatestConsent("demo-slug", "pass-1")).toBeNull();
+
+    await expect(
+      service.recordReferralEmbedConsent({
+        handoffId: handoff.handoffId,
+        entrySlug: "demo-slug",
+        entryHost: "demo-host.com",
+        currentDrtsPassengerId: "pass-1",
+        currentPartnerEntrySlug: "demo-slug",
+        consentBundle: consentBundle(),
+      }),
+    ).rejects.toMatchObject({ code: "REFERRAL_HANDOFF_REVOKED" });
+
+    expect(await handoffRepo.findLatestConsent("demo-slug", "pass-1")).toBeNull();
+  });
+
+  it("rejects the first-ever grant-consent attempt when the entry's tenant ownership had already changed before any consent was granted, writing zero ledger entries", async () => {
+    const handoffRepo = new ReferralEmbedHandoffRepository();
+    const linkRepo = { findByDrtsPassengerId: async () => ({ status: "active" }) };
+
+    // The handoff is issued/consumed while the tenant-partner directory
+    // already reflects the reassigned owner, modeling a directory update
+    // that landed before the passenger ever completed consent.
+    const handoff = await issueAndConsume(handoffRepo, {
+      artifact: "artifact_owner_changed_before_first_grant",
+    });
+    const reassignedService = buildService(
+      { tenantId: "tenant-reassigned" },
+      linkRepo,
+      handoffRepo,
+    );
+    await reassignedService.onModuleInit();
+
+    expect(await handoffRepo.findLatestConsent("demo-slug", "pass-1")).toBeNull();
+
+    await expect(
+      reassignedService.recordReferralEmbedConsent({
+        handoffId: handoff.handoffId,
+        entrySlug: "demo-slug",
+        entryHost: "demo-host.com",
+        currentDrtsPassengerId: "pass-1",
+        currentPartnerEntrySlug: "demo-slug",
+        consentBundle: consentBundle(),
+      }),
+    ).rejects.toMatchObject({ code: "OWNERSHIP_MISMATCH" });
+
+    expect(await handoffRepo.findLatestConsent("demo-slug", "pass-1")).toBeNull();
+  });
+
   it("allows grant-consent when the link is active and ownership is unchanged (positive control)", async () => {
     const handoffRepo = new ReferralEmbedHandoffRepository();
     const linkRepo = { findByDrtsPassengerId: async () => ({ status: "active" }) };
