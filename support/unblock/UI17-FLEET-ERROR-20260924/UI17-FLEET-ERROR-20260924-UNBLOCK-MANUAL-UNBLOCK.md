@@ -102,7 +102,8 @@ zh/en — would satisfy the parent's own acceptance wording
 ("完成窄範圍真元件與 reset／復原行為檢查...未跑 hosted browser 明列未驗", i.e. hosted-browser
 coverage is the acceptance criterion's own stronger option, not an optional extra) without
 touching `package.json` or `pnpm-lock.yaml` at all. It only needs `write_scopes` to gain a
-new test path (e.g. `tests/e2e/ui17-fleet-error-20260924-logout.spec.ts`) — a scope-list
+new test path (e.g. a `tests/e2e/ui17-fleet-error-20260924-logout*.spec.ts` file, not yet
+created) — a scope-list
 edit, not a dependency install, and not something blocked by the sandbox restriction above.
 
 If a true unit-level jsdom-mounted test is still wanted instead of (or in addition to)
