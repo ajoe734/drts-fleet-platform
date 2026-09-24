@@ -50,6 +50,7 @@
 <script type="text/babel" src="platform-p5.jsx"></script>
 <script type="text/babel" src="platform-mtx-auth.jsx"></script>
 <script type="text/babel" src="platform-mtx-commerce.jsx"></script>
+<script type="text/babel" src="platform-partner-notify.jsx"></script>
 
 <script type="text/babel">
 const TWEAK_DEFAULTS = /*EDITMODE-BEGIN*/{
@@ -160,6 +161,33 @@ function App() {
           <DCArtboard id="com-04" label="UI-04 · 營運紀錄查詢 · 缺值=未取得" width={W} height={H}><Bare><P5C_Records theme={th} /></Bare></DCArtboard>
           <DCArtboard id="com-05" label="UI-05 · 受控匯出 · 範圍確認" width={W} height={H}><Bare><P5C_Export theme={th} /></Bare></DCArtboard>
           <DCArtboard id="com-05b" label="UI-05 · 匯出執行中 running 64%" width={W} height={H}><Bare><P5C_Export theme={th} phase="running" /></Bare></DCArtboard>
+        </DCSection>
+
+        <DCSection id="partner-notify" title="03l · 夥伴通知分頁 · D · partner-notification-20260923" subtitle="夥伴詳情頁新增「通知」分頁 · 6 組狀態 · 密鑰遮罩 · 硬性文案「端點已接受，但裝置未知」">
+          <DCArtboard id="pn-ready" label="D1/D2/D4 · 綁定就緒 + 派送紀錄 + 生命週期" width={W} height={H}><Hero url="/partners/nexus-premium?tab=notify"><PA_PartnerNotify theme={th} /></Hero></DCArtboard>
+          <DCArtboard id="pn-pending" label="D1 · 綁定待測試（尚未測試）" width={W} height={H}><Bare><PA_PartnerNotify theme={th} bind="test_pending" test="none" /></Bare></DCArtboard>
+          <DCArtboard id="pn-pending-ongoing" label="D1 · 綁定待測試（測試進行中）" width={W} height={H}><Bare><PA_PartnerNotify theme={th} bind="test_pending" test="none" testingState="pending" inflight={true} /></Bare></DCArtboard>
+          <DCArtboard id="pn-pending-tested" label="D1 · 綁定待測試（測試成功，可啟用）" width={W} height={H}><Bare><PA_PartnerNotify theme={th} bind="test_pending" test="passed_current" /></Bare></DCArtboard>
+          <DCArtboard id="pn-disabled" label="D1 · 綁定已停用 (指紋相符，可直接恢復)" width={W} height={H}><Bare><PA_PartnerNotify theme={th} bind="disabled" test="passed_current" /></Bare></DCArtboard>
+          <DCArtboard id="pn-stale" label="D1 · 綁定已停用 (指紋變更，需重測)" width={W} height={H}><Bare><PA_PartnerNotify theme={th} bind="disabled" test="passed_stale" /></Bare></DCArtboard>
+          <DCArtboard id="pn-loading" label="D2 · 派送紀錄載入中" width={W} height={H}><Bare><PA_PartnerNotify theme={th} deliveries="loading" /></Bare></DCArtboard>
+          <DCArtboard id="pn-empty" label="D2 · 派送紀錄空清單" width={W} height={H}><Bare><PA_PartnerNotify theme={th} deliveries="empty" /></Bare></DCArtboard>
+          <DCArtboard id="pn-retry-pending" label="D2 · 派送紀錄單筆重送中" width={W} height={H}><Bare><PA_PartnerNotify theme={th} retryState="pending" retryRowId="dlv_0908" /></Bare></DCArtboard>
+          <DCArtboard id="pn-retry-failed" label="D2 · 派送紀錄單筆重送失敗" width={W} height={H}><Bare><PA_PartnerNotify theme={th} retryState="failed" retryRowId="dlv_0908" /></Bare></DCArtboard>
+          <DCArtboard id="pn-ready-no-access" label="D1 · 綁定就緒 (無 tenant:webhooks:read 權限)" width={W} height={H}><Bare><PA_PartnerNotify theme={th} endpointAccessible={false} /></Bare></DCArtboard>
+          <DCArtboard id="pn-edit" label="D3 · 編輯回呼綁定與事件類型" width={W} height={H}><Bare><PA_PartnerNotifyEdit theme={th} /></Bare></DCArtboard>
+          <DCArtboard id="pn-edit-no-access" label="D3 · 編輯回呼綁定 (無 tenant:webhooks:read 權限)" width={W} height={H}><Bare><PA_PartnerNotifyEdit theme={th} endpointAccessible={false} /></Bare></DCArtboard>
+          <DCArtboard id="pn-edit-pending" label="D3 · 編輯儲存中" width={W} height={H}><Bare><PA_PartnerNotifyEdit theme={th} saveState="pending" /></Bare></DCArtboard>
+          <DCArtboard id="pn-edit-failed" label="D3 · 編輯儲存失敗" width={W} height={H}><Bare><PA_PartnerNotifyEdit theme={th} saveState="failed" /></Bare></DCArtboard>
+          <DCArtboard id="pn-edit-success" label="D3 · 編輯儲存成功 (返回綁定頁，version: 8，尚未測試)" width={W} height={H}><Bare><PA_PartnerNotify theme={th} bind="test_pending" test="none" version={8} /></Bare></DCArtboard>
+          <DCArtboard id="pn-test-failed" label="D1 · 綁定測試失敗 (網路異常)" width={W} height={H}><Bare><PA_PartnerNotify theme={th} bind="test_pending" test="none" testingState="failed" failed={true} /></Bare></DCArtboard>
+          <DCArtboard id="pn-test-rejected" label="D1 · 綁定測試遭拒 (夥伴端回傳失敗)" width={W} height={H}><Bare><PA_PartnerNotify theme={th} bind="test_pending" test="none" testingState="rejected" failed={true} /></Bare></DCArtboard>
+          <DCArtboard id="pn-enable-pending" label="D1 · 綁定啟用中" width={W} height={H}><Bare><PA_PartnerNotify theme={th} bind="test_pending" test="passed_current" enableState="pending" inflight={true} /></Bare></DCArtboard>
+          <DCArtboard id="pn-enable-failed" label="D1 · 綁定啟用失敗" width={W} height={H}><Bare><PA_PartnerNotify theme={th} bind="test_pending" test="passed_current" enableState="failed" /></Bare></DCArtboard>
+          <DCArtboard id="pn-disable-pending" label="D1 · 綁定停用中" width={W} height={H}><Bare><PA_PartnerNotify theme={th} bind="ready" test="passed_current" disableState="pending" inflight={true} /></Bare></DCArtboard>
+          <DCArtboard id="pn-disable-failed" label="D1 · 綁定停用失敗" width={W} height={H}><Bare><PA_PartnerNotify theme={th} bind="ready" test="passed_current" disableState="failed" /></Bare></DCArtboard>
+          <DCArtboard id="pn-errors" label="D6 · 錯誤與復原 · 409/404/403 + 200/202" width={W} height={H}><Bare><PA_PartnerNotifyErrors theme={th} /></Bare></DCArtboard>
+          <DCArtboard id="pn-recovery" label="D6 · 生命週期載入與復原狀態" width={W} height={H}><Bare><PA_PartnerNotifyRecoveryBoards theme={th} /></Bare></DCArtboard>
         </DCSection>
 
         <DCSection id="fleet" title="04 · 車隊與法遵 · 多 tab (Q-ADM08/09)">          <DCArtboard id="fleet-vehicles" label="Vehicles" width={W} height={H}><Hero url="/fleet?tab=vehicles"><PA_Fleet theme={th} tab="vehicles" /></Hero></DCArtboard>
