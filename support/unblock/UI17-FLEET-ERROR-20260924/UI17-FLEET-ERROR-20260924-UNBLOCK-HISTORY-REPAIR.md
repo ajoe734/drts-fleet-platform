@@ -116,8 +116,9 @@ this history-repair task does not have write scope to fix:
   hoist pattern in `.npmrc`, so pnpm's per-package isolation would still keep
   `react` out of anything outside `apps/fleet-partner-portal-web`'s own
   `node_modules` after a full install — does not depend on install state.)
-- `docs/04-uat/ui17-handoff-20260924/UI17-FLEET-ERROR-20260924.md` as committed
-  on `gemini/ui17-fleet-error-20260924-v2` self-reports
+- `gemini/ui17-fleet-error-20260924-v2:docs/04-uat/ui17-handoff-20260924/UI17-FLEET-ERROR-20260924.md`
+  (that path does not exist on this branch; it is only present on the `v2`
+  branch referenced) self-reports
   `pnpm run typecheck: Exit 0` / `pnpm run test:unit ...: Exit 0` for this
   content. That claim is **not independently verified** here and is
   inconsistent with the static `package.json`/`node_modules` evidence above; per
