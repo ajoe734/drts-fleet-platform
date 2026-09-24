@@ -90,4 +90,61 @@ test.describe("partner map booking UI", () => {
     await expect(page.getByText("派遣前需人工確認").first()).toBeVisible();
     await expect(page.getByText("表單驗證通過")).toHaveCount(0);
   });
+
+
+  test("blocks submission when outside service area AND provider is down (pickup)", async ({ page }) => {
+    const response = await page.goto("/acme/book?eligibilityVerificationId=elig-verified-003");
+    expect(response?.status()).toBe(200);
+
+    await fillCardProgramFields(page);
+    
+    const pickupPicker = page.locator("[data-address-map-picker]").nth(0);
+    await pickupPicker.getByRole("button", { name: "手動輸入座標" }).click();
+    await pickupPicker.getByLabel("緯度").fill("24.9");
+    await pickupPicker.getByLabel("經度").fill("121.4");
+    await pickupPicker.getByLabel("手動定位原因").fill("Outside test");
+    await pickupPicker.getByRole("button", { name: "使用此位置" }).click();
+
+    const submit = page.getByRole("button", { name: "驗證下單表單" });
+    await expect(submit).toBeDisabled();
+
+    await page.evaluate(() => {
+      window.sessionStorage.setItem("drts.mock.mapProviderMode", "unavailable");
+    });
+    
+    const dropoffPicker = page.locator("[data-address-map-picker]").nth(1);
+    await dropoffPicker.getByRole("button", { name: "手動輸入座標" }).click();
+    await dropoffPicker.getByLabel("緯度").fill("25.047");
+    await dropoffPicker.getByLabel("經度").fill("121.517");
+    await dropoffPicker.getByLabel("手動定位原因").fill("Outage dropoff");
+    await dropoffPicker.getByRole("button", { name: "使用此位置" }).click();
+
+    await expect(submit).toBeDisabled();
+  });
+
+  test("blocks submission if manual reason is only whitespace", async ({ page }) => {
+    await page.addInitScript(() => {
+      window.sessionStorage.setItem("drts.mock.mapProviderMode", "unavailable");
+    });
+    await page.goto("/acme/book?eligibilityVerificationId=elig-verified-004");
+    await fillCardProgramFields(page);
+    
+    const pickupPicker = page.locator("[data-address-map-picker]").nth(0);
+    await pickupPicker.getByRole("button", { name: "手動輸入座標" }).click();
+    await pickupPicker.getByLabel("緯度").fill("25.04");
+    await pickupPicker.getByLabel("經度").fill("121.51");
+    await pickupPicker.getByLabel("手動定位原因").fill("   ");
+    await pickupPicker.getByRole("button", { name: "使用此位置" }).click();
+
+    const dropoffPicker = page.locator("[data-address-map-picker]").nth(1);
+    await dropoffPicker.getByRole("button", { name: "手動輸入座標" }).click();
+    await dropoffPicker.getByLabel("緯度").fill("25.047");
+    await dropoffPicker.getByLabel("經度").fill("121.517");
+    await dropoffPicker.getByLabel("手動定位原因").fill("   ");
+    await dropoffPicker.getByRole("button", { name: "使用此位置" }).click();
+
+    const submit = page.getByRole("button", { name: "驗證下單表單" });
+    await expect(submit).toBeDisabled();
+  });
+
 });

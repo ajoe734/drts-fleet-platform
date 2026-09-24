@@ -42,7 +42,7 @@ const zhLabels: AddressMapPickerLabels = {
   provenanceLabel: "位置來源",
   coordinatesLabel: "座標",
   mapEmpty: "選擇地址或手動放置座標後，會在這裡預覽。",
-  mapHint: "可拖曳圖釘，或用方向鍵微調位置。",
+  mapHint: "↑↓←→ 微調 · Shift 大步",
   pinAdjustHint: "已手動調整圖釘位置。",
   clearSelection: "清除",
   serviceableTitle: "位於服務範圍內",
