@@ -36,10 +36,15 @@
 <script type="text/babel" src="pb-states.jsx"></script>
 <script type="text/babel" src="pb-receipts.jsx"></script>
 <script type="text/babel" src="pb-embed.jsx"></script>
+<script type="text/babel" src="mgmt-tokens.jsx"></script>
+<script type="text/babel" src="map-picker.jsx"></script>
+<script type="text/babel" src="map-picker-integrations.jsx"></script>
 
 <script type="text/babel">
 function App() {
   const W = 402, H = 874;
+  const th = buildMgmtTheme({ console: 'partner' });
+
   const Phone = ({ children, p }) => (
     <IOSDevice width={W} height={H} title={(p && p.brand) + ' App'}>{children}</IOSDevice>
   );
@@ -84,6 +89,18 @@ function App() {
         <DCArtboard id="trv-receipt" label="行程明細 / 收據 · 已含團費 (§5.4)" width={W} height={H}><Phone p={PROGRAMS.travel}><PB_TrvReceipt /></Phone></DCArtboard>
       </DCSection>
 
+      
+      <DCSection id="map-picker" title="05 · 夥伴訂車表單 × 地址選點 · A · partner-map-picker-20260704" subtitle="保留方案膠囊 / 資格橫幅 / 送出鈕位置 · 地圖中斷 → 送交人工複核">
+        <DCArtboard id="mp-pb-empty" label="A2 · 尚未輸入 (初始態)" width={W} height={H}><Phone p={PROGRAMS.card}><PB_BookCardMap theme={th} state="empty" dropoffState="empty" /></Phone></DCArtboard>
+        <DCArtboard id="mp-pb-selected" label="A2 · 已選定落點" width={W} height={H}><Phone p={PROGRAMS.card}><PB_BookCardMap theme={th} state="selected" dropoffState="selected" /></Phone></DCArtboard>
+        <DCArtboard id="mp-pb-candidates" label="A2 · 候選清單" width={W} height={H}><Phone p={PROGRAMS.card}><PB_BookCardMap theme={th} state="candidates" dropoffState="selected" /></Phone></DCArtboard>
+        <DCArtboard id="mp-pb-out" label="A2 · 不在服務範圍（阻擋）" width={W} height={H}><Phone p={PROGRAMS.card}><PB_BookCardMap theme={th} state="selected" dropoffState="out_of_area" /></Phone></DCArtboard>
+        <DCArtboard id="mp-pb-down-blank" label="A2 · 地圖中斷 → 送交人工複核 (阻擋未填原因)" width={W} height={H}><Phone p={PROGRAMS.card}><PB_BookCardMap theme={th} state="provider_down" dropoffState="selected" reason="" /></Phone></DCArtboard>
+        <DCArtboard id="mp-pb-down-filled" label="A2 · 地圖中斷 → 送交人工複核" width={W} height={H}><Phone p={PROGRAMS.card}><PB_BookCardMap theme={th} state="provider_down" dropoffState="selected" reason="請協助確認" /></Phone></DCArtboard>
+        <DCArtboard id="mp-pb-manual" label="A2 · 人工複核" width={W} height={H}><Phone p={PROGRAMS.card}><PB_BookCardMap theme={th} state="manual_review" dropoffState="selected" reason="無法定位" /></Phone></DCArtboard>
+        <DCArtboard id="mp-pb-manual-blank" label="A2 · 人工複核 (阻擋未填原因)" width={W} height={H}><Phone p={PROGRAMS.card}><PB_BookCardMap theme={th} state="manual_review" dropoffState="selected" reason="" /></Phone></DCArtboard>
+        <DCArtboard id="mp-pb-manual-coords" label="A2 · 手動座標 (正常派車)" width={W} height={H}><Phone p={PROGRAMS.card}><PB_BookCardMap theme={th} state="manual_coords" dropoffState="selected" reason="現場確認座標" /></Phone></DCArtboard>
+      </DCSection>
       <DCSection id="embed" title="04 · 網銀 App 內嵌身分狀態 · Online-banking Embed Identity (B1–B5)" subtitle="身分來自銀行 session (reference token) · 永不擷取卡片資料 · 中信 App webview">
         <DCArtboard id="embed-b1" label="B1 · 已登入帶入 (happy path)" width={W} height={H}><Phone p={PROGRAMS.card}><PB_EmbedHandoff /></Phone></DCArtboard>
         <DCArtboard id="embed-b2" label="B2 · 權杖逾時 · 需重新驗證" width={W} height={H}><Phone p={PROGRAMS.card}><PB_EmbedReauth /></Phone></DCArtboard>

@@ -1153,7 +1153,7 @@ export function AddressMapPicker<TServiceProduct extends string = string>(
                       theme={theme}
                       tone={confidenceTone(candidate.confidence)}
                     >
-                      {candidate.confidence}
+                      {candidate.provider} · {candidate.confidence}
                     </TonePill>
                   </button>
                 </li>

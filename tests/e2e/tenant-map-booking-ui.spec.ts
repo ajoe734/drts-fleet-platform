@@ -166,4 +166,98 @@ test.describe("tenant console booking map alignment", () => {
     });
     await expect(submit).toBeDisabled();
   });
+
+
+  test("degraded map provider warns but allows service-area submission", async ({ page }) => {
+    await stubGeoProvider(page, "serviceable");
+    await page.route("**/api/geo/health", (route) =>
+      route.fulfill({
+        json: { provider: "mock", mode: "mock", status: "degraded" },
+      })
+    );
+    
+    // Intercept submission to check payload
+    let submitPayload = null;
+    await page.route("**/api/bookings", async (route) => {
+      if (route.request().method() === "POST") {
+        submitPayload = route.request().postDataJSON();
+        await route.fulfill({ json: { id: "test-booking-123" } });
+      } else {
+        await route.continue();
+      }
+    });
+
+    await page.goto("/bookings/new");
+    await pinBothStops(page);
+    await expect(page.getByText("Inside the service area", { exact: false })).toBeVisible();
+    
+    // Check degraded CTA
+    const submitBtn = page.getByRole("button", { name: "Submit manual review" });
+    await expect(submitBtn).toBeVisible();
+    await expect(submitBtn).toBeEnabled();
+    await submitBtn.click();
+    
+    // Wait for payload
+    await page.waitForTimeout(500); // give time for route
+    expect(submitPayload).toBeTruthy();
+    expect(submitPayload.mapFallbackReview).toMatchObject({
+      providerAvailable: true,
+      providerDegraded: true
+    });
+  });
+
+  test("manual coordinate entry supports routing and outage submission", async ({ page }) => {
+    await stubGeoProvider(page, "serviceable");
+    await page.route("**/api/geo/health", (route) =>
+      route.fulfill({
+        json: { provider: "mock", mode: "mock", status: "unhealthy", failClosed: true },
+      })
+    );
+    
+    // Intercept submission to check payload
+    let submitPayload = null;
+    await page.route("**/api/bookings", async (route) => {
+      if (route.request().method() === "POST") {
+        submitPayload = route.request().postDataJSON();
+        await route.fulfill({ json: { id: "test-booking-124" } });
+      } else {
+        await route.continue();
+      }
+    });
+
+    await page.goto("/bookings/new");
+
+    await page.getByRole("button", { name: "Enter coordinates manually" }).first().click();
+    const latInput1 = page.getByLabel("Latitude").first();
+    const lngInput1 = page.getByLabel("Longitude").first();
+    const reasonInput1 = page.getByLabel("Reason for manual location").first();
+    await latInput1.fill("25.047");
+    await lngInput1.fill("121.517");
+    await reasonInput1.fill("Manual pickup");
+    await page.getByRole("button", { name: "Use this location" }).first().click();
+
+    await page.getByRole("button", { name: "Enter coordinates manually" }).last().click();
+    const latInput2 = page.getByLabel("Latitude").last();
+    const lngInput2 = page.getByLabel("Longitude").last();
+    const reasonInput2 = page.getByLabel("Reason for manual location").last();
+    await latInput2.fill("25.0797");
+    await lngInput2.fill("121.2342");
+    await reasonInput2.fill("Manual dropoff");
+    await page.getByRole("button", { name: "Use this location" }).last().click();
+
+    await expect(page.getByText("Inside the service area", { exact: false })).toBeVisible();
+    
+    const submitBtn = page.getByRole("button", { name: "Submit manual review" });
+    await expect(submitBtn).toBeVisible();
+    await expect(submitBtn).toBeEnabled();
+    await submitBtn.click();
+    
+    await page.waitForTimeout(500); // give time for route
+    expect(submitPayload).toBeTruthy();
+    expect(submitPayload.mapFallbackReview).toMatchObject({
+      providerAvailable: false,
+      providerDegraded: true
+    });
+  });
+
 });
