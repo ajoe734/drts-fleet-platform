@@ -1,0 +1,29 @@
+name: Live Map UI Acceptance
+
+on:
+  workflow_dispatch:
+    inputs:
+      candidate_sha:
+        description: 'Candidate SHA'
+        required: false
+
+jobs:
+  map-ui-acceptance:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.inputs.candidate_sha || github.sha }}
+      - uses: pnpm/action-setup@v4
+        with: { version: 10.33.0, run_install: false }
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: pnpm-lock.yaml
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm exec playwright install --with-deps chromium
+      - run: pnpm exec playwright test -c playwright.tenant-map-booking.config.ts tests/e2e/tenant-map-booking-ui.spec.ts
+      - run: pnpm exec playwright test -c playwright.concierge-map-booking.config.ts tests/e2e/concierge-map-booking-ui.spec.ts
+      - run: pnpm exec playwright test -c playwright.partner-booking-surfaces.config.ts tests/e2e/partner-map-booking-ui.spec.ts
