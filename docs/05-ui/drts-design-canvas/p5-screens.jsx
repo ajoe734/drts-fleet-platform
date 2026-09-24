@@ -42,11 +42,16 @@ function P5_S09(){ return <P5Phone><P5Header status="行程已完成"/>
     <div style={{ fontSize:12.5, color:P5.mut }}>您的意見會協助我們維持服務品質。</div>
   </div>
   <div style={{ margin:'0 14px 10px', display:'flex', flexDirection:'column', gap:8 }}><P5Btn icon="doc">查看電子乘車證明</P5Btn><P5Btn kind="ghost">回到首頁</P5Btn></div><P5Notice/></P5Phone>; }
-function P5_S10(){ // Certificate
-  const R=(k,v,mono)=><div style={{ display:'flex', justifyContent:'space-between', gap:12, padding:'8px 0', borderBottom:'1px solid '+P5.lineSoft, fontSize:12.5 }}><span style={{ color:P5.mut }}>{k}</span><span style={{ fontWeight:600, fontFamily:mono?P5.mono:'inherit', textAlign:'right' }}>{v}</span></div>;
+function P5_S10({ detail=true }){ // E-04 電子乘車證明（修正版 §91-6）
+  const R=(k,v,mono,bold)=><div style={{ display:'flex', justifyContent:'space-between', gap:12, padding:'8px 0', borderBottom:'1px solid '+P5.lineSoft, fontSize:12.5 }}><span style={{ color:P5.mut, flexShrink:0 }}>{k}</span><span style={{ fontWeight:bold?800:600, fontFamily:mono?P5.mono:'inherit', textAlign:'right', fontSize:bold?14:12.5 }}>{v}</span></div>;
   return <P5Phone><P5Header status="電子乘車證明"/>
     <P5Card>
-      {R('車牌','BKR-2208',1)}{R('上車 / 下車','14:32 / 15:07',1)}{R('行駛時間','35 分鐘')}{R('起訖','信義區松仁路 100 號 → 中山區南京東路二段 100 號')}{R('行駛里程','6.4 公里',1)}{R('車資','NT$ 355',1)}{R('通行費','NT$ 0',1)}{R('客服電話','0800-090-000',1)}
+      {R('車隊／派遣業者','智行車隊（智慧運輸科技股份有限公司）')}{R('車牌','BKR-2208',1)}{R('駕駛','蔡○○　執登證號 ••••4280',1)}{R('上車／下車時間','2026/07/20 14:32 / 15:07',1)}{R('起訖地點','信義區松仁路 100 號 → 中山區南京東路二段 100 號')}{R('行駛里程','6.4 公里',1)}{R('行駛時間','35 分鐘')}
+      <div style={{ padding:'8px 0', borderBottom:'1px solid '+P5.lineSoft }}>
+        <div style={{ display:'flex', justifyContent:'space-between', fontSize:12.5 }}><span style={{ color:P5.mut }}>車資明細</span><span style={{ fontSize:11, color:P5.brand, fontWeight:600 }}>{detail?'收合 ▴':'展開 ▾'}</span></div>
+        {detail && <div style={{ marginTop:6, display:'grid', gridTemplateColumns:'1fr 1fr', gap:'4px 12px', fontSize:11.5 }}>{[['起程','NT$ 85'],['續程','NT$ 245'],['延滯計時','NT$ 25'],['夜間加成','NT$ 0']].map(([k,v])=><div key={k} style={{ display:'flex', justifyContent:'space-between' }}><span style={{ color:P5.mut }}>{k}</span><span style={{ fontFamily:P5.mono, fontWeight:600 }}>{v}</span></div>)}</div>}
+      </div>
+      {R('通行費','NT$ 0',1)}{R('車資合計','NT$ 355',1,true)}{R('支付方式','信用卡 ••••1234',1)}{R('客服電話','02-2944-0985',1)}
       <div style={{ display:'flex', justifyContent:'space-between', gap:12, padding:'8px 0', fontSize:12.5 }}><span style={{ color:P5.mut }}>主管機關申訴電話</span><span style={{ fontWeight:600, fontFamily:P5.mono }}>1999</span></div>
       <div style={{ fontSize:10, color:P5.dim, marginTop:4 }}>證明編號 RC-2607••-0186 · 個資已遮碼</div>
     </P5Card>
