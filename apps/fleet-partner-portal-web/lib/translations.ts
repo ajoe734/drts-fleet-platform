@@ -501,6 +501,18 @@ const en: Dict = {
   "referral.statements.noStatement": "Statement not found",
   "referral.actions.export": "Export",
   "referral.actions.viewDetail": "View detail",
+
+  "error.scope.badge": "Missing fleet scope",
+  "error.scope.title": "Fleet identity unrecognised",
+  "error.scope.body":
+    "Your account lacks a valid fleet identity configuration. No fleet data can be loaded. Please contact your administrator to restore your fleet scope.",
+  "error.generic.badge": "Page error",
+  "error.generic.title": "This page is temporarily unavailable",
+  "error.generic.body":
+    "An unexpected error occurred. Your data is unaffected. Please try again; if the issue persists, report it with the trace ID.",
+  "error.trace": "trace",
+  "error.unknown": "unknown",
+
   "referral.table.day": "Date",
   "referral.table.activeUsers": "Active users",
   "referral.table.trip": "Trip",
@@ -754,6 +766,18 @@ const zh: Dict = {
   "referral.nav.usage": "用量明細",
   "referral.nav.revenue": "分潤",
   "referral.nav.statements": "分潤對帳單",
+
+  "error.scope.badge": "缺少車隊身分",
+  "error.scope.title": "無法辨識您所屬的車隊",
+  "error.scope.body":
+    "您的帳號缺少有效的車隊識別設定，因此無法載入任何車隊資料。請聯絡您的車隊管理員或平台客服重新綁定車隊身分。",
+  "error.generic.badge": "頁面發生錯誤",
+  "error.generic.title": "這個頁面暫時無法顯示",
+  "error.generic.body":
+    "發生未預期的錯誤，您的資料沒有受到影響。請重試一次；若持續發生，請附上追蹤編號回報。",
+  "error.trace": "trace",
+  "error.unknown": "unknown",
+
   "dashboard.title": "車行營運總覽",
   "dashboard.subtitle": "大都會車隊 · 2026 年 6 月 · METRO_FLEET",
   "dashboard.recruit": "招募司機",
