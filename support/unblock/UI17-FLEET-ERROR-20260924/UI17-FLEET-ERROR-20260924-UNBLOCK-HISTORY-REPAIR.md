@@ -178,3 +178,16 @@ and `Product smoke acceptance` (10m50s). `orchestrator-tests` reports
 `skipping` (not applicable to a docs-only change) and is not part of the
 required set. No further push was needed; the reopen was evaluated against
 the pre-fix SHA before the fix's own progress note was read.
+
+Self-caught regression while writing this section: commit `1a48d0bbf` (adding
+this section) was staged with `git add -A` *before* a follow-up edit to this
+same paragraph, so the pushed blob still carried an unqualified backtick
+citation of the `v2`-only UAT doc path and re-failed `Canonical consistency`
+on this task's own PR #2138 (run `35980616926`, job `107571344526`,
+`gh run view --job 107571344526 --log`). Corrected in commit `03e1431bc`
+(re-worded to reference "Still open" instead of repeating the raw path;
+confirmed the committed blob itself via `git show 03e1431bc:<path>`, not just
+the working tree, before pushing). Re-verified full-green with `gh run watch
+35981847676/35981847777 --exit-status` then `gh pr checks 2138` (exit 0),
+covering the same required-check set as above at the final candidate SHA
+`03e1431bc`.
