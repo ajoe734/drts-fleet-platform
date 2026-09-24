@@ -39,26 +39,33 @@ function PnBinding({ theme:th, state='ready', version=7, validatedAt='09-23 14:0
     </Card>
   );
 }
-function PnLifecycle({ theme:th, state='ready', version=7, validated=true, fingerprintMatch=true, testingState='idle', enableState='idle', disableState='idle' }) {
-  const isPending = testingState === 'pending' || enableState === 'pending' || disableState === 'pending';
-  const canTest = !isPending;
-  const canEnable = (state==='test_pending' || state==='disabled') && validated && fingerprintMatch && !isPending;
-  const enableReason = state==='ready' ? 'already_enabled' : (!validated ? 'requires_test' : (!fingerprintMatch ? 'stale_fingerprint' : (isPending ? 'action_in_progress' : undefined)));
-  const canDisable = state==='ready' && !isPending;
+function PnLifecycle({ theme:th, state='ready', version=7, validated=true, fingerprintMatch=true, testingState='idle', enableState='idle', disableState='idle', resumeState='idle', inflight=false }) {
+  const isPending = testingState === 'pending' || enableState === 'pending' || disableState === 'pending' || resumeState === 'pending' || inflight;
+  const canTest = !isPending && state !== 'disabled';
+  const canEnable = state === 'test_pending' && validated && fingerprintMatch && !isPending;
+  const enableReason = state === 'ready' ? 'already_enabled' : (!validated ? 'requires_test' : (!fingerprintMatch ? 'stale_fingerprint' : (isPending ? 'action_in_progress' : undefined)));
+  const canDisable = state === 'ready' && !isPending;
+  const canResume = state === 'disabled' && !isPending;
 
   return (
     <Card theme={th} title="生命週期控制" subtitle="test / enable / disable">
       <div style={{ display:'flex', flexDirection:'column', gap:8 }}>
-        <ActionButton theme={th} descriptor={{ action:'test', enabled: canTest, riskLevel:'low', disabledReasonCode: isPending ? 'action_in_progress' : undefined }} icon="refresh" label={testingState==='pending' ? "測試中..." : "發送測試事件"} en="test"/>
-        <ActionButton theme={th} descriptor={{ action:'enable', enabled: canEnable, disabledReasonCode: enableReason, riskLevel:'medium', requiresReason:true }} icon="check" label={enableState==='pending' ? "啟用中..." : `啟用 / 恢復 (expectedVersion: ${version})`} en="enable"/>
+        <ActionButton theme={th} descriptor={{ action:'test', enabled: canTest, riskLevel:'low', disabledReasonCode: isPending ? 'action_in_progress' : (state === 'disabled' ? 'binding_disabled' : undefined) }} icon="refresh" label={testingState==='pending' ? "測試中..." : "發送測試事件"} en="test"/>
+        {state === 'disabled' ? (
+          <ActionButton theme={th} descriptor={{ action:'resume', enabled: canResume, riskLevel:'medium', requiresReason:true, disabledReasonCode: isPending ? 'action_in_progress' : undefined }} icon="check" label={resumeState==='pending' ? "恢復中..." : "恢復通知"} en="resume"/>
+        ) : (
+          <ActionButton theme={th} descriptor={{ action:'enable', enabled: canEnable, disabledReasonCode: enableReason, riskLevel:'medium', requiresReason:true }} icon="check" label={enableState==='pending' ? "啟用中..." : `啟用 (expectedVersion: ${version})`} en="enable"/>
+        )}
         <ActionButton theme={th} descriptor={{ action:'disable', enabled: canDisable, disabledReasonCode: isPending ? 'action_in_progress' : undefined, riskLevel:'high', requiresReason:true }} icon="lock" label={disableState==='pending' ? "停用中..." : `停用 (expectedVersion: ${version})`} en="disable"/>
       </div>
       <div style={{ fontSize:10.5, color:th.textDim, marginTop:9 }}>
         <p>測試成功僅更新驗證狀態，無須 expectedVersion。異動前 (啟用/停用) 將重新載入取得最新版本。</p>
+        <p>「恢復通知」將觸發更新並重新測試，通過後才能啟用。 (API: PUT → test → enable)</p>
         {testingState==='failed' && <div style={{color:th.danger, marginBottom:4}}>測試發送失敗，請重試 (網路異常)。</div>}
         {testingState==='rejected' && <div style={{color:th.danger, marginBottom:4}}>測試遭拒：夥伴回傳失敗狀態 (kind: failed)。</div>}
         {enableState==='failed' && <div style={{color:th.danger, marginBottom:4}}>啟用失敗，請重試。</div>}
         {disableState==='failed' && <div style={{color:th.danger, marginBottom:4}}>停用失敗，請重試。</div>}
+        {resumeState==='failed' && <div style={{color:th.danger, marginBottom:4}}>恢復失敗，請重試。</div>}
         待測試狀態需先通過測試事件才可啟用。目前測試狀態: {isPending ? '進行中' : (!validated ? '尚未測試' : (fingerprintMatch ? '已通過 (指紋相符)' : '指紋不符 (端點已變更)'))}
       </div>
     </Card>
@@ -70,7 +77,7 @@ const FX_PN_DELIVERIES = [
   { outboxId:'dlv_0913', deliveryId:'del_ghi789', event:'eta_changed', target:'…/drts/hook', status:'failed', code:'408', reason:'lease_active (處理中)', at:'09-24 09:45:00', tries:2, stage:'outbox_persisted', disposition:'automatic', failReason:'provider_transient_error', admission:'lease_active' },
   { outboxId:'dlv_0912', deliveryId:'del_jkl012', event:'assignment_replaced', target:'…/drts/hook', status:'failed', code:'—', reason:'被新通知取代 (notification_superseded)', at:'09-24 09:41:12', tries:1, stage:'outbox_persisted', disposition:'terminal', failReason:'notification_superseded', admission:'none' },
   { outboxId:'dlv_0911', deliveryId:'del_mno345', event:'assignment_disclosure_ready', target:'…/drts/hook', status:'failed', code:'—', reason:'過期 (notification_expired)', at:'09-24 09:38:50', tries:1, stage:'outbox_persisted', disposition:'terminal', failReason:'notification_expired', admission:'none' },
-  { outboxId:'dlv_0910', deliveryId:null, event:'assignment_disclosure_ready', target:'…/drts/hook', status:'pending', code:'—', reason:'重新入列 (待送)', at:'09-24 09:30:07', tries:0, stage:'outbox_persisted', disposition:'manual_only', failReason:'route_missing', admission:'none' },
+  { outboxId:'dlv_0910', deliveryId:null, event:'assignment_disclosure_ready', target:null, status:'pending', code:'—', reason:'重新入列 (待送)', at:'09-24 09:30:07', tries:0, stage:'outbox_persisted', disposition:'manual_only', failReason:'route_missing', admission:'none' },
   { outboxId:'dlv_0909', deliveryId:'del_pqr678', event:'driver_arrived', target:'…/drts/hook', status:'failed', code:'503', reason:'綁定未就緒 (configuration_blocked)', at:'09-24 08:55:41', tries:3, stage:'outbox_persisted', disposition:'configuration_blocked', failReason:'endpoint_unavailable', admission:'none' },
   { outboxId:'dlv_0908', deliveryId:null, event:'receipt_ready', target:'…/drts/hook', status:'pending', code:'—', reason:'已接受手動重送 (待送)', at:'09-24 08:15:00', tries:1, stage:'outbox_persisted', disposition:'manual_only', failReason:'partner_ack_invalid', admission:'none' },
   { outboxId:'dlv_0908', deliveryId:'del_stu901', event:'receipt_ready', target:'…/drts/hook', status:'failed', code:'200', reason:'無效 Ack (缺 ID/不符) (partner_ack_invalid)', at:'09-24 08:12:30', tries:1, stage:'outbox_persisted', disposition:'manual_only', failReason:'partner_ack_invalid', admission:'none' },
@@ -91,7 +98,7 @@ function PnDeliveries({ theme:th, mode='list', retryState='idle', retryRowId=nul
              </div>
           )},
           { h:'事件', k:'event', w:150, mono:true },
-          { h:'目標', k:'target', w:120, mono:true },
+          { h:'目標', w:120, r:r=><span style={{fontSize:10.5, fontFamily:SHELL_MONO, color:r.target?th.text:th.textDim}}>{r.target || '未知／尚未建立'}</span> },
           { h:'狀態', w:170, r:r=><Pill theme={th} tone={PN_DLV[r.status]?.[1]||'neutral'} dot>{PN_DLV[r.status]?.[0]||r.status}</Pill> },
           { h:'回應', k:'code', w:60, mono:true },
           { h:'失敗原因/狀態', w:180, r:r=><span style={{ fontSize:11.5, color:r.status==='failed'?th.danger:(r.stage==='partner_accepted'?th.warn:th.textMuted) }}>{r.reason}</span> },
