@@ -798,6 +798,8 @@ class ExecutionWorkspaceTests(unittest.TestCase):
             self.assertEqual(_git(workspace, "rev-parse", "--is-inside-work-tree").stdout.strip(), "true")
             self.assertEqual(_git(workspace, "branch", "--show-current").stdout.strip(), "")
             self.assertIn("isolated coordination worktree", request.message)
+            self.assertIn("must not start product development servers", request.message)
+            self.assertIn("pnpm exec playwright", request.message)
             self.assertEqual(request.metadata["workspace_root"], str(workspace))
 
     def test_review_dispatch_ignores_owner_execution_branch_override(self) -> None:
