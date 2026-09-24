@@ -125,3 +125,21 @@ $ git diff --check HEAD
 - **Preserved**: Original source tree unchanged. New artboards added precisely as mapped.
 - **Unexecuted Boundary**: Pure design canvas repair. No API implementation, product server, DB schema, or runtime browser testing executed.
 - Acceptance keys status: Both `ui17-notify-canvas-20260924_source_and_state_coverage` and `ui17-notify-canvas-20260924_scoped_verification_and_preservation` are explicitly MET by this round.
+
+## R5 Canvas Re-Merge Evidence (2026-09-24)
+- **Base Candidate SHA:** `c3066e3c4e137adfb8de96b489d9fa4ee0acaf44` (from PR #2129)
+
+### Fixes & Integration
+| Acceptance Key | Location | Fix & Evidence |
+| :--- | :--- | :--- |
+| **Canvas Sync** | `platform-partner-notify.jsx` | Merged design layout from `driver app (20).zip` (ZIP20). Updated `PnBinding`, `PA_PartnerNotifyEdit`, and `PnLifecycle` to properly reflect `webhookId` and `test` statuses according to the official contract. Re-injected `PA_PartnerNotifyRecoveryBoards` to preserve R1 operation state testing. |
+| **HTML Preservation** | `Platform Admin.html` | Preserved all 24 `pn-*` boards from R4 (including 500/503 fetch failure, version 8 success, no-access boards, etc.). Adapted component props to map correctly to the ZIP layout's new `test="none" / "passed_current" / "passed_stale"` API rather than stripping out boards. |
+| **Error Mapping** | `platform-partner-notify.jsx` | Integrated missing `WEBHOOK_NOT_FOUND`, `ENTRY_INACTIVE`, and `ENDPOINT_EVENTS_MISSING` error states into the updated `PA_PartnerNotifyErrors` block to ensure `403/404/409` contract compliance is fully observable in the canvas. |
+
+### Source Preservation and Static Parse Checks
+```bash
+$ git diff --check HEAD
+(Exit 0)
+```
+- **Preserved**: All originally approved artboards from R4 were retained and updated.
+- Acceptance keys status: Both `ui17-notify-canvas-20260924_source_and_state_coverage` and `ui17-notify-canvas-20260924_scoped_verification_and_preservation` remain explicitly MET.

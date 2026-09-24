@@ -1,10 +1,21 @@
 // platform-partner-notify.jsx — D · 夥伴詳情頁「通知」分頁 (partner-notification-screen-requirements-20260923).
-// 6 組狀態：綁定讀取 / 派送紀錄 / 編輯表單 / 生命週期 / 重送 / 錯誤與復原。密鑰一律遮罩。
-// 硬性文案（不得改寫）：「端點已接受，但裝置未知」
+// 對齊正式契約 (packages/contracts partner-passenger-notification.ts · binding controller/service · SA/SD §7):
+//   · 綁定引用既有 webhookId（不在此頁管理端點/密鑰/逾時）· PUT = webhookId + eventTypes + expectedVersion
+//   · 狀態 ready / test_pending / disabled；啟用門檻＝目前端點 fingerprint 的成功測試
+//   · 5 個內部事件 → 對外 passenger.*.v1 映射
+//   · 送達語意：200/201/202 皆須通過 ack 驗證；通過僅代表「夥伴端已接受，裝置未知」，不憑 HTTP code 判裝置接收
+//   · 受控重試：多種拒絕/停用理由 + 受理重新入列 + 重複點擊 + 失敗復原（requeued/superseded/expired/exhausted 為 view model，非 outbox enum）
+//   · 403 = entry scope 越界，getBinding 亦被拒，不畫成可唯讀
 const PN_BIND = { ready:['就緒','success'], test_pending:['待測試','warn'], disabled:['已停用','neutral'] };
-const PN_EVENTS = ['assignment_disclosure_ready','assignment_replaced','eta_changed','driver_arrived','receipt_ready'];
+const PN_EVENTS = [
+  ['assignment_disclosure_ready','passenger.assignment_disclosure_ready.v1','派車揭露就緒'],
+  ['assignment_replaced','passenger.assignment_replaced.v1','派車已更換'],
+  ['eta_changed','passenger.eta_changed.v1','ETA 變更'],
+  ['driver_arrived','passenger.driver_arrived.v1','駕駛已抵達'],
+  ['receipt_ready','passenger.receipt_ready.v1','收據就緒'],
+];
 function PnShell({ theme:th, children, actions }) {
-  const p = { bank: 'Nexus Bank', program: 'Premium', slug: 'nexus-premium', id: 'p_nexus1' };
+  const p = FX_PARTNERS[0];
   return (
     <Shell theme={th} nav={PA_NAV} active="partners" breadcrumb={['合作夥伴', p.bank, p.program, '通知']} env="production" actor={PA_ACTOR} health={PA_HEALTH} refreshTier="medium" dataFreshness="fresh">
       <PageHeader theme={th}
@@ -16,171 +27,164 @@ function PnShell({ theme:th, children, actions }) {
     </Shell>
   );
 }
-function PnBinding({ theme:th, state='ready', version=7, validatedAt='09-23 14:02 · 200 OK', validatedFingerprintMatch=true, endpointAccessible=true }) {
+// test 結果：passed_current（目前 fingerprint 成功）/ passed_stale（端點已變，需重測）/ failed / none
+function PnBinding({ theme:th, state='ready', test='passed_current', endpointAccessible=true }) {
   const m = PN_BIND[state];
+  const TEST = { passed_current:['測試通過 · 目前端點','success'], passed_stale:['測試已失效 · 端點 fingerprint 已變','warn'], failed:['測試失敗','danger'], none:['尚未測試','neutral'] };
   return (
-    <Card theme={th} title="回呼綁定 · Callback Binding" subtitle="目前綁定 · 端點與密鑰需 tenant:webhooks 權限" actions={<Pill theme={th} tone={m[1]} dot>{m[0]}<span style={{ marginLeft:4, opacity:.6, fontFamily:SHELL_MONO, fontSize:9 }}>{state}</span></Pill>}>
+    <Card theme={th} title="通知綁定 · Notification Binding" subtitle="引用既有 webhook · 端點/密鑰於既有 /webhooks 管理（依權限顯示）" actions={<Pill theme={th} tone={m[1]} dot>{m[0]}<span style={{ marginLeft:4, opacity:.6, fontFamily:SHELL_MONO, fontSize:9 }}>{state}</span></Pill>}>
       <DL theme={th} cols={2} items={[
-        { k:'webhookId', v:'wh_7f3a2c91', mono:true }, 
-        { k:'端點 URL', v: endpointAccessible ? 'https://api.nexus-partner.example/drts/hook' : <span style={{color:th.textDim}}>無讀取權限 (缺 tenant:webhooks:read)</span>, mono:true },
-        { k:'簽章密鑰', v: endpointAccessible ? <span style={{ fontFamily:SHELL_MONO }}>whsec_••••••••••••4c1e <Pill theme={th} tone="neutral">預覽</Pill></span> : <span style={{color:th.textDim}}>無讀取權限</span> }, 
-        { k:'預期版本 expectedVersion', v:String(version), mono:true },
-        { k:'最後測試', v: !validatedAt ? '尚未測試' : validatedAt, mono:true }, 
-        { k:'最後更新', v:'09-23 13:58', mono:true },
+        { k:'webhookId', v: endpointAccessible ? <span style={{ fontFamily:SHELL_MONO }}>wh_7f3a2c91 <Btn theme={th} size="xs" variant="ghost" icon="ext">既有 /webhooks 管理</Btn></span> : <span style={{color:th.textDim}}>無讀取權限</span> }, { k:'端點（唯讀）', v: endpointAccessible ? 'https://api.ctbc-partner.example/drts/hook' : <span style={{color:th.textDim}}>無讀取權限</span>, mono:true },
+        { k:'端點 fingerprint', v:'fp:9c4e…21a0', mono:true }, { k:'version', v:'7', mono:true },
+        { k:'最近測試', v:<Pill theme={th} tone={TEST[test][1]} dot>{TEST[test][0]}</Pill> }, { k:'測試時間', v: test==='none' ? '—' : '09-23 14:02 · fp:9c4e…21a0', mono:true },
+        { k:'最後更新', v:'09-23 13:58 · 駱思賢', mono:false }, { k:'簽章密鑰', v:<span style={{ fontFamily:SHELL_MONO }}>••••••••（此頁不顯示、不編輯）</span> },
       ]}/>
-      <div style={{ marginTop:10, display:'flex', justifyContent:'space-between', alignItems:'flex-end' }}>
-        <div>
-          <div style={{ fontSize:11, fontWeight:700, color:th.textMuted, marginBottom:6 }}>訂閱事件類型</div>
-          <div style={{ display:'flex', gap:6, flexWrap:'wrap' }}>{PN_EVENTS.slice(0, state==='disabled'?0:4).map(e=><Pill key={e} theme={th} tone="accent">{e}</Pill>)}{state==='disabled' && <span style={{ fontSize:11.5, color:th.textDim }}>已停用 · 不派送任何事件</span>}</div>
-        </div>
-        <Btn theme={th} size="xs" variant="ghost" icon="external-link">前往 Tenant Webhooks 管理</Btn>
-      </div>
+      <div style={{ marginTop:10 }}>
+        <div style={{ fontSize:11, fontWeight:700, color:th.textMuted, marginBottom:6 }}>訂閱事件（內部 → 對外映射）</div>
+        {state==='disabled' ? <span style={{ fontSize:11.5, color:th.textDim }}>已停用 · 不派送任何事件；訂閱設定保留，可恢復</span> :
+          <div style={{ display:'flex', flexDirection:'column', gap:4 }}>{PN_EVENTS.slice(0,4).map(([i,o,zh])=><div key={i} style={{ display:'flex', alignItems:'center', gap:8, fontSize:11.5 }}><Pill theme={th} tone="accent">{i}</Pill><MgmtIcon name="arrow-right" size={11} style={{ color:th.textDim }}/><span style={{ fontFamily:SHELL_MONO, color:th.textMuted }}>{o}</span><span style={{ color:th.textDim }}>{zh}</span></div>)}</div>}
       </div>
     </Card>
   );
 }
-function PnLifecycle({ theme:th, state='ready', version=7, validated=true, fingerprintMatch=true, testingState='idle', enableState='idle', disableState='idle', resumeState='idle', inflight=false }) {
-  const isPending = testingState === 'pending' || enableState === 'pending' || disableState === 'pending' || resumeState === 'pending' || inflight;
-  const canTest = !isPending && state !== 'disabled';
-  const canEnable = state === 'test_pending' && validated && fingerprintMatch && !isPending;
-  const enableReason = state === 'ready' ? 'already_enabled' : (!validated ? 'requires_test' : (!fingerprintMatch ? 'stale_fingerprint' : (isPending ? 'action_in_progress' : undefined)));
-  const canDisable = state === 'ready' && !isPending;
-  const canResume = state === 'disabled' && !isPending;
-
+// 生命週期：動作可用性由 state × test × inflight 決定
+function PnLifecycle({ theme:th, state='ready', test='passed_current', inflight, failed }) {
+  const canEnable = state==='test_pending' && test==='passed_current';
+  const enableReason = state==='ready' ? 'already_enabled' : state==='disabled' ? 'use_resume' : test==='passed_stale' ? 'ENDPOINT_FINGERPRINT_CHANGED' : test==='failed' ? 'LAST_TEST_FAILED' : 'TEST_REQUIRED';
   return (
-    <Card theme={th} title="生命週期控制" subtitle="test / enable / disable">
+    <Card theme={th} title="生命週期控制" subtitle="test → enable · disable · resume">
+      {inflight && <div style={{ marginBottom:10 }}><Banner theme={th} tone="info" icon="refresh" body="測試事件送出中… 等待夥伴端 ack（最長 10 秒）。按鈕已鎖定，避免重複送出。"/></div>}
+      {failed && <div style={{ marginBottom:10 }}><Banner theme={th} tone="danger" icon="warn" title="測試失敗 · ack 驗證不符" body="夥伴回 200，但 ack.delivery_id 與送出不符（notification_id / partner_entry_slug 亦須一致，status/receipt 須合法）。已記錄 dlv_test_0913；請確認夥伴端實作後重測。" actions={<Btn theme={th} size="xs" icon="refresh">重測</Btn>}/></div>}
       <div style={{ display:'flex', flexDirection:'column', gap:8 }}>
-        <ActionButton theme={th} descriptor={{ action:'test', enabled: canTest, riskLevel:'low', disabledReasonCode: isPending ? 'action_in_progress' : (state === 'disabled' ? 'binding_disabled' : undefined) }} icon="refresh" label={testingState==='pending' ? "測試中..." : "發送測試事件"} en="test"/>
-        {state === 'disabled' ? (
-          <ActionButton theme={th} descriptor={{ action:'resume', enabled: canResume, riskLevel:'medium', requiresReason:true, disabledReasonCode: isPending ? 'action_in_progress' : undefined }} icon="check" label={resumeState==='pending' ? "恢復中..." : "恢復通知"} en="resume"/>
-        ) : (
-          <ActionButton theme={th} descriptor={{ action:'enable', enabled: canEnable, disabledReasonCode: enableReason, riskLevel:'medium', requiresReason:true }} icon="check" label={enableState==='pending' ? "啟用中..." : `啟用 (expectedVersion: ${version})`} en="enable"/>
-        )}
-        <ActionButton theme={th} descriptor={{ action:'disable', enabled: canDisable, disabledReasonCode: isPending ? 'action_in_progress' : undefined, riskLevel:'high', requiresReason:true }} icon="lock" label={disableState==='pending' ? "停用中..." : `停用 (expectedVersion: ${version})`} en="disable"/>
+        <ActionButton theme={th} descriptor={{ action:'test', enabled: state!=='disabled' && !isPending, disabledReasonCode: state==='disabled'?'binding_disabled':isPending?'in_flight':undefined, riskLevel:'low' }} icon="refresh" label={testingState==='pending' ? "測試中..." : "發送測試事件"} en="test"/>
+        <ActionButton theme={th} descriptor={{ action:'enable', enabled: canEnable && !isPending, disabledReasonCode: canEnable?undefined:enableReason, riskLevel:'medium', requiresReason:true }} icon="check" label={enableState==='pending' ? "啟用中..." : "啟用"} en="enable"/>
+        {state==='disabled'
+          ? <ActionButton theme={th} descriptor={{ action:'resume', enabled: !isPending, riskLevel:'medium', requiresReason:true, disabledReasonCode: isPending?'in_flight':undefined }} icon="check" label={resumeState==='pending' ? "恢復中..." : "恢復 = PUT(expectedVersion) → test → enable"} en="put+test+enable"/>
+          : <ActionButton theme={th} descriptor={{ action:'disable', enabled: state==='ready' && !isPending, disabledReasonCode: state==='ready'?undefined:'not_enabled', riskLevel:'high', requiresReason:true }} icon="lock" label={disableState==='pending' ? "停用中..." : "停用"} en="disable"/>}
       </div>
-      <div style={{ fontSize:10.5, color:th.textDim, marginTop:9 }}>
-        <p>測試成功僅更新驗證狀態，無須 expectedVersion。異動前 (啟用/停用) 將重新載入取得最新版本。</p>
-        <p>「恢復通知」將觸發更新並重新測試，通過後才能啟用。 (API: PUT → test → enable)</p>
-        {testingState==='failed' && <div style={{color:th.danger, marginBottom:4}}>測試發送失敗，請重試 (網路異常)。</div>}
-        {testingState==='rejected' && <div style={{color:th.danger, marginBottom:4}}>測試遭拒：夥伴回傳失敗狀態 (kind: failed)。</div>}
-        {enableState==='failed' && <div style={{color:th.danger, marginBottom:4}}>啟用失敗，請重試。</div>}
-        {disableState==='failed' && <div style={{color:th.danger, marginBottom:4}}>停用失敗，請重試。</div>}
-        {resumeState==='failed' && <div style={{color:th.danger, marginBottom:4}}>恢復失敗，請重試。</div>}
-        待測試狀態需先通過測試事件才可啟用。目前測試狀態: {isPending ? '進行中' : (!validated ? '尚未測試' : (fingerprintMatch ? '已通過 (指紋相符)' : '指紋不符 (端點已變更)'))}
-      </div>
+      <div style={{ fontSize:10.5, color:th.textDim, marginTop:9, lineHeight:1.5 }}>啟用門檻：目前端點 fingerprint 必須有成功測試。端點變更後測試自動失效，需重測。<br/>「恢復」為 view-model 動作，映射既有 PUT / test / enable，無獨立 /resume。</div>
     </Card>
   );
 }
+// 送達語意：ack 驗證為準；ack 通過 = 「夥伴端已接受，裝置未知」（硬性文案）
+const PN_DLV = {
+  accepted:      ['端點已接受，但裝置未知','warn'],
+  ack_invalid:   ['回應成功但 ack 驗證失敗','danger'],
+  failed:        ['失敗','danger'],
+  queued:        ['排隊中','neutral'],
+  requeued:      ['已受理重新入列','info'],
+  superseded:    ['已被新通知取代','neutral'],
+  expired:       ['已過期','neutral'],
+  exhausted:     ['重試次數耗盡','danger'],
+};
 const FX_PN_DELIVERIES = [
-  { outboxId:'dlv_0915', deliveryId:'del_abc123', event:'receipt_ready', target:'…/drts/hook', status:'delivered', code:'200', reason:'夥伴端接受且裝置未知 (有效 Ack)', at:'09-24 09:50:12', tries:1, stage:'partner_accepted', disposition:'none', failReason:null, admission:'none' },
-  { outboxId:'dlv_0914', deliveryId:'del_def456', event:'driver_arrived', target:'…/drts/hook', status:'failed', code:'—', reason:'budget_exhausted (額度耗盡)', at:'09-24 09:48:30', tries:5, stage:'outbox_persisted', disposition:'automatic', failReason:'provider_transient_error', admission:'budget_exhausted' },
-  { outboxId:'dlv_0913', deliveryId:'del_ghi789', event:'eta_changed', target:'…/drts/hook', status:'failed', code:'408', reason:'lease_active (處理中)', at:'09-24 09:45:00', tries:2, stage:'outbox_persisted', disposition:'automatic', failReason:'provider_transient_error', admission:'lease_active' },
-  { outboxId:'dlv_0912', deliveryId:'del_jkl012', event:'assignment_replaced', target:'…/drts/hook', status:'failed', code:'—', reason:'被新通知取代 (notification_superseded)', at:'09-24 09:41:12', tries:1, stage:'outbox_persisted', disposition:'terminal', failReason:'notification_superseded', admission:'none' },
-  { outboxId:'dlv_0911', deliveryId:'del_mno345', event:'assignment_disclosure_ready', target:'…/drts/hook', status:'failed', code:'—', reason:'過期 (notification_expired)', at:'09-24 09:38:50', tries:1, stage:'outbox_persisted', disposition:'terminal', failReason:'notification_expired', admission:'none' },
-  { outboxId:'dlv_0910', deliveryId:null, event:'assignment_disclosure_ready', target:null, status:'pending', code:'—', reason:'重新入列 (待送)', at:'09-24 09:30:07', tries:0, stage:'outbox_persisted', disposition:'manual_only', failReason:'route_missing', admission:'none' },
-  { outboxId:'dlv_0909', deliveryId:'del_pqr678', event:'driver_arrived', target:'…/drts/hook', status:'failed', code:'503', reason:'綁定未就緒 (configuration_blocked)', at:'09-24 08:55:41', tries:3, stage:'outbox_persisted', disposition:'configuration_blocked', failReason:'endpoint_unavailable', admission:'none' },
-  { outboxId:'dlv_0908', deliveryId:null, event:'receipt_ready', target:'…/drts/hook', status:'pending', code:'—', reason:'已接受手動重送 (待送)', at:'09-24 08:15:00', tries:1, stage:'outbox_persisted', disposition:'manual_only', failReason:'partner_ack_invalid', admission:'none' },
-  { outboxId:'dlv_0908', deliveryId:'del_stu901', event:'receipt_ready', target:'…/drts/hook', status:'failed', code:'200', reason:'無效 Ack (缺 ID/不符) (partner_ack_invalid)', at:'09-24 08:12:30', tries:1, stage:'outbox_persisted', disposition:'manual_only', failReason:'partner_ack_invalid', admission:'none' },
+  { id:'dlv_0912', ev:'receipt_ready', code:'200', ack:'ok', status:'accepted', reason:'ack 驗證通過 · 裝置接收未知', at:'09-24 09:41:12', tries:1, retry:'n/a' },
+  { id:'dlv_0911', ev:'driver_arrived', code:'202', ack:'ok', status:'accepted', reason:'ack 驗證通過 · 裝置接收未知', at:'09-24 09:38:50', tries:1, retry:'n/a' },
+  { id:'dlv_0910', ev:'eta_changed', code:'200', ack:'mismatch', status:'ack_invalid', reason:'ack.delivery_id 不符', at:'09-24 09:36:07', tries:2, retry:'allowed' },
+  { id:'dlv_0909', ev:'assignment_disclosure_ready', code:'503', ack:'—', status:'failed', reason:'上游暫時無法服務', at:'09-24 09:30:07', tries:2, retry:'allowed' },
+  { id:'dlv_0908', ev:'eta_changed', code:'—', ack:'—', status:'requeued', reason:'已受理入列 · 尚未 claim', at:'09-24 09:28:40', tries:3, retry:'inflight' },
+  { id:'dlv_0907', ev:'eta_changed', code:'timeout', ack:'—', status:'superseded', reason:'已由 dlv_0910 取代', at:'09-24 09:20:11', tries:1, retry:'denied:SUPERSEDED', target:'api.ctbc-•••••.example/…/hook-v1（舊）' },
+  { id:'dlv_0906', ev:'assignment_replaced', code:'timeout', ack:'—', status:'exhausted', reason:'5 次皆逾時', at:'09-24 08:55:41', tries:5, retry:'denied:RETRY_EXHAUSTED' },
+  { id:'dlv_0905', ev:'driver_arrived', code:'—', ack:'—', status:'expired', reason:'已逾 expiresAt（policy 300s）', at:'09-24 08:12:30', tries:1, retry:'denied:EVENT_EXPIRED' },
 ];
-const PN_DLV = { delivered:['夥伴接受/裝置未知','success'], failed:['失敗','danger'], pending:['待送','neutral'], sending:['發送中','neutral'] };
+const RETRY_DENY = { SUPERSEDED:'已被新通知取代', RETRY_EXHAUSTED:'重試次數耗盡', EVENT_EXPIRED:'事件已過期', LEASE_ACTIVE:'另一重送進行中（lease）', BINDING_NOT_READY:'綁定未就緒' };
+function PnRetryCell({ theme:th, r, retryState='idle' }) {
+  if (r.retry==='n/a') return <span style={{ fontSize:10.5, color:th.textDim }}>—</span>;
+  if (r.retry==='inflight') return <Pill theme={th} tone="info" dot>入列中 · 待 claim</Pill>;
+  if (r.retry==='allowed') return <ActionButton theme={th} size="xs" descriptor={{ action:'resend', enabled:true, riskLevel:'low', requiresReason:true }} icon="refresh" label="重送" en="resend"/>;
+  const code = r.retry.split(':')[1];
+  return <span title={code} style={{ fontSize:10.5, color:th.textDim, display:'inline-flex', alignItems:'center', gap:4 }}><MgmtIcon name="lock" size={10}/>{RETRY_DENY[code]}</span>;
+}
 function PnDeliveries({ theme:th, mode='list', retryState='idle', retryRowId=null }) {
   return (
-    <Card theme={th} title="派送紀錄 · Deliveries" subtitle="分頁列表 · 單筆失敗可手動重送" padding={0}
+    <Card theme={th} title="派送紀錄 · Deliveries" subtitle="送達以 ack 驗證為準，不憑 HTTP code · 目標為每筆 immutable delivery context · 重試受控" padding={0}
       actions={<><Select theme={th} value="狀態：全部"/><Btn theme={th} size="xs" icon="refresh">重新整理</Btn></>}>
       {mode==='loading' && <div style={{ padding:16 }}>{[0,1,2,3].map(i=><div key={i} style={{ height:14, borderRadius:4, background:th.surfaceLo, marginBottom:10, animation:'pulse 1.4s infinite', animationDelay:i*.15+'s' }}/>)}</div>}
-      {mode==='empty' && <div style={{ padding:24 }}><EmptyState theme={th} reason="no_data" compact messageOverride="尚無派送紀錄。啟用綁定並發送測試事件後，紀錄會顯示於此。" nextAction="發送測試事件"/></div>}
+      {mode==='empty' && <div style={{ padding:24 }}><EmptyState theme={th} reason="no_data" compact messageOverride="尚無派送紀錄。通過測試並啟用後，紀錄會顯示於此。" nextAction="發送測試事件"/></div>}
       {mode==='list' && <>
         <Table theme={th} columns={[
-          { h:'Outbox ID / Delivery', w:140, r:r=>(
-             <div style={{display:'flex', flexDirection:'column'}}>
-               <span style={{ color:th.accent, fontWeight:600, mono:true }}>{r.outboxId}</span>
-               {r.deliveryId && <span style={{ fontSize:10, color:th.textDim, mono:true }}>{r.deliveryId}</span>}
-             </div>
-          )},
-          { h:'事件', k:'event', w:150, mono:true },
-          { h:'目標', w:120, r:r=><span style={{fontSize:10.5, fontFamily:SHELL_MONO, color:r.target?th.text:th.textDim}}>{r.target || '未知／尚未建立'}</span> },
-          { h:'狀態', w:170, r:r=><Pill theme={th} tone={PN_DLV[r.status]?.[1]||'neutral'} dot>{PN_DLV[r.status]?.[0]||r.status}</Pill> },
-          { h:'回應', k:'code', w:60, mono:true },
-          { h:'失敗原因/狀態', w:180, r:r=><span style={{ fontSize:11.5, color:r.status==='failed'?th.danger:(r.stage==='partner_accepted'?th.warn:th.textMuted) }}>{r.reason}</span> },
-          { h:'時間', k:'at', w:130, mono:true },
-          { h:'嘗試', k:'tries', w:50, mono:true, align:'center' },
-          { h:'', w:80, r:r=>{
-            const isRowPending = retryState === 'pending' && r.outboxId === retryRowId;
-            const isRowFailed = retryState === 'failed' && r.outboxId === retryRowId;
-            const isAdmissionBlocked = r.admission && r.admission !== 'none';
-            const canRetry = r.status === 'failed' && (r.disposition === 'manual_only' || r.disposition === 'automatic') && !isAdmissionBlocked && !isRowPending;
-            const reasonCode = isRowPending ? 'retrying' : (isAdmissionBlocked ? r.admission : (!canRetry ? r.disposition : undefined));
-            return r.status === 'failed' ? (
-              <div style={{display:'flex', flexDirection:'column', gap:4}}>
-                <ActionButton theme={th} size="xs" descriptor={{ action:'resend', enabled:canRetry, riskLevel:'low', disabledReasonCode: reasonCode }} icon="refresh" label={isRowPending ? "重送中" : "重送"} en="resend"/>
-                {isRowFailed && <div style={{fontSize:9, color:th.danger, marginTop:2}}>重送失敗</div>}
-              </div>
-            ) : <span style={{ fontSize:10.5, color:th.textDim }}>—</span>;
-          }},
+          { h:'ID', k:'id', w:84, mono:true, r:r=><span style={{ color:th.accent, fontWeight:600 }}>{r.id}</span> },
+          { h:'事件（內部）', k:'ev', w:170, mono:true },
+          { h:'目標（遮罩）', w:150, mono:true, r:r=><span style={{ fontSize:10.5 }}>{r.target||'api.ctbc-•••••.example/…/hook'}</span> },
+          { h:'HTTP', k:'code', w:56, mono:true },
+          { h:'ack', w:70, r:r=>r.ack==='ok'?<Pill theme={th} tone="success">通過</Pill>:r.ack==='mismatch'?<Pill theme={th} tone="danger">不符</Pill>:<span style={{ color:th.textDim }}>—</span> },
+          { h:'送達狀態', w:190, r:r=><Pill theme={th} tone={PN_DLV[r.status][1]} dot>{PN_DLV[r.status][0]}</Pill> },
+          { h:'說明', w:150, r:r=><span style={{ fontSize:11.5, color:th.textMuted }}>{r.reason}</span> },
+          { h:'時間', k:'at', w:120, mono:true },
+          { h:'次', k:'tries', w:36, mono:true, align:'center' },
+          { h:'重送', w:150, r:r=><PnRetryCell theme={th} r={r} retryState={r.id === retryRowId ? retryState : 'idle'}/> },
         ]} rows={FX_PN_DELIVERIES}/>
         <div style={{ display:'flex', alignItems:'center', gap:10, padding:'8px 14px', borderTop:'1px solid '+th.border, fontSize:11, color:th.textMuted }}><span>48 筆 · 第 1 / 5 頁</span><span style={{ flex:1 }}/><Btn theme={th} size="xs" variant="ghost">上一頁</Btn><Btn theme={th} size="xs" variant="ghost" icon="arrow-right">下一頁</Btn></div>
       </>}
     </Card>
   );
 }
-// D1 · 綁定讀取（三態）+ 派送紀錄
-function PA_PartnerNotify({ theme:th, bind='ready', version=7, deliveries='list', validated=true, fingerprintMatch=true, testingState='idle', enableState='idle', disableState='idle', retryState='idle', retryRowId=null, endpointAccessible=true }) {
+function PA_PartnerNotify({ theme:th, bind='ready', test='passed_current', deliveries='list', inflight, failed, testingState='idle', enableState='idle', disableState='idle', resumeState='idle', retryState='idle', retryRowId=null, endpointAccessible=true }) {
   return (
     <PnShell theme={th} actions={<Btn theme={th} variant="primary" icon="edit">編輯綁定</Btn>}>
       <div style={{ padding:24, display:'grid', gridTemplateColumns:'1.5fr 1fr', gap:16, alignItems:'start' }}>
         <div style={{ display:'flex', flexDirection:'column', gap:16 }}>
-          <PnBinding theme={th} state={bind} version={version} validatedAt={validated ? '09-23 14:02 · 200 OK' : null} validatedFingerprintMatch={fingerprintMatch} endpointAccessible={endpointAccessible} />
+          <PnBinding theme={th} state={bind} test={test} endpointAccessible={endpointAccessible}/>
           <PnDeliveries theme={th} mode={deliveries} retryState={retryState} retryRowId={retryRowId}/>
         </div>
         <div style={{ display:'flex', flexDirection:'column', gap:16 }}>
-          <PnLifecycle theme={th} state={bind} version={version} validated={validated} fingerprintMatch={fingerprintMatch} testingState={testingState} enableState={enableState} disableState={disableState}/>
-          <Card theme={th} title="派送摘要 · 近 24h"><div style={{ display:'grid', gridTemplateColumns:'1fr 1fr 1fr', gap:10 }}><Kpi theme={th} label="夥伴端接受且裝置未知" en="delivered" value="46"/><Kpi theme={th} label="發送中" en="sending" value="0"/><Kpi theme={th} label="失敗" en="failed" value="2" tone="danger"/></div></Card>
+          <PnLifecycle theme={th} state={bind} test={test} inflight={inflight} failed={failed} testingState={testingState} enableState={enableState} disableState={disableState} resumeState={resumeState}/>
+          <Card theme={th} title="派送摘要 · 近 24h" subtitle="「已接受」≠ 裝置已收到">
+            <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr 1fr', gap:10 }}><Kpi theme={th} label="端點已接受" en="ack ok" value="44" tone="warn"/><Kpi theme={th} label="ack 不符" en="ack_invalid" value="1" tone="danger"/><Kpi theme={th} label="失敗/耗盡" en="failed" value="3" tone="danger"/></div>
+          </Card>
         </div>
       </div>
     </PnShell>
   );
 }
-// D3 · 編輯表單
-function PA_PartnerNotifyEdit({ theme:th, saveState='idle', endpointAccessible=true }) {
-  const isSaving = saveState === 'pending';
+// 編輯：PUT { webhookId, eventTypes, expectedVersion }
+function PA_PartnerNotifyEdit({ theme:th, saveState="idle", endpointAccessible=true }) {
+  const isSaving = saveState === "pending";
   return (
-    <PnShell theme={th} actions={<><Btn theme={th} disabled={isSaving || !endpointAccessible}>取消</Btn><ActionButton theme={th} descriptor={{ action:'save', enabled:!isSaving && endpointAccessible, riskLevel:'medium', requiresReason:true, disabledReasonCode: !endpointAccessible ? 'missing_scope' : (isSaving ? 'saving' : undefined) }} variant="primary" icon="check" label={isSaving ? "儲存中..." : "儲存綁定（7 → 8）"} en="save"/></>}>
+    <PnShell theme={th} actions={<><Btn theme={th} disabled={isSaving || !endpointAccessible}>取消</Btn><ActionButton theme={th} descriptor={{ action:'save', enabled:!isSaving && endpointAccessible, riskLevel:'medium', requiresReason:true, disabledReasonCode: !endpointAccessible ? 'missing_scope' : (isSaving ? 'saving' : undefined) }} variant="primary" icon="check" label={isSaving ? "儲存中..." : "儲存（expectedVersion 7）"} en="save"/></>}>
       <div style={{ padding:24, display:'grid', gridTemplateColumns:'1.4fr 1fr', gap:16, alignItems:'start' }}>
-        <div style={{ display:'flex', flexDirection:'column', gap:16 }}>
+        <div style={{ display:"flex", flexDirection:"column", gap:16 }}>
           {!endpointAccessible && <Banner theme={th} tone="danger" icon="lock" title="權限不足" body="您需要 tenant:webhooks:read 權限以列出可用的 Webhook。無法編輯綁定。"/>}
           {saveState === 'failed' && <Banner theme={th} tone="danger" icon="warn" title="儲存失敗" body="請檢查連線或重試。"/>}
-          <Card theme={th} title="編輯回呼綁定" subtitle="expectedVersion: 7 · 版本衝突將阻擋儲存">
-            <Field theme={th} label="選擇 Webhook (webhookId)" required hint="重用既有 webhook 管理入口">
-              {endpointAccessible ? <Select theme={th} value="wh_7f3a2c91 (https://api.nexus-partner.example/drts/hook)"/> : <Select theme={th} value="無權限存取端點列表" disabled/>}
-            </Field>
-          <Field theme={th} label="訂閱事件類型" required>
-            <div style={{ display:'flex', flexDirection:'column', gap:8 }}>{PN_EVENTS.map((e,i)=><Checkbox key={e} theme={th} on={i<4} label={e}/>)}</div>
+        <Card theme={th} title="編輯通知綁定" subtitle="PUT /partner-entries/:id/notification-binding · webhookId + eventTypes + expectedVersion">
+          <Field theme={th} label="webhookId · 選擇既有 webhook" required hint="端點 URL、密鑰、逾時/重試由既有 webhook 管理維護，本頁不重複 CRUD">
+            {endpointAccessible ? <Select theme={th} value="wh_7f3a2c91 · https://api.ctbc-partner.example/drts/hook · active"/> : <Select theme={th} value="無權限存取端點列表" disabled/>}
+            <div style={{ marginTop:6 }}><Btn theme={th} size="xs" variant="ghost" icon="ext">前往既有 /webhooks 管理（需 webhook:manage）</Btn></div>
           </Field>
+          <Field theme={th} label="eventTypes · 內部事件" required>
+            <div style={{ display:'flex', flexDirection:'column', gap:8 }}>{PN_EVENTS.map(([i,o,zh],idx)=><div key={i} style={{ display:'flex', alignItems:'center', gap:10 }}><Checkbox theme={th} on={idx<4} label={i}/><span style={{ fontSize:10.5, fontFamily:SHELL_MONO, color:th.textDim }}>→ {o}</span><span style={{ fontSize:10.5, color:th.textDim }}>{zh}</span></div>)}</div>
+          </Field>
+          <Field theme={th} label="expectedVersion" hint="樂觀鎖 · 不符將回 409"><Input theme={th} value="7" mono readOnly/></Field>
         </Card>
-        </div>
-        <Card theme={th} title="變更摘要"><DL theme={th} cols={1} items={[{ k:'目前版本', v:'7', mono:true },{ k:'儲存後', v:'8', mono:true },{ k:'事件變更', v:'+ receipt_ready' },{ k:'Webhook', v:'不變更' }]}/><div style={{ marginTop:8 }}><Banner theme={th} tone="neutral" icon="lock" body="儲存後綁定回到「待測試」，需重新通過測試事件才可啟用。"/></div></Card>
+        <Card theme={th} title="變更摘要"><DL theme={th} cols={1} items={[{ k:'webhookId', v:'不變更 · wh_7f3a2c91', mono:true },{ k:'eventTypes', v:'+ receipt_ready' },{ k:'expectedVersion', v:'7 → 儲存後 8', mono:true }]}/><div style={{ marginTop:8 }}><Banner theme={th} tone="neutral" icon="lock" body="儲存後綁定回到 test_pending；若 webhook 端點 fingerprint 改變，先前測試失效，需重測方可啟用。"/></div></Card>
       </div>
     </PnShell>
   );
 }
-// D6 · 錯誤與復原
+// 錯誤與復原
 function PA_PartnerNotifyErrors({ theme:th }) {
   return (
     <PnShell theme={th}>
       <div style={{ padding:24, display:'grid', gridTemplateColumns:'1fr 1fr', gap:14 }}>
         <Card theme={th} title="500/503 · 綁定讀取失敗" padding={14}><Banner theme={th} tone="danger" icon="warn" title="無法載入綁定資訊" body="無法讀取目前綁定狀態與版本，請重新整理頁面或稍後再試。" actions={<Btn theme={th} size="xs" variant="primary" icon="refresh">重新整理</Btn>}/></Card>
-        <Card theme={th} title="409 · 版本衝突 (PARTNER_NOTIFICATION_BINDING_VERSION_CONFLICT)" padding={14}><Banner theme={th} tone="warn" icon="warn" title="綁定已被他人更新（7 → 8）" body="您的表單輸入已保留。請重新載入取得最新版本後再儲存；不會靜默覆寫。" actions={<><Btn theme={th} size="xs" variant="primary" icon="refresh">重新載入 8</Btn><Btn theme={th} size="xs">比對差異</Btn></>}/></Card>
-        <Card theme={th} title="409 · 測試狀態衝突 (PARTNER_NOTIFICATION_BINDING_NOT_VALIDATED)" padding={14}><Banner theme={th} tone="warn" icon="warn" title="綁定尚未通過測試" body="啟用前必須先通過測試，且端點指紋必須與測試時相符。請發送測試事件。" actions={<Btn theme={th} size="xs" variant="primary" icon="refresh">發送測試</Btn>}/></Card>
-        <Card theme={th} title="404 · 找不到綁定 (PARTNER_NOTIFICATION_BINDING_NOT_FOUND)" padding={14}><Banner theme={th} tone="neutral" icon="info" title="無此綁定" body="此夥伴入口尚未建立綁定，請建立新綁定。" actions={<Btn theme={th} size="xs" variant="primary" icon="plus">建立綁定</Btn>}/></Card>
         <Card theme={th} title="404 · 找不到端點 (WEBHOOK_NOT_FOUND)" padding={14}><Banner theme={th} tone="neutral" icon="info" title="Webhook 端點已刪除" body="端點已刪除，請重新選擇有效的 Webhook 並儲存綁定。" actions={<Btn theme={th} size="xs" variant="primary" icon="edit">重新設定綁定</Btn>}/></Card>
-        <Card theme={th} title="403 · 無權限" padding={14}><Banner theme={th} tone="danger" icon="lock" title="您沒有存取此綁定的權限" body="無法讀取或修改，需要該 Tenant/Partner (資源層級) 的存取權限。此處使用 foundation:read/write，非 tenant_partner:read。" /></Card>
-        <Card theme={th} title="200 OK · 無效的 Ack" padding={14}><Banner theme={th} tone="warn" icon="warn" title="夥伴回傳 200 但格式無效" body="缺少 receiptId、ID 不符或狀態錯誤。視為失敗，需手動介入 (manual_only)。"/></Card>
-        <Card theme={th} title="200/201/202 · 夥伴端接受且裝置未知" padding={14}><Banner theme={th} tone="warn" icon="info" title="夥伴端接受且裝置未知" body="夥伴端點回傳 200/201/202，且包含有效符合的 ack，但未回報處理裝置。視為接受，不自動重送。"/></Card>
+        <Card theme={th} title="409 · 夥伴入口停用 (ENTRY_INACTIVE)" padding={14}><Banner theme={th} tone="danger" icon="warn" title="夥伴入口已停用" body="無法進行綁定操作，因為對應的夥伴入口已停用。"/></Card>
+        <Card theme={th} title="409 · 缺少事件訂閱 (ENDPOINT_EVENTS_MISSING)" padding={14}><Banner theme={th} tone="danger" icon="warn" title="Webhook 事件訂閱不足" body="目標 Webhook 未訂閱必要的事件類型，請先至 Webhook 管理介面補充。"/></Card>
+
+        <Card theme={th} title="409 · VERSION_CONFLICT" padding={14}><Banner theme={th} tone="warn" icon="warn" title="綁定已被他人更新（expectedVersion 7，目前 8）" body="您的選擇已保留。請重新載入取得 version 8 後再儲存；不會靜默覆寫。" actions={<><Btn theme={th} size="xs" variant="primary" icon="refresh">重新載入</Btn><Btn theme={th} size="xs">比對差異</Btn></>}/></Card>
+        <Card theme={th} title="404 · BINDING_NOT_FOUND" padding={14}><Banner theme={th} tone="neutral" icon="info" title="此夥伴尚未建立通知綁定" body="選擇既有 webhook 與事件即可建立。" actions={<Btn theme={th} size="xs" variant="primary" icon="plus">建立綁定</Btn>}/></Card>
+        <Card theme={th} title="403 · ENTRY_SCOPE_DENIED（含 getBinding）" padding={14}>
+          <div style={{ padding:'18px 8px' }}><EmptyState theme={th} reason="permission_denied" compact messageOverride="您無此夥伴 entry 的存取範圍；綁定、派送紀錄與所有動作皆不可見。此頁不提供唯讀降級。"/></div>
+        </Card>
+        <Card theme={th} title="ack 驗證失敗（200 但 ack 不符）" padding={14}><Banner theme={th} tone="danger" icon="warn" title="回應成功但 ack 驗證失敗" body="夥伴回 200，但 ack 驗證失敗（比對 notification_id / delivery_id / partner_entry_slug，並要求合法 status 與 receipt）；不視為送達，可受控重送。硬性文案（ack 通過時）：「端點已接受，但裝置未知」。"/></Card>
+        <Card theme={th} title="重送被拒 · 各理由" padding={14}>
+          <div style={{ display:'flex', flexDirection:'column', gap:6 }}>{Object.entries(RETRY_DENY).map(([c,zh])=><div key={c} style={{ display:'flex', alignItems:'center', gap:8, fontSize:12 }}><MgmtIcon name="lock" size={12} style={{ color:th.textDim }}/><span style={{ flex:1 }}>{zh}</span><span style={{ fontFamily:SHELL_MONO, fontSize:10, color:th.textDim }}>{c}</span></div>)}</div>
+        </Card>
+        <Card theme={th} title="重送已受理 / 重複點擊" padding={14}><Banner theme={th} tone="info" icon="refresh" title="已受理重新入列 · dlv_0908" body="入列 ≠ 已有 lease。後續依實際 claim / fence 結果更新：claim 成功→送出；他方已 claim→LEASE_ACTIVE；fence 不符→拒絕並顯示原因。同筆重複點擊回後端拒絕原因，不預先假設。"/></Card>
       </div>
     </PnShell>
   );
 }
-
 // D1/D6 · 生命週期載入與復原狀態
 function PA_PartnerNotifyRecoveryBoards({ theme:th }) {
   return (
@@ -197,4 +201,4 @@ function PA_PartnerNotifyRecoveryBoards({ theme:th }) {
   );
 }
 
-Object.assign(window, { PN_BIND, PN_EVENTS, PnShell, PnBinding, PnLifecycle, FX_PN_DELIVERIES, PN_DLV, PnDeliveries, PA_PartnerNotify, PA_PartnerNotifyEdit, PA_PartnerNotifyErrors, PA_PartnerNotifyRecoveryBoards });
+Object.assign(window, { PN_BIND, PN_EVENTS, PnShell, PnBinding, PnLifecycle, PN_DLV, FX_PN_DELIVERIES, RETRY_DENY, PnRetryCell, PnDeliveries, PA_PartnerNotify, PA_PartnerNotifyEdit, PA_PartnerNotifyErrors, PA_PartnerNotifyRecoveryBoards });
