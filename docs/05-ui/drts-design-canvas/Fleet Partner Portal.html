@@ -44,6 +44,7 @@
 <script type="text/babel" src="fleet-host.jsx"></script>
 <script type="text/babel" src="fleet-referral.jsx"></script>
 <script type="text/babel" src="fleet-supply.jsx"></script>
+<script type="text/babel" src="fleet-errors.jsx"></script>
 
 <script type="text/babel">
 const TWEAK_DEFAULTS = /*EDITMODE-BEGIN*/{
@@ -103,6 +104,11 @@ function App() {
           <DCArtboard id="case-access-states" label="R12 · 附件 / 歷程 · 讀取狀態（無權限 / 不存在 / 讀取失敗 / 空歷程）" width={W} height={H}><Bare><FLP_CaseAccessStates theme={th} /></Bare></DCArtboard>
           <DCArtboard id="case-errors" label="R12 · 案件指令錯誤 / edge states" width={W} height={H}><Bare><FLP_CaseErrors theme={th} /></Bare></DCArtboard>
           <DCArtboard id="quality" label="品質指標 / Quality Metrics" width={W} height={H}><Bare><FLP_Quality theme={th} /></Bare></DCArtboard>
+        </DCSection>
+
+        <DCSection id="errors" title="06 · 錯誤與缺權限 · B · missing-scope-20260808" subtitle="只用 Card / Pill / Btn · fleet 深色緊湊 · 無自訂色碼">
+          <DCArtboard id="err-scope" label="B1 · 缺少車隊身分 · danger 徽章 + 行動文案" width={W} height={H}><Hero url="/"><FLP_MissingScope theme={th} /></Hero></DCArtboard>
+          <DCArtboard id="err-page" label="B2 · 一般頁面例外 · warn 徽章 + 重試" width={W} height={H}><Bare><FLP_PageError theme={th} /></Bare></DCArtboard>
         </DCSection>
 
         <DCSection id="host" title="06 · 車主 Host 自車受限唯讀入口 · N03 / C012" subtitle="individual_owner realm partner · 嚴格唯讀，無新增/編輯/派工入口 · 與上方 flp_admin 是不同 actor">
