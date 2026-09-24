@@ -189,21 +189,48 @@ put_secret() { # put_secret <name>  (value on stdin)
 }
 
 random_token() { openssl rand -base64 48 | tr -d '\n'; }
-
-DB_PASSWORD="$(openssl rand -base64 32 | tr -dc 'A-Za-z0-9' | head -c 32)"
-if gc sql users list --instance="$SQL_INSTANCE" --format='value(name)' | grep -qx "$DB_USER"; then
-  gc sql users set-password "$DB_USER" --instance="$SQL_INSTANCE" --password="$DB_PASSWORD"
-else
-  gc sql users create "$DB_USER" --instance="$SQL_INSTANCE" --password="$DB_PASSWORD"
-fi
-
+new_db_password() { openssl rand -base64 32 | tr -dc 'A-Za-z0-9' | head -c 32; }
 # Unix-socket form: Cloud Run mounts the instance at /cloudsql/<connection>.
 # operations/database/db-common.sh parses the password out of this URL and hands
 # the whole URL to psql, so the ?host= form works for both the API and migrations.
-printf 'postgresql://%s:%s@/%s?host=/cloudsql/%s' \
-  "$DB_USER" "$DB_PASSWORD" "$DB_NAME" "$CONNECTION_NAME" \
-  | put_secret "${SECRET_PREFIX}-db-url"
-unset DB_PASSWORD
+db_url() { printf 'postgresql://%s:%s@/%s?host=/cloudsql/%s' "$DB_USER" "$1" "$DB_NAME" "$CONNECTION_NAME"; }
+
+DB_URL_SECRET="${SECRET_PREFIX}-db-url"
+db_user_exists=false
+gc sql users list --instance="$SQL_INSTANCE" --format='value(name)' | grep -qx "$DB_USER" && db_user_exists=true
+db_secret_exists=false
+gc secrets describe "$DB_URL_SECRET" >/dev/null 2>&1 && db_secret_exists=true
+
+# A rerun must not invalidate a credential that a deployed service is already
+# using: deploy-dev.yml injects this secret's value as DATABASE_URL, and
+# apps/api/src/common/db/database.service.ts caches it in its constructor, so
+# nothing picks up a rotated password until the next deploy. Only touch the
+# password when we are missing the piece needed to reconstruct it.
+if $db_user_exists && $db_secret_exists; then
+  echo "kept     ${DB_USER} / ${DB_URL_SECRET} (already present; not rotating)"
+elif $db_user_exists && ! $db_secret_exists; then
+  # Secret is gone so the current password is unrecoverable; rotate it and
+  # (re)create the secret together so the two never disagree.
+  DB_PASSWORD="$(new_db_password)"
+  gc sql users set-password "$DB_USER" --instance="$SQL_INSTANCE" --password="$DB_PASSWORD"
+  db_url "$DB_PASSWORD" | gc secrets create "$DB_URL_SECRET" --replication-policy=automatic --data-file=- >/dev/null
+  unset DB_PASSWORD
+  echo "recovered ${DB_USER} / ${DB_URL_SECRET} (secret was missing; password rotated, secret created)"
+elif ! $db_user_exists && $db_secret_exists; then
+  # User is gone so whatever password the secret holds is stale; recreate the
+  # user with a fresh password and rotate the secret to match.
+  DB_PASSWORD="$(new_db_password)"
+  gc sql users create "$DB_USER" --instance="$SQL_INSTANCE" --password="$DB_PASSWORD"
+  db_url "$DB_PASSWORD" | gc secrets versions add "$DB_URL_SECRET" --data-file=- >/dev/null
+  unset DB_PASSWORD
+  echo "recovered ${DB_USER} / ${DB_URL_SECRET} (user was missing; user created, secret rotated)"
+else
+  DB_PASSWORD="$(new_db_password)"
+  gc sql users create "$DB_USER" --instance="$SQL_INSTANCE" --password="$DB_PASSWORD"
+  db_url "$DB_PASSWORD" | gc secrets create "$DB_URL_SECRET" --replication-policy=automatic --data-file=- >/dev/null
+  unset DB_PASSWORD
+  echo "created  ${DB_USER} / ${DB_URL_SECRET}"
+fi
 
 for name in \
   "${SECRET_PREFIX}-api-key-salt" \
