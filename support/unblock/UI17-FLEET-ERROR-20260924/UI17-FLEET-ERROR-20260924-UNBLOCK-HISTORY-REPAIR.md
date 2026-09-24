@@ -151,3 +151,31 @@ this history-repair task does not have write scope to fix:
 4. #2128 can then be closed by its owner/Supervisor as superseded by #2137, once
    #2137 is confirmed to carry everything #2128's last-reviewed candidate had
    (verified above) plus the R4 fix.
+
+## Reopen resolved: this task's own PR #2138 CI failure
+
+The reviewer reopened this helper task citing a `Canonical consistency` failure
+on candidate `68a868162` (PR #2138, run `35978693533`/job `107565162826`):
+`tools/ci/git/check_canonical_consistency.py`'s cited-paths check flagged this
+artifact's inline backtick reference to
+`docs/04-uat/ui17-handoff-20260924/UI17-FLEET-ERROR-20260924.md` as a
+repo-rooted path claim, but that path exists only on
+`gemini/ui17-fleet-error-20260924-v2`, not on this task's own branch tree.
+
+Fix (commit `a237cfd56`, already pushed to
+`claude/ui17-fleet-error-20260924-unblock-history-repair` before the reopen
+note landed): qualified the citation with an explicit `<branch>:<path>` prefix
+so the checker's regex no longer parses it as an in-tree path claim, without
+changing the substance of the "still open" finding.
+
+Verified independently after the fix landed, by watching PR #2138's hosted
+checks to terminal state (`gh run watch 35979116153 --exit-status`,
+`gh run watch 35979115150 --exit-status`, then `gh pr checks 2138`, all on
+2026-09-24): every required check is `pass` at `a237cfd56`, including
+`Canonical consistency` (10s), `Commit trailers`, `build` (5m14s), `unit`
+(5m52s), `typecheck` (2m25s), `lint`, `integration`, `iam-negative-matrix`,
+`cross-surface-e2e` (3m36s), `ui-route-e2e` (5m46s), `i18n guard`/`i18n-guard`,
+and `Product smoke acceptance` (10m50s). `orchestrator-tests` reports
+`skipping` (not applicable to a docs-only change) and is not part of the
+required set. No further push was needed; the reopen was evaluated against
+the pre-fix SHA before the fix's own progress note was read.
