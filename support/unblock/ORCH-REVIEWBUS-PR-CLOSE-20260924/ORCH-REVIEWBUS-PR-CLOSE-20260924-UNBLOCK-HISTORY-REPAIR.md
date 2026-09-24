@@ -6,6 +6,18 @@
 - Worker: `/home/lupin/workspace/drts-fleet-platform/.artifacts/worktrees/auto/claude-orch-reviewbus-pr-close-20260924-unblock-history-repair`.
 - Branch: `claude/orch-reviewbus-pr-close-20260924-unblock-history-repair`.
 
+> **Round 2 correction (Claude2 reopen, `REVIEWED_SHA=1f98bc4e8e5d7b363fd34109b324ed3e4df3a4ba`, 2026-09-24T08:49:12Z; confirmed by owner re-investigation at 08:55Z).**
+> The bottom-line disposition below (no branch/PR/commit contamination, all four
+> target PRs CLOSED, #2113 OPEN, all branches present) is independently
+> reproduced and still holds. But §2(a)/(b)/(c)'s "append-only, structurally
+> guaranteed" argument for reconstructing the truncated 72 lines is **not
+> sound** and does not survive a fresh independent rerun. Treat §2(a)-(c) as a
+> **superseded audit trail**, not as conclusive evidence. See the new **§2(d)
+> Round 2 correction** for the falsifying evidence and the corrected, honest
+> confidence level, and see the revised **§5** for the recommended next step
+> (human-operator escalation, per the parent's already-recorded path), since no
+> stronger historical proof of the pre-closure state is available.
+
 ## Disposition
 
 There is no branch, worktree, or commit contamination on this parent. The
@@ -108,6 +120,80 @@ of them are candidates for accidentally holding one of the four
 `sr-partner-notify-{nav,ui}-20260917*` branch strings; that naming convention
 never applies to unrelated task families.
 
+**(d) Round 2 correction: the above is downgraded to suggestive, not
+conclusive — here is what an independent rerun actually found.**
+
+Claude2's R2 review reran the identical `candidate_branch` query minutes after
+this section was first authored (~08:41-42Z) and got a different result:
+total line count 155 → 154, and the boundary task `SR-HOST-FE-001-CANVAS`
+moved from line 72 to line 71. That already falsifies "nothing in the
+truncated range could have changed." The owner re-investigated this
+independently in the Round 2 pass (2026-09-24, ~08:53-08:55Z) and confirms it,
+with a concrete cause:
+
+1. **The evidence cited for "append-only" was checked against the wrong
+   file.** §2(a) says the no-sort claim was "checked by grepping the file for
+   `sort`/`sorted(`: zero matches" against
+   `tools/development-orchestrator/control_plane/infra/task_board_repo.py`.
+   That file is 53 lines and contains only a cross-process/cross-thread file
+   lock (`task_board_transaction`) — it has no task-list read, write, or
+   mutation logic at all, so a `sort`/`sorted(` grep against it proves nothing
+   about the real write path's ordering or removal behavior. The actual
+   mutation path is elsewhere (delegated through
+   `control_plane/usecases/task_board_commands.py` and a dynamically-loaded
+   release module) and was not pinned down further within this repair's
+   scope.
+2. **A task present in the doc's own 08:38Z snapshot was later fully absent
+   from `.tasks`, confirmed two independent ways.** The doc's original
+   `/tmp/candidate_branch_today.txt` (mtime 08:38Z, still on disk) has
+   `SR-QA-GOVERNANCE-001: candidate_branch=gemini/sr-qa-governance-001` at
+   line 2 — *before* the line-72 boundary this section relies on. Diffing that
+   file against a fresh rerun during Round 2 (`diff
+   /tmp/candidate_branch_today.txt /tmp/cb_now.txt`) shows that line is simply
+   gone, and:
+   ```
+   $ jq '.tasks[] | select(.id=="SR-QA-GOVERNANCE-001")' ai-status.json
+   (no output)
+   $ AI_NAME=Claude tools/development-orchestrator/bin/ai-status.sh show SR-QA-GOVERNANCE-001
+   Task not found: SR-QA-GOVERNANCE-001
+   ```
+   The task existed at 08:38Z and does not exist at all ~15 minutes later, via
+   both a raw `jq` query and the official CLI. This directly contradicts
+   "existing entries are never removed" — the exact premise §2(b) uses to
+   trust that a coincidental line-72 boundary match proves the leading rows
+   were frozen. No matching removal event (`task_removed`, `prune`,
+   `dedupe`, etc.) exists anywhere in the ~33,600-line
+   `ai-activity-log.jsonl`, and grepping the whole log for those event
+   *types* across its full history returns zero hits — so this system has no
+   audited path for how or why an existing task disappears from the array,
+   which is itself a gap worth flagging (see §5), separate from this
+   candidate's evidence question.
+3. **The file is under continuous, live, concurrent mutation from many other
+   task lanes**, not a static artifact. During this exact Round 2
+   investigation window (08:48-08:55Z), `ai-activity-log.jsonl` shows dozens
+   of interleaved events for unrelated tasks (`UI17-MAP-20260924`
+   `candidate_handoff` at 08:52:56Z, `ORCH-ORPHAN-PR-LAND-20260924` `progress`
+   at 08:51:27Z, `SR-PARTNER-NOTIFY-UI-20260917-UNBLOCK-PLANNING-DECISION`
+   `candidate_auto_merge_deferred` at 08:51:15Z, etc.). Re-running
+   `jq '.tasks|length' ai-status.json` twice within this same investigation,
+   about two minutes apart, returned `175` and then `176` (a new sibling
+   helper task, `UI17-FLEET-ERROR-20260924-UNBLOCK-HISTORY-REPAIR`, was
+   appended in between, pushing this very helper task from the last element
+   to the second-to-last). Growth-by-append at the tail is consistent with
+   §2(a)'s claim for *new* tasks, but it also means the array's length and
+   the position of any given row is a moving target on a timescale of single
+   minutes, which is incompatible with treating a single retrospective
+   boundary-line match as a "structural guarantee" per §2(b).
+
+**Corrected conclusion:** the line-boundary/append-only argument in §2(a)-(c)
+is suggestive circumstantial support at best (it is consistent with, but does
+not prove, "the 07:14Z truncated rows were unmodified"), not conclusive proof
+of pre-closure state. It does not clear the bar §0.7 sets for verified
+reproduction of historical state, and it belongs to the same class of gap
+Codex rounds 1-4 already rejected (a post-closure rerun cannot prove
+pre-closure state) — this candidate's boundary-match technique fails on its
+own terms once independently rerun, exactly as Claude2's R2 review found.
+
 ## 3. Direct re-verification (today, read-only, no repository mutation)
 
 Target set — the four closed-PR branches:
@@ -170,32 +256,57 @@ round.
 
 | Finding／驗收項 | 原始碼依據與修改位置 | 舊版重現 → 修正版結果 | 命令、退出碼、執行版本與證據位置 | 未驗項與具體限制 |
 | --- | --- | --- | --- | --- |
-| R2 (Codex round 1-4): pre-closure `candidate_branch` all-task check unverifiable — original query output missing 72 lines | `.orchestrator/logs/20260924T071405665431Z-gemini2-gemini2-198f5e.log` step 20/21 (`run_command` tool truncation); `ai-status.json` `.tasks` array (append-only, no sort in `task_board_repo.py`) | Old: transcript alone cannot show whether the first 72 rows included any of the 4 target branches. New: rerun today reproduces the identical 71-row prefix (boundary-verified at line 72 = `SR-HOST-FE-001-CANVAS`, byte-identical to Gemini2's first visible line) and a full-file grep of all 155 current rows, a strict superset, finds zero matches. | `jq` rerun this session, exit 0, output saved at `/tmp/candidate_branch_today.txt` (155 lines) and `/tmp/execution_branch_today.txt` (28 lines) in this worktree; `grep -nE` exit 1 (no match) against both; `gh pr view`/`git ls-remote` exit 0, see §3 | Cannot literally replay 2026-09-24T07:14-16Z; relies on the append-only/no-reorder structural guarantee (verified by code inspection + boundary match) plus the task-ID naming exclusion argument in §2(c), not on recovering the original bytes |
+| R2 (Codex round 1-4): pre-closure `candidate_branch` all-task check unverifiable — original query output missing 72 lines | `.orchestrator/logs/20260924T071405665431Z-gemini2-gemini2-198f5e.log` step 20/21 (`run_command` tool truncation); `ai-status.json` `.tasks` array | **Superseded by Round 2 correction, §2(d).** Old (this helper's R2 attempt, 08:41Z): claimed a rerun reproduces the identical 71-row prefix via an "append-only" boundary match. **Falsified** by Claude2's reopen (08:49:12Z) and confirmed by owner re-check (08:53-08:55Z): the boundary line shifted (72→71) within ~11 minutes because an existing task (`SR-QA-GOVERNANCE-001`, present in the doc's own 08:38Z snapshot before the boundary) was fully removed from `.tasks` by ~08:49Z — contradicting "existing entries are never removed." The "no sort()" evidence was also grepped from `task_board_repo.py`, a 53-line file-lock helper with no task-list logic, so it does not support the claim either. Corrected conclusion: the boundary-match argument is suggestive circumstantial support only, not conclusive proof of 2026-09-24T07:14-16Z pre-closure state. | `jq` reruns this session (08:38Z, 08:49Z, 08:53-08:55Z), all exit 0; `diff /tmp/candidate_branch_today.txt /tmp/cb_now.txt` shows `SR-QA-GOVERNANCE-001` line removed; `ai-status.sh show SR-QA-GOVERNANCE-001` → "Task not found"; `wc -l tools/development-orchestrator/control_plane/infra/task_board_repo.py` → 53; full-history grep of `ai-activity-log.jsonl` event types finds no `task_removed`/`prune`/`dedupe` event — see §2(d) | No stronger historical proof of the 2026-09-24T07:14-16Z pre-closure state was found. Per this correction, the recommended disposition is **not** "resolved R2 evidence" — it is to confirm the parent's already-recorded human-operator escalation (`next: "Escalated to human operator: no historical R2 snapshot recovered. Needs explicit disposition."`, set 2026-09-24T07:51:36Z) still stands; see revised §5 |
 | R1 (already repaired, prior rounds): closure comments' candidate/merge SHA disposition | `docs/03-runbooks/orchestrator-orphan-pr-backlog-20260924.md`, "PR closures by Gemini2" section | Confirmed unchanged and correct across all 4 review rounds | N/A (documentation content check) | Not re-audited here; out of this helper's scope, no new risk identified |
 | Branch/PR/commit contamination (this helper's own mandate) | GitHub PR state, `origin` refs | No contamination found: all 4 PRs CLOSED, #2113 OPEN, all 5 branches present unmodified | `gh pr view`, `git ls-remote --heads origin`, see §3, all exit 0 | None |
 
 ## 5. Concrete unblocked next step for the parent
 
-`ORCH-REVIEWBUS-PR-CLOSE-20260924` can leave `blocked` without any further
-code, PR, or branch action. The recommended path:
+**Revised after the Round 2 correction (§2(d)):** this helper's
+line-boundary reconstruction does *not* clear the R2 evidence bar, so it
+should not be presented as resolved R2 evidence, and the parent's own
+already-recorded disposition should stand rather than being replaced by a
+sixth review cycle over an argument that has now failed twice (Codex round
+1-4, then this helper's own attempt on Round 2 reopen). Concretely:
 
-1. Supervisor (or owner Gemini2, on resume) references this artifact
-   (`support/unblock/ORCH-REVIEWBUS-PR-CLOSE-20260924/ORCH-REVIEWBUS-PR-CLOSE-20260924-UNBLOCK-HISTORY-REPAIR.md`)
-   as the R2 evidence, and either:
-   - resumes the parent to `todo`/`in_progress` so Gemini2 can issue one more
-     `handoff` that cites this artifact instead of the unrecoverable
-     transcript, or
-   - if the parent's lifecycle allows it, records this artifact directly as
-     the missing R2 evidence and lets Codex do a fifth review round against
-     it (not a sixth "unchanged handoff" — the evidence itself is new).
-2. Codex's fifth review should check this artifact's §2/§3 reasoning and
-   rerun the two `grep`/`gh` checks itself (all read-only, a few seconds) —
-   independent reviewer verification of a reconstruction argument is exactly
-   what §0.7 asks for, and is materially different from re-accepting the
-   original (still-incomplete) transcript.
-3. No PR should be reopened or reclosed, no branch should be deleted, and no
+1. The parent (`ORCH-REVIEWBUS-PR-CLOSE-20260924`) already carries
+   `next: "Escalated to human operator: no historical R2 snapshot recovered.
+   Needs explicit disposition."` (recorded 2026-09-24T07:51:36Z, before this
+   helper task existed). That disposition is **confirmed still correct** by
+   this repair: no stronger historical proof of the 07:14-16Z pre-closure
+   `candidate_branch` state was found, and the one new technique attempted
+   (line-boundary/append-only reconstruction) is independently falsified in
+   §2(d). Supervisor/operator should treat the parent as still awaiting an
+   explicit human-operator disposition, not as unblocked by new evidence.
+2. If a human operator explicitly accepts the risk (i.e., decides the
+   independently-reproduced *current* state — all 4 PRs CLOSED with correct
+   disposition comments, #2113 OPEN, zero live `candidate_branch`/
+   `execution_branch` references to the 4 branches, all branches present
+   unmodified — is sufficient without the specific 07:14-16Z historical
+   proof), that acceptance itself becomes the R2 evidence and should be
+   recorded as such on the parent, citing this artifact for the
+   independently-reproduced current-state facts and citing §2(d) for why the
+   historical-reconstruction argument was not used as the basis.
+3. Do not treat a further, differently-worded reconstruction of the same 72
+   truncated lines as a new technique — per AI_COLLABORATION_GUIDE.md §0.7,
+   the same trigger condition (unrecoverable pre-closure evidence) has now
+   failed independent review twice in a row under two different arguments;
+   absent an actual new source of historical bytes (e.g. a previously
+   unknown log, cache, or backup that predates 07:16Z), a seventh attempt at
+   the same reconstruction is not expected to succeed either.
+4. No PR should be reopened or reclosed, no branch should be deleted, and no
    commit history should be rewritten as part of closing out the parent —
-   none of that is implicated by this finding.
+   none of that is implicated by this finding, and none of it was done by
+   this helper.
+
+The following is the prior (now-superseded) recommendation, kept for the
+audit trail per §0.7's rule against overwriting unresolved findings with a
+new summary: resume the parent to `todo`/`in_progress` and let Codex run a
+fifth review against this artifact's §2/§3 reasoning as new R2 evidence. That
+path is superseded because §2(d) shows the reasoning does not survive
+independent rerun, so a fifth Codex round would predictably reject it again
+on the same substantive grounds, which is not a productive use of another
+review cycle.
 
 This helper made no changes to product code, task board state (beyond its
 own `start`/`note`/`handoff` lifecycle transitions), or any PR/branch. It is
