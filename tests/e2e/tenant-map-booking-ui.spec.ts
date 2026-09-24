@@ -200,7 +200,7 @@ test.describe("tenant console booking map alignment", () => {
     // Wait for payload
     await page.waitForTimeout(500); // give time for route
     expect(submitPayload).toBeTruthy();
-    expect(submitPayload.mapFallbackReview).toMatchObject({
+    expect(submitPayload!.mapFallbackReview).toMatchObject({
       providerAvailable: true,
       providerDegraded: true
     });
@@ -254,7 +254,7 @@ test.describe("tenant console booking map alignment", () => {
     
     await page.waitForTimeout(500); // give time for route
     expect(submitPayload).toBeTruthy();
-    expect(submitPayload.mapFallbackReview).toMatchObject({
+    expect(submitPayload!.mapFallbackReview).toMatchObject({
       providerAvailable: false,
       providerDegraded: true
     });
