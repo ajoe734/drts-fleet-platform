@@ -2584,4 +2584,55 @@ export class MultiTaxiService implements OnModuleInit {
       serviceAreaCodes: [...authorization.serviceAreaCodes],
     };
   }
+
+  async listPartnerNotificationDeliveries(
+    entrySlug: string,
+    query: any,
+    identity: BootstrapRequestIdentity,
+  ) {
+    const entry = this.requireEntryInScope(entrySlug, identity);
+    return this.repository!.listPartnerNotificationDeliveries(entry, query);
+  }
+
+  async retryPartnerNotificationDelivery(
+    entrySlug: string,
+    outboxId: string,
+    identity: BootstrapRequestIdentity,
+    requestId?: string,
+  ) {
+    const entry = this.requireEntryInScope(entrySlug, identity);
+    return this.repository!.retryPartnerNotificationDelivery(entry, outboxId, identity, requestId);
+  }
+
+  private requireEntryInScope(
+    entrySlugInput: string,
+    identity: BootstrapRequestIdentity | null,
+  ) {
+    const entrySlug = entrySlugInput?.trim();
+    if (!entrySlug) {
+      throw new ApiRequestError(
+        HttpStatus.BAD_REQUEST,
+        "PARTNER_NOTIFICATION_BINDING_ENTRY_SLUG_REQUIRED",
+        "entrySlug is required.",
+      );
+    }
+    const entry = this.tenantPartnerService!.getPartnerEntry(entrySlug);
+    if (identity?.tenantId && identity.tenantId !== entry.tenantId) {
+      throw new ApiRequestError(
+        HttpStatus.FORBIDDEN,
+        "PARTNER_NOTIFICATION_BINDING_TENANT_SCOPE_DENIED",
+        "The caller's tenant scope does not include this partner entry.",
+        { entrySlug, tenantId: identity.tenantId },
+      );
+    }
+    if (!entry.activeFlag) {
+      throw new ApiRequestError(
+        HttpStatus.CONFLICT,
+        "PARTNER_NOTIFICATION_BINDING_ENTRY_INACTIVE",
+        "The partner entry is not active.",
+        { entrySlug },
+      );
+    }
+    return entry;
+  }
 }
