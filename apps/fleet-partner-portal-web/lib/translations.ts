@@ -438,6 +438,8 @@ const en: Dict = {
   "actions.remindDriver": "Remind driver",
   "actions.upload": "Upload",
   "actions.retry": "Try again",
+  "actions.logout": "Sign out",
+  "actions.backToDashboard": "Back to dashboard",
   "referral.dashboard.title": "Channel Dashboard",
   "referral.dashboard.subtitle":
     "Referral channel · partner-scoped usage / GMV / receivable share",
@@ -944,6 +946,8 @@ const zh: Dict = {
   "actions.remindDriver": "提醒司機",
   "actions.upload": "上傳",
   "actions.retry": "重試",
+  "actions.logout": "登出",
+  "actions.backToDashboard": "回營運總覽",
   "referral.dashboard.title": "渠道總覽",
   "referral.dashboard.subtitle":
     "Referral 渠道夥伴自家數字 · 用量 / GMV / 應收分潤",
