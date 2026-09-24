@@ -36,9 +36,11 @@ import {
   KpiRow,
   StatusChip,
   buildCanvasTheme,
+  evaluateAddressSubmitGate,
   type AddressMapPairChange,
   type AddressPayload,
   type ServiceAreaEvaluationResult,
+  type AddressProviderState,
 } from "@drts/ui-web";
 import {
   buildTenantBookingCreateCommand,
@@ -825,6 +827,11 @@ export function TenantBookingCreateForm({
   );
   const [serviceability, setServiceability] =
     useState<ServiceAreaEvaluationResult | null>(null);
+  const [providerState, setProviderState] = useState<AddressProviderState>({
+    available: true,
+    degraded: false,
+    reasonCode: "available",
+  });
   const [geoProvider] = useState(() => createTenantConsoleGeoProvider());
   // Bumped only when a saved address is chosen, to remount the picker with the
   // new seed value (the picker seeds its internal state from props at mount).
@@ -879,7 +886,11 @@ export function TenantBookingCreateForm({
   const dropoffAddress = dropoffPayload?.address ?? "";
   const dropoffLat = coordinateToDraftString(dropoffPayload?.lat);
   const dropoffLng = coordinateToDraftString(dropoffPayload?.lng);
-  const notServiceable = serviceability?.decision === "not_serviceable";
+  const baseGate = evaluateAddressSubmitGate({ pickup: pickupPayload, dropoff: dropoffPayload, serviceability, providerState });
+  const hasTextFallback = Boolean((pickupPayload?.address || "").trim() && (dropoffPayload?.address || "").trim());
+  const mapGate = (baseGate.code === "coordinates_required" && providerState && !providerState.available && hasTextFallback) ? { blocking: false, code: "dispatch_manual_review_required" as const } : baseGate;
+  const notServiceable = mapGate.code === "outside_service_area";
+  const mapFallbackReview = mapGate.code === "dispatch_manual_review_required" && providerState && !providerState.available ? { reasonCode: "map_provider_unavailable", providerAvailable: providerState.available, providerDegraded: providerState.degraded, providerReasonCode: providerState.reasonCode ?? null } : null;
   const draft: TenantBookingDraftValues = {
     businessDispatchSubtype,
     selectedPassengerId,
@@ -954,7 +965,7 @@ export function TenantBookingCreateForm({
     pageModel.emptyState != null ||
     pageModel.actions.submit.enabled === false ||
     approvalEvaluation?.outcome?.blocked === true ||
-    notServiceable ||
+    mapGate.blocking ||
     missingRequiredFields ||
     Object.keys(formatErrors).length > 0;
 
@@ -1034,6 +1045,7 @@ export function TenantBookingCreateForm({
     setPickupPayload(change.pickup);
     setDropoffPayload(change.dropoff);
     setServiceability(change.serviceability);
+    setProviderState(change.providerState);
     // A user-edited stop is no longer the saved address; drop the stale id so
     // the submitted payload's addressId matches the pinned coordinates.
     if (change.pickup && change.pickup.coordinateSource !== "saved_address") {
@@ -1195,6 +1207,7 @@ export function TenantBookingCreateForm({
       const command = buildTenantBookingCreateCommand({
         draft,
         passengers,
+        mapFallbackReview,
       });
 
       const response = await fetch("/api/bookings/create", {
@@ -2288,7 +2301,7 @@ export function TenantBookingCreateForm({
                         : approvalEvaluation?.outcome?.decision ===
                             "require_approval"
                           ? t("newBooking.submit.forApproval")
-                          : t("newBooking.submit.create")
+                          : mapGate.code === "dispatch_manual_review_required" ? t("newBooking.submit.manualReview") : t("newBooking.submit.create")
                     }
                     primary
                     type="submit"

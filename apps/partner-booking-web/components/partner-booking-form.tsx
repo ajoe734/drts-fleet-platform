@@ -796,7 +796,9 @@ export function PartnerBookingForm({
               style={submitButtonStyle(theme, !ready || mapGate.blocking)}
               disabled={!ready || mapGate.blocking}
             >
-              {t("book.submit")}
+              {mapGate.code === "dispatch_manual_review_required"
+                ? t("book.submit.manualReview")
+                : t("book.submit")}
             </button>
             {entry.programCode ? (
               <span style={{ color: theme.textMuted }}>
