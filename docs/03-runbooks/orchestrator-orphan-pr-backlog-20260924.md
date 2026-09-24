@@ -562,3 +562,32 @@ infra/gcp/dev/provision-dev-project.sh` 與 `git diff --check` 均額外
 迴圈等其他段落。新增的 `gc secrets versions access latest` 呼叫只讀一次、
 輸出導向 `/dev/null`，不落地、不列印明文，且只在 `db_secret_exists=true`
 時才執行（secret 確認不存在時不需要多打一次 API）。
+
+## F1-A/F1-C 候選 `a67c4c851` 同 SHA hosted CI 證據
+
+候選 `a67c4c851b462bbbba7696cd8f5a03dcc2ba5f23`（PR #2132 head，本 SHA 只
+含上述 F1-A/F1-C 修正，未疊加其他 diff）的兩個必要 hosted run 均已收斂
+且 `headSha` 與本候選一致：
+
+- CI run [35982655322](https://github.com/ajoe734/drts-fleet-platform/actions/runs/35982655322)：
+  `status=completed`／`conclusion=success`，11 個 job（Spec source
+  archive、Change scope、Canonical consistency、Verify Internal Key
+  Exceptions、BFF-only imports、Commit trailers、No real
+  financial-institution identifiers、Runtime mirror guard、Product smoke
+  acceptance、i18n guard、Smoke acceptance）全部 `completed/success`，無
+  skipped。已讀 `Commit trailers` job 日誌：`check_commit_trailers: 9
+  commit(s) OK.`（相對 `d74caf654` 輪的 8 commits，因疊上本輪 1 個新
+  commit）。
+- CI integration trunk run [35982655317](https://github.com/ajoe734/drts-fleet-platform/actions/runs/35982655317)：
+  `status=completed`／`conclusion=success`，14 個 job（candidate、
+  changes、cross-surface-e2e、unit、build、lint、typecheck、
+  orchestrator-tests、ui-route-e2e、iam-negative-matrix、integration、
+  i18n-guard、e2e、ci-integ）全部 `completed/success`，無 skipped。已讀
+  `orchestrator-tests` job 日誌尾端：`Ran 973 tests in 13.585s` /
+  `OK`（0 failures/errors/skips）。
+
+`gh pr view 2132` 讀回 `headRefOid=a67c4c851b462bbbba7696cd8f5a03dcc2ba5f23`、
+`mergeable=MERGEABLE`、`mergeStateStatus=CLEAN`、`state=OPEN`，與本地
+worktree `git rev-parse HEAD` 及上述兩個 run 的 `headSha` 三方一致。F2/F3
+沿用 Codex 第三／四輪已確認通過、未重開之結論，本節只新增本 SHA 自身 CI
+證據，未新增或修改任何程式碼。
