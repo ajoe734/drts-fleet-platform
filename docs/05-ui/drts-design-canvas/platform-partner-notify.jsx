@@ -61,7 +61,7 @@ function PnLifecycle({ theme:th, state='ready', test='passed_current', inflight,
         <ActionButton theme={th} descriptor={{ action:'test', enabled: state!=='disabled' && !isPending, disabledReasonCode: state==='disabled'?'binding_disabled':isPending?'in_flight':undefined, riskLevel:'low' }} icon="refresh" label={testingState==='pending' ? "測試中..." : "發送測試事件"} en="test"/>
         <ActionButton theme={th} descriptor={{ action:'enable', enabled: canEnable && !isPending, disabledReasonCode: canEnable?undefined:enableReason, riskLevel:'medium', requiresReason:true }} icon="check" label={enableState==='pending' ? "啟用中..." : "啟用"} en="enable"/>
         {state==='disabled'
-          ? <ActionButton theme={th} descriptor={{ action:'resume', enabled: !isPending, riskLevel:'medium', requiresReason:true, disabledReasonCode: isPending?'in_flight':undefined }} icon="check" label={resumeState==='pending' ? "恢復中..." : test==='passed_current' ? "恢復（直接啟用）" : "恢復（需重測）"} en="resume"/>
+          ? <ActionButton theme={th} descriptor={{ action:'resume', enabled: !isPending, riskLevel:'medium', requiresReason:true, disabledReasonCode: isPending?'in_flight':undefined }} icon="check" label={resumeState==='pending' ? "恢復通知中..." : test==='passed_current' ? "恢復通知" : "恢復通知（恢復後需重新測試，通過後才能啟用）"} en="resume"/>
           : <ActionButton theme={th} descriptor={{ action:'disable', enabled: state==='ready' && !isPending, disabledReasonCode: state==='ready'?undefined:'not_enabled', riskLevel:'high', requiresReason:true }} icon="lock" label={disableState==='pending' ? "停用中..." : "停用"} en="disable"/>}
       </div>
       <div style={{ fontSize:10.5, color:th.textDim, marginTop:9, lineHeight:1.5 }}>啟用門檻：目前端點 fingerprint 必須有成功測試。端點變更後測試自動失效，需重測。<br/>「恢復」依據目前端點是否 passed_current 來決定是否需重測，無獨立 /resume。</div>
@@ -109,7 +109,7 @@ function PnDeliveries({ theme:th, mode='list', retryState='idle', retryRowId=nul
         <Table theme={th} columns={[
           { h:'Delivery ID', k:'id', w:110, mono:true, r:r=><div style={{display:'flex', flexDirection:'column'}}><span style={{ color:th.accent, fontWeight:600 }}>{r.id}</span><span style={{ fontSize:10, color:th.textDim }}>{r.outboxId}</span></div> },
           { h:'事件（內部）', k:'ev', w:170, mono:true },
-          { h:'目標（遮罩）', w:150, mono:true, r:r=><span style={{ fontSize:10.5 }}>{r.target || <span style={{color:th.textDim}}>未知</span>}</span> },
+          { h:'目標（遮罩）', w:150, mono:true, r:r=><span style={{ fontSize:10.5 }}>{r.target || <span style={{color:th.textDim}}>未知／尚未建立派送目標</span>}</span> },
           { h:'HTTP', k:'code', w:56, mono:true },
           { h:'ack', w:70, r:r=>r.ack==='ok'?<Pill theme={th} tone="success">通過</Pill>:r.ack==='mismatch'?<Pill theme={th} tone="danger">不符</Pill>:<span style={{ color:th.textDim }}>—</span> },
           { h:'送達狀態', w:190, r:r=><Pill theme={th} tone={PN_DLV[r.status][1]} dot>{PN_DLV[r.status][0]}</Pill> },
@@ -153,7 +153,7 @@ function PA_PartnerNotifyEdit({ theme:th, saveState="idle", endpointAccessible=t
         <Card theme={th} title="編輯通知綁定" subtitle="PUT /partner-entries/:id/notification-binding · webhookId + eventTypes + expectedVersion">
           <Field theme={th} label="webhookId · 選擇既有 webhook" required hint="端點 URL、密鑰、逾時/重試由既有 webhook 管理維護，本頁不重複 CRUD">
             {endpointAccessible ? <Select theme={th} value="wh_7f3a2c91 · https://api.nexus.example/drts/hook · active"/> : <div style={{ padding:'8px 12px', border:'1px solid '+th.border, borderRadius:4, background:th.surfaceLo, color:th.textDim, fontSize:13 }}>無權限存取端點列表</div>}
-            <div style={{ marginTop:6 }}><Btn theme={th} size="xs" variant="ghost" icon="ext">前往既有 /webhooks 管理（需 webhook:manage）</Btn></div>
+            <div style={{ marginTop:6 }}><Btn theme={th} size="xs" variant="ghost" icon="ext">前往既有 /webhooks 管理（需 tenant:webhooks:write）</Btn></div>
           </Field>
           <Field theme={th} label="eventTypes · 內部事件" required>
             <div style={{ display:'flex', flexDirection:'column', gap:8 }}>{PN_EVENTS.map(([i,o,zh],idx)=><div key={i} style={{ display:'flex', alignItems:'center', gap:10 }}><Checkbox theme={th} on={idx<4} label={i}/><span style={{ fontSize:10.5, fontFamily:SHELL_MONO, color:th.textDim }}>→ {o}</span><span style={{ fontSize:10.5, color:th.textDim }}>{zh}</span></div>)}</div>
