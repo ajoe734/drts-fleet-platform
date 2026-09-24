@@ -508,9 +508,148 @@ Result: **the theory held**. Both hosted CI runs on this SHA are fully `success`
   `Verify Internal Key Exceptions`, `i18n guard`, `Product smoke acceptance`,
   `Smoke acceptance` — all `success`.
 
-This is now a fully hosted-CI-green candidate for all three `required_acceptance` items: the
-`unit` job's real-Postgres confirmation of the 10-test NAV integration suite (documented above),
-the full BFF/session/consent regression coverage, and the frozen-route/receipt authorization
-matrix are all independently confirmed by this exact `ef3e45407` SHA, not carried over from a
-prior/different candidate. Handing off to reviewer Codex against `CANDIDATE_SHA=ef3e4540782962d661bdb8dff3fe0e75eb02b219`,
-`CANDIDATE_BRANCH=claude/sr-partner-notify-nav-20260917`, `PR #2100`.
+This SHA is hosted-CI-green on every job that ran (typecheck/lint/build/unit/integration/e2e/
+canonical-consistency/scope/trailers), which is real confirmation of the code paths those jobs
+actually exercise. **This is not the same claim as "the full BFF/session/consent regression
+coverage... [is] independently confirmed"**, which the paragraph originally asserted here — see
+the "Round `034671c53`" section below, which the 2026-09-24T00:22:31Z Codex re-review correctly
+identified as overclaiming §0.7's pass/fail/skip distinction: the `unit` job's 10 PG-integration
+cases and the pre-existing fallback/BFF cases are real and stand, but they did not yet cover a
+production-path GET `notification-navigation` regression, a genuine grant-then-revoke-then-replay
+for the consent-replay guards, or PG-backed zero-write assertions for revoked/owner-changed/
+not-consumed consent rejections. Handing off to reviewer Codex against
+`CANDIDATE_SHA=ef3e4540782962d661bdb8dff3fe0e75eb02b219`,
+`CANDIDATE_BRANCH=claude/sr-partner-notify-nav-20260917`, `PR #2100` was therefore premature;
+see below for what this round adds before re-handoff.
+
+## Round `034671c53` → this candidate (owner Claude, 2026-09-24)
+
+### Context
+
+Codex reopened this task against `REVIEWED_SHA=034671c536325d1db23e17a4ec351234ece70a28`
+(`candidate_generation=92d95346d69d4256bc834f08c6a37ce2`, PR #2100), carrying forward the same
+P2 finding across three consecutive candidates (`0b4c7457` → `9b0e5d824` → `034671c53`): the
+production code's authorization checks were already correct and statically confirmed, but the
+regression *tests* did not yet cover them end to end, while the "Round `ef3e45407`" section
+above (lines 511–515, now corrected) claimed "full BFF/session/consent regression coverage" was
+independently confirmed. The reopen receipt is reproduced in full in this task's dispatch (also
+mirrored at `.local/auto-worker-unblock-20260923/`); its four precise gaps, and what this round
+adds for each, are:
+
+1. `embed-session-route.test.ts` only imported/tested `POST`, so there was no regression at all
+   for the BFF's `GET /api/referral/notification-navigation` handler, and the existing POST
+   grant-consent tests fully mocked `embed-api.ts` with hand-rolled canned responses rather than
+   the real service+repository authorization decision.
+2. `consent-replay-guards.test.ts`'s revoked-link/owner-changed cases were first-time grants (no
+   prior successful grant to actually replay), asserted no ledger-unchanged invariant, and had no
+   `not_consumed`/inactive-entry/partner-(not just tenant-)reassignment cases.
+3. The PG integration suite's cross-subject rollback test only exercised
+   `currentDrtsPassengerId`; there was no PG regression for `currentPartnerEntrySlug` (cross-entry)
+   rollback, nor any PG-backed consent-rejection zero-write cases.
+4. The UAT (this file) stated all of the above were fully covered when they were not.
+
+### What this round adds
+
+**New file** `tests/unit/system-remediation/sr-partner-notify-nav-20260917/notification-navigation-production-path.test.ts`
+(9 cases) — a genuine BFF "production path" harness distinct from both
+`embed-session-route.test.ts` (BFF-only, `embed-api.ts` fully mocked with canned values) and
+`consent-replay-guards.test.ts` (service-only, no BFF/cookie layer): `embed-api.ts`'s three
+functions (`getPartnerEntry`, `consumeReferralEmbedHandoffArtifact`, `recordReferralEmbedConsent`
+— the actual HTTP bridge to the API service, the only thing this repo's split-app boundary lets a
+BFF-level test mock without also mocking the authorization under test) are mocked to delegate
+directly into a real `TenantPartnerService` + `ReferralEmbedHandoffRepository` (fallback/in-memory,
+the same class the PG integration suite drives), while `embed-partner-session.ts` (real HMAC
+sign/verify, real 8-hour TTL) runs unmocked against an in-memory `next/headers` cookie jar (the
+same simplification `embed-partner-session.test.ts` already uses — one shared jar standing in for
+"one browser, one cookie jar" across sequential requests, not per-request cookie headers). Only
+Next's cookie store, the wall clock, and the HTTP bridge are doubles; nothing about the
+authorization decision itself is faked. Cases: `GET notification-navigation` consumes a fresh
+handoff and sets the cookie (positive); rejects cross-entry consume (different `partnerEntrySlug`
+in the caller's cookie) leaving that cookie and the new handoff untouched, then proves the handoff
+was not burned by consuming it rightfully afterward; rejects cross-subject consume (different
+`drtsPassengerId`, same entry) with the same untouched/not-burned proof; rejects replaying an
+already-consumed artifact without granting the replayer a session; rejects an expired artifact.
+`POST /api/referral/session` (`grant-consent`, JSON and form): rejects once the real signed cookie
+ages past the 8-hour TTL (a genuine expired *signed* cookie through the BFF, not a mocked
+`getReferralEmbedSession` returning `null`, closing the exact gap finding #1 called out); rejects
+when the identity link is revoked between consume and consent, leaving the pending-consent cookie
+and ledger byte-for-byte unchanged; rejects a cross-entry `entrySlug` in the request body even
+though the cookie and `handoffId` match; grants consent via a form submission and shows a
+resubmission is treated as an idempotent replay (same ledger `consentId`, no second row).
+
+**Rewrote** `consent-replay-guards.test.ts` (3 → 6 cases): the revoked-link and tenant-ownership
+cases are now genuine replays — grant consent successfully once (proving a ledger entry exists),
+change link/entry state afterward (a second `TenantPartnerService` sharing the same
+`ReferralEmbedHandoffRepository` for entry-attribute changes, since `TenantPartnerService`
+snapshots `partnerEntries` once in `onModuleInit`; a mutable `linkRepo` object for the identity
+link, since that repository is queried live on every call) — then attempt the identical
+`handoffId`+`bundleVersion` again and assert both the rejection code and that
+`findLatestConsent(...)` is `toEqual` its pre-replay value (proving no second ledger write). Added:
+a partner-(not tenant-)reassignment case, distinct from the existing tenant-reassignment case;
+an inactive-entry case (`activeFlag: false` since the handoff was issued, zero ledger writes); a
+not-consumed case (`recordReferralEmbedConsent` called on a handoff that was never
+`handoffRepo.consume`d, zero ledger writes). The pre-existing positive control is unchanged.
+
+**Extended** `tests/integration/sr-partner-notify-nav-20260917.integration.test.ts` (10 → 14
+cases, real Postgres via the existing `db-apply.sh`-provisioned throwaway database, unchanged
+harness): a cross-entry companion to the existing cross-subject rollback test (`currentDrtsPassengerId`
+→ `currentPartnerEntrySlug`), proving the mismatched `UPDATE` rolls back and the handoff is still
+consumable by its rightful entry afterward; a PG-backed revoked-link consent-replay test (grant
+once, flip the mock `linkRepo` to `"revoked"`, replay, assert the real
+`admin.phase1_referral_embed_consent_ledger` row count is unchanged); a PG-backed tenant-ownership
+consent-replay test (grant with one `TenantPartnerService`, reassign the entry's `tenantId` via a
+second instance sharing the same handoff repository, replay, assert unchanged row count); a
+PG-backed not-consumed test (zero ledger rows for a handoff that was issued but never consumed).
+
+### Test Evidence (this round)
+
+| Finding | Fix location | Old → new | Command / result | Not verified |
+| --- | --- | --- | --- | --- |
+| #1 no GET/POST production-path regression | new `notification-navigation-production-path.test.ts` | 0 → 9 cases exercising real service+repo+cookie code through both BFF entry points | `node --experimental-strip-types --check tests/unit/system-remediation/sr-partner-notify-nav-20260917/notification-navigation-production-path.test.ts` — exit 0 (syntax only) | Not executed by a local Vitest run this session (see below); pending hosted `unit` job on this SHA |
+| #2 revoked/owner-changed were first-grants, missing cases | `consent-replay-guards.test.ts` | 3 → 6 cases, revoked/tenant-owner cases now grant→mutate→replay with ledger-unchanged assertions; +partner-owner, +inactive-entry, +not-consumed | `node --experimental-strip-types --check tests/unit/system-remediation/sr-partner-notify-nav-20260917/consent-replay-guards.test.ts` — exit 0 (syntax only) | Same as above |
+| #3 PG suite missing cross-entry rollback + consent-rejection zero-write | `sr-partner-notify-nav-20260917.integration.test.ts` | 10 → 14 cases | `node --experimental-strip-types --check tests/integration/sr-partner-notify-nav-20260917.integration.test.ts` — exit 0 (syntax only) | Not executed against Postgres this session; pending hosted `unit` job (this file's `describe.skipIf(!seedDatabaseUrl)` only runs with a real `DATABASE_URL`, which hosted CI's `unit` job provides — see the `0b4c7457` round's evidence above for why this root-level file executes under `pnpm run test:unit`) |
+| #4 UAT overclaimed full coverage | this file | Corrected the "Round `ef3e45407`" closing paragraph (lines 511–523) to stop asserting independent confirmation of coverage that did not exist; this section documents the actual gap/fix per finding | `python3 tools/ci/git/check_canonical_consistency.py --ci --base origin/dev --head HEAD` → `OK`, 0 findings across all 4 checks | n/a |
+
+**Local execution limits (why the table above says "syntax only"):** this worktree's shared
+`node_modules` root has multiple dangling top-level symlinks left by supervisor worktree reaping —
+the same class of environment defect every prior round on this task has independently hit and
+documented (see the `92ac938e8`/`c20853357`/`0b4c7457` rounds above), just against a different
+reaped worktree name each time. This round found 15 of them
+(`husky`, `next`, `typescript`, `globals`, `lint-staged`, `eslint-config-prettier`, `eslint`,
+`jsonwebtoken`, `vitest`, `prettier`, `pdfkit`, `pdfjs-dist`, `turbo`, `typescript-eslint`,
+`exceljs`) pointing into a since-reaped `gemini2-sr-partner-notify-nav-20260917-3` worktree and
+repaired them by re-pointing each to the equivalent version already present in a still-live
+sibling worktree (`gemini2-sr-partner-notify-nav-20260917-2`, currently `locked` per
+`git worktree list`) — a symlink repair, not a `pnpm install`, so it did not touch the lockfile or
+mutate the shared pnpm content-addressable store. This unblocked `pnpm run typecheck:root` and
+`pnpm run test:unit`'s module resolution for those 15 packages, but a subsequent full
+`pnpm run test:unit` run (489 test files, ~490s) still showed **289 failed test files** for
+unrelated packages this repair did not cover (`@nestjs/common`, `zod`, `react`, `tsx`, and others),
+confirming the shared install is broken far more broadly than these 15 packages — a pre-existing,
+repo-wide environment condition, not something introduced by or scoped to this candidate. A
+scoped re-run against only this task's 3 test files confirmed the same remaining gap
+(`Cannot find package '@nestjs/common'`/`'zod'`). Per this task's own established practice across
+every prior round (see `92ac938e8`, `c20853357`, `0b4c7457`, `9b0e5d824` above), this owner did not
+run `pnpm install` to fix the remainder, to avoid mutating the shared canonical-root `node_modules`
+that other concurrently-locked worker worktrees depend on. `git diff --check` — exit 0. The new/
+modified test cases in this round are therefore statically reviewed against the exact production
+code paths they exercise (cited by file/line above and in each test's own inline comments) and
+syntax-checked, but **not executed by a local Vitest run this session**; the hosted `unit` job on
+this round's pushed candidate SHA is the acceptance evidence, to be recorded below once available.
+
+### Production Requirements Checked (updated, this round)
+
+- [ ] entry_scoped_navigation_denies_cross_subject_tenant_entry — cross-entry BFF (GET) and PG
+      rollback regressions added this round; prior rounds' fixes and PG negative-matrix unchanged;
+      pending hosted CI on this round's SHA
+- [ ] fresh_single_use_handoff_and_http_only_session_reuse — production-path BFF regression (real
+      cookie TTL, real service-backed grant-consent rejection matrix) and PG consent zero-write
+      regressions added this round; pending hosted CI confirmation (`unit`/`typecheck`/`lint`) on
+      this round's SHA
+- [ ] navigation_reads_current_trip_without_creating_orders — unchanged this round (no findings
+      against this criterion in the reopen); frozen-route authorization and no-order-creation
+      confirmation from prior rounds carries forward; browser/native/live still unverified
+
+Handing off to reviewer Codex once pushed, against the new `CANDIDATE_SHA`/`CANDIDATE_BRANCH`
+recorded in the task's `handoff` — do not reuse `ef3e4540782962d661bdb8dff3fe0e75eb02b219` as the
+reviewed SHA for this round's changes.

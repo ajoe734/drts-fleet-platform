@@ -661,5 +661,352 @@ describe.skipIf(!seedDatabaseUrl)(
       });
       expect(consumeBReplay.outcome).toBe("replayed");
     });
+
+    it("rejects consume on cross-entry session mismatch without consuming the handoff (negative cross-entry zero-write)", async () => {
+      // Companion to the cross-subject case above: this covers
+      // currentPartnerEntrySlug instead of currentDrtsPassengerId, the other
+      // half of the BFF's mismatch guard, which had no real-Postgres
+      // regression before this round.
+      const artifact = "artifact_cross_entry";
+      const handoff = await handoffRepo.issue({
+        artifact,
+        entrySlug: "demo-slug-entry-a",
+        entryHost: "demo-host.com",
+        partnerUserRef: "user-a",
+        drtsPassengerId: "pass-a",
+        tenantId: null,
+        partnerId: null,
+        partnerProgramId: null,
+        consentRequired: true,
+        consentBundleVersion: null,
+        consentGrantedAt: null,
+        issuedAt: new Date().toISOString(),
+        expiresAt: new Date(Date.now() + 120_000).toISOString(),
+      });
+
+      const consumeFromOtherEntry = await handoffRepo.consume({
+        artifact,
+        entrySlug: "demo-slug-entry-a",
+        entryHost: "demo-host.com",
+        currentPartnerEntrySlug: "demo-slug-entry-b",
+      });
+      expect(consumeFromOtherEntry.outcome).toBe("session_mismatch");
+
+      const client = await db.connect();
+      try {
+        const res = await client.query(
+          "SELECT consumed_at FROM admin.phase1_referral_embed_handoffs WHERE handoff_id = $1",
+          [handoff.handoffId],
+        );
+        expect(res.rows[0].consumed_at).toBeNull();
+      } finally {
+        client.release();
+      }
+
+      const rightfulConsume = await handoffRepo.consume({
+        artifact,
+        entrySlug: "demo-slug-entry-a",
+        entryHost: "demo-host.com",
+        currentPartnerEntrySlug: "demo-slug-entry-a",
+      });
+      expect(rightfulConsume.outcome).toBe("consumed");
+    });
+
+    it("rejects a real-Postgres grant-consent replay once the identity link is revoked, writing zero additional ledger rows", async () => {
+      const entrySlug = "demo-slug-pg-revoked";
+      const linkStatus: { current: "active" | "revoked" } = { current: "active" };
+      const linkRepo = {
+        findByDrtsPassengerId: async () => ({ status: linkStatus.current }),
+      };
+      const tenantPartnerRepo = {
+        loadState: async () => ({
+          partnerEntries: [
+            {
+              entrySlug,
+              status: "active",
+              tenantId: null,
+              partnerId: null,
+              activeFlag: true,
+              authMode: "partner_api_key",
+            },
+          ],
+        }),
+      };
+      const auditNotificationService = { recordTenantAudit: () => {} };
+      const service = new TenantPartnerService(
+        auditNotificationService as any,
+        tenantPartnerRepo as any,
+        undefined,
+        undefined,
+        undefined,
+        linkRepo as any,
+        handoffRepo,
+      );
+      await service.onModuleInit();
+
+      const handoff = await handoffRepo.issue({
+        artifact: "artifact_pg_revoked",
+        entrySlug,
+        entryHost: "demo-host.com",
+        partnerUserRef: "user-1",
+        drtsPassengerId: "pass-pg-revoked",
+        tenantId: null,
+        partnerId: null,
+        partnerProgramId: null,
+        consentRequired: true,
+        consentBundleVersion: null,
+        consentGrantedAt: null,
+        issuedAt: new Date().toISOString(),
+        expiresAt: new Date(Date.now() + 120_000).toISOString(),
+      });
+      const consumeRes = await handoffRepo.consume({
+        artifact: "artifact_pg_revoked",
+        entrySlug,
+        entryHost: "demo-host.com",
+      });
+      expect(consumeRes.outcome).toBe("consumed");
+
+      await service.recordReferralEmbedConsent({
+        handoffId: handoff.handoffId,
+        entrySlug,
+        entryHost: "demo-host.com",
+        currentDrtsPassengerId: "pass-pg-revoked",
+        currentPartnerEntrySlug: entrySlug,
+        consentBundle: {
+          bundleVersion: "v1",
+          grantedScopes: ["trip.manage", "pii.trip", "identity.bind"],
+          grantedAt: new Date().toISOString(),
+        },
+      });
+
+      const client = await db.connect();
+      let rowCountAfterGrant: number;
+      try {
+        const res = await client.query(
+          "SELECT COUNT(*)::int AS count FROM admin.phase1_referral_embed_consent_ledger WHERE handoff_id = $1",
+          [handoff.handoffId],
+        );
+        rowCountAfterGrant = res.rows[0].count;
+        expect(rowCountAfterGrant).toBe(1);
+      } finally {
+        client.release();
+      }
+
+      linkStatus.current = "revoked";
+
+      await expect(
+        service.recordReferralEmbedConsent({
+          handoffId: handoff.handoffId,
+          entrySlug,
+          entryHost: "demo-host.com",
+          currentDrtsPassengerId: "pass-pg-revoked",
+          currentPartnerEntrySlug: entrySlug,
+          consentBundle: {
+            bundleVersion: "v1",
+            grantedScopes: ["trip.manage", "pii.trip", "identity.bind"],
+            grantedAt: new Date().toISOString(),
+          },
+        }),
+      ).rejects.toMatchObject({ code: "REFERRAL_HANDOFF_REVOKED" });
+
+      const clientAfter = await db.connect();
+      try {
+        const res = await clientAfter.query(
+          "SELECT COUNT(*)::int AS count FROM admin.phase1_referral_embed_consent_ledger WHERE handoff_id = $1",
+          [handoff.handoffId],
+        );
+        expect(res.rows[0].count).toBe(rowCountAfterGrant);
+      } finally {
+        clientAfter.release();
+      }
+    });
+
+    it("rejects a real-Postgres grant-consent replay once the entry's tenant ownership has changed, writing zero additional ledger rows", async () => {
+      const entrySlug = "demo-slug-pg-owner-changed";
+      const linkRepo = { findByDrtsPassengerId: async () => ({ status: "active" }) };
+      const buildTenantPartnerRepo = (tenantId: string | null) => ({
+        loadState: async () => ({
+          partnerEntries: [
+            {
+              entrySlug,
+              status: "active",
+              tenantId,
+              partnerId: null,
+              activeFlag: true,
+              authMode: "partner_api_key",
+            },
+          ],
+        }),
+      });
+      const auditNotificationService = { recordTenantAudit: () => {} };
+      const serviceAtGrantTime = new TenantPartnerService(
+        auditNotificationService as any,
+        buildTenantPartnerRepo(null) as any,
+        undefined,
+        undefined,
+        undefined,
+        linkRepo as any,
+        handoffRepo,
+      );
+      await serviceAtGrantTime.onModuleInit();
+
+      const handoff = await handoffRepo.issue({
+        artifact: "artifact_pg_owner_changed",
+        entrySlug,
+        entryHost: "demo-host.com",
+        partnerUserRef: "user-1",
+        drtsPassengerId: "pass-pg-owner-changed",
+        tenantId: null,
+        partnerId: null,
+        partnerProgramId: null,
+        consentRequired: true,
+        consentBundleVersion: null,
+        consentGrantedAt: null,
+        issuedAt: new Date().toISOString(),
+        expiresAt: new Date(Date.now() + 120_000).toISOString(),
+      });
+      const consumeRes = await handoffRepo.consume({
+        artifact: "artifact_pg_owner_changed",
+        entrySlug,
+        entryHost: "demo-host.com",
+      });
+      expect(consumeRes.outcome).toBe("consumed");
+
+      await serviceAtGrantTime.recordReferralEmbedConsent({
+        handoffId: handoff.handoffId,
+        entrySlug,
+        entryHost: "demo-host.com",
+        currentDrtsPassengerId: "pass-pg-owner-changed",
+        currentPartnerEntrySlug: entrySlug,
+        consentBundle: {
+          bundleVersion: "v1",
+          grantedScopes: ["trip.manage", "pii.trip", "identity.bind"],
+          grantedAt: new Date().toISOString(),
+        },
+      });
+
+      const client = await db.connect();
+      let rowCountAfterGrant: number;
+      try {
+        const res = await client.query(
+          "SELECT COUNT(*)::int AS count FROM admin.phase1_referral_embed_consent_ledger WHERE handoff_id = $1",
+          [handoff.handoffId],
+        );
+        rowCountAfterGrant = res.rows[0].count;
+        expect(rowCountAfterGrant).toBe(1);
+      } finally {
+        client.release();
+      }
+
+      const serviceAfterReassignment = new TenantPartnerService(
+        auditNotificationService as any,
+        buildTenantPartnerRepo("tenant-reassigned") as any,
+        undefined,
+        undefined,
+        undefined,
+        linkRepo as any,
+        handoffRepo,
+      );
+      await serviceAfterReassignment.onModuleInit();
+
+      await expect(
+        serviceAfterReassignment.recordReferralEmbedConsent({
+          handoffId: handoff.handoffId,
+          entrySlug,
+          entryHost: "demo-host.com",
+          currentDrtsPassengerId: "pass-pg-owner-changed",
+          currentPartnerEntrySlug: entrySlug,
+          consentBundle: {
+            bundleVersion: "v1",
+            grantedScopes: ["trip.manage", "pii.trip", "identity.bind"],
+            grantedAt: new Date().toISOString(),
+          },
+        }),
+      ).rejects.toMatchObject({ code: "OWNERSHIP_MISMATCH" });
+
+      const clientAfter = await db.connect();
+      try {
+        const res = await clientAfter.query(
+          "SELECT COUNT(*)::int AS count FROM admin.phase1_referral_embed_consent_ledger WHERE handoff_id = $1",
+          [handoff.handoffId],
+        );
+        expect(res.rows[0].count).toBe(rowCountAfterGrant);
+      } finally {
+        clientAfter.release();
+      }
+    });
+
+    it("rejects a real-Postgres grant-consent for a handoff that has not been consumed yet, writing zero ledger rows", async () => {
+      const entrySlug = "demo-slug-pg-not-consumed";
+      const linkRepo = { findByDrtsPassengerId: async () => ({ status: "active" }) };
+      const tenantPartnerRepo = {
+        loadState: async () => ({
+          partnerEntries: [
+            {
+              entrySlug,
+              status: "active",
+              tenantId: null,
+              partnerId: null,
+              activeFlag: true,
+              authMode: "partner_api_key",
+            },
+          ],
+        }),
+      };
+      const auditNotificationService = { recordTenantAudit: () => {} };
+      const service = new TenantPartnerService(
+        auditNotificationService as any,
+        tenantPartnerRepo as any,
+        undefined,
+        undefined,
+        undefined,
+        linkRepo as any,
+        handoffRepo,
+      );
+      await service.onModuleInit();
+
+      const handoff = await handoffRepo.issue({
+        artifact: "artifact_pg_not_consumed",
+        entrySlug,
+        entryHost: "demo-host.com",
+        partnerUserRef: "user-1",
+        drtsPassengerId: "pass-pg-not-consumed",
+        tenantId: null,
+        partnerId: null,
+        partnerProgramId: null,
+        consentRequired: true,
+        consentBundleVersion: null,
+        consentGrantedAt: null,
+        issuedAt: new Date().toISOString(),
+        expiresAt: new Date(Date.now() + 120_000).toISOString(),
+      });
+      // Deliberately skipped: handoffRepo.consume(...)
+
+      await expect(
+        service.recordReferralEmbedConsent({
+          handoffId: handoff.handoffId,
+          entrySlug,
+          entryHost: "demo-host.com",
+          currentDrtsPassengerId: "pass-pg-not-consumed",
+          currentPartnerEntrySlug: entrySlug,
+          consentBundle: {
+            bundleVersion: "v1",
+            grantedScopes: ["trip.manage", "pii.trip", "identity.bind"],
+            grantedAt: new Date().toISOString(),
+          },
+        }),
+      ).rejects.toMatchObject({ code: "REFERRAL_HANDOFF_NOT_CONSUMED" });
+
+      const client = await db.connect();
+      try {
+        const res = await client.query(
+          "SELECT COUNT(*)::int AS count FROM admin.phase1_referral_embed_consent_ledger WHERE handoff_id = $1",
+          [handoff.handoffId],
+        );
+        expect(res.rows[0].count).toBe(0);
+      } finally {
+        client.release();
+      }
+    });
   },
 );
