@@ -53,9 +53,23 @@ function decode(value: string | undefined): ReferralEmbedSessionCookie | null {
     return null;
   }
   try {
-    return JSON.parse(
+    const parsed = JSON.parse(
       Buffer.from(body, "base64url").toString("utf8"),
     ) as ReferralEmbedSessionCookie;
+
+    if (!parsed.issuedAt || typeof parsed.issuedAt !== "string") {
+      return null;
+    }
+    const issuedAt = new Date(parsed.issuedAt).getTime();
+    if (Number.isNaN(issuedAt)) {
+      return null;
+    }
+    const ageSeconds = (Date.now() - issuedAt) / 1000;
+    if (ageSeconds < 0 || ageSeconds > REFERRAL_EMBED_SESSION_MAX_AGE_SECONDS) {
+      return null;
+    }
+
+    return parsed;
   } catch {
     return null;
   }
@@ -116,6 +130,8 @@ export function buildReferralEmbedConsentCommand(input: {
   handoffId: string;
   entrySlug: string;
   entryHost: string;
+  currentDrtsPassengerId: string;
+  currentPartnerEntrySlug: string;
   actorIp?: string | null;
   userAgent?: string | null;
 }): RecordReferralEmbedConsentCommand {
@@ -123,6 +139,8 @@ export function buildReferralEmbedConsentCommand(input: {
     handoffId: input.handoffId,
     entrySlug: input.entrySlug,
     entryHost: input.entryHost,
+    currentDrtsPassengerId: input.currentDrtsPassengerId,
+    currentPartnerEntrySlug: input.currentPartnerEntrySlug,
     consentBundle: {
       bundleVersion: REFERRAL_EMBED_CONSENT_BUNDLE_VERSION,
       grantedScopes: [...REFERRAL_EMBED_REQUIRED_CONSENT_SCOPES],
