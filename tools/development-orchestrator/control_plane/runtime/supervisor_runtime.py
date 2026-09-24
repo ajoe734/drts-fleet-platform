@@ -1478,6 +1478,7 @@ def attach_workspace_metadata(
             "with no Git candidate to isolate).\n"
             f"- Canonical machine-truth root: `{canonical_root}`.\n"
             "- Do not `git switch` the canonical root for task code.\n"
+            f"{vm_restriction_notice}"
         )
     elif request.task_id and is_reviewer and workspace_source == "unresolvable_pinned_candidate":
         # The task locked a candidate_sha we could not resolve to any local
@@ -1494,6 +1495,7 @@ def attach_workspace_metadata(
             "candidate. Report `blocker`/`progress` and wait for the object to become available.\n"
             f"- Canonical machine-truth root: `{canonical_root}`.\n"
             "- Do not `git switch` the canonical root for task code.\n"
+            f"{vm_restriction_notice}"
         )
     elif request.task_id and is_reviewer and workspace_root != canonical_root:
         # `branch` is actually the resolved candidate commit here (see
@@ -1508,6 +1510,7 @@ def attach_workspace_metadata(
             f"- Canonical machine-truth root: `{canonical_root}`.\n"
             f"- Use `{status_cli}` for state changes; it runs current release code and writes through "
             "`ORCH_STATUS_ROOT` / `AI_STATUS_ROOT` to canonical machine truth.\n"
+            f"{vm_restriction_notice}"
         )
     elif request.task_id and is_reviewer and workspace_root == canonical_root:
         notice = (
@@ -1516,6 +1519,7 @@ def attach_workspace_metadata(
             "could not be created).\n"
             f"- Canonical machine-truth root: `{canonical_root}`.\n"
             "- Do not `git switch` the canonical root for task code.\n"
+            f"{vm_restriction_notice}"
         )
     elif request.task_id and branch:
         if workspace_root == canonical_root:
