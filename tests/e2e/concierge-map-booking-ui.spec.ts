@@ -154,7 +154,7 @@ async function selectConciergeMapCandidate(
 ) {
   const picker = page.locator("[data-address-map-picker]").nth(index);
   await picker.getByRole("textbox", { name: "搜尋地址" }).fill(query);
-  await picker.getByRole("button", { name: "搜尋" }).click();
+  await picker.getByRole("button", { name: /搜尋/ }).click();
   await picker.getByRole("button", { name: new RegExp(candidateName) }).click();
 }
 
@@ -186,10 +186,10 @@ test.describe("concierge map booking UI", () => {
     );
 
     await expect(
-      page.getByRole("button", { name: "提交禮賓代訂" }),
+      page.getByRole("button", { name: /提交禮賓代訂/ }),
     ).toBeEnabled();
     await page
-      .getByRole("button", { name: "提交禮賓代訂" })
+      .getByRole("button", { name: /提交禮賓代訂/ })
       .click();
 
     await expect(page.getByText("訂單 ID")).toBeVisible();
@@ -227,21 +227,21 @@ test.describe("concierge map booking UI", () => {
     expect(response?.status()).toBe(200);
 
     const pickupPicker = page.locator("[data-address-map-picker]").nth(0);
-    await pickupPicker.getByRole("button", { name: "手動輸入座標" }).click();
+    await pickupPicker.getByRole("button", { name: /手動輸入座標/ }).click();
     await pickupPicker.getByLabel("緯度").fill("25.04");
     await pickupPicker.getByLabel("經度").fill("121.51");
     await pickupPicker.getByLabel("手動定位原因").fill("Outage pickup");
-    await pickupPicker.getByRole("button", { name: "使用此位置" }).click();
+    await pickupPicker.getByRole("button", { name: /使用此位置/ }).click();
 
     const dropoffPicker = page.locator("[data-address-map-picker]").nth(1);
-    await dropoffPicker.getByRole("button", { name: "手動輸入座標" }).click();
+    await dropoffPicker.getByRole("button", { name: /手動輸入座標/ }).click();
     await dropoffPicker.getByLabel("緯度").fill("25.047");
     await dropoffPicker.getByLabel("經度").fill("121.517");
     await dropoffPicker.getByLabel("手動定位原因").fill("Outage dropoff");
-    await dropoffPicker.getByRole("button", { name: "使用此位置" }).click();
+    await dropoffPicker.getByRole("button", { name: /使用此位置/ }).click();
 
-    await expect(page.getByRole("button", { name: "提交禮賓代訂" })).toBeEnabled();
-    await page.getByRole("button", { name: "提交禮賓代訂" }).click();
+    await expect(page.getByRole("button", { name: /提交禮賓代訂/ })).toBeEnabled();
+    await page.getByRole("button", { name: /提交禮賓代訂/ }).click();
 
     await expect(page.getByText("訂單 ID")).toBeVisible();
     expect(captured.body).toHaveLength(1);
@@ -256,7 +256,7 @@ test.describe("concierge map booking UI", () => {
   test("blocks submission if addresses are empty", async ({ page }) => {
     await installConciergeApiMocks(page, { body: [] });
     await page.goto("/bookings/new");
-    await expect(page.getByRole("button", { name: "提交禮賓代訂" })).toBeDisabled();
+    await expect(page.getByRole("button", { name: /提交禮賓代訂/ })).toBeDisabled();
   });
 
 });

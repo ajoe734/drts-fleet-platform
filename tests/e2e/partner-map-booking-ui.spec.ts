@@ -8,7 +8,7 @@ async function selectPartnerMapCandidate(
 ) {
   const picker = page.locator("[data-address-map-picker]").nth(index);
   await picker.getByRole("textbox", { name: "搜尋地址" }).fill(query);
-  await picker.getByRole("button", { name: "搜尋" }).click();
+  await picker.getByRole("button", { name: /搜尋/ }).click();
   await picker.getByRole("button", { name: new RegExp(candidateName) }).click();
 }
 
@@ -41,7 +41,7 @@ test.describe("partner map booking UI", () => {
 
     await expect(page.getByText("位於服務範圍內")).toBeVisible();
 
-    const submit = page.getByRole("button", { name: "驗證下單表單" });
+    const submit = page.getByRole("button", { name: /驗證下單表單/ });
     await expect(submit).toBeEnabled();
     await submit.click();
 
@@ -83,7 +83,7 @@ test.describe("partner map booking UI", () => {
       page.getByTestId("partner-booking-review-summary"),
     ).toHaveText("目前可先記錄這趟行程，但正式派遣前仍需人工確認。");
 
-    const submit = page.getByRole("button", { name: "驗證下單表單" });
+    const submit = page.getByRole("button", { name: /驗證下單表單/ });
     await expect(submit).toBeEnabled();
     await submit.click();
 
@@ -99,13 +99,13 @@ test.describe("partner map booking UI", () => {
     await fillCardProgramFields(page);
     
     const pickupPicker = page.locator("[data-address-map-picker]").nth(0);
-    await pickupPicker.getByRole("button", { name: "手動輸入座標" }).click();
+    await pickupPicker.getByRole("button", { name: /手動輸入座標/ }).click();
     await pickupPicker.getByLabel("緯度").fill("24.9");
     await pickupPicker.getByLabel("經度").fill("121.4");
     await pickupPicker.getByLabel("手動定位原因").fill("Outside test");
-    await pickupPicker.getByRole("button", { name: "使用此位置" }).click();
+    await pickupPicker.getByRole("button", { name: /使用此位置/ }).click();
 
-    const submit = page.getByRole("button", { name: "驗證下單表單" });
+    const submit = page.getByRole("button", { name: /驗證下單表單/ });
     await expect(submit).toBeDisabled();
 
     await page.evaluate(() => {
@@ -113,11 +113,11 @@ test.describe("partner map booking UI", () => {
     });
     
     const dropoffPicker = page.locator("[data-address-map-picker]").nth(1);
-    await dropoffPicker.getByRole("button", { name: "手動輸入座標" }).click();
+    await dropoffPicker.getByRole("button", { name: /手動輸入座標/ }).click();
     await dropoffPicker.getByLabel("緯度").fill("25.047");
     await dropoffPicker.getByLabel("經度").fill("121.517");
     await dropoffPicker.getByLabel("手動定位原因").fill("Outage dropoff");
-    await dropoffPicker.getByRole("button", { name: "使用此位置" }).click();
+    await dropoffPicker.getByRole("button", { name: /使用此位置/ }).click();
 
     await expect(submit).toBeDisabled();
   });
@@ -130,20 +130,20 @@ test.describe("partner map booking UI", () => {
     await fillCardProgramFields(page);
     
     const pickupPicker = page.locator("[data-address-map-picker]").nth(0);
-    await pickupPicker.getByRole("button", { name: "手動輸入座標" }).click();
+    await pickupPicker.getByRole("button", { name: /手動輸入座標/ }).click();
     await pickupPicker.getByLabel("緯度").fill("25.04");
     await pickupPicker.getByLabel("經度").fill("121.51");
     await pickupPicker.getByLabel("手動定位原因").fill("   ");
-    await pickupPicker.getByRole("button", { name: "使用此位置" }).click();
+    await pickupPicker.getByRole("button", { name: /使用此位置/ }).click();
 
     const dropoffPicker = page.locator("[data-address-map-picker]").nth(1);
-    await dropoffPicker.getByRole("button", { name: "手動輸入座標" }).click();
+    await dropoffPicker.getByRole("button", { name: /手動輸入座標/ }).click();
     await dropoffPicker.getByLabel("緯度").fill("25.047");
     await dropoffPicker.getByLabel("經度").fill("121.517");
     await dropoffPicker.getByLabel("手動定位原因").fill("   ");
-    await dropoffPicker.getByRole("button", { name: "使用此位置" }).click();
+    await dropoffPicker.getByRole("button", { name: /使用此位置/ }).click();
 
-    const submit = page.getByRole("button", { name: "驗證下單表單" });
+    const submit = page.getByRole("button", { name: /驗證下單表單/ });
     await expect(submit).toBeDisabled();
   });
 
