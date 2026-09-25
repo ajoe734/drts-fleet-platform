@@ -401,6 +401,19 @@ const server = http.createServer((req, res) => {
     return;
   }
 
+  if (req.method === "GET" && url.pathname === "/api/auth/session") {
+    json(res, 200, {
+      data: {
+        active: true,
+        identity: {
+          realm: "tenant",
+          tenant_id: "tenant-acme",
+        },
+      },
+    });
+    return;
+  }
+
   json(res, 404, {
     error: {
       code: "NOT_FOUND",
