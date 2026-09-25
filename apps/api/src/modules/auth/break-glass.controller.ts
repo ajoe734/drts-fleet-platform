@@ -1,4 +1,4 @@
-import { Body, Controller, Headers, Param, Post } from "@nestjs/common";
+import { Body, Controller, Get, Headers, Param, Post } from "@nestjs/common";
 
 import type {
   ApproveBreakGlassRequestCommand,
@@ -7,7 +7,10 @@ import type {
   IamBreakGlassActivationCommand,
 } from "@drts/contracts";
 
-import { toApiSuccessEnvelope } from "../../common/api-envelope";
+import {
+  toApiListData,
+  toApiSuccessEnvelope,
+} from "../../common/api-envelope";
 import {
   CurrentIdentity,
   RequireRealms,
@@ -24,6 +27,29 @@ export class BreakGlassController {
     private readonly breakGlassService: BreakGlassService,
     private readonly jwtAuthService: JwtAuthService,
   ) {}
+
+  @Get("requests")
+  async listRequests(
+    @CurrentIdentity() identity: BootstrapRequestIdentity,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    return toApiSuccessEnvelope(
+      toApiListData(await this.breakGlassService.listForViewer(identity)),
+      requestId,
+    );
+  }
+
+  @Get("requests/:requestId")
+  async getRequest(
+    @CurrentIdentity() identity: BootstrapRequestIdentity,
+    @Param("requestId") requestId: string,
+    @Headers("x-request-id") requestIdHeader?: string,
+  ) {
+    return toApiSuccessEnvelope(
+      await this.breakGlassService.getForViewer(identity, requestId),
+      requestIdHeader,
+    );
+  }
 
   @Post("requests")
   @RequireScopes("identity:break-glass:request")
