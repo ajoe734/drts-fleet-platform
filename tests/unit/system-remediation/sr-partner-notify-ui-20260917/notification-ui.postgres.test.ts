@@ -38,9 +38,6 @@ describe.skipIf(!testDbUrl || process.env.RUN_UI_PG_GATE !== "true")(
         "INSERT INTO admin.phase1_platform_tenants (tenant_id, tenant_code, tenant_status, created_at, updated_at, record) VALUES ('tenant-a', 'TENANT-A', 'active', now(), now(), '{}') ON CONFLICT DO NOTHING",
       );
       await pool.query(
-        "INSERT INTO admin.phase1_partners (partner_id, status, created_at, updated_at, record) VALUES ('partner-1', 'active', now(), now(), '{}') ON CONFLICT DO NOTHING",
-      );
-      await pool.query(
         "INSERT INTO admin.phase1_platform_tenants (tenant_id, tenant_code, tenant_status, created_at, updated_at, record) VALUES ('tenant-other', 'TENANT-O', 'active', now(), now(), '{}') ON CONFLICT DO NOTHING",
       );
       await pool.query(
