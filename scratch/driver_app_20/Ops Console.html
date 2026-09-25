@@ -1,0 +1,160 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="UTF-8" />
+<title>Ops Console · DRTS</title>
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;450;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&family=Noto+Sans+TC:wght@400;500;600;700&display=swap" rel="stylesheet" />
+<style>
+  html, body { margin: 0; padding: 0; background: #f0eee9; font-family: "Inter", "Noto Sans TC", system-ui, sans-serif; }
+  * { box-sizing: border-box; }
+  @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.3; } }
+</style>
+</head>
+<body>
+<template id="__bundler_thumbnail">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">
+  <rect width="100" height="100" fill="#3F1212"/>
+  <rect x="14" y="22" width="72" height="56" rx="6" fill="#FFFFFF" stroke="#DC2626" stroke-width="2"/>
+  <rect x="20" y="30" width="14" height="40" rx="2" fill="#FEF2F2"/>
+  <rect x="40" y="32" width="38" height="3" rx="1.5" fill="#DC2626"/>
+  <rect x="40" y="40" width="22" height="2.5" rx="1" fill="#FCA5A5"/>
+  <rect x="40" y="48" width="38" height="20" rx="2" fill="#FEF2F2"/>
+</svg>
+</template>
+<div id="root"></div>
+
+<script src="https://unpkg.com/react@18.3.1/umd/react.development.js" integrity="sha384-hD6/rw4ppMLGNu3tX5cjIb+uRZ7UkRJ6BPkLpg4hAu/6onKUg4lLsHAs9EBPT82L" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" integrity="sha384-u6aeetuaXnQ38mYT8rp6sbXaQe3NL9t+IBXmnYxwkUI2Hw4bsp2Wvmx4yRQF1uAm" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" integrity="sha384-m08KidiNqLdpJqLq95G/LEi8Qvjl/xUYll3QILypMoQ65QorJ9Lvtp2RXYGBFj1y" crossorigin="anonymous"></script>
+
+<script type="text/babel" src="design-canvas.jsx"></script>
+<script type="text/babel" src="macos-window.jsx"></script>
+<script type="text/babel" src="tweaks-panel.jsx"></script>
+<script type="text/babel" src="mgmt-tokens.jsx"></script>
+<script type="text/babel" src="mgmt-primitives.jsx"></script>
+<script type="text/babel" src="mgmt-shell.jsx"></script>
+<script type="text/babel" src="mgmt-auth.jsx"></script>
+<script type="text/babel" src="mgmt-data.jsx"></script>
+<script type="text/babel" src="ops-screens-1.jsx"></script>
+<script type="text/babel" src="ops-screens-2.jsx"></script>
+<script type="text/babel" src="ops-screens-3.jsx"></script>
+<script type="text/babel" src="ops-supply.jsx"></script>
+<script type="text/babel" src="ops-av-fallback.jsx"></script>
+<script type="text/babel" src="ops-sos.jsx"></script>
+<script type="text/babel" src="ops-mtx-queue.jsx"></script>
+
+<script type="text/babel">
+const TWEAK_DEFAULTS = /*EDITMODE-BEGIN*/{
+  "dark": false,
+  "density": "compact"
+}/*EDITMODE-END*/;
+
+function App() {
+  const [tw, setTweak] = useTweaks(TWEAK_DEFAULTS);
+  const th = buildMgmtTheme({ console: 'ops', dark: tw.dark, density: tw.density });
+  const W = 1440, H = 900;
+  const Frame = ({ children, chrome, url }) => chrome
+    ? <MacWindow title="Ops Console · DRTS" url={'https://ops.drts.io' + (url || '')} variant={tw.dark ? 'dark' : 'light'} width={W} height={H}>{children}</MacWindow>
+    : <div style={{ width: W, height: H, background: th.bg, borderRadius: 10, overflow: 'hidden', border: '1px solid ' + th.border }}>{children}</div>;
+  const Hero = ({ url, children }) => <Frame chrome url={url}>{children}</Frame>;
+  const Bare = ({ children }) => <Frame>{children}</Frame>;
+
+  return (
+    <>
+      <DesignCanvas projectName="Ops Console" subtitle="即時營運指揮 · 20 routes · packet OPS-DH-PKT-002 (2026-05-25)" accent="#DC2626">
+
+        <DCSection id="overview" title="01 · Workspace" subtitle="當班總覽 + 派遣多看板">
+          <DCArtboard id="dashboard" label="儀表板 / Dashboard · T3" width={W} height={H}><Hero url="/dashboard"><OC_Dashboard theme={th} /></Hero></DCArtboard>
+          <DCArtboard id="dispatch-ready" label="派遣 · Ready queue" width={W} height={H}><Hero url="/dispatch?board=ready"><OC_Dispatch theme={th} board="ready" /></Hero></DCArtboard>
+          <DCArtboard id="dispatch-assigned" label="派遣 · Assigned" width={W} height={H}><Bare><OC_Dispatch theme={th} board="assigned" /></Bare></DCArtboard>
+          <DCArtboard id="dispatch-exception" label="派遣 · Exception hold" width={W} height={H}><Bare><OC_Dispatch theme={th} board="exception" /></Bare></DCArtboard>
+          <DCArtboard id="dispatch-nosupply" label="派遣 · No eligible supply" width={W} height={H}><Bare><OC_Dispatch theme={th} board="no_supply" /></Bare></DCArtboard>
+          <DCArtboard id="dispatch-governance" label="派遣 · Governance blocked" width={W} height={H}><Bare><OC_Dispatch theme={th} board="governance" /></Bare></DCArtboard>
+          <DCArtboard id="dispatch-forwarded" label="派遣 · Forwarded mirror" width={W} height={H}><Bare><OC_Dispatch theme={th} board="forwarded" /></Bare></DCArtboard>
+        </DCSection>
+
+        <DCSection id="dispatch-detail" title="02 · 工作項目工作區" subtitle="owned + forwarded via domain flag">
+          <DCArtboard id="dispatch-detail-owned" label="dispatch/[id] · owned" width={W} height={H}><Hero url="/dispatch/ord_8233"><OC_DispatchDetail theme={th} domain="owned" /></Hero></DCArtboard>
+          <DCArtboard id="dispatch-detail-fwd" label="dispatch/[id] · forwarded" width={W} height={H}><Bare><OC_DispatchDetail theme={th} domain="forwarded" /></Bare></DCArtboard>
+        </DCSection>
+
+        <DCSection id="callcenter" title="03 · Callcenter" subtitle="一個 agent 同時間僅一個 active session">
+          <DCArtboard id="callcenter" label="客服中心 / Callcenter" width={W} height={H}><Hero url="/callcenter"><OC_Callcenter theme={th} /></Hero></DCArtboard>
+        </DCSection>
+
+        <DCSection id="casework" title="04 · 案件處理" subtitle="客訴 + 事故 + 跨租戶審批佇列">
+          <DCArtboard id="complaints" label="客訴中心 / Complaints" width={W} height={H}><Bare><OC_Complaints theme={th} /></Bare></DCArtboard>
+          <DCArtboard id="complaint-detail" label="客訴詳情 · NEW Q-OPS01" width={W} height={H}><Hero url="/complaints/cmp_0908"><OC_ComplaintDetail theme={th} /></Hero></DCArtboard>
+          <DCArtboard id="incidents" label="事故中心 / Incidents" width={W} height={H}><Bare><OC_Incidents theme={th} /></Bare></DCArtboard>
+          <DCArtboard id="incident-detail" label="事故詳情 · SOS coordination" width={W} height={H}><Hero url="/incidents/inc_0214"><OC_IncidentDetail theme={th} /></Hero></DCArtboard>
+          <DCArtboard id="approvals" label="跨租戶審批佇列 · Q-OPS10" width={W} height={H}><Hero url="/approval-requests"><OC_Approvals theme={th} /></Hero></DCArtboard>
+        </DCSection>
+
+        <DCSection id="av-fallback" title="04a · AV Fallback / 乘客安撫 · Phase 2 A4" subtitle="自駕→人駕轉派觸發與追蹤 · 乘客 ETA/服務狀態 · 沙盒例外 · flows §5">
+          <DCArtboard id="av-fallback" label="AV→人駕 Fallback 監控 · 觸發+進度" width={W} height={H}><Hero url="/av-fallback"><OC_AvFallback theme={th} /></Hero></DCArtboard>
+          <DCArtboard id="pax-recovery" label="乘客安撫 · 僅服務狀態（不見 AV 內部）" width={W} height={H}><Bare><OC_PassengerRecovery theme={th} /></Bare></DCArtboard>
+          <DCArtboard id="sandbox-exceptions" label="沙盒例外清單 · 邊界/失聯/逾時/鮮度" width={W} height={H}><Bare><OC_SandboxExceptions theme={th} /></Bare></DCArtboard>
+        </DCSection>
+
+        <DCSection id="eligibility" title="04b · 派車資格 Eligibility · Packet 3A" subtitle="候選判斷 + hard/soft 原因 + freshness · 不只「無車」">          <DCArtboard id="elig-normal" label="候選面板 · eligible 優先 (VQ-1)" width={W} height={H}><Hero url="/dispatch/ord_8233/candidates"><OC_EligibilityPanel theme={th} /></Hero></DCArtboard>
+          <DCArtboard id="elig-include" label="includeIneligible · 顯示被排除 (VQ-2)" width={W} height={H}><Bare><OC_EligibilityPanel theme={th} variant="include_ineligible" /></Bare></DCArtboard>
+          <DCArtboard id="elig-nosupply" label="NO_ELIGIBLE_SUPPLY · 顯示原因 (VQ-3)" width={W} height={H}><Bare><OC_EligibilityPanel theme={th} variant="no_supply" /></Bare></DCArtboard>
+          <DCArtboard id="elig-conflict" label="409 · assignment recheck (VQ-4)" width={W} height={H}><Bare><OC_EligibilityPanel theme={th} variant="recheck_conflict" /></Bare></DCArtboard>
+        </DCSection>
+
+        <DCSection id="ops-reports" title="05b · 營運報表 Operational Reports · Packet 3B" subtitle="每日派遣紀錄 + 半年營運摘要 · 固定口徑 SA §7.4">
+          <DCArtboard id="report-daily" label="每日派遣紀錄 · DispatchDailyRecord" width={W} height={H}><Hero url="/reports/daily-dispatch"><OC_OpsReports theme={th} report="daily" /></Hero></DCArtboard>
+          <DCArtboard id="report-summary" label="半年營運摘要 · coverage<95% (VQ-5/6)" width={W} height={H}><Bare><OC_OpsReports theme={th} report="summary" /></Bare></DCArtboard>
+        </DCSection>
+
+        <DCSection id="sos-ops" title="05c · SOS 緊急事件 · S-3 值班端" subtitle="智行叫車 duty surface · 持續性警示不自動消失 · 先確認者取得處理權 · 提示音健康狀態">
+          <DCArtboard id="s3-o01" label="S3-O01 · Critical Alert Overlay · 事件編號+等待時間+確認" width={W} height={H}><Hero url="/sos"><S3O_Alert theme={th} /></Hero></DCArtboard>
+          <DCArtboard id="s3-o02" label="S3-O02 · SOS 佇列 · 全欄位" width={W} height={H}><Bare><S3O_Queue theme={th} /></Bare></DCArtboard>
+          <DCArtboard id="s3-o03" label="S3-O03 · 詳情 + 地圖 + 自動附帶 · 待確認" width={W} height={H}><Bare><S3O_Detail theme={th} phase="new" /></Bare></DCArtboard>
+          <DCArtboard id="s3-o04" label="S3-O04 · 已由 王小明 於 14:31 確認（他人無主確認鈕）" width={W} height={H}><Bare><S3O_Detail theme={th} phase="acked" /></Bare></DCArtboard>
+          <DCArtboard id="s3-o05" label="S3-O05 · 調查時間軸 · 補充/附件/結案" width={W} height={H}><Bare><S3O_Detail theme={th} phase="inv" /></Bare></DCArtboard>
+          <DCArtboard id="s3-o06" label="S3-O06 · 提示音未啟用健康警示（視覺等效不只靠聲音）" width={W} height={H}><Bare><S3O_Queue theme={th} soundOff /></Bare></DCArtboard>
+        </DCSection>
+
+        <DCSection id="queue-ops" title="04c · 佇列營運 Queue Operations · MTX-QUEUE-UI-01..03" subtitle="queue mode 文字標示 · multi_taxi_direct 禁實體排班/招呼站 · 無 override">
+          <DCArtboard id="queue-01" label="UI-01 · 佇列總覽 · 含被拒列" width={W} height={H}><Hero url="/dispatch/queue"><OC_QueueOverview theme={th} /></Hero></DCArtboard>
+          <DCArtboard id="queue-02" label="UI-02 · 佇列項目詳情 · 虛擬媒合" width={W} height={H}><Bare><OC_QueueEntry theme={th} /></Bare></DCArtboard>
+          <DCArtboard id="queue-03" label="UI-03 · 實體排班拒絕 · 不可繞過" width={W} height={H}><Bare><OC_QueueDenial theme={th} /></Bare></DCArtboard>
+          <DCArtboard id="queue-03b" label="UI-03 · 招呼站拒絕文案變體" width={W} height={H}><Bare><OC_QueueDenial theme={th} stand /></Bare></DCArtboard>
+        </DCSection>
+
+        <DCSection id="monitor" title="06 · 營運監控">
+          <DCArtboard id="reports" label="報表 / Reports · T6" width={W} height={H}><Bare><OC_Reports theme={th} /></Bare></DCArtboard>
+          <DCArtboard id="revenue" label="收益審視 / Revenue + mismatch (Q-OPS14)" width={W} height={H}><Bare><OC_Revenue theme={th} /></Bare></DCArtboard>
+          <DCArtboard id="attendance" label="出勤 / Attendance" width={W} height={H}><Bare><OC_Attendance theme={th} /></Bare></DCArtboard>
+          <DCArtboard id="maintenance" label="車輛保修 / Maintenance" width={W} height={H}><Bare><OC_Maintenance theme={th} /></Bare></DCArtboard>
+        </DCSection>
+
+        <DCSection id="registry" title="06 · 主資料 Registry" subtitle="3 個新 detail route (Q-OPS01/02/03)">
+          <DCArtboard id="drivers" label="司機 / Drivers" width={W} height={H}><Bare><OC_Drivers theme={th} /></Bare></DCArtboard>
+          <DCArtboard id="driver-detail" label="司機詳情 · SOS active" width={W} height={H}><Hero url="/drivers/d_8843"><OC_DriverDetail theme={th} sosActive /></Hero></DCArtboard>
+          <DCArtboard id="vehicles" label="車輛 / Vehicles" width={W} height={H}><Bare><OC_Vehicles theme={th} /></Bare></DCArtboard>
+          <DCArtboard id="vehicle-detail" label="車輛詳情 · NEW Q-OPS02 · offboarding" width={W} height={H}><Hero url="/vehicles/v_330"><OC_VehicleDetail theme={th} /></Hero></DCArtboard>
+          <DCArtboard id="contracts" label="合約 / Contracts" width={W} height={H}><Bare><OC_Contracts theme={th} /></Bare></DCArtboard>
+          <DCArtboard id="contract-detail" label="合約詳情 · NEW Q-OPS03 · read-only" width={W} height={H}><Hero url="/contracts/CTR-310"><OC_ContractDetail theme={th} /></Hero></DCArtboard>
+          <DCArtboard id="flags" label="功能旗標 · read-only" width={W} height={H}><Bare><OC_FeatureFlags theme={th} /></Bare></DCArtboard>
+        </DCSection>
+      </DesignCanvas>
+
+      <TweaksPanel title="Tweaks">
+        <TweakSection title="Theme">
+          <TweakToggle label="深色模式" value={tw.dark} onChange={v => setTweak('dark', v)} />
+          <TweakRadio label="密度" value={tw.density} onChange={v => setTweak('density', v)} options={[{ value: 'compact', label: 'Compact' }, { value: 'comfy', label: 'Comfy' }]} />
+        </TweakSection>
+      </TweaksPanel>
+    </>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById('root')).render(<App />);
+</script>
+</body>
+</html>

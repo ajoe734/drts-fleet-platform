@@ -778,8 +778,8 @@ function EmptyStatePanel({
 export function evaluateTenantSubmitGate(
   pickupPayload: AddressPayload | null,
   dropoffPayload: AddressPayload | null,
-  serviceability: ServiceabilityResult | null,
-  providerState: ProviderState | null
+  serviceability: ServiceAreaEvaluationResult | null,
+  providerState: AddressProviderState | null,
 ) {
   const baseGate = evaluateAddressSubmitGate({
     pickup: pickupPayload,
@@ -974,7 +974,12 @@ export function TenantBookingCreateForm({
       (entry): entry is { href: string; link: CrossAppResourceLink } =>
         entry.href != null,
     );
-  const submitGate = evaluateTenantSubmitGate(pickupPayload, dropoffPayload, serviceability, providerState);
+  const submitGate = evaluateTenantSubmitGate(
+    pickupPayload,
+    dropoffPayload,
+    serviceability,
+    providerState,
+  );
 
   const submitDisabled =
     submitting ||

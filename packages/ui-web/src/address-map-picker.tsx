@@ -558,8 +558,6 @@ interface SelectionState {
   manualReason: string;
 }
 
-
-
 export function evaluateManualApply(
   manualLat: string,
   manualLng: string,
@@ -568,8 +566,8 @@ export function evaluateManualApply(
   labels: AddressMapPickerLabels,
   query: string,
   selectedAddress: AddressPayload | null,
-  actorId: string,
-  surface: string
+  actorId: string | null,
+  surface: GeoResolutionSurface,
 ): { error?: string; address?: AddressPayload; reason?: string } {
   const lat = Number.parseFloat(manualLat);
   const lng = Number.parseFloat(manualLng);
@@ -591,7 +589,7 @@ export function evaluateManualApply(
     addressName: selectedAddress?.addressName ?? null,
     surface,
     manualOverrideReason: reason,
-    pinnedByActorId: actorId,
+    ...(actorId ? { pinnedByActorId: actorId } : {}),
     ...(selectedAddress?.geocodeConfidence
       ? { geocodeConfidence: selectedAddress.geocodeConfidence }
       : {}),
@@ -819,7 +817,7 @@ export function AddressMapPicker<TServiceProduct extends string = string>(
       query,
       selectedAddress,
       actorId,
-      surface
+      surface,
     );
     if (result.error) {
       setManualError(result.error);
