@@ -128,20 +128,30 @@ function PA_IamPrivileged({ theme:th, stepUpState = "none" }) {
         </div>
         <div style={{ display:'flex', flexDirection:'column', gap:16 }}>
         <Card theme={th} title="申請 PR-0086 · 王新人 → security_admin" subtitle="待審批 · 單人核准" actions={<Pill theme={th} tone="warn" dot>待審批</Pill>}>
-          <Stepper theme={th} current={1} steps={['送出','非本人核准','生效']}/>
+          <Stepper theme={th} current={1} steps={['送出','非本人核准 + step-up','生效']}/>
           <div style={{ marginTop:12 }}>
-            {stepUpState === "none" && <Banner theme={th} tone="warn" icon="lock" title="操作前請先取得 step-up 憑證或重新登入 (Fresh MFA)" actions={<Btn theme={th} size="xs" variant="primary" icon="lock">取得 step-up proof</Btn>}/>}
+            {stepUpState === "none" && <Banner theme={th} tone="warn" icon="lock" title="需 step-up proof" body="核准前需重新驗證取得 stepUpReference（有效 5 分鐘、單次使用）。核准請求須附此參照；過期或已用回 401 IAM_STEP_UP_REQUIRED。" actions={<Btn theme={th} size="xs" variant="primary" icon="lock">取得 step-up proof</Btn>}/>}
             {stepUpState === "verifying" && <Banner theme={th} tone="info" icon="clock" title="正在向伺服器請求身分驗證憑證..."/>}
             {stepUpState === "valid" && <Banner theme={th} tone="success" icon="check" title="身分驗證憑證有效" body="可進行高風險操作。"/>}
             {stepUpState === "expired" && <Banner theme={th} tone="danger" icon="alert-triangle" title="登入逾時 (IAM_STEP_UP_REQUIRED)" body="憑證已過期或被拒絕，請重新登入 (Fresh MFA) 後再試。" actions={<Btn theme={th} size="xs" variant="primary" icon="refresh">重新取得</Btn>}/>}
           </div>
-          <div style={{ display:'flex', gap:8, marginTop: 12 }}><ActionButton theme={th} descriptor={{ action:'approve', enabled: stepUpState === 'valid', disabledReasonCode:'IAM_STEP_UP_REQUIRED', riskLevel:'high', requiresReason:true }} variant="primary" icon="check" label="核准" en="approve"/></div>
+          <div style={{ marginTop:10 }}>
+            {stepUpState === "none" && <Field theme={th} label="stepUpReference" required hint="尚未取得 · 核准前先完成 step-up"><Input theme={th} value="—" mono readOnly/></Field>}
+            {stepUpState === "verifying" && <Field theme={th} label="stepUpReference" required hint="驗證中"><Input theme={th} value="驗證中..." mono readOnly disabled/></Field>}
+            {stepUpState === "valid" && <Field theme={th} label="stepUpReference" required hint="由 step-up 驗證回填 · 到期 09-24 10:41"><Input theme={th} value="sup_••••••••b3e1 · 剩 04:12" mono readOnly/></Field>}
+            {stepUpState === "expired" && <Field theme={th} label="stepUpReference" required hint="已失效"><Input theme={th} value="sup_••••••••b3e1 (已失效)" mono readOnly disabled/></Field>}
+          </div>
+          <div style={{ display:'flex', gap:8, marginTop: 12 }}>
+            <ActionButton theme={th} descriptor={{ action:'approve', enabled: stepUpState === 'valid', disabledReasonCode:'IAM_STEP_UP_REQUIRED', riskLevel:'high', requiresReason:true }} variant="primary" icon="check" label={stepUpState === 'valid' ? '核准（附 proof）' : '核准'} en="approve"/>
+            {stepUpState === 'expired' && <Btn theme={th} size="sm" variant="ghost" icon="refresh">proof 失效 · 重新取得</Btn>}
+          </div>
         </Card>
         <Card theme={th} title="申請表單">
           <Field theme={th} label="對象成員" required><Select theme={th} value="王新人"/></Field>
           <Field theme={th} label="目標角色" required><Select theme={th} value="security_admin"/></Field>
           <Field theme={th} label="理由" required><Input theme={th} value="接手資安事件處理"/></Field>
           <Field theme={th} label="有效期限"><Select theme={th} value="永久（需季度存取複核）"/></Field>
+          <Field theme={th} label="stepUpReference（送出申請亦需）" required hint="尚未取得 · 送出前先完成 step-up"><Input theme={th} value="—" mono readOnly/></Field>
           <ActionButton theme={th} descriptor={{ action:'submit', enabled:true, riskLevel:'medium' }} variant="primary" icon="check" label="送出申請" en="submit"/>
         </Card>
         </div>
@@ -247,10 +257,16 @@ function PA_IamBreakGlass({ theme:th, active, state = "form", stepUpState = "non
                   { k:'申請範圍', v:'identity:read · security:audit:read', mono:true }
                 ]}/>
                 <div style={{ marginTop:12 }}>
-                  {stepUpState === "none" && <Banner theme={th} tone="warn" icon="lock" title="需 step-up proof 或 Fresh MFA" body="操作前請先取得 step-up 憑證或重新登入 (Fresh MFA)。" actions={<Btn theme={th} size="xs" variant="primary" icon="lock">取得 step-up proof</Btn>}/>}
+                  {stepUpState === "none" && <Banner theme={th} tone="warn" icon="lock" title="需 step-up proof" body="操作前需重新驗證取得 stepUpReference。核准請求須附此參照；過期或已用回 401 IAM_STEP_UP_REQUIRED。" actions={<Btn theme={th} size="xs" variant="primary" icon="lock">取得 step-up proof</Btn>}/>}
                   {stepUpState === "verifying" && <Banner theme={th} tone="info" icon="clock" title="正在向伺服器請求身分驗證憑證..."/>}
                   {stepUpState === "valid" && <Banner theme={th} tone="success" icon="check" title="身分驗證憑證有效" body="可進行高風險操作。"/>}
                   {stepUpState === "expired" && <Banner theme={th} tone="danger" icon="alert-triangle" title="憑證已過期" body="請重新取得憑證。" actions={<Btn theme={th} size="xs" variant="primary" icon="refresh">重新取得</Btn>}/>}
+                </div>
+                <div style={{ marginTop:10 }}>
+                  {stepUpState === "none" && <Field theme={th} label="stepUpReference" required hint="尚未取得 · 核准前先完成 step-up"><Input theme={th} value="—" mono readOnly/></Field>}
+                  {stepUpState === "verifying" && <Field theme={th} label="stepUpReference" required hint="驗證中"><Input theme={th} value="驗證中..." mono readOnly disabled/></Field>}
+                  {stepUpState === "valid" && <Field theme={th} label="stepUpReference" required hint="由 step-up 驗證回填 · 到期 09-24 10:41"><Input theme={th} value="sup_••••••••b3e1 · 剩 04:12" mono readOnly/></Field>}
+                  {stepUpState === "expired" && <Field theme={th} label="stepUpReference" required hint="已失效"><Input theme={th} value="sup_••••••••b3e1 (已失效)" mono readOnly disabled/></Field>}
                 </div>
                 <div style={{ marginTop:12, display:'flex', gap:8 }}>
                   <ActionButton theme={th} descriptor={{ action:'approve', enabled:stepUpState === "valid", disabledReasonCode:'IAM_STEP_UP_REQUIRED', riskLevel:'high' }} variant="primary" icon="check" label="核准 (需 proof)" en="approve"/>
