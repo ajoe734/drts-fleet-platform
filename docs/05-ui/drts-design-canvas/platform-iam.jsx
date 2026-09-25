@@ -130,7 +130,7 @@ function PA_IamPrivileged({ theme:th, stepUpState = "none" }) {
         <Card theme={th} title="申請 PR-0086 · 王新人 → security_admin" subtitle="待審批 · 單人核准" actions={<Pill theme={th} tone="warn" dot>待審批</Pill>}>
           <Stepper theme={th} current={1} steps={['送出','非本人核准 + step-up','生效']}/>
           <div style={{ marginTop:12 }}>
-            {stepUpState === "none" && <Banner theme={th} tone="warn" icon="lock" title="需 step-up proof" body="核准前需重新驗證取得 stepUpReference（有效 5 分鐘、單次使用）。核准請求須附此參照；過期或已用回 403 IAM_STEP_UP_REQUIRED。" actions={<Btn theme={th} size="xs" variant="primary" icon="lock">取得 step-up proof</Btn>}/>}
+            {stepUpState === "none" && <Banner theme={th} tone="warn" icon="lock" title="需 step-up proof" body="核准前需重新驗證取得 stepUpReference（有效 5 分鐘、單次使用）。核准請求須附此參照；過期或已用回 401 IAM_STEP_UP_REQUIRED。" actions={<Btn theme={th} size="xs" variant="primary" icon="lock">取得 step-up proof</Btn>}/>}
             {stepUpState === "verifying" && <Banner theme={th} tone="info" icon="clock" title="正在向伺服器請求身分驗證憑證..."/>}
             {stepUpState === "valid" && <Banner theme={th} tone="success" icon="check" title="身分驗證憑證有效" body="可進行高風險操作。"/>}
             {stepUpState === "expired" && <Banner theme={th} tone="danger" icon="alert-triangle" title="登入逾時 (IAM_STEP_UP_REQUIRED)" body="憑證已過期或被拒絕，請重新登入 (Fresh MFA) 後再試。" actions={<Btn theme={th} size="xs" variant="primary" icon="refresh">重新取得</Btn>}/>}
@@ -210,7 +210,7 @@ function PA_IamBreakGlass({ theme:th, active, state = "form", stepUpState = "non
   const isApproved = resolvedState === "approved";
   const isActive = resolvedState === "active" || resolvedState === "exit_failed";
   const isClosed = resolvedState === "closed";
-  const isExpired = resolvedState === "expired_grant";
+
 
   const stepMap = {
     form: 0,
@@ -258,7 +258,7 @@ function PA_IamBreakGlass({ theme:th, active, state = "form", stepUpState = "non
                   { k:'申請範圍', v:'identity:read · security:audit:read', mono:true }
                 ]}/>
                 <div style={{ marginTop:12 }}>
-                  {stepUpState === "none" && <Banner theme={th} tone="warn" icon="lock" title="需 step-up proof" body="操作前需重新驗證取得 stepUpReference。核准請求須附此參照；過期或已用回 403 IAM_STEP_UP_REQUIRED。" actions={<Btn theme={th} size="xs" variant="primary" icon="lock">取得 step-up proof</Btn>}/>}
+                  {stepUpState === "none" && <Banner theme={th} tone="warn" icon="lock" title="需 step-up proof" body="操作前需重新驗證取得 stepUpReference。核准請求須附此參照；過期或已用回 401 IAM_STEP_UP_REQUIRED。" actions={<Btn theme={th} size="xs" variant="primary" icon="lock">取得 step-up proof</Btn>}/>}
                   {stepUpState === "verifying" && <Banner theme={th} tone="info" icon="clock" title="正在向伺服器請求身分驗證憑證..."/>}
                   {stepUpState === "valid" && <Banner theme={th} tone="success" icon="check" title="身分驗證憑證有效" body="可進行高風險操作。"/>}
                   {stepUpState === "expired" && <Banner theme={th} tone="danger" icon="alert-triangle" title="憑證已過期" body="請重新取得憑證。" actions={<Btn theme={th} size="xs" variant="primary" icon="refresh">重新取得</Btn>}/>}
@@ -279,7 +279,8 @@ function PA_IamBreakGlass({ theme:th, active, state = "form", stepUpState = "non
               <>
                 <DL theme={th} cols={2} items={[
                   { k:'申請人', v:'駱思賢' },{ k:'核准', v:'林安全' },
-                  { k:'狀態', v:<Pill theme={th} tone="success" dot>已核准，待啟用</Pill> }
+                  { k:'狀態', v:<Pill theme={th} tone="success" dot>已核准，待啟用</Pill> },
+                  { k:'到期時間', v:'不自動到期 (待啟用)' }
                 ]}/>
                 <div style={{ marginTop:12 }}>
                   <Banner theme={th} tone="warn" icon="lock" title="此環境的後端尚未實作 activate 操作的 step-up policy (Documented Gap)。Activate 將因缺乏 step-up 憑證而無法通過驗證。"/>
@@ -315,18 +316,7 @@ function PA_IamBreakGlass({ theme:th, active, state = "form", stepUpState = "non
               </>
             )}
 
-            {isExpired && (
-              <>
-                <DL theme={th} cols={2} items={[
-                  { k:'申請人', v:'駱思賢' },
-                  { k:'狀態', v:<Pill theme={th} tone="danger" dot>已逾期未啟用 (Expired)</Pill> },
-                  { k:'失效時間', v:'09-24 10:30:00 +08', mono:true }
-                ]}/>
-                <div style={{ marginTop:12 }}>
-                  <Banner theme={th} tone="danger" icon="alert-triangle" title="核准已失效" body="該緊急授權未於核准後期限內啟用，已自動失效，需重新申請。"/>
-                </div>
-              </>
-            )}
+
 
           </Card>
         </div>

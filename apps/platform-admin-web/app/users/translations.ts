@@ -34,6 +34,8 @@ export const breakGlassTranslations = {
     reasonCodeLabel: "Reason Code:",
     postUseAuditLabel: "Post-Use Audit:",
     manageGrant: "Manage Grant",
+    nonExpiring: "Non-expiring (pending activation)",
+    expiresAt: "Expires At",
   },
   zh: {
     surfaceTitle: "緊急破窗存取 (Break-Glass)",
@@ -49,6 +51,8 @@ export const breakGlassTranslations = {
     reasonCodeLabel: "理由代碼：",
     postUseAuditLabel: "事後稽核：",
     manageGrant: "管理授權",
+    nonExpiring: "不自動到期 (待啟用)",
+    expiresAt: "到期時間",
   },
 } as const;
 

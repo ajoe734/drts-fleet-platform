@@ -1430,6 +1430,20 @@ export function BreakGlassPanel() {
       r: (r) => formatDateTime(r.requestedAt),
     },
     {
+      h: "EXPIRES AT",
+      w: 160,
+      mono: true,
+      r: (r) => {
+        if (r.status === "approved" && !r.activatedAt) {
+          return <span style={{ color: theme.textMuted }}>{bgCopy.nonExpiring}</span>;
+        }
+        if (r.status === "active" && r.expiresAt) {
+          return formatDateTime(r.expiresAt);
+        }
+        return <span style={{ color: theme.textMuted }}>—</span>;
+      },
+    },
+    {
       h: "ACTIONS",
       w: 160,
       r: (r) => (
@@ -1703,6 +1717,16 @@ export function BreakGlassPanel() {
                     {t("users.governance.breakGlass.postUseAuditLabel")}
                   </span>{" "}
                   Required
+                </div>
+                <div>
+                  <span style={{ color: theme.textMuted }}>
+                    {bgCopy.expiresAt}:
+                  </span>{" "}
+                  {selectedGrant.status === "approved" && !selectedGrant.activatedAt
+                    ? bgCopy.nonExpiring
+                    : selectedGrant.status === "active" && selectedGrant.expiresAt
+                    ? formatDateTime(selectedGrant.expiresAt)
+                    : "—"}
                 </div>
               </div>
 
