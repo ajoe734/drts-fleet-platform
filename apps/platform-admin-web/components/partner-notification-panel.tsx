@@ -4,6 +4,7 @@ import React, { useEffect, useState, useCallback } from "react";
 import { usePlatformAdminClient } from "@/lib/admin-client";
 import { useTranslation } from "@/lib/i18n";
 import { PARTNER_PASSENGER_EVENT_TO_EXTERNAL_NAME } from "@drts/contracts";
+import { resolveCrossAppHref } from "./assistant/route-context";
 
 import {
   buildCanvasTheme,
@@ -144,7 +145,14 @@ function PnBinding({
                 {binding?.webhookId || "—"}{" "}
                 {tenantId && canWriteWebhooks ? (
                   <a
-                    href={`/tenant-console/webhooks`}
+                    href={resolveCrossAppHref({
+                      targetApp: "tenant-console",
+                      route: "/webhooks",
+                      resourceType: "webhook",
+                      resourceId: "",
+                      openMode: "new_tab",
+                      label: "Webhooks",
+                    })}
                     target="_blank"
                     rel="noreferrer"
                   >
@@ -923,7 +931,8 @@ function PnDeliveries({
           }}
         >
           <span style={{ fontSize: 12, color: th.textSecondary }}>
-            共 {total} 筆紀錄
+            {t("partnerNotification.pagination.total", { total: total }) ??
+              `共 ${total} 筆紀錄`}
           </span>
           <div style={{ display: "flex", gap: 8 }}>
             <CanvasBtn
@@ -933,7 +942,7 @@ function PnDeliveries({
               disabled={page <= 1 || loading}
               onClick={() => onPageChange?.(page - 1)}
             >
-              上一頁
+              {t("partnerNotification.pagination.prev") ?? "上一頁"}
             </CanvasBtn>
             <CanvasBtn
               theme={th}
@@ -942,7 +951,7 @@ function PnDeliveries({
               disabled={page * 50 >= total || loading}
               onClick={() => onPageChange?.(page + 1)}
             >
-              下一頁
+              {t("partnerNotification.pagination.next") ?? "下一頁"}
             </CanvasBtn>
           </div>
         </div>
@@ -1087,7 +1096,14 @@ function PnEditView({
             <div style={{ marginTop: 6 }}>
               {tenantId && canWriteWebhooks ? (
                 <a
-                  href={`/tenant-console/webhooks`}
+                  href={resolveCrossAppHref({
+                    targetApp: "tenant-console",
+                    route: "/webhooks",
+                    resourceType: "webhook",
+                    resourceId: "",
+                    openMode: "new_tab",
+                    label: "Webhooks",
+                  })}
                   target="_blank"
                   rel="noreferrer"
                 >
@@ -1280,141 +1296,130 @@ export function PartnerNotificationPanel({
   const pageRef = React.useRef(page);
   pageRef.current = page;
 
-  const fetchState = useCallback(
-    async (isInitial = false) => {
-      const reqId = ++currentRequest.current;
-      setLoading(true);
-      try {
-        const p: Promise<any>[] = [
-          (client as any).getPartnerEntryNotificationBinding(entrySlug),
-          (client as any).listPartnerNotificationDeliveries(entrySlug, {
-            pageSize: 50,
-            page: pageRef.current,
+  const fetchState = useCallback(async () => {
+    const reqId = ++currentRequest.current;
+    setLoading(true);
+    try {
+      const p: Promise<any>[] = [
+        (client as any).getPartnerEntryNotificationBinding(entrySlug),
+        (client as any).listPartnerNotificationDeliveries(entrySlug, {
+          pageSize: 50,
+          page: pageRef.current,
+        }),
+      ];
+      if (tenantId && canReadWebhooks) {
+        p.push(
+          (client as any).getList("/api/tenant/webhooks", {
+            headers: { "x-tenant-id": tenantId },
           }),
-        ];
-        if (tenantId && canReadWebhooks) {
-          p.push(
-            (client as any).getList("/api/tenant/webhooks", {
-              headers: { "x-tenant-id": tenantId },
-            }),
-          );
-        }
-        const _results = await Promise.allSettled(p);
-        let bReq = _results[0] as any;
-        const dReq = _results[1] as any;
-        const wReq = tenantId && canReadWebhooks ? (_results[2] as any) : null;
-        if (reqId !== currentRequest.current) return;
+        );
+      }
+      const _results = await Promise.allSettled(p);
+      let bReq = _results[0] as any;
+      const dReq = _results[1] as any;
+      const wReq = tenantId && canReadWebhooks ? (_results[2] as any) : null;
+      if (reqId !== currentRequest.current) return;
 
-        if (
-          bReq.status === "fulfilled" &&
-          bReq.value &&
-          wReq?.status === "fulfilled"
-        ) {
-          const ep = (wReq.value || []).find(
-            (w: any) => w.webhookId === bReq.value.webhookId,
-          );
-          if (ep) {
-            const material = JSON.stringify({
-              url: ep.url,
-              events: [...(ep.events || [])].sort(),
-              secretVersion: ep.secretVersion,
-              ownerRef: ep.ownerRef ?? null,
-            });
-            const encoder = new TextEncoder();
-            const data = encoder.encode(material);
-            const hashBuffer = await crypto.subtle.digest("SHA-256", data);
-            const hashArray = Array.from(new Uint8Array(hashBuffer));
-            const fingerprint = hashArray
-              .map((b) => b.toString(16).padStart(2, "0"))
-              .join("");
-            bReq = {
-              ...bReq,
-              value: {
-                ...bReq.value,
-                endpointFingerprint: fingerprint,
-                endpointUrl: ep.url,
-              },
-            };
-          }
-        }
-
-        if (bReq.status === "rejected") {
-          const statusCode = bReq.reason?.statusCode;
-          const errCode = bReq.reason?.code || bReq.reason?.error;
-          if (statusCode === 404) {
-            setBinding(null);
-            if (isInitial || !isEditing) {
-              setEditEventTypes(["eta_changed"]);
-            }
-            setError({ kind: "404", message: "Not found", code: errCode });
-          } else if (statusCode === 403) {
-            setError({ kind: "403", message: "Forbidden", code: errCode });
-          } else if (statusCode === 409) {
-            setError({
-              kind: "409",
-              message: bReq.reason?.message || "Conflict",
-              code: errCode,
-            });
-          } else {
-            setError({
-              kind: "error",
-              message: bReq.reason?.message || "Failed to load binding",
-              code: errCode,
-            });
-          }
-        } else {
-          setBinding(bReq.value);
-          if (isInitial) {
-            setEditWebhookId(bReq.value?.webhookId || "");
-            setEditEventTypes(bReq.value?.eventTypes || []);
-          }
-          setEditExpectedVersion(bReq.value?.version || 0);
-          setError(null);
-        }
-
-        if (dReq.status === "fulfilled") {
-          setDeliveries(dReq.value?.items || dReq.value || []);
-          setTotal(dReq.value?.total || 0);
-          setDeliveryError(null);
-        } else {
-          setDeliveries([]);
-          if (dReq.reason?.statusCode === 403) {
-            setDeliveryError("無權限讀取派送紀錄 (Forbidden)");
-          } else {
-            setDeliveryError(
-              dReq.reason?.message || "Failed to load deliveries",
-            );
-          }
-        }
-
-        if (wReq) {
-          if (wReq.status === "fulfilled") {
-            setAvailableWebhooks(wReq.value || []);
-            setWebhookError(null);
-          } else if (wReq.reason?.statusCode === 403) {
-            setWebhookError("Forbidden");
-          } else {
-            setWebhookError(wReq.reason?.message || "Failed to load webhooks");
-          }
-        } else {
-          setAvailableWebhooks([]);
-          setWebhookError(canReadWebhooks === false ? "missing_scope" : null);
-        }
-      } catch (err: any) {
-        if (reqId !== currentRequest.current) return;
-        setError({
-          kind: "error",
-          message: err.message,
-          code: err.code || err.error,
-        });
-      } finally {
-        if (reqId === currentRequest.current) {
-          setLoading(false);
+      if (
+        bReq.status === "fulfilled" &&
+        bReq.value &&
+        wReq?.status === "fulfilled"
+      ) {
+        const ep = (wReq.value || []).find(
+          (w: any) => w.webhookId === bReq.value.webhookId,
+        );
+        if (ep) {
+          const material = JSON.stringify({
+            url: ep.url,
+            events: [...(ep.events || [])].sort(),
+            secretVersion: ep.secretVersion,
+            ownerRef: ep.ownerRef ?? null,
+          });
+          const encoder = new TextEncoder();
+          const data = encoder.encode(material);
+          const hashBuffer = await crypto.subtle.digest("SHA-256", data);
+          if (reqId !== currentRequest.current) return;
+          const hashArray = Array.from(new Uint8Array(hashBuffer));
+          const fingerprint = hashArray
+            .map((b) => b.toString(16).padStart(2, "0"))
+            .join("");
+          bReq = {
+            ...bReq,
+            value: {
+              ...bReq.value,
+              endpointFingerprint: fingerprint,
+              endpointUrl: ep.url,
+            },
+          };
         }
       }
-    },
-    [client, entrySlug, tenantId, canReadWebhooks],
-  );
+
+      if (bReq.status === "rejected") {
+        const statusCode = bReq.reason?.statusCode;
+        const errCode = bReq.reason?.code || bReq.reason?.error;
+        if (statusCode === 404) {
+          setBinding(null);
+          setError({ kind: "404", message: "Not found", code: errCode });
+        } else if (statusCode === 403) {
+          setError({ kind: "403", message: "Forbidden", code: errCode });
+        } else if (statusCode === 409) {
+          setError({
+            kind: "409",
+            message: bReq.reason?.message || "Conflict",
+            code: errCode,
+          });
+        } else {
+          setError({
+            kind: "error",
+            message: bReq.reason?.message || "Failed to load binding",
+            code: errCode,
+          });
+        }
+      } else {
+        setBinding(bReq.value);
+        setEditExpectedVersion(bReq.value?.version || 0);
+        setError(null);
+      }
+
+      if (dReq.status === "fulfilled") {
+        setDeliveries(dReq.value?.items || dReq.value || []);
+        setTotal(dReq.value?.pageInfo?.totalItems ?? dReq.value?.total ?? 0);
+        setDeliveryError(null);
+      } else {
+        setDeliveries([]);
+        if (dReq.reason?.statusCode === 403) {
+          setDeliveryError("無權限讀取派送紀錄 (Forbidden)");
+        } else {
+          setDeliveryError(dReq.reason?.message || "Failed to load deliveries");
+        }
+      }
+
+      if (wReq) {
+        if (wReq.status === "fulfilled") {
+          setAvailableWebhooks(wReq.value || []);
+          setWebhookError(null);
+        } else if (wReq.reason?.statusCode === 403) {
+          setWebhookError("Forbidden");
+        } else {
+          setWebhookError(wReq.reason?.message || "Failed to load webhooks");
+        }
+      } else {
+        setAvailableWebhooks([]);
+        setWebhookError(canReadWebhooks === false ? "missing_scope" : null);
+      }
+    } catch (err: any) {
+      if (reqId !== currentRequest.current) return;
+      setError({
+        kind: "error",
+        message: err.message,
+        code: err.code || err.error,
+      });
+    } finally {
+      if (reqId === currentRequest.current) {
+        setLoading(false);
+      }
+    }
+  }, [client, entrySlug, tenantId, canReadWebhooks]);
 
   fetchStateRef.current = fetchState;
 
@@ -1432,31 +1437,33 @@ export function PartnerNotificationPanel({
     setRetryState("idle");
     setRetryRowId(null);
     setIsEditing(false);
+    setPage(1);
   }, [entrySlug]);
 
   useEffect(() => {
-    fetchState(true);
-  }, [fetchState]);
-
-  useEffect(() => {
-    fetchState(false);
+    fetchState();
   }, [page, fetchState]);
+
+  const currentMutationSession = React.useRef(0);
+  useEffect(() => {
+    currentMutationSession.current++;
+  }, [client, entrySlug, tenantId, canWriteBinding, canReadWebhooks]);
 
   const handleSave = async () => {
     setSaveState("pending");
-    const currentEntry = entrySlug;
+    const session = currentMutationSession.current;
     try {
       await (client as any).updatePartnerEntryNotificationBinding(entrySlug, {
         webhookId: editWebhookId,
         eventTypes: editEventTypes as any,
         expectedVersion: editExpectedVersion,
       });
-      if (activeEntry.current !== currentEntry) return;
+      if (session !== currentMutationSession.current) return;
       setIsEditing(false);
       setSaveState("idle");
       fetchStateRef.current?.();
     } catch (err: any) {
-      if (activeEntry.current !== currentEntry) return;
+      if (session !== currentMutationSession.current) return;
       setSaveState("failed");
       if (err.statusCode === 409) {
         setError({
@@ -1476,12 +1483,12 @@ export function PartnerNotificationPanel({
 
   const handleTest = async () => {
     setTestingState("pending");
-    const currentEntry = entrySlug;
+    const session = currentMutationSession.current;
     try {
       const res = await (client as any).testPartnerEntryNotificationBinding(
         entrySlug,
       );
-      if (activeEntry.current !== currentEntry) return;
+      if (session !== currentMutationSession.current) return;
       if (res.kind === "failed") {
         setTestingState("rejected");
         setError({
@@ -1495,7 +1502,7 @@ export function PartnerNotificationPanel({
         fetchStateRef.current?.();
       }
     } catch (err: any) {
-      if (activeEntry.current !== currentEntry) return;
+      if (session !== currentMutationSession.current) return;
       setTestingState("rejected");
       setError({
         kind: "error",
@@ -1508,16 +1515,16 @@ export function PartnerNotificationPanel({
   const handleEnable = async () => {
     if (!binding) return;
     setEnableState("pending");
-    const currentEntry = entrySlug;
+    const session = currentMutationSession.current;
     try {
       await (client as any).enablePartnerEntryNotificationBinding(
         entrySlug,
         binding.version,
       );
-      if (activeEntry.current !== currentEntry) return;
+      if (session !== currentMutationSession.current) return;
       fetchStateRef.current?.();
     } catch (err: any) {
-      if (activeEntry.current !== currentEntry) return;
+      if (session !== currentMutationSession.current) return;
       setError({
         kind: "error",
         message: err.message,
@@ -1525,7 +1532,7 @@ export function PartnerNotificationPanel({
       });
       setEnableState("failed");
     } finally {
-      if (activeEntry.current === currentEntry) {
+      if (session === currentMutationSession.current) {
         setEnableState((prev) => (prev === "pending" ? "idle" : prev));
       }
     }
@@ -1534,16 +1541,16 @@ export function PartnerNotificationPanel({
   const handleDisable = async () => {
     if (!binding) return;
     setDisableState("pending");
-    const currentEntry = entrySlug;
+    const session = currentMutationSession.current;
     try {
       await (client as any).disablePartnerEntryNotificationBinding(
         entrySlug,
         binding.version,
       );
-      if (activeEntry.current !== currentEntry) return;
+      if (session !== currentMutationSession.current) return;
       fetchStateRef.current?.();
     } catch (err: any) {
-      if (activeEntry.current !== currentEntry) return;
+      if (session !== currentMutationSession.current) return;
       setError({
         kind: "error",
         message: err.message,
@@ -1551,7 +1558,7 @@ export function PartnerNotificationPanel({
       });
       setDisableState("failed");
     } finally {
-      if (activeEntry.current === currentEntry) {
+      if (session === currentMutationSession.current) {
         setDisableState((prev) => (prev === "pending" ? "idle" : prev));
       }
     }
@@ -1560,7 +1567,7 @@ export function PartnerNotificationPanel({
   const handleResumeLifecycle = async () => {
     if (!binding) return;
     setResumeState("pending");
-    const currentEntry = entrySlug;
+    const session = currentMutationSession.current;
     try {
       const isStale =
         !binding.validatedAt ||
@@ -1571,7 +1578,7 @@ export function PartnerNotificationPanel({
         const testRes = await (
           client as any
         ).testPartnerEntryNotificationBinding(entrySlug, currentVersion);
-        if (activeEntry.current !== currentEntry) return;
+        if (session !== currentMutationSession.current) return;
         if (testRes.kind === "failed") {
           setError({
             kind: "error",
@@ -1590,10 +1597,10 @@ export function PartnerNotificationPanel({
         entrySlug,
         currentVersion,
       );
-      if (activeEntry.current !== currentEntry) return;
+      if (session !== currentMutationSession.current) return;
       fetchStateRef.current?.();
     } catch (err: any) {
-      if (activeEntry.current !== currentEntry) return;
+      if (session !== currentMutationSession.current) return;
       setError({
         kind: "error",
         message: err.message,
@@ -1601,7 +1608,7 @@ export function PartnerNotificationPanel({
       });
       setResumeState("failed");
     } finally {
-      if (activeEntry.current === currentEntry) {
+      if (session === currentMutationSession.current) {
         setResumeState((prev) => (prev === "pending" ? "idle" : prev));
       }
     }
@@ -1611,13 +1618,13 @@ export function PartnerNotificationPanel({
     setRetryRowId(outboxId);
     setRetryState("pending");
     setRetryErrorMsg(null);
-    const currentEntry = entrySlug;
+    const session = currentMutationSession.current;
     try {
       const outcome = await (client as any).retryPartnerNotificationDelivery(
         entrySlug,
         outboxId,
       );
-      if (activeEntry.current !== currentEntry) return;
+      if (session !== currentMutationSession.current) return;
       if (outcome.kind === "failed") {
         setRetryState("failed");
         setRetryErrorMsg(
@@ -1630,7 +1637,7 @@ export function PartnerNotificationPanel({
       }
       fetchStateRef.current?.();
     } catch (err: any) {
-      if (activeEntry.current !== currentEntry) return;
+      if (session !== currentMutationSession.current) return;
       setRetryState("failed");
       setRetryErrorMsg(err.message || "發生錯誤");
     }
@@ -1736,7 +1743,11 @@ export function PartnerNotificationPanel({
                   size="xs"
                   variant="primary"
                   icon="plus"
-                  onClick={() => setIsEditing(true)}
+                  onClick={() => {
+                    setEditWebhookId("");
+                    setEditEventTypes(["eta_changed"]);
+                    setIsEditing(true);
+                  }}
                   disabled={!canWriteBinding}
                 >
                   {t("partnerNotification.createBinding") ?? "建立綁定"}
@@ -1751,7 +1762,11 @@ export function PartnerNotificationPanel({
             tenantId={tenantId}
             testStatus={testStatus}
             t={t}
-            onEdit={() => setIsEditing(true)}
+            onEdit={() => {
+              setEditWebhookId(binding?.webhookId || "");
+              setEditEventTypes(binding?.eventTypes || ["eta_changed"]);
+              setIsEditing(true);
+            }}
             canWriteBinding={canWriteBinding}
             canWriteWebhooks={canWriteWebhooks}
           />

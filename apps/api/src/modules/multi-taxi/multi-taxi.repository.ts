@@ -1780,7 +1780,7 @@ export class MultiTaxiRepository {
         o.event_type as "eventType",
         CASE
           WHEN o.status = 'delivered' THEN 'delivered'
-          WHEN COALESCE(ctx.failure_reason, o.payload->'partnerNotification'->>'failureReason') IN ('route_missing', 'endpoint_disabled', 'configuration_blocked', 'recipient_revoked', 'owner_changed') THEN 'provider_not_configured'
+          WHEN COALESCE(ctx.failure_reason, o.payload->'partnerNotification'->>'failureReason') IN ('endpoint_disabled', 'configuration_blocked') THEN 'provider_not_configured'
           WHEN o.status = 'failed' THEN 'provider_error'
           ELSE NULL
         END as result,

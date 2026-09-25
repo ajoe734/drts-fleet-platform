@@ -431,7 +431,7 @@ export interface PartnerNotificationDeliveryRecord extends Partial<PartnerNotifi
   status: "pending" | "sending" | "delivered" | "failed";
   result: "delivered" | "provider_not_configured" | "provider_error" | null;
   attempts: number;
-  maxAttempts: number;
+  maxAttempts: number | null;
   nextAttemptAt: string | null;
   leaseExpiresAt?: string | null;
   createdAt?: string;
