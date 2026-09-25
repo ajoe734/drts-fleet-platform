@@ -1,8 +1,8 @@
 "use client";
 
-import React, { useEffect, useState, useCallback, useMemo } from "react";
+import React, { useEffect, useState, useCallback } from "react";
 import { usePlatformAdminClient } from "@/lib/admin-client";
-import { useTranslation } from "@/lib/i18n";
+
 import { 
   buildCanvasTheme,
   CanvasBtn, 
@@ -10,15 +10,10 @@ import {
   CanvasPill, 
   CanvasDL, 
   CanvasField, 
-  CanvasInput, 
-  CanvasSelect, 
-  CanvasShell, 
-  CanvasPageHeader, 
   CanvasBanner, 
   CanvasIcon, 
   CanvasActionButton, 
-  CanvasEmptyState, 
-  CanvasKPI 
+  CanvasEmptyState
 } from "@drts/ui-web";
 
 const PN_EVENTS: [string, string, string][] = [
@@ -35,12 +30,7 @@ const PN_BIND: Record<string, [string, any]> = {
   disabled: ['已停用', 'neutral'] 
 };
 
-const TEST: Record<string, [string, any]> = { 
-  passed_current: ['測試通過 · 目前端點', 'success'], 
-  passed_stale: ['測試已失效 · 端點 fingerprint 已變', 'warn'], 
-  failed: ['測試失敗', 'danger'], 
-  none: ['尚未測試', 'neutral'] 
-};
+
 
 const PN_DLV: Record<string, [string, any]> = {
   accepted:      ['端點已接受，但裝置未知','warn'],
@@ -61,10 +51,10 @@ const RETRY_DENY: Record<string, string> = {
   BINDING_NOT_READY:'綁定未就緒' 
 };
 
-export function PartnerNotificationPanel({ entrySlug, partnerName, programName, partnerId, tenantId }: { entrySlug: string; partnerName?: string; programName?: string; partnerId?: string; tenantId?: string }) {
+export function PartnerNotificationPanel({ entrySlug }: { entrySlug: string; partnerName?: string; programName?: string; partnerId?: string; tenantId?: string }) {
   const client = usePlatformAdminClient();
   const theme = buildCanvasTheme({ surface: "platform" });
-  const { t } = useTranslation();
+
 
   const [binding, setBinding] = useState<any>(null);
   const [deliveries, setDeliveries] = useState<any[]>([]);
@@ -148,7 +138,7 @@ export function PartnerNotificationPanel({ entrySlug, partnerName, programName, 
       await client.testPartnerEntryNotificationBinding(entrySlug);
       setTestingState("idle");
       fetchState();
-    } catch (err: any) {
+    } catch {
       setTestingState("rejected");
     }
   };
@@ -157,10 +147,10 @@ export function PartnerNotificationPanel({ entrySlug, partnerName, programName, 
     setRetryRowId(outboxId);
     setRetryState("pending");
     try {
-      const res = await client.retryPartnerNotificationDelivery(entrySlug, outboxId);
+      await client.retryPartnerNotificationDelivery(entrySlug, outboxId);
       setRetryState("queued");
       fetchState();
-    } catch (err: any) {
+    } catch {
       setRetryState("failed");
     }
   };
@@ -209,7 +199,7 @@ export function PartnerNotificationPanel({ entrySlug, partnerName, programName, 
               </div>
             </CanvasField>
             <CanvasField theme={theme} label="expectedVersion" hint="樂觀鎖 · 不符將回 409">
-              <CanvasInput theme={theme} value={String(editExpectedVersion)} mono readOnly/>
+              <input type="text" value={String(editExpectedVersion)} readOnly style={{ width: '100%', padding: '8px 12px', border: `1px solid ${theme.border}`, borderRadius: 4, background: theme.surfaceLo, color: theme.textDim, fontSize: 13, fontFamily: theme.monoFamily }} />
             </CanvasField>
           </CanvasCard>
         </div>
@@ -220,7 +210,7 @@ export function PartnerNotificationPanel({ entrySlug, partnerName, programName, 
             { k:'expectedVersion', v: `${editExpectedVersion} → 儲存後 ${editExpectedVersion + 1}`, mono:true }
           ]}/>
           <div style={{ marginTop:8 }}>
-            <CanvasBanner theme={theme} tone="neutral" icon="lock" body="儲存後綁定回到 test_pending；若 webhook 端點 fingerprint 改變，先前測試失效，需重測方可啟用。"/>
+            <CanvasBanner theme={theme} tone="info" icon="flags" body="儲存後綁定回到 test_pending；若 webhook 端點 fingerprint 改變，先前測試失效，需重測方可啟用。"/>
           </div>
           <div style={{ marginTop: 16, display: 'flex', gap: 8 }}>
             <CanvasBtn theme={theme} disabled={saveState === "pending"} onClick={() => setIsEditing(false)}>取消</CanvasBtn>
@@ -241,7 +231,7 @@ export function PartnerNotificationPanel({ entrySlug, partnerName, programName, 
       <div style={{ display:'flex', flexDirection:'column', gap:16 }}>
         {error?.kind === "404" ? (
           <CanvasCard theme={theme} title="404 · PARTNER_NOTIFICATION_BINDING_NOT_FOUND" padding={14}>
-            <CanvasBanner theme={theme} tone="neutral" icon="info" title="此夥伴尚未建立通知綁定" body="選擇既有 webhook 與事件即可建立。" actions={<CanvasBtn theme={theme} size="xs" variant="primary" icon="plus" onClick={() => setIsEditing(true)}>建立綁定</CanvasBtn>}/>
+            <CanvasBanner theme={theme} tone="info" icon="info" title="此夥伴尚未建立通知綁定" body="選擇既有 webhook 與事件即可建立。" actions={<CanvasBtn theme={theme} size="xs" variant="primary" icon="plus" onClick={() => setIsEditing(true)}>建立綁定</CanvasBtn>}/>
           </CanvasCard>
         ) : (
           <CanvasCard theme={theme} title="通知綁定 · Notification Binding" subtitle="引用既有 webhook · 端點/密鑰於既有 /webhooks 管理" actions={<><CanvasBtn theme={theme} size="xs" icon="edit" onClick={() => setIsEditing(true)}>編輯</CanvasBtn><CanvasPill theme={theme} tone={m[1]} dot>{m[0]}<span style={{ marginLeft:4, opacity:.6, fontFamily:theme.monoFamily, fontSize:9 }}>{bindState}</span></CanvasPill></>}>
@@ -259,7 +249,7 @@ export function PartnerNotificationPanel({ entrySlug, partnerName, programName, 
                 <div style={{ display:'flex', flexDirection:'column', gap:4 }}>
                   {(binding?.eventTypes || []).map((i: string) => {
                     const row = PN_EVENTS.find(e => e[0] === i);
-                    return <div key={i} style={{ display:'flex', alignItems:'center', gap:8, fontSize:11.5 }}><CanvasPill theme={theme} tone="accent">{i}</CanvasPill><CanvasIcon name="arrow-right" size={11} style={{ color:theme.textDim }}/><span style={{ fontFamily:theme.monoFamily, color:theme.textMuted }}>{row ? row[1] : i}</span><span style={{ color:theme.textDim }}>{row ? row[2] : ''}</span></div>
+                    return <div key={i} style={{ display:'flex', alignItems:'center', gap:8, fontSize:11.5 }}><CanvasPill theme={theme} tone="accent">{i}</CanvasPill><CanvasIcon name="chevR" size={11} style={{ color:theme.textDim }}/><span style={{ fontFamily:theme.monoFamily, color:theme.textMuted }}>{row ? row[1] : i}</span><span style={{ color:theme.textDim }}>{row ? row[2] : ''}</span></div>
                   })}
                 </div>}
             </div>
@@ -302,7 +292,7 @@ export function PartnerNotificationPanel({ entrySlug, partnerName, programName, 
                       <td style={{ padding: '8px 14px' }}>
                         {r.retryDisposition === 'manual_only' || r.retryDisposition === 'automatic' || r.retryDisposition === 'configuration_blocked' ? (
                           <CanvasActionButton theme={theme} size="xs" descriptor={{ action:'resend', enabled: rState !== 'pending', riskLevel:'low', requiresReason:false }} icon="refresh" label={rState === 'pending' ? '重送中' : '重送'} en="resend" onAction={() => handleRetry(r.outboxId)}/>
-                        ) : <span style={{ fontSize:10.5, color:theme.textDim, display:'inline-flex', alignItems:'center', gap:4 }}><CanvasIcon name="lock" size={10}/>{RETRY_DENY[r.retryDisposition] || r.retryDisposition}</span>}
+                        ) : <span style={{ fontSize:10.5, color:theme.textDim, display:'inline-flex', alignItems:'center', gap:4 }}><CanvasIcon name="flags" size={10}/>{RETRY_DENY[r.retryDisposition] || r.retryDisposition}</span>}
                       </td>
                     </tr>
                   );

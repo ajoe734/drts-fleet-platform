@@ -1826,7 +1826,7 @@ export class MultiTaxiRepository {
       const outbox = outboxRows.rows[0];
 
       const ctxRows = await client.query(
-        "SELECT entry_slug, tenant_id, partner_id, expires_at, failure_reason, binding_id, binding_version, endpoint_fingerprint, retry_disposition, order_id, event_sequence, wire_payload, retry_policy_snapshot FROM mobility.phase1_partner_notification_delivery_contexts WHERE outbox_id = $1 FOR UPDATE",
+        "SELECT entry_slug, tenant_id, partner_id, expires_at, failure_reason, binding_id, binding_version, webhook_id, endpoint_fingerprint, retry_disposition, order_id, event_sequence, wire_payload, retry_policy_snapshot FROM mobility.phase1_partner_notification_delivery_contexts WHERE outbox_id = $1 FOR UPDATE",
         [outboxId],
       );
       const ctx = ctxRows.rows[0] || null;
@@ -1978,7 +1978,7 @@ export class MultiTaxiRepository {
           await client.query("ROLLBACK");
           return { kind: "failed", failure: readiness.failure };
         }
-        if (ctx && (ctx.binding_id !== readiness.binding.bindingId || ctx.wire_payload?.data?.recipient?.webhookId !== readiness.binding.webhookId)) {
+        if (ctx && (ctx.binding_id !== readiness.binding.bindingId || ctx.webhook_id !== readiness.binding.webhookId)) {
           // owner_changed
           await client.query("ROLLBACK");
           return { kind: "failed", failure: { failureReason: "owner_changed", retryDisposition: "terminal", suggestedNextAttemptAt: null } };
