@@ -2074,12 +2074,14 @@ export class MultiTaxiRepository {
           };
         }
 
+        const maxAttemptsRaw =
+          ctx?.retry_policy_snapshot?.maxAttempts ??
+          outbox.payload?.partnerNotification?.maxAttempts ??
+          readiness.retryPolicy?.maxAttempts;
         const maxAttempts =
-          ctx &&
-          ctx.retry_policy_snapshot &&
-          ctx.retry_policy_snapshot.maxAttempts
-            ? parseInt(ctx.retry_policy_snapshot.maxAttempts, 10)
-            : (readiness.retryPolicy?.maxAttempts ?? 3);
+          maxAttemptsRaw !== undefined && maxAttemptsRaw !== null
+            ? parseInt(String(maxAttemptsRaw), 10)
+            : undefined;
         if (maxAttempts !== undefined && outbox.attempt_count >= maxAttempts) {
           await client.query("ROLLBACK");
           return {
