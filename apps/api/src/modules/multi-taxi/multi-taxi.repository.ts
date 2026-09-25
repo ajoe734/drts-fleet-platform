@@ -27,6 +27,8 @@ import type {
   StoredPartnerNotificationContext,
 } from "./partner-notification.types";
 
+import { notificationExpiresAt } from "./partner-notification.transport";
+
 import { DatabaseService } from "../../common/db/database.service";
 import { PartnerNotificationDispatchFacade } from "../tenant-partner/partner-notification-dispatch.facade";
 
@@ -1866,14 +1868,18 @@ export class MultiTaxiRepository {
         };
       }
 
-      const expiresAtStr = ctx
-        ? ctx.expires_at
-        : outbox.payload?.notificationExpiresAt ||
-          outbox.payload?.expiresAt ||
-          new Date(
-            new Date(outbox.created_at || new Date()).getTime() + 15 * 60000,
-          ).toISOString();
-      if (expiresAtStr && new Date() >= new Date(expiresAtStr)) {
+      let expiresAtStr: string;
+      try {
+        expiresAtStr = notificationExpiresAt({
+          createdAt: outbox.created_at,
+          eventType: outbox.event_type as any,
+          payload: outbox.payload,
+        } as any);
+      } catch (err: any) {
+        expiresAtStr = new Date(0).toISOString();
+      }
+
+      if (new Date() >= new Date(expiresAtStr)) {
         await client.query("ROLLBACK");
         return {
           kind: "failed",
@@ -1900,6 +1906,7 @@ export class MultiTaxiRepository {
           failure: {
             failureReason: "notification_obsolete",
             retryDisposition: "terminal",
+            suggestedNextAttemptAt: null,
           },
         };
       }
@@ -1911,22 +1918,7 @@ export class MultiTaxiRepository {
           failure: {
             failureReason: "notification_superseded",
             retryDisposition: "terminal",
-          },
-        };
-      }
-
-      const expiresAt = ctx
-        ? new Date(ctx.expires_at)
-        : outbox.payload?.partnerNotification?.expiresAt
-          ? new Date(outbox.payload.partnerNotification.expiresAt)
-          : null;
-      if (expiresAt && expiresAt < new Date()) {
-        await client.query("ROLLBACK");
-        return {
-          kind: "failed",
-          failure: {
-            failureReason: "notification_expired",
-            retryDisposition: "terminal",
+            suggestedNextAttemptAt: null,
           },
         };
       }

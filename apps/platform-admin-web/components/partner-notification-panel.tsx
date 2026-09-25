@@ -425,14 +425,12 @@ function PnLifecycle({
           theme={th}
           descriptor={{
             action: "test",
-            enabled: canMutate && state !== "disabled" && !isPending,
+            enabled: canMutate && !isPending,
             disabledReasonCode: !canMutate
               ? "missing_scope"
-              : state === "disabled"
-                ? "binding_disabled"
-                : isPending
-                  ? "in_flight"
-                  : undefined,
+              : isPending
+                ? "in_flight"
+                : undefined,
             riskLevel: "low",
           }}
           icon="refresh"
@@ -532,7 +530,7 @@ function PnRetryCell({ theme: th, r, retryState, onRetry, t }: any) {
     LEASE_ACTIVE: "另一重送進行中 (lease)",
     BINDING_NOT_READY: "綁定未就緒",
   };
-  const retryValue = r.retryPolicy || r.retry;
+  const retryValue = r.retryDisposition;
   if (!retryValue || retryValue === "n/a")
     return <span style={{ fontSize: 10.5, color: th.textDim }}>—</span>;
   if (retryValue.startsWith("denied:")) {
@@ -587,7 +585,7 @@ function PnRetryCell({ theme: th, r, retryState, onRetry, t }: any) {
         {t("partnerNotification.enqueued") ?? "入列中 · 待 claim"}
       </CanvasPill>
     );
-  if (retryValue === "allowed")
+  if (retryValue === "allowed" || retryValue === "manual_only")
     return (
       <PanelActionBtn
         theme={th}
@@ -613,7 +611,7 @@ function PnDeliveries({
   t,
 }: any) {
   const PN_DLV: Record<string, [string, any]> = {
-    accepted: ["端點已接受，但裝置未知", "warn"],
+    accepted: ["端點已接受，裝置未知", "info"],
     ack_invalid: ["回應成功但 ack 驗證失敗", "danger"],
     failed: ["失敗", "danger"],
     queued: ["排隊中", "neutral"],
@@ -621,7 +619,7 @@ function PnDeliveries({
     superseded: ["已被新通知取代", "neutral"],
     ttl_expired: ["生命週期逾時 (ttl)", "neutral"],
     budget_exhausted: ["重試次數耗盡 (budget)", "danger"],
-    delivered: ["端點已接受，但裝置未知", "warn"],
+    delivered: ["歷史紀錄（裝置未知）", "neutral"],
     pending: ["排隊中", "neutral"],
     sending: ["發送中", "info"],
   };
@@ -707,13 +705,13 @@ function PnDeliveries({
         columns={[
           {
             h: "Delivery ID",
-            k: "id",
+            k: "deliveryId",
             w: 110,
             mono: true,
             r: (r: any) => (
               <div style={{ display: "flex", flexDirection: "column" }}>
                 <span style={{ color: th.accent, fontWeight: 600 }}>
-                  {r.id}
+                  {r.deliveryId || r.id || "—"}
                 </span>
                 <span style={{ fontSize: 10, color: th.textDim }}>
                   {r.outboxId}
@@ -723,10 +721,10 @@ function PnDeliveries({
           },
           {
             h: "事件（內部）",
-            k: "ev",
+            k: "eventType",
             w: 170,
             mono: true,
-            r: (r: any) => r.ev || r.event,
+            r: (r: any) => r.eventType || r.ev || r.event,
           },
           {
             h: "目標（遮罩）",
@@ -734,7 +732,7 @@ function PnDeliveries({
             mono: true,
             r: (r: any) => (
               <span style={{ fontSize: 10.5 }}>
-                {r.target || (
+                {r.deliveryTarget || r.target || (
                   <span style={{ color: th.textDim }}>
                     {t("partnerNotification.unknownTarget") ??
                       "未知／尚未建立派送目標"}
@@ -745,22 +743,22 @@ function PnDeliveries({
           },
           {
             h: "HTTP",
-            k: "code",
+            k: "downstreamStatus",
             w: 56,
             mono: true,
-            r: (r: any) => r.code || r.httpCode || "—",
+            r: (r: any) => r.downstreamStatus || r.code || r.httpCode || "—",
           },
           {
             h: "ack",
             w: 70,
             r: (r: any) =>
-              r.ack === "ok" ? (
-                <CanvasPill theme={th} tone="success">
-                  {t("partnerNotification.pass") ?? "通過"}
-                </CanvasPill>
-              ) : r.ack === "mismatch" ? (
+              r.failureReason === "partner_ack_invalid" ? (
                 <CanvasPill theme={th} tone="danger">
                   {t("partnerNotification.mismatch") ?? "不符"}
+                </CanvasPill>
+              ) : r.status === "delivered" || r.status === "accepted" ? (
+                <CanvasPill theme={th} tone="success">
+                  {t("partnerNotification.pass") ?? "通過"}
                 </CanvasPill>
               ) : (
                 <span style={{ color: th.textDim }}>—</span>
@@ -784,24 +782,24 @@ function PnDeliveries({
             w: 150,
             r: (r: any) => (
               <span style={{ fontSize: 11.5, color: th.textMuted }}>
-                {r.reason}
+                {r.failureReason || r.reason}
               </span>
             ),
           },
           {
             h: "時間",
-            k: "at",
+            k: "createdAt",
             w: 120,
             mono: true,
-            r: (r: any) => r.at || r.createdAt || "—",
+            r: (r: any) => r.createdAt || r.at || "—",
           },
           {
             h: "次",
-            k: "tries",
+            k: "attempts",
             w: 36,
             mono: true,
             align: "center",
-            r: (r: any) => r.tries || r.attemptCount || 1,
+            r: (r: any) => r.attempts || r.tries || r.attemptCount || 1,
           },
           {
             h: "重送",
@@ -811,23 +809,24 @@ function PnDeliveries({
                 theme={th}
                 r={r}
                 retryState={
-                  r.id === retryRowId || r.outboxId === retryRowId
+                  r.deliveryId === retryRowId || r.outboxId === retryRowId || r.id === retryRowId
                     ? retryState
                     : "idle"
                 }
                 onRetry={onRetry}
+                t={t}
               />
             ),
           },
         ]}
         rows={deliveries.map((r: any) => {
-          if (r.id === retryRowId || r.outboxId === retryRowId) {
+          if (r.deliveryId === retryRowId || r.outboxId === retryRowId || r.id === retryRowId) {
             if (retryState === "queued")
               return {
                 ...r,
                 status: "queued",
-                reason: "已受理重新入列",
-                retry: "inflight",
+                failureReason: "已受理重新入列",
+                retryDisposition: "inflight",
               };
           }
           return r;
@@ -851,6 +850,7 @@ function PnEditView({
   tenantId,
   t,
   canWriteBinding,
+  availableWebhooks,
 }: any) {
   const isSaving = saveState === "pending";
   const isSaveDisabled = isSaving || !editWebhookId || !canWriteBinding;
@@ -927,8 +927,7 @@ function PnEditView({
             required
             hint="端點 URL、密鑰、逾時/重試由既有 webhook 管理維護，本頁不重複 CRUD"
           >
-            <input
-              type="text"
+            <select
               value={editWebhookId}
               onChange={(e) => setEditWebhookId(e.target.value)}
               style={{
@@ -940,8 +939,14 @@ function PnEditView({
                 color: th.text,
                 fontSize: 13,
               }}
-              placeholder="wh_..."
-            />
+            >
+              <option value="" disabled>請選擇 webhook 端點...</option>
+              {availableWebhooks?.map((wh: any) => (
+                <option key={wh.webhookId} value={wh.webhookId}>
+                  {wh.webhookId} ({wh.url})
+                </option>
+              ))}
+            </select>
             <div style={{ marginTop: 6 }}>
               {tenantId ? (
                 <a
@@ -1089,12 +1094,15 @@ export function PartnerNotificationPanel({
 
   const [binding, setBinding] = useState<any>(null);
   const [deliveries, setDeliveries] = useState<any[]>([]);
+  const [availableWebhooks, setAvailableWebhooks] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<{
     kind: "error" | "404" | "403" | "409";
     message: string;
     code?: string;
   } | null>(null);
+  const [deliveryError, setDeliveryError] = useState<string | null>(null);
+  const currentRequest = React.useRef(0);
   const [isEditing, setIsEditing] = useState(false);
   const [saveState, setSaveState] = useState<"idle" | "pending" | "failed">(
     "idle",
@@ -1120,22 +1128,30 @@ export function PartnerNotificationPanel({
   const [editEventTypes, setEditEventTypes] = useState<string[]>([]);
   const [editExpectedVersion, setEditExpectedVersion] = useState(0);
 
-  const fetchState = useCallback(async () => {
+  const fetchState = useCallback(async (isInitial = false) => {
+    const reqId = ++currentRequest.current;
     setLoading(true);
     try {
-      const [bReq, dReq] = await Promise.allSettled([
+      const p: Promise<any>[] = [
         (client as any).getPartnerEntryNotificationBinding(entrySlug),
         (client as any).listPartnerNotificationDeliveries(entrySlug, {
           pageSize: 500,
         }),
-      ]);
+      ];
+      if (tenantId) {
+        p.push((client as any).getList("/api/tenant/webhooks", { headers: { "x-tenant-id": tenantId } }));
+      }
+      const [bReq, dReq, wReq] = await Promise.allSettled(p);
+      if (reqId !== currentRequest.current) return;
 
       if (bReq.status === "rejected") {
         const statusCode = bReq.reason?.statusCode;
         const errCode = bReq.reason?.code || bReq.reason?.error;
         if (statusCode === 404) {
           setBinding(null);
-          setEditEventTypes(["eta_changed"]);
+          if (isInitial || !isEditing) {
+            setEditEventTypes(["eta_changed"]);
+          }
           setError({ kind: "404", message: "Not found", code: errCode });
         } else if (statusCode === 403) {
           setError({ kind: "403", message: "Forbidden", code: errCode });
@@ -1154,29 +1170,54 @@ export function PartnerNotificationPanel({
         }
       } else {
         setBinding(bReq.value);
-        setEditWebhookId(bReq.value?.webhookId || "");
-        setEditEventTypes(bReq.value?.eventTypes || []);
+        if (isInitial || !isEditing) {
+          setEditWebhookId(bReq.value?.webhookId || "");
+          setEditEventTypes(bReq.value?.eventTypes || []);
+        }
         setEditExpectedVersion(bReq.value?.version || 0);
         setError(null);
       }
 
       if (dReq.status === "fulfilled") {
-        setDeliveries(dReq.value.items || []);
+        setDeliveries(dReq.value.items || dReq.value || []);
+        setDeliveryError(null);
+      } else {
+        if (dReq.reason?.statusCode !== 403) {
+          setDeliveryError(dReq.reason?.message || "Failed to load deliveries");
+        }
+      }
+      
+      if (wReq && wReq.status === "fulfilled") {
+        setAvailableWebhooks(wReq.value || []);
       }
     } catch (err: any) {
+      if (reqId !== currentRequest.current) return;
       setError({
         kind: "error",
         message: err.message,
         code: err.code || err.error,
       });
     } finally {
-      setLoading(false);
+      if (reqId === currentRequest.current) {
+        setLoading(false);
+      }
     }
-  }, [client, entrySlug]);
+  }, [client, entrySlug, tenantId, isEditing]);
 
   useEffect(() => {
-    fetchState();
-  }, [fetchState]);
+    setBinding(null);
+    setDeliveries([]);
+    setError(null);
+    setDeliveryError(null);
+    setTestingState("idle");
+    setEnableState("idle");
+    setDisableState("idle");
+    setResumeState("idle");
+    setRetryState("idle");
+    setRetryRowId(null);
+    setIsEditing(false);
+    fetchState(true);
+  }, [entrySlug, fetchState]);
 
   const handleSave = async () => {
     setSaveState("pending");
@@ -1208,13 +1249,13 @@ export function PartnerNotificationPanel({
       setTestingState("idle");
       fetchState();
     } catch (err: any) {
-      if (
-        err?.code === "PARTNER_NOTIFICATION_BINDING_TEST_FAILED" ||
-        err?.kind === "failed"
-      ) {
-        setTestingState("rejected");
-      } else {
-        setTestingState("rejected");
+      setTestingState("rejected");
+      if (err?.code !== "PARTNER_NOTIFICATION_BINDING_TEST_FAILED" && err?.kind !== "failed") {
+        setError({
+          kind: "error",
+          message: err.message,
+          code: err.code || err.error,
+        });
       }
     }
   };
@@ -1346,11 +1387,15 @@ export function PartnerNotificationPanel({
         onSave={handleSave}
         onCancel={() => {
           setIsEditing(false);
-          fetchState();
+          if (binding) {
+            setEditWebhookId(binding.webhookId || "");
+            setEditEventTypes(binding.eventTypes || []);
+          }
         }}
         tenantId={tenantId}
         t={t}
         canWriteBinding={canWriteBinding}
+        availableWebhooks={availableWebhooks}
       />
     );
   }
@@ -1425,6 +1470,11 @@ export function PartnerNotificationPanel({
           onRefresh={fetchState}
           t={t}
         />
+        {deliveryError && (
+          <div style={{ marginTop: 8 }}>
+            <CanvasBanner theme={theme} tone="danger" icon="warn" body={deliveryError} />
+          </div>
+        )}
       </div>
 
       <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
@@ -1449,7 +1499,7 @@ export function PartnerNotificationPanel({
         <CanvasCard
           theme={theme}
           title={
-            t("partnerNotification.deliverySummary24h") ?? "派送摘要 · 近 24h"
+            t("partnerNotification.deliverySummary") ?? "近期派送摘要 (本頁)"
           }
           subtitle="「已接受」≠ 裝置已收到"
         >

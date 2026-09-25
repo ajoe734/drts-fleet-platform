@@ -79,6 +79,13 @@ export class PartnerEntryNotificationBindingService {
         { entrySlug: entry.entrySlug },
       );
     }
+    const endpoint = this.tenantPartnerService
+      .listWebhookEndpoints(entry.tenantId)
+      .find((candidate) => candidate.webhookId === binding.webhookId);
+    if (endpoint) {
+      binding.endpointFingerprint = computeEndpointFingerprint(endpoint);
+      binding.endpointUrl = endpoint.url;
+    }
     return binding;
   }
 

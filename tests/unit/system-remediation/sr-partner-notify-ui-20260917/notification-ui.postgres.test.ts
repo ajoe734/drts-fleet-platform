@@ -35,14 +35,6 @@ describe.skipIf(!testDbUrl || process.env.RUN_UI_PG_GATE !== "true")(
       process.env.AUTH_MODE = "test";
 
       pool = new Pool({ connectionString: testDbUrl, max: 16 });
-      await pool.query('DELETE FROM mobility.phase1_partner_notification_delivery_contexts');
-      await pool.query('DELETE FROM ops.consumer_notification_outbox');
-      await pool.query('DELETE FROM mobility.phase1_order_partner_notification_routes');
-      await pool.query('DELETE FROM admin.phase1_partner_user_identity_links');
-      await pool.query('DELETE FROM admin.phase1_partner_notification_bindings');
-      await pool.query('DELETE FROM admin.phase1_tenant_webhook_endpoints');
-      await pool.query('DELETE FROM admin.phase1_partner_channel_entries');
-      await pool.query('DELETE FROM ops.phase1_owned_orders');
       // insert fixtures before app.init
       await pool.query(
         "INSERT INTO admin.phase1_platform_tenants (tenant_id, tenant_code, tenant_status, created_at, updated_at, record) VALUES ('tenant-a', 'TENANT-A', 'active', now(), now(), '{}') ON CONFLICT DO NOTHING",
@@ -51,13 +43,13 @@ describe.skipIf(!testDbUrl || process.env.RUN_UI_PG_GATE !== "true")(
         "INSERT INTO admin.phase1_platform_tenants (tenant_id, tenant_code, tenant_status, created_at, updated_at, record) VALUES ('tenant-other', 'TENANT-O', 'active', now(), now(), '{}') ON CONFLICT DO NOTHING",
       );
       await pool.query(
-        "INSERT INTO admin.phase1_partner_channel_entries (entry_slug, tenant_id, partner_id, created_at, updated_at, program_id, status, record) VALUES ('entry-tenant', 'tenant-a', 'partner-1', now(), now(), 'program1', 'active', jsonb_build_object('entrySlug', 'entry-tenant', 'tenantId', 'tenant-a', 'partnerId', 'partner-1', 'status', 'active', 'activeFlag', true)) ON CONFLICT DO NOTHING",
+        "INSERT INTO admin.phase1_partner_channel_entries (entry_slug, tenant_id, partner_id, created_at, updated_at, program_id, status, record) VALUES ('entry-tenant', 'tenant-a', 'partner-1', now(), now(), 'program1', 'active', jsonb_build_object('entrySlug', 'entry-tenant', 'tenantId', 'tenant-a', 'partnerId', 'partner-1', 'programId', 'program1', 'status', 'active', 'activeFlag', true)) ON CONFLICT DO NOTHING",
       );
       await pool.query(
-        "INSERT INTO admin.phase1_partner_channel_entries (entry_slug, tenant_id, partner_id, created_at, updated_at, program_id, status, record) VALUES ('entry-409-test', 'tenant-a', 'partner-1', now(), now(), 'program1', 'active', jsonb_build_object('entrySlug', 'entry-409-test', 'tenantId', 'tenant-a', 'partnerId', 'partner-1', 'status', 'active', 'activeFlag', true)) ON CONFLICT DO NOTHING",
+        "INSERT INTO admin.phase1_partner_channel_entries (entry_slug, tenant_id, partner_id, created_at, updated_at, program_id, status, record) VALUES ('entry-409-test', 'tenant-a', 'partner-1', now(), now(), 'program1', 'active', jsonb_build_object('entrySlug', 'entry-409-test', 'tenantId', 'tenant-a', 'partnerId', 'partner-1', 'programId', 'program1', 'status', 'active', 'activeFlag', true)) ON CONFLICT DO NOTHING",
       );
       await pool.query(
-        "INSERT INTO admin.phase1_partner_channel_entries (entry_slug, tenant_id, partner_id, created_at, updated_at, program_id, status, record) VALUES ('entry-retry-test', 'tenant-a', 'partner-1', now(), now(), 'program1', 'active', jsonb_build_object('entrySlug', 'entry-retry-test', 'tenantId', 'tenant-a', 'partnerId', 'partner-1', 'status', 'active', 'activeFlag', true)) ON CONFLICT DO NOTHING",
+        "INSERT INTO admin.phase1_partner_channel_entries (entry_slug, tenant_id, partner_id, created_at, updated_at, program_id, status, record) VALUES ('entry-retry-test', 'tenant-a', 'partner-1', now(), now(), 'program1', 'active', jsonb_build_object('entrySlug', 'entry-retry-test', 'tenantId', 'tenant-a', 'partnerId', 'partner-1', 'programId', 'program1', 'status', 'active', 'activeFlag', true)) ON CONFLICT DO NOTHING",
       );
 
       app = await NestFactory.create(AppModule, { logger: false });
@@ -237,6 +229,36 @@ describe.skipIf(!testDbUrl || process.env.RUN_UI_PG_GATE !== "true")(
       );
       expect(updated.rows[0].attempt_count).toBe(1); // attempt_count is incremented by the worker on dequeue, not by the manual retry
       expect(updated.rows[0].status).toBe("pending");
+
+      // Test 2: Expired TTL
+      const expiredRetry = await mtRepo.retryPartnerNotificationDelivery(
+        { entrySlug, tenantId, partnerId },
+        outboxId2,
+      );
+      expect(expiredRetry.kind).toBe("failed");
+      if (expiredRetry.kind === "failed") {
+        expect(expiredRetry.failure.failureReason).toBe("notification_expired");
+      }
+
+      // Test 3: Superseded
+      const supersededRetry = await mtRepo.retryPartnerNotificationDelivery(
+        { entrySlug, tenantId, partnerId },
+        outboxId3,
+      );
+      expect(supersededRetry.kind).toBe("failed");
+      if (supersededRetry.kind === "failed") {
+        expect(supersededRetry.failure.failureReason).toBe("notification_superseded");
+      }
+
+      // Test 4: Active lease (concurrency)
+      const leaseRetry = await mtRepo.retryPartnerNotificationDelivery(
+        { entrySlug, tenantId, partnerId },
+        outboxId4,
+      );
+      expect(leaseRetry.kind).toBe("failed");
+      if (leaseRetry.kind === "failed") {
+        expect(leaseRetry.failure.failureReason).toBe("provider_transient_error");
+      }
     });
 
     it("same-tenant vs cross-tenant logic is validated using real TenantPartnerService", async () => {
