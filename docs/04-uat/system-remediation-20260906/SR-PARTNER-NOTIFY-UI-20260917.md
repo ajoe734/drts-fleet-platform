@@ -15,7 +15,7 @@
 ## Handoff Evidence (Gemini)
 
 - **Candidate Branch**: gemini/sr-partner-notify-ui-20260924-canvas
-- **Candidate SHA**: 0efbd80e79520f881a5f73558b4007d76c22840d
+- **Candidate SHA**: f7a241d138ed41a3d623416ef8f2b053c982c8fe
 - **Hosted CI Evidence**:
   - CI: (To be generated after push)
   - CI (integration trunk): (To be generated after push)
