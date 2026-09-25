@@ -209,8 +209,6 @@ function ActiveBreakGlassBanner({
   const seconds = secondsRemaining % 60;
   const timerDisplay = `${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}`;
 
-  const client = usePlatformAdminClient();
-  const iamClient = useMemo(() => createPlatformAdminIamClient(client), [client]);
 
   const handleExit = async () => {
     setExiting(true);

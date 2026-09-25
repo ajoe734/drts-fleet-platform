@@ -480,7 +480,7 @@ export function RoleApprovalPanel() {
     }
   };
 
-  
+
 
   const handleApprove = async () => {
     if (!selectedReq) return;

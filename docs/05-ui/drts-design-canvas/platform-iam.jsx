@@ -211,7 +211,7 @@ function PA_IamBreakGlass({ theme:th, active, state = "form", stepUpState = "non
   const isApproved = resolvedState === "approved";
   const isActive = resolvedState === "active" || resolvedState === "exit_failed";
   const isClosed = resolvedState === "closed";
-  
+
   const stepMap = {
     form: 0,
     requested: 1,
@@ -227,7 +227,7 @@ function PA_IamBreakGlass({ theme:th, active, state = "form", stepUpState = "non
         <div style={{ display:'flex', flexDirection:'column', gap:16 }}>
           <Card theme={th} title={isActive || isClosed ? 'BG-20260924-003' : '申請緊急破窗'} subtitle="單人核准 · 上限 60 分鐘 · 全程稽核">
             <div style={{ marginBottom:14 }}><Stepper theme={th} current={stepMap[resolvedState]} steps={['申請','核准','啟用 · 發放短效權杖']}/></div>
-            
+
             {isForm && (
               <>
                 <Field theme={th} label="事故 / 理由" required><Input theme={th} value="INC-20260924-07 · 租戶帳務凍結需緊急解除"/></Field>
