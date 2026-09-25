@@ -5,6 +5,7 @@ import {
   useEffect,
   useCallback,
   useMemo,
+  useRef,
   type CSSProperties,
   type FormEvent,
 } from "react";
@@ -1246,7 +1247,18 @@ export function BreakGlassPanel() {
   const [stepUpState, setStepUpState] = useState<"NONE" | "VERIFYING" | "VALID" | "EXPIRED">("NONE");
   const [stepUpRef, setStepUpRef] = useState<string | null>(null);
 
+  const stepUpTimerRef = useRef<NodeJS.Timeout | null>(null);
+  const clearStepUp = useCallback(() => {
+    if (stepUpTimerRef.current) {
+      clearTimeout(stepUpTimerRef.current);
+      stepUpTimerRef.current = null;
+    }
+    setStepUpRef(null);
+    setStepUpState("NONE");
+  }, []);
+
   const handleGetStepUpProof = async (actionId: string) => {
+    clearStepUp();
     setStepUpState("VERIFYING");
     try {
       const proof = await iamClient.createStepUpProof({
@@ -1261,7 +1273,7 @@ export function BreakGlassPanel() {
         if (proof.expiresAt) {
           const ttl = new Date(proof.expiresAt).getTime() - Date.now();
           if (ttl > 0) {
-            setTimeout(() => {
+            stepUpTimerRef.current = setTimeout(() => {
               setStepUpState((prev) => (prev === "VALID" ? "EXPIRED" : prev));
               setStepUpRef((prev) => (prev === proof.stepUpReference ? null : prev));
             }, ttl);
@@ -1304,10 +1316,9 @@ export function BreakGlassPanel() {
       setGrants((prev) => [created, ...prev]);
       setShowRequestModal(false);
       setReasonText("");
-      setStepUpRef(null);
-      setStepUpState("NONE");
+      clearStepUp();
     } catch (err: unknown) {
-      if (err instanceof ApiClientError && (err.code === "IAM_STEP_UP_REQUIRED" || err.code === "MFA_REQUIRED")) {
+      if (err instanceof ApiClientError && (err.code === "IAM_STEP_UP_REQUIRED" || err.code === "MFA_REQUIRED" || err.code === "STEP_UP_REQUIRED")) {
         setStepUpState("EXPIRED");
         setStepUpRef(null);
         setError("憑證已過期或被拒絕 (IAM_STEP_UP_REQUIRED)，請重新取得或重新登入 (Fresh MFA)。");
@@ -1338,10 +1349,9 @@ export function BreakGlassPanel() {
         ),
       );
       setSelectedGrant(approved);
-      setStepUpRef(null);
-      setStepUpState("NONE");
+      clearStepUp();
     } catch (err: unknown) {
-      if (err instanceof ApiClientError && (err.code === "IAM_STEP_UP_REQUIRED" || err.code === "MFA_REQUIRED")) {
+      if (err instanceof ApiClientError && (err.code === "IAM_STEP_UP_REQUIRED" || err.code === "MFA_REQUIRED" || err.code === "STEP_UP_REQUIRED")) {
         setStepUpState("EXPIRED");
         setStepUpRef(null);
         setError("憑證已過期或被拒絕 (IAM_STEP_UP_REQUIRED)，請重新取得或重新登入 (Fresh MFA)。");
@@ -1371,10 +1381,9 @@ export function BreakGlassPanel() {
       });
       activateSession(result.grant, result.accessToken, result.expiresAt);
       setSelectedGrant(null);
-      setStepUpRef(null);
-      setStepUpState("NONE");
+      clearStepUp();
     } catch (err: unknown) {
-      if (err instanceof ApiClientError && (err.code === "IAM_STEP_UP_REQUIRED" || err.code === "MFA_REQUIRED")) {
+      if (err instanceof ApiClientError && (err.code === "IAM_STEP_UP_REQUIRED" || err.code === "MFA_REQUIRED" || err.code === "STEP_UP_REQUIRED")) {
         setStepUpState("EXPIRED");
         setStepUpRef(null);
         setError("憑證已過期或被拒絕 (IAM_STEP_UP_REQUIRED)，請重新取得或重新登入 (Fresh MFA)。");
@@ -1417,7 +1426,10 @@ export function BreakGlassPanel() {
           theme={theme}
           size="xs"
           variant="primary"
-          onClick={() => setSelectedGrant(r)}
+          onClick={() => {
+            clearStepUp();
+            setSelectedGrant(r);
+          }}
         >
           {t("users.governance.breakGlass.manageGrant")}
         </CanvasBtn>
@@ -1640,7 +1652,7 @@ export function BreakGlassPanel() {
               <CanvasBtn
                 theme={theme}
                 variant="ghost"
-                onClick={() => setSelectedGrant(null)}
+                onClick={() => { clearStepUp(); setSelectedGrant(null); }}
               >
                 ✕
               </CanvasBtn>
@@ -1702,18 +1714,15 @@ export function BreakGlassPanel() {
                   tone="warn"
                   icon="lock"
                   title={stepUpCopy.stepUpRequiredTitle}
-                  body={selectedGrant?.status === "requested" ? "操作前請先取得 step-up 憑證或重新登入 (Fresh MFA)。" : "API 缺少此操作的 Step-up policy，憑證取得將失敗。"}
+                  body={selectedGrant?.status === "requested" ? "操作前請先取得 step-up 憑證或重新登入 (Fresh MFA)。" : "此環境的後端尚未實作 activate 操作的 step-up policy (Documented Gap)。Activate 將因缺乏 step-up 憑證而無法通過驗證。"}
                   actions={
-                    <CanvasBtn theme={theme} size="xs" variant="primary" icon="lock" onClick={() => {
-                      if (selectedGrant?.status === "requested") {
+                    selectedGrant?.status === "requested" ? (
+                      <CanvasBtn theme={theme} size="xs" variant="primary" icon="lock" onClick={() => {
                         handleGetStepUpProof("platform:break-glass:approve");
-                      } else {
-                        // Documented gap: No step-up policy for activate/close
-                        handleGetStepUpProof("platform:break-glass:activate"); // This will fail with 'required: false' as expected due to missing policy.
-                      }
-                    }}>
-                      {stepUpCopy.getStepUpProof}
-                    </CanvasBtn>
+                      }}>
+                        {stepUpCopy.getStepUpProof}
+                      </CanvasBtn>
+                    ) : null
                   }
                 />
               ) : stepUpState === "VERIFYING" ? (
@@ -1732,15 +1741,13 @@ export function BreakGlassPanel() {
                   title={stepUpCopy.expiredTitle}
                   body="憑證已過期或已被使用，請重新取得。"
                   actions={
-                    <CanvasBtn theme={theme} size="xs" variant="primary" icon="refresh" onClick={() => {
-                      if (selectedGrant?.status === "requested") {
+                    selectedGrant?.status === "requested" ? (
+                      <CanvasBtn theme={theme} size="xs" variant="primary" icon="refresh" onClick={() => {
                         handleGetStepUpProof("platform:break-glass:approve");
-                      } else {
-                        handleGetStepUpProof("platform:break-glass:activate");
-                      }
-                    }}>
-                      {stepUpCopy.retry}
-                    </CanvasBtn>
+                      }}>
+                        {stepUpCopy.retry}
+                      </CanvasBtn>
+                    ) : null
                   }
                 />
               ) : null}
@@ -1756,7 +1763,7 @@ export function BreakGlassPanel() {
               <CanvasBtn
                 theme={theme}
                 variant="secondary"
-                onClick={() => setSelectedGrant(null)}
+                onClick={() => { clearStepUp(); setSelectedGrant(null); }}
               >
                 Close
               </CanvasBtn>

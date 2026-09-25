@@ -7,8 +7,8 @@ function BreakGlassBanner({ theme:th }) {
       <MgmtIcon name="incidents" size={16} style={{ color:th.danger }}/>
       <span style={{ fontSize:12.5, fontWeight:800, color:th.danger }}>緊急破窗授權生效中</span>
       <span style={{ fontFamily:SHELL_MONO, fontSize:13, fontWeight:800, color:th.danger }}>剩餘 41:27</span>
-      <span style={{ fontSize:11.5, color:th.textMuted }}>· BG-20260924-003 · 駱思賢 · 雙人核准：林安全</span>
-      <span style={{ display:'inline-flex', gap:5, marginLeft:6 }}>{['tenant:write','billing:read','audit:read'].map(s=><Pill key={s} theme={th} tone="danger">{s}</Pill>)}</span>
+      <span style={{ fontSize:11.5, color:th.textMuted }}>· BG-20260924-003 · 駱思賢 · 核准：林安全</span>
+      <span style={{ display:'inline-flex', gap:5, marginLeft:6 }}>{['identity:read','security:audit:read'].map(s=><Pill key={s} theme={th} tone="danger">{s}</Pill>)}</span>
       <span style={{ flex:1 }}/>
       <Btn theme={th} size="xs" variant="secondary" danger icon="x">退出破窗</Btn>
     </div>
@@ -127,7 +127,7 @@ function PA_IamPrivileged({ theme:th, stepUpState = "none" }) {
           </Card>
         </div>
         <div style={{ display:'flex', flexDirection:'column', gap:16 }}>
-        <Card theme={th} title="申請 PR-0086 · 王新人 → security_officer" subtitle="待審批 · 單人核准" actions={<Pill theme={th} tone="warn" dot>待審批</Pill>}>
+        <Card theme={th} title="申請 PR-0086 · 王新人 → security_admin" subtitle="待審批 · 單人核准" actions={<Pill theme={th} tone="warn" dot>待審批</Pill>}>
           <Stepper theme={th} current={1} steps={['送出','非本人核准','生效']}/>
           <div style={{ marginTop:12 }}>
             {stepUpState === "none" && <Banner theme={th} tone="warn" icon="lock" title="操作前請先取得 step-up 憑證或重新登入 (Fresh MFA)" actions={<Btn theme={th} size="xs" variant="primary" icon="lock">取得 step-up proof</Btn>}/>}
@@ -139,7 +139,7 @@ function PA_IamPrivileged({ theme:th, stepUpState = "none" }) {
         </Card>
         <Card theme={th} title="申請表單">
           <Field theme={th} label="對象成員" required><Select theme={th} value="王新人"/></Field>
-          <Field theme={th} label="目標角色" required><Select theme={th} value="security_officer"/></Field>
+          <Field theme={th} label="目標角色" required><Select theme={th} value="security_admin"/></Field>
           <Field theme={th} label="理由" required><Input theme={th} value="接手資安事件處理"/></Field>
           <Field theme={th} label="有效期限"><Select theme={th} value="永久（需季度存取複核）"/></Field>
           <ActionButton theme={th} descriptor={{ action:'submit', enabled:true, riskLevel:'medium' }} variant="primary" icon="check" label="送出申請" en="submit"/>
@@ -193,7 +193,7 @@ function PA_IamReview({ theme:th, create }) {
   );
 }
 // C5 · 緊急破窗（申請 → 單人核准 → 啟用 → 短效權杖）
-function PA_IamBreakGlass({ theme:th, active, state = "form" }) {
+function PA_IamBreakGlass({ theme:th, active, state = "form", stepUpState = "none" }) {
   // Backwards compatibility with 'active' prop
   const resolvedState = active ? "active" : state;
   const isForm = resolvedState === "form";
@@ -223,8 +223,20 @@ function PA_IamBreakGlass({ theme:th, active, state = "form" }) {
                 <Field theme={th} label="事故 / 理由" required><Input theme={th} value="INC-20260924-07 · 租戶帳務凍結需緊急解除"/></Field>
                 <Field theme={th} label="申請範圍" required><div style={{ display:'flex', gap:7, flexWrap:'wrap' }}><Checkbox theme={th} on label="identity:read"/><Checkbox theme={th} on label="security:audit:read"/><Checkbox theme={th} label="identity:sessions:revoke"/></div></Field>
                 <Field theme={th} label="持續時間（≤ 60 分鐘）" required><Input theme={th} value="60 分鐘" mono/></Field>
-                <Field theme={th} label="stepUpReference" required hint="已由 step-up 驗證回填"><Input theme={th} value="sup_••••••••b3e1" mono readOnly/></Field>
-                <ActionButton theme={th} descriptor={{ action:'request_breakglass', enabled:true, riskLevel:'high', requiresReason:true }} variant="primary" icon="incidents" label="送出破窗申請" en="request"/>
+                <div style={{ marginTop:12 }}>
+                  {stepUpState === "none" && <Banner theme={th} tone="warn" icon="lock" title="操作前請先取得 step-up 憑證或重新登入 (Fresh MFA)" actions={<Btn theme={th} size="xs" variant="primary" icon="lock">取得 step-up proof</Btn>}/>}
+                  {stepUpState === "verifying" && <Banner theme={th} tone="info" icon="clock" title="正在向伺服器請求身分驗證憑證..."/>}
+                  {stepUpState === "valid" && <Field theme={th} label="stepUpReference" required hint="已由 step-up 驗證回填"><Input theme={th} value="sup_••••••••b3e1" mono readOnly/></Field>}
+                  {stepUpState === "expired" && (
+                    <>
+                      <Banner theme={th} tone="danger" icon="alert-triangle" title="登入逾時 (IAM_STEP_UP_REQUIRED)" body="憑證已過期或被拒絕，請重新登入 (Fresh MFA) 後再試。" actions={<Btn theme={th} size="xs" variant="primary" icon="refresh">重新取得</Btn>}/>
+                      <Field theme={th} label="stepUpReference" required hint="已失效"><Input theme={th} value="sup_••••••••b3e1" mono readOnly disabled/></Field>
+                    </>
+                  )}
+                </div>
+                <div style={{ marginTop: 12 }}>
+                  <ActionButton theme={th} descriptor={{ action:'request_breakglass', enabled:stepUpState === "valid", riskLevel:'high', requiresReason:true }} variant="primary" icon="incidents" label="送出破窗申請" en="request"/>
+                </div>
               </>
             )}
 
@@ -234,9 +246,14 @@ function PA_IamBreakGlass({ theme:th, active, state = "form" }) {
                   { k:'申請人', v:'駱思賢' }, { k:'狀態', v:<Pill theme={th} tone="warn" dot>待核准</Pill> },
                   { k:'申請範圍', v:'identity:read · security:audit:read', mono:true }
                 ]}/>
-                <div style={{ marginTop:12 }}><Banner theme={th} tone="warn" icon="lock" title="需 step-up proof 或 Fresh MFA" body="操作前請先取得 step-up 憑證或重新登入 (Fresh MFA)。" actions={<Btn theme={th} size="xs" variant="primary" icon="lock">取得 step-up proof</Btn>}/></div>
+                <div style={{ marginTop:12 }}>
+                  {stepUpState === "none" && <Banner theme={th} tone="warn" icon="lock" title="需 step-up proof 或 Fresh MFA" body="操作前請先取得 step-up 憑證或重新登入 (Fresh MFA)。" actions={<Btn theme={th} size="xs" variant="primary" icon="lock">取得 step-up proof</Btn>}/>}
+                  {stepUpState === "verifying" && <Banner theme={th} tone="info" icon="clock" title="正在向伺服器請求身分驗證憑證..."/>}
+                  {stepUpState === "valid" && <Banner theme={th} tone="success" icon="check" title="身分驗證憑證有效" body="可進行高風險操作。"/>}
+                  {stepUpState === "expired" && <Banner theme={th} tone="danger" icon="alert-triangle" title="憑證已過期" body="請重新取得憑證。" actions={<Btn theme={th} size="xs" variant="primary" icon="refresh">重新取得</Btn>}/>}
+                </div>
                 <div style={{ marginTop:12, display:'flex', gap:8 }}>
-                  <ActionButton theme={th} descriptor={{ action:'approve', enabled:false, disabledReasonCode:'IAM_STEP_UP_REQUIRED', riskLevel:'high' }} variant="primary" icon="check" label="核准 (需 proof)" en="approve"/>
+                  <ActionButton theme={th} descriptor={{ action:'approve', enabled:stepUpState === "valid", disabledReasonCode:'IAM_STEP_UP_REQUIRED', riskLevel:'high' }} variant="primary" icon="check" label="核准 (需 proof)" en="approve"/>
                 </div>
               </>
             )}
@@ -247,9 +264,11 @@ function PA_IamBreakGlass({ theme:th, active, state = "form" }) {
                   { k:'申請人', v:'駱思賢' },{ k:'核准', v:'林安全' },
                   { k:'狀態', v:<Pill theme={th} tone="success" dot>已核准，待啟用</Pill> }
                 ]}/>
-                <div style={{ marginTop:12 }}><Banner theme={th} tone="warn" icon="lock" title="需 step-up proof 或 Fresh MFA" body="操作前請先取得 step-up 憑證或重新登入 (Fresh MFA)。" actions={<Btn theme={th} size="xs" variant="primary" icon="lock">取得 step-up proof</Btn>}/></div>
+                <div style={{ marginTop:12 }}>
+                  <Banner theme={th} tone="warn" icon="lock" title="此環境的後端尚未實作 activate 操作的 step-up policy (Documented Gap)。Activate 將因缺乏 step-up 憑證而無法通過驗證。"/>
+                </div>
                 <div style={{ marginTop:12, display:'flex', gap:8 }}>
-                  <ActionButton theme={th} descriptor={{ action:'activate', enabled:false, disabledReasonCode:'IAM_STEP_UP_REQUIRED', riskLevel:'high' }} variant="primary" danger icon="power" label="啟用緊急權限 (需 proof)" en="activate"/>
+                  <ActionButton theme={th} descriptor={{ action:'activate', enabled:false, disabledReasonCode:'NO_API_POLICY', riskLevel:'high' }} variant="primary" danger icon="power" label="啟用緊急權限" en="activate"/>
                 </div>
               </>
             )}
@@ -262,7 +281,7 @@ function PA_IamBreakGlass({ theme:th, active, state = "form" }) {
                   { k:'短效權杖', v:<span style={{ fontFamily:SHELL_MONO }}>bgt_••••••••••••9e2f <Pill theme={th} tone="neutral">僅顯示一次</Pill></span> },{ k:'已授權範圍', v:'identity:read · security:audit:read', mono:true },
                 ]}/>
                 {resolvedState === "exit_failed" && (
-                  <div style={{ marginTop:12 }}><Banner theme={th} tone="danger" icon="alert-triangle" title="登入逾時 (IAM_STEP_UP_REQUIRED)" body="請重新取得或登入 (Fresh MFA) 後重試。" actions={<Btn theme={th} size="xs" variant="primary" icon="lock">取得 step-up proof</Btn>}/></div>
+                  <div style={{ marginTop:12 }}><Banner theme={th} tone="danger" icon="alert-triangle" title="無法退出 (STEP_UP_REQUIRED)" body="此環境的後端尚未實作 close 操作的 step-up policy (Documented Gap)。Exit 將因缺乏 step-up 憑證而無法通過驗證。"/></div>
                 )}
                 <div style={{ marginTop:12, display:'flex', gap:8 }}><Btn theme={th} variant="secondary" danger icon="x">提前退出破窗</Btn><Btn theme={th} icon="audit">檢視稽核紀錄</Btn></div>
               </>
