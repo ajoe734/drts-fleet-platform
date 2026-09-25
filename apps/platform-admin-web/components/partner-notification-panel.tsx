@@ -30,34 +30,24 @@ export function PanelActionBtn({
   variant,
 }: any) {
   if (!descriptor) return null;
-  if (descriptor.enabled && onClick) {
-    const isHigh = descriptor.riskLevel === "high";
-    const resolvedVariant =
-      variant ?? (descriptor.riskLevel === "medium" ? "primary" : "secondary");
-    return (
+  const isHigh = descriptor.riskLevel === "high";
+  const resolvedVariant =
+    variant ?? (descriptor.riskLevel === "medium" ? "primary" : "secondary");
+  return (
+    <div title={!descriptor.enabled ? descriptor.reason : undefined}>
       <CanvasBtn
         theme={theme}
         size={size}
         danger={isHigh}
         variant={resolvedVariant}
-        onClick={onClick}
+        onClick={descriptor.enabled ? onClick : undefined}
+        disabled={!descriptor.enabled}
         icon={icon}
       >
         {label}
         {en && <span style={{ opacity: 0.72 }}> · {en}</span>}
       </CanvasBtn>
-    );
-  }
-  return (
-    <CanvasActionButton
-      theme={theme}
-      descriptor={descriptor}
-      label={label}
-      en={en}
-      icon={icon}
-      size={size}
-      variant={variant}
-    />
+    </div>
   );
 }
 
