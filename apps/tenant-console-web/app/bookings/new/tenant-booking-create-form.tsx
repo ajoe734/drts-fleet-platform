@@ -827,7 +827,11 @@ export function TenantBookingCreateForm({
   );
   const [serviceability, setServiceability] =
     useState<ServiceAreaEvaluationResult | null>(null);
-  const [providerState, setProviderState] = useState<AddressProviderState>({ available: true, degraded: false, reasonCode: "available" });
+  const [providerState, setProviderState] = useState<AddressProviderState>({
+    available: true,
+    degraded: false,
+    reasonCode: "available",
+  });
   const [geoProvider] = useState(() => createTenantConsoleGeoProvider());
   // Bumped only when a saved address is chosen, to remount the picker with the
   // new seed value (the picker seeds its internal state from props at mount).
@@ -1199,7 +1203,10 @@ export function TenantBookingCreateForm({
       if (submitGate.code === "outside_service_area") {
         setSubmitError(t("newBooking.serviceability.blockedBody"));
       } else {
-        setSubmitError(t("newBooking.serviceability.coordinatesRequired") ?? "Coordinates required");
+        setSubmitError(
+          t("newBooking.serviceability.coordinatesRequired") ??
+            "Coordinates required",
+        );
       }
       return;
     }
@@ -1256,6 +1263,8 @@ export function TenantBookingCreateForm({
       setSubmitting(false);
     }
   }
+
+  const notServiceable = serviceability?.decision === "not_serviceable";
 
   return (
     <div style={pageStyle}>
