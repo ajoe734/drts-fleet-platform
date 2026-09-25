@@ -18,11 +18,11 @@ function TN_NewBookingMap({ theme:th, degraded, pick, drop, reason }) {
   const HARD = ['out_of_area', 'provider_down'];                                   // 服務範圍外或地圖服務中斷：任何路徑皆不可送
   const UNRESOLVED = ['no_results','empty','searching','candidates','missing_coordinate']; // 尚未定點：不可送
   const MANUAL = ['manual_review']; // 走人工複核 (僅限手動座標帶理由)
-  
+
   // 檢查是否有 manual_coords 並帶有理由
   const hasManualCoords = ps === 'manual_coords' || ds === 'manual_coords';
   const reasonValid = (reason || '').trim() !== '';
-  
+
   const hardBlocked = HARD.includes(ps) || HARD.includes(ds);
   const unresolved = UNRESOLVED.includes(ps) || UNRESOLVED.includes(ds);
   const manualPath = MANUAL.includes(ps) || MANUAL.includes(ds);
@@ -116,11 +116,13 @@ function PB_BookCardMap({ state='selected', drop='selected', reason }) {
   const p = PROGRAMS.card;
   const th = buildMgmtTheme({ console: 'partner' }); th.accent = p.primary;
   const hard = state==='out_of_area' || drop==='out_of_area';
-  const unresolved = ['no_results','empty','searching','candidates'].some(s=>s===state||s===drop);
+  const unresolved = ['no_results','empty','searching','candidates','missing_coordinate'].some(s=>s===state||s===drop);
   const manualPath = ['provider_down','manual_review'].some(s=>s===state||s===drop);
+  const hasManualCoords = state === 'manual_coords' || drop === 'manual_coords';
+  const reasonValid = (reason || '').trim() !== '';
   const down = state==='provider_down' || drop==='provider_down';
-  const blocked = manualPath && !hard && !unresolved && ((reason || '').trim() !== '');
-  const notReady = hard || unresolved || (manualPath && (reason || '').trim() === '');
+  const blocked = manualPath && !hard && !unresolved && reasonValid;
+  const notReady = hard || unresolved || (manualPath && !reasonValid) || (hasManualCoords && !reasonValid);
   return (
     <PBScreen p={p}>
       <PBHeader p={p} title="建立行程" sub="信用卡機場接送 · 桃園 T2" back/>
@@ -138,8 +140,8 @@ function PB_BookCardMap({ state='selected', drop='selected', reason }) {
         </PBCard>
         <PBCard p={p} title="上下車地點">
           <div style={{ display:'flex', flexDirection:'column', gap:8 }}>
-            <MapPicker theme={th} skin="pb" label="上車" state={state} compact requiresReason={manualPath} reason={reason}/>
-            <MapPicker theme={th} skin="pb" label="下車" state={drop} value="桃園機場 第二航廈 出境大廳" compact requiresReason={manualPath} reason={reason}/>
+            <MapPicker theme={th} skin="pb" label="上車" state={state} compact requiresReason={manualPath||hasManualCoords} reason={reason}/>
+            <MapPicker theme={th} skin="pb" label="下車" state={drop} value="桃園機場 第二航廈 出境大廳" compact requiresReason={manualPath||hasManualCoords} reason={reason}/>
           </div>
           {state==='out_of_area' && <div style={{ marginTop:8, fontSize:11.5, color:th.danger, fontWeight:700 }}>上車地點不在服務範圍，無法送出；請更換地點。</div>}
           <div style={{ marginTop:12 }}><PBField label="出發時間" value="2026-09-26 05:30" req/></div>
@@ -149,7 +151,7 @@ function PB_BookCardMap({ state='selected', drop='selected', reason }) {
         </PBCard>
       </PBBody>
       <PBFooter>{notReady
-          ? <PBBtn p={p} disabled>{hard?'不在服務範圍 · 請更換地點':'請先選定上下車地點'}</PBBtn>
+          ? <PBBtn p={p} disabled>{hard?'不在服務範圍 · 請更換地點':'請先選定上下車地點，並填寫必填理由'}</PBBtn>
         : blocked
         ? <PBBtn p={p} primary>送交人工複核</PBBtn>
         : <PBBtn p={p} primary>前往確認</PBBtn>}</PBFooter>
@@ -161,11 +163,13 @@ function PB_BookInsuranceMap({ state='selected', drop='selected', reason }) {
   const p = PROGRAMS.insurance;
   const th = buildMgmtTheme({ console: 'partner' }); th.accent = p.primary;
   const hard = state==='out_of_area' || drop==='out_of_area';
-  const unresolved = ['no_results','empty','searching','candidates'].some(s=>s===state||s===drop);
+  const unresolved = ['no_results','empty','searching','candidates','missing_coordinate'].some(s=>s===state||s===drop);
   const manualPath = ['provider_down','manual_review'].some(s=>s===state||s===drop);
+  const hasManualCoords = state === 'manual_coords' || drop === 'manual_coords';
+  const reasonValid = (reason || '').trim() !== '';
   const down = state==='provider_down' || drop==='provider_down';
-  const blocked = manualPath && !hard && !unresolved && ((reason || '').trim() !== '');
-  const notReady = hard || unresolved || (manualPath && (reason || '').trim() === '');
+  const blocked = manualPath && !hard && !unresolved && reasonValid;
+  const notReady = hard || unresolved || (manualPath && !reasonValid) || (hasManualCoords && !reasonValid);
 
   return (
     <PBScreen p={p}>
@@ -186,8 +190,8 @@ function PB_BookInsuranceMap({ state='selected', drop='selected', reason }) {
         </PBCard>
         <PBCard p={p} title="行程地點">
           <div style={{ display:'flex', flexDirection:'column', gap:8 }}>
-            <MapPicker theme={th} skin="pb" label="上車" state={state} value="新北市板橋區文化路一段 88 號" compact requiresReason={manualPath} reason={reason}/>
-            <MapPicker theme={th} skin="pb" label="下車" state={drop} value="台北榮民總醫院" compact requiresReason={manualPath} reason={reason}/>
+            <MapPicker theme={th} skin="pb" label="上車" state={state} value="新北市板橋區文化路一段 88 號" compact requiresReason={manualPath||hasManualCoords} reason={reason}/>
+            <MapPicker theme={th} skin="pb" label="下車" state={drop} value="台北榮民總醫院" compact requiresReason={manualPath||hasManualCoords} reason={reason}/>
           </div>
           {state==='out_of_area' && <div style={{ marginTop:8, fontSize:11.5, color:th.danger, fontWeight:700 }}>上車地點不在服務範圍，無法送出；請更換地點。</div>}
           <PBFieldLocked label="車型權益 · vehicle class" value="一般車型 (權益內)" sub="依理賠核定 · 不可變更" />
@@ -204,7 +208,7 @@ function PB_BookInsuranceMap({ state='selected', drop='selected', reason }) {
         </PBCard>
       </PBBody>
       <PBFooter>{notReady
-        ? <PBBtn p={p} disabled>{hard?'不在服務範圍 · 請更換地點':'請先選定上下車地點'}</PBBtn>
+        ? <PBBtn p={p} disabled>{hard?'不在服務範圍 · 請更換地點':'請先選定上下車地點，並填寫必填理由'}</PBBtn>
         : blocked
         ? <PBBtn p={p} primary>送交人工複核</PBBtn>
         : <PBBtn p={p} primary>前往確認</PBBtn>}</PBFooter>
@@ -217,11 +221,13 @@ function PB_BookTravelMap({ state='selected', drop='selected', reason }) {
   const p = PROGRAMS.travel;
   const th = buildMgmtTheme({ console: 'partner' }); th.accent = p.primary;
   const hard = state==='out_of_area' || drop==='out_of_area';
-  const unresolved = ['no_results','empty','searching','candidates'].some(s=>s===state||s===drop);
+  const unresolved = ['no_results','empty','searching','candidates','missing_coordinate'].some(s=>s===state||s===drop);
   const manualPath = ['provider_down','manual_review'].some(s=>s===state||s===drop);
+  const hasManualCoords = state === 'manual_coords' || drop === 'manual_coords';
+  const reasonValid = (reason || '').trim() !== '';
   const down = state==='provider_down' || drop==='provider_down';
-  const blocked = manualPath && !hard && !unresolved && ((reason || '').trim() !== '');
-  const notReady = hard || unresolved || (manualPath && (reason || '').trim() === '');
+  const blocked = manualPath && !hard && !unresolved && reasonValid;
+  const notReady = hard || unresolved || (manualPath && !reasonValid) || (hasManualCoords && !reasonValid);
 
   return (
     <PBScreen p={p}>
@@ -242,8 +248,8 @@ function PB_BookTravelMap({ state='selected', drop='selected', reason }) {
         </PBCard>
         <PBCard p={p} title="接送行程">
           <div style={{ display:'flex', flexDirection:'column', gap:8 }}>
-            <MapPicker theme={th} skin="pb" label="上車" state={state} value="桃園機場 第一航廈 入境大廳" compact requiresReason={manualPath} reason={reason}/>
-            <MapPicker theme={th} skin="pb" label="下車" state={drop} value="台北車站" compact requiresReason={manualPath} reason={reason}/>
+            <MapPicker theme={th} skin="pb" label="上車" state={state} value="桃園機場 第一航廈 入境大廳" compact requiresReason={manualPath||hasManualCoords} reason={reason}/>
+            <MapPicker theme={th} skin="pb" label="下車" state={drop} value="台北車站" compact requiresReason={manualPath||hasManualCoords} reason={reason}/>
           </div>
           {state==='out_of_area' && <div style={{ marginTop:8, fontSize:11.5, color:th.danger, fontWeight:700 }}>上車地點不在服務範圍，無法送出；請更換地點。</div>}
           <PBField label="多點停靠 · multi-stop" value="台北車站 → 西門商旅" />
@@ -261,7 +267,7 @@ function PB_BookTravelMap({ state='selected', drop='selected', reason }) {
         </PBCard>
       </PBBody>
       <PBFooter>{notReady
-        ? <PBBtn p={p} disabled>{hard?'不在服務範圍 · 請更換地點':'請先選定上下車地點'}</PBBtn>
+        ? <PBBtn p={p} disabled>{hard?'不在服務範圍 · 請更換地點':'請先選定上下車地點，並填寫必填理由'}</PBBtn>
         : blocked
         ? <PBBtn p={p} primary>送交人工複核</PBBtn>
         : <PBBtn p={p} primary>前往確認</PBBtn>}</PBFooter>
@@ -284,13 +290,13 @@ function CG_NewBookingMap({ theme:th, degraded, drop, pick, success, reason, bac
   const HARD = ['out_of_area'];
   const UNRESOLVED = ['no_results','empty','searching','candidates','missing_coordinate'];
   const MANUAL = ['manual_review', 'provider_down'];
-  
+
   const hasManualCoords = ps === 'manual_coords' || ds === 'manual_coords';
   const reasonValid = (reason || '').trim() !== '';
-  
+
   const hard = HARD.includes(ps) || HARD.includes(ds);
   const unresolved = UNRESOLVED.includes(ps) || UNRESOLVED.includes(ds);
-  const manualPath = MANUAL.includes(ps) || MANUAL.includes(ds) || hasManualCoords;
+  const manualPath = MANUAL.includes(ps) || MANUAL.includes(ds);
   const manualReady = manualPath && !hard && !unresolved && (!hasManualCoords || reasonValid);
   const normalReady = !manualPath && !hard && !unresolved && (!hasManualCoords || reasonValid);
   return (
@@ -298,11 +304,11 @@ function CG_NewBookingMap({ theme:th, degraded, drop, pick, success, reason, bac
       <div style={{ padding:'26px 24px 18px', background:'linear-gradient(135deg,'+th.accentBg+','+th.surface+')', borderBottom:'1px solid '+th.border }}>
         <div style={{ fontSize:11, fontFamily:SHELL_MONO, letterSpacing:1.2, color:th.accent, fontWeight:700 }}>CONCIERGE DESK · 大廳服務台</div>
         <div style={{ fontSize:22, fontWeight:800, color:th.text, marginTop:4 }}>為賓客安排車輛</div>
-        <div style={{ fontSize:12.5, color:th.textMuted, marginTop:3 }}>賓客地點以選點元件確認；地圖中斷時無法建立新訂單</div>
+        <div style={{ fontSize:12.5, color:th.textMuted, marginTop:3 }}>賓客地點以選點元件確認；地圖中斷時須有明確座標方可送交人工複核</div>
       </div>
       <div style={{ padding:24, display:'grid', gridTemplateColumns:'1.4fr 1fr', gap:16, alignItems:'start' }}>
         <Card theme={th} title="行程">
-          {degraded && <div style={{ marginBottom:12 }}><Banner theme={th} tone="danger" icon="warn" title="地圖服務中斷 · 目前無法建立訂單" body="不會靜默建立一般訂單。請告知賓客：地圖服務恢復前無法叫車，請稍後再試。"/></div>}
+          {degraded && <div style={{ marginBottom:12 }}><Banner theme={th} tone="danger" icon="warn" title="地圖服務中斷 · 將轉人工複核" body="不會靜默建立一般訂單。若已有明確地點與座標，可填寫理由並送交人工複核；否則請稍後再試。"/></div>}
           {backendError && <div style={{ marginBottom:12 }}><Banner theme={th} tone="danger" icon="x" title="訂單建立失敗" body={backendError}/></div>}
           <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:12 }}>
             <Field theme={th} label="賓客" required><Select theme={th} value="Mr. Tanaka · 1208 房"/></Field>

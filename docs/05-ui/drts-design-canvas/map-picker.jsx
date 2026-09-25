@@ -8,7 +8,7 @@ const MP_STATES = {
   candidates:    { zh:'請選擇候選', tone:'info', next:'從清單選一個地點以定位' },
   selected:      { zh:'已選定落點', tone:'success', next:'可繼續填寫或拖曳微調' },
   manual_coords: { zh:'手動座標', tone:'warn', next:'請確認座標對應的實際位置' },
-  provider_down: { zh:'地圖服務無回應', tone:'danger', next:'僅可送交人工複核，不會直接派車' },
+  provider_down: { zh:'地圖服務無回應', tone:'danger', next:'地圖服務恢復前無法定位' },
   no_results:    { zh:'查無結果', tone:'warn', next:'換個關鍵字，或改用手動座標' },
   manual_review: { zh:'待人工複核', tone:'warn', next:'此地點將由客服確認後才派車' },
   out_of_area:   { zh:'不在服務範圍', tone:'danger', next:'請更換地點；此地點無法派車' },
@@ -23,7 +23,7 @@ function MapPicker({ theme:th, label='上車地點', state='selected', value, co
   const vals = { empty:'', searching:'松仁路 1', candidates:'松仁路 100', selected:'台北市信義區松仁路 100 號', manual_coords:'25.0330, 121.5654', provider_down:'台北市信義區松仁路 100 號', no_results:'松人路 1000 巷', manual_review:'台北市信義區松仁路 100 號 後門', out_of_area:'宜蘭縣頭城鎮濱海路 12 號' };
   const v = value ?? vals[state];
   const showReason = state==='manual_coords' || state==='manual_review' || state==='provider_down' || requiresReason;
-  
+
   return (
     <div style={{ border:'1px solid '+c.line, borderRadius:10, background:c.surface, overflow:'hidden' }}>
       {/* search row */}
@@ -71,9 +71,9 @@ function MapPicker({ theme:th, label='上車地點', state='selected', value, co
       )}
       {/* next-step footer */}
       <div style={{ display:'flex', alignItems:'center', gap:8, padding:'7px 10px', borderTop:'1px solid '+c.line, background:blocked?(skin==='pb'?th.dangerBg:th.dangerBg):c.surface }}>
-        <span style={{ flex:1, fontSize:11, color:blocked?c.danger:c.muted, fontWeight:blocked?700:500 }}>{m.next}</span>
+        <span style={{ flex:1, fontSize:11, color:blocked?c.danger:c.muted, fontWeight:blocked?700:500 }}>{state==='provider_down' ? (requiresReason ? '僅可送交人工複核，不會直接派車' : '服務恢復前無法建立訂單') : m.next}</span>
         {state==='no_results' && <span style={{ fontSize:11, color:c.accent, fontWeight:700 }}>改用手動座標</span>}
-        {state==='provider_down' && <span style={{ fontSize:11, color:c.danger, fontWeight:700 }}>送交人工複核 →</span>}
+        {state==='provider_down' && requiresReason && <span style={{ fontSize:11, color:c.danger, fontWeight:700 }}>送交人工複核 →</span>}
         {state==='out_of_area' && <span style={{ fontSize:11, color:c.danger, fontWeight:700 }}>更換地點</span>}
         {state==='manual_review' && <span style={{ fontSize:11, color:c.warn, fontWeight:700 }}>客服確認後派車</span>}
         {state==='candidates' && <span style={{ fontSize:11, color:c.dim }}>3 筆候選</span>}
