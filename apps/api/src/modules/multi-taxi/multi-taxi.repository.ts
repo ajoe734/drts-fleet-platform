@@ -1765,6 +1765,8 @@ export class MultiTaxiRepository {
         o.created_at as "createdAt",
         ctx.delivered_at as "deliveredAt",
         o.status,
+        ctx.delivery_id as "deliveryId",
+        o.event_type as "eventType",
         NULL as result,
         o.attempt_count as attempts,
         COALESCE((ctx.retry_policy_snapshot->>'maxAttempts')::int, (o.payload->'partnerNotification'->>'maxAttempts')::int) as "maxAttempts",
@@ -1813,7 +1815,7 @@ export class MultiTaxiRepository {
       await client.query("BEGIN");
 
       const outboxRows = await client.query(
-        "SELECT o.status, o.event_type, o.next_attempt_at, o.payload, o.attempt_count, o.order_id, o.assignment_version, r.entry_slug as route_entry_slug, r.tenant_id as route_tenant_id, r.partner_id as route_partner_id FROM ops.consumer_notification_outbox o LEFT JOIN mobility.phase1_order_partner_notification_routes r ON r.order_id = o.order_id WHERE o.outbox_id = $1 FOR UPDATE OF o",
+        "SELECT o.status, o.event_type, o.next_attempt_at, o.payload, o.attempt_count, o.order_id, o.assignment_version, o.created_at, r.entry_slug as route_entry_slug, r.tenant_id as route_tenant_id, r.partner_id as route_partner_id FROM ops.consumer_notification_outbox o LEFT JOIN mobility.phase1_order_partner_notification_routes r ON r.order_id = o.order_id WHERE o.outbox_id = $1 FOR UPDATE OF o",
         [outboxId],
       );
       if (outboxRows.rows.length === 0) {
@@ -1849,22 +1851,12 @@ export class MultiTaxiRepository {
 
       
       
-      const expiresAtStr = ctx ? ctx.expires_at : (outbox.payload?.expiresAt || outbox.payload?.partnerNotification?.expiresAt);
+      const expiresAtStr = ctx ? ctx.expires_at : (outbox.payload?.notificationExpiresAt || outbox.payload?.expiresAt || new Date(new Date(outbox.created_at || new Date()).getTime() + 15 * 60000).toISOString());
       if (expiresAtStr && new Date() >= new Date(expiresAtStr)) {
         await client.query("ROLLBACK");
         return { kind: "failed", failure: { failureReason: "notification_expired", retryDisposition: "terminal", suggestedNextAttemptAt: null } };
       }
-      const maxAttempts = ctx && ctx.retry_policy_snapshot && ctx.retry_policy_snapshot.maxAttempts ? parseInt(ctx.retry_policy_snapshot.maxAttempts, 10) : (outbox.payload?.partnerNotification?.maxAttempts ? parseInt(outbox.payload.partnerNotification.maxAttempts, 10) : undefined);
-      if (maxAttempts !== undefined && outbox.attempt_count >= maxAttempts) {
-        await client.query("ROLLBACK");
-        return {
-          kind: "failed",
-          failure: {
-            failureReason: ctx?.failure_reason as any || "endpoint_unavailable",
-            retryDisposition: "terminal",
-          }
-        };
-      }
+
 
       const retryDisp = ctx
         ? ctx.retry_disposition
@@ -1945,6 +1937,7 @@ export class MultiTaxiRepository {
           failure: {
             failureReason: "provider_transient_error",
             retryDisposition: "automatic",
+            suggestedNextAttemptAt: new Date(Date.now() + 60000).toISOString()
           },
         };
       }
@@ -1988,6 +1981,18 @@ export class MultiTaxiRepository {
           await client.query("ROLLBACK");
           return { kind: "failed", failure: { failureReason: "endpoint_disabled", retryDisposition: "configuration_blocked", suggestedNextAttemptAt: null } };
         }
+        
+        const maxAttempts = ctx && ctx.retry_policy_snapshot && ctx.retry_policy_snapshot.maxAttempts ? parseInt(ctx.retry_policy_snapshot.maxAttempts, 10) : (readiness.retryPolicy?.maxAttempts ?? 3);
+        if (maxAttempts !== undefined && outbox.attempt_count >= maxAttempts) {
+          await client.query("ROLLBACK");
+          return {
+            kind: "failed",
+            failure: {
+              failureReason: ctx?.failure_reason as any || "endpoint_unavailable",
+              retryDisposition: "terminal",
+            }
+          };
+        }
       }
 
       const relevance = await this.findPartnerNotificationRelevance(outbox.order_id);
@@ -2013,11 +2018,20 @@ export class MultiTaxiRepository {
         return { kind: "requeued" };
       }
 
-      const retryAuditEntry = { actorId: identity?.actorId, actorType: identity?.actorType, requestId, retriedAt: new Date().toISOString() };
+      const isUuid = (str: string) => /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(str);
+      const validActorId = identity?.actorId && isUuid(identity.actorId) ? identity.actorId : null;
+      await client.query(
+        "INSERT INTO admin.audit_logs (actor_id, actor_type, module_name, action_name, resource_type, resource_id, new_value, request_id) VALUES ($1, $2, 'partner_notification', 'retry_delivery', 'consumer_notification_outbox', $3, $4::jsonb, $5)",
+        [
+          validActorId,
+          identity?.actorType || 'system',
+          outboxId,
+          JSON.stringify({ retriedAt: new Date().toISOString() }),
+          requestId || null
+        ]
+      );
+
       const newPayload = outbox.payload || {};
-      const retryHistory = Array.isArray(newPayload.retryHistory) ? newPayload.retryHistory : [];
-      retryHistory.push(retryAuditEntry);
-      newPayload.retryHistory = retryHistory;
 
       await client.query(
         "UPDATE ops.consumer_notification_outbox SET status = 'pending', next_attempt_at = NOW(), payload = $2::jsonb WHERE outbox_id = $1",

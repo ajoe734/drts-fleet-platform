@@ -33,8 +33,8 @@ describe.skipIf(!testDbUrl || process.env.RUN_UI_PG_GATE !== "true")("partner no
     
     pool = new Pool({ connectionString: testDbUrl, max: 16 });
     // insert fixtures before app.init
-    await pool.query("INSERT INTO admin.phase1_tenant_registry (tenant_id, tenant_name, status, record) VALUES ('tenant-a', 'Tenant A', 'active', '{}') ON CONFLICT DO NOTHING");
-    await pool.query("INSERT INTO admin.phase1_tenant_registry (tenant_id, tenant_name, status, record) VALUES ('tenant-other', 'Tenant Other', 'active', '{}') ON CONFLICT DO NOTHING");
+    await pool.query("INSERT INTO admin.phase1_platform_tenants (tenant_id, tenant_code, tenant_status, created_at, updated_at, record) VALUES ('tenant-a', 'TENANT-A', 'active', now(), now(), '{}') ON CONFLICT DO NOTHING");
+    await pool.query("INSERT INTO admin.phase1_platform_tenants (tenant_id, tenant_code, tenant_status, created_at, updated_at, record) VALUES ('tenant-other', 'TENANT-O', 'active', now(), now(), '{}') ON CONFLICT DO NOTHING");
     await pool.query("INSERT INTO admin.phase1_partner_channel_entries (entry_slug, tenant_id, partner_id, created_at, updated_at, program_id, status, record) VALUES ('entry-tenant', 'tenant-a', 'partner-1', now(), now(), 'program1', 'active', '{}'::jsonb) ON CONFLICT DO NOTHING");
     await pool.query("INSERT INTO admin.phase1_partner_channel_entries (entry_slug, tenant_id, partner_id, created_at, updated_at, program_id, status, record) VALUES ('entry-409-test', 'tenant-a', 'partner-1', now(), now(), 'program1', 'active', '{}'::jsonb) ON CONFLICT DO NOTHING");
     await pool.query("INSERT INTO admin.phase1_partner_channel_entries (entry_slug, tenant_id, partner_id, created_at, updated_at, program_id, status, record) VALUES ('entry-retry-test', 'tenant-a', 'partner-1', now(), now(), 'program1', 'active', '{}'::jsonb) ON CONFLICT DO NOTHING");
@@ -48,7 +48,6 @@ describe.skipIf(!testDbUrl || process.env.RUN_UI_PG_GATE !== "true")("partner no
     mtService = app.get(MultiTaxiService);
     bindingRepo = app.get(PartnerEntryNotificationBindingRepository);
     
-    pool = new Pool({ connectionString: testDbUrl, max: 16 });
   }, 60000);
 
   afterAll(async () => {
@@ -106,11 +105,11 @@ describe.skipIf(!testDbUrl || process.env.RUN_UI_PG_GATE !== "true")("partner no
     const partnerId = "partner-1";
     
     await pool.query(
-      "INSERT INTO admin.phase1_partner_channel_entries (entry_slug, tenant_id, partner_id, created_at, updated_at, program_id, status, record) VALUES ($1, $2, $3, now(), now(), 'program1', 'active', '{}'::jsonb) ON CONFLICT DO NOTHING",
+      "INSERT INTO admin.phase1_partner_channel_entries (entry_slug, tenant_id, partner_id, created_at, updated_at, program_id, status, record) VALUES ($1, $2, $3, now(), now(), 'program1', 'active', '{\"identityLinkMode\":\"always\"}'::jsonb) ON CONFLICT DO NOTHING",
       [entrySlug, tenantId, partnerId],
     );
     await pool.query(
-      "INSERT INTO admin.phase1_tenant_webhook_endpoints (webhook_id, tenant_id, status, created_at, updated_at, record) VALUES ('w', $1, 'active', now(), now(), '{}'::jsonb) ON CONFLICT DO NOTHING",
+      "INSERT INTO admin.phase1_tenant_webhook_endpoints (webhook_id, tenant_id, status, created_at, updated_at, record) VALUES ('w', $1, 'active', now(), now(), '{\"endpointUrl\":\"https://example.com/webhook\",\"secretKey\":\"supersecret\",\"events\":[\"eta_changed\"],\"retryPolicy\":{\"maxAttempts\":3}}'::jsonb) ON CONFLICT DO NOTHING",
       [tenantId]
     );
 
@@ -121,9 +120,9 @@ describe.skipIf(!testDbUrl || process.env.RUN_UI_PG_GATE !== "true")("partner no
     await pool.query(
       `
       INSERT INTO admin.phase1_partner_notification_bindings (
-        entry_slug, binding_id, tenant_id, partner_id, webhook_id, version, state, purpose, event_types, schema_version, acknowledgement_policy, updated_at
+        entry_slug, binding_id, tenant_id, partner_id, webhook_id, version, state, purpose, event_types, schema_version, acknowledgement_policy, updated_at, validated_at, validated_endpoint_fingerprint
       ) VALUES (
-        $1, $2, $3, $4, 'w', 1, 'ready', 'passenger_notification', '["eta_changed"]'::jsonb, '1.0', 'durable_partner_acceptance_v1', now()
+        $1, $2, $3, $4, 'w', 1, 'ready', 'passenger_notification', '["eta_changed"]'::jsonb, '1.0', 'durable_partner_acceptance_v1', now(), now(), 'fingerprint'
       )
     `,
       [entrySlug, bindingId, tenantId, partnerId],
@@ -186,6 +185,11 @@ describe.skipIf(!testDbUrl || process.env.RUN_UI_PG_GATE !== "true")("partner no
       outboxId,
     );
     expect(res2.kind).toBe("requeued");
+    
+    // Test that the DB actually updated next_attempt_at and attempt_count
+    const updated = await pool.query("SELECT * FROM ops.consumer_notification_outbox WHERE outbox_id = $1", [outboxId]);
+    expect(updated.rows[0].attempt_count).toBe(1); // attempt_count is incremented by the worker on dequeue, not by the manual retry
+    expect(updated.rows[0].status).toBe("pending");
   });
 
   it("same-tenant vs cross-tenant logic is validated using real TenantPartnerService", async () => {

@@ -20,6 +20,7 @@ import {
 } from "@/components/partner-governance-shared";
 import { formatDateTime, usePlatformAdminClient } from "@/lib/admin-client";
 import { useTranslation } from "@/lib/i18n";
+import { usePlatformAdminAuthority } from "@/lib/platform-admin-authority";
 import { formatPlatformCodeLabel } from "@/lib/localized-labels";
 import {
   BUSINESS_DISPATCH_SUBTYPES,
@@ -791,6 +792,7 @@ export default function PartnerDetailPage() {
     ? params.entrySlug[0]
     : (params?.entrySlug ?? "");
   const client = usePlatformAdminClient();
+  const authority = usePlatformAdminAuthority();
   const { t, locale } = useTranslation();
 
   const [entry, setEntry] = useState<PartnerChannelEntryRecord | null>(null);
@@ -2337,7 +2339,12 @@ export default function PartnerDetailPage() {
         ) : null}
 
         {activeTab === "notifications" ? (
-          <PartnerNotificationPanel entrySlug={entrySlug} />
+          <PartnerNotificationPanel 
+            entrySlug={entrySlug}
+            tenantId={entry.tenantId}
+            canManageWebhooks={authority.scopes.includes("tenant:webhooks:write") || authority.scopes.includes("foundation:write")}
+            canWriteBinding={authority.scopes.includes("foundation:write")}
+          />
         ) : null}
 
         {activeTab === "audit" ? (

@@ -130,6 +130,8 @@ export interface PartnerEntryNotificationBinding {
   schemaVersion: PartnerNotificationSchemaVersion;
   acknowledgementPolicy: typeof PARTNER_NOTIFICATION_ACKNOWLEDGEMENT_POLICY;
   validatedEndpointFingerprint: string | null;
+  endpointFingerprint?: string | null;
+  endpointUrl?: string | null;
   validatedAt: string | null;
   updatedAt: string;
 }
@@ -425,6 +427,7 @@ export const PARTNER_NOTIFICATION_MAX_ACK_BODY_BYTES = 4096;
 
 export interface PartnerNotificationDeliveryRecord extends Partial<PartnerNotificationDeliveryContext> {
   outboxId: string;
+  eventType: string;
   status: "pending" | "sending" | "delivered" | "failed";
   result: "delivered" | "provider_not_configured" | "provider_error" | null;
   attempts: number;
