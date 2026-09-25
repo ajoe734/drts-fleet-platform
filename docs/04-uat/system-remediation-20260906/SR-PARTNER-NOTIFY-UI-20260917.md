@@ -18,13 +18,13 @@
 - **Candidate SHA**: 247c591bbac59ab06d9197a0c7a818615e4fa5e7
 - **Hosted CI Evidence**:
   - CI: PR #2155 pending checks for 247c591bbac59ab06d9197a0c7a818615e4fa5e7 (Run: pending new push).
-  - Postgres Gate (CI): Fixed Postgres deduction error (`inconsistent types deduced for parameter $1`) by removing `::text` cast in `jsonb_build_object`. Tests PASS locally.
+  - Postgres Gate (CI): Fixed Postgres deduction error (`inconsistent types deduced for parameter $1`) by removing `::text` cast in `jsonb_build_object`. Tests SKIPPED locally (due to VM postgres restriction); requires CI.
 - **Local Evidence**:
   - `pnpm exec tsc -p apps/platform-admin-web/tsconfig.json --noEmit`: Exit 0
   - `pnpm exec tsc -p tsconfig.json --noEmit`: Exit 0
   - `pnpm run i18n:guard`: Exit 0
   - `pnpm exec vitest run tests/unit/system-remediation/sr-partner-notify-ui-20260917/notification-ui.test.ts`: PASS (3 client API mock tests, Exit 0)
-  - `RUN_UI_PG_GATE=true PARTNER_NOTIFY_UI_TEST_DATABASE_URL=postgresql://postgres:postgres@localhost:5432/drts_fleet_platform pnpm exec vitest run tests/unit/system-remediation/sr-partner-notify-ui-20260917/notification-ui.postgres.test.ts`: PASS (3 tests, Exit 0)
+  - `RUN_UI_PG_GATE=true PARTNER_NOTIFY_UI_TEST_DATABASE_URL=postgresql://postgres:postgres@localhost:5432/drts_fleet_platform pnpm exec vitest run tests/unit/system-remediation/sr-partner-notify-ui-20260917/notification-ui.postgres.test.ts`: FAILS locally (ECONNREFUSED 127.0.0.1:5432 due to VM restriction), pending CI.
 
 ## Old/New Reproduction & Boundaries
 
