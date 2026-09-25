@@ -61,6 +61,8 @@ describe.skipIf(!testDbUrl)(
             programId: "p1",
             displayName: "Partner 1",
             businessDispatchSubtype: "standard",
+            activeFlag: true,
+            status: "active",
           }),
         ],
       );
@@ -79,21 +81,23 @@ describe.skipIf(!testDbUrl)(
             programId: "p2",
             displayName: "Partner 2",
             businessDispatchSubtype: "standard",
+            activeFlag: true,
+            status: "active",
           }),
         ],
       );
 
       await pool.query(
-        'INSERT INTO admin.phase1_tenant_webhook_endpoints (webhook_id, tenant_id, status, created_at, updated_at, record) VALUES ($1, $2, \'active\', now(), now(), \'{"url": "https://test.com", "events": ["eta_changed"], "secret_version": 1, "secret_preview": "prev"}\'::jsonb)',
+        'INSERT INTO admin.phase1_tenant_webhook_endpoints (webhook_id, tenant_id, status, created_at, updated_at, record) VALUES ($1, $2, \'active\', now(), now(), \'{"url": "https://test.com", "events": ["passenger.eta_changed.v1"], "secret_version": 1, "secret_preview": "prev", "fingerprint": "f", "validatedAt": "2026-09-24T00:00:00Z", "retryPolicy": {"maxAttempts": 3}}\'::jsonb)',
         [webhookId, tenantId],
       );
 
       await pool.query(
-        "INSERT INTO admin.phase1_partner_notification_bindings (binding_id, entry_slug, tenant_id, partner_id, webhook_id, version, state, event_types, validated_endpoint_fingerprint) VALUES ($1, $2, $3, $4, $5, 1, 'ready', '[\"eta_changed\"]', 'f')",
+        "INSERT INTO admin.phase1_partner_notification_bindings (binding_id, entry_slug, tenant_id, partner_id, webhook_id, version, state, event_types, validated_endpoint_fingerprint, record) VALUES ($1, $2, $3, $4, $5, 1, 'ready', '[\"eta_changed\"]', 'f', '{\"validatedAt\": \"2026-09-24T00:00:00Z\"}'::jsonb)",
         [bindingId1, entrySlug1, tenantId, partnerId, webhookId],
       );
       await pool.query(
-        "INSERT INTO admin.phase1_partner_notification_bindings (binding_id, entry_slug, tenant_id, partner_id, webhook_id, version, state, event_types, validated_endpoint_fingerprint) VALUES ($1, $2, $3, $4, $5, 1, 'ready', '[\"eta_changed\"]', 'f')",
+        "INSERT INTO admin.phase1_partner_notification_bindings (binding_id, entry_slug, tenant_id, partner_id, webhook_id, version, state, event_types, validated_endpoint_fingerprint, record) VALUES ($1, $2, $3, $4, $5, 1, 'ready', '[\"eta_changed\"]', 'f', '{\"validatedAt\": \"2026-09-24T00:00:00Z\"}'::jsonb)",
         [bindingId2, entrySlug2, tenantId, partnerId, webhookId],
       );
 
@@ -170,7 +174,7 @@ describe.skipIf(!testDbUrl)(
       createdOutboxIds.push(outboxId);
 
       await pool.query(
-        "INSERT INTO admin.phase1_partner_user_identity_links (entry_slug, partner_user_ref, drts_passenger_id, status, consent_scope, linked_at, last_seen_at, created_at, updated_at, record) VALUES ($1, 'user', 'passenger', 'active', '[\"all\"]'::jsonb, now(), now(), now(), now(), '{}') ON CONFLICT DO NOTHING",
+        'INSERT INTO admin.phase1_partner_user_identity_links (entry_slug, partner_user_ref, drts_passenger_id, status, consent_scope, linked_at, last_seen_at, created_at, updated_at, record) VALUES ($1, \'user\', \'passenger\', \'active\', \'["all"]\'::jsonb, now(), now(), now(), now(), \'{"status":"active","drtsPassengerId":"passenger","partnerUserRef":"user"}\') ON CONFLICT DO NOTHING',
         [opts.entrySlug || entrySlug1],
       );
       await pool.query(

@@ -568,8 +568,6 @@ function PnRetryCell({
   if (!canWriteBinding) denyCode = "no_write";
   else if (bindingState !== "ready") denyCode = "configuration_blocked";
   else if (r.retryDisposition === "terminal") denyCode = "terminal";
-  else if (r.retryDisposition === "configuration_blocked")
-    denyCode = "configuration_blocked";
   else if (r.retryDisposition === "none") denyCode = "none";
   else if (isExpired) denyCode = "expired";
   else if (isExhausted) denyCode = "exhausted";
