@@ -1,4 +1,9 @@
-import { ForbiddenException, ConflictException, NotFoundException } from "@nestjs/common";
+/* eslint-disable @typescript-eslint/no-unused-vars */
+import {
+  ForbiddenException,
+  ConflictException,
+  NotFoundException,
+} from "@nestjs/common";
 import { describe, beforeEach, it, expect } from "vitest";
 
 import { AccessReviewService } from "../../src/modules/identity/access-review.service";
@@ -15,7 +20,11 @@ describe("Privileged Access Review Campaigns Integration Tests (IAM-GOV-001)", (
   beforeEach(() => {
     identityRepo = new IdentityRepository();
     securityEventsService = new SecurityEventsService();
-    service = new AccessReviewService(identityRepo, undefined, securityEventsService);
+    service = new AccessReviewService(
+      identityRepo,
+      undefined,
+      securityEventsService,
+    );
     controller = new AccessReviewController(service);
 
     // Seed test principal and membership into fallback repository
@@ -255,7 +264,10 @@ describe("Privileged Access Review Campaigns Integration Tests (IAM-GOV-001)", (
       expect(summary.overdueItemCount).toBeGreaterThanOrEqual(1);
       expect(summary.remediatedItemCount).toBeGreaterThanOrEqual(1);
 
-      const detail = await service.getCampaign(campaign.campaignId, actor as any);
+      const detail = await service.getCampaign(
+        campaign.campaignId,
+        actor as any,
+      );
       expect(detail.campaign.status).toBe("overdue");
       expect(detail.items[0].status).toBe("removed");
       expect(detail.items[0].sessionRevoked).toBe(true);
@@ -312,7 +324,9 @@ describe("Privileged Access Review Campaigns Integration Tests (IAM-GOV-001)", (
         actor as any,
       );
 
-      const item = items.find((i) => i.targetPrincipalId === targetPrincipalId)!;
+      const item = items.find(
+        (i) => i.targetPrincipalId === targetPrincipalId,
+      )!;
 
       await service.decideReviewItem(
         item.reviewId,
@@ -328,11 +342,16 @@ describe("Privileged Access Review Campaigns Integration Tests (IAM-GOV-001)", (
       );
 
       // Verify session was revoked in identity repository
-      const targetSessions = await identityRepo.listSessionsByPrincipal(targetPrincipalId);
-      const revokedSession = targetSessions.find((s) => s.sessionId === session.sessionId);
+      const targetSessions =
+        await identityRepo.listSessionsByPrincipal(targetPrincipalId);
+      const revokedSession = targetSessions.find(
+        (s) => s.sessionId === session.sessionId,
+      );
       expect(revokedSession).toBeDefined();
       expect(revokedSession?.status).toBe("revoked");
-      expect(revokedSession?.revokeReason).toContain("ACCESS_REVIEW_REVOCATION");
+      expect(revokedSession?.revokeReason).toContain(
+        "ACCESS_REVIEW_REVOCATION",
+      );
     });
   });
 

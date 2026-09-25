@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-unused-vars */
 import { buildOrderFixture } from "./voice-order-fixture";
 
 import { randomUUID } from "node:crypto";
@@ -87,12 +88,14 @@ async function seedVoiceFixture(
       [
         boundOrderId,
         `ON-${boundOrderId}`,
-        JSON.stringify(buildOrderFixture({
-          orderId: boundOrderId,
-          status: "ready_for_dispatch",
-          callId,
-          voiceIntentId: intentId,
-        })),
+        JSON.stringify(
+          buildOrderFixture({
+            orderId: boundOrderId,
+            status: "ready_for_dispatch",
+            callId,
+            voiceIntentId: intentId,
+          }),
+        ),
       ],
     );
   }
@@ -157,7 +160,11 @@ async function seedVoiceFixture(
   };
 }
 
-async function tryDelete(database: DatabaseService, sql: string, values: unknown[]) {
+async function tryDelete(
+  database: DatabaseService,
+  sql: string,
+  values: unknown[],
+) {
   try {
     await database.query(sql, values);
   } catch (error) {
@@ -168,37 +175,51 @@ async function tryDelete(database: DatabaseService, sql: string, values: unknown
   }
 }
 
-async function purgeVoiceFixture(database: DatabaseService, fixture: VoiceFixture) {
-  await database.query(`DELETE FROM voice.command_receipt WHERE intent_id = $1`, [
-    fixture.intentId,
-  ]);
+async function purgeVoiceFixture(
+  database: DatabaseService,
+  fixture: VoiceFixture,
+) {
+  await database.query(
+    `DELETE FROM voice.command_receipt WHERE intent_id = $1`,
+    [fixture.intentId],
+  );
   await database.query(`DELETE FROM voice.intent WHERE voice_session_id = $1`, [
     fixture.voiceSessionId,
   ]);
-  await tryDelete(database, `DELETE FROM voice.session WHERE voice_session_id = $1`, [
-    fixture.voiceSessionId,
-  ]);
-  await tryDelete(database, `DELETE FROM voice.line_binding WHERE line_binding_id = $1`, [
-    fixture.lineBindingId,
-  ]);
-  await tryDelete(database, `DELETE FROM voice.resource_scope WHERE scope_id = $1`, [
-    fixture.scopeId,
-  ]);
+  await tryDelete(
+    database,
+    `DELETE FROM voice.session WHERE voice_session_id = $1`,
+    [fixture.voiceSessionId],
+  );
+  await tryDelete(
+    database,
+    `DELETE FROM voice.line_binding WHERE line_binding_id = $1`,
+    [fixture.lineBindingId],
+  );
+  await tryDelete(
+    database,
+    `DELETE FROM voice.resource_scope WHERE scope_id = $1`,
+    [fixture.scopeId],
+  );
   if (fixture.boundOrderId) {
-    await database.query(`DELETE FROM ops.phase1_owned_orders WHERE order_id = $1`, [
-      fixture.boundOrderId,
-    ]);
+    await database.query(
+      `DELETE FROM ops.phase1_owned_orders WHERE order_id = $1`,
+      [fixture.boundOrderId],
+    );
   }
-  await tryDelete(database, `DELETE FROM crm.phase1_call_sessions WHERE call_id = $1`, [
-    fixture.callId,
-  ]);
+  await tryDelete(
+    database,
+    `DELETE FROM crm.phase1_call_sessions WHERE call_id = $1`,
+    [fixture.callId],
+  );
 }
-
 
 function createTestService(database: DatabaseService) {
   const auditNotificationService = new AuditNotificationService();
   const callcenterService = new CallcenterService(auditNotificationService);
-  const taskEventsService = new OwnedMobilityTaskEventsService(new EventEmitter() as never);
+  const taskEventsService = new OwnedMobilityTaskEventsService(
+    new EventEmitter() as never,
+  );
   const regulatoryRegistryService = {
     getEligibleCandidates: () => [],
     getVehicleDispatchability: () => true,
@@ -227,17 +248,21 @@ function createTestService(database: DatabaseService) {
     voiceBookingRepository,
   );
 
-  return { service, ownedMobilityRepository, voiceBookingRepository, callcenterService };
+  return {
+    service,
+    ownedMobilityRepository,
+    voiceBookingRepository,
+    callcenterService,
+  };
 }
 
 async function readOrderRow(database: DatabaseService, orderId: string) {
   const result = await database.query<{
     status: string;
     record: { recordingId: string | null; complianceFlags: string[] };
-  }>(
-    `SELECT status, record FROM ops.phase1_owned_orders WHERE order_id = $1`,
-    [orderId],
-  );
+  }>(`SELECT status, record FROM ops.phase1_owned_orders WHERE order_id = $1`, [
+    orderId,
+  ]);
   return result.rows[0] ?? null;
 }
 
@@ -311,7 +336,9 @@ describe("UV-EXEC-005 legacy callcenter/multi-taxi/callback voice fence", () => 
       expect(DATABASE_URL).toBeTruthy();
       const database = new DatabaseService();
       databases.push(database);
-      const fixture = await seedVoiceFixture(database, { receiptStatus: "pending" });
+      const fixture = await seedVoiceFixture(database, {
+        receiptStatus: "pending",
+      });
       voiceFixtures.push(fixture);
 
       const outcome = await resolveVoiceOrderFence(
@@ -325,7 +352,9 @@ describe("UV-EXEC-005 legacy callcenter/multi-taxi/callback voice fence", () => 
       expect(DATABASE_URL).toBeTruthy();
       const database = new DatabaseService();
       databases.push(database);
-      const fixture = await seedVoiceFixture(database, { receiptStatus: "rejected" });
+      const fixture = await seedVoiceFixture(database, {
+        receiptStatus: "rejected",
+      });
       voiceFixtures.push(fixture);
 
       const outcome = await resolveVoiceOrderFence(
@@ -374,7 +403,9 @@ describe("UV-EXEC-005 legacy callcenter/multi-taxi/callback voice fence", () => 
       const database = new DatabaseService();
       databases.push(database);
       const { service } = createTestService(database);
-      const fixture = await seedVoiceFixture(database, { receiptStatus: "pending" });
+      const fixture = await seedVoiceFixture(database, {
+        receiptStatus: "pending",
+      });
       voiceFixtures.push(fixture);
 
       let caught: unknown;
@@ -402,7 +433,9 @@ describe("UV-EXEC-005 legacy callcenter/multi-taxi/callback voice fence", () => 
       const database = new DatabaseService();
       databases.push(database);
       const { service } = createTestService(database);
-      const fixture = await seedVoiceFixture(database, { receiptStatus: "rejected" });
+      const fixture = await seedVoiceFixture(database, {
+        receiptStatus: "rejected",
+      });
       voiceFixtures.push(fixture);
 
       const order = await service.createCallCenterOrder(
@@ -499,7 +532,9 @@ describe("UV-EXEC-005 legacy callcenter/multi-taxi/callback voice fence", () => 
         undefined,
         voiceBookingRepository,
       );
-      const fixture = await seedVoiceFixture(database, { receiptStatus: "pending" });
+      const fixture = await seedVoiceFixture(database, {
+        receiptStatus: "pending",
+      });
       voiceFixtures.push(fixture);
       callcenterService.upsertExternalSession({ callId: fixture.callId });
 

@@ -1875,7 +1875,7 @@ export class MultiTaxiRepository {
           eventType: outbox.event_type as any,
           payload: outbox.payload,
         } as any);
-      } catch (err: any) {
+      } catch {
         expiresAtStr = new Date(0).toISOString();
       }
 

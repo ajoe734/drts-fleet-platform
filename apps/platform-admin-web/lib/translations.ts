@@ -1643,6 +1643,7 @@ const en = {
   "partnerNotification.reason.notification_obsolete": "Notification Obsolete",
   "partnerNotification.reason.notification_superseded":
     "Notification Superseded",
+  "partnerNotification.selectWebhookEndpoint": "Select webhook endpoint...",
 
   "common.enabled": "Enabled",
   "common.disabled": "Disabled",
@@ -4804,6 +4805,7 @@ const zh: typeof en = {
   "partnerNotification.reason.notification_expired": "通知已過期",
   "partnerNotification.reason.notification_obsolete": "通知已淘汰",
   "partnerNotification.reason.notification_superseded": "通知已被取代",
+  "partnerNotification.selectWebhookEndpoint": "請選擇 webhook 端點...",
 
   "common.enabled": "已啟用",
   "common.disabled": "已停用",

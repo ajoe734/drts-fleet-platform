@@ -83,15 +83,19 @@ function PnBinding({
   const testDisplay = TEST_STATUS[testStatus] || ["尚未測試", "neutral"];
 
   const ZH_MAP: Record<string, string> = {
-    assignment_disclosure_ready: t("partnerNotification.event.assignment_disclosure_ready") ?? "派車揭露就緒",
-    assignment_replaced: t("partnerNotification.event.assignment_replaced") ?? "派車已更換",
+    assignment_disclosure_ready:
+      t("partnerNotification.event.assignment_disclosure_ready") ??
+      "派車揭露就緒",
+    assignment_replaced:
+      t("partnerNotification.event.assignment_replaced") ?? "派車已更換",
     eta_changed: t("partnerNotification.event.eta_changed") ?? "ETA 變更",
-    driver_arrived: t("partnerNotification.event.driver_arrived") ?? "駕駛已抵達",
+    driver_arrived:
+      t("partnerNotification.event.driver_arrived") ?? "駕駛已抵達",
     receipt_ready: t("partnerNotification.event.receipt_ready") ?? "收據就緒",
   };
-  const PN_EVENTS: [string, string, string][] = Object.entries(PARTNER_PASSENGER_EVENT_TO_EXTERNAL_NAME).map(
-    ([k, v]) => [k, v, ZH_MAP[k] || k]
-  );
+  const PN_EVENTS: [string, string, string][] = Object.entries(
+    PARTNER_PASSENGER_EVENT_TO_EXTERNAL_NAME,
+  ).map(([k, v]) => [k, v, ZH_MAP[k] || k]);
 
   return (
     <CanvasCard
@@ -809,7 +813,9 @@ function PnDeliveries({
                 theme={th}
                 r={r}
                 retryState={
-                  r.deliveryId === retryRowId || r.outboxId === retryRowId || r.id === retryRowId
+                  r.deliveryId === retryRowId ||
+                  r.outboxId === retryRowId ||
+                  r.id === retryRowId
                     ? retryState
                     : "idle"
                 }
@@ -820,7 +826,11 @@ function PnDeliveries({
           },
         ]}
         rows={deliveries.map((r: any) => {
-          if (r.deliveryId === retryRowId || r.outboxId === retryRowId || r.id === retryRowId) {
+          if (
+            r.deliveryId === retryRowId ||
+            r.outboxId === retryRowId ||
+            r.id === retryRowId
+          ) {
             if (retryState === "queued")
               return {
                 ...r,
@@ -856,15 +866,19 @@ function PnEditView({
   const isSaveDisabled = isSaving || !editWebhookId || !canWriteBinding;
 
   const ZH_MAP: Record<string, string> = {
-    assignment_disclosure_ready: t("partnerNotification.event.assignment_disclosure_ready") ?? "派車揭露就緒",
-    assignment_replaced: t("partnerNotification.event.assignment_replaced") ?? "派車已更換",
+    assignment_disclosure_ready:
+      t("partnerNotification.event.assignment_disclosure_ready") ??
+      "派車揭露就緒",
+    assignment_replaced:
+      t("partnerNotification.event.assignment_replaced") ?? "派車已更換",
     eta_changed: t("partnerNotification.event.eta_changed") ?? "ETA 變更",
-    driver_arrived: t("partnerNotification.event.driver_arrived") ?? "駕駛已抵達",
+    driver_arrived:
+      t("partnerNotification.event.driver_arrived") ?? "駕駛已抵達",
     receipt_ready: t("partnerNotification.event.receipt_ready") ?? "收據就緒",
   };
-  const PN_EVENTS: [string, string, string][] = Object.entries(PARTNER_PASSENGER_EVENT_TO_EXTERNAL_NAME).map(
-    ([k, v]) => [k, v, ZH_MAP[k] || k]
-  );
+  const PN_EVENTS: [string, string, string][] = Object.entries(
+    PARTNER_PASSENGER_EVENT_TO_EXTERNAL_NAME,
+  ).map(([k, v]) => [k, v, ZH_MAP[k] || k]);
 
   return (
     <div
@@ -940,7 +954,9 @@ function PnEditView({
                 fontSize: 13,
               }}
             >
-              <option value="" disabled>請選擇 webhook 端點...</option>
+              <option value="" disabled>
+                {t("partnerNotification.selectWebhookEndpoint")}
+              </option>
               {availableWebhooks?.map((wh: any) => (
                 <option key={wh.webhookId} value={wh.webhookId}>
                   {wh.webhookId} ({wh.url})
@@ -1128,84 +1144,93 @@ export function PartnerNotificationPanel({
   const [editEventTypes, setEditEventTypes] = useState<string[]>([]);
   const [editExpectedVersion, setEditExpectedVersion] = useState(0);
 
-  const fetchState = useCallback(async (isInitial = false) => {
-    const reqId = ++currentRequest.current;
-    setLoading(true);
-    try {
-      const p: Promise<any>[] = [
-        (client as any).getPartnerEntryNotificationBinding(entrySlug),
-        (client as any).listPartnerNotificationDeliveries(entrySlug, {
-          pageSize: 500,
-        }),
-      ];
-      if (tenantId) {
-        p.push((client as any).getList("/api/tenant/webhooks", { headers: { "x-tenant-id": tenantId } }));
-      }
-      const _results = await Promise.allSettled(p);
-      const bReq = _results[0] as any;
-      const dReq = _results[1] as any;
-      const wReq = _results[2] as any;
-      if (reqId !== currentRequest.current) return;
+  const fetchState = useCallback(
+    async (isInitial = false) => {
+      const reqId = ++currentRequest.current;
+      setLoading(true);
+      try {
+        const p: Promise<any>[] = [
+          (client as any).getPartnerEntryNotificationBinding(entrySlug),
+          (client as any).listPartnerNotificationDeliveries(entrySlug, {
+            pageSize: 500,
+          }),
+        ];
+        if (tenantId) {
+          p.push(
+            (client as any).getList("/api/tenant/webhooks", {
+              headers: { "x-tenant-id": tenantId },
+            }),
+          );
+        }
+        const _results = await Promise.allSettled(p);
+        const bReq = _results[0] as any;
+        const dReq = _results[1] as any;
+        const wReq = _results[2] as any;
+        if (reqId !== currentRequest.current) return;
 
-      if (bReq.status === "rejected") {
-        const statusCode = bReq.reason?.statusCode;
-        const errCode = bReq.reason?.code || bReq.reason?.error;
-        if (statusCode === 404) {
-          setBinding(null);
-          if (isInitial || !isEditing) {
-            setEditEventTypes(["eta_changed"]);
+        if (bReq.status === "rejected") {
+          const statusCode = bReq.reason?.statusCode;
+          const errCode = bReq.reason?.code || bReq.reason?.error;
+          if (statusCode === 404) {
+            setBinding(null);
+            if (isInitial || !isEditing) {
+              setEditEventTypes(["eta_changed"]);
+            }
+            setError({ kind: "404", message: "Not found", code: errCode });
+          } else if (statusCode === 403) {
+            setError({ kind: "403", message: "Forbidden", code: errCode });
+          } else if (statusCode === 409) {
+            setError({
+              kind: "409",
+              message: bReq.reason?.message || "Conflict",
+              code: errCode,
+            });
+          } else {
+            setError({
+              kind: "error",
+              message: bReq.reason?.message || "Failed to load binding",
+              code: errCode,
+            });
           }
-          setError({ kind: "404", message: "Not found", code: errCode });
-        } else if (statusCode === 403) {
-          setError({ kind: "403", message: "Forbidden", code: errCode });
-        } else if (statusCode === 409) {
-          setError({
-            kind: "409",
-            message: bReq.reason?.message || "Conflict",
-            code: errCode,
-          });
         } else {
-          setError({
-            kind: "error",
-            message: bReq.reason?.message || "Failed to load binding",
-            code: errCode,
-          });
+          setBinding(bReq.value);
+          if (isInitial || !isEditing) {
+            setEditWebhookId(bReq.value?.webhookId || "");
+            setEditEventTypes(bReq.value?.eventTypes || []);
+          }
+          setEditExpectedVersion(bReq.value?.version || 0);
+          setError(null);
         }
-      } else {
-        setBinding(bReq.value);
-        if (isInitial || !isEditing) {
-          setEditWebhookId(bReq.value?.webhookId || "");
-          setEditEventTypes(bReq.value?.eventTypes || []);
-        }
-        setEditExpectedVersion(bReq.value?.version || 0);
-        setError(null);
-      }
 
-      if (dReq.status === "fulfilled") {
-        setDeliveries(dReq.value.items || dReq.value || []);
-        setDeliveryError(null);
-      } else {
-        if (dReq.reason?.statusCode !== 403) {
-          setDeliveryError(dReq.reason?.message || "Failed to load deliveries");
+        if (dReq.status === "fulfilled") {
+          setDeliveries(dReq.value.items || dReq.value || []);
+          setDeliveryError(null);
+        } else {
+          if (dReq.reason?.statusCode !== 403) {
+            setDeliveryError(
+              dReq.reason?.message || "Failed to load deliveries",
+            );
+          }
+        }
+
+        if (wReq && wReq.status === "fulfilled") {
+          setAvailableWebhooks(wReq.value || []);
+        }
+      } catch (err: any) {
+        if (reqId !== currentRequest.current) return;
+        setError({
+          kind: "error",
+          message: err.message,
+          code: err.code || err.error,
+        });
+      } finally {
+        if (reqId === currentRequest.current) {
+          setLoading(false);
         }
       }
-      
-      if (wReq && wReq.status === "fulfilled") {
-        setAvailableWebhooks(wReq.value || []);
-      }
-    } catch (err: any) {
-      if (reqId !== currentRequest.current) return;
-      setError({
-        kind: "error",
-        message: err.message,
-        code: err.code || err.error,
-      });
-    } finally {
-      if (reqId === currentRequest.current) {
-        setLoading(false);
-      }
-    }
-  }, [client, entrySlug, tenantId, isEditing]);
+    },
+    [client, entrySlug, tenantId, isEditing],
+  );
 
   useEffect(() => {
     setBinding(null);
@@ -1253,7 +1278,10 @@ export function PartnerNotificationPanel({
       fetchState();
     } catch (err: any) {
       setTestingState("rejected");
-      if (err?.code !== "PARTNER_NOTIFICATION_BINDING_TEST_FAILED" && err?.kind !== "failed") {
+      if (
+        err?.code !== "PARTNER_NOTIFICATION_BINDING_TEST_FAILED" &&
+        err?.kind !== "failed"
+      ) {
         setError({
           kind: "error",
           message: err.message,
@@ -1475,7 +1503,12 @@ export function PartnerNotificationPanel({
         />
         {deliveryError && (
           <div style={{ marginTop: 8 }}>
-            <CanvasBanner theme={theme} tone="danger" icon="warn" body={deliveryError} />
+            <CanvasBanner
+              theme={theme}
+              tone="danger"
+              icon="warn"
+              body={deliveryError}
+            />
           </div>
         )}
       </div>

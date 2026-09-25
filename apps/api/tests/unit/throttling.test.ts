@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-unused-vars */
 import "reflect-metadata";
 
 import {
@@ -224,4 +225,3 @@ describe("route throttling metadata", () => {
     ).toBe(REPORT_JOBS_RATE_LIMIT.default.blockDuration);
   });
 });
-
