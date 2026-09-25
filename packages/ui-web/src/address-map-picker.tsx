@@ -762,12 +762,9 @@ export function AddressMapPicker<TServiceProduct extends string = string>(
   );
 
   const handleManualApply = useCallback(() => {
-    let lat = selectedAddress?.lat;
-    let lng = selectedAddress?.lng;
-    if (lat === undefined || lng === undefined) {
-      lat = (bounds.minLat + bounds.maxLat) / 2;
-      lng = (bounds.minLng + bounds.maxLng) / 2;
-    }
+    let lat = selectedAddress?.lat ?? (bounds ? (bounds.minLat + bounds.maxLat) / 2 : 0);
+    let lng = selectedAddress?.lng ?? (bounds ? (bounds.minLng + bounds.maxLng) / 2 : 0);
+    
     if (requireManualReason && manualReason.trim().length === 0) {
       setManualError(labels.manualReasonLabel);
       return;
@@ -802,10 +799,10 @@ export function AddressMapPicker<TServiceProduct extends string = string>(
     labels.manualInvalid,
     labels.manualReasonLabel,
     labels.pinAdjustHint,
-    bounds.maxLat,
-    bounds.maxLng,
-    bounds.minLat,
-    bounds.minLng,
+    bounds?.maxLat,
+    bounds?.maxLng,
+    bounds?.minLat,
+    bounds?.minLng,
     manualReason,
     query,
     requireManualReason,
