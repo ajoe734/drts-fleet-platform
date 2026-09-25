@@ -13,6 +13,7 @@ const PN_EVENTS = [
   ['eta_changed','passenger.eta_changed.v1','ETA 變更'],
   ['driver_arrived','passenger.driver_arrived.v1','駕駛已抵達'],
   ['receipt_ready','passenger.receipt_ready.v1','收據就緒'],
+  ['external_action', 'external.action_required', '需外部處理'],
 ];
 function PnShell({ theme:th, children, actions }) {
   const p = { id: 'p_8a4b2c19', slug: 'nexus-premium', bank: 'Nexus Bank', program: 'Nexus Premium' };
@@ -84,22 +85,22 @@ const PN_DLV = {
   queued:        ['排隊中','neutral'],
   requeued:      ['已受理重新入列','info'],
   superseded:    ['已被新通知取代','neutral'],
-  expired:       ['已過期','neutral'],
-  exhausted:     ['重試次數耗盡','danger'],
+  ttl_expired:   ['生命週期逾時 (ttl)','neutral'],
+  budget_exhausted: ['重試次數耗盡 (budget)','danger'],
 };
 const FX_PN_DELIVERIES = [
-  { id:'dlv_0912', outboxId:'obx_78a1', ev:'receipt_ready', code:'200', ack:'ok', status:'accepted', reason:'ack 驗證通過 · 裝置接收未知', at:'09-24 09:41:12', tries:1, retry:'n/a', target:'api.nexus.example/drts/hook' },
-  { id:'dlv_0911', outboxId:'obx_78a0', ev:'driver_arrived', code:'202', ack:'ok', status:'accepted', reason:'ack 驗證通過 · 裝置接收未知', at:'09-24 09:38:50', tries:1, retry:'n/a', target:'api.nexus.example/drts/hook' },
+  { id:'dlv_0912', outboxId:'obx_78a1', ev:'receipt_ready', code:'200', ack:'ok', status:'accepted', reason:'ack 驗證通過 · 裝置接收未知', at:'09-24 09:41:12', tries:1, retry:'denied:DELIVERY_TERMINAL', target:'api.nexus.example/drts/hook' },
+  { id:'dlv_0911', outboxId:'obx_78a0', ev:'driver_arrived', code:'202', ack:'ok', status:'accepted', reason:'ack 驗證通過 · 裝置接收未知', at:'09-24 09:38:50', tries:1, retry:'denied:DELIVERY_TERMINAL', target:'api.nexus.example/drts/hook' },
   { id:'dlv_0910', outboxId:'obx_789f', ev:'eta_changed', code:'200', ack:'mismatch', status:'ack_invalid', reason:'ack.delivery_id 不符', at:'09-24 09:36:07', tries:2, retry:'allowed', target:'api.nexus.example/drts/hook' },
   { id:'dlv_0909', outboxId:'obx_789e', ev:'assignment_disclosure_ready', code:'503', ack:'—', status:'failed', reason:'上游暫時無法服務', at:'09-24 09:30:07', tries:2, retry:'allowed', target:'api.nexus.example/drts/hook' },
   { id:'dlv_0908', outboxId:'obx_789d', ev:'eta_changed', code:'—', ack:'—', status:'failed', reason:'上游暫時無法服務', at:'09-24 09:28:40', tries:1, retry:'allowed', target:'api.nexus.example/drts/hook' },
   { id:'dlv_0907', outboxId:'obx_789c', ev:'eta_changed', code:'timeout', ack:'—', status:'superseded', reason:'已由 dlv_0910 取代', at:'09-24 09:20:11', tries:1, retry:'denied:SUPERSEDED', target:'api.nexus-•••••.example/…/hook-v1（舊）' },
-  { id:'dlv_0906', outboxId:'obx_789b', ev:'assignment_replaced', code:'timeout', ack:'—', status:'exhausted', reason:'5 次皆逾時 (budget_exhausted)', at:'09-24 08:55:41', tries:5, retry:'denied:RETRY_EXHAUSTED', target:'api.nexus.example/drts/hook' },
-  { id:'dlv_0905', outboxId:'obx_789a', ev:'driver_arrived', code:'—', ack:'—', status:'expired', reason:'已逾 expiresAt（policy 300s）', at:'09-24 08:12:30', tries:1, retry:'denied:EVENT_EXPIRED', target:'' },
+  { id:'dlv_0906', outboxId:'obx_789b', ev:'assignment_replaced', code:'timeout', ack:'—', status:'budget_exhausted', reason:'5 次皆逾時 (budget_exhausted)', at:'09-24 08:55:41', tries:5, retry:'denied:BUDGET_EXHAUSTED', target:'api.nexus.example/drts/hook' },
+  { id:'dlv_0905', outboxId:'obx_789a', ev:'driver_arrived', code:'—', ack:'—', status:'ttl_expired', reason:'已逾 expiresAt（policy 300s）', at:'09-24 08:12:30', tries:1, retry:'denied:TTL_EXPIRED', target:'' },
   { id:'dlv_0904', outboxId:'obx_7899', ev:'receipt_ready', code:'—', ack:'—', status:'failed', reason:'系統錯誤', at:'09-24 08:00:00', tries:1, retry:'denied:LEASE_ACTIVE', target:'api.nexus.example/drts/hook' },
   { id:'dlv_0903', outboxId:'obx_7898', ev:'assignment_replaced', code:'—', ack:'—', status:'failed', reason:'綁定未啟用', at:'09-24 07:50:00', tries:1, retry:'denied:BINDING_NOT_READY', target:'api.nexus.example/drts/hook' },
 ];
-const RETRY_DENY = { SUPERSEDED:'已被新通知取代', RETRY_EXHAUSTED:'重試次數耗盡', EVENT_EXPIRED:'事件已過期', LEASE_ACTIVE:'另一重送進行中（lease）', BINDING_NOT_READY:'綁定未就緒' };
+const RETRY_DENY = { DELIVERY_TERMINAL:'已是終止狀態（已接受或已取代）', SUPERSEDED:'已被新通知取代', BUDGET_EXHAUSTED:'預算耗盡 (budget)', TTL_EXPIRED:'生命週期已過期 (ttl)', LEASE_ACTIVE:'另一重送進行中 (lease)', BINDING_NOT_READY:'綁定未就緒' };
 function PnRetryCell({ theme:th, r, retryState='idle' }) {
   if (r.retry==='n/a') return <span style={{ fontSize:10.5, color:th.textDim }}>—</span>;
   if (r.retry.startsWith('denied:')) {
