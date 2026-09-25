@@ -15,10 +15,10 @@
 ## Handoff Evidence (Gemini)
 
 - **Candidate Branch**: gemini/sr-partner-notify-ui-20260924-canvas
-- **Candidate SHA**: 4c4d033cee56cee278a04a4ac6e11a5341b026e4
+- **Candidate SHA**: eb568dd0a1fe9fd0c7835cde555240eaedf00d78
 - **Hosted CI Evidence**:
-  - CI: PR #2155 pending checks for c53813b3a (Run: pending new push).
-  - Postgres Gate (CI): PASSED locally against local DB.
+  - CI: PR #2155 pending checks for eb568dd0a1fe9fd0c7835cde555240eaedf00d78 (Run: pending new push).
+  - Postgres Gate (CI): Fixed Postgres deduction error (`inconsistent types deduced for parameter $1`) by removing `::text` cast in `jsonb_build_object`. Tests PASS locally.
 - **Local Evidence**:
   - `pnpm exec tsc -p apps/platform-admin-web/tsconfig.json --noEmit`: Exit 0
   - `pnpm exec tsc -p tsconfig.json --noEmit`: Exit 0
@@ -40,7 +40,7 @@
 | R2. invalid retry context matching      | `apps/api/src/modules/multi-taxi/multi-taxi.repository.ts:1753,1974`                                                    | 舊: 漏載 ctx.webhook_id, 比對錯誤導致合法 retry 被拒<br/>新: 正確自 db 讀取 webhook_id 並與 readiness.binding.webhookId 比對                                                                     | Node TypeScript API signature check (Exit 0), local DB skip | 實際行為由 CI PG 測試捕捉       |
 | R3. outbox event type lookup missing    | `apps/api/src/modules/multi-taxi/multi-taxi.repository.ts`                                                              | 舊: 讀取不存在的 eventType 導致 route_missing<br/>新: 從 ctx.wire_payload 讀取並 fallback 至真實 outbox.event_type                                                                               | Node TypeScript API signature check (Exit 0)                | 實際行為由 CI PG 測試捕捉       |
 | R4. bad context versions / defaults     | `apps/api/src/modules/multi-taxi/multi-taxi.repository.ts:1985,2007`                                                    | 舊: 讀取錯誤的 version path，並自行給予 default maxAttempts=3<br/>新: 重用真實 producer payload version 與 readiness maxAttempts                                                                 | Node TypeScript API signature check (Exit 0)                | 實際行為由 CI PG 測試捕捉       |
-| R5. invalid PG fixtures & coverage      | `tests/unit/system-remediation/sr-partner-notify-ui-20260917/notification-ui.postgres.test.ts`, `apps/api/package.json` | 舊: insert tenant_id 導致錯誤，vitest 未發現 test<br/>新: 完整修復 record insert、webhook mapping 與 fingerprint computation，本機 PG 測試通過                                 | 本機 `vitest run ...` (Exit 0)                             | 無     |
+| R5. invalid PG fixtures & coverage      | `tests/unit/system-remediation/sr-partner-notify-ui-20260917/notification-ui.postgres.test.ts`, `apps/api/package.json` | 舊: insert tenant_id 導致錯誤，vitest 未發現 test<br/>新: 完整修復 record insert、webhook mapping 與 fingerprint computation，並修正 `jsonb_build_object` 參數推導錯誤 (`inconsistent types deduced`)，本機 PG 測試通過                                 | 本機 `vitest run ...` (Exit 0)                             | 無     |
 | R6. unsupported UAT claims & CI config  | `.github/workflows/ci.yml`, `.github/workflows/ci-integ.yml`                                                            | 舊: 移除了 CI 中的 PG variables 和 verify script<br/>新: 恢復 PG variables，加入 UI db 變數                                                                                                      | 文件靜態檢查                                                | CI 需等待 push 後觸發           |
 | R7. UI Web scope violation & raw colors | `apps/platform-admin-web/components/partner-notification-panel.tsx`                                                     | 舊: 使用未經授權設計、hardcode 標題和色碼<br/>新: 使用 CanvasCard/CanvasPill 搭配 `@drts/ui-tokens` theme                                                                                        | `pnpm run i18n:guard` (Exit 0)                              | UI 視覺需由預覽或 E2E 驗證      |
 | R8. evidence mismatch & RTL claims      | `docs/04-uat/system-remediation-20260906/SR-PARTNER-NOTIFY-UI-20260917.md`                                              | 舊: 宣稱不存在的 RTL component test PASS，狀態不實<br/>新: 如實記載 Pending CI 與 unperformed 本機結果                                                                                           | 靜態文件核對                                                | 無                              |
