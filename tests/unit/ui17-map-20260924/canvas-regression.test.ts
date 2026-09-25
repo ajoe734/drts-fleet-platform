@@ -1,5 +1,4 @@
 import { describe, test, expect } from 'vitest';
-import * as React from 'react';
 
 // Stub test for now to show we added regressions.
 // Since actual parsing uses a custom loader, we'll just verify the files exist and load conceptually.
