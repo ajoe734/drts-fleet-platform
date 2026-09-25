@@ -798,6 +798,8 @@ class ExecutionWorkspaceTests(unittest.TestCase):
             self.assertEqual(_git(workspace, "rev-parse", "--is-inside-work-tree").stdout.strip(), "true")
             self.assertEqual(_git(workspace, "branch", "--show-current").stdout.strip(), "")
             self.assertIn("isolated coordination worktree", request.message)
+            self.assertIn("must not start product development servers", request.message)
+            self.assertIn("pnpm exec playwright", request.message)
             self.assertEqual(request.metadata["workspace_root"], str(workspace))
 
     def test_review_dispatch_ignores_owner_execution_branch_override(self) -> None:
@@ -1750,6 +1752,78 @@ class ExecutionWorkspaceTests(unittest.TestCase):
             self.assertNotEqual(Path(request.metadata["workspace_root"]), root.resolve())
             self.assertIn("isolated, detached review workspace", request.message)
             self.assertNotIn("canonical workspace; this is a report/evidence review", request.message)
+
+    def test_vm_restriction_notice_present_on_every_reviewer_workspace_branch(self) -> None:
+        """ORCH-ORPHAN-PR-LAND-20260924 F2 regression.
+
+        The VM-runtime restriction (no `pnpm dev`/Playwright/Docker Compose
+        servers) was moved into `attach_workspace_metadata` for #2059, but
+        the #2114 rewrite of this function only threaded it into the
+        owner-isolated and coordination-isolated branches. Every
+        `is_reviewer` branch -- isolated detached, canonical fallback,
+        unresolvable pinned candidate, and the noncanonical-report canonical
+        branch -- silently dropped it, so a reviewer VM dispatch carried no
+        restriction at all. Assert it on every branch directly through the
+        production function, not just the two that already had coverage.
+        """
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir) / "repo"
+            root.mkdir()
+            self._init_repo(root)
+            config = self._repo_config(root)
+            canonical_root = root.resolve()
+            isolated = root / ".artifacts/worktrees/auto/codex2-review"
+            isolated.mkdir(parents=True)
+
+            def notice_present(message: str) -> bool:
+                return "VM restriction" in message and "pnpm exec playwright" in message
+
+            # isolated, detached review workspace
+            r1 = supervisor.DeliveryRequest(
+                agent_id="codex2", provider="codex2", delivery_mode="codex",
+                message="wake", task_id="T-1", reason="review_ready_dispatch",
+                metadata={"mode": "execution"},
+            )
+            supervisor.attach_workspace_metadata(
+                config, r1, isolated, "deadbeefcafe", "dev", "created_review_worktree",
+            )
+            self.assertTrue(notice_present(r1.message), "isolated reviewer workspace missing VM restriction")
+
+            # canonical fallback (isolated review workspace could not be created)
+            r2 = supervisor.DeliveryRequest(
+                agent_id="codex2", provider="codex2", delivery_mode="codex",
+                message="wake", task_id="T-2", reason="review_ready_dispatch",
+                metadata={"mode": "execution"},
+            )
+            supervisor.attach_workspace_metadata(
+                config, r2, canonical_root, "deadbeefcafe", "dev", "fallback_canonical",
+            )
+            self.assertTrue(notice_present(r2.message), "reviewer canonical fallback missing VM restriction")
+
+            # unresolvable pinned candidate
+            r3 = supervisor.DeliveryRequest(
+                agent_id="codex2", provider="codex2", delivery_mode="codex",
+                message="wake", task_id="T-3", reason="review_ready_dispatch",
+                metadata={"mode": "execution"},
+            )
+            supervisor.attach_workspace_metadata(
+                config, r3, canonical_root, "deadbeefcafe", "dev", "unresolvable_pinned_candidate",
+            )
+            self.assertTrue(notice_present(r3.message), "unresolvable pinned candidate missing VM restriction")
+
+            # noncanonical report/evidence review, no Git candidate to isolate
+            r4 = supervisor.DeliveryRequest(
+                agent_id="codex2", provider="codex2", delivery_mode="codex",
+                message="wake", task_id="T-4", reason="review_ready_dispatch",
+                metadata={
+                    "mode": "execution",
+                    "task": {"task_class": "report", "mutates_canonical": False},
+                },
+            )
+            supervisor.attach_workspace_metadata(
+                config, r4, canonical_root, None, None, "fallback_canonical",
+            )
+            self.assertTrue(notice_present(r4.message), "report/evidence review missing VM restriction")
 
 
 class RunOnceSupervisorStateTests(unittest.TestCase):
