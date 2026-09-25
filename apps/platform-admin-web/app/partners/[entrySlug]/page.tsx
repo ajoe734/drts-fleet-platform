@@ -2342,7 +2342,6 @@ export default function PartnerDetailPage() {
           <PartnerNotificationPanel 
             entrySlug={entrySlug}
             tenantId={entry.tenantId}
-            canManageWebhooks={authority.scopes.includes("tenant:webhooks:write") || authority.scopes.includes("foundation:write")}
             canWriteBinding={authority.scopes.includes("foundation:write")}
           />
         ) : null}
