@@ -290,6 +290,12 @@ function ActiveBreakGlassBanner({
   const [exiting, setExiting] = useState(false);
   const [exitError, setExitError] = useState<string | null>(null);
 
+  const rawClient = usePlatformAdminClient();
+  const iamClient = useMemo(
+    () => createPlatformAdminIamClient(rawClient),
+    [rawClient],
+  );
+
   const theme = buildCanvasTheme({ surface: "platform", density: "compact" });
 
   const minutes = Math.floor(secondsRemaining / 60);
@@ -300,7 +306,14 @@ function ActiveBreakGlassBanner({
     setExiting(true);
     setExitError(null);
     try {
-      await exitSession("operator_exit_cta", undefined);
+      let stepUpRef: string | undefined = undefined;
+      const proof = await iamClient.createStepUpProof({
+        actionId: "platform:break-glass:close" as any,
+      });
+      if (proof.required !== false && proof.stepUpReference) {
+        stepUpRef = proof.stepUpReference;
+      }
+      await exitSession("operator_exit_cta", stepUpRef);
     } catch (err: any) {
       if (
         err.code === "IAM_STEP_UP_REQUIRED" ||
@@ -308,9 +321,7 @@ function ActiveBreakGlassBanner({
         err.code === "STEP_UP_REQUIRED"
       ) {
         setExitError(
-          "無法退出: " +
-            (err.apiMessage ||
-              "憑證失效 (STEP_UP_REQUIRED)。API 缺少對應政策。"),
+          "無法退出: 憑證已過期或被拒絕 (IAM_STEP_UP_REQUIRED)，請重新登入 (Fresh MFA)。",
         );
       } else {
         setExitError(err.message || "Failed to close emergency access");

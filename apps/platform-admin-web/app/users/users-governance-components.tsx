@@ -1855,11 +1855,7 @@ export function BreakGlassPanel() {
                   tone="warn"
                   icon="lock"
                   title={stepUpCopy.stepUpRequiredTitle}
-                  body={
-                    selectedGrant?.status === "requested"
-                      ? "操作前請先取得 step-up 憑證或重新登入 (Fresh MFA)。"
-                      : "此環境的後端尚未實作 activate 操作的 step-up policy (Documented Gap)。Activate 將因缺乏 step-up 憑證而無法通過驗證。"
-                  }
+                  body="操作前請先取得 step-up 憑證或重新登入 (Fresh MFA)。"
                   actions={
                     selectedGrant?.status === "requested" ? (
                       <CanvasBtn
@@ -1869,6 +1865,18 @@ export function BreakGlassPanel() {
                         icon="lock"
                         onClick={() => {
                           handleGetStepUpProof("platform:break-glass:approve");
+                        }}
+                      >
+                        {stepUpCopy.getStepUpProof}
+                      </CanvasBtn>
+                    ) : selectedGrant?.status === "approved" ? (
+                      <CanvasBtn
+                        theme={theme}
+                        size="xs"
+                        variant="primary"
+                        icon="lock"
+                        onClick={() => {
+                          handleGetStepUpProof("platform:break-glass:activate");
                         }}
                       >
                         {stepUpCopy.getStepUpProof}
@@ -1900,6 +1908,18 @@ export function BreakGlassPanel() {
                         icon="refresh"
                         onClick={() => {
                           handleGetStepUpProof("platform:break-glass:approve");
+                        }}
+                      >
+                        {stepUpCopy.retry}
+                      </CanvasBtn>
+                    ) : selectedGrant?.status === "approved" ? (
+                      <CanvasBtn
+                        theme={theme}
+                        size="xs"
+                        variant="primary"
+                        icon="refresh"
+                        onClick={() => {
+                          handleGetStepUpProof("platform:break-glass:activate");
                         }}
                       >
                         {stepUpCopy.retry}
