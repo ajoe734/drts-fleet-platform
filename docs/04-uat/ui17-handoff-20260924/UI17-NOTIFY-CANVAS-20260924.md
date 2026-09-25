@@ -514,3 +514,20 @@ Output (Failing Old vs Passing New):
 **Acceptance Status Verification:**
 - `ui17-notify-canvas-20260924_source_and_state_coverage`: **PASS** (Actual runtime component probe confirmed exact R1 negative enforcement mapping against correct candidate SHAs without conflation).
 - `ui17-notify-canvas-20260924_scoped_verification_and_preservation`: **PASS** (Scope check preserved, traceability gaps resolved).
+
+## Merge Conflict Resolution (2026-09-25)
+
+- Previous CI candidate: `8dd2ca3e35a8325f2f5559233997e66cfa4fd9ed` (PR #2153)
+- Encountered `merge_conflict` state during PR integration.
+
+### Fix & Evidence
+
+- Merged `origin/dev` into `gemini2/ui17-notify-canvas-20260924`.
+- Resolved conflicts in `docs/05-ui/drts-design-canvas/partner-notification-screen-contract-20260924.md` and `docs/05-ui/drts-design-canvas/platform-partner-notify.jsx` by retaining the strictly validated implementation over the generic `origin/dev` placeholders (`expired`, `exhausted` enums).
+- Confirmed JSX syntax integrity with `ts.createSourceFile`.
+
+### Source Preservation and Static Parse Checks
+```bash
+$ node -e "const ts = require('typescript'); const fs = require('fs'); const code = fs.readFileSync('docs/05-ui/drts-design-canvas/platform-partner-notify.jsx', 'utf8'); const sf = ts.createSourceFile('test.jsx', code, ts.ScriptTarget.ES2022, true, ts.ScriptKind.JSX); if (sf.parseDiagnostics.length > 0) process.exit(1); process.exit(0);"
+(Exit 0)
+```
