@@ -6,14 +6,13 @@ This document describes the UI changes to the partner entry management page to s
 - **Tab Name**: Notifications
 - **Location**: Added as a new tab next to 'Audit' in the `Platform Admin.html` partner details page.
 - **Components**:
-  Currently, the notification layout lacks canonical canvas coverage in `Platform Admin.html`.
-  Following the design contract, we have recorded the explicit required states and are awaiting design handoff.
-  The UI component `partner-notification-panel.tsx` is temporarily a placeholder to avoid inventing a layout.
+  The notification layout is covered by the canonical canvas `docs/05-ui/drts-design-canvas/platform-partner-notify.jsx` (added in UI17-NOTIFY-CANVAS-20260924).
+  The UI component `partner-notification-panel.tsx` implements this design using `@drts/ui-tokens`.
 
-### Explicit Screen Requirements for Handoff
-To pass functional UI acceptance, the requested canvas must include the following explicit states and controls:
-1. **Binding Read State**: Display current `webhook_id`, `eventTypes`, and state (`ready`, `test_pending`, `disabled`).
-2. **Delivery List View**: Display a paginated list of deliveries (status, target, failure reason).
+### Explicit Screen Requirements
+The implemented canvas includes the following explicit states and controls:
+1. **Binding Read State**: Displays current `webhook_id`, `eventTypes`, and state (`ready`, `test_pending`, `disabled`).
+2. **Delivery List View**: Displays a list of deliveries (status, target, failure reason).
 3. **Edit Controls**: Form to update webhook binding and event types.
 4. **Lifecycle Controls**: Action buttons for Test, Enable, and Disable binding.
 5. **Retry Control**: Action button on individual failed deliveries to trigger a manual retry.

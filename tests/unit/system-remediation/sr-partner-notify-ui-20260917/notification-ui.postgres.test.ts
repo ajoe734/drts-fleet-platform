@@ -36,6 +36,8 @@ describe.skipIf(!testDbUrl || process.env.RUN_UI_PG_GATE !== "true")("partner no
     await pool.query("INSERT INTO admin.phase1_tenant_registry (tenant_id, tenant_name, status, record) VALUES ('tenant-a', 'Tenant A', 'active', '{}') ON CONFLICT DO NOTHING");
     await pool.query("INSERT INTO admin.phase1_tenant_registry (tenant_id, tenant_name, status, record) VALUES ('tenant-other', 'Tenant Other', 'active', '{}') ON CONFLICT DO NOTHING");
     await pool.query("INSERT INTO admin.phase1_partner_channel_entries (entry_slug, tenant_id, partner_id, created_at, updated_at, program_id, status, record) VALUES ('entry-tenant', 'tenant-a', 'partner-1', now(), now(), 'program1', 'active', '{}'::jsonb) ON CONFLICT DO NOTHING");
+    await pool.query("INSERT INTO admin.phase1_partner_channel_entries (entry_slug, tenant_id, partner_id, created_at, updated_at, program_id, status, record) VALUES ('entry-409-test', 'tenant-a', 'partner-1', now(), now(), 'program1', 'active', '{}'::jsonb) ON CONFLICT DO NOTHING");
+    await pool.query("INSERT INTO admin.phase1_partner_channel_entries (entry_slug, tenant_id, partner_id, created_at, updated_at, program_id, status, record) VALUES ('entry-retry-test', 'tenant-a', 'partner-1', now(), now(), 'program1', 'active', '{}'::jsonb) ON CONFLICT DO NOTHING");
     
     app = await NestFactory.create(AppModule, { logger: false });
 
@@ -100,8 +102,8 @@ describe.skipIf(!testDbUrl || process.env.RUN_UI_PG_GATE !== "true")("partner no
 
   it("retry idempotence/lease/fence/expiry/supersession are verified via DB state", async () => {
     const entrySlug = "entry-retry-test";
-    const tenantId = "tenant-t";
-    const partnerId = "partner-p";
+    const tenantId = "tenant-a";
+    const partnerId = "partner-1";
     
     await pool.query(
       "INSERT INTO admin.phase1_partner_channel_entries (entry_slug, tenant_id, partner_id, created_at, updated_at, program_id, status, record) VALUES ($1, $2, $3, now(), now(), 'program1', 'active', '{}'::jsonb) ON CONFLICT DO NOTHING",
@@ -132,7 +134,7 @@ describe.skipIf(!testDbUrl || process.env.RUN_UI_PG_GATE !== "true")("partner no
       INSERT INTO ops.phase1_owned_orders (
         order_id, status, created_at, updated_at, order_no, order_source, service_bucket, dispatch_semantics, record
       ) VALUES (
-        $1, 'assigned', now(), now(), 'ORD-123', 'consumer_app', 'demand', 'immediate', '{"tenantId": "' + tenantId + '"}'::jsonb
+        $1, 'assigned', now(), now(), 'ORD-123', 'consumer_app', 'demand', 'immediate', '{"tenantId": "${tenantId}"}'::jsonb
       )
     `,
       [orderId],
@@ -165,7 +167,7 @@ describe.skipIf(!testDbUrl || process.env.RUN_UI_PG_GATE !== "true")("partner no
       INSERT INTO mobility.phase1_partner_notification_delivery_contexts (
         outbox_id, delivery_id, order_id, entry_slug, tenant_id, partner_id, binding_id, binding_version, webhook_id, endpoint_fingerprint, wire_payload, wire_payload_hash, event_sequence, expires_at, retry_policy_snapshot, delivery_target, retry_disposition, failure_reason, created_at
       ) VALUES (
-        $1, gen_random_uuid(), $2, $3, $4, $5, $6, 1, 'w', 'fingerprint', '{"event": "passenger.eta_changed.v1"}'::jsonb, 'hash', 1, now() + interval '1 day', '{"maxAttempts": 3}'::jsonb, 'partner_endpoint', 'manual_only', 'provider_transient_error', now()
+        $1, gen_random_uuid(), $2, $3, $4, $5, $6, 1, 'w', 'fingerprint', '{"event": "passenger.eta_changed.v1", "data": {"recipient": {"partnerUserRef": "u"}}}'::jsonb, 'hash', 1, now() + interval '1 day', '{"maxAttempts": 3}'::jsonb, 'partner_endpoint', 'manual_only', 'provider_transient_error', now()
       )
     `,
       [outboxId, orderId, entrySlug, tenantId, partnerId, bindingId],

@@ -1813,7 +1813,7 @@ export class MultiTaxiRepository {
       await client.query("BEGIN");
 
       const outboxRows = await client.query(
-        "SELECT o.status, o.event_type, o.next_attempt_at, o.payload, o.attempt_count, o.order_id, r.entry_slug as route_entry_slug, r.tenant_id as route_tenant_id, r.partner_id as route_partner_id FROM ops.consumer_notification_outbox o LEFT JOIN mobility.phase1_order_partner_notification_routes r ON r.order_id = o.order_id WHERE o.outbox_id = $1 FOR UPDATE OF o",
+        "SELECT o.status, o.event_type, o.next_attempt_at, o.payload, o.attempt_count, o.order_id, o.assignment_version, r.entry_slug as route_entry_slug, r.tenant_id as route_tenant_id, r.partner_id as route_partner_id FROM ops.consumer_notification_outbox o LEFT JOIN mobility.phase1_order_partner_notification_routes r ON r.order_id = o.order_id WHERE o.outbox_id = $1 FOR UPDATE OF o",
         [outboxId],
       );
       if (outboxRows.rows.length === 0) {
@@ -2001,7 +2001,7 @@ export class MultiTaxiRepository {
           await client.query("ROLLBACK");
           return { kind: "failed", failure: { failureReason: "notification_obsolete", retryDisposition: "terminal", suggestedNextAttemptAt: null } };
         }
-        const assignmentVersion = ctx ? ctx.wire_payload?.data?.assignmentVersion : outbox.payload?.assignmentVersion;
+        const assignmentVersion = ctx ? ctx.wire_payload?.data?.assignmentVersion : outbox.assignment_version;
         if (assignmentVersion !== undefined && assignmentVersion !== null && assignmentVersion < relevance.assignmentVersion) {
           await client.query("ROLLBACK");
           return { kind: "failed", failure: { failureReason: "notification_superseded", retryDisposition: "terminal", suggestedNextAttemptAt: null } };
