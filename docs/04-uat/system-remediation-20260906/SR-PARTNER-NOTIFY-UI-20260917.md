@@ -15,7 +15,7 @@
 ## Handoff Evidence (Gemini)
 
 - **Candidate Branch**: gemini/sr-partner-notify-ui-20260924-canvas
-- **Candidate SHA**: 1d0a469f0642c4d41fb051615fd10f433fa25c77
+- **Candidate SHA**: 2059e164b37ea401e22258435537ddb717dc151e
 - **Hosted CI Evidence**:
   - CI: Pending PR #2155 update.
   - Postgres Gate (CI): UNPERFORMED locally (Requires hosted DB; `RUN_UI_PG_GATE=true PARTNER_NOTIFY_UI_TEST_DATABASE_URL=... vitest run ...` returned ECONNREFUSED).
@@ -23,6 +23,7 @@
   - `pnpm exec tsc -p apps/platform-admin-web/tsconfig.json --noEmit`: Exit 0
   - `pnpm exec tsc -p tsconfig.json --noEmit`: Exit 0
   - `pnpm run i18n:guard`: Exit 0
+  - `pnpm exec vitest run tests/unit/system-remediation/sr-partner-notify-ui-20260917/notification-ui.test.ts`: PASS (3 client API mock tests, Exit 0)
   - `RUN_UI_PG_GATE=true PARTNER_NOTIFY_UI_TEST_DATABASE_URL=postgresql://postgres:postgres@localhost:5432/drts_fleet_platform pnpm exec vitest run tests/unit/system-remediation/sr-partner-notify-ui-20260917/notification-ui.postgres.test.ts`: SKIPPED locally (ECONNREFUSED).
 
 ## Old/New Reproduction & Boundaries
