@@ -15,7 +15,7 @@
 ## Handoff Evidence (Gemini)
 
 - **Candidate Branch**: gemini/sr-partner-notify-ui-20260924-canvas
-- **Candidate SHA**: 1e21cd4a51cad42aabe0805e6d35e6b983b80e05
+- **Candidate SHA**: 42f3847178c063601610615a1dee9a754bb5645a
 - **Hosted CI Evidence**:
   - CI: Pending PR #2155 update.
   - Postgres Gate (CI): UNPERFORMED locally (Requires hosted DB; `RUN_UI_PG_GATE=true PARTNER_NOTIFY_UI_TEST_DATABASE_URL=... vitest run ...` returned ECONNREFUSED).
