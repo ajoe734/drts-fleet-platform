@@ -1767,7 +1767,7 @@ export class MultiTaxiRepository {
         o.status,
         NULL as result,
         o.attempt_count as attempts,
-        COALESCE((ctx.retry_policy_snapshot->>'maxAttempts')::int, 3) as "maxAttempts",
+        COALESCE((ctx.retry_policy_snapshot->>'maxAttempts')::int, (o.payload->'partnerNotification'->>'maxAttempts')::int) as "maxAttempts",
         o.next_attempt_at as "nextAttemptAt"
       FROM ops.consumer_notification_outbox o
       LEFT JOIN mobility.phase1_partner_notification_delivery_contexts ctx ON ctx.outbox_id = o.outbox_id
@@ -1813,7 +1813,7 @@ export class MultiTaxiRepository {
       await client.query("BEGIN");
 
       const outboxRows = await client.query(
-        "SELECT o.status, o.next_attempt_at, o.payload, o.attempt_count, o.order_id, r.entry_slug as route_entry_slug, r.tenant_id as route_tenant_id, r.partner_id as route_partner_id FROM ops.consumer_notification_outbox o LEFT JOIN mobility.phase1_order_partner_notification_routes r ON r.order_id = o.order_id WHERE o.outbox_id = $1 FOR UPDATE OF o",
+        "SELECT o.status, o.event_type, o.next_attempt_at, o.payload, o.attempt_count, o.order_id, r.entry_slug as route_entry_slug, r.tenant_id as route_tenant_id, r.partner_id as route_partner_id FROM ops.consumer_notification_outbox o LEFT JOIN mobility.phase1_order_partner_notification_routes r ON r.order_id = o.order_id WHERE o.outbox_id = $1 FOR UPDATE OF o",
         [outboxId],
       );
       if (outboxRows.rows.length === 0) {
@@ -1854,8 +1854,8 @@ export class MultiTaxiRepository {
         await client.query("ROLLBACK");
         return { kind: "failed", failure: { failureReason: "notification_expired", retryDisposition: "terminal", suggestedNextAttemptAt: null } };
       }
-const maxAttempts = ctx && ctx.retry_policy_snapshot ? parseInt(ctx.retry_policy_snapshot.maxAttempts || '3', 10) : (outbox.payload?.maxAttempts ? parseInt(outbox.payload.maxAttempts, 10) : 3);
-      if (outbox.attempt_count >= maxAttempts) {
+      const maxAttempts = ctx && ctx.retry_policy_snapshot && ctx.retry_policy_snapshot.maxAttempts ? parseInt(ctx.retry_policy_snapshot.maxAttempts, 10) : (outbox.payload?.partnerNotification?.maxAttempts ? parseInt(outbox.payload.partnerNotification.maxAttempts, 10) : undefined);
+      if (maxAttempts !== undefined && outbox.attempt_count >= maxAttempts) {
         await client.query("ROLLBACK");
         return {
           kind: "failed",
@@ -1963,7 +1963,7 @@ const maxAttempts = ctx && ctx.retry_policy_snapshot ? parseInt(ctx.retry_policy
         return { kind: "failed", failure: { failureReason: "owner_changed", retryDisposition: "terminal", suggestedNextAttemptAt: null } };
       }
       
-      const eventType = ctx ? ctx.wire_payload?.event : outbox.payload?.partnerNotification?.eventType;
+      const eventType = ctx ? ctx.wire_payload?.event : outbox.event_type;
       if (!eventType) {
         await client.query("ROLLBACK");
         return { kind: "failed", failure: { failureReason: "route_missing", retryDisposition: "terminal", suggestedNextAttemptAt: null } };
@@ -2001,7 +2001,7 @@ const maxAttempts = ctx && ctx.retry_policy_snapshot ? parseInt(ctx.retry_policy
           await client.query("ROLLBACK");
           return { kind: "failed", failure: { failureReason: "notification_obsolete", retryDisposition: "terminal", suggestedNextAttemptAt: null } };
         }
-        const assignmentVersion = ctx ? ctx.wire_payload?.data?.assignment?.version : outbox.payload?.partnerNotification?.assignmentVersion;
+        const assignmentVersion = ctx ? ctx.wire_payload?.data?.assignmentVersion : outbox.payload?.assignmentVersion;
         if (assignmentVersion !== undefined && assignmentVersion !== null && assignmentVersion < relevance.assignmentVersion) {
           await client.query("ROLLBACK");
           return { kind: "failed", failure: { failureReason: "notification_superseded", retryDisposition: "terminal", suggestedNextAttemptAt: null } };
