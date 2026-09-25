@@ -225,6 +225,164 @@ describe("UI17-FLEET-ERROR-20260924 component rendering and interactions", () =>
       expect(window.location.href).toBe("/");
     });
   });
+
+  it("retains mount through 403, network error, and successful retry clearing all cookies", async () => {
+    const error = new Error("Missing fleet scope configuration");
+    render(React.createElement(FleetPortalError, { error, reset: () => {} }));
+
+    document.cookie = "drts_csrf=csrf-123; drts_session=sesh";
+
+    let fetchCount = 0;
+    let lastRouteRes: any;
+
+    (global.fetch as any).mockImplementation(async (url: any, opts: any) => {
+      fetchCount++;
+      if (fetchCount === 1) return { ok: false, status: 403 };
+      if (fetchCount === 2) return Promise.reject(new Error("Network Error"));
+
+      const nextReq = new NextRequest("http://localhost" + url, {
+        method: opts.method,
+        headers: new Headers({
+          cookie: "drts_session=sesh; " + document.cookie,
+          "x-csrf-token": opts.headers["x-csrf-token"],
+        }),
+      });
+      const midRes = await middleware(nextReq);
+      if (midRes.status === 403) return { ok: false, status: 403 };
+      const routeRes = await POST(nextReq, {
+        params: Promise.resolve({ auth: ["logout"] }),
+      });
+      lastRouteRes = routeRes;
+      return { ok: routeRes.status === 200, status: routeRes.status };
+    });
+
+    const logoutBtn = screen.getByText(/登出/);
+
+    // 1st click: 403
+    fireEvent.click(logoutBtn);
+    expect((logoutBtn.closest("button") as HTMLButtonElement)?.disabled).toBe(
+      true,
+    );
+    await waitFor(() => expect(global.fetch).toHaveBeenCalledTimes(1));
+    expect(window.location.href).toBe("");
+    expect(screen.getByText("頁面發生錯誤 - 重試")).toBeDefined();
+    expect((logoutBtn.closest("button") as HTMLButtonElement)?.disabled).toBe(
+      false,
+    );
+
+    // 2nd click: Network Error
+    fireEvent.click(logoutBtn);
+    expect((logoutBtn.closest("button") as HTMLButtonElement)?.disabled).toBe(
+      true,
+    );
+    await waitFor(() => expect(global.fetch).toHaveBeenCalledTimes(2));
+    expect(window.location.href).toBe("");
+    expect(screen.getByText("頁面發生錯誤 - 重試")).toBeDefined();
+    expect((logoutBtn.closest("button") as HTMLButtonElement)?.disabled).toBe(
+      false,
+    );
+
+    // 3rd click: Success
+    fireEvent.click(logoutBtn);
+    await waitFor(() => {
+      expect(global.fetch).toHaveBeenCalledTimes(3);
+      expect(window.location.href).toBe("/");
+    });
+
+    expect(lastRouteRes).toBeDefined();
+    const setCookie = lastRouteRes.headers.get("set-cookie") || "";
+    expect(setCookie).toContain("drts_session=;");
+    expect(setCookie).toContain("drts_csrf=;");
+    expect(setCookie).toContain("drts_oidc_state=;");
+    expect(setCookie).toMatch(/Expires=Thu, 01 Jan 1970/);
+  });
+});
+
+describe("State/locale matrix", () => {
+  const originalLocation = window.location;
+
+  beforeEach(() => {
+    delete (window as any).location;
+    window.location = { href: "" } as any;
+    global.fetch = vi.fn();
+    vi.spyOn(console, "error").mockImplementation(() => {});
+  });
+
+  afterEach(() => {
+    window.location = originalLocation as any;
+    vi.restoreAllMocks();
+  });
+
+  const matrix = [
+    { type: "generic", locale: "no-provider", errorMsg: "Some generic error" },
+    { type: "generic", locale: "zh", errorMsg: "Some generic error" },
+    { type: "generic", locale: "en", errorMsg: "Some generic error" },
+    {
+      type: "scope",
+      locale: "no-provider",
+      errorMsg: "Missing fleet scope configuration",
+    },
+    {
+      type: "scope",
+      locale: "zh",
+      errorMsg: "Missing fleet scope configuration",
+    },
+    {
+      type: "scope",
+      locale: "en",
+      errorMsg: "Missing fleet scope configuration",
+    },
+  ];
+
+  matrix.forEach(({ type, locale, errorMsg }) => {
+    it(`renders ${type} error with locale ${locale} properly masking raw error and showing digest`, () => {
+      const error = new Error(errorMsg);
+      (error as any).digest = `DIGEST-${type}-${locale}`;
+
+      let ui;
+      if (locale === "no-provider") {
+        ui = React.createElement(FleetPortalError, { error, reset: () => {} });
+      } else {
+        ui = React.createElement(
+          LanguageProvider,
+          { defaultLocale: locale },
+          React.createElement(FleetPortalError, { error, reset: () => {} }),
+        );
+      }
+      render(ui);
+
+      expect(screen.queryByText(errorMsg)).toBeNull();
+      expect(
+        screen.getByText(new RegExp(`DIGEST-${type}-${locale}`)),
+      ).toBeDefined();
+
+      if (type === "generic") {
+        if (locale === "en") {
+          expect(screen.getByText("Page error")).toBeDefined();
+          expect(
+            screen.getByText("This page is temporarily unavailable"),
+          ).toBeDefined();
+          expect(
+            screen.getByRole("button", { name: /Try again/ }),
+          ).toBeDefined();
+        } else {
+          expect(screen.getByText("頁面發生錯誤")).toBeDefined();
+          expect(screen.getByText("這個頁面暫時無法顯示")).toBeDefined();
+          expect(screen.getByRole("button", { name: /重試/ })).toBeDefined();
+        }
+      } else {
+        if (locale === "en") {
+          expect(screen.getByText("Missing fleet scope")).toBeDefined();
+          expect(screen.getByText("Fleet identity unrecognised")).toBeDefined();
+          expect(screen.getByText(/Sign out/)).toBeDefined();
+        } else {
+          expect(screen.getByText("缺少車隊身分")).toBeDefined();
+          expect(screen.getByText("無法辨識您所屬的車隊")).toBeDefined();
+          expect(screen.getByText(/登出/)).toBeDefined();
+        }
+      }
+    });
+  });
 });
 
 describe("UI17-FLEET-ERROR-20260924 auth logic", () => {
@@ -244,6 +402,8 @@ describe("UI17-FLEET-ERROR-20260924 auth logic", () => {
     expect(routeRes.status).toBe(200);
     const setCookie = routeRes.headers.get("set-cookie") || "";
     expect(setCookie).toContain("drts_session=;");
+    expect(setCookie).toContain("drts_csrf=;");
+    expect(setCookie).toContain("drts_oidc_state=;");
   });
 
   it("logout route and middleware handle 403 on invalid CSRF", async () => {
