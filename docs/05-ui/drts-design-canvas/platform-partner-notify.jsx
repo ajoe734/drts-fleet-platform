@@ -13,7 +13,6 @@ const PN_EVENTS = [
   ['eta_changed','passenger.eta_changed.v1','ETA 變更'],
   ['driver_arrived','passenger.driver_arrived.v1','駕駛已抵達'],
   ['receipt_ready','passenger.receipt_ready.v1','收據就緒'],
-  ['external_action', 'external.action_required', '需外部處理'],
 ];
 function PnShell({ theme:th, children, actions }) {
   const p = { id: 'p_8a4b2c19', slug: 'nexus-premium', bank: 'Nexus Bank', program: 'Nexus Premium' };
