@@ -15,9 +15,9 @@
 ## Handoff Evidence (Gemini)
 
 - **Candidate Branch**: gemini/sr-partner-notify-ui-20260924-canvas
-- **Candidate SHA**: 72f579adc14a719418ea9143216d483ec5016f95
+- **Candidate SHA**: f7bc2e9175339f25549e8ebb72b11f273c4759ca
 - **Hosted CI Evidence**:
-  - CI: PR #2155 pending checks for 72f579adc14a719418ea9143216d483ec5016f95 (Run: pending new push).
+  - CI: PR #2155 pending checks for f7bc2e9175339f25549e8ebb72b11f273c4759ca (Run: pending new push).
   - Postgres Gate (CI): Fixed Postgres deduction error (`inconsistent types deduced for parameter $1`) by removing `::text` cast in `jsonb_build_object`. Tests SKIPPED locally (due to VM postgres restriction); requires CI.
 - **Local Evidence**:
   - `pnpm exec tsc -p apps/platform-admin-web/tsconfig.json --noEmit`: Exit 0
