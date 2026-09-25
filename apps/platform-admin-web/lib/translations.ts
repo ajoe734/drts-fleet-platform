@@ -1524,6 +1524,24 @@ const cmpZh: Record<keyof typeof cmpEn, string> = {
 };
 
 const en = {
+  "partnerNotification.permissionDenied": "Permission Denied",
+  "partnerNotification.saveFailed": "Save Failed",
+  "partnerNotification.reload": "Reload",
+  "partnerNotification.editBinding.title": "Edit Notification Binding",
+  "partnerNotification.summary.title": "Summary of Changes",
+  "partnerNotification.notFound.title": "This partner does not have a notification binding yet",
+  "partnerNotification.createBinding": "Create Binding",
+  "partnerNotification.binding.title": "Notification Binding",
+  "partnerNotification.subscribedEvents": "Subscribed Events (Internal → External)",
+  "partnerNotification.disabledDesc": "Disabled · No events will be dispatched; subscriptions are retained and can be resumed",
+  "partnerNotification.deliveries.title": "Deliveries",
+  "partnerNotification.refresh": "Refresh",
+  "partnerNotification.noData": "No Data",
+  "partnerNotification.colDeliveryId": "Delivery / Outbox ID",
+  "partnerNotification.lifecycle.title": "Lifecycle Control",
+  "partnerNotification.testFailed": "Test Failed",
+  "partnerNotification.retest": "Retest",
+  "partnerNotification.enableThreshold": "Enable threshold: The current endpoint fingerprint must have a successful test. Testing invalidates if the endpoint changes and requires retesting.",
   // ── App ──
   "app.name": "DRTS Fleet",
   "app.sub": "Platform Admin",
@@ -4649,6 +4667,24 @@ const en = {
 };
 
 const zh: typeof en = {
+  "partnerNotification.permissionDenied": "權限不足",
+  "partnerNotification.saveFailed": "儲存失敗",
+  "partnerNotification.reload": "重新載入",
+  "partnerNotification.editBinding.title": "編輯通知綁定",
+  "partnerNotification.summary.title": "變更摘要",
+  "partnerNotification.notFound.title": "此夥伴尚未建立通知綁定",
+  "partnerNotification.createBinding": "建立綁定",
+  "partnerNotification.binding.title": "通知綁定 · Notification Binding",
+  "partnerNotification.subscribedEvents": "訂閱事件（內部 → 對外映射）",
+  "partnerNotification.disabledDesc": "已停用 · 不派送任何事件；訂閱設定保留，可恢復",
+  "partnerNotification.deliveries.title": "派送紀錄 · Deliveries",
+  "partnerNotification.refresh": "重新整理",
+  "partnerNotification.noData": "無資料",
+  "partnerNotification.colDeliveryId": "Delivery / Outbox ID",
+  "partnerNotification.lifecycle.title": "生命週期控制",
+  "partnerNotification.testFailed": "測試失敗",
+  "partnerNotification.retest": "重測",
+  "partnerNotification.enableThreshold": "啟用門檻：目前端點 fingerprint 必須有成功測試。端點變更後測試自動失效，需重測。",
   // ── App ──
   "app.name": "DRTS 車隊",
   "app.sub": "平台管理",
