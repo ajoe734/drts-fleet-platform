@@ -84,10 +84,10 @@ describe.skipIf(!testDbUrl || process.env.RUN_UI_PG_GATE !== "true")(
     });
 
     it("expectedVersion/409 is enforced correctly using repository", async () => {
-      const entrySlug = "entry-409-test";
-      const tenantId = "tenant-a";
-      const partnerId = "partner-1";
-      const webhookId = "webhook-409";
+      const entrySlug = `entry-409-${crypto.randomUUID()}`;
+      const tenantId = `tenant-${crypto.randomUUID()}`;
+      const partnerId = `partner-${crypto.randomUUID()}`;
+      const webhookId = `webhook-${crypto.randomUUID()}`;
 
       const r = await pool.query(
         "INSERT INTO admin.phase1_partner_channel_entries (entry_slug, tenant_id, partner_id, created_at, updated_at, program_id, status, record) VALUES ($1::varchar, $2::varchar, $3::varchar, now(), now(), 'program1', 'active', jsonb_build_object('entrySlug', $1::varchar, 'tenantId', $2::varchar, 'partnerId', $3::varchar, 'programId', 'program1', 'status', 'active', 'activeFlag', true)) ON CONFLICT (entry_slug) DO UPDATE SET record = EXCLUDED.record",
@@ -129,9 +129,9 @@ describe.skipIf(!testDbUrl || process.env.RUN_UI_PG_GATE !== "true")(
     });
 
     it("retry idempotence/lease/fence/expiry/supersession are verified via DB state", async () => {
-      const entrySlug = "entry-retry-test";
-      const tenantId = "tenant-a";
-      const partnerId = "partner-1";
+      const entrySlug = `entry-retry-${crypto.randomUUID()}`;
+      const tenantId = `tenant-${crypto.randomUUID()}`;
+      const partnerId = `partner-${crypto.randomUUID()}`;
 
       await pool.query(
         "INSERT INTO admin.phase1_partner_channel_entries (entry_slug, tenant_id, partner_id, created_at, updated_at, program_id, status, record) VALUES ($1::varchar, $2::varchar, $3::varchar, now(), now(), 'program1', 'active', jsonb_build_object('entrySlug', $1::varchar, 'tenantId', $2::varchar, 'partnerId', $3::varchar, 'programId', 'program1', 'status', 'active', 'activeFlag', true, 'identityLinkMode', 'always')) ON CONFLICT DO NOTHING",
@@ -320,17 +320,18 @@ describe.skipIf(!testDbUrl || process.env.RUN_UI_PG_GATE !== "true")(
     });
 
     it("same-tenant vs cross-tenant logic is validated using real TenantPartnerService", async () => {
-      const entrySlug = "entry-tenant-3";
+      const entrySlug = `entry-tenant-${crypto.randomUUID()}`;
+      const tenantId = `tenant-${crypto.randomUUID()}`;
+      const partnerId = `partner-${crypto.randomUUID()}`;
+
       mtService.tenantPartnerService.partnerEntries.push({
         entrySlug,
-        tenantId: "tenant-a",
-        partnerId: "partner-1",
+        tenantId,
+        partnerId,
         programId: "program1",
         status: "active",
         activeFlag: true,
       });
-      const tenantId = "tenant-a";
-      const partnerId = "partner-1";
 
       await pool.query(
         "INSERT INTO admin.phase1_partner_channel_entries (entry_slug, tenant_id, partner_id, created_at, updated_at, program_id, status, record) VALUES ($1::varchar, $2::varchar, $3::varchar, now(), now(), 'program1', 'active', jsonb_build_object('entrySlug', $1::varchar, 'tenantId', $2::varchar, 'partnerId', $3::varchar, 'programId', 'program1', 'status', 'active', 'activeFlag', true)) ON CONFLICT DO NOTHING",
@@ -342,7 +343,7 @@ describe.skipIf(!testDbUrl || process.env.RUN_UI_PG_GATE !== "true")(
         actorType: "tenant_admin",
         actorId: "admin-1",
         realm: "tenant",
-        tenantId: "tenant-a",
+        tenantId: tenantId,
       };
 
       const queryPromise = mtService.listPartnerNotificationDeliveries(

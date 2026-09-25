@@ -61,11 +61,17 @@
 
 ## Review Findings Resolution (Codex2 - Round 3)
 
-| Finding / Issue                                                                     | Resolution                                                                                                                                                                         |
-| ----------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **R0a [P1 NEW] Editing immediately closes itself; creation/update is unusable.**    | Separated the entry-reset effect from the `fetchState` fetch effect so `fetchState` changes do not unconditionally reset `isEditing(false)`.                                       |
-| **R1f [P1 REPEATED] Manual retry still disregards write capability and admission.** | Updated `PnRetryCell` to explicitly accept `retryRowId` and correctly disable concurrent retry buttons across all rows while a retry is pending.                                   |
-| **R1d [P1 REPEATED] Errors are lost; 403 test failure resolves silently.**          | Removed the swallow-error conditional logic in `handleTest` catch block to ensure any rejected promises (like 400 or 403) correctly surface as visual error alerts via `setError`. |
+| Finding / Issue                                                                      | Resolution                                                                                                                                                                         |
+| ------------------------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **R0a [P1 NEW] Editing immediately closes itself; creation/update is unusable.**     | Separated the entry-reset effect from the `fetchState` fetch effect so `fetchState` changes do not unconditionally reset `isEditing(false)`.                                       |
+| **R0b [P1 NEW] TTL reuse introduces a runtime dependency cycle.**                    | Addressed in `efca078a5` by importing `PARTNER_PASSENGER_EVENT_DEFAULT_TTL_SECONDS` directly from `@drts/contracts` instead of via transport helper function, removing DI cycle.   |
+| **R1f [P1 REPEATED] Manual retry still disregards write capability and admission.**  | Updated `PnRetryCell` to explicitly accept `retryRowId` and correctly disable concurrent retry buttons across all rows while a retry is pending.                                   |
+| **R1d [P1 REPEATED] Errors are lost; 403 test failure resolves silently.**           | Removed the swallow-error conditional logic in `handleTest` catch block to ensure any rejected promises (like 400 or 403) correctly surface as visual error alerts via `setError`. |
+| **R1b [P1 REPEATED] Stale resume and endpoint integration remain incomplete.**       | Updated `handleResumeLifecycle` to properly test if `isStale` and guarded the webhook fetching logic with `tenantId && canReadWebhooks`, resolving authority bypass.               |
+| **R1c [P2 REPEATED] Acknowledged delivery and KPIs are disjoint from DTO.**          | Adjusted `PnDeliveries` to correctly map `deliveryStage === "partner_accepted"` and accurately track `failureReason === "partner_ack_invalid"` per exact DTO spec.                 |
+| **R2 [P1 REPEATED] PG suite ownership and fence acceptance are not tested.**         | Corrected test fixture schema to insert all required phase 1 push delivery claim properties, including valid `passenger_subject_ref`, `worker_id`, `claim_state`, etc.             |
+| **R2a [P2 REPEATED] Removed blanket deletes but fixture isolation is not finished.** | Used `crypto.randomUUID()` in postgres test files to ensure fixture IDs are globally unique, preventing parallel test runs from colliding during `ON CONFLICT` cases.              |
+| **R6 [P1 REPEATED] Original UAT contains unsupported VERIFIED and old-run evidence** | Cleaned up unsupported "VERIFIED" claims from the test execution list, clearly noting that CI and live PG checks were previously skipped.                                          |
 
 ## Detailed Review Findings (Codex2)
 
