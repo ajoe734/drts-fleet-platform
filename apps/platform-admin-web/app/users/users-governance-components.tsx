@@ -13,7 +13,7 @@ import { useTranslation } from "@/lib/i18n";
 import { useBreakGlass } from "@/components/break-glass-context";
 import { ApiClientError } from "@drts/api-client";
 import { createPlatformAdminIamClient } from "@/lib/platform-admin-iam-client";
-import { getSessionGovernanceCopy, getBreakGlassCopy } from "./translations";
+import { getSessionGovernanceCopy, getBreakGlassCopy, getStepUpCopy } from "./translations";
 import type {
   AccessReviewCampaignRecord,
   AccessReviewEvidenceRecord,
@@ -399,7 +399,8 @@ export function RoleApprovalPanel() {
     () => createPlatformAdminIamClient(rawClient),
     [rawClient],
   );
-  const { t } = useTranslation();
+  const { t, locale } = useTranslation();
+  const stepUpCopy = useMemo(() => getStepUpCopy(locale), [locale]);
 
   const [requests, setRequests] = useState<
     PrivilegedRoleApprovalRequestRecord[]
@@ -836,7 +837,7 @@ export function RoleApprovalPanel() {
                   theme={theme}
                   tone="danger"
                   icon="lock"
-                  title="職責分離衝突 · 核准已被系統阻擋"
+                  title={stepUpCopy.sodViolationTitle}
                   body={sodError + " 後端 checkSodPolicy 回 403 IAM_SOD_VIOLATION；無例外理由放行。需先卸除衝突角色或改申請其他角色。"}
                 />
               ) : null}
@@ -1213,6 +1214,7 @@ export function BreakGlassPanel() {
   );
   const { t: originalT, locale } = useTranslation();
   const bgCopy = useMemo(() => getBreakGlassCopy(locale), [locale]);
+  const stepUpCopy = useMemo(() => getStepUpCopy(locale), [locale]);
   const t = useCallback((key: string) => {
     if (key.startsWith("users.governance.breakGlass.")) {
        const k = key.replace("users.governance.breakGlass.", "");
@@ -1555,13 +1557,13 @@ export function BreakGlassPanel() {
                     theme={theme}
                     tone="warn"
                     icon="lock"
-                    title="需 step-up proof 或 Fresh MFA"
+                    title={stepUpCopy.stepUpRequiredTitle}
                     body="申請前請先取得 step-up 憑證或重新登入 (Fresh MFA)。"
                     actions={
                       <CanvasBtn theme={theme} size="xs" variant="primary" icon="lock" onClick={() => {
                         handleGetStepUpProof("platform:break-glass:request");
                       }}>
-                        取得 step-up proof
+                        {stepUpCopy.getStepUpProof}
                       </CanvasBtn>
                     }
                   />
@@ -1570,7 +1572,7 @@ export function BreakGlassPanel() {
                     theme={theme}
                     tone="info"
                     icon="clock"
-                    title="等待驗證"
+                    title={stepUpCopy.verifyingTitle}
                     body="正在向伺服器請求身分驗證憑證..."
                   />
                 ) : stepUpState === "EXPIRED" ? (
@@ -1578,13 +1580,13 @@ export function BreakGlassPanel() {
                     theme={theme}
                     tone="danger"
                     icon="warn"
-                    title="step-up proof 已失效"
+                    title={stepUpCopy.expiredTitle}
                     body="憑證已過期或已被使用，請重新取得。"
                     actions={
                       <CanvasBtn theme={theme} size="xs" variant="primary" icon="refresh" onClick={() => {
                         handleGetStepUpProof("platform:break-glass:request");
                       }}>
-                        重新取得
+                        {stepUpCopy.retry}
                       </CanvasBtn>
                     }
                   />
@@ -1699,13 +1701,13 @@ export function BreakGlassPanel() {
                   theme={theme}
                   tone="warn"
                   icon="lock"
-                  title="需 step-up proof 或 Fresh MFA"
+                  title={stepUpCopy.stepUpRequiredTitle}
                   body="操作前請先取得 step-up 憑證或重新登入 (Fresh MFA)。"
                   actions={
                     <CanvasBtn theme={theme} size="xs" variant="primary" icon="lock" onClick={() => {
                       handleGetStepUpProof(selectedGrant?.status === "requested" ? "platform:break-glass:approve" : "platform:break-glass:activate");
                     }}>
-                      取得 step-up proof
+                      {stepUpCopy.getStepUpProof}
                     </CanvasBtn>
                   }
                 />
@@ -1714,7 +1716,7 @@ export function BreakGlassPanel() {
                   theme={theme}
                   tone="info"
                   icon="clock"
-                  title="等待驗證"
+                  title={stepUpCopy.verifyingTitle}
                   body="正在向伺服器請求身分驗證憑證..."
                 />
               ) : stepUpState === "EXPIRED" ? (
@@ -1722,13 +1724,13 @@ export function BreakGlassPanel() {
                   theme={theme}
                   tone="danger"
                   icon="warn"
-                  title="step-up proof 已失效"
+                  title={stepUpCopy.expiredTitle}
                   body="憑證已過期或已被使用，請重新取得。"
                   actions={
                     <CanvasBtn theme={theme} size="xs" variant="primary" icon="refresh" onClick={() => {
                       handleGetStepUpProof(selectedGrant?.status === "requested" ? "platform:break-glass:approve" : "platform:break-glass:activate");
                     }}>
-                      重新取得
+                      {stepUpCopy.retry}
                     </CanvasBtn>
                   }
                 />

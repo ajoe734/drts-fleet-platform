@@ -36,7 +36,7 @@ const listCases = [
   {
     name: "driver affiliations",
     path: `${partnerPath}/drivers`,
-    load: (client: ApiClient) => listFleetPartnerDrivers(client, partnerId),
+    load: (client: ApiClient) => listFleetPartnerDrivers(client as any, partnerId),
     row: {
       affiliation_id: "sr-admin-affiliation",
       driver_id: "sr-admin-driver",
@@ -51,7 +51,7 @@ const listCases = [
   {
     name: "revenue share rules",
     path: `${partnerPath}/revenue-share-rules`,
-    load: (client: ApiClient) => listRevenueShareRules(client, partnerId),
+    load: (client: ApiClient) => listRevenueShareRules(client as any, partnerId),
     row: {
       rule_id: "sr-admin-rule",
       fleet_partner_id: partnerId,
@@ -66,7 +66,7 @@ const listCases = [
   {
     name: "statements",
     path: `${partnerPath}/statements`,
-    load: (client: ApiClient) => listFleetStatements(client, partnerId),
+    load: (client: ApiClient) => listFleetStatements(client as any, partnerId),
     row: {
       statement_id: "sr-admin-statement",
       fleet_partner_id: partnerId,
@@ -96,7 +96,7 @@ describe.each(listCases)(
       );
       vi.stubGlobal("fetch", fetchMock);
 
-      const result = await load(client());
+      const result = await load(client() as any);
       expect(result).toEqual([expect.objectContaining(expected)]);
       expect(fetchMock).toHaveBeenCalledTimes(1);
       expect(fetchMock.mock.calls[0]?.[0]).toBe(
@@ -114,7 +114,7 @@ describe.each(listCases)(
         ),
       );
 
-      await expect(load(client())).resolves.toEqual([]);
+      await expect(load(client() as any)).resolves.toEqual([]);
     });
 
     it.each([403, 503])(
@@ -131,7 +131,7 @@ describe.each(listCases)(
         );
         vi.stubGlobal("fetch", fetchMock);
 
-        await expect(load(client())).rejects.toMatchObject({
+        await expect(load(client() as any)).rejects.toMatchObject({
           statusCode: status,
           code: "FLEET_READ_FAILED",
         });

@@ -52,10 +52,33 @@ export const breakGlassTranslations = {
   },
 } as const;
 
+export const stepUpTranslations = {
+  en: {
+    sodViolationTitle: "Segregation of Duties Conflict · Blocked by System",
+    stepUpRequiredTitle: "step-up proof or Fresh MFA required",
+    getStepUpProof: "Get step-up proof",
+    verifyingTitle: "Verifying",
+    expiredTitle: "step-up proof expired",
+    retry: "Retry",
+  },
+  zh: {
+    sodViolationTitle: "職責分離衝突 · 核准已被系統阻擋",
+    stepUpRequiredTitle: "需 step-up proof 或 Fresh MFA",
+    getStepUpProof: "取得 step-up proof",
+    verifyingTitle: "等待驗證",
+    expiredTitle: "step-up proof 已失效",
+    retry: "重新取得",
+  },
+} as const;
+
 export function getSessionGovernanceCopy(locale: Locale) {
   return sessionGovernanceTranslations[locale === "en" ? "en" : "zh"];
 }
 
 export function getBreakGlassCopy(locale: Locale) {
   return breakGlassTranslations[locale === "en" ? "en" : "zh"];
+}
+
+export function getStepUpCopy(locale: Locale) {
+  return stepUpTranslations[locale === "en" ? "en" : "zh"];
 }
