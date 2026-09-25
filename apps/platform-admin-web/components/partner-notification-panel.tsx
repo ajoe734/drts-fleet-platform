@@ -34,7 +34,7 @@ export function PanelActionBtn({ theme, descriptor, label, en, icon, onClick, si
   return <CanvasActionButton theme={theme} descriptor={descriptor} label={label} en={en} icon={icon} size={size} variant={variant} />;
 }
 
-export function PartnerNotificationPanel({ entrySlug, canWriteBinding, canManageWebhooks, tenantId }: { entrySlug: string; partnerName?: string; programName?: string; partnerId?: string; tenantId?: string, canWriteBinding?: boolean, canManageWebhooks?: boolean }) {
+export function PartnerNotificationPanel({ entrySlug, canWriteBinding, tenantId }: { entrySlug: string; partnerName?: string; programName?: string; partnerId?: string; tenantId?: string, canWriteBinding?: boolean }) {
   const client = usePlatformAdminClient();
   const { t } = useTranslation();
   const theme = buildCanvasTheme({ surface: "platform" });
