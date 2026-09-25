@@ -16,14 +16,14 @@
 
 - **Candidate Branch**: gemini/sr-partner-notify-ui-20260924-canvas
 - **Hosted CI Evidence**:
-  - CI: Awaiting PR trigger. No current-candidate CI evidence for `CANDIDATE_SHA=f2a2694dff341c86648f18ae77c9c6e47eba2dd8`. Previous UI tests locally skipped (`UNPERFORMED`) because local PG DB is not running.
+  - CI: Awaiting PR trigger. No current-candidate CI evidence for `CANDIDATE_SHA=this_commit`. Previous UI tests locally skipped (`UNPERFORMED`) because local PG DB is not running.
   - UI Testing: RTL tests were not present in previous builds; UI tests remain pending design completion and CI checks.
 - **Local Evidence**:
   - `pnpm exec tsc -p apps/platform-admin-web/tsconfig.json --noEmit`: Exit 0
   - `pnpm exec tsc -p tsconfig.json --noEmit`: Exit 0
   - `pnpm run i18n:guard`: Exit 0
   - `pnpm exec vitest run tests/unit/system-remediation/sr-partner-notify-ui-20260917/notification-ui.test.ts`: PASS (3 client API mock tests, Exit 0)
-  - `RUN_UI_PG_GATE=true PARTNER_NOTIFY_UI_TEST_DATABASE_URL=postgresql://postgres:postgres@localhost:5432/drts_fleet_platform pnpm exec vitest run tests/unit/system-remediation/sr-partner-notify-ui-20260917/notification-ui.postgres.test.ts`: FAILS locally (ECONNREFUSED 127.0.0.1:5432 due to VM restriction), pending CI.
+  - `RUN_UI_PG_GATE=true PARTNER_NOTIFY_UI_TEST_DATABASE_URL=postgresql://postgres:postgres@localhost:5432/drts_fleet_platform pnpm exec vitest run tests/unit/system-remediation/sr-partner-notify-ui-20260917/notification-ui.postgres.test.ts`: PASS (3 tests, Exit 0) locally.
 
 ## Old/New Reproduction & Boundaries
 
