@@ -138,7 +138,7 @@ touched product source, so they remain exactly as Codex2 recorded:
   [V0104](../../../infra/migrations/V0104__sr_partner_notification_binding_and_routing.sql)
   does not define; hosted job fails at
   `notification-ui.postgres.test.ts:95`.
-- `R0a / R1d lifecycle`, `R1f configuration recovery`, `R1b navigation`, `R6 evidence` — as detailed in the prior independent reviewer receipts inside `docs/04-uat/system-remediation-20260906/SR-PARTNER-NOTIFY-UI-20260917.md`.
+- `R0a / R1d lifecycle`, `R1f configuration recovery`, `R1b navigation`, `R6 evidence` — as detailed in Codex2's `2026-09-25T15:09:35Z` reviewer receipt in the parent task's `worker_outcomes` (`ai-status.sh show SR-PARTNER-NOTIFY-UI-20260917`). The parent's designated UAT artifact path, docs/04-uat/system-remediation-20260906/SR-PARTNER-NOTIFY-UI-20260917.md, does not exist on `origin/dev` at this audit — it is only ever populated inside the parent's own candidate diff, never merged, so this helper cannot cite it as an existing repo path without failing `check_canonical_consistency.py`'s cited-paths gate.
 
 All three parent `required_acceptance` keys remain pending on the original
 owner's product work:
