@@ -105,7 +105,7 @@ function PA_IamSessions({ theme:th }) {
   );
 }
 // C3 · 特權角色審批
-function PA_IamPrivileged({ theme:th }) {
+function PA_IamPrivileged({ theme:th, stepUpState = "none" }) {
   return (
     <IamShell theme={th} tab="privileged" actions={<Btn theme={th} variant="primary" icon="plus">申請特權角色</Btn>}>
       <div style={{ padding:24, display:'grid', gridTemplateColumns:'1.3fr 1fr', gap:16, alignItems:'start' }}>
@@ -127,15 +127,20 @@ function PA_IamPrivileged({ theme:th }) {
           </Card>
         </div>
         <div style={{ display:'flex', flexDirection:'column', gap:16 }}>
-        <Card theme={th} title="申請 PR-0086 · 王新人 → billing_admin" subtitle="核准中間狀態 · 需 Fresh MFA" actions={<Pill theme={th} tone="info" dot>1 / 2 已核准</Pill>}>
-          <Stepper theme={th} current={1} steps={['送出','第一人核准','第二人核准','生效']}/>
-          <div style={{ marginTop:12 }}><Banner theme={th} tone="warn" icon="lock" title="登入逾時 (IAM_STEP_UP_REQUIRED)" body="核准特權角色需在最近 10 分鐘內驗證。請重新登入 (Fresh MFA) 後再試。"/></div>
-          <div style={{ display:'flex', gap:8 }}><ActionButton theme={th} descriptor={{ action:'approve', enabled:false, disabledReasonCode:'IAM_STEP_UP_REQUIRED', riskLevel:'high', requiresReason:true }} variant="primary" icon="check" label="核准 (需 Fresh MFA)" en="approve"/></div>
+        <Card theme={th} title="申請 PR-0086 · 王新人 → security_officer" subtitle="待審批 · 單人核准" actions={<Pill theme={th} tone="warn" dot>待審批</Pill>}>
+          <Stepper theme={th} current={1} steps={['送出','非本人核准','生效']}/>
+          <div style={{ marginTop:12 }}>
+            {stepUpState === "none" && <Banner theme={th} tone="warn" icon="lock" title="操作前請先取得 step-up 憑證或重新登入 (Fresh MFA)" actions={<Btn theme={th} size="xs" variant="primary" icon="lock">取得 step-up proof</Btn>}/>}
+            {stepUpState === "verifying" && <Banner theme={th} tone="info" icon="clock" title="正在向伺服器請求身分驗證憑證..."/>}
+            {stepUpState === "valid" && <Banner theme={th} tone="success" icon="check" title="身分驗證憑證有效" body="可進行高風險操作。"/>}
+            {stepUpState === "expired" && <Banner theme={th} tone="danger" icon="alert-triangle" title="登入逾時 (IAM_STEP_UP_REQUIRED)" body="憑證已過期或被拒絕，請重新登入 (Fresh MFA) 後再試。" actions={<Btn theme={th} size="xs" variant="primary" icon="refresh">重新取得</Btn>}/>}
+          </div>
+          <div style={{ display:'flex', gap:8, marginTop: 12 }}><ActionButton theme={th} descriptor={{ action:'approve', enabled: stepUpState === 'valid', disabledReasonCode:'IAM_STEP_UP_REQUIRED', riskLevel:'high', requiresReason:true }} variant="primary" icon="check" label="核准" en="approve"/></div>
         </Card>
         <Card theme={th} title="申請表單">
           <Field theme={th} label="對象成員" required><Select theme={th} value="王新人"/></Field>
-          <Field theme={th} label="目標角色" required><Select theme={th} value="billing_admin"/></Field>
-          <Field theme={th} label="理由" required><Input theme={th} value="接手月結對帳"/></Field>
+          <Field theme={th} label="目標角色" required><Select theme={th} value="security_officer"/></Field>
+          <Field theme={th} label="理由" required><Input theme={th} value="接手資安事件處理"/></Field>
           <Field theme={th} label="有效期限"><Select theme={th} value="永久（需季度存取複核）"/></Field>
           <ActionButton theme={th} descriptor={{ action:'submit', enabled:true, riskLevel:'medium' }} variant="primary" icon="check" label="送出申請" en="submit"/>
         </Card>

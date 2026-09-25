@@ -98,7 +98,7 @@ describe("SR-IAM-001 / R05 — Session governance 403 request loop regression", 
       post: vi.fn(),
     } as unknown as ApiClient;
 
-    const iamClient = createPlatformAdminIamClient(mockClient as any);
+    const iamClient = createPlatformAdminIamClient(mockClient);
 
     // Simulate component lifecycle state and single load execution
     let loadingSessions = true;
@@ -176,7 +176,7 @@ describe("SR-IAM-001 / R05 — Session governance 403 request loop regression", 
       post: vi.fn(),
     } as unknown as ApiClient;
 
-    const iamClient = createPlatformAdminIamClient(mockClient as any);
+    const iamClient = createPlatformAdminIamClient(mockClient);
     let error: string | null = null;
 
     try {
@@ -201,7 +201,7 @@ describe("SR-IAM-001 / R05 — Session governance 403 request loop regression", 
       post: vi.fn(),
     } as unknown as ApiClient;
 
-    const iamClient = createPlatformAdminIamClient(mockClient as any);
+    const iamClient = createPlatformAdminIamClient(mockClient);
     let loadingSessions = true;
     let sessions: MaskedSessionSummary[] = [];
     let error: string | null = null;
@@ -242,7 +242,7 @@ describe("SR-IAM-001 / R05 — Session governance 403 request loop regression", 
       }),
     } as unknown as ApiClient;
 
-    const iamClient = createPlatformAdminIamClient(mockClient as any);
+    const iamClient = createPlatformAdminIamClient(mockClient);
     let revokingSid: string | null = "sess_ops_101";
     let error: string | null = null;
     const locale = "zh";
@@ -285,7 +285,7 @@ describe("SR-IAM-001 / R05 — Session governance 403 request loop regression", 
       })),
     } as unknown as ApiClient;
 
-    const iamClient = createPlatformAdminIamClient(mockClient as any);
+    const iamClient = createPlatformAdminIamClient(mockClient);
     const result = await iamClient.revokeSession("sess_ops_101", {
       reason: "security_incident_containment",
       isCompromised: true,

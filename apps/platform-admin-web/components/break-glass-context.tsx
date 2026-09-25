@@ -176,13 +176,32 @@ export function useBreakGlass() {
 export function BreakGlassBanner() {
   const { isBreakGlassActive, grant, secondsRemaining, exitSession } =
     useBreakGlass();
-  const { t } = useTranslation();
-  const [exiting, setExiting] = useState(false);
-  const [exitError, setExitError] = useState<string | null>(null);
 
   if (!isBreakGlassActive || !grant) {
     return null;
   }
+
+  return (
+    <ActiveBreakGlassBanner
+      grant={grant}
+      secondsRemaining={secondsRemaining}
+      exitSession={exitSession}
+    />
+  );
+}
+
+function ActiveBreakGlassBanner({
+  grant,
+  secondsRemaining,
+  exitSession,
+}: {
+  grant: import("@drts/contracts").BreakGlassGrantRecord;
+  secondsRemaining: number;
+  exitSession: (reason?: string, stepUpRef?: string) => Promise<void>;
+}) {
+  const { t } = useTranslation();
+  const [exiting, setExiting] = useState(false);
+  const [exitError, setExitError] = useState<string | null>(null);
 
   const theme = buildCanvasTheme({ surface: "platform", density: "compact" });
 
@@ -198,6 +217,8 @@ export function BreakGlassBanner() {
   const handleGetStepUpProof = async () => {
     setStepUpState("VERIFYING");
     try {
+      // Documented gap: No 'platform:break-glass:close' in IAM_STAGE15_OPERATION_CATALOG
+      // This will correctly resolve to 'required: false' and eventually fail on the backend.
       const proof = await iamClient.createStepUpProof({
         actionId: "platform:break-glass:close" as any,
       });

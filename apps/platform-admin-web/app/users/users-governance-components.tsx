@@ -1702,10 +1702,15 @@ export function BreakGlassPanel() {
                   tone="warn"
                   icon="lock"
                   title={stepUpCopy.stepUpRequiredTitle}
-                  body="操作前請先取得 step-up 憑證或重新登入 (Fresh MFA)。"
+                  body={selectedGrant?.status === "requested" ? "操作前請先取得 step-up 憑證或重新登入 (Fresh MFA)。" : "API 缺少此操作的 Step-up policy，憑證取得將失敗。"}
                   actions={
                     <CanvasBtn theme={theme} size="xs" variant="primary" icon="lock" onClick={() => {
-                      handleGetStepUpProof(selectedGrant?.status === "requested" ? "platform:break-glass:approve" : "platform:break-glass:activate");
+                      if (selectedGrant?.status === "requested") {
+                        handleGetStepUpProof("platform:break-glass:approve");
+                      } else {
+                        // Documented gap: No step-up policy for activate/close
+                        handleGetStepUpProof("platform:break-glass:activate"); // This will fail with 'required: false' as expected due to missing policy.
+                      }
                     }}>
                       {stepUpCopy.getStepUpProof}
                     </CanvasBtn>
@@ -1728,7 +1733,11 @@ export function BreakGlassPanel() {
                   body="憑證已過期或已被使用，請重新取得。"
                   actions={
                     <CanvasBtn theme={theme} size="xs" variant="primary" icon="refresh" onClick={() => {
-                      handleGetStepUpProof(selectedGrant?.status === "requested" ? "platform:break-glass:approve" : "platform:break-glass:activate");
+                      if (selectedGrant?.status === "requested") {
+                        handleGetStepUpProof("platform:break-glass:approve");
+                      } else {
+                        handleGetStepUpProof("platform:break-glass:activate");
+                      }
                     }}>
                       {stepUpCopy.retry}
                     </CanvasBtn>
