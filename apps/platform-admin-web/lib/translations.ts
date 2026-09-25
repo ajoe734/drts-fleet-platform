@@ -1524,6 +1524,28 @@ const cmpZh: Record<keyof typeof cmpEn, string> = {
 };
 
 const en = {
+  "partnerNotification.permissionDenied": "Permission Denied",
+  "partnerNotification.saveFailed": "Save Failed",
+  "partnerNotification.reload": "Reload",
+  "partnerNotification.editBinding.title": "Edit Notification Binding",
+  "partnerNotification.summary.title": "Summary of Changes",
+  "partnerNotification.notFound.title":
+    "This partner does not have a notification binding yet",
+  "partnerNotification.createBinding": "Create Binding",
+  "partnerNotification.binding.title": "Notification Binding",
+  "partnerNotification.subscribedEvents":
+    "Subscribed Events (Internal → External)",
+  "partnerNotification.disabledDesc":
+    "Disabled · No events will be dispatched; subscriptions are retained and can be resumed",
+  "partnerNotification.deliveries.title": "Deliveries",
+  "partnerNotification.refresh": "Refresh",
+  "partnerNotification.noData": "No Data",
+  "partnerNotification.colDeliveryId": "Delivery / Outbox ID",
+  "partnerNotification.lifecycle.title": "Lifecycle Control",
+  "partnerNotification.testFailed": "Test Failed",
+  "partnerNotification.retest": "Retest",
+  "partnerNotification.enableThreshold":
+    "Enable threshold: The current endpoint fingerprint must have a successful test. Testing invalidates if the endpoint changes and requires retesting.",
   // ── App ──
   "app.name": "DRTS Fleet",
   "app.sub": "Platform Admin",
@@ -1548,6 +1570,81 @@ const en = {
   "nav.featureFlags": "Feature Flags",
 
   // ── Common ──
+
+  // Partner Notification
+  "partnerNotification.save": "Save",
+  "partnerNotification.cancel": "Cancel",
+  "partnerNotification.create": "Create",
+  "partnerNotification.edit": "Edit",
+  "partnerNotification.title": "Notification Binding",
+  "partnerNotification.subtitle":
+    "Manage webhook bindings for passenger notifications",
+  "partnerNotification.test": "Test Binding",
+  "partnerNotification.enable": "Enable",
+  "partnerNotification.disable": "Disable",
+  "partnerNotification.lifecycleCtrl": "Lifecycle Control",
+  "partnerNotification.testRejected": "Test Rejected",
+  "partnerNotification.enableFailed": "Enable Failed",
+  "partnerNotification.disableFailed": "Disable Failed",
+  "partnerNotification.resumeFailed": "Resume Failed",
+  "partnerNotification.testFailedAck": "Test Failed (Ack Mismatch)",
+  "partnerNotification.resumeDep":
+    "'Resume' depends on if current endpoint is passed_current, no separate /resume.",
+  "partnerNotification.enqueueFailed": "Enqueue Failed",
+  "partnerNotification.enqueued": "Enqueued, awaiting claim",
+  "partnerNotification.noDeliveries": "No Deliveries",
+  "partnerNotification.unknownTarget": "Unknown / Target Not Created",
+  "partnerNotification.pass": "Pass",
+  "partnerNotification.mismatch": "Mismatch",
+  "partnerNotification.deliverySummary24h": "Delivery Summary (24h)",
+  "partnerNotification.noBinding": "No binding configured",
+  "partnerNotification.noBindingBody":
+    "This entry has no passenger notification binding.",
+  "partnerNotification.recent": "Recent Deliveries",
+  "partnerNotification.recentSubtitle":
+    "Shows recent delivery attempts (unknown device status)",
+  "partnerNotification.privacyNotice": "Privacy notice",
+  "partnerNotification.privacyBody":
+    "Device delivery status is unknown. Do not claim the resident has received or read the notification.",
+  "partnerNotification.retry": "Retry",
+  "partnerNotification.delivered": "Partner Accepted (Device Unknown)",
+  "partnerNotification.state": "State",
+  "partnerNotification.webhookId": "Webhook ID",
+  "partnerNotification.outboxId": "Outbox ID",
+  "partnerNotification.status": "Status",
+  "partnerNotification.stage": "Delivery Stage",
+  "partnerNotification.reason": "Failure Reason",
+  "partnerNotification.conflict": "Conflict",
+  "partnerNotification.error": "Error",
+
+  "partnerNotification.state.pending": "Pending",
+  "partnerNotification.state.test_pending": "Test Pending",
+  "partnerNotification.state.ready": "Ready",
+  "partnerNotification.state.disabled": "Disabled",
+
+  "partnerNotification.stage.outbox_persisted": "Outbox Persisted",
+  "partnerNotification.stage.partner_accepted": "Partner Accepted",
+  "partnerNotification.stage.provider_accepted": "Provider Accepted",
+  "partnerNotification.stage.device_received": "Device Received",
+  "partnerNotification.stage.opened": "Opened",
+
+  "partnerNotification.reason.configuration_blocked": "Configuration Blocked",
+  "partnerNotification.reason.endpoint_disabled": "Endpoint Disabled",
+  "partnerNotification.reason.route_missing": "Route Missing",
+  "partnerNotification.reason.route_ambiguous": "Route Ambiguous",
+  "partnerNotification.reason.owner_changed": "Owner Changed",
+  "partnerNotification.reason.recipient_revoked": "Recipient Revoked",
+  "partnerNotification.reason.provider_transient_error":
+    "Provider Transient Error",
+  "partnerNotification.reason.credential_rejected": "Credential Rejected",
+  "partnerNotification.reason.endpoint_unavailable": "Endpoint Unavailable",
+  "partnerNotification.reason.partner_ack_invalid": "Partner Ack Invalid",
+  "partnerNotification.reason.notification_expired": "Notification Expired",
+  "partnerNotification.reason.notification_obsolete": "Notification Obsolete",
+  "partnerNotification.reason.notification_superseded":
+    "Notification Superseded",
+  "partnerNotification.selectWebhookEndpoint": "Select webhook endpoint...",
+
   "common.enabled": "Enabled",
   "common.disabled": "Disabled",
   "common.active": "Active",
@@ -4596,6 +4693,41 @@ const en = {
 };
 
 const zh: typeof en = {
+  "partnerNotification.lifecycleCtrl": "生命週期控制",
+  "partnerNotification.testRejected": "綁定測試遭拒",
+  "partnerNotification.enableFailed": "啟用失敗",
+  "partnerNotification.disableFailed": "停用失敗",
+  "partnerNotification.resumeFailed": "恢復失敗",
+  "partnerNotification.testFailedAck": "測試失敗 · ack 驗證不符",
+  "partnerNotification.resumeDep":
+    "「恢復」依據目前端點是否 passed_current 來決定是否需重測，無獨立 /resume。",
+  "partnerNotification.enqueueFailed": "入列要求失敗",
+  "partnerNotification.enqueued": "入列中 · 待 claim",
+  "partnerNotification.noDeliveries": "尚無派送紀錄",
+  "partnerNotification.unknownTarget": "未知／尚未建立派送目標",
+  "partnerNotification.pass": "通過",
+  "partnerNotification.mismatch": "不符",
+  "partnerNotification.deliverySummary24h": "派送摘要 · 近 24h",
+  "partnerNotification.permissionDenied": "權限不足",
+  "partnerNotification.saveFailed": "儲存失敗",
+  "partnerNotification.reload": "重新載入",
+  "partnerNotification.editBinding.title": "編輯通知綁定",
+  "partnerNotification.summary.title": "變更摘要",
+  "partnerNotification.notFound.title": "此夥伴尚未建立通知綁定",
+  "partnerNotification.createBinding": "建立綁定",
+  "partnerNotification.binding.title": "通知綁定 · Notification Binding",
+  "partnerNotification.subscribedEvents": "訂閱事件（內部 → 對外映射）",
+  "partnerNotification.disabledDesc":
+    "已停用 · 不派送任何事件；訂閱設定保留，可恢復",
+  "partnerNotification.deliveries.title": "派送紀錄 · Deliveries",
+  "partnerNotification.refresh": "重新整理",
+  "partnerNotification.noData": "無資料",
+  "partnerNotification.colDeliveryId": "Delivery / Outbox ID",
+  "partnerNotification.lifecycle.title": "生命週期控制",
+  "partnerNotification.testFailed": "測試失敗",
+  "partnerNotification.retest": "重測",
+  "partnerNotification.enableThreshold":
+    "啟用門檻：目前端點 fingerprint 必須有成功測試。端點變更後測試自動失效，需重測。",
   // ── App ──
   "app.name": "DRTS 車隊",
   "app.sub": "平台管理",
@@ -4620,6 +4752,61 @@ const zh: typeof en = {
   "nav.featureFlags": "功能旗標",
 
   // ── Common ──
+
+  // Partner Notification
+  "partnerNotification.save": "儲存",
+  "partnerNotification.cancel": "取消",
+  "partnerNotification.create": "建立",
+  "partnerNotification.edit": "編輯",
+  "partnerNotification.title": "通知綁定",
+  "partnerNotification.subtitle": "管理乘客通知的 Webhook 綁定",
+  "partnerNotification.test": "測試綁定",
+  "partnerNotification.enable": "啟用",
+  "partnerNotification.disable": "停用",
+  "partnerNotification.noBinding": "未配置綁定",
+  "partnerNotification.noBindingBody": "此 entry 尚未配置乘客通知綁定。",
+  "partnerNotification.recent": "近期投遞",
+  "partnerNotification.recentSubtitle": "顯示近期的投遞嘗試（裝置狀態未知）",
+  "partnerNotification.privacyNotice": "隱私聲明",
+  "partnerNotification.privacyBody":
+    "裝置投遞狀態未知。請勿聲稱居民已收到或閱讀通知。",
+  "partnerNotification.retry": "重試",
+  "partnerNotification.delivered": "夥伴已接受（裝置未知）",
+  "partnerNotification.state": "狀態",
+  "partnerNotification.webhookId": "Webhook ID",
+  "partnerNotification.outboxId": "Outbox ID",
+  "partnerNotification.status": "狀態",
+  "partnerNotification.stage": "投遞階段",
+  "partnerNotification.reason": "失敗原因",
+  "partnerNotification.conflict": "衝突",
+  "partnerNotification.error": "錯誤",
+
+  "partnerNotification.state.pending": "待驗證",
+  "partnerNotification.state.test_pending": "測試中",
+  "partnerNotification.state.ready": "就緒",
+  "partnerNotification.state.disabled": "已停用",
+
+  "partnerNotification.stage.outbox_persisted": "已存入發件箱",
+  "partnerNotification.stage.partner_accepted": "夥伴已接受",
+  "partnerNotification.stage.provider_accepted": "供應商已接受",
+  "partnerNotification.stage.device_received": "裝置已接收",
+  "partnerNotification.stage.opened": "已開啟",
+
+  "partnerNotification.reason.configuration_blocked": "配置錯誤",
+  "partnerNotification.reason.endpoint_disabled": "端點已停用",
+  "partnerNotification.reason.route_missing": "查無路由",
+  "partnerNotification.reason.route_ambiguous": "路由模糊",
+  "partnerNotification.reason.owner_changed": "擁有人已變更",
+  "partnerNotification.reason.recipient_revoked": "收件人已撤銷",
+  "partnerNotification.reason.provider_transient_error": "供應商暫時性錯誤",
+  "partnerNotification.reason.credential_rejected": "憑證被拒絕",
+  "partnerNotification.reason.endpoint_unavailable": "端點無法使用",
+  "partnerNotification.reason.partner_ack_invalid": "無效的夥伴回覆",
+  "partnerNotification.reason.notification_expired": "通知已過期",
+  "partnerNotification.reason.notification_obsolete": "通知已淘汰",
+  "partnerNotification.reason.notification_superseded": "通知已被取代",
+  "partnerNotification.selectWebhookEndpoint": "請選擇 webhook 端點...",
+
   "common.enabled": "已啟用",
   "common.disabled": "已停用",
   "common.active": "啟用中",

@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { PartnerNotificationPanel } from "@/components/partner-notification-panel";
 import { useParams } from "next/navigation";
 import React, {
   useCallback,
@@ -19,6 +20,7 @@ import {
 } from "@/components/partner-governance-shared";
 import { formatDateTime, usePlatformAdminClient } from "@/lib/admin-client";
 import { useTranslation } from "@/lib/i18n";
+import { usePlatformAdminAuthority } from "@/lib/platform-admin-authority";
 import { formatPlatformCodeLabel } from "@/lib/localized-labels";
 import {
   BUSINESS_DISPATCH_SUBTYPES,
@@ -51,7 +53,8 @@ type TabKey =
   | "auth"
   | "eligibility"
   | "credentials"
-  | "audit";
+  | "audit"
+  | "notifications";
 
 type CredentialRow = Record<string, unknown> & {
   keyId: string;
@@ -789,6 +792,7 @@ export default function PartnerDetailPage() {
     ? params.entrySlug[0]
     : (params?.entrySlug ?? "");
   const client = usePlatformAdminClient();
+  const authority = usePlatformAdminAuthority();
   const { t, locale } = useTranslation();
 
   const [entry, setEntry] = useState<PartnerChannelEntryRecord | null>(null);
@@ -842,6 +846,7 @@ export default function PartnerDetailPage() {
             eligibility: "Eligibility",
             credentials: "Credentials",
             audit: "Audit",
+            notifications: "Notifications",
           },
           preview: "Preview entry",
           issueCredential: "Issue credential",
@@ -955,6 +960,7 @@ export default function PartnerDetailPage() {
             eligibility: "Eligibility",
             credentials: "Credentials",
             audit: "Audit",
+            notifications: "Notifications",
           },
           preview: "預覽 entry",
           issueCredential: "發行 credential",
@@ -1158,13 +1164,7 @@ export default function PartnerDetailPage() {
     } finally {
       setIssuingCredential(false);
     }
-  }, [
-    client,
-    credentialActionMode,
-    credentialActionReason,
-    entry,
-    loadEntry,
-  ]);
+  }, [client, credentialActionMode, credentialActionReason, entry, loadEntry]);
 
   const runGovernanceAction = useCallback(async () => {
     if (!entry) {
@@ -1255,6 +1255,7 @@ export default function PartnerDetailPage() {
           ["eligibility", copy.tabs.eligibility],
           ["credentials", copy.tabs.credentials],
           ["audit", copy.tabs.audit],
+          ["notifications", copy.tabs.notifications],
         ] as const
       ).map(([key, label]) => ({
         key,
@@ -2329,6 +2330,15 @@ export default function PartnerDetailPage() {
               </div>
             </Card>
           </div>
+        ) : null}
+
+        {activeTab === "notifications" ? (
+          <PartnerNotificationPanel
+            entrySlug={entrySlug}
+            tenantId={entry.tenantId}
+            canWriteBinding={authority.scopes.includes("foundation:write")}
+            canReadWebhooks={authority.scopes.includes("tenant:webhooks:read")}
+          />
         ) : null}
 
         {activeTab === "audit" ? (
