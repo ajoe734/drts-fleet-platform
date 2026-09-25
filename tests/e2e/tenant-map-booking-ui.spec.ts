@@ -136,10 +136,29 @@ async function pinBothStops(page: Page) {
 
 test.describe("tenant console booking map alignment", () => {
   test.beforeEach(async ({ context, baseURL }) => {
+    // We import locally here to avoid top-level issues if the test runner changes
+    const jwt = require("jsonwebtoken");
+    const payload = {
+      sub: "mock-user-1",
+      actorType: "tenant_user",
+      actorId: "mock-user-1",
+      realm: "tenant",
+      tenantId: "tenant-acme",
+      authMode: "jwt_bearer",
+      roles: ["tenant_admin"],
+      scopes: ["*"]
+    };
+    const validToken = jwt.sign(payload, "ci-e2e-secret", { 
+      algorithm: "HS256",
+      expiresIn: "1h",
+      issuer: "drts-local",
+      audience: "drts-api",
+    });
+
     await context.addCookies([
       {
         name: "drts_tenant_session",
-        value: "mock-session-token",
+        value: validToken,
         domain: new URL(baseURL!).hostname,
         path: "/",
       },
