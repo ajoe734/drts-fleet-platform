@@ -762,8 +762,8 @@ export function AddressMapPicker<TServiceProduct extends string = string>(
   );
 
   const handleManualApply = useCallback(() => {
-    let lat = selectedAddress?.lat ?? (bounds ? (bounds.minLat + bounds.maxLat) / 2 : 0);
-    let lng = selectedAddress?.lng ?? (bounds ? (bounds.minLng + bounds.maxLng) / 2 : 0);
+    const lat = selectedAddress?.lat ?? (bounds ? (bounds.minLat + bounds.maxLat) / 2 : 0);
+    const lng = selectedAddress?.lng ?? (bounds ? (bounds.minLng + bounds.maxLng) / 2 : 0);
     
     if (requireManualReason && manualReason.trim().length === 0) {
       setManualError(labels.manualReasonLabel);
