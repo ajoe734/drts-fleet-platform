@@ -19,12 +19,12 @@ export default defineConfig({
       "@": path.resolve(__dirname, "apps/tenant-console-web"),
     },
   },
+  esbuild: {
+    jsx: "transform",
+  },
   test: {
     environment: "node",
     globals: true,
-    esbuild: {
-      jsx: "transform",
-    },
     include: [
       "tests/contract/**/*.test.{ts,tsx}",
       "tests/integ/**/*.test.{ts,tsx}",
