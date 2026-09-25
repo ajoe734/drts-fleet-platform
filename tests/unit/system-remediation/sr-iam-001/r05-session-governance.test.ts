@@ -6,7 +6,7 @@ import type {
   MaskedSessionSummary,
   PlatformAdminUserRecord,
 } from "@drts/contracts";
-import { ApiClient, ApiClientError } from "@drts/api-client";
+import { ApiClient, ApiClientError } from "../../../../packages/api-client/src";
 import { createPlatformAdminIamClient } from "../../../../apps/platform-admin-web/lib/platform-admin-iam-client";
 import { getSessionGovernanceCopy } from "../../../../apps/platform-admin-web/app/users/translations";
 

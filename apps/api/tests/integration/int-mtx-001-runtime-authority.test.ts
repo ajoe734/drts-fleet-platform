@@ -1,4 +1,3 @@
-/* eslint-disable @typescript-eslint/no-unused-vars */
 import { EventEmitter2 } from "@nestjs/event-emitter";
 import { describe, expect, it, vi } from "vitest";
 
@@ -102,21 +101,17 @@ function createHarness() {
       authorizations: multiTaxiState.authorizations.map((record) =>
         structuredClone(record),
       ),
-      vehicles: multiTaxiState.vehicles.map((record) =>
-        structuredClone(record),
-      ),
+      vehicles: multiTaxiState.vehicles.map((record) => structuredClone(record)),
     })),
-    persistAuthorization: vi.fn(
-      async (authorization: Record<string, unknown>) => {
-        multiTaxiState.authorizations = [
-          structuredClone(authorization),
-          ...multiTaxiState.authorizations.filter(
-            (existing) =>
-              existing.authorizationId !== authorization.authorizationId,
-          ),
-        ];
-      },
-    ),
+    persistAuthorization: vi.fn(async (authorization: Record<string, unknown>) => {
+      multiTaxiState.authorizations = [
+        structuredClone(authorization),
+        ...multiTaxiState.authorizations.filter(
+          (existing) =>
+            existing.authorizationId !== authorization.authorizationId,
+        ),
+      ];
+    }),
     persistVehicle: vi.fn(async (vehicle: Record<string, unknown>) => {
       multiTaxiState.vehicles = [
         structuredClone(vehicle),
@@ -129,12 +124,10 @@ function createHarness() {
         ),
       ];
     }),
-    persistRideAccessToken: vi.fn(
-      async (token: Record<string, unknown>, digest: string) => {
-        const { accessToken: _accessToken, ...persisted } = token;
-        accessTokensByDigest.set(digest, structuredClone(persisted));
-      },
-    ),
+    persistRideAccessToken: vi.fn(async (token: Record<string, unknown>, digest: string) => {
+      const { accessToken: _accessToken, ...persisted } = token;
+      accessTokensByDigest.set(digest, structuredClone(persisted));
+    }),
     findRideAccessTokenByDigest: vi.fn(async (digest: string) => {
       const token = accessTokensByDigest.get(digest);
       return token ? structuredClone(token) : null;
@@ -153,12 +146,8 @@ function createHarness() {
     getVehicleLicenseType: vi.fn(() => "multi_purpose_taxi"),
     getVehiclePassengerDisclosureProfile: vi.fn(() => null),
     getDriverPublicRegistrationCredential: vi.fn(() => null),
-    listVehicles: vi.fn(() => [
-      { vehicleId: "veh-demo-001", plateNo: "TAXI-001" },
-    ]),
-    listDrivers: vi.fn(() => [
-      { driverId: "drv-demo-001", name: "Driver One" },
-    ]),
+    listVehicles: vi.fn(() => [{ vehicleId: "veh-demo-001", plateNo: "TAXI-001" }]),
+    listDrivers: vi.fn(() => [{ driverId: "drv-demo-001", name: "Driver One" }]),
   };
   const callcenterService = {
     registerRecordingAttachmentListener: vi.fn(),
