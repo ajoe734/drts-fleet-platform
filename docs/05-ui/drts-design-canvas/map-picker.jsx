@@ -9,23 +9,22 @@ const MP_STATES = {
   selected:      { zh:'已選定落點', tone:'success', next:'可繼續填寫或拖曳微調' },
   saved_pin:     { zh:'已載入落點', tone:'success', next:'可繼續填寫或拖曳微調' },
   missing_coordinate: { zh:'尚無落點', tone:'warn', next:'此地址尚無座標，請搜尋或手動標記' },
-  manual_coords: { zh:'手動座標', tone:'warn', next:'請填寫手動座標理由' },
+  manual_coords: { zh:'手動座標', tone:'warn', next:'請確認座標對應的實際位置' },
   provider_down: { zh:'地圖服務無回應', tone:'danger', next:'僅可送交人工複核，不會直接派車' },
   no_results:    { zh:'查無結果', tone:'warn', next:'換個關鍵字，或改用手動座標' },
   manual_review: { zh:'待人工複核', tone:'warn', next:'此地點將由客服確認後才派車' },
   out_of_area:   { zh:'不在服務範圍', tone:'danger', next:'請更換地點；此地點無法派車' },
 };
-function MapPicker({ theme:th, label='上車地點', state='selected', value, reason, compact, skin='mgmt' }) {
+function MapPicker({ theme:th, label='上車地點', state='selected', value, compact, skin='mgmt' }) {
   const m = MP_STATES[state];
-  const c = { text:th.text, muted:th.textMuted, dim:th.textDim, line:th.border, surface:th.surface, lo:th.surfaceLo, accent:th.accent, success:th.success, warn:th.warn, danger:th.danger, mono: skin === 'pb' ? (window.PB_MONO || 'monospace') : (window.SHELL_MONO || 'monospace') };
+  const c = skin==='pb'
+    ? { text:'#0E1424', muted:'#56657F', dim:'#9AA5B8', line:'#E5E7EB', surface:'#fff', lo:'#F4F6FB', accent:'#1B4FA0', success:'#15803D', warn:'#B45309', danger:'#B91C1C', mono:PB_MONO }
+    : { text:th.text, muted:th.textMuted, dim:th.textDim, line:th.border, surface:th.surface, lo:th.surfaceLo, accent:th.accent, success:th.success, warn:th.warn, danger:th.danger, mono:SHELL_MONO };
   const tone = c[m.tone==='neutral'?'muted':m.tone==='info'?'accent':m.tone];
   const blocked = state==='provider_down' || state==='out_of_area';
   const H = compact ? 96 : 130;
-  const vals = { empty:'', searching:'松仁路 1', candidates:'松仁路 100', selected:'台北市信義區松仁路 100 號', saved_pin:'新竹市東區光復路二段 101 號 後門', missing_coordinate:'宜蘭縣頭城鎮濱海路 12 號', manual_coords:'25.0330, 121.5654', provider_down:'台北市信義區松仁路 100 號', no_results:'松人路 1000 巷', manual_review:'台北市信義區松仁路 100 號 後門', out_of_area:'宜蘭縣頭城鎮濱海路 12 號' };
+  const vals = { empty:'', searching:'松仁路 1', candidates:'松仁路 100', selected:'台北市信義區松仁路 100 號', manual_coords:'25.0330, 121.5654', provider_down:'台北市信義區松仁路 100 號', saved_pin:'新竹市東區光復路二段 101 號 後門', missing_coordinate:'宜蘭縣頭城鎮濱海路 12 號', no_results:'松人路 1000 巷', manual_review:'台北市信義區松仁路 100 號 後門', out_of_area:'宜蘭縣頭城鎮濱海路 12 號' };
   const v = value ?? vals[state];
-  const showPin = state==='selected'||state==='manual_coords'||state==='manual_review'||state==='provider_down'||state==='saved_pin';
-  const requiresReason = state==='manual_coords' || state==='manual_review' || state==='provider_down';
-
   return (
     <div style={{ border:'1px solid '+c.line, borderRadius:10, background:c.surface, overflow:'hidden' }}>
       {/* search row */}
@@ -52,9 +51,9 @@ function MapPicker({ theme:th, label='上車地點', state='selected', value, re
       )}
       {/* neutral preview plane */}
       <div style={{ height:H, position:'relative', background:'repeating-linear-gradient(0deg,'+c.lo+' 0 1px,transparent 1px 24px),repeating-linear-gradient(90deg,'+c.lo+' 0 1px,transparent 1px 24px),'+c.surface, opacity:blocked?.55:1 }}>
-        {showPin && (
+        {(state==='selected'||state==='manual_coords'||state==='manual_review'||state==='provider_down'||state==='saved_pin') && (
           <div style={{ position:'absolute', left:'50%', top:'50%', transform:'translate(-50%,-100%)' }}>
-            <svg width="26" height="30" viewBox="0 0 24 28" fill={(state==='selected'||state==='saved_pin')?c.accent:tone} stroke="#fff" strokeWidth="1.5"><path d="M12 27s-9-7-9-15a9 9 0 0118 0c0 8-9 15-9 15z"/><circle cx="12" cy="12" r="3.5" fill="#fff"/></svg>
+            <svg width="26" height="30" viewBox="0 0 24 28" fill={state==='selected'?c.accent:tone} stroke="#fff" strokeWidth="1.5"><path d="M12 27s-9-7-9-15a9 9 0 0118 0c0 8-9 15-9 15z"/><circle cx="12" cy="12" r="3.5" fill="#fff"/></svg>
           </div>
         )}
         {state==='out_of_area' && <div style={{ position:'absolute', inset:'12px 30%', border:'2px dashed '+c.danger, borderRadius:8, opacity:.6 }}/>}
@@ -63,17 +62,16 @@ function MapPicker({ theme:th, label='上車地點', state='selected', value, re
         {state==='provider_down' && <div style={{ position:'absolute', inset:0, display:'flex', alignItems:'center', justifyContent:'center', background:'rgba(255,255,255,.55)', fontSize:12, fontWeight:700, color:c.danger }}>地圖服務暫時無回應</div>}
         {(state==='selected' || state==='saved_pin') && <div style={{ position:'absolute', left:8, bottom:6, fontSize:10, fontFamily:c.mono, color:c.muted, background:c.surface, padding:'2px 6px', borderRadius:4 }}>25.0330, 121.5654 · 可拖曳微調</div>}
         {state==='manual_coords' && <div style={{ position:'absolute', left:8, bottom:6, fontSize:10, color:c.warn, background:c.surface, padding:'2px 6px', borderRadius:4 }}>未經地址解析 · 請核對位置</div>}
-        {(state==='selected'||state==='manual_coords'||state==='saved_pin') && <div style={{ position:'absolute', right:8, bottom:6, fontSize:9.5, fontFamily:c.mono, color:c.dim, background:c.surface, padding:'2px 6px', borderRadius:4 }}>↑↓←→ 微調 · Shift 大步</div>}
+        {(state==='selected'||state==='manual_coords'||state==='saved_pin') && <div style={{ position:'absolute', right:8, bottom:6, fontSize:9.5, fontFamily:c.mono, color:c.dim, background:c.surface, padding:'2px 6px', borderRadius:4 }}>↑↓←→ 1 m · Shift 10 m · Enter 確認</div>}
       </div>
-      {/* manual coords reason field */}
-      {requiresReason && (
-        <div style={{ padding:'8px 10px', borderTop:'1px solid '+c.line, background:c.lo, display:'flex', gap:8, alignItems:'center' }}>
-          <span style={{ fontSize:11, color:c.warn, fontWeight:700, whiteSpace:'nowrap' }}>{state==='provider_down'?'中斷說明':'手動原因'}</span>
-          <input type="text" placeholder="必填，請說明為何需要人工複核或手動標記" value={reason} readOnly style={{ flex:1, border:'1px solid '+(reason?c.line:c.warn), borderRadius:4, padding:'4px 8px', fontSize:12, background:reason?'transparent':th.warnBg }} />
+      {(state==='manual_coords'||state==='manual_review') && (
+        <div style={{ display:'flex', alignItems:'center', gap:8, padding:'7px 10px', borderTop:'1px solid '+c.line, background:c.lo }}>
+          <span style={{ fontSize:10.5, fontWeight:700, color:c.warn, flexShrink:0 }}>{state==='manual_coords'?'手動座標理由 *':'複核理由 *'}</span>
+          <span style={{ flex:1, fontSize:11.5, color:c.text, padding:'4px 8px', border:'1px solid '+c.line, borderRadius:6, background:c.surface }}>{state==='manual_coords'?'新建案無門牌，依現場實測座標':'地址解析落點與實際入口不符（後門）'}</span>
         </div>
       )}
       {/* next-step footer */}
-      <div style={{ display:'flex', alignItems:'center', gap:8, padding:'7px 10px', borderTop:'1px solid '+c.line, background:blocked?(th.dangerBg||'#FEF2F2'):c.surface }}>
+      <div style={{ display:'flex', alignItems:'center', gap:8, padding:'7px 10px', borderTop:'1px solid '+c.line, background:blocked?(skin==='pb'?'#FEF2F2':th.dangerBg):c.surface }}>
         <span style={{ flex:1, fontSize:11, color:blocked?c.danger:c.muted, fontWeight:blocked?700:500 }}>{m.next}</span>
         {state==='no_results' && <span style={{ fontSize:11, color:c.accent, fontWeight:700 }}>改用手動座標</span>}
         {state==='provider_down' && <span style={{ fontSize:11, color:c.danger, fontWeight:700 }}>送交人工複核 →</span>}
