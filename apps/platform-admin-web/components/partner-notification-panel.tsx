@@ -143,7 +143,7 @@ function PnBinding({
                 {binding?.webhookId || "—"}{" "}
                 {tenantId ? (
                   <a
-                    href={`/tenants/${tenantId}/webhooks${binding?.webhookId ? `/${binding.webhookId}` : ""}`}
+                    href={`/tenant-console/webhooks${binding?.webhookId ? `/${binding.webhookId}` : ""}`}
                     target="_blank"
                     rel="noreferrer"
                   >
@@ -542,12 +542,17 @@ function PnRetryCell({
     exhausted: "重試預算耗盡",
     expired: "生命週期已過期",
     no_write: "無權限重試",
+    active_lease: "處理中 (排隊或發送中)",
   };
 
   const isExpired = r.expiresAt && new Date(r.expiresAt) <= new Date();
   const isExhausted =
     typeof r.maxAttempts === "number" &&
     (r.attempts || r.attemptCount || 0) >= r.maxAttempts;
+
+  const isActiveLease =
+    r.leaseExpiresAt && new Date(r.leaseExpiresAt) > new Date();
+  const isPending = r.status === "pending" || r.status === "sending";
 
   let denyCode: string | null = null;
   if (!canWriteBinding) denyCode = "no_write";
@@ -558,6 +563,7 @@ function PnRetryCell({
   else if (r.retryDisposition === "none") denyCode = "none";
   else if (isExpired) denyCode = "expired";
   else if (isExhausted) denyCode = "exhausted";
+  else if (isActiveLease || isPending) denyCode = "active_lease";
 
   if (denyCode) {
     return (
@@ -615,7 +621,9 @@ function PnRetryCell({
           onClick={() => onRetry(r.outboxId)}
         />
         <span style={{ fontSize: 10, color: th.danger }}>
-          {t("partnerNotification.enqueueFailed") ?? "入列要求失敗"}
+          {retryError
+            ? retryError
+            : (t("partnerNotification.enqueueFailed") ?? "入列要求失敗")}
         </span>
       </div>
     );
@@ -646,6 +654,7 @@ function PnDeliveries({
   deliveries,
   retryState,
   retryRowId,
+  retryError,
   onRetry,
   onRefresh,
   t,
@@ -869,9 +878,10 @@ function PnDeliveries({
             r: (r: any) => (
               <PnRetryCell
                 theme={th}
-                r={r}
+                row={r}
                 retryState={retryState}
                 retryRowId={retryRowId}
+                retryError={retryError}
                 onRetry={onRetry}
                 t={t}
                 canWriteBinding={canWriteBinding}
@@ -912,6 +922,7 @@ function PnEditView({
   error,
   onSave,
   onCancel,
+  onReload,
   tenantId,
   t,
   canWriteBinding,
@@ -919,7 +930,11 @@ function PnEditView({
   webhookError,
 }: any) {
   const isSaving = saveState === "pending";
-  const isSaveDisabled = isSaving || !editWebhookId || !canWriteBinding;
+  const isSaveDisabled =
+    isSaving ||
+    !editWebhookId ||
+    !canWriteBinding ||
+    webhookError === "missing_scope";
 
   const ZH_MAP: Record<string, string> = {
     assignment_disclosure_ready:
@@ -979,7 +994,7 @@ function PnEditView({
                   size="xs"
                   variant="primary"
                   icon="refresh"
-                  onClick={onCancel}
+                  onClick={onReload}
                 >
                   {t("partnerNotification.reload") ?? "重新載入"}
                 </CanvasBtn>
@@ -1031,7 +1046,7 @@ function PnEditView({
             <div style={{ marginTop: 6 }}>
               {tenantId ? (
                 <a
-                  href={`/tenants/${tenantId}/webhooks`}
+                  href={`/tenant-console/webhooks`}
                   target="_blank"
                   rel="noreferrer"
                 >
@@ -1212,6 +1227,10 @@ export function PartnerNotificationPanel({
   const [editEventTypes, setEditEventTypes] = useState<string[]>([]);
   const [editExpectedVersion, setEditExpectedVersion] = useState(0);
 
+  const activeEntry = React.useRef(entrySlug);
+  activeEntry.current = entrySlug;
+  const fetchStateRef = React.useRef<any>();
+
   const fetchState = useCallback(
     async (isInitial = false) => {
       const reqId = ++currentRequest.current;
@@ -1310,8 +1329,10 @@ export function PartnerNotificationPanel({
         }
       }
     },
-    [client, entrySlug, tenantId],
+    [client, entrySlug, tenantId, canReadWebhooks],
   );
+
+  fetchStateRef.current = fetchState;
 
   useEffect(() => {
     setBinding(null);
@@ -1335,21 +1356,30 @@ export function PartnerNotificationPanel({
 
   const handleSave = async () => {
     setSaveState("pending");
+    const currentEntry = entrySlug;
     try {
       await (client as any).updatePartnerEntryNotificationBinding(entrySlug, {
         webhookId: editWebhookId,
         eventTypes: editEventTypes as any,
         expectedVersion: editExpectedVersion,
       });
+      if (activeEntry.current !== currentEntry) return;
       setIsEditing(false);
       setSaveState("idle");
-      fetchState();
+      fetchStateRef.current?.();
     } catch (err: any) {
+      if (activeEntry.current !== currentEntry) return;
       setSaveState("failed");
       if (err.statusCode === 409) {
         setError({
           kind: "409",
           message: err.message,
+          code: err.code || err.error,
+        });
+      } else {
+        setError({
+          kind: "error",
+          message: err.message || "Save failed",
           code: err.code || err.error,
         });
       }
@@ -1358,10 +1388,12 @@ export function PartnerNotificationPanel({
 
   const handleTest = async () => {
     setTestingState("pending");
+    const currentEntry = entrySlug;
     try {
       const res = await (client as any).testPartnerEntryNotificationBinding(
         entrySlug,
       );
+      if (activeEntry.current !== currentEntry) return;
       if (res.kind === "failed") {
         setTestingState("rejected");
         setError({
@@ -1372,9 +1404,10 @@ export function PartnerNotificationPanel({
         });
       } else {
         setTestingState("idle");
-        fetchState();
+        fetchStateRef.current?.();
       }
     } catch (err: any) {
+      if (activeEntry.current !== currentEntry) return;
       setTestingState("rejected");
       setError({
         kind: "error",
@@ -1538,6 +1571,7 @@ export function PartnerNotificationPanel({
             setEditEventTypes(binding.eventTypes || []);
           }
         }}
+        onReload={() => fetchStateRef.current?.(false)}
         tenantId={tenantId}
         t={t}
         canWriteBinding={canWriteBinding}

@@ -1778,13 +1778,19 @@ export class MultiTaxiRepository {
         o.status,
         ctx.delivery_id as "deliveryId",
         o.event_type as "eventType",
-        NULL as result,
+        CASE
+          WHEN o.status = 'delivered' THEN 'delivered'
+          WHEN o.status = 'failed' THEN 'provider_error'
+          ELSE NULL
+        END as result,
         o.attempt_count as attempts,
-        COALESCE((ctx.retry_policy_snapshot->>'maxAttempts')::int, (o.payload->'partnerNotification'->>'maxAttempts')::int) as "maxAttempts",
-        o.next_attempt_at as "nextAttemptAt"
+        COALESCE((ctx.retry_policy_snapshot->>'maxAttempts')::int, (o.payload->'partnerNotification'->>'maxAttempts')::int, 3) as "maxAttempts",
+        o.next_attempt_at as "nextAttemptAt",
+        l.lease_expires_at as "leaseExpiresAt"
       FROM ops.consumer_notification_outbox o
       LEFT JOIN mobility.phase1_partner_notification_delivery_contexts ctx ON ctx.outbox_id = o.outbox_id
       LEFT JOIN mobility.phase1_order_partner_notification_routes r ON r.order_id = o.order_id
+      LEFT JOIN ops.phase1_push_delivery_claims l ON l.outbox_id = o.outbox_id AND l.claim_state = 'claimed'
       WHERE (ctx.entry_slug = $1 OR r.entry_slug = $1)
       AND COALESCE(ctx.tenant_id, r.tenant_id) = $4
       AND COALESCE(ctx.partner_id, r.partner_id) = $5

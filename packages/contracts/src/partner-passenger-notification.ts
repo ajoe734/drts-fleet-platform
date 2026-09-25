@@ -433,6 +433,7 @@ export interface PartnerNotificationDeliveryRecord extends Partial<PartnerNotifi
   attempts: number;
   maxAttempts: number;
   nextAttemptAt: string | null;
+  leaseExpiresAt?: string | null;
   createdAt?: string;
 }
 

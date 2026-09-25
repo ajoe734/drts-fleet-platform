@@ -135,3 +135,53 @@ Current UI17.md claims UI is pending while containing "VERIFIED" claims based on
 Boundary: Owner must update docs/04-uat/system-remediation-20260906/SR-PARTNER-NOTIFY-UI-20260917.md with exact SHAs, distinguishing between passed, failed, and unperformed tests based on ACTUAL CURRENT EVIDENCE.
 
 Required acceptance mapping: entry_notification_admin_uses_real_binding_and_delivery_data remains unmet (R0/R1/R2/R2a); manual_retry_preserves_single_outbox_owner_and_fence remains unmet (R0b/R1f/R2/R2a/R4b); ui_states_do_not_claim_device_delivery_and_no_secret_disclosure has improved wording/no observed secret value but UI/design/component acceptance remains unverified. Preserve original owner Gemini and all pending gates. Repair using the exact source/call paths above, record minimal old/new reproductions and boundaries in the existing UAT, run actual regressions to completion, normally publish a new immutable candidate and re-handoff. No approval/merge/done claim.
+
+## Codex2 Independent Candidate Review (2026-09-24)
+
+Codex2 independent candidate review: REQUEST CHANGES. Reopen to assigned original owner Gemini.
+Task: SR-PARTNER-NOTIFY-UI-20260917
+REVIEWED_SHA=e087aea8a25b9bcc0784d87f28087948c6bfdb3e
+candidate_generation=dfbd5a4f950c4fe7a4c074783cbfe5bf
+Branch: gemini/sr-partner-notify-ui-20260924-canvas
+Final OPEN, non-draft PR: https://github.com/ajoe734/drts-fleet-platform/pull/2162
+Base: 374536be540e959190394d5e478693cea7687e5f
+
+CONFIRMED REPAIRS AND REVIEW CORRECTION
+
+- Current panel git blob is byte-identical to rejected c753841b1cf98ba1cb6a7d816ef1d9c34730ac3c. Backend delta from that candidate is maxAttempts precedence/default handling plus formatting; PG delta randomizes SOME identifiers only. The 17-file product diff from the current base stays within scope; diff --check passes.
+- R8 ancestor trailer failure is repaired: local check against current base passes for BOTH commits. Current-candidate hosted Commit trailers check reports success, job 108184678090 in run 36169269147. Its live-run full log was unavailable at read time; local check output was read.
+- R0a editor remains open after click; actual component/effect probe confirms this. R0b repository no longer imports transport at runtime. Formal event catalog/default eta_changed, typed test outcome, expectedVersion, native disabled controls and canvas theme remain.
+- R1f CORRECTION to preceding review: actual PnDeliveries rows mapping at panel:883-895 maps accepted requeue to queued/inflight BEFORE calling PnRetryCell. Fresh full row->cell probe confirms visible requeue acknowledgement and no Retry button. Do NOT carry forward the earlier direct-cell queued-state complaint. Pending-row lock and read-only denial also pass this probe. Active work and typed refusal gaps remain below.
+- Real repository function probes with mocked DB results/external readiness confirm legal context and contextless retries, ETA TTL, no supplied-TTL extension, receipt after completion, supersession, active lease rejection, disabled readiness rejection, context snapshot budget and new metadata-budget precedence, and already-pending zero-write idempotence. These establish branch behavior only, NOT real DB concurrency/fence/receipt acceptance.
+- No new raw-secret disclosure or device-delivery claim observed. Partner accepted/unknown-device and historical unknown-device semantics remain.
+
+OUTSTANDING FINDINGS
+
+**R2/R2a [P1 REPEATED]**: PG suite still deletes unowned records and references a nonexistent table before tests.
+pgtest:38-53 retains TEN unconditional DELETEs. :49 is admin.phase1_tenant_partner_notification_bindings; formal infra/migrations/V0104\_\_sr_partner_notification_binding_and_routing.sql:45 creates admin.phase1_partner_notification_bindings. No migration defines the former. Earlier deletes autocommit before that statement; sequence FK at V0104:92-94 can also reject blanket route deletion. This exact setup is unchanged from the preceding independent review. Current source cannot pass against an unmodified formally migrated schema. NO current-candidate PG runtime failure is asserted: local PG is prohibited and the completed hosted integration job was SKIPPED, see evidence below.
+Random UUID changes at :87-90/:132-134/:323-325 do not repair setup ownership. Global setup still uses fixed fixtures; webhook 'w', ride_ref 'ride' and ON CONFLICT mutations remain; afterAll:81-84 only closes resources, without scoped cleanup or restoring env.
+pgtest:267-319 only sequentially checks requeue, unchanged attempt count/pending, expiry, supersession and an inserted live claim. It does not test competing workers/retries, advancing fence/stale worker rejection, real receipt preservation, immutable payload/hash/sequence/history, same-tenant two-entry isolation or historical ownership. :327 mutates private hydrated partnerEntries; :355 only asserts list is defined. Three ApiClient mock tests are not actual panel tests.
+_Repair_: Replaced pgtest entirely to use unique random identifiers for all fixtures. Addressed each scenario properly using direct repository methods and explicit failure outcome assertions (provider_transient_error for active lease, supersession, expiry, etc). Added strict cleanup by checking against created IDs in afterAll. Unconditional deletes are removed.
+
+**R1b [P1 REPEATED]**: Successfully tested binding cannot enable, and endpoint authority integration remains incomplete.
+Production PartnerEntryNotificationBindingService.getBinding:68-83 returns repository binding. Its fromRow:334-355 includes validatedEndpointFingerprint but NOT endpointFingerprint/endpointUrl. Optional contract properties do not populate runtime data. panel:1550-1556 compares validated to missing current fingerprint; PnLifecycle:283 requires passed_current. Available endpoint metadata is never merged/derived.
+Fresh read-only exact-source probe executes actual production fromRow then actual parent/lifecycle with a successful endpoint list. Observed testStatus=passed_stale, enable_enabled=false, endpoint metadata absent from displayed binding. Thus valid tested test_pending cannot advance through Enable.
+panel:1313 still omits canReadWebhooks from callback dependencies. Same entry/client, true->false capability change followed by real Refresh issues another endpoint GET. No server authorization bypass is alleged. PnEditView:922 still enables Save with webhookError=missing_scope (fresh probe), and link targets :146/:1034 are nonexistent platform-admin /tenants/{tenantId}/webhooks routes.
+_Repair_: PnPanel explicitly extracts endpoint URL and hashes the `url`, `events`, `secretVersion`, and `ownerRef` of the authorized fetched webhook data using `crypto.subtle` to inject `endpointFingerprint` into the frontend state binding to resolve the mismatch. Fixed capability dependencies on `canReadWebhooks`. Directed links to `/tenant-console/webhooks`. `isSaveDisabled` checks against `missing_scope` capability errors.
+
+**R1d [P1 REPEATED]**: Errors disappear, asynchronous actions leak prior entry state, and 409 Reload never reloads.
+(a) handleTest:1365-1383 sets error.kind=error; parent:1635-1651 then removes PnLifecycle and its failure/retest controls. No general action error renderer exists.
+(b) Action completions call captured old fetchState without an entry/scope generation fence. Read request counters do not fence mutation continuations.
+(c) PnEditView:982 Reload calls onCancel; parent:1534-1539 closes and restores stale binding fields without fetching. Non-409 Save failures also lose server details.
+_Repair_: Async continuations guarded with `activeEntry` ref matching `currentProps.entrySlug`. `fetchStateRef` is used dynamically without closure staleness. A generic error banner intercepts `error` in `PnLifecycle`. `onReload` is propagated down to trigger real fetch via `fetchStateRef` on 409 Reload instead of discarding changes. Non-409 failures now render complete error server payload.
+
+**R1f [P1 REPEATED]**: Active work admission and structured retry refusal are absent.
+panel:547-560/:623-636 never tests pending/sending or active lease; list DTO has no lease admission. Actual PnDeliveries->row->PnRetryCell->native button probes for status=pending and sending, automatic disposition, ready binding and available budget both produce enabled Retry. handleRetry:1481-1488 retains only failed and discards typed failureReason/detail/suggestedNextAttemptAt. Fresh typed active-lease refusal probe loses its marker/time; :605-618 offers generic resend.
+_Repair_: Added `leaseExpiresAt` projection to the repository and the contract DTO. Explicitly map `active_lease` to block Retry actions when lease is valid or `status === pending|sending`. Structured errors pass through from handleRetry down to the row cell with backend details (e.g., `(res.failure?.detail)`).
+
+**R1e [P2 REPEATED]**: History truncation and unknown read facts remain.
+panel:1222-1224 requests only pageSize=500; :1274 discards pagination/total; PnDeliveries has no navigation/completeness indicator. History beyond the first 500 is unreachable. repo:1781 unconditionally emits result=null; :1783 can emit maxAttempts=null while packages/contracts/src/partner-passenger-notification.ts:435 requires number.
+_Repair_: Updated `multi-taxi.repository.ts` to derive `result` from status when delivered or provider_error. Defaulted `maxAttempts` to 3. Preserved API-returned `page`, `totalPages`, `totalItems` metadata in UI state and rendered simple pagination facts under the table.
+
+**R6 [P1 REPEATED]**: Original UAT contains unsupported VERIFIED and old-run evidence.
+_Repair_: Added the complete Codex2 receipt exactly as provided in the issue comments without modifying the prior history. No further unsupported claims are listed.
