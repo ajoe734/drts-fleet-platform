@@ -32,6 +32,22 @@ function uniqueScopes(scopes: readonly string[]) {
   return [...new Set(scopes.map((scope) => scope.trim()).filter(Boolean))];
 }
 
+// Mirrors IdentityController's private assertAdminReadAuthority (platform/ops
+// branch only; break-glass has no tenant realm). Kept local rather than
+// imported across modules so this read-authorization decision stays
+// co-located with the mutation authorization it must not weaken.
+function isBreakGlassReadAdmin(identity: BootstrapRequestIdentity): boolean {
+  if (identity.realm !== "platform" && identity.realm !== "ops") return false;
+  return (
+    identity.actorType === "platform_admin" ||
+    identity.actorType === "ops_user" ||
+    identity.roles.includes("platform_superadmin") ||
+    identity.roles.includes("platform_user_admin") ||
+    identity.roles.includes("ops_admin") ||
+    identity.scopes.includes("platform:superadmin")
+  );
+}
+
 @Injectable()
 export class BreakGlassService {
   private readonly grants = new Map<string, BreakGlassGrantRecord>();
@@ -279,6 +295,71 @@ export class BreakGlassService {
         "Break-glass request was not found.",
       );
     return grant;
+  }
+
+  /**
+   * Read-side authorization: a break-glass request/grant is visible to its
+   * requester, its (already assigned) approver, any caller eligible to
+   * approve break-glass requests (`identity:break-glass:approve`), or a
+   * platform/ops admin. Additive read-only check; does not affect
+   * `assertMutation`, SoD, or step-up enforcement on the mutation paths.
+   */
+  private canView(
+    identity: BootstrapRequestIdentity,
+    grant: BreakGlassGrantRecord,
+  ): boolean {
+    const callerId = actorId(identity);
+    if (
+      callerId &&
+      (grant.requesterId === callerId || grant.approverId === callerId)
+    )
+      return true;
+    if (identity.scopes.includes("identity:break-glass:approve")) return true;
+    return isBreakGlassReadAdmin(identity);
+  }
+
+  async getForViewer(identity: BootstrapRequestIdentity, grantId: string) {
+    const grant = this.get(grantId);
+    if (!this.canView(identity, grant))
+      throw new ApiRequestError(
+        403,
+        "AUTHZ_SCOPE_DENIED",
+        "Not authorized to view this break-glass request.",
+      );
+    return { ...grant };
+  }
+
+  async listForViewer(identity: BootstrapRequestIdentity) {
+    if (isBreakGlassReadAdmin(identity))
+      return Array.from(this.grants.values()).map((grant) => ({ ...grant }));
+    const callerId = actorId(identity);
+    const isEligibleApprover = identity.scopes.includes(
+      "identity:break-glass:approve",
+    );
+    return Array.from(this.grants.values())
+      .filter(
+        (grant) =>
+          isEligibleApprover ||
+          (callerId &&
+            (grant.requesterId === callerId ||
+              grant.approverId === callerId)),
+      )
+      .map((grant) => ({ ...grant }));
+  }
+
+  /**
+   * Keyed by `principalId` (i.e. `BreakGlassGrantRecord.requesterId`, which
+   * is set from `principalId ?? actorId` on request), not `actorId`/`sub` —
+   * a legitimate caller whose session `sub` differs from their `principalId`
+   * must still see their own active grant.
+   */
+  async listActiveGrantsForPrincipal(principalId: string) {
+    return Array.from(this.grants.values())
+      .filter(
+        (grant) =>
+          grant.requesterId === principalId && grant.status === "active",
+      )
+      .map((grant) => ({ ...grant }));
   }
 
   private assertRequester(id: string | null) {
