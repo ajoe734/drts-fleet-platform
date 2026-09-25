@@ -229,4 +229,36 @@ durable evidence; local logs are not themselves canonical delivery.
 | Task-scoped commit / push / PR | This report only, helper branch | Publication recorded below | Scoped content/trailer checks and normal push | Review/CI/merge remain separate. |
 | Update parent next step | Exact note and disposition above | Attempted parent write → dispatch guard rejection, exit 1 | Canonical `ai-status.sh note SR-PARTNER-NOTIFY-UI-20260917 ...` | **BLOCKED**: Supervisor parent note, helper metadata and routing required. |
 
-Publication and final scoped verification are appended after the first anchor.
+### Publication and scoped verification
+
+Anchor `3a00a2034991731a1aba11c6e6f993ab88d12228` was committed with the
+helper Task-ID/LLM-Agent/Reviewer trailers and pushed normally (exit 0).
+[Draft PR #2165](https://github.com/ajoe734/drts-fleet-platform/pull/2165)
+targets `dev` and changes only this report. PR creation completed (exit 0).
+
+Completed checks on the anchor:
+
+| Check | Result |
+| --- | --- |
+| `git diff --check origin/dev...HEAD` | PASS, exit 0. |
+| `python3 tools/ci/git/check_commit_trailers.py --base origin/dev --head HEAD` | PASS, exit 0, one helper commit. |
+| `python3 tools/ci/git/check_canonical_consistency.py --ci --base origin/dev --head HEAD` | PASS, exit 0, zero findings in all four categories. |
+| Markdown local-target check | PASS, exit 0; four linked local files exist after URL decoding and removing fragments. |
+| Temporary-index replay | PASS, exit 0; exact source tree, zero out-of-scope paths, refs/worktree unchanged. |
+
+This publication receipt is a subsequent helper commit. Final full local SHA,
+remote branch and PR head identity, repeated scoped checks and current hosted
+check states are recorded in the helper's canonical progress/blocker receipt.
+No self-referential commit hash is embedded in this file. All explicitly run
+local checks finished and their results were read; automatic hosted checks
+are reported separately and never inferred from an older SHA.
+
+Helper `progress` successfully recorded the exact parent-write rejection and
+requested Supervisor disposition. Final status remains blocked pending that
+write; draft publication is not candidate handoff. Once Supervisor persists
+the disposition and parent next step, recheck the same report, final checks,
+local/remote/PR identity, then set `CANDIDATE_SHA=$(git rev-parse HEAD)` and
+`CANDIDATE_BRANCH=$(git branch --show-current)` and use canonical `handoff`
+to Claude with `PR_URL=https://github.com/ajoe734/drts-fleet-platform/pull/2165`.
+Do not call `done`. Product tests are not applicable to this report; parent
+product/PG/browser/live gates remain unverified or failed as detailed above.
