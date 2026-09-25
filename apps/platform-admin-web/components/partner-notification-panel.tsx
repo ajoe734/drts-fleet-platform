@@ -285,6 +285,7 @@ function PnLifecycle({
   onEnable,
   onDisable,
   onResume,
+  t,
 }: any) {
   const state = binding ? binding.state : "none";
   const isPending =
@@ -308,7 +309,7 @@ function PnLifecycle({
   return (
     <CanvasCard
       theme={th}
-      title="生命週期控制"
+      title={t("partnerNotification.lifecycleCtrl") ?? "生命週期控制"}
       subtitle="test → enable · disable · resume"
     >
       {!canMutate && (
@@ -317,7 +318,7 @@ function PnLifecycle({
             theme={th}
             tone="warn"
             icon="lock"
-            title="權限不足"
+            title={t("partnerNotification.permissionDenied") ?? "權限不足"}
             body="您沒有本 entry 綁定的寫入權限，無法執行生命週期操作（需 foundation:write）。"
           />
         </div>
@@ -328,7 +329,7 @@ function PnLifecycle({
             theme={th}
             tone="danger"
             icon="warn"
-            title="綁定測試遭拒"
+            title={t("partnerNotification.testRejected") ?? "綁定測試遭拒"}
             body="夥伴端點回傳錯誤狀態碼，拒絕了測試要求，無法啟用。"
             actions={
               <CanvasBtn
@@ -338,7 +339,7 @@ function PnLifecycle({
                 disabled={!canMutate || isPending}
                 onClick={onTest}
               >
-                重測
+                {t("partnerNotification.retest") ?? "重測"}
               </CanvasBtn>
             }
           />
@@ -350,7 +351,7 @@ function PnLifecycle({
             theme={th}
             tone="danger"
             icon="warn"
-            title="啟用失敗"
+            title={t("partnerNotification.enableFailed") ?? "啟用失敗"}
             body="無法啟用綁定，請確認測試狀態有效後重試。"
             actions={
               <CanvasBtn
@@ -360,7 +361,7 @@ function PnLifecycle({
                 disabled={!canMutate || isPending || !canEnable}
                 onClick={onEnable}
               >
-                重試
+                {t("partnerNotification.retry") ?? "重試"}
               </CanvasBtn>
             }
           />
@@ -372,7 +373,7 @@ function PnLifecycle({
             theme={th}
             tone="danger"
             icon="warn"
-            title="停用失敗"
+            title={t("partnerNotification.disableFailed") ?? "停用失敗"}
             body="無法停用綁定，請重試。"
             actions={
               <CanvasBtn
@@ -382,7 +383,7 @@ function PnLifecycle({
                 disabled={!canMutate || isPending}
                 onClick={onDisable}
               >
-                重試
+                {t("partnerNotification.retry") ?? "重試"}
               </CanvasBtn>
             }
           />
@@ -394,7 +395,7 @@ function PnLifecycle({
             theme={th}
             tone="danger"
             icon="warn"
-            title="恢復失敗"
+            title={t("partnerNotification.resumeFailed") ?? "恢復失敗"}
             body="無法恢復綁定狀態，請重試。"
             actions={
               <CanvasBtn
@@ -404,7 +405,7 @@ function PnLifecycle({
                 disabled={!canMutate || isPending}
                 onClick={onResume}
               >
-                重試
+                {t("partnerNotification.retry") ?? "重試"}
               </CanvasBtn>
             }
           />
@@ -416,7 +417,10 @@ function PnLifecycle({
             theme={th}
             tone="danger"
             icon="warn"
-            title="測試失敗 · ack 驗證不符"
+            title={
+              t("partnerNotification.testFailedAck") ??
+              "測試失敗 · ack 驗證不符"
+            }
             body="夥伴回 200，但 ack.delivery_id 與送出不符（notification_id / partner_entry_slug 亦須一致，status/receipt 須合法）。請確認夥伴端實作後重測。"
             actions={
               <CanvasBtn
@@ -426,7 +430,7 @@ function PnLifecycle({
                 disabled={!canMutate || isPending}
                 onClick={onTest}
               >
-                重測
+                {t("partnerNotification.retest") ?? "重測"}
               </CanvasBtn>
             }
           />
@@ -525,17 +529,18 @@ function PnLifecycle({
           lineHeight: 1.5,
         }}
       >
-        啟用門檻：目前端點 fingerprint
-        必須有成功測試。端點變更後測試自動失效，需重測。
+        {t("partnerNotification.enableThreshold") ??
+          "啟用門檻：目前端點 fingerprint "}
+
         <br />
-        「恢復」依據目前端點是否 passed_current 來決定是否需重測，無獨立
-        /resume。
+        {t("partnerNotification.resumeDep") ??
+          "「恢復」依據目前端點是否 passed_current 來決定是否需重測，無獨立 "}
       </div>
     </CanvasCard>
   );
 }
 
-function PnRetryCell({ theme: th, r, retryState, onRetry }: any) {
+function PnRetryCell({ theme: th, r, retryState, onRetry, t }: any) {
   const RETRY_DENY: Record<string, string> = {
     DELIVERY_TERMINAL: "已是終止狀態（已接受或已取代）",
     SUPERSEDED: "已被新通知取代",
@@ -588,13 +593,15 @@ function PnRetryCell({ theme: th, r, retryState, onRetry }: any) {
           size="xs"
           onClick={() => onRetry(r.outboxId)}
         />
-        <span style={{ fontSize: 10, color: th.danger }}>入列要求失敗</span>
+        <span style={{ fontSize: 10, color: th.danger }}>
+          {t("partnerNotification.enqueueFailed") ?? "入列要求失敗"}
+        </span>
       </div>
     );
   if (retryValue === "inflight")
     return (
       <CanvasPill theme={th} tone="info" dot>
-        入列中 · 待 claim
+        {t("partnerNotification.enqueued") ?? "入列中 · 待 claim"}
       </CanvasPill>
     );
   if (retryValue === "allowed")
@@ -620,6 +627,7 @@ function PnDeliveries({
   retryRowId,
   onRetry,
   onRefresh,
+  t,
 }: any) {
   const PN_DLV: Record<string, [string, any]> = {
     accepted: ["端點已接受，但裝置未知", "warn"],
@@ -684,13 +692,13 @@ function PnDeliveries({
         padding={24}
         actions={
           <CanvasBtn theme={th} size="xs" icon="refresh" onClick={onRefresh}>
-            重新整理
+            {t("partnerNotification.refresh") ?? "重新整理"}
           </CanvasBtn>
         }
       >
         <CanvasEmptyState
           theme={th}
-          title="尚無派送紀錄"
+          title={t("partnerNotification.noDeliveries") ?? "尚無派送紀錄"}
           body="通過測試並啟用後，紀錄會顯示於此。"
         />
       </CanvasCard>
@@ -707,7 +715,7 @@ function PnDeliveries({
       padding={0}
       actions={
         <CanvasBtn theme={th} size="xs" icon="refresh" onClick={onRefresh}>
-          重新整理
+          {t("partnerNotification.refresh") ?? "重新整理"}
         </CanvasBtn>
       }
     >
@@ -745,7 +753,8 @@ function PnDeliveries({
               <span style={{ fontSize: 10.5 }}>
                 {r.target || (
                   <span style={{ color: th.textDim }}>
-                    未知／尚未建立派送目標
+                    {t("partnerNotification.unknownTarget") ??
+                      "未知／尚未建立派送目標"}
                   </span>
                 )}
               </span>
@@ -764,11 +773,11 @@ function PnDeliveries({
             r: (r: any) =>
               r.ack === "ok" ? (
                 <CanvasPill theme={th} tone="success">
-                  通過
+                  {t("partnerNotification.pass") ?? "通過"}
                 </CanvasPill>
               ) : r.ack === "mismatch" ? (
                 <CanvasPill theme={th} tone="danger">
-                  不符
+                  {t("partnerNotification.mismatch") ?? "不符"}
                 </CanvasPill>
               ) : (
                 <span style={{ color: th.textDim }}>—</span>
@@ -908,7 +917,7 @@ function PnEditView({
             theme={th}
             tone="warn"
             icon="lock"
-            title="權限不足"
+            title={t("partnerNotification.permissionDenied") ?? "權限不足"}
             body="您沒有本 entry 綁定的寫入權限，無法儲存（需要 entry 對應之 foundation/tenant write 權限）。"
           />
         )}
@@ -1473,7 +1482,9 @@ export function PartnerNotificationPanel({
 
         <CanvasCard
           theme={theme}
-          title="派送摘要 · 近 24h"
+          title={
+            t("partnerNotification.deliverySummary24h") ?? "派送摘要 · 近 24h"
+          }
           subtitle="「已接受」≠ 裝置已收到"
         >
           <div

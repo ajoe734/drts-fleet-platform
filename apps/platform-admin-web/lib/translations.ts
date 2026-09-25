@@ -1582,6 +1582,21 @@ const en = {
   "partnerNotification.test": "Test Binding",
   "partnerNotification.enable": "Enable",
   "partnerNotification.disable": "Disable",
+  "partnerNotification.lifecycleCtrl": "Lifecycle Control",
+  "partnerNotification.testRejected": "Test Rejected",
+  "partnerNotification.enableFailed": "Enable Failed",
+  "partnerNotification.disableFailed": "Disable Failed",
+  "partnerNotification.resumeFailed": "Resume Failed",
+  "partnerNotification.testFailedAck": "Test Failed (Ack Mismatch)",
+  "partnerNotification.resumeDep":
+    "'Resume' depends on if current endpoint is passed_current, no separate /resume.",
+  "partnerNotification.enqueueFailed": "Enqueue Failed",
+  "partnerNotification.enqueued": "Enqueued, awaiting claim",
+  "partnerNotification.noDeliveries": "No Deliveries",
+  "partnerNotification.unknownTarget": "Unknown / Target Not Created",
+  "partnerNotification.pass": "Pass",
+  "partnerNotification.mismatch": "Mismatch",
+  "partnerNotification.deliverySummary24h": "Delivery Summary (24h)",
   "partnerNotification.noBinding": "No binding configured",
   "partnerNotification.noBindingBody":
     "This entry has no passenger notification binding.",
@@ -4677,6 +4692,21 @@ const en = {
 };
 
 const zh: typeof en = {
+  "partnerNotification.lifecycleCtrl": "生命週期控制",
+  "partnerNotification.testRejected": "綁定測試遭拒",
+  "partnerNotification.enableFailed": "啟用失敗",
+  "partnerNotification.disableFailed": "停用失敗",
+  "partnerNotification.resumeFailed": "恢復失敗",
+  "partnerNotification.testFailedAck": "測試失敗 · ack 驗證不符",
+  "partnerNotification.resumeDep":
+    "「恢復」依據目前端點是否 passed_current 來決定是否需重測，無獨立 /resume。",
+  "partnerNotification.enqueueFailed": "入列要求失敗",
+  "partnerNotification.enqueued": "入列中 · 待 claim",
+  "partnerNotification.noDeliveries": "尚無派送紀錄",
+  "partnerNotification.unknownTarget": "未知／尚未建立派送目標",
+  "partnerNotification.pass": "通過",
+  "partnerNotification.mismatch": "不符",
+  "partnerNotification.deliverySummary24h": "派送摘要 · 近 24h",
   "partnerNotification.permissionDenied": "權限不足",
   "partnerNotification.saveFailed": "儲存失敗",
   "partnerNotification.reload": "重新載入",
