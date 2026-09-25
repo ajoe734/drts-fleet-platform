@@ -33,7 +33,13 @@ export function PanelActionBtn({
   const resolvedVariant =
     variant ?? (descriptor.riskLevel === "medium" ? "primary" : "secondary");
   return (
-    <div title={!descriptor.enabled ? descriptor.reason : undefined}>
+    <div
+      title={
+        !descriptor.enabled
+          ? descriptor.reason || descriptor.disabledReasonCode
+          : undefined
+      }
+    >
       <CanvasBtn
         theme={theme}
         size={size}
@@ -50,21 +56,30 @@ export function PanelActionBtn({
   );
 }
 
-export function PartnerNotificationPanel({
-  entrySlug,
-  canWriteBinding,
+function PnBinding({
+  theme: th,
+  binding,
   tenantId,
-}: {
-  entrySlug: string;
-  partnerName?: string;
-  programName?: string;
-  partnerId?: string;
-  tenantId?: string;
-  canWriteBinding?: boolean;
-}) {
-  const client = usePlatformAdminClient();
-  const { t } = useTranslation();
-  const theme = buildCanvasTheme({ surface: "platform" });
+  testStatus,
+  t,
+  onEdit,
+  canWriteBinding,
+}: any) {
+  const state = binding ? binding.state : "none";
+  const PN_BIND: Record<string, [string, any]> = {
+    ready: [t("partnerNotification.state.ready") ?? "就緒", "success"],
+    test_pending: ["待測試", "warn"],
+    disabled: [t("partnerNotification.state.disabled") ?? "已停用", "neutral"],
+  };
+  const TEST_STATUS: Record<string, [string, any]> = {
+    passed_current: ["測試通過 · 目前端點", "success"],
+    passed_stale: ["測試已失效 · 端點 fingerprint 已變", "warn"],
+    failed: ["測試失敗", "danger"],
+    none: ["尚未測試", "neutral"],
+  };
+
+  const m = PN_BIND[state] || ["未知", "neutral"];
+  const testDisplay = TEST_STATUS[testStatus] || ["尚未測試", "neutral"];
 
   const PN_EVENTS: [string, string, string][] = [
     [
@@ -95,26 +110,1008 @@ export function PartnerNotificationPanel({
     ],
   ];
 
-  const PN_BIND: Record<string, [string, any]> = {
-    ready: [t("partnerNotification.state.ready"), "success"],
-    test_pending: ["待測試", "warn"],
-    disabled: [t("partnerNotification.state.disabled"), "neutral"],
-  };
+  return (
+    <CanvasCard
+      theme={th}
+      title={
+        t("partnerNotification.binding.title") ??
+        "通知綁定 · Notification Binding"
+      }
+      subtitle="引用既有 webhook · 端點/密鑰於既有 /webhooks 管理（依權限顯示）"
+      actions={
+        <>
+          <CanvasBtn
+            theme={th}
+            size="xs"
+            icon="edit"
+            onClick={onEdit}
+            disabled={!canWriteBinding}
+          >
+            {t("partnerNotification.edit") ?? "編輯綁定"}
+          </CanvasBtn>
+          <CanvasPill theme={th} tone={m[1] as any} dot>
+            {m[0]}
+            <span
+              style={{
+                marginLeft: 4,
+                opacity: 0.6,
+                fontFamily: th.monoFamily,
+                fontSize: 9,
+              }}
+            >
+              {state}
+            </span>
+          </CanvasPill>
+        </>
+      }
+    >
+      <CanvasDL
+        theme={th}
+        cols={2}
+        items={[
+          {
+            k: "webhookId",
+            v: (
+              <span style={{ fontFamily: th.monoFamily }}>
+                {binding?.webhookId || "—"}{" "}
+                {tenantId ? (
+                  <a
+                    href={`/tenants/${tenantId}`}
+                    target="_blank"
+                    rel="noreferrer"
+                  >
+                    <CanvasBtn theme={th} size="xs" variant="ghost" icon="ext">
+                      {t("partnerNotification.webhookHelp") ??
+                        "既有 /webhooks 管理（需 tenant:webhooks:write）"}
+                    </CanvasBtn>
+                  </a>
+                ) : (
+                  <CanvasBtn theme={th} size="xs" variant="ghost" icon="ext">
+                    {t("partnerNotification.webhookHelp") ??
+                      "既有 /webhooks 管理（需 tenant:webhooks:write）"}
+                  </CanvasBtn>
+                )}
+              </span>
+            ),
+          },
+          { k: "端點（唯讀）", v: "https://...", mono: true },
+          {
+            k: "端點 fingerprint",
+            v: binding?.endpointFingerprint || "未知",
+            mono: true,
+          },
+          { k: "version", v: String(binding?.version || 0), mono: true },
+          {
+            k: "最近測試",
+            v: (
+              <CanvasPill theme={th} tone={testDisplay[1] as any} dot>
+                {testDisplay[0]}
+              </CanvasPill>
+            ),
+          },
+          {
+            k: "測試時間",
+            v:
+              testStatus === "none"
+                ? "—"
+                : binding?.validatedAt
+                  ? `${new Date(binding.validatedAt).toLocaleString()} · fp:${binding.validatedEndpointFingerprint}`
+                  : "—",
+            mono: true,
+          },
+          {
+            k: "最後更新",
+            v: binding?.updatedAt
+              ? new Date(binding.updatedAt).toLocaleString()
+              : "—",
+            mono: false,
+          },
+          {
+            k: "簽章密鑰",
+            v: (
+              <span style={{ fontFamily: th.monoFamily }}>
+                {t("partnerNotification.secretHidden") ??
+                  "••••••••（此頁不顯示、不編輯）"}
+              </span>
+            ),
+          },
+        ]}
+      />
+      <div style={{ marginTop: 10 }}>
+        <div
+          style={{
+            fontSize: 11,
+            fontWeight: 700,
+            color: th.textMuted,
+            marginBottom: 6,
+          }}
+        >
+          {t("partnerNotification.subscribedEvents") ??
+            "訂閱事件（內部 → 對外映射）"}
+        </div>
+        {state === "disabled" ? (
+          <span style={{ fontSize: 11.5, color: th.textDim }}>
+            {t("partnerNotification.disabledDesc") ??
+              "已停用 · 不派送任何事件；訂閱設定保留，可恢復"}
+          </span>
+        ) : (
+          <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+            {(binding?.eventTypes || []).map((i: string) => {
+              const row = PN_EVENTS.find((e) => e[0] === i);
+              return (
+                <div
+                  key={i}
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    gap: 8,
+                    fontSize: 11.5,
+                  }}
+                >
+                  <CanvasPill theme={th} tone="accent">
+                    {i}
+                  </CanvasPill>
+                  <CanvasIcon
+                    name="chevR"
+                    size={11}
+                    style={{ color: th.textDim }}
+                  />
+                  <span
+                    style={{ fontFamily: th.monoFamily, color: th.textMuted }}
+                  >
+                    {row ? row[1] : i}
+                  </span>
+                  <span style={{ color: th.textDim }}>{row ? row[2] : ""}</span>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </div>
+    </CanvasCard>
+  );
+}
 
+function PnLifecycle({
+  theme: th,
+  binding,
+  testStatus,
+  testingState,
+  enableState,
+  disableState,
+  resumeState,
+  canWriteBinding,
+  onTest,
+  onEnable,
+  onDisable,
+  onResume,
+}: any) {
+  const state = binding ? binding.state : "none";
+  const isPending =
+    testingState === "pending" ||
+    enableState === "pending" ||
+    disableState === "pending" ||
+    resumeState === "pending";
+  const canEnable = state === "test_pending" && testStatus === "passed_current";
+  const canMutate = canWriteBinding;
+  const enableReason =
+    state === "ready"
+      ? "already_enabled"
+      : state === "disabled"
+        ? "use_resume"
+        : testStatus === "passed_stale"
+          ? "ENDPOINT_FINGERPRINT_CHANGED"
+          : testStatus === "failed"
+            ? "LAST_TEST_FAILED"
+            : "TEST_REQUIRED";
+
+  return (
+    <CanvasCard
+      theme={th}
+      title="生命週期控制"
+      subtitle="test → enable · disable · resume"
+    >
+      {!canMutate && (
+        <div style={{ marginBottom: 10 }}>
+          <CanvasBanner
+            theme={th}
+            tone="warn"
+            icon="lock"
+            title="權限不足"
+            body="您沒有本 entry 綁定的寫入權限，無法執行生命週期操作（需 foundation:write）。"
+          />
+        </div>
+      )}
+      {testingState === "rejected" && (
+        <div style={{ marginBottom: 10 }}>
+          <CanvasBanner
+            theme={th}
+            tone="danger"
+            icon="warn"
+            title="綁定測試遭拒"
+            body="夥伴端點回傳錯誤狀態碼，拒絕了測試要求，無法啟用。"
+            actions={
+              <CanvasBtn
+                theme={th}
+                size="xs"
+                icon="refresh"
+                disabled={!canMutate || isPending}
+                onClick={onTest}
+              >
+                重測
+              </CanvasBtn>
+            }
+          />
+        </div>
+      )}
+      {enableState === "failed" && (
+        <div style={{ marginBottom: 10 }}>
+          <CanvasBanner
+            theme={th}
+            tone="danger"
+            icon="warn"
+            title="啟用失敗"
+            body="無法啟用綁定，請確認測試狀態有效後重試。"
+            actions={
+              <CanvasBtn
+                theme={th}
+                size="xs"
+                icon="refresh"
+                disabled={!canMutate || isPending || !canEnable}
+                onClick={onEnable}
+              >
+                重試
+              </CanvasBtn>
+            }
+          />
+        </div>
+      )}
+      {disableState === "failed" && (
+        <div style={{ marginBottom: 10 }}>
+          <CanvasBanner
+            theme={th}
+            tone="danger"
+            icon="warn"
+            title="停用失敗"
+            body="無法停用綁定，請重試。"
+            actions={
+              <CanvasBtn
+                theme={th}
+                size="xs"
+                icon="refresh"
+                disabled={!canMutate || isPending}
+                onClick={onDisable}
+              >
+                重試
+              </CanvasBtn>
+            }
+          />
+        </div>
+      )}
+      {resumeState === "failed" && (
+        <div style={{ marginBottom: 10 }}>
+          <CanvasBanner
+            theme={th}
+            tone="danger"
+            icon="warn"
+            title="恢復失敗"
+            body="無法恢復綁定狀態，請重試。"
+            actions={
+              <CanvasBtn
+                theme={th}
+                size="xs"
+                icon="refresh"
+                disabled={!canMutate || isPending}
+                onClick={onResume}
+              >
+                重試
+              </CanvasBtn>
+            }
+          />
+        </div>
+      )}
+      {testStatus === "failed" && testingState !== "rejected" && (
+        <div style={{ marginBottom: 10 }}>
+          <CanvasBanner
+            theme={th}
+            tone="danger"
+            icon="warn"
+            title="測試失敗 · ack 驗證不符"
+            body="夥伴回 200，但 ack.delivery_id 與送出不符（notification_id / partner_entry_slug 亦須一致，status/receipt 須合法）。請確認夥伴端實作後重測。"
+            actions={
+              <CanvasBtn
+                theme={th}
+                size="xs"
+                icon="refresh"
+                disabled={!canMutate || isPending}
+                onClick={onTest}
+              >
+                重測
+              </CanvasBtn>
+            }
+          />
+        </div>
+      )}
+
+      <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+        <PanelActionBtn
+          theme={th}
+          descriptor={{
+            action: "test",
+            enabled: canMutate && state !== "disabled" && !isPending,
+            disabledReasonCode: !canMutate
+              ? "missing_scope"
+              : state === "disabled"
+                ? "binding_disabled"
+                : isPending
+                  ? "in_flight"
+                  : undefined,
+            riskLevel: "low",
+          }}
+          icon="refresh"
+          label={testingState === "pending" ? "測試中..." : "發送測試事件"}
+          en="test"
+          onClick={onTest}
+        />
+        <PanelActionBtn
+          theme={th}
+          descriptor={{
+            action: "enable",
+            enabled: canMutate && canEnable && !isPending,
+            disabledReasonCode: !canMutate
+              ? "missing_scope"
+              : canEnable
+                ? undefined
+                : enableReason,
+            riskLevel: "medium",
+            requiresReason: true,
+          }}
+          icon="check"
+          label={enableState === "pending" ? "啟用中..." : "啟用"}
+          en="enable"
+          onClick={onEnable}
+        />
+        {state === "disabled" ? (
+          <PanelActionBtn
+            theme={th}
+            descriptor={{
+              action: "resume",
+              enabled: canMutate && !isPending,
+              disabledReasonCode: !canMutate
+                ? "missing_scope"
+                : isPending
+                  ? "in_flight"
+                  : undefined,
+              riskLevel: "medium",
+              requiresReason: true,
+            }}
+            icon="check"
+            label={
+              resumeState === "pending"
+                ? "恢復通知中..."
+                : testStatus === "passed_current"
+                  ? "恢復通知"
+                  : "恢復通知（恢復後需重新測試，通過後才能啟用）"
+            }
+            en="resume"
+            onClick={onResume}
+          />
+        ) : (
+          <PanelActionBtn
+            theme={th}
+            descriptor={{
+              action: "disable",
+              enabled: canMutate && state === "ready" && !isPending,
+              disabledReasonCode: !canMutate
+                ? "missing_scope"
+                : state === "ready"
+                  ? undefined
+                  : "not_enabled",
+              riskLevel: "high",
+              requiresReason: true,
+            }}
+            icon="lock"
+            label={disableState === "pending" ? "停用中..." : "停用"}
+            en="disable"
+            onClick={onDisable}
+          />
+        )}
+      </div>
+      <div
+        style={{
+          fontSize: 10.5,
+          color: th.textDim,
+          marginTop: 9,
+          lineHeight: 1.5,
+        }}
+      >
+        啟用門檻：目前端點 fingerprint
+        必須有成功測試。端點變更後測試自動失效，需重測。
+        <br />
+        「恢復」依據目前端點是否 passed_current 來決定是否需重測，無獨立
+        /resume。
+      </div>
+    </CanvasCard>
+  );
+}
+
+function PnRetryCell({ theme: th, r, retryState, onRetry }: any) {
+  const RETRY_DENY: Record<string, string> = {
+    DELIVERY_TERMINAL: "已是終止狀態（已接受或已取代）",
+    SUPERSEDED: "已被新通知取代",
+    BUDGET_EXHAUSTED: "預算耗盡 (budget)",
+    TTL_EXPIRED: "生命週期已過期 (ttl)",
+    LEASE_ACTIVE: "另一重送進行中 (lease)",
+    BINDING_NOT_READY: "綁定未就緒",
+  };
+  const retryValue = r.retryPolicy || r.retry;
+  if (!retryValue || retryValue === "n/a")
+    return <span style={{ fontSize: 10.5, color: th.textDim }}>—</span>;
+  if (retryValue.startsWith("denied:")) {
+    const code = retryValue.split(":")[1];
+    return (
+      <span
+        title={code}
+        style={{
+          fontSize: 10.5,
+          color: th.textDim,
+          display: "inline-flex",
+          alignItems: "center",
+          gap: 4,
+        }}
+      >
+        <CanvasIcon name="warn" size={10} />
+        {RETRY_DENY[code] || code}
+      </span>
+    );
+  }
+  if (retryState === "pending")
+    return (
+      <PanelActionBtn
+        theme={th}
+        descriptor={{ enabled: false, riskLevel: "low" }}
+        icon="refresh"
+        label="重送中..."
+        en="resend"
+        size="xs"
+      />
+    );
+  if (retryState === "failed")
+    return (
+      <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+        <PanelActionBtn
+          theme={th}
+          descriptor={{ enabled: true, riskLevel: "low" }}
+          icon="refresh"
+          label="重送"
+          en="resend"
+          size="xs"
+          onClick={() => onRetry(r.outboxId)}
+        />
+        <span style={{ fontSize: 10, color: th.danger }}>入列要求失敗</span>
+      </div>
+    );
+  if (retryValue === "inflight")
+    return (
+      <CanvasPill theme={th} tone="info" dot>
+        入列中 · 待 claim
+      </CanvasPill>
+    );
+  if (retryValue === "allowed")
+    return (
+      <PanelActionBtn
+        theme={th}
+        descriptor={{ enabled: true, riskLevel: "low" }}
+        icon="refresh"
+        label="重送"
+        en="resend"
+        size="xs"
+        onClick={() => onRetry(r.outboxId)}
+      />
+    );
+  return null;
+}
+
+function PnDeliveries({
+  theme: th,
+  loading,
+  deliveries,
+  retryState,
+  retryRowId,
+  onRetry,
+  onRefresh,
+}: any) {
   const PN_DLV: Record<string, [string, any]> = {
+    accepted: ["端點已接受，但裝置未知", "warn"],
+    ack_invalid: ["回應成功但 ack 驗證失敗", "danger"],
+    failed: ["失敗", "danger"],
+    queued: ["排隊中", "neutral"],
+    requeued: ["已受理重新入列", "info"],
+    superseded: ["已被新通知取代", "neutral"],
+    ttl_expired: ["生命週期逾時 (ttl)", "neutral"],
+    budget_exhausted: ["重試次數耗盡 (budget)", "danger"],
     delivered: ["端點已接受，但裝置未知", "warn"],
     pending: ["排隊中", "neutral"],
     sending: ["發送中", "info"],
-    failed: ["失敗", "danger"],
   };
 
-  const RETRY_DENY: Record<string, string> = {
-    SUPERSEDED: "已被新通知取代",
-    RETRY_EXHAUSTED: "重試次數耗盡",
-    EVENT_EXPIRED: "事件已過期",
-    LEASE_ACTIVE: "另一重送進行中（lease）",
-    BINDING_NOT_READY: "綁定未就緒",
-  };
+  if (loading && deliveries.length === 0) {
+    return (
+      <CanvasCard
+        theme={th}
+        title={
+          t("partnerNotification.deliveries.title") ?? "派送紀錄 · Deliveries"
+        }
+        subtitle="送達以 ack 驗證為準，不憑 HTTP code · 目標為每筆 immutable delivery context · 重試受控"
+        padding={16}
+      >
+        <div
+          style={{
+            height: 14,
+            borderRadius: 4,
+            background: th.surfaceLo,
+            marginBottom: 10,
+          }}
+        />
+        <div
+          style={{
+            height: 14,
+            borderRadius: 4,
+            background: th.surfaceLo,
+            marginBottom: 10,
+          }}
+        />
+        <div
+          style={{
+            height: 14,
+            borderRadius: 4,
+            background: th.surfaceLo,
+            marginBottom: 10,
+          }}
+        />
+      </CanvasCard>
+    );
+  }
+
+  if (deliveries.length === 0) {
+    return (
+      <CanvasCard
+        theme={th}
+        title={
+          t("partnerNotification.deliveries.title") ?? "派送紀錄 · Deliveries"
+        }
+        subtitle="送達以 ack 驗證為準，不憑 HTTP code · 目標為每筆 immutable delivery context · 重試受控"
+        padding={24}
+        actions={
+          <CanvasBtn theme={th} size="xs" icon="refresh" onClick={onRefresh}>
+            重新整理
+          </CanvasBtn>
+        }
+      >
+        <CanvasEmptyState
+          theme={th}
+          title="尚無派送紀錄"
+          body="通過測試並啟用後，紀錄會顯示於此。"
+        />
+      </CanvasCard>
+    );
+  }
+
+  return (
+    <CanvasCard
+      theme={th}
+      title={
+        t("partnerNotification.deliveries.title") ?? "派送紀錄 · Deliveries"
+      }
+      subtitle="送達以 ack 驗證為準，不憑 HTTP code · 目標為每筆 immutable delivery context · 重試受控"
+      padding={0}
+      actions={
+        <CanvasBtn theme={th} size="xs" icon="refresh" onClick={onRefresh}>
+          重新整理
+        </CanvasBtn>
+      }
+    >
+      <CanvasTable
+        theme={th}
+        columns={[
+          {
+            h: "Delivery ID",
+            k: "id",
+            w: 110,
+            mono: true,
+            r: (r: any) => (
+              <div style={{ display: "flex", flexDirection: "column" }}>
+                <span style={{ color: th.accent, fontWeight: 600 }}>
+                  {r.id}
+                </span>
+                <span style={{ fontSize: 10, color: th.textDim }}>
+                  {r.outboxId}
+                </span>
+              </div>
+            ),
+          },
+          {
+            h: "事件（內部）",
+            k: "ev",
+            w: 170,
+            mono: true,
+            r: (r: any) => r.ev || r.event,
+          },
+          {
+            h: "目標（遮罩）",
+            w: 150,
+            mono: true,
+            r: (r: any) => (
+              <span style={{ fontSize: 10.5 }}>
+                {r.target || (
+                  <span style={{ color: th.textDim }}>
+                    未知／尚未建立派送目標
+                  </span>
+                )}
+              </span>
+            ),
+          },
+          {
+            h: "HTTP",
+            k: "code",
+            w: 56,
+            mono: true,
+            r: (r: any) => r.code || r.httpCode || "—",
+          },
+          {
+            h: "ack",
+            w: 70,
+            r: (r: any) =>
+              r.ack === "ok" ? (
+                <CanvasPill theme={th} tone="success">
+                  通過
+                </CanvasPill>
+              ) : r.ack === "mismatch" ? (
+                <CanvasPill theme={th} tone="danger">
+                  不符
+                </CanvasPill>
+              ) : (
+                <span style={{ color: th.textDim }}>—</span>
+              ),
+          },
+          {
+            h: "送達狀態",
+            w: 190,
+            r: (r: any) => (
+              <CanvasPill
+                theme={th}
+                tone={(PN_DLV[r.status] || ["未知", "neutral"])[1] as any}
+                dot
+              >
+                {(PN_DLV[r.status] || ["未知", "neutral"])[0]}
+              </CanvasPill>
+            ),
+          },
+          {
+            h: "說明",
+            w: 150,
+            r: (r: any) => (
+              <span style={{ fontSize: 11.5, color: th.textMuted }}>
+                {r.reason}
+              </span>
+            ),
+          },
+          {
+            h: "時間",
+            k: "at",
+            w: 120,
+            mono: true,
+            r: (r: any) => r.at || r.createdAt || "—",
+          },
+          {
+            h: "次",
+            k: "tries",
+            w: 36,
+            mono: true,
+            align: "center",
+            r: (r: any) => r.tries || r.attemptCount || 1,
+          },
+          {
+            h: "重送",
+            w: 150,
+            r: (r: any) => (
+              <PnRetryCell
+                theme={th}
+                r={r}
+                retryState={
+                  r.id === retryRowId || r.outboxId === retryRowId
+                    ? retryState
+                    : "idle"
+                }
+                onRetry={onRetry}
+              />
+            ),
+          },
+        ]}
+        rows={deliveries.map((r: any) => {
+          if (r.id === retryRowId || r.outboxId === retryRowId) {
+            if (retryState === "queued")
+              return {
+                ...r,
+                status: "queued",
+                reason: "已受理重新入列",
+                retry: "inflight",
+              };
+          }
+          return r;
+        })}
+      />
+    </CanvasCard>
+  );
+}
+
+function PnEditView({
+  theme: th,
+  editWebhookId,
+  setEditWebhookId,
+  editEventTypes,
+  setEditEventTypes,
+  editExpectedVersion,
+  saveState,
+  error,
+  onSave,
+  onCancel,
+  tenantId,
+  t,
+  canWriteBinding,
+}: any) {
+  const isSaving = saveState === "pending";
+  const isSaveDisabled = isSaving || !editWebhookId || !canWriteBinding;
+
+  const PN_EVENTS: [string, string, string][] = [
+    [
+      "assignment_disclosure_ready",
+      "passenger.assignment_disclosure_ready.v1",
+      t("partnerNotification.event.assignment_disclosure_ready") ??
+        "派車揭露就緒",
+    ],
+    [
+      "assignment_replaced",
+      "passenger.assignment_replaced.v1",
+      t("partnerNotification.event.assignment_replaced") ?? "派車已更換",
+    ],
+    [
+      "eta_changed",
+      "passenger.eta_changed.v1",
+      t("partnerNotification.event.eta_changed") ?? "ETA 變更",
+    ],
+    [
+      "driver_arrived",
+      "passenger.driver_arrived.v1",
+      t("partnerNotification.event.driver_arrived") ?? "駕駛已抵達",
+    ],
+    [
+      "receipt_ready",
+      "passenger.receipt_ready.v1",
+      t("partnerNotification.event.receipt_ready") ?? "收據就緒",
+    ],
+  ];
+
+  return (
+    <div
+      style={{
+        padding: 24,
+        display: "grid",
+        gridTemplateColumns: "1.4fr 1fr",
+        gap: 16,
+        alignItems: "start",
+      }}
+    >
+      <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+        {!canWriteBinding && (
+          <CanvasBanner
+            theme={th}
+            tone="warn"
+            icon="lock"
+            title="權限不足"
+            body="您沒有本 entry 綁定的寫入權限，無法儲存（需要 entry 對應之 foundation/tenant write 權限）。"
+          />
+        )}
+        {saveState === "failed" && (
+          <CanvasBanner
+            theme={th}
+            tone="danger"
+            icon="warn"
+            title={t("partnerNotification.saveFailed") ?? "儲存失敗"}
+            body={error?.message || "請檢查連線或重試。"}
+          />
+        )}
+        {error?.kind === "409" &&
+          error.code === "PARTNER_NOTIFICATION_BINDING_VERSION_CONFLICT" && (
+            <CanvasBanner
+              theme={th}
+              tone="warn"
+              icon="warn"
+              title={`綁定已被他人更新（expectedVersion ${editExpectedVersion}）`}
+              body="您的選擇已保留。請重新載入後再儲存；不會靜默覆寫。"
+              actions={
+                <CanvasBtn
+                  theme={th}
+                  size="xs"
+                  variant="primary"
+                  icon="refresh"
+                  onClick={onCancel}
+                >
+                  {t("partnerNotification.reload") ?? "重新載入"}
+                </CanvasBtn>
+              }
+            />
+          )}
+        <CanvasCard
+          theme={th}
+          title={t("partnerNotification.editBinding.title") ?? "編輯通知綁定"}
+          subtitle="PUT /partner-entries/:id/notification-binding · webhookId + eventTypes + expectedVersion"
+        >
+          <CanvasField
+            theme={th}
+            label="webhookId · 選擇既有 webhook"
+            required
+            hint="端點 URL、密鑰、逾時/重試由既有 webhook 管理維護，本頁不重複 CRUD"
+          >
+            <input
+              type="text"
+              value={editWebhookId}
+              onChange={(e) => setEditWebhookId(e.target.value)}
+              style={{
+                width: "100%",
+                padding: "8px 12px",
+                border: `1px solid ${th.border}`,
+                borderRadius: 4,
+                background: th.surfaceLo,
+                color: th.text,
+                fontSize: 13,
+              }}
+              placeholder="wh_..."
+            />
+            <div style={{ marginTop: 6 }}>
+              {tenantId ? (
+                <a
+                  href={`/tenants/${tenantId}`}
+                  target="_blank"
+                  rel="noreferrer"
+                >
+                  <CanvasBtn theme={th} size="xs" variant="ghost" icon="ext">
+                    {t("partnerNotification.webhookHelp") ??
+                      "前往既有 /webhooks 管理（需 tenant:webhooks:write）"}
+                  </CanvasBtn>
+                </a>
+              ) : (
+                <CanvasBtn theme={th} size="xs" variant="ghost" icon="ext">
+                  {t("partnerNotification.webhookHelp") ??
+                    "前往既有 /webhooks 管理（需 tenant:webhooks:write）"}
+                </CanvasBtn>
+              )}
+            </div>
+          </CanvasField>
+          <CanvasField theme={th} label="eventTypes · 內部事件" required>
+            <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+              {PN_EVENTS.map(([i, o, zh]) => (
+                <div
+                  key={i}
+                  style={{ display: "flex", alignItems: "center", gap: 10 }}
+                >
+                  <input
+                    type="checkbox"
+                    checked={editEventTypes.includes(i)}
+                    onChange={(e) => {
+                      if (e.target.checked)
+                        setEditEventTypes([...editEventTypes, i]);
+                      else
+                        setEditEventTypes(
+                          editEventTypes.filter((x: string) => x !== i),
+                        );
+                    }}
+                  />
+                  <span
+                    style={{
+                      fontSize: 10.5,
+                      fontFamily: th.monoFamily,
+                      color: th.textDim,
+                    }}
+                  >
+                    → {o}
+                  </span>
+                  <span style={{ fontSize: 10.5, color: th.textDim }}>
+                    {zh}
+                  </span>
+                </div>
+              ))}
+            </div>
+          </CanvasField>
+          <CanvasField
+            theme={th}
+            label="expectedVersion"
+            hint="樂觀鎖 · 不符將回 409"
+          >
+            <input
+              type="text"
+              value={String(editExpectedVersion)}
+              readOnly
+              style={{
+                width: "100%",
+                padding: "8px 12px",
+                border: `1px solid ${th.border}`,
+                borderRadius: 4,
+                background: th.surfaceLo,
+                color: th.textDim,
+                fontSize: 13,
+                fontFamily: th.monoFamily,
+              }}
+            />
+          </CanvasField>
+        </CanvasCard>
+      </div>
+      <CanvasCard
+        theme={th}
+        title={t("partnerNotification.summary.title") ?? "變更摘要"}
+      >
+        <CanvasDL
+          theme={th}
+          cols={1}
+          items={[
+            { k: "webhookId", v: editWebhookId || "未設定", mono: true },
+            {
+              k: "eventTypes",
+              v: editEventTypes.length > 0 ? editEventTypes.join(", ") : "無",
+            },
+            {
+              k: "expectedVersion",
+              v: `${editExpectedVersion} → 儲存後 ${editExpectedVersion + 1}`,
+              mono: true,
+            },
+          ]}
+        />
+        <div style={{ marginTop: 8 }}>
+          <CanvasBanner
+            theme={th}
+            tone="info"
+            icon="flags"
+            body="儲存後綁定回到 test_pending；若 webhook 端點 fingerprint 改變，先前測試失效，需重測方可啟用。"
+          />
+        </div>
+        <div style={{ marginTop: 16, display: "flex", gap: 8 }}>
+          <CanvasBtn theme={th} disabled={isSaving} onClick={onCancel}>
+            {t("partnerNotification.cancel") ?? "取消"}
+          </CanvasBtn>
+          <PanelActionBtn
+            theme={th}
+            descriptor={{
+              action: "save",
+              enabled: !isSaveDisabled,
+              riskLevel: "medium",
+            }}
+            variant="primary"
+            icon="check"
+            label={isSaving ? "儲存中..." : "儲存"}
+            en="save"
+            onClick={onSave}
+          />
+        </div>
+      </CanvasCard>
+    </div>
+  );
+}
+
+export function PartnerNotificationPanel({
+  entrySlug,
+  canWriteBinding,
+  tenantId,
+}: {
+  entrySlug: string;
+  partnerName?: string;
+  programName?: string;
+  partnerId?: string;
+  tenantId?: string;
+  canWriteBinding?: boolean;
+}) {
+  const client = usePlatformAdminClient();
+  const { t } = useTranslation();
+  const theme = buildCanvasTheme({ surface: "platform" });
 
   const [binding, setBinding] = useState<any>(null);
   const [deliveries, setDeliveries] = useState<any[]>([]);
@@ -131,6 +1128,15 @@ export function PartnerNotificationPanel({
   const [testingState, setTestingState] = useState<
     "idle" | "pending" | "rejected"
   >("idle");
+  const [enableState, setEnableState] = useState<"idle" | "pending" | "failed">(
+    "idle",
+  );
+  const [disableState, setDisableState] = useState<
+    "idle" | "pending" | "failed"
+  >("idle");
+  const [resumeState, setResumeState] = useState<"idle" | "pending" | "failed">(
+    "idle",
+  );
   const [retryState, setRetryState] = useState<
     "idle" | "pending" | "failed" | "queued"
   >("idle");
@@ -144,8 +1150,10 @@ export function PartnerNotificationPanel({
     setLoading(true);
     try {
       const [bReq, dReq] = await Promise.allSettled([
-        client.getPartnerEntryNotificationBinding(entrySlug),
-        client.listPartnerNotificationDeliveries(entrySlug, { pageSize: 500 }),
+        (client as any).getPartnerEntryNotificationBinding(entrySlug),
+        (client as any).listPartnerNotificationDeliveries(entrySlug, {
+          pageSize: 500,
+        }),
       ]);
 
       if (bReq.status === "rejected") {
@@ -198,7 +1206,7 @@ export function PartnerNotificationPanel({
   const handleSave = async () => {
     setSaveState("pending");
     try {
-      await client.updatePartnerEntryNotificationBinding(entrySlug, {
+      await (client as any).updatePartnerEntryNotificationBinding(entrySlug, {
         webhookId: editWebhookId,
         eventTypes: editEventTypes as any,
         expectedVersion: editExpectedVersion,
@@ -221,7 +1229,7 @@ export function PartnerNotificationPanel({
   const handleTest = async () => {
     setTestingState("pending");
     try {
-      await client.testPartnerEntryNotificationBinding(entrySlug);
+      await (client as any).testPartnerEntryNotificationBinding(entrySlug);
       setTestingState("idle");
       fetchState();
     } catch (err: any) {
@@ -231,16 +1239,16 @@ export function PartnerNotificationPanel({
       ) {
         setTestingState("rejected");
       } else {
-        setTestingState("rejected"); // fallback
+        setTestingState("rejected");
       }
     }
   };
 
   const handleEnable = async () => {
     if (!binding) return;
-    setSaveState("pending");
+    setEnableState("pending");
     try {
-      await client.enablePartnerEntryNotificationBinding(
+      await (client as any).enablePartnerEntryNotificationBinding(
         entrySlug,
         binding.version,
       );
@@ -251,16 +1259,17 @@ export function PartnerNotificationPanel({
         message: err.message,
         code: err.code || err.error,
       });
+      setEnableState("failed");
     } finally {
-      setSaveState("idle");
+      setEnableState((prev) => (prev === "pending" ? "idle" : prev));
     }
   };
 
   const handleDisable = async () => {
     if (!binding) return;
-    setSaveState("pending");
+    setDisableState("pending");
     try {
-      await client.disablePartnerEntryNotificationBinding(
+      await (client as any).disablePartnerEntryNotificationBinding(
         entrySlug,
         binding.version,
       );
@@ -271,23 +1280,39 @@ export function PartnerNotificationPanel({
         message: err.message,
         code: err.code || err.error,
       });
+      setDisableState("failed");
     } finally {
-      setSaveState("idle");
+      setDisableState((prev) => (prev === "pending" ? "idle" : prev));
     }
   };
 
-  const handleResume = () => {
-    setEditWebhookId(binding?.webhookId || "");
-    setEditEventTypes(binding?.eventTypes || []);
-    setEditExpectedVersion(binding?.version || 0);
-    setIsEditing(true);
+  const handleResumeLifecycle = async () => {
+    if (!binding) return;
+    setResumeState("pending");
+    try {
+      // Resume corresponds to re-enabling an existing disabled binding in the backend
+      await (client as any).enablePartnerEntryNotificationBinding(
+        entrySlug,
+        binding.version,
+      );
+      fetchState();
+    } catch (err: any) {
+      setError({
+        kind: "error",
+        message: err.message,
+        code: err.code || err.error,
+      });
+      setResumeState("failed");
+    } finally {
+      setResumeState((prev) => (prev === "pending" ? "idle" : prev));
+    }
   };
 
   const handleRetry = async (outboxId: string) => {
     setRetryRowId(outboxId);
     setRetryState("pending");
     try {
-      const outcome = await client.retryPartnerNotificationDelivery(
+      const outcome = await (client as any).retryPartnerNotificationDelivery(
         entrySlug,
         outboxId,
       );
@@ -333,226 +1358,28 @@ export function PartnerNotificationPanel({
   }
 
   if (isEditing) {
-    const isSaveDisabled = saveState === "pending" || !editWebhookId;
     return (
-      <div
-        style={{
-          padding: 24,
-          display: "grid",
-          gridTemplateColumns: "1.4fr 1fr",
-          gap: 16,
-          alignItems: "start",
+      <PnEditView
+        theme={theme}
+        editWebhookId={editWebhookId}
+        setEditWebhookId={setEditWebhookId}
+        editEventTypes={editEventTypes}
+        setEditEventTypes={setEditEventTypes}
+        editExpectedVersion={editExpectedVersion}
+        saveState={saveState}
+        error={error}
+        onSave={handleSave}
+        onCancel={() => {
+          setIsEditing(false);
+          fetchState();
         }}
-      >
-        <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
-          {saveState === "failed" && (
-            <CanvasBanner
-              theme={theme}
-              tone="danger"
-              icon="warn"
-              title={t("partnerNotification.saveFailed")}
-              body={error?.message || "請檢查連線或重試。"}
-            />
-          )}
-          {error?.kind === "409" &&
-            error.code === "PARTNER_NOTIFICATION_BINDING_VERSION_CONFLICT" && (
-              <CanvasBanner
-                theme={theme}
-                tone="warn"
-                icon="warn"
-                title={`綁定已被他人更新（expectedVersion ${editExpectedVersion}）`}
-                body="您的選擇已保留。請重新載入後再儲存；不會靜默覆寫。"
-                actions={
-                  <>
-                    <CanvasBtn
-                      theme={theme}
-                      size="xs"
-                      variant="primary"
-                      icon="refresh"
-                      onClick={fetchState}
-                    >
-                      {t("partnerNotification.reload")}
-                    </CanvasBtn>
-                  </>
-                }
-              />
-            )}
-          <CanvasCard
-            theme={theme}
-            title={t("partnerNotification.editBinding.title")}
-            subtitle="PUT /partner-entries/:id/notification-binding · webhookId + eventTypes + expectedVersion"
-          >
-            <CanvasField
-              theme={theme}
-              label="webhookId · 選擇既有 webhook"
-              required
-              hint="端點 URL、密鑰、逾時/重試由既有 webhook 管理維護，本頁不重複 CRUD"
-            >
-              <input
-                type="text"
-                value={editWebhookId}
-                onChange={(e) => setEditWebhookId(e.target.value)}
-                style={{
-                  width: "100%",
-                  padding: "8px 12px",
-                  border: `1px solid ${theme.border}`,
-                  borderRadius: 4,
-                  background: theme.surfaceLo,
-                  color: theme.text,
-                  fontSize: 13,
-                }}
-                placeholder="wh_..."
-              />
-              <div style={{ marginTop: 6 }}>
-                {tenantId ? (
-                  <a
-                    href={`/tenants/${tenantId}`}
-                    target="_blank"
-                    rel="noreferrer"
-                  >
-                    <CanvasBtn
-                      theme={theme}
-                      size="xs"
-                      variant="ghost"
-                      icon="ext"
-                    >
-                      {t("partnerNotification.webhookHelp") ??
-                        "前往既有 /webhooks 管理（需 tenant:webhooks:write）"}
-                    </CanvasBtn>
-                  </a>
-                ) : (
-                  <CanvasBtn theme={theme} size="xs" variant="ghost" icon="ext">
-                    {t("partnerNotification.webhookHelp") ??
-                      "前往既有 /webhooks 管理（需 tenant:webhooks:write）"}
-                  </CanvasBtn>
-                )}
-              </div>
-            </CanvasField>
-            <CanvasField theme={theme} label="eventTypes · 內部事件" required>
-              <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-                {PN_EVENTS.map(([i, o, zh]) => (
-                  <div
-                    key={i}
-                    style={{ display: "flex", alignItems: "center", gap: 10 }}
-                  >
-                    <input
-                      type="checkbox"
-                      checked={editEventTypes.includes(i as string)}
-                      onChange={(e) => {
-                        if (e.target.checked)
-                          setEditEventTypes([...editEventTypes, i as string]);
-                        else
-                          setEditEventTypes(
-                            editEventTypes.filter((x) => x !== (i as string)),
-                          );
-                      }}
-                    />
-                    <span
-                      style={{
-                        fontSize: 10.5,
-                        fontFamily: theme.monoFamily,
-                        color: theme.textDim,
-                      }}
-                    >
-                      → {o}
-                    </span>
-                    <span style={{ fontSize: 10.5, color: theme.textDim }}>
-                      {zh}
-                    </span>
-                  </div>
-                ))}
-              </div>
-            </CanvasField>
-            <CanvasField
-              theme={theme}
-              label="expectedVersion"
-              hint="樂觀鎖 · 不符將回 409"
-            >
-              <input
-                type="text"
-                value={String(editExpectedVersion)}
-                readOnly
-                style={{
-                  width: "100%",
-                  padding: "8px 12px",
-                  border: `1px solid ${theme.border}`,
-                  borderRadius: 4,
-                  background: theme.surfaceLo,
-                  color: theme.textDim,
-                  fontSize: 13,
-                  fontFamily: theme.monoFamily,
-                }}
-              />
-            </CanvasField>
-          </CanvasCard>
-        </div>
-        <CanvasCard
-          theme={theme}
-          title={t("partnerNotification.summary.title")}
-        >
-          <CanvasDL
-            theme={theme}
-            cols={1}
-            items={[
-              { k: "webhookId", v: editWebhookId || "未設定", mono: true },
-              {
-                k: "eventTypes",
-                v: editEventTypes.length > 0 ? editEventTypes.join(", ") : "無",
-              },
-              {
-                k: "expectedVersion",
-                v: `${editExpectedVersion} → 儲存後 ${editExpectedVersion + 1}`,
-                mono: true,
-              },
-            ]}
-          />
-          <div style={{ marginTop: 8 }}>
-            <CanvasBanner
-              theme={theme}
-              tone="info"
-              icon="flags"
-              body="儲存後綁定回到 test_pending；若 webhook 端點 fingerprint 改變，先前測試失效，需重測方可啟用。"
-            />
-          </div>
-          <div style={{ marginTop: 16, display: "flex", gap: 8 }}>
-            <CanvasBtn
-              theme={theme}
-              disabled={saveState === "pending"}
-              onClick={() => setIsEditing(false)}
-            >
-              {t("partnerNotification.cancel")}
-            </CanvasBtn>
-            <PanelActionBtn
-              theme={theme}
-              descriptor={{
-                action: "save",
-                enabled: !isSaveDisabled,
-                riskLevel: "medium",
-              }}
-              variant="primary"
-              icon="check"
-              label={saveState === "pending" ? "儲存中..." : "儲存"}
-              en="save"
-              onClick={handleSave}
-            />
-          </div>
-        </CanvasCard>
-      </div>
+        tenantId={tenantId}
+        t={t}
+        canWriteBinding={canWriteBinding}
+      />
     );
   }
 
-  const bindState = binding
-    ? binding.state
-    : error?.kind === "404"
-      ? "none"
-      : "unknown";
-  const isPending = testingState === "pending" || saveState === "pending";
-  const m = PN_BIND[bindState] || ["未知", "neutral"];
-
-  // Real or mock test status logic
-  // If we have a validatedFingerprint and it matches current endpoint fingerprint, it's passed_current
-  // But we don't have endpointFingerprint exposed yet on binding from server? Actually binding has it in my UI?
-  // Let's assume binding returns endpointFingerprint if available, and we compare against validatedEndpointFingerprint
   let testStatus = "none";
   if (binding?.validatedEndpointFingerprint) {
     if (binding.validatedEndpointFingerprint === binding.endpointFingerprint) {
@@ -563,14 +1390,6 @@ export function PartnerNotificationPanel({
   } else if (testingState === "rejected") {
     testStatus = "failed";
   }
-
-  const TEST: Record<string, [string, any]> = {
-    passed_current: ["測試通過 · 目前端點", "success"],
-    passed_stale: ["測試已失效 · 端點 fingerprint 已變", "warn"],
-    failed: ["測試失敗", "danger"],
-    none: ["尚未測試", "neutral"],
-  };
-  const testDisplay = TEST[testStatus] || ["尚未測試", "neutral"];
 
   return (
     <div
@@ -602,539 +1421,102 @@ export function PartnerNotificationPanel({
                   variant="primary"
                   icon="plus"
                   onClick={() => setIsEditing(true)}
+                  disabled={!canWriteBinding}
                 >
-                  {t("partnerNotification.createBinding")}
+                  {t("partnerNotification.createBinding") ?? "建立綁定"}
                 </CanvasBtn>
               }
             />
           </CanvasCard>
         ) : (
-          <CanvasCard
+          <PnBinding
             theme={theme}
-            title={t("partnerNotification.binding.title")}
-            subtitle="引用既有 webhook · 端點/密鑰於既有 /webhooks 管理（依權限顯示）"
-            actions={
-              <>
-                <CanvasBtn
-                  theme={theme}
-                  size="xs"
-                  icon="edit"
-                  onClick={() => setIsEditing(true)}
-                >
-                  {t("partnerNotification.edit")}
-                </CanvasBtn>
-                <CanvasPill theme={theme} tone={m[1] as any} dot>
-                  {m[0]}
-                  <span
-                    style={{
-                      marginLeft: 4,
-                      opacity: 0.6,
-                      fontFamily: theme.monoFamily,
-                      fontSize: 9,
-                    }}
-                  >
-                    {bindState}
-                  </span>
-                </CanvasPill>
-              </>
-            }
-          >
-            <CanvasDL
-              theme={theme}
-              cols={2}
-              items={[
-                {
-                  k: "webhookId",
-                  v: (
-                    <span style={{ fontFamily: theme.monoFamily }}>
-                      {binding?.webhookId || "—"}{" "}
-                      {tenantId ? (
-                        <a
-                          href={`/tenants/${tenantId}`}
-                          target="_blank"
-                          rel="noreferrer"
-                        >
-                          <CanvasBtn
-                            theme={theme}
-                            size="xs"
-                            variant="ghost"
-                            icon="ext"
-                          >
-                            {t("partnerNotification.webhookHelp") ??
-                              "既有 /webhooks 管理（需 tenant:webhooks:write）"}
-                          </CanvasBtn>
-                        </a>
-                      ) : (
-                        <CanvasBtn
-                          theme={theme}
-                          size="xs"
-                          variant="ghost"
-                          icon="ext"
-                        >
-                          {t("partnerNotification.webhookHelp") ??
-                            "既有 /webhooks 管理（需 tenant:webhooks:write）"}
-                        </CanvasBtn>
-                      )}
-                    </span>
-                  ),
-                },
-                { k: "端點（唯讀）", v: "https://...", mono: true },
-                {
-                  k: "端點 fingerprint",
-                  v: binding?.endpointFingerprint || "未知",
-                  mono: true,
-                },
-                { k: "version", v: String(binding?.version || 0), mono: true },
-                {
-                  k: "最近測試",
-                  v: (
-                    <CanvasPill theme={theme} tone={testDisplay[1] as any} dot>
-                      {testDisplay[0]}
-                    </CanvasPill>
-                  ),
-                },
-                {
-                  k: "測試時間",
-                  v:
-                    testStatus === "none"
-                      ? "—"
-                      : binding?.validatedAt
-                        ? `${new Date(binding.validatedAt).toLocaleString()} · fp:${binding.validatedEndpointFingerprint}`
-                        : "—",
-                  mono: true,
-                },
-                {
-                  k: "最後更新",
-                  v: binding?.updatedAt
-                    ? new Date(binding.updatedAt).toLocaleString()
-                    : "—",
-                  mono: false,
-                },
-                {
-                  k: "簽章密鑰",
-                  v: (
-                    <span style={{ fontFamily: theme.monoFamily }}>
-                      {t("partnerNotification.secretHidden") ??
-                        "••••••••（此頁不顯示、不編輯）"}
-                    </span>
-                  ),
-                },
-              ]}
-            />
-            <div style={{ marginTop: 10 }}>
-              <div
-                style={{
-                  fontSize: 11,
-                  fontWeight: 700,
-                  color: theme.textMuted,
-                  marginBottom: 6,
-                }}
-              >
-                {t("partnerNotification.subscribedEvents")}
-              </div>
-              {bindState === "disabled" ? (
-                <div
-                  style={{ display: "flex", flexDirection: "column", gap: 8 }}
-                >
-                  <span style={{ fontSize: 11.5, color: theme.textDim }}>
-                    {t("partnerNotification.disabledDesc")}
-                  </span>
-                </div>
-              ) : (
-                <div
-                  style={{ display: "flex", flexDirection: "column", gap: 4 }}
-                >
-                  {(binding?.eventTypes || []).map((i: string) => {
-                    const row = PN_EVENTS.find((e) => e[0] === i);
-                    return (
-                      <div
-                        key={i}
-                        style={{
-                          display: "flex",
-                          alignItems: "center",
-                          gap: 8,
-                          fontSize: 11.5,
-                        }}
-                      >
-                        <CanvasPill theme={theme} tone="accent">
-                          {i}
-                        </CanvasPill>
-                        <CanvasIcon
-                          name="chevR"
-                          size={11}
-                          style={{ color: theme.textDim }}
-                        />
-                        <span
-                          style={{
-                            fontFamily: theme.monoFamily,
-                            color: theme.textMuted,
-                          }}
-                        >
-                          {row ? row[1] : i}
-                        </span>
-                        <span style={{ color: theme.textDim }}>
-                          {row ? row[2] : ""}
-                        </span>
-                      </div>
-                    );
-                  })}
-                </div>
-              )}
-            </div>
-          </CanvasCard>
+            binding={binding}
+            tenantId={tenantId}
+            testStatus={testStatus}
+            t={t}
+            onEdit={() => setIsEditing(true)}
+            canWriteBinding={canWriteBinding}
+          />
         )}
+
+        <PnDeliveries
+          theme={theme}
+          loading={loading}
+          deliveries={deliveries}
+          retryState={retryState}
+          retryRowId={retryRowId}
+          onRetry={handleRetry}
+          onRefresh={fetchState}
+          t={t}
+        />
+      </div>
+
+      <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+        {!error?.kind || error?.kind === "404" ? (
+          <PnLifecycle
+            theme={theme}
+            binding={binding}
+            testStatus={testStatus}
+            testingState={testingState}
+            enableState={enableState}
+            disableState={disableState}
+            resumeState={resumeState}
+            canWriteBinding={canWriteBinding}
+            onTest={handleTest}
+            onEnable={handleEnable}
+            onDisable={handleDisable}
+            onResume={handleResumeLifecycle}
+            t={t}
+          />
+        ) : null}
 
         <CanvasCard
           theme={theme}
-          title={t("partnerNotification.deliveries.title")}
-          subtitle="送達以 ack 驗證為準，不憑 HTTP code · 目標為每筆 immutable delivery context · 重試受控"
-          padding={0}
-          actions={
-            <>
-              <CanvasBtn
-                theme={theme}
-                size="xs"
-                icon="refresh"
-                onClick={fetchState}
-              >
-                {t("partnerNotification.refresh")}
-              </CanvasBtn>
-            </>
-          }
+          title="派送摘要 · 近 24h"
+          subtitle="「已接受」≠ 裝置已收到"
         >
-          {loading ? (
-            <div style={{ padding: 16 }}>
-              {[0, 1, 2].map((i) => (
-                <div
-                  key={i}
-                  style={{
-                    height: 14,
-                    borderRadius: 4,
-                    background: theme.surfaceLo,
-                    marginBottom: 10,
-                  }}
-                />
-              ))}
-            </div>
-          ) : deliveries.length === 0 ? (
-            <div style={{ padding: 24 }}>
-              <CanvasEmptyState
-                theme={theme}
-                title={t("partnerNotification.noData")}
-                body="尚無派送紀錄。"
-              />
-            </div>
-          ) : (
-            <CanvasTable
-              theme={theme}
-              columns={[
-                {
-                  h: "Delivery ID",
-                  k: "id",
-                  w: 110,
-                  mono: true,
-                  r: (r: any) => (
-                    <div style={{ display: "flex", flexDirection: "column" }}>
-                      <span style={{ color: theme.accent, fontWeight: 600 }}>
-                        {r.deliveryId || "—"}
-                      </span>
-                      <span style={{ fontSize: 10, color: theme.textDim }}>
-                        {r.outboxId}
-                      </span>
-                    </div>
-                  ),
-                },
-                {
-                  h: "事件（內部）",
-                  k: "ev",
-                  w: 170,
-                  mono: true,
-                  r: (r: any) =>
-                    r.eventSequence
-                      ? `${r.eventType} (#${r.eventSequence})`
-                      : r.eventType,
-                },
-                {
-                  h: "目標（遮罩）",
-                  w: 150,
-                  mono: true,
-                  r: (r: any) => (
-                    <span style={{ fontSize: 10.5 }}>
-                      {r.deliveryTarget || (
-                        <span style={{ color: theme.textDim }}>
-                          {t("partnerNotification.unknownTarget") ??
-                            "未知／尚未建立派送目標"}
-                        </span>
-                      )}
-                    </span>
-                  ),
-                },
-                {
-                  h: "下游狀態",
-                  k: "ds",
-                  w: 100,
-                  mono: true,
-                  r: (r: any) => r.downstreamStatus || "—",
-                },
-                {
-                  h: "ack",
-                  w: 70,
-                  r: (r: any) =>
-                    r.status === "delivered" ? (
-                      <CanvasPill theme={theme} tone="success">
-                        {t("cmp.common.pass") ?? "通過"}
-                      </CanvasPill>
-                    ) : r.failureReason === "partner_ack_invalid" ? (
-                      <CanvasPill theme={theme} tone="danger">
-                        {t("cmp.common.none") ?? "不符"}
-                      </CanvasPill>
-                    ) : (
-                      <span style={{ color: theme.textDim }}>—</span>
-                    ),
-                },
-                {
-                  h: "送達狀態",
-                  w: 190,
-                  r: (r: any) => {
-                    const st = PN_DLV[r.status] || ["未知", "neutral"];
-                    return (
-                      <CanvasPill theme={theme} tone={st[1]} dot>
-                        {st[0]}
-                      </CanvasPill>
-                    );
-                  },
-                },
-                {
-                  h: "說明",
-                  w: 150,
-                  r: (r: any) => (
-                    <span style={{ fontSize: 11.5, color: theme.textMuted }}>
-                      {r.failureReason || "—"}
-                    </span>
-                  ),
-                },
-                {
-                  h: "時間",
-                  k: "at",
-                  w: 120,
-                  mono: true,
-                  r: (r: any) =>
-                    r.createdAt ? new Date(r.createdAt).toLocaleString() : "—",
-                },
-                {
-                  h: "次",
-                  k: "tries",
-                  w: 36,
-                  mono: true,
-                  align: "center",
-                  r: (r: any) => `${r.attempts || 0}/${r.maxAttempts || 0}`,
-                },
-                {
-                  h: "重送",
-                  w: 150,
-                  r: (r: any) => {
-                    const rState =
-                      retryRowId === r.outboxId ? retryState : "idle";
-                    if (
-                      r.retryDisposition === "manual_only" ||
-                      (r.retryDisposition === "automatic" &&
-                        r.attempts < (r.maxAttempts || 99)) ||
-                      (r.retryDisposition === "configuration_blocked" &&
-                        r.attempts < (r.maxAttempts || 99))
-                    ) {
-                      return (
-                        <PanelActionBtn
-                          theme={theme}
-                          size="xs"
-                          descriptor={{
-                            action: "resend",
-                            enabled: rState !== "pending" && !!canWriteBinding,
-                            riskLevel: "low",
-                            requiresReason: false,
-                          }}
-                          icon="refresh"
-                          label={rState === "pending" ? "重送中" : "重送"}
-                          en="resend"
-                          onClick={() => handleRetry(r.outboxId)}
-                        />
-                      );
-                    }
-                    return (
-                      <span
-                        style={{
-                          fontSize: 10.5,
-                          color: theme.textDim,
-                          display: "inline-flex",
-                          alignItems: "center",
-                          gap: 4,
-                        }}
-                      >
-                        <CanvasIcon name="flags" size={10} />
-                        {RETRY_DENY[r.retryDisposition] || r.retryDisposition}
-                      </span>
-                    );
-                  },
-                },
-              ]}
-              rows={deliveries}
-            />
-          )}
-        </CanvasCard>
-      </div>
-      <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
-        {binding && (
-          <CanvasCard
-            theme={theme}
-            title={t("partnerNotification.lifecycle.title")}
-            subtitle="test → enable · disable · resume"
+          <div
+            style={{
+              display: "grid",
+              gridTemplateColumns: "1fr 1fr 1fr",
+              gap: 10,
+            }}
           >
-            {testingState === "rejected" && (
-              <CanvasBanner
-                theme={theme}
-                tone="danger"
-                icon="warn"
-                title={
-                  t("partnerNotification.testDeniedTitle") ?? "綁定測試遭拒"
-                }
-                body="夥伴端點回傳錯誤狀態碼，拒絕了測試要求，無法啟用。"
-                actions={
-                  <CanvasBtn
-                    theme={theme}
-                    size="xs"
-                    icon="refresh"
-                    onClick={handleTest}
-                  >
-                    {t("partnerNotification.retest")}
-                  </CanvasBtn>
-                }
-              />
-            )}
-            <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-              <PanelActionBtn
-                theme={theme}
-                descriptor={{
-                  action: "test",
-                  enabled: bindState !== "disabled" && !isPending,
-                  riskLevel: "low",
-                }}
-                icon="refresh"
-                label={
-                  testingState === "pending" ? "測試中..." : "發送測試事件"
-                }
-                en="test"
-                onClick={handleTest}
-              />
-              <PanelActionBtn
-                theme={theme}
-                descriptor={{
-                  action: "enable",
-                  enabled: testStatus === "passed_current" && !isPending,
-                  riskLevel: "medium",
-                }}
-                icon="check"
-                label={"啟用"}
-                en="enable"
-                onClick={handleEnable}
-              />
-              {bindState === "disabled" ? (
-                <PanelActionBtn
-                  theme={theme}
-                  descriptor={{
-                    action: "resume",
-                    enabled: !isPending,
-                    riskLevel: "medium",
-                  }}
-                  icon="check"
-                  label={
-                    saveState === "pending"
-                      ? "恢復通知中..."
-                      : testStatus === "passed_current"
-                        ? "恢復通知"
-                        : "恢復通知（恢復後需重新測試，通過後才能啟用）"
-                  }
-                  en="resume"
-                  onClick={handleResume}
-                />
-              ) : (
-                <PanelActionBtn
-                  theme={theme}
-                  descriptor={{
-                    action: "disable",
-                    enabled: bindState === "ready" && !isPending,
-                    riskLevel: "high",
-                  }}
-                  icon="lock"
-                  label={"停用"}
-                  en="disable"
-                  onClick={handleDisable}
-                />
-              )}
-            </div>
-            <div
-              style={{
-                fontSize: 10.5,
-                color: theme.textDim,
-                marginTop: 9,
-                lineHeight: 1.5,
-              }}
-            >
-              {t("partnerNotification.enableThreshold")}
-              <br />
-              {t("partnerNotification.resumeThreshold") ??
-                "「恢復」依據目前端點是否 passed_current 來決定是否需重測，無獨立 /resume。"}
-            </div>
-          </CanvasCard>
-        )}
-        {(() => {
-          const recent = deliveries.filter(
-            (d: any) =>
-              d.createdAt &&
-              new Date(d.createdAt).getTime() >
-                Date.now() - 24 * 60 * 60 * 1000,
-          );
-          const accepted = recent.filter(
-            (d: any) => d.status === "delivered",
-          ).length;
-          const mismatch = recent.filter(
-            (d: any) => d.failureReason === "partner_ack_invalid",
-          ).length;
-          const failed = recent.filter(
-            (d: any) => d.status === "failed",
-          ).length;
-          return (
-            <CanvasCard
+            <CanvasKPI
               theme={theme}
-              title={
-                t("partnerNotification.recentSubtitle") ?? "派送摘要 · 近 24h"
-              }
-              subtitle="「已接受」≠ 裝置已收到"
-            >
-              <div
-                style={{
-                  display: "grid",
-                  gridTemplateColumns: "1fr 1fr 1fr",
-                  gap: 10,
-                }}
-              >
-                <CanvasKPI
-                  theme={theme}
-                  label="端點已接受"
-                  value={String(accepted)}
-                />
-                <CanvasKPI
-                  theme={theme}
-                  label="ack 不符"
-                  value={String(mismatch)}
-                />
-                <CanvasKPI
-                  theme={theme}
-                  label="失敗/耗盡"
-                  value={String(failed)}
-                />
-              </div>
-            </CanvasCard>
-          );
-        })()}
+              label="端點已接受"
+              value={deliveries
+                .filter(
+                  (d: any) =>
+                    d.status === "accepted" ||
+                    d.ack === "ok" ||
+                    d.status === "delivered",
+                )
+                .length.toString()}
+            />
+            <CanvasKPI
+              theme={theme}
+              label="ack 不符"
+              value={deliveries
+                .filter(
+                  (d: any) =>
+                    d.status === "ack_invalid" || d.ack === "mismatch",
+                )
+                .length.toString()}
+            />
+            <CanvasKPI
+              theme={theme}
+              label="失敗/耗盡"
+              value={deliveries
+                .filter(
+                  (d: any) =>
+                    d.status === "failed" || d.status === "budget_exhausted",
+                )
+                .length.toString()}
+            />
+          </div>
+        </CanvasCard>
       </div>
     </div>
   );
