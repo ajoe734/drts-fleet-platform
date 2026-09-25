@@ -74,6 +74,13 @@ function App() {
           <DCArtboard id="bk-reserve" label="訂單詳情 · 可編輯 (editableUntil 內)" width={W} height={H}><Bare><TN_BookingDetail theme={th} state="reserve" /></Bare></DCArtboard>
           <DCArtboard id="bk-pending" label="訂單詳情 · accepted_pending (Q-TEN04)" width={W} height={H}><Bare><TN_BookingDetail theme={th} state="accepted_pending" /></Bare></DCArtboard>
           <DCArtboard id="newbooking" label="建立訂單 · 同步 command" width={W} height={H}><Bare><TN_NewBookingMap theme={th} /></Bare></DCArtboard>
+          <DCArtboard id="map-states" label="選點元件九態 · MP_STATES" width={W} height={800}><Bare><MP_StatesBoard /></Bare></DCArtboard>
+          <DCArtboard id="newbooking-outage" label="建立訂單 · 服務中斷" width={W} height={H}><Bare><TN_NewBookingMap theme={th} degraded /></Bare></DCArtboard>
+          <DCArtboard id="newbooking-out-of-area" label="建立訂單 · 超出範圍" width={W} height={H}><Bare><TN_NewBookingMap theme={th} drop="out_of_area" /></Bare></DCArtboard>
+          <DCArtboard id="cg-new" label="禮賓 · 建立叫車" width={W} height={H}><Bare><CG_NewBookingMap theme={th} /></Bare></DCArtboard>
+          <DCArtboard id="cg-outage" label="禮賓 · 服務中斷" width={W} height={H}><Bare><CG_NewBookingMap theme={th} degraded /></Bare></DCArtboard>
+          <DCArtboard id="cg-out-of-area" label="禮賓 · 超出範圍" width={W} height={H}><Bare><CG_NewBookingMap theme={th} drop="out_of_area" /></Bare></DCArtboard>
+          <DCArtboard id="cg-success" label="禮賓 · 成功/追蹤" width={W} height={H}><Bare><CG_NewBookingMap theme={th} success /></Bare></DCArtboard>
         </DCSection>
 
         <DCSection id="directory" title="03 · 通訊錄與規則 · 軟停用 (Q-TEN06)">

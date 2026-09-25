@@ -13,15 +13,15 @@ function MP_StatesBoard({ theme:th }) {
   );
 }
 // ── 租戶線：訂車建立（兩欄保留，左行程卡 / 右審核卡，上下車換成成對選點） ──
-function TN_NewBookingMap({ theme:th, degraded, pick, drop }) {
+function TN_NewBookingMap({ theme:th, degraded, pick, drop, reason }) {
   const ps = degraded?'provider_down':(pick||'selected'), ds = degraded?'provider_down':(drop||'selected');
   const HARD = ['out_of_area'];                                   // 服務範圍外：任何路徑皆不可送
   const UNRESOLVED = ['no_results','empty','searching','candidates']; // 尚未定點：不可送
-  const MANUAL = ['manual_coords','manual_review','provider_down']; // 走人工複核
+  const MANUAL = ['manual_review','provider_down']; // 走人工複核
   const hardBlocked = HARD.includes(ps) || HARD.includes(ds);
   const unresolved = UNRESOLVED.includes(ps) || UNRESOLVED.includes(ds);
   const manualPath = MANUAL.includes(ps) || MANUAL.includes(ds);
-  const manualReady = manualPath && !hardBlocked && !unresolved;   // 有地址文字＋理由即可送人工複核
+  const manualReady = manualPath && !hardBlocked && !unresolved && (reason !== '');   // 有地址文字＋理由即可送人工複核
   const normalReady = !manualPath && !hardBlocked && !unresolved;
   return (
     <Shell theme={th} nav={TN_NAV} active="new" breadcrumb={['訂單','新增']} env="production" tenant="YAMATO" actor={TN_ACTOR} health={TN_HEALTH} refreshTier="manual">
@@ -34,9 +34,13 @@ function TN_NewBookingMap({ theme:th, degraded, pick, drop }) {
             <Field theme={th} label="服務類型 · service_type" required><Select theme={th} value="airport_pickup"/></Field>
             <Field theme={th} label="預約 / 即時 · timing" required><Select theme={th} value="預約 · scheduled"/></Field>
           </div>
+          <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:12, marginBottom:10 }}>
+            <Field theme={th} label="已存上車點"><Select theme={th} value="-- 自行搜尋或地圖選點 --" /></Field>
+            <Field theme={th} label="已存下車點"><Select theme={th} value={ds==='selected' ? '桃園機場 第二航廈 出境大廳' : '-- 自行搜尋或地圖選點 --'} /></Field>
+          </div>
           <div style={{ display:'flex', flexDirection:'column', gap:10, marginBottom:14 }}>
-            <MapPicker theme={th} label="上車" state={ps}/>
-            <MapPicker theme={th} label="下車" state={ds} value={ds==='no_results'?'桃園機場 第三航廈':'桃園機場 第二航廈 出境大廳'}/>
+            <MapPicker theme={th} label="上車" state={ps} value={ps==='empty'?'':undefined} requiresReason={manualPath} reason={reason}/>
+            <MapPicker theme={th} label="下車" state={ds} value={ds==='empty'?'':(ds==='no_results'?'桃園機場 第三航廈':'桃園機場 第二航廈 出境大廳')} requiresReason={manualPath} reason={reason}/>
             {(ps==='out_of_area'||ds==='out_of_area') && <Banner theme={th} tone="danger" icon="warn" title="有地點不在服務範圍 · 無法送出" body="請更換該地點；不可提交人工複核繞過服務範圍。"/>}
             {ds==='no_results' && <Banner theme={th} tone="warn" icon="info" title="下車查無結果 · 復原路徑" body="換關鍵字重搜，或改用手動座標（需填理由，落點將轉人工複核）。"/>}
           </div>
@@ -89,7 +93,10 @@ function TN_AddressesMap({ theme:th }) {
         </Card>
         <Card theme={th} title="編輯 · 新竹據點（後門）" subtitle="選點元件內嵌於表單">
           <Field theme={th} label="名稱" required><Input theme={th} value="新竹據點（後門）"/></Field>
-          <div style={{ marginBottom:14 }}><MapPicker theme={th} label="地址" state="manual_review"/></div>
+          <div style={{ marginBottom:14 }}>
+            <MapPicker theme={th} label="地址" state="manual_review" value="新竹市東區光復路二段 101 號 後門" requiresReason={true} reason="貨車專用道無門牌，依現場實測定位"/>
+            <div style={{ marginTop:8 }}><Banner theme={th} tone="warn" icon="warn" title="缺少座標" body="此地址目前沒有座標，請在地圖上定位。"/></div>
+          </div>
           <Field theme={th} label="備註"><Input theme={th} value="貨運出入口，正門不可停車"/></Field>
           <div style={{ display:'flex', gap:8 }}><Btn theme={th}>取消</Btn><span style={{ flex:1 }}/><Btn theme={th} variant="primary" icon="check">儲存</Btn></div>
         </Card>
@@ -98,15 +105,15 @@ function TN_AddressesMap({ theme:th }) {
   );
 }
 // ── 夥伴線：訂車表單（保留方案膠囊、資格橫幅、送出鈕位置） ──
-function PB_BookCardMap({ state='selected', drop='selected' }) {
+function PB_BookCardMap({ state='selected', drop='selected', reason }) {
   const p = PROGRAMS.card;
-  const th = { text:'#0E1424', textMuted:'#56657F', textDim:'#9AA5B8', border:'#E5E7EB', surface:'#fff', surfaceLo:'#F4F6FB', accent:p.primary, success:'#15803D', warn:'#B45309', danger:'#B91C1C', dangerBg:'#FEF2F2' };
+  const th = buildMgmtTheme({ console: 'partner' }); th.accent = p.primary;
   const hard = state==='out_of_area' || drop==='out_of_area';
   const unresolved = ['no_results','empty','searching','candidates'].some(s=>s===state||s===drop);
-  const manualPath = ['provider_down','manual_coords','manual_review'].some(s=>s===state||s===drop);
+  const manualPath = ['provider_down','manual_review'].some(s=>s===state||s===drop);
   const down = state==='provider_down' || drop==='provider_down';
-  const blocked = manualPath && !hard && !unresolved;   // 可送人工複核
-  const notReady = hard || unresolved;
+  const blocked = manualPath && !hard && !unresolved && (reason !== '');
+  const notReady = hard || unresolved || (manualPath && reason === '');
   return (
     <PBScreen p={p}>
       <PBHeader p={p} title="建立行程" sub="信用卡機場接送 · 桃園 T2" back/>
@@ -124,8 +131,8 @@ function PB_BookCardMap({ state='selected', drop='selected' }) {
         </PBCard>
         <PBCard p={p} title="上下車地點">
           <div style={{ display:'flex', flexDirection:'column', gap:8 }}>
-            <MapPicker theme={th} skin="pb" label="上車" state={state} compact/>
-            <MapPicker theme={th} skin="pb" label="下車" state={drop} value="桃園機場 第二航廈 出境大廳" compact/>
+            <MapPicker theme={th} skin="pb" label="上車" state={state} compact requiresReason={manualPath} reason={reason}/>
+            <MapPicker theme={th} skin="pb" label="下車" state={drop} value="桃園機場 第二航廈 出境大廳" compact requiresReason={manualPath} reason={reason}/>
           </div>
           {state==='out_of_area' && <div style={{ marginTop:8, fontSize:11.5, color:'#B91C1C', fontWeight:700 }}>上車地點不在服務範圍，無法送出；請更換地點。</div>}
           <div style={{ marginTop:12 }}><PBField label="出發時間" value="2026-09-26 05:30" req/></div>
@@ -144,6 +151,119 @@ function PB_BookCardMap({ state='selected', drop='selected' }) {
     </PBScreen>
   );
 }
+// ── 夥伴線：保險代步表單 ──
+function PB_BookInsuranceMap({ state='selected', drop='selected', reason }) {
+  const p = PROGRAMS.insurance;
+  const th = buildMgmtTheme({ console: 'partner' }); th.accent = p.primary;
+  const hard = state==='out_of_area' || drop==='out_of_area';
+  const unresolved = ['no_results','empty','searching','candidates'].some(s=>s===state||s===drop);
+  const manualPath = ['provider_down','manual_review'].some(s=>s===state||s===drop);
+  const down = state==='provider_down' || drop==='provider_down';
+  const blocked = manualPath && !hard && !unresolved && (reason !== '');
+  const notReady = hard || unresolved || (manualPath && reason === '');
+
+  return (
+    <PBScreen p={p}>
+      <PBHeader p={p} title="建立代步行程" sub="保險理賠代步 · 回診接送" back />
+      <PBBody>
+        <PBMeter p={p} label="代步額度剩餘" en="replacement_days" used={16} total={30} unit="天" secondary="本案剩 14 天 · 含 4 趟" />
+        {hard
+          ? <div style={{ background:'#FEF2F2', border:'1px solid #FECACA', borderRadius:12, padding:'10px 14px', fontSize:12.5, color:'#B91C1C', fontWeight:600 }}>有地點不在服務範圍 · 無法預約，亦不可改送人工複核</div>
+          : blocked
+          ? <div style={{ background:'#FEF2F2', border:'1px solid #FECACA', borderRadius:12, padding:'10px 14px', fontSize:12.5, color:'#B91C1C', fontWeight:600 }}>{down?'地圖服務中斷 · 本次預約將送交人工複核，客服確認地點後才派車':'地點需人工確認 · 送出後由客服核對後才派車'}</div>
+          : null}
+        <PBCard p={p} title="理賠資訊">
+          <PBField label="保單號 · policy number" value="POL-558-22019" req />
+          <PBField label="理賠號 · claim number" value="CLM-2026-88142" req />
+          <PBField label="理賠申請人 · claimant" value="王〇華" req />
+          <PBFieldLocked label="代步期間 · replacement period" value="2026-06-01 ~ 06-30" sub="由理賠案件帶入 · 剩 14 天" />
+          <PBFieldLocked label="承辦人 · case handler" value="富邦產險 · 李專員" />
+        </PBCard>
+        <PBCard p={p} title="行程地點">
+          <div style={{ display:'flex', flexDirection:'column', gap:8 }}>
+            <MapPicker theme={th} skin="pb" label="上車" state={state} value="新北市板橋區文化路一段 88 號" compact requiresReason={manualPath} reason={reason}/>
+            <MapPicker theme={th} skin="pb" label="下車" state={drop} value="台北榮民總醫院" compact requiresReason={manualPath} reason={reason}/>
+          </div>
+          {state==='out_of_area' && <div style={{ marginTop:8, fontSize:11.5, color:'#B91C1C', fontWeight:700 }}>上車地點不在服務範圍，無法送出；請更換地點。</div>}
+          <PBFieldLocked label="車型權益 · vehicle class" value="一般車型 (權益內)" sub="依理賠核定 · 不可變更" />
+          <PBField label="出發時間" value="2026-06-06 08:30" req />
+        </PBCard>
+        <PBCard p={p} accentBar>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
+            <span style={{ fontSize: 12, color: '#56657F', fontWeight: 600 }}>費用方向</span>
+            <PBMoneyBadge kind="insurer" />
+          </div>
+          <PBRow k="代步權益狀態 · entitlement" v="核定通過" />
+          <PBRow k="本趟費用" v="NT$ 480 · 理賠給付" mono />
+          <PBRow k="您將支付" v="免費" />
+        </PBCard>
+      </PBBody>
+      <PBFooter>{notReady
+        ? <button disabled aria-disabled="true" style={{ width:'100%', minHeight:46, borderRadius:12, fontSize:14, fontWeight:700, border:'none', background:'#E5E7EB', color:'#9AA5B8', cursor:'not-allowed', fontFamily:PB_FONT }}>{hard?'不在服務範圍 · 請更換地點':'請先選定上下車地點'}</button>
+        : blocked
+        ? <PBBtn p={p} primary>送交人工複核</PBBtn>
+        : <PBBtn p={p} primary>前往確認</PBBtn>}</PBFooter>
+    </PBScreen>
+  );
+}
+
+// ── 夥伴線：旅行社表單 ──
+function PB_BookTravelMap({ state='selected', drop='selected', reason }) {
+  const p = PROGRAMS.travel;
+  const th = buildMgmtTheme({ console: 'partner' }); th.accent = p.primary;
+  const hard = state==='out_of_area' || drop==='out_of_area';
+  const unresolved = ['no_results','empty','searching','candidates'].some(s=>s===state||s===drop);
+  const manualPath = ['provider_down','manual_review'].some(s=>s===state||s===drop);
+  const down = state==='provider_down' || drop==='provider_down';
+  const blocked = manualPath && !hard && !unresolved && (reason !== '');
+  const notReady = hard || unresolved || (manualPath && reason === '');
+
+  return (
+    <PBScreen p={p}>
+      <PBHeader p={p} title="建立團體接送" sub="旅行社接送 · 機場 → 飯店" back />
+      <PBBody>
+        <PBMeter p={p} label="團體接送段數" en="transfer_legs" used={1} total={4} unit="段" secondary="本團 12 席 · 第 1 段" />
+        {hard
+          ? <div style={{ background:'#FEF2F2', border:'1px solid #FECACA', borderRadius:12, padding:'10px 14px', fontSize:12.5, color:'#B91C1C', fontWeight:600 }}>有地點不在服務範圍 · 無法預約，亦不可改送人工複核</div>
+          : blocked
+          ? <div style={{ background:'#FEF2F2', border:'1px solid #FECACA', borderRadius:12, padding:'10px 14px', fontSize:12.5, color:'#B91C1C', fontWeight:600 }}>{down?'地圖服務中斷 · 本次預約將送交人工複核，客服確認地點後才派車':'地點需人工確認 · 送出後由客服核對後才派車'}</div>
+          : null}
+        <PBCard p={p} title="團體資訊">
+          <PBField label="團號 · group number" value="LION-TPE-0628" req />
+          <PBField label="旅客人數 · traveler count" value="12 人" req />
+          <PBField label="行李件數 · luggage" value="18 件" req />
+          <PBField label="領隊 / 導遊 · guide contact" value="林〇雄 · 0922-118-456" req />
+          <PBField label="航班編號 · flight number" value="JX802" />
+        </PBCard>
+        <PBCard p={p} title="接送行程">
+          <div style={{ display:'flex', flexDirection:'column', gap:8 }}>
+            <MapPicker theme={th} skin="pb" label="上車" state={state} value="桃園機場 第一航廈 入境大廳" compact requiresReason={manualPath} reason={reason}/>
+            <MapPicker theme={th} skin="pb" label="下車" state={drop} value="台北車站" compact requiresReason={manualPath} reason={reason}/>
+          </div>
+          {state==='out_of_area' && <div style={{ marginTop:8, fontSize:11.5, color:'#B91C1C', fontWeight:700 }}>上車地點不在服務範圍，無法送出；請更換地點。</div>}
+          <PBField label="多點停靠 · multi-stop" value="台北車站 → 西門商旅" />
+          <PBField label="舉牌需求 · signage" value="需要 · 雄獅旅遊 LION-TPE-0628" />
+          <PBField label="出發時間" value="2026-06-28 14:20" req />
+        </PBCard>
+        <PBCard p={p} accentBar>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
+            <span style={{ fontSize: 12, color: '#56657F', fontWeight: 600 }}>費用方向</span>
+            <PBMoneyBadge kind="tour" />
+          </div>
+          <PBFieldLocked label="車輛配置 · fleet" value="中型巴士 ×1" sub="依團體人數配置" />
+          <PBRow k="接送段數" v="第 1 / 4 段" mono />
+          <PBRow k="費用" v="已含團費" />
+        </PBCard>
+      </PBBody>
+      <PBFooter>{notReady
+        ? <button disabled aria-disabled="true" style={{ width:'100%', minHeight:46, borderRadius:12, fontSize:14, fontWeight:700, border:'none', background:'#E5E7EB', color:'#9AA5B8', cursor:'not-allowed', fontFamily:PB_FONT }}>{hard?'不在服務範圍 · 請更換地點':'請先選定上下車地點'}</button>
+        : blocked
+        ? <PBBtn p={p} primary>送交人工複核</PBBtn>
+        : <PBBtn p={p} primary>前往確認</PBBtn>}</PBFooter>
+    </PBScreen>
+  );
+}
+
 // ── 禮賓線：訂車建立（保留主視覺區、服務台姿態卡、護欄卡） ──
 const CG_NAV = [
   { divider:'禮賓 · Concierge' },
@@ -153,13 +273,13 @@ const CG_NAV = [
   { key:'guests', icon:'users', label:'賓客 · Guests' },
 ];
 const CG_ACTOR = { name:'CH', display:'周禮賓', role:'concierge_agent' };
-function CG_NewBookingMap({ theme:th, degraded, drop, pick, success }) {
+function CG_NewBookingMap({ theme:th, degraded, drop, pick, success, reason }) {
   const ps = degraded?'provider_down':(pick||'selected');
   const ds = degraded?'provider_down':(drop||'candidates');
   const hard = ps==='out_of_area' || ds==='out_of_area';
   const unresolved = ['no_results','empty','searching','candidates'].some(s=>s===ps||s===ds);
-  const manualPath = ['provider_down','manual_coords','manual_review'].some(s=>s===ps||s===ds);
-  const manualReady = manualPath && !hard && !unresolved;
+  const manualPath = ['provider_down','manual_review'].some(s=>s===ps||s===ds);
+  const manualReady = manualPath && !hard && !unresolved && (reason !== '');
   const normalReady = !manualPath && !hard && !unresolved;
   return (
     <Shell theme={th} nav={CG_NAV} active="new" breadcrumb={['禮賓','建立叫車']} env="production" tenant="GRAND HOTEL" actor={CG_ACTOR} health={TN_HEALTH} refreshTier="manual">
@@ -176,8 +296,8 @@ function CG_NewBookingMap({ theme:th, degraded, drop, pick, success }) {
             <Field theme={th} label="用車時間" required><Input theme={th} value="今日 15:30" mono/></Field>
           </div>
           <div style={{ display:'flex', flexDirection:'column', gap:10, marginBottom:14 }}>
-            <MapPicker theme={th} label="上車" state={ps} value="圓山大飯店 正門車道"/>
-            <MapPicker theme={th} label="下車" state={ds} value={ds==='out_of_area'?'宜蘭縣頭城鎮濱海路 12 號':'松山機場'}/>
+            <MapPicker theme={th} label="上車" state={ps} value="圓山大飯店 正門車道" requiresReason={manualPath} reason={reason}/>
+            <MapPicker theme={th} label="下車" state={ds} value={ds==='out_of_area'?'宜蘭縣頭城鎮濱海路 12 號':'松山機場'} requiresReason={manualPath} reason={reason}/>
             {ds==='out_of_area' && <Banner theme={th} tone="danger" icon="warn" title="下車地點不在服務範圍" body="無法建立叫車；請與賓客確認其他地點。"/>}
           </div>
           <Field theme={th} label="車型偏好"><Select theme={th} value="商務轎車"/></Field>
@@ -205,4 +325,4 @@ function CG_NewBookingMap({ theme:th, degraded, drop, pick, success }) {
     </Shell>
   );
 }
-Object.assign(window, { MP_StatesBoard, TN_NewBookingMap, TN_AddressesMap, PB_BookCardMap, CG_NAV, CG_ACTOR, CG_NewBookingMap });
+Object.assign(window, { MP_StatesBoard, TN_NewBookingMap, TN_AddressesMap, PB_BookCardMap, PB_BookInsuranceMap, PB_BookTravelMap, CG_NAV, CG_ACTOR, CG_NewBookingMap });

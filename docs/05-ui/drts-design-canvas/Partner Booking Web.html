@@ -61,7 +61,8 @@ function App() {
       <DCSection id="insurance" title="02 · 保險代步 · Insurance Replacement" subtitle="富邦產險 · claim.fubon-ins.com.tw · 理賠額度 (非趟次) · reference/claim-driven">
         <DCArtboard id="ins-landing" label="入口 · 代步額度" width={W} height={H}><Phone p={PROGRAMS.insurance}><PB_Landing program="insurance" /></Phone></DCArtboard>
         <DCArtboard id="ins-elig" label="資格驗證 · policy + replacement-vehicle + roster" width={W} height={H}><Phone p={PROGRAMS.insurance}><PB_InsEligibility /></Phone></DCArtboard>
-        <DCArtboard id="ins-book" label="預約表單 · insurance fields" width={W} height={H}><Phone p={PROGRAMS.insurance}><PB_BookCardMap state="out_of_area" /></Phone></DCArtboard>
+        <DCArtboard id="ins-book" label="預約表單 · insurance fields" width={W} height={H}><Phone p={PROGRAMS.insurance}><PB_BookInsuranceMap /></Phone></DCArtboard>
+        <DCArtboard id="ins-book-outage" label="預約表單 · 超區例外" width={W} height={H}><Phone p={PROGRAMS.insurance}><PB_BookInsuranceMap state="out_of_area" /></Phone></DCArtboard>
         <DCArtboard id="ins-review" label="確認 Review" width={W} height={H}><Phone p={PROGRAMS.insurance}><PB_Review program="insurance" /></Phone></DCArtboard>
         <DCArtboard id="ins-success" label="預約成功 Success" width={W} height={H}><Phone p={PROGRAMS.insurance}><PB_Success program="insurance" /></Phone></DCArtboard>
         <DCArtboard id="ins-track" label="行程追蹤 Tracking" width={W} height={H}><Phone p={PROGRAMS.insurance}><PB_Tracking program="insurance" /></Phone></DCArtboard>
@@ -80,7 +81,8 @@ function App() {
         <DCArtboard id="trv-landing" label="入口 · 接送額度" width={W} height={H}><Phone p={PROGRAMS.travel}><PB_Landing program="travel" /></Phone></DCArtboard>
         <DCArtboard id="trv-elig" label="資格驗證 · 團號" width={W} height={H}><Phone p={PROGRAMS.travel}><PB_Eligibility program="travel" /></Phone></DCArtboard>
         <DCArtboard id="trv-roster" label="團體席次 · roster + itinerary + batching" width={W} height={H}><Phone p={PROGRAMS.travel}><PB_TrvRoster /></Phone></DCArtboard>
-        <DCArtboard id="trv-book" label="預約表單 · travel fields" width={W} height={H}><Phone p={PROGRAMS.travel}><PB_BookCardMap state="provider_down" /></Phone></DCArtboard>
+        <DCArtboard id="trv-book" label="預約表單 · travel fields" width={W} height={H}><Phone p={PROGRAMS.travel}><PB_BookTravelMap /></Phone></DCArtboard>
+        <DCArtboard id="trv-book-outage" label="預約表單 · 服務中斷例外" width={W} height={H}><Phone p={PROGRAMS.travel}><PB_BookTravelMap state="provider_down" /></Phone></DCArtboard>
         <DCArtboard id="trv-review" label="確認 Review" width={W} height={H}><Phone p={PROGRAMS.travel}><PB_Review program="travel" /></Phone></DCArtboard>
         <DCArtboard id="trv-success" label="預約成功 Success" width={W} height={H}><Phone p={PROGRAMS.travel}><PB_Success program="travel" /></Phone></DCArtboard>
         <DCArtboard id="trv-receipt" label="行程明細 / 收據 · 已含團費 (§5.4)" width={W} height={H}><Phone p={PROGRAMS.travel}><PB_TrvReceipt /></Phone></DCArtboard>

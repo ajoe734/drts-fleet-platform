@@ -953,12 +953,21 @@ export function TenantBookingCreateForm({
       (entry): entry is { href: string; link: CrossAppResourceLink } =>
         entry.href != null,
     );
-  const submitGate = evaluateAddressSubmitGate({
-    pickup: pickupPayload,
-    dropoff: dropoffPayload,
-    serviceability,
-    providerState,
-  });
+  const submitGate = (() => {
+    const baseGate = evaluateAddressSubmitGate({
+      pickup: pickupPayload,
+      dropoff: dropoffPayload,
+      serviceability,
+      providerState,
+    });
+    if (providerState && !providerState.available) {
+      return {
+        blocking: true,
+        code: "provider_outage",
+      };
+    }
+    return baseGate;
+  })();
 
   const submitDisabled =
     submitting ||
@@ -1202,6 +1211,11 @@ export function TenantBookingCreateForm({
     if (submitGate.blocking) {
       if (submitGate.code === "outside_service_area") {
         setSubmitError(t("newBooking.serviceability.blockedBody"));
+      } else if (submitGate.code === "provider_outage") {
+        setSubmitError(
+          t("newBooking.serviceability.providerOutageBlocked") ??
+            "Address provider is down. Submission blocked.",
+        );
       } else {
         setSubmitError(
           t("newBooking.serviceability.coordinatesRequired") ??
