@@ -1141,7 +1141,10 @@ export function PartnerNotificationPanel({
       if (tenantId) {
         p.push((client as any).getList("/api/tenant/webhooks", { headers: { "x-tenant-id": tenantId } }));
       }
-      const [bReq, dReq, wReq] = await Promise.allSettled(p);
+      const _results = await Promise.allSettled(p);
+      const bReq = _results[0] as any;
+      const dReq = _results[1] as any;
+      const wReq = _results[2] as any;
       if (reqId !== currentRequest.current) return;
 
       if (bReq.status === "rejected") {

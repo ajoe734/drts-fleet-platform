@@ -127,6 +127,9 @@ describe.skipIf(!testDbUrl || process.env.RUN_UI_PG_GATE !== "true")(
       );
 
       const outboxId = randomUUID();
+      const outboxId2 = randomUUID();
+      const outboxId3 = randomUUID();
+      const outboxId4 = randomUUID();
       const bindingId = randomUUID();
       const orderId = randomUUID();
 
@@ -209,6 +212,37 @@ describe.skipIf(!testDbUrl || process.env.RUN_UI_PG_GATE !== "true")(
       );
 
       const entryObj = { entrySlug, tenantId, partnerId };
+
+      await pool.query(
+        `INSERT INTO ops.consumer_notification_outbox (outbox_id, order_id, passenger_subject_ref, event_type, payload, status, attempt_count, next_attempt_at, created_at) VALUES ($1, $2, 's', 'eta_changed', '{}', 'failed', 1, now() - interval '1 hour', now() - interval '1 year')`,
+        [outboxId2, orderId]
+      );
+      await pool.query(
+        `INSERT INTO mobility.phase1_partner_notification_delivery_contexts (outbox_id, delivery_id, order_id, entry_slug, tenant_id, partner_id, binding_id, binding_version, webhook_id, endpoint_fingerprint, wire_payload, wire_payload_hash, event_sequence, expires_at, retry_policy_snapshot, delivery_target, retry_disposition, failure_reason, created_at) VALUES ($1, gen_random_uuid(), $2, $3, $4, $5, $6, 1, 'w', 'f', '{"event": "passenger.eta_changed.v1", "data": {"recipient": {"partnerUserRef": "u"}}}'::jsonb, 'hash', 1, now() - interval '1 day', '{"maxAttempts": 3}'::jsonb, 'partner_endpoint', 'manual_only', 'notification_expired', now())`,
+        [outboxId2, orderId, entrySlug, tenantId, partnerId, bindingId]
+      );
+
+      await pool.query(
+        `INSERT INTO ops.consumer_notification_outbox (outbox_id, order_id, passenger_subject_ref, event_type, payload, status, attempt_count, next_attempt_at, created_at) VALUES ($1, $2, 's', 'eta_changed', '{}', 'failed', 1, now() - interval '1 hour', now())`,
+        [outboxId3, orderId]
+      );
+      await pool.query(
+        `INSERT INTO mobility.phase1_partner_notification_delivery_contexts (outbox_id, delivery_id, order_id, entry_slug, tenant_id, partner_id, binding_id, binding_version, webhook_id, endpoint_fingerprint, wire_payload, wire_payload_hash, event_sequence, expires_at, retry_policy_snapshot, delivery_target, retry_disposition, failure_reason, created_at) VALUES ($1, gen_random_uuid(), $2, $3, $4, $5, $6, 1, 'w', 'f', '{"event": "passenger.eta_changed.v1", "data": {"recipient": {"partnerUserRef": "u"}}}'::jsonb, 'hash', 1, now() + interval '1 day', '{"maxAttempts": 3}'::jsonb, 'partner_endpoint', 'manual_only', 'notification_superseded', now())`,
+        [outboxId3, orderId, entrySlug, tenantId, partnerId, bindingId]
+      );
+
+      await pool.query(
+        `INSERT INTO ops.consumer_notification_outbox (outbox_id, order_id, passenger_subject_ref, event_type, payload, status, attempt_count, next_attempt_at, created_at) VALUES ($1, $2, 's', 'eta_changed', '{}', 'failed', 1, now() - interval '1 hour', now())`,
+        [outboxId4, orderId]
+      );
+      await pool.query(
+        `INSERT INTO mobility.phase1_partner_notification_delivery_contexts (outbox_id, delivery_id, order_id, entry_slug, tenant_id, partner_id, binding_id, binding_version, webhook_id, endpoint_fingerprint, wire_payload, wire_payload_hash, event_sequence, expires_at, retry_policy_snapshot, delivery_target, retry_disposition, failure_reason, created_at) VALUES ($1, gen_random_uuid(), $2, $3, $4, $5, $6, 1, 'w', 'f', '{"event": "passenger.eta_changed.v1", "data": {"recipient": {"partnerUserRef": "u"}}}'::jsonb, 'hash', 1, now() + interval '1 day', '{"maxAttempts": 3}'::jsonb, 'partner_endpoint', 'manual_only', 'provider_transient_error', now())`,
+        [outboxId4, orderId, entrySlug, tenantId, partnerId, bindingId]
+      );
+      await pool.query(
+        `INSERT INTO ops.phase1_push_delivery_claims (outbox_id, task_owner, claim_state, lease_expires_at, claim_token, created_at, updated_at) VALUES ($1, 'worker-1', 'claimed', now() + interval '10 minutes', 'token', now(), now())`,
+        [outboxId4]
+      );
 
       const res1 = await mtRepo.retryPartnerNotificationDelivery(
         entryObj,
