@@ -13,7 +13,6 @@ import {
   CanvasField,
   CanvasBanner,
   CanvasIcon,
-  CanvasActionButton,
   CanvasEmptyState,
   CanvasTable,
   CanvasKPI,
