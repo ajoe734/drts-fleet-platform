@@ -352,14 +352,31 @@ export class BreakGlassService {
    * is set from `principalId ?? actorId` on request), not `actorId`/`sub` —
    * a legitimate caller whose session `sub` differs from their `principalId`
    * must still see their own active grant.
+   *
+   * A grant's `status` field only changes on an explicit mutation (`close`,
+   * `expireDue`), so it can lag reality: the grant's own bound session may
+   * already be revoked/replaced (e.g. by a newer login), or its TTL may have
+   * elapsed with no sweeper having run yet. This read additively cross-checks
+   * both against the live repository/clock without touching `status` or any
+   * mutation path.
    */
   async listActiveGrantsForPrincipal(principalId: string) {
-    return Array.from(this.grants.values())
-      .filter(
-        (grant) =>
-          grant.requesterId === principalId && grant.status === "active",
-      )
-      .map((grant) => ({ ...grant }));
+    const now = Date.now();
+    const candidates = Array.from(this.grants.values()).filter(
+      (grant) => grant.requesterId === principalId && grant.status === "active",
+    );
+    const results: BreakGlassGrantRecord[] = [];
+    for (const grant of candidates) {
+      if (grant.expiresAt && Date.parse(grant.expiresAt) <= now) continue;
+      if (grant.sessionId && this.identityRepository) {
+        const session = await this.identityRepository.getSession(
+          grant.sessionId,
+        );
+        if (!session || session.status !== "active") continue;
+      }
+      results.push({ ...grant });
+    }
+    return results;
   }
 
   private assertRequester(id: string | null) {

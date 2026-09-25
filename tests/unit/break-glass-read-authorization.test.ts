@@ -1,7 +1,14 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import { ApiRequestError } from "../../apps/api/src/common/api-envelope";
-import { BreakGlassService } from "../../apps/api/src/modules/identity/break-glass.service";
+import { BootstrapAuthGuard } from "../../apps/api/src/common/auth/bootstrap-auth.guard";
+import { JwtAuthService } from "../../apps/api/src/common/auth/jwt-auth.service";
+import type { BootstrapRequestIdentity } from "../../apps/api/src/common/auth/auth.types";
+import { BreakGlassController } from "../../apps/api/src/modules/auth/break-glass.controller";
+import {
+  BREAK_GLASS_ALLOWED_SCOPES,
+  BreakGlassService,
+} from "../../apps/api/src/modules/identity/break-glass.service";
 import { IdentityRepository } from "../../apps/api/src/modules/identity/identity.repository";
 
 const mutation = {
@@ -178,5 +185,134 @@ describe("BreakGlassService read authorization (additive GET routes)", () => {
         mutation: { ...mutation, stepUpReference: "" },
       }),
     ).rejects.toMatchObject({ code: "IAM_STEP_UP_REQUIRED" });
+  });
+});
+
+function createTestReflector() {
+  return {
+    getAllAndOverride: (key: string, targets: unknown[]) => {
+      for (const target of targets) {
+        if (!target) continue;
+        const metadata = Reflect.getMetadata(key, target);
+        if (metadata !== undefined) return metadata;
+      }
+      return undefined;
+    },
+  };
+}
+
+function createTestExecutionContext(
+  controllerClass: { prototype: Record<string, unknown> },
+  handlerName: string,
+  request: unknown,
+) {
+  return {
+    switchToHttp: () => ({
+      getRequest: () => request,
+    }),
+    getClass: () => controllerClass,
+    getHandler: () => controllerClass.prototype[handlerName],
+  };
+}
+
+// Round-1 R3: the two new GET routes must be reachable by a legitimate
+// activated break-glass session, which only ever carries
+// BREAK_GLASS_ALLOWED_SCOPES (never foundation:read). Every test above calls
+// BreakGlassService methods directly and so never exercised the guard's
+// merged route policy, which is exactly how a `platform-admin/` generic
+// fallback requiring foundation:read slipped in ahead of this task's routes.
+describe("BreakGlassController GET routes reachable by an activated break-glass session (guard-level, round-1 R3)", () => {
+  const ORIGINAL_ENV = { ...process.env };
+  let jwtAuthService: JwtAuthService;
+  let guard: BootstrapAuthGuard;
+
+  beforeEach(() => {
+    process.env = { ...ORIGINAL_ENV };
+    process.env.APP_ENV = "production";
+    process.env.JWT_SECRET = "unit-test-jwt-secret-key-min-32-chars-long";
+    process.env.JWT_ISSUER = "drts";
+    process.env.JWT_AUDIENCE = "drts-api";
+    jwtAuthService = new JwtAuthService();
+    guard = new BootstrapAuthGuard(createTestReflector() as never, jwtAuthService);
+  });
+
+  afterEach(() => {
+    process.env = { ...ORIGINAL_ENV };
+  });
+
+  async function makeBreakGlassBearerRequest(
+    overrides: Partial<BootstrapRequestIdentity>,
+    method: string,
+    url: string,
+  ) {
+    const identity: BootstrapRequestIdentity = {
+      authMode: "jwt_bearer",
+      actorType: "platform_admin",
+      actorId: "requester",
+      principalId: "requester",
+      subject: "requester",
+      realm: "platform",
+      tenantId: null,
+      roleFamilies: ["platform"],
+      roles: ["break_glass"],
+      // An activated break-glass grant only ever holds
+      // BREAK_GLASS_ALLOWED_SCOPES -- notably never foundation:read.
+      scopes: [...BREAK_GLASS_ALLOWED_SCOPES],
+      requestId: "req-break-glass",
+      ...overrides,
+    } as BootstrapRequestIdentity;
+
+    const issued = await jwtAuthService.issueSessionToken(identity);
+    return {
+      headers: { authorization: `Bearer ${issued.token}` },
+      method,
+      url,
+      originalUrl: url,
+      identity,
+    };
+  }
+
+  it("lets an activated break-glass session (no foundation:read) list requests", async () => {
+    const req = await makeBreakGlassBearerRequest(
+      {},
+      "GET",
+      "/api/platform-admin/break-glass/requests",
+    );
+    const ctx = createTestExecutionContext(
+      BreakGlassController,
+      "listRequests",
+      req,
+    );
+    await expect(guard.canActivate(ctx as never)).resolves.toBe(true);
+  });
+
+  it("lets an activated break-glass session (no foundation:read) read a single request", async () => {
+    const req = await makeBreakGlassBearerRequest(
+      {},
+      "GET",
+      "/api/platform-admin/break-glass/requests/bg_example",
+    );
+    const ctx = createTestExecutionContext(
+      BreakGlassController,
+      "getRequest",
+      req,
+    );
+    await expect(guard.canActivate(ctx as never)).resolves.toBe(true);
+  });
+
+  it("still denies an unrelated realm for the new GET routes (realm restriction unchanged)", async () => {
+    const req = await makeBreakGlassBearerRequest(
+      { realm: "tenant", actorType: "tenant_admin", tenantId: "tenant-1" },
+      "GET",
+      "/api/platform-admin/break-glass/requests",
+    );
+    const ctx = createTestExecutionContext(
+      BreakGlassController,
+      "listRequests",
+      req,
+    );
+    await expect(guard.canActivate(ctx as never)).rejects.toMatchObject({
+      code: "AUTH_REALM_DENIED",
+    });
   });
 });

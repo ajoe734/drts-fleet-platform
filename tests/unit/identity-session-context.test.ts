@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import { BreakGlassService } from "../../apps/api/src/modules/identity/break-glass.service";
 import { IdentityController } from "../../apps/api/src/modules/identity/identity.controller";
@@ -232,5 +232,151 @@ describe("IdentityController.getSessionContext (UI17-IAM-BREAK-GLASS-READ-CONTRA
         (g: { grantId: string }) => g.grantId,
       ),
     ).toEqual([grant.grantId]);
+  });
+
+  it("scenario 5 (round-1 R1): a grant whose own bound session was revoked/replaced is not reported active via another valid session of the same principal", async () => {
+    const repository = new IdentityRepository();
+    // The caller's *own* ordinary session is separate from the session bound
+    // to the break-glass grant -- e.g. the caller logged in again elsewhere
+    // after the grant's session was superseded.
+    await repository.createSession(session({ sessionId: "ordinary-session" }));
+    await repository.createSession(session({ sessionId: "grant-session" }));
+
+    const breakGlassService = new BreakGlassService(repository);
+    const requesterIdentity = {
+      authMode: "jwt_bearer" as const,
+      actorType: "platform_admin" as const,
+      actorId: "principal-1",
+      principalId: "principal-1",
+      realm: "platform" as const,
+      tenantId: null,
+      roleFamilies: ["platform"] as (
+        | "platform"
+        | "tenant"
+        | "partner"
+        | "driver"
+        | "ops"
+      )[],
+      roles: [],
+      scopes: [],
+      requestId: "req-grant",
+    };
+    const approverIdentity = {
+      ...requesterIdentity,
+      actorId: "approver",
+      principalId: "approver",
+      requestId: "req-approve",
+    };
+    const grant = await breakGlassService.request(requesterIdentity, {
+      requestedScopes: ["identity:read"],
+      reasonCode: "INCIDENT",
+      reasonText: "Restore incident access",
+      proofReference: "vault://break-glass/proof",
+      mutation,
+    });
+    await breakGlassService.approve(approverIdentity, grant.grantId, mutation);
+    await breakGlassService.activate(requesterIdentity, {
+      requestId: grant.grantId,
+      requestedScope: ["identity:read"],
+      requestedDurationMinutes: 10,
+      mutation,
+    });
+    await breakGlassService.bindSession(grant.grantId, "grant-session");
+    await repository.revokeSession("grant-session", "session_replaced");
+
+    const controller = new IdentityController(
+      repository,
+      undefined,
+      undefined,
+      undefined,
+      breakGlassService,
+    );
+
+    const result = await controller.getSessionContext(
+      callerIdentity({ sessionId: "ordinary-session" }),
+    );
+    expect(result.data.sessionActive).toBe(true);
+    expect(result.data.activeBreakGlassGrants).toEqual([]);
+  });
+
+  it("scenario 6 (round-1 R2): an expired grant is not reported active even though its status has not yet been swept to 'expired'", async () => {
+    vi.useFakeTimers();
+    try {
+      vi.setSystemTime(new Date("2026-09-25T14:00:00.000Z"));
+      const repository = new IdentityRepository();
+      await repository.createSession(session());
+
+      const breakGlassService = new BreakGlassService(repository);
+      const requesterIdentity = {
+        authMode: "jwt_bearer" as const,
+        actorType: "platform_admin" as const,
+        actorId: "principal-1",
+        principalId: "principal-1",
+        realm: "platform" as const,
+        tenantId: null,
+        roleFamilies: ["platform"] as (
+          | "platform"
+          | "tenant"
+          | "partner"
+          | "driver"
+          | "ops"
+        )[],
+        roles: [],
+        scopes: [],
+        requestId: "req-grant",
+      };
+      const approverIdentity = {
+        ...requesterIdentity,
+        actorId: "approver",
+        principalId: "approver",
+        requestId: "req-approve",
+      };
+      const grant = await breakGlassService.request(requesterIdentity, {
+        requestedScopes: ["identity:read"],
+        reasonCode: "INCIDENT",
+        reasonText: "Restore incident access",
+        proofReference: "vault://break-glass/proof",
+        mutation,
+      });
+      await breakGlassService.approve(
+        approverIdentity,
+        grant.grantId,
+        mutation,
+      );
+      await breakGlassService.activate(requesterIdentity, {
+        requestId: grant.grantId,
+        requestedScope: ["identity:read"],
+        requestedDurationMinutes: 1,
+        mutation,
+      });
+      await breakGlassService.bindSession(grant.grantId, "sess-1");
+
+      const controller = new IdentityController(
+        repository,
+        undefined,
+        undefined,
+        undefined,
+        breakGlassService,
+      );
+
+      // Still within the 1-minute TTL: active.
+      const stillValid = await controller.getSessionContext(callerIdentity());
+      expect(
+        stillValid.data.activeBreakGlassGrants.map(
+          (g: { grantId: string }) => g.grantId,
+        ),
+      ).toEqual([grant.grantId]);
+
+      // Advance past the TTL with no explicit expireDue/close call -- the
+      // grant's own `status` field is still "active" in storage.
+      vi.setSystemTime(new Date("2026-09-25T14:02:00.000Z"));
+      const afterExpiry = await controller.getSessionContext(
+        callerIdentity(),
+      );
+      expect(afterExpiry.data.sessionActive).toBe(true);
+      expect(afterExpiry.data.activeBreakGlassGrants).toEqual([]);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
