@@ -256,7 +256,7 @@ export function PartnerNotificationPanel({ entrySlug }: { entrySlug: string; par
     failed:['測試失敗','danger'], 
     none:['尚未測試','neutral'] 
   };
-  const t = TEST[testStatus] || ["尚未測試", "neutral"];
+  const testDisplay = TEST[testStatus] || ["尚未測試", "neutral"];
 
   return (
     <div style={{ padding: 24, display:'grid', gridTemplateColumns:'1.5fr 1fr', gap:16, alignItems:'start' }}>
@@ -266,13 +266,13 @@ export function PartnerNotificationPanel({ entrySlug }: { entrySlug: string; par
             <CanvasBanner theme={theme} tone="info" icon="info" title={t("partnerNotification.notFound.title")} body="選擇既有 webhook 與事件即可建立。" actions={<CanvasBtn theme={theme} size="xs" variant="primary" icon="plus" onClick={() => setIsEditing(true)}>{t("partnerNotification.createBinding")}</CanvasBtn>}/>
           </CanvasCard>
         ) : (
-          <CanvasCard theme={theme} title={t("partnerNotification.binding.title")} subtitle="引用既有 webhook · 端點/密鑰於既有 /webhooks 管理（依權限顯示）" actions={<><CanvasBtn theme={theme} size="xs" icon="edit" onClick={() => setIsEditing(true)}>{t("partnerNotification.edit")}</CanvasBtn><CanvasPill theme={theme} tone={m[1]} dot>{m[0]}<span style={{ marginLeft:4, opacity:.6, fontFamily:theme.monoFamily, fontSize:9 }}>{bindState}</span></CanvasPill></>}>
+          <CanvasCard theme={theme} title={t("partnerNotification.binding.title")} subtitle="引用既有 webhook · 端點/密鑰於既有 /webhooks 管理（依權限顯示）" actions={<><CanvasBtn theme={theme} size="xs" icon="edit" onClick={() => setIsEditing(true)}>{t("partnerNotification.edit")}</CanvasBtn><CanvasPill theme={theme} tone={m[1] as any} dot>{m[0]}<span style={{ marginLeft:4, opacity:.6, fontFamily:theme.monoFamily, fontSize:9 }}>{bindState}</span></CanvasPill></>}>
             <CanvasDL theme={theme} cols={2} items={[
               { k:'webhookId', v: <span style={{ fontFamily:theme.monoFamily }}>{binding?.webhookId || '—'} <CanvasBtn theme={theme} size="xs" variant="ghost" icon="ext">{t("partnerNotification.webhookHelp") ?? "既有 /webhooks 管理（需 tenant:webhooks:write）"}</CanvasBtn></span> }, 
               { k:'端點（唯讀）', v: 'https://...', mono:true },
               { k:'端點 fingerprint', v: binding?.endpointFingerprint || '未知', mono:true }, 
               { k:'version', v:String(binding?.version || 0), mono:true },
-              { k:'最近測試', v: <CanvasPill theme={theme} tone={t[1]} dot>{t[0]}</CanvasPill> }, 
+              { k:'最近測試', v: <CanvasPill theme={theme} tone={testDisplay[1] as any} dot>{testDisplay[0]}</CanvasPill> }, 
               { k:'測試時間', v: (testStatus==='none') ? '—' : (binding?.validatedAt ? `${new Date(binding.validatedAt).toLocaleString()} · fp:${binding.validatedEndpointFingerprint}` : '—'), mono:true },
               { k:'最後更新', v: binding?.updatedAt ? new Date(binding.updatedAt).toLocaleString() : '—', mono:false },
               { k:'簽章密鑰', v: <span style={{ fontFamily:theme.monoFamily }}>{t("partnerNotification.secretHidden") ?? "••••••••（此頁不顯示、不編輯）"}</span> }

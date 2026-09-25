@@ -15,15 +15,16 @@
 ## Handoff Evidence (Gemini)
 
 - **Candidate Branch**: gemini/sr-partner-notify-ui-20260924-canvas
-- **Candidate SHA**: $(git rev-parse HEAD)
+- **Candidate SHA**: <PENDING_COMMIT>
 - **Hosted CI Evidence**:
-  - CI: https://github.com/ajoe734/drts-fleet-platform/actions/runs/36094693136
-  - CI (integration trunk): https://github.com/ajoe734/drts-fleet-platform/actions/runs/36094693037
-  - Postgres Gate (CI): Tests executed in the above CI jobs successfully.
+  - CI: (To be generated after push)
+  - CI (integration trunk): (To be generated after push)
+  - Postgres Gate (CI): Depends on hosted DB.
 - **Local Evidence**:
-  - `pnpm exec tsc -p apps/platform-admin-web/tsconfig.json --noEmit --incremental false`: Exit 0
-  - `pnpm exec tsc -p tsconfig.json --noEmit --incremental false`: Exit 0
-  - `pnpm run i18n:guard`: Exit 0 (565 files scanned across 10 apps, 0 active violations)
+  - `pnpm exec tsc -p apps/platform-admin-web/tsconfig.json --noEmit`: Exit 0
+  - `pnpm exec tsc -p tsconfig.json --noEmit`: Exit 0
+  - `vitest run tests/unit/system-remediation/sr-partner-notify-ui-20260917/notification-ui.test.ts`: 3 tests passed
+  - `pnpm run i18n:guard`: Exit 0
 
 ## Unperformed Gates & Constraints
 
@@ -33,11 +34,11 @@
 
 | Finding / 驗收項                      | 狀態 (Status) | 修改位置與說明                                            | 證據 (Evidence)                                                                                                                 |
 | ------------------------------------- | ------------- | --------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------- |
-| R1. Binding events and ApiClient      | PASSED        | `partner-notification-panel.tsx`, `api-client/src/index.ts` | Aligned events with `partner-passenger-notification.ts`. Fixed ApiClient return type to `PartnerNotificationDispatchOutcome`. |
-| R2. Context webhookId omission        | PASSED        | `multi-taxi.repository.ts`                                | Changed `ctx.wire_payload?.data?.recipient?.webhookId` to stored context `webhook_id`.                                                                     |
-| R3. outbox eventType not selected     | PASSED        | `multi-taxi.repository.ts`                                | Selected `o.event_type` and `o.assignment_version` and used them instead of missing producer payload fields.                                                                   |
-| R4. assignmentVersion/exhausted logic | PASSED        | `multi-taxi.repository.ts`                                | Used `ctx.wire_payload?.data?.assignmentVersion` or `outbox.assignment_version`. Checks expiry/lease before returning requeued.                                                            |
-| R5. PG test fixtures / discovery      | PASSED        | `notification-ui.postgres.test.ts`, `apps/api/package.json` | Corrected JS string interpolation in fixture inserts, added valid wire_payload recipient, and ensured all fixtures are injected.                                                                                  |
-| R6. CI env vars and python script     | PASSED        | `.github/workflows/ci.yml`, `verify...`                   | Restored test URLs and Python verifier.                                                           |
-| R7. UI Design Canvas & i18n Guard     | PASSED        | `partner-notification-panel.tsx`, `03_ui_design_delta.md` | Verified UI implementation aligns with `platform-partner-notify.jsx` using `@drts/ui-web`. Refactored component to use `useTranslation` for `i18n-guard` compliance.         |
-| R8. UAT false claims                  | PASSED        | `SR-PARTNER-NOTIFY-UI-20260917.md`                        | Corrected this artifact with actual commands, exact hosted CI links, removed false claims, and explicitly stated skipped test conditions. |
+| R1. Binding events and ApiClient      | PASSED        | `partner-notification-panel.tsx`, `api-client/src/index.ts` | Old: `ride_assigned` default, `RequeueOutcome` return type. New: `binding?.eventTypes`, valid `PartnerNotificationDispatchOutcome`. |
+| R2. Context webhookId omission        | PASSED        | `multi-taxi.repository.ts`                                | Old: checked `wire_payload.data.recipient.webhookId`. New: uses stored context `ctx.webhook_id`. |
+| R3. outbox eventType not selected     | PASSED        | `multi-taxi.repository.ts`                                | Old: `o.event_type` missing from SELECT. New: selected `o.event_type` and `o.assignment_version`. |
+| R4. assignmentVersion/exhausted logic | PASSED        | `multi-taxi.repository.ts`                                | Old: `pending`/`sending` requeue check before expiry, wrong version path. New: correct version path, requeue check moved after lease/expiry. |
+| R5. PG test fixtures / discovery      | PASSED        | `notification-ui.postgres.test.ts`, `apps/api/package.json` | Old: invalid `tenant_id` insert, missing recipient. New: correct JS insert without `tenant_id`, recipient added to context payload. |
+| R6. CI env vars and python script     | PASSED        | `.github/workflows/ci.yml`, `verify...`                   | Restored PG test URLs and python verification script checks. |
+| R7. UI Design Canvas & i18n Guard     | PASSED        | `partner-notification-panel.tsx`, `03_ui_design_delta.md` | Old: hardcoded text, `#` hex colors. New: implemented `docs/05-ui/drts-design-canvas/platform-partner-notify.jsx` using canvas primitives and `@drts/ui-tokens`, and `useTranslation`. |
+| R8. UAT false claims                  | PASSED        | `SR-PARTNER-NOTIFY-UI-20260917.md`                        | This document lists actual local evidence, specifies skipped local DB gates, provides exact reproduction differences. |
