@@ -64,25 +64,41 @@ export function BreakGlassProvider({ children }: { children: ReactNode }) {
 
   const [state, setState] = useState<BreakGlassState>(() => {
     if (typeof window === "undefined") {
-      return { grant: null, accessToken: null, expiresAt: null, sessionBanner: null };
+      return {
+        grant: null,
+        accessToken: null,
+        expiresAt: null,
+        sessionBanner: null,
+      };
     }
     try {
       const stored = sessionStorage.getItem(STORAGE_KEY);
       if (stored) {
         const parsed = JSON.parse(stored) as BreakGlassState;
-        if (parsed.expiresAt && new Date(parsed.expiresAt).getTime() > Date.now()) {
+        if (
+          parsed.expiresAt &&
+          new Date(parsed.expiresAt).getTime() > Date.now()
+        ) {
           return parsed;
         }
       }
     } catch {
       // Ignore parse errors
     }
-    return { grant: null, accessToken: null, expiresAt: null, sessionBanner: null };
+    return {
+      grant: null,
+      accessToken: null,
+      expiresAt: null,
+      sessionBanner: null,
+    };
   });
 
   const [secondsRemaining, setSecondsRemaining] = useState<number>(() => {
     if (!state.expiresAt) return 0;
-    return Math.max(0, Math.floor((new Date(state.expiresAt).getTime() - Date.now()) / 1000));
+    return Math.max(
+      0,
+      Math.floor((new Date(state.expiresAt).getTime() - Date.now()) / 1000),
+    );
   });
 
   useEffect(() => {
@@ -100,7 +116,12 @@ export function BreakGlassProvider({ children }: { children: ReactNode }) {
       if (remaining === 0) {
         // Auto expire locally when countdown reaches 0
         sessionStorage.removeItem(STORAGE_KEY);
-        setState({ grant: null, accessToken: null, expiresAt: null, sessionBanner: null });
+        setState({
+          grant: null,
+          accessToken: null,
+          expiresAt: null,
+          sessionBanner: null,
+        });
       }
     };
 
@@ -110,26 +131,65 @@ export function BreakGlassProvider({ children }: { children: ReactNode }) {
   }, [state.expiresAt, state.grant]);
 
   useEffect(() => {
-    if (!state.grant || !state.expiresAt || secondsRemaining <= 0 || state.sessionBanner !== "BREAK_GLASS_ACTIVE") return;
-    
+    if (
+      !state.grant ||
+      !state.expiresAt ||
+      secondsRemaining <= 0 ||
+      state.sessionBanner !== "BREAK_GLASS_ACTIVE"
+    )
+      return;
+
     let active = true;
     const verifyGrantContext = async () => {
       try {
-        const ctx = await rawClient.get<import("@drts/contracts").IdentityContext>("/identity/context");
-        if (active && ctx.actorId && ctx.actorId !== state.grant!.requesterId) {
-          sessionStorage.removeItem(STORAGE_KEY);
-          setState({ grant: null, accessToken: null, expiresAt: null, sessionBanner: null });
+        const ctx = await iamClient.getIdentitySessionContext();
+        if (active) {
+          // If the session is not authoritatively active (e.g. replaced/revoked/anonymous),
+          // or if this specific grant is not in the active break-glass grants list
+          if (
+            !ctx.sessionActive ||
+            !ctx.activeBreakGlassGrants.some(
+              (g) => g.grantId === state.grant!.grantId,
+            )
+          ) {
+            sessionStorage.removeItem(STORAGE_KEY);
+            setState({
+              grant: null,
+              accessToken: null,
+              expiresAt: null,
+              sessionBanner: null,
+            });
+          }
         }
       } catch (err: unknown) {
-        if (active && typeof err === "object" && err !== null && "statusCode" in err && (err as any).statusCode === 401) {
-           sessionStorage.removeItem(STORAGE_KEY);
-           setState({ grant: null, accessToken: null, expiresAt: null, sessionBanner: null });
+        if (
+          active &&
+          typeof err === "object" &&
+          err !== null &&
+          "statusCode" in err &&
+          (err as any).statusCode === 401
+        ) {
+          sessionStorage.removeItem(STORAGE_KEY);
+          setState({
+            grant: null,
+            accessToken: null,
+            expiresAt: null,
+            sessionBanner: null,
+          });
         }
       }
     };
     void verifyGrantContext();
-    return () => { active = false; };
-  }, [state.grant?.grantId, state.expiresAt, state.sessionBanner, secondsRemaining, rawClient]);
+    return () => {
+      active = false;
+    };
+  }, [
+    state.grant?.grantId,
+    state.expiresAt,
+    state.sessionBanner,
+    secondsRemaining,
+    iamClient,
+  ]);
 
   const activateSession = useCallback(
     (grant: BreakGlassGrantRecord, accessToken: string, expiresAt: string) => {
@@ -161,16 +221,21 @@ export function BreakGlassProvider({ children }: { children: ReactNode }) {
         });
       }
       sessionStorage.removeItem(STORAGE_KEY);
-      setState({ grant: null, accessToken: null, expiresAt: null, sessionBanner: null });
+      setState({
+        grant: null,
+        accessToken: null,
+        expiresAt: null,
+        sessionBanner: null,
+      });
     },
     [iamClient, state.grant],
   );
 
   const isBreakGlassActive = Boolean(
     state.grant &&
-      state.expiresAt &&
-      secondsRemaining > 0 &&
-      state.sessionBanner === "BREAK_GLASS_ACTIVE",
+    state.expiresAt &&
+    secondsRemaining > 0 &&
+    state.sessionBanner === "BREAK_GLASS_ACTIVE",
   );
 
   const value = useMemo<BreakGlassContextValue>(
@@ -231,15 +296,22 @@ function ActiveBreakGlassBanner({
   const seconds = secondsRemaining % 60;
   const timerDisplay = `${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}`;
 
-
   const handleExit = async () => {
     setExiting(true);
     setExitError(null);
     try {
       await exitSession("operator_exit_cta", undefined);
     } catch (err: any) {
-      if (err.code === "IAM_STEP_UP_REQUIRED" || err.code === "MFA_REQUIRED" || err.code === "STEP_UP_REQUIRED") {
-        setExitError("無法退出: " + (err.apiMessage || "憑證失效 (STEP_UP_REQUIRED)。API 缺少對應政策。"));
+      if (
+        err.code === "IAM_STEP_UP_REQUIRED" ||
+        err.code === "MFA_REQUIRED" ||
+        err.code === "STEP_UP_REQUIRED"
+      ) {
+        setExitError(
+          "無法退出: " +
+            (err.apiMessage ||
+              "憑證失效 (STEP_UP_REQUIRED)。API 缺少對應政策。"),
+        );
       } else {
         setExitError(err.message || "Failed to close emergency access");
       }
@@ -247,7 +319,6 @@ function ActiveBreakGlassBanner({
       setExiting(false);
     }
   };
-
 
   return (
     <div
@@ -314,7 +385,9 @@ function ActiveBreakGlassBanner({
             border: "1px solid rgba(248, 113, 113, 0.4)",
           }}
         >
-          <span style={{ fontSize: 11, textTransform: "uppercase", opacity: 0.85 }}>
+          <span
+            style={{ fontSize: 11, textTransform: "uppercase", opacity: 0.85 }}
+          >
             {t("breakGlass.banner.expiresInLabel")}
           </span>
           <span
@@ -330,7 +403,14 @@ function ActiveBreakGlassBanner({
           </span>
         </div>
 
-        <div style={{ display: "flex", flexDirection: "column", gap: 4, alignItems: "flex-end" }}>
+        <div
+          style={{
+            display: "flex",
+            flexDirection: "column",
+            gap: 4,
+            alignItems: "flex-end",
+          }}
+        >
           <div style={{ display: "flex", gap: 8 }}>
             <button
               type="button"
@@ -353,7 +433,9 @@ function ActiveBreakGlassBanner({
             </button>
           </div>
           {exitError && (
-            <span style={{ color: "#FFD700", fontSize: 11, fontWeight: 600 }}>{exitError}</span>
+            <span style={{ color: "#FFD700", fontSize: 11, fontWeight: 600 }}>
+              {exitError}
+            </span>
           )}
         </div>
       </div>
