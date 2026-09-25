@@ -269,8 +269,7 @@ jobs:
         # Keep every test and assertion, but serialize access to the shared DB.
         run: |
           pnpm --filter @drts/api test --no-file-parallelism --maxConcurrency=1 --reporter=default --reporter=json --outputFile.json=api-test-results.json
-          RUN_UI_PG_GATE=true pnpm exec vitest run tests/unit/system-remediation/sr-partner-notify-ui-20260917/notification-ui.postgres.test.ts --reporter=default --reporter=json --outputFile.json=ui-test-results.json
-          python3 tools/ci/verify_partner_notification_postgres_gate.py unit-test-results.json apps/api/api-test-results.json ui-test-results.json
+          python3 tools/ci/verify_partner_notification_postgres_gate.py unit-test-results.json apps/api/api-test-results.json
       - name: Upload test results
         uses: actions/upload-artifact@v4
         if: always()
@@ -279,7 +278,6 @@ jobs:
           path: |
             unit-test-results.json
             apps/api/api-test-results.json
-            ui-test-results.json
 
   smoke-acceptance:
     name: Smoke acceptance

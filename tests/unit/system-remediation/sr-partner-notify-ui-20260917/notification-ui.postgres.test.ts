@@ -13,7 +13,7 @@ import { MultiTaxiRepository } from "../../../../apps/api/src/modules/multi-taxi
 
 const testDbUrl = process.env.PARTNER_NOTIFY_UI_TEST_DATABASE_URL;
 
-describe.skipIf(!testDbUrl || process.env.RUN_UI_PG_GATE !== "true")(
+describe.skipIf(!testDbUrl)(
   "partner notification UI postgres acceptance",
   () => {
     let pool: any;
@@ -48,11 +48,39 @@ describe.skipIf(!testDbUrl || process.env.RUN_UI_PG_GATE !== "true")(
 
       await pool.query(
         "INSERT INTO admin.phase1_partner_channel_entries (entry_slug, tenant_id, partner_id, created_at, updated_at, program_id, status, record) VALUES ($1, $2, $3, now(), now(), 'p1', 'active', $4::jsonb)",
-        [entrySlug1, tenantId, partnerId, JSON.stringify({ entrySlug: entrySlug1, tenantId, partnerId, partnerCode: "P1", partnerType: "enterprise", programId: "p1", displayName: "Partner 1", businessDispatchSubtype: "standard" })],
+        [
+          entrySlug1,
+          tenantId,
+          partnerId,
+          JSON.stringify({
+            entrySlug: entrySlug1,
+            tenantId,
+            partnerId,
+            partnerCode: "P1",
+            partnerType: "enterprise",
+            programId: "p1",
+            displayName: "Partner 1",
+            businessDispatchSubtype: "standard",
+          }),
+        ],
       );
       await pool.query(
         "INSERT INTO admin.phase1_partner_channel_entries (entry_slug, tenant_id, partner_id, created_at, updated_at, program_id, status, record) VALUES ($1, $2, $3, now(), now(), 'p2', 'active', $4::jsonb)",
-        [entrySlug2, tenantId, partnerId, JSON.stringify({ entrySlug: entrySlug2, tenantId, partnerId, partnerCode: "P2", partnerType: "enterprise", programId: "p2", displayName: "Partner 2", businessDispatchSubtype: "standard" })],
+        [
+          entrySlug2,
+          tenantId,
+          partnerId,
+          JSON.stringify({
+            entrySlug: entrySlug2,
+            tenantId,
+            partnerId,
+            partnerCode: "P2",
+            partnerType: "enterprise",
+            programId: "p2",
+            displayName: "Partner 2",
+            businessDispatchSubtype: "standard",
+          }),
+        ],
       );
 
       await pool.query(
