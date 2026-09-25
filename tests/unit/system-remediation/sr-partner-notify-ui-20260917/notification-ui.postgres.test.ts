@@ -140,9 +140,6 @@ describe.skipIf(!testDbUrl || process.env.RUN_UI_PG_GATE !== "true")("partner no
       [orderId],
     );
 
-    await pool.query(
-      `
-      
     await pool.query(`
       INSERT INTO admin.phase1_partner_passenger_identity_links (
         tenant_id, partner_id, partner_user_ref, drts_passenger_id, link_status, created_at, updated_at, record
@@ -151,6 +148,7 @@ describe.skipIf(!testDbUrl || process.env.RUN_UI_PG_GATE !== "true")("partner no
       ) ON CONFLICT DO NOTHING
     `, [tenantId, partnerId]);
 
+    await pool.query(`
       INSERT INTO mobility.phase1_order_partner_notification_routes (
         order_id, tenant_id, partner_id, entry_slug, partner_user_ref, drts_passenger_id, passenger_subject_ref, identity_linked_at, consent_bundle_version, ride_ref
       ) VALUES (
