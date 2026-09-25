@@ -1248,22 +1248,31 @@ export function BreakGlassPanel() {
   const [stepUpRef, setStepUpRef] = useState<string | null>(null);
 
   const stepUpTimerRef = useRef<NodeJS.Timeout | null>(null);
+  const stepUpNonceRef = useRef<number>(0);
+
   const clearStepUp = useCallback(() => {
     if (stepUpTimerRef.current) {
       clearTimeout(stepUpTimerRef.current);
       stepUpTimerRef.current = null;
     }
+    stepUpNonceRef.current += 1;
     setStepUpRef(null);
     setStepUpState("NONE");
   }, []);
 
+  useEffect(() => {
+    return () => clearStepUp();
+  }, [clearStepUp]);
+
   const handleGetStepUpProof = async (actionId: string) => {
     clearStepUp();
+    const nonce = stepUpNonceRef.current;
     setStepUpState("VERIFYING");
     try {
       const proof = await iamClient.createStepUpProof({
         actionId: actionId as any,
       });
+      if (stepUpNonceRef.current !== nonce) return;
       if (proof.required === false || !proof.stepUpReference) {
         setStepUpRef(null);
         setStepUpState("VALID");
@@ -1274,6 +1283,7 @@ export function BreakGlassPanel() {
           const ttl = new Date(proof.expiresAt).getTime() - Date.now();
           if (ttl > 0) {
             stepUpTimerRef.current = setTimeout(() => {
+              if (stepUpNonceRef.current !== nonce) return;
               setStepUpState((prev) => (prev === "VALID" ? "EXPIRED" : prev));
               setStepUpRef((prev) => (prev === proof.stepUpReference ? null : prev));
             }, ttl);
@@ -1284,6 +1294,7 @@ export function BreakGlassPanel() {
         }
       }
     } catch (e: unknown) {
+      if (stepUpNonceRef.current !== nonce) return;
       setStepUpState("NONE");
       setError(e instanceof Error ? e.message : "Failed to get step-up proof");
     }
@@ -1495,7 +1506,7 @@ export function BreakGlassPanel() {
               <CanvasBtn
                 theme={theme}
                 variant="ghost"
-                onClick={() => setShowRequestModal(false)}
+                onClick={() => { clearStepUp(); setShowRequestModal(false); }}
               >
                 ✕
               </CanvasBtn>
@@ -1615,7 +1626,7 @@ export function BreakGlassPanel() {
                 <CanvasBtn
                   theme={theme}
                   variant="secondary"
-                  onClick={() => setShowRequestModal(false)}
+                  onClick={() => { clearStepUp(); setShowRequestModal(false); }}
                 >
                   Cancel
                 </CanvasBtn>

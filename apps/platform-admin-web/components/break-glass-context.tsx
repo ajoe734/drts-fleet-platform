@@ -109,6 +109,28 @@ export function BreakGlassProvider({ children }: { children: ReactNode }) {
     return () => clearInterval(interval);
   }, [state.expiresAt, state.grant]);
 
+  useEffect(() => {
+    if (!state.grant || !state.expiresAt || secondsRemaining <= 0 || state.sessionBanner !== "BREAK_GLASS_ACTIVE") return;
+    
+    let active = true;
+    const verifyGrantContext = async () => {
+      try {
+        const ctx = await rawClient.get<import("@drts/contracts").IdentityContext>("/identity/context");
+        if (active && ctx.actorId && ctx.actorId !== state.grant!.requesterId) {
+          sessionStorage.removeItem(STORAGE_KEY);
+          setState({ grant: null, accessToken: null, expiresAt: null, sessionBanner: null });
+        }
+      } catch (err: unknown) {
+        if (active && typeof err === "object" && err !== null && "statusCode" in err && (err as any).statusCode === 401) {
+           sessionStorage.removeItem(STORAGE_KEY);
+           setState({ grant: null, accessToken: null, expiresAt: null, sessionBanner: null });
+        }
+      }
+    };
+    void verifyGrantContext();
+    return () => { active = false; };
+  }, [state.grant?.grantId, state.expiresAt, state.sessionBanner, secondsRemaining, rawClient]);
+
   const activateSession = useCallback(
     (grant: BreakGlassGrantRecord, accessToken: string, expiresAt: string) => {
       const nextState: BreakGlassState = {

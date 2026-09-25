@@ -25,10 +25,10 @@ function IamShell({ theme:th, tab, children, actions, breakglass }) {
 }
 const FX_IAM_USERS = [
   { name:'駱思賢', email:'sx.luo@drts.example', role:'platform_admin', mfa:'已啟用 · TOTP', last:'09-24 09:58', status:'active' },
-  { name:'林安全', email:'sec.lin@drts.example', role:'security_officer', mfa:'已啟用 · FIDO2', last:'09-24 09:12', status:'active' },
+  { name:'林安全', email:'sec.lin@drts.example', role:'security_admin', mfa:'已啟用 · FIDO2', last:'09-24 09:12', status:'active' },
   { name:'陳稽核', email:'audit.chen@drts.example', role:'auditor', mfa:'未啟用', last:'09-20 17:40', status:'active', warn:true },
   { name:'王新人', email:'new.wang@drts.example', role:'ops_viewer', mfa:'—', last:'尚未登入', status:'invited' },
-  { name:'李離職', email:'ex.li@drts.example', role:'billing_admin', mfa:'已啟用', last:'08-30 18:02', status:'suspended' },
+  { name:'李離職', email:'ex.li@drts.example', role:'platform_viewer', mfa:'已啟用', last:'08-30 18:02', status:'suspended' },
 ];
 const IAM_UST = { active:['啟用中','success'], invited:['已邀請','info'], suspended:['已停用','neutral'] };
 // C1 · 使用者與成員（+ 邀請抽屜 / 詳情抽屜）
@@ -51,7 +51,7 @@ function PA_IamUsers({ theme:th, drawer }) {
             <Field theme={th} label="Email" required><Input theme={th} value="new.member@drts.example" mono/></Field>
             <Field theme={th} label="角色" required><Select theme={th} value="ops_viewer"/></Field>
             <Field theme={th} label="要求多重驗證"><Toggle theme={th} on label="首次登入須完成 MFA 綁定"/></Field>
-            <Banner theme={th} tone="neutral" icon="info" body="特權角色（platform_admin / security_officer）不可直接邀請，須經特權角色審批。"/>
+            <Banner theme={th} tone="neutral" icon="info" body="特權角色（platform_admin / security_admin）不可直接邀請，須經特權角色審批。"/>
           </Drawer>
         )}
         {drawer==='detail' && (
@@ -130,7 +130,7 @@ function PA_IamPrivileged({ theme:th, stepUpState = "none" }) {
         <Card theme={th} title="申請 PR-0086 · 王新人 → security_admin" subtitle="待審批 · 單人核准" actions={<Pill theme={th} tone="warn" dot>待審批</Pill>}>
           <Stepper theme={th} current={1} steps={['送出','非本人核准 + step-up','生效']}/>
           <div style={{ marginTop:12 }}>
-            {stepUpState === "none" && <Banner theme={th} tone="warn" icon="lock" title="需 step-up proof" body="核准前需重新驗證取得 stepUpReference（有效 5 分鐘、單次使用）。核准請求須附此參照；過期或已用回 401 IAM_STEP_UP_REQUIRED。" actions={<Btn theme={th} size="xs" variant="primary" icon="lock">取得 step-up proof</Btn>}/>}
+            {stepUpState === "none" && <Banner theme={th} tone="warn" icon="lock" title="需 step-up proof" body="核准前需重新驗證取得 stepUpReference（有效 5 分鐘、單次使用）。核准請求須附此參照；過期或已用回 403 IAM_STEP_UP_REQUIRED。" actions={<Btn theme={th} size="xs" variant="primary" icon="lock">取得 step-up proof</Btn>}/>}
             {stepUpState === "verifying" && <Banner theme={th} tone="info" icon="clock" title="正在向伺服器請求身分驗證憑證..."/>}
             {stepUpState === "valid" && <Banner theme={th} tone="success" icon="check" title="身分驗證憑證有效" body="可進行高風險操作。"/>}
             {stepUpState === "expired" && <Banner theme={th} tone="danger" icon="alert-triangle" title="登入逾時 (IAM_STEP_UP_REQUIRED)" body="憑證已過期或被拒絕，請重新登入 (Fresh MFA) 後再試。" actions={<Btn theme={th} size="xs" variant="primary" icon="refresh">重新取得</Btn>}/>}
@@ -151,7 +151,6 @@ function PA_IamPrivileged({ theme:th, stepUpState = "none" }) {
           <Field theme={th} label="目標角色" required><Select theme={th} value="security_admin"/></Field>
           <Field theme={th} label="理由" required><Input theme={th} value="接手資安事件處理"/></Field>
           <Field theme={th} label="有效期限"><Select theme={th} value="永久（需季度存取複核）"/></Field>
-          <Field theme={th} label="stepUpReference（送出申請亦需）" required hint="尚未取得 · 送出前先完成 step-up"><Input theme={th} value="—" mono readOnly/></Field>
           <ActionButton theme={th} descriptor={{ action:'submit', enabled:true, riskLevel:'medium' }} variant="primary" icon="check" label="送出申請" en="submit"/>
         </Card>
         </div>
@@ -163,9 +162,9 @@ function PA_IamPrivileged({ theme:th, stepUpState = "none" }) {
 function PA_IamReview({ theme:th, create }) {
   const rows=[
     { user:'駱思賢', role:'platform_admin', last:'09-24', decision:null },
-    { user:'林安全', role:'security_officer', last:'09-24', decision:'確認' },
+    { user:'林安全', role:'security_admin', last:'09-24', decision:'確認' },
     { user:'陳稽核', role:'auditor', last:'09-20', decision:null, flag:'MFA 未啟用' },
-    { user:'李離職', role:'billing_admin', last:'08-30', decision:null, flag:'逾期 25 天未登入' },
+    { user:'李離職', role:'platform_viewer', last:'08-30', decision:null, flag:'逾期 25 天未登入' },
   ];
   const DEC = { '確認':'success', '降權':'warn', '移除':'danger' };
   return (
@@ -174,8 +173,8 @@ function PA_IamReview({ theme:th, create }) {
         {create && (
           <Drawer theme={th} title="建立複核活動" subtitle="access review campaign" footer={<><Btn theme={th}>取消</Btn><Btn theme={th} variant="primary" icon="check">建立並指派複核人</Btn></>}>
             <Field theme={th} label="名稱" required><Input theme={th} value="2026 Q4 季度複核"/></Field>
-            <Field theme={th} label="範圍" required><Select theme={th} value="所有特權角色（platform_admin / security_officer / billing_admin）"/></Field>
-            <Field theme={th} label="複核人" required><Select theme={th} value="林安全 · security_officer"/></Field>
+            <Field theme={th} label="範圍" required><Select theme={th} value="所有特權角色（platform_admin / security_admin / platform_viewer）"/></Field>
+            <Field theme={th} label="複核人" required><Select theme={th} value="林安全 · security_admin"/></Field>
             <Field theme={th} label="截止日" required><Input theme={th} value="2026-12-15" mono/></Field>
             <Field theme={th} label="逾期未登入門檻"><Input theme={th} value="30 天" mono/></Field>
             <Banner theme={th} tone="neutral" icon="info" body="建立後系統自動掃描逾期帳號並標旗；複核人不可複核自己的角色。"/>
@@ -211,6 +210,7 @@ function PA_IamBreakGlass({ theme:th, active, state = "form", stepUpState = "non
   const isApproved = resolvedState === "approved";
   const isActive = resolvedState === "active" || resolvedState === "exit_failed";
   const isClosed = resolvedState === "closed";
+  const isExpired = resolvedState === "expired_grant";
 
   const stepMap = {
     form: 0,
@@ -219,6 +219,7 @@ function PA_IamBreakGlass({ theme:th, active, state = "form", stepUpState = "non
     active: 3,
     exit_failed: 3,
     closed: 3,
+    expired_grant: 3,
   };
 
   return (
@@ -257,7 +258,7 @@ function PA_IamBreakGlass({ theme:th, active, state = "form", stepUpState = "non
                   { k:'申請範圍', v:'identity:read · security:audit:read', mono:true }
                 ]}/>
                 <div style={{ marginTop:12 }}>
-                  {stepUpState === "none" && <Banner theme={th} tone="warn" icon="lock" title="需 step-up proof" body="操作前需重新驗證取得 stepUpReference。核准請求須附此參照；過期或已用回 401 IAM_STEP_UP_REQUIRED。" actions={<Btn theme={th} size="xs" variant="primary" icon="lock">取得 step-up proof</Btn>}/>}
+                  {stepUpState === "none" && <Banner theme={th} tone="warn" icon="lock" title="需 step-up proof" body="操作前需重新驗證取得 stepUpReference。核准請求須附此參照；過期或已用回 403 IAM_STEP_UP_REQUIRED。" actions={<Btn theme={th} size="xs" variant="primary" icon="lock">取得 step-up proof</Btn>}/>}
                   {stepUpState === "verifying" && <Banner theme={th} tone="info" icon="clock" title="正在向伺服器請求身分驗證憑證..."/>}
                   {stepUpState === "valid" && <Banner theme={th} tone="success" icon="check" title="身分驗證憑證有效" body="可進行高風險操作。"/>}
                   {stepUpState === "expired" && <Banner theme={th} tone="danger" icon="alert-triangle" title="憑證已過期" body="請重新取得憑證。" actions={<Btn theme={th} size="xs" variant="primary" icon="refresh">重新取得</Btn>}/>}
@@ -311,6 +312,19 @@ function PA_IamBreakGlass({ theme:th, active, state = "form", stepUpState = "non
                   { k:'結束時間', v:'09-24 10:45:12 +08', mono:true }
                 ]}/>
                 <div style={{ marginTop:12, display:'flex', gap:8 }}><Btn theme={th} icon="audit">檢視稽核紀錄</Btn></div>
+              </>
+            )}
+
+            {isExpired && (
+              <>
+                <DL theme={th} cols={2} items={[
+                  { k:'申請人', v:'駱思賢' },
+                  { k:'狀態', v:<Pill theme={th} tone="danger" dot>已逾期未啟用 (Expired)</Pill> },
+                  { k:'失效時間', v:'09-24 10:30:00 +08', mono:true }
+                ]}/>
+                <div style={{ marginTop:12 }}>
+                  <Banner theme={th} tone="danger" icon="alert-triangle" title="核准已失效" body="該緊急授權未於核准後期限內啟用，已自動失效，需重新申請。"/>
+                </div>
               </>
             )}
 
