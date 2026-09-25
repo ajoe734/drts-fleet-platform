@@ -17,6 +17,7 @@ import type {
   IamSessionInventoryQuery,
   IamSessionRevokeCommand,
   IdentityContext,
+  IdentitySessionContext,
   StepUpProof,
   CreatePrivilegedRoleRequestCommand,
   ApprovePrivilegedRoleRequestCommand,
@@ -40,6 +41,7 @@ import {
   OPEN_ROUTE_RATE_LIMIT,
   READ_HEAVY_RATE_LIMIT,
 } from "../../common/throttling/rate-limit.constants";
+import { BreakGlassService } from "./break-glass.service";
 import { IdentityRepository } from "./identity.repository";
 import { PrivilegedRoleGovernanceService } from "./privileged-role-governance.service";
 import { SecurityEventsService } from "../security-events/security-events.service";
@@ -60,6 +62,7 @@ export class IdentityController {
     @Optional() private readonly stepUpProofService?: StepUpProofService,
     @Optional()
     private readonly privilegedRoleGovernanceService?: PrivilegedRoleGovernanceService,
+    @Optional() private readonly breakGlassService?: BreakGlassService,
   ) {}
 
   @OpenRoute()
@@ -78,10 +81,59 @@ export class IdentityController {
       roles: identity.roles,
       scopes: identity.scopes,
       tenantId: identity.tenantId,
+      principalId: identity.principalId ?? null,
+      sessionId: identity.sessionId ?? null,
       supportedExecutionModes: [
         "discussion_planning",
         "supervisor_managed_execution",
       ],
+    };
+
+    return toApiSuccessEnvelope(context, requestId);
+  }
+
+  /**
+   * Authoritative principal/session read, additive to `getContext`. Exists
+   * so callers can distinguish "my own current session is the active one for
+   * this principal" from stale local/cached state — see
+   * `IdentitySessionContext` for why grant matching must key off
+   * `principalId`, not `actorId`. Anonymous callers and callers with no
+   * resolvable session both yield `sessionActive: false` rather than a 401,
+   * matching `getContext`'s open-route behavior.
+   */
+  @OpenRoute()
+  @Throttle(OPEN_ROUTE_RATE_LIMIT)
+  @Get("session-context")
+  async getSessionContext(
+    @CurrentIdentity() identity: BootstrapRequestIdentity | null,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    const principalId = identity?.principalId ?? identity?.actorId ?? null;
+    const sessionId = identity?.sessionId ?? null;
+
+    let sessionActive = false;
+    if (sessionId && principalId && this.identityRepository) {
+      const session = await this.identityRepository.getSession(sessionId);
+      sessionActive =
+        !!session &&
+        session.status === "active" &&
+        session.principalId === principalId &&
+        (identity?.tokenVersion == null ||
+          session.tokenVersion === identity.tokenVersion);
+    }
+
+    const activeBreakGlassGrants =
+      sessionActive && principalId && this.breakGlassService
+        ? await this.breakGlassService.listActiveGrantsForPrincipal(
+            principalId,
+          )
+        : [];
+
+    const context: IdentitySessionContext = {
+      principalId,
+      sessionId,
+      sessionActive,
+      activeBreakGlassGrants,
     };
 
     return toApiSuccessEnvelope(context, requestId);
