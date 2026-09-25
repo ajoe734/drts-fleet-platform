@@ -16,8 +16,8 @@
 | **Delivery Map: Pending** | `outbox.status: "pending"` or `"sending"` | Shows '排隊中' | View uses mapped row, immutable outbox identity (outboxId/deliveryId/wirePayload/sequence). |
 | **Delivery Map: Accepted** | `outbox.status: "delivered"`, `deliveryStage: "partner_accepted"`, `downstreamStatus: "unknown"` | Shows '端點已接受，但裝置未知' | Exact ack conditions: matching `notification_id`/`delivery_id`/`partner_entry_slug`, `accepted|duplicate`, real nonempty `receipt_id`. |
 | **Delivery Map: Failed** | `outbox.status: "failed"` | Shows '失敗' | Display shows local failure message. |
-| **Delivery Map: Expired** | `outbox.status: "failed"`, `failureReason: "notification_expired"` | Shows '已過期' | |
-| **Delivery Map: Exhausted** | `outbox.status: "failed"`, UI derived admission reason `RETRY_EXHAUSTED` | Shows '重試次數耗盡' | Distinct from disabled endpoint. Based on max retry count. |
+| **Delivery Map: Expired** | `outbox.status: "failed"`, `failureReason: "notification_expired"` | Shows '生命週期逾時 (ttl)' | |
+| **Delivery Map: Exhausted** | `outbox.status: "failed"`, UI derived admission reason `BUDGET_EXHAUSTED` | Shows '重試次數耗盡' | Distinct from disabled endpoint. Based on max retry count. |
 | **Delivery Map: Superseded**| `outbox.status: "failed"`, `failureReason: "notification_superseded"` | Shows '已被新通知取代' | |
 | **Retry Admission: Active** | UI derived admission reason `LEASE_ACTIVE` | Disables retry, shows '另一重送進行中' | Admission denial precedes local failure. |
 | **Retry: Config Blocked**   | `retryDisposition: "configuration_blocked"` | Disables retry, shows '綁定未就緒' (BINDING_NOT_READY) | |
