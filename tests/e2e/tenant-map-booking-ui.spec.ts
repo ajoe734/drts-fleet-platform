@@ -14,6 +14,7 @@
  * directories from the configured backend.
  */
 import { expect, test, type Page } from "@playwright/test";
+import * as jwt from "jsonwebtoken";
 
 const PICKUP_CANDIDATE = {
   candidateId: "cand-pickup-1",
@@ -136,8 +137,7 @@ async function pinBothStops(page: Page) {
 
 test.describe("tenant console booking map alignment", () => {
   test.beforeEach(async ({ context, baseURL }) => {
-    // We import locally here to avoid top-level issues if the test runner changes
-    const jwt = require("jsonwebtoken");
+    // We imported jsonwebtoken at the top of the file
     const payload = {
       sub: "mock-user-1",
       actorType: "tenant_user",
