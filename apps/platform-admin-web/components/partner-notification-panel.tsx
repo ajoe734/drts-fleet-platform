@@ -529,6 +529,7 @@ function PnRetryCell({
   theme: th,
   r,
   retryState,
+  retryRowId,
   onRetry,
   t,
   canWriteBinding,
@@ -587,7 +588,9 @@ function PnRetryCell({
       </CanvasPill>
     );
 
-  if (retryState === "pending")
+  const isTargetRow = r.outboxId === retryRowId;
+
+  if (isTargetRow && retryState === "pending")
     return (
       <PanelActionBtn
         theme={th}
@@ -599,7 +602,7 @@ function PnRetryCell({
       />
     );
 
-  if (retryState === "failed")
+  if (isTargetRow && retryState === "failed")
     return (
       <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
         <PanelActionBtn
@@ -625,7 +628,7 @@ function PnRetryCell({
     return (
       <PanelActionBtn
         theme={th}
-        descriptor={{ enabled: true, riskLevel: "low" }}
+        descriptor={{ enabled: retryState !== "pending", riskLevel: "low" }}
         icon="refresh"
         label="重送"
         en="resend"
@@ -867,13 +870,8 @@ function PnDeliveries({
               <PnRetryCell
                 theme={th}
                 r={r}
-                retryState={
-                  r.deliveryId === retryRowId ||
-                  r.outboxId === retryRowId ||
-                  r.id === retryRowId
-                    ? retryState
-                    : "idle"
-                }
+                retryState={retryState}
+                retryRowId={retryRowId}
                 onRetry={onRetry}
                 t={t}
                 canWriteBinding={canWriteBinding}
@@ -1329,8 +1327,11 @@ export function PartnerNotificationPanel({
     setRetryState("idle");
     setRetryRowId(null);
     setIsEditing(false);
+  }, [entrySlug]);
+
+  useEffect(() => {
     fetchState(true);
-  }, [entrySlug, fetchState]);
+  }, [fetchState]);
 
   const handleSave = async () => {
     setSaveState("pending");
@@ -1375,16 +1376,11 @@ export function PartnerNotificationPanel({
       }
     } catch (err: any) {
       setTestingState("rejected");
-      if (
-        err?.code !== "PARTNER_NOTIFICATION_BINDING_TEST_FAILED" &&
-        err?.kind !== "failed"
-      ) {
-        setError({
-          kind: "error",
-          message: err.message,
-          code: err.code || err.error,
-        });
-      }
+      setError({
+        kind: "error",
+        message: err.message || "測試發生未預期錯誤",
+        code: err.code || err.error,
+      });
     }
   };
 

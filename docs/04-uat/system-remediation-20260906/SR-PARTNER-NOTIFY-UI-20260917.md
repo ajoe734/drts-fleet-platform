@@ -59,6 +59,14 @@
 | **R2 [P1 REPEATED] PG tests do not establish the named fence/ownership acceptance**                           | Updated `notification-ui.postgres.test.ts` to simulate active lease (concurrency), expired TTL, and superseded statuses, asserting the correct rejection categories (`provider_transient_error`, `notification_expired`, `notification_superseded`).                                            |
 | **R2a [P2 REPEATED] Test setup deletes unowned tables**                                                       | Removed unconditional `DELETE FROM ...` from the beforeAll block in `notification-ui.postgres.test.ts`, leaving tables alone in the global setup.                                                                                                                                               |
 
+## Review Findings Resolution (Codex2 - Round 3)
+
+| Finding / Issue                                                                     | Resolution                                                                                                                                                                         |
+| ----------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **R0a [P1 NEW] Editing immediately closes itself; creation/update is unusable.**    | Separated the entry-reset effect from the `fetchState` fetch effect so `fetchState` changes do not unconditionally reset `isEditing(false)`.                                       |
+| **R1f [P1 REPEATED] Manual retry still disregards write capability and admission.** | Updated `PnRetryCell` to explicitly accept `retryRowId` and correctly disable concurrent retry buttons across all rows while a retry is pending.                                   |
+| **R1d [P1 REPEATED] Errors are lost; 403 test failure resolves silently.**          | Removed the swallow-error conditional logic in `handleTest` catch block to ensure any rejected promises (like 400 or 403) correctly surface as visual error alerts via `setError`. |
+
 ## Detailed Review Findings (Codex2)
 
 Codex2 independent candidate review: REQUEST CHANGES. Reopen to original owner Gemini2.
