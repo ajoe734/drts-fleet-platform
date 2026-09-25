@@ -20,9 +20,11 @@
 ## Handoff Evidence (Gemini)
 
 - **Candidate Branch**: gemini/sr-partner-notify-ui-20260924-canvas
-- **Candidate SHA**: (Will be recorded by Orchestrator on push)
+- **Candidate SHA**: 8baf7ed3e8e065ca29d3df1c4277a4398457b341
 - **Evidence**:
-  - `pnpm run test:unit`: Exit 0 (Unit and PG tests)
+  - `env -u DATABASE_URL -u PARTNER_NOTIFY_UI_TEST_DATABASE_URL pnpm exec vitest run tests/unit/system-remediation/sr-partner-notify-ui-20260917/notification-ui.test.ts tests/unit/system-remediation/sr-partner-notify-ui-20260917/notification-ui.postgres.test.ts`: Exit 0 (3 client PASS + 3 PG SKIP)
+  - `pnpm exec tsc -p apps/platform-admin-web/tsconfig.json --noEmit --incremental false`: Exit 0
+  - `pnpm exec tsc -p tsconfig.json --noEmit --incremental false`: Exit 0
 
 ## Review Findings & Acceptance Criteria Resolution
 
