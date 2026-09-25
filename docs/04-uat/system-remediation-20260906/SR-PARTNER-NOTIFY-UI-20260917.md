@@ -20,7 +20,7 @@
 ## Handoff Evidence (Gemini)
 
 - **Candidate Branch**: gemini/sr-partner-notify-ui-20260924-canvas
-- **Candidate SHA**: (pending commit)
+- **Candidate SHA**: 3e675b43e8190a0874a2b730c38fdd5b5106973b (base), will be updated post-commit
 - **Evidence**:
   - Postgres gate: `RUN_UI_PG_GATE=true PARTNER_NOTIFY_UI_TEST_DATABASE_URL=postgresql://postgres:postgres@localhost:5432/drts_fleet_platform pnpm exec vitest run tests/unit/system-remediation/sr-partner-notify-ui-20260917/notification-ui.postgres.test.ts` (SKIPPED/FAILED locally due to no DB connection, awaiting CI)
   - `pnpm exec tsc -p apps/platform-admin-web/tsconfig.json --noEmit --incremental false`: Exit 0
