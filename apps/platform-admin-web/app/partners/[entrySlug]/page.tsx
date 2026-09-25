@@ -1164,13 +1164,7 @@ export default function PartnerDetailPage() {
     } finally {
       setIssuingCredential(false);
     }
-  }, [
-    client,
-    credentialActionMode,
-    credentialActionReason,
-    entry,
-    loadEntry,
-  ]);
+  }, [client, credentialActionMode, credentialActionReason, entry, loadEntry]);
 
   const runGovernanceAction = useCallback(async () => {
     if (!entry) {
@@ -2339,7 +2333,7 @@ export default function PartnerDetailPage() {
         ) : null}
 
         {activeTab === "notifications" ? (
-          <PartnerNotificationPanel 
+          <PartnerNotificationPanel
             entrySlug={entrySlug}
             tenantId={entry.tenantId}
             canWriteBinding={authority.scopes.includes("foundation:write")}

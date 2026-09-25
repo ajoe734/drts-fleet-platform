@@ -77,8 +77,11 @@ describe("SR-PARTNER-NOTIFY-UI-20260917 API client contracts", () => {
     global.fetch = fetchMock as any;
 
     const client = createPlatformAdminClient("http://localhost", "admin-1");
-    const res = await client.retryPartnerNotificationDelivery("entry-2", "outbox-123");
-    
+    const res = await client.retryPartnerNotificationDelivery(
+      "entry-2",
+      "outbox-123",
+    );
+
     expect(res).toEqual({ kind: "requeued" });
     expect(fetchMock).toHaveBeenCalledWith(
       "http://localhost/api/platform-admin/partner-entries/entry-2/notification-deliveries/outbox-123/retry",

@@ -1,4 +1,7 @@
-import { PARTNER_PASSENGER_EVENT_TO_EXTERNAL_NAME, PartnerPassengerEventType } from "@drts/contracts";
+import {
+  PARTNER_PASSENGER_EVENT_TO_EXTERNAL_NAME,
+  PartnerPassengerEventType,
+} from "@drts/contracts";
 import { PLATFORM_CURRENCY } from "@drts/contracts";
 import { Injectable, Logger, Optional } from "@nestjs/common";
 import type { QueryResultRow } from "pg";
@@ -232,7 +235,10 @@ type OrderPartnerNotificationRouteRow = QueryResultRow & {
 export class MultiTaxiRepository {
   private readonly logger = new Logger(MultiTaxiRepository.name);
 
-  constructor(@Optional() private readonly databaseService?: DatabaseService, @Optional() private readonly facade?: PartnerNotificationDispatchFacade) {}
+  constructor(
+    @Optional() private readonly databaseService?: DatabaseService,
+    @Optional() private readonly facade?: PartnerNotificationDispatchFacade,
+  ) {}
 
   isEnabled() {
     return this.databaseService?.isEnabled() ?? false;
@@ -591,7 +597,9 @@ export class MultiTaxiRepository {
       [Math.max(1, Math.min(limit, 1000))],
     );
     // Expired rows are selected once to persist a terminal outcome, never sent.
-    return result.rows.map((row: any) => this.mapNotificationOutbox(row.record));
+    return result.rows.map((row: any) =>
+      this.mapNotificationOutbox(row.record),
+    );
   }
 
   /** Re-read authoritative state under lock: callers may hold a stale outbox copy. */
@@ -1157,7 +1165,9 @@ export class MultiTaxiRepository {
       );
 
     return {
-      items: result.rows.map((row: any) => this.mapPassengerRatingReviewRow(row)),
+      items: result.rows.map((row: any) =>
+        this.mapPassengerRatingReviewRow(row),
+      ),
       totalItems,
     };
   }
@@ -1795,7 +1805,7 @@ export class MultiTaxiRepository {
     };
   }
 
-    async retryPartnerNotificationDelivery(
+  async retryPartnerNotificationDelivery(
     entry: { entrySlug: string; tenantId: string; partnerId: string },
     outboxId: string,
     identity?: any,
@@ -1822,7 +1832,11 @@ export class MultiTaxiRepository {
         await client.query("ROLLBACK");
         return {
           kind: "failed",
-          failure: { failureReason: "route_missing", retryDisposition: "none", suggestedNextAttemptAt: null },
+          failure: {
+            failureReason: "route_missing",
+            retryDisposition: "none",
+            suggestedNextAttemptAt: null,
+          },
         };
       }
       const outbox = outboxRows.rows[0];
@@ -1844,19 +1858,32 @@ export class MultiTaxiRepository {
         await client.query("ROLLBACK");
         return {
           kind: "failed",
-          failure: { failureReason: "route_missing", retryDisposition: "none", suggestedNextAttemptAt: null },
+          failure: {
+            failureReason: "route_missing",
+            retryDisposition: "none",
+            suggestedNextAttemptAt: null,
+          },
         };
       }
 
-
-      
-      
-      const expiresAtStr = ctx ? ctx.expires_at : (outbox.payload?.notificationExpiresAt || outbox.payload?.expiresAt || new Date(new Date(outbox.created_at || new Date()).getTime() + 15 * 60000).toISOString());
+      const expiresAtStr = ctx
+        ? ctx.expires_at
+        : outbox.payload?.notificationExpiresAt ||
+          outbox.payload?.expiresAt ||
+          new Date(
+            new Date(outbox.created_at || new Date()).getTime() + 15 * 60000,
+          ).toISOString();
       if (expiresAtStr && new Date() >= new Date(expiresAtStr)) {
         await client.query("ROLLBACK");
-        return { kind: "failed", failure: { failureReason: "notification_expired", retryDisposition: "terminal", suggestedNextAttemptAt: null } };
+        return {
+          kind: "failed",
+          failure: {
+            failureReason: "notification_expired",
+            retryDisposition: "terminal",
+            suggestedNextAttemptAt: null,
+          },
+        };
       }
-
 
       const retryDisp = ctx
         ? ctx.retry_disposition
@@ -1937,98 +1964,200 @@ export class MultiTaxiRepository {
           failure: {
             failureReason: "provider_transient_error",
             retryDisposition: "automatic",
-            suggestedNextAttemptAt: new Date(Date.now() + 60000).toISOString()
+            suggestedNextAttemptAt: new Date(Date.now() + 60000).toISOString(),
           },
         };
       }
-      
-      const route = await this.findOrderPartnerNotificationRoute(outbox.order_id);
+
+      const route = await this.findOrderPartnerNotificationRoute(
+        outbox.order_id,
+      );
       if (!route) {
         await client.query("ROLLBACK");
         return {
           kind: "failed",
-          failure: { failureReason: "route_missing", retryDisposition: "none", suggestedNextAttemptAt: null },
+          failure: {
+            failureReason: "route_missing",
+            retryDisposition: "none",
+            suggestedNextAttemptAt: null,
+          },
         };
       }
-      
-      if (ctx && (ctx.order_id !== route.orderId || ctx.tenant_id !== route.tenantId || ctx.partner_id !== route.partnerId || ctx.entry_slug !== route.entrySlug || ctx.wire_payload?.data?.recipient?.partnerUserRef !== route.partnerUserRef)) {
+
+      if (
+        ctx &&
+        (ctx.order_id !== route.orderId ||
+          ctx.tenant_id !== route.tenantId ||
+          ctx.partner_id !== route.partnerId ||
+          ctx.entry_slug !== route.entrySlug ||
+          ctx.wire_payload?.data?.recipient?.partnerUserRef !==
+            route.partnerUserRef)
+      ) {
         await client.query("ROLLBACK");
-        return { kind: "failed", failure: { failureReason: "owner_changed", retryDisposition: "terminal", suggestedNextAttemptAt: null } };
+        return {
+          kind: "failed",
+          failure: {
+            failureReason: "owner_changed",
+            retryDisposition: "terminal",
+            suggestedNextAttemptAt: null,
+          },
+        };
       }
-      
+
       const eventType = ctx ? ctx.wire_payload?.event : outbox.event_type;
       if (!eventType) {
         await client.query("ROLLBACK");
-        return { kind: "failed", failure: { failureReason: "route_missing", retryDisposition: "terminal", suggestedNextAttemptAt: null } };
+        return {
+          kind: "failed",
+          failure: {
+            failureReason: "route_missing",
+            retryDisposition: "terminal",
+            suggestedNextAttemptAt: null,
+          },
+        };
       }
-      
+
       // Convert to internal event type if needed, or if facade expects internal event type
-      const internalEvent = Object.keys(PARTNER_PASSENGER_EVENT_TO_EXTERNAL_NAME).find(k => PARTNER_PASSENGER_EVENT_TO_EXTERNAL_NAME[k as PartnerPassengerEventType] === eventType) as PartnerPassengerEventType || eventType;
+      const internalEvent =
+        (Object.keys(PARTNER_PASSENGER_EVENT_TO_EXTERNAL_NAME).find(
+          (k) =>
+            PARTNER_PASSENGER_EVENT_TO_EXTERNAL_NAME[
+              k as PartnerPassengerEventType
+            ] === eventType,
+        ) as PartnerPassengerEventType) || eventType;
 
       if (this.facade) {
-        const readiness = await this.facade.resolveNotificationRoute(route, internalEvent);
+        const readiness = await this.facade.resolveNotificationRoute(
+          route,
+          internalEvent,
+        );
         if (!readiness.ready) {
           await client.query("ROLLBACK");
           return { kind: "failed", failure: readiness.failure };
         }
-        if (ctx && (ctx.binding_id !== readiness.binding.bindingId || ctx.webhook_id !== readiness.binding.webhookId)) {
+        if (
+          ctx &&
+          (ctx.binding_id !== readiness.binding.bindingId ||
+            ctx.webhook_id !== readiness.binding.webhookId)
+        ) {
           // owner_changed
           await client.query("ROLLBACK");
-          return { kind: "failed", failure: { failureReason: "owner_changed", retryDisposition: "terminal", suggestedNextAttemptAt: null } };
+          return {
+            kind: "failed",
+            failure: {
+              failureReason: "owner_changed",
+              retryDisposition: "terminal",
+              suggestedNextAttemptAt: null,
+            },
+          };
         }
-        if (ctx && (ctx.binding_version !== readiness.binding.version || ctx.endpoint_fingerprint !== readiness.endpointFingerprint)) {
+        if (
+          ctx &&
+          (ctx.binding_version !== readiness.binding.version ||
+            ctx.endpoint_fingerprint !== readiness.endpointFingerprint)
+        ) {
           // configuration_blocked
           await client.query("ROLLBACK");
-          return { kind: "failed", failure: { failureReason: "endpoint_disabled", retryDisposition: "configuration_blocked", suggestedNextAttemptAt: null } };
+          return {
+            kind: "failed",
+            failure: {
+              failureReason: "endpoint_disabled",
+              retryDisposition: "configuration_blocked",
+              suggestedNextAttemptAt: null,
+            },
+          };
         }
-        
-        const maxAttempts = ctx && ctx.retry_policy_snapshot && ctx.retry_policy_snapshot.maxAttempts ? parseInt(ctx.retry_policy_snapshot.maxAttempts, 10) : (readiness.retryPolicy?.maxAttempts ?? 3);
+
+        const maxAttempts =
+          ctx &&
+          ctx.retry_policy_snapshot &&
+          ctx.retry_policy_snapshot.maxAttempts
+            ? parseInt(ctx.retry_policy_snapshot.maxAttempts, 10)
+            : (readiness.retryPolicy?.maxAttempts ?? 3);
         if (maxAttempts !== undefined && outbox.attempt_count >= maxAttempts) {
           await client.query("ROLLBACK");
           return {
             kind: "failed",
             failure: {
-              failureReason: ctx?.failure_reason as any || "endpoint_unavailable",
+              failureReason:
+                (ctx?.failure_reason as any) || "endpoint_unavailable",
               retryDisposition: "terminal",
-            }
+            },
           };
         }
       }
 
-      const relevance = await this.findPartnerNotificationRelevance(outbox.order_id);
+      const relevance = await this.findPartnerNotificationRelevance(
+        outbox.order_id,
+      );
       if (!relevance) {
         await client.query("ROLLBACK");
-        return { kind: "failed", failure: { failureReason: "route_missing", retryDisposition: "terminal", suggestedNextAttemptAt: null } };
+        return {
+          kind: "failed",
+          failure: {
+            failureReason: "route_missing",
+            retryDisposition: "terminal",
+            suggestedNextAttemptAt: null,
+          },
+        };
       }
-      
+
       if (internalEvent !== "receipt_ready") {
-        if (["cancelled", "completed", "closed", "rejected"].includes(relevance.status)) {
+        if (
+          ["cancelled", "completed", "closed", "rejected"].includes(
+            relevance.status,
+          )
+        ) {
           await client.query("ROLLBACK");
-          return { kind: "failed", failure: { failureReason: "notification_obsolete", retryDisposition: "terminal", suggestedNextAttemptAt: null } };
+          return {
+            kind: "failed",
+            failure: {
+              failureReason: "notification_obsolete",
+              retryDisposition: "terminal",
+              suggestedNextAttemptAt: null,
+            },
+          };
         }
-        const assignmentVersion = ctx ? ctx.wire_payload?.data?.assignmentVersion : outbox.assignment_version;
-        if (assignmentVersion !== undefined && assignmentVersion !== null && assignmentVersion < relevance.assignmentVersion) {
+        const assignmentVersion = ctx
+          ? ctx.wire_payload?.data?.assignmentVersion
+          : outbox.assignment_version;
+        if (
+          assignmentVersion !== undefined &&
+          assignmentVersion !== null &&
+          assignmentVersion < relevance.assignmentVersion
+        ) {
           await client.query("ROLLBACK");
-          return { kind: "failed", failure: { failureReason: "notification_superseded", retryDisposition: "terminal", suggestedNextAttemptAt: null } };
+          return {
+            kind: "failed",
+            failure: {
+              failureReason: "notification_superseded",
+              retryDisposition: "terminal",
+              suggestedNextAttemptAt: null,
+            },
+          };
         }
       }
 
-            if (outbox.status === "pending" || outbox.status === "sending") {
+      if (outbox.status === "pending" || outbox.status === "sending") {
         await client.query("ROLLBACK");
         return { kind: "requeued" };
       }
 
-      const isUuid = (str: string) => /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(str);
-      const validActorId = identity?.actorId && isUuid(identity.actorId) ? identity.actorId : null;
+      const isUuid = (str: string) =>
+        /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(
+          str,
+        );
+      const validActorId =
+        identity?.actorId && isUuid(identity.actorId) ? identity.actorId : null;
       await client.query(
         "INSERT INTO admin.audit_logs (actor_id, actor_type, module_name, action_name, resource_type, resource_id, new_value, request_id) VALUES ($1, $2, 'partner_notification', 'retry_delivery', 'consumer_notification_outbox', $3, $4::jsonb, $5)",
         [
           validActorId,
-          identity?.actorType || 'system',
+          identity?.actorType || "system",
           outboxId,
           JSON.stringify({ retriedAt: new Date().toISOString() }),
-          requestId || null
-        ]
+          requestId || null,
+        ],
       );
 
       const newPayload = outbox.payload || {};

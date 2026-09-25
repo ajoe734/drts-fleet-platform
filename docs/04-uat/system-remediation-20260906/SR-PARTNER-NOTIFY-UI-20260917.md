@@ -44,4 +44,3 @@
 | R6. unsupported UAT claims & CI config         | `.github/workflows/ci.yml`, `.github/workflows/ci-integ.yml` | 舊: 移除了 CI 中的 PG variables 和 verify script<br/>新: 恢復 PG variables，加入 UI db 變數 | 文件靜態檢查 | CI 需等待 push 後觸發 |
 | R7. UI Web scope violation & raw colors        | `apps/platform-admin-web/components/partner-notification-panel.tsx` | 舊: 使用未經授權設計、hardcode 標題和色碼<br/>新: 使用 CanvasCard/CanvasPill 搭配 `@drts/ui-tokens` theme | `pnpm run i18n:guard` (Exit 0) | UI 視覺需由預覽或 E2E 驗證 |
 | R8. evidence mismatch & RTL claims             | `docs/04-uat/system-remediation-20260906/SR-PARTNER-NOTIFY-UI-20260917.md` | 舊: 宣稱不存在的 RTL component test PASS，狀態不實<br/>新: 如實記載 Pending CI 與 unperformed 本機結果 | 靜態文件核對 | 無 |
-
