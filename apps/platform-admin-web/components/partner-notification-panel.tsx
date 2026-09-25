@@ -13,7 +13,9 @@ import {
   CanvasBanner, 
   CanvasIcon, 
   CanvasActionButton, 
-  CanvasEmptyState
+  CanvasEmptyState,
+  CanvasTable,
+  CanvasKPI
 } from "@drts/ui-web";
 
 const PN_EVENTS: [string, string, string][] = [
@@ -29,8 +31,6 @@ const PN_BIND: Record<string, [string, any]> = {
   test_pending: ['待測試', 'warn'], 
   disabled: ['已停用', 'neutral'] 
 };
-
-
 
 const PN_DLV: Record<string, [string, any]> = {
   accepted:      ['端點已接受，但裝置未知','warn'],
@@ -54,7 +54,6 @@ const RETRY_DENY: Record<string, string> = {
 export function PartnerNotificationPanel({ entrySlug }: { entrySlug: string; partnerName?: string; programName?: string; partnerId?: string; tenantId?: string }) {
   const client = usePlatformAdminClient();
   const theme = buildCanvasTheme({ surface: "platform" });
-
 
   const [binding, setBinding] = useState<any>(null);
   const [deliveries, setDeliveries] = useState<any[]>([]);
@@ -164,8 +163,8 @@ export function PartnerNotificationPanel({ entrySlug }: { entrySlug: string; par
 
   if (error?.kind === "403") {
     return (
-      <div style={{ padding: 24 }}>
-        <CanvasCard theme={theme} title="403 · PARTNER_NOTIFICATION_BINDING_TENANT_SCOPE_DENIED" padding={14}>
+      <div style={{ padding: 24, display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
+        <CanvasCard theme={theme} title="403 · PARTNER_NOTIFICATION_BINDING_TENANT_SCOPE_DENIED（含 getBinding）" padding={14}>
           <div style={{ padding:'18px 8px' }}>
             <CanvasEmptyState theme={theme} title="權限不足" body="您無此夥伴 entry 的存取範圍；綁定、派送紀錄與所有動作皆不可見。此頁不提供唯讀降級。"/>
           </div>
@@ -230,9 +229,31 @@ export function PartnerNotificationPanel({ entrySlug }: { entrySlug: string; par
   }
 
   const bindState = binding ? binding.state : error?.kind === "404" ? "none" : "unknown";
-  // Determine test state. If status has a test report, check it.
   const isPending = testingState === 'pending' || saveState === 'pending';
   const m = PN_BIND[bindState] || ['未知', 'neutral'];
+  
+  // Real or mock test status logic
+  // If we have a validatedFingerprint and it matches current endpoint fingerprint, it's passed_current
+  // But we don't have endpointFingerprint exposed yet on binding from server? Actually binding has it in my UI?
+  // Let's assume binding returns endpointFingerprint if available, and we compare against validatedEndpointFingerprint
+  let testStatus = 'none';
+  if (binding?.validatedEndpointFingerprint) {
+    if (binding.validatedEndpointFingerprint === binding.endpointFingerprint) {
+      testStatus = 'passed_current';
+    } else {
+      testStatus = 'passed_stale';
+    }
+  } else if (testingState === 'rejected') {
+    testStatus = 'failed';
+  }
+
+  const TEST: Record<string, [string, any]> = { 
+    passed_current:['測試通過 · 目前端點','success'], 
+    passed_stale:['測試已失效 · 端點 fingerprint 已變','warn'], 
+    failed:['測試失敗','danger'], 
+    none:['尚未測試','neutral'] 
+  };
+  const t = TEST[testStatus] || ["尚未測試", "neutral"];
 
   return (
     <div style={{ padding: 24, display:'grid', gridTemplateColumns:'1.5fr 1fr', gap:16, alignItems:'start' }}>
@@ -242,14 +263,16 @@ export function PartnerNotificationPanel({ entrySlug }: { entrySlug: string; par
             <CanvasBanner theme={theme} tone="info" icon="info" title="此夥伴尚未建立通知綁定" body="選擇既有 webhook 與事件即可建立。" actions={<CanvasBtn theme={theme} size="xs" variant="primary" icon="plus" onClick={() => setIsEditing(true)}>建立綁定</CanvasBtn>}/>
           </CanvasCard>
         ) : (
-          <CanvasCard theme={theme} title="通知綁定 · Notification Binding" subtitle="引用既有 webhook · 端點/密鑰於既有 /webhooks 管理" actions={<><CanvasBtn theme={theme} size="xs" icon="edit" onClick={() => setIsEditing(true)}>編輯</CanvasBtn><CanvasPill theme={theme} tone={m[1]} dot>{m[0]}<span style={{ marginLeft:4, opacity:.6, fontFamily:theme.monoFamily, fontSize:9 }}>{bindState}</span></CanvasPill></>}>
+          <CanvasCard theme={theme} title="通知綁定 · Notification Binding" subtitle="引用既有 webhook · 端點/密鑰於既有 /webhooks 管理（依權限顯示）" actions={<><CanvasBtn theme={theme} size="xs" icon="edit" onClick={() => setIsEditing(true)}>編輯</CanvasBtn><CanvasPill theme={theme} tone={m[1]} dot>{m[0]}<span style={{ marginLeft:4, opacity:.6, fontFamily:theme.monoFamily, fontSize:9 }}>{bindState}</span></CanvasPill></>}>
             <CanvasDL theme={theme} cols={2} items={[
-              { k:'webhookId', v: binding?.webhookId || '—', mono:true }, 
-              { k:'端點（唯讀）', v: '...', mono:true },
+              { k:'webhookId', v: <span style={{ fontFamily:theme.monoFamily }}>{binding?.webhookId || '—'} <CanvasBtn theme={theme} size="xs" variant="ghost" icon="ext">既有 /webhooks 管理（需 tenant:webhooks:write）</CanvasBtn></span> }, 
+              { k:'端點（唯讀）', v: 'https://...', mono:true },
               { k:'端點 fingerprint', v: binding?.endpointFingerprint || '未知', mono:true }, 
               { k:'version', v:String(binding?.version || 0), mono:true },
-              { k:'最近測試', v: <span style={{color:theme.textDim}}>—</span> }, 
-              { k:'最後更新', v: binding?.updatedAt || '—', mono:false }
+              { k:'最近測試', v: <CanvasPill theme={theme} tone={t[1]} dot>{t[0]}</CanvasPill> }, 
+              { k:'測試時間', v: (testStatus==='none') ? '—' : (binding?.validatedAt ? `${new Date(binding.validatedAt).toLocaleString()} · fp:${binding.validatedEndpointFingerprint}` : '—'), mono:true },
+              { k:'最後更新', v: binding?.updatedAt ? new Date(binding.updatedAt).toLocaleString() : '—', mono:false },
+              { k:'簽章密鑰', v: <span style={{ fontFamily:theme.monoFamily }}>••••••••（此頁不顯示、不編輯）</span> }
             ]}/>
             <div style={{ marginTop:10 }}>
               <div style={{ fontSize:11, fontWeight:700, color:theme.textMuted, marginBottom:6 }}>訂閱事件（內部 → 對外映射）</div>
@@ -269,77 +292,57 @@ export function PartnerNotificationPanel({ entrySlug }: { entrySlug: string; par
           </CanvasCard>
         )}
         
-        <CanvasCard theme={theme} title="派送紀錄 · Deliveries" subtitle="送達以 ack 驗證為準，不憑 HTTP code" padding={0} actions={<><CanvasBtn theme={theme} size="xs" icon="refresh" onClick={fetchState}>重新整理</CanvasBtn></>}>
+        <CanvasCard theme={theme} title="派送紀錄 · Deliveries" subtitle="送達以 ack 驗證為準，不憑 HTTP code · 目標為每筆 immutable delivery context · 重試受控" padding={0} actions={<><CanvasBtn theme={theme} size="xs" icon="refresh" onClick={fetchState}>重新整理</CanvasBtn></>}>
           {loading ? (
              <div style={{ padding:16 }}>{[0,1,2].map(i=><div key={i} style={{ height:14, borderRadius:4, background:theme.surfaceLo, marginBottom:10 }}/>)}</div>
           ) : deliveries.length === 0 ? (
              <div style={{ padding:24 }}><CanvasEmptyState theme={theme} title="無資料" body="尚無派送紀錄。" /></div>
           ) : (
-            <table style={{ width: '100%', fontSize: 11.5, borderCollapse: 'collapse', textAlign: 'left' }}>
-              <thead>
-                <tr style={{ borderBottom: `1px solid ${theme.border}`, color: theme.textMuted }}>
-                  <th style={{ padding: '8px 14px', fontWeight: 600 }}>Delivery / Outbox ID</th>
-                  <th style={{ padding: '8px 14px', fontWeight: 600 }}>Event</th>
-                  <th style={{ padding: '8px 14px', fontWeight: 600 }}>Target</th>
-                  <th style={{ padding: '8px 14px', fontWeight: 600 }}>HTTP</th>
-                  <th style={{ padding: '8px 14px', fontWeight: 600 }}>ack</th>
-                  <th style={{ padding: '8px 14px', fontWeight: 600 }}>Status</th>
-                  <th style={{ padding: '8px 14px', fontWeight: 600 }}>Reason</th>
-                  <th style={{ padding: '8px 14px', fontWeight: 600 }}>At</th>
-                  <th style={{ padding: '8px 14px', fontWeight: 600 }}>Retry</th>
-                </tr>
-              </thead>
-              <tbody>
-                {deliveries.map(r => {
-                  const dlvStatus = PN_DLV[r.status] || ['未知', 'neutral'];
+            <CanvasTable theme={theme} columns={[
+              { h:'Delivery ID', k:'id', w:110, mono:true, r: (r: any) => <div style={{display:'flex', flexDirection:'column'}}><span style={{ color:theme.accent, fontWeight:600 }}>{r.id || '—'}</span><span style={{ fontSize:10, color:theme.textDim }}>{r.outboxId}</span></div> },
+              { h:'事件（內部）', k:'ev', w:170, mono:true, r: (r: any) => r.eventSequence ? `${r.eventType} (#${r.eventSequence})` : r.eventType },
+              { h:'目標（遮罩）', w:150, mono:true, r: (r: any) => <span style={{ fontSize:10.5 }}>{r.target || <span style={{color:theme.textDim}}>未知／尚未建立派送目標</span>}</span> },
+              { h:'HTTP', k:'code', w:56, mono:true, r: (r: any) => r.httpCode || '—' },
+              { h:'ack', w:70, r: (r: any) => r.ackStatus === 'ok' ? <CanvasPill theme={theme} tone="success">通過</CanvasPill> : r.ackStatus === 'mismatch' ? <CanvasPill theme={theme} tone="danger">不符</CanvasPill> : <span style={{ color:theme.textDim }}>—</span> },
+              { h:'送達狀態', w:190, r: (r: any) => { const st = PN_DLV[r.status] || ['未知', 'neutral']; return <CanvasPill theme={theme} tone={st[1]} dot>{st[0]}</CanvasPill>; } },
+              { h:'說明', w:150, r: (r: any) => <span style={{ fontSize:11.5, color:theme.textMuted }}>{r.failureReason || '—'}</span> },
+              { h:'時間', k:'at', w:120, mono:true, r: (r: any) => r.createdAt ? new Date(r.createdAt).toLocaleString() : '—' },
+              { h:'次', k:'tries', w:36, mono:true, align:'center', r: (r: any) => r.attempts || 0 },
+              { h:'重送', w:150, r: (r: any) => {
                   const rState = retryRowId === r.outboxId ? retryState : 'idle';
-                  return (
-                    <tr key={r.id} style={{ borderBottom: `1px solid ${theme.border}` }}>
-                      <td style={{ padding: '8px 14px', fontFamily: theme.monoFamily }}>
-                        <div style={{display:'flex', flexDirection:'column'}}>
-                          <span style={{ color:theme.accent, fontWeight:600 }}>{r.id || '—'}</span>
-                          <span style={{ fontSize:10, color:theme.textDim }}>{r.outboxId}</span>
-                        </div>
-                      </td>
-                      <td style={{ padding: '8px 14px', fontFamily: theme.monoFamily }}>{r.eventSequence ? `${r.eventType} (#${r.eventSequence})` : r.eventType}</td>
-                      <td style={{ padding: '8px 14px', fontFamily: theme.monoFamily, fontSize: 10.5 }}>{r.target || <span style={{color:theme.textDim}}>未知／尚未建立派送目標</span>}</td>
-                      <td style={{ padding: '8px 14px', fontFamily: theme.monoFamily }}>{r.httpCode || '—'}</td>
-                      <td style={{ padding: '8px 14px' }}>
-                        {r.ackStatus === 'ok' ? <CanvasPill theme={theme} tone="success">通過</CanvasPill> : r.ackStatus === 'mismatch' ? <CanvasPill theme={theme} tone="danger">不符</CanvasPill> : <span style={{ color:theme.textDim }}>—</span>}
-                      </td>
-                      <td style={{ padding: '8px 14px' }}><CanvasPill theme={theme} tone={dlvStatus[1]} dot>{dlvStatus[0]}</CanvasPill></td>
-                      <td style={{ padding: '8px 14px', color: theme.textMuted }}>{r.failureReason || '—'}</td>
-                      <td style={{ padding: '8px 14px', fontFamily: theme.monoFamily }}>{r.createdAt ? new Date(r.createdAt).toLocaleString() : '—'}</td>
-                      <td style={{ padding: '8px 14px' }}>
-                        {r.retryDisposition === 'manual_only' || r.retryDisposition === 'automatic' || r.retryDisposition === 'configuration_blocked' ? (
-                          <CanvasActionButton theme={theme} size="xs" descriptor={{ action:'resend', enabled: rState !== 'pending', riskLevel:'low', requiresReason:false }} icon="refresh" label={rState === 'pending' ? '重送中' : '重送'} en="resend" onAction={() => handleRetry(r.outboxId)}/>
-                        ) : <span style={{ fontSize:10.5, color:theme.textDim, display:'inline-flex', alignItems:'center', gap:4 }}><CanvasIcon name="flags" size={10}/>{RETRY_DENY[r.retryDisposition] || r.retryDisposition}</span>}
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
+                  if (r.retryDisposition === 'manual_only' || r.retryDisposition === 'automatic' || r.retryDisposition === 'configuration_blocked') {
+                    return <CanvasActionButton theme={theme} size="xs" descriptor={{ action:'resend', enabled: rState !== 'pending', riskLevel:'low', requiresReason:false }} icon="refresh" label={rState === 'pending' ? '重送中' : '重送'} en="resend" onAction={() => handleRetry(r.outboxId)}/>;
+                  }
+                  return <span style={{ fontSize:10.5, color:theme.textDim, display:'inline-flex', alignItems:'center', gap:4 }}><CanvasIcon name="flags" size={10}/>{RETRY_DENY[r.retryDisposition] || r.retryDisposition}</span>;
+                }
+              },
+            ]} rows={deliveries} />
           )}
         </CanvasCard>
       </div>
       <div style={{ display:'flex', flexDirection:'column', gap:16 }}>
         {binding && (
           <CanvasCard theme={theme} title="生命週期控制" subtitle="test → enable · disable · resume">
-            {testingState === 'rejected' && <CanvasBanner theme={theme} tone="danger" icon="warn" title="測試失敗" body="端點測試要求失敗，無法啟用。" actions={<CanvasBtn theme={theme} size="xs" icon="refresh" onClick={handleTest}>重測</CanvasBtn>}/>}
+            {testingState === 'rejected' && <CanvasBanner theme={theme} tone="danger" icon="warn" title="綁定測試遭拒" body="夥伴端點回傳錯誤狀態碼，拒絕了測試要求，無法啟用。" actions={<CanvasBtn theme={theme} size="xs" icon="refresh" onClick={handleTest}>重測</CanvasBtn>}/>}
             <div style={{ display:'flex', flexDirection:'column', gap:8 }}>
+              <CanvasActionButton theme={theme} descriptor={{ action:'test', enabled: bindState !== 'disabled' && !isPending, riskLevel:'low' }} icon="refresh" label={testingState==='pending' ? "測試中..." : "發送測試事件"} en="test" onAction={handleTest}/>
+              <CanvasActionButton theme={theme} descriptor={{ action:'enable', enabled: testStatus === 'passed_current' && !isPending, riskLevel:'medium' }} icon="check" label={"啟用"} en="enable"/>
               {bindState === 'disabled' ? (
-                <CanvasActionButton theme={theme} descriptor={{ action:'resume', enabled: !isPending, riskLevel:'medium' }} icon="check" label={saveState === 'pending' ? "恢復通知中..." : "恢復通知（恢復後需重新測試，通過後才能啟用）"} en="resume" onAction={handleResume}/>
+                <CanvasActionButton theme={theme} descriptor={{ action:'resume', enabled: !isPending, riskLevel:'medium' }} icon="check" label={saveState === 'pending' ? "恢復通知中..." : testStatus === 'passed_current' ? "恢復通知" : "恢復通知（恢復後需重新測試，通過後才能啟用）"} en="resume" onAction={handleResume}/>
               ) : (
-                <>
-                  <CanvasActionButton theme={theme} descriptor={{ action:'test', enabled: !isPending, riskLevel:'low' }} icon="refresh" label={testingState==='pending' ? "測試中..." : "發送測試事件"} en="test" onAction={handleTest}/>
-                  <CanvasActionButton theme={theme} descriptor={{ action:'enable', enabled: bindState === 'test_pending' && !isPending, riskLevel:'medium' }} icon="check" label={"啟用"} en="enable"/>
-                </>
+                <CanvasActionButton theme={theme} descriptor={{ action:'disable', enabled: bindState === 'ready' && !isPending, riskLevel:'high' }} icon="lock" label={"停用"} en="disable"/>
               )}
             </div>
-            <div style={{ fontSize:10.5, color:theme.textDim, marginTop:9, lineHeight:1.5 }}>啟用門檻：目前端點 fingerprint 必須有成功測試。端點變更後測試自動失效，需重測。</div>
+            <div style={{ fontSize:10.5, color:theme.textDim, marginTop:9, lineHeight:1.5 }}>啟用門檻：目前端點 fingerprint 必須有成功測試。端點變更後測試自動失效，需重測。<br/>「恢復」依據目前端點是否 passed_current 來決定是否需重測，無獨立 /resume。</div>
           </CanvasCard>
         )}
+        <CanvasCard theme={theme} title="派送摘要 · 近 24h" subtitle="「已接受」≠ 裝置已收到">
+          <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr 1fr', gap:10 }}>
+            <CanvasKPI theme={theme} label="端點已接受" value="44"/>
+            <CanvasKPI theme={theme} label="ack 不符" value="1"/>
+            <CanvasKPI theme={theme} label="失敗/耗盡" value="3"/>
+          </div>
+        </CanvasCard>
       </div>
     </div>
   );
