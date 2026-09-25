@@ -84,13 +84,6 @@ export function evaluateAddressSubmitGate(params: {
 }): AddressSubmitGateState {
   const { pickup, dropoff, serviceability, providerState } = params;
 
-  if (!isDispatchReadyAddress(pickup) || !isDispatchReadyAddress(dropoff)) {
-    return {
-      blocking: true,
-      code: "coordinates_required",
-    };
-  }
-
   if (serviceability?.decision === "not_serviceable") {
     return {
       blocking: true,
@@ -98,14 +91,33 @@ export function evaluateAddressSubmitGate(params: {
     };
   }
 
-  if (serviceability?.decision === "manual_review") {
+  const providerDown = providerState && !providerState.available;
+  const isPickupReady = isDispatchReadyAddress(pickup);
+  const isDropoffReady = isDispatchReadyAddress(dropoff);
+  const hasPickupText = Boolean(pickup?.address?.trim());
+  const hasDropoffText = Boolean(dropoff?.address?.trim());
+
+  if (providerDown) {
+    if (!hasPickupText || !hasDropoffText) {
+      return {
+        blocking: true,
+        code: "coordinates_required",
+      };
+    }
     return {
       blocking: false,
       code: "dispatch_manual_review_required",
     };
   }
 
-  if (providerState && !providerState.available) {
+  if (!isPickupReady || !isDropoffReady) {
+    return {
+      blocking: true,
+      code: "coordinates_required",
+    };
+  }
+
+  if (serviceability?.decision === "manual_review") {
     return {
       blocking: false,
       code: "dispatch_manual_review_required",
