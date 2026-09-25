@@ -1170,6 +1170,7 @@ export function PartnerNotificationPanel({
         const errCode = bReq.reason?.code || bReq.reason?.error;
         if (statusCode === 404) {
           setBinding(null);
+          setEditEventTypes(["eta_changed"]);
           setError({ kind: "404", message: "Not found", code: errCode });
         } else if (statusCode === 403) {
           setError({ kind: "403", message: "Forbidden", code: errCode });
