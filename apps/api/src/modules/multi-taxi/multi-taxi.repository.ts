@@ -20,14 +20,13 @@ import type {
   PassengerRideAccessToken,
   PassengerTripRatingRecord,
   PushProviderAckState,
+  PARTNER_PASSENGER_EVENT_DEFAULT_TTL_SECONDS,
 } from "@drts/contracts";
 
 import type {
   PartnerDeliveryMetadata,
   StoredPartnerNotificationContext,
 } from "./partner-notification.types";
-
-import { notificationExpiresAt } from "./partner-notification.transport";
 
 import { DatabaseService } from "../../common/db/database.service";
 import { PartnerNotificationDispatchFacade } from "../tenant-partner/partner-notification-dispatch.facade";
@@ -1820,6 +1819,7 @@ export class MultiTaxiRepository {
         failure: {
           failureReason: "endpoint_unavailable",
           retryDisposition: "terminal",
+          suggestedNextAttemptAt: null,
         },
       };
     const client = await this.databaseService!.connect();
@@ -1869,14 +1869,27 @@ export class MultiTaxiRepository {
       }
 
       let expiresAtStr: string;
-      try {
-        expiresAtStr = notificationExpiresAt({
-          createdAt: outbox.created_at,
-          eventType: outbox.event_type as any,
-          payload: outbox.payload,
-        } as any);
-      } catch {
-        expiresAtStr = new Date(0).toISOString();
+      if (ctx && ctx.expires_at) {
+        expiresAtStr = ctx.expires_at;
+      } else {
+        try {
+          const createdAt = Date.parse(outbox.created_at ?? "");
+          if (!Number.isFinite(createdAt)) throw new Error("missing");
+          const ttlEnd =
+            createdAt +
+            PARTNER_PASSENGER_EVENT_DEFAULT_TTL_SECONDS[
+              outbox.event_type as keyof typeof PARTNER_PASSENGER_EVENT_DEFAULT_TTL_SECONDS
+            ] *
+              1000;
+          const supplied =
+            typeof outbox.payload?.expiresAt === "string"
+              ? Date.parse(outbox.payload.expiresAt)
+              : ttlEnd;
+          if (!Number.isFinite(supplied)) throw new Error("expired");
+          expiresAtStr = new Date(Math.min(ttlEnd, supplied)).toISOString();
+        } catch {
+          expiresAtStr = new Date(0).toISOString();
+        }
       }
 
       if (new Date() >= new Date(expiresAtStr)) {
@@ -1941,6 +1954,7 @@ export class MultiTaxiRepository {
           failure: {
             failureReason: failureReason,
             retryDisposition: "terminal",
+            suggestedNextAttemptAt: null,
           },
         };
       }
@@ -2072,8 +2086,11 @@ export class MultiTaxiRepository {
             kind: "failed",
             failure: {
               failureReason:
-                (ctx?.failure_reason as any) || "endpoint_unavailable",
+                (ctx?.failure_reason as any) ||
+                outbox.payload?.partnerNotification?.failureReason ||
+                "endpoint_unavailable",
               retryDisposition: "terminal",
+              suggestedNextAttemptAt: null,
             },
           };
         }

@@ -143,7 +143,7 @@ function PnBinding({
                 {binding?.webhookId || "—"}{" "}
                 {tenantId ? (
                   <a
-                    href={`/tenants/${tenantId}`}
+                    href={`/tenants/${tenantId}/webhooks${binding?.webhookId ? `/${binding.webhookId}` : ""}`}
                     target="_blank"
                     rel="noreferrer"
                   >
@@ -161,7 +161,7 @@ function PnBinding({
               </span>
             ),
           },
-          { k: "端點（唯讀）", v: "https://...", mono: true },
+          { k: "端點（唯讀）", v: binding?.endpointUrl || "—", mono: true },
           {
             k: "端點 fingerprint",
             v: binding?.endpointFingerprint || "未知",
@@ -525,23 +525,43 @@ function PnLifecycle({
   );
 }
 
-function PnRetryCell({ theme: th, r, retryState, onRetry, t }: any) {
+function PnRetryCell({
+  theme: th,
+  r,
+  retryState,
+  onRetry,
+  t,
+  canWriteBinding,
+  bindingState,
+}: any) {
   const RETRY_DENY: Record<string, string> = {
-    DELIVERY_TERMINAL: "已是終止狀態（已接受或已取代）",
-    SUPERSEDED: "已被新通知取代",
-    BUDGET_EXHAUSTED: "預算耗盡 (budget)",
-    TTL_EXPIRED: "生命週期已過期 (ttl)",
-    LEASE_ACTIVE: "另一重送進行中 (lease)",
-    BINDING_NOT_READY: "綁定未就緒",
+    terminal: "已是終止狀態",
+    configuration_blocked: "綁定未就緒",
+    none: "無重試機制",
+    exhausted: "重試預算耗盡",
+    expired: "生命週期已過期",
+    no_write: "無權限重試",
   };
-  const retryValue = r.retryDisposition;
-  if (!retryValue || retryValue === "n/a")
-    return <span style={{ fontSize: 10.5, color: th.textDim }}>—</span>;
-  if (retryValue.startsWith("denied:")) {
-    const code = retryValue.split(":")[1];
+
+  const isExpired = r.expiresAt && new Date(r.expiresAt) <= new Date();
+  const isExhausted =
+    typeof r.maxAttempts === "number" &&
+    (r.attempts || r.attemptCount || 0) >= r.maxAttempts;
+
+  let denyCode: string | null = null;
+  if (!canWriteBinding) denyCode = "no_write";
+  else if (bindingState !== "ready") denyCode = "configuration_blocked";
+  else if (r.retryDisposition === "terminal") denyCode = "terminal";
+  else if (r.retryDisposition === "configuration_blocked")
+    denyCode = "configuration_blocked";
+  else if (r.retryDisposition === "none") denyCode = "none";
+  else if (isExpired) denyCode = "expired";
+  else if (isExhausted) denyCode = "exhausted";
+
+  if (denyCode) {
     return (
       <span
-        title={code}
+        title={denyCode}
         style={{
           fontSize: 10.5,
           color: th.textDim,
@@ -551,10 +571,22 @@ function PnRetryCell({ theme: th, r, retryState, onRetry, t }: any) {
         }}
       >
         <CanvasIcon name="warn" size={10} />
-        {RETRY_DENY[code] || code}
+        {RETRY_DENY[denyCode] || denyCode}
       </span>
     );
   }
+
+  const retryValue = r.retryDisposition;
+  if (!retryValue || retryValue === "n/a")
+    return <span style={{ fontSize: 10.5, color: th.textDim }}>—</span>;
+
+  if (retryValue === "inflight")
+    return (
+      <CanvasPill theme={th} tone="info" dot>
+        {t("partnerNotification.enqueued") ?? "入列中 · 待 claim"}
+      </CanvasPill>
+    );
+
   if (retryState === "pending")
     return (
       <PanelActionBtn
@@ -566,6 +598,7 @@ function PnRetryCell({ theme: th, r, retryState, onRetry, t }: any) {
         size="xs"
       />
     );
+
   if (retryState === "failed")
     return (
       <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
@@ -583,13 +616,12 @@ function PnRetryCell({ theme: th, r, retryState, onRetry, t }: any) {
         </span>
       </div>
     );
-  if (retryValue === "inflight")
-    return (
-      <CanvasPill theme={th} tone="info" dot>
-        {t("partnerNotification.enqueued") ?? "入列中 · 待 claim"}
-      </CanvasPill>
-    );
-  if (retryValue === "allowed" || retryValue === "manual_only")
+
+  if (
+    retryValue === "allowed" ||
+    retryValue === "manual_only" ||
+    retryValue === "automatic"
+  )
     return (
       <PanelActionBtn
         theme={th}
@@ -601,6 +633,7 @@ function PnRetryCell({ theme: th, r, retryState, onRetry, t }: any) {
         onClick={() => onRetry(r.outboxId)}
       />
     );
+
   return null;
 }
 
@@ -613,6 +646,8 @@ function PnDeliveries({
   onRetry,
   onRefresh,
   t,
+  canWriteBinding,
+  bindingState,
 }: any) {
   const PN_DLV: Record<string, [string, any]> = {
     accepted: ["端點已接受，裝置未知", "info"],
@@ -747,10 +782,9 @@ function PnDeliveries({
           },
           {
             h: "HTTP",
-            k: "downstreamStatus",
             w: 56,
             mono: true,
-            r: (r: any) => r.downstreamStatus || r.code || r.httpCode || "—",
+            r: () => "—",
           },
           {
             h: "ack",
@@ -760,7 +794,7 @@ function PnDeliveries({
                 <CanvasPill theme={th} tone="danger">
                   {t("partnerNotification.mismatch") ?? "不符"}
                 </CanvasPill>
-              ) : r.status === "delivered" || r.status === "accepted" ? (
+              ) : r.deliveryStage === "partner_accepted" && r.receiptId ? (
                 <CanvasPill theme={th} tone="success">
                   {t("partnerNotification.pass") ?? "通過"}
                 </CanvasPill>
@@ -771,15 +805,31 @@ function PnDeliveries({
           {
             h: "送達狀態",
             w: 190,
-            r: (r: any) => (
-              <CanvasPill
-                theme={th}
-                tone={(PN_DLV[r.status] || ["未知", "neutral"])[1] as any}
-                dot
-              >
-                {(PN_DLV[r.status] || ["未知", "neutral"])[0]}
-              </CanvasPill>
-            ),
+            r: (r: any) => {
+              if (r.deliveryStage === "partner_accepted" && r.receiptId) {
+                return (
+                  <CanvasPill theme={th} tone="info" dot>
+                    端點已接受，裝置未知
+                  </CanvasPill>
+                );
+              }
+              if (r.status === "delivered") {
+                return (
+                  <CanvasPill theme={th} tone="neutral" dot>
+                    歷史紀錄（裝置未知）
+                  </CanvasPill>
+                );
+              }
+              return (
+                <CanvasPill
+                  theme={th}
+                  tone={(PN_DLV[r.status] || ["未知", "neutral"])[1] as any}
+                  dot
+                >
+                  {(PN_DLV[r.status] || ["未知", "neutral"])[0]}
+                </CanvasPill>
+              );
+            },
           },
           {
             h: "說明",
@@ -803,7 +853,10 @@ function PnDeliveries({
             w: 36,
             mono: true,
             align: "center",
-            r: (r: any) => r.attempts || r.tries || r.attemptCount || 1,
+            r: (r: any) =>
+              typeof r.attempts === "number"
+                ? r.attempts
+                : (r.attemptCount ?? 1),
           },
           {
             h: "重送",
@@ -821,6 +874,8 @@ function PnDeliveries({
                 }
                 onRetry={onRetry}
                 t={t}
+                canWriteBinding={canWriteBinding}
+                bindingState={bindingState}
               />
             ),
           },
@@ -861,6 +916,7 @@ function PnEditView({
   t,
   canWriteBinding,
   availableWebhooks,
+  webhookError,
 }: any) {
   const isSaving = saveState === "pending";
   const isSaveDisabled = isSaving || !editWebhookId || !canWriteBinding;
@@ -941,9 +997,18 @@ function PnEditView({
             required
             hint="端點 URL、密鑰、逾時/重試由既有 webhook 管理維護，本頁不重複 CRUD"
           >
+            {webhookError ? (
+              <div style={{ fontSize: 12, color: th.danger, marginBottom: 8 }}>
+                {webhookError === "Forbidden" ||
+                webhookError === "missing_scope"
+                  ? "無權限讀取端點列表 (需 tenant:webhooks:read)"
+                  : `端點讀取失敗: ${webhookError}`}
+              </div>
+            ) : null}
             <select
               value={editWebhookId}
               onChange={(e) => setEditWebhookId(e.target.value)}
+              disabled={isSaving || !!webhookError}
               style={{
                 width: "100%",
                 padding: "8px 12px",
@@ -966,7 +1031,7 @@ function PnEditView({
             <div style={{ marginTop: 6 }}>
               {tenantId ? (
                 <a
-                  href={`/tenants/${tenantId}`}
+                  href={`/tenants/${tenantId}/webhooks`}
                   target="_blank"
                   rel="noreferrer"
                 >
@@ -1096,6 +1161,7 @@ export function PartnerNotificationPanel({
   entrySlug,
   canWriteBinding,
   tenantId,
+  canReadWebhooks,
 }: {
   entrySlug: string;
   partnerName?: string;
@@ -1103,6 +1169,7 @@ export function PartnerNotificationPanel({
   partnerId?: string;
   tenantId?: string;
   canWriteBinding?: boolean;
+  canReadWebhooks?: boolean;
 }) {
   const client = usePlatformAdminClient();
   const { t } = useTranslation();
@@ -1118,6 +1185,7 @@ export function PartnerNotificationPanel({
     code?: string;
   } | null>(null);
   const [deliveryError, setDeliveryError] = useState<string | null>(null);
+  const [webhookError, setWebhookError] = useState<string | null>(null);
   const currentRequest = React.useRef(0);
   const [isEditing, setIsEditing] = useState(false);
   const [saveState, setSaveState] = useState<"idle" | "pending" | "failed">(
@@ -1155,7 +1223,7 @@ export function PartnerNotificationPanel({
             pageSize: 500,
           }),
         ];
-        if (tenantId) {
+        if (tenantId && canReadWebhooks) {
           p.push(
             (client as any).getList("/api/tenant/webhooks", {
               headers: { "x-tenant-id": tenantId },
@@ -1165,7 +1233,7 @@ export function PartnerNotificationPanel({
         const _results = await Promise.allSettled(p);
         const bReq = _results[0] as any;
         const dReq = _results[1] as any;
-        const wReq = _results[2] as any;
+        const wReq = tenantId && canReadWebhooks ? (_results[2] as any) : null;
         if (reqId !== currentRequest.current) return;
 
         if (bReq.status === "rejected") {
@@ -1194,7 +1262,7 @@ export function PartnerNotificationPanel({
           }
         } else {
           setBinding(bReq.value);
-          if (isInitial || !isEditing) {
+          if (isInitial) {
             setEditWebhookId(bReq.value?.webhookId || "");
             setEditEventTypes(bReq.value?.eventTypes || []);
           }
@@ -1206,15 +1274,28 @@ export function PartnerNotificationPanel({
           setDeliveries(dReq.value.items || dReq.value || []);
           setDeliveryError(null);
         } else {
-          if (dReq.reason?.statusCode !== 403) {
+          setDeliveries([]);
+          if (dReq.reason?.statusCode === 403) {
+            setDeliveryError("無權限讀取派送紀錄 (Forbidden)");
+          } else {
             setDeliveryError(
               dReq.reason?.message || "Failed to load deliveries",
             );
           }
         }
 
-        if (wReq && wReq.status === "fulfilled") {
-          setAvailableWebhooks(wReq.value || []);
+        if (wReq) {
+          if (wReq.status === "fulfilled") {
+            setAvailableWebhooks(wReq.value || []);
+            setWebhookError(null);
+          } else if (wReq.reason?.statusCode === 403) {
+            setWebhookError("Forbidden");
+          } else {
+            setWebhookError(wReq.reason?.message || "Failed to load webhooks");
+          }
+        } else {
+          setAvailableWebhooks([]);
+          setWebhookError(canReadWebhooks === false ? "missing_scope" : null);
         }
       } catch (err: any) {
         if (reqId !== currentRequest.current) return;
@@ -1229,12 +1310,14 @@ export function PartnerNotificationPanel({
         }
       }
     },
-    [client, entrySlug, tenantId, isEditing],
+    [client, entrySlug, tenantId],
   );
 
   useEffect(() => {
     setBinding(null);
     setDeliveries([]);
+    setAvailableWebhooks([]);
+    setWebhookError(null);
     setError(null);
     setDeliveryError(null);
     setTestingState("idle");
@@ -1273,9 +1356,21 @@ export function PartnerNotificationPanel({
   const handleTest = async () => {
     setTestingState("pending");
     try {
-      await (client as any).testPartnerEntryNotificationBinding(entrySlug);
-      setTestingState("idle");
-      fetchState();
+      const res = await (client as any).testPartnerEntryNotificationBinding(
+        entrySlug,
+      );
+      if (res.kind === "failed") {
+        setTestingState("rejected");
+        setError({
+          kind: "error",
+          message:
+            "測試失敗：" + (res.failure?.detail || res.failure?.failureReason),
+          code: res.failure?.failureReason,
+        });
+      } else {
+        setTestingState("idle");
+        fetchState();
+      }
     } catch (err: any) {
       setTestingState("rejected");
       if (
@@ -1337,10 +1432,32 @@ export function PartnerNotificationPanel({
     if (!binding) return;
     setResumeState("pending");
     try {
-      // Resume corresponds to re-enabling an existing disabled binding in the backend
+      const isStale =
+        !binding.validatedAt ||
+        binding.validatedEndpointFingerprint !== binding.endpointFingerprint;
+
+      let currentVersion = binding.version;
+      if (isStale) {
+        const testRes = await (
+          client as any
+        ).testPartnerEntryNotificationBinding(entrySlug, currentVersion);
+        if (testRes.kind === "failed") {
+          setError({
+            kind: "error",
+            message:
+              "復原測試失敗：" +
+              (testRes.failure?.detail || testRes.failure?.failureReason),
+            code: testRes.failure?.failureReason,
+          });
+          setResumeState("failed");
+          return;
+        }
+        currentVersion = testRes.version || currentVersion;
+      }
+
       await (client as any).enablePartnerEntryNotificationBinding(
         entrySlug,
-        binding.version,
+        currentVersion,
       );
       fetchState();
     } catch (err: any) {
@@ -1427,6 +1544,7 @@ export function PartnerNotificationPanel({
         t={t}
         canWriteBinding={canWriteBinding}
         availableWebhooks={availableWebhooks}
+        webhookError={webhookError}
       />
     );
   }
@@ -1500,6 +1618,8 @@ export function PartnerNotificationPanel({
           onRetry={handleRetry}
           onRefresh={fetchState}
           t={t}
+          canWriteBinding={canWriteBinding}
+          bindingState={binding?.state}
         />
         {deliveryError && (
           <div style={{ marginTop: 8 }}>
@@ -1552,9 +1672,7 @@ export function PartnerNotificationPanel({
               value={deliveries
                 .filter(
                   (d: any) =>
-                    d.status === "accepted" ||
-                    d.ack === "ok" ||
-                    d.status === "delivered",
+                    d.deliveryStage === "partner_accepted" && !!d.receiptId,
                 )
                 .length.toString()}
             />
@@ -1562,10 +1680,7 @@ export function PartnerNotificationPanel({
               theme={theme}
               label="ack 不符"
               value={deliveries
-                .filter(
-                  (d: any) =>
-                    d.status === "ack_invalid" || d.ack === "mismatch",
-                )
+                .filter((d: any) => d.failureReason === "partner_ack_invalid")
                 .length.toString()}
             />
             <CanvasKPI
