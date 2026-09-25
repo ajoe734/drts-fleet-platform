@@ -415,11 +415,18 @@ export function RoleApprovalPanel() {
   const [justification, setJustification] = useState("");
   const [submitting, setSubmitting] = useState(false);
 
+
   // Approval modal state
   const [selectedReq, setSelectedReq] =
     useState<PrivilegedRoleApprovalRequestRecord | null>(null);
   const [actionReason, setActionReason] = useState("");
   const [acting, setActing] = useState(false);
+
+  // Added Step-up and SoD state
+  const [stepUpState, setStepUpState] = useState<"NONE" | "VERIFYING" | "VALID" | "EXPIRED">("NONE");
+  const [stepUpRef, setStepUpRef] = useState<string | null>(null);
+  const [sodError, setSodError] = useState<string | null>(null);
+
 
   const loadRequests = useCallback(async () => {
     setLoading(true);
@@ -461,35 +468,74 @@ export function RoleApprovalPanel() {
       setJustification("");
       await loadRequests();
     } catch (err: unknown) {
-      setError(
-        err instanceof Error ? err.message : "Failed to create role request",
-      );
+      if (err instanceof ApiClientError && err.code === "IAM_SOD_VIOLATION") {
+        setError("職責分離衝突 · 核准已被系統阻擋: " + (err.apiMessage || "無例外理由放行。需先卸除不相容角色。"));
+      } else {
+        setError(
+          err instanceof Error ? err.message : "Failed to create role request",
+        );
+      }
     } finally {
       setSubmitting(false);
     }
   };
 
+  
+  const handleGetStepUpProof = async () => {
+    setStepUpState("VERIFYING");
+    try {
+      const proof = await iamClient.createStepUpProof({
+        actionId: "PRIVILEGED_ROLE_GRANT" as any,
+      });
+      if (proof.stepUpReference) {
+        setStepUpRef(proof.stepUpReference);
+        setStepUpState("VALID");
+      }
+    } catch (e: unknown) {
+      setStepUpState("NONE");
+      setError(e instanceof Error ? e.message : "Failed to get step-up proof");
+    }
+  };
+
+  
   const handleApprove = async () => {
     if (!selectedReq) return;
     setActing(true);
     setError(null);
+    setSodError(null);
     try {
       await iamClient.approvePrivilegedRoleRequest(selectedReq.requestId, {
         approvalRequestId: selectedReq.requestId,
+        stepUpReference: stepUpRef,
         mutation: {
           reasonCode: actionReason.trim() || "PRIVILEGED_ROLE_APPROVED",
           expectedVersion: selectedReq.version ?? 1,
+          stepUpReference: stepUpRef,
         },
       });
       setSelectedReq(null);
       setActionReason("");
+      setStepUpState("NONE");
+      setStepUpRef(null);
       await loadRequests();
     } catch (err: unknown) {
-      setError(err instanceof Error ? err.message : "Role approval failed");
+      if (err instanceof ApiClientError) {
+        if (err.code === "IAM_STEP_UP_REQUIRED") {
+          setStepUpState("NONE");
+          setError("Step-up verification required.");
+        } else if (err.code === "IAM_SOD_VIOLATION") {
+          setSodError(err.apiMessage || "SoD Violation: Incompatible role pairs.");
+        } else {
+          setError(err.message);
+        }
+      } else {
+        setError(err instanceof Error ? err.message : "Role approval failed");
+      }
     } finally {
       setActing(false);
     }
   };
+
 
   const handleReject = async () => {
     if (!selectedReq) return;
@@ -560,7 +606,15 @@ export function RoleApprovalPanel() {
               theme={theme}
               size="xs"
               variant="primary"
-              onClick={() => setSelectedReq(r)}
+              onClick={() => {
+                setSelectedReq(r);
+                setStepUpState("NONE");
+                setStepUpRef(null);
+                setSodError(null);
+                setError(null);
+                setActionReason("");
+              }}
+
             >
               {t("users.governance.roleApproval.reviewStepUp")}
             </CanvasBtn>
@@ -569,7 +623,15 @@ export function RoleApprovalPanel() {
               theme={theme}
               size="xs"
               variant="secondary"
-              onClick={() => setSelectedReq(r)}
+              onClick={() => {
+                setSelectedReq(r);
+                setStepUpState("NONE");
+                setStepUpRef(null);
+                setSodError(null);
+                setError(null);
+                setActionReason("");
+              }}
+
             >
               {t("users.governance.roleApproval.viewDetail")}
             </CanvasBtn>
@@ -780,13 +842,57 @@ export function RoleApprovalPanel() {
                 </div>
               </div>
 
-              <CanvasBanner
-                theme={theme}
-                tone="info"
-                icon="info"
-                title={t("users.governance.roleApproval.stepUpTitle")}
-                body="Secondary administrator sign-off is required before the privileged role becomes active."
-              />
+              {sodError ? (
+                <CanvasBanner
+                  theme={theme}
+                  tone="danger"
+                  icon="lock"
+                  title="職責分離衝突 · 核准已被系統阻擋"
+                  body={sodError + " 後端 checkSodPolicy 回 403 IAM_SOD_VIOLATION；無例外理由放行。需先卸除衝突角色或改申請其他角色。"}
+                />
+              ) : null}
+
+              {stepUpState === "NONE" && !sodError ? (
+                <CanvasBanner
+                  theme={theme}
+                  tone="warn"
+                  icon="lock"
+                  title="需 step-up proof"
+                  body="核准特權角色前，以 FIDO2 重新驗證取得 stepUpReference。過期或已用回 403 IAM_STEP_UP_REQUIRED。"
+                  actions={
+                    <CanvasBtn theme={theme} size="xs" variant="primary" icon="lock" onClick={handleGetStepUpProof}>
+                      取得 step-up proof
+                    </CanvasBtn>
+                  }
+                />
+              ) : stepUpState === "VERIFYING" && !sodError ? (
+                <CanvasBanner
+                  theme={theme}
+                  tone="info"
+                  icon="clock"
+                  title="等待驗證"
+                  body="請在彈出的驗證視窗中完成身分驗證..."
+                />
+              ) : stepUpState === "EXPIRED" && !sodError ? (
+                <CanvasBanner
+                  theme={theme}
+                  tone="danger"
+                  icon="warn"
+                  title="step-up proof 已失效"
+                  body="憑證已過期或已被使用，請重新取得。"
+                  actions={
+                    <CanvasBtn theme={theme} size="xs" variant="primary" icon="refresh" onClick={handleGetStepUpProof}>
+                      重新取得
+                    </CanvasBtn>
+                  }
+                />
+              ) : null}
+
+              {stepUpState === "VALID" || stepUpState === "VERIFYING" || stepUpState === "EXPIRED" ? (
+                <CanvasField theme={theme} label="stepUpReference" required hint={stepUpState === "VERIFYING" ? "驗證中..." : stepUpState === "EXPIRED" ? "已失效" : "有效"}>
+                  <input type="text" value={stepUpRef || "—"} readOnly disabled style={controlStyle} />
+                </CanvasField>
+              ) : null}
 
               <CanvasField
                 theme={theme}
@@ -827,7 +933,7 @@ export function RoleApprovalPanel() {
                   <CanvasBtn
                     theme={theme}
                     variant="primary"
-                    disabled={acting}
+                    disabled={acting || (stepUpState !== "VALID") || !!sodError}
                     onClick={() => void handleApprove()}
                   >
                     {acting ? "Approving…" : "Approve & Grant Role"}

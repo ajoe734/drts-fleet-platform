@@ -51,6 +51,7 @@
 <script type="text/babel" src="platform-mtx-auth.jsx"></script>
 <script type="text/babel" src="platform-mtx-commerce.jsx"></script>
 <script type="text/babel" src="platform-partner-notify.jsx"></script>
+<script type="text/babel" src="platform-iam.jsx"></script>
 
 <script type="text/babel">
 const TWEAK_DEFAULTS = /*EDITMODE-BEGIN*/{
@@ -198,6 +199,18 @@ function App() {
           <DCArtboard id="pn-resume-failed" label="D1 · 綁定恢復失敗" width={W} height={H}><Bare><PA_PartnerNotify theme={th} bind="disabled" test="passed_current" resumeState="failed" /></Bare></DCArtboard>
           <DCArtboard id="pn-errors" label="D6 · 錯誤與復原 · 409/404/403 + 200/202" width={W} height={H}><Bare><PA_PartnerNotifyErrors theme={th} /></Bare></DCArtboard>
           <DCArtboard id="pn-recovery" label="D6 · 生命週期載入與復原狀態" width={W} height={H}><Bare><PA_PartnerNotifyRecoveryBoards theme={th} /></Bare></DCArtboard>
+        </DCSection>
+
+        <DCSection id="iam" title="03m · 身分治理工作區 · C · iam-security-20260813" subtitle="5 分頁 + 常駐破窗橫幅 · SoD 衝突 · 最後管理員保護 · 雙人核准 · ≤60 分鐘">
+          <DCArtboard id="iam-users" label="C1 · 使用者與成員 · MFA / 最後登入" width={W} height={H}><Hero url="/iam/users"><PA_IamUsers theme={th} /></Hero></DCArtboard>
+          <DCArtboard id="iam-invite" label="C1 · 邀請抽屜" width={W} height={H}><Bare><PA_IamUsers theme={th} drawer="invite" /></Bare></DCArtboard>
+          <DCArtboard id="iam-detail" label="C1 · 詳情抽屜 · memberships/scope · 逐 session 撤銷 · 稽核時間軸" width={W} height={H}><Bare><PA_IamUsers theme={th} drawer="detail" /></Bare></DCArtboard>
+          <DCArtboard id="iam-sessions" label="C2 · 連線階段 · 遮罩權杖 · 遠端終止" width={W} height={H}><Bare><PA_IamSessions theme={th} /></Bare></DCArtboard>
+          <DCArtboard id="iam-priv" label="C3 · 特權角色審批 · SoD 403 硬阻擋（無例外）· step-up · 核准中間態 · 最後管理員保護" width={W} height={H}><Bare><PA_IamPrivileged theme={th} /></Bare></DCArtboard>
+          <DCArtboard id="iam-review" label="C4 · 存取複核 · 確認/降權/移除/逾期掃描" width={W} height={H}><Bare><PA_IamReview theme={th} /></Bare></DCArtboard>
+          <DCArtboard id="iam-review-create" label="C4 · 建立複核活動抽屜" width={W} height={H}><Bare><PA_IamReview theme={th} create /></Bare></DCArtboard>
+          <DCArtboard id="iam-bg" label="C5 · 緊急破窗申請 · 雙人核准" width={W} height={H}><Bare><PA_IamBreakGlass theme={th} /></Bare></DCArtboard>
+          <DCArtboard id="iam-bg-active" label="C5 · 破窗生效中 · 常駐橫幅（倒數 + 範圍 + 退出）" width={W} height={H}><Bare><PA_IamBreakGlass theme={th} active /></Bare></DCArtboard>
         </DCSection>
 
         <DCSection id="fleet" title="04 · 車隊與法遵 · 多 tab (Q-ADM08/09)">          <DCArtboard id="fleet-vehicles" label="Vehicles" width={W} height={H}><Hero url="/fleet?tab=vehicles"><PA_Fleet theme={th} tab="vehicles" /></Hero></DCArtboard>
