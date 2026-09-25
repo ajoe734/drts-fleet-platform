@@ -21,10 +21,9 @@ import {
   deriveProviderState,
   derivePickerStatus,
   isDispatchReadyAddress,
-  isValidLatitude,
-  isValidLongitude,
   manualCoordinateToAddressPayload,
   resolveAddressPickerLabels,
+  evaluateManualApply,
   serviceabilityTone,
   type AddressMapPickerChange,
   type AddressMapPickerLabels,
@@ -556,48 +555,6 @@ export interface AddressMapRendererProps {
 interface SelectionState {
   address: AddressPayload;
   manualReason: string;
-}
-
-export function evaluateManualApply(
-  manualLat: string,
-  manualLng: string,
-  manualReason: string,
-  requireManualReason: boolean,
-  labels: AddressMapPickerLabels,
-  query: string,
-  selectedAddress: AddressPayload | null,
-  actorId: string | null,
-  surface: GeoResolutionSurface,
-): { error?: string; address?: AddressPayload; reason?: string } {
-  const lat = Number.parseFloat(manualLat);
-  const lng = Number.parseFloat(manualLng);
-  if (!isValidLatitude(lat) || !isValidLongitude(lng)) {
-    return { error: labels.manualInvalid };
-  }
-  if (requireManualReason && manualReason.trim().length === 0) {
-    return { error: labels.manualReasonLabel };
-  }
-  const reason = manualReason.trim() || labels.pinAdjustHint;
-  const address = manualCoordinateToAddressPayload({
-    lat,
-    lng,
-    addressText:
-      query.trim() ||
-      selectedAddress?.address ||
-      `Manual location (${roundCoord(lat)}, ${roundCoord(lng)})`,
-    baseAddress: selectedAddress,
-    addressName: selectedAddress?.addressName ?? null,
-    surface,
-    manualOverrideReason: reason,
-    ...(actorId ? { pinnedByActorId: actorId } : {}),
-    ...(selectedAddress?.geocodeConfidence
-      ? { geocodeConfidence: selectedAddress.geocodeConfidence }
-      : {}),
-  });
-  if (!address) {
-    return { error: labels.manualInvalid };
-  }
-  return { address, reason };
 }
 
 export function AddressMapPicker<TServiceProduct extends string = string>(

@@ -36,7 +36,6 @@ import {
   KpiRow,
   StatusChip,
   buildCanvasTheme,
-  evaluateAddressSubmitGate,
   type AddressMapPairChange,
   type AddressPayload,
   type AddressProviderState,
@@ -60,6 +59,7 @@ import {
   TENANT_CONSOLE_MAP_SURFACE,
   coordinateToDraftString,
   savedAddressToPayload,
+  evaluateTenantSubmitGate,
 } from "@/lib/tenant-address-map";
 
 type BookingCreateActionMap = {
@@ -773,27 +773,6 @@ function EmptyStatePanel({
       </div>
     </div>
   );
-}
-
-export function evaluateTenantSubmitGate(
-  pickupPayload: AddressPayload | null,
-  dropoffPayload: AddressPayload | null,
-  serviceability: ServiceAreaEvaluationResult | null,
-  providerState: AddressProviderState | null,
-) {
-  const baseGate = evaluateAddressSubmitGate({
-    pickup: pickupPayload,
-    dropoff: dropoffPayload,
-    serviceability,
-    providerState,
-  });
-  if (providerState && !providerState.available) {
-    return {
-      blocking: true,
-      code: "provider_outage",
-    };
-  }
-  return baseGate;
 }
 
 export function TenantBookingCreateForm({

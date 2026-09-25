@@ -99,8 +99,8 @@ describe("UI17-MAP-20260924 gate behavior regressions", () => {
   });
 });
 
-import { evaluateTenantSubmitGate } from "../../../apps/tenant-console-web/app/bookings/new/tenant-booking-create-form";
-import { evaluateManualApply } from "../../../packages/ui-web/src/address-map-picker";
+import { evaluateTenantSubmitGate } from "../../../apps/tenant-console-web/lib/tenant-address-map";
+import { evaluateManualApply } from "../../../packages/ui-web/src/address-map-picker-core";
 import { buildCallCenterMapFallbackReview } from "../../../apps/concierge-portal-web/lib/map-booking";
 
 describe("R7b/R7c real component/handler regressions", () => {
