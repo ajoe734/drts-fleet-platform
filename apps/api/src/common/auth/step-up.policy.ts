@@ -108,6 +108,26 @@ const STEP_UP_ROUTE_RULES: readonly StepUpRouteRule[] = [
     ),
   },
   {
+    actionId: "platform:break-glass:activate",
+    description: "Break-glass activation",
+    freshnessWindowMs: 10 * MINUTE_MS,
+    enforcedRealms: ["platform"],
+    matches: regexMatch(
+      "POST",
+      /^platform-admin\/break-glass\/requests\/[^/]+\/activate$/,
+    ),
+  },
+  {
+    actionId: "platform:break-glass:close",
+    description: "Break-glass session close",
+    freshnessWindowMs: 10 * MINUTE_MS,
+    enforcedRealms: ["platform"],
+    matches: regexMatch(
+      "POST",
+      /^platform-admin\/break-glass\/requests\/[^/]+\/close$/,
+    ),
+  },
+  {
     actionId: "platform:partner-entries:create",
     description: "Platform partner entry creation",
     freshnessWindowMs: 10 * MINUTE_MS,
