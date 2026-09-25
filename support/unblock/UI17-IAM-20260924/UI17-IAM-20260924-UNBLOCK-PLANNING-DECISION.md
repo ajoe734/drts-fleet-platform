@@ -396,11 +396,114 @@ backend task scoped above. Superseding recommendation:
   (active) grant expires via TTL — and drop the previously-added invented
   approval-timeout rule/state. This one *can* proceed now, inside existing `write_scopes`."
 
-## Required acceptance mapping (updated)
+## Round 3 — Codex2 reopen on `b25c7b03d8930478b423f1e12282d7fb0bbd49fa` (2026-09-25T06:03:14Z)
+
+Adjacent reviewed candidate: `2190d2d0dc22d088499a817cc9cafa14b946c748` (round 2 above, reviewed
+2026-09-25T05:44:10Z). Reviewer confirmed **UD2 and UD3 from round 2 are fixed** (all four
+break-glass `STEP_UP_ROUTE_RULES` entries now enforce `ops` as well as `platform`; the OpenAPI
+`CreateStepUpProofCommand.actionId` enum now carries `activate`/`close` exactly once each) and
+confirmed the **round-2 UD1 document improvement** (the current-parent R3/R4 gap is correctly
+identified, a backend scope is proposed, active-only TTL semantics are explicit) — none of
+those are reopened; do not re-litigate them. Two things are not reopened as code changes,
+retained here as-is:
+
+- No further code fix is required for UD1; per the reopen, "no additional product code is
+  required to close this remaining helper finding."
+
+### UD1 [P1, repeated — machine-truth routing still not persisted]
+
+The reopen's point (confirmed by re-reading `ai-status.sh show
+UI17-IAM-20260924-UNBLOCK-PLANNING-DECISION` and `ai-status.sh show UI17-IAM-20260924` in this
+worktree): the disposition text in "Disposition for the parent task" above is correct prose,
+but it is **prose only** — it has never been written into this task's `resolved_parent_status` /
+`resolved_parent_next` / `resolved_parent_waiting_for` fields, and no backend follow-up task
+exists yet in the task board (`ai-status.sh list --status backlog|todo` has no
+read-contract/break-glass-read task). `transition_after_merge` →
+`apply_unblock_parent_resolution` (`tools/development-orchestrator/bin/ai_status.py:1092-1176`)
+reads exactly those three task fields (or the `PARENT_*` env vars) at merge time; with neither
+set, it defaults the parent to `todo` with a generic "Unblock resolution complete" message and
+drops `waiting_for` — which would silently re-open Gemini on the parent with the still-unrouted
+R3/R4 gap. This is a repeat of the same trigger condition as round 2's finding, now in its
+second consecutive independent review, per §0.7's two-round threshold.
+
+**Why this worker cannot close it directly:** every CLI path that writes
+`resolved_parent_status`/`resolved_parent_next`/`resolved_parent_waiting_for` onto a task record,
+or that registers a brand-new task on the board, goes through `command_assign`
+(`ai_status.py:1747-1800`, the only caller of `task_metadata_from_env()` /
+`TASK_METADATA_JSON`). None of the owner-permitted commands (`start`, `progress`, `note`,
+`handoff`, `blocker`) touch those fields. `assign` is documented in
+`AI_COLLABORATION_GUIDE.md` §6 as an **Operator/Supervisor** action, and the round-3 reopen
+explicitly says "do not impersonate Supervisor or bypass worker dispatch guards." So this
+worker is recording the exact values below and blocking on Supervisor, rather than running
+`AI_NAME=Supervisor ai-status.sh assign ...` itself.
+
+**Exact values for Supervisor to apply, verbatim, via `assign` before this candidate is
+approved/merged** (matches `apply_unblock_parent_resolution`'s field names exactly):
+
+```bash
+AI_NAME=Supervisor "$STATUS_CLI" assign UI17-IAM-20260924-UNBLOCK-PLANNING-DECISION Claude Codex2 \
+  "Resolve planning blocker for UI17-IAM-20260924"
+# with:
+TASK_METADATA_JSON='{
+  "resolved_parent_status": "blocked",
+  "resolved_parent_waiting_for": "Supervisor",
+  "resolved_parent_next": "Contract/routing status as of UI17-IAM-20260924-UNBLOCK-PLANNING-DECISION round 2/3: (1) R3/R4 original activate/close action-id gap is resolved, incl. ops-realm enforcement and OpenAPI enum sync (Finding A + round-2 UD2/UD3). (2) R1 (privileged-role approval) stays routed as UI-only per Finding B. (3) R3/R4 as most recently reviewed (cross-person grant read/sync; principal/session/grant authority for the active-session banner) need the new backend read-contract task <TASK-ID-TBD-BY-SUPERVISOR, proposed scope below>; do not resume until it lands. (4) R5 (canvas expiry states) can proceed now inside existing write_scopes: depict approved-but-not-activated grants as not auto-expiring; only an activated grant expires via TTL."
+}'
+```
+
+**Proposed backend follow-up task, for Supervisor to register (or map onto an existing scoped
+task if one already covers this)** — restated from round 2's UD1 section for direct
+copy-paste into `assign`:
+
+- Proposed task ID: `UI17-IAM-BREAK-GLASS-READ-CONTRACT-20260925`
+- Proposed owner/reviewer: `Codex` (contracts/schema/state-system lane) / `Codex2` (existing
+  reviewer for this phase's IAM work)
+- Scope (`write_scopes`): `apps/api/src/modules/auth/break-glass.controller.ts`,
+  `apps/api/src/modules/identity/break-glass.service.ts`,
+  `apps/api/src/modules/identity/identity.controller.ts`,
+  `packages/contracts/src/iam-contracts.ts`, `openapi/iam-stage15-contracts-v1.yaml`
+- Depends on: none blocking (independent of `UI17-NOTIFY-CANVAS-20260924`); should land before
+  `UI17-IAM-20260924` resumes the cross-person grant list/sync UI or the session/authority-aware
+  banner
+- Acceptance / regression boundary: add read-only `GET` route(s) for break-glass
+  requests/grants plus authorization rules for who may see a given request (requester, eligible
+  approvers, platform/ops admins); extend `IdentityController.getContext` (or add a new
+  session-context read) with `principalId`/`sessionId`/active-grant summary; additive only —
+  must not change existing mutation authorization, SoD checks, or the step-up enforcement fixed
+  in this document's Finding A / round-2 UD2. Regression must cover: legitimate same-principal
+  active session (visible/active), replaced session (not trusted as active), anonymous/no
+  session (not trusted as active), and **a legitimate `sub != principal` grant** (see evidence
+  correction below) — that case must stay visible/active through the new principal/session read,
+  not be silently cleared.
+
+**Small evidence correction (per round-3 reopen) to round 2's UD1 text at lines ~249-252
+above:** that text says "anonymous, sub!=principal, and session-replacement fixtures all keep
+the local banner 'active'." The reopen points out the latest parent review actually records two
+different behaviors, not one: the new actor-only comparison incorrectly **clears** a legitimate
+`sub != principal` grant's active banner (a false negative — a real grant is hidden from its
+rightful holder), while the anonymous and replaced-session cases **remain shown as active** (a
+false positive — a grant that should no longer be trusted still shows active). This document
+does not correct round 2's original sentence in place (per §0.7, prior rounds are not
+overwritten); this paragraph is the correction of record, and the regression boundary above
+already carries both expected behaviors as separate scenarios for the follow-up task.
+
+**Verification performed this round:** re-read `ai-status.sh show
+UI17-IAM-20260924-UNBLOCK-PLANNING-DECISION` (confirms no `resolved_parent_*` fields present on
+this task) and `ai-status.sh show UI17-IAM-20260924` (confirms parent still `status: blocked`,
+`waiting_for: Claude`, `last_update: 2026-09-25T05:21:30Z`, old generic "verify actual
+API/contract gaps" `next`) and `ai-status.sh list --status backlog|todo` (no read-contract /
+break-glass-read task exists yet) directly in this worktree. Read
+`tools/development-orchestrator/bin/ai_status.py` `apply_unblock_parent_resolution` (:1092-1176)
+and `command_assign` (:1747-1800) / `task_metadata_from_env` (:1018-1040) source to confirm the
+field names and the fact that `assign` is the only command that writes them. No source/product
+code was changed this round — UD2/UD3 fixes from round 2 remain as committed; `git status` in
+this worktree is clean at `b25c7b03d8930478b423f1e12282d7fb0bbd49fa` before this write.
+
+## Required acceptance mapping (updated — round 3)
 
 | Acceptance item | Status |
 | --- | --- |
-| Resolve or route the missing product/contract decision through canonical planning artifacts | Done — round 1 (R3/R4 original activate/close gap, R1, R5-scope-note) plus round 2 (ops-realm step-up bypass fix, OpenAPI enum sync, and explicit routing of the *current* R3/R4 grant-read/session-authority gap to a new standalone backend task) |
-| Record the decision, scope cut, or explicit follow-up needed by the parent task | Done — see "Disposition for the parent task" above (supersedes round 1's) |
-| Produce task-scoped commit/push/PR evidence for any canonical change | Pending — commit/push/handoff follows this write |
-| Update the parent task with the concrete unblocked next step | Pending Supervisor/merge-time `resolved_parent_*` application; text recorded above for that step |
+| Resolve or route the missing product/contract decision through canonical planning artifacts | Done — round 1 (R3/R4 original activate/close gap, R1, R5-scope-note), round 2 (ops-realm step-up bypass fix, OpenAPI enum sync, explicit routing of the *current* R3/R4 grant-read/session-authority gap to a new standalone backend task), round 3 (exact `resolved_parent_*` values and backend follow-up task spec restated for direct Supervisor `assign` use; evidence correction on the sub!=principal banner behavior) |
+| Record the decision, scope cut, or explicit follow-up needed by the parent task | Done — see "Disposition for the parent task" above, refined by round 3's exact `assign`/`TASK_METADATA_JSON` payload |
+| Produce task-scoped commit/push/PR evidence for any canonical change | This round: commit/push follows this write (document-only change, no product code) |
+| Update the parent task with the concrete unblocked next step | Still pending machine-truth application — requires Supervisor `assign` (owner has no CLI path to write `resolved_parent_*` or register a new task; see UD1 above). This worker is setting task status to `blocked`/`waiting_for: Supervisor` after this commit, per the exact values above, rather than re-handing off to Codex2 while the pre-merge routing step is still outstanding. |
