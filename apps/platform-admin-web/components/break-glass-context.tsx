@@ -128,18 +128,15 @@ export function BreakGlassProvider({ children }: { children: ReactNode }) {
   );
 
   const exitSession = useCallback(
-    async (reason = "user_manual_exit") => {
+    async (reason = "user_manual_exit", stepUpRef?: string | null) => {
       if (state.grant?.grantId) {
-        try {
-          await iamClient.closeBreakGlass(state.grant.grantId, {
-            mutation: {
-              reasonCode: reason,
-              expectedVersion: state.grant.version ?? 1,
-            },
-          });
-        } catch {
-          // Proceed with local revocation even if API fails
-        }
+        await iamClient.closeBreakGlass(state.grant.grantId, {
+          mutation: {
+            reasonCode: reason,
+            expectedVersion: state.grant.version ?? 1,
+            stepUpReference: stepUpRef,
+          },
+        });
       }
       sessionStorage.removeItem(STORAGE_KEY);
       setState({ grant: null, accessToken: null, expiresAt: null, sessionBanner: null });
@@ -181,6 +178,7 @@ export function BreakGlassBanner() {
     useBreakGlass();
   const { t } = useTranslation();
   const [exiting, setExiting] = useState(false);
+  const [exitError, setExitError] = useState<string | null>(null);
 
   if (!isBreakGlassActive || !grant) {
     return null;
@@ -194,8 +192,15 @@ export function BreakGlassBanner() {
 
   const handleExit = async () => {
     setExiting(true);
+    setExitError(null);
     try {
       await exitSession("operator_exit_cta");
+    } catch (err: any) {
+      if (err.code === "IAM_STEP_UP_REQUIRED") {
+        setExitError("憑證失效 (IAM_STEP_UP_REQUIRED)，請重新取得或登入 (Fresh MFA) 後重試。");
+      } else {
+        setExitError(err.message || "Failed to close emergency session");
+      }
     } finally {
       setExiting(false);
     }
@@ -282,25 +287,30 @@ export function BreakGlassBanner() {
           </span>
         </div>
 
-        <button
-          type="button"
-          disabled={exiting}
-          onClick={() => void handleExit()}
-          style={{
-            background: ALERT_OPS_ACCENT.light,
-            color: "#FFFFFF",
-            border: `1px solid ${ALERT_DANGER}`,
-            borderRadius: 6,
-            padding: "5px 12px",
-            fontSize: 12,
-            fontWeight: 700,
-            cursor: exiting ? "not-allowed" : "pointer",
-            opacity: exiting ? 0.6 : 1,
-            fontFamily: theme.fontFamily,
-          }}
-        >
-          {exiting ? "Exiting…" : "Exit Emergency Access"}
-        </button>
+        <div style={{ display: "flex", flexDirection: "column", gap: 4, alignItems: "flex-end" }}>
+          <button
+            type="button"
+            disabled={exiting}
+            onClick={() => void handleExit()}
+            style={{
+              background: ALERT_OPS_ACCENT.light,
+              color: "#FFFFFF",
+              border: `1px solid ${ALERT_DANGER}`,
+              borderRadius: 6,
+              padding: "5px 12px",
+              fontSize: 12,
+              fontWeight: 700,
+              cursor: exiting ? "not-allowed" : "pointer",
+              opacity: exiting ? 0.6 : 1,
+              fontFamily: theme.fontFamily,
+            }}
+          >
+            {exiting ? "Exiting…" : "Exit Emergency Access"}
+          </button>
+          {exitError && (
+            <span style={{ color: "#FFD700", fontSize: 11, fontWeight: 600 }}>{exitError}</span>
+          )}
+        </div>
       </div>
     </div>
   );

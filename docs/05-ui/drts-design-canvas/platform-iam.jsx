@@ -206,35 +206,35 @@ function PA_IamReview({ theme:th, create }) {
     </IamShell>
   );
 }
-// C5 · 緊急破窗（申請 → 雙人核准 → 啟用 → 短效權杖）
+// C5 · 緊急破窗（申請 → 單人核准 → 啟用 → 短效權杖）
 function PA_IamBreakGlass({ theme:th, active }) {
   return (
     <IamShell theme={th} tab="breakglass" breakglass={active}>
       <div style={{ padding:24, display:'grid', gridTemplateColumns:'1.3fr 1fr', gap:16, alignItems:'start' }}>
         <div style={{ display:'flex', flexDirection:'column', gap:16 }}>
-          <Card theme={th} title={active?'BG-20260924-003 · 已啟用':'申請緊急破窗'} subtitle="雙人核准 · 上限 60 分鐘 · 全程稽核">
-            <div style={{ marginBottom:14 }}><Stepper theme={th} current={active?3:0} steps={['申請','第一人核准','第二人核准','啟用 · 發放短效權杖']}/></div>
+          <Card theme={th} title={active?'BG-20260924-003 · 已啟用':'申請緊急破窗'} subtitle="單人核准 · 上限 60 分鐘 · 全程稽核">
+            <div style={{ marginBottom:14 }}><Stepper theme={th} current={active?3:0} steps={['申請','核准','啟用 · 發放短效權杖']}/></div>
             {active
               ? <>
                 <DL theme={th} cols={2} items={[
-                  { k:'申請人', v:'駱思賢' },{ k:'核准', v:'林安全 · 陳稽核' },
+                  { k:'申請人', v:'駱思賢' },{ k:'核准', v:'林安全' },
                   { k:'啟用時間', v:'09-24 10:18:33 +08', mono:true },{ k:'到期', v:'11:18:33 · 剩 41:27', mono:true },
-                  { k:'短效權杖', v:<span style={{ fontFamily:SHELL_MONO }}>bgt_••••••••••••9e2f <Pill theme={th} tone="neutral">僅顯示一次</Pill></span> },{ k:'已授權範圍', v:'tenant:write · billing:read · audit:read', mono:true },
+                  { k:'短效權杖', v:<span style={{ fontFamily:SHELL_MONO }}>bgt_••••••••••••9e2f <Pill theme={th} tone="neutral">僅顯示一次</Pill></span> },{ k:'已授權範圍', v:'identity:read · security:audit:read', mono:true },
                 ]}/>
                 <div style={{ marginTop:12, display:'flex', gap:8 }}><Btn theme={th} variant="secondary" danger icon="x">提前退出破窗</Btn><Btn theme={th} icon="audit">檢視稽核紀錄</Btn></div>
               </>
               : <>
                 <Field theme={th} label="事故 / 理由" required><Input theme={th} value="INC-20260924-07 · 租戶帳務凍結需緊急解除"/></Field>
-                <Field theme={th} label="申請範圍" required><div style={{ display:'flex', gap:7, flexWrap:'wrap' }}><Checkbox theme={th} on label="tenant:write"/><Checkbox theme={th} on label="billing:read"/><Checkbox theme={th} on label="audit:read"/><Checkbox theme={th} label="iam:write"/></div></Field>
+                <Field theme={th} label="申請範圍" required><div style={{ display:'flex', gap:7, flexWrap:'wrap' }}><Checkbox theme={th} on label="identity:read"/><Checkbox theme={th} on label="security:audit:read"/><Checkbox theme={th} label="identity:sessions:revoke"/></div></Field>
                 <Field theme={th} label="持續時間（≤ 60 分鐘）" required><Input theme={th} value="60 分鐘" mono/></Field>
-                <Field theme={th} label="核准人（需兩位，不含本人）" required><div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:10 }}><Select theme={th} value="林安全 · security_officer"/><Select theme={th} value="陳稽核 · auditor"/></div></Field>
+                <Field theme={th} label="stepUpReference（送出申請亦需）" required hint="尚未取得 · 送出前先完成 step-up"><Input theme={th} value="—" mono readOnly/></Field>
                 <ActionButton theme={th} descriptor={{ action:'request_breakglass', enabled:true, riskLevel:'high', requiresReason:true }} variant="primary" icon="incidents" label="送出破窗申請" en="request"/>
               </>}
           </Card>
         </div>
         <Card theme={th} title="破窗規則">
           <div style={{ display:'flex', flexDirection:'column', gap:8, fontSize:12 }}>
-            {['授權時間上限 60 分鐘，不可延長，需重新申請','需兩位非本人核准者','啟用期間外殼常駐紅色橫幅（倒數 + 範圍 + 退出）','所有動作標記 break_glass 進入稽核','到期或退出即撤銷短效權杖'].map((t,i)=><div key={i} style={{ display:'flex', gap:8 }}><MgmtIcon name="check" size={13} style={{ color:th.success, marginTop:1 }}/><span>{t}</span></div>)}
+            {['授權時間上限 60 分鐘，不可延長，需重新申請','需一位非本人核准者','啟用期間外殼常駐紅色橫幅（倒數 + 範圍 + 退出）','所有動作標記 break_glass 進入稽核','到期或退出即撤銷短效權杖'].map((t,i)=><div key={i} style={{ display:'flex', gap:8 }}><MgmtIcon name="check" size={13} style={{ color:th.success, marginTop:1 }}/><span>{t}</span></div>)}
           </div>
         </Card>
       </div>
