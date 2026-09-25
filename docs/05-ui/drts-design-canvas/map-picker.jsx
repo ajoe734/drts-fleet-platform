@@ -61,7 +61,7 @@ function MapPicker({ theme:th, label='上車地點', state='selected', value, co
         {state==='provider_down' && <div style={{ position:'absolute', inset:0, display:'flex', alignItems:'center', justifyContent:'center', background:'rgba(255,255,255,.55)', fontSize:12, fontWeight:700, color:c.danger }}>地圖服務暫時無回應</div>}
         {state==='selected' && <div style={{ position:'absolute', left:8, bottom:6, fontSize:10, fontFamily:c.mono, color:c.muted, background:c.surface, padding:'2px 6px', borderRadius:4 }}>{coordinateData || '25.0330, 121.5654'} · 可拖曳微調</div>}
         {state==='manual_coords' && <div style={{ position:'absolute', left:8, bottom:6, fontSize:10, color:c.warn, background:c.surface, padding:'2px 6px', borderRadius:4 }}>未經地址解析 · 請核對位置</div>}
-        {(state==='selected'||state==='manual_coords') && <div style={{ position:'absolute', right:8, bottom:6, fontSize:9.5, fontFamily:c.mono, color:c.dim, background:c.surface, padding:'2px 6px', borderRadius:4 }}>↑↓←→ 1 m · Shift 10 m · Enter 確認</div>}
+        {(state==='selected'||state==='manual_coords') && <div style={{ position:'absolute', right:8, bottom:6, fontSize:9.5, fontFamily:c.mono, color:c.dim, background:c.surface, padding:'2px 6px', borderRadius:4 }}>↑↓←→ 依縮放微調 · Shift 4×</div>}
       </div>
       {showReason && (
         <div style={{ display:'flex', alignItems:'center', gap:8, padding:'7px 10px', borderTop:'1px solid '+c.line, background:c.lo }}>

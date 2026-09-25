@@ -16,7 +16,7 @@ function MP_StatesBoard({ theme:th }) {
 function TN_NewBookingMap({ theme:th, degraded, pick, drop, reason }) {
   const ps = degraded?'provider_down':(pick||'selected'), ds = degraded?'provider_down':(drop||'selected');
   const HARD = ['out_of_area', 'provider_down'];                                   // 服務範圍外或地圖服務中斷：任何路徑皆不可送
-  const UNRESOLVED = ['no_results','empty','searching','candidates']; // 尚未定點：不可送
+  const UNRESOLVED = ['no_results','empty','searching','candidates','missing_coordinate']; // 尚未定點：不可送
   const MANUAL = ['manual_review']; // 走人工複核 (僅限手動座標帶理由)
   
   // 檢查是否有 manual_coords 並帶有理由
@@ -25,9 +25,9 @@ function TN_NewBookingMap({ theme:th, degraded, pick, drop, reason }) {
   
   const hardBlocked = HARD.includes(ps) || HARD.includes(ds);
   const unresolved = UNRESOLVED.includes(ps) || UNRESOLVED.includes(ds);
-  const manualPath = MANUAL.includes(ps) || MANUAL.includes(ds) || hasManualCoords;
+  const manualPath = MANUAL.includes(ps) || MANUAL.includes(ds);
   const manualReady = manualPath && !hardBlocked && !unresolved && reasonValid;   // 有地址文字＋理由即可送人工複核
-  const normalReady = !manualPath && !hardBlocked && !unresolved;
+  const normalReady = !manualPath && !hardBlocked && !unresolved && (!hasManualCoords || reasonValid);
   return (
     <Shell theme={th} nav={TN_NAV} active="new" breadcrumb={['訂單','新增']} env="production" tenant="YAMATO" actor={TN_ACTOR} health={TN_HEALTH} refreshTier="manual">
       <PageHeader theme={th} title="建立叫車" subtitle="代訂或本人 · 預約 / 即時 · 同步 command (Q-TEN04) · 上下車改為成對地址選點"
@@ -119,8 +119,8 @@ function PB_BookCardMap({ state='selected', drop='selected', reason }) {
   const unresolved = ['no_results','empty','searching','candidates'].some(s=>s===state||s===drop);
   const manualPath = ['provider_down','manual_review'].some(s=>s===state||s===drop);
   const down = state==='provider_down' || drop==='provider_down';
-  const blocked = manualPath && !hard && !unresolved && (reason !== '');
-  const notReady = hard || unresolved || (manualPath && reason === '');
+  const blocked = manualPath && !hard && !unresolved && ((reason || '').trim() !== '');
+  const notReady = hard || unresolved || (manualPath && (reason || '').trim() === '');
   return (
     <PBScreen p={p}>
       <PBHeader p={p} title="建立行程" sub="信用卡機場接送 · 桃園 T2" back/>
@@ -151,6 +151,7 @@ function PB_BookCardMap({ state='selected', drop='selected', reason }) {
       <PBFooter>{notReady
           ? <PBBtn p={p} disabled>{hard?'不在服務範圍 · 請更換地點':'請先選定上下車地點'}</PBBtn>
         : blocked
+        ? <PBBtn p={p} primary>送交人工複核</PBBtn>
         : <PBBtn p={p} primary>前往確認</PBBtn>}</PBFooter>
     </PBScreen>
   );
@@ -163,8 +164,8 @@ function PB_BookInsuranceMap({ state='selected', drop='selected', reason }) {
   const unresolved = ['no_results','empty','searching','candidates'].some(s=>s===state||s===drop);
   const manualPath = ['provider_down','manual_review'].some(s=>s===state||s===drop);
   const down = state==='provider_down' || drop==='provider_down';
-  const blocked = manualPath && !hard && !unresolved && (reason !== '');
-  const notReady = hard || unresolved || (manualPath && reason === '');
+  const blocked = manualPath && !hard && !unresolved && ((reason || '').trim() !== '');
+  const notReady = hard || unresolved || (manualPath && (reason || '').trim() === '');
 
   return (
     <PBScreen p={p}>
@@ -219,8 +220,8 @@ function PB_BookTravelMap({ state='selected', drop='selected', reason }) {
   const unresolved = ['no_results','empty','searching','candidates'].some(s=>s===state||s===drop);
   const manualPath = ['provider_down','manual_review'].some(s=>s===state||s===drop);
   const down = state==='provider_down' || drop==='provider_down';
-  const blocked = manualPath && !hard && !unresolved && (reason !== '');
-  const notReady = hard || unresolved || (manualPath && reason === '');
+  const blocked = manualPath && !hard && !unresolved && ((reason || '').trim() !== '');
+  const notReady = hard || unresolved || (manualPath && (reason || '').trim() === '');
 
   return (
     <PBScreen p={p}>
@@ -280,9 +281,9 @@ const CG_ACTOR = { name:'CH', display:'周禮賓', role:'concierge_agent' };
 function CG_NewBookingMap({ theme:th, degraded, drop, pick, success, reason, backendError }) {
   const ps = degraded?'provider_down':(pick||'selected');
   const ds = degraded?'provider_down':(drop||'candidates');
-  const HARD = ['out_of_area', 'provider_down'];
-  const UNRESOLVED = ['no_results','empty','searching','candidates'];
-  const MANUAL = ['manual_review'];
+  const HARD = ['out_of_area'];
+  const UNRESOLVED = ['no_results','empty','searching','candidates','missing_coordinate'];
+  const MANUAL = ['manual_review', 'provider_down'];
   
   const hasManualCoords = ps === 'manual_coords' || ds === 'manual_coords';
   const reasonValid = (reason || '').trim() !== '';
@@ -290,8 +291,8 @@ function CG_NewBookingMap({ theme:th, degraded, drop, pick, success, reason, bac
   const hard = HARD.includes(ps) || HARD.includes(ds);
   const unresolved = UNRESOLVED.includes(ps) || UNRESOLVED.includes(ds);
   const manualPath = MANUAL.includes(ps) || MANUAL.includes(ds) || hasManualCoords;
-  const manualReady = manualPath && !hard && !unresolved && reasonValid;
-  const normalReady = !manualPath && !hard && !unresolved;
+  const manualReady = manualPath && !hard && !unresolved && (!hasManualCoords || reasonValid);
+  const normalReady = !manualPath && !hard && !unresolved && (!hasManualCoords || reasonValid);
   return (
     <Shell theme={th} nav={CG_NAV} active="new" breadcrumb={['禮賓','建立叫車']} env="production" tenant="GRAND HOTEL" actor={CG_ACTOR} health={TN_HEALTH} refreshTier="manual">
       <div style={{ padding:'26px 24px 18px', background:'linear-gradient(135deg,'+th.accentBg+','+th.surface+')', borderBottom:'1px solid '+th.border }}>
