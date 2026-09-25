@@ -79,3 +79,60 @@ describe('UI17-MAP-20260924 gate behavior regressions', () => {
     expect(gate.code).toBe('ready');
   });
 });
+
+import { evaluateTenantSubmitGate } from '../../../apps/tenant-console-web/app/bookings/new/tenant-booking-create-form';
+import { evaluateManualApply } from '../../../packages/ui-web/src/address-map-picker';
+import { buildCallCenterMapFallbackReview } from '../../../apps/concierge-portal-web/lib/map-booking';
+
+describe('R7b/R7c real component/handler regressions', () => {
+  const validAddress = {
+    address: 'Taipei 101',
+    coordinateSource: 'provider_candidate' as const,
+    lat: 25.0330,
+    lng: 121.5654,
+  };
+  
+  test('evaluateTenantSubmitGate: blocks on provider outage regardless of pins', () => {
+    const gate = evaluateTenantSubmitGate(
+      validAddress as any,
+      validAddress as any,
+      { decision: 'serviceable', reasonCodes: ['ok'] } as any,
+      { available: false, degraded: true, reasonCode: 'provider_unhealthy' }
+    );
+    expect(gate.blocking).toBe(true);
+    expect(gate.code).toBe('provider_outage');
+  });
+
+  test('evaluateManualApply: rejects invalid lat/lng and blank reason', () => {
+    const labels = { manualInvalid: 'Invalid', manualReasonLabel: 'Reason required', pinAdjustHint: 'Pin adjusted' } as any;
+    
+    // Invalid lat
+    expect(evaluateManualApply('NaN', '121.5', 'reason', true, labels, '', null, 'A1', 'tenant').error).toBe('Invalid');
+    
+    // Blank reason
+    expect(evaluateManualApply('25.0', '121.5', '   ', true, labels, '', null, 'A1', 'tenant').error).toBe('Reason required');
+    
+    // Valid
+    const valid = evaluateManualApply('25.0', '121.5', '   reason   ', true, labels, 'Query', null, 'A1', 'tenant');
+    expect(valid.error).toBeUndefined();
+    expect(valid.address?.manualOverrideReason).toBe('reason');
+    expect(valid.reason).toBe('reason');
+  });
+
+  test('buildCallCenterMapFallbackReview: explicitly allows fallback on outage with pins, but blocks outside/missing', () => {
+    // Normal fallback
+    const fallback = buildCallCenterMapFallbackReview({
+      submitGate: { blocking: false, code: 'dispatch_manual_review_required' },
+      providerState: { available: false, degraded: true, reasonCode: 'provider_unhealthy' }
+    });
+    expect(fallback).not.toBeNull();
+    expect(fallback?.providerDownFallback).toBe(true);
+    
+    // Blocked by outside (which evaluates as blocking: true from submitGate)
+    const blockedFallback = buildCallCenterMapFallbackReview({
+      submitGate: { blocking: true, code: 'outside_service_area' },
+      providerState: { available: false, degraded: true, reasonCode: 'provider_unhealthy' }
+    });
+    expect(blockedFallback).toBeNull(); // Because the gate is blocking, we don't proceed to fallback review
+  });
+});

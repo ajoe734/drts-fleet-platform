@@ -558,6 +558,50 @@ interface SelectionState {
   manualReason: string;
 }
 
+
+
+export function evaluateManualApply(
+  manualLat: string,
+  manualLng: string,
+  manualReason: string,
+  requireManualReason: boolean,
+  labels: AddressMapPickerLabels,
+  query: string,
+  selectedAddress: AddressPayload | null,
+  actorId: string,
+  surface: string
+): { error?: string; address?: AddressPayload; reason?: string } {
+  const lat = Number.parseFloat(manualLat);
+  const lng = Number.parseFloat(manualLng);
+  if (!isValidLatitude(lat) || !isValidLongitude(lng)) {
+    return { error: labels.manualInvalid };
+  }
+  if (requireManualReason && manualReason.trim().length === 0) {
+    return { error: labels.manualReasonLabel };
+  }
+  const reason = manualReason.trim() || labels.pinAdjustHint;
+  const address = manualCoordinateToAddressPayload({
+    lat,
+    lng,
+    addressText:
+      query.trim() ||
+      selectedAddress?.address ||
+      `Manual location (${roundCoord(lat)}, ${roundCoord(lng)})`,
+    baseAddress: selectedAddress,
+    addressName: selectedAddress?.addressName ?? null,
+    surface,
+    manualOverrideReason: reason,
+    pinnedByActorId: actorId,
+    ...(selectedAddress?.geocodeConfidence
+      ? { geocodeConfidence: selectedAddress.geocodeConfidence }
+      : {}),
+  });
+  if (!address) {
+    return { error: labels.manualInvalid };
+  }
+  return { address, reason };
+}
+
 export function AddressMapPicker<TServiceProduct extends string = string>(
   props: AddressMapPickerProps<TServiceProduct>,
 ) {
@@ -766,40 +810,26 @@ export function AddressMapPicker<TServiceProduct extends string = string>(
   );
 
   const handleManualApply = useCallback(() => {
-    const lat = Number.parseFloat(manualLat);
-    const lng = Number.parseFloat(manualLng);
-    if (!isValidLatitude(lat) || !isValidLongitude(lng)) {
-      setManualError(labels.manualInvalid);
+    const result = evaluateManualApply(
+      manualLat,
+      manualLng,
+      manualReason,
+      requireManualReason,
+      labels,
+      query,
+      selectedAddress,
+      actorId,
+      surface
+    );
+    if (result.error) {
+      setManualError(result.error);
       return;
     }
-    if (requireManualReason && manualReason.trim().length === 0) {
-      setManualError(labels.manualReasonLabel);
-      return;
+    if (result.address) {
+      setManualError(null);
+      applySelection(result.address, result.reason || "");
+      runServiceability(result.address);
     }
-    const reason = manualReason.trim() || labels.pinAdjustHint;
-    const address = manualCoordinateToAddressPayload({
-      lat,
-      lng,
-      addressText:
-        query.trim() ||
-        selectedAddress?.address ||
-        `Manual location (${roundCoord(lat)}, ${roundCoord(lng)})`,
-      baseAddress: selectedAddress,
-      addressName: selectedAddress?.addressName ?? null,
-      surface,
-      manualOverrideReason: reason,
-      pinnedByActorId: actorId,
-      ...(selectedAddress?.geocodeConfidence
-        ? { geocodeConfidence: selectedAddress.geocodeConfidence }
-        : {}),
-    });
-    if (!address) {
-      setManualError(labels.manualInvalid);
-      return;
-    }
-    setManualError(null);
-    applySelection(address, reason);
-    runServiceability(address);
   }, [
     actorId,
     applySelection,

@@ -775,6 +775,27 @@ function EmptyStatePanel({
   );
 }
 
+export function evaluateTenantSubmitGate(
+  pickupPayload: AddressPayload | null,
+  dropoffPayload: AddressPayload | null,
+  serviceability: ServiceabilityResult | null,
+  providerState: ProviderState | null
+) {
+  const baseGate = evaluateAddressSubmitGate({
+    pickup: pickupPayload,
+    dropoff: dropoffPayload,
+    serviceability,
+    providerState,
+  });
+  if (providerState && !providerState.available) {
+    return {
+      blocking: true,
+      code: "provider_outage",
+    };
+  }
+  return baseGate;
+}
+
 export function TenantBookingCreateForm({
   passengers,
   addresses,
@@ -953,21 +974,7 @@ export function TenantBookingCreateForm({
       (entry): entry is { href: string; link: CrossAppResourceLink } =>
         entry.href != null,
     );
-  const submitGate = (() => {
-    const baseGate = evaluateAddressSubmitGate({
-      pickup: pickupPayload,
-      dropoff: dropoffPayload,
-      serviceability,
-      providerState,
-    });
-    if (providerState && !providerState.available) {
-      return {
-        blocking: true,
-        code: "provider_outage",
-      };
-    }
-    return baseGate;
-  })();
+  const submitGate = evaluateTenantSubmitGate(pickupPayload, dropoffPayload, serviceability, providerState);
 
   const submitDisabled =
     submitting ||

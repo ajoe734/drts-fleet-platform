@@ -14,8 +14,8 @@ function MP_StatesBoard({ theme:th }) {
 }
 // ── 租戶線：訂車建立（兩欄保留，左行程卡 / 右審核卡，上下車換成成對選點） ──
 function TN_NewBookingMap({ theme:th, degraded, pick, drop, reason }) {
-  const ps = degraded?'provider_down':(pick||'selected'), ds = degraded?'provider_down':(drop||'selected');
-  const HARD = ['out_of_area', 'provider_down'];                                   // 服務範圍外或地圖服務中斷：任何路徑皆不可送
+  const ps = pick||'selected', ds = drop||'selected';
+  const HARD = ['out_of_area'];                                   // 服務範圍外：任何路徑皆不可送
   const UNRESOLVED = ['no_results','empty','searching','candidates','missing_coordinate']; // 尚未定點：不可送
   const MANUAL = ['manual_review']; // 走人工複核 (僅限手動座標帶理由)
 
@@ -23,7 +23,7 @@ function TN_NewBookingMap({ theme:th, degraded, pick, drop, reason }) {
   const hasManualCoords = ps === 'manual_coords' || ds === 'manual_coords';
   const reasonValid = (reason || '').trim() !== '';
 
-  const hardBlocked = HARD.includes(ps) || HARD.includes(ds);
+  const hardBlocked = degraded || HARD.includes(ps) || HARD.includes(ds); // 租戶遇中斷直接阻擋
   const unresolved = UNRESOLVED.includes(ps) || UNRESOLVED.includes(ds);
   const manualPath = MANUAL.includes(ps) || MANUAL.includes(ds);
   const manualReady = manualPath && !hardBlocked && !unresolved && reasonValid;   // 有地址文字＋理由即可送人工複核
@@ -44,8 +44,8 @@ function TN_NewBookingMap({ theme:th, degraded, pick, drop, reason }) {
             <Field theme={th} label="已存下車點"><Select theme={th} value={ds==='selected' ? '桃園機場 第二航廈 出境大廳' : '-- 自行搜尋或地圖選點 --'} /></Field>
           </div>
           <div style={{ display:'flex', flexDirection:'column', gap:10, marginBottom:14 }}>
-            <MapPicker theme={th} label="上車" state={ps} value={ps==='empty'?'':undefined} requiresReason={manualPath} reason={reason}/>
-            <MapPicker theme={th} label="下車" state={ds} value={ds==='empty'?'':(ds==='no_results'?'桃園機場 第三航廈':'桃園機場 第二航廈 出境大廳')} requiresReason={manualPath} reason={reason}/>
+            <MapPicker theme={th} label="上車" state={degraded ? 'provider_down' : ps} value={ps==='empty'?'':undefined} requiresReason={manualPath} reason={reason}/>
+            <MapPicker theme={th} label="下車" state={degraded ? 'provider_down' : ds} value={ds==='empty'?'':(ds==='no_results'?'桃園機場 第三航廈':'桃園機場 第二航廈 出境大廳')} requiresReason={manualPath} reason={reason}/>
             {(ps==='out_of_area'||ds==='out_of_area') && <Banner theme={th} tone="danger" icon="warn" title="有地點不在服務範圍 · 無法送出" body="請更換該地點；不可提交人工複核繞過服務範圍。"/>}
             {ds==='no_results' && <Banner theme={th} tone="warn" icon="info" title="下車查無結果 · 復原路徑" body="換關鍵字重搜，或改用手動座標（需填理由，落點將轉人工複核）。"/>}
           </div>
@@ -285,18 +285,19 @@ const CG_NAV = [
 ];
 const CG_ACTOR = { name:'CH', display:'周禮賓', role:'concierge_agent' };
 function CG_NewBookingMap({ theme:th, degraded, drop, pick, success, reason, backendError }) {
-  const ps = degraded?'provider_down':(pick||'selected');
-  const ds = degraded?'provider_down':(drop||'candidates');
+  const ps = pick||'selected';
+  const ds = drop||'candidates';
   const HARD = ['out_of_area'];
   const UNRESOLVED = ['no_results','empty','searching','candidates','missing_coordinate'];
-  const MANUAL = ['manual_review', 'provider_down'];
+  const MANUAL = ['manual_review'];
 
   const hasManualCoords = ps === 'manual_coords' || ds === 'manual_coords';
   const reasonValid = (reason || '').trim() !== '';
 
   const hard = HARD.includes(ps) || HARD.includes(ds);
   const unresolved = UNRESOLVED.includes(ps) || UNRESOLVED.includes(ds);
-  const manualPath = MANUAL.includes(ps) || MANUAL.includes(ds);
+  // Degraded forces manual review path for concierge
+  const manualPath = degraded || MANUAL.includes(ps) || MANUAL.includes(ds);
   const manualReady = manualPath && !hard && !unresolved && (!hasManualCoords || reasonValid);
   const normalReady = !manualPath && !hard && !unresolved && (!hasManualCoords || reasonValid);
   return (
@@ -315,8 +316,8 @@ function CG_NewBookingMap({ theme:th, degraded, drop, pick, success, reason, bac
             <Field theme={th} label="用車時間" required><Input theme={th} value="今日 15:30" mono/></Field>
           </div>
           <div style={{ display:'flex', flexDirection:'column', gap:10, marginBottom:14 }}>
-            <MapPicker theme={th} label="上車" state={ps} value="圓山大飯店 正門車道" requiresReason={manualPath} reason={reason}/>
-            <MapPicker theme={th} label="下車" state={ds} value={ds==='out_of_area'?'宜蘭縣頭城鎮濱海路 12 號':'松山機場'} requiresReason={manualPath} reason={reason}/>
+            <MapPicker theme={th} label="上車" state={degraded ? 'provider_down' : ps} value="圓山大飯店 正門車道" requiresReason={manualPath} reason={reason}/>
+            <MapPicker theme={th} label="下車" state={degraded ? 'provider_down' : ds} value={ds==='out_of_area'?'宜蘭縣頭城鎮濱海路 12 號':'松山機場'} requiresReason={manualPath} reason={reason}/>
             {ds==='out_of_area' && <Banner theme={th} tone="danger" icon="warn" title="下車地點不在服務範圍" body="無法建立叫車；請與賓客確認其他地點。"/>}
           </div>
           <Field theme={th} label="車型偏好"><Select theme={th} value="商務轎車"/></Field>
