@@ -12,11 +12,11 @@
   - **Status**: UNVERIFIED (Awaiting CI)
   - **Reason**: i18n text mapped via delivered/pending states, correctly reporting backend states. UI component tests skipped/unperformed locally; awaits CI and browser testing.
 
-## Handoff Evidence (Gemini2 - Round 2)
+## Handoff Evidence (Gemini - Round 4)
 
 - **Candidate Branch**: gemini/sr-partner-notify-ui-20260924-canvas
 - **Hosted CI Evidence**:
-  - CI: Awaiting PR trigger. No current-candidate CI evidence for `REVIEWED_SHA=388b4bb00be72ccb050b2b6cd45bf6eaeb5b3525`. Previous UI tests locally skipped (`UNPERFORMED`) because local PG DB is not running.
+  - CI: Awaiting PR trigger. No current-candidate CI evidence for `CANDIDATE_SHA=f2a2694dff341c86648f18ae77c9c6e47eba2dd8`. Previous UI tests locally skipped (`UNPERFORMED`) because local PG DB is not running.
   - UI Testing: RTL tests were not present in previous builds; UI tests remain pending design completion and CI checks.
 - **Local Evidence**:
   - `pnpm exec tsc -p apps/platform-admin-web/tsconfig.json --noEmit`: Exit 0
