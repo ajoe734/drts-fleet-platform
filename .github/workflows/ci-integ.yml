@@ -520,8 +520,60 @@ jobs:
           pnpm exec playwright install --with-deps chromium
           pnpm exec playwright test -c playwright.deterministic-route-suite.config.ts
 
+  ui-map-e2e:
+    needs: [candidate, changes]
+    if: needs.candidate.outputs.run_full_ci == 'true' && needs.changes.outputs.e2e == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    services:
+      postgres:
+        image: postgis/postgis:16-3.4
+        env:
+          POSTGRES_DB: drts_fleet_platform
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      DATABASE_URL: postgresql://postgres:postgres@localhost:5432/drts_map_suite
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with: { version: 10.33.0, run_install: false }
+      - uses: actions/setup-node@v4
+        with:
+          {
+            node-version: 22,
+            cache: pnpm,
+            cache-dependency-path: pnpm-lock.yaml,
+          }
+      - run: pnpm install --frozen-lockfile
+      - name: Build API
+        run: pnpm --filter @drts/api build
+      - name: Run deterministic map UI suite
+        run: |
+          PGPASSWORD=postgres psql \
+            postgresql://postgres:postgres@localhost:5432/postgres \
+            -v ON_ERROR_STOP=1 \
+            -c 'DROP DATABASE IF EXISTS drts_map_suite;' \
+            -c 'CREATE DATABASE drts_map_suite;'
+          pnpm db:migrate
+          pnpm db:seed
+          sudo find /etc/apt/sources.list.d -maxdepth 1 -type f \
+            \( -iname "*google*" -o -iname "*chrome*" \) \
+            -exec mv "{}" "{}.disabled" \; || true
+          pnpm exec playwright install --with-deps chromium
+          pnpm exec playwright test -c playwright.tenant-map-booking.config.ts
+          pnpm exec playwright test -c playwright.concierge-map-booking.config.ts
+          pnpm exec playwright test -c playwright.partner-booking-surfaces.config.ts
+
   e2e:
-    needs: [candidate, changes, cross-surface-e2e, ui-route-e2e]
+    needs: [candidate, changes, cross-surface-e2e, ui-route-e2e, ui-map-e2e]
     runs-on: ubuntu-latest
     timeout-minutes: 10
     if: always()
@@ -533,7 +585,7 @@ jobs:
             exit 0
           fi
           [ '${{ needs.changes.result }}' = 'success' ] || { echo "changes gate failed"; exit 1; }
-          for result in '${{ needs.cross-surface-e2e.result }}' '${{ needs.ui-route-e2e.result }}'; do
+          for result in '${{ needs.cross-surface-e2e.result }}' '${{ needs.ui-route-e2e.result }}' '${{ needs.ui-map-e2e.result }}'; do
             case "$result" in
               success) ;;
               skipped) echo "E2E skipped: no changed path can exercise it." ;;
