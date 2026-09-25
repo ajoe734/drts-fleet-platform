@@ -41,6 +41,30 @@ const DROPOFF_CANDIDATE = {
   accuracyM: 5,
 };
 
+test.beforeEach(async ({ context, request, baseURL }) => {
+  if (baseURL) {
+    const res = await request.post("http://127.0.0.1:3301/api/auth/token", {
+      headers: {
+        "x-actor-type": "tenant_admin",
+        "x-tenant-id": "S0002",
+        "x-realm": "tenant",
+      },
+    });
+    if (res.ok()) {
+      const { token } = await res.json();
+      if (token) {
+        await context.addCookies([
+          {
+            name: "drts_tenant_session",
+            value: token,
+            url: baseURL,
+          },
+        ]);
+      }
+    }
+  }
+});
+
 function serviceabilityResult(
   decision: "serviceable" | "not_serviceable",
   reason: string,
@@ -116,7 +140,10 @@ async function pinBothStops(page: Page) {
   const searchInputs = page.getByLabel("Search address");
   // Pickup is the first picker, drop-off the second (pair picker DOM order).
   await searchInputs.first().fill("Taipei 101");
-  await page.getByRole("button", { name: /Search/ }).first().click();
+  await page
+    .getByRole("button", { name: /Search/ })
+    .first()
+    .click();
   await page
     .getByRole("button", {
       name: /Taipei 101[\s\S]*exact/i,
@@ -125,7 +152,10 @@ async function pinBothStops(page: Page) {
     .click();
 
   await searchInputs.last().fill("Airport");
-  await page.getByRole("button", { name: /Search/ }).last().click();
+  await page
+    .getByRole("button", { name: /Search/ })
+    .last()
+    .click();
   await page
     .getByRole("button", {
       name: /Taoyuan Airport T1[\s\S]*exact/i,
@@ -167,14 +197,16 @@ test.describe("tenant console booking map alignment", () => {
     await expect(submit).toBeDisabled();
   });
 
-  test("degraded map provider warns but allows service-area submission", async ({ page }) => {
+  test("degraded map provider warns but allows service-area submission", async ({
+    page,
+  }) => {
     await stubGeoProvider(page, "serviceable");
     await page.route("**/api/geo/health", (route) =>
       route.fulfill({
         json: { provider: "mock", mode: "mock", status: "degraded" },
-      })
+      }),
     );
-    
+
     // Intercept submission to check payload
     let submitPayload = null;
     await page.route("**/api/bookings", async (route) => {
@@ -188,31 +220,42 @@ test.describe("tenant console booking map alignment", () => {
 
     await page.goto("/bookings/new");
     await pinBothStops(page);
-    await expect(page.getByText("Inside the service area", { exact: false })).toBeVisible();
-    
+    await expect(
+      page.getByText("Inside the service area", { exact: false }),
+    ).toBeVisible();
+
     // Check degraded CTA
-    const submitBtn = page.getByRole("button", { name: /Submit manual review/ });
+    const submitBtn = page.getByRole("button", {
+      name: /Submit manual review/,
+    });
     await expect(submitBtn).toBeVisible();
     await expect(submitBtn).toBeEnabled();
     await submitBtn.click();
-    
+
     // Wait for payload
     await page.waitForTimeout(500); // give time for route
     expect(submitPayload).toBeTruthy();
     expect(submitPayload!.mapFallbackReview).toMatchObject({
       providerAvailable: true,
-      providerDegraded: true
+      providerDegraded: true,
     });
   });
 
-  test("manual coordinate entry supports routing and outage submission", async ({ page }) => {
+  test("manual coordinate entry supports routing and outage submission", async ({
+    page,
+  }) => {
     await stubGeoProvider(page, "serviceable");
     await page.route("**/api/geo/health", (route) =>
       route.fulfill({
-        json: { provider: "mock", mode: "mock", status: "unhealthy", failClosed: true },
-      })
+        json: {
+          provider: "mock",
+          mode: "mock",
+          status: "unhealthy",
+          failClosed: true,
+        },
+      }),
     );
-    
+
     // Intercept submission to check payload
     let submitPayload = null;
     await page.route("**/api/bookings", async (route) => {
@@ -226,36 +269,52 @@ test.describe("tenant console booking map alignment", () => {
 
     await page.goto("/bookings/new");
 
-    await page.getByRole("button", { name: /Enter coordinates manually/ }).first().click();
+    await page
+      .getByRole("button", { name: /Enter coordinates manually/ })
+      .first()
+      .click();
     const latInput1 = page.getByLabel("Latitude").first();
     const lngInput1 = page.getByLabel("Longitude").first();
     const reasonInput1 = page.getByLabel("Reason for manual location").first();
     await latInput1.fill("25.047");
     await lngInput1.fill("121.517");
     await reasonInput1.fill("Manual pickup");
-    await page.getByRole("button", { name: /Use this location/ }).first().click();
+    await page
+      .getByRole("button", { name: /Use this location/ })
+      .first()
+      .click();
 
-    await page.getByRole("button", { name: /Enter coordinates manually/ }).last().click();
+    await page
+      .getByRole("button", { name: /Enter coordinates manually/ })
+      .last()
+      .click();
     const latInput2 = page.getByLabel("Latitude").last();
     const lngInput2 = page.getByLabel("Longitude").last();
     const reasonInput2 = page.getByLabel("Reason for manual location").last();
     await latInput2.fill("25.0797");
     await lngInput2.fill("121.2342");
     await reasonInput2.fill("Manual dropoff");
-    await page.getByRole("button", { name: /Use this location/ }).last().click();
+    await page
+      .getByRole("button", { name: /Use this location/ })
+      .last()
+      .click();
 
-    await expect(page.getByText("Inside the service area", { exact: false })).toBeVisible();
-    
-    const submitBtn = page.getByRole("button", { name: /Submit manual review/ });
+    await expect(
+      page.getByText("Inside the service area", { exact: false }),
+    ).toBeVisible();
+
+    const submitBtn = page.getByRole("button", {
+      name: /Submit manual review/,
+    });
     await expect(submitBtn).toBeVisible();
     await expect(submitBtn).toBeEnabled();
     await submitBtn.click();
-    
+
     await page.waitForTimeout(500); // give time for route
     expect(submitPayload).toBeTruthy();
     expect(submitPayload!.mapFallbackReview).toMatchObject({
       providerAvailable: false,
-      providerDegraded: true
+      providerDegraded: true,
     });
   });
 });
