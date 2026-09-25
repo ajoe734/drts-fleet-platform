@@ -142,6 +142,13 @@ export function PartnerNotificationPanel({ entrySlug }: { entrySlug: string; par
       setTestingState("rejected");
     }
   };
+
+  const handleResume = () => {
+    setEditWebhookId(binding?.webhookId || "");
+    setEditEventTypes(binding?.eventTypes || []);
+    setEditExpectedVersion(binding?.version || 0);
+    setIsEditing(true);
+  };
   
   const handleRetry = async (outboxId: string) => {
     setRetryRowId(outboxId);
@@ -183,6 +190,7 @@ export function PartnerNotificationPanel({ entrySlug }: { entrySlug: string; par
                 style={{ width: '100%', padding: '8px 12px', border: `1px solid ${theme.border}`, borderRadius: 4, background: theme.surfaceLo, color: theme.text, fontSize: 13 }}
                 placeholder="wh_..."
               />
+              <div style={{ marginTop:6 }}><CanvasBtn theme={theme} size="xs" variant="ghost" icon="ext">前往既有 /webhooks 管理（需 tenant:webhooks:write）</CanvasBtn></div>
             </CanvasField>
             <CanvasField theme={theme} label="eventTypes · 內部事件" required>
               <div style={{ display:'flex', flexDirection:'column', gap:8 }}>
@@ -245,13 +253,18 @@ export function PartnerNotificationPanel({ entrySlug }: { entrySlug: string; par
             ]}/>
             <div style={{ marginTop:10 }}>
               <div style={{ fontSize:11, fontWeight:700, color:theme.textMuted, marginBottom:6 }}>訂閱事件（內部 → 對外映射）</div>
-              {bindState === 'disabled' ? <span style={{ fontSize:11.5, color:theme.textDim }}>已停用 · 不派送任何事件；訂閱設定保留，可恢復</span> :
+              {bindState === 'disabled' ? (
+                <div style={{ display:'flex', flexDirection:'column', gap:8 }}>
+                  <span style={{ fontSize:11.5, color:theme.textDim }}>已停用 · 不派送任何事件；訂閱設定保留，可恢復</span>
+                </div>
+              ) : (
                 <div style={{ display:'flex', flexDirection:'column', gap:4 }}>
                   {(binding?.eventTypes || []).map((i: string) => {
                     const row = PN_EVENTS.find(e => e[0] === i);
                     return <div key={i} style={{ display:'flex', alignItems:'center', gap:8, fontSize:11.5 }}><CanvasPill theme={theme} tone="accent">{i}</CanvasPill><CanvasIcon name="chevR" size={11} style={{ color:theme.textDim }}/><span style={{ fontFamily:theme.monoFamily, color:theme.textMuted }}>{row ? row[1] : i}</span><span style={{ color:theme.textDim }}>{row ? row[2] : ''}</span></div>
                   })}
-                </div>}
+                </div>
+              )}
             </div>
           </CanvasCard>
         )}
@@ -267,6 +280,9 @@ export function PartnerNotificationPanel({ entrySlug }: { entrySlug: string; par
                 <tr style={{ borderBottom: `1px solid ${theme.border}`, color: theme.textMuted }}>
                   <th style={{ padding: '8px 14px', fontWeight: 600 }}>Delivery / Outbox ID</th>
                   <th style={{ padding: '8px 14px', fontWeight: 600 }}>Event</th>
+                  <th style={{ padding: '8px 14px', fontWeight: 600 }}>Target</th>
+                  <th style={{ padding: '8px 14px', fontWeight: 600 }}>HTTP</th>
+                  <th style={{ padding: '8px 14px', fontWeight: 600 }}>ack</th>
                   <th style={{ padding: '8px 14px', fontWeight: 600 }}>Status</th>
                   <th style={{ padding: '8px 14px', fontWeight: 600 }}>Reason</th>
                   <th style={{ padding: '8px 14px', fontWeight: 600 }}>At</th>
@@ -286,6 +302,11 @@ export function PartnerNotificationPanel({ entrySlug }: { entrySlug: string; par
                         </div>
                       </td>
                       <td style={{ padding: '8px 14px', fontFamily: theme.monoFamily }}>{r.eventSequence ? `${r.eventType} (#${r.eventSequence})` : r.eventType}</td>
+                      <td style={{ padding: '8px 14px', fontFamily: theme.monoFamily, fontSize: 10.5 }}>{r.target || <span style={{color:theme.textDim}}>未知／尚未建立派送目標</span>}</td>
+                      <td style={{ padding: '8px 14px', fontFamily: theme.monoFamily }}>{r.httpCode || '—'}</td>
+                      <td style={{ padding: '8px 14px' }}>
+                        {r.ackStatus === 'ok' ? <CanvasPill theme={theme} tone="success">通過</CanvasPill> : r.ackStatus === 'mismatch' ? <CanvasPill theme={theme} tone="danger">不符</CanvasPill> : <span style={{ color:theme.textDim }}>—</span>}
+                      </td>
                       <td style={{ padding: '8px 14px' }}><CanvasPill theme={theme} tone={dlvStatus[1]} dot>{dlvStatus[0]}</CanvasPill></td>
                       <td style={{ padding: '8px 14px', color: theme.textMuted }}>{r.failureReason || '—'}</td>
                       <td style={{ padding: '8px 14px', fontFamily: theme.monoFamily }}>{r.createdAt ? new Date(r.createdAt).toLocaleString() : '—'}</td>
@@ -307,8 +328,14 @@ export function PartnerNotificationPanel({ entrySlug }: { entrySlug: string; par
           <CanvasCard theme={theme} title="生命週期控制" subtitle="test → enable · disable · resume">
             {testingState === 'rejected' && <CanvasBanner theme={theme} tone="danger" icon="warn" title="測試失敗" body="端點測試要求失敗，無法啟用。" actions={<CanvasBtn theme={theme} size="xs" icon="refresh" onClick={handleTest}>重測</CanvasBtn>}/>}
             <div style={{ display:'flex', flexDirection:'column', gap:8 }}>
-              <CanvasActionButton theme={theme} descriptor={{ action:'test', enabled: bindState !== 'disabled' && !isPending, riskLevel:'low' }} icon="refresh" label={testingState==='pending' ? "測試中..." : "發送測試事件"} en="test" onAction={handleTest}/>
-              <CanvasActionButton theme={theme} descriptor={{ action:'enable', enabled: false, riskLevel:'medium' }} icon="check" label={"啟用"} en="enable"/>
+              {bindState === 'disabled' ? (
+                <CanvasActionButton theme={theme} descriptor={{ action:'resume', enabled: !isPending, riskLevel:'medium' }} icon="check" label={saveState === 'pending' ? "恢復通知中..." : "恢復通知（恢復後需重新測試，通過後才能啟用）"} en="resume" onAction={handleResume}/>
+              ) : (
+                <>
+                  <CanvasActionButton theme={theme} descriptor={{ action:'test', enabled: !isPending, riskLevel:'low' }} icon="refresh" label={testingState==='pending' ? "測試中..." : "發送測試事件"} en="test" onAction={handleTest}/>
+                  <CanvasActionButton theme={theme} descriptor={{ action:'enable', enabled: bindState === 'test_pending' && !isPending, riskLevel:'medium' }} icon="check" label={"啟用"} en="enable"/>
+                </>
+              )}
             </div>
             <div style={{ fontSize:10.5, color:theme.textDim, marginTop:9, lineHeight:1.5 }}>啟用門檻：目前端點 fingerprint 必須有成功測試。端點變更後測試自動失效，需重測。</div>
           </CanvasCard>

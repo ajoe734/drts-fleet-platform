@@ -4,22 +4,24 @@ import sys
 
 def main():
     if len(sys.argv) < 2:
-        print("Usage: verify_partner_notification_postgres_gate.py <vitest-json-report>")
+        print("Usage: verify_partner_notification_postgres_gate.py <vitest-json-report> [more_reports...]")
         sys.exit(1)
 
-    report_path = sys.argv[1]
-    try:
-        with open(report_path, 'r') as f:
-            report = json.load(f)
-    except Exception as e:
-        print(f"Failed to load report {report_path}: {e}")
-        sys.exit(1)
+    all_test_results = []
+    for report_path in sys.argv[1:]:
+        try:
+            with open(report_path, 'r') as f:
+                report = json.load(f)
+                all_test_results.extend(report.get("testResults", []))
+        except Exception as e:
+            print(f"Failed to load report {report_path}: {e}")
+            sys.exit(1)
 
     seq_suite = None
     transport_suite = None
     ui_suite = None
 
-    for suite in report.get("testResults", []):
+    for suite in all_test_results:
         name = suite.get("name", "")
         if "notification-sequence.postgres.test.ts" in name:
             seq_suite = suite

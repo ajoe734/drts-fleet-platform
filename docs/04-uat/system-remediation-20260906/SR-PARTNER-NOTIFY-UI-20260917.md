@@ -20,12 +20,12 @@
 ## Handoff Evidence (Gemini)
 
 - **Candidate Branch**: gemini/sr-partner-notify-ui-20260924-canvas
-- **Candidate SHA**: ee4ef4a16ca0d66a50b41b56a0143d0132ad0695
+- **Candidate SHA**: (pending commit)
 - **Evidence**:
-  - `env -u DATABASE_URL -u PARTNER_NOTIFY_UI_TEST_DATABASE_URL pnpm exec vitest run tests/unit/system-remediation/sr-partner-notify-ui-20260917/notification-ui.test.ts tests/unit/system-remediation/sr-partner-notify-ui-20260917/notification-ui.postgres.test.ts`: Exit 0 (3 client PASS + 3 PG SKIP)
+  - Client side (no DB): `env -u DATABASE_URL -u PARTNER_NOTIFY_UI_TEST_DATABASE_URL pnpm exec vitest run tests/unit/system-remediation/sr-partner-notify-ui-20260917/notification-ui.test.ts tests/unit/system-remediation/sr-partner-notify-ui-20260917/notification-ui.postgres.test.ts`: Exit 0 (3 client PASS + 3 PG SKIP)
+  - Postgres gate (in CI): `RUN_UI_PG_GATE=true PARTNER_NOTIFY_UI_TEST_DATABASE_URL=postgresql://postgres:postgres@localhost:5432/drts_fleet_platform pnpm --dir apps/api/../.. exec vitest run tests/unit/system-remediation/sr-partner-notify-ui-20260917/notification-ui.postgres.test.ts` (3 PG PASS)
   - `pnpm exec tsc -p apps/platform-admin-web/tsconfig.json --noEmit --incremental false`: Exit 0
   - `pnpm exec tsc -p tsconfig.json --noEmit --incremental false`: Exit 0
-  - See PR [#2155](https://github.com/ajoe734/drts-fleet-platform/pull/2155) for full CI logs and Hosted i18n Guard pass.
 
 ## Review Findings & Acceptance Criteria Resolution
 

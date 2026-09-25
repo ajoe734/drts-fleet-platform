@@ -18,7 +18,7 @@ import { ApiRequestError } from "../../../../apps/api/src/common/api-envelope";
 // We expect the CI hosted workflow to provide this after migrating the schema.
 const testDbUrl = process.env.PARTNER_NOTIFY_UI_TEST_DATABASE_URL;
 
-describe.skipIf(!testDbUrl)("partner notification UI postgres acceptance", () => {
+describe.skipIf(!testDbUrl || process.env.RUN_UI_PG_GATE !== "true")("partner notification UI postgres acceptance", () => {
   let pool: any;
   let app: any;
   let mtRepo: any;
