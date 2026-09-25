@@ -15,9 +15,9 @@
 ## Handoff Evidence (Gemini)
 
 - **Candidate Branch**: gemini/sr-partner-notify-ui-20260924-canvas
-- **Candidate SHA**: 095b6400dbdd5435a1d28f3c47270605fd8cd7e5
+- **Candidate SHA**: 97f2ef656b0eabd6147cfa865e9118ebcfcbd5f3
 - **Hosted CI Evidence**:
-  - CI: PR #2155 pending checks for 095b6400dbdd5435a1d28f3c47270605fd8cd7e5 (Run: pending new push).
+  - CI: PR #2155 pending checks for 97f2ef656b0eabd6147cfa865e9118ebcfcbd5f3 (Run: pending new push).
   - Postgres Gate (CI): Fixed Postgres deduction error (`could not determine data type of parameter $1`) by properly casting parameters to `varchar` inside `jsonb_build_object`. Tests SKIPPED locally (due to VM postgres restriction); requires CI.
 - **Local Evidence**:
   - `pnpm exec tsc -p apps/platform-admin-web/tsconfig.json --noEmit`: Exit 0
