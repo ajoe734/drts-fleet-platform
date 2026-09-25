@@ -14,7 +14,6 @@
  * directories from the configured backend.
  */
 import { expect, test, type Page } from "@playwright/test";
-import * as jwt from "jsonwebtoken";
 
 const PICKUP_CANDIDATE = {
   candidateId: "cand-pickup-1",
@@ -136,35 +135,6 @@ async function pinBothStops(page: Page) {
 }
 
 test.describe("tenant console booking map alignment", () => {
-  test.beforeEach(async ({ context, baseURL }) => {
-    // We imported jsonwebtoken at the top of the file
-    const payload = {
-      sub: "mock-user-1",
-      actorType: "tenant_user",
-      actorId: "mock-user-1",
-      realm: "tenant",
-      tenantId: "tenant-acme",
-      authMode: "jwt_bearer",
-      roles: ["tenant_admin"],
-      scopes: ["*"]
-    };
-    const validToken = jwt.sign(payload, "ci-e2e-secret", { 
-      algorithm: "HS256",
-      expiresIn: "1h",
-      issuer: "drts-local",
-      audience: "drts-api",
-    });
-
-    await context.addCookies([
-      {
-        name: "drts_tenant_session",
-        value: validToken,
-        domain: new URL(baseURL!).hostname,
-        path: "/",
-      },
-    ]);
-  });
-
   test("serviceable stops pin and clear the service-area state", async ({
     page,
   }) => {
@@ -196,7 +166,6 @@ test.describe("tenant console booking map alignment", () => {
     });
     await expect(submit).toBeDisabled();
   });
-
 
   test("degraded map provider warns but allows service-area submission", async ({ page }) => {
     await stubGeoProvider(page, "serviceable");
@@ -289,5 +258,4 @@ test.describe("tenant console booking map alignment", () => {
       providerDegraded: true
     });
   });
-
 });
