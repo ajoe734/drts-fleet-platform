@@ -1,3 +1,7 @@
+import {
+  PARTNER_PASSENGER_EVENT_TO_EXTERNAL_NAME,
+  PartnerPassengerEventType,
+} from "@drts/contracts";
 import { PLATFORM_CURRENCY } from "@drts/contracts";
 import { Injectable, Logger, Optional } from "@nestjs/common";
 import type { QueryResultRow } from "pg";
@@ -23,7 +27,8 @@ import type {
   StoredPartnerNotificationContext,
 } from "./partner-notification.types";
 
-import { DatabaseService } from "../../common/db";
+import { DatabaseService } from "../../common/db/database.service";
+import { PartnerNotificationDispatchFacade } from "../tenant-partner/partner-notification-dispatch.facade";
 
 type AuthorizationRow = QueryResultRow & {
   authorization_id: string;
@@ -230,7 +235,10 @@ type OrderPartnerNotificationRouteRow = QueryResultRow & {
 export class MultiTaxiRepository {
   private readonly logger = new Logger(MultiTaxiRepository.name);
 
-  constructor(@Optional() private readonly databaseService?: DatabaseService) {}
+  constructor(
+    @Optional() private readonly databaseService?: DatabaseService,
+    @Optional() private readonly facade?: PartnerNotificationDispatchFacade,
+  ) {}
 
   isEnabled() {
     return this.databaseService?.isEnabled() ?? false;
@@ -255,10 +263,10 @@ export class MultiTaxiRepository {
     ]);
 
     return {
-      authorizations: authorizationResult.rows.map((row) =>
+      authorizations: authorizationResult.rows.map((row: any) =>
         this.mapAuthorization(row),
       ),
-      vehicles: vehicleResult.rows.map((row) => this.mapVehicle(row)),
+      vehicles: vehicleResult.rows.map((row: any) => this.mapVehicle(row)),
     };
   }
 
@@ -589,7 +597,9 @@ export class MultiTaxiRepository {
       [Math.max(1, Math.min(limit, 1000))],
     );
     // Expired rows are selected once to persist a terminal outcome, never sent.
-    return result.rows.map((row) => this.mapNotificationOutbox(row.record));
+    return result.rows.map((row: any) =>
+      this.mapNotificationOutbox(row.record),
+    );
   }
 
   /** Re-read authoritative state under lock: callers may hold a stale outbox copy. */
@@ -1155,7 +1165,9 @@ export class MultiTaxiRepository {
       );
 
     return {
-      items: result.rows.map((row) => this.mapPassengerRatingReviewRow(row)),
+      items: result.rows.map((row: any) =>
+        this.mapPassengerRatingReviewRow(row),
+      ),
       totalItems,
     };
   }
@@ -1215,7 +1227,7 @@ export class MultiTaxiRepository {
       summary: summaryResult.rows[0]
         ? this.mapDriverRatingSummary(summaryResult.rows[0])
         : null,
-      moderationHistory: auditResult.rows.map((audit) =>
+      moderationHistory: auditResult.rows.map((audit: any) =>
         this.mapPassengerRatingModerationAudit(audit),
       ),
     };
@@ -1718,5 +1730,464 @@ export class MultiTaxiRepository {
 
   private escapeLike(value: string) {
     return value.replace(/[\\%_]/g, (character) => `\\${character}`);
+  }
+
+  async listPartnerNotificationDeliveries(
+    entry: { entrySlug: string; tenantId: string; partnerId: string },
+    query: any,
+  ) {
+    const entrySlug = entry.entrySlug;
+    const countResult = await this.databaseService!.query(
+      `
+      SELECT COUNT(*) as cnt
+      FROM ops.consumer_notification_outbox o
+      LEFT JOIN mobility.phase1_partner_notification_delivery_contexts ctx ON ctx.outbox_id = o.outbox_id
+      LEFT JOIN mobility.phase1_order_partner_notification_routes r ON r.order_id = o.order_id
+      WHERE (ctx.entry_slug = $1 OR r.entry_slug = $1)
+      AND COALESCE(ctx.tenant_id, r.tenant_id) = $2
+      AND COALESCE(ctx.partner_id, r.partner_id) = $3
+    `,
+      [entrySlug, entry.tenantId, entry.partnerId],
+    );
+
+    const result = await this.databaseService!.query(
+      `
+      SELECT
+        o.outbox_id as "outboxId",
+        COALESCE(ctx.order_id, o.order_id) as "orderId",
+        $1 as "entrySlug",
+        COALESCE(ctx.tenant_id, r.tenant_id) as "tenantId",
+        COALESCE(ctx.partner_id, r.partner_id) as "partnerId",
+        ctx.binding_id as "bindingId",
+        ctx.binding_version as "bindingVersion",
+        ctx.webhook_id as "webhookId",
+        ctx.endpoint_fingerprint as "endpointFingerprint",
+        ctx.wire_payload as "wirePayload",
+        ctx.wire_payload_hash as "wirePayloadHash",
+        ctx.event_sequence as "eventSequence",
+        COALESCE(ctx.expires_at, (o.payload->'partnerNotification'->>'expiresAt')::timestamptz) as "expiresAt",
+        COALESCE(ctx.delivery_target, o.payload->'partnerNotification'->>'deliveryTarget') as "deliveryTarget",
+        COALESCE(ctx.delivery_stage, o.payload->'partnerNotification'->>'deliveryStage') as "deliveryStage",
+        COALESCE(ctx.retry_disposition, o.payload->'partnerNotification'->>'retryDisposition') as "retryDisposition",
+        COALESCE(ctx.failure_reason, o.payload->'partnerNotification'->>'failureReason') as "failureReason",
+        COALESCE(ctx.receipt_id, o.payload->'partnerNotification'->>'receiptId') as "receiptId",
+        COALESCE(ctx.downstream_status, o.payload->'partnerNotification'->>'downstreamStatus') as "downstreamStatus",
+        o.created_at as "createdAt",
+        ctx.delivered_at as "deliveredAt",
+        o.status,
+        ctx.delivery_id as "deliveryId",
+        o.event_type as "eventType",
+        NULL as result,
+        o.attempt_count as attempts,
+        COALESCE((ctx.retry_policy_snapshot->>'maxAttempts')::int, (o.payload->'partnerNotification'->>'maxAttempts')::int) as "maxAttempts",
+        o.next_attempt_at as "nextAttemptAt"
+      FROM ops.consumer_notification_outbox o
+      LEFT JOIN mobility.phase1_partner_notification_delivery_contexts ctx ON ctx.outbox_id = o.outbox_id
+      LEFT JOIN mobility.phase1_order_partner_notification_routes r ON r.order_id = o.order_id
+      WHERE (ctx.entry_slug = $1 OR r.entry_slug = $1)
+      AND COALESCE(ctx.tenant_id, r.tenant_id) = $4
+      AND COALESCE(ctx.partner_id, r.partner_id) = $5
+      ORDER BY o.created_at DESC
+      LIMIT $2 OFFSET $3
+    `,
+      [
+        entrySlug,
+        query.pageSize || 50,
+        ((query.page || 1) - 1) * (query.pageSize || 50),
+        entry.tenantId,
+        entry.partnerId,
+      ],
+    );
+
+    return {
+      rows: result.rows,
+      total: parseInt(countResult.rows[0]?.cnt || "0", 10),
+    };
+  }
+
+  async retryPartnerNotificationDelivery(
+    entry: { entrySlug: string; tenantId: string; partnerId: string },
+    outboxId: string,
+    identity?: any,
+    requestId?: string,
+  ) {
+    const entrySlug = entry.entrySlug;
+    if (!this.isEnabled())
+      return {
+        kind: "failed",
+        failure: {
+          failureReason: "endpoint_unavailable",
+          retryDisposition: "terminal",
+        },
+      };
+    const client = await this.databaseService!.connect();
+    try {
+      await client.query("BEGIN");
+
+      const outboxRows = await client.query(
+        "SELECT o.status, o.event_type, o.next_attempt_at, o.payload, o.attempt_count, o.order_id, o.assignment_version, o.created_at, r.entry_slug as route_entry_slug, r.tenant_id as route_tenant_id, r.partner_id as route_partner_id FROM ops.consumer_notification_outbox o LEFT JOIN mobility.phase1_order_partner_notification_routes r ON r.order_id = o.order_id WHERE o.outbox_id = $1 FOR UPDATE OF o",
+        [outboxId],
+      );
+      if (outboxRows.rows.length === 0) {
+        await client.query("ROLLBACK");
+        return {
+          kind: "failed",
+          failure: {
+            failureReason: "route_missing",
+            retryDisposition: "none",
+            suggestedNextAttemptAt: null,
+          },
+        };
+      }
+      const outbox = outboxRows.rows[0];
+
+      const ctxRows = await client.query(
+        "SELECT entry_slug, tenant_id, partner_id, expires_at, failure_reason, binding_id, binding_version, webhook_id, endpoint_fingerprint, retry_disposition, order_id, event_sequence, wire_payload, retry_policy_snapshot FROM mobility.phase1_partner_notification_delivery_contexts WHERE outbox_id = $1 FOR UPDATE",
+        [outboxId],
+      );
+      const ctx = ctxRows.rows[0] || null;
+
+      const actualEntrySlug = ctx ? ctx.entry_slug : outbox.route_entry_slug;
+      const actualTenantId = ctx ? ctx.tenant_id : outbox.route_tenant_id;
+      const actualPartnerId = ctx ? ctx.partner_id : outbox.route_partner_id;
+      if (
+        actualEntrySlug !== entrySlug ||
+        actualTenantId !== entry.tenantId ||
+        actualPartnerId !== entry.partnerId
+      ) {
+        await client.query("ROLLBACK");
+        return {
+          kind: "failed",
+          failure: {
+            failureReason: "route_missing",
+            retryDisposition: "none",
+            suggestedNextAttemptAt: null,
+          },
+        };
+      }
+
+      const expiresAtStr = ctx
+        ? ctx.expires_at
+        : outbox.payload?.notificationExpiresAt ||
+          outbox.payload?.expiresAt ||
+          new Date(
+            new Date(outbox.created_at || new Date()).getTime() + 15 * 60000,
+          ).toISOString();
+      if (expiresAtStr && new Date() >= new Date(expiresAtStr)) {
+        await client.query("ROLLBACK");
+        return {
+          kind: "failed",
+          failure: {
+            failureReason: "notification_expired",
+            retryDisposition: "terminal",
+            suggestedNextAttemptAt: null,
+          },
+        };
+      }
+
+      const retryDisp = ctx
+        ? ctx.retry_disposition
+        : outbox.payload?.partnerNotification?.retryDisposition;
+      if (
+        !retryDisp ||
+        !["manual_only", "automatic", "configuration_blocked"].includes(
+          retryDisp,
+        )
+      ) {
+        await client.query("ROLLBACK");
+        return {
+          kind: "failed",
+          failure: {
+            failureReason: "notification_obsolete",
+            retryDisposition: "terminal",
+          },
+        };
+      }
+
+      if (outbox.status === "delivered") {
+        await client.query("ROLLBACK");
+        return {
+          kind: "failed",
+          failure: {
+            failureReason: "notification_superseded",
+            retryDisposition: "terminal",
+          },
+        };
+      }
+
+      const expiresAt = ctx
+        ? new Date(ctx.expires_at)
+        : outbox.payload?.partnerNotification?.expiresAt
+          ? new Date(outbox.payload.partnerNotification.expiresAt)
+          : null;
+      if (expiresAt && expiresAt < new Date()) {
+        await client.query("ROLLBACK");
+        return {
+          kind: "failed",
+          failure: {
+            failureReason: "notification_expired",
+            retryDisposition: "terminal",
+          },
+        };
+      }
+
+      const failureReason = ctx
+        ? ctx.failure_reason
+        : outbox.payload?.partnerNotification?.failureReason;
+      if (
+        failureReason &&
+        [
+          "notification_superseded",
+          "notification_expired",
+          "notification_obsolete",
+          "recipient_revoked",
+        ].includes(failureReason)
+      ) {
+        await client.query("ROLLBACK");
+        return {
+          kind: "failed",
+          failure: {
+            failureReason: failureReason,
+            retryDisposition: "terminal",
+          },
+        };
+      }
+
+      const claimRows = await client.query(
+        "SELECT 1 FROM ops.phase1_push_delivery_claims WHERE outbox_id = $1 AND claim_state = 'claimed' AND lease_expires_at > now()",
+        [outboxId],
+      );
+      if (claimRows.rows.length > 0) {
+        await client.query("ROLLBACK");
+        return {
+          kind: "failed",
+          failure: {
+            failureReason: "provider_transient_error",
+            retryDisposition: "automatic",
+            suggestedNextAttemptAt: new Date(Date.now() + 60000).toISOString(),
+          },
+        };
+      }
+
+      const route = await this.findOrderPartnerNotificationRoute(
+        outbox.order_id,
+      );
+      if (!route) {
+        await client.query("ROLLBACK");
+        return {
+          kind: "failed",
+          failure: {
+            failureReason: "route_missing",
+            retryDisposition: "none",
+            suggestedNextAttemptAt: null,
+          },
+        };
+      }
+
+      if (
+        ctx &&
+        (ctx.order_id !== route.orderId ||
+          ctx.tenant_id !== route.tenantId ||
+          ctx.partner_id !== route.partnerId ||
+          ctx.entry_slug !== route.entrySlug ||
+          ctx.wire_payload?.data?.recipient?.partnerUserRef !==
+            route.partnerUserRef)
+      ) {
+        await client.query("ROLLBACK");
+        return {
+          kind: "failed",
+          failure: {
+            failureReason: "owner_changed",
+            retryDisposition: "terminal",
+            suggestedNextAttemptAt: null,
+          },
+        };
+      }
+
+      const eventType = ctx ? ctx.wire_payload?.event : outbox.event_type;
+      if (!eventType) {
+        await client.query("ROLLBACK");
+        return {
+          kind: "failed",
+          failure: {
+            failureReason: "route_missing",
+            retryDisposition: "terminal",
+            suggestedNextAttemptAt: null,
+          },
+        };
+      }
+
+      // Convert to internal event type if needed, or if facade expects internal event type
+      const internalEvent =
+        (Object.keys(PARTNER_PASSENGER_EVENT_TO_EXTERNAL_NAME).find(
+          (k) =>
+            PARTNER_PASSENGER_EVENT_TO_EXTERNAL_NAME[
+              k as PartnerPassengerEventType
+            ] === eventType,
+        ) as PartnerPassengerEventType) || eventType;
+
+      if (this.facade) {
+        const readiness = await this.facade.resolveNotificationRoute(
+          route,
+          internalEvent,
+        );
+        if (!readiness.ready) {
+          await client.query("ROLLBACK");
+          return { kind: "failed", failure: readiness.failure };
+        }
+        if (
+          ctx &&
+          (ctx.binding_id !== readiness.binding.bindingId ||
+            ctx.webhook_id !== readiness.binding.webhookId)
+        ) {
+          // owner_changed
+          await client.query("ROLLBACK");
+          return {
+            kind: "failed",
+            failure: {
+              failureReason: "owner_changed",
+              retryDisposition: "terminal",
+              suggestedNextAttemptAt: null,
+            },
+          };
+        }
+        if (
+          ctx &&
+          (ctx.binding_version !== readiness.binding.version ||
+            ctx.endpoint_fingerprint !== readiness.endpointFingerprint)
+        ) {
+          // configuration_blocked
+          await client.query("ROLLBACK");
+          return {
+            kind: "failed",
+            failure: {
+              failureReason: "endpoint_disabled",
+              retryDisposition: "configuration_blocked",
+              suggestedNextAttemptAt: null,
+            },
+          };
+        }
+
+        const maxAttempts =
+          ctx &&
+          ctx.retry_policy_snapshot &&
+          ctx.retry_policy_snapshot.maxAttempts
+            ? parseInt(ctx.retry_policy_snapshot.maxAttempts, 10)
+            : (readiness.retryPolicy?.maxAttempts ?? 3);
+        if (maxAttempts !== undefined && outbox.attempt_count >= maxAttempts) {
+          await client.query("ROLLBACK");
+          return {
+            kind: "failed",
+            failure: {
+              failureReason:
+                (ctx?.failure_reason as any) || "endpoint_unavailable",
+              retryDisposition: "terminal",
+            },
+          };
+        }
+      }
+
+      const relevance = await this.findPartnerNotificationRelevance(
+        outbox.order_id,
+      );
+      if (!relevance) {
+        await client.query("ROLLBACK");
+        return {
+          kind: "failed",
+          failure: {
+            failureReason: "route_missing",
+            retryDisposition: "terminal",
+            suggestedNextAttemptAt: null,
+          },
+        };
+      }
+
+      if (internalEvent !== "receipt_ready") {
+        if (
+          ["cancelled", "completed", "closed", "rejected"].includes(
+            relevance.status,
+          )
+        ) {
+          await client.query("ROLLBACK");
+          return {
+            kind: "failed",
+            failure: {
+              failureReason: "notification_obsolete",
+              retryDisposition: "terminal",
+              suggestedNextAttemptAt: null,
+            },
+          };
+        }
+        const assignmentVersion = ctx
+          ? ctx.wire_payload?.data?.assignmentVersion
+          : outbox.assignment_version;
+        if (
+          assignmentVersion !== undefined &&
+          assignmentVersion !== null &&
+          assignmentVersion < relevance.assignmentVersion
+        ) {
+          await client.query("ROLLBACK");
+          return {
+            kind: "failed",
+            failure: {
+              failureReason: "notification_superseded",
+              retryDisposition: "terminal",
+              suggestedNextAttemptAt: null,
+            },
+          };
+        }
+      }
+
+      if (outbox.status === "pending" || outbox.status === "sending") {
+        await client.query("ROLLBACK");
+        return { kind: "requeued" };
+      }
+
+      const isUuid = (str: string) =>
+        /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(
+          str,
+        );
+      const validActorId =
+        identity?.actorId && isUuid(identity.actorId) ? identity.actorId : null;
+      await client.query(
+        "INSERT INTO admin.audit_logs (actor_id, actor_type, module_name, action_name, resource_type, resource_id, new_value, request_id) VALUES ($1, $2, 'partner_notification', 'retry_delivery', 'consumer_notification_outbox', $3, $4::jsonb, $5)",
+        [
+          validActorId,
+          identity?.actorType || "system",
+          outboxId,
+          JSON.stringify({ retriedAt: new Date().toISOString() }),
+          requestId || null,
+        ],
+      );
+
+      const newPayload = outbox.payload || {};
+
+      await client.query(
+        "UPDATE ops.consumer_notification_outbox SET status = 'pending', next_attempt_at = NOW(), payload = $2::jsonb WHERE outbox_id = $1",
+        [outboxId, JSON.stringify(newPayload)],
+      );
+
+      if (ctx) {
+        await client.query(
+          "UPDATE mobility.phase1_partner_notification_delivery_contexts SET retry_disposition = 'automatic' WHERE outbox_id = $1",
+          [outboxId],
+        );
+      } else {
+        newPayload.partnerNotification = newPayload.partnerNotification || {};
+        newPayload.partnerNotification.retryDisposition = "automatic";
+        await client.query(
+          "UPDATE ops.consumer_notification_outbox SET payload = $2::jsonb WHERE outbox_id = $1",
+          [outboxId, JSON.stringify(newPayload)],
+        );
+      }
+
+      await client.query("COMMIT");
+      return { kind: "requeued" };
+    } catch (e) {
+      await client.query("ROLLBACK");
+      throw e;
+    } finally {
+      client.release();
+    }
   }
 }
