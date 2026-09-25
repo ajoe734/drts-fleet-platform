@@ -32,15 +32,21 @@ function uniqueScopes(scopes: readonly string[]) {
   return [...new Set(scopes.map((scope) => scope.trim()).filter(Boolean))];
 }
 
-// Mirrors IdentityController's private assertAdminReadAuthority (platform/ops
-// branch only; break-glass has no tenant realm). Kept local rather than
-// imported across modules so this read-authorization decision stays
-// co-located with the mutation authorization it must not weaken.
+// Deliberately narrower than IdentityController's private
+// assertAdminReadAuthority: that check treats bare `actorType === "ops_user"`
+// as sufficient (it gates session inventory, where every ops caller is
+// already expected to have session visibility). Break-glass requests/grants
+// carry sensitive reasonText/proofReference for other principals, so this
+// predicate requires explicit admin authority -- actorType "platform_admin",
+// or an explicit admin/superadmin role or scope -- and must not grant it to
+// every ordinary ops_user bystander merely by actorType (round-3 R5). Kept
+// local rather than imported across modules so this read-authorization
+// decision stays co-located with the mutation authorization it must not
+// weaken.
 function isBreakGlassReadAdmin(identity: BootstrapRequestIdentity): boolean {
   if (identity.realm !== "platform" && identity.realm !== "ops") return false;
   return (
     identity.actorType === "platform_admin" ||
-    identity.actorType === "ops_user" ||
     identity.roles.includes("platform_superadmin") ||
     identity.roles.includes("platform_user_admin") ||
     identity.roles.includes("ops_admin") ||
@@ -359,6 +365,12 @@ export class BreakGlassService {
    * elapsed with no sweeper having run yet. This read additively cross-checks
    * both against the live repository/clock without touching `status` or any
    * mutation path.
+   *
+   * A grant with no bound `sessionId` has not completed activation (e.g. the
+   * controller's post-activate `issueSessionToken`/`bindSession` step never
+   * ran because token issuance failed) and must fail closed here rather than
+   * be reported active with no authoritative session to validate against
+   * (round-3 R6).
    */
   async listActiveGrantsForPrincipal(principalId: string) {
     const now = Date.now();
@@ -368,7 +380,8 @@ export class BreakGlassService {
     const results: BreakGlassGrantRecord[] = [];
     for (const grant of candidates) {
       if (grant.expiresAt && Date.parse(grant.expiresAt) <= now) continue;
-      if (grant.sessionId && this.identityRepository) {
+      if (!grant.sessionId) continue;
+      if (this.identityRepository) {
         const session = await this.identityRepository.getSession(
           grant.sessionId,
         );

@@ -207,6 +207,11 @@ describe("IdentityController.getSessionContext (UI17-IAM-BREAK-GLASS-READ-CONTRA
       requestedDurationMinutes: 10,
       mutation,
     });
+    // Bind the grant to the live session, mirroring what
+    // BreakGlassController.activate does after a successful token issuance
+    // (round-3 R6: an unbound grant must not be a valid "active" fixture --
+    // listActiveGrantsForPrincipal fails closed on a missing sessionId).
+    await breakGlassService.bindSession(grant.grantId, "sess-1");
 
     const controller = new IdentityController(
       repository,
@@ -378,5 +383,65 @@ describe("IdentityController.getSessionContext (UI17-IAM-BREAK-GLASS-READ-CONTRA
     } finally {
       vi.useRealTimers();
     }
+  });
+
+  it("scenario 7 (round-3 R6): a grant left status='active' by a failed activation with no bound session is not reported active", async () => {
+    const repository = new IdentityRepository();
+    await repository.createSession(session());
+
+    const breakGlassService = new BreakGlassService(repository);
+    const requesterIdentity = {
+      authMode: "jwt_bearer" as const,
+      actorType: "platform_admin" as const,
+      actorId: "principal-1",
+      principalId: "principal-1",
+      realm: "platform" as const,
+      tenantId: null,
+      roleFamilies: ["platform"] as (
+        | "platform"
+        | "tenant"
+        | "partner"
+        | "driver"
+        | "ops"
+      )[],
+      roles: [],
+      scopes: [],
+      requestId: "req-grant",
+    };
+    const approverIdentity = {
+      ...requesterIdentity,
+      actorId: "approver",
+      principalId: "approver",
+      requestId: "req-approve",
+    };
+    const grant = await breakGlassService.request(requesterIdentity, {
+      requestedScopes: ["identity:read"],
+      reasonCode: "INCIDENT",
+      reasonText: "Restore incident access",
+      proofReference: "vault://break-glass/proof",
+      mutation,
+    });
+    await breakGlassService.approve(approverIdentity, grant.grantId, mutation);
+    // Mirror BreakGlassController.activate up to the point where token
+    // issuance fails: the grant is left in storage with status "active" but
+    // `sessionId` is never set because bindSession is never reached.
+    await breakGlassService.activate(requesterIdentity, {
+      requestId: grant.grantId,
+      requestedScope: ["identity:read"],
+      requestedDurationMinutes: 10,
+      mutation,
+    });
+
+    const controller = new IdentityController(
+      repository,
+      undefined,
+      undefined,
+      undefined,
+      breakGlassService,
+    );
+
+    const result = await controller.getSessionContext(callerIdentity());
+    expect(result.data.sessionActive).toBe(true);
+    expect(result.data.activeBreakGlassGrants).toEqual([]);
   });
 });

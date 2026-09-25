@@ -83,14 +83,77 @@ describe("BreakGlassService read authorization (additive GET routes)", () => {
   it("lets a platform/ops admin view any request", async () => {
     const service = new BreakGlassService(new IdentityRepository());
     const { grant } = await seedGrant(service);
+    // Explicit admin role, not bare actorType -- see round-3 R5: an ordinary
+    // ops_user with no admin role/scope must NOT be treated as admin.
     const opsAdmin = identity({
       actorId: "ops-admin",
       principalId: "ops-admin",
       realm: "ops",
       actorType: "ops_user",
+      roles: ["ops_admin"],
     });
     const viewed = await service.getForViewer(opsAdmin, grant.grantId);
     expect(viewed.grantId).toBe(grant.grantId);
+  });
+
+  it("round-3 R5: an ordinary ops_user bystander with no admin role/scope cannot view another principal's request", async () => {
+    const service = new BreakGlassService(new IdentityRepository());
+    const { grant } = await seedGrant(service);
+    const ordinaryOpsUser = identity({
+      actorId: "ordinary-ops",
+      principalId: "ordinary-ops",
+      realm: "ops",
+      actorType: "ops_user",
+      roles: ["ops_user"],
+      scopes: ["identity:read"],
+    });
+
+    await expect(
+      service.getForViewer(ordinaryOpsUser, grant.grantId),
+    ).rejects.toMatchObject({ code: "AUTHZ_SCOPE_DENIED" } satisfies Partial<
+      ApiRequestError
+    >);
+  });
+
+  it("round-3 R5: an ordinary ops_user bystander's list excludes another principal's request", async () => {
+    const service = new BreakGlassService(new IdentityRepository());
+    const { grant } = await seedGrant(service);
+    const ordinaryOpsUser = identity({
+      actorId: "ordinary-ops",
+      principalId: "ordinary-ops",
+      realm: "ops",
+      actorType: "ops_user",
+      roles: ["ops_user"],
+      scopes: ["identity:read"],
+    });
+
+    const seen = await service.listForViewer(ordinaryOpsUser);
+    expect(seen.map((g) => g.grantId)).not.toContain(grant.grantId);
+    expect(seen).toEqual([]);
+  });
+
+  it("round-3 R5: an ordinary ops_user requester's list is limited to their own requests", async () => {
+    const service = new BreakGlassService(new IdentityRepository());
+    const ordinaryOpsRequester = identity({
+      actorId: "ordinary-ops-requester",
+      principalId: "ordinary-ops-requester",
+      realm: "ops",
+      actorType: "ops_user",
+      roles: ["ops_user"],
+      scopes: ["identity:break-glass:request"],
+    });
+    const ownGrant = await service.request(ordinaryOpsRequester, {
+      requestedScopes: ["identity:read"],
+      reasonCode: "INCIDENT",
+      reasonText: "Own request",
+      proofReference: "vault://break-glass/proof-own",
+      mutation,
+    });
+    const { grant: otherGrant } = await seedGrant(service);
+
+    const seen = await service.listForViewer(ordinaryOpsRequester);
+    expect(seen.map((g) => g.grantId)).toEqual([ownGrant.grantId]);
+    expect(seen.map((g) => g.grantId)).not.toContain(otherGrant.grantId);
   });
 
   it("denies a caller who is neither requester, approver, eligible approver, nor admin", async () => {
@@ -154,7 +217,11 @@ describe("BreakGlassService read authorization (additive GET routes)", () => {
     const seenByRequester = await service.listForViewer(nonAdminRequester);
     expect(seenByRequester.map((g) => g.grantId)).toEqual([grant.grantId]);
 
-    const opsAdmin = identity({ realm: "ops", actorType: "ops_user" });
+    const opsAdmin = identity({
+      realm: "ops",
+      actorType: "ops_user",
+      roles: ["ops_admin"],
+    });
     const seenByAdmin = await service.listForViewer(opsAdmin);
     expect(seenByAdmin.map((g) => g.grantId).sort()).toEqual(
       [grant.grantId, otherRequest.grantId].sort(),
