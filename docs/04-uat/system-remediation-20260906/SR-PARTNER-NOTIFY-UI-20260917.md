@@ -33,13 +33,14 @@
 
 ## Review Findings Resolution (Codex2)
 
-| Finding / 驗收項                      | 狀態 (Status) | 修改位置與說明                                            |
-| ------------------------------------- | ------------- | --------------------------------------------------------- |
-| R1. invalid binding events default    | RESOLVED (STATIC) | `partner-notification-panel.tsx`: eventTypes list matches exactly the backend contract (`eta_changed`, etc.). `ApiClient` test signature corrected to `PartnerNotificationDispatchOutcome`. |
-| R2. invalid retry context matching    | RESOLVED (STATIC) | `multi-taxi.repository.ts:1974`: compares `ctx.webhook_id` against `readiness.binding.webhookId`, fixing legitimate retries. |
-| R3. outbox event type lookup missing  | RESOLVED (STATIC) | `multi-taxi.repository.ts`: reads true authoritative metadata layout for deliveries, falling back securely to producer payloads. |
-| R4. bad context versions / defaults   | RESOLVED (STATIC) | `multi-taxi.repository.ts`: respects worker readiness limits without forging maxAttempts=3 for orphaned rows. |
-| R5. invalid PG fixtures               | RESOLVED (STATIC) | `notification-ui.postgres.test.ts`: inserts correct required JSON `record` structures without asserting GENERATED values (e.g., `tenantId` is via record, no `tenant_id` column insert). |
-| R6. unsupported UAT claims            | RESOLVED (STATIC) | Removed missing RTL component tests. Restored PG workflow vars in `.github/workflows/ci.yml`. Explicitly marking unperformed acceptance and pending CI in this UAT document. |
-| R7. UI Web scope violation & raw colors | RESOLVED (STATIC) | Reverted unauthorized token overrides. Used approved canvas labels and `theme` correctly. |
-| R8. retryHistory mutates payload      | RESOLVED (STATIC) | Corrected evidence document to reflect exact commands, pending CI link context, and proper boundaries without falsely declaring skipped PG assertions as 'PASS'. |
+| Finding／驗收項                                | 原始碼依據與修改位置   | 舊版重現 → 修正版結果                     | 命令、退出碼、執行版本與證據位置                            | 未驗項與具體限制               |
+| ---------------------------------------------- | ---------------------- | ----------------------------------------- | ----------------------------------------------------------- | ------------------------------ |
+| R1. invalid binding events default             | `partner-notification-panel.tsx`, `packages/api-client/src/index.ts:4881` | 舊: 預設選取五個不合法事件, ApiClient.testBinding 回傳 RequeueOutcome<br/>新: 僅提供合法的 contract 事件, ApiClient 正確回傳 PartnerNotificationDispatchOutcome | Node TypeScript API signature check (Exit 0) | 未驗: 實際 API 呼叫需由 CI 執行 |
+| R2. invalid retry context matching             | `apps/api/src/modules/multi-taxi/multi-taxi.repository.ts:1753,1974` | 舊: 漏載 ctx.webhook_id, 比對錯誤導致合法 retry 被拒<br/>新: 正確自 db 讀取 webhook_id 並與 readiness.binding.webhookId 比對 | Node TypeScript API signature check (Exit 0), local DB skip | 實際行為由 CI PG 測試捕捉 |
+| R3. outbox event type lookup missing           | `apps/api/src/modules/multi-taxi/multi-taxi.repository.ts` | 舊: 讀取不存在的 eventType 導致 route_missing<br/>新: 從 ctx.wire_payload 讀取並 fallback 至真實 outbox.event_type | Node TypeScript API signature check (Exit 0) | 實際行為由 CI PG 測試捕捉 |
+| R4. bad context versions / defaults            | `apps/api/src/modules/multi-taxi/multi-taxi.repository.ts:1985,2007` | 舊: 讀取錯誤的 version path，並自行給予 default maxAttempts=3<br/>新: 重用真實 producer payload version 與 readiness maxAttempts | Node TypeScript API signature check (Exit 0) | 實際行為由 CI PG 測試捕捉 |
+| R5. invalid PG fixtures & coverage             | `tests/unit/system-remediation/sr-partner-notify-ui-20260917/notification-ui.postgres.test.ts`, `apps/api/package.json` | 舊: insert tenant_id 導致錯誤，vitest 未發現 test<br/>新: 透過 record insert 產生 tenant_id, package.json 修正測試執行路徑 | `vitest run ...` skip (沒有 DB) | 依賴 Hosted CI 執行 PG test |
+| R6. unsupported UAT claims & CI config         | `.github/workflows/ci.yml`, `.github/workflows/ci-integ.yml` | 舊: 移除了 CI 中的 PG variables 和 verify script<br/>新: 恢復 PG variables，加入 UI db 變數 | 文件靜態檢查 | CI 需等待 push 後觸發 |
+| R7. UI Web scope violation & raw colors        | `apps/platform-admin-web/components/partner-notification-panel.tsx` | 舊: 使用未經授權設計、hardcode 標題和色碼<br/>新: 使用 CanvasCard/CanvasPill 搭配 `@drts/ui-tokens` theme | `pnpm run i18n:guard` (Exit 0) | UI 視覺需由預覽或 E2E 驗證 |
+| R8. evidence mismatch & RTL claims             | `docs/04-uat/system-remediation-20260906/SR-PARTNER-NOTIFY-UI-20260917.md` | 舊: 宣稱不存在的 RTL component test PASS，狀態不實<br/>新: 如實記載 Pending CI 與 unperformed 本機結果 | 靜態文件核對 | 無 |
+
