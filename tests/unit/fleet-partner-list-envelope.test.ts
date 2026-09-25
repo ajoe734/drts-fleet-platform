@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { ApiClient } from "../../packages/api-client/src";
+import { ApiClient } from "@drts/api-client";
 import {
   listFleetPartners,
   listFleetPartnerDrivers,
