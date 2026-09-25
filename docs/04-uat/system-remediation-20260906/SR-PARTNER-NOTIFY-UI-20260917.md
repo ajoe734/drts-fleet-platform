@@ -20,11 +20,12 @@
 ## Handoff Evidence (Gemini)
 
 - **Candidate Branch**: gemini/sr-partner-notify-ui-20260924-canvas
-- **Candidate SHA**: 8baf7ed3e8e065ca29d3df1c4277a4398457b341
+- **Candidate SHA**: ee4ef4a16ca0d66a50b41b56a0143d0132ad0695
 - **Evidence**:
   - `env -u DATABASE_URL -u PARTNER_NOTIFY_UI_TEST_DATABASE_URL pnpm exec vitest run tests/unit/system-remediation/sr-partner-notify-ui-20260917/notification-ui.test.ts tests/unit/system-remediation/sr-partner-notify-ui-20260917/notification-ui.postgres.test.ts`: Exit 0 (3 client PASS + 3 PG SKIP)
   - `pnpm exec tsc -p apps/platform-admin-web/tsconfig.json --noEmit --incremental false`: Exit 0
   - `pnpm exec tsc -p tsconfig.json --noEmit --incremental false`: Exit 0
+  - See PR [#2155](https://github.com/ajoe734/drts-fleet-platform/pull/2155) for full CI logs and Hosted i18n Guard pass.
 
 ## Review Findings & Acceptance Criteria Resolution
 
@@ -36,6 +37,5 @@
 | R4. assignmentVersion/exhausted logic | PASS                 | `multi-taxi.repository.ts`                                | Used `ctx.wire_payload?.data?.assignmentVersion` or `outbox.payload?.assignmentVersion`. Checks expiry/lease before returning requeued, and preserves actual failure_reason on exhausted.                                                            |
 | R5. PG test fixtures / discovery      | PASS                 | `notification-ui.postgres.test.ts`, `apps/api/package.json` | Removed invalid test fixtures, injected valid `phase1_tenant_registry`, `phase1_owned_orders` with full required fields. Added test to CI integration gates.                                                                                  |
 | R6. CI env vars and python script     | PASS                 | `.github/workflows/ci.yml`, `verify...`                   | Restored `PARTNER_NOTIFY_SEQ_TEST_DATABASE_URL` and `PARTNER_NOTIFY_TRANSPORT_TEST_DATABASE_URL` and Python verifier. Added `PARTNER_NOTIFY_UI_TEST_DATABASE_URL`.                                                           |
-| R7. UI Design Canvas                  | PASS                 | `partner-notification-panel.tsx`                          | Implemented the actual approved design canvas using `@drts/ui-web` primitives (`CanvasCard`, `CanvasPill`, etc.) and tokens instead of raw palettes.         |
+| R7. UI Design Canvas                  | PASS                 | `partner-notification-panel.tsx`, `translations.ts`                          | Implemented the actual approved design canvas using `@drts/ui-web` primitives and tokens instead of raw palettes. Extracted all hardcoded Chinese text to `translations.ts` to pass `i18n-guard`.         |
 | R8. UAT false claims                  | PASS                 | `SR-PARTNER-NOTIFY-UI-20260917.md`                        | Corrected this artifact with actual commands, full candidate identity, removed false React Testing Library claims. |
-
