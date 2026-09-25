@@ -64,7 +64,7 @@ Implication:
   - Historical role audit timeline.
 
 ### 3.2 Privileged Role Approvals & SoD
-- Form to submit `CreatePrivilegedRoleRequestCommand` with requested role, justification, and step-up proof reference.
+- Form to submit `CreatePrivilegedRoleRequestCommand` with requested role and justification. Step-up is verified via fresh MFA or existing server proof during approval.
 - Renders before-after role diff pill (e.g. `operator` → `superadmin`).
 - Highlights SoD warnings (`IAM_SOD_VIOLATION`) when requester matches target or conflicting roles exist.
 - Enforces Last-Admin Protection (`IAM_LAST_ADMIN_PROTECTION`) when modifying or removing the final active `superadmin`.

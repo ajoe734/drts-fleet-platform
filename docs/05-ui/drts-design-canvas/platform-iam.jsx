@@ -130,20 +130,13 @@ function PA_IamPrivileged({ theme:th, stepUpState = "none" }) {
         <Card theme={th} title="申請 PR-0086 · 王新人 → security_admin" subtitle="待審批 · 單人核准" actions={<Pill theme={th} tone="warn" dot>待審批</Pill>}>
           <Stepper theme={th} current={1} steps={['送出','非本人核准 + step-up','生效']}/>
           <div style={{ marginTop:12 }}>
-            {stepUpState === "none" && <Banner theme={th} tone="warn" icon="lock" title="需 step-up proof" body="核准前需重新驗證取得 stepUpReference（有效 5 分鐘、單次使用）。核准請求須附此參照；過期或已用回 401 IAM_STEP_UP_REQUIRED。" actions={<Btn theme={th} size="xs" variant="primary" icon="lock">取得 step-up proof</Btn>}/>}
-            {stepUpState === "verifying" && <Banner theme={th} tone="info" icon="clock" title="正在向伺服器請求身分驗證憑證..."/>}
-            {stepUpState === "valid" && <Banner theme={th} tone="success" icon="check" title="身分驗證憑證有效" body="可進行高風險操作。"/>}
-            {stepUpState === "expired" && <Banner theme={th} tone="danger" icon="alert-triangle" title="登入逾時 (IAM_STEP_UP_REQUIRED)" body="憑證已過期或被拒絕，請重新登入 (Fresh MFA) 後再試。" actions={<Btn theme={th} size="xs" variant="primary" icon="refresh">重新取得</Btn>}/>}
-          </div>
-          <div style={{ marginTop:10 }}>
-            {stepUpState === "none" && <Field theme={th} label="stepUpReference" required hint="尚未取得 · 核准前先完成 step-up"><Input theme={th} value="—" mono readOnly/></Field>}
-            {stepUpState === "verifying" && <Field theme={th} label="stepUpReference" required hint="驗證中"><Input theme={th} value="驗證中..." mono readOnly disabled/></Field>}
-            {stepUpState === "valid" && <Field theme={th} label="stepUpReference" required hint="由 step-up 驗證回填 · 到期 09-24 10:41"><Input theme={th} value="sup_••••••••b3e1 · 剩 04:12" mono readOnly/></Field>}
-            {stepUpState === "expired" && <Field theme={th} label="stepUpReference" required hint="已失效"><Input theme={th} value="sup_••••••••b3e1 (已失效)" mono readOnly disabled/></Field>}
+            {stepUpState === "none" && <Banner theme={th} tone="warn" icon="lock" title="需 Fresh MFA 重新驗證" body="核准高權限角色前，需具有有效的 Fresh MFA 或伺服器憑證。若驗證失效，伺服器將拒絕並回傳 401 IAM_STEP_UP_REQUIRED。"/>}
+            {stepUpState === "verifying" && <Banner theme={th} tone="info" icon="clock" title="正在驗證身分..."/>}
+            {stepUpState === "valid" && <Banner theme={th} tone="success" icon="check" title="身分驗證有效" body="已符合 Fresh MFA 或伺服器憑證要求，可進行核准操作。"/>}
+            {stepUpState === "expired" && <Banner theme={th} tone="danger" icon="alert-triangle" title="驗證過期 (401 IAM_STEP_UP_REQUIRED)" body="目前的登入憑證已失效，請重新登入 (Fresh MFA) 後再試。" actions={<Btn theme={th} size="xs" variant="primary" icon="refresh">重新登入</Btn>}/>}
           </div>
           <div style={{ display:'flex', gap:8, marginTop: 12 }}>
-            <ActionButton theme={th} descriptor={{ action:'approve', enabled: stepUpState === 'valid', disabledReasonCode:'IAM_STEP_UP_REQUIRED', riskLevel:'high', requiresReason:true }} variant="primary" icon="check" label={stepUpState === 'valid' ? '核准（附 proof）' : '核准'} en="approve"/>
-            {stepUpState === 'expired' && <Btn theme={th} size="sm" variant="ghost" icon="refresh">proof 失效 · 重新取得</Btn>}
+            <ActionButton theme={th} descriptor={{ action:'approve', enabled: stepUpState === 'valid', disabledReasonCode:'IAM_STEP_UP_REQUIRED', riskLevel:'high', requiresReason:true }} variant="primary" icon="check" label="核准" en="approve"/>
           </div>
         </Card>
         <Card theme={th} title="申請表單">
@@ -210,7 +203,7 @@ function PA_IamBreakGlass({ theme:th, active, state = "form", stepUpState = "non
   const isApproved = resolvedState === "approved";
   const isActive = resolvedState === "active" || resolvedState === "exit_failed";
   const isClosed = resolvedState === "closed";
-
+  const isExpiredGrant = resolvedState === "expired_grant";
 
   const stepMap = {
     form: 0,
@@ -240,7 +233,7 @@ function PA_IamBreakGlass({ theme:th, active, state = "form", stepUpState = "non
                   {stepUpState === "valid" && <Field theme={th} label="stepUpReference" required hint="已由 step-up 驗證回填"><Input theme={th} value="sup_••••••••b3e1" mono readOnly/></Field>}
                   {stepUpState === "expired" && (
                     <>
-                      <Banner theme={th} tone="danger" icon="alert-triangle" title="登入逾時 (IAM_STEP_UP_REQUIRED)" body="憑證已過期或被拒絕，請重新登入 (Fresh MFA) 後再試。" actions={<Btn theme={th} size="xs" variant="primary" icon="refresh">重新取得</Btn>}/>
+                      <Banner theme={th} tone="danger" icon="alert-triangle" title="憑證無效 (403 IAM_STEP_UP_REQUIRED)" body="憑證已過期或被拒絕，請重新登入 (Fresh MFA) 後再試。" actions={<Btn theme={th} size="xs" variant="primary" icon="refresh">重新取得</Btn>}/>
                       <Field theme={th} label="stepUpReference" required hint="已失效"><Input theme={th} value="sup_••••••••b3e1" mono readOnly disabled/></Field>
                     </>
                   )}
@@ -258,10 +251,10 @@ function PA_IamBreakGlass({ theme:th, active, state = "form", stepUpState = "non
                   { k:'申請範圍', v:'identity:read · security:audit:read', mono:true }
                 ]}/>
                 <div style={{ marginTop:12 }}>
-                  {stepUpState === "none" && <Banner theme={th} tone="warn" icon="lock" title="需 step-up proof" body="操作前需重新驗證取得 stepUpReference。核准請求須附此參照；過期或已用回 401 IAM_STEP_UP_REQUIRED。" actions={<Btn theme={th} size="xs" variant="primary" icon="lock">取得 step-up proof</Btn>}/>}
+                  {stepUpState === "none" && <Banner theme={th} tone="warn" icon="lock" title="需 step-up proof" body="操作前需重新驗證取得 stepUpReference。核准請求須附此參照；過期或缺漏將回傳 403 IAM_STEP_UP_REQUIRED。" actions={<Btn theme={th} size="xs" variant="primary" icon="lock">取得 step-up proof</Btn>}/>}
                   {stepUpState === "verifying" && <Banner theme={th} tone="info" icon="clock" title="正在向伺服器請求身分驗證憑證..."/>}
                   {stepUpState === "valid" && <Banner theme={th} tone="success" icon="check" title="身分驗證憑證有效" body="可進行高風險操作。"/>}
-                  {stepUpState === "expired" && <Banner theme={th} tone="danger" icon="alert-triangle" title="憑證已過期" body="請重新取得憑證。" actions={<Btn theme={th} size="xs" variant="primary" icon="refresh">重新取得</Btn>}/>}
+                  {stepUpState === "expired" && <Banner theme={th} tone="danger" icon="alert-triangle" title="憑證無效 (403 IAM_STEP_UP_REQUIRED)" body="憑證已過期或被拒絕，請重新取得。" actions={<Btn theme={th} size="xs" variant="primary" icon="refresh">重新取得</Btn>}/>}
                 </div>
                 <div style={{ marginTop:10 }}>
                   {stepUpState === "none" && <Field theme={th} label="stepUpReference" required hint="尚未取得 · 核准前先完成 step-up"><Input theme={th} value="—" mono readOnly/></Field>}
@@ -283,7 +276,7 @@ function PA_IamBreakGlass({ theme:th, active, state = "form", stepUpState = "non
                   { k:'到期時間', v:'不自動到期 (待啟用)' }
                 ]}/>
                 <div style={{ marginTop:12 }}>
-                  <Banner theme={th} tone="warn" icon="lock" title="此環境的後端尚未實作 activate 操作的 step-up policy (Documented Gap)。Activate 將因缺乏 step-up 憑證而無法通過驗證。"/>
+                  <Banner theme={th} tone="danger" icon="alert-triangle" title="無法啟用緊急權限 (403 IAM_STEP_UP_REQUIRED)" body="由於系統未能驗證您的身分憑證，目前無法核發權杖。請聯絡系統管理員協助處理。"/>
                 </div>
                 <div style={{ marginTop:12, display:'flex', gap:8 }}>
                   <ActionButton theme={th} descriptor={{ action:'activate', enabled:false, disabledReasonCode:'NO_API_POLICY', riskLevel:'high' }} variant="primary" danger icon="power" label="啟用緊急權限" en="activate"/>
@@ -299,7 +292,7 @@ function PA_IamBreakGlass({ theme:th, active, state = "form", stepUpState = "non
                   { k:'短效權杖', v:<span style={{ fontFamily:SHELL_MONO }}>bgt_••••••••••••9e2f <Pill theme={th} tone="neutral">僅顯示一次</Pill></span> },{ k:'已授權範圍', v:'identity:read · security:audit:read', mono:true },
                 ]}/>
                 {resolvedState === "exit_failed" && (
-                  <div style={{ marginTop:12 }}><Banner theme={th} tone="danger" icon="alert-triangle" title="無法退出 (STEP_UP_REQUIRED)" body="此環境的後端尚未實作 close 操作的 step-up policy (Documented Gap)。Exit 將因缺乏 step-up 憑證而無法通過驗證。"/></div>
+                  <div style={{ marginTop:12 }}><Banner theme={th} tone="danger" icon="alert-triangle" title="無法自動退出 (403 IAM_STEP_UP_REQUIRED)" body="由於系統未能驗證您的身分憑證，無法正常撤銷權杖。請聯絡系統管理員手動介入。"/></div>
                 )}
                 <div style={{ marginTop:12, display:'flex', gap:8 }}><Btn theme={th} variant="secondary" danger icon="x">提前退出破窗</Btn><Btn theme={th} icon="audit">檢視稽核紀錄</Btn></div>
               </>
@@ -312,6 +305,20 @@ function PA_IamBreakGlass({ theme:th, active, state = "form", stepUpState = "non
                   { k:'狀態', v:<Pill theme={th} tone="neutral" dot>已結束</Pill> },
                   { k:'結束時間', v:'09-24 10:45:12 +08', mono:true }
                 ]}/>
+                <div style={{ marginTop:12, display:'flex', gap:8 }}><Btn theme={th} icon="audit">檢視稽核紀錄</Btn></div>
+              </>
+            )}
+
+            {isExpiredGrant && (
+              <>
+                <DL theme={th} cols={2} items={[
+                  { k:'申請人', v:'駱思賢' },{ k:'核准', v:'林安全' },
+                  { k:'狀態', v:<Pill theme={th} tone="danger" dot>授權已逾時</Pill> },
+                  { k:'過期時間', v:'09-24 11:18:33 +08', mono:true }
+                ]}/>
+                <div style={{ marginTop:12 }}>
+                  <Banner theme={th} tone="danger" icon="alert-triangle" title="短效權杖已撤銷" body="超過 60 分鐘授權上限，系統已自動撤銷您的破窗權杖及所有相關連線。"/>
+                </div>
                 <div style={{ marginTop:12, display:'flex', gap:8 }}><Btn theme={th} icon="audit">檢視稽核紀錄</Btn></div>
               </>
             )}
