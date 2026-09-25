@@ -47,12 +47,12 @@ describe.skipIf(!testDbUrl || process.env.RUN_UI_PG_GATE !== "true")(
       );
 
       await pool.query(
-        "INSERT INTO admin.phase1_partner_channel_entries (entry_slug, tenant_id, partner_id, created_at, updated_at, program_id, status, record) VALUES ($1, $2, $3, now(), now(), 'p1', 'active', '{}')",
-        [entrySlug1, tenantId, partnerId],
+        "INSERT INTO admin.phase1_partner_channel_entries (entry_slug, tenant_id, partner_id, created_at, updated_at, program_id, status, record) VALUES ($1, $2, $3, now(), now(), 'p1', 'active', $4::jsonb)",
+        [entrySlug1, tenantId, partnerId, JSON.stringify({ entrySlug: entrySlug1, tenantId, partnerId, partnerCode: "P1", partnerType: "enterprise", programId: "p1", displayName: "Partner 1", businessDispatchSubtype: "standard" })],
       );
       await pool.query(
-        "INSERT INTO admin.phase1_partner_channel_entries (entry_slug, tenant_id, partner_id, created_at, updated_at, program_id, status, record) VALUES ($1, $2, $3, now(), now(), 'p2', 'active', '{}')",
-        [entrySlug2, tenantId, partnerId],
+        "INSERT INTO admin.phase1_partner_channel_entries (entry_slug, tenant_id, partner_id, created_at, updated_at, program_id, status, record) VALUES ($1, $2, $3, now(), now(), 'p2', 'active', $4::jsonb)",
+        [entrySlug2, tenantId, partnerId, JSON.stringify({ entrySlug: entrySlug2, tenantId, partnerId, partnerCode: "P2", partnerType: "enterprise", programId: "p2", displayName: "Partner 2", businessDispatchSubtype: "standard" })],
       );
 
       await pool.query(
@@ -103,8 +103,8 @@ describe.skipIf(!testDbUrl || process.env.RUN_UI_PG_GATE !== "true")(
       }
 
       await pool.query(
-        "DELETE FROM admin.phase1_passenger_identity_links WHERE tenant_id = $1 AND partner_id = $2",
-        [tenantId, partnerId],
+        "DELETE FROM admin.phase1_partner_user_identity_links WHERE entry_slug IN ($1, $2)",
+        [entrySlug1, entrySlug2],
       );
       await pool.query(
         "DELETE FROM admin.phase1_partner_notification_bindings WHERE binding_id IN ($1, $2)",
@@ -142,12 +142,12 @@ describe.skipIf(!testDbUrl || process.env.RUN_UI_PG_GATE !== "true")(
       createdOutboxIds.push(outboxId);
 
       await pool.query(
-        "INSERT INTO admin.phase1_passenger_identity_links (drts_passenger_id, passenger_subject_ref, tenant_id, partner_id, partner_user_ref, status, created_at, updated_at) VALUES ('passenger', 'sub', $1, $2, 'user', 'active', now(), now()) ON CONFLICT DO NOTHING",
-        [tenantId, partnerId],
+        "INSERT INTO admin.phase1_partner_user_identity_links (entry_slug, partner_user_ref, drts_passenger_id, status, consent_scope, linked_at, last_seen_at, created_at, updated_at, record) VALUES ($1, 'user', 'passenger', 'active', '[\"all\"]'::jsonb, now(), now(), now(), now(), '{}') ON CONFLICT DO NOTHING",
+        [opts.entrySlug || entrySlug1],
       );
       await pool.query(
-        "INSERT INTO ops.phase1_owned_orders (order_id, order_no, status, order_source, service_bucket, dispatch_semantics, created_at, updated_at, record) VALUES ($1, $1, 'created', 'app', 'multi_taxi', 'immediate', now(), now(), '{}')",
-        [orderId],
+        "INSERT INTO ops.phase1_owned_orders (order_id, order_no, status, order_source, service_bucket, dispatch_semantics, created_at, updated_at, record) VALUES ($1, $1, 'created', 'app', 'multi_taxi', 'immediate', now(), now(), $2::jsonb)",
+        [orderId, JSON.stringify({ tenantId, partnerId, origin: "system" })],
       );
 
       await pool.query(

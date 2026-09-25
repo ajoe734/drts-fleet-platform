@@ -2136,11 +2136,14 @@ export class MultiTaxiRepository {
             },
           };
         }
-        const assignmentVersion = ctx
+        const assignmentVersionRaw = ctx
           ? ctx.wire_payload?.data?.assignmentVersion
-          : outbox.assignment_version;
+          : (outbox.assignment_version ?? outbox.payload?.assignmentVersion);
+        const assignmentVersion =
+          assignmentVersionRaw !== undefined && assignmentVersionRaw !== null
+            ? Number(assignmentVersionRaw)
+            : null;
         if (
-          assignmentVersion !== undefined &&
           assignmentVersion !== null &&
           assignmentVersion < relevance.assignmentVersion
         ) {
