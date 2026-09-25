@@ -15,10 +15,10 @@
 ## Handoff Evidence (Gemini)
 
 - **Candidate Branch**: gemini/sr-partner-notify-ui-20260924-canvas
-- **Candidate SHA**: 3d61cb0b4e759f702752e8cb37f528f74dde1220
+- **Candidate SHA**: 7ede6dacd34b699991e07b05c1b6141ffaf93bd9
 - **Hosted CI Evidence**:
-  - CI: Pending PR #2155 update.
-  - Postgres Gate (CI): UNPERFORMED locally (Requires hosted DB; `RUN_UI_PG_GATE=true PARTNER_NOTIFY_UI_TEST_DATABASE_URL=... vitest run ...` returned ECONNREFUSED).
+  - CI: PR #2155 pending checks for 7ede6dacd (Run: https://github.com/ajoe734/drts-fleet-platform/actions/runs/36129647146).
+  - Postgres Gate (CI): UNPERFORMED locally (Requires hosted DB; `RUN_UI_PG_GATE=true PARTNER_NOTIFY_UI_TEST_DATABASE_URL=... vitest run ...` returned SKIP).
 - **Local Evidence**:
   - `pnpm exec tsc -p apps/platform-admin-web/tsconfig.json --noEmit`: Exit 0
   - `pnpm exec tsc -p tsconfig.json --noEmit`: Exit 0
