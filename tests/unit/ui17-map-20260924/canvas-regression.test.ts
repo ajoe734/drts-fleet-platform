@@ -4,13 +4,13 @@ import { evaluateAddressSubmitGate } from '../../../packages/ui-web/src/address-
 describe('UI17-MAP-20260924 gate behavior regressions', () => {
   const validAddress = {
     address: 'Taipei 101',
-    coordinateSource: 'provider' as const,
+    coordinateSource: 'provider_candidate' as const,
     lat: 25.0330,
     lng: 121.5654,
   };
   const invalidAddress = {
     address: 'No Pin',
-    coordinateSource: 'provider' as const,
+    coordinateSource: 'provider_candidate' as const,
   };
   
   test('tenant outage request prevention logic / provider_down with pins', () => {
@@ -19,8 +19,8 @@ describe('UI17-MAP-20260924 gate behavior regressions', () => {
     const gate = evaluateAddressSubmitGate({
       pickup: validAddress,
       dropoff: validAddress,
-      serviceability: { decision: 'serviceable', reasonCode: 'ok' },
-      providerState: { available: false, degraded: true, reasonCode: 'outage' },
+      serviceability: { decision: 'serviceable', reasonCodes: ['ok'] } as any,
+      providerState: { available: false, degraded: true, reasonCode: 'provider_unhealthy' },
     });
     expect(gate.blocking).toBe(false);
     expect(gate.code).toBe('dispatch_manual_review_required');
@@ -31,8 +31,8 @@ describe('UI17-MAP-20260924 gate behavior regressions', () => {
     const gate = evaluateAddressSubmitGate({
       pickup: invalidAddress as any,
       dropoff: validAddress,
-      serviceability: { decision: 'serviceable', reasonCode: 'ok' },
-      providerState: { available: false, degraded: true, reasonCode: 'outage' },
+      serviceability: { decision: 'serviceable', reasonCodes: ['ok'] } as any,
+      providerState: { available: false, degraded: true, reasonCode: 'provider_unhealthy' },
     });
     expect(gate.blocking).toBe(true);
     expect(gate.code).toBe('coordinates_required');
@@ -43,12 +43,12 @@ describe('UI17-MAP-20260924 gate behavior regressions', () => {
     const gate = evaluateAddressSubmitGate({
       pickup: {
         address: 'Manual Point',
-        coordinateSource: 'manual',
+        coordinateSource: 'manual_pin',
         lat: NaN,
         lng: 121.5,
       },
       dropoff: validAddress,
-      serviceability: { decision: 'serviceable', reasonCode: 'ok' },
+      serviceability: { decision: 'serviceable', reasonCodes: ['ok'] } as any,
     });
     expect(gate.blocking).toBe(true);
     expect(gate.code).toBe('coordinates_required');
@@ -58,8 +58,8 @@ describe('UI17-MAP-20260924 gate behavior regressions', () => {
     const gate = evaluateAddressSubmitGate({
       pickup: validAddress,
       dropoff: validAddress,
-      serviceability: { decision: 'not_serviceable', reasonCode: 'out_of_area' },
-      providerState: { available: false, degraded: true, reasonCode: 'outage' },
+      serviceability: { decision: 'not_serviceable', reasonCodes: ['out_of_area'] } as any,
+      providerState: { available: false, degraded: true, reasonCode: 'provider_unhealthy' },
     });
     expect(gate.blocking).toBe(true);
     expect(gate.code).toBe('outside_service_area');
@@ -69,10 +69,10 @@ describe('UI17-MAP-20260924 gate behavior regressions', () => {
     const gate = evaluateAddressSubmitGate({
       pickup: {
         ...validAddress,
-        coordinateSource: 'manual',
+        coordinateSource: 'manual_pin',
       },
       dropoff: validAddress,
-      serviceability: { decision: 'serviceable', reasonCode: 'ok' },
+      serviceability: { decision: 'serviceable', reasonCodes: ['ok'] } as any,
       providerState: { available: true, degraded: false, reasonCode: 'available' },
     });
     expect(gate.blocking).toBe(false);
