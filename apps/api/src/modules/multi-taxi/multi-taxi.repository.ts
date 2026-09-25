@@ -20,8 +20,8 @@ import type {
   PassengerRideAccessToken,
   PassengerTripRatingRecord,
   PushProviderAckState,
-  PARTNER_PASSENGER_EVENT_DEFAULT_TTL_SECONDS,
 } from "@drts/contracts";
+import { PARTNER_PASSENGER_EVENT_DEFAULT_TTL_SECONDS } from "@drts/contracts";
 
 import type {
   PartnerDeliveryMetadata,

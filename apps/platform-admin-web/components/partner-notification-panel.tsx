@@ -809,14 +809,16 @@ function PnDeliveries({
               if (r.deliveryStage === "partner_accepted" && r.receiptId) {
                 return (
                   <CanvasPill theme={th} tone="info" dot>
-                    端點已接受，裝置未知
+                    {t("partnerNotification.accepted_unknown") ??
+                      "端點已接受，裝置未知"}
                   </CanvasPill>
                 );
               }
               if (r.status === "delivered") {
                 return (
                   <CanvasPill theme={th} tone="neutral" dot>
-                    歷史紀錄（裝置未知）
+                    {t("partnerNotification.historical_unknown") ??
+                      "歷史紀錄（裝置未知）"}
                   </CanvasPill>
                 );
               }
