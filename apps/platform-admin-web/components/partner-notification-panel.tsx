@@ -3,6 +3,7 @@
 import React, { useEffect, useState, useCallback } from "react";
 import { usePlatformAdminClient } from "@/lib/admin-client";
 import { useTranslation } from "@/lib/i18n";
+import { PARTNER_PASSENGER_EVENT_TO_EXTERNAL_NAME } from "@drts/contracts";
 
 import {
   buildCanvasTheme,
@@ -81,34 +82,16 @@ function PnBinding({
   const m = PN_BIND[state] || ["未知", "neutral"];
   const testDisplay = TEST_STATUS[testStatus] || ["尚未測試", "neutral"];
 
-  const PN_EVENTS: [string, string, string][] = [
-    [
-      "assignment_disclosure_ready",
-      "passenger.assignment_disclosure_ready.v1",
-      t("partnerNotification.event.assignment_disclosure_ready") ??
-        "派車揭露就緒",
-    ],
-    [
-      "assignment_replaced",
-      "passenger.assignment_replaced.v1",
-      t("partnerNotification.event.assignment_replaced") ?? "派車已更換",
-    ],
-    [
-      "eta_changed",
-      "passenger.eta_changed.v1",
-      t("partnerNotification.event.eta_changed") ?? "ETA 變更",
-    ],
-    [
-      "driver_arrived",
-      "passenger.driver_arrived.v1",
-      t("partnerNotification.event.driver_arrived") ?? "駕駛已抵達",
-    ],
-    [
-      "receipt_ready",
-      "passenger.receipt_ready.v1",
-      t("partnerNotification.event.receipt_ready") ?? "收據就緒",
-    ],
-  ];
+  const ZH_MAP: Record<string, string> = {
+    assignment_disclosure_ready: t("partnerNotification.event.assignment_disclosure_ready") ?? "派車揭露就緒",
+    assignment_replaced: t("partnerNotification.event.assignment_replaced") ?? "派車已更換",
+    eta_changed: t("partnerNotification.event.eta_changed") ?? "ETA 變更",
+    driver_arrived: t("partnerNotification.event.driver_arrived") ?? "駕駛已抵達",
+    receipt_ready: t("partnerNotification.event.receipt_ready") ?? "收據就緒",
+  };
+  const PN_EVENTS: [string, string, string][] = Object.entries(PARTNER_PASSENGER_EVENT_TO_EXTERNAL_NAME).map(
+    ([k, v]) => [k, v, ZH_MAP[k] || k]
+  );
 
   return (
     <CanvasCard
@@ -872,34 +855,16 @@ function PnEditView({
   const isSaving = saveState === "pending";
   const isSaveDisabled = isSaving || !editWebhookId || !canWriteBinding;
 
-  const PN_EVENTS: [string, string, string][] = [
-    [
-      "assignment_disclosure_ready",
-      "passenger.assignment_disclosure_ready.v1",
-      t("partnerNotification.event.assignment_disclosure_ready") ??
-        "派車揭露就緒",
-    ],
-    [
-      "assignment_replaced",
-      "passenger.assignment_replaced.v1",
-      t("partnerNotification.event.assignment_replaced") ?? "派車已更換",
-    ],
-    [
-      "eta_changed",
-      "passenger.eta_changed.v1",
-      t("partnerNotification.event.eta_changed") ?? "ETA 變更",
-    ],
-    [
-      "driver_arrived",
-      "passenger.driver_arrived.v1",
-      t("partnerNotification.event.driver_arrived") ?? "駕駛已抵達",
-    ],
-    [
-      "receipt_ready",
-      "passenger.receipt_ready.v1",
-      t("partnerNotification.event.receipt_ready") ?? "收據就緒",
-    ],
-  ];
+  const ZH_MAP: Record<string, string> = {
+    assignment_disclosure_ready: t("partnerNotification.event.assignment_disclosure_ready") ?? "派車揭露就緒",
+    assignment_replaced: t("partnerNotification.event.assignment_replaced") ?? "派車已更換",
+    eta_changed: t("partnerNotification.event.eta_changed") ?? "ETA 變更",
+    driver_arrived: t("partnerNotification.event.driver_arrived") ?? "駕駛已抵達",
+    receipt_ready: t("partnerNotification.event.receipt_ready") ?? "收據就緒",
+  };
+  const PN_EVENTS: [string, string, string][] = Object.entries(PARTNER_PASSENGER_EVENT_TO_EXTERNAL_NAME).map(
+    ([k, v]) => [k, v, ZH_MAP[k] || k]
+  );
 
   return (
     <div
