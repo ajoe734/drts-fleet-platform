@@ -1780,11 +1780,12 @@ export class MultiTaxiRepository {
         o.event_type as "eventType",
         CASE
           WHEN o.status = 'delivered' THEN 'delivered'
+          WHEN COALESCE(ctx.failure_reason, o.payload->'partnerNotification'->>'failureReason') IN ('route_missing', 'endpoint_disabled', 'configuration_blocked', 'recipient_revoked', 'owner_changed') THEN 'provider_not_configured'
           WHEN o.status = 'failed' THEN 'provider_error'
           ELSE NULL
         END as result,
         o.attempt_count as attempts,
-        COALESCE((ctx.retry_policy_snapshot->>'maxAttempts')::int, (o.payload->'partnerNotification'->>'maxAttempts')::int, 3) as "maxAttempts",
+        COALESCE((ctx.retry_policy_snapshot->>'maxAttempts')::int, (o.payload->'partnerNotification'->>'maxAttempts')::int) as "maxAttempts",
         o.next_attempt_at as "nextAttemptAt",
         l.lease_expires_at as "leaseExpiresAt"
       FROM ops.consumer_notification_outbox o

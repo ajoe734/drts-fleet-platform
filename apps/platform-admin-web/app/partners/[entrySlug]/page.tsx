@@ -2338,6 +2338,9 @@ export default function PartnerDetailPage() {
             tenantId={entry.tenantId}
             canWriteBinding={authority.scopes.includes("foundation:write")}
             canReadWebhooks={authority.scopes.includes("tenant:webhooks:read")}
+            canWriteWebhooks={authority.scopes.includes(
+              "tenant:webhooks:write",
+            )}
           />
         ) : null}
 

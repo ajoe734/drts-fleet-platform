@@ -56,16 +56,16 @@ describe.skipIf(!testDbUrl || process.env.RUN_UI_PG_GATE !== "true")(
       );
 
       await pool.query(
-        "INSERT INTO admin.phase1_tenant_webhook_endpoints (webhook_id, tenant_id, url, events, status, secret_version, secret_preview, created_at, updated_at) VALUES ($1, $2, 'https://test.com', '[]', 'active', 1, 'prev', now(), now())",
+        'INSERT INTO admin.phase1_tenant_webhook_endpoints (webhook_id, tenant_id, status, created_at, updated_at, record) VALUES ($1, $2, \'active\', now(), now(), \'{"url": "https://test.com", "events": ["eta_changed"], "secret_version": 1, "secret_preview": "prev"}\'::jsonb)',
         [webhookId, tenantId],
       );
 
       await pool.query(
-        "INSERT INTO admin.phase1_partner_notification_bindings (binding_id, entry_slug, tenant_id, partner_id, webhook_id, version, state, event_types, validated_endpoint_fingerprint, created_at, updated_at) VALUES ($1, $2, $3, $4, $5, 1, 'ready', '[]', 'f', now(), now())",
+        "INSERT INTO admin.phase1_partner_notification_bindings (binding_id, entry_slug, tenant_id, partner_id, webhook_id, version, state, event_types, validated_endpoint_fingerprint) VALUES ($1, $2, $3, $4, $5, 1, 'ready', '[\"eta_changed\"]', 'f')",
         [bindingId1, entrySlug1, tenantId, partnerId, webhookId],
       );
       await pool.query(
-        "INSERT INTO admin.phase1_partner_notification_bindings (binding_id, entry_slug, tenant_id, partner_id, webhook_id, version, state, event_types, validated_endpoint_fingerprint, created_at, updated_at) VALUES ($1, $2, $3, $4, $5, 1, 'ready', '[]', 'f', now(), now())",
+        "INSERT INTO admin.phase1_partner_notification_bindings (binding_id, entry_slug, tenant_id, partner_id, webhook_id, version, state, event_types, validated_endpoint_fingerprint) VALUES ($1, $2, $3, $4, $5, 1, 'ready', '[\"eta_changed\"]', 'f')",
         [bindingId2, entrySlug2, tenantId, partnerId, webhookId],
       );
 
@@ -73,7 +73,6 @@ describe.skipIf(!testDbUrl || process.env.RUN_UI_PG_GATE !== "true")(
       await app.init();
 
       mtRepo = app.get(MultiTaxiRepository);
-      mtService = app.get(MultiTaxiService);
     });
 
     afterAll(async () => {
@@ -97,8 +96,16 @@ describe.skipIf(!testDbUrl || process.env.RUN_UI_PG_GATE !== "true")(
           "DELETE FROM mobility.phase1_order_partner_notification_routes WHERE order_id = ANY($1)",
           [createdOrderIds],
         );
+        await pool.query(
+          "DELETE FROM ops.phase1_owned_orders WHERE order_id = ANY($1)",
+          [createdOrderIds],
+        );
       }
 
+      await pool.query(
+        "DELETE FROM admin.phase1_passenger_identity_links WHERE tenant_id = $1 AND partner_id = $2",
+        [tenantId, partnerId],
+      );
       await pool.query(
         "DELETE FROM admin.phase1_partner_notification_bindings WHERE binding_id IN ($1, $2)",
         [bindingId1, bindingId2],
@@ -135,7 +142,16 @@ describe.skipIf(!testDbUrl || process.env.RUN_UI_PG_GATE !== "true")(
       createdOutboxIds.push(outboxId);
 
       await pool.query(
-        "INSERT INTO mobility.phase1_order_partner_notification_routes (order_id, entry_slug, tenant_id, partner_id, partner_user_ref, created_at, updated_at) VALUES ($1, $2, $3, $4, 'user', now(), now())",
+        "INSERT INTO admin.phase1_passenger_identity_links (drts_passenger_id, passenger_subject_ref, tenant_id, partner_id, partner_user_ref, status, created_at, updated_at) VALUES ('passenger', 'sub', $1, $2, 'user', 'active', now(), now()) ON CONFLICT DO NOTHING",
+        [tenantId, partnerId],
+      );
+      await pool.query(
+        "INSERT INTO ops.phase1_owned_orders (order_id, order_no, status, order_source, service_bucket, dispatch_semantics, created_at, updated_at, record) VALUES ($1, $1, 'created', 'app', 'multi_taxi', 'immediate', now(), now(), '{}')",
+        [orderId],
+      );
+
+      await pool.query(
+        "INSERT INTO mobility.phase1_order_partner_notification_routes (order_id, ride_ref, entry_slug, tenant_id, partner_id, partner_user_ref, drts_passenger_id, passenger_subject_ref, identity_linked_at, consent_bundle_version, created_at) VALUES ($1, $1, $2, $3, $4, 'user', 'passenger', 'sub', now(), 1, now())",
         [orderId, opts.entrySlug || entrySlug1, tenantId, partnerId],
       );
 
@@ -148,7 +164,7 @@ describe.skipIf(!testDbUrl || process.env.RUN_UI_PG_GATE !== "true")(
       await pool.query(
         'INSERT INTO mobility.phase1_partner_notification_delivery_contexts (outbox_id, delivery_id, order_id, entry_slug, tenant_id, partner_id, binding_id, binding_version, webhook_id, endpoint_fingerprint, wire_payload, wire_payload_hash, event_sequence, expires_at, retry_policy_snapshot, delivery_target, retry_disposition, failure_reason, receipt_id, created_at) VALUES ($1, gen_random_uuid(), $2, $3, $4, $5, $6, 1, $7, \'f\', \'{"event": "passenger.eta_changed.v1", "data": {"recipient": {"partnerUserRef": "user"}}}\'::jsonb, \'testhash\', 42, ' +
           (opts.expiresAt || "now() + interval '1 day'") +
-          ", '{\"maxAttempts\": 3}'::jsonb, 'target', $8, $9, $10, now())",
+          ", '{\"maxAttempts\": 3}'::jsonb, 'partner_endpoint', $8, $9, $10, now())",
         [
           outboxId,
           orderId,
@@ -248,29 +264,28 @@ describe.skipIf(!testDbUrl || process.env.RUN_UI_PG_GATE !== "true")(
 
       // mtRepo.listPartnerNotificationDeliveries
       const list1 = await mtRepo.listPartnerNotificationDeliveries(
-        entrySlug1,
+        { entrySlug: entrySlug1, tenantId, partnerId },
         { pageSize: 50 },
-        { tenantId, partnerId },
       );
       expect(list1.rows.length).toBe(1);
       expect(list1.rows[0].deliveryId).toBeDefined();
       expect(list1.rows[0].wirePayloadHash).toBe("testhash");
-      expect(list1.rows[0].eventSequence).toBe(42);
+      expect(Number(list1.rows[0].eventSequence)).toBe(42);
       expect(list1.rows[0].receiptId).toBe("rcpt-123");
 
       const list2 = await mtRepo.listPartnerNotificationDeliveries(
-        entrySlug2,
+        { entrySlug: entrySlug2, tenantId, partnerId },
         { pageSize: 50 },
-        { tenantId, partnerId },
       );
       expect(list2.rows.length).toBe(1);
       expect(list2.rows[0].receiptId).toBe("rcpt-456");
+    });
 
+    it("tests list API pagination boundary", async () => {
       // Test pagination boundary
       const listP = await mtRepo.listPartnerNotificationDeliveries(
-        entrySlug1,
+        { entrySlug: entrySlug1, tenantId, partnerId },
         { page: 2, pageSize: 50 },
-        { tenantId, partnerId },
       );
       expect(listP.rows.length).toBe(0);
     });

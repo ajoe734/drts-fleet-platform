@@ -65,6 +65,7 @@ function PnBinding({
   t,
   onEdit,
   canWriteBinding,
+  canWriteWebhooks,
 }: any) {
   const state = binding ? binding.state : "none";
   const PN_BIND: Record<string, [string, any]> = {
@@ -141,9 +142,9 @@ function PnBinding({
             v: (
               <span style={{ fontFamily: th.monoFamily }}>
                 {binding?.webhookId || "—"}{" "}
-                {tenantId ? (
+                {tenantId && canWriteWebhooks ? (
                   <a
-                    href={`/tenant-console/webhooks${binding?.webhookId ? `/${binding.webhookId}` : ""}`}
+                    href={`/tenant-console/webhooks`}
                     target="_blank"
                     rel="noreferrer"
                   >
@@ -527,9 +528,10 @@ function PnLifecycle({
 
 function PnRetryCell({
   theme: th,
-  r,
+  row: r,
   retryState,
   retryRowId,
+  retryError,
   onRetry,
   t,
   canWriteBinding,
@@ -660,6 +662,9 @@ function PnDeliveries({
   t,
   canWriteBinding,
   bindingState,
+  page,
+  total,
+  onPageChange,
 }: any) {
   const PN_DLV: Record<string, [string, any]> = {
     accepted: ["端點已接受，裝置未知", "info"],
@@ -907,6 +912,41 @@ function PnDeliveries({
           return r;
         })}
       />
+      {total > 0 && (
+        <div
+          style={{
+            padding: 12,
+            display: "flex",
+            justifyContent: "space-between",
+            alignItems: "center",
+            borderTop: `1px solid ${th.border}`,
+          }}
+        >
+          <span style={{ fontSize: 12, color: th.textSecondary }}>
+            共 {total} 筆紀錄
+          </span>
+          <div style={{ display: "flex", gap: 8 }}>
+            <CanvasBtn
+              theme={th}
+              size="xs"
+              variant="secondary"
+              disabled={page <= 1 || loading}
+              onClick={() => onPageChange?.(page - 1)}
+            >
+              上一頁
+            </CanvasBtn>
+            <CanvasBtn
+              theme={th}
+              size="xs"
+              variant="secondary"
+              disabled={page * 50 >= total || loading}
+              onClick={() => onPageChange?.(page + 1)}
+            >
+              下一頁
+            </CanvasBtn>
+          </div>
+        </div>
+      )}
     </CanvasCard>
   );
 }
@@ -926,6 +966,7 @@ function PnEditView({
   tenantId,
   t,
   canWriteBinding,
+  canWriteWebhooks,
   availableWebhooks,
   webhookError,
 }: any) {
@@ -1044,7 +1085,7 @@ function PnEditView({
               ))}
             </select>
             <div style={{ marginTop: 6 }}>
-              {tenantId ? (
+              {tenantId && canWriteWebhooks ? (
                 <a
                   href={`/tenant-console/webhooks`}
                   target="_blank"
@@ -1177,6 +1218,7 @@ export function PartnerNotificationPanel({
   canWriteBinding,
   tenantId,
   canReadWebhooks,
+  canWriteWebhooks,
 }: {
   entrySlug: string;
   partnerName?: string;
@@ -1185,6 +1227,7 @@ export function PartnerNotificationPanel({
   tenantId?: string;
   canWriteBinding?: boolean;
   canReadWebhooks?: boolean;
+  canWriteWebhooks?: boolean;
 }) {
   const client = usePlatformAdminClient();
   const { t } = useTranslation();
@@ -1222,14 +1265,20 @@ export function PartnerNotificationPanel({
     "idle" | "pending" | "failed" | "queued"
   >("idle");
   const [retryRowId, setRetryRowId] = useState<string | null>(null);
+  const [retryErrorMsg, setRetryErrorMsg] = useState<string | null>(null);
 
   const [editWebhookId, setEditWebhookId] = useState("");
   const [editEventTypes, setEditEventTypes] = useState<string[]>([]);
   const [editExpectedVersion, setEditExpectedVersion] = useState(0);
 
+  const [page, setPage] = useState(1);
+  const [total, setTotal] = useState(0);
+
   const activeEntry = React.useRef(entrySlug);
   activeEntry.current = entrySlug;
-  const fetchStateRef = React.useRef<any>();
+  const fetchStateRef = React.useRef<any>(null);
+  const pageRef = React.useRef(page);
+  pageRef.current = page;
 
   const fetchState = useCallback(
     async (isInitial = false) => {
@@ -1239,7 +1288,8 @@ export function PartnerNotificationPanel({
         const p: Promise<any>[] = [
           (client as any).getPartnerEntryNotificationBinding(entrySlug),
           (client as any).listPartnerNotificationDeliveries(entrySlug, {
-            pageSize: 500,
+            pageSize: 50,
+            page: pageRef.current,
           }),
         ];
         if (tenantId && canReadWebhooks) {
@@ -1250,10 +1300,43 @@ export function PartnerNotificationPanel({
           );
         }
         const _results = await Promise.allSettled(p);
-        const bReq = _results[0] as any;
+        let bReq = _results[0] as any;
         const dReq = _results[1] as any;
         const wReq = tenantId && canReadWebhooks ? (_results[2] as any) : null;
         if (reqId !== currentRequest.current) return;
+
+        if (
+          bReq.status === "fulfilled" &&
+          bReq.value &&
+          wReq?.status === "fulfilled"
+        ) {
+          const ep = (wReq.value || []).find(
+            (w: any) => w.webhookId === bReq.value.webhookId,
+          );
+          if (ep) {
+            const material = JSON.stringify({
+              url: ep.url,
+              events: [...(ep.events || [])].sort(),
+              secretVersion: ep.secretVersion,
+              ownerRef: ep.ownerRef ?? null,
+            });
+            const encoder = new TextEncoder();
+            const data = encoder.encode(material);
+            const hashBuffer = await crypto.subtle.digest("SHA-256", data);
+            const hashArray = Array.from(new Uint8Array(hashBuffer));
+            const fingerprint = hashArray
+              .map((b) => b.toString(16).padStart(2, "0"))
+              .join("");
+            bReq = {
+              ...bReq,
+              value: {
+                ...bReq.value,
+                endpointFingerprint: fingerprint,
+                endpointUrl: ep.url,
+              },
+            };
+          }
+        }
 
         if (bReq.status === "rejected") {
           const statusCode = bReq.reason?.statusCode;
@@ -1290,7 +1373,8 @@ export function PartnerNotificationPanel({
         }
 
         if (dReq.status === "fulfilled") {
-          setDeliveries(dReq.value.items || dReq.value || []);
+          setDeliveries(dReq.value?.items || dReq.value || []);
+          setTotal(dReq.value?.total || 0);
           setDeliveryError(null);
         } else {
           setDeliveries([]);
@@ -1353,6 +1437,10 @@ export function PartnerNotificationPanel({
   useEffect(() => {
     fetchState(true);
   }, [fetchState]);
+
+  useEffect(() => {
+    fetchState(false);
+  }, [page, fetchState]);
 
   const handleSave = async () => {
     setSaveState("pending");
@@ -1420,13 +1508,16 @@ export function PartnerNotificationPanel({
   const handleEnable = async () => {
     if (!binding) return;
     setEnableState("pending");
+    const currentEntry = entrySlug;
     try {
       await (client as any).enablePartnerEntryNotificationBinding(
         entrySlug,
         binding.version,
       );
-      fetchState();
+      if (activeEntry.current !== currentEntry) return;
+      fetchStateRef.current?.();
     } catch (err: any) {
+      if (activeEntry.current !== currentEntry) return;
       setError({
         kind: "error",
         message: err.message,
@@ -1434,20 +1525,25 @@ export function PartnerNotificationPanel({
       });
       setEnableState("failed");
     } finally {
-      setEnableState((prev) => (prev === "pending" ? "idle" : prev));
+      if (activeEntry.current === currentEntry) {
+        setEnableState((prev) => (prev === "pending" ? "idle" : prev));
+      }
     }
   };
 
   const handleDisable = async () => {
     if (!binding) return;
     setDisableState("pending");
+    const currentEntry = entrySlug;
     try {
       await (client as any).disablePartnerEntryNotificationBinding(
         entrySlug,
         binding.version,
       );
-      fetchState();
+      if (activeEntry.current !== currentEntry) return;
+      fetchStateRef.current?.();
     } catch (err: any) {
+      if (activeEntry.current !== currentEntry) return;
       setError({
         kind: "error",
         message: err.message,
@@ -1455,13 +1551,16 @@ export function PartnerNotificationPanel({
       });
       setDisableState("failed");
     } finally {
-      setDisableState((prev) => (prev === "pending" ? "idle" : prev));
+      if (activeEntry.current === currentEntry) {
+        setDisableState((prev) => (prev === "pending" ? "idle" : prev));
+      }
     }
   };
 
   const handleResumeLifecycle = async () => {
     if (!binding) return;
     setResumeState("pending");
+    const currentEntry = entrySlug;
     try {
       const isStale =
         !binding.validatedAt ||
@@ -1472,6 +1571,7 @@ export function PartnerNotificationPanel({
         const testRes = await (
           client as any
         ).testPartnerEntryNotificationBinding(entrySlug, currentVersion);
+        if (activeEntry.current !== currentEntry) return;
         if (testRes.kind === "failed") {
           setError({
             kind: "error",
@@ -1490,8 +1590,10 @@ export function PartnerNotificationPanel({
         entrySlug,
         currentVersion,
       );
-      fetchState();
+      if (activeEntry.current !== currentEntry) return;
+      fetchStateRef.current?.();
     } catch (err: any) {
+      if (activeEntry.current !== currentEntry) return;
       setError({
         kind: "error",
         message: err.message,
@@ -1499,26 +1601,38 @@ export function PartnerNotificationPanel({
       });
       setResumeState("failed");
     } finally {
-      setResumeState((prev) => (prev === "pending" ? "idle" : prev));
+      if (activeEntry.current === currentEntry) {
+        setResumeState((prev) => (prev === "pending" ? "idle" : prev));
+      }
     }
   };
 
   const handleRetry = async (outboxId: string) => {
     setRetryRowId(outboxId);
     setRetryState("pending");
+    setRetryErrorMsg(null);
+    const currentEntry = entrySlug;
     try {
       const outcome = await (client as any).retryPartnerNotificationDelivery(
         entrySlug,
         outboxId,
       );
+      if (activeEntry.current !== currentEntry) return;
       if (outcome.kind === "failed") {
         setRetryState("failed");
+        setRetryErrorMsg(
+          outcome.failure?.detail ||
+            outcome.failure?.failureReason ||
+            "重試失敗",
+        );
       } else {
         setRetryState("queued");
       }
-      fetchState();
-    } catch {
+      fetchStateRef.current?.();
+    } catch (err: any) {
+      if (activeEntry.current !== currentEntry) return;
       setRetryState("failed");
+      setRetryErrorMsg(err.message || "發生錯誤");
     }
   };
 
@@ -1575,6 +1689,7 @@ export function PartnerNotificationPanel({
         tenantId={tenantId}
         t={t}
         canWriteBinding={canWriteBinding}
+        canWriteWebhooks={canWriteWebhooks}
         availableWebhooks={availableWebhooks}
         webhookError={webhookError}
       />
@@ -1638,6 +1753,7 @@ export function PartnerNotificationPanel({
             t={t}
             onEdit={() => setIsEditing(true)}
             canWriteBinding={canWriteBinding}
+            canWriteWebhooks={canWriteWebhooks}
           />
         )}
 
@@ -1647,11 +1763,15 @@ export function PartnerNotificationPanel({
           deliveries={deliveries}
           retryState={retryState}
           retryRowId={retryRowId}
+          retryError={retryErrorMsg}
           onRetry={handleRetry}
           onRefresh={fetchState}
           t={t}
           canWriteBinding={canWriteBinding}
           bindingState={binding?.state}
+          page={page}
+          total={total}
+          onPageChange={setPage}
         />
         {deliveryError && (
           <div style={{ marginTop: 8 }}>
@@ -1666,23 +1786,30 @@ export function PartnerNotificationPanel({
       </div>
 
       <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
-        {!error?.kind || error?.kind === "404" ? (
-          <PnLifecycle
+        {error?.kind && error.kind !== "404" && error.kind !== "409" ? (
+          <CanvasBanner
             theme={theme}
-            binding={binding}
-            testStatus={testStatus}
-            testingState={testingState}
-            enableState={enableState}
-            disableState={disableState}
-            resumeState={resumeState}
-            canWriteBinding={canWriteBinding}
-            onTest={handleTest}
-            onEnable={handleEnable}
-            onDisable={handleDisable}
-            onResume={handleResumeLifecycle}
-            t={t}
+            tone="danger"
+            icon="warn"
+            body={error.message || "發生錯誤"}
           />
         ) : null}
+
+        <PnLifecycle
+          theme={theme}
+          binding={binding}
+          testStatus={testStatus}
+          testingState={testingState}
+          enableState={enableState}
+          disableState={disableState}
+          resumeState={resumeState}
+          canWriteBinding={canWriteBinding}
+          onTest={handleTest}
+          onEnable={handleEnable}
+          onDisable={handleDisable}
+          onResume={handleResumeLifecycle}
+          t={t}
+        />
 
         <CanvasCard
           theme={theme}
