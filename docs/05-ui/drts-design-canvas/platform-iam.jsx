@@ -127,36 +127,17 @@ function PA_IamPrivileged({ theme:th }) {
           </Card>
         </div>
         <div style={{ display:'flex', flexDirection:'column', gap:16 }}>
-        <Card theme={th} title="申請 PR-0086 · 王新人 → billing_admin" subtitle="核准中間狀態 · step-up proof (未取得)" actions={<Pill theme={th} tone="info" dot>1 / 2 已核准</Pill>}>
-          <Stepper theme={th} current={1} steps={['送出','第一人核准','第二人核准 + step-up','生效']}/>
-          <div style={{ marginTop:12 }}><Banner theme={th} tone="warn" icon="lock" title="需 step-up proof" body="核准特權角色前，以 FIDO2 重新驗證取得 stepUpReference（有效 5 分鐘、單次使用）。核准請求須附此參照；過期或已用回 403 IAM_STEP_UP_REQUIRED。" actions={<Btn theme={th} size="xs" variant="primary" icon="lock">取得 step-up proof</Btn>}/></div>
-          <div style={{ marginTop:10 }}><Field theme={th} label="stepUpReference" required hint="尚未取得"><Input theme={th} value="—" mono readOnly disabled/></Field></div>
-          <div style={{ display:'flex', gap:8 }}><ActionButton theme={th} descriptor={{ action:'approve', enabled:false, disabledReasonCode:'IAM_STEP_UP_REQUIRED', riskLevel:'high', requiresReason:true }} variant="primary" icon="check" label="核准 (需 proof)" en="approve"/></div>
-        </Card>
-        <Card theme={th} title="申請 PR-0086 · 王新人 → billing_admin" subtitle="核准中間狀態 · step-up proof (驗證中)" actions={<Pill theme={th} tone="info" dot>1 / 2 已核准</Pill>}>
-          <Stepper theme={th} current={1} steps={['送出','第一人核准','第二人核准 + step-up','生效']}/>
-          <div style={{ marginTop:12 }}><Banner theme={th} tone="info" icon="clock" title="等待驗證" body="請在彈出的驗證視窗中完成身分驗證..."/></div>
-          <div style={{ marginTop:10 }}><Field theme={th} label="stepUpReference" required hint="驗證中..."><Input theme={th} value="—" mono readOnly disabled/></Field></div>
-          <div style={{ display:'flex', gap:8 }}><ActionButton theme={th} descriptor={{ action:'approve', enabled:false, disabledReasonCode:'IAM_STEP_UP_REQUIRED', riskLevel:'high', requiresReason:true }} variant="primary" icon="check" label="核准 (需 proof)" en="approve"/></div>
-        </Card>
-        <Card theme={th} title="申請 PR-0086 · 王新人 → billing_admin" subtitle="核准中間狀態 · step-up proof (有效)" actions={<Pill theme={th} tone="info" dot>1 / 2 已核准</Pill>}>
-          <Stepper theme={th} current={1} steps={['送出','第一人核准','第二人核准 + step-up','生效']}/>
-          <div style={{ marginTop:10 }}><Field theme={th} label="stepUpReference" required hint="由 step-up 驗證回填 · 到期 09-24 10:41"><Input theme={th} value="sup_••••••••b3e1 · 剩 04:12" mono readOnly/></Field></div>
-          <div style={{ display:'flex', gap:8 }}><ActionButton theme={th} descriptor={{ action:'approve', enabled:true, riskLevel:'high', requiresReason:true }} variant="primary" icon="check" label="核准（第二人 · 附 proof）" en="approve"/></div>
-        </Card>
-        <Card theme={th} title="申請 PR-0086 · 王新人 → billing_admin" subtitle="核准中間狀態 · step-up proof (失效/重新取得)" actions={<Pill theme={th} tone="info" dot>1 / 2 已核准</Pill>}>
-          <Stepper theme={th} current={1} steps={['送出','第一人核准','第二人核准 + step-up','生效']}/>
-          <div style={{ marginTop:12 }}><Banner theme={th} tone="danger" icon="alert-triangle" title="step-up proof 已失效" body="憑證已過期或已被使用，請重新取得。" actions={<Btn theme={th} size="xs" variant="primary" icon="refresh">重新取得</Btn>}/></div>
-          <div style={{ marginTop:10 }}><Field theme={th} label="stepUpReference" required hint="已失效"><Input theme={th} value="sup_••••••••b3e1 (已失效)" mono readOnly disabled/></Field></div>
-          <div style={{ display:'flex', gap:8 }}><ActionButton theme={th} descriptor={{ action:'approve', enabled:false, disabledReasonCode:'IAM_STEP_UP_REQUIRED', riskLevel:'high', requiresReason:true }} variant="primary" icon="check" label="核准 (需 proof)" en="approve"/></div>
+        <Card theme={th} title="申請 PR-0086 · 王新人 → billing_admin" subtitle="核准中間狀態 · 需 Fresh MFA" actions={<Pill theme={th} tone="info" dot>1 / 2 已核准</Pill>}>
+          <Stepper theme={th} current={1} steps={['送出','第一人核准','第二人核准','生效']}/>
+          <div style={{ marginTop:12 }}><Banner theme={th} tone="warn" icon="lock" title="登入逾時 (IAM_STEP_UP_REQUIRED)" body="核准特權角色需在最近 10 分鐘內驗證。請重新登入 (Fresh MFA) 後再試。"/></div>
+          <div style={{ display:'flex', gap:8 }}><ActionButton theme={th} descriptor={{ action:'approve', enabled:false, disabledReasonCode:'IAM_STEP_UP_REQUIRED', riskLevel:'high', requiresReason:true }} variant="primary" icon="check" label="核准 (需 Fresh MFA)" en="approve"/></div>
         </Card>
         <Card theme={th} title="申請表單">
           <Field theme={th} label="對象成員" required><Select theme={th} value="王新人"/></Field>
           <Field theme={th} label="目標角色" required><Select theme={th} value="billing_admin"/></Field>
           <Field theme={th} label="理由" required><Input theme={th} value="接手月結對帳"/></Field>
           <Field theme={th} label="有效期限"><Select theme={th} value="永久（需季度存取複核）"/></Field>
-          <Field theme={th} label="stepUpReference（送出申請亦需）" required hint="尚未取得 · 送出前先完成 step-up"><Input theme={th} value="—" mono readOnly/></Field>
-          <ActionButton theme={th} descriptor={{ action:'submit', enabled:false, disabledReasonCode:'IAM_STEP_UP_REQUIRED', riskLevel:'high' }} variant="primary" icon="check" label="送出申請" en="submit"/>
+          <ActionButton theme={th} descriptor={{ action:'submit', enabled:true, riskLevel:'medium' }} variant="primary" icon="check" label="送出申請" en="submit"/>
         </Card>
         </div>
       </div>
@@ -207,29 +188,92 @@ function PA_IamReview({ theme:th, create }) {
   );
 }
 // C5 · 緊急破窗（申請 → 單人核准 → 啟用 → 短效權杖）
-function PA_IamBreakGlass({ theme:th, active }) {
+function PA_IamBreakGlass({ theme:th, active, state = "form" }) {
+  // Backwards compatibility with 'active' prop
+  const resolvedState = active ? "active" : state;
+  const isForm = resolvedState === "form";
+  const isRequested = resolvedState === "requested";
+  const isApproved = resolvedState === "approved";
+  const isActive = resolvedState === "active" || resolvedState === "exit_failed";
+  const isClosed = resolvedState === "closed";
+  
+  const stepMap = {
+    form: 0,
+    requested: 1,
+    approved: 2,
+    active: 3,
+    exit_failed: 3,
+    closed: 3,
+  };
+
   return (
-    <IamShell theme={th} tab="breakglass" breakglass={active}>
+    <IamShell theme={th} tab="breakglass" breakglass={isActive}>
       <div style={{ padding:24, display:'grid', gridTemplateColumns:'1.3fr 1fr', gap:16, alignItems:'start' }}>
         <div style={{ display:'flex', flexDirection:'column', gap:16 }}>
-          <Card theme={th} title={active?'BG-20260924-003 · 已啟用':'申請緊急破窗'} subtitle="單人核准 · 上限 60 分鐘 · 全程稽核">
-            <div style={{ marginBottom:14 }}><Stepper theme={th} current={active?3:0} steps={['申請','核准','啟用 · 發放短效權杖']}/></div>
-            {active
-              ? <>
+          <Card theme={th} title={isActive || isClosed ? 'BG-20260924-003' : '申請緊急破窗'} subtitle="單人核准 · 上限 60 分鐘 · 全程稽核">
+            <div style={{ marginBottom:14 }}><Stepper theme={th} current={stepMap[resolvedState]} steps={['申請','核准','啟用 · 發放短效權杖']}/></div>
+            
+            {isForm && (
+              <>
+                <Field theme={th} label="事故 / 理由" required><Input theme={th} value="INC-20260924-07 · 租戶帳務凍結需緊急解除"/></Field>
+                <Field theme={th} label="申請範圍" required><div style={{ display:'flex', gap:7, flexWrap:'wrap' }}><Checkbox theme={th} on label="identity:read"/><Checkbox theme={th} on label="security:audit:read"/><Checkbox theme={th} label="identity:sessions:revoke"/></div></Field>
+                <Field theme={th} label="持續時間（≤ 60 分鐘）" required><Input theme={th} value="60 分鐘" mono/></Field>
+                <Field theme={th} label="stepUpReference" required hint="已由 step-up 驗證回填"><Input theme={th} value="sup_••••••••b3e1" mono readOnly/></Field>
+                <ActionButton theme={th} descriptor={{ action:'request_breakglass', enabled:true, riskLevel:'high', requiresReason:true }} variant="primary" icon="incidents" label="送出破窗申請" en="request"/>
+              </>
+            )}
+
+            {isRequested && (
+              <>
+                <DL theme={th} cols={2} items={[
+                  { k:'申請人', v:'駱思賢' }, { k:'狀態', v:<Pill theme={th} tone="warn" dot>待核准</Pill> },
+                  { k:'申請範圍', v:'identity:read · security:audit:read', mono:true }
+                ]}/>
+                <div style={{ marginTop:12 }}><Banner theme={th} tone="warn" icon="lock" title="需 step-up proof 或 Fresh MFA" body="操作前請先取得 step-up 憑證或重新登入 (Fresh MFA)。" actions={<Btn theme={th} size="xs" variant="primary" icon="lock">取得 step-up proof</Btn>}/></div>
+                <div style={{ marginTop:12, display:'flex', gap:8 }}>
+                  <ActionButton theme={th} descriptor={{ action:'approve', enabled:false, disabledReasonCode:'IAM_STEP_UP_REQUIRED', riskLevel:'high' }} variant="primary" icon="check" label="核准 (需 proof)" en="approve"/>
+                </div>
+              </>
+            )}
+
+            {isApproved && (
+              <>
+                <DL theme={th} cols={2} items={[
+                  { k:'申請人', v:'駱思賢' },{ k:'核准', v:'林安全' },
+                  { k:'狀態', v:<Pill theme={th} tone="success" dot>已核准，待啟用</Pill> }
+                ]}/>
+                <div style={{ marginTop:12 }}><Banner theme={th} tone="warn" icon="lock" title="需 step-up proof 或 Fresh MFA" body="操作前請先取得 step-up 憑證或重新登入 (Fresh MFA)。" actions={<Btn theme={th} size="xs" variant="primary" icon="lock">取得 step-up proof</Btn>}/></div>
+                <div style={{ marginTop:12, display:'flex', gap:8 }}>
+                  <ActionButton theme={th} descriptor={{ action:'activate', enabled:false, disabledReasonCode:'IAM_STEP_UP_REQUIRED', riskLevel:'high' }} variant="primary" danger icon="power" label="啟用緊急權限 (需 proof)" en="activate"/>
+                </div>
+              </>
+            )}
+
+            {isActive && (
+              <>
                 <DL theme={th} cols={2} items={[
                   { k:'申請人', v:'駱思賢' },{ k:'核准', v:'林安全' },
                   { k:'啟用時間', v:'09-24 10:18:33 +08', mono:true },{ k:'到期', v:'11:18:33 · 剩 41:27', mono:true },
                   { k:'短效權杖', v:<span style={{ fontFamily:SHELL_MONO }}>bgt_••••••••••••9e2f <Pill theme={th} tone="neutral">僅顯示一次</Pill></span> },{ k:'已授權範圍', v:'identity:read · security:audit:read', mono:true },
                 ]}/>
+                {resolvedState === "exit_failed" && (
+                  <div style={{ marginTop:12 }}><Banner theme={th} tone="danger" icon="alert-triangle" title="登入逾時 (IAM_STEP_UP_REQUIRED)" body="請重新取得或登入 (Fresh MFA) 後重試。" actions={<Btn theme={th} size="xs" variant="primary" icon="lock">取得 step-up proof</Btn>}/></div>
+                )}
                 <div style={{ marginTop:12, display:'flex', gap:8 }}><Btn theme={th} variant="secondary" danger icon="x">提前退出破窗</Btn><Btn theme={th} icon="audit">檢視稽核紀錄</Btn></div>
               </>
-              : <>
-                <Field theme={th} label="事故 / 理由" required><Input theme={th} value="INC-20260924-07 · 租戶帳務凍結需緊急解除"/></Field>
-                <Field theme={th} label="申請範圍" required><div style={{ display:'flex', gap:7, flexWrap:'wrap' }}><Checkbox theme={th} on label="identity:read"/><Checkbox theme={th} on label="security:audit:read"/><Checkbox theme={th} label="identity:sessions:revoke"/></div></Field>
-                <Field theme={th} label="持續時間（≤ 60 分鐘）" required><Input theme={th} value="60 分鐘" mono/></Field>
-                <Field theme={th} label="stepUpReference（送出申請亦需）" required hint="尚未取得 · 送出前先完成 step-up"><Input theme={th} value="—" mono readOnly/></Field>
-                <ActionButton theme={th} descriptor={{ action:'request_breakglass', enabled:true, riskLevel:'high', requiresReason:true }} variant="primary" icon="incidents" label="送出破窗申請" en="request"/>
-              </>}
+            )}
+
+            {isClosed && (
+              <>
+                <DL theme={th} cols={2} items={[
+                  { k:'申請人', v:'駱思賢' },{ k:'核准', v:'林安全' },
+                  { k:'狀態', v:<Pill theme={th} tone="neutral" dot>已結束</Pill> },
+                  { k:'結束時間', v:'09-24 10:45:12 +08', mono:true }
+                ]}/>
+                <div style={{ marginTop:12, display:'flex', gap:8 }}><Btn theme={th} icon="audit">檢視稽核紀錄</Btn></div>
+              </>
+            )}
+
           </Card>
         </div>
         <Card theme={th} title="破窗規則">

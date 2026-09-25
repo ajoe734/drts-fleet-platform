@@ -41,7 +41,7 @@ export interface BreakGlassContextValue extends BreakGlassState {
     accessToken: string,
     expiresAt: string,
   ) => void;
-  exitSession: (reason?: string) => Promise<void>;
+  exitSession: (reason?: string, stepUpReference?: string) => Promise<void>;
 }
 
 const BreakGlassContext = createContext<BreakGlassContextValue>({
@@ -134,7 +134,7 @@ export function BreakGlassProvider({ children }: { children: ReactNode }) {
           mutation: {
             reasonCode: reason,
             expectedVersion: state.grant.version ?? 1,
-            stepUpReference: stepUpRef,
+            ...(stepUpRef ? { stepUpReference: stepUpRef } : {}),
           },
         });
       }
@@ -190,14 +190,54 @@ export function BreakGlassBanner() {
   const seconds = secondsRemaining % 60;
   const timerDisplay = `${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}`;
 
+  const client = usePlatformAdminClient();
+  const iamClient = useMemo(() => createPlatformAdminIamClient(client), [client]);
+  const [stepUpState, setStepUpState] = useState<"NONE" | "VERIFYING" | "VALID" | "EXPIRED">("NONE");
+  const [stepUpRef, setStepUpRef] = useState<string | null>(null);
+
+  const handleGetStepUpProof = async () => {
+    setStepUpState("VERIFYING");
+    try {
+      const proof = await iamClient.createStepUpProof({
+        actionId: "platform:break-glass:close" as any,
+      });
+      if (proof.required === false || !proof.stepUpReference) {
+        setStepUpRef(null);
+        setStepUpState("VALID");
+      } else if (proof.stepUpReference) {
+        setStepUpRef(proof.stepUpReference);
+        setStepUpState("VALID");
+        if (proof.expiresAt) {
+          const ttl = new Date(proof.expiresAt).getTime() - Date.now();
+          if (ttl > 0) {
+            setTimeout(() => {
+              setStepUpState((prev) => (prev === "VALID" ? "EXPIRED" : prev));
+              setStepUpRef((prev) => (prev === proof.stepUpReference ? null : prev));
+            }, ttl);
+          } else {
+            setStepUpState("EXPIRED");
+            setStepUpRef(null);
+          }
+        }
+      }
+    } catch (e: unknown) {
+      setStepUpState("NONE");
+      setExitError(e instanceof Error ? e.message : "Failed to get step-up proof");
+    }
+  };
+
   const handleExit = async () => {
     setExiting(true);
     setExitError(null);
     try {
-      await exitSession("operator_exit_cta");
+      await exitSession("operator_exit_cta", stepUpRef || undefined);
+      setStepUpRef(null);
+      setStepUpState("NONE");
     } catch (err: any) {
-      if (err.code === "IAM_STEP_UP_REQUIRED") {
-        setExitError("憑證失效 (IAM_STEP_UP_REQUIRED)，請重新取得或登入 (Fresh MFA) 後重試。");
+      if (err.code === "IAM_STEP_UP_REQUIRED" || err.code === "MFA_REQUIRED") {
+        setStepUpState("EXPIRED");
+        setStepUpRef(null);
+        setExitError("登入逾時 (IAM_STEP_UP_REQUIRED)，請重新取得或登入 (Fresh MFA) 後重試。");
       } else {
         setExitError(err.message || "Failed to close emergency session");
       }
@@ -288,25 +328,48 @@ export function BreakGlassBanner() {
         </div>
 
         <div style={{ display: "flex", flexDirection: "column", gap: 4, alignItems: "flex-end" }}>
-          <button
-            type="button"
-            disabled={exiting}
-            onClick={() => void handleExit()}
-            style={{
-              background: ALERT_OPS_ACCENT.light,
-              color: "#FFFFFF",
-              border: `1px solid ${ALERT_DANGER}`,
-              borderRadius: 6,
-              padding: "5px 12px",
-              fontSize: 12,
-              fontWeight: 700,
-              cursor: exiting ? "not-allowed" : "pointer",
-              opacity: exiting ? 0.6 : 1,
-              fontFamily: theme.fontFamily,
-            }}
-          >
-            {exiting ? "Exiting…" : "Exit Emergency Access"}
-          </button>
+          <div style={{ display: "flex", gap: 8 }}>
+            {stepUpState !== "VALID" && (
+              <button
+                type="button"
+                disabled={stepUpState === "VERIFYING"}
+                onClick={() => void handleGetStepUpProof()}
+                style={{
+                  background: ALERT_OPS_ACCENT.light,
+                  color: "#FFFFFF",
+                  border: `1px solid ${ALERT_DANGER}`,
+                  borderRadius: 6,
+                  padding: "5px 12px",
+                  fontSize: 12,
+                  fontWeight: 700,
+                  cursor: stepUpState === "VERIFYING" ? "not-allowed" : "pointer",
+                  opacity: stepUpState === "VERIFYING" ? 0.6 : 1,
+                  fontFamily: theme.fontFamily,
+                }}
+              >
+                {stepUpState === "VERIFYING" ? "Verifying..." : "Get step-up proof"}
+              </button>
+            )}
+            <button
+              type="button"
+              disabled={exiting || stepUpState !== "VALID"}
+              onClick={() => void handleExit()}
+              style={{
+                background: ALERT_OPS_ACCENT.light,
+                color: "#FFFFFF",
+                border: `1px solid ${ALERT_DANGER}`,
+                borderRadius: 6,
+                padding: "5px 12px",
+                fontSize: 12,
+                fontWeight: 700,
+                cursor: exiting || stepUpState !== "VALID" ? "not-allowed" : "pointer",
+                opacity: exiting || stepUpState !== "VALID" ? 0.6 : 1,
+                fontFamily: theme.fontFamily,
+              }}
+            >
+              {exiting ? "Exiting…" : "Exit Emergency Access"}
+            </button>
+          </div>
           {exitError && (
             <span style={{ color: "#FFD700", fontSize: 11, fontWeight: 600 }}>{exitError}</span>
           )}
