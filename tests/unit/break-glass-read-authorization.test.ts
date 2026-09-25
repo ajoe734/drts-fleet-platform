@@ -202,7 +202,10 @@ function createTestReflector() {
 }
 
 function createTestExecutionContext(
-  controllerClass: { prototype: Record<string, unknown> },
+  // `prototype: any` (not `Record<string, unknown>`) so the concrete
+  // controller class -- whose prototype has no index signature -- is
+  // structurally assignable.
+  controllerClass: { prototype: any },
   handlerName: string,
   request: unknown,
 ) {
