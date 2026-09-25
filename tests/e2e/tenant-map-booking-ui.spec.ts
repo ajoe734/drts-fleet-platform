@@ -120,7 +120,7 @@ async function pinBothStops(page: Page) {
   await page.getByRole("button", { name: "Search" }).first().click();
   await page
     .getByRole("button", {
-      name: /Taipei 101 .*exact|Taipei 101 台北市信義區信義路五段 7 號 exact/i,
+      name: /Taipei 101[\s\S]*exact/i,
     })
     .first()
     .click();
@@ -129,7 +129,7 @@ async function pinBothStops(page: Page) {
   await page.getByRole("button", { name: "Search" }).last().click();
   await page
     .getByRole("button", {
-      name: /Taoyuan Airport T1 .*exact|Taoyuan Airport T1 桃園國際機場第一航廈 exact/i,
+      name: /Taoyuan Airport T1[\s\S]*exact/i,
     })
     .first()
     .click();

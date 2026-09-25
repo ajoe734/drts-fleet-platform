@@ -21,6 +21,8 @@ import {
   deriveProviderState,
   derivePickerStatus,
   isDispatchReadyAddress,
+  isValidLatitude,
+  isValidLongitude,
   manualCoordinateToAddressPayload,
   resolveAddressPickerLabels,
   serviceabilityTone,
@@ -620,6 +622,8 @@ export function AddressMapPicker<TServiceProduct extends string = string>(
   const [searchError, setSearchError] = useState<string | null>(null);
 
   const [manualMode, setManualMode] = useState(false);
+  const [manualLat, setManualLat] = useState("");
+  const [manualLng, setManualLng] = useState("");
   const [manualReason, setManualReason] = useState("");
   const [manualError, setManualError] = useState<string | null>(null);
 
@@ -762,8 +766,12 @@ export function AddressMapPicker<TServiceProduct extends string = string>(
   );
 
   const handleManualApply = useCallback(() => {
-    const lat = selectedAddress?.lat ?? (bounds ? (bounds.minLat + bounds.maxLat) / 2 : 0);
-    const lng = selectedAddress?.lng ?? (bounds ? (bounds.minLng + bounds.maxLng) / 2 : 0);
+    const lat = Number.parseFloat(manualLat);
+    const lng = Number.parseFloat(manualLng);
+    if (!isValidLatitude(lat) || !isValidLongitude(lng)) {
+      setManualError(labels.manualInvalid);
+      return;
+    }
     
     if (requireManualReason && manualReason.trim().length === 0) {
       setManualError(labels.manualReasonLabel);
@@ -799,10 +807,8 @@ export function AddressMapPicker<TServiceProduct extends string = string>(
     labels.manualInvalid,
     labels.manualReasonLabel,
     labels.pinAdjustHint,
-    bounds?.maxLat,
-    bounds?.maxLng,
-    bounds?.minLat,
-    bounds?.minLng,
+    manualLat,
+    manualLng,
     manualReason,
     query,
     requireManualReason,
@@ -1320,76 +1326,95 @@ export function AddressMapPicker<TServiceProduct extends string = string>(
       ) : null}
 
       {/* Manual entry */}
-      {manualMode ||
-      status === "manual_entry" ||
-      (requireManualReason && status === "provider_unavailable") ? (
+      {manualMode || status === "manual_entry" || (requireManualReason && status === "provider_unavailable") ? (
         <div
           style={{
-            display: "flex",
-            alignItems: "center",
-            gap: 8,
-            padding: "8px 10px",
             border: `1px solid ${theme.border}`,
             borderRadius: 8,
+            padding: "10px 12px",
+            display: "flex",
+            flexDirection: "column",
+            gap: 10,
             background: theme.surfaceLo,
           }}
         >
-          <span
-            style={{
-              fontSize: 11,
-              fontWeight: 700,
-              color: theme.warn,
-              flexShrink: 0,
-            }}
-          >
-            {labels.manualReasonLabel} *
-          </span>
-          <div
-            style={{
-              flex: 1,
-              display: "flex",
-              flexDirection: "column",
-              gap: 4,
-            }}
-          >
-            <input
-              type="text"
-              value={manualReason}
-              placeholder={labels.manualReasonPlaceholder}
-              aria-label={labels.manualReasonLabel}
-              style={{
-                flex: 1,
-                padding: "6px 10px",
-                fontSize: 12,
-                color: theme.text,
-                background: manualReason.trim() ? theme.surface : theme.warnBg,
-                border: `1px solid ${manualReason.trim() ? theme.border : theme.warn}`,
-                borderRadius: 6,
-                outline: "none",
-              }}
-              onChange={(event) => setManualReason(event.target.value)}
-            />
-            {manualError ? (
-              <div style={{ fontSize: 11, color: theme.danger }}>
-                {manualError}
-              </div>
-            ) : null}
+          <div style={{ fontSize: 12, fontWeight: 700 }}>
+            {labels.manualTitle}
           </div>
+          <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+            <label style={{ flex: "1 1 120px" }}>
+              <span style={fieldLabelStyle(theme)}>
+                {labels.manualLatLabel}
+              </span>
+              <input
+                type="text"
+                inputMode="decimal"
+                value={manualLat}
+                aria-label={labels.manualLatLabel}
+                style={inputStyle(theme)}
+                onChange={(event) => setManualLat(event.target.value)}
+              />
+            </label>
+            <label style={{ flex: "1 1 120px" }}>
+              <span style={fieldLabelStyle(theme)}>
+                {labels.manualLngLabel}
+              </span>
+              <input
+                type="text"
+                inputMode="decimal"
+                value={manualLng}
+                aria-label={labels.manualLngLabel}
+                style={inputStyle(theme)}
+                onChange={(event) => setManualLng(event.target.value)}
+              />
+            </label>
+          </div>
+          {requireManualReason ? (
+            <label style={{ display: "block" }}>
+              <span style={{...fieldLabelStyle(theme), color: theme.warn}}>
+                {labels.manualReasonLabel} *
+              </span>
+              <input
+                type="text"
+                value={manualReason}
+                placeholder={labels.manualReasonPlaceholder}
+                aria-label={labels.manualReasonLabel}
+                style={{
+                  ...inputStyle(theme),
+                  background: manualReason.trim() ? theme.surface : theme.warnBg,
+                  border: `1px solid ${manualReason.trim() ? theme.border : theme.warn}`,
+                }}
+                onChange={(event) => setManualReason(event.target.value)}
+              />
+            </label>
+          ) : null}
+          {manualError ? (
+            <div style={{ fontSize: 11.5, color: theme.danger }}>
+              {manualError}
+            </div>
+          ) : null}
+          <div>
+            <button
+              type="button"
+              style={buttonStyle(theme, "primary")}
+              onClick={handleManualApply}
+            >
+              <CanvasIcon name="pin" size={14} />
+              {labels.manualApply}
+            </button>
+          </div>
+        </div>
+      ) : !manualMode &&
+        providerAvailable &&
+        status !== "provider_unavailable" ? (
+        <div>
           <button
             type="button"
-            style={{
-              padding: "6px 12px",
-              background: theme.accent,
-              color: "#fff",
-              border: "none",
-              borderRadius: 6,
-              fontSize: 12,
-              fontWeight: 700,
-              cursor: "pointer",
-            }}
-            onClick={handleManualApply}
+            style={buttonStyle(theme, "ghost")}
+            onClick={() => setManualMode(true)}
           >
-            {labels.manualApply}
+            <CanvasIcon name="pin" size={14} />
+            {labels.manualToggle}
           </button>
         </div>
       ) : null}
