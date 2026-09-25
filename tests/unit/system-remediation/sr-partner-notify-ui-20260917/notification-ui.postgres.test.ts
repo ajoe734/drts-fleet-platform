@@ -72,7 +72,7 @@ describe.skipIf(!testDbUrl || process.env.RUN_UI_PG_GATE !== "true")(
       const webhookId = "webhook-409";
 
       await pool.query(
-        "INSERT INTO admin.phase1_partner_channel_entries (entry_slug, tenant_id, partner_id, created_at, updated_at, program_id, status, record) VALUES ($1, $2, $3, now(), now(), 'program1', 'active', jsonb_build_object('entrySlug', $1, 'tenantId', $2, 'partnerId', $3, 'status', 'active')) ON CONFLICT DO NOTHING",
+        "INSERT INTO admin.phase1_partner_channel_entries (entry_slug, tenant_id, partner_id, created_at, updated_at, program_id, status, record) VALUES ($1, $2, $3, now(), now(), 'program1', 'active', jsonb_build_object('entrySlug', $1::text, 'tenantId', $2::text, 'partnerId', $3::text, 'status', 'active')) ON CONFLICT DO NOTHING",
         [entrySlug, tenantId, partnerId],
       );
       await pool.query(
@@ -115,7 +115,7 @@ describe.skipIf(!testDbUrl || process.env.RUN_UI_PG_GATE !== "true")(
       const partnerId = "partner-1";
 
       await pool.query(
-        "INSERT INTO admin.phase1_partner_channel_entries (entry_slug, tenant_id, partner_id, created_at, updated_at, program_id, status, record) VALUES ($1, $2, $3, now(), now(), 'program1', 'active', jsonb_build_object('entrySlug', $1, 'tenantId', $2, 'partnerId', $3, 'status', 'active', 'identityLinkMode', 'always')) ON CONFLICT DO NOTHING",
+        "INSERT INTO admin.phase1_partner_channel_entries (entry_slug, tenant_id, partner_id, created_at, updated_at, program_id, status, record) VALUES ($1, $2, $3, now(), now(), 'program1', 'active', jsonb_build_object('entrySlug', $1::text, 'tenantId', $2::text, 'partnerId', $3::text, 'status', 'active', 'identityLinkMode', 'always')) ON CONFLICT DO NOTHING",
         [entrySlug, tenantId, partnerId],
       );
       await pool.query(
@@ -222,7 +222,7 @@ describe.skipIf(!testDbUrl || process.env.RUN_UI_PG_GATE !== "true")(
       const partnerId = "partner-1";
 
       await pool.query(
-        "INSERT INTO admin.phase1_partner_channel_entries (entry_slug, tenant_id, partner_id, created_at, updated_at, program_id, status, record) VALUES ($1, $2, $3, now(), now(), 'program1', 'active', jsonb_build_object('entrySlug', $1, 'tenantId', $2, 'partnerId', $3, 'status', 'active')) ON CONFLICT DO NOTHING",
+        "INSERT INTO admin.phase1_partner_channel_entries (entry_slug, tenant_id, partner_id, created_at, updated_at, program_id, status, record) VALUES ($1, $2, $3, now(), now(), 'program1', 'active', jsonb_build_object('entrySlug', $1::text, 'tenantId', $2::text, 'partnerId', $3::text, 'status', 'active')) ON CONFLICT DO NOTHING",
         [entrySlug, tenantId, partnerId],
       );
 
