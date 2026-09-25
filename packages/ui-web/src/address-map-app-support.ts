@@ -3,8 +3,14 @@ import type {
   AddressPayload,
   AddressProviderState,
   ServiceAreaEvaluationResult,
+  GeoResolutionSurface,
 } from "./address-map-picker-core";
-import { createMockAddressProvider } from "./address-map-picker-core";
+import { 
+  createMockAddressProvider,
+  isValidLatitude,
+  isValidLongitude,
+  manualCoordinateToAddressPayload,
+} from "./address-map-picker-core";
 
 export type AddressPickerLocale = "en" | "zh";
 export type AddressProviderMode = "healthy" | "degraded" | "unavailable";
@@ -116,4 +122,68 @@ export function evaluateAddressSubmitGate(params: {
     blocking: false,
     code: "ready",
   };
+}
+
+export function evaluateTenantSubmitGate(
+  pickupPayload: AddressPayload | null,
+  dropoffPayload: AddressPayload | null,
+  serviceability: ServiceAreaEvaluationResult | null,
+  providerState: AddressProviderState | null,
+): AddressSubmitGateState {
+  const baseGate = evaluateAddressSubmitGate({
+    pickup: pickupPayload,
+    dropoff: dropoffPayload,
+    serviceability,
+    providerState,
+  });
+  if (providerState && !providerState.available) {
+    return {
+      blocking: true,
+      code: "provider_outage" as AddressSubmitGateCode,
+    };
+  }
+  return baseGate;
+}
+
+export function evaluateManualApply(
+  manualLat: string,
+  manualLng: string,
+  manualReason: string,
+  requireManualReason: boolean,
+  labels: AddressMapPickerLabels,
+  query: string,
+  selectedAddress: AddressPayload | null,
+  actorId: string | null,
+  surface: GeoResolutionSurface,
+): { error?: string; address?: AddressPayload; reason?: string } {
+  const lat = Number.parseFloat(manualLat);
+  const lng = Number.parseFloat(manualLng);
+  if (!isValidLatitude(lat) || !isValidLongitude(lng)) {
+    return { error: labels.manualInvalid };
+  }
+  if (requireManualReason && manualReason.trim().length === 0) {
+    return { error: labels.manualReasonLabel };
+  }
+  const reason = manualReason.trim() || labels.pinAdjustHint;
+  const roundCoord = (n: number) => Math.round(n * 100000) / 100000;
+  const address = manualCoordinateToAddressPayload({
+    lat,
+    lng,
+    addressText:
+      query.trim() ||
+      selectedAddress?.address ||
+      `Manual location (${roundCoord(lat)}, ${roundCoord(lng)})`,
+    baseAddress: selectedAddress ?? null,
+    addressName: selectedAddress?.addressName ?? null,
+    surface,
+    manualOverrideReason: reason,
+    ...(actorId ? { pinnedByActorId: actorId } : {}),
+    ...(selectedAddress?.geocodeConfidence
+      ? { geocodeConfidence: selectedAddress.geocodeConfidence }
+      : {}),
+  });
+  if (!address) {
+    return { error: labels.manualInvalid };
+  }
+  return { address, reason };
 }

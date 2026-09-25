@@ -59,8 +59,8 @@ import {
   TENANT_CONSOLE_MAP_SURFACE,
   coordinateToDraftString,
   savedAddressToPayload,
-  evaluateTenantSubmitGate,
 } from "@/lib/tenant-address-map";
+import { evaluateAddressSubmitGate, evaluateTenantSubmitGate, type AddressSubmitGateCode } from "@drts/ui-web";
 
 type BookingCreateActionMap = {
   submit: ResourceActionDescriptor;

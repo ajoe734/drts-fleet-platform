@@ -99,8 +99,7 @@ describe("UI17-MAP-20260924 gate behavior regressions", () => {
   });
 });
 
-import { evaluateTenantSubmitGate } from "../../../apps/tenant-console-web/lib/tenant-address-map";
-import { evaluateManualApply } from "../../../packages/ui-web/src/address-map-picker-core";
+import { evaluateTenantSubmitGate, evaluateManualApply } from "../../../packages/ui-web/src/address-map-app-support";
 import { buildCallCenterMapFallbackReview } from "../../../apps/concierge-portal-web/lib/map-booking";
 
 describe("R7b/R7c real component/handler regressions", () => {
@@ -182,8 +181,6 @@ describe("R7b/R7c real component/handler regressions", () => {
       mapGate: {
         blocking: false,
         code: "dispatch_manual_review_required",
-        addressErrors: [],
-        addressPairsReady: false,
       },
       providerState: {
         available: false,
@@ -199,8 +196,6 @@ describe("R7b/R7c real component/handler regressions", () => {
       mapGate: {
         blocking: true,
         code: "outside_service_area",
-        addressErrors: [],
-        addressPairsReady: false,
       },
       providerState: {
         available: false,

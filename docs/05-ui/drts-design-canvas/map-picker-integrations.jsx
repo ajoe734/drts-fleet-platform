@@ -18,12 +18,14 @@ function TN_NewBookingMap({ theme:th, degraded, pick, drop, reason }) {
   const HARD = ['out_of_area'];                                   // 服務範圍外：任何路徑皆不可送
   const UNRESOLVED = ['no_results','empty','searching','candidates','missing_coordinate']; // 尚未定點：不可送
   const MANUAL = ['manual_review']; // 走人工複核 (僅限手動座標帶理由)
+  const DOWN = ['provider_down'];
 
   // 檢查是否有 manual_coords 並帶有理由
   const hasManualCoords = ps === 'manual_coords' || ds === 'manual_coords';
   const reasonValid = (reason || '').trim() !== '';
 
-  const hardBlocked = degraded || HARD.includes(ps) || HARD.includes(ds); // 租戶遇中斷直接阻擋
+  const isDown = degraded || DOWN.includes(ps) || DOWN.includes(ds);
+  const hardBlocked = isDown || HARD.includes(ps) || HARD.includes(ds); // 租戶遇中斷直接阻擋
   const unresolved = UNRESOLVED.includes(ps) || UNRESOLVED.includes(ds);
   const manualPath = MANUAL.includes(ps) || MANUAL.includes(ds);
   const manualReady = manualPath && !hardBlocked && !unresolved && reasonValid;   // 有地址文字＋理由即可送人工複核

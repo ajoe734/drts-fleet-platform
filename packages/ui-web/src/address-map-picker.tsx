@@ -12,6 +12,7 @@ import {
 
 import { CanvasIcon } from "./canvas-primitives";
 import { buildCanvasTheme, type CanvasTheme } from "./canvas-tokens";
+import { evaluateManualApply } from "./address-map-app-support";
 import {
   addressToGeoPoint,
   AddressProviderUnavailableError,
@@ -23,7 +24,6 @@ import {
   isDispatchReadyAddress,
   manualCoordinateToAddressPayload,
   resolveAddressPickerLabels,
-  evaluateManualApply,
   serviceabilityTone,
   type AddressMapPickerChange,
   type AddressMapPickerLabels,
