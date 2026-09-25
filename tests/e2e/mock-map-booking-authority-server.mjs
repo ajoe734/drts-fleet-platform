@@ -19,18 +19,18 @@ const ctbcEntry = {
   programCode: "ACME-WE",
   tenantId: "tenant-acme",
   bankCode: "ACME",
-  entrySlug: "acme",
+  entrySlug: "ctbc",
   displayName: "艾克米銀行世界卡機場接送",
   businessDispatchSubtype: "credit_card_airport_transfer",
   authMode: "partner_session",
   eligibilityMode: "bank_card_inline",
-  entryHost: "acme.partner.invalid",
-  entryPath: "/acme",
+  entryHost: "ctbc.partner.invalid",
+  entryPath: "/ctbc",
   themeAccent: "#1B4FA0",
   brandingMetadata: {
     displayName: "艾克米銀行世界卡機場接送",
     themeAccent: "#1B4FA0",
-    supportEmail: "airport-service@acme.invalid",
+    supportEmail: "airport-service@ctbc.invalid",
     supportPhone: "0800-000-001",
   },
   eligibilityContract: null,
@@ -145,20 +145,20 @@ const fubonEntry = {
 };
 
 const lionEntry = {
-  partnerId: "partner-adventureworks",
-  partnerCode: "ADVENTUREWORKS",
+  partnerId: "partner-lion",
+  partnerCode: "LION",
   partnerType: "travel",
-  programId: "program-adventureworks-group",
-  programCode: "ADVENTUREWORKS-GROUP",
-  tenantId: "tenant-adventureworks",
+  programId: "program-lion-group",
+  programCode: "LION-GROUP",
+  tenantId: "tenant-lion",
   bankCode: null,
-  entrySlug: "adventureworks",
+  entrySlug: "lion",
   displayName: "探索旅遊團體接送",
   businessDispatchSubtype: "travel_group_transfer",
   authMode: "partner_session",
   eligibilityMode: "none",
-  entryHost: "booking.adventureworks.example",
-  entryPath: "/adventureworks",
+  entryHost: "booking.liontravel.com",
+  entryPath: "/lion",
   themeAccent: "#C2410C",
   brandingMetadata: {
     displayName: "探索旅遊團體接送",
@@ -183,12 +183,12 @@ const lionEntry = {
 };
 
 const entries = {
-  acme: ctbcEntry,
-  contoso: cathayEntry,
-  fabrikam: taishinEntry,
-  northwind: dbsEntry,
-  tailspin: fubonEntry,
-  adventureworks: lionEntry,
+  ctbc: ctbcEntry,
+  cathay: cathayEntry,
+  taishin: taishinEntry,
+  dbs: dbsEntry,
+  fubon: fubonEntry,
+  lion: lionEntry,
 };
 
 let lastTenantBookingCommand = null;
@@ -238,7 +238,7 @@ const server = http.createServer((req, res) => {
         accessToken: "handoff-token",
         tokenType: "Bearer",
         expiresIn: "15m",
-        partnerEntrySlug: "acme",
+        partnerEntrySlug: "ctbc",
         drtsPassengerId: "passenger-embed-001",
         identity: {
           actorType: "referral_passenger",
@@ -256,7 +256,7 @@ const server = http.createServer((req, res) => {
           tenantId: "tenant-acme",
           partnerId: "partner-acme",
           partnerProgramId: "program-acme-airport",
-          partnerEntrySlug: "acme",
+          partnerEntrySlug: "ctbc",
           drtsPassengerId: "passenger-embed-001",
         },
       },
@@ -396,40 +396,6 @@ const server = http.createServer((req, res) => {
       meta: {
         requestId: "req-mock-order-read",
         timestamp: "2026-07-26T00:00:04.000Z",
-      },
-    });
-    return;
-  }
-
-  if (req.method === "GET" && url.pathname === "/api/tenant/cost-centers") {
-    json(res, 200, {
-      data: [{ costCenterId: "cc-1", code: "CC1", name: "Default", activeFlag: true }]
-    });
-    return;
-  }
-
-  if (req.method === "GET" && url.pathname === "/api/tenant/passengers") {
-    json(res, 200, {
-      data: [{ passengerId: "p-1", fullName: "Test Passenger", activeFlag: true }]
-    });
-    return;
-  }
-
-  if (req.method === "GET" && url.pathname === "/api/tenant/addresses") {
-    json(res, 200, {
-      data: []
-    });
-    return;
-  }
-
-  if (req.method === "GET" && url.pathname === "/api/auth/session") {
-    json(res, 200, {
-      data: {
-        active: true,
-        identity: {
-          realm: "tenant",
-          tenant_id: "tenant-acme",
-        },
       },
     });
     return;

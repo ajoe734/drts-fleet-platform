@@ -25,8 +25,8 @@ export function payloadHasCoordinates(
 ): boolean {
   return Boolean(
     payload &&
-    isFiniteCoordinate(payload.lat, 90) &&
-    isFiniteCoordinate(payload.lng, 180),
+      isFiniteCoordinate(payload.lat, 90) &&
+      isFiniteCoordinate(payload.lng, 180),
   );
 }
 
@@ -60,31 +60,4 @@ export function coordinateToDraftString(
   return typeof value === "number" && Number.isFinite(value)
     ? String(value)
     : "";
-}
-
-import { evaluateAddressSubmitGate } from "@drts/ui-web";
-import type {
-  ServiceAreaEvaluationResult,
-  AddressProviderState,
-} from "@drts/ui-web";
-
-export function evaluateTenantSubmitGate(
-  pickupPayload: AddressPayload | null,
-  dropoffPayload: AddressPayload | null,
-  serviceability: ServiceAreaEvaluationResult | null,
-  providerState: AddressProviderState | null,
-) {
-  const baseGate = evaluateAddressSubmitGate({
-    pickup: pickupPayload,
-    dropoff: dropoffPayload,
-    serviceability,
-    providerState,
-  });
-  if (providerState && !providerState.available) {
-    return {
-      blocking: true,
-      code: "provider_outage",
-    };
-  }
-  return baseGate;
 }

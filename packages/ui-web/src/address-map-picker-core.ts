@@ -215,9 +215,7 @@ export interface ServiceAreaEvaluationResult {
  * callers can retain their own `ServiceProductType` union without ui-web needing
  * to import it. Structurally assignable to the contract command.
  */
-export interface ServiceAreaPreviewCommand<
-  TServiceProduct extends string = string,
-> {
+export interface ServiceAreaPreviewCommand<TServiceProduct extends string = string> {
   serviceProductType: TServiceProduct;
   pickup: GeoPoint;
   dropoff?: GeoPoint | null;
@@ -373,17 +371,12 @@ export function manualCoordinateToAddressPayload(
   const geocodeProvider =
     baseAddress?.geocodeProvider ?? baseProvenance?.geocodeProvider ?? null;
   const providerCandidateId =
-    baseAddress?.providerCandidateId ??
-    baseProvenance?.providerCandidateId ??
-    null;
+    baseAddress?.providerCandidateId ?? baseProvenance?.providerCandidateId ?? null;
   const selectedByActorId =
     baseAddress?.selectedByActorId ?? baseProvenance?.selectedByActorId ?? null;
-  const selectedAt =
-    baseAddress?.selectedAt ?? baseProvenance?.selectedAt ?? null;
+  const selectedAt = baseAddress?.selectedAt ?? baseProvenance?.selectedAt ?? null;
   const inheritedAccuracy =
-    baseAddress?.coordinateAccuracyM ??
-    baseProvenance?.coordinateAccuracyM ??
-    null;
+    baseAddress?.coordinateAccuracyM ?? baseProvenance?.coordinateAccuracyM ?? null;
   const pinnedByActorId =
     input.pinnedByActorId ?? baseAddress?.pinnedByActorId ?? null;
   const pinnedAt = input.pinnedAt ?? baseAddress?.pinnedAt ?? null;
@@ -442,9 +435,7 @@ export function isDispatchReadyAddress(
 
 // ── Service-area preview ──
 
-export interface ServiceAreaPreviewInput<
-  TServiceProduct extends string = string,
-> {
+export interface ServiceAreaPreviewInput<TServiceProduct extends string = string> {
   serviceProductType: TServiceProduct;
   pickup: GeoPoint;
   dropoff?: GeoPoint | null;
@@ -698,8 +689,7 @@ export const DEFAULT_ADDRESS_PICKER_LABELS: AddressMapPickerLabels = {
   manualReasonLabel: "Reason for manual location",
   manualReasonPlaceholder: "e.g. new development not yet mapped",
   manualApply: "Use this location",
-  manualInvalid:
-    "Enter a valid latitude (-90 to 90) and longitude (-180 to 180).",
+  manualInvalid: "Enter a valid latitude (-90 to 90) and longitude (-180 to 180).",
   providerOutageTitle: "Address lookup is unavailable",
   providerOutageBody:
     "The address service can't be reached right now. Enter the location manually to continue.",
@@ -802,12 +792,8 @@ export interface MockAddressProviderOptions {
 }
 
 function mockServiceDecision(point: GeoPoint): ServiceAreaEvaluationDecision {
-  const inLat =
-    point.lat >= MOCK_SERVICE_BOX.minLat &&
-    point.lat <= MOCK_SERVICE_BOX.maxLat;
-  const inLng =
-    point.lng >= MOCK_SERVICE_BOX.minLng &&
-    point.lng <= MOCK_SERVICE_BOX.maxLng;
+  const inLat = point.lat >= MOCK_SERVICE_BOX.minLat && point.lat <= MOCK_SERVICE_BOX.maxLat;
+  const inLng = point.lng >= MOCK_SERVICE_BOX.minLng && point.lng <= MOCK_SERVICE_BOX.maxLng;
   if (inLat && inLng) {
     // Outer 10% ring → manual_review.
     const latSpan = MOCK_SERVICE_BOX.maxLat - MOCK_SERVICE_BOX.minLat;
@@ -856,9 +842,7 @@ export function createMockAddressProvider(
                 (candidate.district ?? "").toLowerCase().includes(needle),
             );
       const limited =
-        typeof query.limit === "number"
-          ? matches.slice(0, query.limit)
-          : matches;
+        typeof query.limit === "number" ? matches.slice(0, query.limit) : matches;
       const response: GeoSearchResponse = {
         candidates: limited,
         provider: MOCK_PROVIDER_NAME,
@@ -930,8 +914,7 @@ export function createMockAddressProvider(
       stops.push({
         kind: "pickup",
         location: command.pickup,
-        serviceAreaCodes:
-          pickupDecision === "not_serviceable" ? [] : ["mock-core"],
+        serviceAreaCodes: pickupDecision === "not_serviceable" ? [] : ["mock-core"],
         policyCodes: [],
         geometryVersionRefs: ["mock-v1"],
         decision: pickupDecision,
@@ -995,50 +978,4 @@ export function worstServiceDecision(
     not_serviceable: 2,
   };
   return rank[a] >= rank[b] ? a : b;
-}
-
-function roundCoord(val: number): number {
-  return Math.round(val * 100000) / 100000;
-}
-
-export function evaluateManualApply(
-  manualLat: string,
-  manualLng: string,
-  manualReason: string,
-  requireManualReason: boolean,
-  labels: AddressMapPickerLabels,
-  query: string,
-  selectedAddress: AddressPayload | null,
-  actorId: string | null,
-  surface: GeoResolutionSurface,
-): { error?: string; address?: AddressPayload; reason?: string } {
-  const lat = Number.parseFloat(manualLat);
-  const lng = Number.parseFloat(manualLng);
-  if (!isValidLatitude(lat) || !isValidLongitude(lng)) {
-    return { error: labels.manualInvalid };
-  }
-  if (requireManualReason && manualReason.trim().length === 0) {
-    return { error: labels.manualReasonLabel };
-  }
-  const reason = manualReason.trim() || labels.pinAdjustHint;
-  const address = manualCoordinateToAddressPayload({
-    lat,
-    lng,
-    addressText:
-      query.trim() ||
-      selectedAddress?.address ||
-      `Manual location (${roundCoord(lat)}, ${roundCoord(lng)})`,
-    baseAddress: selectedAddress,
-    addressName: selectedAddress?.addressName ?? null,
-    surface,
-    manualOverrideReason: reason,
-    ...(actorId ? { pinnedByActorId: actorId } : {}),
-    ...(selectedAddress?.geocodeConfidence
-      ? { geocodeConfidence: selectedAddress.geocodeConfidence }
-      : {}),
-  });
-  if (!address) {
-    return { error: labels.manualInvalid };
-  }
-  return { address, reason };
 }

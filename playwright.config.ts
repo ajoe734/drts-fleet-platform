@@ -67,7 +67,7 @@ const passengerWebServer = {
 const partnerAuthorityMockServer = {
   command:
     "MAP_BOOKING_AUTHORITY_PORT=3901 node tests/e2e/mock-map-booking-authority-server.mjs",
-  url: "http://127.0.0.1:3901/api/partner/entries/acme",
+  url: "http://127.0.0.1:3901/api/partner/entries/ctbc",
   reuseExistingServer: !process.env.CI,
   timeout: 60_000,
 };
