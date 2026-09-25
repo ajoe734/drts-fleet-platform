@@ -198,3 +198,209 @@ checkout as commit `bea50bbf714e2e2529b58bfb0f9720b2374897da`. That commit was n
 (non-fast-forwardable against `origin/dev` in any case) and does not appear in this
 worktree's history. All actual work for this task — the edits, tests, and this artifact — is
 in this worktree on branch `claude/ui17-iam-20260924-unblock-planning-decision`.
+
+## Round 2 — Codex2 reopen on `2190d2d0dc22d088499a817cc9cafa14b946c748` (2026-09-25T05:44:10Z)
+
+Reviewer confirmed (via exact-source, non-mocked service probes) that the R3/R4 activate/close
+contract addition above is real: platform-realm proofs are now required, self-issued, and
+validated (rejects missing/forged/wrong-action/wrong-session/wrong-principal/expired). Those
+platform controls are **not reopened**. Reviewer raised three new findings; this section
+records the source SHA/review timestamp, the fix or routing decision for each, and the
+verification performed, per §0.7 (do not overwrite the round-1 record above).
+
+### UD1 [P1] — R3/R4/R5 in the *current* parent review are not the same findings this
+document's "Trigger"/Finding B originally routed
+
+This document's Finding B closed out the *original* R1 ("privileged-role approval proof
+misuse") using the parent's blocking snapshot from 2026-09-25T05:21:30Z. The parent has since
+accumulated further independent reviews; the latest is Codex2's reopen on parent candidate
+`f275c4f8445749646952f13f4e627c4e1b77fc79` (2026-09-25T05:18:51Z, prior adjacent candidate
+`3b4f012252db519cd3a784d4c56527657ee7ecaa`). In that latest round, "R3" and "R4" no longer
+mean the original activate/close action-id gap (this document's Finding A already fixes that
+at the framework layer) — they mean two different, still-open product/contract gaps:
+
+- **R3 (latest) — cross-person grant read/sync.** There is no HTTP read path for break-glass
+  requests/grants at all. `BreakGlassController`
+  (`apps/api/src/modules/auth/break-glass.controller.ts:20-114`) exposes only
+  `POST requests`, `POST requests/:id/approve`, `POST requests/:id/activate`,
+  `POST requests/:id/close` — no `GET`. `BreakGlassService.get(grantId)`
+  (`apps/api/src/modules/identity/break-glass.service.ts:273-282`) is an internal in-memory
+  lookup, never routed. The frontend mirrors this:
+  `apps/platform-admin-web/lib/platform-admin-iam-client.ts:204-242` only has mutation
+  methods, and `users-governance-components.tsx:1233` initializes local `grants` state to
+  `[]` with no fetch, updated only by the page's own mutation responses
+  (`:1327`/`:1357`), and is lost on tab unmount (`page.tsx:940-945`). Parent-review reproduction
+  (two adjacent SHAs): requester submits a real signed request, sees it locally; a second
+  approver's session mounts the same panel and sees zero rows because there is no read call,
+  even though the server-side grant exists; after that approver approves it via a direct
+  service call, the original requester's remount still shows zero rows for the same reason.
+  This is a missing backend read contract, not a frontend bug — there is nothing in
+  `UI17-IAM-20260924`'s `write_scopes` that can add a controller route or service method.
+- **R4 (latest) — principal/session/grant authority for the active-session banner.**
+  `break-glass-context.tsx` compares only `ctx.actorId` to `grant.requesterId`
+  (reviewer-cited `:112-132`/`:213-220` across the two adjacent SHAs) and otherwise trusts
+  `sessionStorage` plus a client-side TTL. `IdentityController.getContext`
+  (`apps/api/src/modules/identity/identity.controller.ts:68-86`) — the only read-side identity
+  endpoint available to the frontend — returns `actorType/actorId/realm/authMode/
+  roleFamilies/roles/scopes/tenantId`; it does **not** return `principalId`, `sessionId`, or
+  any break-glass grant/session state. `BreakGlassService` requesterId is
+  `principalId ?? actorId` (`:27-28`), so an actor with a distinct `principalId`, a replaced
+  session, or a server-revoked grant is indistinguishable to the frontend from the original
+  authorized holder — there is no server field to check it against. Reproduced with the real
+  `JwtAuthService`/`IdentityController` projection: anonymous, sub!=principal, and
+  session-replacement fixtures all keep the local banner "active" because nothing server-side
+  is re-read. This is the same class of gap as R3 — a missing read/session-state contract, not
+  a frontend defect fixable inside existing `write_scopes`.
+- **R5 (latest) — expiry semantics.** `BreakGlassService.approve` never sets `expiresAt`
+  (`:96-128`); `expireDue` (`:233-249`) only expires grants already `status: "active"`. So the
+  real, current contract is: an **approved-but-not-yet-activated** grant does not expire on
+  its own — only an **active** (activated) grant expires via TTL. The round-1/round-2 design
+  canvas additions invented a *new* rule ("approval auto-expires if not activated within a
+  window") that the backend does not implement and that this helper has no authority to add
+  (`break-glass.service.ts` is not in anyone's write scope here). This is **not** a contract
+  gap requiring routing — it is a canvas/backend mismatch. **Decision:** no backend change;
+  route back to the parent task as a scope correction (see disposition below): the canvas
+  should depict the actual behavior (approved persists until activated, rejected, or the
+  request itself is otherwise closed; only an *active* grant carries a TTL-based expiry), not
+  an invented approval-timeout state. If product actually wants approved-but-inactive grants
+  to expire, that is a separate, explicit security/product decision to raise later — it is not
+  implied by anything in scope today and is out of scope for this contract-unblock pass.
+
+**Decision for R3/R4 (latest):** these require a new backend read contract — at minimum (a)
+a `GET` list/read route on `BreakGlassController` (e.g.
+`GET platform-admin/break-glass/requests` scoped by realm/tenant, and/or
+`GET platform-admin/break-glass/requests/:id`) backed by a new `BreakGlassService` query
+method with its own authorization rules (who may see a given request: requester, eligible
+approvers, platform/ops admins — this is itself a policy decision, not just plumbing), and
+(b) extending `IdentityController.getContext` (or a new endpoint) to expose `principalId` and
+`sessionId` so the frontend can authoritatively distinguish "same principal, current session,
+grant still active" from a replaced/anonymous/revoked identity. Both require new
+`IAM_STEP_UP_ACTION_IDS`/OpenAPI/contract surface and are **not** achievable inside
+`UI17-IAM-20260924`'s existing `write_scopes`, and are large enough (new authorization
+semantics, not a two-field addition) that they do not belong inside this contract-unblock
+helper either. **Recorded as an explicit follow-up, per this task's acceptance criteria**,
+for Supervisor to scope as a standalone task before Gemini's cross-person-sync/authority work
+can proceed:
+
+- Proposed scope: add read routes + service query method + DTOs for break-glass
+  requests/grants (`apps/api/src/modules/auth/break-glass.controller.ts`,
+  `apps/api/src/modules/identity/break-glass.service.ts`,
+  `packages/contracts/src/iam-contracts.ts`, `openapi/iam-stage15-contracts-v1.yaml`); extend
+  `IdentityController.getContext` (or a new session-context read) with `principalId`/
+  `sessionId`/active-grant summary (`apps/api/src/modules/identity/identity.controller.ts`).
+- Dependencies: none blocking (independent of `UI17-NOTIFY-CANVAS-20260924`); should land
+  before `UI17-IAM-20260924` resumes work on the cross-person grant list/sync UI or the
+  session/authority-aware banner, since those UI changes have nothing real to call otherwise.
+- Regression boundary: new read-only routes/fields, additive to existing contracts; must not
+  change existing mutation authorization, SoD checks, or step-up enforcement already fixed in
+  this document's Finding A / UD2 below.
+- Owner/reviewer: unassigned — for Supervisor to dispatch (backend-authoring agent + Codex2
+  as reviewer, consistent with this phase's pairing).
+
+### UD2 [P1] — allowed `ops` callers still skipped the new activate/close gate (and the two
+pre-existing sibling rules had the same gap)
+
+`BreakGlassController` is `@RequireRealms("platform", "ops")` and the underlying scopes
+(`identity:break-glass:request/approve/activate`,
+`packages/contracts/src/iam-policy-catalog.ts:474-493`) allow
+`allowedRealms: ["system", "platform", "ops"]` — `ops` is a legitimate caller for all four
+routes. But `STEP_UP_ROUTE_RULES` entries for all four break-glass actions
+(`request`/`approve`/`activate`/`close`) had `enforcedRealms: ["platform"]` only —
+including the two pre-existing sibling rules (`request`, `approve`), not just the two this
+document's Finding A added. `resolveRouteStepUpPolicy`
+(`apps/api/src/common/auth/step-up.policy.ts:482-507`) skips any rule whose
+`enforcedRealms` doesn't include the caller's realm and returns `null` — i.e. for an `ops`
+identity, `assertRequestSatisfied` returned immediately with **no step-up check at all** on
+any of the four break-glass routes, while `BreakGlassService.assertMutation`'s own check only
+verifies the reference string is non-empty. This was a real bypass for legitimately-allowed
+`ops` callers (pre-existing for request/approve, and would have persisted for the newly-added
+activate/close entries had it not been caught here).
+
+**Fix (this round):** added `"ops"` to `enforcedRealms` on all four break-glass
+`STEP_UP_ROUTE_RULES` entries (`apps/api/src/common/auth/step-up.policy.ts`), matching the
+existing pattern used for other `ops`-eligible actions in the same file (e.g.
+`platform:evidence-exports:*`, `ops:approval-requests:*`). No change to `platform` behavior,
+no new action ids, no scope/route/controller change — purely closes the realm-gating gap.
+
+**Verification:**
+- Added four `realm: "ops"` fixtures to `tests/unit/step-up-policy-catalog.test.ts`
+  (mirroring the existing `platform` fixtures) for
+  `POST platform-admin/break-glass/requests{,/…/approve,/…/activate,/…/close}`.
+- Negative-control check: temporarily reverted the `request` rule's `enforcedRealms` back to
+  `["platform"]` only and reran `npx vitest run tests/unit/step-up-policy-catalog.test.ts` —
+  failed as expected (`resolveRouteStepUpPolicy(..., "ops")` returned `null` instead of
+  matching `platform:break-glass:request`), confirming the fixture actually exercises the
+  bypass. Restored the fix and reran — passed. (Command outputs captured in this worker's
+  tool transcript; not re-pasted here.)
+- `npx tsc -p apps/api/tsconfig.json --noEmit` → exit 0, no diagnostics (after
+  `pnpm --filter @drts/contracts build` to avoid the repo's known stale-`dist` false
+  positives).
+- `npx vitest run tests/unit/step-up-policy-catalog.test.ts tests/unit/break-glass.service.test.ts tests/security/iam-route-inventory.test.ts tests/unit/step-up-iap-path.test.ts tests/unit/bootstrap-auth-guard-strict-env.test.ts tests/unit/step-up-proof-policy.test.ts`
+  → 6 files / 29 tests passed, exit 0.
+- `git diff --check` → exit 0 (no whitespace issues).
+
+Not fixed as part of this pass: the sibling `platform:*` rules with `enforcedRealms:
+["platform"]` for actions where `ops` is *not* an allowed realm at the controller/scope layer
+are correct as-is (no change made to any rule outside the four break-glass actions).
+
+### UD3 [P2] — canonical OpenAPI contract rejected the new action ids
+
+`packages/contracts/src/iam-contracts.ts` (`IAM_STEP_UP_ACTION_IDS`) already listed
+`platform:break-glass:activate`/`close` from this document's Finding A, but
+`openapi/iam-stage15-contracts-v1.yaml`'s `CreateStepUpProofCommand.properties.actionId.enum`
+(`:658-708`) still only had `request`/`approve`. Per
+`docs/.../phase1_service_contracts_v1.md:136-140`, both files are canonical wire-contract
+sources — a client validated against the OpenAPI enum could not send the new action ids this
+document tells the parent task to use.
+
+**Fix:** added `platform:break-glass:activate` and `platform:break-glass:close` to the
+`CreateStepUpProofCommand.actionId` enum in `openapi/iam-stage15-contracts-v1.yaml`, directly
+after the existing `approve` entry, matching the TS catalog order.
+
+**Verification:** parsed the YAML with `python3 -c "import yaml; ..."` and confirmed both new
+values are present exactly once each in the enum; `git diff --check` exit 0.
+
+**Not fixed (pre-existing, out of scope for this pass):** `IAM_STEP_UP_ACTION_IDS` also
+contains `platform:tenants:rollback-hold`, which is likewise absent from the OpenAPI enum.
+That gap predates this task's commits and is unrelated to the break-glass activate/close
+change; noting it here rather than fixing it silently, since fixing unrelated pre-existing
+contract drift is outside this helper's declared scope. Flagging for a future
+contract-hygiene pass, not blocking this task or the parent.
+
+## Disposition for the parent task (superseding round 1's, per the latest parent review)
+
+Round 1's `PARENT_STATUS=todo` recommendation was written against the parent's earlier
+2026-09-25T05:21:30Z blocking snapshot and Finding A/B/C only. It undercounted the parent's
+subsequent, independently-reviewed R3/R4 (grant read/sync, session/principal authority) —
+those are **not** resolved by this document's contract fixes and require the new standalone
+backend task scoped above. Superseding recommendation:
+
+- `PARENT_STATUS=blocked` (unchanged — do not resume full implementation yet).
+- `PARENT_WAITING_FOR=Supervisor` (to scope/dispatch the new backend read-contract task from
+  UD1 above; once that lands, `PARENT_WAITING_FOR` should move to `Gemini`).
+- `PARENT_NEXT`: "Contract/routing status as of
+  UI17-IAM-20260924-UNBLOCK-PLANNING-DECISION round 2: (1) R3/R4 *original* activate/close
+  action-id gap is resolved — `platform:break-glass:activate`/`close` are real
+  `IamStepUpActionId`s with enforced, validated route policy for both `platform` and `ops`
+  callers (Finding A + UD2 fix); wire `createStepUpProof`/`mutation.stepUpReference` using
+  those action ids for the activate/exit flows. (2) R1 (privileged-role approval) stays
+  routed as UI-only per Finding B — do not call `createStepUpProof` for that action; submit
+  without a `stepUpReference` and handle a 401 by prompting re-authentication. (3) R3/R4 *as
+  most recently reviewed* (cross-person grant read/sync; principal/session/grant authority
+  for the active-session banner) are a missing backend read contract, not something fixable
+  inside this task's `write_scopes` — do not attempt to work around this with fabricated
+  local state, polling a mutation endpoint, or trusting client-only TTL/actorId checks; wait
+  for the standalone backend task recorded in this document's UD1 section. (4) R5 (canvas
+  expiry states) needs a canvas correction, not a contract change: depict the actual
+  behavior — approved-but-not-activated grants do not auto-expire; only an activated
+  (active) grant expires via TTL — and drop the previously-added invented
+  approval-timeout rule/state. This one *can* proceed now, inside existing `write_scopes`."
+
+## Required acceptance mapping (updated)
+
+| Acceptance item | Status |
+| --- | --- |
+| Resolve or route the missing product/contract decision through canonical planning artifacts | Done — round 1 (R3/R4 original activate/close gap, R1, R5-scope-note) plus round 2 (ops-realm step-up bypass fix, OpenAPI enum sync, and explicit routing of the *current* R3/R4 grant-read/session-authority gap to a new standalone backend task) |
+| Record the decision, scope cut, or explicit follow-up needed by the parent task | Done — see "Disposition for the parent task" above (supersedes round 1's) |
+| Produce task-scoped commit/push/PR evidence for any canonical change | Pending — commit/push/handoff follows this write |
+| Update the parent task with the concrete unblocked next step | Pending Supervisor/merge-time `resolved_parent_*` application; text recorded above for that step |
