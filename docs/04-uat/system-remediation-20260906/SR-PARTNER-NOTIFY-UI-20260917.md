@@ -15,7 +15,7 @@
 ## Handoff Evidence (Gemini)
 
 - **Candidate Branch**: gemini/sr-partner-notify-ui-20260924-canvas
-- **Candidate SHA**: f7d57ba15893d806c5e1255f099d2254b69e53eb
+- **Candidate SHA**: bb9508e4863b9f29c46f5c8b6feca4b380d06d9a
 - **Hosted CI Evidence**:
   - CI: Pending PR #2155 update.
   - Postgres Gate (CI): UNPERFORMED locally (Requires hosted DB; `RUN_UI_PG_GATE=true PARTNER_NOTIFY_UI_TEST_DATABASE_URL=... vitest run ...` returned ECONNREFUSED).
@@ -44,3 +44,4 @@
 | R6. unsupported UAT claims & CI config         | `.github/workflows/ci.yml`, `.github/workflows/ci-integ.yml` | 舊: 移除了 CI 中的 PG variables 和 verify script<br/>新: 恢復 PG variables，加入 UI db 變數 | 文件靜態檢查 | CI 需等待 push 後觸發 |
 | R7. UI Web scope violation & raw colors        | `apps/platform-admin-web/components/partner-notification-panel.tsx` | 舊: 使用未經授權設計、hardcode 標題和色碼<br/>新: 使用 CanvasCard/CanvasPill 搭配 `@drts/ui-tokens` theme | `pnpm run i18n:guard` (Exit 0) | UI 視覺需由預覽或 E2E 驗證 |
 | R8. evidence mismatch & RTL claims             | `docs/04-uat/system-remediation-20260906/SR-PARTNER-NOTIFY-UI-20260917.md` | 舊: 宣稱不存在的 RTL component test PASS，狀態不實<br/>新: 如實記載 Pending CI 與 unperformed 本機結果 | 靜態文件核對 | 無 |
+| UI20 Design Audit Gaps (D1-D4)               | `apps/platform-admin-web/components/partner-notification-panel.tsx` | 舊: 權限名錯、resume按鈕無效、預留值不符、目標未知時使用假資料<br/>新: 權限名改為 `tenant:webhooks:write`，`PanelActionBtn` 改傳 native `disabled` 給 `CanvasBtn` 鎖定，按鈕文字與 fallback 修正 | 靜態文件核對 (Exit 0) | 無 |
