@@ -106,8 +106,8 @@ function PB_BookCardMap({ state='selected', drop='selected', reason, program='ca
   const p = PROGRAMS[program];
   const th = { text:'#0E1424', textMuted:'#56657F', textDim:'#9AA5B8', border:'#E5E7EB', surface:'#fff', surfaceLo:'#F4F6FB', accent:p.primary, success:'#15803D', warn:'#B45309', danger:'#B91C1C', dangerBg:'#FEF2F2' };
   const hard = state==='out_of_area' || drop==='out_of_area';
-  const unresolved = ['no_results','empty','searching','candidates','missing_coordinate'].some(s=>s===state||s===drop);
-  const manualPath = ['provider_down','manual_review'].some(s=>s===state||s===drop);
+  const unresolved = ['no_results','empty','searching','candidates'].some(s=>s===state||s===drop);
+  const manualPath = ['provider_down','manual_review','manual_coords'].some(s=>s===state||s===drop);
   const needsReason = ['provider_down','manual_review','manual_coords'].some(s=>s===state||s===drop);
   const down = state==='provider_down' || drop==='provider_down';
   const hasReason = Boolean((reason || '').trim());

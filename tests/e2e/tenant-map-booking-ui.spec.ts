@@ -333,18 +333,15 @@ test.describe("tenant console booking map alignment", () => {
     await expect(submitBtn).toBeDisabled();
 
     // Simulate recovery
-    await page.route(
-      "**/api/geo/health",
-      (route) =>
-        route.fulfill({
-          json: {
-            provider: "mock",
-            mode: "mock",
-            status: "healthy",
-            failClosed: false,
-          },
-        }),
-      { times: 1 },
+    await page.route("**/api/geo/health", (route) =>
+      route.fulfill({
+        json: {
+          provider: "mock",
+          mode: "mock",
+          status: "healthy",
+          failClosed: false,
+        },
+      }),
     );
     // Trigger a refresh or re-eval (e.g. by modifying a field or clicking refresh)
     await page.getByRole("button", { name: /Refresh|刷新|更新/i }).click();
