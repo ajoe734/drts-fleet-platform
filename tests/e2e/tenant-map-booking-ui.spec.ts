@@ -154,12 +154,6 @@ async function stubGeoProvider(
 async function pinBothStops(page: Page) {
   const searchInputs = page.getByLabel("Search address");
 
-  if (await page.getByText("Failed to load booking context").isVisible()) {
-    console.error("API calls failed! EmptyState is rendered.");
-    const body = await page.textContent("body");
-    console.error("Body text:", body?.substring(0, 500));
-  }
-
   // Pickup is the first picker, drop-off the second (pair picker DOM order).
   await searchInputs.first().fill("Taipei 101");
   await page
@@ -313,7 +307,7 @@ test.describe("tenant console booking map alignment", () => {
     // Fallback UI doesn't automatically show fields unless manual reason is required.
     // Tenant form doesn't require manual reason, so we have to explicitly click the button.
     const manualButtons = page.getByRole("button", {
-      name: /Manual location|改用手動座標/,
+      name: /Manual location|Enter coordinates manually|改用手動座標|手動輸入座標/i,
     });
     if (await manualButtons.first().isVisible()) {
       await manualButtons.first().click();

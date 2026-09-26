@@ -153,8 +153,10 @@ async function selectConciergeMapCandidate(
   candidateName: string,
 ) {
   const picker = page.locator("[data-address-map-picker]").nth(index);
-  await picker.getByRole("textbox", { name: "搜尋地址" }).fill(query);
-  await picker.getByRole("button", { name: /搜尋/ }).click();
+  await picker
+    .getByRole("textbox", { name: /Search address|搜尋地址/i })
+    .fill(query);
+  await picker.getByRole("button", { name: /Search|搜尋/i }).click();
   await picker.getByRole("button", { name: new RegExp(candidateName) }).click();
 }
 
@@ -171,7 +173,10 @@ test.describe("concierge map booking UI", () => {
   test("submits dispatchable coordinates to the concierge booking seam", async ({
     page,
   }, testInfo) => {
-    test.skip(testInfo.project.name === "outage", "This test requires healthy provider");
+    test.skip(
+      testInfo.project.name === "outage",
+      "This test requires healthy provider",
+    );
     const captured = { body: [] as unknown[] };
     await installConciergeApiMocks(page, captured);
 
@@ -187,11 +192,17 @@ test.describe("concierge map booking UI", () => {
     );
 
     await expect(
-      page.getByRole("button", { name: /提交禮賓代訂/ }),
+      page.getByRole("button", {
+        name: /Create booking|For approval|Submitting|建立叫車|提交禮賓代訂/i,
+      }),
     ).toBeEnabled();
-    await page.getByRole("button", { name: /提交禮賓代訂/ }).click();
+    await page
+      .getByRole("button", {
+        name: /Create booking|For approval|Submitting|建立叫車|提交禮賓代訂/i,
+      })
+      .click();
 
-    await expect(page.getByText("訂單 ID")).toBeVisible();
+    await expect(page.getByText(/Booking ID|Order ID|訂單 ID/i)).toBeVisible();
     expect(captured.body).toHaveLength(1);
 
     const command = captured.body[0] as {
@@ -213,72 +224,128 @@ test.describe("concierge map booking UI", () => {
     expect(command.mapFallbackReview ?? null).toBeNull();
   });
 
-  test("blocks submission if addresses are empty", async ({ page }, testInfo) => {
-    test.skip(testInfo.project.name === "outage", "This test requires healthy provider");
+  test("blocks submission if addresses are empty", async ({
+    page,
+  }, testInfo) => {
+    test.skip(
+      testInfo.project.name === "outage",
+      "This test requires healthy provider",
+    );
     await installConciergeApiMocks(page, { body: [] });
     await page.goto("/bookings/new");
     await expect(
-      page.getByRole("button", { name: /提交禮賓代訂/ }),
+      page.getByRole("button", {
+        name: /Create booking|For approval|Submitting|建立叫車|提交禮賓代訂/i,
+      }),
     ).toBeDisabled();
   });
 
-  test("submits manual fallback review when provider is down", async ({ page }, testInfo) => {
-    test.skip(testInfo.project.name !== "outage", "This test requires the outage provider mode");
+  test("submits manual fallback review when provider is down", async ({
+    page,
+  }, testInfo) => {
+    test.skip(
+      testInfo.project.name !== "outage",
+      "This test requires the outage provider mode",
+    );
     const captured = { body: [] as unknown[] };
     await installConciergeApiMocks(page, captured);
 
     await page.goto("/bookings/new");
 
     const pickupPicker = page.locator("[data-address-map-picker]").nth(0);
-    await pickupPicker.getByRole("button", { name: /手動輸入座標/ }).click();
-    await pickupPicker.getByLabel("緯度").fill("25.04");
-    await pickupPicker.getByLabel("經度").fill("121.51");
-    await pickupPicker.getByLabel("手動定位原因").fill("Outage pickup");
-    await pickupPicker.getByRole("button", { name: /使用此位置/ }).click();
+    await pickupPicker
+      .getByRole("button", {
+        name: /Manual location|Enter coordinates manually|改用手動座標|手動輸入座標/i,
+      })
+      .click();
+    await pickupPicker.getByLabel(/Latitude|緯度/i).fill("25.04");
+    await pickupPicker.getByLabel(/Longitude|經度/i).fill("121.51");
+    await pickupPicker
+      .getByLabel(/Reason for manual location|手動定位原因/i)
+      .fill("Outage pickup");
+    await pickupPicker
+      .getByRole("button", { name: /Use this location|使用此位置/i })
+      .click();
 
     const dropoffPicker = page.locator("[data-address-map-picker]").nth(1);
-    await dropoffPicker.getByRole("button", { name: /手動輸入座標/ }).click();
-    await dropoffPicker.getByLabel("緯度").fill("25.047");
-    await dropoffPicker.getByLabel("經度").fill("121.517");
-    await dropoffPicker.getByLabel("手動定位原因").fill("Outage dropoff");
-    await dropoffPicker.getByRole("button", { name: /使用此位置/ }).click();
+    await dropoffPicker
+      .getByRole("button", {
+        name: /Manual location|Enter coordinates manually|改用手動座標|手動輸入座標/i,
+      })
+      .click();
+    await dropoffPicker.getByLabel(/Latitude|緯度/i).fill("25.047");
+    await dropoffPicker.getByLabel(/Longitude|經度/i).fill("121.517");
+    await dropoffPicker
+      .getByLabel(/Reason for manual location|手動定位原因/i)
+      .fill("Outage dropoff");
+    await dropoffPicker
+      .getByRole("button", { name: /Use this location|使用此位置/i })
+      .click();
 
-    const submit = page.getByRole("button", { name: /送交人工複核/ });
+    const submit = page.getByRole("button", {
+      name: /Submit for review|Manual review|送交人工複核/i,
+    });
     await expect(submit).toBeEnabled();
     await submit.click();
 
-    await expect(page.getByText("訂單 ID")).toBeVisible();
+    await expect(page.getByText(/Booking ID|Order ID|訂單 ID/i)).toBeVisible();
     expect(captured.body).toHaveLength(1);
 
     const command = captured.body[0] as any;
     expect(command.mapFallbackReview).toBeTruthy();
-    expect(command.mapFallbackReview.reasonCode).toBe("map_provider_unavailable");
+    expect(command.mapFallbackReview.reasonCode).toBe(
+      "map_provider_unavailable",
+    );
   });
 
-  test("blocks submission when outside service area", async ({ page }, testInfo) => {
-    test.skip(testInfo.project.name === "outage", "This test requires healthy provider");
+  test("blocks submission when outside service area", async ({
+    page,
+  }, testInfo) => {
+    test.skip(
+      testInfo.project.name === "outage",
+      "This test requires healthy provider",
+    );
     const captured = { body: [] as unknown[] };
     await installConciergeApiMocks(page, captured);
 
     await page.goto("/bookings/new");
 
     const pickupPicker = page.locator("[data-address-map-picker]").nth(0);
-    await pickupPicker.getByRole("button", { name: /手動輸入座標/ }).click();
-    await pickupPicker.getByLabel("緯度").fill("24.9");
-    await pickupPicker.getByLabel("經度").fill("121.4");
-    await pickupPicker.getByLabel("手動定位原因").fill("Outside area");
-    await pickupPicker.getByRole("button", { name: /使用此位置/ }).click();
+    await pickupPicker
+      .getByRole("button", {
+        name: /Manual location|Enter coordinates manually|改用手動座標|手動輸入座標/i,
+      })
+      .click();
+    await pickupPicker.getByLabel(/Latitude|緯度/i).fill("24.9");
+    await pickupPicker.getByLabel(/Longitude|經度/i).fill("121.4");
+    await pickupPicker
+      .getByLabel(/Reason for manual location|手動定位原因/i)
+      .fill("Outside area");
+    await pickupPicker
+      .getByRole("button", { name: /Use this location|使用此位置/i })
+      .click();
 
     const dropoffPicker = page.locator("[data-address-map-picker]").nth(1);
-    await dropoffPicker.getByRole("button", { name: /手動輸入座標/ }).click();
-    await dropoffPicker.getByLabel("緯度").fill("25.047");
-    await dropoffPicker.getByLabel("經度").fill("121.517");
-    await dropoffPicker.getByLabel("手動定位原因").fill("Inside area");
-    await dropoffPicker.getByRole("button", { name: /使用此位置/ }).click();
+    await dropoffPicker
+      .getByRole("button", {
+        name: /Manual location|Enter coordinates manually|改用手動座標|手動輸入座標/i,
+      })
+      .click();
+    await dropoffPicker.getByLabel(/Latitude|緯度/i).fill("25.047");
+    await dropoffPicker.getByLabel(/Longitude|經度/i).fill("121.517");
+    await dropoffPicker
+      .getByLabel(/Reason for manual location|手動定位原因/i)
+      .fill("Inside area");
+    await dropoffPicker
+      .getByRole("button", { name: /Use this location|使用此位置/i })
+      .click();
 
-    const submit = page.getByRole("button", { name: /提交禮賓代訂/ });
+    const submit = page.getByRole("button", {
+      name: /Create booking|For approval|Submitting|建立叫車|提交禮賓代訂/i,
+    });
     await expect(submit).toBeDisabled();
-    await expect(page.getByText("不在服務範圍內").first()).toBeVisible();
+    await expect(
+      page.getByText(/Outside the service area|不在服務範圍內/i).first(),
+    ).toBeVisible();
   });
-
 });
