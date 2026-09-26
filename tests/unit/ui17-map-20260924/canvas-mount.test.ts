@@ -131,11 +131,11 @@ describe("Canvas SSR Integrations", () => {
       "送出 command",
       true,
     );
-    checkCta("TN_degraded", results.TN_degraded, "送出 command", true);
+    checkCta("TN_degraded", results.TN_degraded, "送交人工複核", false);
     checkCta(
       "TN_manual_review",
       results.TN_manual_review,
-      "送出 command",
+      "送交人工複核",
       false,
     );
 
