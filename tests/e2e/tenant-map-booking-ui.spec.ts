@@ -441,7 +441,7 @@ test.describe("tenant console booking map alignment", () => {
     const lngHidden = page.locator('input[name="lng"]');
     await expect(lngHidden).toHaveValue("121.0028");
     const coordinateSourceHidden = page.locator('input[name="coordinateSource"]');
-    await expect(coordinateSourceHidden).toHaveValue("manual");
+    await expect(coordinateSourceHidden).toHaveValue("manual_pin");
 
     // Click save
     let interceptedRequest = false;
