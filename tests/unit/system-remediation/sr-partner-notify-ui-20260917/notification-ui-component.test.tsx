@@ -42,16 +42,33 @@ describe("PartnerNotificationPanel", () => {
         ],
         pageInfo: { totalItems: 1 },
       }),
-      createPartnerEntryNotificationBinding: vi.fn().mockResolvedValue({ version: 1, state: "disabled" }),
-      updatePartnerEntryNotificationBinding: vi.fn().mockResolvedValue({ version: 2, state: "disabled" }),
-      testPartnerEntryNotificationBinding: vi.fn().mockResolvedValue({ kind: "accepted", ack: true }),
-      enablePartnerEntryNotificationBinding: vi.fn().mockResolvedValue({ version: 2, state: "ready", validatedAt: "2026-09-24T12:00:00Z" }),
-      retryPartnerNotificationDelivery: vi.fn().mockResolvedValue({ kind: "requeued" }),
+      createPartnerEntryNotificationBinding: vi
+        .fn()
+        .mockResolvedValue({ version: 1, state: "disabled" }),
+      updatePartnerEntryNotificationBinding: vi
+        .fn()
+        .mockResolvedValue({ version: 2, state: "disabled" }),
+      testPartnerEntryNotificationBinding: vi
+        .fn()
+        .mockResolvedValue({ kind: "accepted", ack: true }),
+      enablePartnerEntryNotificationBinding: vi
+        .fn()
+        .mockResolvedValue({
+          version: 2,
+          state: "ready",
+          validatedAt: "2026-09-24T12:00:00Z",
+        }),
+      retryPartnerNotificationDelivery: vi
+        .fn()
+        .mockResolvedValue({ kind: "requeued" }),
       getList: vi.fn().mockImplementation((url) => {
         if (url === "/api/tenant/webhooks") {
           return Promise.resolve([
             { webhookId: "test-webhook", url: "https://example.com" },
-            { webhookId: "different-webhook", url: "https://different.example.com" },
+            {
+              webhookId: "different-webhook",
+              url: "https://different.example.com",
+            },
           ]);
         }
         return Promise.resolve([]);
@@ -142,10 +159,13 @@ describe("PartnerNotificationPanel", () => {
     await waitFor(() => {
       expect(
         mockClient.updatePartnerEntryNotificationBinding,
-      ).toHaveBeenCalledWith("test-entry", expect.objectContaining({
-        webhookId: "test-webhook",
-        expectedVersion: 1
-      }));
+      ).toHaveBeenCalledWith(
+        "test-entry",
+        expect.objectContaining({
+          webhookId: "test-webhook",
+          expectedVersion: 1,
+        }),
+      );
     });
 
     const conflictBanner = await screen.findByText(/綁定已被他人更新/);
@@ -193,11 +213,14 @@ describe("PartnerNotificationPanel", () => {
     await waitFor(() => {
       expect(
         mockClient.updatePartnerEntryNotificationBinding,
-      ).toHaveBeenCalledWith("test-entry", expect.objectContaining({
-        webhookId: "different-webhook",
-        eventTypes: expect.arrayContaining(["receipt_ready"]),
-        expectedVersion: 1
-      }));
+      ).toHaveBeenCalledWith(
+        "test-entry",
+        expect.objectContaining({
+          webhookId: "different-webhook",
+          eventTypes: expect.arrayContaining(["receipt_ready"]),
+          expectedVersion: 1,
+        }),
+      );
     });
   });
 
@@ -252,21 +275,24 @@ describe("PartnerNotificationPanel", () => {
         mockClient.getPartnerEntryNotificationBinding,
       ).toHaveBeenCalledTimes(2);
     });
-    
+
     // Draft should be preserved
     const selectAfter = await screen.findByRole("combobox");
     expect((selectAfter as HTMLSelectElement).value).toBe("test-webhook");
-    
+
     // Resubmit
     mockClient.updatePartnerEntryNotificationBinding.mockResolvedValueOnce({});
     fireEvent.click(saveBtn);
     await waitFor(() => {
       expect(
         mockClient.updatePartnerEntryNotificationBinding,
-      ).toHaveBeenCalledWith("test-entry", expect.objectContaining({
-        webhookId: "test-webhook",
-        expectedVersion: 2
-      }));
+      ).toHaveBeenCalledWith(
+        "test-entry",
+        expect.objectContaining({
+          webhookId: "test-webhook",
+          expectedVersion: 2,
+        }),
+      );
     });
   });
 
@@ -360,7 +386,9 @@ describe("PartnerNotificationPanel", () => {
     const testBtn = await screen.findByRole("button", { name: /test/i });
     fireEvent.click(testBtn);
     await waitFor(() =>
-      expect(mockClient.testPartnerEntryNotificationBinding).toHaveBeenCalledWith("test-entry-3"),
+      expect(
+        mockClient.testPartnerEntryNotificationBinding,
+      ).toHaveBeenCalledWith("test-entry-3"),
     );
 
     // 4. Enable - starts test_pending and passed_current
@@ -434,7 +462,9 @@ describe("PartnerNotificationPanel", () => {
     expect((editBtn as HTMLButtonElement).disabled).toBe(true);
 
     // Missing-webhook permission denial should be rendered
-    const disabledWebhookLinks = await screen.findAllByText(/partnerNotification\.webhookHelp/i);
+    const disabledWebhookLinks = await screen.findAllByText(
+      /partnerNotification\.webhookHelp/i,
+    );
     expect(disabledWebhookLinks.length).toBeGreaterThan(0);
     // Button should be disabled because canWriteWebhooks is false
     expect(disabledWebhookLinks[0].closest("button")?.disabled).toBe(true);
@@ -448,7 +478,7 @@ describe("PartnerNotificationPanel", () => {
       webhookId: "test-webhook",
       eventTypes: ["eta_changed"],
       state: "ready",
-      validatedAt: "2026-09-24T12:00:00Z"
+      validatedAt: "2026-09-24T12:00:00Z",
     });
     render(
       <PartnerNotificationPanel
@@ -464,7 +494,9 @@ describe("PartnerNotificationPanel", () => {
     const extLinks = await screen.findAllByRole("link");
     expect(extLinks.length).toBeGreaterThan(0);
     const loginHref = extLinks[0].getAttribute("href");
-    expect(loginHref).toBe("/_apps/tenant-console/api/auth/tenant/login?tenant_id=test-tenant&redirect_uri=%2Fwebhooks");
+    expect(loginHref).toBe(
+      "/_apps/tenant-console/api/auth/tenant/login?tenant_id=test-tenant&redirect_uri=%2Fwebhooks",
+    );
 
     // Click edit to check the other link
     const editBtn = await screen.findByRole("button", {
@@ -475,7 +507,9 @@ describe("PartnerNotificationPanel", () => {
     const extLinksEdit = await screen.findAllByRole("link");
     expect(extLinksEdit.length).toBeGreaterThan(0);
     const loginHrefEdit = extLinksEdit[0].getAttribute("href");
-    expect(loginHrefEdit).toBe("/_apps/tenant-console/api/auth/tenant/login?tenant_id=test-tenant&redirect_uri=%2Fwebhooks");
+    expect(loginHrefEdit).toBe(
+      "/_apps/tenant-console/api/auth/tenant/login?tenant_id=test-tenant&redirect_uri=%2Fwebhooks",
+    );
   });
 
   it("pending mutation across entry/client/account/permission/unmount changes", async () => {
@@ -489,7 +523,7 @@ describe("PartnerNotificationPanel", () => {
       version: 1,
       webhookId: "test-webhook",
       eventTypes: ["eta_changed"],
-      state: "disabled"
+      state: "disabled",
     });
 
     const { unmount, rerender } = render(
@@ -501,7 +535,7 @@ describe("PartnerNotificationPanel", () => {
         canReadWebhooks={true}
       />,
     );
-    
+
     const editBtn = await screen.findByRole("button", {
       name: /partnerNotification\.edit/i,
     });
@@ -521,7 +555,7 @@ describe("PartnerNotificationPanel", () => {
         canWriteBinding={false}
       />,
     );
-    
+
     unmount();
 
     // Clear mocks to assert absence of follow-on calls
@@ -533,14 +567,22 @@ describe("PartnerNotificationPanel", () => {
     resolveMutation({
       version: 2,
       state: "ready",
-      validatedAt: "2026-09-24T12:00:00Z"
+      validatedAt: "2026-09-24T12:00:00Z",
     });
     await new Promise((r) => setTimeout(r, 10));
 
     // We ensure no follow-on state updates/GETs/tests occur on unmounted component
-    expect(mockClient.updatePartnerEntryNotificationBinding).toHaveBeenCalledTimes(1);
-    expect(mockClient.getPartnerEntryNotificationBinding).not.toHaveBeenCalled();
-    expect(mockClient.testPartnerEntryNotificationBinding).not.toHaveBeenCalled();
-    expect(mockClient.enablePartnerEntryNotificationBinding).not.toHaveBeenCalled();
+    expect(
+      mockClient.updatePartnerEntryNotificationBinding,
+    ).toHaveBeenCalledTimes(1);
+    expect(
+      mockClient.getPartnerEntryNotificationBinding,
+    ).not.toHaveBeenCalled();
+    expect(
+      mockClient.testPartnerEntryNotificationBinding,
+    ).not.toHaveBeenCalled();
+    expect(
+      mockClient.enablePartnerEntryNotificationBinding,
+    ).not.toHaveBeenCalled();
   });
 });
