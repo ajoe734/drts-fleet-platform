@@ -60,7 +60,7 @@ import {
   coordinateToDraftString,
   savedAddressToPayload,
 } from "@/lib/tenant-address-map";
-import { evaluateAddressSubmitGate, evaluateTenantSubmitGate, type AddressSubmitGateCode } from "@drts/ui-web";
+import { evaluateTenantSubmitGate } from "@drts/ui-web";
 
 type BookingCreateActionMap = {
   submit: ResourceActionDescriptor;

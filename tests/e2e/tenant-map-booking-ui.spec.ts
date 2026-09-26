@@ -108,16 +108,19 @@ async function stubGeoProvider(
       },
     });
   });
-  await page.route("**/api/geo/evaluate-service-area", (route) =>
-    route.fulfill({
+  await page.route("**/api/geo/evaluate-service-area", (route) => {
+    if (decision === "outage") {
+      return route.fulfill({ status: 503, json: { error: "provider outage" } });
+    }
+    return route.fulfill({
       json: serviceabilityResult(
         decision,
         decision === "serviceable"
           ? "Inside the published service area."
           : "Selected stop is outside the service area.",
       ),
-    }),
-  );
+    });
+  });
 }
 
 async function pinBothStops(page: Page) {
