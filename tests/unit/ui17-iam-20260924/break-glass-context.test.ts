@@ -305,7 +305,11 @@ describe("BreakGlass R6b Regression Tests - True Provider Mutation", () => {
           mutation: {
             stepUpReference: "proof_activate_789",
             expectedVersion: 1,
+            reasonCode: "BREAK_GLASS_ACTIVATED",
           },
+          requestId: "bg_req_1",
+          requestedDurationMinutes: 30,
+          requestedScope: undefined,
         },
       );
     });
