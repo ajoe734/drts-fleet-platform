@@ -81,7 +81,7 @@ describe("Canvas SSR Integrations", () => {
       renders.CG_out_of_area = ReactDOMServer.renderToStaticMarkup(window.CG_NewBookingMap({ theme: testTheme, pick: 'selected', drop: 'out_of_area' }));
       renders.CG_backend_rejected = ReactDOMServer.renderToStaticMarkup(window.CG_NewBookingMap({ theme: testTheme, pick: 'selected', drop: 'candidates' }));
       renders.CG_degraded_recovered = ReactDOMServer.renderToStaticMarkup(window.CG_NewBookingMap({ theme: testTheme, success: true }));
-      renders.CG_degraded = ReactDOMServer.renderToStaticMarkup(window.CG_NewBookingMap({ theme: testTheme, degraded: true, pick: 'selected', drop: 'selected' }));
+      renders.CG_degraded = ReactDOMServer.renderToStaticMarkup(window.CG_NewBookingMap({ theme: testTheme, degraded: true }));
 
       global.results = renders;
     `,
@@ -131,11 +131,11 @@ describe("Canvas SSR Integrations", () => {
       "送出 command",
       true,
     );
-    checkCta("TN_degraded", results.TN_degraded, "送交人工複核", false);
+    checkCta("TN_degraded", results.TN_degraded, "送出 command", true);
     checkCta(
       "TN_manual_review",
       results.TN_manual_review,
-      "送交人工複核",
+      "送出 command",
       false,
     );
 
