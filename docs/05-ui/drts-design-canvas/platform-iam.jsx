@@ -276,10 +276,18 @@ function PA_IamBreakGlass({ theme:th, active, state = "form", stepUpState = "non
                   { k:'到期時間', v:'不自動到期 (待啟用)' }
                 ]}/>
                 <div style={{ marginTop:12 }}>
-                  <Banner theme={th} tone="danger" icon="alert-triangle" title="無法啟用緊急權限 (403 IAM_STEP_UP_REQUIRED)" body="由於系統未能驗證您的身分憑證，目前無法核發權杖。請聯絡系統管理員協助處理。"/>
+                  {stepUpState === "none" && <Banner theme={th} tone="warn" icon="lock" title="啟用前請先取得 step-up 憑證或重新登入 (Fresh MFA)" actions={<Btn theme={th} size="xs" variant="primary" icon="lock">取得 step-up proof</Btn>}/>}
+                  {stepUpState === "verifying" && <Banner theme={th} tone="info" icon="clock" title="正在向伺服器請求身分驗證憑證..."/>}
+                  {stepUpState === "valid" && <Field theme={th} label="stepUpReference" required hint="已由 step-up 驗證回填"><Input theme={th} value="sup_••••••••b3e1" mono readOnly/></Field>}
+                  {stepUpState === "expired" && (
+                    <>
+                      <Banner theme={th} tone="danger" icon="alert-triangle" title="無法啟用緊急權限 (403 IAM_STEP_UP_REQUIRED)" body="由於系統未能驗證您的身分憑證，目前無法核發權杖。請重新登入 (Fresh MFA) 後再試。" actions={<Btn theme={th} size="xs" variant="primary" icon="refresh">重新取得</Btn>}/>
+                      <Field theme={th} label="stepUpReference" required hint="已失效"><Input theme={th} value="sup_••••••••b3e1" mono readOnly disabled/></Field>
+                    </>
+                  )}
                 </div>
                 <div style={{ marginTop:12, display:'flex', gap:8 }}>
-                  <ActionButton theme={th} descriptor={{ action:'activate', enabled:false, disabledReasonCode:'NO_API_POLICY', riskLevel:'high' }} variant="primary" danger icon="power" label="啟用緊急權限" en="activate"/>
+                  <ActionButton theme={th} descriptor={{ action:'activate', enabled:stepUpState === "valid", disabledReasonCode:stepUpState === "valid" ? undefined : 'NO_API_POLICY', riskLevel:'high' }} variant="primary" danger icon="power" label="啟用緊急權限" en="activate"/>
                 </div>
               </>
             )}

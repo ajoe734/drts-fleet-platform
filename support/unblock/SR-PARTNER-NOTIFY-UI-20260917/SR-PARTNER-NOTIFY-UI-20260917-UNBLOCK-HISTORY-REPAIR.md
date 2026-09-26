@@ -52,22 +52,22 @@ different task).
 
 ## Exact history and worktree finding (re-verified fresh, 2026-09-25)
 
-| Identity                           | Observed value                                                                                     | How re-verified this session                                                                                                                                                  |
-| ---------------------------------- | -------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| This helper's assigned branch/base | `claude2/sr-partner-notify-ui-20260917-unblock-history-repair` from `dev`                          | Supervisor-assigned worktree cwd; `git status`/`git log`                                                                                                                      |
-| Fetched `origin/dev` at this audit | `374536be540e959190394d5e478693cea7687e5f`                                                         | `git fetch origin && git log -1 origin/dev` — unchanged since Codex2's audit                                                                                                  |
-| Parent execution/candidate branch  | `gemini/sr-partner-notify-ui-20260924-canvas`                                                      | `gh pr view 2162`                                                                                                                                                             |
-| Parent PR head                     | `b755846383e2562f0190bf47930da6ff022ec67a`                                                         | `gh pr view 2162 --json headRefOid,state` → still `OPEN`, head unchanged                                                                                                      |
-| Base relationship                  | `git rev-list --left-right --count origin/dev...b755846383e2562f0190bf47930da6ff022ec67a` = `0 11` | re-ran directly, same result: no divergence, 11 commits ahead of dev                                                                                                          |
-| Audited base→candidate diff        | 16 files, 3694 insertions(+), 50 deletions(-)                                                      | `git diff --stat 374536be5..b755846383` re-run, same 16 paths                                                                                                                 |
-| Commit trailer gate                | FAILS, 2 commits                                                                                   | `python3 tools/ci/git/check_commit_trailers.py --base 374536be540e959190394d5e478693cea7687e5f --head b755846383e2562f0190bf47930da6ff022ec67a` → exit 1, re-run this session |
+| Identity | Observed value | How re-verified this session |
+| --- | --- | --- |
+| This helper's assigned branch/base | `claude2/sr-partner-notify-ui-20260917-unblock-history-repair` from `dev` | Supervisor-assigned worktree cwd; `git status`/`git log` |
+| Fetched `origin/dev` at this audit | `374536be540e959190394d5e478693cea7687e5f` | `git fetch origin && git log -1 origin/dev` — unchanged since Codex2's audit |
+| Parent execution/candidate branch | `gemini/sr-partner-notify-ui-20260924-canvas` | `gh pr view 2162` |
+| Parent PR head | `b755846383e2562f0190bf47930da6ff022ec67a` | `gh pr view 2162 --json headRefOid,state` → still `OPEN`, head unchanged |
+| Base relationship | `git rev-list --left-right --count origin/dev...b755846383e2562f0190bf47930da6ff022ec67a` = `0 11` | re-ran directly, same result: no divergence, 11 commits ahead of dev |
+| Audited base→candidate diff | 16 files, 3694 insertions(+), 50 deletions(-) | `git diff --stat 374536be5..b755846383` re-run, same 16 paths |
+| Commit trailer gate | FAILS, 2 commits | `python3 tools/ci/git/check_commit_trailers.py --base 374536be540e959190394d5e478693cea7687e5f --head b755846383e2562f0190bf47930da6ff022ec67a` → exit 1, re-run this session |
 
 The two contaminating commits, confirmed unchanged by direct `git log`:
 
-| Published commit                           | Exact defect                                                                                                                                    |
-| ------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------- |
+| Published commit | Exact defect |
+| --- | --- |
 | `8681f5edf3be959473ca68a29258a1fc8e9f7621` | Subject `SR-PARTNER-NOTIFY-UI-20260917: Append complete Codex2 receipt and repair matrix`; missing `Task-ID`, `LLM-Agent`, `Reviewer` trailers. |
-| `766da54cb70500daa75470523e2bfe6855800d09` | Subject `SR-PARTNER-NOTIFY-UI-20260917: Append round 6 review and repair matrix`; same three missing trailers.                                  |
+| `766da54cb70500daa75470523e2bfe6855800d09` | Subject `SR-PARTNER-NOTIFY-UI-20260917: Append round 6 review and repair matrix`; same three missing trailers. |
 
 Both remain ancestors of the parent candidate only; neither is an ancestor of
 `origin/dev`. The hosted same-head
@@ -152,12 +152,12 @@ this helper session. No deploy was prepared or performed.
 
 ## Helper acceptance and verification evidence (this session)
 
-| Acceptance item                | Evidence this session                                                                                                                                                                                                                                                         | Result                                                                                        |
-| ------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------- |
-| Identify exact contamination   | Re-ran `git rev-list --left-right --count origin/dev...b755846383e2562f0190bf47930da6ff022ec67a`, `python3 tools/ci/git/check_commit_trailers.py --base 374536be540e959190394d5e478693cea7687e5f --head b755846383e2562f0190bf47930da6ff022ec67a`, `git log` on both bad SHAs | Confirmed: `0 11`, exit 1 with the same two commits, both missing all three required trailers |
-| Non-destructive repair path    | Re-derived base/source relationship and 16-file/3694+/50- diff stat directly; reviewed Codex2's temporary-index replay script logic                                                                                                                                           | Confirmed reproducible without touching any published ref; no force-push proposed             |
-| Task-scoped commit / push / PR | This report, committed on `claude2/sr-partner-notify-ui-20260917-unblock-history-repair`, pushed normally                                                                                                                                                                     | See publication section below                                                                 |
-| Update parent next step        | Re-read parent task via canonical `show`; `resolved_parent_status`/`resolved_parent_waiting_for`/`resolved_parent_next` already match Codex2's requested text                                                                                                                 | Confirmed applied by Supervisor; no additional cross-task write attempted or needed           |
+| Acceptance item | Evidence this session | Result |
+| --- | --- | --- |
+| Identify exact contamination | Re-ran `git rev-list --left-right --count origin/dev...b755846383e2562f0190bf47930da6ff022ec67a`, `python3 tools/ci/git/check_commit_trailers.py --base 374536be540e959190394d5e478693cea7687e5f --head b755846383e2562f0190bf47930da6ff022ec67a`, `git log` on both bad SHAs | Confirmed: `0 11`, exit 1 with the same two commits, both missing all three required trailers |
+| Non-destructive repair path | Re-derived base/source relationship and 16-file/3694+/50- diff stat directly; reviewed Codex2's temporary-index replay script logic | Confirmed reproducible without touching any published ref; no force-push proposed |
+| Task-scoped commit / push / PR | This report, committed on `claude2/sr-partner-notify-ui-20260917-unblock-history-repair`, pushed normally | See publication section below |
+| Update parent next step | Re-read parent task via canonical `show`; `resolved_parent_status`/`resolved_parent_waiting_for`/`resolved_parent_next` already match Codex2's requested text | Confirmed applied by Supervisor; no additional cross-task write attempted or needed |
 
 ### Publication
 
