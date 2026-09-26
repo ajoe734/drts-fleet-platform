@@ -366,7 +366,9 @@ describe.skipIf(!testDbUrl)(
       );
       expect(resLease.kind).toBe("failed");
       if (resLease.kind === "failed")
-        expect((resLease as any).failure.failureReason).toBe("provider_transient_error");
+        expect((resLease as any).failure.failureReason).toBe(
+          "provider_transient_error",
+        );
 
       // 3. Expired lease is accepted (stale worker rejection)
       const { outboxId: staleId } = await createFixture({ lease: "expired" });
@@ -484,7 +486,9 @@ describe.skipIf(!testDbUrl)(
       );
       expect(resSuper.kind).toBe("failed");
       if (resSuper.kind === "failed") {
-        expect((resSuper as any).failure.failureReason).toBe("notification_superseded");
+        expect((resSuper as any).failure.failureReason).toBe(
+          "notification_superseded",
+        );
       }
 
       // 5. Cross-tenant authority rejection
@@ -531,8 +535,16 @@ describe.skipIf(!testDbUrl)(
       expect(resBudget.kind).toBe("failed");
 
       // 9. Genuine receipt preservation under refused repeat retry
-      const { outboxId: genReceiptId } = await createFixture({ lease: "expired", status: "pending", retryDisp: "automatic" });
-      const genReceiptClaim = await mtRepo.claimPartnerNotification(genReceiptId, "worker-gen", 60);
+      const { outboxId: genReceiptId } = await createFixture({
+        lease: "expired",
+        status: "pending",
+        retryDisp: "automatic",
+      });
+      const genReceiptClaim = await mtRepo.claimPartnerNotification(
+        genReceiptId,
+        "worker-gen",
+        60,
+      );
       const genuineRes = await mtRepo.recordPushDeliveryOutcome({
         outboxId: genReceiptId,
         fenceToken: genReceiptClaim!.fenceToken,
@@ -561,7 +573,10 @@ describe.skipIf(!testDbUrl)(
       });
       expect(genuineRes.recorded).toBe(true);
 
-      const resGenRetry = await mtRepo.retryPartnerNotificationDelivery(entryObj, genReceiptId);
+      const resGenRetry = await mtRepo.retryPartnerNotificationDelivery(
+        entryObj,
+        genReceiptId,
+      );
       expect(resGenRetry.kind).toBe("failed");
 
       const genuineReceiptCheck = await pool.query(
@@ -569,7 +584,9 @@ describe.skipIf(!testDbUrl)(
         [genReceiptId],
       );
       expect(genuineReceiptCheck.rows.length).toBe(1);
-      expect(genuineReceiptCheck.rows[0].provider_message_ref).toBe("msg-genuine");
+      expect(genuineReceiptCheck.rows[0].provider_message_ref).toBe(
+        "msg-genuine",
+      );
     });
 
     it("tests list API preservation of sequence, hash, receipt, history and same-tenant isolation", async () => {
@@ -649,8 +666,6 @@ describe.skipIf(!testDbUrl)(
         outboxId,
       );
       expect(res.kind).toBe("requeued");
-
-      
     });
 
     it("tests missing/disabled/test_pending readiness", async () => {
@@ -676,27 +691,42 @@ describe.skipIf(!testDbUrl)(
 
       await pool.query(
         "UPDATE admin.phase1_partner_notification_bindings SET state = 'disabled' WHERE binding_id = $1",
-        [bindingId1]
+        [bindingId1],
       );
-      const prepDisabled = await mtRepo.retryPartnerNotificationDelivery({ entrySlug: entrySlug1, tenantId, partnerId }, outboxId); expect(prepDisabled.kind).toBe("failed");
-      
+      const prepDisabled = await mtRepo.retryPartnerNotificationDelivery(
+        { entrySlug: entrySlug1, tenantId, partnerId },
+        outboxId,
+      );
+      expect(prepDisabled.kind).toBe("failed");
+
       await pool.query(
         "UPDATE admin.phase1_partner_notification_bindings SET state = 'test_pending' WHERE binding_id = $1",
-        [bindingId1]
+        [bindingId1],
       );
-      const prepTestPending = await mtRepo.retryPartnerNotificationDelivery({ entrySlug: entrySlug1, tenantId, partnerId }, outboxId); expect(prepTestPending.kind).toBe("failed");
+      const prepTestPending = await mtRepo.retryPartnerNotificationDelivery(
+        { entrySlug: entrySlug1, tenantId, partnerId },
+        outboxId,
+      );
+      expect(prepTestPending.kind).toBe("failed");
 
       await pool.query(
         "UPDATE admin.phase1_partner_notification_bindings SET state = 'ready' WHERE binding_id = $1",
-        [bindingId1]
+        [bindingId1],
       );
-      const prepReady = await mtRepo.retryPartnerNotificationDelivery({ entrySlug: entrySlug1, tenantId, partnerId }, outboxId); expect(prepReady.kind).toBe("requeued");
+      const prepReady = await mtRepo.retryPartnerNotificationDelivery(
+        { entrySlug: entrySlug1, tenantId, partnerId },
+        outboxId,
+      );
+      expect(prepReady.kind).toBe("requeued");
     });
 
     it("tests cancellation versus independent receipt_ready", async () => {
       const { outboxId, orderId } = await createFixture({ status: "failed" });
-      await pool.query("UPDATE ops.phase1_owned_orders SET status = 'cancelled' WHERE order_id = $1", [orderId]);
-      
+      await pool.query(
+        "UPDATE ops.phase1_owned_orders SET status = 'cancelled' WHERE order_id = $1",
+        [orderId],
+      );
+
       const res = await mtRepo.retryPartnerNotificationDelivery(
         { entrySlug: entrySlug1, tenantId, partnerId },
         outboxId,
@@ -709,18 +739,18 @@ describe.skipIf(!testDbUrl)(
 
     it("tests historical context/route ownership changes", async () => {
       const { outboxId, orderId } = await createFixture({ status: "failed" });
-      
+
       await pool.query(
         "UPDATE mobility.phase1_order_partner_notification_routes SET entry_slug = $1 WHERE order_id = $2",
-        [entrySlug2, orderId]
+        [entrySlug2, orderId],
       );
-      
+
       const res = await mtRepo.retryPartnerNotificationDelivery(
         { entrySlug: entrySlug1, tenantId, partnerId },
         outboxId,
       );
       expect(res.kind).toBe("failed");
-      
+
       const res2 = await mtRepo.retryPartnerNotificationDelivery(
         { entrySlug: entrySlug2, tenantId, partnerId },
         outboxId,
