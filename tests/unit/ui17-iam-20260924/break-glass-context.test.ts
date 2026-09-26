@@ -172,7 +172,7 @@ describe("BreakGlass R6b Regression Tests - True Provider Mutation", () => {
       }),
     );
 
-    mockTransportClient.post.mockImplementation(async (url, body) => {
+    mockTransportClient.post.mockImplementation(async (url) => {
       if (url.includes("/identity/step-up-proofs")) {
         return { required: true, stepUpReference: "proof_close_456" };
       }
@@ -278,7 +278,7 @@ describe("BreakGlass R6b Regression Tests - True Provider Mutation", () => {
     fireEvent.click(manageBtn);
 
     const getProofBtn = await screen.findByText(/Get step-up proof/i);
-    mockTransportClient.post.mockImplementation(async (url, body) => {
+    mockTransportClient.post.mockImplementation(async (url) => {
       if (url.includes("/identity/step-up-proofs")) {
         return { required: true, stepUpReference: "proof_activate_789" };
       }

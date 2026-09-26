@@ -287,7 +287,7 @@ function PA_IamBreakGlass({ theme:th, active, state = "form", stepUpState = "non
                   )}
                 </div>
                 <div style={{ marginTop:12, display:'flex', gap:8 }}>
-                  <ActionButton theme={th} descriptor={{ action:'activate', enabled:stepUpState === "valid", disabledReasonCode:stepUpState === "valid" ? undefined : (stepUpState === "expired" ? 'STEP_UP_EXPIRED' : (stepUpState === "verifying" ? 'STEP_UP_VERIFYING' : 'MISSING_STEP_UP_PROOF')), riskLevel:'high' }} variant="primary" danger icon="power" label="啟用緊急權限" en="activate"/>
+                  <ActionButton theme={th} descriptor={{ action:'activate', enabled:stepUpState === "valid", disabledReasonCode:stepUpState === "valid" ? undefined : 'IAM_STEP_UP_REQUIRED', riskLevel:'high' }} variant="primary" danger icon="power" label="啟用緊急權限" en="activate"/>
                 </div>
               </>
             )}
