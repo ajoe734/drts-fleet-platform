@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { describe, it, beforeAll, afterAll, afterEach, expect } from "vitest";
+import { describe, it, beforeAll, afterAll, afterEach, expect, vi } from "vitest";
 import { createRequire } from "node:module";
 const customRequire = createRequire(
   new URL("file://" + process.cwd() + "/apps/api/package.json"),
@@ -131,7 +131,7 @@ describe.skipIf(!testDbUrl)(
       const endpointRecord: import("../../../../apps/api/src/modules/tenant-partner/tenant-partner.repository").StoredWebhookEndpointRecord =
         {
           url: "https://test.com",
-          events: ["passenger.eta_changed.v1"],
+          events: ["passenger.eta_changed.v1", "passenger.receipt_ready.v1"],
           status: "active",
           webhookId: webhookId,
           tenantId: tenantId,
@@ -237,20 +237,20 @@ describe.skipIf(!testDbUrl)(
     afterAll(async () => {
       try {
         await pool.query(
-          "DELETE FROM admin.phase1_partner_user_identity_links WHERE entry_slug IN ($1, $2)",
-          [entrySlug1, entrySlug2],
+          "DELETE FROM admin.phase1_partner_user_identity_links WHERE entry_slug IN ($1, $2, $3)",
+          [entrySlug1, entrySlug2, entrySlug3],
         );
         await pool.query(
-          "DELETE FROM admin.phase1_partner_notification_bindings WHERE binding_id IN ($1, $2)",
-          [bindingId1, bindingId2],
+          "DELETE FROM admin.phase1_partner_notification_bindings WHERE entry_slug IN ($1, $2, $3)",
+          [entrySlug1, entrySlug2, entrySlug3],
         );
         await pool.query(
           "DELETE FROM admin.phase1_tenant_webhook_endpoints WHERE webhook_id = $1",
           [webhookId],
         );
         await pool.query(
-          "DELETE FROM admin.phase1_partner_channel_entries WHERE entry_slug IN ($1, $2)",
-          [entrySlug1, entrySlug2],
+          "DELETE FROM admin.phase1_partner_channel_entries WHERE entry_slug IN ($1, $2, $3)",
+          [entrySlug1, entrySlug2, entrySlug3],
         );
         await pool.query(
           "DELETE FROM admin.phase1_platform_tenants WHERE tenant_id = $1",
@@ -712,38 +712,39 @@ describe.skipIf(!testDbUrl)(
         [outboxId, orderId],
       );
 
+      await pool.query(
+        'INSERT INTO admin.phase1_partner_user_identity_links (entry_slug, partner_user_ref, drts_passenger_id, status, consent_scope, linked_at, last_seen_at, created_at, updated_at, record) VALUES ($1, \'user\', \'passenger\', \'active\', \'["all"]\'::jsonb, now(), now(), now(), now(), \'{"status":"active","drtsPassengerId":"passenger","partnerUserRef":"user"}\') ON CONFLICT DO NOTHING',
+        [missingBindingSlug]
+      );
+
       // Verify it is configuration_blocked initially
       const prepBefore = await mtRepo.retryPartnerNotificationDelivery(
         { entrySlug: missingBindingSlug, tenantId, partnerId },
         outboxId,
       );
       expect(prepBefore.kind).toBe("failed");
-      expect((prepBefore as any).failureReason).toBe("configuration_blocked");
+      expect((prepBefore as any).failure?.failureReason).toBe("configuration_blocked");
 
       // using production function
       const { PartnerEntryNotificationBindingService } = await import("../../../../apps/api/src/modules/tenant-partner/partner-entry-notification-binding.service");
+      const { PartnerNotificationDispatchFacade } = await import("../../../../apps/api/src/modules/tenant-partner/partner-notification-dispatch.facade");
       const bindingService = app.get(PartnerEntryNotificationBindingService);
+      const dispatchFacade = app.get(PartnerNotificationDispatchFacade);
       
-      const mockedApiClient = {
-        fetch: async () => ({
-          status: 200,
-          body: {
-            success: true,
-            data: { ack: true }
-          }
-        })
-      };
-      
-      // Override the binding service's api client for testing
-      (bindingService as any).apiClient = mockedApiClient;
+      const dispatchSpy = vi.spyOn(dispatchFacade, "dispatchNotificationAttemptByWebhookId").mockResolvedValue({
+        kind: "accepted",
+        ack: { received: true, id: "ack-1" }
+      } as any);
 
       await bindingService.putBinding(missingBindingSlug, {
         webhookId: webhookId,
         eventTypes: ["eta_changed"],
         expectedVersion: 0
       });
-      await bindingService.testBinding(missingBindingSlug, { expectedVersion: 1 });
-      await bindingService.enableBinding(missingBindingSlug, { expectedVersion: 1 });
+      await bindingService.testBinding(missingBindingSlug, { tenantId, partnerId, actingUser: "system" } as any);
+      await bindingService.enableBinding(missingBindingSlug, 1);
+
+      dispatchSpy.mockRestore();
 
       const res = await mtRepo.retryPartnerNotificationDelivery(
         { entrySlug: missingBindingSlug, tenantId, partnerId },
@@ -830,7 +831,7 @@ describe.skipIf(!testDbUrl)(
         outboxId,
       );
       expect(resReceiptReady.kind).toBe("failed");
-      expect((resReceiptReady as any).failureReason).toBe("notification_obsolete");
+      expect((resReceiptReady as any).failure?.failureReason).toBe("notification_obsolete");
 
       // Add an independent valid receipt_ready fixture
       const { outboxId: outboxIdReceipt, orderId: orderIdReceipt } = await createFixture({ status: "failed", entrySlug: entrySlug1, eventType: "receipt_ready" });
@@ -861,19 +862,26 @@ describe.skipIf(!testDbUrl)(
         [entrySlug2, orderId],
       );
 
+      const oldRes = await mtRepo.listPartnerNotificationDeliveries({ entrySlug: entrySlug1, tenantId, partnerId }, { limit: 50 });
+      expect(oldRes.rows.find((i: any) => i.outbox_id === outboxId)).toBeUndefined();
+
+      const newRes = await mtRepo.listPartnerNotificationDeliveries({ entrySlug: entrySlug2, tenantId, partnerId }, { limit: 50 });
+      expect(newRes.total).toBeGreaterThanOrEqual(1);
+      expect(newRes.rows.find((i: any) => i.outbox_id === outboxId)).toBeDefined();
+
       const res = await mtRepo.retryPartnerNotificationDelivery(
         { entrySlug: entrySlug1, tenantId, partnerId },
         outboxId,
       );
       expect(res.kind).toBe("failed");
-      expect((res as any).failureReason).toBe("owner_changed");
+      expect((res as any).failure?.failureReason).toBe("owner_changed");
 
       const res2 = await mtRepo.retryPartnerNotificationDelivery(
         { entrySlug: entrySlug2, tenantId, partnerId },
         outboxId,
       );
       expect(res2.kind).toBe("failed");
-      expect((res2 as any).failureReason).toBe("route_missing");
+      expect((res2 as any).failure?.failureReason).toBe("route_missing");
     });
   },
 );

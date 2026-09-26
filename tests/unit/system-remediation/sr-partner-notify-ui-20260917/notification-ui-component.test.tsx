@@ -42,9 +42,9 @@ describe("PartnerNotificationPanel", () => {
         ],
         pageInfo: { totalItems: 1 },
       }),
-      createPartnerEntryNotificationBinding: vi.fn().mockResolvedValue({ version: 1, state: "configuration" }),
-      updatePartnerEntryNotificationBinding: vi.fn().mockResolvedValue({ version: 2, state: "configuration" }),
-      testPartnerEntryNotificationBinding: vi.fn().mockResolvedValue({ version: 2, state: "test_pending", lastTestResult: { result: "accepted", data: { ack: true } } }),
+      createPartnerEntryNotificationBinding: vi.fn().mockResolvedValue({ version: 1, state: "disabled" }),
+      updatePartnerEntryNotificationBinding: vi.fn().mockResolvedValue({ version: 2, state: "disabled" }),
+      testPartnerEntryNotificationBinding: vi.fn().mockResolvedValue({ kind: "accepted", ack: true }),
       enablePartnerEntryNotificationBinding: vi.fn().mockResolvedValue({ version: 2, state: "ready", validatedAt: "2026-09-24T12:00:00Z" }),
       retryPartnerNotificationDelivery: vi.fn().mockResolvedValue({ kind: "requeued" }),
       getList: vi.fn().mockImplementation((url) => {
@@ -181,12 +181,8 @@ describe("PartnerNotificationPanel", () => {
     const select = await screen.findByRole("combobox");
     fireEvent.change(select, { target: { value: "different-webhook" } });
 
-    // Click receipt_ready checkbox
     const checkboxes = await screen.findAllByRole("checkbox");
-    // Find the one for receipt_ready which is likely the third or fourth, or we can just click the last one
-    if (checkboxes.length > 0 && !checkboxes[checkboxes.length - 1].checked) {
-      fireEvent.click(checkboxes[checkboxes.length - 1]);
-    }
+    fireEvent.click(checkboxes[4]);
 
     const saveBtn = await screen.findByRole("button", { name: /儲存/i });
     await waitFor(() =>
@@ -199,6 +195,7 @@ describe("PartnerNotificationPanel", () => {
         mockClient.updatePartnerEntryNotificationBinding,
       ).toHaveBeenCalledWith("test-entry", expect.objectContaining({
         webhookId: "different-webhook",
+        eventTypes: expect.arrayContaining(["receipt_ready"]),
         expectedVersion: 1
       }));
     });
@@ -338,7 +335,7 @@ describe("PartnerNotificationPanel", () => {
     await waitFor(() =>
       expect(
         mockClient.enablePartnerEntryNotificationBinding,
-      ).toHaveBeenCalledWith("test-entry-2", expect.objectContaining({ expectedVersion: 1 })),
+      ).toHaveBeenCalledWith("test-entry-2", 1),
     );
     mockClient.enablePartnerEntryNotificationBinding.mockClear();
 
@@ -363,7 +360,7 @@ describe("PartnerNotificationPanel", () => {
     const testBtn = await screen.findByRole("button", { name: /test/i });
     fireEvent.click(testBtn);
     await waitFor(() =>
-      expect(mockClient.testPartnerEntryNotificationBinding).toHaveBeenCalledWith("test-entry-3", expect.objectContaining({ expectedVersion: 1 })),
+      expect(mockClient.testPartnerEntryNotificationBinding).toHaveBeenCalledWith("test-entry-3"),
     );
 
     // 4. Enable - starts test_pending and passed_current
@@ -389,7 +386,7 @@ describe("PartnerNotificationPanel", () => {
     await waitFor(() =>
       expect(
         mockClient.enablePartnerEntryNotificationBinding,
-      ).toHaveBeenCalledWith("test-entry-4", expect.objectContaining({ expectedVersion: 1 })),
+      ).toHaveBeenCalledWith("test-entry-4", 1),
     );
   });
 
@@ -398,7 +395,7 @@ describe("PartnerNotificationPanel", () => {
     mockClient.getPartnerEntryNotificationBinding.mockRejectedValueOnce(
       Object.assign(new Error("Forbidden"), { statusCode: 403 }),
     );
-    const { rerender } = render(
+    const { rerender, unmount } = render(
       <PartnerNotificationPanel
         entrySlug="test-entry"
         tenantId="test-tenant"
@@ -409,7 +406,7 @@ describe("PartnerNotificationPanel", () => {
       await screen.findByText(/partnerNotification\.scopeDeniedTitle/i),
     ).toBeDefined();
 
-    // No permission for binding but YES permission for webhooks
+    // No permission for binding and NO permission for webhooks
     mockClient.getPartnerEntryNotificationBinding.mockResolvedValueOnce({
       state: "ready",
       webhookId: "wh_1",
@@ -421,7 +418,7 @@ describe("PartnerNotificationPanel", () => {
         entrySlug="test-entry"
         tenantId="test-tenant"
         canWriteBinding={false}
-        canWriteWebhooks={true}
+        canWriteWebhooks={false}
         canReadWebhooks={true}
       />,
     );
@@ -437,7 +434,7 @@ describe("PartnerNotificationPanel", () => {
     expect((editBtn as HTMLButtonElement).disabled).toBe(true);
 
     // Missing-webhook permission denial should be rendered
-    const disabledWebhookLinks = await screen.findAllByText(/前往既有 \/webhooks 管理/i);
+    const disabledWebhookLinks = await screen.findAllByText(/partnerNotification\.webhookHelp/i);
     expect(disabledWebhookLinks.length).toBeGreaterThan(0);
     // Button should be disabled because canWriteWebhooks is false
     expect(disabledWebhookLinks[0].closest("button")?.disabled).toBe(true);
@@ -492,7 +489,7 @@ describe("PartnerNotificationPanel", () => {
       version: 1,
       webhookId: "test-webhook",
       eventTypes: ["eta_changed"],
-      state: "configuration"
+      state: "disabled"
     });
 
     const { unmount, rerender } = render(
@@ -511,6 +508,9 @@ describe("PartnerNotificationPanel", () => {
     fireEvent.click(editBtn);
 
     const saveBtn = await screen.findByRole("button", { name: /儲存/i });
+    await waitFor(() =>
+      expect((saveBtn as HTMLButtonElement).disabled).toBe(false),
+    );
     fireEvent.click(saveBtn);
 
     // change props while mutation is pending
@@ -524,6 +524,11 @@ describe("PartnerNotificationPanel", () => {
     
     unmount();
 
+    // Clear mocks to assert absence of follow-on calls
+    mockClient.getPartnerEntryNotificationBinding.mockClear();
+    mockClient.testPartnerEntryNotificationBinding.mockClear();
+    mockClient.enablePartnerEntryNotificationBinding.mockClear();
+
     // Resolve the mutation after unmount
     resolveMutation({
       version: 2,
@@ -532,7 +537,10 @@ describe("PartnerNotificationPanel", () => {
     });
     await new Promise((r) => setTimeout(r, 10));
 
-    // We just ensure no state updates on unmounted component throw errors
+    // We ensure no follow-on state updates/GETs/tests occur on unmounted component
     expect(mockClient.updatePartnerEntryNotificationBinding).toHaveBeenCalledTimes(1);
+    expect(mockClient.getPartnerEntryNotificationBinding).not.toHaveBeenCalled();
+    expect(mockClient.testPartnerEntryNotificationBinding).not.toHaveBeenCalled();
+    expect(mockClient.enablePartnerEntryNotificationBinding).not.toHaveBeenCalled();
   });
 });
