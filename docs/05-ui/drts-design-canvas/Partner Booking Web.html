@@ -36,6 +36,8 @@
 <script type="text/babel" src="pb-states.jsx"></script>
 <script type="text/babel" src="pb-receipts.jsx"></script>
 <script type="text/babel" src="pb-embed.jsx"></script>
+<script type="text/babel" src="map-picker.jsx"></script>
+<script type="text/babel" src="map-picker-integrations.jsx"></script>
 
 <script type="text/babel">
 function App() {
@@ -82,6 +84,15 @@ function App() {
         <DCArtboard id="trv-review" label="確認 Review" width={W} height={H}><Phone p={PROGRAMS.travel}><PB_Review program="travel" /></Phone></DCArtboard>
         <DCArtboard id="trv-success" label="預約成功 Success" width={W} height={H}><Phone p={PROGRAMS.travel}><PB_Success program="travel" /></Phone></DCArtboard>
         <DCArtboard id="trv-receipt" label="行程明細 / 收據 · 已含團費 (§5.4)" width={W} height={H}><Phone p={PROGRAMS.travel}><PB_TrvReceipt /></Phone></DCArtboard>
+      </DCSection>
+
+      <DCSection id="map-picker" title="05 · 夥伴訂車表單 × 地址選點 · A · partner-map-picker-20260704" subtitle="保留方案膠囊 / 資格橫幅 / 送出鈕位置 · 地圖中斷 → 送交人工複核">
+        <DCArtboard id="mp-pb-selected" label="A2 · 成對上下車 · 皆已選定 · 可送出" width={W} height={H}><Phone p={PROGRAMS.card}><PB_BookCardMap state="selected" drop="selected" /></Phone></DCArtboard>
+        <DCArtboard id="mp-pb-candidates" label="A2 · 上車候選（含來源/可信度）· 送出停用" width={W} height={H}><Phone p={PROGRAMS.card}><PB_BookCardMap state="candidates" drop="selected" /></Phone></DCArtboard>
+        <DCArtboard id="mp-pb-out" label="A2 · 上車不在服務範圍 · 送出 disabled" width={W} height={H}><Phone p={PROGRAMS.card}><PB_BookCardMap state="out_of_area" drop="selected" /></Phone></DCArtboard>
+        <DCArtboard id="mp-pb-down" label="A2 · 地圖中斷 → 送交人工複核" width={W} height={H}><Phone p={PROGRAMS.card}><PB_BookCardMap state="provider_down" drop="provider_down" /></Phone></DCArtboard>
+        <DCArtboard id="mp-pb-mixed" label="A2 · 中斷 + 超區混合 · 超區優先 · 不可送人工複核" width={W} height={H}><Phone p={PROGRAMS.card}><PB_BookCardMap state="provider_down" drop="out_of_area" /></Phone></DCArtboard>
+        <DCArtboard id="mp-pb-manual" label="A2 · 手動座標（含理由）→ 人工複核分支" width={W} height={H}><Phone p={PROGRAMS.card}><PB_BookCardMap state="manual_coords" drop="selected" /></Phone></DCArtboard>
       </DCSection>
 
       <DCSection id="embed" title="04 · 網銀 App 內嵌身分狀態 · Online-banking Embed Identity (B1–B5)" subtitle="身分來自銀行 session (reference token) · 永不擷取卡片資料 · 中信 App webview">

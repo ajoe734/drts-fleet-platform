@@ -42,6 +42,8 @@
 <script type="text/babel" src="tenant-screens-2.jsx"></script>
 <script type="text/babel" src="tenant-screens-3.jsx"></script>
 <script type="text/babel" src="tenant-av-fallback.jsx"></script>
+<script type="text/babel" src="map-picker.jsx"></script>
+<script type="text/babel" src="map-picker-integrations.jsx"></script>
 
 <script type="text/babel">
 const TWEAK_DEFAULTS = /*EDITMODE-BEGIN*/{
@@ -108,6 +110,21 @@ function App() {
         <DCSection id="system" title="08 · 系統">
           <DCArtboard id="flags" label="功能旗標 · read-only (Q-X16)" width={W} height={H}><Bare><TN_Flags theme={th} /></Bare></DCArtboard>
           <DCArtboard id="settings" label="設定" width={W} height={H}><Bare><TN_Settings theme={th} /></Bare></DCArtboard>
+        </DCSection>
+
+        <DCSection id="map-picker" title="10 · 地址選點元件 + 租戶/禮賓線整合 · A · map-picker-20260630/0703/0704" subtitle="共用元件 9 態 · 內嵌不開彈窗 · 地圖中斷只能人工複核（不靜默變普通訂單）">
+          <DCArtboard id="mp-states" label="A0 · 元件 9 態總覽 · 中性工具平面" width={W} height={H}><Hero url="/design/map-picker"><MP_StatesBoard theme={th} /></Hero></DCArtboard>
+          <DCArtboard id="mp-tn-new" label="A1 · 租戶訂車建立 · 兩欄保留 · 成對選點" width={W} height={H}><Bare><TN_NewBookingMap theme={th} /></Bare></DCArtboard>
+          <DCArtboard id="mp-tn-degraded" label="A1 · 租戶訂車 · 地圖中斷 → 人工複核" width={W} height={H}><Bare><TN_NewBookingMap theme={th} degraded /></Bare></DCArtboard>
+          <DCArtboard id="mp-tn-addr" label="A1 · 租戶通訊錄 · 地址簿內嵌選點" width={W} height={H}><Bare><TN_AddressesMap theme={th} /></Bare></DCArtboard>
+          <DCArtboard id="mp-tn-reject" label="A1 · 租戶訂車 · 拒絕與復原（不在服務範圍 / 查無結果 → 手動座標+理由）" width={W} height={H}><Bare><TN_NewBookingMap theme={th} pick="out_of_area" drop="no_results" /></Bare></DCArtboard>
+          <DCArtboard id="mp-tn-manual" label="A1 · 租戶訂車 · 手動座標 + 待人工複核（含理由）" width={W} height={H}><Bare><TN_NewBookingMap theme={th} pick="manual_coords" drop="manual_review" /></Bare></DCArtboard>
+          <DCArtboard id="mp-cg-new" label="A3 · 禮賓訂車建立 · 主視覺區 + 服務台姿態 + 護欄" width={W} height={H}><Bare><CG_NewBookingMap theme={th} /></Bare></DCArtboard>
+          <DCArtboard id="mp-cg-degraded" label="A3 · 禮賓訂車 · 地圖中斷 → 人工複核" width={W} height={H}><Bare><CG_NewBookingMap theme={th} degraded /></Bare></DCArtboard>
+          <DCArtboard id="mp-cg-ready" label="A3 · 禮賓訂車 · 雙點已確認 · 可建立" width={W} height={H}><Bare><CG_NewBookingMap theme={th} drop="selected" /></Bare></DCArtboard>
+          <DCArtboard id="mp-cg-success" label="A3 · 禮賓訂車 · 建立成功 · 復原路徑" width={W} height={H}><Bare><CG_NewBookingMap theme={th} drop="selected" success /></Bare></DCArtboard>
+          <DCArtboard id="mp-cg-manual" label="A3 · 禮賓訂車 · 下車待人工複核（理由）→ 送交人工複核" width={W} height={H}><Bare><CG_NewBookingMap theme={th} drop="manual_review" /></Bare></DCArtboard>
+          <DCArtboard id="mp-cg-reject" label="A3 · 禮賓訂車 · 下車不在服務範圍 · 建立停用" width={W} height={H}><Bare><CG_NewBookingMap theme={th} drop="out_of_area" /></Bare></DCArtboard>
         </DCSection>
 
         <DCSection id="av-fallback" title="09 · AV→人駕 Fallback · Phase 2 V1" subtitle="計畫 vs 實際履約 · 轉派階段 · ETA/計費/SLA · 文案走 tenantMessageCode · 不加收不重下單">

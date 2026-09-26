@@ -299,6 +299,24 @@ export function AddressMapPreviewSurface({
           );
         })}
       </svg>
+      {pins.some((p) => p.draggable) ? (
+        <div
+          style={{
+            position: "absolute",
+            right: 8,
+            bottom: 6,
+            fontSize: 9.5,
+            fontFamily: theme.monoFamily,
+            color: theme.textDim,
+            background: theme.surface,
+            padding: "2px 6px",
+            borderRadius: 4,
+            pointerEvents: "none",
+          }}
+        >
+          ↑↓←→ 微調 · Shift 大步
+        </div>
+      ) : null}
       {!hasPins ? (
         <div
           style={{
@@ -772,6 +790,7 @@ export function AddressMapPicker<TServiceProduct extends string = string>(
       setManualError(labels.manualInvalid);
       return;
     }
+
     if (requireManualReason && manualReason.trim().length === 0) {
       setManualError(labels.manualReasonLabel);
       return;
@@ -813,6 +832,10 @@ export function AddressMapPicker<TServiceProduct extends string = string>(
     requireManualReason,
     runServiceability,
     selectedAddress?.address,
+    selectedAddress?.addressName,
+    selectedAddress?.geocodeConfidence,
+    selectedAddress?.lat,
+    selectedAddress?.lng,
     surface,
   ]);
 
@@ -1153,7 +1176,7 @@ export function AddressMapPicker<TServiceProduct extends string = string>(
                       theme={theme}
                       tone={confidenceTone(candidate.confidence)}
                     >
-                      {candidate.confidence}
+                      {candidate.provider} · {candidate.confidence}
                     </TonePill>
                   </button>
                 </li>
@@ -1321,16 +1344,18 @@ export function AddressMapPicker<TServiceProduct extends string = string>(
       ) : null}
 
       {/* Manual entry */}
-      {manualMode || status === "manual_entry" ? (
+      {manualMode ||
+      status === "manual_entry" ||
+      (requireManualReason && status === "provider_unavailable") ? (
         <div
           style={{
-            border: `1px dashed ${theme.border}`,
+            border: `1px solid ${theme.border}`,
             borderRadius: 8,
-            padding: 12,
+            padding: "10px 12px",
             display: "flex",
             flexDirection: "column",
             gap: 10,
-            background: theme.surface,
+            background: theme.surfaceLo,
           }}
         >
           <div style={{ fontSize: 12, fontWeight: 700 }}>
@@ -1366,15 +1391,21 @@ export function AddressMapPicker<TServiceProduct extends string = string>(
           </div>
           {requireManualReason ? (
             <label style={{ display: "block" }}>
-              <span style={fieldLabelStyle(theme)}>
-                {labels.manualReasonLabel}
+              <span style={{ ...fieldLabelStyle(theme), color: theme.warn }}>
+                {labels.manualReasonLabel} *
               </span>
               <input
                 type="text"
                 value={manualReason}
                 placeholder={labels.manualReasonPlaceholder}
                 aria-label={labels.manualReasonLabel}
-                style={inputStyle(theme)}
+                style={{
+                  ...inputStyle(theme),
+                  background: manualReason.trim()
+                    ? theme.surface
+                    : theme.warnBg,
+                  border: `1px solid ${manualReason.trim() ? theme.border : theme.warn}`,
+                }}
                 onChange={(event) => setManualReason(event.target.value)}
               />
             </label>

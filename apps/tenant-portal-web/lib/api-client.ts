@@ -11,7 +11,9 @@ import {
 } from "@drts/api-client";
 
 export const API_URL =
-  process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:3001";
+  process.env.DRTS_API_URL ??
+  process.env.NEXT_PUBLIC_API_URL ??
+  "http://localhost:3001";
 export const TENANT_PORTAL_LOGIN_PATH = "/login";
 
 const TENANT_PORTAL_SESSION_COOKIE = "tenant-portal-session";

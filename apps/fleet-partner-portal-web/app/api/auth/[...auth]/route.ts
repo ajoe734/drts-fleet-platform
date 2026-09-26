@@ -1,7 +1,10 @@
 import { randomBytes } from "node:crypto";
 import { NextRequest, NextResponse } from "next/server";
 
-const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:3001";
+const API_URL =
+  process.env.DRTS_API_URL ??
+  process.env.NEXT_PUBLIC_API_URL ??
+  "http://localhost:3001";
 const SESSION_COOKIE_NAME = "drts_session";
 const CSRF_COOKIE_NAME = "drts_csrf";
 

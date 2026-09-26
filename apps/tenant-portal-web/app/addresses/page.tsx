@@ -208,7 +208,7 @@ function AddressList({ addresses }: { addresses: TenantAddressRecord[] }) {
               <tr key={a.addressId}>
                 <td>{a.addressName}</td>
                 <td>{a.addressText}</td>
-                <td>{a.tags.length > 0 ? a.tags.join(", ") : "-"}</td>
+                <td>{a.tags && a.tags.length > 0 ? a.tags.join(", ") : "-"}</td>
                 <td>{a.lat != null ? a.lat.toFixed(6) : "-"}</td>
                 <td>{a.lng != null ? a.lng.toFixed(6) : "-"}</td>
                 <td>{a.activeFlag ? "Active" : "Inactive"}</td>
@@ -331,13 +331,14 @@ async function updateAddress(formData: FormData) {
 
   try {
     await client.upsertAddress(command);
-    revalidatePath("/addresses");
   } catch (e) {
     const msg = e instanceof Error ? e.message : "Unknown error";
     redirect(
       `/addresses?edit=${command.addressId}&error=${encodeURIComponent(msg)}`,
     );
   }
+  revalidatePath("/addresses");
+  redirect("/addresses");
 }
 
 async function deleteAddress(formData: FormData) {

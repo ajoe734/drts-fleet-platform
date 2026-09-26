@@ -520,8 +520,154 @@ jobs:
           pnpm exec playwright install --with-deps chromium
           pnpm exec playwright test -c playwright.deterministic-route-suite.config.ts
 
+  ui-map-e2e:
+    needs: [candidate, changes]
+    if: needs.candidate.outputs.run_full_ci == 'true' && needs.changes.outputs.e2e == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    services:
+      postgres:
+        image: postgis/postgis:16-3.4
+        env:
+          POSTGRES_DB: drts_fleet_platform
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      DATABASE_URL: postgresql://postgres:postgres@localhost:5432/drts_map_suite
+      API_PORT: "3001"
+      API_HOST: 0.0.0.0
+      E2E_API_URL: http://localhost:3001
+      AUTH_MODE: test
+      JWT_SECRET: ci-e2e-secret
+      JWT_ISSUER: drts-local
+      JWT_AUDIENCE: drts-api
+      CONTROLLED_DOWNLOAD_SIGNING_SECRET: ci-e2e-controlled-download-secret
+      PARTNER_INGRESS_KEY_BANK_DEMO_ALPHA_AIRPORT: ci-e2e-alpha-ingress-key
+      PARTNER_INGRESS_KEY_BANK_DEMO_BETA_AIRPORT: ci-e2e-beta-ingress-key
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with: { version: 10.33.0, run_install: false }
+      - uses: actions/setup-node@v4
+        with:
+          {
+            node-version: 22,
+            cache: pnpm,
+            cache-dependency-path: pnpm-lock.yaml,
+          }
+      - run: pnpm install --frozen-lockfile
+      - name: Build API
+        run: pnpm --filter @drts/api build
+      - name: Run deterministic map UI suite
+        run: |
+          PGPASSWORD=postgres psql \
+            postgresql://postgres:postgres@localhost:5432/postgres \
+            -v ON_ERROR_STOP=1 \
+            -c 'DROP DATABASE IF EXISTS drts_map_suite;' \
+            -c 'CREATE DATABASE drts_map_suite;'
+          pnpm db:migrate
+          pnpm db:seed
+          sudo find /etc/apt/sources.list.d -maxdepth 1 -type f \
+            \( -iname "*google*" -o -iname "*chrome*" \) \
+            -exec mv "{}" "{}.disabled" \; || true
+          pnpm exec playwright install --with-deps chromium
+          cat << 'EOF' > tests/e2e/ci-tenant-mock-server.js
+          const http = require('http');
+          
+          let addressUpdated = false;
+          
+          const server = http.createServer((req, res) => {
+            const url = new URL(req.url, 'http://127.0.0.1:3001');
+            res.setHeader('Content-Type', 'application/json');
+            if (req.method === 'GET' && url.pathname === '/api/auth/session') {
+              res.end(JSON.stringify({ data: { active: true, identity: { realm: 'tenant', tenant_id: 'tenant-mock', roles: ['tenant_admin'], scopes: ['tenant:write', 'tenant:read'] } } }));
+              return;
+            }
+            if (req.method === 'GET' && url.pathname === '/api/identity/context') {
+              res.end(JSON.stringify({ data: { actorType: 'tenant_admin', actorId: 'admin-1', roles: ['tenant_admin'], scopes: ['tenant:write', 'tenant:read'], realm: 'tenant', authMode: 'jwt_bearer', roleFamilies: ['tenant'] } }));
+              return;
+            }
+            if (req.method === 'GET' && url.pathname === '/api/tenant/passengers') {
+              res.end(JSON.stringify({ data: [{ activeFlag: true, passengerId: 'p1', fullName: 'Mock Passenger' }] }));
+              return;
+            }
+            if (req.method === 'GET' && url.pathname === '/api/tenant/addresses') {
+              res.end(JSON.stringify({ data: [{
+                activeFlag: true,
+                addressId: 'a1',
+                addressName: addressUpdated ? 'Mock Address updated' : 'Mock Address',
+                tenantId: 'tenant-mock',
+                ownerPassengerId: 'p1',
+                addressText: 'Mock Address Text',
+                lat: addressUpdated ? 24.7951 : 25.0330,
+                lng: addressUpdated ? 121.0028 : 121.5654,
+                tags: ['home'],
+                createdAt: new Date().toISOString(),
+                updatedAt: new Date().toISOString()
+              }] }));
+              return;
+            }
+            if (req.method === 'POST' && url.pathname === '/api/tenant/addresses') {
+              let body = '';
+              req.on('data', chunk => { body += chunk.toString(); });
+              req.on('end', () => {
+                addressUpdated = true;
+                res.end(JSON.stringify({ data: {
+                  activeFlag: true,
+                  addressId: 'a1',
+                  addressName: 'Mock Address updated',
+                  tenantId: 'tenant-mock',
+                  ownerPassengerId: 'p1',
+                  addressText: 'Mock Address Text',
+                  lat: 24.7951,
+                  lng: 121.0028,
+                  tags: ['home'],
+                  createdAt: new Date().toISOString(),
+                  updatedAt: new Date().toISOString()
+                } }));
+              });
+              return;
+            }
+            if (req.method === 'GET' && url.pathname === '/api/tenant/cost-centers') {
+              res.end(JSON.stringify({ data: [{ activeFlag: true, costCenterId: 'cc1', costCenterName: 'Mock Cost Center' }] }));
+              return;
+            }
+            if (req.method === 'GET' && url.pathname === '/api/tenant/bookings/page-model/new') {
+              res.end(JSON.stringify({ data: { emptyState: null, actions: { submit: { enabled: true } }, prefill: {} } }));
+              return;
+            }
+            res.writeHead(404);
+            res.end();
+          });
+          server.listen(3001, '127.0.0.1', () => console.log('Mock on 3001'));
+          EOF
+          node tests/e2e/ci-tenant-mock-server.js &
+          export DRTS_API_URL=http://127.0.0.1:3001
+          PLAYWRIGHT_HTML_REPORT=playwright-report/tenant pnpm exec playwright test -c playwright.tenant-map-booking.config.ts --reporter=html
+          PLAYWRIGHT_HTML_REPORT=playwright-report/concierge-healthy START_OUTAGE_SERVER=0 pnpm exec playwright test -c playwright.concierge-map-booking.config.ts --project=healthy --reporter=html
+          PLAYWRIGHT_HTML_REPORT=playwright-report/concierge-outage START_OUTAGE_SERVER=1 pnpm exec playwright test -c playwright.concierge-map-booking.config.ts --project=outage --reporter=html
+          unset DRTS_API_URL
+          PLAYWRIGHT_HTML_REPORT=playwright-report/partner-healthy START_OUTAGE_SERVER=0 pnpm exec playwright test -c playwright.partner-booking-surfaces.config.ts --project=healthy --reporter=html
+          PLAYWRIGHT_HTML_REPORT=playwright-report/partner-outage START_OUTAGE_SERVER=1 pnpm exec playwright test -c playwright.partner-booking-surfaces.config.ts --project=outage --reporter=html
+
+
+      - name: Upload ui-map-e2e reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report-ui-map-e2e
+          path: playwright-report/
+          retention-days: 7
+
   e2e:
-    needs: [candidate, changes, cross-surface-e2e, ui-route-e2e]
+    needs: [candidate, changes, cross-surface-e2e, ui-route-e2e, ui-map-e2e]
     runs-on: ubuntu-latest
     timeout-minutes: 10
     if: always()
@@ -533,7 +679,7 @@ jobs:
             exit 0
           fi
           [ '${{ needs.changes.result }}' = 'success' ] || { echo "changes gate failed"; exit 1; }
-          for result in '${{ needs.cross-surface-e2e.result }}' '${{ needs.ui-route-e2e.result }}'; do
+          for result in '${{ needs.cross-surface-e2e.result }}' '${{ needs.ui-route-e2e.result }}' '${{ needs.ui-map-e2e.result }}'; do
             case "$result" in
               success) ;;
               skipped) echo "E2E skipped: no changed path can exercise it." ;;
