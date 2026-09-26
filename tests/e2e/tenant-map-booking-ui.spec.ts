@@ -199,6 +199,14 @@ test.describe("tenant console booking map alignment", () => {
     await stubGeoProvider(page, "outage");
     await page.goto("/bookings/new");
 
+    // Fill required booking fields to simulate a valid form otherwise
+    await page.getByLabel(/Service subtype|服務子類型/).selectOption({ index: 1 });
+    await page.getByLabel(/Timing mode|時間模式/).selectOption({ index: 1 });
+    await page.getByLabel(/Reservation start|預約開始/).fill("2026-10-01T12:00");
+    await page.getByLabel(/Reservation end|預約結束/).fill("2026-10-01T13:00");
+    await page.getByRole("combobox", { name: /Passenger|乘客/ }).selectOption({ index: 1 });
+    await page.getByRole("combobox", { name: /Cost center|成本中心/ }).selectOption({ index: 1 });
+
     // The UI should show the outage banner
     await expect(page.getByText(/Address provider is down|地址服務中斷/i).first()).toBeVisible();
 
@@ -251,8 +259,8 @@ test.describe("tenant console booking map alignment", () => {
     await page.getByLabel(/Reservation start|預約開始/).fill("2026-10-01T12:00");
     await page.getByLabel(/Reservation end|預約結束/).fill("2026-10-01T13:00");
 
-    await page.getByLabel(/Passenger|乘客/).selectOption({ index: 1 });
-    await page.getByLabel(/Cost center|成本中心/).selectOption({ index: 1 });
+    await page.getByRole("combobox", { name: /Passenger|乘客/ }).selectOption({ index: 1 });
+    await page.getByRole("combobox", { name: /Cost center|成本中心/ }).selectOption({ index: 1 });
 
     const submit = page.getByRole("button", { name: /Create booking|For approval|Submitting|建立叫車|送出/ });
     await expect(submit).toBeEnabled();
@@ -261,6 +269,6 @@ test.describe("tenant console booking map alignment", () => {
     await expect.poll(() => postedData).toBeTruthy();
     expect(postedData.pickup.lat).toBe(25.033);
     expect(postedData.dropoff.lat).toBe(25.044);
-    expect(postedData.pickup.reason).toBe("Testing manual pin");
+    expect(postedData.pickup.manualOverrideReason).toBe("Testing manual pin");
   });
 });

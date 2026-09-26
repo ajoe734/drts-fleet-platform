@@ -131,8 +131,7 @@ export default function ConciergeBookingCreatePage() {
 
   useEffect(() => {
     if (typeof window !== "undefined") {
-      const params = new URLSearchParams(window.location.search);
-      const mode = params.get("geoMode") as AddressProviderMode;
+      const mode = window.sessionStorage.getItem("drts.geo.mode") as AddressProviderMode;
       if (mode) {
         setMapProviderMode(mode);
       }

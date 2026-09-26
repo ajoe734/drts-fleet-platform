@@ -218,7 +218,10 @@ test.describe("concierge map booking UI", () => {
     const captured = { body: [] as unknown[] };
     await installConciergeApiMocks(page, captured);
 
-    const response = await page.goto("/bookings/new?geoMode=unavailable");
+    await page.addInitScript(() => {
+      window.sessionStorage.setItem("drts.geo.mode", "unavailable");
+    });
+    const response = await page.goto("/bookings/new");
     expect(response?.status()).toBe(200);
 
     // Provide manual coordinates and reason for pickup
@@ -267,7 +270,10 @@ test.describe("concierge map booking UI", () => {
     const captured = { body: [] as unknown[] };
     await installConciergeApiMocks(page, captured);
 
-    const response = await page.goto("/bookings/new?geoMode=unavailable");
+    await page.addInitScript(() => {
+      window.sessionStorage.setItem("drts.geo.mode", "unavailable");
+    });
+    const response = await page.goto("/bookings/new");
     expect(response?.status()).toBe(200);
 
     // The submit button should be disabled because coordinates are missing

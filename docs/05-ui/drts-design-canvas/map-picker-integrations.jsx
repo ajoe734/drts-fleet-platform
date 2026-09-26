@@ -24,11 +24,12 @@ function TN_NewBookingMap({ theme:th, degraded, pick, drop, reason }) {
   const hasManualCoords = ps === 'manual_coords' || ds === 'manual_coords';
   const reasonValid = (reason || '').trim() !== '';
 
+  const hasOutage = degraded || ps === 'provider_down' || ds === 'provider_down';
   const hardBlocked = HARD.includes(ps) || HARD.includes(ds);
   const unresolved = UNRESOLVED.includes(ps) || UNRESOLVED.includes(ds);
-  const manualPath = degraded || MANUAL.includes(ps) || MANUAL.includes(ds);
-  const manualReady = manualPath && !hardBlocked && !unresolved && (!hasManualCoords || reasonValid);   // 有地址文字＋理由即可送人工複核
-  const normalReady = !manualPath && !hardBlocked && !unresolved && (!hasManualCoords || reasonValid);
+  const manualPath = MANUAL.includes(ps) || MANUAL.includes(ds);
+  const manualReady = manualPath && !hardBlocked && !hasOutage && !unresolved && (!hasManualCoords || reasonValid);   // 有地址文字＋理由即可送人工複核
+  const normalReady = !manualPath && !hardBlocked && !hasOutage && !unresolved && (!hasManualCoords || reasonValid);
   return (
     <Shell theme={th} nav={TN_NAV} active="new" breadcrumb={['訂單','新增']} env="production" tenant="YAMATO" actor={TN_ACTOR} health={TN_HEALTH} refreshTier="manual">
       <PageHeader theme={th} title="建立叫車" subtitle="代訂或本人 · 預約 / 即時 · 同步 command (Q-TEN04) · 上下車改為成對地址選點"
@@ -68,7 +69,9 @@ function TN_NewBookingMap({ theme:th, degraded, pick, drop, reason }) {
           ]}/>
           <div style={{ display:'flex', gap:8, marginTop:12 }}>
             <Btn theme={th}>取消</Btn><span style={{ flex:1 }}/><Btn theme={th}>另存草稿</Btn>
-            {manualPath
+            {hasOutage
+              ? <ActionButton theme={th} descriptor={{ action:'submit_command', enabled:false, disabledReasonCode:'PROVIDER_OUTAGE', riskLevel:'medium' }} variant="primary" icon="x" label="送出 command" en="commit"/>
+              : manualPath
               ? <ActionButton theme={th} descriptor={{ action:'submit_manual_review', enabled:manualReady, disabledReasonCode:hardBlocked?'OUT_OF_SERVICE_AREA':unresolved?'location_not_ready':undefined, riskLevel:'medium', requiresReason:true }} variant="primary" icon="users" label="送交人工複核" en="manual_review"/>
               : <ActionButton theme={th} descriptor={{ action:'submit_command', enabled:normalReady, disabledReasonCode:hardBlocked?'OUT_OF_SERVICE_AREA':unresolved?'location_not_ready':undefined, riskLevel:'medium' }} variant="primary" icon="check" label="送出 command" en="commit"/>}
           </div>
