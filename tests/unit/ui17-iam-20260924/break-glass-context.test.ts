@@ -70,6 +70,7 @@ const mockIamClient = {
   closeBreakGlass: vi.fn(),
   listBreakGlassRequests: vi.fn(),
   activateBreakGlass: vi.fn(),
+  getIdentitySessionContext: vi.fn(),
 };
 
 vi.mock("@/lib/platform-admin-iam-client", () => ({
@@ -82,7 +83,15 @@ vi.mock("@/lib/admin-client", () => ({
 
 vi.mock("@/lib/i18n", () => ({
   useTranslation: () => ({
-    t: (key: string) => key,
+    t: (key: string) => {
+      if (key.includes("manageGrant")) return "Manage Grant";
+      if (key.includes("getStepUp")) return "Get step-up proof";
+      if (key.includes("activateLabel")) return "Activate Emergency Session";
+      if (key.includes("exitLabel")) return "Exit Emergency Access";
+      if (key.includes("activeLabel")) return "Break-Glass Session Active";
+      if (key.includes("expiresInLabel")) return "Expires In";
+      return key;
+    },
     locale: "en",
   }),
 }));
@@ -96,7 +105,18 @@ const load = createCustomUiModuleLoader(appRoot, {
     formatDateTime: (d: any) => String(d),
   },
   "@/lib/i18n": {
-    useTranslation: () => ({ t: (key: string) => key, locale: "en" }),
+    useTranslation: () => ({
+      t: (key: string) => {
+        if (key.includes("manageGrant")) return "Manage Grant";
+        if (key.includes("getStepUp")) return "Get step-up proof";
+        if (key.includes("activateLabel")) return "Activate Emergency Session";
+        if (key.includes("exitLabel")) return "Exit Emergency Access";
+        if (key.includes("activeLabel")) return "Break-Glass Session Active";
+        if (key.includes("expiresInLabel")) return "Expires In";
+        return key;
+      },
+      locale: "en",
+    }),
   },
 });
 
@@ -111,6 +131,10 @@ describe("BreakGlass R6b Regression Tests - True Provider Mutation", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     sessionStorage.clear();
+    mockIamClient.getIdentitySessionContext.mockResolvedValue({
+      sessionActive: true,
+      activeBreakGlassGrants: [{ grantId: "bg_123" }, { grantId: "bg_req_1" }],
+    });
   });
 
   afterEach(() => {
@@ -247,7 +271,7 @@ describe("BreakGlass R6b Regression Tests - True Provider Mutation", () => {
       expect(mockIamClient.listBreakGlassRequests).toHaveBeenCalled();
     });
 
-    const manageBtn = screen.getByText(/Manage Grant/i);
+    const manageBtn = await screen.findByText(/Manage Grant/i);
     fireEvent.click(manageBtn);
 
     const getProofBtn = await screen.findByText(/Get step-up proof/i);
@@ -297,20 +321,20 @@ describe("BreakGlass R6b Regression Tests - True Provider Mutation", () => {
 
   it("should clear session storage properly if IAM returns 401 on polling", async () => {
     // Just testing that 401 unauth cleans up the storage via BreakGlassProvider's polling logic if we could trigger it,
-    // but without full fake timers we'll simulate the effect: if 401 occurs anywhere it cleans up.
-    // We can simulate an active session, and a component throwing 401 or similar.
-    // The requirement says we need to test cross-page/logout (i.e. clearing).
-    // We cover manual clearing and exit clearing above.
-    const past = new Date(Date.now() - 300000).toISOString();
+    const future = new Date(Date.now() + 300000).toISOString();
     sessionStorage.setItem(
       "drts_platform_break_glass_session",
       JSON.stringify({
         grant: { grantId: "bg_123" },
         accessToken: "token123",
-        expiresAt: past,
+        expiresAt: future,
         sessionBanner: "BREAK_GLASS_ACTIVE",
       }),
     );
+
+    mockIamClient.getIdentitySessionContext.mockRejectedValue({
+      statusCode: 401,
+    });
 
     render(
       React.createElement(
@@ -320,8 +344,9 @@ describe("BreakGlass R6b Regression Tests - True Provider Mutation", () => {
       ),
     );
 
-    // The provider automatically clears expired sessions on mount or tick.
+    // The provider automatically clears expired sessions on tick or 401.
     await waitFor(() => {
+      expect(mockIamClient.getIdentitySessionContext).toHaveBeenCalled();
       expect(
         sessionStorage.getItem("drts_platform_break_glass_session"),
       ).toBeNull();
