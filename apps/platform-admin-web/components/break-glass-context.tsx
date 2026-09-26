@@ -44,7 +44,7 @@ export interface BreakGlassContextValue extends BreakGlassState {
   exitSession: (reason?: string, stepUpReference?: string) => Promise<void>;
 }
 
-const BreakGlassContext = createContext<BreakGlassContextValue>({
+export const BreakGlassContext = createContext<BreakGlassContextValue>({
   grant: null,
   accessToken: null,
   expiresAt: null,

@@ -171,9 +171,7 @@ export class PlatformAdminIamClient {
     );
   }
 
-  async getAccessReviewCampaignDetail(
-    campaignId: string,
-  ): Promise<{
+  async getAccessReviewCampaignDetail(campaignId: string): Promise<{
     campaign: AccessReviewCampaignRecord;
     items: AccessReviewItemRecord[];
   }> {
@@ -279,7 +277,7 @@ export class PlatformAdminIamClient {
 }
 
 export function createPlatformAdminIamClient(
-  client: ApiClient,
+  client: any,
 ): PlatformAdminIamClient {
-  return new PlatformAdminIamClient(client);
+  return new PlatformAdminIamClient(client as ApiClient);
 }
