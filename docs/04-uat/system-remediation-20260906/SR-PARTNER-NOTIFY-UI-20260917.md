@@ -12,7 +12,7 @@
   - **Status**: UNVERIFIED (Awaiting CI)
   - **Reason**: i18n text mapped via delivered/pending states, correctly reporting backend states. UI component tests skipped/unperformed locally; awaits CI and browser testing.
 
-## Handoff Evidence (Gemini - Round 4)
+## Handoff Evidence (Gemini - Round 5)
 
 - **Candidate Branch**: gemini/sr-partner-notify-ui-20260924-canvas
 - **Hosted CI Evidence**:

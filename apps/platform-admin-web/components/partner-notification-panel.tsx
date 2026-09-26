@@ -543,7 +543,8 @@ function PnLifecycle({
 
 function PnRetryCell({
   theme: th,
-  row: r,
+  row,
+  r,
   retryState,
   retryRowId,
   retryError,
@@ -552,6 +553,7 @@ function PnRetryCell({
   canWriteBinding,
   bindingState,
 }: any) {
+  const item = row || r;
   const RETRY_DENY: Record<string, string> = {
     terminal: "已是終止狀態",
     configuration_blocked: "綁定未就緒",
@@ -562,20 +564,22 @@ function PnRetryCell({
     active_lease: "處理中 (排隊或發送中)",
   };
 
-  const isExpired = r.expiresAt && new Date(r.expiresAt) <= new Date();
+  if (!item) return null;
+
+  const isExpired = item.expiresAt && new Date(item.expiresAt) <= new Date();
   const isExhausted =
-    typeof r.maxAttempts === "number" &&
-    (r.attempts || r.attemptCount || 0) >= r.maxAttempts;
+    typeof item.maxAttempts === "number" &&
+    (item.attempts || item.attemptCount || 0) >= item.maxAttempts;
 
   const isActiveLease =
-    r.leaseExpiresAt && new Date(r.leaseExpiresAt) > new Date();
-  const isPending = r.status === "pending" || r.status === "sending";
+    item.leaseExpiresAt && new Date(item.leaseExpiresAt) > new Date();
+  const isPending = item.status === "pending" || item.status === "sending";
 
   let denyCode: string | null = null;
   if (!canWriteBinding) denyCode = "no_write";
   else if (bindingState !== "ready") denyCode = "configuration_blocked";
-  else if (r.retryDisposition === "terminal") denyCode = "terminal";
-  else if (r.retryDisposition === "none") denyCode = "none";
+  else if (item.retryDisposition === "terminal") denyCode = "terminal";
+  else if (item.retryDisposition === "none") denyCode = "none";
   else if (isExpired) denyCode = "expired";
   else if (isExhausted) denyCode = "exhausted";
   else if (isActiveLease || isPending) denyCode = "active_lease";
@@ -598,7 +602,7 @@ function PnRetryCell({
     );
   }
 
-  const retryValue = r.retryDisposition;
+  const retryValue = item.retryDisposition;
   if (!retryValue || retryValue === "n/a")
     return <span style={{ fontSize: 10.5, color: th.textDim }}>—</span>;
 
@@ -609,7 +613,7 @@ function PnRetryCell({
       </CanvasPill>
     );
 
-  const isTargetRow = r.outboxId === retryRowId;
+  const isTargetRow = item.outboxId === retryRowId;
 
   if (isTargetRow && retryState === "pending")
     return (
@@ -633,7 +637,7 @@ function PnRetryCell({
           label="重送"
           en="resend"
           size="xs"
-          onClick={() => onRetry(r.outboxId)}
+          onClick={() => onRetry(item.outboxId)}
         />
         <span style={{ fontSize: 10, color: th.danger }}>
           {retryError
@@ -657,7 +661,7 @@ function PnRetryCell({
         label="重送"
         en="resend"
         size="xs"
-        onClick={() => onRetry(r.outboxId)}
+        onClick={() => onRetry(item.outboxId)}
       />
     );
 
