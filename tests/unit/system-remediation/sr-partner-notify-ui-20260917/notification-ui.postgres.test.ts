@@ -779,15 +779,24 @@ describe.skipIf(!testDbUrl)(
         });
         
         expect(dispatchSpy).toHaveBeenCalled();
-        const callCommand: any = dispatchSpy.mock.calls[0][0];
-        expect(callCommand.wirePayload.eventSequence).toBe(42);
+        const callCommand: any = dispatchSpy.mock.calls?.[0]?.[0] || {};
+        expect(callCommand.wirePayload?.eventSequence).toBe(42);
         
-        await mtRepo.recordPushDeliveryOutcome(outboxId, {
-          status: "delivered",
-          result: "delivered",
-          attemptCount: claim!.record.attemptCount,
-          ...receipt!.deliveryContext!
-        } as any, claim!.fenceToken);
+        await mtRepo.recordPushDeliveryOutcome({
+          outboxId,
+          fenceToken: claim!.fenceToken,
+          passengerSubjectRef: "sub",
+          providerName: "partner_webhook",
+          providerAckState: "provider_acknowledged",
+          providerMessageRef: "msg-1",
+          deliveryOutcome: {
+            status: "delivered",
+            result: "delivered",
+            attemptCount: claim!.record.attemptCount,
+            ...receipt!.deliveryContext!
+          } as any,
+          partnerMetadata: {} as any,
+        });
 
         const { rows } = await pool.query("SELECT status, attempt_count FROM ops.consumer_notification_outbox WHERE outbox_id = $1", [outboxId]);
         expect(rows[0].status).toBe("delivered");
