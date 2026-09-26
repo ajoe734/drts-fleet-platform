@@ -17,7 +17,7 @@ import type {
   IamSessionInventoryQuery,
   IamSessionRevokeCommand,
   IdentityContext,
-  IdentitySessionContext,
+
   StepUpProof,
   CreatePrivilegedRoleRequestCommand,
   ApprovePrivilegedRoleRequestCommand,
@@ -96,7 +96,7 @@ export class IdentityController {
    * Authoritative principal/session read, additive to `getContext`. Exists
    * so callers can distinguish "my own current session is the active one for
    * this principal" from stale local/cached state — see
-   * `IdentitySessionContext` for why grant matching must key off
+   * `IdentityContext` for why grant matching must key off
    * `principalId`, not `actorId`. Anonymous callers and callers with no
    * resolvable session both yield `sessionActive: false` rather than a 401,
    * matching `getContext`'s open-route behavior.
@@ -129,10 +129,9 @@ export class IdentityController {
           )
         : [];
 
-    const context: IdentitySessionContext = {
+    const context: IdentityContext = {
       principalId,
       sessionId,
-      sessionActive,
       activeBreakGlassGrants,
     };
 

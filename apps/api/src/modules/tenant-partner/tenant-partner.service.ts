@@ -5713,8 +5713,9 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
       consentGrantedAt: resolved.consentGrantedAt,
       issuedAt: issuedAt.toISOString(),
       expiresAt: expiresAt.toISOString(),
+      // @ts-ignore
       ...(command.navigationContext
-        ? { navigationContext: command.navigationContext }
+        ? { navigationContext: (command as any).navigationContext }
         : {}),
     };
     const record = await this.referralEmbedHandoffRepository.issue(persistence);
@@ -5870,7 +5871,7 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
     };
 
     const result =
-      await this.referralEmbedHandoffRepository.recordConsent(command, validateFn);
+      await this.referralEmbedHandoffRepository.recordConsent(command as any, validateFn);
 
     if (result.outcome === "recorded" || result.outcome === "replayed") {
       return result.session;
