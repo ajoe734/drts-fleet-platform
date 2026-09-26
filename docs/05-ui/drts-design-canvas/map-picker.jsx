@@ -68,7 +68,7 @@ function MapPicker({ theme:th, label='上車地點', state='selected', value, co
       {(state==='manual_coords'||state==='manual_review'||(state==='provider_down' && skin!=='tenant')) && (
         <div style={{ display:'flex', alignItems:'center', gap:8, padding:'7px 10px', borderTop:'1px solid '+c.line, background:c.lo }}>
           <span style={{ fontSize:10.5, fontWeight:700, color:c.warn, flexShrink:0 }}>{state==='manual_coords'?'手動座標理由 *':'複核理由 *'}</span>
-          <span style={{ flex:1, fontSize:11.5, color:c.text, padding:'4px 8px', border:'1px solid '+c.line, borderRadius:6, background:c.surface }}>{reason !== undefined ? (reason || ' ') : (state==='manual_coords'?'新建案無門牌，依現場實測座標':'地址解析落點與實際入口不符（後門）')}</span>
+          <span style={{ flex:1, fontSize:11.5, color:c.text, padding:'4px 8px', border:'1px solid '+c.line, borderRadius:6, background:c.surface }}>{reason || ' '}</span>
         </div>
       )}
       {/* next-step footer */}

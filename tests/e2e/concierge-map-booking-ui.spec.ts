@@ -254,4 +254,31 @@ test.describe("concierge map booking UI", () => {
     expect(command.mapFallbackReview).toBeTruthy();
     expect(command.mapFallbackReview.reasonCode).toBe("map_provider_unavailable");
   });
+
+  test("blocks submission when outside service area", async ({ page }, testInfo) => {
+    test.skip(testInfo.project.name === "outage", "This test requires healthy provider");
+    const captured = { body: [] as unknown[] };
+    await installConciergeApiMocks(page, captured);
+
+    await page.goto("/bookings/new");
+
+    const pickupPicker = page.locator("[data-address-map-picker]").nth(0);
+    await pickupPicker.getByRole("button", { name: /手動輸入座標/ }).click();
+    await pickupPicker.getByLabel("緯度").fill("24.9");
+    await pickupPicker.getByLabel("經度").fill("121.4");
+    await pickupPicker.getByLabel("手動定位原因").fill("Outside area");
+    await pickupPicker.getByRole("button", { name: /使用此位置/ }).click();
+
+    const dropoffPicker = page.locator("[data-address-map-picker]").nth(1);
+    await dropoffPicker.getByRole("button", { name: /手動輸入座標/ }).click();
+    await dropoffPicker.getByLabel("緯度").fill("25.047");
+    await dropoffPicker.getByLabel("經度").fill("121.517");
+    await dropoffPicker.getByLabel("手動定位原因").fill("Inside area");
+    await dropoffPicker.getByRole("button", { name: /使用此位置/ }).click();
+
+    const submit = page.getByRole("button", { name: /提交禮賓代訂/ });
+    await expect(submit).toBeDisabled();
+    await expect(page.getByText("不在服務範圍內").first()).toBeVisible();
+  });
+
 });

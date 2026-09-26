@@ -239,37 +239,51 @@ const server = http.createServer((req, res) => {
     req.method === "POST" &&
     url.pathname === "/api/partner/ingress/handoff"
   ) {
-    json(res, 200, {
-      data: {
-        accessToken: "handoff-token",
-        tokenType: "Bearer",
-        expiresIn: "15m",
-        partnerEntrySlug: "ctbc",
-        drtsPassengerId: "passenger-embed-001",
-        identity: {
-          actorType: "referral_passenger",
-          actorId: "passenger-embed-001",
-          realm: "partner",
-          authMode: "jwt_bearer",
-          roleFamilies: ["partner"],
-          roles: ["partner_booking"],
-          scopes: [
-            "partner:handoff",
-            "partner:eligibility:read",
-            "partner:eligibility:write",
-            "partner:book",
-          ],
-          tenantId: "tenant-acme",
-          partnerId: "partner-acme",
-          partnerProgramId: "program-acme-airport",
-          partnerEntrySlug: "ctbc",
+    let body = "";
+    req.on("data", (chunk) => {
+      body += chunk.toString();
+    });
+    req.on("end", () => {
+      let slug = "ctbc";
+      try {
+        if (body) {
+          const payload = JSON.parse(body);
+          if (payload.partnerEntrySlug) {
+            slug = payload.partnerEntrySlug;
+          }
+        }
+      } catch (e) {}
+
+      json(res, 200, {
+        data: {
+          accessToken: "handoff-token",
+          tokenType: "Bearer",
+          expiresIn: "15m",
+          partnerEntrySlug: slug,
           drtsPassengerId: "passenger-embed-001",
+          identity: {
+            actorType: "referral_passenger",
+            actorId: "passenger-embed-001",
+            realm: "partner",
+            authMode: "jwt_bearer",
+            roleFamilies: ["partner"],
+            roles: ["partner_booking"],
+            scopes: [
+              "partner:handoff",
+              "partner:eligibility:read",
+              "partner:eligibility:write",
+              "partner:book",
+            ],
+            grants: {
+              partnerEntrySlug: slug,
+            },
+          },
         },
-      },
-      meta: {
-        requestId: "req-mock-handoff",
-        timestamp: "2026-07-26T00:00:00.000Z",
-      },
+        meta: {
+          requestId: "req-mock-handoff",
+          timestamp: "2026-07-26T00:00:01.000Z",
+        },
+      });
     });
     return;
   }

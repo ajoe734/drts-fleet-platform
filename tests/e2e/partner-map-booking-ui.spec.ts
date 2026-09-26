@@ -118,7 +118,7 @@ test.describe("partner map booking UI", () => {
     const submit = page.getByRole("button", {
       name: /驗證下單表單|送交人工複核/,
     });
-    await expect(submit).toBeDisabled();
+    await expect(submit).toBeDisabled(); // Disabled because dropoff is still missing
 
     const dropoffPicker = page.locator("[data-address-map-picker]").nth(1);
     await dropoffPicker.getByRole("button", { name: /手動輸入座標/ }).click();
@@ -127,7 +127,9 @@ test.describe("partner map booking UI", () => {
     await dropoffPicker.getByLabel("手動定位原因").fill("Outage dropoff");
     await dropoffPicker.getByRole("button", { name: /使用此位置/ }).click();
 
-    await expect(submit).toBeDisabled();
+    await expect(submit).toBeEnabled();
+    await submit.click();
+    await expect(page.getByText("派遣前需人工確認").first()).toBeVisible();
   });
 
   test("blocks submission if manual reason is only whitespace", async ({
@@ -154,4 +156,31 @@ test.describe("partner map booking UI", () => {
     const submit = page.getByRole("button", { name: /驗證下單表單/ });
     await expect(submit).toBeDisabled();
   });
+
+  test("blocks submission when outside service area (pickup)", async ({
+    page,
+  }, testInfo) => {
+    test.skip(testInfo.project.name === "outage", "This test requires healthy provider");
+    await page.goto("/acme/book?eligibilityVerificationId=elig-verified-005");
+    await fillCardProgramFields(page);
+
+    const pickupPicker = page.locator("[data-address-map-picker]").nth(0);
+    await pickupPicker.getByRole("button", { name: /手動輸入座標/ }).click();
+    await pickupPicker.getByLabel("緯度").fill("24.9");
+    await pickupPicker.getByLabel("經度").fill("121.4");
+    await pickupPicker.getByLabel("手動定位原因").fill("Outside test");
+    await pickupPicker.getByRole("button", { name: /使用此位置/ }).click();
+
+    const dropoffPicker = page.locator("[data-address-map-picker]").nth(1);
+    await dropoffPicker.getByRole("button", { name: /手動輸入座標/ }).click();
+    await dropoffPicker.getByLabel("緯度").fill("25.047");
+    await dropoffPicker.getByLabel("經度").fill("121.517");
+    await dropoffPicker.getByLabel("手動定位原因").fill("Inside dropoff");
+    await dropoffPicker.getByRole("button", { name: /使用此位置/ }).click();
+
+    const submit = page.getByRole("button", { name: /驗證下單表單/ });
+    await expect(submit).toBeDisabled();
+    await expect(page.getByText("不在服務範圍內").first()).toBeVisible();
+  });
+
 });

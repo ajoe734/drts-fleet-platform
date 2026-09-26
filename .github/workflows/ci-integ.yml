@@ -610,12 +610,21 @@ jobs:
           EOF
           node tests/e2e/ci-tenant-mock-server.js &
           export DRTS_API_URL=http://127.0.0.1:3001
-          pnpm exec playwright test -c playwright.tenant-map-booking.config.ts
-          START_OUTAGE_SERVER=0 pnpm exec playwright test -c playwright.concierge-map-booking.config.ts --project=healthy
-          START_OUTAGE_SERVER=1 pnpm exec playwright test -c playwright.concierge-map-booking.config.ts --project=outage
+          PLAYWRIGHT_HTML_REPORT=playwright-report/tenant pnpm exec playwright test -c playwright.tenant-map-booking.config.ts
+          PLAYWRIGHT_HTML_REPORT=playwright-report/concierge-healthy START_OUTAGE_SERVER=0 pnpm exec playwright test -c playwright.concierge-map-booking.config.ts --project=healthy
+          PLAYWRIGHT_HTML_REPORT=playwright-report/concierge-outage START_OUTAGE_SERVER=1 pnpm exec playwright test -c playwright.concierge-map-booking.config.ts --project=outage
           unset DRTS_API_URL
-          START_OUTAGE_SERVER=0 pnpm exec playwright test -c playwright.partner-booking-surfaces.config.ts --project=healthy
-          START_OUTAGE_SERVER=1 pnpm exec playwright test -c playwright.partner-booking-surfaces.config.ts --project=outage
+          PLAYWRIGHT_HTML_REPORT=playwright-report/partner-healthy START_OUTAGE_SERVER=0 pnpm exec playwright test -c playwright.partner-booking-surfaces.config.ts --project=healthy
+          PLAYWRIGHT_HTML_REPORT=playwright-report/partner-outage START_OUTAGE_SERVER=1 pnpm exec playwright test -c playwright.partner-booking-surfaces.config.ts --project=outage
+
+
+      - name: Upload ui-map-e2e reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report-ui-map-e2e
+          path: playwright-report/
+          retention-days: 7
 
   e2e:
     needs: [candidate, changes, cross-surface-e2e, ui-route-e2e, ui-map-e2e]

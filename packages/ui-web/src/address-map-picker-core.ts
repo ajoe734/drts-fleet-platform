@@ -908,7 +908,7 @@ export function createMockAddressProvider(
     async evaluateServiceArea(
       command: ServiceAreaPreviewCommand,
     ): Promise<ServiceAreaEvaluationResult> {
-
+      guard();
       const stops: ServiceAreaStopEvaluation[] = [];
       const pickupDecision = mockServiceDecision(command.pickup);
       stops.push({

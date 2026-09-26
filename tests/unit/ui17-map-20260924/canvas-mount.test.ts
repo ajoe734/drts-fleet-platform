@@ -90,28 +90,24 @@ describe("Canvas SSR Integrations", () => {
 
     const results = sandbox.global.results;
 
-    const checkCta = (
+        const checkCta = (
       name: string,
       html: string,
       buttonText: string,
       expectedDisabled: boolean,
     ) => {
-      if (!html.includes(buttonText)) {
+      const buttonMatches = html.match(/<button[^>]*>([\s\S]*?)<\/button>/gi);
+      if (!buttonMatches) {
+        throw new Error(`[${name}] No buttons found in HTML`);
+      }
+      
+      const buttonHtml = buttonMatches.find((btn) => btn.includes(buttonText));
+      
+      if (!buttonHtml) {
         throw new Error(
-          `[${name}] CTA '${buttonText}' not found in HTML:\n${html}`,
+          `[${name}] button tag with '${buttonText}' not found in HTML`,
         );
       }
-      const buttonRegex = new RegExp(
-        `<button[^>]*>[\\s\\S]*?${buttonText}[\\s\\S]*?</button>`,
-        "i",
-      );
-      const match = html.match(buttonRegex);
-      if (!match) {
-        throw new Error(
-          `[${name}] button tag with '${buttonText}' not found in HTML:\n${html.substring(html.indexOf(buttonText) - 100, html.indexOf(buttonText) + 100)}`,
-        );
-      }
-      const buttonHtml = match[0];
       if (expectedDisabled) {
         expect(buttonHtml.includes("disabled")).toBeTruthy();
       } else {

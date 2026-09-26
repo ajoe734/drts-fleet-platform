@@ -27,5 +27,12 @@ export default defineConfig({
       reuseExistingServer: !process.env.CI,
       timeout: 300_000,
     },
+    {
+      command:
+        "cd apps/tenant-portal-web && pnpm exec next dev --webpack --hostname 127.0.0.1 --port 3305",
+      url: "http://127.0.0.1:3305",
+      reuseExistingServer: !process.env.CI,
+      timeout: 300_000,
+    },
   ],
 });

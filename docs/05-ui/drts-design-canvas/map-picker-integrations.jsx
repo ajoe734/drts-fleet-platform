@@ -157,7 +157,7 @@ function PB_BookCardMap({ state='selected', drop='selected', reason, program='ca
         </PBCard>
       </PBBody>
       <PBFooter>{blocked
-          ? <button disabled aria-disabled="true" style={{ width:'100%', minHeight:46, borderRadius:12, fontSize:14, fontWeight:700, border:'none', background:th.border, color:th.textDim, cursor:'not-allowed', fontFamily:PB_FONT }}>{hard?'不在服務範圍 · 請更換地點':(manualPath && !hasReason)?'請填寫手動定位原因':'請先選定上下車地點'}</button>
+          ? <button disabled aria-disabled="true" style={{ width:'100%', minHeight:46, borderRadius:12, fontSize:14, fontWeight:700, border:'none', background:th.border, color:th.textDim, cursor:'not-allowed', fontFamily:PB_FONT }}>{hard?'不在服務範圍 · 請更換地點':(needsReason && !hasReason)?'請填寫手動定位原因':'請先選定上下車地點'}</button>
         : manualReady
         ? <PBBtn p={p} primary>送交人工複核</PBBtn>
         : <PBBtn p={p} primary>前往確認</PBBtn>
