@@ -1,9 +1,8 @@
 import { randomUUID } from "node:crypto";
 import { describe, it, beforeAll, afterAll, afterEach, expect } from "vitest";
 import { createRequire } from "node:module";
-
 const customRequire = createRequire(
-  new URL("../../../../apps/api/package.json", import.meta.url),
+  new URL("file://" + process.cwd() + "/apps/api/package.json"),
 );
 const { NestFactory } = customRequire("@nestjs/core");
 const { Pool } = customRequire("pg");
