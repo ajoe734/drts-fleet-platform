@@ -50,9 +50,9 @@ def main():
 
     print(f"Sequence suite: passed cases={seq_passed} (Expected 7), other cases={seq_other} (Expected 0)")
     print(f"Transport suite: passed cases={transport_passed} (Expected 7), other cases={transport_other} (Expected 0)")
-    print(f"UI suite: passed cases={ui_passed} (Expected 3), other cases={ui_other} (Expected 0)")
+    print(f"UI suite: passed cases={ui_passed} (Expected 7), other cases={ui_other} (Expected 0)")
 
-    if seq_passed != 7 or transport_passed != 7 or ui_passed != 3 or seq_other != 0 or transport_other != 0 or ui_other != 0:
+    if seq_passed != 7 or transport_passed != 7 or ui_passed != 7 or seq_other != 0 or transport_other != 0 or ui_other != 0:
         print("Error: Expected exact passed cases and 0 other cases in each suite.")
         sys.exit(1)
 
