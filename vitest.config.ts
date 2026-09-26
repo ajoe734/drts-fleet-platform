@@ -31,6 +31,7 @@ export default defineConfig({
       "@": path.resolve(__dirname, "apps/tenant-console-web"),
     },
   },
+  oxc: false,
   esbuild: {
     jsx: "automatic",
   },

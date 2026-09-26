@@ -124,7 +124,9 @@ export class IdentityController {
 
     const activeBreakGlassGrants =
       sessionActive && principalId && this.breakGlassService
-        ? await this.breakGlassService.listActiveGrantsForPrincipal(principalId)
+        ? await this.breakGlassService.listActiveGrantsForPrincipal(
+            principalId,
+          )
         : [];
 
     const context: IdentitySessionContext = {
