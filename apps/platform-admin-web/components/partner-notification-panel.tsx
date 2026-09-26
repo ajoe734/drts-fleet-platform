@@ -148,7 +148,7 @@ function PnBinding({
                   <a
                     href={resolveCrossAppHref({
                       targetApp: "tenant-console",
-                      route: `/api/auth/tenant/login?tenant_id=${encodeURIComponent(tenantId)}&redirect_uri=${encodeURIComponent("/webhooks")}`,
+                      route: `/api/auth/tenant/login?tenant_id=${encodeURIComponent(tenantId)}&redirect_uri=${encodeURIComponent("/tenant/webhooks")}`,
                       resourceType: "webhook",
                       resourceId: "",
                       openMode: "new_tab",
@@ -1103,7 +1103,7 @@ function PnEditView({
                 <a
                   href={resolveCrossAppHref({
                     targetApp: "tenant-console",
-                    route: `/api/auth/tenant/login?tenant_id=${encodeURIComponent(tenantId)}&redirect_uri=${encodeURIComponent("/webhooks")}`,
+                    route: `/api/auth/tenant/login?tenant_id=${encodeURIComponent(tenantId)}&redirect_uri=${encodeURIComponent("/tenant/webhooks")}`,
                     resourceType: "webhook",
                     resourceId: "",
                     openMode: "new_tab",

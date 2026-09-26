@@ -34,7 +34,7 @@ export default defineConfig({
     },
   },
   esbuild: {
-    jsx: "react-jsx",
+    jsx: "automatic",
   },
   test: {
     environment: "jsdom",

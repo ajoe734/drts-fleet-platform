@@ -10,6 +10,7 @@ const { Pool } = customRequire("pg");
 
 import { AppModule } from "../../../../apps/api/src/app.module";
 import { MultiTaxiRepository } from "../../../../apps/api/src/modules/multi-taxi/multi-taxi.repository";
+import { computeEndpointFingerprint } from "../../../../apps/api/src/modules/tenant-partner/partner-notification-fingerprint";
 
 const testDbUrl = process.env.PARTNER_NOTIFY_UI_TEST_DATABASE_URL;
 
@@ -134,10 +135,7 @@ describe.skipIf(!testDbUrl)(
         };
 
       // Compute actual fingerprint
-      const { computeEndpointFingerprint } = customRequire(
-        "./src/modules/tenant-partner/partner-notification-fingerprint",
-      );
-      computedFingerprint = computeEndpointFingerprint(endpointRecord);
+      computedFingerprint = computeEndpointFingerprint(endpointRecord as any);
 
       await pool.query(
         "INSERT INTO admin.phase1_tenant_webhook_endpoints (webhook_id, tenant_id, status, created_at, updated_at, record) VALUES ($1, $2, 'active', now(), now(), $3::jsonb)",
