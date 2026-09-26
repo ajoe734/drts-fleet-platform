@@ -185,6 +185,11 @@ const lionEntry = {
 const entries = {
   ctbc: ctbcEntry,
   acme: { ...ctbcEntry, entrySlug: "acme" },
+  contoso: { ...cathayEntry, entrySlug: "contoso" },
+  fabrikam: { ...taishinEntry, entrySlug: "fabrikam" },
+  northwind: { ...dbsEntry, entrySlug: "northwind" },
+  tailspin: { ...fubonEntry, entrySlug: "tailspin" },
+  adventureworks: { ...lionEntry, entrySlug: "adventureworks" },
   cathay: cathayEntry,
   taishin: taishinEntry,
   dbs: dbsEntry,
