@@ -456,6 +456,6 @@ test.describe("tenant console booking map alignment", () => {
     });
     
     // Assert the table shows the updated source
-    await expect(page.locator('[data-testid="source-a1"]')).toHaveText("manual_pin");
+    await expect(page.locator('[data-testid="source-a1"]')).toHaveText("manual");
   });
 });

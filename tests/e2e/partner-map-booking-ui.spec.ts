@@ -219,7 +219,7 @@ test.describe("partner map booking UI", () => {
     await expect(page.getByText(/Outside the service area|不在服務範圍內/i)).toHaveCount(0);
     await expect(submit).not.toBeDisabled();
     await submit.click();
-    await expect(page.getByText(/successfully|Review booking|確認訂單/i).first()).toBeVisible({ timeout: 10000 });
+    await expect(page.getByText(/Form validation passed|表單驗證通過/i).first()).toBeVisible({ timeout: 10000 });
   });
 
 

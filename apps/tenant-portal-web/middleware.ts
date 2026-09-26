@@ -18,23 +18,41 @@ export function middleware(request: NextRequest) {
     "max-age=31536000; includeSubDomains",
   );
 
+  // 2. CSRF Token Check for State-Mutating Requests (POST, PUT, DELETE, PATCH)
   if (["POST", "PUT", "DELETE", "PATCH"].includes(request.method)) {
-    const csrfCookie = request.cookies.get(CSRF_COOKIE_NAME)?.value;
-    const csrfHeader = request.headers.get("x-csrf-token");
+    const isServerAction = request.headers.has("next-action");
 
-    if (!csrfCookie || !csrfHeader || csrfCookie !== csrfHeader) {
-      return new NextResponse(
-        JSON.stringify({
-          error: "CSRF_TOKEN_INVALID",
-          message: "CSRF verification failed for mutation request.",
-        }),
-        {
-          status: 403,
-          headers: {
-            "Content-Type": "application/json",
+    if (isServerAction) {
+      const origin = request.headers.get("origin");
+      const host = request.headers.get("host");
+      if (origin && host) {
+        try {
+          const originUrl = new URL(origin);
+          if (originUrl.host !== host) {
+            return new NextResponse("Cross-origin Server Actions denied", { status: 403 });
+          }
+        } catch {
+          return new NextResponse("Invalid Origin", { status: 403 });
+        }
+      }
+    } else {
+      const csrfCookie = request.cookies.get(CSRF_COOKIE_NAME)?.value;
+      const csrfHeader = request.headers.get("x-csrf-token");
+
+      if (!csrfCookie || !csrfHeader || csrfCookie !== csrfHeader) {
+        return new NextResponse(
+          JSON.stringify({
+            error: "CSRF_TOKEN_INVALID",
+            message: "CSRF verification failed for mutation request.",
+          }),
+          {
+            status: 403,
+            headers: {
+              "Content-Type": "application/json",
+            },
           },
-        },
-      );
+        );
+      }
     }
   }
 

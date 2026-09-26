@@ -78,8 +78,8 @@ async function installConciergeApiMocks(
         if (captured.refusalCode === 'map_validation_failed') {
           await fulfillJson(route, 400, {
             error: {
-              code: "VALIDATION_FAILED",
-              message: "Pickup location is outside authorized zone",
+              code: "PICKUP_NOT_ALLOWED",
+              message: "Location rejected by server",
             }
           });
         } else {
@@ -397,7 +397,7 @@ test.describe("concierge map booking UI", () => {
     await submitBtn.click();
     
     // Check map-specific error message
-    await expect(page.getByText(/Location rejected by server|Pickup location is outside authorized zone/i)).toBeVisible();
+    await expect(page.getByText(/Outside the service area|不在支援的服務範圍內/i)).toBeVisible();
     
     // Correction: change the location
     await selectConciergeMapCandidate(page, 0, "songshan airport", "Songshan Airport");
