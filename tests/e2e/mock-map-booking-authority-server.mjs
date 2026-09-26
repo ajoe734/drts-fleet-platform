@@ -201,6 +201,19 @@ const server = http.createServer((req, res) => {
 
   const url = new URL(req.url, `http://127.0.0.1:${PORT}`);
 
+  if (req.method === "GET" && url.pathname === "/api/auth/session") {
+    json(res, 200, {
+      data: {
+        active: true,
+        identity: {
+          realm: "tenant",
+          tenant_id: "tenant-mock",
+        },
+      },
+    });
+    return;
+  }
+
   if (
     req.method === "GET" &&
     url.pathname.startsWith("/api/partner/entries/")

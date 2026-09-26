@@ -15,6 +15,24 @@
  */
 import { expect, test, type Page } from "@playwright/test";
 
+test.use({
+  storageState: {
+    cookies: [
+      {
+        name: "drts_tenant_session",
+        value: "mock-session",
+        domain: "127.0.0.1",
+        path: "/",
+        expires: Date.now() / 1000 + 3600,
+        httpOnly: true,
+        secure: false,
+        sameSite: "Lax",
+      },
+    ],
+    origins: [],
+  },
+});
+
 const PICKUP_CANDIDATE = {
   candidateId: "cand-pickup-1",
   provider: "mock",

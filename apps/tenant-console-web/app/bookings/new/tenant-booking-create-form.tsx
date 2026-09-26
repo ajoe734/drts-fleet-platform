@@ -886,11 +886,14 @@ export function TenantBookingCreateForm({
   const dropoffAddress = dropoffPayload?.address ?? "";
   const dropoffLat = coordinateToDraftString(dropoffPayload?.lat);
   const dropoffLng = coordinateToDraftString(dropoffPayload?.lng);
-  const baseGate = evaluateAddressSubmitGate({ pickup: pickupPayload, dropoff: dropoffPayload, serviceability, providerState });
-  const hasTextFallback = Boolean((pickupPayload?.address || "").trim() && (dropoffPayload?.address || "").trim());
-  const mapGate = (baseGate.code === "coordinates_required" && providerState && !providerState.available && hasTextFallback) ? { blocking: false, code: "dispatch_manual_review_required" as const } : baseGate;
+  const baseGate = evaluateAddressSubmitGate({
+    pickup: pickupPayload,
+    dropoff: dropoffPayload,
+    serviceability,
+    providerState,
+  });
+  const mapGate = baseGate;
   const notServiceable = mapGate.code === "outside_service_area";
-  const mapFallbackReview = mapGate.code === "dispatch_manual_review_required" && providerState && !providerState.available ? { reasonCode: "map_provider_unavailable", providerAvailable: providerState.available, providerDegraded: providerState.degraded, providerReasonCode: providerState.reasonCode ?? null } : null;
   const draft: TenantBookingDraftValues = {
     businessDispatchSubtype,
     selectedPassengerId,
@@ -1207,7 +1210,6 @@ export function TenantBookingCreateForm({
       const command = buildTenantBookingCreateCommand({
         draft,
         passengers,
-        mapFallbackReview,
       });
 
       const response = await fetch("/api/bookings/create", {
@@ -2301,7 +2303,9 @@ export function TenantBookingCreateForm({
                         : approvalEvaluation?.outcome?.decision ===
                             "require_approval"
                           ? t("newBooking.submit.forApproval")
-                          : mapGate.code === "dispatch_manual_review_required" ? t("newBooking.submit.manualReview") : t("newBooking.submit.create")
+                          : mapGate.code === "dispatch_manual_review_required"
+                            ? t("newBooking.submit.manualReview")
+                            : t("newBooking.submit.create")
                     }
                     primary
                     type="submit"

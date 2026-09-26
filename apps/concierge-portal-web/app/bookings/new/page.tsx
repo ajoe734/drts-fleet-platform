@@ -123,14 +123,10 @@ export default function ConciergeBookingCreatePage() {
     bothDispatchReady: false,
   });
 
-  const [mapProviderMode, setMapProviderMode] =
-    useState<AddressProviderMode>("healthy");
-  useEffect(() => {
-    if (typeof window !== "undefined") {
-      const mode = window.sessionStorage.getItem("drts.mock.mapProviderMode");
-      if (mode) setMapProviderMode(mode as AddressProviderMode);
-    }
-  }, []);
+  const mapProviderMode =
+    (process.env.NEXT_PUBLIC_ADDRESS_PICKER_PROVIDER_MODE as
+      | AddressProviderMode
+      | undefined) ?? "healthy";
   const mapProvider = useMemo(
     () => createConfiguredMockAddressProvider(mapProviderMode),
     [mapProviderMode],

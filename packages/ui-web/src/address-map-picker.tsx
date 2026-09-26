@@ -314,7 +314,7 @@ export function AddressMapPreviewSurface({
             pointerEvents: "none",
           }}
         >
-          ↑↓←→ 1 m · Shift 10 m · Enter 確認
+          ↑↓←→ 微調 · Shift 大步
         </div>
       ) : null}
       {!hasPins ? (
@@ -790,7 +790,7 @@ export function AddressMapPicker<TServiceProduct extends string = string>(
       setManualError(labels.manualInvalid);
       return;
     }
-    
+
     if (requireManualReason && manualReason.trim().length === 0) {
       setManualError(labels.manualReasonLabel);
       return;
@@ -1344,7 +1344,9 @@ export function AddressMapPicker<TServiceProduct extends string = string>(
       ) : null}
 
       {/* Manual entry */}
-      {manualMode || status === "manual_entry" || (requireManualReason && status === "provider_unavailable") ? (
+      {manualMode ||
+      status === "manual_entry" ||
+      (requireManualReason && status === "provider_unavailable") ? (
         <div
           style={{
             border: `1px solid ${theme.border}`,
@@ -1389,7 +1391,7 @@ export function AddressMapPicker<TServiceProduct extends string = string>(
           </div>
           {requireManualReason ? (
             <label style={{ display: "block" }}>
-              <span style={{...fieldLabelStyle(theme), color: theme.warn}}>
+              <span style={{ ...fieldLabelStyle(theme), color: theme.warn }}>
                 {labels.manualReasonLabel} *
               </span>
               <input
@@ -1399,7 +1401,9 @@ export function AddressMapPicker<TServiceProduct extends string = string>(
                 aria-label={labels.manualReasonLabel}
                 style={{
                   ...inputStyle(theme),
-                  background: manualReason.trim() ? theme.surface : theme.warnBg,
+                  background: manualReason.trim()
+                    ? theme.surface
+                    : theme.warnBg,
                   border: `1px solid ${manualReason.trim() ? theme.border : theme.warn}`,
                 }}
                 onChange={(event) => setManualReason(event.target.value)}

@@ -338,9 +338,8 @@ export function getTenantBookingFieldErrors(
 export function buildTenantBookingCreateCommand(params: {
   draft: TenantBookingDraftValues;
   passengers: TenantPassengerRecord[];
-  mapFallbackReview?: any | null;
 }): CreateTenantBookingCommand {
-  const { draft, passengers, mapFallbackReview } = params;
+  const { draft, passengers } = params;
   const passengerRoles =
     passengers.find((row) => row.passengerId === draft.selectedPassengerId)
       ?.roles ?? undefined;
@@ -411,6 +410,5 @@ export function buildTenantBookingCreateCommand(params: {
           },
         }
       : {}),
-    ...(mapFallbackReview ? { mapFallbackReview } : {}),
   };
 }

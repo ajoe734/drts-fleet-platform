@@ -17,7 +17,7 @@ const MP_STATES = {
 };
 function MapPicker({ theme:th, label='上車地點', state='selected', value, compact, coordinateData, reason, skin='mgmt' }) {
   const m = MP_STATES[state];
-  const c = { text:th.text, muted:th.textMuted, dim:th.textDim, line:th.border, surface:th.surface, lo:th.surfaceLo, accent:th.accent, success:th.success, warn:th.warn, danger:th.danger, mono:th.mono || SHELL_MONO };
+  const c = { text:th.text, muted:th.textMuted, dim:th.textDim, line:th.border, surface:th.surface, lo:th.surfaceLo, accent:th.accent, success:th.success, warn:th.warn, danger:th.danger, mono:th.mono || (typeof SHELL_MONO !== 'undefined' ? SHELL_MONO : 'ui-monospace, Menlo, monospace') };
   const tone = c[m.tone==='neutral'?'muted':m.tone==='info'?'accent':m.tone];
   const blocked = state==='provider_down' || state==='out_of_area';
   const H = compact ? 96 : 130;
@@ -60,7 +60,7 @@ function MapPicker({ theme:th, label='上車地點', state='selected', value, co
         {state==='provider_down' && <div style={{ position:'absolute', inset:0, display:'flex', alignItems:'center', justifyContent:'center', background:'rgba(255,255,255,.55)', fontSize:12, fontWeight:700, color:c.danger }}>地圖服務暫時無回應</div>}
         {(state==='selected' || state==='saved_pin') && <div style={{ position:'absolute', left:8, bottom:6, fontSize:10, fontFamily:c.mono, color:c.muted, background:c.surface, padding:'2px 6px', borderRadius:4 }}>{coordinateData ? `${coordinateData.lat}, ${coordinateData.lng}` : '25.0330, 121.5654'} · 可拖曳微調</div>}
         {state==='manual_coords' && <div style={{ position:'absolute', left:8, bottom:6, fontSize:10, color:c.warn, background:c.surface, padding:'2px 6px', borderRadius:4 }}>未經地址解析 · 請核對位置</div>}
-        {(state==='selected'||state==='manual_coords'||state==='saved_pin') && <div style={{ position:'absolute', right:8, bottom:6, fontSize:9.5, fontFamily:c.mono, color:c.dim, background:c.surface, padding:'2px 6px', borderRadius:4 }}>↑↓←→ 4 m · Shift 16 m</div>}
+        {(state==='selected'||state==='manual_coords'||state==='saved_pin') && <div style={{ position:'absolute', right:8, bottom:6, fontSize:9.5, fontFamily:c.mono, color:c.dim, background:c.surface, padding:'2px 6px', borderRadius:4 }}>↑↓←→ 微調 · Shift 大步</div>}
       </div>
       {(state==='manual_coords'||state==='manual_review') && (
         <div style={{ display:'flex', alignItems:'center', gap:8, padding:'7px 10px', borderTop:'1px solid '+c.line, background:c.lo }}>
