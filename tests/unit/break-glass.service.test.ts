@@ -127,4 +127,88 @@ describe("BreakGlassService", () => {
     });
     expect((await repository.getSession("bg-session"))?.status).toBe("revoked");
   });
+
+  it("round-3 R6: listActiveGrantsForPrincipal excludes an active grant with no bound session (failed issuance)", async () => {
+    const repository = new IdentityRepository();
+    const service = new BreakGlassService(repository);
+    const grant = await service.request(requester, {
+      requestedScopes: ["identity:read"],
+      reasonCode: "INCIDENT",
+      reasonText: "Restore incident access",
+      proofReference: "vault://break-glass/proof",
+      mutation,
+    });
+    await service.approve(approver, grant.grantId, mutation);
+    // Mirror the controller's activate flow stopping before bindSession is
+    // ever reached (e.g. token issuance failed): status is "active" in
+    // storage but sessionId stays null.
+    await service.activate(requester, {
+      requestId: grant.grantId,
+      requestedScope: ["identity:read"],
+      requestedDurationMinutes: 10,
+      mutation,
+    });
+
+    const active = await service.listActiveGrantsForPrincipal("requester");
+    expect(active).toEqual([]);
+  });
+
+  it("round-3 R6: listActiveGrantsForPrincipal still reports a genuinely bound, active-session grant as active", async () => {
+    const repository = new IdentityRepository();
+    const service = new BreakGlassService(repository);
+    const grant = await service.request(requester, {
+      requestedScopes: ["identity:read"],
+      reasonCode: "INCIDENT",
+      reasonText: "Restore incident access",
+      proofReference: "vault://break-glass/proof",
+      mutation,
+    });
+    await service.approve(approver, grant.grantId, mutation);
+    const active = await service.activate(requester, {
+      requestId: grant.grantId,
+      requestedScope: ["identity:read"],
+      requestedDurationMinutes: 10,
+      mutation,
+    });
+    await repository.createSession({
+      sessionId: "bg-session-2",
+      sourceRef: "test",
+      principalId: "requester",
+      membershipId: null,
+      realm: "platform",
+      actorType: "platform_admin",
+      actorId: "requester",
+      tenantId: null,
+      partnerId: null,
+      partnerProgramId: null,
+      partnerEntrySlug: null,
+      currentTokenId: "token",
+      roles: [],
+      scopes: [],
+      policyVersion: "test",
+      acr: "aal2",
+      audience: [],
+      issuer: null,
+      subject: "requester",
+      status: "active",
+      authTime: active.activatedAt!,
+      authMethods: ["break_glass"],
+      tokenVersion: 1,
+      idleExpiresAt: null,
+      absoluteExpiresAt: active.expiresAt!,
+      revokedAt: null,
+      revokedByPrincipalId: null,
+      revokeReason: null,
+      deviceSummary: {},
+      riskSummary: {},
+      createdAt: active.activatedAt!,
+      updatedAt: active.activatedAt!,
+    });
+    await service.bindSession(grant.grantId, "bg-session-2");
+
+    const activeGrants = await service.listActiveGrantsForPrincipal(
+      "requester",
+    );
+    expect(activeGrants.map((g) => g.grantId)).toEqual([grant.grantId]);
+  });
 });

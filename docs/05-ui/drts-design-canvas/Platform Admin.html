@@ -50,6 +50,8 @@
 <script type="text/babel" src="platform-p5.jsx"></script>
 <script type="text/babel" src="platform-mtx-auth.jsx"></script>
 <script type="text/babel" src="platform-mtx-commerce.jsx"></script>
+<script type="text/babel" src="platform-partner-notify.jsx"></script>
+<script type="text/babel" src="platform-iam.jsx"></script>
 
 <script type="text/babel">
 const TWEAK_DEFAULTS = /*EDITMODE-BEGIN*/{
@@ -160,6 +162,72 @@ function App() {
           <DCArtboard id="com-04" label="UI-04 · 營運紀錄查詢 · 缺值=未取得" width={W} height={H}><Bare><P5C_Records theme={th} /></Bare></DCArtboard>
           <DCArtboard id="com-05" label="UI-05 · 受控匯出 · 範圍確認" width={W} height={H}><Bare><P5C_Export theme={th} /></Bare></DCArtboard>
           <DCArtboard id="com-05b" label="UI-05 · 匯出執行中 running 64%" width={W} height={H}><Bare><P5C_Export theme={th} phase="running" /></Bare></DCArtboard>
+        </DCSection>
+
+        <DCSection id="partner-notify" title="03l · 夥伴通知分頁 · D · partner-notification-20260923" subtitle="夥伴詳情頁新增「通知」分頁 · 6 組狀態 · 密鑰遮罩 · 硬性文案「端點已接受，但裝置未知」">
+          <DCArtboard id="pn-ready" label="D1/D2/D4 · 綁定就緒 + 派送紀錄 + 生命週期" width={W} height={H}><Hero url="/partners/nexus-premium?tab=notify"><PA_PartnerNotify theme={th} /></Hero></DCArtboard>
+          <DCArtboard id="pn-pending" label="D1 · 綁定待測試（尚未測試）" width={W} height={H}><Bare><PA_PartnerNotify theme={th} bind="test_pending" test="none" /></Bare></DCArtboard>
+          <DCArtboard id="pn-pending-ongoing" label="D1 · 綁定待測試（測試進行中）" width={W} height={H}><Bare><PA_PartnerNotify theme={th} bind="test_pending" test="none" testingState="pending" inflight={true} /></Bare></DCArtboard>
+          <DCArtboard id="pn-pending-tested" label="D1 · 綁定待測試（測試成功，可啟用）" width={W} height={H}><Bare><PA_PartnerNotify theme={th} bind="test_pending" test="passed_current" /></Bare></DCArtboard>
+          <DCArtboard id="pn-disabled" label="D1 · 綁定已停用 (指紋相符，可直接恢復)" width={W} height={H}><Bare><PA_PartnerNotify theme={th} bind="disabled" test="passed_current" /></Bare></DCArtboard>
+          <DCArtboard id="pn-stale" label="D1 · 綁定已停用 (指紋變更，需重測)" width={W} height={H}><Bare><PA_PartnerNotify theme={th} bind="disabled" test="passed_stale" /></Bare></DCArtboard>
+          <DCArtboard id="pn-loading" label="D2 · 派送紀錄載入中" width={W} height={H}><Bare><PA_PartnerNotify theme={th} deliveries="loading" /></Bare></DCArtboard>
+          <DCArtboard id="pn-empty" label="D2 · 派送紀錄空清單" width={W} height={H}><Bare><PA_PartnerNotify theme={th} deliveries="empty" /></Bare></DCArtboard>
+          <DCArtboard id="pn-retry-pending" label="D2 · 派送紀錄單筆重送中" width={W} height={H}><Bare><PA_PartnerNotify theme={th} retryState="pending" retryRowId="dlv_0908" /></Bare></DCArtboard>
+          <DCArtboard id="pn-retry-failed" label="D2 · 派送紀錄單筆重送失敗" width={W} height={H}><Bare><PA_PartnerNotify theme={th} retryState="failed" retryRowId="dlv_0908" /></Bare></DCArtboard>
+          <DCArtboard id="pn-retry-queued" label="D2 · 派送紀錄單筆重送入列" width={W} height={H}><Bare><PA_PartnerNotify theme={th} retryState="queued" retryRowId="dlv_0908" /></Bare></DCArtboard>
+          <DCArtboard id="pn-ready-no-access" label="D1 · 綁定就緒 (無 tenant:webhooks:read 權限)" width={W} height={H}><Bare><PA_PartnerNotify theme={th} endpointAccess="denied" /></Bare></DCArtboard>
+          <DCArtboard id="pn-ready-read-only" label="D1 · 綁定就緒 (端點列表唯讀權限)" width={W} height={H}><Bare><PA_PartnerNotify theme={th} endpointAccess="read_only" /></Bare></DCArtboard>
+          <DCArtboard id="pn-ready-binding-read-only" label="D1 · 綁定就緒 (無 entry 綁定寫入權限)" width={W} height={H}><Bare><PA_PartnerNotify theme={th} bindingAccess="read_only" /></Bare></DCArtboard>
+          <DCArtboard id="pn-edit" label="D3 · 編輯回呼綁定與事件類型" width={W} height={H}><Bare><PA_PartnerNotifyEdit theme={th} /></Bare></DCArtboard>
+          <DCArtboard id="pn-edit-no-access" label="D3 · 編輯回呼綁定 (無 tenant:webhooks:read 權限)" width={W} height={H}><Bare><PA_PartnerNotifyEdit theme={th} endpointAccess="denied" /></Bare></DCArtboard>
+          <DCArtboard id="pn-edit-read-only" label="D3 · 編輯回呼綁定 (端點列表唯讀權限)" width={W} height={H}><Bare><PA_PartnerNotifyEdit theme={th} endpointAccess="read_only" /></Bare></DCArtboard>
+          <DCArtboard id="pn-edit-binding-read-only" label="D3 · 編輯回呼綁定 (無 entry 綁定寫入權限)" width={W} height={H}><Bare><PA_PartnerNotifyEdit theme={th} bindingAccess="read_only" /></Bare></DCArtboard>
+          <DCArtboard id="pn-edit-loading" label="D3 · 編輯回呼綁定 (端點列表載入中)" width={W} height={H}><Bare><PA_PartnerNotifyEdit theme={th} endpointAccess="loading" /></Bare></DCArtboard>
+          <DCArtboard id="pn-edit-unavailable" label="D3 · 編輯回呼綁定 (端點列表無法取得)" width={W} height={H}><Bare><PA_PartnerNotifyEdit theme={th} endpointAccess="unavailable" /></Bare></DCArtboard>
+          <DCArtboard id="pn-edit-retry" label="D3 · 編輯回呼綁定 (端點列表無法取得，可重試)" width={W} height={H}><Bare><PA_PartnerNotifyEdit theme={th} endpointAccess="retry" /></Bare></DCArtboard>
+          <DCArtboard id="pn-edit-pending" label="D3 · 編輯儲存中" width={W} height={H}><Bare><PA_PartnerNotifyEdit theme={th} saveState="pending" /></Bare></DCArtboard>
+          <DCArtboard id="pn-edit-failed" label="D3 · 編輯儲存失敗" width={W} height={H}><Bare><PA_PartnerNotifyEdit theme={th} saveState="failed" /></Bare></DCArtboard>
+          <DCArtboard id="pn-edit-success" label="D3 · 編輯儲存成功 (返回綁定頁，version: 8，尚未測試)" width={W} height={H}><Bare><PA_PartnerNotify theme={th} bind="test_pending" test="none" version={8} /></Bare></DCArtboard>
+          <DCArtboard id="pn-test-failed" label="D1 · 綁定測試失敗 (網路異常)" width={W} height={H}><Bare><PA_PartnerNotify theme={th} bind="test_pending" test="none" testingState="failed" failed={true} /></Bare></DCArtboard>
+          <DCArtboard id="pn-test-rejected" label="D1 · 綁定測試遭拒 (夥伴端回傳失敗)" width={W} height={H}><Bare><PA_PartnerNotify theme={th} bind="test_pending" test="none" testingState="rejected" failed={true} /></Bare></DCArtboard>
+          <DCArtboard id="pn-enable-pending" label="D1 · 綁定啟用中" width={W} height={H}><Bare><PA_PartnerNotify theme={th} bind="test_pending" test="passed_current" enableState="pending" inflight={true} /></Bare></DCArtboard>
+          <DCArtboard id="pn-enable-failed" label="D1 · 綁定啟用失敗" width={W} height={H}><Bare><PA_PartnerNotify theme={th} bind="test_pending" test="passed_current" enableState="failed" /></Bare></DCArtboard>
+          <DCArtboard id="pn-disable-pending" label="D1 · 綁定停用中" width={W} height={H}><Bare><PA_PartnerNotify theme={th} bind="ready" test="passed_current" disableState="pending" inflight={true} /></Bare></DCArtboard>
+          <DCArtboard id="pn-disable-failed" label="D1 · 綁定停用失敗" width={W} height={H}><Bare><PA_PartnerNotify theme={th} bind="ready" test="passed_current" disableState="failed" /></Bare></DCArtboard>
+          <DCArtboard id="pn-resume-pending" label="D1 · 綁定恢復中" width={W} height={H}><Bare><PA_PartnerNotify theme={th} bind="disabled" test="passed_current" resumeState="pending" inflight={true} /></Bare></DCArtboard>
+          <DCArtboard id="pn-resume-failed" label="D1 · 綁定恢復失敗" width={W} height={H}><Bare><PA_PartnerNotify theme={th} bind="disabled" test="passed_current" resumeState="failed" /></Bare></DCArtboard>
+          <DCArtboard id="pn-errors" label="D6 · 錯誤與復原 · 409/404/403 + 200/202" width={W} height={H}><Bare><PA_PartnerNotifyErrors theme={th} /></Bare></DCArtboard>
+          <DCArtboard id="pn-recovery" label="D6 · 生命週期載入與復原狀態" width={W} height={H}><Bare><PA_PartnerNotifyRecoveryBoards theme={th} /></Bare></DCArtboard>
+        </DCSection>
+
+        <DCSection id="iam" title="03m · 身分治理工作區 · C · iam-security-20260813" subtitle="5 分頁 + 常駐破窗橫幅 · SoD 衝突 · 最後管理員保護 · 雙人核准 · ≤60 分鐘">
+          <DCArtboard id="iam-users" label="C1 · 使用者與成員 · MFA / 最後登入" width={W} height={H}><Hero url="/iam/users"><PA_IamUsers theme={th} /></Hero></DCArtboard>
+          <DCArtboard id="iam-invite" label="C1 · 邀請抽屜" width={W} height={H}><Bare><PA_IamUsers theme={th} drawer="invite" /></Bare></DCArtboard>
+          <DCArtboard id="iam-detail" label="C1 · 詳情抽屜 · memberships/scope · 逐 session 撤銷 · 稽核時間軸" width={W} height={H}><Bare><PA_IamUsers theme={th} drawer="detail" /></Bare></DCArtboard>
+          <DCArtboard id="iam-sessions" label="C2 · 連線階段 · 遮罩權杖 · 遠端終止" width={W} height={H}><Bare><PA_IamSessions theme={th} /></Bare></DCArtboard>
+          <DCArtboard id="iam-priv" label="C3 · 特權角色審批 · step-up (none)" width={W} height={H}><Bare><PA_IamPrivileged theme={th} stepUpState="none" /></Bare></DCArtboard>
+          <DCArtboard id="iam-priv-verifying" label="C3 · 特權角色審批 · step-up (verifying)" width={W} height={H}><Bare><PA_IamPrivileged theme={th} stepUpState="verifying" /></Bare></DCArtboard>
+          <DCArtboard id="iam-priv-valid" label="C3 · 特權角色審批 · step-up (valid)" width={W} height={H}><Bare><PA_IamPrivileged theme={th} stepUpState="valid" /></Bare></DCArtboard>
+          <DCArtboard id="iam-priv-expired" label="C3 · 特權角色審批 · step-up (expired)" width={W} height={H}><Bare><PA_IamPrivileged theme={th} stepUpState="expired" /></Bare></DCArtboard>
+          <DCArtboard id="iam-review" label="C4 · 存取複核 · 確認/降權/移除/逾期掃描" width={W} height={H}><Bare><PA_IamReview theme={th} /></Bare></DCArtboard>
+          <DCArtboard id="iam-review-create" label="C4 · 建立複核活動抽屜" width={W} height={H}><Bare><PA_IamReview theme={th} create /></Bare></DCArtboard>
+          <DCArtboard id="iam-bg" label="C5 · 緊急破窗申請 · 表單" width={W} height={H}><Bare><PA_IamBreakGlass theme={th} state="form" /></Bare></DCArtboard>
+          <DCArtboard id="iam-bg-form-verifying" label="C5 · 緊急破窗申請 · step-up (verifying)" width={W} height={H}><Bare><PA_IamBreakGlass theme={th} state="form" stepUpState="verifying" /></Bare></DCArtboard>
+          <DCArtboard id="iam-bg-form-valid" label="C5 · 緊急破窗申請 · step-up (valid)" width={W} height={H}><Bare><PA_IamBreakGlass theme={th} state="form" stepUpState="valid" /></Bare></DCArtboard>
+          <DCArtboard id="iam-bg-form-expired" label="C5 · 緊急破窗申請 · step-up (expired)" width={W} height={H}><Bare><PA_IamBreakGlass theme={th} state="form" stepUpState="expired" /></Bare></DCArtboard>
+          <DCArtboard id="iam-bg-requested" label="C5 · 破窗申請中 · 待核准" width={W} height={H}><Bare><PA_IamBreakGlass theme={th} state="requested" /></Bare></DCArtboard>
+          <DCArtboard id="iam-bg-req-verifying" label="C5 · 破窗申請中 · step-up (verifying)" width={W} height={H}><Bare><PA_IamBreakGlass theme={th} state="requested" stepUpState="verifying" /></Bare></DCArtboard>
+          <DCArtboard id="iam-bg-req-valid" label="C5 · 破窗申請中 · step-up (valid)" width={W} height={H}><Bare><PA_IamBreakGlass theme={th} state="requested" stepUpState="valid" /></Bare></DCArtboard>
+          <DCArtboard id="iam-bg-req-expired" label="C5 · 破窗申請中 · step-up (expired)" width={W} height={H}><Bare><PA_IamBreakGlass theme={th} state="requested" stepUpState="expired" /></Bare></DCArtboard>
+          <DCArtboard id="iam-bg-approved" label="C5 · 破窗已核准 · 待啟用" width={W} height={H}><Bare><PA_IamBreakGlass theme={th} state="approved" /></Bare></DCArtboard>
+          <DCArtboard id="iam-bg-app-verifying" label="C5 · 破窗已核准 · step-up (verifying)" width={W} height={H}><Bare><PA_IamBreakGlass theme={th} state="approved" stepUpState="verifying" /></Bare></DCArtboard>
+          <DCArtboard id="iam-bg-app-valid" label="C5 · 破窗已核准 · step-up (valid)" width={W} height={H}><Bare><PA_IamBreakGlass theme={th} state="approved" stepUpState="valid" /></Bare></DCArtboard>
+          <DCArtboard id="iam-bg-app-expired" label="C5 · 破窗已核准 · step-up (expired)" width={W} height={H}><Bare><PA_IamBreakGlass theme={th} state="approved" stepUpState="expired" /></Bare></DCArtboard>
+          <DCArtboard id="iam-bg-active" label="C5 · 破窗生效中 · 常駐橫幅" width={W} height={H}><Bare><PA_IamBreakGlass theme={th} state="active" /></Bare></DCArtboard>
+          <DCArtboard id="iam-bg-exit-failed" label="C5 · 破窗退出失敗 · step-up" width={W} height={H}><Bare><PA_IamBreakGlass theme={th} state="exit_failed" /></Bare></DCArtboard>
+          <DCArtboard id="iam-bg-closed" label="C5 · 破窗已結束" width={W} height={H}><Bare><PA_IamBreakGlass theme={th} state="closed" /></Bare></DCArtboard>
+          <DCArtboard id="iam-bg-expired-grant" label="C5 · 破窗已撤銷 · 授權已逾時" width={W} height={H}><Bare><PA_IamBreakGlass theme={th} state="expired_grant" /></Bare></DCArtboard>
         </DCSection>
 
         <DCSection id="fleet" title="04 · 車隊與法遵 · 多 tab (Q-ADM08/09)">          <DCArtboard id="fleet-vehicles" label="Vehicles" width={W} height={H}><Hero url="/fleet?tab=vehicles"><PA_Fleet theme={th} tab="vehicles" /></Hero></DCArtboard>
