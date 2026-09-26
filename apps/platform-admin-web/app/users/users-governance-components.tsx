@@ -1424,7 +1424,7 @@ export function BreakGlassPanel() {
             ),
           );
           setSelectedGrant(currentGrant);
-        } catch (reloadErr) {
+        } catch {
           setSelectedGrant(null);
         }
       } else if (
