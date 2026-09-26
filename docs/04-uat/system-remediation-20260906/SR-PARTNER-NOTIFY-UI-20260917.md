@@ -754,3 +754,11 @@ All findings from the Round 7 review have been addressed:
 - `tools/ci/verify_partner_notification_postgres_gate.py` updated to expect 7 PG UI test assertions.
 - `pnpm exec vitest run tests/unit/system-remediation/sr-partner-notify-ui-20260917/notification-ui-component.test.tsx` -> PASS.
 - `pnpm exec vitest run tests/unit/system-remediation/sr-partner-notify-ui-20260917/notification-ui.test.ts` -> PASS.
+
+## 2026-09-26 Gemini Owner Addendum
+
+Addressed final gap in R1 default event bindings:
+- `partner-notification-panel.tsx` now correctly defaults new bindings and edit fallbacks to the formal wire events catalog `["assignment_disclosure_ready", "assignment_replaced", "eta_changed", "driver_arrived", "receipt_ready"]` using `PARTNER_PASSENGER_EVENT_TO_EXTERNAL_NAME`.
+
+### Evidences
+- `partner-notification-panel.tsx` updated to use `Object.keys(PARTNER_PASSENGER_EVENT_TO_EXTERNAL_NAME)`.
