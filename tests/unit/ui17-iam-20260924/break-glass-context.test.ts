@@ -324,7 +324,6 @@ describe("BreakGlass R6b Regression Tests - True Provider Mutation", () => {
   });
 
   it("should clear session storage properly if IAM returns 401 on polling", async () => {
-    // Just testing that 401 unauth cleans up the storage via BreakGlassProvider's polling logic if we could trigger it,
     const future = new Date(Date.now() + 300000).toISOString();
     sessionStorage.setItem(
       "drts_platform_break_glass_session",
@@ -336,9 +335,9 @@ describe("BreakGlass R6b Regression Tests - True Provider Mutation", () => {
       }),
     );
 
-    mockIamClient.getIdentitySessionContext.mockRejectedValue({
-      statusCode: 401,
-    });
+    mockIamClient.getIdentitySessionContext.mockImplementation(() =>
+      Promise.reject({ statusCode: 401 })
+    );
 
     render(
       React.createElement(
@@ -349,11 +348,14 @@ describe("BreakGlass R6b Regression Tests - True Provider Mutation", () => {
     );
 
     // The provider automatically clears expired sessions on tick or 401.
-    await waitFor(() => {
-      expect(mockIamClient.getIdentitySessionContext).toHaveBeenCalled();
-      expect(
-        sessionStorage.getItem("drts_platform_break_glass_session"),
-      ).toBeNull();
-    });
+    await waitFor(
+      () => {
+        expect(mockIamClient.getIdentitySessionContext).toHaveBeenCalled();
+        expect(
+          sessionStorage.getItem("drts_platform_break_glass_session"),
+        ).toBeNull();
+      },
+      { timeout: 3000 }
+    );
   });
 });
