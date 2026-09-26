@@ -447,9 +447,8 @@ test.describe("tenant console booking map alignment", () => {
     );
     await expect(coordinateSourceHidden).toHaveValue("manual_pin");
 
-    await page
-      .getByRole("button", { name: "Save Changes" })
-      .click({ force: true });
+    await page.getByRole("button", { name: "Save Changes" }).focus();
+    await page.keyboard.press("Enter");
 
     // Wait for navigation back to addresses list or a success state
     await expect(page.getByText("Mock Address updated").first()).toBeVisible({
