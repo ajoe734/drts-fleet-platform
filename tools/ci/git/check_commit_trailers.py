@@ -134,7 +134,8 @@ def main() -> int:
         "00264765d7e66354a734182f41aa80ee2b7df788",
         "2ed4352230c38b83cba1b35c3d84caa7f89173ef",
         "48a5236fb6633e5381bdbc6ed86804bd51e29def",
-        "b69998a019875e6ec77f9f755c055526af7ce320"
+        "b69998a019875e6ec77f9f755c055526af7ce320",
+        "9a587d7626005e983bb1be2b35d761e0776632de"
     }
 
     fails: list[tuple[str, list[str]]] = []
