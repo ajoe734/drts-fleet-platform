@@ -895,7 +895,7 @@ export function TenantBookingCreateForm({
   const mapGate = {
     ...baseGate,
     blocking:
-      baseGate.blocking || baseGate.code === "dispatch_manual_review_required",
+      baseGate.blocking || (!providerState.available && baseGate.code === "dispatch_manual_review_required"),
   };
   const notServiceable = mapGate.code === "outside_service_area";
   const draft: TenantBookingDraftValues = {

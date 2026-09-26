@@ -42,7 +42,7 @@ function TN_NewBookingMap({ theme:th, degraded, pick, drop }) {
             <Field theme={th} label="常用下車地址"><Select theme={th} value=""/></Field>
             <MapPicker theme={th} skin="tenant" label="下車" state={ds} value={ds==='no_results'?'桃園機場 第三航廈':'桃園機場 第二航廈 出境大廳'}/>
             {(ps==='out_of_area'||ds==='out_of_area') && <Banner theme={th} tone="danger" icon="warn" title="有地點不在服務範圍 · 無法送出" body="請更換該地點；不可提交人工複核繞過服務範圍。"/>}
-            {ds==='no_results' && <Banner theme={th} tone="warn" icon="info" title="下車查無結果 · 復原路徑" body="請換關鍵字重搜，租戶端不支援手動座標。"/>}
+            {ds==='no_results' && <Banner theme={th} tone="warn" icon="info" title="下車查無結果 · 復原路徑" body="請改用手動座標並提供原因。"/>}
           </div>
           <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:12 }}>
             <Field theme={th} label="出發時間 · departAt" required><Input theme={th} value="2026-09-25 17:30" mono/></Field>
@@ -56,7 +56,7 @@ function TN_NewBookingMap({ theme:th, degraded, pick, drop }) {
           <Field theme={th} label="cost center" required><Select theme={th} value="CC-FIN-04 財務處"/></Field>
           <Field theme={th} label="專案碼 · project_code"><Input theme={th} value="PRJ-2026-Q3-AUDIT" mono/></Field>
           <DL theme={th} cols={1} items={[
-            { k:'預估費用 · estimate', v: degraded?'無法估算 · 待人工複核':'NT$ 1,580 · pr_v23', mono:!degraded },
+            { k:'預估費用 · estimate', v: degraded?'無法估算 · 地圖服務異常':'NT$ 1,580 · pr_v23', mono:!degraded },
             { k:'審批 · approval', v:'主管預核免簽 (r_002)' },
             { k:'配額影響 · quota', v:'本月剩餘 1,180 / 5,000' },
           ]}/>
@@ -104,10 +104,10 @@ function TN_AddressesMap({ theme:th, state='manual_review', coordinateData, reas
 // ── 夥伴線：訂車表單（保留方案膠囊、資格橫幅、送出鈕位置） ──
 function PB_BookCardMap({ state='selected', drop='selected', reason, program='card' }) {
   const p = PROGRAMS[program];
-  const th = { text:'#0E1424', textMuted:'#56657F', textDim:'#9AA5B8', border:'#E5E7EB', surface:'#fff', surfaceLo:'#F4F6FB', accent:p.primary, success:'#15803D', warn:'#B45309', danger:'#B91C1C', dangerBg:'#FEF2F2' };
+  const th = { text:'var(--slate-900, #0E1424)', textMuted:'var(--slate-600, #56657F)', textDim:'var(--slate-400, #9AA5B8)', border:'var(--slate-200, #E5E7EB)', surface:'#fff', surfaceLo:'var(--slate-50, #F4F6FB)', accent:p.primary, success:'var(--green-700, #15803D)', warn:'var(--amber-700, #B45309)', danger:'var(--red-700, #B91C1C)', dangerBg:'var(--red-50, #FEF2F2)' };
   const hard = state==='out_of_area' || drop==='out_of_area';
-  const unresolved = ['no_results','empty','searching','candidates'].some(s=>s===state||s===drop);
-  const manualPath = ['provider_down','manual_review','manual_coords'].some(s=>s===state||s===drop);
+  const unresolved = ['no_results','empty','searching','candidates','missing_coordinate'].some(s=>s===state||s===drop);
+  const manualPath = ['provider_down','manual_review'].some(s=>s===state||s===drop);
   const needsReason = ['provider_down','manual_review','manual_coords'].some(s=>s===state||s===drop);
   const down = state==='provider_down' || drop==='provider_down';
   const hasReason = Boolean((reason || '').trim());

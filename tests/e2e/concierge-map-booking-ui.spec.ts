@@ -261,7 +261,7 @@ test.describe("concierge map booking UI", () => {
 
     const command = captured.body[0] as any;
     expect(command.mapFallbackReview).toBeTruthy();
-    expect(command.mapFallbackReview.reviewCode).toBe("provider_outage");
+    expect(command.mapFallbackReview.reasonCode).toBe("map_provider_unavailable");
 
     // Clear capture and simulate recovery
     captured.body = [];

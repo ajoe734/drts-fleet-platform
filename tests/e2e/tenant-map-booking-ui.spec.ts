@@ -197,6 +197,7 @@ test.describe("tenant console booking map alignment", () => {
     await page.goto("/bookings/new");
 
     await pinBothStops(page);
+    await fillProgramFields(page);
 
     await expect(
       page.getByText("Outside the service area", { exact: false }).first(),

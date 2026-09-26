@@ -19,7 +19,6 @@ function MapPicker({ theme:th, label='上車地點', state='selected', value, co
   const m = { ...MP_STATES[state] };
   if (skin === 'tenant') {
     if (state === 'provider_down') m.next = '地圖服務無回應，無法建立叫車';
-    if (state === 'manual_review') m.next = '租戶端不支援手動座標';
   }
   const c = { text:th.text, muted:th.textMuted, dim:th.textDim, line:th.border, surface:th.surface, lo:th.surfaceLo, accent:th.accent, success:th.success, warn:th.warn, danger:th.danger, mono:th.mono || (typeof SHELL_MONO !== 'undefined' ? SHELL_MONO : 'ui-monospace, Menlo, monospace') };
   const tone = c[m.tone==='neutral'?'muted':m.tone==='info'?'accent':m.tone];
@@ -59,9 +58,9 @@ function MapPicker({ theme:th, label='上車地點', state='selected', value, co
           </div>
         )}
         {state==='out_of_area' && <div style={{ position:'absolute', inset:'12px 30%', border:'2px dashed '+c.danger, borderRadius:8, opacity:.6 }}/>}
-        {state==='out_of_area' && <div style={{ position:'absolute', right:'14%', top:'40%' }}><svg width="26" height="30" viewBox="0 0 24 28" fill={c.danger} stroke="#fff" strokeWidth="1.5"><path d="M12 27s-9-7-9-15a9 9 0 0118 0c0 8-9 15-9 15z"/></svg></div>}
+        {state==='out_of_area' && <div style={{ position:'absolute', right:'14%', top:'40%' }}><svg width="26" height="30" viewBox="0 0 24 28" fill={c.danger} stroke={c.surface} strokeWidth="1.5"><path d="M12 27s-9-7-9-15a9 9 0 0118 0c0 8-9 15-9 15z"/></svg></div>}
         {(state==='empty'||state==='searching'||state==='no_results'||state==='candidates'||state==='missing_coordinate') && <div style={{ position:'absolute', inset:0, display:'flex', alignItems:'center', justifyContent:'center', fontSize:11.5, color:c.dim }}>{state==='no_results'?'找不到符合的地點':state==='candidates'?'選擇候選後顯示落點':state==='missing_coordinate'?'地圖上無標記點':'預覽區 · 選定後顯示落點'}</div>}
-        {state==='provider_down' && <div style={{ position:'absolute', inset:0, display:'flex', alignItems:'center', justifyContent:'center', background:'rgba(255,255,255,.55)', fontSize:12, fontWeight:700, color:c.danger }}>地圖服務暫時無回應</div>}
+        {state==='provider_down' && <div style={{ position:'absolute', inset:0, display:'flex', alignItems:'center', justifyContent:'center', background:'var(--bg-overlay, rgba(255,255,255,.55))', fontSize:12, fontWeight:700, color:c.danger }}>地圖服務暫時無回應</div>}
         {(state==='selected' || state==='saved_pin') && <div style={{ position:'absolute', left:8, bottom:6, fontSize:10, fontFamily:c.mono, color:c.muted, background:c.surface, padding:'2px 6px', borderRadius:4 }}>{coordinateData ? `${coordinateData.lat}, ${coordinateData.lng}` : '25.0330, 121.5654'} · 可拖曳微調</div>}
         {state==='manual_coords' && <div style={{ position:'absolute', left:8, bottom:6, fontSize:10, color:c.warn, background:c.surface, padding:'2px 6px', borderRadius:4 }}>未經地址解析 · 請核對位置</div>}
         {(state==='selected'||state==='manual_coords'||state==='saved_pin') && <div style={{ position:'absolute', right:8, bottom:6, fontSize:9.5, fontFamily:c.mono, color:c.dim, background:c.surface, padding:'2px 6px', borderRadius:4 }}>↑↓←→ 微調 · Shift 大步</div>}
@@ -78,7 +77,7 @@ function MapPicker({ theme:th, label='上車地點', state='selected', value, co
         {state==='no_results' && <span style={{ fontSize:11, color:c.accent, fontWeight:700 }}>{skin==='tenant'?'查無結果':'改用手動座標'}</span>}
         {state==='provider_down' && <span style={{ fontSize:11, color:c.danger, fontWeight:700 }}>{skin==='tenant'?'無法建立':'送交人工複核 →'}</span>}
         {state==='out_of_area' && <span style={{ fontSize:11, color:c.danger, fontWeight:700 }}>更換地點</span>}
-        {state==='manual_review' && <span style={{ fontSize:11, color:c.warn, fontWeight:700 }}>{skin==='tenant'?'不支援手動座標':'客服確認後派車'}</span>}
+        {state==='manual_review' && <span style={{ fontSize:11, color:c.warn, fontWeight:700 }}>客服確認後派車</span>}
         {state==='candidates' && <span style={{ fontSize:11, color:c.dim }}>3 筆候選</span>}
       </div>
     </div>

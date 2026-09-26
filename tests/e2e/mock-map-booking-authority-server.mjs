@@ -184,6 +184,7 @@ const lionEntry = {
 
 const entries = {
   ctbc: ctbcEntry,
+  acme: { ...ctbcEntry, entrySlug: "acme" },
   cathay: cathayEntry,
   taishin: taishinEntry,
   dbs: dbsEntry,

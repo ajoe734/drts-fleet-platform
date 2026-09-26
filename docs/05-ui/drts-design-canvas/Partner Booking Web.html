@@ -92,7 +92,7 @@ function App() {
         <DCArtboard id="mp-pb-out" label="A2 · 上車不在服務範圍 · 送出 disabled" width={W} height={H}><Phone p={PROGRAMS.card}><PB_BookCardMap state="out_of_area" drop="selected" program="card" /></Phone></DCArtboard>
         <DCArtboard id="mp-pb-down" label="A2 · 地圖中斷 → 送交人工複核" width={W} height={H}><Phone p={PROGRAMS.card}><PB_BookCardMap state="provider_down" drop="provider_down" program="card" reason="地圖服務異常" /></Phone></DCArtboard>
         <DCArtboard id="mp-pb-mixed" label="A2 · 中斷 + 超區混合 · 超區優先 · 不可送人工複核" width={W} height={H}><Phone p={PROGRAMS.card}><PB_BookCardMap state="provider_down" drop="out_of_area" program="card" /></Phone></DCArtboard>
-        <DCArtboard id="mp-pb-manual" label="A2 · 手動座標（含理由）→ 人工複核分支" width={W} height={H}><Phone p={PROGRAMS.card}><PB_BookCardMap state="manual_coords" drop="selected" program="card" /></Phone></DCArtboard>
+        <DCArtboard id="mp-pb-manual" label="A2 · 手動座標（含理由）→ 人工複核分支" width={W} height={H}><Phone p={PROGRAMS.card}><PB_BookCardMap state="manual_coords" drop="selected" program="card" reason="確認入口" /></Phone></DCArtboard>
         <DCArtboard id="mp-pb-insurance" label="A2 · 保險理賠代步" width={W} height={H}><Phone p={PROGRAMS.insurance}><PB_BookCardMap state="selected" drop="selected" program="insurance" /></Phone></DCArtboard>
         <DCArtboard id="mp-pb-travel" label="A2 · 旅行社接送" width={W} height={H}><Phone p={PROGRAMS.travel}><PB_BookCardMap state="selected" drop="selected" program="travel" /></Phone></DCArtboard>
       </DCSection>
