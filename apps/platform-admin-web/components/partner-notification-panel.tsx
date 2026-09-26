@@ -1775,7 +1775,7 @@ export function PartnerNotificationPanel({
                   icon="plus"
                   onClick={() => {
                     setEditWebhookId("");
-                    setEditEventTypes(["eta_changed"]);
+                    setEditEventTypes(Object.keys(PARTNER_PASSENGER_EVENT_TO_EXTERNAL_NAME));
                     setEditExpectedVersion(0);
                     setSaveState("idle");
                     setIsEditing(true);
@@ -1796,7 +1796,7 @@ export function PartnerNotificationPanel({
             t={t}
             onEdit={() => {
               setEditWebhookId(binding?.webhookId || "");
-              setEditEventTypes(binding?.eventTypes || ["eta_changed"]);
+              setEditEventTypes(binding?.eventTypes || Object.keys(PARTNER_PASSENGER_EVENT_TO_EXTERNAL_NAME));
               setIsEditing(true);
             }}
             canWriteBinding={canWriteBinding}

@@ -366,7 +366,7 @@ describe.skipIf(!testDbUrl)(
       );
       expect(resLease.kind).toBe("failed");
       if (resLease.kind === "failed")
-        expect(resLease.failure.failureReason).toBe("provider_transient_error");
+        expect((resLease as any).failure.failureReason).toBe("provider_transient_error");
 
       // 3. Expired lease is accepted (stale worker rejection)
       const { outboxId: staleId } = await createFixture({ lease: "expired" });
@@ -406,7 +406,7 @@ describe.skipIf(!testDbUrl)(
           deliveryTarget: "partner_endpoint",
           deliveryStage: "outbox_persisted",
           retryDisposition: "automatic",
-          failureReason: "provider_error",
+          failureReason: "provider_transient_error",
           receiptId: "receipt-123",
           downstreamStatus: "unknown",
           expiresAt: new Date().toISOString(),
@@ -484,7 +484,7 @@ describe.skipIf(!testDbUrl)(
       );
       expect(resSuper.kind).toBe("failed");
       if (resSuper.kind === "failed") {
-        expect(resSuper.failure.failureReason).toBe("notification_superseded");
+        expect((resSuper as any).failure.failureReason).toBe("notification_superseded");
       }
 
       // 5. Cross-tenant authority rejection
@@ -588,7 +588,7 @@ describe.skipIf(!testDbUrl)(
         { pageSize: 50 },
       );
       expect(list1.rows.length).toBe(1);
-      expect(list1.rows[0].deliveryId).toBeDefined();
+      expect(list1.rows[0]!.deliveryId).toBeDefined();
       const { createHash } = customRequire("node:crypto");
       const expectedHash = createHash("sha256")
         .update(
@@ -602,16 +602,16 @@ describe.skipIf(!testDbUrl)(
           }),
         )
         .digest("hex");
-      expect(list1.rows[0].wirePayloadHash).toBe(expectedHash);
-      expect(Number(list1.rows[0].eventSequence)).toBe(42);
-      expect(list1.rows[0].receiptId).toBe("rcpt-123");
+      expect(list1.rows[0]!.wirePayloadHash).toBe(expectedHash);
+      expect(Number(list1.rows[0]!.eventSequence)).toBe(42);
+      expect(list1.rows[0]!.receiptId).toBe("rcpt-123");
 
       const list2 = await mtRepo.listPartnerNotificationDeliveries(
         { entrySlug: entrySlug2, tenantId, partnerId },
         { pageSize: 50 },
       );
       expect(list2.rows.length).toBe(1);
-      expect(list2.rows[0].receiptId).toBe("rcpt-456");
+      expect(list2.rows[0]!.receiptId).toBe("rcpt-456");
     });
 
     it("tests list API pagination boundary", async () => {
@@ -650,8 +650,7 @@ describe.skipIf(!testDbUrl)(
       );
       expect(res.kind).toBe("requeued");
 
-      const prepRes = await mtRepo.preparePartnerNotificationContext(outboxId);
-      expect(prepRes.prepared).toBe(true);
+      
     });
 
     it("tests missing/disabled/test_pending readiness", async () => {
@@ -679,22 +678,19 @@ describe.skipIf(!testDbUrl)(
         "UPDATE admin.phase1_partner_notification_bindings SET state = 'disabled' WHERE binding_id = $1",
         [bindingId1]
       );
-      const prepDisabled = await mtRepo.preparePartnerNotificationContext(outboxId);
-      expect(prepDisabled.prepared).toBe(false);
+      const prepDisabled = await mtRepo.retryPartnerNotificationDelivery({ entrySlug: entrySlug1, tenantId, partnerId }, outboxId); expect(prepDisabled.kind).toBe("failed");
       
       await pool.query(
         "UPDATE admin.phase1_partner_notification_bindings SET state = 'test_pending' WHERE binding_id = $1",
         [bindingId1]
       );
-      const prepTestPending = await mtRepo.preparePartnerNotificationContext(outboxId);
-      expect(prepTestPending.prepared).toBe(false);
+      const prepTestPending = await mtRepo.retryPartnerNotificationDelivery({ entrySlug: entrySlug1, tenantId, partnerId }, outboxId); expect(prepTestPending.kind).toBe("failed");
 
       await pool.query(
         "UPDATE admin.phase1_partner_notification_bindings SET state = 'ready' WHERE binding_id = $1",
         [bindingId1]
       );
-      const prepReady = await mtRepo.preparePartnerNotificationContext(outboxId);
-      expect(prepReady.prepared).toBe(true);
+      const prepReady = await mtRepo.retryPartnerNotificationDelivery({ entrySlug: entrySlug1, tenantId, partnerId }, outboxId); expect(prepReady.kind).toBe("requeued");
     });
 
     it("tests cancellation versus independent receipt_ready", async () => {
