@@ -110,6 +110,13 @@ export const PARTNER_NOTIFICATION_ACKNOWLEDGEMENT_POLICY =
  * ordinary tenant webhook subscription does not implicitly gain
  * `passenger.*` events; only a `ready` binding does.
  */
+
+export interface UpdatePartnerEntryNotificationBindingCommand {
+  webhookId: string;
+  eventTypes: PartnerPassengerEventType[];
+  expectedVersion: number;
+}
+
 export interface PartnerEntryNotificationBinding {
   bindingId: string;
   entrySlug: string;
@@ -123,6 +130,8 @@ export interface PartnerEntryNotificationBinding {
   schemaVersion: PartnerNotificationSchemaVersion;
   acknowledgementPolicy: typeof PARTNER_NOTIFICATION_ACKNOWLEDGEMENT_POLICY;
   validatedEndpointFingerprint: string | null;
+  endpointFingerprint?: string | null;
+  endpointUrl?: string | null;
   validatedAt: string | null;
   updatedAt: string;
 }
@@ -362,6 +371,10 @@ export interface PartnerNotificationTypedFailure {
   detail?: string;
 }
 
+export type PartnerNotificationRequeueOutcome =
+  | { kind: "requeued" }
+  | { kind: "failed"; failure: PartnerNotificationTypedFailure };
+
 export type PartnerNotificationDispatchOutcome =
   | { kind: "accepted"; ack: PartnerNotificationAcceptedAck }
   | { kind: "failed"; failure: PartnerNotificationTypedFailure };
@@ -407,3 +420,23 @@ export interface PartnerNotificationDeliveryContext {
 
 export const PARTNER_NOTIFICATION_ATTEMPT_TIMEOUT_MS = 10_000;
 export const PARTNER_NOTIFICATION_MAX_ACK_BODY_BYTES = 4096;
+
+// ===========================================================================
+// §15 UI API Read Models
+// ===========================================================================
+
+export interface PartnerNotificationDeliveryRecord extends Partial<PartnerNotificationDeliveryContext> {
+  outboxId: string;
+  eventType: string;
+  status: "pending" | "sending" | "delivered" | "failed";
+  result: "delivered" | "provider_not_configured" | "provider_error" | null;
+  attempts: number;
+  maxAttempts: number;
+  nextAttemptAt: string | null;
+  createdAt?: string;
+}
+
+export interface PartnerNotificationDeliveryQuery {
+  page?: number;
+  pageSize?: number;
+}

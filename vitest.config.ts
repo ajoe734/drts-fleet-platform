@@ -16,6 +16,10 @@ export default defineConfig({
         __dirname,
         "packages/ui-tokens/src/index.ts",
       ),
+      "@drts/api-client": path.resolve(
+        __dirname,
+        "packages/api-client/src/index.ts",
+      ),
       "@": path.resolve(__dirname, "apps/tenant-console-web"),
     },
   },
