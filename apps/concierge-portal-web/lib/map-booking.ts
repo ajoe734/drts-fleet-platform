@@ -54,6 +54,16 @@ export function formatConciergeApiError(
     ) {
       return t("booking.error.outsideServiceArea");
     }
+    if (error.code === "VALIDATION_FAILED") {
+      try {
+        const payload = JSON.parse(error.rawBody);
+        if (payload?.error?.message) {
+          return payload.error.message;
+        }
+      } catch {
+        // ignore JSON parse error
+      }
+    }
     return t(fallbackKey);
   }
 

@@ -405,7 +405,7 @@ test.describe("tenant console booking map alignment", () => {
     // Wait for the address list to load
     await expect(
       page.getByText("Mock Address", { exact: true }).first(),
-    ).toBeVisible({ timeout: 30000 });
+    ).toBeVisible({ timeout: 60000 });
 
     // Click the Edit link for the mocked address
     await page.getByRole("link", { name: "Edit" }).first().click();

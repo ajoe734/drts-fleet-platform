@@ -153,7 +153,7 @@ function EditAddressForm({ address }: { address: TenantAddressRecord }) {
             type="text"
             id="tags"
             name="tags"
-            defaultValue={address.tags.join(", ")}
+            defaultValue={(address.tags || []).join(", ")}
             placeholder="e.g. office, warehouse"
           />
         </div>
