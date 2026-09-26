@@ -2044,6 +2044,8 @@ export class MultiTaxiRepository {
           route,
           internalEvent,
         );
+        console.log("DEBUG readiness:", JSON.stringify(readiness, null, 2));
+        console.log("DEBUG ctx:", JSON.stringify(ctx, null, 2));
         if (!readiness.ready) {
           await client.query("ROLLBACK");
           return { kind: "failed", failure: readiness.failure };

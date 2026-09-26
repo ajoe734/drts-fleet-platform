@@ -102,15 +102,14 @@ export class PartnerNotificationDispatchFacade {
     )
       return failed("recipient_revoked");
     const binding = await this.bindings?.findByEntrySlug(route.entrySlug);
-    if (!binding) return failed("configuration_blocked");
+    if (!binding) { console.log("blocked 1"); return failed("configuration_blocked"); }
     if (
       binding.tenantId !== route.tenantId ||
       binding.partnerId !== route.partnerId
     )
       return failed("owner_changed");
     if (binding.state === "disabled") return failed("endpoint_disabled");
-    if (binding.state !== "ready" || !binding.eventTypes.includes(eventType))
-      return failed("configuration_blocked");
+    if (binding.state !== "ready" || !binding.eventTypes.includes(eventType)) { console.log("blocked 2"); return failed("configuration_blocked"); }
     const endpoint =
       await this.tenantPartnerService.findNotificationWebhookEndpoint(
         route.tenantId,
@@ -123,8 +122,7 @@ export class PartnerNotificationDispatchFacade {
       !endpoint.events.includes(
         PARTNER_PASSENGER_EVENT_TO_EXTERNAL_NAME[eventType],
       )
-    )
-      return failed("configuration_blocked");
+    ) { console.log("blocked 3, endpoint:", endpoint); return failed("configuration_blocked"); }
     if (
       endpoint.credentialStatus &&
       !["active", "overlap_active"].includes(endpoint.credentialStatus)
@@ -135,13 +133,13 @@ export class PartnerNotificationDispatchFacade {
       Date.parse(endpoint.secretExpiresAt) <= Date.now()
     )
       return failed("credential_rejected");
+
     const endpointFingerprint = computeEndpointFingerprint(endpoint);
     if (
       !binding.validatedAt ||
       binding.validatedEndpointFingerprint !== endpointFingerprint ||
       !endpoint.retryPolicy
-    )
-      return failed("configuration_blocked");
+    ) { console.log("blocked 4, vAt:", binding.validatedAt, "vFP:", binding.validatedEndpointFingerprint, "fp:", endpointFingerprint); return failed("configuration_blocked"); }
     return {
       ready: true,
       binding,

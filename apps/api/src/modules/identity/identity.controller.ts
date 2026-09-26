@@ -17,7 +17,7 @@ import type {
   IamSessionInventoryQuery,
   IamSessionRevokeCommand,
   IdentityContext,
-
+  IdentitySessionContext,
   StepUpProof,
   CreatePrivilegedRoleRequestCommand,
   ApprovePrivilegedRoleRequestCommand,
@@ -129,9 +129,10 @@ export class IdentityController {
           )
         : [];
 
-    const context: IdentityContext = {
+    const context: IdentitySessionContext = {
       principalId,
       sessionId,
+      sessionActive,
       activeBreakGlassGrants,
     };
 

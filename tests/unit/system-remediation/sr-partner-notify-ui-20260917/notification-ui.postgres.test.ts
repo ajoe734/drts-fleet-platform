@@ -63,6 +63,12 @@ describe.skipIf(!testDbUrl)(
             displayName: "Partner 1",
             businessDispatchSubtype: "standard",
             activeFlag: true,
+            createdAt: new Date().toISOString(),
+            updatedAt: new Date().toISOString(),
+            auditMetadata: {
+              source: "test",
+              updatedBy: "system:test",
+            },
             status: "active",
           }),
         ],
@@ -83,13 +89,19 @@ describe.skipIf(!testDbUrl)(
             displayName: "Partner 2",
             businessDispatchSubtype: "standard",
             activeFlag: true,
+            createdAt: new Date().toISOString(),
+            updatedAt: new Date().toISOString(),
+            auditMetadata: {
+              source: "test",
+              updatedBy: "system:test",
+            },
             status: "active",
           }),
         ],
       );
 
       await pool.query(
-        'INSERT INTO admin.phase1_tenant_webhook_endpoints (webhook_id, tenant_id, status, created_at, updated_at, record) VALUES ($1, $2, \'active\', now(), now(), \'{"url": "https://test.com", "events": ["passenger.eta_changed.v1"], "secret_version": 1, "secret_preview": "prev", "fingerprint": "f", "validatedAt": "2026-09-24T00:00:00Z", "retryPolicy": {"maxAttempts": 3}}\'::jsonb)',
+        'INSERT INTO admin.phase1_tenant_webhook_endpoints (webhook_id, tenant_id, status, created_at, updated_at, record) VALUES ($1, $2, \'active\', now(), now(), \'{"url": "https://test.com", "events": ["passenger.eta_changed.v1"], "status": "active", "secret_version": 1, "secret_preview": "prev", "fingerprint": "be5d7634209f7903e6a3c6e19091a251c0124be5227d4879fcdaff432f862a2b", "validatedAt": "2026-09-24T00:00:00Z", "retryPolicy": {"maxAttempts": 3}, "runtimeMetadata": {"secretRotation": {"rotatedAt": null, "rotationCount": 0, "history": []}, "deliveryCount": 0, "failedDeliveryCount": 0}}\'::jsonb)',
         [webhookId, tenantId],
       );
 
@@ -98,7 +110,7 @@ describe.skipIf(!testDbUrl)(
         [bindingId1, entrySlug1, tenantId, partnerId, webhookId],
       );
       await pool.query(
-        "INSERT INTO admin.phase1_partner_notification_bindings (binding_id, entry_slug, tenant_id, partner_id, webhook_id, version, state, event_types, validated_endpoint_fingerprint, validated_at) VALUES ($1, $2, $3, $4, $5, 1, 'ready', '[\"eta_changed\"]', 'be5d7634209f7903e6a3c6e19091a251c0124be5227d4879fcdaff432f862a2b', '2026-09-24T00:00:00Z')",
+        "INSERT INTO admin.phase1_partner_notification_bindings (binding_id, entry_slug, tenant_id, partner_id, webhook_id, version, state, event_types, validated_endpoint_fingerprint, validated_at) VALUES ($1, $2, $3, $4, $5, 1, 'ready', '[\"eta_changed\"]', '3c513e9a4f475a89fb3f939e6a0c0ec40552b0f4fa6e3d2c18d3df62ef3222e9', '2026-09-24T00:00:00Z')",
         [bindingId2, entrySlug2, tenantId, partnerId, webhookId],
       );
 
@@ -204,7 +216,7 @@ describe.skipIf(!testDbUrl)(
       );
 
       await pool.query(
-        'INSERT INTO mobility.phase1_partner_notification_delivery_contexts (outbox_id, delivery_id, order_id, entry_slug, tenant_id, partner_id, binding_id, binding_version, webhook_id, endpoint_fingerprint, wire_payload, wire_payload_hash, event_sequence, expires_at, retry_policy_snapshot, delivery_target, retry_disposition, failure_reason, receipt_id, created_at) VALUES ($1, gen_random_uuid(), $2, $3, $4, $5, $6, 1, $7, \'f\', \'{"event": "passenger.eta_changed.v1", "data": {"recipient": {"partnerUserRef": "user"}}}\'::jsonb, \'testhash\', 42, ' +
+        'INSERT INTO mobility.phase1_partner_notification_delivery_contexts (outbox_id, delivery_id, order_id, entry_slug, tenant_id, partner_id, binding_id, binding_version, webhook_id, endpoint_fingerprint, wire_payload, wire_payload_hash, event_sequence, expires_at, retry_policy_snapshot, delivery_target, retry_disposition, failure_reason, receipt_id, created_at) VALUES ($1, gen_random_uuid(), $2, $3, $4, $5, $6, 1, $7, \'be5d7634209f7903e6a3c6e19091a251c0124be5227d4879fcdaff432f862a2b\', \'{"event": "passenger.eta_changed.v1", "data": {"recipient": {"partnerUserRef": "user"}}}\'::jsonb, \'testhash\', 42, ' +
           (opts.expiresAt || "now() + interval '1 day'") +
           ", '{\"maxAttempts\": 3}'::jsonb, 'partner_endpoint', $8, $9, $10, now())",
         [
@@ -245,6 +257,9 @@ describe.skipIf(!testDbUrl)(
         entryObj,
         legalId,
       );
+      if (res1.kind !== "requeued") {
+        console.log("res1 failed:", res1);
+      }
       expect(res1.kind).toBe("requeued");
 
       const legalOutbox = await pool.query(
