@@ -310,7 +310,12 @@ test.describe("tenant console booking map alignment", () => {
       name: /Manual location|Enter coordinates manually|改用手動座標|手動輸入座標/i,
     });
     
-    await expect(manualButtons.first().or(latInput1)).toBeVisible({ timeout: 30000 });
+    await expect(async () => {
+      expect(
+        (await manualButtons.first().isVisible()) ||
+          (await latInput1.isVisible())
+      ).toBeTruthy();
+    }).toPass({ timeout: 30000 });
     
     if (await manualButtons.first().isVisible()) {
       await manualButtons.first().click();
@@ -329,7 +334,12 @@ test.describe("tenant console booking map alignment", () => {
       .getByLabel(/Reason for manual location|手動定位原因/i)
       .last();
       
-    await expect(manualButtons.last().or(latInput2)).toBeVisible({ timeout: 30000 });
+    await expect(async () => {
+      expect(
+        (await manualButtons.last().isVisible()) ||
+          (await latInput2.isVisible())
+      ).toBeTruthy();
+    }).toPass({ timeout: 30000 });
     
     if (await manualButtons.last().isVisible()) {
       await manualButtons.last().click();
