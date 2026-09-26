@@ -309,6 +309,9 @@ test.describe("tenant console booking map alignment", () => {
     const manualButtons = page.getByRole("button", {
       name: /Manual location|Enter coordinates manually|改用手動座標|手動輸入座標/i,
     });
+    
+    await expect(manualButtons.first().or(latInput1)).toBeVisible({ timeout: 30000 });
+    
     if (await manualButtons.first().isVisible()) {
       await manualButtons.first().click();
     }
@@ -325,6 +328,9 @@ test.describe("tenant console booking map alignment", () => {
     const reasonInput2 = page
       .getByLabel(/Reason for manual location|手動定位原因/i)
       .last();
+      
+    await expect(manualButtons.last().or(latInput2)).toBeVisible({ timeout: 30000 });
+    
     if (await manualButtons.last().isVisible()) {
       await manualButtons.last().click();
     }
@@ -397,11 +403,9 @@ test.describe("tenant console booking map alignment", () => {
 
     await expect(
       page.getByText("No map coordinates yet").first(),
-    ).toBeVisible();
+    ).toBeVisible({ timeout: 30000 });
 
-    if (await manualButtons.first().isVisible()) {
-      await manualButtons.first().click();
-    }
+    await manualButtons.first().click();
 
     const latInput = page.getByLabel(/Latitude|緯度/i).first();
     const lngInput = page.getByLabel(/Longitude|經度/i).first();
