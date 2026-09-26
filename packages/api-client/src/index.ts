@@ -614,10 +614,10 @@ function parseApiErrorEnvelope(body: string): ApiErrorEnvelope["error"] | null {
 }
 
 export class ApiClient {
-  private baseUrl: string;
-  private defaultHeaders: Record<string, string>;
-  private timeout: number;
-  private pathTransform: ((path: string) => string) | undefined;
+  readonly baseUrl: string;
+  readonly defaultHeaders: Record<string, string>;
+  readonly timeout: number;
+  readonly pathTransform: ((path: string) => string) | undefined;
 
   constructor(config: ApiClientConfig) {
     this.baseUrl = config.baseUrl.replace(/\/$/, "");

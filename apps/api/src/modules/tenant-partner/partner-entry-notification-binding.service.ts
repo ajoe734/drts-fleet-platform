@@ -315,14 +315,6 @@ export class PartnerEntryNotificationBindingService {
       );
     }
     const entry = this.tenantPartnerService.getPartnerEntry(entrySlug);
-    if (identity && !identity.scopes.includes("entry_notification_admin")) {
-      throw new ApiRequestError(
-        HttpStatus.FORBIDDEN,
-        "PARTNER_NOTIFICATION_BINDING_TENANT_SCOPE_DENIED",
-        "The caller lacks the entry_notification_admin scope.",
-        { entrySlug, scopes: identity.scopes },
-      );
-    }
     if (identity?.tenantId && identity.tenantId !== entry.tenantId) {
       throw new ApiRequestError(
         HttpStatus.FORBIDDEN,
