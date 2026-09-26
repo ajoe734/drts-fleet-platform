@@ -517,3 +517,14 @@ Final PR identity remained exactly REVIEWED_SHA and OPEN; worktree remained clea
 | Finding / Acceptance Gate | Fix Implemented                                                                   | Exact Command / Probe | Outcome | Limits / Pending   |
 | ------------------------- | --------------------------------------------------------------------------------- | --------------------- | ------- | ------------------ |
 | CI Typecheck Failure      | Mapped `@drts/api-client` in `tsconfig.json` and fixed relative imports in tests. | `pnpm run typecheck`  | PASS    | CI automated check |
+
+### Repair Entries (Gemini - Round 12)
+
+- **R2a & R2b (DB Fixtures)**: Fixed the DB fixture test constraints in `notification-ui.postgres.test.ts` by ensuring the correct sequence of values for `admin.phase1_tenant_webhook_endpoints` and matching the generated `validatedEndpointFingerprint` within `mobility.phase1_partner_notification_delivery_contexts`. Sequential test suite passes.
+- **R6 (Test DB Enforcement)**: Preserved the `PARTNER_NOTIFY_SEQ_TEST_DATABASE_URL` setup logic in `.github/workflows/ci.yml`. Verified that Postgres gate scripts are successfully parsing the generated test artifacts sequentially.
+
+### Verification Matrix (Gemini - Round 12)
+
+| Finding / Acceptance Gate | Fix Implemented                                                                   | Exact Command / Probe | Outcome | Limits / Pending   |
+| ------------------------- | --------------------------------------------------------------------------------- | --------------------- | ------- | ------------------ |
+| R2a / R2b (DB Fixtures)   | Populated exact constraint hashes across test DB tables to resolve gate blockage. | `docker exec drts-postgres psql -U postgres -d drts_fleet_platform -c "TRUNCATE ... CASCADE;" && env PARTNER_NOTIFY_SEQ_TEST_DATABASE_URL=... pnpm exec vitest run tests/unit/system-remediation/ --no-file-parallelism --reporter json --outputFile .artifacts/test-results/partner-notify.json` followed by `python3 tools/ci/verify_partner_notification_postgres_gate.py .artifacts/test-results/partner-notify.json`  | PASS    | CI automated check |
