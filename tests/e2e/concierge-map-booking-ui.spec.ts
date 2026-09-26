@@ -40,7 +40,7 @@ async function fulfillJson(route: Route, status: number, data: unknown) {
 
 async function installConciergeApiMocks(
   page: Page,
-  captured: { body: unknown[]; rejectFirstOrder?: boolean },
+  captured: { body: unknown[]; rejectFirstOrder?: boolean; refusalCode?: string },
 ) {
   await page.route("**/api/**", async (route) => {
     const request = route.request();
@@ -74,12 +74,22 @@ async function installConciergeApiMocks(
       
       if (captured.rejectFirstOrder) {
         captured.rejectFirstOrder = false;
-        await fulfillJson(route, 400, {
-          error: {
-            code: "VALIDATION_FAILED",
-            message: "Missing required compliance fields for special location",
-          }
-        });
+        
+        if (captured.refusalCode === 'map_validation_failed') {
+          await fulfillJson(route, 400, {
+            error: {
+              code: "VALIDATION_FAILED",
+              message: "Pickup location is outside authorized zone",
+            }
+          });
+        } else {
+          await fulfillJson(route, 400, {
+            error: {
+              code: "VALIDATION_FAILED",
+              message: "Missing required compliance fields for special location",
+            }
+          });
+        }
         return;
       }
 
@@ -361,12 +371,12 @@ test.describe("concierge map booking UI", () => {
     ).toBeVisible();
   });
 
-  test("handles backend refusal with visible error and allows retry", async ({ page }, testInfo) => {
+  test("handles map validation refusal from backend and allows correction before successful submission", async ({ page }, testInfo) => {
     test.skip(
       testInfo.project.name === "outage",
       "This test requires healthy provider",
     );
-    const captured = { body: [] as unknown[], rejectFirstOrder: true };
+    const captured = { body: [] as unknown[], rejectFirstOrder: true, refusalCode: 'map_validation_failed' };
     await installConciergeApiMocks(page, captured);
 
     await page.goto("/bookings/new");
@@ -383,12 +393,15 @@ test.describe("concierge map booking UI", () => {
     });
     await expect(submitBtn).toBeEnabled();
     
-    // First submit, should fail
+    // First submit, should fail due to backend map refusal
     await submitBtn.click();
     
-    // Check error message
-    await expect(page.getByText(/Failed to create the concierge-assisted booking|建立禮賓代訂失敗/i)).toBeVisible();
+    // Check map-specific error message
+    await expect(page.getByText(/Location rejected by server|Pickup location is outside authorized zone/i)).toBeVisible();
     
+    // Correction: change the location
+    await selectConciergeMapCandidate(page, 0, "songshan airport", "Songshan Airport");
+
     // Retry, should succeed
     await submitBtn.click();
     await expect(page.getByText(/Booking ID|Order ID|訂單 ID/i)).toBeVisible();

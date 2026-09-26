@@ -52,6 +52,7 @@ main {
 }
 
 .route-link {
+  display: inline-block;
   border-radius: 16px;
   padding: 18px;
   text-decoration: none;

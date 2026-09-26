@@ -581,7 +581,20 @@ jobs:
           cat << 'EOF' > tests/e2e/ci-tenant-mock-server.js
           const http = require('http');
           
-          let addressUpdated = false;
+          let addressStore = {
+            activeFlag: true,
+            addressId: 'a1',
+            addressName: 'Mock Address',
+            tenantId: 'tenant-mock',
+            ownerPassengerId: 'p1',
+            addressText: 'Mock Address Text',
+            lat: 25.0330,
+            lng: 121.5654,
+            geocodeSource: 'provider',
+            tags: ['home'],
+            createdAt: new Date().toISOString(),
+            updatedAt: new Date().toISOString()
+          };
           
           const server = http.createServer((req, res) => {
             const url = new URL(req.url, 'http://127.0.0.1:3001');
@@ -599,39 +612,24 @@ jobs:
               return;
             }
             if (req.method === 'GET' && url.pathname === '/api/tenant/addresses') {
-              res.end(JSON.stringify({ data: [{
-                activeFlag: true,
-                addressId: 'a1',
-                addressName: addressUpdated ? 'Mock Address updated' : 'Mock Address',
-                tenantId: 'tenant-mock',
-                ownerPassengerId: 'p1',
-                addressText: 'Mock Address Text',
-                lat: addressUpdated ? 24.7951 : 25.0330,
-                lng: addressUpdated ? 121.0028 : 121.5654,
-                tags: ['home'],
-                createdAt: new Date().toISOString(),
-                updatedAt: new Date().toISOString()
-              }] }));
+              res.end(JSON.stringify({ data: [addressStore] }));
               return;
             }
             if (req.method === 'POST' && url.pathname === '/api/tenant/addresses') {
               let body = '';
               req.on('data', chunk => { body += chunk.toString(); });
               req.on('end', () => {
-                addressUpdated = true;
-                res.end(JSON.stringify({ data: {
-                  activeFlag: true,
-                  addressId: 'a1',
-                  addressName: 'Mock Address updated',
-                  tenantId: 'tenant-mock',
-                  ownerPassengerId: 'p1',
-                  addressText: 'Mock Address Text',
-                  lat: 24.7951,
-                  lng: 121.0028,
-                  tags: ['home'],
-                  createdAt: new Date().toISOString(),
+                const payload = JSON.parse(body);
+                addressStore = {
+                  ...addressStore,
+                  addressName: payload.addressName || addressStore.addressName,
+                  addressText: payload.addressText || addressStore.addressText,
+                  lat: payload.lat !== undefined ? payload.lat : addressStore.lat,
+                  lng: payload.lng !== undefined ? payload.lng : addressStore.lng,
+                  geocodeSource: payload.geocodeSource || addressStore.geocodeSource,
                   updatedAt: new Date().toISOString()
-                } }));
+                };
+                res.end(JSON.stringify({ data: addressStore }));
               });
               return;
             }

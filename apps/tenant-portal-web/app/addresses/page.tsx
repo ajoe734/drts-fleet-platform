@@ -199,6 +199,7 @@ function AddressList({ addresses }: { addresses: TenantAddressRecord[] }) {
               <th>Tags</th>
               <th>Lat</th>
               <th>Lng</th>
+              <th>Source</th>
               <th>Status</th>
               <th>Actions</th>
             </tr>
@@ -211,6 +212,7 @@ function AddressList({ addresses }: { addresses: TenantAddressRecord[] }) {
                 <td>{a.tags && a.tags.length > 0 ? a.tags.join(", ") : "-"}</td>
                 <td>{a.lat != null ? a.lat.toFixed(6) : "-"}</td>
                 <td>{a.lng != null ? a.lng.toFixed(6) : "-"}</td>
+                <td data-testid={`source-${a.addressId}`}>{a.geocodeSource || "-"}</td>
                 <td>{a.activeFlag ? "Active" : "Inactive"}</td>
                 <td>
                   <Link href={`/addresses?edit=${a.addressId}`}>Edit</Link>

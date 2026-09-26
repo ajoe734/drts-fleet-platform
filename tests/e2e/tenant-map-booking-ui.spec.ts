@@ -447,12 +447,15 @@ test.describe("tenant console booking map alignment", () => {
     );
     await expect(coordinateSourceHidden).toHaveValue("manual_pin");
 
-    await page.getByRole("button", { name: "Save Changes" }).focus();
-    await page.keyboard.press("Enter");
+    await page.getByLabel(/Name|名稱/).fill("Mock Address updated");
+    await page.getByRole("button", { name: "Save Changes" }).click();
 
     // Wait for navigation back to addresses list or a success state
     await expect(page.getByText("Mock Address updated").first()).toBeVisible({
       timeout: 10000,
     });
+    
+    // Assert the table shows the updated source
+    await expect(page.locator('[data-testid="source-a1"]')).toHaveText("manual_pin");
   });
 });

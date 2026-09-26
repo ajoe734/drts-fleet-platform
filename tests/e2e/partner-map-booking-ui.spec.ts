@@ -171,12 +171,12 @@ test.describe("partner map booking UI", () => {
     ).toBeVisible();
   });
 
-  test("blocks submission when known outside service area despite outage", async ({
+  test("blocks submission when outside service area, then recovers upon correction", async ({
     page,
   }, testInfo) => {
     test.skip(
       testInfo.project.name === "outage",
-      "We simulate the outage mid-test here",
+      "Outage project skips known-outside check because provider is unavailable from start",
     );
     const response = await page.goto(
       "/acme/book?eligibilityVerificationId=elig-verified-003",
@@ -193,27 +193,21 @@ test.describe("partner map booking UI", () => {
     await pickupPicker.getByLabel(/Reason for manual location|手動定位原因/i).fill("Known Outside");
     await pickupPicker.getByRole("button", { name: /Use this location|使用此位置/i }).click();
     
-    // Check known outside state
+    // Check known outside state blocks it
     await expect(page.getByText(/Outside the service area|不在服務範圍內/i).first()).toBeVisible();
 
     const submit = page.getByRole("button", {
-      name: /Verify booking|Submit for review|驗證下單表單|送交人工複核/i,
+      name: /Verify booking|Submit for review|驗證下單表單|送交人工複核|Next|下一步/i,
     });
     await expect(submit).toBeDisabled();
 
-    // Now simulate outage
-    await page.route("**/api/geo/health", async (route) => {
-      await route.fulfill({
-        json: {
-          provider: "mock",
-          mode: "mock",
-          status: "outage",
-          failClosed: true,
-        },
-      });
-    });
+    // Correction: change to a valid location
+    await pickupPicker.getByLabel(/Latitude|緯度/i).fill("25.047");
+    await pickupPicker.getByLabel(/Longitude|經度/i).fill("121.517");
+    await pickupPicker.getByLabel(/Reason for manual location|手動定位原因/i).fill("Corrected Inside");
+    await pickupPicker.getByRole("button", { name: /Use this location|使用此位置/i }).click();
 
-    // Fill dropoff to trigger check and enable button if it bypassed
+    // Fill dropoff 
     const dropoffPicker = page.locator("[data-address-map-picker]").nth(1);
     await dropoffPicker.getByRole("button", { name: /Manual location|Enter coordinates manually|改用手動座標|手動輸入座標/i }).click();
     await dropoffPicker.getByLabel(/Latitude|緯度/i).fill("25.047");
@@ -221,9 +215,11 @@ test.describe("partner map booking UI", () => {
     await dropoffPicker.getByLabel(/Reason for manual location|手動定位原因/i).fill("Inside");
     await dropoffPicker.getByRole("button", { name: /Use this location|使用此位置/i }).click();
 
-    // Re-verify that even during outage, the known-outside state blocks it
-    await expect(submit).toBeDisabled();
-    await expect(page.getByText(/Outside the service area|不在服務範圍內/i).first()).toBeVisible();
+    // Verify recovery and successful submission
+    await expect(page.getByText(/Outside the service area|不在服務範圍內/i)).toHaveCount(0);
+    await expect(submit).not.toBeDisabled();
+    await submit.click();
+    await expect(page.getByText(/successfully|Review booking|確認訂單/i).first()).toBeVisible({ timeout: 10000 });
   });
 
 

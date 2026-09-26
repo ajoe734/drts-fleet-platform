@@ -18,10 +18,7 @@ export function middleware(request: NextRequest) {
     "max-age=31536000; includeSubDomains",
   );
 
-  // 2. CSRF Token Check for State-Mutating Requests (POST, PUT, DELETE, PATCH)
-  // Next.js Server Actions handle their own CSRF protection; bypass custom check for them.
-  const isServerAction = request.headers.has("next-action");
-  if (!isServerAction && ["POST", "PUT", "DELETE", "PATCH"].includes(request.method)) {
+  if (["POST", "PUT", "DELETE", "PATCH"].includes(request.method)) {
     const csrfCookie = request.cookies.get(CSRF_COOKIE_NAME)?.value;
     const csrfHeader = request.headers.get("x-csrf-token");
 

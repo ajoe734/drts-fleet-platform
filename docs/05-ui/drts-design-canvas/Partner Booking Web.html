@@ -92,7 +92,11 @@ function App() {
         <DCArtboard id="mp-pb-out" label="A2 · 上車不在服務範圍 · 送出 disabled" width={W} height={H}><Phone p={PROGRAMS.card}><PB_BookCardMap state="out_of_area" drop="selected" /></Phone></DCArtboard>
         <DCArtboard id="mp-pb-down" label="A2 · 地圖中斷 → 送交人工複核" width={W} height={H}><Phone p={PROGRAMS.card}><PB_BookCardMap state="provider_down" drop="provider_down" /></Phone></DCArtboard>
         <DCArtboard id="mp-pb-mixed" label="A2 · 中斷 + 超區混合 · 超區優先 · 不可送人工複核" width={W} height={H}><Phone p={PROGRAMS.card}><PB_BookCardMap state="provider_down" drop="out_of_area" /></Phone></DCArtboard>
-        <DCArtboard id="mp-pb-manual" label="A2 · 手動座標（含理由）→ 人工複核分支" width={W} height={H}><Phone p={PROGRAMS.card}><PB_BookCardMap state="manual_coords" drop="selected" /></Phone></DCArtboard>
+        <DCArtboard id="mp-pb-manual" label="A2 · 手動座標（含理由）· 視同定點可送出" width={W} height={H}><Phone p={PROGRAMS.card}><PB_BookCardMap state="manual_coords" reason="Field verified" drop="selected" /></Phone></DCArtboard>
+        <DCArtboard id="mp-pb-manual-no-reason" label="A2 · 手動座標（無理由）→ 送交人工複核" width={W} height={H}><Phone p={PROGRAMS.card}><PB_BookCardMap state="manual_coords" reason="" drop="selected" /></Phone></DCArtboard>
+        <DCArtboard id="mp-pb-missing" label="A2 · 缺少座標 · 不可送出" width={W} height={H}><Phone p={PROGRAMS.card}><PB_BookCardMap state="missing_coordinate" drop="selected" /></Phone></DCArtboard>
+        <DCArtboard id="mp-pb-insurance" label="A2 · 保險方案 (無航班欄位)" width={W} height={H}><Phone p={PROGRAMS.insurance}><PB_BookCardMap program="insurance" state="selected" drop="selected" /></Phone></DCArtboard>
+        <DCArtboard id="mp-pb-travel" label="A2 · 旅遊方案 (無航班欄位)" width={W} height={H}><Phone p={PROGRAMS.travel}><PB_BookCardMap program="travel" state="selected" drop="selected" /></Phone></DCArtboard>
       </DCSection>
 
       <DCSection id="embed" title="04 · 網銀 App 內嵌身分狀態 · Online-banking Embed Identity (B1–B5)" subtitle="身分來自銀行 session (reference token) · 永不擷取卡片資料 · 中信 App webview">
