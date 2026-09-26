@@ -5713,7 +5713,6 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
       consentGrantedAt: resolved.consentGrantedAt,
       issuedAt: issuedAt.toISOString(),
       expiresAt: expiresAt.toISOString(),
-      // @ts-expect-error - generic navigation context
       ...(command.navigationContext
         ? { navigationContext: (command as any).navigationContext }
         : {}),
