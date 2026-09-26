@@ -135,6 +135,17 @@ async function pinBothStops(page: Page) {
 }
 
 test.describe("tenant console booking map alignment", () => {
+  test.beforeEach(async ({ context }) => {
+    await context.addCookies([
+      {
+        name: "drts_tenant_session",
+        value: "mock-session-token",
+        domain: "127.0.0.1",
+        path: "/",
+      },
+    ]);
+  });
+
   test("serviceable stops pin and clear the service-area state", async ({
     page,
   }) => {
