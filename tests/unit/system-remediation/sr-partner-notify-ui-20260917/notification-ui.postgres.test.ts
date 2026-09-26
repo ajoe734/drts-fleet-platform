@@ -93,11 +93,11 @@ describe.skipIf(!testDbUrl)(
       );
 
       await pool.query(
-        "INSERT INTO admin.phase1_partner_notification_bindings (binding_id, entry_slug, tenant_id, partner_id, webhook_id, version, state, event_types, validated_endpoint_fingerprint, record) VALUES ($1, $2, $3, $4, $5, 1, 'ready', '[\"eta_changed\"]', 'f', '{\"validatedAt\": \"2026-09-24T00:00:00Z\"}'::jsonb)",
+        "INSERT INTO admin.phase1_partner_notification_bindings (binding_id, entry_slug, tenant_id, partner_id, webhook_id, version, state, event_types, validated_endpoint_fingerprint, validated_at) VALUES ($1, $2, $3, $4, $5, 1, 'ready', '[\"eta_changed\"]', 'f', '2026-09-24T00:00:00Z')",
         [bindingId1, entrySlug1, tenantId, partnerId, webhookId],
       );
       await pool.query(
-        "INSERT INTO admin.phase1_partner_notification_bindings (binding_id, entry_slug, tenant_id, partner_id, webhook_id, version, state, event_types, validated_endpoint_fingerprint, record) VALUES ($1, $2, $3, $4, $5, 1, 'ready', '[\"eta_changed\"]', 'f', '{\"validatedAt\": \"2026-09-24T00:00:00Z\"}'::jsonb)",
+        "INSERT INTO admin.phase1_partner_notification_bindings (binding_id, entry_slug, tenant_id, partner_id, webhook_id, version, state, event_types, validated_endpoint_fingerprint, validated_at) VALUES ($1, $2, $3, $4, $5, 1, 'ready', '[\"eta_changed\"]', 'f', '2026-09-24T00:00:00Z')",
         [bindingId2, entrySlug2, tenantId, partnerId, webhookId],
       );
 
