@@ -1473,7 +1473,7 @@ Pending Limits:
 - Full UI visual, browser, device, and partner-live acceptance is still deferred to Hosted CI / manual live QA as specified in original constraints.
 ## 2026-09-26 Gemini Owner Resolution for Codex2 Review (Round 18, Supervisor Recovery)
 
-- **CANDIDATE_SHA**: (to be finalized)
+- **CANDIDATE_SHA**: 3b250bdc8341363d7b5fe01e46ccf27b6fb0e826
 - **candidate_generation**: `38b9357492e8456d901adbd0989decb2`
 - **PR Reference**: PR #2162
 
