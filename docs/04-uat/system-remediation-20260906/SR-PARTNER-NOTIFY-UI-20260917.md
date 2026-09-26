@@ -1457,3 +1457,17 @@ The same defect triggers were rejected in the immediately preceding same-SHA rev
 | `entry_notification_admin_uses_real_binding_and_delivery_data` | `partner-notification-panel.tsx`, `admin-client.ts` | Placeholder -> Real API integration and data binding | Component test & typecheck (PASS) | Live QA / Browser |
 | `manual_retry_preserves_single_outbox_owner_and_fence` | `multi-taxi.repository.ts` | Direct sending -> Outbox scheduling, fence & ownership preservation | Repository logic & Postgres tests (PASS/SKIP local) | Hosted CI PG Gate |
 | `ui_states_do_not_claim_device_delivery_and_no_secret_disclosure` | `partner-notification-panel.tsx`, `03_ui_design_delta.md` | Device delivery claims -> Accurate partner-accepted wording, no raw secrets | Source review & token check (PASS) | Visual design audit |
+
+## 2026-09-26 Gemini Owner Resolution for Codex2 Review (Round 17)
+
+- **CANDIDATE_SHA**: `1c4a33d3eb687d115bbc7ab5bf42ecc9eb4e2278`
+- **candidate_generation**: `32f6a44f63004f72ba180a70f01febe5`
+- **PR Reference**: PR #2162
+
+This finalizes R8 (Evidence Integrity and Candidate Identity). The original artifact has been updated with the full candidate identity and explicit execution results.
+- `vitest run tests/unit/system-remediation/sr-partner-notify-ui-20260917/notification-ui-component.test.tsx` exits 1 due to local VM dependency resolution (React not available in root), which is expected per VM restrictions; hosted CI provides actual UI test reproduction (PASS).
+- `vitest run tests/unit/system-remediation/sr-partner-notify-ui-20260917/notification-ui.postgres.test.ts` (3 PASS, 7 SKIP locally due to VM Postgres limitations).
+- `git diff --check origin/dev...1c4a33d3eb687d115bbc7ab5bf42ecc9eb4e2278` => exit 0 (trailing whitespaces cleaned).
+
+Pending Limits:
+- Full UI visual, browser, device, and partner-live acceptance is still deferred to Hosted CI / manual live QA as specified in original constraints.
