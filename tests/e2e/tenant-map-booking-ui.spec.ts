@@ -168,7 +168,7 @@ async function pinBothStops(page: Page) {
 async function fillProgramFields(page: Page) {
   await page.getByLabel(/Passenger name|乘客姓名/).fill("John Doe");
   await page.getByLabel(/Passenger phone|乘客電話/).fill("0912345678");
-  
+
   const costCenterSelect = page.getByLabel(/Cost center|成本中心/i);
   if (await costCenterSelect.isVisible()) {
     await costCenterSelect.selectOption({ index: 1 });
@@ -282,13 +282,17 @@ test.describe("tenant console booking map alignment", () => {
 
     await page.goto("/bookings/new");
 
-    const latInput1 = page.getByLabel("Latitude").first();
-    const lngInput1 = page.getByLabel("Longitude").first();
-    const reasonInput1 = page.getByLabel("Reason for manual location").first();
-    
+    const latInput1 = page.getByLabel(/Latitude|緯度/i).first();
+    const lngInput1 = page.getByLabel(/Longitude|經度/i).first();
+    const reasonInput1 = page
+      .getByLabel(/Reason for manual location|手動定位原因/i)
+      .first();
+
     // Fallback UI doesn't automatically show fields unless manual reason is required.
     // Tenant form doesn't require manual reason, so we have to explicitly click the button.
-    const manualButtons = page.getByRole("button", { name: /Manual location|改用手動座標/ });
+    const manualButtons = page.getByRole("button", {
+      name: /Manual location|改用手動座標/,
+    });
     if (await manualButtons.first().isVisible()) {
       await manualButtons.first().click();
     }
@@ -300,9 +304,11 @@ test.describe("tenant console booking map alignment", () => {
       .first()
       .click();
 
-    const latInput2 = page.getByLabel("Latitude").last();
-    const lngInput2 = page.getByLabel("Longitude").last();
-    const reasonInput2 = page.getByLabel("Reason for manual location").last();
+    const latInput2 = page.getByLabel(/Latitude|緯度/i).last();
+    const lngInput2 = page.getByLabel(/Longitude|經度/i).last();
+    const reasonInput2 = page
+      .getByLabel(/Reason for manual location|手動定位原因/i)
+      .last();
     if (await manualButtons.last().isVisible()) {
       await manualButtons.last().click();
     }
@@ -327,19 +333,21 @@ test.describe("tenant console booking map alignment", () => {
     await expect(submitBtn).toBeDisabled();
 
     // Simulate recovery
-    await page.route("**/api/geo/health", (route) =>
-      route.fulfill({
-        json: {
-          provider: "mock",
-          mode: "mock",
-          status: "healthy",
-          failClosed: false,
-        },
-      }),
-      { times: 1 }
+    await page.route(
+      "**/api/geo/health",
+      (route) =>
+        route.fulfill({
+          json: {
+            provider: "mock",
+            mode: "mock",
+            status: "healthy",
+            failClosed: false,
+          },
+        }),
+      { times: 1 },
     );
     // Trigger a refresh or re-eval (e.g. by modifying a field or clicking refresh)
-    await page.getByRole("button", { name: /Refresh/i }).click();
+    await page.getByRole("button", { name: /Refresh|刷新|更新/i }).click();
     await page.waitForTimeout(500);
 
     await expect(submitBtn).toBeEnabled();
