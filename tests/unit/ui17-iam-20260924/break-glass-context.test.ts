@@ -65,20 +65,17 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import React from "react";
 import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 
-const mockIamClient = {
-  createStepUpProof: vi.fn(),
-  closeBreakGlass: vi.fn(),
-  listBreakGlassRequests: vi.fn(),
-  activateBreakGlass: vi.fn(),
-  getIdentitySessionContext: vi.fn(),
+const mockTransportClient = {
+  get: vi.fn(),
+  post: vi.fn(),
+  put: vi.fn(),
+  delete: vi.fn(),
 };
 
-vi.mock("@/lib/platform-admin-iam-client", () => ({
-  createPlatformAdminIamClient: () => mockIamClient,
-}));
+
 
 vi.mock("@/lib/admin-client", () => ({
-  usePlatformAdminClient: () => ({}),
+  usePlatformAdminClient: () => mockTransportClient,
 }));
 
 vi.mock("@/lib/i18n", () => ({
@@ -97,11 +94,9 @@ vi.mock("@/lib/i18n", () => ({
 }));
 
 const load = createCustomUiModuleLoader(appRoot, {
-  "@/lib/platform-admin-iam-client": {
-    createPlatformAdminIamClient: () => mockIamClient,
-  },
+  
   "@/lib/admin-client": {
-    usePlatformAdminClient: () => ({}),
+    usePlatformAdminClient: () => mockTransportClient,
     formatDateTime: (d: any) => String(d),
   },
   "@/lib/i18n": {
@@ -131,10 +126,29 @@ describe("BreakGlass R6b Regression Tests - True Provider Mutation", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     sessionStorage.clear();
-    mockIamClient.getIdentitySessionContext.mockResolvedValue({
-      sessionActive: true,
-      activeBreakGlassGrants: [{ grantId: "bg_123" }, { grantId: "bg_req_1" }],
+    mockTransportClient.get.mockImplementation(async (url) => {
+      if (url.includes("/identity/session-context")) {
+        return {
+          sessionActive: true,
+          activeBreakGlassGrants: [{ grantId: "bg_123" }, { grantId: "bg_req_1" }],
+        };
+      }
+      if (url.includes("/platform-admin/break-glass/requests")) {
+        return {
+          items: [
+            {
+              grantId: "bg_req_1",
+              status: "approved",
+              requesterId: "u_1",
+              version: 1,
+              requestedScopes: ["identity:read"],
+            },
+          ],
+        };
+      }
+      return {};
     });
+    mockTransportClient.post.mockImplementation(async () => ({}));
   });
 
   afterEach(() => {
@@ -142,7 +156,6 @@ describe("BreakGlass R6b Regression Tests - True Provider Mutation", () => {
   });
 
   it("should execute exitSession mutation on BreakGlassBanner exit click and clean up storage", async () => {
-    // Set up active break glass state
     const future = new Date(Date.now() + 300000).toISOString();
     sessionStorage.setItem(
       "drts_platform_break_glass_session",
@@ -159,11 +172,15 @@ describe("BreakGlass R6b Regression Tests - True Provider Mutation", () => {
       }),
     );
 
-    mockIamClient.createStepUpProof.mockResolvedValue({
-      required: true,
-      stepUpReference: "proof_close_456",
+    mockTransportClient.post.mockImplementation(async (url, body) => {
+      if (url.includes("/identity/step-up-proofs")) {
+        return { required: true, stepUpReference: "proof_close_456" };
+      }
+      if (url.includes("/platform-admin/break-glass/requests/bg_123/close")) {
+        return {};
+      }
+      return {};
     });
-    mockIamClient.closeBreakGlass.mockResolvedValue({});
 
     render(
       React.createElement(
@@ -177,21 +194,16 @@ describe("BreakGlass R6b Regression Tests - True Provider Mutation", () => {
     fireEvent.click(exitBtn);
 
     await waitFor(() => {
-      // 1. Proof is requested
-      expect(mockIamClient.createStepUpProof).toHaveBeenCalledWith({
-        actionId: "platform:break-glass:close",
-      });
-      // 2. Mutation is executed
-      expect(mockIamClient.closeBreakGlass).toHaveBeenCalledWith("bg_123", {
-        mutation: {
-          reasonCode: "operator_exit_cta",
-          expectedVersion: 2,
-          stepUpReference: "proof_close_456",
-        },
-      });
+      expect(mockTransportClient.post).toHaveBeenCalledWith(
+        "/identity/step-up-proofs",
+        { body: { actionId: "platform:break-glass:close" } }
+      );
+      expect(mockTransportClient.post).toHaveBeenCalledWith(
+        "/platform-admin/break-glass/requests/bg_123/close",
+        { body: { mutation: { reasonCode: "operator_exit_cta", expectedVersion: 2, stepUpReference: "proof_close_456" } } }
+      );
     });
 
-    // 3. Storage is cleaned up on success
     expect(
       sessionStorage.getItem("drts_platform_break_glass_session"),
     ).toBeNull();
@@ -216,12 +228,14 @@ describe("BreakGlass R6b Regression Tests - True Provider Mutation", () => {
       JSON.stringify(storedState),
     );
 
-    mockIamClient.createStepUpProof.mockResolvedValue({
-      required: true,
-      stepUpReference: "proof_close_expired",
-    });
-    mockIamClient.closeBreakGlass.mockRejectedValue({
-      code: "IAM_STEP_UP_REQUIRED",
+    mockTransportClient.post.mockImplementation(async (url) => {
+      if (url.includes("/identity/step-up-proofs")) {
+        return { required: true, stepUpReference: "proof_close_expired" };
+      }
+      if (url.includes("/platform-admin/break-glass/requests/bg_123/close")) {
+        return Promise.reject({ code: "IAM_STEP_UP_REQUIRED" });
+      }
+      return {};
     });
 
     render(
@@ -235,29 +249,16 @@ describe("BreakGlass R6b Regression Tests - True Provider Mutation", () => {
     const exitBtn = await screen.findByText(/Exit Emergency Access/i);
     fireEvent.click(exitBtn);
 
-    // Wait for the failure message
     await waitFor(() => {
       expect(screen.getByText(/無法退出: 憑證已過期或被拒絕/)).toBeDefined();
     });
 
-    // State is preserved
     expect(sessionStorage.getItem("drts_platform_break_glass_session")).toEqual(
       JSON.stringify(storedState),
     );
   });
 
   it("should activate session properly and call activateBreakGlass mutation", async () => {
-    mockIamClient.listBreakGlassRequests.mockResolvedValue({
-      items: [
-        {
-          grantId: "bg_req_1",
-          status: "approved",
-          requesterId: "u_1",
-          version: 1,
-        },
-      ],
-    });
-
     render(
       React.createElement(
         BreakGlassProvider,
@@ -268,53 +269,48 @@ describe("BreakGlass R6b Regression Tests - True Provider Mutation", () => {
     );
 
     await waitFor(() => {
-      expect(mockIamClient.listBreakGlassRequests).toHaveBeenCalled();
+      expect(mockTransportClient.get).toHaveBeenCalledWith(
+        expect.stringContaining("/platform-admin/break-glass/requests")
+      );
     });
 
     const manageBtn = await screen.findByText(/Manage Grant/i);
     fireEvent.click(manageBtn);
 
     const getProofBtn = await screen.findByText(/Get step-up proof/i);
-    mockIamClient.createStepUpProof.mockResolvedValue({
-      required: true,
-      stepUpReference: "proof_activate_789",
+    mockTransportClient.post.mockImplementation(async (url, body) => {
+      if (url.includes("/identity/step-up-proofs")) {
+        return { required: true, stepUpReference: "proof_activate_789" };
+      }
+      if (url.includes("/platform-admin/break-glass/requests/bg_req_1/activate")) {
+        return {
+          grant: { grantId: "bg_req_1", requesterId: "u_1", requestedScopes: ["identity:read"] },
+          accessToken: "token999",
+          expiresAt: new Date(Date.now() + 300000).toISOString(),
+        };
+      }
+      return {};
     });
+    
     fireEvent.click(getProofBtn);
 
-    // Now step up proof is obtained, activate button should be visible (mocked flow)
     await waitFor(() => {
-      expect(mockIamClient.createStepUpProof).toHaveBeenCalledWith({
-        actionId: "platform:break-glass:activate",
-      });
-    });
-
-    const activateBtn = await screen.findByText(/Activate Emergency Session/i);
-
-    mockIamClient.activateBreakGlass.mockResolvedValue({
-      grant: { grantId: "bg_req_1", requesterId: "u_1" },
-      accessToken: "token999",
-      expiresAt: new Date(Date.now() + 300000).toISOString(),
-    });
-
-    fireEvent.click(activateBtn);
-
-    await waitFor(() => {
-      expect(mockIamClient.activateBreakGlass).toHaveBeenCalledWith(
-        "bg_req_1",
-        {
-          mutation: {
-            stepUpReference: "proof_activate_789",
-            expectedVersion: 1,
-            reasonCode: "BREAK_GLASS_ACTIVATED",
-          },
-          requestId: "bg_req_1",
-          requestedDurationMinutes: 30,
-          requestedScope: undefined,
-        },
+      expect(mockTransportClient.post).toHaveBeenCalledWith(
+        "/identity/step-up-proofs",
+        { body: { actionId: "platform:break-glass:activate" } }
       );
     });
 
-    // Verify session storage was updated and banner is active
+    const activateBtn = await screen.findByText(/Activate Emergency Session/i);
+    fireEvent.click(activateBtn);
+
+    await waitFor(() => {
+      expect(mockTransportClient.post).toHaveBeenCalledWith(
+        "/platform-admin/break-glass/requests/bg_req_1/activate",
+        { body: { mutation: { stepUpReference: "proof_activate_789", expectedVersion: 1, reasonCode: "BREAK_GLASS_ACTIVATED" }, requestId: "bg_req_1", requestedDurationMinutes: 30, requestedScope: ["identity:read"] } }
+      );
+    });
+
     await waitFor(() => {
       expect(
         sessionStorage.getItem("drts_platform_break_glass_session"),
@@ -335,9 +331,12 @@ describe("BreakGlass R6b Regression Tests - True Provider Mutation", () => {
       }),
     );
 
-    mockIamClient.getIdentitySessionContext.mockImplementation(() =>
-      Promise.reject({ statusCode: 401 })
-    );
+    mockTransportClient.get.mockImplementation(async (url) => {
+      if (url.includes("/identity/session-context")) {
+        return Promise.reject({ statusCode: 401 });
+      }
+      return {};
+    });
 
     render(
       React.createElement(
@@ -347,10 +346,9 @@ describe("BreakGlass R6b Regression Tests - True Provider Mutation", () => {
       ),
     );
 
-    // The provider automatically clears expired sessions on tick or 401.
     await waitFor(
       () => {
-        expect(mockIamClient.getIdentitySessionContext).toHaveBeenCalled();
+        expect(mockTransportClient.get).toHaveBeenCalledWith("/identity/session-context");
         expect(
           sessionStorage.getItem("drts_platform_break_glass_session"),
         ).toBeNull();
