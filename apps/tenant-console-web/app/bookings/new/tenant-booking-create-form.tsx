@@ -894,7 +894,8 @@ export function TenantBookingCreateForm({
   });
   const mapGate = {
     ...baseGate,
-    blocking: baseGate.blocking || baseGate.code === "dispatch_manual_review_required",
+    blocking:
+      baseGate.blocking || baseGate.code === "dispatch_manual_review_required",
   };
   const notServiceable = mapGate.code === "outside_service_area";
   const draft: TenantBookingDraftValues = {
@@ -1657,7 +1658,7 @@ export function TenantBookingCreateForm({
 
                 <div style={{ marginTop: 12 }}>
                   <AddressMapPairPicker
-                    key={pickerNonce}
+                    key={`${pageModel.refresh.generatedAt}-${pickerNonce}`}
                     provider={geoProvider}
                     surface={TENANT_CONSOLE_MAP_SURFACE}
                     theme={th}
