@@ -25,6 +25,7 @@ describe.skipIf(!testDbUrl)(
     const testRunId = randomUUID();
     const entrySlug1 = `test-entry-${testRunId}-1`;
     const entrySlug2 = `test-entry-${testRunId}-2`;
+    const entrySlug3 = `test-entry-${testRunId}-3`;
     const tenantId = `tenant-${testRunId}`;
     const partnerId = `partner-${testRunId}`;
     const webhookId = `w-${testRunId}`;
@@ -88,6 +89,32 @@ describe.skipIf(!testDbUrl)(
             partnerType: "enterprise",
             programId: "p2",
             displayName: "Partner 2",
+            businessDispatchSubtype: "standard",
+            activeFlag: true,
+            createdAt: new Date().toISOString(),
+            updatedAt: new Date().toISOString(),
+            auditMetadata: {
+              source: "test",
+              updatedBy: "system:test",
+            },
+            status: "active",
+          }),
+        ],
+      );
+      await pool.query(
+        "INSERT INTO admin.phase1_partner_channel_entries (entry_slug, tenant_id, partner_id, created_at, updated_at, program_id, status, record) VALUES ($1, $2, $3, now(), now(), 'p3', 'active', $4::jsonb)",
+        [
+          entrySlug3,
+          tenantId,
+          partnerId,
+          JSON.stringify({
+            entrySlug: entrySlug3,
+            tenantId,
+            partnerId,
+            partnerCode: "P3",
+            partnerType: "enterprise",
+            programId: "p3",
+            displayName: "Partner 3",
             businessDispatchSubtype: "standard",
             activeFlag: true,
             createdAt: new Date().toISOString(),
@@ -262,6 +289,7 @@ describe.skipIf(!testDbUrl)(
       retryDisp?: string;
       receiptId?: string;
       attemptCount?: number;
+      eventType?: string;
     }) {
       const orderId = randomUUID();
       const outboxId = randomUUID();
@@ -284,12 +312,12 @@ describe.skipIf(!testDbUrl)(
 
       const status = opts.status || "failed";
       await pool.query(
-        "INSERT INTO ops.consumer_notification_outbox (outbox_id, order_id, passenger_subject_ref, event_type, payload, status, attempt_count, next_attempt_at, created_at, assignment_version) VALUES ($1, $2, 'sub', 'eta_changed', '{}', $3, $4, now() - interval '1 hour', now(), 1)",
-        [outboxId, orderId, status, opts.attemptCount || 1],
+        "INSERT INTO ops.consumer_notification_outbox (outbox_id, order_id, passenger_subject_ref, event_type, payload, status, attempt_count, next_attempt_at, created_at, assignment_version) VALUES ($1, $2, 'sub', $5, '{}', $3, $4, now() - interval '1 hour', now(), 1)",
+        [outboxId, orderId, status, opts.attemptCount || 1, opts.eventType || "eta_changed"],
       );
 
       const wirePayload = {
-        event: "passenger.eta_changed.v1",
+        event: `passenger.${opts.eventType || 'eta_changed'}.v1`,
         data: {
           assignmentVersion: 1,
           assignment: { version: 1 },
@@ -629,15 +657,36 @@ describe.skipIf(!testDbUrl)(
       );
       expect(list2.rows.length).toBe(1);
       expect(list2.rows[0]!.receiptId).toBe("rcpt-456");
+
+      // Retry to test invariance
+      const retryResult = await mtRepo.retryPartnerNotificationDelivery(
+        { entrySlug: entrySlug1, tenantId, partnerId },
+        list1.rows[0]!.outboxId
+      );
+      expect(retryResult.kind).toBe("requeued");
+      
+      const listAfter = await mtRepo.listPartnerNotificationDeliveries(
+        { entrySlug: entrySlug1, tenantId, partnerId },
+        { pageSize: 50 },
+      );
+      expect(listAfter.rows[0]!.deliveryId).toBe(list1.rows[0]!.deliveryId);
+      expect(listAfter.rows[0]!.wirePayload).toEqual(list1.rows[0]!.wirePayload);
+      expect(listAfter.rows[0]!.wirePayloadHash).toBe(expectedHash);
+      expect(Number(listAfter.rows[0]!.eventSequence)).toBe(42);
+      expect(listAfter.rows[0]!.receiptId).toBe("rcpt-123");
     });
 
     it("tests list API pagination boundary", async () => {
-      // Test pagination boundary
+      // Test pagination boundary with actual data
+      await createFixture({ entrySlug: entrySlug1 });
+      await createFixture({ entrySlug: entrySlug1 });
+      await createFixture({ entrySlug: entrySlug1 });
+      
       const listP = await mtRepo.listPartnerNotificationDeliveries(
         { entrySlug: entrySlug1, tenantId, partnerId },
-        { page: 2, pageSize: 50 },
+        { page: 2, pageSize: 1 },
       );
-      expect(listP.rows.length).toBe(0);
+      expect(listP.rows.length).toBe(1);
     });
 
     it("tests missing-binding -> configure/test/enable -> retry of SAME contextless outbox -> original worker eligibility", async () => {
@@ -645,6 +694,8 @@ describe.skipIf(!testDbUrl)(
       const outboxId = randomUUID();
       createdOrderIds.push(orderId);
       createdOutboxIds.push(outboxId);
+      
+      const missingBindingSlug = entrySlug3;
 
       await pool.query(
         "INSERT INTO ops.phase1_owned_orders (order_id, order_no, status, order_source, service_bucket, dispatch_semantics, created_at, updated_at, record) VALUES ($1, $1, 'created', 'app', 'multi_taxi', 'immediate', now(), now(), $2::jsonb)",
@@ -653,16 +704,49 @@ describe.skipIf(!testDbUrl)(
 
       await pool.query(
         "INSERT INTO mobility.phase1_order_partner_notification_routes (order_id, ride_ref, entry_slug, tenant_id, partner_id, partner_user_ref, drts_passenger_id, passenger_subject_ref, identity_linked_at, consent_bundle_version, created_at) VALUES ($1, $1, $2, $3, $4, 'user', 'passenger', 'sub', now(), 1, now())",
-        [orderId, entrySlug1, tenantId, partnerId],
+        [orderId, missingBindingSlug, tenantId, partnerId],
       );
 
       await pool.query(
-        "INSERT INTO ops.consumer_notification_outbox (outbox_id, order_id, passenger_subject_ref, event_type, payload, status, attempt_count, next_attempt_at, created_at, assignment_version) VALUES ($1, $2, 'sub', 'eta_changed', '{}', 'failed', 1, now() - interval '1 hour', now(), 1)",
+        "INSERT INTO ops.consumer_notification_outbox (outbox_id, order_id, passenger_subject_ref, event_type, payload, status, attempt_count, next_attempt_at, created_at, assignment_version) VALUES ($1, $2, 'sub', 'eta_changed', '{\"eventSequence\": 42}', 'failed', 1, now() - interval '1 hour', now(), 1)",
         [outboxId, orderId],
       );
 
+      // Verify it is configuration_blocked initially
+      const prepBefore = await mtRepo.retryPartnerNotificationDelivery(
+        { entrySlug: missingBindingSlug, tenantId, partnerId },
+        outboxId,
+      );
+      expect(prepBefore.kind).toBe("failed");
+      expect((prepBefore as any).failureReason).toBe("configuration_blocked");
+
+      // using production function
+      const { PartnerEntryNotificationBindingService } = await import("../../../../apps/api/src/modules/tenant-partner/partner-entry-notification-binding.service");
+      const bindingService = app.get(PartnerEntryNotificationBindingService);
+      
+      const mockedApiClient = {
+        fetch: async () => ({
+          status: 200,
+          body: {
+            success: true,
+            data: { ack: true }
+          }
+        })
+      };
+      
+      // Override the binding service's api client for testing
+      (bindingService as any).apiClient = mockedApiClient;
+
+      await bindingService.putBinding(missingBindingSlug, {
+        webhookId: webhookId,
+        eventTypes: ["eta_changed"],
+        expectedVersion: 0
+      });
+      await bindingService.testBinding(missingBindingSlug, { expectedVersion: 1 });
+      await bindingService.enableBinding(missingBindingSlug, { expectedVersion: 1 });
+
       const res = await mtRepo.retryPartnerNotificationDelivery(
-        { entrySlug: entrySlug1, tenantId, partnerId },
+        { entrySlug: missingBindingSlug, tenantId, partnerId },
         outboxId,
       );
       expect(res.kind).toBe("requeued");
@@ -727,14 +811,46 @@ describe.skipIf(!testDbUrl)(
         [orderId],
       );
 
-      const res = await mtRepo.retryPartnerNotificationDelivery(
+      // First without receipt_ready
+      const resNoReceiptReady = await mtRepo.retryPartnerNotificationDelivery(
         { entrySlug: entrySlug1, tenantId, partnerId },
         outboxId,
       );
-      // Depending on implementation, retry might allow it if it only looks at route ownership.
-      // But let's assume we expect it to be allowed or failed based on independent receipt ready logic.
-      // A safe assertion is just to check it returns an object.
-      expect(res).toBeDefined();
+      expect(resNoReceiptReady.kind).toBe("failed");
+      
+      // Update binding to have receipt_ready
+      await pool.query(
+        "UPDATE admin.phase1_partner_notification_bindings SET event_types = '[\"eta_changed\", \"receipt_ready\"]' WHERE binding_id = $1",
+        [bindingId1]
+      );
+      
+      // Even with receipt_ready in binding, the immutable outbox event is 'eta_changed', which is obsolete
+      const resReceiptReady = await mtRepo.retryPartnerNotificationDelivery(
+        { entrySlug: entrySlug1, tenantId, partnerId },
+        outboxId,
+      );
+      expect(resReceiptReady.kind).toBe("failed");
+      expect((resReceiptReady as any).failureReason).toBe("notification_obsolete");
+
+      // Add an independent valid receipt_ready fixture
+      const { outboxId: outboxIdReceipt, orderId: orderIdReceipt } = await createFixture({ status: "failed", entrySlug: entrySlug1, eventType: "receipt_ready" });
+      await pool.query(
+        "UPDATE ops.phase1_owned_orders SET status = 'cancelled' WHERE order_id = $1",
+        [orderIdReceipt],
+      );
+
+      // This should be allowed to retry because the event itself is receipt_ready
+      const resActualReceiptReady = await mtRepo.retryPartnerNotificationDelivery(
+        { entrySlug: entrySlug1, tenantId, partnerId },
+        outboxIdReceipt,
+      );
+      expect(resActualReceiptReady.kind).toBe("requeued");
+      
+      // Revert binding
+      await pool.query(
+        "UPDATE admin.phase1_partner_notification_bindings SET event_types = '[\"eta_changed\"]' WHERE binding_id = $1",
+        [bindingId1]
+      );
     });
 
     it("tests historical context/route ownership changes", async () => {
@@ -750,12 +866,14 @@ describe.skipIf(!testDbUrl)(
         outboxId,
       );
       expect(res.kind).toBe("failed");
+      expect((res as any).failureReason).toBe("owner_changed");
 
       const res2 = await mtRepo.retryPartnerNotificationDelivery(
         { entrySlug: entrySlug2, tenantId, partnerId },
         outboxId,
       );
-      expect(res2.kind).toBe("requeued");
+      expect(res2.kind).toBe("failed");
+      expect((res2 as any).failureReason).toBe("route_missing");
     });
   },
 );

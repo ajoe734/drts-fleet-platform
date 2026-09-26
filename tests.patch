@@ -1,0 +1,266 @@
+diff --git a/tests/unit/system-remediation/sr-partner-notify-ui-20260917/notification-ui-component.test.tsx b/tests/unit/system-remediation/sr-partner-notify-ui-20260917/notification-ui-component.test.tsx
+index 5e9f8401c..499d745af 100644
+--- a/tests/unit/system-remediation/sr-partner-notify-ui-20260917/notification-ui-component.test.tsx
++++ b/tests/unit/system-remediation/sr-partner-notify-ui-20260917/notification-ui-component.test.tsx
+@@ -144,7 +144,10 @@ describe("PartnerNotificationPanel", () => {
+     await waitFor(() => {
+       expect(
+         mockClient.updatePartnerEntryNotificationBinding,
+-      ).toHaveBeenCalled();
++      ).toHaveBeenCalledWith("test-entry", expect.objectContaining({
++        webhookId: "test-webhook",
++        expectedVersion: 1
++      }));
+     });
+ 
+     const conflictBanner = await screen.findByText(/綁定已被他人更新/);
+@@ -196,7 +199,10 @@ describe("PartnerNotificationPanel", () => {
+     await waitFor(() => {
+       expect(
+         mockClient.updatePartnerEntryNotificationBinding,
+-      ).toHaveBeenCalled();
++      ).toHaveBeenCalledWith("test-entry", expect.objectContaining({
++        webhookId: "test-webhook",
++        expectedVersion: 1
++      }));
+     });
+   });
+ 
+@@ -234,6 +240,14 @@ describe("PartnerNotificationPanel", () => {
+     });
+     expect(reloadBtn).toBeDefined();
+ 
++    // We simulate the reload returning a newer version
++    mockClient.getPartnerEntryNotificationBinding.mockResolvedValueOnce({
++      state: "ready",
++      webhookId: "old-webhook",
++      eventTypes: ["eta_changed"],
++      version: 2,
++    });
++
+     // Click reload
+     fireEvent.click(reloadBtn);
+ 
+@@ -243,6 +257,22 @@ describe("PartnerNotificationPanel", () => {
+         mockClient.getPartnerEntryNotificationBinding,
+       ).toHaveBeenCalledTimes(2);
+     });
++    
++    // Draft should be preserved
++    const selectAfter = await screen.findByRole("combobox");
++    expect((selectAfter as HTMLSelectElement).value).toBe("test-webhook");
++    
++    // Resubmit
++    mockClient.updatePartnerEntryNotificationBinding.mockResolvedValueOnce({});
++    fireEvent.click(saveBtn);
++    await waitFor(() => {
++      expect(
++        mockClient.updatePartnerEntryNotificationBinding,
++      ).toHaveBeenCalledWith("test-entry", expect.objectContaining({
++        webhookId: "test-webhook",
++        expectedVersion: 2
++      }));
++    });
+   });
+ 
+   it("creation/resume/test/enable", async () => {
+@@ -293,6 +323,7 @@ describe("PartnerNotificationPanel", () => {
+       version: 1,
+       endpointFingerprint: "fp1",
+       validatedEndpointFingerprint: "fp1",
++      validatedAt: new Date().toISOString(),
+     });
+     rerender(
+       <PartnerNotificationPanel
+@@ -309,8 +340,9 @@ describe("PartnerNotificationPanel", () => {
+     await waitFor(() =>
+       expect(
+         mockClient.enablePartnerEntryNotificationBinding,
+-      ).toHaveBeenCalled(),
++      ).toHaveBeenCalledTimes(1),
+     );
++    mockClient.enablePartnerEntryNotificationBinding.mockClear();
+ 
+     // 3. Test - starts test_pending
+     mockClient.getPartnerEntryNotificationBinding.mockResolvedValueOnce({
+@@ -320,6 +352,7 @@ describe("PartnerNotificationPanel", () => {
+       version: 1,
+       endpointFingerprint: "fp1",
+       validatedEndpointFingerprint: "fp2",
++      validatedAt: new Date().toISOString(),
+     });
+     rerender(
+       <PartnerNotificationPanel
+@@ -343,6 +376,7 @@ describe("PartnerNotificationPanel", () => {
+       version: 1,
+       endpointFingerprint: "fp1",
+       validatedEndpointFingerprint: "fp1",
++      validatedAt: new Date().toISOString(),
+     });
+     rerender(
+       <PartnerNotificationPanel
+@@ -406,12 +440,11 @@ describe("PartnerNotificationPanel", () => {
+     // Management links should be available if canWriteWebhooks=true
+     const extLinks = await screen.findAllByRole("link");
+     expect(extLinks.length).toBeGreaterThan(0);
+-    expect(extLinks[0].getAttribute("href")).toContain(
+-      "/api/auth/tenant/login",
+-    );
++    const loginHref = extLinks[0].getAttribute("href");
++    expect(loginHref).toBe("/_apps/tenant-console/api/auth/tenant/login?tenant_id=test-tenant&redirect_uri=%2Fwebhooks");
+   });
+ 
+-  it("pending entry/client/permission/unmount boundaries", async () => {
++  it("pending mutation across entry/client/account/permission/unmount changes", async () => {
+     let resolvePromise: any;
+     mockClient.getPartnerEntryNotificationBinding.mockReturnValue(
+       new Promise((resolve) => {
+@@ -419,25 +452,31 @@ describe("PartnerNotificationPanel", () => {
+       }),
+     );
+ 
+-    const { unmount } = render(
++    const { unmount, rerender } = render(
+       <PartnerNotificationPanel
+         entrySlug="test-entry"
+         canWriteBinding={true}
+       />,
+     );
+ 
++    // change props while pending
++    rerender(
++      <PartnerNotificationPanel
++        entrySlug="test-entry-new"
++        canWriteBinding={false}
++      />,
++    );
++    
+     unmount();
+ 
+-    // Resolve after unmount
+     resolvePromise({
+       state: "ready",
+       webhookId: "wh_1",
+       eventTypes: [],
+       version: 1,
+     });
+-    await new Promise((r) => setTimeout(r, 10)); // Allow microtasks to process
++    await new Promise((r) => setTimeout(r, 10));
+ 
+-    // Should not throw any errors about updating unmounted components
+-    expect(true).toBe(true);
++    expect(mockClient.getPartnerEntryNotificationBinding).toHaveBeenCalledTimes(2);
+   });
+ });
+diff --git a/tests/unit/system-remediation/sr-partner-notify-ui-20260917/notification-ui.postgres.test.ts b/tests/unit/system-remediation/sr-partner-notify-ui-20260917/notification-ui.postgres.test.ts
+index 817ddca08..eb2831d56 100644
+--- a/tests/unit/system-remediation/sr-partner-notify-ui-20260917/notification-ui.postgres.test.ts
++++ b/tests/unit/system-remediation/sr-partner-notify-ui-20260917/notification-ui.postgres.test.ts
+@@ -629,6 +629,20 @@ describe.skipIf(!testDbUrl)(
+       );
+       expect(list2.rows.length).toBe(1);
+       expect(list2.rows[0]!.receiptId).toBe("rcpt-456");
++
++      // Retry to test invariance
++      await mtRepo.retryPartnerNotificationDelivery(
++        { entrySlug: entrySlug1, tenantId, partnerId },
++        list1.rows[0]!.outboxId
++      );
++      
++      const listAfter = await mtRepo.listPartnerNotificationDeliveries(
++        { entrySlug: entrySlug1, tenantId, partnerId },
++        { pageSize: 50 },
++      );
++      expect(listAfter.rows[0]!.wirePayloadHash).toBe(expectedHash);
++      expect(Number(listAfter.rows[0]!.eventSequence)).toBe(42);
++      expect(listAfter.rows[0]!.receiptId).toBe("rcpt-123");
+     });
+ 
+     it("tests list API pagination boundary", async () => {
+@@ -645,6 +659,12 @@ describe.skipIf(!testDbUrl)(
+       const outboxId = randomUUID();
+       createdOrderIds.push(orderId);
+       createdOutboxIds.push(outboxId);
++      
++      const missingBindingSlug = "missing-bind-" + randomUUID();
++      await pool.query(
++        "INSERT INTO admin.phase1_partner_channel_entries (entry_slug, tenant_id, partner_id, created_at, updated_at, program_id, status, record) VALUES ($1, $2, $3, now(), now(), 'p3', 'active', '{}'::jsonb)",
++        [missingBindingSlug, tenantId, partnerId],
++      );
+ 
+       await pool.query(
+         "INSERT INTO ops.phase1_owned_orders (order_id, order_no, status, order_source, service_bucket, dispatch_semantics, created_at, updated_at, record) VALUES ($1, $1, 'created', 'app', 'multi_taxi', 'immediate', now(), now(), $2::jsonb)",
+@@ -653,19 +673,33 @@ describe.skipIf(!testDbUrl)(
+ 
+       await pool.query(
+         "INSERT INTO mobility.phase1_order_partner_notification_routes (order_id, ride_ref, entry_slug, tenant_id, partner_id, partner_user_ref, drts_passenger_id, passenger_subject_ref, identity_linked_at, consent_bundle_version, created_at) VALUES ($1, $1, $2, $3, $4, 'user', 'passenger', 'sub', now(), 1, now())",
+-        [orderId, entrySlug1, tenantId, partnerId],
++        [orderId, missingBindingSlug, tenantId, partnerId],
+       );
+ 
+       await pool.query(
+-        "INSERT INTO ops.consumer_notification_outbox (outbox_id, order_id, passenger_subject_ref, event_type, payload, status, attempt_count, next_attempt_at, created_at, assignment_version) VALUES ($1, $2, 'sub', 'eta_changed', '{}', 'failed', 1, now() - interval '1 hour', now(), 1)",
++        "INSERT INTO ops.consumer_notification_outbox (outbox_id, order_id, passenger_subject_ref, event_type, payload, status, attempt_count, next_attempt_at, created_at, assignment_version) VALUES ($1, $2, 'sub', 'eta_changed', '{\"eventSequence\": 42}', 'failed', 1, now() - interval '1 hour', now(), 1)",
+         [outboxId, orderId],
+       );
+ 
++      // Simulate missing-binding -> test_pending -> ready
++      // using production function
++      const { TenantPartnerRepository } = await import("../../../../apps/api/src/modules/tenant-partner/tenant-partner.repository");
++      const partnerAdminRepo = app.get(TenantPartnerRepository);
++      await partnerAdminRepo.createPartnerEntryNotificationBinding(missingBindingSlug, {
++        webhookId: webhookId,
++        eventTypes: ["eta_changed"],
++        expectedVersion: 0
++      });
++      await partnerAdminRepo.testPartnerEntryNotificationBinding(missingBindingSlug, { expectedVersion: 1 });
++      await partnerAdminRepo.enablePartnerEntryNotificationBinding(missingBindingSlug, { expectedVersion: 2 });
++
+       const res = await mtRepo.retryPartnerNotificationDelivery(
+-        { entrySlug: entrySlug1, tenantId, partnerId },
++        { entrySlug: missingBindingSlug, tenantId, partnerId },
+         outboxId,
+       );
+       expect(res.kind).toBe("requeued");
++      
++      await pool.query("DELETE FROM admin.phase1_partner_channel_entries WHERE entry_slug = $1", [missingBindingSlug]);
+     });
+ 
+     it("tests missing/disabled/test_pending readiness", async () => {
+@@ -727,14 +761,31 @@ describe.skipIf(!testDbUrl)(
+         [orderId],
+       );
+ 
+-      const res = await mtRepo.retryPartnerNotificationDelivery(
++      // First without receipt_ready
++      const resNoReceiptReady = await mtRepo.retryPartnerNotificationDelivery(
++        { entrySlug: entrySlug1, tenantId, partnerId },
++        outboxId,
++      );
++      expect(resNoReceiptReady.kind).toBe("failed");
++      
++      // Update binding to have receipt_ready
++      await pool.query(
++        "UPDATE admin.phase1_partner_notification_bindings SET event_types = '[\"eta_changed\", \"receipt_ready\"]' WHERE binding_id = $1",
++        [bindingId1]
++      );
++      
++      // Now it should be allowed to retry
++      const resReceiptReady = await mtRepo.retryPartnerNotificationDelivery(
+         { entrySlug: entrySlug1, tenantId, partnerId },
+         outboxId,
+       );
+-      // Depending on implementation, retry might allow it if it only looks at route ownership.
+-      // But let's assume we expect it to be allowed or failed based on independent receipt ready logic.
+-      // A safe assertion is just to check it returns an object.
+-      expect(res).toBeDefined();
++      expect(resReceiptReady.kind).toBe("requeued");
++      
++      // Revert binding
++      await pool.query(
++        "UPDATE admin.phase1_partner_notification_bindings SET event_types = '[\"eta_changed\"]' WHERE binding_id = $1",
++        [bindingId1]
++      );
+     });
+ 
+     it("tests historical context/route ownership changes", async () => {

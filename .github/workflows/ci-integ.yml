@@ -203,7 +203,9 @@ jobs:
         # failure. Smoke acceptance runs the same suite without one.
         env:
           DRTS_REQUIRE_API_TEST_IMAGE: "1"
-        run: pnpm run test:unit
+        run: |
+          pnpm db:migrate
+          pnpm run test:unit
 
   integration:
     needs: [candidate, changes]
