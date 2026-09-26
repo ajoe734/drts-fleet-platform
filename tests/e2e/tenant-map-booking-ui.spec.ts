@@ -246,12 +246,12 @@ test.describe("tenant console booking map alignment", () => {
 
     // Fill required booking fields to enable submit
     await page.getByLabel(/Service subtype|服務子類型/).selectOption({ index: 1 });
-    await page.getByLabel(/Timing|預約 \/ 即時/).selectOption({ index: 1 });
+    await page.getByLabel(/Timing mode|時間模式/).selectOption({ index: 1 });
 
-    await page.getByLabel(/Depart At|出發時間/).fill("2026-10-01T12:00");
-    await page.getByLabel(/Headcount|人數/).fill("1");
+    await page.getByLabel(/Reservation start|預約開始/).fill("2026-10-01T12:00");
+    await page.getByLabel(/Reservation end|預約結束/).fill("2026-10-01T13:00");
 
-    await page.getByLabel(/Passenger|聯絡人/).selectOption({ index: 1 });
+    await page.getByLabel(/Passenger|乘客/).selectOption({ index: 1 });
     await page.getByLabel(/Cost center|成本中心/).selectOption({ index: 1 });
 
     const submit = page.getByRole("button", { name: /Create booking|For approval|Submitting|建立叫車|送出/ });
