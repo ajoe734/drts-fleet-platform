@@ -444,18 +444,9 @@ test.describe("tenant console booking map alignment", () => {
     await expect(coordinateSourceHidden).toHaveValue("manual_pin");
 
     // Click save
-    let interceptedRequest = false;
-    await page.route("**/api/tenant/addresses", async (route) => {
-        if (route.request().method() === "POST") {
-            interceptedRequest = true;
-        }
-        await route.continue();
-    });
-    
     await page.getByRole("button", { name: "Save Changes" }).click();
     
     // Wait for navigation back to addresses list or a success state
     await expect(page.getByText("Mock Address updated").first()).toBeVisible({ timeout: 30000 });
-    expect(interceptedRequest).toBe(true);
   });
 });

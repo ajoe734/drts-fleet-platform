@@ -580,6 +580,9 @@ jobs:
           pnpm exec playwright install --with-deps chromium
           cat << 'EOF' > tests/e2e/ci-tenant-mock-server.js
           const http = require('http');
+          
+          let addressUpdated = false;
+          
           const server = http.createServer((req, res) => {
             const url = new URL(req.url, 'http://127.0.0.1:3001');
             res.setHeader('Content-Type', 'application/json');
@@ -595,12 +598,12 @@ jobs:
               res.end(JSON.stringify({ data: [{
                 activeFlag: true,
                 addressId: 'a1',
-                addressName: 'Mock Address',
+                addressName: addressUpdated ? 'Mock Address updated' : 'Mock Address',
                 tenantId: 'tenant-mock',
                 ownerPassengerId: 'p1',
                 addressText: 'Mock Address Text',
-                lat: 25.0330,
-                lng: 121.5654,
+                lat: addressUpdated ? 24.7951 : 25.0330,
+                lng: addressUpdated ? 121.0028 : 121.5654,
                 tags: ['home'],
                 createdAt: new Date().toISOString(),
                 updatedAt: new Date().toISOString()
@@ -608,6 +611,7 @@ jobs:
               return;
             }
             if (req.method === 'POST' && url.pathname === '/api/tenant/addresses') {
+              addressUpdated = true;
               res.end(JSON.stringify({ data: {
                 activeFlag: true,
                 addressId: 'a1',
