@@ -170,7 +170,8 @@ test.describe("concierge map booking UI", () => {
 
   test("submits dispatchable coordinates to the concierge booking seam", async ({
     page,
-  }) => {
+  }, testInfo) => {
+    test.skip(testInfo.project.name === "outage", "This test requires healthy provider");
     const captured = { body: [] as unknown[] };
     await installConciergeApiMocks(page, captured);
 
@@ -212,11 +213,45 @@ test.describe("concierge map booking UI", () => {
     expect(command.mapFallbackReview ?? null).toBeNull();
   });
 
-  test("blocks submission if addresses are empty", async ({ page }) => {
+  test("blocks submission if addresses are empty", async ({ page }, testInfo) => {
+    test.skip(testInfo.project.name === "outage", "This test requires healthy provider");
     await installConciergeApiMocks(page, { body: [] });
     await page.goto("/bookings/new");
     await expect(
       page.getByRole("button", { name: /提交禮賓代訂/ }),
     ).toBeDisabled();
+  });
+
+  test("submits manual fallback review when provider is down", async ({ page }, testInfo) => {
+    test.skip(testInfo.project.name !== "outage", "This test requires the outage provider mode");
+    const captured = { body: [] as unknown[] };
+    await installConciergeApiMocks(page, captured);
+
+    await page.goto("/bookings/new");
+
+    const pickupPicker = page.locator("[data-address-map-picker]").nth(0);
+    await pickupPicker.getByRole("button", { name: /手動輸入座標/ }).click();
+    await pickupPicker.getByLabel("緯度").fill("25.04");
+    await pickupPicker.getByLabel("經度").fill("121.51");
+    await pickupPicker.getByLabel("手動定位原因").fill("Outage pickup");
+    await pickupPicker.getByRole("button", { name: /使用此位置/ }).click();
+
+    const dropoffPicker = page.locator("[data-address-map-picker]").nth(1);
+    await dropoffPicker.getByRole("button", { name: /手動輸入座標/ }).click();
+    await dropoffPicker.getByLabel("緯度").fill("25.047");
+    await dropoffPicker.getByLabel("經度").fill("121.517");
+    await dropoffPicker.getByLabel("手動定位原因").fill("Outage dropoff");
+    await dropoffPicker.getByRole("button", { name: /使用此位置/ }).click();
+
+    const submit = page.getByRole("button", { name: /送交人工複核/ });
+    await expect(submit).toBeEnabled();
+    await submit.click();
+
+    await expect(page.getByText("訂單 ID")).toBeVisible();
+    expect(captured.body).toHaveLength(1);
+
+    const command = captured.body[0] as any;
+    expect(command.mapFallbackReview).toBeTruthy();
+    expect(command.mapFallbackReview.reasonCode).toBe("map_provider_unavailable");
   });
 });

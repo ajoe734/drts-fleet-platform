@@ -18,10 +18,23 @@ export default defineConfig({
   retries: 0,
   workers: 1,
   reporter: [["list"], ["html", { open: "never" }]],
-  use: {
-    baseURL: partnerBookingBaseURL,
-    trace: "retain-on-failure",
-  },
+  projects: [
+    {
+      name: "healthy",
+      use: {
+        baseURL: partnerBookingBaseURL,
+        trace: "retain-on-failure",
+      },
+    },
+    {
+      name: "outage",
+      testMatch: /partner-map-booking-ui\.spec\.ts/,
+      use: {
+        baseURL: "http://127.0.0.1:3008",
+        trace: "retain-on-failure",
+      },
+    },
+  ],
   ...(shouldStartLocalPartnerBooking && !skipLocalPartnerBookingWebServer
     ? {
         webServer: [
@@ -36,6 +49,13 @@ export default defineConfig({
             command:
               "pnpm --filter @drts/contracts build && pnpm --filter @drts/ui-tokens build && cd apps/partner-booking-web && DRTS_API_URL=http://127.0.0.1:3901 pnpm exec next dev --webpack --hostname 127.0.0.1 --port 3007",
             url: localPartnerBookingBaseURL,
+            reuseExistingServer: !process.env.CI,
+            timeout: 120_000,
+          },
+          {
+            command:
+              "pnpm --filter @drts/contracts build && pnpm --filter @drts/ui-tokens build && cd apps/partner-booking-web && NEXT_PUBLIC_ADDRESS_PICKER_PROVIDER_MODE=unavailable DRTS_API_URL=http://127.0.0.1:3901 pnpm exec next dev --webpack --hostname 127.0.0.1 --port 3008",
+            url: "http://127.0.0.1:3008",
             reuseExistingServer: !process.env.CI,
             timeout: 120_000,
           },

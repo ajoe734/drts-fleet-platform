@@ -24,7 +24,8 @@ async function fillCardProgramFields(page: Page) {
 test.describe("partner map booking UI", () => {
   test("keeps dispatchable coordinates explicit before validation success", async ({
     page,
-  }) => {
+  }, testInfo) => {
+    test.skip(testInfo.project.name === "outage", "This test requires healthy provider");
     const response = await page.goto(
       "/acme/book?eligibilityVerificationId=elig-verified-001",
     );
@@ -55,7 +56,8 @@ test.describe("partner map booking UI", () => {
 
   test("keeps manual-review routes explicit instead of looking dispatch-ready", async ({
     page,
-  }) => {
+  }, testInfo) => {
+    test.skip(testInfo.project.name === "outage", "This test requires healthy provider");
     const response = await page.goto(
       "/acme/book?eligibilityVerificationId=elig-verified-002",
     );
@@ -97,7 +99,8 @@ test.describe("partner map booking UI", () => {
 
   test("blocks submission when outside service area AND provider is down (pickup)", async ({
     page,
-  }) => {
+  }, testInfo) => {
+    test.skip(testInfo.project.name !== "outage", "This test requires the outage provider mode");
     const response = await page.goto(
       "/acme/book?eligibilityVerificationId=elig-verified-003",
     );
@@ -117,24 +120,6 @@ test.describe("partner map booking UI", () => {
     });
     await expect(submit).toBeDisabled();
 
-    // Mock API health endpoint to return degraded status
-    await page.route("**/health", (route) =>
-      route.fulfill({
-        json: { status: "down" },
-      }),
-    );
-    // Trigger re-render by doing something that fetches health or we can just mock it for the next actions
-    await page.reload();
-    await fillCardProgramFields(page);
-
-    // Re-fill pickup since reload clears it
-    const pickupPicker2 = page.locator("[data-address-map-picker]").nth(0);
-    await pickupPicker2.getByRole("button", { name: /手動輸入座標/ }).click();
-    await pickupPicker2.getByLabel("緯度").fill("24.9");
-    await pickupPicker2.getByLabel("經度").fill("121.4");
-    await pickupPicker2.getByLabel("手動定位原因").fill("Outside test");
-    await pickupPicker2.getByRole("button", { name: /使用此位置/ }).click();
-
     const dropoffPicker = page.locator("[data-address-map-picker]").nth(1);
     await dropoffPicker.getByRole("button", { name: /手動輸入座標/ }).click();
     await dropoffPicker.getByLabel("緯度").fill("25.047");
@@ -147,12 +132,8 @@ test.describe("partner map booking UI", () => {
 
   test("blocks submission if manual reason is only whitespace", async ({
     page,
-  }) => {
-    await page.route("**/health", (route) =>
-      route.fulfill({
-        json: { status: "down" },
-      }),
-    );
+  }, testInfo) => {
+    test.skip(testInfo.project.name !== "outage", "This test requires the outage provider mode");
     await page.goto("/acme/book?eligibilityVerificationId=elig-verified-004");
     await fillCardProgramFields(page);
 

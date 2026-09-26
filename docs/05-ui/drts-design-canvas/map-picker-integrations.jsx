@@ -104,7 +104,7 @@ function TN_AddressesMap({ theme:th, state='manual_review', coordinateData, reas
 // ── 夥伴線：訂車表單（保留方案膠囊、資格橫幅、送出鈕位置） ──
 function PB_BookCardMap({ state='selected', drop='selected', reason, program='card' }) {
   const p = PROGRAMS[program];
-  const th = { text:'var(--slate-900, #0E1424)', textMuted:'var(--slate-600, #56657F)', textDim:'var(--slate-400, #9AA5B8)', border:'var(--slate-200, #E5E7EB)', surface:'#fff', surfaceLo:'var(--slate-50, #F4F6FB)', accent:p.primary, success:'var(--green-700, #15803D)', warn:'var(--amber-700, #B45309)', danger:'var(--red-700, #B91C1C)', dangerBg:'var(--red-50, #FEF2F2)' };
+  const th = { text:'#0E1424', textMuted:'#56657F', textDim:'#9AA5B8', border:'#E5E7EB', surface:'#fff', surfaceLo:'#F4F6FB', accent:p.primary, success:'#15803D', warn:'#B45309', danger:'#B91C1C', dangerBg:'#FEF2F2' };
   const hard = state==='out_of_area' || drop==='out_of_area';
   const unresolved = ['no_results','empty','searching','candidates','missing_coordinate'].some(s=>s===state||s===drop);
   const manualPath = ['provider_down','manual_review'].some(s=>s===state||s===drop);
