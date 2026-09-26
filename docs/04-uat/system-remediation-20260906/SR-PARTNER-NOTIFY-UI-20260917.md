@@ -732,8 +732,8 @@ _Resolution:_ Typed `mtRepo` as `MultiTaxiRepository`. Corrected the mocked inpu
 _Command/Result:_ TypeScript diagnostic probe over the file ensures no invalid enum errors.
 
 **R2b-COVERAGE [P1 REPEATED, required behavior cases still absent]**
-_Finding:_ Missing PG cases for missing-binding, test_pending readiness, cancellation, historical route ownership, and receipt preservation. Missing UI cases for editable webhook selection, newer-version reload, creation/enable, and permission boundaries.
-_Resolution:_ Added the missing comprehensive test cases to both `notification-ui.postgres.test.ts` and `notification-ui-component.test.tsx`, preserving original cleanups and adding snapshot deletion.
+_Finding:_ Missing PG cases for missing-binding, test*pending readiness, cancellation, historical route ownership, and receipt preservation. Missing UI cases for editable webhook selection, newer-version reload, creation/enable, and permission boundaries.
+\_Resolution:* Added the missing comprehensive test cases to both `notification-ui.postgres.test.ts` and `notification-ui-component.test.tsx`, preserving original cleanups and adding snapshot deletion.
 
 **R7 [P2 REPEATED, two unscoped files still differ]**
 _Finding:_ Unrelated formatting changes in `identity.controller.ts` and `tenant-partner.service.ts`.
@@ -1430,6 +1430,7 @@ The same defect triggers were rejected in the immediately preceding same-SHA rev
 - Fixed `tests historical context/route ownership changes` in `tests/unit/system-remediation/sr-partner-notify-ui-20260917/notification-ui.postgres.test.ts` to expect historical `outboxId` context to map correctly to `entrySlug1` after the route changed to `entrySlug2`.
 - Cleaned up trailing whitespace violations in all test and markdown files, allowing `git diff --check origin/dev...HEAD` to succeed.
 - Appended all 6 original historical receipts as requested.
+- Added `entry_notification_admin` scope enforcement in `MultiTaxiService` and `PartnerEntryNotificationBindingService` per Codex2 review (R2).
 
 **Local Evidence**:
 
