@@ -37,6 +37,8 @@ export const IAM_STEP_UP_ACTION_IDS = [
   "platform:access-reviews:decide",
   "platform:break-glass:request",
   "platform:break-glass:approve",
+  "platform:break-glass:activate",
+  "platform:break-glass:close",
   "platform:partner-entries:create",
   "platform:partner-entries:update",
   "platform:partner-entries:activate",
@@ -315,6 +317,27 @@ export interface ApproveBreakGlassRequestCommand {
 
 export interface CloseBreakGlassGrantCommand {
   mutation: IamMutationMetadata;
+}
+
+/**
+ * Server-authoritative view of the caller's own principal/session and any
+ * break-glass grants that belong to that principal. Distinct from
+ * `IdentityContext.actorId` (which may be a session `sub` that differs from
+ * `principalId` for a legitimate caller): callers must key grant matching off
+ * `principalId`, not `actorId`, to avoid dropping a legitimate
+ * `sub != principal` grant.
+ */
+export interface IdentitySessionContext {
+  principalId: string | null;
+  sessionId: string | null;
+  /**
+   * True only when the caller presented a session that is currently on
+   * record as `active` for `principalId` and has not been superseded
+   * (revoked, replaced, or token-version-rotated). Anonymous callers and
+   * replaced/revoked sessions are always `false`.
+   */
+  sessionActive: boolean;
+  activeBreakGlassGrants: BreakGlassGrantRecord[];
 }
 
 export interface IamCredentialMutationCommand {

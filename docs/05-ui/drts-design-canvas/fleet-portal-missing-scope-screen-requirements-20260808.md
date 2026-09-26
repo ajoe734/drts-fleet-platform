@@ -3,7 +3,7 @@
 **Date:** 2026-08-08
 **Task:** `S1F-FLT-001`
 **Surface:** `apps/fleet-partner-portal-web/app/error.tsx`
-**Status:** app-specific screen-requirements artifact only; missing-scope / error state not yet in canvas
+**Status:** Integrated into canvas via `UI17-FLEET-ERROR-20260924` (`fleet-errors.jsx`)
 **Author lane:** Gemini2
 **Visual authority:** `docs/05-ui/drts-design-canvas/Fleet Partner Portal.html` · `docs/05-ui/drts-design-canvas/fleet-screens.jsx` · `@drts/ui-tokens` · `@drts/ui-web`
 

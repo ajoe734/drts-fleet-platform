@@ -5,6 +5,7 @@ import {
   useEffect,
   useCallback,
   useMemo,
+  useRef,
   type CSSProperties,
   type FormEvent,
 } from "react";
@@ -13,7 +14,11 @@ import { useTranslation } from "@/lib/i18n";
 import { useBreakGlass } from "@/components/break-glass-context";
 import { ApiClientError } from "@drts/api-client";
 import { createPlatformAdminIamClient } from "@/lib/platform-admin-iam-client";
-import { getSessionGovernanceCopy } from "./translations";
+import {
+  getSessionGovernanceCopy,
+  getBreakGlassCopy,
+  getStepUpCopy,
+} from "./translations";
 import type {
   AccessReviewCampaignRecord,
   AccessReviewEvidenceRecord,
@@ -399,7 +404,8 @@ export function RoleApprovalPanel() {
     () => createPlatformAdminIamClient(rawClient),
     [rawClient],
   );
-  const { t } = useTranslation();
+  const { t, locale } = useTranslation();
+  const stepUpCopy = useMemo(() => getStepUpCopy(locale), [locale]);
 
   const [requests, setRequests] = useState<
     PrivilegedRoleApprovalRequestRecord[]
@@ -420,6 +426,9 @@ export function RoleApprovalPanel() {
     useState<PrivilegedRoleApprovalRequestRecord | null>(null);
   const [actionReason, setActionReason] = useState("");
   const [acting, setActing] = useState(false);
+
+  // Added SoD state
+  const [sodError, setSodError] = useState<string | null>(null);
 
   const loadRequests = useCallback(async () => {
     setLoading(true);
@@ -461,9 +470,16 @@ export function RoleApprovalPanel() {
       setJustification("");
       await loadRequests();
     } catch (err: unknown) {
-      setError(
-        err instanceof Error ? err.message : "Failed to create role request",
-      );
+      if (err instanceof ApiClientError && err.code === "IAM_SOD_VIOLATION") {
+        setError(
+          "職責分離衝突 · 核准已被系統阻擋: " +
+            (err.apiMessage || "無例外理由放行。需先卸除不相容角色。"),
+        );
+      } else {
+        setError(
+          err instanceof Error ? err.message : "Failed to create role request",
+        );
+      }
     } finally {
       setSubmitting(false);
     }
@@ -473,6 +489,7 @@ export function RoleApprovalPanel() {
     if (!selectedReq) return;
     setActing(true);
     setError(null);
+    setSodError(null);
     try {
       await iamClient.approvePrivilegedRoleRequest(selectedReq.requestId, {
         approvalRequestId: selectedReq.requestId,
@@ -485,7 +502,31 @@ export function RoleApprovalPanel() {
       setActionReason("");
       await loadRequests();
     } catch (err: unknown) {
-      setError(err instanceof Error ? err.message : "Role approval failed");
+      if (err instanceof ApiClientError) {
+        if (
+          err.code === "IAM_STEP_UP_REQUIRED" ||
+          err.code === "MFA_REQUIRED"
+        ) {
+          setError(
+            "登入逾時 (IAM_STEP_UP_REQUIRED)，請重新登入 (Fresh MFA) 後再試。",
+          );
+        } else if (
+          err.statusCode === 409 ||
+          err.code === "IAM_CONCURRENCY_CONFLICT"
+        ) {
+          await loadRequests();
+          setSelectedReq(null);
+          setError("資料版本衝突，已自動重載。請重新選擇該申請。");
+        } else if (err.code === "IAM_SOD_VIOLATION") {
+          setSodError(
+            err.apiMessage || "SoD Violation: Incompatible role pairs.",
+          );
+        } else {
+          setError(err.message);
+        }
+      } else {
+        setError(err instanceof Error ? err.message : "Role approval failed");
+      }
     } finally {
       setActing(false);
     }
@@ -508,7 +549,27 @@ export function RoleApprovalPanel() {
       setActionReason("");
       await loadRequests();
     } catch (err: unknown) {
-      setError(err instanceof Error ? err.message : "Role rejection failed");
+      if (err instanceof ApiClientError) {
+        if (
+          err.code === "IAM_STEP_UP_REQUIRED" ||
+          err.code === "MFA_REQUIRED"
+        ) {
+          setError(
+            "登入逾時 (IAM_STEP_UP_REQUIRED)，請重新登入 (Fresh MFA) 後再試。",
+          );
+        } else if (
+          err.statusCode === 409 ||
+          err.code === "IAM_CONCURRENCY_CONFLICT"
+        ) {
+          await loadRequests();
+          setSelectedReq(null);
+          setError("資料版本衝突，已自動重載。請重新選擇該申請。");
+        } else {
+          setError(err.message);
+        }
+      } else {
+        setError(err instanceof Error ? err.message : "Role rejection failed");
+      }
     } finally {
       setActing(false);
     }
@@ -560,7 +621,12 @@ export function RoleApprovalPanel() {
               theme={theme}
               size="xs"
               variant="primary"
-              onClick={() => setSelectedReq(r)}
+              onClick={() => {
+                setSelectedReq(r);
+                setSodError(null);
+                setError(null);
+                setActionReason("");
+              }}
             >
               {t("users.governance.roleApproval.reviewStepUp")}
             </CanvasBtn>
@@ -569,7 +635,12 @@ export function RoleApprovalPanel() {
               theme={theme}
               size="xs"
               variant="secondary"
-              onClick={() => setSelectedReq(r)}
+              onClick={() => {
+                setSelectedReq(r);
+                setSodError(null);
+                setError(null);
+                setActionReason("");
+              }}
             >
               {t("users.governance.roleApproval.viewDetail")}
             </CanvasBtn>
@@ -780,13 +851,18 @@ export function RoleApprovalPanel() {
                 </div>
               </div>
 
-              <CanvasBanner
-                theme={theme}
-                tone="info"
-                icon="info"
-                title={t("users.governance.roleApproval.stepUpTitle")}
-                body="Secondary administrator sign-off is required before the privileged role becomes active."
-              />
+              {sodError ? (
+                <CanvasBanner
+                  theme={theme}
+                  tone="danger"
+                  icon="lock"
+                  title={stepUpCopy.sodViolationTitle}
+                  body={
+                    sodError +
+                    " 後端 checkSodPolicy 回 403 IAM_SOD_VIOLATION；無例外理由放行。需先卸除衝突角色或改申請其他角色。"
+                  }
+                />
+              ) : null}
 
               <CanvasField
                 theme={theme}
@@ -827,7 +903,7 @@ export function RoleApprovalPanel() {
                   <CanvasBtn
                     theme={theme}
                     variant="primary"
-                    disabled={acting}
+                    disabled={acting || !!sodError}
                     onClick={() => void handleApprove()}
                   >
                     {acting ? "Approving…" : "Approve & Grant Role"}
@@ -1156,7 +1232,20 @@ export function BreakGlassPanel() {
     () => createPlatformAdminIamClient(rawClient),
     [rawClient],
   );
-  const { t } = useTranslation();
+  const { t: originalT, locale } = useTranslation();
+  const bgCopy = useMemo(() => getBreakGlassCopy(locale), [locale]);
+  const stepUpCopy = useMemo(() => getStepUpCopy(locale), [locale]);
+  const t = useCallback(
+    (key: string) => {
+      if (key.startsWith("users.governance.breakGlass.")) {
+        const k = key.replace("users.governance.breakGlass.", "");
+        return bgCopy[k as keyof typeof bgCopy] || originalT(key);
+      }
+      return originalT(key);
+    },
+    [originalT, bgCopy],
+  );
+
   const {
     activateSession,
     isBreakGlassActive,
@@ -1169,12 +1258,92 @@ export function BreakGlassPanel() {
 
   // Form state
   const [requestedScopes, setRequestedScopes] = useState(
-    "platform:superadmin, identity:break-glass:activate",
+    "identity:read, security:audit:read",
   );
   const [reasonCode, setReasonCode] = useState("INCIDENT_BREAK_GLASS");
   const [reasonText, setReasonText] = useState("");
   const [proofReference, setProofReference] = useState("");
   const [submitting, setSubmitting] = useState(false);
+
+  // Added Step-up state
+  const [stepUpState, setStepUpState] = useState<
+    "NONE" | "VERIFYING" | "VALID" | "EXPIRED"
+  >("NONE");
+  const [stepUpRef, setStepUpRef] = useState<string | null>(null);
+  const [stepUpAction, setStepUpAction] = useState<string | null>(null);
+
+  const stepUpTimerRef = useRef<NodeJS.Timeout | null>(null);
+  const stepUpNonceRef = useRef<number>(0);
+
+  const clearStepUp = useCallback(() => {
+    if (stepUpTimerRef.current) {
+      clearTimeout(stepUpTimerRef.current);
+      stepUpTimerRef.current = null;
+    }
+    stepUpNonceRef.current += 1;
+    setStepUpRef(null);
+    setStepUpAction(null);
+    setStepUpState("NONE");
+  }, []);
+
+  useEffect(() => {
+    return () => clearStepUp();
+  }, [clearStepUp]);
+
+  const fetchGrants = useCallback(async () => {
+    try {
+      const res = await iamClient.listBreakGlassRequests();
+      setGrants(res.items || []);
+    } catch (err: unknown) {
+      if (err instanceof Error) {
+        setError("Failed to fetch requests: " + err.message);
+      }
+    }
+  }, [iamClient]);
+
+  useEffect(() => {
+    void fetchGrants();
+  }, [fetchGrants]);
+
+  const handleGetStepUpProof = async (actionId: string) => {
+    clearStepUp();
+    const nonce = stepUpNonceRef.current;
+    setStepUpState("VERIFYING");
+    try {
+      const proof = await iamClient.createStepUpProof({
+        actionId: actionId as any,
+      });
+      if (stepUpNonceRef.current !== nonce) return;
+      if (proof.required === false || !proof.stepUpReference) {
+        setStepUpRef(null);
+        setStepUpAction(actionId);
+        setStepUpState("VALID");
+      } else if (proof.stepUpReference) {
+        setStepUpRef(proof.stepUpReference);
+        setStepUpAction(actionId);
+        setStepUpState("VALID");
+        if (proof.expiresAt) {
+          const ttl = new Date(proof.expiresAt).getTime() - Date.now();
+          if (ttl > 0) {
+            stepUpTimerRef.current = setTimeout(() => {
+              if (stepUpNonceRef.current !== nonce) return;
+              setStepUpState((prev) => (prev === "VALID" ? "EXPIRED" : prev));
+              setStepUpRef((prev) =>
+                prev === proof.stepUpReference ? null : prev,
+              );
+            }, ttl);
+          } else {
+            setStepUpState("EXPIRED");
+            setStepUpRef(null);
+          }
+        }
+      }
+    } catch (e: unknown) {
+      if (stepUpNonceRef.current !== nonce) return;
+      setStepUpState("NONE");
+      setError(e instanceof Error ? e.message : "Failed to get step-up proof");
+    }
+  };
 
   // Selected grant modal for approve/activate
   const [selectedGrant, setSelectedGrant] =
@@ -1193,23 +1362,62 @@ export function BreakGlassPanel() {
           .filter(Boolean),
         reasonCode: reasonCode.trim(),
         reasonText: reasonText.trim(),
-        proofReference: proofReference.trim() || `bg_proof_${Date.now()}`,
+        proofReference: proofReference.trim(),
         mutation: {
           reasonCode: "BREAK_GLASS_REQUEST",
           expectedVersion: 1,
+          stepUpReference: stepUpRef,
         },
       });
       setGrants((prev) => [created, ...prev]);
       setShowRequestModal(false);
       setReasonText("");
+      clearStepUp();
     } catch (err: unknown) {
-      setError(
-        err instanceof Error ? err.message : "Break-glass request failed",
-      );
+      if (
+        err instanceof ApiClientError &&
+        (err.code === "IAM_STEP_UP_REQUIRED" ||
+          err.code === "MFA_REQUIRED" ||
+          err.code === "STEP_UP_REQUIRED")
+      ) {
+        setStepUpState("EXPIRED");
+        setStepUpRef(null);
+        setError(
+          "憑證已過期或被拒絕 (IAM_STEP_UP_REQUIRED)，請重新取得或重新登入 (Fresh MFA)。",
+        );
+      } else {
+        setError(
+          err instanceof Error ? err.message : "Break-glass request failed",
+        );
+      }
     } finally {
       setSubmitting(false);
     }
   };
+
+  const handleReloadGrant = useCallback(
+    async (grantId: string) => {
+      try {
+        const currentGrant = await iamClient.getBreakGlassRequest(grantId);
+        setGrants((prev) =>
+          prev.map((item) => (item.grantId === grantId ? currentGrant : item)),
+        );
+        setSelectedGrant((prev) =>
+          prev?.grantId === grantId ? currentGrant : prev,
+        );
+      } catch {
+        setGrants((prev) =>
+          prev.map((item) =>
+            item.grantId === grantId
+              ? ({ ...item, _syncError: true } as any)
+              : item,
+          ),
+        );
+        setSelectedGrant((prev) => (prev?.grantId === grantId ? null : prev));
+      }
+    },
+    [iamClient],
+  );
 
   const handleApproveGrant = async (g: BreakGlassGrantRecord) => {
     setActing(true);
@@ -1219,6 +1427,7 @@ export function BreakGlassPanel() {
         mutation: {
           reasonCode: "BREAK_GLASS_APPROVED",
           expectedVersion: g.version ?? 1,
+          stepUpReference: stepUpRef,
         },
       });
       setGrants((prev) =>
@@ -1227,10 +1436,31 @@ export function BreakGlassPanel() {
         ),
       );
       setSelectedGrant(approved);
+      clearStepUp();
     } catch (err: unknown) {
-      setError(
-        err instanceof Error ? err.message : "Break-glass approval failed",
-      );
+      if (
+        err instanceof ApiClientError &&
+        err.code === "IAM_CONCURRENCY_CONFLICT"
+      ) {
+        clearStepUp();
+        setError("狀態已變更，請重新整理 (IAM_CONCURRENCY_CONFLICT)。");
+        await handleReloadGrant(g.grantId);
+      } else if (
+        err instanceof ApiClientError &&
+        (err.code === "IAM_STEP_UP_REQUIRED" ||
+          err.code === "MFA_REQUIRED" ||
+          err.code === "STEP_UP_REQUIRED")
+      ) {
+        setStepUpState("EXPIRED");
+        setStepUpRef(null);
+        setError(
+          "憑證已過期或被拒絕 (IAM_STEP_UP_REQUIRED)，請重新取得或重新登入 (Fresh MFA)。",
+        );
+      } else {
+        setError(
+          err instanceof Error ? err.message : "Break-glass approval failed",
+        );
+      }
     } finally {
       setActing(false);
     }
@@ -1247,14 +1477,36 @@ export function BreakGlassPanel() {
         mutation: {
           reasonCode: "BREAK_GLASS_ACTIVATED",
           expectedVersion: g.version ?? 1,
+          stepUpReference: stepUpRef,
         },
       });
       activateSession(result.grant, result.accessToken, result.expiresAt);
       setSelectedGrant(null);
+      clearStepUp();
     } catch (err: unknown) {
-      setError(
-        err instanceof Error ? err.message : "Break-glass activation failed",
-      );
+      if (
+        err instanceof ApiClientError &&
+        err.code === "IAM_CONCURRENCY_CONFLICT"
+      ) {
+        clearStepUp();
+        setError("狀態已變更，請重新整理 (IAM_CONCURRENCY_CONFLICT)。");
+        await handleReloadGrant(g.grantId);
+      } else if (
+        err instanceof ApiClientError &&
+        (err.code === "IAM_STEP_UP_REQUIRED" ||
+          err.code === "MFA_REQUIRED" ||
+          err.code === "STEP_UP_REQUIRED")
+      ) {
+        setStepUpState("EXPIRED");
+        setStepUpRef(null);
+        setError(
+          "憑證已過期或被拒絕 (IAM_STEP_UP_REQUIRED)，請重新取得或重新登入 (Fresh MFA)。",
+        );
+      } else {
+        setError(
+          err instanceof Error ? err.message : "Break-glass activation failed",
+        );
+      }
     } finally {
       setActing(false);
     }
@@ -1282,16 +1534,41 @@ export function BreakGlassPanel() {
       r: (r) => formatDateTime(r.requestedAt),
     },
     {
+      h: "EXPIRES AT",
+      w: 160,
+      mono: true,
+      r: (r) => {
+        if (r.status === "approved" && !r.activatedAt) {
+          return (
+            <span style={{ color: theme.textMuted }}>{bgCopy.nonExpiring}</span>
+          );
+        }
+        if (r.status === "active" && r.expiresAt) {
+          return formatDateTime(r.expiresAt);
+        }
+        return <span style={{ color: theme.textMuted }}>—</span>;
+      },
+    },
+    {
       h: "ACTIONS",
       w: 160,
       r: (r) => (
         <CanvasBtn
           theme={theme}
           size="xs"
-          variant="primary"
-          onClick={() => setSelectedGrant(r)}
+          variant={r._syncError ? "ghost" : "primary"}
+          onClick={() => {
+            if (r._syncError) {
+              void handleReloadGrant(r.grantId);
+              return;
+            }
+            clearStepUp();
+            setSelectedGrant(r);
+          }}
         >
-          {t("users.governance.breakGlass.manageGrant")}
+          {r._syncError
+            ? "Retry Sync"
+            : t("users.governance.breakGlass.manageGrant")}
         </CanvasBtn>
       ),
     },
@@ -1355,7 +1632,10 @@ export function BreakGlassPanel() {
               <CanvasBtn
                 theme={theme}
                 variant="ghost"
-                onClick={() => setShowRequestModal(false)}
+                onClick={() => {
+                  clearStepUp();
+                  setShowRequestModal(false);
+                }}
               >
                 ✕
               </CanvasBtn>
@@ -1423,19 +1703,99 @@ export function BreakGlassPanel() {
                     style={controlStyle}
                   />
                 </CanvasField>
+
+                {stepUpState === "NONE" ? (
+                  <CanvasBanner
+                    theme={theme}
+                    tone="warn"
+                    icon="lock"
+                    title={stepUpCopy.stepUpRequiredTitle}
+                    body="申請前請先取得 step-up 憑證或重新登入 (Fresh MFA)。"
+                    actions={
+                      <CanvasBtn
+                        theme={theme}
+                        size="xs"
+                        variant="primary"
+                        icon="lock"
+                        onClick={() => {
+                          handleGetStepUpProof("platform:break-glass:request");
+                        }}
+                      >
+                        {stepUpCopy.getStepUpProof}
+                      </CanvasBtn>
+                    }
+                  />
+                ) : stepUpState === "VERIFYING" ? (
+                  <CanvasBanner
+                    theme={theme}
+                    tone="info"
+                    icon="clock"
+                    title={stepUpCopy.verifyingTitle}
+                    body="正在向伺服器請求身分驗證憑證..."
+                  />
+                ) : stepUpState === "EXPIRED" ? (
+                  <CanvasBanner
+                    theme={theme}
+                    tone="danger"
+                    icon="warn"
+                    title={stepUpCopy.expiredTitle}
+                    body="憑證已過期或已被使用，請重新取得。"
+                    actions={
+                      <CanvasBtn
+                        theme={theme}
+                        size="xs"
+                        variant="primary"
+                        icon="refresh"
+                        onClick={() => {
+                          handleGetStepUpProof("platform:break-glass:request");
+                        }}
+                      >
+                        {stepUpCopy.retry}
+                      </CanvasBtn>
+                    }
+                  />
+                ) : null}
+
+                {stepUpState === "VALID" ||
+                stepUpState === "VERIFYING" ||
+                stepUpState === "EXPIRED" ? (
+                  <CanvasField
+                    theme={theme}
+                    label="stepUpReference"
+                    required
+                    hint={
+                      stepUpState === "VERIFYING"
+                        ? "驗證中..."
+                        : stepUpState === "EXPIRED"
+                          ? "已失效"
+                          : "有效"
+                    }
+                  >
+                    <input
+                      type="text"
+                      value={stepUpRef || "—"}
+                      readOnly
+                      disabled
+                      style={controlStyle}
+                    />
+                  </CanvasField>
+                ) : null}
               </div>
 
               <div style={footerStyle}>
                 <CanvasBtn
                   theme={theme}
                   variant="secondary"
-                  onClick={() => setShowRequestModal(false)}
+                  onClick={() => {
+                    clearStepUp();
+                    setShowRequestModal(false);
+                  }}
                 >
                   Cancel
                 </CanvasBtn>
                 <button
                   type="submit"
-                  disabled={submitting}
+                  disabled={submitting || stepUpState !== "VALID" || stepUpAction !== "platform:break-glass:request"}
                   style={{
                     background: theme.danger,
                     color: "#fff",
@@ -1466,7 +1826,10 @@ export function BreakGlassPanel() {
               <CanvasBtn
                 theme={theme}
                 variant="ghost"
-                onClick={() => setSelectedGrant(null)}
+                onClick={() => {
+                  clearStepUp();
+                  setSelectedGrant(null);
+                }}
               >
                 ✕
               </CanvasBtn>
@@ -1507,6 +1870,18 @@ export function BreakGlassPanel() {
                   </span>{" "}
                   Required
                 </div>
+                <div>
+                  <span style={{ color: theme.textMuted }}>
+                    {bgCopy.expiresAt}:
+                  </span>{" "}
+                  {selectedGrant.status === "approved" &&
+                  !selectedGrant.activatedAt
+                    ? bgCopy.nonExpiring
+                    : selectedGrant.status === "active" &&
+                        selectedGrant.expiresAt
+                      ? formatDateTime(selectedGrant.expiresAt)
+                      : "—"}
+                </div>
               </div>
 
               <div
@@ -1521,11 +1896,125 @@ export function BreakGlassPanel() {
               </div>
             </div>
 
+            <div style={{ padding: "0 24px" }}>
+              {stepUpState === "NONE" ? (
+                <CanvasBanner
+                  theme={theme}
+                  tone="warn"
+                  icon="lock"
+                  title={stepUpCopy.stepUpRequiredTitle}
+                  body="操作前請先取得 step-up 憑證或重新登入 (Fresh MFA)。"
+                  actions={
+                    selectedGrant?.status === "requested" ? (
+                      <CanvasBtn
+                        theme={theme}
+                        size="xs"
+                        variant="primary"
+                        icon="lock"
+                        disabled={acting}
+                        onClick={() => {
+                          handleGetStepUpProof("platform:break-glass:approve");
+                        }}
+                      >
+                        {stepUpCopy.getStepUpProof}
+                      </CanvasBtn>
+                    ) : selectedGrant?.status === "approved" ? (
+                      <CanvasBtn
+                        theme={theme}
+                        size="xs"
+                        variant="primary"
+                        icon="lock"
+                        disabled={acting}
+                        onClick={() => {
+                          handleGetStepUpProof("platform:break-glass:activate");
+                        }}
+                      >
+                        {stepUpCopy.getStepUpProof}
+                      </CanvasBtn>
+                    ) : null
+                  }
+                />
+              ) : stepUpState === "VERIFYING" ? (
+                <CanvasBanner
+                  theme={theme}
+                  tone="info"
+                  icon="clock"
+                  title={stepUpCopy.verifyingTitle}
+                  body="正在向伺服器請求身分驗證憑證..."
+                />
+              ) : stepUpState === "EXPIRED" ? (
+                <CanvasBanner
+                  theme={theme}
+                  tone="danger"
+                  icon="warn"
+                  title={stepUpCopy.expiredTitle}
+                  body="憑證已過期或已被使用，請重新取得。"
+                  actions={
+                    selectedGrant?.status === "requested" ? (
+                      <CanvasBtn
+                        theme={theme}
+                        size="xs"
+                        variant="primary"
+                        icon="refresh"
+                        disabled={acting}
+                        onClick={() => {
+                          handleGetStepUpProof("platform:break-glass:approve");
+                        }}
+                      >
+                        {stepUpCopy.retry}
+                      </CanvasBtn>
+                    ) : selectedGrant?.status === "approved" ? (
+                      <CanvasBtn
+                        theme={theme}
+                        size="xs"
+                        variant="primary"
+                        icon="refresh"
+                        disabled={acting}
+                        onClick={() => {
+                          handleGetStepUpProof("platform:break-glass:activate");
+                        }}
+                      >
+                        {stepUpCopy.retry}
+                      </CanvasBtn>
+                    ) : null
+                  }
+                />
+              ) : null}
+
+              {stepUpState === "VALID" ||
+              stepUpState === "VERIFYING" ||
+              stepUpState === "EXPIRED" ? (
+                <CanvasField
+                  theme={theme}
+                  label="stepUpReference"
+                  required
+                  hint={
+                    stepUpState === "VERIFYING"
+                      ? "驗證中..."
+                      : stepUpState === "EXPIRED"
+                        ? "已失效"
+                        : "有效"
+                  }
+                >
+                  <input
+                    type="text"
+                    value={stepUpRef || "—"}
+                    readOnly
+                    disabled
+                    style={controlStyle}
+                  />
+                </CanvasField>
+              ) : null}
+            </div>
+
             <div style={footerStyle}>
               <CanvasBtn
                 theme={theme}
                 variant="secondary"
-                onClick={() => setSelectedGrant(null)}
+                onClick={() => {
+                  clearStepUp();
+                  setSelectedGrant(null);
+                }}
               >
                 Close
               </CanvasBtn>
@@ -1533,7 +2022,7 @@ export function BreakGlassPanel() {
                 <CanvasBtn
                   theme={theme}
                   variant="primary"
-                  disabled={acting}
+                  disabled={acting || stepUpState !== "VALID" || stepUpAction !== "platform:break-glass:approve"}
                   onClick={() => void handleApproveGrant(selectedGrant)}
                 >
                   {acting ? "Approving…" : "Approve (2nd Person Sign-Off)"}
@@ -1543,7 +2032,7 @@ export function BreakGlassPanel() {
                   theme={theme}
                   variant="primary"
                   danger
-                  disabled={acting}
+                  disabled={acting || stepUpState !== "VALID" || stepUpAction !== "platform:break-glass:activate"}
                   onClick={() => void handleActivateGrant(selectedGrant)}
                 >
                   {acting ? "Activating…" : "Activate Emergency Session"}
