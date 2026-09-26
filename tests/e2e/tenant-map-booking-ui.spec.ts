@@ -124,7 +124,7 @@ async function stubGeoProvider(
 }
 
 async function pinBothStops(page: Page) {
-  const searchInputs = page.getByLabel("Search address");
+  const searchInputs = page.getByLabel(/Search address|搜尋地址/);
   // Pickup is the first picker, drop-off the second (pair picker DOM order).
   await searchInputs.first().fill("Taipei 101");
   await page.getByRole("button", { name: "Search" }).first().click();
@@ -245,7 +245,7 @@ test.describe("tenant console booking map alignment", () => {
     await page.getByRole("button", { name: /Use this location|確認使用此位置/ }).last().click();
 
     // Fill required booking fields to enable submit
-    await page.getByLabel(/Service type|服務類型/).click();
+    await page.getByLabel(/Service subtype|服務子類型/).click();
     await page.getByRole("option").nth(1).click();
     await page.getByLabel(/Timing|預約 \/ 即時/).click();
     await page.getByRole("option").nth(1).click();
