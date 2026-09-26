@@ -1391,6 +1391,28 @@ export function BreakGlassPanel() {
     }
   };
 
+  const handleReloadGrant = useCallback(
+    async (grantId: string) => {
+      try {
+        const currentGrant = await iamClient.getBreakGlassRequest(grantId);
+        setGrants((prev) =>
+          prev.map((item) => (item.grantId === grantId ? currentGrant : item)),
+        );
+        setSelectedGrant((prev) => (prev?.grantId === grantId ? currentGrant : prev));
+      } catch (err: unknown) {
+        setGrants((prev) =>
+          prev.map((item) =>
+            item.grantId === grantId
+              ? ({ ...item, _syncError: true } as any)
+              : item,
+          ),
+        );
+        setSelectedGrant((prev) => (prev?.grantId === grantId ? null : prev));
+      }
+    },
+    [iamClient],
+  );
+
   const handleApproveGrant = async (g: BreakGlassGrantRecord) => {
     setActing(true);
     setError(null);
@@ -1416,17 +1438,7 @@ export function BreakGlassPanel() {
       ) {
         clearStepUp();
         setError("狀態已變更，請重新整理 (IAM_CONCURRENCY_CONFLICT)。");
-        try {
-          const currentGrant = await iamClient.getBreakGlassRequest(g.grantId);
-          setGrants((prev) =>
-            prev.map((item) =>
-              item.grantId === currentGrant.grantId ? currentGrant : item,
-            ),
-          );
-          setSelectedGrant(currentGrant);
-        } catch {
-          setSelectedGrant(null);
-        }
+        void handleReloadGrant(g.grantId);
       } else if (
         err instanceof ApiClientError &&
         (err.code === "IAM_STEP_UP_REQUIRED" ||
@@ -1467,6 +1479,13 @@ export function BreakGlassPanel() {
       clearStepUp();
     } catch (err: unknown) {
       if (
+        err instanceof ApiClientError &&
+        err.code === "IAM_CONCURRENCY_CONFLICT"
+      ) {
+        clearStepUp();
+        setError("狀態已變更，請重新整理 (IAM_CONCURRENCY_CONFLICT)。");
+        void handleReloadGrant(g.grantId);
+      } else if (
         err instanceof ApiClientError &&
         (err.code === "IAM_STEP_UP_REQUIRED" ||
           err.code === "MFA_REQUIRED" ||
@@ -1531,13 +1550,17 @@ export function BreakGlassPanel() {
         <CanvasBtn
           theme={theme}
           size="xs"
-          variant="primary"
+          variant={r._syncError ? "ghost" : "primary"}
           onClick={() => {
+            if (r._syncError) {
+              void handleReloadGrant(r.grantId);
+              return;
+            }
             clearStepUp();
             setSelectedGrant(r);
           }}
         >
-          {t("users.governance.breakGlass.manageGrant")}
+          {r._syncError ? "Retry Sync" : t("users.governance.breakGlass.manageGrant")}
         </CanvasBtn>
       ),
     },

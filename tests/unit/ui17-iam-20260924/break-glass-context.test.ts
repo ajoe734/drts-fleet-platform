@@ -447,5 +447,108 @@ describe("BreakGlass R6b Regression Tests - True Provider Mutation", () => {
     });
 
     expect(mockTransportClient.get).toHaveBeenCalledWith("/platform-admin/break-glass/requests/bg_req_409");
+
+    // Wait for the modal state to update to approved.
+    await waitFor(() => {
+      expect(screen.queryByRole("button", { name: /Approve/i })).toBeNull();
+      // Activate Emergency Session button should be present if it's approved
+    });
+    
+    const newProofBtn = await screen.findByText(/Get step-up proof/i);
+    expect(newProofBtn).toBeDefined(); // Proof was cleared, need to get a new one
+  });
+
+  it("should handle reload failure after 409, tag grant as sync error, and keep it disabled until manual retry", async () => {
+    mockTransportClient.get.mockImplementation(async (url) => {
+      if (url.includes("/platform-admin/break-glass/requests/bg_req_409")) {
+        return Promise.reject(new Error("Network failed"));
+      }
+      if (url.includes("/platform-admin/break-glass/requests")) {
+        return { items: [{ grantId: "bg_req_409", status: "requested", requesterId: "u_1", version: 1, requestedScopes: ["identity:read"] }] };
+      }
+      return {};
+    });
+
+    render(React.createElement(BreakGlassProvider, null, React.createElement(BreakGlassPanel, null)));
+    await waitFor(() => expect(screen.getByText(/Manage Grant/i)).toBeDefined());
+    
+    fireEvent.click(screen.getByText(/Manage Grant/i));
+
+    mockTransportClient.post.mockImplementation(async (url) => {
+      if (url.includes("/identity/step-up-proofs")) { return { required: true, stepUpReference: "proof_1" }; }
+      if (url.includes("/approve")) { return Promise.reject(new MockApiClientError("Mock error", 409, "IAM_CONCURRENCY_CONFLICT")); }
+      return {};
+    });
+    
+    fireEvent.click(screen.getByText(/Get step-up proof/i));
+    await waitFor(() => expect(screen.getByDisplayValue("proof_1")).toBeDefined());
+
+    fireEvent.click(screen.getByRole("button", { name: /Approve/i }));
+
+    await waitFor(() => {
+      expect(screen.getByText(/狀態已變更，請重新整理/)).toBeDefined();
+    });
+
+    // The modal should close and the list should show Retry Sync because reload failed
+    await waitFor(() => {
+      expect(screen.getByText(/Retry Sync/i)).toBeDefined();
+    });
+    
+    expect(screen.queryByRole("button", { name: /Approve/i })).toBeNull(); // Modal closed
+  });
+
+  it("should ignore late response for getBreakGlassRequest if dialog is closed", async () => {
+    let resolveLateGet: (val: any) => void = () => {};
+    const lateGetPromise = new Promise((resolve) => { resolveLateGet = resolve; });
+    
+    mockTransportClient.get.mockImplementation(async (url) => {
+      if (url.includes("/platform-admin/break-glass/requests/bg_req_409")) {
+        return lateGetPromise;
+      }
+      if (url.includes("/platform-admin/break-glass/requests")) {
+        return { items: [{ grantId: "bg_req_409", status: "requested", requesterId: "u_1", version: 1, requestedScopes: ["identity:read"] }] };
+      }
+      return {};
+    });
+
+    render(React.createElement(BreakGlassProvider, null, React.createElement(BreakGlassPanel, null)));
+    await waitFor(() => expect(screen.getByText(/Manage Grant/i)).toBeDefined());
+    
+    fireEvent.click(screen.getByText(/Manage Grant/i));
+
+    mockTransportClient.post.mockImplementation(async (url) => {
+      if (url.includes("/identity/step-up-proofs")) { return { required: true, stepUpReference: "proof_1" }; }
+      if (url.includes("/approve")) { return Promise.reject(new MockApiClientError("Mock error", 409, "IAM_CONCURRENCY_CONFLICT")); }
+      return {};
+    });
+    
+    fireEvent.click(screen.getByText(/Get step-up proof/i));
+    await waitFor(() => expect(screen.getByDisplayValue("proof_1")).toBeDefined());
+
+    fireEvent.click(screen.getByRole("button", { name: /Approve/i }));
+
+    await waitFor(() => {
+      expect(screen.getByText(/狀態已變更，請重新整理/)).toBeDefined();
+    });
+
+    // Close the dialog while the reload is still pending
+    fireEvent.click(screen.getByText(/Close/i));
+
+    await waitFor(() => {
+      expect(screen.queryByRole("dialog")).toBeNull();
+    });
+
+    // Now resolve the late GET response
+    resolveLateGet({ grantId: "bg_req_409", status: "approved", requesterId: "u_1", version: 2, requestedScopes: ["identity:read"] });
+
+    // Wait a bit to ensure the dialog does NOT reappear
+    await new Promise((r) => setTimeout(r, 100));
+
+    expect(screen.queryByRole("dialog")).toBeNull();
+    
+    // The list should have updated to show the new status in the background
+    await waitFor(() => {
+      expect(screen.getByText("approved")).toBeDefined();
+    });
   });
 });
