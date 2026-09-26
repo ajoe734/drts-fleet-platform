@@ -1200,8 +1200,12 @@ export function TenantBookingCreateForm({
       return;
     }
 
-    if (notServiceable) {
-      setSubmitError(t("newBooking.serviceability.blockedBody"));
+    if (mapGate.blocking) {
+      if (mapGate.code === "outside_service_area") {
+        setSubmitError(t("newBooking.serviceability.blockedBody"));
+      } else {
+        setSubmitError(t("newBooking.error.unknown"));
+      }
       return;
     }
 
@@ -2303,9 +2307,7 @@ export function TenantBookingCreateForm({
                         : approvalEvaluation?.outcome?.decision ===
                             "require_approval"
                           ? t("newBooking.submit.forApproval")
-                          : mapGate.code === "dispatch_manual_review_required"
-                            ? t("newBooking.submit.manualReview")
-                            : t("newBooking.submit.create")
+                          : t("newBooking.submit.create")
                     }
                     primary
                     type="submit"

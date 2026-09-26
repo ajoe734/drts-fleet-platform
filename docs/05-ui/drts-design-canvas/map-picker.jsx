@@ -69,7 +69,7 @@ function MapPicker({ theme:th, label='上車地點', state='selected', value, co
         </div>
       )}
       {/* next-step footer */}
-      <div style={{ display:'flex', alignItems:'center', gap:8, padding:'7px 10px', borderTop:'1px solid '+c.line, background:blocked?(skin==='pb'?'#FEF2F2':th.dangerBg):c.surface }}>
+      <div style={{ display:'flex', alignItems:'center', gap:8, padding:'7px 10px', borderTop:'1px solid '+c.line, background:blocked?(skin==='pb'?theme.dangerBg:theme.dangerBg):c.surface }}>
         <span style={{ flex:1, fontSize:11, color:blocked?c.danger:c.muted, fontWeight:blocked?700:500 }}>{m.next}</span>
         {state==='no_results' && <span style={{ fontSize:11, color:c.accent, fontWeight:700 }}>改用手動座標</span>}
         {state==='provider_down' && <span style={{ fontSize:11, color:c.danger, fontWeight:700 }}>送交人工複核 →</span>}

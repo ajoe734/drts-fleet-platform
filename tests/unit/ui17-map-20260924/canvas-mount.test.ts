@@ -72,8 +72,8 @@ describe("Canvas SSR Integrations", () => {
       renders.PB_empty = ReactDOMServer.renderToStaticMarkup(window.PB_BookCardMap({ state: 'empty', drop: 'empty' }));
       renders.PB_selected = ReactDOMServer.renderToStaticMarkup(window.PB_BookCardMap({ state: 'selected', drop: 'selected' }));
       renders.PB_out_of_area = ReactDOMServer.renderToStaticMarkup(window.PB_BookCardMap({ state: 'selected', drop: 'out_of_area' }));
-      renders.PB_provider_down = ReactDOMServer.renderToStaticMarkup(window.PB_BookCardMap({ state: 'provider_down', drop: 'provider_down', gate: 'dispatch_manual_review_required' }));
-      renders.PB_manual_review = ReactDOMServer.renderToStaticMarkup(window.PB_BookCardMap({ state: 'manual_review', drop: 'selected', gate: 'dispatch_manual_review_required' }));
+      renders.PB_provider_down = ReactDOMServer.renderToStaticMarkup(window.PB_BookCardMap({ state: 'provider_down', drop: 'provider_down', gate: 'dispatch_manual_review_required', reason: 'Map is down' }));
+      renders.PB_manual_review = ReactDOMServer.renderToStaticMarkup(window.PB_BookCardMap({ state: 'manual_review', drop: 'selected', gate: 'dispatch_manual_review_required', reason: 'Manual entry' }));
 
       // CG Scenarios
       renders.CG_empty = ReactDOMServer.renderToStaticMarkup(window.CG_NewBookingMap({ theme, pick: 'empty', drop: 'empty' }));
@@ -81,7 +81,7 @@ describe("Canvas SSR Integrations", () => {
       renders.CG_out_of_area = ReactDOMServer.renderToStaticMarkup(window.CG_NewBookingMap({ theme, pick: 'selected', drop: 'out_of_area' }));
       renders.CG_backend_rejected = ReactDOMServer.renderToStaticMarkup(window.CG_NewBookingMap({ theme, pick: 'selected', drop: 'candidates' }));
       renders.CG_degraded_recovered = ReactDOMServer.renderToStaticMarkup(window.CG_NewBookingMap({ theme, success: true }));
-      renders.CG_degraded = ReactDOMServer.renderToStaticMarkup(window.CG_NewBookingMap({ theme, degraded: true }));
+      renders.CG_degraded = ReactDOMServer.renderToStaticMarkup(window.CG_NewBookingMap({ theme, degraded: true, pick: 'selected', drop: 'selected' }));
 
       global.results = renders;
     `,
