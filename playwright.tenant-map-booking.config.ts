@@ -30,7 +30,7 @@ export default defineConfig({
     },
     {
       command:
-        "cd apps/tenant-portal-web && pnpm exec next dev --webpack --hostname 127.0.0.1 --port 3305",
+        "cd apps/tenant-portal-web && DRTS_API_URL=${DRTS_API_URL:-https://drts-dev-api-waji3fer3a-uc.a.run.app} NEXT_PUBLIC_API_URL=/control-plane-proxy pnpm exec next dev --webpack --hostname 127.0.0.1 --port 3305",
       url: "http://127.0.0.1:3305",
       reuseExistingServer: !process.env.CI,
       timeout: 300_000,
