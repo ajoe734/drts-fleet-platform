@@ -245,18 +245,14 @@ test.describe("tenant console booking map alignment", () => {
     await page.getByRole("button", { name: /Use this location|確認使用此位置/ }).last().click();
 
     // Fill required booking fields to enable submit
-    await page.getByLabel(/Service subtype|服務子類型/).click();
-    await page.getByRole("option").nth(1).click();
-    await page.getByLabel(/Timing|預約 \/ 即時/).click();
-    await page.getByRole("option").nth(1).click();
+    await page.getByLabel(/Service subtype|服務子類型/).selectOption({ index: 1 });
+    await page.getByLabel(/Timing|預約 \/ 即時/).selectOption({ index: 1 });
 
     await page.getByLabel(/Depart At|出發時間/).fill("2026-10-01T12:00");
     await page.getByLabel(/Headcount|人數/).fill("1");
 
-    await page.getByLabel(/Passenger|聯絡人/).click();
-    await page.getByRole("option").nth(1).click();
-    await page.getByLabel(/Cost center|成本中心/).click();
-    await page.getByRole("option").nth(1).click();
+    await page.getByLabel(/Passenger|聯絡人/).selectOption({ index: 1 });
+    await page.getByLabel(/Cost center|成本中心/).selectOption({ index: 1 });
 
     const submit = page.getByRole("button", { name: /Create booking|For approval|Submitting|建立叫車|送出/ });
     await expect(submit).toBeEnabled();
