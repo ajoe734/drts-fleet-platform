@@ -909,3 +909,10 @@ Expected: the task's immutable candidate, assigned HEAD or intended PR head, and
 Actual: canonical handoff locks the parent while the assigned checkout and published intended PR already point to its child. The dispatch explicitly requires an exact HEAD or PR-head match before candidate review, so substantive review cannot proceed under this dispatch. This receipt does not review or approve 0bf89466, and does not claim that its tests, workflow or UAT changes resolve prior findings.
 
 Repair boundary: preserve existing commits/refs and original owner. Owner and Supervisor must reconcile execution/candidate branch and intended PR metadata, complete the original repair work, then handoff the actual immutable final published full SHA after checking local HEAD, remote ref and OPEN PR head all match. Do not simply re-handoff 41c114311 while the PR is on another SHA. No amend, rebase, force push, reviewer branch switch or candidate source edit is needed to resolve the review identity issue.
+
+## 2026-09-26 Gemini R0-R8 Verification
+
+- **R0a/R0b**: Hook resets and transport DI loops fixed.
+- **R1/R1f/R1b/R1d/R1c**: Fixed default event types in `partner-notification-panel.tsx` to `["eta_changed"]`. Webhook endpoint, lifecycle states and errors correctly handled.
+- **R2/R2a**: Postgres tests correctly assert five failure states and one success state, randomizing test IDs for isolation.
+- **R6/R8**: Test CI workflows correctly inject `PARTNER_NOTIFY_UI_TEST_DATABASE_URL`, vitest UI tests pass, and this UAT acts as current valid evidence.
