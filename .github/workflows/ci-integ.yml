@@ -622,11 +622,11 @@ jobs:
                 const payload = JSON.parse(body);
                 addressStore = {
                   ...addressStore,
-                  addressName: payload.addressName || addressStore.addressName,
-                  addressText: payload.addressText || addressStore.addressText,
+                  addressName: payload.address_name || addressStore.addressName,
+                  addressText: payload.address_text || addressStore.addressText,
                   lat: payload.lat !== undefined ? payload.lat : addressStore.lat,
                   lng: payload.lng !== undefined ? payload.lng : addressStore.lng,
-                  geocodeSource: payload.geocodeSource || addressStore.geocodeSource,
+                  geocodeSource: payload.geocode_source || addressStore.geocodeSource,
                   updatedAt: new Date().toISOString()
                 };
                 res.end(JSON.stringify({ data: addressStore }));

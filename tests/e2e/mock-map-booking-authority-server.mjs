@@ -248,10 +248,10 @@ const server = http.createServer((req, res) => {
       try {
         if (body) {
           const payload = JSON.parse(body);
-          if (payload.entrySlug) {
-            slug = payload.entrySlug;
-          } else if (payload.partnerEntrySlug) {
-            slug = payload.partnerEntrySlug;
+          if (payload.entry_slug) {
+            slug = payload.entry_slug;
+          } else if (payload.partner_entry_slug) {
+            slug = payload.partner_entry_slug;
           }
         }
       } catch {
