@@ -1398,8 +1398,10 @@ export function BreakGlassPanel() {
         setGrants((prev) =>
           prev.map((item) => (item.grantId === grantId ? currentGrant : item)),
         );
-        setSelectedGrant((prev) => (prev?.grantId === grantId ? currentGrant : prev));
-      } catch (err: unknown) {
+        setSelectedGrant((prev) =>
+          prev?.grantId === grantId ? currentGrant : prev,
+        );
+      } catch {
         setGrants((prev) =>
           prev.map((item) =>
             item.grantId === grantId
@@ -1560,7 +1562,9 @@ export function BreakGlassPanel() {
             setSelectedGrant(r);
           }}
         >
-          {r._syncError ? "Retry Sync" : t("users.governance.breakGlass.manageGrant")}
+          {r._syncError
+            ? "Retry Sync"
+            : t("users.governance.breakGlass.manageGrant")}
         </CanvasBtn>
       ),
     },
