@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { ApiClient } from "@drts/api-client";
+import { ApiClient } from "../../../../packages/api-client/src";
 import {
   DRIVER_LEAVE_STATUSES,
   DRIVER_LEAVE_TYPES,
@@ -89,7 +89,12 @@ describe("SR-LEAVE-FE-001 — 司機與主管請假操作畫面", () => {
         "2026-09-16T15:59:00.000Z",
       );
       expect(crossDay).toBe("09/14（一）08:00 – 09/16（三）23:59");
-      expect(formatLeaveRangeZhOps("2026-09-10T08:00:00.000Z", "2026-09-10T13:00:00.000Z")).toBe(sameDay);
+      expect(
+        formatLeaveRangeZhOps(
+          "2026-09-10T08:00:00.000Z",
+          "2026-09-10T13:00:00.000Z",
+        ),
+      ).toBe(sameDay);
     });
 
     it("2.3 Validates normal future date range successfully", () => {
@@ -264,7 +269,9 @@ describe("SR-LEAVE-FE-001 — 司機與主管請假操作畫面", () => {
       expect(pendingRecord).toBeDefined();
       expect(pendingRecord?.status).toBe("pending");
 
-      const terminalRecords = FX_DRV_LEAVE.filter((l) => l.status !== "pending");
+      const terminalRecords = FX_DRV_LEAVE.filter(
+        (l) => l.status !== "pending",
+      );
       expect(terminalRecords.length).toBe(3);
       for (const t of terminalRecords) {
         expect(["approved", "rejected", "withdrawn"]).toContain(t.status);

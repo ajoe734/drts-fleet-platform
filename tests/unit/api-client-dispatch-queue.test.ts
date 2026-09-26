@@ -4,7 +4,7 @@ import {
   DISPATCH_QUEUE_ELIGIBILITY_DECISIONS,
   DISPATCH_QUEUE_ELIGIBILITY_REASON_CODES,
 } from "../../packages/contracts/src";
-import { ApiClient } from "@drts/api-client";
+import { ApiClient } from "../../packages/api-client/src";
 
 afterEach(() => {
   vi.restoreAllMocks();

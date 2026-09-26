@@ -1,7 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import type {
-  CallSessionRecord,
-} from "@drts/contracts";
+import type { CallSessionRecord } from "@drts/contracts";
 import {
   deriveDispatchPresentation,
   deriveTtsPresentation,
@@ -17,7 +15,7 @@ import { CallcenterService } from "../../apps/api/src/modules/callcenter/callcen
 import { AuditNotificationService } from "../../apps/api/src/modules/audit-notification/audit-notification.service";
 import { VoiceCallbackService } from "../../apps/api/src/modules/voice-booking/voice-callback.service";
 import { VoiceHandoffQueueService } from "../../apps/api/src/modules/callcenter/voice-handoff-queue.service";
-import { ApiClient } from "@drts/api-client";
+import { ApiClient } from "../../packages/api-client/src";
 
 describe("UV-EXEC-019 Ops Console Exception Workbench, Tracing, and Callback Operations", () => {
   describe("AC-1: ops_normal_no_approval_evidence (UV-FR-021, UV-AC-029)", () => {
@@ -74,8 +72,12 @@ describe("UV-EXEC-019 Ops Console Exception Workbench, Tracing, and Callback Ope
       expect(normalSession.aiMetadata?.requiresApprovalGate).toBe(false);
       expect(normalSession.aiMetadata?.step).toBe("confirming");
       expect(normalSession.aiMetadata?.latencies?.endToEndMs).toBe(650);
-      expect(normalSession.aiMetadata?.confirmedData?.confirmedPickup).toBe("台北車站");
-      expect(normalSession.aiMetadata?.confirmedData?.confirmedDropoff).toBe("桃園國際機場");
+      expect(normalSession.aiMetadata?.confirmedData?.confirmedPickup).toBe(
+        "台北車站",
+      );
+      expect(normalSession.aiMetadata?.confirmedData?.confirmedDropoff).toBe(
+        "桃園國際機場",
+      );
     });
   });
 
@@ -116,7 +118,8 @@ describe("UV-EXEC-019 Ops Console Exception Workbench, Tracing, and Callback Ope
               commandId: "CMD-ORD-999",
               actionKey: "create_phone_booking",
               receiptStatus: "pending_reconciliation",
-              description: "Booking outcome unknown, pending reconciliation. Duplicate order prohibited.",
+              description:
+                "Booking outcome unknown, pending reconciliation. Duplicate order prohibited.",
               detectedAt: "2026-09-09T10:06:00Z",
               canRetry: false, // Forbidden to blindly retry
             },
@@ -137,7 +140,8 @@ describe("UV-EXEC-019 Ops Console Exception Workbench, Tracing, and Callback Ope
         "command_pending_reconciliation",
       );
       expect(
-        exceptionSession.aiMetadata?.exceptionDetails?.unknownOperation?.canRetry,
+        exceptionSession.aiMetadata?.exceptionDetails?.unknownOperation
+          ?.canRetry,
       ).toBe(false);
       expect(
         exceptionSession.aiMetadata?.exceptionDetails?.nextResponsibleParty,
@@ -267,8 +271,13 @@ describe("UV-EXEC-019 Ops Console Exception Workbench, Tracing, and Callback Ope
         { callId: "CALL-BRAND-SYS", brandId: null },
       ];
 
-      const filtered = filterSessionsByBrandAuthorization(sessions, ["brand-alpha"]);
-      expect(filtered.map((s) => s.callId)).toEqual(["CALL-BRAND-A", "CALL-BRAND-SYS"]);
+      const filtered = filterSessionsByBrandAuthorization(sessions, [
+        "brand-alpha",
+      ]);
+      expect(filtered.map((s) => s.callId)).toEqual([
+        "CALL-BRAND-A",
+        "CALL-BRAND-SYS",
+      ]);
       expect(filtered.find((s) => s.callId === "CALL-BRAND-B")).toBeUndefined();
     });
 

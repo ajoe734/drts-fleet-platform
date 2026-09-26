@@ -11,7 +11,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { FeatureFlagsService } from "../../apps/api/src/modules/feature-flags/feature-flags.service";
-import { ApiClient } from "@drts/api-client";
+import { ApiClient } from "../../packages/api-client/src/index";
 import type { FeatureFlagSummary } from "../../packages/contracts/src/index";
 
 afterEach(() => {
