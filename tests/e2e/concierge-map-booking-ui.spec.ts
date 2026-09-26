@@ -40,7 +40,7 @@ async function fulfillJson(route: Route, status: number, data: unknown) {
 
 async function installConciergeApiMocks(
   page: Page,
-  captured: { body: unknown[] },
+  captured: { body: unknown[]; rejectFirstOrder?: boolean },
 ) {
   await page.route("**/api/**", async (route) => {
     const request = route.request();
