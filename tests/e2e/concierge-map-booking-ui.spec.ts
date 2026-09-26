@@ -233,8 +233,7 @@ test.describe("concierge map booking UI", () => {
           status: "down",
           failClosed: false,
         },
-      }),
-      { times: 1 }
+      })
     );
 
     await page.goto("/bookings/new");
