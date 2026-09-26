@@ -26,7 +26,7 @@ test.describe("partner map booking UI", () => {
     page,
   }) => {
     const response = await page.goto(
-      "/ctbc/book?eligibilityVerificationId=elig-verified-001",
+      "/acme/book?eligibilityVerificationId=elig-verified-001",
     );
     expect(response?.status()).toBe(200);
 
@@ -57,7 +57,7 @@ test.describe("partner map booking UI", () => {
     page,
   }) => {
     const response = await page.goto(
-      "/ctbc/book?eligibilityVerificationId=elig-verified-002",
+      "/acme/book?eligibilityVerificationId=elig-verified-002",
     );
     expect(response?.status()).toBe(200);
 
@@ -99,7 +99,7 @@ test.describe("partner map booking UI", () => {
     page,
   }) => {
     const response = await page.goto(
-      "/ctbc/book?eligibilityVerificationId=elig-verified-003",
+      "/acme/book?eligibilityVerificationId=elig-verified-003",
     );
     expect(response?.status()).toBe(200);
 
@@ -137,7 +137,7 @@ test.describe("partner map booking UI", () => {
     await page.addInitScript(() => {
       window.sessionStorage.setItem("drts.mock.mapProviderMode", "unavailable");
     });
-    await page.goto("/ctbc/book?eligibilityVerificationId=elig-verified-004");
+    await page.goto("/acme/book?eligibilityVerificationId=elig-verified-004");
     await fillCardProgramFields(page);
 
     const pickupPicker = page.locator("[data-address-map-picker]").nth(0);

@@ -168,6 +168,11 @@ async function pinBothStops(page: Page) {
 async function fillProgramFields(page: Page) {
   await page.getByLabel(/Passenger name|乘客姓名/).fill("John Doe");
   await page.getByLabel(/Passenger phone|乘客電話/).fill("0912345678");
+  
+  const costCenterSelect = page.getByLabel(/Cost center|成本中心/i);
+  if (await costCenterSelect.isVisible()) {
+    await costCenterSelect.selectOption({ index: 1 });
+  }
 }
 
 test.describe("tenant console booking map alignment", () => {

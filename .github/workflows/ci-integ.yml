@@ -588,15 +588,15 @@ jobs:
               return;
             }
             if (req.method === 'GET' && url.pathname === '/api/tenant/passengers') {
-              res.end(JSON.stringify({ data: [] }));
+              res.end(JSON.stringify({ data: [{ activeFlag: true, passengerId: 'p1', fullName: 'Mock Passenger' }] }));
               return;
             }
             if (req.method === 'GET' && url.pathname === '/api/tenant/addresses') {
-              res.end(JSON.stringify({ data: [] }));
+              res.end(JSON.stringify({ data: [{ activeFlag: true, addressId: 'a1', addressName: 'Mock Address' }] }));
               return;
             }
             if (req.method === 'GET' && url.pathname === '/api/tenant/cost-centers') {
-              res.end(JSON.stringify({ data: [] }));
+              res.end(JSON.stringify({ data: [{ activeFlag: true, costCenterId: 'cc1', costCenterName: 'Mock Cost Center' }] }));
               return;
             }
             if (req.method === 'GET' && url.pathname === '/api/tenant/bookings/page-model/new') {
@@ -612,6 +612,7 @@ jobs:
           export DRTS_API_URL=http://127.0.0.1:3001
           pnpm exec playwright test -c playwright.tenant-map-booking.config.ts
           pnpm exec playwright test -c playwright.concierge-map-booking.config.ts
+          unset DRTS_API_URL
           pnpm exec playwright test -c playwright.partner-booking-surfaces.config.ts
 
   e2e:

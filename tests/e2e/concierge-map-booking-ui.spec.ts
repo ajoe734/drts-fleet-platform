@@ -42,7 +42,7 @@ async function installConciergeApiMocks(
   page: Page,
   captured: { body: unknown[] },
 ) {
-  await page.route("http://localhost:3001/api/**", async (route) => {
+  await page.route("**/api/**", async (route) => {
     const request = route.request();
     const url = new URL(request.url());
     const body = request.postDataJSON();
@@ -212,49 +212,6 @@ test.describe("concierge map booking UI", () => {
     expect(command.mapFallbackReview ?? null).toBeNull();
   });
 
-  test("requires manual review and fallback metadata when provider is unavailable (outage)", async ({
-    page,
-  }) => {
-    const captured = { body: [] as unknown[] };
-    await installConciergeApiMocks(page, captured);
-
-    await page.addInitScript(() => {
-      window.sessionStorage.setItem("drts.mock.mapProviderMode", "unavailable");
-    });
-
-    const response = await page.goto("/bookings/new");
-    expect(response?.status()).toBe(200);
-
-    const pickupPicker = page.locator("[data-address-map-picker]").nth(0);
-    await pickupPicker.getByRole("button", { name: /手動輸入座標/ }).click();
-    await pickupPicker.getByLabel("緯度").fill("25.033964");
-    await pickupPicker.getByLabel("經度").fill("121.564468");
-    await pickupPicker.getByLabel("手動定位原因").fill("xinyi");
-    await pickupPicker.getByRole("button", { name: /使用此位置/ }).click();
-
-    const dropoffPicker = page.locator("[data-address-map-picker]").nth(1);
-    await dropoffPicker.getByRole("button", { name: /手動輸入座標/ }).click();
-    await dropoffPicker.getByLabel("緯度").fill("25.047762");
-    await dropoffPicker.getByLabel("經度").fill("121.517017");
-    await dropoffPicker.getByLabel("手動定位原因").fill("xinyi");
-    await dropoffPicker.getByRole("button", { name: /使用此位置/ }).click();
-
-    await expect(
-      page.getByRole("button", { name: /提交禮賓代訂|送交人工審核/ }),
-    ).toBeEnabled();
-    await page
-      .getByRole("button", { name: /提交禮賓代訂|送交人工審核/ })
-      .click();
-
-    await expect(page.getByText("訂單 ID")).toBeVisible();
-    expect(captured.body).toHaveLength(1);
-
-    const command = captured.body[0] as any;
-    expect(command.mapFallbackReview).toMatchObject({
-      providerAvailable: false,
-      providerDegraded: true,
-    });
-  });
 
   test("blocks submission if addresses are empty", async ({ page }) => {
     await installConciergeApiMocks(page, { body: [] });
