@@ -787,13 +787,13 @@ export function PartnerBookingForm({
               theme={theme}
               tone="warn"
               title={
-                !providerState.available
-                  ? "地圖服務中斷 · 本次預約將送交人工複核"
+                !mapSelection.providerState.available
+                  ? t("book.map.outageReviewTitle")
                   : t("book.map.manualReviewTitle")
               }
               body={
-                !providerState.available
-                  ? "無法解析地址與落點。您可繼續填寫並送交客服人工複核；系統不會將此單靜默建立為一般訂單。"
+                !mapSelection.providerState.available
+                  ? t("book.map.outageReviewBody")
                   : t("book.map.manualReview")
               }
             />

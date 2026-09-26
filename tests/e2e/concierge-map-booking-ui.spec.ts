@@ -218,13 +218,7 @@ test.describe("concierge map booking UI", () => {
     const captured = { body: [] as unknown[] };
     await installConciergeApiMocks(page, captured);
 
-    // Simulate provider down
-    await page.route("**/api/geo/health", route => route.fulfill({
-      status: 200,
-      json: { provider: "mock", mode: "unavailable", status: "unhealthy" }
-    }));
-
-    const response = await page.goto("/bookings/new");
+    const response = await page.goto("/bookings/new?geoMode=unavailable");
     expect(response?.status()).toBe(200);
 
     // Provide manual coordinates and reason for pickup
@@ -264,7 +258,8 @@ test.describe("concierge map booking UI", () => {
     });
     expect(command.mapFallbackReview).toMatchObject({
       providerDegraded: true,
-      gateCode: "dispatch_manual_review_required"
+      providerAvailable: false,
+      reasonCode: "map_provider_unavailable"
     });
   });
 
@@ -272,13 +267,7 @@ test.describe("concierge map booking UI", () => {
     const captured = { body: [] as unknown[] };
     await installConciergeApiMocks(page, captured);
 
-    // Simulate provider down
-    await page.route("**/api/geo/health", route => route.fulfill({
-      status: 200,
-      json: { provider: "mock", mode: "unavailable", status: "unhealthy" }
-    }));
-
-    const response = await page.goto("/bookings/new");
+    const response = await page.goto("/bookings/new?geoMode=unavailable");
     expect(response?.status()).toBe(200);
 
     // The submit button should be disabled because coordinates are missing

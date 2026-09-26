@@ -14,7 +14,8 @@ function MP_StatesBoard({ theme:th }) {
 }
 // ── 租戶線：訂車建立（兩欄保留，左行程卡 / 右審核卡，上下車換成成對選點） ──
 function TN_NewBookingMap({ theme:th, degraded, pick, drop, reason }) {
-  const ps = degraded?'provider_down':(pick||'selected'), ds = degraded?'provider_down':(drop||'selected');
+  const ps = pick || 'selected';
+  const ds = drop || 'selected';
   const HARD = ['out_of_area'];                                   // 服務範圍外：任何路徑皆不可送
   const UNRESOLVED = ['no_results','empty','searching','candidates','missing_coordinate']; // 尚未定點：不可送
   const MANUAL = ['manual_review','provider_down']; // 走人工複核 (含手動座標帶理由)
@@ -105,7 +106,7 @@ function TN_AddressesMap({ theme:th, state='manual_review', coordinateData }) {
             {state === 'missing_coordinate' && <div style={{ marginTop:8 }}><Banner theme={th} tone="warn" icon="warn" title="缺少座標" body="此地址目前沒有座標，請在地圖上定位。"/></div>}
           </div>
           <Field theme={th} label="備註"><Input theme={th} value="貨運出入口，正門不可停車"/></Field>
-          <div style={{ display:'flex', gap:8 }}><Btn theme={th}>取消</Btn><span style={{ flex:1 }}/><Btn theme={th} variant="primary" icon="check" disabled={state==='missing_coordinate'}>儲存</Btn></div>
+          <div style={{ display:'flex', gap:8 }}><Btn theme={th}>取消</Btn><span style={{ flex:1 }}/><Btn theme={th} variant="primary" icon="check">儲存</Btn></div>
         </Card>
       </div>
     </Shell>
@@ -199,7 +200,7 @@ function PB_BookInsuranceMap({ state='selected', drop='selected', reason }) {
         </PBCard>
         <PBCard p={p} accentBar>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
-            <span style={{ fontSize: 12, color: '#56657F', fontWeight: 600 }}>費用方向</span>
+            <span style={{ fontSize: 12, color: th.textMuted, fontWeight: 600 }}>費用方向</span>
             <PBMoneyBadge kind="insurer" />
           </div>
           <PBRow k="代步權益狀態 · entitlement" v="核定通過" />
@@ -258,7 +259,7 @@ function PB_BookTravelMap({ state='selected', drop='selected', reason }) {
         </PBCard>
         <PBCard p={p} accentBar>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
-            <span style={{ fontSize: 12, color: '#56657F', fontWeight: 600 }}>費用方向</span>
+            <span style={{ fontSize: 12, color: th.textMuted, fontWeight: 600 }}>費用方向</span>
             <PBMoneyBadge kind="tour" />
           </div>
           <PBFieldLocked label="車輛配置 · fleet" value="中型巴士 ×1" sub="依團體人數配置" />

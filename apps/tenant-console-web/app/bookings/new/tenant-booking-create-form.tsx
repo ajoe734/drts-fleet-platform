@@ -1669,12 +1669,10 @@ export function TenantBookingCreateForm({
                         tone="danger"
                         icon="warn"
                         title={
-                          t("newBooking.serviceability.providerOutageBlocked") ??
-                          "地圖服務中斷 · 本單只能送交人工複核"
+                          t("newBooking.serviceability.providerOutageBlocked")
                         }
                         body={
-                          t("newBooking.serviceability.providerOutageBody") ??
-                          "無法解析地址與落點。您可繼續填寫並送交客服人工複核；系統不會將此單靜默建立為一般訂單。"
+                          t("newBooking.serviceability.providerOutageBody")
                         }
                       />
                     </div>

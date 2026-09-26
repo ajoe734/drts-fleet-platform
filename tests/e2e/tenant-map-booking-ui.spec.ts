@@ -191,7 +191,7 @@ test.describe("tenant console booking map alignment", () => {
 
   test("provider_outage disables search and blocks ordinary booking submission", async ({ page }) => {
     let bookingPostCalled = false;
-    await page.route("**/api/bookings", (route) => {
+    await page.route("**/api/bookings/create", (route) => {
       bookingPostCalled = true;
       return route.abort();
     });
@@ -200,7 +200,7 @@ test.describe("tenant console booking map alignment", () => {
     await page.goto("/bookings/new");
 
     // The UI should show the outage banner
-    await expect(page.getByText(/temporarily unavailable|暫時無法使用/i).first()).toBeVisible();
+    await expect(page.getByText(/Address provider is down|地址服務中斷/i).first()).toBeVisible();
 
     // The search input and button should be disabled
     const searchInputs = page.getByLabel(/Search|搜尋/i);
@@ -218,7 +218,11 @@ test.describe("tenant console booking map alignment", () => {
   });
 
   test("manual coordinate edits are allowed and submit with valid reason", async ({ page }) => {
-    await page.route("**/api/bookings", (route) => {
+    let postedData: any = null;
+    await page.route("**/api/bookings/create", (route) => {
+      if (route.request().method() === "POST") {
+        postedData = route.request().postDataJSON();
+      }
       return route.fulfill({ status: 201, json: { id: "BK-123" } });
     });
 
@@ -226,23 +230,41 @@ test.describe("tenant console booking map alignment", () => {
     await page.goto("/bookings/new");
 
     // Toggle manual for pickup
-    await page.getByText(/Manual location|手動輸入座標/).first().click();
+    await page.getByText(/Enter coordinates manually|改用手動座標/).first().click();
     await page.getByLabel(/Latitude|緯度/).first().fill("25.033");
     await page.getByLabel(/Longitude|經度/).first().fill("121.565");
     // Invalid reason (empty string) blocks apply if required, but tenant requires it
     await page.getByLabel(/Reason|原因/).first().fill("Testing manual pin");
-    await page.getByRole("button", { name: /Apply|使用此位置/ }).first().click();
+    await page.getByRole("button", { name: /Use this location|確認使用此位置/ }).first().click();
 
     // Toggle manual for dropoff
-    await page.getByText(/Manual location|手動輸入座標/).last().click();
+    await page.getByText(/Enter coordinates manually|改用手動座標/).last().click();
     await page.getByLabel(/Latitude|緯度/).last().fill("25.044");
     await page.getByLabel(/Longitude|經度/).last().fill("121.575");
     await page.getByLabel(/Reason|原因/).last().fill("Testing manual pin dropoff");
-    await page.getByRole("button", { name: /Apply|使用此位置/ }).last().click();
+    await page.getByRole("button", { name: /Use this location|確認使用此位置/ }).last().click();
 
-    // Now fill required booking fields (assuming mock setup allows)
-    // We just want to check if the submit gate allows it.
-    // If the form still has other required fields, the submit might be disabled until they are filled.
-    // We can just verify the gate state or check if the button becomes enabled (if the form is otherwise valid).
+    // Fill required booking fields to enable submit
+    await page.getByLabel(/Service type|服務類型/).click();
+    await page.getByRole("option").nth(1).click();
+    await page.getByLabel(/Timing|預約 \/ 即時/).click();
+    await page.getByRole("option").nth(1).click();
+
+    await page.getByLabel(/Depart At|出發時間/).fill("2026-10-01T12:00");
+    await page.getByLabel(/Headcount|人數/).fill("1");
+
+    await page.getByLabel(/Passenger|聯絡人/).click();
+    await page.getByRole("option").nth(1).click();
+    await page.getByLabel(/Cost center|成本中心/).click();
+    await page.getByRole("option").nth(1).click();
+
+    const submit = page.getByRole("button", { name: /Create booking|For approval|Submitting|建立叫車|送出/ });
+    await expect(submit).toBeEnabled();
+    await submit.click();
+
+    await expect.poll(() => postedData).toBeTruthy();
+    expect(postedData.pickup.lat).toBe(25.033);
+    expect(postedData.dropoff.lat).toBe(25.044);
+    expect(postedData.pickup.reason).toBe("Testing manual pin");
   });
 });

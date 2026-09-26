@@ -123,10 +123,22 @@ export default function ConciergeBookingCreatePage() {
     bothDispatchReady: false,
   });
 
-  const mapProviderMode =
+  const [mapProviderMode, setMapProviderMode] = useState<AddressProviderMode>(
     (process.env.NEXT_PUBLIC_ADDRESS_PICKER_PROVIDER_MODE as
       | AddressProviderMode
-      | undefined) ?? "healthy";
+      | undefined) ?? "healthy"
+  );
+
+  useEffect(() => {
+    if (typeof window !== "undefined") {
+      const params = new URLSearchParams(window.location.search);
+      const mode = params.get("geoMode") as AddressProviderMode;
+      if (mode) {
+        setMapProviderMode(mode);
+      }
+    }
+  }, []);
+
   const mapProvider = useMemo(
     () => createConfiguredMockAddressProvider(mapProviderMode),
     [mapProviderMode],
@@ -606,7 +618,7 @@ export default function ConciergeBookingCreatePage() {
                 }).code === "dispatch_manual_review_required" ? (
                   <p className="form-help">
                     {!mapSelection.providerState.available
-                      ? "地圖服務中斷 · 本單只能送交人工複核"
+                      ? t("booking.help.outageReview")
                       : t("booking.help.manualReview")}
                   </p>
                 ) : null}

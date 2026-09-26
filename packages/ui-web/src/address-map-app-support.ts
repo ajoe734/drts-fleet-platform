@@ -48,7 +48,7 @@ const zhLabels: AddressMapPickerLabels = {
   provenanceLabel: "位置來源",
   coordinatesLabel: "座標",
   mapEmpty: "選擇地址或手動放置座標後，會在這裡預覽。",
-  mapHint: "可拖曳圖釘，或用方向鍵微調位置。",
+  mapHint: "可拖曳圖釘，或用方向鍵微調 (Shift 加速)。",
   pinAdjustHint: "已手動調整圖釘位置。",
   clearSelection: "清除",
   serviceableTitle: "位於服務範圍內",
@@ -137,6 +137,13 @@ export function evaluateTenantSubmitGate(
   serviceability: ServiceAreaEvaluationResult | null,
   providerState: AddressProviderState | null,
 ): TenantAddressSubmitGateState {
+  if (providerState?.available === false) {
+    return {
+      blocking: true,
+      code: "provider_outage",
+    };
+  }
+
   const baseGate = evaluateAddressSubmitGate({
     pickup: pickupPayload,
     dropoff: dropoffPayload,

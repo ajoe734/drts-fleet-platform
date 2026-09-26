@@ -698,7 +698,7 @@ export const DEFAULT_ADDRESS_PICKER_LABELS: AddressMapPickerLabels = {
   provenanceLabel: "Location source",
   coordinatesLabel: "Coordinates",
   mapEmpty: "Select an address or drop a pin to preview it here.",
-  mapHint: "↑↓←→ 1 m · Shift 10 m · Enter 確認",
+  mapHint: "Drag the pin or use arrow keys to adjust (Shift for larger steps).",
   pinAdjustHint: "Pin adjusted manually.",
   clearSelection: "Clear",
   serviceableTitle: "Inside the service area",

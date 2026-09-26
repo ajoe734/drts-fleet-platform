@@ -71,6 +71,9 @@ const en = {
   "book.map.manualReviewTitle": "Needs review before dispatch",
   "book.map.manualReview":
     "The selected stops can be recorded, but dispatch must review them before normal assignment.",
+  "book.map.outageReviewTitle": "Address provider down \u00B7 Sent for review",
+  "book.map.outageReviewBody":
+    "Cannot resolve addresses and endpoints. You can continue submitting for manual review; this will not be silently created as a normal booking.",
   "book.map.outageFallback":
     "Address search is temporarily unavailable. The request can still be recorded with text addresses and held for review.",
   "book.map.outsideServiceArea":
@@ -559,6 +562,9 @@ const zh = {
   "book.map.coordinatesRequired": "此訂單在繼續前，必須先確認上下車座標。",
   "book.map.manualReviewTitle": "派遣前需人工確認",
   "book.map.manualReview": "目前可先記錄這趟行程，但正式派遣前仍需人工確認。",
+  "book.map.outageReviewTitle": "地圖服務中斷 \u00B7 本次預約將送交人工複核",
+  "book.map.outageReviewBody":
+    "無法解析地址與落點。您可繼續填寫並送交客服人工複核；系統不會將此單靜默建立為一般訂單。",
   "book.map.outageFallback":
     "地址查詢暫時無法使用。此申請仍可先用文字地址記錄，並轉入人工確認。",
   "book.map.outsideServiceArea": "所選路線超出服務範圍，無法從此入口送出。",
