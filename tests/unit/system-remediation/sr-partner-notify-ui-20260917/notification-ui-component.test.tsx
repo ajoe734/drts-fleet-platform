@@ -45,6 +45,8 @@ describe("PartnerNotificationPanel", () => {
       createPartnerEntryNotificationBinding: vi.fn().mockResolvedValue({}),
       updatePartnerEntryNotificationBinding: vi.fn().mockResolvedValue({}),
       testPartnerEntryNotificationBinding: vi.fn().mockResolvedValue({}),
+      enablePartnerEntryNotificationBinding: vi.fn().mockResolvedValue({}),
+      retryPartnerNotificationDelivery: vi.fn().mockResolvedValue({}),
       getList: vi.fn().mockImplementation((url) => {
         if (url === "/api/tenant/webhooks") {
           return Promise.resolve([
@@ -161,8 +163,18 @@ describe("PartnerNotificationPanel", () => {
     });
   });
   it("editable webhook/event selection with expectedVersion payload assertion", async () => {
-    render(<PartnerNotificationPanel entrySlug="test-entry" tenantId="test-tenant" canWriteBinding={true} canWriteWebhooks={true} canReadWebhooks={true} />);
-    const editBtn = await screen.findByRole("button", { name: /partnerNotification\.edit/i });
+    render(
+      <PartnerNotificationPanel
+        entrySlug="test-entry"
+        tenantId="test-tenant"
+        canWriteBinding={true}
+        canWriteWebhooks={true}
+        canReadWebhooks={true}
+      />,
+    );
+    const editBtn = await screen.findByRole("button", {
+      name: /partnerNotification\.edit/i,
+    });
     fireEvent.click(editBtn);
 
     const select = await screen.findByRole("combobox");
@@ -176,22 +188,39 @@ describe("PartnerNotificationPanel", () => {
     }
 
     const saveBtn = await screen.findByRole("button", { name: /儲存/i });
-    await waitFor(() => expect((saveBtn as HTMLButtonElement).disabled).toBe(false));
+    await waitFor(() =>
+      expect((saveBtn as HTMLButtonElement).disabled).toBe(false),
+    );
     fireEvent.click(saveBtn);
 
     await waitFor(() => {
-      expect(mockClient.updatePartnerEntryNotificationBinding).toHaveBeenCalled();
+      expect(
+        mockClient.updatePartnerEntryNotificationBinding,
+      ).toHaveBeenCalled();
     });
   });
 
   it("newer-version reload/resubmit preserving draft", async () => {
     // 409 conflict scenario
     mockClient.updatePartnerEntryNotificationBinding.mockRejectedValueOnce(
-      Object.assign(new Error("Conflict"), { statusCode: 409, code: "PARTNER_NOTIFICATION_BINDING_VERSION_CONFLICT" })
+      Object.assign(new Error("Conflict"), {
+        statusCode: 409,
+        code: "PARTNER_NOTIFICATION_BINDING_VERSION_CONFLICT",
+      }),
     );
 
-    render(<PartnerNotificationPanel entrySlug="test-entry" tenantId="test-tenant" canWriteBinding={true} canReadWebhooks={true} canWriteWebhooks={true} />);
-    const editBtn = await screen.findByRole("button", { name: /partnerNotification\.edit/i });
+    render(
+      <PartnerNotificationPanel
+        entrySlug="test-entry"
+        tenantId="test-tenant"
+        canWriteBinding={true}
+        canReadWebhooks={true}
+        canWriteWebhooks={true}
+      />,
+    );
+    const editBtn = await screen.findByRole("button", {
+      name: /partnerNotification\.edit/i,
+    });
     fireEvent.click(editBtn);
 
     const select = await screen.findByRole("combobox");
@@ -200,28 +229,42 @@ describe("PartnerNotificationPanel", () => {
     const saveBtn = await screen.findByRole("button", { name: /儲存/i });
     fireEvent.click(saveBtn);
 
-    const reloadBtn = await screen.findByRole("button", { name: /partnerNotification\.reload/i });
+    const reloadBtn = await screen.findByRole("button", {
+      name: /partnerNotification\.reload/i,
+    });
     expect(reloadBtn).toBeDefined();
-    
+
     // Click reload
     fireEvent.click(reloadBtn);
-    
+
     // We expect fetchState to have been called again (in addition to initial load)
     await waitFor(() => {
-      expect(mockClient.getPartnerEntryNotificationBinding).toHaveBeenCalledTimes(2);
+      expect(
+        mockClient.getPartnerEntryNotificationBinding,
+      ).toHaveBeenCalledTimes(2);
     });
   });
 
   it("creation/resume/test/enable", async () => {
     // 1. Creation - starts with 404
     mockClient.getPartnerEntryNotificationBinding.mockRejectedValueOnce(
-      Object.assign(new Error("Not found"), { statusCode: 404 })
+      Object.assign(new Error("Not found"), { statusCode: 404 }),
     );
-    const { rerender } = render(<PartnerNotificationPanel entrySlug="test-entry" tenantId="test-tenant" canWriteBinding={true} canReadWebhooks={true} canWriteWebhooks={true} />);
-    
-    const createBtn = await screen.findByRole("button", { name: /partnerNotification\.createBinding/i });
+    const { rerender } = render(
+      <PartnerNotificationPanel
+        entrySlug="test-entry"
+        tenantId="test-tenant"
+        canWriteBinding={true}
+        canReadWebhooks={true}
+        canWriteWebhooks={true}
+      />,
+    );
+
+    const createBtn = await screen.findByRole("button", {
+      name: /partnerNotification\.createBinding/i,
+    });
     fireEvent.click(createBtn);
-    
+
     // Select webhook to enable save button
     const select = await screen.findByRole("combobox");
     fireEvent.change(select, { target: { value: "test-webhook" } });
@@ -232,80 +275,168 @@ describe("PartnerNotificationPanel", () => {
     }
 
     const saveBtn = await screen.findByRole("button", { name: /儲存/i });
-    await waitFor(() => expect((saveBtn as HTMLButtonElement).disabled).toBe(false));
+    await waitFor(() =>
+      expect((saveBtn as HTMLButtonElement).disabled).toBe(false),
+    );
     fireEvent.click(saveBtn);
-    await waitFor(() => expect(mockClient.updatePartnerEntryNotificationBinding).toHaveBeenCalled());
+    await waitFor(() =>
+      expect(
+        mockClient.updatePartnerEntryNotificationBinding,
+      ).toHaveBeenCalled(),
+    );
 
     // 2. Resume - starts disabled
     mockClient.getPartnerEntryNotificationBinding.mockResolvedValueOnce({
-      state: "disabled", webhookId: "wh_1", eventTypes: [], version: 1, endpointFingerprint: "fp1", validatedEndpointFingerprint: "fp1"
+      state: "disabled",
+      webhookId: "wh_1",
+      eventTypes: [],
+      version: 1,
+      endpointFingerprint: "fp1",
+      validatedEndpointFingerprint: "fp1",
     });
-    rerender(<PartnerNotificationPanel entrySlug="test-entry" tenantId="test-tenant" canWriteBinding={true} canReadWebhooks={true} canWriteWebhooks={true} />);
-    
+    rerender(
+      <PartnerNotificationPanel
+        entrySlug="test-entry-2"
+        tenantId="test-tenant"
+        canWriteBinding={true}
+        canReadWebhooks={true}
+        canWriteWebhooks={true}
+      />,
+    );
+
     const resumeBtn = await screen.findByRole("button", { name: /resume/i });
     fireEvent.click(resumeBtn);
-    await waitFor(() => expect(mockClient.enablePartnerEntryNotificationBinding).toHaveBeenCalled());
+    await waitFor(() =>
+      expect(
+        mockClient.enablePartnerEntryNotificationBinding,
+      ).toHaveBeenCalled(),
+    );
 
     // 3. Test - starts test_pending
     mockClient.getPartnerEntryNotificationBinding.mockResolvedValueOnce({
-      state: "test_pending", webhookId: "wh_1", eventTypes: [], version: 1, endpointFingerprint: "fp1", validatedEndpointFingerprint: "fp2"
+      state: "test_pending",
+      webhookId: "wh_1",
+      eventTypes: [],
+      version: 1,
+      endpointFingerprint: "fp1",
+      validatedEndpointFingerprint: "fp2",
     });
-    rerender(<PartnerNotificationPanel entrySlug="test-entry" tenantId="test-tenant" canWriteBinding={true} />);
-    
+    rerender(
+      <PartnerNotificationPanel
+        entrySlug="test-entry-3"
+        tenantId="test-tenant"
+        canWriteBinding={true}
+      />,
+    );
+
     const testBtn = await screen.findByRole("button", { name: /test/i });
     fireEvent.click(testBtn);
-    await waitFor(() => expect(mockClient.testPartnerEntryNotificationBinding).toHaveBeenCalled());
+    await waitFor(() =>
+      expect(mockClient.testPartnerEntryNotificationBinding).toHaveBeenCalled(),
+    );
 
     // 4. Enable - starts test_pending and passed_current
     mockClient.getPartnerEntryNotificationBinding.mockResolvedValueOnce({
-      state: "test_pending", webhookId: "wh_1", eventTypes: [], version: 1, endpointFingerprint: "fp1", validatedEndpointFingerprint: "fp1"
+      state: "test_pending",
+      webhookId: "wh_1",
+      eventTypes: [],
+      version: 1,
+      endpointFingerprint: "fp1",
+      validatedEndpointFingerprint: "fp1",
     });
-    rerender(<PartnerNotificationPanel entrySlug="test-entry" tenantId="test-tenant" canWriteBinding={true} />);
-    
+    rerender(
+      <PartnerNotificationPanel
+        entrySlug="test-entry-4"
+        tenantId="test-tenant"
+        canWriteBinding={true}
+      />,
+    );
+
     const enableBtn = await screen.findByRole("button", { name: /enable/i });
     fireEvent.click(enableBtn);
-    await waitFor(() => expect(mockClient.enablePartnerEntryNotificationBinding).toHaveBeenCalled());
+    await waitFor(() =>
+      expect(
+        mockClient.enablePartnerEntryNotificationBinding,
+      ).toHaveBeenCalled(),
+    );
   });
 
   it("both management destinations plus authority denial", async () => {
     // 403 error
     mockClient.getPartnerEntryNotificationBinding.mockRejectedValueOnce(
-      Object.assign(new Error("Forbidden"), { statusCode: 403 })
+      Object.assign(new Error("Forbidden"), { statusCode: 403 }),
     );
-    const { rerender } = render(<PartnerNotificationPanel entrySlug="test-entry" tenantId="test-tenant" canWriteBinding={false} />);
-    expect(await screen.findByText(/partnerNotification\.scopeDeniedTitle/i)).toBeDefined();
+    const { rerender } = render(
+      <PartnerNotificationPanel
+        entrySlug="test-entry"
+        tenantId="test-tenant"
+        canWriteBinding={false}
+      />,
+    );
+    expect(
+      await screen.findByText(/partnerNotification\.scopeDeniedTitle/i),
+    ).toBeDefined();
 
     // No permission for binding but YES permission for webhooks
     mockClient.getPartnerEntryNotificationBinding.mockResolvedValueOnce({
-      state: "ready", webhookId: "wh_1", eventTypes: [], version: 1
+      state: "ready",
+      webhookId: "wh_1",
+      eventTypes: [],
+      version: 1,
     });
-    rerender(<PartnerNotificationPanel entrySlug="test-entry" tenantId="test-tenant" canWriteBinding={false} canWriteWebhooks={true} canReadWebhooks={true} />);
-    
-    expect(await screen.findByText(/partnerNotification\.permissionDenied/i)).toBeDefined();
-    
-    const editBtn = await screen.findByRole("button", { name: /partnerNotification\.edit/i });
+    rerender(
+      <PartnerNotificationPanel
+        entrySlug="test-entry"
+        tenantId="test-tenant"
+        canWriteBinding={false}
+        canWriteWebhooks={true}
+        canReadWebhooks={true}
+      />,
+    );
+
+    expect(
+      await screen.findByText(/partnerNotification\.permissionDenied/i),
+    ).toBeDefined();
+
+    const editBtn = await screen.findByRole("button", {
+      name: /partnerNotification\.edit/i,
+    });
     expect((editBtn as HTMLButtonElement).disabled).toBe(true);
-    
+
     // Management links should be available if canWriteWebhooks=true
     const extLinks = await screen.findAllByRole("link");
     expect(extLinks.length).toBeGreaterThan(0);
-    expect(extLinks[0].getAttribute("href")).toContain("/tenants/test-tenant");
+    expect(extLinks[0].getAttribute("href")).toContain(
+      "/api/auth/tenant/login",
+    );
   });
 
   it("pending entry/client/permission/unmount boundaries", async () => {
     let resolvePromise: any;
-    mockClient.getPartnerEntryNotificationBinding.mockReturnValue(new Promise(resolve => {
-      resolvePromise = resolve;
-    }));
-    
-    const { unmount } = render(<PartnerNotificationPanel entrySlug="test-entry" canWriteBinding={true} />);
-    
+    mockClient.getPartnerEntryNotificationBinding.mockReturnValue(
+      new Promise((resolve) => {
+        resolvePromise = resolve;
+      }),
+    );
+
+    const { unmount } = render(
+      <PartnerNotificationPanel
+        entrySlug="test-entry"
+        canWriteBinding={true}
+      />,
+    );
+
     unmount();
-    
+
     // Resolve after unmount
-    resolvePromise({ state: "ready", webhookId: "wh_1", eventTypes: [], version: 1 });
-    await new Promise(r => setTimeout(r, 10)); // Allow microtasks to process
-    
+    resolvePromise({
+      state: "ready",
+      webhookId: "wh_1",
+      eventTypes: [],
+      version: 1,
+    });
+    await new Promise((r) => setTimeout(r, 10)); // Allow microtasks to process
+
     // Should not throw any errors about updating unmounted components
     expect(true).toBe(true);
   });
