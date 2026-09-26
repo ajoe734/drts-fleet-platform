@@ -177,6 +177,10 @@ describe.skipIf(!testDbUrl)(
           [createdOutboxIds],
         );
         await pool.query(
+          "DELETE FROM ops.phase1_push_delivery_receipts WHERE outbox_id = ANY($1)",
+          [createdOutboxIds],
+        );
+        await pool.query(
           "DELETE FROM mobility.phase1_partner_notification_delivery_contexts WHERE outbox_id = ANY($1)",
           [createdOutboxIds],
         );
@@ -378,18 +382,38 @@ describe.skipIf(!testDbUrl)(
       expect(claimRes!.fenceToken).toBeDefined();
 
       // Attempt a stale completion (using an old fence) - should fail
-      await expect(
-        mtRepo.pushDeliveryOutcome(staleId, claimRes!.fenceToken - 1, {
-          kind: "delivered",
-          receiptId: "rec-fail",
-        }),
-      ).rejects.toThrow("Delivery outcome rejected");
+      const staleRes = await mtRepo.recordPushDeliveryOutcome({
+        outboxId: staleId,
+        fenceToken: claimRes!.fenceToken - 1,
+        passengerSubjectRef: "test-passenger",
+        providerName: "test-provider",
+        providerAckState: "delivered",
+        providerMessageRef: "msg-fail",
+        deliveryOutcome: "delivered",
+        partnerMetadata: {
+          entrySlug: entrySlug1,
+          tenantId: "tenant-1",
+          partnerId,
+        },
+      });
+      expect(staleRes).toEqual({ recorded: false, reason: "fence_lost" });
 
       // Attempt a genuine completion with the correct fence
-      await mtRepo.pushDeliveryOutcome(staleId, claimRes!.fenceToken, {
-        kind: "delivered",
-        receiptId: "rec-123",
+      const genRes = await mtRepo.recordPushDeliveryOutcome({
+        outboxId: staleId,
+        fenceToken: claimRes!.fenceToken,
+        passengerSubjectRef: "test-passenger",
+        providerName: "test-provider",
+        providerAckState: "delivered",
+        providerMessageRef: "msg-123",
+        deliveryOutcome: "delivered",
+        partnerMetadata: {
+          entrySlug: entrySlug1,
+          tenantId: "tenant-1",
+          partnerId,
+        },
       });
+      expect(genRes).toEqual({ recorded: true, replayed: false });
 
       // Verify actual receipt insertion
       const receipt = await pool.query(
@@ -397,7 +421,10 @@ describe.skipIf(!testDbUrl)(
         [staleId],
       );
       expect(receipt.rows.length).toBe(1);
-      expect(receipt.rows[0].receipt_id).toBe("rec-123");
+      expect(receipt.rows[0].receipt_id).toMatch(
+        /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i,
+      );
+      expect(receipt.rows[0].provider_message_ref).toBe("msg-123");
 
       // 4. Expiry / superseded
       const { outboxId: expId } = await createFixture({
@@ -410,15 +437,22 @@ describe.skipIf(!testDbUrl)(
       );
       expect(resExp.kind).toBe("failed");
 
-      const { outboxId: superId } = await createFixture({
-        status: "delivered",
-        failureReason: "notification_superseded",
+      const { outboxId: superId, orderId: superOrderId } = await createFixture({
+        status: "failed",
       });
+      // Bump assignment version to exercise authoritative reassignment
+      await pool.query(
+        "INSERT INTO ops.passenger_dispatch_disclosure_snapshots (order_id, assignment_version, dispatch_event_id, snapshot_at) VALUES ($1, 2, 'evt-1', now())",
+        [superOrderId],
+      );
       const resSuper = await mtRepo.retryPartnerNotificationDelivery(
         entryObj,
         superId,
       );
       expect(resSuper.kind).toBe("failed");
+      if (resSuper.kind === "failed") {
+        expect(resSuper.failure.failureReason).toBe("notification_superseded");
+      }
 
       // 5. Cross-tenant authority rejection
       const resCrossTenant = await mtRepo.retryPartnerNotificationDelivery(
@@ -428,19 +462,30 @@ describe.skipIf(!testDbUrl)(
       expect(resCrossTenant.kind).toBe("failed");
 
       // 6. Duplicate retry / schedule preservation check
+      const { outboxId: pendingId } = await createFixture({
+        status: "pending",
+      });
+      const pendingBefore = await pool.query(
+        "SELECT attempt_count, next_attempt_at FROM ops.consumer_notification_outbox WHERE outbox_id = $1",
+        [pendingId],
+      );
+
       const resDup = await mtRepo.retryPartnerNotificationDelivery(
         entryObj,
-        staleId,
+        pendingId,
       );
-      // Since it is now delivered, it should be rejected.
-      expect(resDup.kind).toBe("failed");
+      expect(resDup.kind).toBe("requeued");
 
-      // 7. Requeue of a pending outbox
-      const resPending = await mtRepo.retryPartnerNotificationDelivery(
-        entryObj,
-        legalId,
+      const pendingAfter = await pool.query(
+        "SELECT attempt_count, next_attempt_at FROM ops.consumer_notification_outbox WHERE outbox_id = $1",
+        [pendingId],
       );
-      expect(resPending.kind).toBe("requeued");
+      expect(pendingAfter.rows[0].attempt_count).toBe(
+        pendingBefore.rows[0].attempt_count,
+      );
+      expect(pendingAfter.rows[0].next_attempt_at.getTime()).toBe(
+        pendingBefore.rows[0].next_attempt_at.getTime(),
+      );
 
       // 8. Exhausted budget
       const { outboxId: budgetId } = await createFixture({

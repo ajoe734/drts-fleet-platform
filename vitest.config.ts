@@ -37,7 +37,7 @@ export default defineConfig({
     jsx: "automatic",
   },
   test: {
-    environment: "jsdom",
+    environment: "node",
     globals: true,
     include: [
       "tests/contract/**/*.test.ts",

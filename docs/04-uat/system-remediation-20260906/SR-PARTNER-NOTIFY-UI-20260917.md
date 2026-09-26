@@ -694,3 +694,29 @@ All P1 findings from the latest review by Codex2 (REVIEWED_SHA=4d691feb1a48e4801
 | ------------------------- | ------------------------------------------------------------------- | ------------------------------- | ------- | --------------------- |
 | R1b: Cross App Linking    | Replaced `/webhooks` with `/tenant/webhooks` in resolveCrossAppHref | Node compilation / source check | PASS    | Live testing          |
 | R-CI: createRequire fixes | Fixed dynamic import loading in JSDOM environment                   | `pnpm exec vitest run ...`      | SKIP    | VM restricts local PG |
+
+---
+
+## Review Findings Resolution (Codex2 - Round 4)
+
+Codex2 independent candidate re-review: REQUEST CHANGES.
+REVIEWED_SHA=6957b4c662f7b20a47379ca21c6423577ef81471
+candidate_generation=102eab5d76604b53893b0606feee124b
+
+### Outstanding Findings Fixed
+
+| Finding / Issue                                                        | Resolution                                                                                                                                                                                                                                                                                                                                                         |
+| :--------------------------------------------------------------------- | :----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **R-PUBLISH [P1; new handoff identity regression]**                    | PR identity mismatch is resolved by committing and pushing the corrected SHA properly and executing the proper handoff command for candidate submission, resolving #2162 to the locked SHA.                                                                                                                                                                        |
+| **R-CI [P1; repeated] global jsdom environment breaks Node semantics** | Updated `vitest.config.ts` to use `node` environment globally and isolated `jsdom` via `environmentMatchGlobs: [["**/*.tsx", "jsdom"]]`. This preserves Node semantics for backend tests while giving UI tests their required DOM.                                                                                                                                 |
+| **R1b [P1; repeated broken webhook-management navigation]**            | Updated `partner-notification-panel.tsx` to correctly resolve redirect URLs to `/webhooks` instead of the nonexistent `/tenant/webhooks`, resolving routing issues for tenant administration.                                                                                                                                                                      |
+| **R2b-API [P1; repeated hosted PG failure]**                           | `notification-ui.postgres.test.ts` was calling a nonexistent `mtRepo.pushDeliveryOutcome`. Updated to use actual API `mtRepo.recordPushDeliveryOutcome(input)` with the correct `RecordPushDeliveryOutcomeInput` shape. Correctly verified receipt fields including UUID pattern matching. Ensured receipts are deleted prior to outboxes in `afterEach` teardown. |
+| **R2b-COVERAGE [P1; repeated acceptance gaps]**                        | Rewrote `notification-ui-component.test.tsx` to actually execute component rendering, management link availability, and error interactions such as 409 conflict recovery, checking component UI boundaries properly rather than just testing a heading. Also updated PG suite to test schedule preservation and exercise authoritative reassignment via DB bump.   |
+| **R6/R7 [P2] Scope & Evidence coordination**                           | Fixed unrelated file changes from working tree. Added real previous independent re-review trace to document (see above), appending actual findings correctly instead of overwriting with unsupported VERIFIED claims.                                                                                                                                              |
+
+## Handoff Evidence (Gemini - Round 5)
+
+- **Candidate Branch**: gemini/sr-partner-notify-ui-20260924-canvas
+- **Hosted CI Evidence**: PENDING hosted pipeline
+- **Local Evidence**:
+  - `pnpm exec vitest run ...` executed cleanly (Exit 0) with 18 passed tests and 17 skipped (PG skipped due to local DB restrictions) across 6 test files.
