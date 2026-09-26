@@ -1164,8 +1164,10 @@ const en = {
   "newBooking.serviceability.blockedTitle": "Outside the service area",
   "newBooking.serviceability.blockedBody":
     "The selected pickup or drop-off is not serviceable. Adjust the pins to a covered location before submitting. The backend enforces this check independently.",
-  "newBooking.serviceability.manualReviewTitle": "Map provider degraded · Manual review required",
-  "newBooking.serviceability.manualReviewBody": "System cannot verify service area. Support will verify location before dispatch.",
+  "newBooking.serviceability.manualReviewTitle":
+    "Map provider degraded · Manual review required",
+  "newBooking.serviceability.manualReviewBody":
+    "System cannot verify service area. Support will verify location before dispatch.",
   "newBooking.card.approval.title": "References and approval",
   "newBooking.card.approval.subtitle":
     "Cost center, finance fields, and proxy metadata travel with the command.",
@@ -1271,6 +1273,7 @@ const en = {
   "newBooking.submit.fixHighlightedTitle": "Fix the highlighted fields first",
   "newBooking.submit.submitting": "Submitting...",
   "newBooking.submit.forApproval": "Submit for approval",
+  "newBooking.submit.manualReview": "Submit manual review",
   "newBooking.submit.create": "Create booking",
 
   "refreshControl.fresh": "Fresh snapshot",
@@ -5156,8 +5159,10 @@ const zh: Record<keyof typeof en, string> = {
   "newBooking.serviceability.blockedTitle": "超出服務範圍",
   "newBooking.serviceability.blockedBody":
     "所選上車或下車點不在可服務範圍內。送出前請將地圖 pin 調整到涵蓋範圍內。後端會獨立再驗證此限制。",
-  "newBooking.serviceability.manualReviewTitle": "地圖服務中斷 · 本次預約將送交人工複核",
-  "newBooking.serviceability.manualReviewBody": "系統暫時無法驗證合約服務範圍。請手動填寫上下車地點，客服中心確認後才會派車。",
+  "newBooking.serviceability.manualReviewTitle":
+    "地圖服務中斷 · 本次預約將送交人工複核",
+  "newBooking.serviceability.manualReviewBody":
+    "系統暫時無法驗證合約服務範圍。請手動填寫上下車地點，客服中心確認後才會派車。",
   "newBooking.card.approval.title": "關聯與審批",
   "newBooking.card.approval.subtitle":
     "成本中心、財務欄位與代訂 metadata 都隨命令一起送出。",
@@ -5252,6 +5257,7 @@ const zh: Record<keyof typeof en, string> = {
   "newBooking.submit.fixHighlightedTitle": "請先處理高亮欄位",
   "newBooking.submit.submitting": "送出中...",
   "newBooking.submit.forApproval": "送出審批",
+  "newBooking.submit.manualReview": "送交人工審核",
   "newBooking.submit.create": "建立叫車",
 
   "refreshControl.fresh": "最新快照",
