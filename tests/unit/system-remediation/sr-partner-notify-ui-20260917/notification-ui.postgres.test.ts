@@ -733,50 +733,69 @@ describe.skipIf(!testDbUrl)(
         [missingBindingSlug],
       );
 
-      // Verify it is configuration_blocked initially
       const prepBefore = await mtRepo.retryPartnerNotificationDelivery(
         { entrySlug: missingBindingSlug, tenantId, partnerId },
         outboxId,
       );
       expect(prepBefore.kind).toBe("failed");
-      expect((prepBefore as any).failure?.failureReason).toBe(
-        "configuration_blocked",
-      );
+      expect((prepBefore as any).failure?.failureReason).toBe("configuration_blocked");
 
-      // using production function
-      const { PartnerEntryNotificationBindingService } =
-        await import("../../../../apps/api/src/modules/tenant-partner/partner-entry-notification-binding.service");
-      const { PartnerNotificationDispatchFacade } =
-        await import("../../../../apps/api/src/modules/tenant-partner/partner-notification-dispatch.facade");
+      const { PartnerEntryNotificationBindingService } = await import("../../../../apps/api/src/modules/tenant-partner/partner-entry-notification-binding.service");
+      const { PartnerNotificationDispatchFacade } = await import("../../../../apps/api/src/modules/tenant-partner/partner-notification-dispatch.facade");
+      const { PartnerNotificationTransport } = await import("../../../../apps/api/src/modules/multi-taxi/partner-notification.transport");
       const bindingService = app.get(PartnerEntryNotificationBindingService);
       const dispatchFacade = app.get(PartnerNotificationDispatchFacade);
 
-      const dispatchSpy = vi
-        .spyOn(dispatchFacade, "dispatchNotificationAttemptByWebhookId")
-        .mockResolvedValue({
-          kind: "accepted",
-          ack: { received: true, id: "ack-1" },
-        } as any);
-
-      await bindingService.putBinding(missingBindingSlug, {
-        webhookId: webhookId,
-        eventTypes: ["eta_changed"],
-        expectedVersion: 0,
-      });
-      await bindingService.testBinding(missingBindingSlug, {
-        tenantId,
-        partnerId,
-        actingUser: "system",
-      } as any);
+      await bindingService.putBinding(missingBindingSlug, { webhookId, eventTypes: ["eta_changed"], expectedVersion: 0 });
+      await bindingService.testBinding(missingBindingSlug, { tenantId, partnerId, actingUser: "system" } as any);
       await bindingService.enableBinding(missingBindingSlug, 1);
-
-      dispatchSpy.mockRestore();
 
       const res = await mtRepo.retryPartnerNotificationDelivery(
         { entrySlug: missingBindingSlug, tenantId, partnerId },
         outboxId,
       );
       expect(res.kind).toBe("requeued");
+
+      const claim = await mtRepo.claimPartnerNotification(outboxId, "worker-1", 60);
+      expect(claim).toBeDefined();
+
+      const dispatchSpy = vi.spyOn(dispatchFacade, "dispatchNotificationAttemptByWebhookId").mockImplementation(async (command) => ({
+        kind: "accepted",
+        ack: {
+          notificationId: command.wirePayload.notificationId,
+          deliveryId: command.wirePayload.deliveryId,
+          partnerEntrySlug: missingBindingSlug,
+          status: "accepted",
+          receiptId: "ack-typed",
+        } as any,
+      }));
+
+      try {
+        const transport = new PartnerNotificationTransport(mtRepo, dispatchFacade);
+        const receipt = await transport.send({
+          providerName: "partner_webhook",
+          message: claim!.record as any,
+          context: { fenceToken: claim!.fenceToken }
+        });
+        
+        expect(dispatchSpy).toHaveBeenCalled();
+        const callCommand = dispatchSpy.mock.calls[0][0];
+        expect(callCommand.wirePayload.eventSequence).toBe(42);
+        
+        await mtRepo.recordPartnerPushOutcome(outboxId, {
+          status: "delivered",
+          result: "delivered",
+          deliveredAt: receipt.deliveredAt!,
+          attemptCount: claim!.record.attemptCount,
+          ...receipt.deliveryContext!
+        } as any, claim!.fenceToken);
+
+        const { rows } = await pool.query("SELECT status, attempt_count FROM ops.consumer_notification_outbox WHERE outbox_id = $1", [outboxId]);
+        expect(rows[0].status).toBe("delivered");
+        expect(rows[0].attempt_count).toBe(2);
+      } finally {
+        dispatchSpy.mockRestore();
+      }
     });
 
     it("tests missing/disabled/test_pending readiness", async () => {

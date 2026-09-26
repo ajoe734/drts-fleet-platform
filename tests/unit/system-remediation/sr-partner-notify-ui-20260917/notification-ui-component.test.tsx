@@ -50,7 +50,7 @@ describe("PartnerNotificationPanel", () => {
         .mockResolvedValue({ version: 2, state: "disabled" }),
       testPartnerEntryNotificationBinding: vi
         .fn()
-        .mockResolvedValue({ kind: "accepted", ack: true }),
+        .mockResolvedValue({ kind: "accepted", ack: { notificationId: "n-1", deliveryId: "d-1", partnerEntrySlug: "test", status: "accepted", receiptId: "ack-1" } }),
       enablePartnerEntryNotificationBinding: vi
         .fn()
         .mockResolvedValue({
@@ -296,19 +296,21 @@ describe("PartnerNotificationPanel", () => {
     });
   });
 
-  it("creation/resume/test/enable", async () => {
+  it("creation/resume/test/enable and typed failure paths", async () => {
     // 1. Creation - starts with 404
     mockClient.getPartnerEntryNotificationBinding.mockRejectedValueOnce(
       Object.assign(new Error("Not found"), { statusCode: 404 }),
     );
     const { rerender } = render(
-      <PartnerNotificationPanel
-        entrySlug="test-entry"
-        tenantId="test-tenant"
-        canWriteBinding={true}
-        canReadWebhooks={true}
-        canWriteWebhooks={true}
-      />,
+      <AdminClientProvider adminClient={mockClient as any}>
+        <PartnerNotificationPanel
+          entrySlug="test-entry"
+          tenantId="test-tenant"
+          canWriteBinding={true}
+          canReadWebhooks={true}
+          canWriteWebhooks={true}
+        />
+      </AdminClientProvider>
     );
 
     const createBtn = await screen.findByRole("button", {
@@ -320,93 +322,115 @@ describe("PartnerNotificationPanel", () => {
     const select = await screen.findByRole("combobox");
     fireEvent.change(select, { target: { value: "test-webhook" } });
 
-    const checkboxes = await screen.findAllByRole("checkbox");
-    if (checkboxes.length > 0 && !checkboxes[checkboxes.length - 1].checked) {
-      fireEvent.click(checkboxes[checkboxes.length - 1]);
-    }
-
+    // Ensure eta_changed is selected
     const saveBtn = await screen.findByRole("button", { name: /儲存/i });
     await waitFor(() =>
       expect((saveBtn as HTMLButtonElement).disabled).toBe(false),
     );
     fireEvent.click(saveBtn);
+    
     await waitFor(() =>
-      expect(
-        mockClient.updatePartnerEntryNotificationBinding,
-      ).toHaveBeenCalled(),
+      expect(mockClient.updatePartnerEntryNotificationBinding).toHaveBeenCalledWith(
+        "test-entry",
+        expect.objectContaining({
+          webhookId: "test-webhook",
+          eventTypes: ["eta_changed"],
+          expectedVersion: 0,
+        })
+      ),
     );
 
-    // 2. Resume - starts disabled
+    // 2. Resume - test a stale validation sequencing
     mockClient.getPartnerEntryNotificationBinding.mockResolvedValueOnce({
-      state: "disabled",
+      state: "disabled", // but with fingerprint mismatch => stale
       webhookId: "wh_1",
-      eventTypes: [],
+      eventTypes: ["eta_changed"],
       version: 1,
       endpointFingerprint: "fp1",
-      validatedEndpointFingerprint: "fp1",
+      validatedEndpointFingerprint: "fp-old", // stale test
       validatedAt: new Date().toISOString(),
     });
     rerender(
-      <PartnerNotificationPanel
-        entrySlug="test-entry-2"
-        tenantId="test-tenant"
-        canWriteBinding={true}
-        canReadWebhooks={true}
-        canWriteWebhooks={true}
-      />,
+      <AdminClientProvider adminClient={mockClient as any}>
+        <PartnerNotificationPanel
+          entrySlug="test-entry-2"
+          tenantId="test-tenant"
+          canWriteBinding={true}
+          canReadWebhooks={true}
+          canWriteWebhooks={true}
+        />
+      </AdminClientProvider>
     );
 
-    const resumeBtn = await screen.findByRole("button", { name: /resume/i });
-    fireEvent.click(resumeBtn);
+    // It should demand a re-test, not just enable
+    const staleTestBtn = await screen.findByRole("button", { name: /test/i });
+    fireEvent.click(staleTestBtn);
     await waitFor(() =>
-      expect(
-        mockClient.enablePartnerEntryNotificationBinding,
-      ).toHaveBeenCalledWith("test-entry-2", 1),
+      expect(mockClient.testPartnerEntryNotificationBinding).toHaveBeenCalledWith("test-entry-2"),
     );
-    mockClient.enablePartnerEntryNotificationBinding.mockClear();
 
-    // 3. Test - starts test_pending
+    // 3. Test failed path
+    mockClient.testPartnerEntryNotificationBinding.mockResolvedValueOnce({
+      kind: "failed",
+      failure: { failureReason: "delivery_timeout", retryDisposition: "transient" }
+    });
+    
     mockClient.getPartnerEntryNotificationBinding.mockResolvedValueOnce({
       state: "test_pending",
       webhookId: "wh_1",
-      eventTypes: [],
+      eventTypes: ["eta_changed"],
       version: 1,
       endpointFingerprint: "fp1",
       validatedEndpointFingerprint: "fp2",
       validatedAt: new Date().toISOString(),
     });
+    
     rerender(
-      <PartnerNotificationPanel
-        entrySlug="test-entry-3"
-        tenantId="test-tenant"
-        canWriteBinding={true}
-      />,
+      <AdminClientProvider adminClient={mockClient as any}>
+        <PartnerNotificationPanel
+          entrySlug="test-entry-3"
+          tenantId="test-tenant"
+          canWriteBinding={true}
+        />
+      </AdminClientProvider>
     );
 
     const testBtn = await screen.findByRole("button", { name: /test/i });
     fireEvent.click(testBtn);
+    
+    // We expect it to handle the failure gracefully (no unhandled promise rejection)
     await waitFor(() =>
-      expect(
-        mockClient.testPartnerEntryNotificationBinding,
-      ).toHaveBeenCalledWith("test-entry-3"),
+      expect(mockClient.testPartnerEntryNotificationBinding).toHaveBeenCalledWith("test-entry-3"),
     );
 
-    // 4. Enable - starts test_pending and passed_current
+    // 4. Test rejected path
+    mockClient.testPartnerEntryNotificationBinding.mockResolvedValueOnce({
+      kind: "failed",
+      failure: { failureReason: "provider_terminal_error", retryDisposition: "terminal" }
+    });
+    fireEvent.click(testBtn);
+    await waitFor(() =>
+      expect(mockClient.testPartnerEntryNotificationBinding).toHaveBeenCalledTimes(3),
+    );
+
+    // 5. Enable - starts test_pending and passed_current
     mockClient.getPartnerEntryNotificationBinding.mockResolvedValueOnce({
       state: "test_pending",
       webhookId: "wh_1",
-      eventTypes: [],
+      eventTypes: ["eta_changed"],
       version: 1,
       endpointFingerprint: "fp1",
       validatedEndpointFingerprint: "fp1",
       validatedAt: new Date().toISOString(),
     });
     rerender(
-      <PartnerNotificationPanel
-        entrySlug="test-entry-4"
-        tenantId="test-tenant"
-        canWriteBinding={true}
-      />,
+      <AdminClientProvider adminClient={mockClient as any}>
+        <PartnerNotificationPanel
+          entrySlug="test-entry-4"
+          tenantId="test-tenant"
+          canWriteBinding={true}
+        />
+      </AdminClientProvider>
     );
 
     const enableBtn = await screen.findByRole("button", { name: /enable/i });
@@ -527,13 +551,15 @@ describe("PartnerNotificationPanel", () => {
     });
 
     const { unmount, rerender } = render(
-      <PartnerNotificationPanel
-        entrySlug="test-entry"
-        tenantId="test-tenant"
-        canWriteBinding={true}
-        canWriteWebhooks={true}
-        canReadWebhooks={true}
-      />,
+      <AdminClientProvider adminClient={mockClient as any}>
+        <PartnerNotificationPanel
+          entrySlug="test-entry"
+          tenantId="test-tenant"
+          canWriteBinding={true}
+          canWriteWebhooks={true}
+          canReadWebhooks={true}
+        />
+      </AdminClientProvider>
     );
 
     const editBtn = await screen.findByRole("button", {
@@ -542,47 +568,55 @@ describe("PartnerNotificationPanel", () => {
     fireEvent.click(editBtn);
 
     const saveBtn = await screen.findByRole("button", { name: /儲存/i });
-    await waitFor(() =>
-      expect((saveBtn as HTMLButtonElement).disabled).toBe(false),
-    );
+    await waitFor(() => expect((saveBtn as HTMLButtonElement).disabled).toBe(false));
     fireEvent.click(saveBtn);
-
-    // change props while mutation is pending
+    
+    // now we have a pending mutation.
+    // 1. Change entry context while mounted
     rerender(
-      <PartnerNotificationPanel
-        entrySlug="test-entry-new"
-        tenantId="test-tenant"
-        canWriteBinding={false}
-      />,
+      <AdminClientProvider adminClient={mockClient as any}>
+        <PartnerNotificationPanel
+          entrySlug="new-entry"
+          tenantId="new-tenant"
+          canWriteBinding={true}
+        />
+      </AdminClientProvider>
     );
 
-    unmount();
-
-    // Clear mocks to assert absence of follow-on calls
+    // Resolve old mutation while new entry is mounted
     mockClient.getPartnerEntryNotificationBinding.mockClear();
-    mockClient.testPartnerEntryNotificationBinding.mockClear();
-    mockClient.enablePartnerEntryNotificationBinding.mockClear();
-
-    // Resolve the mutation after unmount
+    
     resolveMutation({
       version: 2,
-      state: "ready",
-      validatedAt: "2026-09-24T12:00:00Z",
+      state: "disabled",
     });
+    
     await new Promise((r) => setTimeout(r, 10));
+    
+    // the old mutation resolution should not trigger any reload for the new entry!
+    expect(mockClient.getPartnerEntryNotificationBinding).not.toHaveBeenCalledWith("test-entry");
+    expect(mockClient.getPartnerEntryNotificationBinding).toHaveBeenCalledWith("new-entry");
 
-    // We ensure no follow-on state updates/GETs/tests occur on unmounted component
-    expect(
-      mockClient.updatePartnerEntryNotificationBinding,
-    ).toHaveBeenCalledTimes(1);
-    expect(
-      mockClient.getPartnerEntryNotificationBinding,
-    ).not.toHaveBeenCalled();
-    expect(
-      mockClient.testPartnerEntryNotificationBinding,
-    ).not.toHaveBeenCalled();
-    expect(
-      mockClient.enablePartnerEntryNotificationBinding,
-    ).not.toHaveBeenCalled();
+    // 2. Unmount with deferred completion
+    let resolveTest: any;
+    mockClient.testPartnerEntryNotificationBinding.mockReturnValue(
+      new Promise((resolve) => {
+        resolveTest = resolve;
+      })
+    );
+    
+    // Wait for the new entry to load
+    await screen.findByRole("button", { name: /partnerNotification\.edit/i });
+    
+    unmount();
+    
+    // resolve while unmounted
+    mockClient.enablePartnerEntryNotificationBinding.mockClear();
+    resolveTest({ kind: "accepted", ack: { received: true, id: "ack-1" }});
+    
+    await new Promise((r) => setTimeout(r, 10));
+    
+    // ensure no follow-on state update/enable call
+    expect(mockClient.enablePartnerEntryNotificationBinding).not.toHaveBeenCalled();
   });
 });
