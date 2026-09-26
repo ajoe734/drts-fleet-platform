@@ -121,7 +121,7 @@ function PB_BookCardMap({ state='selected', drop='selected', reason, program='ca
         {hard
           ? <div style={{ background:th.dangerBg, border:`1px solid ${th.danger}40`, borderRadius:12, padding:'10px 14px', fontSize:12.5, color:th.danger, fontWeight:600 }}>有地點不在服務範圍 · 無法預約，亦不可改送人工複核</div>
           : blocked
-          ? <div style={{ background:th.dangerBg, border:`1px solid ${th.danger}40`, borderRadius:12, padding:'10px 14px', fontSize:12.5, color:th.danger, fontWeight:600 }}>{down?'地圖服務中斷 · 本次預約將送交人工複核，客服確認地點後才派車':'地點需人工確認 · 送出後由客服核對後才派車'}</div>
+          ? <div style={{ background:th.dangerBg, border:`1px solid ${th.danger}40`, borderRadius:12, padding:'10px 14px', fontSize:12.5, color:th.danger, fontWeight:600 }}>{down?'地圖服務中斷 · 本次預約將送交人工複核，客服確認地點後才派車':manualPath?'地點需人工確認 · 送出後由客服核對後才派車':(needsReason && !hasReason)?'手動定位需填寫原因 · 請完成所有必填欄位':'請先選定並確認上下車地點'}</div>
           : <div style={{ background:p.accentBg, border:'1px solid '+p.accent+'40', borderRadius:12, padding:'10px 14px', fontSize:12.5, color:p.primaryDark, fontWeight:600 }}>資格已確認 · 剩 8 趟免費接送</div>}
         <PBCard p={p} title={program === 'insurance' ? '理賠代步資訊' : program === 'travel' ? '團體接送資訊' : '機場接送資訊'}>
           {program === 'insurance' ? (

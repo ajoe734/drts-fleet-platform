@@ -184,12 +184,12 @@ const lionEntry = {
 
 const entries = {
   ctbc: ctbcEntry,
-  acme: { ...ctbcEntry, entrySlug: "acme" },
-  contoso: { ...cathayEntry, entrySlug: "contoso" },
-  fabrikam: { ...taishinEntry, entrySlug: "fabrikam" },
-  northwind: { ...dbsEntry, entrySlug: "northwind" },
-  tailspin: { ...fubonEntry, entrySlug: "tailspin" },
-  adventureworks: { ...lionEntry, entrySlug: "adventureworks" },
+  acme: { ...ctbcEntry, entrySlug: "acme", partnerId: "partner-acme", tenantId: "tenant-acme", entryHost: "acme.partner.invalid", programId: "program-acme" },
+  contoso: { ...cathayEntry, entrySlug: "contoso", partnerId: "partner-contoso", tenantId: "tenant-contoso", entryHost: "contoso.partner.invalid", programId: "program-contoso" },
+  fabrikam: { ...taishinEntry, entrySlug: "fabrikam", partnerId: "partner-fabrikam", tenantId: "tenant-fabrikam", entryHost: "fabrikam.partner.invalid", programId: "program-fabrikam" },
+  northwind: { ...dbsEntry, entrySlug: "northwind", partnerId: "partner-northwind", tenantId: "tenant-northwind", entryHost: "northwind.partner.invalid", programId: "program-northwind" },
+  tailspin: { ...fubonEntry, entrySlug: "tailspin", partnerId: "partner-tailspin", tenantId: "tenant-tailspin", entryHost: "tailspin.partner.invalid", programId: "program-tailspin" },
+  adventureworks: { ...lionEntry, entrySlug: "adventureworks", partnerId: "partner-adventureworks", tenantId: "tenant-adventureworks", entryHost: "adventureworks.partner.invalid", programId: "program-adventureworks" },
   cathay: cathayEntry,
   taishin: taishinEntry,
   dbs: dbsEntry,
@@ -248,13 +248,17 @@ const server = http.createServer((req, res) => {
       try {
         if (body) {
           const payload = JSON.parse(body);
-          if (payload.partnerEntrySlug) {
+          if (payload.entrySlug) {
+            slug = payload.entrySlug;
+          } else if (payload.partnerEntrySlug) {
             slug = payload.partnerEntrySlug;
           }
         }
       } catch {
         // ignore
       }
+      
+      const entry = entries[slug] || ctbcEntry;
 
       json(res, 200, {
         data: {
@@ -276,9 +280,12 @@ const server = http.createServer((req, res) => {
               "partner:eligibility:write",
               "partner:book",
             ],
-            grants: {
-              partnerEntrySlug: slug,
-            },
+            tenantId: entry.tenantId,
+            partnerId: entry.partnerId,
+            partnerProgramId: entry.programId,
+            partnerEntrySlug: entry.entrySlug,
+            drtsPassengerId: "passenger-embed-001",
+            grants: {},
           },
         },
         meta: {

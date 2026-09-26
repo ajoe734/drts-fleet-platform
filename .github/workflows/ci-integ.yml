@@ -584,7 +584,7 @@ jobs:
             const url = new URL(req.url, 'http://127.0.0.1:3001');
             res.setHeader('Content-Type', 'application/json');
             if (req.method === 'GET' && url.pathname === '/api/auth/session') {
-              res.end(JSON.stringify({ data: { active: true, identity: { realm: 'tenant', tenant_id: 'tenant-mock' } } }));
+              res.end(JSON.stringify({ data: { active: true, identity: { realm: 'tenant', tenant_id: 'tenant-mock', roles: ['tenant_admin'], scopes: ['tenant:write'] } } }));
               return;
             }
             if (req.method === 'GET' && url.pathname === '/api/tenant/passengers') {
@@ -592,7 +592,35 @@ jobs:
               return;
             }
             if (req.method === 'GET' && url.pathname === '/api/tenant/addresses') {
-              res.end(JSON.stringify({ data: [{ activeFlag: true, addressId: 'a1', addressName: 'Mock Address' }] }));
+              res.end(JSON.stringify({ data: [{
+                activeFlag: true,
+                addressId: 'a1',
+                addressName: 'Mock Address',
+                tenantId: 'tenant-mock',
+                ownerPassengerId: 'p1',
+                addressText: 'Mock Address Text',
+                lat: 25.0330,
+                lng: 121.5654,
+                tags: ['home'],
+                createdAt: new Date().toISOString(),
+                updatedAt: new Date().toISOString()
+              }] }));
+              return;
+            }
+            if (req.method === 'POST' && url.pathname === '/api/tenant/addresses') {
+              res.end(JSON.stringify({ data: {
+                activeFlag: true,
+                addressId: 'a1',
+                addressName: 'Mock Address updated',
+                tenantId: 'tenant-mock',
+                ownerPassengerId: 'p1',
+                addressText: 'Mock Address Text',
+                lat: 24.7951,
+                lng: 121.0028,
+                tags: ['home'],
+                createdAt: new Date().toISOString(),
+                updatedAt: new Date().toISOString()
+              } }));
               return;
             }
             if (req.method === 'GET' && url.pathname === '/api/tenant/cost-centers') {
@@ -610,12 +638,12 @@ jobs:
           EOF
           node tests/e2e/ci-tenant-mock-server.js &
           export DRTS_API_URL=http://127.0.0.1:3001
-          PLAYWRIGHT_HTML_REPORT=playwright-report/tenant pnpm exec playwright test -c playwright.tenant-map-booking.config.ts
-          PLAYWRIGHT_HTML_REPORT=playwright-report/concierge-healthy START_OUTAGE_SERVER=0 pnpm exec playwright test -c playwright.concierge-map-booking.config.ts --project=healthy
-          PLAYWRIGHT_HTML_REPORT=playwright-report/concierge-outage START_OUTAGE_SERVER=1 pnpm exec playwright test -c playwright.concierge-map-booking.config.ts --project=outage
+          PLAYWRIGHT_HTML_REPORT=playwright-report/tenant pnpm exec playwright test -c playwright.tenant-map-booking.config.ts --reporter=html
+          PLAYWRIGHT_HTML_REPORT=playwright-report/concierge-healthy START_OUTAGE_SERVER=0 pnpm exec playwright test -c playwright.concierge-map-booking.config.ts --project=healthy --reporter=html
+          PLAYWRIGHT_HTML_REPORT=playwright-report/concierge-outage START_OUTAGE_SERVER=1 pnpm exec playwright test -c playwright.concierge-map-booking.config.ts --project=outage --reporter=html
           unset DRTS_API_URL
-          PLAYWRIGHT_HTML_REPORT=playwright-report/partner-healthy START_OUTAGE_SERVER=0 pnpm exec playwright test -c playwright.partner-booking-surfaces.config.ts --project=healthy
-          PLAYWRIGHT_HTML_REPORT=playwright-report/partner-outage START_OUTAGE_SERVER=1 pnpm exec playwright test -c playwright.partner-booking-surfaces.config.ts --project=outage
+          PLAYWRIGHT_HTML_REPORT=playwright-report/partner-healthy START_OUTAGE_SERVER=0 pnpm exec playwright test -c playwright.partner-booking-surfaces.config.ts --project=healthy --reporter=html
+          PLAYWRIGHT_HTML_REPORT=playwright-report/partner-outage START_OUTAGE_SERVER=1 pnpm exec playwright test -c playwright.partner-booking-surfaces.config.ts --project=outage --reporter=html
 
 
       - name: Upload ui-map-e2e reports

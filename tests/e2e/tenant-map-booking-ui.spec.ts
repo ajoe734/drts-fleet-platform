@@ -400,20 +400,24 @@ test.describe("tenant console booking map alignment", () => {
       }),
     );
 
-    // Mock search API or use whatever the mock provider does
-    // Wait, the address book might not use `api/geo/health`? It uses createTenantPortalGeoProvider
     await page.goto("http://127.0.0.1:3305/addresses");
 
-    // Click to add manual coordinates
+    // Wait for the address list to load
+    await expect(page.getByText("Mock Address", { exact: true }).first()).toBeVisible({ timeout: 30000 });
+
+    // Click the Edit link for the mocked address
+    await page.getByRole('link', { name: 'Edit' }).first().click();
+
+    await expect(page.getByText("Edit Address: Mock Address")).toBeVisible();
+
+    // Verify existing coordinates are loaded in hidden fields if they exist
+    const latHidden = page.locator('input[name="lat"]');
+    await expect(latHidden).toHaveValue("25.033");
+
+    // Click to add/edit manual coordinates
     const manualButtons = page.getByRole("button", {
       name: /Manual location|Enter coordinates manually|改用手動座標|手動輸入座標/i,
     });
-
-    // Wait for page to load
-
-    await expect(
-      page.getByText("No map coordinates yet").first(),
-    ).toBeVisible({ timeout: 30000 });
 
     await manualButtons.first().click();
 
@@ -432,14 +436,26 @@ test.describe("tenant console booking map alignment", () => {
       .first()
       .click();
 
-    // The warning should disappear
-    await expect(page.getByText("No map coordinates yet").first()).toBeHidden();
-
-    // Check hidden inputs are populated
-    const latHidden = page.locator('input[name="lat"]');
+    // Check hidden inputs are populated with new values
     await expect(latHidden).toHaveValue("24.7951");
-
     const lngHidden = page.locator('input[name="lng"]');
     await expect(lngHidden).toHaveValue("121.0028");
+    const priorSourceHidden = page.locator('input[name="priorGeocodeSource"]');
+    await expect(priorSourceHidden).toHaveValue("manual");
+
+    // Click save
+    let interceptedRequest = false;
+    await page.route("**/api/tenant/addresses", async (route) => {
+        if (route.request().method() === "POST") {
+            interceptedRequest = true;
+        }
+        await route.continue();
+    });
+    
+    await page.getByRole("button", { name: "Save Changes" }).click();
+    
+    // Wait for navigation back to addresses list or a success state
+    await expect(page.getByText("Mock Address updated").first()).toBeVisible({ timeout: 30000 });
+    expect(interceptedRequest).toBe(true);
   });
 });

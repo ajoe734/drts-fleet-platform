@@ -71,6 +71,18 @@ async function installConciergeApiMocks(
       url.pathname === "/api/call-center/orders"
     ) {
       captured.body.push(body);
+      
+      if (captured.rejectFirstOrder) {
+        captured.rejectFirstOrder = false;
+        await fulfillJson(route, 400, {
+          error: {
+            code: "VALIDATION_FAILED",
+            message: "Missing required compliance fields for special location",
+          }
+        });
+        return;
+      }
+
       await fulfillJson(route, 200, {
         orderId: "ord-map-001",
         orderSource: "call_center",
@@ -347,5 +359,121 @@ test.describe("concierge map booking UI", () => {
     await expect(
       page.getByText(/Outside the service area|不在服務範圍內/i).first(),
     ).toBeVisible();
+  });
+
+  test("handles backend refusal with visible error and allows retry", async ({ page }, testInfo) => {
+    test.skip(
+      testInfo.project.name === "outage",
+      "This test requires healthy provider",
+    );
+    const captured = { body: [] as unknown[], rejectFirstOrder: true };
+    await installConciergeApiMocks(page, captured);
+
+    await page.goto("/bookings/new");
+    await selectConciergeMapCandidate(page, 0, "taipei 101", "Taipei 101");
+    await selectConciergeMapCandidate(
+      page,
+      1,
+      "taipei main",
+      "Taipei Main Station",
+    );
+
+    const submitBtn = page.getByRole("button", {
+      name: /Create booking|For approval|Submitting|建立叫車|提交禮賓代訂/i,
+    });
+    await expect(submitBtn).toBeEnabled();
+    
+    // First submit, should fail
+    await submitBtn.click();
+    
+    // Check error message
+    await expect(page.getByText(/Missing required compliance fields/i)).toBeVisible();
+    
+    // Retry, should succeed
+    await submitBtn.click();
+    await expect(page.getByText(/Booking ID|Order ID|訂單 ID/i)).toBeVisible();
+  });
+
+  test("supports same-session outage recovery", async ({ page }, testInfo) => {
+    test.skip(
+      testInfo.project.name === "outage",
+      "This test requires initial healthy provider to simulate outage later",
+    );
+    const captured = { body: [] as unknown[] };
+    await installConciergeApiMocks(page, captured);
+
+    await page.goto("/bookings/new");
+
+    // Start with a healthy state
+    await selectConciergeMapCandidate(page, 0, "taipei 101", "Taipei 101");
+
+    // Simulate outage mid-session
+    await page.route("**/api/geo/health", async (route) => {
+      await route.fulfill({
+        json: {
+          provider: "mock",
+          mode: "mock",
+          status: "outage",
+          failClosed: true,
+        },
+      });
+    });
+
+    // Refresh or interact to trigger health check
+    // Wait for the button
+    const submitBtn = page.getByRole("button", {
+      name: /Create booking|For approval|Submitting|建立叫車|提交禮賓代訂/i,
+    });
+
+    // Refresh is not available by default, we just click another candidate or wait. Let's just simulate the outage and see if the UI updates if we interact
+    // we can change the dropoff which will trigger a provider call
+    await selectConciergeMapCandidate(
+      page,
+      1,
+      "taipei main",
+      "Taipei Main Station",
+    );
+    
+    await expect(page.getByText(/Outage|服務中斷/i).first()).toBeVisible();
+    await expect(submitBtn).toBeDisabled();
+    
+    // Simulate recovery
+    await page.route("**/api/geo/health", async (route) => {
+      await route.fulfill({
+        json: {
+          provider: "mock",
+          mode: "mock",
+          status: "healthy",
+          failClosed: false,
+        },
+      });
+    });
+    
+    // Click manual location button for dropoff and back to trigger provider
+    const dropoffPicker = page.locator("[data-address-map-picker]").nth(1);
+    await dropoffPicker.getByRole("button", { name: /Manual location|Enter coordinates manually|改用手動座標|手動輸入座標/i }).click();
+    await dropoffPicker.getByRole("button", { name: /Cancel|取消/i }).click();
+
+    await selectConciergeMapCandidate(
+      page,
+      1,
+      "taipei 101",
+      "Taipei 101",
+    );
+    
+    await expect(page.getByText(/Outage|服務中斷/i).first()).toBeHidden();
+    
+    // Need to reselect both properly
+    await selectConciergeMapCandidate(
+      page,
+      0,
+      "taipei main",
+      "Taipei Main Station",
+    );
+    
+    await expect(submitBtn).toBeEnabled();
+    await submitBtn.click();
+    
+    await expect(page.getByText(/Booking ID|Order ID|訂單 ID/i)).toBeVisible();
   });
 });
