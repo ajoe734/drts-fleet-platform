@@ -67,7 +67,7 @@ describe("fleet-partner admin list parsing against the API list envelope", () =>
       ]),
     );
 
-    const partners = await listFleetPartners(client());
+    const partners = await listFleetPartners(client() as any);
 
     expect(partners).toHaveLength(1);
     expect(partners[0]?.fleetPartnerId).toBe("fp-001");
@@ -88,7 +88,10 @@ describe("fleet-partner admin list parsing against the API list envelope", () =>
       ]),
     );
 
-    const affiliations = await listFleetPartnerDrivers(client(), "fp-001");
+    const affiliations = await listFleetPartnerDrivers(
+      client() as any,
+      "fp-001",
+    );
 
     expect(affiliations).toHaveLength(1);
     expect(affiliations[0]?.driverId).toBe("drv-001");
@@ -108,7 +111,7 @@ describe("fleet-partner admin list parsing against the API list envelope", () =>
       ]),
     );
 
-    const rules = await listRevenueShareRules(client(), "fp-001");
+    const rules = await listRevenueShareRules(client() as any, "fp-001");
 
     expect(rules).toHaveLength(1);
     expect(rules[0]?.ruleId).toBe("rule-001");
@@ -125,7 +128,7 @@ describe("fleet-partner admin list parsing against the API list envelope", () =>
       ]),
     );
 
-    const statements = await listFleetStatements(client(), "fp-001");
+    const statements = await listFleetStatements(client() as any, "fp-001");
 
     expect(statements).toHaveLength(1);
     expect(statements[0]?.statementId).toBe("stmt-001");
@@ -133,10 +136,10 @@ describe("fleet-partner admin list parsing against the API list envelope", () =>
 
   it("returns an empty list instead of throwing when the payload is empty", async () => {
     stubFetch(listEnvelope([]));
-    await expect(listFleetPartners(client())).resolves.toEqual([]);
+    await expect(listFleetPartners(client() as any)).resolves.toEqual([]);
 
     stubFetch({ data: null });
-    await expect(listFleetPartners(client())).resolves.toEqual([]);
+    await expect(listFleetPartners(client() as any)).resolves.toEqual([]);
   });
 
   it("still accepts a bare array payload from unwrapped list routes", async () => {
@@ -155,7 +158,7 @@ describe("fleet-partner admin list parsing against the API list envelope", () =>
       ],
     });
 
-    const partners = await listFleetPartners(client());
+    const partners = await listFleetPartners(client() as any);
 
     expect(partners).toHaveLength(1);
     expect(partners[0]?.fleetPartnerId).toBe("fp-002");
