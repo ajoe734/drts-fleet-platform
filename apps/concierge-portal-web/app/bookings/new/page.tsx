@@ -604,7 +604,11 @@ export default function ConciergeBookingCreatePage() {
                   serviceability: mapSelection.serviceability,
                   providerState: mapSelection.providerState,
                 }).code === "dispatch_manual_review_required" ? (
-                  <p className="form-help">{t("booking.help.manualReview")}</p>
+                  <p className="form-help">
+                    {!mapSelection.providerState.available
+                      ? "地圖服務中斷 · 本單只能送交人工複核"
+                      : t("booking.help.manualReview")}
+                  </p>
                 ) : null}
               </div>
             </div>

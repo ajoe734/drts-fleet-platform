@@ -128,6 +128,7 @@ export interface AddressMapPreviewSurfaceProps {
   ariaLabel?: string;
   nudgeHint?: string;
   onPinMove?: (id: string, point: GeoPoint) => void;
+  overlay?: ReactNode;
 }
 
 /**
@@ -145,6 +146,7 @@ export function AddressMapPreviewSurface({
   ariaLabel = "Location preview map",
   nudgeHint,
   onPinMove,
+  overlay,
 }: AddressMapPreviewSurfaceProps) {
   const theme = themeProp ?? DEFAULT_THEME;
   const svgRef = useRef<SVGSVGElement | null>(null);
@@ -332,6 +334,7 @@ export function AddressMapPreviewSurface({
           {caption}
         </div>
       ) : null}
+      {overlay}
     </div>
   );
 }
@@ -1201,6 +1204,25 @@ export function AddressMapPicker<TServiceProduct extends string = string>(
                   },
                 ]
               : []
+          }
+          overlay={
+            status === "provider_unavailable" ? (
+              <div
+                style={{
+                  position: "absolute",
+                  inset: 0,
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  background: "rgba(255,255,255,.55)",
+                  fontSize: 12,
+                  fontWeight: 700,
+                  color: theme.danger,
+                }}
+              >
+                {labels.providerOutageTitle}
+              </div>
+            ) : null
           }
         />
       )}

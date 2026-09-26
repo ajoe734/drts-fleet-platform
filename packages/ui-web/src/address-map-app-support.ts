@@ -143,12 +143,6 @@ export function evaluateTenantSubmitGate(
     serviceability,
     providerState,
   });
-  if (providerState && !providerState.available) {
-    return {
-      blocking: true,
-      code: "provider_outage",
-    };
-  }
   return baseGate;
 }
 

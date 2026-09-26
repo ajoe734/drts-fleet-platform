@@ -1662,6 +1662,24 @@ export function TenantBookingCreateForm({
                 </div>
 
                 <div style={{ marginTop: 12 }}>
+                  {!providerState.available ? (
+                    <div style={{ marginBottom: 12 }}>
+                      <CanvasBanner
+                        theme={th}
+                        tone="danger"
+                        icon="warn"
+                        title={
+                          t("newBooking.serviceability.providerOutageBlocked") ??
+                          "地圖服務中斷 · 本單只能送交人工複核"
+                        }
+                        body={
+                          t("newBooking.serviceability.providerOutageBody") ??
+                          "無法解析地址與落點。您可繼續填寫並送交客服人工複核；系統不會將此單靜默建立為一般訂單。"
+                        }
+                      />
+                    </div>
+                  ) : null}
+
                   <AddressMapPairPicker
                     key={pickerNonce}
                     provider={geoProvider}

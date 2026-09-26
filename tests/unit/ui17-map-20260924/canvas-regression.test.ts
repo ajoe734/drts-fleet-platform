@@ -110,15 +110,15 @@ describe("R7b/R7c real component/handler regressions", () => {
     lng: 121.5654,
   };
 
-  test("evaluateTenantSubmitGate: blocks on provider outage regardless of pins", () => {
+  test("evaluateTenantSubmitGate: allows manual review on provider outage with valid pins", () => {
     const gate = evaluateTenantSubmitGate(
       validAddress as any,
       validAddress as any,
       { decision: "serviceable", reasonCodes: ["ok"] } as any,
       { available: false, degraded: true, reasonCode: "provider_unhealthy" },
     );
-    expect(gate.blocking).toBe(true);
-    expect(gate.code).toBe("provider_outage");
+    expect(gate.blocking).toBe(false);
+    expect(gate.code).toBe("dispatch_manual_review_required");
   });
 
   test("evaluateManualApply: rejects invalid lat/lng and blank reason", () => {

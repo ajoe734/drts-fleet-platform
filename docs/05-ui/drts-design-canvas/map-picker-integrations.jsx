@@ -14,21 +14,19 @@ function MP_StatesBoard({ theme:th }) {
 }
 // ── 租戶線：訂車建立（兩欄保留，左行程卡 / 右審核卡，上下車換成成對選點） ──
 function TN_NewBookingMap({ theme:th, degraded, pick, drop, reason }) {
-  const ps = pick||'selected', ds = drop||'selected';
+  const ps = degraded?'provider_down':(pick||'selected'), ds = degraded?'provider_down':(drop||'selected');
   const HARD = ['out_of_area'];                                   // 服務範圍外：任何路徑皆不可送
   const UNRESOLVED = ['no_results','empty','searching','candidates','missing_coordinate']; // 尚未定點：不可送
-  const MANUAL = ['manual_review']; // 走人工複核 (僅限手動座標帶理由)
-  const DOWN = ['provider_down'];
+  const MANUAL = ['manual_review','provider_down']; // 走人工複核 (含手動座標帶理由)
 
   // 檢查是否有 manual_coords 並帶有理由
   const hasManualCoords = ps === 'manual_coords' || ds === 'manual_coords';
   const reasonValid = (reason || '').trim() !== '';
 
-  const isDown = degraded || DOWN.includes(ps) || DOWN.includes(ds);
-  const hardBlocked = isDown || HARD.includes(ps) || HARD.includes(ds); // 租戶遇中斷直接阻擋
+  const hardBlocked = HARD.includes(ps) || HARD.includes(ds);
   const unresolved = UNRESOLVED.includes(ps) || UNRESOLVED.includes(ds);
-  const manualPath = MANUAL.includes(ps) || MANUAL.includes(ds);
-  const manualReady = manualPath && !hardBlocked && !unresolved && reasonValid;   // 有地址文字＋理由即可送人工複核
+  const manualPath = degraded || MANUAL.includes(ps) || MANUAL.includes(ds);
+  const manualReady = manualPath && !hardBlocked && !unresolved && (!hasManualCoords || reasonValid);   // 有地址文字＋理由即可送人工複核
   const normalReady = !manualPath && !hardBlocked && !unresolved && (!hasManualCoords || reasonValid);
   return (
     <Shell theme={th} nav={TN_NAV} active="new" breadcrumb={['訂單','新增']} env="production" tenant="YAMATO" actor={TN_ACTOR} health={TN_HEALTH} refreshTier="manual">
@@ -36,7 +34,7 @@ function TN_NewBookingMap({ theme:th, degraded, pick, drop, reason }) {
         meta={<Pill theme={th} tone="info" dot>POST /api/tenant/bookings/commands/create</Pill>}/>
       <div style={{ padding:24, display:'grid', gridTemplateColumns:'1.4fr 1fr', gap:16, alignItems:'start' }}>
         <Card theme={th} title="行程">
-          {degraded && <div style={{ marginBottom:12 }}><Banner theme={th} tone="danger" icon="warn" title="地圖服務中斷 · 目前無法建立訂單" body="無法解析地址與落點。地圖服務恢復前無法建立新訂單，請稍後再試。"/></div>}
+          {degraded && <div style={{ marginBottom:12 }}><Banner theme={th} tone="danger" icon="warn" title="地圖服務中斷 · 本單只能送交人工複核" body="無法解析地址與落點。您可繼續填寫並送交客服人工複核；系統不會將此單靜默建立為一般訂單。"/></div>}
           <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:12 }}>
             <Field theme={th} label="服務類型 · service_type" required><Select theme={th} value="airport_pickup"/></Field>
             <Field theme={th} label="預約 / 即時 · timing" required><Select theme={th} value="預約 · scheduled"/></Field>
@@ -307,11 +305,11 @@ function CG_NewBookingMap({ theme:th, degraded, drop, pick, success, reason, bac
       <div style={{ padding:'26px 24px 18px', background:'linear-gradient(135deg,'+th.accentBg+','+th.surface+')', borderBottom:'1px solid '+th.border }}>
         <div style={{ fontSize:11, fontFamily:SHELL_MONO, letterSpacing:1.2, color:th.accent, fontWeight:700 }}>CONCIERGE DESK · 大廳服務台</div>
         <div style={{ fontSize:22, fontWeight:800, color:th.text, marginTop:4 }}>為賓客安排車輛</div>
-        <div style={{ fontSize:12.5, color:th.textMuted, marginTop:3 }}>賓客地點以選點元件確認；地圖中斷時須有明確座標方可送交人工複核</div>
+        <div style={{ fontSize:12.5, color:th.textMuted, marginTop:3 }}>賓客地點以選點元件確認；地圖中斷時僅可送交人工複核</div>
       </div>
       <div style={{ padding:24, display:'grid', gridTemplateColumns:'1.4fr 1fr', gap:16, alignItems:'start' }}>
         <Card theme={th} title="行程">
-          {degraded && <div style={{ marginBottom:12 }}><Banner theme={th} tone="danger" icon="warn" title="地圖服務中斷 · 將轉人工複核" body="不會靜默建立一般訂單。若已有明確地點與座標，可填寫理由並送交人工複核；否則請稍後再試。"/></div>}
+          {degraded && <div style={{ marginBottom:12 }}><Banner theme={th} tone="danger" icon="warn" title="地圖服務中斷 · 只能送交人工複核" body="不會靜默建立一般訂單。請告知賓客：客服確認地點後才會派車。"/></div>}
           {backendError && <div style={{ marginBottom:12 }}><Banner theme={th} tone="danger" icon="x" title="訂單建立失敗" body={backendError}/></div>}
           <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:12 }}>
             <Field theme={th} label="賓客" required><Select theme={th} value="Mr. Tanaka · 1208 房"/></Field>
