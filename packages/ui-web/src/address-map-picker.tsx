@@ -299,6 +299,24 @@ export function AddressMapPreviewSurface({
           );
         })}
       </svg>
+      {pins.some((p) => p.draggable) ? (
+        <div
+          style={{
+            position: "absolute",
+            right: 8,
+            bottom: 6,
+            fontSize: 9.5,
+            fontFamily: theme.monoFamily,
+            color: theme.textDim,
+            background: theme.surface,
+            padding: "2px 6px",
+            borderRadius: 4,
+            pointerEvents: "none",
+          }}
+        >
+          ↑↓←→ 1 m · Shift 10 m · Enter 確認
+        </div>
+      ) : null}
       {!hasPins ? (
         <div
           style={{
