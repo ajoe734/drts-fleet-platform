@@ -20,7 +20,7 @@ function TN_NewBookingMap({ theme:th, degraded, pick, drop }) {
   const UNRESOLVED = ['no_results','empty','searching','candidates','missing_coordinate'];
   const ps = (degraded && !HARD.includes(p_raw) && !UNRESOLVED.includes(p_raw)) ? 'provider_down' : p_raw;
   const ds = (degraded && !HARD.includes(d_raw) && !UNRESOLVED.includes(d_raw)) ? 'provider_down' : d_raw;
-  const hardBlocked = HARD.includes(ps) || HARD.includes(ds);
+  const hardBlocked = HARD.includes(ps) || HARD.includes(ds) || ps === 'provider_down' || ds === 'provider_down';
   const unresolved = UNRESOLVED.includes(ps) || UNRESOLVED.includes(ds);
   const manualPath = false;
   const manualReady = false;
