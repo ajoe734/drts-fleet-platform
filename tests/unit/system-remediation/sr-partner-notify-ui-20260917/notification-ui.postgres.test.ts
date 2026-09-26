@@ -30,6 +30,7 @@ describe.skipIf(!testDbUrl)(
     const webhookId = `w-${testRunId}`;
     const bindingId1 = randomUUID();
     const bindingId2 = randomUUID();
+    let computedFingerprint = "";
 
     const createdOutboxIds: string[] = [];
     const createdOrderIds: string[] = [];
@@ -100,18 +101,56 @@ describe.skipIf(!testDbUrl)(
         ],
       );
 
+      const endpointRecord = {
+        url: "https://test.com",
+        events: ["passenger.eta_changed.v1"],
+        status: "active",
+        webhookId: webhookId,
+        tenantId: tenantId,
+        secretVersion: 1,
+        secretPreview: "prev",
+        validatedAt: "2026-09-24T00:00:00Z",
+        retryPolicy: { maxAttempts: 3 },
+        runtimeMetadata: {
+          secretRotation: { rotatedAt: null, rotationCount: 0, history: [] },
+          deliveryCount: 0,
+          failedDeliveryCount: 0,
+        },
+      };
+
+      // Compute actual fingerprint
+      const { computeEndpointFingerprint } = customRequire(
+        "../../../../apps/api/src/modules/tenant-partner/partner-notification-fingerprint",
+      );
+      computedFingerprint = computeEndpointFingerprint(endpointRecord);
+      endpointRecord.fingerprint = computedFingerprint;
+
       await pool.query(
-        'INSERT INTO admin.phase1_tenant_webhook_endpoints (webhook_id, tenant_id, status, created_at, updated_at, record) VALUES ($1, $2, \'active\', now(), now(), \'{"url": "https://test.com", "events": ["passenger.eta_changed.v1"], "status": "active", "webhookId": "w-uuid", "tenantId": "t-uuid", "secretVersion": 1, "secretPreview": "prev", "fingerprint": "be5d7634209f7903e6a3c6e19091a251c0124be5227d4879fcdaff432f862a2b", "validatedAt": "2026-09-24T00:00:00Z", "retryPolicy": {"maxAttempts": 3}, "runtimeMetadata": {"secretRotation": {"rotatedAt": null, "rotationCount": 0, "history": []}, "deliveryCount": 0, "failedDeliveryCount": 0}}\'::jsonb)',
-        [webhookId, tenantId],
+        "INSERT INTO admin.phase1_tenant_webhook_endpoints (webhook_id, tenant_id, status, created_at, updated_at, record) VALUES ($1, $2, 'active', now(), now(), $3::jsonb)",
+        [webhookId, tenantId, JSON.stringify(endpointRecord)],
       );
 
       await pool.query(
-        "INSERT INTO admin.phase1_partner_notification_bindings (binding_id, entry_slug, tenant_id, partner_id, webhook_id, version, state, event_types, validated_endpoint_fingerprint, validated_at) VALUES ($1, $2, $3, $4, $5, 1, 'ready', '[\"eta_changed\"]', 'be5d7634209f7903e6a3c6e19091a251c0124be5227d4879fcdaff432f862a2b', '2026-09-24T00:00:00Z')",
-        [bindingId1, entrySlug1, tenantId, partnerId, webhookId],
+        "INSERT INTO admin.phase1_partner_notification_bindings (binding_id, entry_slug, tenant_id, partner_id, webhook_id, version, state, event_types, validated_endpoint_fingerprint, validated_at) VALUES ($1, $2, $3, $4, $5, 1, 'ready', '[\"eta_changed\"]', $6, '2026-09-24T00:00:00Z')",
+        [
+          bindingId1,
+          entrySlug1,
+          tenantId,
+          partnerId,
+          webhookId,
+          computedFingerprint,
+        ],
       );
       await pool.query(
-        "INSERT INTO admin.phase1_partner_notification_bindings (binding_id, entry_slug, tenant_id, partner_id, webhook_id, version, state, event_types, validated_endpoint_fingerprint, validated_at) VALUES ($1, $2, $3, $4, $5, 1, 'ready', '[\"eta_changed\"]', 'be5d7634209f7903e6a3c6e19091a251c0124be5227d4879fcdaff432f862a2b', '2026-09-24T00:00:00Z')",
-        [bindingId2, entrySlug2, tenantId, partnerId, webhookId],
+        "INSERT INTO admin.phase1_partner_notification_bindings (binding_id, entry_slug, tenant_id, partner_id, webhook_id, version, state, event_types, validated_endpoint_fingerprint, validated_at) VALUES ($1, $2, $3, $4, $5, 1, 'ready', '[\"eta_changed\"]', $6, '2026-09-24T00:00:00Z')",
+        [
+          bindingId2,
+          entrySlug2,
+          tenantId,
+          partnerId,
+          webhookId,
+          computedFingerprint,
+        ],
       );
 
       app = await NestFactory.createApplicationContext(AppModule);
@@ -230,10 +269,23 @@ describe.skipIf(!testDbUrl)(
         [outboxId, orderId, status],
       );
 
+      const wirePayload = {
+        event: "passenger.eta_changed.v1",
+        data: {
+          assignmentVersion: 1,
+          assignment: { version: 1 },
+          recipient: { partnerUserRef: "user" },
+        },
+      };
+      const { createHash } = customRequire("node:crypto");
+      const wirePayloadHash = createHash("sha256")
+        .update(JSON.stringify(wirePayload))
+        .digest("hex");
+
       await pool.query(
-        'INSERT INTO mobility.phase1_partner_notification_delivery_contexts (outbox_id, delivery_id, order_id, entry_slug, tenant_id, partner_id, binding_id, binding_version, webhook_id, endpoint_fingerprint, wire_payload, wire_payload_hash, event_sequence, expires_at, retry_policy_snapshot, delivery_target, retry_disposition, failure_reason, receipt_id, created_at) VALUES ($1, gen_random_uuid(), $2, $3, $4, $5, $6, 1, $7, \'be5d7634209f7903e6a3c6e19091a251c0124be5227d4879fcdaff432f862a2b\', \'{"event": "passenger.eta_changed.v1", "data": {"assignmentVersion": 1, "assignment": {"version": 1}, "recipient": {"partnerUserRef": "user"}}}\'::jsonb, \'6440c946e9690186981cfecfbf39c595701e54f0a2d201202e21b8bbf4033bd2\', 42, ' +
+        "INSERT INTO mobility.phase1_partner_notification_delivery_contexts (outbox_id, delivery_id, order_id, entry_slug, tenant_id, partner_id, binding_id, binding_version, webhook_id, endpoint_fingerprint, wire_payload, wire_payload_hash, event_sequence, expires_at, retry_policy_snapshot, delivery_target, retry_disposition, failure_reason, receipt_id, created_at) VALUES ($1, gen_random_uuid(), $2, $3, $4, $5, $6, 1, $7, $8, $9::jsonb, $10, 42, " +
           (opts.expiresAt || "now() + interval '1 day'") +
-          ", '{\"maxAttempts\": 3}'::jsonb, 'partner_endpoint', $8, $9, $10, now())",
+          ", '{\"maxAttempts\": 3}'::jsonb, 'partner_endpoint', $11, $12, $13, now())",
         [
           outboxId,
           orderId,
@@ -242,6 +294,9 @@ describe.skipIf(!testDbUrl)(
           partnerId,
           opts.entrySlug === entrySlug2 ? bindingId2 : bindingId1,
           webhookId,
+          computedFingerprint,
+          JSON.stringify(wirePayload),
+          wirePayloadHash,
           opts.retryDisp || "manual_only",
           opts.failureReason || "provider_transient_error",
           opts.receiptId || null,
@@ -341,7 +396,20 @@ describe.skipIf(!testDbUrl)(
       );
       expect(list1.rows.length).toBe(1);
       expect(list1.rows[0].deliveryId).toBeDefined();
-      expect(list1.rows[0].wirePayloadHash).toBe("testhash");
+      const { createHash } = customRequire("node:crypto");
+      const expectedHash = createHash("sha256")
+        .update(
+          JSON.stringify({
+            event: "passenger.eta_changed.v1",
+            data: {
+              assignmentVersion: 1,
+              assignment: { version: 1 },
+              recipient: { partnerUserRef: "user" },
+            },
+          }),
+        )
+        .digest("hex");
+      expect(list1.rows[0].wirePayloadHash).toBe(expectedHash);
       expect(Number(list1.rows[0].eventSequence)).toBe(42);
       expect(list1.rows[0].receiptId).toBe("rcpt-123");
 

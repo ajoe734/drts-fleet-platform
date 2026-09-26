@@ -5714,7 +5714,7 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
       issuedAt: issuedAt.toISOString(),
       expiresAt: expiresAt.toISOString(),
       ...(command.navigationContext
-        ? { navigationContext: (command as any).navigationContext }
+        ? { navigationContext: command.navigationContext }
         : {}),
     };
     const record = await this.referralEmbedHandoffRepository.issue(persistence);
@@ -5872,7 +5872,7 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
     };
 
     const result = await this.referralEmbedHandoffRepository.recordConsent(
-      command as any,
+      command,
       validateFn,
     );
 

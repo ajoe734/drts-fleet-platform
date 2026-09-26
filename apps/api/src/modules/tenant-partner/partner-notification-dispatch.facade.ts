@@ -135,7 +135,6 @@ export class PartnerNotificationDispatchFacade {
       Date.parse(endpoint.secretExpiresAt) <= Date.now()
     )
       return failed("credential_rejected");
-
     const endpointFingerprint = computeEndpointFingerprint(endpoint);
     if (
       !binding.validatedAt ||
