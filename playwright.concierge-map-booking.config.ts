@@ -35,20 +35,21 @@ export default defineConfig({
   ...(shouldStartLocalConcierge
     ? {
         webServer: [
-          {
-            command:
-              "pnpm --filter @drts/contracts build && pnpm --filter @drts/ui-tokens build && cd apps/concierge-portal-web && pnpm exec next dev --webpack --hostname 127.0.0.1 --port 3006",
-            url: localConciergeBaseURL,
-            reuseExistingServer: !process.env.CI,
-            timeout: 120_000,
-          },
-          {
-            command:
-              "pnpm --filter @drts/contracts build && pnpm --filter @drts/ui-tokens build && cd apps/concierge-portal-web && NEXT_PUBLIC_ADDRESS_PICKER_PROVIDER_MODE=unavailable pnpm exec next dev --webpack --hostname 127.0.0.1 --port 3007",
-            url: "http://127.0.0.1:3007",
-            reuseExistingServer: !process.env.CI,
-            timeout: 120_000,
-          },
+          process.env.START_OUTAGE_SERVER === "1"
+            ? {
+                command:
+                  "pnpm --filter @drts/contracts build && pnpm --filter @drts/ui-tokens build && cd apps/concierge-portal-web && NEXT_PUBLIC_ADDRESS_PICKER_PROVIDER_MODE=unavailable pnpm exec next dev --webpack --hostname 127.0.0.1 --port 3007",
+                url: "http://127.0.0.1:3007",
+                reuseExistingServer: !process.env.CI,
+                timeout: 120_000,
+              }
+            : {
+                command:
+                  "pnpm --filter @drts/contracts build && pnpm --filter @drts/ui-tokens build && cd apps/concierge-portal-web && pnpm exec next dev --webpack --hostname 127.0.0.1 --port 3006",
+                url: localConciergeBaseURL,
+                reuseExistingServer: !process.env.CI,
+                timeout: 120_000,
+              },
         ],
       }
     : {}),

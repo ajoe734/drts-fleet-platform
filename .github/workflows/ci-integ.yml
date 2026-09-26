@@ -611,9 +611,11 @@ jobs:
           node tests/e2e/ci-tenant-mock-server.js &
           export DRTS_API_URL=http://127.0.0.1:3001
           pnpm exec playwright test -c playwright.tenant-map-booking.config.ts
-          pnpm exec playwright test -c playwright.concierge-map-booking.config.ts
+          START_OUTAGE_SERVER=0 pnpm exec playwright test -c playwright.concierge-map-booking.config.ts --project=healthy
+          START_OUTAGE_SERVER=1 pnpm exec playwright test -c playwright.concierge-map-booking.config.ts --project=outage
           unset DRTS_API_URL
-          pnpm exec playwright test -c playwright.partner-booking-surfaces.config.ts
+          START_OUTAGE_SERVER=0 pnpm exec playwright test -c playwright.partner-booking-surfaces.config.ts --project=healthy
+          START_OUTAGE_SERVER=1 pnpm exec playwright test -c playwright.partner-booking-surfaces.config.ts --project=outage
 
   e2e:
     needs: [candidate, changes, cross-surface-e2e, ui-route-e2e, ui-map-e2e]
