@@ -252,7 +252,9 @@ const server = http.createServer((req, res) => {
             slug = payload.partnerEntrySlug;
           }
         }
-      } catch (e) {}
+      } catch {
+        // ignore
+      }
 
       json(res, 200, {
         data: {

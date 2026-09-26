@@ -28,6 +28,27 @@ test.use({
         secure: false,
         sameSite: "Lax",
       },
+      {
+        name: "tenant-portal-session",
+        value:
+          "eyJhY2Nlc3NUb2tlbiI6Im1vY2stdG9rZW4iLCJ0ZW5hbnRJZCI6InRlbmFudC1lbWJlZC0wMDEiLCJlbWFpbCI6InRlc3RAZXhhbXBsZS5jb20iLCJmdWxsTmFtZSI6IlRlc3QgVXNlciIsInJvbGVDb2RlIjoidGVuYW50X2FkbWluIn0",
+        domain: "127.0.0.1",
+        path: "/",
+        expires: Date.now() / 1000 + 3600,
+        httpOnly: true,
+        secure: false,
+        sameSite: "Lax",
+      },
+      {
+        name: "drts_session",
+        value: "mock-session",
+        domain: "127.0.0.1",
+        path: "/",
+        expires: Date.now() / 1000 + 3600,
+        httpOnly: true,
+        secure: false,
+        sameSite: "Lax",
+      },
     ],
     origins: [],
   },
@@ -375,35 +396,42 @@ test.describe("tenant console booking map alignment", () => {
 
     // Click to add manual coordinates
     const manualButtons = page.getByRole("button", {
-      name: /Manual location|改用手動座標|手動輸入座標/i,
+      name: /Manual location|Enter coordinates manually|改用手動座標|手動輸入座標/i,
     });
-    
+
     // Wait for page to load
-    await expect(page.getByText("No map coordinates yet").first()).toBeVisible();
+
+    await expect(
+      page.getByText("No map coordinates yet").first(),
+    ).toBeVisible();
 
     if (await manualButtons.first().isVisible()) {
       await manualButtons.first().click();
     }
-    
+
     const latInput = page.getByLabel(/Latitude|緯度/i).first();
     const lngInput = page.getByLabel(/Longitude|經度/i).first();
-    const reasonInput = page.getByLabel(/Reason for manual location|手動定位原因/i).first();
-    
+    const reasonInput = page
+      .getByLabel(/Reason for manual location|手動定位原因/i)
+      .first();
+
     await latInput.fill("24.7951");
     await lngInput.fill("121.0028");
     await reasonInput.fill("Test manual save");
-    
-    await page.getByRole("button", { name: /Use this location|使用此位置/i }).first().click();
-    
+
+    await page
+      .getByRole("button", { name: /Use this location|使用此位置/i })
+      .first()
+      .click();
+
     // The warning should disappear
     await expect(page.getByText("No map coordinates yet").first()).toBeHidden();
-    
+
     // Check hidden inputs are populated
     const latHidden = page.locator('input[name="lat"]');
     await expect(latHidden).toHaveValue("24.7951");
-    
+
     const lngHidden = page.locator('input[name="lng"]');
     await expect(lngHidden).toHaveValue("121.0028");
   });
-
 });
