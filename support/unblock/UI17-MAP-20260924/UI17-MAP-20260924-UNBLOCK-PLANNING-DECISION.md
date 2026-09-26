@@ -136,8 +136,10 @@ must stay untouched unless a future review identifies a concrete need.
    already in `write_scopes` if the `ui-route-e2e` job needs to invoke the new
    project(s).
 4. Re-run the hosted map E2E suites on the resulting candidate and update the
-   same UAT artifact (`docs/04-uat/ui17-handoff-20260924/UI17-MAP-20260924.md`)
-   with the measured pass/fail matrix per Guide §0.7 — do not overwrite the
+   same UAT artifact (docs/04-uat/ui17-handoff-20260924/UI17-MAP-20260924.md,
+   added on the pending PR #2130 candidate — not yet present on `dev`, so it
+   is named here in prose rather than as a repo-rooted code citation) with the
+   measured pass/fail matrix per Guide §0.7 — do not overwrite the
    unresolved-finding history with an all-fixed summary.
 
 This does not resolve R7 (remaining test correctness), R10 (artifact accuracy)
