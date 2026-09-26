@@ -41,38 +41,6 @@ const DROPOFF_CANDIDATE = {
   accuracyM: 5,
 };
 
-test.beforeEach(async ({ context, request, baseURL }) => {
-  const bootstrapResponse = await request.post(
-    "http://127.0.0.1:3301/api/auth/tenant/bootstrap-session",
-    {
-      data: {
-        email: "admin@acme.example",
-        tenantId: "tenant-demo-001",
-      },
-    },
-  );
-
-  if (bootstrapResponse.ok()) {
-    const session = await bootstrapResponse.json();
-    if (baseURL && session.data?.access_token) {
-      await context.addCookies([
-        {
-          name: "drts_tenant_session",
-          value: session.data.access_token,
-          domain: new URL(baseURL).hostname,
-          path: "/",
-        },
-      ]);
-    }
-  } else {
-    console.error(
-      "Bootstrap session failed:",
-      bootstrapResponse.status(),
-      await bootstrapResponse.text(),
-    );
-  }
-});
-
 function serviceabilityResult(
   decision: "serviceable" | "not_serviceable",
   reason: string,
@@ -179,6 +147,11 @@ async function pinBothStops(page: Page) {
     .click();
 }
 
+async function fillProgramFields(page: Page) {
+  await page.getByLabel(/Passenger name|乘客姓名/).fill("John Doe");
+  await page.getByLabel(/Passenger phone|乘客電話/).fill("0912345678");
+}
+
 test.describe("tenant console booking map alignment", () => {
   test("serviceable stops pin and clear the service-area state", async ({
     page,
@@ -224,10 +197,12 @@ test.describe("tenant console booking map alignment", () => {
 
     // Intercept submission to check payload
     let submitPayload = null;
-    await page.route("**/api/bookings", async (route) => {
+    await page.route("**/api/bookings/create", async (route) => {
       if (route.request().method() === "POST") {
         submitPayload = route.request().postDataJSON();
-        await route.fulfill({ json: { id: "test-booking-123" } });
+        await route.fulfill({
+          json: { result: { booking: { bookingId: "test-booking-123" } } },
+        });
       } else {
         await route.continue();
       }
@@ -235,13 +210,14 @@ test.describe("tenant console booking map alignment", () => {
 
     await page.goto("/bookings/new");
     await pinBothStops(page);
+    await fillProgramFields(page);
     await expect(
       page.getByText("Inside the service area", { exact: false }),
     ).toBeVisible();
 
     // Check degraded CTA
     const submitBtn = page.getByRole("button", {
-      name: /Submit manual review|Submit for approval|送交人工審核/,
+      name: /Create booking|For approval|Submitting|建立叫車/,
     });
     await expect(submitBtn).toBeVisible();
     await expect(submitBtn).toBeEnabled();
@@ -273,10 +249,12 @@ test.describe("tenant console booking map alignment", () => {
 
     // Intercept submission to check payload
     let submitPayload = null;
-    await page.route("**/api/bookings", async (route) => {
+    await page.route("**/api/bookings/create", async (route) => {
       if (route.request().method() === "POST") {
         submitPayload = route.request().postDataJSON();
-        await route.fulfill({ json: { id: "test-booking-124" } });
+        await route.fulfill({
+          json: { result: { booking: { bookingId: "test-booking-124" } } },
+        });
       } else {
         await route.continue();
       }
@@ -314,6 +292,7 @@ test.describe("tenant console booking map alignment", () => {
       .last()
       .click();
 
+    await fillProgramFields(page);
     await expect(
       page.getByText("Inside the service area", { exact: false }),
     ).toBeVisible();

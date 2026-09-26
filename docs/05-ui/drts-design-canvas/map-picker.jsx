@@ -15,11 +15,9 @@ const MP_STATES = {
   manual_review: { zh:'待人工複核', tone:'warn', next:'此地點將由客服確認後才派車' },
   out_of_area:   { zh:'不在服務範圍', tone:'danger', next:'請更換地點；此地點無法派車' },
 };
-function MapPicker({ theme:th, label='上車地點', state='selected', value, compact, skin='mgmt' }) {
+function MapPicker({ theme:th, label='上車地點', state='selected', value, compact, coordinateData, reason, skin='mgmt' }) {
   const m = MP_STATES[state];
-  const c = skin==='pb'
-    ? { text:'#0E1424', muted:'#56657F', dim:'#9AA5B8', line:'#E5E7EB', surface:'#fff', lo:'#F4F6FB', accent:'#1B4FA0', success:'#15803D', warn:'#B45309', danger:'#B91C1C', mono:PB_MONO }
-    : { text:th.text, muted:th.textMuted, dim:th.textDim, line:th.border, surface:th.surface, lo:th.surfaceLo, accent:th.accent, success:th.success, warn:th.warn, danger:th.danger, mono:SHELL_MONO };
+  const c = { text:th.text, muted:th.textMuted, dim:th.textDim, line:th.border, surface:th.surface, lo:th.surfaceLo, accent:th.accent, success:th.success, warn:th.warn, danger:th.danger, mono:th.mono || SHELL_MONO };
   const tone = c[m.tone==='neutral'?'muted':m.tone==='info'?'accent':m.tone];
   const blocked = state==='provider_down' || state==='out_of_area';
   const H = compact ? 96 : 130;
@@ -60,14 +58,14 @@ function MapPicker({ theme:th, label='上車地點', state='selected', value, co
         {state==='out_of_area' && <div style={{ position:'absolute', right:'14%', top:'40%' }}><svg width="26" height="30" viewBox="0 0 24 28" fill={c.danger} stroke="#fff" strokeWidth="1.5"><path d="M12 27s-9-7-9-15a9 9 0 0118 0c0 8-9 15-9 15z"/></svg></div>}
         {(state==='empty'||state==='searching'||state==='no_results'||state==='candidates'||state==='missing_coordinate') && <div style={{ position:'absolute', inset:0, display:'flex', alignItems:'center', justifyContent:'center', fontSize:11.5, color:c.dim }}>{state==='no_results'?'找不到符合的地點':state==='candidates'?'選擇候選後顯示落點':state==='missing_coordinate'?'地圖上無標記點':'預覽區 · 選定後顯示落點'}</div>}
         {state==='provider_down' && <div style={{ position:'absolute', inset:0, display:'flex', alignItems:'center', justifyContent:'center', background:'rgba(255,255,255,.55)', fontSize:12, fontWeight:700, color:c.danger }}>地圖服務暫時無回應</div>}
-        {(state==='selected' || state==='saved_pin') && <div style={{ position:'absolute', left:8, bottom:6, fontSize:10, fontFamily:c.mono, color:c.muted, background:c.surface, padding:'2px 6px', borderRadius:4 }}>25.0330, 121.5654 · 可拖曳微調</div>}
+        {(state==='selected' || state==='saved_pin') && <div style={{ position:'absolute', left:8, bottom:6, fontSize:10, fontFamily:c.mono, color:c.muted, background:c.surface, padding:'2px 6px', borderRadius:4 }}>{coordinateData ? `${coordinateData.lat}, ${coordinateData.lng}` : '25.0330, 121.5654'} · 可拖曳微調</div>}
         {state==='manual_coords' && <div style={{ position:'absolute', left:8, bottom:6, fontSize:10, color:c.warn, background:c.surface, padding:'2px 6px', borderRadius:4 }}>未經地址解析 · 請核對位置</div>}
-        {(state==='selected'||state==='manual_coords'||state==='saved_pin') && <div style={{ position:'absolute', right:8, bottom:6, fontSize:9.5, fontFamily:c.mono, color:c.dim, background:c.surface, padding:'2px 6px', borderRadius:4 }}>↑↓←→ 1 m · Shift 10 m · Enter 確認</div>}
+        {(state==='selected'||state==='manual_coords'||state==='saved_pin') && <div style={{ position:'absolute', right:8, bottom:6, fontSize:9.5, fontFamily:c.mono, color:c.dim, background:c.surface, padding:'2px 6px', borderRadius:4 }}>↑↓←→ 4 m · Shift 16 m</div>}
       </div>
       {(state==='manual_coords'||state==='manual_review') && (
         <div style={{ display:'flex', alignItems:'center', gap:8, padding:'7px 10px', borderTop:'1px solid '+c.line, background:c.lo }}>
           <span style={{ fontSize:10.5, fontWeight:700, color:c.warn, flexShrink:0 }}>{state==='manual_coords'?'手動座標理由 *':'複核理由 *'}</span>
-          <span style={{ flex:1, fontSize:11.5, color:c.text, padding:'4px 8px', border:'1px solid '+c.line, borderRadius:6, background:c.surface }}>{state==='manual_coords'?'新建案無門牌，依現場實測座標':'地址解析落點與實際入口不符（後門）'}</span>
+          <span style={{ flex:1, fontSize:11.5, color:c.text, padding:'4px 8px', border:'1px solid '+c.line, borderRadius:6, background:c.surface }}>{reason !== undefined ? (reason || ' ') : (state==='manual_coords'?'新建案無門牌，依現場實測座標':'地址解析落點與實際入口不符（後門）')}</span>
         </div>
       )}
       {/* next-step footer */}

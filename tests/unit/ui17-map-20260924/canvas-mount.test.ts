@@ -58,7 +58,7 @@ describe("Canvas SSR Integrations", () => {
       window.PROGRAMS = { card: { primary: 'blue', accentBg: '#fff', accent: '#ccc' } };
 
       const renders = {};
-      
+
       // TN Scenarios
       renders.TN_empty = ReactDOMServer.renderToStaticMarkup(window.TN_NewBookingMap({ theme, pick: 'empty', drop: 'empty' }));
       renders.TN_normal = ReactDOMServer.renderToStaticMarkup(window.TN_NewBookingMap({ theme, pick: 'selected', drop: 'selected' }));
@@ -72,8 +72,8 @@ describe("Canvas SSR Integrations", () => {
       renders.PB_empty = ReactDOMServer.renderToStaticMarkup(window.PB_BookCardMap({ state: 'empty', drop: 'empty' }));
       renders.PB_selected = ReactDOMServer.renderToStaticMarkup(window.PB_BookCardMap({ state: 'selected', drop: 'selected' }));
       renders.PB_out_of_area = ReactDOMServer.renderToStaticMarkup(window.PB_BookCardMap({ state: 'selected', drop: 'out_of_area' }));
-      renders.PB_provider_down = ReactDOMServer.renderToStaticMarkup(window.PB_BookCardMap({ state: 'provider_down', drop: 'provider_down' }));
-      renders.PB_manual_review = ReactDOMServer.renderToStaticMarkup(window.PB_BookCardMap({ state: 'manual_review', drop: 'selected' }));
+      renders.PB_provider_down = ReactDOMServer.renderToStaticMarkup(window.PB_BookCardMap({ state: 'provider_down', drop: 'provider_down', gate: 'dispatch_manual_review_required' }));
+      renders.PB_manual_review = ReactDOMServer.renderToStaticMarkup(window.PB_BookCardMap({ state: 'manual_review', drop: 'selected', gate: 'dispatch_manual_review_required' }));
 
       // CG Scenarios
       renders.CG_empty = ReactDOMServer.renderToStaticMarkup(window.CG_NewBookingMap({ theme, pick: 'empty', drop: 'empty' }));
@@ -101,8 +101,21 @@ describe("Canvas SSR Integrations", () => {
           `[${name}] CTA '${buttonText}' not found in HTML:\n${html}`,
         );
       }
+      const buttonRegex = new RegExp(
+        `<button[^>]*>[\\s\\S]*?${buttonText}[\\s\\S]*?</button>`,
+        "i",
+      );
+      const match = html.match(buttonRegex);
+      if (!match) {
+        throw new Error(
+          `[${name}] button tag with '${buttonText}' not found in HTML:\n${html.substring(html.indexOf(buttonText) - 100, html.indexOf(buttonText) + 100)}`,
+        );
+      }
+      const buttonHtml = match[0];
       if (expectedDisabled) {
-        expect(html.includes("disabled")).toBeTruthy(); // Rough check
+        expect(buttonHtml.includes("disabled")).toBeTruthy();
+      } else {
+        expect(buttonHtml.includes("disabled")).toBeFalsy();
       }
     };
 
