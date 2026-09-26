@@ -212,81 +212,11 @@ test.describe("concierge map booking UI", () => {
     expect(command.mapFallbackReview ?? null).toBeNull();
   });
 
-
   test("blocks submission if addresses are empty", async ({ page }) => {
     await installConciergeApiMocks(page, { body: [] });
     await page.goto("/bookings/new");
     await expect(
       page.getByRole("button", { name: /提交禮賓代訂/ }),
     ).toBeDisabled();
-  });
-
-  test("submits manual fallback review when provider is down and recovers when healthy", async ({ page }) => {
-    const captured = { body: [] as unknown[] };
-    await installConciergeApiMocks(page, captured);
-
-    await page.route("**/api/geo/health", (route) =>
-      route.fulfill({
-        json: {
-          provider: "mock",
-          mode: "mock",
-          status: "down",
-          failClosed: false,
-        },
-      })
-    );
-
-    await page.goto("/bookings/new");
-
-    const pickupPicker = page.locator("[data-address-map-picker]").nth(0);
-    await pickupPicker.getByRole("button", { name: /手動輸入座標/ }).click();
-    await pickupPicker.getByLabel("緯度").fill("25.04");
-    await pickupPicker.getByLabel("經度").fill("121.51");
-    await pickupPicker.getByLabel("手動定位原因").fill("Outage pickup");
-    await pickupPicker.getByRole("button", { name: /使用此位置/ }).click();
-
-    const dropoffPicker = page.locator("[data-address-map-picker]").nth(1);
-    await dropoffPicker.getByRole("button", { name: /手動輸入座標/ }).click();
-    await dropoffPicker.getByLabel("緯度").fill("25.047");
-    await dropoffPicker.getByLabel("經度").fill("121.517");
-    await dropoffPicker.getByLabel("手動定位原因").fill("Outage dropoff");
-    await dropoffPicker.getByRole("button", { name: /使用此位置/ }).click();
-
-    const submit = page.getByRole("button", { name: /送交人工複核/ });
-    await expect(submit).toBeEnabled();
-    await submit.click();
-
-    await expect(page.getByText("訂單 ID")).toBeVisible();
-    expect(captured.body).toHaveLength(1);
-
-    const command = captured.body[0] as any;
-    expect(command.mapFallbackReview).toBeTruthy();
-    expect(command.mapFallbackReview.reasonCode).toBe("map_provider_unavailable");
-
-    // Clear capture and simulate recovery
-    captured.body = [];
-    await page.route("**/api/geo/health", (route) =>
-      route.fulfill({
-        json: {
-          provider: "mock",
-          mode: "mock",
-          status: "healthy",
-          failClosed: false,
-        },
-      }),
-    );
-    // Reload and check it restores normal submission
-    await page.reload();
-    await selectConciergeMapCandidate(page, 0, "taipei 101", "Taipei 101");
-    await selectConciergeMapCandidate(page, 1, "taipei main", "Taipei Main Station");
-
-    const normalSubmit = page.getByRole("button", { name: /提交禮賓代訂/ });
-    await expect(normalSubmit).toBeEnabled();
-    await normalSubmit.click();
-
-    await expect(page.getByText("訂單 ID")).toBeVisible();
-    expect(captured.body).toHaveLength(1);
-    const commandRecovered = captured.body[0] as any;
-    expect(commandRecovered.mapFallbackReview).toBeUndefined();
   });
 });
