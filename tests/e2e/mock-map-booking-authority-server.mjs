@@ -183,12 +183,12 @@ const lionEntry = {
 };
 
 const entries = {
-  acme: ctbcEntry,
-  contoso: cathayEntry,
-  fabrikam: taishinEntry,
-  northwind: dbsEntry,
-  tailspin: fubonEntry,
-  adventureworks: lionEntry,
+  ctbc: ctbcEntry,
+  cathay: cathayEntry,
+  taishin: taishinEntry,
+  dbs: dbsEntry,
+  fubon: fubonEntry,
+  lion: lionEntry,
 };
 
 let lastTenantBookingCommand = null;
@@ -238,7 +238,7 @@ const server = http.createServer((req, res) => {
         accessToken: "handoff-token",
         tokenType: "Bearer",
         expiresIn: "15m",
-        partnerEntrySlug: "acme",
+        partnerEntrySlug: "ctbc",
         drtsPassengerId: "passenger-embed-001",
         identity: {
           actorType: "referral_passenger",
@@ -256,7 +256,7 @@ const server = http.createServer((req, res) => {
           tenantId: "tenant-acme",
           partnerId: "partner-acme",
           partnerProgramId: "program-acme-airport",
-          partnerEntrySlug: "acme",
+          partnerEntrySlug: "ctbc",
           drtsPassengerId: "passenger-embed-001",
         },
       },

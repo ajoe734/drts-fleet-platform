@@ -892,7 +892,10 @@ export function TenantBookingCreateForm({
     serviceability,
     providerState,
   });
-  const mapGate = baseGate;
+  const mapGate = {
+    ...baseGate,
+    blocking: baseGate.blocking || baseGate.code === "dispatch_manual_review_required",
+  };
   const notServiceable = mapGate.code === "outside_service_area";
   const draft: TenantBookingDraftValues = {
     businessDispatchSubtype,

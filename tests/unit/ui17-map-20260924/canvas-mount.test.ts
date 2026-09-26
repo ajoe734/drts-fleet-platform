@@ -49,7 +49,7 @@ describe("Canvas SSR Integrations", () => {
 
     vm.runInContext(
       `
-      const theme = window.buildMgmtTheme ? window.buildMgmtTheme({ console: 'tenant' }) : { consoleId: 'tenant', primary: 'blue', text: '#000', surface: '#fff', danger: '#ff0000', textMuted: '#aaa', accent: '#00f', surfaceLo: '#fff', border: '#ccc', accentBg: '#fff', accentBorder: '#ccc' };
+      const testTheme = window.buildMgmtTheme ? window.buildMgmtTheme({ console: 'tenant' }) : { consoleId: 'tenant', primary: 'blue', text: '#000', surface: '#fff', danger: '#ff0000', textMuted: '#aaa', accent: '#00f', surfaceLo: '#fff', border: '#ccc', accentBg: '#fff', accentBorder: '#ccc' };
       window.TN_ACTOR = window.TN_ACTOR || { name: 'LC', display: '張俐萱' };
       window.TN_NAV = window.TN_NAV || [];
       window.TN_HEALTH = window.TN_HEALTH || {};
@@ -60,13 +60,13 @@ describe("Canvas SSR Integrations", () => {
       const renders = {};
 
       // TN Scenarios
-      renders.TN_empty = ReactDOMServer.renderToStaticMarkup(window.TN_NewBookingMap({ theme, pick: 'empty', drop: 'empty' }));
-      renders.TN_normal = ReactDOMServer.renderToStaticMarkup(window.TN_NewBookingMap({ theme, pick: 'selected', drop: 'selected' }));
-      renders.TN_saved_address = ReactDOMServer.renderToStaticMarkup(window.TN_NewBookingMap({ theme, pick: 'saved_pin', drop: 'saved_pin' }));
-      renders.TN_out_of_area = ReactDOMServer.renderToStaticMarkup(window.TN_NewBookingMap({ theme, pick: 'selected', drop: 'out_of_area' }));
-      renders.TN_backend_rejected = ReactDOMServer.renderToStaticMarkup(window.TN_NewBookingMap({ theme, pick: 'selected', drop: 'candidates' }));
-      renders.TN_degraded = ReactDOMServer.renderToStaticMarkup(window.TN_NewBookingMap({ theme, degraded: true }));
-      renders.TN_manual_review = ReactDOMServer.renderToStaticMarkup(window.TN_NewBookingMap({ theme, pick: 'manual_review', drop: 'selected' }));
+      renders.TN_empty = ReactDOMServer.renderToStaticMarkup(window.TN_NewBookingMap({ theme: testTheme, pick: 'empty', drop: 'empty' }));
+      renders.TN_normal = ReactDOMServer.renderToStaticMarkup(window.TN_NewBookingMap({ theme: testTheme, pick: 'selected', drop: 'selected' }));
+      renders.TN_saved_address = ReactDOMServer.renderToStaticMarkup(window.TN_NewBookingMap({ theme: testTheme, pick: 'saved_pin', drop: 'saved_pin' }));
+      renders.TN_out_of_area = ReactDOMServer.renderToStaticMarkup(window.TN_NewBookingMap({ theme: testTheme, pick: 'selected', drop: 'out_of_area' }));
+      renders.TN_backend_rejected = ReactDOMServer.renderToStaticMarkup(window.TN_NewBookingMap({ theme: testTheme, pick: 'selected', drop: 'candidates' }));
+      renders.TN_degraded = ReactDOMServer.renderToStaticMarkup(window.TN_NewBookingMap({ theme: testTheme, degraded: true }));
+      renders.TN_manual_review = ReactDOMServer.renderToStaticMarkup(window.TN_NewBookingMap({ theme: testTheme, pick: 'manual_review', drop: 'selected' }));
 
       // PB Scenarios
       renders.PB_empty = ReactDOMServer.renderToStaticMarkup(window.PB_BookCardMap({ state: 'empty', drop: 'empty' }));
@@ -76,12 +76,12 @@ describe("Canvas SSR Integrations", () => {
       renders.PB_manual_review = ReactDOMServer.renderToStaticMarkup(window.PB_BookCardMap({ state: 'manual_review', drop: 'selected', gate: 'dispatch_manual_review_required', reason: 'Manual entry' }));
 
       // CG Scenarios
-      renders.CG_empty = ReactDOMServer.renderToStaticMarkup(window.CG_NewBookingMap({ theme, pick: 'empty', drop: 'empty' }));
-      renders.CG_normal = ReactDOMServer.renderToStaticMarkup(window.CG_NewBookingMap({ theme, pick: 'selected', drop: 'selected' }));
-      renders.CG_out_of_area = ReactDOMServer.renderToStaticMarkup(window.CG_NewBookingMap({ theme, pick: 'selected', drop: 'out_of_area' }));
-      renders.CG_backend_rejected = ReactDOMServer.renderToStaticMarkup(window.CG_NewBookingMap({ theme, pick: 'selected', drop: 'candidates' }));
-      renders.CG_degraded_recovered = ReactDOMServer.renderToStaticMarkup(window.CG_NewBookingMap({ theme, success: true }));
-      renders.CG_degraded = ReactDOMServer.renderToStaticMarkup(window.CG_NewBookingMap({ theme, degraded: true, pick: 'selected', drop: 'selected' }));
+      renders.CG_empty = ReactDOMServer.renderToStaticMarkup(window.CG_NewBookingMap({ theme: testTheme, pick: 'empty', drop: 'empty' }));
+      renders.CG_normal = ReactDOMServer.renderToStaticMarkup(window.CG_NewBookingMap({ theme: testTheme, pick: 'selected', drop: 'selected' }));
+      renders.CG_out_of_area = ReactDOMServer.renderToStaticMarkup(window.CG_NewBookingMap({ theme: testTheme, pick: 'selected', drop: 'out_of_area' }));
+      renders.CG_backend_rejected = ReactDOMServer.renderToStaticMarkup(window.CG_NewBookingMap({ theme: testTheme, pick: 'selected', drop: 'candidates' }));
+      renders.CG_degraded_recovered = ReactDOMServer.renderToStaticMarkup(window.CG_NewBookingMap({ theme: testTheme, success: true }));
+      renders.CG_degraded = ReactDOMServer.renderToStaticMarkup(window.CG_NewBookingMap({ theme: testTheme, degraded: true, pick: 'selected', drop: 'selected' }));
 
       global.results = renders;
     `,

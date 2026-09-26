@@ -319,10 +319,29 @@ test.describe("tenant console booking map alignment", () => {
       page.getByText("Inside the service area", { exact: false }),
     ).toBeVisible();
 
+    // In outage, Tenant must explicitly block rather than falling back to normal booking
     const submitBtn = page.getByRole("button", {
-      name: /Create booking|For approval|Submitting|建立叫車/,
+      name: /Create booking|For approval|Submitting|建立叫車|送出 command/,
     });
     await expect(submitBtn).toBeVisible();
+    await expect(submitBtn).toBeDisabled();
+
+    // Simulate recovery
+    await page.route("**/api/geo/health", (route) =>
+      route.fulfill({
+        json: {
+          provider: "mock",
+          mode: "mock",
+          status: "healthy",
+          failClosed: false,
+        },
+      }),
+      { times: 1 }
+    );
+    // Trigger a refresh or re-eval (e.g. by modifying a field or clicking refresh)
+    await page.getByRole("button", { name: /Refresh/i }).click();
+    await page.waitForTimeout(500);
+
     await expect(submitBtn).toBeEnabled();
     await submitBtn.click();
 

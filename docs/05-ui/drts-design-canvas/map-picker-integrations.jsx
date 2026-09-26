@@ -31,18 +31,18 @@ function TN_NewBookingMap({ theme:th, degraded, pick, drop }) {
         meta={<Pill theme={th} tone="info" dot>POST /api/tenant/bookings/commands/create</Pill>}/>
       <div style={{ padding:24, display:'grid', gridTemplateColumns:'1.4fr 1fr', gap:16, alignItems:'start' }}>
         <Card theme={th} title="行程">
-          {degraded && <div style={{ marginBottom:12 }}><Banner theme={th} tone="warn" icon="warn" title="地圖服務不穩定" body="目前地圖服務可能無法搜尋。若您有確定座標，仍可繼續建立一般訂單；無座標或超出服務範圍將無法建立。"/></div>}
+          {degraded && <div style={{ marginBottom:12 }}><Banner theme={th} tone="danger" icon="warn" title="地圖服務中斷" body="目前地圖服務無回應。此期間無法建立叫車，亦不支援送交人工複核；請稍後再試。"/></div>}
           <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:12 }}>
             <Field theme={th} label="服務類型 · service_type" required><Select theme={th} value="airport_pickup"/></Field>
             <Field theme={th} label="預約 / 即時 · timing" required><Select theme={th} value="預約 · scheduled"/></Field>
           </div>
           <div style={{ display:'flex', flexDirection:'column', gap:10, marginBottom:14 }}>
             <Field theme={th} label="常用上車地址"><Select theme={th} value=""/></Field>
-            <MapPicker theme={th} label="上車" state={ps}/>
+            <MapPicker theme={th} skin="tenant" label="上車" state={ps}/>
             <Field theme={th} label="常用下車地址"><Select theme={th} value=""/></Field>
-            <MapPicker theme={th} label="下車" state={ds} value={ds==='no_results'?'桃園機場 第三航廈':'桃園機場 第二航廈 出境大廳'}/>
+            <MapPicker theme={th} skin="tenant" label="下車" state={ds} value={ds==='no_results'?'桃園機場 第三航廈':'桃園機場 第二航廈 出境大廳'}/>
             {(ps==='out_of_area'||ds==='out_of_area') && <Banner theme={th} tone="danger" icon="warn" title="有地點不在服務範圍 · 無法送出" body="請更換該地點；不可提交人工複核繞過服務範圍。"/>}
-            {ds==='no_results' && <Banner theme={th} tone="warn" icon="info" title="下車查無結果 · 復原路徑" body="換關鍵字重搜，或改用手動座標（需填理由，落點將轉人工複核）。"/>}
+            {ds==='no_results' && <Banner theme={th} tone="warn" icon="info" title="下車查無結果 · 復原路徑" body="請換關鍵字重搜，租戶端不支援手動座標。"/>}
           </div>
           <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:12 }}>
             <Field theme={th} label="出發時間 · departAt" required><Input theme={th} value="2026-09-25 17:30" mono/></Field>
@@ -93,7 +93,7 @@ function TN_AddressesMap({ theme:th, state='manual_review', coordinateData, reas
         </Card>
         <Card theme={th} title="編輯 · 新竹據點（後門）" subtitle="選點元件內嵌於表單">
           <Field theme={th} label="名稱" required><Input theme={th} value="新竹據點（後門）"/></Field>
-          <div style={{ marginBottom:14 }}><MapPicker theme={th} label="地址" state={state} coordinateData={coordinateData} reason={reason} value={value} /></div>
+          <div style={{ marginBottom:14 }}><MapPicker theme={th} skin="tenant" label="地址" state={state} coordinateData={coordinateData} reason={reason} value={value} /></div>
           <Field theme={th} label="備註"><Input theme={th} value="貨運出入口，正門不可停車"/></Field>
           <div style={{ display:'flex', gap:8 }}><Btn theme={th}>取消</Btn><span style={{ flex:1 }}/><Btn theme={th} variant="primary" icon="check">儲存</Btn></div>
         </Card>
@@ -108,11 +108,11 @@ function PB_BookCardMap({ state='selected', drop='selected', reason, program='ca
   const hard = state==='out_of_area' || drop==='out_of_area';
   const unresolved = ['no_results','empty','searching','candidates','missing_coordinate'].some(s=>s===state||s===drop);
   const manualPath = ['provider_down','manual_review'].some(s=>s===state||s===drop);
+  const needsReason = ['provider_down','manual_review','manual_coords'].some(s=>s===state||s===drop);
   const down = state==='provider_down' || drop==='provider_down';
   const hasReason = Boolean((reason || '').trim());
   const manualReady = manualPath && !hard && !unresolved && hasReason;
-  const normalReady = !manualPath && !hard && !unresolved;
-  const blocked = hard || unresolved || (manualPath && !manualReady);
+  const blocked = hard || unresolved || (needsReason && !hasReason);
   return (
     <PBScreen p={p}>
       <PBHeader p={p} title="建立行程" sub="信用卡機場接送 · 桃園 T2" back/>

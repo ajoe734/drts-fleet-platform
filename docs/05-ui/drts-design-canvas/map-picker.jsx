@@ -16,7 +16,11 @@ const MP_STATES = {
   out_of_area:   { zh:'不在服務範圍', tone:'danger', next:'請更換地點；此地點無法派車' },
 };
 function MapPicker({ theme:th, label='上車地點', state='selected', value, compact, coordinateData, reason, skin='mgmt' }) {
-  const m = MP_STATES[state];
+  const m = { ...MP_STATES[state] };
+  if (skin === 'tenant') {
+    if (state === 'provider_down') m.next = '地圖服務無回應，無法建立叫車';
+    if (state === 'manual_review') m.next = '租戶端不支援手動座標';
+  }
   const c = { text:th.text, muted:th.textMuted, dim:th.textDim, line:th.border, surface:th.surface, lo:th.surfaceLo, accent:th.accent, success:th.success, warn:th.warn, danger:th.danger, mono:th.mono || (typeof SHELL_MONO !== 'undefined' ? SHELL_MONO : 'ui-monospace, Menlo, monospace') };
   const tone = c[m.tone==='neutral'?'muted':m.tone==='info'?'accent':m.tone];
   const blocked = state==='provider_down' || state==='out_of_area';
@@ -62,19 +66,19 @@ function MapPicker({ theme:th, label='上車地點', state='selected', value, co
         {state==='manual_coords' && <div style={{ position:'absolute', left:8, bottom:6, fontSize:10, color:c.warn, background:c.surface, padding:'2px 6px', borderRadius:4 }}>未經地址解析 · 請核對位置</div>}
         {(state==='selected'||state==='manual_coords'||state==='saved_pin') && <div style={{ position:'absolute', right:8, bottom:6, fontSize:9.5, fontFamily:c.mono, color:c.dim, background:c.surface, padding:'2px 6px', borderRadius:4 }}>↑↓←→ 微調 · Shift 大步</div>}
       </div>
-      {(state==='manual_coords'||state==='manual_review') && (
+      {(state==='manual_coords'||state==='manual_review'||(state==='provider_down' && skin!=='tenant')) && (
         <div style={{ display:'flex', alignItems:'center', gap:8, padding:'7px 10px', borderTop:'1px solid '+c.line, background:c.lo }}>
           <span style={{ fontSize:10.5, fontWeight:700, color:c.warn, flexShrink:0 }}>{state==='manual_coords'?'手動座標理由 *':'複核理由 *'}</span>
           <span style={{ flex:1, fontSize:11.5, color:c.text, padding:'4px 8px', border:'1px solid '+c.line, borderRadius:6, background:c.surface }}>{reason !== undefined ? (reason || ' ') : (state==='manual_coords'?'新建案無門牌，依現場實測座標':'地址解析落點與實際入口不符（後門）')}</span>
         </div>
       )}
       {/* next-step footer */}
-      <div style={{ display:'flex', alignItems:'center', gap:8, padding:'7px 10px', borderTop:'1px solid '+c.line, background:blocked?(skin==='pb'?theme.dangerBg:theme.dangerBg):c.surface }}>
+      <div style={{ display:'flex', alignItems:'center', gap:8, padding:'7px 10px', borderTop:'1px solid '+c.line, background:blocked?(skin==='pb'?th.dangerBg:th.dangerBg):c.surface }}>
         <span style={{ flex:1, fontSize:11, color:blocked?c.danger:c.muted, fontWeight:blocked?700:500 }}>{m.next}</span>
-        {state==='no_results' && <span style={{ fontSize:11, color:c.accent, fontWeight:700 }}>改用手動座標</span>}
-        {state==='provider_down' && <span style={{ fontSize:11, color:c.danger, fontWeight:700 }}>送交人工複核 →</span>}
+        {state==='no_results' && <span style={{ fontSize:11, color:c.accent, fontWeight:700 }}>{skin==='tenant'?'查無結果':'改用手動座標'}</span>}
+        {state==='provider_down' && <span style={{ fontSize:11, color:c.danger, fontWeight:700 }}>{skin==='tenant'?'無法建立':'送交人工複核 →'}</span>}
         {state==='out_of_area' && <span style={{ fontSize:11, color:c.danger, fontWeight:700 }}>更換地點</span>}
-        {state==='manual_review' && <span style={{ fontSize:11, color:c.warn, fontWeight:700 }}>客服確認後派車</span>}
+        {state==='manual_review' && <span style={{ fontSize:11, color:c.warn, fontWeight:700 }}>{skin==='tenant'?'不支援手動座標':'客服確認後派車'}</span>}
         {state==='candidates' && <span style={{ fontSize:11, color:c.dim }}>3 筆候選</span>}
       </div>
     </div>
