@@ -83,6 +83,7 @@
     "@types/pg": "^8.20.0",
     "@types/react": "^19.2.2",
     "@types/react-dom": "^19.2.2",
+    "@vitejs/plugin-react": "^6.1.1",
     "eslint": "^9.39.1",
     "eslint-config-prettier": "^10.1.8",
     "exceljs": "^4.4.0",

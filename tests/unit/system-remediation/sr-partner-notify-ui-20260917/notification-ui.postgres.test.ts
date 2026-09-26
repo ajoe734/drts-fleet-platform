@@ -127,8 +127,10 @@ describe.skipIf(!testDbUrl)(
             },
             deliveryCount: 0,
             failedDeliveryCount: 0,
-          },
+          } as any,
           secretHistory: [],
+          createdAt: "2026-09-24T00:00:00Z",
+          updatedAt: "2026-09-24T00:00:00Z",
         };
 
       // Compute actual fingerprint
@@ -254,6 +256,7 @@ describe.skipIf(!testDbUrl)(
       entrySlug?: string;
       retryDisp?: string;
       receiptId?: string;
+      attemptCount?: number;
     }) {
       const orderId = randomUUID();
       const outboxId = randomUUID();
