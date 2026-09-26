@@ -925,17 +925,18 @@ describe.skipIf(!testDbUrl)(
 
       const oldRes = await mtRepo.listPartnerNotificationDeliveries(
         { entrySlug: entrySlug1, tenantId, partnerId },
-        { limit: 50 },
+        { pageSize: 50 },
       );
+      expect(oldRes.rows).toHaveLength(1);
       expect(
         oldRes.rows.find((i: any) => i.outboxId === outboxId),
       ).toBeDefined();
 
       const newRes = await mtRepo.listPartnerNotificationDeliveries(
         { entrySlug: entrySlug2, tenantId, partnerId },
-        { limit: 50 },
+        { pageSize: 50 },
       );
-      expect(oldRes.total).toBeGreaterThanOrEqual(1);
+      expect(oldRes.total).toBe(1);
       expect(
         newRes.rows.find((i: any) => i.outboxId === outboxId),
       ).toBeUndefined();
@@ -953,6 +954,13 @@ describe.skipIf(!testDbUrl)(
       );
       expect(res2.kind).toBe("failed");
       expect((res2 as any).failure?.failureReason).toBe("route_missing");
+      
+      const { rows: postRows } = await pool.query(
+        "SELECT status, attempt_count FROM ops.consumer_notification_outbox WHERE outbox_id = $1",
+        [outboxId],
+      );
+      expect(postRows[0].status).toBe("failed");
+      expect(postRows[0].attempt_count).toBe(1); // from createFixture
     });
   },
 );
