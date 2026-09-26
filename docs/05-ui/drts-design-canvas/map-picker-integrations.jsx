@@ -22,9 +22,9 @@ function TN_NewBookingMap({ theme:th, degraded, pick, drop }) {
   const ds = (degraded && !HARD.includes(d_raw) && !UNRESOLVED.includes(d_raw)) ? 'provider_down' : d_raw;
   const hardBlocked = HARD.includes(ps) || HARD.includes(ds);
   const unresolved = UNRESOLVED.includes(ps) || UNRESOLVED.includes(ds);
-  const manualPath = ['manual_review','provider_down'].some(s=>s===ps||s===ds);
-  const manualReady = manualPath && !hardBlocked && !unresolved;
-  const normalReady = !manualPath && !hardBlocked && !unresolved;
+  const manualPath = false;
+  const manualReady = false;
+  const normalReady = !hardBlocked && !unresolved;
   return (
     <Shell theme={th} nav={TN_NAV} active="new" breadcrumb={['訂單','新增']} env="production" tenant="YAMATO" actor={TN_ACTOR} health={TN_HEALTH} refreshTier="manual">
       <PageHeader theme={th} title="建立叫車" subtitle="代訂或本人 · 預約 / 即時 · 同步 command (Q-TEN04) · 上下車改為成對地址選點"
