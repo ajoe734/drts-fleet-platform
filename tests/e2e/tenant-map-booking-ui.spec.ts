@@ -443,10 +443,9 @@ test.describe("tenant console booking map alignment", () => {
     const coordinateSourceHidden = page.locator('input[name="coordinateSource"]');
     await expect(coordinateSourceHidden).toHaveValue("manual_pin");
 
-    // Click save
-    await page.getByRole("button", { name: "Save Changes" }).click({ force: true });
+    await page.getByRole("button", { name: "Save Changes" }).dispatchEvent("click");
     
     // Wait for navigation back to addresses list or a success state
-    await expect(page.getByText("Mock Address updated").first()).toBeVisible({ timeout: 30000 });
+    await expect(page.getByText("Mock Address updated").first()).toBeVisible({ timeout: 10000 });
   });
 });

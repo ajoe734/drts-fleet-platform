@@ -587,7 +587,11 @@ jobs:
             const url = new URL(req.url, 'http://127.0.0.1:3001');
             res.setHeader('Content-Type', 'application/json');
             if (req.method === 'GET' && url.pathname === '/api/auth/session') {
-              res.end(JSON.stringify({ data: { active: true, identity: { realm: 'tenant', tenant_id: 'tenant-mock', roles: ['tenant_admin'], scopes: ['tenant:write'] } } }));
+              res.end(JSON.stringify({ data: { active: true, identity: { realm: 'tenant', tenant_id: 'tenant-mock', roles: ['tenant_admin'], scopes: ['tenant:write', 'tenant:read'] } } }));
+              return;
+            }
+            if (req.method === 'GET' && url.pathname === '/api/identity/context') {
+              res.end(JSON.stringify({ data: { actorType: 'tenant_admin', actorId: 'admin-1', roles: ['tenant_admin'], scopes: ['tenant:write', 'tenant:read'], realm: 'tenant', authMode: 'jwt_bearer', roleFamilies: ['tenant'] } }));
               return;
             }
             if (req.method === 'GET' && url.pathname === '/api/tenant/passengers') {
