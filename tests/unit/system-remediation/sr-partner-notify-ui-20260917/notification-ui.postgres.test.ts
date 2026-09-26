@@ -759,7 +759,7 @@ describe.skipIf(!testDbUrl)(
       const claim = await mtRepo.claimPartnerNotification(outboxId, "worker-1", 60);
       expect(claim).toBeDefined();
 
-      const dispatchSpy = vi.spyOn(dispatchFacade, "dispatchNotificationAttemptByWebhookId").mockImplementation(async (command) => ({
+      const dispatchSpy = vi.spyOn(dispatchFacade, "dispatchNotificationAttemptByWebhookId").mockImplementation(async (command: any) => ({
         kind: "accepted",
         ack: {
           notificationId: command.wirePayload.notificationId,
@@ -779,15 +779,14 @@ describe.skipIf(!testDbUrl)(
         });
         
         expect(dispatchSpy).toHaveBeenCalled();
-        const callCommand = dispatchSpy.mock.calls[0][0];
+        const callCommand: any = dispatchSpy.mock.calls[0][0];
         expect(callCommand.wirePayload.eventSequence).toBe(42);
         
-        await mtRepo.recordPartnerPushOutcome(outboxId, {
+        await mtRepo.recordPushDeliveryOutcome(outboxId, {
           status: "delivered",
           result: "delivered",
-          deliveredAt: receipt.deliveredAt!,
           attemptCount: claim!.record.attemptCount,
-          ...receipt.deliveryContext!
+          ...receipt!.deliveryContext!
         } as any, claim!.fenceToken);
 
         const { rows } = await pool.query("SELECT status, attempt_count FROM ops.consumer_notification_outbox WHERE outbox_id = $1", [outboxId]);
