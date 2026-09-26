@@ -21,7 +21,7 @@ export default defineConfig({
   },
   webServer: [
     {
-      command: "API_PORT=3301 AUTH_MODE=test JWT_SECRET=ci-e2e-secret JWT_ISSUER=drts-local JWT_AUDIENCE=drts-api pnpm --filter @drts/api start",
+      command: "API_PORT=3301 AUTH_MODE=test DRTS_TENANT_BOOTSTRAP_MODE=fixture JWT_SECRET=ci-e2e-secret JWT_ISSUER=drts-local JWT_AUDIENCE=drts-api pnpm --filter @drts/api start",
       url: "http://127.0.0.1:3301/health",
       reuseExistingServer: !process.env.CI,
       timeout: 180_000,
