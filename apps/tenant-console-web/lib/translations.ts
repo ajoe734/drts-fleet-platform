@@ -1162,6 +1162,11 @@ const en = {
   "newBooking.card.pickupDropoff.subtitle":
     "Start from the address book, then adjust directly when needed without opening another geocoding flow.",
   "newBooking.serviceability.blockedTitle": "Outside the service area",
+  "newBooking.serviceability.providerOutageBlocked":
+    "Address provider is down. Submission blocked.",
+  "newBooking.serviceability.providerOutageBody":
+    "Cannot resolve addresses and endpoints. Please try again later.",
+  "newBooking.serviceability.coordinatesRequired": "Coordinates required",
   "newBooking.serviceability.blockedBody":
     "The selected pickup or drop-off is not serviceable. Adjust the pins to a covered location before submitting. The backend enforces this check independently.",
   "newBooking.card.approval.title": "References and approval",
@@ -5152,6 +5157,10 @@ const zh: Record<keyof typeof en, string> = {
   "newBooking.card.pickupDropoff.subtitle":
     "先選地址簿，再視需要直接微調，不另外開 geocoding flow。",
   "newBooking.serviceability.blockedTitle": "超出服務範圍",
+  "newBooking.serviceability.providerOutageBlocked": "地址服務中斷。無法送出。",
+  "newBooking.serviceability.providerOutageBody":
+    "無法解析地址與落點。請稍後再試。",
+  "newBooking.serviceability.coordinatesRequired": "必須提供座標",
   "newBooking.serviceability.blockedBody":
     "所選上車或下車點不在可服務範圍內。送出前請將地圖 pin 調整到涵蓋範圍內。後端會獨立再驗證此限制。",
   "newBooking.card.approval.title": "關聯與審批",

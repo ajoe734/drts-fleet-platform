@@ -38,6 +38,7 @@ import {
   buildCanvasTheme,
   type AddressMapPairChange,
   type AddressPayload,
+  type AddressProviderState,
   type ServiceAreaEvaluationResult,
 } from "@drts/ui-web";
 import {
@@ -59,6 +60,7 @@ import {
   coordinateToDraftString,
   savedAddressToPayload,
 } from "@/lib/tenant-address-map";
+import { evaluateTenantSubmitGate } from "@drts/ui-web";
 
 type BookingCreateActionMap = {
   submit: ResourceActionDescriptor;
@@ -825,6 +827,11 @@ export function TenantBookingCreateForm({
   );
   const [serviceability, setServiceability] =
     useState<ServiceAreaEvaluationResult | null>(null);
+  const [providerState, setProviderState] = useState<AddressProviderState>({
+    available: true,
+    degraded: false,
+    reasonCode: "available",
+  });
   const [geoProvider] = useState(() => createTenantConsoleGeoProvider());
   // Bumped only when a saved address is chosen, to remount the picker with the
   // new seed value (the picker seeds its internal state from props at mount).
@@ -879,7 +886,6 @@ export function TenantBookingCreateForm({
   const dropoffAddress = dropoffPayload?.address ?? "";
   const dropoffLat = coordinateToDraftString(dropoffPayload?.lat);
   const dropoffLng = coordinateToDraftString(dropoffPayload?.lng);
-  const notServiceable = serviceability?.decision === "not_serviceable";
   const draft: TenantBookingDraftValues = {
     businessDispatchSubtype,
     selectedPassengerId,
@@ -947,6 +953,13 @@ export function TenantBookingCreateForm({
       (entry): entry is { href: string; link: CrossAppResourceLink } =>
         entry.href != null,
     );
+  const submitGate = evaluateTenantSubmitGate(
+    pickupPayload,
+    dropoffPayload,
+    serviceability,
+    providerState,
+  );
+
   const submitDisabled =
     submitting ||
     navigationPending ||
@@ -954,7 +967,7 @@ export function TenantBookingCreateForm({
     pageModel.emptyState != null ||
     pageModel.actions.submit.enabled === false ||
     approvalEvaluation?.outcome?.blocked === true ||
-    notServiceable ||
+    submitGate.blocking ||
     missingRequiredFields ||
     Object.keys(formatErrors).length > 0;
 
@@ -1034,6 +1047,7 @@ export function TenantBookingCreateForm({
     setPickupPayload(change.pickup);
     setDropoffPayload(change.dropoff);
     setServiceability(change.serviceability);
+    setProviderState(change.providerState);
     // A user-edited stop is no longer the saved address; drop the stale id so
     // the submitted payload's addressId matches the pinned coordinates.
     if (change.pickup && change.pickup.coordinateSource !== "saved_address") {
@@ -1185,8 +1199,20 @@ export function TenantBookingCreateForm({
       return;
     }
 
-    if (notServiceable) {
-      setSubmitError(t("newBooking.serviceability.blockedBody"));
+    if (submitGate.blocking) {
+      if (submitGate.code === "outside_service_area") {
+        setSubmitError(t("newBooking.serviceability.blockedBody"));
+      } else if (submitGate.code === "provider_outage") {
+        setSubmitError(
+          t("newBooking.serviceability.providerOutageBlocked") ??
+            "Address provider is down. Submission blocked.",
+        );
+      } else {
+        setSubmitError(
+          t("newBooking.serviceability.coordinatesRequired") ??
+            "Coordinates required",
+        );
+      }
       return;
     }
 
@@ -1242,6 +1268,8 @@ export function TenantBookingCreateForm({
       setSubmitting(false);
     }
   }
+
+  const notServiceable = serviceability?.decision === "not_serviceable";
 
   return (
     <div style={pageStyle}>
@@ -1634,6 +1662,22 @@ export function TenantBookingCreateForm({
                 </div>
 
                 <div style={{ marginTop: 12 }}>
+                  {!providerState.available ? (
+                    <div style={{ marginBottom: 12 }}>
+                      <CanvasBanner
+                        theme={th}
+                        tone="danger"
+                        icon="warn"
+                        title={
+                          t("newBooking.serviceability.providerOutageBlocked")
+                        }
+                        body={
+                          t("newBooking.serviceability.providerOutageBody")
+                        }
+                      />
+                    </div>
+                  ) : null}
+
                   <AddressMapPairPicker
                     key={pickerNonce}
                     provider={geoProvider}

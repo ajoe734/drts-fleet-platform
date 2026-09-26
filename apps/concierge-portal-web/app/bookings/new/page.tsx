@@ -123,10 +123,21 @@ export default function ConciergeBookingCreatePage() {
     bothDispatchReady: false,
   });
 
-  const mapProviderMode =
+  const [mapProviderMode, setMapProviderMode] = useState<AddressProviderMode>(
     (process.env.NEXT_PUBLIC_ADDRESS_PICKER_PROVIDER_MODE as
       | AddressProviderMode
-      | undefined) ?? "healthy";
+      | undefined) ?? "healthy"
+  );
+
+  useEffect(() => {
+    if (typeof window !== "undefined") {
+      const mode = window.sessionStorage.getItem("drts.geo.mode") as AddressProviderMode;
+      if (mode) {
+        setMapProviderMode(mode);
+      }
+    }
+  }, []);
+
   const mapProvider = useMemo(
     () => createConfiguredMockAddressProvider(mapProviderMode),
     [mapProviderMode],
@@ -604,7 +615,11 @@ export default function ConciergeBookingCreatePage() {
                   serviceability: mapSelection.serviceability,
                   providerState: mapSelection.providerState,
                 }).code === "dispatch_manual_review_required" ? (
-                  <p className="form-help">{t("booking.help.manualReview")}</p>
+                  <p className="form-help">
+                    {!mapSelection.providerState.available
+                      ? t("booking.help.outageReview")
+                      : t("booking.help.manualReview")}
+                  </p>
                 ) : null}
               </div>
             </div>
