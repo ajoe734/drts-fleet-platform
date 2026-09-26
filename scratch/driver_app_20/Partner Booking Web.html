@@ -1,0 +1,113 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="UTF-8" />
+<title>Partner Booking Web · 智慧運輸科技</title>
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&family=Noto+Sans+TC:wght@400;500;600;700&display=swap" rel="stylesheet" />
+<style>
+  html, body { margin: 0; padding: 0; background: #f0eee9; font-family: "Inter", "Noto Sans TC", system-ui, sans-serif; }
+  * { box-sizing: border-box; }
+</style>
+</head>
+<body>
+<template id="__bundler_thumbnail">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">
+  <rect width="100" height="100" fill="#0A2A6E"/>
+  <rect x="32" y="16" width="36" height="68" rx="6" fill="#FFFFFF"/>
+  <rect x="36" y="22" width="28" height="16" rx="2" fill="#1B4FA0"/>
+  <rect x="56" y="32" width="6" height="4" rx="1" fill="#C9A356"/>
+  <rect x="36" y="44" width="28" height="2.5" fill="#E5E7EB"/>
+  <rect x="36" y="50" width="20" height="2.5" fill="#E5E7EB"/>
+  <rect x="36" y="62" width="28" height="12" rx="2" fill="#C9A356"/>
+</svg>
+</template>
+<div id="root"></div>
+
+<script src="https://unpkg.com/react@18.3.1/umd/react.development.js" integrity="sha384-hD6/rw4ppMLGNu3tX5cjIb+uRZ7UkRJ6BPkLpg4hAu/6onKUg4lLsHAs9EBPT82L" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" integrity="sha384-u6aeetuaXnQ38mYT8rp6sbXaQe3NL9t+IBXmnYxwkUI2Hw4bsp2Wvmx4yRQF1uAm" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" integrity="sha384-m08KidiNqLdpJqLq95G/LEi8Qvjl/xUYll3QILypMoQ65QorJ9Lvtp2RXYGBFj1y" crossorigin="anonymous"></script>
+
+<script type="text/babel" src="design-canvas.jsx"></script>
+<script type="text/babel" src="ios-frame.jsx"></script>
+<script type="text/babel" src="pb-screens.jsx"></script>
+<script type="text/babel" src="pb-states.jsx"></script>
+<script type="text/babel" src="pb-receipts.jsx"></script>
+<script type="text/babel" src="pb-embed.jsx"></script>
+<script type="text/babel" src="map-picker.jsx"></script>
+<script type="text/babel" src="map-picker-integrations.jsx"></script>
+
+<script type="text/babel">
+function App() {
+  const W = 402, H = 874;
+  const Phone = ({ children, p }) => (
+    <IOSDevice width={W} height={H} title={(p && p.brand) + ' App'}>{children}</IOSDevice>
+  );
+
+  return (
+    <DesignCanvas projectName="Partner Booking Web" subtitle="白牌合作入口 · Phase 1 P0 · 3 program flows (信用卡機場 / 保險代步 / 旅行社) · spec Part C" accent="#1B4FA0">
+
+      <DCSection id="card" title="01 · 信用卡機場接送 · Credit-card Airport Transfer" subtitle="中信 World Elite · 嵌入卡片 App webview">
+        <DCArtboard id="card-landing" label="入口 Landing · 權益" width={W} height={H}><Phone p={PROGRAMS.card}><PB_Landing program="card" /></Phone></DCArtboard>
+        <DCArtboard id="card-elig" label="資格驗證 Eligibility" width={W} height={H}><Phone p={PROGRAMS.card}><PB_Eligibility program="card" /></Phone></DCArtboard>
+        <DCArtboard id="card-book" label="預約表單 · airport fields" width={W} height={H}><Phone p={PROGRAMS.card}><PB_BookCard /></Phone></DCArtboard>
+        <DCArtboard id="card-review" label="確認 Review & Confirm" width={W} height={H}><Phone p={PROGRAMS.card}><PB_Review program="card" /></Phone></DCArtboard>
+        <DCArtboard id="card-success" label="預約成功 Success" width={W} height={H}><Phone p={PROGRAMS.card}><PB_Success program="card" /></Phone></DCArtboard>
+        <DCArtboard id="card-track" label="行程追蹤 Tracking" width={W} height={H}><Phone p={PROGRAMS.card}><PB_Tracking program="card" /></Phone></DCArtboard>
+      </DCSection>
+
+      <DCSection id="insurance" title="02 · 保險代步 · Insurance Replacement" subtitle="富邦產險 · claim.fubon-ins.com.tw · 理賠額度 (非趟次) · reference/claim-driven">
+        <DCArtboard id="ins-landing" label="入口 · 代步額度" width={W} height={H}><Phone p={PROGRAMS.insurance}><PB_Landing program="insurance" /></Phone></DCArtboard>
+        <DCArtboard id="ins-elig" label="資格驗證 · policy + replacement-vehicle + roster" width={W} height={H}><Phone p={PROGRAMS.insurance}><PB_InsEligibility /></Phone></DCArtboard>
+        <DCArtboard id="ins-book" label="預約表單 · insurance fields" width={W} height={H}><Phone p={PROGRAMS.insurance}><PB_BookInsurance /></Phone></DCArtboard>
+        <DCArtboard id="ins-review" label="確認 Review" width={W} height={H}><Phone p={PROGRAMS.insurance}><PB_Review program="insurance" /></Phone></DCArtboard>
+        <DCArtboard id="ins-success" label="預約成功 Success" width={W} height={H}><Phone p={PROGRAMS.insurance}><PB_Success program="insurance" /></Phone></DCArtboard>
+        <DCArtboard id="ins-track" label="行程追蹤 Tracking" width={W} height={H}><Phone p={PROGRAMS.insurance}><PB_Tracking program="insurance" /></Phone></DCArtboard>
+        <DCArtboard id="ins-receipt" label="行程明細 / 收據 · 理賠核銷 (§5.2)" width={W} height={H}><Phone p={PROGRAMS.insurance}><PB_InsReceipt /></Phone></DCArtboard>
+      </DCSection>
+
+      <DCSection id="insurance-states" title="02b · 保險 · 資格 / 阻擋狀態 · Eligibility States" subtitle="contract enum 各對應一個畫面狀態 · 由理賠系統判定">
+        <DCArtboard id="ins-pending" label="insurance_pending · 理賠審核中" width={W} height={H}><Phone p={PROGRAMS.insurance}><PB_InsBlocked state="insurance_pending" /></Phone></DCArtboard>
+        <DCArtboard id="ins-missing" label="insurance_missing · 查無案件" width={W} height={H}><Phone p={PROGRAMS.insurance}><PB_InsBlocked state="insurance_missing" /></Phone></DCArtboard>
+        <DCArtboard id="ins-expired" label="insurance_expired · 代步逾期" width={W} height={H}><Phone p={PROGRAMS.insurance}><PB_InsBlocked state="insurance_expired" /></Phone></DCArtboard>
+        <DCArtboard id="ins-cancelled" label="insurance_cancelled · 已結案" width={W} height={H}><Phone p={PROGRAMS.insurance}><PB_InsBlocked state="insurance_cancelled" /></Phone></DCArtboard>
+        <DCArtboard id="ins-manual" label="manual_review · 需人工審核" width={W} height={H}><Phone p={PROGRAMS.insurance}><PB_Error program="insurance" /></Phone></DCArtboard>
+      </DCSection>
+
+      <DCSection id="travel" title="03 · 旅行社接送 · Travel Agency Transfer" subtitle="雄獅旅遊 · booking.lion-travel.com.tw · 團體席次 · roster-driven">
+        <DCArtboard id="trv-landing" label="入口 · 接送額度" width={W} height={H}><Phone p={PROGRAMS.travel}><PB_Landing program="travel" /></Phone></DCArtboard>
+        <DCArtboard id="trv-elig" label="資格驗證 · 團號" width={W} height={H}><Phone p={PROGRAMS.travel}><PB_Eligibility program="travel" /></Phone></DCArtboard>
+        <DCArtboard id="trv-roster" label="團體席次 · roster + itinerary + batching" width={W} height={H}><Phone p={PROGRAMS.travel}><PB_TrvRoster /></Phone></DCArtboard>
+        <DCArtboard id="trv-book" label="預約表單 · travel fields" width={W} height={H}><Phone p={PROGRAMS.travel}><PB_BookTravel /></Phone></DCArtboard>
+        <DCArtboard id="trv-review" label="確認 Review" width={W} height={H}><Phone p={PROGRAMS.travel}><PB_Review program="travel" /></Phone></DCArtboard>
+        <DCArtboard id="trv-success" label="預約成功 Success" width={W} height={H}><Phone p={PROGRAMS.travel}><PB_Success program="travel" /></Phone></DCArtboard>
+        <DCArtboard id="trv-receipt" label="行程明細 / 收據 · 已含團費 (§5.4)" width={W} height={H}><Phone p={PROGRAMS.travel}><PB_TrvReceipt /></Phone></DCArtboard>
+      </DCSection>
+
+      <DCSection id="map-picker" title="05 · 夥伴訂車表單 × 地址選點 · A · partner-map-picker-20260704" subtitle="保留方案膠囊 / 資格橫幅 / 送出鈕位置 · 地圖中斷 → 送交人工複核">
+        <DCArtboard id="mp-pb-selected" label="A2 · 成對上下車 · 皆已選定 · 可送出" width={W} height={H}><Phone p={PROGRAMS.card}><PB_BookCardMap state="selected" drop="selected" /></Phone></DCArtboard>
+        <DCArtboard id="mp-pb-candidates" label="A2 · 上車候選（含來源/可信度）· 送出停用" width={W} height={H}><Phone p={PROGRAMS.card}><PB_BookCardMap state="candidates" drop="selected" /></Phone></DCArtboard>
+        <DCArtboard id="mp-pb-out" label="A2 · 上車不在服務範圍 · 送出 disabled" width={W} height={H}><Phone p={PROGRAMS.card}><PB_BookCardMap state="out_of_area" drop="selected" /></Phone></DCArtboard>
+        <DCArtboard id="mp-pb-down" label="A2 · 地圖中斷 → 送交人工複核" width={W} height={H}><Phone p={PROGRAMS.card}><PB_BookCardMap state="provider_down" drop="provider_down" /></Phone></DCArtboard>
+        <DCArtboard id="mp-pb-mixed" label="A2 · 中斷 + 超區混合 · 超區優先 · 不可送人工複核" width={W} height={H}><Phone p={PROGRAMS.card}><PB_BookCardMap state="provider_down" drop="out_of_area" /></Phone></DCArtboard>
+        <DCArtboard id="mp-pb-manual" label="A2 · 手動座標（含理由）→ 人工複核分支" width={W} height={H}><Phone p={PROGRAMS.card}><PB_BookCardMap state="manual_coords" drop="selected" /></Phone></DCArtboard>
+      </DCSection>
+
+      <DCSection id="embed" title="04 · 網銀 App 內嵌身分狀態 · Online-banking Embed Identity (B1–B5)" subtitle="身分來自銀行 session (reference token) · 永不擷取卡片資料 · 中信 App webview">
+        <DCArtboard id="embed-b1" label="B1 · 已登入帶入 (happy path)" width={W} height={H}><Phone p={PROGRAMS.card}><PB_EmbedHandoff /></Phone></DCArtboard>
+        <DCArtboard id="embed-b2" label="B2 · 權杖逾時 · 需重新驗證" width={W} height={H}><Phone p={PROGRAMS.card}><PB_EmbedReauth /></Phone></DCArtboard>
+        <DCArtboard id="embed-b3" label="B3 · 非授權環境 · 封鎖" width={W} height={H}><Phone p={PROGRAMS.card}><PB_EmbedUnsupported /></Phone></DCArtboard>
+        <DCArtboard id="embed-b4" label="B4 · 授權範圍同意 (scope)" width={W} height={H}><Phone p={PROGRAMS.card}><PB_EmbedConsent /></Phone></DCArtboard>
+        <DCArtboard id="embed-b5" label="B5 · 回退至官網 standalone" width={W} height={H}><Phone p={PROGRAMS.card}><PB_EmbedFallback /></Phone></DCArtboard>
+      </DCSection>
+
+    </DesignCanvas>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById('root')).render(<App />);
+</script>
+</body>
+</html>

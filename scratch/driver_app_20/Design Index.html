@@ -1,0 +1,151 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="UTF-8" />
+<title>智慧運輸科技 · Design Index</title>
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&family=Noto+Sans+TC:wght@400;500;600;700&display=swap" rel="stylesheet" />
+<style>
+  :root { --bg: #0B1B3A; --ink: #fff; --muted: rgba(255,255,255,.62); --line: rgba(255,255,255,.09); --card: #11254C; }
+  html, body { margin: 0; padding: 0; background: var(--bg); color: var(--ink); font-family: "Inter", "Noto Sans TC", system-ui, sans-serif; -webkit-font-smoothing: antialiased; }
+  * { box-sizing: border-box; }
+  a { text-decoration: none; color: inherit; }
+  .wrap { max-width: 1320px; margin: 0 auto; padding: 56px 32px 96px; }
+  .eyebrow { font-size: 11px; letter-spacing: .2em; color: var(--muted); font-weight: 600; text-transform: uppercase; }
+  .brandline { display: flex; align-items: center; gap: 12px; margin-bottom: 22px; }
+  .brandline .lg { width: 38px; height: 38px; border-radius: 10px; background: linear-gradient(135deg, #15306B, #0E7490); display: flex; align-items: center; justify-content: center; }
+  .brandline .zh { font-size: 17px; font-weight: 700; }
+  .brandline .en { font-size: 11px; color: var(--muted); }
+  h1 { font-size: 50px; line-height: 1.05; letter-spacing: -.025em; margin: 8px 0 18px; font-weight: 700; max-width: 920px; text-wrap: balance; }
+  .lede { font-size: 17px; color: var(--muted); max-width: 780px; line-height: 1.6; margin-bottom: 40px; }
+  .lede b { color: #fff; font-weight: 600; }
+  .meta-row { display: flex; flex-wrap: wrap; gap: 12px 28px; padding: 16px 20px; background: rgba(255,255,255,.04); border: 1px solid var(--line); border-radius: 14px; margin-bottom: 48px; font-size: 13px; }
+  .meta-row b { color: #fff; font-weight: 600; margin-right: 6px; font-family: "JetBrains Mono", monospace; }
+  .meta-row span { color: var(--muted); }
+  .section-h { font-size: 12px; font-weight: 600; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); margin: 48px 0 16px; padding-bottom: 12px; border-bottom: 1px solid var(--line); display: flex; align-items: baseline; gap: 12px; }
+  .section-h em { font-style: normal; color: rgba(255,255,255,.3); font-family: "JetBrains Mono", monospace; }
+  .grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 18px; }
+  .card { display: block; background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: 26px; position: relative; overflow: hidden; transition: transform .18s ease, border-color .18s ease; }
+  .card:hover { transform: translateY(-2px); border-color: rgba(255,255,255,.24); }
+  .card .accent-strip { position: absolute; left: 0; top: 0; bottom: 0; width: 4px; background: var(--accent); }
+  .card .num { font-size: 11px; font-family: "JetBrains Mono", monospace; color: var(--muted); margin-bottom: 14px; letter-spacing: .06em; }
+  .card h2 { font-size: 22px; font-weight: 700; margin: 0 0 6px; letter-spacing: -.01em; }
+  .card .tag { font-size: 11.5px; color: var(--accent); font-family: "JetBrains Mono", monospace; font-weight: 600; margin-bottom: 12px; }
+  .card p { font-size: 13.5px; color: var(--muted); line-height: 1.65; margin: 0 0 16px; max-width: 50ch; }
+  .card ul { list-style: none; padding: 0; margin: 0; display: flex; flex-wrap: wrap; gap: 6px; }
+  .card li { font-size: 11px; padding: 4px 8px; background: rgba(255,255,255,.05); border: 1px solid var(--line); border-radius: 5px; color: rgba(255,255,255,.72); font-family: "JetBrains Mono", monospace; }
+  .card .arrow { position: absolute; right: 22px; top: 24px; color: rgba(255,255,255,.3); transition: color .18s, transform .18s; }
+  .card:hover .arrow { color: var(--accent); transform: translate(2px, -2px); }
+  .twocol { grid-column: span 2; }
+  .single { grid-template-columns: 1fr 1fr 1fr; }
+  @media (max-width: 880px) { .grid, .single { grid-template-columns: 1fr; } .twocol { grid-column: span 1; } h1 { font-size: 34px; } }
+  .footer { margin-top: 64px; padding-top: 22px; border-top: 1px solid var(--line); display: flex; flex-wrap: wrap; gap: 24px; font-size: 12px; color: var(--muted); }
+  .footer code { font-family: "JetBrains Mono", monospace; color: rgba(255,255,255,.85); }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="brandline">
+    <span class="lg"><svg viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:22px;height:22px"><path d="M3 17h18M5 17l2-7h10l2 7M8 10V6h8v4"/><circle cx="7.5" cy="17.5" r="1.5" fill="#fff"/><circle cx="16.5" cy="17.5" r="1.5" fill="#fff"/></svg></span>
+    <span><span class="zh">智慧運輸科技</span><br><span class="en">Smart Transport Technology</span></span>
+  </div>
+  <div class="eyebrow">Design Index · v0.7 · Phase 1 商業模式補強</div>
+  <h1>多角色車隊營運與商務派車平台 — UI Design Index</h1>
+  <p class="lede">依 2026-06-04 Phase 1 視覺需求規格重建。涵蓋公開網站與 6 個系統面，<b>90+ 畫面</b>，以 <b>service product</b>（即時 / 商務 / 機場 / 保險 / 旅行社）與 <b>vehicle eligibility</b> 為貫穿骨幹，含車行分潤與品質責任工具。</p>
+
+  <div class="meta-row">
+    <span><b>品牌：</b>智慧運輸科技 Smart Transport Technology</span>
+    <span><b>布局：</b>1440×900 桌面 · 412×915 / 360×800 行動 · 響應式官網</span>
+    <span><b>語系：</b>繁體中文 · raw_code 雙語</span>
+    <span><b>主題：</b>淺 / 深色 · compact / comfy</span>
+  </div>
+
+  <div class="section-h"><em>01</em> 公開網站 · Public Website</div>
+  <div class="grid">
+    <a class="card twocol" href="site/index.html" style="--accent: #1593B0;">
+      <div class="accent-strip"></div>
+      <svg class="arrow" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M7 17L17 7M9 7h8v8"/></svg>
+      <div class="num">00 · PUBLIC WEBSITE · 7 pages · responsive</div>
+      <h2>智慧運輸科技 官網</h2>
+      <div class="tag">B2B SaaS / Mobility Ops · 深藍 + 青綠</div>
+      <p>首頁、司機合作（含任務卡 mockup）、企業與機場接送（含後台 preview）、平台導單合作（邊界強調）、車行合作（含分潤 preview）、關於我們、聯絡合作（登入分流）。desktop + mobile 響應式。</p>
+      <ul><li>三角色定位</li><li>5 service products</li><li>合作邊界 do/don't</li><li>dashboard previews</li><li>手機抽屜選單</li></ul>
+    </a>
+  </div>
+
+  <div class="section-h"><em>02</em> 對外系統面 · Partner-facing</div>
+  <div class="grid">
+    <a class="card" href="Tenant Console.html" style="--accent: #5EEAD4;">
+      <div class="accent-strip"></div>
+      <svg class="arrow" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M7 17L17 7M9 7h8v8"/></svg>
+      <div class="num">01 · TENANT / PARTNER PORTAL</div>
+      <h2>企業／合作方 Portal</h2>
+      <div class="tag">teal · 20 routes</div>
+      <p>企業 / 銀行 / 保險 / 旅行社的商務派車管理後台：訂單、成本中心、審批、應付帳款、月結、整合與 cross-actor 稽核。</p>
+      <ul><li>command pattern</li><li>cross-actor audit</li><li>aggregated readiness</li><li>＋service-product 下一輪</li></ul>
+    </a>
+    <a class="card" href="Fleet Partner Portal.html" style="--accent: #6EE7B7;">
+      <div class="accent-strip"></div>
+      <svg class="arrow" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M7 17L17 7M9 7h8v8"/></svg>
+      <div class="num">02 · FLEET PARTNER PORTAL · NEW</div>
+      <h2>車行合作夥伴 Portal</h2>
+      <div class="tag">emerald · 10 routes</div>
+      <p>車行管理旗下司機 / 車輛、趟次、分潤對帳、文件缺件、訓練完成率、事故 / 申訴責任歸屬與品質指標。service-product aware。</p>
+      <ul><li>分潤組成明細</li><li>責任歸屬 fleet/shared/platform</li><li>服務資格供給</li><li>缺件影響派工</li></ul>
+    </a>
+    <a class="card twocol" href="archive/README.md" style="--accent: #FCD34D;">
+      <div class="accent-strip"></div>
+      <div class="num">03 · PARTNER BOOKING WEB · 重啟為 Phase 1 P0 (next round)</div>
+      <h2>合作夥伴叫車入口 — program-specific</h2>
+      <div class="tag">amber · 信用卡機場 / 保險代步 / 旅行社 三種 program 表單</div>
+      <p>新規格將 Partner Booking 重列為 Phase 1 P0。下一輪會做 credit-card airport / insurance replacement / travel agency 三種 program-specific flow。舊 CTBC funnel 暫存於 archive/ 作為 reference。</p>
+      <ul><li>archive/Partner Booking.html</li><li>3 program forms · 下一輪</li></ul>
+    </a>
+  </div>
+
+  <div class="section-h"><em>03</em> 司機面 · Driver</div>
+  <div class="grid">
+    <a class="card twocol" href="Driver App.html" style="--accent: #7BC0FF;">
+      <div class="accent-strip"></div>
+      <svg class="arrow" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M7 17L17 7M9 7h8v8"/></svg>
+      <div class="num">04 · DRIVER APP · 多平台司機工作台</div>
+      <h2>Driver App</h2>
+      <div class="tag">10 routes · Android narrow + large</div>
+      <p>多平台任務整合工作台：cockpit、任務 inbox、trip（8 狀態）、平台 / 資格中心、收益、班次、SOS、設定。one-primary-action、capability flags、press-and-hold SOS、4 reauth 機制。</p>
+      <ul><li>service-product 任務卡</li><li>eligibility center</li><li>平台別 / 服務別收益</li><li>＋fleet attribution 下一輪</li></ul>
+    </a>
+  </div>
+
+  <div class="section-h"><em>04</em> 內部系統面 · Internal</div>
+  <div class="grid">
+    <a class="card" href="Platform Admin.html" style="--accent: #A5B4FC;">
+      <div class="accent-strip"></div>
+      <svg class="arrow" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M7 17L17 7M9 7h8v8"/></svg>
+      <div class="num">05 · PLATFORM ADMIN</div>
+      <h2>平台管理後台</h2>
+      <div class="tag">indigo · 18 routes</div>
+      <p>租戶、合作夥伴、車隊與法遵、計價、reimbursement state machine、稽核 legal-hold。下一輪補 service products + vehicle eligibility matrix + fleet partners + revenue share rules。</p>
+      <ul><li>reimbursement state machine</li><li>plaintext-once secret</li><li>＋eligibility matrix 下一輪</li></ul>
+    </a>
+    <a class="card" href="Ops Console.html" style="--accent: #FCA5A5;">
+      <div class="accent-strip"></div>
+      <svg class="arrow" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M7 17L17 7M9 7h8v8"/></svg>
+      <div class="num">06 · OPS CONSOLE</div>
+      <h2>營運後台</h2>
+      <div class="tag">coral · 20 routes</div>
+      <p>派遣多看板、客服中心、客訴 / 事故 / SOS、跨租戶審批。下一輪補 service-aware dispatch filter、eligibility failed panel、fleet partner 責任視圖。</p>
+      <ul><li>multi-board dispatch</li><li>SOS coordination</li><li>＋eligibility filter 下一輪</li></ul>
+    </a>
+  </div>
+
+  <div class="footer">
+    <span>智慧運輸科技 · Design Index v0.7</span>
+    <code>1 公開網站 + 6 系統面 · 90+ screens</code>
+    <code>service-product + vehicle-eligibility 骨幹</code>
+    <span>下一輪：service-product 維度補進 4 個 console + Partner Booking 3 program flows</span>
+  </div>
+</div>
+</body>
+</html>

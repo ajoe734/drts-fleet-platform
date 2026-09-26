@@ -21,10 +21,9 @@ import {
   deriveProviderState,
   derivePickerStatus,
   isDispatchReadyAddress,
-  isValidLatitude,
-  isValidLongitude,
   manualCoordinateToAddressPayload,
   resolveAddressPickerLabels,
+  evaluateManualApply,
   serviceabilityTone,
   type AddressMapPickerChange,
   type AddressMapPickerLabels,
@@ -766,40 +765,26 @@ export function AddressMapPicker<TServiceProduct extends string = string>(
   );
 
   const handleManualApply = useCallback(() => {
-    const lat = Number.parseFloat(manualLat);
-    const lng = Number.parseFloat(manualLng);
-    if (!isValidLatitude(lat) || !isValidLongitude(lng)) {
-      setManualError(labels.manualInvalid);
-      return;
-    }
-    if (requireManualReason && manualReason.trim().length === 0) {
-      setManualError(labels.manualReasonLabel);
-      return;
-    }
-    const reason = manualReason.trim() || labels.pinAdjustHint;
-    const address = manualCoordinateToAddressPayload({
-      lat,
-      lng,
-      addressText:
-        query.trim() ||
-        selectedAddress?.address ||
-        `Manual location (${roundCoord(lat)}, ${roundCoord(lng)})`,
-      baseAddress: selectedAddress,
-      addressName: selectedAddress?.addressName ?? null,
+    const result = evaluateManualApply(
+      manualLat,
+      manualLng,
+      manualReason,
+      requireManualReason,
+      labels,
+      query,
+      selectedAddress,
+      actorId,
       surface,
-      manualOverrideReason: reason,
-      pinnedByActorId: actorId,
-      ...(selectedAddress?.geocodeConfidence
-        ? { geocodeConfidence: selectedAddress.geocodeConfidence }
-        : {}),
-    });
-    if (!address) {
-      setManualError(labels.manualInvalid);
+    );
+    if (result.error) {
+      setManualError(result.error);
       return;
     }
-    setManualError(null);
-    applySelection(address, reason);
-    runServiceability(address);
+    if (result.address) {
+      setManualError(null);
+      applySelection(result.address, result.reason || "");
+      runServiceability(result.address);
+    }
   }, [
     actorId,
     applySelection,
