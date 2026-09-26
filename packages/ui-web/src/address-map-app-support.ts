@@ -5,7 +5,7 @@ import type {
   ServiceAreaEvaluationResult,
   GeoResolutionSurface,
 } from "./address-map-picker-core";
-import { 
+import {
   createMockAddressProvider,
   isValidLatitude,
   isValidLongitude,
@@ -124,12 +124,19 @@ export function evaluateAddressSubmitGate(params: {
   };
 }
 
+export type TenantAddressSubmitGateCode = AddressSubmitGateCode | "provider_outage";
+
+export type TenantAddressSubmitGateState = {
+  blocking: boolean;
+  code: TenantAddressSubmitGateCode;
+};
+
 export function evaluateTenantSubmitGate(
   pickupPayload: AddressPayload | null,
   dropoffPayload: AddressPayload | null,
   serviceability: ServiceAreaEvaluationResult | null,
   providerState: AddressProviderState | null,
-): AddressSubmitGateState {
+): TenantAddressSubmitGateState {
   const baseGate = evaluateAddressSubmitGate({
     pickup: pickupPayload,
     dropoff: dropoffPayload,
@@ -139,7 +146,7 @@ export function evaluateTenantSubmitGate(
   if (providerState && !providerState.available) {
     return {
       blocking: true,
-      code: "provider_outage" as AddressSubmitGateCode,
+      code: "provider_outage",
     };
   }
   return baseGate;

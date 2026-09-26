@@ -214,17 +214,77 @@ test.describe("concierge map booking UI", () => {
     expect(command.mapFallbackReview ?? null).toBeNull();
   });
 
-  test("submits manual review fallback when provider is down", async ({ page }) => {
+  test("submits manual review fallback when provider is down but coordinates exist", async ({ page }) => {
     const captured = { body: [] as unknown[] };
     await installConciergeApiMocks(page, captured);
-    
-    // Simulate provider down via route abort
-    await page.route("**/api/geo/health", route => route.abort());
+
+    // Simulate provider down
+    await page.route("**/api/geo/health", route => route.fulfill({
+      status: 200,
+      json: { provider: "mock", mode: "unavailable", status: "unhealthy" }
+    }));
 
     const response = await page.goto("/bookings/new");
     expect(response?.status()).toBe(200);
 
-    // This is a minimal test to satisfy R7b/R7c request contracts
-    // Real implementation would interact with UI to trigger fallback
+    // Provide manual coordinates and reason for pickup
+    const pickupPicker = page.locator("[data-address-map-picker]").nth(0);
+    await pickupPicker.getByText(/手動輸入座標/).click();
+    await pickupPicker.getByLabel(/緯度/).fill("25.033");
+    await pickupPicker.getByLabel(/經度/).fill("121.565");
+    await pickupPicker.getByLabel(/原因/).fill("Concierge manual pickup");
+    await pickupPicker.getByRole("button", { name: /使用此位置/ }).click();
+
+    // Provide manual coordinates and reason for dropoff
+    const dropoffPicker = page.locator("[data-address-map-picker]").nth(1);
+    await dropoffPicker.getByText(/手動輸入座標/).click();
+    await dropoffPicker.getByLabel(/緯度/).fill("25.044");
+    await dropoffPicker.getByLabel(/經度/).fill("121.575");
+    await dropoffPicker.getByLabel(/原因/).fill("Concierge manual dropoff");
+    await dropoffPicker.getByRole("button", { name: /使用此位置/ }).click();
+
+    // The submit button should be enabled as manual fallback
+    const submitBtn = page.getByRole("button", { name: /提交禮賓代訂|送交人工複核/ });
+    await expect(submitBtn).toBeEnabled();
+    await submitBtn.click();
+
+    await expect(page.getByText("訂單 ID")).toBeVisible();
+    expect(captured.body).toHaveLength(1);
+
+    const command = captured.body[0] as {
+      pickup: { lat?: number; lng?: number; coordinateSource?: string };
+      dropoff: { lat?: number; lng?: number; coordinateSource?: string };
+      mapFallbackReview?: unknown;
+    };
+
+    expect(command.pickup).toMatchObject({
+      lat: 25.033,
+      lng: 121.565,
+      coordinateSource: "manual_pin",
+    });
+    expect(command.mapFallbackReview).toMatchObject({
+      providerDegraded: true,
+      gateCode: "dispatch_manual_review_required"
+    });
+  });
+
+  test("blocks submission when provider is down and no coordinates are provided", async ({ page }) => {
+    const captured = { body: [] as unknown[] };
+    await installConciergeApiMocks(page, captured);
+
+    // Simulate provider down
+    await page.route("**/api/geo/health", route => route.fulfill({
+      status: 200,
+      json: { provider: "mock", mode: "unavailable", status: "unhealthy" }
+    }));
+
+    const response = await page.goto("/bookings/new");
+    expect(response?.status()).toBe(200);
+
+    // The submit button should be disabled because coordinates are missing
+    const submitBtn = page.getByRole("button", { name: /提交禮賓代訂|送交人工複核/ });
+    await expect(submitBtn).toBeDisabled();
+
+    expect(captured.body).toHaveLength(0);
   });
 });

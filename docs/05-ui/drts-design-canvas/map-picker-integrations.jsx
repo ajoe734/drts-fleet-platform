@@ -291,14 +291,14 @@ function CG_NewBookingMap({ theme:th, degraded, drop, pick, success, reason, bac
   const ds = drop||'candidates';
   const HARD = ['out_of_area'];
   const UNRESOLVED = ['no_results','empty','searching','candidates','missing_coordinate'];
-  const MANUAL = ['manual_review'];
+  const MANUAL = ['manual_review', 'provider_down'];
 
   const hasManualCoords = ps === 'manual_coords' || ds === 'manual_coords';
   const reasonValid = (reason || '').trim() !== '';
 
   const hard = HARD.includes(ps) || HARD.includes(ds);
   const unresolved = UNRESOLVED.includes(ps) || UNRESOLVED.includes(ds);
-  // Degraded forces manual review path for concierge
+  // Degraded or endpoint outage forces manual review path for concierge
   const manualPath = degraded || MANUAL.includes(ps) || MANUAL.includes(ds);
   const manualReady = manualPath && !hard && !unresolved && (!hasManualCoords || reasonValid);
   const normalReady = !manualPath && !hard && !unresolved && (!hasManualCoords || reasonValid);

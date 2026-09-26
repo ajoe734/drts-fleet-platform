@@ -17,7 +17,7 @@ import { CallcenterService } from "../../apps/api/src/modules/callcenter/callcen
 import { AuditNotificationService } from "../../apps/api/src/modules/audit-notification/audit-notification.service";
 import { VoiceCallbackService } from "../../apps/api/src/modules/voice-booking/voice-callback.service";
 import { VoiceHandoffQueueService } from "../../apps/api/src/modules/callcenter/voice-handoff-queue.service";
-import { ApiClient } from "../../packages/api-client/src";
+import { ApiClient } from "@drts/api-client";
 
 describe("UV-EXEC-019 Ops Console Exception Workbench, Tracing, and Callback Operations", () => {
   describe("AC-1: ops_normal_no_approval_evidence (UV-FR-021, UV-AC-029)", () => {

@@ -52,13 +52,13 @@ function MapPicker({ theme:th, label='上車地點', state='selected', value, co
       <div style={{ height:H, position:'relative', background:'repeating-linear-gradient(0deg,'+c.lo+' 0 1px,transparent 1px 24px),repeating-linear-gradient(90deg,'+c.lo+' 0 1px,transparent 1px 24px),'+c.surface, opacity:blocked?.55:1 }}>
         {(state==='selected'||state==='manual_coords'||state==='manual_review'||state==='provider_down') && (
           <div style={{ position:'absolute', left:'50%', top:'50%', transform:'translate(-50%,-100%)' }}>
-            <svg width="26" height="30" viewBox="0 0 24 28" fill={state==='selected'?c.accent:tone} stroke="#fff" strokeWidth="1.5"><path d="M12 27s-9-7-9-15a9 9 0 0118 0c0 8-9 15-9 15z"/><circle cx="12" cy="12" r="3.5" fill="#fff"/></svg>
+            <svg width="26" height="30" viewBox="0 0 24 28" fill={state==='selected'?c.accent:tone} stroke={c.surface} strokeWidth="1.5"><path d="M12 27s-9-7-9-15a9 9 0 0118 0c0 8-9 15-9 15z"/><circle cx="12" cy="12" r="3.5" fill={c.surface}/></svg>
           </div>
         )}
         {state==='out_of_area' && <div style={{ position:'absolute', inset:'12px 30%', border:'2px dashed '+c.danger, borderRadius:8, opacity:.6 }}/>}
-        {state==='out_of_area' && <div style={{ position:'absolute', right:'14%', top:'40%' }}><svg width="26" height="30" viewBox="0 0 24 28" fill={c.danger} stroke="#fff" strokeWidth="1.5"><path d="M12 27s-9-7-9-15a9 9 0 0118 0c0 8-9 15-9 15z"/></svg></div>}
+        {state==='out_of_area' && <div style={{ position:'absolute', right:'14%', top:'40%' }}><svg width="26" height="30" viewBox="0 0 24 28" fill={c.danger} stroke={c.surface} strokeWidth="1.5"><path d="M12 27s-9-7-9-15a9 9 0 0118 0c0 8-9 15-9 15z"/></svg></div>}
         {(state==='empty'||state==='searching'||state==='no_results'||state==='candidates' || state==='missing_coordinate') && <div style={{ position:'absolute', inset:0, display:'flex', alignItems:'center', justifyContent:'center', fontSize:11.5, color:c.dim }}>{state==='missing_coordinate'?'無法預覽，請重新定位':state==='no_results'?'找不到符合的地點':state==='candidates'?'選擇候選後顯示落點':'預覽區 · 選定後顯示落點'}</div>}
-        {state==='provider_down' && <div style={{ position:'absolute', inset:0, display:'flex', alignItems:'center', justifyContent:'center', background:'rgba(255,255,255,.55)', fontSize:12, fontWeight:700, color:c.danger }}>地圖服務暫時無回應</div>}
+        {state==='provider_down' && <div style={{ position:'absolute', inset:0, display:'flex', alignItems:'center', justifyContent:'center', background:c.surface, opacity:.8, fontSize:12, fontWeight:700, color:c.danger }}>地圖服務暫時無回應</div>}
         {state==='selected' && <div style={{ position:'absolute', left:8, bottom:6, fontSize:10, fontFamily:c.mono, color:c.muted, background:c.surface, padding:'2px 6px', borderRadius:4 }}>{coordinateData || '25.0330, 121.5654'} · 可拖曳微調</div>}
         {state==='manual_coords' && <div style={{ position:'absolute', left:8, bottom:6, fontSize:10, color:c.warn, background:c.surface, padding:'2px 6px', borderRadius:4 }}>未經地址解析 · 請核對位置</div>}
         {(state==='selected'||state==='manual_coords') && <div style={{ position:'absolute', right:8, bottom:6, fontSize:9.5, fontFamily:c.mono, color:c.dim, background:c.surface, padding:'2px 6px', borderRadius:4 }}>↑↓←→ 依縮放微調 · Shift 4×</div>}
