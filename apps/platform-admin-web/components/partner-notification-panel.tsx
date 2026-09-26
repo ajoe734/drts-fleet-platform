@@ -646,7 +646,8 @@ function PnRetryCell({
   if (
     retryValue === "allowed" ||
     retryValue === "manual_only" ||
-    retryValue === "automatic"
+    retryValue === "automatic" ||
+    retryValue === "configuration_blocked"
   )
     return (
       <PanelActionBtn

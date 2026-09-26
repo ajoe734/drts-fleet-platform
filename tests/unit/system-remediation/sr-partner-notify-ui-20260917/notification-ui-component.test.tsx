@@ -36,7 +36,8 @@ describe("PartnerNotificationPanel", () => {
             createdAt: new Date().toISOString(),
             nextAttemptAt: new Date().toISOString(),
             assignmentVersion: 1,
-            payload: { partnerNotification: { retryDisposition: "automatic" } },
+            retryDisposition: "automatic",
+            payload: { partnerNotification: {} },
           },
         ],
         pageInfo: { totalItems: 1 },
@@ -85,7 +86,7 @@ describe("PartnerNotificationPanel", () => {
 
     // Verify retry interaction
     const retryBtn = await screen.findByRole("button", {
-      name: /partnerNotification.retryDelivery/i,
+      name: /重送/i,
     });
     fireEvent.click(retryBtn);
     await waitFor(() => {
@@ -102,7 +103,7 @@ describe("PartnerNotificationPanel", () => {
   it("exercises 409 recovery on update", async () => {
     mockClient.updatePartnerEntryNotificationBinding.mockRejectedValueOnce(
       Object.assign(new Error("Conflict"), {
-        kind: "409",
+        statusCode: 409,
         code: "PARTNER_NOTIFICATION_BINDING_VERSION_CONFLICT",
       }),
     );
@@ -138,11 +139,25 @@ describe("PartnerNotificationPanel", () => {
     fireEvent.click(saveBtn);
 
     // The component should catch 409 and potentially reload or retry
-    // In our test, just ensuring the 409 branch doesn't crash the UI and the mock was called
     await waitFor(() => {
       expect(
         mockClient.updatePartnerEntryNotificationBinding,
       ).toHaveBeenCalled();
+    });
+
+    const conflictBanner = await screen.findByText(/綁定已被他人更新/);
+    expect(conflictBanner).toBeDefined();
+
+    const reloadBtn = await screen.findByRole("button", {
+      name: /partnerNotification.reload/i,
+    });
+    fireEvent.click(reloadBtn);
+
+    await waitFor(() => {
+      // 1 initial fetch + 1 from reload
+      expect(
+        mockClient.getPartnerEntryNotificationBinding,
+      ).toHaveBeenCalledTimes(2);
     });
   });
 });

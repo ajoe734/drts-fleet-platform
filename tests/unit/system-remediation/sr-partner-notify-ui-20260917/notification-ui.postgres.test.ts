@@ -387,13 +387,25 @@ describe.skipIf(!testDbUrl)(
         fenceToken: claimRes!.fenceToken - 1,
         passengerSubjectRef: "test-passenger",
         providerName: "test-provider",
-        providerAckState: "delivered",
+        providerAckState: "provider_acknowledged",
         providerMessageRef: "msg-fail",
-        deliveryOutcome: "delivered",
+        deliveryOutcome: {
+          outboxId: staleId,
+          status: "failed",
+          result: "failed",
+          attemptCount: 1,
+          nextAttemptAt: new Date().toISOString(),
+          deliveredAt: null,
+          providerName: "test-provider",
+        },
         partnerMetadata: {
-          entrySlug: entrySlug1,
-          tenantId: "tenant-1",
-          partnerId,
+          deliveryTarget: "webhook",
+          deliveryStage: "completed",
+          retryDisposition: "allowed",
+          failureReason: null,
+          receiptId: "receipt-123",
+          downstreamStatus: "error",
+          expiresAt: new Date().toISOString(),
         },
       });
       expect(staleRes).toEqual({ recorded: false, reason: "fence_lost" });
@@ -404,13 +416,25 @@ describe.skipIf(!testDbUrl)(
         fenceToken: claimRes!.fenceToken,
         passengerSubjectRef: "test-passenger",
         providerName: "test-provider",
-        providerAckState: "delivered",
+        providerAckState: "provider_acknowledged",
         providerMessageRef: "msg-123",
-        deliveryOutcome: "delivered",
+        deliveryOutcome: {
+          outboxId: staleId,
+          status: "completed",
+          result: "delivered",
+          attemptCount: 1,
+          nextAttemptAt: new Date().toISOString(),
+          deliveredAt: new Date().toISOString(),
+          providerName: "test-provider",
+        },
         partnerMetadata: {
-          entrySlug: entrySlug1,
-          tenantId: "tenant-1",
-          partnerId,
+          deliveryTarget: "webhook",
+          deliveryStage: "completed",
+          retryDisposition: "allowed",
+          failureReason: null,
+          receiptId: "receipt-123",
+          downstreamStatus: "ok",
+          expiresAt: new Date().toISOString(),
         },
       });
       expect(genRes).toEqual({ recorded: true, replayed: false });
@@ -442,8 +466,13 @@ describe.skipIf(!testDbUrl)(
       });
       // Bump assignment version to exercise authoritative reassignment
       await pool.query(
-        "INSERT INTO ops.passenger_dispatch_disclosure_snapshots (order_id, assignment_version, dispatch_event_id, snapshot_at) VALUES ($1, 2, 'evt-1', now())",
-        [superOrderId],
+        "INSERT INTO ops.passenger_dispatch_disclosure_snapshots (snapshot_id, order_id, dispatch_job_id, assignment_id, assignment_version, record, created_at) VALUES ($1, $2, $3, $4, 2, '{}', now())",
+        [
+          `snap-${superOrderId}`,
+          superOrderId,
+          `job-${superOrderId}`,
+          `assn-${superOrderId}`,
+        ],
       );
       const resSuper = await mtRepo.retryPartnerNotificationDelivery(
         entryObj,
