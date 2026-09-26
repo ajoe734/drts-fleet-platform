@@ -1412,6 +1412,23 @@ export function BreakGlassPanel() {
     } catch (err: unknown) {
       if (
         err instanceof ApiClientError &&
+        err.code === "IAM_CONCURRENCY_CONFLICT"
+      ) {
+        clearStepUp();
+        setError("狀態已變更，請重新整理 (IAM_CONCURRENCY_CONFLICT)。");
+        try {
+          const currentGrant = await iamClient.getBreakGlassRequest(g.grantId);
+          setGrants((prev) =>
+            prev.map((item) =>
+              item.grantId === currentGrant.grantId ? currentGrant : item,
+            ),
+          );
+          setSelectedGrant(currentGrant);
+        } catch (reloadErr) {
+          setSelectedGrant(null);
+        }
+      } else if (
+        err instanceof ApiClientError &&
         (err.code === "IAM_STEP_UP_REQUIRED" ||
           err.code === "MFA_REQUIRED" ||
           err.code === "STEP_UP_REQUIRED")

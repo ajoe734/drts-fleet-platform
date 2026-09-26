@@ -93,6 +93,18 @@ vi.mock("@/lib/i18n", () => ({
   }),
 }));
 
+class MockApiClientError extends Error {
+  code: string;
+  statusCode: number;
+  constructor(message: string, statusCode: number, code: string) {
+    super(message);
+    this.name = "ApiClientError";
+    this.statusCode = statusCode;
+    this.code = code;
+    Object.setPrototypeOf(this, MockApiClientError.prototype);
+  }
+}
+
 const load = createCustomUiModuleLoader(appRoot, {
   
   "@/lib/admin-client": {
@@ -113,6 +125,9 @@ const load = createCustomUiModuleLoader(appRoot, {
       locale: "en",
     }),
   },
+  "@drts/api-client": {
+    ApiClientError: MockApiClientError
+  }
 });
 
 const { BreakGlassBanner, BreakGlassProvider } = load(
@@ -355,5 +370,82 @@ describe("BreakGlass R6b Regression Tests - True Provider Mutation", () => {
       },
       { timeout: 3000 }
     );
+  });
+
+  it("should handle 409 IAM_CONCURRENCY_CONFLICT on approve, reload state, and invalidate proof", async () => {
+    // We mock the get requests to first return requested, then approved (after reload)
+    mockTransportClient.get.mockImplementation(async (url) => {
+      if (url.includes("/platform-admin/break-glass/requests/bg_req_409")) {
+        return {
+          grantId: "bg_req_409",
+          status: "approved",
+          requesterId: "u_1",
+          version: 2,
+          requestedScopes: ["identity:read"],
+        };
+      }
+      if (url.includes("/platform-admin/break-glass/requests")) {
+        return {
+          items: [
+            {
+              grantId: "bg_req_409",
+              status: "requested",
+              requesterId: "u_1",
+              version: 1,
+              requestedScopes: ["identity:read"],
+            },
+          ],
+        };
+      }
+      return {};
+    });
+
+    render(
+      React.createElement(
+        BreakGlassProvider,
+        null,
+        React.createElement(BreakGlassPanel, null),
+        React.createElement(BreakGlassBanner, null),
+      ),
+    );
+
+    await waitFor(() => {
+      expect(mockTransportClient.get).toHaveBeenCalledWith(
+        expect.stringContaining("/platform-admin/break-glass/requests")
+      );
+    });
+
+    const manageBtn = await screen.findByText(/Manage Grant/i);
+    fireEvent.click(manageBtn);
+
+    const getProofBtn = await screen.findByText(/Get step-up proof/i);
+    
+    mockTransportClient.post.mockImplementation(async (url) => {
+      if (url.includes("/identity/step-up-proofs")) {
+        return { required: true, stepUpReference: "proof_approve_409" };
+      }
+      if (url.includes("/platform-admin/break-glass/requests/bg_req_409/approve")) {
+        return Promise.reject(new MockApiClientError("Mock error", 409, "IAM_CONCURRENCY_CONFLICT"));
+      }
+      return {};
+    });
+    
+    fireEvent.click(getProofBtn);
+
+    await waitFor(() => {
+      expect(mockTransportClient.post).toHaveBeenCalledWith(
+        "/identity/step-up-proofs",
+        { body: { actionId: "platform:break-glass:approve" } }
+      );
+    });
+
+    const approveBtn = await screen.findByRole("button", { name: /Approve/i });
+    fireEvent.click(approveBtn);
+
+    await waitFor(() => {
+      expect(screen.getByText(/狀態已變更，請重新整理 \(IAM_CONCURRENCY_CONFLICT\)。/)).toBeDefined();
+    });
+
+    expect(mockTransportClient.get).toHaveBeenCalledWith("/platform-admin/break-glass/requests/bg_req_409");
   });
 });
