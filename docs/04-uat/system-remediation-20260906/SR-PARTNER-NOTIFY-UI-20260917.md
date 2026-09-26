@@ -1481,11 +1481,155 @@ Pending Limits:
 
 ### Authentic Review Receipt (2026-09-26T13:35:10Z)
 
+```text
+Codex2 independent locked-candidate review: REQUEST CHANGES. Return SR-PARTNER-NOTIFY-UI-20260917 to original owner Gemini.
+REVIEWED_SHA=39521fc9d3a47bf61369caac876b8955a1b29537
+candidate_generation=540f05d3fcf0403d9a923dacfd5f4598
+PR https://github.com/ajoe734/drts-fleet-platform/pull/2162
+Branch gemini/sr-partner-notify-ui-20260924-canvas
+Previous independently rejected candidate: 44c0f06b8216fdfd0eacdebb82decde93f1a91bb, generation f6c6b911ced64fc99f5e66d30b6d7f5c, receipt 2026-09-26T13:05:30Z.
+
+BOUNDARY / IDENTITY
+Assigned HEAD, live OPEN PR head and remote branch matched REVIEWED_SHA; final local HEAD/PR still match and worktree is clean. Canonical generation/SHA still match at final readback, although status has independently become in_progress and ci_status=failure; latest next says owner is reviewing findings. This receipt reviews only the locked SHA.
+Read AI_COLLABORATION_GUIDE section 0.7, AGENTS/candidate lifecycle, specified canonical recovery findings/spec/common/UI20 audit, notification SA and canonical integration contract, approved canvas/realm tokens, production repository/service/controller/client/panel/callers/contracts and current tests/workflows/UAT.
+No reviewer file edits, commit, push, amend, rebase, branch switch, dependency installation, workflow dispatch, local product/API/DB/browser/receiver server or deployment.
+Because dispatch prohibits file edits, this authorized same-task CLI receipt extends the original review artifact. Owner must incorporate the complete receipt into docs/04-uat/system-remediation-20260906/SR-PARTNER-NOTIFY-UI-20260917.md with its own identity, preserving earlier authentic receipts.
+
+CONFIRMED PROGRESS -- DO NOT REOPEN THESE FIXED DEFECTS
+The delta from 44c0f06b changes task tests/UAT, removes the branch-specific COMMIT_TRAILER_BYPASS and deletes tests.patch; product source is unchanged.
+Current local client/component checks PASS: 3 client + 8 real rendered-component cases, exit 0. Same-SHA hosted smoke independently confirms those 11 passes. Earlier wrong enable/test assertions, authority text/prop mismatch and undefined unmount are repaired. Edit now asserts receipt_ready and the pending-save test asserts no follow-on calls after unmount.
+Current hosted PG suite has 6 PASS / 1 FAIL (previous candidate had 4 PASS / 3 FAIL). Missing-binding configure/test/enable/requeue now passes; active entry3 identity, nested failure path, actual dispatch-facade spy, numeric enable version, receipt endpoint subscription and entry3 cleanup are repaired. Cancellation versus independent receipt_ready passes. Existing legal retry/fence/stale-worker rejection, receipt/payload invariance, idempotent scheduling and pagination remain passing.
+Context-first production history SQL, valid eta_changed default, formal event catalog, no-secret-value projection, endpoint-accepted/device-unknown wording and restored PG/migration/discovery workflow changes are preserved.
+
+OPEN FINDINGS
+Aliases: pgtest=tests/unit/system-remediation/sr-partner-notify-ui-20260917/notification-ui.postgres.test.ts; uitest=same directory/notification-ui-component.test.tsx; repo=apps/api/src/modules/multi-taxi/multi-taxi.repository.ts; panel=apps/platform-admin-web/components/partner-notification-panel.tsx; UAT=original artifact above.
+
+R2b-PG-HISTORY [P1: new assertions invert the already-correct historical ownership contract; required PG gate fails]
+pgtest:857-870 creates a delivery context for entry1, then changes ONLY the mutable order route to entry2. Lines 866 and 869-870 incorrectly expect the old entry to lose the delivery and the new entry to gain it. Both row predicates use i.outbox_id, but the production projection is outboxId (repo:1757), so line 866 passes vacuously. The query argument is also limit rather than the actual pageSize.
+Production count/list/attribution correctly use COALESCE(ctx.entry_slug,r.entry_slug), repo:1747,1759,1795. The immutable context still belongs to entry1; expected old total=1 with that outboxId/entrySlug and new total=0 with no row. Same-SHA hosted actual result is newRes.total=0; pgtest:869 fails 'expected 0 to be greater than or equal to 1'.
+Reproduction: normal migrated hosted smoke run 36245015926/job 108412637469, headSha REVIEWED_SHA, completed FAILURE, root Unit tests exit 1:
+https://github.com/ajoe734/drts-fleet-platform/actions/runs/36245015926/job/108412637469
+Repair boundary: fix the regression test to assert immutable old-entry attribution and exact old/new counts using the real camelCase DTO/pageSize. Do NOT change the repaired production SQL to satisfy these inverted assertions. Preserve and reach both owner_changed/route_missing retry refusals, and assert unchanged durable payload/receipt/claim state and cross-tenant/partner rejection. Run the formal non-skipped PG gate to completion.
+
+R2b-PG-RECOVERY [P2 REPEATED: recovery proof still ends before the original worker takes over]
+pgtest:692-754 now legitimately passes the existing test, but ends at expect(res.kind).toBe('requeued'); despite the title it never claims/prepares that SAME contextless outbox using the production worker/transport path. The separate contextful fence case is useful but cannot establish contextless recovery.
+The dispatch spy at :734-737 returns ack={received:true,id:'ack-1'}, whereas PartnerNotificationAcceptedAck requires notificationId, deliveryId, partnerEntrySlug, status, receiptId (packages/contracts/src/partner-passenger-notification.ts:265-270). putBinding and enableBinding still omit their required identity argument (:739-745; binding.service.ts:85-89,188-192); app:any hides the signature errors. These omissions did not cause the current runtime failure, and no such failure is claimed.
+Repair boundary: use typed service identities and a contract-valid accepted ack at the actual external boundary, restore spies in finally, then prove configure/test/enable -> retry -> production claim/transport preparation for the original outbox/sequence, preserving TTL, payload ownership and fence. Retain the six currently passing PG cases.
+
+R2b-UI-COVERAGE [P2 REPEATED, narrowed: passing cases still do not cover the previously required lifecycle boundaries]
+uitest:481-544 changes entry/permission and immediately unmounts before settling one save. It never changes the API client or account, and cannot prove behavior while the changed mounted context remains active. It does prove unmount suppression; preserve that progress.
+uitest:273-390 asserts only that creation called update, and tests a resume with an already-current fingerprint. It does not assert the complete create payload (webhookId/eventTypes/expectedVersion=0), stale resume test-before-enable/current-version behavior, typed failed-test result, or rejected test mutation. Default accepted ack is still boolean true (:47), outside the formal contract.
+Repair boundary: complete these existing requested real-component cases with typed boundary responses and exact payloads; independently exercise mounted entry/client/authority changes and unmount while promises are pending. Keep the production signatures and the passing 409 draft/version-2 resubmit/management-link/authority cases. This is a remaining coverage gap, NOT a claim that the now-passing eight tests fail.
+
+R-PUBLISH [P1 REPEATED: normal full-range validation still fails]
+Removing the bypass and scratch file is correct, but the published range is still invalid. Fresh normal local check:
+env -u COMMIT_TRAILER_BYPASS python3 tools/ci/git/check_commit_trailers.py --base origin/dev --head 39521fc9d3a47bf61369caac876b8955a1b29537
+=> exit 1, SIX commits fail: 39521fc9, 44c0f06b, 49d07f66, 0bf89466, 3835b9c0, 87a4f810. The new candidate itself has an invalid subject AND lacks Task-ID, LLM-Agent and Reviewer trailers.
+Same-SHA normal hosted trailer job 108412502626 also completed FAILURE with the same six failures/exit 1; logs read in full relevant failure section:
+https://github.com/ajoe734/drts-fleet-platform/actions/runs/36245015926/job/108412502626
+Repair boundary: Supervisor-coordinated successor/publication workflow preserving existing published refs/history, original owner and task scope. No amend/rebase/force-push or gate bypass. Require a normal full-range PASS and one immutable final local/remote/PR/handoff SHA. A later well-formed child commit does not repair invalid ancestors.
+
+R6 [P2 REPEATED: evidence remains incomplete and mislabeled]
+UAT:920-999 appends most of the previous 44c0f06b review, but omits its concluding repeated-rework/repair paragraph. Fresh exact-text comparison against canonical worker_outcomes confirms complete receipts at 11:52:38Z, 12:01:01Z, 12:16:48Z, 12:34:12Z, 12:45:41Z and 12:51:32Z still absent as complete authentic receipts. UAT:869 still labels the old 692b69b8 product review an identity check.
+UAT:841-860 keeps PASS statements for old history/PG/UI while :865-867 lists only manual QA as remaining; there is no current finding-level reconciliation with this candidate's actual automatic failures. The handoff claim that UAT candidate identity matches is unsupported: its labeled candidate remains 41c114311, without a current evidence mapping.
+Repair boundary: preserve historical statements explicitly as history, append authentic complete reviews under their original identities, and add one current finding/acceptance table with commands, exit codes, immutable evidence refs and PASS/FAIL/SKIP/NOT RUN/PENDING. Pin the reviewed revision through the canonical handoff/review receipt; do not fabricate a self-referential commit hash in its own file. Record current hosted PG 6/7, normal trailer failure and remaining automation as well as browser/live limits.
+
+VERIFICATION COMPLETED / LIMITS
+1. Current local command:
+env -u DATABASE_URL -u PARTNER_NOTIFY_UI_TEST_DATABASE_URL -u PARTNER_NOTIFY_SEQ_TEST_DATABASE_URL -u PARTNER_NOTIFY_TRANSPORT_TEST_DATABASE_URL pnpm exec vitest run tests/unit/system-remediation/sr-partner-notify-ui-20260917/notification-ui.test.ts tests/unit/system-remediation/sr-partner-notify-ui-20260917/notification-ui-component.test.tsx
+=> exit 0, 2 files/11 tests PASS, Vitest 4.1.4, duration 5.32s. All reviewer-started checks ended and outputs were read; no background local test remains.
+2. Current completed smoke run 36245015926 headSha REVIEWED_SHA: lint/typecheck/migrations SUCCESS; Unit tests FAILURE, 1 failed/4075 passed/39 skipped, 390 files. Task UI 8 PASS, client 3 PASS, PG 6 PASS/1 FAIL. API package tests SKIPPED after root failure; no full regression or PG-gate pass claimed.
+3. Previous candidate 44c0f06b run 36243653208/job 108408798072 completed/read: UI 6 PASS/2 FAIL, PG 4 PASS/3 FAIL, client 3 PASS, overall 5 failed/4071 passed/39 skipped, exit 1. This is OLD-candidate reproduction only:
+https://github.com/ajoe734/drts-fleet-platform/actions/runs/36243653208/job/108408798072
+4. Current normal trailer checks failed locally and hosted as above.
+5. git diff --check origin/dev...REVIEWED_SHA => exit 2 (task test trailing whitespace and UAT extra EOF blank line).
+6. Existing integration-trunk unit job 108412557936 remained in_progress at the latest readback. It was not launched by this reviewer; no result is assumed. No local PG/browser/runtime, live partner/device acceptance, deployment or merge claimed.
+
+ACCEPTANCE / REPEATED REWORK
+entry_notification_admin_uses_real_binding_and_delivery_data: UNMET overall; history test is wrong/failing and required lifecycle evidence incomplete.
+manual_retry_preserves_single_outbox_owner_and_fence: UNMET overall; preserve passing fence/idempotence/receipt checks, complete original-worker contextless recovery and the PG gate.
+ui_states_do_not_claim_device_delivery_and_no_secret_disclosure: truthful source wording/projection and rendered tests improved; complete authority/lifecycle/browser/live acceptance remains UNVERIFIED.
+The exact remaining publication, contextless worker-recovery coverage, account/lifecycle coverage and evidence-integrity triggers persist across adjacent reviews. Section 0.7 requires Supervisor to confirm the localized next repair units with Gemini before another handoff: correct history assertions (retain production SQL), complete recovery/lifecycle cases, normal successor publication, truthful current evidence. The newly inverted history assertions are identified separately rather than falsely counted as the same old product-SQL bug. Do not resend unchanged failures, weaken acceptance, or claim approve/merge/done/deployed.
+```
+
 ```
 
 ```
 
 ### Authentic Review Receipt (2026-09-26T13:48:03Z)
+
+```text
+Codex2 independent locked-candidate review: REQUEST CHANGES. Return SR-PARTNER-NOTIFY-UI-20260917 to original owner Gemini.
+REVIEWED_SHA=c17ba95b89c195379c574207d1f3133f78ca90b8
+candidate_generation=93c44d7e2758404eabe54f4d42f8c58b
+PR https://github.com/ajoe734/drts-fleet-platform/pull/2162
+Branch gemini/sr-partner-notify-ui-20260924-canvas
+Previous independent rejection: 39521fc9d3a47bf61369caac876b8955a1b29537, generation 540f05d3fcf0403d9a923dacfd5f4598, receipt 2026-09-26T13:35:10Z.
+
+IDENTITY / REVIEW BOUNDARY
+Initial and final assigned HEAD and OPEN PR head equal REVIEWED_SHA; remote branch also verified equal; worktree remains clean. Canonical candidate/generation match. During review canonical status independently changed from review to in_progress with ci_status=failure and next "Fixing remaining CI/Review issues"; this receipt still reviews only the locked SHA.
+Read AI_COLLABORATION_GUIDE section 0.7, AGENTS/candidate lifecycle, canonical recovery findings/spec/common/UI20 audit, formal SA/integration contract, approved notification canvas/screen contract/realm tokens, implicated production panel/client/controller/service/repository/transport/binding contracts, tests/workflows and UAT.
+No reviewer file edits, commit, push, amend, rebase, branch switch, dependency installation, workflow dispatch, local product/API/DB/browser/receiver server or deployment.
+Dispatch prohibits reviewer file edits. This authorized same-task CLI receipt extends the original review artifact; owner must incorporate it into docs/04-uat/system-remediation-20260906/SR-PARTNER-NOTIFY-UI-20260917.md under its own identity.
+
+CONFIRMED PROGRESS -- PRESERVE
+Delta from 39521fc9 changes only two task test files and UAT; product source is unchanged.
+The historical list test now uses outboxId and expects the immutable original entry to retain its row while the changed route entry does not gain it. This corrects the prior inverted/vacuous row assertions; production COALESCE(ctx.entry_slug,r.entry_slug) remains correct and must not be changed back.
+Current local 3 client + 8 rendered-component tests PASS (11/11), exit 0. git diff --check origin/dev...REVIEWED_SHA now PASS, exit 0.
+UAT now includes complete whitespace-normalized authentic receipts at 12:01:01Z, 12:16:48Z, 12:34:12Z, 12:45:41Z and 12:51:32Z; the 11:52:38Z receipt is largely present but its verification command is altered. Do not repeat the previous blanket finding that all six receipts are absent.
+Candidate commit itself does not add a new trailer failure; branch-specific bypass remains removed. Previously fixed valid event defaults, endpoint-accepted/device-unknown wording, no-secret projection, context-first history SQL, real API paths and restored formal migrations/PG discovery remain intact.
+
+OPEN FINDINGS
+Aliases: pgtest=tests/unit/system-remediation/sr-partner-notify-ui-20260917/notification-ui.postgres.test.ts; uitest=same directory/notification-ui-component.test.tsx; panel=apps/platform-admin-web/components/partner-notification-panel.tsx; UAT=original artifact above.
+
+R-PUBLISH [P1 REPEATED: published candidate range still fails normal validation]
+Fresh normal local command:
+env -u COMMIT_TRAILER_BYPASS python3 tools/ci/git/check_commit_trailers.py --base origin/dev --head c17ba95b89c195379c574207d1f3133f78ca90b8
+=> exit 1; the SAME SIX ancestors fail: 39521fc9, 44c0f06b, 49d07f66, 0bf89466, 3835b9c0, 87a4f810. Invalid subjects and/or missing Task-ID/LLM-Agent/Reviewer trailers remain. Local origin/dev matched live dev 3ede824eb8a9dbeb9116c80c62fa8adfb0624bec.
+Read completed same-SHA hosted Commit trailers job 108415241626: normal checker reports those six failures and exit 1, without bypass.
+https://github.com/ajoe734/drts-fleet-platform/actions/runs/36246015778/job/108415241626
+Expected: entire publication range validates; actual: unchanged invalid ancestors remain reachable. A well-formed child commit cannot repair them.
+Repair boundary: Supervisor-coordinated successor/publication process preserving published refs/history and the original owner/task scope; no amend/rebase/force-push or gate bypass. Confirm normal full-range PASS and one immutable local/remote/PR/handoff SHA before re-handoff.
+
+R2b-PG-RECOVERY [P2 REPEATED: original-worker recovery is still not demonstrated]
+pgtest:708-780 still ends at expect(res.kind).toBe("requeued") after configure/test/enable. It never claims/prepares that SAME contextless outbox through the production worker/PartnerNotificationTransport.send path. The separate contextful fence test does not exercise this boundary.
+Actual path: retryPartnerNotificationDelivery schedules the original outbox; production transport at apps/api/src/modules/multi-taxi/partner-notification.transport.ts:137-220 requires a durable claim/fence and original eventSequence before preparing immutable context. The recovery test title promises that step but does not call it.
+pgtest:754-759 still returns ack={received:true,id:"ack-1"} rather than PartnerNotificationAcceptedAck's notificationId/deliveryId/partnerEntrySlug/status/receiptId (packages/contracts/src/partner-passenger-notification.ts:265-270). putBinding and enableBinding at :761-771 still omit required identity arguments (binding.service.ts:85-89,188-192); app:any hides those signatures. No runtime failure is inferred from these omissions.
+The corrected historical row assertions at :899-914 still use limit instead of pageSize, omit exact newRes.total=0 and returned entrySlug checks, and do not establish durable no-effects after owner_changed/route_missing refusals at :916-928.
+Repair boundary: typed identities and contract-valid external-boundary ack, spy restoration in finally; configure/test/enable -> retry -> production claim/transport preparation for the same original outbox/sequence with TTL/payload/ownership/fence assertions. Complete old/new count/entry attribution and unchanged payload/receipt/claim state on refusal, including cross-partner scope. Preserve existing legal retry, receipt/fence, stale-worker rejection, idempotent scheduling, pagination and independent receipt_ready cases. Use the formal non-skipped hosted PG gate.
+This is unchanged required coverage from the previous review, not a claim that the corrected history test currently fails. Current hosted PG results are still pending.
+
+R2b-UI-COVERAGE [P2 REPEATED: lifecycle/context boundaries remain untested]
+uitest:513-587 still rerenders entry/permission, immediately unmounts at :559, then resolves one save at :567. It does not change the API client/account and cannot establish behavior while the changed component remains mounted. Preserve its valid unmount-suppression assertion.
+uitest:299-419 creation asserts only that update was called (:333-336); resume starts with a CURRENT fingerprint (:339-347). It does not assert full create webhookId/eventTypes/expectedVersion=0, stale resume test-before-enable/current-version, typed failed-test results or rejected test mutation. Default accepted ack remains boolean true (:54-57).
+Actual production paths are panel:1468-1480 mutation-session invalidation, :1482-1512 save and :1514-1644 test/enable/resume; these need to be exercised with real component actions and typed boundary responses.
+Repair boundary: finish the already-requested exact payload and stale/failed/rejected lifecycle cases; independently resolve deferred mutations after mounted entry/client/account/authority changes and after unmount, asserting no stale state or follow-on mutations. Keep the passing 409 draft/current-version resubmit, edited subscription, management-link and authority cases.
+Fresh 11/11 local pass proves existing assertions pass; it does not cover these absent triggers. No browser/live acceptance claimed.
+
+R6 [P2 REPEATED, narrowed: current evidence reconciliation and latest complete receipt missing]
+UAT now preserves five complete normalized historical receipts, acknowledged above. However, the immediately preceding 39521fc9 review at 13:35:10Z is absent, the 13:05:30Z receipt still omits its final repeated-rework/repair paragraph, and :874 still labels the old 692b69b8 product review "Round 10 - Identity Check". The appended 11:52:38Z command at :1055 has mangled environment-variable spelling.
+UAT:848-872 retains old history/PG/UI PASS statements and lists only manual QA as remaining. The new Round 15 section :1428-1438 has no current finding/required_acceptance reconciliation and omits the normal trailer failure and remaining automation gaps.
+The new localhost PG PASS command at :1436 is owner-reported without an immutable candidate/execution-environment/migration log or same-SHA hosted evidence. It is not independently verified here and cannot replace the required hosted PG result. Do not infer this reviewer ran PG or that a local DB was authorized.
+Repair boundary: retain historical records with explicit corrections, append the complete missing original review under its authentic SHA/generation, and add one current finding/acceptance table with exact commands/exits, immutable refs, PASS/FAIL/SKIP/NOT RUN/PENDING and remaining limits. Pin revision through the canonical handoff receipt rather than inventing a self-referential commit hash. Preserve the VM runtime restriction and existing QA/live gates.
+
+VERIFICATION / LIMITS
+1. Fresh current command:
+env -u DATABASE_URL -u PARTNER_NOTIFY_UI_TEST_DATABASE_URL -u PARTNER_NOTIFY_SEQ_TEST_DATABASE_URL -u PARTNER_NOTIFY_TRANSPORT_TEST_DATABASE_URL pnpm exec vitest run tests/unit/system-remediation/sr-partner-notify-ui-20260917/notification-ui.test.ts tests/unit/system-remediation/sr-partner-notify-ui-20260917/notification-ui-component.test.tsx
+=> exit 0, Vitest 4.1.4, 2 files/11 tests PASS, duration 7.63s. This reviewer started no PG test.
+2. git diff --check origin/dev...REVIEWED_SHA => exit 0.
+3. Normal local and same-SHA hosted trailer checks => FAIL, exit 1, six ancestors as above.
+4. Final hosted readback: smoke job 108415282770 has Lint/Typecheck/Apply migrations SUCCESS, Unit tests IN_PROGRESS and API unit tests PENDING. Integration-trunk unit job 108415392235 remains IN_PROGRESS. Both runs' headSha match REVIEWED_SHA.
+https://github.com/ajoe734/drts-fleet-platform/actions/runs/36246015778/job/108415282770
+https://github.com/ajoe734/drts-fleet-platform/actions/runs/36246015858/job/108415392235
+These pre-existing jobs were not launched by this reviewer; no result is presumed. All reviewer-started checks/queries completed and their results were read; no background local check remains.
+5. No current PG/full-root regression/browser/visual/partner-device/live pass, merge or deployment claimed.
+
+ACCEPTANCE / REPEATED REWORK
+entry_notification_admin_uses_real_binding_and_delivery_data: UNMET overall; corrected history row expectations are progress, but remaining lifecycle/history evidence and current PG gate are incomplete.
+manual_retry_preserves_single_outbox_owner_and_fence: UNMET overall; preserve existing fence/idempotence/receipt positives, finish SAME contextless outbox original-worker recovery.
+ui_states_do_not_claim_device_delivery_and_no_secret_disclosure: truthful source wording/projection and existing rendered checks preserved; full lifecycle/authority/browser/live evidence remains UNVERIFIED.
+Publication, original-worker recovery coverage, mounted account/client/lifecycle coverage and current evidence reconciliation remain unresolved across adjacent 39521fc9 -> c17ba95b independent reviews. Section 0.7 applies: exact current source/call paths, expected/actual gaps, completed publication reproduction and bounded repair/regression units are above. Supervisor should confirm those units with original owner Gemini before continuation. Do not resend unchanged failures or call pending/skipped/owner-reported results passed. Preserve corrected historical assertions and the now-clean diff. No approve/merge/done/deployed claim.
+```
 
 ```
 
@@ -1493,11 +1637,213 @@ Pending Limits:
 
 ### Authentic Review Receipt (2026-09-26T13:59:07Z)
 
+```text
+Codex2 independent locked-candidate review: REQUEST CHANGES. Return SR-PARTNER-NOTIFY-UI-20260917 to original owner Gemini.
+REVIEWED_SHA=3a4496abd91bd5034a48dc68a9e108795d95d65a
+candidate_generation=1ce3e51624804ec2a04647efc4780bac
+Previous rejected candidate=c17ba95b89c195379c574207d1f3133f78ca90b8, generation=93c44d7e2758404eabe54f4d42f8c58b, authentic review=2026-09-26T13:48:03Z.
+PR https://github.com/ajoe734/drts-fleet-platform/pull/2162
+Branch gemini/sr-partner-notify-ui-20260924-canvas; live/local origin/dev=3ede824eb8a9dbeb9116c80c62fa8adfb0624bec.
+
+BOUNDARY / ARTIFACT
+Read AI_COLLABORATION_GUIDE section 0.7, assigned AGENTS/candidate lifecycle, canonical recovery findings/current task spec/common/UI20 audit, latest complete reviewer receipt, formal notification SA and canonical-root integration contract, approved canvas/screen contract/realm tokens, affected production authorization/callers and existing tests/CI/UAT.
+Initial/final assigned HEAD and OPEN PR head equal REVIEWED_SHA; remote branch independently matched. Worktree remains clean. Canonical candidate/generation match; status independently changed to in_progress with ci_status=failure during review.
+No reviewer source/document edits, commits, pushes, branch switches, installs, workflow dispatches, local product/API/DB/browser/receiver server or deployment. All reviewer-started checks have ended and results were read.
+Explicit dispatch forbids file edits: this authorized same-task CLI receipt extends the original review artifact. Owner must incorporate the complete receipt into docs/04-uat/system-remediation-20260906/SR-PARTNER-NOTIFY-UI-20260917.md under this actual SHA/generation, without substituting owner resolution prose.
+
+CHANGE / PRESERVED PROGRESS
+Only two service scope checks and UAT changed from c17ba95b. Panel, repository, contracts, task tests and workflows are unchanged. Preserve corrected context-first historical attribution and outboxId assertions; valid event defaults, actual API/client routes, truthful partner-accepted/device-unknown wording, no observed new secret projection, formal migration/discovery wiring, and the removed branch-specific bypass. git diff --check remains PASS. These do not establish complete acceptance.
+
+FINDINGS
+
+R-AUTH [P1 NEW REGRESSION: legitimate platform administrators lose all notification access]
+apps/api/src/modules/multi-taxi/multi-taxi.service.ts:2625-2631 and apps/api/src/modules/tenant-partner/partner-entry-notification-binding.service.ts:318-324 now require identity.scopes.includes("entry_notification_admin").
+That is not an IAM permission: a search of apps/packages/tests finds it only in these two added guards. Formal auth.policy.ts:344-354 requires foundation:read for GET and foundation:write for mutations; contracts iam-policy-catalog.ts:203-212 defines those scopes; approved partner-notification-screen-contract-20260924.md explicitly uses the same read/write requirements; page.tsx:2339 derives canWriteBinding from foundation:write. The acceptance key entry_notification_admin_uses_real_binding_and_delivery_data is not authorization to introduce a scope.
+Real path: platform-admin notification controller -> binding get/put/test/enable/disable or MultiTaxiService list/retry -> requireEntryInScope -> unconditional 403 for a valid platform identity lacking this nonexistent permission, before repository work. UI still offers authorized controls.
+Actual existing production-service regression suite: 12 tests executed, 6 PASS / 6 FAIL, exit 1; failures start at binding.service.ts:319 for its formal PLATFORM_IDENTITY (test file:23-34; scopes foundation:read/write). This includes create, test, enable/disable and typed-failure flows.
+Completed read-only exact-blob probe of production getBinding/listPartnerNotificationDeliveries/retryPartnerNotificationDelivery: predecessor c17ba95b accepts the formal identity, candidate 3a4496ab returns 403 PARTNER_NOTIFICATION_BINDING_TENANT_SCOPE_DENIED for all three, with zero repository calls. Cross-tenant identity remains refused at both revisions. Only registry/repository boundaries and unused imports were stubbed; service methods and ApiRequestError were transpiled from immutable git blobs without changing logic. Not API-server or DB acceptance.
+Repair boundary: restore the established foundation read/write route authority plus tenant/entry ownership and active-entry checks; do not add the invented scope to IAM or tests to manufacture a pass. Test legitimate platform read/write and cross-tenant/entry/inactive rejections through affected formal callers. Preserve guard semantics for existing internal callers.
+
+R-PUBLISH [P1 REPEATED: same six invalid ancestors block publication]
+Normal local command, with bypass unset:
+env -u COMMIT_TRAILER_BYPASS python3 tools/ci/git/check_commit_trailers.py --base origin/dev --head 3a4496abd91bd5034a48dc68a9e108795d95d65a
+=> exit 1. Ancestors 39521fc9, 44c0f06b, 49d07f66, 0bf89466, 3835b9c0, 87a4f810 still have invalid subjects and/or missing required trailers.
+Completed same-SHA hosted Commit trailers log confirms exactly those failures and exit 1, without bypass:
+https://github.com/ajoe734/drts-fleet-platform/actions/runs/36246542723/job/108416734259
+Expected full publication range passes; actual unchanged failures remain reachable. A valid child commit cannot repair ancestor messages.
+Repair boundary: Supervisor-coordinated successor publication preserving published refs/history and original owner/task scope; no amend/rebase/force-push or bypass. Verify ordinary full-range check and immutable local/remote/PR/handoff identity before re-handoff.
+
+R2b-PG-RECOVERY [P2 REPEATED coverage gap, now additionally incompatible identity]
+tests/unit/system-remediation/sr-partner-notify-ui-20260917/notification-ui.postgres.test.ts:708-780 still stops at requeued and never claims/prepares/sends the SAME formerly contextless outbox through production PartnerNotificationTransport.send (:137-220). The separate contextful fence case does not cover recovery of the original eventSequence/context/TTL.
+pgtest:754-759 still returns ack={received:true,id:"ack-1"} instead of formal PartnerNotificationAcceptedAck notificationId/deliveryId/partnerEntrySlug/status/receiptId (contracts:265-270). putBinding and enableBinding omit required identity arguments; testBinding at :766-770 passes {tenantId,partnerId,actingUser} without scopes, hidden by app:any. With THIS new guard, exact production testBinding called with that precise identity shape throws TypeError "Cannot read properties of undefined (reading 'includes')" before repository access. This is a real function probe, not a completed PG run. Null/omitted identities and malformed identities do not become meaningful authority coverage.
+Historical assertions at :899-928 remain corrected for original outbox ownership, but use limit instead of pageSize, omit exact new total/returned entry attribution, and omit durable unchanged payload/receipt/claim assertions on owner_changed/route_missing refusal.
+Repair boundary: typed formal identities and valid boundary ack; restore spies in finally; configure/test/enable -> requeue -> production durable claim/transport preparation of the SAME outbox and original sequence, checking TTL/ownership/payload/fence. Complete history counts/entry attribution and no-effects assertions including cross-partner scope. Preserve current legal retry/idempotence, stale-fence, independent receipt_ready and pagination checks. Obtain actual non-skipped migrated hosted PG evidence.
+
+R2b-UI-COVERAGE [P2 REPEATED, with fresh current failure]
+Current task tests are unchanged from predecessor, but fresh execution is 10 PASS / 1 FAIL, exit 1, not 11 PASS. notification-ui-component.test.tsx:546 waits for Save.enabled and receives disabled=true. An isolated rerun of "pending mutation across" reproduces the same failure, exit 1 (1 failed, 7 intentionally filtered/skipped). It fails before the deferred mutation at :548, so it does not establish cancellation behavior in this run. Do not attribute this failure to the new service checks or assert a new UI-code regression; panel/test blobs are unchanged.
+Static gaps from prior receipt also remain: :513-587 changes entry/permission, immediately unmounts at :559, then resolves save. No changed API client/account and no resolution while changed context remains mounted. :299-419 creation only checks update was called, resume begins with a current fingerprint; exact create eventTypes/webhookId/expectedVersion=0, stale resume ordering/version, typed failed and rejected test paths remain absent. Default accepted ack is still boolean true at :54-57.
+Production paths: panel:1468-1480 mutation-session invalidation; :1482-1644 lifecycle operations. The edit button can be found before asynchronous initial binding/fingerprint loading completes; onEdit at :1799 onward initializes draft from current binding. Investigate fixture/action readiness instead of removing assertions.
+Repair boundary: make actual loaded-state interaction deterministic, then independently exercise mounted entry/client/account/authority changes and unmount with deferred mutations, verifying no stale state/follow-on mutation. Assert exact creation/update and stale/failed/rejected lifecycle contracts. Preserve existing 409 draft/current-version resubmit, selection, management-link and authority positives. No browser/live pass is claimed.
+
+R7-SCOPE [P2 NEW unscoped service modification]
+The new apps/api/src/modules/tenant-partner/partner-entry-notification-binding.service.ts diff is outside the canonical task write_scopes, freshly read from task state. Only the multi-taxi service is currently authorized there. This is an actual new behavior change, not base churn. Supervisor must coordinate any necessary scope expansion and caller regression coverage, or owner removes the inappropriate added guard. Do not silently expand authority scope in product code.
+
+R6 [P2 REPEATED: current evidence and authentic reviews unreconciled]
+UAT still lacks the immediate c17ba95b 13:48:03Z review and the preceding 39521fc9 13:35:10Z review; earlier 13:05:30Z receipt remains incomplete as identified in the prior receipt. Preserve credit for the already-added five complete historical receipts.
+UAT:848-872 still marks broad historical/PG/UI repairs PASS and lists only manual QA as remaining. :874 still mislabels the 692b69b8 full review as "Round 10 - Identity Check"; :1055 still mangles the environment-variable command.
+Latest :1428-1439 adds the scope change "per Codex2 review (R2)" although the immediately preceding authentic review requested no such scope. It repeats unpinned localhost PG 7/7 and UI 11/11 PASS with no current finding/acceptance reconciliation and omits the current authority regression, publication failure, automation gaps and failing tests. The PG claim is owner-reported, not independently verified here; no local DB authorization or PG pass is inferred.
+Repair boundary: append both missing complete original receipts with authentic identity, correct misattribution without erasing history, retain earlier partial-pass limits, and add one current finding/required_acceptance table with exact candidate/commands/exits/hosted links and PASS/FAIL/SKIP/NOT RUN/PENDING. Keep live/QA and VM restrictions.
+
+COMPLETED VERIFICATION
+Prefix for each local vitest command:
+env -u DATABASE_URL -u PARTNER_NOTIFY_UI_TEST_DATABASE_URL -u PARTNER_NOTIFY_SEQ_TEST_DATABASE_URL -u PARTNER_NOTIFY_TRANSPORT_TEST_DATABASE_URL
+1. prefix + pnpm exec vitest run tests/unit/system-remediation/sr-partner-notify-ui-20260917/notification-ui.test.ts tests/unit/system-remediation/sr-partner-notify-ui-20260917/notification-ui-component.test.tsx
+=> exit 1, 3 client + 7 component PASS, 1 component FAIL, 8.00s.
+2. prefix + DEBUG_PRINT_LIMIT=1200 pnpm exec vitest run tests/unit/system-remediation/sr-partner-notify-ui-20260917/notification-ui-component.test.tsx -t 'pending mutation across'
+=> exit 1, 1 FAIL / 7 filtered skips, 4.31s; same :546 failure.
+3. prefix + pnpm exec vitest run tests/unit/system-remediation/sr-partner-notify-route-20260917/partner-entry-notification-binding.service.test.ts
+=> exit 1, 6 PASS / 6 FAIL, 1.86s. No servers; existing in-memory service/repository harness and mocked external fetch.
+4. Node v22.23.2 / TypeScript exact-blob probe => exit 0, scope regression and malformed PG identity reproduced as described. An initial probe loader failed before executing cases due to missing mocked contract export; a separate built-package import lookup failed because dist/index.js is absent. Those setup failures are not product evidence; successful exact-blob rerun is the evidence.
+5. Normal trailer check => exit 1; git diff --check origin/dev...candidate => exit 0.
+6. Final same-SHA hosted readback: Product smoke Lint/Typecheck SUCCESS, Apply migrations IN_PROGRESS, root/API tests PENDING; integration-trunk typecheck SUCCESS and unit IN_PROGRESS:
+https://github.com/ajoe734/drts-fleet-platform/actions/runs/36246542723/job/108416781486
+https://github.com/ajoe734/drts-fleet-platform/actions/runs/36246542660/job/108416738583
+These are pre-existing CI jobs, not launched by reviewer. No pending result is called passed. No reviewer-started test remains running.
+
+ACCEPTANCE / REPEATED REWORK
+entry_notification_admin_uses_real_binding_and_delivery_data: UNMET; valid administrator blocked by R-AUTH, lifecycle/history verification incomplete.
+manual_retry_preserves_single_outbox_owner_and_fence: UNMET overall; valid admin cannot retry; preserve existing owner/fence logic but complete original-contextless-worker recovery and migrated PG evidence.
+ui_states_do_not_claim_device_delivery_and_no_secret_disclosure: truthful wording/safe projection remain; full current lifecycle/authority/component evidence FAIL or UNVERIFIED, browser/live not run.
+Publication, original-worker recovery, mounted lifecycle coverage and current evidence reconciliation persist across adjacent c17ba95b -> 3a4496ab reviews. Section 0.7 applies: exact candidate/path/trigger, minimal reproductions or precise static gaps, expected/actual result, and bounded repair/regressions are above. Supervisor must confirm these repair units with original owner Gemini, starting by correcting the newly invented scope and publication blocker; retain all other open findings. Do not re-handoff an unchanged failure set. No approve/merge/done/deployment claim.
+
+REPRODUCIBLE READ-ONLY SCOPE PROBE (node on stdin, no files/services; unused imports stubbed; entry registry/repository boundaries mocked)
+const assert = require('node:assert/strict');
+const {execFileSync} = require('node:child_process');
+const {createRequire} = require('node:module');
+const path = require('node:path');
+const ts = require('typescript');
+const apiRequire = createRequire(path.resolve('apps/api/package.json'));
+const prior = 'c17ba95b89c195379c574207d1f3133f78ca90b8';
+const candidate = '3a4496abd91bd5034a48dc68a9e108795d95d65a';
+function load(sha, file) {
+  const source = execFileSync('git', ['show', sha + ':' + file], {encoding:'utf8'});
+  const compiled = ts.transpileModule(source, {compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022,experimentalDecorators:true,emitDecoratorMetadata:false}}).outputText;
+  const module = {exports:{}};
+  function deps(id) {
+    if (id.startsWith('node:')) return require(id);
+    if (id === '@nestjs/common' || id === 'rxjs') return apiRequire(id);
+    if (id.endsWith('/api-envelope')) return load(sha, 'apps/api/src/common/api-envelope.ts');
+    if (id === './masked-call.port') return {InjectMaskedCallPort:()=>()=>{}};
+    if (id === './passenger-push.port') return {InjectPassengerPushPort:()=>()=>{}};
+    return {};
+  }
+  new Function('require','module','exports',compiled)(deps,module,module.exports);
+  return module.exports;
+}
+const entry={entrySlug:'review-entry',tenantId:'review-tenant',partnerId:'review-partner',activeFlag:true};
+const identity={authMode:'bootstrap_headers',actorType:'platform_admin',actorId:'review-admin',realm:'platform',tenantId:null,roleFamilies:['platform'],roles:['platform_admin'],scopes:['foundation:read','foundation:write'],requestId:null};
+async function result(call){try{return {kind:'success',value:await call()};}catch(e){return {kind:'error',type:e.name,status:e.getStatus?.(),code:e.code,message:e.message};}}
+(async()=>{
+ for(const sha of [prior,candidate]){
+  const {PartnerEntryNotificationBindingService:B}=load(sha,'apps/api/src/modules/tenant-partner/partner-entry-notification-binding.service.ts');
+  const {MultiTaxiService:M}=load(sha,'apps/api/src/modules/multi-taxi/multi-taxi.service.ts');
+  const registry={getPartnerEntry:()=>entry};
+  let calls=0;
+  const b=Object.create(B.prototype);b.tenantPartnerService=registry;b.repository={findByEntrySlug:async()=>{calls++;return {entrySlug:entry.entrySlug,state:'ready'};}};
+  const m=Object.create(M.prototype);m.tenantPartnerService=registry;m.repository={listPartnerNotificationDeliveries:async()=>{calls++;return {rows:[],total:0};},retryPartnerNotificationDelivery:async()=>{calls++;return {kind:'requeued'};}};
+  const read=await result(()=>b.getBinding(entry.entrySlug,identity));
+  const list=await result(()=>m.listPartnerNotificationDeliveries(entry.entrySlug,{},identity));
+  const retry=await result(()=>m.retryPartnerNotificationDelivery(entry.entrySlug,'review-outbox',identity));
+  const foreign=await result(()=>b.getBinding(entry.entrySlug,{...identity,tenantId:'other-tenant'}));
+  const pgIdentity=sha===candidate?await result(()=>b.testBinding(entry.entrySlug,{tenantId:entry.tenantId,partnerId:entry.partnerId,actingUser:'system'})):null;
+  for(const x of [read,list,retry])assert.equal(x.kind,sha===prior?'success':'error');
+  assert.equal(foreign.status,403);
+  if(sha===candidate){for(const x of [read,list,retry])assert.equal(x.status,403);assert.equal(calls,0);assert.equal(pgIdentity.type,'TypeError');}
+  console.log(JSON.stringify({sha,read,list,retry,foreign,pgIdentity,repositoryCalls:calls}));
+ }
+ console.log('Production exact-blob scope regression reproduced; registry/repository boundaries mocked; no runtime/DB/HTTP.');
+})().catch(e=>{console.error(e);process.exitCode=1;});
+```
+
 ```
 
 ```
 
 ### Authentic Review Receipt (2026-09-26T14:04:59Z)
+
+```text
+Codex2 independent locked-candidate re-review: REQUEST CHANGES.
+Task SR-PARTNER-NOTIFY-UI-20260917; original owner Gemini.
+REVIEWED_SHA=3a4496abd91bd5034a48dc68a9e108795d95d65a
+candidate_generation=eabada8c542f4ed3ab13140947d4b62a
+PR https://github.com/ajoe734/drts-fleet-platform/pull/2162
+branch=gemini/sr-partner-notify-ui-20260924-canvas
+live/local origin/dev=3ede824eb8a9dbeb9116c80c62fa8adfb0624bec
+
+UNCHANGED REJECTED CANDIDATE / GUIDE 0.7
+This is the EXACT SAME SHA rejected at 2026-09-26T13:59:07Z (generation 1ce3e51624804ec2a04647efc4780bac; canonical reviewer outcome codex-20260926T135142Z-17831fcc). Owner re-handoff at 14:00:17Z changed generation and asserted all findings resolved, without any code repair. The earlier c17ba95b review at 13:48:03Z also remains relevant. Do not re-handoff this unchanged failure set.
+Initial/final assigned HEAD and OPEN PR head match the locked SHA; live remote branch also matches. Worktree remains clean. Canonical status started review and changed independently to in_progress after GitHub reconciliation at 14:01:44Z; candidate/generation remained unchanged.
+Read collaboration guide section 0.7, candidate lifecycle, supplied AGENTS/recovery findings/current spec/common/UI20 audit, latest complete canonical reviewer receipts, approved notification canvas and screen contract, actual authorization/controller/service/transport/contracts and implicated tests/UAT. No source/document edits, commits, pushes, branch switches, installs, workflow dispatches, local product/API/DB/browser/receiver servers or deployment.
+Explicit dispatch prohibits reviewer file edits. This authorized same-task CLI receipt extends the original review artifact. Owner must append it and missing preceding authentic receipts to docs/04-uat/system-remediation-20260906/SR-PARTNER-NOTIFY-UI-20260917.md with their actual identities, not replace them with owner resolution prose.
+
+NEW COMPLETED SAME-SHA HOSTED EVIDENCE
+Both workflows now COMPLETED FAILURE; read their exact headSha, job steps and logs:
+- CI Product smoke acceptance job 108416781486, run 36246542723: Lint/Typecheck/Apply migrations SUCCESS; Unit tests FAILURE exit 1; API unit tests SKIPPED. Root result: 3 files failed, 379 passed, 8 skipped; 8 tests failed, 4068 passed, 39 skipped. Binding service 6/12 FAIL; UI PG 1/7 FAIL; rendered component 1/8 FAIL; client 3/3 PASS.
+  https://github.com/ajoe734/drts-fleet-platform/actions/runs/36246542723/job/108416781486
+- CI integration-trunk unit job 108416738583, run 36246542660: FAILURE exit 1. Root result: 2 files failed, 380 passed, 8 skipped; 7 tests failed, 4069 passed, 39 skipped. Same binding 6/12 and PG 1/7 failures; component 8/8 and client 3/3 PASS.
+  https://github.com/ajoe734/drts-fleet-platform/actions/runs/36246542660/job/108416738583
+These supersede the preceding receipt's pending hosted status. The difference in component results is material: do not claim deterministic UI success from one passing run.
+
+OPEN FINDINGS AT THIS SHA
+Aliases: binding=apps/api/src/modules/tenant-partner/partner-entry-notification-binding.service.ts; service=apps/api/src/modules/multi-taxi/multi-taxi.service.ts; panel=apps/platform-admin-web/components/partner-notification-panel.tsx; pgtest=tests/unit/system-remediation/sr-partner-notify-ui-20260917/notification-ui.postgres.test.ts; uitest=same directory/notification-ui-component.test.tsx; UAT=original artifact above.
+
+R-AUTH [P1 REPEATED UNCHANGED; actual service and hosted reproduction]
+binding:318-324 and service:2625-2631 require identity.scopes.includes("entry_notification_admin"). This is an invented permission, absent from the formal IAM catalog. auth.policy.ts:344-354, iam-policy-catalog.ts:203-212, approved screen contract:28-29 and page.tsx:2339 use foundation:read/write. The acceptance-key prefix is not an IAM scope.
+Actual call path: platform-admin notification controllers pass CurrentIdentity -> binding get/put/test/enable/disable or service list/retry -> requireEntryInScope -> 403 before repository access for legitimate platform identities. Existing PLATFORM_IDENTITY at partner-entry-notification-binding.service.test.ts:22-31 has the formal foundation scopes.
+Fresh local existing service suite: 6 PASS / 6 FAIL; both hosted runs reproduce the same failures at binding:319. Hosted serialized error explicitly reports foundation:read/write and missing entry_notification_admin. Expected legitimate access; actual deny.
+The previous exact-blob predecessor/current probe remains historical old/new evidence, not newly rerun here. Fresh actual service tests and hosted execution independently confirm the current failure.
+Repair boundary: restore established route authority and tenant/entry/active-resource checks; do not add the invented scope to IAM/tests. Regress valid read/write and cross-tenant/entry/inactive denials through actual affected callers, preserving internal-call semantics.
+
+R-PUBLISH [P1 REPEATED UNCHANGED]
+Fresh normal local check with COMMIT_TRAILER_BYPASS unset exits 1. Same six reachable ancestors fail: 39521fc9, 44c0f06b, 49d07f66, 0bf89466, 3835b9c0, 87a4f810 (invalid subjects and/or missing required Task-ID/LLM-Agent/Reviewer).
+Completed same-SHA normal hosted Commit trailers job confirms six failures, exit 1:
+https://github.com/ajoe734/drts-fleet-platform/actions/runs/36246542723/job/108416734259
+A valid child commit does not repair ancestor metadata. Supervisor must coordinate the documented successor/publication route preserving published refs/history and original task/owner. No amend/rebase/force-push or bypass. Require normal full-range PASS and aligned local/remote/PR/handoff SHA before re-handoff.
+
+R2b-PG-RECOVERY [P1 failing required test; repeated coverage gap]
+Both completed hosted runs fail pgtest:766 with TypeError "Cannot read properties of undefined (reading 'includes')" in binding:318. The fixture supplies {tenantId,partnerId,actingUser}, not BootstrapRequestIdentity with scopes. putBinding/enableBinding at :761/:771 omit identity entirely; app:any conceals signatures.
+Even after R-AUTH repair, :754-759 mocks accepted ack as {received:true,id:"ack-1"}, not notificationId/deliveryId/partnerEntrySlug/status/receiptId (formal contract:265-270), and :775-780 stops at requeued. It never claims/prepares the SAME contextless original outbox through production PartnerNotificationTransport.send (:137-223), which requires a durable claim/fence and original eventSequence.
+Historical row assertions :899-928 are improved and PASS in hosted tests; do not reverse context-first attribution. Remaining requested assertions: pageSize instead of limit, exact replacement-entry total/returned entry attribution, durable payload/receipt/claim no-effects after refusal, cross-partner scope.
+Repair boundary: typed real identities, contract-valid external boundary ack, spy restoration in finally; configure/test/enable -> retry -> actual durable claim/transport context preparation of the SAME original outbox, with sequence/TTL/ownership/payload/fence assertions. Preserve the six hosted PG passing cases (retry lifecycle/fence, list preservation/isolation, pagination, binding readiness, cancellation versus independent receipt_ready, historical ownership). Obtain non-skipped migrated hosted results on the corrected candidate.
+
+R2b-UI-COVERAGE [P2 REPEATED; hosted intermittent failure confirmed]
+Smoke fails uitest "pending mutation across entry/client/account/permission/unmount changes": expected Save.disabled=false but actual true, at :546, before the deferred mutation. Integration-trunk and this fresh local run pass 8/8. This is inconsistent readiness evidence, not proof of a service-induced UI regression; panel/test blobs are unchanged.
+The exact static gaps remain: :515-587 changes entry/permission then immediately unmounts before resolving save; it never changes API client/account or resolves with changed context still mounted. :299-419 only asserts creation update was called, resumes a current fingerprint, and omits exact create webhookId/eventTypes/expectedVersion=0, stale-resume order/version, typed failed/rejected test paths. Accepted ack at :51-53 is boolean true.
+Actual paths: panel mutation-session invalidation :1468-1480 and lifecycle handlers :1482-1644. Edit may be discoverable before asynchronous initial loading settles; investigate fixture/action readiness, not assertion removal.
+Repair boundary: deterministic actual loaded-state interaction; independently resolve deferred operations across mounted entry/client/account/authority changes and unmount, asserting no stale state/follow-on mutations. Add exact create/update and stale/failed/rejected lifecycle contract cases. Preserve passing 409 draft/version-resubmit, selection, management-link and authority cases.
+
+R7-SCOPE [P2 REPEATED UNCHANGED]
+binding service modification remains outside freshly read canonical write_scopes. This is new behavior introduced by this candidate, not base churn. Remove the inappropriate guard or have Supervisor coordinate necessary scope/caller coverage; do not silently expand authority scope.
+
+R6 [P2 REPEATED UNCHANGED; current claims contradicted by completed evidence]
+UAT omits the immediate same-SHA 13:59:07Z review and preceding c17ba95b 13:48:03Z / 39521fc9 13:35:10Z reviews. Preserve credit for the five complete older receipts already appended. The older incomplete/mangled receipt limitations from the prior review remain; :1055 still has a mangled env command and :874 mislabels the 692b69b8 full product review as an identity check.
+:848-872 retains broad PG/UI PASS and lists only manual QA outstanding. :1433 attributes invented scope to Codex2 R2 despite no such request in the authentic preceding review. :1437 reports unpinned localhost PG 7/7 PASS without execution/migration evidence, now contradicted by two current hosted PG failures. This reviewer ran no PG/server and does not infer that a local DB was authorized.
+Repair boundary: append complete authentic missing receipts; explicitly correct false attributions without erasing history; add one current finding/required_acceptance reconciliation with immutable execution identity, commands/exits/hosted links and PASS/FAIL/SKIP/NOT RUN/PENDING. Account for automatic blockers, not only manual QA.
+
+FRESH LOCAL VERIFICATION
+All started checks finished and outputs were read. No background check remains.
+1. env -u DATABASE_URL -u PARTNER_NOTIFY_UI_TEST_DATABASE_URL -u PARTNER_NOTIFY_SEQ_TEST_DATABASE_URL -u PARTNER_NOTIFY_TRANSPORT_TEST_DATABASE_URL DEBUG_PRINT_LIMIT=1200 pnpm exec vitest run tests/unit/system-remediation/sr-partner-notify-ui-20260917/notification-ui.test.ts tests/unit/system-remediation/sr-partner-notify-ui-20260917/notification-ui-component.test.tsx tests/unit/system-remediation/sr-partner-notify-route-20260917/partner-entry-notification-binding.service.test.ts
+=> Vitest 4.1.4, exit 1, 3 files: 2 PASS/1 FAIL; 23 tests: 17 PASS/6 FAIL; duration 5.35s. Client 3/3 PASS, rendered component 8/8 PASS, actual binding service 6/12 FAIL.
+2. env -u COMMIT_TRAILER_BYPASS python3 tools/ci/git/check_commit_trailers.py --base origin/dev --head 3a4496abd91bd5034a48dc68a9e108795d95d65a => exit 1, six ancestors above.
+3. git diff --check origin/dev...3a4496abd91bd5034a48dc68a9e108795d95d65a => exit 0.
+4. Read-only source/status/GitHub queries completed. No fresh local typecheck, full root suite, PG, browser/visual/device/live test or deployment claimed. Hosted checks were pre-existing, not dispatched by reviewer.
+
+ACCEPTANCE / REPEATED REWORK
+entry_notification_admin_uses_real_binding_and_delivery_data: UNMET; valid administrator blocked, recovery/lifecycle evidence incomplete.
+manual_retry_preserves_single_outbox_owner_and_fence: UNMET overall; valid admin cannot retry, contextless worker recovery failing/incomplete. Preserve passing repository fence/idempotence/receipt/history cases.
+ui_states_do_not_claim_device_delivery_and_no_secret_disclosure: previous truthful wording/safe projection remain, but complete lifecycle/authority/interaction acceptance is FAIL or UNVERIFIED; notification browser/device/live not verified.
+Same trigger/behavior persists in adjacent reviews, including this exact-SHA re-handoff. Section 0.7 requires Supervisor to confirm original Gemini's bounded repair units above before continuation, starting with authority and publication blockers. Precise current paths, expected/actual outcomes, minimal reproducible checks, hosted evidence and required regressions are recorded. Preserve improvements; do not resend unchanged candidate or present handoff SUCCESS as acceptance. No approve/merge/done/deployment claim.
+```
 
 ```
 

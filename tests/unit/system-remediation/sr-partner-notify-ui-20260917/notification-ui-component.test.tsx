@@ -302,7 +302,6 @@ describe("PartnerNotificationPanel", () => {
       Object.assign(new Error("Not found"), { statusCode: 404 }),
     );
     const { rerender } = render(
-      <AdminClientProvider adminClient={mockClient as any}>
         <PartnerNotificationPanel
           entrySlug="test-entry"
           tenantId="test-tenant"
@@ -310,7 +309,6 @@ describe("PartnerNotificationPanel", () => {
           canReadWebhooks={true}
           canWriteWebhooks={true}
         />
-      </AdminClientProvider>
     );
 
     const createBtn = await screen.findByRole("button", {
@@ -351,7 +349,6 @@ describe("PartnerNotificationPanel", () => {
       validatedAt: new Date().toISOString(),
     });
     rerender(
-      <AdminClientProvider adminClient={mockClient as any}>
         <PartnerNotificationPanel
           entrySlug="test-entry-2"
           tenantId="test-tenant"
@@ -359,7 +356,6 @@ describe("PartnerNotificationPanel", () => {
           canReadWebhooks={true}
           canWriteWebhooks={true}
         />
-      </AdminClientProvider>
     );
 
     // It should demand a re-test, not just enable
@@ -386,13 +382,11 @@ describe("PartnerNotificationPanel", () => {
     });
     
     rerender(
-      <AdminClientProvider adminClient={mockClient as any}>
         <PartnerNotificationPanel
           entrySlug="test-entry-3"
           tenantId="test-tenant"
           canWriteBinding={true}
         />
-      </AdminClientProvider>
     );
 
     const testBtn = await screen.findByRole("button", { name: /test/i });
@@ -424,13 +418,11 @@ describe("PartnerNotificationPanel", () => {
       validatedAt: new Date().toISOString(),
     });
     rerender(
-      <AdminClientProvider adminClient={mockClient as any}>
         <PartnerNotificationPanel
           entrySlug="test-entry-4"
           tenantId="test-tenant"
           canWriteBinding={true}
         />
-      </AdminClientProvider>
     );
 
     const enableBtn = await screen.findByRole("button", { name: /enable/i });
@@ -551,7 +543,6 @@ describe("PartnerNotificationPanel", () => {
     });
 
     const { unmount, rerender } = render(
-      <AdminClientProvider adminClient={mockClient as any}>
         <PartnerNotificationPanel
           entrySlug="test-entry"
           tenantId="test-tenant"
@@ -559,7 +550,6 @@ describe("PartnerNotificationPanel", () => {
           canWriteWebhooks={true}
           canReadWebhooks={true}
         />
-      </AdminClientProvider>
     );
 
     const editBtn = await screen.findByRole("button", {
@@ -567,25 +557,26 @@ describe("PartnerNotificationPanel", () => {
     });
     fireEvent.click(editBtn);
 
+    const select = await screen.findByRole("combobox");
+    fireEvent.change(select, { target: { value: "different-webhook" } });
+
     const saveBtn = await screen.findByRole("button", { name: /儲存/i });
     await waitFor(() => expect((saveBtn as HTMLButtonElement).disabled).toBe(false));
     fireEvent.click(saveBtn);
     
     // now we have a pending mutation.
     // 1. Change entry context while mounted
+    // Resolve old mutation while new entry is mounted
+    mockClient.getPartnerEntryNotificationBinding.mockClear();
+    
     rerender(
-      <AdminClientProvider adminClient={mockClient as any}>
         <PartnerNotificationPanel
           entrySlug="new-entry"
           tenantId="new-tenant"
           canWriteBinding={true}
         />
-      </AdminClientProvider>
     );
 
-    // Resolve old mutation while new entry is mounted
-    mockClient.getPartnerEntryNotificationBinding.mockClear();
-    
     resolveMutation({
       version: 2,
       state: "disabled",
