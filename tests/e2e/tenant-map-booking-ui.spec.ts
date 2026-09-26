@@ -14,6 +14,7 @@
  * directories from the configured backend.
  */
 import { expect, test, type Page } from "@playwright/test";
+import * as jwt from "jsonwebtoken";
 
 const PICKUP_CANDIDATE = {
   candidateId: "cand-pickup-1",
@@ -41,35 +42,33 @@ const DROPOFF_CANDIDATE = {
   accuracyM: 5,
 };
 
-test.beforeEach(async ({ context, request, baseURL }) => {
-  const bootstrapResponse = await request.post(
-    "http://127.0.0.1:3301/api/auth/tenant/bootstrap-session",
-    {
-      data: {
-        email: "admin@acme.example",
-        tenantId: "tenant-demo-001",
-      },
-    },
-  );
+test.beforeEach(async ({ context, baseURL }) => {
+  const payload = {
+    sub: "mock-user-1",
+    actorType: "tenant_user",
+    actorId: "mock-user-1",
+    realm: "tenant",
+    tenantId: "tenant-acme",
+    authMode: "jwt_bearer",
+    roles: ["tenant_admin"],
+    scopes: ["*"],
+  };
+  const validToken = jwt.sign(payload, "ci-e2e-secret", {
+    algorithm: "HS256",
+    expiresIn: "1h",
+    issuer: "drts-local",
+    audience: "drts-api",
+  });
 
-  if (bootstrapResponse.ok()) {
-    const session = await bootstrapResponse.json();
-    if (baseURL && session.data?.access_token) {
-      await context.addCookies([
-        {
-          name: "drts_tenant_session",
-          value: session.data.access_token,
-          domain: new URL(baseURL).hostname,
-          path: "/",
-        },
-      ]);
-    }
-  } else {
-    console.error(
-      "Bootstrap session failed:",
-      bootstrapResponse.status(),
-      await bootstrapResponse.text(),
-    );
+  if (baseURL) {
+    await context.addCookies([
+      {
+        name: "drts_tenant_session",
+        value: validToken,
+        domain: new URL(baseURL).hostname,
+        path: "/",
+      },
+    ]);
   }
 });
 
