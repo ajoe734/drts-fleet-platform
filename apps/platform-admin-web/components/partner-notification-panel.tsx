@@ -19,6 +19,8 @@ import {
   CanvasKPI,
 } from "@drts/ui-web";
 
+import { resolveCrossAppHref } from "./assistant/route-context";
+
 export function PanelActionBtn({
   theme,
   descriptor,
@@ -64,6 +66,8 @@ function PnBinding({
   t,
   onEdit,
   canWriteBinding,
+  tenantId,
+  canWriteWebhooks,
 }: any) {
   const state = binding ? binding.state : "none";
   const PN_BIND: Record<string, [string, any]> = {
@@ -140,10 +144,36 @@ function PnBinding({
             v: (
               <span style={{ fontFamily: th.monoFamily }}>
                 {binding?.webhookId || "—"}{" "}
-                <CanvasBtn theme={th} size="xs" variant="ghost" icon="ext">
-                  {t("partnerNotification.webhookHelp") ??
-                    "既有 /webhooks 管理（需 tenant:webhooks:write）"}
-                </CanvasBtn>
+                {tenantId && canWriteWebhooks ? (
+                  <a
+                    href={resolveCrossAppHref({
+                      targetApp: "tenant-console",
+                      route: `/api/auth/tenant/login?tenant_id=${encodeURIComponent(tenantId)}&redirect_uri=${encodeURIComponent("/webhooks")}`,
+                      resourceType: "webhook",
+                      resourceId: "",
+                      openMode: "new_tab",
+                      label: "Webhooks",
+                    })}
+                    target="_blank"
+                    rel="noreferrer"
+                  >
+                    <CanvasBtn theme={th} size="xs" variant="ghost" icon="ext">
+                      {t("partnerNotification.webhookHelp") ??
+                        "既有 /webhooks 管理（需 tenant:webhooks:write）"}
+                    </CanvasBtn>
+                  </a>
+                ) : (
+                  <CanvasBtn
+                    theme={th}
+                    size="xs"
+                    variant="ghost"
+                    icon="ext"
+                    disabled
+                  >
+                    {t("partnerNotification.webhookHelp") ??
+                      "既有 /webhooks 管理（需 tenant:webhooks:write）"}
+                  </CanvasBtn>
+                )}
               </span>
             ),
           },
@@ -951,6 +981,8 @@ function PnEditView({
   canWriteBinding,
   availableWebhooks,
   webhookError,
+  tenantId,
+  canWriteWebhooks,
 }: any) {
   const isSaving = saveState === "pending";
   const isSaveDisabled =
@@ -1067,10 +1099,36 @@ function PnEditView({
               ))}
             </select>
             <div style={{ marginTop: 6 }}>
-              <CanvasBtn theme={th} size="xs" variant="ghost" icon="ext">
-                {t("partnerNotification.webhookHelp") ??
-                  "前往既有 /webhooks 管理（需 tenant:webhooks:write）"}
-              </CanvasBtn>
+              {tenantId && canWriteWebhooks ? (
+                <a
+                  href={resolveCrossAppHref({
+                    targetApp: "tenant-console",
+                    route: `/api/auth/tenant/login?tenant_id=${encodeURIComponent(tenantId)}&redirect_uri=${encodeURIComponent("/webhooks")}`,
+                    resourceType: "webhook",
+                    resourceId: "",
+                    openMode: "new_tab",
+                    label: "Webhooks",
+                  })}
+                  target="_blank"
+                  rel="noreferrer"
+                >
+                  <CanvasBtn theme={th} size="xs" variant="ghost" icon="ext">
+                    {t("partnerNotification.webhookHelp") ??
+                      "前往既有 /webhooks 管理（需 tenant:webhooks:write）"}
+                  </CanvasBtn>
+                </a>
+              ) : (
+                <CanvasBtn
+                  theme={th}
+                  size="xs"
+                  variant="ghost"
+                  icon="ext"
+                  disabled
+                >
+                  {t("partnerNotification.webhookHelp") ??
+                    "前往既有 /webhooks 管理（需 tenant:webhooks:write）"}
+                </CanvasBtn>
+              )}
             </div>
           </CanvasField>
           <CanvasField theme={th} label="eventTypes · 內部事件" required>

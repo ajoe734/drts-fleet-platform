@@ -101,29 +101,41 @@ describe.skipIf(!testDbUrl)(
         ],
       );
 
-      const endpointRecord = {
-        url: "https://test.com",
-        events: ["passenger.eta_changed.v1"],
-        status: "active",
-        webhookId: webhookId,
-        tenantId: tenantId,
-        secretVersion: 1,
-        secretPreview: "prev",
-        validatedAt: "2026-09-24T00:00:00Z",
-        retryPolicy: { maxAttempts: 3 },
-        runtimeMetadata: {
-          secretRotation: { rotatedAt: null, rotationCount: 0, history: [] },
-          deliveryCount: 0,
-          failedDeliveryCount: 0,
-        },
-      };
+      const endpointRecord: import("../../../../apps/api/src/modules/tenant-partner/tenant-partner.repository").StoredWebhookEndpointRecord =
+        {
+          url: "https://test.com",
+          events: ["passenger.eta_changed.v1"],
+          status: "active",
+          webhookId: webhookId,
+          tenantId: tenantId,
+          secretVersion: 1,
+          secretPreview: "prev",
+          secretValue: "test-secret-value",
+          retryPolicy: {
+            maxAttempts: 3,
+            initialBackoffSeconds: 10,
+            backoffMultiplier: 2,
+            maxBackoffSeconds: 3600,
+            retryableStatusCodes: [429, 500, 502, 503, 504],
+          },
+          runtimeMetadata: {
+            secretRotation: {
+              currentVersion: 1,
+              rotatedAt: "2026-09-24T00:00:00Z",
+              rotationCount: 0,
+              history: [],
+            },
+            deliveryCount: 0,
+            failedDeliveryCount: 0,
+          },
+          secretHistory: [],
+        };
 
       // Compute actual fingerprint
       const { computeEndpointFingerprint } = customRequire(
-        "../../../../apps/api/src/modules/tenant-partner/partner-notification-fingerprint",
+        "./src/modules/tenant-partner/partner-notification-fingerprint",
       );
       computedFingerprint = computeEndpointFingerprint(endpointRecord);
-      endpointRecord.fingerprint = computedFingerprint;
 
       await pool.query(
         "INSERT INTO admin.phase1_tenant_webhook_endpoints (webhook_id, tenant_id, status, created_at, updated_at, record) VALUES ($1, $2, 'active', now(), now(), $3::jsonb)",
@@ -210,10 +222,9 @@ describe.skipIf(!testDbUrl)(
           "DELETE FROM admin.phase1_platform_tenants WHERE tenant_id = $1",
           [tenantId],
         );
-
+      } finally {
         if (app) await app.close();
         if (pool) await pool.end();
-      } finally {
         if (originalEnv.PARTNER_NOTIFY_UI_TEST_DATABASE_URL !== undefined) {
           process.env.PARTNER_NOTIFY_UI_TEST_DATABASE_URL =
             originalEnv.PARTNER_NOTIFY_UI_TEST_DATABASE_URL;
@@ -265,8 +276,8 @@ describe.skipIf(!testDbUrl)(
 
       const status = opts.status || "failed";
       await pool.query(
-        "INSERT INTO ops.consumer_notification_outbox (outbox_id, order_id, passenger_subject_ref, event_type, payload, status, attempt_count, next_attempt_at, created_at, assignment_version) VALUES ($1, $2, 'sub', 'eta_changed', '{}', $3, 1, now() - interval '1 hour', now(), 1)",
-        [outboxId, orderId, status],
+        "INSERT INTO ops.consumer_notification_outbox (outbox_id, order_id, passenger_subject_ref, event_type, payload, status, attempt_count, next_attempt_at, created_at, assignment_version) VALUES ($1, $2, 'sub', 'eta_changed', '{}', $3, $4, now() - interval '1 hour', now(), 1)",
+        [outboxId, orderId, status, opts.attemptCount || 1],
       );
 
       const wirePayload = {
@@ -357,6 +368,37 @@ describe.skipIf(!testDbUrl)(
       );
       expect(resStale.kind).toBe("requeued");
 
+      // Actually claim the requeued outbox to get a worker fence
+      const claimRes = await mtRepo.claimPartnerNotification(
+        staleId,
+        "worker-1",
+        60,
+      );
+      expect(claimRes).toBeDefined();
+      expect(claimRes!.fenceToken).toBeDefined();
+
+      // Attempt a stale completion (using an old fence) - should fail
+      await expect(
+        mtRepo.pushDeliveryOutcome(staleId, claimRes!.fenceToken - 1, {
+          kind: "delivered",
+          receiptId: "rec-fail",
+        }),
+      ).rejects.toThrow("Delivery outcome rejected");
+
+      // Attempt a genuine completion with the correct fence
+      await mtRepo.pushDeliveryOutcome(staleId, claimRes!.fenceToken, {
+        kind: "delivered",
+        receiptId: "rec-123",
+      });
+
+      // Verify actual receipt insertion
+      const receipt = await pool.query(
+        "SELECT * FROM ops.phase1_push_delivery_receipts WHERE outbox_id = $1",
+        [staleId],
+      );
+      expect(receipt.rows.length).toBe(1);
+      expect(receipt.rows[0].receipt_id).toBe("rec-123");
+
       // 4. Expiry / superseded
       const { outboxId: expId } = await createFixture({
         expiresAt: "now() - interval '1 day'",
@@ -377,6 +419,41 @@ describe.skipIf(!testDbUrl)(
         superId,
       );
       expect(resSuper.kind).toBe("failed");
+
+      // 5. Cross-tenant authority rejection
+      const resCrossTenant = await mtRepo.retryPartnerNotificationDelivery(
+        { entrySlug: entrySlug1, tenantId: "tenant-wrong", partnerId },
+        legalId,
+      );
+      expect(resCrossTenant.kind).toBe("failed");
+
+      // 6. Duplicate retry / schedule preservation check
+      const resDup = await mtRepo.retryPartnerNotificationDelivery(
+        entryObj,
+        staleId,
+      );
+      // Since it is now delivered, it should be rejected.
+      expect(resDup.kind).toBe("failed");
+
+      // 7. Requeue of a pending outbox
+      const resPending = await mtRepo.retryPartnerNotificationDelivery(
+        entryObj,
+        legalId,
+      );
+      expect(resPending.kind).toBe("requeued");
+
+      // 8. Exhausted budget
+      const { outboxId: budgetId } = await createFixture({
+        attemptCount: 3,
+      });
+      const resBudget = await mtRepo.retryPartnerNotificationDelivery(
+        entryObj,
+        budgetId,
+      );
+      // It allows requeue by the API, but during claim or processing it might be blocked.
+      // Wait, let's see what `retryPartnerNotificationDelivery` does.
+      // Ah! retryPartnerNotificationDelivery DOES check `attempt_count >= maxAttempts`!
+      expect(resBudget.kind).toBe("failed");
     });
 
     it("tests list API preservation of sequence, hash, receipt, history and same-tenant isolation", async () => {
