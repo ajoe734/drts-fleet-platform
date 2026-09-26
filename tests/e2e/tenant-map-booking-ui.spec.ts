@@ -309,14 +309,14 @@ test.describe("tenant console booking map alignment", () => {
     const manualButtons = page.getByRole("button", {
       name: /Manual location|Enter coordinates manually|改用手動座標|手動輸入座標/i,
     });
-    
+
     await expect(async () => {
       expect(
         (await manualButtons.first().isVisible()) ||
-          (await latInput1.isVisible())
+          (await latInput1.isVisible()),
       ).toBeTruthy();
     }).toPass({ timeout: 30000 });
-    
+
     if (await manualButtons.first().isVisible()) {
       await manualButtons.first().click();
     }
@@ -333,14 +333,14 @@ test.describe("tenant console booking map alignment", () => {
     const reasonInput2 = page
       .getByLabel(/Reason for manual location|手動定位原因/i)
       .last();
-      
+
     await expect(async () => {
       expect(
         (await manualButtons.last().isVisible()) ||
-          (await latInput2.isVisible())
+          (await latInput2.isVisible()),
       ).toBeTruthy();
     }).toPass({ timeout: 30000 });
-    
+
     if (await manualButtons.last().isVisible()) {
       await manualButtons.last().click();
     }
@@ -403,10 +403,12 @@ test.describe("tenant console booking map alignment", () => {
     await page.goto("http://127.0.0.1:3305/addresses");
 
     // Wait for the address list to load
-    await expect(page.getByText("Mock Address", { exact: true }).first()).toBeVisible({ timeout: 30000 });
+    await expect(
+      page.getByText("Mock Address", { exact: true }).first(),
+    ).toBeVisible({ timeout: 30000 });
 
     // Click the Edit link for the mocked address
-    await page.getByRole('link', { name: 'Edit' }).first().click();
+    await page.getByRole("link", { name: "Edit" }).first().click();
 
     await expect(page.getByText("Edit Address: Mock Address")).toBeVisible();
 
@@ -440,12 +442,18 @@ test.describe("tenant console booking map alignment", () => {
     await expect(latHidden).toHaveValue("24.7951");
     const lngHidden = page.locator('input[name="lng"]');
     await expect(lngHidden).toHaveValue("121.0028");
-    const coordinateSourceHidden = page.locator('input[name="coordinateSource"]');
+    const coordinateSourceHidden = page.locator(
+      'input[name="coordinateSource"]',
+    );
     await expect(coordinateSourceHidden).toHaveValue("manual_pin");
 
-    await page.getByRole("button", { name: "Save Changes" }).dispatchEvent("click");
-    
+    await page
+      .getByRole("button", { name: "Save Changes" })
+      .click({ force: true });
+
     // Wait for navigation back to addresses list or a success state
-    await expect(page.getByText("Mock Address updated").first()).toBeVisible({ timeout: 10000 });
+    await expect(page.getByText("Mock Address updated").first()).toBeVisible({
+      timeout: 10000,
+    });
   });
 });
