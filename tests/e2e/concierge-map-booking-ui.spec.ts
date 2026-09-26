@@ -387,7 +387,7 @@ test.describe("concierge map booking UI", () => {
     await submitBtn.click();
     
     // Check error message
-    await expect(page.getByText(/Missing required compliance fields/i)).toBeVisible();
+    await expect(page.getByText(/Failed to create the concierge-assisted booking|建立禮賓代訂失敗/i)).toBeVisible();
     
     // Retry, should succeed
     await submitBtn.click();
@@ -408,13 +408,15 @@ test.describe("concierge map booking UI", () => {
     await selectConciergeMapCandidate(page, 0, "taipei 101", "Taipei 101");
 
     // Simulate outage mid-session
-    await page.route("**/api/geo/health", async (route) => {
+    await page.route("**/api/geo/**", async (route) => {
       await route.fulfill({
         json: {
-          provider: "mock",
-          mode: "mock",
-          status: "outage",
-          failClosed: true,
+          data: {
+            provider: "mock",
+            mode: "mock",
+            status: "outage",
+            failClosed: true,
+          }
         },
       });
     });
@@ -434,17 +436,19 @@ test.describe("concierge map booking UI", () => {
       "Taipei Main Station",
     );
     
-    await expect(page.getByText(/Outage|服務中斷/i).first()).toBeVisible();
+    await expect(page.getByText(/Address lookup is unavailable|地址查詢暫時無法使用/i).first()).toBeVisible();
     await expect(submitBtn).toBeDisabled();
     
     // Simulate recovery
-    await page.route("**/api/geo/health", async (route) => {
+    await page.route("**/api/geo/**", async (route) => {
       await route.fulfill({
         json: {
-          provider: "mock",
-          mode: "mock",
-          status: "healthy",
-          failClosed: false,
+          data: {
+            provider: "mock",
+            mode: "mock",
+            status: "healthy",
+            failClosed: false,
+          }
         },
       });
     });
@@ -461,7 +465,7 @@ test.describe("concierge map booking UI", () => {
       "Taipei 101",
     );
     
-    await expect(page.getByText(/Outage|服務中斷/i).first()).toBeHidden();
+    await expect(page.getByText(/Address lookup is unavailable|地址查詢暫時無法使用/i).first()).toBeHidden();
     
     // Need to reselect both properly
     await selectConciergeMapCandidate(
