@@ -618,9 +618,10 @@ describe("BreakGlass R6b Regression Tests - True Provider Mutation", () => {
     });
 
     // Proof button should be disabled because acting is true
-    expect(getProofBtn.hasAttribute("disabled")).toBe(true);
+    // Need to re-query as the component might have re-rendered and the old DOM node is detached
+    expect(screen.getByText(/Get step-up proof/i).hasAttribute("disabled")).toBe(true);
     // Approve button should also be disabled or show Approving...
-    expect(approveBtn.hasAttribute("disabled")).toBe(true);
+    expect(screen.getByRole("button", { name: /Approve/i }).hasAttribute("disabled")).toBe(true);
 
     getResolve({
       grantId: "bg_req_r12c_a",
@@ -632,20 +633,17 @@ describe("BreakGlass R6b Regression Tests - True Provider Mutation", () => {
 
     // After reload finishes, acting becomes false.
     await waitFor(() => {
-      expect(getProofBtn.hasAttribute("disabled")).toBe(false);
+      expect(screen.getByText(/Get step-up proof/i).hasAttribute("disabled")).toBe(false);
     });
   });
 
   it("should bind proof to action and disable Activate if proof is for approve (R12c B)", async () => {
+    let getResolve: (val: any) => void = () => {};
+    const getPromise = new Promise((r) => { getResolve = r; });
+
     mockTransportClient.get.mockImplementation(async (url) => {
       if (url.includes("/platform-admin/break-glass/requests/bg_req_r12c_b")) {
-        return {
-          grantId: "bg_req_r12c_b",
-          status: "approved",
-          requesterId: "u_1",
-          version: 2,
-          requestedScopes: ["identity:read"],
-        };
+        return getPromise;
       }
       if (url.includes("/platform-admin/break-glass/requests")) {
         return {
@@ -683,6 +681,10 @@ describe("BreakGlass R6b Regression Tests - True Provider Mutation", () => {
         // Mock returning a proof
         return { required: true, stepUpReference: "proof_1" };
       }
+      if (url.includes("/platform-admin/break-glass/requests/bg_req_r12c_b/approve")) {
+        // Trigger reload grant to change state to approved
+        return Promise.reject(new MockApiClientError("Conflict", 409, "IAM_CONCURRENCY_CONFLICT"));
+      }
       return {};
     });
 
@@ -694,15 +696,28 @@ describe("BreakGlass R6b Regression Tests - True Provider Mutation", () => {
       expect(screen.getByRole("button", { name: /Approve/i }).hasAttribute("disabled")).toBe(false);
     });
 
-    // Simulate the status changing to approved externally, by triggering a close and reopen
-    fireEvent.click(screen.getByText(/Close/i));
-    fireEvent.click(screen.getByText(/Manage Grant/i));
+    // Click Approve to trigger 409
+    fireEvent.click(screen.getByRole("button", { name: /Approve/i }));
+
+    // Wait for the detail GET to be called
+    await waitFor(() => {
+      expect(mockTransportClient.get).toHaveBeenCalledWith("/platform-admin/break-glass/requests/bg_req_r12c_b");
+    });
+
+    // Resolve the detail GET to move to 'approved' state
+    getResolve({
+      grantId: "bg_req_r12c_b",
+      status: "approved",
+      requesterId: "u_1",
+      version: 2,
+      requestedScopes: ["identity:read"],
+    });
 
     await waitFor(() => {
       expect(screen.getByRole("button", { name: /Activate Emergency Session/i })).toBeDefined();
     });
 
-    // The Activate button MUST be disabled initially since we closed and reopened
+    // The Activate button MUST be disabled initially since the proof was for approve
     const activateBtn = screen.getByRole("button", { name: /Activate Emergency Session/i });
     expect(activateBtn.hasAttribute("disabled")).toBe(true);
 
