@@ -120,12 +120,20 @@ describe("BreakGlass R6b Regression Tests - True Provider Mutation", () => {
   it("should execute exitSession mutation on BreakGlassBanner exit click and clean up storage", async () => {
     // Set up active break glass state
     const future = new Date(Date.now() + 300000).toISOString();
-    sessionStorage.setItem("break_glass_state", JSON.stringify({
-      grant: { grantId: "bg_123", requesterId: "u_1", targetId: "env_1", version: 2 },
-      accessToken: "token123",
-      expiresAt: future,
-      sessionBanner: "BREAK_GLASS_ACTIVE"
-    }));
+    sessionStorage.setItem(
+      "drts_platform_break_glass_session",
+      JSON.stringify({
+        grant: {
+          grantId: "bg_123",
+          requesterId: "u_1",
+          targetId: "env_1",
+          version: 2,
+        },
+        accessToken: "token123",
+        expiresAt: future,
+        sessionBanner: "BREAK_GLASS_ACTIVE",
+      }),
+    );
 
     mockIamClient.createStepUpProof.mockResolvedValue({
       required: true,
@@ -150,39 +158,46 @@ describe("BreakGlass R6b Regression Tests - True Provider Mutation", () => {
         actionId: "platform:break-glass:close",
       });
       // 2. Mutation is executed
-      expect(mockIamClient.closeBreakGlass).toHaveBeenCalledWith(
-        "bg_123",
-        {
-          mutation: {
-            reasonCode: "operator_exit_cta",
-            expectedVersion: 2,
-            stepUpReference: "proof_close_456"
-          }
-        }
-      );
+      expect(mockIamClient.closeBreakGlass).toHaveBeenCalledWith("bg_123", {
+        mutation: {
+          reasonCode: "operator_exit_cta",
+          expectedVersion: 2,
+          stepUpReference: "proof_close_456",
+        },
+      });
     });
 
     // 3. Storage is cleaned up on success
-    expect(sessionStorage.getItem("break_glass_state")).toBeNull();
+    expect(
+      sessionStorage.getItem("drts_platform_break_glass_session"),
+    ).toBeNull();
     expect(screen.queryByText(/Exit Emergency Access/i)).toBeNull();
   });
 
   it("should fail exitSession cleanly on 403 step up required and preserve storage", async () => {
     const future = new Date(Date.now() + 300000).toISOString();
     const storedState = {
-      grant: { grantId: "bg_123", requesterId: "u_1", targetId: "env_1", version: 1 },
+      grant: {
+        grantId: "bg_123",
+        requesterId: "u_1",
+        targetId: "env_1",
+        version: 1,
+      },
       accessToken: "token123",
       expiresAt: future,
-      sessionBanner: "BREAK_GLASS_ACTIVE"
+      sessionBanner: "BREAK_GLASS_ACTIVE",
     };
-    sessionStorage.setItem("break_glass_state", JSON.stringify(storedState));
+    sessionStorage.setItem(
+      "drts_platform_break_glass_session",
+      JSON.stringify(storedState),
+    );
 
     mockIamClient.createStepUpProof.mockResolvedValue({
       required: true,
       stepUpReference: "proof_close_expired",
     });
     mockIamClient.closeBreakGlass.mockRejectedValue({
-      code: "IAM_STEP_UP_REQUIRED"
+      code: "IAM_STEP_UP_REQUIRED",
     });
 
     render(
@@ -202,7 +217,9 @@ describe("BreakGlass R6b Regression Tests - True Provider Mutation", () => {
     });
 
     // State is preserved
-    expect(sessionStorage.getItem("break_glass_state")).toEqual(JSON.stringify(storedState));
+    expect(sessionStorage.getItem("drts_platform_break_glass_session")).toEqual(
+      JSON.stringify(storedState),
+    );
   });
 
   it("should activate session properly and call activateBreakGlass mutation", async () => {
@@ -212,7 +229,7 @@ describe("BreakGlass R6b Regression Tests - True Provider Mutation", () => {
           grantId: "bg_req_1",
           status: "approved",
           requesterId: "u_1",
-          version: 1
+          version: 1,
         },
       ],
     });
@@ -248,11 +265,11 @@ describe("BreakGlass R6b Regression Tests - True Provider Mutation", () => {
     });
 
     const activateBtn = await screen.findByText(/Activate Emergency Session/i);
-    
+
     mockIamClient.activateBreakGlass.mockResolvedValue({
       grant: { grantId: "bg_req_1", requesterId: "u_1" },
       accessToken: "token999",
-      expiresAt: new Date(Date.now() + 300000).toISOString()
+      expiresAt: new Date(Date.now() + 300000).toISOString(),
     });
 
     fireEvent.click(activateBtn);
@@ -263,15 +280,17 @@ describe("BreakGlass R6b Regression Tests - True Provider Mutation", () => {
         {
           mutation: {
             stepUpReference: "proof_activate_789",
-            expectedVersion: 1
-          }
-        }
+            expectedVersion: 1,
+          },
+        },
       );
     });
 
     // Verify session storage was updated and banner is active
     await waitFor(() => {
-      expect(sessionStorage.getItem("break_glass_state")).toContain("token999");
+      expect(
+        sessionStorage.getItem("drts_platform_break_glass_session"),
+      ).toContain("token999");
       expect(screen.getByText(/Exit Emergency Access/i)).toBeDefined();
     });
   });
@@ -283,12 +302,15 @@ describe("BreakGlass R6b Regression Tests - True Provider Mutation", () => {
     // The requirement says we need to test cross-page/logout (i.e. clearing).
     // We cover manual clearing and exit clearing above.
     const past = new Date(Date.now() - 300000).toISOString();
-    sessionStorage.setItem("break_glass_state", JSON.stringify({
-      grant: { grantId: "bg_123" },
-      accessToken: "token123",
-      expiresAt: past,
-      sessionBanner: "BREAK_GLASS_ACTIVE"
-    }));
+    sessionStorage.setItem(
+      "drts_platform_break_glass_session",
+      JSON.stringify({
+        grant: { grantId: "bg_123" },
+        accessToken: "token123",
+        expiresAt: past,
+        sessionBanner: "BREAK_GLASS_ACTIVE",
+      }),
+    );
 
     render(
       React.createElement(
@@ -300,7 +322,9 @@ describe("BreakGlass R6b Regression Tests - True Provider Mutation", () => {
 
     // The provider automatically clears expired sessions on mount or tick.
     await waitFor(() => {
-      expect(sessionStorage.getItem("break_glass_state")).toBeNull();
+      expect(
+        sessionStorage.getItem("drts_platform_break_glass_session"),
+      ).toBeNull();
     });
   });
 });
