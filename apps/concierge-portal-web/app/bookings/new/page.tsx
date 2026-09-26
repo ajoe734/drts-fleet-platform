@@ -652,7 +652,14 @@ export default function ConciergeBookingCreatePage() {
                 }
                 type="submit"
               >
-                {t("booking.submit")}
+                {evaluateAddressSubmitGate({
+                  pickup: mapSelection.pickup,
+                  dropoff: mapSelection.dropoff,
+                  serviceability: mapSelection.serviceability,
+                  providerState: mapSelection.providerState,
+                }).code === "dispatch_manual_review_required"
+                  ? t("booking.submit.manualReview")
+                  : t("booking.submit")}
               </button>
             </div>
           </form>
