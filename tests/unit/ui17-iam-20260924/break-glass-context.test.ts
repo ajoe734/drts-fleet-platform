@@ -106,7 +106,7 @@ class MockApiClientError extends Error {
 }
 
 const load = createCustomUiModuleLoader(appRoot, {
-  
+
   "@/lib/admin-client": {
     usePlatformAdminClient: () => mockTransportClient,
     formatDateTime: (d: any) => String(d),
@@ -306,7 +306,7 @@ describe("BreakGlass R6b Regression Tests - True Provider Mutation", () => {
       }
       return {};
     });
-    
+
     fireEvent.click(getProofBtn);
 
     await waitFor(() => {
@@ -419,7 +419,7 @@ describe("BreakGlass R6b Regression Tests - True Provider Mutation", () => {
     fireEvent.click(manageBtn);
 
     const getProofBtn = await screen.findByText(/Get step-up proof/i);
-    
+
     mockTransportClient.post.mockImplementation(async (url) => {
       if (url.includes("/identity/step-up-proofs")) {
         return { required: true, stepUpReference: "proof_approve_409" };
@@ -429,7 +429,7 @@ describe("BreakGlass R6b Regression Tests - True Provider Mutation", () => {
       }
       return {};
     });
-    
+
     fireEvent.click(getProofBtn);
 
     await waitFor(() => {
@@ -453,7 +453,7 @@ describe("BreakGlass R6b Regression Tests - True Provider Mutation", () => {
       expect(screen.queryByRole("button", { name: /Approve/i })).toBeNull();
       // Activate Emergency Session button should be present if it's approved
     });
-    
+
     const newProofBtn = await screen.findByText(/Get step-up proof/i);
     expect(newProofBtn).toBeDefined(); // Proof was cleared, need to get a new one
   });
@@ -471,7 +471,7 @@ describe("BreakGlass R6b Regression Tests - True Provider Mutation", () => {
 
     render(React.createElement(BreakGlassProvider, null, React.createElement(BreakGlassPanel, null)));
     await waitFor(() => expect(screen.getByText(/Manage Grant/i)).toBeDefined());
-    
+
     fireEvent.click(screen.getByText(/Manage Grant/i));
 
     mockTransportClient.post.mockImplementation(async (url) => {
@@ -479,7 +479,7 @@ describe("BreakGlass R6b Regression Tests - True Provider Mutation", () => {
       if (url.includes("/approve")) { return Promise.reject(new MockApiClientError("Mock error", 409, "IAM_CONCURRENCY_CONFLICT")); }
       return {};
     });
-    
+
     fireEvent.click(screen.getByText(/Get step-up proof/i));
     await waitFor(() => expect(screen.getByDisplayValue("proof_1")).toBeDefined());
 
@@ -493,14 +493,14 @@ describe("BreakGlass R6b Regression Tests - True Provider Mutation", () => {
     await waitFor(() => {
       expect(screen.getByText(/Retry Sync/i)).toBeDefined();
     });
-    
+
     expect(screen.queryByRole("button", { name: /Approve/i })).toBeNull(); // Modal closed
   });
 
   it("should ignore late response for getBreakGlassRequest if dialog is closed", async () => {
     let resolveLateGet: (val: any) => void = () => {};
     const lateGetPromise = new Promise((resolve) => { resolveLateGet = resolve; });
-    
+
     mockTransportClient.get.mockImplementation(async (url) => {
       if (url.includes("/platform-admin/break-glass/requests/bg_req_409")) {
         return lateGetPromise;
@@ -513,7 +513,7 @@ describe("BreakGlass R6b Regression Tests - True Provider Mutation", () => {
 
     render(React.createElement(BreakGlassProvider, null, React.createElement(BreakGlassPanel, null)));
     await waitFor(() => expect(screen.getByText(/Manage Grant/i)).toBeDefined());
-    
+
     fireEvent.click(screen.getByText(/Manage Grant/i));
 
     mockTransportClient.post.mockImplementation(async (url) => {
@@ -521,7 +521,7 @@ describe("BreakGlass R6b Regression Tests - True Provider Mutation", () => {
       if (url.includes("/approve")) { return Promise.reject(new MockApiClientError("Mock error", 409, "IAM_CONCURRENCY_CONFLICT")); }
       return {};
     });
-    
+
     fireEvent.click(screen.getByText(/Get step-up proof/i));
     await waitFor(() => expect(screen.getByDisplayValue("proof_1")).toBeDefined());
 
@@ -545,10 +545,173 @@ describe("BreakGlass R6b Regression Tests - True Provider Mutation", () => {
     await new Promise((r) => setTimeout(r, 100));
 
     expect(screen.queryByRole("dialog")).toBeNull();
-    
+
     // The list should have updated to show the new status in the background
     await waitFor(() => {
       expect(screen.getByText("approved")).toBeDefined();
+    });
+  });
+
+  it("should prevent mutation and proof fetching while reload is pending (R12c A)", async () => {
+    let getResolve: (val: any) => void = () => {};
+    const getPromise = new Promise((r) => { getResolve = r; });
+
+    mockTransportClient.get.mockImplementation(async (url) => {
+      if (url.includes("/platform-admin/break-glass/requests/bg_req_r12c_a")) {
+        return getPromise;
+      }
+      if (url.includes("/platform-admin/break-glass/requests")) {
+        return {
+          items: [
+            {
+              grantId: "bg_req_r12c_a",
+              status: "requested",
+              requesterId: "u_1",
+              version: 1,
+              requestedScopes: ["identity:read"],
+            },
+          ],
+        };
+      }
+      return {};
+    });
+
+    render(
+      React.createElement(
+        BreakGlassProvider,
+        null,
+        React.createElement(BreakGlassPanel, null),
+        React.createElement(BreakGlassBanner, null),
+      ),
+    );
+
+    await waitFor(() => {
+      expect(screen.getByText("bg_req_r12c_a")).toBeDefined();
+    });
+
+    fireEvent.click(screen.getByText(/Manage Grant/i));
+
+    mockTransportClient.post.mockImplementation(async (url) => {
+      if (url.includes("/identity/step-up-proofs")) {
+        return { required: true, stepUpReference: "proof_1" };
+      }
+      if (url.includes("/platform-admin/break-glass/requests/bg_req_r12c_a/approve")) {
+        return Promise.reject(new MockApiClientError("Conflict", 409, "IAM_CONCURRENCY_CONFLICT"));
+      }
+      return {};
+    });
+
+    const getProofBtn = await screen.findByText(/Get step-up proof/i);
+    fireEvent.click(getProofBtn);
+
+    const approveBtn = await screen.findByRole("button", { name: /Approve/i });
+
+    await waitFor(() => {
+      expect(approveBtn.hasAttribute("disabled")).toBe(false);
+    });
+
+    fireEvent.click(approveBtn);
+
+    // 409 triggers handleReloadGrant. It should be pending.
+    await waitFor(() => {
+      expect(mockTransportClient.get).toHaveBeenCalledWith("/platform-admin/break-glass/requests/bg_req_r12c_a");
+    });
+
+    // Proof button should be disabled because acting is true
+    expect(getProofBtn.hasAttribute("disabled")).toBe(true);
+    // Approve button should also be disabled or show Approving...
+    expect(approveBtn.hasAttribute("disabled")).toBe(true);
+
+    getResolve({
+      grantId: "bg_req_r12c_a",
+      status: "requested",
+      requesterId: "u_1",
+      version: 2,
+      requestedScopes: ["identity:read"],
+    });
+
+    // After reload finishes, acting becomes false.
+    await waitFor(() => {
+      expect(getProofBtn.hasAttribute("disabled")).toBe(false);
+    });
+  });
+
+  it("should bind proof to action and disable Activate if proof is for approve (R12c B)", async () => {
+    mockTransportClient.get.mockImplementation(async (url) => {
+      if (url.includes("/platform-admin/break-glass/requests/bg_req_r12c_b")) {
+        return {
+          grantId: "bg_req_r12c_b",
+          status: "approved",
+          requesterId: "u_1",
+          version: 2,
+          requestedScopes: ["identity:read"],
+        };
+      }
+      if (url.includes("/platform-admin/break-glass/requests")) {
+        return {
+          items: [
+            {
+              grantId: "bg_req_r12c_b",
+              status: "requested",
+              requesterId: "u_1",
+              version: 1,
+              requestedScopes: ["identity:read"],
+            },
+          ],
+        };
+      }
+      return {};
+    });
+
+    render(
+      React.createElement(
+        BreakGlassProvider,
+        null,
+        React.createElement(BreakGlassPanel, null),
+        React.createElement(BreakGlassBanner, null),
+      ),
+    );
+
+    await waitFor(() => {
+      expect(screen.getByText("bg_req_r12c_b")).toBeDefined();
+    });
+
+    fireEvent.click(screen.getByText(/Manage Grant/i));
+
+    mockTransportClient.post.mockImplementation(async (url) => {
+      if (url.includes("/identity/step-up-proofs")) {
+        // Mock returning a proof
+        return { required: true, stepUpReference: "proof_1" };
+      }
+      return {};
+    });
+
+    const getProofBtn = await screen.findByText(/Get step-up proof/i);
+    fireEvent.click(getProofBtn);
+
+    // Wait for proof to be valid
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: /Approve/i }).hasAttribute("disabled")).toBe(false);
+    });
+
+    // Simulate the status changing to approved externally, by triggering a close and reopen
+    fireEvent.click(screen.getByText(/Close/i));
+    fireEvent.click(screen.getByText(/Manage Grant/i));
+
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: /Activate Emergency Session/i })).toBeDefined();
+    });
+
+    // The Activate button MUST be disabled initially since we closed and reopened
+    const activateBtn = screen.getByRole("button", { name: /Activate Emergency Session/i });
+    expect(activateBtn.hasAttribute("disabled")).toBe(true);
+
+    // Get proof for activate
+    const getProofActivateBtn = await screen.findByText(/Get step-up proof/i);
+    fireEvent.click(getProofActivateBtn);
+
+    await waitFor(() => {
+      expect(activateBtn.hasAttribute("disabled")).toBe(false);
     });
   });
 });

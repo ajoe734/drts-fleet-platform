@@ -1270,6 +1270,7 @@ export function BreakGlassPanel() {
     "NONE" | "VERIFYING" | "VALID" | "EXPIRED"
   >("NONE");
   const [stepUpRef, setStepUpRef] = useState<string | null>(null);
+  const [stepUpAction, setStepUpAction] = useState<string | null>(null);
 
   const stepUpTimerRef = useRef<NodeJS.Timeout | null>(null);
   const stepUpNonceRef = useRef<number>(0);
@@ -1281,6 +1282,7 @@ export function BreakGlassPanel() {
     }
     stepUpNonceRef.current += 1;
     setStepUpRef(null);
+    setStepUpAction(null);
     setStepUpState("NONE");
   }, []);
 
@@ -1314,9 +1316,11 @@ export function BreakGlassPanel() {
       if (stepUpNonceRef.current !== nonce) return;
       if (proof.required === false || !proof.stepUpReference) {
         setStepUpRef(null);
+        setStepUpAction(actionId);
         setStepUpState("VALID");
       } else if (proof.stepUpReference) {
         setStepUpRef(proof.stepUpReference);
+        setStepUpAction(actionId);
         setStepUpState("VALID");
         if (proof.expiresAt) {
           const ttl = new Date(proof.expiresAt).getTime() - Date.now();
@@ -1440,7 +1444,7 @@ export function BreakGlassPanel() {
       ) {
         clearStepUp();
         setError("狀態已變更，請重新整理 (IAM_CONCURRENCY_CONFLICT)。");
-        void handleReloadGrant(g.grantId);
+        await handleReloadGrant(g.grantId);
       } else if (
         err instanceof ApiClientError &&
         (err.code === "IAM_STEP_UP_REQUIRED" ||
@@ -1486,7 +1490,7 @@ export function BreakGlassPanel() {
       ) {
         clearStepUp();
         setError("狀態已變更，請重新整理 (IAM_CONCURRENCY_CONFLICT)。");
-        void handleReloadGrant(g.grantId);
+        await handleReloadGrant(g.grantId);
       } else if (
         err instanceof ApiClientError &&
         (err.code === "IAM_STEP_UP_REQUIRED" ||
@@ -1791,7 +1795,7 @@ export function BreakGlassPanel() {
                 </CanvasBtn>
                 <button
                   type="submit"
-                  disabled={submitting || stepUpState !== "VALID"}
+                  disabled={submitting || stepUpState !== "VALID" || stepUpAction !== "platform:break-glass:request"}
                   style={{
                     background: theme.danger,
                     color: "#fff",
@@ -1907,6 +1911,7 @@ export function BreakGlassPanel() {
                         size="xs"
                         variant="primary"
                         icon="lock"
+                        disabled={acting}
                         onClick={() => {
                           handleGetStepUpProof("platform:break-glass:approve");
                         }}
@@ -1919,6 +1924,7 @@ export function BreakGlassPanel() {
                         size="xs"
                         variant="primary"
                         icon="lock"
+                        disabled={acting}
                         onClick={() => {
                           handleGetStepUpProof("platform:break-glass:activate");
                         }}
@@ -1950,6 +1956,7 @@ export function BreakGlassPanel() {
                         size="xs"
                         variant="primary"
                         icon="refresh"
+                        disabled={acting}
                         onClick={() => {
                           handleGetStepUpProof("platform:break-glass:approve");
                         }}
@@ -1962,6 +1969,7 @@ export function BreakGlassPanel() {
                         size="xs"
                         variant="primary"
                         icon="refresh"
+                        disabled={acting}
                         onClick={() => {
                           handleGetStepUpProof("platform:break-glass:activate");
                         }}
@@ -2014,7 +2022,7 @@ export function BreakGlassPanel() {
                 <CanvasBtn
                   theme={theme}
                   variant="primary"
-                  disabled={acting || stepUpState !== "VALID"}
+                  disabled={acting || stepUpState !== "VALID" || stepUpAction !== "platform:break-glass:approve"}
                   onClick={() => void handleApproveGrant(selectedGrant)}
                 >
                   {acting ? "Approving…" : "Approve (2nd Person Sign-Off)"}
@@ -2024,7 +2032,7 @@ export function BreakGlassPanel() {
                   theme={theme}
                   variant="primary"
                   danger
-                  disabled={acting || stepUpState !== "VALID"}
+                  disabled={acting || stepUpState !== "VALID" || stepUpAction !== "platform:break-glass:activate"}
                   onClick={() => void handleActivateGrant(selectedGrant)}
                 >
                   {acting ? "Activating…" : "Activate Emergency Session"}
