@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { describe, it, beforeAll, afterAll, expect } from "vitest";
+import { describe, it, beforeAll, afterAll, afterEach, expect } from "vitest";
 import { createRequire } from "node:module";
 
 const customRequire = createRequire(
@@ -17,6 +17,7 @@ describe.skipIf(!testDbUrl)(
   "partner notification UI postgres acceptance",
   () => {
     let pool: any;
+    const originalEnv = { ...process.env };
     let app: any;
     let mtRepo: any;
 
@@ -93,11 +94,11 @@ describe.skipIf(!testDbUrl)(
       );
 
       await pool.query(
-        "INSERT INTO admin.phase1_partner_notification_bindings (binding_id, entry_slug, tenant_id, partner_id, webhook_id, version, state, event_types, validated_endpoint_fingerprint, validated_at) VALUES ($1, $2, $3, $4, $5, 1, 'ready', '[\"eta_changed\"]', 'f', '2026-09-24T00:00:00Z')",
+        "INSERT INTO admin.phase1_partner_notification_bindings (binding_id, entry_slug, tenant_id, partner_id, webhook_id, version, state, event_types, validated_endpoint_fingerprint, validated_at) VALUES ($1, $2, $3, $4, $5, 1, 'ready', '[\"eta_changed\"]', 'be5d7634209f7903e6a3c6e19091a251c0124be5227d4879fcdaff432f862a2b', '2026-09-24T00:00:00Z')",
         [bindingId1, entrySlug1, tenantId, partnerId, webhookId],
       );
       await pool.query(
-        "INSERT INTO admin.phase1_partner_notification_bindings (binding_id, entry_slug, tenant_id, partner_id, webhook_id, version, state, event_types, validated_endpoint_fingerprint, validated_at) VALUES ($1, $2, $3, $4, $5, 1, 'ready', '[\"eta_changed\"]', 'f', '2026-09-24T00:00:00Z')",
+        "INSERT INTO admin.phase1_partner_notification_bindings (binding_id, entry_slug, tenant_id, partner_id, webhook_id, version, state, event_types, validated_endpoint_fingerprint, validated_at) VALUES ($1, $2, $3, $4, $5, 1, 'ready', '[\"eta_changed\"]', 'be5d7634209f7903e6a3c6e19091a251c0124be5227d4879fcdaff432f862a2b', '2026-09-24T00:00:00Z')",
         [bindingId2, entrySlug2, tenantId, partnerId, webhookId],
       );
 
@@ -107,8 +108,8 @@ describe.skipIf(!testDbUrl)(
       mtRepo = app.get(MultiTaxiRepository);
     });
 
-    afterAll(async () => {
-      // Scoped cleanup
+    
+    afterEach(async () => {
       if (createdOutboxIds.length > 0) {
         await pool.query(
           "DELETE FROM ops.phase1_push_delivery_claims WHERE outbox_id = ANY($1)",
@@ -133,7 +134,12 @@ describe.skipIf(!testDbUrl)(
           [createdOrderIds],
         );
       }
+      createdOutboxIds.length = 0;
+      createdOrderIds.length = 0;
+    });
 
+    afterAll(async () => {
+      
       await pool.query(
         "DELETE FROM admin.phase1_partner_user_identity_links WHERE entry_slug IN ($1, $2)",
         [entrySlug1, entrySlug2],
@@ -157,6 +163,10 @@ describe.skipIf(!testDbUrl)(
 
       if (app) await app.close();
       if (pool) await pool.end();
+
+      process.env.PARTNER_NOTIFY_UI_TEST_DATABASE_URL = originalEnv.PARTNER_NOTIFY_UI_TEST_DATABASE_URL;
+      process.env.DATABASE_URL = originalEnv.DATABASE_URL;
+      process.env.AUTH_MODE = originalEnv.AUTH_MODE;
     });
 
     async function createFixture(opts: {

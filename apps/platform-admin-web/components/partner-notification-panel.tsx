@@ -147,7 +147,7 @@ function PnBinding({
                   <a
                     href={resolveCrossAppHref({
                       targetApp: "tenant-console",
-                      route: "/webhooks",
+                      route: `/api/auth/tenant/login?tenant_id=${encodeURIComponent(tenantId)}&redirect_uri=${encodeURIComponent("/webhooks")}`,
                       resourceType: "webhook",
                       resourceId: "",
                       openMode: "new_tab",
@@ -1096,7 +1096,7 @@ function PnEditView({
                 <a
                   href={resolveCrossAppHref({
                     targetApp: "tenant-console",
-                    route: "/webhooks",
+                    route: `/api/auth/tenant/login?tenant_id=${encodeURIComponent(tenantId)}&redirect_uri=${encodeURIComponent("/webhooks")}`,
                     resourceType: "webhook",
                     resourceId: "",
                     openMode: "new_tab",
@@ -1357,6 +1357,7 @@ export function PartnerNotificationPanel({
         const errCode = bReq.reason?.code || bReq.reason?.error;
         if (statusCode === 404) {
           setBinding(null);
+          setEditExpectedVersion(0);
           setError({ kind: "404", message: "Not found", code: errCode });
         } else if (statusCode === 403) {
           setError({ kind: "403", message: "Forbidden", code: errCode });
@@ -1436,6 +1437,10 @@ export function PartnerNotificationPanel({
     setRetryRowId(null);
     setIsEditing(false);
     setPage(1);
+    setEditExpectedVersion(0);
+    setEditWebhookId("");
+    setEditEventTypes([]);
+    setSaveState("idle");
   }, [entrySlug]);
 
   useEffect(() => {
@@ -1445,6 +1450,15 @@ export function PartnerNotificationPanel({
   const currentMutationSession = React.useRef(0);
   useEffect(() => {
     currentMutationSession.current++;
+    setTestingState("idle");
+    setEnableState("idle");
+    setDisableState("idle");
+    setResumeState("idle");
+    setRetryState("idle");
+    setSaveState("idle");
+    return () => {
+      currentMutationSession.current++;
+    };
   }, [client, entrySlug, tenantId, canWriteBinding, canReadWebhooks]);
 
   const handleSave = async () => {
@@ -1744,6 +1758,8 @@ export function PartnerNotificationPanel({
                   onClick={() => {
                     setEditWebhookId("");
                     setEditEventTypes(["eta_changed"]);
+                    setEditExpectedVersion(0);
+                    setSaveState("idle");
                     setIsEditing(true);
                   }}
                   disabled={!canWriteBinding}
