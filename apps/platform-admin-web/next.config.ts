@@ -37,14 +37,6 @@ const nextConfig: NextConfig = {
       },
     ];
   },
-  async rewrites() {
-    return [
-      {
-        source: "/_apps/tenant-console/:path*",
-        destination: `${process.env.NEXT_PUBLIC_TENANT_CONSOLE_URL || 'http://localhost:3004'}/:path*`,
-      },
-    ];
-  },
 };
 
 export default nextConfig;

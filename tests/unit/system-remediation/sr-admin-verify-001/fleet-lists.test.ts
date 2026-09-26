@@ -11,7 +11,7 @@ import {
   listFleetStatements,
   listRevenueShareRules,
 } from "../../../../apps/platform-admin-web/app/fleet-partners/fleet-partner-shared";
-import { ApiClient } from "@drts/api-client";
+import { ApiClient } from "../../../../packages/api-client/src";
 
 // Test-only resource IDs and transport. The envelope builders and consumers
 // are production code; this suite does not claim a deployed API/DB round trip.

@@ -5713,7 +5713,7 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
       consentGrantedAt: resolved.consentGrantedAt,
       issuedAt: issuedAt.toISOString(),
       expiresAt: expiresAt.toISOString(),
-      // @ts-ignore
+      // @ts-expect-error - generic navigation context
       ...(command.navigationContext
         ? { navigationContext: (command as any).navigationContext }
         : {}),
@@ -5782,10 +5782,11 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
       }
 
       if (!result.session.identityActive) {
-        const latestConsent = await this.referralEmbedHandoffRepository.findLatestConsent(
-          result.session.partnerEntrySlug,
-          result.session.drtsPassengerId,
-        );
+        const latestConsent =
+          await this.referralEmbedHandoffRepository.findLatestConsent(
+            result.session.partnerEntrySlug,
+            result.session.drtsPassengerId,
+          );
         if (latestConsent) {
           result.session.identityActive = true;
           result.session.consent.bundleVersion = latestConsent.bundleVersion;
@@ -5857,10 +5858,11 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
           "The partner entry ownership has changed.",
         );
       }
-      const link = await this.partnerUserIdentityLinkRepository.findByDrtsPassengerId(
-        session.partnerEntrySlug,
-        session.drtsPassengerId,
-      );
+      const link =
+        await this.partnerUserIdentityLinkRepository.findByDrtsPassengerId(
+          session.partnerEntrySlug,
+          session.drtsPassengerId,
+        );
       if (!link || link.status !== "active") {
         throw new ApiRequestError(
           HttpStatus.FORBIDDEN,
@@ -5870,8 +5872,10 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
       }
     };
 
-    const result =
-      await this.referralEmbedHandoffRepository.recordConsent(command as any, validateFn);
+    const result = await this.referralEmbedHandoffRepository.recordConsent(
+      command as any,
+      validateFn,
+    );
 
     if (result.outcome === "recorded" || result.outcome === "replayed") {
       return result.session;

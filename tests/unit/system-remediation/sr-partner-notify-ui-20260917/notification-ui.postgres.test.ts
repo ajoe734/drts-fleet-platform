@@ -101,7 +101,7 @@ describe.skipIf(!testDbUrl)(
       );
 
       await pool.query(
-        'INSERT INTO admin.phase1_tenant_webhook_endpoints (webhook_id, tenant_id, status, created_at, updated_at, record) VALUES ($1, $2, \'active\', now(), now(), \'{"url": "https://test.com", "events": ["passenger.eta_changed.v1"], "status": "active", "secret_version": 1, "secret_preview": "prev", "fingerprint": "be5d7634209f7903e6a3c6e19091a251c0124be5227d4879fcdaff432f862a2b", "validatedAt": "2026-09-24T00:00:00Z", "retryPolicy": {"maxAttempts": 3}, "runtimeMetadata": {"secretRotation": {"rotatedAt": null, "rotationCount": 0, "history": []}, "deliveryCount": 0, "failedDeliveryCount": 0}}\'::jsonb)',
+        'INSERT INTO admin.phase1_tenant_webhook_endpoints (webhook_id, tenant_id, status, created_at, updated_at, record) VALUES ($1, $2, \'active\', now(), now(), \'{"url": "https://test.com", "events": ["passenger.eta_changed.v1"], "status": "active", "webhookId": "w-uuid", "tenantId": "t-uuid", "secretVersion": 1, "secretPreview": "prev", "fingerprint": "be5d7634209f7903e6a3c6e19091a251c0124be5227d4879fcdaff432f862a2b", "validatedAt": "2026-09-24T00:00:00Z", "retryPolicy": {"maxAttempts": 3}, "runtimeMetadata": {"secretRotation": {"rotatedAt": null, "rotationCount": 0, "history": []}, "deliveryCount": 0, "failedDeliveryCount": 0}}\'::jsonb)',
         [webhookId, tenantId],
       );
 
@@ -110,7 +110,7 @@ describe.skipIf(!testDbUrl)(
         [bindingId1, entrySlug1, tenantId, partnerId, webhookId],
       );
       await pool.query(
-        "INSERT INTO admin.phase1_partner_notification_bindings (binding_id, entry_slug, tenant_id, partner_id, webhook_id, version, state, event_types, validated_endpoint_fingerprint, validated_at) VALUES ($1, $2, $3, $4, $5, 1, 'ready', '[\"eta_changed\"]', '3c513e9a4f475a89fb3f939e6a0c0ec40552b0f4fa6e3d2c18d3df62ef3222e9', '2026-09-24T00:00:00Z')",
+        "INSERT INTO admin.phase1_partner_notification_bindings (binding_id, entry_slug, tenant_id, partner_id, webhook_id, version, state, event_types, validated_endpoint_fingerprint, validated_at) VALUES ($1, $2, $3, $4, $5, 1, 'ready', '[\"eta_changed\"]', 'be5d7634209f7903e6a3c6e19091a251c0124be5227d4879fcdaff432f862a2b', '2026-09-24T00:00:00Z')",
         [bindingId2, entrySlug2, tenantId, partnerId, webhookId],
       );
 
@@ -120,7 +120,6 @@ describe.skipIf(!testDbUrl)(
       mtRepo = app.get(MultiTaxiRepository);
     });
 
-    
     afterEach(async () => {
       if (createdOutboxIds.length > 0) {
         await pool.query(
@@ -151,34 +150,50 @@ describe.skipIf(!testDbUrl)(
     });
 
     afterAll(async () => {
-      
-      await pool.query(
-        "DELETE FROM admin.phase1_partner_user_identity_links WHERE entry_slug IN ($1, $2)",
-        [entrySlug1, entrySlug2],
-      );
-      await pool.query(
-        "DELETE FROM admin.phase1_partner_notification_bindings WHERE binding_id IN ($1, $2)",
-        [bindingId1, bindingId2],
-      );
-      await pool.query(
-        "DELETE FROM admin.phase1_tenant_webhook_endpoints WHERE webhook_id = $1",
-        [webhookId],
-      );
-      await pool.query(
-        "DELETE FROM admin.phase1_partner_channel_entries WHERE entry_slug IN ($1, $2)",
-        [entrySlug1, entrySlug2],
-      );
-      await pool.query(
-        "DELETE FROM admin.phase1_platform_tenants WHERE tenant_id = $1",
-        [tenantId],
-      );
+      try {
+        await pool.query(
+          "DELETE FROM admin.phase1_partner_user_identity_links WHERE entry_slug IN ($1, $2)",
+          [entrySlug1, entrySlug2],
+        );
+        await pool.query(
+          "DELETE FROM admin.phase1_partner_notification_bindings WHERE binding_id IN ($1, $2)",
+          [bindingId1, bindingId2],
+        );
+        await pool.query(
+          "DELETE FROM admin.phase1_tenant_webhook_endpoints WHERE webhook_id = $1",
+          [webhookId],
+        );
+        await pool.query(
+          "DELETE FROM admin.phase1_partner_channel_entries WHERE entry_slug IN ($1, $2)",
+          [entrySlug1, entrySlug2],
+        );
+        await pool.query(
+          "DELETE FROM admin.phase1_platform_tenants WHERE tenant_id = $1",
+          [tenantId],
+        );
 
-      if (app) await app.close();
-      if (pool) await pool.end();
+        if (app) await app.close();
+        if (pool) await pool.end();
+      } finally {
+        if (originalEnv.PARTNER_NOTIFY_UI_TEST_DATABASE_URL !== undefined) {
+          process.env.PARTNER_NOTIFY_UI_TEST_DATABASE_URL =
+            originalEnv.PARTNER_NOTIFY_UI_TEST_DATABASE_URL;
+        } else {
+          delete process.env.PARTNER_NOTIFY_UI_TEST_DATABASE_URL;
+        }
 
-      process.env.PARTNER_NOTIFY_UI_TEST_DATABASE_URL = originalEnv.PARTNER_NOTIFY_UI_TEST_DATABASE_URL;
-      process.env.DATABASE_URL = originalEnv.DATABASE_URL;
-      process.env.AUTH_MODE = originalEnv.AUTH_MODE;
+        if (originalEnv.DATABASE_URL !== undefined) {
+          process.env.DATABASE_URL = originalEnv.DATABASE_URL;
+        } else {
+          delete process.env.DATABASE_URL;
+        }
+
+        if (originalEnv.AUTH_MODE !== undefined) {
+          process.env.AUTH_MODE = originalEnv.AUTH_MODE;
+        } else {
+          delete process.env.AUTH_MODE;
+        }
+      }
     });
 
     async function createFixture(opts: {
@@ -216,7 +231,7 @@ describe.skipIf(!testDbUrl)(
       );
 
       await pool.query(
-        'INSERT INTO mobility.phase1_partner_notification_delivery_contexts (outbox_id, delivery_id, order_id, entry_slug, tenant_id, partner_id, binding_id, binding_version, webhook_id, endpoint_fingerprint, wire_payload, wire_payload_hash, event_sequence, expires_at, retry_policy_snapshot, delivery_target, retry_disposition, failure_reason, receipt_id, created_at) VALUES ($1, gen_random_uuid(), $2, $3, $4, $5, $6, 1, $7, \'be5d7634209f7903e6a3c6e19091a251c0124be5227d4879fcdaff432f862a2b\', \'{"event": "passenger.eta_changed.v1", "data": {"recipient": {"partnerUserRef": "user"}}}\'::jsonb, \'testhash\', 42, ' +
+        'INSERT INTO mobility.phase1_partner_notification_delivery_contexts (outbox_id, delivery_id, order_id, entry_slug, tenant_id, partner_id, binding_id, binding_version, webhook_id, endpoint_fingerprint, wire_payload, wire_payload_hash, event_sequence, expires_at, retry_policy_snapshot, delivery_target, retry_disposition, failure_reason, receipt_id, created_at) VALUES ($1, gen_random_uuid(), $2, $3, $4, $5, $6, 1, $7, \'be5d7634209f7903e6a3c6e19091a251c0124be5227d4879fcdaff432f862a2b\', \'{"event": "passenger.eta_changed.v1", "data": {"assignmentVersion": 1, "assignment": {"version": 1}, "recipient": {"partnerUserRef": "user"}}}\'::jsonb, \'6440c946e9690186981cfecfbf39c595701e54f0a2d201202e21b8bbf4033bd2\', 42, ' +
           (opts.expiresAt || "now() + interval '1 day'") +
           ", '{\"maxAttempts\": 3}'::jsonb, 'partner_endpoint', $8, $9, $10, now())",
         [
