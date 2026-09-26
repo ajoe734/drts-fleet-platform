@@ -1744,7 +1744,7 @@ export class MultiTaxiRepository {
       FROM ops.consumer_notification_outbox o
       LEFT JOIN mobility.phase1_partner_notification_delivery_contexts ctx ON ctx.outbox_id = o.outbox_id
       LEFT JOIN mobility.phase1_order_partner_notification_routes r ON r.order_id = o.order_id
-      WHERE (ctx.entry_slug = $1 OR r.entry_slug = $1)
+      WHERE COALESCE(ctx.entry_slug, r.entry_slug) = $1
       AND COALESCE(ctx.tenant_id, r.tenant_id) = $2
       AND COALESCE(ctx.partner_id, r.partner_id) = $3
     `,
@@ -1756,7 +1756,7 @@ export class MultiTaxiRepository {
       SELECT
         o.outbox_id as "outboxId",
         COALESCE(ctx.order_id, o.order_id) as "orderId",
-        $1 as "entrySlug",
+        COALESCE(ctx.entry_slug, r.entry_slug) as "entrySlug",
         COALESCE(ctx.tenant_id, r.tenant_id) as "tenantId",
         COALESCE(ctx.partner_id, r.partner_id) as "partnerId",
         ctx.binding_id as "bindingId",
@@ -1792,7 +1792,7 @@ export class MultiTaxiRepository {
       LEFT JOIN mobility.phase1_partner_notification_delivery_contexts ctx ON ctx.outbox_id = o.outbox_id
       LEFT JOIN mobility.phase1_order_partner_notification_routes r ON r.order_id = o.order_id
       LEFT JOIN ops.phase1_push_delivery_claims l ON l.outbox_id = o.outbox_id AND l.claim_state = 'claimed'
-      WHERE (ctx.entry_slug = $1 OR r.entry_slug = $1)
+      WHERE COALESCE(ctx.entry_slug, r.entry_slug) = $1
       AND COALESCE(ctx.tenant_id, r.tenant_id) = $4
       AND COALESCE(ctx.partner_id, r.partner_id) = $5
       ORDER BY o.created_at DESC

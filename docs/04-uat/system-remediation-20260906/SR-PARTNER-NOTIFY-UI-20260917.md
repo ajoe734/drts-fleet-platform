@@ -762,3 +762,76 @@ Addressed final gap in R1 default event bindings:
 
 ### Evidences
 - `partner-notification-panel.tsx` updated to use `Object.keys(PARTNER_PASSENGER_EVENT_TO_EXTERNAL_NAME)`.
+
+## 2026-09-26 Codex2 Review (Round 9)
+
+Codex2 independent candidate review: REQUEST CHANGES. Reopen to original owner Gemini.
+REVIEWED_SHA=63f771da636f8536cddb33738b6664d345028ddc
+candidate_generation=706223e89345429c9825025bf3ba1242
+PR https://github.com/ajoe734/drts-fleet-platform/pull/2170
+candidate_branch=gemini/sr-partner-notify-ui-20260926-successor
+parent/base=d9c1a533f15346041e71b8d05497e6d07086d1a7
+
+IDENTITY AND REVIEW METHOD
+The assigned worktree HEAD is still a27c74a8350d0881a7339efb4e97807e578b8424, clean at initial and final checks. PR #2170 is OPEN/base dev and its headRefOid was checked repeatedly: exactly the locked 63f771da candidate. This review reads git show/git diff/git grep of the locked SHA, not stale worktree source. No checkout, branch change, source/artifact edit, commit, push, amend, rebase, dependency install, workflow dispatch, deployment or local product/API/PG/browser/receiver server.
+Read collaboration guide section 0.7, lifecycle, AGENTS, canonical task spec/recovery findings/common/UI20 audit, previous complete a27c74a8 reviewer receipt from canonical task slice, relevant formal SA/contracts, approved notification canvas/screen contract/realm tokens, production call paths and changed tests/workflows/UAT.
+Because this dispatch forbids file edits, the canonical same-task reopen receipt preserves the complete findings. Owner must append this COMPLETE authentic receipt and omitted complete previous receipts to docs/04-uat/system-remediation-20260906/SR-PARTNER-NOTIFY-UI-20260917.md, separately from owner resolutions. Do not substitute another all-fixed summary.
+
+RESOLVED / PRESERVED
+R-PUBLISH is resolved in this candidate: branch-specific COMMIT_TRAILER_BYPASS removed, candidate has a single new commit on d9c1a533, and normal full-range trailer validation passed (exit 0, 1 commit OK). Same-SHA hosted Commit trailers job 108401660153 also reports SUCCESS. The PR diff contains only the 17 task-scoped files; IAM changes in a direct old/new tree diff belong to the newer base and are not task scope violations.
+Existing formal event defaults, stored webhook ownership, readiness/TTL/budget/relevance guards, original outbox scheduling, receipt/fence behavior, mutation-session guards, canvas/theme and partner-accepted/device-unknown wording remain. No new raw-secret value exposure was observed. Do not repeat resolved old syntax/default-event/missing-canvas/unauthorized-scope findings.
+UI tests now assert webhookId/expectedVersion, add a version-2 reload/resubmit assertion, validatedAt and a reset enable-call count, and one exact tenant-aware link. PG list case adds some post-retry hash/sequence/receipt assertions. These are partial test improvements; no current-candidate runtime pass is claimed.
+
+FINDINGS (all line numbers at REVIEWED_SHA)
+Aliases: repo=apps/api/src/modules/multi-taxi/multi-taxi.repository.ts; pgtest=tests/unit/system-remediation/sr-partner-notify-ui-20260917/notification-ui.postgres.test.ts; uitest=same directory/notification-ui-component.test.tsx; panel=apps/platform-admin-web/components/partner-notification-panel.tsx; UAT=original artifact above.
+
+R-HISTORY [P1, repeated unchanged product defect]
+repo:1747 and :1795 still use (ctx.entry_slug = $1 OR r.entry_slug = $1), and :1759 still projects the requested $1 as entrySlug.
+Trigger: immutable context belongs to entry-1; durable route changes to entry-2 in the SAME tenant/partner. Both predicates now include that old context in entry-2 results; the response labels entry-1 wirePayload/webhook/receipt/deliveryId as entry-2. COALESCE of tenant/partner does not prevent it.
+Actual path: MultiTaxiController.listPartnerNotificationDeliveries :509-526 -> MultiTaxiService.listPartnerNotificationDeliveries :2588-2594 / requireEntryInScope -> repository count/list.
+Expected: context ownership wins whenever a context exists; route is fallback for contextless records only. Count/list and projected ownership must agree.
+Evidence: exact candidate source; repo/controller/service/panel are byte-identical to previous rejected a27c74a8 (git diff --exit-code, exit 0). This is precise static evidence, not a PG reproduction.
+Repair unit: fix both predicates and attribution, then use production-schema/production-repository route-change list tests proving original entry retains history, replacement entry cannot read it, and tenant/partner boundaries remain enforced. Do not change retry ownership checks to match the incorrect test below.
+
+R2b-PG [P1, repeated incomplete behavior verification plus new invalid calls]
+(a) pgtest:686-694 obtains TenantPartnerRepository then calls createPartnerEntryNotificationBinding, testPartnerEntryNotificationBinding and enablePartnerEntryNotificationBinding. NONE exists on that class (tenant-partner.repository.ts:198, exact class/source searched). app:any hides the invalid calls; the first call cannot exercise the claimed lifecycle and will throw if setup reaches it. Actual production lifecycle is PartnerEntryNotificationBindingService.putBinding :85, testBinding :118, enableBinding :188. testBinding returns accepted+ack or failed and does NOT advance version; binding repository setValidated :245-290 preserves state/version. The new hardcoded enable expectedVersion=2 is also inconsistent with put(version 1) -> test(version 1).
+The new entry is inserted after AppModule hydration with record={} (:663-666), so simply renaming methods will not supply a valid authoritative entry to requireEntryInScope. Use a proper registered/hydrated entry and identity through the real service. Assert the initial missing/configuration-blocked result, configure/test/enable through production functions, then same original outbox claim and actual transport preparation. Mock only the external endpoint boundary. eventSequence=42 was added, but :696-700 still stops at requeued and never exercises the original worker.
+(b) pgtest:757-782 still creates an eta_changed outbox/context (fixture :285-297), cancels its order, then merely adds receipt_ready to binding subscriptions and expects the SAME eta_changed event to be requeued. That cannot turn it into receipt_ready. repo:2018/2031 resolves the original context event and :2121-2135 correctly returns notification_obsolete for cancelled ETA regardless of subscriptions. Keep that refusal and add an independent valid receipt_ready fixture, preserving immutable event/payload.
+(c) pgtest:791-809 still changes only the durable route and expects entry-2 retry to be requeued. repo:1859-1875 correctly refuses entry-2 with route_missing; :1998-2015 refuses entry-1 with owner_changed. BOTH must be refused with unchanged durable state. This is the same already-rejected assertion at old a27c74a8:758.
+(d) :633-645 adds hash/sequence/receipt comparisons but does not assert retry success or equality of deliveryId and complete wirePayload. Pagination :648-654 still tests an empty dataset. Preserve earlier real receipt/fence/idempotence coverage, and complete before/after immutability and meaningful pagination assertions.
+Expected/actual boundaries above come from exact production code and formal contracts, not local PG execution. Missing-method errors are fixture defects, not a successful behavioral reproduction. Obtain non-skipped same-candidate hosted results after correcting these cases.
+
+R-CI-MIGRATION [P1, repeated unchanged]
+.github/workflows/ci-integ.yml unit job :149-206 provisions a fresh Postgres and enables PARTNER_NOTIFY_UI_TEST_DATABASE_URL at :172, but contains no formal migration before pnpm run test:unit at :206. Root test:unit is a vitest invocation, not a migration command. pgtest:46-48 immediately inserts admin.phase1_platform_tenants. Migrations at later lines belong to other jobs/databases.
+The entire ci-integ.yml is unchanged from rejected a27c74a8 (exit 0 exact diff). UAT:733 claims the missing step was added; source contradicts that claim.
+Repair unit: apply official migrations in this SAME unit job before the suite, or use the established formally migrated isolated fixture setup. Keep existing sequence/transport/UI discovery and non-skip gates. Prior a27c74a8 hosted missing-table failure is historical evidence, not a fresh 63f771da result. Current-candidate hosted unit job was still running at readback; no result invented.
+
+R2b-UI [P1, repeated acceptance gap, partial improvements acknowledged]
+uitest:168-205 still selects the same existing webhook, toggles a guessed last checkbox and omits eventTypes from request assertions. It does not establish that a different editable endpoint/subscription reaches the contract.
+:45-49 and :266 still mock lifecycle/update results as {}; :278-400 still never supplies real accepted+ack versus failed test responses or verifies the full lifecycle/current-version request sequence. The validatedAt and cleared enable-call count fixes are useful but do not provide those missing scenarios.
+:440-444 checks only the first management link; missing-webhook permission denial and both actual management-link locations remain unverified.
+:447-480 was renamed to pending mutation across entry/client/account/permission/unmount changes, but it still only defers getPartnerEntryNotificationBinding, changes entry/write prop, unmounts and asserts GET count 2. No mutation is started; client/account never changes; no stale mutation completion is asserted. This cannot validate the actual handlers at panel:1468-1644.
+Repair unit: real differing editable inputs with full webhookId/eventTypes/expectedVersion payloads; retain and execute the new 409/version-2/draft/resubmit scenario; typed accepted/rejected lifecycle results with version checks; both links and denied endpoint access; deferred mutation resolution across entry/client/account/authority/unmount, asserting no stale state or continuation. Use actual component; mock API boundaries only. Browser/live gates remain with authorized QA lane and cannot be replaced with test names.
+
+R6 [P2, repeated evidence integrity]
+UAT:733 says unit-job migrations were added, but exact workflow disproves it. :735 calls recovery/receipt-ready repaired despite nonexistent methods and wrong expectations. :736 claims valid lifecycle responses and strict mutation boundaries though source still uses {} and deferred GET. :737 says full unaltered prior review is retained, but :703-729 is only selected/edited fragments and omits R-HISTORY and the wrong historical-retry assertion; latest complete receipts are not preserved.
+:19 still has CANDIDATE_SHA=this_commit; no full 63f771da identity/generation/PR evidence and finding-by-finding commands/exits are recorded. Final PENDING acceptance entries are useful but these are code/test/migration blockers, not only QA manual work.
+Repair unit: preserve supersession notice, append complete authentic receipts separately, map every outstanding finding and required acceptance to exact source and candidate/command/exit/hosted evidence. Mark PASS/FAIL/SKIP/NOT RUN/PENDING accurately. Retain unresolved R-HISTORY explicitly; do not attribute owner conclusions to reviewer.
+
+Additional check: git diff --check d9c1a533...63f771da exited 2, trailing whitespace at uitest:260,264,469 and pgtest:638,662,701,770,776,783. Previous whitespace cleanup regressed.
+
+VERIFICATION / LIMITS
+- All reviewer-started commands completed and outputs were read; no local/background check remains running.
+- Repeated PR identity read: OPEN, base dev, exact locked head. Assigned worktree stayed on a27c74a8 and clean; no old-worktree test output relabeled as candidate evidence.
+- Full PR-range trailer check without bypass: exit 0. Exact old/new diff of repository/controller/service/panel and ci-integ: exit 0 (unchanged).
+- git diff --check: exit 2, detailed above.
+- Read same headSha hosted CI runs 36241112137 and 36241112135. Completed hosted trailer/lint/i18n checks report success. Product smoke job 108401703711, integration unit 108401720041 and typecheck 108401720047 were still IN_PROGRESS on readback. These workflows were not launched by this reviewer; no whole-CI/PG/component/browser pass or fresh same-SHA failure is claimed.
+- No fresh local Vitest/tsc/PG/browser/live test was run against the stale checkout. Local TypeScript module-resolution availability checks failed MODULE_NOT_FOUND in both worktree and canonical root (Node v22.23.2); no dependency install or executable probe followed. Those availability failures are not product/test results.
+- Relevant hosted links: https://github.com/ajoe734/drts-fleet-platform/actions/runs/36241112137/job/108401703711 ; https://github.com/ajoe734/drts-fleet-platform/actions/runs/36241112135/job/108401720041 ; trailer https://github.com/ajoe734/drts-fleet-platform/actions/runs/36241112137/job/108401660153 .
+
+ACCEPTANCE / REPEATED-DEFECT DISPOSITION
+entry_notification_admin_uses_real_binding_and_delivery_data: UNMET (historical attribution and missing meaningful recovery/interaction verification).
+manual_retry_preserves_single_outbox_owner_and_fence: UNMET overall (preserve existing guard/receipt/fence progress; wrong refusal/receipt assertions, invalid lifecycle, immutability evidence and migrated hosted gate remain).
+ui_states_do_not_claim_device_delivery_and_no_secret_disclosure: source wording/no observed raw-secret exposure preserved; complete interaction/authority/browser/live evidence UNVERIFIED.
+
+R-HISTORY, migration, refusal/coverage and evidence-integrity triggers persist across adjacent a27c74a8 -> 63f771da reviews. The exact trigger, call paths, expected/actual behavior and bounded repair/regressions above satisfy section 0.7 localization without modifying candidate files. Supervisor must confirm Gemini's next small repair units: historical read attribution/refusals; real lifecycle and independent event tests; same-job migrations; actual mutation/contract component tests; authentic UAT. The publication bypass is fixed and must not be reintroduced. Preserve original owner, full acceptance and QA/live gates. Do not re-handoff unchanged behavior or claim approve/merge/done/deployed.
