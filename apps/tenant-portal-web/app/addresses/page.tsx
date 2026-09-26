@@ -153,7 +153,7 @@ function EditAddressForm({ address }: { address: TenantAddressRecord }) {
             type="text"
             id="tags"
             name="tags"
-            defaultValue={address.tags.join(", ")}
+            defaultValue={(address.tags || []).join(", ")}
             placeholder="e.g. office, warehouse"
           />
         </div>
@@ -199,6 +199,7 @@ function AddressList({ addresses }: { addresses: TenantAddressRecord[] }) {
               <th>Tags</th>
               <th>Lat</th>
               <th>Lng</th>
+              <th>Source</th>
               <th>Status</th>
               <th>Actions</th>
             </tr>
@@ -208,9 +209,10 @@ function AddressList({ addresses }: { addresses: TenantAddressRecord[] }) {
               <tr key={a.addressId}>
                 <td>{a.addressName}</td>
                 <td>{a.addressText}</td>
-                <td>{a.tags.length > 0 ? a.tags.join(", ") : "-"}</td>
+                <td>{a.tags && a.tags.length > 0 ? a.tags.join(", ") : "-"}</td>
                 <td>{a.lat != null ? a.lat.toFixed(6) : "-"}</td>
                 <td>{a.lng != null ? a.lng.toFixed(6) : "-"}</td>
+                <td data-testid={`source-${a.addressId}`}>{a.geocodeSource || "-"}</td>
                 <td>{a.activeFlag ? "Active" : "Inactive"}</td>
                 <td>
                   <Link href={`/addresses?edit=${a.addressId}`}>Edit</Link>
@@ -331,13 +333,14 @@ async function updateAddress(formData: FormData) {
 
   try {
     await client.upsertAddress(command);
-    revalidatePath("/addresses");
   } catch (e) {
     const msg = e instanceof Error ? e.message : "Unknown error";
     redirect(
       `/addresses?edit=${command.addressId}&error=${encodeURIComponent(msg)}`,
     );
   }
+  revalidatePath("/addresses");
+  redirect("/addresses");
 }
 
 async function deleteAddress(formData: FormData) {

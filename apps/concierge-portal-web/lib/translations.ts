@@ -265,6 +265,7 @@ const en = {
   "booking.help.manualReview":
     "This trip needs dispatch review before auto-assignment. Continue only if the coordinates are correct.",
   "booking.submit": "Submit concierge-assisted booking",
+  "booking.submit.manualReview": "Submit for manual review",
   "booking.summary.eyebrow": "Submission accepted",
   "booking.summary.orderId": "Order ID",
   "booking.summary.callId": "Call ID",
@@ -669,13 +670,12 @@ const zh: Record<keyof typeof en, string> = {
   "booking.field.callbackDue": "選填回撥到期時間",
   "booking.field.callbackNote": "回撥備註",
   "booking.field.notes": "櫃台備註",
-  "booking.help.product":
-    "入口會先確認授權產品，再沿用既有櫃台建單流程。",
-  "booking.help.route":
-    "建立禮賓代訂前，請先在地圖上確認上下車位置。",
+  "booking.help.product": "入口會先確認授權產品，再沿用既有櫃台建單流程。",
+  "booking.help.route": "建立禮賓代訂前，請先在地圖上確認上下車位置。",
   "booking.help.manualReview":
     "此行程在派遣前仍需人工確認；只有在座標無誤時才可繼續。",
   "booking.submit": "提交禮賓代訂",
+  "booking.submit.manualReview": "送交人工複核",
   "booking.summary.eyebrow": "提交已接受",
   "booking.summary.orderId": "訂單 ID",
   "booking.summary.callId": "通話 ID",

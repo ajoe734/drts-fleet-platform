@@ -27,5 +27,13 @@ export default defineConfig({
       reuseExistingServer: !process.env.CI,
       timeout: 300_000,
     },
+    {
+      command:
+        "cd apps/tenant-portal-web && NEXT_PUBLIC_API_URL=${DRTS_API_URL:-https://drts-dev-api-waji3fer3a-uc.a.run.app} pnpm exec next dev --webpack --hostname 127.0.0.1 --port 3305",
+      url: "http://127.0.0.1:3305",
+      reuseExistingServer: !process.env.CI,
+      timeout: 300_000,
+    },
   ],
+  timeout: 120_000,
 });

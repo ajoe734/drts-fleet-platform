@@ -79,6 +79,7 @@ const en = {
     "Program details and locations are confirmed. You can continue with submission.",
   "book.notReady": "Resolve the highlighted fields before submission.",
   "book.submit": "Validate booking form",
+  "book.submit.manualReview": "Submit for manual review",
   "book.success": "Form validation passed",
   "book.success.detail":
     "This booking is ready for the partner team to continue creating the order.",
@@ -565,6 +566,7 @@ const zh = {
   "book.ready": "方案資料與地址已確認，可繼續送出預約。",
   "book.notReady": "請先修正標示欄位，再進行提交。",
   "book.submit": "驗證下單表單",
+  "book.submit.manualReview": "送交人工複核",
   "book.success": "表單驗證通過",
   "book.success.detail": "此預約資料已準備完成，可交由合作通路後續建立訂單。",
   "book.summary.direction": "接送方向",
