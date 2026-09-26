@@ -531,7 +531,7 @@ describe.skipIf(!testDbUrl)(
       expect(resBudget.kind).toBe("failed");
 
       // 9. Genuine receipt preservation under refused repeat retry
-      const { outboxId: genReceiptId } = await createFixture({ lease: "active", status: "pending" });
+      const { outboxId: genReceiptId } = await createFixture({ lease: "expired", status: "pending", retryDisp: "automatic" });
       const genReceiptClaim = await mtRepo.claimPartnerNotification(genReceiptId, "worker-gen", 60);
       const genuineRes = await mtRepo.recordPushDeliveryOutcome({
         outboxId: genReceiptId,

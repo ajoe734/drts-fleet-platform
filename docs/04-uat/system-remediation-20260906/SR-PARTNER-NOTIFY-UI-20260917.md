@@ -23,7 +23,7 @@
   - `pnpm exec tsc -p tsconfig.json --noEmit`: Exit 0
   - `pnpm run i18n:guard`: Exit 0
   - `pnpm exec vitest run tests/unit/system-remediation/sr-partner-notify-ui-20260917/notification-ui.test.ts`: PASS (3 client API mock tests, Exit 0)
-  - `RUN_UI_PG_GATE=true PARTNER_NOTIFY_UI_TEST_PARTNER_NOTIFY_UI_TEST_DATABASE_URL=postgresql://postgres:postgres@localhost:5432/drts_fleet_platform pnpm exec vitest run tests/unit/system-remediation/sr-partner-notify-ui-20260917/notification-ui.postgres.test.ts`: SKIP (VM restricts local PG)
+  - `RUN_UI_PG_GATE=true PARTNER_NOTIFY_UI_TEST_DATABASE_URL=postgresql://postgres:postgres@localhost:5432/drts_fleet_platform pnpm exec vitest run tests/unit/system-remediation/sr-partner-notify-ui-20260917/notification-ui.postgres.test.ts`: SKIP (VM restricts local PG)
 
 ## Old/New Reproduction & Boundaries
 

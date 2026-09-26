@@ -1915,10 +1915,8 @@ export class MultiTaxiRepository {
         ? ctx.retry_disposition
         : outbox.payload?.partnerNotification?.retryDisposition;
       if (
-        !retryDisp ||
-        !["manual_only", "automatic", "configuration_blocked"].includes(
-          retryDisp,
-        )
+        retryDisp === "terminal" ||
+        (retryDisp && !["manual_only", "automatic", "configuration_blocked"].includes(retryDisp))
       ) {
         await client.query("ROLLBACK");
         return {
