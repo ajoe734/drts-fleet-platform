@@ -331,13 +331,14 @@ async function updateAddress(formData: FormData) {
 
   try {
     await client.upsertAddress(command);
-    revalidatePath("/addresses");
   } catch (e) {
     const msg = e instanceof Error ? e.message : "Unknown error";
     redirect(
       `/addresses?edit=${command.addressId}&error=${encodeURIComponent(msg)}`,
     );
   }
+  revalidatePath("/addresses");
+  redirect("/addresses");
 }
 
 async function deleteAddress(formData: FormData) {
