@@ -66,7 +66,7 @@ export const partnerNotificationHttpsFetch: WebhookFetch = async (
         method: "POST",
         headers: Object.fromEntries(new Headers(init?.headers)),
         ...(init?.signal ? { signal: init.signal } : {}),
-        lookup: (hostname, options, callback) => {
+        lookup: (hostname: string, options: any, callback: any) => {
           lookup(
             hostname,
             { all: true, verbatim: true },
@@ -89,7 +89,7 @@ export const partnerNotificationHttpsFetch: WebhookFetch = async (
           );
         },
       },
-      (response) => {
+      (response: import("node:http").IncomingMessage) => {
         const status = response.statusCode ?? 0;
         const ok = status >= 200 && status < 300;
         // Preserve headers immediately. Non-ack responses need no body; a
