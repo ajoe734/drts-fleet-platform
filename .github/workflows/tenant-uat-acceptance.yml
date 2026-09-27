@@ -199,6 +199,13 @@ jobs:
             --outputFile.json=.artifacts/tenant-uat-acceptance/webhook-unit-report.json \
             2>&1 | tee -a .artifacts/tenant-uat-acceptance/execution-log.txt
 
+      - name: Clear notification outbox backlog left by unit tests
+        run: |
+          pnpm --filter @drts/api exec node -e "
+            const { Client } = require('pg');
+            const client = new Client({ connectionString: process.env.DATABASE_URL });
+            client.connect().then(() => client.query('TRUNCATE TABLE ops.consumer_notification_outbox CASCADE;')).then(() => client.end()).catch(console.error);
+          "
       - name: Start the real API server
         id: start_api
         env:
