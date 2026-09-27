@@ -26,13 +26,13 @@ export default defineConfig({
     {
       name: "healthy",
       use: {
-        baseURL: "http://127.0.0.1:3007",
+        baseURL: shouldStartLocalPartnerBooking ? "http://127.0.0.1:3007" : partnerBookingBaseURL,
       },
     },
     {
       name: "outage",
       use: {
-        baseURL: "http://127.0.0.1:3008",
+        baseURL: shouldStartLocalPartnerBooking ? "http://127.0.0.1:3008" : (process.env.DRTS_DEV_PARTNER_BOOKING_OUTAGE_BASE_URL ?? partnerBookingBaseURL),
       },
     },
   ],
@@ -49,13 +49,13 @@ export default defineConfig({
           {
             command:
               "pnpm --filter @drts/contracts build && pnpm --filter @drts/ui-tokens build && cd apps/partner-booking-web && AUTH_MODE=test DRTS_API_URL=http://127.0.0.1:3901 pnpm exec next dev --webpack --hostname 127.0.0.1 --port 3007",
-            url: localPartnerBookingBaseURL,
+            url: "http://127.0.0.1:3007",
             reuseExistingServer: !process.env.CI,
             timeout: 120_000,
           },
           {
             command:
-              "pnpm --filter @drts/contracts build && pnpm --filter @drts/ui-tokens build && cd apps/partner-booking-web && AUTH_MODE=test DRTS_API_URL=http://127.0.0.1:3901 NEXT_PUBLIC_ADDRESS_PICKER_PROVIDER_MODE=unavailable pnpm exec next dev --webpack --hostname 127.0.0.1 --port 3008",
+              "pnpm --filter @drts/contracts build && pnpm --filter @drts/ui-tokens build && cd apps/partner-booking-web && AUTH_MODE=test DRTS_API_URL=http://127.0.0.1:3901 NEXT_PUBLIC_ADDRESS_PICKER_PROVIDER_MODE=unavailable NEXT_PRIVATE_DIST_DIR=.next-outage pnpm exec next dev --webpack --hostname 127.0.0.1 --port 3008",
             url: "http://127.0.0.1:3008",
             reuseExistingServer: !process.env.CI,
             timeout: 120_000,

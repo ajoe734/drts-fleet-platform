@@ -289,15 +289,118 @@ test.describe("concierge map booking UI", () => {
     expect(response?.status()).toBe(200);
 
     await selectConciergeMapCandidate(page, 0, "taipei 101", "Taipei 101");
-    await selectConciergeMapCandidate(
-      page,
-      1,
-      "Tokyo Tower", // mock map provider returns out of area for Tokyo Tower
-      "Tokyo Tower",
-    );
+    
+    // Manual coordinates outside service area
+    const dropoffPicker = page.locator("[data-address-map-picker]").nth(1);
+    await dropoffPicker.getByText(/手動輸入座標|Enter coordinates manually/).click();
+    await dropoffPicker.getByLabel(/Latitude|緯度/).fill("22.620");
+    await dropoffPicker.getByLabel(/Longitude|經度/).fill("120.300");
+    await dropoffPicker.getByLabel(/Reason|原因/).fill("Far away dropoff");
+    await dropoffPicker.getByRole("button", { name: /Use this location|確認使用此位置/ }).click();
 
     const submitBtn = page.getByRole("button", { name: /提交禮賓代訂|送交人工複核/ });
     await expect(submitBtn).toBeDisabled();
     expect(captured.body).toHaveLength(0);
+  });
+
+  test("handles backend refusal and recovers via manual pin", async ({ page }, testInfo) => {
+    test.skip(testInfo.project.name === "outage");
+    const captured = { body: [] as unknown[] };
+    let postCount = 0;
+
+    await page.route("http://localhost:3001/api/**", async (route) => {
+      const request = route.request();
+      const url = new URL(request.url());
+      
+      // Override orders POST to fail once
+      if (request.method() === "POST" && url.pathname === "/api/call-center/orders") {
+        captured.body.push(request.postDataJSON());
+        postCount++;
+        if (postCount === 1) {
+          await route.fulfill({
+            status: 400,
+            contentType: "application/json",
+            body: JSON.stringify({
+              error: {
+                code: "ADDRESS_RESOLUTION_FAILED",
+                message: "Backend rejected provider address",
+                details: { path: "pickup" }
+              }
+            })
+          });
+          return;
+        }
+        await route.fulfill({
+          status: 200,
+          contentType: "application/json",
+          body: JSON.stringify({ data: { orderId: "cg-recovered-001" } })
+        });
+        return;
+      }
+      
+      // Fallback to normal mock installer logic for everything else
+      if (url.pathname === "/api/callcenter/sessions") {
+        await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ data: { callId: "c1" } }) });
+        return;
+      }
+      if (url.pathname.includes("/cost-centers")) {
+        await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ data: [{ costCenterId: "cc-1", name: "Default" }] }) });
+        return;
+      }
+      await route.continue();
+    });
+
+    const response = await page.goto("/bookings/new");
+    expect(response?.status()).toBe(200);
+
+    // Initial search
+    await selectConciergeMapCandidate(page, 0, "taipei 101", "Taipei 101");
+    await selectConciergeMapCandidate(page, 1, "banqiao", "Banqiao Station");
+
+    const submitBtn = page.getByRole("button", { name: /提交禮賓代訂/ });
+    await expect(submitBtn).toBeEnabled();
+    await submitBtn.click();
+
+    // Expect the backend refusal message
+    await expect(page.getByText(/Backend rejected provider address|無法解析地址/)).toBeVisible();
+    
+    // Recover by editing pickup to manual pin
+    const pickupPicker = page.locator("[data-address-map-picker]").nth(0);
+    await pickupPicker.getByText(/手動輸入座標|Enter coordinates manually/).click();
+    await pickupPicker.getByLabel(/Latitude|緯度/).fill("25.033");
+    await pickupPicker.getByLabel(/Longitude|經度/).fill("121.565");
+    await pickupPicker.getByLabel(/Reason|原因/).fill("Fixing rejected address");
+    await pickupPicker.getByRole("button", { name: /Use this location|確認使用此位置/ }).click();
+    
+    // Re-submit
+    await expect(submitBtn).toBeEnabled();
+    await submitBtn.click();
+    
+    // Should pass the second time
+    expect(postCount).toBe(2);
+    const command = captured.body[1] as any;
+    expect(command.pickup.coordinateSource).toBe("manual_pin");
+  });
+  test("pointer/keyboard persistence", async ({ page }, testInfo) => {
+    test.skip(testInfo.project.name === "outage");
+    const captured = { body: [] as unknown[] };
+    await installConciergeApiMocks(page, captured);
+
+    const response = await page.goto("/bookings/new");
+    expect(response?.status()).toBe(200);
+
+    // Initial search
+    await selectConciergeMapCandidate(page, 0, "taipei 101", "Taipei 101");
+
+    const pickupPicker = page.locator("[data-address-map-picker]").nth(0);
+    // Expand keyboard instructions
+    await pickupPicker.getByText(/Keyboard commands|鍵盤指令/).click();
+    
+    // Check that we can toggle manual coords from keyboard hints
+    await pickupPicker.getByText(/手動輸入座標|Enter coordinates manually/).first().click();
+    
+    // Coordinates from Taipei 101 should persist in the manual input
+    await expect(pickupPicker.getByLabel(/Latitude|緯度/)).toHaveValue("25.033964");
+    await expect(pickupPicker.getByLabel(/Longitude|經度/)).toHaveValue("121.564468");
   });
 });

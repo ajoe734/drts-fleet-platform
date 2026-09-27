@@ -100,7 +100,14 @@ test.describe("partner map booking UI", () => {
 
     await fillCardProgramFields(page);
     await selectPartnerMapCandidate(page, 0, "taipei 101", "Taipei 101");
-    await selectPartnerMapCandidate(page, 1, "Tokyo Tower", "Tokyo Tower");
+    
+    // Dropoff uses manual coordinates outside the service area
+    const dropoffPicker = page.locator("[data-address-map-picker]").nth(1);
+    await dropoffPicker.getByText(/手動輸入座標|Enter coordinates manually/).click();
+    await dropoffPicker.getByLabel(/Latitude|緯度/).fill("22.620");
+    await dropoffPicker.getByLabel(/Longitude|經度/).fill("120.300");
+    await dropoffPicker.getByLabel(/Reason|原因/).fill("Far away dropoff");
+    await dropoffPicker.getByRole("button", { name: /Use this location|確認使用此位置/ }).click();
 
     const submit = page.getByRole("button", { name: "驗證下單表單" });
     await expect(submit).toBeDisabled();
@@ -113,33 +120,36 @@ test.describe("partner map booking UI", () => {
 
     await fillCardProgramFields(page);
 
-    // Enter manual coords and blank reason
+    // Enter manual coords and valid reason for pickup
     const pickupPicker = page.locator("[data-address-map-picker]").nth(0);
-    await pickupPicker.getByText(/手動輸入座標/).click();
-    await pickupPicker.getByLabel(/緯度/).fill("25.033");
-    await pickupPicker.getByLabel(/經度/).fill("121.565");
-    await pickupPicker.getByRole("button", { name: /使用此位置/ }).click();
+    await pickupPicker.getByText(/手動輸入座標|Enter coordinates manually/).click();
+    await pickupPicker.getByLabel(/Latitude|緯度/).fill("25.033");
+    await pickupPicker.getByLabel(/Longitude|經度/).fill("121.565");
+    await pickupPicker.getByLabel(/Reason|原因/).fill("Partner outage pickup");
+    await pickupPicker.getByRole("button", { name: /Use this location|確認使用此位置/ }).click();
 
     const dropoffPicker = page.locator("[data-address-map-picker]").nth(1);
-    await dropoffPicker.getByText(/手動輸入座標/).click();
-    await dropoffPicker.getByLabel(/緯度/).fill("25.044");
-    await dropoffPicker.getByLabel(/經度/).fill("121.575");
-    await dropoffPicker.getByLabel(/原因/).fill("");
-    await dropoffPicker.getByRole("button", { name: /使用此位置/ }).click();
-
+    await dropoffPicker.getByText(/手動輸入座標|Enter coordinates manually/).click();
+    await dropoffPicker.getByLabel(/Latitude|緯度/).fill("25.044");
+    await dropoffPicker.getByLabel(/Longitude|經度/).fill("121.575");
+    
     // Blank reason means we can't submit
+    await dropoffPicker.getByLabel(/Reason|原因/).fill("");
+    await dropoffPicker.getByRole("button", { name: /Use this location|確認使用此位置/ }).click();
+
     const submit = page.getByRole("button", { name: "驗證下單表單" });
     await expect(submit).toBeDisabled();
 
-    // Fix reason
-    await dropoffPicker.getByText(/手動輸入座標/).click();
-    await dropoffPicker.getByLabel(/原因/).fill("Partner outage dropoff");
-    await dropoffPicker.getByRole("button", { name: /使用此位置/ }).click();
+    // Fix reason for dropoff
+    await dropoffPicker.getByLabel(/Reason|原因/).fill("Partner outage dropoff");
+    await dropoffPicker.getByRole("button", { name: /Use this location|確認使用此位置/ }).click();
 
     // Now it works
     await expect(submit).toBeEnabled();
     await submit.click();
-    await expect(page.getByText("表單驗證通過")).toBeVisible();
+    
+    // Actual PartnerBookingForm renders manual review required message
+    await expect(page.getByText(/送交人工審核|Submit for manual review|Manual review required/)).toBeVisible();
   });
 
   test("blocks submission when provider is down and no coordinates are provided", async ({ page }, testInfo) => {

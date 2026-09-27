@@ -193,6 +193,21 @@ const entries = {
 
 let lastTenantBookingCommand = null;
 
+let mockAddresses = [
+  {
+    addressId: "addr-001",
+    tenantId: "tenant-acme",
+    ownerPassengerId: null,
+    addressName: "Home",
+    addressText: "Taipei 101",
+    lat: 25.033,
+    lng: 121.565,
+    geocodeSource: "provider",
+    tags: [],
+    activeFlag: true,
+  }
+];
+
 const server = http.createServer((req, res) => {
   if (!req.url) {
     json(res, 400, { error: { code: "BAD_REQUEST", message: "Missing URL." } });
@@ -439,25 +454,30 @@ const server = http.createServer((req, res) => {
   }
 
   if (req.method === "GET" && url.pathname === "/api/tenant/addresses") {
-    json(res, 200, {
-      data: [
-        {
-          addressId: "addr-001",
-          tenantId: "tenant-acme",
-          ownerPassengerId: null,
-          addressName: "Home",
-          addressText: "Taipei 101",
-          lat: 25.033,
-          lng: 121.565,
-          geocodeSource: "provider",
-          tags: [],
-          activeFlag: true,
-        }
-      ],
-    });
+    json(res, 200, { data: mockAddresses });
     return;
   }
 
+  if (req.method === "POST" && url.pathname === "/api/tenant/addresses") {
+    let body = "";
+    req.on("data", (chunk) => {
+      body += chunk.toString();
+    });
+    req.on("end", () => {
+      const payload = JSON.parse(body);
+      
+      const idx = mockAddresses.findIndex((a) => a.addressId === payload.addressId);
+      if (idx !== -1) {
+        mockAddresses[idx] = { ...mockAddresses[idx], ...payload };
+        json(res, 200, { data: mockAddresses[idx] });
+      } else {
+        const newAddress = { ...payload, addressId: payload.addressId || "addr-" + Date.now() };
+        mockAddresses.push(newAddress);
+        json(res, 200, { data: newAddress });
+      }
+    });
+    return;
+  }
   if (req.method === "GET" && url.pathname === "/api/auth/session") {
     json(res, 200, {
       data: {
