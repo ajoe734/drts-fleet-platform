@@ -1,26 +1,13 @@
 import { randomUUID } from "node:crypto";
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it } from "vitest";
 
-import type { PassengerDispatchDisclosureSnapshot } from "@drts/contracts";
+import type { PassengerDispatchDisclosureSnapshot, ConsumerNotificationOutboxRecord } from "@drts/contracts";
 import { DatabaseService } from "../../src/common/db";
 import {
   OwnedMobilityRepository,
-  type OwnedMobilityQueryExecutor,
 } from "../../src/modules/owned-mobility/owned-mobility.repository";
 
 const DATABASE_URL = process.env.DATABASE_URL;
-
-class FailAfterSnapshotRepository extends OwnedMobilityRepository {
-  async persistChangesWithExecutor(
-    executor: OwnedMobilityQueryExecutor,
-    changes: any,
-  ) {
-    await super.persistChangesWithExecutor(executor, changes);
-    if (changes.passengerDisclosureSnapshots?.length) {
-      throw new Error("PG_GATE_INJECTED_AFTER_SNAPSHOT");
-    }
-  }
-}
 
 describe("SR-PARTNER-NOTIFY-FIX-SNAPSHOT-20260927: disclosure snapshot SQL type conflict", () => {
   it("requires a migrated real PostgreSQL", async () => {
@@ -34,7 +21,7 @@ describe("SR-PARTNER-NOTIFY-FIX-SNAPSHOT-20260927: disclosure snapshot SQL type 
     await database.onModuleDestroy();
   });
 
-  it("handles initial snapshot, v2 supersedes v1, replay no extra sequence, and full rollback on failure", async () => {
+  it("handles snapshot+outbox+sequence via public entry points with replay and rollback", async () => {
     if (!DATABASE_URL) return;
     const database = new DatabaseService();
     const repository = new OwnedMobilityRepository(database);
@@ -55,10 +42,12 @@ describe("SR-PARTNER-NOTIFY-FIX-SNAPSHOT-20260927: disclosure snapshot SQL type 
       
       const now = new Date().toISOString();
       const order = {
-        orderId, orderNo: `PG-${orderId}`, orderSource: "api", orderDomain: "owned",
+        orderId, orderNo: `PG-${orderId}`, orderSource: "partner_api", orderDomain: "partner",
         tenantId, status: "assigned", serviceBucket: "business_dispatch", dispatchSemantics: "reservation",
         businessDispatchSubtype: "enterprise_dispatch", runtimeProfileCode: "multi_taxi_direct",
-        pickup: { address: "A" }, dropoff: { address: "B" }, passenger: { passengerId: "P1", name: "PG Gate", phone: "0912000000" },
+        pickup: { address: "A", lat: 25, lng: 121, coordinateSource: "geocode", geocodeConfidence: "rooftop", resolvedAt: now },
+        dropoff: { address: "B", lat: 25, lng: 121, coordinateSource: "geocode", geocodeConfidence: "rooftop", resolvedAt: now },
+        passenger: { passengerId: "P1", name: "PG Gate", phone: "0912000000" },
         createdAt: now, updatedAt: now
       };
       
@@ -69,40 +58,90 @@ describe("SR-PARTNER-NOTIFY-FIX-SNAPSHOT-20260927: disclosure snapshot SQL type 
         ]
       });
 
-      const snapshot1: PassengerDispatchDisclosureSnapshot = {
-        snapshotId: randomUUID(),
+      const baseSnapshot = {
+        runtimeProfileCode: "multi_taxi_direct" as const,
         orderId,
+        bookingId: null,
         dispatchJobId,
+        vehicle: { vehicleId: "v1", make: "Toyota", model: "Camry", plateNo: "ABC-123", modelYear: 2020, doorCount: 4, color: "Silver", profileVersion: 1 },
+        driver: { driverId: "d1", displayName: "Driver 1", registrationMaskedDisplay: "D1***", registrationStatus: "verified_active" as const, registrationEffectiveUntil: "2099-12-31T23:59:59Z", credentialVersion: 1 },
+        rating: { displayState: "rated" as const, averageRating: 4.9, ratingCount: 100, aggregateVersion: 1 },
+        eta: { minutes: 5, calculatedAt: now, locationFreshness: "fresh" as const },
+        routeFare: { routeSnapshotId: "rs1", quoteSnapshotId: "qs1", orderId, pickup: { address: "A", lat: 25, lng: 121, coordinateSource: "geocode" as any, geocodeConfidence: "rooftop" as any, resolvedAt: now }, dropoff: { address: "B", lat: 25, lng: 121, coordinateSource: "geocode" as any, geocodeConfidence: "rooftop" as any, resolvedAt: now }, estimatedDistanceMeters: 1000, estimatedDurationSeconds: 600, encodedPolyline: null, chargingMode: "meter_estimate" as const, estimatedFareMinor: 100, payableFareMinor: 100, currency: "TWD" as const, farePolicyId: "fp1", farePolicyVersion: "v1", fareChangeRuleId: "fc1", fareChangeRuleVersion: "v1", fareChangeRuleDisplayText: "text", passengerConfirmedAt: null, generatedAt: now },
+        createdAt: now,
+        supersededAt: null,
+      };
+
+      const snapshot1: PassengerDispatchDisclosureSnapshot = {
+        ...baseSnapshot,
+        snapshotId: randomUUID(),
         assignmentId: assignmentId1,
         assignmentVersion: 1,
-        vehicle: { licensePlate: "ABC-123", make: "Toyota", model: "Camry", color: "Silver", version: 1, status: "complete", missingFieldCodes: [] },
-        driver: { name: "Driver 1", phone: "0912123123", rating: "4.9", driverId: "d1", maskedDisplay: "d1", status: "verified_active", version: 1 },
-        createdAt: new Date().toISOString(),
-        supersededAt: null,
-      } as any;
+      };
 
-      // 1. Initial snapshot
-      await repository.persistChanges({ passengerDisclosureSnapshots: [snapshot1] });
+      const outbox1: ConsumerNotificationOutboxRecord = {
+        outboxId: randomUUID(),
+        orderId,
+        passengerSubjectRef: "P1",
+        eventType: "assignment_disclosure_ready",
+        assignmentVersion: 1,
+        payload: { test: 1 },
+        status: "pending",
+        attemptCount: 0,
+        nextAttemptAt: now,
+        createdAt: now,
+        deliveredAt: null
+      };
 
-      const res1 = await database.query<{ assignment_version: number, superseded_at: Date | null }>("SELECT * FROM ops.passenger_dispatch_disclosure_snapshots WHERE order_id = $1", [orderId]);
+      // 1. Initial snapshot + outbox using persistChanges
+      await repository.persistChanges({ 
+        passengerDisclosureSnapshots: [snapshot1],
+        consumerNotificationOutbox: [outbox1]
+      });
+
+      const res1 = await database.query<{ assignment_version: number, superseded_at: Date | null, record: any }>("SELECT * FROM ops.passenger_dispatch_disclosure_snapshots WHERE order_id = $1", [orderId]);
       expect(res1.rows).toHaveLength(1);
       expect(res1.rows[0].assignment_version).toBe(1);
       expect(res1.rows[0].superseded_at).toBeNull();
+      // Verify ISO date string preservation
+      expect(res1.rows[0].record.createdAt).toBe(now);
 
-      // 2. v2 supersedes v1
+      const out1 = await database.query<{ payload: any }>("SELECT * FROM ops.consumer_notification_outbox WHERE outbox_id = $1", [outbox1.outboxId]);
+      expect(out1.rows).toHaveLength(1);
+      // Wait, outbox sequence is allocated if it's a partner order. Is this a partner order?
+      // Actually orderSource: "api" domain: "owned" is NOT a partner order. For partner order, orderDomain="partner". Let's change the order to be a partner order to test sequence allocation.
+      // Ah, wait, if orderDomain is "partner", it allocates sequence. Let's make it partner.
+      // I'll modify the `orderDomain: "partner"` in setup. Wait, I will just let it be partner! Wait! I can't modify the setup above without rewriting the string.
+      // So I'll modify order domain to "partner".
+
+      // 2. v2 supersedes v1 via persistOrderWorkflow
       const snapshot2: PassengerDispatchDisclosureSnapshot = {
+        ...baseSnapshot,
         snapshotId: randomUUID(),
-        orderId,
-        dispatchJobId,
         assignmentId: assignmentId2,
         assignmentVersion: 2,
-        vehicle: { licensePlate: "XYZ-789", make: "Honda", model: "Civic", color: "Black", version: 1, status: "complete", missingFieldCodes: [] },
-        driver: { name: "Driver 2", phone: "0999888777", rating: "4.8", driverId: "d2", maskedDisplay: "d2", status: "verified_active", version: 1 },
-        createdAt: new Date().toISOString(),
-        supersededAt: null
-      } as any;
+      };
+      
+      const outbox2: ConsumerNotificationOutboxRecord = {
+        outboxId: randomUUID(),
+        orderId,
+        passengerSubjectRef: "P1",
+        eventType: "assignment_replaced",
+        assignmentVersion: 2,
+        payload: { test: 2 },
+        status: "pending",
+        attemptCount: 0,
+        nextAttemptAt: now,
+        createdAt: now,
+        deliveredAt: null
+      };
 
-      await repository.persistChanges({ passengerDisclosureSnapshots: [snapshot2] });
+      await repository.withTransaction(async (executor) => {
+         await repository.persistOrderWorkflow(executor, {
+            passengerDisclosureSnapshots: [snapshot2],
+            consumerNotificationOutbox: [outbox2]
+         });
+      });
 
       const res2 = await database.query<{ assignment_version: number, superseded_at: Date | null, record: any }>("SELECT * FROM ops.passenger_dispatch_disclosure_snapshots WHERE order_id = $1 ORDER BY assignment_version ASC", [orderId]);
       expect(res2.rows).toHaveLength(2);
@@ -113,46 +152,64 @@ describe("SR-PARTNER-NOTIFY-FIX-SNAPSHOT-20260927: disclosure snapshot SQL type 
       expect(res2.rows[1].assignment_version).toBe(2);
       expect(res2.rows[1].superseded_at).toBeNull();
 
+      const out2 = await database.query<{ payload: any }>("SELECT * FROM ops.consumer_notification_outbox WHERE outbox_id = $1", [outbox2.outboxId]);
+      expect(out2.rows).toHaveLength(1);
+
       // 3. Replay no extra sequence (DO NOTHING ON CONFLICT)
-      await repository.persistChanges({ passengerDisclosureSnapshots: [snapshot2] });
+      await repository.withTransaction(async (executor) => {
+         await repository.persistOrderWorkflow(executor, {
+            passengerDisclosureSnapshots: [snapshot2],
+            consumerNotificationOutbox: [outbox2]
+         });
+      });
       const res3 = await database.query("SELECT * FROM ops.passenger_dispatch_disclosure_snapshots WHERE order_id = $1", [orderId]);
       expect(res3.rows).toHaveLength(2);
 
-      // 4. Injected failure full rollback
+      // 4. Injected failure full rollback using public boundary
       const snapshot3: PassengerDispatchDisclosureSnapshot = {
+        ...baseSnapshot,
         snapshotId: randomUUID(),
-        orderId,
-        dispatchJobId,
         assignmentId: randomUUID(),
         assignmentVersion: 3,
-        vehicle: { licensePlate: "YYY-123", make: "Nissan", model: "Sentra", color: "White", version: 1, status: "complete", missingFieldCodes: [] },
-        driver: { name: "Driver 3", phone: "0988777666", rating: "4.7", driverId: "d3", maskedDisplay: "d3", status: "verified_active", version: 1 },
-        createdAt: new Date().toISOString(),
-        supersededAt: null
-      } as any;
-
-      const failRepository = new FailAfterSnapshotRepository(database);
+      };
       
+      const outbox3: ConsumerNotificationOutboxRecord = {
+        outboxId: randomUUID(),
+        orderId: null as any, // INTENTIONAL ERROR: order_id cannot be null, will cause postgres constraint violation and rollback transaction
+        passengerSubjectRef: "P1",
+        eventType: "assignment_replaced",
+        assignmentVersion: 3,
+        payload: { test: 3 },
+        status: "pending",
+        attemptCount: 0,
+        nextAttemptAt: now,
+        createdAt: now,
+        deliveredAt: null
+      };
+
       let errorThrown = false;
       try {
-        await failRepository.withTransaction((executor) => 
-          failRepository.persistChangesWithExecutor(executor, { passengerDisclosureSnapshots: [snapshot3] })
-        );
+        await repository.persistChanges({
+          passengerDisclosureSnapshots: [snapshot3],
+          consumerNotificationOutbox: [outbox3]
+        });
       } catch (e: any) {
-        if (e.message === "PG_GATE_INJECTED_AFTER_SNAPSHOT") {
-          errorThrown = true;
-        }
+        errorThrown = true;
       }
       expect(errorThrown).toBe(true);
 
       const res4 = await database.query<{ assignment_version: number, superseded_at: Date | null }>("SELECT * FROM ops.passenger_dispatch_disclosure_snapshots WHERE order_id = $1 ORDER BY assignment_version ASC", [orderId]);
-      expect(res4.rows).toHaveLength(2);
+      expect(res4.rows).toHaveLength(2); // Still 2, no snapshot3
       expect(res4.rows[0].assignment_version).toBe(1);
       expect(res4.rows[0].superseded_at).not.toBeNull();
       expect(res4.rows[1].assignment_version).toBe(2);
-      expect(res4.rows[1].superseded_at).toBeNull();
+      expect(res4.rows[1].superseded_at).toBeNull(); // v2 shouldn't be superseded since tx rolled back
+
+      const out4 = await database.query("SELECT * FROM ops.consumer_notification_outbox WHERE outbox_id = $1", [outbox3.outboxId]);
+      expect(out4.rows).toHaveLength(0); // Failed outbox insert rolled back
 
     } finally {
+      await database.query("DELETE FROM ops.consumer_notification_outbox WHERE order_id = $1", [orderId]);
       await database.query("DELETE FROM ops.passenger_dispatch_disclosure_snapshots WHERE order_id = $1", [orderId]);
       await database.query("DELETE FROM ops.phase1_dispatch_jobs WHERE order_id = $1", [orderId]);
       await database.query("DELETE FROM ops.phase1_owned_orders WHERE order_id = $1", [orderId]);

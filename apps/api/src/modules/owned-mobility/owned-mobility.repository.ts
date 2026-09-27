@@ -1807,7 +1807,7 @@ export class OwnedMobilityRepository {
             WITH superseded AS (
               UPDATE ops.passenger_dispatch_disclosure_snapshots
               SET
-                superseded_at = $7::timestamptz,
+                superseded_at = ($7::text)::timestamptz,
                 record = jsonb_set(
                   record,
                   '{supersededAt}',
@@ -1827,7 +1827,7 @@ export class OwnedMobilityRepository {
               record,
               created_at,
               superseded_at
-            ) VALUES ($1, $2, $3, $4, $5, $6::jsonb, $7::timestamptz, $8::timestamptz)
+            ) VALUES ($1, $2, $3, $4, $5, $6::jsonb, ($7::text)::timestamptz, ($8::text)::timestamptz)
             ON CONFLICT (assignment_id, assignment_version) DO NOTHING
           `,
           [
