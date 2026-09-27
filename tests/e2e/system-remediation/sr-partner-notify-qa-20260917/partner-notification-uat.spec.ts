@@ -1089,6 +1089,14 @@ test.describe("SR-PARTNER-NOTIFY-QA-20260917: E2E Partner Notification Delivery 
           "real AppModule OS restart, natural production backoff; receiver returns 503 after durable inbox; no device acceptance",
       }),
     });
+    // Exhaustion legitimately disables this shared endpoint. Restore its
+    // governed readiness before the next case tests a different refusal reason.
+    // This does not reset or retry the exhausted outbox.
+    fixture.fault = "none";
+    await fixture.revalidateEndpoint(entry);
+    await fixture.revalidateBinding(entry);
+    expect(await fixture.outcome(outboxId)).toEqual(terminal);
+    expect(received(outboxId)).toHaveLength(5);
   });
 
   test("C217 E2E: Expired notifications stop without sending", async () => {
