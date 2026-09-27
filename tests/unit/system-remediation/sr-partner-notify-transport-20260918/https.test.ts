@@ -61,10 +61,39 @@ describe("partner HTTPS restrictions", () => {
     "https://user:pass@example.com",
     "https://127.0.0.1",
     "https://[::1]",
-  ])("rejects unsafe endpoint %s before opening a socket", async (url) => {
+  ])("rejects unsafe endpoint %s before opening a socket (default behavior)", async (url) => {
     await expect(partnerNotificationHttpsFetch(url)).rejects.toThrow(
       "partner_endpoint_not_public_https",
     );
+  });
+
+  describe("environment safeguard matrix", () => {
+    afterEach(() => {
+      vi.unstubAllEnvs();
+    });
+
+    it("production env rejects HTTP/local even if flag is true", async () => {
+      vi.stubEnv("NODE_ENV", "production");
+      vi.stubEnv("DRTS_ALLOW_LOCAL_WEBHOOKS", "true");
+      await expect(partnerNotificationHttpsFetch("http://127.0.0.1")).rejects.toThrow(
+        "partner_endpoint_not_public_https",
+      );
+    });
+
+    it("test env rejects HTTP/local if flag is false or unset", async () => {
+      vi.stubEnv("NODE_ENV", "test");
+      vi.stubEnv("DRTS_ALLOW_LOCAL_WEBHOOKS", "false");
+      await expect(partnerNotificationHttpsFetch("http://127.0.0.1")).rejects.toThrow(
+        "partner_endpoint_not_public_https",
+      );
+
+      vi.stubEnv("DRTS_ALLOW_LOCAL_WEBHOOKS", "");
+      await expect(partnerNotificationHttpsFetch("http://127.0.0.1")).rejects.toThrow(
+        "partner_endpoint_not_public_https",
+      );
+    });
+
+
   });
   it("ack body shares the platform deadline even when the reader ignores abort", async () => {
     vi.useFakeTimers();
