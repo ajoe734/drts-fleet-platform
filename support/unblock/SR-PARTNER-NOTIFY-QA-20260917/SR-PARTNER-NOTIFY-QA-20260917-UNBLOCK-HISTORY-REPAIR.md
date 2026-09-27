@@ -286,3 +286,18 @@ the release CLI handoff receipt. Report checks are formatting, canonical links,
 diff scope/whitespace and the full-range commit policy; they do not establish
 parent functionality. Any hosted checks triggered by publication remain tied
 to this helper's exact SHA.
+
+### Published evidence
+
+- Anchor `bf63f0c9b3566fc10635a93c1ed5e64edd099cc2` was normally pushed to
+  `codex2/sr-partner-notify-qa-20260917-unblock-history-repair`; remote head and
+  [draft PR #2181](https://github.com/ajoe734/drts-fleet-platform/pull/2181) head
+  were read back and matched. The PR targets dev and changes only this report.
+- Anchor report checks completed: Prettier exit 0, canonical consistency exit 0
+  (zero findings), full-range trailer check exit 0 (one commit), and
+  `git diff --check origin/dev...HEAD` exit 0. The closeout commit adds this
+  publication receipt; its full identity and final results are read back through
+  the same checks and recorded in the task/PR receipt.
+- The parent note and blocked disposition remain pending Supervisor action.
+  Publication of the report does not satisfy that fourth acceptance item. Do not
+  approve/merge the helper or claim parent unblocking while it remains missing.
