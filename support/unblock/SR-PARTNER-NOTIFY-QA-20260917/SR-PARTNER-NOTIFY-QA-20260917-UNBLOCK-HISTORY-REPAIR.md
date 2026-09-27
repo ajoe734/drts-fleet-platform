@@ -18,10 +18,12 @@ worktree, PR, or published commit was changed. The preview is a tree, **not a
 commit, candidate, runtime result, or completed parent repair**.
 
 The parent remains blocked on product repairs and all three required acceptance
-items. Updating its machine-truth next step was attempted through the supplied
-CLI but rejected by the worker's cross-task guard. **Supervisor must persist
-the parent note and blocked helper disposition in section 5 before approval or
-merge of this helper.** That acceptance item is still outstanding.
+items. The worker's original parent update was rejected by the cross-task guard.
+**The operator updates are now persisted:** release-CLI readback at
+`2026-09-27T23:00:54.120715Z` confirms all three helper disposition fields and
+the identical concrete parent next step, while preserving `blocked`/`Gemini`.
+Section 5 records the failed and corrected states. HR-R1 / helper acceptance 4
+is now supported; this does not resolve any parent product acceptance.
 
 ## 1. Fixed identities and branch/worktree diagnosis
 
@@ -239,7 +241,7 @@ is successful with main product jobs skipped; its green aggregate is not product
 acceptance. No product, database, browser, receiver, deployment or live/device
 test was started on this VM for this helper.
 
-## 5. Canonical update required from Supervisor
+## 5. Canonical operator update and verified readback
 
 The supplied release entry point is
 `/home/lupin/workspace/drts-fleet-platform/tools/development-orchestrator/bin/ai-status.sh`.
@@ -250,12 +252,13 @@ worker's helper lifecycle only. No guard environment was removed, no different
 identity was assumed, and no machine-truth files were directly edited.
 Helper `start` and `progress` succeeded and record this outstanding action.
 
-Supervisor must use the same release CLI's normal metadata/assignment gateway
-to persist the following on the helper, and `note` on the parent for the same
-concrete next step. Preserve existing task ownership/scopes unless separately
-coordinating a repair child. Do not manually set `resolved_parent_at`; merge
-lifecycle supplies it. The helper's default resolution would otherwise make a
-blocked parent todo despite unresolved product defects.
+The required repair was for Supervisor to use the same release CLI's normal
+metadata/assignment gateway to persist the following on the helper, and `note`
+on the parent for the same concrete next step. Existing ownership/scopes must
+be preserved unless separately coordinating a repair child. Do not manually
+set `resolved_parent_at`; merge lifecycle supplies it. The helper's default
+resolution would otherwise make a blocked parent todo despite unresolved
+product defects.
 
 ```json
 {
@@ -265,10 +268,10 @@ blocked parent todo despite unresolved product defects.
 }
 ```
 
-This is a review-blocking operator action, not an instruction for the reviewer
-to edit the parent candidate or impersonate Supervisor. Read back both task
-slices after the update; helper completion alone does not establish parent
-readiness. Resume parent work only with fresh resolution evidence.
+This was a review-blocking operator action, not an instruction for the reviewer
+to edit the parent candidate or impersonate Supervisor. Both task slices must
+be read back after the update; helper completion alone does not establish
+parent readiness. Resume parent work only with fresh resolution evidence.
 
 ### HR-R1 reopen: operator boundary and readback (2026-09-27)
 
@@ -291,7 +294,9 @@ All three helper comparisons and parent-next comparison fail; parent status,
 waiting-for and timestamp checks pass. It writes only compact machine-local
 receipts. The inspected report SHA-256 is
 `3aa2b166395471c1abd3d67d02b7332e129c01d44ea4242448111f80c914b865`.
-There is no corrected-state receipt yet.
+There was no corrected-state receipt at that checkpoint. The successful
+continuation below supersedes that outstanding operator hold while preserving
+this original failed reproduction.
 
 The active release's actual call path localizes the repair boundary:
 
@@ -350,16 +355,94 @@ The CLI's agent registry excludes Supervisor from `blocker`'s waiting-agent
 argument; the owner therefore uses `progress` with this explicit operator
 blocker rather than attributing the missing action to a different lane.
 
+### HR-R1 corrected state observed by the owner (2026-09-27)
+
+During this continuation, the initial live check still showed missing helper
+fields and the parent's old unit7 text. The later release-CLI readback at
+`2026-09-27T23:00:54.120715Z` completed **exit 0, all eight comparisons passed**.
+The helper slice then had `last_update=2026-09-27T22:59:33Z`; the parent had
+`last_update=2026-09-27T22:59:34Z`. These are observed state timestamps, not a
+claim that the worker executed the operator commands.
+
+| Live comparison                      | Corrected result                                  |
+| ------------------------------------ | ------------------------------------------------- |
+| Helper `resolved_parent_status`      | `blocked`, exact match to section 5 JSON          |
+| Helper `resolved_parent_waiting_for` | `Gemini`, exact match                             |
+| Helper `resolved_parent_next`        | Exact full-string match to section 5 JSON         |
+| Parent `status`                      | `blocked`, preserved                              |
+| Parent `waiting_for`                 | `Gemini`, preserved                               |
+| Parent `next`                        | Exact full-string match to `resolved_parent_next` |
+| Helper `resolved_parent_at`          | Absent; lifecycle has not resolved the helper     |
+| Helper owner / reviewer              | `Codex2` / `Codex`, preserved                     |
+
+Receipt: `.local/hr-r1-20260927-resume/readback.json`, SHA-256
+`9d1c74a17326a66a495f43d16e5543ee9bb15324556082593832f8a077f1adc4`.
+It records both filtered CLI slices, expected values, all eight comparisons,
+the observed helper HEAD `e3aebbeff450c71d2ac73821d93a08c58f408d0a`, and
+that report's SHA-256
+`66b6595488234175671ce53cfb2f1550f3a7764d21a270fe5c252cecfe86961a`.
+The bounded activity-log tail also records `Supervisor` `assign` at 22:59:33Z
+for the helper and `Supervisor` `note` at 22:59:34Z for the parent; live task
+slices, not those log entries alone, establish the persisted correction.
+The table and exact JSON above retain the evidence if machine-local receipts
+are unavailable in a later isolated worktree. Re-run the live comparison from
+this helper worktree without depending on the earlier local probe file:
+
+````bash
+python3 - <<'PY'
+import json
+import os
+from pathlib import Path
+import re
+import subprocess
+
+cli = "/home/lupin/workspace/drts-fleet-platform/tools/development-orchestrator/bin/ai-status.sh"
+parent_id = "SR-PARTNER-NOTIFY-QA-20260917"
+helper_id = parent_id + "-UNBLOCK-HISTORY-REPAIR"
+text = Path(f"support/unblock/{parent_id}/{helper_id}.md").read_text()
+section = text.split("## 5. ", 1)[1]
+expected = json.loads(re.search(r"```json\n(.*?)\n```", section, re.S).group(1))
+assert set(expected) == {
+    "resolved_parent_status", "resolved_parent_waiting_for", "resolved_parent_next"
+}
+
+def show(task_id):
+    result = subprocess.run(
+        [cli, "show", task_id], env={**os.environ, "AI_NAME": "Codex2"},
+        capture_output=True, text=True, check=True,
+    )
+    return json.loads(result.stdout)
+
+helper, parent = show(helper_id), show(parent_id)
+checks = {f"helper.{key}": helper.get(key) == value for key, value in expected.items()}
+checks.update({
+    "parent.status": parent.get("status") == expected["resolved_parent_status"],
+    "parent.waiting_for": parent.get("waiting_for") == expected["resolved_parent_waiting_for"],
+    "parent.next": parent.get("next") == expected["resolved_parent_next"],
+    "no_early_resolved_parent_at": "resolved_parent_at" not in helper,
+    "owner_reviewer_preserved": (helper.get("owner"), helper.get("reviewer")) == ("Codex2", "Codex"),
+})
+print(json.dumps(checks, indent=2))
+raise SystemExit(0 if all(checks.values()) else 1)
+PY
+````
+
+This is a pre-merge state check through the production CLI; no merge handler
+is simulated and no machine truth is directly edited. Parent R5/R9/R10/R11/R12,
+successor routing and all three product acceptance gates remain unresolved.
+The owner can now publish this receipt and submit a new immutable helper
+candidate for Codex review; the rejected candidate is not reused.
+
 ## 6. Acceptance and publication ledger
 
-| Acceptance / finding            | Source and verification                                                             | Old result → current result                                                                 | Outstanding boundary                                                      |
-| ------------------------------- | ----------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------- |
-| Identify contamination (R8/R9)  | Fixed-SHA logs/diffs, refs/PRs, production trailer checker and completed CI log     | 18 invalid messages reproduced; 20 authorized + 3 unauthorized paths identified             | No assertion of product repair                                            |
-| Document non-destructive repair | Section 3 patch recipe; local `audit.py` / `preview.json` / `invalid-commits.json`  | Existing rail fails; clean-index import, blob/trunk preservation and whitespace checks pass | Actual successor and new same-SHA product verification remain parent work |
-| Task-scoped commit/push/PR      | Only this report is authored on the dispatched helper branch                        | Publication receipt and helper PR record full candidate identity                            | No parent candidate manufactured                                          |
-| Parent concrete next step       | Release CLI parent `note` attempt; helper `progress` receipt; section 5 disposition | Parent write rejected (exit 1); helper progress recorded (exit 0)                           | Supervisor must persist note/disposition before helper approval/merge     |
-| HR-R1 / acceptance 4 reopen     | Section 5 live readback and active-release guard/metadata/resolution call path      | Reviewed `6334a41a` missing fields → fresh readback still missing; probe exit 1 expected    | Unresolved; only Supervisor can perform the documented operator sequence  |
-| Parent required acceptance      | Section 4 and original UAT ledger                                                   | All three NOT MET, retained                                                                 | PG/browser/live/device acceptance not executed by helper                  |
+| Acceptance / finding            | Source and verification                                                                    | Old result → current result                                                                 | Outstanding boundary                                                      |
+| ------------------------------- | ------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------- |
+| Identify contamination (R8/R9)  | Fixed-SHA logs/diffs, refs/PRs, production trailer checker and completed CI log            | 18 invalid messages reproduced; 20 authorized + 3 unauthorized paths identified             | No assertion of product repair                                            |
+| Document non-destructive repair | Section 3 patch recipe; local `audit.py` / `preview.json` / `invalid-commits.json`         | Existing rail fails; clean-index import, blob/trunk preservation and whitespace checks pass | Actual successor and new same-SHA product verification remain parent work |
+| Task-scoped commit/push/PR      | Only this report is authored on the dispatched helper branch                               | Publication receipt and helper PR record full candidate identity                            | No parent candidate manufactured                                          |
+| Parent concrete next step       | Section 5 exact metadata/parent-next comparison through the release CLI                    | Initial worker write rejected (exit 1) → actual operator updates read back (exit 0)         | Parent stays blocked; successor routing/product fixes still required      |
+| HR-R1 / acceptance 4 reopen     | Reviewed `6334a41a`, checkpoint `e3aebbef`, active-release call path and corrected receipt | Missing fields / old parent next → all eight live comparisons pass at 23:00:54Z             | Finding addressed; Codex must review the new immutable candidate          |
+| Parent required acceptance      | Section 4 and original UAT ledger                                                          | All three NOT MET, retained                                                                 | PG/browser/live/device acceptance not executed by helper                  |
 
 The helper uses ordinary commits and normal push. Its final local SHA, remote
 head and PR head must match `CANDIDATE_SHA`, `CANDIDATE_BRANCH` and `PR_URL` in
@@ -379,9 +462,9 @@ to this helper's exact SHA.
   `git diff --check origin/dev...HEAD` exit 0. The closeout commit adds this
   publication receipt; its full identity and final results are read back through
   the same checks and recorded in the task/PR receipt.
-- The parent note and blocked disposition remain pending Supervisor action.
-  Publication of the report does not satisfy that fourth acceptance item. Do not
-  approve/merge the helper or claim parent unblocking while it remains missing.
+- At initial publication, the parent note and blocked disposition were pending
+  Supervisor action. Publication alone did not satisfy acceptance 4; the actual
+  operator updates and successful readback above now supply the missing evidence.
 - HR-R1 owner continuation adds the precise gateway sequence and fresh failed
   readback to this same artifact. Its next ordinary commit/push is a recovery
   checkpoint only, not a handoff or a claim that the reviewer finding is fixed.
@@ -389,3 +472,21 @@ to this helper's exact SHA.
   success (main product jobs skipped) apply only to `6334a41a`; any checkpoint
   CI must be read separately. No parent source, branch, worktree or task state
   was changed by this continuation.
+- Checkpoint `e3aebbeff450c71d2ac73821d93a08c58f408d0a` was normally pushed and
+  matched local/remote/draft PR #2181. Its
+  [CI 36356271696](https://github.com/ajoe734/drts-fleet-platform/actions/runs/36356271696)
+  completed success, including hosted lint/typecheck/migrations/root and API unit
+  steps; [integration 36356271702](https://github.com/ajoe734/drts-fleet-platform/actions/runs/36356271702)
+  completed success with main product jobs skipped. Both were read to completion.
+  They establish only checkpoint validation, not validation of the new receipt
+  commit or parent acceptance. The final receipt commit's SHA, PR head, artifact
+  hash and completed checks are recorded in the subsequent handoff/PR receipt.
+- This continuation re-executed the documented live probe (eight comparisons,
+  exit 0) and syntax-checked all four shell blocks (`bash -n`, exit 0). The
+  production parent trailer checker again produced exactly 18 failures in 72
+  commits (expected exit 1). A fresh isolated index reproduced the same preview
+  tree and both patch hashes, recovered all 20 QA blobs, excluded the same three
+  product files, preserved all 31 dev blobs and passed whitespace checks (exit 0).
+  `git show-ref` before/after was identical. The scoped regression receipt is
+  `.local/hr-r1-20260927-resume/recovery-regression.json`; no parent ref, source
+  file or worktree was changed and no product runtime was started.
