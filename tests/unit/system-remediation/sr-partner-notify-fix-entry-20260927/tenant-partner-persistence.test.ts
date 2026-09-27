@@ -30,6 +30,7 @@ describe("SR-PARTNER-NOTIFY-FIX-ENTRY-20260927: TenantPartnerService entry durab
         displayName: "Durable Partner",
         authMode: "partner_api_key",
         eligibilityMode: "none",
+        businessDispatchSubtype: "enterprise_dispatch",
       },
       "req-1",
     ).then((res) => {
@@ -73,6 +74,7 @@ describe("SR-PARTNER-NOTIFY-FIX-ENTRY-20260927: TenantPartnerService entry durab
           displayName: "Failed Partner",
           authMode: "partner_api_key",
           eligibilityMode: "none",
+          businessDispatchSubtype: "enterprise_dispatch",
         },
         "req-2",
       )

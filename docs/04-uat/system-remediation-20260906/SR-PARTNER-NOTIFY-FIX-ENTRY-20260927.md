@@ -25,8 +25,13 @@
 
 ### ENTRY-R4 [P2] Hosted-PG regression is invalid
 * **Original Issue**: The integration test `sr-partner-notify-fix-entry-20260927.integration.test.ts` checked a nonexistent `admin.phase1_tenant_partner_state` table and did not call `PartnerEntryNotificationBindingService.putBinding`. The `DatabaseService` constructor was also incorrectly passed arguments.
-* **Fix**: Updated the test to use `vitest.skipIf(!DATABASE_URL)`, instantiate `DatabaseService` properly with zero arguments, and call `bindingService.putBinding(entrySlug, ...)` to prove the FK constraint to `admin.phase1_partner_channel_entries` succeeds.
+* **Fix**: Updated the test to use `vitest.skipIf(!DATABASE_URL)`, instantiate `DatabaseService` properly with zero arguments, and call `bindingService.putBinding(entrySlug, ...)` to prove the FK constraint to `admin.phase1_partner_channel_entries` succeeds. Added `eventTypes: ["partner.entry.created"]` to satisfy the binding service API requirements.
 * **Verification**: Integration test passes or properly skips when `DATABASE_URL` is missing: `pnpm exec vitest run tests/integration/sr-partner-notify-fix-entry-20260927.integration.test.ts`.
+
+### ENTRY-R6 [P2] Type check failures on persistence tests
+* **Original Issue**: Typecheck failed in `tenant-partner-persistence.test.ts` and `sr-partner-notify-fix-entry-20260927.integration.test.ts` due to missing `businessDispatchSubtype` in `CreatePartnerChannelEntryCommand`.
+* **Fix**: Added `businessDispatchSubtype: "enterprise_dispatch"` to the payload in all affected tests.
+* **Verification**: `pnpm run typecheck` passes for the isolated API workspace.
 
 ### ENTRY-R5 [P2] Required artifact missing
 * **Original Issue**: This artifact was missing from the candidate.

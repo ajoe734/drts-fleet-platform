@@ -52,6 +52,7 @@ describe.skipIf(!DATABASE_URL)(
         displayName: "PG Durable Partner",
         authMode: "partner_api_key",
         eligibilityMode: "none",
+        businessDispatchSubtype: "enterprise_dispatch",
       });
 
       expect(entry.entrySlug).toBe(entrySlug);
@@ -64,6 +65,7 @@ describe.skipIf(!DATABASE_URL)(
         {
           notificationType: "webhook",
           endpointUrl: "https://example.com/webhook",
+          eventTypes: ["partner.entry.created"],
         },
         null
       );
