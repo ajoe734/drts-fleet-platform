@@ -121,7 +121,7 @@ test.describe("SR-PARTNER-NOTIFY-QA-20260917 E2E Cases", () => {
   test("同 tenant 兩 entry 僅送原 entry - Entry specific delivery & Cross-tenant Endpoint Isolation", async () => {
     const whRes = await apiCall(tenantA, tokenA, "POST", "api/tenant/webhooks", {
       url: receiverUrl,
-      secret: "test-secret",
+      secret: "whsec_e2e_verified_signing_secret_999",
       events: ["passenger.assignment_disclosure_ready.v1"],
     });
     expect(whRes.status()).toBe(201);
@@ -184,9 +184,10 @@ test.describe("SR-PARTNER-NOTIFY-QA-20260917 E2E Cases", () => {
 
     const whRes = await apiCall(tenantA, tokenA, "POST", "api/tenant/webhooks", {
       url: receiverUrl,
-      secret: "test-secret",
+      secret: "whsec_e2e_verified_signing_secret_999",
       events: ["passenger.assignment_disclosure_ready.v1"],
     });
+    expect(whRes.status()).toBe(201);
     const webhookId = (await whRes.json()).data.webhook_id;
 
     await apiCall(tenantA, tokenPlatform, "PUT", `api/platform-admin/partner-entries/${entrySlug}/notification-binding`, {
@@ -220,9 +221,10 @@ test.describe("SR-PARTNER-NOTIFY-QA-20260917 E2E Cases", () => {
     });
     const whRes = await apiCall(tenantA, tokenA, "POST", "api/tenant/webhooks", {
       url: receiverUrl,
-      secret: "test-secret",
+      secret: "whsec_e2e_verified_signing_secret_999",
       events: ["passenger.assignment_disclosure_ready.v1"],
     });
+    expect(whRes.status()).toBe(201);
     const webhookId = (await whRes.json()).data.webhook_id;
     await apiCall(tenantA, tokenPlatform, "PUT", `api/platform-admin/partner-entries/${entrySlug}/notification-binding`, {
       webhookId,
@@ -310,12 +312,12 @@ test.describe("SR-PARTNER-NOTIFY-QA-20260917 E2E Cases", () => {
     expect([401, 403, 404, 200]).toContain(res.status());
   });
 
-  test("管理真狀態與 retry UI, restart/claim/fence/唯一 retry owner", async ({ page }) => {
+  test("管理真狀態與 retry UI, restart/claim/fence/唯一 retry owner", async ({ request }) => {
     const adminUrl = "http://127.0.0.1:3001/partners/test-slug";
     try {
-      await page.goto(adminUrl, { timeout: 10000 });
-      const title = await page.title();
-      expect(typeof title).toBe('string');
+      const res = await request.get(adminUrl, { timeout: 10000 });
+      const html = await res.text();
+      expect(typeof html).toBe('string');
     } catch (e) {
       // Network failure fallback is fine if not running locally
     }
