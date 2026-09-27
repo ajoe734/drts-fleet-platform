@@ -278,7 +278,12 @@ test.describe("Hosted navigation and session boundaries", () => {
   test("C224 NAV: ReturnTo and every handoff consumption path reject replay", async ({
     page,
   }) => {
-    test.setTimeout(170_000);
+    test.setTimeout(240_000);
+    // The real consumer uses OPEN_ROUTE_RATE_LIMIT (30 requests/minute).
+    // Earlier negative cases share its caller bucket. Start a new natural
+    // window before issuing these 120-second handoffs; keep every refusal
+    // assertion strict so throttling can never count as replay protection.
+    await new Promise((resolve) => setTimeout(resolve, 61_000));
     const navFixture = new NavigationFixture(fixture);
     const entry = fixture.entries[0]!;
     const orderId = await fixture.createRide(entry);
@@ -363,6 +368,7 @@ test.describe("Hosted navigation and session boundaries", () => {
         candidate_sha: process.env.CANDIDATE_SHA,
         orderId,
         rows,
+        pacing: "natural61s before issuance; production rate limits unchanged",
         expiry: "natural120s",
         returnTo: "same origin preserved; external origin refused",
       }),
