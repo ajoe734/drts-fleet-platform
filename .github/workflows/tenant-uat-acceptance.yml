@@ -39,6 +39,8 @@ on:
       - claude/sr-qa-tenant-001-acceptance-runner
       - codex/sr-qa-tenant-ci-repair-20260911
       - gemini2/sr-c115-harness-20260913
+      - gemini/sr-partner-notify-qa-20260917
+      - gemini/sr-partner-notify-qa-20260917
     paths:
       - .github/workflows/tenant-uat-acceptance.yml
       - tools/ci/test_tenant_uat_acceptance_workflow.py
@@ -48,6 +50,13 @@ on:
       - tests/e2e/system-remediation/sr-qa-webhook-001/**
       - tests/unit/system-remediation/sr-qa-webhook-001/**
       - docs/04-uat/system-remediation-20260906/SR-QA-WEBHOOK-001.md
+      - tests/e2e/system-remediation/sr-partner-notify-qa-20260917/**
+      - tests/unit/system-remediation/sr-partner-notify-qa-20260917/**
+      - docs/04-uat/system-remediation-20260906/SR-PARTNER-NOTIFY-QA-20260917.md
+      - docs/02-architecture/partner-notification-20260917/04_sources.md
+      - tests/e2e/system-remediation/sr-partner-notify-qa-20260917/**
+      - tests/unit/system-remediation/sr-partner-notify-qa-20260917/**
+      - docs/04-uat/system-remediation-20260906/SR-PARTNER-NOTIFY-QA-20260917.md
 
 permissions:
   contents: read
@@ -84,6 +93,9 @@ jobs:
           - 8025:8025
     env:
       DATABASE_URL: postgresql://postgres:postgres@localhost:5432/drts_fleet_platform
+      PARTNER_NOTIFY_TRANSPORT_TEST_DATABASE_URL: postgresql://postgres:postgres@localhost:5432/drts_fleet_platform
+      PARTNER_NOTIFY_UI_TEST_DATABASE_URL: postgresql://postgres:postgres@localhost:5432/drts_fleet_platform
+      PARTNER_NOTIFY_SEQ_TEST_DATABASE_URL: postgresql://postgres:postgres@localhost:5432/drts_fleet_platform
       DRTS_UAT_ENV: sandbox
       NODE_ENV: test
       AUTH_MODE: test
@@ -98,6 +110,7 @@ jobs:
       CANDIDATE_SHA: ${{ github.event.inputs.candidate_sha || github.sha }}
       WORKFLOW_SHA: ${{ github.sha }}
       DRTS_CANDIDATE_SHA: ${{ github.event.inputs.candidate_sha || github.sha }}
+      DRTS_ALLOW_LOCAL_WEBHOOKS: "true"
     steps:
       - name: Validate candidate_sha input
         run: |
@@ -157,6 +170,13 @@ jobs:
           set -o pipefail
           pnpm --filter @drts/api... build 2>&1 | tee -a .artifacts/tenant-uat-acceptance/execution-log.txt
 
+      - name: Build UI applications
+        id: build_ui
+        run: |
+          set -o pipefail
+          pnpm --filter @drts/platform-admin-web... build 2>&1 | tee -a .artifacts/tenant-uat-acceptance/execution-log.txt
+          pnpm --filter @drts/referral-embed-web... build 2>&1 | tee -a .artifacts/tenant-uat-acceptance/execution-log.txt
+
       - name: Seed disposable tenant A/B sessions through the authoritative service
         id: seed
         run: |
@@ -164,6 +184,34 @@ jobs:
           ./apps/api/node_modules/.bin/tsx tests/e2e/system-remediation/sr-qa-tenant-001/appmodule-acceptance-seed.ts \
             2>&1 | awk '{ print; if ($0 !~ /^::add-mask::/) print >> ".artifacts/tenant-uat-acceptance/execution-log.txt"; }'
 
+      - name: Run tenant service-level regression suite
+        id: harness_unit
+        run: |
+          set -o pipefail
+          pnpm exec vitest run \
+            tests/unit/system-remediation/sr-qa-tenant-001/ \
+            tests/unit/system-remediation/sr-partner-notify-*/ \
+            --reporter=default --reporter=json \
+            --outputFile.json=.artifacts/tenant-uat-acceptance/unit-test-report.json \
+            2>&1 | tee -a .artifacts/tenant-uat-acceptance/execution-log.txt
+
+      - name: Run webhook unit regression suite (C111-C115 34 tests)
+        id: webhook_unit
+        run: |
+          set -o pipefail
+          pnpm exec vitest run \
+            tests/unit/system-remediation/sr-qa-webhook-001/ \
+            --reporter=default --reporter=json \
+            --outputFile.json=.artifacts/tenant-uat-acceptance/webhook-unit-report.json \
+            2>&1 | tee -a .artifacts/tenant-uat-acceptance/execution-log.txt
+
+      - name: Clear notification outbox backlog left by unit tests
+        run: |
+          pnpm --filter @drts/api exec node -e "
+            const { Client } = require('pg');
+            const client = new Client({ connectionString: process.env.DATABASE_URL });
+            client.connect().then(() => client.query('TRUNCATE TABLE ops.consumer_notification_outbox CASCADE;')).then(() => client.end()).catch(console.error);
+          "
       - name: Start the real API server
         id: start_api
         env:
@@ -189,6 +237,24 @@ jobs:
           cat .artifacts/tenant-uat-acceptance/api-server.log || true
           exit 1
 
+      - name: Start the UI applications
+        id: start_ui
+        env:
+          PORT: 3001
+        run: |
+          set -o pipefail
+          (
+            cd apps/platform-admin-web
+            PORT=3001 pnpm start > ../../.artifacts/tenant-uat-acceptance/admin-web.log 2>&1 &
+            echo $! > ../../.artifacts/tenant-uat-acceptance/admin-web.pid
+          )
+          (
+            cd apps/referral-embed-web
+            PORT=3002 pnpm start > ../../.artifacts/tenant-uat-acceptance/referral-web.log 2>&1 &
+            echo $! > ../../.artifacts/tenant-uat-acceptance/referral-web.pid
+          )
+          sleep 5 # Give UI servers time to start
+
       - name: Run tenant HTTP acceptance specs (real server, real DB, real sessions)
         id: harness_e2e
         run: |
@@ -201,16 +267,6 @@ jobs:
           mkdir -p .artifacts/tenant-uat-acceptance
           cp test-results/system-remediation-report.json .artifacts/tenant-uat-acceptance/system-remediation-report.json || true
 
-      - name: Run tenant service-level regression suite
-        id: harness_unit
-        run: |
-          set -o pipefail
-          pnpm exec vitest run \
-            tests/unit/system-remediation/sr-qa-tenant-001/ \
-            --reporter=default --reporter=json \
-            --outputFile.json=.artifacts/tenant-uat-acceptance/unit-test-report.json \
-            2>&1 | tee -a .artifacts/tenant-uat-acceptance/execution-log.txt
-
       - name: Run webhook E2E acceptance specs (C111-C112 real service & HTTP)
         id: webhook_e2e
         env:
@@ -220,20 +276,35 @@ jobs:
           pnpm exec playwright test \
             -c playwright.system-remediation.config.ts \
             --output test-results/webhook-artifacts \
-            tests/e2e/system-remediation/sr-qa-webhook-001/sr-qa-webhook-001.spec.ts --workers=1 --trace=off \
+            tests/e2e/system-remediation/sr-qa-webhook-001/sr-qa-webhook-001.spec.ts \
+            tests/e2e/system-remediation/sr-partner-notify-qa-20260917/partner-notification-uat.spec.ts --workers=1 --trace=off \
             2>&1 | tee -a .artifacts/tenant-uat-acceptance/execution-log.txt
           if [ ! -f test-results/system-remediation-report.json ] && [ -f .artifacts/tenant-uat-acceptance/system-remediation-report.json ]; then
             cp .artifacts/tenant-uat-acceptance/system-remediation-report.json test-results/system-remediation-report.json
           fi
 
-      - name: Run webhook unit regression suite (C111-C115 34 tests)
-        id: webhook_unit
+
+      - name: Run partner notify E2E acceptance specs
+        id: partner_notify_e2e
+        env:
+          PLAYWRIGHT_JSON_OUTPUT_FILE: "test-results/partner-notify-e2e-report.json"
+        run: |
+          set -o pipefail
+          pnpm exec playwright test \
+            -c playwright.system-remediation.config.ts \
+            --output test-results/partner-notify-artifacts \
+            tests/e2e/system-remediation/sr-partner-notify-qa-20260917 --workers=1 --trace=off \
+            2>&1 | tee -a .artifacts/tenant-uat-acceptance/execution-log.txt
+
+
+      - name: Run partner notify unit regression suite
+        id: partner_notify_unit
         run: |
           set -o pipefail
           pnpm exec vitest run \
-            tests/unit/system-remediation/sr-qa-webhook-001/ \
+            tests/unit/system-remediation/sr-partner-notify-qa-20260917/ \
             --reporter=default --reporter=json \
-            --outputFile.json=.artifacts/tenant-uat-acceptance/webhook-unit-report.json \
+            --outputFile.json=.artifacts/tenant-uat-acceptance/partner-notify-unit-report.json \
             2>&1 | tee -a .artifacts/tenant-uat-acceptance/execution-log.txt
 
       - name: Run C113-C115 pre-restart hosted acceptance (ledger audit, geo provider, C115 seed)
@@ -378,8 +449,28 @@ jobs:
           unit_total = unit_report.get("numTotalTests", 0)
           unit_passed = unit_report.get("numPassedTests", 0)
           unit_pending = unit_report.get("numPendingTests", 0)
+          
+          # Check for specific partner suites presence
+          partner_suites = {
+              "notification-sequence.postgres.test.ts",
+              "transport.postgres.test.ts",
+              "transport.test.ts",
+              "worker.test.ts",
+              "https.test.ts",
+              "https-client.test.ts",
+              "governance.test.ts",
+              "embed-partner-session.test.ts",
+              "notification-navigation-production-path.test.ts",
+              "multi-taxi-order-partner-notification-route.test.ts"
+          }
+          found_suites = set()
+          for tr in unit_report.get("testResults", []):
+              found_suites.add(Path(tr.get("name", "")).name)
+          if not partner_suites.issubset(found_suites):
+              raise SystemExit(f"Partner UAT unit regression missing suites: {partner_suites - found_suites}")
+
           if (
-              unit_total < 27
+              unit_total < 280
               or unit_passed != unit_total
               or unit_pending
               or not unit_report.get("success")
@@ -446,30 +537,71 @@ jobs:
                   raise SystemExit(f"Capability {cap_id} has empty verification evidence")
           print(f"C111-C115 Capability matrix verified: all 5 capabilities passed under candidate {actual_candidate}.")
 
+
+          # Partner notify unit regression suite gate
+          pn_unit_path = Path(".artifacts/tenant-uat-acceptance/partner-notify-unit-report.json")
+          if not pn_unit_path.exists():
+              raise SystemExit("Tenant UAT acceptance gate: no Partner Notify Vitest JSON report was produced.")
+          pn_unit = json.loads(pn_unit_path.read_text())
+          pn_total = pn_unit.get("numTotalTests", 0)
+          pn_passed = pn_unit.get("numPassedTests", 0)
+          pn_pending = pn_unit.get("numPendingTests", 0)
+          if pn_total < 1 or pn_passed != pn_total or pn_pending or not pn_unit.get("success"):
+              raise SystemExit(f"Partner Notify unit regression incomplete: total={pn_total}, passed={pn_passed}, pending={pn_pending}, success={pn_unit.get('success')}.")
+          print(f"Partner Notify unit regression: {pn_passed}/{pn_total} passed, zero skips.")
+
+          pn_e2e_report = Path("test-results/partner-notify-e2e-report.json")
+          if not pn_e2e_report.exists():
+              raise SystemExit("Partner Notify E2E acceptance gate: no Playwright JSON report was produced.")
+          pn_e2e_data = json.loads(pn_e2e_report.read_text())
+          pn_e2e_specs = [
+              spec
+              for suite in pn_e2e_data.get("suites", [])
+              for spec in iter_specs(suite)
+              if "sr-partner-notify-qa-20260917" in spec.get("file", "")
+          ]
+          pn_e2e_total = 0
+          pn_e2e_passed = 0
+          for spec in pn_e2e_specs:
+              for test in spec.get("tests", []):
+                  pn_e2e_total += 1
+                  results = test.get("results", [])
+                  status = results[-1].get("status") if results else None
+                  if status == "passed":
+                      pn_e2e_passed += 1
+          if pn_e2e_total < 1 or pn_e2e_passed != pn_e2e_total:
+              raise SystemExit(f"Partner Notify E2E acceptance incomplete: total={pn_e2e_total}, passed={pn_e2e_passed}.")
+          print(f"Partner Notify E2E acceptance: {pn_e2e_passed}/{pn_e2e_total} passed, zero skips.")
+
           webhook_e2e_report = Path("test-results/webhook-e2e-report.json")
-          if webhook_e2e_report.exists():
-              wh_e2e_data = json.loads(webhook_e2e_report.read_text())
-              wh_e2e_specs = [
-                  spec
-                  for suite in wh_e2e_data.get("suites", [])
-                  for spec in iter_specs(suite)
-                  if "sr-qa-webhook-001" in spec.get("file", "")
-              ]
-              wh_e2e_total = 0
-              wh_e2e_passed = 0
-              for spec in wh_e2e_specs:
-                  for test in spec.get("tests", []):
-                      wh_e2e_total += 1
-                      results = test.get("results", [])
-                      status = results[-1].get("status") if results else None
-                      if status == "passed":
-                          wh_e2e_passed += 1
-              if wh_e2e_total and wh_e2e_passed != wh_e2e_total:
-                  raise SystemExit(
-                      f"Webhook E2E acceptance incomplete: total={wh_e2e_total}, passed={wh_e2e_passed}."
-                  )
-              if wh_e2e_total:
-                  print(f"Webhook E2E acceptance: {wh_e2e_passed}/{wh_e2e_total} passed, zero skips.")
+          if not webhook_e2e_report.exists():
+              raise SystemExit("Webhook E2E acceptance gate: no Playwright JSON report was produced.")
+          wh_e2e_data = json.loads(webhook_e2e_report.read_text())
+          wh_e2e_specs = [
+              spec
+              for suite in wh_e2e_data.get("suites", [])
+              for spec in iter_specs(suite)
+              if "sr-qa-webhook-001" in spec.get("file", "") or "partner-notification-uat" in spec.get("file", "")
+          ]
+          wh_e2e_total = 0
+          wh_e2e_passed = 0
+          found_partner_e2e = False
+          for spec in wh_e2e_specs:
+              if "partner-notification-uat" in spec.get("file", ""):
+                  found_partner_e2e = True
+              for test in spec.get("tests", []):
+                  wh_e2e_total += 1
+                  results = test.get("results", [])
+                  status = results[-1].get("status") if results else None
+                  if status == "passed":
+                      wh_e2e_passed += 1
+          if not found_partner_e2e or wh_e2e_total < 2:
+              raise SystemExit("Partner notification E2E acceptance suite missing or empty from run.")
+          if wh_e2e_passed != wh_e2e_total:
+              raise SystemExit(
+                  f"Webhook E2E acceptance incomplete: total={wh_e2e_total}, passed={wh_e2e_passed}."
+              )
+          print(f"Webhook E2E acceptance: {wh_e2e_passed}/{wh_e2e_total} passed, zero skips.")
           PY_GATE
 
       - name: Record run status
@@ -484,6 +616,8 @@ jobs:
           HARNESS_UNIT_OUTCOME: ${{ steps.harness_unit.outcome }}
           WEBHOOK_E2E_OUTCOME: ${{ steps.webhook_e2e.outcome }}
           WEBHOOK_UNIT_OUTCOME: ${{ steps.webhook_unit.outcome }}
+          PARTNER_NOTIFY_E2E_OUTCOME: ${{ steps.partner_notify_e2e.outcome }}
+          PARTNER_NOTIFY_UNIT_OUTCOME: ${{ steps.partner_notify_unit.outcome }}
           C113_C115_ACCEPTANCE_OUTCOME: ${{ steps.c113_c115_acceptance.outcome }}
           GATE_OUTCOME: ${{ steps.gate.outcome }}
           RESTART_API_OUTCOME: ${{ steps.restart_api.outcome }}
@@ -510,6 +644,8 @@ jobs:
                   "HARNESS_UNIT_OUTCOME",
                   "WEBHOOK_E2E_OUTCOME",
                   "WEBHOOK_UNIT_OUTCOME",
+                  "PARTNER_NOTIFY_E2E_OUTCOME",
+                  "PARTNER_NOTIFY_UNIT_OUTCOME",
                   "C113_C115_ACCEPTANCE_OUTCOME",
                   "GATE_OUTCOME",
                   "RESTART_API_OUTCOME",
@@ -533,6 +669,8 @@ jobs:
               and outcomes["HARNESS_UNIT_OUTCOME"] == "success"
               and outcomes["WEBHOOK_E2E_OUTCOME"] == "success"
               and outcomes["WEBHOOK_UNIT_OUTCOME"] == "success"
+              and outcomes["PARTNER_NOTIFY_E2E_OUTCOME"] == "success"
+              and outcomes["PARTNER_NOTIFY_UNIT_OUTCOME"] == "success"
               and outcomes["C113_C115_ACCEPTANCE_OUTCOME"] == "success"
               and outcomes["GATE_OUTCOME"] == "success"
               and outcomes["RESTART_API_OUTCOME"] == "success"
@@ -565,6 +703,7 @@ jobs:
             .artifacts/tenant-uat-acceptance/system-remediation-report.json
             .artifacts/tenant-uat-acceptance/unit-test-report.json
             .artifacts/tenant-uat-acceptance/webhook-unit-report.json
+            .artifacts/tenant-uat-acceptance/partner-notify-unit-report.json
             .artifacts/tenant-uat-acceptance/run-status.json
             .artifacts/tenant-uat-acceptance/identity-fixtures.json
             .artifacts/tenant-uat-acceptance/restart-report.json

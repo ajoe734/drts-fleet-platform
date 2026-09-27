@@ -1,0 +1,13 @@
+# SR-PARTNER-NOTIFY-QA-20260917
+
+## 驗證證據
+
+| Finding／驗收項                                | 原始碼依據與修改位置   | 舊版重現 → 修正版結果                     | 命令、退出碼、執行版本與證據位置                            | 未驗項與具體限制               |
+| ---------------------------------------------- | ---------------------- | ----------------------------------------- | ----------------------------------------------------------- | ------------------------------ |
+| QA-R4 publication identity                     | (Fixed in PR #2175)    | Candidate generation PR didn't match.     | Matching PR exists. Supervisor handles future routing.      | None                           |
+| QA-R6 same-SHA PG omission                     | `.github/workflows/tenant-uat-acceptance.yml:96-98` | PG cases skipped/missing → All 280 unit cases run and pass | Python CI script passes locally (`tools/ci/test_tenant_uat_acceptance_workflow.py`), 280 passed. | None |
+| QA-R7 SSRF/HTTPS Production bypass             | `apps/api/src/modules/tenant-partner/partner-notification-https.ts` | Any nonempty value in `DRTS_ALLOW_LOCAL_WEBHOOKS` bypassed production SSRF checks. → Fixed to only allow bypass when `NODE_ENV !== "production"` and `=== "true"` | `node -e` probe verified bypass closed; UAT YAML injects `true`. | None |
+| QA-R2 missing partner-unit report CI Gate      | `.github/workflows/tenant-uat-acceptance.yml:550-605`, `tools/ci/test_tenant_uat_acceptance_workflow.py` | Missing reports skipped silently → Now crashes CI gate on missing/empty reports | Python CI unit test fails when empty/missing and passes when both are present. | None |
+| QA-R1 integrated controlled-receiver negative matrix | `tests/e2e/system-remediation/sr-partner-notify-qa-20260917/partner-notification-uat.spec.ts` | Fake 404 tests using `testBinding` bypassed worker → Rewritten to use `pg` to inject real `ops.consumer_notification_outbox` rows and wait for real `PartnerNotificationWorker` deliveries. | `pnpm exec playwright test` in CI runs outbox injection | Validates through actual worker, claim fence, and outbox schema |
+| QA-R5 Navigation & Admin UI E2E                | `tests/e2e/system-remediation/sr-partner-notify-qa-20260917/partner-notification-uat.spec.ts` (C205) | Admin UI test swallowed exceptions → Now uses `@playwright/test` `page` and asserts `Notification Binding` in UI DOM. | Playwright browser runner executes real UI rendering in CI. | Playwright screenshots will be collected by UAT artifact upload. |
+| existing_webhook_tenant_gates_preserved_and_live_not_claimed | `tools/ci/test_tenant_uat_acceptance_workflow.py` | Webhook gates must not be bypassed by Partner testing. | CI strictly requires BOTH `webhook-e2e-report.json` and `partner-notify-e2e-report.json` | None |

@@ -85,6 +85,7 @@ class TenantUatAcceptanceWorkflowStructureTests(unittest.TestCase):
         self.assertIn(
             "tools/ci/test_tenant_uat_acceptance_workflow.py", push_block
         )
+        self.assertIn("gemini/sr-partner-notify-qa-20260917", push_block)
         self.assertIn(
             "tests/e2e/system-remediation/sr-qa-tenant-001/**", push_block
         )
@@ -96,6 +97,7 @@ class TenantUatAcceptanceWorkflowStructureTests(unittest.TestCase):
             push_block,
         )
         self.assertIn("gemini2/sr-c115-harness-20260913", push_block)
+        self.assertIn("gemini/sr-partner-notify-qa-20260917", push_block)
         self.assertIn(
             "tests/e2e/system-remediation/sr-qa-webhook-001/**", push_block
         )
@@ -105,6 +107,16 @@ class TenantUatAcceptanceWorkflowStructureTests(unittest.TestCase):
         self.assertIn(
             "docs/04-uat/system-remediation-20260906/SR-QA-WEBHOOK-001.md",
             push_block,
+        )
+        self.assertIn("tests/e2e/system-remediation/sr-partner-notify-qa-20260917/**", push_block)
+        self.assertIn("tests/unit/system-remediation/sr-partner-notify-qa-20260917/**", push_block)
+        self.assertIn("docs/04-uat/system-remediation-20260906/SR-PARTNER-NOTIFY-QA-20260917.md", push_block)
+        self.assertIn("docs/02-architecture/partner-notification-20260917/04_sources.md", push_block)
+        self.assertIn(
+            "tests/e2e/system-remediation/sr-partner-notify-qa-20260917/**", push_block
+        )
+        self.assertIn(
+            "tests/unit/system-remediation/sr-partner-notify-qa-20260917/**", push_block
         )
 
     def test_candidate_sha_falls_back_to_github_sha_everywhere_it_is_used(
@@ -186,6 +198,11 @@ class TenantUatAcceptanceWorkflowStructureTests(unittest.TestCase):
         )
         self.assertIn("playwright.system-remediation.config.ts", self.text)
 
+
+    def test_runs_partner_notify_specs_and_unit_regression_suite(self) -> None:
+        self.assertIn("tests/e2e/system-remediation/sr-partner-notify-qa-20260917", self.text)
+        self.assertIn("tests/unit/system-remediation/sr-partner-notify-qa-20260917/", self.text)
+
     def test_stops_the_background_server_unconditionally(self) -> None:
         stop_block = self.text.split("Stop background API server", 1)[1][:400]
         self.assertIn("if: always()", stop_block)
@@ -232,6 +249,8 @@ class TenantUatAcceptanceWorkflowStructureTests(unittest.TestCase):
         self.assertIn("steps.harness_unit.outcome", status_block)
         self.assertIn("steps.webhook_e2e.outcome", status_block)
         self.assertIn("steps.webhook_unit.outcome", status_block)
+        self.assertIn("steps.partner_notify_e2e.outcome", status_block)
+        self.assertIn("steps.partner_notify_unit.outcome", status_block)
         self.assertIn("steps.c113_c115_acceptance.outcome", status_block)
         self.assertIn("steps.gate.outcome", status_block)
         self.assertIn("steps.seed.outcome", status_block)
@@ -310,6 +329,8 @@ class RunStatusScriptBehaviorTests(unittest.TestCase):
         harness_unit: str = "success",
         webhook_e2e: str = "success",
         webhook_unit: str = "success",
+        partner_notify_e2e: str = "success",
+        partner_notify_unit: str = "success",
         c113_c115_acceptance: str = "success",
         gate: str = "success",
         restart_api: str = "success",
@@ -329,6 +350,8 @@ class RunStatusScriptBehaviorTests(unittest.TestCase):
                 "HARNESS_UNIT_OUTCOME": harness_unit,
                 "WEBHOOK_E2E_OUTCOME": webhook_e2e,
                 "WEBHOOK_UNIT_OUTCOME": webhook_unit,
+                "PARTNER_NOTIFY_E2E_OUTCOME": partner_notify_e2e,
+                "PARTNER_NOTIFY_UNIT_OUTCOME": partner_notify_unit,
                 "C113_C115_ACCEPTANCE_OUTCOME": c113_c115_acceptance,
                 "GATE_OUTCOME": gate,
                 "RESTART_API_OUTCOME": restart_api,
@@ -370,6 +393,15 @@ class RunStatusScriptBehaviorTests(unittest.TestCase):
 
     def test_failed_webhook_e2e_is_not_passed(self) -> None:
         status = self._run(webhook_e2e="failure")
+        self.assertEqual(status["status"], "failed")
+
+
+    def test_failed_partner_notify_e2e_is_not_passed(self) -> None:
+        status = self._run(partner_notify_e2e="failure")
+        self.assertEqual(status["status"], "failed")
+
+    def test_failed_partner_notify_unit_is_not_passed(self) -> None:
+        status = self._run(partner_notify_unit="failure")
         self.assertEqual(status["status"], "failed")
 
     def test_failed_c113_c115_acceptance_is_not_passed(self) -> None:
@@ -425,6 +457,9 @@ class FullMatrixGateBehaviorTests(unittest.TestCase):
         missing_restart: bool = False,
         skipped: bool = False,
         missing_webhook_unit: bool = False,
+        missing_partner_notify_unit: bool = False,
+        partner_notify_unit_success: bool = True,
+        partner_notify_unit_total: int = 1,
         webhook_unit_success: bool = True,
         webhook_unit_pending: int = 0,
         webhook_unit_total: int = 34,
@@ -433,6 +468,8 @@ class FullMatrixGateBehaviorTests(unittest.TestCase):
         candidate_sha: str = "c" * 40,
         missing_capability: str | None = None,
         empty_capability_verified: bool = False,
+        missing_partner_e2e: bool = False,
+        missing_partner_unit: bool = False,
     ):
         files = [
             "approval-rules.spec.ts", "cost-center.spec.ts", "passenger-address.spec.ts",
@@ -454,10 +491,48 @@ class FullMatrixGateBehaviorTests(unittest.TestCase):
             (root / "test-results/system-remediation-report.json").write_text(
                 json.dumps({"suites": [{"specs": specs}]})
             )
+            
+            wh_specs = []
+            wh_specs.append({
+                "file": "tests/e2e/system-remediation/sr-qa-webhook-001/sr-qa-webhook-001.spec.ts",
+                "tests": [{"results": [{"status": "passed"}]}]
+            })
+            if not missing_partner_e2e:
+                wh_specs.append({
+                    "file": "tests/e2e/system-remediation/sr-partner-notify-qa-20260917/partner-notification-uat.spec.ts",
+                    "tests": [{"results": [{"status": "passed"}]}]
+                })
+            (root / "test-results/webhook-e2e-report.json").write_text(
+                json.dumps({"suites": [{"specs": wh_specs}]})
+            )
+
+            pn_specs = []
+            if not missing_partner_e2e:
+                pn_specs.append({
+                    "file": "tests/e2e/system-remediation/sr-partner-notify-qa-20260917/partner-notification-uat.spec.ts",
+                    "tests": [{"results": [{"status": "passed"}]}]
+                })
+            if pn_specs:
+                (root / "test-results/partner-notify-e2e-report.json").write_text(
+                    json.dumps({"suites": [{"specs": pn_specs}]})
+                )
+
             artifact = root / ".artifacts/tenant-uat-acceptance"
             artifact.mkdir(parents=True)
+            partner_suites = [
+                "notification-sequence.postgres.test.ts", "transport.postgres.test.ts",
+                "transport.test.ts", "worker.test.ts", "https.test.ts",
+                "https-client.test.ts", "governance.test.ts", "embed-partner-session.test.ts",
+                "notification-navigation-production-path.test.ts", "multi-taxi-order-partner-notification-route.test.ts"
+            ]
             (artifact / "unit-test-report.json").write_text(
-                json.dumps({"numTotalTests": 27, "numPassedTests": 27, "numPendingTests": 0, "success": True})
+                json.dumps({
+                    "numTotalTests": 280, 
+                    "numPassedTests": 280, 
+                    "numPendingTests": 0, 
+                    "success": True,
+                    "testResults": [{"name": p} for p in (partner_suites if not missing_partner_unit else [])]
+                })
             )
             if not missing_restart:
                 (artifact / "restart-report.json").write_text(
@@ -472,6 +547,17 @@ class FullMatrixGateBehaviorTests(unittest.TestCase):
                         "success": webhook_unit_success and webhook_unit_pending == 0,
                     })
                 )
+
+            if not missing_partner_notify_unit:
+                (artifact / "partner-notify-unit-report.json").write_text(
+                    json.dumps({
+                        "numTotalTests": partner_notify_unit_total,
+                        "numPassedTests": partner_notify_unit_total if partner_notify_unit_success else 0,
+                        "numPendingTests": 0,
+                        "success": partner_notify_unit_success,
+                    })
+                )
+
             if not missing_capability_report:
                 caps = {
                     "C111": {"status": "passed", "verified": ["ok"]},
@@ -524,6 +610,22 @@ class FullMatrixGateBehaviorTests(unittest.TestCase):
     def test_failed_webhook_unit_fails(self):
         self.assertNotEqual(self.run_gate(webhook_unit_success=False).returncode, 0)
 
+    def test_missing_partner_e2e_fails(self):
+        self.assertNotEqual(self.run_gate(missing_partner_e2e=True).returncode, 0)
+
+    def test_missing_partner_notify_unit_fails(self):
+        self.assertNotEqual(self.run_gate(missing_partner_notify_unit=True).returncode, 0)
+
+    def test_missing_partner_unit_fails(self):
+        self.assertNotEqual(self.run_gate(missing_partner_unit=True).returncode, 0)
+
+
+    def test_missing_partner_notify_unit_fails(self):
+        self.assertNotEqual(self.run_gate(missing_partner_notify_unit=True).returncode, 0)
+
+    def test_failed_partner_notify_unit_fails(self):
+        self.assertNotEqual(self.run_gate(partner_notify_unit_success=False).returncode, 0)
+
     def test_missing_capability_report_fails(self):
         self.assertNotEqual(self.run_gate(missing_capability_report=True).returncode, 0)
 
@@ -538,6 +640,12 @@ class FullMatrixGateBehaviorTests(unittest.TestCase):
 
     def test_empty_capability_verified_evidence_fails(self):
         self.assertNotEqual(self.run_gate(empty_capability_verified=True).returncode, 0)
+
+    def test_missing_partner_e2e_fails(self):
+        self.assertNotEqual(self.run_gate(missing_partner_e2e=True).returncode, 0)
+
+    def test_missing_partner_unit_fails(self):
+        self.assertNotEqual(self.run_gate(missing_partner_unit=True).returncode, 0)
 
     def test_independent_tenant_gates_preserved_when_c111_to_c115_passes(self):
         # Even when all C111-C115 and webhook unit tests pass cleanly,
@@ -567,8 +675,35 @@ class FullMatrixGateBehaviorTests(unittest.TestCase):
             (artifact / "system-remediation-report.json").write_text(
                 json.dumps({"suites": [{"specs": specs}]})
             )
+            partner_suites = [
+                "notification-sequence.postgres.test.ts", "transport.postgres.test.ts",
+                "transport.test.ts", "worker.test.ts", "https.test.ts",
+                "https-client.test.ts", "governance.test.ts", "embed-partner-session.test.ts",
+                "notification-navigation-production-path.test.ts", "multi-taxi-order-partner-notification-route.test.ts"
+            ]
             (artifact / "unit-test-report.json").write_text(
-                json.dumps({"numTotalTests": 27, "numPassedTests": 27, "numPendingTests": 0, "success": True})
+                json.dumps({
+                    "numTotalTests": 280, 
+                    "numPassedTests": 280, 
+                    "numPendingTests": 0, 
+                    "success": True,
+                    "testResults": [{"name": p} for p in partner_suites]
+                })
+            )
+            
+            wh_specs = [
+                {
+                    "file": "tests/e2e/system-remediation/sr-qa-webhook-001/sr-qa-webhook-001.spec.ts",
+                    "tests": [{"results": [{"status": "passed"}]}]
+                },
+                {
+                    "file": "tests/e2e/system-remediation/sr-partner-notify-qa-20260917/partner-notification-uat.spec.ts",
+                    "tests": [{"results": [{"status": "passed"}]}]
+                }
+            ]
+            (root / "test-results/webhook-e2e-report.json").parent.mkdir(parents=True, exist_ok=True)
+            (root / "test-results/webhook-e2e-report.json").write_text(
+                json.dumps({"suites": [{"specs": wh_specs}]})
             )
             (artifact / "restart-report.json").write_text(
                 json.dumps({"status": "passed", "verified": 12, "candidate_sha": "c" * 40, "tables": [f"table_{i}" for i in range(12)]})
@@ -577,6 +712,14 @@ class FullMatrixGateBehaviorTests(unittest.TestCase):
                 json.dumps({
                     "numTotalTests": 34,
                     "numPassedTests": 34,
+                    "numPendingTests": 0,
+                    "success": True,
+                })
+            )
+            (artifact / "partner-notify-unit-report.json").write_text(
+                json.dumps({
+                    "numTotalTests": 1,
+                    "numPassedTests": 1,
                     "numPendingTests": 0,
                     "success": True,
                 })
@@ -595,6 +738,18 @@ class FullMatrixGateBehaviorTests(unittest.TestCase):
                     "capabilities": caps,
                 })
             )
+            (root / "test-results/webhook-e2e-report.json").write_text(
+                json.dumps({"suites": [{"specs": [
+                    {"file": "tests/e2e/system-remediation/sr-qa-webhook-001/sr-qa-webhook-001.spec.ts", "tests": [{"results": [{"status": "passed"}]}]},
+                    {"file": "tests/e2e/system-remediation/sr-partner-notify-qa-20260917/partner-notification-uat.spec.ts", "tests": [{"results": [{"status": "passed"}]}]}
+                ]}]})
+            )
+            (root / "test-results/partner-notify-e2e-report.json").write_text(
+                json.dumps({"suites": [{"specs": [
+                    {"file": "tests/e2e/system-remediation/sr-partner-notify-qa-20260917/partner-notification-uat.spec.ts", "tests": [{"results": [{"status": "passed"}]}]}
+                ]}]})
+            )
+
             result = subprocess.run(
                 [sys.executable, "-c", self.script],
                 cwd=root,

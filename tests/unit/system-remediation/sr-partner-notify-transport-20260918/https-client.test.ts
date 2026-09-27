@@ -33,8 +33,15 @@ function harness(status = 202) {
   }) as typeof request);
   return { response, req, options: () => options };
 }
-beforeEach(() => vi.resetAllMocks());
-afterEach(() => vi.useRealTimers());
+beforeEach(() => {
+  vi.resetAllMocks();
+  vi.stubEnv("DRTS_ALLOW_LOCAL_WEBHOOKS", "false");
+  vi.stubEnv("NODE_ENV", "production");
+});
+afterEach(() => {
+  vi.useRealTimers();
+  vi.unstubAllEnvs();
+});
 describe("bounded HTTPS client without a network server", () => {
   it("stops reading after 4 KiB and returns an invalid oversized ack", async () => {
     const h = harness();

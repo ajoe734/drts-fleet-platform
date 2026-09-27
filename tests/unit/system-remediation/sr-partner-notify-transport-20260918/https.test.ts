@@ -62,9 +62,12 @@ describe("partner HTTPS restrictions", () => {
     "https://127.0.0.1",
     "https://[::1]",
   ])("rejects unsafe endpoint %s before opening a socket", async (url) => {
+    vi.stubEnv("DRTS_ALLOW_LOCAL_WEBHOOKS", "false");
+    vi.stubEnv("NODE_ENV", "production");
     await expect(partnerNotificationHttpsFetch(url)).rejects.toThrow(
       "partner_endpoint_not_public_https",
     );
+    vi.unstubAllEnvs();
   });
   it("ack body shares the platform deadline even when the reader ignores abort", async () => {
     vi.useFakeTimers();
