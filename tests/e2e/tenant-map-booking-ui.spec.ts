@@ -493,22 +493,26 @@ test.describe("tenant console booking map alignment", () => {
     );
 
     // 3. Pointer drag map click
+    const svgMap = picker.locator("svg[role='img']").first();
+    await svgMap.scrollIntoViewIfNeeded();
+    await page.waitForTimeout(100); // Wait for scroll to settle
+
     const pin2 = picker.locator("g[role='button']").first();
-    await pin2.scrollIntoViewIfNeeded();
     const pinBox = await pin2.boundingBox();
     expect(pinBox).not.toBeNull();
     if (pinBox) {
-      await page.mouse.move(
-        pinBox.x + pinBox.width / 2,
-        pinBox.y + pinBox.height / 2,
-      );
+      const startX = pinBox.x + pinBox.width / 2;
+      const startY = pinBox.y + pinBox.height / 2;
+
+      await page.mouse.move(startX, startY);
       await page.mouse.down();
       // Wait to simulate a human drag
-      await page.waitForTimeout(100);
-      await page.mouse.move(pinBox.x + pinBox.width / 2, pinBox.y - 50, { steps: 5 });
+      await page.waitForTimeout(200);
+      await page.mouse.move(startX, startY - 100, { steps: 10 });
+      await page.waitForTimeout(200);
       await page.mouse.up();
     }
-    await page.waitForTimeout(100); // Give React state time to update
+    await page.waitForTimeout(500); // Give React state time to update and handle geocode
     const dragLat = await page.locator('input[name="lat"]').inputValue();
     const dragLng = await page.locator('input[name="lng"]').inputValue();
     expect(dragLat).not.toBe(keyboardLat);

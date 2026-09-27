@@ -434,24 +434,26 @@ test.describe("concierge map booking UI", () => {
     const pickupPicker = page.locator("[data-address-map-picker]").nth(0);
     const dropoffPicker = page.locator("[data-address-map-picker]").nth(1);
 
-    // Get baseline coords
-    const initialPickupText = await pickupPicker
-      .getByText(/(座標|Coordinates):\s*[0-9.-]+,\s*[0-9.-]+/)
-      .textContent();
-    const initialPickupMatch = initialPickupText?.match(
-      /(?:座標|Coordinates):\s*([0-9.-]+),\s*([0-9.-]+)/,
-    );
-    const initialPickupLat = initialPickupMatch ? initialPickupMatch[1] : "0";
+    async function getDisplayedCoordinates(picker: any) {
+      const text = await picker
+        .getByText(/(座標|Coordinates):\s*-?\d+\.\d+,\s*-?\d+\.\d+/)
+        .textContent();
+      expect(typeof text).toBe("string");
+      const match = text
+        ? text.match(/(?:座標|Coordinates):\s*(-?\d+\.\d+),\s*(-?\d+\.\d+)/)
+        : null;
+      expect(match).toBeTruthy();
+      if (!match) throw new Error("Match failed");
+      const lat = parseFloat(match[1]);
+      const lng = parseFloat(match[2]);
+      expect(Number.isFinite(lat)).toBe(true);
+      expect(Number.isFinite(lng)).toBe(true);
+      return { lat, lng };
+    }
 
-    const initialDropoffText = await dropoffPicker
-      .getByText(/(座標|Coordinates):\s*[0-9.-]+,\s*[0-9.-]+/)
-      .textContent();
-    const initialDropoffMatch = initialDropoffText?.match(
-      /(?:座標|Coordinates):\s*([0-9.-]+),\s*([0-9.-]+)/,
-    );
-    const initialDropoffLat = initialDropoffMatch
-      ? initialDropoffMatch[1]
-      : "0";
+    // Get baseline coords
+    const initialPickup = await getDisplayedCoordinates(pickupPicker);
+    const initialDropoff = await getDisplayedCoordinates(dropoffPicker);
 
     // 1. Simulate keyboard adjustment on pickup
     const pickupPin = pickupPicker.locator("g[role='button']").first();
@@ -475,31 +477,11 @@ test.describe("concierge map booking UI", () => {
     }
 
     // Read the exact expected coordinates from the displayed coordinate summary
-    const pickupCoordsText = await pickupPicker
-      .getByText(/(座標|Coordinates):\s*[0-9.-]+,\s*[0-9.-]+/)
-      .textContent();
-    const pickupMatch = pickupCoordsText?.match(
-      /(?:座標|Coordinates):\s*([0-9.-]+),\s*([0-9.-]+)/,
-    );
-    expect(pickupMatch).not.toBeNull();
-    const expectedPickupLat = pickupMatch![1];
-    const expectedPickupLng = pickupMatch![2];
-    expect(Number.isFinite(parseFloat(expectedPickupLat))).toBe(true);
-    expect(Number.isFinite(parseFloat(expectedPickupLng))).toBe(true);
-    expect(expectedPickupLat).not.toBe(initialPickupLat);
+    const expectedPickup = await getDisplayedCoordinates(pickupPicker);
+    expect(expectedPickup.lat).not.toBe(initialPickup.lat);
 
-    const dropoffCoordsText = await dropoffPicker
-      .getByText(/(座標|Coordinates):\s*[0-9.-]+,\s*[0-9.-]+/)
-      .textContent();
-    const dropoffMatch = dropoffCoordsText?.match(
-      /(?:座標|Coordinates):\s*([0-9.-]+),\s*([0-9.-]+)/,
-    );
-    expect(dropoffMatch).not.toBeNull();
-    const expectedDropoffLat = dropoffMatch![1];
-    const expectedDropoffLng = dropoffMatch![2];
-    expect(Number.isFinite(parseFloat(expectedDropoffLat))).toBe(true);
-    expect(Number.isFinite(parseFloat(expectedDropoffLng))).toBe(true);
-    expect(expectedDropoffLat).not.toBe(initialDropoffLat);
+    const expectedDropoff = await getDisplayedCoordinates(dropoffPicker);
+    expect(expectedDropoff.lat).not.toBe(initialDropoff.lat);
 
     // Submit and verify keyboard and drag
     const submitBtn = page.getByRole("button", { name: /提交禮賓代訂/ });
@@ -511,15 +493,15 @@ test.describe("concierge map booking UI", () => {
 
     const command1 = captured.body[0] as any;
     expect(command1.pickup.coordinateSource).toBe("manual_pin");
-    expect(command1.pickup.lat).toBe(parseFloat(expectedPickupLat));
-    expect(command1.pickup.lng).toBe(parseFloat(expectedPickupLng));
+    expect(command1.pickup.lat).toBe(expectedPickup.lat);
+    expect(command1.pickup.lng).toBe(expectedPickup.lng);
     expect(command1.pickup.manualOverrideReason).toMatch(
       /Pin adjusted manually|已手動調整圖釘位置/,
     );
 
     expect(command1.dropoff.coordinateSource).toBe("manual_pin");
-    expect(command1.dropoff.lat).toBe(parseFloat(expectedDropoffLat));
-    expect(command1.dropoff.lng).toBe(parseFloat(expectedDropoffLng));
+    expect(command1.dropoff.lat).toBe(expectedDropoff.lat);
+    expect(command1.dropoff.lng).toBe(expectedDropoff.lng);
     expect(command1.dropoff.manualOverrideReason).toMatch(
       /Pin adjusted manually|已手動調整圖釘位置/,
     );
@@ -528,13 +510,7 @@ test.describe("concierge map booking UI", () => {
     await page.goto("/bookings/new");
     await selectConciergeMapCandidate(page, 0, "taipei 101", "Taipei 101");
     const pickupPicker2 = page.locator("[data-address-map-picker]").nth(0);
-    const initialClickText = await pickupPicker2
-      .getByText(/(座標|Coordinates):\s*[0-9.-]+,\s*[0-9.-]+/)
-      .textContent();
-    const initialClickMatch = initialClickText?.match(
-      /(?:座標|Coordinates):\s*([0-9.-]+),\s*([0-9.-]+)/,
-    );
-    const initialClickLat = initialClickMatch ? initialClickMatch[1] : "0";
+    const initialClick = await getDisplayedCoordinates(pickupPicker2);
 
     const pickupSvg = pickupPicker2.locator("svg[role='img']").first();
     const pickupSvgBox = await pickupSvg.boundingBox();
@@ -575,18 +551,8 @@ test.describe("concierge map booking UI", () => {
     );
 
     // Read the exact expected pickup coordinates after background click
-    const clickCoordsText = await pickupPicker2
-      .getByText(/(座標|Coordinates):\s*[0-9.-]+,\s*[0-9.-]+/)
-      .textContent();
-    const clickMatch = clickCoordsText?.match(
-      /(?:座標|Coordinates):\s*([0-9.-]+),\s*([0-9.-]+)/,
-    );
-    expect(clickMatch).not.toBeNull();
-    const expectedClickLat = clickMatch![1];
-    const expectedClickLng = clickMatch![2];
-    expect(Number.isFinite(parseFloat(expectedClickLat))).toBe(true);
-    expect(Number.isFinite(parseFloat(expectedClickLng))).toBe(true);
-    expect(expectedClickLat).not.toBe(initialClickLat);
+    const expectedClick = await getDisplayedCoordinates(pickupPicker2);
+    expect(expectedClick.lat).not.toBe(initialClick.lat);
 
     // Now it should be enabled
     await expect(submitBtn).toBeEnabled();
@@ -600,7 +566,7 @@ test.describe("concierge map booking UI", () => {
     // Pickup was changed via pointer background click
     expect(command2.pickup.coordinateSource).toBe("manual_pin");
     expect(command2.pickup.manualOverrideReason).toBe("agent_map_click");
-    expect(command2.pickup.lat).toBe(parseFloat(expectedClickLat));
-    expect(command2.pickup.lng).toBe(parseFloat(expectedClickLng));
+    expect(command2.pickup.lat).toBe(expectedClick.lat);
+    expect(command2.pickup.lng).toBe(expectedClick.lng);
   });
 });
