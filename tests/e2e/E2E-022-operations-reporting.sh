@@ -27,6 +27,8 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=lib/helpers.sh
 source "${SCRIPT_DIR}/lib/helpers.sh"
+# shellcheck source=lib/operations-reporting-dates.sh
+source "${SCRIPT_DIR}/lib/operations-reporting-dates.sh"
 
 SCENARIO="E2E-022"
 chain_init
@@ -39,21 +41,20 @@ TMP_DIR="$(mktemp -d /tmp/drts-e2e-022-XXXXXX)"
 trap 'rm -rf "$TMP_DIR"' EXIT
 
 SUFFIX="$(date +%s | tail -c 7)"
-SERVICE_DATE="$(date -u +"%Y-%m-%d")"
-SUMMARY_MONTH="${SERVICE_DATE:0:7}"
+BASE_TIME="$(get_current_time)"
+SERVICE_DATE="$(get_date_from_iso "$BASE_TIME")"
+SUMMARY_MONTH="$(get_month_from_iso "$BASE_TIME")"
 SUMMARY_FROM_DATE="${SUMMARY_MONTH}-01"
 SUMMARY_TO_DATE=$(
   date -u -d "${SUMMARY_FROM_DATE} +1 month -1 day" +"%Y-%m-%d" 2>/dev/null \
     || date -u -j -f "%Y-%m-%d" "${SUMMARY_FROM_DATE}" -v+1m -v-1d +"%Y-%m-%d"
 )
-PORTAL_WINDOW_START=$(
-  date -u -d "+30 minutes" +"%Y-%m-%dT%H:%M:%SZ" 2>/dev/null \
-    || date -u -v+30M +"%Y-%m-%dT%H:%M:%SZ"
-)
-PORTAL_WINDOW_END=$(
-  date -u -d "+60 minutes" +"%Y-%m-%dT%H:%M:%SZ" 2>/dev/null \
-    || date -u -v+60M +"%Y-%m-%dT%H:%M:%SZ"
-)
+PORTAL_WINDOW_START="$(get_time_with_offset 30)"
+PORTAL_WINDOW_END="$(get_time_with_offset 60)"
+PORTAL_SERVICE_DATE="$(get_date_from_iso "$PORTAL_WINDOW_START")"
+PORTAL_SUMMARY_MONTH="$(get_month_from_iso "$PORTAL_WINDOW_START")"
+UNIQUE_SERVICE_DATES="$(echo -e "${SERVICE_DATE}\n${PORTAL_SERVICE_DATE}" | sort -u)"
+UNIQUE_SUMMARY_MONTHS="$(echo -e "${SUMMARY_MONTH}\n${PORTAL_SUMMARY_MONTH}" | sort -u)"
 TAIPEI_CORE_PICKUP_LAT="25.0375"
 TAIPEI_CORE_PICKUP_LNG="121.5637"
 TAIPEI_CORE_DROPOFF_LAT="25.06"
@@ -726,20 +727,29 @@ assert_int_equals \
 
 log_step "2.2 — POST /reports/daily-dispatch-records/rebuild"
 DAILY_REBUILD_FIXTURE="${TMP_DIR}/daily-rebuild.json"
-jq -n --arg serviceDate "$SERVICE_DATE" '{serviceDate: $serviceDate}' > "$DAILY_REBUILD_FIXTURE"
-http_call POST "/reports/daily-dispatch-records/rebuild" "$DAILY_REBUILD_FIXTURE"
-assert_status "200|201"
-assert_int_equals "daily rebuild count" 3 "$(json_get_first ".data.rebuiltCount" ".data.rebuilt_count")"
+AGGREGATED_DAILY_RECORDS="[]"
+DAILY_REBUILT_COUNT=0
+
+for sd in $UNIQUE_SERVICE_DATES; do
+  jq -n --arg serviceDate "$sd" '{serviceDate: $serviceDate}' > "$DAILY_REBUILD_FIXTURE"
+  http_call POST "/reports/daily-dispatch-records/rebuild" "$DAILY_REBUILD_FIXTURE"
+  assert_status "200|201"
+  rc="$(json_get_first ".data.rebuiltCount" ".data.rebuilt_count")"
+  DAILY_REBUILT_COUNT=$((DAILY_REBUILT_COUNT + rc))
+  AGGREGATED_DAILY_RECORDS="$(echo "$AGGREGATED_DAILY_RECORDS" "$RESP_BODY" | jq -s '.[0] + (.[1].data.records // [])')"
+done
+
+assert_int_equals "daily rebuild count" 3 "$DAILY_REBUILT_COUNT"
 
 log_step "2.3 — Validate daily dispatch records from rebuild response"
 assert_int_equals \
   "daily dispatch record row count" \
   3 \
-  "$(echo "$RESP_BODY" | jq -r '(.data.records // []) | length' 2>/dev/null || true)"
+  "$(echo "$AGGREGATED_DAILY_RECORDS" | jq 'length' 2>/dev/null || true)"
 
-APP_DAILY_ROW="$(extract_item_by_order_id "$APP_ORDER_ID")"
-PHONE_DAILY_ROW="$(extract_item_by_order_id "$PHONE_ORDER_ID")"
-PORTAL_DAILY_ROW="$(extract_item_by_order_id "$PORTAL_ORDER_ID")"
+APP_DAILY_ROW="$(echo "$AGGREGATED_DAILY_RECORDS" | jq -c --arg oid "$APP_ORDER_ID" '.[] | select((.orderId // .order_id) == $oid)' 2>/dev/null | head -1)"
+PHONE_DAILY_ROW="$(echo "$AGGREGATED_DAILY_RECORDS" | jq -c --arg oid "$PHONE_ORDER_ID" '.[] | select((.orderId // .order_id) == $oid)' 2>/dev/null | head -1)"
+PORTAL_DAILY_ROW="$(echo "$AGGREGATED_DAILY_RECORDS" | jq -c --arg oid "$PORTAL_ORDER_ID" '.[] | select((.orderId // .order_id) == $oid)' 2>/dev/null | head -1)"
 
 assert_daily_record_fields "$APP_DAILY_ROW" "$APP_ORDER_ID" "third_party_platform" "completed" 1
 assert_non_empty \
@@ -772,42 +782,51 @@ assert_equals \
 
 log_step "2.4 — POST /reports/jobs (daily_dispatch_record)"
 DAILY_REPORT_JOB_FIXTURE="${TMP_DIR}/daily-report-job.json"
-jq -n \
-  --arg serviceDate "$SERVICE_DATE" \
-  '{
-    jobType: "daily_dispatch_record",
-    format: "csv",
-    filters: {
-      serviceDate: $serviceDate
-    }
-  }' > "$DAILY_REPORT_JOB_FIXTURE"
-http_call POST "/reports/jobs" "$DAILY_REPORT_JOB_FIXTURE"
-assert_status "200|201"
-DAILY_REPORT_JOB_ID=$(json_get_first ".data.jobId" ".data.job_id")
-assert_non_empty "daily report jobId" "$DAILY_REPORT_JOB_ID"
-chain_set "reporting" "dailyReportJobId" "$DAILY_REPORT_JOB_ID"
-save_evidence "$SCENARIO" "reporting" "dailyReportJobId" "$DAILY_REPORT_JOB_ID"
-wait_for_report_job_completed "$DAILY_REPORT_JOB_ID"
+AGGREGATED_DAILY_JOB_ROWS="[]"
+DAILY_REPORT_JOB_ROW_COUNT=0
+
+for sd in $UNIQUE_SERVICE_DATES; do
+  jq -n \
+    --arg serviceDate "$sd" \
+    '{
+      jobType: "daily_dispatch_record",
+      format: "csv",
+      filters: {
+        serviceDate: $serviceDate
+      }
+    }' > "$DAILY_REPORT_JOB_FIXTURE"
+  http_call POST "/reports/jobs" "$DAILY_REPORT_JOB_FIXTURE"
+  assert_status "200|201"
+  DAILY_REPORT_JOB_ID=$(json_get_first ".data.jobId" ".data.job_id")
+  assert_non_empty "daily report jobId ($sd)" "$DAILY_REPORT_JOB_ID"
+  chain_set "reporting" "dailyReportJobId_${sd}" "$DAILY_REPORT_JOB_ID"
+  save_evidence "$SCENARIO" "reporting" "dailyReportJobId_${sd}" "$DAILY_REPORT_JOB_ID"
+  wait_for_report_job_completed "$DAILY_REPORT_JOB_ID"
+  
+  rc="$(echo "$RESP_BODY" | jq -r '.data.rows | length' 2>/dev/null || true)"
+  DAILY_REPORT_JOB_ROW_COUNT=$((DAILY_REPORT_JOB_ROW_COUNT + rc))
+  AGGREGATED_DAILY_JOB_ROWS="$(echo "$AGGREGATED_DAILY_JOB_ROWS" "$RESP_BODY" | jq -s '.[0] + (.[1].data.rows // [])')"
+done
 
 assert_int_equals \
   "daily report job row count" \
   3 \
-  "$(echo "$RESP_BODY" | jq -r '.data.rows | length' 2>/dev/null || true)"
+  "$DAILY_REPORT_JOB_ROW_COUNT"
 assert_non_empty \
   "daily report artifactId" \
   "$(echo "$RESP_BODY" | jq -r '.data.artifact.artifactId // .data.artifact.artifact_id // empty' 2>/dev/null || true)"
 assert_int_equals \
   "daily report rows for app order" \
   1 \
-  "$(echo "$RESP_BODY" | jq -r --arg oid "$APP_ORDER_ID" '.data.rows | map(select((.orderId // .order_id) == $oid)) | length' 2>/dev/null || true)"
+  "$(echo "$AGGREGATED_DAILY_JOB_ROWS" | jq -r --arg oid "$APP_ORDER_ID" 'map(select((.orderId // .order_id) == $oid)) | length' 2>/dev/null || true)"
 assert_int_equals \
   "daily report rows for phone order" \
   1 \
-  "$(echo "$RESP_BODY" | jq -r --arg oid "$PHONE_ORDER_ID" '.data.rows | map(select((.orderId // .order_id) == $oid)) | length' 2>/dev/null || true)"
+  "$(echo "$AGGREGATED_DAILY_JOB_ROWS" | jq -r --arg oid "$PHONE_ORDER_ID" 'map(select((.orderId // .order_id) == $oid)) | length' 2>/dev/null || true)"
 assert_int_equals \
   "daily report rows for portal order" \
   1 \
-  "$(echo "$RESP_BODY" | jq -r --arg oid "$PORTAL_ORDER_ID" '.data.rows | map(select((.orderId // .order_id) == $oid)) | length' 2>/dev/null || true)"
+  "$(echo "$AGGREGATED_DAILY_JOB_ROWS" | jq -r --arg oid "$PORTAL_ORDER_ID" 'map(select((.orderId // .order_id) == $oid)) | length' 2>/dev/null || true)"
 
 log_surface "Supply snapshots and six-month summary"
 
