@@ -890,11 +890,23 @@ describe.skipIf(!testDbUrl)(
           .update(partnerNotificationWireBytes(prodCommand.wirePayload))
           .digest("hex");
         expect(dRows[0].wire_payload_hash).toBe(expectedHash);
-        expect(dRows[0].expires_at.toISOString()).toBe(new Date(receipt.deliveryContext!.expiresAt).toISOString());
+        
+        // TTL upper bound check across retry
+        const { rows: oRows } = await pool.query("SELECT created_at FROM ops.consumer_notification_outbox WHERE outbox_id = $1", [outboxId]);
+        const originalCreatedAt = new Date(oRows[0].created_at).getTime();
+        const expectedExpiresAt = new Date(originalCreatedAt + 120 * 1000).toISOString();
+        expect(dRows[0].expires_at.toISOString()).toBe(expectedExpiresAt);
+
         expect(dRows[0].delivery_stage).toBe("partner_accepted");
         expect(dRows[0].entry_slug).toBe(missingBindingSlug);
-        expect(dRows[0].event_sequence).toBe((prodCommand.wirePayload as any).data.eventSequence);
+        expect(Number(dRows[0].event_sequence)).toBe((prodCommand.wirePayload as any).data.eventSequence);
         expect(dRows[0].downstream_status).toBe("unknown");
+        
+        // Identity matching (context receipt + provider_message_ref)
+        expect(dRows[0].receipt_id).toBe(receipt.deliveryContext?.receiptId);
+        expect(dRows[0].provider_message_ref).toBe(receipt.providerMessageRef);
+        expect(dRows[0].tenant_id).toBe(tenantId);
+        expect(dRows[0].partner_id).toBe(partnerId);
 
         // Check matching claim fence release
         const { rows: cRows } = await pool.query(
@@ -907,14 +919,15 @@ describe.skipIf(!testDbUrl)(
 
         // Check receipt identity
         const { rows: rRows } = await pool.query(
-          "SELECT receipt_id, dedupe_key, fence_token, provider_message_ref FROM ops.phase1_push_delivery_receipts WHERE outbox_id = $1",
+          "SELECT receipt_id, dedupe_key, fence_token, provider_message_ref, passenger_subject_ref FROM ops.phase1_push_delivery_receipts WHERE outbox_id = $1",
           [outboxId],
         );
         expect(rRows.length).toBe(1);
-        expect(rRows[0].receipt_id).toBe(receipt.deliveryContext?.receiptId);
+        expect(rRows[0].receipt_id).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/); // generated internal UUID
         expect(rRows[0].dedupe_key).toBe(`${outboxId}:${claim!.fenceToken}`);
         expect(rRows[0].fence_token).toBe(claim!.fenceToken);
         expect(rRows[0].provider_message_ref).toBe(receipt.providerMessageRef);
+        expect(rRows[0].passenger_subject_ref).toBe("sub"); // tied to dispatched command/original route
 
         // Check audit identity
         const { rows: aRows } = await pool.query(

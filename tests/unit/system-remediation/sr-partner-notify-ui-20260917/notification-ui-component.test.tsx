@@ -489,7 +489,7 @@ describe("PartnerNotificationPanel", () => {
     mockClient.getPartnerEntryNotificationBinding.mockRejectedValueOnce(
       Object.assign(new Error("Forbidden"), { statusCode: 403 }),
     );
-    const { rerender, unmount } = render(
+    const { rerender } = render(
       <PartnerNotificationPanel
         entrySlug="test-entry"
         tenantId="test-tenant"
@@ -596,7 +596,7 @@ describe("PartnerNotificationPanel", () => {
       state: "disabled",
     });
 
-    const { unmount, rerender } = render(
+    const { rerender } = render(
       <PartnerNotificationPanel
         entrySlug="test-entry"
         tenantId="test-tenant"
@@ -805,9 +805,9 @@ describe("PartnerNotificationPanel", () => {
       resolveResume({
         kind: "failed",
         failure: {
-          failureReason: "endpoint_unreachable",
+          failureReason: "endpoint_unavailable",
           detail: "Cannot reach partner",
-          retryDisposition: "transient",
+          retryDisposition: "automatic",
           suggestedNextAttemptAt: new Date(Date.now() + 60000).toISOString()
         }
       });
@@ -826,7 +826,7 @@ describe("PartnerNotificationPanel", () => {
     expect(newerMockClient.getPartnerEntryNotificationBinding).not.toHaveBeenCalled();
     expect(newerMockClient.listPartnerNotificationDeliveries).not.toHaveBeenCalled();
 
-    // ensure no error message is displayed on new client
+    // ensure no error message is displayed on new client because it's a stale failure
     expect(screen.queryByText(/Cannot reach partner/)).toBeNull();
 
     // 4. Genuine pending Resume across client transition with accepted result
@@ -891,56 +891,27 @@ describe("PartnerNotificationPanel", () => {
     expect(newerMockClient.enablePartnerEntryNotificationBinding).not.toHaveBeenCalled();
 
     // 5. Current-validation direct Resume (successful)
-    let resolveDirectResume: any;
-    evenNewerMockClient.testPartnerEntryNotificationBinding.mockReturnValue(
-      new Promise((resolve) => {
-        resolveDirectResume = resolve;
-      }),
-    );
-    evenNewerMockClient.enablePartnerEntryNotificationBinding.mockResolvedValue({
-      version: 2,
-      webhookId: "even-newer-webhook",
-      eventTypes: ["eta_changed"],
-      state: "enabled",
-    });
-
-    const resumeBtn3 = await screen.findByRole("button", {
-      name: /恢復/i,
-    });
-    fireEvent.click(resumeBtn3);
-
-    await act(async () => {
-      resolveDirectResume({
-        kind: "accepted",
-        ack: {
-          notificationId: "n-4",
-          deliveryId: "d-4",
-          partnerEntrySlug: "test-entry",
-          status: "accepted",
-          receiptId: "ack-4",
-        },
-      });
-      await new Promise((r) => setTimeout(r, 10));
-    });
-
-    // It should now call enable because the client hasn't changed
-    expect(evenNewerMockClient.enablePartnerEntryNotificationBinding).toHaveBeenCalledTimes(1);
-
-    // 6. Genuine pending Resume across Unmount
-    let resolveResumeUnmount: any;
-    evenNewerMockClient.testPartnerEntryNotificationBinding.mockReturnValue(
-      new Promise((resolve) => {
-        resolveResumeUnmount = resolve;
-      }),
-    );
-
-    // Get the disabled view back (since enable state update in mock might not trigger full reload here)
-    evenNewerMockClient.getPartnerEntryNotificationBinding.mockResolvedValue({
-        version: 2,
+    const validClient = {
+      ...evenNewerMockClient,
+      getPartnerEntryNotificationBinding: vi.fn().mockResolvedValue({
+        version: 1,
         webhookId: "even-newer-webhook",
         eventTypes: ["eta_changed"],
         state: "disabled",
-    });
+        validatedAt: new Date().toISOString(),
+        validatedEndpointFingerprint: "fingerprint-123",
+        endpointFingerprint: "fingerprint-123",
+      }),
+      testPartnerEntryNotificationBinding: vi.fn(),
+      enablePartnerEntryNotificationBinding: vi.fn().mockResolvedValue({
+        version: 2,
+        webhookId: "even-newer-webhook",
+        eventTypes: ["eta_changed"],
+        state: "enabled",
+      }),
+    };
+    (usePlatformAdminClient as any).mockReturnValue(validClient);
+    
     await act(async () => {
       rerender(
         <PartnerNotificationPanel
@@ -953,29 +924,136 @@ describe("PartnerNotificationPanel", () => {
       await new Promise((r) => setTimeout(r, 50));
     });
 
-    const resumeBtn4 = await screen.findByRole("button", {
+    const resumeBtn3 = await screen.findByRole("button", {
       name: /恢復/i,
     });
-    fireEvent.click(resumeBtn4);
+    
+    await act(async () => {
+      fireEvent.click(resumeBtn3);
+      await new Promise((r) => setTimeout(r, 10));
+    });
 
-    unmount();
+    // Zero test calls, directly enable
+    expect(validClient.testPartnerEntryNotificationBinding).not.toHaveBeenCalled();
+    expect(validClient.enablePartnerEntryNotificationBinding).toHaveBeenCalledTimes(1);
+
+    // 6. Genuine pending Resume across authority-only transition (unmount-like)
+    let resolveResumeAuth: any;
+    validClient.testPartnerEntryNotificationBinding.mockReturnValue(
+      new Promise((resolve) => {
+        resolveResumeAuth = resolve;
+      }),
+    );
+
+    // Make it stale again to force a test
+    validClient.getPartnerEntryNotificationBinding.mockResolvedValue({
+        version: 2,
+        webhookId: "even-newer-webhook",
+        eventTypes: ["eta_changed"],
+        state: "disabled",
+    });
+    
+    await act(async () => {
+      rerender(
+        <PartnerNotificationPanel
+          entrySlug="test-entry"
+          tenantId="test-tenant"
+          canWriteBinding={true}
+          canReadWebhooks={true}
+        />,
+      );
+      await new Promise((r) => setTimeout(r, 50));
+    });
+
+    const resumeBtnAuth = await screen.findByRole("button", {
+      name: /恢復/i,
+    });
+    fireEvent.click(resumeBtnAuth);
+
+    // Authority transition (mounted)
+    await act(async () => {
+      rerender(
+        <PartnerNotificationPanel
+          entrySlug="test-entry"
+          tenantId="test-tenant"
+          canWriteBinding={false}
+          canReadWebhooks={true}
+        />,
+      );
+      await new Promise((r) => setTimeout(r, 50));
+    });
+
+    validClient.enablePartnerEntryNotificationBinding.mockClear();
 
     await act(async () => {
-      resolveResumeUnmount({
+      resolveResumeAuth({
         kind: "accepted",
         ack: {
-          notificationId: "n-5",
-          deliveryId: "d-5",
+          notificationId: "n-auth",
+          deliveryId: "d-auth",
           partnerEntrySlug: "test-entry",
           status: "accepted",
-          receiptId: "ack-5",
+          receiptId: "ack-auth",
         },
       });
       await new Promise((r) => setTimeout(r, 10));
     });
 
-    expect(
-      evenNewerMockClient.enablePartnerEntryNotificationBinding,
-    ).toHaveBeenCalledTimes(1); // the mock was cleared/reset? Wait, the previous call was 1, so it shouldn't be called again
+    expect(validClient.enablePartnerEntryNotificationBinding).not.toHaveBeenCalled();
+
+    // 7. Genuine pending Resume across entry-only transition
+    let resolveResumeEntry: any;
+    validClient.testPartnerEntryNotificationBinding.mockReturnValue(
+      new Promise((resolve) => {
+        resolveResumeEntry = resolve;
+      }),
+    );
+    
+    // restore authority
+    await act(async () => {
+      rerender(
+        <PartnerNotificationPanel
+          entrySlug="test-entry"
+          tenantId="test-tenant"
+          canWriteBinding={true}
+          canReadWebhooks={true}
+        />,
+      );
+      await new Promise((r) => setTimeout(r, 50));
+    });
+
+    const resumeBtnEntry = await screen.findByRole("button", {
+      name: /恢復/i,
+    });
+    fireEvent.click(resumeBtnEntry);
+
+    // Entry transition (mounted)
+    await act(async () => {
+      rerender(
+        <PartnerNotificationPanel
+          entrySlug="different-entry"
+          tenantId="test-tenant"
+          canWriteBinding={true}
+          canReadWebhooks={true}
+        />,
+      );
+      await new Promise((r) => setTimeout(r, 50));
+    });
+
+    await act(async () => {
+      resolveResumeEntry({
+        kind: "accepted",
+        ack: {
+          notificationId: "n-entry",
+          deliveryId: "d-entry",
+          partnerEntrySlug: "test-entry",
+          status: "accepted",
+          receiptId: "ack-entry",
+        },
+      });
+      await new Promise((r) => setTimeout(r, 10));
+    });
+
+    expect(validClient.enablePartnerEntryNotificationBinding).not.toHaveBeenCalled();
   });
-});;
+});

@@ -1873,7 +1873,7 @@ export function PartnerNotificationPanel({
             theme={theme}
             tone="danger"
             icon="warn"
-            body={error.message || "發生錯誤"}
+            body={error.kind === "failed" ? (error.failure?.detail || error.failure?.failureReason || "測試失敗") : (error.message || "發生錯誤")}
           />
         ) : null}
 

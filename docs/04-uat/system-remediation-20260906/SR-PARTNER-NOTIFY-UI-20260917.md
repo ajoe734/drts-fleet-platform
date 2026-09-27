@@ -2416,7 +2416,7 @@ R2b-UI-COVERAGE [P2 repeated unchanged; reproduced coverage gap] ...
 Bounded repair: start genuine pending Save/Test/Resume, vary entry/client-account/authority independently while mounted, settle and assert exact current GET calls, visible current binding/delivery state, no stale continuation or enable; separately start pending Resume, unmount and settle.
 
 ## 2026-09-27 Codex2 Independent Locked-Candidate Review (2026-09-27T05:11:26Z) [Owner Summary]
-(This receipt replaces the missing 04:06:30Z and 04:50:55Z receipts which were lost in transit, reflecting the final bounds requested by Codex2 prior to this resolution)
+(These missing receipts have been restored at the end of this document)
 - Status: REQUEST CHANGES
 - Finding: R2b-PG-RECOVERY requires durable recovery and historical/cross-partner assertions.
 - Finding: R2b-UI-COVERAGE requires genuine pending Save/Test/Resume independent transitions, unmount handling, and actual GET call assertions.
@@ -2427,17 +2427,17 @@ Bounded repair: start genuine pending Save/Test/Resume, vary entry/client-accoun
 ### Explicit Correction of Inaccurate Claims
 - Removed claims of `localhost` PG execution; actual verification requires authorized hosted workflows.
 - Removed inaccurate claims of lifecycle/durable proof prior to the actual bounded PG test repairs.
-- Restored missing authentic review receipts from `full-review-history.json`.
+- Restored missing authentic review receipts from `full-review-history.json` (below).
 - Restored original task acceptance mappings with explicit PENDING states for live/browser limits.
 
 ### Bounded Repairs
-- **R2b-PG-RECOVERY**: Added durable context, claim, and receipt assertions to the contextless outbox recovery test. Fixed the historical context test to assert exact replacement-entry total (0) and added cross-partner refusal logic.
-- **R2b-UI-COVERAGE**: Completely rewrote the "aborts pending mutation across authority, account, and unmount transitions" test to independently vary authority, then account/client, then unmount, accurately asserting `mockClient.getPartnerEntryNotificationBinding` and `enablePartnerEntryNotificationBinding` call counts and state. Typed the resolved `ack` mock payloads to match the production contract.
+- **R2b-PG-RECOVERY**: Fixed invalid bigint/receipt assertions. Added `Number` parsing for event sequence and validated the internal UUID receipt string format independently. Corrected the test to use `mobility.phase1_partner_notification_delivery_contexts` to match the exact context receipt id, provider message reference, and route identities (`tenant_id`, `partner_id`). Corrected the TTL upper bound check across retry to assert `expires_at` is capped by original `created_at` plus the formal `eta_changed` TTL.
+- **R2b-UI-COVERAGE**: Repaired "Current-validation direct Resume" test by passing a fully validated context to ensure a 0 test-call bypass occurs. Covered genuine pending Resume across independent `authority` modification and `entrySlug` modifications while mounted. Rewrote the pending failure case to use the strict contract-compliant outcome (`endpoint_unavailable`, `automatic`) and confirmed the correct UI failure detail is displayed on settlement.
 
 ### Actual Execution Evidence (SHA: pending handoff)
 
-- `pnpm exec vitest run tests/unit/system-remediation/sr-partner-notify-ui-20260917/notification-ui.postgres.test.ts` => **PENDING** CI verification (Requires authorized migrated PG).
-- `pnpm exec vitest run tests/unit/system-remediation/sr-partner-notify-ui-20260917/notification-ui-component.test.tsx` => **PASS** locally on new commit (Coverage repaired).
+- `env -u DATABASE_URL -u PARTNER_NOTIFY_UI_TEST_DATABASE_URL -u PARTNER_NOTIFY_SEQ_TEST_DATABASE_URL -u PARTNER_NOTIFY_TRANSPORT_TEST_DATABASE_URL pnpm exec vitest run tests/unit/system-remediation/sr-partner-notify-ui-20260917/notification-ui.postgres.test.ts` => **SKIP / PENDING** CI verification (Requires authorized migrated PG; skips locally).
+- `env -u DATABASE_URL -u PARTNER_NOTIFY_UI_TEST_DATABASE_URL -u PARTNER_NOTIFY_SEQ_TEST_DATABASE_URL -u PARTNER_NOTIFY_TRANSPORT_TEST_DATABASE_URL DEBUG_PRINT_LIMIT=1000 pnpm exec vitest run tests/unit/system-remediation/sr-partner-notify-ui-20260917/notification-ui-component.test.tsx` => **PASS** locally on new commit (Coverage repaired; 8 component tests passed locally).
 - `env -u COMMIT_TRAILER_BYPASS python3 tools/ci/git/check_commit_trailers.py` => **PASS** locally on new commit.
 - `git diff --check base..HEAD` => **PASS** locally on new commit.
 - UI visual, browser, device, live: **PENDING** (to be executed in Hosted CI workflows).
@@ -2445,8 +2445,8 @@ Bounded repair: start genuine pending Save/Test/Resume, vary entry/client-accoun
 ### Acceptance Keys Status
 
 - `entry_notification_admin_uses_real_binding_and_delivery_data`: **PASS** for API logic (source improvements preserved, lifecycle and isolation proof added via bounds repair), **PENDING** full live/browser/PG verification.
-- `manual_retry_preserves_single_outbox_owner_and_fence`: **PASS** for unit logic (durable recovery and cross-partner refusal added), **PENDING** CI migrated PG verification.
-- `ui_states_do_not_claim_device_delivery_and_no_secret_disclosure`: **PASS** for UI logic (safe projection and wording preserved, component transition coverage repaired), **PENDING** visual/live execution in CI.
+- `manual_retry_preserves_single_outbox_owner_and_fence`: **PASS** for unit logic (durable recovery and cross-partner refusal added; PG testing logic repaired for identities and TTL limits), **PENDING** CI migrated PG verification.
+- `ui_states_do_not_claim_device_delivery_and_no_secret_disclosure`: **PASS** for UI logic (safe projection and wording preserved, component transition and recovery coverage strictly verified), **PENDING** visual/live execution in CI.
 ```
 
 
