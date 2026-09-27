@@ -1,6 +1,13 @@
 import { execFile, spawn } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
-import { mkdtemp, rm } from "node:fs/promises";
+import {
+  mkdtemp,
+  open,
+  readFile,
+  realpath,
+  rm,
+  writeFile,
+} from "node:fs/promises";
 import { createServer, type Server } from "node:http";
 import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
@@ -61,6 +68,7 @@ export class PartnerFixture {
     status: number;
     responseBody: string;
     secretVersion: number;
+    receivedAt: string;
   }[] = [];
   readonly db: Database;
   receiver!: ControlledReceiver;
@@ -73,6 +81,7 @@ export class PartnerFixture {
   fault:
     | "none"
     | "timeout"
+    | "unavailable"
     | "invalid_ack"
     | "html_ack"
     | "wrong_notification"
@@ -169,7 +178,12 @@ export class PartnerFixture {
           const fault = passenger ? this.fault : "none";
           let status = reply.status;
           let body = reply.body;
-          if (fault === "invalid_ack") {
+          if (fault === "unavailable") {
+            // The signed request reached the durable receiver, but the external
+            // response is unavailable. DRTS must never infer an accepted ack.
+            status = 503;
+            body = JSON.stringify({ error: "controlled_unavailable" });
+          } else if (fault === "invalid_ack") {
             status = 204;
             body = "";
           } else if (fault === "html_ack") {
@@ -204,6 +218,7 @@ export class PartnerFixture {
             hash: createHash("sha256").update(raw).digest("hex"),
             status,
             responseBody: body,
+            receivedAt: new Date().toISOString(),
             // Evidence only: retain the public version, never the secret/HMAC.
             secretVersion: Number(
               /^v=(\d+);/.exec(
@@ -840,6 +855,84 @@ export class PartnerFixture {
       throw error;
     } finally {
       clearTimeout(timer);
+    }
+  }
+
+  async restartApi() {
+    // Same hosted server/PID file used by the existing workflow. Validate the
+    // process identity before touching it; this fixture never runs on the VM.
+    const evidenceDir = path.resolve(".artifacts/tenant-uat-acceptance");
+    const pidPath = path.join(evidenceDir, "api-server.pid");
+    const oldPid = Number((await readFile(pidPath, "utf8")).trim());
+    expect(Number.isSafeInteger(oldPid) && oldPid > 1).toBe(true);
+    expect(await realpath(`/proc/${oldPid}/cwd`)).toBe(
+      await realpath("apps/api"),
+    );
+    expect(
+      (await readFile(`/proc/${oldPid}/cmdline`, "utf8")).split("\0"),
+    ).toContain("dist/main.js");
+    process.kill(oldPid, "SIGTERM");
+    await expect
+      .poll(
+        async () => {
+          try {
+            // A child of a previous Actions shell can remain as a zombie briefly.
+            const stat = await readFile(`/proc/${oldPid}/stat`, "utf8");
+            return stat.slice(stat.lastIndexOf(")") + 2).startsWith("Z");
+          } catch (error) {
+            if ((error as NodeJS.ErrnoException).code === "ENOENT") return true;
+            throw error;
+          }
+        },
+        { timeout: 30_000 },
+      )
+      .toBe(true);
+    const log = await open(path.join(evidenceDir, "api-server.log"), "a");
+    try {
+      const child = spawn(process.execPath, ["dist/main.js"], {
+        cwd: path.resolve("apps/api"),
+        env: {
+          ...process.env,
+          DRTS_ALLOW_LOCAL_WEBHOOKS: "true",
+          API_PORT: "4102",
+          API_HOST: "127.0.0.1",
+        },
+        detached: true,
+        stdio: ["ignore", log.fd, log.fd],
+      });
+      await new Promise<void>((resolve, reject) => {
+        child.once("spawn", resolve);
+        child.once("error", reject);
+      });
+      const newPid = child.pid!;
+      expect(newPid).not.toBe(oldPid);
+      await writeFile(pidPath, `${newPid}\n`);
+      child.unref();
+      await expect
+        .poll(
+          async () => {
+            try {
+              const response = await fetch(
+                `${required("DRTS_UAT_API_URL")}/api/health`,
+                {
+                  signal: AbortSignal.timeout(2_000),
+                },
+              );
+              return (
+                response.ok &&
+                response.headers.get("x-drts-candidate-sha") ===
+                  required("CANDIDATE_SHA")
+              );
+            } catch {
+              return false;
+            }
+          },
+          { timeout: 30_000 },
+        )
+        .toBe(true);
+      return { oldPid, newPid, candidateSha: required("CANDIDATE_SHA") };
+    } finally {
+      await log.close();
     }
   }
 

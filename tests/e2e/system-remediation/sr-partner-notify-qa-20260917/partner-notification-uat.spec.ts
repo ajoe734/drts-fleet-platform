@@ -986,6 +986,111 @@ test.describe("SR-PARTNER-NOTIFY-QA-20260917: E2E Partner Notification Delivery 
     }
   });
 
+  test("C216 E2E: Five maximum attempts have one retry owner across restart", async () => {
+    // The approved production policy waits 30+60+120+240 seconds. Do not
+    // shorten it, rewrite due dates, or invoke the worker manually.
+    test.setTimeout(600_000);
+    const entry = fixture.entries[0]!;
+    fixture.fault = "unavailable";
+    const outboxId = await fixture.enqueue(await fixture.createRide(entry));
+    const first = await fixture.settled(outboxId);
+    expect(first).toMatchObject({
+      status: "failed",
+      attempt_count: 1,
+      claim_state: "released",
+      failure_reason: "provider_transient_error",
+      retry_disposition: "automatic",
+      receipt_id: null,
+      delivered_at: null,
+    });
+    const context = (
+      await fixture.db.query(
+        "SELECT * FROM mobility.phase1_partner_notification_delivery_contexts WHERE outbox_id=$1",
+        [outboxId],
+      )
+    ).rows[0]!;
+    const policy = context.retry_policy_snapshot;
+    expect(policy).toMatchObject({
+      maxAttempts: 5,
+      initialBackoffSeconds: 30,
+      backoffMultiplier: 2,
+      maxBackoffSeconds: 900,
+    });
+    expect(received(outboxId)).toHaveLength(1);
+    const restart = await fixture.restartApi();
+    // Restart preserves both the reserved count and the policy's due time.
+    expect(await fixture.outcome(outboxId)).toEqual(first);
+    expect(received(outboxId)).toHaveLength(1);
+    const outcomes = [first];
+    for (let attempt = 2; attempt <= policy.maxAttempts; attempt += 1) {
+      const prior = outcomes.at(-1)!;
+      const dueAt = new Date(prior.next_attempt_at).getTime();
+      await expect
+        .poll(
+          async () => {
+            const row = await fixture.outcome(outboxId);
+            return row?.status === "failed" && row.attempt_count === attempt;
+          },
+          {
+            timeout: Math.max(0, dueAt - Date.now()) + 20_000,
+            intervals: [500],
+          },
+        )
+        .toBe(true);
+      const row = (await fixture.outcome(outboxId))!;
+      outcomes.push(row);
+      expect(row).toMatchObject({
+        status: "failed",
+        attempt_count: attempt,
+        claim_state: "released",
+        failure_reason: "provider_transient_error",
+        retry_disposition: attempt === 5 ? "terminal" : "automatic",
+        receipt_id: null,
+        delivered_at: null,
+        delivery_id: first.delivery_id,
+        wire_payload_hash: first.wire_payload_hash,
+      });
+      const attempts = received(outboxId);
+      expect(attempts).toHaveLength(attempt);
+      const request = attempts[attempt - 1]!;
+      expect(Date.parse(request.receivedAt)).toBeGreaterThanOrEqual(dueAt);
+      expect(request.rawBody).toBe(attempts[0]!.rawBody);
+      expect(request.status).toBe(503);
+      await noAcknowledgedReceipt(outboxId);
+    }
+    const terminal = outcomes.at(-1)!;
+    const finalRestart = await fixture.restartApi();
+    // Terminal next_attempt_at is already due; observe multiple actual polls
+    // after reload, including the tenant scheduler's persisted retry recovery.
+    await new Promise((resolve) => setTimeout(resolve, 3_200));
+    expect(await fixture.outcome(outboxId)).toEqual(terminal);
+    expect(received(outboxId)).toHaveLength(5);
+    expect(
+      (await fixture.receiver.records()).filter(
+        (r) => r.notificationId === outboxId,
+      ),
+    ).toHaveLength(1);
+    await noAcknowledgedReceipt(outboxId);
+    await test.info().attach("five-attempts-api-restart", {
+      contentType: "application/json",
+      body: JSON.stringify({
+        candidate_sha: process.env.CANDIDATE_SHA,
+        outboxId,
+        policy,
+        restart,
+        finalRestart,
+        outcomes,
+        attempts: received(outboxId).map((r) => ({
+          receivedAt: r.receivedAt,
+          hash: r.hash,
+          status: r.status,
+        })),
+        boundary:
+          "real AppModule OS restart, natural production backoff; receiver returns 503 after durable inbox; no device acceptance",
+      }),
+    });
+  });
+
   test("C217 E2E: Expired notifications stop without sending", async () => {
     const entry = fixture.entries[0]!;
     const orderId = await fixture.createRide(entry);
