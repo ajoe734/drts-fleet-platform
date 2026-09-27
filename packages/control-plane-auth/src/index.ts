@@ -136,7 +136,7 @@ export interface ControlPlaneIdentity {
   actorId: string;
   subject?: string | null;
   realm: AuthRealm;
-  tenantId: null;
+  tenantId: string | null;
   roleFamilies: AuthRoleFamily[];
   roles: string[];
   scopes: string[];
@@ -245,6 +245,7 @@ function buildIdentity(
   authMode: ControlPlaneIdentity["authMode"] = "jwt_bearer",
   subject?: string | null,
   overrideRoles?: string[],
+  assumeTenantId?: string | null,
 ): ControlPlaneIdentity {
   const known =
     PLATFORM_ADMIN_DIRECTORY[
@@ -266,7 +267,7 @@ function buildIdentity(
           : platformIdentity.actorId,
       ...(subject ? { subject } : {}),
       realm: CONTROL_PLANE_REALMS[actorType],
-      tenantId: null,
+      tenantId: assumeTenantId || null,
       roleFamilies: [...CONTROL_PLANE_ROLE_FAMILIES[actorType]],
       roles: overrideRoles ?? platformIdentity.roles,
       scopes: [...getIamActorScopePreset(actorType)],
@@ -284,7 +285,7 @@ function buildIdentity(
         : `ops-user-${toActorSlug(authenticatedUserEmail)}`,
     ...(subject ? { subject } : {}),
     realm: CONTROL_PLANE_REALMS[actorType],
-    tenantId: null,
+    tenantId: assumeTenantId || null,
     roleFamilies: [...CONTROL_PLANE_ROLE_FAMILIES[actorType]],
     roles: overrideRoles ?? ["ops_user"],
     scopes: [...getIamActorScopePreset(actorType)],
@@ -446,6 +447,7 @@ export function issueControlPlaneRequestAuth(options: {
   iapJwtSecretOrPublicKey?: string | undefined;
   expectedIapAudience?: string | undefined;
   expectedIapIssuer?: string | undefined;
+  assumeTenantId?: string | null;
 }): ControlPlaneRequestAuth {
   let verifiedSubject: string | null = null;
   let verifiedEmail: string | null = null;
@@ -566,6 +568,7 @@ export function issueControlPlaneRequestAuth(options: {
     hasJwtSecret ? "jwt_bearer" : "bootstrap_headers",
     verifiedSubject,
     overrideRoles,
+    options.assumeTenantId
   );
 
   const rawAssertion = options.headers
@@ -581,6 +584,9 @@ export function issueControlPlaneRequestAuth(options: {
       "x-role-families": identity.roleFamilies.join(","),
       "x-scopes": identity.scopes.join(","),
     };
+    if (identity.tenantId) {
+      headers["x-tenant-id"] = identity.tenantId;
+    }
     if (rawAssertion) {
       headers[CONTROL_PLANE_IAP_JWT_HEADER] = rawAssertion;
     }
@@ -608,7 +614,7 @@ export function issueControlPlaneRequestAuth(options: {
       sub: identity.actorId,
       actorType: identity.actorType,
       realm: identity.realm,
-      tenantId: null,
+      tenantId: identity.tenantId,
       roleFamilies: identity.roleFamilies,
       roles: identity.roles,
       scopes: identity.scopes,
