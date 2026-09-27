@@ -335,11 +335,11 @@ scope 未擴充。R5 日期 DTO／tenant picker／translation、R9 transport lin
 
 | Finding／驗收項 | 原始碼依據與修改位置 | 舊版 → 本單元 | 驗證與邊界 | 未驗項 |
 | --- | --- | --- | --- | --- |
-| R1／C209 entry ownership | `resolveNotificationRoute` 先比 entry.tenantId 與 frozen route；正式 entry POST | 09e2277f 缺案例 → 新增先排入通知、再以 HTTP 移轉 tenant、檢查 owner_changed/manual_only、零外送、route 不改；恢復 owner 後新事件正向 | synthetic event 僅用 `OwnedMobilityRepository.persistChanges`；不寫 route／claim SQL；hosted 待跑 | 其餘 SD14 仍缺 |
-| R1／C212 invalid ack | `WebhookDispatchService`／transport 真正驗 receipt identity | 舊版只204 → 新增 HTML200、錯 notification/delivery/entry、缺 receipt；均須 manual_only、無 acknowledged receipt，endpoint 正式重測仍不自動重送 | 只替換受控 receiver 回應，保留 HMAC/durable inbox；hosted 待跑 | 不稱真夥伴驗收 |
-| R1／C217 expiry | `notificationExpiresAt`、真 worker claim/outcome | 缺案例 → 八日前 receipt_ready 終止、零外送，同ride fresh receipt sequence=2可送 | synthetic event timestamp，無時鐘／worker mock；hosted 待跑 | expiry during retry 仍待完整故障矩陣 |
-| R1／C219 privacy | `PartnerNotificationTransport.send` allowlist | 缺案例 → synthetic 私密欄位留在PG，wire只允許正式欄位；缺driver仍可交付 | receiver raw bytes＋PG readback；hosted 待跑 | 不含真個資或真裝置 |
-| R2／R3 既有 gates | 原 workflow `c113_c115_acceptance`、restart/readback | C205失敗時全部skip → 把 partner specs 放在既有 restart gates 之後，所有 gate 及 strict case manifest 保留 | 原 Python ordering/assertion checks 與 hosted 待跑 | C205已知產品缺陷仍保留必需且可能失敗 |
+| R1／C209 entry ownership | `resolveNotificationRoute` 先比 entry.tenantId 與 frozen route；正式 entry POST | 09e2277f 缺案例 → 新增先排入通知、再以 HTTP 移轉 tenant、檢查 owner_changed/manual_only、零外送、route 不改；恢復 owner 後新事件正向 | synthetic event 僅用 `OwnedMobilityRepository.persistChanges`；不寫 route／claim SQL；8039453e hosted passed | 其餘 SD14 仍缺 |
+| R1／C212 invalid ack | `WebhookDispatchService`／transport 真正驗 receipt identity | 舊版只204 → 新增 HTML200、錯 notification/delivery/entry、缺 receipt；均須 manual_only、無 acknowledged receipt，endpoint 正式重測仍不自動重送 | 只替換受控 receiver 回應，保留 HMAC/durable inbox；8039453e hosted passed | 不稱真夥伴驗收 |
+| R1／C217 expiry | `notificationExpiresAt`、真 worker claim/outcome | 缺案例 → 八日前 receipt_ready 終止、零外送，同ride fresh receipt sequence=2可送 | synthetic event timestamp，無時鐘／worker mock；8039453e hosted passed | expiry during retry 仍待完整故障矩陣 |
+| R1／C219 privacy | `PartnerNotificationTransport.send` allowlist | 缺案例 → synthetic 私密欄位留在PG，wire只允許正式欄位；缺driver仍可交付 | receiver raw bytes＋PG readback；8039453e hosted passed | 不含真個資或真裝置 |
+| R2／R3 既有 gates | 原 workflow `c113_c115_acceptance`、restart/readback | C205失敗時全部skip → 把 partner specs 放在既有 restart gates 之後，所有 gate 及 strict case manifest 保留 | 原 Python ordering/assertion checks 與 8039453e hosted passed | C205已知產品缺陷仍保留必需且可能失敗 |
 
 本 checkpoint 只保存已實作待驗案例，不是通過／交審；三項 required_acceptance 仍 **NOT MET**。
 C208、C210–C211、C213–C216、C218、C220–C224 仍缺；C205完整UI受產品缺陷阻塞。

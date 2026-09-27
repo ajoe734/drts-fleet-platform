@@ -11,7 +11,7 @@
 | 正向worker delivery                              | C201；200/201/202 + 相符durable accepted/duplicate receipt；partner_accepted，downstream unknown               | 58081594 C201真worker/PG/receiver passed（非全矩陣）   |
 | accepted後timeout與dedupe                        | C202；大於10秒deadline、同notification/delivery/body hash、同receipt duplicate、只入列一次                     | 58081594 C202 passed；同bytes/receipt duplicate        |
 | 缺route                                          | C203；typed route_missing/manual_only、不猜entry、receiver count=0                                             | 58081594 C203 passed；typed reason、零外送             |
-| 204、HTML200、錯receipt                          | C204；partner_ack_invalid/manual_only，不能自動retry                                                           | 58081594 C204的204拒絕 passed；HTML/錯receipt C212仍缺 |
+| 204、HTML200、錯receipt                          | C204/C212；partner_ack_invalid/manual_only，不能自動retry                                                      | 8039453e C204與C212五種invalid ack均passed             |
 | 同tenant兩entry、跨tenant同URL、同住戶兩App      | 僅原entry/tenant/subject收到，payload不串單                                                                    | C206/C207在58081594 passed；同住戶兩App C208仍缺       |
 | entry移轉與link撤銷                              | 舊消息不移轉；owner_changed/manual_only與recipient_revoked/terminal；零外送                                    | 8039453e C209移轉passed；link撤銷C210仍缺                |
 | endpoint停用、secret輪替重測、未配置availability | 明確configuration_blocked；測試就緒後才enable                                                                  | 缺整合案例                                             |
