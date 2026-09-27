@@ -14,7 +14,7 @@ const MP_STATES = {
   out_of_area:   { zh:'不在服務範圍', tone:'danger', next:'請更換地點；此地點無法派車' },
   missing_coordinate: { zh:'缺少座標', tone:'warn', next:'地址簿缺少座標，請重新定位' },
 };
-function MapPicker({ theme:th, label='上車地點', state='selected', value, compact, skin='mgmt', requiresReason=false, reason, coordinateData }) {
+function MapPicker({ theme:th, label='上車地點', state='selected', value, compact, skin='mgmt', requiresReason=false, allowFallback=false, reason, coordinateData }) {
   const m = MP_STATES[state];
   const c = { text:th.text, muted:th.textMuted, dim:th.textDim, line:th.border, surface:th.surface, lo:th.surfaceLo, accent:th.accent, success:th.success, warn:th.warn, danger:th.danger, mono: skin==='pb' ? PB_MONO : SHELL_MONO };
   const tone = c[m.tone==='neutral'?'muted':m.tone==='info'?'accent':m.tone];
@@ -71,9 +71,9 @@ function MapPicker({ theme:th, label='上車地點', state='selected', value, co
       )}
       {/* next-step footer */}
       <div style={{ display:'flex', alignItems:'center', gap:8, padding:'7px 10px', borderTop:'1px solid '+c.line, background:blocked?th.dangerBg:c.surface }}>
-        <span style={{ flex:1, fontSize:11, color:blocked?c.danger:c.muted, fontWeight:blocked?700:500 }}>{state==='provider_down' ? (requiresReason ? '僅可送交人工複核，不會直接派車' : '服務恢復前無法建立訂單') : m.next}</span>
+        <span style={{ flex:1, fontSize:11, color:blocked?c.danger:c.muted, fontWeight:blocked?700:500 }}>{state==='provider_down' ? (allowFallback ? '僅可送交人工複核，不會直接派車' : '服務恢復前無法建立訂單') : m.next}</span>
         {state==='no_results' && <span style={{ fontSize:11, color:c.accent, fontWeight:700 }}>改用手動座標</span>}
-        {state==='provider_down' && requiresReason && <span style={{ fontSize:11, color:c.danger, fontWeight:700 }}>送交人工複核 →</span>}
+        {state==='provider_down' && allowFallback && <span style={{ fontSize:11, color:c.danger, fontWeight:700 }}>送交人工複核 →</span>}
         {state==='out_of_area' && <span style={{ fontSize:11, color:c.danger, fontWeight:700 }}>更換地點</span>}
         {state==='manual_review' && <span style={{ fontSize:11, color:c.warn, fontWeight:700 }}>客服確認後派車</span>}
         {state==='candidates' && <span style={{ fontSize:11, color:c.dim }}>3 筆候選</span>}

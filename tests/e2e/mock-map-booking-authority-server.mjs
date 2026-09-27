@@ -440,7 +440,20 @@ const server = http.createServer((req, res) => {
 
   if (req.method === "GET" && url.pathname === "/api/tenant/addresses") {
     json(res, 200, {
-      data: [],
+      data: [
+        {
+          addressId: "addr-001",
+          tenantId: "tenant-acme",
+          ownerPassengerId: null,
+          addressName: "Home",
+          addressText: "Taipei 101",
+          lat: 25.033,
+          lng: 121.565,
+          geocodeSource: "provider",
+          tags: [],
+          activeFlag: true,
+        }
+      ],
     });
     return;
   }

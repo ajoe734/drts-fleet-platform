@@ -63,7 +63,7 @@ function TN_NewBookingMap({ theme:th, degraded, pick, drop, reason }) {
           <Field theme={th} label="cost center" required><Select theme={th} value="CC-FIN-04 財務處"/></Field>
           <Field theme={th} label="專案碼 · project_code"><Input theme={th} value="PRJ-2026-Q3-AUDIT" mono/></Field>
           <DL theme={th} cols={1} items={[
-            { k:'預估費用 · estimate', v: degraded?'無法估算 · 待人工複核':'NT$ 1,580 · pr_v23', mono:!degraded },
+            { k:'預估費用 · estimate', v: degraded?'無法估算 · 服務中斷':'NT$ 1,580 · pr_v23', mono:!degraded },
             { k:'審批 · approval', v:'主管預核免簽 (r_002)' },
             { k:'配額影響 · quota', v:'本月剩餘 1,180 / 5,000' },
           ]}/>
@@ -144,8 +144,8 @@ function PB_BookCardMap({ state='selected', drop='selected', reason }) {
         </PBCard>
         <PBCard p={p} title="上下車地點">
           <div style={{ display:'flex', flexDirection:'column', gap:8 }}>
-            <MapPicker theme={th} skin="pb" label="上車" state={state} compact requiresReason={manualPath||hasManualCoords} reason={reason}/>
-            <MapPicker theme={th} skin="pb" label="下車" state={drop} value="桃園機場 第二航廈 出境大廳" compact requiresReason={manualPath||hasManualCoords} reason={reason}/>
+            <MapPicker theme={th} skin="pb" label="上車" state={state} compact requiresReason={manualPath||hasManualCoords} allowFallback={manualPath} reason={reason}/>
+            <MapPicker theme={th} skin="pb" label="下車" state={drop} value="桃園機場 第二航廈 出境大廳" compact requiresReason={manualPath||hasManualCoords} allowFallback={manualPath} reason={reason}/>
           </div>
           {state==='out_of_area' && <div style={{ marginTop:8, fontSize:11.5, color:th.danger, fontWeight:700 }}>上車地點不在服務範圍，無法送出；請更換地點。</div>}
           <div style={{ marginTop:12 }}><PBField label="出發時間" value="2026-09-26 05:30" req/></div>
@@ -194,8 +194,8 @@ function PB_BookInsuranceMap({ state='selected', drop='selected', reason }) {
         </PBCard>
         <PBCard p={p} title="行程地點">
           <div style={{ display:'flex', flexDirection:'column', gap:8 }}>
-            <MapPicker theme={th} skin="pb" label="上車" state={state} value="新北市板橋區文化路一段 88 號" compact requiresReason={manualPath||hasManualCoords} reason={reason}/>
-            <MapPicker theme={th} skin="pb" label="下車" state={drop} value="台北榮民總醫院" compact requiresReason={manualPath||hasManualCoords} reason={reason}/>
+            <MapPicker theme={th} skin="pb" label="上車" state={state} value="新北市板橋區文化路一段 88 號" compact requiresReason={manualPath||hasManualCoords} allowFallback={manualPath} reason={reason}/>
+            <MapPicker theme={th} skin="pb" label="下車" state={drop} value="台北榮民總醫院" compact requiresReason={manualPath||hasManualCoords} allowFallback={manualPath} reason={reason}/>
           </div>
           {state==='out_of_area' && <div style={{ marginTop:8, fontSize:11.5, color:th.danger, fontWeight:700 }}>上車地點不在服務範圍，無法送出；請更換地點。</div>}
           <PBFieldLocked label="車型權益 · vehicle class" value="一般車型 (權益內)" sub="依理賠核定 · 不可變更" />
@@ -252,8 +252,8 @@ function PB_BookTravelMap({ state='selected', drop='selected', reason }) {
         </PBCard>
         <PBCard p={p} title="接送行程">
           <div style={{ display:'flex', flexDirection:'column', gap:8 }}>
-            <MapPicker theme={th} skin="pb" label="上車" state={state} value="桃園機場 第一航廈 入境大廳" compact requiresReason={manualPath||hasManualCoords} reason={reason}/>
-            <MapPicker theme={th} skin="pb" label="下車" state={drop} value="台北車站" compact requiresReason={manualPath||hasManualCoords} reason={reason}/>
+            <MapPicker theme={th} skin="pb" label="上車" state={state} value="桃園機場 第一航廈 入境大廳" compact requiresReason={manualPath||hasManualCoords} allowFallback={manualPath} reason={reason}/>
+            <MapPicker theme={th} skin="pb" label="下車" state={drop} value="台北車站" compact requiresReason={manualPath||hasManualCoords} allowFallback={manualPath} reason={reason}/>
           </div>
           {state==='out_of_area' && <div style={{ marginTop:8, fontSize:11.5, color:th.danger, fontWeight:700 }}>上車地點不在服務範圍，無法送出；請更換地點。</div>}
           <PBField label="多點停靠 · multi-stop" value="台北車站 → 西門商旅" />
@@ -320,8 +320,8 @@ function CG_NewBookingMap({ theme:th, degraded, drop, pick, success, reason, bac
             <Field theme={th} label="用車時間" required><Input theme={th} value="今日 15:30" mono/></Field>
           </div>
           <div style={{ display:'flex', flexDirection:'column', gap:10, marginBottom:14 }}>
-            <MapPicker theme={th} label="上車" state={degraded ? 'provider_down' : ps} value="圓山大飯店 正門車道" requiresReason={manualPath} reason={reason}/>
-            <MapPicker theme={th} label="下車" state={degraded ? 'provider_down' : ds} value={ds==='out_of_area'?'宜蘭縣頭城鎮濱海路 12 號':'松山機場'} requiresReason={manualPath} reason={reason}/>
+            <MapPicker theme={th} label="上車" state={degraded ? 'provider_down' : ps} value="圓山大飯店 正門車道" requiresReason={manualPath} allowFallback={manualPath} reason={reason}/>
+            <MapPicker theme={th} label="下車" state={degraded ? 'provider_down' : ds} value={ds==='out_of_area'?'宜蘭縣頭城鎮濱海路 12 號':'松山機場'} requiresReason={manualPath} allowFallback={manualPath} reason={reason}/>
             {ds==='out_of_area' && <Banner theme={th} tone="danger" icon="warn" title="下車地點不在服務範圍" body="無法建立叫車；請與賓客確認其他地點。"/>}
           </div>
           <Field theme={th} label="車型偏好"><Select theme={th} value="商務轎車"/></Field>

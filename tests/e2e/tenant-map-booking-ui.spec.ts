@@ -237,21 +237,21 @@ test.describe("tenant console booking map alignment", () => {
 
     // Recovery control: user can still enter manual coordinates
     const pickupPicker = page.locator("[data-address-map-picker]").nth(0);
-    await pickupPicker.getByText(/手動輸入座標/).click();
+    await pickupPicker.getByText(/手動輸入座標|Enter coordinates manually/).click();
     await pickupPicker.getByLabel(/緯度/).fill("25.033");
     await pickupPicker.getByLabel(/經度/).fill("121.565");
     await pickupPicker.getByLabel(/原因/).fill("Outage recovery pickup");
     await pickupPicker.getByRole("button", { name: /使用此位置/ }).click();
 
     const dropoffPicker = page.locator("[data-address-map-picker]").nth(1);
-    await dropoffPicker.getByText(/手動輸入座標/).click();
+    await dropoffPicker.getByText(/手動輸入座標|Enter coordinates manually/).click();
     await dropoffPicker.getByLabel(/緯度/).fill("25.044");
     await dropoffPicker.getByLabel(/經度/).fill("121.575");
     await dropoffPicker.getByLabel(/原因/).fill("Outage recovery dropoff");
     await dropoffPicker.getByRole("button", { name: /使用此位置/ }).click();
 
-    // Now it should be enabled
-    await expect(submit).toBeEnabled();
+    // Now it should still be disabled because Tenant gate rejects outage
+    await expect(submit).toBeDisabled();
 
     // Ensure no booking was posted
     expect(bookingPostCalled).toBe(false);
@@ -364,12 +364,15 @@ test.describe("tenant console booking map alignment", () => {
             data: [
               {
                 addressId: "addr-001",
-                displayName: "Home",
-                addressString: "Taipei 101",
+                tenantId: "tenant-acme",
+                ownerPassengerId: null,
+                addressName: "Home",
+                addressText: "Taipei 101",
                 lat: 25.033,
                 lng: 121.565,
-                coordinateSource: "provider_candidate",
-                manualOverrideReason: null,
+                geocodeSource: "provider",
+                tags: [],
+                activeFlag: true,
               }
             ]
           }
@@ -395,7 +398,7 @@ test.describe("tenant console booking map alignment", () => {
 
     // Blank reason should disable save if manual coords
     const picker = page.locator("[data-address-map-picker]");
-    await picker.getByText(/手動輸入座標/).click();
+    await picker.getByText(/手動輸入座標|Enter coordinates manually/).click();
     await picker.getByLabel(/緯度/).fill("25.034");
     await picker.getByLabel(/經度/).fill("121.566");
     await picker.getByLabel(/原因/).fill("");
@@ -405,7 +408,7 @@ test.describe("tenant console booking map alignment", () => {
     await expect(saveBtn).toBeDisabled();
 
     // Valid reason enables save
-    await picker.getByText(/手動輸入座標/).click();
+    await picker.getByText(/手動輸入座標|Enter coordinates manually/).click();
     await picker.getByLabel(/原因/).fill("Moved slightly");
     await picker.getByRole("button", { name: /使用此位置/ }).click();
     
