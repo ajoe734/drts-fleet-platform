@@ -152,3 +152,30 @@ exit1，**17個繼承的已發布commit**不合規（包含checkpoint的8個新�
 `pnpm exec eslint <partner-notification-uat.spec.ts> <partner-notify.test.ts> --max-warnings=0`
 exit0。`git diff --check`及與base931eabb0的diff --check均exit0。
 R8的scope內lint/whitespace修正已驗，歷史packaging blocker仍未解。
+
+## 單元1 PR 與 CI 結果（已讀完）
+
+草稿 [PR #2179](https://github.com/ajoe734/drts-fleet-platform/pull/2179)，
+已檢查local/remote/PR head均為 `5db78fdc185c6a7be6a110a691df3ff99d00e307`。
+這是checkpoint，**未handoff**；reviewer仍Codex2。原PR #2175保留發布歷史。
+
+- [CI run36335019850](https://github.com/ajoe734/drts-fleet-platform/actions/runs/36335019850)：
+  completed **failure**。
+  [Commit trailers job108664105157](https://github.com/ajoe734/drts-fleet-platform/actions/runs/36335019850/job/108664105157)
+  再次確認17個繼承commit不合規。
+  [Product smoke job108664156556](https://github.com/ajoe734/drts-fleet-platform/actions/runs/36335019850/job/108664156556)
+  根test lint通過後，API lint在
+  `apps/api/src/modules/tenant-partner/partner-notification-https.ts:63:58`
+  失敗：`@typescript-eslint/no-require-imports`（動態`require("node:http")`）。
+  它是繼承的scope外產品碼，證實R9尚需經授權修復，不能以API typecheck pass當整體CI pass。
+  正常修復邊界為typed Node HTTP import/request選擇與原安全拒絕回歸；不得降低lint規則。
+- [Integration run36335019853](https://github.com/ajoe734/drts-fleet-platform/actions/runs/36335019853)：
+  completed **success**，但draft PR的build/unit/typecheck/lint/integration/UI主要工作均
+  **skipped**。此綠燈不代表product/regression或任何required_acceptance通過。
+- `gh run view ... --json status,conclusion,jobs` 與 `--log-failed` 已讀至完成，exit0。
+  原始失敗log：`.local/sr-partner-notify-qa-20260927/checkpoint-ci-failed.log`。
+  本輪未dispatch新的tenant UAT、未執行本機runtime、沒有仍在背景執行的本機測試。
+
+上述CI以5db78fdc的程式為準；本節追加屬文件checkpoint，不能把它冒稱同一candidate。
+任務仍未達三項驗收。先由Supervisor協調R9產品scope及R8已發布history recovery，
+並確認下個R1 fixture/receiver小單元，再續做完整SD14/NAV；不要再次原封handoff。

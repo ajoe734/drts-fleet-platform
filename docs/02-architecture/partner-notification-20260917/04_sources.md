@@ -53,3 +53,9 @@ unit280/280、PG21/21是真實該SHA歷史；partner E2E fail、restart skipped�
 六種漏驗輸入old exit0→new exit1，完整synthetic報告皆exit0。
 64 workflow tests、API typecheck通過；此處不將synthetic gate稱產品280/284或PG通過。
 詳細命令、邊界與剩餘R1/R5/scope限制見原UAT artifact「Codex 修復單元1」。
+
+修復checkpoint `5db78fdc185c6a7be6a110a691df3ff99d00e307` 已在
+[草稿PR #2179](https://github.com/ajoe734/drts-fleet-platform/pull/2179) 發布，未handoff。
+[CI run36335019850](https://github.com/ajoe734/drts-fleet-platform/actions/runs/36335019850)
+已完成failure：17個繼承commit trailers + scope外transport動態require的API lint。
+Integration run36335019853主要工作skip，不是產品通過；完整job/source證據沿用原UAT artifact。
