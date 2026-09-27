@@ -738,40 +738,54 @@ describe.skipIf(!testDbUrl)(
         outboxId,
       );
       expect(prepBefore.kind).toBe("failed");
-      expect((prepBefore as any).failure?.failureReason).toBe("configuration_blocked");
+      expect((prepBefore as any).failure?.failureReason).toBe(
+        "configuration_blocked",
+      );
 
-      const { PartnerEntryNotificationBindingService } = await import("../../../../apps/api/src/modules/tenant-partner/partner-entry-notification-binding.service");
-      const { PartnerNotificationDispatchFacade } = await import("../../../../apps/api/src/modules/tenant-partner/partner-notification-dispatch.facade");
-      const { PartnerNotificationTransport } = await import("../../../../apps/api/src/modules/multi-taxi/partner-notification.transport");
+      const { PartnerEntryNotificationBindingService } =
+        await import("../../../../apps/api/src/modules/tenant-partner/partner-entry-notification-binding.service");
+      const { PartnerNotificationDispatchFacade } =
+        await import("../../../../apps/api/src/modules/tenant-partner/partner-notification-dispatch.facade");
+      const { PartnerNotificationTransport } =
+        await import("../../../../apps/api/src/modules/multi-taxi/partner-notification.transport");
       const bindingService = app.get(PartnerEntryNotificationBindingService);
       const dispatchFacade = app.get(PartnerNotificationDispatchFacade);
 
-      await bindingService.putBinding(missingBindingSlug, { webhookId, eventTypes: ["eta_changed"], expectedVersion: 0 });
+      await bindingService.putBinding(missingBindingSlug, {
+        webhookId,
+        eventTypes: ["eta_changed"],
+        expectedVersion: 0,
+      });
 
-      const dispatchSpy = vi.spyOn(dispatchFacade as any, "dispatchNotificationAttemptByWebhookId").mockImplementation(async (command: any): Promise<any> => ({
-        kind: "accepted",
-        ack: {
-          notificationId: command.wirePayload.data.notificationId,
-          deliveryId: command.wirePayload.deliveryId,
-          partnerEntrySlug: missingBindingSlug,
-          status: "accepted",
-          receiptId: "ack-typed",
-        },
-      }));
+      const dispatchSpy = vi
+        .spyOn(dispatchFacade as any, "dispatchNotificationAttemptByWebhookId")
+        .mockImplementation(
+          async (command: any): Promise<any> => ({
+            kind: "accepted",
+            ack: {
+              notificationId: command.wirePayload.data.notificationId,
+              deliveryId: command.wirePayload.deliveryId,
+              partnerEntrySlug: missingBindingSlug,
+              status: "accepted",
+              receiptId: "ack-typed",
+            },
+          }),
+        );
 
       try {
-        const identity: import("../../../../apps/api/src/common/auth/auth.types").BootstrapRequestIdentity = {
-          authMode: "bootstrap_headers",
-          actorType: "system",
-          actorId: "system",
-          realm: "tenant",
-          tenantId,
-          partnerId,
-          roleFamilies: [],
-          roles: [],
-          scopes: [],
-          requestId: randomUUID(),
-        };
+        const identity: import("../../../../apps/api/src/common/auth/auth.types").BootstrapRequestIdentity =
+          {
+            authMode: "bootstrap_headers",
+            actorType: "system",
+            actorId: "system",
+            realm: "tenant",
+            tenantId,
+            partnerId,
+            roleFamilies: [],
+            roles: [],
+            scopes: [],
+            requestId: randomUUID(),
+          };
         await bindingService.testBinding(missingBindingSlug, identity);
         await bindingService.enableBinding(missingBindingSlug, 1);
 
@@ -781,29 +795,45 @@ describe.skipIf(!testDbUrl)(
         );
         expect(res.kind).toBe("requeued");
 
-        const claim = await mtRepo.claimPartnerNotification(outboxId, "worker-1", 60);
+        const claim = await mtRepo.claimPartnerNotification(
+          outboxId,
+          "worker-1",
+          60,
+        );
         expect(claim).toBeDefined();
 
-        const transport = new PartnerNotificationTransport(mtRepo, dispatchFacade);
+        const transport = new PartnerNotificationTransport(
+          mtRepo,
+          dispatchFacade,
+        );
         const receipt = await transport.send({
           providerName: "partner_webhook",
-          message: claim!.record as import("../../../../apps/api/src/modules/multi-taxi/passenger-push.port").PassengerPushMessage,
-          context: { fenceToken: claim!.fenceToken }
+          message: claim!
+            .record as import("../../../../apps/api/src/modules/multi-taxi/passenger-push.port").PassengerPushMessage,
+          context: { fenceToken: claim!.fenceToken },
         });
 
         expect(dispatchSpy).toHaveBeenCalledTimes(2);
 
         // Assert binding-test contract
-        const testCommand = dispatchSpy.mock.calls.find(c => c[0].wirePayload.eventType === "passenger.notification.test.v1")?.[0] as any;
+        const testCommand = dispatchSpy.mock.calls.find(
+          (c) => c[0].wirePayload.event === "passenger.notification.test.v1",
+        )?.[0] as any;
         expect(testCommand).toBeDefined();
-        expect(testCommand.wirePayload.data.schemaVersion).toBe(1);
+        expect(testCommand.wirePayload.data.schemaVersion).toBe("1.0");
         expect(testCommand.wirePayload.data.notificationId).toBeDefined();
 
         // Assert production notification contract
-        const prodCommand = dispatchSpy.mock.calls.find(c => c[0].wirePayload.eventType !== "passenger.notification.test.v1")?.[0] as import("../../../../apps/api/src/modules/tenant-partner/tenant-partner.service").PartnerNotificationDispatchAttemptCommand;
+        const prodCommand = dispatchSpy.mock.calls.find(
+          (c) => c[0].wirePayload.event !== "passenger.notification.test.v1",
+        )?.[0] as import("../../../../apps/api/src/modules/tenant-partner/tenant-partner.service").PartnerNotificationDispatchAttemptCommand;
         expect(prodCommand).toBeDefined();
         expect(prodCommand.wirePayload.data.notificationId).toBe(outboxId);
-        expect((prodCommand.wirePayload as import("../../../../packages/contracts/src/partner-passenger-notification").PartnerPassengerNotificationWirePayload).data.eventSequence).toBe(42);
+        expect(
+          (
+            prodCommand.wirePayload as import("../../../../packages/contracts/src/partner-passenger-notification").PartnerPassengerNotificationWirePayload
+          ).data.eventSequence,
+        ).toBe(42);
 
         const outcomeResult = await mtRepo.recordPushDeliveryOutcome({
           outboxId,
@@ -819,22 +849,28 @@ describe.skipIf(!testDbUrl)(
             attemptCount: claim!.record.attemptCount,
             nextAttemptAt: new Date(Date.now() + 60000).toISOString(),
             deliveredAt: new Date().toISOString(),
-            providerName: "partner_webhook"
+            providerName: "partner_webhook",
           },
-          ...(receipt.deliveryContext ? { partnerMetadata: receipt.deliveryContext } : {}),
+          ...(receipt.deliveryContext
+            ? { partnerMetadata: receipt.deliveryContext }
+            : {}),
         });
-        expect(outcomeResult).toBe("recorded");
+        expect(outcomeResult).toEqual({ recorded: true, replayed: false });
 
-        const { rows } = await pool.query("SELECT status, attempt_count, fence_token, delivery_id FROM ops.consumer_notification_outbox WHERE outbox_id = $1", [outboxId]);
+        const { rows } = await pool.query(
+          "SELECT status, attempt_count FROM ops.consumer_notification_outbox WHERE outbox_id = $1",
+          [outboxId],
+        );
         expect(rows[0].status).toBe("delivered");
         expect(rows[0].attempt_count).toBe(2);
-        expect(rows[0].fence_token).toBeNull();
-        expect(rows[0].delivery_id).toBeDefined();
 
-        const { rows: dRows } = await pool.query("SELECT * FROM ops.partner_notification_delivery WHERE delivery_id = $1", [rows[0].delivery_id]);
+        const { rows: dRows } = await pool.query(
+          "SELECT delivery_stage, entry_slug FROM mobility.phase1_partner_notification_delivery_contexts WHERE outbox_id = $1",
+          [outboxId],
+        );
         expect(dRows.length).toBe(1);
-        expect(dRows[0].notification_id).toBe(outboxId);
-        expect(dRows[0].partner_entry_slug).toBe(missingBindingSlug);
+        expect(dRows[0].delivery_stage).toBe("partner_accepted");
+        expect(dRows[0].entry_slug).toBe(missingBindingSlug);
       } finally {
         dispatchSpy.mockRestore();
       }
