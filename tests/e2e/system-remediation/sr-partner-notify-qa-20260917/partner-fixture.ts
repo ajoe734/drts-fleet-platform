@@ -123,13 +123,27 @@ export class PartnerFixture {
     // The authoritative policy also gates tenant webhook creation/test/update.
     // Let it decide whether this exact action/session requires a proof.
     if (method !== "GET" && token) {
-      const proof = await fetch(`${origin}/api/identity/step-up-proofs`, {
-        method: "POST",
-        headers: { ...headers, "Content-Type": "application/json" },
-        body: JSON.stringify({ method, path: `/api/${apiPath}` }),
-        redirect: "error",
-        signal: AbortSignal.timeout(20_000),
-      });
+      const requestProof = () =>
+        fetch(`${origin}/api/identity/step-up-proofs`, {
+          method: "POST",
+          headers: { ...headers, "Content-Type": "application/json" },
+          body: JSON.stringify({ method, path: `/api/${apiPath}` }),
+          redirect: "error",
+          signal: AbortSignal.timeout(20_000),
+        });
+      let proof = await requestProof();
+      if (proof.status === 429) {
+        // A failed Playwright worker rebuilds its disposable governance setup.
+        // Respect the existing server throttle once; never disable the guard
+        // or retry a successful mutation. This is setup, not rate-limit UAT.
+        const delay = Number(proof.headers.get("retry-after") ?? 60);
+        expect(delay > 0 && delay <= 60).toBe(true);
+        await proof.arrayBuffer();
+        await new Promise((resolve) =>
+          setTimeout(resolve, delay * 1_000 + 500),
+        );
+        proof = await requestProof();
+      }
       expect(proof.status, `step-up ${apiPath}`).toBe(201);
       const envelope = decodeTenantWire(await proof.json());
       expect(typeof envelope.data.required).toBe("boolean");
@@ -403,7 +417,7 @@ export class PartnerFixture {
           businessDispatchSubtype: "enterprise_dispatch",
           authMode: "partner_api_key",
           eligibilityMode: "none",
-          entryHost: "127.0.0.1:3002",
+          entryHost: "localhost:3002",
           entryPath: `/embed/${slug}`,
           status: "active",
           activeFlag: true,

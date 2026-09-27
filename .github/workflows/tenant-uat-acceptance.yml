@@ -103,10 +103,10 @@ jobs:
       NOTIFICATION_OUTBOX_DIRECTORY: /tmp/tenant-uat-mail-outbox
       NOTIFICATION_FROM_EMAIL: qa-sender@qa-tenant-uat.example
       DRTS_UAT_API_URL: http://127.0.0.1:4102
-      DRTS_REFERRAL_EMBED_BASE_URL: http://127.0.0.1:3002
+      DRTS_REFERRAL_EMBED_BASE_URL: http://localhost:3002
       DRTS_REFERRAL_EMBED_HANDOFF_KEY: hosted-uat-handoff-not-a-real-secret
       REFERRAL_EMBED_SESSION_SECRET: hosted-uat-session-not-a-real-secret
-      REFERRAL_EMBED_ALLOWED_HOSTS: 127.0.0.1:3002
+      REFERRAL_EMBED_ALLOWED_HOSTS: localhost:3002
       JWT_SECRET: tenant-uat-acceptance-runner-not-a-real-secret-32-chars-min
       JWT_ALGORITHMS: HS256
       CONTROLLED_DOWNLOAD_SIGNING_SECRET: tenant-uat-acceptance-runner-not-a-real-secret-32-chars-min

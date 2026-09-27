@@ -54,6 +54,53 @@ test.describe("Hosted navigation and session boundaries", () => {
       contentType: "image/png",
       body: await page.screenshot(),
     });
+    const cancelResponse = page.waitForResponse(
+      (response) =>
+        response.url().endsWith(`/api/referral/cancel/${orderId}`) &&
+        response.request().method() === "POST",
+    );
+    await page.getByRole("button", { name: /^取消行程/ }).click();
+    expect((await cancelResponse).status()).toBe(200);
+    await expect
+      .poll(
+        async () =>
+          (
+            await fixture.db.query(
+              "SELECT status FROM ops.phase1_owned_orders WHERE order_id=$1",
+              [orderId],
+            )
+          ).rows[0]?.status,
+      )
+      .toBe("cancelled");
+    await expect(page.getByText("行程已取消", { exact: true })).toBeVisible();
+    // A handoff issued before cancellation still points at the old trip screen.
+    // The page must read current authority rather than resurrect the old ride.
+    const staleLink = await navFixture.consume(
+      page.context(),
+      fresh,
+      "navigation",
+    );
+    expect(staleLink.status()).toBe(307);
+    await page.goto(staleLink.headers().location!);
+    await expect(
+      page.getByText("行程已結束或更新", { exact: true }),
+    ).toBeVisible();
+    const current = await navFixture.issue(entry, orderId);
+    const currentLink = await navFixture.consume(
+      page.context(),
+      current,
+      "navigation",
+    );
+    expect(currentLink.status()).toBe(307);
+    expect(
+      new URL(currentLink.headers().location!).searchParams.get("screen"),
+    ).toBe("cancelled");
+    await page.goto(currentLink.headers().location!);
+    await expect(page.getByText("行程已取消", { exact: true })).toBeVisible();
+    await test.info().attach("navigation-latest-cancelled-ride", {
+      contentType: "image/png",
+      body: await page.screenshot(),
+    });
     await test.info().attach("navigation-session-evidence", {
       contentType: "application/json",
       body: JSON.stringify({
@@ -67,6 +114,8 @@ test.describe("Hosted navigation and session boundaries", () => {
           sameSite: cookie.sameSite,
         },
         replayStatus: 403,
+        latestState:
+          "cancelled; pre-cancel handoff renders updated state; fresh resolve selects cancelled screen",
         boundary:
           "real hosted browser/BFF/session/PG; partner login is controlled, native launch not executed",
       }),

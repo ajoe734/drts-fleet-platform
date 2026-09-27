@@ -5,7 +5,9 @@ import type {
 } from "@drts/contracts";
 import type { PartnerFixture, PartnerFixtureEntry } from "./partner-fixture";
 
-export const EMBED_ORIGIN = "http://127.0.0.1:3002";
+// Next's production session cookie remains Secure. The browser and Playwright
+// permit Secure cookies on localhost, not arbitrary HTTP IP origins.
+export const EMBED_ORIGIN = "http://localhost:3002";
 const COOKIE = "drts_referral_embed_session";
 export type ConsumePath = "navigation" | "json" | "form";
 export interface Navigation {
@@ -77,6 +79,7 @@ export class NavigationFixture {
   }
 
   async activate(context: BrowserContext, nav: Navigation) {
+    await this.cookie(context);
     const response = await context.request.post(
       `${EMBED_ORIGIN}/api/referral/session`,
       {
@@ -88,8 +91,10 @@ export class NavigationFixture {
         },
       },
     );
-    expect(response.status()).toBe(200);
     const envelope = await response.json();
+    expect(response.status(), envelope.message ?? "BFF consent grant").toBe(
+      200,
+    );
     expect(envelope.ok).toBe(true);
     const session = envelope.session as ReferralEmbedSession;
     expect(session.identityActive).toBe(true);
