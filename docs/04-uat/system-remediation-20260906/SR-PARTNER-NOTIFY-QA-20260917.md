@@ -3,8 +3,8 @@
 Owner: Codex（2026-09-27 Supervisor 直接交接）；Reviewer: Codex2。
 狀態：修復中，尚無新的 review candidate。交接 checkpoint 為
 `91b1d4ac122b1373ac7beb05df902cb991b62232`，沿用既有實作與發布歷史。
-最新程式 checkpoint `8039453e93b7aa78ff6cb56b1f99b31066c73955`：hosted partner
-10 passed／1 failed（C205）／0 skipped；完整結果、限制與 scope 阻塞見「修復單元3」。
+最新程式 checkpoint `0638617e08b2773870b4813081c3e2446af414a9`：hosted partner
+13 passed／1 failed（C205）／0 skipped；完整結果、限制與 scope 阻塞見「修復單元4」。
 
 ## 證據規則與撤回
 
@@ -396,3 +396,64 @@ Integration36341115198 completed **success**但主要build/unit/typecheck/lint/i
 完整NAV/UI、合格CI／獨立review／merge候選。C208、C210–C211、C213–C216、C218、C220–C224
 仍缺；R5/R9產品scope及R8 history recovery仍待Supervisor協調。B/C維持未執行的真夥伴／
 真機gate。本節後續純文件commit不冒充8039453e的runtime SHA。
+
+## Codex 修復單元 4（2026-09-27，checkpoint，未 handoff）
+
+起點 `9fb031efc070b454e6be56618ac11c72eb422b52`；同一 branch／草稿 PR2179，
+local／remote／PR head 核對一致後續做。只修改 QA scope；本單元保留 R1–R9 歷史與
+R5/R8/R9 的 Supervisor scope／history recovery 請求，沒有改產品或已發布歷史。
+
+| Finding／驗收項 | 原始碼依據與修改位置 | 舊版 → 修復結果 | 證據與邊界 | 未驗項 |
+| --- | --- | --- | --- | --- |
+| R1／C208 同住戶兩 App | `PartnerUserIdentityLinkRepository`、正式建單 frozen route、`resolvePartnerNotificationNavigation`／`resolveRoute`；QA spec／fixture | 9fb031ef 缺案例 → 1b279b88 與 0638617e hosted passed：相同外部住戶參照在兩 entry 產生各自乘客身份、通知只含原 ride／entry；2 個 own resolve 成功、6 個 wrong entry／subject／key resolve 403 | 真 API key、HTTP、worker、PG、receiver；不輸出 credential／handoff artifact | 僅 resolve 權限，不代替 C221–C224 browser/session/readback |
+| R1／C210 revoked link | façade `resolveNotificationRoute` → production identity repository `find` → `recipient_revoked`；NAV 同樣查 link；V0030 正式 schema | 1b279b88 清理 fixture 的 `$3` 同時推導 varchar/text，case failed；0638617e 將兩處明確為 text，新增還原讀回後 passed | 排入 pending → 撤銷狀態注入 → terminal／零外送／無成功receipt／resolve403；另一 entry 同住戶可送；還原後新事件可送，舊事件不自動重送 | production repository 沒有 revoke writer/API；僅在 hosted 正式表中修改既有 fixture 的 status 與 record.status，模擬 lifecycle fault，不驗收撤銷管理流程、不複製 gate/worker 業務邏輯 |
+| R1／C211 停用／輪替 | `updateWebhookEndpoint`、`rotateWebhookSecret`、`computeEndpointFingerprint`、binding test/enable、真 route gate | 9fb031ef 缺案例 → 1b279b88 與 0638617e passed：disabled 零外送，active 操作仍 test_pending；輪替後 endpoint test 不足，須 binding 重測才可派送 | 全部治理透過正式 HTTP＋step-up；receiver 僅更新自己的 secret，驗真 HMAC version=2；四筆 configuration_blocked 不自動重送；finally 以正式重測恢復所有共用 endpoint 的 bindings | 不宣稱真夥伴／native device；未驗 overlap 全矩陣 |
+| R5／C205 | `listPartnerNotificationDeliveries` raw PG Date → `deepToSnakeCase` → panel `createdAt` React child；picker header 被 proxy blocklist 移除 | 8039453e → 1b279b88 → 0638617e 同樣 fail，沒有透過 fixture 改回應掩蓋 | 兩次新 hosted trace：React31、HTTP200 delivery dates={}、picker400 TENANT_ID_REQUIRED；下列 actual serializer／React probe exit0 表示重現缺陷 | 需 Supervisor 協調 delivery DTO、授權 tenant picker、translation 原產品 owner／scope；不能解除 auth blocklist |
+| R8／R9 CI 與歷史 | inherited 17 commits；`partner-notification-https.ts:63` | 兩個程式 checkpoint CI 均 fail，scope 外 no-require-imports 未修；本輪兩新 commits trailers pass | 下列 CI runs/log；普通 push，未 force/rebase/amend | typed safe transport／既有 security tests 的 scope/child；preserving-refs publication/history recovery |
+
+### 同 SHA hosted 結果與相鄰失敗歷史
+
+1. `1b279b880e0fa5f513ac84cb4ba8f1d3d1434b0b`：
+   [run36342461507/job108685085198](https://github.com/ajoe734/drts-fleet-platform/actions/runs/36342461507/job/108685085198)
+   completed **failure**；partner **12 passed／2 failed／0 skipped**。
+   C208/C211 passed；C210 fixture cleanup 型別錯誤，**不算產品通過**；C205 fail。
+   Artifact10940000863，ZIP SHA256 `2d6ff4ecd6ad13180e430bb70fc2506f3f1e91eaf0e320750b45dade01c60428`。
+2. `0638617e08b2773870b4813081c3e2446af414a9`：
+   [run36343023791/job108686675674](https://github.com/ajoe734/drts-fleet-platform/actions/runs/36343023791/job/108686675674)
+   completed **failure**；partner **13 passed／1 failed／0 skipped／0 flaky**。
+   C201–C204、C206–C212、C217、C219 全部 passed；C205 fail。
+   Artifact10939418920，ZIP SHA256 `31aeb175ab07e6fe254d6b81587349f37f8b33724eebff513bb08dc232b1511a`。
+
+兩次 run 各自的 candidate/workflow SHA 與 execution report 均已核對；各自 tenant/partner
+unit **291/291**（三 PG suites 各 **7/7**）、webhook unit **34/34**、tenant HTTP **10/10**、
+webhook E2E **1/1**；C111–C115 capability reports passed、restart verified **15**。
+Partner 獨立 unit step **skipped**，strict gate **failed**，run-status=failed；沒有降低 gate。
+上列 step 通過只代表既有 harness 邊界，不擴稱外部 provider／真夥伴通過。
+
+執行命令：`gh workflow run tenant-uat-acceptance.yml --ref codex/sr-partner-notify-qa-20260917
+-f candidate_sha=<上述完整SHA>`，兩次 dispatch exit0；等到 completed 後下載 artifact ZIP、
+SHA256／逐 case JSON／run-status／failed logs／C205 trace 均已讀取，原始資料在工作樹
+`.local/sr-partner-notify-qa-20260927-unit4/`（第二次為 `artifact-0638617e/`）。
+
+本機 checks：`pnpm exec tsc -p .local/sr-partner-notify-qa-20260927-unit4/tsconfig.json --noEmit`
+在兩個程式 SHA 均 exit0；scoped ESLint exit0；QA unit 命令同單元3，**12 passed**，
+只驗純函式／receiver boundary，未開服務；Playwright `--list --reporter=list` 收集 **14** 案例，
+僅 collection；`git diff 9fb031ef --check` exit0；`check_commit_trailers.py --base 9fb031ef --head HEAD`
+兩個新 commits passed。四 dependency merge `c2d94aaa/931eabb0/d6177129/318b44b6` 均為祖先。
+日期缺陷 probe：`./apps/api/node_modules/.bin/tsx --tsconfig apps/api/tsconfig.json
+.local/sr-partner-notify-qa-20260927-unit4/probe-ui-date.ts` exit0＝實際 serializer/React 成功重現，
+**不是產品通過**，未啟 VM server／browser／DB。
+
+[CI36342453228](https://github.com/ajoe734/drts-fleet-platform/actions/runs/36342453228) 與
+[CI36343006928](https://github.com/ajoe734/drts-fleet-platform/actions/runs/36343006928)
+均 completed **failure** 並讀完（17 inherited trailers + scope 外 transport lint）；
+integration36342453244／36343006908 completed success，但主要 build/unit/typecheck/lint/integration
+jobs **skipped**，不作 acceptance。所有本單元程式 checks 均已結束，沒有背景測試未讀。
+
+仍缺 C213–C216、C218、C220–C224 共 **10** 個必需案例；C205 需產品修復。
+三項 `required_acceptance`：`integrated_controlled_receiver_negative_matrix_same_sha`、
+`navigation_and_admin_ui_hosted_real_runtime_evidence`、
+`existing_webhook_tenant_gates_preserved_and_live_not_claimed` 均 **NOT MET**。
+R1 完整故障矩陣、R5 NAV/UI、R8/R9 publication/scope blockers 仍開放；原 R2/R3 strict gate 與
+證據邊界持續保留，沒有 handoff／merge／A 層完成宣稱；B/C 真夥伴／真機 gates 均未執行。
+後續文件 checkpoint 不冒充 0638617e 的 runtime SHA。

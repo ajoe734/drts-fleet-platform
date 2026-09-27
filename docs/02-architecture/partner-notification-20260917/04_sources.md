@@ -12,9 +12,9 @@
 | accepted後timeout與dedupe                        | C202；大於10秒deadline、同notification/delivery/body hash、同receipt duplicate、只入列一次                     | 58081594 C202 passed；同bytes/receipt duplicate        |
 | 缺route                                          | C203；typed route_missing/manual_only、不猜entry、receiver count=0                                             | 58081594 C203 passed；typed reason、零外送             |
 | 204、HTML200、錯receipt                          | C204/C212；partner_ack_invalid/manual_only，不能自動retry                                                      | 8039453e C204與C212五種invalid ack均passed             |
-| 同tenant兩entry、跨tenant同URL、同住戶兩App      | 僅原entry/tenant/subject收到，payload不串單                                                                    | C206/C207在58081594 passed；同住戶兩App C208仍缺       |
-| entry移轉與link撤銷                              | 舊消息不移轉；owner_changed/manual_only與recipient_revoked/terminal；零外送                                    | 8039453e C209移轉passed；link撤銷C210仍缺                |
-| endpoint停用、secret輪替重測、未配置availability | 明確configuration_blocked；測試就緒後才enable                                                                  | 缺整合案例                                             |
+| 同tenant兩entry、跨tenant同URL、同住戶兩App      | 僅原entry/tenant/subject收到，payload不串單                                                                    | 0638617e C206/C207/C208 passed；C208含resolve隔離       |
+| entry移轉與link撤銷                              | 舊消息不移轉；owner_changed/manual_only與recipient_revoked/terminal；零外送                                    | 0638617e C209/C210 passed；C210注入撤銷狀態，非撤銷API驗收 |
+| endpoint停用、secret輪替重測、未配置availability | 明確configuration_blocked；測試就緒後才enable                                                                  | 0638617e C211 passed；availability C220仍缺             |
 | ack後DB失敗、lease/fence、兩worker競爭           | durable transaction、舊fence不可commit、dedupe且單retry owner                                                  | PG歷史21/21；缺整合fault evidence                      |
 | maxAttempts=5與expiry                            | 總共五次、最多四次retry、超expiresAt停止                                                                       | 8039453e C217過期零外送passed；C216仍缺                 |
 | 舊ETA、取消後舊到場、payload confidentiality     | superseded/obsolete terminal；缺driver情報不洩漏敏感資料                                                       | 8039453e C219真wire allowlist passed；C218仍缺          |
@@ -98,3 +98,29 @@ report verified15、C111–C115既有capability report passed。既有gates移�
 strict gate failed、run-status failed；本機Python64／QAunit12／scoped tsc+lint完成pass。
 R5/R8/R9產品與history blockers未解；13個必需case仍缺，三項required_acceptance **NOT MET**，
 沒有新candidate handoff／merge／live或device通過宣稱。
+
+## 單元4 source／case 邊界
+
+最新程式 `0638617e08b2773870b4813081c3e2446af414a9` 的
+[run36343023791/job108686675674](https://github.com/ajoe734/drts-fleet-platform/actions/runs/36343023791/job/108686675674)
+completed **failure**：partner **13 passed／1 failed／0 skipped**，新增 C208/C210/C211 passed，
+C205 仍是 React31／Date→{}／picker400。Artifact10939418920，ZIP SHA256
+`31aeb175ab07e6fe254d6b81587349f37f8b33724eebff513bb08dc232b1511a`。
+
+C208 沿真 handoff／建單／worker 驗兩 App 同住戶的 entry／subject 隔離，2 個自身 resolve
+成功與6個拒絕；只驗 resolve，不能代替完整 NAV。C210 在 V0030 正式表對既有測試 link
+注入 revoked 狀態，真 `PartnerUserIdentityLinkRepository.find`／façade／worker 必須拒送，
+NAV亦拒絕；另一 entry 及還原後新事件仍正向，舊 terminal 不重送。現無 revoke writer/API，
+故不是撤銷管理流程驗收。C211 全部沿 HTTP governance＋step-up，輪替後先驗 endpoint test
+不足，再經 binding test/enable 才可送；真 receiver HMAC驗 version2，blocked舊事件不自動重送。
+
+相鄰 `1b279b880e0fa5f513ac84cb4ba8f1d3d1434b0b` /
+[run36342461507](https://github.com/ajoe734/drts-fleet-platform/actions/runs/36342461507)
+是12pass/2fail：C210清理SQL型別衝突、C205產品缺陷；前者以明確text cast及restore readback
+修正後重跑，不能把首輪算通過。完整相鄰 SHA／hash／命令／限制沿用原 UAT artifact「單元4」。
+
+兩次各自同SHA unit291（PG21）、webhook34、tenant HTTP10、webhook E2E1、C111–C115與
+restart verified15 passed；partner獨立unit step skipped、strict gate failed。一般CI仍因17個
+歷史trailers及scope外transport lint失敗，integration主要jobs skipped。新增程式scoped tsc/lint
+通過、本機QA12 passed（boundary）；無VM服務、handoff或live/device完成宣稱。
+C213–C216、C218、C220–C224共10個必需case仍缺，R5/R8/R9 blockers與三項acceptance **NOT MET** 保留。
