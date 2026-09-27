@@ -154,6 +154,21 @@ test.describe("tenant console booking map alignment", () => {
         domain: "127.0.0.1",
         path: "/",
       },
+      {
+        name: "tenant-portal-session",
+        value: Buffer.from(
+          JSON.stringify({
+            accessToken: "mock-session-token",
+            tenantId: "tenant-acme",
+            email: "test@example.com",
+            fullName: "Test User",
+            roleCode: "tenant_admin",
+          }),
+          "utf8",
+        ).toString("base64url"),
+        domain: "127.0.0.1",
+        path: "/",
+      },
     ]);
   });
 
