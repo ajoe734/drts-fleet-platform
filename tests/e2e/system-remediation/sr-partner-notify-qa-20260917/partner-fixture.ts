@@ -1,10 +1,11 @@
-import { execFile } from "node:child_process";
+import { execFile, spawn } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
 import { mkdtemp, rm } from "node:fs/promises";
 import { createServer, type Server } from "node:http";
 import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import path from "node:path";
+import { createInterface } from "node:readline";
 import { promisify } from "node:util";
 import { expect } from "@playwright/test";
 import type {
@@ -32,6 +33,13 @@ interface Database {
     sql: string,
     params?: unknown[],
   ): Promise<{ rows: Record<string, any>[] }>;
+  connect(): Promise<{
+    query(
+      sql: string,
+      params?: unknown[],
+    ): Promise<{ rows: Record<string, any>[] }>;
+    release(): void;
+  }>;
   end(): Promise<void>;
 }
 export interface PartnerFixtureEntry {
@@ -663,12 +671,143 @@ export class PartnerFixture {
       await this.db.query(
         `SELECT o.*, c.wire_payload_hash, c.delivery_id, c.receipt_id,
       c.delivery_stage, c.failure_reason, c.retry_disposition,
-      l.claim_state FROM ops.consumer_notification_outbox o
+      l.claim_state, l.fence_token, l.worker_id, l.lease_expires_at,
+      l.claimed_at FROM ops.consumer_notification_outbox o
       LEFT JOIN mobility.phase1_partner_notification_delivery_contexts c USING(outbox_id)
       LEFT JOIN ops.phase1_push_delivery_claims l USING(outbox_id) WHERE o.outbox_id=$1`,
         [outboxId],
       )
     ).rows[0];
+  }
+
+  async failOutcomeCommit(outboxId: string) {
+    if (!/^[0-9a-f-]{36}$/.test(outboxId))
+      throw new Error("Invalid fault target");
+    const name = `qa_commit_${outboxId.replaceAll("-", "")}`;
+    // A sequence is a nontransactional fault counter: its value proves the
+    // injected error actually ran, even though the production transaction
+    // rolls back receipt/context/outbox writes. No replacement business tables.
+    await this.db.query(`CREATE SEQUENCE ops.${name}`);
+    await this.db
+      .query(`CREATE FUNCTION ops.${name}() RETURNS trigger LANGUAGE plpgsql AS $$
+      BEGIN
+        IF NEW.outbox_id = '${outboxId}' AND NEW.status = 'delivered' THEN
+          PERFORM nextval('ops.${name}');
+          RAISE EXCEPTION 'QA_C214_OUTCOME_COMMIT_FAILURE' USING ERRCODE = 'P0001';
+        END IF;
+        RETURN NEW;
+      END $$`);
+    await this.db.query(`CREATE TRIGGER ${name} BEFORE UPDATE OF status
+      ON ops.consumer_notification_outbox FOR EACH ROW EXECUTE FUNCTION ops.${name}()`);
+    return {
+      count: async () => {
+        const row = (
+          await this.db.query(`SELECT last_value, is_called FROM ops.${name}`)
+        ).rows[0]!;
+        return row.is_called ? Number(row.last_value) : 0;
+      },
+      remove: async () => {
+        await this.db.query(
+          `DROP TRIGGER IF EXISTS ${name} ON ops.consumer_notification_outbox`,
+        );
+        await this.db.query(`DROP FUNCTION IF EXISTS ops.${name}()`);
+        await this.db.query(`DROP SEQUENCE IF EXISTS ops.${name}`);
+      },
+    };
+  }
+
+  async staleOutcome(outboxId: string, fenceToken: number) {
+    const { stdout } = await run(
+      "./apps/api/node_modules/.bin/tsx",
+      [
+        "tests/e2e/system-remediation/sr-partner-notify-qa-20260917/probe-stale-outcome.ts",
+        outboxId,
+        String(fenceToken),
+      ],
+      { timeout: 20_000 },
+    );
+    const line = stdout
+      .split("\n")
+      .find((value) => value.startsWith('{"staleOutcome":'));
+    if (!line)
+      throw new Error("Production repository returned no stale-fence evidence");
+    const evidence = JSON.parse(line);
+    expect(evidence.candidateSha).toBe(required("CANDIDATE_SHA"));
+    return evidence;
+  }
+
+  async competingWorker() {
+    const databaseUrl = new URL(required("DATABASE_URL"));
+    databaseUrl.searchParams.set("application_name", "qa-partner-competitor");
+    const child = spawn(
+      "./apps/api/node_modules/.bin/tsx",
+      [
+        "tests/e2e/system-remediation/sr-partner-notify-qa-20260917/competing-worker.ts",
+      ],
+      {
+        env: {
+          ...process.env,
+          DATABASE_URL: databaseUrl.toString(),
+          DRTS_ALLOW_LOCAL_WEBHOOKS: "true",
+        },
+        stdio: ["pipe", "pipe", "pipe"],
+      },
+    );
+    let errors = "";
+    child.stderr.on("data", (chunk: Buffer) => {
+      errors += chunk.toString();
+    });
+    const exited = new Promise<number | null>((resolve, reject) => {
+      child.once("error", reject);
+      child.once("exit", (code) => resolve(code));
+    });
+    const lines = createInterface({ input: child.stdout });
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    try {
+      const ready = await Promise.race([
+        new Promise<Record<string, unknown>>((resolve, reject) => {
+          timer = setTimeout(
+            () => reject(new Error("Competing worker readiness timed out")),
+            30_000,
+          );
+          lines.on("line", (line) => {
+            if (line.startsWith('{"competingWorkerReady":'))
+              resolve(JSON.parse(line));
+          });
+        }),
+        exited.then((code) => {
+          throw new Error(
+            `Competing worker exited before ready (${code}): ${errors}`,
+          );
+        }),
+      ]);
+      expect(ready.candidateSha).toBe(required("CANDIDATE_SHA"));
+      return {
+        ready,
+        stop: async () => {
+          child.stdin.end("stop\n");
+          const stopTimer = setTimeout(() => child.kill("SIGKILL"), 20_000);
+          try {
+            expect(await exited, errors).toBe(0);
+          } finally {
+            clearTimeout(stopTimer);
+            lines.close();
+          }
+        },
+      };
+    } catch (error) {
+      child.stdin.end("stop\n");
+      const stopTimer = setTimeout(() => child.kill("SIGKILL"), 20_000);
+      try {
+        await exited;
+      } finally {
+        clearTimeout(stopTimer);
+        lines.close();
+      }
+      throw error;
+    } finally {
+      clearTimeout(timer);
+    }
   }
 
   async settled(outboxId: string) {

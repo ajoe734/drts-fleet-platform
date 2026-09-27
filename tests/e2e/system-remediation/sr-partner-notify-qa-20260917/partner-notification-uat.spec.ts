@@ -646,21 +646,19 @@ test.describe("SR-PARTNER-NOTIFY-QA-20260917: E2E Partner Notification Delivery 
         (r) => r.notificationId === outboxId,
       ),
     ).toEqual(durable);
-    await test
-      .info()
-      .attach("durable-receiver-reopen", {
-        contentType: "application/json",
-        body: JSON.stringify({
-          candidate_sha: process.env.CANDIDATE_SHA,
-          outboxId,
-          receiptId: ack.receipt_id,
-          payloadHash: first.hash,
-          attempts: 2,
-          receiverRecords: durable,
-          boundary:
-            "receiver object recreated from fsynced inbox; no native device",
-        }),
-      });
+    await test.info().attach("durable-receiver-reopen", {
+      contentType: "application/json",
+      body: JSON.stringify({
+        candidate_sha: process.env.CANDIDATE_SHA,
+        outboxId,
+        receiptId: ack.receipt_id,
+        payloadHash: first.hash,
+        attempts: 2,
+        receiverRecords: durable,
+        boundary:
+          "receiver object recreated from fsynced inbox; no native device",
+      }),
+    });
   });
 
   test("C218 E2E: Old ETA and cancelled arrival stop while receipt remains independent", async () => {
@@ -736,23 +734,21 @@ test.describe("SR-PARTNER-NOTIFY-QA-20260917: E2E Partner Notification Delivery 
     );
     expect((await fixture.outcome(old))!.attempt_count).toBe(1);
     expect((await fixture.outcome(arrival))!.attempt_count).toBe(1);
-    await test
-      .info()
-      .attach("notification-relevance", {
-        contentType: "application/json",
-        body: JSON.stringify({
-          candidate_sha: process.env.CANDIDATE_SHA,
-          orderId,
-          first,
-          old,
-          latest,
-          arrival,
-          receipt,
-          snapshots,
-          boundary:
-            "synthetic disclosure producer; real cancellation API and transport relevance",
-        }),
-      });
+    await test.info().attach("notification-relevance", {
+      contentType: "application/json",
+      body: JSON.stringify({
+        candidate_sha: process.env.CANDIDATE_SHA,
+        orderId,
+        first,
+        old,
+        latest,
+        arrival,
+        receipt,
+        snapshots,
+        boundary:
+          "synthetic disclosure producer; real cancellation API and transport relevance",
+      }),
+    });
   });
 
   test("C220 E2E: Missing configuration is unavailable and never falls back", async () => {
@@ -816,20 +812,178 @@ test.describe("SR-PARTNER-NOTIFY-QA-20260917: E2E Partner Notification Delivery 
       expect(received(held)).toHaveLength(0);
       await noAcknowledgedReceipt(held);
     }
-    await test
-      .info()
-      .attach("route-availability", {
+    await test.info().attach("route-availability", {
+      contentType: "application/json",
+      body: JSON.stringify({
+        candidate_sha: process.env.CANDIDATE_SHA,
+        missing,
+        untested,
+        fresh,
+        unavailable,
+        ready,
+        boundary: "actual full AppModule DI/readiness; no provider override",
+      }),
+    });
+  });
+
+  test("C214 E2E: Ack then database failure recovers after lease expiry with duplicate receipt", async () => {
+    test.setTimeout(170_000);
+    const orderId = await fixture.createRide(fixture.entries[0]!);
+    const outboxId = await fixture.enqueue(orderId, "partner", {
+      nextAttemptAt: new Date(Date.now() + 6_000).toISOString(),
+    });
+    const fault = await fixture.failOutcomeCommit(outboxId);
+    let failed: Awaited<ReturnType<typeof fixture.outcome>>;
+    let failures = 0;
+    try {
+      await expect.poll(fault.count, { timeout: 20_000 }).toBe(1);
+      failures = await fault.count();
+      failed = await fixture.outcome(outboxId);
+      expect(failed).toMatchObject({
+        status: "sending",
+        attempt_count: 1,
+        claim_state: "claimed",
+        fence_token: 1,
+        delivered_at: null,
+        receipt_id: null,
+        delivery_stage: null,
+      });
+      expect(failed!.payload.partnerNotification).toBeUndefined();
+      expect(received(outboxId)).toHaveLength(1);
+      expect(JSON.parse(received(outboxId)[0]!.responseBody).status).toBe(
+        "accepted",
+      );
+      await noAcknowledgedReceipt(outboxId);
+      // The failure occurred after receipt/context writes in the real outcome
+      // transaction. Those writes must all roll back while its earlier claim
+      // and immutable delivery context survive.
+      expect(failed!.wire_payload_hash).toBe(received(outboxId)[0]!.hash);
+      expect(
+        new Date(failed!.lease_expires_at).getTime() -
+          new Date(failed!.claimed_at).getTime(),
+      ).toBe(120_000);
+    } finally {
+      await fault.remove();
+    }
+    await new Promise((resolve) => setTimeout(resolve, 2_200));
+    expect((await fixture.outcome(outboxId))!.attempt_count).toBe(1);
+    expect(received(outboxId)).toHaveLength(1);
+    // Natural production lease expiry; never edit lease/nextAttemptAt, fake a
+    // clock, invoke send, or manufacture the receipt.
+    await expect
+      .poll(async () => (await fixture.outcome(outboxId))?.status, {
+        timeout: 140_000,
+        intervals: [500],
+      })
+      .toBe("delivered");
+    const recovered = await accepted(outboxId);
+    expect(recovered).toMatchObject({ attempt_count: 2, fence_token: 2 });
+    expect(new Date(recovered.claimed_at).getTime()).toBeGreaterThanOrEqual(
+      new Date(failed!.lease_expires_at).getTime(),
+    );
+    expect(received(outboxId)).toHaveLength(2);
+    const [first, duplicate] = received(outboxId);
+    expect(duplicate!.rawBody).toBe(first!.rawBody);
+    expect(JSON.parse(duplicate!.responseBody)).toMatchObject({
+      status: "duplicate",
+      receipt_id: JSON.parse(first!.responseBody).receipt_id,
+    });
+    const stale = await fixture.staleOutcome(outboxId, failed!.fence_token);
+    expect(stale.staleOutcome).toEqual({
+      recorded: false,
+      reason: "fence_lost",
+    });
+    expect(await fixture.outcome(outboxId)).toEqual(recovered);
+    await accepted(outboxId); // Still exactly one acknowledged receipt.
+    await test.info().attach("ack-db-rollback-lease-recovery", {
+      contentType: "application/json",
+      body: JSON.stringify({
+        candidate_sha: process.env.CANDIDATE_SHA,
+        outboxId,
+        injectedFailures: failures,
+        failed,
+        recovered,
+        stale,
+        responseStatuses: received(outboxId).map(
+          (r) => JSON.parse(r.responseBody).status,
+        ),
+        requestHashes: received(outboxId).map((r) => r.hash),
+        boundary:
+          "scoped DB trigger injects write failure; production transaction, 120-second lease and worker recovery unchanged",
+      }),
+    });
+  });
+
+  test("C215 E2E: Two workers compete and stale fences cannot commit", async () => {
+    test.setTimeout(70_000);
+    const orderId = await fixture.createRide(fixture.entries[0]!);
+    const competitor = await fixture.competingWorker();
+    const lock = await fixture.db.connect();
+    try {
+      const outboxId = await fixture.enqueue(orderId, "partner", {
+        nextAttemptAt: new Date(Date.now() + 6_000).toISOString(),
+      });
+      await lock.query("BEGIN");
+      await lock.query(
+        "SELECT outbox_id FROM ops.consumer_notification_outbox WHERE outbox_id=$1 FOR UPDATE",
+        [outboxId],
+      );
+      const blockers = async () =>
+        (
+          await fixture.db.query(
+            `SELECT pid, application_name, wait_event_type FROM pg_stat_activity
+         WHERE state='active' AND wait_event_type='Lock'
+           AND query LIKE 'SELECT * FROM ops.consumer_notification_outbox WHERE outbox_id=$1 FOR UPDATE%'
+           AND cardinality(pg_blocking_pids(pid)) > 0`,
+          )
+        ).rows;
+      // Both independent production schedulers must actually attempt this row;
+      // merely booting a second app is not competition evidence.
+      await expect
+        .poll(async () => (await blockers()).length, { timeout: 20_000 })
+        .toBe(2);
+      const competing = await blockers();
+      expect(
+        competing.some(
+          (row) => row.application_name === "qa-partner-competitor",
+        ),
+      ).toBe(true);
+      expect(received(outboxId)).toHaveLength(0);
+      await lock.query("COMMIT");
+      const delivered = await accepted(outboxId);
+      expect(delivered).toMatchObject({ attempt_count: 1, fence_token: 1 });
+      expect(received(outboxId)).toHaveLength(1);
+      await new Promise((resolve) => setTimeout(resolve, 2_200));
+      expect(await fixture.outcome(outboxId)).toEqual(delivered);
+      const stale = await fixture.staleOutcome(outboxId, delivered.fence_token);
+      expect(stale.staleOutcome).toEqual({
+        recorded: false,
+        reason: "fence_lost",
+      });
+      expect(await fixture.outcome(outboxId)).toEqual(delivered);
+      await accepted(outboxId);
+      expect(received(outboxId)).toHaveLength(1);
+      await test.info().attach("two-workers-one-claim", {
         contentType: "application/json",
         body: JSON.stringify({
           candidate_sha: process.env.CANDIDATE_SHA,
-          missing,
-          untested,
-          fresh,
-          unavailable,
-          ready,
-          boundary: "actual full AppModule DI/readiness; no provider override",
+          outboxId,
+          competing,
+          competitor: competitor.ready,
+          delivered,
+          stale,
+          boundary:
+            "two full AppModule processes; test row lock synchronizes existing schedulers; released-fence replay uses real repository",
         }),
       });
+    } finally {
+      try {
+        await lock.query("ROLLBACK");
+      } finally {
+        lock.release();
+      }
+      await competitor.stop();
+    }
   });
 
   test("C217 E2E: Expired notifications stop without sending", async () => {
