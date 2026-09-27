@@ -55,9 +55,13 @@ async function main() {
       resolvePassengerSubjectRef: typeof ResolveSubject;
     };
     await owned.persistChanges({
-      ...(event.relevanceVersion === undefined ? {} : {
-        passengerDisclosureSnapshots: [disclosureFixture(orderId, event.relevanceVersion, now)],
-      }),
+      ...(event.relevanceVersion === undefined
+        ? {}
+        : {
+            passengerDisclosureSnapshots: [
+              disclosureFixture(orderId, event.relevanceVersion, now),
+            ],
+          }),
       consumerNotificationOutbox: [
         {
           outboxId,

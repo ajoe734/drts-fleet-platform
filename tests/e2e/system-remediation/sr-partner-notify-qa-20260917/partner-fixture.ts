@@ -389,8 +389,14 @@ export class PartnerFixture {
         // A real fourth entry deliberately has no binding for C220. Its route
         // and resident are still created by the same authoritative API flow.
         if (tenantId === tenantB && index === 1) {
-          this.entries.push({ entry, apiKey: issued.plaintextKey, partnerUserRef,
-            token, webhookId: webhook.webhookId, binding: null });
+          this.entries.push({
+            entry,
+            apiKey: issued.plaintextKey,
+            partnerUserRef,
+            token,
+            webhookId: webhook.webhookId,
+            binding: null,
+          });
           continue;
         }
         const binding = await this.call<PartnerEntryNotificationBinding>(
@@ -634,12 +640,19 @@ export class PartnerFixture {
   }
 
   async availability(outboxId: string) {
-    const { stdout } = await run("./apps/api/node_modules/.bin/tsx", [
-      "tests/e2e/system-remediation/sr-partner-notify-qa-20260917/probe-availability.ts",
-      outboxId,
-    ], { timeout: 30_000 });
-    const line = stdout.split("\n").find((value) => value.startsWith('{"availability":'));
-    if (!line) throw new Error("Full AppModule availability probe returned no evidence");
+    const { stdout } = await run(
+      "./apps/api/node_modules/.bin/tsx",
+      [
+        "tests/e2e/system-remediation/sr-partner-notify-qa-20260917/probe-availability.ts",
+        outboxId,
+      ],
+      { timeout: 30_000 },
+    );
+    const line = stdout
+      .split("\n")
+      .find((value) => value.startsWith('{"availability":'));
+    if (!line)
+      throw new Error("Full AppModule availability probe returned no evidence");
     const result = JSON.parse(line);
     expect(result.candidateSha).toBe(required("CANDIDATE_SHA"));
     return result;

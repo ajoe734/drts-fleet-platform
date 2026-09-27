@@ -588,6 +588,250 @@ test.describe("SR-PARTNER-NOTIFY-QA-20260917: E2E Partner Notification Delivery 
     });
   });
 
+  test("C213 E2E: Accepted then timeout retries identical bytes and one durable receipt", async () => {
+    test.setTimeout(75_000);
+    fixture.fault = "timeout";
+    const outboxId = await fixture.enqueue(
+      await fixture.createRide(fixture.entries[0]!),
+    );
+    const failed = await fixture.settled(outboxId);
+    expect(failed).toMatchObject({
+      status: "failed",
+      attempt_count: 1,
+      failure_reason: "provider_transient_error",
+      retry_disposition: "automatic",
+      receipt_id: null,
+      claim_state: "released",
+      delivered_at: null,
+    });
+    await noAcknowledgedReceipt(outboxId);
+    expect(received(outboxId)).toHaveLength(1);
+    const first = received(outboxId)[0]!;
+    const ack = JSON.parse(first.responseBody);
+    expect(ack.status).toBe("accepted");
+    const durable = (await fixture.receiver.records()).filter(
+      (r) => r.notificationId === outboxId,
+    );
+    expect(durable).toHaveLength(1);
+    expect(durable[0]).toMatchObject({
+      receiptId: ack.receipt_id,
+      nativeDelivery: "pending",
+    });
+    // Recreate the external receiver from durable storage before the real
+    // worker's policy backoff. Never manufacture another receipt or retry call.
+    fixture.fault = "none";
+    const reopened = await fixture.reopenReceiver();
+    expect(reopened.filter((r) => r.notificationId === outboxId)).toEqual(
+      durable,
+    );
+    await expect
+      .poll(async () => (await fixture.outcome(outboxId))?.status, {
+        timeout: 45_000,
+        intervals: [500],
+      })
+      .toBe("delivered");
+    const delivered = await accepted(outboxId);
+    expect(delivered.attempt_count).toBe(2);
+    expect(delivered.receipt_id).toBe(ack.receipt_id);
+    expect(received(outboxId)).toHaveLength(2);
+    const second = received(outboxId)[1]!;
+    expect(second.rawBody).toBe(first.rawBody);
+    expect(second.hash).toBe(first.hash);
+    expect(JSON.parse(second.responseBody)).toEqual({
+      ...ack,
+      status: "duplicate",
+    });
+    expect(
+      (await fixture.receiver.records()).filter(
+        (r) => r.notificationId === outboxId,
+      ),
+    ).toEqual(durable);
+    await test
+      .info()
+      .attach("durable-receiver-reopen", {
+        contentType: "application/json",
+        body: JSON.stringify({
+          candidate_sha: process.env.CANDIDATE_SHA,
+          outboxId,
+          receiptId: ack.receipt_id,
+          payloadHash: first.hash,
+          attempts: 2,
+          receiverRecords: durable,
+          boundary:
+            "receiver object recreated from fsynced inbox; no native device",
+        }),
+      });
+  });
+
+  test("C218 E2E: Old ETA and cancelled arrival stop while receipt remains independent", async () => {
+    test.setTimeout(90_000);
+    const entry = fixture.entries[0]!;
+    const orderId = await fixture.createRide(entry);
+    const eta = { minutes: 4, asOf: new Date().toISOString() };
+    // Synthetic upstream assignment snapshots are persisted by the production
+    // repository. Transport's actual relevance query and refusal stay real.
+    const first = await fixture.enqueue(orderId, "partner", {
+      eventType: "eta_changed",
+      assignmentVersion: 1,
+      relevanceVersion: 1,
+      payload: { eta },
+    });
+    await accepted(first);
+    const old = await fixture.enqueue(orderId, "partner", {
+      eventType: "eta_changed",
+      assignmentVersion: 1,
+      relevanceVersion: 2,
+      payload: { eta },
+    });
+    await refusedWithoutSending(old, "notification_superseded", "terminal");
+    const latest = await fixture.enqueue(orderId, "partner", {
+      eventType: "eta_changed",
+      assignmentVersion: 2,
+      payload: { eta },
+    });
+    await accepted(latest);
+    expect(JSON.parse(received(latest)[0]!.rawBody).data).toMatchObject({
+      assignment_version: 2,
+      event_sequence: 3,
+      eta: { minutes: 4, as_of: eta.asOf },
+    });
+    const snapshots = (
+      await fixture.db.query(
+        "SELECT assignment_version, superseded_at FROM ops.passenger_dispatch_disclosure_snapshots WHERE order_id=$1 ORDER BY assignment_version",
+        [orderId],
+      )
+    ).rows;
+    expect(snapshots.map((s) => s.assignment_version)).toEqual([1, 2]);
+    expect(snapshots[0]!.superseded_at).not.toBeNull();
+    expect(snapshots[1]!.superseded_at).toBeNull();
+    const due = Date.now() + 10_000;
+    const arrival = await fixture.enqueue(orderId, "partner", {
+      eventType: "driver_arrived",
+      assignmentVersion: 2,
+      nextAttemptAt: new Date(due).toISOString(),
+    });
+    await fixture.call(
+      `passenger/orders/${orderId}/cancel`,
+      process.env.DRTS_UAT_TOKEN_PLATFORM!,
+      "POST",
+      { reason: "Controlled notification relevance acceptance" },
+    );
+    expect(
+      (
+        await fixture.db.query(
+          "SELECT status FROM ops.phase1_owned_orders WHERE order_id=$1",
+          [orderId],
+        )
+      ).rows[0]!.status,
+    ).toBe("cancelled");
+    expect(
+      Date.now(),
+      "cancellation committed before arrival was due",
+    ).toBeLessThan(due);
+    await refusedWithoutSending(arrival, "notification_obsolete", "terminal");
+    const receipt = await fixture.enqueue(orderId);
+    await accepted(receipt);
+    expect(JSON.parse(received(receipt)[0]!.rawBody).data.event_sequence).toBe(
+      5,
+    );
+    expect((await fixture.outcome(old))!.attempt_count).toBe(1);
+    expect((await fixture.outcome(arrival))!.attempt_count).toBe(1);
+    await test
+      .info()
+      .attach("notification-relevance", {
+        contentType: "application/json",
+        body: JSON.stringify({
+          candidate_sha: process.env.CANDIDATE_SHA,
+          orderId,
+          first,
+          old,
+          latest,
+          arrival,
+          receipt,
+          snapshots,
+          boundary:
+            "synthetic disclosure producer; real cancellation API and transport relevance",
+        }),
+      });
+  });
+
+  test("C220 E2E: Missing configuration is unavailable and never falls back", async () => {
+    test.setTimeout(90_000);
+    const entry = fixture.entries[3]!;
+    const orderId = await fixture.createRide(entry);
+    expect(
+      (
+        await fixture.db.query(
+          "SELECT binding_id FROM admin.phase1_partner_notification_bindings WHERE entry_slug=$1",
+          [entry.entry.entrySlug],
+        )
+      ).rows,
+    ).toHaveLength(0);
+    const missing = await fixture.enqueue(orderId);
+    await refusedWithoutSending(
+      missing,
+      "configuration_blocked",
+      "configuration_blocked",
+    );
+    const unavailable = await fixture.availability(missing);
+    expect(unavailable).toMatchObject({
+      availability: false,
+      serviceAvailable: false,
+      transportMode: "partner_webhook",
+      providerName: "partner_webhook",
+      partnerTransportBound: true,
+    });
+    const apiPath = `platform-admin/partner-entries/${entry.entry.entrySlug}/notification-binding`;
+    const platform = process.env.DRTS_UAT_TOKEN_PLATFORM!;
+    const pending = await fixture.call<{ state: string }>(
+      apiPath,
+      platform,
+      "PUT",
+      {
+        webhookId: entry.webhookId,
+        eventTypes: ["receipt_ready"],
+        expectedVersion: 0,
+      },
+    );
+    expect(pending.state).toBe("test_pending");
+    const untested = await fixture.enqueue(orderId);
+    await refusedWithoutSending(
+      untested,
+      "configuration_blocked",
+      "configuration_blocked",
+    );
+    expect((await fixture.availability(untested)).availability).toBe(false);
+    await fixture.revalidateBinding(entry);
+    const ready = await fixture.availability(untested);
+    expect(ready).toMatchObject({
+      availability: true,
+      serviceAvailable: false,
+      transportMode: "partner_webhook",
+      partnerTransportBound: true,
+    });
+    const fresh = await fixture.enqueue(orderId);
+    await accepted(fresh);
+    for (const held of [missing, untested]) {
+      expect((await fixture.outcome(held))!.attempt_count).toBe(1);
+      expect(received(held)).toHaveLength(0);
+      await noAcknowledgedReceipt(held);
+    }
+    await test
+      .info()
+      .attach("route-availability", {
+        contentType: "application/json",
+        body: JSON.stringify({
+          candidate_sha: process.env.CANDIDATE_SHA,
+          missing,
+          untested,
+          fresh,
+          unavailable,
+          ready,
+          boundary: "actual full AppModule DI/readiness; no provider override",
+        }),
+      });
+  });
+
   test("C217 E2E: Expired notifications stop without sending", async () => {
     const entry = fixture.entries[0]!;
     const orderId = await fixture.createRide(entry);

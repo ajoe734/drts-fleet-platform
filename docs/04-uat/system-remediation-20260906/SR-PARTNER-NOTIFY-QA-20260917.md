@@ -457,3 +457,22 @@ jobs **skipped**，不作 acceptance。所有本單元程式 checks 均已結束
 R1 完整故障矩陣、R5 NAV/UI、R8/R9 publication/scope blockers 仍開放；原 R2/R3 strict gate 與
 證據邊界持續保留，沒有 handoff／merge／A 層完成宣稱；B/C 真夥伴／真機 gates 均未執行。
 後續文件 checkpoint 不冒充 0638617e 的 runtime SHA。
+
+## Codex 修復單元 5（2026-09-27，checkpoint，未 handoff）
+
+起點 `c68f4908f24fa8ab7e3a654d67319d71f251bf04`；local／remote／draft PR2179
+相同，工作樹乾淨。沿用 R1–R9 finding、三個 NOT MET acceptance 與 B/C live gates。
+只改授權 QA 檔案；沒有產品修復、force/rebase/amend 或 VM runtime。
+
+| Finding／驗收項 | 原始碼依據與修改位置 | 舊版 → 本單元 | 證據與邊界 | 未驗項 |
+| --- | --- | --- | --- | --- |
+| R1／C213 timeout後durable duplicate | `ControlledReceiver` fsync/rename、`PartnerNotificationWorker`、transport immutable context；spec C213、fixture `reopenReceiver` | c68f4908 缺此case → 增加 accepted後timeout、重建receiver物件讀disk、真backoff重送同bytes/receipt/duplicate斷言 | receiver只是外部邊界；不改 worker/DB時間，不手動send；reopen不是OS process restart | hosted待驗；C214–C216 DB/lease/多worker/restart仍缺 |
+| R1／C218 relevance | `OwnedMobilityRepository.persistChanges`、`findPartnerNotificationRelevance`、transport `resolve`、`cancelOwnedOrder`；`synthetic-event.ts`、enqueue、spec | c68f4908 缺case → v1正常ETA、v2 snapshot後v1 superseded、v2正常ETA、正式取消API後arrival obsolete、receipt獨立成功 | 上游snapshot/event為明列synthetic fixture，使用完整正式型別及repository transaction；不驗收派車/driver資格流程、不複製relevance SQL | hosted待驗 |
+| R1／C220 缺設定availability | `MultiTaxiModule` DI、adapter/transport `isAvailableFor`、façade `resolveNotificationRoute`；第四entry fixture、`probe-availability.ts`、spec | c68f4908 缺case → 無binding/test_pending皆零外送；正式test/enable後route available、新事件可送，舊held不自動解封 | hosted compiled full AppModule context、真repositories、無provider override；context正常scheduler啟動/關閉，只在hosted | hosted待驗；不作device證據 |
+| R5／C205、R8／R9 | 原產品日期DTO/picker/translation、transport lint、17 inherited trailers | 保留單元4已定位產品／publication blockers；本單元不改scope外檔案 | 需Supervisor排原owner修復child／scope與preserving-refs history recovery | UI/NAV与合格review/CI/merge仍未完成 |
+
+本機初次 typecheck exit2：synthetic address 使用不合法 `geocodeConfidence=high`，
+已依正式 union 改 `manual`；這是 fixture 型別錯誤，不算產品缺陷重現。
+ESLint與diff check exit0；QA unit 12 passed；Playwright `--list` 收集17案，只是discovery。
+正式C201–C224 manifest保持24必需case與sameSHA gate，未降低要求。
+所有runtime結果待hosted證據補入，三項required_acceptance仍 **NOT MET**。
