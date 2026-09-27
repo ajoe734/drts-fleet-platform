@@ -25,7 +25,8 @@ This file contains the test cases matrix for SR-PARTNER-NOTIFY-QA-20260917.
 - 既有一般 tenant webhook C111–C115 回歸
 
 ## Evidence
-- Pinned candidate SHA: TBD (will be provided upon commit)
-- Acceptance status: TBD
-- A-level (controlled receiver verified): TBD
+
+- Pinned candidate SHA: b6808c812c48becc604df30c7daa25aa5bb2fc89
+- Acceptance status: passed in GitHub Actions tenant-uat-acceptance
+- A-level (controlled receiver verified): passed via Playwright API tests in harness
 - B/C levels: Gated by SR-LIVE-PUSH-001
