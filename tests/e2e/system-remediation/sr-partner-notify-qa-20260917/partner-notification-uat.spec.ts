@@ -163,7 +163,7 @@ test.describe("SR-PARTNER-NOTIFY-QA-20260917 E2E Cases", () => {
     
     await new Promise(r => setTimeout(r, 1000));
     expect(requests.length).toBe(1);
-    expect(requests[0].body.data.partner_entry_slug).toBe(entrySlug);
+    expect(requests[0]!.body.data.partner_entry_slug).toBe(entrySlug);
   });
 
   test("endpoint 停用／輪替重測 - Webhook disable/rotate", async () => {
