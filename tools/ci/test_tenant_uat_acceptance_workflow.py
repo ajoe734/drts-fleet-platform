@@ -506,6 +506,17 @@ class FullMatrixGateBehaviorTests(unittest.TestCase):
                 json.dumps({"suites": [{"specs": wh_specs}]})
             )
 
+            pn_specs = []
+            if not missing_partner_e2e:
+                pn_specs.append({
+                    "file": "tests/e2e/system-remediation/sr-partner-notify-qa-20260917/partner-notification-uat.spec.ts",
+                    "tests": [{"results": [{"status": "passed"}]}]
+                })
+            if pn_specs:
+                (root / "test-results/partner-notify-e2e-report.json").write_text(
+                    json.dumps({"suites": [{"specs": pn_specs}]})
+                )
+
             artifact = root / ".artifacts/tenant-uat-acceptance"
             artifact.mkdir(parents=True)
             partner_suites = [
@@ -598,6 +609,15 @@ class FullMatrixGateBehaviorTests(unittest.TestCase):
 
     def test_failed_webhook_unit_fails(self):
         self.assertNotEqual(self.run_gate(webhook_unit_success=False).returncode, 0)
+
+    def test_missing_partner_e2e_fails(self):
+        self.assertNotEqual(self.run_gate(missing_partner_e2e=True).returncode, 0)
+
+    def test_missing_partner_notify_unit_fails(self):
+        self.assertNotEqual(self.run_gate(missing_partner_notify_unit=True).returncode, 0)
+
+    def test_missing_partner_unit_fails(self):
+        self.assertNotEqual(self.run_gate(missing_partner_unit=True).returncode, 0)
 
 
     def test_missing_partner_notify_unit_fails(self):
@@ -718,6 +738,18 @@ class FullMatrixGateBehaviorTests(unittest.TestCase):
                     "capabilities": caps,
                 })
             )
+            (root / "test-results/webhook-e2e-report.json").write_text(
+                json.dumps({"suites": [{"specs": [
+                    {"file": "tests/e2e/system-remediation/sr-qa-webhook-001/sr-qa-webhook-001.spec.ts", "tests": [{"results": [{"status": "passed"}]}]},
+                    {"file": "tests/e2e/system-remediation/sr-partner-notify-qa-20260917/partner-notification-uat.spec.ts", "tests": [{"results": [{"status": "passed"}]}]}
+                ]}]})
+            )
+            (root / "test-results/partner-notify-e2e-report.json").write_text(
+                json.dumps({"suites": [{"specs": [
+                    {"file": "tests/e2e/system-remediation/sr-partner-notify-qa-20260917/partner-notification-uat.spec.ts", "tests": [{"results": [{"status": "passed"}]}]}
+                ]}]})
+            )
+
             result = subprocess.run(
                 [sys.executable, "-c", self.script],
                 cwd=root,

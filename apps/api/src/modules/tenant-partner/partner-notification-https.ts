@@ -1,6 +1,5 @@
 import { lookup } from "node:dns";
-import { request as httpsRequest } from "node:https";
-import { request as httpRequest } from "node:http";
+import { request } from "node:https";
 import { BlockList, isIP } from "node:net";
 import { PARTNER_NOTIFICATION_MAX_ACK_BODY_BYTES } from "@drts/contracts";
 import type { WebhookFetch } from "./webhook-dispatch.service";
@@ -48,8 +47,11 @@ export const partnerNotificationHttpsFetch: WebhookFetch = async (
 ) => {
   const url = new URL(input);
   const host = url.hostname.replace(/^\[|\]$/g, "");
+  const isTestEnv =
+    process.env.NODE_ENV !== "production" &&
+    process.env.DRTS_ALLOW_LOCAL_WEBHOOKS === "true";
   if (
-    !process.env.DRTS_ALLOW_LOCAL_WEBHOOKS &&
+    !isTestEnv &&
     (url.protocol !== "https:" ||
       url.username ||
       url.password ||
@@ -58,7 +60,7 @@ export const partnerNotificationHttpsFetch: WebhookFetch = async (
     throw new Error("partner_endpoint_not_public_https");
   return new Promise((resolve, reject) => {
     let rejectBody: ((error: Error) => void) | undefined;
-    const req = (process.env.DRTS_ALLOW_LOCAL_WEBHOOKS && url.protocol === 'http:' ? httpRequest : httpsRequest)(
+    const req = (isTestEnv && url.protocol === "http:" ? require("node:http").request : request)(
       url,
       {
         method: "POST",
@@ -74,7 +76,7 @@ export const partnerNotificationHttpsFetch: WebhookFetch = async (
                 return;
               }
               if (
-                !process.env.DRTS_ALLOW_LOCAL_WEBHOOKS &&
+                !isTestEnv &&
                 (!addresses.length ||
                   addresses.some((item) => !isPublicPartnerAddress(item.address)))
               ) {

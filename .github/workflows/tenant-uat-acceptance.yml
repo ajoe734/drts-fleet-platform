@@ -110,6 +110,7 @@ jobs:
       CANDIDATE_SHA: ${{ github.event.inputs.candidate_sha || github.sha }}
       WORKFLOW_SHA: ${{ github.sha }}
       DRTS_CANDIDATE_SHA: ${{ github.event.inputs.candidate_sha || github.sha }}
+      DRTS_ALLOW_LOCAL_WEBHOOKS: "true"
     steps:
       - name: Validate candidate_sha input
         run: |
@@ -550,56 +551,57 @@ jobs:
           print(f"Partner Notify unit regression: {pn_passed}/{pn_total} passed, zero skips.")
 
           pn_e2e_report = Path("test-results/partner-notify-e2e-report.json")
-          if pn_e2e_report.exists():
-              pn_e2e_data = json.loads(pn_e2e_report.read_text())
-              pn_e2e_specs = [
-                  spec
-                  for suite in pn_e2e_data.get("suites", [])
-                  for spec in iter_specs(suite)
-                  if "sr-partner-notify-qa-20260917" in spec.get("file", "")
-              ]
-              pn_e2e_total = 0
-              pn_e2e_passed = 0
-              for spec in pn_e2e_specs:
-                  for test in spec.get("tests", []):
-                      pn_e2e_total += 1
-                      results = test.get("results", [])
-                      status = results[-1].get("status") if results else None
-                      if status == "passed":
-                          pn_e2e_passed += 1
-              if pn_e2e_total and pn_e2e_passed != pn_e2e_total:
-                  raise SystemExit(f"Partner Notify E2E acceptance incomplete: total={pn_e2e_total}, passed={pn_e2e_passed}.")
-              if pn_e2e_total:
-                  print(f"Partner Notify E2E acceptance: {pn_e2e_passed}/{pn_e2e_total} passed, zero skips.")
+          if not pn_e2e_report.exists():
+              raise SystemExit("Partner Notify E2E acceptance gate: no Playwright JSON report was produced.")
+          pn_e2e_data = json.loads(pn_e2e_report.read_text())
+          pn_e2e_specs = [
+              spec
+              for suite in pn_e2e_data.get("suites", [])
+              for spec in iter_specs(suite)
+              if "sr-partner-notify-qa-20260917" in spec.get("file", "")
+          ]
+          pn_e2e_total = 0
+          pn_e2e_passed = 0
+          for spec in pn_e2e_specs:
+              for test in spec.get("tests", []):
+                  pn_e2e_total += 1
+                  results = test.get("results", [])
+                  status = results[-1].get("status") if results else None
+                  if status == "passed":
+                      pn_e2e_passed += 1
+          if pn_e2e_total < 1 or pn_e2e_passed != pn_e2e_total:
+              raise SystemExit(f"Partner Notify E2E acceptance incomplete: total={pn_e2e_total}, passed={pn_e2e_passed}.")
+          print(f"Partner Notify E2E acceptance: {pn_e2e_passed}/{pn_e2e_total} passed, zero skips.")
+
           webhook_e2e_report = Path("test-results/webhook-e2e-report.json")
-          if webhook_e2e_report.exists():
-              wh_e2e_data = json.loads(webhook_e2e_report.read_text())
-              wh_e2e_specs = [
-                  spec
-                  for suite in wh_e2e_data.get("suites", [])
-                  for spec in iter_specs(suite)
-                  if "sr-qa-webhook-001" in spec.get("file", "") or "partner-notification-uat" in spec.get("file", "")
-              ]
-              wh_e2e_total = 0
-              wh_e2e_passed = 0
-              found_partner_e2e = False
-              for spec in wh_e2e_specs:
-                  if "partner-notification-uat" in spec.get("file", ""):
-                      found_partner_e2e = True
-                  for test in spec.get("tests", []):
-                      wh_e2e_total += 1
-                      results = test.get("results", [])
-                      status = results[-1].get("status") if results else None
-                      if status == "passed":
-                          wh_e2e_passed += 1
-              if not found_partner_e2e:
-                  raise SystemExit("Partner notification E2E acceptance suite missing from run.")
-              if wh_e2e_total and wh_e2e_passed != wh_e2e_total:
-                  raise SystemExit(
-                      f"Webhook E2E acceptance incomplete: total={wh_e2e_total}, passed={wh_e2e_passed}."
-                  )
-              if wh_e2e_total:
-                  print(f"Webhook E2E acceptance: {wh_e2e_passed}/{wh_e2e_total} passed, zero skips.")
+          if not webhook_e2e_report.exists():
+              raise SystemExit("Webhook E2E acceptance gate: no Playwright JSON report was produced.")
+          wh_e2e_data = json.loads(webhook_e2e_report.read_text())
+          wh_e2e_specs = [
+              spec
+              for suite in wh_e2e_data.get("suites", [])
+              for spec in iter_specs(suite)
+              if "sr-qa-webhook-001" in spec.get("file", "") or "partner-notification-uat" in spec.get("file", "")
+          ]
+          wh_e2e_total = 0
+          wh_e2e_passed = 0
+          found_partner_e2e = False
+          for spec in wh_e2e_specs:
+              if "partner-notification-uat" in spec.get("file", ""):
+                  found_partner_e2e = True
+              for test in spec.get("tests", []):
+                  wh_e2e_total += 1
+                  results = test.get("results", [])
+                  status = results[-1].get("status") if results else None
+                  if status == "passed":
+                      wh_e2e_passed += 1
+          if not found_partner_e2e or wh_e2e_total < 2:
+              raise SystemExit("Partner notification E2E acceptance suite missing or empty from run.")
+          if wh_e2e_passed != wh_e2e_total:
+              raise SystemExit(
+                  f"Webhook E2E acceptance incomplete: total={wh_e2e_total}, passed={wh_e2e_passed}."
+              )
+          print(f"Webhook E2E acceptance: {wh_e2e_passed}/{wh_e2e_total} passed, zero skips.")
           PY_GATE
 
       - name: Record run status
