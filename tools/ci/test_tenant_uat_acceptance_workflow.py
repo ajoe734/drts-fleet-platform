@@ -85,6 +85,7 @@ class TenantUatAcceptanceWorkflowStructureTests(unittest.TestCase):
         self.assertIn(
             "tools/ci/test_tenant_uat_acceptance_workflow.py", push_block
         )
+        self.assertIn("gemini/sr-partner-notify-qa-20260917", push_block)
         self.assertIn(
             "tests/e2e/system-remediation/sr-qa-tenant-001/**", push_block
         )
@@ -105,6 +106,12 @@ class TenantUatAcceptanceWorkflowStructureTests(unittest.TestCase):
         self.assertIn(
             "docs/04-uat/system-remediation-20260906/SR-QA-WEBHOOK-001.md",
             push_block,
+        )
+        self.assertIn(
+            "tests/e2e/system-remediation/sr-partner-notify-qa-20260917/**", push_block
+        )
+        self.assertIn(
+            "tests/unit/system-remediation/sr-partner-notify-qa-20260917/**", push_block
         )
 
     def test_candidate_sha_falls_back_to_github_sha_everywhere_it_is_used(

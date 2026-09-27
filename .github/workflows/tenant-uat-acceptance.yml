@@ -39,6 +39,7 @@ on:
       - claude/sr-qa-tenant-001-acceptance-runner
       - codex/sr-qa-tenant-ci-repair-20260911
       - gemini2/sr-c115-harness-20260913
+      - gemini/sr-partner-notify-qa-20260917
     paths:
       - .github/workflows/tenant-uat-acceptance.yml
       - tools/ci/test_tenant_uat_acceptance_workflow.py
@@ -48,6 +49,9 @@ on:
       - tests/e2e/system-remediation/sr-qa-webhook-001/**
       - tests/unit/system-remediation/sr-qa-webhook-001/**
       - docs/04-uat/system-remediation-20260906/SR-QA-WEBHOOK-001.md
+      - tests/e2e/system-remediation/sr-partner-notify-qa-20260917/**
+      - tests/unit/system-remediation/sr-partner-notify-qa-20260917/**
+      - docs/04-uat/system-remediation-20260906/SR-PARTNER-NOTIFY-QA-20260917.md
 
 permissions:
   contents: read
@@ -84,6 +88,9 @@ jobs:
           - 8025:8025
     env:
       DATABASE_URL: postgresql://postgres:postgres@localhost:5432/drts_fleet_platform
+      PARTNER_NOTIFY_TRANSPORT_TEST_DATABASE_URL: postgresql://postgres:postgres@localhost:5432/drts_fleet_platform
+      PARTNER_NOTIFY_UI_TEST_DATABASE_URL: postgresql://postgres:postgres@localhost:5432/drts_fleet_platform
+      PARTNER_NOTIFY_SEQ_TEST_DATABASE_URL: postgresql://postgres:postgres@localhost:5432/drts_fleet_platform
       DRTS_UAT_ENV: sandbox
       NODE_ENV: test
       AUTH_MODE: test
@@ -207,6 +214,7 @@ jobs:
           set -o pipefail
           pnpm exec vitest run \
             tests/unit/system-remediation/sr-qa-tenant-001/ \
+            tests/unit/system-remediation/sr-partner-notify-*/ \
             --reporter=default --reporter=json \
             --outputFile.json=.artifacts/tenant-uat-acceptance/unit-test-report.json \
             2>&1 | tee -a .artifacts/tenant-uat-acceptance/execution-log.txt
@@ -220,7 +228,8 @@ jobs:
           pnpm exec playwright test \
             -c playwright.system-remediation.config.ts \
             --output test-results/webhook-artifacts \
-            tests/e2e/system-remediation/sr-qa-webhook-001/sr-qa-webhook-001.spec.ts --workers=1 --trace=off \
+            tests/e2e/system-remediation/sr-qa-webhook-001/sr-qa-webhook-001.spec.ts \
+            tests/e2e/system-remediation/sr-partner-notify-qa-20260917/partner-notification-uat.spec.ts --workers=1 --trace=off \
             2>&1 | tee -a .artifacts/tenant-uat-acceptance/execution-log.txt
           if [ ! -f test-results/system-remediation-report.json ] && [ -f .artifacts/tenant-uat-acceptance/system-remediation-report.json ]; then
             cp .artifacts/tenant-uat-acceptance/system-remediation-report.json test-results/system-remediation-report.json
