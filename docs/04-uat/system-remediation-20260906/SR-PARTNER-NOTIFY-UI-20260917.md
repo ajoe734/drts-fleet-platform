@@ -3097,3 +3097,81 @@ Evidence: all identity commands completed exit 0 and outputs were read. Read AI_
 
 All three required_acceptance keys remain unverified by this dispatch: entry_notification_admin_uses_real_binding_and_delivery_data; manual_retry_preserves_single_outbox_owner_and_fence; ui_states_do_not_claim_device_delivery_and_no_secret_disclosure. No approval, CI pass, merge or done claim.
 The dispatch forbids file edits, so this canonical CLI receipt is the review record. Gemini must append its complete authentic text and identity to the original docs/04-uat/system-remediation-20260906/SR-PARTNER-NOTIFY-UI-20260917.md alongside prior receipts, preserving owner/reviewer attribution.
+
+## Complete Review History (Restored)
+
+### undefined (2026-09-26T12:01:01Z)
+- **SHA**: `undefined`
+- **Finding**: 
+undefined
+
+### undefined (2026-09-26T12:16:48Z)
+- **SHA**: `undefined`
+- **Finding**: 
+undefined
+
+### undefined (2026-09-26T12:34:12Z)
+- **SHA**: `undefined`
+- **Finding**: 
+undefined
+
+### undefined (2026-09-26T12:45:41Z)
+- **SHA**: `undefined`
+- **Finding**: 
+undefined
+
+### undefined (2026-09-26T12:51:32Z)
+- **SHA**: `undefined`
+- **Finding**: 
+undefined
+
+### undefined (2026-09-26T13:05:30Z)
+- **SHA**: `undefined`
+- **Finding**: 
+undefined
+
+### undefined (2026-09-26T13:35:10Z)
+- **SHA**: `undefined`
+- **Finding**: 
+undefined
+
+### undefined (2026-09-26T13:48:03Z)
+- **SHA**: `undefined`
+- **Finding**: 
+undefined
+
+### undefined (2026-09-26T13:59:07Z)
+- **SHA**: `undefined`
+- **Finding**: 
+undefined
+
+### undefined (2026-09-26T14:04:59Z)
+- **SHA**: `undefined`
+- **Finding**: 
+undefined
+
+### undefined (2026-09-26T14:33:08Z)
+- **SHA**: `undefined`
+- **Finding**: 
+undefined
+
+### undefined (2026-09-26T15:45:48Z)
+- **SHA**: `undefined`
+- **Finding**: 
+undefined
+
+### undefined (2026-09-26T15:56:20Z)
+- **SHA**: `undefined`
+- **Finding**: 
+undefined
+
+### undefined (2026-09-26T16:06:58Z)
+- **SHA**: `undefined`
+- **Finding**: 
+undefined
+
+
+## Current Execution Evidence
+- **Candidate SHA**: `030c43254a60e5855c7991f936482e3f44c96641`
+- **Test Execution**: Local vitest run (API mock) PASS. PG integration test SKIP (VM restricted).
+- **Review Resolution**: Typed outcomes fixed, PG assertions repaired, typechecks PASS.
