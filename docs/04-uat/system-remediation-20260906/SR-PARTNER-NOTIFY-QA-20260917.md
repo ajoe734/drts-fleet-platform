@@ -179,3 +179,65 @@ R8的scope內lint/whitespace修正已驗，歷史packaging blocker仍未解。
 上述CI以5db78fdc的程式為準；本節追加屬文件checkpoint，不能把它冒稱同一candidate。
 任務仍未達三項驗收。先由Supervisor協調R9產品scope及R8已發布history recovery，
 並確認下個R1 fixture/receiver小單元，再續做完整SD14/NAV；不要再次原封handoff。
+
+## Codex 修復單元 2（2026-09-27，checkpoint，未 handoff）
+
+本單元由 clean/published `a24a4ca7b8fd424134f43f7820fe329ab79945c1` 續做。
+NAV/UI/LEGACY/PG 四個 dependency 的 machine status 均為 done，且其 merge
+c2d94aaa／931eabb0／d6177129／318b44b6 均為本分支 ancestor；未改寫任何發布歷史。
+以下是進度，**不是全部 finding 消除，也不是 A 層或 live 驗收通過**。
+
+| Finding／驗收項                       | 原始碼依據與本輪修改                                                                                                                                                                                                                          | 舊版 → 本輪結果                                                                                                                                                                                                                                                                                   | 檢查／證據                                                                                                                | 未驗與修復邊界                                                                                                                                                                                                    |
+| ------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| R1 receiver 泛用 JSON／無 durable ack | `controlled-receiver.ts`、`controlled-receiver.test.ts`；正式 `WebhookDispatchService.dispatchAttempt`                                                                                                                                        | a24a4ca7 的 `{ok:true,received:true}` 經正式 parser 判 invalid；新 receiver 經正式 signing/serialization/parser 得 accepted，重開後 duplicate 回同 receipt                                                                                                                                        | 本機 7/7；只替 HTTP IO，真的寫檔/fsync/rename；含併發去重、hash conflict409、簽章/tenant/entry/recipient 拒絕、storage503 | filesystem inbox 是外部夥伴邊界 fixture，dedupe + pending native delivery 同一原子文件；沒有原生推播／真夥伴 claim                                                                                                |
+| R1 權威 fixture／typed outcome        | `partner-fixture.ts`、`enqueue-notification.ts`、spec C201–C204/C206/C207；`createPlatformPartnerEntry`、`sendTestWebhook`、binding PUT/test/enable、ingress handoff、`MultiTaxiService.createRide`、`OwnedMobilityRepository.persistChanges` | 移除手造 route/identity/sequence SQL；兩 tenant、同 tenant 兩 entry、共用 URL 各自 secret；真 order/link/route 讀回，synthetic receipt_ready event 由正式 repository transaction 入列；C203 要求 route_missing/manual_only、零 request、claim released；C204 要求 partner_ack_invalid/manual_only | 下列 hosted checkpoints 逐一定位 port、step-up、idempotency setup 問題；最新修復尚待 hosted 結果                          | 事件 producer 是明列的 fixture 邊界，不宣稱正式收據生成／全 SD14 已驗；C208–C224 仍未實作                                                                                                                         |
+| R5 真 UI 路徑與 retry 控制            | C205 改 `/partners/{entrySlug}` → Notifications → 指定 outbox row 的重送 → 實際 POST → PG/畫面讀回；workflow UI 指向 API4102                                                                                                                  | 撤除不存在的 localStorage bearer reader／錯 route；只用正式 server authority/control-plane proxy 的 hosted test 身分；UI與API各自 SHA header 驗證                                                                                                                                                 | `--list` 7 cases，僅 discovery；沒有把它當 browser pass                                                                   | hosted test-mode control-plane authority 不代表正式 IAP/workforce 驗收；NAV C221–C224 仍缺                                                                                                                        |
+| R5 UI 啟動 port                       | workflow `Start the UI applications`；兩個 package `start` 實際固定3002/3014                                                                                                                                                                  | f44a6c7e UI readiness fail → 1ba5364c 明確 `pnpm exec next start --hostname 127.0.0.1 --port 3001/3002` 後 readiness success                                                                                                                                                                      | f44a6c7e admin/referral log + 1ba5364c run-status；curl deadline5s；無 VM server                                          | 只修既有 hosted runner，不修改產品 package scripts                                                                                                                                                                |
+| R1 tenant mutation authority          | `step-up.policy.ts:446–471`、controller `sendTestWebhook`                                                                                                                                                                                     | 1ba5364c POST tenant/webhooks403 STEP_UP_REQUIRED → f07af5e0 已越過此步；f07af5e0 POST tenant/webhooks/test400 IDEMPOTENCY_KEY_REQUIRED → 00f0bfbf endpoint-specific key 已補                                                                                                                     | 分別 run36337635742、36338110601；錯誤來自正式 HTTP API，非缺套件／假 mock                                                | 新 helper 向正式 policy 取得每次 authenticated mutation 的 action/session proof，不繞過 gate；待新 run 驗證 idempotency 修復                                                                                      |
+| R5 新產品定位：已接受文案顯示 raw key | `partner-notification-panel.tsx:847` 的 `t("partnerNotification.accepted_unknown") ?? ...`；`translations.ts` 的 `t` missing-key fallback                                                                                                     | 正式 `t(key,"en")` 與 `t(key,"zh")` 都回 `partnerNotification.accepted_unknown`，不是預期文案；因非 null，component fallback 不執行                                                                                                                                                               | 實際函式 tsx probe exit0，`.local/sr-partner-notify-qa-20260927-unit2/ui-translation-probe.jsonl`                         | **產品檔超 scope**：Supervisor 請安排原 owner 修復 child 或核准 scope：`apps/platform-admin-web/lib/translations.ts`、`apps/platform-admin-web/components/partner-notification-panel.tsx`；保留 C205 正式文案斷言 |
+| R2/R3／三項 required_acceptance       | manifest 保留全部 C201–C224，新增 receiver7 到 tenant_unit/partner_unit；原 finding/A/B/C 不刪除                                                                                                                                              | gate64 synthetic pass；manifest 要求 tenant291、partner unit12、partner E2E24，缺 C208–C224 必須拒絕                                                                                                                                                                                              | 本機 Python64、QA12；不把 totals 當 runtime case 完成                                                                     | **三項 required_acceptance 全部 NOT MET**；B/C 繼續 SR-LIVE-PUSH-001，未執行真夥伴／裝置                                                                                                                          |
+| R8/R9 繼承產品與 publication          | transport no-require-imports；已發布17 commits 不合規                                                                                                                                                                                         | 每個新 checkpoint 的 CI 仍 fail；本輪新 commits 合規且普通 push，未碰 scope 外三個 transport/security 檔                                                                                                                                                                                          | 下列 CI links；scoped ESLint/tsc/diff exit0 不代替整體 CI                                                                 | 原 Supervisor scope/child 與 preserving-refs history recovery 請求仍未解；禁止 force/rebase/amend                                                                                                                 |
+
+本機 repository checks 全已結束：QA兩檔12 passed（receiver7 + security5）；
+`python3 -B -m unittest tools.ci.test_tenant_uat_acceptance_workflow` 64 passed；
+scoped `pnpm exec tsc -p .local/sr-partner-notify-qa-20260927-unit2/tsconfig.json --noEmit`
+（include本單元所有TS檔及正式imported types）、ESLint、diff --check 均exit0。
+`pnpm exec playwright test --config playwright.system-remediation.config.ts ... --list`
+只列出7 cases，沒有啟 browser/server。原始 logs/JSON/ZIP 均在上述 `.local/`。
+
+### 單元2 hosted 執行歷史（逐 SHA，不互借通過）
+
+1. `19e099ef1270abd5976d50920bdf118916a0570b`：
+   [run36336771098/job108669011601](https://github.com/ajoe734/drts-fleet-platform/actions/runs/36336771098/job/108669011601)，
+   **cancelled** during UI build，seed/runtime全skip、run-status=not_run。
+   取消原因：讀取 Playwright1.59.1 `ArtifactsRecorder.didCreateRequestContext` 發現手動 API context
+   也錄 trace；先以 Node fetch 隔離含憑證 setup，保留真正 browser trace，避免 secret 進附件。
+   artifact10936879560，ZIP SHA256 `5b91243ed28f1263e7f360a063e80cb3772fedd90914cdcbeb7a9078063e99b5`；已讀完。
+2. `f44a6c7e7e3645e40231bfb53538928c7c5f8ea0`：
+   [run36337144950/job108670054090](https://github.com/ajoe734/drts-fleet-platform/actions/runs/36337144950/job/108670054090)，
+   **failure**：build/seed/API start成功，unit291/291（PG三suite各7）、webhook unit34/34；
+   UI port readiness fail，E2E/restart全skip，run-status=not_run。
+   artifact10938330464，ZIP SHA256 `8ccae4ac0830d6477d755042a9343af307caf0282f20d4b8d5180a3a3cd86f66`；已讀完。
+3. `1ba5364c84c5b5f2f931012c0bf7d9192f44146d`：
+   [run36337635742/job108671433064](https://github.com/ajoe734/drts-fleet-platform/actions/runs/36337635742/job/108671433064)，
+   **failure**：UI readiness成功、unit291/291（PG21）、webhook unit34/34、tenant HTTP10/10、
+   webhook E2E1/1。Partner beforeAll 在tenant webhook403失敗：C201 failed、其餘6 skipped；
+   C113–C115/restart全skip，run-status=failed。
+   artifact10938136369，ZIP SHA256 `2fdd4cbe9193340516ce0d5d121201caf0eac3e0c4170eb1d255cd3c9f2b7484`；已讀完。
+4. `f07af5e040aa58944107e82095e424d8b8aec49a`：
+   [run36338110601/job108672762771](https://github.com/ajoe734/drts-fleet-platform/actions/runs/36338110601/job/108672762771)，
+   **failure**：unit291/291、webhook unit34/34、tenant HTTP10/10、webhook E2E1/1；
+   Partner beforeAll 在webhook test400失敗：C201 failed、其餘6 skipped；C113–C115/restart全skip。
+   artifact10937549138，ZIP SHA256 `7abc0bc3850ea7a1179056c6fa731c8f8847c656b762752280bba3b9d2d69c56`；已讀完。
+5. 最新程式 checkpoint `00f0bfbf82488a8a8ac403a1c8c9a9b690a86f3e`：
+   [run36338535726](https://github.com/ajoe734/drts-fleet-platform/actions/runs/36338535726) 執行中，尚無 pass 宣稱。
+
+一般 CI（各自已讀至 completed failure）：
+[36336749335](https://github.com/ajoe734/drts-fleet-platform/actions/runs/36336749335) at19e099ef、
+[36337124704](https://github.com/ajoe734/drts-fleet-platform/actions/runs/36337124704) atf44a6c7e、
+[36337610037](https://github.com/ajoe734/drts-fleet-platform/actions/runs/36337610037) at1ba5364c、
+[36338080721](https://github.com/ajoe734/drts-fleet-platform/actions/runs/36338080721) atf07af5e0。
+最後一個的 trailers job108672679129 與 smoke job108672835988
+仍為相同17個歷史commits與 `partner-notification-https.ts:63:58` 動態require錯誤。
+对应 integration runs36336749351／36337124715／36337610008／36338080697
+completed success，但主要build/unit/typecheck/lint/integration均skip，不是驗收。

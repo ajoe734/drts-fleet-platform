@@ -8,17 +8,17 @@
 
 | Scenario                                         | 正式期望與現有位置                                                                                             | 驗收狀態                                             |
 | ------------------------------------------------ | -------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------- |
-| 正向worker delivery                              | C201；200/201/202 + 相符durable accepted/duplicate receipt；partner_accepted，downstream unknown               | checkpoint setup failed；未驗                        |
-| accepted後timeout與dedupe                        | C202；大於10秒deadline、同notification/delivery/body hash、同receipt duplicate、只入列一次                     | fixture failed；未驗                                 |
-| 缺route                                          | C203；typed route_missing/manual_only、不猜entry、receiver count=0                                             | generic failed斷言不足；未驗                         |
-| 204、HTML200、錯receipt                          | C204；partner_ack_invalid/manual_only，不能自動retry                                                           | fixture failed；未驗                                 |
+| 正向worker delivery                              | C201；200/201/202 + 相符durable accepted/duplicate receipt；partner_accepted，downstream unknown               | 單元2已改權威fixture；hosted setup仍失敗，未驗       |
+| accepted後timeout與dedupe                        | C202；大於10秒deadline、同notification/delivery/body hash、同receipt duplicate、只入列一次                     | 單元2已改durable receiver；待hosted案例執行          |
+| 缺route                                          | C203；typed route_missing/manual_only、不猜entry、receiver count=0                                             | 單元2要求typed reason/no-send；待hosted執行          |
+| 204、HTML200、錯receipt                          | C204；partner_ack_invalid/manual_only，不能自動retry                                                           | 單元2已改durable receiver；待hosted案例執行          |
 | 同tenant兩entry、跨tenant同URL、同住戶兩App      | 僅原entry/tenant/subject收到，payload不串單                                                                    | 缺整合案例                                           |
 | entry移轉與link撤銷                              | 舊消息不移轉；owner_changed/manual_only與recipient_revoked/terminal；零外送                                    | 缺整合案例                                           |
 | endpoint停用、secret輪替重測、未配置availability | 明確configuration_blocked；測試就緒後才enable                                                                  | 缺整合案例                                           |
 | ack後DB失敗、lease/fence、兩worker競爭           | durable transaction、舊fence不可commit、dedupe且單retry owner                                                  | PG歷史21/21；缺整合fault evidence                    |
 | maxAttempts=5與expiry                            | 總共五次、最多四次retry、超expiresAt停止                                                                       | 缺整合案例                                           |
 | 舊ETA、取消後舊到場、payload confidentiality     | superseded/obsolete terminal；缺driver情報不洩漏敏感資料                                                       | 缺整合案例                                           |
-| admin readiness/stage/failure與手動retry         | C205；真route/auth、點control、觀察request及durable readback                                                   | checkpoint無Chromium；未驗                           |
+| admin readiness/stage/failure與手動retry         | C205；真route/auth、點control、觀察request及durable readback                                                   | 已改真route/control及hosted port；待browser執行      |
 | notification-navigation                          | fresh single-use handoff、HttpOnly session、returnTo、最新ride readback、錯entry/subject/logout/account switch | 缺hosted runtime案例                                 |
 | 一般tenant webhook C111–C115與restart            | 獨立既有gate不可由partner數量取代                                                                              | checkpoint C111/112 passed；C113–115/restart skipped |
 
@@ -48,7 +48,7 @@ unit280/280、PG21/21是真實該SHA歷史；partner E2E fail、restart skipped�
 ## 本輪 gate 修復（不等於 runtime acceptance）
 
 `tests/unit/system-remediation/sr-partner-notify-qa-20260917/required-cases.json`
-凍結逐suite/case身份與C201–C224整合需求；C206–C224目前缺實作，gate必須拒絕缺案例。
+凍結逐suite/case身份與C201–C224整合需求；單元1時C206–C224缺實作；單元2已補C206/C207，C208–C224仍缺，gate必須拒絕缺案例。
 `probe-gate-regression.py` 實際執行兩個相鄰舊候選PY_GATE與本輪PY_GATE：
 六種漏驗輸入old exit0→new exit1，完整synthetic報告皆exit0。
 64 workflow tests、API typecheck通過；此處不將synthetic gate稱產品280/284或PG通過。
@@ -59,3 +59,16 @@ unit280/280、PG21/21是真實該SHA歷史；partner E2E fail、restart skipped�
 [CI run36335019850](https://github.com/ajoe734/drts-fleet-platform/actions/runs/36335019850)
 已完成failure：17個繼承commit trailers + scope外transport動態require的API lint。
 Integration run36335019853主要工作skip，不是產品通過；完整job/source證據沿用原UAT artifact。
+
+## 單元2 source／case 邊界
+
+`controlled-receiver.ts` 在原始bytes驗HMAC與tenant/entry/recipient後，以fsync/atomic rename
+同時持久化dedupe + pending native delivery；`WebhookDispatchService.dispatchAttempt` 的
+7個本機boundary tests驗accepted/duplicate等契約，**不代表真夥伴／原生投遞**。
+`partner-fixture.ts` 沿正式HTTP governance/handoff/建單；`enqueue-notification.ts` 僅將
+synthetic event交正式 `OwnedMobilityRepository.persistChanges` transaction分配sequence，
+不手造route/link/schema。C201–C204/C206/C207驗真worker與typed outcome；C205改真管理UI
+重送control。以上runtime尚未通過，完整逐SHA失敗與修復鏈見原UAT artifact「修復單元2」。
+最新程式 `00f0bfbf82488a8a8ac403a1c8c9a9b690a86f3e` 的run36338535726執行中；
+不得把先前291/291或PG21/21帶到此SHA，三項required_acceptance仍NOT MET。
+另有正式 `t()` 已重現的accepted_unknown raw-key產品文案缺陷，待Supervisor協調scope/child。
