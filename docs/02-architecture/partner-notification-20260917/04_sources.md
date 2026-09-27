@@ -13,14 +13,14 @@
 | 缺route                                          | C203；typed route_missing/manual_only、不猜entry、receiver count=0                                             | 58081594 C203 passed；typed reason、零外送             |
 | 204、HTML200、錯receipt                          | C204；partner_ack_invalid/manual_only，不能自動retry                                                           | 58081594 C204的204拒絕 passed；HTML/錯receipt C212仍缺 |
 | 同tenant兩entry、跨tenant同URL、同住戶兩App      | 僅原entry/tenant/subject收到，payload不串單                                                                    | C206/C207在58081594 passed；同住戶兩App C208仍缺       |
-| entry移轉與link撤銷                              | 舊消息不移轉；owner_changed/manual_only與recipient_revoked/terminal；零外送                                    | 缺整合案例                                             |
+| entry移轉與link撤銷                              | 舊消息不移轉；owner_changed/manual_only與recipient_revoked/terminal；零外送                                    | 8039453e C209移轉passed；link撤銷C210仍缺                |
 | endpoint停用、secret輪替重測、未配置availability | 明確configuration_blocked；測試就緒後才enable                                                                  | 缺整合案例                                             |
 | ack後DB失敗、lease/fence、兩worker競爭           | durable transaction、舊fence不可commit、dedupe且單retry owner                                                  | PG歷史21/21；缺整合fault evidence                      |
-| maxAttempts=5與expiry                            | 總共五次、最多四次retry、超expiresAt停止                                                                       | 缺整合案例                                             |
-| 舊ETA、取消後舊到場、payload confidentiality     | superseded/obsolete terminal；缺driver情報不洩漏敏感資料                                                       | 缺整合案例                                             |
+| maxAttempts=5與expiry                            | 總共五次、最多四次retry、超expiresAt停止                                                                       | 8039453e C217過期零外送passed；C216仍缺                 |
+| 舊ETA、取消後舊到場、payload confidentiality     | superseded/obsolete terminal；缺driver情報不洩漏敏感資料                                                       | 8039453e C219真wire allowlist passed；C218仍缺          |
 | admin readiness/stage/failure與手動retry         | C205；真route/auth、點control、觀察request及durable readback                                                   | C205真browser fail：日期DTO為{}，React崩潰；picker400  |
 | notification-navigation                          | fresh single-use handoff、HttpOnly session、returnTo、最新ride readback、錯entry/subject/logout/account switch | 缺hosted runtime案例                                   |
-| 一般tenant webhook C111–C115與restart            | 獨立既有gate不可由partner數量取代                                                                              | checkpoint C111/112 passed；C113–115/restart skipped   |
+| 一般tenant webhook C111–C115與restart            | 獨立既有gate不可由partner數量取代                                                                              | 8039453e既有reports passed；tenant restart verified15 |
 
 ## Acceptance Matrix
 
@@ -77,3 +77,24 @@ C113–C115/restart skipped。Artifact10938113863/hash與相鄰失敗歷史均�
 R5產品定位：repository raw PG Date → deepToSnakeCase {} → panel React error #31；
 webhook picker的tenant header被control-plane proxy blocklist移除而400；accepted_unknown raw-key probe亦成立。
 上述產品scope/child與既有transport/history修復仍需Supervisor協調，不能弱化fixture斷言、auth或gate。
+
+## 單元3 source／case 邊界
+
+程式 `8039453e93b7aa78ff6cb56b1f99b31066c73955` 的
+[run36341144117/job108681345612](https://github.com/ajoe734/drts-fleet-platform/actions/runs/36341144117/job/108681345612)
+completed **failure**，partner **10 passed／1 failed／0 skipped**：新增C209、C212、C217、C219
+與既有C201–C204/C206/C207均passed；C205仍Date→{}／React31、picker400。
+Artifact10938394046，ZIP SHA256 `6d0485e24d7e01a53038dc2df301b677186c090dc20fdf119e54e60892423ac0`。
+
+`PartnerNotificationTransport.send/resolve`、`resolveNotificationRoute`、正式worker/claim/outcome、
+正式entry API均未mock。C209只延後synthetic event的排程後以API移轉tenant；C212只污染外部
+receiver response（HTML200／錯notification、delivery、entry／缺receipt），DRTS仍須拒絕；
+C217/C219只提供synthetic expired/private-canary事件，經 `OwnedMobilityRepository.persistChanges`
+寫入與分配sequence，再驗真PG outcome和receiver raw bytes。詳情沿用原UAT artifact。
+
+同SHA unit291（PG21）、webhook34、tenant HTTP10、webhook E2E1皆passed；原tenant restart
+report verified15、C111–C115既有capability report passed。既有gates移到partner faults之前，
+不再被C205失敗跳過，未改寫原harness邏輯或擴稱真實外部驗收。Partner獨立unit step skipped、
+strict gate failed、run-status failed；本機Python64／QAunit12／scoped tsc+lint完成pass。
+R5/R8/R9產品與history blockers未解；13個必需case仍缺，三項required_acceptance **NOT MET**，
+沒有新candidate handoff／merge／live或device通過宣稱。

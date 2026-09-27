@@ -3,6 +3,8 @@
 Owner: Codex（2026-09-27 Supervisor 直接交接）；Reviewer: Codex2。
 狀態：修復中，尚無新的 review candidate。交接 checkpoint 為
 `91b1d4ac122b1373ac7beb05df902cb991b62232`，沿用既有實作與發布歷史。
+最新程式 checkpoint `8039453e93b7aa78ff6cb56b1f99b31066c73955`：hosted partner
+10 passed／1 failed（C205）／0 skipped；完整結果、限制與 scope 阻塞見「修復單元3」。
 
 ## 證據規則與撤回
 
@@ -342,3 +344,55 @@ scope 未擴充。R5 日期 DTO／tenant picker／translation、R9 transport lin
 本 checkpoint 只保存已實作待驗案例，不是通過／交審；三項 required_acceptance 仍 **NOT MET**。
 C208、C210–C211、C213–C216、C218、C220–C224 仍缺；C205完整UI受產品缺陷阻塞。
 VM 不啟任何產品／receiver／DB／browser服務。後續實際命令、SHA/run/artifact及結果續記於本節。
+
+### 單元3完成的驗證（已等待結束、讀取結果）
+
+程式 SHA `8039453e93b7aa78ff6cb56b1f99b31066c73955` 已普通 push，當時 local／remote／
+草稿 PR2179 head 一致；沒有 handoff。NAV `c2d94aaa`、UI `931eabb0`、LEGACY `d6177129`、
+PG `318b44b6` 的正式 merge commit 均為此 SHA ancestor（四次 `git merge-base --is-ancestor` exit0）。
+
+| 命令／證據 | 已讀取結果 | 限制 |
+| --- | --- | --- |
+| `python3 -m unittest tools.ci.test_tenant_uat_acceptance_workflow` | exit0，64 passed | workflow/report判斷，不是產品驗收 |
+| `pnpm exec vitest run tests/unit/system-remediation/sr-partner-notify-qa-20260917/ --reporter=default` | exit0，12 passed | 7 receiver＋5安全boundary，不開socket/server |
+| `pnpm exec tsc -p .local/sr-partner-notify-qa-20260927-unit3/tsconfig.json --noEmit`；`pnpm exec eslint tests/e2e/system-remediation/sr-partner-notify-qa-20260917/ --max-warnings=0`；`git diff 09e2277f --check` | 各exit0 | scoped編譯／lint／whitespace |
+| `pnpm exec playwright test -c playwright.system-remediation.config.ts tests/e2e/system-remediation/sr-partner-notify-qa-20260917 --list --reporter=list` | exit0，11案例可收集 | 僅collection，未執行browser或beforeAll |
+| `gh workflow run tenant-uat-acceptance.yml --ref codex/sr-partner-notify-qa-20260917 -f candidate_sha=8039453e93b7aa78ff6cb56b1f99b31066c73955` | dispatch exit0；[run36341144117/job108681345612](https://github.com/ajoe734/drts-fleet-platform/actions/runs/36341144117/job/108681345612) completed **failure** | 整體未通過，非review candidate |
+| Artifact10938394046 ZIP | SHA256 `6d0485e24d7e01a53038dc2df301b677186c090dc20fdf119e54e60892423ac0`；下載、解壓、JSON核對exit0 | 原始機器證據存本工作樹 `.local/sr-partner-notify-qa-20260927-unit3/` |
+
+同 SHA hosted 報告核對：
+
+- Partner **10 passed／1 failed／0 skipped／0 flaky**：C201–C204、C206、C207、
+  **C209、C212、C217、C219 passed**；C205 failed。舊 checkpoint 缺四案例，本輪真 worker/
+  HMAC/PG/receiver路徑已執行；沒有用synthetic報告冒充runtime。
+- C209 真正先以repository排入pending通知，再以正式API把entry移到另一tenant；
+  `owner_changed/manual_only`、零外送、frozen route保持原tenant，恢復owner後新事件成功。
+- C212 五種外部回應故障均 `partner_ack_invalid/manual_only`：HTML200、錯notification_id、
+  delivery_id、entry_slug與缺receipt。receiver已durable接受而DRTS無acknowledged receipt；
+  正式endpoint重測後舊事件仍不自動重送，fresh事件正向成功。
+- C217 過期事件 `notification_expired/terminal` 零外送；同ride新事件sequence=2成功。
+  C219 私密canary留於outbox payload、wire exact allowlist不洩漏；driver=null亦正向成功。
+- Tenant/partner units **291/291**，其中三個正式PG suites各**7/7**；webhook units **34/34**；
+  tenant HTTP **10/10**；webhook E2E **1/1**。上述JSON的execution candidate/workflow SHA皆為8039453e。
+- 原 tenant restart report **passed／verified=15**；C111–C115既有capability report **passed**，
+  API restart與HTTP/PG readback步驟均success。相鄰58081594的C205 failure使其skip，
+  本輪順序修正後已執行；此為既有harness結果，其內部fixture/provider邊界未擴稱真實外部驗收。
+- Partner獨立unit step因C205 failure而**skipped**（前面291總suite已包含QA12）；
+  strict aggregate gate **failed**，run-status=failed。13個缺實作case仍列為必需，沒有刪除gate。
+
+R5在本輪真browser再次失敗：trace內 deliveries HTTP200的日期仍 `{}`，React error #31；
+tenant webhook picker仍400 `TENANT_ID_REQUIRED`。trace位置為artifact的
+`test-results/partner-notify-artifacts/sr-partner-notify-qa-20260-d6d16-n-binding-and-enables-retry/trace.zip`。
+最小重現命令 `./apps/api/node_modules/.bin/tsx --tsconfig apps/api/tsconfig.json .local/sr-partner-notify-qa-20260927-unit3/probe-ui-date.ts`
+exit0（成功重現缺陷，**不是產品通過**）：實際serializer把Date變空object，實際React拒絕child；
+未開server。修復邊界仍為前節的delivery DTO、授權tenant picker及translation；不能修改fixture回應來掩蓋。
+
+[CI36341115170](https://github.com/ajoe734/drts-fleet-platform/actions/runs/36341115170) completed **failure**，
+job108681262871為同17個繼承commit格式，job108681322837為scope外transport `no-require-imports`。
+完整failed log已讀，存 `.local/sr-partner-notify-qa-20260927-unit3/ci-failed.log`。
+Integration36341115198 completed **success**但主要build/unit/typecheck/lint/integration均**skipped**。
+
+三項required_acceptance仍 **NOT MET**；既有gates已有本SHA局部證據，但尚無完整矩陣、
+完整NAV/UI、合格CI／獨立review／merge候選。C208、C210–C211、C213–C216、C218、C220–C224
+仍缺；R5/R9產品scope及R8 history recovery仍待Supervisor協調。B/C維持未執行的真夥伴／
+真機gate。本節後續純文件commit不冒充8039453e的runtime SHA。
