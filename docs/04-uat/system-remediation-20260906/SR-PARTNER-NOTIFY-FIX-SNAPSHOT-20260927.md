@@ -17,3 +17,8 @@
   1. `node -e 'const t=require("typescript"),c=t.readConfigFile("tsconfig.json",t.sys.readFile),p=t.parseJsonConfigFileContent(c.config,t.sys,process.cwd()),g=t.createProgram(["apps/api/tests/integration/sr-partner-notify-fix-snapshot-20260927.integration.test.ts"],{...p.options,noEmit:true,incremental:false}),d=t.getPreEmitDiagnostics(g); console.log(t.formatDiagnosticsWithColorAndContext(d,{getCurrentDirectory:()=>process.cwd(),getCanonicalFileName:f=>f,getNewLine:()=>"\n"})); process.exitCode=d.length?1:0;'` (Exited with 0)
   2. `git diff --check origin/dev...HEAD` (Exited with 0)
 - **Required Acceptance Keys Pending:** `snapshot_parameter_types_consistent`, `snapshot_supersede_replay_rollback_hosted_pg`
+
+## Parameter Ambiguity Fix (2026-09-27)
+- **Previous Rejected SHA:** `6ece53c6ee47542e9cbe5a734cafaef95ae818a1`
+- **Issue:** PostgreSQL 42P08 ambiguous parameter persisted when `$7` was cast to `text` and `timestamptz` in the same query (`($7::text)::timestamptz`).
+- **Fix:** Separated `createdAt` into two distinct parameters `$7` (for `timestamptz`) and `$8` (for `text`/`jsonb`), and `supersededAt` into `$9`, guaranteeing isolated type contexts for each parameter. This ensures 42P08 cannot occur since each parameter is cast to exactly one type.
