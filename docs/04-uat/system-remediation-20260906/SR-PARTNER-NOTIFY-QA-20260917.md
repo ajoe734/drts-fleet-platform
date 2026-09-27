@@ -3,8 +3,9 @@
 Owner: Codex（2026-09-27 Supervisor 直接交接）；Reviewer: Codex2。
 狀態：修復中，尚無新的 review candidate。交接 checkpoint 為
 `91b1d4ac122b1373ac7beb05df902cb991b62232`，沿用既有實作與發布歷史。
-最新程式 checkpoint `8c23e9a07fdd6ed858199f06a180325d356d5179`：hosted partner
-15 passed／2 failed（C205、C218）／0 skipped；完整結果、限制與新增 R10 scope 阻塞見「修復單元5」。
+最新程式 checkpoint `7f0032c512bcae1f59028f6217c5fb692c93e5dd` 的 hosted run36349279855 執行中。
+單元7已讀完的3f346cc13新增C216通過（真五次重試／API重啟）；17 passed／3 failed／0 skipped。
+NAV首次執行由Secure-cookie origin／429 setup阻塞，修正後待驗；產品與publication blockers均保留，詳「修復單元7」。
 
 ## 證據規則與撤回
 
@@ -637,3 +638,111 @@ Playwright `--list --reporter=list` 收集 **19** 案，僅 discovery；沒有�
 completed success，但主要產品 jobs skipped，非 acceptance。沒有 force/rebase/amend。
 本機證據皆在此 task worktree `.local/sr-partner-notify-qa-20260927-unit6/`；
 原 logs/ZIP 包含 disposable hosted 資料，不複製進公開文件。後續文件 checkpoint 不冒稱 runtime SHA。
+
+## Codex 修復單元 7（2026-09-27，checkpoint，未 handoff）
+
+本單元從 `196f09b0a323a050a186059eeaffe39c2a8ed80e` 接續，只改派定 QA／workflow／文件 scopes。
+C216 由真 AppModule OS process 重啟與正式 30/60/120/240 秒 backoff 驗證五次上限；
+C221–C224 改用真 referral BFF、browser、HttpOnly session 與 PG handoff ledger。
+required-cases 仍要求全部24案；四個 NAV identity 移到 `navigation-uat.spec.ts`，沒有刪除或放寬 gate。
+
+### 實作／fixture 邊界與已知失敗
+
+- `3f346cc13944407570bb22df51ffb3896ccaa8d2` 增 C216：外部 receiver 在驗簽並 durable
+  接收後固定回503；正式 outbox 是唯一 retry owner。第一次失敗後重啟完整 API，終止重試後再重啟；
+  五個 receiver request 必須同 bytes/hash/delivery ID，於每次 durable next_attempt_at 之後發生。
+  不改 DB due date／lease／policy、不自行 send；檢查終態、無 acknowledged receipt、單筆 inbox。
+- `8621e6fbad79a129d5e0a38459f7cfc69df28c88` 為恢復用 checkpoint，nested `test.use({trace:'off'})`
+  被 Playwright collection 拒絕；未 dispatch tenant UAT，非產品失敗。原 `--list | tail` pipeline
+  只回傳 tail 的exit0，診斷並未通過；後續改成直接 `--list > .local/.../collection.txt` 核對真 exit0。
+- `ae4b1d690733128bd6f0f8a14b654946622517f8` 將 NAV 獨立到允許 top-level trace option 的 spec；
+  collection24成功。hosted run36348414924 / job108702186746 已 completed failure 並讀完：
+  partner **0 passed / 5 failed / 19 not-run**。C221–C223 在 BFF consent grant 得400；
+  C224及C201 beforeAll因重複 setup 觸發 step-up429。不能把這些 setup 問題算正式導航負向通過。
+- QA原因定位：Next production session cookie 保留 Secure；Playwright1.59.1
+  `Cookie.matches` → `network.isLocalHostname` 僅允許 localhost／*.localhost 的HTTP例外。
+  實際非serving probe：HTTP127.0.0.1=false、HTTPS127.0.0.1=true、HTTPlocalhost=true。
+  `a1395e634ecfab61de89ac4e73637de6c98d9528` 將 hosted referral origin/entry host/allowlist
+  一致改 localhost:3002；step-up setup 僅遇429時依 Retry-After（最多60秒）等待一次，再要求201。
+  不關閉 throttle、不重試成功mutation、不宣稱rate-limit產品驗收。
+- C221 真瀏覽器 GET handoff → consent → 原行程頁，檢查 HttpOnly、replay、PG120s。
+  再點實際取消按鈕，核對POST/PG，舊handoff頁須讀到已更新狀態，新resolve須導向cancelled。
+- C222 逐項拒絕 wrong entry/subject/key/tenant resolve與三種consume，保留原cookie、不消耗他人handoff；
+  真history/receipt HTTP read 必須拒絕他人行程，不能以假CONFIRMED回應當成功。
+- C223 的外部邊界明列為「夥伴 logout 清掉 WebView cookie jar」；之後真BFF拒絕舊consumed artifact，
+  fresh其他subject登入後三種入口拒絕stale前subject。這不是原生App logout整合、8h expiry等待或
+  server-side signed-cookie revocation驗收，不關閉SR-LIVE-PUSH真機gate。
+- C224 每個 GET/JSON/form consumer 的正向與跨入口 replay，另驗受保護API consume409，
+  external returnTo拒絕／same-origin保留，實際等待120秒到期。未加長或繞過正式TTL。
+- NAV trace刻意關閉，避免handoff/cookie credential進上傳附件；保留真browser截圖、PG ledger、
+  遮罩狀態證據。ae4b1d69 ZIP已查無NAV trace.zip；C205仍保留既有失敗trace。
+
+### R12：history BFF 對不存在於授權清單的行程回造成功
+
+來源：`apps/referral-embed-web/app/api/referral/history/[orderId]/route.ts:11–15` 的
+`GET` 在 `getReferralTripHistoryServer()` 已過濾的 items 裡找不到指定 orderId，仍回
+`{ok:true,data:{orderId,status:'CONFIRMED'}}`／HTTP200。其正式上游為
+`lib/embed-booking-api.ts:getReferralTripHistoryServer` →
+`OwnedMobilityController.listReferralPassengerHistory` →
+`OwnedMobilityService.listReferralPassengerHistory`（核對entry/subject/tenant/partner/program）。
+BFF fallback 會抹掉上游的「查無授權行程」；不以此反例宣称洩漏真實他人行程資料。
+
+非serving最小反例：
+`node .local/sr-partner-notify-qa-20260927-unit7/probe-history.cjs`，exit0，Node22.23.2。
+以 `git show` 載入196f09b0與ae4b1d69的原GET，TypeScript僅transpile，NextResponse用實際Next套件；
+只替代外部授權history回傳 `owned-order/cancelled`。兩SHA皆 own→200/cancelled，
+foreign→200/CONFIRMED。測到的是原handler控制流程；不 mock 此查找/fallback。
+原probe與JSONL在本worktree `.local/sr-partner-notify-qa-20260927-unit7/`。
+
+請 Supervisor 以 agy owner/Codex reviewer 排最窄 child/scope：上述BFF route及相應NAV負向unit；
+確認 clients 對deny envelope的處理，保留合法own read。必要回歸：wrong subject、同tenant兩entry、
+跨tenant、未知order、無session、正常own歷史；不以fake status/fallback掩飾失敗，不由QA改產品。
+
+### 本機檢查與既有阻塞
+
+Node22.23.2、pnpm10.33.0、Python3.12.3。
+`pnpm exec tsc --noEmit -p .local/sr-partner-notify-qa-20260927-unit7/tsconfig.json`、
+QA E2E scoped ESLint與 `git diff --check` exit0；`python3 -m unittest
+ tools.ci.test_tenant_uat_acceptance_workflow` **64 passed**；QA Vitest **12 passed**。
+Playwright `--list` **24** 案，只代表collection，沒有本機runtime／DB／browser。
+四dependency mergeSHA均是ancestor；本輪新commits trailers合規，普通push、未force/rebase/amend。
+
+既有R5日期DTO/picker/translation、R10 snapshot SQL42P08、R11 entry持久化race，及
+R9 transport/security-tests scope、R8 preserving-refs history recovery仍需Supervisor排產品修復。
+這些finding保留原單元定位，不以新增案例替代修復。
+
+### 單元7已讀完的 hosted checkpoints
+
+| 程式 SHA | run／job | partner 結果 | artifact／SHA256 |
+|---|---|---|---|
+| `3f346cc13944407570bb22df51ffb3896ccaa8d2` | [36347973557/108700947475](https://github.com/ajoe734/drts-fleet-platform/actions/runs/36347973557/job/108700947475) completed failure | **17 pass / 3 fail (C205/C218/C217) / 0 skip**；C216 **457.856秒 passed**；當時NAV四案尚未包含 | `10941279820` / `ba4e1a1e7d4b0715f9105ed1a5cc40385cc83f2ff63ff34810b50700dc725e84` |
+| `ae4b1d690733128bd6f0f8a14b654946622517f8` | [36348414924/108702186746](https://github.com/ajoe734/drts-fleet-platform/actions/runs/36348414924/job/108702186746) completed failure | **0 pass / 5 fail / 19 not-run**；NAV consent400、後续setup429 | `10941537383` / `3bc3738d41c78c28672f50d8fb5328744fa6cc6a548e21ec7094f3e86c1db67a` |
+| `a1395e634ecfab61de89ac4e73637de6c98d9528` | [36348975121](https://github.com/ajoe734/drts-fleet-platform/actions/runs/36348975121) completed cancelled | 發現C216污染下一fixture後取消，實際停於webhook unit step；API/browser未啟動，run-status **not_run** | `10941985632` / `8a346480638a1123b79c44b6e297a4592f6291f9d230602b9d39c006e20d5f37` |
+
+3f346cc13、ae4b1d69各自同SHA的tenant291（PG21）、webhook34、tenantHTTP10、webhookE2E1，
+及C111–C115/restart verified15均passed；dedicated partner-unit step skipped，strict gate failed。
+Cancelled a139僅已完成tenant291，不能借前述runtime綠燈。所有ZIP與report execution SHA均讀回核對。
+
+3f C216附件 `five-attempts-api-restart`：API PID15120→18711→21485；HTTP503五次時間為
+20:36:13.434 / 20:36:44.118 / 20:37:44.166 / 20:39:44.319 / 20:43:44.635 UTC，均在正式due時間後，
+同hash `aa829589b2b4130337bd316366b5b58823093cd1166e3771de818b285f43e4ef`。
+前四次automatic，第五次terminal；兩次重啟保留outbox/delivery identity，沒有第六次外送。
+C217後續失敗的原因是共享endpoint按治理規則停用；7f0032c5透過正式endpoint/binding重測恢復fixture，
+再確認終態outbox與五次receiver count不變。此修正的完整同SHA runtime仍在run36349279855等待結果。
+
+### 單元7 finding／required_acceptance disposition（待最後run）
+
+| Finding／驗收 | source／修改 | 舊→新／證據 | 尚未满足 |
+|---|---|---|---|
+| R1 C216 | `PartnerNotificationWorker`、claim/context/outcome、tenant單attempt façade；QA restart helper | 196f缺案→3f真五次/重啟pass；7f修endpoint cleanup待重驗 | C218產品SQL、完整最終SHA仍未通過 |
+| R5 C221–C224 | `NavigationFixture`、`navigation-uat.spec.ts`；真BFF/session/PG、C221取消control | 196f缺案→ae已執行但setup阻塞→7f localhost/throttle fixture待驗 | 完整NAV、既有C205產品DTO/picker/translation |
+| R12 fabricated history | 原BFF `GET`、正式過濾history，上述最小probe | 196f/ae actual-handler positive own + foreign假success同現 | Supervisor agy child/scope；尚無可通過C222的產品修復 |
+| R8/R9/R10/R11 | 原單元的精確定位、caller與修復邊界保留 | 新commits合規；CI仍17歷史trailer及transport lint；R10 hosted再現 | preserving-refs history recovery、產品修復scope/child |
+| `integrated_controlled_receiver_negative_matrix_same_sha` | SD14全24案／manifest／原gates | **NOT MET** | C218產品bug與最終整合run |
+| `navigation_and_admin_ui_hosted_real_runtime_evidence` | NAV/管理UI真runtime | **NOT MET** | C205/R5、C222/R12、NAV新run未結束 |
+| `existing_webhook_tenant_gates_preserved_and_live_not_claimed` | 原獨立tenant/webhook/restart gate與A/B/C邊界 | **NOT MET**；上述既有gate有逐SHA正向證據但完整run未過 | strict gate與未解R9；A未放行，B/C仍SR-LIVE-PUSH-001 |
+
+CI36347968917／36348413247／36348971044／36349265466均completed failure，讀過log，
+同17歷史commits與scope外transport no-require-imports。中途8621的CI36348320920 completed cancelled。
+Integration36347968868／36348320921／36348413295／36348971038／36349265476均completed success，
+主要product jobs skipped，不能稱產品回歸通過。尚未handoff、review/merge或記錄三項acceptance。

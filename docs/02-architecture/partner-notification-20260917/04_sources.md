@@ -15,17 +15,17 @@
 | 同tenant兩entry、跨tenant同URL、同住戶兩App      | 僅原entry/tenant/subject收到，payload不串單                                                                    | 0638617e C206/C207/C208 passed；C208含resolve隔離       |
 | entry移轉與link撤銷                              | 舊消息不移轉；owner_changed/manual_only與recipient_revoked/terminal；零外送                                    | 0638617e C209/C210 passed；C210注入撤銷狀態，非撤銷API驗收 |
 | endpoint停用、secret輪替重測、未配置availability | 明確configuration_blocked；測試就緒後才enable                                                                  | 8c23e9a0 C211/C220 passed；full AppModule route readiness false→true |
-| ack後DB失敗、lease/fence、兩worker競爭           | durable transaction、舊fence不可commit、dedupe且單retry owner                                                  | 6d6fdb77 C214/C215 passed；真rollback／自然lease／兩process，C216 restart仍缺 |
-| maxAttempts=5與expiry                            | 總共五次、最多四次retry、超expiresAt停止                                                                       | 8039453e C217過期零外送passed；C216仍缺                 |
+| ack後DB失敗、lease/fence、兩worker競爭           | durable transaction、舊fence不可commit、dedupe且單retry owner                                                  | 3f346cc13 C214/C215/C216 passed；真rollback／自然lease／兩process／API restart |
+| maxAttempts=5與expiry                            | 總共五次、最多四次retry、超expiresAt停止                                                                       | 3f346cc13 C216五次上限passed；C217共享endpoint停用的setup已修，7f待驗                 |
 | 舊ETA、取消後舊到場、payload confidentiality     | superseded/obsolete terminal；缺driver情報不洩漏敏感資料                                                       | 8c23e9a0 C219 passed；C218正式repository SQL42P08，後續未驗 |
 | admin readiness/stage/failure與手動retry         | C205；真route/auth、點control、觀察request及durable readback                                                   | C205真browser fail：日期DTO為{}，React崩潰；picker400  |
-| notification-navigation                          | fresh single-use handoff、HttpOnly session、returnTo、最新ride readback、錯entry/subject/logout/account switch | 缺hosted runtime案例                                   |
+| notification-navigation                          | fresh single-use handoff、HttpOnly session、returnTo、最新ride readback、錯entry/subject/logout/account switch | C221–C224已實作；ae4b1d69 setup失敗，7f0032c5 hosted待驗                                   |
 | 一般tenant webhook C111–C115與restart            | 獨立既有gate不可由partner數量取代                                                                              | 8039453e既有reports passed；tenant restart verified15 |
 
 ## Acceptance Matrix
 
 - `integrated_controlled_receiver_negative_matrix_same_sha`：**NOT MET**（R1/R2/R6/R9/R10/R11）。
-- `navigation_and_admin_ui_hosted_real_runtime_evidence`：**NOT MET**（R5）。
+- `navigation_and_admin_ui_hosted_real_runtime_evidence`：**NOT MET**（R5/R12）。
 - `existing_webhook_tenant_gates_preserved_and_live_not_claimed`：**NOT MET**（R2/R3/R9）。
 
 A：DRTS受控receiver/PG/browser全套同SHA通過才是 `controlled_receiver_verified`；目前未達。
@@ -187,3 +187,26 @@ C205仍React31／日期{}／picker400；C218仍正式snapshot SQL42P08，後續�
 C216、C221–C224共 **5** 案未實作；R5/R8/R9/R10/R11保留，三項acceptance **NOT MET**。
 本機tsc/lint/diff0、QA12／Python64、兩新commit trailers passed；一般CI仍17 inherited trailers
 及scope外transport lint，integration主要jobs skipped；原artifact保留所有逐SHA失敗紀錄。
+
+
+## 單元7 source／case 邊界
+
+C216使用正式 `PartnerNotificationWorker`、`claimPartnerNotification`／context／outcome transaction，
+`TenantPartnerService.dispatchNotificationAttemptByWebhookId` 一次遠端送出；QA receiver僅外部固定503。
+3f346cc13 [run36347973557](https://github.com/ajoe734/drts-fleet-platform/actions/runs/36347973557)
+**C216 passed457.856秒**：自然30/60/120/240秒退避、共五次、兩次真API重啟、同wire/hash/ID，
+terminal後無第六次；沒有改DB時間或手動send。該run partner17pass/3fail，仍不是完整A層。
+
+NAV四案改放 `navigation-uat.spec.ts`，manifest保留全部24案。
+真resolve→fresh120s handoff→GET/JSON/form BFF→HttpOnly session／正式PG replay ledger；
+C221含實際取消按鈕與最新行程狀態讀回，C222含wrong scope及history/receipt read，
+C223明列外部partner logout清cookie邊界（不是原生整合或server cookie revocation），
+C224含三種consumer互相replay與direct API consume、returnTo與自然TTL。
+NAV trace關閉以免上傳handoff/cookie，保留實際截圖與遮罩證據。
+ae4b1d69首次hosted因Secure-cookie origin及setup429失敗；7f0032c5修為localhost並尊重throttle、
+恢復C216耗盡後endpoint readiness，完整run36349279855 **執行中**，不能預填pass。
+
+R12 source：`app/api/referral/history/[orderId]/route.ts:GET` 對上游授權history未包含的ID
+回造200/CONFIRMED。原handler+實際NextResponse的非serving probe在196f與ae4b均重現；
+只stub外部授權history，不mock GET，不宣稱真實他人資料洩漏。修復scope/必要回歸與各SHA/run/
+artifact/hash、全部未解findings／三項acceptance **NOT MET** 逐項沿用原UAT「修復單元7」。
