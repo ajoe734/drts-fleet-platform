@@ -353,6 +353,21 @@ export class PartnerFixture {
         },
         tenantId,
       );
+      // Governance creation currently returns before its async persistence.
+      // Fixture prerequisites must be durable before dependent FK writes;
+      // this readback is setup, not acceptance of the create API's durability.
+      await expect
+        .poll(
+          async () =>
+            (
+              await this.db.query(
+                "SELECT webhook_id, tenant_id FROM admin.phase1_tenant_webhook_endpoints WHERE webhook_id=$1",
+                [webhook.webhookId],
+              )
+            ).rows,
+          { timeout: 10_000 },
+        )
+        .toEqual([{ webhook_id: webhook.webhookId, tenant_id: tenantId }]);
       const tested = await this.call<{ httpStatus: number }>(
         "tenant/webhooks/test",
         token,
@@ -385,6 +400,24 @@ export class PartnerFixture {
           body,
         );
         expect(entry.tenantId).toBe(tenantId);
+        await expect
+          .poll(
+            async () =>
+              (
+                await this.db.query(
+                  "SELECT entry_slug, tenant_id, partner_id FROM admin.phase1_partner_channel_entries WHERE entry_slug=$1",
+                  [slug],
+                )
+              ).rows,
+            { timeout: 10_000 },
+          )
+          .toEqual([
+            {
+              entry_slug: slug,
+              tenant_id: tenantId,
+              partner_id: entry.partnerId,
+            },
+          ]);
         const partnerUserRef = "qa-resident-shared-ref";
         entries.set(slug, new Set([partnerUserRef]));
         const issued = await this.call<PartnerIngressCredentialIssued>(
