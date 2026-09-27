@@ -97,6 +97,7 @@ class TenantUatAcceptanceWorkflowStructureTests(unittest.TestCase):
             push_block,
         )
         self.assertIn("gemini2/sr-c115-harness-20260913", push_block)
+        self.assertIn("gemini/sr-partner-notify-qa-20260917", push_block)
         self.assertIn(
             "tests/e2e/system-remediation/sr-qa-webhook-001/**", push_block
         )
@@ -107,6 +108,10 @@ class TenantUatAcceptanceWorkflowStructureTests(unittest.TestCase):
             "docs/04-uat/system-remediation-20260906/SR-QA-WEBHOOK-001.md",
             push_block,
         )
+        self.assertIn("tests/e2e/system-remediation/sr-partner-notify-qa-20260917/**", push_block)
+        self.assertIn("tests/unit/system-remediation/sr-partner-notify-qa-20260917/**", push_block)
+        self.assertIn("docs/04-uat/system-remediation-20260906/SR-PARTNER-NOTIFY-QA-20260917.md", push_block)
+        self.assertIn("docs/02-architecture/partner-notification-20260917/04_sources.md", push_block)
         self.assertIn(
             "tests/e2e/system-remediation/sr-partner-notify-qa-20260917/**", push_block
         )
@@ -193,6 +198,11 @@ class TenantUatAcceptanceWorkflowStructureTests(unittest.TestCase):
         )
         self.assertIn("playwright.system-remediation.config.ts", self.text)
 
+
+    def test_runs_partner_notify_specs_and_unit_regression_suite(self) -> None:
+        self.assertIn("tests/e2e/system-remediation/sr-partner-notify-qa-20260917", self.text)
+        self.assertIn("tests/unit/system-remediation/sr-partner-notify-qa-20260917/", self.text)
+
     def test_stops_the_background_server_unconditionally(self) -> None:
         stop_block = self.text.split("Stop background API server", 1)[1][:400]
         self.assertIn("if: always()", stop_block)
@@ -239,6 +249,8 @@ class TenantUatAcceptanceWorkflowStructureTests(unittest.TestCase):
         self.assertIn("steps.harness_unit.outcome", status_block)
         self.assertIn("steps.webhook_e2e.outcome", status_block)
         self.assertIn("steps.webhook_unit.outcome", status_block)
+        self.assertIn("steps.partner_notify_e2e.outcome", status_block)
+        self.assertIn("steps.partner_notify_unit.outcome", status_block)
         self.assertIn("steps.c113_c115_acceptance.outcome", status_block)
         self.assertIn("steps.gate.outcome", status_block)
         self.assertIn("steps.seed.outcome", status_block)
@@ -317,6 +329,8 @@ class RunStatusScriptBehaviorTests(unittest.TestCase):
         harness_unit: str = "success",
         webhook_e2e: str = "success",
         webhook_unit: str = "success",
+        partner_notify_e2e: str = "success",
+        partner_notify_unit: str = "success",
         c113_c115_acceptance: str = "success",
         gate: str = "success",
         restart_api: str = "success",
@@ -336,6 +350,8 @@ class RunStatusScriptBehaviorTests(unittest.TestCase):
                 "HARNESS_UNIT_OUTCOME": harness_unit,
                 "WEBHOOK_E2E_OUTCOME": webhook_e2e,
                 "WEBHOOK_UNIT_OUTCOME": webhook_unit,
+                "PARTNER_NOTIFY_E2E_OUTCOME": partner_notify_e2e,
+                "PARTNER_NOTIFY_UNIT_OUTCOME": partner_notify_unit,
                 "C113_C115_ACCEPTANCE_OUTCOME": c113_c115_acceptance,
                 "GATE_OUTCOME": gate,
                 "RESTART_API_OUTCOME": restart_api,
@@ -377,6 +393,15 @@ class RunStatusScriptBehaviorTests(unittest.TestCase):
 
     def test_failed_webhook_e2e_is_not_passed(self) -> None:
         status = self._run(webhook_e2e="failure")
+        self.assertEqual(status["status"], "failed")
+
+
+    def test_failed_partner_notify_e2e_is_not_passed(self) -> None:
+        status = self._run(partner_notify_e2e="failure")
+        self.assertEqual(status["status"], "failed")
+
+    def test_failed_partner_notify_unit_is_not_passed(self) -> None:
+        status = self._run(partner_notify_unit="failure")
         self.assertEqual(status["status"], "failed")
 
     def test_failed_c113_c115_acceptance_is_not_passed(self) -> None:
@@ -432,6 +457,9 @@ class FullMatrixGateBehaviorTests(unittest.TestCase):
         missing_restart: bool = False,
         skipped: bool = False,
         missing_webhook_unit: bool = False,
+        missing_partner_notify_unit: bool = False,
+        partner_notify_unit_success: bool = True,
+        partner_notify_unit_total: int = 1,
         webhook_unit_success: bool = True,
         webhook_unit_pending: int = 0,
         webhook_unit_total: int = 34,
@@ -508,6 +536,17 @@ class FullMatrixGateBehaviorTests(unittest.TestCase):
                         "success": webhook_unit_success and webhook_unit_pending == 0,
                     })
                 )
+
+            if not missing_partner_notify_unit:
+                (artifact / "partner-notify-unit-report.json").write_text(
+                    json.dumps({
+                        "numTotalTests": partner_notify_unit_total,
+                        "numPassedTests": partner_notify_unit_total if partner_notify_unit_success else 0,
+                        "numPendingTests": 0,
+                        "success": partner_notify_unit_success,
+                    })
+                )
+
             if not missing_capability_report:
                 caps = {
                     "C111": {"status": "passed", "verified": ["ok"]},
@@ -559,6 +598,13 @@ class FullMatrixGateBehaviorTests(unittest.TestCase):
 
     def test_failed_webhook_unit_fails(self):
         self.assertNotEqual(self.run_gate(webhook_unit_success=False).returncode, 0)
+
+
+    def test_missing_partner_notify_unit_fails(self):
+        self.assertNotEqual(self.run_gate(missing_partner_notify_unit=True).returncode, 0)
+
+    def test_failed_partner_notify_unit_fails(self):
+        self.assertNotEqual(self.run_gate(partner_notify_unit_success=False).returncode, 0)
 
     def test_missing_capability_report_fails(self):
         self.assertNotEqual(self.run_gate(missing_capability_report=True).returncode, 0)
@@ -646,6 +692,14 @@ class FullMatrixGateBehaviorTests(unittest.TestCase):
                 json.dumps({
                     "numTotalTests": 34,
                     "numPassedTests": 34,
+                    "numPendingTests": 0,
+                    "success": True,
+                })
+            )
+            (artifact / "partner-notify-unit-report.json").write_text(
+                json.dumps({
+                    "numTotalTests": 1,
+                    "numPassedTests": 1,
                     "numPendingTests": 0,
                     "success": True,
                 })
