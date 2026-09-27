@@ -161,7 +161,10 @@ test.describe("SR-PARTNER-NOTIFY-QA-20260917 E2E Cases", () => {
     const testRes = await apiCall(tenantA, tokenPlatform, "POST", `api/platform-admin/partner-entries/${entrySlug}/notification-binding/test`);
     expect(testRes.status()).toBe(201);
     
-    await new Promise(r => setTimeout(r, 1000));
+    for (let i = 0; i < 20; i++) {
+      if (requests.length > 0) break;
+      await new Promise(r => setTimeout(r, 250));
+    }
     expect(requests.length).toBe(1);
     expect(requests[0]!.body.data.partner_entry_slug).toBe(entrySlug);
   });
