@@ -12,6 +12,7 @@ import {
 
 import { CanvasIcon } from "./canvas-primitives";
 import { buildCanvasTheme, type CanvasTheme } from "./canvas-tokens";
+import { evaluateManualApply } from "./address-map-app-support";
 import {
   addressToGeoPoint,
   AddressProviderUnavailableError,
@@ -21,8 +22,6 @@ import {
   deriveProviderState,
   derivePickerStatus,
   isDispatchReadyAddress,
-  isValidLatitude,
-  isValidLongitude,
   manualCoordinateToAddressPayload,
   resolveAddressPickerLabels,
   serviceabilityTone,
@@ -129,6 +128,8 @@ export interface AddressMapPreviewSurfaceProps {
   ariaLabel?: string;
   nudgeHint?: string;
   onPinMove?: (id: string, point: GeoPoint) => void;
+  onPointSelect?: (point: GeoPoint) => void;
+  overlay?: ReactNode;
 }
 
 /**
@@ -146,6 +147,8 @@ export function AddressMapPreviewSurface({
   ariaLabel = "Location preview map",
   nudgeHint,
   onPinMove,
+  onPointSelect,
+  overlay,
 }: AddressMapPreviewSurfaceProps) {
   const theme = themeProp ?? DEFAULT_THEME;
   const svgRef = useRef<SVGSVGElement | null>(null);
@@ -180,6 +183,22 @@ export function AddressMapPreviewSurface({
       }
     },
     [dragId, onPinMove, pointFromEvent],
+  );
+
+  const handlePointerUp = useCallback(
+    (event: React.PointerEvent<SVGSVGElement>) => {
+      if (dragId) {
+        setDragId(null);
+        return;
+      }
+      if (onPointSelect) {
+        const next = pointFromEvent(event.clientX, event.clientY);
+        if (next) {
+          onPointSelect(next);
+        }
+      }
+    },
+    [dragId, onPointSelect, pointFromEvent],
   );
 
   const endDrag = useCallback(() => setDragId(null), []);
@@ -226,7 +245,7 @@ export function AddressMapPreviewSurface({
           height: "100%",
         }}
         onPointerMove={handlePointerMove}
-        onPointerUp={endDrag}
+        onPointerUp={handlePointerUp}
         onPointerLeave={endDrag}
       >
         {/* grid */}
@@ -333,6 +352,7 @@ export function AddressMapPreviewSurface({
           {caption}
         </div>
       ) : null}
+      {overlay}
     </div>
   );
 }
@@ -665,8 +685,10 @@ export function AddressMapPicker<TServiceProduct extends string = string>(
     };
   }, [provider, providerHealth]);
 
+  const interactionIdRef = useRef<number>(0);
   const applySelection = useCallback(
     (address: AddressPayload | null, reason: string) => {
+      interactionIdRef.current += 1;
       setSelection(address ? { address, manualReason: reason } : null);
     },
     [],
@@ -766,40 +788,26 @@ export function AddressMapPicker<TServiceProduct extends string = string>(
   );
 
   const handleManualApply = useCallback(() => {
-    const lat = Number.parseFloat(manualLat);
-    const lng = Number.parseFloat(manualLng);
-    if (!isValidLatitude(lat) || !isValidLongitude(lng)) {
-      setManualError(labels.manualInvalid);
-      return;
-    }
-    if (requireManualReason && manualReason.trim().length === 0) {
-      setManualError(labels.manualReasonLabel);
-      return;
-    }
-    const reason = manualReason.trim() || labels.pinAdjustHint;
-    const address = manualCoordinateToAddressPayload({
-      lat,
-      lng,
-      addressText:
-        query.trim() ||
-        selectedAddress?.address ||
-        `Manual location (${roundCoord(lat)}, ${roundCoord(lng)})`,
-      baseAddress: selectedAddress,
-      addressName: selectedAddress?.addressName ?? null,
+    const result = evaluateManualApply(
+      manualLat,
+      manualLng,
+      manualReason,
+      requireManualReason,
+      labels,
+      query,
+      selectedAddress,
+      actorId,
       surface,
-      manualOverrideReason: reason,
-      pinnedByActorId: actorId,
-      ...(selectedAddress?.geocodeConfidence
-        ? { geocodeConfidence: selectedAddress.geocodeConfidence }
-        : {}),
-    });
-    if (!address) {
-      setManualError(labels.manualInvalid);
+    );
+    if (result.error) {
+      setManualError(result.error);
       return;
     }
-    setManualError(null);
-    applySelection(address, reason);
-    runServiceability(address);
+    if (result.address) {
+      setManualError(null);
+      applySelection(result.address, result.reason || "");
+      runServiceability(result.address);
+    }
   }, [
     actorId,
     applySelection,
@@ -889,6 +897,7 @@ export function AddressMapPicker<TServiceProduct extends string = string>(
 
       // Keep the exact map click immediately; reverse geocoding only enriches it.
       applyPoint(null);
+      const currentInteraction = interactionIdRef.current;
       if (!provider.reverse) {
         return;
       }
@@ -899,6 +908,9 @@ export function AddressMapPicker<TServiceProduct extends string = string>(
           ...(locale ? { locale } : {}),
           requestedByActorId: actorId,
         });
+        if (interactionIdRef.current !== currentInteraction) {
+          return;
+        }
         applyPoint(reverse.address);
       } catch {
         // A provider outage must not erase a valid, policy-evaluated map pin.
@@ -1149,12 +1161,27 @@ export function AddressMapPicker<TServiceProduct extends string = string>(
                         {candidate.address}
                       </span>
                     </span>
-                    <TonePill
-                      theme={theme}
-                      tone={confidenceTone(candidate.confidence)}
+                    <span
+                      style={{
+                        display: "flex",
+                        flexDirection: "column",
+                        gap: 4,
+                        alignItems: "flex-end",
+                        flexShrink: 0,
+                      }}
                     >
-                      {candidate.confidence}
-                    </TonePill>
+                      {candidate.provider && (
+                        <span style={{ fontSize: 10, color: theme.textMuted }}>
+                          {candidate.provider}
+                        </span>
+                      )}
+                      <TonePill
+                        theme={theme}
+                        tone={confidenceTone(candidate.confidence)}
+                      >
+                        {candidate.confidence}
+                      </TonePill>
+                    </span>
                   </button>
                 </li>
               );
@@ -1204,6 +1231,7 @@ export function AddressMapPicker<TServiceProduct extends string = string>(
               : undefined
           }
           onPinMove={handlePinMove}
+          onPointSelect={handleMapPointSelect}
           pins={
             pinPoint
               ? [
@@ -1216,6 +1244,25 @@ export function AddressMapPicker<TServiceProduct extends string = string>(
                   },
                 ]
               : []
+          }
+          overlay={
+            status === "provider_unavailable" ? (
+              <div
+                style={{
+                  position: "absolute",
+                  inset: 0,
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  background: "rgba(255,255,255,.55)",
+                  fontSize: 12,
+                  fontWeight: 700,
+                  color: theme.danger,
+                }}
+              >
+                {labels.providerOutageTitle}
+              </div>
+            ) : null
           }
         />
       )}
