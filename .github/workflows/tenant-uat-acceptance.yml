@@ -178,6 +178,27 @@ jobs:
           ./apps/api/node_modules/.bin/tsx tests/e2e/system-remediation/sr-qa-tenant-001/appmodule-acceptance-seed.ts \
             2>&1 | awk '{ print; if ($0 !~ /^::add-mask::/) print >> ".artifacts/tenant-uat-acceptance/execution-log.txt"; }'
 
+      - name: Run tenant service-level regression suite
+        id: harness_unit
+        run: |
+          set -o pipefail
+          pnpm exec vitest run \
+            tests/unit/system-remediation/sr-qa-tenant-001/ \
+            tests/unit/system-remediation/sr-partner-notify-*/ \
+            --reporter=default --reporter=json \
+            --outputFile.json=.artifacts/tenant-uat-acceptance/unit-test-report.json \
+            2>&1 | tee -a .artifacts/tenant-uat-acceptance/execution-log.txt
+
+      - name: Run webhook unit regression suite (C111-C115 34 tests)
+        id: webhook_unit
+        run: |
+          set -o pipefail
+          pnpm exec vitest run \
+            tests/unit/system-remediation/sr-qa-webhook-001/ \
+            --reporter=default --reporter=json \
+            --outputFile.json=.artifacts/tenant-uat-acceptance/webhook-unit-report.json \
+            2>&1 | tee -a .artifacts/tenant-uat-acceptance/execution-log.txt
+
       - name: Start the real API server
         id: start_api
         env:
@@ -233,17 +254,6 @@ jobs:
           mkdir -p .artifacts/tenant-uat-acceptance
           cp test-results/system-remediation-report.json .artifacts/tenant-uat-acceptance/system-remediation-report.json || true
 
-      - name: Run tenant service-level regression suite
-        id: harness_unit
-        run: |
-          set -o pipefail
-          pnpm exec vitest run \
-            tests/unit/system-remediation/sr-qa-tenant-001/ \
-            tests/unit/system-remediation/sr-partner-notify-*/ \
-            --reporter=default --reporter=json \
-            --outputFile.json=.artifacts/tenant-uat-acceptance/unit-test-report.json \
-            2>&1 | tee -a .artifacts/tenant-uat-acceptance/execution-log.txt
-
       - name: Run webhook E2E acceptance specs (C111-C112 real service & HTTP)
         id: webhook_e2e
         env:
@@ -259,16 +269,6 @@ jobs:
           if [ ! -f test-results/system-remediation-report.json ] && [ -f .artifacts/tenant-uat-acceptance/system-remediation-report.json ]; then
             cp .artifacts/tenant-uat-acceptance/system-remediation-report.json test-results/system-remediation-report.json
           fi
-
-      - name: Run webhook unit regression suite (C111-C115 34 tests)
-        id: webhook_unit
-        run: |
-          set -o pipefail
-          pnpm exec vitest run \
-            tests/unit/system-remediation/sr-qa-webhook-001/ \
-            --reporter=default --reporter=json \
-            --outputFile.json=.artifacts/tenant-uat-acceptance/webhook-unit-report.json \
-            2>&1 | tee -a .artifacts/tenant-uat-acceptance/execution-log.txt
 
       - name: Run C113-C115 pre-restart hosted acceptance (ledger audit, geo provider, C115 seed)
         id: c113_c115_acceptance

@@ -41,3 +41,6 @@
 Fixed a TS2532 error (`Object is possibly 'undefined'`) in `partner-notification-uat.spec.ts` caused by `requests[0].body` and fixed the `403 Forbidden` API error by fetching the step-up proof (`/api/identity/step-up-proofs`) for POST/PUT requests directly within the `apiCall` wrapper, bypassing the hardcoded `requiresTenantStepUp` whitelist which did not include `tenant/webhooks`. 
 The CI `Tenant UAT Acceptance` is now unblocked from E2E test failures.
 Note: Old commits by the previous agent on this PR have invalid trailers. Because force pushing is forbidden by the branch strategy, the `CI/Commit trailers (pull_request)` check will remain failing. This will require manual bypass or history recovery.
+
+### QA-R6: Unit Test Flakiness / Background Worker Conflict Fix
+Moved the execution of `harness_unit` (`sr-partner-notify-*/`) and `webhook_unit` to run *before* starting the real API server in `.github/workflows/tenant-uat-acceptance.yml`. This prevents the real API server's background notification delivery workers from polling and modifying the DB records concurrently with the unit tests, which was causing assertions like `expect(rows[0].attempt_count).toBe(2)` to fail intermittently with `expected 3 to be 2`.
