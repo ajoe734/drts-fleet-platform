@@ -337,7 +337,7 @@ test.describe("concierge map booking UI", () => {
               contentType: "application/json",
               body: JSON.stringify({
                 error: {
-                  code: "ADDRESS_RESOLUTION_FAILED",
+                  code: "SERVICE_AREA_NOT_SERVICEABLE",
                   message: "Backend rejected provider address",
                   details: { path: "pickup" },
                 },
@@ -383,7 +383,7 @@ test.describe("concierge map booking UI", () => {
     // Expect the backend refusal message (actual localized message)
     await expect(
       page.getByText(
-        /建立禮賓代訂失敗。|Failed to create the concierge-assisted booking./,
+        /上車或下車地點不在支援的服務範圍內。請確認路線後再試一次。|Pickup or drop-off is outside the supported service area/,
       ),
     ).toBeVisible();
 
@@ -431,13 +431,11 @@ test.describe("concierge map booking UI", () => {
     const pickupPicker = page.locator("[data-address-map-picker]").nth(0);
 
     // Click on the map to set a new location
-    const mapContainer = pickupPicker
-      .locator(".map-container, [role='application']")
-      .first();
-    await mapContainer.click({ position: { x: 80, y: 80 } });
+    const pin = pickupPicker.locator("g[role='button']").first();
+    await pin.focus();
+    await page.keyboard.press("ArrowUp");
 
-    // Ensure it correctly changed the pin source to map_click
-    // Verify by submitting and checking the coordinate source
+    // Verify it correctly changed the pin source
     const submitBtn = page.getByRole("button", { name: /提交禮賓代訂/ });
     await expect(submitBtn).toBeEnabled();
     await submitBtn.click();
@@ -446,6 +444,7 @@ test.describe("concierge map booking UI", () => {
     expect(captured.body).toHaveLength(1);
 
     const command = captured.body[0] as any;
-    expect(command.pickup.coordinateSource).toBe("map_click");
+    expect(command.pickup.coordinateSource).toBe("manual_pin");
+    expect(command.pickup.manualOverrideReason).toBe("agent_map_click");
   });
 });

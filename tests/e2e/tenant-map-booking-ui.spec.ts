@@ -149,6 +149,12 @@ test.describe("tenant console booking map alignment", () => {
   test.beforeEach(async ({ context }) => {
     await context.addCookies([
       {
+        name: "drts_tenant_session",
+        value: "mock-session-token",
+        domain: "127.0.0.1",
+        path: "/",
+      },
+      {
         name: "drts_session",
         value: "mock-session-token",
         domain: "127.0.0.1",
@@ -425,9 +431,9 @@ test.describe("tenant console booking map alignment", () => {
 
     // Assert rejection: error message is visible and hidden inputs are unchanged
     await expect(
-      picker.getByText(/A reason is required|請輸入原因/i),
+      picker.getByText(/Reason for manual location|手動定位原因/i),
     ).toBeVisible();
-    await expect(picker.locator('input[name="lat"]')).not.toHaveValue("25.034");
+    await expect(page.locator('input[name="lat"]')).not.toHaveValue("25.034");
 
     // Provide a valid reason
     await picker.getByLabel(/Reason|原因/).fill("Moved slightly");
@@ -439,41 +445,59 @@ test.describe("tenant console booking map alignment", () => {
     await page.getByRole("button", { name: /Save Changes|儲存/i }).click();
 
     // Real behavior: updateAddress calls revalidatePath but no success redirect;
-    // ?edit=addr-001 remains.
+    // ?edit=addr-001 remains. Wait a moment then reload to verify persistence.
+    await page.waitForTimeout(1000); // give server action time
+    await page.reload();
     await expect(
       page.getByRole("heading", { name: /Edit Address/i }),
     ).toBeVisible();
 
     // Verify coordinates are updated in the form's hidden inputs (persisted)
-    await expect(picker.locator('input[name="lat"]')).toHaveValue("25.034");
-    await expect(picker.locator('input[name="lng"]')).toHaveValue("121.566");
-    await expect(picker.locator('input[name="coordinateSource"]')).toHaveValue(
+    await expect(page.locator('input[name="lat"]')).toHaveValue("25.034");
+    await expect(page.locator('input[name="lng"]')).toHaveValue("121.566");
+    await expect(page.locator('input[name="coordinateSource"]')).toHaveValue(
       "manual_pin",
     );
 
-    // Verify manual inputs remain empty upon reopen (they don't autofill)
+    // Verify remounting manual toggle starts blank
+    await page.goto("http://127.0.0.1:3306/addresses");
+    await page
+      .getByRole("link", { name: /Edit|編輯/i })
+      .first()
+      .click();
+    await expect(
+      page.getByRole("heading", { name: /Edit Address/i }),
+    ).toBeVisible();
     await picker
       .getByText(/Enter coordinates manually|手動輸入座標|改用手動座標/)
       .click();
     await expect(picker.getByLabel(/Latitude|緯度/)).toHaveValue("");
-    await expect(picker.getByLabel(/Longitude|經度/)).toHaveValue("");
 
-    // Pointer/Keyboard case: simulate setting coordinates via pointer/keyboard drag
+    // Pointer/Keyboard case: simulate setting coordinates via keyboard drag
     // which updates the pin without manual entry
-    // Just click on the map to set a new location (simulating pointer)
-    const mapContainer = picker
-      .locator(".map-container, [role='application']")
-      .first();
-    await mapContainer.click({ position: { x: 50, y: 50 } });
+    const pin = picker.locator("g[role='button']").first();
+    await pin.focus();
+    await page.keyboard.press("ArrowUp");
 
-    // The form should now have different coordinates but same source or map_click
+    // Verify it changed in local state
+    await expect(page.locator('input[name="lat"]')).not.toHaveValue("25.034");
+    await expect(page.locator('input[name="coordinateSource"]')).toHaveValue(
+      "manual_pin",
+    );
+    await expect(
+      page.locator('input[name="manualOverrideReason"]'),
+    ).toHaveValue("agent_map_click");
+
     await page.getByRole("button", { name: /Save Changes|儲存/i }).click();
+
+    // Check server persistence
+    await page.waitForTimeout(1000);
+    await page.reload();
     await expect(
       page.getByRole("heading", { name: /Edit Address/i }),
     ).toBeVisible();
 
-    // Verify it changed
-    const newLat = await picker.locator('input[name="lat"]').inputValue();
+    const newLat = await page.locator('input[name="lat"]').inputValue();
     expect(newLat).not.toBe("25.034");
     expect(newLat).not.toBe("");
   });

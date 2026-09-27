@@ -205,7 +205,7 @@ let mockAddresses = [
     geocodeSource: "provider",
     tags: [],
     activeFlag: true,
-  }
+  },
 ];
 
 const server = http.createServer((req, res) => {
@@ -465,13 +465,18 @@ const server = http.createServer((req, res) => {
     });
     req.on("end", () => {
       const payload = JSON.parse(body);
-      
-      const idx = mockAddresses.findIndex((a) => a.addressId === payload.addressId);
+
+      const idx = mockAddresses.findIndex(
+        (a) => a.addressId === payload.addressId,
+      );
       if (idx !== -1) {
         mockAddresses[idx] = { ...mockAddresses[idx], ...payload };
         json(res, 200, { data: mockAddresses[idx] });
       } else {
-        const newAddress = { ...payload, addressId: payload.addressId || "addr-" + Date.now() };
+        const newAddress = {
+          ...payload,
+          addressId: payload.addressId || "addr-" + Date.now(),
+        };
         mockAddresses.push(newAddress);
         json(res, 200, { data: newAddress });
       }
@@ -487,6 +492,17 @@ const server = http.createServer((req, res) => {
           tenant_id: "tenant-acme",
         },
       },
+    });
+    return;
+  }
+  if (req.method === "GET" && url.pathname === "/api/identity/context") {
+    json(res, 200, {
+      id: "mock-identity-id",
+      type: "tenant_user",
+      realm: "tenant",
+      tenant_id: "tenant-acme",
+      roles: ["tenant_admin"],
+      scopes: ["tenant:read", "tenant:write"],
     });
     return;
   }
