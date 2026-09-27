@@ -149,6 +149,7 @@ jobs:
         run: |
           set -o pipefail
           pnpm install --frozen-lockfile 2>&1 | tee -a .artifacts/tenant-uat-acceptance/execution-log.txt
+          pnpm exec playwright install --with-deps chromium 2>&1 | tee -a .artifacts/tenant-uat-acceptance/execution-log.txt
 
       - name: Apply migrations to the dedicated acceptance database
         id: migrate
