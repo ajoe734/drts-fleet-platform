@@ -22,3 +22,10 @@
 - **Previous Rejected SHA:** `6ece53c6ee47542e9cbe5a734cafaef95ae818a1`
 - **Issue:** PostgreSQL 42P08 ambiguous parameter persisted when `$7` was cast to `text` and `timestamptz` in the same query (`($7::text)::timestamptz`).
 - **Fix:** Separated `createdAt` into two distinct parameters `$7` (for `timestamptz`) and `$8` (for `text`/`jsonb`), and `supersededAt` into `$9`, guaranteeing isolated type contexts for each parameter. This ensures 42P08 cannot occur since each parameter is cast to exactly one type.
+
+## Test Teardown Typo Fix (2026-09-27)
+- **Previous Rejected SHA:** `deb5d2ed7a2028e69291d1142f59eff4ec837c99` (Failed CI integration job)
+- **Issue:** The integration test teardown attempted to delete from `mobility.phase1_partner_notification_routes` which does not exist, causing PostgreSQL error 42P01. The correct table name is `mobility.phase1_order_partner_notification_routes`.
+- **Fix:** Fixed the table name in the test teardown (`DELETE FROM mobility.phase1_order_partner_notification_routes`). Also fixed an unused error variable lint warning.
+- **Commands Verified locally:**
+  1. `pnpm exec eslint apps/api/tests/integration/sr-partner-notify-fix-snapshot-20260927.integration.test.ts` (Exited with 0)

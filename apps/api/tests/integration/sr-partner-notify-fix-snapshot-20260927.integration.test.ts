@@ -279,7 +279,7 @@ describe("SR-PARTNER-NOTIFY-FIX-SNAPSHOT-20260927: disclosure snapshot SQL type 
           passengerDisclosureSnapshots: [snapshot3],
           consumerNotificationOutbox: [outbox3]
         });
-      } catch (e: any) {
+      } catch {
         errorThrown = true;
       }
       expect(errorThrown).toBe(true);
@@ -301,7 +301,7 @@ describe("SR-PARTNER-NOTIFY-FIX-SNAPSHOT-20260927: disclosure snapshot SQL type 
     } finally {
       await database.query("DELETE FROM ops.consumer_notification_outbox WHERE order_id = $1", [orderId]);
       await database.query("DELETE FROM ops.passenger_dispatch_disclosure_snapshots WHERE order_id = $1", [orderId]);
-      await database.query("DELETE FROM mobility.phase1_partner_notification_routes WHERE order_id = $1", [orderId]);
+      await database.query("DELETE FROM mobility.phase1_order_partner_notification_routes WHERE order_id = $1", [orderId]);
       await database.query("DELETE FROM mobility.phase1_partner_notification_sequences WHERE order_id = $1", [orderId]);
       await database.query("DELETE FROM ops.phase1_dispatch_jobs WHERE order_id = $1", [orderId]);
       await database.query("DELETE FROM ops.phase1_owned_orders WHERE order_id = $1", [orderId]);
