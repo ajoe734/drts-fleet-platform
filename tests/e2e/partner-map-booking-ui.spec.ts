@@ -171,11 +171,17 @@ test.describe("partner map booking UI", () => {
     await submit.click();
 
     // Actual PartnerBookingForm renders manual review required message in the submitted result
+    const reviewSection = page
+      .locator("section")
+      .filter({ has: page.getByTestId("partner-booking-review-summary") });
+
     await expect(
-      page.getByText(
-        /目前可先記錄這趟行程，但正式派遣前仍需人工確認|The selected stops can be recorded, but dispatch must review them before normal assignment/,
-      ),
+      reviewSection.getByText(/派遣前需人工確認|Needs review before dispatch/),
     ).toBeVisible();
+
+    await expect(
+      page.getByText(/表單驗證通過|Form validation passed/),
+    ).not.toBeVisible();
   });
 
   test("blocks submission when provider is down and no coordinates are provided", async ({
