@@ -16,8 +16,24 @@ export default defineConfig({
         __dirname,
         "packages/ui-tokens/src/index.ts",
       ),
+      "@drts/api-client": path.resolve(
+        __dirname,
+        "packages/api-client/src/index.ts",
+      ),
+      "@/lib/admin-client": path.resolve(
+        __dirname,
+        "apps/platform-admin-web/lib/admin-client.ts",
+      ),
+      "@/lib/i18n": path.resolve(
+        __dirname,
+        "apps/platform-admin-web/lib/i18n.tsx",
+      ),
       "@": path.resolve(__dirname, "apps/tenant-console-web"),
     },
+  },
+  oxc: false,
+  esbuild: {
+    jsx: "automatic",
   },
   test: {
     environment: "node",
@@ -26,6 +42,7 @@ export default defineConfig({
       "tests/contract/**/*.test.ts",
       "tests/integ/**/*.test.ts",
       "tests/unit/**/*.test.ts",
+      "tests/unit/**/*.test.tsx",
       "tests/integration/**/*.test.ts",
       "tests/security/**/*.test.ts",
       "tests/load/**/*.test.ts",
