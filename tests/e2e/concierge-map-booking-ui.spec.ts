@@ -475,8 +475,8 @@ test.describe("concierge map booking UI", () => {
       await page.mouse.down();
       await page.waitForTimeout(200); // Wait to simulate a human drag
       await page.mouse.move(
-        dropoffPinBox.x + dropoffPinBox.width / 2,
-        dropoffPinBox.y - 50,
+        dropoffPinBox.x + dropoffPinBox.width / 2 + 40,
+        dropoffPinBox.y + 40,
         { steps: 10 },
       );
       await page.waitForTimeout(200);
