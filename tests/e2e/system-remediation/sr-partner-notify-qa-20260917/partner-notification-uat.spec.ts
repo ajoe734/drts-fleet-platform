@@ -146,14 +146,14 @@ test.describe("SR-PARTNER-NOTIFY-QA-20260917 E2E Cases", () => {
 
     const bindRes = await apiCall(tenantA, tokenPlatform, "PUT", `api/platform-admin/partner-entries/${entrySlug}/notification-binding`, {
       webhookId,
-      eventTypes: ["passenger.assignment_disclosure_ready.v1"],
+      eventTypes: ["assignment_disclosure_ready"],
       expectedVersion: 0
     });
     expect(bindRes.status()).toBe(200);
 
     const crossRes = await apiCall(tenantB, tokenPlatform, "PUT", `api/platform-admin/partner-entries/${entrySlug}/notification-binding`, {
       webhookId,
-      eventTypes: ["passenger.assignment_disclosure_ready.v1"],
+      eventTypes: ["assignment_disclosure_ready"],
       expectedVersion: 0
     });
     expect([403, 404]).toContain(crossRes.status());
@@ -192,7 +192,7 @@ test.describe("SR-PARTNER-NOTIFY-QA-20260917 E2E Cases", () => {
 
     await apiCall(tenantA, tokenPlatform, "PUT", `api/platform-admin/partner-entries/${entrySlug}/notification-binding`, {
       webhookId,
-      eventTypes: ["passenger.assignment_disclosure_ready.v1"],
+      eventTypes: ["assignment_disclosure_ready"],
       expectedVersion: 0
     });
 
@@ -228,7 +228,7 @@ test.describe("SR-PARTNER-NOTIFY-QA-20260917 E2E Cases", () => {
     const webhookId = (await whRes.json()).data.webhook_id;
     await apiCall(tenantA, tokenPlatform, "PUT", `api/platform-admin/partner-entries/${entrySlug}/notification-binding`, {
       webhookId,
-      eventTypes: ["passenger.assignment_disclosure_ready.v1"],
+      eventTypes: ["assignment_disclosure_ready"],
       expectedVersion: 0
     });
     const testRes = await apiCall(tenantA, tokenPlatform, "POST", `api/platform-admin/partner-entries/${entrySlug}/notification-binding/test`);
