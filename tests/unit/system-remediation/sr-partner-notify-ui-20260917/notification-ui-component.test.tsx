@@ -667,7 +667,7 @@ describe("PartnerNotificationPanel", () => {
     });
 
     // Exit edit mode if stuck
-    const cancelBtn = screen.queryByRole("button", { name: /取消/i });
+    const cancelBtn = screen.queryByRole("button", { name: /取消|partnerNotification\.cancel/i });
     if (cancelBtn) {
       fireEvent.click(cancelBtn);
     }
@@ -679,6 +679,7 @@ describe("PartnerNotificationPanel", () => {
 
     // Simulate account/client transition by changing the mocked client returned
     const newMockClient = {
+      ...mockClient,
       getPartnerEntryNotificationBinding: vi.fn().mockResolvedValue({
         version: 1,
         webhookId: "new-webhook",
@@ -744,19 +745,17 @@ describe("PartnerNotificationPanel", () => {
     ).not.toHaveBeenCalled();
 
     // 3. Setup a pending Resume mutation, unmount and settle
-    // Actually, Resume is for test_pending state.
-    // Let's set the component to state test_pending
     newMockClient.getPartnerEntryNotificationBinding.mockResolvedValue({
       version: 1,
       webhookId: "new-webhook",
       eventTypes: ["eta_changed"],
-      state: "test_pending",
+      state: "disabled",
     });
 
     await act(async () => {
       rerender(
         <PartnerNotificationPanel
-          entrySlug="new-entry"
+          entrySlug="resume-entry"
           tenantId="new-tenant"
           canWriteBinding={true}
           canReadWebhooks={true}
@@ -786,7 +785,7 @@ describe("PartnerNotificationPanel", () => {
         ack: {
           notificationId: "n-3",
           deliveryId: "d-3",
-          partnerEntrySlug: "new-entry",
+          partnerEntrySlug: "resume-entry",
           status: "accepted",
           receiptId: "ack-3",
         },

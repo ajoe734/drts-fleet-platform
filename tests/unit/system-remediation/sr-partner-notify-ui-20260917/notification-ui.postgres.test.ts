@@ -26,7 +26,7 @@ describe.skipIf(!testDbUrl)(
   () => {
     let pool: any;
     const originalEnv = { ...process.env };
-    let app: import("@nestjs/common").INestApplicationContext;
+    let app: any;
     let mtRepo: MultiTaxiRepository;
 
     // Unique test suite identifier prefix
@@ -764,16 +764,6 @@ describe.skipIf(!testDbUrl)(
           scopes: [],
           requestId: randomUUID(),
         };
-      await bindingService.putBinding(
-        missingBindingSlug,
-        {
-          webhookId,
-          eventTypes: ["eta_changed"],
-          expectedVersion: 0,
-        },
-        identity,
-      );
-
       const dispatchSpy = vi
         .spyOn(
           dispatchFacade as import("../../../../apps/api/src/modules/tenant-partner/partner-notification-dispatch.facade").PartnerNotificationDispatchFacade,
@@ -783,11 +773,11 @@ describe.skipIf(!testDbUrl)(
           async (
             command: import("../../../../apps/api/src/modules/tenant-partner/tenant-partner.service").PartnerNotificationDispatchAttemptCommand,
           ): Promise<
-            import("../../../../apps/api/src/modules/tenant-partner/tenant-partner.service").PartnerNotificationDispatchAttemptOutcome
+            import("@drts/contracts").PartnerNotificationDispatchOutcome
           > => ({
             kind: "accepted",
             ack: {
-              notificationId: command.wirePayload.data.notificationId,
+              notificationId: (command.wirePayload as any).data?.notificationId || "ack-test",
               deliveryId: command.wirePayload.deliveryId,
               partnerEntrySlug: missingBindingSlug,
               status: "accepted",
@@ -795,6 +785,16 @@ describe.skipIf(!testDbUrl)(
             },
           }),
         );
+
+      await bindingService.putBinding(
+        missingBindingSlug,
+        {
+          webhookId,
+          eventTypes: ["eta_changed"],
+          expectedVersion: 0,
+        },
+        identity,
+      );
 
       try {
         await bindingService.testBinding(missingBindingSlug, identity);

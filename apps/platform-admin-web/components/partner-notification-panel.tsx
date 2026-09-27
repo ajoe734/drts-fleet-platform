@@ -1485,6 +1485,7 @@ export function PartnerNotificationPanel({
     setResumeState("idle");
     setRetryState("idle");
     setSaveState("idle");
+    setIsEditing(false);
     return () => {
       currentMutationSession.current++;
       console.log(
