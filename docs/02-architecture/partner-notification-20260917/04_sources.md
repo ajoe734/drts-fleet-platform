@@ -6,21 +6,23 @@
 
 ## SD §14 Case Matrix
 
+以下狀態以最新完整runtime `84c5d9e3cf499863de0b2838892508b3972e8093` 為準；相鄰失敗沿用下文及原UAT。
+
 | Scenario                                         | 正式期望與現有位置                                                                                             | 驗收狀態                                               |
 | ------------------------------------------------ | -------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------ |
-| 正向worker delivery                              | C201；200/201/202 + 相符durable accepted/duplicate receipt；partner_accepted，downstream unknown               | 58081594 C201真worker/PG/receiver passed（非全矩陣）   |
-| accepted後timeout與dedupe                        | C202/C213；大於10秒deadline、同notification/delivery/body hash、同receipt duplicate、只入列一次                     | 8c23e9a0 C202/C213 passed；C213重建receiver物件讀durable inbox |
-| 缺route                                          | C203；typed route_missing/manual_only、不猜entry、receiver count=0                                             | 58081594 C203 passed；typed reason、零外送             |
-| 204、HTML200、錯receipt                          | C204/C212；partner_ack_invalid/manual_only，不能自動retry                                                      | 8039453e C204與C212五種invalid ack均passed             |
-| 同tenant兩entry、跨tenant同URL、同住戶兩App      | 僅原entry/tenant/subject收到，payload不串單                                                                    | 0638617e C206/C207/C208 passed；C208含resolve隔離       |
-| entry移轉與link撤銷                              | 舊消息不移轉；owner_changed/manual_only與recipient_revoked/terminal；零外送                                    | 0638617e C209/C210 passed；C210注入撤銷狀態，非撤銷API驗收 |
-| endpoint停用、secret輪替重測、未配置availability | 明確configuration_blocked；測試就緒後才enable                                                                  | 8c23e9a0 C211/C220 passed；full AppModule route readiness false→true |
-| ack後DB失敗、lease/fence、兩worker競爭           | durable transaction、舊fence不可commit、dedupe且單retry owner                                                  | 3f346cc13 C214/C215/C216 passed；真rollback／自然lease／兩process／API restart |
-| maxAttempts=5與expiry                            | 總共五次、最多四次retry、超expiresAt停止                                                                       | 7f0032c5 C216與C217 passed；6f後段fixture auth過期，84c修復待驗                 |
-| 舊ETA、取消後舊到場、payload confidentiality     | superseded/obsolete terminal；缺driver情報不洩漏敏感資料                                                       | 8c23e9a0 C219 passed；C218正式repository SQL42P08，後續未驗 |
+| 正向worker delivery                              | C201；200/201/202 + 相符durable accepted/duplicate receipt；partner_accepted，downstream unknown               | C201真worker/PG/receiver passed（非全矩陣）   |
+| accepted後timeout與dedupe                        | C202/C213；大於10秒deadline、同notification/delivery/body hash、同receipt duplicate、只入列一次                     | C202/C213 passed；C213重建receiver物件讀durable inbox |
+| 缺route                                          | C203；typed route_missing/manual_only、不猜entry、receiver count=0                                             | C203 passed；typed reason、零外送             |
+| 204、HTML200、錯receipt                          | C204/C212；partner_ack_invalid/manual_only，不能自動retry                                                      | C204與C212五種invalid ack均passed             |
+| 同tenant兩entry、跨tenant同URL、同住戶兩App      | 僅原entry/tenant/subject收到，payload不串單                                                                    | C206/C207/C208 passed；C208含resolve隔離       |
+| entry移轉與link撤銷                              | 舊消息不移轉；owner_changed/manual_only與recipient_revoked/terminal；零外送                                    | C209/C210 passed；C210注入撤銷狀態，非撤銷API驗收 |
+| endpoint停用、secret輪替重測、未配置availability | 明確configuration_blocked；測試就緒後才enable                                                                  | C211/C220 passed；full AppModule route readiness false→true |
+| ack後DB失敗、lease/fence、兩worker競爭           | durable transaction、舊fence不可commit、dedupe且單retry owner                                                  | C214/C215/C216 passed；真rollback／自然lease／兩process／API restart |
+| maxAttempts=5與expiry                            | 總共五次、最多四次retry、超expiresAt停止                                                                       | C216與C217 passed；正式endpoint cleanup與fresh fixture auth已驗                 |
+| 舊ETA、取消後舊到場、payload confidentiality     | superseded/obsolete terminal；缺driver情報不洩漏敏感資料                                                       | C219 passed；C218正式repository SQL42P08，後續未驗 |
 | admin readiness/stage/failure與手動retry         | C205；真route/auth、點control、觀察request及durable readback                                                   | C205真browser fail：日期DTO為{}，React崩潰；picker400  |
-| notification-navigation                          | fresh single-use handoff、HttpOnly session、returnTo、最新ride readback、錯entry/subject/logout/account switch | 6f C221/C223/C224 passed；C222真HTTP確認R12假success                                   |
-| 一般tenant webhook C111–C115與restart            | 獨立既有gate不可由partner數量取代                                                                              | 8039453e既有reports passed；tenant restart verified15 |
+| notification-navigation                          | fresh single-use handoff、HttpOnly session、returnTo、最新ride readback、錯entry/subject/logout/account switch | C221/C223/C224 passed；C222真HTTP確認R12假success                                   |
+| 一般tenant webhook C111–C115與restart            | 獨立既有gate不可由partner數量取代                                                                              | 既有reports passed；tenant restart verified15 |
 
 ## Acceptance Matrix
 
@@ -217,4 +219,14 @@ completed failure，**18pass/4fail/2skip**。C224在簽發前自然等61秒，�
 passed183.268秒；C216最後cleanup遭過舊step-up拒絕，後續JWT_INVALID使C217 setup fail，C219/C205
 skipped。不能跨SHA補成全pass。84c5d9e3沿原seed可信認證邊界，以正式JWT服務先驗舊credential與
 durable authority，再建同principal/roles/scopes的fresh session；不改正式15m/10min期限。
-新run36352402864執行中。R8增Codex6f錯誤subject，現18個失敗；保留refs等待history recovery。
+R8增Codex6f錯誤subject，現18個失敗；保留refs等待history recovery。
+
+最後 `84c5d9e3cf499863de0b2838892508b3972e8093` 的
+[run36352402864/job108713466759](https://github.com/ajoe734/drts-fleet-platform/actions/runs/36352402864/job/108713466759)
+completed **failure**，**21pass／3fail(C205/C218/C222)／0skip／0flaky**，全部24個manifest identity一致。
+Artifact10942708339，ZIP SHA256 `ec817672a9b74666539e7fe2cca0e3b01c6d55157cb17f9d2ec7bb137ac063a9`。
+C216含正式cleanup passed460.020秒；C224 passed183.300秒；C217/C219正常執行並passed，fixture認證修正有效。
+同SHA tenant291（PG21）、webhook34、tenantHTTP10、webhookE2E1、C111–C115/restart15 passed；
+獨立partner-unit step skipped、strict gate failed。C205 trace仍日期{}／React31／picker400，C218仍42P08，
+C222仍foreign history200/ok=true；R11產品race亦未修。原UAT保留每項修復scope、caller及回歸要求。
+R5/R8/R9/R10/R11/R12需Supervisor排agy修復／history recovery；三項acceptance **NOT MET**，未handoff／merge／live。

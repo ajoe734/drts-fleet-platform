@@ -1,12 +1,12 @@
 # SR-PARTNER-NOTIFY-QA-20260917
 
 Owner: Codex（2026-09-27 Supervisor 直接交接）；Reviewer: Codex2。
-狀態：修復中，尚無新的 review candidate。交接 checkpoint 為
+狀態：整合驗收未通過，待 Supervisor 排產品修復與 history recovery；尚無新的 review candidate。交接 checkpoint 為
 `91b1d4ac122b1373ac7beb05df902cb991b62232`，沿用既有實作與發布歷史。
-最新程式 checkpoint `84c5d9e3cf499863de0b2838892508b3972e8093` 的 hosted run36352402864 執行中。
-前輪6f3a1e36：C224完整通過，但長時間等待導致fixture認證過期；18 passed／4 failed／2 skipped。
-7f0032c5為20 passed／4 failed／0 skipped，C216/C217/C221/C223通過；C222確認新產品R12。
-全部24案已實作；產品與publication blockers均保留，詳「修復單元7」。
+最新程式 checkpoint `84c5d9e3cf499863de0b2838892508b3972e8093` 的 hosted run36352402864 已完成並讀完：
+**21 passed／3 failed（C205、C218、C222）／0 skipped／0 flaky**，全部24個manifest identity吻合。
+C216/C217及C221/C223/C224同SHA通過；認證fixture已修，但產品R5/R10/R11/R12與publication R8/R9未解。
+全部24案已實作，三項required_acceptance仍 **NOT MET**；詳「修復單元7」。
 
 ## 證據規則與撤回
 
@@ -725,8 +725,9 @@ R9 transport/security-tests scope、R8 preserving-refs history recovery仍需Sup
 | `a1395e634ecfab61de89ac4e73637de6c98d9528` | [36348975121](https://github.com/ajoe734/drts-fleet-platform/actions/runs/36348975121) completed cancelled | 發現C216污染下一fixture後取消，實際停於webhook unit step；API/browser未啟動，run-status **not_run** | `10941985632` / `8a346480638a1123b79c44b6e297a4592f6291f9d230602b9d39c006e20d5f37` |
 | `7f0032c512bcae1f59028f6217c5fb692c93e5dd` | [36349279855/108704646111](https://github.com/ajoe734/drts-fleet-platform/actions/runs/36349279855/job/108704646111) completed failure | **20 pass / 4 fail (C222/C224/C218/C205) / 0 skip**；C216 endpoint cleanup及C217通過；C221/C223真browser通過；C224 direct replay遇429，未到TTL | `10941713690` / `066a974df4c3c1ac8bcbf8969933eaa76f767365f5d7777fa3a0822f10bebc39` |
 | `6f3a1e3659417fcafe1ed8566a13f3c0f87654bf` | [36350774384/108708902951](https://github.com/ajoe734/drts-fleet-platform/actions/runs/36350774384/job/108708902951) completed failure | **18 pass / 4 fail / 2 skip**；C224 **183.268秒 passed**；C222/R12、C218/R10 failed；C216清理step-up403、C217 setup JWT_INVALID，C219/C205 skipped | `10942523183` / `8a3f15a73ab39e4e846d065997d3f611c7b6fa46a3fc6954e6cb7d3150a902d1` |
+| `84c5d9e3cf499863de0b2838892508b3972e8093` | [36352402864/108713466759](https://github.com/ajoe734/drts-fleet-platform/actions/runs/36352402864/job/108713466759) completed failure | **21 pass / 3 fail (C205/C218/C222) / 0 skip / 0 flaky**；C216含cleanup **460.020秒 passed**，C224 **183.300秒 passed**；C217/C219亦passed | `10942708339` / `ec817672a9b74666539e7fe2cca0e3b01c6d55157cb17f9d2ec7bb137ac063a9` |
 
-3f346cc13、ae4b1d69、7f0032c5、6f3a1e36各自同SHA的tenant291（PG21）、webhook34、tenantHTTP10、webhookE2E1，
+3f346cc13、ae4b1d69、7f0032c5、6f3a1e36、84c5d9e3各自同SHA的tenant291（PG21）、webhook34、tenantHTTP10、webhookE2E1，
 及C111–C115/restart verified15均passed；dedicated partner-unit step skipped，strict gate failed。
 Cancelled a139僅已完成tenant291，不能借前述runtime綠燈。所有ZIP與report execution SHA均讀回核對。
 
@@ -760,18 +761,35 @@ full AppModule的`verifyAccessToken`先檢查原credential及durable authority�
 只在fixture開始、C216開始前呼叫；不延長舊session、不接受過期/revoked authority、不改JWT／
 step-up／通知TTL。新secret只經0600暫存檔回傳並刪除，不進CLI參數/stdout/report。
 這不是產品refresh endpoint或MFA登入驗收；原API所有認證與step-up guard仍執行。
-本機tsc／scoped lint／collection24／84c單commit check均exit0；run36352402864待讀。
+本機tsc／scoped lint／collection24／84c單commit check均exit0；run36352402864已讀完。
 
-### 單元7 finding／required_acceptance disposition（待最後run）
+84c最終附件核對：C216 API PID15022→20291→23630；五次503於21:51:11.469、21:51:42.076、
+21:52:42.113、21:54:42.225、21:58:42.481 UTC，全部同wire hash
+`7cc5cd3ed74588623192876d16faab77a74f3826c3b19d5fcba4a0efd6884dd3`，無第六次；正式endpoint與
+binding重測恢復後，原terminal outcome/count不變。C224三個consumer各自正向後，跨入口皆403/400/400、
+direct皆409，same-origin returnTo保留／external拒絕與自然120秒到期皆完成。C221/C223亦同SHA passed。
+
+84c C205仍是產品失敗：離線讀取`d6d16.../trace.zip`，delivery HTTP200的created_at/expires_at/
+next_attempt_at均{}、React **#31**；tenant webhook picker仍400 **TENANT_ID_REQUIRED**。
+C218仍正式repository SQL42P08，後續ETA/取消arrival斷言未到達；C222仍foreign history200/ok=true，
+receipt400/ok=false。R11沒有產品修復，bounded prerequisite readback只讓fixture可建立。
+最新JSON的candidate_sha/workflow_sha均為84c；24案逐title與manifest一致，三個PG suite各7 passed。
+dedicated partner-unit step **skipped**，strict overall gate **failed**，不能把上述21pass當全套驗收。
+
+### 單元7 finding／required_acceptance disposition（84c結果已讀完）
 
 | Finding／驗收 | source／修改 | 舊→新／證據 | 尚未满足 |
 |---|---|---|---|
-| R1 C216 | `PartnerNotificationWorker`、claim/context/outcome、tenant單attempt façade；QA restart helper | 196f缺案→3f五次/重啟pass→7f cleanup/C217 pass→6f stale fixture auth失敗 | 84c認證準備待驗；C218產品SQL未修 |
-| R5 C221–C224 | `NavigationFixture`、`navigation-uat.spec.ts`；真BFF/session/PG、C221取消control | 7f C221/C223 passed；6f C224完整passed；C222產品R12 failed | 既有C205產品DTO/picker/translation；完整同SHA未通過 |
-| R12 fabricated history | 原BFF `GET`、正式過濾history，上述最小probe | 7f/6f真HTTP：foreign receipt400，history200/ok=true | Supervisor agy child/scope；尚無可通過C222的產品修復 |
-| R8/R9/R10/R11 | 原單元的精確定位、caller與修復邊界保留 | R8現18個失敗含Codex新6f subject；scope外transport lint；R10 hosted再現 | preserving-refs history recovery、產品修復scope/child |
-| `integrated_controlled_receiver_negative_matrix_same_sha` | SD14全24案／manifest／原gates | **NOT MET** | C218產品bug與最終整合run |
-| `navigation_and_admin_ui_hosted_real_runtime_evidence` | NAV/管理UI真runtime | **NOT MET** | C205/R5、C222/R12、84c整合run未結束 |
+| R1 C216 | `PartnerNotificationWorker`、claim/context/outcome、tenant單attempt façade；QA restart helper | 196f缺案→3f/7f pass→6f stale fixture auth失敗→84c整案與cleanup pass | C218產品SQL未修，完整受控矩陣未通過 |
+| R5 C205／C221–C224 | `NavigationFixture`、真BFF/session/PG、取消control；原delivery DTO/picker/translation | 84c C221/C223/C224同SHA passed；C205仍Date{}／React31／picker400；C222見R12 | Supervisor安排原產品owner；native/logout/session-revocation限制保留 |
+| R12 fabricated history | 原BFF `GET`、正式過濾history，上述最小probe | 7f/6f/84c真HTTP：foreign receipt400，history200/ok=true | Supervisor agy child/scope；合法own與wrong-scope回歸要求見上文 |
+| R8 publication history | commit subject/trailer gate | 現18個失敗，含Codex本輪6f subject；後續84c/191d格式檢查pass不抵消祖先 | preserving-refs recovery，不force/rebase/amend |
+| R9 transport/security scope | `partner-notification-https.ts:63`、原security tests；workflow local flag邊界 | 一般CI仍no-require-imports；QA scoped lint pass不代表產品lint pass | Supervisor排產品與原test scopes；不解除安全gates |
+| R10 snapshot SQL | `OwnedMobilityRepository.persistChangesWithExecutor`，單元5 caller/scope | 84c C218仍42P08；後續ETA/取消/receipt斷言未執行 | agy產品修復＋真PG transaction/supersede回歸 |
+| R11 entry durability | `createPlatformPartnerEntry`，單元6 caller/scope | 原POST201→binding FK失敗反例保留；QA bounded readback不是產品修復 | await durable write、傳遞失敗、同SHA立即binding回歸 |
+| R2/R3/R4/R6/R7 證據邊界 | 原gate/evidence/publication/PG/transport finding | strict manifest全24保留；84c PG21/21；草稿PR2179保留SHA身份；production transport拒絕的local probes如前 | 無review/merge/full acceptance；security scope仍見R9，B/C未執行 |
+| `integrated_controlled_receiver_negative_matrix_same_sha` | SD14全24案／manifest／原gates | **NOT MET** | C218/R10及R11產品修復，之後新同SHA完整矩陣 |
+| `navigation_and_admin_ui_hosted_real_runtime_evidence` | NAV/管理UI真runtime | **NOT MET** | C205/R5、C222/R12未修 |
 | `existing_webhook_tenant_gates_preserved_and_live_not_claimed` | 原獨立tenant/webhook/restart gate與A/B/C邊界 | **NOT MET**；上述既有gate有逐SHA正向證據但完整run未過 | strict gate與未解R9；A未放行，B/C仍SR-LIVE-PUSH-001 |
 
 CI36347968917／36348413247／36348971044／36349265466均completed failure，讀過log，
@@ -781,5 +799,13 @@ Integration36347968868／36348320921／36348413295／36348971038／36349265476�
 
 676b文件CI36349684853 completed failure/read（17 inherited＋transport lint），integration36349684827
 completed success/main jobs skipped。6f CI36350755940 completed failure/read（**18** subject/trailer
-＋transport lint），integration36350755933 completed success/main jobs skipped。新84c CI／hosted待讀；
+＋transport lint），integration36350755933 completed success/main jobs skipped。
+84c CI36352396249及191d文件CI36352551655均completed failure/read，仍18個subject/trailer與
+transport lint；integration36352396297／36352551647均completed success/main jobs skipped。
 不改寫先前失敗或把partial/assertion附件當整案通過。
+
+本輪證據在worker `.local/sr-partner-notify-qa-20260927-unit7/`，另保存到canonical root
+`/home/lupin/workspace/drts-fleet-platform/.local/sr-partner-notify-qa-20260927-unit7-codex-84c5d9e3/`。
+最後文件checkpoint的完整head／CI結果另記canonical task狀態與該目錄`final-checkpoint.json`；
+文件SHA不冒充84c runtime SHA。後續需Supervisor排agy owner/Codex reviewer產品child／scope與R8 recovery；
+不handoff、不done、不關閉三項acceptance，也無shared-dev部署或真夥伴／裝置宣稱。
