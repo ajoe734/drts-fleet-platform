@@ -15,7 +15,7 @@
 | 同tenant兩entry、跨tenant同URL、同住戶兩App      | 僅原entry/tenant/subject收到，payload不串單                                                                    | 0638617e C206/C207/C208 passed；C208含resolve隔離       |
 | entry移轉與link撤銷                              | 舊消息不移轉；owner_changed/manual_only與recipient_revoked/terminal；零外送                                    | 0638617e C209/C210 passed；C210注入撤銷狀態，非撤銷API驗收 |
 | endpoint停用、secret輪替重測、未配置availability | 明確configuration_blocked；測試就緒後才enable                                                                  | 8c23e9a0 C211/C220 passed；full AppModule route readiness false→true |
-| ack後DB失敗、lease/fence、兩worker競爭           | durable transaction、舊fence不可commit、dedupe且單retry owner                                                  | PG歷史21/21；缺整合fault evidence                      |
+| ack後DB失敗、lease/fence、兩worker競爭           | durable transaction、舊fence不可commit、dedupe且單retry owner                                                  | 6d6fdb77 C214/C215 passed；真rollback／自然lease／兩process，C216 restart仍缺 |
 | maxAttempts=5與expiry                            | 總共五次、最多四次retry、超expiresAt停止                                                                       | 8039453e C217過期零外送passed；C216仍缺                 |
 | 舊ETA、取消後舊到場、payload confidentiality     | superseded/obsolete terminal；缺driver情報不洩漏敏感資料                                                       | 8c23e9a0 C219 passed；C218正式repository SQL42P08，後續未驗 |
 | admin readiness/stage/failure與手動retry         | C205；真route/auth、點control、觀察request及durable readback                                                   | C205真browser fail：日期DTO為{}，React崩潰；picker400  |
@@ -24,7 +24,7 @@
 
 ## Acceptance Matrix
 
-- `integrated_controlled_receiver_negative_matrix_same_sha`：**NOT MET**（R1/R2/R6/R9/R10）。
+- `integrated_controlled_receiver_negative_matrix_same_sha`：**NOT MET**（R1/R2/R6/R9/R10/R11）。
 - `navigation_and_admin_ui_hosted_real_runtime_evidence`：**NOT MET**（R5）。
 - `existing_webhook_tenant_gates_preserved_and_live_not_claimed`：**NOT MET**（R2/R3/R9）。
 
@@ -154,3 +154,36 @@ C218第一次正式 `OwnedMobilityRepository.persistChanges` 即遇 **42P08**：
 C205真browser仍React31／Date→{}／picker400；R5/R8/R9原scope/history blockers仍在。
 C214–C216、C221–C224 **7**案未實作，C218已實作但阻塞；三項required_acceptance **NOT MET**。
 沒有handoff／merge／真夥伴或裝置驗收宣稱。
+
+## 單元6 source／case 邊界
+
+程式 `6d6fdb77c8db54c45c99a36af6f75a5573f09648`，
+[run36346488294/job108696546272](https://github.com/ajoe734/drts-fleet-platform/actions/runs/36346488294/job/108696546272)
+completed **failure**：partner **17 passed／2 failed（C205、C218）／0 skipped**，
+新增 C214/C215 **passed**。Artifact10940424368，ZIP SHA256
+`7678c78d96b71a2c369b51976441c340d1a8004b128a2a516d8d0303d5b0d477`。
+同SHA unit291（PG21）、webhook34、tenant HTTP10、webhook E2E1、C111–C115／restart15
+均passed；partner獨立unit step skipped、strict gate failed。B/C live gates全保留。
+
+C214只用正式表 trigger 注入單筆 outcome 寫入例外，非交易式 sequence 證明觸發一次；
+真 `recordPushDeliveryOutcome` 必須 rollback receipt/context/outbox metadata，原 immutable
+context 與 claim 保留。等待正式120秒lease自然到期後，真 worker以同bytes/hash/receipt重送，
+accepted→duplicate、fence1→2，只有一筆inbox及成功receipt。`probe-stale-outcome.ts` 呼叫
+compiled production repository 拒絕舊 fence1，讀回不變；没有改 DB時間或合成ack。
+C215用 `competing-worker.ts` 啟動第二個 full AppModule OS process，無provider override。
+PG row lock同步兩個真scheduler，pg_stat_activity證明兩個claim都等鎖；勝者僅一次外送，
+released fence拒寫，child正常close/exit0。C215不是跨lease慢HTTP測試，該舊fence證據在C214。
+
+前輪 `068a990e119e385b310378713a492957b842444f` 的
+[run36346008535](https://github.com/ajoe734/drts-fleet-platform/actions/runs/36346008535)
+是 **0pass／1fail（setup）／18not-run**，Artifact10940264658，ZIP SHA256
+`d50118d9bb5723f23df81070b54e9cbcf408c18f9eb927adbee1fcd722636c85`。
+新 **R11**：entry POST201後 binding PUT500，PG container log明示entry_slug FK缺entry；
+service `createPlatformPartnerEntry` 未await `persistChanges`。QA增加bounded PG prerequisite
+readback才繼續binding；沒有重試500或手寫entry SQL，**產品競態未修**。
+完整最小重現、affected callers、Supervisor agy scope／必要回歸在原 UAT「單元6」。
+
+C205仍React31／日期{}／picker400；C218仍正式snapshot SQL42P08，後續未驗。
+C216、C221–C224共 **5** 案未實作；R5/R8/R9/R10/R11保留，三項acceptance **NOT MET**。
+本機tsc/lint/diff0、QA12／Python64、兩新commit trailers passed；一般CI仍17 inherited trailers
+及scope外transport lint，integration主要jobs skipped；原artifact保留所有逐SHA失敗紀錄。

@@ -548,3 +548,92 @@ Integration36344323797／36344493214 completed success，但主要產品jobs **s
 仍缺C214–C216、C221–C224共 **7** 個必需case；C218新增但由R10阻塞，C205由R5阻塞。
 R8/R9 publication/scope限制保留。三項required_acceptance全部 **NOT MET**；
 未handoff、未merge、未稱A層verified，B/C真夥伴／native device gates均未執行。
+
+## Codex 修復單元 6（2026-09-27，checkpoint，未 handoff）
+
+起點 `ad697af45c79d1c3d4a3b3c846e32c059d959322`，local／remote／草稿 PR2179
+一致且乾淨。只改 QA scopes，保留所有 R1–R10 findings、既有 gates 及 B/C 限制。
+
+| Finding／驗收項 | 原始碼依據與修改位置 | 舊版 → 本輪結果 | 命令／證據與邊界 | 未驗項與限制 |
+| --- | --- | --- | --- | --- |
+| R1／C214 ack 後 DB 失敗與 lease recovery | `MultiTaxiService.deliverPartnerNotification`、`MultiTaxiRepository.recordPushDeliveryOutcome/claimPartnerNotification`；QA spec、fixture、`probe-stale-outcome.ts` | ad697af4 缺 case → 068a990e 因 setup 失敗未執行 → 6d6fdb77 **passed**（128.146 秒） | 正式表上的單一 outbox trigger 注入 outcome status 寫入錯誤；sequence 僅作不隨 rollback 消失的故障計數；production repository、transaction、worker、120 秒 lease 均未替代 | 注入 DB 寫入例外，不宣稱 DB 主機重啟；C216 五次重試／API restart 仍缺 |
+| R1／C215 兩 worker 競爭及失效 fence | `PartnerNotificationWorker.dispatchDue`、正式 claim/outcome repository；`competing-worker.ts`、fixture、spec | ad697af4 缺 case → 6d6fdb77 **passed**（12.573 秒） | 第二個 OS process 啟動 compiled full AppModule；PG row lock 同步兩個真 scheduler，以 pg_stat_activity 確認兩個 claim 都在等鎖；釋鎖後只一次外送／一次 attempt／一筆 receipt | C215 驗 released fence 拒寫；C214 另驗被新 fence 取代的 token1 拒寫。沒有把 C215 冒稱跨 lease 的慢 HTTP 回覆 |
+| 新 R11／entry 建立回應早於 durable write | `createPlatformPartnerEntry` → 未 await 的 `persistChanges`；V0104 entry FK；QA setup readback | 068a990e 真 HTTP201 後 binding PUT500、PG 明示缺 entry → 6d6fdb77 fixture bounded readback 後可跑完整 suite | 下方原始 log 與 caller 定位；只讀正式 PG 前置資料，不寫 entry SQL、不重試失敗 PUT | **產品競態未修**，需要 Supervisor 協調 agy owner/scope；QA readback 不是 create API durability 驗收 |
+| R5／C205、R10／C218 | 原管理 DTO/picker/translations；snapshot CTE `$7` | 6d6fdb77 **兩案仍 failed**；C218 後續 ETA／取消斷言未到達 | 同 SHA browser trace：React31、日期{}、TENANT_ID_REQUIRED；C218 production repository PostgreSQL42P08 | 原 scope／修復 child 請求保留；不以 fixture bypass 產品邏輯 |
+| R8／R9、三個 required_acceptance | 既有 publication／transport scope；required-cases manifest | 本輪新 commits 合規，普通 CI 仍 fail；三項 acceptance **NOT MET** | 所有舊 gates 保留，未降低 manifest 的24案需求；下列同 SHA regression 與 run 身份 | C216、C221–C224 共5案未實作；未 review handoff／merge／A層放行／真夥伴或裝置宣稱 |
+
+### 單元6 同 SHA 執行與附件（全部已結束並讀完）
+
+- 錯填 candidate_sha 的 dispatch [36345997432](https://github.com/ajoe734/drts-fleet-platform/actions/runs/36345997432)
+  在 container 初始化階段取消，終態 **cancelled**；checkout、build、tests 全 skipped，沒有驗收證據。
+  隨後用 `-f candidate_sha="$(git rev-parse HEAD)"` dispatch 正確完整 SHA。
+- 第一個程式 checkpoint `068a990e119e385b310378713a492957b842444f`：
+  [run36346008535/job108695166580](https://github.com/ajoe734/drts-fleet-platform/actions/runs/36346008535/job/108695166580)
+  **failure**，partner **0 passed／1 failed（beforeAll）／18 not-run**。
+  Artifact **10940264658**，ZIP SHA256
+  `d50118d9bb5723f23df81070b54e9cbcf408c18f9eb927adbee1fcd722636c85`。
+  新 C214/C215 沒有跑到；不得稱產品故障案例失敗或通過。
+- 最後程式 checkpoint `6d6fdb77c8db54c45c99a36af6f75a5573f09648`：
+  [run36346488294/job108696546272](https://github.com/ajoe734/drts-fleet-platform/actions/runs/36346488294/job/108696546272)
+  **failure**，partner **17 passed／2 failed（C205、C218）／0 skipped／0 flaky**。
+  Artifact **10940424368**，ZIP SHA256
+  `7678c78d96b71a2c369b51976441c340d1a8004b128a2a516d8d0303d5b0d477`。
+
+兩次各自同 SHA 的 tenant/partner unit **291/291**（三個 PG suite 各7，合計21）、
+webhook unit **34/34**、tenant HTTP **10/10**、webhook E2E **1/1**、
+C111–C115 capability report **passed**、tenant restart **15 verified**。
+Partner 獨立 unit step **skipped**、strict gate **failed**、run-status=failed。
+JSON execution.candidate_sha／workflow_sha 與執行版本一致；報告、ZIP hash 已讀回。
+
+新附件 `ack-db-rollback-lease-recovery`：故障計數=1；第一次真 accepted 後 receipt／
+context outcome／outbox metadata 全 rollback，保留 sending、attempt1、claim1 與 immutable hash。
+原 lease 為 `20:09:41.750Z → 20:11:41.750Z`，第二次 claim 在 `20:11:41.939Z`，
+自然到期後才重送；attempt2、fence2，兩次同 bytes/hash 與原 receipt、accepted→duplicate，
+只有一筆 durable inbox/native pending 與 acknowledged receipt。正式 repository 拒絕舊 fence1，
+完整 outcome 讀回不變。未修改 DB 時間、lease、policy，未自行 send／合成回執。
+
+新附件 `two-workers-one-claim`：兩個 PG backends（1827 與1846，後者 application_name=
+qa-partner-competitor）同時等 claim 鎖；第二個 AppModule OS PID18257，與 API process 分開。
+勝者只產生一次 attempt／HTTP／receipt；released fence1 的 replay 回 fence_lost，讀回不變。
+新增 process 在 finally 透過 AppModule.close 正常退出並驗 exit0；沒有背景檢查遺留。
+
+### R11 最小重現、caller 與產品修正邊界
+
+- 觸發序列：正式 POST `/api/platform-admin/partner-entries` 回201 → credential issue →
+  PUT 該 entry 的 notification-binding 回500。此時尚未呼叫本輪新增的 fault helpers。
+- 直接 DB 證據：第一輪完整 hosted log `hosted-068a990e-full.log:6271–6284`，
+  `phase1_partner_notification_bindings_entry_slug_fkey` 違反，key
+  `qa-notify-8cb96a5f` 不存在於 `phase1_partner_channel_entries`。API exception filter 抹成
+  INTERNAL_SERVER_ERROR；不能只從 API log 無 stack 推定沒有 DB 失敗。
+- 呼叫圖：`tenant-partner.controller.ts:832–840` 同步把 service 回值包成 success；
+  `tenant-partner.service.ts:createPlatformPartnerEntry:4880–4973` 先改 memory，:4943 呼叫
+  `persistChanges` 後直接 return；:15194–15222 的 helper 回傳 promise 且 catch persistence error。
+  Binding service `putBinding:85` → repository `put:179` 立即使用 V0104 正式 FK。
+- 最窄修復 scope 請 Supervisor 排給 agy：`tenant-partner.service.ts`、
+  `tenant-partner.controller.ts` 及相應 durability regression；需要 shared helper/repository
+  變更時先核對平行 scope。修復需等待真正 durable write 並正確傳遞失敗，不能只對成功 envelope
+  包 promise，也不能把 persistence error catch 吞掉後仍回201。
+- 搜過實際 callers：platform-admin `app/partners/page.tsx:355`、api-client `index.ts:3846`，
+  API service unit:1000、route binding service test:77、transport governance test:78。
+  同步 service callers／測試可能需一起調整；不得由 QA worker 直接改產品。
+- 必要回歸：真 PG 建立後立刻 binding PUT、延遲／拒絕 entry persistence、failed create 不留可用
+  memory-only entry、一般 entry 建立／既有 binding governance 及同 SHA partner矩陣。
+  6d6fdb77 的 QA readback 有10秒上限，只核對正式 rows，不修也不宣稱驗收產品的回應時序。
+
+### 單元6 本機與 CI
+
+Node22.23.2、pnpm10.33.0、Python3.12.3。本機只跑 repository checks：
+`pnpm exec tsc --noEmit -p .local/sr-partner-notify-qa-20260927-unit6/tsconfig.json`、
+QA E2E目錄 scoped ESLint、`git diff --check` 均exit0；`pnpm exec vitest run
+tests/unit/system-remediation/sr-partner-notify-qa-20260917/ --reporter=dot` **12 passed**；
+`python3 -m unittest tools.ci.test_tenant_uat_acceptance_workflow` **64 passed**。
+Playwright `--list --reporter=list` 收集 **19** 案，僅 discovery；沒有本機 runtime／DB／browser。
+四 dependency 的 merge commit仍是祖先；本輪兩程式 commits 的 trailer check exit0。
+
+[CI36345997544](https://github.com/ajoe734/drts-fleet-platform/actions/runs/36345997544)（068a990e）及
+[CI36346489291](https://github.com/ajoe734/drts-fleet-platform/actions/runs/36346489291)（6d6fdb77）
+已完成 **failure** 並讀 log：仍是17個 inherited trailers 與 scope外
+`partner-notification-https.ts:63` no-require-imports。Integration36345997642／36346489377
+completed success，但主要產品 jobs skipped，非 acceptance。沒有 force/rebase/amend。
+本機證據皆在此 task worktree `.local/sr-partner-notify-qa-20260927-unit6/`；
+原 logs/ZIP 包含 disposable hosted 資料，不複製進公開文件。後續文件 checkpoint 不冒稱 runtime SHA。
