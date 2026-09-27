@@ -44,3 +44,9 @@ Note: Old commits by the previous agent on this PR have invalid trailers. Becaus
 
 ### QA-R6: Unit Test Flakiness / Background Worker Conflict Fix
 Moved the execution of `harness_unit` (`sr-partner-notify-*/`) and `webhook_unit` to run *before* starting the real API server in `.github/workflows/tenant-uat-acceptance.yml`. This prevents the real API server's background notification delivery workers from polling and modifying the DB records concurrently with the unit tests, which was causing assertions like `expect(rows[0].attempt_count).toBe(2)` to fail intermittently with `expected 3 to be 2`.
+
+### QA-R7: E2E Network & State Setup Fixes
+Fixed three issues blocking the webhook E2E tests:
+1. Replaced invalid fully-qualified event strings (`passenger.assignment_disclosure_ready.v1`) with internal enums (`assignment_disclosure_ready`) in the binding API requests to fix `400 Bad Request`.
+2. Bypassed the API Server SSRF protection in UAT for local mock receivers using `DRTS_ALLOW_LOCAL_WEBHOOKS=true` to prevent the `dispatchFacade` from blocking HTTP calls to `127.0.0.1`.
+3. Corrected test sequence by calling `POST api/tenant/webhooks/test` to activate webhooks before testing the notification binding; previously, the API server rejected binding tests with `409 configuration_blocked` because the webhooks were still in `test_pending` state.
