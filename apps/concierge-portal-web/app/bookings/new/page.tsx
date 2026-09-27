@@ -123,7 +123,7 @@ export default function ConciergeBookingCreatePage() {
     bothDispatchReady: false,
   });
 
-  const [mapProviderMode, setMapProviderMode] = useState<AddressProviderMode>(
+  const [mapProviderMode] = useState<AddressProviderMode>(
     (process.env.NEXT_PUBLIC_ADDRESS_PICKER_PROVIDER_MODE as
       | AddressProviderMode
       | undefined) ?? "healthy"
