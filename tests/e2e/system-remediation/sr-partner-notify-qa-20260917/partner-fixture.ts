@@ -87,6 +87,9 @@ export class PartnerFixture {
       "x-request-id": `partner-qa-${randomUUID()}`,
       ...(token ? { Authorization: `Bearer ${token}` } : {}),
       ...(tenant ? { "x-tenant-id": tenant } : {}),
+      ...(method === "POST" && apiPath === "tenant/webhooks/test"
+        ? { "idempotency-key": randomUUID() }
+        : {}),
     };
     // The authoritative policy also gates tenant webhook creation/test/update.
     // Let it decide whether this exact action/session requires a proof.
