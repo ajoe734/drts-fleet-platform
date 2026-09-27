@@ -56,13 +56,15 @@ Patch SHA-256:
 Its entire scope is:
 
 - `apps/api/src/modules/multi-taxi/multi-taxi.repository.ts`
-- `apps/api/tests/integration/sr-partner-notify-fix-admin-20260927.integration.test.ts`
+- [apps/api/tests/integration/sr-partner-notify-fix-admin-20260927.integration.test.ts (old candidate)](https://github.com/ajoe734/drts-fleet-platform/blob/db7925251a8ac1ca68f64f1162710ea06ce8a92b/apps/api/tests/integration/sr-partner-notify-fix-admin-20260927.integration.test.ts)
 - `apps/platform-admin-web/app/control-plane-proxy/[...path]/route.ts`
 - `apps/platform-admin-web/lib/translations.ts`
 - `packages/control-plane-auth/src/index.ts`
-- `tests/unit/system-remediation/sr-partner-notify-fix-admin-20260927/tenant-auth.test.ts`
-- `docs/04-uat/system-remediation-20260906/SR-PARTNER-NOTIFY-FIX-ADMIN-20260927.md`
+- [tests/unit/system-remediation/sr-partner-notify-fix-admin-20260927/tenant-auth.test.ts (old candidate)](https://github.com/ajoe734/drts-fleet-platform/blob/db7925251a8ac1ca68f64f1162710ea06ce8a92b/tests/unit/system-remediation/sr-partner-notify-fix-admin-20260927/tenant-auth.test.ts)
+- [docs/04-uat/system-remediation-20260906/SR-PARTNER-NOTIFY-FIX-ADMIN-20260927.md (old candidate)](https://github.com/ajoe734/drts-fleet-platform/blob/db7925251a8ac1ca68f64f1162710ea06ce8a92b/docs/04-uat/system-remediation-20260906/SR-PARTNER-NOTIFY-FIX-ADMIN-20260927.md)
 
+The three linked files exist in the pinned old candidate and have not landed
+on the helper's base; the links deliberately identify that source version.
 All seven paths are in the parent's recorded write scopes; the diff is 208
 insertions and 5 deletions. `git apply --check` against the clean base exits 0.
 An isolated `GIT_INDEX_FILE` under the helper's `.local/admin-history-repair/`
@@ -182,6 +184,19 @@ new range, normal push, new numeric PR, fresh candidate**. Keep the parent's
 current lifecycle and original owner; do not reset an active candidate or claim
 product acceptance from this helper. The relay request is also in the helper's
 canonical progress/handoff so it is visible to Supervisor.
+
+A subsequent live parent readback shows `in_progress`, still owned by Gemini
+on the configured successor, with `next: Applying patch and implementing missing
+tests.` The original owner has resumed implementation. This observation does
+not imply the additional helper note was delivered or that R2 is fixed.
+
+Helper verification: the initial report commit `91fd8f9c5081c128da95f8b3dd7760a082939dfe`
+passed full-range trailer, whitespace and Prettier checks, but canonical
+consistency exited 1 because it interpreted the three old-only source files as
+local citations. This follow-up pins those citations to their actual published
+candidate. Each linked blob was checked with `git cat-file -e OLD:path`; the
+final report is rechecked with full-range trailers, `git diff --check`, Prettier
+and canonical consistency before handoff. The initial commit remains preserved.
 
 All checks started by this helper are completed before handoff. No project
 server, browser test server, Docker infrastructure or deployment was started.
