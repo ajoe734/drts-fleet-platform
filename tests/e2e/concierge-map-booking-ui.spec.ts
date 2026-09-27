@@ -340,6 +340,8 @@ test.describe("concierge map booking UI", () => {
                   code: "SERVICE_AREA_NOT_SERVICEABLE",
                   message: "Backend rejected provider address",
                   details: { path: "pickup" },
+                  retryable: false,
+                  traceId: "review-ui17-map",
                 },
               }),
             });
