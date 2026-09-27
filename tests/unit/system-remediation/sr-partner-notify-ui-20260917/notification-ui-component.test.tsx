@@ -85,7 +85,7 @@ describe("PartnerNotificationPanel", () => {
   });
 
   it("renders PartnerNotificationPanel and exercises interactions", async () => {
-    const { unmount } = render(
+    render(
       <PartnerNotificationPanel
         entrySlug="test-entry"
         tenantId="test-tenant"
@@ -494,7 +494,7 @@ describe("PartnerNotificationPanel", () => {
     mockClient.getPartnerEntryNotificationBinding.mockRejectedValueOnce(
       Object.assign(new Error("Forbidden"), { statusCode: 403 }),
     );
-    const { rerender, unmount } = render(
+    const { rerender } = render(
       <PartnerNotificationPanel
         entrySlug="test-entry"
         tenantId="test-tenant"
