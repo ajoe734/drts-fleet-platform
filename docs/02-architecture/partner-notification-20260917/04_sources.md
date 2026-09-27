@@ -14,3 +14,13 @@
 | State | Concurrency claim owner | partner-notification-uat.spec.ts (Concurrency claim owner) |
 | Retry | Max attempts (5x backoff) | partner-notification-uat.spec.ts (Retry limit backoff) |
 | Retry | Admin UI real state & manual retry | partner-notification-uat.spec.ts (Admin UI test) |
+
+## Acceptance Matrix
+
+- **A層 (Layer A)**: `controlled_receiver_verified` - Verified using internal GitHub-hosted workflow and controlled receivers.
+- **B/C層 (Layer B/C)**: 仍保留 `SR-LIVE-PUSH` gate。不能用受控 receiver 或 browsermock 稱真夥伴/裝置達標。
+
+## Pinned Candidate & Artifacts
+
+- **Candidate SHA**: `a2e2be7fa4d7198a84ee91a235773db5c8abe689`
+- **Report/Artifacts**: See UAT pipeline execution artifacts for full HTML and JSON test reports.
