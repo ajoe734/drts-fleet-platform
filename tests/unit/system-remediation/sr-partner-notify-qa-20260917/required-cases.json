@@ -338,6 +338,15 @@
       "SR-QA-TENANT-001 — tenant lifecycle (C102 平臺管理員 | 租戶生命週期與跨租戶治理) creates a platform tenant, then updates its settings and status, with each write visible on independent re-read",
       "SR-QA-TENANT-001 — tenant lifecycle (C102 平臺管理員 | 租戶生命週期與跨租戶治理) negative: creating a tenant with a code that already exists is rejected (TENANT_CODE_CONFLICT)",
       "SR-QA-TENANT-001 — tenant lifecycle (C102 平臺管理員 | 租戶生命週期與跨租戶治理) negative: transitioning the status of an unknown tenant is rejected instead of creating a phantom record (TENANT_NOT_FOUND)"
+    ],
+    "sr-partner-notify-qa-20260917/controlled-receiver.test.ts": [
+      "controlled receiver with production dispatch commits pending delivery before accepted and reopens with the same duplicate receipt",
+      "controlled receiver with production dispatch serializes concurrent duplicate requests into one durable pending delivery",
+      "controlled receiver with production dispatch rejects changed bytes under an existing notification identity with 409",
+      "controlled receiver with production dispatch rejects altered raw bytes, stale signatures and unrecognized secret versions",
+      "controlled receiver with production dispatch keeps tenant, entry and recipient checks independent of valid signing",
+      "controlled receiver with production dispatch returns 503 when durable storage is unavailable without an accepted receipt",
+      "controlled receiver with production dispatch accepts binding tests without scheduling native delivery and rejects the historical generic ack"
     ]
   },
   "partner_unit": {
@@ -347,6 +356,15 @@
       "partner transport environment isolation production/true: rejects loopback and mixed DNS while allowing public HTTPS",
       "partner transport environment isolation test/unset: rejects loopback and mixed DNS while allowing public HTTPS",
       "partner transport environment isolation test/false: rejects loopback and mixed DNS while allowing public HTTPS"
+    ],
+    "sr-partner-notify-qa-20260917/controlled-receiver.test.ts": [
+      "controlled receiver with production dispatch commits pending delivery before accepted and reopens with the same duplicate receipt",
+      "controlled receiver with production dispatch serializes concurrent duplicate requests into one durable pending delivery",
+      "controlled receiver with production dispatch rejects changed bytes under an existing notification identity with 409",
+      "controlled receiver with production dispatch rejects altered raw bytes, stale signatures and unrecognized secret versions",
+      "controlled receiver with production dispatch keeps tenant, entry and recipient checks independent of valid signing",
+      "controlled receiver with production dispatch returns 503 when durable storage is unavailable without an accepted receipt",
+      "controlled receiver with production dispatch accepts binding tests without scheduling native delivery and rejects the historical generic ack"
     ]
   },
   "webhook_unit": {

@@ -1,367 +1,225 @@
-import { test, expect } from "@playwright/test";
-import * as http from "node:http";
+import { test, expect, type APIRequestContext } from "@playwright/test";
 import { randomUUID } from "node:crypto";
-import { createRequire } from "node:module";
-import * as path from "node:path";
-
-import { UatNamespaceManager, createTenantPersonas } from "../shared";
-
-const apiRequire = createRequire(path.resolve("apps/api/package.json"));
-const { Pool } = apiRequire("pg") as { Pool: any };
+import { UatNamespaceManager } from "../shared";
+import { PartnerFixture } from "./partner-fixture";
 
 test.describe("SR-PARTNER-NOTIFY-QA-20260917: E2E Partner Notification Delivery & Fault Isolation", () => {
-  let receiverServer: http.Server;
-  let receiverUrl: string;
-  let requests: {
-    method: string;
-    url: string;
-    headers: http.IncomingHttpHeaders;
-    rawBody: string;
-  }[] = [];
-  let receiverStatus = 200;
-  let receiverDelay = 0;
-  let receiverBody = JSON.stringify({ ok: true, received: true });
-
-  let pool: any;
-
-  test.beforeAll(async () => {
-    receiverServer = http.createServer((req, res) => {
-      const chunks: Buffer[] = [];
-      req.on("data", (chunk: Buffer) => chunks.push(chunk));
-      req.on("end", () => {
-        const rawBody = Buffer.concat(chunks).toString("utf-8");
-        requests.push({
-          method: req.method ?? "UNKNOWN",
-          url: req.url ?? "",
-          headers: req.headers,
-          rawBody,
-        });
-        setTimeout(() => {
-          res.writeHead(receiverStatus, { "Content-Type": "application/json" });
-          res.end(receiverBody);
-        }, receiverDelay);
-      });
-    });
-    await new Promise<void>((resolve) =>
-      receiverServer.listen(0, "127.0.0.1", () => resolve()),
-    );
-    const address = receiverServer.address() as any;
-    receiverUrl = `http://127.0.0.1:${address.port}/webhook`;
-    pool = new Pool({
-      connectionString:
-        process.env.DATABASE_URL ||
-        "postgresql://postgres:postgres@localhost:5432/drts_fleet_platform",
-    });
+  test.describe.configure({ mode: "default" });
+  let fixture: PartnerFixture;
+  let client: APIRequestContext;
+  test.beforeAll(async ({ playwright }) => {
+    test.setTimeout(90_000);
+    // This private API context is not a browser tracing context: disposable
+    // credential issuance and bearer exchanges must not enter uploaded traces.
+    client = await playwright.request.newContext();
+    fixture = new PartnerFixture(client);
+    await fixture.start();
   });
-
   test.afterAll(async () => {
-    receiverServer.close();
-    await pool.end();
+    await fixture?.close();
+    await client?.dispose();
   });
-
   test.beforeEach(() => {
-    requests = [];
-    receiverStatus = 200;
-    receiverDelay = 0;
-    receiverBody = JSON.stringify({ ok: true, received: true });
+    fixture.fault = "none";
   });
 
-  const apiCall = async (
-    client: any,
-    tenant: string | null,
-    token: string,
-    method: "GET" | "POST" | "PUT",
-    path: string,
-    data?: unknown,
-  ) => {
-    const baseURL = client.baseURL || "http://127.0.0.1:4102";
-    const url = new URL(path, `${baseURL}/`).href;
-    const headers: Record<string, string> = {
-      Authorization: `Bearer ${token}`,
-    };
-    if (tenant) headers["x-tenant-id"] = tenant;
-    if (method === "POST" || method === "PUT") {
-      const stepUpRes = await client.post(
-        `${baseURL}/api/identity/step-up-proofs`,
-        {
-          headers: {
-            Authorization: `Bearer ${token}`,
-            ...(tenant ? { "x-tenant-id": tenant } : {}),
-          },
-          data: { method, path: `/${path}` },
-        },
-      );
-      if (stepUpRes.ok()) {
-        const envelope = await stepUpRes.json();
-        if (envelope.data?.step_up_reference) {
-          headers["x-drts-step-up-reference"] = envelope.data.step_up_reference;
-        }
-      }
-    }
-    return client.fetch(url, { method, headers, data: data ?? undefined });
+  const received = (outboxId: string) =>
+    fixture.requests.filter((r) => {
+      const payload = JSON.parse(r.rawBody);
+      return payload.data?.notification_id === outboxId;
+    });
+  const accepted = async (outboxId: string) => {
+    const row = await fixture.settled(outboxId);
+    expect(row).toMatchObject({
+      status: "delivered",
+      claim_state: "released",
+      delivery_stage: "partner_accepted",
+      retry_disposition: "none",
+      failure_reason: null,
+    });
+    expect(row.payload.partnerNotification).toMatchObject({
+      deliveryTarget: "partner_endpoint",
+      deliveryStage: "partner_accepted",
+      downstreamStatus: "unknown",
+      receiptId: row.receipt_id,
+    });
+    const inbox = (await fixture.receiver.records()).filter(
+      (r) => r.notificationId === outboxId,
+    );
+    expect(inbox).toHaveLength(1);
+    expect(inbox[0]).toMatchObject({
+      receiptId: row.receipt_id,
+      payloadHash: row.wire_payload_hash,
+      deliveryId: row.delivery_id,
+      nativeDelivery: "pending",
+    });
+    const receipts = (
+      await fixture.db.query(
+        `SELECT provider_message_ref FROM ops.phase1_push_delivery_receipts
+      WHERE outbox_id=$1 AND provider_ack_state='provider_acknowledged'`,
+        [outboxId],
+      )
+    ).rows;
+    expect(receipts).toEqual([{ provider_message_ref: row.receipt_id }]);
+    return row;
   };
 
-  const insertOutbox = async (
-    tenantId: string,
-    entrySlug: string,
-    orderId: string,
-  ) => {
-    const outboxId = randomUUID();
-    const partnerId = `p_${randomUUID().replace(/-/g, "").slice(0, 8)}`;
-    await pool.query(
-      `INSERT INTO mobility.phase1_order_partner_notification_routes (
-        order_id, tenant_id, partner_id, entry_slug, partner_user_ref,
-        drts_passenger_id, passenger_subject_ref, identity_linked_at,
-        consent_bundle_version, notification_policy_version, ride_ref,
-        created_at
-      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
-      ON CONFLICT DO NOTHING`,
-      [
-        orderId,
-        tenantId,
-        partnerId,
-        entrySlug,
-        "user-ref",
-        "pass-id",
-        "subject-ref",
-        new Date(),
-        1,
-        1,
-        "ride-ref",
-        new Date(),
-      ],
-    );
-    await pool.query(
-      `INSERT INTO ops.consumer_notification_outbox (
-        outbox_id, order_id, passenger_subject_ref, event_type, assignment_version,
-        payload, next_attempt_at, created_at, status, attempt_count
-      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
-      [
+  test("C201 E2E: Worker positive delivery path", async () => {
+    const testInfo = test.info();
+    const entry = fixture.entries[0]!;
+    const orderId = await fixture.createRide(entry);
+    const outboxId = await fixture.enqueue(orderId);
+    const row = await accepted(outboxId);
+    expect(row.attempt_count).toBe(1);
+    expect(received(outboxId)).toHaveLength(1);
+    const wire = JSON.parse(received(outboxId)[0]!.rawBody);
+    expect(wire).toMatchObject({
+      tenant_id: entry.entry.tenantId,
+      delivery_id: row.delivery_id,
+      data: {
+        notification_id: outboxId,
+        partner_entry_slug: entry.entry.entrySlug,
+        recipient: { partner_user_ref: entry.partnerUserRef },
+        ride_ref: orderId,
+        event_sequence: 1,
+      },
+    });
+    await testInfo.attach("controlled-delivery", {
+      contentType: "application/json",
+      body: JSON.stringify({
+        candidate_sha: process.env.CANDIDATE_SHA,
         outboxId,
         orderId,
-        "subject-ref",
-        "receipt_ready",
-        1,
-        JSON.stringify({ eventSequence: 1 }),
-        new Date(),
-        new Date(),
-        "pending",
-        0,
-      ],
-    );
-    return outboxId;
-  };
-
-  const waitForWorker = async (outboxId: string) => {
-    for (let i = 0; i < 60; i++) {
-      const res = await pool.query(
-        "SELECT status, attempt_count FROM ops.consumer_notification_outbox WHERE outbox_id = $1",
-        [outboxId],
-      );
-      if (
-        res.rows.length > 0 &&
-        res.rows[0].status !== "pending" &&
-        res.rows[0].status !== "sending"
-      ) {
-        return res.rows[0];
-      }
-      await new Promise((r) => setTimeout(r, 200));
-    }
-    throw new Error("Worker timeout");
-  };
-
-  test("C201 E2E: Worker positive delivery path", async ({ request }) => {
-    test.setTimeout(30000);
-    const namespaceManager = UatNamespaceManager.getInstance();
-    const shardNs = namespaceManager.createShardNamespace({
-      shardIndex: 0,
-      taskId: "SR-PARTNER-NOTIFY-QA-20260917",
+        wire,
+        receiptId: row.receipt_id,
+        payloadHash: row.wire_payload_hash,
+        boundary: "hosted controlled receiver; native delivery not executed",
+      }),
     });
-    const tenantId = shardNs.tenantA.tenantId;
-    const personas = createTenantPersonas(shardNs.tenantA);
-    const adminToken = personas.admin.platformAuthToken;
-
-    const entrySlug = `tst-${randomUUID().slice(0, 6)}`;
-    const createRes = await apiCall(
-      request,
-      tenantId,
-      process.env.DRTS_UAT_TOKEN_PLATFORM!,
-      "POST",
-      "api/platform-admin/partner-entries",
-      {
-        name: "Positive Test Partner",
-        entrySlug,
-        capabilities: { notificationBinding: true },
-      },
-    );
-    expect(createRes.status()).toBe(201);
-
-    const webhookRes = await apiCall(
-      request,
-      tenantId,
-      adminToken,
-      "POST",
-      "api/tenant/webhooks",
-      {
-        url: receiverUrl,
-        eventTypes: ["partner_notification.*"],
-        secretMode: "generated",
-      },
-    );
-    const webhookData = (await webhookRes.json()).data;
-    const webhookId = webhookData.webhook.webhookId;
-
-    const enableRes = await apiCall(
-      request,
-      tenantId,
-      process.env.DRTS_UAT_TOKEN_PLATFORM!,
-      "POST",
-      `api/platform-admin/partner-entries/${entrySlug}/notification-binding/enable`,
-      {
-        webhookId,
-        eventTypes: ["receipt_ready"],
-        expectedVersion: 1,
-      },
-    );
-    expect(enableRes.status()).toBe(200);
-
-    const outboxId = await insertOutbox(tenantId, entrySlug, randomUUID());
-    const row = await waitForWorker(outboxId);
-
-    expect(row.status).toBe("delivered");
-    expect(requests.length).toBeGreaterThan(0);
-    expect(requests[0].headers["x-drts-webhook-delivery-id"]).toBeTruthy();
   });
 
-  test("C202 E2E: Transport timeout triggers retry", async ({ request }) => {
-    test.setTimeout(30000);
-    const namespaceManager = UatNamespaceManager.getInstance();
-    const shardNs = namespaceManager.createShardNamespace({
-      shardIndex: 1,
-      taskId: "SR-PARTNER-NOTIFY-QA-20260917",
+  test("C202 E2E: Transport timeout triggers retry", async () => {
+    test.setTimeout(70_000);
+    const orderId = await fixture.createRide(fixture.entries[0]!);
+    fixture.fault = "timeout";
+    const outboxId = await fixture.enqueue(orderId);
+    const failed = await fixture.settled(outboxId);
+    expect(failed).toMatchObject({
+      status: "failed",
+      attempt_count: 1,
+      claim_state: "released",
+      failure_reason: "provider_transient_error",
+      retry_disposition: "automatic",
+      receipt_id: null,
     });
-    const tenantId = shardNs.tenantA.tenantId;
-    const adminToken = createTenantPersonas(shardNs.tenantA).admin
-      .platformAuthToken;
-    const entrySlug = `timeout-${randomUUID().slice(0, 6)}`;
-    await apiCall(
-      request,
-      tenantId,
-      process.env.DRTS_UAT_TOKEN_PLATFORM!,
-      "POST",
-      "api/platform-admin/partner-entries",
-      { name: "Test", entrySlug, capabilities: { notificationBinding: true } },
-    );
-    const webhookRes = await apiCall(
-      request,
-      tenantId,
-      adminToken,
-      "POST",
-      "api/tenant/webhooks",
-      {
-        url: receiverUrl,
-        eventTypes: ["partner_notification.*"],
-        secretMode: "generated",
-      },
-    );
-    const webhookId = (await webhookRes.json()).data.webhook.webhookId;
-    await apiCall(
-      request,
-      tenantId,
-      process.env.DRTS_UAT_TOKEN_PLATFORM!,
-      "POST",
-      `api/platform-admin/partner-entries/${entrySlug}/notification-binding/enable`,
-      { webhookId, eventTypes: ["receipt_ready"], expectedVersion: 1 },
-    );
-
-    receiverDelay = 3000;
-    const outboxId = await insertOutbox(tenantId, entrySlug, randomUUID());
-    const row = await waitForWorker(outboxId);
-
-    expect(row.status).toBe("failed");
-    expect(row.attempt_count).toBeGreaterThan(0);
+    expect(received(outboxId)).toHaveLength(1);
+    const before = (await fixture.receiver.records()).find(
+      (r) => r.notificationId === outboxId,
+    )!;
+    expect(before.nativeDelivery).toBe("pending");
+    fixture.fault = "none";
+    // Let the sole real worker reach its policy's nextAttemptAt. Do not alter
+    // DB times, invoke send ourselves, or use a second retry scheduler.
+    await expect
+      .poll(async () => (await fixture.outcome(outboxId))?.status, {
+        timeout: 45_000,
+        intervals: [500],
+      })
+      .toBe("delivered");
+    const row = await accepted(outboxId);
+    expect(row.attempt_count).toBe(2);
+    expect(row.receipt_id).toBe(before.receiptId);
+    expect(received(outboxId)).toHaveLength(2);
+    expect(received(outboxId)[0]!.rawBody).toBe(received(outboxId)[1]!.rawBody);
   });
 
   test("C203 E2E: Missing route triggers 404/permanent failure", async () => {
-    test.setTimeout(30000);
-    const outboxId = randomUUID();
-    await pool.query(
-      `INSERT INTO ops.consumer_notification_outbox (
-        outbox_id, order_id, passenger_subject_ref, event_type, assignment_version,
-        payload, next_attempt_at, created_at, status, attempt_count
-      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
-      [
-        outboxId,
-        randomUUID(),
-        "sub",
-        "receipt_ready",
-        1,
-        JSON.stringify({ eventSequence: 1 }),
-        new Date(),
-        new Date(),
-        "pending",
-        0,
-      ],
-    );
-    const row = await waitForWorker(outboxId);
-    expect(row.status).toBe("failed");
+    const orderId = await fixture.createRide();
+    const outboxId = await fixture.enqueue(orderId, "missing_route");
+    const row = await fixture.settled(outboxId);
+    expect(row).toMatchObject({
+      status: "failed",
+      attempt_count: 1,
+      claim_state: "released",
+      delivered_at: null,
+      delivery_id: null,
+      receipt_id: null,
+    });
+    expect(row.payload.partnerNotification).toMatchObject({
+      failureReason: "route_missing",
+      retryDisposition: "manual_only",
+      deliveryStage: null,
+      receiptId: null,
+    });
+    expect(received(outboxId)).toHaveLength(0);
+    expect(
+      (await fixture.receiver.records()).filter(
+        (r) => r.notificationId === outboxId,
+      ),
+    ).toHaveLength(0);
+    // Several actual scheduler polls must leave this refused record untouched.
+    await new Promise((resolve) => setTimeout(resolve, 2_200));
+    expect((await fixture.outcome(outboxId))!.attempt_count).toBe(1);
+    expect(received(outboxId)).toHaveLength(0);
   });
 
-  test("C204 E2E: Receiver invalid ack (HTTP 204 with payload) handling", async ({
-    request,
-  }) => {
-    test.setTimeout(30000);
-    const namespaceManager = UatNamespaceManager.getInstance();
-    const shardNs = namespaceManager.createShardNamespace({
-      shardIndex: 2,
-      taskId: "SR-PARTNER-NOTIFY-QA-20260917",
+  test("C204 E2E: Receiver invalid ack (HTTP 204 with payload) handling", async () => {
+    const orderId = await fixture.createRide(fixture.entries[0]!);
+    fixture.fault = "invalid_ack";
+    const outboxId = await fixture.enqueue(orderId);
+    const row = await fixture.settled(outboxId);
+    expect(row).toMatchObject({
+      status: "failed",
+      attempt_count: 1,
+      claim_state: "released",
+      failure_reason: "partner_ack_invalid",
+      retry_disposition: "manual_only",
+      receipt_id: null,
     });
-    const tenantId = shardNs.tenantA.tenantId;
-    const adminToken = createTenantPersonas(shardNs.tenantA).admin
-      .platformAuthToken;
-    const entrySlug = `invack-${randomUUID().slice(0, 6)}`;
-    await apiCall(
-      request,
-      tenantId,
-      process.env.DRTS_UAT_TOKEN_PLATFORM!,
-      "POST",
-      "api/platform-admin/partner-entries",
-      { name: "Test", entrySlug, capabilities: { notificationBinding: true } },
-    );
-    const webhookRes = await apiCall(
-      request,
-      tenantId,
-      adminToken,
-      "POST",
-      "api/tenant/webhooks",
-      {
-        url: receiverUrl,
-        eventTypes: ["partner_notification.*"],
-        secretMode: "generated",
-      },
-    );
-    const webhookId = (await webhookRes.json()).data.webhook.webhookId;
-    await apiCall(
-      request,
-      tenantId,
-      process.env.DRTS_UAT_TOKEN_PLATFORM!,
-      "POST",
-      `api/platform-admin/partner-entries/${entrySlug}/notification-binding/enable`,
-      { webhookId, eventTypes: ["receipt_ready"], expectedVersion: 1 },
-    );
-
-    receiverStatus = 204;
-    receiverBody = JSON.stringify({
-      some_garbage_because_204_should_have_no_body: true,
-    });
-
-    const outboxId = await insertOutbox(tenantId, entrySlug, randomUUID());
-    const row = await waitForWorker(outboxId);
-
-    expect(row.status).toBe("failed");
-    expect(row.attempt_count).toBeGreaterThan(0);
+    expect(received(outboxId)).toHaveLength(1);
+    expect(
+      (await fixture.receiver.records()).filter(
+        (r) => r.notificationId === outboxId,
+      ),
+    ).toHaveLength(1);
+    await new Promise((resolve) => setTimeout(resolve, 2_200));
+    expect((await fixture.outcome(outboxId))!.attempt_count).toBe(1);
+    expect(received(outboxId)).toHaveLength(1);
   });
 
+  test("C206 E2E: Same tenant entries deliver only to the original entry", async () => {
+    const [first, second] = fixture.entries;
+    expect(first!.entry.tenantId).toBe(second!.entry.tenantId);
+    expect(first!.entry.entrySlug).not.toBe(second!.entry.entrySlug);
+    for (const entry of [first!, second!]) {
+      const outboxId = await fixture.enqueue(await fixture.createRide(entry));
+      await accepted(outboxId);
+      expect(received(outboxId)).toHaveLength(1);
+      expect(
+        JSON.parse(received(outboxId)[0]!.rawBody).data.partner_entry_slug,
+      ).toBe(entry.entry.entrySlug);
+    }
+  });
+
+  test("C207 E2E: Same URL across tenants preserves recipient isolation", async () => {
+    const [first, , otherTenant] = fixture.entries;
+    expect(first!.entry.tenantId).not.toBe(otherTenant!.entry.tenantId);
+    expect(first!.webhookId).not.toBe(otherTenant!.webhookId);
+    for (const entry of [first!, otherTenant!]) {
+      const outboxId = await fixture.enqueue(await fixture.createRide(entry));
+      await accepted(outboxId);
+      expect(received(outboxId)).toHaveLength(1);
+      expect(JSON.parse(received(outboxId)[0]!.rawBody)).toMatchObject({
+        tenant_id: entry.entry.tenantId,
+        data: {
+          partner_entry_slug: entry.entry.entrySlug,
+          recipient: { partner_user_ref: entry.partnerUserRef },
+        },
+      });
+    }
+  });
+
+  // QA-R5 remains open: inherited UI case awaits its independent repair unit.
   test("C205 E2E: Admin UI displays notification binding and enables retry", async ({
     page,
   }) => {
