@@ -3,8 +3,8 @@
 Owner: Codex（2026-09-27 Supervisor 直接交接）；Reviewer: Codex2。
 狀態：修復中，尚無新的 review candidate。交接 checkpoint 為
 `91b1d4ac122b1373ac7beb05df902cb991b62232`，沿用既有實作與發布歷史。
-最新程式 checkpoint `0638617e08b2773870b4813081c3e2446af414a9`：hosted partner
-13 passed／1 failed（C205）／0 skipped；完整結果、限制與 scope 阻塞見「修復單元4」。
+最新程式 checkpoint `8c23e9a07fdd6ed858199f06a180325d356d5179`：hosted partner
+15 passed／2 failed（C205、C218）／0 skipped；完整結果、限制與新增 R10 scope 阻塞見「修復單元5」。
 
 ## 證據規則與撤回
 
@@ -466,13 +466,85 @@ R1 完整故障矩陣、R5 NAV/UI、R8/R9 publication/scope blockers 仍開放�
 
 | Finding／驗收項 | 原始碼依據與修改位置 | 舊版 → 本單元 | 證據與邊界 | 未驗項 |
 | --- | --- | --- | --- | --- |
-| R1／C213 timeout後durable duplicate | `ControlledReceiver` fsync/rename、`PartnerNotificationWorker`、transport immutable context；spec C213、fixture `reopenReceiver` | c68f4908 缺此case → 增加 accepted後timeout、重建receiver物件讀disk、真backoff重送同bytes/receipt/duplicate斷言 | receiver只是外部邊界；不改 worker/DB時間，不手動send；reopen不是OS process restart | hosted待驗；C214–C216 DB/lease/多worker/restart仍缺 |
-| R1／C218 relevance | `OwnedMobilityRepository.persistChanges`、`findPartnerNotificationRelevance`、transport `resolve`、`cancelOwnedOrder`；`synthetic-event.ts`、enqueue、spec | c68f4908 缺case → v1正常ETA、v2 snapshot後v1 superseded、v2正常ETA、正式取消API後arrival obsolete、receipt獨立成功 | 上游snapshot/event為明列synthetic fixture，使用完整正式型別及repository transaction；不驗收派車/driver資格流程、不複製relevance SQL | hosted待驗 |
-| R1／C220 缺設定availability | `MultiTaxiModule` DI、adapter/transport `isAvailableFor`、façade `resolveNotificationRoute`；第四entry fixture、`probe-availability.ts`、spec | c68f4908 缺case → 無binding/test_pending皆零外送；正式test/enable後route available、新事件可送，舊held不自動解封 | hosted compiled full AppModule context、真repositories、無provider override；context正常scheduler啟動/關閉，只在hosted | hosted待驗；不作device證據 |
+| R1／C213 timeout後durable duplicate | `ControlledReceiver` fsync/rename、`PartnerNotificationWorker`、transport immutable context；spec C213、fixture `reopenReceiver` | c68f4908 缺此case → 8c23e9a0 hosted passed：accepted後timeout、重建receiver物件讀disk、真backoff重送同bytes/receipt/duplicate | receiver只是外部邊界；不改 worker/DB時間，不手動send；reopen不是OS process restart | C214–C216 DB/lease/多worker/restart仍缺 |
+| R1／C218 relevance → 新 R10 | `OwnedMobilityRepository.persistChanges`、`findPartnerNotificationRelevance`、transport `resolve`、`cancelOwnedOrder`；`synthetic-event.ts`、enqueue、spec | c68f4908 缺case → 8c23e9a0 hosted failed：第一筆snapshot即正式repository SQL42P08，後續ETA／取消arrival／receipt斷言未執行 | 上游snapshot/event為明列synthetic fixture，使用完整正式型別及repository transaction；不驗收派車/driver資格流程、不複製relevance SQL | 產品SQL修復需scope/child，詳下方最小重現；**不是C218通過** |
+| R1／C220 缺設定availability | `MultiTaxiModule` DI、adapter/transport `isAvailableFor`、façade `resolveNotificationRoute`；第四entry fixture、`probe-availability.ts`、spec | c68f4908 缺case → 8c23e9a0 hosted passed：無binding/test_pending皆零外送；正式test/enable後route available、新事件可送，舊held不自動解封 | hosted compiled full AppModule context、真repositories、無provider override；context正常scheduler啟動/關閉，只在hosted | 不作device證據 |
 | R5／C205、R8／R9 | 原產品日期DTO/picker/translation、transport lint、17 inherited trailers | 保留單元4已定位產品／publication blockers；本單元不改scope外檔案 | 需Supervisor排原owner修復child／scope與preserving-refs history recovery | UI/NAV与合格review/CI/merge仍未完成 |
 
 本機初次 typecheck exit2：synthetic address 使用不合法 `geocodeConfidence=high`，
 已依正式 union 改 `manual`；這是 fixture 型別錯誤，不算產品缺陷重現。
 ESLint與diff check exit0；QA unit 12 passed；Playwright `--list` 收集17案，只是discovery。
 正式C201–C224 manifest保持24必需case與sameSHA gate，未降低要求。
-所有runtime結果待hosted證據補入，三項required_acceptance仍 **NOT MET**。
+三項required_acceptance仍 **NOT MET**；下列hosted結果不代表全24案例完成。
+
+### 單元5 同 SHA 結果（已結束並讀完）
+
+程式 `8c23e9a07fdd6ed858199f06a180325d356d5179`，
+[run36344513008/job108690910239](https://github.com/ajoe734/drts-fleet-platform/actions/runs/36344513008/job/108690910239)
+completed **failure**，partner **15 passed／2 failed／0 skipped／0 flaky**。
+C201–C204、C206–C213、C217、C219、C220 passed；C205與C218 failed。
+Artifact **10940415836**，ZIP SHA256
+`ce1d2c4fd1edaf4289e2a3330d0c0160437947b56de8b9efa2fd5e1bbe1454eb`。
+dispatch命令：`gh workflow run tenant-uat-acceptance.yml --ref codex/sr-partner-notify-qa-20260917
+-f candidate_sha=8c23e9a07fdd6ed858199f06a180325d356d5179`，exit0；下載ZIP、hash、
+report逐case與execution候選/工作流SHA均核對，原始證據存
+`.local/sr-partner-notify-qa-20260927-unit5/artifact-8c23e9a0/`。
+
+同 SHA tenant/partner unit **291/291**（三PG suites各 **7/7**）、webhook unit **34/34**、
+tenant HTTP **10/10**、webhook E2E **1/1**；既有 C111–C115 report passed、restart verified **15**。
+Partner獨立unit step **skipped**，strict gate **failed**，run-status=failed。舊gates／外部限制未變。
+兩個新增passed案例的JSON附件 `durable-receiver-reopen`、`route-availability` 已讀回：
+C213只有一筆durable inbox、兩次同hash的request、原receipt accepted→duplicate；
+C220正式DI為partner_webhook，serviceAvailable=false，route readiness false→true，
+兩筆held皆一次attempt／零receiver request，新事件取得真受控receipt。
+
+C205同run真browser trace仍有React #31；deliveries HTTP200中的created_at/expires_at/
+next_attempt_at皆{}；tenant/webhooks HTTP400 `TENANT_ID_REQUIRED`。實際serializer+React
+最小probe：`./apps/api/node_modules/.bin/tsx --tsconfig apps/api/tsconfig.json
+.local/sr-partner-notify-qa-20260927-unit5/probe-ui-date.ts` exit0＝成功重現缺陷，不是產品通過。
+DTO／授權picker／translation修復仍交Supervisor排原owner/scope，不解除auth blocklist。
+
+### 新 finding R10：正式 disclosure snapshot SQL 參數衝突
+
+- 觸發：`enqueue-notification.ts` 呼叫正式 `OwnedMobilityRepository.persistChanges`，
+  在真migration schema中同transaction存一筆符合 `PassengerDispatchDisclosureSnapshot`
+  型別的version1 snapshot與ETA outbox。沒有手寫snapshot SQL或替代schema。
+- 實際：第一個snapshot寫入即 **PostgreSQL42P08**，`inconsistent types deduced for parameter $7`，
+  detail=`text versus timestamp with time zone`。compiled stack指
+  `owned-mobility.repository.js:1320` → `withTransaction` → `persistChanges` → enqueue main:57。
+  API/build/PG可用、套件完整；不是缺套件或測試自己SQL的錯誤。C218所有後續通知斷言未到達。
+- 靜態定位：`apps/api/src/modules/owned-mobility/owned-mobility.repository.ts:1803–1843`
+  的 `persistChangesWithExecutor`，同 `$7` 用於 `superseded_at=$7`、
+  `to_jsonb($7::text)` 與 INSERT `created_at`。正式 V0056 的兩日期欄皆timestamptz。
+  c68f4908與8c23e9a0產品檔完全相同；舊checkpoint沒有C218，**未聲稱舊SHA動態跑過**。
+- caller範圍：`persistChanges` 與 `persistOrderWorkflow` 共用此函式；
+  `OwnedMobilityService` 的 reassign durable workflow（snapshot caller:5256）及
+  `applyDispatchAssignmentBundle`（:10660）均可帶snapshot。真派車受影響是依呼叫圖推論，
+  本輪只動態重現repository路徑，沒有宣稱跑過整個派車API。
+- 修復邊界：請Supervisor核對平行scope並交agy產品owner，最窄產品檔為
+  `apps/api/src/modules/owned-mobility/owned-mobility.repository.ts`；統一明確參數型別，
+  同時保留JSON日期格式、supersede規則、snapshot/outbox/sequence的原交易。
+  必要回歸：真PG初次snapshot、v2 supersede v1、重放不多配置sequence、錯誤整筆rollback、
+  同SHA C218正向ETA/過期指派拒送/取消後arrival拒送/receipt獨立。
+  QA write_scopes沒有該產品檔，不能直接改碼、改fixture成手寫SQL或降低assertion。
+- 可重跑probe：既有hosted workflow在同SHA用C218（或完整partner spec），
+  fixture會自行建立合法entry/identity/order並呼叫該正式repository；API/PG/browser只能hosted。
+  具體命令、錯誤與stack在 `hosted-8c23e9a0-failed.log:63–105` 與上列artifact的partner JSON。
+
+### 單元5 本機與 publication 檢查
+
+本機 Node22.23.2、pnpm10.33.0、Python3.12.3；scoped tsc修正fixture enum後exit0、
+scoped ESLint exit0、QA unit **12 passed**、workflow unittest **64 passed**、
+Playwright `--list --reporter=list` **17**案（discovery）、`git diff c68f4908 --check` exit0。
+`python3 tools/ci/git/check_commit_trailers.py --base c68f4908 --head HEAD`：兩個程式提交pass；
+曾誤用缺少git/的script路徑exit2，已改正，不算check成功。四dependency merge仍是祖先。
+
+[CI36344323807](https://github.com/ajoe734/drts-fleet-platform/actions/runs/36344323807)（a4a790af）與
+[CI36344493261](https://github.com/ajoe734/drts-fleet-platform/actions/runs/36344493261)（8c23e9a0）
+均completed **failure**並讀完：17 inherited trailers與scope外transport no-require-imports。
+Integration36344323797／36344493214 completed success，但主要產品jobs **skipped**，不是acceptance。
+所有本單元程式checks均已結束、讀取結果；後續docs checkpoint不冒充本程式SHA的runtime。
+
+仍缺C214–C216、C221–C224共 **7** 個必需case；C218新增但由R10阻塞，C205由R5阻塞。
+R8/R9 publication/scope限制保留。三項required_acceptance全部 **NOT MET**；
+未handoff、未merge、未稱A層verified，B/C真夥伴／native device gates均未執行。

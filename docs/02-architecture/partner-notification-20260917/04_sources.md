@@ -9,22 +9,22 @@
 | Scenario                                         | 正式期望與現有位置                                                                                             | 驗收狀態                                               |
 | ------------------------------------------------ | -------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------ |
 | 正向worker delivery                              | C201；200/201/202 + 相符durable accepted/duplicate receipt；partner_accepted，downstream unknown               | 58081594 C201真worker/PG/receiver passed（非全矩陣）   |
-| accepted後timeout與dedupe                        | C202；大於10秒deadline、同notification/delivery/body hash、同receipt duplicate、只入列一次                     | 58081594 C202 passed；同bytes/receipt duplicate        |
+| accepted後timeout與dedupe                        | C202/C213；大於10秒deadline、同notification/delivery/body hash、同receipt duplicate、只入列一次                     | 8c23e9a0 C202/C213 passed；C213重建receiver物件讀durable inbox |
 | 缺route                                          | C203；typed route_missing/manual_only、不猜entry、receiver count=0                                             | 58081594 C203 passed；typed reason、零外送             |
 | 204、HTML200、錯receipt                          | C204/C212；partner_ack_invalid/manual_only，不能自動retry                                                      | 8039453e C204與C212五種invalid ack均passed             |
 | 同tenant兩entry、跨tenant同URL、同住戶兩App      | 僅原entry/tenant/subject收到，payload不串單                                                                    | 0638617e C206/C207/C208 passed；C208含resolve隔離       |
 | entry移轉與link撤銷                              | 舊消息不移轉；owner_changed/manual_only與recipient_revoked/terminal；零外送                                    | 0638617e C209/C210 passed；C210注入撤銷狀態，非撤銷API驗收 |
-| endpoint停用、secret輪替重測、未配置availability | 明確configuration_blocked；測試就緒後才enable                                                                  | 0638617e C211 passed；availability C220仍缺             |
+| endpoint停用、secret輪替重測、未配置availability | 明確configuration_blocked；測試就緒後才enable                                                                  | 8c23e9a0 C211/C220 passed；full AppModule route readiness false→true |
 | ack後DB失敗、lease/fence、兩worker競爭           | durable transaction、舊fence不可commit、dedupe且單retry owner                                                  | PG歷史21/21；缺整合fault evidence                      |
 | maxAttempts=5與expiry                            | 總共五次、最多四次retry、超expiresAt停止                                                                       | 8039453e C217過期零外送passed；C216仍缺                 |
-| 舊ETA、取消後舊到場、payload confidentiality     | superseded/obsolete terminal；缺driver情報不洩漏敏感資料                                                       | 8039453e C219真wire allowlist passed；C218仍缺          |
+| 舊ETA、取消後舊到場、payload confidentiality     | superseded/obsolete terminal；缺driver情報不洩漏敏感資料                                                       | 8c23e9a0 C219 passed；C218正式repository SQL42P08，後續未驗 |
 | admin readiness/stage/failure與手動retry         | C205；真route/auth、點control、觀察request及durable readback                                                   | C205真browser fail：日期DTO為{}，React崩潰；picker400  |
 | notification-navigation                          | fresh single-use handoff、HttpOnly session、returnTo、最新ride readback、錯entry/subject/logout/account switch | 缺hosted runtime案例                                   |
 | 一般tenant webhook C111–C115與restart            | 獨立既有gate不可由partner數量取代                                                                              | 8039453e既有reports passed；tenant restart verified15 |
 
 ## Acceptance Matrix
 
-- `integrated_controlled_receiver_negative_matrix_same_sha`：**NOT MET**（R1/R2/R6/R9）。
+- `integrated_controlled_receiver_negative_matrix_same_sha`：**NOT MET**（R1/R2/R6/R9/R10）。
 - `navigation_and_admin_ui_hosted_real_runtime_evidence`：**NOT MET**（R5）。
 - `existing_webhook_tenant_gates_preserved_and_live_not_claimed`：**NOT MET**（R2/R3/R9）。
 
@@ -124,3 +124,33 @@ restart verified15 passed；partner獨立unit step skipped、strict gate failed�
 歷史trailers及scope外transport lint失敗，integration主要jobs skipped。新增程式scoped tsc/lint
 通過、本機QA12 passed（boundary）；無VM服務、handoff或live/device完成宣稱。
 C213–C216、C218、C220–C224共10個必需case仍缺，R5/R8/R9 blockers與三項acceptance **NOT MET** 保留。
+
+## 單元5 source／case 邊界
+
+最新程式 `8c23e9a07fdd6ed858199f06a180325d356d5179`，
+[run36344513008/job108690910239](https://github.com/ajoe734/drts-fleet-platform/actions/runs/36344513008/job/108690910239)
+completed **failure**：partner **15 passed／2 failed（C205、C218）／0 skipped**。
+新增 C213/C220 passed；Artifact10940415836，ZIP SHA256
+`ce1d2c4fd1edaf4289e2a3330d0c0160437947b56de8b9efa2fd5e1bbe1454eb`。
+同SHA unit291（PG21）、webhook34、tenant HTTP10、webhook E2E1、C111–C115與restart15
+皆passed；partner独立unit step skipped、strict gate failed。原gates及B/C live限制全保留。
+
+C213沿真10秒timeout及30秒backoff，在外部receiver物件重建後從fsynced inbox讀原receipt，
+兩次request完全相同bytes/hash，第二次回duplicate，只有一筆pending native delivery；
+沒有真的原生投遞，也不是receiver OS process restart。C220以正式API建立第四entry但不綁定，
+無binding/test_pending都configuration_blocked且零外送；`probe-availability.ts` 在hosted
+啟動／關閉compiled full AppModule context、真DI/repos，route readiness false→true；
+只有正式test/enable後的新事件可送，舊held不自動解封，沒有provider override或fallback。
+
+C218第一次正式 `OwnedMobilityRepository.persistChanges` 即遇 **42P08**：
+`persistChangesWithExecutor` snapshot CTE同 `$7` 用於timestamptz及text，
+`text versus timestamp with time zone`；不是fixture自己SQL。完整typed snapshot是明列的
+上游synthetic邊界，正式migration/schema/repository/transaction未mock；未驗派車資格流程。
+新 **R10** 請Supervisor安排agy修復child/scope：
+`apps/api/src/modules/owned-mobility/owned-mobility.repository.ts:1803–1843`，
+保留snapshot/outbox/sequence原子性並回歸初次/v2 supersede/replay/rollback/C218。
+最小重現、實際stack、affected callers及修正邊界均沿用原UAT artifact「單元5」，不繞過產品SQL。
+
+C205真browser仍React31／Date→{}／picker400；R5/R8/R9原scope/history blockers仍在。
+C214–C216、C221–C224 **7**案未實作，C218已實作但阻塞；三項required_acceptance **NOT MET**。
+沒有handoff／merge／真夥伴或裝置驗收宣稱。
