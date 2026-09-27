@@ -990,6 +990,10 @@ test.describe("SR-PARTNER-NOTIFY-QA-20260917: E2E Partner Notification Delivery 
     // The approved production policy waits 30+60+120+240 seconds. Do not
     // shorten it, rewrite due dates, or invoke the worker manually.
     test.setTimeout(600_000);
+    // Natural retry waits outlive the original workflow's fixture auth age.
+    // Provision fresh durable sessions while the existing authority is valid;
+    // production JWT/step-up TTLs and all notification timing stay unchanged.
+    await fixture.provisionFreshSessions();
     const entry = fixture.entries[0]!;
     fixture.fault = "unavailable";
     const outboxId = await fixture.enqueue(await fixture.createRide(entry));

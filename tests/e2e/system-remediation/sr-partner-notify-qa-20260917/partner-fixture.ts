@@ -177,6 +177,7 @@ export class PartnerFixture {
     this.directory = await mkdtemp(
       path.join(tmpdir(), "partner-hosted-receiver-"),
     );
+    await this.provisionFreshSessions();
     this.receiver = new ControlledReceiver(this.directory, this.scopes);
     this.server = createServer((request, response) => {
       const chunks: Buffer[] = [];
@@ -507,6 +508,25 @@ export class PartnerFixture {
           binding: enabled,
         });
       }
+    }
+  }
+
+  async provisionFreshSessions() {
+    const file = path.join(this.directory!, "fixture-sessions.json");
+    try {
+      await run("./apps/api/node_modules/.bin/tsx", [
+        "tests/e2e/system-remediation/sr-partner-notify-qa-20260917/fixture-sessions.ts",
+        file,
+      ], { timeout: 30_000 });
+      const tokens = JSON.parse(await readFile(file, "utf8")) as Record<string, string>;
+      const replacements = new Map(
+        Object.entries(tokens).map(([name, token]) => [process.env[name], token]),
+      );
+      for (const entry of this.entries)
+        entry.token = replacements.get(entry.token) ?? entry.token;
+      for (const [name, token] of Object.entries(tokens)) process.env[name] = token;
+    } finally {
+      await rm(file, { force: true });
     }
   }
 
