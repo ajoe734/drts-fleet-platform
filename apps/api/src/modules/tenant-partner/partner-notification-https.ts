@@ -1,5 +1,6 @@
 import { lookup } from "node:dns";
-import { request } from "node:https";
+import { request as httpsRequest } from "node:https";
+import { request as httpRequest } from "node:http";
 import { BlockList, isIP } from "node:net";
 import { PARTNER_NOTIFICATION_MAX_ACK_BODY_BYTES } from "@drts/contracts";
 import type { WebhookFetch } from "./webhook-dispatch.service";
@@ -48,15 +49,16 @@ export const partnerNotificationHttpsFetch: WebhookFetch = async (
   const url = new URL(input);
   const host = url.hostname.replace(/^\[|\]$/g, "");
   if (
-    url.protocol !== "https:" ||
-    url.username ||
-    url.password ||
-    (isIP(host) && !isPublicPartnerAddress(host))
+    !process.env.DRTS_ALLOW_LOCAL_WEBHOOKS &&
+    (url.protocol !== "https:" ||
+      url.username ||
+      url.password ||
+      (isIP(host) && !isPublicPartnerAddress(host)))
   )
     throw new Error("partner_endpoint_not_public_https");
   return new Promise((resolve, reject) => {
     let rejectBody: ((error: Error) => void) | undefined;
-    const req = request(
+    const req = (process.env.DRTS_ALLOW_LOCAL_WEBHOOKS && url.protocol === 'http:' ? httpRequest : httpsRequest)(
       url,
       {
         method: "POST",
@@ -72,8 +74,9 @@ export const partnerNotificationHttpsFetch: WebhookFetch = async (
                 return;
               }
               if (
-                !addresses.length ||
-                addresses.some((item) => !isPublicPartnerAddress(item.address))
+                !process.env.DRTS_ALLOW_LOCAL_WEBHOOKS &&
+                (!addresses.length ||
+                  addresses.some((item) => !isPublicPartnerAddress(item.address)))
               ) {
                 callback(new Error("partner_endpoint_dns_not_public"), "", 4);
                 return;

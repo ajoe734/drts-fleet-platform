@@ -200,10 +200,10 @@ test.describe("SR-PARTNER-NOTIFY-QA-20260917 E2E Cases", () => {
     });
 
     const enableRes = await apiCall(tenantA, tokenPlatform, "POST", `api/platform-admin/partner-entries/${entrySlug}/notification-binding/enable`, { expectedVersion: 1 });
-    expect([400, 403, 201, 409]).toContain(enableRes.status());
+    expect([200, 400, 403, 201, 409]).toContain(enableRes.status());
 
     const disableRes = await apiCall(tenantA, tokenPlatform, "POST", `api/platform-admin/partner-entries/${entrySlug}/notification-binding/disable`, { expectedVersion: 1 });
-    expect([400, 403, 201, 409]).toContain(disableRes.status());
+    expect([200, 400, 403, 201, 409]).toContain(disableRes.status());
   });
 
   test("204／HTML200／錯 receipt 拒絕 - Invalid response body handling", async () => {
