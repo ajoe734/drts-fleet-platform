@@ -210,10 +210,10 @@ test.describe("SR-PARTNER-NOTIFY-QA-20260917 E2E Cases", () => {
     });
 
     const enableRes = await apiCall(tenantA, tokenPlatform, "POST", `api/platform-admin/partner-entries/${entrySlug}/notification-binding/enable`, { expectedVersion: 1 });
-    expect([200, 400, 403, 201, 409]).toContain(enableRes.status());
+    expect(enableRes.status()).toBe(200);
 
     const disableRes = await apiCall(tenantA, tokenPlatform, "POST", `api/platform-admin/partner-entries/${entrySlug}/notification-binding/disable`, { expectedVersion: 1 });
-    expect([200, 400, 403, 201, 409]).toContain(disableRes.status());
+    expect(disableRes.status()).toBe(200);
   });
 
   test("204／HTML200／錯 receipt 拒絕 - Invalid response body handling", async () => {
@@ -259,76 +259,76 @@ test.describe("SR-PARTNER-NOTIFY-QA-20260917 E2E Cases", () => {
       rideRef: "invalid-ride",
       partnerUserRef: "invalid-user"
     });
-    expect([400, 401, 403, 404]).toContain(resolveRes.status());
+    expect(resolveRes.status()).toBe(404);
   });
 
   test("同住戶在兩 App 不串單 - Session isolation", async () => {
     const res = await apiCall(tenantA, tokenPlatform, "GET", "api/partner/entries/test-slug/session");
-    expect([401, 403, 404, 200]).toContain(res.status());
+    expect(res.status()).toBe(404);
   });
 
   test("entry 改 tenant 後舊消息不移轉 - Tenant migration isolation", async () => {
     const res = await apiCall(tenantB, tokenPlatform, "GET", "api/platform-admin/partner-entries/test-slug/notification-deliveries");
-    expect([401, 403, 404, 200]).toContain(res.status());
+    expect(res.status()).toBe(404);
   });
 
   test("link 撤銷停送 - Recipient revoked", async () => {
     const res = await apiCall(tenantA, tokenPlatform, "POST", "api/platform-admin/partner-entries/test-slug/notification-binding/disable");
-    expect([401, 403, 404, 200, 400]).toContain(res.status());
+    expect(res.status()).toBe(404);
   });
 
   test("缺 route 不猜 - Route missing handling", async () => {
     const res = await apiCall(tenantA, tokenPlatform, "POST", "api/platform-admin/partner-entries/missing-slug/notification-binding/test");
-    expect([401, 403, 404, 200, 201]).toContain(res.status());
+    expect(res.status()).toBe(404);
   });
 
   test("partner 已入列但我方 timeout 後 duplicate ack", async () => {
     const res = await apiCall(tenantA, tokenPlatform, "POST", "api/platform-admin/partner-entries/test-slug/notification-binding/test", { forceTimeout: true });
-    expect([401, 403, 404, 200, 201, 500]).toContain(res.status());
+    expect(res.status()).toBe(404);
   });
 
   test("ack 後 DB 寫入失敗與 worker lease 到期 (fence transaction)", async () => {
     const res = await apiCall(tenantA, tokenPlatform, "POST", "api/platform-admin/partner-entries/test-slug/notification-binding/test", { forceDbError: true });
-    expect([401, 403, 404, 200, 201, 500]).toContain(res.status());
+    expect(res.status()).toBe(404);
   });
 
   test("兩個 worker 競爭 - Concurrency claim owner", async () => {
     const p1 = apiCall(tenantA, tokenPlatform, "POST", "api/platform-admin/partner-entries/test-slug/notification-binding/test");
     const p2 = apiCall(tenantA, tokenPlatform, "POST", "api/platform-admin/partner-entries/test-slug/notification-binding/test");
     const results = await Promise.all([p1, p2]);
-    expect([401, 403, 404, 200, 201, 409]).toContain(results[0].status());
-    expect([401, 403, 404, 200, 201, 409]).toContain(results[1].status());
+    expect(results[0].status()).toBe(404);
+    expect(results[1].status()).toBe(404);
   });
 
   test("五次 maxattempt - Retry limit backoff", async () => {
     receiverStatus = 500;
     const res = await apiCall(tenantA, tokenPlatform, "POST", "api/platform-admin/partner-entries/test-slug/notification-binding/test");
-    expect([401, 403, 404, 200, 201, 500]).toContain(res.status());
+    expect(res.status()).toBe(404);
   });
 
   test("expiresAt - Timeout expiry", async () => {
     const res = await apiCall(tenantA, tokenPlatform, "POST", "api/platform-admin/partner-entries/test-slug/notification-binding/test", { forceExpiry: true });
-    expect([401, 403, 404, 200, 201, 500]).toContain(res.status());
+    expect(res.status()).toBe(404);
   });
 
   test("改派舊 ETA - Superseded event", async () => {
     const res = await apiCall(tenantA, tokenPlatform, "POST", "api/platform-admin/partner-entries/test-slug/notification-binding/test", { event: "eta_update" });
-    expect([401, 403, 404, 200, 201, 500]).toContain(res.status());
+    expect(res.status()).toBe(404);
   });
 
   test("取消後舊到場 - Expired event arrival", async () => {
     const res = await apiCall(tenantA, tokenPlatform, "POST", "api/platform-admin/partner-entries/test-slug/notification-binding/test", { event: "driver_arrival" });
-    expect([401, 403, 404, 200, 201, 500]).toContain(res.status());
+    expect(res.status()).toBe(404);
   });
 
   test("缺 driver 情報不洩漏 - Minimal payload", async () => {
     const res = await apiCall(tenantA, tokenPlatform, "POST", "api/platform-admin/partner-entries/test-slug/notification-binding/test");
-    expect([401, 403, 404, 200, 201]).toContain(res.status());
+    expect(res.status()).toBe(404);
   });
 
   test("未配置不可 available - Readiness check", async () => {
     const res = await apiCall(tenantA, tokenPlatform, "GET", "api/platform-admin/partner-entries/test-slug/notification-binding");
-    expect([401, 403, 404, 200]).toContain(res.status());
+    expect(res.status()).toBe(404);
   });
 
   test("管理真狀態與 retry UI, restart/claim/fence/唯一 retry owner", async ({ request }) => {
