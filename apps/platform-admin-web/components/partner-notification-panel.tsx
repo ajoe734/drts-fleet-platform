@@ -1139,9 +1139,9 @@ function PnEditView({
           <CanvasField theme={th} label="eventTypes · 內部事件" required>
             <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
               {PN_EVENTS.map(([i, o, zh]) => (
-                <div
+                <label
                   key={i}
-                  style={{ display: "flex", alignItems: "center", gap: 10 }}
+                  style={{ display: "flex", alignItems: "center", gap: 10, cursor: "pointer" }}
                 >
                   <input
                     type="checkbox"
@@ -1162,12 +1162,12 @@ function PnEditView({
                       color: th.textDim,
                     }}
                   >
-                    → {o}
+                    {i} → {o}
                   </span>
                   <span style={{ fontSize: 10.5, color: th.textDim }}>
                     {zh}
                   </span>
-                </div>
+                </label>
               ))}
             </div>
           </CanvasField>
@@ -1607,7 +1607,7 @@ export function PartnerNotificationPanel({
       if (isStale) {
         const testRes = await (
           client as any
-        ).testPartnerEntryNotificationBinding(entrySlug, currentVersion);
+        ).testPartnerEntryNotificationBinding(entrySlug);
         if (session !== currentMutationSession.current) return;
         if (testRes.kind === "failed") {
           setError({
