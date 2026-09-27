@@ -229,11 +229,29 @@ test.describe("tenant console booking map alignment", () => {
       page.getByRole("button", { name: /Search|搜尋/i }).first(),
     ).toBeDisabled();
 
-    // The submit button should be disabled for normal flow
+    // The submit button should be disabled for normal flow before we provide coordinates
     const submit = page.getByRole("button", {
       name: /Create booking|For approval|Submitting|建立叫車|送出/,
     });
     await expect(submit).toBeDisabled();
+
+    // Recovery control: user can still enter manual coordinates
+    const pickupPicker = page.locator("[data-address-map-picker]").nth(0);
+    await pickupPicker.getByText(/手動輸入座標/).click();
+    await pickupPicker.getByLabel(/緯度/).fill("25.033");
+    await pickupPicker.getByLabel(/經度/).fill("121.565");
+    await pickupPicker.getByLabel(/原因/).fill("Outage recovery pickup");
+    await pickupPicker.getByRole("button", { name: /使用此位置/ }).click();
+
+    const dropoffPicker = page.locator("[data-address-map-picker]").nth(1);
+    await dropoffPicker.getByText(/手動輸入座標/).click();
+    await dropoffPicker.getByLabel(/緯度/).fill("25.044");
+    await dropoffPicker.getByLabel(/經度/).fill("121.575");
+    await dropoffPicker.getByLabel(/原因/).fill("Outage recovery dropoff");
+    await dropoffPicker.getByRole("button", { name: /使用此位置/ }).click();
+
+    // Now it should be enabled
+    await expect(submit).toBeEnabled();
 
     // Ensure no booking was posted
     expect(bookingPostCalled).toBe(false);
@@ -334,5 +352,72 @@ test.describe("tenant console booking map alignment", () => {
     expect(postedData.pickup.lat).toBe(25.033);
     expect(postedData.dropoff.lat).toBe(25.044);
     expect(postedData.pickup.manualOverrideReason).toBe("Testing manual pin");
+  });
+
+  test("address editing in portal preserves coordinates and supports manual reasons", async ({ page }) => {
+    let savedAddress: any = null;
+    await page.route("**/api/tenant/addresses", (route) => {
+      if (route.request().method() === "GET") {
+        return route.fulfill({
+          status: 200,
+          json: {
+            data: [
+              {
+                addressId: "addr-001",
+                displayName: "Home",
+                addressString: "Taipei 101",
+                lat: 25.033,
+                lng: 121.565,
+                coordinateSource: "provider_candidate",
+                manualOverrideReason: null,
+              }
+            ]
+          }
+        });
+      }
+      return route.continue();
+    });
+
+    await page.route("**/api/tenant/addresses/addr-001", (route) => {
+      if (route.request().method() === "PUT") {
+        savedAddress = route.request().postDataJSON();
+        return route.fulfill({ status: 200, json: { data: savedAddress } });
+      }
+      return route.continue();
+    });
+
+    // Go to Tenant Portal addresses page (port 3306)
+    await page.goto("http://127.0.0.1:3306/addresses");
+    await expect(page.getByText("Taipei 101")).toBeVisible();
+
+    // Edit address
+    await page.getByRole("button", { name: /Edit|編輯/i }).first().click();
+
+    // Blank reason should disable save if manual coords
+    const picker = page.locator("[data-address-map-picker]");
+    await picker.getByText(/手動輸入座標/).click();
+    await picker.getByLabel(/緯度/).fill("25.034");
+    await picker.getByLabel(/經度/).fill("121.566");
+    await picker.getByLabel(/原因/).fill("");
+    await picker.getByRole("button", { name: /使用此位置/ }).click();
+
+    const saveBtn = page.getByRole("button", { name: /Save|儲存/i });
+    await expect(saveBtn).toBeDisabled();
+
+    // Valid reason enables save
+    await picker.getByText(/手動輸入座標/).click();
+    await picker.getByLabel(/原因/).fill("Moved slightly");
+    await picker.getByRole("button", { name: /使用此位置/ }).click();
+    
+    await expect(saveBtn).toBeEnabled();
+    await saveBtn.click();
+
+    await expect(page.getByText("Taipei 101")).toBeVisible();
+    expect(savedAddress).toMatchObject({
+      lat: 25.034,
+      lng: 121.566,
+      coordinateSource: "manual_pin",
+      manualOverrideReason: "Moved slightly",
+    });
   });
 });

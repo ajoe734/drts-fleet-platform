@@ -1137,12 +1137,19 @@ export function AddressMapPicker<TServiceProduct extends string = string>(
                         {candidate.address}
                       </span>
                     </span>
-                    <TonePill
-                      theme={theme}
-                      tone={confidenceTone(candidate.confidence)}
-                    >
-                      {candidate.confidence}
-                    </TonePill>
+                    <span style={{ display: "flex", flexDirection: "column", gap: 4, alignItems: "flex-end", flexShrink: 0 }}>
+                      {candidate.provider && (
+                        <span style={{ fontSize: 10, color: theme.textMuted }}>
+                          {candidate.provider}
+                        </span>
+                      )}
+                      <TonePill
+                        theme={theme}
+                        tone={confidenceTone(candidate.confidence)}
+                      >
+                        {candidate.confidence}
+                      </TonePill>
+                    </span>
                   </button>
                 </li>
               );

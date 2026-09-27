@@ -18,7 +18,7 @@ function TN_NewBookingMap({ theme:th, degraded, pick, drop, reason }) {
   const ds = drop || 'selected';
   const HARD = ['out_of_area'];                                   // 服務範圍外：任何路徑皆不可送
   const UNRESOLVED = ['no_results','empty','searching','candidates','missing_coordinate']; // 尚未定點：不可送
-  const MANUAL = ['manual_review','provider_down']; // 走人工複核 (含手動座標帶理由)
+  const MANUAL = ['manual_review']; // 只有特定條件可能人工複核，但不含 provider_down（Tenant 直接阻擋）
 
   // 檢查是否有 manual_coords 並帶有理由
   const hasManualCoords = ps === 'manual_coords' || ds === 'manual_coords';
@@ -28,7 +28,7 @@ function TN_NewBookingMap({ theme:th, degraded, pick, drop, reason }) {
   const hardBlocked = HARD.includes(ps) || HARD.includes(ds);
   const unresolved = UNRESOLVED.includes(ps) || UNRESOLVED.includes(ds);
   const manualPath = MANUAL.includes(ps) || MANUAL.includes(ds);
-  const manualReady = manualPath && !hardBlocked && !hasOutage && !unresolved && (!hasManualCoords || reasonValid);   // 有地址文字＋理由即可送人工複核
+  const manualReady = manualPath && !hardBlocked && !hasOutage && !unresolved && (!hasManualCoords || reasonValid);
   const normalReady = !manualPath && !hardBlocked && !hasOutage && !unresolved && (!hasManualCoords || reasonValid);
   return (
     <Shell theme={th} nav={TN_NAV} active="new" breadcrumb={['訂單','新增']} env="production" tenant="YAMATO" actor={TN_ACTOR} health={TN_HEALTH} refreshTier="manual">
@@ -36,7 +36,7 @@ function TN_NewBookingMap({ theme:th, degraded, pick, drop, reason }) {
         meta={<Pill theme={th} tone="info" dot>POST /api/tenant/bookings/commands/create</Pill>}/>
       <div style={{ padding:24, display:'grid', gridTemplateColumns:'1.4fr 1fr', gap:16, alignItems:'start' }}>
         <Card theme={th} title="行程">
-          {degraded && <div style={{ marginBottom:12 }}><Banner theme={th} tone="danger" icon="warn" title="地圖服務中斷 · 本單只能送交人工複核" body="無法解析地址與落點。您可繼續填寫並送交客服人工複核；系統不會將此單靜默建立為一般訂單。"/></div>}
+          {degraded && <div style={{ marginBottom:12 }}><Banner theme={th} tone="danger" icon="warn" title="地圖服務中斷 · 暫時無法建立訂單" body="無法解析地址與落點。系統不允許在此狀態下建立訂單，請稍後再試。"/></div>}
           <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:12 }}>
             <Field theme={th} label="服務類型 · service_type" required><Select theme={th} value="airport_pickup"/></Field>
             <Field theme={th} label="預約 / 即時 · timing" required><Select theme={th} value="預約 · scheduled"/></Field>
@@ -46,10 +46,10 @@ function TN_NewBookingMap({ theme:th, degraded, pick, drop, reason }) {
             <Field theme={th} label="已存下車點"><Select theme={th} value={ds==='selected' ? '桃園機場 第二航廈 出境大廳' : '-- 自行搜尋或地圖選點 --'} /></Field>
           </div>
           <div style={{ display:'flex', flexDirection:'column', gap:10, marginBottom:14 }}>
-            <MapPicker theme={th} label="上車" state={degraded ? 'provider_down' : ps} value={ps==='empty'?'':undefined} requiresReason={manualPath} reason={reason}/>
-            <MapPicker theme={th} label="下車" state={degraded ? 'provider_down' : ds} value={ds==='empty'?'':(ds==='no_results'?'桃園機場 第三航廈':'桃園機場 第二航廈 出境大廳')} requiresReason={manualPath} reason={reason}/>
+            <MapPicker theme={th} label="上車" state={degraded ? 'provider_down' : ps} value={ps==='empty'?'':undefined} requiresReason={hasManualCoords} reason={reason}/>
+            <MapPicker theme={th} label="下車" state={degraded ? 'provider_down' : ds} value={ds==='empty'?'':(ds==='no_results'?'桃園機場 第三航廈':'桃園機場 第二航廈 出境大廳')} requiresReason={hasManualCoords} reason={reason}/>
             {(ps==='out_of_area'||ds==='out_of_area') && <Banner theme={th} tone="danger" icon="warn" title="有地點不在服務範圍 · 無法送出" body="請更換該地點；不可提交人工複核繞過服務範圍。"/>}
-            {ds==='no_results' && <Banner theme={th} tone="warn" icon="info" title="下車查無結果 · 復原路徑" body="換關鍵字重搜，或改用手動座標（需填理由，落點將轉人工複核）。"/>}
+            {ds==='no_results' && <Banner theme={th} tone="warn" icon="info" title="下車查無結果 · 復原路徑" body="換關鍵字重搜，或改用手動座標。"/>}
           </div>
           <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:12 }}>
             <Field theme={th} label="出發時間 · departAt" required><Input theme={th} value="2026-09-25 17:30" mono/></Field>
@@ -118,7 +118,7 @@ function TN_AddressesMap({ theme:th, state='manual_review', coordinateData }) {
 // ── 夥伴線：訂車表單（保留方案膠囊、資格橫幅、送出鈕位置） ──
 function PB_BookCardMap({ state='selected', drop='selected', reason }) {
   const p = PROGRAMS.card;
-  const th = buildMgmtTheme({ console: 'partner' }); th.accent = p.primary;
+  const th = { text: '#111827', textMuted: '#6b7280', textDim: '#9ca3af', border: '#e5e7eb', surface: '#ffffff', surfaceLo: '#f9fafb', accent: p.primary, success: '#16a34a', warn: '#d97706', danger: '#dc2626', dangerBg: '#fef2f2', dangerBorder: '#fca5a5' };
   const hard = state==='out_of_area' || drop==='out_of_area';
   const unresolved = ['no_results','empty','searching','candidates','missing_coordinate'].some(s=>s===state||s===drop);
   const manualPath = ['provider_down','manual_review'].some(s=>s===state||s===drop);
@@ -165,7 +165,7 @@ function PB_BookCardMap({ state='selected', drop='selected', reason }) {
 // ── 夥伴線：保險代步表單 ──
 function PB_BookInsuranceMap({ state='selected', drop='selected', reason }) {
   const p = PROGRAMS.insurance;
-  const th = buildMgmtTheme({ console: 'partner' }); th.accent = p.primary;
+  const th = { text: '#111827', textMuted: '#6b7280', textDim: '#9ca3af', border: '#e5e7eb', surface: '#ffffff', surfaceLo: '#f9fafb', accent: p.primary, success: '#16a34a', warn: '#d97706', danger: '#dc2626', dangerBg: '#fef2f2', dangerBorder: '#fca5a5' };
   const hard = state==='out_of_area' || drop==='out_of_area';
   const unresolved = ['no_results','empty','searching','candidates','missing_coordinate'].some(s=>s===state||s===drop);
   const manualPath = ['provider_down','manual_review'].some(s=>s===state||s===drop);
@@ -223,7 +223,7 @@ function PB_BookInsuranceMap({ state='selected', drop='selected', reason }) {
 // ── 夥伴線：旅行社表單 ──
 function PB_BookTravelMap({ state='selected', drop='selected', reason }) {
   const p = PROGRAMS.travel;
-  const th = buildMgmtTheme({ console: 'partner' }); th.accent = p.primary;
+  const th = { text: '#111827', textMuted: '#6b7280', textDim: '#9ca3af', border: '#e5e7eb', surface: '#ffffff', surfaceLo: '#f9fafb', accent: p.primary, success: '#16a34a', warn: '#d97706', danger: '#dc2626', dangerBg: '#fef2f2', dangerBorder: '#fca5a5' };
   const hard = state==='out_of_area' || drop==='out_of_area';
   const unresolved = ['no_results','empty','searching','candidates','missing_coordinate'].some(s=>s===state||s===drop);
   const manualPath = ['provider_down','manual_review'].some(s=>s===state||s===drop);

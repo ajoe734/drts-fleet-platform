@@ -34,5 +34,12 @@ export default defineConfig({
       reuseExistingServer: !process.env.CI,
       timeout: 300_000,
     },
+    {
+      command:
+        "pnpm --filter @drts/contracts build && pnpm --filter @drts/ui-tokens build && cd apps/tenant-portal-web && AUTH_MODE=test DRTS_API_URL=http://127.0.0.1:3305 NEXT_PUBLIC_API_URL=/control-plane-proxy pnpm exec next dev --webpack --hostname 127.0.0.1 --port 3306",
+      url: "http://127.0.0.1:3306",
+      reuseExistingServer: !process.env.CI,
+      timeout: 300_000,
+    },
   ],
 });

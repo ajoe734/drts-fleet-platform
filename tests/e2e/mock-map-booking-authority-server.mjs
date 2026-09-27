@@ -83,7 +83,7 @@ function createAirportCardEntry({
 }
 
 const cathayEntry = createAirportCardEntry({
-  slug: "cathay",
+  slug: "contoso",
   bankCode: "CONTOSO",
   displayName: "康拓索銀行 CUBE World 機場接送",
   programCode: "CUBE-WORLD",
@@ -91,7 +91,7 @@ const cathayEntry = createAirportCardEntry({
 });
 
 const taishinEntry = createAirportCardEntry({
-  slug: "taishin",
+  slug: "fabrikam",
   bankCode: "FABRIKAM",
   displayName: "法碧康銀行 Infinite 機場接送",
   programCode: "FABRIKAM-INFINITE",
@@ -99,7 +99,7 @@ const taishinEntry = createAirportCardEntry({
 });
 
 const dbsEntry = createAirportCardEntry({
-  slug: "dbs",
+  slug: "northwind",
   bankCode: "DBS",
   displayName: "北風銀行 Insignia 機場接送",
   programCode: "DBS-INSIGNIA",
@@ -114,18 +114,18 @@ const fubonEntry = {
   programCode: "TAILSPIN-CLAIM",
   tenantId: "tenant-tailspin",
   bankCode: null,
-  entrySlug: "fubon",
+  entrySlug: "tailspin",
   displayName: "泰思賓產險理賠代步",
   businessDispatchSubtype: "insurance_claim_replacement_transport",
   authMode: "partner_session",
   eligibilityMode: "none",
   entryHost: "claim.tailspin.example",
-  entryPath: "/fubon",
+  entryPath: "/tailspin",
   themeAccent: "#0F766E",
   brandingMetadata: {
     displayName: "泰思賓產險理賠代步",
     themeAccent: "#0F766E",
-    supportEmail: "claim-service@fubon.invalid",
+    supportEmail: "claim-service@tailspin.invalid",
     supportPhone: "0800-009-888",
   },
   eligibilityContract: null,
@@ -233,37 +233,46 @@ const server = http.createServer((req, res) => {
     req.method === "POST" &&
     url.pathname === "/api/partner/ingress/handoff"
   ) {
-    json(res, 200, {
-      data: {
-        accessToken: "handoff-token",
-        tokenType: "Bearer",
-        expiresIn: "15m",
-        partnerEntrySlug: "acme",
-        drtsPassengerId: "passenger-embed-001",
-        identity: {
-          actorType: "referral_passenger",
-          actorId: "passenger-embed-001",
-          realm: "partner",
-          authMode: "jwt_bearer",
-          roleFamilies: ["partner"],
-          roles: ["partner_booking"],
-          scopes: [
-            "partner:handoff",
-            "partner:eligibility:read",
-            "partner:eligibility:write",
-            "partner:book",
-          ],
-          tenantId: "tenant-acme",
-          partnerId: "partner-acme",
-          partnerProgramId: "program-acme-airport",
-          partnerEntrySlug: "acme",
+    let body = "";
+    req.on("data", (chunk) => {
+      body += chunk.toString();
+    });
+    req.on("end", () => {
+      const payload = JSON.parse(body || "{}");
+      const slug = payload.partnerEntrySlug || "acme";
+      const entry = entries[slug] || entries.acme;
+      json(res, 200, {
+        data: {
+          accessToken: "handoff-token",
+          tokenType: "Bearer",
+          expiresIn: "15m",
+          partnerEntrySlug: slug,
           drtsPassengerId: "passenger-embed-001",
+          identity: {
+            actorType: "referral_passenger",
+            actorId: "passenger-embed-001",
+            realm: "partner",
+            authMode: "jwt_bearer",
+            roleFamilies: ["partner"],
+            roles: ["partner_booking"],
+            scopes: [
+              "partner:handoff",
+              "partner:eligibility:read",
+              "partner:eligibility:write",
+              "partner:book",
+            ],
+            tenantId: entry.tenantId,
+            partnerId: entry.partnerId,
+            partnerProgramId: entry.programId,
+            partnerEntrySlug: slug,
+            drtsPassengerId: "passenger-embed-001",
+          },
         },
-      },
-      meta: {
-        requestId: "req-mock-handoff",
-        timestamp: "2026-07-26T00:00:00.000Z",
-      },
+        meta: {
+          requestId: "req-mock-handoff",
+          timestamp: "2026-07-26T00:00:00.000Z",
+        },
+      });
     });
     return;
   }

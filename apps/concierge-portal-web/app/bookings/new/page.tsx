@@ -129,14 +129,6 @@ export default function ConciergeBookingCreatePage() {
       | undefined) ?? "healthy"
   );
 
-  useEffect(() => {
-    if (typeof window !== "undefined") {
-      const mode = window.sessionStorage.getItem("drts.geo.mode") as AddressProviderMode;
-      if (mode) {
-        setMapProviderMode(mode);
-      }
-    }
-  }, []);
 
   const mapProvider = useMemo(
     () => createConfiguredMockAddressProvider(mapProviderMode),

@@ -170,7 +170,8 @@ test.describe("concierge map booking UI", () => {
 
   test("submits dispatchable coordinates to the concierge booking seam", async ({
     page,
-  }) => {
+  }, testInfo) => {
+    test.skip(testInfo.project.name === "outage");
     const captured = { body: [] as unknown[] };
     await installConciergeApiMocks(page, captured);
 
@@ -214,13 +215,11 @@ test.describe("concierge map booking UI", () => {
     expect(command.mapFallbackReview ?? null).toBeNull();
   });
 
-  test("submits manual review fallback when provider is down but coordinates exist", async ({ page }) => {
+  test("submits manual review fallback when provider is down but coordinates exist", async ({ page }, testInfo) => {
+    test.skip(testInfo.project.name !== "outage");
     const captured = { body: [] as unknown[] };
     await installConciergeApiMocks(page, captured);
 
-    await page.addInitScript(() => {
-      window.sessionStorage.setItem("drts.geo.mode", "unavailable");
-    });
     const response = await page.goto("/bookings/new");
     expect(response?.status()).toBe(200);
 
@@ -266,13 +265,11 @@ test.describe("concierge map booking UI", () => {
     });
   });
 
-  test("blocks submission when provider is down and no coordinates are provided", async ({ page }) => {
+  test("blocks submission when provider is down and no coordinates are provided", async ({ page }, testInfo) => {
+    test.skip(testInfo.project.name !== "outage");
     const captured = { body: [] as unknown[] };
     await installConciergeApiMocks(page, captured);
 
-    await page.addInitScript(() => {
-      window.sessionStorage.setItem("drts.geo.mode", "unavailable");
-    });
     const response = await page.goto("/bookings/new");
     expect(response?.status()).toBe(200);
 
@@ -280,6 +277,27 @@ test.describe("concierge map booking UI", () => {
     const submitBtn = page.getByRole("button", { name: /提交禮賓代訂|送交人工複核/ });
     await expect(submitBtn).toBeDisabled();
 
+    expect(captured.body).toHaveLength(0);
+  });
+
+  test("blocks outside service area", async ({ page }, testInfo) => {
+    test.skip(testInfo.project.name === "outage");
+    const captured = { body: [] as unknown[] };
+    await installConciergeApiMocks(page, captured);
+
+    const response = await page.goto("/bookings/new");
+    expect(response?.status()).toBe(200);
+
+    await selectConciergeMapCandidate(page, 0, "taipei 101", "Taipei 101");
+    await selectConciergeMapCandidate(
+      page,
+      1,
+      "Tokyo Tower", // mock map provider returns out of area for Tokyo Tower
+      "Tokyo Tower",
+    );
+
+    const submitBtn = page.getByRole("button", { name: /提交禮賓代訂|送交人工複核/ });
+    await expect(submitBtn).toBeDisabled();
     expect(captured.body).toHaveLength(0);
   });
 });

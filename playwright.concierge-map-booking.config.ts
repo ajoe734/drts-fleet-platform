@@ -20,15 +20,38 @@ export default defineConfig({
     baseURL: conciergeBaseURL,
     trace: "retain-on-failure",
   },
+  projects: [
+    {
+      name: "healthy",
+      use: {
+        baseURL: "http://127.0.0.1:3006",
+      },
+    },
+    {
+      name: "outage",
+      use: {
+        baseURL: "http://127.0.0.1:3007",
+      },
+    },
+  ],
   ...(shouldStartLocalConcierge
     ? {
-        webServer: {
-          command:
-            "pnpm --filter @drts/contracts build && pnpm --filter @drts/ui-tokens build && cd apps/concierge-portal-web && AUTH_MODE=test pnpm exec next dev --webpack --hostname 127.0.0.1 --port 3006",
-          url: localConciergeBaseURL,
-          reuseExistingServer: !process.env.CI,
-          timeout: 120_000,
-        },
+        webServer: [
+          {
+            command:
+              "pnpm --filter @drts/contracts build && pnpm --filter @drts/ui-tokens build && cd apps/concierge-portal-web && AUTH_MODE=test pnpm exec next dev --webpack --hostname 127.0.0.1 --port 3006",
+            url: "http://127.0.0.1:3006",
+            reuseExistingServer: !process.env.CI,
+            timeout: 120_000,
+          },
+          {
+            command:
+              "pnpm --filter @drts/contracts build && pnpm --filter @drts/ui-tokens build && cd apps/concierge-portal-web && AUTH_MODE=test NEXT_PUBLIC_ADDRESS_PICKER_PROVIDER_MODE=unavailable pnpm exec next dev --webpack --hostname 127.0.0.1 --port 3007",
+            url: "http://127.0.0.1:3007",
+            reuseExistingServer: !process.env.CI,
+            timeout: 120_000,
+          },
+        ],
       }
     : {}),
   timeout: 30_000,
