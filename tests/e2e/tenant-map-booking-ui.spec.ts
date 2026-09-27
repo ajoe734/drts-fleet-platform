@@ -418,7 +418,9 @@ test.describe("tenant console booking map alignment", () => {
         response.url().includes("/addresses") &&
         response.request().method() === "POST",
     );
-    await page.getByRole("button", { name: /Save Changes|儲存/i }).click();
+    await page
+      .getByRole("button", { name: /Save Changes|儲存/i })
+      .click({ force: true });
     await responsePromise;
     await page.reload();
     await expect(
@@ -456,7 +458,9 @@ test.describe("tenant console booking map alignment", () => {
         response.url().includes("/addresses") &&
         response.request().method() === "POST",
     );
-    await page.getByRole("button", { name: /Save Changes|儲存/i }).click();
+    await page
+      .getByRole("button", { name: /Save Changes|儲存/i })
+      .click({ force: true });
     await responsePromise;
     await page.reload();
     await expect(
@@ -498,7 +502,9 @@ test.describe("tenant console booking map alignment", () => {
         response.url().includes("/addresses") &&
         response.request().method() === "POST",
     );
-    await page.getByRole("button", { name: /Save Changes|儲存/i }).click();
+    await page
+      .getByRole("button", { name: /Save Changes|儲存/i })
+      .click({ force: true });
     await responsePromise;
     await page.reload();
     await expect(
@@ -539,7 +545,9 @@ test.describe("tenant console booking map alignment", () => {
         response.url().includes("/addresses") &&
         response.request().method() === "POST",
     );
-    await page.getByRole("button", { name: /Save Changes|儲存/i }).click();
+    await page
+      .getByRole("button", { name: /Save Changes|儲存/i })
+      .click({ force: true });
     await responsePromise;
     await page.reload();
     await expect(
