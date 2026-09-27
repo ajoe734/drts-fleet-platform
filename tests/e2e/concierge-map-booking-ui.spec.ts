@@ -360,7 +360,7 @@ test.describe("concierge map booking UI", () => {
           });
           return;
         }
-        await route.continue();
+        await route.fallback();
       },
     );
 

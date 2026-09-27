@@ -338,7 +338,7 @@ test.describe("tenant console booking map alignment", () => {
       .first()
       .fill("Testing manual pin");
     await page
-      .getByRole("button", { name: /Use this location|確認使用此位置/ })
+      .getByRole("button", { name: /Use this location|使用此位置/ })
       .first()
       .click();
 
@@ -364,7 +364,7 @@ test.describe("tenant console booking map alignment", () => {
       .last()
       .fill("Testing manual pin dropoff");
     await page
-      .getByRole("button", { name: /Use this location|確認使用此位置/ })
+      .getByRole("button", { name: /Use this location|使用此位置/ })
       .last()
       .click();
 
@@ -426,7 +426,7 @@ test.describe("tenant console booking map alignment", () => {
     // Blank reason rejected by MapPicker, retaining prior pin
     await picker.getByLabel(/Reason|原因/).fill("");
     await picker
-      .getByRole("button", { name: /Use this location|確認使用此位置/ })
+      .getByRole("button", { name: /Use this location|使用此位置/ })
       .click();
 
     // Assert rejection: error message is visible and hidden inputs are unchanged
@@ -438,17 +438,24 @@ test.describe("tenant console booking map alignment", () => {
     // Provide a valid reason
     await picker.getByLabel(/Reason|原因/).fill("Moved slightly");
     await picker
-      .getByRole("button", { name: /Use this location|確認使用此位置/ })
+      .getByRole("button", { name: /Use this location|使用此位置/ })
       .click();
 
+    const responsePromise = page.waitForResponse(
+      (response) =>
+        response.url().includes("/addresses") &&
+        response.request().method() === "POST",
+    );
     // Save the form
     await page
       .getByRole("button", { name: /Save Changes|儲存/i })
       .click({ force: true });
 
+    // Wait for the server action POST to finish
+    await responsePromise;
+
     // Real behavior: updateAddress calls revalidatePath but no success redirect;
-    // ?edit=addr-001 remains. Wait a moment then reload to verify persistence.
-    await page.waitForTimeout(1000); // give server action time
+    // ?edit=addr-001 remains. Reload to verify persistence.
     await page.reload();
     await expect(
       page.getByRole("heading", { name: /Edit Address/i }),
