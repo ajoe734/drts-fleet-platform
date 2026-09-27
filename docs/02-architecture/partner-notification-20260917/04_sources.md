@@ -22,5 +22,5 @@
 
 ## Pinned Candidate & Artifacts
 
-- **Candidate SHA**: `a2e2be7fa4d7198a84ee91a235773db5c8abe689`
+- **Candidate SHA**: `9f306bb821dd617c0b19cc33ef80530974dae596`
 - **Report/Artifacts**: See UAT pipeline execution artifacts for full HTML and JSON test reports.
