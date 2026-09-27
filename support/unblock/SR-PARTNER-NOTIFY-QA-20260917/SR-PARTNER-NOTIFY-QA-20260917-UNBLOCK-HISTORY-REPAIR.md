@@ -270,6 +270,86 @@ to edit the parent candidate or impersonate Supervisor. Read back both task
 slices after the update; helper completion alone does not establish parent
 readiness. Resume parent work only with fresh resolution evidence.
 
+### HR-R1 reopen: operator boundary and readback (2026-09-27)
+
+Reviewer Codex reopened candidate
+`6334a41acd6c2b1f9a71ee8e964c5db6b2b2b2e2`, generation
+`a67b3315348e44e2a6938bc9a1b41e31`, at `2026-09-27T22:38:43Z`.
+The owner's fresh release-CLI readback at `2026-09-27T22:41:15Z` confirms
+**HR-R1 remains unresolved**: all three disposition fields above are absent;
+the parent remains blocked, waiting for Gemini, with its unit7 next step and
+`last_update=2026-09-27T22:07:37Z`. `resolved_parent_at` is also absent,
+as required before actual resolution. Fetch, local HEAD, remote helper branch
+and draft PR #2181 agree on the reviewed SHA. No new candidate is submitted.
+
+Minimal read-only probe:
+`python3 .local/hr-r1-20260927/readback.py .local/hr-r1-20260927/before.json`
+completed **exit 1, expected**. It calls the supplied CLI's `show` for only these
+two tasks, extracts the JSON payload above, and compares all three helper fields
+plus parent status/waiting-for/next and absence of an early resolution timestamp.
+All three helper comparisons and parent-next comparison fail; parent status,
+waiting-for and timestamp checks pass. It writes only compact machine-local
+receipts. The inspected report SHA-256 is
+`3aa2b166395471c1abd3d67d02b7332e129c01d44ea4242448111f80c914b865`.
+There is no corrected-state receipt yet.
+
+The active release's actual call path localizes the repair boundary:
+
+- `TaskBoardCommandExecutor.execute_with_result` invokes
+  `_guard_worker_command` before its mutation handler. The guard at
+  `tools/development-orchestrator/control_plane/usecases/task_board_commands.py:82`
+  excludes `assign` from worker commands and rejects cross-task `note`.
+- `task_metadata_from_env` in
+  `tools/development-orchestrator/bin/ai_status.py:1018` reads
+  `TASK_METADATA_JSON`; `command_assign` at line 1747 merges it into an existing
+  task. Worker `progress`/`note` do not consume that metadata. Merely attaching
+  the JSON to a progress command cannot fix this finding.
+- `apply_unblock_parent_resolution` at line 1092 consumes the stored disposition;
+  line 1111 defaults its absence to `todo`. `command_note` at line 1995 updates
+  parent `next` without resuming it. Thus both the helper metadata and parent
+  note are required. No production-code change or guard removal is in scope.
+
+The inspected release files' SHA-256 hashes are respectively
+`d2490cccd93cc91d18f0df2348f8671b65c38233c95cc8d3ffbd73ad9961faa4`
+(task-board executor) and
+`4a0fe6275b4350cd7085877519d43469a2b76b0a6a640d54b2b2840cd010ca27`
+(`ai_status.py`). These are static call-path evidence, not simulated merge or
+parent acceptance results.
+
+Supervisor can run this bounded transaction sequence from its existing operator
+context after checking that the owner/reviewer and unresolved finding still
+match. **Do not run it in a dispatched worker or remove dispatch guards.**
+This sequence has been documented, not executed by Codex2:
+
+````bash
+set -euo pipefail
+repair_cli=/home/lupin/workspace/drts-fleet-platform/tools/development-orchestrator/bin/ai-status.sh
+repair_helper=SR-PARTNER-NOTIFY-QA-20260917-UNBLOCK-HISTORY-REPAIR
+repair_parent=SR-PARTNER-NOTIFY-QA-20260917
+repair_artifact=support/unblock/$repair_parent/$repair_helper.md
+repair_metadata=$(python3 -c '
+import json, pathlib, re, sys
+section = pathlib.Path(sys.argv[1]).read_text().split("## 5. ", 1)[1]
+payload = json.loads(re.search(r"```json\n(.*?)\n```", section, re.S).group(1))
+assert set(payload) == {"resolved_parent_status", "resolved_parent_waiting_for", "resolved_parent_next"}
+print(json.dumps(payload))
+' "$repair_artifact")
+AI_NAME=Supervisor TASK_METADATA_JSON="$repair_metadata" \
+  "$repair_cli" assign "$repair_helper" Codex2 Codex
+repair_next=$(python3 -c 'import json,sys; print(json.loads(sys.argv[1])["resolved_parent_next"])' "$repair_metadata")
+AI_NAME=Supervisor "$repair_cli" note "$repair_parent" "$repair_next"
+````
+
+After **both exit 0**, read back both slices through the same CLI. Require exact
+equality with the three JSON fields above, parent `next` equal to
+`resolved_parent_next`, parent still `blocked`/`Gemini`, and no manually supplied
+`resolved_parent_at`. A successful `assign` alone, helper progress receipt or
+new report commit is insufficient. Codex2 then records the real timestamps and
+readback receipts here and in section 6 before final verification and handoff.
+The CLI's agent registry excludes Supervisor from `blocker`'s waiting-agent
+argument; the owner therefore uses `progress` with this explicit operator
+blocker rather than attributing the missing action to a different lane.
+
 ## 6. Acceptance and publication ledger
 
 | Acceptance / finding            | Source and verification                                                             | Old result → current result                                                                 | Outstanding boundary                                                      |
@@ -278,6 +358,7 @@ readiness. Resume parent work only with fresh resolution evidence.
 | Document non-destructive repair | Section 3 patch recipe; local `audit.py` / `preview.json` / `invalid-commits.json`  | Existing rail fails; clean-index import, blob/trunk preservation and whitespace checks pass | Actual successor and new same-SHA product verification remain parent work |
 | Task-scoped commit/push/PR      | Only this report is authored on the dispatched helper branch                        | Publication receipt and helper PR record full candidate identity                            | No parent candidate manufactured                                          |
 | Parent concrete next step       | Release CLI parent `note` attempt; helper `progress` receipt; section 5 disposition | Parent write rejected (exit 1); helper progress recorded (exit 0)                           | Supervisor must persist note/disposition before helper approval/merge     |
+| HR-R1 / acceptance 4 reopen     | Section 5 live readback and active-release guard/metadata/resolution call path      | Reviewed `6334a41a` missing fields → fresh readback still missing; probe exit 1 expected    | Unresolved; only Supervisor can perform the documented operator sequence  |
 | Parent required acceptance      | Section 4 and original UAT ledger                                                   | All three NOT MET, retained                                                                 | PG/browser/live/device acceptance not executed by helper                  |
 
 The helper uses ordinary commits and normal push. Its final local SHA, remote
@@ -301,3 +382,10 @@ to this helper's exact SHA.
 - The parent note and blocked disposition remain pending Supervisor action.
   Publication of the report does not satisfy that fourth acceptance item. Do not
   approve/merge the helper or claim parent unblocking while it remains missing.
+- HR-R1 owner continuation adds the precise gateway sequence and fresh failed
+  readback to this same artifact. Its next ordinary commit/push is a recovery
+  checkpoint only, not a handoff or a claim that the reviewer finding is fixed.
+  The prior candidate's CI 36355003807 success and integration 36355003838
+  success (main product jobs skipped) apply only to `6334a41a`; any checkpoint
+  CI must be read separately. No parent source, branch, worktree or task state
+  was changed by this continuation.
