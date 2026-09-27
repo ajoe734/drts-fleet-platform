@@ -252,18 +252,18 @@ jobs:
           set -o pipefail
           (
             cd apps/platform-admin-web
-            PORT=3001 pnpm start > ../../.artifacts/tenant-uat-acceptance/admin-web.log 2>&1 &
+            pnpm exec next start --hostname 127.0.0.1 --port 3001 > ../../.artifacts/tenant-uat-acceptance/admin-web.log 2>&1 &
             echo $! > ../../.artifacts/tenant-uat-acceptance/admin-web.pid
           )
           (
             cd apps/referral-embed-web
-            PORT=3002 pnpm start > ../../.artifacts/tenant-uat-acceptance/referral-web.log 2>&1 &
+            pnpm exec next start --hostname 127.0.0.1 --port 3002 > ../../.artifacts/tenant-uat-acceptance/referral-web.log 2>&1 &
             echo $! > ../../.artifacts/tenant-uat-acceptance/referral-web.pid
           )
           for origin in http://127.0.0.1:3001 http://127.0.0.1:3002; do
             ready=false
             for i in $(seq 1 60); do
-              code="$(curl -s -o /dev/null -w '%{http_code}' "$origin" || true)"
+              code="$(curl --max-time 5 -s -o /dev/null -w '%{http_code}' "$origin" || true)"
               if [[ "$code" =~ ^[23][0-9][0-9]$ ]]; then ready=true; break; fi
               sleep 1
             done
