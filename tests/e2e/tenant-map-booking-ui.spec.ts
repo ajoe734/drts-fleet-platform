@@ -512,10 +512,14 @@ test.describe("tenant console booking map alignment", () => {
       await page.waitForTimeout(200);
       await page.mouse.up();
     }
-    await page.waitForTimeout(500); // Give React state time to update and handle geocode
+
+    // Polling expect to wait for React to update the hidden field
+    await expect(page.locator('input[name="lat"]')).not.toHaveValue(
+      keyboardLat,
+    );
+
     const dragLat = await page.locator('input[name="lat"]').inputValue();
     const dragLng = await page.locator('input[name="lng"]').inputValue();
-    expect(dragLat).not.toBe(keyboardLat);
     await expect(page.locator('input[name="coordinateSource"]')).toHaveValue(
       "manual_pin",
     );

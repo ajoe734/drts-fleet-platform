@@ -462,19 +462,29 @@ test.describe("concierge map booking UI", () => {
 
     // 2. Add pointer drag on dropoff
     const dropoffPin = dropoffPicker.locator("g[role='button']").first();
+    await dropoffPin.scrollIntoViewIfNeeded();
+    await page.waitForTimeout(100); // Wait for scroll to settle
+
     const dropoffPinBox = await dropoffPin.boundingBox();
+    expect(dropoffPinBox).not.toBeNull();
     if (dropoffPinBox) {
       await page.mouse.move(
         dropoffPinBox.x + dropoffPinBox.width / 2,
         dropoffPinBox.y + dropoffPinBox.height / 2,
       );
       await page.mouse.down();
+      await page.waitForTimeout(200); // Wait to simulate a human drag
       await page.mouse.move(
         dropoffPinBox.x + dropoffPinBox.width / 2,
         dropoffPinBox.y - 50,
+        { steps: 10 },
       );
+      await page.waitForTimeout(200);
       await page.mouse.up();
     }
+
+    // Wait for React to update the coordinate summary
+    await page.waitForTimeout(500);
 
     // Read the exact expected coordinates from the displayed coordinate summary
     const expectedPickup = await getDisplayedCoordinates(pickupPicker);
