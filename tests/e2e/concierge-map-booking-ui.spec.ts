@@ -410,6 +410,9 @@ test.describe("concierge map booking UI", () => {
     expect(postCount).toBe(2);
     const command = captured.body[1] as any;
     expect(command.pickup.coordinateSource).toBe("manual_pin");
+    expect(command.pickup.lat).toBe(25.033);
+    expect(command.pickup.lng).toBe(121.565);
+    expect(command.pickup.manualOverrideReason).toBe("Fixing rejected address");
   });
   test("pointer/keyboard persistence", async ({ page }, testInfo) => {
     test.skip(testInfo.project.name === "outage");
@@ -430,10 +433,21 @@ test.describe("concierge map booking UI", () => {
 
     const pickupPicker = page.locator("[data-address-map-picker]").nth(0);
 
-    // Click on the map to set a new location
+    // Simulate keyboard adjustment
     const pin = pickupPicker.locator("g[role='button']").first();
     await pin.focus();
     await page.keyboard.press("ArrowUp");
+
+    // Add independent genuine pointer interaction (Map click) on the dropoff picker
+    const dropoffPicker = page.locator("[data-address-map-picker]").nth(1);
+    const dropoffSvg = dropoffPicker.locator("svg[role='img']").first();
+    const dropoffBox = await dropoffSvg.boundingBox();
+    if (dropoffBox) {
+      await page.mouse.click(
+        dropoffBox.x + dropoffBox.width * 0.2,
+        dropoffBox.y + dropoffBox.height * 0.2,
+      );
+    }
 
     // Verify it correctly changed the pin source
     const submitBtn = page.getByRole("button", { name: /提交禮賓代訂/ });
@@ -443,8 +457,16 @@ test.describe("concierge map booking UI", () => {
     await expect(page.getByText("訂單 ID")).toBeVisible();
     expect(captured.body).toHaveLength(1);
 
-    const command = captured.body[0] as any;
-    expect(command.pickup.coordinateSource).toBe("manual_pin");
-    expect(command.pickup.manualOverrideReason).toBe("agent_map_click");
+    const command2 = captured.body[0] as any;
+
+    // Pickup was changed via keyboard
+    expect(command2.pickup.coordinateSource).toBe("manual_pin");
+    expect(command2.pickup.manualOverrideReason).toMatch(
+      /Pin adjusted manually|已手動調整圖釘位置/,
+    );
+
+    // Dropoff was changed via pointer click
+    expect(command2.dropoff.coordinateSource).toBe("manual_pin");
+    expect(command2.dropoff.manualOverrideReason).toBe("agent_map_click");
   });
 });

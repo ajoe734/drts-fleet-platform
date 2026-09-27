@@ -128,6 +128,7 @@ export interface AddressMapPreviewSurfaceProps {
   ariaLabel?: string;
   nudgeHint?: string;
   onPinMove?: (id: string, point: GeoPoint) => void;
+  onPointSelect?: (point: GeoPoint) => void;
   overlay?: ReactNode;
 }
 
@@ -146,6 +147,7 @@ export function AddressMapPreviewSurface({
   ariaLabel = "Location preview map",
   nudgeHint,
   onPinMove,
+  onPointSelect,
   overlay,
 }: AddressMapPreviewSurfaceProps) {
   const theme = themeProp ?? DEFAULT_THEME;
@@ -181,6 +183,22 @@ export function AddressMapPreviewSurface({
       }
     },
     [dragId, onPinMove, pointFromEvent],
+  );
+
+  const handlePointerUp = useCallback(
+    (event: React.PointerEvent<SVGSVGElement>) => {
+      if (dragId) {
+        setDragId(null);
+        return;
+      }
+      if (onPointSelect) {
+        const next = pointFromEvent(event.clientX, event.clientY);
+        if (next) {
+          onPointSelect(next);
+        }
+      }
+    },
+    [dragId, onPointSelect, pointFromEvent],
   );
 
   const endDrag = useCallback(() => setDragId(null), []);
@@ -227,7 +245,7 @@ export function AddressMapPreviewSurface({
           height: "100%",
         }}
         onPointerMove={handlePointerMove}
-        onPointerUp={endDrag}
+        onPointerUp={handlePointerUp}
         onPointerLeave={endDrag}
       >
         {/* grid */}
@@ -1137,7 +1155,15 @@ export function AddressMapPicker<TServiceProduct extends string = string>(
                         {candidate.address}
                       </span>
                     </span>
-                    <span style={{ display: "flex", flexDirection: "column", gap: 4, alignItems: "flex-end", flexShrink: 0 }}>
+                    <span
+                      style={{
+                        display: "flex",
+                        flexDirection: "column",
+                        gap: 4,
+                        alignItems: "flex-end",
+                        flexShrink: 0,
+                      }}
+                    >
                       {candidate.provider && (
                         <span style={{ fontSize: 10, color: theme.textMuted }}>
                           {candidate.provider}
@@ -1199,6 +1225,7 @@ export function AddressMapPicker<TServiceProduct extends string = string>(
               : undefined
           }
           onPinMove={handlePinMove}
+          onPointSelect={handleMapPointSelect}
           pins={
             pinPoint
               ? [

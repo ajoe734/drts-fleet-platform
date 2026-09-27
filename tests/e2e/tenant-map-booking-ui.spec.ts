@@ -431,8 +431,8 @@ test.describe("tenant console booking map alignment", () => {
 
     // Assert rejection: error message is visible and hidden inputs are unchanged
     await expect(
-      picker.getByText(/Reason for manual location|手動定位原因/i).first(),
-    ).toBeVisible();
+      picker.getByText(/Reason for manual location|手動定位原因/i),
+    ).toHaveCount(2);
     await expect(page.locator('input[name="lat"]')).not.toHaveValue("25.034");
 
     // Provide a valid reason
@@ -465,7 +465,10 @@ test.describe("tenant console booking map alignment", () => {
     await expect(page.locator('input[name="lat"]')).toHaveValue("25.034");
     await expect(page.locator('input[name="lng"]')).toHaveValue("121.566");
     await expect(page.locator('input[name="coordinateSource"]')).toHaveValue(
-      "manual_pin",
+      "saved_address",
+    );
+    await expect(page.locator('input[name="priorGeocodeSource"]')).toHaveValue(
+      "manual",
     );
 
     // Verify remounting manual toggle starts blank
@@ -495,14 +498,35 @@ test.describe("tenant console booking map alignment", () => {
     );
     await expect(
       page.locator('input[name="manualOverrideReason"]'),
+    ).toHaveValue(/Pin adjusted manually|已手動調整圖釘位置/);
+
+    // Add independent genuine pointer interaction (Map click)
+    const svg = picker.locator("svg[role='img']").first();
+    const svgBox = await svg.boundingBox();
+    if (svgBox) {
+      // Click near the top-left of the map preview to trigger handleMapPointSelect
+      await page.mouse.click(
+        svgBox.x + svgBox.width * 0.2,
+        svgBox.y + svgBox.height * 0.2,
+      );
+    }
+
+    // Verify it updated the reason to agent_map_click
+    await expect(
+      page.locator('input[name="manualOverrideReason"]'),
     ).toHaveValue("agent_map_click");
 
+    const responsePromise2 = page.waitForResponse(
+      (response) =>
+        response.url().includes("/addresses") &&
+        response.request().method() === "POST",
+    );
     await page
       .getByRole("button", { name: /Save Changes|儲存/i })
       .click({ force: true });
 
     // Check server persistence
-    await page.waitForTimeout(1000);
+    await responsePromise2;
     await page.reload();
     await expect(
       page.getByRole("heading", { name: /Edit Address/i }),
