@@ -170,9 +170,11 @@ test.describe("partner map booking UI", () => {
     await expect(submit).toBeEnabled();
     await submit.click();
 
-    // Actual PartnerBookingForm renders manual review required message
+    // Actual PartnerBookingForm renders manual review required message in the submitted result
     await expect(
-      page.getByText(/派遣前需人工確認|Needs review before dispatch/),
+      page.getByText(
+        /目前可先記錄這趟行程，但正式派遣前仍需人工確認|The selected stops can be recorded, but dispatch must review them before normal assignment/,
+      ),
     ).toBeVisible();
   });
 
