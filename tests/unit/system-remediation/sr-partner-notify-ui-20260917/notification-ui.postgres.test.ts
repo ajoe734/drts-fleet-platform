@@ -26,7 +26,7 @@ describe.skipIf(!testDbUrl)(
   () => {
     let pool: any;
     const originalEnv = { ...process.env };
-    let app: any;
+    let app: import("@nestjs/common").INestApplicationContext;
     let mtRepo: MultiTaxiRepository;
 
     // Unique test suite identifier prefix
@@ -751,16 +751,40 @@ describe.skipIf(!testDbUrl)(
       const bindingService = app.get(PartnerEntryNotificationBindingService);
       const dispatchFacade = app.get(PartnerNotificationDispatchFacade);
 
-      await bindingService.putBinding(missingBindingSlug, {
-        webhookId,
-        eventTypes: ["eta_changed"],
-        expectedVersion: 0,
-      });
+      const identity: import("../../../../apps/api/src/common/auth/auth.types").BootstrapRequestIdentity =
+        {
+          authMode: "bootstrap_headers",
+          actorType: "system",
+          actorId: "system",
+          realm: "tenant",
+          tenantId,
+          partnerId,
+          roleFamilies: [],
+          roles: [],
+          scopes: [],
+          requestId: randomUUID(),
+        };
+      await bindingService.putBinding(
+        missingBindingSlug,
+        {
+          webhookId,
+          eventTypes: ["eta_changed"],
+          expectedVersion: 0,
+        },
+        identity,
+      );
 
       const dispatchSpy = vi
-        .spyOn(dispatchFacade as any, "dispatchNotificationAttemptByWebhookId")
+        .spyOn(
+          dispatchFacade as import("../../../../apps/api/src/modules/tenant-partner/partner-notification-dispatch.facade").PartnerNotificationDispatchFacade,
+          "dispatchNotificationAttemptByWebhookId",
+        )
         .mockImplementation(
-          async (command: any): Promise<any> => ({
+          async (
+            command: import("../../../../apps/api/src/modules/tenant-partner/tenant-partner.service").PartnerNotificationDispatchAttemptCommand,
+          ): Promise<
+            import("../../../../apps/api/src/modules/tenant-partner/tenant-partner.service").PartnerNotificationDispatchAttemptOutcome
+          > => ({
             kind: "accepted",
             ack: {
               notificationId: command.wirePayload.data.notificationId,
@@ -773,21 +797,8 @@ describe.skipIf(!testDbUrl)(
         );
 
       try {
-        const identity: import("../../../../apps/api/src/common/auth/auth.types").BootstrapRequestIdentity =
-          {
-            authMode: "bootstrap_headers",
-            actorType: "system",
-            actorId: "system",
-            realm: "tenant",
-            tenantId,
-            partnerId,
-            roleFamilies: [],
-            roles: [],
-            scopes: [],
-            requestId: randomUUID(),
-          };
         await bindingService.testBinding(missingBindingSlug, identity);
-        await bindingService.enableBinding(missingBindingSlug, 1);
+        await bindingService.enableBinding(missingBindingSlug, 1, identity);
 
         const res = await mtRepo.retryPartnerNotificationDelivery(
           { entrySlug: missingBindingSlug, tenantId, partnerId },
@@ -867,12 +878,34 @@ describe.skipIf(!testDbUrl)(
         expect(rows[0].attempt_count).toBe(2);
 
         const { rows: dRows } = await pool.query(
-          "SELECT delivery_stage, entry_slug FROM mobility.phase1_partner_notification_delivery_contexts WHERE outbox_id = $1",
+          "SELECT * FROM mobility.phase1_partner_notification_delivery_contexts WHERE outbox_id = $1",
           [outboxId],
         );
         expect(dRows.length).toBe(1);
+        expect(dRows[0].delivery_id).toBeDefined();
+        expect(dRows[0].wire_payload).toBeDefined();
+        expect(dRows[0].wire_payload_hash).toBeDefined();
+        expect(dRows[0].expires_at).toBeDefined();
         expect(dRows[0].delivery_stage).toBe("partner_accepted");
         expect(dRows[0].entry_slug).toBe(missingBindingSlug);
+
+        // Check matching claim fence release
+        const { rows: cRows } = await pool.query(
+          "SELECT claim_state, fence_token FROM ops.phase1_push_delivery_claims WHERE outbox_id = $1",
+          [outboxId],
+        );
+        expect(cRows.length).toBe(1);
+        expect(cRows[0].claim_state).toBe("released");
+        expect(cRows[0].fence_token).toBe(claim!.fenceToken);
+
+        // Check receipt identity
+        const { rows: rRows } = await pool.query(
+          "SELECT receipt_id, provider_message_ref FROM ops.phase1_push_delivery_receipts WHERE outbox_id = $1",
+          [outboxId],
+        );
+        expect(rRows.length).toBe(1);
+        expect(rRows[0].receipt_id).toBeDefined();
+        expect(rRows[0].provider_message_ref).toBe(receipt.providerMessageRef);
       } finally {
         dispatchSpy.mockRestore();
       }
@@ -1008,11 +1041,18 @@ describe.skipIf(!testDbUrl)(
         { entrySlug: entrySlug2, tenantId, partnerId },
         { pageSize: 50 },
       );
-      expect(oldRes.total).toBe(1);
+      expect(newRes.total).toBe(0);
       expect(
         newRes.rows.find((i: any) => i.outboxId === outboxId),
       ).toBeUndefined();
 
+      // Ensure contexts/receipts/claims didn't change
+      const beforeContext = await pool.query(
+        "SELECT * FROM mobility.phase1_partner_notification_delivery_contexts WHERE outbox_id = $1",
+        [outboxId],
+      );
+
+      // Refuse on old owner
       const res = await mtRepo.retryPartnerNotificationDelivery(
         { entrySlug: entrySlug1, tenantId, partnerId },
         outboxId,
@@ -1020,6 +1060,7 @@ describe.skipIf(!testDbUrl)(
       expect(res.kind).toBe("failed");
       expect((res as any).failure?.failureReason).toBe("owner_changed");
 
+      // Refuse on new owner
       const res2 = await mtRepo.retryPartnerNotificationDelivery(
         { entrySlug: entrySlug2, tenantId, partnerId },
         outboxId,
@@ -1027,12 +1068,26 @@ describe.skipIf(!testDbUrl)(
       expect(res2.kind).toBe("failed");
       expect((res2 as any).failure?.failureReason).toBe("route_missing");
 
+      // Cross-partner refusal
+      const res3 = await mtRepo.retryPartnerNotificationDelivery(
+        { entrySlug: entrySlug1, tenantId, partnerId: "partner-wrong" },
+        outboxId,
+      );
+      expect(res3.kind).toBe("failed");
+      expect((res3 as any).failure?.failureReason).toBe("route_missing");
+
       const { rows: postRows } = await pool.query(
-        "SELECT status, attempt_count FROM ops.consumer_notification_outbox WHERE outbox_id = $1",
+        "SELECT * FROM ops.consumer_notification_outbox WHERE outbox_id = $1",
         [outboxId],
       );
       expect(postRows[0].status).toBe("failed");
       expect(postRows[0].attempt_count).toBe(1); // from createFixture
+
+      const afterContext = await pool.query(
+        "SELECT * FROM mobility.phase1_partner_notification_delivery_contexts WHERE outbox_id = $1",
+        [outboxId],
+      );
+      expect(beforeContext.rows).toEqual(afterContext.rows);
     });
   },
 );

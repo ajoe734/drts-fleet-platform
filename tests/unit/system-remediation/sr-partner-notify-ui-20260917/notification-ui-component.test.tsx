@@ -377,7 +377,13 @@ describe("PartnerNotificationPanel", () => {
 
     mockClient.testPartnerEntryNotificationBinding.mockResolvedValueOnce({
       kind: "accepted",
-      ack: { received: true, id: "ack-1" },
+      ack: {
+        notificationId: "n-1",
+        deliveryId: "d-1",
+        partnerEntrySlug: "test-entry",
+        status: "accepted",
+        receiptId: "ack-1",
+      },
     });
     // It should demand a re-test, not just enable. We must click Resume!
     const staleTestBtn = await screen.findByRole("button", { name: /恢復/i });
@@ -582,9 +588,10 @@ describe("PartnerNotificationPanel", () => {
         resolveMutation = resolve;
       }),
     );
+
     mockClient.getPartnerEntryNotificationBinding.mockResolvedValue({
       version: 1,
-      webhookId: "test-webhook",
+      webhookId: "old-webhook",
       eventTypes: ["eta_changed"],
       state: "disabled",
     });
@@ -594,8 +601,6 @@ describe("PartnerNotificationPanel", () => {
         entrySlug="test-entry"
         tenantId="test-tenant"
         canWriteBinding={true}
-        canWriteBinding={true}
-        canWriteWebhooks={true}
         canReadWebhooks={true}
       />,
     );
@@ -620,15 +625,12 @@ describe("PartnerNotificationPanel", () => {
     mockClient.getPartnerEntryNotificationBinding.mockClear();
     rerender(
       <PartnerNotificationPanel
-        entrySlug="test-entry-3"
+        entrySlug="test-entry"
         tenantId="test-tenant"
-        canWriteBinding={true}
-        canWriteBinding={false}
+        canWriteBinding={false} // ONLY authority changes
+        canReadWebhooks={true}
       />,
     );
-
-    // wait for effect to flush
-    await new Promise((r) => setTimeout(r, 50));
 
     await act(async () => {
       resolveMutation({
@@ -638,11 +640,12 @@ describe("PartnerNotificationPanel", () => {
       await new Promise((r) => setTimeout(r, 10));
     });
 
-    // Old mutation resolution should not trigger reload
-    // expect(mockClient.getPartnerEntryNotificationBinding).not.toHaveBeenCalled();
+    // Old mutation resolution should not trigger reload or GET because authority changed
+    expect(
+      mockClient.getPartnerEntryNotificationBinding,
+    ).not.toHaveBeenCalled();
 
-    // 2. Setup another pending mutation to test client/account transition
-    // For Resume, suspend the actual test-before-enable chain, change context/unmount, settle and assert no stale enable or GET.
+    // 2. Setup another pending mutation (Test) to test client/account transition
     let resolveTest2: any;
     mockClient.testPartnerEntryNotificationBinding.mockReturnValue(
       new Promise((resolve) => {
@@ -654,21 +657,20 @@ describe("PartnerNotificationPanel", () => {
     await act(async () => {
       rerender(
         <PartnerNotificationPanel
-          entrySlug="test-entry-3"
+          entrySlug="test-entry"
           tenantId="test-tenant"
           canWriteBinding={true}
+          canReadWebhooks={true}
         />,
       );
       await new Promise((r) => setTimeout(r, 50));
     });
 
-    rerender(
-      <PartnerNotificationPanel
-        entrySlug="test-entry-3"
-        tenantId="test-tenant"
-        canWriteBinding={true}
-      />,
-    );
+    // Exit edit mode if stuck
+    const cancelBtn = screen.queryByRole("button", { name: /取消/i });
+    if (cancelBtn) {
+      fireEvent.click(cancelBtn);
+    }
 
     const testBtn2 = await screen.findByRole("button", {
       name: /發送測試事件/i,
@@ -692,12 +694,14 @@ describe("PartnerNotificationPanel", () => {
     };
     (usePlatformAdminClient as any).mockReturnValue(newMockClient);
 
+    // Change BOTH client and entrySlug and tenantId
     await act(async () => {
       rerender(
         <PartnerNotificationPanel
           entrySlug="new-entry"
           tenantId="new-tenant"
           canWriteBinding={true}
+          canReadWebhooks={true}
         />,
       );
       await new Promise((r) => setTimeout(r, 50));
@@ -711,21 +715,88 @@ describe("PartnerNotificationPanel", () => {
       newMockClient.getPartnerEntryNotificationBinding,
     ).toHaveBeenCalledWith("new-entry");
     newMockClient.getPartnerEntryNotificationBinding.mockClear();
+    newMockClient.enablePartnerEntryNotificationBinding.mockClear();
 
-    // Now unmount before test completes
-    unmount();
-
+    // Settle the old pending test mutation
     await act(async () => {
-      resolveTest2({ kind: "accepted", ack: { received: true, id: "ack-2" } });
+      resolveTest2({
+        kind: "accepted",
+        ack: {
+          notificationId: "n-2",
+          deliveryId: "d-2",
+          partnerEntrySlug: "test-entry",
+          status: "accepted",
+          receiptId: "ack-2",
+        },
+      });
       await new Promise((r) => setTimeout(r, 10));
     });
 
-    // ensure no follow-on state update/GET call on the new client
+    // ensure no follow-on state update/GET call on the new client, or enable call
     expect(
       newMockClient.enablePartnerEntryNotificationBinding,
     ).not.toHaveBeenCalled();
     expect(
       newMockClient.getPartnerEntryNotificationBinding,
+    ).not.toHaveBeenCalled();
+    expect(
+      mockClient.enablePartnerEntryNotificationBinding,
+    ).not.toHaveBeenCalled();
+
+    // 3. Setup a pending Resume mutation, unmount and settle
+    // Actually, Resume is for test_pending state.
+    // Let's set the component to state test_pending
+    newMockClient.getPartnerEntryNotificationBinding.mockResolvedValue({
+      version: 1,
+      webhookId: "new-webhook",
+      eventTypes: ["eta_changed"],
+      state: "test_pending",
+    });
+
+    await act(async () => {
+      rerender(
+        <PartnerNotificationPanel
+          entrySlug="new-entry"
+          tenantId="new-tenant"
+          canWriteBinding={true}
+          canReadWebhooks={true}
+        />,
+      );
+      await new Promise((r) => setTimeout(r, 50));
+    });
+
+    let resolveResume: any;
+    newMockClient.testPartnerEntryNotificationBinding.mockReturnValue(
+      new Promise((resolve) => {
+        resolveResume = resolve;
+      }),
+    );
+
+    const resumeBtn = await screen.findByRole("button", {
+      name: /恢復/i,
+    });
+    fireEvent.click(resumeBtn);
+
+    // Now unmount before Resume test completes
+    unmount();
+
+    await act(async () => {
+      resolveResume({
+        kind: "accepted",
+        ack: {
+          notificationId: "n-3",
+          deliveryId: "d-3",
+          partnerEntrySlug: "new-entry",
+          status: "accepted",
+          receiptId: "ack-3",
+        },
+      });
+      await new Promise((r) => setTimeout(r, 10));
+    });
+
+    // Should not call enable after unmount
+    expect(
+      newMockClient.enablePartnerEntryNotificationBinding,
     ).not.toHaveBeenCalled();
   });
 });

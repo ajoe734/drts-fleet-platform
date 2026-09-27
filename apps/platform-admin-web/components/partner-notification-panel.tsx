@@ -1141,7 +1141,12 @@ function PnEditView({
               {PN_EVENTS.map(([i, o, zh]) => (
                 <label
                   key={i}
-                  style={{ display: "flex", alignItems: "center", gap: 10, cursor: "pointer" }}
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    gap: 10,
+                    cursor: "pointer",
+                  }}
                 >
                   <input
                     type="checkbox"
@@ -1468,6 +1473,12 @@ export function PartnerNotificationPanel({
   const currentMutationSession = React.useRef(0);
   useEffect(() => {
     currentMutationSession.current++;
+    console.log(
+      "session incremented to ",
+      currentMutationSession.current,
+      "canWriteBinding is",
+      canWriteBinding,
+    );
     setTestingState("idle");
     setEnableState("idle");
     setDisableState("idle");
@@ -1476,6 +1487,12 @@ export function PartnerNotificationPanel({
     setSaveState("idle");
     return () => {
       currentMutationSession.current++;
+      console.log(
+        "session incremented to ",
+        currentMutationSession.current,
+        "canWriteBinding is",
+        canWriteBinding,
+      );
     };
   }, [client, entrySlug, tenantId, canWriteBinding, canReadWebhooks]);
 
@@ -1488,11 +1505,13 @@ export function PartnerNotificationPanel({
         eventTypes: editEventTypes as any,
         expectedVersion: editExpectedVersion,
       });
+      console.log("Checking session:", session, currentMutationSession.current);
       if (session !== currentMutationSession.current) return;
       setIsEditing(false);
       setSaveState("idle");
       fetchStateRef.current?.();
     } catch (err: any) {
+      console.log("Checking session:", session, currentMutationSession.current);
       if (session !== currentMutationSession.current) return;
       setSaveState("failed");
       if (err.statusCode === 409) {
@@ -1518,6 +1537,7 @@ export function PartnerNotificationPanel({
       const res = await (client as any).testPartnerEntryNotificationBinding(
         entrySlug,
       );
+      console.log("Checking session:", session, currentMutationSession.current);
       if (session !== currentMutationSession.current) return;
       if (res.kind === "failed") {
         setTestingState("rejected");
@@ -1532,6 +1552,7 @@ export function PartnerNotificationPanel({
         fetchStateRef.current?.();
       }
     } catch (err: any) {
+      console.log("Checking session:", session, currentMutationSession.current);
       if (session !== currentMutationSession.current) return;
       setTestingState("rejected");
       setError({
@@ -1551,9 +1572,11 @@ export function PartnerNotificationPanel({
         entrySlug,
         binding.version,
       );
+      console.log("Checking session:", session, currentMutationSession.current);
       if (session !== currentMutationSession.current) return;
       fetchStateRef.current?.();
     } catch (err: any) {
+      console.log("Checking session:", session, currentMutationSession.current);
       if (session !== currentMutationSession.current) return;
       setError({
         kind: "error",
@@ -1577,9 +1600,11 @@ export function PartnerNotificationPanel({
         entrySlug,
         binding.version,
       );
+      console.log("Checking session:", session, currentMutationSession.current);
       if (session !== currentMutationSession.current) return;
       fetchStateRef.current?.();
     } catch (err: any) {
+      console.log("Checking session:", session, currentMutationSession.current);
       if (session !== currentMutationSession.current) return;
       setError({
         kind: "error",
@@ -1608,6 +1633,11 @@ export function PartnerNotificationPanel({
         const testRes = await (
           client as any
         ).testPartnerEntryNotificationBinding(entrySlug);
+        console.log(
+          "Checking session:",
+          session,
+          currentMutationSession.current,
+        );
         if (session !== currentMutationSession.current) return;
         if (testRes.kind === "failed") {
           setError({
@@ -1627,9 +1657,11 @@ export function PartnerNotificationPanel({
         entrySlug,
         currentVersion,
       );
+      console.log("Checking session:", session, currentMutationSession.current);
       if (session !== currentMutationSession.current) return;
       fetchStateRef.current?.();
     } catch (err: any) {
+      console.log("Checking session:", session, currentMutationSession.current);
       if (session !== currentMutationSession.current) return;
       setError({
         kind: "error",
@@ -1654,6 +1686,7 @@ export function PartnerNotificationPanel({
         entrySlug,
         outboxId,
       );
+      console.log("Checking session:", session, currentMutationSession.current);
       if (session !== currentMutationSession.current) return;
       if (outcome.kind === "failed") {
         setRetryState("failed");
@@ -1667,6 +1700,7 @@ export function PartnerNotificationPanel({
       }
       fetchStateRef.current?.();
     } catch (err: any) {
+      console.log("Checking session:", session, currentMutationSession.current);
       if (session !== currentMutationSession.current) return;
       setRetryState("failed");
       setRetryErrorMsg(err.message || "發生錯誤");
