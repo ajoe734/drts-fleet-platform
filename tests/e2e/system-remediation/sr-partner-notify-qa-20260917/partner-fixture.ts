@@ -439,6 +439,36 @@ export class PartnerFixture {
     return created.ride.orderId;
   }
 
+  async revalidateEndpoint(entry: PartnerFixtureEntry) {
+    const list = () =>
+      this.call<{ items: TenantWebhookEndpoint[] }>(
+        "tenant/webhooks",
+        entry.token,
+        "GET",
+        undefined,
+        entry.entry.tenantId,
+      );
+    const before = (await list()).items.find(
+      (endpoint) => endpoint.webhookId === entry.webhookId,
+    );
+    expect(before).toBeDefined();
+    // A permanent bad ack disables the shared endpoint under the existing
+    // tenant policy. Recover through its real signed test, never SQL/status edits.
+    const result = await this.call<{ httpStatus: number }>(
+      "tenant/webhooks/test",
+      entry.token,
+      "POST",
+      { webhookId: entry.webhookId },
+      entry.entry.tenantId,
+    );
+    expect(result.httpStatus).toBe(204);
+    const after = (await list()).items.find(
+      (endpoint) => endpoint.webhookId === entry.webhookId,
+    );
+    expect(after?.status).toBe("active");
+    return { before: before!.status, after: after!.status };
+  }
+
   async enqueue(
     orderId: string,
     mode: "partner" | "missing_route" = "partner",

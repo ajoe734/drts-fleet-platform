@@ -23,7 +23,10 @@ test.describe("SR-PARTNER-NOTIFY-QA-20260917: E2E Partner Notification Delivery 
     });
   const accepted = async (outboxId: string) => {
     const row = await fixture.settled(outboxId);
-    expect(row).toMatchObject({
+    expect(
+      row,
+      JSON.stringify({ outboxId, outcome: row.payload.partnerNotification }),
+    ).toMatchObject({
       status: "delivered",
       claim_state: "released",
       delivery_stage: "partner_accepted",
@@ -157,7 +160,8 @@ test.describe("SR-PARTNER-NOTIFY-QA-20260917: E2E Partner Notification Delivery 
   });
 
   test("C204 E2E: Receiver invalid ack (HTTP 204 with payload) handling", async () => {
-    const orderId = await fixture.createRide(fixture.entries[0]!);
+    const entry = fixture.entries[0]!;
+    const orderId = await fixture.createRide(entry);
     fixture.fault = "invalid_ack";
     const outboxId = await fixture.enqueue(orderId);
     const row = await fixture.settled(outboxId);
@@ -175,6 +179,17 @@ test.describe("SR-PARTNER-NOTIFY-QA-20260917: E2E Partner Notification Delivery 
         (r) => r.notificationId === outboxId,
       ),
     ).toHaveLength(1);
+    fixture.fault = "none";
+    const endpoint = await fixture.revalidateEndpoint(entry);
+    await test.info().attach("endpoint-revalidation", {
+      contentType: "application/json",
+      body: JSON.stringify({
+        candidate_sha: process.env.CANDIDATE_SHA,
+        outboxId,
+        endpoint,
+      }),
+    });
+    // Endpoint recovery must not requeue the manually blocked passenger record.
     await new Promise((resolve) => setTimeout(resolve, 2_200));
     expect((await fixture.outcome(outboxId))!.attempt_count).toBe(1);
     expect(received(outboxId)).toHaveLength(1);
@@ -224,6 +239,7 @@ test.describe("SR-PARTNER-NOTIFY-QA-20260917: E2E Partner Notification Delivery 
     expect(refused.failure_reason).toBe("partner_ack_invalid");
     expect(refused.retry_disposition).toBe("manual_only");
     fixture.fault = "none";
+    await fixture.revalidateEndpoint(entry);
     // The real server authority/control-plane proxy provides the hosted test
     // identity. No localStorage bearer, mocked route, or fake browser response.
     const document = await page.goto(
