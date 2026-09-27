@@ -747,55 +747,71 @@ describe.skipIf(!testDbUrl)(
       const dispatchFacade = app.get(PartnerNotificationDispatchFacade);
 
       await bindingService.putBinding(missingBindingSlug, { webhookId, eventTypes: ["eta_changed"], expectedVersion: 0 });
-      await bindingService.testBinding(missingBindingSlug, { tenantId, partnerId, actingUser: "system" } as any);
-      await bindingService.enableBinding(missingBindingSlug, 1);
 
-      const res = await mtRepo.retryPartnerNotificationDelivery(
-        { entrySlug: missingBindingSlug, tenantId, partnerId },
-        outboxId,
-      );
-      expect(res.kind).toBe("requeued");
-
-      const claim = await mtRepo.claimPartnerNotification(outboxId, "worker-1", 60);
-      expect(claim).toBeDefined();
-
-      const dispatchSpy = vi.spyOn(dispatchFacade, "dispatchNotificationAttemptByWebhookId").mockImplementation(async (command: any) => ({
+      const dispatchSpy = vi.spyOn(dispatchFacade, "dispatchNotificationAttemptByWebhookId").mockImplementation(async (command: import("../../../../apps/api/src/modules/tenant-partner/tenant-partner.service").PartnerNotificationDispatchAttemptCommand) => ({
         kind: "accepted",
         ack: {
-          notificationId: command.wirePayload.notificationId,
+          notificationId: command.wirePayload.data.notificationId,
           deliveryId: command.wirePayload.deliveryId,
           partnerEntrySlug: missingBindingSlug,
           status: "accepted",
           receiptId: "ack-typed",
-        } as any,
+        },
       }));
 
       try {
+        const identity: import("../../../../apps/api/src/common/auth/auth.types").BootstrapRequestIdentity = {
+          authMode: "test",
+          actorType: "system",
+          actorId: "system",
+          realm: "tenant",
+          tenantId,
+          partnerId,
+          roleFamilies: [],
+          roles: [],
+          scopes: [],
+          requestId: randomUUID(),
+        };
+        await bindingService.testBinding(missingBindingSlug, identity);
+        await bindingService.enableBinding(missingBindingSlug, 1);
+
+        const res = await mtRepo.retryPartnerNotificationDelivery(
+          { entrySlug: missingBindingSlug, tenantId, partnerId },
+          outboxId,
+        );
+        expect(res.kind).toBe("requeued");
+
+        const claim = await mtRepo.claimPartnerNotification(outboxId, "worker-1", 60);
+        expect(claim).toBeDefined();
+
         const transport = new PartnerNotificationTransport(mtRepo, dispatchFacade);
         const receipt = await transport.send({
           providerName: "partner_webhook",
-          message: claim!.record as any,
+          message: claim!.record as import("../../../../apps/api/src/modules/multi-taxi/passenger-push.port").PassengerPushMessage,
           context: { fenceToken: claim!.fenceToken }
         });
         
         expect(dispatchSpy).toHaveBeenCalled();
         const callCommand: any = dispatchSpy.mock.calls?.[0]?.[0] || {};
-        expect(callCommand.wirePayload?.eventSequence).toBe(42);
+        expect(callCommand.wirePayload?.data?.eventSequence).toBe(42);
         
         await mtRepo.recordPushDeliveryOutcome({
           outboxId,
           fenceToken: claim!.fenceToken,
-          passengerSubjectRef: "sub",
+          passengerSubjectRef: claim!.record.passengerSubjectRef || "sub",
           providerName: "partner_webhook",
           providerAckState: "provider_acknowledged",
-          providerMessageRef: "msg-1",
+          providerMessageRef: receipt.providerMessageRef,
           deliveryOutcome: {
+            outboxId,
             status: "delivered",
             result: "delivered",
             attemptCount: claim!.record.attemptCount,
-            ...receipt!.deliveryContext!
-          } as any,
-          partnerMetadata: {} as any,
+            nextAttemptAt: new Date(Date.now() + 60000).toISOString(),
+            deliveredAt: new Date().toISOString(),
+            providerName: "partner_webhook"
+          },
+          partnerMetadata: receipt.deliveryContext as any,
         });
 
         const { rows } = await pool.query("SELECT status, attempt_count FROM ops.consumer_notification_outbox WHERE outbox_id = $1", [outboxId]);
