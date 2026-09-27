@@ -173,6 +173,10 @@ describe("multi-tenant header controller routing", () => {
       {} as never,
       new JwtAuthService(),
       {} as never,
+      {} as never,
+      {} as never,
+      {} as never,
+      {} as never,
     );
 
     let thrown: unknown;
@@ -218,6 +222,10 @@ describe("multi-tenant header controller routing", () => {
       {} as never,
       {} as never,
       new JwtAuthService(),
+      {} as never,
+      {} as never,
+      {} as never,
+      {} as never,
       {} as never,
     );
     const requestId = "req-tenant-partner-alpha";

@@ -320,6 +320,27 @@ export function resolveRouteAuthPolicy(
     };
   }
 
+  // Break-glass request/grant reads are visible to the requester, the
+  // assigned/eligible approver, or a platform/ops admin -- a decision made
+  // inside BreakGlassService.canView/listForViewer, not by a route scope.
+  // An activated break-glass session only carries BREAK_GLASS_ALLOWED_SCOPES
+  // (e.g. identity:read), never foundation:read, so these two GET routes
+  // must not fall through to the generic platform-admin/ foundation:read
+  // requirement below or the legitimate activated requester is locked out.
+  if (
+    upperMethod === "GET" &&
+    (routePath === "platform-admin/break-glass/requests" ||
+      /^platform-admin\/break-glass\/requests\/[^/]+$/.test(routePath))
+  ) {
+    return {
+      routeKey: `platform-admin:break-glass:read:${upperMethod}`,
+      requiredScopes: [],
+      allowedRealms: baseAllowedRealms("platform", "ops"),
+      description:
+        "Break-glass request/grant read (requester/eligible-approver/admin visibility enforced in service)",
+    };
+  }
+
   if (routePath.startsWith("platform-admin/")) {
     return {
       routeKey: `platform-admin:${upperMethod}`,
@@ -922,6 +943,19 @@ export function resolveRouteAuthPolicy(
       ),
       allowedRealms: baseAllowedRealms("platform", "tenant", "ops"),
       description: "Identity and privileged role governance access",
+    };
+  }
+
+  if (
+    routePath.startsWith("partner/entries/") &&
+    routePath.endsWith("/notification-navigation/resolve") &&
+    upperMethod === "POST"
+  ) {
+    return {
+      routeKey: "partner:notification-navigation:resolve",
+      requiredScopes: [],
+      allowedRealms: baseAllowedRealms("partner"),
+      description: "Partner notification navigation resolution",
     };
   }
 

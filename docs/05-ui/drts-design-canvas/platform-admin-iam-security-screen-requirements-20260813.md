@@ -21,7 +21,7 @@
   1. **Users & Memberships**: Durable user list, memberships across realms/tenants, MFA status, last-login timestamp, active session count, user detail drawer with session revocation and audit timeline.
   2. **Privileged Role Requests & Approvals**: Step-up approval workflow, two-person approval, before-after role diff, Separation of Duties (SoD) violation warning, last-admin protection warning, temporary grant expiry, and manual grant removal.
   3. **Access Reviews**: Access review campaigns list, campaign details with review items, certify/reduce/remove decisions, overdue sweep triggering, and audit evidence query.
-  4. **Break-Glass Emergency Access**: Break-glass request creation, two-person approval, activation with duration (max 60m), and persistent active-session banner with countdown TTL and exit control.
+  4. **Break-Glass Emergency Access**: Break-glass request creation, single-approver approval, activation with duration (max 60m), and persistent active-session banner with countdown TTL and exit control.
 
 Implication:
 - The Platform Admin users surface (`/users`) is extended into a multi-tab governance workspace:
@@ -29,7 +29,7 @@ Implication:
   - `Sessions` (`sessions`): Active session inventory, masked token summaries, remote session revocation.
   - `Role Approvals` (`role-approvals`): Privileged role requests, before-after diffs, SoD conflict warnings, step-up approval triggers.
   - `Access Reviews` (`access-reviews`): Review campaigns, overdue sweeps, certifying/reducing/removing role bindings, audit evidence logs.
-  - `Break-Glass` (`break-glass`): Emergency access request, two-person approval, activation token issuance, and emergency grant close.
+  - `Break-Glass` (`break-glass`): Emergency access request, single-approver approval, activation token issuance, and emergency grant close.
 - A persistent `BreakGlassBanner` is mounted at the shell level (`AdminShell`) whenever an emergency access grant or break-glass session token is active.
 
 ---
@@ -64,7 +64,7 @@ Implication:
   - Historical role audit timeline.
 
 ### 3.2 Privileged Role Approvals & SoD
-- Form to submit `CreatePrivilegedRoleRequestCommand` with requested role, justification, and step-up proof reference.
+- Form to submit `CreatePrivilegedRoleRequestCommand` with requested role and justification. Step-up is verified via fresh MFA or existing server proof during approval.
 - Renders before-after role diff pill (e.g. `operator` → `superadmin`).
 - Highlights SoD warnings (`IAM_SOD_VIOLATION`) when requester matches target or conflicting roles exist.
 - Enforces Last-Admin Protection (`IAM_LAST_ADMIN_PROTECTION`) when modifying or removing the final active `superadmin`.
@@ -81,7 +81,7 @@ Implication:
 
 ### 3.4 Break-Glass Emergency Access & Persistent Banner
 - Form to submit `CreateBreakGlassRequestCommand` (scopes, reasonCode, reasonText, proofReference).
-- Two-person approval control (`ApproveBreakGlassRequestCommand`).
+- Single-approver approval control (`ApproveBreakGlassRequestCommand`).
 - Activation (`IamBreakGlassActivationCommand`) issuing short-lived emergency session token with `sessionBanner = "BREAK_GLASS_ACTIVE"`.
 - Persistent Top Banner:
   - Rendered at top of `AdminShell` when active.

@@ -29,7 +29,6 @@ import type {
   ApiSuccessEnvelope,
   AttendanceRecord,
   BookingRecord,
-  TenantBookingDateField,
   TenantBookingListQuery,
   TenantBookingsPageRecord,
   CallbackTaskRecord,
@@ -325,6 +324,8 @@ import type {
   UpdatePlatformAdminUserRoleCommand,
   UpdatePlatformTenantOnboardingCommand,
   UpdatePartnerChannelEntryCommand,
+  UpdatePartnerEntryNotificationBindingCommand,
+  PartnerEntryNotificationBinding,
   UpdatePlatformTenantSettingsCommand,
   UpdateTenantNotificationsCommand,
   UpdateTenantRoleCommand,
@@ -385,6 +386,8 @@ import type {
   SubmitSafetyOperatorTakeoverReportResult,
   UpdateServiceAreaBoundaryCommand,
   UpdateStopPolicyCommand,
+  PartnerNotificationDeliveryQuery,
+  PartnerNotificationDeliveryRecord,
 } from "@drts/contracts";
 
 export interface ApiClientConfig {
@@ -491,9 +494,7 @@ function buildReportQuery(query: Record<string, string | undefined>): string {
   return serialized ? `?${serialized}` : "";
 }
 
-function buildTenantBookingQueryParams(
-  query?: TenantBookingListQuery,
-): string {
+function buildTenantBookingQueryParams(query?: TenantBookingListQuery): string {
   if (!query) {
     return "";
   }
@@ -613,10 +614,10 @@ function parseApiErrorEnvelope(body: string): ApiErrorEnvelope["error"] | null {
 }
 
 export class ApiClient {
-  private baseUrl: string;
-  private defaultHeaders: Record<string, string>;
-  private timeout: number;
-  private pathTransform: ((path: string) => string) | undefined;
+  readonly baseUrl: string;
+  readonly defaultHeaders: Record<string, string>;
+  readonly timeout: number;
+  readonly pathTransform: ((path: string) => string) | undefined;
 
   constructor(config: ApiClientConfig) {
     this.baseUrl = config.baseUrl.replace(/\/$/, "");
@@ -4858,6 +4859,94 @@ export class ApiClient {
     const qs = params.toString();
     return this.get<ApiListData<HostVehicleCaseItem>>(
       `/api/host/vehicles/${encodeURIComponent(vehicleId)}/cases${qs ? `?${qs}` : ""}`,
+      options,
+    );
+  }
+
+  // ===========================================================================
+  // SR-PARTNER-NOTIFY-UI-20260917
+  // ===========================================================================
+
+  public async getPartnerEntryNotificationBinding(
+    entrySlug: string,
+    options?: RequestOptions,
+  ): Promise<PartnerEntryNotificationBinding> {
+    return this.get<PartnerEntryNotificationBinding>(
+      `/api/platform-admin/partner-entries/${encodeURIComponent(entrySlug)}/notification-binding`,
+      options,
+    );
+  }
+
+  public async updatePartnerEntryNotificationBinding(
+    entrySlug: string,
+    command: UpdatePartnerEntryNotificationBindingCommand,
+    options?: RequestOptions,
+  ): Promise<PartnerEntryNotificationBinding> {
+    return this.put<PartnerEntryNotificationBinding>(
+      `/api/platform-admin/partner-entries/${encodeURIComponent(entrySlug)}/notification-binding`,
+      { ...options, body: command },
+    );
+  }
+
+  public async testPartnerEntryNotificationBinding(
+    entrySlug: string,
+    options?: RequestOptions,
+  ): Promise<import("@drts/contracts").PartnerNotificationDispatchOutcome> {
+    return this.post<
+      import("@drts/contracts").PartnerNotificationDispatchOutcome
+    >(
+      `/api/platform-admin/partner-entries/${encodeURIComponent(entrySlug)}/notification-binding/test`,
+      options,
+    );
+  }
+
+  public async enablePartnerEntryNotificationBinding(
+    entrySlug: string,
+    expectedVersion: number,
+    options?: RequestOptions,
+  ): Promise<PartnerEntryNotificationBinding> {
+    return this.post<PartnerEntryNotificationBinding>(
+      `/api/platform-admin/partner-entries/${encodeURIComponent(entrySlug)}/notification-binding/enable`,
+      { ...options, body: { expectedVersion } },
+    );
+  }
+
+  public async disablePartnerEntryNotificationBinding(
+    entrySlug: string,
+    expectedVersion: number,
+    options?: RequestOptions,
+  ): Promise<PartnerEntryNotificationBinding> {
+    return this.post<PartnerEntryNotificationBinding>(
+      `/api/platform-admin/partner-entries/${encodeURIComponent(entrySlug)}/notification-binding/disable`,
+      { ...options, body: { expectedVersion } },
+    );
+  }
+
+  public async listPartnerNotificationDeliveries(
+    entrySlug: string,
+    query?: PartnerNotificationDeliveryQuery,
+    options?: RequestOptions,
+  ): Promise<ApiListData<PartnerNotificationDeliveryRecord>> {
+    const params = new URLSearchParams();
+    if (query?.page !== undefined) params.set("page", String(query.page));
+    if (query?.pageSize !== undefined)
+      params.set("pageSize", String(query.pageSize));
+    const qs = params.toString();
+    return this.get<ApiListData<PartnerNotificationDeliveryRecord>>(
+      `/api/platform-admin/partner-entries/${encodeURIComponent(entrySlug)}/notification-deliveries${qs ? `?${qs}` : ""}`,
+      options,
+    );
+  }
+
+  public async retryPartnerNotificationDelivery(
+    entrySlug: string,
+    outboxId: string,
+    options?: RequestOptions,
+  ): Promise<import("@drts/contracts").PartnerNotificationRequeueOutcome> {
+    return this.post<
+      import("@drts/contracts").PartnerNotificationRequeueOutcome
+    >(
+      `/api/platform-admin/partner-entries/${encodeURIComponent(entrySlug)}/notification-deliveries/${encodeURIComponent(outboxId)}/retry`,
       options,
     );
   }

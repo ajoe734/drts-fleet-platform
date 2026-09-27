@@ -85,7 +85,12 @@ describe("CONF-IDEM-004: CRM & webhook command idempotency", () => {
     it("rejects a missing Idempotency-Key with IDEMPOTENCY_KEY_REQUIRED", async () => {
       const { response } = fakeResponse();
       const error = await expectThrows(() =>
-        controller.createComplaintCase(baseCommand, response, undefined, "req-1"),
+        controller.createComplaintCase(
+          baseCommand,
+          response,
+          undefined,
+          "req-1",
+        ),
       );
       expect(getErrorCode(error)).toBe("IDEMPOTENCY_KEY_REQUIRED");
       expect(complaintService.listComplaintCases()).toHaveLength(0);
@@ -175,7 +180,12 @@ describe("CONF-IDEM-004: CRM & webhook command idempotency", () => {
     it("rejects a missing Idempotency-Key with IDEMPOTENCY_KEY_REQUIRED", async () => {
       const { response } = fakeResponse();
       const error = await expectThrows(() =>
-        controller.createCallCenterOrder(baseCommand, response, undefined, "req-1"),
+        controller.createCallCenterOrder(
+          baseCommand,
+          response,
+          undefined,
+          "req-1",
+        ),
       );
       expect(getErrorCode(error)).toBe("IDEMPOTENCY_KEY_REQUIRED");
       expect(createCallCenterOrder).not.toHaveBeenCalled();
@@ -253,6 +263,10 @@ describe("CONF-IDEM-004: CRM & webhook command idempotency", () => {
         {} as never,
         new JwtAuthService(),
         idempotencyService,
+        {} as never,
+        {} as never,
+        {} as never,
+        {} as never,
       );
     });
 
