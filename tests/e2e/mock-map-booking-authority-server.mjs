@@ -403,21 +403,35 @@ const server = http.createServer((req, res) => {
 
   if (req.method === "GET" && url.pathname === "/api/tenant/cost-centers") {
     json(res, 200, {
-      data: [{ costCenterId: "cc-1", code: "CC1", name: "Default", activeFlag: true }]
+      data: [
+        {
+          costCenterId: "cc-1",
+          code: "CC1",
+          name: "Default",
+          activeFlag: true,
+        },
+      ],
     });
     return;
   }
 
   if (req.method === "GET" && url.pathname === "/api/tenant/passengers") {
     json(res, 200, {
-      data: [{ passengerId: "p-1", fullName: "Test Passenger", activeFlag: true }]
+      data: [
+        {
+          passengerId: "p-1",
+          fullName: "Test Passenger",
+          mobile: "0912345678",
+          activeFlag: true,
+        },
+      ],
     });
     return;
   }
 
   if (req.method === "GET" && url.pathname === "/api/tenant/addresses") {
     json(res, 200, {
-      data: []
+      data: [],
     });
     return;
   }

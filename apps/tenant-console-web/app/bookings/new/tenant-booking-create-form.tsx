@@ -886,6 +886,8 @@ export function TenantBookingCreateForm({
   const dropoffAddress = dropoffPayload?.address ?? "";
   const dropoffLat = coordinateToDraftString(dropoffPayload?.lat);
   const dropoffLng = coordinateToDraftString(dropoffPayload?.lng);
+  const pickupManualOverrideReason = pickupPayload?.manualOverrideReason;
+  const dropoffManualOverrideReason = dropoffPayload?.manualOverrideReason;
   const draft: TenantBookingDraftValues = {
     businessDispatchSubtype,
     selectedPassengerId,
@@ -897,6 +899,8 @@ export function TenantBookingCreateForm({
     dropoffAddress,
     dropoffLat,
     dropoffLng,
+    pickupManualOverrideReason,
+    dropoffManualOverrideReason,
     reservationWindowStart,
     reservationWindowEnd,
     passengerName,
@@ -1668,12 +1672,10 @@ export function TenantBookingCreateForm({
                         theme={th}
                         tone="danger"
                         icon="warn"
-                        title={
-                          t("newBooking.serviceability.providerOutageBlocked")
-                        }
-                        body={
-                          t("newBooking.serviceability.providerOutageBody")
-                        }
+                        title={t(
+                          "newBooking.serviceability.providerOutageBlocked",
+                        )}
+                        body={t("newBooking.serviceability.providerOutageBody")}
                       />
                     </div>
                   ) : null}

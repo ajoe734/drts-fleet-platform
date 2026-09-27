@@ -189,7 +189,9 @@ test.describe("tenant console booking map alignment", () => {
     await expect(submit).toBeDisabled();
   });
 
-  test("provider_outage disables search and blocks ordinary booking submission", async ({ page }) => {
+  test("provider_outage disables search and blocks ordinary booking submission", async ({
+    page,
+  }) => {
     let bookingPostCalled = false;
     await page.route("**/api/bookings/create", (route) => {
       bookingPostCalled = true;
@@ -200,20 +202,32 @@ test.describe("tenant console booking map alignment", () => {
     await page.goto("/bookings/new");
 
     // Fill required booking fields to simulate a valid form otherwise
-    await page.getByLabel(/Service subtype|服務子類型/).selectOption({ index: 1 });
+    await page
+      .getByLabel(/Service subtype|服務子類型/)
+      .selectOption({ index: 1 });
     await page.getByLabel(/Timing mode|時間模式/).selectOption({ index: 1 });
-    await page.getByLabel(/Reservation start|預約開始/).fill("2026-10-01T12:00");
+    await page
+      .getByLabel(/Reservation start|預約開始/)
+      .fill("2026-10-01T12:00");
     await page.getByLabel(/Reservation end|預約結束/).fill("2026-10-01T13:00");
-    await page.getByRole("combobox", { name: /Passenger|乘客/ }).selectOption({ index: 1 });
-    await page.getByRole("combobox", { name: /Cost center|成本中心/ }).selectOption({ index: 1 });
+    await page
+      .getByRole("combobox", { name: /Passenger|乘客/ })
+      .selectOption({ index: 1 });
+    await page
+      .getByRole("combobox", { name: /Cost center|成本中心/ })
+      .selectOption({ index: 1 });
 
     // The UI should show the outage banner
-    await expect(page.getByText(/Address provider is down|地址服務中斷/i).first()).toBeVisible();
+    await expect(
+      page.getByText(/Address provider is down|地址服務中斷/i).first(),
+    ).toBeVisible();
 
     // The search input and button should be disabled
     const searchInputs = page.getByLabel(/Search|搜尋/i);
     await expect(searchInputs.first()).toBeDisabled();
-    await expect(page.getByRole("button", { name: /Search|搜尋/i }).first()).toBeDisabled();
+    await expect(
+      page.getByRole("button", { name: /Search|搜尋/i }).first(),
+    ).toBeDisabled();
 
     // The submit button should be disabled for normal flow
     const submit = page.getByRole("button", {
@@ -225,7 +239,9 @@ test.describe("tenant console booking map alignment", () => {
     expect(bookingPostCalled).toBe(false);
   });
 
-  test("manual coordinate edits are allowed and submit with valid reason", async ({ page }) => {
+  test("manual coordinate edits are allowed and submit with valid reason", async ({
+    page,
+  }) => {
     let postedData: any = null;
     await page.route("**/api/bookings/create", (route) => {
       if (route.request().method() === "POST") {
@@ -238,31 +254,79 @@ test.describe("tenant console booking map alignment", () => {
     await page.goto("/bookings/new");
 
     // Toggle manual for pickup
-    await page.getByText(/Enter coordinates manually|改用手動座標/).first().click();
-    await page.getByLabel(/Latitude|緯度/).first().fill("25.033");
-    await page.getByLabel(/Longitude|經度/).first().fill("121.565");
+    await page
+      .getByLabel(/Search address|搜尋地址/)
+      .first()
+      .fill("Manual Pickup");
+    await page
+      .getByText(/Enter coordinates manually|改用手動座標/)
+      .first()
+      .click();
+    await page
+      .getByLabel(/Latitude|緯度/)
+      .first()
+      .fill("25.033");
+    await page
+      .getByLabel(/Longitude|經度/)
+      .first()
+      .fill("121.565");
     // Invalid reason (empty string) blocks apply if required, but tenant requires it
-    await page.getByLabel(/Reason|原因/).first().fill("Testing manual pin");
-    await page.getByRole("button", { name: /Use this location|確認使用此位置/ }).first().click();
+    await page
+      .getByLabel(/Reason|原因/)
+      .first()
+      .fill("Testing manual pin");
+    await page
+      .getByRole("button", { name: /Use this location|確認使用此位置/ })
+      .first()
+      .click();
 
     // Toggle manual for dropoff
-    await page.getByText(/Enter coordinates manually|改用手動座標/).last().click();
-    await page.getByLabel(/Latitude|緯度/).last().fill("25.044");
-    await page.getByLabel(/Longitude|經度/).last().fill("121.575");
-    await page.getByLabel(/Reason|原因/).last().fill("Testing manual pin dropoff");
-    await page.getByRole("button", { name: /Use this location|確認使用此位置/ }).last().click();
+    await page
+      .getByLabel(/Search address|搜尋地址/)
+      .last()
+      .fill("Manual Dropoff");
+    await page
+      .getByText(/Enter coordinates manually|改用手動座標/)
+      .last()
+      .click();
+    await page
+      .getByLabel(/Latitude|緯度/)
+      .last()
+      .fill("25.044");
+    await page
+      .getByLabel(/Longitude|經度/)
+      .last()
+      .fill("121.575");
+    await page
+      .getByLabel(/Reason|原因/)
+      .last()
+      .fill("Testing manual pin dropoff");
+    await page
+      .getByRole("button", { name: /Use this location|確認使用此位置/ })
+      .last()
+      .click();
 
     // Fill required booking fields to enable submit
-    await page.getByLabel(/Service subtype|服務子類型/).selectOption({ index: 1 });
+    await page
+      .getByLabel(/Service subtype|服務子類型/)
+      .selectOption({ index: 1 });
     await page.getByLabel(/Timing mode|時間模式/).selectOption({ index: 1 });
 
-    await page.getByLabel(/Reservation start|預約開始/).fill("2026-10-01T12:00");
+    await page
+      .getByLabel(/Reservation start|預約開始/)
+      .fill("2026-10-01T12:00");
     await page.getByLabel(/Reservation end|預約結束/).fill("2026-10-01T13:00");
 
-    await page.getByRole("combobox", { name: /Passenger|乘客/ }).selectOption({ index: 1 });
-    await page.getByRole("combobox", { name: /Cost center|成本中心/ }).selectOption({ index: 1 });
+    await page
+      .getByRole("combobox", { name: /Passenger|乘客/ })
+      .selectOption({ index: 1 });
+    await page
+      .getByRole("combobox", { name: /Cost center|成本中心/ })
+      .selectOption({ index: 1 });
 
-    const submit = page.getByRole("button", { name: /Create booking|For approval|Submitting|建立叫車|送出/ });
+    const submit = page.getByRole("button", {
+      name: /Create booking|For approval|Submitting|建立叫車|送出/,
+    });
     await expect(submit).toBeEnabled();
     await submit.click();
 
