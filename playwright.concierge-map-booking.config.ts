@@ -24,13 +24,18 @@ export default defineConfig({
     {
       name: "healthy",
       use: {
-        baseURL: shouldStartLocalConcierge ? "http://127.0.0.1:3006" : conciergeBaseURL,
+        baseURL: shouldStartLocalConcierge
+          ? "http://127.0.0.1:3006"
+          : conciergeBaseURL,
       },
     },
     {
       name: "outage",
       use: {
-        baseURL: shouldStartLocalConcierge ? "http://127.0.0.1:3007" : (process.env.DRTS_DEV_CONCIERGE_OUTAGE_BASE_URL ?? conciergeBaseURL),
+        baseURL: shouldStartLocalConcierge
+          ? "http://127.0.0.1:3007"
+          : (process.env.DRTS_DEV_CONCIERGE_OUTAGE_BASE_URL ??
+            conciergeBaseURL),
       },
     },
   ],
@@ -46,7 +51,7 @@ export default defineConfig({
           },
           {
             command:
-              "pnpm --filter @drts/contracts build && pnpm --filter @drts/ui-tokens build && cd apps/concierge-portal-web && AUTH_MODE=test NEXT_PUBLIC_ADDRESS_PICKER_PROVIDER_MODE=unavailable NEXT_PRIVATE_DIST_DIR=.next-outage pnpm exec next dev --webpack --hostname 127.0.0.1 --port 3007",
+              "pnpm --filter @drts/contracts build && pnpm --filter @drts/ui-tokens build && cd apps/concierge-portal-web && AUTH_MODE=test NEXT_PUBLIC_ADDRESS_PICKER_PROVIDER_MODE=unavailable DRTS_NEXT_DIST_DIR=.next-outage pnpm exec next dev --webpack --hostname 127.0.0.1 --port 3007",
             url: "http://127.0.0.1:3007",
             reuseExistingServer: !process.env.CI,
             timeout: 120_000,

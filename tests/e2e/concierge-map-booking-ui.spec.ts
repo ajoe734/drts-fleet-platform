@@ -481,9 +481,9 @@ test.describe("concierge map booking UI", () => {
     const pickupMatch = pickupCoordsText?.match(
       /(?:座標|Coordinates):\s*([0-9.-]+),\s*([0-9.-]+)/,
     );
-    const expectedPickupLat = pickupMatch ? pickupMatch[1] : "0";
-    const expectedPickupLng = pickupMatch ? pickupMatch[2] : "0";
-    expect(parseFloat(expectedPickupLat)).toBeFinite();
+    const expectedPickupLat = pickupMatch ? pickupMatch[1]! : "0";
+    const expectedPickupLng = pickupMatch ? pickupMatch[2]! : "0";
+    expect(parseFloat(expectedPickupLat)).not.toBeNaN();
     expect(expectedPickupLat).not.toBe(initialPickupLat);
 
     const dropoffCoordsText = await dropoffPicker
@@ -492,9 +492,9 @@ test.describe("concierge map booking UI", () => {
     const dropoffMatch = dropoffCoordsText?.match(
       /(?:座標|Coordinates):\s*([0-9.-]+),\s*([0-9.-]+)/,
     );
-    const expectedDropoffLat = dropoffMatch ? dropoffMatch[1] : "0";
-    const expectedDropoffLng = dropoffMatch ? dropoffMatch[2] : "0";
-    expect(parseFloat(expectedDropoffLat)).toBeFinite();
+    const expectedDropoffLat = dropoffMatch ? dropoffMatch[1]! : "0";
+    const expectedDropoffLng = dropoffMatch ? dropoffMatch[2]! : "0";
+    expect(parseFloat(expectedDropoffLat)).not.toBeNaN();
     expect(expectedDropoffLat).not.toBe(initialDropoffLat);
 
     // Submit and verify keyboard and drag
@@ -577,9 +577,9 @@ test.describe("concierge map booking UI", () => {
     const clickMatch = clickCoordsText?.match(
       /(?:座標|Coordinates):\s*([0-9.-]+),\s*([0-9.-]+)/,
     );
-    const expectedClickLat = clickMatch ? clickMatch[1] : "0";
-    const expectedClickLng = clickMatch ? clickMatch[2] : "0";
-    expect(parseFloat(expectedClickLat)).toBeFinite();
+    const expectedClickLat = clickMatch ? clickMatch[1]! : "0";
+    const expectedClickLng = clickMatch ? clickMatch[2]! : "0";
+    expect(parseFloat(expectedClickLat)).not.toBeNaN();
     expect(expectedClickLat).not.toBe(initialClickLat);
 
     // Now it should be enabled

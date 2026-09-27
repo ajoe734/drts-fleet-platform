@@ -2,7 +2,7 @@ import type { NextConfig } from "next";
 import path from "path";
 
 const nextConfig: NextConfig = {
-  distDir: process.env.NEXT_PRIVATE_DIST_DIR || ".next",
+  distDir: process.env.DRTS_NEXT_DIST_DIR || ".next",
   output: "standalone",
   compress: false,
   transpilePackages: ["@drts/api-client", "@drts/contracts", "@drts/ui-tokens"],
