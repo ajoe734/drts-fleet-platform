@@ -18,6 +18,7 @@ import type {
 } from "@drts/contracts";
 import { decodeTenantWire } from "../sr-qa-tenant-001/http-boundary";
 import { ControlledReceiver, type ReceiverScope } from "./controlled-receiver";
+import type { ServiceProductRecord } from "../../../../apps/api/src/modules/service-product/service-product.types";
 
 const run = promisify(execFile);
 function required(name: string) {
@@ -183,27 +184,90 @@ export class PartnerFixture {
       throw new Error("Receiver address unavailable");
     this.url = `http://127.0.0.1:${address.port}/notify`;
     const platform = required("DRTS_UAT_TOKEN_PLATFORM");
-    const authorization =
-      await this.call<MultiTaxiOperatingAuthorizationRecord>(
-        "platform-admin/multi-taxi/authorizations",
+    // The default taxi_reservation product is deliberately inactive. Configure
+    // both product and runtime policy through governance, before creating rides.
+    const products = await this.call<{ items: ServiceProductRecord[] }>(
+      "admin/service-products",
+      platform,
+    );
+    const reservation = products.items.find(
+      (product) => product.serviceProductType === "taxi_reservation",
+    );
+    if (reservation) {
+      if (!reservation.active)
+        await this.call(
+          `admin/service-products/${reservation.serviceProductId}`,
+          platform,
+          "PUT",
+          { active: true },
+        );
+    } else {
+      await this.call("admin/service-products", platform, "POST", {
+        serviceProductType: "taxi_reservation",
+        displayName: "Controlled QA taxi reservation",
+        timing: "reservation",
+        active: true,
+        defaultBillingMode: "meter",
+      });
+    }
+    const productReadback = await this.call<{ items: ServiceProductRecord[] }>(
+      "admin/service-products",
+      platform,
+    );
+    expect(
+      productReadback.items.find(
+        (product) => product.serviceProductType === "taxi_reservation",
+      )?.active,
+    ).toBe(true);
+    await this.call(
+      "admin/service-products/runtime-policies/multi_taxi_direct/taxi_reservation",
+      platform,
+      "PUT",
+      {
+        active: true,
+        effectiveFrom: new Date(Date.now() - 60_000).toISOString(),
+        effectiveUntil: new Date(Date.now() + 3_600_000).toISOString(),
+      },
+    );
+    // Playwright starts a new worker after a failure. Reuse the single effective
+    // authorization so that a rerun cannot make production resolution ambiguous.
+    const authorizations = await this.call<{
+      items: MultiTaxiOperatingAuthorizationRecord[];
+    }>("platform-admin/multi-taxi/authorizations", platform);
+    const active = authorizations.items.filter(
+      (authorization) =>
+        authorization.status === "approved" &&
+        Date.parse(authorization.effectiveFrom) <= Date.now() &&
+        (authorization.effectiveUntil === null ||
+          Date.parse(authorization.effectiveUntil) > Date.now()),
+    );
+    expect(
+      active.length,
+      "one unambiguous operating authorization",
+    ).toBeLessThanOrEqual(1);
+    if (active.length === 0) {
+      const authorization =
+        await this.call<MultiTaxiOperatingAuthorizationRecord>(
+          "platform-admin/multi-taxi/authorizations",
+          platform,
+          "POST",
+          {
+            operatorId: `qa-${randomUUID()}`,
+            authorityCode: "QA-CONTROLLED",
+            businessPlanVersion: "qa-v1",
+            serviceAreaCodes: ["QA"],
+            activeFareVersionId: "qa-fare",
+            effectiveFrom: new Date(Date.now() - 60_000).toISOString(),
+            effectiveUntil: new Date(Date.now() + 3_600_000).toISOString(),
+          },
+        );
+      await this.call(
+        `platform-admin/multi-taxi/authorizations/${authorization.authorizationId}/activate`,
         platform,
         "POST",
-        {
-          operatorId: `qa-${randomUUID()}`,
-          authorityCode: "QA-CONTROLLED",
-          businessPlanVersion: "qa-v1",
-          serviceAreaCodes: ["QA"],
-          activeFareVersionId: "qa-fare",
-          effectiveFrom: new Date(Date.now() - 60_000).toISOString(),
-          effectiveUntil: new Date(Date.now() + 3_600_000).toISOString(),
-        },
+        {},
       );
-    await this.call(
-      `platform-admin/multi-taxi/authorizations/${authorization.authorizationId}/activate`,
-      platform,
-      "POST",
-      {},
-    );
+    }
     const tenantA = required("DRTS_UAT_TENANT_A");
     const tenantB = required("DRTS_UAT_TENANT_B");
     expect(tenantA).not.toBe(tenantB);
