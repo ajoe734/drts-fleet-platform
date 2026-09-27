@@ -8,13 +8,11 @@ import type { Translator } from "./translations";
 
 function isApiClientError(
   error: unknown,
-): error is { code: string; statusCode: number; rawBody: string } {
+): error is { code: string; statusCode?: number; rawBody?: string } {
   return (
     typeof error === "object" &&
     error !== null &&
-    typeof (error as { code?: unknown }).code === "string" &&
-    typeof (error as { statusCode?: unknown }).statusCode === "number" &&
-    typeof (error as { rawBody?: unknown }).rawBody === "string"
+    typeof (error as { code?: unknown }).code === "string"
   );
 }
 

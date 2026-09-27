@@ -453,6 +453,23 @@ const server = http.createServer((req, res) => {
     return;
   }
 
+  if (req.method === "GET" && url.pathname === "/api/geo/health") {
+    json(res, 200, {
+      data: {
+        provider: "mock",
+        mode: "mock",
+        status: "healthy",
+        environment: "test",
+        generatedAt: new Date().toISOString(),
+        failClosed: true,
+        mockAllowed: true,
+        requiredSecretNames: [],
+        missingSecretNames: [],
+      },
+    });
+    return;
+  }
+
   if (req.method === "GET" && url.pathname === "/api/tenant/addresses") {
     json(res, 200, { data: mockAddresses });
     return;

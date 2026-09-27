@@ -401,6 +401,7 @@ test.describe("tenant console booking map alignment", () => {
   test("address editing in portal preserves coordinates and supports manual reasons", async ({
     page,
   }) => {
+    await stubGeoProvider(page, "serviceable");
     await page.goto("http://127.0.0.1:3306/addresses");
     await expect(page.getByText("Taipei 101")).toBeVisible();
     await page
@@ -501,16 +502,15 @@ test.describe("tenant console booking map alignment", () => {
     const pinBox = await pin2.boundingBox();
     expect(pinBox).not.toBeNull();
     if (pinBox) {
-      const startX = pinBox.x + pinBox.width / 2;
-      const startY = pinBox.y + pinBox.height / 2;
-
-      await page.mouse.move(startX, startY);
-      await page.mouse.down();
-      // Wait to simulate a human drag
-      await page.waitForTimeout(200);
-      await page.mouse.move(startX + 10, startY + 10, { steps: 10 });
-      await page.waitForTimeout(200);
-      await page.mouse.up();
+      const svgBox = await svgMap.boundingBox();
+      if (svgBox) {
+        await pin2.dragTo(svgMap, {
+          targetPosition: {
+            x: svgBox.width * 0.7,
+            y: svgBox.height * 0.7,
+          },
+        });
+      }
     }
 
     // Polling expect to wait for React to update the hidden field
