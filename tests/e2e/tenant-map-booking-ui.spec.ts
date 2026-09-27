@@ -401,11 +401,8 @@ test.describe("tenant console booking map alignment", () => {
   test("address editing in portal preserves coordinates and supports manual reasons", async ({
     page,
   }) => {
-    // Go to Tenant Portal addresses page (port 3306)
     await page.goto("http://127.0.0.1:3306/addresses");
     await expect(page.getByText("Taipei 101")).toBeVisible();
-
-    // Edit address is a link, not a button
     await page
       .getByRole("link", { name: /Edit|編輯/i })
       .first()
@@ -414,85 +411,39 @@ test.describe("tenant console booking map alignment", () => {
       page.getByRole("heading", { name: /Edit Address/i }),
     ).toBeVisible();
 
-    const picker = page.locator("[data-address-map-picker]");
-
-    // Toggle manual coords
-    await picker
-      .getByText(/Enter coordinates manually|手動輸入座標|改用手動座標/)
-      .click();
-    await picker.getByLabel(/Latitude|緯度/).fill("25.034");
-    await picker.getByLabel(/Longitude|經度/).fill("121.566");
-
-    // Blank reason rejected by MapPicker, retaining prior pin
-    await picker.getByLabel(/Reason|原因/).fill("");
-    await picker
-      .getByRole("button", { name: /Use this location|使用此位置/ })
-      .click();
-
-    // Assert rejection: error message is visible and hidden inputs are unchanged
-    await expect(
-      picker.getByText(/Reason for manual location|手動定位原因/i),
-    ).toHaveCount(2);
-    await expect(page.locator('input[name="lat"]')).not.toHaveValue("25.034");
-
-    // Provide a valid reason
-    await picker.getByLabel(/Reason|原因/).fill("Moved slightly");
-    await picker
-      .getByRole("button", { name: /Use this location|使用此位置/ })
-      .click();
-
-    const responsePromise = page.waitForResponse(
+    // 1. Verify unchanged persistence (R7b/R7c: never saves an UNCHANGED saved pin and verifies provenance)
+    // First, just save without modifications.
+    let responsePromise = page.waitForResponse(
       (response) =>
         response.url().includes("/addresses") &&
         response.request().method() === "POST",
     );
-    // Save the form
-    await page
-      .getByRole("button", { name: /Save Changes|儲存/i })
-      .click({ force: true });
-
-    // Wait for the server action POST to finish
+    await page.getByRole("button", { name: /Save Changes|儲存/i }).click();
     await responsePromise;
-
-    // Real behavior: updateAddress calls revalidatePath but no success redirect;
-    // ?edit=addr-001 remains. Reload to verify persistence.
     await page.reload();
     await expect(
       page.getByRole("heading", { name: /Edit Address/i }),
     ).toBeVisible();
 
-    // Verify coordinates are updated in the form's hidden inputs (persisted)
-    await expect(page.locator('input[name="lat"]')).toHaveValue("25.034");
-    await expect(page.locator('input[name="lng"]')).toHaveValue("121.566");
+    // Check it persisted original coordinates and source
+    await expect(page.locator('input[name="lat"]')).toHaveValue("25.033");
+    await expect(page.locator('input[name="lng"]')).toHaveValue("121.565");
     await expect(page.locator('input[name="coordinateSource"]')).toHaveValue(
       "saved_address",
     );
     await expect(page.locator('input[name="priorGeocodeSource"]')).toHaveValue(
-      "manual",
+      "provider",
     );
 
-    // Verify remounting manual toggle starts blank
-    await page.goto("http://127.0.0.1:3306/addresses");
-    await page
-      .getByRole("link", { name: /Edit|編輯/i })
-      .first()
-      .click();
-    await expect(
-      page.getByRole("heading", { name: /Edit Address/i }),
-    ).toBeVisible();
-    await picker
-      .getByText(/Enter coordinates manually|手動輸入座標|改用手動座標/)
-      .click();
-    await expect(picker.getByLabel(/Latitude|緯度/)).toHaveValue("");
+    const picker = page.locator("[data-address-map-picker]");
 
-    // Pointer/Keyboard case: simulate setting coordinates via keyboard drag
-    // which updates the pin without manual entry
+    // 2. Keyboard nudge persistence
     const pin = picker.locator("g[role='button']").first();
     await pin.focus();
     await page.keyboard.press("ArrowUp");
-
-    // Verify it changed in local state
-    await expect(page.locator('input[name="lat"]')).not.toHaveValue("25.034");
+    await expect(page.locator('input[name="lat"]')).not.toHaveValue("25.033");
+    const keyboardLat = await page.locator('input[name="lat"]').inputValue();
+    const keyboardLng = await page.locator('input[name="lng"]').inputValue();
     await expect(page.locator('input[name="coordinateSource"]')).toHaveValue(
       "manual_pin",
     );
@@ -500,40 +451,126 @@ test.describe("tenant console booking map alignment", () => {
       page.locator('input[name="manualOverrideReason"]'),
     ).toHaveValue(/Pin adjusted manually|已手動調整圖釘位置/);
 
-    // Add independent genuine pointer interaction (Map click)
+    responsePromise = page.waitForResponse(
+      (response) =>
+        response.url().includes("/addresses") &&
+        response.request().method() === "POST",
+    );
+    await page.getByRole("button", { name: /Save Changes|儲存/i }).click();
+    await responsePromise;
+    await page.reload();
+    await expect(
+      page.getByRole("heading", { name: /Edit Address/i }),
+    ).toBeVisible();
+    await expect(page.locator('input[name="lat"]')).toHaveValue(keyboardLat);
+    await expect(page.locator('input[name="lng"]')).toHaveValue(keyboardLng);
+    await expect(page.locator('input[name="coordinateSource"]')).toHaveValue(
+      "saved_address",
+    );
+    await expect(page.locator('input[name="priorGeocodeSource"]')).toHaveValue(
+      "manual_pin",
+    );
+
+    // 3. Pointer drag map click
+    const pin2 = picker.locator("g[role='button']").first();
+    const pinBox = await pin2.boundingBox();
+    if (pinBox) {
+      await page.mouse.move(
+        pinBox.x + pinBox.width / 2,
+        pinBox.y + pinBox.height / 2,
+      );
+      await page.mouse.down();
+      await page.mouse.move(pinBox.x + pinBox.width / 2, pinBox.y - 50);
+      await page.mouse.up();
+    }
+    const dragLat = await page.locator('input[name="lat"]').inputValue();
+    const dragLng = await page.locator('input[name="lng"]').inputValue();
+    expect(dragLat).not.toBe(keyboardLat);
+    await expect(page.locator('input[name="coordinateSource"]')).toHaveValue(
+      "manual_pin",
+    );
+    await expect(
+      page.locator('input[name="manualOverrideReason"]'),
+    ).toHaveValue(/Pin adjusted manually|已手動調整圖釘位置/);
+
+    responsePromise = page.waitForResponse(
+      (response) =>
+        response.url().includes("/addresses") &&
+        response.request().method() === "POST",
+    );
+    await page.getByRole("button", { name: /Save Changes|儲存/i }).click();
+    await responsePromise;
+    await page.reload();
+    await expect(
+      page.getByRole("heading", { name: /Edit Address/i }),
+    ).toBeVisible();
+    await expect(page.locator('input[name="lat"]')).toHaveValue(dragLat);
+    await expect(page.locator('input[name="lng"]')).toHaveValue(dragLng);
+    await expect(page.locator('input[name="coordinateSource"]')).toHaveValue(
+      "saved_address",
+    );
+    await expect(page.locator('input[name="priorGeocodeSource"]')).toHaveValue(
+      "manual_pin",
+    );
+
+    // 4. Pointer click (Map Background click)
     const svg = picker.locator("svg[role='img']").first();
     const svgBox = await svg.boundingBox();
     if (svgBox) {
-      // Click near the top-left of the map preview to trigger handleMapPointSelect
       await page.mouse.click(
         svgBox.x + svgBox.width * 0.2,
         svgBox.y + svgBox.height * 0.2,
       );
     }
-
-    // Verify it updated the reason to agent_map_click
     await expect(
       page.locator('input[name="manualOverrideReason"]'),
     ).toHaveValue("agent_map_click");
 
-    const responsePromise2 = page.waitForResponse(
+    await expect(page.locator('input[name="lat"]')).not.toHaveValue(dragLat);
+
+    const clickLat = await page.locator('input[name="lat"]').inputValue();
+    const clickLng = await page.locator('input[name="lng"]').inputValue();
+    const clickSource = await page
+      .locator('input[name="coordinateSource"]')
+      .inputValue();
+
+    responsePromise = page.waitForResponse(
       (response) =>
         response.url().includes("/addresses") &&
         response.request().method() === "POST",
     );
-    await page
-      .getByRole("button", { name: /Save Changes|儲存/i })
-      .click({ force: true });
-
-    // Check server persistence
-    await responsePromise2;
+    await page.getByRole("button", { name: /Save Changes|儲存/i }).click();
+    await responsePromise;
     await page.reload();
     await expect(
       page.getByRole("heading", { name: /Edit Address/i }),
     ).toBeVisible();
+    await expect(page.locator('input[name="lat"]')).toHaveValue(clickLat);
+    await expect(page.locator('input[name="lng"]')).toHaveValue(clickLng);
+    await expect(page.locator('input[name="coordinateSource"]')).toHaveValue(
+      "saved_address",
+    );
+    await expect(page.locator('input[name="priorGeocodeSource"]')).toHaveValue(
+      clickSource,
+    );
 
-    const newLat = await page.locator('input[name="lat"]').inputValue();
-    expect(newLat).not.toBe("25.034");
-    expect(newLat).not.toBe("");
+    // 5. No-coordinate policy / Clear pin
+    await picker.getByRole("button", { name: /Clear|清除/ }).click();
+    await expect(page.locator('input[name="lat"]')).toHaveValue("");
+    await expect(page.locator('input[name="lng"]')).toHaveValue("");
+
+    responsePromise = page.waitForResponse(
+      (response) =>
+        response.url().includes("/addresses") &&
+        response.request().method() === "POST",
+    );
+    await page.getByRole("button", { name: /Save Changes|儲存/i }).click();
+    await responsePromise;
+    await page.reload();
+    await expect(
+      page.getByRole("heading", { name: /Edit Address/i }),
+    ).toBeVisible();
+    await expect(page.locator('input[name="lat"]')).toHaveValue("");
+    await expect(page.locator('input[name="lng"]')).toHaveValue("");
   });
 });

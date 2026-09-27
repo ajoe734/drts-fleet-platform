@@ -685,8 +685,10 @@ export function AddressMapPicker<TServiceProduct extends string = string>(
     };
   }, [provider, providerHealth]);
 
+  const interactionIdRef = useRef<number>(0);
   const applySelection = useCallback(
     (address: AddressPayload | null, reason: string) => {
+      interactionIdRef.current += 1;
       setSelection(address ? { address, manualReason: reason } : null);
     },
     [],
@@ -895,6 +897,7 @@ export function AddressMapPicker<TServiceProduct extends string = string>(
 
       // Keep the exact map click immediately; reverse geocoding only enriches it.
       applyPoint(null);
+      const currentInteraction = interactionIdRef.current;
       if (!provider.reverse) {
         return;
       }
@@ -905,6 +908,9 @@ export function AddressMapPicker<TServiceProduct extends string = string>(
           ...(locale ? { locale } : {}),
           requestedByActorId: actorId,
         });
+        if (interactionIdRef.current !== currentInteraction) {
+          return;
+        }
         applyPoint(reverse.address);
       } catch {
         // A provider outage must not erase a valid, policy-evaluated map pin.

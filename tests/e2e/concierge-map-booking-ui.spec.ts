@@ -414,7 +414,7 @@ test.describe("concierge map booking UI", () => {
     expect(command.pickup.lng).toBe(121.565);
     expect(command.pickup.manualOverrideReason).toBe("Fixing rejected address");
   });
-  test("pointer/keyboard persistence", async ({ page }, testInfo) => {
+  test("pointer/keyboard/drag persistence", async ({ page }, testInfo) => {
     test.skip(testInfo.project.name === "outage");
     const captured = { body: [] as unknown[] };
     await installConciergeApiMocks(page, captured);
@@ -432,22 +432,52 @@ test.describe("concierge map booking UI", () => {
     );
 
     const pickupPicker = page.locator("[data-address-map-picker]").nth(0);
+    const dropoffPicker = page.locator("[data-address-map-picker]").nth(1);
 
-    // Simulate keyboard adjustment
-    const pin = pickupPicker.locator("g[role='button']").first();
-    await pin.focus();
+    // 1. Simulate keyboard adjustment on pickup
+    const pickupPin = pickupPicker.locator("g[role='button']").first();
+    await pickupPin.focus();
     await page.keyboard.press("ArrowUp");
 
-    // Add independent genuine pointer interaction (Map click) on the dropoff picker
-    const dropoffPicker = page.locator("[data-address-map-picker]").nth(1);
-    const dropoffSvg = dropoffPicker.locator("svg[role='img']").first();
-    const dropoffBox = await dropoffSvg.boundingBox();
-    if (dropoffBox) {
+    // 2. Add pointer drag on dropoff
+    const dropoffPin = dropoffPicker.locator("g[role='button']").first();
+    const dropoffPinBox = await dropoffPin.boundingBox();
+    if (dropoffPinBox) {
+      await page.mouse.move(
+        dropoffPinBox.x + dropoffPinBox.width / 2,
+        dropoffPinBox.y + dropoffPinBox.height / 2,
+      );
+      await page.mouse.down();
+      await page.mouse.move(
+        dropoffPinBox.x + dropoffPinBox.width / 2,
+        dropoffPinBox.y - 50,
+      );
+      await page.mouse.up();
+    }
+    const afterDragLat = await dropoffPicker
+      .locator('input[name="lat"]')
+      .inputValue();
+
+    // 3. Add independent genuine pointer interaction (Map click) on pickup
+    const pickupSvg = pickupPicker.locator("svg[role='img']").first();
+    const pickupSvgBox = await pickupSvg.boundingBox();
+    if (pickupSvgBox) {
       await page.mouse.click(
-        dropoffBox.x + dropoffBox.width * 0.2,
-        dropoffBox.y + dropoffBox.height * 0.2,
+        pickupSvgBox.x + pickupSvgBox.width * 0.2,
+        pickupSvgBox.y + pickupSvgBox.height * 0.2,
       );
     }
+    const afterClickLat = await pickupPicker
+      .locator('input[name="lat"]')
+      .inputValue();
+
+    // Wait for reverse geocode to settle
+    await expect(
+      pickupPicker.locator('input[name="coordinateSource"]'),
+    ).toHaveValue("provider", { timeout: 10000 });
+    const finalPickupSource = await pickupPicker
+      .locator('input[name="coordinateSource"]')
+      .inputValue();
 
     // Verify it correctly changed the pin source
     const submitBtn = page.getByRole("button", { name: /提交禮賓代訂/ });
@@ -459,14 +489,17 @@ test.describe("concierge map booking UI", () => {
 
     const command2 = captured.body[0] as any;
 
-    // Pickup was changed via keyboard
-    expect(command2.pickup.coordinateSource).toBe("manual_pin");
-    expect(command2.pickup.manualOverrideReason).toMatch(
+    // Pickup was changed via pointer background click
+    expect(command2.pickup.coordinateSource).toBe(finalPickupSource);
+    expect(command2.pickup.manualOverrideReason).toBe("agent_map_click");
+    expect(String(command2.pickup.lat)).toBe(afterClickLat);
+    expect(String(command2.pickup.lat)).not.toBe("25.033");
+
+    // Dropoff was changed via pointer drag
+    expect(command2.dropoff.coordinateSource).toBe("manual_pin");
+    expect(command2.dropoff.manualOverrideReason).toMatch(
       /Pin adjusted manually|已手動調整圖釘位置/,
     );
-
-    // Dropoff was changed via pointer click
-    expect(command2.dropoff.coordinateSource).toBe("manual_pin");
-    expect(command2.dropoff.manualOverrideReason).toBe("agent_map_click");
+    expect(String(command2.dropoff.lat)).toBe(afterDragLat);
   });
 });
