@@ -22,20 +22,41 @@ export default defineConfig({
     baseURL: partnerBookingBaseURL,
     trace: "retain-on-failure",
   },
+  projects: [
+    {
+      name: "healthy",
+      use: {
+        baseURL: "http://127.0.0.1:3007",
+      },
+    },
+    {
+      name: "outage",
+      use: {
+        baseURL: "http://127.0.0.1:3008",
+      },
+    },
+  ],
   ...(shouldStartLocalPartnerBooking && !skipLocalPartnerBookingWebServer
     ? {
         webServer: [
           {
             command:
               "MAP_BOOKING_AUTHORITY_PORT=3901 node tests/e2e/mock-map-booking-authority-server.mjs",
-            url: "http://127.0.0.1:3901/api/partner/entries/ctbc",
+            url: "http://127.0.0.1:3901/api/partner/entries/acme",
             reuseExistingServer: !process.env.CI,
             timeout: 30_000,
           },
           {
             command:
-              "pnpm --filter @drts/contracts build && pnpm --filter @drts/ui-tokens build && cd apps/partner-booking-web && DRTS_API_URL=http://127.0.0.1:3901 pnpm exec next dev --webpack --hostname 127.0.0.1 --port 3007",
+              "pnpm --filter @drts/contracts build && pnpm --filter @drts/ui-tokens build && cd apps/partner-booking-web && AUTH_MODE=test DRTS_API_URL=http://127.0.0.1:3901 pnpm exec next dev --webpack --hostname 127.0.0.1 --port 3007",
             url: localPartnerBookingBaseURL,
+            reuseExistingServer: !process.env.CI,
+            timeout: 120_000,
+          },
+          {
+            command:
+              "pnpm --filter @drts/contracts build && pnpm --filter @drts/ui-tokens build && cd apps/partner-booking-web && AUTH_MODE=test DRTS_API_URL=http://127.0.0.1:3901 NEXT_PUBLIC_ADDRESS_PICKER_PROVIDER_MODE=unavailable pnpm exec next dev --webpack --hostname 127.0.0.1 --port 3008",
+            url: "http://127.0.0.1:3008",
             reuseExistingServer: !process.env.CI,
             timeout: 120_000,
           },
