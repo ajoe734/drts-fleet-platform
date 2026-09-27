@@ -1557,7 +1557,7 @@ describe("TenantPartnerService sensitive-data governance", () => {
     );
     await service.onModuleInit();
 
-    service.revokePlatformPartnerEntry(
+    await service.revokePlatformPartnerEntry(
       "bank-demo-alpha-airport",
       "req-partner-entry-persist-001",
     );
