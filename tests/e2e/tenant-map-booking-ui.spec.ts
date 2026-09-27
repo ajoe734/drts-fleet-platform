@@ -508,7 +508,7 @@ test.describe("tenant console booking map alignment", () => {
       await page.mouse.down();
       // Wait to simulate a human drag
       await page.waitForTimeout(200);
-      await page.mouse.move(startX + 40, startY + 40, { steps: 10 });
+      await page.mouse.move(startX + 10, startY + 10, { steps: 10 });
       await page.waitForTimeout(200);
       await page.mouse.up();
     }
