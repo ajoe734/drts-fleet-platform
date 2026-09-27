@@ -626,6 +626,9 @@ export function issueControlPlaneRequestAuth(options: {
   const headers: Record<string, string> = {
     [CONTROL_PLANE_REQUEST_AUTH_HEADER]: `Bearer ${token}`,
   };
+  if (identity.tenantId) {
+    headers["x-tenant-id"] = identity.tenantId;
+  }
   if (rawAssertion) {
     headers[CONTROL_PLANE_IAP_JWT_HEADER] = rawAssertion;
   }
