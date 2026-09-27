@@ -19,6 +19,7 @@ import type {
 import { decodeTenantWire } from "../sr-qa-tenant-001/http-boundary";
 import { ControlledReceiver, type ReceiverScope } from "./controlled-receiver";
 import type { ServiceProductRecord } from "../../../../apps/api/src/modules/service-product/service-product.types";
+import type { SyntheticEvent } from "./synthetic-event";
 
 const run = promisify(execFile);
 function required(name: string) {
@@ -39,7 +40,7 @@ export interface PartnerFixtureEntry {
   apiKey: string;
   token: string;
   webhookId: string;
-  binding: PartnerEntryNotificationBinding;
+  binding: PartnerEntryNotificationBinding | null;
 }
 
 /** Uses the existing hosted full AppModule, real bearer/step-up authority and migrations. */
@@ -320,7 +321,7 @@ export class PartnerFixture {
     expect(tenantA).not.toBe(tenantB);
     for (const [tenantId, token, count] of [
       [tenantA, required("DRTS_UAT_TOKEN_A"), 2],
-      [tenantB, required("DRTS_UAT_TOKEN_B"), 1],
+      [tenantB, required("DRTS_UAT_TOKEN_B"), 2],
     ] as const) {
       const entries = new Map<string, ReadonlySet<string>>();
       const secret = randomUUID();
@@ -338,6 +339,8 @@ export class PartnerFixture {
             "tenant.webhook.test",
             "passenger.notification.test.v1",
             "passenger.receipt_ready.v1",
+            "passenger.eta_changed.v1",
+            "passenger.driver_arrived.v1",
           ],
         },
         tenantId,
@@ -383,13 +386,20 @@ export class PartnerFixture {
           { purpose: "disposable hosted QA" },
         );
         expect(issued.plaintextKey).toBeTruthy();
+        // A real fourth entry deliberately has no binding for C220. Its route
+        // and resident are still created by the same authoritative API flow.
+        if (tenantId === tenantB && index === 1) {
+          this.entries.push({ entry, apiKey: issued.plaintextKey, partnerUserRef,
+            token, webhookId: webhook.webhookId, binding: null });
+          continue;
+        }
         const binding = await this.call<PartnerEntryNotificationBinding>(
           `platform-admin/partner-entries/${slug}/notification-binding`,
           platform,
           "PUT",
           {
             webhookId: webhook.webhookId,
-            eventTypes: ["receipt_ready"],
+            eventTypes: ["receipt_ready", "eta_changed", "driver_arrived"],
             expectedVersion: 0,
           },
         );
@@ -590,11 +600,7 @@ export class PartnerFixture {
   async enqueue(
     orderId: string,
     mode: "partner" | "missing_route" = "partner",
-    event: {
-      createdAt?: string;
-      nextAttemptAt?: string;
-      payload?: Record<string, unknown>;
-    } = {},
+    event: SyntheticEvent = {},
   ) {
     const { stdout } = await run(
       "./apps/api/node_modules/.bin/tsx",
@@ -617,6 +623,26 @@ export class PartnerFixture {
     };
     expect(created.candidateSha).toBe(required("CANDIDATE_SHA"));
     return created.outboxId;
+  }
+
+  async reopenReceiver() {
+    // Wait for its durable write queue, then discard the receiver instance.
+    // The HTTP listener stays alive; this is a storage reopen, not an OS reboot.
+    await this.receiver.records();
+    this.receiver = new ControlledReceiver(this.directory!, this.scopes);
+    return this.receiver.records();
+  }
+
+  async availability(outboxId: string) {
+    const { stdout } = await run("./apps/api/node_modules/.bin/tsx", [
+      "tests/e2e/system-remediation/sr-partner-notify-qa-20260917/probe-availability.ts",
+      outboxId,
+    ], { timeout: 30_000 });
+    const line = stdout.split("\n").find((value) => value.startsWith('{"availability":'));
+    if (!line) throw new Error("Full AppModule availability probe returned no evidence");
+    const result = JSON.parse(line);
+    expect(result.candidateSha).toBe(required("CANDIDATE_SHA"));
+    return result;
   }
 
   async outcome(outboxId: string) {

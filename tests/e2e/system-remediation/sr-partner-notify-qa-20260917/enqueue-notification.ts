@@ -3,6 +3,7 @@
 import { createRequire } from "node:module";
 import { randomUUID } from "node:crypto";
 import path from "node:path";
+import { disclosureFixture, type SyntheticEvent } from "./synthetic-event";
 import type { DatabaseService as DatabaseType } from "../../../../apps/api/src/common/db/database.service";
 import type { MultiTaxiRepository as MultiTaxiType } from "../../../../apps/api/src/modules/multi-taxi/multi-taxi.repository";
 import type { OwnedMobilityRepository as OwnedType } from "../../../../apps/api/src/modules/owned-mobility/owned-mobility.repository";
@@ -18,11 +19,7 @@ async function main() {
       "Notification fixtures require the authorized hosted UAT job",
     );
   const [orderId, mode, eventJson = "{}"] = process.argv.slice(2);
-  const event = JSON.parse(eventJson) as {
-    createdAt?: string;
-    nextAttemptAt?: string;
-    payload?: Record<string, unknown>;
-  };
+  const event = JSON.parse(eventJson) as SyntheticEvent;
   if (event.createdAt && !Number.isFinite(Date.parse(event.createdAt)))
     throw new Error("Invalid synthetic event timestamp");
   if (event.nextAttemptAt && !Number.isFinite(Date.parse(event.nextAttemptAt)))
@@ -58,6 +55,9 @@ async function main() {
       resolvePassengerSubjectRef: typeof ResolveSubject;
     };
     await owned.persistChanges({
+      ...(event.relevanceVersion === undefined ? {} : {
+        passengerDisclosureSnapshots: [disclosureFixture(orderId, event.relevanceVersion, now)],
+      }),
       consumerNotificationOutbox: [
         {
           outboxId,
@@ -65,8 +65,8 @@ async function main() {
           passengerSubjectRef:
             route?.passengerSubjectRef ??
             resolvePassengerSubjectRef(order.passenger),
-          eventType: "receipt_ready",
-          assignmentVersion: null,
+          eventType: event.eventType ?? "receipt_ready",
+          assignmentVersion: event.assignmentVersion ?? null,
           payload: event.payload ?? {},
           status: "pending",
           attemptCount: 0,
