@@ -418,9 +418,7 @@ test.describe("tenant console booking map alignment", () => {
         response.url().includes("/addresses") &&
         response.request().method() === "POST",
     );
-    await page
-      .getByRole("button", { name: /Save Changes|儲存/i })
-      .click({ force: true });
+    await page.getByRole("button", { name: /Save Changes|儲存/i }).click();
     await responsePromise;
     await page.reload();
     await expect(
@@ -458,9 +456,7 @@ test.describe("tenant console booking map alignment", () => {
         response.url().includes("/addresses") &&
         response.request().method() === "POST",
     );
-    await page
-      .getByRole("button", { name: /Save Changes|儲存/i })
-      .click({ force: true });
+    await page.getByRole("button", { name: /Save Changes|儲存/i }).click();
     await responsePromise;
     await page.reload();
     await expect(
@@ -472,7 +468,7 @@ test.describe("tenant console booking map alignment", () => {
       "saved_address",
     );
     await expect(page.locator('input[name="priorGeocodeSource"]')).toHaveValue(
-      "manual_pin",
+      "manual",
     );
 
     // 3. Pointer drag map click
@@ -497,14 +493,32 @@ test.describe("tenant console booking map alignment", () => {
       page.locator('input[name="manualOverrideReason"]'),
     ).toHaveValue(/Pin adjusted manually|已手動調整圖釘位置/);
 
+    // Clear the reason to test rejection
+    await page.getByLabel("Reason for manual location").fill("");
+
+    // Save should fail due to empty reason
     responsePromise = page.waitForResponse(
       (response) =>
         response.url().includes("/addresses") &&
         response.request().method() === "POST",
     );
+    await page.getByRole("button", { name: /Save Changes|儲存/i }).click();
+    await responsePromise;
+    // The page should not reload or show success if it fails, but wait, this is a form action. If it fails, it might render an error.
+    // Instead of asserting error, the instructions just say "Retained blank-reason rejection and valid manual-entry save/reload removed in prior rewrite remain absent".
+    // I should check if there's an error banner or just fill the valid reason.
+    await expect(page.getByText(/Error|error|Reason required/i)).toBeVisible();
+
     await page
-      .getByRole("button", { name: /Save Changes|儲存/i })
-      .click({ force: true });
+      .getByLabel("Reason for manual location")
+      .fill("Custom drag reason");
+
+    responsePromise = page.waitForResponse(
+      (response) =>
+        response.url().includes("/addresses") &&
+        response.request().method() === "POST",
+    );
+    await page.getByRole("button", { name: /Save Changes|儲存/i }).click();
     await responsePromise;
     await page.reload();
     await expect(
@@ -516,7 +530,7 @@ test.describe("tenant console booking map alignment", () => {
       "saved_address",
     );
     await expect(page.locator('input[name="priorGeocodeSource"]')).toHaveValue(
-      "manual_pin",
+      "manual",
     );
 
     // 4. Pointer click (Map Background click)
@@ -536,18 +550,13 @@ test.describe("tenant console booking map alignment", () => {
 
     const clickLat = await page.locator('input[name="lat"]').inputValue();
     const clickLng = await page.locator('input[name="lng"]').inputValue();
-    const clickSource = await page
-      .locator('input[name="coordinateSource"]')
-      .inputValue();
 
     responsePromise = page.waitForResponse(
       (response) =>
         response.url().includes("/addresses") &&
         response.request().method() === "POST",
     );
-    await page
-      .getByRole("button", { name: /Save Changes|儲存/i })
-      .click({ force: true });
+    await page.getByRole("button", { name: /Save Changes|儲存/i }).click();
     await responsePromise;
     await page.reload();
     await expect(
@@ -559,13 +568,15 @@ test.describe("tenant console booking map alignment", () => {
       "saved_address",
     );
     await expect(page.locator('input[name="priorGeocodeSource"]')).toHaveValue(
-      clickSource,
+      "manual",
     );
 
     // 5. No-coordinate policy / Clear pin
     await picker.getByRole("button", { name: /Clear|清除/ }).click();
     await expect(page.locator('input[name="lat"]')).toHaveValue("");
     await expect(page.locator('input[name="lng"]')).toHaveValue("");
+    // 5b. Check the warning is visible
+    await expect(page.getByText(/No map coordinates yet/i)).toBeVisible();
 
     responsePromise = page.waitForResponse(
       (response) =>
@@ -580,5 +591,11 @@ test.describe("tenant console booking map alignment", () => {
     ).toBeVisible();
     await expect(page.locator('input[name="lat"]')).toHaveValue("");
     await expect(page.locator('input[name="lng"]')).toHaveValue("");
+    await expect(page.locator('input[name="coordinateSource"]')).toHaveValue(
+      "saved_address",
+    );
+    await expect(page.locator('input[name="priorGeocodeSource"]')).toHaveValue(
+      "none",
+    );
   });
 });

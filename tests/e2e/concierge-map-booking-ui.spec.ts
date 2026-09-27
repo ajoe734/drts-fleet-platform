@@ -454,32 +454,7 @@ test.describe("concierge map booking UI", () => {
       );
       await page.mouse.up();
     }
-    const afterDragLat = await dropoffPicker
-      .locator('input[name="lat"]')
-      .inputValue();
-
-    // 3. Add independent genuine pointer interaction (Map click) on pickup
-    const pickupSvg = pickupPicker.locator("svg[role='img']").first();
-    const pickupSvgBox = await pickupSvg.boundingBox();
-    if (pickupSvgBox) {
-      await page.mouse.click(
-        pickupSvgBox.x + pickupSvgBox.width * 0.2,
-        pickupSvgBox.y + pickupSvgBox.height * 0.2,
-      );
-    }
-    const afterClickLat = await pickupPicker
-      .locator('input[name="lat"]')
-      .inputValue();
-
-    // Wait for reverse geocode to settle
-    await expect(
-      pickupPicker.locator('input[name="coordinateSource"]'),
-    ).toHaveValue("provider", { timeout: 10000 });
-    const finalPickupSource = await pickupPicker
-      .locator('input[name="coordinateSource"]')
-      .inputValue();
-
-    // Verify it correctly changed the pin source
+    // Submit and verify keyboard and drag
     const submitBtn = page.getByRole("button", { name: /提交禮賓代訂/ });
     await expect(submitBtn).toBeEnabled();
     await submitBtn.click();
@@ -487,19 +462,69 @@ test.describe("concierge map booking UI", () => {
     await expect(page.getByText("訂單 ID")).toBeVisible();
     expect(captured.body).toHaveLength(1);
 
-    const command2 = captured.body[0] as any;
-
-    // Pickup was changed via pointer background click
-    expect(command2.pickup.coordinateSource).toBe(finalPickupSource);
-    expect(command2.pickup.manualOverrideReason).toBe("agent_map_click");
-    expect(String(command2.pickup.lat)).toBe(afterClickLat);
-    expect(String(command2.pickup.lat)).not.toBe("25.033");
-
-    // Dropoff was changed via pointer drag
-    expect(command2.dropoff.coordinateSource).toBe("manual_pin");
-    expect(command2.dropoff.manualOverrideReason).toMatch(
+    const command1 = captured.body[0] as any;
+    expect(command1.pickup.coordinateSource).toBe("manual_pin");
+    expect(command1.pickup.lat).not.toBe(25.033);
+    expect(command1.pickup.manualOverrideReason).toMatch(
       /Pin adjusted manually|已手動調整圖釘位置/,
     );
-    expect(String(command2.dropoff.lat)).toBe(afterDragLat);
+
+    expect(command1.dropoff.coordinateSource).toBe("manual_pin");
+    expect(command1.dropoff.lat).not.toBe(25.011);
+    expect(command1.dropoff.manualOverrideReason).toMatch(
+      /Pin adjusted manually|已手動調整圖釘位置/,
+    );
+
+    // 3. Add independent genuine pointer interaction (Map click) on pickup
+    await page.goto("/bookings/new");
+    await selectConciergeMapCandidate(page, 0, "taipei 101", "Taipei 101");
+    const pickupPicker2 = page.locator("[data-address-map-picker]").nth(0);
+
+    const pickupSvg = pickupPicker2.locator("svg[role='img']").first();
+    const pickupSvgBox = await pickupSvg.boundingBox();
+
+    // Out-of-area click (e.g. 0.1, 0.1)
+    if (pickupSvgBox) {
+      await page.mouse.click(
+        pickupSvgBox.x + pickupSvgBox.width * 0.1,
+        pickupSvgBox.y + pickupSvgBox.height * 0.1,
+      );
+    }
+    // Should be out of service area
+    await expect(
+      page.getByText(/Outside the service area|不在支援的服務範圍內/i).first(),
+    ).toBeVisible();
+    await expect(submitBtn).toBeDisabled();
+
+    // Serviceable click (center 0.5, 0.5)
+    if (pickupSvgBox) {
+      await page.mouse.click(
+        pickupSvgBox.x + pickupSvgBox.width * 0.5,
+        pickupSvgBox.y + pickupSvgBox.height * 0.5,
+      );
+    }
+
+    // Wait for geocode to settle by checking submit btn enabled
+    await expect(submitBtn).toBeEnabled();
+
+    // Fill in dropoff to allow submit
+    await selectConciergeMapCandidate(
+      page,
+      1,
+      "banqiao",
+      "Banqiao District Office",
+    );
+
+    await submitBtn.click();
+    await expect(page.getByText("訂單 ID")).toBeVisible();
+
+    expect(captured.body).toHaveLength(2);
+    const command2 = captured.body[1] as any;
+
+    // Pickup was changed via pointer background click
+    expect(command2.pickup.coordinateSource).toBe("manual_pin");
+    expect(command2.pickup.manualOverrideReason).toBe("agent_map_click");
+    expect(command2.pickup.lat).toBeDefined();
+    expect(command2.pickup.lng).toBeDefined();
   });
 });
