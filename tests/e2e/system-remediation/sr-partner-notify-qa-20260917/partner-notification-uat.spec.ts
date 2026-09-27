@@ -442,12 +442,15 @@ test.describe("SR-PARTNER-NOTIFY-QA-20260917: E2E Partner Notification Delivery 
         await fixture.enqueue(await fixture.createRide(unaffected)),
       );
     } finally {
-      await fixture.db.query(
+      const restored = await fixture.db.query(
         `UPDATE admin.phase1_partner_user_identity_links
-         SET status=$3, record=jsonb_set(record, '{status}', to_jsonb($3::text))
-         WHERE entry_slug=$1 AND partner_user_ref=$2`,
+         SET status=$3::text, record=jsonb_set(record, '{status}', to_jsonb($3::text))
+         WHERE entry_slug=$1 AND partner_user_ref=$2 RETURNING status, record`,
         [entry.entry.entrySlug, entry.partnerUserRef, original.status],
       );
+      expect(restored.rows).toHaveLength(1);
+      expect(restored.rows[0]!.status).toBe(original.status);
+      expect(restored.rows[0]!.record.status).toBe(original.record.status);
     }
     await accepted(await fixture.enqueue(await fixture.createRide(entry)));
     expect((await fixture.outcome(outboxId))!.attempt_count).toBe(1);
