@@ -51,6 +51,7 @@ export class PartnerFixture {
     hash: string;
     status: number;
     responseBody: string;
+    secretVersion: number;
   }[] = [];
   readonly db: Database;
   receiver!: ControlledReceiver;
@@ -194,6 +195,12 @@ export class PartnerFixture {
             hash: createHash("sha256").update(raw).digest("hex"),
             status,
             responseBody: body,
+            // Evidence only: retain the public version, never the secret/HMAC.
+            secretVersion: Number(
+              /^v=(\d+);/.exec(
+                String(request.headers["x-drts-webhook-signature"]),
+              )?.[1],
+            ),
           });
           const finish = () => {
             response.writeHead(status, {
@@ -507,6 +514,77 @@ export class PartnerFixture {
     );
     expect(after?.status).toBe("active");
     return { before: before!.status, after: after!.status };
+  }
+
+  async binding(entry: PartnerFixtureEntry) {
+    return this.call<PartnerEntryNotificationBinding>(
+      `platform-admin/partner-entries/${entry.entry.entrySlug}/notification-binding`,
+      required("DRTS_UAT_TOKEN_PLATFORM"),
+    );
+  }
+
+  async revalidateBinding(entry: PartnerFixtureEntry) {
+    const apiPath = `platform-admin/partner-entries/${entry.entry.entrySlug}/notification-binding`;
+    const platform = required("DRTS_UAT_TOKEN_PLATFORM");
+    const tested = await this.call<{ kind: string }>(
+      `${apiPath}/test`,
+      platform,
+      "POST",
+      {},
+    );
+    expect(tested.kind).toBe("accepted");
+    const validated = await this.binding(entry);
+    const enabled = await this.call<PartnerEntryNotificationBinding>(
+      `${apiPath}/enable`,
+      platform,
+      "POST",
+      { expectedVersion: validated.version },
+    );
+    expect(enabled.state).toBe("ready");
+    return enabled;
+  }
+
+  async rotateReceiverSecret(entry: PartnerFixtureEntry) {
+    const scope = this.scopes.find((s) => s.tenantId === entry.entry.tenantId)!;
+    const secret = randomUUID();
+    const rotated = await this.call<{ secretVersion: number }>(
+      `tenant/webhooks/${entry.webhookId}/rotate-secret`,
+      entry.token,
+      "POST",
+      { secret, rotationReason: "Controlled QA rotation" },
+      entry.entry.tenantId,
+    );
+    expect(rotated.secretVersion).toBe(scope.secretVersion + 1);
+    // Only the external receiver changes its signing-key version here.
+    scope.secret = secret;
+    scope.secretVersion = rotated.secretVersion;
+    return rotated.secretVersion;
+  }
+
+  async resolveNavigation(
+    entry: PartnerFixtureEntry,
+    rideRef: string,
+    partnerUserRef = entry.partnerUserRef,
+    apiKey = entry.apiKey,
+  ) {
+    // Keep partner credentials and issued handoffs out of Playwright traces.
+    const response = await fetch(
+      `${required("DRTS_UAT_API_URL")}/api/partner/entries/${entry.entry.entrySlug}/notification-navigation/resolve`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "x-api-key": apiKey },
+        body: JSON.stringify({ rideRef, partnerUserRef }),
+        redirect: "error",
+        signal: AbortSignal.timeout(20_000),
+      },
+    );
+    expect(response.headers.get("x-drts-candidate-sha")).toBe(
+      required("CANDIDATE_SHA"),
+    );
+    return {
+      status: response.status,
+      envelope: decodeTenantWire(await response.json()),
+    };
   }
 
   async enqueue(

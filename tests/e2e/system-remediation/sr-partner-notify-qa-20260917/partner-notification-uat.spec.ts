@@ -334,6 +334,196 @@ test.describe("SR-PARTNER-NOTIFY-QA-20260917: E2E Partner Notification Delivery 
     expect(received(outboxId)).toHaveLength(0);
   });
 
+  test("C208 E2E: The same resident in two apps cannot cross entry or subject", async () => {
+    const entries = [fixture.entries[0]!, fixture.entries[1]!];
+    expect(entries[0]!.partnerUserRef).toBe(entries[1]!.partnerUserRef);
+    const rides: string[] = [];
+    const passengers: string[] = [];
+    for (const entry of entries) {
+      const orderId = await fixture.createRide(entry);
+      rides.push(orderId);
+      const route = (
+        await fixture.db.query(
+          "SELECT drts_passenger_id FROM mobility.phase1_order_partner_notification_routes WHERE order_id=$1",
+          [orderId],
+        )
+      ).rows[0]!;
+      passengers.push(route.drts_passenger_id);
+      const outboxId = await fixture.enqueue(orderId);
+      await accepted(outboxId);
+      expect(received(outboxId)).toHaveLength(1);
+      expect(JSON.parse(received(outboxId)[0]!.rawBody).data).toMatchObject({
+        partner_entry_slug: entry.entry.entrySlug,
+        recipient: { partner_user_ref: entry.partnerUserRef },
+        navigation: { type: "ride", ride_ref: orderId },
+      });
+      const own = await fixture.resolveNavigation(entry, orderId);
+      expect(own.status).toBe(201);
+      // Check only shape so a failing assertion cannot expose a handoff token.
+      expect(typeof own.envelope.data?.handoffArtifact?.artifact).toBe(
+        "string",
+      );
+    }
+    expect(passengers[0]).not.toBe(passengers[1]);
+    for (const [index, entry] of entries.entries()) {
+      const other = entries[1 - index]!;
+      for (const denied of [
+        await fixture.resolveNavigation(entry, rides[1 - index]!),
+        await fixture.resolveNavigation(
+          entry,
+          rides[index]!,
+          "different-resident",
+        ),
+        await fixture.resolveNavigation(
+          entry,
+          rides[index]!,
+          entry.partnerUserRef,
+          other.apiKey,
+        ),
+      ]) {
+        expect(denied.status).toBe(403);
+        expect(denied.envelope.error?.code).toBe("FORBIDDEN");
+        expect(denied.envelope.data).toBeUndefined();
+      }
+    }
+    await test.info().attach("entry-subject-isolation", {
+      contentType: "application/json",
+      body: JSON.stringify({
+        candidate_sha: process.env.CANDIDATE_SHA,
+        entries: entries.map((e) => e.entry.entrySlug),
+        rides,
+        separatePassengerIdentities: true,
+        ownResolves: 2,
+        refusedResolves: 6,
+      }),
+    });
+  });
+
+  test("C210 E2E: Revoked recipient link stops delivery without sending", async () => {
+    const entry = fixture.entries[0]!;
+    const unaffected = fixture.entries[1]!;
+    const orderId = await fixture.createRide(entry);
+    const original = (
+      await fixture.db.query(
+        `SELECT status, record FROM admin.phase1_partner_user_identity_links
+       WHERE entry_slug=$1 AND partner_user_ref=$2`,
+        [entry.entry.entrySlug, entry.partnerUserRef],
+      )
+    ).rows[0]!;
+    expect(original.status).toBe("active");
+    expect(original.record.status).toBe("active");
+    const due = Date.now() + 10_000;
+    const outboxId = await fixture.enqueue(orderId, "partner", {
+      nextAttemptAt: new Date(due).toISOString(),
+    });
+    try {
+      // Fault injection only: the repository exposes no revoke writer/API.
+      // Change the existing fixture link in the V0030 schema, both projections;
+      // the real repository, route gate, worker and outcome transaction run unchanged.
+      const revoked = await fixture.db.query(
+        `UPDATE admin.phase1_partner_user_identity_links
+         SET status='revoked', record=jsonb_set(record, '{status}', '"revoked"'::jsonb)
+         WHERE entry_slug=$1 AND partner_user_ref=$2 AND status='active'
+         RETURNING status, record`,
+        [entry.entry.entrySlug, entry.partnerUserRef],
+      );
+      expect(revoked.rows).toHaveLength(1);
+      expect(revoked.rows[0]!.record.status).toBe("revoked");
+      expect(
+        Date.now(),
+        "revocation fault installed before delivery is due",
+      ).toBeLessThan(due);
+      await refusedWithoutSending(outboxId, "recipient_revoked", "terminal");
+      const navigation = await fixture.resolveNavigation(entry, orderId);
+      expect(navigation.status).toBe(403);
+      expect(navigation.envelope.error?.code).toBe("FORBIDDEN");
+      // The same external resident reference in the other app remains valid.
+      await accepted(
+        await fixture.enqueue(await fixture.createRide(unaffected)),
+      );
+    } finally {
+      await fixture.db.query(
+        `UPDATE admin.phase1_partner_user_identity_links
+         SET status=$3, record=jsonb_set(record, '{status}', to_jsonb($3::text))
+         WHERE entry_slug=$1 AND partner_user_ref=$2`,
+        [entry.entry.entrySlug, entry.partnerUserRef, original.status],
+      );
+    }
+    await accepted(await fixture.enqueue(await fixture.createRide(entry)));
+    expect((await fixture.outcome(outboxId))!.attempt_count).toBe(1);
+    expect(received(outboxId)).toHaveLength(0);
+  });
+
+  test("C211 E2E: Disabled endpoint and secret rotation require retest", async () => {
+    test.setTimeout(90_000);
+    const entry = fixture.entries[0]!;
+    const orderId = await fixture.createRide(entry);
+    const held: string[] = [];
+    const refuse = async (reason: string) => {
+      const outboxId = await fixture.enqueue(orderId);
+      held.push(outboxId);
+      await refusedWithoutSending(outboxId, reason, "configuration_blocked");
+    };
+    const updateEndpoint = (status: string) =>
+      fixture.call<{ status: string }>(
+        `tenant/webhooks/${entry.webhookId}`,
+        entry.token,
+        "POST",
+        { status, disableReason: "Controlled QA disable" },
+        entry.entry.tenantId,
+      );
+    try {
+      expect((await updateEndpoint("disabled")).status).toBe("disabled");
+      await refuse("endpoint_disabled");
+      expect((await updateEndpoint("active")).status).toBe("test_pending");
+      await refuse("configuration_blocked");
+      await fixture.revalidateEndpoint(entry);
+      await accepted(await fixture.enqueue(orderId));
+
+      const oldBinding = await fixture.binding(entry);
+      const secretVersion = await fixture.rotateReceiverSecret(entry);
+      await refuse("configuration_blocked");
+      await fixture.revalidateEndpoint(entry);
+      // A successful status-only webhook test is insufficient: partner binding
+      // validation is still pinned to the old secret fingerprint.
+      expect((await fixture.binding(entry)).validatedEndpointFingerprint).toBe(
+        oldBinding.validatedEndpointFingerprint,
+      );
+      await refuse("configuration_blocked");
+      const updated = await fixture.revalidateBinding(entry);
+      expect(updated.validatedEndpointFingerprint).not.toBe(
+        oldBinding.validatedEndpointFingerprint,
+      );
+      const delivered = await fixture.enqueue(orderId);
+      await accepted(delivered);
+      expect(received(delivered)).toHaveLength(1);
+      expect(received(delivered)[0]!.secretVersion).toBe(secretVersion);
+      for (const outboxId of held) {
+        expect((await fixture.outcome(outboxId))!.attempt_count).toBe(1);
+        expect(received(outboxId)).toHaveLength(0);
+      }
+      await test.info().attach("rotation-retest", {
+        contentType: "application/json",
+        body: JSON.stringify({
+          candidate_sha: process.env.CANDIDATE_SHA,
+          held,
+          delivered,
+          secretVersion,
+          partnerRetested: true,
+        }),
+      });
+    } finally {
+      // All entries sharing this endpoint need a fresh partner validation after
+      // rotation; restore via governance for later cases, never SQL statuses.
+      await fixture.revalidateEndpoint(entry);
+      for (const affected of fixture.entries.filter(
+        (e) => e.webhookId === entry.webhookId,
+      )) {
+        await fixture.revalidateBinding(affected);
+      }
+    }
+  });
+
   test("C212 E2E: HTML 200 and mismatched receipt remain manual only", async () => {
     test.setTimeout(60_000);
     const entry = fixture.entries[0]!;
