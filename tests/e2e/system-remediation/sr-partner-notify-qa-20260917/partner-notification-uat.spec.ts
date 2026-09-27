@@ -159,13 +159,8 @@ test.describe("SR-PARTNER-NOTIFY-QA-20260917 E2E Cases", () => {
     expect([403, 404, 409]).toContain(crossRes.status());
 
     const testRes = await apiCall(tenantA, tokenPlatform, "POST", `api/platform-admin/partner-entries/${entrySlug}/notification-binding/test`);
-    expect(testRes.status()).toBe(201);
-    
-    for (let i = 0; i < 20; i++) {
-      if (requests.length > 0) break;
-      await new Promise(r => setTimeout(r, 250));
-    }
-    expect(requests.length).toBe(1);
+    const testBody = await testRes.json();
+    throw new Error(`DEBUG_TEST_RES: ${testRes.status()} ${JSON.stringify(testBody)}`);
     expect(requests[0]!.body.data.partner_entry_slug).toBe(entrySlug);
   });
 
@@ -235,6 +230,9 @@ test.describe("SR-PARTNER-NOTIFY-QA-20260917 E2E Cases", () => {
       expectedVersion: 0
     });
     const testRes = await apiCall(tenantA, tokenPlatform, "POST", `api/platform-admin/partner-entries/${entrySlug}/notification-binding/test`);
+    const testBody = await testRes.json();
+    console.log("TEST BINDING RESULT:", testRes.status(), testBody);
+    if (testBody?.data?.kind === 'failed') throw new Error("Binding test failed: " + JSON.stringify(testBody.data));
     expect(testRes.status()).toBe(201);
   });
 
