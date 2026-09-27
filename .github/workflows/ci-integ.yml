@@ -519,6 +519,9 @@ jobs:
             -exec mv "{}" "{}.disabled" \; || true
           pnpm exec playwright install --with-deps chromium
           pnpm exec playwright test -c playwright.deterministic-route-suite.config.ts
+          pnpm exec playwright test -c playwright.tenant-map-booking.config.ts
+          pnpm exec playwright test -c playwright.partner-booking-surfaces.config.ts
+          pnpm exec playwright test -c playwright.concierge-map-booking.config.ts
 
   e2e:
     needs: [candidate, changes, cross-surface-e2e, ui-route-e2e]
