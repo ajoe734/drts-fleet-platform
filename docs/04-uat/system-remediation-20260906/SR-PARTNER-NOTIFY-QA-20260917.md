@@ -111,3 +111,31 @@ C：第一家真夥伴native App背景/冷啟動收到通知、點擊fresh hando
 可重跑probe已提交；原始JSON/log在 `.local/sr-partner-notify-qa-20260927/`。
 本輪未啟hosted run；舊checkpoint run已讀完。R1/R5及產品scope/history問題仍開放，
 三項required_acceptance仍NOT MET，沒有送出新review candidate。
+
+### 單元 1 補充驗證與下一修復邊界
+
+- Node `v22.23.2`、Python `3.12.3`、Vitest `4.1.4`。
+- `pnpm exec vitest run tests/unit/system-remediation/sr-partner-notify-qa-20260917/
+tests/unit/system-remediation/sr-partner-notify-transport-20260918/https.test.ts
+tests/unit/system-remediation/sr-partner-notify-transport-20260918/https-client.test.ts`
+  （default + JSON reporter）：exit0，3 files / **42 passed**（QA5 + https21 + client16），
+  零skip。JSON：`.local/sr-partner-notify-qa-20260927/security-unit.json`。
+  只驗transport安全邊界，不是worker/receiver/PG/browser；既有兩https檔沿用交接版本，
+  不把它們稱為「未經前owner修改」的原始回歸。
+- R8 scope內lint：移除spec未使用UatEvidenceRecorder/BASELINE_PERSONAS/BASE_SHA與C203的request；
+  格式化清除scope內trailing whitespace。沒有用此變更宣称R1/R5 runtime已修。
+
+Supervisor 待協調的確切邊界（已用canonical progress回報）：
+
+1. 繼承已發布的transport產品修改與兩個既有security tests不在write_scopes：
+   `apps/api/src/modules/tenant-partner/partner-notification-https.ts`、
+   `tests/unit/system-remediation/sr-partner-notify-transport-20260918/https-client.test.ts`、
+   `tests/unit/system-remediation/sr-partner-notify-transport-20260918/https.test.ts`。
+   相關checkpoint提交5377a253b/5dfd0c41d/26e246a61。需確認原授權owner/scope或指定
+   修復child，不能讓QA owner默認吞下超scope產品變更；Codex本輪未改這三檔。
+2. 已發布歷史中不合規subject/trailers無法靠新增commit補到舊commit。
+   需Supervisor走repository既有publication/history recovery；禁止改寫、amend、rebase或force push。
+3. R1下一單元先做權威兩tenant/兩entry/order/link fixture、HMAC durable inbox與
+   accepted/duplicate receipt、真worker正向與typed no-send。須使用完整entry/webhook/binding
+   契約及正式migration，不能用目前無效route資料或寬鬆failed斷言續送review。
+   之後才補C206–C224與R5真auth/control/NAV；case manifest已fail closed保留此要求。
