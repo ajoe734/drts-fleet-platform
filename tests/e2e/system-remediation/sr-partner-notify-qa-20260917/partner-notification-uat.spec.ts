@@ -134,7 +134,7 @@ test.describe("SR-PARTNER-NOTIFY-QA-20260917: E2E Partner Notification Delivery 
     const adminToken = personas.admin.platformAuthToken;
 
     const entrySlug = `tst-${randomUUID().slice(0, 6)}`;
-    const createRes = await apiCall(request, tenantId, adminToken, "POST", "api/platform-admin/partner-entries", {
+    const createRes = await apiCall(request, tenantId, process.env.DRTS_UAT_TOKEN_PLATFORM!, "POST", "api/platform-admin/partner-entries", {
       name: "Positive Test Partner",
       entrySlug,
       capabilities: { notificationBinding: true },
@@ -149,7 +149,7 @@ test.describe("SR-PARTNER-NOTIFY-QA-20260917: E2E Partner Notification Delivery 
     const webhookData = (await webhookRes.json()).data;
     const webhookId = webhookData.webhook.webhookId;
 
-    const enableRes = await apiCall(request, tenantId, adminToken, "POST", `api/platform-admin/partner-entries/${entrySlug}/notification-binding/enable`, {
+    const enableRes = await apiCall(request, tenantId, process.env.DRTS_UAT_TOKEN_PLATFORM!, "POST", `api/platform-admin/partner-entries/${entrySlug}/notification-binding/enable`, {
       webhookId,
       eventTypes: ["receipt_ready"],
       expectedVersion: 1,
@@ -171,10 +171,10 @@ test.describe("SR-PARTNER-NOTIFY-QA-20260917: E2E Partner Notification Delivery 
     const tenantId = shardNs.tenantA.tenantId;
     const adminToken = createTenantPersonas(shardNs.tenantA).admin.platformAuthToken;
     const entrySlug = `timeout-${randomUUID().slice(0, 6)}`;
-    await apiCall(request, tenantId, adminToken, "POST", "api/platform-admin/partner-entries", { name: "Test", entrySlug, capabilities: { notificationBinding: true } });
+    await apiCall(request, tenantId, process.env.DRTS_UAT_TOKEN_PLATFORM!, "POST", "api/platform-admin/partner-entries", { name: "Test", entrySlug, capabilities: { notificationBinding: true } });
     const webhookRes = await apiCall(request, tenantId, adminToken, "POST", "api/tenant/webhooks", { url: receiverUrl, eventTypes: ["partner_notification.*"], secretMode: "generated" });
     const webhookId = (await webhookRes.json()).data.webhook.webhookId;
-    await apiCall(request, tenantId, adminToken, "POST", `api/platform-admin/partner-entries/${entrySlug}/notification-binding/enable`, { webhookId, eventTypes: ["receipt_ready"], expectedVersion: 1 });
+    await apiCall(request, tenantId, process.env.DRTS_UAT_TOKEN_PLATFORM!, "POST", `api/platform-admin/partner-entries/${entrySlug}/notification-binding/enable`, { webhookId, eventTypes: ["receipt_ready"], expectedVersion: 1 });
 
     receiverDelay = 3000;
     const outboxId = await insertOutbox(tenantId, entrySlug, randomUUID());
@@ -205,10 +205,10 @@ test.describe("SR-PARTNER-NOTIFY-QA-20260917: E2E Partner Notification Delivery 
     const tenantId = shardNs.tenantA.tenantId;
     const adminToken = createTenantPersonas(shardNs.tenantA).admin.platformAuthToken;
     const entrySlug = `invack-${randomUUID().slice(0, 6)}`;
-    await apiCall(request, tenantId, adminToken, "POST", "api/platform-admin/partner-entries", { name: "Test", entrySlug, capabilities: { notificationBinding: true } });
+    await apiCall(request, tenantId, process.env.DRTS_UAT_TOKEN_PLATFORM!, "POST", "api/platform-admin/partner-entries", { name: "Test", entrySlug, capabilities: { notificationBinding: true } });
     const webhookRes = await apiCall(request, tenantId, adminToken, "POST", "api/tenant/webhooks", { url: receiverUrl, eventTypes: ["partner_notification.*"], secretMode: "generated" });
     const webhookId = (await webhookRes.json()).data.webhook.webhookId;
-    await apiCall(request, tenantId, adminToken, "POST", `api/platform-admin/partner-entries/${entrySlug}/notification-binding/enable`, { webhookId, eventTypes: ["receipt_ready"], expectedVersion: 1 });
+    await apiCall(request, tenantId, process.env.DRTS_UAT_TOKEN_PLATFORM!, "POST", `api/platform-admin/partner-entries/${entrySlug}/notification-binding/enable`, { webhookId, eventTypes: ["receipt_ready"], expectedVersion: 1 });
 
     receiverStatus = 204;
     receiverBody = JSON.stringify({ some_garbage_because_204_should_have_no_body: true });
@@ -230,7 +230,7 @@ test.describe("SR-PARTNER-NOTIFY-QA-20260917: E2E Partner Notification Delivery 
     
     // Create entry
     await page.request.post(`http://127.0.0.1:4102/api/platform-admin/partner-entries`, {
-      headers: { Authorization: `Bearer ${adminToken}`, "x-tenant-id": tenantId },
+      headers: { Authorization: `Bearer ${process.env.DRTS_UAT_TOKEN_PLATFORM}`, "x-tenant-id": tenantId },
       data: { name: "UI Partner", entrySlug, capabilities: { notificationBinding: true } }
     });
     
@@ -239,7 +239,7 @@ test.describe("SR-PARTNER-NOTIFY-QA-20260917: E2E Partner Notification Delivery 
     await page.goto("http://127.0.0.1:3001/");
     await page.evaluate((token) => {
       localStorage.setItem("drts_platform_auth_token", token);
-    }, adminToken);
+    }, process.env.DRTS_UAT_TOKEN_PLATFORM!);
     
     // Navigate to the partner entry
     await page.goto(`http://127.0.0.1:3001/tenant/${tenantId}/partners/${entrySlug}`);
