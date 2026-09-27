@@ -440,6 +440,8 @@ class FullMatrixGateBehaviorTests(unittest.TestCase):
         candidate_sha: str = "c" * 40,
         missing_capability: str | None = None,
         empty_capability_verified: bool = False,
+        missing_partner_e2e: bool = False,
+        missing_partner_unit: bool = False,
     ):
         files = [
             "approval-rules.spec.ts", "cost-center.spec.ts", "passenger-address.spec.ts",
@@ -461,10 +463,37 @@ class FullMatrixGateBehaviorTests(unittest.TestCase):
             (root / "test-results/system-remediation-report.json").write_text(
                 json.dumps({"suites": [{"specs": specs}]})
             )
+            
+            wh_specs = []
+            wh_specs.append({
+                "file": "tests/e2e/system-remediation/sr-qa-webhook-001/sr-qa-webhook-001.spec.ts",
+                "tests": [{"results": [{"status": "passed"}]}]
+            })
+            if not missing_partner_e2e:
+                wh_specs.append({
+                    "file": "tests/e2e/system-remediation/sr-partner-notify-qa-20260917/partner-notification-uat.spec.ts",
+                    "tests": [{"results": [{"status": "passed"}]}]
+                })
+            (root / "test-results/webhook-e2e-report.json").write_text(
+                json.dumps({"suites": [{"specs": wh_specs}]})
+            )
+
             artifact = root / ".artifacts/tenant-uat-acceptance"
             artifact.mkdir(parents=True)
+            partner_suites = [
+                "notification-sequence.postgres.test.ts", "transport.postgres.test.ts",
+                "transport.test.ts", "worker.test.ts", "https.test.ts",
+                "https-client.test.ts", "governance.test.ts", "embed-partner-session.test.ts",
+                "notification-navigation-production-path.test.ts", "multi-taxi-order-partner-notification-route.test.ts"
+            ]
             (artifact / "unit-test-report.json").write_text(
-                json.dumps({"numTotalTests": 27, "numPassedTests": 27, "numPendingTests": 0, "success": True})
+                json.dumps({
+                    "numTotalTests": 280, 
+                    "numPassedTests": 280, 
+                    "numPendingTests": 0, 
+                    "success": True,
+                    "testResults": [{"name": p} for p in (partner_suites if not missing_partner_unit else [])]
+                })
             )
             if not missing_restart:
                 (artifact / "restart-report.json").write_text(
@@ -546,6 +575,12 @@ class FullMatrixGateBehaviorTests(unittest.TestCase):
     def test_empty_capability_verified_evidence_fails(self):
         self.assertNotEqual(self.run_gate(empty_capability_verified=True).returncode, 0)
 
+    def test_missing_partner_e2e_fails(self):
+        self.assertNotEqual(self.run_gate(missing_partner_e2e=True).returncode, 0)
+
+    def test_missing_partner_unit_fails(self):
+        self.assertNotEqual(self.run_gate(missing_partner_unit=True).returncode, 0)
+
     def test_independent_tenant_gates_preserved_when_c111_to_c115_passes(self):
         # Even when all C111-C115 and webhook unit tests pass cleanly,
         # a failure in tenant specs or restart durability STILL fails the gate independently!
@@ -574,8 +609,35 @@ class FullMatrixGateBehaviorTests(unittest.TestCase):
             (artifact / "system-remediation-report.json").write_text(
                 json.dumps({"suites": [{"specs": specs}]})
             )
+            partner_suites = [
+                "notification-sequence.postgres.test.ts", "transport.postgres.test.ts",
+                "transport.test.ts", "worker.test.ts", "https.test.ts",
+                "https-client.test.ts", "governance.test.ts", "embed-partner-session.test.ts",
+                "notification-navigation-production-path.test.ts", "multi-taxi-order-partner-notification-route.test.ts"
+            ]
             (artifact / "unit-test-report.json").write_text(
-                json.dumps({"numTotalTests": 27, "numPassedTests": 27, "numPendingTests": 0, "success": True})
+                json.dumps({
+                    "numTotalTests": 280, 
+                    "numPassedTests": 280, 
+                    "numPendingTests": 0, 
+                    "success": True,
+                    "testResults": [{"name": p} for p in partner_suites]
+                })
+            )
+            
+            wh_specs = [
+                {
+                    "file": "tests/e2e/system-remediation/sr-qa-webhook-001/sr-qa-webhook-001.spec.ts",
+                    "tests": [{"results": [{"status": "passed"}]}]
+                },
+                {
+                    "file": "tests/e2e/system-remediation/sr-partner-notify-qa-20260917/partner-notification-uat.spec.ts",
+                    "tests": [{"results": [{"status": "passed"}]}]
+                }
+            ]
+            (root / "test-results/webhook-e2e-report.json").parent.mkdir(parents=True, exist_ok=True)
+            (root / "test-results/webhook-e2e-report.json").write_text(
+                json.dumps({"suites": [{"specs": wh_specs}]})
             )
             (artifact / "restart-report.json").write_text(
                 json.dumps({"status": "passed", "verified": 12, "candidate_sha": "c" * 40, "tables": [f"table_{i}" for i in range(12)]})

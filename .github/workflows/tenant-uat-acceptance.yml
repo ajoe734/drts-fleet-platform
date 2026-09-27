@@ -164,6 +164,13 @@ jobs:
           set -o pipefail
           pnpm --filter @drts/api... build 2>&1 | tee -a .artifacts/tenant-uat-acceptance/execution-log.txt
 
+      - name: Build UI applications
+        id: build_ui
+        run: |
+          set -o pipefail
+          pnpm --filter @drts/platform-admin-web... build 2>&1 | tee -a .artifacts/tenant-uat-acceptance/execution-log.txt
+          pnpm --filter @drts/referral-embed-web... build 2>&1 | tee -a .artifacts/tenant-uat-acceptance/execution-log.txt
+
       - name: Seed disposable tenant A/B sessions through the authoritative service
         id: seed
         run: |
@@ -195,6 +202,24 @@ jobs:
           echo "::error::Tenant UAT API did not start within 60s"
           cat .artifacts/tenant-uat-acceptance/api-server.log || true
           exit 1
+
+      - name: Start the UI applications
+        id: start_ui
+        env:
+          PORT: 3001
+        run: |
+          set -o pipefail
+          (
+            cd apps/platform-admin-web
+            PORT=3001 pnpm start > ../../.artifacts/tenant-uat-acceptance/admin-web.log 2>&1 &
+            echo $! > ../../.artifacts/tenant-uat-acceptance/admin-web.pid
+          )
+          (
+            cd apps/referral-embed-web
+            PORT=3002 pnpm start > ../../.artifacts/tenant-uat-acceptance/referral-web.log 2>&1 &
+            echo $! > ../../.artifacts/tenant-uat-acceptance/referral-web.pid
+          )
+          sleep 5 # Give UI servers time to start
 
       - name: Run tenant HTTP acceptance specs (real server, real DB, real sessions)
         id: harness_e2e
@@ -387,8 +412,28 @@ jobs:
           unit_total = unit_report.get("numTotalTests", 0)
           unit_passed = unit_report.get("numPassedTests", 0)
           unit_pending = unit_report.get("numPendingTests", 0)
+          
+          # Check for specific partner suites presence
+          partner_suites = {
+              "notification-sequence.postgres.test.ts",
+              "transport.postgres.test.ts",
+              "transport.test.ts",
+              "worker.test.ts",
+              "https.test.ts",
+              "https-client.test.ts",
+              "governance.test.ts",
+              "embed-partner-session.test.ts",
+              "notification-navigation-production-path.test.ts",
+              "multi-taxi-order-partner-notification-route.test.ts"
+          }
+          found_suites = set()
+          for tr in unit_report.get("testResults", []):
+              found_suites.add(Path(tr.get("name", "")).name)
+          if not partner_suites.issubset(found_suites):
+              raise SystemExit(f"Partner UAT unit regression missing suites: {partner_suites - found_suites}")
+
           if (
-              unit_total < 27
+              unit_total < 280
               or unit_passed != unit_total
               or unit_pending
               or not unit_report.get("success")
@@ -462,17 +507,22 @@ jobs:
                   spec
                   for suite in wh_e2e_data.get("suites", [])
                   for spec in iter_specs(suite)
-                  if "sr-qa-webhook-001" in spec.get("file", "")
+                  if "sr-qa-webhook-001" in spec.get("file", "") or "partner-notification-uat" in spec.get("file", "")
               ]
               wh_e2e_total = 0
               wh_e2e_passed = 0
+              found_partner_e2e = False
               for spec in wh_e2e_specs:
+                  if "partner-notification-uat" in spec.get("file", ""):
+                      found_partner_e2e = True
                   for test in spec.get("tests", []):
                       wh_e2e_total += 1
                       results = test.get("results", [])
                       status = results[-1].get("status") if results else None
                       if status == "passed":
                           wh_e2e_passed += 1
+              if not found_partner_e2e:
+                  raise SystemExit("Partner notification E2E acceptance suite missing from run.")
               if wh_e2e_total and wh_e2e_passed != wh_e2e_total:
                   raise SystemExit(
                       f"Webhook E2E acceptance incomplete: total={wh_e2e_total}, passed={wh_e2e_passed}."
