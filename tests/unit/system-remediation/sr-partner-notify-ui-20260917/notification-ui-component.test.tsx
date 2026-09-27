@@ -801,12 +801,14 @@ describe("PartnerNotificationPanel", () => {
     newerMockClient.listPartnerNotificationDeliveries.mockClear();
 
     await act(async () => {
-      // test with rejection
+      // test with rejection using valid typed failure
       resolveResume({
         kind: "failed",
         failure: {
-          failureReason: "network_error",
+          failureReason: "endpoint_unreachable",
           detail: "Cannot reach partner",
+          retryDisposition: "transient",
+          suggestedNextAttemptAt: new Date(Date.now() + 60000).toISOString()
         }
       });
       await new Promise((r) => setTimeout(r, 10));
@@ -820,27 +822,95 @@ describe("PartnerNotificationPanel", () => {
       newMockClient.enablePartnerEntryNotificationBinding,
     ).not.toHaveBeenCalled();
 
-    // ensure no error message is displayed on new client
-    expect(screen.queryByText(/network_error/)).toBeNull();
+    // ensure GETs are not called due to the stale failure
+    expect(newerMockClient.getPartnerEntryNotificationBinding).not.toHaveBeenCalled();
+    expect(newerMockClient.listPartnerNotificationDeliveries).not.toHaveBeenCalled();
 
-    // 4. Genuine pending Resume across Unmount
-    let resolveResumeUnmount: any;
+    // ensure no error message is displayed on new client
+    expect(screen.queryByText(/Cannot reach partner/)).toBeNull();
+
+    // 4. Genuine pending Resume across client transition with accepted result
+    let resolveResumeAccept: any;
     newerMockClient.testPartnerEntryNotificationBinding.mockReturnValue(
       new Promise((resolve) => {
-        resolveResumeUnmount = resolve;
+        resolveResumeAccept = resolve;
       }),
     );
 
-    // get the resume button again
     const resumeBtn2 = await screen.findByRole("button", {
       name: /恢復/i,
     });
     fireEvent.click(resumeBtn2);
 
-    unmount();
+    const evenNewerMockClient = {
+      ...newerMockClient,
+      getPartnerEntryNotificationBinding: vi.fn().mockResolvedValue({
+        version: 1,
+        webhookId: "even-newer-webhook",
+        eventTypes: ["eta_changed"],
+        state: "disabled",
+      }),
+      testPartnerEntryNotificationBinding: vi.fn(),
+      enablePartnerEntryNotificationBinding: vi.fn(),
+      listPartnerNotificationDeliveries: vi
+        .fn()
+        .mockResolvedValue({ items: [], total: 0 }),
+    };
+    (usePlatformAdminClient as any).mockReturnValue(evenNewerMockClient);
 
     await act(async () => {
-      resolveResumeUnmount({
+      rerender(
+        <PartnerNotificationPanel
+          entrySlug="test-entry"
+          tenantId="test-tenant"
+          canWriteBinding={true}
+          canReadWebhooks={true}
+        />,
+      );
+      await new Promise((r) => setTimeout(r, 50));
+    });
+
+    evenNewerMockClient.getPartnerEntryNotificationBinding.mockClear();
+    evenNewerMockClient.listPartnerNotificationDeliveries.mockClear();
+
+    await act(async () => {
+      resolveResumeAccept({
+        kind: "accepted",
+        ack: {
+          notificationId: "n-3",
+          deliveryId: "d-3",
+          partnerEntrySlug: "test-entry",
+          status: "accepted",
+          receiptId: "ack-3",
+        },
+      });
+      await new Promise((r) => setTimeout(r, 10));
+    });
+
+    expect(evenNewerMockClient.enablePartnerEntryNotificationBinding).not.toHaveBeenCalled();
+    expect(newerMockClient.enablePartnerEntryNotificationBinding).not.toHaveBeenCalled();
+
+    // 5. Current-validation direct Resume (successful)
+    let resolveDirectResume: any;
+    evenNewerMockClient.testPartnerEntryNotificationBinding.mockReturnValue(
+      new Promise((resolve) => {
+        resolveDirectResume = resolve;
+      }),
+    );
+    evenNewerMockClient.enablePartnerEntryNotificationBinding.mockResolvedValue({
+      version: 2,
+      webhookId: "even-newer-webhook",
+      eventTypes: ["eta_changed"],
+      state: "enabled",
+    });
+
+    const resumeBtn3 = await screen.findByRole("button", {
+      name: /恢復/i,
+    });
+    fireEvent.click(resumeBtn3);
+
+    await act(async () => {
+      resolveDirectResume({
         kind: "accepted",
         ack: {
           notificationId: "n-4",
@@ -853,8 +923,59 @@ describe("PartnerNotificationPanel", () => {
       await new Promise((r) => setTimeout(r, 10));
     });
 
+    // It should now call enable because the client hasn't changed
+    expect(evenNewerMockClient.enablePartnerEntryNotificationBinding).toHaveBeenCalledTimes(1);
+
+    // 6. Genuine pending Resume across Unmount
+    let resolveResumeUnmount: any;
+    evenNewerMockClient.testPartnerEntryNotificationBinding.mockReturnValue(
+      new Promise((resolve) => {
+        resolveResumeUnmount = resolve;
+      }),
+    );
+
+    // Get the disabled view back (since enable state update in mock might not trigger full reload here)
+    evenNewerMockClient.getPartnerEntryNotificationBinding.mockResolvedValue({
+        version: 2,
+        webhookId: "even-newer-webhook",
+        eventTypes: ["eta_changed"],
+        state: "disabled",
+    });
+    await act(async () => {
+      rerender(
+        <PartnerNotificationPanel
+          entrySlug="test-entry"
+          tenantId="test-tenant"
+          canWriteBinding={true}
+          canReadWebhooks={true}
+        />,
+      );
+      await new Promise((r) => setTimeout(r, 50));
+    });
+
+    const resumeBtn4 = await screen.findByRole("button", {
+      name: /恢復/i,
+    });
+    fireEvent.click(resumeBtn4);
+
+    unmount();
+
+    await act(async () => {
+      resolveResumeUnmount({
+        kind: "accepted",
+        ack: {
+          notificationId: "n-5",
+          deliveryId: "d-5",
+          partnerEntrySlug: "test-entry",
+          status: "accepted",
+          receiptId: "ack-5",
+        },
+      });
+      await new Promise((r) => setTimeout(r, 10));
+    });
+
     expect(
-      newerMockClient.enablePartnerEntryNotificationBinding,
-    ).not.toHaveBeenCalled();
+      evenNewerMockClient.enablePartnerEntryNotificationBinding,
+    ).toHaveBeenCalledTimes(1); // the mock was cleared/reset? Wait, the previous call was 1, so it shouldn't be called again
   });
-});
+});;

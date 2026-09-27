@@ -882,16 +882,19 @@ describe.skipIf(!testDbUrl)(
           [outboxId],
         );
         expect(dRows.length).toBe(1);
-        expect(dRows[0].delivery_id).toBeDefined();
+        expect(dRows[0].delivery_id).toBe(receipt.deliveryContext?.deliveryId);
         expect(dRows[0].wire_payload).toEqual(prodCommand.wirePayload);
+        const { partnerNotificationWireBytes } = await import("../../../../apps/api/src/modules/tenant-partner/partner-notification-wire");
         const { createHash } = await import("node:crypto");
         const expectedHash = createHash("sha256")
-          .update(JSON.stringify(prodCommand.wirePayload))
+          .update(partnerNotificationWireBytes(prodCommand.wirePayload))
           .digest("hex");
         expect(dRows[0].wire_payload_hash).toBe(expectedHash);
-        expect(dRows[0].expires_at).toBeDefined();
+        expect(dRows[0].expires_at.toISOString()).toBe(new Date(receipt.deliveryContext!.expiresAt).toISOString());
         expect(dRows[0].delivery_stage).toBe("partner_accepted");
         expect(dRows[0].entry_slug).toBe(missingBindingSlug);
+        expect(dRows[0].event_sequence).toBe((prodCommand.wirePayload as any).data.eventSequence);
+        expect(dRows[0].downstream_status).toBe("unknown");
 
         // Check matching claim fence release
         const { rows: cRows } = await pool.query(
@@ -908,19 +911,20 @@ describe.skipIf(!testDbUrl)(
           [outboxId],
         );
         expect(rRows.length).toBe(1);
-        expect(rRows[0].receipt_id).toBeDefined();
+        expect(rRows[0].receipt_id).toBe(receipt.deliveryContext?.receiptId);
         expect(rRows[0].dedupe_key).toBe(`${outboxId}:${claim!.fenceToken}`);
         expect(rRows[0].fence_token).toBe(claim!.fenceToken);
         expect(rRows[0].provider_message_ref).toBe(receipt.providerMessageRef);
 
         // Check audit identity
         const { rows: aRows } = await pool.query(
-          "SELECT * FROM ops.phase1_push_delivery_audit_log WHERE outbox_id = $1",
+          "SELECT * FROM admin.audit_logs WHERE resource_type = 'consumer_notification_outbox' AND resource_id = $1",
           [outboxId],
         );
         expect(aRows.length).toBe(1);
-        expect(aRows[0].action).toBe("retry_scheduled");
-        expect(aRows[0].reason).toBe("api_manual_retry");
+        expect(aRows[0].action_name).toBe("retry_delivery");
+        expect(aRows[0].module_name).toBe("partner_notification");
+        expect(aRows[0].new_value).toHaveProperty("retriedAt");
       } finally {
         dispatchSpy.mockRestore();
       }
@@ -1079,7 +1083,7 @@ describe.skipIf(!testDbUrl)(
         [outboxId],
       );
       const beforeAudit = await pool.query(
-        "SELECT * FROM ops.phase1_push_delivery_audit_log WHERE outbox_id = $1",
+        "SELECT * FROM admin.audit_logs WHERE resource_type = 'consumer_notification_outbox' AND resource_id = $1",
         [outboxId],
       );
 
@@ -1134,7 +1138,7 @@ describe.skipIf(!testDbUrl)(
       expect(beforeReceipts.rows).toEqual(afterReceipts.rows);
 
       const afterAudit = await pool.query(
-        "SELECT * FROM ops.phase1_push_delivery_audit_log WHERE outbox_id = $1",
+        "SELECT * FROM admin.audit_logs WHERE resource_type = 'consumer_notification_outbox' AND resource_id = $1",
         [outboxId],
       );
       expect(beforeAudit.rows).toEqual(afterAudit.rows);
