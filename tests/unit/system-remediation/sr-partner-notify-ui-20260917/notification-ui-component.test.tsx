@@ -1,3 +1,4 @@
+import { cleanup } from "@testing-library/react";
 import { act } from "@testing-library/react";
 // @vitest-environment jsdom
 import React from "react";
@@ -37,7 +38,7 @@ describe("PartnerNotificationPanel", () => {
             createdAt: new Date().toISOString(),
             nextAttemptAt: new Date().toISOString(),
             assignmentVersion: 1,
-            retryDisposition: "automatic",
+            retryDisposition: "configuration_blocked",
             payload: { partnerNotification: {} },
           },
         ],
@@ -121,7 +122,7 @@ describe("PartnerNotificationPanel", () => {
     });
 
     // Unmount check
-    unmount();
+    cleanup();
   });
 
   it("exercises 409 recovery on update", async () => {
@@ -405,6 +406,7 @@ describe("PartnerNotificationPanel", () => {
         failureReason: "provider_transient_error",
         retryDisposition: "automatic",
         suggestedNextAttemptAt: new Date().toISOString(),
+        detail: "Transient failure testing",
       },
     });
 
@@ -423,7 +425,7 @@ describe("PartnerNotificationPanel", () => {
         entrySlug="test-entry-3"
         tenantId="test-tenant"
         canWriteBinding={true}
-        canWriteBinding={true}
+        canReadWebhooks={true}
       />,
     );
 
@@ -432,29 +434,32 @@ describe("PartnerNotificationPanel", () => {
     });
     fireEvent.click(testBtn);
 
-    // We expect it to handle the failure gracefully (no unhandled promise rejection)
+    // Assert invocation and visible failure
     await waitFor(() =>
-      expect(
-        mockClient.testPartnerEntryNotificationBinding,
-      ).toHaveBeenCalledWith("test-entry-3"),
+      expect(mockClient.testPartnerEntryNotificationBinding).toHaveBeenCalledWith("test-entry-3")
     );
-    expect(
-      mockClient.enablePartnerEntryNotificationBinding,
-    ).not.toHaveBeenCalled();
+    expect(mockClient.enablePartnerEntryNotificationBinding).not.toHaveBeenCalled();
+
+    // Assert visible failure
+    await waitFor(() => {
+      expect(screen.queryByText(/Transient failure testing/)).not.toBeNull();
+    });
 
     // 4. Test rejected path (actual Promise rejection, not just a failed result)
     mockClient.testPartnerEntryNotificationBinding.mockRejectedValueOnce(
       new Error("Network Error"),
     );
     fireEvent.click(testBtn);
-    await waitFor(() =>
-      expect(
-        mockClient.testPartnerEntryNotificationBinding,
-      ).toHaveBeenCalledTimes(3),
-    );
-    expect(
-      mockClient.enablePartnerEntryNotificationBinding,
-    ).not.toHaveBeenCalled();
+
+    await waitFor(() => {
+      expect(mockClient.testPartnerEntryNotificationBinding).toHaveBeenCalledTimes(3);
+    });
+    expect(mockClient.enablePartnerEntryNotificationBinding).not.toHaveBeenCalled();
+
+    // Assert visible failure for rejection
+    await waitFor(() => {
+      expect(screen.queryByText(/Network Error/)).not.toBeNull();
+    });
 
     // 5. Enable - starts test_pending and passed_current
     mockClient.getPartnerEntryNotificationBinding.mockResolvedValueOnce({
@@ -537,7 +542,7 @@ describe("PartnerNotificationPanel", () => {
     // Button should be disabled because canWriteWebhooks is false
     expect(disabledWebhookLinks[0].closest("button")?.disabled).toBe(true);
 
-    unmount();
+    cleanup();
   });
 
   it("management links are rendered properly when enabled", async () => {
@@ -807,7 +812,7 @@ describe("PartnerNotificationPanel", () => {
         failure: {
           failureReason: "endpoint_unavailable",
           detail: "Cannot reach partner",
-          retryDisposition: "automatic",
+          retryDisposition: "configuration_blocked",
           suggestedNextAttemptAt: new Date(Date.now() + 60000).toISOString()
         }
       });
@@ -907,11 +912,11 @@ describe("PartnerNotificationPanel", () => {
         version: 2,
         webhookId: "even-newer-webhook",
         eventTypes: ["eta_changed"],
-        state: "enabled",
+        state: "ready",
       }),
     };
     (usePlatformAdminClient as any).mockReturnValue(validClient);
-    
+
     await act(async () => {
       rerender(
         <PartnerNotificationPanel
@@ -927,7 +932,7 @@ describe("PartnerNotificationPanel", () => {
     const resumeBtn3 = await screen.findByRole("button", {
       name: /恢復/i,
     });
-    
+
     await act(async () => {
       fireEvent.click(resumeBtn3);
       await new Promise((r) => setTimeout(r, 10));
@@ -937,7 +942,14 @@ describe("PartnerNotificationPanel", () => {
     expect(validClient.testPartnerEntryNotificationBinding).not.toHaveBeenCalled();
     expect(validClient.enablePartnerEntryNotificationBinding).toHaveBeenCalledTimes(1);
 
-    // 6. Genuine pending Resume across authority-only transition (unmount-like)
+    // 6. Genuine pending Resume across authority-only transition
+    cleanup();
+
+    validClient.getPartnerEntryNotificationBinding.mockClear();
+    validClient.listPartnerNotificationDeliveries.mockClear();
+    validClient.testPartnerEntryNotificationBinding.mockClear();
+    validClient.enablePartnerEntryNotificationBinding.mockClear();
+
     let resolveResumeAuth: any;
     validClient.testPartnerEntryNotificationBinding.mockReturnValue(
       new Promise((resolve) => {
@@ -945,16 +957,18 @@ describe("PartnerNotificationPanel", () => {
       }),
     );
 
-    // Make it stale again to force a test
+    // Make it stale to force a test
     validClient.getPartnerEntryNotificationBinding.mockResolvedValue({
         version: 2,
         webhookId: "even-newer-webhook",
         eventTypes: ["eta_changed"],
         state: "disabled",
+        // no validatedAt -> stale
     });
-    
+
+    let renderAuth: any;
     await act(async () => {
-      rerender(
+      renderAuth = render(
         <PartnerNotificationPanel
           entrySlug="test-entry"
           tenantId="test-tenant"
@@ -965,14 +979,19 @@ describe("PartnerNotificationPanel", () => {
       await new Promise((r) => setTimeout(r, 50));
     });
 
+    const getCountsBefore = validClient.getPartnerEntryNotificationBinding.mock.calls.length;
+
     const resumeBtnAuth = await screen.findByRole("button", {
       name: /恢復/i,
     });
     fireEvent.click(resumeBtnAuth);
 
+    // Assert test invocation before authority-only change
+    expect(validClient.testPartnerEntryNotificationBinding).toHaveBeenCalledTimes(1);
+
     // Authority transition (mounted)
     await act(async () => {
-      rerender(
+      renderAuth.rerender(
         <PartnerNotificationPanel
           entrySlug="test-entry"
           tenantId="test-tenant"
@@ -982,8 +1001,6 @@ describe("PartnerNotificationPanel", () => {
       );
       await new Promise((r) => setTimeout(r, 50));
     });
-
-    validClient.enablePartnerEntryNotificationBinding.mockClear();
 
     await act(async () => {
       resolveResumeAuth({
@@ -1000,18 +1017,25 @@ describe("PartnerNotificationPanel", () => {
     });
 
     expect(validClient.enablePartnerEntryNotificationBinding).not.toHaveBeenCalled();
+    expect(validClient.getPartnerEntryNotificationBinding).toHaveBeenCalledTimes(getCountsBefore);
 
-    // 7. Genuine pending Resume across entry-only transition
-    let resolveResumeEntry: any;
+    // 7. Actual pending Resume -> unmount -> settlement
+    renderAuth.unmount();
+
+    validClient.testPartnerEntryNotificationBinding.mockClear();
+    validClient.enablePartnerEntryNotificationBinding.mockClear();
+    validClient.getPartnerEntryNotificationBinding.mockClear();
+
+    let resolveResumeUnmount: any;
     validClient.testPartnerEntryNotificationBinding.mockReturnValue(
       new Promise((resolve) => {
-        resolveResumeEntry = resolve;
+        resolveResumeUnmount = resolve;
       }),
     );
-    
-    // restore authority
+
+    let renderUnmount: any;
     await act(async () => {
-      rerender(
+      renderUnmount = render(
         <PartnerNotificationPanel
           entrySlug="test-entry"
           tenantId="test-tenant"
@@ -1022,38 +1046,31 @@ describe("PartnerNotificationPanel", () => {
       await new Promise((r) => setTimeout(r, 50));
     });
 
-    const resumeBtnEntry = await screen.findByRole("button", {
+    const resumeBtnUnmount = await screen.findByRole("button", {
       name: /恢復/i,
     });
-    fireEvent.click(resumeBtnEntry);
+    fireEvent.click(resumeBtnUnmount);
 
-    // Entry transition (mounted)
-    await act(async () => {
-      rerender(
-        <PartnerNotificationPanel
-          entrySlug="different-entry"
-          tenantId="test-tenant"
-          canWriteBinding={true}
-          canReadWebhooks={true}
-        />,
-      );
-      await new Promise((r) => setTimeout(r, 50));
-    });
+    expect(validClient.testPartnerEntryNotificationBinding).toHaveBeenCalledTimes(1);
+
+    // Unmount before settlement
+    renderUnmount.unmount();
 
     await act(async () => {
-      resolveResumeEntry({
+      resolveResumeUnmount({
         kind: "accepted",
         ack: {
-          notificationId: "n-entry",
-          deliveryId: "d-entry",
+          notificationId: "n-unmount",
+          deliveryId: "d-unmount",
           partnerEntrySlug: "test-entry",
           status: "accepted",
-          receiptId: "ack-entry",
+          receiptId: "ack-unmount",
         },
       });
       await new Promise((r) => setTimeout(r, 10));
     });
 
+    // Assert no stale enable
     expect(validClient.enablePartnerEntryNotificationBinding).not.toHaveBeenCalled();
   });
 });

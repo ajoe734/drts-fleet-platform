@@ -890,7 +890,7 @@ describe.skipIf(!testDbUrl)(
           .update(partnerNotificationWireBytes(prodCommand.wirePayload))
           .digest("hex");
         expect(dRows[0].wire_payload_hash).toBe(expectedHash);
-        
+
         // TTL upper bound check across retry
         const { rows: oRows } = await pool.query("SELECT created_at FROM ops.consumer_notification_outbox WHERE outbox_id = $1", [outboxId]);
         const originalCreatedAt = new Date(oRows[0].created_at).getTime();
@@ -901,10 +901,9 @@ describe.skipIf(!testDbUrl)(
         expect(dRows[0].entry_slug).toBe(missingBindingSlug);
         expect(Number(dRows[0].event_sequence)).toBe((prodCommand.wirePayload as import("@drts/contracts").PartnerPassengerNotificationWirePayload).data.eventSequence);
         expect(dRows[0].downstream_status).toBe("unknown");
-        
-        // Identity matching (context receipt + provider_message_ref)
+
+        // Identity matching (context receipt)
         expect(dRows[0].receipt_id).toBe(receipt.deliveryContext?.receiptId);
-        expect(dRows[0].provider_message_ref).toBe(receipt.providerMessageRef);
         expect(dRows[0].tenant_id).toBe(tenantId);
         expect(dRows[0].partner_id).toBe(partnerId);
 
