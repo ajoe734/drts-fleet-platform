@@ -126,11 +126,13 @@ test.describe("SR-PARTNER-NOTIFY-QA-20260917 E2E Cases", () => {
     });
     if(whRes.status() !== 201) { console.error(await whRes.text()); } expect(whRes.status()).toBe(201);
     const whData = await whRes.json();
-    const webhookId = whData.data.webhook_id;
+    const webhookId = whData.data.webhookId;
 
     // ACTIVATE THE WEBHOOK FIRST!
     const activateRes = await apiCall(tenantA, tokenA, "POST", "api/tenant/webhooks/test", { webhookId });
     expect(activateRes.status()).toBe(201);
+    // wait for webhook to activate
+    await new Promise(r => setTimeout(r, 1000));
 
     const entrySlug = `entry-${randomUUID()}`;
     const createEntryRes = await apiCall(null, tokenPlatform, "POST", "api/platform-admin/partner-entries", {
@@ -197,7 +199,9 @@ test.describe("SR-PARTNER-NOTIFY-QA-20260917 E2E Cases", () => {
       events: ["passenger.assignment_disclosure_ready.v1"],
     });
     if(whRes.status() !== 201) { console.error(await whRes.text()); } expect(whRes.status()).toBe(201);
-    const webhookId = (await whRes.json()).data.webhook_id; await apiCall(tenantA, tokenA, "POST", "api/tenant/webhooks/test", { webhookId });
+    const webhookId = (await whRes.json()).data.webhookId; await apiCall(tenantA, tokenA, "POST", "api/tenant/webhooks/test", { webhookId });
+    // wait for webhook to activate
+    await new Promise(r => setTimeout(r, 1000));
 
     await apiCall(tenantA, tokenPlatform, "PUT", `api/platform-admin/partner-entries/${entrySlug}/notification-binding`, {
       webhookId,
@@ -213,7 +217,6 @@ test.describe("SR-PARTNER-NOTIFY-QA-20260917 E2E Cases", () => {
   });
 
   test("204／HTML200／錯 receipt 拒絕 - Invalid response body handling", async () => {
-    receiverStatus = 204;
     const entrySlug = `entry-${randomUUID()}`;
     await apiCall(null, tokenPlatform, "POST", "api/platform-admin/partner-entries", {
       tenantId: tenantA,
@@ -234,7 +237,12 @@ test.describe("SR-PARTNER-NOTIFY-QA-20260917 E2E Cases", () => {
       events: ["passenger.assignment_disclosure_ready.v1"],
     });
     if(whRes.status() !== 201) { console.error(await whRes.text()); } expect(whRes.status()).toBe(201);
-    const webhookId = (await whRes.json()).data.webhook_id; await apiCall(tenantA, tokenA, "POST", "api/tenant/webhooks/test", { webhookId });
+    const webhookId = (await whRes.json()).data.webhookId; await apiCall(tenantA, tokenA, "POST", "api/tenant/webhooks/test", { webhookId });
+    // wait for webhook to activate
+    await new Promise(r => setTimeout(r, 500));
+    
+    // Now set receiverStatus to 204 for the notification binding test
+    receiverStatus = 204;
     await apiCall(tenantA, tokenPlatform, "PUT", `api/platform-admin/partner-entries/${entrySlug}/notification-binding`, {
       webhookId,
       eventTypes: ["assignment_disclosure_ready"],
