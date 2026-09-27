@@ -13,13 +13,13 @@ Disposition: defined the exact identity boundary for the controlled local receiv
 
 ## Scope and routing decision
 
-1. **Decision**: The environment guard exception requires the full condition: non-production AND explicit flag (`DRTS_ALLOW_LOCAL_WEBHOOKS=true`) AND bounded receiver identity (`127.0.0.1`, `::1`, and `localhost`). 
+1. **Decision**: The environment guard exception requires the full condition: non-production AND explicit flag (`DRTS_ALLOW_LOCAL_WEBHOOKS=true`) AND bounded receiver identity (`127.0.0.1`, `::1`, and `localhost`).
    - Production with any flag, and non-production without opt-in, must keep every existing refusal gate.
    - Only the bounded local HTTP/address exception changes. Credentials and the non-local public-HTTPS/DNS guards remain intact.
    - Localhost socket-time resolution must strictly stay within the defined receiver identity (no non-loopback private IPs like `10.x.x.x` or metadata IP `169.254.169.254`).
    - The deadline, body, redirect, and HMAC constraints are fully retained.
 2. **Action**: The parent owner (Gemini2) must implement this exact constraint in `partner-notification-https.ts` using the new v2 branch (`gemini2/sr-partner-notify-fix-transport-20260927-v2`), preserving all original security guarantees for non-loopback destinations.
-3. **Routing**: Do not regress the parent task to `in_progress` solely to satisfy routing notes. Instead, use state-preserving coordination through Supervisor: record this decision and follow up on the parent task, preserving its current candidate review, CI, and acceptance gates. If unresolved routing remains before helper merge, use the canonical lifecycle disposition mechanism. Unresolved product choices must route through `PHASE1_OPEN_QUESTIONS.md` with Supervisor scope coordination.
+3. **Routing**: Helper scope prevents direct parent mutation (`Dispatched worker cannot mutate a different task` error). Coordination request routed through canonical progress for Supervisor at 2026-09-27T23:56Z using `ai-status.sh progress`. Unresolved routing relies on canonical lifecycle disposition metadata before helper merge, preserving the parent's current candidate review, CI, and acceptance gates.
 
 ## Delivery and validation
 
@@ -30,5 +30,6 @@ This task resolves the planning blocker; no product runtime code is changed in t
 | Finding / 驗收項 | 原始碼依據與修改位置 | 舊版重現 → 修正版結果 | 命令、退出碼、執行版本與證據位置 | 未驗項與具體限制 |
 | --- | --- | --- | --- | --- |
 | PD-1: PR evidence mismatch | Parent task and PR | PR #2192 (parent) → Helper PR #2193 | `gh pr view` and git evidence showing PR #2193 with branch `gemini2/sr-partner-notify-fix-transport-20260927-unblock-planning-decision` | Runtime tests not applicable to PR mapping |
-| PD-2: Decision weakens explicit environment guard | `SR-PARTNER-NOTIFY-FIX-TRANSPORT-20260927-UNBLOCK-PLANNING-DECISION.md` | Incomplete conditions → Full conditions defined (non-prod AND flag AND bounded receiver) | `git diff --check`, `python3 tools/ci/git/check_commit_trailers.py` | Runtime reproduction non-applicable to docs-only diff |
-| PD-3: Parent routing/evidence acceptance incomplete | `SR-PARTNER-NOTIFY-FIX-TRANSPORT-20260927-UNBLOCK-PLANNING-DECISION.md` | Stale instructions → Replaced with state-preserving Supervisor coordination | Docs content check / Guide 0.7 table inclusion | Parent update execution depends on parent lifecycle |
+| PD-2: Decision weakens explicit environment guard | `SR-PARTNER-NOTIFY-FIX-TRANSPORT-20260927-UNBLOCK-PLANNING-DECISION.md` | Incomplete conditions → Full conditions defined (non-prod AND flag AND bounded receiver) | `python3 tools/ci/git/check_commit_trailers.py` (exit 0) | Runtime reproduction non-applicable to docs-only diff |
+| PD-3: Parent routing/evidence acceptance incomplete | `SR-PARTNER-NOTIFY-FIX-TRANSPORT-20260927-UNBLOCK-PLANNING-DECISION.md` | `ai-status.sh note` mutation rejected (worker boundary) → Coordination explicitly requested via helper progress | `ai-status.sh progress SR-...-UNBLOCK-PLANNING-DECISION ...` at 2026-09-27T23:56Z (exit 0) | Parent task actual note addition relies on Supervisor |
+| Second-round repair: Trailing whitespace | `SR-PARTNER-NOTIFY-FIX-TRANSPORT-20260927-UNBLOCK-PLANNING-DECISION.md`:16 | `git diff --check` exits 2 (trailing whitespace) → Whitespace removed | `git diff --check` exits 0 (clean) | Docs-only formatting diff |
