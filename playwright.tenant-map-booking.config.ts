@@ -22,7 +22,14 @@ export default defineConfig({
   webServer: [
     {
       command:
-        "pnpm --filter @drts/contracts build && pnpm --filter @drts/ui-tokens build && cd apps/tenant-console-web && DRTS_API_URL=${DRTS_API_URL:-https://drts-dev-api-waji3fer3a-uc.a.run.app} NEXT_PUBLIC_API_URL=/control-plane-proxy pnpm exec next dev --webpack --hostname 127.0.0.1 --port 3304",
+        "MAP_BOOKING_AUTHORITY_PORT=3305 node tests/e2e/mock-map-booking-authority-server.mjs",
+      url: "http://127.0.0.1:3305/api/auth/session",
+      reuseExistingServer: !process.env.CI,
+      timeout: 30_000,
+    },
+    {
+      command:
+        "pnpm --filter @drts/contracts build && pnpm --filter @drts/ui-tokens build && cd apps/tenant-console-web && DRTS_API_URL=http://127.0.0.1:3305 NEXT_PUBLIC_API_URL=/control-plane-proxy pnpm exec next dev --webpack --hostname 127.0.0.1 --port 3304",
       url: "http://127.0.0.1:3304",
       reuseExistingServer: !process.env.CI,
       timeout: 300_000,
