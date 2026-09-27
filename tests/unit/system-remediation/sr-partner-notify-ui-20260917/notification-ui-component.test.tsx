@@ -1072,5 +1072,91 @@ describe("PartnerNotificationPanel", () => {
 
     // Assert no stale enable
     expect(validClient.enablePartnerEntryNotificationBinding).not.toHaveBeenCalled();
+
+    // 8. Genuine pending Resume across entry-only transition
+    validClient.testPartnerEntryNotificationBinding.mockClear();
+    validClient.enablePartnerEntryNotificationBinding.mockClear();
+    validClient.getPartnerEntryNotificationBinding.mockClear();
+    validClient.listPartnerNotificationDeliveries.mockClear();
+
+    let resolveResumeEntry: any;
+    validClient.testPartnerEntryNotificationBinding.mockReturnValue(
+      new Promise((resolve) => {
+        resolveResumeEntry = resolve;
+      }),
+    );
+
+    let renderEntry: any;
+    await act(async () => {
+      renderEntry = render(
+        <PartnerNotificationPanel
+          entrySlug="test-entry"
+          tenantId="test-tenant"
+          canWriteBinding={true}
+          canReadWebhooks={true}
+        />,
+      );
+      await new Promise((r) => setTimeout(r, 50));
+    });
+
+    const resumeBtnEntry = await screen.findByRole("button", {
+      name: /恢復/i,
+    });
+    fireEvent.click(resumeBtnEntry);
+
+    expect(validClient.testPartnerEntryNotificationBinding).toHaveBeenCalledTimes(1);
+
+    // Entry transition (mounted) changing ONLY entrySlug
+    const getCountsBeforeEntry = validClient.getPartnerEntryNotificationBinding.mock.calls.length;
+    const listCountsBeforeEntry = validClient.listPartnerNotificationDeliveries.mock.calls.length;
+
+    validClient.listPartnerNotificationDeliveries.mockResolvedValueOnce({
+      items: [{ outboxId: "new-entry-delivery-123", status: "failed", eventType: "eta_changed" }],
+      total: 1,
+    });
+
+    await act(async () => {
+      renderEntry.rerender(
+        <PartnerNotificationPanel
+          entrySlug="new-test-entry"
+          tenantId="test-tenant"
+          canWriteBinding={true}
+          canReadWebhooks={true}
+        />,
+      );
+      await new Promise((r) => setTimeout(r, 50));
+    });
+
+    // Assert exact initial binding AND delivery GET counts/arguments for the new entry
+    expect(validClient.getPartnerEntryNotificationBinding).toHaveBeenCalledTimes(getCountsBeforeEntry + 1);
+    expect(validClient.getPartnerEntryNotificationBinding).toHaveBeenLastCalledWith("new-test-entry");
+    expect(validClient.listPartnerNotificationDeliveries).toHaveBeenCalledTimes(listCountsBeforeEntry + 1);
+    expect(validClient.listPartnerNotificationDeliveries).toHaveBeenLastCalledWith("new-test-entry", { page: 1, pageSize: 50 });
+
+    const getCountsAfterEntryTransition = validClient.getPartnerEntryNotificationBinding.mock.calls.length;
+    const listCountsAfterEntryTransition = validClient.listPartnerNotificationDeliveries.mock.calls.length;
+
+    // Settle old request
+    await act(async () => {
+      resolveResumeEntry({
+        kind: "accepted",
+        ack: {
+          notificationId: "n-entry",
+          deliveryId: "d-entry",
+          partnerEntrySlug: "test-entry",
+          status: "accepted",
+          receiptId: "ack-entry",
+        },
+      });
+      await new Promise((r) => setTimeout(r, 10));
+    });
+
+    // Assert no extra GETs or enable after old settlement
+    expect(validClient.enablePartnerEntryNotificationBinding).not.toHaveBeenCalled();
+    expect(validClient.getPartnerEntryNotificationBinding).toHaveBeenCalledTimes(getCountsAfterEntryTransition);
+    expect(validClient.listPartnerNotificationDeliveries).toHaveBeenCalledTimes(listCountsAfterEntryTransition);
+
+    // Visible current-entry data 
+    expect(await screen.findByText("new-entry-delivery-123")).toBeDefined();
   });
 });
