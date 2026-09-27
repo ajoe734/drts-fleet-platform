@@ -105,7 +105,7 @@ describe("exception boundary TR1 destinations", () => {
     });
 
     const promise = partnerNotificationHttpsFetch("http://127.0.0.1/notify", { body: "signed_bytes" });
-    
+
     // Simulate valid HTTP response
     const resInstance = new EventEmitter() as any;
     resInstance.statusCode = 200;
