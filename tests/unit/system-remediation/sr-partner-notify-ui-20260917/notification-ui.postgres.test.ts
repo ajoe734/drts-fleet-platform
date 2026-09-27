@@ -748,7 +748,7 @@ describe.skipIf(!testDbUrl)(
 
       await bindingService.putBinding(missingBindingSlug, { webhookId, eventTypes: ["eta_changed"], expectedVersion: 0 });
 
-      const dispatchSpy = vi.spyOn(dispatchFacade, "dispatchNotificationAttemptByWebhookId").mockImplementation(async (command: import("../../../../apps/api/src/modules/tenant-partner/tenant-partner.service").PartnerNotificationDispatchAttemptCommand) => ({
+      const dispatchSpy = vi.spyOn(dispatchFacade as any, "dispatchNotificationAttemptByWebhookId").mockImplementation(async (command: any): Promise<any> => ({
         kind: "accepted",
         ack: {
           notificationId: command.wirePayload.data.notificationId,
@@ -761,7 +761,7 @@ describe.skipIf(!testDbUrl)(
 
       try {
         const identity: import("../../../../apps/api/src/common/auth/auth.types").BootstrapRequestIdentity = {
-          authMode: "test",
+          authMode: "bootstrap_headers",
           actorType: "system",
           actorId: "system",
           realm: "tenant",
@@ -792,8 +792,8 @@ describe.skipIf(!testDbUrl)(
         });
         
         expect(dispatchSpy).toHaveBeenCalled();
-        const callCommand: any = dispatchSpy.mock.calls?.[0]?.[0] || {};
-        expect(callCommand.wirePayload?.data?.eventSequence).toBe(42);
+        const callCommand = dispatchSpy.mock.calls?.[0]?.[0] as import("../../../../apps/api/src/modules/tenant-partner/tenant-partner.service").PartnerNotificationDispatchAttemptCommand;
+        expect((callCommand?.wirePayload as import("../../../../packages/contracts/src/partner-passenger-notification").PartnerPassengerNotificationWirePayload)?.data?.eventSequence).toBe(42);
         
         await mtRepo.recordPushDeliveryOutcome({
           outboxId,
@@ -811,7 +811,7 @@ describe.skipIf(!testDbUrl)(
             deliveredAt: new Date().toISOString(),
             providerName: "partner_webhook"
           },
-          partnerMetadata: receipt.deliveryContext as any,
+          ...(receipt.deliveryContext ? { partnerMetadata: receipt.deliveryContext } : {}),
         });
 
         const { rows } = await pool.query("SELECT status, attempt_count FROM ops.consumer_notification_outbox WHERE outbox_id = $1", [outboxId]);
