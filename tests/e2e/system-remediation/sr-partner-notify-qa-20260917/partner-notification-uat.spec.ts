@@ -372,8 +372,6 @@ test.describe("SR-PARTNER-NOTIFY-QA-20260917: E2E Partner Notification Delivery 
       taskId: "SR-PARTNER-NOTIFY-QA-20260917",
     });
     const tenantId = shardNs.tenantA.tenantId;
-    const adminToken = createTenantPersonas(shardNs.tenantA).admin
-      .platformAuthToken;
     const entrySlug = `uientry-${randomUUID().slice(0, 6)}`;
 
     // Create entry

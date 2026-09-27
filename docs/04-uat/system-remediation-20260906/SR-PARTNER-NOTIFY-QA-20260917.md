@@ -139,3 +139,16 @@ Supervisor 待協調的確切邊界（已用canonical progress回報）：
    accepted/duplicate receipt、真worker正向與typed no-send。須使用完整entry/webhook/binding
    契約及正式migration，不能用目前無效route資料或寬鬆failed斷言續送review。
    之後才補C206–C224與R5真auth/control/NAV；case manifest已fail closed保留此要求。
+
+### Publication 檢查（單元1末）
+
+`python3 tools/ci/git/check_commit_trailers.py --base origin/dev --head HEAD`
+exit1，**17個繼承的已發布commit**不合規（包含checkpoint的8個新提交）；
+精確錯誤存 `.local/sr-partner-notify-qa-20260927/commit-trailers.log`。
+`--base 91b1d4ac122b1373ac7beb05df902cb991b62232 --head HEAD` exit0，
+本輪Codex提交符合trailers，沒有改寫任何已發布歷史。
+
+首次雙spec scoped lint另發現C205未使用adminToken（exit1）；移除後同一條
+`pnpm exec eslint <partner-notification-uat.spec.ts> <partner-notify.test.ts> --max-warnings=0`
+exit0。`git diff --check`及與base931eabb0的diff --check均exit0。
+R8的scope內lint/whitespace修正已驗，歷史packaging blocker仍未解。
