@@ -190,10 +190,10 @@ c2d94aaa／931eabb0／d6177129／318b44b6 均為本分支 ancestor；未改寫�
 | Finding／驗收項                       | 原始碼依據與本輪修改                                                                                                                                                                                                                          | 舊版 → 本輪結果                                                                                                                                                                                                                                                                                   | 檢查／證據                                                                                                                | 未驗與修復邊界                                                                                                                                                                                                    |
 | ------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | R1 receiver 泛用 JSON／無 durable ack | `controlled-receiver.ts`、`controlled-receiver.test.ts`；正式 `WebhookDispatchService.dispatchAttempt`                                                                                                                                        | a24a4ca7 的 `{ok:true,received:true}` 經正式 parser 判 invalid；新 receiver 經正式 signing/serialization/parser 得 accepted，重開後 duplicate 回同 receipt                                                                                                                                        | 本機 7/7；只替 HTTP IO，真的寫檔/fsync/rename；含併發去重、hash conflict409、簽章/tenant/entry/recipient 拒絕、storage503 | filesystem inbox 是外部夥伴邊界 fixture，dedupe + pending native delivery 同一原子文件；沒有原生推播／真夥伴 claim                                                                                                |
-| R1 權威 fixture／typed outcome        | `partner-fixture.ts`、`enqueue-notification.ts`、spec C201–C204/C206/C207；`createPlatformPartnerEntry`、`sendTestWebhook`、binding PUT/test/enable、ingress handoff、`MultiTaxiService.createRide`、`OwnedMobilityRepository.persistChanges` | 移除手造 route/identity/sequence SQL；兩 tenant、同 tenant 兩 entry、共用 URL 各自 secret；真 order/link/route 讀回，synthetic receipt_ready event 由正式 repository transaction 入列；C203 要求 route_missing/manual_only、零 request、claim released；C204 要求 partner_ack_invalid/manual_only | 下列 hosted checkpoints 逐一定位 port、step-up、idempotency setup 問題；最新修復尚待 hosted 結果                          | 事件 producer 是明列的 fixture 邊界，不宣稱正式收據生成／全 SD14 已驗；C208–C224 仍未實作                                                                                                                         |
+| R1 權威 fixture／typed outcome        | `partner-fixture.ts`、`enqueue-notification.ts`、spec C201–C204/C206/C207；`createPlatformPartnerEntry`、`sendTestWebhook`、binding PUT/test/enable、ingress handoff、`MultiTaxiService.createRide`、`OwnedMobilityRepository.persistChanges` | 移除手造 route/identity/sequence SQL；兩 tenant、同 tenant 兩 entry、共用 URL 各自 secret；真 order/link/route 讀回，synthetic receipt_ready event 由正式 repository transaction 入列；C203 要求 route_missing/manual_only、零 request、claim released；C204 要求 partner_ack_invalid/manual_only | 下列 hosted checkpoints 逐一定位 port、step-up、idempotency setup 問題；後续58081594已得6 pass/1 UI fail，詳下節          | 事件 producer 是明列的 fixture 邊界，不宣稱正式收據生成／全 SD14 已驗；C208–C224 仍未實作                                                                                                                         |
 | R5 真 UI 路徑與 retry 控制            | C205 改 `/partners/{entrySlug}` → Notifications → 指定 outbox row 的重送 → 實際 POST → PG/畫面讀回；workflow UI 指向 API4102                                                                                                                  | 撤除不存在的 localStorage bearer reader／錯 route；只用正式 server authority/control-plane proxy 的 hosted test 身分；UI與API各自 SHA header 驗證                                                                                                                                                 | `--list` 7 cases，僅 discovery；沒有把它當 browser pass                                                                   | hosted test-mode control-plane authority 不代表正式 IAP/workforce 驗收；NAV C221–C224 仍缺                                                                                                                        |
 | R5 UI 啟動 port                       | workflow `Start the UI applications`；兩個 package `start` 實際固定3002/3014                                                                                                                                                                  | f44a6c7e UI readiness fail → 1ba5364c 明確 `pnpm exec next start --hostname 127.0.0.1 --port 3001/3002` 後 readiness success                                                                                                                                                                      | f44a6c7e admin/referral log + 1ba5364c run-status；curl deadline5s；無 VM server                                          | 只修既有 hosted runner，不修改產品 package scripts                                                                                                                                                                |
-| R1 tenant mutation authority          | `step-up.policy.ts:446–471`、controller `sendTestWebhook`                                                                                                                                                                                     | 1ba5364c POST tenant/webhooks403 STEP_UP_REQUIRED → f07af5e0 已越過此步；f07af5e0 POST tenant/webhooks/test400 IDEMPOTENCY_KEY_REQUIRED → 00f0bfbf endpoint-specific key 已補                                                                                                                     | 分別 run36337635742、36338110601；錯誤來自正式 HTTP API，非缺套件／假 mock                                                | 新 helper 向正式 policy 取得每次 authenticated mutation 的 action/session proof，不繞過 gate；待新 run 驗證 idempotency 修復                                                                                      |
+| R1 tenant mutation authority          | `step-up.policy.ts:446–471`、controller `sendTestWebhook`                                                                                                                                                                                     | 1ba5364c POST tenant/webhooks403 STEP_UP_REQUIRED → f07af5e0 已越過此步；f07af5e0 POST tenant/webhooks/test400 IDEMPOTENCY_KEY_REQUIRED → 00f0bfbf endpoint-specific key 已補                                                                                                                     | 分別 run36337635742、36338110601；錯誤來自正式 HTTP API，非缺套件／假 mock                                                | 新 helper 向正式 policy 取得每次 authenticated mutation 的 action/session proof，不繞過 gate；00f0bfbf起已越過idempotency gate，詳下節                                                                            |
 | R5 新產品定位：已接受文案顯示 raw key | `partner-notification-panel.tsx:847` 的 `t("partnerNotification.accepted_unknown") ?? ...`；`translations.ts` 的 `t` missing-key fallback                                                                                                     | 正式 `t(key,"en")` 與 `t(key,"zh")` 都回 `partnerNotification.accepted_unknown`，不是預期文案；因非 null，component fallback 不執行                                                                                                                                                               | 實際函式 tsx probe exit0，`.local/sr-partner-notify-qa-20260927-unit2/ui-translation-probe.jsonl`                         | **產品檔超 scope**：Supervisor 請安排原 owner 修復 child 或核准 scope：`apps/platform-admin-web/lib/translations.ts`、`apps/platform-admin-web/components/partner-notification-panel.tsx`；保留 C205 正式文案斷言 |
 | R2/R3／三項 required_acceptance       | manifest 保留全部 C201–C224，新增 receiver7 到 tenant_unit/partner_unit；原 finding/A/B/C 不刪除                                                                                                                                              | gate64 synthetic pass；manifest 要求 tenant291、partner unit12、partner E2E24，缺 C208–C224 必須拒絕                                                                                                                                                                                              | 本機 Python64、QA12；不把 totals 當 runtime case 完成                                                                     | **三項 required_acceptance 全部 NOT MET**；B/C 繼續 SR-LIVE-PUSH-001，未執行真夥伴／裝置                                                                                                                          |
 | R8/R9 繼承產品與 publication          | transport no-require-imports；已發布17 commits 不合規                                                                                                                                                                                         | 每個新 checkpoint 的 CI 仍 fail；本輪新 commits 合規且普通 push，未碰 scope 外三個 transport/security 檔                                                                                                                                                                                          | 下列 CI links；scoped ESLint/tsc/diff exit0 不代替整體 CI                                                                 | 原 Supervisor scope/child 與 preserving-refs history recovery 請求仍未解；禁止 force/rebase/amend                                                                                                                 |
@@ -229,8 +229,8 @@ scoped `pnpm exec tsc -p .local/sr-partner-notify-qa-20260927-unit2/tsconfig.jso
    **failure**：unit291/291、webhook unit34/34、tenant HTTP10/10、webhook E2E1/1；
    Partner beforeAll 在webhook test400失敗：C201 failed、其餘6 skipped；C113–C115/restart全skip。
    artifact10937549138，ZIP SHA256 `7abc0bc3850ea7a1179056c6fa731c8f8847c656b762752280bba3b9d2d69c56`；已讀完。
-5. 最新程式 checkpoint `00f0bfbf82488a8a8ac403a1c8c9a9b690a86f3e`：
-   [run36338535726](https://github.com/ajoe734/drts-fleet-platform/actions/runs/36338535726) 執行中，尚無 pass 宣稱。
+5. 程式 checkpoint `00f0bfbf82488a8a8ac403a1c8c9a9b690a86f3e`：
+   [run36338535726](https://github.com/ajoe734/drts-fleet-platform/actions/runs/36338535726) completed failure；完整結果與後續修復見下節。
 
 一般 CI（各自已讀至 completed failure）：
 [36336749335](https://github.com/ajoe734/drts-fleet-platform/actions/runs/36336749335) at19e099ef、
@@ -241,3 +241,86 @@ scoped `pnpm exec tsc -p .local/sr-partner-notify-qa-20260927-unit2/tsconfig.jso
 仍為相同17個歷史commits與 `partner-notification-https.ts:63:58` 動態require錯誤。
 对应 integration runs36336749351／36337124715／36337610008／36338080697
 completed success，但主要build/unit/typecheck/lint/integration均skip，不是驗收。
+
+### 單元2：真 worker 結果與新產品定位
+
+- `00f0bfbf82488a8a8ac403a1c8c9a9b690a86f3e` / run36338535726 已完成 **failure**。
+  Partner 0 passed / 4 failed / 3 skipped：第一筆建單 `SERVICE_PRODUCT_INACTIVE`；
+  worker 重啟重複建立授權，後續 `MULTI_TAXI_AUTHORIZATION_AMBIGUOUS`，再觸發 step-up429。
+  artifact10938236899，ZIP SHA256 `83c7046d26d7dc7831a559e368831c9c19530370c21310f15207379dcabcd90d`。
+- `6864d45837751b8ccd358a256062df1588bcb647` 透過正式 `admin/service-products` 與 runtime-policy
+  API 啟用 reservation，沿用唯一 effective/approved 營運授權；沒有 SQL 製造治理狀態。
+  [run36339238416/job108675939838](https://github.com/ajoe734/drts-fleet-platform/actions/runs/36339238416/job/108675939838)
+  completed **failure**，unit291/291（PG21）、webhook unit34/34、tenant HTTP10/10、webhook E2E1/1。
+  **C201–C204、C207 共5 passed；C206/C205共2 failed；0 skipped**。
+  artifact10938467378，ZIP SHA256 `aea49c39d11f530da5f9d78da869dee58676dbb53373f6bb892882f817f54b2b`。
+  C201 是正式 worker/HMAC/receiver/receipt/claim 讀回；C202 真10秒 timeout後由同一 worker 等
+  正式 backoff、相同 bytes/delivery/receipt duplicate，只入列一次；C203 typed route_missing
+  零外送、manual_only；C204 204 invalid ack/manual_only；C207 跨 tenant 同URL隔離。
+  不把5個案例稱為完整24-case matrix。
+- C206 的共享 fixture 干擾：C204 永久 ack failure 沿
+  `TenantPartnerService.applyWebhookPostDispatchPolicy` 停用 endpoint；後續正向需正式重測。
+  `580815945070942923d5c5740a5ae807a0d4e769` 新增 `revalidateEndpoint`：讀 endpoint →
+  signed `tenant/webhooks/test` → active readback；C204 重測後仍驗原 outbox 不會自動重送。
+  C205 重送前同樣重測，保留原 binding/context/receipt，不改 DB status/lease/fence。
+
+R5 新 finding（原 finding 歷史保留，均為 **scope 外產品修復**）：
+
+1. **PG 日期 DTO 導致管理 UI 崩潰。** 6864d458 的 browser trace 中 binding/deliveries 都HTTP200；
+   deliveries 的 `created_at`、`expires_at`、`next_attempt_at` 實為 `{}`，接著 React error #31，
+   最後畫面 `This page couldn’t load`。原始碼：
+   `MultiTaxiRepository.listPartnerNotificationDeliveries` 回傳 raw PG `result.rows`；
+   `deepToSnakeCase` 對 Date 遍歷空 entries；panel 把 `r.createdAt` 直接當 React child。
+   最小 probe：`./apps/api/node_modules/.bin/tsx .local/sr-partner-notify-qa-20260927-unit2/probe-ui-date.ts`
+   exit0，實際 serializer 回 `{created_at:{}}`，實際 React `renderToStaticMarkup` 拒絕 object child；
+   只跑純函式，未啟 server。fixture 的 wire/body 不攔截、不改寫日期來掩蓋產品錯誤。
+   優先修復邊界：`apps/api/src/modules/multi-taxi/multi-taxi.repository.ts` 的 delivery DTO
+   明確轉 ISO/string/number；若選擇改通用 serializer，必須另核准
+   `apps/api/src/common/snake-case.interceptor.ts` 與跨 endpoint 回歸範圍。
+2. **管理 UI 的 tenant webhook picker 缺 tenant authority。** 同 trace 的
+   `/control-plane-proxy/tenant/webhooks` 回400 `TENANT_ID_REQUIRED`。panel傳 `x-tenant-id`，
+   proxy 的 `CONTROL_PLANE_REQUEST_HEADER_BLOCKLIST` 刪除該header；這不是缺資料。
+   修復要有 server 驗證的 tenant 選擇/授權路徑，不能為驗收直接解除 auth blocklist。
+   Scope 邊界含 platform-admin panel/proxy、control-plane-auth，需Supervisor安排原owner。
+3. **accepted_unknown raw translation key** 的正式 `t()` probe 仍成立；目前 browser先被日期
+   crash 阻住，因此不宣稱 browser 已到 accepted 文案。原 translation child/scope 請求保留。
+
+Trace：上述 artifact 的 `test-results/partner-notify-artifacts/*d6d16*/trace.zip`。
+失敗附件含實際 network response、pageError 與 screenshot；只查閱離線ZIP，沒有 VM browser/server。
+最小 probe、提取 frame、run logs 存 `.local/sr-partner-notify-qa-20260927-unit2/`。
+
+一般CI at00f0bfbf（36338512812）、5e03e13c（36338720252）、6864d458（36339240363）
+均completed failure並讀完：仍為繼承17 commits格式與 transport `no-require-imports`。
+各 integration36338512780／36338720215／36339240278 completed success但主要工作skip；
+沒有把這些綠燈當驗收，也未改寫已發布歷史。
+
+### 單元2最後 hosted checkpoint（已結束並讀完）
+
+`580815945070942923d5c5740a5ae807a0d4e769`：
+[run36339890321/job108677788797](https://github.com/ajoe734/drts-fleet-platform/actions/runs/36339890321/job/108677788797)，
+completed **failure**、run-status=failed；artifact10938113863，ZIP SHA256
+`6a58adae4a88c63d3eb777e24fb4949dcc3fef9cbb0d818d400b768aadc069b7`。
+
+- 同SHA partner **6 passed / 1 failed / 0 skipped**：C201–C204、C206、C207 passed；C205 failed。
+  C206在6864d458失敗 → 58081594正式 endpoint 重測後通過；C204仍確認先前manual_only事件
+  在 endpoint 恢復後沒有自動重送。這是 fixture isolation 修復，不是削弱 endpoint治理。
+- C205再現相同HTTP200日期 `{}` + React #31崩潰；webhook picker仍400。
+  兩輪同一產品缺陷已定位至上節最小probe與修復邊界，下一步交原產品owner修復，
+  不再原封重跑／handoff，也不把raw key/空表/隱藏錯誤當UI通過。
+- 同SHA tenant unit **291/291**（含既有PG三suite各7）、webhook unit **34/34**、
+  tenant HTTP **10/10**、webhook E2E **1/1**；partner獨立unit step、C113–C115、restart
+  steps均因前置UI失敗而skip。Gate因缺restart-report失敗，並保留完整24-case manifest。
+- 最新TS修改的scoped typecheck與ESLint exit0；`git diff --check` exit0；
+  本輪9個commit trailers（base a24a4ca7）exit0。先前本機QA12/Python64只代表其記錄版本，
+  不是最新SHA的完整runtime acceptance。沒有背景本機checks或VM服務。
+- [CI36339892568](https://github.com/ajoe734/drts-fleet-platform/actions/runs/36339892568)
+  completed failure：同17歷史commits與scope外transport lint；
+  integration36339892596 completed success但主要工作skip，兩者結果已讀完。
+
+目前三項required_acceptance仍 **NOT MET**；C208–C224未實作、完整SD14/NAV仍缺。
+B/C仍未執行，真夥伴與真機維持 `SR-LIVE-PUSH-001` gate。
+草稿PR2179只是普通發布的checkpoint，未handoff、未done、未merge。
+後續需要Supervisor安排上節R5產品修復及R9安全transport scope、R8保留refs的history recovery；
+之後原owner續做餘下矩陣並以同一新SHA重新review/CI/runtime，不借用本次歷史通過。
+本節文件提交與上述程式/runtime SHA分開；文件提交CI結果另存 `.local/` 並回報canonical progress，
+不因文件checkpoint前進冒稱新SHA已跑過hosted驗收。
