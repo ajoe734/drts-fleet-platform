@@ -246,6 +246,8 @@ jobs:
         id: start_ui
         env:
           PORT: 3001
+          DRTS_API_URL: http://127.0.0.1:4102
+          DRTS_ENV: test
         run: |
           set -o pipefail
           (

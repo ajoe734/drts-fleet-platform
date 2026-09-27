@@ -1,23 +1,16 @@
-import { test, expect, type APIRequestContext } from "@playwright/test";
-import { randomUUID } from "node:crypto";
-import { UatNamespaceManager } from "../shared";
+import { test, expect } from "@playwright/test";
 import { PartnerFixture } from "./partner-fixture";
 
 test.describe("SR-PARTNER-NOTIFY-QA-20260917: E2E Partner Notification Delivery & Fault Isolation", () => {
   test.describe.configure({ mode: "default" });
   let fixture: PartnerFixture;
-  let client: APIRequestContext;
-  test.beforeAll(async ({ playwright }) => {
+  test.beforeAll(async () => {
     test.setTimeout(90_000);
-    // This private API context is not a browser tracing context: disposable
-    // credential issuance and bearer exchanges must not enter uploaded traces.
-    client = await playwright.request.newContext();
-    fixture = new PartnerFixture(client);
+    fixture = new PartnerFixture();
     await fixture.start();
   });
   test.afterAll(async () => {
     await fixture?.close();
-    await client?.dispose();
   });
   test.beforeEach(() => {
     fixture.fault = "none";
@@ -219,57 +212,62 @@ test.describe("SR-PARTNER-NOTIFY-QA-20260917: E2E Partner Notification Delivery 
     }
   });
 
-  // QA-R5 remains open: inherited UI case awaits its independent repair unit.
   test("C205 E2E: Admin UI displays notification binding and enables retry", async ({
     page,
   }) => {
-    test.setTimeout(45000);
-    const namespaceManager = UatNamespaceManager.getInstance();
-    const shardNs = namespaceManager.createShardNamespace({
-      shardIndex: 3,
-      taskId: "SR-PARTNER-NOTIFY-QA-20260917",
+    test.setTimeout(45_000);
+    const entry = fixture.entries[1]!;
+    const orderId = await fixture.createRide(entry);
+    fixture.fault = "invalid_ack";
+    const outboxId = await fixture.enqueue(orderId);
+    const refused = await fixture.settled(outboxId);
+    expect(refused.failure_reason).toBe("partner_ack_invalid");
+    expect(refused.retry_disposition).toBe("manual_only");
+    fixture.fault = "none";
+    // The real server authority/control-plane proxy provides the hosted test
+    // identity. No localStorage bearer, mocked route, or fake browser response.
+    const document = await page.goto(
+      `http://127.0.0.1:3001/partners/${entry.entry.entrySlug}`,
+    );
+    expect(document!.headers()["x-drts-candidate-sha"]).toBe(
+      process.env.CANDIDATE_SHA,
+    );
+    await page
+      .getByRole("button", { name: "Notifications", exact: true })
+      .click();
+    const row = page.getByRole("row").filter({ hasText: outboxId });
+    await expect(row).toContainText("partner_ack_invalid");
+    const retry = row.getByRole("button", { name: /重送/ });
+    await expect(retry).toBeEnabled();
+    const retryResponse = page.waitForResponse(
+      (response) =>
+        response.request().method() === "POST" &&
+        response
+          .url()
+          .includes(
+            `/partner-entries/${entry.entry.entrySlug}/notification-deliveries/${outboxId}/retry`,
+          ),
+    );
+    await retry.click();
+    expect((await retryResponse).status()).toBe(201);
+    await expect
+      .poll(async () => (await fixture.outcome(outboxId))?.status, {
+        timeout: 20_000,
+      })
+      .toBe("delivered");
+    const delivered = await accepted(outboxId);
+    expect(delivered.attempt_count).toBe(2);
+    expect(received(outboxId)).toHaveLength(2);
+    expect(received(outboxId)[0]!.rawBody).toBe(received(outboxId)[1]!.rawBody);
+    await page
+      .getByRole("button", { name: /^(重新整理|Refresh)$/ })
+      .last()
+      .click();
+    await expect(row).toContainText(/端點已接受，裝置未知|Endpoint accepted/);
+    await expect(row.getByRole("button", { name: /重送/ })).toHaveCount(0);
+    await test.info().attach("admin-retry-readback", {
+      contentType: "image/png",
+      body: await page.screenshot({ fullPage: true }),
     });
-    const tenantId = shardNs.tenantA.tenantId;
-    const entrySlug = `uientry-${randomUUID().slice(0, 6)}`;
-
-    // Create entry
-    await page.request.post(
-      `http://127.0.0.1:4102/api/platform-admin/partner-entries`,
-      {
-        headers: {
-          Authorization: `Bearer ${process.env.DRTS_UAT_TOKEN_PLATFORM}`,
-          "x-tenant-id": tenantId,
-        },
-        data: {
-          name: "UI Partner",
-          entrySlug,
-          capabilities: { notificationBinding: true },
-        },
-      },
-    );
-
-    // We navigate to the UI on port 3001
-    // Need to set the token in localStorage for authentication
-    await page.goto("http://127.0.0.1:3001/");
-    await page.evaluate((token) => {
-      localStorage.setItem("drts_platform_auth_token", token);
-    }, process.env.DRTS_UAT_TOKEN_PLATFORM!);
-
-    // Navigate to the partner entry
-    await page.goto(
-      `http://127.0.0.1:3001/tenant/${tenantId}/partners/${entrySlug}`,
-    );
-
-    // The UI should display something about notification binding, wait for it
-    await expect(
-      page
-        .locator("text=Notification Binding")
-        .or(page.locator("text=Notification"))
-        .first(),
-    ).toBeVisible({ timeout: 15000 });
-
-    // Maybe take a screenshot or assert
-    const title = await page.title();
-    expect(title).toBeDefined();
   });
 });

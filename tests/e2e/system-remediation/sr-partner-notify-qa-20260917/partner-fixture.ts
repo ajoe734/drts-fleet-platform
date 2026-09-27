@@ -6,7 +6,7 @@ import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { promisify } from "node:util";
-import { expect, type APIRequestContext } from "@playwright/test";
+import { expect } from "@playwright/test";
 import type {
   CreatePartnerChannelEntryCommand,
   PartnerChannelEntryRecord,
@@ -60,7 +60,7 @@ export class PartnerFixture {
   // Faults only apply to real passenger events, never governance setup.
   fault: "none" | "timeout" | "invalid_ack" = "none";
 
-  constructor(private readonly client: APIRequestContext) {
+  constructor() {
     if (
       process.env.GITHUB_ACTIONS !== "true" ||
       required("DRTS_UAT_ENV") !== "sandbox"
@@ -89,15 +89,14 @@ export class PartnerFixture {
       ...(tenant ? { "x-tenant-id": tenant } : {}),
     };
     if (method !== "GET" && token === process.env.DRTS_UAT_TOKEN_PLATFORM) {
-      const proof = await this.client.post(
-        `${origin}/api/identity/step-up-proofs`,
-        {
-          headers,
-          data: { method, path: `/api/${apiPath}` },
-          maxRedirects: 0,
-        },
-      );
-      expect(proof.status(), `step-up ${apiPath}`).toBe(201);
+      const proof = await fetch(`${origin}/api/identity/step-up-proofs`, {
+        method: "POST",
+        headers: { ...headers, "Content-Type": "application/json" },
+        body: JSON.stringify({ method, path: `/api/${apiPath}` }),
+        redirect: "error",
+        signal: AbortSignal.timeout(20_000),
+      });
+      expect(proof.status, `step-up ${apiPath}`).toBe(201);
       const envelope = decodeTenantWire(await proof.json());
       expect(typeof envelope.data.required).toBe("boolean");
       if (envelope.data.required) {
@@ -105,18 +104,21 @@ export class PartnerFixture {
         headers["x-drts-step-up-reference"] = envelope.data.stepUpReference;
       }
     }
-    const response = await this.client.fetch(`${origin}/api/${apiPath}`, {
+    // Node fetch keeps credential issuance/exchange out of Playwright traces.
+    // Browser requests retain their real trace; no auth/response interception.
+    const response = await fetch(`${origin}/api/${apiPath}`, {
       method,
-      headers,
-      data,
-      maxRedirects: 0,
+      headers: { ...headers, "Content-Type": "application/json" },
+      ...(data === undefined ? {} : { body: JSON.stringify(data) }),
+      redirect: "error",
+      signal: AbortSignal.timeout(20_000),
     });
-    expect(response.headers()["x-drts-candidate-sha"]).toBe(
+    expect(response.headers.get("x-drts-candidate-sha")).toBe(
       required("CANDIDATE_SHA"),
     );
     const envelope = decodeTenantWire(await response.json());
     expect(
-      response.status(),
+      response.status,
       `${method} ${apiPath}: ${envelope.error?.code ?? "response"}`,
     ).toBe(method === "POST" ? 201 : 200);
     expect(envelope.data).toBeDefined();
