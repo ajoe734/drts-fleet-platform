@@ -128,6 +128,10 @@ test.describe("SR-PARTNER-NOTIFY-QA-20260917 E2E Cases", () => {
     const whData = await whRes.json();
     const webhookId = whData.data.webhook_id;
 
+    // ACTIVATE THE WEBHOOK FIRST!
+    const activateRes = await apiCall(tenantA, tokenA, "POST", "api/tenant/webhooks/test", { webhookId });
+    expect(activateRes.status()).toBe(201);
+
     const entrySlug = `entry-${randomUUID()}`;
     const createEntryRes = await apiCall(null, tokenPlatform, "POST", "api/platform-admin/partner-entries", {
       tenantId: tenantA,
@@ -159,8 +163,15 @@ test.describe("SR-PARTNER-NOTIFY-QA-20260917 E2E Cases", () => {
     expect([403, 404, 409]).toContain(crossRes.status());
 
     const testRes = await apiCall(tenantA, tokenPlatform, "POST", `api/platform-admin/partner-entries/${entrySlug}/notification-binding/test`);
+    expect(testRes.status()).toBe(201);
     const testBody = await testRes.json();
-    throw new Error(`DEBUG_TEST_RES: ${testRes.status()} ${JSON.stringify(testBody)}`);
+    if (testBody?.data?.kind === 'failed') throw new Error("Binding test failed: " + JSON.stringify(testBody.data));
+    
+    for (let i = 0; i < 20; i++) {
+      if (requests.length > 0) break;
+      await new Promise(r => setTimeout(r, 250));
+    }
+    expect(requests.length).toBe(1);
     expect(requests[0]!.body.data.partner_entry_slug).toBe(entrySlug);
   });
 
@@ -186,7 +197,7 @@ test.describe("SR-PARTNER-NOTIFY-QA-20260917 E2E Cases", () => {
       events: ["passenger.assignment_disclosure_ready.v1"],
     });
     if(whRes.status() !== 201) { console.error(await whRes.text()); } expect(whRes.status()).toBe(201);
-    const webhookId = (await whRes.json()).data.webhook_id;
+    const webhookId = (await whRes.json()).data.webhook_id; await apiCall(tenantA, tokenA, "POST", "api/tenant/webhooks/test", { webhookId });
 
     await apiCall(tenantA, tokenPlatform, "PUT", `api/platform-admin/partner-entries/${entrySlug}/notification-binding`, {
       webhookId,
@@ -223,7 +234,7 @@ test.describe("SR-PARTNER-NOTIFY-QA-20260917 E2E Cases", () => {
       events: ["passenger.assignment_disclosure_ready.v1"],
     });
     if(whRes.status() !== 201) { console.error(await whRes.text()); } expect(whRes.status()).toBe(201);
-    const webhookId = (await whRes.json()).data.webhook_id;
+    const webhookId = (await whRes.json()).data.webhook_id; await apiCall(tenantA, tokenA, "POST", "api/tenant/webhooks/test", { webhookId });
     await apiCall(tenantA, tokenPlatform, "PUT", `api/platform-admin/partner-entries/${entrySlug}/notification-binding`, {
       webhookId,
       eventTypes: ["assignment_disclosure_ready"],
@@ -231,7 +242,6 @@ test.describe("SR-PARTNER-NOTIFY-QA-20260917 E2E Cases", () => {
     });
     const testRes = await apiCall(tenantA, tokenPlatform, "POST", `api/platform-admin/partner-entries/${entrySlug}/notification-binding/test`);
     const testBody = await testRes.json();
-    console.log("TEST BINDING RESULT:", testRes.status(), testBody);
     if (testBody?.data?.kind === 'failed') throw new Error("Binding test failed: " + JSON.stringify(testBody.data));
     expect(testRes.status()).toBe(201);
   });
