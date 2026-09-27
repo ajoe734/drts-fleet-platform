@@ -465,16 +465,17 @@ test.describe("concierge map booking UI", () => {
     await dropoffPin.scrollIntoViewIfNeeded();
     await page.waitForTimeout(100); // Wait for scroll to settle
 
-    const dropoffSvg = dropoffPicker.locator("svg").first();
+    const dropoffSvg = dropoffPicker.locator("svg[role='img']").first();
     const dropoffSvgBox = await dropoffSvg.boundingBox();
-    if (dropoffSvgBox) {
-      await dropoffPin.dragTo(dropoffSvg, {
-        targetPosition: {
-          x: dropoffSvgBox.width * 0.7,
-          y: dropoffSvgBox.height * 0.7,
-        },
-      });
-    }
+    expect(dropoffSvgBox).not.toBeNull();
+
+    await dropoffPin.dragTo(dropoffSvg, {
+      targetPosition: {
+        // use a guaranteed non-null value for the target position
+        x: dropoffSvgBox!.width * 0.7,
+        y: dropoffSvgBox!.height * 0.7,
+      },
+    });
 
     // Wait for React to update the coordinate summary
     await page.waitForTimeout(500);
