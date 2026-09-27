@@ -19,18 +19,18 @@ const ctbcEntry = {
   programCode: "ACME-WE",
   tenantId: "tenant-acme",
   bankCode: "ACME",
-  entrySlug: "ctbc",
+  entrySlug: "acme",
   displayName: "艾克米銀行世界卡機場接送",
   businessDispatchSubtype: "credit_card_airport_transfer",
   authMode: "partner_session",
   eligibilityMode: "bank_card_inline",
-  entryHost: "ctbc.partner.invalid",
-  entryPath: "/ctbc",
+  entryHost: "acme.partner.invalid",
+  entryPath: "/acme",
   themeAccent: "#1B4FA0",
   brandingMetadata: {
     displayName: "艾克米銀行世界卡機場接送",
     themeAccent: "#1B4FA0",
-    supportEmail: "airport-service@ctbc.invalid",
+    supportEmail: "airport-service@acme.invalid",
     supportPhone: "0800-000-001",
   },
   eligibilityContract: null,
@@ -83,7 +83,7 @@ function createAirportCardEntry({
 }
 
 const cathayEntry = createAirportCardEntry({
-  slug: "cathay",
+  slug: "contoso",
   bankCode: "CONTOSO",
   displayName: "康拓索銀行 CUBE World 機場接送",
   programCode: "CUBE-WORLD",
@@ -91,7 +91,7 @@ const cathayEntry = createAirportCardEntry({
 });
 
 const taishinEntry = createAirportCardEntry({
-  slug: "taishin",
+  slug: "fabrikam",
   bankCode: "FABRIKAM",
   displayName: "法碧康銀行 Infinite 機場接送",
   programCode: "FABRIKAM-INFINITE",
@@ -99,7 +99,7 @@ const taishinEntry = createAirportCardEntry({
 });
 
 const dbsEntry = createAirportCardEntry({
-  slug: "dbs",
+  slug: "northwind",
   bankCode: "DBS",
   displayName: "北風銀行 Insignia 機場接送",
   programCode: "DBS-INSIGNIA",
@@ -114,18 +114,18 @@ const fubonEntry = {
   programCode: "TAILSPIN-CLAIM",
   tenantId: "tenant-tailspin",
   bankCode: null,
-  entrySlug: "fubon",
+  entrySlug: "tailspin",
   displayName: "泰思賓產險理賠代步",
   businessDispatchSubtype: "insurance_claim_replacement_transport",
   authMode: "partner_session",
   eligibilityMode: "none",
   entryHost: "claim.tailspin.example",
-  entryPath: "/fubon",
+  entryPath: "/tailspin",
   themeAccent: "#0F766E",
   brandingMetadata: {
     displayName: "泰思賓產險理賠代步",
     themeAccent: "#0F766E",
-    supportEmail: "claim-service@fubon.invalid",
+    supportEmail: "claim-service@tailspin.invalid",
     supportPhone: "0800-009-888",
   },
   eligibilityContract: null,
@@ -145,20 +145,20 @@ const fubonEntry = {
 };
 
 const lionEntry = {
-  partnerId: "partner-lion",
-  partnerCode: "LION",
+  partnerId: "partner-adventureworks",
+  partnerCode: "ADVENTUREWORKS",
   partnerType: "travel",
-  programId: "program-lion-group",
-  programCode: "LION-GROUP",
-  tenantId: "tenant-lion",
+  programId: "program-adventureworks-group",
+  programCode: "ADVENTUREWORKS-GROUP",
+  tenantId: "tenant-adventureworks",
   bankCode: null,
-  entrySlug: "lion",
+  entrySlug: "adventureworks",
   displayName: "探索旅遊團體接送",
   businessDispatchSubtype: "travel_group_transfer",
   authMode: "partner_session",
   eligibilityMode: "none",
-  entryHost: "booking.liontravel.com",
-  entryPath: "/lion",
+  entryHost: "booking.adventureworks.example",
+  entryPath: "/adventureworks",
   themeAccent: "#C2410C",
   brandingMetadata: {
     displayName: "探索旅遊團體接送",
@@ -183,15 +183,30 @@ const lionEntry = {
 };
 
 const entries = {
-  ctbc: ctbcEntry,
-  cathay: cathayEntry,
-  taishin: taishinEntry,
-  dbs: dbsEntry,
-  fubon: fubonEntry,
-  lion: lionEntry,
+  acme: ctbcEntry,
+  contoso: cathayEntry,
+  fabrikam: taishinEntry,
+  northwind: dbsEntry,
+  tailspin: fubonEntry,
+  adventureworks: lionEntry,
 };
 
 let lastTenantBookingCommand = null;
+
+let mockAddresses = [
+  {
+    addressId: "addr-001",
+    tenantId: "tenant-acme",
+    ownerPassengerId: null,
+    addressName: "Home",
+    addressText: "Taipei 101",
+    lat: 25.033,
+    lng: 121.565,
+    geocodeSource: "provider",
+    tags: [],
+    activeFlag: true,
+  },
+];
 
 const server = http.createServer((req, res) => {
   if (!req.url) {
@@ -233,37 +248,46 @@ const server = http.createServer((req, res) => {
     req.method === "POST" &&
     url.pathname === "/api/partner/ingress/handoff"
   ) {
-    json(res, 200, {
-      data: {
-        accessToken: "handoff-token",
-        tokenType: "Bearer",
-        expiresIn: "15m",
-        partnerEntrySlug: "ctbc",
-        drtsPassengerId: "passenger-embed-001",
-        identity: {
-          actorType: "referral_passenger",
-          actorId: "passenger-embed-001",
-          realm: "partner",
-          authMode: "jwt_bearer",
-          roleFamilies: ["partner"],
-          roles: ["partner_booking"],
-          scopes: [
-            "partner:handoff",
-            "partner:eligibility:read",
-            "partner:eligibility:write",
-            "partner:book",
-          ],
-          tenantId: "tenant-acme",
-          partnerId: "partner-acme",
-          partnerProgramId: "program-acme-airport",
-          partnerEntrySlug: "ctbc",
+    let body = "";
+    req.on("data", (chunk) => {
+      body += chunk.toString();
+    });
+    req.on("end", () => {
+      const payload = JSON.parse(body || "{}");
+      const slug = payload.partnerEntrySlug || "acme";
+      const entry = entries[slug] || entries.acme;
+      json(res, 200, {
+        data: {
+          accessToken: "handoff-token",
+          tokenType: "Bearer",
+          expiresIn: "15m",
+          partnerEntrySlug: slug,
           drtsPassengerId: "passenger-embed-001",
+          identity: {
+            actorType: "referral_passenger",
+            actorId: "passenger-embed-001",
+            realm: "partner",
+            authMode: "jwt_bearer",
+            roleFamilies: ["partner"],
+            roles: ["partner_booking"],
+            scopes: [
+              "partner:handoff",
+              "partner:eligibility:read",
+              "partner:eligibility:write",
+              "partner:book",
+            ],
+            tenantId: entry.tenantId,
+            partnerId: entry.partnerId,
+            partnerProgramId: entry.programId,
+            partnerEntrySlug: slug,
+            drtsPassengerId: "passenger-embed-001",
+          },
         },
-      },
-      meta: {
-        requestId: "req-mock-handoff",
-        timestamp: "2026-07-26T00:00:00.000Z",
-      },
+        meta: {
+          requestId: "req-mock-handoff",
+          timestamp: "2026-07-26T00:00:00.000Z",
+        },
+      });
     });
     return;
   }
@@ -396,6 +420,90 @@ const server = http.createServer((req, res) => {
       meta: {
         requestId: "req-mock-order-read",
         timestamp: "2026-07-26T00:00:04.000Z",
+      },
+    });
+    return;
+  }
+
+  if (req.method === "GET" && url.pathname === "/api/tenant/cost-centers") {
+    json(res, 200, {
+      data: [
+        {
+          costCenterId: "cc-1",
+          code: "CC1",
+          name: "Default",
+          activeFlag: true,
+        },
+      ],
+    });
+    return;
+  }
+
+  if (req.method === "GET" && url.pathname === "/api/tenant/passengers") {
+    json(res, 200, {
+      data: [
+        {
+          passengerId: "p-1",
+          fullName: "Test Passenger",
+          mobile: "0912345678",
+          activeFlag: true,
+        },
+      ],
+    });
+    return;
+  }
+
+  if (req.method === "GET" && url.pathname === "/api/tenant/addresses") {
+    json(res, 200, { data: mockAddresses });
+    return;
+  }
+
+  if (req.method === "POST" && url.pathname === "/api/tenant/addresses") {
+    let body = "";
+    req.on("data", (chunk) => {
+      body += chunk.toString();
+    });
+    req.on("end", () => {
+      const payload = JSON.parse(body);
+
+      const idx = mockAddresses.findIndex(
+        (a) => a.addressId === payload.addressId,
+      );
+      if (idx !== -1) {
+        mockAddresses[idx] = { ...mockAddresses[idx], ...payload };
+        json(res, 200, { data: mockAddresses[idx] });
+      } else {
+        const newAddress = {
+          ...payload,
+          addressId: payload.addressId || "addr-" + Date.now(),
+        };
+        mockAddresses.push(newAddress);
+        json(res, 200, { data: newAddress });
+      }
+    });
+    return;
+  }
+  if (req.method === "GET" && url.pathname === "/api/auth/session") {
+    json(res, 200, {
+      data: {
+        active: true,
+        identity: {
+          realm: "tenant",
+          tenant_id: "tenant-acme",
+        },
+      },
+    });
+    return;
+  }
+  if (req.method === "GET" && url.pathname === "/api/identity/context") {
+    json(res, 200, {
+      data: {
+        id: "mock-identity-id",
+        type: "tenant_user",
+        realm: "tenant",
+        tenant_id: "tenant-acme",
+        roles: ["tenant_admin"],
+        scopes: ["tenant:read", "tenant:write"],
       },
     });
     return;
