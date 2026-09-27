@@ -120,6 +120,8 @@ export {
   buildAddressPickerLabels,
   createConfiguredMockAddressProvider,
   evaluateAddressSubmitGate,
+  evaluateTenantSubmitGate,
+  evaluateManualApply,
 } from "./address-map-app-support";
 export type {
   AddressPickerLocale,

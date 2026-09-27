@@ -786,8 +786,16 @@ export function PartnerBookingForm({
             <CanvasBanner
               theme={theme}
               tone="warn"
-              title={t("book.map.manualReviewTitle")}
-              body={t("book.map.manualReview")}
+              title={
+                !mapSelection.providerState.available
+                  ? t("book.map.outageReviewTitle")
+                  : t("book.map.manualReviewTitle")
+              }
+              body={
+                !mapSelection.providerState.available
+                  ? t("book.map.outageReviewBody")
+                  : t("book.map.manualReview")
+              }
             />
           ) : null}
           <div style={actionRowStyle}>

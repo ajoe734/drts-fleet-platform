@@ -24,7 +24,8 @@ async function fillCardProgramFields(page: Page) {
 test.describe("partner map booking UI", () => {
   test("keeps dispatchable coordinates explicit before validation success", async ({
     page,
-  }) => {
+  }, testInfo) => {
+    test.skip(testInfo.project.name === "outage");
     const response = await page.goto(
       "/acme/book?eligibilityVerificationId=elig-verified-001",
     );
@@ -53,7 +54,8 @@ test.describe("partner map booking UI", () => {
 
   test("keeps manual-review routes explicit instead of looking dispatch-ready", async ({
     page,
-  }) => {
+  }, testInfo) => {
+    test.skip(testInfo.project.name === "outage");
     const response = await page.goto(
       "/acme/book?eligibilityVerificationId=elig-verified-002",
     );
@@ -89,5 +91,64 @@ test.describe("partner map booking UI", () => {
 
     await expect(page.getByText("派遣前需人工確認").first()).toBeVisible();
     await expect(page.getByText("表單驗證通過")).toHaveCount(0);
+  });
+
+  test("blocks outside service area", async ({ page }, testInfo) => {
+    test.skip(testInfo.project.name === "outage");
+    const response = await page.goto("/acme/book?eligibilityVerificationId=elig-verified-001");
+    expect(response?.status()).toBe(200);
+
+    await fillCardProgramFields(page);
+    await selectPartnerMapCandidate(page, 0, "taipei 101", "Taipei 101");
+    await selectPartnerMapCandidate(page, 1, "Tokyo Tower", "Tokyo Tower");
+
+    const submit = page.getByRole("button", { name: "驗證下單表單" });
+    await expect(submit).toBeDisabled();
+  });
+
+  test("submits manual review fallback when provider is down but coordinates exist", async ({ page }, testInfo) => {
+    test.skip(testInfo.project.name !== "outage");
+    const response = await page.goto("/acme/book?eligibilityVerificationId=elig-verified-001");
+    expect(response?.status()).toBe(200);
+
+    await fillCardProgramFields(page);
+
+    // Enter manual coords and blank reason
+    const pickupPicker = page.locator("[data-address-map-picker]").nth(0);
+    await pickupPicker.getByText(/手動輸入座標/).click();
+    await pickupPicker.getByLabel(/緯度/).fill("25.033");
+    await pickupPicker.getByLabel(/經度/).fill("121.565");
+    await pickupPicker.getByRole("button", { name: /使用此位置/ }).click();
+
+    const dropoffPicker = page.locator("[data-address-map-picker]").nth(1);
+    await dropoffPicker.getByText(/手動輸入座標/).click();
+    await dropoffPicker.getByLabel(/緯度/).fill("25.044");
+    await dropoffPicker.getByLabel(/經度/).fill("121.575");
+    await dropoffPicker.getByLabel(/原因/).fill("");
+    await dropoffPicker.getByRole("button", { name: /使用此位置/ }).click();
+
+    // Blank reason means we can't submit
+    const submit = page.getByRole("button", { name: "驗證下單表單" });
+    await expect(submit).toBeDisabled();
+
+    // Fix reason
+    await dropoffPicker.getByText(/手動輸入座標/).click();
+    await dropoffPicker.getByLabel(/原因/).fill("Partner outage dropoff");
+    await dropoffPicker.getByRole("button", { name: /使用此位置/ }).click();
+
+    // Now it works
+    await expect(submit).toBeEnabled();
+    await submit.click();
+    await expect(page.getByText("表單驗證通過")).toBeVisible();
+  });
+
+  test("blocks submission when provider is down and no coordinates are provided", async ({ page }, testInfo) => {
+    test.skip(testInfo.project.name !== "outage");
+    const response = await page.goto("/acme/book?eligibilityVerificationId=elig-verified-001");
+    expect(response?.status()).toBe(200);
+
+    await fillCardProgramFields(page);
+    const submit = page.getByRole("button", { name: "驗證下單表單" });
+    await expect(submit).toBeDisabled();
   });
 });
