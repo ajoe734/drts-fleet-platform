@@ -12,7 +12,7 @@ describe("explicit_controlled_receiver_optin_tested", () => {
       res.writeHead(200, { "Content-Type": "application/json" });
       res.end(JSON.stringify({ status: "success" }));
     });
-    
+
     await new Promise<void>((resolve) => {
       server.listen(0, "127.0.0.1", () => {
         port = (server.address() as any).port;

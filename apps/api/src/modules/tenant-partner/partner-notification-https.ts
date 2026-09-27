@@ -53,18 +53,22 @@ export const partnerNotificationHttpsFetch: WebhookFetch = async (
   const isTestEnv =
     process.env.NODE_ENV !== "production" &&
     process.env.DRTS_ALLOW_LOCAL_WEBHOOKS === "true";
+  const isControlledReceiver =
+    isTestEnv && (host === "127.0.0.1" || host === "::1" || host === "localhost");
+
+  if (url.username || url.password) {
+    throw new Error("partner_endpoint_not_public_https");
+  }
 
   if (
-    !isTestEnv &&
+    !isControlledReceiver &&
     (url.protocol !== "https:" ||
-      url.username ||
-      url.password ||
       (isIP(host) && !isPublicPartnerAddress(host)))
   )
     throw new Error("partner_endpoint_not_public_https");
   return new Promise((resolve, reject) => {
     let rejectBody: ((error: Error) => void) | undefined;
-    const requestFn = isTestEnv && url.protocol === "http:" ? httpRequest : httpsRequest;
+    const requestFn = isControlledReceiver && url.protocol === "http:" ? httpRequest : httpsRequest;
     const req = requestFn(
       url,
       {
@@ -85,7 +89,7 @@ export const partnerNotificationHttpsFetch: WebhookFetch = async (
                 return;
               }
               if (
-                !isTestEnv &&
+                !isControlledReceiver &&
                 (!addresses.length ||
                   addresses.some((item) => !isPublicPartnerAddress(item.address)))
               ) {
