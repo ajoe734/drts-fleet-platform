@@ -42,6 +42,8 @@
 <script type="text/babel" src="tenant-screens-2.jsx"></script>
 <script type="text/babel" src="tenant-screens-3.jsx"></script>
 <script type="text/babel" src="tenant-av-fallback.jsx"></script>
+<script type="text/babel" src="map-picker.jsx"></script>
+<script type="text/babel" src="map-picker-integrations.jsx"></script>
 
 <script type="text/babel">
 const TWEAK_DEFAULTS = /*EDITMODE-BEGIN*/{
@@ -71,12 +73,23 @@ function App() {
           <DCArtboard id="bk-completed" label="訂單詳情 · completed (read-only)" width={W} height={H}><Bare><TN_BookingDetail theme={th} state="completed" /></Bare></DCArtboard>
           <DCArtboard id="bk-reserve" label="訂單詳情 · 可編輯 (editableUntil 內)" width={W} height={H}><Bare><TN_BookingDetail theme={th} state="reserve" /></Bare></DCArtboard>
           <DCArtboard id="bk-pending" label="訂單詳情 · accepted_pending (Q-TEN04)" width={W} height={H}><Bare><TN_BookingDetail theme={th} state="accepted_pending" /></Bare></DCArtboard>
-          <DCArtboard id="newbooking" label="建立訂單 · 同步 command" width={W} height={H}><Bare><TN_NewBooking theme={th} /></Bare></DCArtboard>
+          <DCArtboard id="newbooking" label="建立訂單 · 同步 command" width={W} height={H}><Bare><TN_NewBookingMap theme={th} /></Bare></DCArtboard>
+          <DCArtboard id="map-states" label="選點元件九態 · MP_STATES" width={W} height={800}><Bare><MP_StatesBoard theme={th} /></Bare></DCArtboard>
+          <DCArtboard id="newbooking-outage" label="建立訂單 · 服務中斷" width={W} height={H}><Bare><TN_NewBookingMap theme={th} degraded /></Bare></DCArtboard>
+          <DCArtboard id="newbooking-out-of-area" label="建立訂單 · 超出範圍" width={W} height={H}><Bare><TN_NewBookingMap theme={th} drop="out_of_area" /></Bare></DCArtboard>
+          <DCArtboard id="cg-new" label="禮賓 · 建立叫車" width={W} height={H}><Bare><CG_NewBookingMap theme={th} /></Bare></DCArtboard>
+          <DCArtboard id="cg-ready" label="禮賓 · 地點已確認 (可送出)" width={W} height={H}><Bare><CG_NewBookingMap theme={th} drop="selected" /></Bare></DCArtboard>
+          <DCArtboard id="cg-error" label="禮賓 · 建立失敗 (後端拒絕)" width={W} height={H}><Bare><CG_NewBookingMap theme={th} drop="selected" backendError="The selected dropoff location requires a special permit for this vehicle class." /></Bare></DCArtboard>
+          <DCArtboard id="cg-outage" label="禮賓 · 服務中斷" width={W} height={H}><Bare><CG_NewBookingMap theme={th} degraded /></Bare></DCArtboard>
+          <DCArtboard id="cg-out-of-area" label="禮賓 · 超出範圍" width={W} height={H}><Bare><CG_NewBookingMap theme={th} drop="out_of_area" /></Bare></DCArtboard>
+          <DCArtboard id="cg-success" label="禮賓 · 成功/追蹤" width={W} height={H}><Bare><CG_NewBookingMap theme={th} success /></Bare></DCArtboard>
         </DCSection>
 
         <DCSection id="directory" title="03 · 通訊錄與規則 · 軟停用 (Q-TEN06)">
           <DCArtboard id="passengers" label="乘客通訊錄" width={W} height={H}><Bare><TN_Passengers theme={th} /></Bare></DCArtboard>
-          <DCArtboard id="addresses" label="地址簿 · NEW Q-TEN02" width={W} height={H}><Bare><TN_Addresses theme={th} /></Bare></DCArtboard>
+          <DCArtboard id="addresses" label="地址簿 · 預設 (待人工複核)" width={W} height={H}><Bare><TN_AddressesMap theme={th} /></Bare></DCArtboard>
+          <DCArtboard id="addresses-seeded" label="地址簿 · 已定位 (編輯)" width={W} height={H}><Bare><TN_AddressesMap theme={th} state="selected" coordinateData="24.7951, 121.0028" /></Bare></DCArtboard>
+          <DCArtboard id="addresses-missing" label="地址簿 · 缺少座標 (需重定)" width={W} height={H}><Bare><TN_AddressesMap theme={th} state="missing_coordinate" /></Bare></DCArtboard>
           <DCArtboard id="cc" label="成本中心 · Q-TEN11" width={W} height={H}><Bare><TN_CostCenters theme={th} /></Bare></DCArtboard>
           <DCArtboard id="rules" label="審批規則 · Q-TEN12" width={W} height={H}><Bare><TN_Rules theme={th} /></Bare></DCArtboard>
         </DCSection>

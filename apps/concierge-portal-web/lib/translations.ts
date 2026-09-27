@@ -264,6 +264,8 @@ const en = {
     "Confirm both stops on the map before creating the concierge-assisted booking.",
   "booking.help.manualReview":
     "This trip needs dispatch review before auto-assignment. Continue only if the coordinates are correct.",
+  "booking.help.outageReview":
+    "Address provider is down. Cannot resolve addresses and endpoints. You can continue submitting for manual review; this will not be silently created as a normal booking.",
   "booking.submit": "Submit concierge-assisted booking",
   "booking.summary.eyebrow": "Submission accepted",
   "booking.summary.orderId": "Order ID",
@@ -675,6 +677,8 @@ const zh: Record<keyof typeof en, string> = {
     "建立禮賓代訂前，請先在地圖上確認上下車位置。",
   "booking.help.manualReview":
     "此行程在派遣前仍需人工確認；只有在座標無誤時才可繼續。",
+  "booking.help.outageReview":
+    "地圖服務中斷 · 本次預約將送交人工複核。無法解析地址與落點。您可繼續填寫並送交客服人工複核；系統不會將此單靜默建立為一般訂單。",
   "booking.submit": "提交禮賓代訂",
   "booking.summary.eyebrow": "提交已接受",
   "booking.summary.orderId": "訂單 ID",
