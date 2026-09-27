@@ -817,7 +817,8 @@ describe.skipIf(!testDbUrl)(
 
         // Assert binding-test contract
         const testCommand = dispatchSpy.mock.calls.find(
-          (c) => c[0].wirePayload.event === "passenger.notification.test.v1",
+          (c: any[]) =>
+            c[0].wirePayload.event === "passenger.notification.test.v1",
         )?.[0] as any;
         expect(testCommand).toBeDefined();
         expect(testCommand.wirePayload.data.schemaVersion).toBe("1.0");
@@ -825,7 +826,8 @@ describe.skipIf(!testDbUrl)(
 
         // Assert production notification contract
         const prodCommand = dispatchSpy.mock.calls.find(
-          (c) => c[0].wirePayload.event !== "passenger.notification.test.v1",
+          (c: any[]) =>
+            c[0].wirePayload.event !== "passenger.notification.test.v1",
         )?.[0] as import("../../../../apps/api/src/modules/tenant-partner/tenant-partner.service").PartnerNotificationDispatchAttemptCommand;
         expect(prodCommand).toBeDefined();
         expect(prodCommand.wirePayload.data.notificationId).toBe(outboxId);
