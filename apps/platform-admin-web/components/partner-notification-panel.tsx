@@ -1275,9 +1275,10 @@ export function PartnerNotificationPanel({
   const [availableWebhooks, setAvailableWebhooks] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<{
-    kind: "error" | "404" | "403" | "409";
+    kind: "error" | "404" | "403" | "409" | "failed";
     message: string;
     code?: string;
+    failure?: any;
   } | null>(null);
   const [deliveryError, setDeliveryError] = useState<string | null>(null);
   const [webhookError, setWebhookError] = useState<string | null>(null);
