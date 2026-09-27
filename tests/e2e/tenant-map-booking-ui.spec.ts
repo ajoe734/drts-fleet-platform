@@ -471,6 +471,27 @@ test.describe("tenant console booking map alignment", () => {
       "manual",
     );
 
+    // 2b. Verify unchanged persistence of a MANUAL pin
+    const manualUnchangedPromise = page.waitForResponse(
+      (response) =>
+        response.url().includes("/addresses") &&
+        response.request().method() === "POST",
+    );
+    await page.getByRole("button", { name: /Save Changes|儲存/i }).click();
+    await manualUnchangedPromise;
+    await page.reload();
+    await expect(
+      page.getByRole("heading", { name: /Edit Address/i }),
+    ).toBeVisible();
+    await expect(page.locator('input[name="lat"]')).toHaveValue(keyboardLat);
+    await expect(page.locator('input[name="lng"]')).toHaveValue(keyboardLng);
+    await expect(page.locator('input[name="coordinateSource"]')).toHaveValue(
+      "saved_address",
+    );
+    await expect(page.locator('input[name="priorGeocodeSource"]')).toHaveValue(
+      "manual",
+    );
+
     // 3. Pointer drag map click
     const pin2 = picker.locator("g[role='button']").first();
     const pinBox = await pin2.boundingBox();
@@ -493,39 +514,75 @@ test.describe("tenant console booking map alignment", () => {
       page.locator('input[name="manualOverrideReason"]'),
     ).toHaveValue(/Pin adjusted manually|已手動調整圖釘位置/);
 
-    // Clear the reason to test rejection
-    await page.getByLabel("Reason for manual location").fill("");
-
-    // Save should fail due to empty reason
-    responsePromise = page.waitForResponse(
+    // Save dragged pin
+    const dragResponsePromise = page.waitForResponse(
       (response) =>
         response.url().includes("/addresses") &&
         response.request().method() === "POST",
     );
     await page.getByRole("button", { name: /Save Changes|儲存/i }).click();
-    await responsePromise;
-    // The page should not reload or show success if it fails, but wait, this is a form action. If it fails, it might render an error.
-    // Instead of asserting error, the instructions just say "Retained blank-reason rejection and valid manual-entry save/reload removed in prior rewrite remain absent".
-    // I should check if there's an error banner or just fill the valid reason.
-    await expect(page.getByText(/Error|error|Reason required/i)).toBeVisible();
-
-    await page
-      .getByLabel("Reason for manual location")
-      .fill("Custom drag reason");
-
-    responsePromise = page.waitForResponse(
-      (response) =>
-        response.url().includes("/addresses") &&
-        response.request().method() === "POST",
-    );
-    await page.getByRole("button", { name: /Save Changes|儲存/i }).click();
-    await responsePromise;
+    await dragResponsePromise;
     await page.reload();
     await expect(
       page.getByRole("heading", { name: /Edit Address/i }),
     ).toBeVisible();
     await expect(page.locator('input[name="lat"]')).toHaveValue(dragLat);
     await expect(page.locator('input[name="lng"]')).toHaveValue(dragLng);
+    await expect(page.locator('input[name="coordinateSource"]')).toHaveValue(
+      "saved_address",
+    );
+    await expect(page.locator('input[name="priorGeocodeSource"]')).toHaveValue(
+      "manual",
+    );
+
+    // 3b. Manual Coordinate Entry and Apply validation
+    await page.getByText(/Enter coordinates manually|改用手動座標/).click();
+    await page.getByLabel(/Latitude|緯度/).fill("25.055");
+    await page.getByLabel(/Longitude|經度/).fill("121.585");
+    // Blank reason apply rejection
+    await page.getByLabel(/Reason for manual location|手動輸入原因/).fill("");
+    await page
+      .getByRole("button", {
+        name: /Use this location|使用此位置|確認使用此位置/,
+      })
+      .click();
+    // Validate selection didn't change (still dragLat)
+    await expect(page.locator('input[name="lat"]')).toHaveValue(dragLat);
+
+    // Fill valid reason
+    await page
+      .getByLabel(/Reason for manual location|手動輸入原因/)
+      .fill("Valid manual entry reason");
+    await page
+      .getByRole("button", {
+        name: /Use this location|使用此位置|確認使用此位置/,
+      })
+      .click();
+
+    // Check that lat/lng got updated in the selection
+    await expect(page.locator('input[name="lat"]')).toHaveValue("25.055");
+    await expect(page.locator('input[name="lng"]')).toHaveValue("121.585");
+    await expect(page.locator('input[name="coordinateSource"]')).toHaveValue(
+      "manual_pin",
+    );
+    await expect(
+      page.locator('input[name="manualOverrideReason"]'),
+    ).toHaveValue("Valid manual entry reason");
+
+    // Save and reload manual pin
+    const manualResponsePromise = page.waitForResponse(
+      (response) =>
+        response.url().includes("/addresses") &&
+        response.request().method() === "POST",
+    );
+    await page.getByRole("button", { name: /Save Changes|儲存/i }).click();
+    await manualResponsePromise;
+    await page.reload();
+    await expect(
+      page.getByRole("heading", { name: /Edit Address/i }),
+    ).toBeVisible();
+    await expect(page.locator('input[name="lat"]')).toHaveValue("25.055");
+    await expect(page.locator('input[name="lng"]')).toHaveValue("121.585");
     await expect(page.locator('input[name="coordinateSource"]')).toHaveValue(
       "saved_address",
     );
@@ -592,7 +649,7 @@ test.describe("tenant console booking map alignment", () => {
     await expect(page.locator('input[name="lat"]')).toHaveValue("");
     await expect(page.locator('input[name="lng"]')).toHaveValue("");
     await expect(page.locator('input[name="coordinateSource"]')).toHaveValue(
-      "saved_address",
+      "",
     );
     await expect(page.locator('input[name="priorGeocodeSource"]')).toHaveValue(
       "none",

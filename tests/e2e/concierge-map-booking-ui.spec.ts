@@ -454,6 +454,31 @@ test.describe("concierge map booking UI", () => {
       );
       await page.mouse.up();
     }
+
+    // Read the exact expected coordinates from the manual entry inputs
+    await pickupPicker
+      .getByText(/手動輸入座標|Enter coordinates manually/)
+      .click();
+    const expectedPickupLat = await pickupPicker
+      .getByLabel(/Latitude|緯度/)
+      .inputValue();
+    const expectedPickupLng = await pickupPicker
+      .getByLabel(/Longitude|經度/)
+      .inputValue();
+    // Cancel or just switch back
+    await pickupPicker.getByText(/返回地圖|Back to map/).click();
+
+    await dropoffPicker
+      .getByText(/手動輸入座標|Enter coordinates manually/)
+      .click();
+    const expectedDropoffLat = await dropoffPicker
+      .getByLabel(/Latitude|緯度/)
+      .inputValue();
+    const expectedDropoffLng = await dropoffPicker
+      .getByLabel(/Longitude|經度/)
+      .inputValue();
+    await dropoffPicker.getByText(/返回地圖|Back to map/).click();
+
     // Submit and verify keyboard and drag
     const submitBtn = page.getByRole("button", { name: /提交禮賓代訂/ });
     await expect(submitBtn).toBeEnabled();
@@ -464,13 +489,15 @@ test.describe("concierge map booking UI", () => {
 
     const command1 = captured.body[0] as any;
     expect(command1.pickup.coordinateSource).toBe("manual_pin");
-    expect(command1.pickup.lat).not.toBe(25.033);
+    expect(command1.pickup.lat).toBe(parseFloat(expectedPickupLat));
+    expect(command1.pickup.lng).toBe(parseFloat(expectedPickupLng));
     expect(command1.pickup.manualOverrideReason).toMatch(
       /Pin adjusted manually|已手動調整圖釘位置/,
     );
 
     expect(command1.dropoff.coordinateSource).toBe("manual_pin");
-    expect(command1.dropoff.lat).not.toBe(25.011);
+    expect(command1.dropoff.lat).toBe(parseFloat(expectedDropoffLat));
+    expect(command1.dropoff.lng).toBe(parseFloat(expectedDropoffLng));
     expect(command1.dropoff.manualOverrideReason).toMatch(
       /Pin adjusted manually|已手動調整圖釘位置/,
     );
@@ -492,7 +519,7 @@ test.describe("concierge map booking UI", () => {
     }
     // Should be out of service area
     await expect(
-      page.getByText(/Outside the service area|不在支援的服務範圍內/i).first(),
+      page.getByText(/Outside the service area|不在服務範圍內/i).first(),
     ).toBeVisible();
     await expect(submitBtn).toBeDisabled();
 
@@ -504,8 +531,11 @@ test.describe("concierge map booking UI", () => {
       );
     }
 
-    // Wait for geocode to settle by checking submit btn enabled
-    await expect(submitBtn).toBeEnabled();
+    // Wait for geocode to settle
+    await page.waitForTimeout(500);
+
+    // Still disabled because dropoff is missing
+    await expect(submitBtn).toBeDisabled();
 
     // Fill in dropoff to allow submit
     await selectConciergeMapCandidate(
@@ -514,6 +544,21 @@ test.describe("concierge map booking UI", () => {
       "banqiao",
       "Banqiao District Office",
     );
+
+    // Read the exact expected pickup coordinates after background click
+    await pickupPicker2
+      .getByText(/手動輸入座標|Enter coordinates manually/)
+      .click();
+    const expectedClickLat = await pickupPicker2
+      .getByLabel(/Latitude|緯度/)
+      .inputValue();
+    const expectedClickLng = await pickupPicker2
+      .getByLabel(/Longitude|經度/)
+      .inputValue();
+    await pickupPicker2.getByText(/返回地圖|Back to map/).click();
+
+    // Now it should be enabled
+    await expect(submitBtn).toBeEnabled();
 
     await submitBtn.click();
     await expect(page.getByText("訂單 ID")).toBeVisible();
@@ -524,7 +569,7 @@ test.describe("concierge map booking UI", () => {
     // Pickup was changed via pointer background click
     expect(command2.pickup.coordinateSource).toBe("manual_pin");
     expect(command2.pickup.manualOverrideReason).toBe("agent_map_click");
-    expect(command2.pickup.lat).toBeDefined();
-    expect(command2.pickup.lng).toBeDefined();
+    expect(command2.pickup.lat).toBe(parseFloat(expectedClickLat));
+    expect(command2.pickup.lng).toBe(parseFloat(expectedClickLng));
   });
 });
