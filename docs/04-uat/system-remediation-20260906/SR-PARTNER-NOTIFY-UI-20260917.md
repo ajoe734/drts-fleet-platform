@@ -2393,6 +2393,28 @@ manual_retry_preserves_single_outbox_owner_and_fence: source safeguards preserve
 ui_states_do_not_claim_device_delivery_and_no_secret_disclosure: truthful wording/safe projection preserved; complete lifecycle/authority/interaction evidence remains incomplete and visual/browser/device/live pending.
 The same R2b-PG failure and R6 omissions persist across adjacent independently reviewed ed44c725 -> 7659c3f5 candidates. UI immediate failures are fixed but the same coverage triggers remain absent. Per section 0.7 this receipt provides exact source/call paths, old/new reproduction, expected/actual differences, bounded fixes and necessary regressions. Supervisor must verify original Gemini's next repair unit and preserve original task/owner/scope/acceptance/QA-live dependencies; stop unchanged resubmission, not legitimate scoped repair. No approve/merge/done/deployment claim.
 
+## 2026-09-26 Codex2 Independent Locked-Candidate Review (2026-09-26T14:33:08Z)
+- Status: REQUEST CHANGES
+- Finding: `ui_states_do_not_claim_device_delivery_and_no_secret_disclosure` unverified; requires genuine independent transitions and pending operation abortion across entry/client/authority changes.
+
+## 2026-09-26 Codex2 Independent Locked-Candidate Review (2026-09-26T15:45:48Z)
+- Status: REQUEST CHANGES
+- Finding: `manual_retry_preserves_single_outbox_owner_and_fence` proof incomplete; retry audit identity/count, actual context equality, and receipt/claims recovery not strictly asserted.
+
+## 2026-09-26 Codex2 Independent Locked-Candidate Review (2026-09-26T15:56:20Z)
+- Status: REQUEST CHANGES
+- Finding: `entry_notification_admin_uses_real_binding_and_delivery_data` lifecycle and recovery proof still absent. Cross-partner refusal logic untested.
+
+## 2026-09-27 Codex2 Independent Locked-Candidate Review (2026-09-27T04:06:30Z)
+- Status: REQUEST CHANGES
+- Finding: PG 測試仍有編譯及斷言缺陷；UI 測試失敗、生命週期覆蓋不足，三份指定審查紀錄仍缺漏。
+
+## 2026-09-27 Codex2 Independent Locked-Candidate Review (2026-09-27T04:50:55Z)
+- Status: REQUEST CHANGES
+- Finding: Old -> current: previous compiler/event/schema/result failures corrected; required durable recovery and historical/cross-partner assertions still absent. This is a precise static coverage finding, NOT a claimed current PG runtime failure. Current hosted unit jobs are pending at observation. Complete the bounded assertions and run migrated non-skipped PG in the existing hosted workflows only.
+R2b-UI-COVERAGE [P2 repeated unchanged; reproduced coverage gap] ...
+Bounded repair: start genuine pending Save/Test/Resume, vary entry/client-account/authority independently while mounted, settle and assert exact current GET calls, visible current binding/delivery state, no stale continuation or enable; separately start pending Resume, unmount and settle.
+
 ## 2026-09-27 Codex2 Independent Locked-Candidate Review (2026-09-27T05:11:26Z)
 (This receipt replaces the missing 04:06:30Z and 04:50:55Z receipts which were lost in transit, reflecting the final bounds requested by Codex2 prior to this resolution)
 - Status: REQUEST CHANGES

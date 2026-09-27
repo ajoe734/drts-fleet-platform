@@ -695,12 +695,12 @@ describe("PartnerNotificationPanel", () => {
     };
     (usePlatformAdminClient as any).mockReturnValue(newMockClient);
 
-    // Change BOTH client and entrySlug and tenantId
+    // Change ONLY client (keep entrySlug, tenantId, canWriteBinding the same)
     await act(async () => {
       rerender(
         <PartnerNotificationPanel
-          entrySlug="new-entry"
-          tenantId="new-tenant"
+          entrySlug="test-entry"
+          tenantId="test-tenant"
           canWriteBinding={true}
           canReadWebhooks={true}
         />,
@@ -708,15 +708,23 @@ describe("PartnerNotificationPanel", () => {
       await new Promise((r) => setTimeout(r, 50));
     });
 
-    // new client should have exactly ONE GET for the initial load of new-entry
+    // new client should have exactly ONE GET for the initial load of test-entry
     expect(
       newMockClient.getPartnerEntryNotificationBinding,
     ).toHaveBeenCalledTimes(1);
     expect(
       newMockClient.getPartnerEntryNotificationBinding,
-    ).toHaveBeenCalledWith("new-entry");
+    ).toHaveBeenCalledWith("test-entry");
+
+    // Delivery GET should also be called
+    expect(
+      newMockClient.listPartnerNotificationDeliveries,
+    ).toHaveBeenCalledTimes(1);
+
     newMockClient.getPartnerEntryNotificationBinding.mockClear();
+    newMockClient.listPartnerNotificationDeliveries.mockClear();
     newMockClient.enablePartnerEntryNotificationBinding.mockClear();
+    mockClient.enablePartnerEntryNotificationBinding.mockClear();
 
     // Settle the old pending test mutation
     await act(async () => {
@@ -733,7 +741,7 @@ describe("PartnerNotificationPanel", () => {
       await new Promise((r) => setTimeout(r, 10));
     });
 
-    // ensure no follow-on state update/GET call on the new client, or enable call
+    // ensure no follow-on state update/GET call on the new client, or enable call on either client
     expect(
       newMockClient.enablePartnerEntryNotificationBinding,
     ).not.toHaveBeenCalled();
@@ -743,27 +751,11 @@ describe("PartnerNotificationPanel", () => {
     expect(
       mockClient.enablePartnerEntryNotificationBinding,
     ).not.toHaveBeenCalled();
+    expect(
+      mockClient.getPartnerEntryNotificationBinding,
+    ).not.toHaveBeenCalled();
 
-    // 3. Setup a pending Resume mutation, unmount and settle
-    newMockClient.getPartnerEntryNotificationBinding.mockResolvedValue({
-      version: 1,
-      webhookId: "new-webhook",
-      eventTypes: ["eta_changed"],
-      state: "disabled",
-    });
-
-    await act(async () => {
-      rerender(
-        <PartnerNotificationPanel
-          entrySlug="resume-entry"
-          tenantId="new-tenant"
-          canWriteBinding={true}
-          canReadWebhooks={true}
-        />,
-      );
-      await new Promise((r) => setTimeout(r, 50));
-    });
-
+    // 3. Setup a pending Resume mutation, client change and settle with rejection
     let resolveResume: any;
     newMockClient.testPartnerEntryNotificationBinding.mockReturnValue(
       new Promise((resolve) => {
@@ -776,26 +768,93 @@ describe("PartnerNotificationPanel", () => {
     });
     fireEvent.click(resumeBtn);
 
-    // Now unmount before Resume test completes
+    // Simulate ANOTHER account/client transition before Resume test completes
+    const newerMockClient = {
+      ...newMockClient,
+      getPartnerEntryNotificationBinding: vi.fn().mockResolvedValue({
+        version: 1,
+        webhookId: "new-webhook",
+        eventTypes: ["eta_changed"],
+        state: "disabled",
+      }),
+      testPartnerEntryNotificationBinding: vi.fn(),
+      enablePartnerEntryNotificationBinding: vi.fn(),
+      listPartnerNotificationDeliveries: vi
+        .fn()
+        .mockResolvedValue({ items: [], total: 0 }),
+    };
+    (usePlatformAdminClient as any).mockReturnValue(newerMockClient);
+
+    await act(async () => {
+      rerender(
+        <PartnerNotificationPanel
+          entrySlug="test-entry"
+          tenantId="test-tenant"
+          canWriteBinding={true}
+          canReadWebhooks={true}
+        />,
+      );
+      await new Promise((r) => setTimeout(r, 50));
+    });
+
+    newerMockClient.getPartnerEntryNotificationBinding.mockClear();
+    newerMockClient.listPartnerNotificationDeliveries.mockClear();
+
+    await act(async () => {
+      // test with rejection
+      resolveResume({
+        kind: "failed",
+        failure: {
+          failureReason: "network_error",
+          detail: "Cannot reach partner",
+        }
+      });
+      await new Promise((r) => setTimeout(r, 10));
+    });
+
+    // Should not call enable on ANY client
+    expect(
+      newerMockClient.enablePartnerEntryNotificationBinding,
+    ).not.toHaveBeenCalled();
+    expect(
+      newMockClient.enablePartnerEntryNotificationBinding,
+    ).not.toHaveBeenCalled();
+
+    // ensure no error message is displayed on new client
+    expect(screen.queryByText(/network_error/)).toBeNull();
+
+    // 4. Genuine pending Resume across Unmount
+    let resolveResumeUnmount: any;
+    newerMockClient.testPartnerEntryNotificationBinding.mockReturnValue(
+      new Promise((resolve) => {
+        resolveResumeUnmount = resolve;
+      }),
+    );
+
+    // get the resume button again
+    const resumeBtn2 = await screen.findByRole("button", {
+      name: /恢復/i,
+    });
+    fireEvent.click(resumeBtn2);
+
     unmount();
 
     await act(async () => {
-      resolveResume({
+      resolveResumeUnmount({
         kind: "accepted",
         ack: {
-          notificationId: "n-3",
-          deliveryId: "d-3",
-          partnerEntrySlug: "resume-entry",
+          notificationId: "n-4",
+          deliveryId: "d-4",
+          partnerEntrySlug: "test-entry",
           status: "accepted",
-          receiptId: "ack-3",
+          receiptId: "ack-4",
         },
       });
       await new Promise((r) => setTimeout(r, 10));
     });
 
-    // Should not call enable after unmount
     expect(
-      newMockClient.enablePartnerEntryNotificationBinding,
+      newerMockClient.enablePartnerEntryNotificationBinding,
     ).not.toHaveBeenCalled();
   });
 });

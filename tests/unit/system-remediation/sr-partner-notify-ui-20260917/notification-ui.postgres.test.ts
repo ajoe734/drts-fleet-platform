@@ -883,8 +883,12 @@ describe.skipIf(!testDbUrl)(
         );
         expect(dRows.length).toBe(1);
         expect(dRows[0].delivery_id).toBeDefined();
-        expect(dRows[0].wire_payload).toBeDefined();
-        expect(dRows[0].wire_payload_hash).toBeDefined();
+        expect(dRows[0].wire_payload).toEqual(prodCommand.wirePayload);
+        const { createHash } = await import("node:crypto");
+        const expectedHash = createHash("sha256")
+          .update(JSON.stringify(prodCommand.wirePayload))
+          .digest("hex");
+        expect(dRows[0].wire_payload_hash).toBe(expectedHash);
         expect(dRows[0].expires_at).toBeDefined();
         expect(dRows[0].delivery_stage).toBe("partner_accepted");
         expect(dRows[0].entry_slug).toBe(missingBindingSlug);
@@ -900,12 +904,23 @@ describe.skipIf(!testDbUrl)(
 
         // Check receipt identity
         const { rows: rRows } = await pool.query(
-          "SELECT receipt_id, provider_message_ref FROM ops.phase1_push_delivery_receipts WHERE outbox_id = $1",
+          "SELECT receipt_id, dedupe_key, fence_token, provider_message_ref FROM ops.phase1_push_delivery_receipts WHERE outbox_id = $1",
           [outboxId],
         );
         expect(rRows.length).toBe(1);
         expect(rRows[0].receipt_id).toBeDefined();
+        expect(rRows[0].dedupe_key).toBe(`${outboxId}:${claim!.fenceToken}`);
+        expect(rRows[0].fence_token).toBe(claim!.fenceToken);
         expect(rRows[0].provider_message_ref).toBe(receipt.providerMessageRef);
+
+        // Check audit identity
+        const { rows: aRows } = await pool.query(
+          "SELECT * FROM ops.phase1_push_delivery_audit_log WHERE outbox_id = $1",
+          [outboxId],
+        );
+        expect(aRows.length).toBe(1);
+        expect(aRows[0].action).toBe("retry_scheduled");
+        expect(aRows[0].reason).toBe("api_manual_retry");
       } finally {
         dispatchSpy.mockRestore();
       }
@@ -1051,6 +1066,22 @@ describe.skipIf(!testDbUrl)(
         "SELECT * FROM mobility.phase1_partner_notification_delivery_contexts WHERE outbox_id = $1",
         [outboxId],
       );
+      const beforeOutbox = await pool.query(
+        "SELECT payload, next_attempt_at, status, attempt_count FROM ops.consumer_notification_outbox WHERE outbox_id = $1",
+        [outboxId],
+      );
+      const beforeClaims = await pool.query(
+        "SELECT * FROM ops.phase1_push_delivery_claims WHERE outbox_id = $1",
+        [outboxId],
+      );
+      const beforeReceipts = await pool.query(
+        "SELECT * FROM ops.phase1_push_delivery_receipts WHERE outbox_id = $1",
+        [outboxId],
+      );
+      const beforeAudit = await pool.query(
+        "SELECT * FROM ops.phase1_push_delivery_audit_log WHERE outbox_id = $1",
+        [outboxId],
+      );
 
       // Refuse on old owner
       const res = await mtRepo.retryPartnerNotificationDelivery(
@@ -1076,18 +1107,37 @@ describe.skipIf(!testDbUrl)(
       expect(res3.kind).toBe("failed");
       expect((res3 as any).failure?.failureReason).toBe("route_missing");
 
-      const { rows: postRows } = await pool.query(
-        "SELECT * FROM ops.consumer_notification_outbox WHERE outbox_id = $1",
+      const afterOutbox = await pool.query(
+        "SELECT payload, next_attempt_at, status, attempt_count FROM ops.consumer_notification_outbox WHERE outbox_id = $1",
         [outboxId],
       );
-      expect(postRows[0].status).toBe("failed");
-      expect(postRows[0].attempt_count).toBe(1); // from createFixture
+      expect(afterOutbox.rows[0].status).toBe("failed");
+      expect(afterOutbox.rows[0].attempt_count).toBe(1); // from createFixture
+      expect(beforeOutbox.rows).toEqual(afterOutbox.rows);
 
       const afterContext = await pool.query(
         "SELECT * FROM mobility.phase1_partner_notification_delivery_contexts WHERE outbox_id = $1",
         [outboxId],
       );
       expect(beforeContext.rows).toEqual(afterContext.rows);
+
+      const afterClaims = await pool.query(
+        "SELECT * FROM ops.phase1_push_delivery_claims WHERE outbox_id = $1",
+        [outboxId],
+      );
+      expect(beforeClaims.rows).toEqual(afterClaims.rows);
+
+      const afterReceipts = await pool.query(
+        "SELECT * FROM ops.phase1_push_delivery_receipts WHERE outbox_id = $1",
+        [outboxId],
+      );
+      expect(beforeReceipts.rows).toEqual(afterReceipts.rows);
+
+      const afterAudit = await pool.query(
+        "SELECT * FROM ops.phase1_push_delivery_audit_log WHERE outbox_id = $1",
+        [outboxId],
+      );
+      expect(beforeAudit.rows).toEqual(afterAudit.rows);
     });
   },
 );
