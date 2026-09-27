@@ -886,8 +886,10 @@ export function TenantBookingCreateForm({
   const dropoffAddress = dropoffPayload?.address ?? "";
   const dropoffLat = coordinateToDraftString(dropoffPayload?.lat);
   const dropoffLng = coordinateToDraftString(dropoffPayload?.lng);
-  const pickupManualOverrideReason = pickupPayload?.manualOverrideReason;
-  const dropoffManualOverrideReason = dropoffPayload?.manualOverrideReason;
+  const pickupManualOverrideReason =
+    pickupPayload?.manualOverrideReason ?? null;
+  const dropoffManualOverrideReason =
+    dropoffPayload?.manualOverrideReason ?? null;
   const draft: TenantBookingDraftValues = {
     businessDispatchSubtype,
     selectedPassengerId,
