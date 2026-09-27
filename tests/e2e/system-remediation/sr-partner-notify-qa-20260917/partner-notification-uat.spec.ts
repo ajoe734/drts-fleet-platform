@@ -1,7 +1,7 @@
 import { test, expect, type APIRequestContext } from "@playwright/test";
 import * as http from "node:http";
 import { randomUUID } from "node:crypto";
-import { tenantStepUpHeaders } from "../sr-qa-tenant-001/http-boundary";
+
 
 function required(name: string): string {
   const value = process.env[name]?.trim();
@@ -101,17 +101,19 @@ test.describe("SR-PARTNER-NOTIFY-QA-20260917 E2E Cases", () => {
     };
     if (tenant) headers["x-tenant-id"] = tenant;
     if (method === "POST" || method === "PUT") {
-      Object.assign(
-        headers,
-        await tenantStepUpHeaders({
-          client,
-          origin: baseURL.origin,
-          token,
-          tenant: tenant ?? "",
-          apiPath: path,
-          method,
-        }),
-      );
+      const stepUpRes = await client.post(`${baseURL.origin}/api/identity/step-up-proofs`, {
+        headers: {
+          Authorization: `Bearer ${token}`,
+          ...(tenant ? { "x-tenant-id": tenant } : {}),
+        },
+        data: { method, path: `/${path}` },
+      });
+      if (stepUpRes.status() === 201) {
+        const envelope = await stepUpRes.json();
+        if (envelope.data?.step_up_reference) {
+          headers["x-drts-step-up-reference"] = envelope.data.step_up_reference;
+        }
+      }
     }
     return client.fetch(url, { method, headers, data: data ?? undefined });
   };
@@ -122,7 +124,7 @@ test.describe("SR-PARTNER-NOTIFY-QA-20260917 E2E Cases", () => {
       secret: "whsec_e2e_verified_signing_secret_999",
       events: ["passenger.assignment_disclosure_ready.v1"],
     });
-    expect(whRes.status()).toBe(201);
+    if(whRes.status() !== 201) { console.error(await whRes.text()); } expect(whRes.status()).toBe(201);
     const whData = await whRes.json();
     const webhookId = whData.data.webhook_id;
 
@@ -185,7 +187,7 @@ test.describe("SR-PARTNER-NOTIFY-QA-20260917 E2E Cases", () => {
       secret: "whsec_e2e_verified_signing_secret_999",
       events: ["passenger.assignment_disclosure_ready.v1"],
     });
-    expect(whRes.status()).toBe(201);
+    if(whRes.status() !== 201) { console.error(await whRes.text()); } expect(whRes.status()).toBe(201);
     const webhookId = (await whRes.json()).data.webhook_id;
 
     await apiCall(tenantA, tokenPlatform, "PUT", `api/platform-admin/partner-entries/${entrySlug}/notification-binding`, {
@@ -222,7 +224,7 @@ test.describe("SR-PARTNER-NOTIFY-QA-20260917 E2E Cases", () => {
       secret: "whsec_e2e_verified_signing_secret_999",
       events: ["passenger.assignment_disclosure_ready.v1"],
     });
-    expect(whRes.status()).toBe(201);
+    if(whRes.status() !== 201) { console.error(await whRes.text()); } expect(whRes.status()).toBe(201);
     const webhookId = (await whRes.json()).data.webhook_id;
     await apiCall(tenantA, tokenPlatform, "PUT", `api/platform-admin/partner-entries/${entrySlug}/notification-binding`, {
       webhookId,
