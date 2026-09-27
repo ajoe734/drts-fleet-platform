@@ -202,6 +202,12 @@ class TenantUatAcceptanceWorkflowStructureTests(unittest.TestCase):
     def test_runs_partner_notify_specs_and_unit_regression_suite(self) -> None:
         self.assertIn("tests/e2e/system-remediation/sr-partner-notify-qa-20260917", self.text)
         self.assertIn("tests/unit/system-remediation/sr-partner-notify-qa-20260917/", self.text)
+        # A known partner/UI failure must not prevent the independent original
+        # tenant/webhook restart evidence from running in the same job.
+        self.assertLess(
+            self.text.index("id: c115_restart_readback"),
+            self.text.index("id: partner_notify_e2e"),
+        )
 
     def test_stops_the_background_server_unconditionally(self) -> None:
         stop_block = self.text.split("Stop background API server", 1)[1][:400]

@@ -1,4 +1,5 @@
 import { test, expect } from "@playwright/test";
+import type { PartnerChannelEntryRecord } from "@drts/contracts";
 import { PartnerFixture } from "./partner-fixture";
 
 test.describe("SR-PARTNER-NOTIFY-QA-20260917: E2E Partner Notification Delivery & Fault Isolation", () => {
@@ -58,6 +59,58 @@ test.describe("SR-PARTNER-NOTIFY-QA-20260917: E2E Partner Notification Delivery 
     ).rows;
     expect(receipts).toEqual([{ provider_message_ref: row.receipt_id }]);
     return row;
+  };
+
+  const noAcknowledgedReceipt = async (outboxId: string) => {
+    const receipts = await fixture.db.query(
+      `SELECT provider_message_ref FROM ops.phase1_push_delivery_receipts
+       WHERE outbox_id=$1 AND provider_ack_state='provider_acknowledged'`,
+      [outboxId],
+    );
+    expect(receipts.rows).toHaveLength(0);
+  };
+
+  const refusedWithoutSending = async (
+    outboxId: string,
+    failureReason: string,
+    retryDisposition: string,
+  ) => {
+    const row = await fixture.settled(outboxId);
+    expect(row).toMatchObject({
+      status: "failed",
+      attempt_count: 1,
+      claim_state: "released",
+      delivered_at: null,
+      receipt_id: null,
+    });
+    expect(row.payload.partnerNotification).toMatchObject({
+      failureReason,
+      retryDisposition,
+      deliveryStage: null,
+      receiptId: null,
+      downstreamStatus: "unknown",
+    });
+    expect(received(outboxId)).toHaveLength(0);
+    expect(
+      (await fixture.receiver.records()).filter(
+        (r) => r.notificationId === outboxId,
+      ),
+    ).toHaveLength(0);
+    await noAcknowledgedReceipt(outboxId);
+    // Observe multiple real worker polls, including durable attempt count.
+    await new Promise((resolve) => setTimeout(resolve, 2_200));
+    expect((await fixture.outcome(outboxId))!.attempt_count).toBe(1);
+    expect(received(outboxId)).toHaveLength(0);
+    await test.info().attach(`no-send-${failureReason}`, {
+      contentType: "application/json",
+      body: JSON.stringify({
+        candidate_sha: process.env.CANDIDATE_SHA,
+        outboxId,
+        status: row.status,
+        metadata: row.payload.partnerNotification,
+        receiverRequests: 0,
+      }),
+    });
   };
 
   test("C201 E2E: Worker positive delivery path", async () => {
@@ -223,6 +276,213 @@ test.describe("SR-PARTNER-NOTIFY-QA-20260917: E2E Partner Notification Delivery 
           partner_entry_slug: entry.entry.entrySlug,
           recipient: { partner_user_ref: entry.partnerUserRef },
         },
+      });
+    }
+  });
+
+  test("C209 E2E: Entry ownership change refuses historical delivery without sending", async () => {
+    const entry = fixture.entries[0]!;
+    const tenantB = fixture.entries[2]!.entry.tenantId;
+    const platform = process.env.DRTS_UAT_TOKEN_PLATFORM!;
+    const orderId = await fixture.createRide(entry);
+    const due = Date.now() + 10_000;
+    // Queue while the original owner is still authoritative. Scheduling is
+    // part of the synthetic event; no claim/route/context SQL is rewritten.
+    const outboxId = await fixture.enqueue(orderId, "partner", {
+      nextAttemptAt: new Date(due).toISOString(),
+    });
+    expect(await fixture.outcome(outboxId)).toMatchObject({
+      status: "pending",
+      attempt_count: 0,
+    });
+    try {
+      const moved = await fixture.call<PartnerChannelEntryRecord>(
+        `platform-admin/partner-entries/${entry.entry.entrySlug}`,
+        platform,
+        "POST",
+        { tenantId: tenantB },
+      );
+      expect(moved.tenantId).toBe(tenantB);
+      expect(
+        Date.now(),
+        "ownership change completed before the event became due",
+      ).toBeLessThan(due);
+      await refusedWithoutSending(outboxId, "owner_changed", "manual_only");
+      const route = (
+        await fixture.db.query(
+          "SELECT tenant_id, partner_id, entry_slug FROM mobility.phase1_order_partner_notification_routes WHERE order_id=$1",
+          [orderId],
+        )
+      ).rows[0];
+      expect(route).toEqual({
+        tenant_id: entry.entry.tenantId,
+        partner_id: entry.entry.partnerId,
+        entry_slug: entry.entry.entrySlug,
+      });
+    } finally {
+      const restored = await fixture.call<PartnerChannelEntryRecord>(
+        `platform-admin/partner-entries/${entry.entry.entrySlug}`,
+        platform,
+        "POST",
+        { tenantId: entry.entry.tenantId },
+      );
+      expect(restored.tenantId).toBe(entry.entry.tenantId);
+    }
+    // Restoring configuration must not silently release the held old event.
+    await accepted(await fixture.enqueue(await fixture.createRide(entry)));
+    expect((await fixture.outcome(outboxId))!.attempt_count).toBe(1);
+    expect(received(outboxId)).toHaveLength(0);
+  });
+
+  test("C212 E2E: HTML 200 and mismatched receipt remain manual only", async () => {
+    test.setTimeout(60_000);
+    const entry = fixture.entries[0]!;
+    const evidence = [];
+    for (const fault of [
+      "html_ack",
+      "wrong_notification",
+      "wrong_delivery",
+      "wrong_entry",
+      "missing_receipt",
+    ] as const) {
+      const orderId = await fixture.createRide(entry);
+      fixture.fault = fault;
+      const outboxId = await fixture.enqueue(orderId);
+      const row = await fixture.settled(outboxId);
+      expect(row, fault).toMatchObject({
+        status: "failed",
+        attempt_count: 1,
+        claim_state: "released",
+        delivered_at: null,
+        failure_reason: "partner_ack_invalid",
+        retry_disposition: "manual_only",
+        receipt_id: null,
+      });
+      expect(row.payload.partnerNotification).toMatchObject({
+        deliveryStage: null,
+        downstreamStatus: "unknown",
+        receiptId: null,
+      });
+      const requests = received(outboxId);
+      expect(requests).toHaveLength(1);
+      expect(requests[0]!.status).toBe(fault === "html_ack" ? 200 : 202);
+      const inbox = (await fixture.receiver.records()).filter(
+        (r) => r.notificationId === outboxId,
+      );
+      expect(inbox).toHaveLength(1);
+      expect(inbox[0]!.nativeDelivery).toBe("pending");
+      await noAcknowledgedReceipt(outboxId);
+      fixture.fault = "none";
+      await fixture.revalidateEndpoint(entry);
+      await new Promise((resolve) => setTimeout(resolve, 2_200));
+      expect((await fixture.outcome(outboxId))!.attempt_count).toBe(1);
+      expect(received(outboxId)).toHaveLength(1);
+      evidence.push({
+        fault,
+        outboxId,
+        responseStatus: requests[0]!.status,
+        responseBody: requests[0]!.responseBody,
+        metadata: row.payload.partnerNotification,
+      });
+    }
+    await accepted(await fixture.enqueue(await fixture.createRide(entry)));
+    await test.info().attach("invalid-ack-matrix", {
+      contentType: "application/json",
+      body: JSON.stringify({
+        candidate_sha: process.env.CANDIDATE_SHA,
+        evidence,
+      }),
+    });
+  });
+
+  test("C217 E2E: Expired notifications stop without sending", async () => {
+    const entry = fixture.entries[0]!;
+    const orderId = await fixture.createRide(entry);
+    const expired = await fixture.enqueue(orderId, "partner", {
+      createdAt: new Date(Date.now() - 8 * 24 * 60 * 60 * 1000).toISOString(),
+    });
+    await refusedWithoutSending(expired, "notification_expired", "terminal");
+    // The same authoritative ride still accepts a fresh event; expiry must
+    // not block the trip or its independent receipt notifications.
+    const fresh = await fixture.enqueue(orderId);
+    await accepted(fresh);
+    expect(JSON.parse(received(fresh)[0]!.rawBody).data.event_sequence).toBe(2);
+  });
+
+  test("C219 E2E: Payload excludes private driver and passenger information", async () => {
+    const entry = fixture.entries[0]!;
+    const sensitive = {
+      driverId: "private-driver-canary",
+      driverName: "private-name-canary",
+      driver: {
+        licenseNumber: "private-license-canary",
+        plate: "private-plate-canary",
+      },
+      passengerName: "private-passenger-canary",
+      phone: "private-phone-canary",
+      address: "private-address-canary",
+      room: "private-room-canary",
+      gps: { lat: 23.123456, lng: 121.123456 },
+      paymentToken: "private-payment-canary",
+      accessToken: "private-token-canary",
+      handoff: "private-handoff-canary",
+      cookie: "private-cookie-canary",
+      secret: "private-secret-canary",
+      eta: { minutes: 4, asOf: new Date().toISOString() },
+    };
+    for (const payload of [sensitive, { driver: null }]) {
+      const outboxId = await fixture.enqueue(
+        await fixture.createRide(entry),
+        "partner",
+        { payload },
+      );
+      await accepted(outboxId);
+      const row = await fixture.outcome(outboxId);
+      expect(row!.payload).toMatchObject(payload);
+      const raw = received(outboxId)[0]!.rawBody;
+      const wire = JSON.parse(raw);
+      expect(Object.keys(wire).sort()).toEqual([
+        "data",
+        "delivery_id",
+        "event",
+        "occurred_at",
+        "tenant_id",
+      ]);
+      expect(Object.keys(wire.data).sort()).toEqual([
+        "assignment_version",
+        "event_sequence",
+        "expires_at",
+        "message",
+        "navigation",
+        "notification_id",
+        "partner_entry_slug",
+        "recipient",
+        "ride_ref",
+        "schema_version",
+      ]);
+      expect(wire.data.recipient).toEqual({
+        partner_user_ref: entry.partnerUserRef,
+      });
+      expect(wire.data.navigation).toEqual({
+        type: "ride",
+        ride_ref: wire.data.ride_ref,
+      });
+      for (const forbidden of [
+        "private-",
+        "QA Fixture",
+        "0900000000",
+        "Controlled pickup",
+        "Controlled dropoff",
+        "23.123456",
+        "121.123456",
+      ])
+        expect(raw).not.toContain(forbidden);
+      await test.info().attach(`wire-allowlist-${outboxId}`, {
+        contentType: "application/json",
+        body: JSON.stringify({
+          candidate_sha: process.env.CANDIDATE_SHA,
+          wire,
+        }),
       });
     }
   });

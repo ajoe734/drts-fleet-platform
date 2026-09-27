@@ -50,6 +50,7 @@ export class PartnerFixture {
     rawBody: string;
     hash: string;
     status: number;
+    responseBody: string;
   }[] = [];
   readonly db: Database;
   receiver!: ControlledReceiver;
@@ -59,7 +60,15 @@ export class PartnerFixture {
   private url = "";
   private readonly timers = new Set<ReturnType<typeof setTimeout>>();
   // Faults only apply to real passenger events, never governance setup.
-  fault: "none" | "timeout" | "invalid_ack" = "none";
+  fault:
+    | "none"
+    | "timeout"
+    | "invalid_ack"
+    | "html_ack"
+    | "wrong_notification"
+    | "wrong_delivery"
+    | "wrong_entry"
+    | "missing_receipt" = "none";
 
   constructor() {
     if (
@@ -147,22 +156,53 @@ export class PartnerFixture {
           const passenger =
             event.startsWith("passenger.") &&
             event !== "passenger.notification.test.v1";
+          const fault = passenger ? this.fault : "none";
+          let status = reply.status;
+          let body = reply.body;
+          if (fault === "invalid_ack") {
+            status = 204;
+            body = "";
+          } else if (fault === "html_ack") {
+            status = 200;
+            body = "<html><body>Accepted</body></html>";
+          } else if (
+            fault.startsWith("wrong_") ||
+            fault === "missing_receipt"
+          ) {
+            // Corrupt only the external response AFTER a valid signed request
+            // has been durably accepted. The DRTS ack validator stays real.
+            const ack = JSON.parse(body);
+            const key = {
+              wrong_notification: "notification_id",
+              wrong_delivery: "delivery_id",
+              wrong_entry: "partner_entry_slug",
+              missing_receipt: "receipt_id",
+            }[
+              fault as
+                | "wrong_notification"
+                | "wrong_delivery"
+                | "wrong_entry"
+                | "missing_receipt"
+            ];
+            if (fault === "missing_receipt") delete ack[key];
+            else ack[key] = `mismatched-${randomUUID()}`;
+            body = JSON.stringify(ack);
+          }
           this.requests.push({
             event,
             rawBody: raw.toString("utf8"),
             hash: createHash("sha256").update(raw).digest("hex"),
-            status: reply.status,
+            status,
+            responseBody: body,
           });
           const finish = () => {
-            response.writeHead(
-              passenger && this.fault === "invalid_ack" ? 204 : reply.status,
-              { "Content-Type": "application/json" },
-            );
-            response.end(
-              passenger && this.fault === "invalid_ack" ? "" : reply.body,
-            );
+            response.writeHead(status, {
+              "Content-Type":
+                fault === "html_ack" ? "text/html" : "application/json",
+            });
+            response.end(body);
           };
-          if (passenger && this.fault === "timeout") {
+          if (fault === "timeout") {
             // Production ack deadline is 10 seconds, including response body.
             const timer = setTimeout(() => {
               this.timers.delete(timer);
@@ -472,6 +512,11 @@ export class PartnerFixture {
   async enqueue(
     orderId: string,
     mode: "partner" | "missing_route" = "partner",
+    event: {
+      createdAt?: string;
+      nextAttemptAt?: string;
+      payload?: Record<string, unknown>;
+    } = {},
   ) {
     const { stdout } = await run(
       "./apps/api/node_modules/.bin/tsx",
@@ -479,6 +524,7 @@ export class PartnerFixture {
         "tests/e2e/system-remediation/sr-partner-notify-qa-20260917/enqueue-notification.ts",
         orderId,
         mode,
+        JSON.stringify(event),
       ],
       { timeout: 20_000 },
     );

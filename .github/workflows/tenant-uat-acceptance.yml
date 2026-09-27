@@ -304,30 +304,6 @@ jobs:
             cp .artifacts/tenant-uat-acceptance/system-remediation-report.json test-results/system-remediation-report.json
           fi
 
-      - name: Run partner notify E2E acceptance specs
-        id: partner_notify_e2e
-        env:
-          PLAYWRIGHT_JSON_OUTPUT_FILE: "test-results/partner-notify-e2e-report.json"
-        run: |
-          set -o pipefail
-          python3 tests/unit/system-remediation/sr-partner-notify-qa-20260917/run-reported.py test-results/partner-notify-e2e-report.json \
-            pnpm exec playwright test \
-            -c playwright.system-remediation.config.ts --reporter=list,json \
-            --output test-results/partner-notify-artifacts \
-            tests/e2e/system-remediation/sr-partner-notify-qa-20260917 --workers=1 --trace=retain-on-failure \
-            2>&1 | tee -a .artifacts/tenant-uat-acceptance/execution-log.txt
-
-      - name: Run partner notify unit regression suite
-        id: partner_notify_unit
-        run: |
-          set -o pipefail
-          python3 tests/unit/system-remediation/sr-partner-notify-qa-20260917/run-reported.py .artifacts/tenant-uat-acceptance/partner-notify-unit-report.json \
-            pnpm exec vitest run \
-            tests/unit/system-remediation/sr-partner-notify-qa-20260917/ \
-            --reporter=default --reporter=json \
-            --outputFile.json=.artifacts/tenant-uat-acceptance/partner-notify-unit-report.json \
-            2>&1 | tee -a .artifacts/tenant-uat-acceptance/execution-log.txt
-
       - name: Run C113-C115 pre-restart hosted acceptance (ledger audit, geo provider, C115 seed)
         id: c113_c115_acceptance
         env:
@@ -383,6 +359,31 @@ jobs:
         run: |
           set -o pipefail
           ./apps/api/node_modules/.bin/tsx --tsconfig apps/api/tsconfig.json tests/e2e/system-remediation/sr-qa-webhook-001/c115-restart-readback.ts \
+            2>&1 | tee -a .artifacts/tenant-uat-acceptance/execution-log.txt
+
+      # Finish the existing tenant/webhook restart gates before partner faults.
+      - name: Run partner notify E2E acceptance specs
+        id: partner_notify_e2e
+        env:
+          PLAYWRIGHT_JSON_OUTPUT_FILE: "test-results/partner-notify-e2e-report.json"
+        run: |
+          set -o pipefail
+          python3 tests/unit/system-remediation/sr-partner-notify-qa-20260917/run-reported.py test-results/partner-notify-e2e-report.json \
+            pnpm exec playwright test \
+            -c playwright.system-remediation.config.ts --reporter=list,json \
+            --output test-results/partner-notify-artifacts \
+            tests/e2e/system-remediation/sr-partner-notify-qa-20260917 --workers=1 --trace=retain-on-failure \
+            2>&1 | tee -a .artifacts/tenant-uat-acceptance/execution-log.txt
+
+      - name: Run partner notify unit regression suite
+        id: partner_notify_unit
+        run: |
+          set -o pipefail
+          python3 tests/unit/system-remediation/sr-partner-notify-qa-20260917/run-reported.py .artifacts/tenant-uat-acceptance/partner-notify-unit-report.json \
+            pnpm exec vitest run \
+            tests/unit/system-remediation/sr-partner-notify-qa-20260917/ \
+            --reporter=default --reporter=json \
+            --outputFile.json=.artifacts/tenant-uat-acceptance/partner-notify-unit-report.json \
             2>&1 | tee -a .artifacts/tenant-uat-acceptance/execution-log.txt
 
       - name: Stop background API server

@@ -17,7 +17,16 @@ async function main() {
     throw new Error(
       "Notification fixtures require the authorized hosted UAT job",
     );
-  const [orderId, mode] = process.argv.slice(2);
+  const [orderId, mode, eventJson = "{}"] = process.argv.slice(2);
+  const event = JSON.parse(eventJson) as {
+    createdAt?: string;
+    nextAttemptAt?: string;
+    payload?: Record<string, unknown>;
+  };
+  if (event.createdAt && !Number.isFinite(Date.parse(event.createdAt)))
+    throw new Error("Invalid synthetic event timestamp");
+  if (event.nextAttemptAt && !Number.isFinite(Date.parse(event.nextAttemptAt)))
+    throw new Error("Invalid synthetic event schedule");
   if (!orderId || !["partner", "missing_route"].includes(mode ?? ""))
     throw new Error("Expected order ID and partner/missing_route mode");
   const apiRequire = createRequire(path.resolve("apps/api/package.json"));
@@ -58,11 +67,11 @@ async function main() {
             resolvePassengerSubjectRef(order.passenger),
           eventType: "receipt_ready",
           assignmentVersion: null,
-          payload: {},
+          payload: event.payload ?? {},
           status: "pending",
           attemptCount: 0,
-          nextAttemptAt: now,
-          createdAt: now,
+          nextAttemptAt: event.nextAttemptAt ?? now,
+          createdAt: event.createdAt ?? now,
           deliveredAt: null,
         },
       ],
