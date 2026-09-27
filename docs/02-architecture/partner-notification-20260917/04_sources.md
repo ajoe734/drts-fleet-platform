@@ -16,10 +16,10 @@
 | entry移轉與link撤銷                              | 舊消息不移轉；owner_changed/manual_only與recipient_revoked/terminal；零外送                                    | 0638617e C209/C210 passed；C210注入撤銷狀態，非撤銷API驗收 |
 | endpoint停用、secret輪替重測、未配置availability | 明確configuration_blocked；測試就緒後才enable                                                                  | 8c23e9a0 C211/C220 passed；full AppModule route readiness false→true |
 | ack後DB失敗、lease/fence、兩worker競爭           | durable transaction、舊fence不可commit、dedupe且單retry owner                                                  | 3f346cc13 C214/C215/C216 passed；真rollback／自然lease／兩process／API restart |
-| maxAttempts=5與expiry                            | 總共五次、最多四次retry、超expiresAt停止                                                                       | 3f346cc13 C216五次上限passed；C217共享endpoint停用的setup已修，7f待驗                 |
+| maxAttempts=5與expiry                            | 總共五次、最多四次retry、超expiresAt停止                                                                       | 7f0032c5 C216與C217 passed；6f後段fixture auth過期，84c修復待驗                 |
 | 舊ETA、取消後舊到場、payload confidentiality     | superseded/obsolete terminal；缺driver情報不洩漏敏感資料                                                       | 8c23e9a0 C219 passed；C218正式repository SQL42P08，後續未驗 |
 | admin readiness/stage/failure與手動retry         | C205；真route/auth、點control、觀察request及durable readback                                                   | C205真browser fail：日期DTO為{}，React崩潰；picker400  |
-| notification-navigation                          | fresh single-use handoff、HttpOnly session、returnTo、最新ride readback、錯entry/subject/logout/account switch | C221–C224已實作；ae4b1d69 setup失敗，7f0032c5 hosted待驗                                   |
+| notification-navigation                          | fresh single-use handoff、HttpOnly session、returnTo、最新ride readback、錯entry/subject/logout/account switch | 6f C221/C223/C224 passed；C222真HTTP確認R12假success                                   |
 | 一般tenant webhook C111–C115與restart            | 獨立既有gate不可由partner數量取代                                                                              | 8039453e既有reports passed；tenant restart verified15 |
 
 ## Acceptance Matrix
@@ -204,9 +204,17 @@ C223明列外部partner logout清cookie邊界（不是原生整合或server cook
 C224含三種consumer互相replay與direct API consume、returnTo與自然TTL。
 NAV trace關閉以免上傳handoff/cookie，保留實際截圖與遮罩證據。
 ae4b1d69首次hosted因Secure-cookie origin及setup429失敗；7f0032c5修為localhost並尊重throttle、
-恢復C216耗盡後endpoint readiness，完整run36349279855 **執行中**，不能預填pass。
+恢復C216耗盡後endpoint readiness；run36349279855 completed failure，**20pass/4fail/0skip**，
+C216/C217/C221/C223 passed，C222產品history假success、C224限流429、C205/R5及C218/R10失敗。
 
 R12 source：`app/api/referral/history/[orderId]/route.ts:GET` 對上游授權history未包含的ID
 回造200/CONFIRMED。原handler+實際NextResponse的非serving probe在196f與ae4b均重現；
 只stub外部授權history，不mock GET，不宣稱真實他人資料洩漏。修復scope/必要回歸與各SHA/run/
 artifact/hash、全部未解findings／三項acceptance **NOT MET** 逐項沿用原UAT「修復單元7」。
+
+6f3a1e36 [run36350774384](https://github.com/ajoe734/drts-fleet-platform/actions/runs/36350774384)
+completed failure，**18pass/4fail/2skip**。C224在簽發前自然等61秒，完整replay/ReturnTo/120s TTL
+passed183.268秒；C216最後cleanup遭過舊step-up拒絕，後續JWT_INVALID使C217 setup fail，C219/C205
+skipped。不能跨SHA補成全pass。84c5d9e3沿原seed可信認證邊界，以正式JWT服務先驗舊credential與
+durable authority，再建同principal/roles/scopes的fresh session；不改正式15m/10min期限。
+新run36352402864執行中。R8增Codex6f錯誤subject，現18個失敗；保留refs等待history recovery。

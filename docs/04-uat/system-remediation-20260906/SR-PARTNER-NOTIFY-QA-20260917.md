@@ -3,9 +3,10 @@
 Owner: Codex（2026-09-27 Supervisor 直接交接）；Reviewer: Codex2。
 狀態：修復中，尚無新的 review candidate。交接 checkpoint 為
 `91b1d4ac122b1373ac7beb05df902cb991b62232`，沿用既有實作與發布歷史。
-最新程式 checkpoint `7f0032c512bcae1f59028f6217c5fb692c93e5dd` 的 hosted run36349279855 執行中。
-單元7已讀完的3f346cc13新增C216通過（真五次重試／API重啟）；17 passed／3 failed／0 skipped。
-NAV首次執行由Secure-cookie origin／429 setup阻塞，修正後待驗；產品與publication blockers均保留，詳「修復單元7」。
+最新程式 checkpoint `84c5d9e3cf499863de0b2838892508b3972e8093` 的 hosted run36352402864 執行中。
+前輪6f3a1e36：C224完整通過，但長時間等待導致fixture認證過期；18 passed／4 failed／2 skipped。
+7f0032c5為20 passed／4 failed／0 skipped，C216/C217/C221/C223通過；C222確認新產品R12。
+全部24案已實作；產品與publication blockers均保留，詳「修復單元7」。
 
 ## 證據規則與撤回
 
@@ -707,6 +708,10 @@ QA E2E scoped ESLint與 `git diff --check` exit0；`python3 -m unittest
 Playwright `--list` **24** 案，只代表collection，沒有本機runtime／DB／browser。
 四dependency mergeSHA均是ancestor；本輪新commits trailers合規，普通push、未force/rebase/amend。
 
+以上合規紀錄截至676b3359。後續6f3a1e36的三個trailers存在，但Codex誤用`test(TASK-ID)`
+subject，被現有regex拒絕；R8因此是17個繼承失敗加本輪1個新失敗，**共18**。
+不以新增正確commit消除祖先失敗，不改寫已發布歷史。84c5d9e3單commit格式檢查exit0。
+
 既有R5日期DTO/picker/translation、R10 snapshot SQL42P08、R11 entry持久化race，及
 R9 transport/security-tests scope、R8 preserving-refs history recovery仍需Supervisor排產品修復。
 這些finding保留原單元定位，不以新增案例替代修復。
@@ -718,8 +723,10 @@ R9 transport/security-tests scope、R8 preserving-refs history recovery仍需Sup
 | `3f346cc13944407570bb22df51ffb3896ccaa8d2` | [36347973557/108700947475](https://github.com/ajoe734/drts-fleet-platform/actions/runs/36347973557/job/108700947475) completed failure | **17 pass / 3 fail (C205/C218/C217) / 0 skip**；C216 **457.856秒 passed**；當時NAV四案尚未包含 | `10941279820` / `ba4e1a1e7d4b0715f9105ed1a5cc40385cc83f2ff63ff34810b50700dc725e84` |
 | `ae4b1d690733128bd6f0f8a14b654946622517f8` | [36348414924/108702186746](https://github.com/ajoe734/drts-fleet-platform/actions/runs/36348414924/job/108702186746) completed failure | **0 pass / 5 fail / 19 not-run**；NAV consent400、後续setup429 | `10941537383` / `3bc3738d41c78c28672f50d8fb5328744fa6cc6a548e21ec7094f3e86c1db67a` |
 | `a1395e634ecfab61de89ac4e73637de6c98d9528` | [36348975121](https://github.com/ajoe734/drts-fleet-platform/actions/runs/36348975121) completed cancelled | 發現C216污染下一fixture後取消，實際停於webhook unit step；API/browser未啟動，run-status **not_run** | `10941985632` / `8a346480638a1123b79c44b6e297a4592f6291f9d230602b9d39c006e20d5f37` |
+| `7f0032c512bcae1f59028f6217c5fb692c93e5dd` | [36349279855/108704646111](https://github.com/ajoe734/drts-fleet-platform/actions/runs/36349279855/job/108704646111) completed failure | **20 pass / 4 fail (C222/C224/C218/C205) / 0 skip**；C216 endpoint cleanup及C217通過；C221/C223真browser通過；C224 direct replay遇429，未到TTL | `10941713690` / `066a974df4c3c1ac8bcbf8969933eaa76f767365f5d7777fa3a0822f10bebc39` |
+| `6f3a1e3659417fcafe1ed8566a13f3c0f87654bf` | [36350774384/108708902951](https://github.com/ajoe734/drts-fleet-platform/actions/runs/36350774384/job/108708902951) completed failure | **18 pass / 4 fail / 2 skip**；C224 **183.268秒 passed**；C222/R12、C218/R10 failed；C216清理step-up403、C217 setup JWT_INVALID，C219/C205 skipped | `10942523183` / `8a3f15a73ab39e4e846d065997d3f611c7b6fa46a3fc6954e6cb7d3150a902d1` |
 
-3f346cc13、ae4b1d69各自同SHA的tenant291（PG21）、webhook34、tenantHTTP10、webhookE2E1，
+3f346cc13、ae4b1d69、7f0032c5、6f3a1e36各自同SHA的tenant291（PG21）、webhook34、tenantHTTP10、webhookE2E1，
 及C111–C115/restart verified15均passed；dedicated partner-unit step skipped，strict gate failed。
 Cancelled a139僅已完成tenant291，不能借前述runtime綠燈。所有ZIP與report execution SHA均讀回核對。
 
@@ -728,21 +735,51 @@ Cancelled a139僅已完成tenant291，不能借前述runtime綠燈。所有ZIP�
 同hash `aa829589b2b4130337bd316366b5b58823093cd1166e3771de818b285f43e4ef`。
 前四次automatic，第五次terminal；兩次重啟保留outbox/delivery identity，沒有第六次外送。
 C217後續失敗的原因是共享endpoint按治理規則停用；7f0032c5透過正式endpoint/binding重測恢復fixture，
-再確認終態outbox與五次receiver count不變。此修正的完整同SHA runtime仍在run36349279855等待結果。
+再確認終態outbox與五次receiver count不變。7f0032c5的C216 **458.264秒 passed**，C217亦passed。
+
+### NAV throttle與長時間fixture認證的相鄰結果
+
+7f的C222附件`navigation-cross-scope`已讀：四種wrong entry/subject/key/tenant resolve均403；
+三種consume為403/400/400且未消耗foreign handoff；receipt讀回400/ok=false，history卻200/ok=true，
+回造foreign order的成功狀態。**R12已有真hosted HTTP重現**，不只前述非serving probe。
+C221實際取消行程與最新頁面、C223其他帳戶行程截圖已讀；仍保留清cookie與native邊界。
+
+6f3a1e36為C224在簽發handoff前自然等待61秒，尊重正式`OPEN_ROUTE_RATE_LIMIT`的30/min。
+三次positive consume，各跨GET/JSON/form replay為403/400/400，受保護direct consumer必須409；
+same-origin returnTo保留、external拒絕、自然120秒到期後不消耗ledger均通過。
+沒有把429當replay防護，也沒有調整正式TTL或limit。
+
+6f後段失敗是fixture生命週期：`JwtAuthService.SERVICE_EXPIRES_IN=15m`，step-up policy
+freshness=10min；先前NAV自然等待讓共用seed credential變舊。C216已完成五次／兩次重啟的核心
+斷言並產生附件，但最後正式endpoint重測的step-up403使**整案failed**；下一worker setup的
+platform JWT已失效，C217 beforeAll失敗，C219/C205未執行。不能借7f結果補成6f全pass。
+
+84c5d9e3新增hosted-only `fixture-sessions.ts`，沿既有seed的可信測試認證邊界：compiled
+full AppModule的`verifyAccessToken`先檢查原credential及durable authority有效，再由正式
+`issueSessionToken`為同一principal/roles/scopes建立新session，重新驗durable validity。
+只在fixture開始、C216開始前呼叫；不延長舊session、不接受過期/revoked authority、不改JWT／
+step-up／通知TTL。新secret只經0600暫存檔回傳並刪除，不進CLI參數/stdout/report。
+這不是產品refresh endpoint或MFA登入驗收；原API所有認證與step-up guard仍執行。
+本機tsc／scoped lint／collection24／84c單commit check均exit0；run36352402864待讀。
 
 ### 單元7 finding／required_acceptance disposition（待最後run）
 
 | Finding／驗收 | source／修改 | 舊→新／證據 | 尚未满足 |
 |---|---|---|---|
-| R1 C216 | `PartnerNotificationWorker`、claim/context/outcome、tenant單attempt façade；QA restart helper | 196f缺案→3f真五次/重啟pass；7f修endpoint cleanup待重驗 | C218產品SQL、完整最終SHA仍未通過 |
-| R5 C221–C224 | `NavigationFixture`、`navigation-uat.spec.ts`；真BFF/session/PG、C221取消control | 196f缺案→ae已執行但setup阻塞→7f localhost/throttle fixture待驗 | 完整NAV、既有C205產品DTO/picker/translation |
-| R12 fabricated history | 原BFF `GET`、正式過濾history，上述最小probe | 196f/ae actual-handler positive own + foreign假success同現 | Supervisor agy child/scope；尚無可通過C222的產品修復 |
-| R8/R9/R10/R11 | 原單元的精確定位、caller與修復邊界保留 | 新commits合規；CI仍17歷史trailer及transport lint；R10 hosted再現 | preserving-refs history recovery、產品修復scope/child |
+| R1 C216 | `PartnerNotificationWorker`、claim/context/outcome、tenant單attempt façade；QA restart helper | 196f缺案→3f五次/重啟pass→7f cleanup/C217 pass→6f stale fixture auth失敗 | 84c認證準備待驗；C218產品SQL未修 |
+| R5 C221–C224 | `NavigationFixture`、`navigation-uat.spec.ts`；真BFF/session/PG、C221取消control | 7f C221/C223 passed；6f C224完整passed；C222產品R12 failed | 既有C205產品DTO/picker/translation；完整同SHA未通過 |
+| R12 fabricated history | 原BFF `GET`、正式過濾history，上述最小probe | 7f/6f真HTTP：foreign receipt400，history200/ok=true | Supervisor agy child/scope；尚無可通過C222的產品修復 |
+| R8/R9/R10/R11 | 原單元的精確定位、caller與修復邊界保留 | R8現18個失敗含Codex新6f subject；scope外transport lint；R10 hosted再現 | preserving-refs history recovery、產品修復scope/child |
 | `integrated_controlled_receiver_negative_matrix_same_sha` | SD14全24案／manifest／原gates | **NOT MET** | C218產品bug與最終整合run |
-| `navigation_and_admin_ui_hosted_real_runtime_evidence` | NAV/管理UI真runtime | **NOT MET** | C205/R5、C222/R12、NAV新run未結束 |
+| `navigation_and_admin_ui_hosted_real_runtime_evidence` | NAV/管理UI真runtime | **NOT MET** | C205/R5、C222/R12、84c整合run未結束 |
 | `existing_webhook_tenant_gates_preserved_and_live_not_claimed` | 原獨立tenant/webhook/restart gate與A/B/C邊界 | **NOT MET**；上述既有gate有逐SHA正向證據但完整run未過 | strict gate與未解R9；A未放行，B/C仍SR-LIVE-PUSH-001 |
 
 CI36347968917／36348413247／36348971044／36349265466均completed failure，讀過log，
 同17歷史commits與scope外transport no-require-imports。中途8621的CI36348320920 completed cancelled。
 Integration36347968868／36348320921／36348413295／36348971038／36349265476均completed success，
 主要product jobs skipped，不能稱產品回歸通過。尚未handoff、review/merge或記錄三項acceptance。
+
+676b文件CI36349684853 completed failure/read（17 inherited＋transport lint），integration36349684827
+completed success/main jobs skipped。6f CI36350755940 completed failure/read（**18** subject/trailer
+＋transport lint），integration36350755933 completed success/main jobs skipped。新84c CI／hosted待讀；
+不改寫先前失敗或把partial/assertion附件當整案通過。
