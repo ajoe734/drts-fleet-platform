@@ -489,7 +489,7 @@ describe("PartnerNotificationPanel", () => {
     mockClient.getPartnerEntryNotificationBinding.mockRejectedValueOnce(
       Object.assign(new Error("Forbidden"), { statusCode: 403 }),
     );
-    const { rerender } = render(
+    const { rerender, unmount } = render(
       <PartnerNotificationPanel
         entrySlug="test-entry"
         tenantId="test-tenant"

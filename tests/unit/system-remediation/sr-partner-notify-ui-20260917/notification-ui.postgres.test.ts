@@ -777,7 +777,7 @@ describe.skipIf(!testDbUrl)(
           > => ({
             kind: "accepted",
             ack: {
-              notificationId: (command.wirePayload as any).data?.notificationId || "ack-test",
+              notificationId: (command.wirePayload.event === "passenger.notification.test.v1" ? (command.wirePayload as import("@drts/contracts").PartnerPassengerNotificationTestWirePayload).data.notificationId : (command.wirePayload as import("@drts/contracts").PartnerPassengerNotificationWirePayload).data.notificationId),
               deliveryId: command.wirePayload.deliveryId,
               partnerEntrySlug: missingBindingSlug,
               status: "accepted",
@@ -830,10 +830,10 @@ describe.skipIf(!testDbUrl)(
         const testCommand = dispatchSpy.mock.calls.find(
           (c: any[]) =>
             c[0].wirePayload.event === "passenger.notification.test.v1",
-        )?.[0] as any;
+        )?.[0] as import("../../../../apps/api/src/modules/tenant-partner/tenant-partner.service").PartnerNotificationDispatchAttemptCommand;
         expect(testCommand).toBeDefined();
-        expect(testCommand.wirePayload.data.schemaVersion).toBe("1.0");
-        expect(testCommand.wirePayload.data.notificationId).toBeDefined();
+        expect((testCommand.wirePayload as import("@drts/contracts").PartnerPassengerNotificationTestWirePayload).data.schemaVersion).toBe("1.0");
+        expect((testCommand.wirePayload as import("@drts/contracts").PartnerPassengerNotificationTestWirePayload).data.notificationId).toBeDefined();
 
         // Assert production notification contract
         const prodCommand = dispatchSpy.mock.calls.find(
@@ -899,7 +899,7 @@ describe.skipIf(!testDbUrl)(
 
         expect(dRows[0].delivery_stage).toBe("partner_accepted");
         expect(dRows[0].entry_slug).toBe(missingBindingSlug);
-        expect(Number(dRows[0].event_sequence)).toBe((prodCommand.wirePayload as any).data.eventSequence);
+        expect(Number(dRows[0].event_sequence)).toBe((prodCommand.wirePayload as import("@drts/contracts").PartnerPassengerNotificationWirePayload).data.eventSequence);
         expect(dRows[0].downstream_status).toBe("unknown");
         
         // Identity matching (context receipt + provider_message_ref)
