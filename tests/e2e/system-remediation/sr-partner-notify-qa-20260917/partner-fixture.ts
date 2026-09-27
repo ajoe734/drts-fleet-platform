@@ -88,7 +88,9 @@ export class PartnerFixture {
       ...(token ? { Authorization: `Bearer ${token}` } : {}),
       ...(tenant ? { "x-tenant-id": tenant } : {}),
     };
-    if (method !== "GET" && token === process.env.DRTS_UAT_TOKEN_PLATFORM) {
+    // The authoritative policy also gates tenant webhook creation/test/update.
+    // Let it decide whether this exact action/session requires a proof.
+    if (method !== "GET" && token) {
       const proof = await fetch(`${origin}/api/identity/step-up-proofs`, {
         method: "POST",
         headers: { ...headers, "Content-Type": "application/json" },
