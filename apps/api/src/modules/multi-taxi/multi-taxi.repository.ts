@@ -1808,7 +1808,14 @@ export class MultiTaxiRepository {
     );
 
     return {
-      rows: result.rows,
+      rows: result.rows.map((row: any) => ({
+        ...row,
+        createdAt: row.createdAt ? this.toIso(row.createdAt) : null,
+        deliveredAt: row.deliveredAt ? this.toIso(row.deliveredAt) : null,
+        expiresAt: row.expiresAt ? this.toIso(row.expiresAt) : null,
+        nextAttemptAt: row.nextAttemptAt ? this.toIso(row.nextAttemptAt) : null,
+        leaseExpiresAt: row.leaseExpiresAt ? this.toIso(row.leaseExpiresAt) : null,
+      })),
       total: parseInt(countResult.rows[0]?.cnt || "0", 10),
     };
   }
