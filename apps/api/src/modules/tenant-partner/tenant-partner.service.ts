@@ -4877,7 +4877,7 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
     );
   }
 
-  createPlatformPartnerEntry(
+  async createPlatformPartnerEntry(
     command: CreatePartnerChannelEntryCommand,
     requestId?: string,
   ) {
@@ -4936,16 +4936,20 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
       },
     };
 
-    this.partnerEntries = [
-      this.clonePartnerEntry(record),
-      ...this.partnerEntries.filter((entry) => entry.entrySlug !== entrySlug),
-    ];
-    this.persistChanges(
+    const newEntry = this.clonePartnerEntry(record);
+
+    await this.persistChangesRequired(
       {
-        partnerEntries: [this.clonePartnerEntry(record)],
+        partnerEntries: [newEntry],
       },
       "create_platform_partner_entry",
     );
+
+    this.partnerEntries = [
+      newEntry,
+      ...this.partnerEntries.filter((entry) => entry.entrySlug !== entrySlug),
+    ];
+
     this.recordTenantAudit(
       {
         actorId: null,
@@ -4966,13 +4970,15 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
     return this.clonePartnerEntry(record);
   }
 
-  updatePlatformPartnerEntry(
+  async updatePlatformPartnerEntry(
     entrySlug: string,
     command: UpdatePartnerChannelEntryCommand,
     requestId?: string,
   ) {
-    const entry = this.requirePlatformPartnerEntry(entrySlug);
-    const before = this.clonePartnerEntry(entry);
+    const originalEntry = this.requirePlatformPartnerEntry(entrySlug);
+    const before = this.clonePartnerEntry(originalEntry);
+    const entry = this.clonePartnerEntry(originalEntry);
+    
     const lifecycleStatus = this.resolveLifecycleStatus(command.status);
     const lifecycleActiveFlag =
       command.activeFlag !== undefined ? command.activeFlag : undefined;
@@ -5070,12 +5076,19 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
       updatedBy: "platform_admin",
     };
 
-    this.persistChanges(
+    const newEntry = this.clonePartnerEntry(entry);
+
+    await this.persistChangesRequired(
       {
-        partnerEntries: [this.clonePartnerEntry(entry)],
+        partnerEntries: [newEntry],
       },
       "update_platform_partner_entry",
     );
+
+    this.partnerEntries = this.partnerEntries.map((e) =>
+      e.entrySlug === entry.entrySlug ? newEntry : e,
+    );
+
     this.recordTenantAudit(
       {
         actorId: null,
@@ -5097,12 +5110,12 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
     return this.clonePartnerEntry(entry);
   }
 
-  setPlatformPartnerEntryStatus(
+  async setPlatformPartnerEntryStatus(
     entrySlug: string,
     status: "active" | "inactive",
     requestId?: string,
   ) {
-    return this.updatePlatformPartnerEntry(
+    return await this.updatePlatformPartnerEntry(
       entrySlug,
       {
         status,
@@ -5111,9 +5124,10 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
     );
   }
 
-  revokePlatformPartnerEntry(entrySlug: string, requestId?: string) {
-    const entry = this.requirePlatformPartnerEntry(entrySlug);
-    const before = this.clonePartnerEntry(entry);
+  async revokePlatformPartnerEntry(entrySlug: string, requestId?: string) {
+    const originalEntry = this.requirePlatformPartnerEntry(entrySlug);
+    const before = this.clonePartnerEntry(originalEntry);
+    const entry = this.clonePartnerEntry(originalEntry);
     const revokedAt = new Date().toISOString();
 
     entry.status = "revoked";
@@ -5130,7 +5144,7 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
     };
 
     let revokedCredentialCount = 0;
-    this.partnerIngressCredentials = this.partnerIngressCredentials.map(
+    const newCredentials = this.partnerIngressCredentials.map(
       (credential) => {
         if (
           credential.entrySlug !== entry.entrySlug ||
@@ -5148,17 +5162,24 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
       },
     );
 
-    this.persistChanges(
+    const newEntry = this.clonePartnerEntry(entry);
+    const updatedCredentials = newCredentials.filter((c) => c.entrySlug === entry.entrySlug);
+
+    await this.persistChangesRequired(
       {
-        partnerEntries: [this.clonePartnerEntry(entry)],
-        partnerIngressCredentials: this.partnerIngressCredentials
-          .filter((credential) => credential.entrySlug === entry.entrySlug)
-          .map((credential) =>
-            this.cloneStoredPartnerIngressCredential(credential),
-          ),
+        partnerEntries: [newEntry],
+        partnerIngressCredentials: updatedCredentials.map((c) =>
+          this.cloneStoredPartnerIngressCredential(c),
+        ),
       },
       "revoke_platform_partner_entry",
     );
+
+    this.partnerEntries = this.partnerEntries.map((e) =>
+      e.entrySlug === entry.entrySlug ? newEntry : e,
+    );
+    this.partnerIngressCredentials = newCredentials;
+
     this.recordTenantAudit(
       {
         actorId: null,

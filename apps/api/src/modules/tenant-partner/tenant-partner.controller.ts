@@ -829,24 +829,27 @@ export class TenantPartnerController {
   }
 
   @Post("platform-admin/partner-entries")
-  createPlatformPartnerEntry(
+  async createPlatformPartnerEntry(
     @Body() command: CreatePartnerChannelEntryCommand,
     @Headers("x-request-id") requestId?: string,
   ) {
     return toApiSuccessEnvelope(
-      this.tenantPartnerService.createPlatformPartnerEntry(command, requestId),
+      await this.tenantPartnerService.createPlatformPartnerEntry(
+        command,
+        requestId,
+      ),
       requestId,
     );
   }
 
   @Post("platform-admin/partner-entries/:entrySlug")
-  updatePlatformPartnerEntry(
+  async updatePlatformPartnerEntry(
     @Param("entrySlug") entrySlug: string,
     @Body() command: UpdatePartnerChannelEntryCommand,
     @Headers("x-request-id") requestId?: string,
   ) {
     return toApiSuccessEnvelope(
-      this.tenantPartnerService.updatePlatformPartnerEntry(
+      await this.tenantPartnerService.updatePlatformPartnerEntry(
         entrySlug,
         command,
         requestId,
@@ -856,12 +859,12 @@ export class TenantPartnerController {
   }
 
   @Post("platform-admin/partner-entries/:entrySlug/activate")
-  activatePlatformPartnerEntry(
+  async activatePlatformPartnerEntry(
     @Param("entrySlug") entrySlug: string,
     @Headers("x-request-id") requestId?: string,
   ) {
     return toApiSuccessEnvelope(
-      this.tenantPartnerService.setPlatformPartnerEntryStatus(
+      await this.tenantPartnerService.setPlatformPartnerEntryStatus(
         entrySlug,
         "active",
         requestId,
@@ -871,12 +874,12 @@ export class TenantPartnerController {
   }
 
   @Post("platform-admin/partner-entries/:entrySlug/deactivate")
-  deactivatePlatformPartnerEntry(
+  async deactivatePlatformPartnerEntry(
     @Param("entrySlug") entrySlug: string,
     @Headers("x-request-id") requestId?: string,
   ) {
     return toApiSuccessEnvelope(
-      this.tenantPartnerService.setPlatformPartnerEntryStatus(
+      await this.tenantPartnerService.setPlatformPartnerEntryStatus(
         entrySlug,
         "inactive",
         requestId,
@@ -886,12 +889,12 @@ export class TenantPartnerController {
   }
 
   @Post("platform-admin/partner-entries/:entrySlug/revoke")
-  revokePlatformPartnerEntry(
+  async revokePlatformPartnerEntry(
     @Param("entrySlug") entrySlug: string,
     @Headers("x-request-id") requestId?: string,
   ) {
     return toApiSuccessEnvelope(
-      this.tenantPartnerService.revokePlatformPartnerEntry(
+      await this.tenantPartnerService.revokePlatformPartnerEntry(
         entrySlug,
         requestId,
       ),
