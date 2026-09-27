@@ -459,7 +459,9 @@
       "C217 E2E: Expired notifications stop without sending",
       "C218 E2E: Old ETA and cancelled arrival stop while receipt remains independent",
       "C219 E2E: Payload excludes private driver and passenger information",
-      "C220 E2E: Missing configuration is unavailable and never falls back",
+      "C220 E2E: Missing configuration is unavailable and never falls back"
+    ],
+    "sr-partner-notify-qa-20260917/navigation-uat.spec.ts": [
       "C221 NAV: Resolve issues fresh single-use handoff and HttpOnly session to the latest ride",
       "C222 NAV: Wrong entry and subject cannot resolve or read a ride",
       "C223 NAV: Logout and account switch invalidate the previous ride session",
