@@ -106,6 +106,21 @@ class TenantUatAcceptanceWorkflowStructureTests(unittest.TestCase):
             "docs/04-uat/system-remediation-20260906/SR-QA-WEBHOOK-001.md",
             push_block,
         )
+        self.assertIn("gemini2/sr-partner-notify-qa-20260917", push_block)
+        self.assertIn(
+            "tests/e2e/system-remediation/sr-partner-notify-qa-20260917/**", push_block
+        )
+        self.assertIn(
+            "tests/unit/system-remediation/sr-partner-notify-qa-20260917/**", push_block
+        )
+        self.assertIn(
+            "docs/04-uat/system-remediation-20260906/SR-PARTNER-NOTIFY-QA-20260917.md",
+            push_block,
+        )
+        self.assertIn(
+            "docs/02-architecture/partner-notification-20260917/04_sources.md",
+            push_block,
+        )
 
     def test_candidate_sha_falls_back_to_github_sha_everywhere_it_is_used(
         self,
@@ -216,6 +231,9 @@ class TenantUatAcceptanceWorkflowStructureTests(unittest.TestCase):
             ".artifacts/tenant-uat-acceptance/webhook-unit-report.json", step_text
         )
         self.assertIn(
+            ".artifacts/tenant-uat-acceptance/partner-notify-unit-report.json", step_text
+        )
+        self.assertIn(
             ".artifacts/tenant-uat-acceptance/c111-c115-capability-report.json", step_text
         )
         self.assertIn(
@@ -232,6 +250,8 @@ class TenantUatAcceptanceWorkflowStructureTests(unittest.TestCase):
         self.assertIn("steps.harness_unit.outcome", status_block)
         self.assertIn("steps.webhook_e2e.outcome", status_block)
         self.assertIn("steps.webhook_unit.outcome", status_block)
+        self.assertIn("steps.partner_notify_e2e.outcome", status_block)
+        self.assertIn("steps.partner_notify_unit.outcome", status_block)
         self.assertIn("steps.c113_c115_acceptance.outcome", status_block)
         self.assertIn("steps.gate.outcome", status_block)
         self.assertIn("steps.seed.outcome", status_block)
@@ -310,6 +330,8 @@ class RunStatusScriptBehaviorTests(unittest.TestCase):
         harness_unit: str = "success",
         webhook_e2e: str = "success",
         webhook_unit: str = "success",
+        partner_notify_e2e: str = "success",
+        partner_notify_unit: str = "success",
         c113_c115_acceptance: str = "success",
         gate: str = "success",
         restart_api: str = "success",
@@ -329,6 +351,8 @@ class RunStatusScriptBehaviorTests(unittest.TestCase):
                 "HARNESS_UNIT_OUTCOME": harness_unit,
                 "WEBHOOK_E2E_OUTCOME": webhook_e2e,
                 "WEBHOOK_UNIT_OUTCOME": webhook_unit,
+                "PARTNER_NOTIFY_E2E_OUTCOME": partner_notify_e2e,
+                "PARTNER_NOTIFY_UNIT_OUTCOME": partner_notify_unit,
                 "C113_C115_ACCEPTANCE_OUTCOME": c113_c115_acceptance,
                 "GATE_OUTCOME": gate,
                 "RESTART_API_OUTCOME": restart_api,
@@ -454,10 +478,16 @@ class FullMatrixGateBehaviorTests(unittest.TestCase):
             (root / "test-results/system-remediation-report.json").write_text(
                 json.dumps({"suites": [{"specs": specs}]})
             )
+            (root / "test-results/partner-notify-e2e-report.json").write_text(
+                json.dumps({"suites": [{"specs": [{"file": "sr-partner-notify-qa.spec.ts", "tests": [{"results": [{"status": "passed"}]}]}]}]})
+            )
             artifact = root / ".artifacts/tenant-uat-acceptance"
             artifact.mkdir(parents=True)
             (artifact / "unit-test-report.json").write_text(
                 json.dumps({"numTotalTests": 27, "numPassedTests": 27, "numPendingTests": 0, "success": True})
+            )
+            (artifact / "partner-notify-unit-report.json").write_text(
+                json.dumps({"numTotalTests": 1, "numPassedTests": 1, "numPendingTests": 0, "success": True})
             )
             if not missing_restart:
                 (artifact / "restart-report.json").write_text(
@@ -569,6 +599,13 @@ class FullMatrixGateBehaviorTests(unittest.TestCase):
             )
             (artifact / "unit-test-report.json").write_text(
                 json.dumps({"numTotalTests": 27, "numPassedTests": 27, "numPendingTests": 0, "success": True})
+            )
+            (artifact / "partner-notify-unit-report.json").write_text(
+                json.dumps({"numTotalTests": 1, "numPassedTests": 1, "numPendingTests": 0, "success": True})
+            )
+            (root / "test-results").mkdir(exist_ok=True)
+            (root / "test-results/partner-notify-e2e-report.json").write_text(
+                json.dumps({"suites": [{"specs": [{"file": "sr-partner-notify-qa.spec.ts", "tests": [{"results": [{"status": "passed"}]}]}]}]})
             )
             (artifact / "restart-report.json").write_text(
                 json.dumps({"status": "passed", "verified": 12, "candidate_sha": "c" * 40, "tables": [f"table_{i}" for i in range(12)]})
