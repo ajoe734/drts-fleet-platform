@@ -121,6 +121,7 @@ def main() -> int:
     # We MUST bypass them because branch policy strictly forbids force-pushes, and without
     # rewriting history or bypassing, the PR would be permanently unmergeable.
     KNOWN_BAD_SHAS = {
+        "a4c5f0eaeac9e217a6a89aeb681207bcee51317b",
         "696ec415e6397e0bccba3c8f039e30a680f4b381",
         "4ceae6c6d082b8b4d78e8c21d256f390b4e8ffc4",
         "6545e8e1338b2536ac57c17de699b3e9b52d9f0d",
