@@ -14,12 +14,11 @@ test.describe("SR-PARTNER-NOTIFY-QA-20260917 E2E Cases", () => {
   let receiverUrl: string;
   let requests: { method: string; url: string; headers: any; body: any }[] = [];
   let receiverStatus = 200;
-  let dedupeIds = new Set<string>();
+  const dedupeIds = new Set<string>();
 
   let tenantA: string;
   let tenantB: string;
   let tokenA: string;
-  let tokenB: string;
   let tokenPlatform: string;
   let client: APIRequestContext;
   let baseURL: URL;
@@ -28,7 +27,6 @@ test.describe("SR-PARTNER-NOTIFY-QA-20260917 E2E Cases", () => {
     tenantA = required("DRTS_UAT_TENANT_A");
     tenantB = required("DRTS_UAT_TENANT_B");
     tokenA = required("DRTS_UAT_TOKEN_A");
-    tokenB = required("DRTS_UAT_TOKEN_B");
     tokenPlatform = required("DRTS_UAT_TOKEN_PLATFORM");
     baseURL = new URL(required("DRTS_UAT_API_URL"));
     client = await playwright.request.newContext();
@@ -40,7 +38,7 @@ test.describe("SR-PARTNER-NOTIFY-QA-20260917 E2E Cases", () => {
         let parsed: any = null;
         try {
           parsed = JSON.parse(body);
-        } catch (e) {}
+        } catch { /* ignore */ }
         requests.push({
           method: req.method || "GET",
           url: req.url || "/",
@@ -318,7 +316,7 @@ test.describe("SR-PARTNER-NOTIFY-QA-20260917 E2E Cases", () => {
       const res = await request.get(adminUrl, { timeout: 10000 });
       const html = await res.text();
       expect(typeof html).toBe('string');
-    } catch (e) {
+    } catch {
       // Network failure fallback is fine if not running locally
     }
   });
