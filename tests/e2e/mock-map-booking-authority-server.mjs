@@ -497,12 +497,14 @@ const server = http.createServer((req, res) => {
   }
   if (req.method === "GET" && url.pathname === "/api/identity/context") {
     json(res, 200, {
-      id: "mock-identity-id",
-      type: "tenant_user",
-      realm: "tenant",
-      tenant_id: "tenant-acme",
-      roles: ["tenant_admin"],
-      scopes: ["tenant:read", "tenant:write"],
+      data: {
+        id: "mock-identity-id",
+        type: "tenant_user",
+        realm: "tenant",
+        tenant_id: "tenant-acme",
+        roles: ["tenant_admin"],
+        scopes: ["tenant:read", "tenant:write"],
+      },
     });
     return;
   }

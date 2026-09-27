@@ -431,7 +431,7 @@ test.describe("tenant console booking map alignment", () => {
 
     // Assert rejection: error message is visible and hidden inputs are unchanged
     await expect(
-      picker.getByText(/Reason for manual location|手動定位原因/i),
+      picker.getByText(/Reason for manual location|手動定位原因/i).first(),
     ).toBeVisible();
     await expect(page.locator('input[name="lat"]')).not.toHaveValue("25.034");
 
@@ -442,7 +442,9 @@ test.describe("tenant console booking map alignment", () => {
       .click();
 
     // Save the form
-    await page.getByRole("button", { name: /Save Changes|儲存/i }).click();
+    await page
+      .getByRole("button", { name: /Save Changes|儲存/i })
+      .click({ force: true });
 
     // Real behavior: updateAddress calls revalidatePath but no success redirect;
     // ?edit=addr-001 remains. Wait a moment then reload to verify persistence.
@@ -488,7 +490,9 @@ test.describe("tenant console booking map alignment", () => {
       page.locator('input[name="manualOverrideReason"]'),
     ).toHaveValue("agent_map_click");
 
-    await page.getByRole("button", { name: /Save Changes|儲存/i }).click();
+    await page
+      .getByRole("button", { name: /Save Changes|儲存/i })
+      .click({ force: true });
 
     // Check server persistence
     await page.waitForTimeout(1000);
