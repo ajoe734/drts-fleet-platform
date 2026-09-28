@@ -535,23 +535,6 @@ wait_for_report_job_completed() {
   exit 1
 }
 
-assert_daily_record_fields() {
-  local row_json="$1" order_id="$2" order_source="$3" final_status="$4" complaint_count="$5"
-
-  assert_non_empty "daily record payload for orderId=${order_id}" "$row_json"
-  assert_equals \
-    "daily record orderSource for orderId=${order_id}" \
-    "$order_source" \
-    "$(json_field_from_object "$row_json" '(.orderSource // .order_source)')"
-  assert_equals \
-    "daily record finalStatus for orderId=${order_id}" \
-    "$final_status" \
-    "$(json_field_from_object "$row_json" '(.finalStatus // .final_status)')"
-  assert_int_equals \
-    "daily record complaintCount for orderId=${order_id}" \
-    "$complaint_count" \
-    "$(json_field_from_object "$row_json" '(.complaintCount // .complaint_count)')"
-}
 
 log_surface "Order sources — app / phone / tenant portal"
 
@@ -734,108 +717,7 @@ eval "$(compute_expected_complaints "$APP_COMPLAINT_MONTH" "$APP_SUMMARY_MONTH" 
 assert_int_equals "app complaint records" 1 "$(echo "$RESP_BODY" | jq -r --arg oid "$APP_ORDER_ID" '.data.items | map(select((.relatedOrderId // .related_order_id) == $oid)) | length' 2>/dev/null || true)"
 assert_int_equals "phone complaint records" 1 "$(echo "$RESP_BODY" | jq -r --arg oid "$PHONE_ORDER_ID" '.data.items | map(select((.relatedOrderId // .related_order_id) == $oid)) | length' 2>/dev/null || true)"
 
-log_step "2.2 — POST /reports/daily-dispatch-records/rebuild"
-DAILY_REBUILD_FIXTURE="${TMP_DIR}/daily-rebuild.json"
-AGGREGATED_DAILY_RECORDS="[]"
-DAILY_REBUILT_COUNT=0
-
-for sd in $UNIQUE_SERVICE_DATES; do
-  jq -n --arg serviceDate "$sd" '{serviceDate: $serviceDate}' > "$DAILY_REBUILD_FIXTURE"
-  http_call POST "/reports/daily-dispatch-records/rebuild" "$DAILY_REBUILD_FIXTURE"
-  assert_status "200|201"
-  rc="$(json_get_first ".data.rebuiltCount" ".data.rebuilt_count")"
-  DAILY_REBUILT_COUNT=$((DAILY_REBUILT_COUNT + rc))
-  AGGREGATED_DAILY_RECORDS="$(echo "$AGGREGATED_DAILY_RECORDS" "$RESP_BODY" | jq -s '.[0] + (.[1].data.records // [])')"
-done
-
-assert_int_equals "daily rebuild count" 3 "$DAILY_REBUILT_COUNT"
-
-log_step "2.3 — Validate daily dispatch records from rebuild response"
-assert_int_equals \
-  "daily dispatch record row count" \
-  3 \
-  "$(echo "$AGGREGATED_DAILY_RECORDS" | jq 'length' 2>/dev/null || true)"
-
-APP_DAILY_ROW="$(echo "$AGGREGATED_DAILY_RECORDS" | jq -c --arg oid "$APP_ORDER_ID" '.[] | select((.orderId // .order_id) == $oid)' 2>/dev/null | head -1)"
-PHONE_DAILY_ROW="$(echo "$AGGREGATED_DAILY_RECORDS" | jq -c --arg oid "$PHONE_ORDER_ID" '.[] | select((.orderId // .order_id) == $oid)' 2>/dev/null | head -1)"
-PORTAL_DAILY_ROW="$(echo "$AGGREGATED_DAILY_RECORDS" | jq -c --arg oid "$PORTAL_ORDER_ID" '.[] | select((.orderId // .order_id) == $oid)' 2>/dev/null | head -1)"
-
-assert_daily_record_fields "$APP_DAILY_ROW" "$APP_ORDER_ID" "third_party_platform" "completed" 1
-assert_non_empty \
-  "app tripCompletedAt" \
-  "$(json_field_from_object "$APP_DAILY_ROW" '(.tripCompletedAt // .trip_completed_at)')"
-
-assert_daily_record_fields "$PHONE_DAILY_ROW" "$PHONE_ORDER_ID" "phone" "cancelled" 1
-assert_int_equals \
-  "phone redispatchCount" \
-  1 \
-  "$(json_field_from_object "$PHONE_DAILY_ROW" '(.redispatchCount // .redispatch_count)')"
-assert_equals \
-  "phone cancellationReason" \
-  "passenger_cancelled" \
-  "$(json_field_from_object "$PHONE_DAILY_ROW" '(.cancellationReason // .cancellation_reason)')"
-assert_equals \
-  "phone tripCompletedAt" \
-  "" \
-  "$(json_field_from_object "$PHONE_DAILY_ROW" '(.tripCompletedAt // .trip_completed_at)')"
-
-assert_daily_record_fields "$PORTAL_DAILY_ROW" "$PORTAL_ORDER_ID" "tenant_portal" "completed" 0
-assert_equals \
-  "portal serviceProductCode" \
-  "enterprise_dispatch" \
-  "$(json_field_from_object "$PORTAL_DAILY_ROW" '(.serviceProductCode // .service_product_code)')"
-assert_equals \
-  "portal tenantId" \
-  "$E2E_SEED_TENANT_ID" \
-  "$(json_field_from_object "$PORTAL_DAILY_ROW" '(.tenantId // .tenant_id)')"
-
-log_step "2.4 — POST /reports/jobs (daily_dispatch_record)"
-DAILY_REPORT_JOB_FIXTURE="${TMP_DIR}/daily-report-job.json"
-AGGREGATED_DAILY_JOB_ROWS="[]"
-DAILY_REPORT_JOB_ROW_COUNT=0
-
-for sd in $UNIQUE_SERVICE_DATES; do
-  jq -n \
-    --arg serviceDate "$sd" \
-    '{
-      jobType: "daily_dispatch_record",
-      format: "csv",
-      filters: {
-        serviceDate: $serviceDate
-      }
-    }' > "$DAILY_REPORT_JOB_FIXTURE"
-  http_call POST "/reports/jobs" "$DAILY_REPORT_JOB_FIXTURE"
-  assert_status "200|201"
-  DAILY_REPORT_JOB_ID=$(json_get_first ".data.jobId" ".data.job_id")
-  assert_non_empty "daily report jobId ($sd)" "$DAILY_REPORT_JOB_ID"
-  chain_set "reporting" "dailyReportJobId_${sd}" "$DAILY_REPORT_JOB_ID"
-  save_evidence "$SCENARIO" "reporting" "dailyReportJobId_${sd}" "$DAILY_REPORT_JOB_ID"
-  wait_for_report_job_completed "$DAILY_REPORT_JOB_ID"
-
-  rc="$(echo "$RESP_BODY" | jq -r '.data.rows | length' 2>/dev/null || true)"
-  DAILY_REPORT_JOB_ROW_COUNT=$((DAILY_REPORT_JOB_ROW_COUNT + rc))
-  AGGREGATED_DAILY_JOB_ROWS="$(echo "$AGGREGATED_DAILY_JOB_ROWS" "$RESP_BODY" | jq -s '.[0] + (.[1].data.rows // [])')"
-done
-
-assert_int_equals \
-  "daily report job row count" \
-  3 \
-  "$DAILY_REPORT_JOB_ROW_COUNT"
-assert_non_empty \
-  "daily report artifactId" \
-  "$(echo "$RESP_BODY" | jq -r '.data.artifact.artifactId // .data.artifact.artifact_id // empty' 2>/dev/null || true)"
-assert_int_equals \
-  "daily report rows for app order" \
-  1 \
-  "$(echo "$AGGREGATED_DAILY_JOB_ROWS" | jq -r --arg oid "$APP_ORDER_ID" 'map(select((.orderId // .order_id) == $oid)) | length' 2>/dev/null || true)"
-assert_int_equals \
-  "daily report rows for phone order" \
-  1 \
-  "$(echo "$AGGREGATED_DAILY_JOB_ROWS" | jq -r --arg oid "$PHONE_ORDER_ID" 'map(select((.orderId // .order_id) == $oid)) | length' 2>/dev/null || true)"
-assert_int_equals \
-  "daily report rows for portal order" \
-  1 \
-  "$(echo "$AGGREGATED_DAILY_JOB_ROWS" | jq -r --arg oid "$PORTAL_ORDER_ID" 'map(select((.orderId // .order_id) == $oid)) | length' 2>/dev/null || true)"
+aggregate_and_assert_daily_records "$UNIQUE_SERVICE_DATES" "$APP_ORDER_ID" "$PHONE_ORDER_ID" "$PORTAL_ORDER_ID" "$E2E_SEED_TENANT_ID" "$SCENARIO"
 
 log_surface "Supply snapshots and six-month summary"
 
@@ -879,33 +761,7 @@ for snapshot_at in "$SNAPSHOT_AT_1" "$SNAPSHOT_AT_2" "$SNAPSHOT_AT_3"; do
     "$(json_field_from_object "$SNAPSHOT_ROW" '(.availableDriverCount // .available_driver_count)')"
 done
 
-log_step "3.5 — POST /reports/monthly-operations-summaries/rebuild"
-MONTHLY_REBUILD_FIXTURE="${TMP_DIR}/monthly-rebuild.json"
-AGGREGATED_MONTHLY_RECORDS="[]"
-MONTHLY_REBUILT_COUNT=0
-
-for month in $UNIQUE_SUMMARY_MONTHS; do
-  jq -n \
-    --arg periodMonth "$month" \
-    --arg businessArea "$TAXI_BUSINESS_AREA" \
-    '{
-      periodMonth: $periodMonth,
-      businessArea: $businessArea,
-      serviceProductCode: "taxi_realtime"
-    }' > "$MONTHLY_REBUILD_FIXTURE"
-  http_call POST "/reports/monthly-operations-summaries/rebuild" "$MONTHLY_REBUILD_FIXTURE"
-  assert_status "200|201"
-
-  rc="$(json_get_first ".data.rebuiltCount" ".data.rebuilt_count")"
-  MONTHLY_REBUILT_COUNT=$((MONTHLY_REBUILT_COUNT + rc))
-  AGGREGATED_MONTHLY_RECORDS="$(echo "$AGGREGATED_MONTHLY_RECORDS" "$RESP_BODY" | jq -s '.[0] + (.[1].data.records // [])')"
-done
-
-assert_int_ge "monthly rebuild count" 1 "$MONTHLY_REBUILT_COUNT"
-assert_int_ge \
-  "monthly summary row count" \
-  1 \
-  "$(echo "$AGGREGATED_MONTHLY_RECORDS" | jq 'length' 2>/dev/null || true)"
+AGGREGATED_MONTHLY_RECORDS="$(aggregate_monthly_records "$UNIQUE_SUMMARY_MONTHS" "$TAXI_BUSINESS_AREA")"
 
 log_step "3.6 — Validate monthly operations summary from rebuild response"
 
@@ -916,52 +772,9 @@ MAX_AVG_DISPATCHABLE="$(echo "$AGGREGATED_MONTHLY_RECORDS" | jq 'map(.averageDis
 
 assert_monthly_records "$AGGREGATED_MONTHLY_RECORDS" "$TAXI_UNIQUE_VEHICLE_COUNT" > /dev/null
 
-log_step "3.7 — GET /reports/operations-summary/preview"
-http_call GET "/reports/operations-summary/preview?from=${SUMMARY_FROM_DATE}&to=${SUMMARY_TO_DATE}&businessArea=${TAXI_BUSINESS_AREA}&serviceProductCode=taxi_realtime"
-assert_status "200"
-assert_int_equals \
-  "summary preview row count" \
-  1 \
-  "$(echo "$RESP_BODY" | jq -r '.data.items | length' 2>/dev/null || true)"
-SUMMARY_ROW=$(echo "$RESP_BODY" | jq -c '.data.items[0]' 2>/dev/null || true)
-assert_non_empty "summary preview row" "$SUMMARY_ROW"
-assert_summary_row "summary preview" "$SUMMARY_ROW" "$SUMMARY_FROM_DATE" "$SUMMARY_TO_DATE" "$MAX_AVG_DISPATCHABLE" "$MONTHLY_EXPECTED_SNAPSHOTS" "$EXPECTED_COVERAGE"
+run_summary_preview_and_assert "$SUMMARY_FROM_DATE" "$SUMMARY_TO_DATE" "$TAXI_BUSINESS_AREA" "$MAX_AVG_DISPATCHABLE" "$MONTHLY_EXPECTED_SNAPSHOTS" "$EXPECTED_COVERAGE"
 
-
-log_step "3.8 — POST /reports/jobs (six_month_operations_summary)"
-SUMMARY_REPORT_JOB_FIXTURE="${TMP_DIR}/summary-report-job.json"
-jq -n \
-  --arg from "$SUMMARY_FROM_DATE" \
-  --arg to "$SUMMARY_TO_DATE" \
-  --arg businessArea "$TAXI_BUSINESS_AREA" \
-  '{
-    jobType: "six_month_operations_summary",
-    format: "csv",
-    filters: {
-      from: $from,
-      to: $to,
-      businessArea: $businessArea,
-      serviceProductCode: "taxi_realtime"
-    }
-  }' > "$SUMMARY_REPORT_JOB_FIXTURE"
-http_call POST "/reports/jobs" "$SUMMARY_REPORT_JOB_FIXTURE"
-assert_status "200|201"
-SUMMARY_REPORT_JOB_ID=$(json_get_first ".data.jobId" ".data.job_id")
-assert_non_empty "summary report jobId" "$SUMMARY_REPORT_JOB_ID"
-chain_set "reporting" "summaryReportJobId" "$SUMMARY_REPORT_JOB_ID"
-save_evidence "$SCENARIO" "reporting" "summaryReportJobId" "$SUMMARY_REPORT_JOB_ID"
-wait_for_report_job_completed "$SUMMARY_REPORT_JOB_ID"
-
-assert_int_equals \
-  "summary report job row count" \
-  1 \
-  "$(echo "$RESP_BODY" | jq -r '.data.rows | length' 2>/dev/null || true)"
-assert_non_empty \
-  "summary report artifactId" \
-  "$(echo "$RESP_BODY" | jq -r '.data.artifact.artifactId // .data.artifact.artifact_id // empty' 2>/dev/null || true)"
-SUMMARY_JOB_ROW=$(echo "$RESP_BODY" | jq -c '.data.rows[0]' 2>/dev/null || true)
-assert_non_empty "summary report row" "$SUMMARY_JOB_ROW"
-assert_summary_row "summary report" "$SUMMARY_JOB_ROW" "" "" "$MAX_AVG_DISPATCHABLE" "$MONTHLY_EXPECTED_SNAPSHOTS" "$EXPECTED_COVERAGE"
+run_summary_job_and_assert "$SUMMARY_FROM_DATE" "$SUMMARY_TO_DATE" "$TAXI_BUSINESS_AREA" "$MAX_AVG_DISPATCHABLE" "$MONTHLY_EXPECTED_SNAPSHOTS" "$EXPECTED_COVERAGE" "$SCENARIO"
 
 
 print_chain_summary
