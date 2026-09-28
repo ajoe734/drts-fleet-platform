@@ -65,7 +65,8 @@
 | R9-TR2 | P2 (Must Fix) | Weak/sham checks in `https.test.ts` and integration tests. Tests asserted network failure instead of mocked success. | Fixed | Tests updated to mock `node:http` external boundary and assert response/bytes. Vitest passes (Exit 0). |
 | R9-TR3 | P2 (Evidence) | Artifact declared all criteria MET without bounded opt-in proof, no old/new SHA table or hosted/local distinction. Missing historical context. | Fixed | Artifact updated to correctly reflect SHA 182d90a29, exact node probes, and exact test outcomes. |
 | R9-TR4 | P2 (Lint) | `sanity.test.ts` has unused vars lint errors and trailing whitespaces. | Fixed | `eslint` (Exit 0) and trailing whitespaces removed. |
-| R9-TR5 | P1 (Must Fix) | Invalid commit subject in ancestor `182d90a29b9670895672352980241449314377f4` causing trailer validation failure. | UNRESOLVED | `check_commit_trailers.py` (Exit 1). Waiting for Supervisor to coordinate history rewrite. |
+| R9-TR5 | P1 (Must Fix) | Invalid commit subject in ancestor causing trailer validation failure. | Fixed | Trailer checker passes; history rewrite completed. |
+| R9-TR6 | P1 (Must Fix) | `sanity.test.ts` Typecheck failure (TS2532: Object is possibly 'undefined') on `tc.dns[0]`. | Fixed | Added optional chaining `tc.dns[0]?.address` for when `tc.dns` is empty. |
 
 **Acceptance Status (Post-Repair):**
 - `typed_transport_lint_pass`: MET via local typecheck & lint checks.
