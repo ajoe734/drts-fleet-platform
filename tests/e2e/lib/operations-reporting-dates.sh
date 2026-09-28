@@ -48,6 +48,10 @@ extract_authoritative_dates() {
 
   echo "APP_SERVICE_DATE=${app_service_date}"
   echo "APP_SUMMARY_MONTH=${app_summary_month}"
+  echo "PHONE_SERVICE_DATE=${phone_service_date}"
+  echo "PHONE_SUMMARY_MONTH=${phone_summary_month}"
+  echo "PORTAL_SERVICE_DATE=${portal_service_date}"
+  echo "PORTAL_SUMMARY_MONTH=${portal_summary_month}"
   echo "UNIQUE_SERVICE_DATES=\"${unique_service_dates}\""
   echo "UNIQUE_SUMMARY_MONTHS=\"${unique_summary_months}\""
   echo "SUMMARY_FROM_DATE=${summary_from_date}"
