@@ -516,53 +516,34 @@ describe.skipIf(!DATABASE_URL)(
       let caughtAssertionError = false;
 
       try {
-        try {
-          const reloadedRepo = new TenantPartnerRepository(database);
-          reloadedService = new TenantPartnerService(
-            new AuditNotificationService(new AuditLogRepository(database)),
-            reloadedRepo,
-          );
-          await reloadedService.onModuleInit();
+        const reloadedRepo = new TenantPartnerRepository(database);
+        reloadedService = new TenantPartnerService(
+          new AuditNotificationService(new AuditLogRepository(database)),
+          reloadedRepo,
+        );
+        await reloadedService.onModuleInit();
 
-          holdTelemetry = true;
-          reloadedService.authenticatePartnerBootstrap(
-            { entrySlug, apiKey },
-            "req-after",
-          );
+        holdTelemetry = true;
+        reloadedService.authenticatePartnerBootstrap(
+          { entrySlug, apiKey },
+          "req-after",
+        );
 
-          await Promise.race([
-            queryEnteredPromise,
-            new Promise((_, rej) =>
-              setTimeout(
-                () => rej(new Error("Timeout waiting for query entry")),
-                2000,
-              ),
-            ),
-          ]);
-          expect(heldTelemetry.length).toBeGreaterThan(0);
+        let timeoutId: any;
+        await Promise.race([
+          queryEnteredPromise,
+          new Promise((_, rej) => {
+            timeoutId = setTimeout(
+              () => rej(new Error("Timeout waiting for query entry")),
+              2000,
+            );
+          }),
+        ]).finally(() => clearTimeout(timeoutId));
 
-          if (reloadedService.entrySlugMutexes.size > 0) {
-            throw new Error("injected post-reload identity assertion failure");
-          }
-        } finally {
-          holdTelemetry = false;
-          try {
-            if (reloadedService) {
-              const reloadDrainStart = Date.now();
-              // Release telemetry BEFORE the bounded drain completes
-              heldTelemetry.forEach((h) => h.resolveHold());
+        expect(heldTelemetry.length > 0 ? true : false).toBe(true);
 
-              while (reloadedService.entrySlugMutexes.size > 0) {
-                if (Date.now() - reloadDrainStart > 2000) {
-                  // eslint-disable-next-line no-unsafe-finally
-                  throw new Error("timeout waiting for reload drain");
-                }
-                await new Promise((r) => setTimeout(r, 10));
-              }
-            }
-          } finally {
-            if (reloadedService) await reloadedService.onModuleDestroy();
-          }
+        if (reloadedService.entrySlugMutexes.size > 0) {
+          throw new Error("injected post-reload identity assertion failure");
         }
       } catch (e: any) {
         if (e.message === "injected post-reload identity assertion failure") {
@@ -571,6 +552,24 @@ describe.skipIf(!DATABASE_URL)(
           throw e;
         }
       } finally {
+        holdTelemetry = false;
+        heldTelemetry.forEach((h) => h.resolveHold());
+
+        try {
+          if (reloadedService) {
+            const reloadDrainStart = Date.now();
+            while (reloadedService.entrySlugMutexes.size > 0) {
+              if (Date.now() - reloadDrainStart > 2000) {
+                // eslint-disable-next-line no-unsafe-finally
+                throw new Error("timeout waiting for reload drain");
+              }
+              await new Promise((r) => setTimeout(r, 10));
+            }
+          }
+        } finally {
+          if (reloadedService) await reloadedService.onModuleDestroy();
+        }
+
         // Await actual completion of all released telemetry queries
         await Promise.allSettled(heldTelemetry.map((h) => h.queryPromise));
         if (reloadedService) {
