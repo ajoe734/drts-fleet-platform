@@ -1,5 +1,33 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { partnerNotificationHttpsFetch } from "../../src/modules/tenant-partner/partner-notification-https";
+import { EventEmitter } from "node:events";
+
+let capturedRequestUrl: string | undefined;
+let capturedRequestBody: any;
+
+vi.mock("node:http", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("node:http")>();
+  return {
+    ...actual,
+    request: vi.fn((url, options, onResponse) => {
+      capturedRequestUrl = url.toString();
+      const req = new EventEmitter() as any;
+      req.end = (body: any) => {
+        capturedRequestBody = body;
+        queueMicrotask(() => {
+          const res = new EventEmitter() as any;
+          res.statusCode = 200;
+          res.complete = true;
+          onResponse(res);
+          res.emit("data", Buffer.from('{"status":"success"}'));
+          res.emit("end");
+        });
+        return req;
+      };
+      return req;
+    })
+  };
+});
 
 describe("explicit_controlled_receiver_optin_tested", () => {
   beforeEach(() => {
@@ -25,9 +53,11 @@ describe("explicit_controlled_receiver_optin_tested", () => {
   it("succeeds locally if test env and DRTS_ALLOW_LOCAL_WEBHOOKS is explicitly true (mock external)", async () => {
     vi.stubEnv("NODE_ENV", "test");
     vi.stubEnv("DRTS_ALLOW_LOCAL_WEBHOOKS", "true");
-    // Explicit opt-in allows the fetch to proceed (thus hitting ECONNREFUSED) without throwing the security exception
-    await expect(partnerNotificationHttpsFetch(`http://127.0.0.1:80/`)).rejects.toThrowError(
-        /ECONNREFUSED|ENOTFOUND|EADDRNOTAVAIL/
-      );
+    const result = await partnerNotificationHttpsFetch("http://127.0.0.1:80/", { body: "test_body_int" });
+    expect(result.ok).toBe(true);
+    expect(result.status).toBe(200);
+    expect(await result.text?.()).toBe('{"status":"success"}');
+    expect(capturedRequestUrl).toBe("http://127.0.0.1/");
+    expect(capturedRequestBody).toBe("test_body_int");
   });
 });

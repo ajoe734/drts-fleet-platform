@@ -51,9 +51,9 @@ describe("exception boundary TR1 destinations", () => {
       let capturedReqCb: any;
       const reqInstance = new EventEmitter() as any;
       reqInstance.end = vi.fn();
-      
+
       const protocolMock = url.startsWith("https") ? https.request : http.request;
-      
+
       (protocolMock as any).mockImplementation((_url: URL, options: any, cb: any) => {
         capturedLookup = options.lookup;
         capturedReqCb = cb;
@@ -112,7 +112,7 @@ describe("exception boundary TR1 destinations", () => {
       for (const tc of cases) {
         it(`${tc.name} with all=${all}`, async () => {
           const { lookupResult, fetchResult, fetchError, reqInstance } = await testLookup(tc.url, tc.dns, { all });
-          
+
           if (tc.ok) {
             expect(lookupResult.err).toBeNull();
             if (all) {
@@ -132,8 +132,8 @@ describe("exception boundary TR1 destinations", () => {
             expect(lookupResult.err.message).toBe("partner_endpoint_dns_not_public");
             expect(fetchError).toBeInstanceOf(Error);
             expect(fetchError.message).toBe("partner_endpoint_dns_not_public");
-            
-            // "no simulated connection/body delivery on refusal" is inherently tested 
+
+            // "no simulated connection/body delivery on refusal" is inherently tested
             // since we do not emit 'response' on lookup failure
           }
         });

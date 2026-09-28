@@ -1,4 +1,32 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { EventEmitter } from "node:events";
+
+let capturedRequestUrl: string | undefined;
+let capturedRequestBody: any;
+
+vi.mock("node:http", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("node:http")>();
+  return {
+    ...actual,
+    request: vi.fn((url, options, onResponse) => {
+      capturedRequestUrl = url.toString();
+      const req = new EventEmitter() as any;
+      req.end = (body: any) => {
+        capturedRequestBody = body;
+        queueMicrotask(() => {
+          const res = new EventEmitter() as any;
+          res.statusCode = 200;
+          res.complete = true;
+          onResponse(res);
+          res.emit("data", Buffer.from('{"status":"success"}'));
+          res.emit("end");
+        });
+        return req;
+      };
+      return req;
+    })
+  };
+});
 import {
   isPublicPartnerAddress,
   partnerNotificationHttpsFetch,
@@ -96,9 +124,12 @@ describe("partner HTTPS restrictions", () => {
     it("test env explicitly authorizes HTTP/local if flag is true", async () => {
       vi.stubEnv("NODE_ENV", "test");
       vi.stubEnv("DRTS_ALLOW_LOCAL_WEBHOOKS", "true");
-      await expect(partnerNotificationHttpsFetch("http://127.0.0.1")).rejects.toThrowError(
-        /ECONNREFUSED|ENOTFOUND|EADDRNOTAVAIL/
-      );
+      const result = await partnerNotificationHttpsFetch("http://127.0.0.1/", { body: "test_body" });
+      expect(result.ok).toBe(true);
+      expect(result.status).toBe(200);
+      expect(await result.text?.()).toBe('{"status":"success"}');
+      expect(capturedRequestUrl).toBe("http://127.0.0.1/");
+      expect(capturedRequestBody).toBe("test_body");
     });
 
 
