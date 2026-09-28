@@ -1,4 +1,4 @@
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { DatabaseService } from "../../src/common/db";
 import { AuditNotificationService } from "../../src/modules/audit-notification/audit-notification.service";
 import { AuditLogRepository } from "../../src/modules/audit-notification/audit-log.repository";
@@ -43,6 +43,21 @@ describe.skipIf(!DATABASE_URL)(
     it("real formal-PG create then immediate binding succeeds", async () => {
       const entrySlug = `pg-durable-${Date.now()}`;
 
+      const persistSpy = vi.spyOn(tenantRepository, "persistChanges");
+
+      const endpoint = await tenantService.createWebhookEndpoint(
+        "tenant-demo-001",
+        {
+          url: "https://example.com/webhook",
+          secret: "test_secret_for_webhook_binding",
+          events: ["passenger.assignment_disclosure_ready.v1"],
+        }
+      );
+
+      // Wait for the fire-and-forget persistChanges promise to resolve
+      const promises = persistSpy.mock.results.map((r) => r.value);
+      await Promise.all(promises);
+
       const entry = await tenantService.createPlatformPartnerEntry({
         tenantId: "tenant-demo-001",
         partnerCode: "pg_durable",
@@ -57,18 +72,6 @@ describe.skipIf(!DATABASE_URL)(
 
       expect(entry.entrySlug).toBe(entrySlug);
 
-      const endpoint = await tenantService.createWebhookEndpoint(
-        "tenant-demo-001",
-        {
-          url: "https://example.com/webhook",
-          secret: "test_secret_for_webhook_binding",
-          events: ["assignment_disclosure_ready"],
-        }
-      );
-
-      // Formal V0021/V0104 tables are used by PartnerEntryNotificationBindingService.
-      // Call putBinding which verifies foreign key from admin.phase1_partner_notification_bindings
-      // to admin.phase1_partner_channel_entries (populated by TenantPartnerRepository).
       const binding = await bindingService.putBinding(
         entrySlug,
         {
