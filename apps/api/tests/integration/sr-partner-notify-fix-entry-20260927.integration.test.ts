@@ -391,7 +391,8 @@ describe.skipIf(!DATABASE_URL)(
                 reloadedService.listPlatformPartnerIngressCredentials(
                   entrySlug,
                 );
-              expect(keys.map((k: any) => k.keyId)).toEqual([keyId]);
+              expect(keys.length).toBe(1);
+              expect(keys[0].keyId).toBe(keyId);
             }
           } else if (mutation === "revoke") {
             // Revoked successfully

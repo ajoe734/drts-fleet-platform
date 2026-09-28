@@ -5,7 +5,7 @@
 - **Task ID**: SR-PARTNER-NOTIFY-FIX-ENTRY-20260927
 - **Parent Baseline SHA**: 585087a2fd8114eaac0eb8a470dfca58e13dfbe4
 - **Previous Candidate SHAs**: e66144dc, 58393f7b, 5bc3f42e, b4d39fda, 63791ef1, 345cbdd614add060971c642bf60d955d51bfa9af, b57e1c0971c6df747c0348df39aca31969f9ef0a, 3249de812, b3726337fcef733c08be82d94bdfe94e433216fe
-- **Tested Checkpoint Tree/Blob**: Handoff mapped to candidate branch `gemini/sr-partner-notify-fix-entry-20260927-v5`. Current root test blob `f007b9f9c353565dc83ef347512161ec87a9f94f`. Current integration test blob `aa2c1fa22134865869992f6a7e4f4850ea1ef08a`.
+- **Tested Checkpoint Tree/Blob**: Handoff mapped to candidate branch `gemini/sr-partner-notify-fix-entry-20260927-v5`. Current root test blob `f007b9f9c353565dc83ef347512161ec87a9f94f`. Current integration test blob `5e1830a2705c41dfb2d9b0b55dd69c40588f1d8b`.
 
 ## Required Acceptance Ledger
 
