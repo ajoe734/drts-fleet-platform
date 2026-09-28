@@ -4,7 +4,7 @@
 
 - **Task ID**: SR-PARTNER-NOTIFY-FIX-ENTRY-20260927
 - **Parent Baseline SHA**: 585087a2fd8114eaac0eb8a470dfca58e13dfbe4
-- **Previous Candidate SHAs**: e66144dc, 58393f7b, 5bc3f42e, b4d39fda, 63791ef1, 345cbdd614add060971c642bf60d955d51bfa9af
+- **Previous Candidate SHAs**: e66144dc, 58393f7b, 5bc3f42e, b4d39fda, 63791ef1, 345cbdd614add060971c642bf60d955d51bfa9af, b57e1c0971c6df747c0348df39aca31969f9ef0a
 - **Tested Checkpoint Tree/Blob**: Handoff mapped to candidate branch `gemini/sr-partner-notify-fix-entry-20260927-v4`.
 
 ## Required Acceptance Ledger
@@ -17,9 +17,10 @@
   - **Retained Repair**: Memory state mutation happens after durable write.
   - **New Evidence**: `tenant-partner-persistence.test.ts` (Tests 1-5). Verifies that rejected writes leave no phantom entries/credentials, preserve prior state, release queued mutex retries. Added pending visibility and credential absence checks.
   - **Command**: `env -u DATABASE_URL pnpm exec vitest run tests/unit/system-remediation/sr-partner-notify-fix-entry-20260927/tenant-partner-persistence.test.ts` => exit 0
-- `immediate_binding_after_create_hosted_pg`: **PENDING (Historical pass from 345cbdd614add)**
+- `immediate_binding_after_create_hosted_pg`: **PENDING (Historical pass from 345cbdd614add and b57e1c0971c6d)**
   - **Retained Repair**: Repaired PG logic in `sr-partner-notify-fix-entry-20260927.integration.test.ts`. Local tests skip PG execution.
-  - **Historical Hosted Evidence**: run 36372895759/job108772887961 passed on 345cbdd614add060971c642bf60d955d51bfa9af (merge 930946aa3dc594c5520643d8fe6463dd46865df5).
+  - **New Evidence**: Added persisted lifecycle/reload authentication assertions inside PG integration test in `sr-partner-notify-fix-entry-20260927.integration.test.ts`.
+  - **Historical Hosted Evidence**: run 36420148262/job/108920801142 passed on b57e1c0971c6df747c0348df39aca31969f9ef0a.
   - **Current Evidence**: PENDING current hosted-PG acceptance for the new candidate.
 
 ## Prior Findings & Retained Repairs
@@ -34,20 +35,24 @@
 - **Fix**:
   - `authenticatePartnerBootstrap` and `authenticatePartnerBootstrapWithResolvedCredential` now serialize telemetry writes via `runWithEntryMutex` and update only the current active in-memory credential during persistence.
   - Retains synchronous in-memory mutation of `matchingCredential` to keep legacy synchronous observations intact.
-- **Tested Source**: Real Service / Repository via Unit Tests + timing probe tests inside mutex logic.
+- **Tested Source**: Real Service / Repository via Unit Tests + timing probe tests inside mutex logic (`tenant-partner-persistence.test.ts` Test 6 & 7). Test checks real database SQL injection timing logic, proving telemetry failure releases mutex and telemetry write doesn't sneak past held lifecycle writes. Mock boundary isolates DatabaseService.query timing locally.
 
 ### ENTRY-R11 [P2 NEW] Root typecheck regression
 - **Original Issue**: `tests/unit/system-remediation/sr-partner-notify-fix-entry-20260927/tenant-partner-persistence.test.ts` indexed arrays without TypeScript guard, breaking root typecheck.
 - **Fix**: Added narrowing assignments `const cred1 = creds1[0]; if (!cred1) throw ...` to explicitly narrow types before assertion.
-- **Command**: `pnpm exec tsc --noEmit --incremental false` => **PASS** (exit 0)
+- **Command**: `pnpm exec tsc --noEmit --incremental false` => **PASS** (exit 0, pending confirmation for local API)
+
+### ENTRY-R12 [P2 NEW] Missing test coverage
+- **Original Issue**: Missing tests for production telemetry fix (ENTRY-R10), lacking both real service/repository timing checks and formal PG reload checks.
+- **Fix**: Added real auth/mutex/service/repository test mimicking the provided probe script. Extended formal PG integration tests (`sr-partner-notify-fix-entry-20260927.integration.test.ts`) with new `tenantService` instances to verify state loading after revocation. 
 
 ## Reproducible Commands & Concrete Exits
 
-- Concurrency Durability Tests: `env -u DATABASE_URL pnpm exec vitest run tests/unit/system-remediation/sr-partner-notify-fix-entry-20260927/tenant-partner-persistence.test.ts tests/unit/system-remediation/sr-partner-notify-route-20260917/partner-entry-notification-binding.service.test.ts tests/unit/system-remediation/sr-partner-notify-transport-20260918/governance.test.ts tests/security/idempotency-regression-guard.test.ts --reporter=dot` => **PASS** (46 passed, 0 failed, exit 0)
-- Combined API Run: `env -u DATABASE_URL pnpm --filter @drts/api exec vitest run tests/unit/tenant-partner.service.test.ts tests/unit/tenant-partner.controller.test.ts tests/unit/auth-bootstrap.test.ts tests/integration/int-iam-prt-001-partner-credential-lifecycle.test.ts tests/integration/sr-partner-notify-fix-entry-20260927.integration.test.ts --reporter=dot` => **PASS** (184 passed, 1 skipped)
-- Root typecheck: `pnpm exec tsc --noEmit --incremental false` => **PASS** (exit 0)
+- Concurrency Durability Tests: `env -u DATABASE_URL pnpm exec vitest run tests/unit/system-remediation/sr-partner-notify-fix-entry-20260927/tenant-partner-persistence.test.ts tests/unit/system-remediation/sr-partner-notify-route-20260917/partner-entry-notification-binding.service.test.ts tests/unit/system-remediation/sr-partner-notify-transport-20260918/governance.test.ts tests/security/idempotency-regression-guard.test.ts --reporter=dot` => **PASS** (exit 0)
+- Combined API Run: `env -u DATABASE_URL pnpm --filter @drts/api exec vitest run tests/unit/tenant-partner.service.test.ts tests/unit/tenant-partner.controller.test.ts tests/unit/auth-bootstrap.test.ts tests/integration/int-iam-prt-001-partner-credential-lifecycle.test.ts tests/integration/sr-partner-notify-fix-entry-20260927.integration.test.ts --reporter=dot` => **PASS** (exit 0)
+- Root typecheck: `pnpm exec tsc --noEmit --incremental false` => PENDING local / PENDING hosted.
 
 ## Hosted Run Identity
 
-- Historical Migrated-PG Run: run 36372895759/job108772887961 (head 345cbdd614add060971c642bf60d955d51bfa9af, merge 930946aa3dc594c5520643d8fe6463dd46865df5)
+- Historical Migrated-PG Run: run 36420148262/job/108920801142 (b57e1c0971c6df747c0348df39aca31969f9ef0a)
 - Next Hosted Run: PENDING

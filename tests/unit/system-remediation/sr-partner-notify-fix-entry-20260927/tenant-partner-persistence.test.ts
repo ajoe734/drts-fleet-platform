@@ -638,3 +638,134 @@ describe("SR-PARTNER-NOTIFY-FIX-ENTRY-20260927: TenantPartnerService entry durab
     expect(service.authenticatePartnerBootstrap({ entrySlug: "entry-c", apiKey: apiKeyC }, "req-auth-3").partnerEntry.entrySlug).toBe("entry-c");
   });
 });
+
+import { TenantPartnerRepository } from "../../../../apps/api/src/modules/tenant-partner/tenant-partner.repository";
+
+describe("SR-PARTNER-NOTIFY-FIX-ENTRY-20260927: Real Repository SQL timing probes", () => {
+  const turn = () => new Promise(r => setTimeout(r, 10));
+
+  const runScenario = async (mode: "external" | "internal", mutation: "revoke" | "rotation", fail: boolean, failAuth: boolean = false) => {
+    let hold = false;
+    let failAuthActive = false;
+    const writes: any[] = [];
+    let dbError = false;
+    
+    const db = {
+      isEnabled: () => true,
+      query: (sql: string, values: any[]) => {
+        if (failAuthActive && sql.includes("INSERT INTO admin.phase1_partner_ingress_credentials")) {
+          dbError = true;
+          return Promise.reject(new Error("Auth telemetry DB fail"));
+        }
+        if (hold && sql.includes("INSERT INTO admin.phase1_partner_ingress_credentials")) {
+          expect(sql).toMatch(/revoked_at = EXCLUDED.revoked_at/);
+          expect(sql).toMatch(/record = EXCLUDED.record/);
+          return new Promise((resolve, reject) => {
+            const item = { record: JSON.parse(values[4]), settled: false, finish: null as any };
+            item.finish = (failure = false) => { 
+              if (item.settled) return; 
+              item.settled = true; 
+              failure ? reject(new Error("probe rejected lifecycle write")) : resolve({ rows: [], rowCount: 1 }); 
+            };
+            writes.push(item);
+          });
+        }
+        return Promise.resolve({ rows: [], rowCount: 1 });
+      },
+    };
+
+    const repo = new TenantPartnerRepository(db as any);
+    const service = new TenantPartnerService(new AuditNotificationService(), repo);
+
+    try {
+      const entrySlug = `review-r10-${mode}-${mutation}-${fail}-${failAuth}`;
+      await service.createPlatformPartnerEntry({
+        tenantId: "tenant-demo-001",
+        partnerCode: `code_${entrySlug}`,
+        partnerType: "bank_partner",
+        programId: "prog-1",
+        entrySlug,
+        displayName: "Review Fixture",
+        authMode: "partner_api_key",
+        eligibilityMode: "none",
+        businessDispatchSubtype: "enterprise_dispatch",
+      });
+
+      const issued = await service.issuePlatformPartnerIngressCredential(entrySlug, { purpose: "review-seed" });
+      hold = true;
+      
+      const operation = (mutation === "revoke" 
+        ? service.revokePlatformPartnerIngressCredential(entrySlug, issued.credential.keyId, { revokeReason: "probe" }) 
+        : service.issuePlatformPartnerIngressCredential(entrySlug, { purpose: "replacement", overlapDays: 1 })
+      ).then(() => "fulfilled", () => "rejected");
+      
+      await turn();
+      const lifecycle = [...writes];
+      expect(lifecycle.length).toBe(mutation === "revoke" ? 1 : 2);
+      
+      failAuthActive = failAuth;
+      let authError = null;
+      try {
+        const result = mode === "external" 
+          ? service.authenticatePartnerBootstrap({ entrySlug, apiKey: issued.plaintextKey }, "probe") 
+          : (service as any).authenticatePartnerBootstrapWithResolvedCredential(entrySlug, "probe");
+        expect(result.identity.actorId).toBe(issued.credential.keyId);
+      } catch (e) {
+        authError = e;
+      }
+      expect(authError).toBeNull();
+      
+      await turn();
+      const whileHeld = writes.length;
+      for (const w of lifecycle) w.finish(fail);
+      
+      const outcome = await operation;
+      expect(outcome).toBe(fail ? "rejected" : "fulfilled");
+      
+      for (let n = 0; n < 10; n++) {
+        await turn();
+        for (const w of writes) w.finish();
+        if ((service as any).entrySlugMutexes.size === 0 && writes.every(w => w.settled)) break;
+      }
+      
+      expect((service as any).entrySlugMutexes.size).toBe(0);
+      expect(writes.every(w => w.settled)).toBe(true);
+      
+      const seedWrites = writes.filter(w => w.record.keyId === issued.credential.keyId).map(w => ({
+        status: w.record.status,
+        revokedAtIsNull: w.record.revokedAt === null,
+        workload: w.record.lastUsedWorkload,
+        overlap: w.record.overlapEndsAt !== null
+      }));
+      
+      const last = seedWrites.at(-1);
+      expect(last).toBeDefined();
+      expect(last?.status).toBe(fail ? "active" : mutation === "revoke" ? "revoked" : "overlap_active");
+      
+      // Crucial requirement: Telemetry write must not have snuck past the mutex holding!
+      expect(whileHeld).toBe(lifecycle.length); // no extra writes while held
+      
+      const memory = service.listPlatformPartnerIngressCredentials(entrySlug).find(c => c.keyId === issued.credential.keyId)?.status;
+      expect(memory).toBe(fail ? "active" : mutation === "revoke" ? "revoked" : "overlap_active");
+      
+    } finally {
+      for (const w of writes) w.finish();
+      await turn();
+      service.onModuleDestroy();
+    }
+  };
+
+  it("should pass real repository timing probe for all mode/mutation/fail combinations", async () => {
+    for (const mode of ["external", "internal"] as const) {
+      for (const mutation of ["revoke", "rotation"] as const) {
+        for (const fail of [false, true]) {
+          await runScenario(mode, mutation, fail);
+        }
+      }
+    }
+  });
+
+  it("should release mutex if telemetry write fails", async () => {
+    await runScenario("external", "revoke", false, true);
+  });
+});

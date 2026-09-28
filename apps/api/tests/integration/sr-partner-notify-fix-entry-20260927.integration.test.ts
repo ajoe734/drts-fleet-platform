@@ -86,5 +86,63 @@ describe.skipIf(!DATABASE_URL)(
       expect(binding.webhookId).toBe(endpoint.webhookId);
       expect(binding.eventTypes).toContain("assignment_disclosure_ready");
     });
+
+    it("real formal-PG lifecycle reload authentication assertions", async () => {
+      const entrySlug = `pg-lifecycle-${Date.now()}`;
+
+      // 1. Create entry and wait for persistence
+      const persistSpy = vi.spyOn(tenantRepository, "persistChanges");
+      await tenantService.createPlatformPartnerEntry({
+        tenantId: "tenant-demo-001",
+        partnerCode: `code_${entrySlug}`,
+        partnerType: "bank_partner",
+        programId: "prog-1",
+        entrySlug,
+        displayName: "PG Lifecycle Partner",
+        authMode: "partner_api_key",
+        eligibilityMode: "none",
+        businessDispatchSubtype: "enterprise_dispatch",
+      });
+      await Promise.all(persistSpy.mock.results.map((r) => r.value));
+
+      // 2. Issue seed key and wait for persistence
+      persistSpy.mockClear();
+      const issueRes = await tenantService.issuePlatformPartnerIngressCredential(entrySlug, { purpose: "seed" });
+      await Promise.all(persistSpy.mock.results.map((r) => r.value));
+
+      const apiKey = issueRes.plaintextKey;
+      const keyId = issueRes.credential.keyId;
+
+      // 3. Reload service and verify authentication
+      const reloadedRepo1 = new TenantPartnerRepository(database);
+      const reloadedService1 = new TenantPartnerService(new AuditNotificationService(new AuditLogRepository(database)), reloadedRepo1);
+      await reloadedService1.onModuleInit();
+
+      const auth1 = reloadedService1.authenticatePartnerBootstrap({ entrySlug, apiKey }, "req-1");
+      expect(auth1.identity.actorId).toBe(keyId);
+      
+      // wait for telemetry write
+      await new Promise(r => setTimeout(r, 100));
+
+      // 4. Revoke key and wait for persistence
+      const persistSpy2 = vi.spyOn(reloadedRepo1, "persistChanges");
+      await reloadedService1.revokePlatformPartnerIngressCredential(entrySlug, keyId, { revokeReason: "test" });
+      await Promise.all(persistSpy2.mock.results.map((r) => r.value));
+
+      // 5. Reload service again and verify authentication fails
+      const reloadedRepo2 = new TenantPartnerRepository(database);
+      const reloadedService2 = new TenantPartnerService(new AuditNotificationService(new AuditLogRepository(database)), reloadedRepo2);
+      await reloadedService2.onModuleInit();
+
+      try {
+        reloadedService2.authenticatePartnerBootstrap({ entrySlug, apiKey }, "req-2");
+        expect.fail("Should have thrown PARTNER_API_KEY_REVOKED");
+      } catch (e: any) {
+        expect(e.code).toBe("PARTNER_API_KEY_REVOKED");
+      }
+
+      await reloadedService1.onModuleDestroy();
+      await reloadedService2.onModuleDestroy();
+    });
   }
 );
