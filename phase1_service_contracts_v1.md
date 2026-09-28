@@ -842,11 +842,6 @@
 
 - audit log append-only，不可 update/delete。
 - webhook 失敗需遵循 retry policy。
-- Webhook Transport Security Rules:
-  - Delivery requires strict environment guards. Production (regardless of flags) and non-production (without explicit opt-in) must retain all refusal gates (e.g., blocking private addresses and requiring HTTPS).
-  - The local delivery exception is strictly bounded: non-production AND explicit flag (`DRTS_ALLOW_LOCAL_WEBHOOKS=true`) AND bounded receiver identity (`127.0.0.1`, `::1`, and `localhost`).
-  - Local socket resolution must strictly remain within the loopback identity. All non-loopback private IPs (e.g., `10.x.x.x`) and metadata IPs (`169.254.169.254`) must be blocked to prevent SSRF.
-  - Deadline, payload limits, redirect restrictions, and HMAC signatures must be fully retained under all conditions.
 - 高敏感操作必須寫審批人與前後值摘要。
 
 ---

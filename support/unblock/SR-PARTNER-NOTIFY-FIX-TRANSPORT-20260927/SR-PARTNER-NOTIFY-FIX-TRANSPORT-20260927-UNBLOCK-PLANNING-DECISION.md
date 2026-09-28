@@ -23,10 +23,10 @@ Disposition: defined the exact identity boundary for the controlled local receiv
 
 ## Delivery and validation
 
-This task resolves the planning blocker by documenting the `DRTS_ALLOW_LOCAL_WEBHOOKS` decision in the canonical `phase1_service_contracts_v1.md`.
+This task resolves the planning blocker by defining the exact `DRTS_ALLOW_LOCAL_WEBHOOKS` decision in this task artifact, routing the product/contract decision directly to the parent task as a concrete next step instead of producing an unratified L1 amendment.
 
 **Unblocked Next Step for Parent Task (`SR-PARTNER-NOTIFY-FIX-TRANSPORT-20260927`):**
-Implement the exact constraint documented in `phase1_service_contracts_v1.md` within `partner-notification-https.ts` using the new v2 branch (`gemini2/sr-partner-notify-fix-transport-20260927-v2`), preserving all original security guarantees for non-loopback destinations.
+Implement the exact constraint documented in this unblock artifact (see Section "Scope and routing decision") within `partner-notification-https.ts` using the new v2 branch (`gemini2/sr-partner-notify-fix-transport-20260927-v2`), preserving all original security guarantees for non-loopback destinations.
 
 ### Guide 0.7 finding/acceptance evidence table
 
@@ -38,3 +38,4 @@ Implement the exact constraint documented in `phase1_service_contracts_v1.md` wi
 | PD-4: Delivery/dispatch-boundary violation | `SR-PARTNER-NOTIFY-FIX-TRANSPORT-20260927-UNBLOCK-PLANNING-DECISION.md` | Helper worker removed ORCH_DISPATCH_* to bypass isolation and mutate parent directly → Bypass removed. Supervisor coordination requested; dependency explicitly recorded in helper task progress/blocker. | Read owner execution log (00:05:10Z), recorded progress at 2026-09-28T00:41:34Z by Gemini2. | Parent runtime/hosted acceptance remains separate |
 | PD-5: New non-mergeable commit history (VERIFIED FIXED) | Commit subject | Invalid subject missing TASK-ID → Replaced with supported docs(TASK-ID) subject with trailers | (Current) Full-range production trailer checker exits 0 (2 commits OK). Historical Same-SHA Commit trailers job 108742777710 on 943a5981aeefaa677b70b98eece31d4f8bca5ff1 completed SUCCESS. Current CI PR 2201 Commit trailers job 108744215193 on d29858a15a5a7eeabf9a5484ce7a2325b27a8097 completed SUCCESS. Old helper remote branch remains preserved at 1f5ae37a39450305d272602ccd0b9a11328eaf5f. | |
 | Second-round repair: Trailing whitespace (VERIFIED FIXED) | `SR-PARTNER-NOTIFY-FIX-TRANSPORT-20260927-UNBLOCK-PLANNING-DECISION.md`:16 | `git diff --check` exits 2 (trailing whitespace) → Whitespace removed | `git diff --check` exits 0 (clean) | Docs-only formatting diff |
+| PD-6: Unratified L1 amendment (VERIFIED FIXED) | `phase1_service_contracts_v1.md` | L1 document modified without ratification → Reverted changes to L1 document; decision is routed to parent task directly | `git diff origin/dev...HEAD phase1_service_contracts_v1.md` is empty | |
