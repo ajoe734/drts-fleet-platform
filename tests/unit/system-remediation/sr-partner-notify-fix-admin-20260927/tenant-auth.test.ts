@@ -7,7 +7,8 @@ describe("SR-PARTNER-NOTIFY-FIX-ADMIN-20260927 tenant auth proxy authority", () 
     const auth = issueControlPlaneRequestAuth({
       actorType: "platform_admin",
       headers: {
-        "x-goog-authenticated-user-email": "accounts.google.com:admin@platform.drts",
+        "x-goog-authenticated-user-email":
+          "accounts.google.com:admin@platform.drts",
       },
       assumeTenantId: "t-test-tenant-id",
     });
@@ -20,7 +21,8 @@ describe("SR-PARTNER-NOTIFY-FIX-ADMIN-20260927 tenant auth proxy authority", () 
     const auth = issueControlPlaneRequestAuth({
       actorType: "platform_admin",
       headers: {
-        "x-goog-authenticated-user-email": "accounts.google.com:admin@platform.drts",
+        "x-goog-authenticated-user-email":
+          "accounts.google.com:admin@platform.drts",
       },
       jwtSecret: "test-secret-123",
       assumeTenantId: "t-test-tenant-id",
@@ -29,7 +31,7 @@ describe("SR-PARTNER-NOTIFY-FIX-ADMIN-20260927 tenant auth proxy authority", () 
     expect(auth.headers["x-tenant-id"]).toBe("t-test-tenant-id");
     expect(auth.identity.tenantId).toBe("t-test-tenant-id");
 
-    const token = auth.headers["x-drts-authorization"].replace("Bearer ", "");
+    const token = auth.headers["x-drts-authorization"]!.replace("Bearer ", "");
     const decoded = jwt.verify(token, "test-secret-123") as any;
     expect(decoded.tenantId).toBe("t-test-tenant-id");
   });
