@@ -1,6 +1,9 @@
 import { lookup } from "node:dns";
-import { request } from "node:https";
+import { request as httpRequest } from "node:http";
+import { request as httpsRequest } from "node:https";
 import { BlockList, isIP } from "node:net";
+import type { LookupAddress, LookupOptions } from "node:dns";
+import type { IncomingMessage } from "node:http";
 import { PARTNER_NOTIFICATION_MAX_ACK_BODY_BYTES } from "@drts/contracts";
 import type { WebhookFetch } from "./webhook-dispatch.service";
 
@@ -47,22 +50,36 @@ export const partnerNotificationHttpsFetch: WebhookFetch = async (
 ) => {
   const url = new URL(input);
   const host = url.hostname.replace(/^\[|\]$/g, "");
+  const isTestEnv =
+    process.env.NODE_ENV !== "production" &&
+    process.env.DRTS_ALLOW_LOCAL_WEBHOOKS === "true";
+  const isControlledReceiver =
+    isTestEnv && (host === "127.0.0.1" || host === "::1" || host === "localhost");
+
+  if (url.username || url.password) {
+    throw new Error("partner_endpoint_not_public_https");
+  }
+
   if (
-    url.protocol !== "https:" ||
-    url.username ||
-    url.password ||
-    (isIP(host) && !isPublicPartnerAddress(host))
+    !isControlledReceiver &&
+    (url.protocol !== "https:" ||
+      (isIP(host) && !isPublicPartnerAddress(host)))
   )
     throw new Error("partner_endpoint_not_public_https");
   return new Promise((resolve, reject) => {
     let rejectBody: ((error: Error) => void) | undefined;
-    const req = request(
+    const requestFn = isControlledReceiver && url.protocol === "http:" ? httpRequest : httpsRequest;
+    const req = requestFn(
       url,
       {
         method: "POST",
         headers: Object.fromEntries(new Headers(init?.headers)),
         ...(init?.signal ? { signal: init.signal } : {}),
-        lookup: (hostname, options, callback) => {
+        lookup: (
+          hostname: string,
+          options: LookupOptions,
+          callback: (err: NodeJS.ErrnoException | null, address: string | LookupAddress[], family: number) => void,
+        ) => {
           lookup(
             hostname,
             { all: true, verbatim: true },
@@ -71,20 +88,26 @@ export const partnerNotificationHttpsFetch: WebhookFetch = async (
                 callback(error, "", 4);
                 return;
               }
-              if (
-                !addresses.length ||
-                addresses.some((item) => !isPublicPartnerAddress(item.address))
-              ) {
+              if (!addresses.length) {
                 callback(new Error("partner_endpoint_dns_not_public"), "", 4);
                 return;
               }
-              if (options.all) callback(null, addresses);
+              if (isControlledReceiver) {
+                if (addresses.some((item) => item.address !== "127.0.0.1" && item.address !== "::1")) {
+                  callback(new Error("partner_endpoint_dns_not_public"), "", 4);
+                  return;
+                }
+              } else if (addresses.some((item) => !isPublicPartnerAddress(item.address))) {
+                callback(new Error("partner_endpoint_dns_not_public"), "", 4);
+                return;
+              }
+              if (options.all) callback(null, addresses, 4);
               else callback(null, addresses[0]!.address, addresses[0]!.family);
             },
           );
         },
       },
-      (response) => {
+      (response: IncomingMessage) => {
         const status = response.statusCode ?? 0;
         const ok = status >= 200 && status < 300;
         // Preserve headers immediately. Non-ack responses need no body; a
