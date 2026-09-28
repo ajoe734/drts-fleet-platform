@@ -486,6 +486,11 @@ describe.skipIf(!DATABASE_URL)(
         queryPromise: Promise<any>;
       }[] = [];
 
+      let queryEnteredResolve!: () => void;
+      const queryEnteredPromise = new Promise<void>((r) => {
+        queryEnteredResolve = r;
+      });
+
       vi.spyOn(database, "query").mockImplementation(
         (sql: string, values?: any[]) => {
           if (
@@ -500,6 +505,7 @@ describe.skipIf(!DATABASE_URL)(
               originalQuery(sql, values),
             );
             heldTelemetry.push({ resolveHold, queryPromise });
+            queryEnteredResolve();
             return queryPromise;
           }
           return originalQuery(sql, values);
@@ -524,12 +530,22 @@ describe.skipIf(!DATABASE_URL)(
             "req-after",
           );
 
-          await new Promise((r) => setTimeout(r, 10));
+          await Promise.race([
+            queryEnteredPromise,
+            new Promise((_, rej) =>
+              setTimeout(
+                () => rej(new Error("Timeout waiting for query entry")),
+                2000,
+              ),
+            ),
+          ]);
+          expect(heldTelemetry.length).toBeGreaterThan(0);
 
           if (reloadedService.entrySlugMutexes.size > 0) {
             throw new Error("injected post-reload identity assertion failure");
           }
         } finally {
+          holdTelemetry = false;
           try {
             if (reloadedService) {
               const reloadDrainStart = Date.now();
@@ -555,16 +571,15 @@ describe.skipIf(!DATABASE_URL)(
           throw e;
         }
       } finally {
-        holdTelemetry = false;
         // Await actual completion of all released telemetry queries
         await Promise.allSettled(heldTelemetry.map((h) => h.queryPromise));
+        if (reloadedService) {
+          expect(reloadedService.entrySlugMutexes.size).toBe(0);
+        }
         vi.restoreAllMocks();
       }
 
       expect(caughtAssertionError).toBe(true);
-      if (reloadedService) {
-        expect(reloadedService.entrySlugMutexes.size).toBe(0);
-      }
     });
   },
 );
