@@ -12,7 +12,7 @@ describe("SR-PARTNER-NOTIFY-FIX-ENTRY-20260927: TenantPartnerService entry durab
       persistChanges: vi.fn(),
     };
     const service = new TenantPartnerService(auditNotificationService, mockRepo);
-    
+
     let resolvePersistence: () => void = () => {};
     const persistencePromise = new Promise<void>((resolve) => {
       resolvePersistence = resolve;
@@ -45,10 +45,10 @@ describe("SR-PARTNER-NOTIFY-FIX-ENTRY-20260927: TenantPartnerService entry durab
     // Now resolve persistence
     resolvePersistence();
     const created = await createPromise;
-    
+
     expect(isResolved).toBe(true);
     expect(created.entrySlug).toBe("durable-partner-1");
-    
+
     // verify it is usable
     const retrieved = service.getPartnerEntry("durable-partner-1");
     expect(retrieved).toBeDefined();
@@ -82,7 +82,7 @@ describe("SR-PARTNER-NOTIFY-FIX-ENTRY-20260927: TenantPartnerService entry durab
 
     // verify it is NOT usable
     expect(() => service.getPartnerEntry("failed-partner-1")).toThrowError();
-    
+
     // check it is not in the list
     const entries = service.listPlatformPartnerEntries();
     expect(entries.find(e => e.entrySlug === "failed-partner-1")).toBeUndefined();

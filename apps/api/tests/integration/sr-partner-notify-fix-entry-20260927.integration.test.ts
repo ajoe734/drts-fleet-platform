@@ -57,22 +57,31 @@ describe.skipIf(!DATABASE_URL)(
 
       expect(entry.entrySlug).toBe(entrySlug);
 
+      const endpoint = await tenantService.createWebhookEndpoint(
+        "tenant-demo-001",
+        {
+          url: "https://example.com/webhook",
+          secret: "test_secret_for_webhook_binding",
+          events: ["assignment_disclosure_ready"],
+        }
+      );
+
       // Formal V0021/V0104 tables are used by PartnerEntryNotificationBindingService.
       // Call putBinding which verifies foreign key from admin.phase1_partner_notification_bindings
       // to admin.phase1_partner_channel_entries (populated by TenantPartnerRepository).
       const binding = await bindingService.putBinding(
         entrySlug,
         {
-          notificationType: "webhook",
-          endpointUrl: "https://example.com/webhook",
-          eventTypes: ["partner.entry.created"],
+          webhookId: endpoint.webhookId,
+          eventTypes: ["assignment_disclosure_ready"],
+          expectedVersion: 0,
         },
         null
       );
 
       expect(binding.entrySlug).toBe(entrySlug);
-      expect(binding.notificationType).toBe("webhook");
-      expect(binding.endpointUrl).toBe("https://example.com/webhook");
+      expect(binding.webhookId).toBe(endpoint.webhookId);
+      expect(binding.eventTypes).toContain("assignment_disclosure_ready");
     });
   }
 );

@@ -915,13 +915,13 @@ export class TenantPartnerController {
   }
 
   @Post("platform-admin/partner-entries/:entrySlug/credentials/issue")
-  issuePlatformPartnerIngressCredential(
+  async issuePlatformPartnerIngressCredential(
     @Param("entrySlug") entrySlug: string,
     @Body() command: IssuePartnerIngressCredentialCommand,
     @Headers("x-request-id") requestId?: string,
   ) {
     const issued: PartnerIngressCredentialIssued =
-      this.tenantPartnerService.issuePlatformPartnerIngressCredential(
+      await this.tenantPartnerService.issuePlatformPartnerIngressCredential(
         entrySlug,
         command,
         requestId,
@@ -930,14 +930,14 @@ export class TenantPartnerController {
   }
 
   @Post("platform-admin/partner-entries/:entrySlug/credentials/:keyId/revoke")
-  revokePlatformPartnerIngressCredential(
+  async revokePlatformPartnerIngressCredential(
     @Param("entrySlug") entrySlug: string,
     @Param("keyId") keyId: string,
     @Body() command: RevokePartnerIngressCredentialCommand,
     @Headers("x-request-id") requestId?: string,
   ) {
     return toApiSuccessEnvelope(
-      this.tenantPartnerService.revokePlatformPartnerIngressCredential(
+      await this.tenantPartnerService.revokePlatformPartnerIngressCredential(
         entrySlug,
         keyId,
         command,
