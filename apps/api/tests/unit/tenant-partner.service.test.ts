@@ -993,11 +993,11 @@ describe("TenantPartnerService sensitive-data governance", () => {
     expect(delivery).not.toHaveProperty("retryPolicySnapshot");
   });
 
-  it("creates and updates partner entries through the platform-admin lifecycle with audit metadata", () => {
+  it("creates and updates partner entries through the platform-admin lifecycle with audit metadata", async () => {
     const auditNotificationService = new AuditNotificationService();
     const service = new TenantPartnerService(auditNotificationService);
 
-    const created = service.createPlatformPartnerEntry(
+    const created = await service.createPlatformPartnerEntry(
       {
         tenantId: "tenant-demo-001",
         partnerCode: "bank_growth_plus",
@@ -1041,7 +1041,7 @@ describe("TenantPartnerService sensitive-data governance", () => {
       },
     });
 
-    const updated = service.updatePlatformPartnerEntry(
+    const updated = await service.updatePlatformPartnerEntry(
       created.entrySlug,
       {
         displayName: "Bank Growth Plus Premium Airport",
@@ -1097,14 +1097,14 @@ describe("TenantPartnerService sensitive-data governance", () => {
     );
   });
 
-  it("revokes partner entries and blocks public lookup plus bootstrap auth", () => {
+  it("revokes partner entries and blocks public lookup plus bootstrap auth", async () => {
     process.env.PARTNER_INGRESS_KEY_BANK_DEMO_ALPHA_AIRPORT =
       "pk_test_alpha_ingress_secret";
 
     const auditNotificationService = new AuditNotificationService();
     const service = new TenantPartnerService(auditNotificationService);
 
-    const revoked = service.revokePlatformPartnerEntry(
+    const revoked = await service.revokePlatformPartnerEntry(
       "bank-demo-alpha-airport",
       "req-partner-revoke-001",
     );
@@ -1557,7 +1557,7 @@ describe("TenantPartnerService sensitive-data governance", () => {
     );
     await service.onModuleInit();
 
-    service.revokePlatformPartnerEntry(
+    await service.revokePlatformPartnerEntry(
       "bank-demo-alpha-airport",
       "req-partner-entry-persist-001",
     );

@@ -1343,6 +1343,37 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
   private partnerIngressCredentials: StoredPartnerIngressCredentialRecord[] =
     [];
 
+  private entrySlugMutexes = new Map<string, Promise<void>>();
+
+  private async runWithEntryMutex<T>(
+    entrySlug: string,
+    task: () => Promise<T>,
+  ): Promise<T> {
+    const lockKey = entrySlug?.trim() ?? "";
+    const previous = this.entrySlugMutexes.get(lockKey) ?? Promise.resolve();
+    let release: () => void;
+    const next = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+
+    const chained = previous.then(
+      () => next,
+      () => next,
+    );
+    this.entrySlugMutexes.set(lockKey, chained);
+
+    await previous.catch(() => {});
+
+    try {
+      return await task();
+    } finally {
+      release!();
+      if (this.entrySlugMutexes.get(lockKey) === chained) {
+        this.entrySlugMutexes.delete(lockKey);
+      }
+    }
+  }
+
   private partnerEligibilityVerifications = new Map<
     string,
     PartnerEligibilityVerificationRecord
@@ -4877,18 +4908,19 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
     );
   }
 
-  createPlatformPartnerEntry(
+  async createPlatformPartnerEntry(
     command: CreatePartnerChannelEntryCommand,
     requestId?: string,
   ) {
-    const now = new Date().toISOString();
-    const tenantId = this.requireNonBlank(command.tenantId, "tenantId");
-    const partnerCode = this.normalizePartnerCode(command.partnerCode);
-    const programId = this.requireNonBlank(command.programId, "programId");
     const entrySlug = this.normalizeEntrySlug(command.entrySlug);
+    return this.runWithEntryMutex(entrySlug, async () => {
+      const now = new Date().toISOString();
+      const tenantId = this.requireNonBlank(command.tenantId, "tenantId");
+      const partnerCode = this.normalizePartnerCode(command.partnerCode);
+      const programId = this.requireNonBlank(command.programId, "programId");
 
-    if (this.partnerEntries.some((entry) => entry.entrySlug === entrySlug)) {
-      throw new ApiRequestError(
+      if (this.partnerEntries.some((entry) => entry.entrySlug === entrySlug)) {
+        throw new ApiRequestError(
         HttpStatus.CONFLICT,
         "PARTNER_ENTRY_CONFLICT",
         "A partner entry with this slug already exists.",
@@ -4936,16 +4968,20 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
       },
     };
 
-    this.partnerEntries = [
-      this.clonePartnerEntry(record),
-      ...this.partnerEntries.filter((entry) => entry.entrySlug !== entrySlug),
-    ];
-    this.persistChanges(
+    const newEntry = this.clonePartnerEntry(record);
+
+    await this.persistChangesRequired(
       {
-        partnerEntries: [this.clonePartnerEntry(record)],
+        partnerEntries: [newEntry],
       },
       "create_platform_partner_entry",
     );
+
+    this.partnerEntries = [
+      newEntry,
+      ...this.partnerEntries.filter((entry) => entry.entrySlug !== entrySlug),
+    ];
+
     this.recordTenantAudit(
       {
         actorId: null,
@@ -4964,15 +5000,19 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
     );
 
     return this.clonePartnerEntry(record);
+    });
   }
 
-  updatePlatformPartnerEntry(
+  async updatePlatformPartnerEntry(
     entrySlug: string,
     command: UpdatePartnerChannelEntryCommand,
     requestId?: string,
   ) {
-    const entry = this.requirePlatformPartnerEntry(entrySlug);
-    const before = this.clonePartnerEntry(entry);
+    return this.runWithEntryMutex(entrySlug, async () => {
+      const originalEntry = this.requirePlatformPartnerEntry(entrySlug);
+      const before = this.clonePartnerEntry(originalEntry);
+      const entry = this.clonePartnerEntry(originalEntry);
+
     const lifecycleStatus = this.resolveLifecycleStatus(command.status);
     const lifecycleActiveFlag =
       command.activeFlag !== undefined ? command.activeFlag : undefined;
@@ -5070,12 +5110,19 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
       updatedBy: "platform_admin",
     };
 
-    this.persistChanges(
+    const newEntry = this.clonePartnerEntry(entry);
+
+    await this.persistChangesRequired(
       {
-        partnerEntries: [this.clonePartnerEntry(entry)],
+        partnerEntries: [newEntry],
       },
       "update_platform_partner_entry",
     );
+
+    this.partnerEntries = this.partnerEntries.map((e) =>
+      e.entrySlug === entry.entrySlug ? newEntry : e,
+    );
+
     this.recordTenantAudit(
       {
         actorId: null,
@@ -5095,14 +5142,15 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
     );
 
     return this.clonePartnerEntry(entry);
+    });
   }
 
-  setPlatformPartnerEntryStatus(
+  async setPlatformPartnerEntryStatus(
     entrySlug: string,
     status: "active" | "inactive",
     requestId?: string,
   ) {
-    return this.updatePlatformPartnerEntry(
+    return await this.updatePlatformPartnerEntry(
       entrySlug,
       {
         status,
@@ -5111,254 +5159,271 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
     );
   }
 
-  revokePlatformPartnerEntry(entrySlug: string, requestId?: string) {
-    const entry = this.requirePlatformPartnerEntry(entrySlug);
-    const before = this.clonePartnerEntry(entry);
-    const revokedAt = new Date().toISOString();
+  async revokePlatformPartnerEntry(entrySlug: string, requestId?: string) {
+    return this.runWithEntryMutex(entrySlug, async () => {
+      const originalEntry = this.requirePlatformPartnerEntry(entrySlug);
+      const before = this.clonePartnerEntry(originalEntry);
+      const entry = this.clonePartnerEntry(originalEntry);
+      const revokedAt = new Date().toISOString();
 
-    entry.status = "revoked";
-    entry.activeFlag = false;
-    entry.revokedAt = revokedAt;
-    entry.revokedBy = "platform_admin";
-    entry.revokeReason = "partner_entry_revoked";
-    entry.updatedAt = revokedAt;
-    entry.auditMetadata = {
-      ...entry.auditMetadata,
-      source: "platform_admin_console",
-      requestId: this.normalizeNullableText(requestId),
-      updatedBy: "platform_admin",
-    };
+      entry.status = "revoked";
+      entry.activeFlag = false;
+      entry.revokedAt = revokedAt;
+      entry.revokedBy = "platform_admin";
+      entry.revokeReason = "partner_entry_revoked";
+      entry.updatedAt = revokedAt;
+      entry.auditMetadata = {
+        ...entry.auditMetadata,
+        source: "platform_admin_console",
+        requestId: this.normalizeNullableText(requestId),
+        updatedBy: "platform_admin",
+      };
 
-    let revokedCredentialCount = 0;
-    this.partnerIngressCredentials = this.partnerIngressCredentials.map(
-      (credential) => {
-        if (
-          credential.entrySlug !== entry.entrySlug ||
-          credential.revokedAt !== null
-        ) {
-          return credential;
-        }
-        revokedCredentialCount += 1;
-        return {
-          ...credential,
-          revokedAt,
-          revokedBy: "platform_admin",
-          revokeReason: "partner_entry_revoked",
-        };
-      },
-    );
+      const credentialsToRevoke = this.partnerIngressCredentials.filter(
+        (c) => c.entrySlug === entry.entrySlug && c.revokedAt === null,
+      );
+      const revokedCredentialCount = credentialsToRevoke.length;
 
-    this.persistChanges(
-      {
-        partnerEntries: [this.clonePartnerEntry(entry)],
-        partnerIngressCredentials: this.partnerIngressCredentials
-          .filter((credential) => credential.entrySlug === entry.entrySlug)
-          .map((credential) =>
-            this.cloneStoredPartnerIngressCredential(credential),
+      const updatedCredentials = credentialsToRevoke.map((c) => ({
+        ...c,
+        revokedAt,
+        revokedBy: "platform_admin",
+        revokeReason: "partner_entry_revoked",
+      }));
+
+      const newEntry = this.clonePartnerEntry(entry);
+
+      await this.persistChangesRequired(
+        {
+          partnerEntries: [newEntry],
+          partnerIngressCredentials: updatedCredentials.map((c) =>
+            this.cloneStoredPartnerIngressCredential(c),
           ),
-      },
-      "revoke_platform_partner_entry",
-    );
-    this.recordTenantAudit(
-      {
-        actorId: null,
-        actorType: "platform_admin",
-        tenantId: entry.tenantId,
-        moduleName: "tenant-partner",
-        actionName: "revoke_partner_entry",
-        resourceType: "partner_entry",
-        resourceId: entry.entrySlug,
-        oldValuesSummary: before as unknown as Record<string, unknown>,
-        newValuesSummary: {
-          ...(this.clonePartnerEntry(entry) as unknown as Record<
-            string,
-            unknown
-          >),
-          revokedCredentialCount,
         },
-      },
-      requestId,
-    );
+        "revoke_platform_partner_entry",
+      );
 
-    return this.clonePartnerEntry(entry);
+      this.partnerEntries = this.partnerEntries.map((e) =>
+        e.entrySlug === entry.entrySlug ? newEntry : e,
+      );
+
+      const updatedKeyIds = new Set(updatedCredentials.map((c) => c.keyId));
+      this.partnerIngressCredentials = this.partnerIngressCredentials.map((c) =>
+        updatedKeyIds.has(c.keyId)
+          ? updatedCredentials.find((u) => u.keyId === c.keyId)!
+          : c,
+      );
+
+      this.recordTenantAudit(
+        {
+          actorId: null,
+          actorType: "platform_admin",
+          tenantId: entry.tenantId,
+          moduleName: "tenant-partner",
+          actionName: "revoke_partner_entry",
+          resourceType: "partner_entry",
+          resourceId: entry.entrySlug,
+          oldValuesSummary: before as unknown as Record<string, unknown>,
+          newValuesSummary: {
+            ...(this.clonePartnerEntry(entry) as unknown as Record<
+              string,
+              unknown
+            >),
+            revokedCredentialCount,
+          },
+        },
+        requestId,
+      );
+
+      return this.clonePartnerEntry(entry);
+    });
   }
 
-  issuePlatformPartnerIngressCredential(
+  async issuePlatformPartnerIngressCredential(
     entrySlug: string,
     command: IssuePartnerIngressCredentialCommand,
     requestId?: string,
-  ): PartnerIngressCredentialIssued {
-    const entry = this.requirePlatformPartnerEntry(entrySlug);
-    if (entry.status === "revoked") {
-      throw new ApiRequestError(
-        HttpStatus.CONFLICT,
-        "PARTNER_ENTRY_REVOKED",
-        "Revoked partner entries cannot receive new credentials.",
+  ): Promise<PartnerIngressCredentialIssued> {
+    return this.runWithEntryMutex(entrySlug, async () => {
+      const entry = this.requirePlatformPartnerEntry(entrySlug);
+      if (entry.status === "revoked") {
+        throw new ApiRequestError(
+          HttpStatus.CONFLICT,
+          "PARTNER_ENTRY_REVOKED",
+          "Revoked partner entries cannot receive new credentials.",
+          {
+            entrySlug: entry.entrySlug,
+          },
+        );
+      }
+
+      const issued = this.buildIssuedPartnerIngressCredential(
+        entry.entrySlug,
+        command.rotationReason ?? null,
         {
-          entrySlug: entry.entrySlug,
+          ownerRef: command.ownerRef ?? null,
+          ownerName: command.ownerName ?? null,
+          ownerType: command.ownerType ?? null,
+          purpose: command.purpose ?? null,
+          scopes: command.scopes ?? undefined,
+          expiresAt: command.expiresAt ?? null,
         },
       );
-    }
+      const rotatedAt = issued.credential.createdAt;
+      const overlapEndsAt = this.resolveCredentialOverlapEndsAt(
+        rotatedAt,
+        command.overlapDays,
+      );
+      let revokedCredentialId: string | null = null;
+      let preservedOverlap = false;
+      const mutatedCredentialIds = new Set<string>([
+        issued.storedCredential.keyId,
+      ]);
+      const updatedCredentialsList = this.partnerIngressCredentials.map(
+        (credential) => {
+          if (credential.entrySlug !== entry.entrySlug || credential.revokedAt) {
+            return credential;
+          }
 
-    const issued = this.buildIssuedPartnerIngressCredential(
-      entry.entrySlug,
-      command.rotationReason ?? null,
-      {
-        ownerRef: command.ownerRef ?? null,
-        ownerName: command.ownerName ?? null,
-        ownerType: command.ownerType ?? null,
-        purpose: command.purpose ?? null,
-        scopes: command.scopes ?? undefined,
-        expiresAt: command.expiresAt ?? null,
-      },
-    );
-    const rotatedAt = issued.credential.createdAt;
-    const overlapEndsAt = this.resolveCredentialOverlapEndsAt(
-      rotatedAt,
-      command.overlapDays,
-    );
-    let revokedCredentialId: string | null = null;
-    let preservedOverlap = false;
-    // A rotation pass touches every live credential on the entry, not only the
-    // new key and the one held open for overlap. On a second rotation the
-    // remaining historical credentials are retired here too, so they all have
-    // to reach the snapshot or they come back live on the next reload.
-    const mutatedCredentialIds = new Set<string>([
-      issued.storedCredential.keyId,
-    ]);
-    this.partnerIngressCredentials = this.partnerIngressCredentials.map(
-      (credential) => {
-        if (credential.entrySlug !== entry.entrySlug || credential.revokedAt) {
-          return credential;
-        }
+          mutatedCredentialIds.add(credential.keyId);
+          const updated = this.cloneStoredPartnerIngressCredential(credential);
+          this.reconcileStoredPartnerIngressCredential(updated, rotatedAt);
+          if (
+            !preservedOverlap &&
+            (updated.status === "active" ||
+              updated.status === "overlap_active")
+          ) {
+            preservedOverlap = true;
+            revokedCredentialId = updated.keyId;
+            updated.overlapEndsAt = overlapEndsAt;
+            updated.supersededByKeyId = issued.storedCredential.keyId;
+            updated.autoRevokedAt = null;
+            updated.status = "overlap_active";
+            updated.revokedAt = null;
+            updated.revokeReason = null;
+            updated.signals = this.buildCredentialSignals(
+              updated.lastUsedAt,
+              updated.expiresAt ?? null,
+              null,
+              rotatedAt,
+            );
+            return updated;
+          }
 
-        mutatedCredentialIds.add(credential.keyId);
-        this.reconcileStoredPartnerIngressCredential(credential, rotatedAt);
-        if (
-          !preservedOverlap &&
-          (credential.status === "active" ||
-            credential.status === "overlap_active")
-        ) {
-          preservedOverlap = true;
-          revokedCredentialId = credential.keyId;
-          credential.overlapEndsAt = overlapEndsAt;
-          credential.supersededByKeyId = issued.storedCredential.keyId;
-          credential.autoRevokedAt = null;
-          credential.status = "overlap_active";
-          credential.revokedAt = null;
-          credential.revokeReason = null;
-          credential.signals = this.buildCredentialSignals(
-            credential.lastUsedAt,
-            credential.expiresAt ?? null,
-            null,
-            rotatedAt,
-          );
-          return this.cloneStoredPartnerIngressCredential(credential);
-        }
-
-        credential.revokedAt = rotatedAt;
-        credential.revokedBy = "platform_admin";
-        credential.revokeReason =
-          command.rotationReason ?? "credential_rotated";
-        credential.status = "revoked";
-        credential.overlapEndsAt = null;
-        return this.cloneStoredPartnerIngressCredential(credential);
-      },
-    );
-    this.partnerIngressCredentials = [
-      issued.storedCredential,
-      ...this.partnerIngressCredentials,
-    ];
-    const persistedCredentials = this.partnerIngressCredentials.filter(
-      (credential) => mutatedCredentialIds.has(credential.keyId),
-    );
-
-    this.persistChanges(
-      {
-        partnerIngressCredentials: persistedCredentials.map((credential) =>
-          this.cloneStoredPartnerIngressCredential(credential),
-        ),
-      },
-      "issue_platform_partner_ingress_credential",
-    );
-
-    this.recordTenantAudit(
-      {
-        actorId: null,
-        actorType: "platform_admin",
-        tenantId: entry.tenantId,
-        moduleName: "tenant-partner",
-        actionName: revokedCredentialId
-          ? "rotate_partner_ingress_credential"
-          : "issue_partner_ingress_credential",
-        resourceType: "partner_ingress_credential",
-        resourceId: issued.credential.keyId,
-        newValuesSummary: {
-          ...issued.credential,
-          revokedCredentialId,
+          updated.revokedAt = rotatedAt;
+          updated.revokedBy = "platform_admin";
+          updated.revokeReason =
+            command.rotationReason ?? "credential_rotated";
+          updated.status = "revoked";
+          updated.overlapEndsAt = null;
+          return updated;
         },
-      },
-      requestId,
-    );
+      );
+      const finalCredentialsList = [
+        issued.storedCredential,
+        ...updatedCredentialsList,
+      ];
+      const persistedCredentials = finalCredentialsList.filter(
+        (credential) => mutatedCredentialIds.has(credential.keyId),
+      );
 
-    return {
-      credential: issued.credential,
-      plaintextKey: issued.plaintextKey,
-      revokedCredentialId,
-      overlapEndsAt: revokedCredentialId ? overlapEndsAt : null,
-    };
+      await this.persistChangesRequired(
+        {
+          partnerIngressCredentials: persistedCredentials.map((credential) =>
+            this.cloneStoredPartnerIngressCredential(credential),
+          ),
+        },
+        "issue_platform_partner_ingress_credential",
+      );
+
+      this.partnerIngressCredentials = finalCredentialsList;
+
+      this.recordTenantAudit(
+        {
+          actorId: null,
+          actorType: "platform_admin",
+          tenantId: entry.tenantId,
+          moduleName: "tenant-partner",
+          actionName: revokedCredentialId
+            ? "rotate_partner_ingress_credential"
+            : "issue_partner_ingress_credential",
+          resourceType: "partner_ingress_credential",
+          resourceId: issued.credential.keyId,
+          newValuesSummary: {
+            ...issued.credential,
+            revokedCredentialId,
+          },
+        },
+        requestId,
+      );
+
+      return {
+        credential: issued.credential,
+        plaintextKey: issued.plaintextKey,
+        revokedCredentialId,
+        overlapEndsAt: revokedCredentialId ? overlapEndsAt : null,
+      };
+    });
   }
 
-  revokePlatformPartnerIngressCredential(
+  async revokePlatformPartnerIngressCredential(
     entrySlug: string,
     keyId: string,
     command: RevokePartnerIngressCredentialCommand,
     requestId?: string,
-  ) {
-    const entry = this.requirePlatformPartnerEntry(entrySlug);
-    const credential = this.requirePartnerIngressCredential(
-      entry.entrySlug,
-      keyId,
-    );
-    this.reconcileStoredPartnerIngressCredential(credential);
-    if (credential.revokedAt) {
+  ): Promise<PartnerIngressCredentialRecord> {
+    return this.runWithEntryMutex(entrySlug, async () => {
+      const entry = this.requirePlatformPartnerEntry(entrySlug);
+      const originalCredential = this.requirePartnerIngressCredential(
+        entry.entrySlug,
+        keyId,
+      );
+
+      const credential = this.cloneStoredPartnerIngressCredential(originalCredential);
+      this.reconcileStoredPartnerIngressCredential(credential);
+      if (credential.revokedAt) {
+        return this.toPartnerIngressCredentialResponse(credential);
+      }
+
+      const revokedAt = new Date().toISOString();
+      credential.revokedAt = revokedAt;
+      credential.revokedBy = "platform_admin";
+      credential.revokeReason =
+        this.normalizeNullableText(command.revokeReason) ?? "manual_revoke";
+      credential.status = "revoked";
+      credential.overlapEndsAt = null;
+
+      await this.persistChangesRequired(
+        {
+          partnerIngressCredentials: [
+            this.cloneStoredPartnerIngressCredential(credential),
+          ],
+        },
+        "revoke_platform_partner_ingress_credential",
+      );
+
+      this.partnerIngressCredentials = this.partnerIngressCredentials.map((c) =>
+        c.keyId === credential.keyId ? credential : c
+      );
+
+      this.recordTenantAudit(
+        {
+          actorId: null,
+          actorType: "platform_admin",
+          tenantId: entry.tenantId,
+          moduleName: "tenant-partner",
+          actionName: "revoke_partner_ingress_credential",
+          resourceType: "partner_ingress_credential",
+          resourceId: credential.keyId,
+          newValuesSummary: this.toPartnerIngressCredentialResponse(
+            credential,
+          ) as unknown as Record<string, unknown>,
+        },
+        requestId,
+      );
+
       return this.toPartnerIngressCredentialResponse(credential);
-    }
-
-    const revokedAt = new Date().toISOString();
-    credential.revokedAt = revokedAt;
-    credential.revokedBy = "platform_admin";
-    credential.revokeReason =
-      this.normalizeNullableText(command.revokeReason) ?? "manual_revoke";
-    credential.status = "revoked";
-    credential.overlapEndsAt = null;
-
-    this.persistChanges(
-      {
-        partnerIngressCredentials: [
-          this.cloneStoredPartnerIngressCredential(credential),
-        ],
-      },
-      "revoke_platform_partner_ingress_credential",
-    );
-
-    this.recordTenantAudit(
-      {
-        actorId: null,
-        actorType: "platform_admin",
-        tenantId: entry.tenantId,
-        moduleName: "tenant-partner",
-        actionName: "revoke_partner_ingress_credential",
-        resourceType: "partner_ingress_credential",
-        resourceId: credential.keyId,
-        newValuesSummary: this.toPartnerIngressCredentialResponse(
-          credential,
-        ) as unknown as Record<string, unknown>,
-      },
-      requestId,
-    );
-
-    return this.toPartnerIngressCredentialResponse(credential);
+    });
   }
 
   authenticatePartnerBootstrap(
