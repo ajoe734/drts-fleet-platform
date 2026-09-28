@@ -35,6 +35,8 @@ describe("SR-PARTNER-NOTIFY-FIX-SNAPSHOT-20260927: disclosure snapshot SQL type 
     const dispatchJobId = randomUUID();
     const assignmentId1 = randomUUID();
     const assignmentId2 = randomUUID();
+    const entrySlug = `slug-${randomUUID()}`;
+    const rideRef = `r1-${randomUUID()}`;
 
     try {
       // Setup prerequisites
@@ -50,8 +52,8 @@ describe("SR-PARTNER-NOTIFY-FIX-SNAPSHOT-20260927: disclosure snapshot SQL type 
         `INSERT INTO admin.phase1_partner_channel_entries (
            entry_slug, tenant_id, partner_id, program_id, status, created_at, updated_at, record
          ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8::jsonb)`,
-        ["slug", tenantId, "pt1", "prog1", "active", now, now, JSON.stringify({
-          entrySlug: "slug", tenantId, partnerId: "pt1", programId: "prog1", status: "active", createdAt: now, updatedAt: now
+        [entrySlug, tenantId, "pt1", "prog1", "active", now, now, JSON.stringify({
+          entrySlug, tenantId, partnerId: "pt1", programId: "prog1", status: "active", createdAt: now, updatedAt: now
         })]
       );
             const order: OwnedOrderRecord = {
@@ -62,7 +64,7 @@ describe("SR-PARTNER-NOTIFY-FIX-SNAPSHOT-20260927: disclosure snapshot SQL type 
         tenantId,
         partnerId: "pt1",
         partnerProgramId: null,
-        partnerEntrySlug: "slug",
+        partnerEntrySlug: entrySlug,
         eligibilityVerificationId: null,
         issuerAuthorizationRef: null,
         passengerDisclosure: null,
@@ -119,9 +121,16 @@ describe("SR-PARTNER-NOTIFY-FIX-SNAPSHOT-20260927: disclosure snapshot SQL type 
 
 
       await multiTaxiRepository.writeOrderPartnerNotificationRoute({
-        orderId, tenantId, partnerId: "pt1", entrySlug: "slug", partnerUserRef: "u1", drtsPassengerId: "P1",
-        passengerSubjectRef: "P1", identityLinkedAt: now, consentBundleVersion: "v1", notificationPolicyVersion: ORDER_PARTNER_NOTIFICATION_ROUTE_POLICY_VERSION, rideRef: "r1", createdAt: now
+        orderId, tenantId, partnerId: "pt1", entrySlug, partnerUserRef: "u1", drtsPassengerId: "P1",
+        passengerSubjectRef: "P1", identityLinkedAt: now, consentBundleVersion: "v1", notificationPolicyVersion: ORDER_PARTNER_NOTIFICATION_ROUTE_POLICY_VERSION, rideRef, createdAt: now
       });
+
+      const routeCheck = await database.query("SELECT * FROM mobility.phase1_order_partner_notification_routes WHERE order_id = $1", [orderId]);
+      expect(routeCheck.rows).toHaveLength(1);
+
+      const seqCheck = await database.query("SELECT next_sequence FROM mobility.phase1_partner_notification_sequences WHERE order_id = $1", [orderId]);
+      expect(seqCheck.rows).toHaveLength(1);
+      expect(seqCheck.rows[0]?.next_sequence).toBe("1");
 
       await repository.persistChanges({
         orders: [order],
@@ -243,6 +252,19 @@ describe("SR-PARTNER-NOTIFY-FIX-SNAPSHOT-20260927: disclosure snapshot SQL type 
       expect(seq2.rows).toHaveLength(1);
       expect(seq2.rows[0]!.next_sequence).toBe("3");
 
+      const getFullState = async () => {
+        const snapshots = await database.query("SELECT * FROM ops.passenger_dispatch_disclosure_snapshots WHERE order_id = $1 ORDER BY assignment_version ASC", [orderId]);
+        const outboxes = await database.query("SELECT * FROM ops.consumer_notification_outbox WHERE order_id = $1 ORDER BY created_at ASC", [orderId]);
+        const sequence = await database.query<{ next_sequence: string }>("SELECT next_sequence FROM mobility.phase1_partner_notification_sequences WHERE order_id = $1", [orderId]);
+        return {
+          snapshots: snapshots.rows,
+          outboxes: outboxes.rows,
+          nextSequence: sequence.rows[0]?.next_sequence
+        };
+      };
+
+      const stateBeforeReplay = await getFullState();
+
       // 3. Replay no extra sequence (DO NOTHING ON CONFLICT)
       await repository.withTransaction(async (executor) => {
          await repository.persistOrderWorkflow(executor, {
@@ -250,17 +272,10 @@ describe("SR-PARTNER-NOTIFY-FIX-SNAPSHOT-20260927: disclosure snapshot SQL type 
             consumerNotificationOutbox: [outbox2]
          });
       });
-      const res3 = await database.query("SELECT * FROM ops.passenger_dispatch_disclosure_snapshots WHERE order_id = $1", [orderId]);
-      expect(res3.rows).toHaveLength(2);
-      const out3_replay = await database.query<{ payload: any }>("SELECT * FROM ops.consumer_notification_outbox WHERE outbox_id = $1", [outbox2.outboxId]);
-      expect(out3_replay.rows).toHaveLength(1);
-      expect(out3_replay.rows[0]!.payload.eventSequence).toBe(2);
+      const stateAfterReplay = await getFullState();
+      expect(stateAfterReplay).toEqual(stateBeforeReplay);
 
-      const seq3 = await database.query<{ next_sequence: string }>("SELECT next_sequence FROM mobility.phase1_partner_notification_sequences WHERE order_id = $1", [orderId]);
-      expect(seq3.rows).toHaveLength(1);
-      expect(seq3.rows[0]!.next_sequence).toBe("3");
-
-      // 4. Injected failure full rollback using public boundary
+      // 4. Injected failure full rollback using public boundary persistOrderWorkflow
       const snapshot3: PassengerDispatchDisclosureSnapshot = {
         ...baseSnapshot,
         snapshotId: randomUUID(),
@@ -282,6 +297,7 @@ describe("SR-PARTNER-NOTIFY-FIX-SNAPSHOT-20260927: disclosure snapshot SQL type 
         deliveredAt: null
       };
 
+      const stateBeforeFailure1 = await getFullState();
       let errorThrown = false;
       let caughtError: any = null;
       try {
@@ -296,7 +312,7 @@ describe("SR-PARTNER-NOTIFY-FIX-SNAPSHOT-20260927: disclosure snapshot SQL type 
               return res;
             }
           } as any;
-          
+
           await repository.persistOrderWorkflow(wrappedExecutor, {
             passengerDisclosureSnapshots: [snapshot3],
             consumerNotificationOutbox: [outbox3]
@@ -309,23 +325,65 @@ describe("SR-PARTNER-NOTIFY-FIX-SNAPSHOT-20260927: disclosure snapshot SQL type 
       expect(errorThrown).toBe(true);
       expect(caughtError?.message).toBe("Injected executor boundary error");
 
-      const res4 = await database.query<{ assignment_version: number, superseded_at: Date | null }>("SELECT * FROM ops.passenger_dispatch_disclosure_snapshots WHERE order_id = $1 ORDER BY assignment_version ASC", [orderId]);
-      expect(res4.rows).toHaveLength(2); // Still 2, no snapshot3
-      const row4_0 = res4.rows[0];
-      expect(row4_0).toBeDefined();
-      expect(row4_0!.assignment_version).toBe(1);
-      expect(row4_0!.superseded_at).not.toBeNull();
-      const row4_1 = res4.rows[1];
-      expect(row4_1).toBeDefined();
-      expect(row4_1!.assignment_version).toBe(2);
-      expect(row4_1!.superseded_at).toBeNull(); // v2 shouldn't be superseded since tx rolled back
+      const stateAfterFailure1 = await getFullState();
+      expect(stateAfterFailure1).toEqual(stateBeforeFailure1);
 
-      const out4 = await database.query("SELECT * FROM ops.consumer_notification_outbox WHERE outbox_id = $1", [outbox3.outboxId]);
-      expect(out4.rows).toHaveLength(0); // Failed outbox insert rolled back
-      
-      const seq4 = await database.query<{ next_sequence: string }>("SELECT next_sequence FROM mobility.phase1_partner_notification_sequences WHERE order_id = $1", [orderId]);
-      expect(seq4.rows).toHaveLength(1);
-      expect(seq4.rows[0]!.next_sequence).toBe("3"); // Sequence should not be incremented (was 3 before)
+      // 5. Injected failure full rollback using persistChanges boundary
+      const snapshot4: PassengerDispatchDisclosureSnapshot = {
+        ...baseSnapshot,
+        snapshotId: randomUUID(),
+        assignmentId: randomUUID(),
+        assignmentVersion: 4,
+      };
+
+      const outbox4: ConsumerNotificationOutboxRecord = {
+        outboxId: randomUUID(),
+        orderId,
+        passengerSubjectRef: "P1",
+        eventType: "assignment_replaced",
+        assignmentVersion: 4,
+        payload: { test: 4 },
+        status: "pending",
+        attemptCount: 0,
+        nextAttemptAt: now,
+        createdAt: now,
+        deliveredAt: null
+      };
+
+      const stateBeforeFailure2 = await getFullState();
+
+      const originalConnect = database.connect.bind(database);
+      database.connect = (async () => {
+        const client = await originalConnect();
+        const originalQuery = client.query.bind(client);
+        client.query = (async <T extends import("pg").QueryResultRow>(text: any, params?: any[]) => {
+          const res = await originalQuery<T>(text, params);
+          if (typeof text === "string" && text.includes("UPDATE ops.consumer_notification_outbox")) {
+            throw new Error("Injected client boundary error");
+          }
+          return res;
+        }) as any;
+        return client;
+      }) as any;
+
+      let errorThrown5 = false;
+      let caughtError5: any = null;
+      try {
+        await repository.persistChanges({
+          passengerDisclosureSnapshots: [snapshot4],
+          consumerNotificationOutbox: [outbox4]
+        });
+      } catch (e) {
+        errorThrown5 = true;
+        caughtError5 = e;
+      } finally {
+        database.connect = originalConnect;
+      }
+      expect(errorThrown5).toBe(true);
+      expect(caughtError5?.message).toBe("Injected client boundary error");
+
+      const stateAfterFailure2 = await getFullState();
+      expect(stateAfterFailure2).toEqual(stateBeforeFailure2);
 
     } finally {
       try {
@@ -335,7 +393,7 @@ describe("SR-PARTNER-NOTIFY-FIX-SNAPSHOT-20260927: disclosure snapshot SQL type 
         await database.query("DELETE FROM mobility.phase1_order_partner_notification_routes WHERE order_id = $1", [orderId]);
         await database.query("DELETE FROM ops.phase1_dispatch_jobs WHERE order_id = $1", [orderId]);
         await database.query("DELETE FROM ops.phase1_owned_orders WHERE order_id = $1", [orderId]);
-        await database.query("DELETE FROM admin.phase1_partner_channel_entries WHERE entry_slug = 'slug'");
+        await database.query("DELETE FROM admin.phase1_partner_channel_entries WHERE entry_slug = $1 AND tenant_id = $2::uuid", [entrySlug, tenantId]);
         await database.query("DELETE FROM core.tenants WHERE tenant_id = $1::uuid", [tenantId]);
       } finally {
         await database.onModuleDestroy();
