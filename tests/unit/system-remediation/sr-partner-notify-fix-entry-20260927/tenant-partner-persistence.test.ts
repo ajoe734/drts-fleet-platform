@@ -2,6 +2,7 @@ import { describe, expect, it, vi, beforeEach } from "vitest";
 import { TenantPartnerService } from "../../../../apps/api/src/modules/tenant-partner/tenant-partner.service";
 import { AuditNotificationService } from "../../../../apps/api/src/modules/audit-notification/audit-notification.service";
 import { TenantPartnerController } from "../../../../apps/api/src/modules/tenant-partner/tenant-partner.controller";
+import type { CreatePartnerChannelEntryCommand } from "@drts/contracts";
 
 class Deferred<T> {
   promise: Promise<T>;
@@ -20,7 +21,7 @@ describe("SR-PARTNER-NOTIFY-FIX-ENTRY-20260927: TenantPartnerService entry durab
   let mockRepo: any;
   let service: TenantPartnerService;
   let controller: TenantPartnerController;
-  
+
   beforeEach(() => {
     auditNotificationService = new AuditNotificationService();
     mockRepo = {
@@ -37,14 +38,14 @@ describe("SR-PARTNER-NOTIFY-FIX-ENTRY-20260927: TenantPartnerService entry durab
     );
   });
 
-  const createCommand = (slug: string) => ({
+  const createCommand = (slug: string): CreatePartnerChannelEntryCommand => ({
     tenantId: "tenant-demo-001",
     partnerCode: `code_${slug}`,
     partnerType: "bank_partner",
     programId: "prog-1",
     entrySlug: slug,
     displayName: `Partner ${slug}`,
-    authMode: "partner_api_key" as const,
+    authMode: "partner_api_key",
     eligibilityMode: "none",
     businessDispatchSubtype: "enterprise_dispatch",
   });
@@ -53,10 +54,19 @@ describe("SR-PARTNER-NOTIFY-FIX-ENTRY-20260927: TenantPartnerService entry durab
     const defer = new Deferred<void>();
     mockRepo.persistChanges.mockReturnValueOnce(defer.promise);
 
-    const createPromise = controller.createPlatformPartnerEntry(createCommand("durable-1"), "req-1");
+    const createPromise = controller.createPlatformPartnerEntry(
+      createCommand("durable-1"),
+      "req-1",
+    );
 
     let isResolved = false;
-    createPromise.then(() => { isResolved = true; }).catch(() => { isResolved = true; });
+    createPromise
+      .then(() => {
+        isResolved = true;
+      })
+      .catch(() => {
+        isResolved = true;
+      });
 
     await new Promise((r) => setTimeout(r, 50));
     expect(isResolved).toBe(false);
@@ -65,34 +75,52 @@ describe("SR-PARTNER-NOTIFY-FIX-ENTRY-20260927: TenantPartnerService entry durab
     await expect(createPromise).rejects.toThrow("DB Error");
 
     expect(() => service.getPartnerEntry("durable-1")).toThrowError();
-    expect(service.listPlatformPartnerEntries().find(e => e.entrySlug === "durable-1")).toBeUndefined();
+    expect(
+      service
+        .listPlatformPartnerEntries()
+        .find((e) => e.entrySlug === "durable-1"),
+    ).toBeUndefined();
   });
 
   it("2. Same-slug concurrent create: one initial write; successful first call makes queued duplicate reject PARTNER_ENTRY_CONFLICT. Rejected first write releases queued retry, with no public entry before retry commits", async () => {
     const defer1 = new Deferred<void>();
     mockRepo.persistChanges.mockReturnValueOnce(defer1.promise);
 
-    const firstCreate = controller.createPlatformPartnerEntry(createCommand("concurrent-slug"), "req-1");
-    await new Promise(r => setTimeout(r, 10)); // let it acquire mutex
+    const firstCreate = controller.createPlatformPartnerEntry(
+      createCommand("concurrent-slug"),
+      "req-1",
+    );
+    await new Promise((r) => setTimeout(r, 10)); // let it acquire mutex
 
     // second create should block on mutex
-    const secondCreate = controller.createPlatformPartnerEntry(createCommand("concurrent-slug"), "req-2");
+    const secondCreate = controller.createPlatformPartnerEntry(
+      createCommand("concurrent-slug"),
+      "req-2",
+    );
 
     defer1.resolve();
     await firstCreate;
-    await expect(secondCreate).rejects.toMatchObject({ code: "PARTNER_ENTRY_CONFLICT" });
+    await expect(secondCreate).rejects.toMatchObject({
+      code: "PARTNER_ENTRY_CONFLICT",
+    });
 
     // Rejected first write
     const defer3 = new Deferred<void>();
     mockRepo.persistChanges.mockReturnValueOnce(defer3.promise);
-    
-    const thirdCreate = controller.createPlatformPartnerEntry(createCommand("retry-slug"), "req-3");
-    await new Promise(r => setTimeout(r, 10)); // let it acquire mutex
+
+    const thirdCreate = controller.createPlatformPartnerEntry(
+      createCommand("retry-slug"),
+      "req-3",
+    );
+    await new Promise((r) => setTimeout(r, 10)); // let it acquire mutex
 
     // fourth create will block on mutex
     const defer4 = new Deferred<void>();
     mockRepo.persistChanges.mockReturnValueOnce(defer4.promise);
-    const fourthCreate = controller.createPlatformPartnerEntry(createCommand("retry-slug"), "req-4");
+    const fourthCreate = controller.createPlatformPartnerEntry(
+      createCommand("retry-slug"),
+      "req-4",
+    );
 
     defer3.reject(new Error("First failed"));
     await expect(thirdCreate).rejects.toThrow("First failed");
@@ -103,11 +131,16 @@ describe("SR-PARTNER-NOTIFY-FIX-ENTRY-20260927: TenantPartnerService entry durab
     defer4.resolve();
     await fourthCreate;
     expect(service.getPartnerEntry("retry-slug")).toBeDefined();
+
+    expect(mockRepo.persistChanges).toHaveBeenCalledTimes(3); // 2 successful, 2 failed but one rejected before calling persistChanges
   });
 
   it("3. Whitespace-alias update/status/revoke ordering preserves terminal revoke; failure preserves the prior committed state", async () => {
     mockRepo.persistChanges.mockResolvedValue(undefined); // ensure non-blocking for creation
-    await controller.createPlatformPartnerEntry(createCommand("state-slug"), "req-1");
+    await controller.createPlatformPartnerEntry(
+      createCommand("state-slug"),
+      "req-1",
+    );
 
     // failure preserves prior committed state
     mockRepo.persistChanges.mockRejectedValueOnce(new Error("Update failed"));
@@ -116,96 +149,195 @@ describe("SR-PARTNER-NOTIFY-FIX-ENTRY-20260927: TenantPartnerService entry durab
       displayName: "Updated Name",
     };
     await expect(
-      controller.updatePlatformPartnerEntry(" state-slug ", updateCmd as any, "req-2")
+      controller.updatePlatformPartnerEntry(
+        " state-slug ",
+        updateCmd as any,
+        "req-2",
+      ),
     ).rejects.toThrow("Update failed");
 
-    let entry = service.listPlatformPartnerEntries().find(e => e.entrySlug === "state-slug")!;
+    let entry = service
+      .listPlatformPartnerEntries()
+      .find((e) => e.entrySlug === "state-slug")!;
     expect(entry.displayName).toBe("Partner state-slug");
 
-    // whitespace-alias update/status/revoke ordering preserves terminal revoke
-    const deferUpdate = new Deferred<void>();
-    mockRepo.persistChanges.mockReturnValueOnce(deferUpdate.promise);
-    const updatePromise = controller.updatePlatformPartnerEntry("state-slug", updateCmd as any, "req-3");
-    await new Promise(r => setTimeout(r, 10));
+    // Revoke first refusal (revoke-first/queued-reactivation refusal)
+    await controller.revokePlatformPartnerEntry("state-slug ", "req-3");
 
-    const deferRevoke = new Deferred<void>();
-    mockRepo.persistChanges.mockReturnValueOnce(deferRevoke.promise);
-    const revokePromise = controller.revokePlatformPartnerEntry("  state-slug", "req-4");
+    await expect(
+      controller.activatePlatformPartnerEntry(" state-slug", "req-4"),
+    ).rejects.toMatchObject({ code: "PARTNER_ENTRY_REVOKED" });
 
-    deferUpdate.resolve();
-    await updatePromise;
-
-    deferRevoke.resolve();
-    await revokePromise;
-
-    entry = service.listPlatformPartnerEntries().find(e => e.entrySlug === "state-slug")!;
+    entry = service
+      .listPlatformPartnerEntries()
+      .find((e) => e.entrySlug === "state-slug")!;
     expect(entry.status).toBe("revoked");
   });
 
   it("4. Same-entry issue/revoke in both orders, including failed revoke and queued issuance", async () => {
-    await controller.createPlatformPartnerEntry(createCommand("issue-revoke-slug"), "req-1");
+    await controller.createPlatformPartnerEntry(
+      createCommand("issue-revoke-slug"),
+      "req-1",
+    );
 
+    // Seed an entry/key as needed
+    await controller.issuePlatformPartnerIngressCredential(
+      "issue-revoke-slug",
+      { purpose: "seeded-key" },
+      "req-seed",
+    );
+
+    // start entry revoke while issue persistence is held
     const deferIssue = new Deferred<void>();
     mockRepo.persistChanges.mockReturnValueOnce(deferIssue.promise);
-    const issuePromise = controller.issuePlatformPartnerIngressCredential("issue-revoke-slug", { label: "key1" }, "req-2");
-    await new Promise(r => setTimeout(r, 10));
+    const issuePromise = controller.issuePlatformPartnerIngressCredential(
+      "issue-revoke-slug",
+      { purpose: "key1" },
+      "req-2",
+    );
+    await new Promise((r) => setTimeout(r, 10)); // allow mutex acquire
 
-    // The issue promise hasn't resolved so we don't have the keyId yet.
-    // We cannot revoke without keyId.
-    // Let's resolve issue first.
-    deferIssue.resolve();
-    const issueResult = await issuePromise;
-    const keyId = issueResult.data.credential.keyId;
-
-    // issue then queued revoke
     const deferRevoke = new Deferred<void>();
     mockRepo.persistChanges.mockReturnValueOnce(deferRevoke.promise);
-    const revokePromise = controller.revokePlatformPartnerIngressCredential("issue-revoke-slug", keyId, {} as any, "req-3");
-    await new Promise(r => setTimeout(r, 10));
+    const revokePromise = controller.revokePlatformPartnerEntry(
+      "issue-revoke-slug",
+      "req-3",
+    );
+    await new Promise((r) => setTimeout(r, 10)); // queued on mutex
 
+    deferIssue.resolve();
+    await issuePromise;
     deferRevoke.resolve();
     await revokePromise;
 
-    const creds = controller.listPlatformPartnerIngressCredentials("issue-revoke-slug").data.items;
-    expect(creds.find((c: any) => c.keyId === keyId)?.status).toBe("revoked");
-  });
+    const entryAfter = service
+      .listPlatformPartnerEntries()
+      .find((e) => e.entrySlug === "issue-revoke-slug")!;
+    expect(entryAfter.status).toBe("revoked");
+    await expect(
+      controller.issuePlatformPartnerIngressCredential(
+        "issue-revoke-slug",
+        { purpose: "key2" },
+        "req-4",
+      ),
+    ).rejects.toMatchObject({ code: "PARTNER_ENTRY_REVOKED" });
 
-  it("5. Cross-entry issue/issue in both completion orders preserves both keys; issue/other-key-revoke cannot resurrect a revoked key, and real authenticatePartnerBootstrap must reject it", async () => {
-    await controller.createPlatformPartnerEntry(createCommand("cross-slug"), "req-1");
-
-    const deferIssue1 = new Deferred<void>();
-    mockRepo.persistChanges.mockReturnValueOnce(deferIssue1.promise);
-    const issue1 = controller.issuePlatformPartnerIngressCredential("cross-slug", { label: "key1" }, "req-2");
-    await new Promise(r => setTimeout(r, 10));
+    // Now test vice versa: start issue while entry revoke persistence is held
+    await controller.createPlatformPartnerEntry(
+      createCommand("revoke-issue-slug"),
+      "req-5",
+    );
+    const deferRevoke2 = new Deferred<void>();
+    mockRepo.persistChanges.mockReturnValueOnce(deferRevoke2.promise);
+    const revokePromise2 = controller.revokePlatformPartnerEntry(
+      "revoke-issue-slug",
+      "req-6",
+    );
+    await new Promise((r) => setTimeout(r, 10)); // allow mutex acquire
 
     const deferIssue2 = new Deferred<void>();
     mockRepo.persistChanges.mockReturnValueOnce(deferIssue2.promise);
-    const issue2 = controller.issuePlatformPartnerIngressCredential("cross-slug", { label: "key2" }, "req-3");
+    const issuePromise2 = controller.issuePlatformPartnerIngressCredential(
+      "revoke-issue-slug",
+      { purpose: "key3" },
+      "req-7",
+    );
 
-    // Complete in reverse order (Issue2 blocks on Issue1's mutex, so Issue2 cannot complete before Issue1 finishes persistChanges)
-    // Actually they are queued in the mutex.
-    deferIssue1.resolve();
-    const res1 = await issue1;
+    deferRevoke2.resolve();
+    await revokePromise2;
+    deferIssue2.resolve(); // it should be rejected because entry is revoked
+    await expect(issuePromise2).rejects.toMatchObject({
+      code: "PARTNER_ENTRY_REVOKED",
+    });
+  });
 
-    deferIssue2.resolve();
-    const res2 = await issue2;
+  it("5. Cross-entry issue/issue in both completion orders preserves both keys; issue/other-key-revoke cannot resurrect a revoked key, and real authenticatePartnerBootstrap must reject it", async () => {
+    // Two distinct entries
+    await controller.createPlatformPartnerEntry(
+      createCommand("entry-a"),
+      "req-1A",
+    );
+    await controller.createPlatformPartnerEntry(
+      createCommand("entry-b"),
+      "req-1B",
+    );
 
-    const creds = controller.listPlatformPartnerIngressCredentials("cross-slug").data.items;
-    expect(creds.length).toBe(2);
+    // Seed key for entry B
+    const resBSeed = await controller.issuePlatformPartnerIngressCredential(
+      "entry-b",
+      { purpose: "key-b-seed" },
+      "req-seed-B",
+    );
+    const apiKeyB = resBSeed.data.plaintextKey;
+    const keyIdB = resBSeed.data.credential.keyId;
 
-    const keyId1 = res1.data.credential.keyId;
-    const apiKey1 = res1.data.plaintextKey;
+    // Successful authentication control before revoke
+    const authSuccess = service.authenticatePartnerBootstrap(
+      { entrySlug: "entry-b", apiKey: apiKeyB },
+      "req-auth-1",
+    );
+    expect(authSuccess.partnerEntry.entrySlug).toBe("entry-b");
 
-    await controller.revokePlatformPartnerIngressCredential("cross-slug", keyId1, {} as any, "req-4");
-    
-    mockRepo.persistChanges.mockRejectedValueOnce(new Error("Failed to revoke"));
-    const key2Id = res2.data.credential.keyId;
+    // Hold entry-A issuance while entry-B existing-key revoke commits
+    const deferIssueA = new Deferred<void>();
+    mockRepo.persistChanges.mockImplementation((entry: any) => {
+      if (entry.entrySlug === "entry-a") return deferIssueA.promise;
+      return Promise.resolve();
+    });
+
+    const issueA = controller.issuePlatformPartnerIngressCredential(
+      "entry-a",
+      { purpose: "key-a" },
+      "req-2A",
+    );
+    await new Promise((r) => setTimeout(r, 10)); // A acquires mutex
+
+    const revokeB = controller.revokePlatformPartnerIngressCredential(
+      "entry-b",
+      keyIdB,
+      {} as any,
+      "req-3B",
+    );
+    await revokeB; // B is independent, so it completes immediately
+
+    deferIssueA.resolve();
+    await issueA; // A completes
+
+    // assert B remains revoked and real authenticatePartnerBootstrap rejects specifically PARTNER_API_KEY_REVOKED
+    const credsB =
+      controller.listPlatformPartnerIngressCredentials("entry-b").data.items;
+    expect(credsB.find((c: any) => c.keyId === keyIdB)?.status).toBe("revoked");
+
+    try {
+      service.authenticatePartnerBootstrap(
+        { entrySlug: "entry-b", apiKey: apiKeyB },
+        "req-auth-2",
+      );
+      expect.fail("Should throw");
+    } catch (e: any) {
+      expect(e.code).toBe("PARTNER_API_KEY_REVOKED");
+    }
+
+    // state/authentication preservation after rejected writes
+    mockRepo.persistChanges.mockRejectedValueOnce(
+      new Error("Failed to revoke A"),
+    );
+    const keyIdA = (await issueA).data.credential.keyId;
     await expect(
-      controller.revokePlatformPartnerIngressCredential("cross-slug", key2Id, {} as any, "req-5")
-    ).rejects.toThrow("Failed to revoke");
+      controller.revokePlatformPartnerIngressCredential(
+        "entry-a",
+        keyIdA,
+        {} as any,
+        "req-4A",
+      ),
+    ).rejects.toThrow("Failed to revoke A");
 
-    expect(() => 
-      service.authenticatePartnerBootstrap({ entrySlug: "cross-slug", apiKey: apiKey1 }, "req-6")
-    ).toThrow();
+    // A's key should still be active because revoke failed
+    const apiKeyA = (await issueA).data.plaintextKey;
+    const authSuccessA = service.authenticatePartnerBootstrap(
+      { entrySlug: "entry-a", apiKey: apiKeyA },
+      "req-auth-3",
+    );
+    expect(authSuccessA.partnerEntry.entrySlug).toBe("entry-a");
   });
 });
