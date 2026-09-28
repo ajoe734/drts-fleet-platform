@@ -23,7 +23,10 @@ Disposition: defined the exact identity boundary for the controlled local receiv
 
 ## Delivery and validation
 
-This task is a pending request waiting for Supervisor coordination to resolve the planning blocker; no product runtime code is changed in this helper task.
+This task resolves the planning blocker by documenting the `DRTS_ALLOW_LOCAL_WEBHOOKS` decision in the canonical `phase1_service_contracts_v1.md`.
+
+**Unblocked Next Step for Parent Task (`SR-PARTNER-NOTIFY-FIX-TRANSPORT-20260927`):**
+Implement the exact constraint documented in `phase1_service_contracts_v1.md` within `partner-notification-https.ts` using the new v2 branch (`gemini2/sr-partner-notify-fix-transport-20260927-v2`), preserving all original security guarantees for non-loopback destinations.
 
 ### Guide 0.7 finding/acceptance evidence table
 
