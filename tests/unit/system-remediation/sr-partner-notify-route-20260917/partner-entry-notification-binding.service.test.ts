@@ -74,7 +74,7 @@ async function createHarness(
     dispatchFacade,
   );
 
-  const entry = tenantPartnerService.createPlatformPartnerEntry({
+  const entry = await tenantPartnerService.createPlatformPartnerEntry({
     tenantId: "tenant-demo-001",
     partnerCode: "yuhe",
     partnerType: "bank_partner",
