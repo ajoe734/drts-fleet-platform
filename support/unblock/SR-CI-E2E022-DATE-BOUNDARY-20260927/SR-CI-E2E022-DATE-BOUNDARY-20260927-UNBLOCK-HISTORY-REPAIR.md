@@ -282,12 +282,12 @@ helper snapshot hash: `d216adb97a214b292db0d135d412f4d9a5f80f9c5b970376a208e928a
 
 ## Helper acceptance and publication
 
-| Helper acceptance                       | Verification                                                                                                            | Status                                                                                                              |
-| --------------------------------------- | ----------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------- |
-| Identify exact contamination            | Published/fork refs, reflog, range-diff, full-range gate and hosted log above                                           | PASS                                                                                                                |
-| Repair or document non-destructive path | Temporary-index exact-content replay; whole new diagnostic range passes; parent refs preserved                          | PASS for documented/rehearsed path; no product successor published by helper                                        |
-| Task-scoped commit/push/PR              | Assigned helper branch, ordinary push, existing PR #2206; publication receipts below                                    | Checkpoint verified; refreshed candidate identity will be recorded by final handoff after checks and head equality. |
-| Update parent with concrete next step   | Successful operator `resume-blocked` receipt, matching helper metadata, current routing/scope readback and probe exit 0 | PASS; parent has independently advanced to `in_progress`.                                                           |
+| Finding / helper acceptance                                                | Source / change                                                                                                           | Old evidence → refreshed result                                                                                                                               | Command, version and evidence                                                                                                    | Remaining limits                                                                                                        |
+| -------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------- |
+| Identify exact contamination                                               | Trailer checker `SUBJECT_RE`; preserved original/fork refs                                                                | PASS: published `8d3d8fdd…` still fails the full range; no history rewritten                                                                                  | Python 3.12.3 checker against `origin/dev` / `bfeec848…`: exit 1, exact violation above; Git 2.43.0 live refs and PR #2190 agree | This identifies the original defect; it does not approve successor code.                                                |
+| Repair or document non-destructive path                                    | Four-file source patch and historical temporary-index rehearsal                                                           | PASS for documented path: source hash unchanged; rehearsal keeps source blobs and excludes offending ancestry                                                 | Original rehearsal exit 0 and hashes above; current `git diff --binary --full-index 585087a2… bfeec848…` SHA-256 unchanged       | Rehearsal is historical at `28d5a1b2…`; actual successor implementation/validation remains Gemini's work.               |
+| Task-scoped commit/push/PR                                                 | Only this report, assigned helper branch, existing PR #2206                                                               | Prior checkpoint `718be8d6…` → refreshed anchor `7e1963c1a…` normally pushed; enclosing final evidence commit is delivered with full SHA in canonical handoff | Completed scoped checks below; final local/remote/PR equality must precede handoff to Codex2                                     | New candidate needs independent review, same-SHA hosted CI and merge; no old green result is reused.                    |
+| Update parent with concrete next step; obsolete blocked/Claude disposition | Operator receipt entries 1–5, helper metadata, parent execution branch and scopes; this report's current readback section | PASS: old worker write rejected → operator resume succeeds → parent independently `in_progress`                                                               | Authorized release `show`, receipt SHA-256, Python routing probe exit 0; all five receipt rc values 0                            | Parent next may advance. No worker parent mutation, premature resolution timestamp, product acceptance or `done` claim. |
 
 Operator writes are confirmed; no parent blocker remains for this helper.
 Refresh the original report on existing PR #2206, run scoped document checks,
@@ -330,3 +330,29 @@ Canonical consistency, Runtime mirror guard, Smoke acceptance and ci-integ
 checks at the 02:30Z PR read; these do not validate the refreshed candidate.
 This turn's `pnpm exec prettier --version` succeeds (3.8.2); no dependency link
 repair or hook change was needed. Product/PG/browser acceptance remains hosted-only.
+
+### Refreshed report checks and delivery (this dispatch)
+
+Anchor `7e1963c1a` was pushed normally to the existing helper branch. The
+following checks completed on that report revision with results read before
+preparing the enclosing evidence commit. The same document/trailer checks are
+repeated on the final commit before its normal push and candidate handoff;
+the full final SHA, PR head equality and results are recorded in that handoff.
+No report-only check stands in for parent product regression or hosted acceptance.
+
+| Check                                            | Actual command / version                                                                                | Completed result                                                                                             |
+| ------------------------------------------------ | ------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------ |
+| Canonical claims and references                  | `python3 tools/ci/git/check_canonical_consistency.py --ci --base origin/dev --head HEAD`, Python 3.12.3 | Exit 0; all four categories have zero findings.                                                              |
+| Entire helper commit range                       | `python3 tools/ci/git/check_commit_trailers.py --base origin/dev --head HEAD`                           | Exit 0; all 3 commits through the refreshed anchor pass.                                                     |
+| Report formatting                                | `pnpm exec prettier --check` on the original report, Node v22.23.2 / Prettier 3.8.2                     | Exit 0.                                                                                                      |
+| Report scope and whitespace                      | `git diff --name-only origin/dev...HEAD` and `git diff origin/dev...HEAD --check`, Git 2.43.0           | Exit 0; only the original report differs.                                                                    |
+| Staged generated-file guard                      | `python3 tools/ci/git/check_staged_generated_files.py --staged` before commit                           | Exit 0. Configured `.husky/_` remains absent; relevant hook checks were run explicitly without bypasses.     |
+| Operator action and current disposition          | Read-only routing probe and hashes above                                                                | Exit 0; preserved parent scope/acceptance and no stale blocked/Claude requirement.                           |
+| Product, PG, browser and new-candidate hosted CI | No local product/runtime test or manually dispatched workflow                                           | NOT RUN locally; new hosted results remain pending for the GitHub bus and are separate from old-head checks. |
+
+The only active handoff target is Codex2 on
+[PR #2206](https://github.com/ajoe734/drts-fleet-platform/pull/2206), base `dev`,
+branch `codex/sr-ci-e2e022-date-boundary-20260927-unblock-history-repair`.
+The stale draft explanation is replaced with the completed operator receipt
+and the report is submitted for fresh independent review. Parent implementation
+can continue concurrently; helper review must not reinstate its historical blocker.
