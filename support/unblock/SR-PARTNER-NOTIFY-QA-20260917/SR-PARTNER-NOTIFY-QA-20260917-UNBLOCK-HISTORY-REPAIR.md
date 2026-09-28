@@ -2,6 +2,9 @@
 
 Audit: 2026-09-27, Codex2. Helper reviewer: Codex.
 
+Current routing refresh: 2026-09-28. **Section 7 is the current disposition**;
+sections 1–6 preserve the dated audit and HR-R1 repair evidence.
+
 ## Result and delivery boundary
 
 QA-R8 is reproducible: the parent's published PR #2179 contains **18 invalid
@@ -17,13 +20,21 @@ preserving all 31 files changed by dev since the common base. No parent branch,
 worktree, PR, or published commit was changed. The preview is a tree, **not a
 commit, candidate, runtime result, or completed parent repair**.
 
-The parent remains blocked on product repairs and all three required acceptance
-items. The worker's original parent update was rejected by the cross-task guard.
+At the 2026-09-27 audit, the parent was blocked on product repairs and all three
+required acceptance items. The original parent update was rejected by the cross-task guard.
 **The operator updates are now persisted:** release-CLI readback at
 `2026-09-27T23:00:54.120715Z` confirms all three helper disposition fields and
 the identical concrete parent next step, while preserving `blocked`/`Gemini`.
 Section 5 records the failed and corrected states. HR-R1 / helper acceptance 4
 is now supported; this does not resolve any parent product acceptance.
+
+The subsequent operator routing queues the parent as `todo`, owner Gemini /
+reviewer Codex2, behind all 11 dependencies. Readback on 2026-09-28 confirms
+the helper's `todo` / null disposition and exact parent-next equality. ENTRY
+and this helper remain outstanding; all three parent acceptance gates remain
+unmet. The clean successor name is assigned but has no local/remote ref or
+registered worktree yet. Section 7 records that distinction and a fresh
+20-file recovery preview against reviewed dev `c8deb87177d13339ca43dd2275346cd477ec7446`.
 
 ## 1. Fixed identities and branch/worktree diagnosis
 
@@ -137,8 +148,8 @@ or weakening of CI is needed.
    newer locked candidate exists, stop and coordinate it rather than racing its
    review. Preserve the old refs. Optional new archive refs must be created
    without overwriting existing refs. Do not delete the three existing PR heads.
-2. Route one unused successor branch, for example
-   `codex/sr-partner-notify-qa-20260917-recovery-20260927`, and a clean isolated
+2. Route one unused successor branch (the current operator assignment is
+   `gemini/sr-partner-notify-qa-20260927-successor`), and a clean isolated
    owner worktree from the then-current fetched dev. Record `execution_branch`
    via Supervisor's canonical gateway. This helper does not change routing.
 3. Export the net patch from common base to the pinned parent head using exactly
@@ -212,7 +223,10 @@ The patch recipe above reproduces these bytes from immutable Git objects.
 The index and JSON/log evidence are machine-local; this report is the durable
 review artifact. Versions: Git 2.43.0, Python 3.12.3, Node 22.23.2, pnpm 10.33.0.
 
-## 4. Existing product findings remain open
+## 4. Product findings at the 2026-09-27 audit
+
+This is the original audit snapshot. Section 7 records later child completion;
+child completion does not supply the parent's integrated acceptance evidence.
 
 The original
 [parent UAT unit1–unit7](https://github.com/ajoe734/drts-fleet-platform/blob/3d50ba809825dfb4a5691f85519016af3575eccc/docs/04-uat/system-remediation-20260906/SR-PARTNER-NOTIFY-QA-20260917.md)
@@ -242,6 +256,11 @@ acceptance. No product, database, browser, receiver, deployment or live/device
 test was started on this VM for this helper.
 
 ## 5. Canonical operator update and verified readback
+
+**Historical HR-R1 transaction, 2026-09-27:** the blocked/Gemini expectations
+and operator commands below preserve the original repair evidence. They must
+not be replayed to replace the later queued routing. Use section 7 for the
+current release CLI and current read-only assertions.
 
 The supplied release entry point is
 `/home/lupin/workspace/drts-fleet-platform/tools/development-orchestrator/bin/ai-status.sh`.
@@ -435,6 +454,9 @@ candidate for Codex review; the rejected candidate is not reused.
 
 ## 6. Acceptance and publication ledger
 
+The following ledger records the 2026-09-27 delivery. Section 7 supersedes its
+parent disposition and candidate/CI status; prior results retain their own SHA.
+
 | Acceptance / finding            | Source and verification                                                                    | Old result → current result                                                                 | Outstanding boundary                                                      |
 | ------------------------------- | ------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------- |
 | Identify contamination (R8/R9)  | Fixed-SHA logs/diffs, refs/PRs, production trailer checker and completed CI log            | 18 invalid messages reproduced; 20 authorized + 3 unauthorized paths identified             | No assertion of product repair                                            |
@@ -490,3 +512,156 @@ to this helper's exact SHA.
   `git show-ref` before/after was identical. The scoped regression receipt is
   `.local/hr-r1-20260927-resume/recovery-regression.json`; no parent ref, source
   file or worktree was changed and no product runtime was started.
+
+## 7. CI dependency follow-up and current routing (2026-09-28)
+
+### Failure, reviewed dependency and non-rewriting refresh
+
+The dispatch spec is
+`/home/lupin/workspace/drts-fleet-platform/.local/qa-worker-recovery-20260927/SR-PARTNER-NOTIFY-QA-20260917-UNBLOCK-HISTORY-REPAIR-ci-followup.md`.
+Candidate `6c49810be7e2552f69aed5908737d0726257556f`, generation
+`7dd6b23608e741a4a05e20729cbfb806`, was approved by Codex at
+`2026-09-27T23:24:59Z`. Its earlier draft integration success skipped product
+jobs. Ready-for-review subsequently triggered
+[integration 36358658467](https://github.com/ajoe734/drts-fleet-platform/actions/runs/36358658467).
+The failed job log was downloaded and read: at `2026-09-27T23:31:58.4483264Z`,
+[cross-surface job 108731489708](https://github.com/ajoe734/drts-fleet-platform/actions/runs/36358658467/job/108731489708)
+reported `daily rebuild count expected 3, got 2` in E2E022. The hermetic
+suite passed 001–021 and failed 022; `e2e` and `ci-integ` failed by propagation.
+This report-only helper does not edit those source/test paths or bypass CI.
+
+`SR-CI-E2E022-DATE-BOUNDARY-20260927` is now `done`. Canonical metadata and
+[merged PR #2217](https://github.com/ajoe734/drts-fleet-platform/pull/2217)
+agree on reviewed candidate `9406e44d7ee67bdbdac422bc1183d5ef526820b6` and
+merge SHA `c8deb87177d13339ca43dd2275346cd477ec7446` at
+`2026-09-28T04:53:35Z`. Both dependency acceptance keys have recorded evidence.
+[Integration 36378654765](https://github.com/ajoe734/drts-fleet-platform/actions/runs/36378654765)
+is completed success at that candidate; all job/step conclusions were read,
+including successful cross-surface E2E. Orchestrator tests were skipped.
+These are dependency receipts, not CI approval for this helper's changed head.
+
+After confirming the old helper CI completed, local = remote = PR #2181 head,
+and dependency completion, the assigned owner worktree merged fetched dev
+normally. Merge `f5589ce9789e8895ed2852cc1c80b0ac1d5a3b24` has parents
+`6c49810be7e2552f69aed5908737d0726257556f` and
+`c8deb87177d13339ca43dd2275346cd477ec7446`; no conflicts or authored product
+edits. The diff against dev remains **only this report**. The previous candidate
+and approval remain historical. The new head requires fresh Codex review and
+complete same-SHA CI in existing [PR #2181](https://github.com/ajoe734/drts-fleet-platform/pull/2181).
+
+### Actual canonical readback and successor boundary
+
+At `2026-09-28T05:00:32.778981+00:00`, the supplied release CLI's `show`
+readback passed **12 comparisons**, exit 0. Receipt
+`.local/hr-ci-followup-20260928/readback.json` SHA-256:
+`7ac61acd4da13514026462a4feb0a0b56ce6efdb30b8ac9dfb03de0e590107bd`.
+
+| Current field / check           | Observed result                                                                  |
+| ------------------------------- | -------------------------------------------------------------------------------- |
+| Parent status; owner / reviewer | `todo`; `Gemini` / `Codex2`                                                      |
+| Parent execution branch         | `gemini/sr-partner-notify-qa-20260927-successor`                                 |
+| Helper disposition              | `resolved_parent_status=todo`; `resolved_parent_waiting_for=null` (explicit key) |
+| Helper `resolved_parent_next`   | Exact full-string equality with parent `next`, quoted below                      |
+| Helper `resolved_parent_at`     | Absent; not manually set                                                         |
+| Helper owner / reviewer         | `Codex2` / `Codex`, preserved                                                    |
+| Parent required acceptance      | Same three section 4 keys; no `acceptance_evidence`, all unmet                   |
+| Parent candidate                | Absent; no successor handoff manufactured                                        |
+
+The exact shared next step is:
+
+> Operator routing complete: wait for all 11 dependencies (five product FIX children, E2E022 date-boundary CI repair, history repair and original four completed tasks), then use clean gemini/sr-partner-notify-qa-20260927-successor from current origin/dev. Follow task_spec_ref and preserved history repair recipe to import only20 QA net-diff files; preserve PR2175/2177/2179 and run full24-case hosted matrix. All required acceptance remains unmet; no live/device claim.
+
+All 11 dependency IDs were compared as an exact set, not only counted:
+
+| Dependency                                             | Readback status              |
+| ------------------------------------------------------ | ---------------------------- |
+| `SR-PARTNER-NOTIFY-NAV-20260917`                       | `done`                       |
+| `SR-PARTNER-NOTIFY-UI-20260917`                        | `done`                       |
+| `SR-PARTNER-NOTIFY-LEGACY-20260917`                    | `done`                       |
+| `SR-PARTNER-NOTIFY-PG-20260919`                        | `done`                       |
+| `SR-PARTNER-NOTIFY-FIX-ADMIN-20260927`                 | `done`                       |
+| `SR-PARTNER-NOTIFY-FIX-TRANSPORT-20260927`             | `done`                       |
+| `SR-PARTNER-NOTIFY-FIX-SNAPSHOT-20260927`              | `done`                       |
+| `SR-PARTNER-NOTIFY-FIX-ENTRY-20260927`                 | `blocked`                    |
+| `SR-PARTNER-NOTIFY-FIX-HISTORY-20260927`               | `done`                       |
+| `SR-PARTNER-NOTIFY-QA-20260917-UNBLOCK-HISTORY-REPAIR` | `in_progress` (this refresh) |
+| `SR-CI-E2E022-DATE-BOUNDARY-20260927`                  | `done`                       |
+
+The parent's `todo` is dependency-gated, not permission to skip ENTRY, the
+helper lifecycle or integrated acceptance. The four completed product children
+do not close the parent's 24-case matrix. ENTRY's recorded blocker is its
+published invalid commit ancestry, routed through its own recovery task.
+
+`git for-each-ref`, live `git ls-remote --heads` and `git worktree list --porcelain`
+confirm the assigned successor name is unused: **no existing successor branch
+or worktree**. The clean successor is a verified creation/import path, not an
+already-created artifact. After dependencies complete, the parent owner must
+create its isolated checkout from then-current dev and repeat section 3's
+scoped import/checks; never import old ancestry or reuse the canonical root.
+The three preserved remote heads remain exactly `3d50ba809...`, `91b1d4ac...`
+and `faee900f...` from section 1. This helper changed none of them or their PRs.
+
+Current pre-merge read-only probe (the historical section 5 probe intentionally
+has different expectations):
+
+```bash
+python3 - <<'PY'
+import json, os, subprocess
+cli = "/home/lupin/workspace/drts-fleet-platform/.artifacts/releases/orchestrator-585087a2fd81/tools/development-orchestrator/bin/ai-status.sh"
+parent_id = "SR-PARTNER-NOTIFY-QA-20260917"
+helper_id = parent_id + "-UNBLOCK-HISTORY-REPAIR"
+def show(task):
+    return json.loads(subprocess.check_output(
+        [cli, "show", task], env={**os.environ, "AI_NAME": "Codex2"}, text=True))
+h, p = show(helper_id), show(parent_id)
+expected = {
+    "SR-PARTNER-NOTIFY-NAV-20260917", "SR-PARTNER-NOTIFY-UI-20260917",
+    "SR-PARTNER-NOTIFY-LEGACY-20260917", "SR-PARTNER-NOTIFY-PG-20260919",
+    *{"SR-PARTNER-NOTIFY-FIX-" + x + "-20260927" for x in
+      ("ADMIN", "TRANSPORT", "SNAPSHOT", "ENTRY", "HISTORY")},
+    helper_id, "SR-CI-E2E022-DATE-BOUNDARY-20260927",
+}
+assert p["status"] == h["resolved_parent_status"] == "todo"
+assert h["resolved_parent_waiting_for"] is None
+assert p["next"] == h["resolved_parent_next"] and p["next"]
+assert "resolved_parent_at" not in h
+assert (p["owner"], p["reviewer"]) == ("Gemini", "Codex2")
+assert (h["owner"], h["reviewer"]) == ("Codex2", "Codex")
+assert len(p["depends_on"]) == 11 and set(p["depends_on"]) == expected
+assert p["execution_branch"] == "gemini/sr-partner-notify-qa-20260927-successor"
+assert not p.get("candidate_sha") and not p.get("acceptance_evidence")
+assert set(p["required_acceptance"]) == {
+    "integrated_controlled_receiver_negative_matrix_same_sha",
+    "navigation_and_admin_ui_hosted_real_runtime_evidence",
+    "existing_webhook_tenant_gates_preserved_and_live_not_claimed",
+}
+assert show("SR-CI-E2E022-DATE-BOUNDARY-20260927")["status"] == "done"
+print("Current parent routing and unmet acceptance: PASS")
+PY
+```
+
+### Finding-level verification for this refresh
+
+| Finding / acceptance                               | Source and change boundary                                                                                                                                     | Old result → refreshed result                                                                                                               | Command / evidence and limitation                                                                                                                                                                                      |
+| -------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| E2E022 CI blocker                                  | Production fixture `tests/e2e/E2E-022-operations-reporting.sh` and shared `tests/e2e/lib/operations-reporting-dates.sh`, inherited unchanged from reviewed dev | Old helper full CI failed daily count; dependency same-SHA hosted CI passed; offline regression at merge `f5589ce9...` exit 0               | `bash tests/unit/system-remediation/sr-ci-e2e022-date-boundary-20260927/test-date-logic.sh`; 8 boundary scenarios plus negative controls. HTTP is mocked; no server or PG started. Helper's new hosted CI is separate. |
+| R8/R9 identification and non-destructive recovery  | Section 3 scoped patch and production trailer checker; only the report authored                                                                                | Old checker still exit 1, exactly 18 invalid / 72 commits; both historical and current-dev index previews pass                              | `python3 .local/hr-ci-followup-20260928/recovery.py` exit 0; recipe remains reproducible from section 3 immutable objects.                                                                                             |
+| Preserve current dev during clean successor import | Independent index initialized from `c8deb87177d13339ca43dd2275346cd477ec7446`                                                                                  | 20 QA blobs equal old parent; excluded three equal current dev; all 59 dev-changed paths preserved; entire remaining tree equal current dev | Preview tree `b87183a46d94c2c9d4bba31992db1b95f7015210`; no ref, owner worktree or parent commit created.                                                                                                              |
+| HR-R1 and acceptance 4 current routing             | Supplied-release CLI parent/helper/dependency slices and section 7 probe                                                                                       | Historical missing fields → historical blocked correction → operator queued `todo`, exact next equality and 11 dependencies verified        | Local `readback.py` exit 0, 12 comparisons; no cross-task mutation or manual resolution timestamp.                                                                                                                     |
+| Canonical publication                              | Normal merge retains old helper head and reviewed dev; only this report differs from dev                                                                       | Old approval is historical; publish new report commit normally to existing PR #2181                                                         | Final full SHA / remote / PR equality, artifact hash and completed validation recorded in the release-CLI handoff and PR body after checks finish. Fresh Codex review required.                                        |
+| Parent required acceptance                         | Original three keys and current metadata                                                                                                                       | All three remain unmet; no parent candidate or acceptance evidence                                                                          | Product integrated/PG/browser/receiver matrix remains parent work; no live partner, native-device or deployment claim.                                                                                                 |
+
+Recovery receipt `.local/hr-ci-followup-20260928/recovery.json` SHA-256:
+`4cde7979b8a5d57524e5b5b829d462e71ebd459fe0db92244e4b1a229993060a`.
+The original preview tree, both patch SHA-256 values and all 31 original-dev
+preservations also reproduced exactly. `git show-ref` before/after the index
+probe was identical. The latest preview checks the complete Git tree against
+current dev with only the 20 QA blobs replaced; this includes the reviewed
+transport/date repairs. It is content evidence, not product acceptance.
+
+Report checks use Prettier, canonical consistency, full-range trailers,
+`git diff --check`, report-only diff scope, shell-block syntax and the current
+live probe. Publication-triggered runs must finish and their job/step results
+be read before handoff; failures in another unowned path require a concrete
+canonical blocker. No VM product runtime, browser server or deployment is
+needed or authorized for this helper.
