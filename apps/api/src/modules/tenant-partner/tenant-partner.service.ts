@@ -5336,7 +5336,15 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
         "issue_platform_partner_ingress_credential",
       );
 
-      this.partnerIngressCredentials = finalCredentialsList;
+      const persistedMap = new Map(
+        persistedCredentials.map((c) => [c.keyId, c]),
+      );
+      this.partnerIngressCredentials = [
+        issued.storedCredential,
+        ...this.partnerIngressCredentials.map((c) =>
+          persistedMap.has(c.keyId) ? persistedMap.get(c.keyId)! : c,
+        ),
+      ];
 
       this.recordTenantAudit(
         {
