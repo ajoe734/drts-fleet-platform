@@ -320,7 +320,7 @@ aggregate_and_assert_daily_records() {
 aggregate_monthly_records() {
   local unique_summary_months="$1"
   local taxi_business_area="$2"
-  
+
   log_step "3.5 — POST /reports/monthly-operations-summaries/rebuild"
   local monthly_rebuild_fixture="${TMP_DIR}/monthly-rebuild.json"
   local aggregated_monthly_records="[]"

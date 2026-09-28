@@ -54,12 +54,12 @@ round_four() {
 
 http_call() {
   local method="$1" path="$2" req_file="${3:-}"
-  
+
   if [[ "$path" == "/reports/daily-dispatch-records/rebuild" ]]; then
     local sd=$(jq -r '.serviceDate' "$req_file")
     local count=0
     local records="[]"
-    
+
     if [[ "$sd" == "$APP_REAL_DATE" ]]; then
       count=$((count+1))
       records="$(echo "$records" | jq -c --arg oid "$APP_ORDER_ID" '. + [{orderId: $oid, orderSource: "third_party_platform", finalStatus: "completed", complaintCount: 1, tripCompletedAt: "2026-09-01T12:00:00Z"}]')"
@@ -72,7 +72,7 @@ http_call() {
       count=$((count+1))
       records="$(echo "$records" | jq -c --arg oid "$PORTAL_ORDER_ID" '. + [{orderId: $oid, orderSource: "tenant_portal", finalStatus: "completed", complaintCount: 0, serviceProductCode: "enterprise_dispatch", tenantId: "'"$E2E_SEED_TENANT_ID"'"}]')"
     fi
-    
+
     RESP_BODY="$(jq -n --arg count "$count" --argjson records "$records" '{data: {rebuiltCount: ($count | tonumber), records: $records}}')"
   elif [[ "$path" == "/reports/jobs" ]]; then
     local jobType=$(jq -r '.jobType' "$req_file")
@@ -90,6 +90,12 @@ http_call() {
        fi
        RESP_BODY="$(jq -n --argjson records "$records" '{data: {jobId: "job-123", artifact: {artifactId: "art-123"}, rows: $records}}')"
     elif [[ "$jobType" == "six_month_operations_summary" ]]; then
+       local j_from=$(jq -r '.filters.from' "$req_file")
+       local j_to=$(jq -r '.filters.to' "$req_file")
+       if [[ "$j_from" != "$SUMMARY_FROM_DATE" || "$j_to" != "$SUMMARY_TO_DATE" ]]; then
+         echo "ASSERT FAIL: wrong job filters from=$j_from to=$j_to (expected from=${SUMMARY_FROM_DATE} to=${SUMMARY_TO_DATE})" >&2
+         exit 1
+       fi
        RESP_BODY="$(jq -n --argjson rec "$FIXTURE_SUMMARY_ROW" '{data: {jobId: "job-456", artifact: {artifactId: "art-456"}, rows: [$rec]}}')"
     fi
   elif [[ "$path" == "/reports/monthly-operations-summaries/rebuild" ]]; then
@@ -101,7 +107,11 @@ http_call() {
       RESP_BODY="$(jq -n '{data: {rebuiltCount: 0, records: []}}')"
     fi
   elif [[ "$path" == "/reports/operations-summary/preview"* ]]; then
-       RESP_BODY="$(jq -n --argjson rec "$FIXTURE_SUMMARY_ROW" '{data: {items: [$rec]}}')"
+    if [[ "$path" != *"?from=${SUMMARY_FROM_DATE}&to=${SUMMARY_TO_DATE}"* ]]; then
+      echo "ASSERT FAIL: wrong preview query in $path (expected from=${SUMMARY_FROM_DATE} to=${SUMMARY_TO_DATE})" >&2
+      exit 1
+    fi
+    RESP_BODY="$(jq -n --argjson rec "$FIXTURE_SUMMARY_ROW" '{data: {items: [$rec]}}')"
   fi
 }
 
@@ -128,19 +138,22 @@ run_scenario() {
   export E2E_SEED_TENANT_ID="tenant-1"
   export TAXI_BUSINESS_AREA="test-business-area"
   local TAXI_UNIQUE_VEHICLE_COUNT=1
-  export SUMMARY_FROM_DATE=$(echo "$FIXTURE_SUMMARY_ROW" | jq -r '.from')
-  export SUMMARY_TO_DATE=$(echo "$FIXTURE_SUMMARY_ROW" | jq -r '.to')
+  local EXPECTED_FROM_DATE=$(echo "$FIXTURE_SUMMARY_ROW" | jq -r '.from')
+  local EXPECTED_TO_DATE=$(echo "$FIXTURE_SUMMARY_ROW" | jq -r '.to')
+  assert_equals "SUMMARY_FROM_DATE" "$EXPECTED_FROM_DATE" "$SUMMARY_FROM_DATE"
+  assert_equals "SUMMARY_TO_DATE" "$EXPECTED_TO_DATE" "$SUMMARY_TO_DATE"
+
   export APP_REAL_DATE="$(get_date_from_iso "$APP_CREATED_AT")"
   export PHONE_REAL_DATE="$(get_date_from_iso "$PHONE_CREATED_AT")"
   export PORTAL_REAL_DATE="$(get_date_from_iso "$PORTAL_WINDOW_START")"
   export TMP_DIR="$(mktemp -d)"
 
   aggregate_and_assert_daily_records "$UNIQUE_SERVICE_DATES" "$APP_ORDER_ID" "$PHONE_ORDER_ID" "$PORTAL_ORDER_ID" "$E2E_SEED_TENANT_ID" "$name"
-  
+
   aggregate_monthly_records "$UNIQUE_SUMMARY_MONTHS" "$TAXI_BUSINESS_AREA"
-  
+
   assert_monthly_records "$AGGREGATED_MONTHLY_RECORDS" "$TAXI_UNIQUE_VEHICLE_COUNT"
-  
+
   local SUM_DEMAND="$(echo "$AGGREGATED_MONTHLY_RECORDS" | jq 'map(.demandRequestCount // .demand_request_count // 0) | add')"
   local MONTHLY_EXPECTED_SNAPSHOTS="$(echo "$AGGREGATED_MONTHLY_RECORDS" | jq 'map(.expectedSnapshotCount // .expected_snapshot_count // 0) | add')"
   local EXPECTED_COVERAGE="$(round_four "$(awk -v valid=3 -v total="$MONTHLY_EXPECTED_SNAPSHOTS" 'BEGIN { print valid / total }')")"
@@ -149,7 +162,7 @@ run_scenario() {
   run_summary_preview_and_assert "$SUMMARY_FROM_DATE" "$SUMMARY_TO_DATE" "$TAXI_BUSINESS_AREA" "$MAX_AVG_DISPATCHABLE" "$MONTHLY_EXPECTED_SNAPSHOTS" "$EXPECTED_COVERAGE"
 
   run_summary_job_and_assert "$SUMMARY_FROM_DATE" "$SUMMARY_TO_DATE" "$TAXI_BUSINESS_AREA" "$MAX_AVG_DISPATCHABLE" "$MONTHLY_EXPECTED_SNAPSHOTS" "$EXPECTED_COVERAGE" "$name"
-  
+
   rm -rf "$TMP_DIR"
 }
 
@@ -220,7 +233,7 @@ run_scenario "one/both complaints crossing (both crossing)" \
 # Negative controls
 echo "--- Running negative controls ---"
 
-# Wrong daily3 totals: e.g. demandRequestCount is 3 instead of 2 in summary
+# Wrong summary totals: e.g. demandRequestCount is 3 instead of 2 in summary
 if ( run_scenario 'negative demand' \
   '2026-09-15T12:00:05Z' '2026-09-15T12:00:10Z' '2026-09-15T12:30:00Z' \
   '2026-09-15T12:05:00Z' '2026-09-15T12:15:00Z' \
