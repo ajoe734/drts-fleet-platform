@@ -18,6 +18,9 @@ The E2E022 test initially failed with `daily rebuild count expected 3, got 2` at
 | `5eda2a96209dc7fb3d39c9aaabf7fe806f14f201` | REJECTED | R7: NEW (helper poisoned stdout via local JSON mixed with returns). R2: REPEATED (job filters/preview dates mock bypass). R6: REPEATED (did not log acceptance history correctly). |
 | `b398a62a9e47f48aca92b86fdfdc3db7c9a1f7b9` | REJECTED | R7: RESOLVED. R2: REPEATED (mock bypass via overwritten fixture). R6: REPEATED (historical SHA missing/incorrect, abbreviated node probe, premature acceptance). |
 | `a8beceb6f267fd4419c5fe887e92169a7272028e` | REJECTED | R8: NEW (distinct daily-date oracle blind spot). R6: PARTIALLY REPAIRED (method/path mock missing assertion, premature SATISFIED, missing SHA/inputs in docs). |
+| `98c657784d63405ea9c4f2f0298fd3c3b1fe3d79` | REJECTED | R5: REPEATED (invalid history/bypass). R6: Probe failure (Node syntax/escaping error). |
+| `241f53c73c9fa4359b7bcfbd872441eb7b5ad085` | REJECTED | R5: RESOLVED. R6: REPEATED (broken Node escaping - probe exited 1 before baseline with missing mutation target `SUMMARY_TO_DATE`; attribution defect remains). |
+| `d176130c8b01e1f9b726d0916fb3508926083908` | REOPENED | R6: PARTIALLY REPAIRED (probe escaping fixed: old 1 / new 0 plus all assertion diagnostics, but attribution/history defect repeated). |
 
 ## Fixes in Progress (Current Iteration)
 
@@ -28,28 +31,26 @@ The E2E022 test initially failed with `daily rebuild count expected 3, got 2` at
 3. **R8 Independent Daily Date Oracle:**
    The `test-date-logic.sh` mock oracle for daily HTTP fixture dates was decoupled from the tested `get_date_from_iso` helper. It now natively extracts string substrings and verifies the output of `UNIQUE_SERVICE_DATES` explicitly to catch collapsed dates. A negative control was added to prove that an incorrect daily date fails non-zero.
 4. **R6 Accurate Documentation:**
-   The document accurately records rejections, includes exact UTC inputs and specific source SHAs for findings, updates probe scripts to test the HTTP method and `R8` daily dates, and explicitly states the true status of acceptance testing.
+   The document accurately records rejections (including `98c657` and `241f53`), includes exact UTC inputs and specific source SHAs for findings, records R5 resolved and probe old1/new0 plus assertion diagnostics, identifies immutable tested sources at `d176130`, marks old hosted success HISTORICAL, and accurately lists new candidate hosted acceptance as PENDING at handoff.
 
 ## Acceptance Criteria
 - [x] `time_boundary_report_fixtures_consistent`: SATISFIED (offline regression test validates bounds generation, preview queries, HTTP methods, explicit unique dates, and job filters correctly fail upon mutation).
-- [x] `hosted_cross_surface_e2e_pass`: SATISFIED. (Evidence: run `36377134763`, job `108785351604` completed SUCCESS at 2026-09-28T04:23:17Z on previous candidate `241f53c73c9fa4359b7bcfbd872441eb7b5ad085` via synthetic PR merge `a6f0818` into `0bcfae19cfa9ecea5db9f3414ed3a462abb316d6`).
+- [ ] `hosted_cross_surface_e2e_pass`: PENDING at handoff. (HISTORICAL evidence: candidate `241f53c73c9fa4359b7bcfbd872441eb7b5ad085` run `36377134763` job `108785351604` PASS. New candidate PR 2216 run `36378013343` job `108787858801` is IN_PROGRESS).
 
 ### Exact UTC Inputs Tested (Unit)
-Daytime: `2026-09-15T12:00:05Z/10Z`, Portal `12:30:00Z`
-23:29:59 crossing: `2026-09-15T23:29:59Z`, Portal `23:59:59Z`
-23:30:00 crossing: `2026-09-15T23:30:00Z`, Portal `2026-09-16T00:00:00Z`
-Same-month midnight: App `2026-09-15T23:59:59Z`, Phone `2026-09-16T00:00:01Z`
-Month/year crossings: `2026-10-01`, `2026-12-31T23:59:59Z/2027-01-01`
-Complaint crossings: `2026-09-30`/`2026-10-01` one- and both-complaint crossings.
+`d176130c8b01e1f9b726d0916fb3508926083908:tests/unit/system-remediation/sr-ci-e2e022-date-boundary-20260927/test-date-logic.sh:182-244`
+
+Daytime, 23:29:59, 23:30:00, same-month midnight, both orders next month, split Dec31/Jan1, one/both complaint crossings. Full matrix documented at source SHA.
 
 ### Evidence Table
 | Command / Check | Candidate / Version | Outcome | Limitations / Notes |
 | --- | --- | --- | --- |
-| Node mock boundary mutation probe | `b398a62a9...` (Previous review) | FAIL | Assertions incorrectly bypassed wrong-date requests, passing unexpectedly |
-| Node method/path and R8 mutation probe | `a8beceb6f...` (Locked candidate) | FAIL | Assertions bypassed wrong method and wrong daily date oracle |
-| Node mock mutation probe | Current clean successor | PASS | Baseline passes (exit 0), all mutations (`wrong-helper-bounds`, `wrong-preview-query`, `wrong-job-filters`, `wrong-daily-date`, `wrong-preview-method-and-path`) exit 1 as expected |
-| `bash tests/unit/system-remediation/sr-ci-e2e022-date-boundary-20260927/test-date-logic.sh` | Current clean successor | PASS | Tests boundary fixtures, HTTP mock queries/filters/methods, and negative controls offline |
-| E2E Assertions Integration | Current clean successor | VERIFIED | `E2E-022-operations-reporting.sh` utilizes shared HTTP iteration paths |
+| Node mock boundary mutation probe | `b398a62a9...` (Historical) | FAIL | Assertions incorrectly bypassed wrong-date requests, passing unexpectedly |
+| Node method/path and R8 mutation probe | `a8beceb6f...` (Historical) | FAIL | Assertions bypassed wrong method and wrong daily date oracle |
+| Node mock mutation probe | `241f53c73...` (Historical) | FAIL | Syntax/escaping error. Probe exited 1 before baseline with missing mutation target `SUMMARY_TO_DATE`. |
+| Node mock mutation probe | `d176130c8b01e1f9b726d0916fb3508926083908` | PASS | Baseline passes (exit 0), all 5 mutations exit 1 (SUMMARY_FROM_DATE; wrong preview query; wrong job filters; UNIQUE_SERVICE_DATES; wrong method DELETE). |
+| `bash tests/unit/.../test-date-logic.sh` | `d176130c8b01e1f9b726d0916fb3508926083908` | PASS | Tests boundary fixtures, HTTP mock queries/filters/methods, and negative controls offline (bash 5.2.21, jq 1.7) |
+| E2E Assertions Integration | `d176130c8b01e1f9b726d0916fb3508926083908` | VERIFIED | `E2E-022-operations-reporting.sh` utilizes shared HTTP iteration paths |
 
 **Replayable Node Probe Command for Reviewers:**
 ```javascript
