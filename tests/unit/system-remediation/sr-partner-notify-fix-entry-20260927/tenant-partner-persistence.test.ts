@@ -194,7 +194,14 @@ describe("SR-PARTNER-NOTIFY-FIX-ENTRY-20260927: TenantPartnerService entry durab
     expect(service.authenticatePartnerBootstrap({ entrySlug: "state-slug", apiKey: seedKey }, "r").partnerEntry.entrySlug).toBe("state-slug");
 
     const deferRevoke1 = new Deferred<void>();
-    mockRepo.persistChanges.mockImplementationOnce(() => deferRevoke1.promise);
+    let revoke1Held = false;
+    mockRepo.persistChanges.mockImplementation((changes: any) => {
+      if (changes.partnerEntries?.some((e: any) => e.entrySlug === "state-slug" && e.status === "revoked")) {
+        revoke1Held = true;
+        return deferRevoke1.promise;
+      }
+      return Promise.resolve();
+    });
 
     const revokePromise = controller.revokePlatformPartnerEntry(
       " state-slug",
@@ -206,6 +213,8 @@ describe("SR-PARTNER-NOTIFY-FIX-ENTRY-20260927: TenantPartnerService entry durab
 
     deferUpdate.resolve();
     await updatePromise;
+    await new Promise((r) => setTimeout(r, 10)); // allow queued revoke to reach its persistence gate
+    expect(revoke1Held).toBe(true);
     expect(revokeResolved).toBe(false); // Explicit no-early-response
     expect(service.authenticatePartnerBootstrap({ entrySlug: "state-slug", apiKey: seedKey }, "r").partnerEntry.entrySlug).toBe("state-slug");
 
@@ -227,9 +236,12 @@ describe("SR-PARTNER-NOTIFY-FIX-ENTRY-20260927: TenantPartnerService entry durab
     const deferRevoke2 = new Deferred<void>();
     let revoke2Held = false;
     let activateResolved = false;
-    mockRepo.persistChanges.mockImplementationOnce(() => {
-      revoke2Held = true;
-      return deferRevoke2.promise;
+    mockRepo.persistChanges.mockImplementation((changes: any) => {
+      if (changes.partnerEntries?.some((e: any) => e.entrySlug === "state-slug-2" && e.status === "revoked")) {
+        revoke2Held = true;
+        return deferRevoke2.promise;
+      }
+      return Promise.resolve();
     });
 
     const revokePromise2 = controller.revokePlatformPartnerEntry(
@@ -403,14 +415,18 @@ describe("SR-PARTNER-NOTIFY-FIX-ENTRY-20260927: TenantPartnerService entry durab
       "failed-revoke-slug",
       { purpose: "queued-issue" },
       "req-10",
-    ).then(res => { 
-      issue3Resolved = true; 
-      return res; 
+    ).then(res => {
+      issue3Resolved = true;
+      return res;
     });
 
     await new Promise((r) => setTimeout(r, 10));
     expect(issue3Held).toBe(false);
     expect(issue3Resolved).toBe(false);
+    const creds1 = service.listPlatformPartnerIngressCredentials("failed-revoke-slug");
+    expect(creds1.length).toBe(1);
+    expect(creds1[0].purpose).toBe("seed");
+    expect(creds1[0].status).toBe("active");
     expect(service.authenticatePartnerBootstrap({ entrySlug: "failed-revoke-slug", apiKey: seedKey }, "r").partnerEntry.entrySlug).toBe("failed-revoke-slug");
 
     deferRevoke3.reject(new Error("Revoke failed"));
@@ -419,6 +435,10 @@ describe("SR-PARTNER-NOTIFY-FIX-ENTRY-20260927: TenantPartnerService entry durab
     await new Promise((r) => setTimeout(r, 10));
     expect(issue3Held).toBe(true);
     expect(issue3Resolved).toBe(false);
+    const creds2 = service.listPlatformPartnerIngressCredentials("failed-revoke-slug");
+    expect(creds2.length).toBe(1);
+    expect(creds2[0].purpose).toBe("seed");
+    expect(creds2[0].status).toBe("active");
     expect(service.authenticatePartnerBootstrap({ entrySlug: "failed-revoke-slug", apiKey: seedKey }, "r").partnerEntry.entrySlug).toBe("failed-revoke-slug");
 
     deferIssue3.resolve();
