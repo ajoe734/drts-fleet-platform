@@ -308,3 +308,21 @@ are recorded in canonical handoff after execution. Checks use Python 3.12.3
 and Prettier 3.8.2. Hosted CI triggered by publishing the final candidate may
 remain pending at handoff and is collected by the existing GitHub bus. No
 manual identical CI rerun, product runtime or deployment is needed here.
+
+Completed local verification at report checkpoint
+`a06c178d2d7945a88f194e577f6d270bf1b68f5f` (same base and commands above):
+
+| Check                                                              | Completed result                                                                  |
+| ------------------------------------------------------------------ | --------------------------------------------------------------------------------- |
+| Full-range production trailer validator, bypass unset              | Exit 0; three non-merge commits OK                                                |
+| `git diff --check`                                                 | Exit 0; no whitespace defects                                                     |
+| Prettier check                                                     | Exit 0; report formatted                                                          |
+| Canonical consistency                                              | Exit 0; all four categories report zero findings                                  |
+| Net path comparison against the immutable dev base                 | Exit 0; exactly this report                                                       |
+| Ancestry for original report commits and both completed dev merges | Each exit 0; `91fd8f9c...`, `74d14280...`, `dce571db...`, `c8deb871...` preserved |
+| Three historical linked blobs via `git cat-file -e OLD:path`       | Each exit 0; source citations still resolve                                       |
+
+This verification receipt is the only addition after that tested checkpoint.
+The final committed receipt is rechecked before normal push and handoff; its
+extra report commit is included in the final full-range trailer count. Helper
+same-SHA hosted review/CI/merge remain pending, separate from these local checks.
