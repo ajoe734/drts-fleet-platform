@@ -994,11 +994,11 @@ assert_int_equals "summary preview complaintCount" "$EXPECTED_TOTAL_COMPLAINT_CO
 assert_int_equals \
   "summary preview complaintsByCategory.late_arrival" \
   "$EXPECTED_LATE_ARRIVAL_COUNT" \
-  "$(json_field_from_object "$SUMMARY_ROW" '(.complaintsByCategory // .complaints_by_category).late_arrival')"
+  "$(json_field_from_object "$SUMMARY_ROW" '(.complaintsByCategory // .complaints_by_category).late_arrival // 0')"
 assert_int_equals \
   "summary preview complaintsByCategory.no_arrival" \
   "$EXPECTED_NO_ARRIVAL_COUNT" \
-  "$(json_field_from_object "$SUMMARY_ROW" '(.complaintsByCategory // .complaints_by_category).no_arrival')"
+  "$(json_field_from_object "$SUMMARY_ROW" '(.complaintsByCategory // .complaints_by_category).no_arrival // 0')"
 
 log_step "3.8 — POST /reports/jobs (six_month_operations_summary)"
 SUMMARY_REPORT_JOB_FIXTURE="${TMP_DIR}/summary-report-job.json"
@@ -1045,11 +1045,11 @@ assert_int_equals "summary report complaintCount" "$EXPECTED_TOTAL_COMPLAINT_COU
 assert_int_equals \
   "summary report complaintsByCategory.late_arrival" \
   "$EXPECTED_LATE_ARRIVAL_COUNT" \
-  "$(json_field_from_object "$SUMMARY_JOB_ROW" '(.complaintsByCategory // .complaints_by_category).late_arrival')"
+  "$(json_field_from_object "$SUMMARY_JOB_ROW" '(.complaintsByCategory // .complaints_by_category).late_arrival // 0')"
 assert_int_equals \
   "summary report complaintsByCategory.no_arrival" \
   "$EXPECTED_NO_ARRIVAL_COUNT" \
-  "$(json_field_from_object "$SUMMARY_JOB_ROW" '(.complaintsByCategory // .complaints_by_category).no_arrival')"
+  "$(json_field_from_object "$SUMMARY_JOB_ROW" '(.complaintsByCategory // .complaints_by_category).no_arrival // 0')"
 
 print_chain_summary
 log_ok "E2E-022 complete — operations reporting shell finished."

@@ -2,37 +2,23 @@
 
 ## Observed Failure
 The E2E022 test initially failed with `daily rebuild count expected 3, got 2` at 2026-09-27 23:31:58 UTC.
-This was caused by the test generating a portal order with a reservation window 30 minutes in the future, which crossed into the next UTC day.
 
-## Implementation Details & Remediation History
+## Remediation History & Review Findings
 
-### Initial Fix Attempt (Candidate: 8419de2aba93dc18a2a46b432a15cd5502b1833e)
-Attempted to use `extract_authoritative_dates` but left frozen variables in the script.
+| Candidate SHA | Status | Findings |
+| --- | --- | --- |
+| `8419de2aba93dc18a2a46b432a15cd5502b1833e` | REJECTED | R1: Month/year rollover remains broken. R2: Offline regression disconnected. |
+| `9501e8874f15479a5b52dfdc84b6b521419589d1` | REJECTED | R1: Partially resolved. R3: Split-month coverage compares different denominators. R4: Complaint creation cross-month eligibility not handled. R2: Offline regression still bypasses real fixture. |
+| `8d3d8fdd7cc1789914a1ed7f131b46a3c0320b27` | REJECTED | R3: RESOLVED. R4: PARTIALLY RESOLVED (fails on zero-category parsing). R2: REPEATED (still bypasses real fixture). R5: NEW (commit subject violation). |
+| `[PENDING]` | IN PROGRESS | Fixes for R4 (zero-category jq `// 0`) and R2 (rewritten unit test with real json assertions). |
 
-### Second Fix Attempt (Candidate: 9501e8874f15479a5b52dfdc84b6b521419589d1)
-Partially resolved the frozen-start-month issue but introduced regressions in split-month/year scenarios. Review by Codex highlighted three main issues:
-- **R2 (Repeated):** The unit test bypassed the actual fixture/assertion path and mocked the `unique_service_dates`. E2E022 duplicated the date logic instead of calling the helper.
-- **R3 (New):** Split-month coverage logic aggregated denominators incorrectly. E2E022 summed expected snapshots from all months, but the first row's snapshot coverage rate only reflected its own month, failing the assertion.
-- **R4 (New):** Complaints crossed the order month boundary, causing a mismatch with the ReportingService rule (which only counts complaints matching the order's month). E2E022 strictly expected 2 complaints regardless of their creation month.
+## Fixes in Progress (Current Iteration)
 
-### Final Remediation
-1. **R2 Refactor:** Modified `tests/e2e/lib/operations-reporting-dates.sh` to export all relevant dates. Replaced the duplicated inline date logic in `E2E-022-operations-reporting.sh` (lines 714-738) with a direct `eval` call to `extract_authoritative_dates`. Rewrote `test-date-logic.sh` to completely simulate the actual E2E logic (including jq-like assertions) for various split-month scenarios.
-2. **R3 Coverage Fix:** Updated E2E022 to independently validate each monthly row's snapshot coverage rate using its own expected and valid snapshot counts, correctly isolating the rows before verifying the aggregate coverage for the job/preview.
-3. **R4 Complaint Eligibility:** Implemented dynamic eligibility checks in E2E022. The script now reads the authoritative `createdAt` for each complaint and only counts it towards the report total if its month matches its related order's summary month. This aligns the test assertions with the production ReportingService contract.
-
-## Testing & Regression Matrix
-
-The offline verification script `test-date-logic.sh` validates the complete report metric logic including unique service dates, daily totals, coverage rates, and complaint eligibility.
-
-| Scenario | App / Phone Created | Portal Started | Complaint Created | Daily Rows | Expected Valid Complaints | Expected Coverage Validation |
-|----------|---------------------|----------------|-------------------|------------|---------------------------|------------------------------|
-| Daytime | Same Day | Same Day | Same Day | 1 | 2 (Both counted) | 1 month validated |
-| Day split | Day 1 | Day 2 | Day 1 | 2 | 2 (Both counted) | 1 month validated |
-| Month split | Month 1 | Month 2 (next day) | Month 1 / 2 | 2 | 1 (Phone skipped if split) | 2 months validated separately |
-| Year split | Dec 31 | Jan 1 | Jan 1 | 2 | 1 (App skipped if split) | 2 months validated separately |
-| Complaint split | Month 1 | Month 1 | Month 2 | 1 | 1 (Complaint skips month) | 1 month validated |
+1. **R4 Complaint Category Parsing:**
+   Added `// 0` to `jq` expressions extracting `.late_arrival` and `.no_arrival` in `E2E-022-operations-reporting.sh` lines 994-1002 and 1045-1052. The production `ReportingService` omits empty category keys, so `json_field_from_object` returns an empty string, which causes `assert_int_equals` to fail when expecting `0`.
+2. **R2 Real Assertion Harness:**
+   Completely rewrote `test-date-logic.sh` to build a realistic JSON `SUMMARY_ROW` matching the `ReportingService` output format (sparse categories). It now extracts the values using the exact E2E `json_field_from_object` queries, covering the ordinary daytime, 23:29:59, 23:30:00, midnight, split month/year, and order/complaint split boundaries, and verifies the daily rebuild count logic.
 
 ## Acceptance Criteria
-- [x] Executable offline regression covering UTC23:30, midnight, and month/year boundaries demonstrating real report logic and E2E assertions.
-- [x] `time_boundary_report_fixtures_consistent`: Fix implemented and correctly aligns reports based on authoritative order creation timestamps and ReportingService semantics.
-- [ ] `hosted_cross_surface_e2e_pass`: E2E passing (pending hosted CI after push).
+- [ ] `time_boundary_report_fixtures_consistent`: UNSATISFIED (pending R2/R4 fix review and R5 resolution by supervisor).
+- [ ] `hosted_cross_surface_e2e_pass`: PENDING (hosted CI will be re-run after the compliant commit structure is recovered).
