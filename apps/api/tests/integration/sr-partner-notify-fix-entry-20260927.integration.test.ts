@@ -169,7 +169,8 @@ describe.skipIf(!DATABASE_URL)(
       let hold = false;
       const writes: {
         settled: boolean;
-        finish: (failure?: boolean) => void;
+        entered: Promise<void>;
+        finish: (failure?: boolean) => Promise<void>;
       }[] = [];
 
       vi.spyOn(database, "query").mockImplementation(
@@ -179,17 +180,28 @@ describe.skipIf(!DATABASE_URL)(
             sql.includes("INSERT INTO admin.phase1_partner_ingress_credentials")
           ) {
             return new Promise((resolve, reject) => {
-              const item = { settled: false, finish: null as any };
-              item.finish = (failure = false) => {
+              let signalEntered!: () => void;
+              const entered = new Promise<void>((r) => {
+                signalEntered = r;
+              });
+              const item = { settled: false, entered, finish: null as any };
+              item.finish = async (failure = false) => {
                 if (item.settled) return;
-                item.settled = true;
-                if (failure) {
-                  reject(new Error("probe rejected lifecycle write"));
-                } else {
-                  originalQuery(sql, values).then(resolve).catch(reject);
+                try {
+                  if (failure) {
+                    reject(new Error("probe rejected lifecycle write"));
+                  } else {
+                    const result = await originalQuery(sql, values);
+                    resolve(result);
+                  }
+                } catch (e) {
+                  reject(e);
+                } finally {
+                  item.settled = true;
                 }
               };
               writes.push(item);
+              signalEntered();
             });
           }
           return originalQuery(sql, values);
@@ -220,7 +232,7 @@ describe.skipIf(!DATABASE_URL)(
           businessDispatchSubtype: "enterprise_dispatch",
         });
 
-        // Wait for persistence to finish
+        // Wait for persistence to finish by awaiting mutexes
         await turn();
         await turn();
 
@@ -236,6 +248,7 @@ describe.skipIf(!DATABASE_URL)(
 
         // 3. Initiate mutation (hold query)
         hold = true;
+        let operationResult: any;
         const operation = (
           mutation === "revoke"
             ? tenantService.revokePlatformPartnerIngressCredential(
@@ -248,11 +261,22 @@ describe.skipIf(!DATABASE_URL)(
                 overlapDays: 1,
               })
         ).then(
-          () => "fulfilled",
+          (res) => {
+            operationResult = res;
+            return "fulfilled";
+          },
           () => "rejected",
         );
 
-        await turn();
+        // Snapshot lifecycle queries before auth via an explicit query-entered signal
+        const expectedWrites = mutation === "revoke" ? 1 : 2;
+        const startPoll = Date.now();
+        while (writes.length < expectedWrites) {
+          if (Date.now() - startPoll > 5000)
+            throw new Error("timeout waiting for lifecycle writes");
+          await turn();
+        }
+        await Promise.all(writes.map((w) => w.entered));
 
         // 4. Authenticate while held
         let authError = null;
@@ -275,24 +299,59 @@ describe.skipIf(!DATABASE_URL)(
         }
         expect(authError).toBeNull();
 
+        // Assert telemetry hasn't joined lifecycle writes (telemetry is usage, not credentials)
         await turn();
+        expect(writes.length).toBe(expectedWrites);
 
         // 5. Release hold
         const lifecycle = [...writes];
-        for (const w of lifecycle) w.finish(fail);
+        for (const w of lifecycle) await w.finish(fail);
 
         const outcome = await operation;
         expect(outcome).toBe(fail ? "rejected" : "fulfilled");
 
         // Wait for telemetry and mutex drain
-        for (let n = 0; n < 10; n++) {
+        const drainStart = Date.now();
+        while (true) {
+          if (Date.now() - drainStart > 5000)
+            throw new Error("timeout waiting for drain");
           await turn();
-          for (const w of writes) w.finish();
           if (
             (tenantService as any).entrySlugMutexes.size === 0 &&
             writes.every((w) => w.settled)
-          )
+          ) {
             break;
+          }
+        }
+
+        hold = false;
+
+        // Inspect durable record directly
+        const durableRows = (
+          await database.query(
+            "SELECT * FROM admin.phase1_partner_ingress_credentials WHERE partner_entry_slug = $1",
+            [entrySlug],
+          )
+        ).rows;
+        const seedRow = durableRows.find((r) => r.key_id === keyId);
+
+        if (!fail && mutation === "rotation") {
+          expect(seedRow.status).toBe("overlap_active");
+          expect(seedRow.overlap_ends_at).not.toBeNull();
+          expect(seedRow.superseded_by_key_id).toBe(
+            operationResult.credential.keyId,
+          );
+          const newRow = durableRows.find(
+            (r) => r.key_id === operationResult.credential.keyId,
+          );
+          expect(newRow).toBeDefined();
+          expect(newRow.status).toBe("active");
+        } else if (!fail && mutation === "revoke") {
+          expect(seedRow.status).toBe("revoked");
+          expect(seedRow.revoked_at).not.toBeNull();
+        } else {
+          expect(seedRow.status).toBe("active");
+          expect(seedRow.overlap_ends_at).toBeNull();
         }
 
         // 6. Inspect durable record by reloading
@@ -328,7 +387,24 @@ describe.skipIf(!DATABASE_URL)(
             "req-after",
           );
           expect(auth.identity.actorId).toBe(keyId);
+
+          const newAuth = reloadedService.authenticatePartnerBootstrap(
+            { entrySlug, apiKey: operationResult.plaintextKey },
+            "req-after-new",
+          );
+          expect(newAuth.identity.actorId).toBe(
+            operationResult.credential.keyId,
+          );
         }
+
+        // Explicitly drain post-reload telemetry
+        const reloadDrainStart = Date.now();
+        while ((reloadedService as any).entrySlugMutexes.size > 0) {
+          if (Date.now() - reloadDrainStart > 5000)
+            throw new Error("timeout waiting for reload drain");
+          await turn();
+        }
+
         await reloadedService.onModuleDestroy();
       };
 
@@ -341,6 +417,10 @@ describe.skipIf(!DATABASE_URL)(
           }
         }
       } finally {
+        hold = false;
+        for (const w of writes) await w.finish();
+        const promises = [...(tenantService as any).entrySlugMutexes.values()];
+        if (promises.length > 0) await Promise.all(promises);
         vi.restoreAllMocks();
       }
     });

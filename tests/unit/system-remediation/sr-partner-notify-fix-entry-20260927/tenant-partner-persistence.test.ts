@@ -996,6 +996,8 @@ describe("SR-PARTNER-NOTIFY-FIX-ENTRY-20260927: Real Repository SQL timing probe
   });
 
   it("should release mutex if telemetry write fails", async () => {
-    await runScenario("external", "revoke", false, true);
+    for (const mode of ["external", "internal"] as const) {
+      await runScenario(mode, "revoke", false, true);
+    }
   });
 });
