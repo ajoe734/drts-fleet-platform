@@ -29,3 +29,18 @@
 - **Fix:** Fixed the table name in the test teardown (`DELETE FROM mobility.phase1_order_partner_notification_routes`). Also fixed an unused error variable lint warning.
 - **Commands Verified locally:**
   1. `pnpm exec eslint apps/api/tests/integration/sr-partner-notify-fix-snapshot-20260927.integration.test.ts` (Exited with 0)
+
+## Fixes for SNAP-R4, SNAP-R5, SNAP-R2 (2026-09-28)
+- **Previous Rejected SHA:** `61af03586a77ee74b60220c610f0b9a254bf3436`
+- **Current Candidate Branch:** `gemini2/sr-partner-notify-fix-snapshot-20260927-v2` (published via compliant replacement path to fix SNAP-R6 commit trailer errors without force pushing)
+- **Issues Fixed:**
+  - **SNAP-R4:** Replaced unresolved route/counter fixture by properly inserting a valid partner entry in `admin.phase1_partner_channel_entries` before allocating sequence.
+  - **SNAP-R5:** Fixed FK order cleanup in teardown. Route is deleted AFTER sequence, and prerequisite partner entry is also deleted in the finally block.
+  - **SNAP-R2:** Implemented full atomicity rollback using a wrapped transaction executor (`persistOrderWorkflow`). Error is injected exactly after successful outbox insertion and sequence allocation (by intercepting the payload `UPDATE` query). Snapshots, sequence allocation, and outbox rows are verified to be fully rolled back.
+  - **SNAP-R6:** Fixed full-range commit gate failure by publishing a compliant replacement candidate on a clean branch `gemini2/sr-partner-notify-fix-snapshot-20260927-v2`.
+- **Commands Verified locally:**
+  1. `node -e 'const t=require("typescript")... getPreEmitDiagnostics(g); process.exitCode=d.length?1:0;'` (Exited with 0)
+  2. `pnpm exec eslint apps/api/tests/integration/sr-partner-notify-fix-snapshot-20260927.integration.test.ts` (Exited with 0)
+  3. `git diff --check origin/dev...HEAD` (Exited with 0)
+  4. `python3 tools/ci/git/check_commit_trailers.py --base origin/dev --head HEAD` (Exited with 0)
+- **Required Acceptance Keys Pending:** `snapshot_parameter_types_consistent`, `snapshot_supersede_replay_rollback_hosted_pg`

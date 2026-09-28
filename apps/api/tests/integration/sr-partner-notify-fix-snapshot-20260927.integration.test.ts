@@ -45,6 +45,15 @@ describe("SR-PARTNER-NOTIFY-FIX-SNAPSHOT-20260927: disclosure snapshot SQL type 
       );
 
       const now = new Date().toISOString();
+
+      await database.query(
+        `INSERT INTO admin.phase1_partner_channel_entries (
+           entry_slug, tenant_id, partner_id, program_id, status, created_at, updated_at, record
+         ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8::jsonb)`,
+        ["slug", tenantId, "pt1", "prog1", "active", now, now, JSON.stringify({
+          entrySlug: "slug", tenantId, partnerId: "pt1", programId: "prog1", status: "active", createdAt: now, updatedAt: now
+        })]
+      );
             const order: OwnedOrderRecord = {
         orderId,
         orderNo: `PG-${orderId}`,
@@ -261,7 +270,7 @@ describe("SR-PARTNER-NOTIFY-FIX-SNAPSHOT-20260927: disclosure snapshot SQL type 
 
       const outbox3: ConsumerNotificationOutboxRecord = {
         outboxId: randomUUID(),
-        orderId: null as any, // INTENTIONAL ERROR: order_id cannot be null, will cause postgres constraint violation and rollback transaction
+        orderId,
         passengerSubjectRef: "P1",
         eventType: "assignment_replaced",
         assignmentVersion: 3,
@@ -274,15 +283,31 @@ describe("SR-PARTNER-NOTIFY-FIX-SNAPSHOT-20260927: disclosure snapshot SQL type 
       };
 
       let errorThrown = false;
+      let caughtError: any = null;
       try {
-        await repository.persistChanges({
-          passengerDisclosureSnapshots: [snapshot3],
-          consumerNotificationOutbox: [outbox3]
+        await repository.withTransaction(async (executor) => {
+          // Wrapped executor to inject error AFTER outbox insert and sequence allocation
+          const wrappedExecutor = {
+            query: async <T extends import("pg").QueryResultRow>(text: any, params?: any[]) => {
+              const res = await executor.query<T>(text, params);
+              if (typeof text === "string" && text.includes("UPDATE ops.consumer_notification_outbox")) {
+                throw new Error("Injected executor boundary error");
+              }
+              return res;
+            }
+          } as any;
+          
+          await repository.persistOrderWorkflow(wrappedExecutor, {
+            passengerDisclosureSnapshots: [snapshot3],
+            consumerNotificationOutbox: [outbox3]
+          });
         });
-      } catch {
+      } catch (e) {
         errorThrown = true;
+        caughtError = e;
       }
       expect(errorThrown).toBe(true);
+      expect(caughtError?.message).toBe("Injected executor boundary error");
 
       const res4 = await database.query<{ assignment_version: number, superseded_at: Date | null }>("SELECT * FROM ops.passenger_dispatch_disclosure_snapshots WHERE order_id = $1 ORDER BY assignment_version ASC", [orderId]);
       expect(res4.rows).toHaveLength(2); // Still 2, no snapshot3
@@ -297,16 +322,24 @@ describe("SR-PARTNER-NOTIFY-FIX-SNAPSHOT-20260927: disclosure snapshot SQL type 
 
       const out4 = await database.query("SELECT * FROM ops.consumer_notification_outbox WHERE outbox_id = $1", [outbox3.outboxId]);
       expect(out4.rows).toHaveLength(0); // Failed outbox insert rolled back
+      
+      const seq4 = await database.query<{ next_sequence: string }>("SELECT next_sequence FROM mobility.phase1_partner_notification_sequences WHERE order_id = $1", [orderId]);
+      expect(seq4.rows).toHaveLength(1);
+      expect(seq4.rows[0]!.next_sequence).toBe("3"); // Sequence should not be incremented (was 3 before)
 
     } finally {
-      await database.query("DELETE FROM ops.consumer_notification_outbox WHERE order_id = $1", [orderId]);
-      await database.query("DELETE FROM ops.passenger_dispatch_disclosure_snapshots WHERE order_id = $1", [orderId]);
-      await database.query("DELETE FROM mobility.phase1_order_partner_notification_routes WHERE order_id = $1", [orderId]);
-      await database.query("DELETE FROM mobility.phase1_partner_notification_sequences WHERE order_id = $1", [orderId]);
-      await database.query("DELETE FROM ops.phase1_dispatch_jobs WHERE order_id = $1", [orderId]);
-      await database.query("DELETE FROM ops.phase1_owned_orders WHERE order_id = $1", [orderId]);
-      await database.query("DELETE FROM core.tenants WHERE tenant_id = $1::uuid", [tenantId]);
-      await database.onModuleDestroy();
+      try {
+        await database.query("DELETE FROM ops.consumer_notification_outbox WHERE order_id = $1", [orderId]);
+        await database.query("DELETE FROM ops.passenger_dispatch_disclosure_snapshots WHERE order_id = $1", [orderId]);
+        await database.query("DELETE FROM mobility.phase1_partner_notification_sequences WHERE order_id = $1", [orderId]);
+        await database.query("DELETE FROM mobility.phase1_order_partner_notification_routes WHERE order_id = $1", [orderId]);
+        await database.query("DELETE FROM ops.phase1_dispatch_jobs WHERE order_id = $1", [orderId]);
+        await database.query("DELETE FROM ops.phase1_owned_orders WHERE order_id = $1", [orderId]);
+        await database.query("DELETE FROM admin.phase1_partner_channel_entries WHERE entry_slug = 'slug'");
+        await database.query("DELETE FROM core.tenants WHERE tenant_id = $1::uuid", [tenantId]);
+      } finally {
+        await database.onModuleDestroy();
+      }
     }
   });
 });
