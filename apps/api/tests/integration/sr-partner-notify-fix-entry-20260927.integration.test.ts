@@ -307,13 +307,13 @@ describe.skipIf(!DATABASE_URL)(
 
         // 5. Release hold
         const lifecycle = [...writes];
+        // Stop intercepting new writes BEFORE releasing lifecycle snapshot
+        hold = false;
+
         for (const w of lifecycle) await w.finish(fail);
 
         const outcome = await operation;
         expect(outcome).toBe(fail ? "rejected" : "fulfilled");
-
-        // Stop intercepting new writes before we wait for telemetry to drain
-        hold = false;
 
         // Wait for telemetry and mutex drain
         const drainStart = Date.now();
@@ -369,14 +369,15 @@ describe.skipIf(!DATABASE_URL)(
         }
 
         // 6. Inspect durable record by reloading
-        const reloadedRepo = new TenantPartnerRepository(database);
-        const reloadedService = new TenantPartnerService(
-          new AuditNotificationService(new AuditLogRepository(database)),
-          reloadedRepo,
-        );
-        await reloadedService.onModuleInit();
-
+        let reloadedService: any;
         try {
+          const reloadedRepo = new TenantPartnerRepository(database);
+          reloadedService = new TenantPartnerService(
+            new AuditNotificationService(new AuditLogRepository(database)),
+            reloadedRepo,
+          );
+          await reloadedService.onModuleInit();
+
           if (fail) {
             // Mutation failed, so key is still active and usable
             const auth = reloadedService.authenticatePartnerBootstrap(
@@ -414,13 +415,13 @@ describe.skipIf(!DATABASE_URL)(
 
           // Explicitly drain post-reload telemetry
           const reloadDrainStart = Date.now();
-          while ((reloadedService as any).entrySlugMutexes.size > 0) {
+          while (reloadedService.entrySlugMutexes.size > 0) {
             if (Date.now() - reloadDrainStart > 5000)
               throw new Error("timeout waiting for reload drain");
             await turn();
           }
         } finally {
-          await reloadedService.onModuleDestroy();
+          if (reloadedService) await reloadedService.onModuleDestroy();
         }
       };
 
