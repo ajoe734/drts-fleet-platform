@@ -1216,9 +1216,16 @@ test.describe("SR-PARTNER-NOTIFY-QA-20260917: E2E Partner Notification Delivery 
     expect(document!.headers()["x-drts-candidate-sha"]).toBe(
       process.env.CANDIDATE_SHA,
     );
+    const pickerResponse = page.waitForResponse(
+      (response) =>
+        response.request().method() === "GET" &&
+        new URL(response.url()).pathname.endsWith("/tenant/webhooks"),
+    );
     await page
       .getByRole("button", { name: "Notifications", exact: true })
       .click();
+    // R5: the real browser's server-authorized tenant picker must load too.
+    expect((await pickerResponse).status()).toBe(200);
     const row = page.getByRole("row").filter({ hasText: outboxId });
     await expect(row).toContainText("partner_ack_invalid");
     const retry = row.getByRole("button", { name: /重送/ });
@@ -1247,7 +1254,7 @@ test.describe("SR-PARTNER-NOTIFY-QA-20260917: E2E Partner Notification Delivery 
       .getByRole("button", { name: /^(重新整理|Refresh)$/ })
       .last()
       .click();
-    await expect(row).toContainText(/端點已接受，裝置未知|Endpoint accepted/);
+    await expect(row).toContainText("Accepted (Unknown Device State)");
     await expect(row.getByRole("button", { name: /重送/ })).toHaveCount(0);
     await test.info().attach("admin-retry-readback", {
       contentType: "image/png",

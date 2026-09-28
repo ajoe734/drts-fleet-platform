@@ -430,24 +430,22 @@ export class PartnerFixture {
           body,
         );
         expect(entry.tenantId).toBe(tenantId);
-        await expect
-          .poll(
-            async () =>
-              (
-                await this.db.query(
-                  "SELECT entry_slug, tenant_id, partner_id FROM admin.phase1_partner_channel_entries WHERE entry_slug=$1",
-                  [slug],
-                )
-              ).rows,
-            { timeout: 10_000 },
-          )
-          .toEqual([
-            {
-              entry_slug: slug,
-              tenant_id: tenantId,
-              partner_id: entry.partnerId,
-            },
-          ]);
+        // R11: creation must already be durable when POST returns. No polling
+        // may hide a response that races the authoritative persistence write.
+        expect(
+          (
+            await this.db.query(
+              "SELECT entry_slug, tenant_id, partner_id FROM admin.phase1_partner_channel_entries WHERE entry_slug=$1",
+              [slug],
+            )
+          ).rows,
+        ).toEqual([
+          {
+            entry_slug: slug,
+            tenant_id: tenantId,
+            partner_id: entry.partnerId,
+          },
+        ]);
         const partnerUserRef = "qa-resident-shared-ref";
         entries.set(slug, new Set([partnerUserRef]));
         const issued = await this.call<PartnerIngressCredentialIssued>(
@@ -514,17 +512,28 @@ export class PartnerFixture {
   async provisionFreshSessions() {
     const file = path.join(this.directory!, "fixture-sessions.json");
     try {
-      await run("./apps/api/node_modules/.bin/tsx", [
-        "tests/e2e/system-remediation/sr-partner-notify-qa-20260917/fixture-sessions.ts",
-        file,
-      ], { timeout: 30_000 });
-      const tokens = JSON.parse(await readFile(file, "utf8")) as Record<string, string>;
+      await run(
+        "./apps/api/node_modules/.bin/tsx",
+        [
+          "tests/e2e/system-remediation/sr-partner-notify-qa-20260917/fixture-sessions.ts",
+          file,
+        ],
+        { timeout: 30_000 },
+      );
+      const tokens = JSON.parse(await readFile(file, "utf8")) as Record<
+        string,
+        string
+      >;
       const replacements = new Map(
-        Object.entries(tokens).map(([name, token]) => [process.env[name], token]),
+        Object.entries(tokens).map(([name, token]) => [
+          process.env[name],
+          token,
+        ]),
       );
       for (const entry of this.entries)
         entry.token = replacements.get(entry.token) ?? entry.token;
-      for (const [name, token] of Object.entries(tokens)) process.env[name] = token;
+      for (const [name, token] of Object.entries(tokens))
+        process.env[name] = token;
     } finally {
       await rm(file, { force: true });
     }
