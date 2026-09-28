@@ -761,7 +761,7 @@ for snapshot_at in "$SNAPSHOT_AT_1" "$SNAPSHOT_AT_2" "$SNAPSHOT_AT_3"; do
     "$(json_field_from_object "$SNAPSHOT_ROW" '(.availableDriverCount // .available_driver_count)')"
 done
 
-AGGREGATED_MONTHLY_RECORDS="$(aggregate_monthly_records "$UNIQUE_SUMMARY_MONTHS" "$TAXI_BUSINESS_AREA")"
+aggregate_monthly_records "$UNIQUE_SUMMARY_MONTHS" "$TAXI_BUSINESS_AREA"
 
 log_step "3.6 — Validate monthly operations summary from rebuild response"
 
@@ -770,7 +770,7 @@ MONTHLY_EXPECTED_SNAPSHOTS="$(echo "$AGGREGATED_MONTHLY_RECORDS" | jq 'map(.expe
 EXPECTED_COVERAGE="$(round_four "$(awk -v valid=3 -v total="$MONTHLY_EXPECTED_SNAPSHOTS" 'BEGIN { print valid / total }')")"
 MAX_AVG_DISPATCHABLE="$(echo "$AGGREGATED_MONTHLY_RECORDS" | jq 'map(.averageDispatchableVehicleCount // .average_dispatchable_vehicle_count // 0) | max')"
 
-assert_monthly_records "$AGGREGATED_MONTHLY_RECORDS" "$TAXI_UNIQUE_VEHICLE_COUNT" > /dev/null
+assert_monthly_records "$AGGREGATED_MONTHLY_RECORDS" "$TAXI_UNIQUE_VEHICLE_COUNT"
 
 run_summary_preview_and_assert "$SUMMARY_FROM_DATE" "$SUMMARY_TO_DATE" "$TAXI_BUSINESS_AREA" "$MAX_AVG_DISPATCHABLE" "$MONTHLY_EXPECTED_SNAPSHOTS" "$EXPECTED_COVERAGE"
 

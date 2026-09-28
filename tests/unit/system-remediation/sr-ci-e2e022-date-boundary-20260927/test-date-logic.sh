@@ -137,10 +137,9 @@ run_scenario() {
 
   aggregate_and_assert_daily_records "$UNIQUE_SERVICE_DATES" "$APP_ORDER_ID" "$PHONE_ORDER_ID" "$PORTAL_ORDER_ID" "$E2E_SEED_TENANT_ID" "$name"
   
-  local AGGREGATED_MONTHLY_RECORDS
-  AGGREGATED_MONTHLY_RECORDS="$(aggregate_monthly_records "$UNIQUE_SUMMARY_MONTHS" "$TAXI_BUSINESS_AREA")"
+  aggregate_monthly_records "$UNIQUE_SUMMARY_MONTHS" "$TAXI_BUSINESS_AREA"
   
-  assert_monthly_records "$AGGREGATED_MONTHLY_RECORDS" "$TAXI_UNIQUE_VEHICLE_COUNT" > /dev/null
+  assert_monthly_records "$AGGREGATED_MONTHLY_RECORDS" "$TAXI_UNIQUE_VEHICLE_COUNT"
   
   local SUM_DEMAND="$(echo "$AGGREGATED_MONTHLY_RECORDS" | jq 'map(.demandRequestCount // .demand_request_count // 0) | add')"
   local MONTHLY_EXPECTED_SNAPSHOTS="$(echo "$AGGREGATED_MONTHLY_RECORDS" | jq 'map(.expectedSnapshotCount // .expected_snapshot_count // 0) | add')"

@@ -153,8 +153,6 @@ assert_monthly_records() {
   assert_int_equals "monthly complaintCount" "$EXPECTED_TOTAL_COMPLAINT_COUNT" "$SUM_COMPLAINTS"
   assert_int_equals "monthly complaintsByCategory.late_arrival" "$EXPECTED_LATE_ARRIVAL_COUNT" "$SUM_COMPLAINTS_LATE"
   assert_int_equals "monthly complaintsByCategory.no_arrival" "$EXPECTED_NO_ARRIVAL_COUNT" "$SUM_COMPLAINTS_NO_ARR"
-
-  echo "$MAX_AVG_DISPATCHABLE|$MONTHLY_EXPECTED_SNAPSHOTS|$EXPECTED_COVERAGE"
 }
 
 assert_summary_row() {
@@ -351,7 +349,7 @@ aggregate_monthly_records() {
     1 \
     "$(echo "$aggregated_monthly_records" | jq 'length' 2>/dev/null || true)"
 
-  echo "$aggregated_monthly_records"
+  AGGREGATED_MONTHLY_RECORDS="$aggregated_monthly_records"
 }
 
 run_summary_preview_and_assert() {
