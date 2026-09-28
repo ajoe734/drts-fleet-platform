@@ -73,7 +73,7 @@ verify_complaints_by_category() {
   local summary_row="$2"
   local expected_late="$3"
   local expected_no_arr="$4"
-  
+
   assert_int_equals \
     "${prefix} complaintsByCategory.late_arrival" \
     "$expected_late" \
@@ -92,7 +92,7 @@ verify_monthly_coverage() {
     local row_valid="$(echo "$row" | jq -r '.validSnapshotCount // .valid_snapshot_count // 0')"
     local row_expected="$(echo "$row" | jq -r '.expectedSnapshotCount // .expected_snapshot_count // 0')"
     local row_coverage="$(echo "$row" | jq -r '.snapshotCoverageRate // .snapshot_coverage_rate // 0')"
-    
+
     if [[ "$row_expected" -gt 0 ]]; then
       local expected_row_coverage="$(round_four "$(awk -v valid="$row_valid" -v total="$row_expected" 'BEGIN { print valid / total }')")"
       assert_equals "monthly snapshotCoverageRate for $row_month" "$expected_row_coverage" "$(round_four "$row_coverage")"
