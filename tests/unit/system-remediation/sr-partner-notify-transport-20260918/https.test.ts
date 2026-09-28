@@ -93,6 +93,14 @@ describe("partner HTTPS restrictions", () => {
       );
     });
 
+    it("test env explicitly authorizes HTTP/local if flag is true", async () => {
+      vi.stubEnv("NODE_ENV", "test");
+      vi.stubEnv("DRTS_ALLOW_LOCAL_WEBHOOKS", "true");
+      await expect(partnerNotificationHttpsFetch("http://127.0.0.1")).rejects.toThrowError(
+        /ECONNREFUSED|ENOTFOUND|EADDRNOTAVAIL/
+      );
+    });
+
 
   });
   it("ack body shares the platform deadline even when the reader ignores abort", async () => {
