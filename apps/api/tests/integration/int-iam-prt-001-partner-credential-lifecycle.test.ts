@@ -679,7 +679,7 @@ describe("IAM-PRT-001 partner credential lifecycle across restart", () => {
 
     // First rotation holds the seeded key open for overlap, so it is still a
     // live credential going into the second rotation.
-    const firstRotation = service.issuePlatformPartnerIngressCredential(
+    const firstRotation = await service.issuePlatformPartnerIngressCredential(
       PARTNER_ENTRY_SLUG,
       { rotationReason: "scheduled_rotation", overlapDays: 7 },
       "req-iam-prt-001-partner-rotate-1",
@@ -689,7 +689,7 @@ describe("IAM-PRT-001 partner credential lifecycle across restart", () => {
     // The second rotation only holds the newest key open. The seeded key is
     // retired in the same pass and has to reach the snapshot with it.
     vi.setSystemTime(new Date("2026-08-03T00:00:00.000Z"));
-    const secondRotation = service.issuePlatformPartnerIngressCredential(
+    const secondRotation = await service.issuePlatformPartnerIngressCredential(
       PARTNER_ENTRY_SLUG,
       { rotationReason: "scheduled_rotation", overlapDays: 7 },
       "req-iam-prt-001-partner-rotate-2",
