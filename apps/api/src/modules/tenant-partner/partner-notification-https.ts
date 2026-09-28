@@ -88,11 +88,16 @@ export const partnerNotificationHttpsFetch: WebhookFetch = async (
                 callback(error, "", 4);
                 return;
               }
-              if (
-                !isControlledReceiver &&
-                (!addresses.length ||
-                  addresses.some((item) => !isPublicPartnerAddress(item.address)))
-              ) {
+              if (!addresses.length) {
+                callback(new Error("partner_endpoint_dns_not_public"), "", 4);
+                return;
+              }
+              if (isControlledReceiver) {
+                if (addresses.some((item) => item.address !== "127.0.0.1" && item.address !== "::1")) {
+                  callback(new Error("partner_endpoint_dns_not_public"), "", 4);
+                  return;
+                }
+              } else if (addresses.some((item) => !isPublicPartnerAddress(item.address))) {
                 callback(new Error("partner_endpoint_dns_not_public"), "", 4);
                 return;
               }

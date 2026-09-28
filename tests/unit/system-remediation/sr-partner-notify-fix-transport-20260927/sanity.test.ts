@@ -29,34 +29,6 @@ describe("exception boundary TR1 destinations", () => {
     vi.unstubAllEnvs();
   });
 
-  const setupMockRequest = (reqMock: any, success: boolean = true) => {
-    const reqInstance = new EventEmitter() as any;
-    reqInstance.end = vi.fn();
-    reqMock.mockImplementation((url: URL, options: any, cb: any) => {
-      // Simulate DNS lookup
-      if (options.lookup) {
-        options.lookup(url.hostname, { all: true, verbatim: true }, (err: any, addresses: any) => {
-          if (err) {
-            reqInstance.emit("error", err);
-            return;
-          }
-          // if successful DNS, simulate request response
-          if (success) {
-            const resInstance = new EventEmitter() as any;
-            resInstance.statusCode = 200;
-            resInstance.complete = true;
-            cb(resInstance);
-            resInstance.emit("data", Buffer.from('{"status":"ok"}'));
-            resInstance.emit("end");
-          } else {
-            reqInstance.emit("error", new Error("connection_failed"));
-          }
-        });
-      }
-      return reqInstance;
-    });
-    return reqInstance;
-  };
 
   it.each([
     ["http://169.254.169.254/computeMetadata/v1/"],
@@ -73,15 +45,15 @@ describe("exception boundary TR1 destinations", () => {
   it("rejects partner.example.test resolving to unsafe IP", async () => {
     const reqInstance = new EventEmitter() as any;
     reqInstance.end = vi.fn();
-    (https.request as any).mockImplementation((url: URL, options: any, cb: any) => {
+    (https.request as any).mockImplementation((url: URL, options: any) => {
       if (options.lookup) {
-        options.lookup(url.hostname, { all: true, verbatim: true }, (err: any, addresses: any) => {
+        options.lookup(url.hostname, { all: true, verbatim: true }, (err: any) => {
           if (err) reqInstance.emit("error", err);
         });
       }
       return reqInstance;
     });
-    (dns.lookup as any).mockImplementation((hostname: string, options: any, cb: any) => {
+    (dns.lookup as any).mockImplementation((_hostname: string, _options: any, cb: any) => {
       cb(null, [{ address: "8.8.8.8", family: 4 }, { address: "169.254.169.254", family: 4 }]);
     });
 
@@ -96,11 +68,11 @@ describe("exception boundary TR1 destinations", () => {
     (http.request as any).mockImplementation((url: URL, options: any, cb: any) => {
       receivedCb = cb;
       if (options.lookup) {
-        options.lookup(url.hostname, { all: true, verbatim: true }, (err: any, addresses: any) => {});
+        options.lookup(url.hostname, { all: true, verbatim: true }, () => {});
       }
       return reqInstance;
     });
-    (dns.lookup as any).mockImplementation((hostname: string, options: any, cb: any) => {
+    (dns.lookup as any).mockImplementation((_hostname: string, _options: any, cb: any) => {
       cb(null, [{ address: "127.0.0.1", family: 4 }]);
     });
 
