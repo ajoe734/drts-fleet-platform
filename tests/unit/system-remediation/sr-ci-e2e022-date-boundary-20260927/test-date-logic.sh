@@ -56,6 +56,7 @@ http_call() {
   local method="$1" path="$2" req_file="${3:-}"
 
   if [[ "$path" == "/reports/daily-dispatch-records/rebuild" ]]; then
+    if [[ "$method" != "POST" ]]; then echo "ASSERT FAIL: wrong method $method for $path" >&2; exit 1; fi
     local sd=$(jq -r '.serviceDate' "$req_file")
     local count=0
     local records="[]"
@@ -75,6 +76,7 @@ http_call() {
 
     RESP_BODY="$(jq -n --arg count "$count" --argjson records "$records" '{data: {rebuiltCount: ($count | tonumber), records: $records}}')"
   elif [[ "$path" == "/reports/jobs" ]]; then
+    if [[ "$method" != "POST" ]]; then echo "ASSERT FAIL: wrong method $method for $path" >&2; exit 1; fi
     local jobType=$(jq -r '.jobType' "$req_file")
     if [[ "$jobType" == "daily_dispatch_record" ]]; then
        local sd=$(jq -r '.filters.serviceDate' "$req_file")
@@ -99,6 +101,7 @@ http_call() {
        RESP_BODY="$(jq -n --argjson rec "$FIXTURE_SUMMARY_ROW" '{data: {jobId: "job-456", artifact: {artifactId: "art-456"}, rows: [$rec]}}')"
     fi
   elif [[ "$path" == "/reports/monthly-operations-summaries/rebuild" ]]; then
+    if [[ "$method" != "POST" ]]; then echo "ASSERT FAIL: wrong method $method for $path" >&2; exit 1; fi
     local month=$(jq -r '.periodMonth' "$req_file")
     local single_month_record="$(echo "$FIXTURE_MONTHLY_RECORDS" | jq -c --arg month "$month" 'map(select(.periodMonth == $month)) | .[0] // empty')"
     if [[ -n "$single_month_record" ]]; then
@@ -107,11 +110,15 @@ http_call() {
       RESP_BODY="$(jq -n '{data: {rebuiltCount: 0, records: []}}')"
     fi
   elif [[ "$path" == "/reports/operations-summary/preview"* ]]; then
-    if [[ "$path" != *"?from=${SUMMARY_FROM_DATE}&to=${SUMMARY_TO_DATE}"* ]]; then
-      echo "ASSERT FAIL: wrong preview query in $path (expected from=${SUMMARY_FROM_DATE} to=${SUMMARY_TO_DATE})" >&2
+    if [[ "$method" != "GET" ]]; then echo "ASSERT FAIL: wrong method $method for $path" >&2; exit 1; fi
+    if [[ "$path" != "/reports/operations-summary/preview?from=${SUMMARY_FROM_DATE}&to=${SUMMARY_TO_DATE}&businessArea=${TAXI_BUSINESS_AREA}&serviceProductCode=taxi_realtime" ]]; then
+      echo "ASSERT FAIL: wrong preview query in $path (expected from=${SUMMARY_FROM_DATE}&to=${SUMMARY_TO_DATE}&businessArea=${TAXI_BUSINESS_AREA}&serviceProductCode=taxi_realtime)" >&2
       exit 1
     fi
     RESP_BODY="$(jq -n --argjson rec "$FIXTURE_SUMMARY_ROW" '{data: {items: [$rec]}}')"
+  else
+    echo "ASSERT FAIL: unexpected path $path" >&2
+    exit 1
   fi
 }
 
@@ -124,6 +131,7 @@ run_scenario() {
   local PHONE_COMPLAINT_CREATED_AT="$6"
   export FIXTURE_MONTHLY_RECORDS="$7"
   export FIXTURE_SUMMARY_ROW="$8"
+  local EXPECTED_UNIQUE_DATES="${9:-}"
 
   echo "--- Running scenario: $name ---"
 
@@ -142,10 +150,14 @@ run_scenario() {
   local EXPECTED_TO_DATE=$(echo "$FIXTURE_SUMMARY_ROW" | jq -r '.to')
   assert_equals "SUMMARY_FROM_DATE" "$EXPECTED_FROM_DATE" "$SUMMARY_FROM_DATE"
   assert_equals "SUMMARY_TO_DATE" "$EXPECTED_TO_DATE" "$SUMMARY_TO_DATE"
+  
+  # Assert expected unique service dates
+  local ACTUAL_DATES_INLINE="$(echo "$UNIQUE_SERVICE_DATES" | tr '\n' ',' | sed 's/,$//')"
+  assert_equals "UNIQUE_SERVICE_DATES" "$EXPECTED_UNIQUE_DATES" "$ACTUAL_DATES_INLINE"
 
-  export APP_REAL_DATE="$(get_date_from_iso "$APP_CREATED_AT")"
-  export PHONE_REAL_DATE="$(get_date_from_iso "$PHONE_CREATED_AT")"
-  export PORTAL_REAL_DATE="$(get_date_from_iso "$PORTAL_WINDOW_START")"
+  export APP_REAL_DATE="${APP_CREATED_AT:0:10}"
+  export PHONE_REAL_DATE="${PHONE_CREATED_AT:0:10}"
+  export PORTAL_REAL_DATE="${PORTAL_WINDOW_START:0:10}"
   export TMP_DIR="$(mktemp -d)"
 
   aggregate_and_assert_daily_records "$UNIQUE_SERVICE_DATES" "$APP_ORDER_ID" "$PHONE_ORDER_ID" "$PORTAL_ORDER_ID" "$E2E_SEED_TENANT_ID" "$name"
@@ -172,36 +184,36 @@ run_scenario "Daytime" \
   "2026-09-15T12:00:05Z" "2026-09-15T12:00:10Z" "2026-09-15T12:30:00Z" \
   "2026-09-15T12:05:00Z" "2026-09-15T12:15:00Z" \
   '[{"periodMonth": "2026-09", "demandRequestCount": 2, "actualDispatchCount": 2, "completedTripCount": 1, "cancelledOrderCount": 1, "averageDispatchableVehicleCount": 1, "validSnapshotCount": 3, "expectedSnapshotCount": 8640, "snapshotCoverageRate": 0.0003, "complaintCount": 2, "complaintsByCategory": {"late_arrival": 1, "no_arrival": 1}}]' \
-  '{"from": "2026-09-01", "to": "2026-09-30", "demandRequestCount": 2, "actualDispatchCount": 2, "completedTripCount": 1, "cancelledOrderCount": 1, "averageDispatchableVehicleCount": 1, "validSnapshotCount": 3, "expectedSnapshotCount": 8640, "snapshotCoverageRate": 0.0003, "complaintCount": 2, "complaintsByCategory": {"late_arrival": 1, "no_arrival": 1}}'
-
+  '{"from": "2026-09-01", "to": "2026-09-30", "demandRequestCount": 2, "actualDispatchCount": 2, "completedTripCount": 1, "cancelledOrderCount": 1, "averageDispatchableVehicleCount": 1, "validSnapshotCount": 3, "expectedSnapshotCount": 8640, "snapshotCoverageRate": 0.0003, "complaintCount": 2, "complaintsByCategory": {"late_arrival": 1, "no_arrival": 1}}' \
+  "2026-09-15"
 # 23:29:59 portal crosses day (Wait, 23:29:59 portal is 23:59:59. It's same month/day.)
 run_scenario "23:29:59" \
   "2026-09-15T23:29:59Z" "2026-09-15T23:30:05Z" "2026-09-15T23:59:59Z" \
   "2026-09-15T23:45:00Z" "2026-09-15T23:50:00Z" \
   '[{"periodMonth": "2026-09", "demandRequestCount": 2, "actualDispatchCount": 2, "completedTripCount": 1, "cancelledOrderCount": 1, "averageDispatchableVehicleCount": 1, "validSnapshotCount": 3, "expectedSnapshotCount": 8640, "snapshotCoverageRate": 0.0003, "complaintCount": 2, "complaintsByCategory": {"late_arrival": 1, "no_arrival": 1}}]' \
-  '{"from": "2026-09-01", "to": "2026-09-30", "demandRequestCount": 2, "actualDispatchCount": 2, "completedTripCount": 1, "cancelledOrderCount": 1, "averageDispatchableVehicleCount": 1, "validSnapshotCount": 3, "expectedSnapshotCount": 8640, "snapshotCoverageRate": 0.0003, "complaintCount": 2, "complaintsByCategory": {"late_arrival": 1, "no_arrival": 1}}'
-
+  '{"from": "2026-09-01", "to": "2026-09-30", "demandRequestCount": 2, "actualDispatchCount": 2, "completedTripCount": 1, "cancelledOrderCount": 1, "averageDispatchableVehicleCount": 1, "validSnapshotCount": 3, "expectedSnapshotCount": 8640, "snapshotCoverageRate": 0.0003, "complaintCount": 2, "complaintsByCategory": {"late_arrival": 1, "no_arrival": 1}}' \
+  "2026-09-15"
 # 23:30:00 portal crosses day
 run_scenario "23:30:00" \
   "2026-09-15T23:30:00Z" "2026-09-15T23:30:05Z" "2026-09-16T00:00:00Z" \
   "2026-09-15T23:45:00Z" "2026-09-15T23:50:00Z" \
   '[{"periodMonth": "2026-09", "demandRequestCount": 2, "actualDispatchCount": 2, "completedTripCount": 1, "cancelledOrderCount": 1, "averageDispatchableVehicleCount": 1, "validSnapshotCount": 3, "expectedSnapshotCount": 8640, "snapshotCoverageRate": 0.0003, "complaintCount": 2, "complaintsByCategory": {"late_arrival": 1, "no_arrival": 1}}]' \
-  '{"from": "2026-09-01", "to": "2026-09-30", "demandRequestCount": 2, "actualDispatchCount": 2, "completedTripCount": 1, "cancelledOrderCount": 1, "averageDispatchableVehicleCount": 1, "validSnapshotCount": 3, "expectedSnapshotCount": 8640, "snapshotCoverageRate": 0.0003, "complaintCount": 2, "complaintsByCategory": {"late_arrival": 1, "no_arrival": 1}}'
-
+  '{"from": "2026-09-01", "to": "2026-09-30", "demandRequestCount": 2, "actualDispatchCount": 2, "completedTripCount": 1, "cancelledOrderCount": 1, "averageDispatchableVehicleCount": 1, "validSnapshotCount": 3, "expectedSnapshotCount": 8640, "snapshotCoverageRate": 0.0003, "complaintCount": 2, "complaintsByCategory": {"late_arrival": 1, "no_arrival": 1}}' \
+  "2026-09-15,2026-09-16"
 # same-month midnight (App at 23:59:59, Phone at 00:00:01 next day, Portal 00:29:59)
 run_scenario "same-month midnight" \
   "2026-09-15T23:59:59Z" "2026-09-16T00:00:01Z" "2026-09-16T00:29:59Z" \
   "2026-09-16T00:05:00Z" "2026-09-16T00:10:00Z" \
   '[{"periodMonth": "2026-09", "demandRequestCount": 2, "actualDispatchCount": 2, "completedTripCount": 1, "cancelledOrderCount": 1, "averageDispatchableVehicleCount": 1, "validSnapshotCount": 3, "expectedSnapshotCount": 8640, "snapshotCoverageRate": 0.0003, "complaintCount": 2, "complaintsByCategory": {"late_arrival": 1, "no_arrival": 1}}]' \
-  '{"from": "2026-09-01", "to": "2026-09-30", "demandRequestCount": 2, "actualDispatchCount": 2, "completedTripCount": 1, "cancelledOrderCount": 1, "averageDispatchableVehicleCount": 1, "validSnapshotCount": 3, "expectedSnapshotCount": 8640, "snapshotCoverageRate": 0.0003, "complaintCount": 2, "complaintsByCategory": {"late_arrival": 1, "no_arrival": 1}}'
-
+  '{"from": "2026-09-01", "to": "2026-09-30", "demandRequestCount": 2, "actualDispatchCount": 2, "completedTripCount": 1, "cancelledOrderCount": 1, "averageDispatchableVehicleCount": 1, "validSnapshotCount": 3, "expectedSnapshotCount": 8640, "snapshotCoverageRate": 0.0003, "complaintCount": 2, "complaintsByCategory": {"late_arrival": 1, "no_arrival": 1}}' \
+  "2026-09-15,2026-09-16"
 # both orders next month (App/Phone on Oct 1, Portal on Oct 1)
 run_scenario "both orders next month" \
   "2026-10-01T00:00:01Z" "2026-10-01T00:00:02Z" "2026-10-01T00:29:59Z" \
   "2026-10-01T00:05:00Z" "2026-10-01T00:10:00Z" \
   '[{"periodMonth": "2026-10", "demandRequestCount": 2, "actualDispatchCount": 2, "completedTripCount": 1, "cancelledOrderCount": 1, "averageDispatchableVehicleCount": 1, "validSnapshotCount": 3, "expectedSnapshotCount": 8928, "snapshotCoverageRate": 0.0003, "complaintCount": 2, "complaintsByCategory": {"late_arrival": 1, "no_arrival": 1}}]' \
-  '{"from": "2026-10-01", "to": "2026-10-31", "demandRequestCount": 2, "actualDispatchCount": 2, "completedTripCount": 1, "cancelledOrderCount": 1, "averageDispatchableVehicleCount": 1, "validSnapshotCount": 3, "expectedSnapshotCount": 8928, "snapshotCoverageRate": 0.0003, "complaintCount": 2, "complaintsByCategory": {"late_arrival": 1, "no_arrival": 1}}'
-
+  '{"from": "2026-10-01", "to": "2026-10-31", "demandRequestCount": 2, "actualDispatchCount": 2, "completedTripCount": 1, "cancelledOrderCount": 1, "averageDispatchableVehicleCount": 1, "validSnapshotCount": 3, "expectedSnapshotCount": 8928, "snapshotCoverageRate": 0.0003, "complaintCount": 2, "complaintsByCategory": {"late_arrival": 1, "no_arrival": 1}}' \
+  "2026-10-01"
 # split-order month/year
 run_scenario "split-order month/year" \
   "2026-12-31T23:59:59Z" "2027-01-01T00:00:01Z" "2027-01-01T00:29:59Z" \
@@ -210,8 +222,8 @@ run_scenario "split-order month/year" \
 '{"periodMonth": "2026-12", "demandRequestCount": 1, "actualDispatchCount": 1, "completedTripCount": 1, "cancelledOrderCount": 0, "averageDispatchableVehicleCount": 1, "validSnapshotCount": 3, "expectedSnapshotCount": 8928, "snapshotCoverageRate": 0.0003, "complaintCount": 0, "complaintsByCategory": {}},'\
 '{"periodMonth": "2027-01", "demandRequestCount": 1, "actualDispatchCount": 1, "completedTripCount": 0, "cancelledOrderCount": 1, "averageDispatchableVehicleCount": 0, "validSnapshotCount": 0, "expectedSnapshotCount": 8928, "snapshotCoverageRate": 0, "complaintCount": 1, "complaintsByCategory": {"no_arrival": 1}}'\
 ']' \
-  '{"from": "2026-12-01", "to": "2027-01-31", "demandRequestCount": 2, "actualDispatchCount": 2, "completedTripCount": 1, "cancelledOrderCount": 1, "averageDispatchableVehicleCount": 1, "validSnapshotCount": 3, "expectedSnapshotCount": 17856, "snapshotCoverageRate": 0.0002, "complaintCount": 1, "complaintsByCategory": {"no_arrival": 1}}'
-
+  '{"from": "2026-12-01", "to": "2027-01-31", "demandRequestCount": 2, "actualDispatchCount": 2, "completedTripCount": 1, "cancelledOrderCount": 1, "averageDispatchableVehicleCount": 1, "validSnapshotCount": 3, "expectedSnapshotCount": 17856, "snapshotCoverageRate": 0.0002, "complaintCount": 1, "complaintsByCategory": {"no_arrival": 1}}' \
+  "2026-12-31,2027-01-01"
 # one complaint crossing
 run_scenario "one/both complaints crossing (one crossing)" \
   "2026-09-30T23:30:00Z" "2026-09-30T23:30:05Z" "2026-10-01T00:00:00Z" \
@@ -219,8 +231,8 @@ run_scenario "one/both complaints crossing (one crossing)" \
   '['\
 '{"periodMonth": "2026-09", "demandRequestCount": 2, "actualDispatchCount": 2, "completedTripCount": 1, "cancelledOrderCount": 1, "averageDispatchableVehicleCount": 1, "validSnapshotCount": 3, "expectedSnapshotCount": 8640, "snapshotCoverageRate": 0.0003, "complaintCount": 1, "complaintsByCategory": {"late_arrival": 1}}'\
 ']' \
-  '{"from": "2026-09-01", "to": "2026-10-31", "demandRequestCount": 2, "actualDispatchCount": 2, "completedTripCount": 1, "cancelledOrderCount": 1, "averageDispatchableVehicleCount": 1, "validSnapshotCount": 3, "expectedSnapshotCount": 8640, "snapshotCoverageRate": 0.0003, "complaintCount": 1, "complaintsByCategory": {"late_arrival": 1}}'
-
+  '{"from": "2026-09-01", "to": "2026-10-31", "demandRequestCount": 2, "actualDispatchCount": 2, "completedTripCount": 1, "cancelledOrderCount": 1, "averageDispatchableVehicleCount": 1, "validSnapshotCount": 3, "expectedSnapshotCount": 8640, "snapshotCoverageRate": 0.0003, "complaintCount": 1, "complaintsByCategory": {"late_arrival": 1}}' \
+  "2026-09-30,2026-10-01"
 # both complaints crossing
 run_scenario "one/both complaints crossing (both crossing)" \
   "2026-09-30T23:50:00Z" "2026-09-30T23:50:05Z" "2026-10-01T00:20:00Z" \
@@ -228,8 +240,8 @@ run_scenario "one/both complaints crossing (both crossing)" \
   '['\
 '{"periodMonth": "2026-09", "demandRequestCount": 2, "actualDispatchCount": 2, "completedTripCount": 1, "cancelledOrderCount": 1, "averageDispatchableVehicleCount": 1, "validSnapshotCount": 3, "expectedSnapshotCount": 8640, "snapshotCoverageRate": 0.0003, "complaintCount": 0, "complaintsByCategory": {}}'\
 ']' \
-  '{"from": "2026-09-01", "to": "2026-10-31", "demandRequestCount": 2, "actualDispatchCount": 2, "completedTripCount": 1, "cancelledOrderCount": 1, "averageDispatchableVehicleCount": 1, "validSnapshotCount": 3, "expectedSnapshotCount": 8640, "snapshotCoverageRate": 0.0003, "complaintCount": 0, "complaintsByCategory": {}}'
-
+  '{"from": "2026-09-01", "to": "2026-10-31", "demandRequestCount": 2, "actualDispatchCount": 2, "completedTripCount": 1, "cancelledOrderCount": 1, "averageDispatchableVehicleCount": 1, "validSnapshotCount": 3, "expectedSnapshotCount": 8640, "snapshotCoverageRate": 0.0003, "complaintCount": 0, "complaintsByCategory": {}}' \
+  "2026-09-30,2026-10-01"
 # Negative controls
 echo "--- Running negative controls ---"
 
@@ -238,7 +250,8 @@ if ( run_scenario 'negative demand' \
   '2026-09-15T12:00:05Z' '2026-09-15T12:00:10Z' '2026-09-15T12:30:00Z' \
   '2026-09-15T12:05:00Z' '2026-09-15T12:15:00Z' \
   '[{"periodMonth": "2026-09", "demandRequestCount": 2, "actualDispatchCount": 2, "completedTripCount": 1, "cancelledOrderCount": 1, "averageDispatchableVehicleCount": 1, "validSnapshotCount": 3, "expectedSnapshotCount": 8640, "snapshotCoverageRate": 0.0003, "complaintCount": 2, "complaintsByCategory": {"late_arrival": 1, "no_arrival": 1}}]' \
-  '{"from": "2026-09-01", "to": "2026-09-30", "demandRequestCount": 3, "actualDispatchCount": 2, "completedTripCount": 1, "cancelledOrderCount": 1, "averageDispatchableVehicleCount": 1, "validSnapshotCount": 3, "expectedSnapshotCount": 8640, "snapshotCoverageRate": 0.0003, "complaintCount": 2, "complaintsByCategory": {"late_arrival": 1, "no_arrival": 1}}' ) >/dev/null 2>&1; then
+  '{"from": "2026-09-01", "to": "2026-09-30", "demandRequestCount": 3, "actualDispatchCount": 2, "completedTripCount": 1, "cancelledOrderCount": 1, "averageDispatchableVehicleCount": 1, "validSnapshotCount": 3, "expectedSnapshotCount": 8640, "snapshotCoverageRate": 0.0003, "complaintCount": 2, "complaintsByCategory": {"late_arrival": 1, "no_arrival": 1}}' \
+  "2026-09-15" ) >/dev/null 2>&1; then
   echo "FAIL: Negative control (wrong demand) passed unexpectedly!"
   exit 1
 fi
@@ -248,7 +261,8 @@ if ( run_scenario 'negative snapshots' \
   '2026-09-15T12:00:05Z' '2026-09-15T12:00:10Z' '2026-09-15T12:30:00Z' \
   '2026-09-15T12:05:00Z' '2026-09-15T12:15:00Z' \
   '[{"periodMonth": "2026-09", "demandRequestCount": 2, "actualDispatchCount": 2, "completedTripCount": 1, "cancelledOrderCount": 1, "averageDispatchableVehicleCount": 1, "validSnapshotCount": 3, "expectedSnapshotCount": 9999, "snapshotCoverageRate": 0.0003, "complaintCount": 2, "complaintsByCategory": {"late_arrival": 1, "no_arrival": 1}}]' \
-  '{"from": "2026-09-01", "to": "2026-09-30", "demandRequestCount": 2, "actualDispatchCount": 2, "completedTripCount": 1, "cancelledOrderCount": 1, "averageDispatchableVehicleCount": 1, "validSnapshotCount": 3, "expectedSnapshotCount": 8640, "snapshotCoverageRate": 0.0003, "complaintCount": 2, "complaintsByCategory": {"late_arrival": 1, "no_arrival": 1}}' ) >/dev/null 2>&1; then
+  '{"from": "2026-09-01", "to": "2026-09-30", "demandRequestCount": 2, "actualDispatchCount": 2, "completedTripCount": 1, "cancelledOrderCount": 1, "averageDispatchableVehicleCount": 1, "validSnapshotCount": 3, "expectedSnapshotCount": 8640, "snapshotCoverageRate": 0.0003, "complaintCount": 2, "complaintsByCategory": {"late_arrival": 1, "no_arrival": 1}}' \
+  "2026-09-15" ) >/dev/null 2>&1; then
   echo "FAIL: Negative control (wrong snapshots) passed unexpectedly!"
   exit 1
 fi
@@ -258,9 +272,22 @@ if ( run_scenario 'negative sparse category' \
   '2026-09-15T12:00:05Z' '2026-09-15T12:00:10Z' '2026-09-15T12:30:00Z' \
   '2026-09-15T12:05:00Z' '2026-09-15T12:15:00Z' \
   '[{"periodMonth": "2026-09", "demandRequestCount": 2, "actualDispatchCount": 2, "completedTripCount": 1, "cancelledOrderCount": 1, "averageDispatchableVehicleCount": 1, "validSnapshotCount": 3, "expectedSnapshotCount": 8640, "snapshotCoverageRate": 0.0003, "complaintCount": 2, "complaintsByCategory": {"late_arrival": 1}}]' \
-  '{"from": "2026-09-01", "to": "2026-09-30", "demandRequestCount": 2, "actualDispatchCount": 2, "completedTripCount": 1, "cancelledOrderCount": 1, "averageDispatchableVehicleCount": 1, "validSnapshotCount": 3, "expectedSnapshotCount": 8640, "snapshotCoverageRate": 0.0003, "complaintCount": 2, "complaintsByCategory": {"late_arrival": 1}}' ) >/dev/null 2>&1; then
+  '{"from": "2026-09-01", "to": "2026-09-30", "demandRequestCount": 2, "actualDispatchCount": 2, "completedTripCount": 1, "cancelledOrderCount": 1, "averageDispatchableVehicleCount": 1, "validSnapshotCount": 3, "expectedSnapshotCount": 8640, "snapshotCoverageRate": 0.0003, "complaintCount": 2, "complaintsByCategory": {"late_arrival": 1}}' \
+  "2026-09-15" ) >/dev/null 2>&1; then
   echo "FAIL: Negative control (sparse category missing no_arrival) passed unexpectedly!"
   exit 1
 fi
 
 echo "All boundary tests passed!"
+
+# Incorrect/collapsed daily date oracle
+if ( run_scenario 'negative collapsed daily date oracle' \
+  '2026-09-15T12:00:05Z' '2026-09-15T12:00:10Z' '2026-09-15T12:30:00Z' \
+  '2026-09-15T12:05:00Z' '2026-09-15T12:15:00Z' \
+  '[{"periodMonth": "2026-09", "demandRequestCount": 2, "actualDispatchCount": 2, "completedTripCount": 1, "cancelledOrderCount": 1, "averageDispatchableVehicleCount": 1, "validSnapshotCount": 3, "expectedSnapshotCount": 8640, "snapshotCoverageRate": 0.0003, "complaintCount": 2, "complaintsByCategory": {"late_arrival": 1, "no_arrival": 1}}]' \
+  '{"from": "2026-09-01", "to": "2026-09-30", "demandRequestCount": 2, "actualDispatchCount": 2, "completedTripCount": 1, "cancelledOrderCount": 1, "averageDispatchableVehicleCount": 1, "validSnapshotCount": 3, "expectedSnapshotCount": 8640, "snapshotCoverageRate": 0.0003, "complaintCount": 2, "complaintsByCategory": {"late_arrival": 1, "no_arrival": 1}}' \
+  "2000-01-01" ) >/dev/null 2>&1; then
+  echo "FAIL: Negative control (incorrect daily date) passed unexpectedly!"
+  exit 1
+fi
+
