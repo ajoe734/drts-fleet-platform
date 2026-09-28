@@ -5,7 +5,7 @@
 - **Task ID**: SR-PARTNER-NOTIFY-FIX-ENTRY-20260927
 - **Parent Baseline SHA**: 585087a2fd8114eaac0eb8a470dfca58e13dfbe4
 - **Previous Candidate SHAs**: e66144dc, 58393f7b, 5bc3f42e, b4d39fda, 63791ef1, 345cbdd614add060971c642bf60d955d51bfa9af, b57e1c0971c6df747c0348df39aca31969f9ef0a, 3249de812, b3726337fcef733c08be82d94bdfe94e433216fe
-- **Tested Checkpoint Tree/Blob**: Handoff mapped to candidate branch `gemini/sr-partner-notify-fix-entry-20260927-v5`. Current root test blob `f007b9f9c353565dc83ef347512161ec87a9f94f`. Current integration test blob `c49b57b2a1cfc51b0e2ff5e058cb228e1bee7103`.
+- **Tested Checkpoint Tree/Blob**: Handoff mapped to candidate branch `gemini/sr-partner-notify-fix-entry-20260927-v5`. Current root test blob `f007b9f9c353565dc83ef347512161ec87a9f94f`. Current integration test blob `aa2c1fa22134865869992f6a7e4f4850ea1ef08a`.
 
 ## Required Acceptance Ledger
 
@@ -147,7 +147,7 @@ ENTRY-R2 [P1, repeated across adjacent 5d9d177 -> df5a5f7; stale-publication def
 
 ENTRY-R3b [P2, second consecutive review of identical same-entry issuance failure]. revokePlatformPartnerEntry :5181-5199 snapshots credential IDs before awaiting; :5209-5213 only replaces captured IDs. issuePlatformPartnerIngressCredential :5241-5337 does not use that entry mutex and reads old active memory. Reproduction: create review-alpha; defer revoke at repository write; await setImmediate; issuePlatformPartnerIngressCredential('review-alpha', {}); resolve revoke and await it; list credentials. Prior/current both return a newly issued credential that remains present, status active, revokedAt null after successful entry revocation. Baseline rejects issuance with PARTNER_ENTRY_REVOKED. Public entry access is still denied after revoke; do not overstate this as proven usable revoked-entry access. Expected completed revocation leaves no credential issued during it active. Repair boundary: coordinate same-entry issuance/rotation and revocation with canonical entry identity and consistent persisted/memory ordering; preserve concurrent issuance for OTHER entries, which the probe confirms remains correct. Add success/failure and ordering regressions.
 
-ENTRY-R4b [P2, repeated invalid hosted-PG regression]. Integration test :63-75 still supplies notificationType/endpointUrl and now an unsupported eventTypes=['partner.entry.created']; webhookId and expectedVersion remain absent; no subscribed tenant webhook is created. Production PutPartnerEntryNotificationBindingCommand :48-52 requires webhookId, one of five PartnerPassengerEventType values, and expectedVersion. Dynamic probe extracted the actual object literal from each integration file and called real binding service after real entry creation. Previous payload rejects PARTNER_NOTIFICATION_BINDING_EVENT_TYPES_REQUIRED; current rejects PARTNER_NOTIFICATION_BINDING_EVENT_TYPES_INVALID; repository.put call count is ZERO in both. Thus a PG connection cannot make this reach the FK under test. In-memory TypeScript program including this file reports TS2322 at68 (invalid event type) and TS2339 at74 (nonexistent binding.notificationType), exit1. The API tsconfig includes only src/\*_/_.ts, explaining why source typecheck passed.
+ENTRY-R4b [P2, repeated invalid hosted-PG regression]. Integration test :63-75 still supplies notificationType/endpointUrl and now an unsupported eventTypes=['partner.entry.created']; webhookId and expectedVersion remain absent; no subscribed tenant webhook is created. Production PutPartnerEntryNotificationBindingCommand :48-52 requires webhookId, one of five PartnerPassengerEventType values, and expectedVersion. Dynamic probe extracted the actual object literal from each integration file and called real binding service after real entry creation. Previous payload rejects PARTNER\*NOTIFICATION_BINDING_EVENT_TYPES_REQUIRED; current rejects PARTNER_NOTIFICATION_BINDING_EVENT_TYPES_INVALID; repository.put call count is ZERO in both. Thus a PG connection cannot make this reach the FK under test. In-memory TypeScript program including this file reports TS2322 at68 (invalid event type) and TS2339 at74 (nonexistent binding.notificationType), exit1. The API tsconfig includes only src/\*\*/\_.ts, explaining why source typecheck passed.
 Repair boundary: use formal infra/migrations/V0021 and V0104 (entry FK and webhook FK), real entry and binding repositories, and create/durably prepare a subscribed tenant webhook BEFORE entry creation. Then immediately create -> putBinding with valid webhookId/eventTypes/expectedVersion=0, asserting actual binding contract and readback. No delay/polling between entry creation and binding, no copied SQL/fake schema. Run through authorized hosted workflow; local no-DB skip is not PG acceptance.
 
 ENTRY-R6 [P2, commit-range failure repeated]. Adding correctly scoped df5a5f7 leaves invalid ancestor 5d9d177003c4c0533aee9576f221be90fadef294 in the PR. python3 tools/ci/git/check_commit_trailers.py --base 585087a2fd8114eaac0eb8a470dfca58e13dfbe4 --head HEAD exits1: subject fix(tenant-partner): serialize entry mutations and fix credential global snapshot lacks TASK-ID scope. Same-SHA CI confirms Commit trailers FAILURE: https://github.com/ajoe734/drts-fleet-platform/actions/runs/36360071415/job/108735359112 . At last read, Product smoke acceptance was still in_progress; no CI pass claimed. Coordinate an authorized clean successor with Supervisor under the no-amend/rebase/force-push constraints, preserve published history, and validate the entire replacement base-to-head range before handoff.
@@ -1039,3 +1039,47 @@ console.log("cleanup: every write and mutex drained");
 }
 })().catch(error => { console.error(error); process.exitCode = 1; });
 REVIEW_PROBE
+
+### ENTRY-R12 REVIEW RECEIPT (Historical cf2e4f97)
+
+```
+ENTRY-R12.3 [P2, reintroduced current blob mismatch; history appendix substantially repaired]:
+UAT line8 claims current integration blob c49b57b2a1cfc51b0e2ff5e058cb228e1bee7103. Actual git ls-tree HEAD returns 79ab10e5696eff3528ded7c13e7bd482f4a9fd56. Root-test blob f007b9f9c353565dc83ef347512161ec87a9f94f is correct. Previous 00feb integration hash was correct; this is a renewed post-formatting provenance mismatch, not a claim the appendix is still absent. Recompute hashes after final formatting, map current commands/results to that checkpoint, and preserve this current hosted FAIL alongside historical outcomes in the existing artifact.
+
+CURRENT HOSTED RESULT (completed job; logs actually read):
+https://github.com/ajoe734/drts-fleet-platform/actions/runs/36427110970/job/108944081765
+Run headSha=cf2e4f976706e1a98017042f843502a50a4c9fff. Checkout explicitly says merge 549d030c45390f01f741770612fb43cea5485573 of cf2 into dev3da15e89f4abd96f3887cea00f8538a76fab20de; this is the CI merge ref, NOT the candidate identity.
+Formal V0021, V0022, V0104 migrations applied successfully.
+vitest run tests/integration tests/load: 292 PASS /1 FAIL, exit1.
+Task file: immediate create/binding PASS (29ms); lifecycle reload authentication PASS (126ms); interleaving matrix FAIL (5007ms), Error: Test timed out in 5000ms at integration test :167:5.
+Thus real hosted behavior corroborates the independently reproduced deadlock; this is NOT merely a missing-column prediction or old-SHA CI.
+Hosted lint job108944081610 SUCCESS. Other run jobs were still running when checked; no overall CI success claimed. Reviewer did not start these hosted runs.
+```
+
+### ENTRY-R12 REVIEW RECEIPT (Historical 5d801976)
+
+```
+Codex REVIEW REOPEN for locked candidate 5d801976f4557032e607772a3482fe3c37b49731, generation b9615f8273c840c697dda807507eeef9. Detached HEAD and PR #2218 head match exactly; PR base dev is 3da15e89f4abd96f3887cea00f8538a76fab20de. Previous adjacent reviewed candidate: cf2e4f976706e1a98017042f843502a50a4c9fff (13:20:04Z receipt). Current commit changes ONLY the integration test; product/root regression sources are unchanged.
+
+CONFIRMED FIXED / RETAINED:
+- The prior ENTRY-R12.1 normal-path deadlock is FIXED. Integration :309-313 now disables interception BEFORE resolving/rejecting the held lifecycle snapshot.
+- Actual same-candidate hosted PG ALSO now passes (details below): all three task tests, full 293-test integration suite, and five PG gates. Do not keep reporting the old cf2 normal-path timeout as a current defect.
+
+REMAINING ENTRY-R12.1 cleanup [P2, repeated remaining requirement across cf2 -> 5d801976]:
+apps/api/tests/integration/sr-partner-notify-fix-entry-20260927.integration.test.ts:381-424 still drains reloadedService telemetry ONLY inside try (:416-422). finally at :423-425 only calls onModuleDestroy.
+
+REMAINING ENTRY-R12.2 reload coverage [P2, explicitly outstanding in cf2 receipt and current task spec]:
+After rejected rotation, :364-367 correctly proves one durable row and :381-387 proves the seed still authenticates. It still never calls listPlatformPartnerIngressCredentials on the reloaded service or asserts its exact key set equals [seedKeyId].
+
+REMAINING ENTRY-R12.3 evidence provenance [P2, same defect across adjacent cf2 -> 5d801976]:
+UAT :8 still claims CURRENT integration blob c49b57b2a1cfc51b0e2ff5e058cb228e1bee7103. Actual candidate integration blob is 986205288598078d5ba6907753f1e45c48738457; root test blob f007b9f9c353565dc83ef347512161ec87a9f94f is correct. The UAT blob is IDENTICAL on cf2 and this candidate: 81a4fbc2074d2b882092afbbbab117820fd50efa.
+
+CURRENT HOSTED EVIDENCE (completed integration job logs actually read):
+https://github.com/ajoe734/drts-fleet-platform/actions/runs/36428241534/job/108948086386
+Run headSha=5d801976f4557032e607772a3482fe3c37b49731. Checkout log identifies CI merge ref 795ccf0 merging this candidate into base3da15e89f4abd96f3887cea00f8538a76fab20de; merge ref is NOT candidate identity.
+Formal V0021, V0022 and V0104 migrations applied successfully.
+vitest run tests/integration tests/load: 45 files,293 PASS,exit0.
+Task file sr-partner-notify-fix-entry-20260927.integration.test.ts:3 PASS in1043ms (immediate binding,lifecycle reload,all8 interleavings).
+Serial PostgreSQL UAT gates:2 files,5 PASS,exit0.
+Hosted lint job108948086209 and typecheck job108948086288 SUCCESS.
+```

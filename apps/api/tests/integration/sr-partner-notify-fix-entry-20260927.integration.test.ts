@@ -272,7 +272,7 @@ describe.skipIf(!DATABASE_URL)(
         const expectedWrites = mutation === "revoke" ? 1 : 2;
         const startPoll = Date.now();
         while (writes.length < expectedWrites) {
-          if (Date.now() - startPoll > 5000)
+          if (Date.now() - startPoll > 2000)
             throw new Error("timeout waiting for lifecycle writes");
           await turn();
         }
@@ -318,7 +318,7 @@ describe.skipIf(!DATABASE_URL)(
         // Wait for telemetry and mutex drain
         const drainStart = Date.now();
         while (true) {
-          if (Date.now() - drainStart > 5000)
+          if (Date.now() - drainStart > 2000)
             throw new Error("timeout waiting for drain");
           await turn();
           if (
@@ -385,6 +385,14 @@ describe.skipIf(!DATABASE_URL)(
               "req-after",
             );
             expect(auth.identity.actorId).toBe(keyId);
+
+            if (mutation === "rotation") {
+              const keys =
+                reloadedService.listPlatformPartnerIngressCredentials(
+                  entrySlug,
+                );
+              expect(keys.map((k: any) => k.keyId)).toEqual([keyId]);
+            }
           } else if (mutation === "revoke") {
             // Revoked successfully
             try {
@@ -412,16 +420,21 @@ describe.skipIf(!DATABASE_URL)(
               operationResult.credential.keyId,
             );
           }
-
-          // Explicitly drain post-reload telemetry
-          const reloadDrainStart = Date.now();
-          while (reloadedService.entrySlugMutexes.size > 0) {
-            if (Date.now() - reloadDrainStart > 5000)
-              throw new Error("timeout waiting for reload drain");
-            await turn();
-          }
         } finally {
-          if (reloadedService) await reloadedService.onModuleDestroy();
+          try {
+            if (reloadedService) {
+              const reloadDrainStart = Date.now();
+              while (reloadedService.entrySlugMutexes.size > 0) {
+                if (Date.now() - reloadDrainStart > 2000) {
+                  // eslint-disable-next-line no-unsafe-finally
+                  throw new Error("timeout waiting for reload drain");
+                }
+                await turn();
+              }
+            }
+          } finally {
+            if (reloadedService) await reloadedService.onModuleDestroy();
+          }
         }
       };
 
@@ -440,6 +453,106 @@ describe.skipIf(!DATABASE_URL)(
         if (promises.length > 0) await Promise.all(promises);
         vi.restoreAllMocks();
       }
+    });
+
+    it("diagnostic: should drain correctly even on assertion failure", async () => {
+      const entrySlug = `pg-failure-${Date.now()}`;
+
+      await tenantService.createPlatformPartnerEntry({
+        tenantId: "tenant-demo-001",
+        partnerCode: `code_${entrySlug}`,
+        partnerType: "bank_partner",
+        programId: "prog-1",
+        entrySlug,
+        displayName: "PG Failure Partner",
+        authMode: "partner_api_key",
+        eligibilityMode: "none",
+        businessDispatchSubtype: "enterprise_dispatch",
+      });
+      await new Promise((r) => setTimeout(r, 20));
+
+      const issueRes =
+        await tenantService.issuePlatformPartnerIngressCredential(entrySlug, {
+          purpose: "seed",
+        });
+      await new Promise((r) => setTimeout(r, 20));
+      const apiKey = issueRes.plaintextKey;
+
+      const originalQuery = database.query.bind(database);
+      let holdTelemetry = false;
+      const heldTelemetry: (() => void)[] = [];
+
+      vi.spyOn(database, "query").mockImplementation(
+        (sql: string, values?: any[]) => {
+          if (
+            holdTelemetry &&
+            sql.includes("INSERT INTO admin.phase1_partner_ingress_credentials")
+          ) {
+            return new Promise((resolve) => {
+              heldTelemetry.push(() => {
+                resolve(originalQuery(sql, values));
+              });
+            });
+          }
+          return originalQuery(sql, values);
+        },
+      );
+
+      let reloadedService: any;
+      let caughtTimeoutError = false;
+
+      try {
+        try {
+          const reloadedRepo = new TenantPartnerRepository(database);
+          reloadedService = new TenantPartnerService(
+            new AuditNotificationService(new AuditLogRepository(database)),
+            reloadedRepo,
+          );
+          await reloadedService.onModuleInit();
+
+          holdTelemetry = true;
+          reloadedService.authenticatePartnerBootstrap(
+            { entrySlug, apiKey },
+            "req-after",
+          );
+
+          if (reloadedService.entrySlugMutexes.size > 0) {
+            throw new Error("injected post-reload identity assertion failure");
+          }
+        } finally {
+          try {
+            if (reloadedService) {
+              const reloadDrainStart = Date.now();
+              while (reloadedService.entrySlugMutexes.size > 0) {
+                if (Date.now() - reloadDrainStart > 2000) {
+                  // eslint-disable-next-line no-unsafe-finally
+                  throw new Error("timeout waiting for reload drain");
+                }
+                await new Promise((r) => setTimeout(r, 10));
+              }
+            }
+          } finally {
+            if (reloadedService) await reloadedService.onModuleDestroy();
+          }
+        }
+      } catch (e: any) {
+        if (e.message === "timeout waiting for reload drain") {
+          caughtTimeoutError = true;
+        } else if (
+          e.message === "injected post-reload identity assertion failure"
+        ) {
+          // If the telemetry wasn't held or finished instantly, we'd catch the original error
+        } else {
+          throw e;
+        }
+      } finally {
+        holdTelemetry = false;
+        heldTelemetry.forEach((finish) => finish());
+        vi.restoreAllMocks();
+      }
+
+      // We expect the drain to have timed out and thrown, meaning the failure-producing bound works.
+      expect(caughtTimeoutError).toBe(true);
     });
   },
 );
