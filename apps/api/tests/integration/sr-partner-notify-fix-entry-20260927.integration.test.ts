@@ -524,6 +524,8 @@ describe.skipIf(!DATABASE_URL)(
             "req-after",
           );
 
+          await new Promise((r) => setTimeout(r, 10));
+
           if (reloadedService.entrySlugMutexes.size > 0) {
             throw new Error("injected post-reload identity assertion failure");
           }
