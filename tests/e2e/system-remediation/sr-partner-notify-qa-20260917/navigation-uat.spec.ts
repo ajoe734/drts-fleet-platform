@@ -133,6 +133,14 @@ test.describe("Hosted navigation and session boundaries", () => {
     expect((await navFixture.active(page.context())).trip.orderId).toBe(
       orderId,
     );
+    const ownHistory = await page
+      .context()
+      .request.get(`${EMBED_ORIGIN}/api/referral/history/${orderId}`);
+    expect(ownHistory.status()).toBe(200);
+    expect(await ownHistory.json()).toMatchObject({
+      ok: true,
+      data: { orderId },
+    });
     const foreign = fixture.entries[1]!;
     const foreignOrder = await fixture.createRide(foreign);
     const statuses: number[] = [];
@@ -188,6 +196,19 @@ test.describe("Hosted navigation and session boundaries", () => {
         returnedOrder: body.data?.orderId ?? null,
       });
     }
+    // FIX-HISTORY deliberately returns 404 when the authenticated history
+    // list contains no matching order; missing sessions still return 400.
+    const unknownHistory = await page
+      .context()
+      .request.get(`${EMBED_ORIGIN}/api/referral/history/${orderId}-unknown`);
+    expect(unknownHistory.status()).toBe(404);
+    expect(await unknownHistory.json()).toMatchObject({ ok: false });
+    await page.context().clearCookies();
+    const unauthenticatedHistory = await page
+      .context()
+      .request.get(`${EMBED_ORIGIN}/api/referral/history/${orderId}`);
+    expect(unauthenticatedHistory.status()).toBe(400);
+    expect(await unauthenticatedHistory.json()).toMatchObject({ ok: false });
     await test.info().attach("navigation-cross-scope", {
       contentType: "application/json",
       body: JSON.stringify({
@@ -197,11 +218,14 @@ test.describe("Hosted navigation and session boundaries", () => {
         statuses,
         consumes,
         reads,
+        ownHistoryStatus: ownHistory.status(),
+        unknownHistoryStatus: unknownHistory.status(),
+        unauthenticatedHistoryStatus: unauthenticatedHistory.status(),
       }),
     });
     expect(reads).toEqual([
       { surface: "receipt", status: 400, ok: false, returnedOrder: null },
-      { surface: "history", status: 400, ok: false, returnedOrder: null },
+      { surface: "history", status: 404, ok: false, returnedOrder: null },
     ]);
   });
 

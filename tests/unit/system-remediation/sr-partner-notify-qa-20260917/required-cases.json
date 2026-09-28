@@ -215,11 +215,14 @@
       "partner HTTPS restrictions allows public 8.8.8.8",
       "partner HTTPS restrictions allows public 1.1.1.1",
       "partner HTTPS restrictions allows public 2606:4700:4700::1111",
-      "partner HTTPS restrictions rejects unsafe endpoint http://example.com before opening a socket",
-      "partner HTTPS restrictions rejects unsafe endpoint https://user:pass@example.com before opening a socket",
-      "partner HTTPS restrictions rejects unsafe endpoint https://127.0.0.1 before opening a socket",
-      "partner HTTPS restrictions rejects unsafe endpoint https://[::1] before opening a socket",
-      "partner HTTPS restrictions ack body shares the platform deadline even when the reader ignores abort"
+      "partner HTTPS restrictions rejects unsafe endpoint http://example.com before opening a socket (default behavior)",
+      "partner HTTPS restrictions rejects unsafe endpoint https://user:pass@example.com before opening a socket (default behavior)",
+      "partner HTTPS restrictions rejects unsafe endpoint https://127.0.0.1 before opening a socket (default behavior)",
+      "partner HTTPS restrictions rejects unsafe endpoint https://[::1] before opening a socket (default behavior)",
+      "partner HTTPS restrictions ack body shares the platform deadline even when the reader ignores abort",
+      "partner HTTPS restrictions environment safeguard matrix production env rejects HTTP/local even if flag is true",
+      "partner HTTPS restrictions environment safeguard matrix test env rejects HTTP/local if flag is false or unset",
+      "partner HTTPS restrictions environment safeguard matrix test env explicitly authorizes HTTP/local if flag is true"
     ],
     "sr-partner-notify-transport-20260918/repository.test.ts": [
       "partner outcome transaction receipt, context, outbox metadata/outcome and release all commit on the same connection",

@@ -1,28 +1,38 @@
 # Sources and Case Matrix
 
+2026-09-28 successor：[PR #2220](https://github.com/ajoe734/drts-fleet-platform/pull/2220)，
+base `2c3d4baa39133de3d740238e5e0f227033b94e59`；指定 20 檔 blob 恢復已驗。
+完整本輪 finding／來源／適配及 checkpoint 證據見原 UAT 開頭的 successor 節。
+`bedd915a7` 一般 CI 通過（PG21／API1438），UAT36498275373 **cancelled**，
+run-status failed、沒有完整 partner JSON，不能收 A 層。C222 按已合併 history BFF
+改為精確 404 拒絕並保留 own200／no-session400 正反向；TRANSPORT 四個安全案例名稱
+按實際 source 同步，未刪除 gate。24 案與 B/C live 界線不變。
+新候選完整同 SHA 結果以 task canonical handoff receipt 及其 hosted artifacts 核對。
+
 正式依據：同目錄 `01_system_sa_sd.md` §4–14 與 `02_partner_integration_contract.md`
 §3–9（canonical root可讀，未把held設計複製發布）。完整finding/SHA與證據沿用
 [原UAT artifact](../../04-uat/system-remediation-20260906/SR-PARTNER-NOTIFY-QA-20260917.md)。
 
 ## SD §14 Case Matrix
 
-以下狀態以最新完整runtime `84c5d9e3cf499863de0b2838892508b3972e8093` 為準；相鄰失敗沿用下文及原UAT。
+以下為歷史完整 runtime `84c5d9e3cf499863de0b2838892508b3972e8093` 的逐案狀態；
+不是 successor 的通過證據。相鄰失敗沿用下文及原 UAT。
 
-| Scenario                                         | 正式期望與現有位置                                                                                             | 驗收狀態                                               |
-| ------------------------------------------------ | -------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------ |
-| 正向worker delivery                              | C201；200/201/202 + 相符durable accepted/duplicate receipt；partner_accepted，downstream unknown               | C201真worker/PG/receiver passed（非全矩陣）   |
-| accepted後timeout與dedupe                        | C202/C213；大於10秒deadline、同notification/delivery/body hash、同receipt duplicate、只入列一次                     | C202/C213 passed；C213重建receiver物件讀durable inbox |
-| 缺route                                          | C203；typed route_missing/manual_only、不猜entry、receiver count=0                                             | C203 passed；typed reason、零外送             |
-| 204、HTML200、錯receipt                          | C204/C212；partner_ack_invalid/manual_only，不能自動retry                                                      | C204與C212五種invalid ack均passed             |
-| 同tenant兩entry、跨tenant同URL、同住戶兩App      | 僅原entry/tenant/subject收到，payload不串單                                                                    | C206/C207/C208 passed；C208含resolve隔離       |
-| entry移轉與link撤銷                              | 舊消息不移轉；owner_changed/manual_only與recipient_revoked/terminal；零外送                                    | C209/C210 passed；C210注入撤銷狀態，非撤銷API驗收 |
-| endpoint停用、secret輪替重測、未配置availability | 明確configuration_blocked；測試就緒後才enable                                                                  | C211/C220 passed；full AppModule route readiness false→true |
+| Scenario                                         | 正式期望與現有位置                                                                                             | 驗收狀態                                                             |
+| ------------------------------------------------ | -------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------- |
+| 正向worker delivery                              | C201；200/201/202 + 相符durable accepted/duplicate receipt；partner_accepted，downstream unknown               | C201真worker/PG/receiver passed（非全矩陣）                          |
+| accepted後timeout與dedupe                        | C202/C213；大於10秒deadline、同notification/delivery/body hash、同receipt duplicate、只入列一次                | C202/C213 passed；C213重建receiver物件讀durable inbox                |
+| 缺route                                          | C203；typed route_missing/manual_only、不猜entry、receiver count=0                                             | C203 passed；typed reason、零外送                                    |
+| 204、HTML200、錯receipt                          | C204/C212；partner_ack_invalid/manual_only，不能自動retry                                                      | C204與C212五種invalid ack均passed                                    |
+| 同tenant兩entry、跨tenant同URL、同住戶兩App      | 僅原entry/tenant/subject收到，payload不串單                                                                    | C206/C207/C208 passed；C208含resolve隔離                             |
+| entry移轉與link撤銷                              | 舊消息不移轉；owner_changed/manual_only與recipient_revoked/terminal；零外送                                    | C209/C210 passed；C210注入撤銷狀態，非撤銷API驗收                    |
+| endpoint停用、secret輪替重測、未配置availability | 明確configuration_blocked；測試就緒後才enable                                                                  | C211/C220 passed；full AppModule route readiness false→true          |
 | ack後DB失敗、lease/fence、兩worker競爭           | durable transaction、舊fence不可commit、dedupe且單retry owner                                                  | C214/C215/C216 passed；真rollback／自然lease／兩process／API restart |
-| maxAttempts=5與expiry                            | 總共五次、最多四次retry、超expiresAt停止                                                                       | C216與C217 passed；正式endpoint cleanup與fresh fixture auth已驗                 |
-| 舊ETA、取消後舊到場、payload confidentiality     | superseded/obsolete terminal；缺driver情報不洩漏敏感資料                                                       | C219 passed；C218正式repository SQL42P08，後續未驗 |
-| admin readiness/stage/failure與手動retry         | C205；真route/auth、點control、觀察request及durable readback                                                   | C205真browser fail：日期DTO為{}，React崩潰；picker400  |
-| notification-navigation                          | fresh single-use handoff、HttpOnly session、returnTo、最新ride readback、錯entry/subject/logout/account switch | C221/C223/C224 passed；C222真HTTP確認R12假success                                   |
-| 一般tenant webhook C111–C115與restart            | 獨立既有gate不可由partner數量取代                                                                              | 既有reports passed；tenant restart verified15 |
+| maxAttempts=5與expiry                            | 總共五次、最多四次retry、超expiresAt停止                                                                       | C216與C217 passed；正式endpoint cleanup與fresh fixture auth已驗      |
+| 舊ETA、取消後舊到場、payload confidentiality     | superseded/obsolete terminal；缺driver情報不洩漏敏感資料                                                       | C219 passed；C218正式repository SQL42P08，後續未驗                   |
+| admin readiness/stage/failure與手動retry         | C205；真route/auth、點control、觀察request及durable readback                                                   | C205真browser fail：日期DTO為{}，React崩潰；picker400                |
+| notification-navigation                          | fresh single-use handoff、HttpOnly session、returnTo、最新ride readback、錯entry/subject/logout/account switch | C221/C223/C224 passed；C222真HTTP確認R12假success                    |
+| 一般tenant webhook C111–C115與restart            | 獨立既有gate不可由partner數量取代                                                                              | 既有reports passed；tenant restart verified15                        |
 
 ## Acceptance Matrix
 
@@ -189,7 +199,6 @@ C205仍React31／日期{}／picker400；C218仍正式snapshot SQL42P08，後續�
 C216、C221–C224共 **5** 案未實作；R5/R8/R9/R10/R11保留，三項acceptance **NOT MET**。
 本機tsc/lint/diff0、QA12／Python64、兩新commit trailers passed；一般CI仍17 inherited trailers
 及scope外transport lint，integration主要jobs skipped；原artifact保留所有逐SHA失敗紀錄。
-
 
 ## 單元7 source／case 邊界
 
