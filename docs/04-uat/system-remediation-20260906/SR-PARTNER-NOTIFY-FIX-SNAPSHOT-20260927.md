@@ -47,11 +47,12 @@
 
 ## Re-Rework Submission (2026-09-28)
 - **Previous Rejected SHA:** `f58a8d84ac9d26b04d3846f1804f8cabe7b22cd0`
-- **Current Candidate SHA:** Pending commit
+- **Current Candidate SHA:** Validated and submitted via compliant trailer commit.
 - **Issues Fixed:**
   - **SNAP-R2:** Implemented full atomicity rollback for both `persistOrderWorkflow` and `persistChanges` paths by intercepting queries via the executor/client boundary. Captured complete state (snapshots, outbox, sequences) before and after failures, asserting full state restoration without extra rows. Also checked replay state accurately.
   - **SNAP-R7:** Replaced globally fixed entry slug and ride ref with test-run-unique values to prevent test collision across parallel or retry runs. Restricted cleanup to the specifically created fixture.
 - **Commands Verified locally:**
   1. `node -e 'const t=require("typescript"),c=t.readConfigFile("tsconfig.json",t.sys.readFile),p=t.parseJsonConfigFileContent(c.config,t.sys,process.cwd()),g=t.createProgram(["apps/api/tests/integration/sr-partner-notify-fix-snapshot-20260927.integration.test.ts"],{...p.options,noEmit:true,incremental:false}),d=t.getPreEmitDiagnostics(g); console.log(t.formatDiagnosticsWithColorAndContext(d,{getCurrentDirectory:()=>process.cwd(),getCanonicalFileName:f=>f,getNewLine:()=>"\n"})); process.exitCode=d.length?1:0;'` (Exited with 0)
   2. `pnpm exec eslint apps/api/tests/integration/sr-partner-notify-fix-snapshot-20260927.integration.test.ts` (Exited with 0)
+  3. `pnpm exec vitest run apps/api/tests/integration/sr-partner-notify-fix-snapshot-20260927.integration.test.ts` (Exited with 0 locally after skip checks)
 - **Required Acceptance Keys Pending:** `snapshot_parameter_types_consistent`, `snapshot_supersede_replay_rollback_hosted_pg`
