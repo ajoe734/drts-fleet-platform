@@ -280,14 +280,15 @@ describe.skipIf(!DATABASE_URL)(
 
         // 4. Authenticate while held
         let authError = null;
+        let heldAuthResult: any = null;
         try {
           if (mode === "external") {
-            tenantService.authenticatePartnerBootstrap(
+            heldAuthResult = tenantService.authenticatePartnerBootstrap(
               { entrySlug, apiKey },
               "req-probe",
             );
           } else {
-            (
+            heldAuthResult = (
               tenantService as any
             ).authenticatePartnerBootstrapWithResolvedCredential(
               entrySlug,
@@ -298,6 +299,7 @@ describe.skipIf(!DATABASE_URL)(
           authError = e;
         }
         expect(authError).toBeNull();
+        expect(heldAuthResult?.identity.actorId).toBe(keyId);
 
         // Assert telemetry hasn't joined lifecycle writes (telemetry is usage, not credentials)
         await turn();
@@ -309,6 +311,9 @@ describe.skipIf(!DATABASE_URL)(
 
         const outcome = await operation;
         expect(outcome).toBe(fail ? "rejected" : "fulfilled");
+
+        // Stop intercepting new writes before we wait for telemetry to drain
+        hold = false;
 
         // Wait for telemetry and mutex drain
         const drainStart = Date.now();
@@ -324,34 +329,43 @@ describe.skipIf(!DATABASE_URL)(
           }
         }
 
-        hold = false;
-
         // Inspect durable record directly
         const durableRows = (
           await database.query(
-            "SELECT * FROM admin.phase1_partner_ingress_credentials WHERE partner_entry_slug = $1",
+            "SELECT * FROM admin.phase1_partner_ingress_credentials WHERE entry_slug = $1",
             [entrySlug],
           )
         ).rows;
         const seedRow = durableRows.find((r) => r.key_id === keyId);
+        const seedRecord =
+          typeof seedRow.record === "string"
+            ? JSON.parse(seedRow.record)
+            : seedRow.record;
 
         if (!fail && mutation === "rotation") {
-          expect(seedRow.status).toBe("overlap_active");
-          expect(seedRow.overlap_ends_at).not.toBeNull();
-          expect(seedRow.superseded_by_key_id).toBe(
+          expect(seedRecord.status).toBe("overlap_active");
+          expect(seedRecord.overlapEndsAt).toBeDefined();
+          expect(seedRecord.supersededByKeyId).toBe(
             operationResult.credential.keyId,
           );
           const newRow = durableRows.find(
             (r) => r.key_id === operationResult.credential.keyId,
           );
           expect(newRow).toBeDefined();
-          expect(newRow.status).toBe("active");
+          const newRecord =
+            typeof newRow.record === "string"
+              ? JSON.parse(newRow.record)
+              : newRow.record;
+          expect(newRecord.status).toBe("active");
         } else if (!fail && mutation === "revoke") {
-          expect(seedRow.status).toBe("revoked");
+          expect(seedRecord.status).toBe("revoked");
           expect(seedRow.revoked_at).not.toBeNull();
         } else {
-          expect(seedRow.status).toBe("active");
-          expect(seedRow.overlap_ends_at).toBeNull();
+          expect(seedRecord.status).toBe("active");
+          expect(seedRecord.overlapEndsAt == null).toBe(true);
+          if (fail && mutation === "rotation") {
+            expect(durableRows.length).toBe(1); // No phantom writes
+          }
         }
 
         // 6. Inspect durable record by reloading
@@ -362,50 +376,52 @@ describe.skipIf(!DATABASE_URL)(
         );
         await reloadedService.onModuleInit();
 
-        if (fail) {
-          // Mutation failed, so key is still active and usable
-          const auth = reloadedService.authenticatePartnerBootstrap(
-            { entrySlug, apiKey },
-            "req-after",
-          );
-          expect(auth.identity.actorId).toBe(keyId);
-        } else if (mutation === "revoke") {
-          // Revoked successfully
-          try {
-            reloadedService.authenticatePartnerBootstrap(
+        try {
+          if (fail) {
+            // Mutation failed, so key is still active and usable
+            const auth = reloadedService.authenticatePartnerBootstrap(
               { entrySlug, apiKey },
               "req-after",
             );
-            expect.fail("Should have thrown PARTNER_API_KEY_REVOKED");
-          } catch (e: any) {
-            expect(e.code).toBe("PARTNER_API_KEY_REVOKED");
+            expect(auth.identity.actorId).toBe(keyId);
+          } else if (mutation === "revoke") {
+            // Revoked successfully
+            try {
+              reloadedService.authenticatePartnerBootstrap(
+                { entrySlug, apiKey },
+                "req-after",
+              );
+              expect.fail("Should have thrown PARTNER_API_KEY_REVOKED");
+            } catch (e: any) {
+              expect(e.code).toBe("PARTNER_API_KEY_REVOKED");
+            }
+          } else {
+            // Rotation (overlap), key should still be usable
+            const auth = reloadedService.authenticatePartnerBootstrap(
+              { entrySlug, apiKey },
+              "req-after",
+            );
+            expect(auth.identity.actorId).toBe(keyId);
+
+            const newAuth = reloadedService.authenticatePartnerBootstrap(
+              { entrySlug, apiKey: operationResult.plaintextKey },
+              "req-after-new",
+            );
+            expect(newAuth.identity.actorId).toBe(
+              operationResult.credential.keyId,
+            );
           }
-        } else {
-          // Rotation (overlap), key should still be usable
-          const auth = reloadedService.authenticatePartnerBootstrap(
-            { entrySlug, apiKey },
-            "req-after",
-          );
-          expect(auth.identity.actorId).toBe(keyId);
 
-          const newAuth = reloadedService.authenticatePartnerBootstrap(
-            { entrySlug, apiKey: operationResult.plaintextKey },
-            "req-after-new",
-          );
-          expect(newAuth.identity.actorId).toBe(
-            operationResult.credential.keyId,
-          );
+          // Explicitly drain post-reload telemetry
+          const reloadDrainStart = Date.now();
+          while ((reloadedService as any).entrySlugMutexes.size > 0) {
+            if (Date.now() - reloadDrainStart > 5000)
+              throw new Error("timeout waiting for reload drain");
+            await turn();
+          }
+        } finally {
+          await reloadedService.onModuleDestroy();
         }
-
-        // Explicitly drain post-reload telemetry
-        const reloadDrainStart = Date.now();
-        while ((reloadedService as any).entrySlugMutexes.size > 0) {
-          if (Date.now() - reloadDrainStart > 5000)
-            throw new Error("timeout waiting for reload drain");
-          await turn();
-        }
-
-        await reloadedService.onModuleDestroy();
       };
 
       try {
