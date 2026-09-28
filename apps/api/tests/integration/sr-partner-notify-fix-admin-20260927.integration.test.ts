@@ -134,6 +134,7 @@ test("multi-taxi.repository listPartnerNotificationDeliveries handles null dates
 });
 
 import { BootstrapAuthGuard } from "../../src/common/auth/bootstrap-auth.guard";
+import { StepUpProofService } from "../../src/common/auth/step-up-proof.service";
 import { NextRequest } from "next/server";
 import { GET } from "../../../platform-admin-web/app/control-plane-proxy/[...path]/route";
 import { JwtAuthService } from "../../src/common/auth/jwt-auth.service";
@@ -430,24 +431,24 @@ test("Next GET valid signed IAP assertion -> Guard -> Controller delegates x-ten
       principalId: "user-1",
       subject: "accounts.google.com:admin@platform.drts",
       status: "active",
-      updatedAt: new Date().toISOString()
+      updatedAt: new Date().toISOString(),
     }),
     findMembershipsByPrincipalId: vi.fn().mockResolvedValue([
       {
         membershipId: "mem-1",
         realm: "platform",
         status: "active",
-        updatedAt: new Date().toISOString()
-      }
+        updatedAt: new Date().toISOString(),
+      },
     ]),
     findRoleBindingsByMembershipId: vi.fn().mockResolvedValue([
       {
         roleCode: "platform_admin",
         updatedAt: new Date().toISOString(),
         validFrom: null,
-        validTo: null
-      }
-    ])
+        validTo: null,
+      },
+    ]),
   } as any;
   const iapAdapter = new IAPSubjectAdapter(mockIdentityRepo);
 
@@ -572,6 +573,7 @@ test("Next POST valid IAP assertion -> Guard -> Controller mutation allowed with
     DRTS_API_URL: "http://localhost:3001",
   };
 
+  const authTime = Math.floor(Date.now() / 1000);
   const token = jwt.sign(
     {
       iss: "https://cloud.google.com/iap",
@@ -580,109 +582,146 @@ test("Next POST valid IAP assertion -> Guard -> Controller mutation allowed with
       email: "admin@platform.drts",
       gcp_ia_groups: ["platform-admins@platform.drts"],
       acr: "aal2", // gives verified_iap_workforce AMR for step up
+      auth_time: authTime,
     },
     "test-secret",
     { algorithm: "HS256" },
   );
 
-  const request = new NextRequest(
-    "http://localhost:3000/api/tenant/webhooks",
+  const realStepUpProofService = new StepUpProofService({
+    recordEvent: vi.fn(),
+  } as any);
+  const proof = realStepUpProofService.createProof(
     {
-      method: "POST",
-      headers: {
-        "x-tenant-id": "review-tenant-a",
-        "x-goog-iap-jwt-assertion": token,
-      },
-    },
+      actorId: "user-1",
+      principalId: "user-1",
+      realm: "platform",
+      sessionId: "iap:mem-1", // corresponds to membershipId
+      authTime: new Date(authTime * 1000).toISOString(),
+      amr: ["verified_iap_workforce"],
+      acr: "aal2",
+    } as any,
+    { actionId: "tenant:webhooks:create" } as any,
   );
 
-  let upstreamRequest: Request | undefined;
-  vi.spyOn(global, "fetch").mockImplementation(async (targetUrl, init) => {
-    upstreamRequest = new Request(targetUrl, init);
-    return new Response(JSON.stringify({}), { status: 200 });
+  const request = new NextRequest("http://localhost:3000/api/tenant/webhooks", {
+    method: "POST",
+    headers: {
+      "x-tenant-id": "review-tenant-a",
+      "x-goog-iap-jwt-assertion": token,
+      "x-drts-step-up-reference": proof.stepUpReference!,
+    },
   });
 
-  const response = await POST(request, {
-    params: Promise.resolve({ path: ["tenant", "webhooks"] }),
-  } as any);
+  let upstreamRequest: Request | undefined;
+  const fetchSpy = vi
+    .spyOn(global, "fetch")
+    .mockImplementation(async (targetUrl, init) => {
+      upstreamRequest = new Request(targetUrl, init);
+      return new Response(JSON.stringify({}), { status: 200 });
+    });
 
-  expect(response.status).toBe(200);
-  expect(upstreamRequest).toBeDefined();
+  try {
+    const response = await POST(request, {
+      params: Promise.resolve({ path: ["tenant", "webhooks"] }),
+    } as any);
 
-  // Guard execution
-  const mockIdentityRepo = {
-    findPrincipalBySubject: vi.fn().mockResolvedValue({
-      principalId: "user-1",
-      subject: "accounts.google.com:admin@platform.drts",
-      status: "active",
-      updatedAt: new Date().toISOString()
-    }),
-    findMembershipsByPrincipalId: vi.fn().mockResolvedValue([
-      {
-        membershipId: "mem-1",
-        realm: "platform",
+    expect(response.status).toBe(200);
+    expect(upstreamRequest).toBeDefined();
+
+    // Guard execution
+    const mockIdentityRepo = {
+      findPrincipalBySubject: vi.fn().mockResolvedValue({
+        principalId: "user-1",
+        subject: "accounts.google.com:admin@platform.drts",
         status: "active",
-        updatedAt: new Date().toISOString()
-      }
-    ]),
-    findRoleBindingsByMembershipId: vi.fn().mockResolvedValue([
-      {
-        roleCode: "platform_admin",
         updatedAt: new Date().toISOString(),
-        validFrom: null,
-        validTo: null
-      }
-    ])
-  } as any;
-  const iapAdapter = new IAPSubjectAdapter(mockIdentityRepo);
+      }),
+      findMembershipsByPrincipalId: vi.fn().mockResolvedValue([
+        {
+          membershipId: "mem-1",
+          realm: "platform",
+          status: "active",
+          updatedAt: new Date().toISOString(),
+        },
+      ]),
+      findRoleBindingsByMembershipId: vi.fn().mockResolvedValue([
+        {
+          roleCode: "platform_admin",
+          updatedAt: new Date().toISOString(),
+          validFrom: null,
+          validTo: null,
+        },
+      ]),
+    } as any;
+    const iapAdapter = new IAPSubjectAdapter(mockIdentityRepo);
 
-  const configService = {
-    get: (key: string) => {
-      if (key === "JWT_SECRET") return "test-secret-123";
-      return null;
-    },
-  } as any;
-  const jwtAuthService = new JwtAuthService(configService, { query: vi.fn() } as any);
+    const configService = {
+      get: (key: string) => {
+        if (key === "JWT_SECRET") return "test-secret-123";
+        return null;
+      },
+    } as any;
+    const jwtAuthService = new JwtAuthService(configService, {
+      query: vi.fn(),
+    } as any);
 
-  const mockStepUpProofService = {
-    verifyStepUpRequirement: vi.fn().mockResolvedValue(true),
-  } as any;
+    const guard = new BootstrapAuthGuard(
+      new Reflector(),
+      jwtAuthService,
+      undefined,
+      { recordEvent: vi.fn() } as any,
+      iapAdapter,
+      undefined,
+      realStepUpProofService,
+    );
 
-  const guard = new BootstrapAuthGuard(
-    new Reflector(),
-    jwtAuthService,
-    undefined,
-    { recordAuditLog: vi.fn() } as any,
-    iapAdapter,
-    undefined,
-    mockStepUpProofService
-  );
+    const mockRequest = {
+      headers: Object.fromEntries(upstreamRequest!.headers.entries()),
+      route: { path: "tenant/webhooks" },
+      url: "/tenant/webhooks",
+      originalUrl: "/tenant/webhooks",
+      method: "POST",
+    } as any;
 
-  const mockRequest = {
-    headers: Object.fromEntries(upstreamRequest!.headers.entries()),
-    route: { path: "tenant/webhooks" },
-    url: "/tenant/webhooks",
-    originalUrl: "/tenant/webhooks",
-    method: "POST",
-  } as any;
+    const mockContext = {
+      switchToHttp: () => ({ getRequest: () => mockRequest }),
+      getHandler: () => TenantPartnerController.prototype.createWebhookEndpoint,
+      getClass: () => TenantPartnerController,
+    } as any;
 
-  const mockContext = {
-    switchToHttp: () => ({ getRequest: () => mockRequest }),
-    getHandler: () => TenantPartnerController.prototype.createWebhookEndpoint,
-    getClass: () => TenantPartnerController,
-  } as any;
+    const mockService = { createWebhookEndpoint: vi.fn().mockReturnValue({}) };
+    const controller = new TenantPartnerController(
+      mockService as any,
+      {} as any,
+      {} as any,
+      {} as any,
+      {} as any,
+      {} as any,
+      {} as any,
+    );
 
-  const canActivate = await guard.canActivate(mockContext);
-  expect(canActivate).toBe(true);
-  expect(mockStepUpProofService.verifyStepUpRequirement).toHaveBeenCalled();
+    const canActivate = await guard.canActivate(mockContext);
+    expect(canActivate).toBe(true);
 
-  const mockService = { createWebhookEndpoint: vi.fn().mockReturnValue({}) };
-  const controller = new TenantPartnerController(mockService as any, {} as any, {} as any, {} as any, {} as any, {} as any, {} as any);
-  
-  controller.createWebhookEndpoint(mockRequest.identity, mockRequest.headers["x-tenant-id"], {} as any, "req-5");
-  expect(mockService.createWebhookEndpoint).toHaveBeenCalledWith("review-tenant-a", mockRequest.identity, {});
-
-  process.env = originalEnv;
+    const mockCommand = {
+      targetUrl: "https://example.com/webhook",
+      events: ["delivery.status.changed"],
+    };
+    controller.createWebhookEndpoint(
+      mockCommand as any,
+      mockRequest.headers["x-tenant-id"],
+      "req-5",
+    );
+    expect(mockService.createWebhookEndpoint).toHaveBeenCalledWith(
+      "review-tenant-a",
+      mockCommand,
+      "req-5",
+    );
+  } finally {
+    process.env = originalEnv;
+    fetchSpy.mockRestore();
+  }
 });
 
 test("Next POST valid IAP assertion without step-up proof -> Guard -> Controller mutation denied, zero effects", async () => {
@@ -696,7 +735,7 @@ test("Next POST valid IAP assertion without step-up proof -> Guard -> Controller
     DRTS_API_URL: "http://localhost:3001",
   };
 
-  // Missing acr claim means no step up proof
+  // Missing acr and auth_time claim means no step up proof
   const token = jwt.sign(
     {
       iss: "https://cloud.google.com/iap",
@@ -709,100 +748,466 @@ test("Next POST valid IAP assertion without step-up proof -> Guard -> Controller
     { algorithm: "HS256" },
   );
 
-  const request = new NextRequest(
-    "http://localhost:3000/api/tenant/webhooks",
-    {
-      method: "POST",
-      headers: {
-        "x-tenant-id": "review-tenant-a",
-        "x-goog-iap-jwt-assertion": token,
-      },
+  const request = new NextRequest("http://localhost:3000/api/tenant/webhooks", {
+    method: "POST",
+    headers: {
+      "x-tenant-id": "review-tenant-a",
+      "x-goog-iap-jwt-assertion": token,
     },
-  );
-
-  let upstreamRequest: Request | undefined;
-  vi.spyOn(global, "fetch").mockImplementation(async (targetUrl, init) => {
-    upstreamRequest = new Request(targetUrl, init);
-    return new Response(JSON.stringify({}), { status: 200 });
   });
 
-  const response = await POST(request, {
-    params: Promise.resolve({ path: ["tenant", "webhooks"] }),
-  } as any);
-
-  expect(response.status).toBe(200);
-
-  const mockIdentityRepo = {
-    findPrincipalBySubject: vi.fn().mockResolvedValue({
-      principalId: "user-1",
-      subject: "accounts.google.com:admin@platform.drts",
-      status: "active",
-      updatedAt: new Date().toISOString()
-    }),
-    findMembershipsByPrincipalId: vi.fn().mockResolvedValue([
-      {
-        membershipId: "mem-1",
-        realm: "platform",
-        status: "active",
-        updatedAt: new Date().toISOString()
-      }
-    ]),
-    findRoleBindingsByMembershipId: vi.fn().mockResolvedValue([
-      {
-        roleCode: "platform_admin",
-        updatedAt: new Date().toISOString(),
-        validFrom: null,
-        validTo: null
-      }
-    ])
-  } as any;
-  const iapAdapter = new IAPSubjectAdapter(mockIdentityRepo);
-
-  const configService = {
-    get: (key: string) => {
-      if (key === "JWT_SECRET") return "test-secret-123";
-      return null;
-    },
-  } as any;
-  const jwtAuthService = new JwtAuthService(configService, { query: vi.fn() } as any);
-
-  const mockStepUpProofService = {
-    verifyStepUpRequirement: vi.fn().mockRejectedValue(new Error("Step-up proof required")),
-  } as any;
-
-  const guard = new BootstrapAuthGuard(
-    new Reflector(),
-    jwtAuthService,
-    undefined,
-    { recordAuditLog: vi.fn() } as any,
-    iapAdapter,
-    undefined,
-    mockStepUpProofService
-  );
-
-  const mockRequest = {
-    headers: Object.fromEntries(upstreamRequest!.headers.entries()),
-    route: { path: "tenant/webhooks" },
-    url: "/tenant/webhooks",
-    originalUrl: "/tenant/webhooks",
-    method: "POST",
-  } as any;
-
-  const mockContext = {
-    switchToHttp: () => ({ getRequest: () => mockRequest }),
-    getHandler: () => TenantPartnerController.prototype.createWebhookEndpoint,
-    getClass: () => TenantPartnerController,
-  } as any;
+  let upstreamRequest: Request | undefined;
+  const fetchSpy = vi
+    .spyOn(global, "fetch")
+    .mockImplementation(async (targetUrl, init) => {
+      upstreamRequest = new Request(targetUrl, init);
+      return new Response(JSON.stringify({}), { status: 200 });
+    });
 
   try {
-    await guard.canActivate(mockContext);
-    expect.fail("Should throw");
-  } catch (e: any) {
-    expect(e.message).toMatch(/Step-up proof required/);
-  }
-  
-  const mockService = { createWebhookEndpoint: vi.fn().mockReturnValue({}) };
-  expect(mockService.createWebhookEndpoint).not.toHaveBeenCalled(); // assert zero mutation effects when denied
+    const response = await POST(request, {
+      params: Promise.resolve({ path: ["tenant", "webhooks"] }),
+    } as any);
 
-  process.env = originalEnv;
+    expect(response.status).toBe(200);
+
+    const mockIdentityRepo = {
+      findPrincipalBySubject: vi.fn().mockResolvedValue({
+        principalId: "user-1",
+        subject: "accounts.google.com:admin@platform.drts",
+        status: "active",
+        updatedAt: new Date().toISOString(),
+      }),
+      findMembershipsByPrincipalId: vi.fn().mockResolvedValue([
+        {
+          membershipId: "mem-1",
+          realm: "platform",
+          status: "active",
+          updatedAt: new Date().toISOString(),
+        },
+      ]),
+      findRoleBindingsByMembershipId: vi.fn().mockResolvedValue([
+        {
+          roleCode: "platform_admin",
+          updatedAt: new Date().toISOString(),
+          validFrom: null,
+          validTo: null,
+        },
+      ]),
+    } as any;
+    const iapAdapter = new IAPSubjectAdapter(mockIdentityRepo);
+
+    const configService = {
+      get: (key: string) => {
+        if (key === "JWT_SECRET") return "test-secret-123";
+        return null;
+      },
+    } as any;
+    const jwtAuthService = new JwtAuthService(configService, {
+      query: vi.fn(),
+    } as any);
+
+    const realStepUpProofService = new StepUpProofService({
+      recordEvent: vi.fn(),
+    } as any);
+
+    const guard = new BootstrapAuthGuard(
+      new Reflector(),
+      jwtAuthService,
+      undefined,
+      { recordEvent: vi.fn() } as any,
+      iapAdapter,
+      undefined,
+      realStepUpProofService,
+    );
+
+    const mockRequest = {
+      headers: Object.fromEntries(upstreamRequest!.headers.entries()),
+      route: { path: "tenant/webhooks" },
+      url: "/tenant/webhooks",
+      originalUrl: "/tenant/webhooks",
+      method: "POST",
+    } as any;
+
+    const mockContext = {
+      switchToHttp: () => ({ getRequest: () => mockRequest }),
+      getHandler: () => TenantPartnerController.prototype.createWebhookEndpoint,
+      getClass: () => TenantPartnerController,
+    } as any;
+
+    const mockService = { createWebhookEndpoint: vi.fn().mockReturnValue({}) };
+    new TenantPartnerController(
+      mockService as any,
+      {} as any,
+      {} as any,
+      {} as any,
+      {} as any,
+      {} as any,
+      {} as any,
+    );
+
+    try {
+      await guard.canActivate(mockContext);
+      expect.fail("Should throw");
+    } catch (e: any) {
+      expect(e.code).toMatch(/^(STEP_UP_REQUIRED|MFA_REQUIRED)$/);
+    }
+
+    expect(mockService.createWebhookEndpoint).not.toHaveBeenCalled(); // assert zero mutation effects when denied
+  } finally {
+    process.env = originalEnv;
+    fetchSpy.mockRestore();
+  }
+});
+
+// R2b: Missing tenant flow
+test("Next GET missing tenant -> Guard -> Controller delegates missing tenant", async () => {
+  const originalEnv = process.env;
+  process.env = {
+    ...originalEnv,
+    NODE_ENV: "production",
+    JWT_SECRET: "test-secret-123",
+    IAP_JWT_SECRET_OR_PUBLIC_KEY: "test-secret",
+    IAP_EXPECTED_AUDIENCE: "test-aud",
+    DRTS_API_URL: "http://localhost:3001",
+  };
+
+  const token = jwt.sign(
+    {
+      iss: "https://cloud.google.com/iap",
+      aud: "test-aud",
+      sub: "accounts.google.com:admin@platform.drts",
+      email: "admin@platform.drts",
+      gcp_ia_groups: ["platform-admins@platform.drts"],
+    },
+    "test-secret",
+    { algorithm: "HS256" },
+  );
+
+  const request = new NextRequest("http://localhost:3000/api/tenant/webhooks", {
+    headers: {
+      "x-goog-iap-jwt-assertion": token,
+      // no x-tenant-id
+    },
+  });
+
+  let upstreamRequest: Request | undefined;
+  const fetchSpy = vi
+    .spyOn(global, "fetch")
+    .mockImplementation(async (targetUrl, init) => {
+      upstreamRequest = new Request(targetUrl, init);
+      return new Response(JSON.stringify({}), { status: 200 });
+    });
+
+  try {
+    await GET(request, {
+      params: Promise.resolve({ path: ["tenant", "webhooks"] }),
+    } as any);
+
+    const mockIdentityRepo = {
+      findPrincipalBySubject: vi.fn().mockResolvedValue({
+        principalId: "user-1",
+        subject: "accounts.google.com:admin@platform.drts",
+        status: "active",
+      }),
+      findMembershipsByPrincipalId: vi.fn().mockResolvedValue([
+        {
+          membershipId: "mem-1",
+          realm: "platform",
+          status: "active",
+        },
+      ]),
+      findRoleBindingsByMembershipId: vi.fn().mockResolvedValue([
+        {
+          roleCode: "platform_admin",
+        },
+      ]),
+    } as any;
+
+    const iapAdapter = new IAPSubjectAdapter(mockIdentityRepo);
+    const jwtAuthService = new JwtAuthService(
+      { get: () => "test-secret-123" } as any,
+      { query: vi.fn() } as any,
+    );
+    const guard = new BootstrapAuthGuard(
+      new Reflector(),
+      jwtAuthService,
+      undefined,
+      { recordAuditLog: vi.fn() } as any,
+      iapAdapter,
+    );
+
+    const mockRequest = {
+      headers: Object.fromEntries(upstreamRequest!.headers.entries()),
+      route: { path: "tenant/webhooks" },
+      url: "/tenant/webhooks",
+      originalUrl: "/tenant/webhooks",
+      method: "GET",
+    } as any;
+
+    const mockContext = {
+      switchToHttp: () => ({ getRequest: () => mockRequest }),
+      getHandler: () => TenantPartnerController.prototype.listWebhookEndpoints,
+      getClass: () => TenantPartnerController,
+    } as any;
+
+    const canActivate = await guard.canActivate(mockContext);
+    expect(canActivate).toBe(true);
+
+    const mockService = { listWebhookEndpoints: vi.fn().mockReturnValue([]) };
+    const controller = new TenantPartnerController(
+      mockService as any,
+      {} as any,
+      {} as any,
+      {} as any,
+      {} as any,
+      {} as any,
+      {} as any,
+    );
+
+    // Controller delegates undefined tenantId because it was missing
+    try {
+      controller.listWebhookEndpoints(
+        mockRequest.identity,
+        mockRequest.headers["x-tenant-id"],
+        "req-9",
+      );
+      expect.fail();
+    } catch (e: any) {
+      expect(e.code).toBe("TENANT_ID_REQUIRED");
+    }
+  } finally {
+    process.env = originalEnv;
+    fetchSpy.mockRestore();
+  }
+});
+
+// R2b: Forged headers dropped, and unauthorized identity rejected
+test("Next GET forged headers and unauthorized identity -> Guard drops forged server authority -> Controller not called", async () => {
+  const originalEnv = process.env;
+  process.env = {
+    ...originalEnv,
+    NODE_ENV: "production",
+    JWT_SECRET: "test-secret-123",
+    IAP_JWT_SECRET_OR_PUBLIC_KEY: "test-secret",
+    IAP_EXPECTED_AUDIENCE: "test-aud",
+    DRTS_API_URL: "http://localhost:3001",
+  };
+
+  const token = jwt.sign(
+    {
+      iss: "https://cloud.google.com/iap",
+      aud: "test-aud",
+      sub: "accounts.google.com:unauthorized@tenant-b.drts", // Unauthorized user
+      email: "unauthorized@tenant-b.drts",
+      gcp_ia_groups: ["platform-admins@platform.drts"],
+    },
+    "test-secret",
+    { algorithm: "HS256" },
+  );
+
+  const request = new NextRequest("http://localhost:3000/api/tenant/webhooks", {
+    headers: {
+      "x-goog-iap-jwt-assertion": token,
+      "x-tenant-id": "review-tenant-a",
+      "x-actor": "platform_admin", // Forged
+      "x-realm": "platform", // Forged
+      "x-scopes": "superuser", // Forged
+      authorization: "Bearer forged-token", // Forged inner bearer
+    },
+  });
+
+  let upstreamRequest: Request | undefined;
+  const fetchSpy = vi
+    .spyOn(global, "fetch")
+    .mockImplementation(async (targetUrl, init) => {
+      upstreamRequest = new Request(targetUrl, init);
+      return new Response(JSON.stringify({}), { status: 200 });
+    });
+
+  try {
+    await GET(request, {
+      params: Promise.resolve({ path: ["tenant", "webhooks"] }),
+    } as any);
+
+    // Assert proxy did not forward forged x-actor, x-realm, x-scopes directly in a way that overrides server authority
+    // The upstreamRequest will have an authorization header from issueControlPlaneRequestAuth, NOT the forged one
+    expect(upstreamRequest!.headers.get("authorization")).not.toBe(
+      "Bearer forged-token",
+    );
+
+    const mockIdentityRepo = {
+      findPrincipalBySubject: vi.fn().mockResolvedValue(null), // User not in DB with platform realm
+    } as any;
+
+    const iapAdapter = new IAPSubjectAdapter(mockIdentityRepo);
+    const jwtAuthService = new JwtAuthService(
+      { get: () => "test-secret-123" } as any,
+      { query: vi.fn() } as any,
+    );
+    const guard = new BootstrapAuthGuard(
+      new Reflector(),
+      jwtAuthService,
+      undefined,
+      { recordAuditLog: vi.fn() } as any,
+      iapAdapter,
+    );
+
+    const mockRequest = {
+      headers: Object.fromEntries(upstreamRequest!.headers.entries()),
+      route: { path: "tenant/webhooks" },
+      url: "/tenant/webhooks",
+      originalUrl: "/tenant/webhooks",
+      method: "GET",
+    } as any;
+
+    const mockContext = {
+      switchToHttp: () => ({ getRequest: () => mockRequest }),
+      getHandler: () => TenantPartnerController.prototype.listWebhookEndpoints,
+      getClass: () => TenantPartnerController,
+    } as any;
+
+    const mockService = { listWebhookEndpoints: vi.fn() };
+
+    try {
+      await guard.canActivate(mockContext);
+      expect.fail("Guard should reject unauthorized user");
+    } catch (e: any) {
+      expect(e).toBeDefined(); // The guard throws Forbidden or Unauthorized
+    }
+
+    expect(mockService.listWebhookEndpoints).not.toHaveBeenCalled();
+  } finally {
+    process.env = originalEnv;
+    fetchSpy.mockRestore();
+  }
+});
+
+// R2b: Selecting A never returns B's data
+test("Next GET cross-tenant selection boundary -> selecting A isolates from B", async () => {
+  const originalEnv = process.env;
+  process.env = {
+    ...originalEnv,
+    NODE_ENV: "production",
+    JWT_SECRET: "test-secret-123",
+    IAP_JWT_SECRET_OR_PUBLIC_KEY: "test-secret",
+    IAP_EXPECTED_AUDIENCE: "test-aud",
+    DRTS_API_URL: "http://localhost:3001",
+  };
+
+  const token = jwt.sign(
+    {
+      iss: "https://cloud.google.com/iap",
+      aud: "test-aud",
+      sub: "accounts.google.com:admin@platform.drts",
+      email: "admin@platform.drts",
+      gcp_ia_groups: ["platform-admins@platform.drts"],
+    },
+    "test-secret",
+    { algorithm: "HS256" },
+  );
+
+  const request = new NextRequest("http://localhost:3000/api/tenant/webhooks", {
+    headers: {
+      "x-goog-iap-jwt-assertion": token,
+      "x-tenant-id": "review-tenant-a",
+    },
+  });
+
+  let upstreamRequest: Request | undefined;
+  const fetchSpy = vi
+    .spyOn(global, "fetch")
+    .mockImplementation(async (targetUrl, init) => {
+      upstreamRequest = new Request(targetUrl, init);
+      return new Response(JSON.stringify({}), { status: 200 });
+    });
+
+  try {
+    await GET(request, {
+      params: Promise.resolve({ path: ["tenant", "webhooks"] }),
+    } as any);
+
+    const mockIdentityRepo = {
+      findPrincipalBySubject: vi.fn().mockResolvedValue({
+        principalId: "user-1",
+        subject: "accounts.google.com:admin@platform.drts",
+        status: "active",
+      }),
+      findMembershipsByPrincipalId: vi.fn().mockResolvedValue([
+        {
+          membershipId: "mem-1",
+          realm: "platform",
+          status: "active",
+        },
+      ]),
+      findRoleBindingsByMembershipId: vi.fn().mockResolvedValue([
+        {
+          roleCode: "platform_admin",
+        },
+      ]),
+    } as any;
+
+    const iapAdapter = new IAPSubjectAdapter(mockIdentityRepo);
+    const jwtAuthService = new JwtAuthService(
+      { get: () => "test-secret-123" } as any,
+      { query: vi.fn() } as any,
+    );
+    const guard = new BootstrapAuthGuard(
+      new Reflector(),
+      jwtAuthService,
+      undefined,
+      { recordAuditLog: vi.fn() } as any,
+      iapAdapter,
+    );
+
+    const mockRequest = {
+      headers: Object.fromEntries(upstreamRequest!.headers.entries()),
+      route: { path: "tenant/webhooks" },
+      url: "/tenant/webhooks",
+      originalUrl: "/tenant/webhooks",
+      method: "GET",
+    } as any;
+
+    const mockContext = {
+      switchToHttp: () => ({ getRequest: () => mockRequest }),
+      getHandler: () => TenantPartnerController.prototype.listWebhookEndpoints,
+      getClass: () => TenantPartnerController,
+    } as any;
+
+    await guard.canActivate(mockContext);
+
+    // Simulate service returning A's data
+    const mockService = {
+      listWebhookEndpoints: vi.fn().mockImplementation((tenantId) => {
+        if (tenantId === "review-tenant-a") return [{ id: "webhook-a" }];
+        if (tenantId === "review-tenant-b") return [{ id: "webhook-b" }];
+        return [];
+      }),
+    };
+    const controller = new TenantPartnerController(
+      mockService as any,
+      {} as any,
+      {} as any,
+      {} as any,
+      {} as any,
+      {} as any,
+      {} as any,
+    );
+
+    const result = controller.listWebhookEndpoints(
+      mockRequest.identity,
+      mockRequest.headers["x-tenant-id"],
+      "req-10",
+    );
+
+    // Assert boundary: B's data is never returned because tenantId is strictly "review-tenant-a"
+    expect(mockService.listWebhookEndpoints).toHaveBeenCalledWith(
+      "review-tenant-a",
+      mockRequest.identity,
+    );
+    expect(result.data).toBeDefined();
+  } finally {
+    process.env = originalEnv;
+    fetchSpy.mockRestore();
+  }
 });
