@@ -605,6 +605,12 @@ test("Next POST valid IAP assertion -> Guard -> Controller mutation allowed with
     { actionId: "tenant:webhooks:create" } as any,
   );
 
+  const commandFixture = {
+    url: "https://example.com/webhook",
+    secret: "whsec_12345",
+    events: ["delivery.status.changed"],
+  };
+
   const request = new NextRequest("http://localhost:3000/api/tenant/webhooks", {
     method: "POST",
     headers: {
@@ -613,11 +619,7 @@ test("Next POST valid IAP assertion -> Guard -> Controller mutation allowed with
       "x-drts-step-up-reference": proof.stepUpReference!,
       "content-type": "application/json",
     },
-    body: JSON.stringify({
-      url: "https://example.com/webhook",
-      secret: "whsec_12345",
-      events: ["delivery.status.changed"],
-    }),
+    body: JSON.stringify(commandFixture),
   });
 
   let upstreamRequest: Request | undefined;
@@ -683,17 +685,16 @@ test("Next POST valid IAP assertion -> Guard -> Controller mutation allowed with
       realStepUpProofService,
     );
 
+    const upstreamBodyStr = await upstreamRequest!.text();
+    const upstreamParsedBody = JSON.parse(upstreamBodyStr);
+
     const mockRequest = {
       headers: Object.fromEntries(upstreamRequest!.headers.entries()),
       route: { path: "tenant/webhooks" },
       url: "/tenant/webhooks",
       originalUrl: "/tenant/webhooks",
       method: "POST",
-      body: {
-        url: "https://example.com/webhook",
-        secret: "whsec_12345",
-        events: ["delivery.status.changed"],
-      },
+      body: upstreamParsedBody,
     } as any;
 
     const mockContext = {
@@ -716,19 +717,14 @@ test("Next POST valid IAP assertion -> Guard -> Controller mutation allowed with
     const canActivate = await guard.canActivate(mockContext);
     expect(canActivate).toBe(true);
 
-    const mockCommand = {
-      url: "https://example.com/webhook",
-      secret: "whsec_12345",
-      events: ["delivery.status.changed"],
-    };
     controller.createWebhookEndpoint(
-      mockCommand as any,
+      mockRequest.body as any,
       mockRequest.headers["x-tenant-id"],
       "req-5",
     );
     expect(mockService.createWebhookEndpoint).toHaveBeenCalledWith(
       "review-tenant-a",
-      mockCommand,
+      commandFixture,
       "req-5",
     );
   } finally {
@@ -877,7 +873,7 @@ test("Next POST valid IAP assertion without step-up proof -> Guard -> Controller
     }
 
     expect(err).toBeDefined();
-    expect(err.code).toMatch(/^(STEP_UP_REQUIRED|MFA_REQUIRED)$/);
+    expect(err.code).toBe("STEP_UP_REQUIRED");
 
     expect(mockService.createWebhookEndpoint).not.toHaveBeenCalled(); // assert zero mutation effects when denied
   } finally {
@@ -1001,6 +997,7 @@ test("Next GET missing tenant -> Guard -> Controller delegates missing tenant", 
       expect.fail();
     } catch (e: any) {
       expect(e.code).toBe("TENANT_ID_REQUIRED");
+      expect(mockService.listWebhookEndpoints).not.toHaveBeenCalled();
     }
   } finally {
     process.env = originalEnv;
@@ -1268,6 +1265,51 @@ test("Next GET cross-tenant selection boundary -> selecting A isolates from B", 
     expect(result.data.items[0].url).toBe("https://a.com/webhook");
     expect(
       result.data.items.some((i: any) => i.url === "https://b.com/webhook"),
+    ).toBe(false);
+
+    // legitimate selection of B through the same proxy/guard/controller chain
+    const requestB = new NextRequest(
+      "http://localhost:3000/api/tenant/webhooks",
+      {
+        headers: {
+          "x-goog-iap-jwt-assertion": token,
+          "x-tenant-id": "review-tenant-b",
+        },
+      },
+    );
+
+    await GET(requestB, {
+      params: Promise.resolve({ path: ["tenant", "webhooks"] }),
+    } as any);
+
+    const mockRequestB = {
+      headers: Object.fromEntries(upstreamRequest!.headers.entries()),
+      route: { path: "tenant/webhooks" },
+      url: "/tenant/webhooks",
+      originalUrl: "/tenant/webhooks",
+      method: "GET",
+    } as any;
+
+    const mockContextB = {
+      switchToHttp: () => ({ getRequest: () => mockRequestB }),
+      getHandler: () => TenantPartnerController.prototype.listWebhookEndpoints,
+      getClass: () => TenantPartnerController,
+    } as any;
+
+    await guard.canActivate(mockContextB);
+
+    const resultB = controller.listWebhookEndpoints(
+      mockRequestB.identity,
+      mockRequestB.headers["x-tenant-id"],
+      "req-11",
+    );
+
+    // Assert boundary: only B's data is returned
+    expect(resultB.data).toBeDefined();
+    expect(resultB.data.items).toHaveLength(1);
+    expect(resultB.data.items[0].url).toBe("https://b.com/webhook");
+    expect(
+      resultB.data.items.some((i: any) => i.url === "https://a.com/webhook"),
     ).toBe(false);
   } finally {
     process.env = originalEnv;
