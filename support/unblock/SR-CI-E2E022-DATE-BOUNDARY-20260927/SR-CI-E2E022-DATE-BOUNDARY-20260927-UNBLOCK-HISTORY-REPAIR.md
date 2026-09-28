@@ -239,7 +239,7 @@ the fourth acceptance item satisfied.
 | --------------------------------------- | ---------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------- |
 | Identify exact contamination            | Published/fork refs, reflog, range-diff, full-range gate and hosted log above                  | PASS                                                                         |
 | Repair or document non-destructive path | Temporary-index exact-content replay; whole new diagnostic range passes; parent refs preserved | PASS for documented/rehearsed path; no product successor published by helper |
-| Task-scoped commit/push/PR              | This report on assigned helper branch; publication receipt follows                             | PENDING publication                                                          |
+| Task-scoped commit/push/PR              | Assigned helper branch, ordinary push, draft PR #2206; publication receipt below               | PASS for checkpoint delivery; no candidate locked                            |
 | Update parent with concrete next step   | Current-release parent `note` rejected, exit 1; exact operator fields above                    | BLOCKED pending Supervisor write/readback                                    |
 
 Do not call `done`. Until the operator writes are confirmed, preserve this
@@ -247,3 +247,36 @@ report in a scoped commit and draft PR, record `blocker`, and do not lock a
 review candidate or claim the helper complete. After confirmation, rerun scoped
 document checks, verify local/remote/PR head equality, and hand off the exact
 `CANDIDATE_SHA` / `CANDIDATE_BRANCH` to Codex2 through the release CLI.
+
+### Publication and completed local checks
+
+Anchor `ebf2295c34a9a5cfbcb5ad43b107eee7151b2f02` was pushed normally to
+`codex/sr-ci-e2e022-date-boundary-20260927-unblock-history-repair` and published
+as [draft PR #2206](https://github.com/ajoe734/drts-fleet-platform/pull/2206),
+base `dev`. Local, remote and PR head matched at publication. This receipt is
+added by a subsequent ordinary commit on the same branch; its exact final
+head is recorded in the canonical helper blocker, not as a review candidate.
+All report commits carry this helper's task identifier and required trailers.
+
+| Completed check                          | Command / version                                                                        | Result                                                        |
+| ---------------------------------------- | ---------------------------------------------------------------------------------------- | ------------------------------------------------------------- |
+| Canonical document references and claims | `python3 tools/ci/git/check_canonical_consistency.py --ci --base origin/dev --head HEAD` | Exit 0, all four categories have zero findings                |
+| Entire helper commit range               | `python3 tools/ci/git/check_commit_trailers.py --base origin/dev --head HEAD`            | Exit 0                                                        |
+| Helper whitespace                        | `git diff origin/dev...HEAD --check`                                                     | Exit 0; separate from the inherited parent whitespace failure |
+| Generated-file staging guard             | `python3 tools/ci/git/check_staged_generated_files.py --staged`                          | Exit 0                                                        |
+| Report formatting                        | Prettier 3.8.2 `--write`, then `--check` on this report                                  | Exit 0                                                        |
+
+The first `pnpm exec prettier` attempt failed with `MODULE_NOT_FOUND`: shared
+`node_modules/prettier` points into another worktree's missing installation.
+Formatting and checking then completed using Node v22.23.2 and the existing
+canonical package store binary at
+`node_modules/.pnpm/prettier@3.8.2/node_modules/prettier/bin/prettier.cjs`
+via its absolute path. No shared dependency link or git hook configuration
+was changed. The configured worktree `.husky/_` directory is absent; the
+applicable staging, formatting and trailer checks above were run explicitly.
+
+After publication, canonical `show` still reports parent `blocked`, its old
+history-recovery request unchanged, no `execution_branch`, and no helper
+`resolved_parent_*` fields. Thus the operator dependency is still real.
+Automatic PR CI is separate from the completed local checks; no hosted helper
+CI result, review approval, merge or parent completion is claimed here.
