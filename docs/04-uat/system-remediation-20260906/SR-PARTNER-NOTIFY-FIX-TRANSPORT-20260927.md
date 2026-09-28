@@ -34,12 +34,20 @@
 
 ### 3. Bounded Opt-In Proof & Unit Tests (Local)
 **Command**: `pnpm exec vitest run tests/unit/system-remediation/sr-partner-notify-transport-20260918 tests/unit/system-remediation/sr-partner-notify-fix-transport-20260927`
-**Result (HEAD)**: Exit 0 (Passed). 116 tests passed. The `sanity.test.ts` proves that `http://169.254.169.254`, `https://10.1.2.3`, `http://8.8.8.8`, and DNS-resolved local IPs are explicitly rejected even when `DRTS_ALLOW_LOCAL_WEBHOOKS=true`, unless the receiver is `127.0.0.1`/`localhost` and DNS resolves strictly to `127.0.0.1`/`::1`.
+**Result (HEAD)**: Exit 0 (Passed). 128 tests passed (7 skipped because database URL absent). Added explicit DNS lookup closure regression tests in `sanity.test.ts` to assert actual `options.lookup` behavior. It strictly proves that `DRTS_ALLOW_LOCAL_WEBHOOKS=true` only permits successful callback delivery when DNS exactly answers `127.0.0.1` or `::1`, and reliably emits `partner_endpoint_dns_not_public` for metadata (`169.254.169.254`), private (`10.1.2.3`), mixed local/private DNS answers, HTTPS localhost metadata, and empty answers, for both `all=true` and `all=false` lookup modes.
 
 ### 4. Integration Test for Controlled Receiver Opt-In (Local)
 **Command**: `cd apps/api && pnpm exec vitest run tests/integration/sr-partner-notify-fix-transport-20260927.integration.test.ts`
 **Old Result (58b73a96)**: 3 passed (Local VM).
 *Note: Real-server integration was deliberately NOT run on this VM in current run per reviewer instructions.*
+
+### Independent DNS Regression Evidence (Codex Review 2026-09-27)
+**Reviewed SHA**: `8885a6ad1ef4f901036d371535aa079ff050612a`
+**Target Boundary**: `WebhookDispatchService.dispatchAttempt` -> `partnerNotificationHttpsFetch` -> `options.lookup` -> `dns.lookup`.
+**Fix Validated**: The tests in `sanity.test.ts` were rewritten to properly capture and assert the inner `options.lookup` closure callback behavior under both `all=true` and `all=false` conditions, preventing the regression from bypassing tests. 
+**Evidence of repair**: 
+- **Old-Fail (on 3c690f69 / original broken transport)**: `options.lookup` allowed `169.254.169.254` DNS answers to pass without error, reproducing the 8 prior violations.
+- **Repaired-Pass (HEAD)**: `options.lookup` closure accurately blocks `169.254.169.254`, `10.1.2.3`, mixed loopback arrays, empty arrays, and HTTPS localhost metadata DNS answers, safely emitting `partner_endpoint_dns_not_public` and refusing callback delivery. (Tested via Node 22.23.2, pnpm 10.33.0, Vitest 4.1.4).
 
 ## Codex Review Findings (2026-09-27) Resolution
 
