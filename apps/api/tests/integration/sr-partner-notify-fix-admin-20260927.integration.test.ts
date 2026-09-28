@@ -140,6 +140,7 @@ import { GET } from "../../../platform-admin-web/app/control-plane-proxy/[...pat
 import { JwtAuthService } from "../../src/common/auth/jwt-auth.service";
 import { Reflector } from "@nestjs/core";
 import { TenantPartnerController } from "../../src/modules/tenant-partner/tenant-partner.controller";
+import { TenantPartnerService } from "../../src/modules/tenant-partner/tenant-partner.service";
 import { IAPSubjectAdapter } from "../../src/modules/auth/iap-subject.adapter";
 
 test("Next GET -> issueControlPlaneRequestAuth -> BootstrapAuthGuard -> authority proxy path (bootstrap mode)", async () => {
@@ -610,7 +611,13 @@ test("Next POST valid IAP assertion -> Guard -> Controller mutation allowed with
       "x-tenant-id": "review-tenant-a",
       "x-goog-iap-jwt-assertion": token,
       "x-drts-step-up-reference": proof.stepUpReference!,
+      "content-type": "application/json",
     },
+    body: JSON.stringify({
+      url: "https://example.com/webhook",
+      secret: "whsec_12345",
+      events: ["delivery.status.changed"],
+    }),
   });
 
   let upstreamRequest: Request | undefined;
@@ -682,6 +689,11 @@ test("Next POST valid IAP assertion -> Guard -> Controller mutation allowed with
       url: "/tenant/webhooks",
       originalUrl: "/tenant/webhooks",
       method: "POST",
+      body: {
+        url: "https://example.com/webhook",
+        secret: "whsec_12345",
+        events: ["delivery.status.changed"],
+      },
     } as any;
 
     const mockContext = {
@@ -705,7 +717,8 @@ test("Next POST valid IAP assertion -> Guard -> Controller mutation allowed with
     expect(canActivate).toBe(true);
 
     const mockCommand = {
-      targetUrl: "https://example.com/webhook",
+      url: "https://example.com/webhook",
+      secret: "whsec_12345",
       events: ["delivery.status.changed"],
     };
     controller.createWebhookEndpoint(
@@ -836,7 +849,7 @@ test("Next POST valid IAP assertion without step-up proof -> Guard -> Controller
     } as any;
 
     const mockService = { createWebhookEndpoint: vi.fn().mockReturnValue({}) };
-    new TenantPartnerController(
+    const controller = new TenantPartnerController(
       mockService as any,
       {} as any,
       {} as any,
@@ -846,12 +859,25 @@ test("Next POST valid IAP assertion without step-up proof -> Guard -> Controller
       {} as any,
     );
 
+    let err: any;
     try {
-      await guard.canActivate(mockContext);
-      expect.fail("Should throw");
+      if (await guard.canActivate(mockContext)) {
+        controller.createWebhookEndpoint(
+          {
+            url: "https://example.com/webhook",
+            secret: "whsec_1",
+            events: [],
+          } as any,
+          mockRequest.headers["x-tenant-id"],
+          "req-x",
+        );
+      }
     } catch (e: any) {
-      expect(e.code).toMatch(/^(STEP_UP_REQUIRED|MFA_REQUIRED)$/);
+      err = e;
     }
+
+    expect(err).toBeDefined();
+    expect(err.code).toMatch(/^(STEP_UP_REQUIRED|MFA_REQUIRED)$/);
 
     expect(mockService.createWebhookEndpoint).not.toHaveBeenCalled(); // assert zero mutation effects when denied
   } finally {
@@ -1010,10 +1036,11 @@ test("Next GET forged headers and unauthorized identity -> Guard drops forged se
     headers: {
       "x-goog-iap-jwt-assertion": token,
       "x-tenant-id": "review-tenant-a",
-      "x-actor": "platform_admin", // Forged
+      "x-actor-id": "forged-id", // Forged
+      "x-actor-type": "forged-type", // Forged
       "x-realm": "platform", // Forged
       "x-scopes": "superuser", // Forged
-      authorization: "Bearer forged-token", // Forged inner bearer
+      "x-drts-authorization": "Bearer forged-token", // Forged inner bearer
     },
   });
 
@@ -1030,14 +1057,15 @@ test("Next GET forged headers and unauthorized identity -> Guard drops forged se
       params: Promise.resolve({ path: ["tenant", "webhooks"] }),
     } as any);
 
-    // Assert proxy did not forward forged x-actor, x-realm, x-scopes directly in a way that overrides server authority
-    // The upstreamRequest will have an authorization header from issueControlPlaneRequestAuth, NOT the forged one
-    expect(upstreamRequest!.headers.get("authorization")).not.toBe(
+    // Assert proxy did not forward forged x-actor-id, x-realm, x-scopes directly in a way that overrides server authority
+    // The upstreamRequest will have a x-drts-authorization header from issueControlPlaneRequestAuth, NOT the forged one
+    expect(upstreamRequest!.headers.get("x-drts-authorization")).not.toBe(
       "Bearer forged-token",
     );
 
     const mockIdentityRepo = {
       findPrincipalBySubject: vi.fn().mockResolvedValue(null), // User not in DB with platform realm
+      findPrincipalsByEmail: vi.fn().mockResolvedValue([]),
     } as any;
 
     const iapAdapter = new IAPSubjectAdapter(mockIdentityRepo);
@@ -1068,13 +1096,32 @@ test("Next GET forged headers and unauthorized identity -> Guard drops forged se
     } as any;
 
     const mockService = { listWebhookEndpoints: vi.fn() };
+    const controller = new TenantPartnerController(
+      mockService as any,
+      {} as any,
+      {} as any,
+      {} as any,
+      {} as any,
+      {} as any,
+      {} as any,
+    );
 
+    let err: any;
     try {
-      await guard.canActivate(mockContext);
-      expect.fail("Guard should reject unauthorized user");
+      if (await guard.canActivate(mockContext)) {
+        controller.listWebhookEndpoints(
+          mockRequest.identity,
+          mockRequest.headers["x-tenant-id"],
+          "req-forged",
+        );
+      }
     } catch (e: any) {
-      expect(e).toBeDefined(); // The guard throws Forbidden or Unauthorized
+      err = e;
     }
+
+    expect(err).toBeDefined();
+    expect(err.status).toBe(403);
+    expect(err.code).toBe("IAP_WORKFORCE_USER_INACTIVE");
 
     expect(mockService.listWebhookEndpoints).not.toHaveBeenCalled();
   } finally {
@@ -1176,16 +1223,31 @@ test("Next GET cross-tenant selection boundary -> selecting A isolates from B", 
 
     await guard.canActivate(mockContext);
 
-    // Simulate service returning A's data
-    const mockService = {
-      listWebhookEndpoints: vi.fn().mockImplementation((tenantId) => {
-        if (tenantId === "review-tenant-a") return [{ id: "webhook-a" }];
-        if (tenantId === "review-tenant-b") return [{ id: "webhook-b" }];
-        return [];
-      }),
-    };
+    const realService = new TenantPartnerService({
+      recordAuditLog: vi.fn(),
+      recordSecurityEvent: vi.fn(),
+    } as any);
+    realService.createWebhookEndpoint(
+      "review-tenant-a",
+      {
+        url: "https://a.com/webhook",
+        secret: "whsec_a",
+        events: ["delivery.status.changed"],
+      },
+      "req-1",
+    );
+    realService.createWebhookEndpoint(
+      "review-tenant-b",
+      {
+        url: "https://b.com/webhook",
+        secret: "whsec_b",
+        events: ["delivery.status.changed"],
+      },
+      "req-2",
+    );
+
     const controller = new TenantPartnerController(
-      mockService as any,
+      realService as any,
       {} as any,
       {} as any,
       {} as any,
@@ -1201,11 +1263,12 @@ test("Next GET cross-tenant selection boundary -> selecting A isolates from B", 
     );
 
     // Assert boundary: B's data is never returned because tenantId is strictly "review-tenant-a"
-    expect(mockService.listWebhookEndpoints).toHaveBeenCalledWith(
-      "review-tenant-a",
-      mockRequest.identity,
-    );
     expect(result.data).toBeDefined();
+    expect(result.data.items).toHaveLength(1);
+    expect(result.data.items[0].url).toBe("https://a.com/webhook");
+    expect(
+      result.data.items.some((i: any) => i.url === "https://b.com/webhook"),
+    ).toBe(false);
   } finally {
     process.env = originalEnv;
     fetchSpy.mockRestore();
