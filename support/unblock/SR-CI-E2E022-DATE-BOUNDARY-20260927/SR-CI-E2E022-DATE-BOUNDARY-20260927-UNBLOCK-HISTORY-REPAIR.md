@@ -5,11 +5,13 @@ Audit: 2026-09-28 UTC. Owner/reviewer: Codex / Codex2.
 Parent owner/reviewer: Gemini / Codex.
 
 The history failure is reproduced and a non-destructive successor path is
-rehearsed. **Parent routing and machine-truth updates remain blocked on the
-Supervisor.** This report does not approve the parent code or satisfy its
-product acceptance. The helper changes only this report.
+rehearsed. **Supervisor completed routing and resumed the parent at 02:28:41Z;
+Gemini is now working on the authorized successor.** The earlier blocked/Claude
+disposition is historical and superseded by the verified operator receipt below.
+This report does not approve the parent code or satisfy its product acceptance.
+The helper changes only this report and continues on existing PR #2206.
 
-## Exact history and worktree findings
+## Original audit: exact history and worktree findings (01:14–01:25Z)
 
 | Identity                      | Audited value                                                                       |
 | ----------------------------- | ----------------------------------------------------------------------------------- |
@@ -125,18 +127,20 @@ recorded here. Git version: 2.43.0; Python: 3.12.3.
 
 ### Supervisor routing and original-owner execution
 
-After inspecting the repeated R2 localization below, Supervisor should set the
-parent's `execution_branch` to a fresh task-scoped successor, for example
-`gemini/sr-ci-e2e022-date-boundary-20260927-successor`, and assign its isolated
-worktree to original owner Gemini. `_execution_branch` in
+Supervisor has inspected the repeated R2/R6 localization below and set the
+parent's `execution_branch` to
+`gemini/sr-ci-e2e022-date-boundary-20260927-successor`. Original owner Gemini
+is assigned its isolated worktree. `_execution_branch` in
 `tools/development-orchestrator/control_plane/runtime/supervisor_runtime.py`
 uses this field for owner routing. Check local refs, remote refs, PRs and
 worktrees first; reuse an already established successor instead of overwriting
 it. Do not switch canonical root. Do not publish the diagnostic object above.
 
-The following recipe is for Gemini **in the clean, Supervisor-routed successor
-worktree at the audited recovery base**, not for this helper to mutate product
-files. Fetch and re-audit if those inputs have changed:
+The following is the **historical rehearsal recipe at the original recovery
+base**, not an instruction to reset or replay an active successor. The authorized
+owner now uses current fetched dev, preserves existing work and rechecks patch
+applicability if the inputs have changed. This helper does not mutate product
+files or the parent's worktree:
 
 ```bash
 set -euo pipefail
@@ -183,7 +187,7 @@ receipts in the [original candidate UAT artifact](https://github.com/ajoe734/drt
 | Finding / acceptance                                        | Source and evidence                                                                                                                                                                     | Disposition / next repair                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
 | ----------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | R1/R3/R4: dates, monthly denominators, sparse category maps | Prior independent production-method probes; latest adjacent candidate changes only UAT document                                                                                         | Prior resolutions retained; recheck on successor. This helper makes no new product-pass claim.                                                                                                                                                                                                                                                                                                                                                                                         |
-| R2: repeated ineffective regression                         | Published unit script lines 51–60 invent daily count; 65–97 create result JSON from expected complaints; 100–128 invent coverage. It bypasses real E2E assertions and ReportingService. | **OPEN.** Both adjacent reviews reproduced false-green mutations: `local val=3` to `0`; both expected complaint counts from 1 to 0; helper `SUMMARY_TO_DATE` to `1900-01-01`. All exit 0. Prior sensitivity controls (coverage=0; empty service dates) exit 1. Supervisor must inspect this localization before Gemini resumes.                                                                                                                                                        |
+| R2: repeated ineffective regression                         | Published unit script lines 51–60 invent daily count; 65–97 create result JSON from expected complaints; 100–128 invent coverage. It bypasses real E2E assertions and ReportingService. | **OPEN product finding.** Both adjacent reviews reproduced false-green mutations: `local val=3` to `0`; both expected complaint counts from 1 to 0; helper `SUMMARY_TO_DATE` to `1900-01-01`. All exit 0. Prior sensitivity controls (coverage=0; empty service dates) exit 1. Supervisor inspected this localization and authorized Gemini to continue at 02:28:41Z.                                                                                                                  |
 | R2 repair boundary                                          | E2E022 steps 2.0/2.1, 2.2–2.5, 3.5–3.8; actual ReportingService date resolution, monthly complaint eligibility and preview aggregation                                                  | Execute real fixture AND E2E assertion paths with independently specified outcomes or actual production results. Mock external records/HTTP only. Cover daytime, 23:29:59, 23:30:00, midnight, both orders next month, split month/year, one/both complaints crossing. Assert daily 3; demand/assigned 2, completed/cancelled 1; snapshots 3; exact bounds; row/aggregate coverage; preview/job sparse maps; wrong-total failures. Demonstrate old failure/new pass, clean whitespace. |
 | R5: invalid published ancestor                              | Local checker exit 1 and hosted job 108748049274 failure; fork reflog/range-diff                                                                                                        | **Path validated; execution pending.** New four-file successor excludes bad ancestry. Never force-push either preserved branch.                                                                                                                                                                                                                                                                                                                                                        |
 | R6: misleading UAT history                                  | Published artifact calls `9db3415b…` ACCEPTED and R2/R5 fixed; cites old run 36362884258 for `adafef433…` as current acceptance                                                         | **OPEN.** Restore rejected/failed history and finding/acceptance evidence table in original artifact. Old green runs cannot validate a new successor.                                                                                                                                                                                                                                                                                                                                  |
@@ -195,10 +199,9 @@ was already running independently; this helper started no workflow. Both require
 parent acceptance keys remain unchanged. No product server, PG, browser,
 Playwright, Docker or deployment ran on this VM.
 
-## Machine-truth update blocked: exact Supervisor action
+## Completed operator action and current machine-truth readback
 
-`AI_NAME=Codex <current-release-ai-status.sh> note <parent-id> <recovery-next>`
-was attempted and returned **exit 1**:
+The first audit's parent `note` attempt returned **exit 1**:
 
 ```text
 Dispatched worker cannot mutate a different task
@@ -208,47 +211,91 @@ The guard is `TaskBoardCommandExecutor._guard_worker_command` in
 `tools/development-orchestrator/control_plane/usecases/task_board_commands.py`.
 The same guard excludes `assign` from dispatched-worker commands. No dispatch
 variables were removed, no actor was impersonated and no state JSON was edited.
-The failed parent write is not claimed as accepted; helper `progress` recorded
-the rejection through the authorized release CLI.
+The failed parent write remains historical evidence, not a successful update.
+The previous report at `718be8d6de6c6cbaef65b650849ae543c492ab2a` requested
+blocked/Claude metadata while routing was unresolved. That request is now
+superseded; no worker authority was expanded and this worker made no parent write.
 
-Before helper handoff/merge, Supervisor must use that release CLI in its own
-operator context to persist the following helper metadata (existing `assign`
-with `TASK_METADATA_JSON`, preserving owner/reviewer and other fields), and
-write the same `resolved_parent_next` as a `note` on the parent:
+The dispatch's operator resume and original report were read from
+`/home/lupin/workspace/drts-fleet-platform/.local/worker-resume-20260928/`.
+The original report SHA-256 is
+`13df8b83002fb53b0f5235d09382e44c0c1b368af88daf0a5a6d6a06a00b473e`, matching
+the report at this turn's initial helper head. The complete operator receipt is
+`/home/lupin/workspace/drts-fleet-platform/.local/worker-resume-20260928/operator-actions.json`,
+SHA-256 `9d1dbd41f2500ec9081489fd2a8f932cb0192348bcea5a488d3deea7dcd2375e`.
+Its first five entries concern this parent/helper; every command has `rc: 0`
+and empty stderr:
 
-```json
-{
-  "resolved_parent_status": "blocked",
-  "resolved_parent_waiting_for": "Claude",
-  "resolved_parent_next": "Supervisor inspect repeated R2 localization, then route original owner Gemini to execution_branch gemini/sr-ci-e2e022-date-boundary-20260927-successor from audited dev 28d5a1b2d072ade55c74fb0e462f00711596fa25. Preserve PR2190 at bfeec848027bc1caa280d39faf0a29bdb0781759 and local-fix 5d06bbaba9578e65fd718a696be7fedf9641207a. Apply the four-file diff from 585087a2fd8114eaac0eb8a470dfca58e13dfbe4 to bfeec848 with valid new history. Gemini repairs R2 executable regression and R6 UAT accuracy, then validates full PR range and supplies fresh same-SHA hosted CI and Codex review. Retain both parent acceptance keys. See the history-repair helper artifact."
-}
-```
+| UTC receipt time | Operator command                  | Recorded result                                                                                                                      |
+| ---------------- | --------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------ |
+| 02:28:39.393278  | `assign` parent, Gemini / Codex   | Successor execution branch recorded; original owner/reviewer retained.                                                               |
+| 02:28:40.317603  | `assign` helper, Codex / Codex2   | `resolved_parent_status=todo`, `resolved_parent_waiting_for=null`, concrete `resolved_parent_next`, correct helper execution branch. |
+| 02:28:41.304456  | `resume-blocked` parent to `todo` | Parent next written with exactly the helper's recorded `resolved_parent_next`.                                                       |
+| 02:28:42.262766  | `assign` helper                   | Current operator-resume `task_spec_ref` recorded.                                                                                    |
+| 02:28:43.429749  | `resume-blocked` helper to `todo` | Report refresh and fresh Codex2 handoff authorized on existing PR #2206.                                                             |
 
-`Claude` is the recognized governance lane for the Supervisor coordination
-dependency; `Supervisor` is an operator actor, not a valid `waiting_for` lane.
-Do not set `resolved_parent_at` manually; the merge transaction owns it.
-Do not let helper completion silently move the parent to `todo` before routing.
-After the actual routing/scope condition is resolved, Supervisor can explicitly
-resume the original parent with that new evidence. An operator receipt and
-subsequent `show` must confirm both requested writes before this helper claims
-the fourth acceptance item satisfied.
+The recorded parent next directs Gemini to preserve PR #2190 / `bfeec848…`
+and local-fix / `5d06bbab…`, import only the four-file diff from `585087a2…`
+to `bfeec848…` onto current dev, repair R2 executable regression and truthful
+R6 UAT evidence, validate the full commit range, push normally to a new PR,
+then obtain fresh Codex review and same-SHA hosted CI. Both acceptance keys
+remain required. No further operator approval is pending.
+
+Readback at 02:30–02:31Z used the supplied release's `show` for each task,
+not the whole status file or a human summary:
+
+- Parent: `in_progress`, last update `2026-09-28T02:29:01Z`, Gemini / Codex,
+  `waiting_for=null`, no dependencies. Its next is now "Investigating E2E022
+  date boundary test failure and preparing fix on successor branch". This
+  authorized progress is newer than the operator receipt; equality to the
+  historical next or `todo` is not a prerequisite for helper handoff.
+- Parent execution branch matches the authorized successor. Its four scopes
+  remain the E2E script, date helper, task unit-test directory and original UAT
+  document listed above. Both `time_boundary_report_fixtures_consistent` and
+  `hosted_cross_surface_e2e_pass` remain in `required_acceptance`; there is no
+  current parent candidate or recorded acceptance evidence.
+- Helper: `in_progress` after this owner's `start`; correct branch and resume
+  spec, `resolved_parent_status=todo`, explicit null waiting lane, and next
+  identical to the successful operator resume command. `resolved_parent_at`
+  is absent, correctly reserved for the helper merge transaction.
+- Registered parent worktree now exists at
+  `/home/lupin/workspace/drts-fleet-platform/.artifacts/worktrees/auto/gemini-sr-ci-e2e022-date-boundary-20260927`
+  on the successor branch. At readback its HEAD and fetched `origin/dev` are
+  `dce571db03d67b6623586501cfb75312ec298826`; no successor remote/PR exists yet.
+  This is owner progress, not a delivered successor or product acceptance.
+- Original local/remote/PR #2190 head remains `bfeec848…`, local-fix remains
+  `5d06bbab…`, and local-fix still has no remote ref. The exact four-file source
+  patch hash remains `72ed85a6…` as recorded above. Re-running the real trailer
+  checker against fetched dev still exits **1** solely for ancestor `8d3d8fdd…`.
+  The new helper range contains only this report; no dev merge is necessary.
+
+The read-only probe `python3 .local/history-repair-e2e022/resume-20260928/verify-routing.py`
+completed **exit 0** with Python 3.12.3. It verifies the full receipt hash, all
+five successful actions, receipt-to-metadata next equality, authorized branches,
+owners, scopes, required acceptance keys, runnable parent status, and absence of
+premature resolution time. It reads saved single-task snapshots only and does
+not write machine truth. Probe SHA-256:
+`69f781231a6688b80bf4315ecd8a396b7714131a036537070133e357754dcd53`.
+Snapshots and its result are under the same local evidence directory. Parent
+snapshot hash: `a7699e826a767d5a0eb040335680f2ad93be5e6269d21e2f89fcad1502207c84`;
+helper snapshot hash: `d216adb97a214b292db0d135d412f4d9a5f80f9c5b970376a208e928a76de6ee`.
 
 ## Helper acceptance and publication
 
-| Helper acceptance                       | Verification                                                                                   | Status                                                                       |
-| --------------------------------------- | ---------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------- |
-| Identify exact contamination            | Published/fork refs, reflog, range-diff, full-range gate and hosted log above                  | PASS                                                                         |
-| Repair or document non-destructive path | Temporary-index exact-content replay; whole new diagnostic range passes; parent refs preserved | PASS for documented/rehearsed path; no product successor published by helper |
-| Task-scoped commit/push/PR              | Assigned helper branch, ordinary push, draft PR #2206; publication receipt below               | PASS for checkpoint delivery; no candidate locked                            |
-| Update parent with concrete next step   | Current-release parent `note` rejected, exit 1; exact operator fields above                    | BLOCKED pending Supervisor write/readback                                    |
+| Helper acceptance                       | Verification                                                                                                            | Status                                                                                                              |
+| --------------------------------------- | ----------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------- |
+| Identify exact contamination            | Published/fork refs, reflog, range-diff, full-range gate and hosted log above                                           | PASS                                                                                                                |
+| Repair or document non-destructive path | Temporary-index exact-content replay; whole new diagnostic range passes; parent refs preserved                          | PASS for documented/rehearsed path; no product successor published by helper                                        |
+| Task-scoped commit/push/PR              | Assigned helper branch, ordinary push, existing PR #2206; publication receipts below                                    | Checkpoint verified; refreshed candidate identity will be recorded by final handoff after checks and head equality. |
+| Update parent with concrete next step   | Successful operator `resume-blocked` receipt, matching helper metadata, current routing/scope readback and probe exit 0 | PASS; parent has independently advanced to `in_progress`.                                                           |
 
-Do not call `done`. Until the operator writes are confirmed, preserve this
-report in a scoped commit and draft PR, record `blocker`, and do not lock a
-review candidate or claim the helper complete. After confirmation, rerun scoped
-document checks, verify local/remote/PR head equality, and hand off the exact
-`CANDIDATE_SHA` / `CANDIDATE_BRANCH` to Codex2 through the release CLI.
+Operator writes are confirmed; no parent blocker remains for this helper.
+Refresh the original report on existing PR #2206, run scoped document checks,
+verify local/remote/PR head equality, and hand off the exact `CANDIDATE_SHA` /
+`CANDIDATE_BRANCH` to Codex2 through the release CLI. Review, same-SHA CI and
+merge remain lifecycle gates; do not call `done` or claim product acceptance.
 
-### Publication and completed local checks
+### Historical publication and completed local checks (01:22–01:25Z)
 
 Anchor `ebf2295c34a9a5cfbcb5ad43b107eee7151b2f02` was pushed normally to
 `codex/sr-ci-e2e022-date-boundary-20260927-unblock-history-repair` and published
@@ -275,8 +322,11 @@ via its absolute path. No shared dependency link or git hook configuration
 was changed. The configured worktree `.husky/_` directory is absent; the
 applicable staging, formatting and trailer checks above were run explicitly.
 
-After publication, canonical `show` still reports parent `blocked`, its old
+After that initial publication, canonical `show` still reported parent `blocked`, its old
 history-recovery request unchanged, no `execution_branch`, and no helper
-`resolved_parent_*` fields. Thus the operator dependency is still real.
-Automatic PR CI is separate from the completed local checks; no hosted helper
-CI result, review approval, merge or parent completion is claimed here.
+`resolved_parent_*` fields. That dated dependency was resolved by the operator
+actions above. The old helper head `718be8d6…` has successful Commit trailers,
+Canonical consistency, Runtime mirror guard, Smoke acceptance and ci-integ
+checks at the 02:30Z PR read; these do not validate the refreshed candidate.
+This turn's `pnpm exec prettier --version` succeeds (3.8.2); no dependency link
+repair or hook change was needed. Product/PG/browser acceptance remains hosted-only.
