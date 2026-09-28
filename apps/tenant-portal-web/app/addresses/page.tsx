@@ -60,9 +60,11 @@ export default async function AddressesPage({
           </>
         )}
 
-        <Link className="route-link" href="/">
-          Back to home
-        </Link>
+        <div style={{ marginTop: "24px", display: "block" }}>
+          <Link className="route-link" href="/">
+            Back to home
+          </Link>
+        </div>
       </AppShellCard>
     </main>
   );

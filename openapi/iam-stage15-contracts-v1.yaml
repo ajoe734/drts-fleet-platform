@@ -217,6 +217,14 @@ paths:
       summary: Return the caller identity context and active IAM authority.
       operationId: getIdentityContext
       tags: [IAM]
+  /api/identity/session-context:
+    get:
+      summary: >-
+        Return the caller's authoritative principal/session state and any
+        break-glass grants active for that principal, keyed by principalId
+        rather than actorId/sub.
+      operationId: getIdentitySessionContext
+      tags: [IAM, Session]
   /api/identity/step-up-proofs:
     post:
       summary: Create a short-lived step-up proof for a privileged IAM action.
@@ -481,6 +489,12 @@ paths:
             schema:
               $ref: "#/components/schemas/IamAccessReviewDecisionCommand"
   /api/platform-admin/break-glass/requests:
+    get:
+      summary: >-
+        List break-glass requests/grants visible to the caller (requester,
+        eligible approver, or platform/ops admin).
+      operationId: listBreakGlassRequests
+      tags: [IAM]
     post:
       summary: Create a break-glass access request.
       operationId: createBreakGlassRequest
@@ -491,6 +505,24 @@ paths:
           application/json:
             schema:
               $ref: "#/components/schemas/CreateBreakGlassRequestCommand"
+  /api/platform-admin/break-glass/requests/{requestId}:
+    get:
+      summary: >-
+        Read a single break-glass request/grant, authorized to its requester,
+        eligible approvers, or a platform/ops admin.
+      operationId: getBreakGlassRequest
+      tags: [IAM]
+      parameters:
+        - name: requestId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "403":
+          description: Caller is not the requester, an eligible approver, or a platform/ops admin.
+        "404":
+          description: Break-glass request was not found.
   /api/platform-admin/break-glass/requests/{requestId}/approve:
     post:
       summary: Approve a break-glass access request.
@@ -666,6 +698,8 @@ components:
             - platform:access-reviews:decide
             - platform:break-glass:request
             - platform:break-glass:approve
+            - platform:break-glass:activate
+            - platform:break-glass:close
             - platform:partner-entries:create
             - platform:partner-entries:update
             - platform:partner-entries:activate

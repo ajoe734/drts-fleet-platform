@@ -5,6 +5,8 @@ import type {
 } from "@drts/contracts";
 
 export interface TenantBookingDraftValues {
+  pickupManualOverrideReason?: string | null;
+  dropoffManualOverrideReason?: string | null;
   businessDispatchSubtype: BusinessDispatchSubtype;
   selectedPassengerId: string;
   pickupAddressId: string;
@@ -361,12 +363,18 @@ export function buildTenantBookingCreateCommand(params: {
       ...(draft.pickupAddressId ? { addressId: draft.pickupAddressId } : {}),
       lat: parseOptionalFloat(draft.pickupLat),
       lng: parseOptionalFloat(draft.pickupLng),
+      ...(draft.pickupManualOverrideReason
+        ? { manualOverrideReason: draft.pickupManualOverrideReason }
+        : {}),
     },
     dropoff: {
       address: draft.dropoffAddress.trim(),
       ...(draft.dropoffAddressId ? { addressId: draft.dropoffAddressId } : {}),
       lat: parseOptionalFloat(draft.dropoffLat),
       lng: parseOptionalFloat(draft.dropoffLng),
+      ...(draft.dropoffManualOverrideReason
+        ? { manualOverrideReason: draft.dropoffManualOverrideReason }
+        : {}),
     },
     reservationWindowStart: new Date(
       draft.reservationWindowStart,

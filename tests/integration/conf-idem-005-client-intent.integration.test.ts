@@ -461,6 +461,10 @@ describe("CONF-IDEM-005: Client Intent Idempotency Integration", () => {
         {} as never,
         {} as never,
         idempotencyService,
+        {} as never,
+        {} as never,
+        {} as never,
+        {} as never,
       );
     });
 
