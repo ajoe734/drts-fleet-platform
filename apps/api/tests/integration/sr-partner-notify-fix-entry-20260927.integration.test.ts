@@ -481,7 +481,10 @@ describe.skipIf(!DATABASE_URL)(
 
       const originalQuery = database.query.bind(database);
       let holdTelemetry = false;
-      const heldTelemetry: (() => void)[] = [];
+      const heldTelemetry: {
+        resolveHold: () => void;
+        queryPromise: Promise<any>;
+      }[] = [];
 
       vi.spyOn(database, "query").mockImplementation(
         (sql: string, values?: any[]) => {
@@ -489,18 +492,22 @@ describe.skipIf(!DATABASE_URL)(
             holdTelemetry &&
             sql.includes("INSERT INTO admin.phase1_partner_ingress_credentials")
           ) {
-            return new Promise((resolve) => {
-              heldTelemetry.push(() => {
-                resolve(originalQuery(sql, values));
-              });
+            let resolveHold!: () => void;
+            const holdPromise = new Promise<void>((r) => {
+              resolveHold = r;
             });
+            const queryPromise = holdPromise.then(() =>
+              originalQuery(sql, values),
+            );
+            heldTelemetry.push({ resolveHold, queryPromise });
+            return queryPromise;
           }
           return originalQuery(sql, values);
         },
       );
 
       let reloadedService: any;
-      let caughtTimeoutError = false;
+      let caughtAssertionError = false;
 
       try {
         try {
@@ -524,6 +531,9 @@ describe.skipIf(!DATABASE_URL)(
           try {
             if (reloadedService) {
               const reloadDrainStart = Date.now();
+              // Release telemetry BEFORE the bounded drain completes
+              heldTelemetry.forEach((h) => h.resolveHold());
+
               while (reloadedService.entrySlugMutexes.size > 0) {
                 if (Date.now() - reloadDrainStart > 2000) {
                   // eslint-disable-next-line no-unsafe-finally
@@ -537,23 +547,22 @@ describe.skipIf(!DATABASE_URL)(
           }
         }
       } catch (e: any) {
-        if (e.message === "timeout waiting for reload drain") {
-          caughtTimeoutError = true;
-        } else if (
-          e.message === "injected post-reload identity assertion failure"
-        ) {
-          // If the telemetry wasn't held or finished instantly, we'd catch the original error
+        if (e.message === "injected post-reload identity assertion failure") {
+          caughtAssertionError = true;
         } else {
           throw e;
         }
       } finally {
         holdTelemetry = false;
-        heldTelemetry.forEach((finish) => finish());
+        // Await actual completion of all released telemetry queries
+        await Promise.allSettled(heldTelemetry.map((h) => h.queryPromise));
         vi.restoreAllMocks();
       }
 
-      // We expect the drain to have timed out and thrown, meaning the failure-producing bound works.
-      expect(caughtTimeoutError).toBe(true);
+      expect(caughtAssertionError).toBe(true);
+      if (reloadedService) {
+        expect(reloadedService.entrySlugMutexes.size).toBe(0);
+      }
     });
   },
 );

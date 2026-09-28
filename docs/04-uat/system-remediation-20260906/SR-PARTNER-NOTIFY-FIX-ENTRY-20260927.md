@@ -1043,6 +1043,28 @@ REVIEW_PROBE
 ### ENTRY-R12 REVIEW RECEIPT (Historical cf2e4f97)
 
 ```
+Codex REVIEW REOPEN for locked candidate cf2e4f976706e1a98017042f843502a50a4c9fff, generation 242a030f1ff34ae8b15907e6ce2dd856. HEAD and PR #2218 head match exactly; base/origin-dev is 3da15e89f4abd96f3887cea00f8538a76fab20de. Previous adjacent independent review: 00feb15826e983b071c00d0aa2c27ac079b9b893 (13:08:28Z receipt). Current diff versus 00feb changes only integration test and UAT, preserving product/root-test source.
+
+Read AI_COLLABORATION_GUIDE §0.7, current task_spec_ref and full latest reviewer receipt. Reviewer dispatch explicitly prohibits file edits: original owner Gemini2 must append this complete receipt and runnable localization to EXISTING docs/04-uat/system-remediation-20260906/SR-PARTNER-NOTIFY-FIX-ENTRY-20260927.md. Supervisor must check this bounded repair unit before resubmission. No candidate edits, commits, branch changes, dependency changes, local PG/API/browser/Compose, or hosted workflow dispatches were performed. Every reviewer-started check has completed and its result was read.
+
+CONFIRMED RETAINED / REPAIRED:
+- Scoped regression retains create response waiting for persistence, no public/list phantom on failure, same-slug serialization/retry, whitespace-alias update/status/revoke coordination, same-entry credential ordering, cross-entry selective publication, and both production auth telemetry callers.
+- ENTRY-R12.2 schema repair is present: integration :335 uses formal entry_slug, :340-368 reads record JSONB status/overlapEndsAt/supersededByKeyId, as V0022 and repository.ts:1916-1948 require. Held auth now asserts returned keyId (:302), failed rotation checks one durable row (:367), matrix reloaded service has a destruction finally (:422). These assertions remain unreachable in the failing first matrix scenario; do not claim complete PG matrix validation.
+- Historical appendix now includes dated original receipts and latest 00feb review; local tsc exit2 and local PG SKIP are distinguished from historical hosted results. This substantially repairs prior provenance omissions.
+- Fresh whole-range trailer check passes all 7 commits; diff --check and scoped ESLint pass.
+
+ENTRY-R12.1 [P1, SAME deadlock across adjacent 00feb -> cf2; repeated-defect localization required by §0.7]:
+apps/api/tests/integration/sr-partner-notify-fix-entry-20260927.integration.test.ts:308-326 sets hold=false TOO LATE. It releases lifecycle snapshot at :310 and awaits operation at :312. Production runWithEntryMutex (service.ts:1348-1374) releases the queued authentication task before that caller continuation; auth at :5577-5597 / :5673-5693 already reaches repository credential INSERT, which :178-205 intercepts while hold is still true. Assigning hold=false at :316 does not resolve an ALREADY-created query promise. Drain :320-329 waits forever on that unsettled telemetry write; finally :435 is only entered after timeout.
+
+Fresh exact-candidate diagnostic calls real TenantPartnerService, auth, mutex and TenantPartnerRepository, mocking only DatabaseService.query responses/timing; no PG acceptance:
+- All 8 external/internal × revoke/rotation × success/rejection combinations reproduced exactly one unsettled telemetry write and mutexes=1 after the committed hold-release sequence. Each 200ms bounded diagnostic reports drained=false; explicit finally drains all operations.
+- Separate full 5000ms first-scenario diagnostic below reproduces drainError="timeout waiting for drain", hold=false, mutexes=1, writes=[{status:"revoked",settled:true},{status:"revoked",settled:false}]. Exit0 means defect reproduction succeeded.
+- Identical production calls with ONLY a diagnostic early release BEFORE finishing the captured lifecycle promises drain successfully: no timeout, mutexes=0, one settled captured lifecycle write. This establishes the repair boundary without changing candidate files or claiming a repaired product/test.
+Expected: finish every queued lifecycle/telemetry operation before durable readback. Actual: first matrix case stalls; later 7 cases/assertions never run.
+
+Bounded repair: preserve the no-extra-write assertion while the lifecycle is held, then disable interception BEFORE resolving/rejecting any lifecycle query, or explicitly finish all newly queued telemetry before awaiting drain. Changing hold only after await operation is insufficient. Do not increase timeouts, clear pending arrays, or weaken assertions to hide the cycle. Keep bounded waits shorter than the test deadline so cleanup can run. Complete all 8 interleavings in authorized migrated hosted PG.
+Remaining cleanup/evidence requirements from prior receipt: onModuleDestroy at service.ts:1950 only clears timers; it does NOT drain mutexes. Put reload-service telemetry draining into finally as well as destruction, so assertion failure cannot skip it. Include exact reloaded key-set assertion for rejected rotation while retaining durable seed-only assertion and held-auth identity. Preserve successful rotation overlap/successor/new-key and revoked-key rejection assertions. No production source/scope expansion is needed for this harness repair.
+
 ENTRY-R12.3 [P2, reintroduced current blob mismatch; history appendix substantially repaired]:
 UAT line8 claims current integration blob c49b57b2a1cfc51b0e2ff5e058cb228e1bee7103. Actual git ls-tree HEAD returns 79ab10e5696eff3528ded7c13e7bd482f4a9fd56. Root-test blob f007b9f9c353565dc83ef347512161ec87a9f94f is correct. Previous 00feb integration hash was correct; this is a renewed post-formatting provenance mismatch, not a claim the appendix is still absent. Recompute hashes after final formatting, map current commands/results to that checkpoint, and preserve this current hosted FAIL alongside historical outcomes in the existing artifact.
 
@@ -1054,6 +1076,94 @@ vitest run tests/integration tests/load: 292 PASS /1 FAIL, exit1.
 Task file: immediate create/binding PASS (29ms); lifecycle reload authentication PASS (126ms); interleaving matrix FAIL (5007ms), Error: Test timed out in 5000ms at integration test :167:5.
 Thus real hosted behavior corroborates the independently reproduced deadlock; this is NOT merely a missing-column prediction or old-SHA CI.
 Hosted lint job108944081610 SUCCESS. Other run jobs were still running when checked; no overall CI success claimed. Reviewer did not start these hosted runs.
+
+COMPLETED CURRENT LOCAL CHECKS (Node22.23.2, pnpm10.33.0, Vitest4.1.4):
+A. env -u DATABASE_URL pnpm exec vitest run tests/unit/system-remediation/sr-partner-notify-fix-entry-20260927/tenant-partner-persistence.test.ts tests/unit/system-remediation/sr-partner-notify-route-20260917/partner-entry-notification-binding.service.test.ts tests/unit/system-remediation/sr-partner-notify-transport-20260918/governance.test.ts tests/security/idempotency-regression-guard.test.ts --reporter=dot => exit0,48 PASS.
+B. env -u DATABASE_URL pnpm --filter @drts/api exec vitest run tests/unit/tenant-partner.service.test.ts tests/unit/tenant-partner.controller.test.ts tests/unit/auth-bootstrap.test.ts tests/integration/int-iam-prt-001-partner-credential-lifecycle.test.ts tests/integration/sr-partner-notify-fix-entry-20260927.integration.test.ts --reporter=dot => exit0,184 PASS /3 PG SKIP.
+C. pnpm exec eslint apps/api/tests/integration/sr-partner-notify-fix-entry-20260927.integration.test.ts tests/unit/system-remediation/sr-partner-notify-fix-entry-20260927/tenant-partner-persistence.test.ts --max-warnings=0 => exit0.
+D. python3 tools/ci/git/check_commit_trailers.py --base origin/dev --head HEAD => exit0,7 commits. git diff --check origin/dev...HEAD => exit0.
+E. Eight-scenario timing diagnostic and below exact 5000ms/early-release comparison => exit0 as diagnostics, all operation cleanup verified. No local PG/full tsc run claimed.
+
+REQUIRED ACCEPTANCE:
+- entry_response_waits_durable_write: fresh scoped PASS.
+- persistence_failure_propagated_without_phantom: scoped PASS for committed covered controls; required durable interleaving/reload matrix remains FAIL/unverified after first case.
+- immediate_binding_after_create_hosted_pg: THIS candidate's test-specific hosted PASS is available in run36427110970/job108944081765. Whole integration job FAIL is separate; do not label overall acceptance/CI complete or replace machine acceptance lifecycle.
+Original owner Gemini2 continues on v5/PR2218 with bounded harness and UAT repair. No additional user authorization or VM runtime required.
+
+RUNNABLE LOCALIZATION (stdin, no file writes; actual candidate production modules):
+env -u DATABASE_URL TS_NODE_PROJECT=apps/api/tsconfig.json node -r ./apps/api/node_modules/ts-node/register/transpile-only - <<'REVIEW_PROBE'
+const assert = require("node:assert/strict");
+const path = require("node:path"), Module = require("node:module");
+const resolve = Module._resolveFilename;
+Module._resolveFilename = function(name, ...args) {
+  return resolve.call(this, name === "@drts/contracts" ? path.resolve("packages/contracts/src/index.ts") : name, ...args);
+};
+const { TenantPartnerService } = require("./apps/api/src/modules/tenant-partner/tenant-partner.service");
+const { TenantPartnerRepository } = require("./apps/api/src/modules/tenant-partner/tenant-partner.repository");
+const { AuditNotificationService } = require("./apps/api/src/modules/audit-notification/audit-notification.service");
+const turn = () => new Promise(r => setTimeout(r, 10));
+async function run(releaseBeforeLifecycle) {
+  let hold = false, operation;
+  const writes = [];
+  const originalQuery = async () => ({rows: [], rowCount: 1});
+  const database = {isEnabled: () => true, query(sql, values) {
+    if (hold && sql.includes("INSERT INTO admin.phase1_partner_ingress_credentials")) {
+      return new Promise((resolveQuery, reject) => {
+        const item = {record: JSON.parse(values[4]), settled: false};
+        item.finish = async (failure = false) => {
+          if (item.settled) return;
+          try {
+            if (failure) reject(new Error("probe rejected lifecycle write"));
+            else { const result = await originalQuery(sql, values); resolveQuery(result); }
+          } catch (e) { reject(e); } finally { item.settled = true; }
+        };
+        writes.push(item);
+      });
+    }
+    return originalQuery(sql, values);
+  }};
+  const service = new TenantPartnerService(new AuditNotificationService(), new TenantPartnerRepository(database));
+  try {
+    const entrySlug = "review-cf2-exact-drain";
+    await service.createPlatformPartnerEntry({tenantId:"tenant-demo-001",partnerCode:"review_drain",partnerType:"bank_partner",programId:"prog-1",entrySlug,displayName:"Review Fixture",authMode:"partner_api_key",eligibilityMode:"none",businessDispatchSubtype:"enterprise_dispatch"});
+    const seed = await service.issuePlatformPartnerIngressCredential(entrySlug, {purpose:"seed"});
+    hold = true;
+    operation = service.revokePlatformPartnerIngressCredential(entrySlug, seed.credential.keyId, {revokeReason:"probe"}).then(() => "fulfilled", () => "rejected");
+    await turn();
+    assert.equal(writes.length, 1);
+    const auth = service.authenticatePartnerBootstrap({entrySlug,apiKey:seed.plaintextKey},"probe");
+    assert.equal(auth.identity.actorId, seed.credential.keyId);
+    await turn();
+    assert.equal(writes.length, 1);
+    const lifecycle = [...writes];
+    if (releaseBeforeLifecycle) hold = false;
+    for (const w of lifecycle) await w.finish(false);
+    assert.equal(await operation, "fulfilled");
+    hold = false;
+    let drainError = null;
+    const start = Date.now();
+    try {
+      while (true) {
+        if (Date.now() - start > 5000) throw new Error("timeout waiting for drain");
+        await turn();
+        if (service.entrySlugMutexes.size === 0 && writes.every(w => w.settled)) break;
+      }
+    } catch (e) { drainError = e.message; }
+    assert.equal(drainError, releaseBeforeLifecycle ? null : "timeout waiting for drain");
+    assert.equal(service.entrySlugMutexes.size, releaseBeforeLifecycle ? 0 : 1);
+    console.log(JSON.stringify({releaseBeforeLifecycle,drainError,hold,mutexes:service.entrySlugMutexes.size,writes:writes.map(w=>({status:w.record.status,settled:w.settled}))}));
+  } finally {
+    hold = false;
+    for (const w of writes) await w.finish();
+    if (operation) await operation;
+    await Promise.all([...service.entrySlugMutexes.values()]);
+    assert(writes.every(w => w.settled));
+    assert.equal(service.entrySlugMutexes.size, 0);
+    await service.onModuleDestroy();
+  }
+}
+(async()=>{await run(false);await run(true);console.log("Exact candidate drain failure and proposed early-release diagnostic complete; no PG or source edits.");})().catch(e=>{console.error(e);process.exitCode=1;});
+REVIEW_PROBE
 ```
 
 ### ENTRY-R12 REVIEW RECEIPT (Historical 5d801976)
@@ -1061,18 +1171,27 @@ Hosted lint job108944081610 SUCCESS. Other run jobs were still running when chec
 ```
 Codex REVIEW REOPEN for locked candidate 5d801976f4557032e607772a3482fe3c37b49731, generation b9615f8273c840c697dda807507eeef9. Detached HEAD and PR #2218 head match exactly; PR base dev is 3da15e89f4abd96f3887cea00f8538a76fab20de. Previous adjacent reviewed candidate: cf2e4f976706e1a98017042f843502a50a4c9fff (13:20:04Z receipt). Current commit changes ONLY the integration test; product/root regression sources are unchanged.
 
+Read AI_COLLABORATION_GUIDE §0.7, the full previous receipt at /home/lupin/workspace/drts-fleet-platform/.local/product-qa-supervision-20260928/entry-cf2e4f97-review.md, and current task_spec_ref including operator's 13:25Z correction. Reviewer dispatch expressly forbids candidate/file edits. Original owner Gemini2 must append this full receipt and the missing cf2 receipt to EXISTING docs/04-uat/system-remediation-20260906/SR-PARTNER-NOTIFY-FIX-ENTRY-20260927.md. Supervisor should verify the bounded remaining unit under §0.7. No source/file edits, commits, branch changes, dependency changes, local product/PG/browser/Compose servers, or hosted workflow dispatches were performed. All reviewer-started checks have completed and their results were read.
+
 CONFIRMED FIXED / RETAINED:
-- The prior ENTRY-R12.1 normal-path deadlock is FIXED. Integration :309-313 now disables interception BEFORE resolving/rejecting the held lifecycle snapshot.
+- The prior ENTRY-R12.1 normal-path deadlock is FIXED. Integration :309-313 now disables interception BEFORE resolving/rejecting the held lifecycle snapshot. The candidate's EXACT matrix callback, parsed from the committed test using TypeScript and executed with the REAL service/auth/mutex/repository plus DatabaseService.query response/timing double, completes all eight scenarios and destroys eight reloaded services with zero pending mutexes. This local diagnostic is explicitly NOT PG evidence.
 - Actual same-candidate hosted PG ALSO now passes (details below): all three task tests, full 293-test integration suite, and five PG gates. Do not keep reporting the old cf2 normal-path timeout as a current defect.
+- Scoped create/controller pending response, write rejection without public/list phantom, same-slug retry/serialization, alias lifecycle ordering, same-entry and cross-entry credential ordering, both auth telemetry callers, and telemetry-failure queue release retain 232 fresh passing local tests. Three PG tests were genuinely skipped locally.
+- Formal schema assertions remain correct: V0022 entry_slug and JSONB record.status/overlapEndsAt/supersededByKeyId; held-auth identity and no-extra-write checks remain; rejected rotation retains its one durable row assertion.
+- Whole-range trailers (8 commits), scoped lint and whitespace checks pass. Hosted lint and typecheck jobs report SUCCESS.
 
 REMAINING ENTRY-R12.1 cleanup [P2, repeated remaining requirement across cf2 -> 5d801976]:
-apps/api/tests/integration/sr-partner-notify-fix-entry-20260927.integration.test.ts:381-424 still drains reloadedService telemetry ONLY inside try (:416-422). finally at :423-425 only calls onModuleDestroy.
+apps/api/tests/integration/sr-partner-notify-fix-entry-20260927.integration.test.ts:381-424 still drains reloadedService telemetry ONLY inside try (:416-422). finally at :423-425 only calls onModuleDestroy. Moving service construction inside try and changing its type to any does not implement the requested failure-path drain. Production onModuleDestroy at service.ts:1950-1959 clears timers only; it neither awaits nor cancels entrySlugMutexes. Outer finally :436-442 drains tenantService, a DIFFERENT instance, then restores query mocks; afterAll :37-40 can then close the shared DB while the reloaded service is writing.
+
+Fresh exact-candidate minimal fault diagnostic below executes the COMMITTED matrix callback without rewriting it. It injects an assertion failure at the first post-reload successful-auth identity check (failed-revoke scenario), while delaying only that reloaded service's production credential query. Actual result after the candidate's finally returns: destroyed=2 (first successful scenario plus failing reload), pendingReloadMutexes=1, unsettledTelemetry=1. The diagnostic then explicitly releases and drains everything in its own finally. Exit0 means the defect was reproduced and cleanup verified; it does not mean the candidate handles the injected failure. First exploratory diagnostic targeted the revoked-key rejection assertion instead and exited1 on a diagnostic expectation; the refined probe targets a real queued reload-auth write and is the evidence used here.
+
+Expected: every reload-auth write finishes or produces a bounded cleanup failure before the scenario exits and before mocks/database teardown. Actual: an assertion exception skips the drain, and onModuleDestroy returns while telemetry remains pending. Bounded repair: put the real reload mutex/telemetry drain in finally, with destruction in a nested finally so drain failure cannot skip timer cleanup. Keep failure-producing bounds with room before the framework deadline; current :275/:321/:419 use 5000ms, equal to the test's default 5000ms timeout, so they do not guarantee cleanup runs first. Do not suppress failure, clear pending work, or merely increase timeouts. Add/retain an assertion-failure diagnostic/regression proving no outstanding reload work remains; rerun all eight normal hosted interleavings. No production logic/scope expansion is needed.
 
 REMAINING ENTRY-R12.2 reload coverage [P2, explicitly outstanding in cf2 receipt and current task spec]:
-After rejected rotation, :364-367 correctly proves one durable row and :381-387 proves the seed still authenticates. It still never calls listPlatformPartnerIngressCredentials on the reloaded service or asserts its exact key set equals [seedKeyId].
+After rejected rotation, :364-367 correctly proves one durable row and :381-387 proves the seed still authenticates. It still never calls listPlatformPartnerIngressCredentials on the reloaded service or asserts its exact key set equals [seedKeyId]. Seed authentication alone permits an additional phantom in reloaded memory to go unnoticed. Add that exact seed-only reloaded key-set assertion alongside (not replacing) the durable one-row and auth assertions. Preserve positive rotation overlap/deadline/successor/new-key assertions and revoked-key rejection.
 
 REMAINING ENTRY-R12.3 evidence provenance [P2, same defect across adjacent cf2 -> 5d801976]:
-UAT :8 still claims CURRENT integration blob c49b57b2a1cfc51b0e2ff5e058cb228e1bee7103. Actual candidate integration blob is 986205288598078d5ba6907753f1e45c48738457; root test blob f007b9f9c353565dc83ef347512161ec87a9f94f is correct. The UAT blob is IDENTICAL on cf2 and this candidate: 81a4fbc2074d2b882092afbbbab117820fd50efa.
+UAT :8 still claims CURRENT integration blob c49b57b2a1cfc51b0e2ff5e058cb228e1bee7103. Actual candidate integration blob is 986205288598078d5ba6907753f1e45c48738457; root test blob f007b9f9c353565dc83ef347512161ec87a9f94f is correct. The UAT blob is IDENTICAL on cf2 and this candidate: 81a4fbc2074d2b882092afbbbab117820fd50efa. Thus the owner made no artifact repair. Historical receipt headings still stop at 13:08:28Z; full 13:20:04Z cf2 review and its run36427110970/job108944081765 292 PASS/1 timeout FAIL are missing. Preserve the delivered history appendix, append missing/current full receipts, distinguish old FAIL from current PASS, and correct CURRENT metadata after final hook formatting. Verify git rev-parse HEAD:<test-path> against the artifact before handoff; use an ordinary correction commit if hooks change bytes. Do not amend/rewrite history.
 
 CURRENT HOSTED EVIDENCE (completed integration job logs actually read):
 https://github.com/ajoe734/drts-fleet-platform/actions/runs/36428241534/job/108948086386
@@ -1081,5 +1200,285 @@ Formal V0021, V0022 and V0104 migrations applied successfully.
 vitest run tests/integration tests/load: 45 files,293 PASS,exit0.
 Task file sr-partner-notify-fix-entry-20260927.integration.test.ts:3 PASS in1043ms (immediate binding,lifecycle reload,all8 interleavings).
 Serial PostgreSQL UAT gates:2 files,5 PASS,exit0.
-Hosted lint job108948086209 and typecheck job108948086288 SUCCESS.
+Hosted lint job108948086209 and typecheck job108948086288 SUCCESS. Whole run was still in_progress when read; no overall CI/merge/deployment completion claimed. Read job logs using gh api --allow-escape-sequences repos/ajoe734/drts-fleet-platform/actions/jobs/108948086386/logs with ANSI removal because gh run view --log waits for the overall run.
+
+COMPLETED LOCAL CHECKS (Node22.23.2,pnpm10.33.0,Vitest4.1.4):
+A. env -u DATABASE_URL pnpm exec vitest run tests/unit/system-remediation/sr-partner-notify-fix-entry-20260927/tenant-partner-persistence.test.ts tests/unit/system-remediation/sr-partner-notify-route-20260917/partner-entry-notification-binding.service.test.ts tests/unit/system-remediation/sr-partner-notify-transport-20260918/governance.test.ts tests/security/idempotency-regression-guard.test.ts --reporter=dot => exit0,48 PASS.
+B. env -u DATABASE_URL pnpm --filter @drts/api exec vitest run tests/unit/tenant-partner.service.test.ts tests/unit/tenant-partner.controller.test.ts tests/unit/auth-bootstrap.test.ts tests/integration/int-iam-prt-001-partner-credential-lifecycle.test.ts tests/integration/sr-partner-notify-fix-entry-20260927.integration.test.ts --reporter=dot => exit0,184 PASS/3 PG SKIP.
+C. pnpm exec eslint apps/api/tests/integration/sr-partner-notify-fix-entry-20260927.integration.test.ts tests/unit/system-remediation/sr-partner-notify-fix-entry-20260927/tenant-partner-persistence.test.ts --max-warnings=0 => exit0.
+D. python3 tools/ci/git/check_commit_trailers.py --base origin/dev --head HEAD => exit0,8 commits. git diff --check origin/dev...HEAD => exit0. Final worktree clean; HEAD unchanged.
+E. Exact candidate matrix callback with query double plus failure cleanup probe below => final exit0,8 normal PASS and failure-path defect reproduced, all diagnostic operations drained. No local PG/full tsc claimed.
+
+REQUIRED ACCEPTANCE:
+- entry_response_waits_durable_write: fresh scoped PASS.
+- persistence_failure_propagated_without_phantom: fresh scoped PASS; current hosted durable matrix PASS for its committed assertions. The specifically required exact reloaded rejected-rotation key-set assertion remains absent, and failure-path test cleanup remains defective.
+- immediate_binding_after_create_hosted_pg: current candidate hosted PASS in the linked completed integration job.
+These are review evidence, not an authorization to bypass canonical record-acceptance/CI/merge gates. Original owner Gemini2 continues on v5/PR2218 with ONLY bounded test cleanup/coverage and UAT provenance repair, preserving the now-confirmed normal-path fixes. Parent full24case QA remains separate.
+
+RUNNABLE LOCALIZATION (stdin only; query response/timing fixture is not a real PG database):
+env -u DATABASE_URL TS_NODE_PROJECT=apps/api/tsconfig.json node -r ./apps/api/node_modules/ts-node/register/transpile-only - <<'REVIEW_PROBE'
+const assert = require("node:assert/strict");
+const fs = require("node:fs"), path = require("node:path"), Module = require("node:module");
+const ts = require("typescript");
+const resolve = Module._resolveFilename;
+Module._resolveFilename = function(name, ...args) {
+  return resolve.call(this, name === "@drts/contracts" ? path.resolve("packages/contracts/src/index.ts") : name, ...args);
+};
+const { TenantPartnerService: RealService } = require("./apps/api/src/modules/tenant-partner/tenant-partner.service");
+const { TenantPartnerRepository } = require("./apps/api/src/modules/tenant-partner/tenant-partner.repository");
+const { AuditNotificationService } = require("./apps/api/src/modules/audit-notification/audit-notification.service");
+const { AuditLogRepository } = require("./apps/api/src/modules/audit-notification/audit-log.repository");
+const file = "apps/api/tests/integration/sr-partner-notify-fix-entry-20260927.integration.test.ts";
+const source = fs.readFileSync(file, "utf8");
+const ast = ts.createSourceFile(file, source, ts.ScriptTarget.Latest, true);
+let matrix;
+function visit(n) {
+  if (ts.isCallExpression(n) && n.expression.getText(ast) === "it" &&
+      n.arguments[0]?.text === "should pass real formal-PG interleaving matrix") matrix = n.arguments[1];
+  ts.forEachChild(n, visit);
+}
+visit(ast); assert(matrix);
+const compiled = ts.transpileModule("const exactMatrix = " + matrix.getText(ast), {
+  compilerOptions: {target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.CommonJS}
+}).outputText;
+const turn = () => new Promise(r => setTimeout(r, 10));
+async function run(injectAssertionFailure) {
+  const entryRows = new Map(), credentialRows = new Map(), reloaded = [], heldTelemetry = [], restores = [];
+  let destroyed = 0, failureInjected = false, holdTelemetry = injectAssertionFailure;
+  function execute(sql, values) {
+    if (sql.includes("INSERT INTO admin.phase1_partner_channel_entries")) {
+      const record = JSON.parse(values[8]); entryRows.set(values[0], {entry_slug:values[0],record});
+    }
+    if (sql.includes("INSERT INTO admin.phase1_partner_ingress_credentials")) {
+      const record = JSON.parse(values[4]);
+      credentialRows.set(values[0], {key_id:values[0],entry_slug:values[1],revoked_at:values[2],record});
+    }
+    let rows = [];
+    if (sql.trim().startsWith("SELECT") && sql.includes("FROM admin.phase1_partner_channel_entries")) rows = [...entryRows.values()];
+    if (sql.trim().startsWith("SELECT") && sql.includes("FROM admin.phase1_partner_ingress_credentials")) {
+      rows = [...credentialRows.values()];
+      if (sql.includes("WHERE entry_slug")) rows = rows.filter(r => r.entry_slug === values[0]);
+    }
+    return {rows:structuredClone(rows),rowCount:rows.length || 1};
+  }
+  const database = {isEnabled:()=>true,query(sql,values) {
+    if (holdTelemetry && reloaded.some(s => s.entrySlugMutexes.size > 0) && sql.includes("INSERT INTO admin.phase1_partner_ingress_credentials"))
+      return new Promise(resolveQuery => heldTelemetry.push(() => resolveQuery(execute(sql,values))));
+    return Promise.resolve(execute(sql,values));
+  }};
+  const tenantService = new RealService(new AuditNotificationService(), new TenantPartnerRepository(database));
+  class CapturedReloadService extends RealService {
+    constructor(...args) { super(...args); reloaded.push(this); }
+    onModuleDestroy() { destroyed++; return super.onModuleDestroy(); }
+  }
+  const expect = (actual) => ({
+    toBe(expected) {
+      if (injectAssertionFailure && reloaded.some(s => s.entrySlugMutexes.size > 0) && !failureInjected) {
+        failureInjected = true;
+        throw new Error("injected post-reload identity assertion failure");
+      }
+      assert.equal(actual,expected);
+    },
+    toBeNull() {assert.equal(actual,null);},
+    toBeDefined() {assert.notEqual(actual,undefined);},
+    not: {toBeNull() {assert.notEqual(actual,null);}},
+  });
+  expect.fail = (msg) => assert.fail(msg);
+  const vi = {
+    spyOn(obj,key) { const original=obj[key]; restores.push(()=>obj[key]=original); return {mockImplementation(fn) {obj[key]=fn;}}; },
+    restoreAllMocks() {for(const restore of restores)restore();}
+  };
+  const runExact = new Function("database","tenantService","TenantPartnerRepository","TenantPartnerService","AuditNotificationService","AuditLogRepository","expect","vi",compiled+"; return exactMatrix();");
+  try {
+    let error;
+    try { await runExact(database,tenantService,TenantPartnerRepository,CapturedReloadService,AuditNotificationService,AuditLogRepository,expect,vi); }
+    catch(e) {error=e;}
+    if (injectAssertionFailure) {
+      assert.equal(error?.message,"injected post-reload identity assertion failure");
+      await turn();
+      assert.equal(destroyed,2);
+      assert.equal(reloaded[1].entrySlugMutexes.size,1);
+      assert.equal(heldTelemetry.length,1);
+      console.log(JSON.stringify({diagnostic:"EXACT candidate matrix assertion-failure cleanup",destroyed,pendingReloadMutexes:1,unsettledTelemetry:heldTelemetry.length,result:"DEFECT REPRODUCED"}));
+    } else {
+      if(error) throw error;
+      assert.equal(reloaded.length,8);
+      assert(reloaded.every(s=>s.entrySlugMutexes.size===0));
+      console.log(JSON.stringify({diagnostic:"EXACT candidate matrix with DatabaseService.query response/timing double",scenarios:reloaded.length,destroyed,result:"8 PASS; NOT PG acceptance"}));
+    }
+  } finally {
+    holdTelemetry=false;
+    heldTelemetry.forEach(finish=>finish());
+    for (const service of [tenantService,...reloaded]) {
+      await Promise.all([...service.entrySlugMutexes.values()]);
+      assert.equal(service.entrySlugMutexes.size,0);
+      await service.onModuleDestroy();
+    }
+    vi.restoreAllMocks();
+  }
+}
+(async()=>{await run(false);await run(true);console.log("All diagnostic operations cleaned up; no file edits or servers.");})().catch(e=>{console.error(e);process.exitCode=1;});
+REVIEW_PROBE
+```
+
+### ENTRY-R12 REVIEW RECEIPT (Historical b606a22a)
+
+```
+ENTRY-R14 [P2 NEW: the newly added diagnostic itself escapes with unfinished telemetry]:
+apps/api/tests/integration/sr-partner-notify-fix-entry-20260927.integration.test.ts:549-556 releases heldTelemetry through synchronous forEach and IMMEDIATELY restores mocks/returns PASS. Each callback at :493-495 calls resolve(originalQuery(...)) but returns void; releasing the gate does not await that query or production entry mutex. :536 onModuleDestroy only clears timers (service.ts:1950-1959), not pending writes. The test permanently holds the query until after its 2000ms drain throws, catches that timeout as success (:540-541), then asserts only caughtTimeoutError=true. It never proves the explicitly required zero outstanding reload work; it also duplicates cleanup code instead of exercising the matrix callback whose regression it is supposed to protect.
+
+Concrete exact-candidate reproduction (full command below): parse and run the COMMITTED diagnostic callback with production service/auth/mutex/repository, replacing ONLY DatabaseService.query responses/timing. Delay the real post-release reload credential query100ms. Callback returns successfully, all its assertions pass, but pendingReloadMutexes=1,activeQueries=1,destroyed=1. Reviewer then awaits all mutexes and verifies0 outstanding operations. Exit0 indicates successful defect reproduction/cleanup, not candidate cleanup correctness. This occurs even with a short finite write, without a DB outage.
+
+Actual path: diagnostic auth :515 -> authenticatePartnerBootstrap service.ts:5577 -> runWithEntryMutex :1348 -> persistChangesRequired -> repository credential INSERT -> diagnostic heldTelemetry callback -> unawaited originalQuery. afterAll :37-40 can start database teardown after the test passes while this work remains outstanding.
+Expected: the diagnostic/finally ends only after delayed work finishes (or reports a genuine bounded failure), and verifies no outstanding operations. Actual: expected timeout is accepted as PASS while the released write remains active.
+Bounded repair: preserve the now-correct main matrix; repair ONLY this diagnostic. Release controlled finite telemetry before the bounded drain completes, exercise the actual matrix/shared cleanup path, observe original assertion failure and verify0 pending mutexes/queries before restoring mocks/DB teardown. If retaining a separate timeout-bound case, its outer finally must release AND await all controlled work before it passes, and assert destruction/zero pending work. Merely awaiting void-returning forEach/finish is insufficient: retain query completion promises or await the service mutex chain. Keep bounds below framework deadline and genuine errors visible. No production changes/scope expansion needed.
+
+ENTRY-R12.3 [P2 remaining repeated evidence omission across5d -> b606; hash portion fixed]:
+Task spec explicitly requires FULL cf2 and5d receipts. UAT :1043-1057 appends only cf2 R12.3/hosted result, omitting its R12.1/R12.2 localization, command/results and runnable diagnostic. :1059-1085 appends abridged5d text, omitting its exact assertion-failure probe, detailed cleanup repair boundary and current local checks. Compare the supplied complete sources:
+ /home/lupin/workspace/drts-fleet-platform/.local/product-qa-supervision-20260928/entry-cf2e4f97-review.md
+ /home/lupin/workspace/drts-fleet-platform/.local/product-qa-supervision-20260928/entry-5d801976-review.md
+The old5d UAT omitted these receipts entirely; current adds excerpts only. This is the same incomplete provenance requirement, not a renewed hash defect. Supervisor should verify this bounded repair under Guide0.7 before resubmission. Append full fenced receipts verbatim (including runnable probes) and this one in the ORIGINAL artifact; preserve current correct hashes and earlier history. Add current repair/result mapping and label184 PASS/4 PG SKIP for this candidate rather than stale3. Recompute hashes after final hooks if test bytes change. No need for speculative new evidence or another production redesign.
+
+CURRENT HOSTED EVIDENCE (completed job logs actually read):
+https://github.com/ajoe734/drts-fleet-platform/actions/runs/36430899192/job/108956709331
+Run head_sha=b606a22a30162f16b08e59d051ff5ddd015b11cd; checkout39f23c1 merges this candidate into base3da15e89f4abd96f3887cea00f8538a76fab20de (CI merge ref is NOT candidate identity).
+Formal V0021,V0022,V0104 migrations applied successfully.
+API vitest tests/integration tests/load:45 files,294 PASS,exit0.
+Task integration file:4 PASS,3061ms (includes the diagnostic whose missing assertions are independently shown above).
+Serial PostgreSQL UAT gates:2 files,5 PASS,exit0.
+Hosted lint,typecheck,Commit trailers SUCCESS. Other overall-CI jobs still IN_PROGRESS at final check; not reviewer-started. No overall CI/merge/deployment completion claimed.
+
+COMPLETED LOCAL CHECKS (Node22.23.2,pnpm10.33.0,Vitest4.1.4):
+A. env -u DATABASE_URL pnpm exec vitest run tests/unit/system-remediation/sr-partner-notify-fix-entry-20260927/tenant-partner-persistence.test.ts tests/unit/system-remediation/sr-partner-notify-route-20260917/partner-entry-notification-binding.service.test.ts tests/unit/system-remediation/sr-partner-notify-transport-20260918/governance.test.ts tests/security/idempotency-regression-guard.test.ts --reporter=dot => exit0,48 PASS.
+B. env -u DATABASE_URL pnpm --filter @drts/api exec vitest run tests/unit/tenant-partner.service.test.ts tests/unit/tenant-partner.controller.test.ts tests/unit/auth-bootstrap.test.ts tests/integration/int-iam-prt-001-partner-credential-lifecycle.test.ts tests/integration/sr-partner-notify-fix-entry-20260927.integration.test.ts --reporter=dot => exit0,184 PASS/4 PG SKIP.
+C. pnpm exec eslint apps/api/tests/integration/sr-partner-notify-fix-entry-20260927.integration.test.ts tests/unit/system-remediation/sr-partner-notify-fix-entry-20260927/tenant-partner-persistence.test.ts --max-warnings=0 => exit0.
+D. python3 tools/ci/git/check_commit_trailers.py --base origin/dev --head HEAD => exit0,10 commits. git diff --check origin/dev...HEAD => exit0. Final HEAD unchanged/worktree clean.
+E. Below exact-callback probe => exit0:8 normal PASS; old5d fault reproduced; current main-matrix fault cleanup fixed; NEW diagnostic returns with1 unfinished write/mutex. All reviewer probe work subsequently drained. Query fixture is NOT PG acceptance. No local full tsc/PG run claimed.
+
+REQUIRED ACCEPTANCE evidence, separate from lifecycle recording:
+entry_response_waits_durable_write: fresh scoped PASS.
+persistence_failure_propagated_without_phantom: fresh scoped PASS and actual current hosted durable/reload matrix PASS, including exact rejected-rotation key set.
+immediate_binding_after_create_hosted_pg: current candidate hosted PASS at linked completed integration job.
+Review remains REOPEN for the new diagnostic defect and specifically required complete provenance. Owner Gemini continues ONLY bounded integration-test/UAT repair on v5/PR2218; preserve product fixes. Parent full24case QA remains separate.
+
+RUNNABLE EXACT-CALLBACK PROBE (stdin only, no candidate edits):
+env -u DATABASE_URL TS_NODE_PROJECT=apps/api/tsconfig.json node -r ./apps/api/node_modules/ts-node/register/transpile-only - <<'REVIEW_PROBE'
+const assert = require("node:assert/strict");
+const fs = require("node:fs"), path = require("node:path"), Module = require("node:module"), cp = require("node:child_process");
+const ts = require("typescript");
+const resolve = Module._resolveFilename;
+Module._resolveFilename = function(name, ...args) {
+  return resolve.call(this, name === "@drts/contracts" ? path.resolve("packages/contracts/src/index.ts") : name, ...args);
+};
+const { TenantPartnerService: RealService } = require("./apps/api/src/modules/tenant-partner/tenant-partner.service");
+const { TenantPartnerRepository } = require("./apps/api/src/modules/tenant-partner/tenant-partner.repository");
+const { AuditNotificationService } = require("./apps/api/src/modules/audit-notification/audit-notification.service");
+const { AuditLogRepository } = require("./apps/api/src/modules/audit-notification/audit-log.repository");
+const file = "apps/api/tests/integration/sr-partner-notify-fix-entry-20260927.integration.test.ts";
+const turn = () => new Promise(r => setTimeout(r, 10));
+function compile(source, title) {
+  const ast = ts.createSourceFile(file, source, ts.ScriptTarget.Latest, true);
+  let callback;
+  function visit(n) {
+    if (ts.isCallExpression(n) && n.expression.getText(ast) === "it" && n.arguments[0]?.text === title) callback = n.arguments[1];
+    ts.forEachChild(n, visit);
+  }
+  visit(ast); assert(callback);
+  return ts.transpileModule("const exactCallback = " + callback.getText(ast), {
+    compilerOptions: {target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.CommonJS}
+  }).outputText;
+}
+async function run(version, diagnostic, injectFailure) {
+  const source = version === "HEAD" ? fs.readFileSync(file, "utf8") : cp.execFileSync("git", ["show",version+":"+file], {encoding:"utf8"});
+  const compiled = compile(source, diagnostic ? "diagnostic: should drain correctly even on assertion failure" : "should pass real formal-PG interleaving matrix");
+  const entryRows = new Map(), credentialRows = new Map(), reloaded = [], restores = [];
+  let destroyed = 0, failureInjected = false, activeQueries = 0;
+  function execute(sql, values) {
+    if (sql.includes("INSERT INTO admin.phase1_partner_channel_entries")) {
+      entryRows.set(values[0], {entry_slug:values[0],record:JSON.parse(values[8])});
+    }
+    if (sql.includes("INSERT INTO admin.phase1_partner_ingress_credentials")) {
+      credentialRows.set(values[0], {key_id:values[0],entry_slug:values[1],revoked_at:values[2],record:JSON.parse(values[4])});
+    }
+    let rows = [];
+    if (sql.trim().startsWith("SELECT") && sql.includes("FROM admin.phase1_partner_channel_entries")) rows = [...entryRows.values()];
+    if (sql.trim().startsWith("SELECT") && sql.includes("FROM admin.phase1_partner_ingress_credentials")) {
+      rows = [...credentialRows.values()];
+      if (sql.includes("WHERE entry_slug")) rows = rows.filter(r => r.entry_slug === values[0]);
+    }
+    return {rows:structuredClone(rows),rowCount:rows.length || 1};
+  }
+  const database = {isEnabled:()=>true,query(sql,values) {
+    if ((diagnostic || injectFailure) && reloaded.some(s => s.entrySlugMutexes.size > 0) && sql.includes("INSERT INTO admin.phase1_partner_ingress_credentials")) {
+      activeQueries++;
+      return new Promise(resolveQuery => setTimeout(() => {
+        activeQueries--; resolveQuery(execute(sql,values));
+      }, 100));
+    }
+    return Promise.resolve(execute(sql,values));
+  }};
+  const tenantService = new RealService(new AuditNotificationService(), new TenantPartnerRepository(database));
+  class CapturedReloadService extends RealService {
+    constructor(...args) { super(...args); reloaded.push(this); }
+    onModuleDestroy() { destroyed++; return super.onModuleDestroy(); }
+  }
+  const expect = (actual) => ({
+    toBe(expected) {
+      if (injectFailure && reloaded.some(s => s.entrySlugMutexes.size > 0) && !failureInjected) {
+        failureInjected = true;
+        throw new Error("injected post-reload identity assertion failure");
+      }
+      assert.equal(actual,expected);
+    },
+    toBeNull() {assert.equal(actual,null);},
+    toBeDefined() {assert.notEqual(actual,undefined);},
+    not: {toBeNull() {assert.notEqual(actual,null);}},
+  });
+  expect.fail = (msg) => assert.fail(msg);
+  const vi = {
+    spyOn(obj,key) { const original=obj[key]; restores.push(()=>obj[key]=original); return {mockImplementation(fn) {obj[key]=fn;}}; },
+    restoreAllMocks() {for(const restore of restores)restore();}
+  };
+  const runExact = new Function("database","tenantService","TenantPartnerRepository","TenantPartnerService","AuditNotificationService","AuditLogRepository","expect","vi",compiled+"; return exactCallback();");
+  try {
+    let error;
+    try { await runExact(database,tenantService,TenantPartnerRepository,CapturedReloadService,AuditNotificationService,AuditLogRepository,expect,vi); }
+    catch(e) {error=e;}
+    const pending = () => reloaded.reduce((n,s)=>n+s.entrySlugMutexes.size,0);
+    if (diagnostic) {
+      if (error) throw error;
+      assert.equal(pending(),1);
+      assert.equal(activeQueries,1);
+      assert.equal(destroyed,1);
+      console.log(JSON.stringify({version,diagnostic:"EXACT committed diagnostic returns PASS",pendingReloadMutexes:pending(),activeQueries,destroyed,result:"DEFECT: test returns with outstanding write"}));
+    } else if (injectFailure) {
+      assert.equal(error?.message,"injected post-reload identity assertion failure");
+      await turn();
+      assert.equal(destroyed,2);
+      assert.equal(pending(),version==="HEAD" ? 0 : 1);
+      assert.equal(activeQueries,version==="HEAD" ? 0 : 1);
+      console.log(JSON.stringify({version,diagnostic:"EXACT matrix assertion failure with 100ms reload query",pendingReloadMutexes:pending(),activeQueries,destroyed,result:version==="HEAD"?"FIX VERIFIED":"OLD DEFECT REPRODUCED"}));
+    } else {
+      if(error) throw error;
+      assert.equal(reloaded.length,8); assert.equal(pending(),0); assert.equal(destroyed,8);
+      console.log(JSON.stringify({version,diagnostic:"EXACT matrix normal path",scenarios:8,pendingReloadMutexes:pending(),destroyed,result:"PASS; NOT PG acceptance"}));
+    }
+  } finally {
+    for (const service of [tenantService,...reloaded]) {
+      await Promise.all([...service.entrySlugMutexes.values()]);
+      assert.equal(service.entrySlugMutexes.size,0);
+      await service.onModuleDestroy();
+    }
+    assert.equal(activeQueries,0);
+    vi.restoreAllMocks();
+  }
+}
+(async()=>{
+  await run("HEAD",false,false);
+  await run("5d801976f4557032e607772a3482fe3c37b49731",false,true);
+  await run("HEAD",false,true);
+  await run("HEAD",true,false);
+  console.log("All diagnostic operations drained; no file edits, servers or PG acceptance.");
+})().catch(e=>{console.error(e);process.exitCode=1;});
+REVIEW_PROBE
 ```
