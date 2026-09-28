@@ -32,4 +32,4 @@ The E2E022 test initially failed with `daily rebuild count expected 3, got 2` at
 --- Running scenario: order/complaint split ---
 All boundary tests passed!
 ```
-- [ ] `hosted_cross_surface_e2e_pass`: PENDING (hosted CI will be re-run after the compliant commit structure is recovered).
+- [x] `hosted_cross_surface_e2e_pass`: SATISFIED (https://github.com/ajoe734/drts-fleet-platform/actions/runs/36362884258)
