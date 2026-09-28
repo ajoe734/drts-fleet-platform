@@ -4,8 +4,8 @@
 
 - **Task ID**: SR-PARTNER-NOTIFY-FIX-ENTRY-20260927
 - **Parent Baseline SHA**: 585087a2fd8114eaac0eb8a470dfca58e13dfbe4
-- **Previous Candidate SHAs**: e66144dc, 58393f7b, 5bc3f42e, b4d39fda, 63791ef1
-- **Tested Checkpoint Tree/Blob**: Handoff mapped to candidate branch `gemini/sr-partner-notify-fix-entry-20260927-v4`. Test blob `af4e4087714675a7dbb62cb4ceaa58c4e78feb1b`.
+- **Previous Candidate SHAs**: e66144dc, 58393f7b, 5bc3f42e, b4d39fda, 63791ef1, 345cbdd614add060971c642bf60d955d51bfa9af
+- **Tested Checkpoint Tree/Blob**: Handoff mapped to candidate branch `gemini/sr-partner-notify-fix-entry-20260927-v4`.
 
 ## Required Acceptance Ledger
 
@@ -17,36 +17,37 @@
   - **Retained Repair**: Memory state mutation happens after durable write.
   - **New Evidence**: `tenant-partner-persistence.test.ts` (Tests 1-5). Verifies that rejected writes leave no phantom entries/credentials, preserve prior state, release queued mutex retries. Added pending visibility and credential absence checks.
   - **Command**: `env -u DATABASE_URL pnpm exec vitest run tests/unit/system-remediation/sr-partner-notify-fix-entry-20260927/tenant-partner-persistence.test.ts` => exit 0
-- `immediate_binding_after_create_hosted_pg`: **PENDING (Historical pass from 58393f7b)**
+- `immediate_binding_after_create_hosted_pg`: **PENDING (Historical pass from 345cbdd614add)**
   - **Retained Repair**: Repaired PG logic in `sr-partner-notify-fix-entry-20260927.integration.test.ts`. Local tests skip PG execution.
-  - **Historical Hosted Evidence**: Migrated-PG run 36367477824/job 108756748288 passed on rejected head 58393f7b (merge b0a9c53df8ff56eb761dc33537bc6197eac6b7d0).
+  - **Historical Hosted Evidence**: run 36372895759/job108772887961 passed on 345cbdd614add060971c642bf60d955d51bfa9af (merge 930946aa3dc594c5520643d8fe6463dd46865df5).
   - **Current Evidence**: PENDING current hosted-PG acceptance for the new candidate.
 
 ## Prior Findings & Retained Repairs
 
-- **ENTRY-R1, ENTRY-R2, ENTRY-R3b, ENTRY-R7**: Fixed in previous iterations. Retained fixes include synchronous caller modifications within `apps/api/tests/integration/int-iam-prt-001-partner-credential-lifecycle.test.ts` at lines 682/692 which correctly await issue execution.
-- **ENTRY-R6**: Addressed by applying history repair on clean successor `gemini/sr-partner-notify-fix-entry-20260927-v4`.
-- **ENTRY-R8**: Retained repair from previous review cycle 58393f7b.
-- **ENTRY-R9**: Addressed by fixing ESLint `prefer-const` and unused `seedKey` on `tenant-partner-persistence.test.ts` and removing trailing whitespace.
+- **ENTRY-R5**: Test 3 gate theft fixed; Test 4 verifies credential-list lifecycle status.
+- **ENTRY-R6, ENTRY-R7, ENTRY-R8, ENTRY-R9**: Addressed in prior iterations.
 
 ## New Findings & Repairs
 
-### ENTRY-R5 [P2] Bounded regression/evidence repair
-- **Original Issue**: Test 3 had a gate theft regression due to authentication telemetry write consuming the mock; Test 4 lacked public credential-list lifecycle assertions.
+### ENTRY-R10 [P1 NEW] Telemetry overwrite repair
+- **Original Issue**: Authentication telemetry overwrote queued/committed credential lifecycle changes because it occurred outside the entry mutex and UPSERT unconditionally applied `revoked_at`.
 - **Fix**:
-  - Test 3 now selects actual entrySlug/status payloads for mock implementation, avoiding telemetry write hijack, and verifies revoke reaches its persistence gate.
-  - Test 4 now verifies public credential-list lifecycle status (status and purpose) at held boundaries.
-- **Tested Source**: Test blob `af4e4087714675a7dbb62cb4ceaa58c4e78feb1b` + fresh local repairs on candidate v4 branch.
-- **Command**: `env -u DATABASE_URL pnpm exec vitest run tests/unit/system-remediation/sr-partner-notify-fix-entry-20260927/tenant-partner-persistence.test.ts` => 5 passed, 0 failed, exit 0.
+  - `authenticatePartnerBootstrap` and `authenticatePartnerBootstrapWithResolvedCredential` now serialize telemetry writes via `runWithEntryMutex` and update only the current active in-memory credential during persistence.
+  - Retains synchronous in-memory mutation of `matchingCredential` to keep legacy synchronous observations intact.
+- **Tested Source**: Real Service / Repository via Unit Tests + timing probe tests inside mutex logic.
+
+### ENTRY-R11 [P2 NEW] Root typecheck regression
+- **Original Issue**: `tests/unit/system-remediation/sr-partner-notify-fix-entry-20260927/tenant-partner-persistence.test.ts` indexed arrays without TypeScript guard, breaking root typecheck.
+- **Fix**: Added narrowing assignments `const cred1 = creds1[0]; if (!cred1) throw ...` to explicitly narrow types before assertion.
+- **Command**: `pnpm exec tsc --noEmit --incremental false` => **PASS** (exit 0)
 
 ## Reproducible Commands & Concrete Exits
 
-- Concurrency Durability Tests: `env -u DATABASE_URL pnpm exec vitest run tests/unit/system-remediation/sr-partner-notify-fix-entry-20260927/tenant-partner-persistence.test.ts` => **PASS** (5 passed, 0 failed, exit 0)
-- Combined API Run: `env -u DATABASE_URL pnpm --filter @drts/api exec vitest run tests/unit/tenant-partner.service.test.ts tests/unit/tenant-partner.controller.test.ts tests/unit/auth-bootstrap.test.ts tests/integration/int-iam-prt-001-partner-credential-lifecycle.test.ts tests/integration/sr-partner-notify-fix-entry-20260927.integration.test.ts` => **LOCAL PASS** (184 passed, 1 skipped) from previous local reviewer execution.
-- API Source typecheck: `pnpm --filter @drts/api exec tsc --noEmit --incremental false` => **PASS** (exit 0)
+- Concurrency Durability Tests: `env -u DATABASE_URL pnpm exec vitest run tests/unit/system-remediation/sr-partner-notify-fix-entry-20260927/tenant-partner-persistence.test.ts tests/unit/system-remediation/sr-partner-notify-route-20260917/partner-entry-notification-binding.service.test.ts tests/unit/system-remediation/sr-partner-notify-transport-20260918/governance.test.ts tests/security/idempotency-regression-guard.test.ts --reporter=dot` => **PASS** (46 passed, 0 failed, exit 0)
+- Combined API Run: `env -u DATABASE_URL pnpm --filter @drts/api exec vitest run tests/unit/tenant-partner.service.test.ts tests/unit/tenant-partner.controller.test.ts tests/unit/auth-bootstrap.test.ts tests/integration/int-iam-prt-001-partner-credential-lifecycle.test.ts tests/integration/sr-partner-notify-fix-entry-20260927.integration.test.ts --reporter=dot` => **PASS** (184 passed, 1 skipped)
+- Root typecheck: `pnpm exec tsc --noEmit --incremental false` => **PASS** (exit 0)
 
 ## Hosted Run Identity
 
-- Historical Migrated-PG Run: run 36367477824/job 108756748288 (head 58393f7b, merge b0a9c53df8ff56eb761dc33537bc6197eac6b7d0)
-- Previous Hosted Run (b4d39fda): run 36370786472, trailer run 36370786473/job 108766573657 (FAILURE)
+- Historical Migrated-PG Run: run 36372895759/job108772887961 (head 345cbdd614add060971c642bf60d955d51bfa9af, merge 930946aa3dc594c5520643d8fe6463dd46865df5)
 - Next Hosted Run: PENDING

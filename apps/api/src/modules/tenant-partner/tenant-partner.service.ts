@@ -5555,6 +5555,7 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
       keyId: matchingCredential.keyId,
     });
     const previousLastUsedAt = matchingCredential.lastUsedAt;
+
     matchingCredential.lastUsedAt = new Date().toISOString();
     matchingCredential.lastUsedWorkload = "partner_bootstrap";
     matchingCredential.signals = this.buildCredentialSignals(
@@ -5563,6 +5564,7 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
       matchingCredential.autoRevokedAt ?? null,
       matchingCredential.lastUsedAt,
     );
+
     this.maybeRecordDormantCredentialUse({
       tenantId: entry.tenantId,
       channel: "ops_notice",
@@ -5571,14 +5573,30 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
       previousLastUsedAt,
       createdAt: matchingCredential.createdAt,
     });
-    this.persistChanges(
-      {
-        partnerIngressCredentials: [
-          this.cloneStoredPartnerIngressCredential(matchingCredential),
-        ],
-      },
-      "authenticate_partner_bootstrap",
-    );
+
+    void this.runWithEntryMutex(entry.entrySlug, async () => {
+      const current = this.partnerIngressCredentials.find(
+        (c) => c.entrySlug === entry.entrySlug && c.keyId === matchingCredential.keyId
+      );
+      if (!current) return;
+
+      current.lastUsedAt = matchingCredential!.lastUsedAt;
+      current.lastUsedWorkload = "partner_bootstrap";
+      if (matchingCredential!.signals) {
+        current.signals = matchingCredential!.signals;
+      }
+
+      await this.persistChangesRequired(
+        {
+          partnerIngressCredentials: [
+            this.cloneStoredPartnerIngressCredential(current),
+          ],
+        },
+        "authenticate_partner_bootstrap",
+      );
+    }).catch(() => {
+      // Best-effort telemetry; failures are logged by persistChangesRequired.
+    });
 
     return {
       partnerEntry: this.clonePartnerEntry(entry),
@@ -5633,6 +5651,7 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
       authSource: "internal_resolved_credential",
     });
     const previousLastUsedAt = credential.lastUsedAt;
+
     credential.lastUsedAt = new Date().toISOString();
     credential.lastUsedWorkload = "internal_resolved_credential";
     credential.signals = this.buildCredentialSignals(
@@ -5641,6 +5660,7 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
       credential.autoRevokedAt ?? null,
       credential.lastUsedAt,
     );
+
     this.maybeRecordDormantCredentialUse({
       tenantId: entry.tenantId,
       channel: "ops_notice",
@@ -5649,14 +5669,30 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
       previousLastUsedAt,
       createdAt: credential.createdAt,
     });
-    this.persistChanges(
-      {
-        partnerIngressCredentials: [
-          this.cloneStoredPartnerIngressCredential(credential),
-        ],
-      },
-      "authenticate_partner_bootstrap_internal",
-    );
+
+    void this.runWithEntryMutex(entry.entrySlug, async () => {
+      const current = this.partnerIngressCredentials.find(
+        (c) => c.entrySlug === entry.entrySlug && c.keyId === credential.keyId
+      );
+      if (!current) return;
+
+      current.lastUsedAt = credential!.lastUsedAt;
+      current.lastUsedWorkload = "internal_resolved_credential";
+      if (credential!.signals) {
+        current.signals = credential!.signals;
+      }
+
+      await this.persistChangesRequired(
+        {
+          partnerIngressCredentials: [
+            this.cloneStoredPartnerIngressCredential(current),
+          ],
+        },
+        "authenticate_partner_bootstrap_internal",
+      );
+    }).catch(() => {
+      // Best-effort telemetry; failures are logged by persistChangesRequired.
+    });
 
     return {
       partnerEntry: this.clonePartnerEntry(entry),

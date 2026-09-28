@@ -425,8 +425,10 @@ describe("SR-PARTNER-NOTIFY-FIX-ENTRY-20260927: TenantPartnerService entry durab
     expect(issue3Resolved).toBe(false);
     const creds1 = service.listPlatformPartnerIngressCredentials("failed-revoke-slug");
     expect(creds1.length).toBe(1);
-    expect(creds1[0].purpose).toBe("seed");
-    expect(creds1[0].status).toBe("active");
+    const cred1 = creds1[0];
+    if (!cred1) throw new Error("Missing credential");
+    expect(cred1.purpose).toBe("seed");
+    expect(cred1.status).toBe("active");
     expect(service.authenticatePartnerBootstrap({ entrySlug: "failed-revoke-slug", apiKey: seedKey }, "r").partnerEntry.entrySlug).toBe("failed-revoke-slug");
 
     deferRevoke3.reject(new Error("Revoke failed"));
@@ -437,8 +439,10 @@ describe("SR-PARTNER-NOTIFY-FIX-ENTRY-20260927: TenantPartnerService entry durab
     expect(issue3Resolved).toBe(false);
     const creds2 = service.listPlatformPartnerIngressCredentials("failed-revoke-slug");
     expect(creds2.length).toBe(1);
-    expect(creds2[0].purpose).toBe("seed");
-    expect(creds2[0].status).toBe("active");
+    const cred2 = creds2[0];
+    if (!cred2) throw new Error("Missing credential");
+    expect(cred2.purpose).toBe("seed");
+    expect(cred2.status).toBe("active");
     expect(service.authenticatePartnerBootstrap({ entrySlug: "failed-revoke-slug", apiKey: seedKey }, "r").partnerEntry.entrySlug).toBe("failed-revoke-slug");
 
     deferIssue3.resolve();
