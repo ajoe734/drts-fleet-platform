@@ -70,8 +70,11 @@ Recheck that condition and remote heads before execution.
 The only latest parent changes to carry from `e66144dc` to `58393f7b` are:
 
 1. `apps/api/tests/integration/int-iam-prt-001-partner-credential-lifecycle.test.ts`
-2. `docs/04-uat/system-remediation-20260906/SR-PARTNER-NOTIFY-FIX-ENTRY-20260927.md`
-3. `tests/unit/system-remediation/sr-partner-notify-fix-entry-20260927/tenant-partner-persistence.test.ts`
+2. [docs/04-uat/system-remediation-20260906/SR-PARTNER-NOTIFY-FIX-ENTRY-20260927.md at the source candidate](https://github.com/ajoe734/drts-fleet-platform/blob/58393f7b8cd1d23c357ac63d586e65595c0a955a/docs/04-uat/system-remediation-20260906/SR-PARTNER-NOTIFY-FIX-ENTRY-20260927.md)
+3. [tests/unit/system-remediation/sr-partner-notify-fix-entry-20260927/tenant-partner-persistence.test.ts at the source candidate](https://github.com/ajoe734/drts-fleet-platform/blob/58393f7b8cd1d23c357ac63d586e65595c0a955a/tests/unit/system-remediation/sr-partner-notify-fix-entry-20260927/tenant-partner-persistence.test.ts)
+
+The two linked files exist only on the parent candidate, not this helper's
+base. The pinned source links distinguish that identity from a local-path claim.
 
 **Do not apply the unrestricted `e66144dc..58393f7b` tree diff.** It also
 reverts unrelated owned-mobility/notification-transport changes and deletes
@@ -215,6 +218,30 @@ Concrete parent next step:
 | Task-scoped canonical delivery         | Report-only commit / normal push / PR to be recorded below.                                                                                | Candidate not yet handed off.                                                             |
 | Update parent concrete next step       | PENDING: parent note rejected exit 1; own `progress` contains exact operator request.                                                      | Supervisor canonical parent write required; prose alone does not satisfy this acceptance. |
 | Product unit/type/PG/browser execution | NOT RUN in this documentation helper. Existing hosted results are historical references.                                                   | No claim that unrepaired ENTRY-R5 is verified.                                            |
+
+### Published checkpoint and completed checks
+
+Anchor `666ef3075957b46a386de35dbe192aaf7f2d9fcc` was normally pushed to the
+helper branch and matched the remote and draft
+[PR #2212](https://github.com/ajoe734/drts-fleet-platform/pull/2212) head.
+The follow-up report commit records these results and corrects two historical
+file references; its exact final SHA is recorded in the helper's canonical
+blocker and PR head, not invented inside its own commit.
+
+| Command / execution identity                                                                                                                             | Completed result                                                                                                                       |
+| -------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------- |
+| Python 3.12.3: `python3 .local/entry-history-repair/rehearse.py`                                                                                         | Exit 0; both recovery trees match; actual HEAD/index/worktree unchanged.                                                               |
+| `python3 tools/ci/git/check_commit_trailers.py --base origin/dev --head HEAD` on anchor                                                                  | Exit 0; one task commit OK.                                                                                                            |
+| `git diff --check origin/dev...HEAD` and task-only changed-path inspection on anchor                                                                     | Exit 0; only this report changed.                                                                                                      |
+| Node 22.23.2 / Prettier 3.8.2: report `--check`, invoked directly from the existing shared `.pnpm/prettier@3.8.2/node_modules/prettier/bin/prettier.cjs` | Exit 0; no install or shared symlink repair.                                                                                           |
+| Anchor hosted [Canonical consistency](https://github.com/ajoe734/drts-fleet-platform/actions/runs/36369179760/job/108761630120)                          | FAILURE, exit 1: two parent-only paths cited as local files. Completed job log read; corrected above to immutable source-commit links. |
+
+The canonical consistency command is
+`python3 tools/ci/git/check_canonical_consistency.py --ci --base origin/dev --head HEAD`.
+It is rerun locally on the corrected report with formatter, whitespace and
+full-range trailers before final publication. The anchor's failed result is
+retained; hosted checks on a subsequent head are separate evidence. No helper
+CI failure is attributed to unrelated debt, and no full-CI pass is claimed.
 
 The report remains an owner checkpoint until the parent update and helper
 disposition are present in machine truth. Do not call `done`; once those
