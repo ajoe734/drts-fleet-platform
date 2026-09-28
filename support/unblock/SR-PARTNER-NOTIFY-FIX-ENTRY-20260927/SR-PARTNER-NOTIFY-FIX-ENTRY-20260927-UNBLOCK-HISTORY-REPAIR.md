@@ -1,14 +1,24 @@
 # SR-PARTNER-NOTIFY-FIX-ENTRY-20260927 history repair
 
-Audit: 2026-09-28 UTC. Helper owner/reviewer: Codex / Codex2.
+Audit: 2026-09-28 UTC; operator follow-up verified at 02:31:31Z.
+Helper owner/reviewer: Codex / Codex2.
 Parent owner/reviewer: Gemini / Codex. This helper changes only this report.
 
 **Disposition:** the history defect is reproduced and a non-destructive repair
-is rehearsed. Parent routing/scope and its canonical next-step update still
-require Supervisor action. Do not auto-resume the old branch or treat this
-report as parent product approval. No published parent refs were changed.
+is rehearsed. Supervisor has completed the routing, scope, dependency and
+canonical next-step actions. The parent is now `in_progress` with Gemini on
+the existing clean successor / PR #2207. This helper's recorded disposition
+is `resolved_parent_status=todo`, `resolved_parent_waiting_for=null`; the former
+blocked/Claude request is historical and superseded. The parent may advance
+independently. This report is ready for fresh Codex2 review on existing PR
+#2212; it does not approve the parent's product findings. No parent refs or
+product files were changed by this helper.
 
-## Exact contamination and routing evidence
+## Exact contamination and original routing evidence
+
+The following identity table records the initial audit before the authorized
+02:28Z operator action. Pinned commits remain reproducible; live owner refs
+may advance and must not be reset to this snapshot.
 
 | Identity                                                                                    | Verified value                                                                                                                                                                                                                                 |
 | ------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -44,28 +54,37 @@ exit 0). Completed hosted results agree: old
 clean successor
 [trailer job SUCCESS](https://github.com/ajoe734/drts-fleet-platform/actions/runs/36366022289/job/108752501183).
 
-Parent machine truth has **no `execution_branch`**. The current release's
+At the initial audit, parent machine truth had **no `execution_branch`**. The current release's
 `control_plane/runtime/supervisor_runtime.py::_execution_branch` (lines 885–913)
 uses the lane/task default in that case. For Gemini this selects the original
 `gemini/sr-partner-notify-fix-entry-20260927`, not the clean successor. Thus
-creating another clean PR without recording routing leaves a path back to
-the invalid ancestry. This is a verified current routing condition, not an
-assertion about an unobserved historical dispatch.
+creating another clean PR without recording routing left a path back to
+the invalid ancestry. The missing metadata was verified then; it is corrected
+by the operator receipt below. This does not assert an unobserved historical
+dispatch.
 
-At audit, `git worktree list --porcelain` contains no parent owner worktree
+At the initial audit, `git worktree list --porcelain` contained no parent owner worktree
 for the original, `-fix`, `-v2`, or `-v3` branches. The assigned helper cwd was
-retained throughout. Shared `node_modules` still contains dangling links into
+retained throughout. Shared `node_modules` then contained dangling links into
 the removed `gemini-sr-partner-notify-fix-entry-20260927-2/node_modules`, including
 Vitest, TypeScript, and lint-staged. This is separate dependency provisioning
-work; no shared links, installs, or product runtime were changed here.
+work; no shared links, installs, or product runtime were changed by this helper.
+At follow-up, an owner worktree exists at the canonical root's
+`.artifacts/worktrees/auto/gemini-sr-partner-notify-fix-entry-20260927` on the
+recorded `-fix` branch. Vitest, TypeScript and Prettier version commands now
+resolve successfully (versions below). This confirms tool resolution, not
+parent test results.
 
 ## Verified non-destructive recovery
 
-Prefer reusing the existing clean successor and PR #2207 after Supervisor
-records `execution_branch=gemini/sr-partner-notify-fix-entry-20260927-fix`.
-There is no active locked parent candidate: its status is `blocked`, its
-candidate SHA is cleared, and the latest review reopened `58393f7b`.
-Recheck that condition and remote heads before execution.
+Supervisor has recorded
+`execution_branch=gemini/sr-partner-notify-fix-entry-20260927-fix`, reusing the
+existing clean successor and PR #2207. At the original rehearsal, the parent
+was `blocked` with no locked candidate after review reopened `58393f7b`.
+The follow-up snapshot is `in_progress` without a locked candidate. The
+original owner must recheck live status and remote heads before recovery;
+the commands below preserve the audited input identities, not a requirement
+to move an advancing branch back.
 
 The only latest parent changes to carry from `e66144dc` to `58393f7b` are:
 
@@ -97,19 +116,28 @@ Two independent temporary-index constructions were compared:
 
 This proves content preservation and applicability, not passing parent tests.
 Git trees are not candidate commits. No branch or worktree was created for
-this rehearsal and no parent file was edited. Machine-specific evidence is
-under this helper cwd's `.local/entry-history-repair/`:
+this rehearsal and no parent file was edited. The original run recorded
+machine-specific evidence under `.local/entry-history-repair/`:
 
 - `rehearse.py` and `rehearsal.json` (Python 3, exit 0).
 - `successor-three-files.patch`, SHA-256 `3df08eee4157a3f373a55cf2144d260563e2e3668303539af7917ebc7485b798`.
 - `parent-nine-files.patch`, SHA-256 `59ef582e9d7dd09b8ad1c5388031b975d754ba5245fd5dcad9f2641751884837`.
 - `parent-status.json`, read-only single-task snapshot including review receipts.
 
-### Owner execution after Supervisor routing/scope correction
+The resumed cwd no longer contains that original evidence directory. A fresh
+Python 3.12.3 run of `.local/entry-history-repair-resume/verify.py` at 02:31:31Z
+reconstructed both patches and temporary-index trees from the pinned Git
+objects, with identical hashes and trees above, exit 0. It also checked the
+operator receipt and parent/helper task snapshots. Fresh evidence in that
+directory is `verification.json`, both patch files, `old-trailers.log`,
+`clean-trailers.log`, `operator-actions.json`, `parent-status.json` and
+`helper-status.json`. HEAD, real index and working tree were unchanged.
+
+### Original owner recovery recipe (pinned inputs)
 
 These commands are a documented next step, **not executed product mutations**.
-Supervisor must reuse/create an isolated owner worktree for the recorded
-successor, preserving the existing branch at `e66144dc`. Do not switch the
+Supervisor has provided an isolated owner worktree for the recorded successor.
+The initial recipe assumed its head was still `e66144dc`. Do not switch the
 canonical root. If any ref has advanced, preserve it and reassess the delta;
 do not reset it to the pinned inputs.
 
@@ -157,7 +185,8 @@ hosted CI must be fresh for that SHA.
 
 ## Retained parent findings and acceptance
 
-Latest complete review: canonical parent `worker_outcomes`, Codex receipt
+Latest complete review of the pinned rejected source: canonical parent
+`worker_outcomes`, Codex receipt
 `codex-20260928T015100Z-d5abee16`, 2026-09-28T01:56:14Z. Adjacent review is
 `e66144dcbb34bc25ba3838de4c52ad24c8bb746a` at 01:30:30Z. Both require the
 bounded ENTRY-R5 regression/evidence repair, so Guide §0.7's two-round rule
@@ -176,57 +205,72 @@ the parent's UAT or substitute its report for the required complete receipts.
 | `persistence_failure_propagated_without_phantom` | Keep persistence-before-publication and real failure assertions, add missing interleavings above.                                                                                                                                                                                                                                              | No lowering of the existing parent acceptance requirement.                                                                                                                                                                                                                                                             |
 | `immediate_binding_after_create_hosted_pg`       | Formal migrations and production repositories, immediate valid binding after create.                                                                                                                                                                                                                                                           | Historical successful [integration job](https://github.com/ajoe734/drts-fleet-platform/actions/runs/36367477824/job/108756748288), event head `58393f7b`, tested merge `b0a9c53df8ff56eb761dc33537bc6197eac6b7d0`; retain provenance and rerun for new candidate. No VM PG/browser/server, merge, or deployment claim. |
 
-## Canonical parent update and remaining operator action
+## Canonical parent update: authorized operator action completed
 
-The release CLI successfully recorded this helper's `start` and `progress`.
-An explicit `AI_NAME=Codex <release-cli> note SR-PARTNER-NOTIFY-FIX-ENTRY-20260927
+The initial release-CLI attempt
+`AI_NAME=Codex <release-cli> note SR-PARTNER-NOTIFY-FIX-ENTRY-20260927
 <concrete recovery next step>` returned exit 1:
 `Dispatched worker cannot mutate a different task`.
 The current release's `control_plane/usecases/task_board_commands.py` lines
 82–91 enforces this boundary. No guard variable was removed and no role was
-impersonated. The helper's own `progress` records the following operator request:
+impersonated. At 02:19:19Z this helper recorded a blocked/Claude request while
+operator steps were pending. That historical disposition no longer applies.
 
-1. Persist parent `execution_branch=gemini/sr-partner-notify-fix-entry-20260927-fix`
-   and the concrete `next` below, using the active release CLI.
-2. Check writer conflicts and add the real lifecycle test path to parent
-   `write_scopes`; it is currently absent. Preserve the existing scope and all
-   three `required_acceptance` keys.
-3. Provision the isolated owner's dependencies without dangling/shared link
-   mutation. Preserve all existing source files, refs, and worktrees.
-4. Before this helper can merge, persist helper `resolved_parent_status=blocked`,
-   `resolved_parent_waiting_for=Claude`, and `resolved_parent_next` below while
-   operator steps remain pending. A report merge must not implicitly route the
-   parent back onto its contaminated default branch. After resolving these
-   steps, Supervisor can explicitly resume the original owner with new evidence.
+The dispatch resume specification and the original report were read at their
+provided absolute paths under
+`/home/lupin/workspace/drts-fleet-platform/.local/worker-resume-20260928/`.
+The original report SHA-256 is
+`197b147935da5207acf995a381438d04098565ad98e0d6bdafc6b957d775baff`, matching
+the report on helper commit `5fecc3fe394dbac4d11f94fdcd6c356a95b33f4b`.
+The operator receipt is that directory's `operator-actions.json`, SHA-256
+`9d1dbd41f2500ec9081489fd2a8f932cb0192348bcea5a488d3deea7dcd2375e`.
+All five relevant actions returned exit 0 with empty stderr:
 
-Concrete parent next step:
+| UTC action time | Authorized release-CLI action     | Verified effect                                                                                                              |
+| --------------- | --------------------------------- | ---------------------------------------------------------------------------------------------------------------------------- |
+| 02:28:44.565510 | `assign` parent Gemini / Codex    | Recorded clean successor execution branch and existing scopes plus the lifecycle integration test path.                      |
+| 02:28:45.889688 | `assign` helper Codex / Codex2    | Recorded `resolved_parent_status=todo`, null waiting-for, the concrete parent next step and correct helper execution branch. |
+| 02:28:47.076326 | `resume-blocked` parent to `todo` | Wrote the same concrete next step as helper `resolved_parent_next`.                                                          |
+| 02:28:48.222269 | `assign` helper Codex / Codex2    | Recorded this dispatch's resume specification.                                                                               |
+| 02:28:49.250095 | `resume-blocked` helper to `todo` | Authorized this report refresh and independent Codex2 handoff on existing PR #2212.                                          |
 
-> Supervisor routes Gemini to the existing clean successor
-> `gemini/sr-partner-notify-fix-entry-20260927-fix` / PR #2207, reconciles the
-> lifecycle test scope and worker dependencies. Gemini normally merges current
-> dev, carries the three-file delta from `58393f7b` without its ancestry,
-> repairs the repeated ENTRY-R5 regression/evidence unit in the original UAT,
-> preserves ENTRY-R7/R8, then validates the whole base-to-head trailer range
-> and affected product checks before a fresh immutable handoff to Codex.
+The exact next step shared by the parent resume command and helper metadata is:
+
+> Supervisor routed Gemini to existing clean successor gemini/sr-partner-notify-fix-entry-20260927-fix / PR2207. Added int-iam-prt-001-partner-credential-lifecycle.test.ts to owned scope with no active writer conflict; repaired broken dependency links. Merge current dev normally, carry ONLY the three owned files from e66144dc to58393f7b, and finish repeated ENTRY-R5 held-write/interleaving/authentication regressions and original UAT provenance, preserving R7/R8 and all three acceptance keys. Fresh whole-range trailers, Codex review and same-SHA hosted CI required; prior refs/PRs preserved.
+
+Read-only single-task snapshots through release `orchestrator-585087a2fd81`
+confirm all assigned routing/scope values, Gemini / Codex ownership and the
+three acceptance keys listed above. Parent `last_update=2026-09-28T02:29:28Z`
+now records `in_progress`, null waiting-for and
+`next=Resuming work, reading context and setting up branch`. This later owner
+progress legitimately supersedes the mutable `next`; the immutable operator
+receipt and helper `resolved_parent_next` still prove the requested update.
+Do not require stale equality of parent status/next with the 02:28Z snapshot.
+
+The helper was started through the same release CLI and is `in_progress`.
+Its `resolved_parent_at` remains absent: this helper has not merged and must
+not manufacture an early resolution timestamp. Parent product work and its
+acceptance remain with Gemini. This refresh does not mutate the parent task,
+reset its lifecycle, or require the parent to wait for this report's merge.
 
 ## Helper verification and delivery ledger
 
-| Helper acceptance / check              | Result and evidence                                                                                                                        | Remaining limit                                                                           |
-| -------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------ | ----------------------------------------------------------------------------------------- |
-| Identify exact contamination           | PASS: Git parents/messages, matching local/remote/PR heads, actual trailer checker exits 1 / 0, current routing code and missing metadata. | No claim about who performed historical branch switches.                                  |
-| Document safe repair                   | PASS: two independent temporary-index constructions give identical tree; allowlist prevents unrelated trunk reversions.                    | Documented parent mutations await original owner.                                         |
-| Task-scoped canonical delivery         | Report-only commit / normal push / PR to be recorded below.                                                                                | Candidate not yet handed off.                                                             |
-| Update parent concrete next step       | PENDING: parent note rejected exit 1; own `progress` contains exact operator request.                                                      | Supervisor canonical parent write required; prose alone does not satisfy this acceptance. |
-| Product unit/type/PG/browser execution | NOT RUN in this documentation helper. Existing hosted results are historical references.                                                   | No claim that unrepaired ENTRY-R5 is verified.                                            |
+| Helper acceptance / check              | Result and evidence                                                                                                                                                        | Remaining limit                                                       |
+| -------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------- |
+| Identify exact contamination           | PASS: pinned old range still fails on the two identified commits (exit 1); clean range passes (exit 0). Initial routing defect and completed correction are distinguished. | No claim about who performed historical branch switches.              |
+| Document safe repair                   | PASS: fresh temporary-index constructions give identical tree and patch hashes; allowlist prevents unrelated trunk reversions.                                             | Product recovery and ENTRY-R5 regressions remain original-owner work. |
+| Task-scoped canonical delivery         | Existing PR #2212 and published commits retained; this report-only follow-up uses normal push and exact-head handoff evidence.                                             | Fresh candidate review, CI and merge remain lifecycle gates.          |
+| Update parent concrete next step       | PASS: authorized parent resume receipt (exit 0), matching helper disposition and live routing/scope/acceptance assertions (exit 0).                                        | Later parent progress is independent; helper merge must not erase it. |
+| Product unit/type/PG/browser execution | NOT RUN in this documentation helper. Existing hosted results are historical references.                                                                                   | No claim that unrepaired ENTRY-R5 is verified.                        |
 
 ### Published checkpoint and completed checks
 
 Anchor `666ef3075957b46a386de35dbe192aaf7f2d9fcc` was normally pushed to the
 helper branch and matched the remote and draft
 [PR #2212](https://github.com/ajoe734/drts-fleet-platform/pull/2212) head.
-The follow-up report commit records these results and corrects two historical
-file references; its exact final SHA is recorded in the helper's canonical
-blocker and PR head, not invented inside its own commit.
+The follow-up `5fecc3fe394dbac4d11f94fdcd6c356a95b33f4b` records these results
+and corrects two historical file references. Both published commits remain
+ancestors of the resumed report candidate.
 
 | Command / execution identity                                                                                                                             | Completed result                                                                                                                       |
 | -------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------- |
@@ -243,7 +287,31 @@ full-range trailers before final publication. The anchor's failed result is
 retained; hosted checks on a subsequent head are separate evidence. No helper
 CI failure is attributed to unrelated debt, and no full-CI pass is claimed.
 
-The report remains an owner checkpoint until the parent update and helper
-disposition are present in machine truth. Do not call `done`; once those
-operator writes are verified, publish any final report update and hand off the
-matching helper SHA/remote/PR to Codex2 through the candidate lifecycle.
+The corrected prior head `5fecc3fe` subsequently passed hosted
+[Canonical consistency](https://github.com/ajoe734/drts-fleet-platform/actions/runs/36369322122/job/108762131152)
+and [Smoke acceptance](https://github.com/ajoe734/drts-fleet-platform/actions/runs/36369322122/job/108764034130).
+These are historical results, not CI evidence for this report follow-up.
+
+### Resumed candidate checks and publication
+
+Fresh verification uses Node 22.23.2, pnpm 10.33.0, Python 3.12.3 and Prettier
+3.8.2. `pnpm exec vitest --version` (4.1.4) and `pnpm exec tsc --version`
+(5.9.3) both exit 0; no dependency install or link mutation was performed.
+The metadata assertions, old-fail/clean-pass trailer reproduction and both
+recovery-tree constructions in `verify.py` completed with exit 0 at 02:31:31Z.
+These Git/document checks do not execute or approve parent product behavior.
+
+| Resumed report check                                                                            | Completed result / execution identity                                                                                      |
+| ----------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------- |
+| `pnpm exec prettier --check` on this report                                                     | Exit 0, Prettier 3.8.2; revised report based on `5fecc3fe`.                                                                |
+| `python3 tools/ci/git/check_canonical_consistency.py --ci --base origin/dev --head HEAD`        | Exit 0, all four checks report zero findings; reads the revised report's working-tree content.                             |
+| `git diff --check origin/dev` and report-only changed-path inspection                           | Exit 0; only this helper's original report is changed.                                                                     |
+| `python3 tools/ci/git/check_commit_trailers.py --base origin/dev --head HEAD` before new commit | Exit 0, both existing published helper commits valid. Final range is checked again after commit and recorded with handoff. |
+
+The parent update and helper disposition are now verified in machine truth.
+Publish only this report on the existing helper branch and PR #2212, then
+record full local SHA = remote SHA = PR head with `CANDIDATE_SHA`,
+`CANDIDATE_BRANCH` and `PR_URL` in the release-CLI handoff to Codex2. The handoff
+supplies the final SHA/generation without embedding a commit's own hash in
+itself. Preserve the candidate afterward for independent review and same-SHA
+hosted CI; do not call `done` or claim parent acceptance, merge or deployment.
