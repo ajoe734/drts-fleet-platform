@@ -119,8 +119,8 @@ describe("exception boundary TR1 destinations", () => {
               expect(lookupResult.address).toEqual(tc.dns);
               expect(lookupResult.family).toBe(4);
             } else {
-              expect(lookupResult.address).toBe(tc.dns[0].address);
-              expect(lookupResult.family).toBe(tc.dns[0].family);
+              expect(lookupResult.address).toBe(tc.dns[0]?.address);
+              expect(lookupResult.family).toBe(tc.dns[0]?.family);
             }
             expect(fetchError).toBeUndefined();
             expect(fetchResult.ok).toBe(true);
