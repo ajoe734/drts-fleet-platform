@@ -910,37 +910,11 @@ assert_int_ge \
 log_step "3.6 — Validate monthly operations summary from rebuild response"
 
 SUM_DEMAND="$(echo "$AGGREGATED_MONTHLY_RECORDS" | jq 'map(.demandRequestCount // .demand_request_count // 0) | add')"
-SUM_ACTUAL_DISPATCH="$(echo "$AGGREGATED_MONTHLY_RECORDS" | jq 'map(.actualDispatchCount // .actual_dispatch_count // 0) | add')"
-SUM_COMPLETED_TRIP="$(echo "$AGGREGATED_MONTHLY_RECORDS" | jq 'map(.completedTripCount // .completed_trip_count // 0) | add')"
-SUM_CANCELLED_ORDER="$(echo "$AGGREGATED_MONTHLY_RECORDS" | jq 'map(.cancelledOrderCount // .cancelled_order_count // 0) | add')"
-MAX_AVG_DISPATCHABLE="$(echo "$AGGREGATED_MONTHLY_RECORDS" | jq 'map(.averageDispatchableVehicleCount // .average_dispatchable_vehicle_count // 0) | max')"
-SUM_VALID_SNAPSHOTS="$(echo "$AGGREGATED_MONTHLY_RECORDS" | jq 'map(.validSnapshotCount // .valid_snapshot_count // 0) | add')"
 MONTHLY_EXPECTED_SNAPSHOTS="$(echo "$AGGREGATED_MONTHLY_RECORDS" | jq 'map(.expectedSnapshotCount // .expected_snapshot_count // 0) | add')"
-SUM_COMPLAINTS="$(echo "$AGGREGATED_MONTHLY_RECORDS" | jq 'map(.complaintCount // .complaint_count // 0) | add')"
-SUM_COMPLAINTS_LATE="$(echo "$AGGREGATED_MONTHLY_RECORDS" | jq 'map((.complaintsByCategory // .complaints_by_category).late_arrival // 0) | add')"
-SUM_COMPLAINTS_NO_ARR="$(echo "$AGGREGATED_MONTHLY_RECORDS" | jq 'map((.complaintsByCategory // .complaints_by_category).no_arrival // 0) | add')"
-
-assert_int_equals "monthly demandRequestCount" 2 "$SUM_DEMAND"
-assert_int_equals "monthly actualDispatchCount" 2 "$SUM_ACTUAL_DISPATCH"
-assert_int_equals "monthly completedTripCount" 1 "$SUM_COMPLETED_TRIP"
-assert_int_equals "monthly cancelledOrderCount" 1 "$SUM_CANCELLED_ORDER"
-assert_equals "monthly averageDispatchableVehicleCount" "$TAXI_UNIQUE_VEHICLE_COUNT" "$MAX_AVG_DISPATCHABLE"
-assert_int_equals "monthly validSnapshotCount" 3 "$SUM_VALID_SNAPSHOTS"
-assert_int_ge "monthly expectedSnapshotCount" 1 "$MONTHLY_EXPECTED_SNAPSHOTS"
-
 EXPECTED_COVERAGE="$(round_four "$(awk -v valid=3 -v total="$MONTHLY_EXPECTED_SNAPSHOTS" 'BEGIN { print valid / total }')")"
+MAX_AVG_DISPATCHABLE="$(echo "$AGGREGATED_MONTHLY_RECORDS" | jq 'map(.averageDispatchableVehicleCount // .average_dispatchable_vehicle_count // 0) | max')"
 
-verify_monthly_coverage "$AGGREGATED_MONTHLY_RECORDS"
-
-assert_int_equals "monthly complaintCount" "$EXPECTED_TOTAL_COMPLAINT_COUNT" "$SUM_COMPLAINTS"
-assert_int_equals \
-  "monthly complaintsByCategory.late_arrival" \
-  "$EXPECTED_LATE_ARRIVAL_COUNT" \
-  "$SUM_COMPLAINTS_LATE"
-assert_int_equals \
-  "monthly complaintsByCategory.no_arrival" \
-  "$EXPECTED_NO_ARRIVAL_COUNT" \
-  "$SUM_COMPLAINTS_NO_ARR"
+assert_monthly_records "$AGGREGATED_MONTHLY_RECORDS" "$TAXI_UNIQUE_VEHICLE_COUNT" > /dev/null
 
 log_step "3.7 — GET /reports/operations-summary/preview"
 http_call GET "/reports/operations-summary/preview?from=${SUMMARY_FROM_DATE}&to=${SUMMARY_TO_DATE}&businessArea=${TAXI_BUSINESS_AREA}&serviceProductCode=taxi_realtime"
@@ -951,18 +925,7 @@ assert_int_equals \
   "$(echo "$RESP_BODY" | jq -r '.data.items | length' 2>/dev/null || true)"
 SUMMARY_ROW=$(echo "$RESP_BODY" | jq -c '.data.items[0]' 2>/dev/null || true)
 assert_non_empty "summary preview row" "$SUMMARY_ROW"
-assert_equals "summary preview from" "$SUMMARY_FROM_DATE" "$(json_field_from_object "$SUMMARY_ROW" '.from')"
-assert_equals "summary preview to" "$SUMMARY_TO_DATE" "$(json_field_from_object "$SUMMARY_ROW" '.to')"
-assert_int_equals "summary preview demandRequestCount" 2 "$(json_field_from_object "$SUMMARY_ROW" '(.demandRequestCount // .demand_request_count)')"
-assert_int_equals "summary preview actualDispatchCount" 2 "$(json_field_from_object "$SUMMARY_ROW" '(.actualDispatchCount // .actual_dispatch_count)')"
-assert_int_equals "summary preview completedTripCount" 1 "$(json_field_from_object "$SUMMARY_ROW" '(.completedTripCount // .completed_trip_count)')"
-assert_int_equals "summary preview cancelledOrderCount" 1 "$(json_field_from_object "$SUMMARY_ROW" '(.cancelledOrderCount // .cancelled_order_count)')"
-assert_equals "summary preview averageDispatchableVehicleCount" "$MAX_AVG_DISPATCHABLE" "$(json_field_from_object "$SUMMARY_ROW" '(.averageDispatchableVehicleCount // .average_dispatchable_vehicle_count)')"
-assert_int_equals "summary preview validSnapshotCount" 3 "$(json_field_from_object "$SUMMARY_ROW" '(.validSnapshotCount // .valid_snapshot_count)')"
-assert_int_equals "summary preview expectedSnapshotCount" "$MONTHLY_EXPECTED_SNAPSHOTS" "$(json_field_from_object "$SUMMARY_ROW" '(.expectedSnapshotCount // .expected_snapshot_count)')"
-assert_equals "summary preview snapshotCoverageRate" "$EXPECTED_COVERAGE" "$(round_four "$(json_field_from_object "$SUMMARY_ROW" '(.snapshotCoverageRate // .snapshot_coverage_rate)')")"
-assert_int_equals "summary preview complaintCount" "$EXPECTED_TOTAL_COMPLAINT_COUNT" "$(json_field_from_object "$SUMMARY_ROW" '(.complaintCount // .complaint_count)')"
-verify_complaints_by_category "summary preview" "$SUMMARY_ROW" "$EXPECTED_LATE_ARRIVAL_COUNT" "$EXPECTED_NO_ARRIVAL_COUNT"
+assert_summary_row "summary preview" "$SUMMARY_ROW" "$SUMMARY_FROM_DATE" "$SUMMARY_TO_DATE" "$MAX_AVG_DISPATCHABLE" "$MONTHLY_EXPECTED_SNAPSHOTS" "$EXPECTED_COVERAGE"
 
 
 log_step "3.8 — POST /reports/jobs (six_month_operations_summary)"
@@ -998,16 +961,7 @@ assert_non_empty \
   "$(echo "$RESP_BODY" | jq -r '.data.artifact.artifactId // .data.artifact.artifact_id // empty' 2>/dev/null || true)"
 SUMMARY_JOB_ROW=$(echo "$RESP_BODY" | jq -c '.data.rows[0]' 2>/dev/null || true)
 assert_non_empty "summary report row" "$SUMMARY_JOB_ROW"
-assert_int_equals "summary report demandRequestCount" 2 "$(json_field_from_object "$SUMMARY_JOB_ROW" '(.demandRequestCount // .demand_request_count)')"
-assert_int_equals "summary report actualDispatchCount" 2 "$(json_field_from_object "$SUMMARY_JOB_ROW" '(.actualDispatchCount // .actual_dispatch_count)')"
-assert_int_equals "summary report completedTripCount" 1 "$(json_field_from_object "$SUMMARY_JOB_ROW" '(.completedTripCount // .completed_trip_count)')"
-assert_int_equals "summary report cancelledOrderCount" 1 "$(json_field_from_object "$SUMMARY_JOB_ROW" '(.cancelledOrderCount // .cancelled_order_count)')"
-assert_equals "summary report averageDispatchableVehicleCount" "$MAX_AVG_DISPATCHABLE" "$(json_field_from_object "$SUMMARY_JOB_ROW" '(.averageDispatchableVehicleCount // .average_dispatchable_vehicle_count)')"
-assert_int_equals "summary report validSnapshotCount" 3 "$(json_field_from_object "$SUMMARY_JOB_ROW" '(.validSnapshotCount // .valid_snapshot_count)')"
-assert_int_equals "summary report expectedSnapshotCount" "$MONTHLY_EXPECTED_SNAPSHOTS" "$(json_field_from_object "$SUMMARY_JOB_ROW" '(.expectedSnapshotCount // .expected_snapshot_count)')"
-assert_equals "summary report snapshotCoverageRate" "$EXPECTED_COVERAGE" "$(round_four "$(json_field_from_object "$SUMMARY_JOB_ROW" '(.snapshotCoverageRate // .snapshot_coverage_rate)')")"
-assert_int_equals "summary report complaintCount" "$EXPECTED_TOTAL_COMPLAINT_COUNT" "$(json_field_from_object "$SUMMARY_JOB_ROW" '(.complaintCount // .complaint_count)')"
-verify_complaints_by_category "summary report" "$SUMMARY_JOB_ROW" "$EXPECTED_LATE_ARRIVAL_COUNT" "$EXPECTED_NO_ARRIVAL_COUNT"
+assert_summary_row "summary report" "$SUMMARY_JOB_ROW" "" "" "$MAX_AVG_DISPATCHABLE" "$MONTHLY_EXPECTED_SNAPSHOTS" "$EXPECTED_COVERAGE"
 
 
 print_chain_summary

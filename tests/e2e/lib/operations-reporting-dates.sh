@@ -122,3 +122,64 @@ compute_expected_complaints() {
   echo "EXPECTED_LATE_ARRIVAL_COUNT=$expected_app"
   echo "EXPECTED_NO_ARRIVAL_COUNT=$expected_phone"
 }
+
+assert_monthly_records() {
+  local AGGREGATED_MONTHLY_RECORDS="$1"
+  local TAXI_UNIQUE_VEHICLE_COUNT="$2"
+
+  local SUM_DEMAND="$(echo "$AGGREGATED_MONTHLY_RECORDS" | jq 'map(.demandRequestCount // .demand_request_count // 0) | add')"
+  local SUM_ACTUAL_DISPATCH="$(echo "$AGGREGATED_MONTHLY_RECORDS" | jq 'map(.actualDispatchCount // .actual_dispatch_count // 0) | add')"
+  local SUM_COMPLETED_TRIP="$(echo "$AGGREGATED_MONTHLY_RECORDS" | jq 'map(.completedTripCount // .completed_trip_count // 0) | add')"
+  local SUM_CANCELLED_ORDER="$(echo "$AGGREGATED_MONTHLY_RECORDS" | jq 'map(.cancelledOrderCount // .cancelled_order_count // 0) | add')"
+  local MAX_AVG_DISPATCHABLE="$(echo "$AGGREGATED_MONTHLY_RECORDS" | jq 'map(.averageDispatchableVehicleCount // .average_dispatchable_vehicle_count // 0) | max')"
+  local SUM_VALID_SNAPSHOTS="$(echo "$AGGREGATED_MONTHLY_RECORDS" | jq 'map(.validSnapshotCount // .valid_snapshot_count // 0) | add')"
+  local MONTHLY_EXPECTED_SNAPSHOTS="$(echo "$AGGREGATED_MONTHLY_RECORDS" | jq 'map(.expectedSnapshotCount // .expected_snapshot_count // 0) | add')"
+  local SUM_COMPLAINTS="$(echo "$AGGREGATED_MONTHLY_RECORDS" | jq 'map(.complaintCount // .complaint_count // 0) | add')"
+  local SUM_COMPLAINTS_LATE="$(echo "$AGGREGATED_MONTHLY_RECORDS" | jq 'map((.complaintsByCategory // .complaints_by_category).late_arrival // 0) | add')"
+  local SUM_COMPLAINTS_NO_ARR="$(echo "$AGGREGATED_MONTHLY_RECORDS" | jq 'map((.complaintsByCategory // .complaints_by_category).no_arrival // 0) | add')"
+
+  assert_int_equals "monthly demandRequestCount" 2 "$SUM_DEMAND"
+  assert_int_equals "monthly actualDispatchCount" 2 "$SUM_ACTUAL_DISPATCH"
+  assert_int_equals "monthly completedTripCount" 1 "$SUM_COMPLETED_TRIP"
+  assert_int_equals "monthly cancelledOrderCount" 1 "$SUM_CANCELLED_ORDER"
+  assert_equals "monthly averageDispatchableVehicleCount" "$TAXI_UNIQUE_VEHICLE_COUNT" "$MAX_AVG_DISPATCHABLE"
+  assert_int_equals "monthly validSnapshotCount" 3 "$SUM_VALID_SNAPSHOTS"
+  assert_int_ge "monthly expectedSnapshotCount" 1 "$MONTHLY_EXPECTED_SNAPSHOTS"
+
+  local EXPECTED_COVERAGE="$(round_four "$(awk -v valid=3 -v total="$MONTHLY_EXPECTED_SNAPSHOTS" 'BEGIN { print valid / total }')")"
+
+  verify_monthly_coverage "$AGGREGATED_MONTHLY_RECORDS"
+
+  assert_int_equals "monthly complaintCount" "$EXPECTED_TOTAL_COMPLAINT_COUNT" "$SUM_COMPLAINTS"
+  assert_int_equals "monthly complaintsByCategory.late_arrival" "$EXPECTED_LATE_ARRIVAL_COUNT" "$SUM_COMPLAINTS_LATE"
+  assert_int_equals "monthly complaintsByCategory.no_arrival" "$EXPECTED_NO_ARRIVAL_COUNT" "$SUM_COMPLAINTS_NO_ARR"
+
+  echo "$MAX_AVG_DISPATCHABLE|$MONTHLY_EXPECTED_SNAPSHOTS|$EXPECTED_COVERAGE"
+}
+
+assert_summary_row() {
+  local prefix="$1"
+  local row="$2"
+  local from="$3"
+  local to="$4"
+  local max_avg_dispatchable="$5"
+  local monthly_expected_snapshots="$6"
+  local expected_coverage="$7"
+
+  if [[ -n "$from" ]]; then
+    assert_equals "$prefix from" "$from" "$(json_field_from_object "$row" '.from')"
+  fi
+  if [[ -n "$to" ]]; then
+    assert_equals "$prefix to" "$to" "$(json_field_from_object "$row" '.to')"
+  fi
+  assert_int_equals "$prefix demandRequestCount" 2 "$(json_field_from_object "$row" '(.demandRequestCount // .demand_request_count)')"
+  assert_int_equals "$prefix actualDispatchCount" 2 "$(json_field_from_object "$row" '(.actualDispatchCount // .actual_dispatch_count)')"
+  assert_int_equals "$prefix completedTripCount" 1 "$(json_field_from_object "$row" '(.completedTripCount // .completed_trip_count)')"
+  assert_int_equals "$prefix cancelledOrderCount" 1 "$(json_field_from_object "$row" '(.cancelledOrderCount // .cancelled_order_count)')"
+  assert_equals "$prefix averageDispatchableVehicleCount" "$max_avg_dispatchable" "$(json_field_from_object "$row" '(.averageDispatchableVehicleCount // .average_dispatchable_vehicle_count)')"
+  assert_int_equals "$prefix validSnapshotCount" 3 "$(json_field_from_object "$row" '(.validSnapshotCount // .valid_snapshot_count)')"
+  assert_int_equals "$prefix expectedSnapshotCount" "$monthly_expected_snapshots" "$(json_field_from_object "$row" '(.expectedSnapshotCount // .expected_snapshot_count)')"
+  assert_equals "$prefix snapshotCoverageRate" "$expected_coverage" "$(round_four "$(json_field_from_object "$row" '(.snapshotCoverageRate // .snapshot_coverage_rate)')")"
+  assert_int_equals "$prefix complaintCount" "$EXPECTED_TOTAL_COMPLAINT_COUNT" "$(json_field_from_object "$row" '(.complaintCount // .complaint_count)')"
+  verify_complaints_by_category "$prefix" "$row" "$EXPECTED_LATE_ARRIVAL_COUNT" "$EXPECTED_NO_ARRIVAL_COUNT"
+}

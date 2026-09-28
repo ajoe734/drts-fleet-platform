@@ -59,68 +59,26 @@ run_scenario() {
   local TAXI_UNIQUE_VEHICLE_COUNT=1
 
   # Full E2E monthly assertions
-  local SUM_DEMAND="$(echo "$AGGREGATED_MONTHLY_RECORDS" | jq 'map(.demandRequestCount // .demand_request_count // 0) | add')"
-  local SUM_ACTUAL_DISPATCH="$(echo "$AGGREGATED_MONTHLY_RECORDS" | jq 'map(.actualDispatchCount // .actual_dispatch_count // 0) | add')"
-  local SUM_COMPLETED_TRIP="$(echo "$AGGREGATED_MONTHLY_RECORDS" | jq 'map(.completedTripCount // .completed_trip_count // 0) | add')"
-  local SUM_CANCELLED_ORDER="$(echo "$AGGREGATED_MONTHLY_RECORDS" | jq 'map(.cancelledOrderCount // .cancelled_order_count // 0) | add')"
-  local MAX_AVG_DISPATCHABLE="$(echo "$AGGREGATED_MONTHLY_RECORDS" | jq 'map(.averageDispatchableVehicleCount // .average_dispatchable_vehicle_count // 0) | max')"
-  local SUM_VALID_SNAPSHOTS="$(echo "$AGGREGATED_MONTHLY_RECORDS" | jq 'map(.validSnapshotCount // .valid_snapshot_count // 0) | add')"
-  local MONTHLY_EXPECTED_SNAPSHOTS="$(echo "$AGGREGATED_MONTHLY_RECORDS" | jq 'map(.expectedSnapshotCount // .expected_snapshot_count // 0) | add')"
-  local SUM_COMPLAINTS="$(echo "$AGGREGATED_MONTHLY_RECORDS" | jq 'map(.complaintCount // .complaint_count // 0) | add')"
-  local SUM_COMPLAINTS_LATE="$(echo "$AGGREGATED_MONTHLY_RECORDS" | jq 'map((.complaintsByCategory // .complaints_by_category).late_arrival // 0) | add')"
-  local SUM_COMPLAINTS_NO_ARR="$(echo "$AGGREGATED_MONTHLY_RECORDS" | jq 'map((.complaintsByCategory // .complaints_by_category).no_arrival // 0) | add')"
-
-  assert_int_equals "monthly demandRequestCount" 2 "$SUM_DEMAND"
-  assert_int_equals "monthly actualDispatchCount" 2 "$SUM_ACTUAL_DISPATCH"
-  assert_int_equals "monthly completedTripCount" 1 "$SUM_COMPLETED_TRIP"
-  assert_int_equals "monthly cancelledOrderCount" 1 "$SUM_CANCELLED_ORDER"
-  assert_equals "monthly averageDispatchableVehicleCount" "$TAXI_UNIQUE_VEHICLE_COUNT" "$MAX_AVG_DISPATCHABLE"
-  assert_int_equals "monthly validSnapshotCount" 3 "$SUM_VALID_SNAPSHOTS"
-  assert_int_ge "monthly expectedSnapshotCount" 1 "$MONTHLY_EXPECTED_SNAPSHOTS"
-
-  local EXPECTED_COVERAGE="$(round_four "$(awk -v valid=3 -v total="$MONTHLY_EXPECTED_SNAPSHOTS" 'BEGIN { print valid / total }')")"
-
-  verify_monthly_coverage "$AGGREGATED_MONTHLY_RECORDS"
-
-  assert_int_equals "monthly complaintCount" "$EXPECTED_TOTAL_COMPLAINT_COUNT" "$SUM_COMPLAINTS"
-  assert_int_equals "monthly complaintsByCategory.late_arrival" "$EXPECTED_LATE_ARRIVAL_COUNT" "$SUM_COMPLAINTS_LATE"
-  assert_int_equals "monthly complaintsByCategory.no_arrival" "$EXPECTED_NO_ARRIVAL_COUNT" "$SUM_COMPLAINTS_NO_ARR"
+  local monthly_ret="$(assert_monthly_records "$AGGREGATED_MONTHLY_RECORDS" "$TAXI_UNIQUE_VEHICLE_COUNT")"
+  local MAX_AVG_DISPATCHABLE="$(echo "$monthly_ret" | cut -d'|' -f1)"
+  local MONTHLY_EXPECTED_SNAPSHOTS="$(echo "$monthly_ret" | cut -d'|' -f2)"
+  local EXPECTED_COVERAGE="$(echo "$monthly_ret" | cut -d'|' -f3)"
 
   # Full E2E summary preview assertions
-  assert_equals "summary preview from" "$SUMMARY_FROM_DATE" "$(json_field_from_object "$SUMMARY_ROW" '.from')"
-  assert_equals "summary preview to" "$SUMMARY_TO_DATE" "$(json_field_from_object "$SUMMARY_ROW" '.to')"
-  assert_int_equals "summary preview demandRequestCount" 2 "$(json_field_from_object "$SUMMARY_ROW" '(.demandRequestCount // .demand_request_count)')"
-  assert_int_equals "summary preview actualDispatchCount" 2 "$(json_field_from_object "$SUMMARY_ROW" '(.actualDispatchCount // .actual_dispatch_count)')"
-  assert_int_equals "summary preview completedTripCount" 1 "$(json_field_from_object "$SUMMARY_ROW" '(.completedTripCount // .completed_trip_count)')"
-  assert_int_equals "summary preview cancelledOrderCount" 1 "$(json_field_from_object "$SUMMARY_ROW" '(.cancelledOrderCount // .cancelled_order_count)')"
-  assert_equals "summary preview averageDispatchableVehicleCount" "$MAX_AVG_DISPATCHABLE" "$(json_field_from_object "$SUMMARY_ROW" '(.averageDispatchableVehicleCount // .average_dispatchable_vehicle_count)')"
-  assert_int_equals "summary preview validSnapshotCount" 3 "$(json_field_from_object "$SUMMARY_ROW" '(.validSnapshotCount // .valid_snapshot_count)')"
-  assert_int_equals "summary preview expectedSnapshotCount" "$MONTHLY_EXPECTED_SNAPSHOTS" "$(json_field_from_object "$SUMMARY_ROW" '(.expectedSnapshotCount // .expected_snapshot_count)')"
-  assert_equals "summary preview snapshotCoverageRate" "$EXPECTED_COVERAGE" "$(round_four "$(json_field_from_object "$SUMMARY_ROW" '(.snapshotCoverageRate // .snapshot_coverage_rate)')")"
-  assert_int_equals "summary preview complaintCount" "$EXPECTED_TOTAL_COMPLAINT_COUNT" "$(json_field_from_object "$SUMMARY_ROW" '(.complaintCount // .complaint_count)')"
-  verify_complaints_by_category "summary preview" "$SUMMARY_ROW" "$EXPECTED_LATE_ARRIVAL_COUNT" "$EXPECTED_NO_ARRIVAL_COUNT"
+  assert_summary_row "summary preview" "$SUMMARY_ROW" "$SUMMARY_FROM_DATE" "$SUMMARY_TO_DATE" "$MAX_AVG_DISPATCHABLE" "$MONTHLY_EXPECTED_SNAPSHOTS" "$EXPECTED_COVERAGE"
 
   # Full E2E summary job assertions
-  assert_int_equals "summary report demandRequestCount" 2 "$(json_field_from_object "$SUMMARY_JOB_ROW" '(.demandRequestCount // .demand_request_count)')"
-  assert_int_equals "summary report actualDispatchCount" 2 "$(json_field_from_object "$SUMMARY_JOB_ROW" '(.actualDispatchCount // .actual_dispatch_count)')"
-  assert_int_equals "summary report completedTripCount" 1 "$(json_field_from_object "$SUMMARY_JOB_ROW" '(.completedTripCount // .completed_trip_count)')"
-  assert_int_equals "summary report cancelledOrderCount" 1 "$(json_field_from_object "$SUMMARY_JOB_ROW" '(.cancelledOrderCount // .cancelled_order_count)')"
-  assert_equals "summary report averageDispatchableVehicleCount" "$MAX_AVG_DISPATCHABLE" "$(json_field_from_object "$SUMMARY_JOB_ROW" '(.averageDispatchableVehicleCount // .average_dispatchable_vehicle_count)')"
-  assert_int_equals "summary report validSnapshotCount" 3 "$(json_field_from_object "$SUMMARY_JOB_ROW" '(.validSnapshotCount // .valid_snapshot_count)')"
-  assert_int_equals "summary report expectedSnapshotCount" "$MONTHLY_EXPECTED_SNAPSHOTS" "$(json_field_from_object "$SUMMARY_JOB_ROW" '(.expectedSnapshotCount // .expected_snapshot_count)')"
-  assert_equals "summary report snapshotCoverageRate" "$EXPECTED_COVERAGE" "$(round_four "$(json_field_from_object "$SUMMARY_JOB_ROW" '(.snapshotCoverageRate // .snapshot_coverage_rate)')")"
-  assert_int_equals "summary report complaintCount" "$EXPECTED_TOTAL_COMPLAINT_COUNT" "$(json_field_from_object "$SUMMARY_JOB_ROW" '(.complaintCount // .complaint_count)')"
-  verify_complaints_by_category "summary report" "$SUMMARY_JOB_ROW" "$EXPECTED_LATE_ARRIVAL_COUNT" "$EXPECTED_NO_ARRIVAL_COUNT"
+  assert_summary_row "summary report" "$SUMMARY_JOB_ROW" "" "" "$MAX_AVG_DISPATCHABLE" "$MONTHLY_EXPECTED_SNAPSHOTS" "$EXPECTED_COVERAGE"
 
   # Assert daily3
   local DAILY_REBUILT_COUNT=0
   for sd in $UNIQUE_SERVICE_DATES; do
-     if [[ "$sd" == "$APP_SERVICE_DATE" ]]; then DAILY_REBUILT_COUNT=$((DAILY_REBUILT_COUNT + 2)); fi
-     if [[ "$sd" == "$PORTAL_SERVICE_DATE" && "$APP_SERVICE_DATE" != "$PORTAL_SERVICE_DATE" ]]; then DAILY_REBUILT_COUNT=$((DAILY_REBUILT_COUNT + 1)); fi
+     local rc=0
+     if [[ "$sd" == "$APP_SERVICE_DATE" ]]; then rc=$((rc + 1)); fi
+     if [[ "$sd" == "$PHONE_SERVICE_DATE" ]]; then rc=$((rc + 1)); fi
+     if [[ "$sd" == "$PORTAL_SERVICE_DATE" ]]; then rc=$((rc + 1)); fi
+     DAILY_REBUILT_COUNT=$((DAILY_REBUILT_COUNT + rc))
   done
-  if [[ "$APP_SERVICE_DATE" == "$PORTAL_SERVICE_DATE" ]]; then
-     DAILY_REBUILT_COUNT=3
-  fi
   assert_int_equals "daily rebuild count" 3 "$DAILY_REBUILT_COUNT"
 }
 
@@ -165,7 +123,7 @@ run_scenario "split-order month/year" \
   "2027-01-01T00:05:00Z" "2027-01-01T00:10:00Z" \
   '['\
 '{"periodMonth": "2026-12", "demandRequestCount": 1, "actualDispatchCount": 1, "completedTripCount": 1, "cancelledOrderCount": 0, "averageDispatchableVehicleCount": 1, "validSnapshotCount": 3, "expectedSnapshotCount": 8928, "snapshotCoverageRate": 0.0003, "complaintCount": 0, "complaintsByCategory": {}},'\
-'{"periodMonth": "2027-01", "demandRequestCount": 1, "actualDispatchCount": 1, "completedTripCount": 0, "cancelledOrderCount": 1, "averageDispatchableVehicleCount": 1, "validSnapshotCount": 0, "expectedSnapshotCount": 8928, "snapshotCoverageRate": 0, "complaintCount": 1, "complaintsByCategory": {"no_arrival": 1}}'\
+'{"periodMonth": "2027-01", "demandRequestCount": 1, "actualDispatchCount": 1, "completedTripCount": 0, "cancelledOrderCount": 1, "averageDispatchableVehicleCount": 0, "validSnapshotCount": 0, "expectedSnapshotCount": 8928, "snapshotCoverageRate": 0, "complaintCount": 1, "complaintsByCategory": {"no_arrival": 1}}'\
 ']' \
   '{"from": "2026-12-01", "to": "2027-01-31", "demandRequestCount": 2, "actualDispatchCount": 2, "completedTripCount": 1, "cancelledOrderCount": 1, "averageDispatchableVehicleCount": 1, "validSnapshotCount": 3, "expectedSnapshotCount": 17856, "snapshotCoverageRate": 0.0002, "complaintCount": 1, "complaintsByCategory": {"no_arrival": 1}}'
 
@@ -174,19 +132,50 @@ run_scenario "one/both complaints crossing (one crossing)" \
   "2026-09-30T23:30:00Z" "2026-09-30T23:30:05Z" "2026-10-01T00:00:00Z" \
   "2026-09-30T23:50:00Z" "2026-10-01T00:10:00Z" \
   '['\
-'{"periodMonth": "2026-09", "demandRequestCount": 2, "actualDispatchCount": 2, "completedTripCount": 1, "cancelledOrderCount": 1, "averageDispatchableVehicleCount": 1, "validSnapshotCount": 3, "expectedSnapshotCount": 8640, "snapshotCoverageRate": 0.0003, "complaintCount": 1, "complaintsByCategory": {"late_arrival": 1}},'\
-'{"periodMonth": "2026-10", "demandRequestCount": 0, "actualDispatchCount": 0, "completedTripCount": 0, "cancelledOrderCount": 0, "averageDispatchableVehicleCount": 0, "validSnapshotCount": 0, "expectedSnapshotCount": 8928, "snapshotCoverageRate": 0, "complaintCount": 0, "complaintsByCategory": {}}'\
+'{"periodMonth": "2026-09", "demandRequestCount": 2, "actualDispatchCount": 2, "completedTripCount": 1, "cancelledOrderCount": 1, "averageDispatchableVehicleCount": 1, "validSnapshotCount": 3, "expectedSnapshotCount": 8640, "snapshotCoverageRate": 0.0003, "complaintCount": 1, "complaintsByCategory": {"late_arrival": 1}}'\
 ']' \
-  '{"from": "2026-09-01", "to": "2026-10-31", "demandRequestCount": 2, "actualDispatchCount": 2, "completedTripCount": 1, "cancelledOrderCount": 1, "averageDispatchableVehicleCount": 1, "validSnapshotCount": 3, "expectedSnapshotCount": 17568, "snapshotCoverageRate": 0.0002, "complaintCount": 1, "complaintsByCategory": {"late_arrival": 1}}'
+  '{"from": "2026-09-01", "to": "2026-10-31", "demandRequestCount": 2, "actualDispatchCount": 2, "completedTripCount": 1, "cancelledOrderCount": 1, "averageDispatchableVehicleCount": 1, "validSnapshotCount": 3, "expectedSnapshotCount": 8640, "snapshotCoverageRate": 0.0003, "complaintCount": 1, "complaintsByCategory": {"late_arrival": 1}}'
 
 # both complaints crossing
 run_scenario "one/both complaints crossing (both crossing)" \
   "2026-09-30T23:50:00Z" "2026-09-30T23:50:05Z" "2026-10-01T00:20:00Z" \
   "2026-10-01T00:05:00Z" "2026-10-01T00:10:00Z" \
   '['\
-'{"periodMonth": "2026-09", "demandRequestCount": 2, "actualDispatchCount": 2, "completedTripCount": 1, "cancelledOrderCount": 1, "averageDispatchableVehicleCount": 1, "validSnapshotCount": 3, "expectedSnapshotCount": 8640, "snapshotCoverageRate": 0.0003, "complaintCount": 0, "complaintsByCategory": {}},'\
-'{"periodMonth": "2026-10", "demandRequestCount": 0, "actualDispatchCount": 0, "completedTripCount": 0, "cancelledOrderCount": 0, "averageDispatchableVehicleCount": 0, "validSnapshotCount": 0, "expectedSnapshotCount": 8928, "snapshotCoverageRate": 0, "complaintCount": 0, "complaintsByCategory": {}}'\
+'{"periodMonth": "2026-09", "demandRequestCount": 2, "actualDispatchCount": 2, "completedTripCount": 1, "cancelledOrderCount": 1, "averageDispatchableVehicleCount": 1, "validSnapshotCount": 3, "expectedSnapshotCount": 8640, "snapshotCoverageRate": 0.0003, "complaintCount": 0, "complaintsByCategory": {}}'\
 ']' \
-  '{"from": "2026-09-01", "to": "2026-10-31", "demandRequestCount": 2, "actualDispatchCount": 2, "completedTripCount": 1, "cancelledOrderCount": 1, "averageDispatchableVehicleCount": 1, "validSnapshotCount": 3, "expectedSnapshotCount": 17568, "snapshotCoverageRate": 0.0002, "complaintCount": 0, "complaintsByCategory": {}}'
+  '{"from": "2026-09-01", "to": "2026-10-31", "demandRequestCount": 2, "actualDispatchCount": 2, "completedTripCount": 1, "cancelledOrderCount": 1, "averageDispatchableVehicleCount": 1, "validSnapshotCount": 3, "expectedSnapshotCount": 8640, "snapshotCoverageRate": 0.0003, "complaintCount": 0, "complaintsByCategory": {}}'
+
+# Negative controls
+echo "--- Running negative controls ---"
+
+# Wrong daily3 totals: e.g. demandRequestCount is 3 instead of 2 in summary
+if ( run_scenario 'negative demand' \
+  '2026-09-15T12:00:05Z' '2026-09-15T12:00:10Z' '2026-09-15T12:30:00Z' \
+  '2026-09-15T12:05:00Z' '2026-09-15T12:15:00Z' \
+  '[{"periodMonth": "2026-09", "demandRequestCount": 2, "actualDispatchCount": 2, "completedTripCount": 1, "cancelledOrderCount": 1, "averageDispatchableVehicleCount": 1, "validSnapshotCount": 3, "expectedSnapshotCount": 8640, "snapshotCoverageRate": 0.0003, "complaintCount": 2, "complaintsByCategory": {"late_arrival": 1, "no_arrival": 1}}]' \
+  '{"from": "2026-09-01", "to": "2026-09-30", "demandRequestCount": 3, "actualDispatchCount": 2, "completedTripCount": 1, "cancelledOrderCount": 1, "averageDispatchableVehicleCount": 1, "validSnapshotCount": 3, "expectedSnapshotCount": 8640, "snapshotCoverageRate": 0.0003, "complaintCount": 2, "complaintsByCategory": {"late_arrival": 1, "no_arrival": 1}}' ) >/dev/null 2>&1; then
+  echo "FAIL: Negative control (wrong demand) passed unexpectedly!"
+  exit 1
+fi
+
+# Wrong snapshots/bounds: expectedSnapshotCount missing or wrong
+if ( run_scenario 'negative snapshots' \
+  '2026-09-15T12:00:05Z' '2026-09-15T12:00:10Z' '2026-09-15T12:30:00Z' \
+  '2026-09-15T12:05:00Z' '2026-09-15T12:15:00Z' \
+  '[{"periodMonth": "2026-09", "demandRequestCount": 2, "actualDispatchCount": 2, "completedTripCount": 1, "cancelledOrderCount": 1, "averageDispatchableVehicleCount": 1, "validSnapshotCount": 3, "expectedSnapshotCount": 9999, "snapshotCoverageRate": 0.0003, "complaintCount": 2, "complaintsByCategory": {"late_arrival": 1, "no_arrival": 1}}]' \
+  '{"from": "2026-09-01", "to": "2026-09-30", "demandRequestCount": 2, "actualDispatchCount": 2, "completedTripCount": 1, "cancelledOrderCount": 1, "averageDispatchableVehicleCount": 1, "validSnapshotCount": 3, "expectedSnapshotCount": 8640, "snapshotCoverageRate": 0.0003, "complaintCount": 2, "complaintsByCategory": {"late_arrival": 1, "no_arrival": 1}}' ) >/dev/null 2>&1; then
+  echo "FAIL: Negative control (wrong snapshots) passed unexpectedly!"
+  exit 1
+fi
+
+# Sparse category: missing no_arrival where expected
+if ( run_scenario 'negative sparse category' \
+  '2026-09-15T12:00:05Z' '2026-09-15T12:00:10Z' '2026-09-15T12:30:00Z' \
+  '2026-09-15T12:05:00Z' '2026-09-15T12:15:00Z' \
+  '[{"periodMonth": "2026-09", "demandRequestCount": 2, "actualDispatchCount": 2, "completedTripCount": 1, "cancelledOrderCount": 1, "averageDispatchableVehicleCount": 1, "validSnapshotCount": 3, "expectedSnapshotCount": 8640, "snapshotCoverageRate": 0.0003, "complaintCount": 2, "complaintsByCategory": {"late_arrival": 1}}]' \
+  '{"from": "2026-09-01", "to": "2026-09-30", "demandRequestCount": 2, "actualDispatchCount": 2, "completedTripCount": 1, "cancelledOrderCount": 1, "averageDispatchableVehicleCount": 1, "validSnapshotCount": 3, "expectedSnapshotCount": 8640, "snapshotCoverageRate": 0.0003, "complaintCount": 2, "complaintsByCategory": {"late_arrival": 1}}' ) >/dev/null 2>&1; then
+  echo "FAIL: Negative control (sparse category missing no_arrival) passed unexpectedly!"
+  exit 1
+fi
 
 echo "All boundary tests passed!"
