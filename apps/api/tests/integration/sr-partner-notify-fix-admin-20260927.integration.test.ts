@@ -195,7 +195,21 @@ test("Next GET -> issueControlPlaneRequestAuth -> BootstrapAuthGuard -> authorit
 
   const canActivate = await guard.canActivate(mockContext);
   expect(canActivate).toBe(true);
-  expect(mockRequest.identity.tenantId).toBe("review-tenant-a");
+
+  // Assert controller consumes the emitted header correctly
+  const mockService = { listWebhookEndpoints: vi.fn().mockReturnValue([]) };
+  const controller = new TenantPartnerController(mockService as any, {} as any);
+
+  controller.listWebhookEndpoints(
+    mockRequest.identity,
+    mockRequest.headers["x-tenant-id"],
+    "req-1",
+  );
+
+  expect(mockService.listWebhookEndpoints).toHaveBeenCalledWith(
+    "review-tenant-a",
+    mockRequest.identity,
+  );
 
   process.env = originalEnv;
 });
@@ -267,7 +281,21 @@ test("Next GET -> issueControlPlaneRequestAuth -> BootstrapAuthGuard -> authorit
 
   const canActivate = await guard.canActivate(mockContext);
   expect(canActivate).toBe(true);
-  expect(mockRequest.identity.tenantId).toBe("review-tenant-a");
+
+  // Assert controller consumes the emitted header correctly
+  const mockService = { listWebhookEndpoints: vi.fn().mockReturnValue([]) };
+  const controller = new TenantPartnerController(mockService as any, {} as any);
+
+  controller.listWebhookEndpoints(
+    mockRequest.identity,
+    mockRequest.headers["x-tenant-id"],
+    "req-1",
+  );
+
+  expect(mockService.listWebhookEndpoints).toHaveBeenCalledWith(
+    "review-tenant-a",
+    mockRequest.identity,
+  );
 
   process.env = originalEnv;
 });
@@ -335,13 +363,15 @@ test("Next GET forged assertion -> 401 in strict IAP mode", async () => {
 
 import jwt from "jsonwebtoken";
 
-test("Next GET valid signed IAP assertion -> 200", async () => {
+test("Next GET valid signed IAP assertion -> Guard -> Controller delegates x-tenant-id", async () => {
   const originalEnv = process.env;
   process.env = {
     ...originalEnv,
     NODE_ENV: "production",
+    JWT_SECRET: "test-secret-123",
     IAP_JWT_SECRET_OR_PUBLIC_KEY: "test-secret",
     IAP_EXPECTED_AUDIENCE: "test-aud",
+    DRTS_API_URL: "http://localhost:3001",
   };
 
   const token = jwt.sign(
@@ -378,6 +408,80 @@ test("Next GET valid signed IAP assertion -> 200", async () => {
 
   expect(response.status).toBe(200);
   expect(upstreamRequest).toBeDefined();
+
+  // Guard execution
+  const iapAdapter = {
+    verifyIapToken: vi.fn().mockResolvedValue({
+      sub: "accounts.google.com:admin@platform.drts",
+      email: "admin@platform.drts",
+      gcp_ia_groups: ["platform-admins@platform.drts"],
+    }),
+    resolveSubject: vi.fn().mockResolvedValue({
+      principal: { principalId: "user-1", subject: "admin@platform.drts" },
+      membership: { membershipId: "mem-1", realm: "platform" },
+      authTime: new Date(),
+      authMethods: ["pwd"],
+      assurance: "high",
+      effectiveRoles: ["platform_admin"],
+      effectiveScopes: ["tenant:webhooks:read"],
+    }),
+  } as any;
+
+  const configService = {
+    get: (key: string) => {
+      if (key === "JWT_SECRET") return "test-secret-123";
+      return null;
+    },
+  } as any;
+
+  const jwtAuthService = new JwtAuthService(configService, {
+    query: vi.fn(),
+  } as any);
+
+  const guard = new BootstrapAuthGuard(
+    new Reflector(),
+    jwtAuthService,
+    undefined, // driverDeviceSessionService
+    undefined, // auditNotificationService
+    iapAdapter,
+    undefined, // securityEventsService
+    undefined, // stepUpProofService
+  );
+
+  const mockRequest = {
+    headers: Object.fromEntries(upstreamRequest!.headers.entries()),
+    route: { path: "tenant/webhooks" },
+    url: "/tenant/webhooks?page=1",
+    originalUrl: "/tenant/webhooks?page=1",
+    method: "GET",
+  } as any;
+
+  const mockContext = {
+    switchToHttp: () => ({ getRequest: () => mockRequest }),
+    getHandler: () => TenantPartnerController.prototype.listWebhookEndpoints,
+    getClass: () => TenantPartnerController,
+  } as any;
+
+  const canActivate = await guard.canActivate(mockContext);
+  expect(canActivate).toBe(true);
+
+  // IAP adapter deliberately sets tenantId to null for the identity
+  expect(mockRequest.identity.tenantId).toBeNull();
+
+  // The controller must rely on the x-tenant-id header instead
+  const mockService = { listWebhookEndpoints: vi.fn().mockReturnValue([]) };
+  const controller = new TenantPartnerController(mockService as any, {} as any);
+
+  controller.listWebhookEndpoints(
+    mockRequest.identity,
+    mockRequest.headers["x-tenant-id"],
+    "req-3",
+  );
+
+  expect(mockService.listWebhookEndpoints).toHaveBeenCalledWith(
+    "review-tenant-a",
+    mockRequest.identity,
+  );
 
   process.env = originalEnv;
 });
@@ -428,18 +532,31 @@ test("TenantPartnerController listWebhookEndpoints rejects missing tenant", asyn
   const controller = new TenantPartnerController(
     { listWebhookEndpoints: vi.fn() } as any,
     {} as any,
+    {} as any,
+    {} as any,
+    {} as any,
+    {} as any,
+    {} as any,
   );
   try {
     controller.listWebhookEndpoints(null as any, undefined, "req-1");
     expect.fail("Should throw");
   } catch (e: any) {
-    expect(e.code).toBe("TENANT_ID_REQUIRED");
+    expect(e.getResponse().error.code).toBe("TENANT_ID_REQUIRED");
   }
 });
 
 test("TenantPartnerController updateTenantNotifications mutation governance regression", async () => {
-  const mockService = { updateTenantNotifications: vi.fn() };
-  const controller = new TenantPartnerController(mockService as any, {} as any);
+  const mockService = { updateNotificationPreferences: vi.fn() };
+  const controller = new TenantPartnerController(
+    mockService as any,
+    {} as any,
+    {} as any,
+    {} as any,
+    {} as any,
+    {} as any,
+    {} as any,
+  );
   try {
     controller.updateTenantNotifications(
       { enabled: true } as any,
@@ -448,6 +565,6 @@ test("TenantPartnerController updateTenantNotifications mutation governance regr
     );
     expect.fail("Should throw");
   } catch (e: any) {
-    expect(e.code).toBe("TENANT_ID_REQUIRED");
+    expect(e.getResponse().error.code).toBe("TENANT_ID_REQUIRED");
   }
 });
