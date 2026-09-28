@@ -75,7 +75,7 @@ async function setup() {
     return service;
   };
   const a = makeService(repoA);
-  const entry = a.createPlatformPartnerEntry({
+  const entry = await a.createPlatformPartnerEntry({
     entrySlug: h.route.entrySlug,
     tenantId: h.route.tenantId,
     partnerCode: "governance-test",
@@ -220,8 +220,8 @@ describe("current durable notification governance", () => {
     async (status) => {
       const h = await setup();
       if (status === "inactive")
-        h.a.setPlatformPartnerEntryStatus(h.route.entrySlug, status);
-      else h.a.revokePlatformPartnerEntry(h.route.entrySlug);
+        await h.a.setPlatformPartnerEntryStatus(h.route.entrySlug, status);
+      else await h.a.revokePlatformPartnerEntry(h.route.entrySlug);
       expect(() => h.a.getPartnerEntry(h.route.entrySlug)).toThrow();
       // B still has the original active public snapshot, which must not authorize dispatch.
       expect(h.b.getPartnerEntry(h.route.entrySlug).activeFlag).toBe(true);
