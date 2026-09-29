@@ -1348,4 +1348,84 @@ describe("PartnerNotificationPanel", () => {
     expect(screen.queryByText("partnerNotification.accepted_unknown")).toBeNull();
     expect(screen.queryByText("partnerNotification.historical_unknown")).toBeNull();
   });
+
+  it("keeps the accepted retry locked (no second POST) while the post-retry readback is still pending (SR-PARTNER-NOTIFY-FIX-RETRY-READBACK-20260929 F1)", async () => {
+    const outboxId = "outbox-retry-readback-3";
+
+    let resolveSecondList: (value: any) => void = () => {};
+    const secondListPromise = new Promise((resolve) => {
+      resolveSecondList = resolve;
+    });
+
+    mockClient.listPartnerNotificationDeliveries
+      .mockResolvedValueOnce({
+        items: [
+          {
+            outboxId,
+            status: "failed",
+            eventType: "eta_changed",
+            attempts: 1,
+            createdAt: new Date().toISOString(),
+            retryDisposition: "automatic",
+            failureReason: "provider_transient_error",
+          },
+        ],
+        pageInfo: { totalItems: 1 },
+      })
+      .mockImplementationOnce(() => secondListPromise);
+    mockClient.retryPartnerNotificationDelivery.mockResolvedValueOnce({
+      kind: "requeued",
+    });
+
+    render(
+      <PartnerNotificationPanel
+        entrySlug="test-entry"
+        tenantId="test-tenant"
+        canWriteBinding={true}
+        canReadWebhooks={false}
+      />,
+    );
+
+    const retryBtn = await screen.findByRole("button", { name: /重送/i });
+    fireEvent.click(retryBtn);
+
+    await waitFor(() => {
+      expect(mockClient.retryPartnerNotificationDelivery).toHaveBeenCalledTimes(1);
+    });
+
+    // The automatic refetch triggered by handleRetry has been issued but has
+    // not resolved yet: the row's server snapshot is still the pre-retry
+    // "failed" data. The row must be shown as in-flight and the resend
+    // control must not accept another click while this readback is pending.
+    await screen.findByText("已受理重新入列");
+    await screen.findByText("partnerNotification.enqueued");
+
+    const retryBtnAfterAccept = screen.queryByRole("button", {
+      name: /重送/i,
+    });
+    if (retryBtnAfterAccept) {
+      fireEvent.click(retryBtnAfterAccept);
+    }
+
+    expect(mockClient.retryPartnerNotificationDelivery).toHaveBeenCalledTimes(1);
+
+    // Release the deferred readback so the test does not leave a pending
+    // promise/timer behind.
+    await act(async () => {
+      resolveSecondList({
+        items: [
+          {
+            outboxId,
+            status: "queued",
+            eventType: "eta_changed",
+            attempts: 1,
+            createdAt: new Date().toISOString(),
+            retryDisposition: "inflight",
+            failureReason: null,
+          },
+        ],
+        pageInfo: { totalItems: 1 },
+      });
+    });
+  });
 });

@@ -920,11 +920,7 @@ function PnDeliveries({
             r.deliveryId === retryRowId ||
             r.outboxId === retryRowId ||
             r.id === retryRowId;
-          if (
-            isRetryTargetRow &&
-            retryState === "queued" &&
-            PN_RETRY_INFLIGHT_STATUSES.has(r.status)
-          ) {
+          if (isRetryTargetRow && retryState === "queued") {
             return {
               ...r,
               status: "queued",
