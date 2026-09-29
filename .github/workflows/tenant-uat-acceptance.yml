@@ -39,6 +39,7 @@ on:
       - claude/sr-qa-tenant-001-acceptance-runner
       - codex/sr-qa-tenant-ci-repair-20260911
       - gemini2/sr-c115-harness-20260913
+      - gemini/sr-partner-notify-qa-20260917
     paths:
       - .github/workflows/tenant-uat-acceptance.yml
       - tools/ci/test_tenant_uat_acceptance_workflow.py
@@ -48,6 +49,13 @@ on:
       - tests/e2e/system-remediation/sr-qa-webhook-001/**
       - tests/unit/system-remediation/sr-qa-webhook-001/**
       - docs/04-uat/system-remediation-20260906/SR-QA-WEBHOOK-001.md
+      - tests/e2e/system-remediation/sr-partner-notify-qa-20260917/**
+      - tests/unit/system-remediation/sr-partner-notify-qa-20260917/**
+      - docs/04-uat/system-remediation-20260906/SR-PARTNER-NOTIFY-QA-20260917.md
+      - docs/02-architecture/partner-notification-20260917/04_sources.md
+      - tests/e2e/system-remediation/sr-partner-notify-qa-20260917/**
+      - tests/unit/system-remediation/sr-partner-notify-qa-20260917/**
+      - docs/04-uat/system-remediation-20260906/SR-PARTNER-NOTIFY-QA-20260917.md
 
 permissions:
   contents: read
@@ -84,6 +92,9 @@ jobs:
           - 8025:8025
     env:
       DATABASE_URL: postgresql://postgres:postgres@localhost:5432/drts_fleet_platform
+      PARTNER_NOTIFY_TRANSPORT_TEST_DATABASE_URL: postgresql://postgres:postgres@localhost:5432/drts_fleet_platform
+      PARTNER_NOTIFY_UI_TEST_DATABASE_URL: postgresql://postgres:postgres@localhost:5432/drts_fleet_platform
+      PARTNER_NOTIFY_SEQ_TEST_DATABASE_URL: postgresql://postgres:postgres@localhost:5432/drts_fleet_platform
       DRTS_UAT_ENV: sandbox
       NODE_ENV: test
       AUTH_MODE: test
@@ -92,6 +103,10 @@ jobs:
       NOTIFICATION_OUTBOX_DIRECTORY: /tmp/tenant-uat-mail-outbox
       NOTIFICATION_FROM_EMAIL: qa-sender@qa-tenant-uat.example
       DRTS_UAT_API_URL: http://127.0.0.1:4102
+      DRTS_REFERRAL_EMBED_BASE_URL: http://localhost:3002
+      DRTS_REFERRAL_EMBED_HANDOFF_KEY: hosted-uat-handoff-not-a-real-secret
+      REFERRAL_EMBED_SESSION_SECRET: hosted-uat-session-not-a-real-secret
+      REFERRAL_EMBED_ALLOWED_HOSTS: localhost:3002
       JWT_SECRET: tenant-uat-acceptance-runner-not-a-real-secret-32-chars-min
       JWT_ALGORITHMS: HS256
       CONTROLLED_DOWNLOAD_SIGNING_SECRET: tenant-uat-acceptance-runner-not-a-real-secret-32-chars-min
@@ -145,6 +160,10 @@ jobs:
           set -o pipefail
           pnpm install --frozen-lockfile 2>&1 | tee -a .artifacts/tenant-uat-acceptance/execution-log.txt
 
+      - name: Install Chromium for hosted UI acceptance
+        id: install_browser
+        run: pnpm exec playwright install --with-deps chromium
+
       - name: Apply migrations to the dedicated acceptance database
         id: migrate
         run: |
@@ -157,6 +176,13 @@ jobs:
           set -o pipefail
           pnpm --filter @drts/api... build 2>&1 | tee -a .artifacts/tenant-uat-acceptance/execution-log.txt
 
+      - name: Build UI applications
+        id: build_ui
+        run: |
+          set -o pipefail
+          pnpm --filter @drts/platform-admin-web... build 2>&1 | tee -a .artifacts/tenant-uat-acceptance/execution-log.txt
+          pnpm --filter @drts/referral-embed-web... build 2>&1 | tee -a .artifacts/tenant-uat-acceptance/execution-log.txt
+
       - name: Seed disposable tenant A/B sessions through the authoritative service
         id: seed
         run: |
@@ -164,9 +190,40 @@ jobs:
           ./apps/api/node_modules/.bin/tsx tests/e2e/system-remediation/sr-qa-tenant-001/appmodule-acceptance-seed.ts \
             2>&1 | awk '{ print; if ($0 !~ /^::add-mask::/) print >> ".artifacts/tenant-uat-acceptance/execution-log.txt"; }'
 
+      - name: Run tenant service-level regression suite
+        id: harness_unit
+        run: |
+          set -o pipefail
+          python3 tests/unit/system-remediation/sr-partner-notify-qa-20260917/run-reported.py .artifacts/tenant-uat-acceptance/unit-test-report.json \
+            pnpm exec vitest run \
+            tests/unit/system-remediation/sr-qa-tenant-001/ \
+            tests/unit/system-remediation/sr-partner-notify-*/ \
+            --reporter=default --reporter=json \
+            --outputFile.json=.artifacts/tenant-uat-acceptance/unit-test-report.json \
+            2>&1 | tee -a .artifacts/tenant-uat-acceptance/execution-log.txt
+
+      - name: Run webhook unit regression suite (C111-C115 34 tests)
+        id: webhook_unit
+        run: |
+          set -o pipefail
+          python3 tests/unit/system-remediation/sr-partner-notify-qa-20260917/run-reported.py .artifacts/tenant-uat-acceptance/webhook-unit-report.json \
+            pnpm exec vitest run \
+            tests/unit/system-remediation/sr-qa-webhook-001/ \
+            --reporter=default --reporter=json \
+            --outputFile.json=.artifacts/tenant-uat-acceptance/webhook-unit-report.json \
+            2>&1 | tee -a .artifacts/tenant-uat-acceptance/execution-log.txt
+
+      - name: Clear notification outbox backlog left by unit tests
+        run: |
+          pnpm --filter @drts/api exec node -e "
+            const { Client } = require('pg');
+            const client = new Client({ connectionString: process.env.DATABASE_URL });
+            client.connect().then(() => client.query('TRUNCATE TABLE ops.consumer_notification_outbox CASCADE;')).then(() => client.end()).catch(console.error);
+          "
       - name: Start the real API server
         id: start_api
         env:
+          DRTS_ALLOW_LOCAL_WEBHOOKS: "true"
           API_PORT: "4102"
           API_HOST: "127.0.0.1"
         run: |
@@ -189,27 +246,51 @@ jobs:
           cat .artifacts/tenant-uat-acceptance/api-server.log || true
           exit 1
 
-      - name: Run tenant HTTP acceptance specs (real server, real DB, real sessions)
-        id: harness_e2e
+      - name: Start the UI applications
+        id: start_ui
+        env:
+          PORT: 3001
+          DRTS_API_URL: http://127.0.0.1:4102
+          DRTS_ENV: test
         run: |
           set -o pipefail
-          pnpm exec playwright test \
-            -c playwright.system-remediation.config.ts \
+          (
+            cd apps/platform-admin-web
+            pnpm exec next start --hostname 127.0.0.1 --port 3001 > ../../.artifacts/tenant-uat-acceptance/admin-web.log 2>&1 &
+            echo $! > ../../.artifacts/tenant-uat-acceptance/admin-web.pid
+          )
+          (
+            cd apps/referral-embed-web
+            pnpm exec next start --hostname 127.0.0.1 --port 3002 > ../../.artifacts/tenant-uat-acceptance/referral-web.log 2>&1 &
+            echo $! > ../../.artifacts/tenant-uat-acceptance/referral-web.pid
+          )
+          for origin in http://127.0.0.1:3001 http://127.0.0.1:3002; do
+            ready=false
+            for i in $(seq 1 60); do
+              code="$(curl --max-time 5 -s -o /dev/null -w '%{http_code}' "$origin" || true)"
+              if [[ "$code" =~ ^[23][0-9][0-9]$ ]]; then ready=true; break; fi
+              sleep 1
+            done
+            if [ "$ready" != true ]; then
+              echo "::error::UI did not become ready: $origin"
+              exit 1
+            fi
+          done
+
+      - name: Run tenant HTTP acceptance specs (real server, real DB, real sessions)
+        id: harness_e2e
+        env:
+          PLAYWRIGHT_JSON_OUTPUT_FILE: "test-results/system-remediation-report.json"
+        run: |
+          set -o pipefail
+          python3 tests/unit/system-remediation/sr-partner-notify-qa-20260917/run-reported.py test-results/system-remediation-report.json \
+            pnpm exec playwright test \
+            -c playwright.system-remediation.config.ts --reporter=list,json \
             --output test-results/tenant-artifacts \
-            tests/e2e/system-remediation/sr-qa-tenant-001 --workers=1 --trace=off \
+            tests/e2e/system-remediation/sr-qa-tenant-001 --workers=1 --trace=retain-on-failure \
             2>&1 | tee -a .artifacts/tenant-uat-acceptance/execution-log.txt
           mkdir -p .artifacts/tenant-uat-acceptance
           cp test-results/system-remediation-report.json .artifacts/tenant-uat-acceptance/system-remediation-report.json || true
-
-      - name: Run tenant service-level regression suite
-        id: harness_unit
-        run: |
-          set -o pipefail
-          pnpm exec vitest run \
-            tests/unit/system-remediation/sr-qa-tenant-001/ \
-            --reporter=default --reporter=json \
-            --outputFile.json=.artifacts/tenant-uat-acceptance/unit-test-report.json \
-            2>&1 | tee -a .artifacts/tenant-uat-acceptance/execution-log.txt
 
       - name: Run webhook E2E acceptance specs (C111-C112 real service & HTTP)
         id: webhook_e2e
@@ -217,24 +298,15 @@ jobs:
           PLAYWRIGHT_JSON_OUTPUT_FILE: "test-results/webhook-e2e-report.json"
         run: |
           set -o pipefail
-          pnpm exec playwright test \
-            -c playwright.system-remediation.config.ts \
+          python3 tests/unit/system-remediation/sr-partner-notify-qa-20260917/run-reported.py test-results/webhook-e2e-report.json \
+            pnpm exec playwright test \
+            -c playwright.system-remediation.config.ts --reporter=list,json \
             --output test-results/webhook-artifacts \
-            tests/e2e/system-remediation/sr-qa-webhook-001/sr-qa-webhook-001.spec.ts --workers=1 --trace=off \
+            tests/e2e/system-remediation/sr-qa-webhook-001/sr-qa-webhook-001.spec.ts --workers=1 --trace=retain-on-failure \
             2>&1 | tee -a .artifacts/tenant-uat-acceptance/execution-log.txt
           if [ ! -f test-results/system-remediation-report.json ] && [ -f .artifacts/tenant-uat-acceptance/system-remediation-report.json ]; then
             cp .artifacts/tenant-uat-acceptance/system-remediation-report.json test-results/system-remediation-report.json
           fi
-
-      - name: Run webhook unit regression suite (C111-C115 34 tests)
-        id: webhook_unit
-        run: |
-          set -o pipefail
-          pnpm exec vitest run \
-            tests/unit/system-remediation/sr-qa-webhook-001/ \
-            --reporter=default --reporter=json \
-            --outputFile.json=.artifacts/tenant-uat-acceptance/webhook-unit-report.json \
-            2>&1 | tee -a .artifacts/tenant-uat-acceptance/execution-log.txt
 
       - name: Run C113-C115 pre-restart hosted acceptance (ledger audit, geo provider, C115 seed)
         id: c113_c115_acceptance
@@ -247,6 +319,8 @@ jobs:
 
       - name: Restart the real API without resetting its database
         id: restart_api
+        env:
+          DRTS_ALLOW_LOCAL_WEBHOOKS: "true"
         run: |
           set -euo pipefail
           old_pid="$(cat .artifacts/tenant-uat-acceptance/api-server.pid)"
@@ -291,12 +365,39 @@ jobs:
           ./apps/api/node_modules/.bin/tsx --tsconfig apps/api/tsconfig.json tests/e2e/system-remediation/sr-qa-webhook-001/c115-restart-readback.ts \
             2>&1 | tee -a .artifacts/tenant-uat-acceptance/execution-log.txt
 
+      # Finish the existing tenant/webhook restart gates before partner faults.
+      - name: Run partner notify E2E acceptance specs
+        id: partner_notify_e2e
+        env:
+          PLAYWRIGHT_JSON_OUTPUT_FILE: "test-results/partner-notify-e2e-report.json"
+        run: |
+          set -o pipefail
+          python3 tests/unit/system-remediation/sr-partner-notify-qa-20260917/run-reported.py test-results/partner-notify-e2e-report.json \
+            pnpm exec playwright test \
+            -c playwright.system-remediation.config.ts --reporter=list,json \
+            --output test-results/partner-notify-artifacts \
+            tests/e2e/system-remediation/sr-partner-notify-qa-20260917 --workers=1 --trace=retain-on-failure \
+            2>&1 | tee -a .artifacts/tenant-uat-acceptance/execution-log.txt
+
+      - name: Run partner notify unit regression suite
+        id: partner_notify_unit
+        run: |
+          set -o pipefail
+          python3 tests/unit/system-remediation/sr-partner-notify-qa-20260917/run-reported.py .artifacts/tenant-uat-acceptance/partner-notify-unit-report.json \
+            pnpm exec vitest run \
+            tests/unit/system-remediation/sr-partner-notify-qa-20260917/ \
+            --reporter=default --reporter=json \
+            --outputFile.json=.artifacts/tenant-uat-acceptance/partner-notify-unit-report.json \
+            2>&1 | tee -a .artifacts/tenant-uat-acceptance/execution-log.txt
+
       - name: Stop background API server
         if: always()
         run: |
-          if [ -f .artifacts/tenant-uat-acceptance/api-server.pid ]; then
-            kill "$(cat .artifacts/tenant-uat-acceptance/api-server.pid)" 2>/dev/null || true
-          fi
+          for name in api-server admin-web referral-web; do
+            if [ -f ".artifacts/tenant-uat-acceptance/$name.pid" ]; then
+              kill "$(cat ".artifacts/tenant-uat-acceptance/$name.pid")" 2>/dev/null || true
+            fi
+          done
 
       - name: Gate on zero skips and every test passed (Playwright + Vitest)
         id: gate
@@ -304,7 +405,78 @@ jobs:
         run: |
           python3 - <<'PY_GATE'
           import json
+          import os
+          import re
           from pathlib import Path
+
+          expected_candidate = os.environ.get("CANDIDATE_SHA", "")
+          if not re.fullmatch(r"[0-9a-f]{40}", expected_candidate):
+              raise SystemExit("Gate requires an immutable candidate SHA")
+          manifest = json.loads(Path("tests/unit/system-remediation/sr-partner-notify-qa-20260917/required-cases.json").read_text())
+
+          def require_identity(data, label, execution=True):
+              if data.get("candidate_sha") != expected_candidate:
+                  raise SystemExit(f"{label}: candidate SHA mismatch")
+              for metadata in (data.get("metadata", {}), data.get("config", {}).get("metadata", {})):
+                  for key in ("candidate_sha", "candidateSha"):
+                      if key in metadata and metadata[key] != expected_candidate:
+                          raise SystemExit(f"{label}: metadata candidate SHA mismatch")
+              if execution:
+                  run = data.get("execution", {})
+                  if (run.get("candidate_sha") != expected_candidate
+                      or run.get("workflow_sha") != os.environ.get("WORKFLOW_SHA")
+                      or run.get("exit_code") != 0):
+                      raise SystemExit(f"{label}: missing or unsuccessful report execution")
+
+          def case_file(value, kind):
+              return value.replace("\\", "/").split(f"tests/{kind}/system-remediation/")[-1]
+
+          def require_unit_cases(data, group):
+              require_identity(data, group)
+              found = {}
+              assertions = 0
+              for suite in data.get("testResults", []):
+                  key = case_file(suite.get("name", ""), "unit")
+                  cases = suite.get("assertionResults", [])
+                  if suite.get("status") != "passed" or not cases:
+                      raise SystemExit(f"{group}: empty or unsuccessful suite {key}")
+                  if key in found:
+                      raise SystemExit(f"{group}: duplicate suite {key}")
+                  found[key] = set()
+                  for case in cases:
+                      identity = case.get("fullName")
+                      if not identity or identity in found[key] or case.get("status") != "passed":
+                          raise SystemExit(f"{group}: unnamed, duplicate, skipped or failed case in {key}")
+                      found[key].add(identity)
+                      assertions += 1
+              if assertions != data.get("numTotalTests") or assertions != data.get("numPassedTests"):
+                  raise SystemExit(f"{group}: aggregate counts do not match executed assertions")
+              for key, names in manifest[group].items():
+                  missing = set(names) - found.get(key, set())
+                  if missing:
+                      raise SystemExit(f"{group}: missing required cases in {key}: {sorted(missing)}")
+
+          def require_e2e_cases(data, group):
+              require_identity(data, group)
+              if data.get("errors"):
+                  raise SystemExit(f"{group}: runner errors")
+              found = {}
+              for suite in data.get("suites", []):
+                  for spec in iter_specs(suite):
+                      key = case_file(spec.get("file", ""), "e2e")
+                      tests = spec.get("tests", [])
+                      if not spec.get("title") or not tests:
+                          raise SystemExit(f"{group}: unnamed or empty spec {key}")
+                      for test in tests:
+                          results = test.get("results", [])
+                          if (test.get("expectedStatus", "passed") != "passed"
+                              or not results or any(result.get("status") != "passed" for result in results)):
+                              raise SystemExit(f"{group}: skipped, failed or flaky case {spec.get('title')}")
+                      found.setdefault(key, set()).add(spec["title"])
+              for key, names in manifest[group].items():
+                  missing = set(names) - found.get(key, set())
+                  if missing:
+                      raise SystemExit(f"{group}: missing required cases in {key}: {sorted(missing)}")
 
           playwright_report = Path("test-results/system-remediation-report.json")
           if not playwright_report.exists() and Path(".artifacts/tenant-uat-acceptance/system-remediation-report.json").exists():
@@ -321,6 +493,8 @@ jobs:
                   yield spec
               for child in suite.get("suites", []):
                   yield from iter_specs(child)
+
+          require_e2e_cases(report, "tenant_e2e")
 
           all_specs = [
               spec
@@ -366,6 +540,7 @@ jobs:
           if not required_files.issubset(actual_files):
               raise SystemExit(f"Tenant capability matrix missing: {sorted(required_files - actual_files)}")
           restart = json.loads(Path(".artifacts/tenant-uat-acceptance/restart-report.json").read_text())
+          require_identity(restart, "tenant restart", execution=False)
           if restart.get("status") != "passed" or restart.get("verified", 0) < 12:
               raise SystemExit("Tenant restart durability did not pass the complete matrix")
 
@@ -375,11 +550,13 @@ jobs:
                   "Tenant UAT acceptance gate: no Vitest JSON report was produced."
               )
           unit_report = json.loads(unit_report_path.read_text())
+          require_unit_cases(unit_report, "tenant_unit")
           unit_total = unit_report.get("numTotalTests", 0)
           unit_passed = unit_report.get("numPassedTests", 0)
           unit_pending = unit_report.get("numPendingTests", 0)
+
           if (
-              unit_total < 27
+              unit_total < 280
               or unit_passed != unit_total
               or unit_pending
               or not unit_report.get("success")
@@ -398,6 +575,7 @@ jobs:
                   "Tenant UAT acceptance gate: no Webhook Vitest JSON report was produced."
               )
           webhook_unit = json.loads(webhook_unit_path.read_text())
+          require_unit_cases(webhook_unit, "webhook_unit")
           wh_total = webhook_unit.get("numTotalTests", 0)
           wh_passed = webhook_unit.get("numPassedTests", 0)
           wh_pending = webhook_unit.get("numPendingTests", 0)
@@ -422,6 +600,7 @@ jobs:
               )
           import os
           cap_report = json.loads(capability_report_path.read_text())
+          require_identity(cap_report, "C111-C115", execution=False)
           expected_candidate = os.environ.get("CANDIDATE_SHA", "").strip()
           actual_candidate = cap_report.get("candidate_sha", "").strip()
           if expected_candidate and actual_candidate != expected_candidate:
@@ -446,30 +625,32 @@ jobs:
                   raise SystemExit(f"Capability {cap_id} has empty verification evidence")
           print(f"C111-C115 Capability matrix verified: all 5 capabilities passed under candidate {actual_candidate}.")
 
+
+          # Partner notify unit regression suite gate
+          pn_unit_path = Path(".artifacts/tenant-uat-acceptance/partner-notify-unit-report.json")
+          if not pn_unit_path.exists():
+              raise SystemExit("Tenant UAT acceptance gate: no Partner Notify Vitest JSON report was produced.")
+          pn_unit = json.loads(pn_unit_path.read_text())
+          require_unit_cases(pn_unit, "partner_unit")
+          pn_total = pn_unit.get("numTotalTests", 0)
+          pn_passed = pn_unit.get("numPassedTests", 0)
+          pn_pending = pn_unit.get("numPendingTests", 0)
+          if pn_total < 1 or pn_passed != pn_total or pn_pending or not pn_unit.get("success"):
+              raise SystemExit(f"Partner Notify unit regression incomplete: total={pn_total}, passed={pn_passed}, pending={pn_pending}, success={pn_unit.get('success')}.")
+          print(f"Partner Notify unit regression: {pn_passed}/{pn_total} passed, zero skips.")
+
+          pn_e2e_report = Path("test-results/partner-notify-e2e-report.json")
+          if not pn_e2e_report.exists():
+              raise SystemExit("Partner Notify E2E acceptance gate: no Playwright JSON report was produced.")
+          pn_e2e_data = json.loads(pn_e2e_report.read_text())
+          require_e2e_cases(pn_e2e_data, "partner_e2e")
+
           webhook_e2e_report = Path("test-results/webhook-e2e-report.json")
-          if webhook_e2e_report.exists():
-              wh_e2e_data = json.loads(webhook_e2e_report.read_text())
-              wh_e2e_specs = [
-                  spec
-                  for suite in wh_e2e_data.get("suites", [])
-                  for spec in iter_specs(suite)
-                  if "sr-qa-webhook-001" in spec.get("file", "")
-              ]
-              wh_e2e_total = 0
-              wh_e2e_passed = 0
-              for spec in wh_e2e_specs:
-                  for test in spec.get("tests", []):
-                      wh_e2e_total += 1
-                      results = test.get("results", [])
-                      status = results[-1].get("status") if results else None
-                      if status == "passed":
-                          wh_e2e_passed += 1
-              if wh_e2e_total and wh_e2e_passed != wh_e2e_total:
-                  raise SystemExit(
-                      f"Webhook E2E acceptance incomplete: total={wh_e2e_total}, passed={wh_e2e_passed}."
-                  )
-              if wh_e2e_total:
-                  print(f"Webhook E2E acceptance: {wh_e2e_passed}/{wh_e2e_total} passed, zero skips.")
+          if not webhook_e2e_report.exists():
+              raise SystemExit("Webhook E2E acceptance gate: no Playwright JSON report was produced.")
+          wh_e2e_data = json.loads(webhook_e2e_report.read_text())
+          require_e2e_cases(wh_e2e_data, "webhook_e2e")
+          print("Required partner, webhook and tenant cases passed independently with same-SHA evidence.")
           PY_GATE
 
       - name: Record run status
@@ -478,12 +659,17 @@ jobs:
           INSTALL_OUTCOME: ${{ steps.install.outcome }}
           MIGRATE_OUTCOME: ${{ steps.migrate.outcome }}
           BUILD_API_OUTCOME: ${{ steps.build_api.outcome }}
+          BUILD_UI_OUTCOME: ${{ steps.build_ui.outcome }}
+          START_UI_OUTCOME: ${{ steps.start_ui.outcome }}
+          INSTALL_BROWSER_OUTCOME: ${{ steps.install_browser.outcome }}
           START_API_OUTCOME: ${{ steps.start_api.outcome }}
           SEED_OUTCOME: ${{ steps.seed.outcome }}
           HARNESS_E2E_OUTCOME: ${{ steps.harness_e2e.outcome }}
           HARNESS_UNIT_OUTCOME: ${{ steps.harness_unit.outcome }}
           WEBHOOK_E2E_OUTCOME: ${{ steps.webhook_e2e.outcome }}
           WEBHOOK_UNIT_OUTCOME: ${{ steps.webhook_unit.outcome }}
+          PARTNER_NOTIFY_E2E_OUTCOME: ${{ steps.partner_notify_e2e.outcome }}
+          PARTNER_NOTIFY_UNIT_OUTCOME: ${{ steps.partner_notify_unit.outcome }}
           C113_C115_ACCEPTANCE_OUTCOME: ${{ steps.c113_c115_acceptance.outcome }}
           GATE_OUTCOME: ${{ steps.gate.outcome }}
           RESTART_API_OUTCOME: ${{ steps.restart_api.outcome }}
@@ -504,12 +690,17 @@ jobs:
                   "INSTALL_OUTCOME",
                   "MIGRATE_OUTCOME",
                   "BUILD_API_OUTCOME",
+                  "BUILD_UI_OUTCOME",
+                  "START_UI_OUTCOME",
+                  "INSTALL_BROWSER_OUTCOME",
                   "START_API_OUTCOME",
                   "SEED_OUTCOME",
                   "HARNESS_E2E_OUTCOME",
                   "HARNESS_UNIT_OUTCOME",
                   "WEBHOOK_E2E_OUTCOME",
                   "WEBHOOK_UNIT_OUTCOME",
+                  "PARTNER_NOTIFY_E2E_OUTCOME",
+                  "PARTNER_NOTIFY_UNIT_OUTCOME",
                   "C113_C115_ACCEPTANCE_OUTCOME",
                   "GATE_OUTCOME",
                   "RESTART_API_OUTCOME",
@@ -523,6 +714,9 @@ jobs:
                   "INSTALL_OUTCOME",
                   "MIGRATE_OUTCOME",
                   "BUILD_API_OUTCOME",
+                  "BUILD_UI_OUTCOME",
+                  "START_UI_OUTCOME",
+                  "INSTALL_BROWSER_OUTCOME",
                   "START_API_OUTCOME",
                   "SEED_OUTCOME",
               ]
@@ -533,6 +727,8 @@ jobs:
               and outcomes["HARNESS_UNIT_OUTCOME"] == "success"
               and outcomes["WEBHOOK_E2E_OUTCOME"] == "success"
               and outcomes["WEBHOOK_UNIT_OUTCOME"] == "success"
+              and outcomes["PARTNER_NOTIFY_E2E_OUTCOME"] == "success"
+              and outcomes["PARTNER_NOTIFY_UNIT_OUTCOME"] == "success"
               and outcomes["C113_C115_ACCEPTANCE_OUTCOME"] == "success"
               and outcomes["GATE_OUTCOME"] == "success"
               and outcomes["RESTART_API_OUTCOME"] == "success"
@@ -562,9 +758,12 @@ jobs:
           path: |
             .artifacts/tenant-uat-acceptance/execution-log.txt
             .artifacts/tenant-uat-acceptance/api-server.log
+            .artifacts/tenant-uat-acceptance/admin-web.log
+            .artifacts/tenant-uat-acceptance/referral-web.log
             .artifacts/tenant-uat-acceptance/system-remediation-report.json
             .artifacts/tenant-uat-acceptance/unit-test-report.json
             .artifacts/tenant-uat-acceptance/webhook-unit-report.json
+            .artifacts/tenant-uat-acceptance/partner-notify-unit-report.json
             .artifacts/tenant-uat-acceptance/run-status.json
             .artifacts/tenant-uat-acceptance/identity-fixtures.json
             .artifacts/tenant-uat-acceptance/restart-report.json

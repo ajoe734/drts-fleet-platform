@@ -1,0 +1,1004 @@
+import { execFile, spawn } from "node:child_process";
+import { createHash, randomUUID } from "node:crypto";
+import {
+  mkdtemp,
+  open,
+  readFile,
+  realpath,
+  rm,
+  writeFile,
+} from "node:fs/promises";
+import { createServer, type Server } from "node:http";
+import { createRequire } from "node:module";
+import { tmpdir } from "node:os";
+import path from "node:path";
+import { createInterface } from "node:readline";
+import { promisify } from "node:util";
+import { expect } from "@playwright/test";
+import type {
+  CreatePartnerChannelEntryCommand,
+  PartnerChannelEntryRecord,
+  PartnerIngressCredentialIssued,
+  PartnerIngressHandoffSession,
+  PartnerEntryNotificationBinding,
+  TenantWebhookEndpoint,
+  MultiTaxiOperatingAuthorizationRecord,
+} from "@drts/contracts";
+import { decodeTenantWire } from "../sr-qa-tenant-001/http-boundary";
+import { ControlledReceiver, type ReceiverScope } from "./controlled-receiver";
+import type { ServiceProductRecord } from "../../../../apps/api/src/modules/service-product/service-product.types";
+import type { SyntheticEvent } from "./synthetic-event";
+
+const run = promisify(execFile);
+function required(name: string) {
+  const value = process.env[name];
+  if (!value) throw new Error(`Missing hosted fixture ${name}`);
+  return value;
+}
+interface Database {
+  query(
+    sql: string,
+    params?: unknown[],
+  ): Promise<{ rows: Record<string, any>[] }>;
+  connect(): Promise<{
+    query(
+      sql: string,
+      params?: unknown[],
+    ): Promise<{ rows: Record<string, any>[] }>;
+    release(): void;
+  }>;
+  end(): Promise<void>;
+}
+export interface PartnerFixtureEntry {
+  entry: PartnerChannelEntryRecord;
+  partnerUserRef: string;
+  apiKey: string;
+  token: string;
+  webhookId: string;
+  binding: PartnerEntryNotificationBinding | null;
+}
+
+/** Uses the existing hosted full AppModule, real bearer/step-up authority and migrations. */
+export class PartnerFixture {
+  readonly entries: PartnerFixtureEntry[] = [];
+  readonly requests: {
+    event: string;
+    rawBody: string;
+    hash: string;
+    status: number;
+    responseBody: string;
+    secretVersion: number;
+    receivedAt: string;
+  }[] = [];
+  readonly db: Database;
+  receiver!: ControlledReceiver;
+  private server?: Server;
+  private directory?: string;
+  private scopes: ReceiverScope[] = [];
+  private url = "";
+  private readonly timers = new Set<ReturnType<typeof setTimeout>>();
+  // Faults only apply to real passenger events, never governance setup.
+  fault:
+    | "none"
+    | "timeout"
+    | "unavailable"
+    | "invalid_ack"
+    | "html_ack"
+    | "wrong_notification"
+    | "wrong_delivery"
+    | "wrong_entry"
+    | "missing_receipt" = "none";
+
+  constructor() {
+    if (
+      process.env.GITHUB_ACTIONS !== "true" ||
+      required("DRTS_UAT_ENV") !== "sandbox"
+    )
+      throw new Error(
+        "Partner runtime acceptance must run in the authorized hosted workflow",
+      );
+    const apiRequire = createRequire(path.resolve("apps/api/package.json"));
+    const { Pool } = apiRequire("pg") as {
+      Pool: new (args: { connectionString: string }) => Database;
+    };
+    this.db = new Pool({ connectionString: required("DATABASE_URL") });
+  }
+
+  async call<T>(
+    apiPath: string,
+    token: string | null,
+    method = "GET",
+    data?: unknown,
+    tenant?: string,
+  ): Promise<T> {
+    const origin = required("DRTS_UAT_API_URL");
+    const headers: Record<string, string> = {
+      "x-request-id": `partner-qa-${randomUUID()}`,
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      ...(tenant ? { "x-tenant-id": tenant } : {}),
+      ...(method === "POST" && apiPath === "tenant/webhooks/test"
+        ? { "idempotency-key": randomUUID() }
+        : {}),
+    };
+    // The authoritative policy also gates tenant webhook creation/test/update.
+    // Let it decide whether this exact action/session requires a proof.
+    if (method !== "GET" && token) {
+      const requestProof = () =>
+        fetch(`${origin}/api/identity/step-up-proofs`, {
+          method: "POST",
+          headers: { ...headers, "Content-Type": "application/json" },
+          body: JSON.stringify({ method, path: `/api/${apiPath}` }),
+          redirect: "error",
+          signal: AbortSignal.timeout(20_000),
+        });
+      let proof = await requestProof();
+      if (proof.status === 429) {
+        // A failed Playwright worker rebuilds its disposable governance setup.
+        // Respect the existing server throttle once; never disable the guard
+        // or retry a successful mutation. This is setup, not rate-limit UAT.
+        const delay = Number(proof.headers.get("retry-after") ?? 60);
+        expect(delay > 0 && delay <= 60).toBe(true);
+        await proof.arrayBuffer();
+        await new Promise((resolve) =>
+          setTimeout(resolve, delay * 1_000 + 500),
+        );
+        proof = await requestProof();
+      }
+      expect(proof.status, `step-up ${apiPath}`).toBe(201);
+      const envelope = decodeTenantWire(await proof.json());
+      expect(typeof envelope.data.required).toBe("boolean");
+      if (envelope.data.required) {
+        expect(typeof envelope.data.stepUpReference).toBe("string");
+        headers["x-drts-step-up-reference"] = envelope.data.stepUpReference;
+      }
+    }
+    // Node fetch keeps credential issuance/exchange out of Playwright traces.
+    // Browser requests retain their real trace; no auth/response interception.
+    const response = await fetch(`${origin}/api/${apiPath}`, {
+      method,
+      headers: { ...headers, "Content-Type": "application/json" },
+      ...(data === undefined ? {} : { body: JSON.stringify(data) }),
+      redirect: "error",
+      signal: AbortSignal.timeout(20_000),
+    });
+    expect(response.headers.get("x-drts-candidate-sha")).toBe(
+      required("CANDIDATE_SHA"),
+    );
+    const envelope = decodeTenantWire(await response.json());
+    expect(
+      response.status,
+      `${method} ${apiPath}: ${envelope.error?.code ?? "response"}`,
+    ).toBe(method === "POST" ? 201 : 200);
+    expect(envelope.data).toBeDefined();
+    return envelope.data as T;
+  }
+
+  async start() {
+    this.directory = await mkdtemp(
+      path.join(tmpdir(), "partner-hosted-receiver-"),
+    );
+    await this.provisionFreshSessions();
+    this.receiver = new ControlledReceiver(this.directory, this.scopes);
+    this.server = createServer((request, response) => {
+      const chunks: Buffer[] = [];
+      request.on("data", (chunk: Buffer) => chunks.push(chunk));
+      request.on("end", () => {
+        void (async () => {
+          const raw = Buffer.concat(chunks);
+          const reply = await this.receiver.handle(request.headers, raw);
+          const event = String(request.headers["x-drts-event-type"]);
+          const passenger =
+            event.startsWith("passenger.") &&
+            event !== "passenger.notification.test.v1";
+          const fault = passenger ? this.fault : "none";
+          let status = reply.status;
+          let body = reply.body;
+          if (fault === "unavailable") {
+            // The signed request reached the durable receiver, but the external
+            // response is unavailable. DRTS must never infer an accepted ack.
+            status = 503;
+            body = JSON.stringify({ error: "controlled_unavailable" });
+          } else if (fault === "invalid_ack") {
+            status = 204;
+            body = "";
+          } else if (fault === "html_ack") {
+            status = 200;
+            body = "<html><body>Accepted</body></html>";
+          } else if (
+            fault.startsWith("wrong_") ||
+            fault === "missing_receipt"
+          ) {
+            // Corrupt only the external response AFTER a valid signed request
+            // has been durably accepted. The DRTS ack validator stays real.
+            const ack = JSON.parse(body);
+            const key = {
+              wrong_notification: "notification_id",
+              wrong_delivery: "delivery_id",
+              wrong_entry: "partner_entry_slug",
+              missing_receipt: "receipt_id",
+            }[
+              fault as
+                | "wrong_notification"
+                | "wrong_delivery"
+                | "wrong_entry"
+                | "missing_receipt"
+            ];
+            if (fault === "missing_receipt") delete ack[key];
+            else ack[key] = `mismatched-${randomUUID()}`;
+            body = JSON.stringify(ack);
+          }
+          this.requests.push({
+            event,
+            rawBody: raw.toString("utf8"),
+            hash: createHash("sha256").update(raw).digest("hex"),
+            status,
+            responseBody: body,
+            receivedAt: new Date().toISOString(),
+            // Evidence only: retain the public version, never the secret/HMAC.
+            secretVersion: Number(
+              /^v=(\d+);/.exec(
+                String(request.headers["x-drts-webhook-signature"]),
+              )?.[1],
+            ),
+          });
+          const finish = () => {
+            response.writeHead(status, {
+              "Content-Type":
+                fault === "html_ack" ? "text/html" : "application/json",
+            });
+            response.end(body);
+          };
+          if (fault === "timeout") {
+            // Production ack deadline is 10 seconds, including response body.
+            const timer = setTimeout(() => {
+              this.timers.delete(timer);
+              finish();
+            }, 11_000);
+            this.timers.add(timer);
+          } else finish();
+        })().catch(() => {
+          response.writeHead(503);
+          response.end("{}");
+        });
+      });
+    });
+    await new Promise<void>((resolve) =>
+      this.server!.listen(0, "127.0.0.1", resolve),
+    );
+    const address = this.server.address();
+    if (!address || typeof address === "string")
+      throw new Error("Receiver address unavailable");
+    this.url = `http://127.0.0.1:${address.port}/notify`;
+    const platform = required("DRTS_UAT_TOKEN_PLATFORM");
+    // The default taxi_reservation product is deliberately inactive. Configure
+    // both product and runtime policy through governance, before creating rides.
+    const products = await this.call<{ items: ServiceProductRecord[] }>(
+      "admin/service-products",
+      platform,
+    );
+    const reservation = products.items.find(
+      (product) => product.serviceProductType === "taxi_reservation",
+    );
+    if (reservation) {
+      if (!reservation.active)
+        await this.call(
+          `admin/service-products/${reservation.serviceProductId}`,
+          platform,
+          "PUT",
+          { active: true },
+        );
+    } else {
+      await this.call("admin/service-products", platform, "POST", {
+        serviceProductType: "taxi_reservation",
+        displayName: "Controlled QA taxi reservation",
+        timing: "reservation",
+        active: true,
+        defaultBillingMode: "meter",
+      });
+    }
+    const productReadback = await this.call<{ items: ServiceProductRecord[] }>(
+      "admin/service-products",
+      platform,
+    );
+    expect(
+      productReadback.items.find(
+        (product) => product.serviceProductType === "taxi_reservation",
+      )?.active,
+    ).toBe(true);
+    await this.call(
+      "admin/service-products/runtime-policies/multi_taxi_direct/taxi_reservation",
+      platform,
+      "PUT",
+      {
+        active: true,
+        effectiveFrom: new Date(Date.now() - 60_000).toISOString(),
+        effectiveUntil: new Date(Date.now() + 3_600_000).toISOString(),
+      },
+    );
+    // Playwright starts a new worker after a failure. Reuse the single effective
+    // authorization so that a rerun cannot make production resolution ambiguous.
+    const authorizations = await this.call<{
+      items: MultiTaxiOperatingAuthorizationRecord[];
+    }>("platform-admin/multi-taxi/authorizations", platform);
+    const active = authorizations.items.filter(
+      (authorization) =>
+        authorization.status === "approved" &&
+        Date.parse(authorization.effectiveFrom) <= Date.now() &&
+        (authorization.effectiveUntil === null ||
+          Date.parse(authorization.effectiveUntil) > Date.now()),
+    );
+    expect(
+      active.length,
+      "one unambiguous operating authorization",
+    ).toBeLessThanOrEqual(1);
+    if (active.length === 0) {
+      const authorization =
+        await this.call<MultiTaxiOperatingAuthorizationRecord>(
+          "platform-admin/multi-taxi/authorizations",
+          platform,
+          "POST",
+          {
+            operatorId: `qa-${randomUUID()}`,
+            authorityCode: "QA-CONTROLLED",
+            businessPlanVersion: "qa-v1",
+            serviceAreaCodes: ["QA"],
+            activeFareVersionId: "qa-fare",
+            effectiveFrom: new Date(Date.now() - 60_000).toISOString(),
+            effectiveUntil: new Date(Date.now() + 3_600_000).toISOString(),
+          },
+        );
+      await this.call(
+        `platform-admin/multi-taxi/authorizations/${authorization.authorizationId}/activate`,
+        platform,
+        "POST",
+        {},
+      );
+    }
+    const tenantA = required("DRTS_UAT_TENANT_A");
+    const tenantB = required("DRTS_UAT_TENANT_B");
+    expect(tenantA).not.toBe(tenantB);
+    for (const [tenantId, token, count] of [
+      [tenantA, required("DRTS_UAT_TOKEN_A"), 2],
+      [tenantB, required("DRTS_UAT_TOKEN_B"), 2],
+    ] as const) {
+      const entries = new Map<string, ReadonlySet<string>>();
+      const secret = randomUUID();
+      this.scopes.push({ tenantId, secret, secretVersion: 1, entries });
+      const webhook = await this.call<
+        Pick<TenantWebhookEndpoint, "webhookId" | "status">
+      >(
+        "tenant/webhooks",
+        token,
+        "POST",
+        {
+          url: this.url,
+          secret,
+          events: [
+            "tenant.webhook.test",
+            "passenger.notification.test.v1",
+            "passenger.receipt_ready.v1",
+            "passenger.eta_changed.v1",
+            "passenger.driver_arrived.v1",
+          ],
+        },
+        tenantId,
+      );
+      // Governance creation currently returns before its async persistence.
+      // Fixture prerequisites must be durable before dependent FK writes;
+      // this readback is setup, not acceptance of the create API's durability.
+      await expect
+        .poll(
+          async () =>
+            (
+              await this.db.query(
+                "SELECT webhook_id, tenant_id FROM admin.phase1_tenant_webhook_endpoints WHERE webhook_id=$1",
+                [webhook.webhookId],
+              )
+            ).rows,
+          { timeout: 10_000 },
+        )
+        .toEqual([{ webhook_id: webhook.webhookId, tenant_id: tenantId }]);
+      const tested = await this.call<{ httpStatus: number }>(
+        "tenant/webhooks/test",
+        token,
+        "POST",
+        { webhookId: webhook.webhookId },
+        tenantId,
+      );
+      expect(tested.httpStatus).toBe(204);
+      for (let index = 0; index < count; index++) {
+        const slug = `qa-notify-${randomUUID().slice(0, 8)}`;
+        const body: CreatePartnerChannelEntryCommand = {
+          tenantId,
+          partnerCode: `qa_${randomUUID().replaceAll("-", "")}`,
+          programId: `qa-${randomUUID()}`,
+          partnerType: "referral_channel",
+          entrySlug: slug,
+          displayName: "Controlled QA entry",
+          businessDispatchSubtype: "enterprise_dispatch",
+          authMode: "partner_api_key",
+          eligibilityMode: "none",
+          entryHost: "localhost:3002",
+          entryPath: `/embed/${slug}`,
+          status: "active",
+          activeFlag: true,
+        };
+        const entry = await this.call<PartnerChannelEntryRecord>(
+          "platform-admin/partner-entries",
+          platform,
+          "POST",
+          body,
+        );
+        expect(entry.tenantId).toBe(tenantId);
+        // R11: creation must already be durable when POST returns. No polling
+        // may hide a response that races the authoritative persistence write.
+        expect(
+          (
+            await this.db.query(
+              "SELECT entry_slug, tenant_id, partner_id FROM admin.phase1_partner_channel_entries WHERE entry_slug=$1",
+              [slug],
+            )
+          ).rows,
+        ).toEqual([
+          {
+            entry_slug: slug,
+            tenant_id: tenantId,
+            partner_id: entry.partnerId,
+          },
+        ]);
+        const partnerUserRef = "qa-resident-shared-ref";
+        entries.set(slug, new Set([partnerUserRef]));
+        const issued = await this.call<PartnerIngressCredentialIssued>(
+          `platform-admin/partner-entries/${slug}/credentials/issue`,
+          platform,
+          "POST",
+          { purpose: "disposable hosted QA" },
+        );
+        expect(issued.plaintextKey).toBeTruthy();
+        // A real fourth entry deliberately has no binding for C220. Its route
+        // and resident are still created by the same authoritative API flow.
+        if (tenantId === tenantB && index === 1) {
+          this.entries.push({
+            entry,
+            apiKey: issued.plaintextKey,
+            partnerUserRef,
+            token,
+            webhookId: webhook.webhookId,
+            binding: null,
+          });
+          continue;
+        }
+        const binding = await this.call<PartnerEntryNotificationBinding>(
+          `platform-admin/partner-entries/${slug}/notification-binding`,
+          platform,
+          "PUT",
+          {
+            webhookId: webhook.webhookId,
+            eventTypes: ["receipt_ready", "eta_changed", "driver_arrived"],
+            expectedVersion: 0,
+          },
+        );
+        expect(binding.state).toBe("test_pending");
+        const contractTest = await this.call<{ kind: string }>(
+          `platform-admin/partner-entries/${slug}/notification-binding/test`,
+          platform,
+          "POST",
+          {},
+        );
+        expect(contractTest.kind).toBe("accepted");
+        const validated = await this.call<PartnerEntryNotificationBinding>(
+          `platform-admin/partner-entries/${slug}/notification-binding`,
+          platform,
+        );
+        const enabled = await this.call<PartnerEntryNotificationBinding>(
+          `platform-admin/partner-entries/${slug}/notification-binding/enable`,
+          platform,
+          "POST",
+          { expectedVersion: validated.version },
+        );
+        expect(enabled.state).toBe("ready");
+        this.entries.push({
+          entry,
+          apiKey: issued.plaintextKey,
+          partnerUserRef,
+          token,
+          webhookId: webhook.webhookId,
+          binding: enabled,
+        });
+      }
+    }
+  }
+
+  async provisionFreshSessions() {
+    const file = path.join(this.directory!, "fixture-sessions.json");
+    try {
+      await run(
+        "./apps/api/node_modules/.bin/tsx",
+        [
+          "tests/e2e/system-remediation/sr-partner-notify-qa-20260917/fixture-sessions.ts",
+          file,
+        ],
+        { timeout: 30_000 },
+      );
+      const tokens = JSON.parse(await readFile(file, "utf8")) as Record<
+        string,
+        string
+      >;
+      const replacements = new Map(
+        Object.entries(tokens).map(([name, token]) => [
+          process.env[name],
+          token,
+        ]),
+      );
+      for (const entry of this.entries)
+        entry.token = replacements.get(entry.token) ?? entry.token;
+      for (const [name, token] of Object.entries(tokens))
+        process.env[name] = token;
+    } finally {
+      await rm(file, { force: true });
+    }
+  }
+
+  async createRide(entry?: PartnerFixtureEntry) {
+    const session = entry
+      ? await this.call<PartnerIngressHandoffSession>(
+          "partner/ingress/handoff",
+          null,
+          "POST",
+          {
+            entrySlug: entry.entry.entrySlug,
+            apiKey: entry.apiKey,
+            partnerUserRef: entry.partnerUserRef,
+            consentScope: "passenger_identity_link",
+          },
+        )
+      : null;
+    const created = await this.call<{ ride: { orderId: string } }>(
+      "multi-taxi/rides",
+      session?.accessToken ?? null,
+      "POST",
+      {
+        pickup: { address: "Controlled pickup" },
+        dropoff: { address: "Controlled dropoff" },
+        passenger: {
+          passengerId: session?.drtsPassengerId ?? `qa-direct-${randomUUID()}`,
+          name: "QA Fixture",
+          phone: "0900000000",
+        },
+        requestedPickupAt: new Date().toISOString(),
+        timingMode: "on_demand",
+        paymentMethodTokenRef: null,
+      },
+    );
+    await expect
+      .poll(
+        async () =>
+          (
+            await this.db.query(
+              "SELECT order_id FROM ops.phase1_owned_orders WHERE order_id=$1",
+              [created.ride.orderId],
+            )
+          ).rows.length,
+      )
+      .toBe(1);
+    if (entry) {
+      const route = (
+        await this.db.query(
+          "SELECT * FROM mobility.phase1_order_partner_notification_routes WHERE order_id=$1",
+          [created.ride.orderId],
+        )
+      ).rows[0];
+      expect(route).toMatchObject({
+        tenant_id: entry.entry.tenantId,
+        partner_id: entry.entry.partnerId,
+        entry_slug: entry.entry.entrySlug,
+        partner_user_ref: entry.partnerUserRef,
+        drts_passenger_id: session!.drtsPassengerId,
+        notification_policy_version: "partner_notification_v1",
+      });
+      expect(route!.ride_ref).toBe(created.ride.orderId);
+    }
+    return created.ride.orderId;
+  }
+
+  async revalidateEndpoint(entry: PartnerFixtureEntry) {
+    const list = () =>
+      this.call<{ items: TenantWebhookEndpoint[] }>(
+        "tenant/webhooks",
+        entry.token,
+        "GET",
+        undefined,
+        entry.entry.tenantId,
+      );
+    const before = (await list()).items.find(
+      (endpoint) => endpoint.webhookId === entry.webhookId,
+    );
+    expect(before).toBeDefined();
+    // A permanent bad ack disables the shared endpoint under the existing
+    // tenant policy. Recover through its real signed test, never SQL/status edits.
+    const result = await this.call<{ httpStatus: number }>(
+      "tenant/webhooks/test",
+      entry.token,
+      "POST",
+      { webhookId: entry.webhookId },
+      entry.entry.tenantId,
+    );
+    expect(result.httpStatus).toBe(204);
+    const after = (await list()).items.find(
+      (endpoint) => endpoint.webhookId === entry.webhookId,
+    );
+    expect(after?.status).toBe("active");
+    return { before: before!.status, after: after!.status };
+  }
+
+  async binding(entry: PartnerFixtureEntry) {
+    return this.call<PartnerEntryNotificationBinding>(
+      `platform-admin/partner-entries/${entry.entry.entrySlug}/notification-binding`,
+      required("DRTS_UAT_TOKEN_PLATFORM"),
+    );
+  }
+
+  async revalidateBinding(entry: PartnerFixtureEntry) {
+    const apiPath = `platform-admin/partner-entries/${entry.entry.entrySlug}/notification-binding`;
+    const platform = required("DRTS_UAT_TOKEN_PLATFORM");
+    const tested = await this.call<{ kind: string }>(
+      `${apiPath}/test`,
+      platform,
+      "POST",
+      {},
+    );
+    expect(tested.kind).toBe("accepted");
+    const validated = await this.binding(entry);
+    const enabled = await this.call<PartnerEntryNotificationBinding>(
+      `${apiPath}/enable`,
+      platform,
+      "POST",
+      { expectedVersion: validated.version },
+    );
+    expect(enabled.state).toBe("ready");
+    return enabled;
+  }
+
+  async rotateReceiverSecret(entry: PartnerFixtureEntry) {
+    const scope = this.scopes.find((s) => s.tenantId === entry.entry.tenantId)!;
+    const secret = randomUUID();
+    const rotated = await this.call<{ secretVersion: number }>(
+      `tenant/webhooks/${entry.webhookId}/rotate-secret`,
+      entry.token,
+      "POST",
+      { secret, rotationReason: "Controlled QA rotation" },
+      entry.entry.tenantId,
+    );
+    expect(rotated.secretVersion).toBe(scope.secretVersion + 1);
+    // Only the external receiver changes its signing-key version here.
+    scope.secret = secret;
+    scope.secretVersion = rotated.secretVersion;
+    return rotated.secretVersion;
+  }
+
+  async resolveNavigation(
+    entry: PartnerFixtureEntry,
+    rideRef: string,
+    partnerUserRef = entry.partnerUserRef,
+    apiKey = entry.apiKey,
+  ) {
+    // Keep partner credentials and issued handoffs out of Playwright traces.
+    const response = await fetch(
+      `${required("DRTS_UAT_API_URL")}/api/partner/entries/${entry.entry.entrySlug}/notification-navigation/resolve`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "x-api-key": apiKey },
+        body: JSON.stringify({ rideRef, partnerUserRef }),
+        redirect: "error",
+        signal: AbortSignal.timeout(20_000),
+      },
+    );
+    expect(response.headers.get("x-drts-candidate-sha")).toBe(
+      required("CANDIDATE_SHA"),
+    );
+    return {
+      status: response.status,
+      envelope: decodeTenantWire(await response.json()),
+    };
+  }
+
+  async enqueue(
+    orderId: string,
+    mode: "partner" | "missing_route" = "partner",
+    event: SyntheticEvent = {},
+  ) {
+    const { stdout } = await run(
+      "./apps/api/node_modules/.bin/tsx",
+      [
+        "tests/e2e/system-remediation/sr-partner-notify-qa-20260917/enqueue-notification.ts",
+        orderId,
+        mode,
+        JSON.stringify(event),
+      ],
+      { timeout: 20_000 },
+    );
+    const line = stdout
+      .split("\n")
+      .find((value) => value.startsWith('{"outboxId":'));
+    if (!line)
+      throw new Error("Production repository did not return fixture identity");
+    const created = JSON.parse(line) as {
+      outboxId: string;
+      candidateSha: string;
+    };
+    expect(created.candidateSha).toBe(required("CANDIDATE_SHA"));
+    return created.outboxId;
+  }
+
+  async reopenReceiver() {
+    // Wait for its durable write queue, then discard the receiver instance.
+    // The HTTP listener stays alive; this is a storage reopen, not an OS reboot.
+    await this.receiver.records();
+    this.receiver = new ControlledReceiver(this.directory!, this.scopes);
+    return this.receiver.records();
+  }
+
+  async availability(outboxId: string) {
+    const { stdout } = await run(
+      "./apps/api/node_modules/.bin/tsx",
+      [
+        "tests/e2e/system-remediation/sr-partner-notify-qa-20260917/probe-availability.ts",
+        outboxId,
+      ],
+      { timeout: 30_000 },
+    );
+    const line = stdout
+      .split("\n")
+      .find((value) => value.startsWith('{"availability":'));
+    if (!line)
+      throw new Error("Full AppModule availability probe returned no evidence");
+    const result = JSON.parse(line);
+    expect(result.candidateSha).toBe(required("CANDIDATE_SHA"));
+    return result;
+  }
+
+  async outcome(outboxId: string) {
+    return (
+      await this.db.query(
+        `SELECT o.*, c.wire_payload_hash, c.delivery_id, c.receipt_id,
+      c.delivery_stage, c.failure_reason, c.retry_disposition,
+      l.claim_state, l.fence_token, l.worker_id, l.lease_expires_at,
+      l.claimed_at FROM ops.consumer_notification_outbox o
+      LEFT JOIN mobility.phase1_partner_notification_delivery_contexts c USING(outbox_id)
+      LEFT JOIN ops.phase1_push_delivery_claims l USING(outbox_id) WHERE o.outbox_id=$1`,
+        [outboxId],
+      )
+    ).rows[0];
+  }
+
+  async failOutcomeCommit(outboxId: string) {
+    if (!/^[0-9a-f-]{36}$/.test(outboxId))
+      throw new Error("Invalid fault target");
+    const name = `qa_commit_${outboxId.replaceAll("-", "")}`;
+    // A sequence is a nontransactional fault counter: its value proves the
+    // injected error actually ran, even though the production transaction
+    // rolls back receipt/context/outbox writes. No replacement business tables.
+    await this.db.query(`CREATE SEQUENCE ops.${name}`);
+    await this.db
+      .query(`CREATE FUNCTION ops.${name}() RETURNS trigger LANGUAGE plpgsql AS $$
+      BEGIN
+        IF NEW.outbox_id = '${outboxId}' AND NEW.status = 'delivered' THEN
+          PERFORM nextval('ops.${name}');
+          RAISE EXCEPTION 'QA_C214_OUTCOME_COMMIT_FAILURE' USING ERRCODE = 'P0001';
+        END IF;
+        RETURN NEW;
+      END $$`);
+    await this.db.query(`CREATE TRIGGER ${name} BEFORE UPDATE OF status
+      ON ops.consumer_notification_outbox FOR EACH ROW EXECUTE FUNCTION ops.${name}()`);
+    return {
+      count: async () => {
+        const row = (
+          await this.db.query(`SELECT last_value, is_called FROM ops.${name}`)
+        ).rows[0]!;
+        return row.is_called ? Number(row.last_value) : 0;
+      },
+      remove: async () => {
+        await this.db.query(
+          `DROP TRIGGER IF EXISTS ${name} ON ops.consumer_notification_outbox`,
+        );
+        await this.db.query(`DROP FUNCTION IF EXISTS ops.${name}()`);
+        await this.db.query(`DROP SEQUENCE IF EXISTS ops.${name}`);
+      },
+    };
+  }
+
+  async staleOutcome(outboxId: string, fenceToken: number) {
+    const { stdout } = await run(
+      "./apps/api/node_modules/.bin/tsx",
+      [
+        "tests/e2e/system-remediation/sr-partner-notify-qa-20260917/probe-stale-outcome.ts",
+        outboxId,
+        String(fenceToken),
+      ],
+      { timeout: 20_000 },
+    );
+    const line = stdout
+      .split("\n")
+      .find((value) => value.startsWith('{"staleOutcome":'));
+    if (!line)
+      throw new Error("Production repository returned no stale-fence evidence");
+    const evidence = JSON.parse(line);
+    expect(evidence.candidateSha).toBe(required("CANDIDATE_SHA"));
+    return evidence;
+  }
+
+  async competingWorker() {
+    const databaseUrl = new URL(required("DATABASE_URL"));
+    databaseUrl.searchParams.set("application_name", "qa-partner-competitor");
+    const child = spawn(
+      "./apps/api/node_modules/.bin/tsx",
+      [
+        "tests/e2e/system-remediation/sr-partner-notify-qa-20260917/competing-worker.ts",
+      ],
+      {
+        env: {
+          ...process.env,
+          DATABASE_URL: databaseUrl.toString(),
+          DRTS_ALLOW_LOCAL_WEBHOOKS: "true",
+        },
+        stdio: ["pipe", "pipe", "pipe"],
+      },
+    );
+    let errors = "";
+    child.stderr.on("data", (chunk: Buffer) => {
+      errors += chunk.toString();
+    });
+    const exited = new Promise<number | null>((resolve, reject) => {
+      child.once("error", reject);
+      child.once("exit", (code) => resolve(code));
+    });
+    const lines = createInterface({ input: child.stdout });
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    try {
+      const ready = await Promise.race([
+        new Promise<Record<string, unknown>>((resolve, reject) => {
+          timer = setTimeout(
+            () => reject(new Error("Competing worker readiness timed out")),
+            30_000,
+          );
+          lines.on("line", (line) => {
+            if (line.startsWith('{"competingWorkerReady":'))
+              resolve(JSON.parse(line));
+          });
+        }),
+        exited.then((code) => {
+          throw new Error(
+            `Competing worker exited before ready (${code}): ${errors}`,
+          );
+        }),
+      ]);
+      expect(ready.candidateSha).toBe(required("CANDIDATE_SHA"));
+      return {
+        ready,
+        stop: async () => {
+          child.stdin.end("stop\n");
+          const stopTimer = setTimeout(() => child.kill("SIGKILL"), 20_000);
+          try {
+            expect(await exited, errors).toBe(0);
+          } finally {
+            clearTimeout(stopTimer);
+            lines.close();
+          }
+        },
+      };
+    } catch (error) {
+      child.stdin.end("stop\n");
+      const stopTimer = setTimeout(() => child.kill("SIGKILL"), 20_000);
+      try {
+        await exited;
+      } finally {
+        clearTimeout(stopTimer);
+        lines.close();
+      }
+      throw error;
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+
+  async restartApi() {
+    // Same hosted server/PID file used by the existing workflow. Validate the
+    // process identity before touching it; this fixture never runs on the VM.
+    const evidenceDir = path.resolve(".artifacts/tenant-uat-acceptance");
+    const pidPath = path.join(evidenceDir, "api-server.pid");
+    const oldPid = Number((await readFile(pidPath, "utf8")).trim());
+    expect(Number.isSafeInteger(oldPid) && oldPid > 1).toBe(true);
+    expect(await realpath(`/proc/${oldPid}/cwd`)).toBe(
+      await realpath("apps/api"),
+    );
+    expect(
+      (await readFile(`/proc/${oldPid}/cmdline`, "utf8")).split("\0"),
+    ).toContain("dist/main.js");
+    process.kill(oldPid, "SIGTERM");
+    await expect
+      .poll(
+        async () => {
+          try {
+            // A child of a previous Actions shell can remain as a zombie briefly.
+            const stat = await readFile(`/proc/${oldPid}/stat`, "utf8");
+            return stat.slice(stat.lastIndexOf(")") + 2).startsWith("Z");
+          } catch (error) {
+            if ((error as NodeJS.ErrnoException).code === "ENOENT") return true;
+            throw error;
+          }
+        },
+        { timeout: 30_000 },
+      )
+      .toBe(true);
+    const log = await open(path.join(evidenceDir, "api-server.log"), "a");
+    try {
+      const child = spawn(process.execPath, ["dist/main.js"], {
+        cwd: path.resolve("apps/api"),
+        env: {
+          ...process.env,
+          DRTS_ALLOW_LOCAL_WEBHOOKS: "true",
+          API_PORT: "4102",
+          API_HOST: "127.0.0.1",
+        },
+        detached: true,
+        stdio: ["ignore", log.fd, log.fd],
+      });
+      await new Promise<void>((resolve, reject) => {
+        child.once("spawn", resolve);
+        child.once("error", reject);
+      });
+      const newPid = child.pid!;
+      expect(newPid).not.toBe(oldPid);
+      await writeFile(pidPath, `${newPid}\n`);
+      child.unref();
+      await expect
+        .poll(
+          async () => {
+            try {
+              const response = await fetch(
+                `${required("DRTS_UAT_API_URL")}/api/health`,
+                {
+                  signal: AbortSignal.timeout(2_000),
+                },
+              );
+              return (
+                response.ok &&
+                response.headers.get("x-drts-candidate-sha") ===
+                  required("CANDIDATE_SHA")
+              );
+            } catch {
+              return false;
+            }
+          },
+          { timeout: 30_000 },
+        )
+        .toBe(true);
+      return { oldPid, newPid, candidateSha: required("CANDIDATE_SHA") };
+    } finally {
+      await log.close();
+    }
+  }
+
+  async settled(outboxId: string) {
+    await expect
+      .poll(async () => (await this.outcome(outboxId))?.status, {
+        timeout: 20_000,
+        intervals: [200],
+      })
+      .toMatch(/^(delivered|failed)$/);
+    return (await this.outcome(outboxId))!;
+  }
+
+  async close() {
+    for (const timer of this.timers) clearTimeout(timer);
+    if (this.server) {
+      this.server.closeAllConnections();
+      await new Promise<void>((resolve, reject) =>
+        this.server!.close((error) => (error ? reject(error) : resolve())),
+      );
+    }
+    await this.db.end();
+    if (this.directory)
+      await rm(this.directory, { recursive: true, force: true });
+  }
+}
