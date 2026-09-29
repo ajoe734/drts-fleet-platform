@@ -1428,4 +1428,87 @@ describe("PartnerNotificationPanel", () => {
       });
     });
   });
+
+  it("reconciles to the authoritative terminal state on the very first automatic post-retry readback, even when it resolves before the retry acceptance has re-rendered (SR-PARTNER-NOTIFY-FIX-RETRY-READBACK-20260929 F2)", async () => {
+    const outboxId = "outbox-retry-readback-f2";
+
+    mockClient.listPartnerNotificationDeliveries
+      .mockResolvedValueOnce({
+        items: [
+          {
+            outboxId,
+            status: "failed",
+            eventType: "eta_changed",
+            attempts: 1,
+            createdAt: new Date().toISOString(),
+            retryDisposition: "automatic",
+            failureReason: "provider_transient_error",
+          },
+        ],
+        pageInfo: { totalItems: 1 },
+      })
+      .mockResolvedValueOnce({
+        // Automatic refetch triggered by handleRetry right after the 201
+        // accept: by the time this GET lands the worker has already
+        // delivered, so the very first post-retry readback is already
+        // terminal - there is no intermediate server-reported "queued" row
+        // at all. The retry-acceptance state update and this readback race
+        // each other; the readback must not depend on having observed a
+        // committed render of the "queued" state first.
+        items: [
+          {
+            outboxId,
+            status: "delivered",
+            deliveryStage: "partner_accepted",
+            receiptId: "receipt-f2",
+            eventType: "eta_changed",
+            attempts: 2,
+            createdAt: new Date().toISOString(),
+            retryDisposition: "none",
+            failureReason: null,
+          },
+        ],
+        pageInfo: { totalItems: 1 },
+      });
+    mockClient.retryPartnerNotificationDelivery.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          // Resolve on a real macrotask rather than inside the test's await
+          // chain, matching the production race: retry acceptance and the
+          // automatic fetchState it triggers are not synchronized to any
+          // particular React render.
+          setTimeout(() => resolve({ kind: "requeued" }), 10);
+        }),
+    );
+
+    render(
+      <PartnerNotificationPanel
+        entrySlug="test-entry"
+        tenantId="test-tenant"
+        canWriteBinding={true}
+        canReadWebhooks={false}
+      />,
+    );
+
+    const retryBtn = await screen.findByRole("button", { name: /重送/i });
+    fireEvent.click(retryBtn);
+
+    await screen.findByRole("button", { name: /重送中/ });
+
+    await waitFor(() => {
+      expect(mockClient.retryPartnerNotificationDelivery).toHaveBeenCalledTimes(1);
+    });
+
+    await waitFor(() => {
+      expect(mockClient.listPartnerNotificationDeliveries).toHaveBeenCalledTimes(2);
+    });
+
+    // Authoritative delivered state must be reconciled on this very first
+    // automatic readback - no additional manual refresh should be required.
+    await waitFor(() => {
+      expect(screen.queryByText("已受理重新入列")).toBeNull();
+      expect(screen.queryByText("partnerNotification.enqueued")).toBeNull();
+    });
+    await screen.findByText("partnerNotification.accepted_unknown");
+  });
 });

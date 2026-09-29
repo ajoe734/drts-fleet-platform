@@ -1306,9 +1306,18 @@ export function PartnerNotificationPanel({
   const [retryRowId, setRetryRowId] = useState<string | null>(null);
   const [retryErrorMsg, setRetryErrorMsg] = useState<string | null>(null);
   const retryStateRef = React.useRef(retryState);
-  retryStateRef.current = retryState;
   const retryRowIdRef = React.useRef(retryRowId);
-  retryRowIdRef.current = retryRowId;
+  const setRetryStateSynced = useCallback(
+    (value: "idle" | "pending" | "failed" | "queued") => {
+      retryStateRef.current = value;
+      setRetryState(value);
+    },
+    [],
+  );
+  const setRetryRowIdSynced = useCallback((value: string | null) => {
+    retryRowIdRef.current = value;
+    setRetryRowId(value);
+  }, []);
 
   const [editWebhookId, setEditWebhookId] = useState("");
   const [editEventTypes, setEditEventTypes] = useState<string[]>([]);
@@ -1423,8 +1432,8 @@ export function PartnerNotificationPanel({
               it.id === activeRetryRowId,
           );
           if (retriedRow && !PN_RETRY_INFLIGHT_STATUSES.has(retriedRow.status)) {
-            setRetryState("idle");
-            setRetryRowId(null);
+            setRetryStateSynced("idle");
+            setRetryRowIdSynced(null);
           }
         }
       } else {
@@ -1476,8 +1485,8 @@ export function PartnerNotificationPanel({
     setEnableState("idle");
     setDisableState("idle");
     setResumeState("idle");
-    setRetryState("idle");
-    setRetryRowId(null);
+    setRetryStateSynced("idle");
+    setRetryRowIdSynced(null);
     setIsEditing(false);
     setPage(1);
     setEditExpectedVersion(0);
@@ -1503,7 +1512,7 @@ export function PartnerNotificationPanel({
     setEnableState("idle");
     setDisableState("idle");
     setResumeState("idle");
-    setRetryState("idle");
+    setRetryStateSynced("idle");
     setSaveState("idle");
     setIsEditing(false);
     return () => {
@@ -1698,8 +1707,8 @@ export function PartnerNotificationPanel({
   };
 
   const handleRetry = async (outboxId: string) => {
-    setRetryRowId(outboxId);
-    setRetryState("pending");
+    setRetryRowIdSynced(outboxId);
+    setRetryStateSynced("pending");
     setRetryErrorMsg(null);
     const session = currentMutationSession.current;
     try {
@@ -1710,20 +1719,20 @@ export function PartnerNotificationPanel({
       console.log("Checking session:", session, currentMutationSession.current);
       if (session !== currentMutationSession.current) return;
       if (outcome.kind === "failed") {
-        setRetryState("failed");
+        setRetryStateSynced("failed");
         setRetryErrorMsg(
           outcome.failure?.detail ||
             outcome.failure?.failureReason ||
             "重試失敗",
         );
       } else {
-        setRetryState("queued");
+        setRetryStateSynced("queued");
       }
       fetchStateRef.current?.();
     } catch (err: any) {
       console.log("Checking session:", session, currentMutationSession.current);
       if (session !== currentMutationSession.current) return;
-      setRetryState("failed");
+      setRetryStateSynced("failed");
       setRetryErrorMsg(err.message || "發生錯誤");
     }
   };
