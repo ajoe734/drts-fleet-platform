@@ -128,6 +128,7 @@ class DispatchedWorkerAcceptanceTests(DispatchEnvironmentIsolation, unittest.Tes
         self.task = {
             "id": "TASK-001",
             "title": "Record acceptance",
+            "phase": "test",
             "owner": "Codex",
             "reviewer": "Codex2",
             "eligible_agents": {"owner": ["Codex"], "reviewer": ["Codex2"]},
@@ -140,7 +141,7 @@ class DispatchedWorkerAcceptanceTests(DispatchEnvironmentIsolation, unittest.Tes
             "merge_sha": "b" * 40,
             "required_acceptance": ["staging_signoff"],
         }
-        self.state = {"tasks": [self.task]}
+        self.state = {"sprint": "test", "objective": "Verify acceptance dispatch", "tasks": [self.task]}
         self.env = {
             "AI_NAME": "Codex",
             "ORCH_DISPATCH_ROLE": "owner",
