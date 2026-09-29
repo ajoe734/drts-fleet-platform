@@ -21,6 +21,8 @@ import {
 
 import { resolveCrossAppHref } from "./assistant/route-context";
 
+const PN_RETRY_INFLIGHT_STATUSES = new Set(["queued", "pending", "sending"]);
+
 export function PanelActionBtn({
   theme,
   descriptor,
@@ -914,18 +916,17 @@ function PnDeliveries({
           },
         ]}
         rows={deliveries.map((r: any) => {
-          if (
+          const isRetryTargetRow =
             r.deliveryId === retryRowId ||
             r.outboxId === retryRowId ||
-            r.id === retryRowId
-          ) {
-            if (retryState === "queued")
-              return {
-                ...r,
-                status: "queued",
-                failureReason: "已受理重新入列",
-                retryDisposition: "inflight",
-              };
+            r.id === retryRowId;
+          if (isRetryTargetRow && retryState === "queued") {
+            return {
+              ...r,
+              status: "queued",
+              failureReason: "已受理重新入列",
+              retryDisposition: "inflight",
+            };
           }
           return r;
         })}
@@ -1304,6 +1305,19 @@ export function PartnerNotificationPanel({
   >("idle");
   const [retryRowId, setRetryRowId] = useState<string | null>(null);
   const [retryErrorMsg, setRetryErrorMsg] = useState<string | null>(null);
+  const retryStateRef = React.useRef(retryState);
+  const retryRowIdRef = React.useRef(retryRowId);
+  const setRetryStateSynced = useCallback(
+    (value: "idle" | "pending" | "failed" | "queued") => {
+      retryStateRef.current = value;
+      setRetryState(value);
+    },
+    [],
+  );
+  const setRetryRowIdSynced = useCallback((value: string | null) => {
+    retryRowIdRef.current = value;
+    setRetryRowId(value);
+  }, []);
 
   const [editWebhookId, setEditWebhookId] = useState("");
   const [editEventTypes, setEditEventTypes] = useState<string[]>([]);
@@ -1405,9 +1419,23 @@ export function PartnerNotificationPanel({
       }
 
       if (dReq.status === "fulfilled") {
-        setDeliveries(dReq.value?.items || dReq.value || []);
+        const items = dReq.value?.items || dReq.value || [];
+        setDeliveries(items);
         setTotal(dReq.value?.pageInfo?.totalItems ?? dReq.value?.total ?? 0);
         setDeliveryError(null);
+        const activeRetryRowId = retryRowIdRef.current;
+        if (activeRetryRowId && retryStateRef.current === "queued") {
+          const retriedRow = items.find(
+            (it: any) =>
+              it.deliveryId === activeRetryRowId ||
+              it.outboxId === activeRetryRowId ||
+              it.id === activeRetryRowId,
+          );
+          if (retriedRow && !PN_RETRY_INFLIGHT_STATUSES.has(retriedRow.status)) {
+            setRetryStateSynced("idle");
+            setRetryRowIdSynced(null);
+          }
+        }
       } else {
         setDeliveries([]);
         if (dReq.reason?.statusCode === 403) {
@@ -1457,8 +1485,8 @@ export function PartnerNotificationPanel({
     setEnableState("idle");
     setDisableState("idle");
     setResumeState("idle");
-    setRetryState("idle");
-    setRetryRowId(null);
+    setRetryStateSynced("idle");
+    setRetryRowIdSynced(null);
     setIsEditing(false);
     setPage(1);
     setEditExpectedVersion(0);
@@ -1484,7 +1512,7 @@ export function PartnerNotificationPanel({
     setEnableState("idle");
     setDisableState("idle");
     setResumeState("idle");
-    setRetryState("idle");
+    setRetryStateSynced("idle");
     setSaveState("idle");
     setIsEditing(false);
     return () => {
@@ -1679,8 +1707,8 @@ export function PartnerNotificationPanel({
   };
 
   const handleRetry = async (outboxId: string) => {
-    setRetryRowId(outboxId);
-    setRetryState("pending");
+    setRetryRowIdSynced(outboxId);
+    setRetryStateSynced("pending");
     setRetryErrorMsg(null);
     const session = currentMutationSession.current;
     try {
@@ -1691,20 +1719,20 @@ export function PartnerNotificationPanel({
       console.log("Checking session:", session, currentMutationSession.current);
       if (session !== currentMutationSession.current) return;
       if (outcome.kind === "failed") {
-        setRetryState("failed");
+        setRetryStateSynced("failed");
         setRetryErrorMsg(
           outcome.failure?.detail ||
             outcome.failure?.failureReason ||
             "重試失敗",
         );
       } else {
-        setRetryState("queued");
+        setRetryStateSynced("queued");
       }
       fetchStateRef.current?.();
     } catch (err: any) {
       console.log("Checking session:", session, currentMutationSession.current);
       if (session !== currentMutationSession.current) return;
-      setRetryState("failed");
+      setRetryStateSynced("failed");
       setRetryErrorMsg(err.message || "發生錯誤");
     }
   };
