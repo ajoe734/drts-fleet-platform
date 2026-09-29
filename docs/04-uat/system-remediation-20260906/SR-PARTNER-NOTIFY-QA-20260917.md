@@ -31,7 +31,8 @@ restart gates 將在同 SHA 的 GitHub-hosted workflow 重驗。
   立即查正式 `admin.phase1_partner_channel_entries`，必須已是正確 tenant／partner。
   正式 `TenantPartnerService.createPlatformPartnerEntry` 已 await `persistChangesRequired`。
 - C205 增加真 browser tenant webhook picker GET 必須 200，並要求修復後正式
-  `PartnerNotificationPanel` 的 `Accepted (Unknown Device State)` 文案；保留
+  `PartnerNotificationPanel` 的 `Accepted (Unknown Device State)`／`夥伴已接受（狀態未知）`
+  正式中英文案；刷新 GET 200 的 wire 必須與同筆 durable receipt／兩次 attempt 相符。保留
   真重送按鈕、POST 201、durable outbox、同 payload／兩次 attempt 與 screenshot。
 - C222 按 FIX-HISTORY 正式 BFF 契約要求 foreign history **404**；receipt 仍 **400**。
   加入同 session 自有 history **200 + 正確 orderId**、unknown history **404**、
@@ -72,6 +73,41 @@ tenant HTTP **10/10**、webhook E2E **1/1**、C111–C115 **passed**、restart *
 partner console 只有 **19 passed／C222 failed**；C216 執行中被取消，C217/C219/C205
 未完成。C218 console 此次走過正式 snapshot／取消／receipt（18.8s），仍須新候選全套重驗。
 取消後 gate 另精確指出四個已改名的 unsafe-endpoint titles 不符 manifest；上述適配保留原案例。
+
+### `fffb77077ce5b5c7a2adb4849a5a0781b738f98b` checkpoint 與 C205 最小定位
+
+[一般 CI 36500000464](https://github.com/ajoe734/drts-fleet-platform/actions/runs/36500000464)
+completed **success**：完整 lint/typecheck 通過，root **4136 pass／39 pending／0 fail**、
+API **1438 pass／0 skip**、三個 PG suite 各 **7/7**。draft integration
+36500000399 的 scope／64 workflow checks 成功，完整產品 jobs 仍 skipped。
+
+[UAT 36499996287／job109188313399](https://github.com/ajoe734/drts-fleet-platform/actions/runs/36499996287/job/109188313399)
+completed **failure**：partner **23/24 pass／C205 failed／0 skipped／0 flaky**，24 個
+manifest identity 全相符。artifact **11005182726**，ZIP SHA256
+`ab427f5b1fba65e185c66f62892cdf3749b53acc05794647a0e3764ba604418c`。
+candidate／workflow SHA 都是 fffb；dedicated partner unit 被前一步 failure 跳過，strict
+gate 正確拒絕；不能收完整 A 層。其餘完整 reports：tenant/partner unit **331/331**
+（PG21）、webhook unit **34/34**、tenant HTTP **10/10**、webhook E2E **1/1**、
+C111–C115 passed、restart verified15。所有啟動的檢查已結束並讀取結果。
+
+C222 正反向 history／receipt 已通過；C218 正式 SQL、supersede／取消／receipt 通過。
+C214 真 DB rollback／自然 lease、C215 兩 worker、C216 五次 attempt 與兩次 API restart、
+C224 61+120 秒自然 TTL 均通過。新 candidate 仍須完整重跑，不能拼接兩輪結果。
+
+C205 最小重現：真 browser 開啟 Notifications → tenant picker GET **200** → 真重送
+POST **201** → DB delivered／attempt_count=2／receiver 同 bytes 兩次／durable receipt
+斷言均通過 → 舊 exact refresh locator 等待 45 秒超時。原 trace／screenshot 顯示按鈕
+accessible name 是 `refresh重新整理`，畫面已 hydration 成繁體中文。
+正式 `CanvasBtn` → `renderIcon` 對 icon registry 未收錄的 `refresh` 回傳原文字；
+`PartnerNotificationPanel` 與 translations 提供上述兩個 accepted label。
+
+修正邊界僅 C205：refresh locator 只允許正式中英文 label 加可選 `refresh` icon prefix；
+觀察此 control 觸發的真 delivery GET **200**，精確驗同 outbox 的 delivered／attempts=2／
+partner_accepted／同 DB receipt／unknown downstream／none retry／null failure，保存原 wire
+JSON 與最終 screenshot，再要求正式 accepted label 及重送按鈕消失。
+未修改產品、mock browser response、放寬 HTTP status、減少矩陣或增加等待時間。
+三項 required_acceptance 在本提交仍 **PENDING**；完整新 SHA 結果以 canonical handoff
+receipt 鎖定，B/C 真夥伴／真機仍未執行。
 
 ### §0.7 本輪 finding／required_acceptance 對照
 

@@ -1250,12 +1250,49 @@ test.describe("SR-PARTNER-NOTIFY-QA-20260917: E2E Partner Notification Delivery 
     expect(delivered.attempt_count).toBe(2);
     expect(received(outboxId)).toHaveLength(2);
     expect(received(outboxId)[0]!.rawBody).toBe(received(outboxId)[1]!.rawBody);
+    const refreshResponse = page.waitForResponse(
+      (response) =>
+        response.request().method() === "GET" &&
+        new URL(response.url()).pathname.endsWith(
+          `/partner-entries/${entry.entry.entrySlug}/notification-deliveries`,
+        ),
+    );
+    // CanvasBtn renders unknown icon names as text; hydration applies the
+    // user's locale. Match only the official refresh labels and optional icon.
     await page
-      .getByRole("button", { name: /^(重新整理|Refresh)$/ })
+      .getByRole("button", { name: /^(?:refresh\s*)?(?:重新整理|Refresh)$/ })
       .last()
       .click();
-    await expect(row).toContainText("Accepted (Unknown Device State)");
+    const readback = await refreshResponse;
+    expect(readback.status()).toBe(200);
+    const wire = await readback.json();
+    expect(wire.data.items).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          outbox_id: outboxId,
+          status: "delivered",
+          attempts: 2,
+          delivery_stage: "partner_accepted",
+          receipt_id: delivered.receipt_id,
+          downstream_status: "unknown",
+          retry_disposition: "none",
+          failure_reason: null,
+        }),
+      ]),
+    );
+    await expect(row).toContainText(
+      /Accepted \(Unknown Device State\)|夥伴已接受（狀態未知）/,
+    );
     await expect(row.getByRole("button", { name: /重送/ })).toHaveCount(0);
+    await test.info().attach("admin-retry-http-readback", {
+      contentType: "application/json",
+      body: JSON.stringify({
+        candidate_sha: process.env.CANDIDATE_SHA,
+        outboxId,
+        httpStatus: readback.status(),
+        wire,
+      }),
+    });
     await test.info().attach("admin-retry-readback", {
       contentType: "image/png",
       body: await page.screenshot({ fullPage: true }),

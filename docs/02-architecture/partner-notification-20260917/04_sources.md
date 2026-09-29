@@ -9,6 +9,15 @@ run-status failed、沒有完整 partner JSON，不能收 A 層。C222 按已合
 按實際 source 同步，未刪除 gate。24 案與 B/C live 界線不變。
 新候選完整同 SHA 結果以 task canonical handoff receipt 及其 hosted artifacts 核對。
 
+2026-09-29 checkpoint `fffb77077ce5b5c7a2adb4849a5a0781b738f98b`：
+[UAT36499996287](https://github.com/ajoe734/drts-fleet-platform/actions/runs/36499996287)
+**23/24 pass、C205 failed、0 skip/flaky**；C218/C222 修復後通過。
+C205 真 retry POST201、DB delivered 與 durable receipt 已通過，舊 locator 未匹配
+`refresh重新整理` 而 timeout。依正式 CanvasBtn renderIcon 與中英 translations 精確適配，
+增加刷新 GET200 與 receipt／stage wire 回讀，不改產品或放寬 gate。
+一般 CI36500000464 完整成功；dedicated partner unit 因 E2E failure 被跳過，整體仍未驗收。
+最小重現、修正邊界與 artifact11005182726/hash 記於原 UAT。新 candidate 必須重跑全 24 案。
+
 正式依據：同目錄 `01_system_sa_sd.md` §4–14 與 `02_partner_integration_contract.md`
 §3–9（canonical root可讀，未把held設計複製發布）。完整finding/SHA與證據沿用
 [原UAT artifact](../../04-uat/system-remediation-20260906/SR-PARTNER-NOTIFY-QA-20260917.md)。
