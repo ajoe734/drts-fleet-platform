@@ -21,6 +21,8 @@ import {
 
 import { resolveCrossAppHref } from "./assistant/route-context";
 
+const PN_RETRY_INFLIGHT_STATUSES = new Set(["queued", "pending", "sending"]);
+
 export function PanelActionBtn({
   theme,
   descriptor,
@@ -914,18 +916,21 @@ function PnDeliveries({
           },
         ]}
         rows={deliveries.map((r: any) => {
-          if (
+          const isRetryTargetRow =
             r.deliveryId === retryRowId ||
             r.outboxId === retryRowId ||
-            r.id === retryRowId
+            r.id === retryRowId;
+          if (
+            isRetryTargetRow &&
+            retryState === "queued" &&
+            PN_RETRY_INFLIGHT_STATUSES.has(r.status)
           ) {
-            if (retryState === "queued")
-              return {
-                ...r,
-                status: "queued",
-                failureReason: "已受理重新入列",
-                retryDisposition: "inflight",
-              };
+            return {
+              ...r,
+              status: "queued",
+              failureReason: "已受理重新入列",
+              retryDisposition: "inflight",
+            };
           }
           return r;
         })}
@@ -1304,6 +1309,10 @@ export function PartnerNotificationPanel({
   >("idle");
   const [retryRowId, setRetryRowId] = useState<string | null>(null);
   const [retryErrorMsg, setRetryErrorMsg] = useState<string | null>(null);
+  const retryStateRef = React.useRef(retryState);
+  retryStateRef.current = retryState;
+  const retryRowIdRef = React.useRef(retryRowId);
+  retryRowIdRef.current = retryRowId;
 
   const [editWebhookId, setEditWebhookId] = useState("");
   const [editEventTypes, setEditEventTypes] = useState<string[]>([]);
@@ -1405,9 +1414,23 @@ export function PartnerNotificationPanel({
       }
 
       if (dReq.status === "fulfilled") {
-        setDeliveries(dReq.value?.items || dReq.value || []);
+        const items = dReq.value?.items || dReq.value || [];
+        setDeliveries(items);
         setTotal(dReq.value?.pageInfo?.totalItems ?? dReq.value?.total ?? 0);
         setDeliveryError(null);
+        const activeRetryRowId = retryRowIdRef.current;
+        if (activeRetryRowId && retryStateRef.current === "queued") {
+          const retriedRow = items.find(
+            (it: any) =>
+              it.deliveryId === activeRetryRowId ||
+              it.outboxId === activeRetryRowId ||
+              it.id === activeRetryRowId,
+          );
+          if (retriedRow && !PN_RETRY_INFLIGHT_STATUSES.has(retriedRow.status)) {
+            setRetryState("idle");
+            setRetryRowId(null);
+          }
+        }
       } else {
         setDeliveries([]);
         if (dReq.reason?.statusCode === 403) {
