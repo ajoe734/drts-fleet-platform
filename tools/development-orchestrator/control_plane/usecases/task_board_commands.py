@@ -84,7 +84,7 @@ class TaskBoardCommandExecutor:
         if role not in {"owner", "reviewer"} or not os.environ.get("ORCH_RUN_ID"):
             return
         task_id = os.environ.get("ORCH_DISPATCH_TASK_ID", "")
-        if command not in {"start", "progress", "note", "handoff", "approve", "reopen", "blocker", "system-block"}:
+        if command not in {"start", "progress", "note", "handoff", "approve", "reopen", "blocker", "system-block", "record-acceptance"}:
             raise SystemExit("Dispatched workers must use their assigned task lifecycle commands")
         if not args or args[0] != task_id:
             raise SystemExit("Dispatched worker cannot mutate a different task")
