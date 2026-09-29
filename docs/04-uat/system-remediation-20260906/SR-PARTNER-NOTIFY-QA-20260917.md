@@ -1,6 +1,96 @@
 # SR-PARTNER-NOTIFY-QA-20260917
 
-## 2026-09-29 最新處置：R13 管理 UI 回讀仍被本地 queued 覆蓋
+## 2026-09-29 R13 修復整合與交審證據
+
+Owner **Codex**／Reviewer **Codex2**；successor [PR #2220](https://github.com/ajoe734/drts-fleet-platform/pull/2220)。
+本輪普通 merge `origin/dev`，未改写既有發布歷史，未自行修改產品。
+12 個依賴均為 done，其 merge SHA 全是本輪 HEAD 的祖先。
+R13 子任務 `SR-PARTNER-NOTIFY-FIX-RETRY-READBACK-20260929` 的候選
+`5d9748130544a312e7b1c0e1609eab6bcdc9443e` 經 Codex2 審查後合併為
+`7f71a7667386149814921df8ca673930e93aa843`，已納入本輪。
+
+### 已完成的修復後完整執行
+
+程式／workflow SHA **`547650284ea1ed4657bcc0043ab4c1967cc2e55c`**：
+[UAT36529807071／job109280716645](https://github.com/ajoe734/drts-fleet-platform/actions/runs/36529807071/job/109280716645)
+completed **success**，artifact **11016905257**，ZIP SHA256
+`cc915e72c320604899a43d6e12804ce3801fb7c8c3537ec4d5100ff1705c7133`。
+執行命令為 `gh workflow run tenant-uat-acceptance.yml --ref gemini/sr-partner-notify-qa-20260927-successor -f candidate_sha=547650284ea1ed4657bcc0043ab4c1967cc2e55c`。
+已讀完整 log、9 份總報告及 43 個解碼附件（含 4 張實際 screenshot）；各報告 candidate／workflow
+與執行 SHA 相符，所有已記錄 execution exit_code=0，strict gate 與 run-status 均 passed。
+
+| 同 SHA 檢查                                  | 實際結果                                                 |
+| -------------------------------------------- | -------------------------------------------------------- |
+| C201–C224 整合／NAV／admin browser           | **24/24，零 fail／skip／flaky**，全部 case identity 相符 |
+| tenant/partner unit                          | **335/335，零 skip**；包括新增的 4 個 R13 regression     |
+| 三組正式 PG suite（sequence／transport／UI） | 各 **7/7，零 skip**                                      |
+| webhook unit／dedicated partner unit         | **34/34**／**12/12，零 skip**                            |
+| tenant HTTP／webhook E2E                     | **10/10**／**1/1，零 skip／flaky**                       |
+| C111–C115／tenant restart                    | 五項 capability passed；restart **verified15**           |
+
+C205（3.894 秒）真 POST201 → 第二次 worker attempt → GET200 返回 delivered、
+partner_accepted、同 durable receipt、attempts=2、none retry、null failure、unknown downstream。
+Screenshot `C205-admin-retry-readback-bfdf07aa37aa.png` 同列確實顯示「夥伴已接受（狀態未知）」
+與「無重試機制」，沒有旧「已受理重新入列／入列中／待 claim」。
+`0de8da3ef1de` 的強斷言內容完全保留，未放寬、未 mock browser response。
+C214（128.065 秒）一筆真 transaction rollback、自然 lease 後同 receipt duplicate；
+C215 兩個 AppModule process 真實競爭同列，舊 fence 拒絕；C216（460.143 秒）自然
+30/60/120/240 秒 backoff、五次同 bytes attempt、兩次 OS process restart 後不多送。
+C218（18.904 秒）正式 snapshot/取消及獨立 receipt 通過；C224（183.264 秒）自然 TTL、
+三個 consume 入口與直接 API 的 replay 拒絕均通過。
+
+[一般 CI36529799306](https://github.com/ajoe734/drts-fleet-platform/actions/runs/36529799306)
+completed **success**，已讀 log 與 JSON：lint **21/21**、typecheck **28/28**、
+root **4140 pass／39 skipped／0 fail**、API **1438/1438**、PG21 與 UI12 零 skip。
+artifact **11016322921**，ZIP SHA256
+`0f4a889adaae0bb2064ea196b8e3cfc47558eeb8a4525796c97e1b334ce0d711`。
+39 skipped 不記為通過。draft integration36529799288 success 僅 checkpoint scope checks，
+完整 product jobs skipped，不冒充完整 integration CI。
+
+### R13 最小差異重現與本機檢查
+
+非 serving probe 使用同一份正式 UI component regression，Vite load hook 僅將 panel
+來源固定為 `0de8da3ef1de37f6bb4e60b8d8cc5ca7cf6b7eb3` 的原始 git blob；其他產品檔
+在 merge 前後相同。未 reset 活躍工作樹。`-t SR-PARTNER-NOTIFY-FIX-RETRY-READBACK-20260929`
+對舊 panel 得 **2 fail／2 pass／8 filtered，exit1**：手動刷新與第一次自動回讀仍殘留 queued。
+修正版完整 UI suite **12/12，exit0**；HTTP client 為 mock，production React state/render
+未替代；此 probe 不冒充 hosted runtime。命令／config／完整輸出保存在下述 `.local` 目錄。
+
+Node22.23.2／pnpm10.33.0／Python3.12.3：workflow unittest **64 pass**；
+`probe-gate-regression.py` 六個錯誤報告 old exit0 → current exit1、合法 control exit0；
+QA12 + UI12 scoped Vitest **24 pass／0 skip，exit0**。初次直接執行 UI suite 因 shared
+`@drts/ui-web` 解析失敗，該 setup error 保留；僅在 `.local` config 加 source aliases 後重跑，
+未安裝或改寫 shared dependencies。本 worktree 缺失的 Husky wrappers 已用 `pnpm exec husky`
+恢復；merge 全範圍 6 commits trailers 與 whitespace 均通過，後續文件提交正常走 hooks。
+
+### §0.7 finding／required_acceptance 對照
+
+下表新結果均為上述 **547650284ea1** 完整 run；舊失敗逐輪原文保留於後文。
+本文件收據提交會產生新 SHA，**最終候選必須再完整重跑**，不得沿用 547 或 502b。
+最終 candidate SHA、同 SHA run/job/artifact/hash、退出碼及逐案 audit 由本 task 的 canonical
+`handoff` receipt 鎖定，並引用本節；交接後不再推送改寫候選。正式 review、CI／merge 與
+三項 required_acceptance 仍由 candidate lifecycle 判定，本文不是 done 或 review approval。
+
+| Finding／驗收項                                                | 正式來源／修正邊界                                                                                     | 舊版 → 547 完整結果                                                                                                   | 剩餘條件／限制                                                      |
+| -------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------ | --------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------- |
+| R1 整合矩陣                                                    | 正式 worker／outbox repository／controlled receiver；C201–C224                                         | 629 缺案與無效 fixture → 24/24 真 runtime                                                                             | 受控事件與 endpoint，非 live                                        |
+| R2 gate／R6 PG                                                 | 原 workflow strict gate、required-cases.json、三組正式 PG suite                                        | 舊 fail-open／skip → 64 gate tests、六種反例拒絕、PG21 零 skip                                                        | synthetic gate 與產品 runtime 分列                                  |
+| R3 證據／R4 publication／R8 history                            | 原 UAT、04_sources、successor PR2220／合規 merge                                                       | 舊不實摘要與18 invalid commits → 新完整 range pass；PR2175/2177/2179 refs 保留                                        | 最終 SHA 以 handoff 核對，不借用舊 CI                               |
+| R5 管理 UI／R13 queued overlay                                 | panel `handleRetry`／`fetchState`／`PnDeliveries`；產品由 ADMIN／RETRY-READBACK children 修復          | 舊 React31/picker400；502b HTTP/畫面矛盾 → C205 真 picker200、retry201、GET200、正確畫面及 no-stale/title=none 全通過 | UI 功能證據，非所有版面／文案的全面視覺驗收                         |
+| R7/R9 transport/security                                       | TRANSPORT child 的 typed HTTPS client；workflow 僅 runtime opt-in                                      | 舊 production bypass／TS7006／lint failure → production/default/false 拒絕與一般 CI 通過                              | 不在 unit job 全域放寬 local endpoint                               |
+| R10 snapshot／R11 entry durability                             | 正式 `OwnedMobilityRepository.persistChangesWithExecutor`／`createPlatformPartnerEntry`，相應 children | 舊42P08／POST201後FK race → C218正式 transaction及fixture即時entry讀回通過                                            | synthetic event producer；無 SQL bypass                             |
+| R12 history／NAV                                               | 真 history BFF 與 navigation resolve/session；HISTORY child                                            | 舊 foreign history200 → own200、foreign/unknown404、no-session400；C221–C224通過                                      | logout 清真 cookie jar；未驗 native lifecycle／伺服器端 cookie 撤銷 |
+| `integrated_controlled_receiver_negative_matrix_same_sha`      | 全24案、PG21、claim/fence/retry/restart                                                                | 547 evidence PASS                                                                                                     | 最終候選全套重跑後交 reviewer                                       |
+| `navigation_and_admin_ui_hosted_real_runtime_evidence`         | C205、C221–C224 真 browser／HTTP／PG／screenshots                                                      | 547 evidence PASS，R13畫面與HTTP一致                                                                                  | 最終候選同 SHA；B/C 仍未執行                                        |
+| `existing_webhook_tenant_gates_preserved_and_live_not_claimed` | tenant10、webhook34/1、C111–C115、restart15與独立manifest                                              | 547 evidence PASS                                                                                                     | 最終候選同 SHA；不以 A 關閉 B/C                                     |
+
+機器收據、原 ZIP、logs、逐案 inspection/audit、全部解碼附件與差異 probe 保存於 canonical
+`/home/lupin/workspace/drts-fleet-platform/.local/sr-partner-notify-qa-20260929-r13-final/`。
+本 VM 僅跑 repository checks，未啟動產品／browser／receiver／PG 服務，未部署。
+A 層僅可稱 `controlled_receiver_verified`；B 真夥伴 HTTPS endpoint 與 C 原生 App
+背景／冷啟動、iOS/Android 收到並開啟通知仍屬 **SR-LIVE-PUSH-001，未執行**。
+
+## 2026-09-29 歷史處置：R13 管理 UI 回讀仍被本地 queued 覆蓋
 
 **產品 blocker，尚未 handoff／收完整 A 層。** 自動化 24 案首次全綠後，逐張讀取
 同 SHA screenshot 與 HTTP 附件發現新的真狀態矛盾；不能以 aggregate success 關閉 UI 驗收。

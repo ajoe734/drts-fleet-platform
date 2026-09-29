@@ -1,6 +1,36 @@
 # Sources and Case Matrix
 
-2026-09-29 最新：`502b51342b656ec42c2bdbb5b8e323369db2abb6` 的
+## 2026-09-29 R13 修復後完整驗證
+
+普通 merge 已完成的 RETRY-READBACK child（dev `7f71a7667386`），保留 checkpoint
+`0de8da3ef1de` 的 C205 no-stale-queued/inflight 與 title=none 強斷言。
+**`547650284ea1ed4657bcc0043ab4c1967cc2e55c`** 的
+[UAT36529807071/job109280716645](https://github.com/ajoe734/drts-fleet-platform/actions/runs/36529807071/job/109280716645)
+已完成 **24/24、零 fail/skip/flaky**；tenant/partner335、PG21、webhook34/1、
+dedicated partner12、tenant HTTP10、C111–C115、restart15全部通過。
+artifact11016905257，ZIP SHA256 `cc915e72c320604899a43d6e12804ce3801fb7c8c3537ec4d5100ff1705c7133`。
+一般 CI36529799306成功：lint21、typecheck28、root4140pass/39skip、API1438、PG21。
+
+| 案例／正式來源                                        | 本輪證據                                                                                      |
+| ----------------------------------------------------- | --------------------------------------------------------------------------------------------- |
+| C201–C204/C206–C213；worker／governance／receiver     | 正向、隔離、拒絕、rotation、durable duplicate 全通過                                          |
+| C214–C217；正式 transaction／claim/fence／retry owner | rollback、自然lease、兩process、五attempt／兩次restart、expiry 全通過                         |
+| C218–C220；snapshot/relevance/readiness               | 舊ETA／取消後到場停止、receipt獨立、payload及真DI readiness全通過                             |
+| C205；真 admin panel HTTP/readback                    | picker200、retry201、GET200 delivered/none/null；截圖無舊queue且顯示「無重試機制」            |
+| C221–C224；真BFF/session/PG/browser                   | fresh handoff、最新狀態、foreign history404、自有200、logout/account switch及replay/TTL全通過 |
+| 原 tenant/webhook/C111–C115/restart gates             | 同SHA獨立manifest及報告全通過，未由partner數量替代                                            |
+
+全部43附件含4張截圖已讀；R13舊panel重現2fail/2pass（8filtered），修正後UI12全過。
+逐finding來源、舊新SHA、命令/exit/hash、fixture及native/logout限制見
+[原 UAT 修復整合節](../../04-uat/system-remediation-20260906/SR-PARTNER-NOTIFY-QA-20260917.md)。
+三項 required_acceptance 在547已有同SHA evidence PASS；**本文提交後的新候選仍須完整重跑**，
+最終 SHA／run／artifact 以 canonical handoff receipt 核對，不沿用547或502b結果。
+交審／merge／acceptance 尚由 lifecycle 判定，非本文直接宣告 done。
+A僅 `controlled_receiver_verified`；B真夥伴HTTPS與C原生裝置仍為 **SR-LIVE-PUSH-001，未執行**。
+
+## 以下為先前候選歷史（不作最終候選驗收）
+
+2026-09-29 歷史：`502b51342b656ec42c2bdbb5b8e323369db2abb6` 的
 [UAT36502578681](https://github.com/ajoe734/drts-fleet-platform/actions/runs/36502578681)
 24/24、零 skip/flaky，PG21、tenant/webhook/restart與dedicated partner unit也全通過。
 但逐張核對 C205 screenshot 發現新 **R13**：HTTP 已 delivered/none/null failure，
