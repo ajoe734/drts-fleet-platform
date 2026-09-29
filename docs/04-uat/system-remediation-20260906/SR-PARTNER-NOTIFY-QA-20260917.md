@@ -42,13 +42,13 @@ outbox `91b7c74d-0cc8-4f05-9543-b98f2325d8f5` 的 `status=delivered`、
   刷新只 `setDeliveries`，未解除該本地狀態；`PnDeliveries` 的 `rows.map`（約916）
   每次仍覆蓋 `status="queued"`、`failureReason="已受理重新入列"`、
   `retryDisposition="inflight"`，最後 `PnRetryCell`（約608）顯示等待 claim。
-- 正式規格：SA/SD §12 Platform/Ops「真實 stage 與受控 retry」、§16 要求 UI 真狀態；
+- 正式規格：SA/SD §12 Platform/Ops「真實 stage 與受控 retry」、§15 要求 UI 真狀態；
   receipt 已持久化後，刷新必須以正式 read model 為準，不能無限保留 transient overlay。
 
 非 serving 最小 probe 使用 production `PartnerNotificationPanel`、Canvas 元件、正式
 翻譯及真正 React click/refresh/state，只替代 admin HTTP client 邊界。依序 failed/manual_only
 → click retry → 確認 queued → 回傳 delivered/none/receipt → click refresh → accepted label
-成立，但要求「入列中 · 待 claim」消失的 assertion **failed**。Node22.23.2／Vitest4.1.2，
+成立，但要求「入列中 · 待 claim」消失的 assertion **failed**。Node22.23.2／Vitest4.1.4，
 exit **1**、**1 test failed**、約4.42秒；不是缺套件或服務啟動錯誤。
 命令：`pnpm exec vitest run --config .local/sr-partner-notify-qa-20260928/vitest-repro.config.ts .local/sr-partner-notify-qa-20260928/admin-retry-readback.test.tsx`。
 最初 alias setup failure 另存 `r13-local-probe-setup-failure.log`，不算重現；修正 alias 後的
