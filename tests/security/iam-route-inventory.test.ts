@@ -614,6 +614,23 @@ describe("IAM dynamic route inventory and catalogue verification", () => {
     const breakGlassRoutes = result.routesDiscovered.filter(
       (r) => r.controller === "BreakGlassController",
     );
-    expect(breakGlassRoutes.length).toBe(4);
+    expect(breakGlassRoutes.length).toBe(6);
+
+    // 4. New read-only routes (UI17-IAM-BREAK-GLASS-READ-CONTRACT-20260925):
+    // additive GET routes carry no route-specific scope decorator (read
+    // authorization is enforced in BreakGlassService, not the route policy),
+    // but still inherit the controller's platform/ops realm restriction and
+    // remain classified.
+    const breakGlassGetRoutes = breakGlassRoutes.filter(
+      (r) => r.httpMethod === "GET",
+    );
+    expect(breakGlassGetRoutes.length).toBe(2);
+    for (const route of breakGlassGetRoutes) {
+      expect(route.isClassified).toBe(true);
+      expect(route.effectiveScopes).toEqual([]);
+      expect(route.effectiveRealms).toEqual(
+        expect.arrayContaining(["platform", "ops"]),
+      );
+    }
   });
 });

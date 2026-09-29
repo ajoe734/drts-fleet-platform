@@ -773,7 +773,7 @@ describe("TenantPartnerService sensitive-data governance", () => {
     ).toHaveLength(0);
   });
 
-  it("loads partner ingress credentials from environment secrets", () => {
+  it("loads partner ingress credentials from environment secrets", async () => {
     process.env.PARTNER_INGRESS_KEY_BANK_DEMO_ALPHA_AIRPORT =
       "pk_test_alpha_ingress_secret";
 
@@ -795,7 +795,7 @@ describe("TenantPartnerService sensitive-data governance", () => {
     });
   });
 
-  it("loads canonical airport issuer ingress credentials from environment secrets", () => {
+  it("loads canonical airport issuer ingress credentials from environment secrets", async () => {
     process.env.PARTNER_INGRESS_KEY_CONTOSO = "pk_test_contoso_ingress_secret";
 
     const service = new TenantPartnerService(new AuditNotificationService());
@@ -993,11 +993,11 @@ describe("TenantPartnerService sensitive-data governance", () => {
     expect(delivery).not.toHaveProperty("retryPolicySnapshot");
   });
 
-  it("creates and updates partner entries through the platform-admin lifecycle with audit metadata", () => {
+  it("creates and updates partner entries through the platform-admin lifecycle with audit metadata", async () => {
     const auditNotificationService = new AuditNotificationService();
     const service = new TenantPartnerService(auditNotificationService);
 
-    const created = service.createPlatformPartnerEntry(
+    const created = await service.createPlatformPartnerEntry(
       {
         tenantId: "tenant-demo-001",
         partnerCode: "bank_growth_plus",
@@ -1041,7 +1041,7 @@ describe("TenantPartnerService sensitive-data governance", () => {
       },
     });
 
-    const updated = service.updatePlatformPartnerEntry(
+    const updated = await service.updatePlatformPartnerEntry(
       created.entrySlug,
       {
         displayName: "Bank Growth Plus Premium Airport",
@@ -1097,14 +1097,14 @@ describe("TenantPartnerService sensitive-data governance", () => {
     );
   });
 
-  it("revokes partner entries and blocks public lookup plus bootstrap auth", () => {
+  it("revokes partner entries and blocks public lookup plus bootstrap auth", async () => {
     process.env.PARTNER_INGRESS_KEY_BANK_DEMO_ALPHA_AIRPORT =
       "pk_test_alpha_ingress_secret";
 
     const auditNotificationService = new AuditNotificationService();
     const service = new TenantPartnerService(auditNotificationService);
 
-    const revoked = service.revokePlatformPartnerEntry(
+    const revoked = await service.revokePlatformPartnerEntry(
       "bank-demo-alpha-airport",
       "req-partner-revoke-001",
     );
@@ -1147,14 +1147,14 @@ describe("TenantPartnerService sensitive-data governance", () => {
     );
   });
 
-  it("rotates and revokes partner ingress credentials with audit evidence", () => {
+  it("rotates and revokes partner ingress credentials with audit evidence", async () => {
     process.env.PARTNER_INGRESS_KEY_BANK_DEMO_ALPHA_AIRPORT =
       "pk_test_alpha_ingress_secret";
 
     const auditNotificationService = new AuditNotificationService();
     const service = new TenantPartnerService(auditNotificationService);
 
-    const issued = service.issuePlatformPartnerIngressCredential(
+    const issued = await service.issuePlatformPartnerIngressCredential(
       "bank-demo-alpha-airport",
       {
         rotationReason: "scheduled_rotation",
@@ -1193,7 +1193,7 @@ describe("TenantPartnerService sensitive-data governance", () => {
     );
     expect(resolution.identity.actorId).toBe(issued.credential.keyId);
 
-    const revoked = service.revokePlatformPartnerIngressCredential(
+    const revoked = await service.revokePlatformPartnerIngressCredential(
       "bank-demo-alpha-airport",
       issued.credential.keyId,
       {
@@ -1241,7 +1241,7 @@ describe("TenantPartnerService sensitive-data governance", () => {
     );
   });
 
-  it("keeps rotated partner ingress credentials in overlap and fails closed for wrong-entry or auto-revoked keys", () => {
+  it("keeps rotated partner ingress credentials in overlap and fails closed for wrong-entry or auto-revoked keys", async () => {
     vi.useFakeTimers();
     try {
       vi.setSystemTime(new Date("2026-08-02T12:00:00.000Z"));
@@ -1251,7 +1251,7 @@ describe("TenantPartnerService sensitive-data governance", () => {
         "pk_test_beta_ingress_secret";
 
       const service = new TenantPartnerService(new AuditNotificationService());
-      const issued = service.issuePlatformPartnerIngressCredential(
+      const issued = await service.issuePlatformPartnerIngressCredential(
         "bank-demo-alpha-airport",
         {
           rotationReason: "scheduled_rotation",
@@ -1342,14 +1342,14 @@ describe("TenantPartnerService sensitive-data governance", () => {
     }
   });
 
-  it("rejects expired partner credentials and records dormant partner credential use", () => {
+  it("rejects expired partner credentials and records dormant partner credential use", async () => {
     vi.useFakeTimers();
     try {
       vi.setSystemTime(new Date("2026-08-02T08:00:00.000Z"));
       const auditNotificationService = new AuditNotificationService();
       const service = new TenantPartnerService(auditNotificationService);
 
-      const expiring = service.issuePlatformPartnerIngressCredential(
+      const expiring = await service.issuePlatformPartnerIngressCredential(
         "bank-demo-alpha-airport",
         {
           rotationReason: "short_lived",
@@ -1378,7 +1378,7 @@ describe("TenantPartnerService sensitive-data governance", () => {
         }),
       );
 
-      const dormant = service.issuePlatformPartnerIngressCredential(
+      const dormant = await service.issuePlatformPartnerIngressCredential(
         "bank-demo-beta-airport",
         {
           rotationReason: "dormancy_probe",
@@ -1430,14 +1430,14 @@ describe("TenantPartnerService sensitive-data governance", () => {
     );
     await service.onModuleInit();
 
-    const issued = service.issuePlatformPartnerIngressCredential(
+    const issued = await service.issuePlatformPartnerIngressCredential(
       "bank-demo-alpha-airport",
       {
         rotationReason: "scheduled_rotation",
       },
       "req-partner-credential-persist-001",
     );
-    service.revokePlatformPartnerIngressCredential(
+    await service.revokePlatformPartnerIngressCredential(
       "bank-demo-alpha-airport",
       issued.credential.keyId,
       {
@@ -1557,7 +1557,7 @@ describe("TenantPartnerService sensitive-data governance", () => {
     );
     await service.onModuleInit();
 
-    service.revokePlatformPartnerEntry(
+    await service.revokePlatformPartnerEntry(
       "bank-demo-alpha-airport",
       "req-partner-entry-persist-001",
     );
@@ -1910,7 +1910,7 @@ describe("TenantPartnerService sensitive-data governance", () => {
     );
   });
 
-  it("applies passenger/address governance quality rules and masks export views", () => {
+  it("applies passenger/address governance quality rules and masks export views", async () => {
     const service = new TenantPartnerService(new AuditNotificationService());
 
     const passenger = service.upsertPassenger("tenant-demo-001", {
@@ -1949,7 +1949,7 @@ describe("TenantPartnerService sensitive-data governance", () => {
     expect(exportView.maskedAddressText).not.toContain("100 號 12 樓");
   });
 
-  it("lists, upserts, and disables tenant cost centers with owner resolution", () => {
+  it("lists, upserts, and disables tenant cost centers with owner resolution", async () => {
     const auditNotificationService = new AuditNotificationService();
     const service = new TenantPartnerService(auditNotificationService);
 
@@ -2074,7 +2074,7 @@ describe("TenantPartnerService sensitive-data governance", () => {
     );
   });
 
-  it("allows duplicate cost-center codes across different tenants", () => {
+  it("allows duplicate cost-center codes across different tenants", async () => {
     const service = new TenantPartnerService(new AuditNotificationService());
 
     const otherTenantCostCenter = service.upsertCostCenter("tenant-demo-002", {
@@ -2107,7 +2107,7 @@ describe("TenantPartnerService sensitive-data governance", () => {
     );
   });
 
-  it("validateBookingCostCenter accepts canonical active codes and rejects unknown, disabled, or malformed entries", () => {
+  it("validateBookingCostCenter accepts canonical active codes and rejects unknown, disabled, or malformed entries", async () => {
     const service = new TenantPartnerService(new AuditNotificationService());
 
     // Seeded tenant has CC-FIN-04 active by default.
@@ -2170,7 +2170,7 @@ describe("TenantPartnerService sensitive-data governance", () => {
     }
   });
 
-  it("validateBookingCostCenter grandfathers tenants whose directory is empty and isolates lookups by tenant", () => {
+  it("validateBookingCostCenter grandfathers tenants whose directory is empty and isolates lookups by tenant", async () => {
     const service = new TenantPartnerService(new AuditNotificationService());
 
     // Tenant with no cost centers: free-text accepted, no normalization to
@@ -2212,7 +2212,7 @@ describe("TenantPartnerService sensitive-data governance", () => {
     ).toEqual({ value: "CC-X", matchedDirectory: true });
   });
 
-  it("normalizes tenant API key scopes and enforces the rotation window", () => {
+  it("normalizes tenant API key scopes and enforces the rotation window", async () => {
     const service = new TenantPartnerService(new AuditNotificationService());
 
     const issued = service.issueApiKey("tenant-demo-001", {
@@ -2258,7 +2258,7 @@ describe("TenantPartnerService sensitive-data governance", () => {
     expect(governance.baselineWebhookEvents).toContain("dispatch.assigned");
   });
 
-  it("limits tenant API key rotation to dual overlap and auto-revokes elapsed overlaps", () => {
+  it("limits tenant API key rotation to dual overlap and auto-revokes elapsed overlaps", async () => {
     vi.useFakeTimers();
     try {
       vi.setSystemTime(new Date("2026-08-02T00:00:00.000Z"));
@@ -2343,7 +2343,7 @@ describe("TenantPartnerService sensitive-data governance", () => {
     }
   });
 
-  it("returns credential plaintext only on issue and never re-exposes key material", () => {
+  it("returns credential plaintext only on issue and never re-exposes key material", async () => {
     process.env.PARTNER_INGRESS_KEY_BANK_DEMO_ALPHA_AIRPORT =
       "pk_test_alpha_ingress_secret";
 
@@ -2377,7 +2377,7 @@ describe("TenantPartnerService sensitive-data governance", () => {
       expect(JSON.stringify(apiKey)).not.toContain(rotated.plaintextKey);
     }
 
-    const partnerIssued = service.issuePlatformPartnerIngressCredential(
+    const partnerIssued = await service.issuePlatformPartnerIngressCredential(
       "bank-demo-alpha-airport",
       { rotationReason: "scheduled_rotation" },
       "req-plaintext-once-partner-001",
@@ -2399,7 +2399,7 @@ describe("TenantPartnerService sensitive-data governance", () => {
     }
   });
 
-  it("keeps raw webhook secret material out of rotation history and endpoint reads", () => {
+  it("keeps raw webhook secret material out of rotation history and endpoint reads", async () => {
     const auditNotificationService = new AuditNotificationService();
     const service = new TenantPartnerService(auditNotificationService);
 
@@ -2652,7 +2652,7 @@ describe("TenantPartnerService sensitive-data governance", () => {
     });
   });
 
-  it("isolates tenant API key read and lifecycle operations across tenants", () => {
+  it("isolates tenant API key read and lifecycle operations across tenants", async () => {
     const service = new TenantPartnerService(new AuditNotificationService());
 
     const alpha = service.issueApiKey("tenant-demo-001", {
@@ -2710,7 +2710,7 @@ describe("TenantPartnerService sensitive-data governance", () => {
     ).toMatchObject({ status: "active", revokedAt: null });
   });
 
-  it("audits credential owner, expiry, and last-used across the issue rotate revoke lifecycle", () => {
+  it("audits credential owner, expiry, and last-used across the issue rotate revoke lifecycle", async () => {
     vi.useFakeTimers();
     try {
       vi.setSystemTime(new Date("2026-08-02T00:00:00.000Z"));
@@ -2792,7 +2792,7 @@ describe("TenantPartnerService sensitive-data governance", () => {
 
       // Partner ingress credentials must carry the same owner/expiry/last-used
       // evidence, including a last-used timestamp observed from real traffic.
-      const partnerIssued = service.issuePlatformPartnerIngressCredential(
+      const partnerIssued = await service.issuePlatformPartnerIngressCredential(
         "bank-demo-beta-airport",
         { rotationReason: "scheduled_rotation" },
         "req-credential-audit-partner-issue-001",
@@ -2808,7 +2808,7 @@ describe("TenantPartnerService sensitive-data governance", () => {
         "req-credential-audit-partner-auth-001",
       );
 
-      service.revokePlatformPartnerIngressCredential(
+      await service.revokePlatformPartnerIngressCredential(
         "bank-demo-beta-airport",
         partnerIssued.credential.keyId,
         { revokeReason: "compromised" },
@@ -3831,7 +3831,7 @@ describe("TenantPartnerService sensitive-data governance", () => {
     );
   });
 
-  it("preserves manual disable reason notes on webhook endpoints", () => {
+  it("preserves manual disable reason notes on webhook endpoints", async () => {
     const service = new TenantPartnerService(
       new AuditNotificationService(),
       undefined,
@@ -4103,7 +4103,7 @@ describe("TenantPartnerService tenant business ops views", () => {
     );
   });
 
-  it("projects issuer contract SLA posture with masked exception references", () => {
+  it("projects issuer contract SLA posture with masked exception references", async () => {
     const service = new TenantPartnerService(new AuditNotificationService());
     service.registerOrderFeedProvider(() => [
       createTenantOrder({
@@ -4209,7 +4209,7 @@ describe("TenantPartnerService tenant business ops views", () => {
 });
 
 describe("TenantPartnerService approval rules", () => {
-  it("creates, reorders, disables, and evaluates approval rules with audit events", () => {
+  it("creates, reorders, disables, and evaluates approval rules with audit events", async () => {
     const auditNotificationService = new AuditNotificationService();
     const service = new TenantPartnerService(auditNotificationService);
 
@@ -4322,7 +4322,7 @@ describe("TenantPartnerService approval rules", () => {
     );
   });
 
-  it("rejects duplicate orderedRuleIds when reordering approval rules", () => {
+  it("rejects duplicate orderedRuleIds when reordering approval rules", async () => {
     const service = new TenantPartnerService(new AuditNotificationService());
 
     const first = service.upsertApprovalRule("tenant-demo-001", {
@@ -5226,7 +5226,7 @@ describe("TenantPartnerService approval rules", () => {
     await expect(jwtAuthService.verifyAccessToken(issued.token)).resolves.toBeNull();
   });
 
-  it("ships a tenant governance dashboard with the required panels and metric bindings", () => {
+  it("ships a tenant governance dashboard with the required panels and metric bindings", async () => {
     const dashboard = JSON.parse(
       readFileSync(
         resolve(

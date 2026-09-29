@@ -20,6 +20,7 @@
 <script type="text/babel" src="design-canvas.jsx"></script>
 <script type="text/babel" src="p5-ui.jsx"></script>
 <script type="text/babel" src="p5-screens.jsx"></script>
+<script type="text/babel" src="p5-e-screens.jsx"></script>
 <script type="text/babel">
 function App(){
   const W=390+28, H=844+28;
@@ -38,7 +39,14 @@ function App(){
       <DCSection id="post" title="02 · 行程後 P5-08 ~ 10" subtitle="評價（星等 ≥44px + 文字標籤 + tags）→ 送出 → 電子乘車證明">
         <DCArtboard id="p5-08" label="P5-08 · 行程完成 + 評價提示" width={W} height={H}><F><P5_S08/></F></DCArtboard>
         <DCArtboard id="p5-09" label="P5-09 · 評價已送出" width={W} height={H}><F><P5_S09/></F></DCArtboard>
-        <DCArtboard id="p5-10" label="P5-10 · 電子乘車證明 · PDF/分享 · 遮碼" width={W} height={H}><F><P5_S10/></F></DCArtboard>
+        <DCArtboard id="p5-10" label="E-04 · 電子乘車證明（修正版 §91-6）· 車隊/駕駛遮碼/車資明細/支付 · 02-2944-0985" width={W} height={H}><F><P5_S10/></F></DCArtboard>
+      </DCSection>
+      <DCSection id="e-review" title="02b · G201011 送審補件 E-18 / E-19" subtitle="回應新北市交通局 115.9.11 初審意見 · 費用政策定稿文字不得改寫 · 749×1563 可直接置換">
+        <DCArtboard id="e18" label="E-18 · 行程結束評分 · 4 星主畫面" width={W} height={H}><F><P5_E18 stars={4}/></F></DCArtboard>
+        <DCArtboard id="e18b" label="E-18b · 低分導流 ≤2 星 · 客服聯繫開關" width={W} height={H}><F><P5_E18 stars={2}/></F></DCArtboard>
+        <DCArtboard id="e19a" label="E-19a · 首頁費用與優惠說明 · 8 項定稿" width={W} height={H}><F><P5_E19a/></F></DCArtboard>
+        <DCArtboard id="e19b" label="E-19b · 下單前確認 bottom sheet · 已勾選" width={W} height={H}><F><P5_E19b/></F></DCArtboard>
+        <DCArtboard id="e19b-off" label="E-19b · 未勾選 · 確認鈕停用態" width={W} height={H}><F><P5_E19b checked={false}/></F></DCArtboard>
       </DCSection>
       <DCSection id="degraded" title="03 · 失效 / 降級 P5-11 ~ 12 + A04" subtitle="fail-closed：不顯示半套 assigned card · 不顯示 raw 電話 · 報價異常不可確認">
         <DCArtboard id="p5-11" label="P5-11 · 派車資訊尚未完整（fail closed）" width={W} height={H}><F><P5_S11/></F></DCArtboard>

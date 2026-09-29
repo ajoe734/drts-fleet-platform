@@ -84,6 +84,26 @@ def workspace_root() -> Path:
     return workspace_roots()[0]
 
 
+_HOOK_CWD: Path | None = None
+
+
+def set_hook_cwd(raw: Any) -> None:
+    """Set this tool call's cwd, clearing any previous hook's value."""
+    global _HOOK_CWD
+    text = str(raw or "").strip()
+    _HOOK_CWD = Path(text).expanduser().resolve(strict=False) if text else None
+
+
+def worker_cwd() -> Path:
+    """Resolve commands from the hook cwd, then the assigned worker workspace.
+
+    workspace_root remains the canonical boundary. Starting a relative git
+    command there instead of in the worker's worktree incorrectly defers a
+    normal merge into a task branch as a canonical-checkout head move.
+    """
+    return _HOOK_CWD if _HOOK_CWD is not None else workspace_roots()[-1]
+
+
 SAFE_BASH_PATTERNS = [
     re.compile(r"^pwd$"),
     re.compile(r"^echo(\s|$)"),
@@ -183,6 +203,10 @@ SAFE_BASH_PATTERNS = [
     # damages anything, which is a worker-liveness matter, not a permission one.
     re.compile(r"^git rebase(\s|$)"),
     re.compile(r"^git -C .+ rebase(\s|$)"),
+    # Published task branches catch up using normal merges (branch strategy
+    # §11.4). classify_command still guards canonical-checkout head moves.
+    re.compile(r"^git merge( --ff-only| --no-edit| --ff| --no-ff)* origin/dev$"),
+    re.compile(r"^git merge --abort$"),
     re.compile(r"^git -C .+ (status|diff|show|log|remote -v|submodule status)(\s|$)"),
     re.compile(r"^gh issue comment(\s|$)"),
     re.compile(r"^gh pr create(\s|$)"),
@@ -1175,13 +1199,13 @@ def _command_tokens_and_cwd(shell_command: str) -> tuple[list[str], Path]:
         tokens = shlex.split(command)
     except ValueError:
         return [], root
-    cwd = root
+    cwd = worker_cwd()
     if "&&" in tokens:
         amp_index = tokens.index("&&")
         if amp_index == 2 and tokens[0] == "cd":
             cd_target = Path(tokens[1])
             if _paths_within_workspace([cd_target]):
-                cwd = _resolve_workspace_path(root, tokens[1])
+                cwd = _resolve_workspace_path(cwd, tokens[1])
                 tokens = tokens[amp_index + 1 :]
     index = 0
     while index < len(tokens) and re.match(r"^[A-Za-z_][A-Za-z0-9_]*=.*$", tokens[index]):
@@ -1288,7 +1312,7 @@ def _moves_head_in_the_canonical_checkout(shell_command: str) -> bool:
     segments = _split_shell_segments(normalized)
     if segments is None:
         return False
-    cwd = workspace_root()
+    cwd = worker_cwd()
     for segment in segments:
         try:
             tokens = shlex.split(_strip_invocation_prefixes(segment))
@@ -2056,6 +2080,7 @@ def hook_mode(config: dict[str, Any], event_name: str, payload: dict[str, Any]) 
         tool_name = payload.get("tool_name") or payload.get("toolName") or ""
         tool_input = payload.get("tool_input") or payload.get("toolInput") or {}
         session_id = payload.get("session_id") or payload.get("sessionId")
+        set_hook_cwd(payload.get("cwd"))
         # Chatbox tree guard fires before override/approval lookups so a
         # dirty fragile working tree can't be auto-allowed by a prior
         # session approval. Only PreToolUse; PermissionRequest is the
