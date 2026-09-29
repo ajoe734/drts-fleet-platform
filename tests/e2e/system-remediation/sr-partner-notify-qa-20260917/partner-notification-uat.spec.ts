@@ -1297,5 +1297,12 @@ test.describe("SR-PARTNER-NOTIFY-QA-20260917: E2E Partner Notification Delivery 
       contentType: "image/png",
       body: await page.screenshot({ fullPage: true }),
     });
+    // R13: a stale local requeue overlay must not contradict this completed
+    // delivery. Keep the HTTP and screenshot evidence even if this fails.
+    await expect(row).not.toContainText("已受理重新入列");
+    await expect(row).not.toContainText(/入列中|待 claim/);
+    await expect(row.getByTitle("none", { exact: true })).toContainText(
+      "無重試機制",
+    );
   });
 });

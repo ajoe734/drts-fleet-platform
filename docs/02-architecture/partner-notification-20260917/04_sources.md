@@ -1,5 +1,19 @@
 # Sources and Case Matrix
 
+2026-09-29 最新：`502b51342b656ec42c2bdbb5b8e323369db2abb6` 的
+[UAT36502578681](https://github.com/ajoe734/drts-fleet-platform/actions/runs/36502578681)
+24/24、零 skip/flaky，PG21、tenant/webhook/restart與dedicated partner unit也全通過。
+但逐張核對 C205 screenshot 發現新 **R13**：HTTP 已 delivered/none/null failure，
+畫面仍受 `PnDeliveries.rows.map` 本地 queued overlay 覆蓋，顯示「入列中 · 待 claim」。
+非 serving production React component probe 也於同觸發路徑 assertion failed（exit1）；
+只有 HTTP client 邊界被替代，未改產品。C205 現已補權威回讀後不得殘留 queue 的 guard。
+**UI acceptance NOT MET，產品 scope blocker；尚未 handoff／收A層。** Supervisor 需協調
+`partner-notification-panel.tsx` 與既有 UI component regression，child merge 後全套新 SHA重驗。
+正式來源、最小重現、artifact11006691019／ZIP hash、完整 required_acceptance 對照見
+[原UAT最新R13節](../../04-uat/system-remediation-20260906/SR-PARTNER-NOTIFY-QA-20260917.md)。
+NAV／一般CI與既有gate的真通過保留為502b證據；不以aggregate green遮蔽新增缺陷。
+B/C仍為SR-LIVE-PUSH-001真夥伴／真機門檻，未執行。
+
 2026-09-28 successor：[PR #2220](https://github.com/ajoe734/drts-fleet-platform/pull/2220)，
 base `2c3d4baa39133de3d740238e5e0f227033b94e59`；指定 20 檔 blob 恢復已驗。
 完整本輪 finding／來源／適配及 checkpoint 證據見原 UAT 開頭的 successor 節。

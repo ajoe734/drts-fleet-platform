@@ -1,6 +1,81 @@
 # SR-PARTNER-NOTIFY-QA-20260917
 
-## 2026-09-28 successor 恢復（目前狀態）
+## 2026-09-29 最新處置：R13 管理 UI 回讀仍被本地 queued 覆蓋
+
+**產品 blocker，尚未 handoff／收完整 A 層。** 自動化 24 案首次全綠後，逐張讀取
+同 SHA screenshot 與 HTTP 附件發現新的真狀態矛盾；不能以 aggregate success 關閉 UI 驗收。
+本次只補 scope 內 C205 斷言與本文件定位，產品由 Supervisor 協調 repair child／scope。
+
+### 已完成的完整同 SHA 執行
+
+程式／workflow SHA：`502b51342b656ec42c2bdbb5b8e323369db2abb6`。
+[UAT36502578681／job109196624110](https://github.com/ajoe734/drts-fleet-platform/actions/runs/36502578681/job/109196624110)
+completed **success**；artifact **11006691019**，ZIP SHA256
+`f761c3e94c2f4dfd9d153da84f556d139c917ca7fb1779b5bbb94c6271a3f20f`。
+完整 log／所有 JSON／43 個附件已讀或解碼核對：C201–C224 **24/24、零 fail/skip/flaky**，
+tenant/partner unit **331/331**（三 PG 各 7/7）、webhook unit **34/34**、dedicated partner
+unit **12/12**、tenant HTTP **10/10**、webhook E2E **1/1**、C111–C115 passed、restart
+verified15。每份執行報告 candidate/workflow SHA 相符、exit_code=0，run-status passed。
+C205 **2.975 秒**；C218 **18.860 秒**；C214 **128.127 秒**；C216 **460.263 秒**；
+C224 **183.310 秒**。這是該版斷言的真結果，不表示斷言已涵蓋下面新發現的 R13。
+
+[一般 CI36502578599](https://github.com/ajoe734/drts-fleet-platform/actions/runs/36502578599)
+completed **success**，已讀完整 log 與 artifact11005049849：lint 21/21、typecheck 28/28、
+root **4136 pass／39 pending／0 fail**、API **1438/1438**、PG21 零 skip。
+CI ZIP SHA256 `4718280ec55e0db5317c76c1b4343ab49a34512c54238e6618f0358e3f494a83`。
+draft integration36502578349 success 僅 scope checks，完整產品 jobs skipped。
+這三個 run 均已完成；不可把其 SHA 換成新增 R13 斷言後的 checkpoint。
+
+### R13 [P2] 最小重現、正式呼叫鏈與修正邊界
+
+同一 C205：真 retry POST201 → worker 第二次 attempt 完成 → refresh GET200 返回
+outbox `91b7c74d-0cc8-4f05-9543-b98f2325d8f5` 的 `status=delivered`、
+`delivery_stage=partner_accepted`、`retry_disposition=none`、`failure_reason=null`、
+`receipt_id=controlled-3a883241-e00c-4f91-a267-c79d7a434557`、`attempts=2`。
+但 screenshot 同列顯示「夥伴已接受（狀態未知）」及「已受理重新入列／入列中 · 待 claim」。
+
+- HTTP 附件：`C205-admin-retry-http-readback-d49f03e494fa.json`，SHA256
+  `d49f03e494fa` 為解碼工具加入的內容 hash 前綴；完整 hash 在 `inspection.json`。
+- Screenshot：`C205-admin-retry-readback-35694f04bc97.png`，同上保留完整 hash。
+- 正式來源：`apps/platform-admin-web/components/partner-notification-panel.tsx` 的
+  `handleRetry`（約1681）成功後 `setRetryState("queued")`；`fetchState`（約1321）
+  刷新只 `setDeliveries`，未解除該本地狀態；`PnDeliveries` 的 `rows.map`（約916）
+  每次仍覆蓋 `status="queued"`、`failureReason="已受理重新入列"`、
+  `retryDisposition="inflight"`，最後 `PnRetryCell`（約608）顯示等待 claim。
+- 正式規格：SA/SD §12 Platform/Ops「真實 stage 與受控 retry」、§16 要求 UI 真狀態；
+  receipt 已持久化後，刷新必須以正式 read model 為準，不能無限保留 transient overlay。
+
+非 serving 最小 probe 使用 production `PartnerNotificationPanel`、Canvas 元件、正式
+翻譯及真正 React click/refresh/state，只替代 admin HTTP client 邊界。依序 failed/manual_only
+→ click retry → 確認 queued → 回傳 delivered/none/receipt → click refresh → accepted label
+成立，但要求「入列中 · 待 claim」消失的 assertion **failed**。Node22.23.2／Vitest4.1.2，
+exit **1**、**1 test failed**、約4.42秒；不是缺套件或服務啟動錯誤。
+命令：`pnpm exec vitest run --config .local/sr-partner-notify-qa-20260928/vitest-repro.config.ts .local/sr-partner-notify-qa-20260928/admin-retry-readback.test.tsx`。
+最初 alias setup failure 另存 `r13-local-probe-setup-failure.log`，不算重現；修正 alias 後的
+實際 assertion failure 在 `r13-local-probe.log`，probe 未修改任何產品來源。
+
+本次 QA 修正：C205 在保存原 HTTP／screenshot 後，要求同列不再有「已受理重新入列」
+或「入列中／待 claim」，並要求 `title=none` 的正式「無重試機制」狀態。此 guard
+預期會在未修 R13 的產品上失敗；沒有為再取得綠燈而省略問題，也未重跑已知有缺陷的全套 hosted。
+
+Supervisor 所需產品修正範圍：上述 panel 的 `handleRetry`／`fetchState`／`PnDeliveries`
+本地狀態與權威回讀協調；必要 regression 放既有
+`tests/unit/system-remediation/sr-partner-notify-ui-20260917/notification-ui-component.test.tsx`。
+先讓本地最小 probe 的 queued→delivered/none 通過，保留初始 pending／送出中及拒絕重送
+邊界；child merge 後 parent 正常 merge dev，再完整同新 SHA 重跑24案及全部既有 gates。
+這兩個產品／既有 UI unit 路徑都在本 task write_scopes 外，owner 未自行修改。
+
+| Required acceptance                                            | 本輪實際證據與剩餘條件                                                                                        |
+| -------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------- |
+| `integrated_controlled_receiver_negative_matrix_same_sha`      | 502b 的24案與PG全綠；新增 R13 guard 後仍需產品修復及新SHA完整重跑，不拼接結果                                 |
+| `navigation_and_admin_ui_hosted_real_runtime_evidence`         | NAV 真 browser/BFF/session/PG 已驗；admin真 retry/readback已驗但R13畫面矛盾，**NOT MET**                      |
+| `existing_webhook_tenant_gates_preserved_and_live_not_claimed` | 502b tenant/webhook/C111–C115/restart 全通過；新候選仍須重跑。B/C真夥伴及原生裝置未執行，保留SR-LIVE-PUSH-001 |
+
+完整機器證據保存在 canonical `.local/sr-partner-notify-qa-20260929-502b51342b65/`；
+包含原 ZIP、解碼附件、逐案 inspection、CI、最小 probe 及本次 blocker receipt。
+Supervisor 尚未安排 R13 前，本任務不得宣稱整合完成、進行最終 handoff 或直接 done。
+
+## 2026-09-28 successor 恢復（先前 checkpoint）
 
 Successor PR：[#2220](https://github.com/ajoe734/drts-fleet-platform/pull/2220)。
 下列為提交時已完成的證據；最終 candidate 的完整 SHA、同 SHA hosted run／artifact
