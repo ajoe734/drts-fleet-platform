@@ -1156,7 +1156,359 @@ describe("PartnerNotificationPanel", () => {
     expect(validClient.getPartnerEntryNotificationBinding).toHaveBeenCalledTimes(getCountsAfterEntryTransition);
     expect(validClient.listPartnerNotificationDeliveries).toHaveBeenCalledTimes(listCountsAfterEntryTransition);
 
-    // Visible current-entry data 
+    // Visible current-entry data
     expect(await screen.findByText("new-entry-delivery-123")).toBeDefined();
+  });
+
+  it("reconciles the transient re-enqueue display to the authoritative delivered state on refresh (SR-PARTNER-NOTIFY-FIX-RETRY-READBACK-20260929)", async () => {
+    const outboxId = "outbox-retry-readback-1";
+
+    mockClient.listPartnerNotificationDeliveries
+      .mockResolvedValueOnce({
+        items: [
+          {
+            outboxId,
+            status: "failed",
+            eventType: "eta_changed",
+            attempts: 1,
+            createdAt: new Date().toISOString(),
+            retryDisposition: "allowed",
+            failureReason: "transient_network_error",
+          },
+        ],
+        pageInfo: { totalItems: 1 },
+      })
+      .mockResolvedValueOnce({
+        // Automatic refetch fired by handleRetry right after the 201 accept;
+        // worker has not delivered yet, so the server itself still reports queued.
+        items: [
+          {
+            outboxId,
+            status: "queued",
+            eventType: "eta_changed",
+            attempts: 1,
+            createdAt: new Date().toISOString(),
+            retryDisposition: "inflight",
+            failureReason: null,
+          },
+        ],
+        pageInfo: { totalItems: 1 },
+      })
+      .mockResolvedValueOnce({
+        // Explicit refresh after the worker's 2nd attempt delivered: authoritative
+        // terminal state per the QA repro (delivered / partner_accepted / receipt /
+        // no retry / failure null).
+        items: [
+          {
+            outboxId,
+            status: "delivered",
+            deliveryStage: "partner_accepted",
+            receiptId: "receipt-1",
+            eventType: "eta_changed",
+            attempts: 2,
+            createdAt: new Date().toISOString(),
+            retryDisposition: "n/a",
+            failureReason: null,
+          },
+        ],
+        pageInfo: { totalItems: 1 },
+      });
+    mockClient.retryPartnerNotificationDelivery.mockResolvedValueOnce({
+      kind: "requeued",
+    });
+
+    render(
+      <PartnerNotificationPanel
+        entrySlug="test-entry"
+        tenantId="test-tenant"
+        canWriteBinding={true}
+        canReadWebhooks={false}
+      />,
+    );
+
+    const retryBtn = await screen.findByRole("button", { name: /重送/i });
+    fireEvent.click(retryBtn);
+
+    await waitFor(() => {
+      expect(mockClient.retryPartnerNotificationDelivery).toHaveBeenCalledWith(
+        "test-entry",
+        outboxId,
+      );
+    });
+
+    // Transient in-flight display from the automatic post-retry refetch.
+    await screen.findByText("已受理重新入列");
+    await screen.findByText("partnerNotification.enqueued");
+
+    // Explicit refresh reads back the authoritative delivered state.
+    const refreshBtn = await screen.findByRole("button", {
+      name: /partnerNotification\.refresh/i,
+    });
+    fireEvent.click(refreshBtn);
+
+    await waitFor(() => {
+      expect(mockClient.listPartnerNotificationDeliveries).toHaveBeenCalledTimes(3);
+    });
+
+    await screen.findByText("partnerNotification.accepted_unknown");
+    expect(screen.queryByText("已受理重新入列")).toBeNull();
+    expect(screen.queryByText("partnerNotification.enqueued")).toBeNull();
+    expect(screen.queryByText("排隊中")).toBeNull();
+  });
+
+  it("retains the in-flight re-enqueue display when refresh still reports queued/pending (SR-PARTNER-NOTIFY-FIX-RETRY-READBACK-20260929)", async () => {
+    const outboxId = "outbox-retry-readback-2";
+
+    mockClient.listPartnerNotificationDeliveries
+      .mockResolvedValueOnce({
+        items: [
+          {
+            outboxId,
+            status: "failed",
+            eventType: "eta_changed",
+            attempts: 1,
+            createdAt: new Date().toISOString(),
+            retryDisposition: "allowed",
+            failureReason: "transient_network_error",
+          },
+        ],
+        pageInfo: { totalItems: 1 },
+      })
+      .mockResolvedValueOnce({
+        items: [
+          {
+            outboxId,
+            status: "queued",
+            eventType: "eta_changed",
+            attempts: 1,
+            createdAt: new Date().toISOString(),
+            retryDisposition: "inflight",
+            failureReason: null,
+          },
+        ],
+        pageInfo: { totalItems: 1 },
+      })
+      .mockResolvedValueOnce({
+        // Explicit refresh: worker still has not claimed the lease, server
+        // authoritative status remains pending.
+        items: [
+          {
+            outboxId,
+            status: "pending",
+            eventType: "eta_changed",
+            attempts: 1,
+            createdAt: new Date().toISOString(),
+            retryDisposition: "none",
+            failureReason: null,
+          },
+        ],
+        pageInfo: { totalItems: 1 },
+      });
+    mockClient.retryPartnerNotificationDelivery.mockResolvedValueOnce({
+      kind: "requeued",
+    });
+
+    render(
+      <PartnerNotificationPanel
+        entrySlug="test-entry"
+        tenantId="test-tenant"
+        canWriteBinding={true}
+        canReadWebhooks={false}
+      />,
+    );
+
+    const retryBtn = await screen.findByRole("button", { name: /重送/i });
+    fireEvent.click(retryBtn);
+
+    await waitFor(() => {
+      expect(mockClient.retryPartnerNotificationDelivery).toHaveBeenCalledWith(
+        "test-entry",
+        outboxId,
+      );
+    });
+
+    await screen.findByText("已受理重新入列");
+    await screen.findByText("partnerNotification.enqueued");
+
+    const refreshBtn = await screen.findByRole("button", {
+      name: /partnerNotification\.refresh/i,
+    });
+    fireEvent.click(refreshBtn);
+
+    await waitFor(() => {
+      expect(mockClient.listPartnerNotificationDeliveries).toHaveBeenCalledTimes(3);
+    });
+
+    // Server is still queued/pending: in-flight display must be retained, not
+    // downgraded or cleared.
+    await waitFor(() => {
+      expect(screen.queryByText("已受理重新入列")).not.toBeNull();
+      expect(screen.queryByText("partnerNotification.enqueued")).not.toBeNull();
+    });
+    expect(screen.queryByText("partnerNotification.accepted_unknown")).toBeNull();
+    expect(screen.queryByText("partnerNotification.historical_unknown")).toBeNull();
+  });
+
+  it("keeps the accepted retry locked (no second POST) while the post-retry readback is still pending (SR-PARTNER-NOTIFY-FIX-RETRY-READBACK-20260929 F1)", async () => {
+    const outboxId = "outbox-retry-readback-3";
+
+    let resolveSecondList: (value: any) => void = () => {};
+    const secondListPromise = new Promise((resolve) => {
+      resolveSecondList = resolve;
+    });
+
+    mockClient.listPartnerNotificationDeliveries
+      .mockResolvedValueOnce({
+        items: [
+          {
+            outboxId,
+            status: "failed",
+            eventType: "eta_changed",
+            attempts: 1,
+            createdAt: new Date().toISOString(),
+            retryDisposition: "automatic",
+            failureReason: "provider_transient_error",
+          },
+        ],
+        pageInfo: { totalItems: 1 },
+      })
+      .mockImplementationOnce(() => secondListPromise);
+    mockClient.retryPartnerNotificationDelivery.mockResolvedValueOnce({
+      kind: "requeued",
+    });
+
+    render(
+      <PartnerNotificationPanel
+        entrySlug="test-entry"
+        tenantId="test-tenant"
+        canWriteBinding={true}
+        canReadWebhooks={false}
+      />,
+    );
+
+    const retryBtn = await screen.findByRole("button", { name: /重送/i });
+    fireEvent.click(retryBtn);
+
+    await waitFor(() => {
+      expect(mockClient.retryPartnerNotificationDelivery).toHaveBeenCalledTimes(1);
+    });
+
+    // The automatic refetch triggered by handleRetry has been issued but has
+    // not resolved yet: the row's server snapshot is still the pre-retry
+    // "failed" data. The row must be shown as in-flight and the resend
+    // control must not accept another click while this readback is pending.
+    await screen.findByText("已受理重新入列");
+    await screen.findByText("partnerNotification.enqueued");
+
+    const retryBtnAfterAccept = screen.queryByRole("button", {
+      name: /重送/i,
+    });
+    if (retryBtnAfterAccept) {
+      fireEvent.click(retryBtnAfterAccept);
+    }
+
+    expect(mockClient.retryPartnerNotificationDelivery).toHaveBeenCalledTimes(1);
+
+    // Release the deferred readback so the test does not leave a pending
+    // promise/timer behind.
+    await act(async () => {
+      resolveSecondList({
+        items: [
+          {
+            outboxId,
+            status: "queued",
+            eventType: "eta_changed",
+            attempts: 1,
+            createdAt: new Date().toISOString(),
+            retryDisposition: "inflight",
+            failureReason: null,
+          },
+        ],
+        pageInfo: { totalItems: 1 },
+      });
+    });
+  });
+
+  it("reconciles to the authoritative terminal state on the very first automatic post-retry readback, even when it resolves before the retry acceptance has re-rendered (SR-PARTNER-NOTIFY-FIX-RETRY-READBACK-20260929 F2)", async () => {
+    const outboxId = "outbox-retry-readback-f2";
+
+    mockClient.listPartnerNotificationDeliveries
+      .mockResolvedValueOnce({
+        items: [
+          {
+            outboxId,
+            status: "failed",
+            eventType: "eta_changed",
+            attempts: 1,
+            createdAt: new Date().toISOString(),
+            retryDisposition: "automatic",
+            failureReason: "provider_transient_error",
+          },
+        ],
+        pageInfo: { totalItems: 1 },
+      })
+      .mockResolvedValueOnce({
+        // Automatic refetch triggered by handleRetry right after the 201
+        // accept: by the time this GET lands the worker has already
+        // delivered, so the very first post-retry readback is already
+        // terminal - there is no intermediate server-reported "queued" row
+        // at all. The retry-acceptance state update and this readback race
+        // each other; the readback must not depend on having observed a
+        // committed render of the "queued" state first.
+        items: [
+          {
+            outboxId,
+            status: "delivered",
+            deliveryStage: "partner_accepted",
+            receiptId: "receipt-f2",
+            eventType: "eta_changed",
+            attempts: 2,
+            createdAt: new Date().toISOString(),
+            retryDisposition: "none",
+            failureReason: null,
+          },
+        ],
+        pageInfo: { totalItems: 1 },
+      });
+    mockClient.retryPartnerNotificationDelivery.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          // Resolve on a real macrotask rather than inside the test's await
+          // chain, matching the production race: retry acceptance and the
+          // automatic fetchState it triggers are not synchronized to any
+          // particular React render.
+          setTimeout(() => resolve({ kind: "requeued" }), 10);
+        }),
+    );
+
+    render(
+      <PartnerNotificationPanel
+        entrySlug="test-entry"
+        tenantId="test-tenant"
+        canWriteBinding={true}
+        canReadWebhooks={false}
+      />,
+    );
+
+    const retryBtn = await screen.findByRole("button", { name: /重送/i });
+    fireEvent.click(retryBtn);
+
+    await screen.findByRole("button", { name: /重送中/ });
+
+    await waitFor(() => {
+      expect(mockClient.retryPartnerNotificationDelivery).toHaveBeenCalledTimes(1);
+    });
+
+    await waitFor(() => {
+      expect(mockClient.listPartnerNotificationDeliveries).toHaveBeenCalledTimes(2);
+    });
+
+    // Authoritative delivered state must be reconciled on this very first
+    // automatic readback - no additional manual refresh should be required.
+    await waitFor(() => {
+      expect(screen.queryByText("已受理重新入列")).toBeNull();
+      expect(screen.queryByText("partnerNotification.enqueued")).toBeNull();
+    });
+    await screen.findByText("partnerNotification.accepted_unknown");
   });
 });
