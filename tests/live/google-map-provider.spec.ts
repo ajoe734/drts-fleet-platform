@@ -55,6 +55,7 @@ test("deployed Ops and Callcenter render the live Google base map", async ({
   const failures = watchGoogleMapErrors(page);
   const evidence = {
     candidate_sha: config.candidateSha,
+    deployed_sha: config.deployedSha,
     status: "failed",
     origin: config.opsOrigin,
     browser: "chromium",
@@ -66,17 +67,32 @@ test("deployed Ops and Callcenter render the live Google base map", async ({
     }>,
     failures,
   };
-  await context.route("**/*", async (route) => {
+  // Chromium interception sees each redirected request too (Playwright route
+  // handlers only see the first URL in a redirect chain). No response mocking.
+  const cdp = await context.newCDPSession(page);
+  await cdp.send("Fetch.enable", {
+    patterns: [{ urlPattern: "*", requestStage: "Request" }],
+  });
+  cdp.on("Fetch.requestPaused", async ({ requestId, request: intercepted }) => {
     try {
-      assertAllowedUrl(route.request().url(), config.allowedTargets);
+      assertAllowedUrl(intercepted.url, config.allowedTargets);
     } catch {
       failures.push(
-        "Browser attempted a request outside DRTS_LIVE_MAP_ALLOWED_TARGETS",
+        `Browser target outside DRTS_LIVE_MAP_ALLOWED_TARGETS: ${new URL(intercepted.url).origin}`,
       );
-      await route.abort("blockedbyclient");
+      await cdp.send("Fetch.failRequest", {
+        requestId,
+        errorReason: "BlockedByClient",
+      });
       return;
     }
-    await route.continue();
+    await cdp.send("Fetch.continueRequest", { requestId });
+  });
+  await context.routeWebSocket("**/*", (socket) => {
+    // These map pages need no WebSocket transport. Prevent a new socket target
+    // escaping the HTTP allowlist and make an unexpected dependency explicit.
+    failures.push("Unexpected WebSocket dependency in map acceptance");
+    socket.close();
   });
   try {
     const configResponse = await request.get(
@@ -84,6 +100,9 @@ test("deployed Ops and Callcenter render the live Google base map", async ({
       { maxRedirects: 0 },
     );
     expect(configResponse.ok()).toBe(true);
+    expect(configResponse.headers()["x-drts-candidate-sha"]).toBe(
+      config.deployedSha,
+    );
     const providerConfig = await configResponse.json();
     // Do not include the providerConfig/browserKey in assertion diagnostics.
     expect(
@@ -92,9 +111,12 @@ test("deployed Ops and Callcenter render the live Google base map", async ({
         providerConfig.reasonCode === null,
     ).toBe(true);
     for (const path of ["/dispatch", "/callcenter"]) {
-      await page.goto(`${config.opsOrigin}${path}`, {
+      const response = await page.goto(`${config.opsOrigin}${path}`, {
         waitUntil: "domcontentloaded",
       });
+      expect(response?.headers()["x-drts-candidate-sha"]).toBe(
+        config.deployedSha,
+      );
       expect(new URL(page.url()).origin).toBe(config.opsOrigin);
       const layer = await expectReadyGoogleMap(page);
       if (path === "/callcenter") {
@@ -117,10 +139,14 @@ test("deployed Ops and Callcenter render the live Google base map", async ({
       expect(failures).toEqual([]);
     }
     evidence.status = "passed";
+  } catch {
+    failures.push("Map rendering failed; only sanitized evidence is retained");
+    throw new Error("Hosted map rendering failed; see evidence-browser.json");
   } finally {
     writeEvidence(
       ".artifacts/live-map-acceptance/evidence-browser.json",
       evidence,
     );
+    await cdp.detach();
   }
 });

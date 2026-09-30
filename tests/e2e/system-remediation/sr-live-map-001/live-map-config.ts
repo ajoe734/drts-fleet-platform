@@ -45,6 +45,12 @@ export function validateLiveMapGate(env: LiveEnv) {
   ) {
     throw new Error("Candidate must be a full SHA matching the workflow SHA");
   }
+  const deployedSha = required(env, "DRTS_LIVE_MAP_DEPLOYED_SHA");
+  if (!/^[a-f0-9]{40}$/.test(deployedSha)) {
+    throw new Error(
+      "DRTS_LIVE_MAP_DEPLOYED_SHA must be the full expected dev deployment SHA",
+    );
+  }
   const allowedTargets = required(env, "DRTS_LIVE_MAP_ALLOWED_TARGETS")
     .split(",")
     .map((value) => origin(value.trim()));
@@ -55,6 +61,7 @@ export function validateLiveMapGate(env: LiveEnv) {
   };
   return {
     candidateSha,
+    deployedSha,
     allowedTargets,
     opsOrigin: requireTarget("DRTS_LIVE_MAP_TEST_ORIGIN"),
     requireTarget,

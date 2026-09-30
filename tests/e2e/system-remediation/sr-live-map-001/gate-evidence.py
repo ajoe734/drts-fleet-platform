@@ -4,7 +4,7 @@ import os
 from pathlib import Path
 
 
-def verify(root, sha, outcomes):
+def verify(root, sha, outcomes, deployed_sha):
     if not all(value == "success" for value in outcomes.values()):
         raise ValueError("All map steps must finish successfully; skip is not pass")
     provider = json.loads((root / "evidence-map.json").read_text())
@@ -13,6 +13,8 @@ def verify(root, sha, outcomes):
     for evidence, key in [(provider, "candidateSha"), (coverage, "candidate_sha"), (browser, "candidate_sha")]:
         if evidence.get(key) != sha or evidence.get("status") != "passed":
             raise ValueError("Evidence must pass on exactly the candidate SHA")
+    if coverage.get("deployed_sha") != deployed_sha or browser.get("deployed_sha") != deployed_sha:
+        raise ValueError("API and browser evidence must match the expected dev deployment SHA")
     if {item["case"] for item in coverage["service_area"]} != {
         "taipei-core", "airport", "outside-taipei", "outside-airport", "pickup-policy"
     }:
@@ -48,7 +50,11 @@ def main():
     try:
         if len(sha) != 40 or any(c not in "0123456789abcdef" for c in sha) or status["workflow_sha"] != sha:
             raise ValueError("Workflow and candidate SHA must match")
-        verify(root, sha, outcomes)
+        deployed_sha = os.environ.get("DRTS_LIVE_MAP_DEPLOYED_SHA", "")
+        if len(deployed_sha) != 40 or any(c not in "0123456789abcdef" for c in deployed_sha):
+            raise ValueError("Expected dev deployment SHA is required")
+        status["deployed_sha"] = deployed_sha
+        verify(root, sha, outcomes, deployed_sha)
         status["status"] = "passed"
     except (ValueError, KeyError, TypeError, OSError) as error:
         status["reason"] = str(error)

@@ -24,11 +24,13 @@ import {
 
 type Evidence = {
   candidate_sha: string;
+  deployed_sha: string;
   status: "failed" | "passed";
   started_at: string;
   api_origin: string;
   service_area: unknown[];
   location: unknown[];
+  stage: string;
   failure?: string;
 };
 type Deps = {
@@ -43,11 +45,13 @@ export async function runCoverage(env: LiveEnv, deps: Deps) {
   const config = validateCoverageInputs(env);
   const evidence: Evidence = {
     candidate_sha: config.candidateSha,
+    deployed_sha: config.deployedSha,
     status: "failed",
     started_at: new Date(deps.now()).toISOString(),
     api_origin: config.apiOrigin,
     service_area: [],
     location: [],
+    stage: "driver-session-and-isolation",
   };
   const request = async <T>(
     url: string,
@@ -67,6 +71,13 @@ export async function runCoverage(env: LiveEnv, deps: Deps) {
       );
     }
     assert(response.ok, `Live map HTTP status ${response.status}`);
+    if (new URL(url).origin === config.apiOrigin) {
+      assert.equal(
+        response.headers.get("x-drts-candidate-sha"),
+        config.deployedSha,
+        "API deployment SHA drift",
+      );
+    }
     return (await response.json()) as T;
   };
   const api = async <T>(
@@ -147,6 +158,7 @@ export async function runCoverage(env: LiveEnv, deps: Deps) {
       { point: GeoPoint; formattedAddress: string }
     >();
     for (const scenario of SERVICE_CASES) {
+      evidence.stage = `service-area:${scenario.id}`;
       let geocode = geocodes.get(scenario.address);
       if (!geocode) {
         const url = new URL(
@@ -275,6 +287,7 @@ export async function runCoverage(env: LiveEnv, deps: Deps) {
       assert.equal(actual.currentVehicleId, null);
     };
     const fresh = await heartbeat(10);
+    evidence.stage = "location:fresh";
     await observe("fresh", fresh);
     const waitStarted = deps.now();
     // Tracking freshness uses server updatedAt, so wait after the acknowledged
@@ -282,8 +295,10 @@ export async function runCoverage(env: LiveEnv, deps: Deps) {
     while (deps.now() - waitStarted < 95_000) {
       await deps.sleep(Math.min(30_000, 95_000 - (deps.now() - waitStarted)));
     }
+    evidence.stage = "location:stale";
     await observe("stale", fresh, deps.now() - waitStarted);
     try {
+      evidence.stage = "location:low-accuracy";
       const inaccurate = await heartbeat(150);
       await observe("low_accuracy", inaccurate);
     } finally {
@@ -293,11 +308,11 @@ export async function runCoverage(env: LiveEnv, deps: Deps) {
       await observe("fresh", restored);
     }
     evidence.status = "passed";
+    evidence.stage = "complete";
   } catch {
     // Do not serialize assertion actual/expected or provider errors: session
     // identities and provider errors may contain credentials or personal data.
-    evidence.failure =
-      "Live coverage failed; inspect recorded case evidence and failed workflow step";
+    evidence.failure = `Live coverage failed at ${evidence.stage}; inspect recorded case evidence`;
     throw new Error(evidence.failure);
   } finally {
     deps.save(evidence);

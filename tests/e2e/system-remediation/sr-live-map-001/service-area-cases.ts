@@ -148,9 +148,13 @@ export function decisionProjection(result: ServiceAreaEvaluationResult) {
     reasonCodes: result.reasonCodes,
     geometryVersionRefs: result.geometryVersionRefs,
     stops: result.stops.map((stop) => ({
-      kind: stop.kind, location: stop.location, serviceAreaCodes: stop.serviceAreaCodes,
-      policyCodes: stop.policyCodes, geometryVersionRefs: stop.geometryVersionRefs,
-      decision: stop.decision, reasonCodes: stop.reasonCodes,
+      kind: stop.kind,
+      location: stop.location,
+      serviceAreaCodes: stop.serviceAreaCodes,
+      policyCodes: stop.policyCodes,
+      geometryVersionRefs: stop.geometryVersionRefs,
+      decision: stop.decision,
+      reasonCodes: stop.reasonCodes,
     })),
   };
 }

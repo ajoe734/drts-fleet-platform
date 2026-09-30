@@ -202,6 +202,7 @@ jobs:
       DRTS_LIVE_MAP_AUTHORIZED_ROUTE_LABELS: ${{ vars.DRTS_LIVE_MAP_AUTHORIZED_ROUTE_LABELS }}
       DRTS_LIVE_MAP_AUTHORIZED_ROUTE_LABEL: ${{ vars.DRTS_LIVE_MAP_AUTHORIZED_ROUTE_LABEL }}
       DRTS_LIVE_MAP_API_ORIGIN: ${{ vars.DRTS_LIVE_MAP_API_ORIGIN }}
+      DRTS_LIVE_MAP_DEPLOYED_SHA: ${{ vars.DRTS_LIVE_MAP_DEPLOYED_SHA }}
       DRTS_LIVE_MAP_TEST_DRIVER_ID: ${{ vars.DRTS_LIVE_MAP_TEST_DRIVER_ID }}
       DRTS_LIVE_MAP_DRIVER_SESSION_TOKEN: ${{ secrets.DRTS_LIVE_MAP_DRIVER_SESSION_TOKEN }}
       DRTS_LIVE_MAP_OBSERVER_SESSION_TOKEN: ${{ secrets.DRTS_LIVE_MAP_OBSERVER_SESSION_TOKEN }}
@@ -249,9 +250,12 @@ jobs:
           set -o pipefail
           pnpm install --frozen-lockfile 2>&1 | tee -a .artifacts/live-map-acceptance/execution-log.txt
 
+      - name: Verify fail-closed evidence gate
+        run: python3 tests/unit/system-remediation/sr-live-map-001/evidence_gate_checks.py
+
       - name: Fail closed before billed calls or browser startup
         id: preflight
-        run: ./apps/api/node_modules/.bin/tsx tests/e2e/system-remediation/sr-live-map-001/coverage-runner.ts --preflight
+        run: ./apps/api/node_modules/.bin/tsx --tsconfig tests/e2e/system-remediation/sr-live-map-001/tsconfig.live.json tests/e2e/system-remediation/sr-live-map-001/coverage-runner.ts --preflight
 
       - name: Run live map acceptance profile
         id: runner
@@ -262,7 +266,7 @@ jobs:
 
       - name: Run real service-area decisions and isolated driver freshness
         id: coverage
-        run: ./apps/api/node_modules/.bin/tsx tests/e2e/system-remediation/sr-live-map-001/coverage-runner.ts
+        run: ./apps/api/node_modules/.bin/tsx --tsconfig tests/e2e/system-remediation/sr-live-map-001/tsconfig.live.json tests/e2e/system-remediation/sr-live-map-001/coverage-runner.ts
 
       - name: Install hosted Chromium
         id: chromium
