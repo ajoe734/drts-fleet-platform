@@ -59,13 +59,21 @@ function serviceabilityResult(
 
 async function stubGeoProvider(
   page: Page,
-  decision: "serviceable" | "not_serviceable",
+  decision: "serviceable" | "not_serviceable" | "outage",
 ) {
-  await page.route("**/api/geo/health", (route) =>
-    route.fulfill({
-      json: { provider: "mock", mode: "mock", status: "healthy" },
-    }),
-  );
+  if (decision === "outage") {
+    await page.route("**/api/geo/health", (route) =>
+      route.fulfill({
+        json: { provider: "mock", mode: "unavailable", status: "unhealthy" },
+      }),
+    );
+  } else {
+    await page.route("**/api/geo/health", (route) =>
+      route.fulfill({
+        json: { provider: "mock", mode: "mock", status: "healthy" },
+      }),
+    );
+  }
   await page.route("**/api/geo/search**", (route) => {
     const url = new URL(route.request().url());
     const q = (url.searchParams.get("q") ?? "").toLowerCase();
@@ -100,20 +108,23 @@ async function stubGeoProvider(
       },
     });
   });
-  await page.route("**/api/geo/evaluate-service-area", (route) =>
-    route.fulfill({
+  await page.route("**/api/geo/evaluate-service-area", (route) => {
+    if (decision === "outage") {
+      return route.fulfill({ status: 503, json: { error: "provider outage" } });
+    }
+    return route.fulfill({
       json: serviceabilityResult(
         decision,
         decision === "serviceable"
           ? "Inside the published service area."
           : "Selected stop is outside the service area.",
       ),
-    }),
-  );
+    });
+  });
 }
 
 async function pinBothStops(page: Page) {
-  const searchInputs = page.getByLabel("Search address");
+  const searchInputs = page.getByLabel(/Search address|搜尋地址/);
   // Pickup is the first picker, drop-off the second (pair picker DOM order).
   await searchInputs.first().fill("Taipei 101");
   await page.getByRole("button", { name: "Search" }).first().click();
@@ -135,6 +146,47 @@ async function pinBothStops(page: Page) {
 }
 
 test.describe("tenant console booking map alignment", () => {
+  test.beforeEach(async ({ context }) => {
+    await context.addCookies([
+      {
+        name: "drts_tenant_session",
+        value: "mock-session-token",
+        domain: "127.0.0.1",
+        path: "/",
+      },
+      {
+        name: "drts_session",
+        value: "mock-session-token",
+        domain: "127.0.0.1",
+        path: "/",
+      },
+      {
+        name: "tenant-portal-session",
+        value: Buffer.from(
+          JSON.stringify({
+            accessToken: "mock-session-token",
+            tenantId: "tenant-acme",
+            email: "test@example.com",
+            fullName: "Test User",
+            roleCode: "tenant_admin",
+          }),
+          "utf8",
+        ).toString("base64url"),
+        domain: "127.0.0.1",
+        path: "/",
+      },
+      {
+        name: "drts_csrf",
+        value: "mock-csrf-token",
+        domain: "127.0.0.1",
+        path: "/",
+      },
+    ]);
+    await context.setExtraHTTPHeaders({
+      "x-csrf-token": "mock-csrf-token",
+    });
+  });
+
   test("serviceable stops pin and clear the service-area state", async ({
     page,
   }) => {
@@ -165,5 +217,455 @@ test.describe("tenant console booking map alignment", () => {
       name: /Create booking|For approval|Submitting|建立叫車/,
     });
     await expect(submit).toBeDisabled();
+  });
+
+  test("provider_outage disables search and blocks ordinary booking submission", async ({
+    page,
+  }) => {
+    let bookingPostCalled = false;
+    await page.route("**/api/bookings/create", (route) => {
+      bookingPostCalled = true;
+      return route.abort();
+    });
+
+    await stubGeoProvider(page, "outage");
+    await page.goto("/bookings/new");
+
+    // Fill required booking fields to simulate a valid form otherwise
+    await page
+      .getByLabel(/Service subtype|服務子類型/)
+      .selectOption({ index: 1 });
+    await page.getByLabel(/Timing mode|時間模式/).selectOption({ index: 1 });
+    await page
+      .getByLabel(/Reservation start|預約開始/)
+      .fill("2026-10-01T12:00");
+    await page.getByLabel(/Reservation end|預約結束/).fill("2026-10-01T13:00");
+    await page
+      .getByRole("combobox", { name: /Passenger|乘客/ })
+      .selectOption({ index: 1 });
+    await page
+      .getByRole("combobox", { name: /Cost center|成本中心/ })
+      .selectOption({ index: 1 });
+
+    // The UI should show the outage banner
+    await expect(
+      page.getByText(/Address provider is down|地址服務中斷/i).first(),
+    ).toBeVisible();
+
+    // The search input and button should be disabled
+    const searchInputs = page.getByLabel(/Search|搜尋/i);
+    await expect(searchInputs.first()).toBeDisabled();
+    await expect(
+      page.getByRole("button", { name: /Search|搜尋/i }).first(),
+    ).toBeDisabled();
+
+    // The submit button should be disabled for normal flow before we provide coordinates
+    const submit = page.getByRole("button", {
+      name: /Create booking|For approval|Submitting|建立叫車|送出/,
+    });
+    await expect(submit).toBeDisabled();
+
+    // Recovery control: user can still enter manual coordinates
+    const pickupPicker = page.locator("[data-address-map-picker]").nth(0);
+    await pickupPicker
+      .getByText(/手動輸入座標|Enter coordinates manually/)
+      .click();
+    await pickupPicker.getByLabel(/Latitude|緯度/).fill("25.033");
+    await pickupPicker.getByLabel(/Longitude|經度/).fill("121.565");
+    await pickupPicker.getByLabel(/Reason|原因/).fill("Outage recovery pickup");
+    await pickupPicker
+      .getByRole("button", {
+        name: /Use this location|使用此位置|確認使用此位置/,
+      })
+      .click();
+
+    const dropoffPicker = page.locator("[data-address-map-picker]").nth(1);
+    await dropoffPicker
+      .getByText(/手動輸入座標|Enter coordinates manually/)
+      .click();
+    await dropoffPicker.getByLabel(/Latitude|緯度/).fill("25.044");
+    await dropoffPicker.getByLabel(/Longitude|經度/).fill("121.575");
+    await dropoffPicker
+      .getByLabel(/Reason|原因/)
+      .fill("Outage recovery dropoff");
+    await dropoffPicker
+      .getByRole("button", {
+        name: /Use this location|使用此位置|確認使用此位置/,
+      })
+      .click();
+
+    // Now it should still be disabled because Tenant gate rejects outage
+    await expect(submit).toBeDisabled();
+
+    // Ensure no booking was posted
+    expect(bookingPostCalled).toBe(false);
+  });
+
+  test("manual coordinate edits are allowed and submit with valid reason", async ({
+    page,
+  }) => {
+    let postedData: any = null;
+    await page.route("**/api/bookings/create", (route) => {
+      if (route.request().method() === "POST") {
+        postedData = route.request().postDataJSON();
+      }
+      return route.fulfill({ status: 201, json: { id: "BK-123" } });
+    });
+
+    await stubGeoProvider(page, "serviceable");
+    await page.goto("/bookings/new");
+
+    // Toggle manual for pickup
+    await page
+      .getByLabel(/Search address|搜尋地址/)
+      .first()
+      .fill("Manual Pickup");
+    await page
+      .getByText(/Enter coordinates manually|改用手動座標/)
+      .first()
+      .click();
+    await page
+      .getByLabel(/Latitude|緯度/)
+      .first()
+      .fill("25.033");
+    await page
+      .getByLabel(/Longitude|經度/)
+      .first()
+      .fill("121.565");
+    // Invalid reason (empty string) blocks apply if required, but tenant requires it
+    await page
+      .getByLabel(/Reason|原因/)
+      .first()
+      .fill("Testing manual pin");
+    await page
+      .getByRole("button", { name: /Use this location|使用此位置/ })
+      .first()
+      .click();
+
+    // Toggle manual for dropoff
+    await page
+      .getByLabel(/Search address|搜尋地址/)
+      .last()
+      .fill("Manual Dropoff");
+    await page
+      .getByText(/Enter coordinates manually|改用手動座標/)
+      .last()
+      .click();
+    await page
+      .getByLabel(/Latitude|緯度/)
+      .last()
+      .fill("25.044");
+    await page
+      .getByLabel(/Longitude|經度/)
+      .last()
+      .fill("121.575");
+    await page
+      .getByLabel(/Reason|原因/)
+      .last()
+      .fill("Testing manual pin dropoff");
+    await page
+      .getByRole("button", { name: /Use this location|使用此位置/ })
+      .last()
+      .click();
+
+    // Fill required booking fields to enable submit
+    await page
+      .getByLabel(/Service subtype|服務子類型/)
+      .selectOption({ index: 1 });
+    await page.getByLabel(/Timing mode|時間模式/).selectOption({ index: 1 });
+
+    await page
+      .getByLabel(/Reservation start|預約開始/)
+      .fill("2026-10-01T12:00");
+    await page.getByLabel(/Reservation end|預約結束/).fill("2026-10-01T13:00");
+
+    await page
+      .getByRole("combobox", { name: /Passenger|乘客/ })
+      .selectOption({ index: 1 });
+    await page
+      .getByRole("combobox", { name: /Cost center|成本中心/ })
+      .selectOption({ index: 1 });
+
+    const submit = page.getByRole("button", {
+      name: /Create booking|For approval|Submitting|建立叫車|送出/,
+    });
+    await expect(submit).toBeEnabled();
+    await submit.click();
+
+    await expect.poll(() => postedData).toBeTruthy();
+    expect(postedData.pickup.lat).toBe(25.033);
+    expect(postedData.dropoff.lat).toBe(25.044);
+    expect(postedData.pickup.manualOverrideReason).toBe("Testing manual pin");
+  });
+
+  test("address editing in portal preserves coordinates and supports manual reasons", async ({
+    page,
+  }) => {
+    await stubGeoProvider(page, "serviceable");
+    await page.goto("http://127.0.0.1:3306/addresses");
+    await expect(page.getByText("Taipei 101")).toBeVisible();
+    await page
+      .getByRole("link", { name: /Edit|編輯/i })
+      .first()
+      .click();
+    await expect(
+      page.getByRole("heading", { name: /Edit Address/i }),
+    ).toBeVisible();
+
+    // 1. Verify unchanged persistence (R7b/R7c: never saves an UNCHANGED saved pin and verifies provenance)
+    // First, just save without modifications.
+    let responsePromise = page.waitForResponse(
+      (response) =>
+        response.url().includes("/addresses") &&
+        response.request().method() === "POST",
+    );
+    await page.getByRole("button", { name: /Save Changes|儲存/i }).click();
+    await responsePromise;
+    await page.reload();
+    await expect(
+      page.getByRole("heading", { name: /Edit Address/i }),
+    ).toBeVisible();
+
+    // Check it persisted original coordinates and source
+    await expect(page.locator('input[name="lat"]')).toHaveValue("25.033");
+    await expect(page.locator('input[name="lng"]')).toHaveValue("121.565");
+    await expect(page.locator('input[name="coordinateSource"]')).toHaveValue(
+      "saved_address",
+    );
+    await expect(page.locator('input[name="priorGeocodeSource"]')).toHaveValue(
+      "provider",
+    );
+
+    const picker = page.locator("[data-address-map-picker]");
+
+    // 2. Keyboard nudge persistence
+    const pin = picker.locator("g[role='button']").first();
+    await pin.focus();
+    await page.keyboard.press("ArrowUp");
+    await expect(page.locator('input[name="lat"]')).not.toHaveValue("25.033");
+    const keyboardLat = await page.locator('input[name="lat"]').inputValue();
+    const keyboardLng = await page.locator('input[name="lng"]').inputValue();
+    await expect(page.locator('input[name="coordinateSource"]')).toHaveValue(
+      "manual_pin",
+    );
+    await expect(
+      page.locator('input[name="manualOverrideReason"]'),
+    ).toHaveValue(/Pin adjusted manually|已手動調整圖釘位置/);
+
+    responsePromise = page.waitForResponse(
+      (response) =>
+        response.url().includes("/addresses") &&
+        response.request().method() === "POST",
+    );
+    await page.getByRole("button", { name: /Save Changes|儲存/i }).click();
+    await responsePromise;
+    await page.reload();
+    await expect(
+      page.getByRole("heading", { name: /Edit Address/i }),
+    ).toBeVisible();
+    await expect(page.locator('input[name="lat"]')).toHaveValue(keyboardLat);
+    await expect(page.locator('input[name="lng"]')).toHaveValue(keyboardLng);
+    await expect(page.locator('input[name="coordinateSource"]')).toHaveValue(
+      "saved_address",
+    );
+    await expect(page.locator('input[name="priorGeocodeSource"]')).toHaveValue(
+      "manual",
+    );
+
+    // 2b. Verify unchanged persistence of a MANUAL pin
+    const manualUnchangedPromise = page.waitForResponse(
+      (response) =>
+        response.url().includes("/addresses") &&
+        response.request().method() === "POST",
+    );
+    await page.getByRole("button", { name: /Save Changes|儲存/i }).click();
+    await manualUnchangedPromise;
+    await page.reload();
+    await expect(
+      page.getByRole("heading", { name: /Edit Address/i }),
+    ).toBeVisible();
+    await expect(page.locator('input[name="lat"]')).toHaveValue(keyboardLat);
+    await expect(page.locator('input[name="lng"]')).toHaveValue(keyboardLng);
+    await expect(page.locator('input[name="coordinateSource"]')).toHaveValue(
+      "saved_address",
+    );
+    await expect(page.locator('input[name="priorGeocodeSource"]')).toHaveValue(
+      "manual",
+    );
+
+    // 3. Pointer drag map click
+    const svgMap = picker.locator("svg[role='img']").first();
+    await svgMap.scrollIntoViewIfNeeded();
+    await page.waitForTimeout(100); // Wait for scroll to settle
+
+    const pin2 = picker.locator("g[role='button']").first();
+    const pinBox = await pin2.boundingBox();
+    expect(pinBox).not.toBeNull();
+    if (pinBox) {
+      const svgBox = await svgMap.boundingBox();
+      if (svgBox) {
+        await pin2.dragTo(svgMap, {
+          targetPosition: {
+            x: svgBox.width * 0.7,
+            y: svgBox.height * 0.7,
+          },
+        });
+      }
+    }
+
+    // Polling expect to wait for React to update the hidden field
+    await expect(page.locator('input[name="lat"]')).not.toHaveValue(
+      keyboardLat,
+    );
+
+    const dragLat = await page.locator('input[name="lat"]').inputValue();
+    const dragLng = await page.locator('input[name="lng"]').inputValue();
+    await expect(page.locator('input[name="coordinateSource"]')).toHaveValue(
+      "manual_pin",
+    );
+    await expect(
+      page.locator('input[name="manualOverrideReason"]'),
+    ).toHaveValue(/Pin adjusted manually|已手動調整圖釘位置/);
+
+    // Save dragged pin
+    const dragResponsePromise = page.waitForResponse(
+      (response) =>
+        response.url().includes("/addresses") &&
+        response.request().method() === "POST",
+    );
+    await page.getByRole("button", { name: /Save Changes|儲存/i }).click();
+    await dragResponsePromise;
+    await page.reload();
+    await expect(
+      page.getByRole("heading", { name: /Edit Address/i }),
+    ).toBeVisible();
+    await expect(page.locator('input[name="lat"]')).toHaveValue(dragLat);
+    await expect(page.locator('input[name="lng"]')).toHaveValue(dragLng);
+    await expect(page.locator('input[name="coordinateSource"]')).toHaveValue(
+      "saved_address",
+    );
+    await expect(page.locator('input[name="priorGeocodeSource"]')).toHaveValue(
+      "manual",
+    );
+
+    // 3b. Manual Coordinate Entry and Apply validation
+    await page.getByText(/Enter coordinates manually|改用手動座標/).click();
+    await page.getByLabel(/Latitude|緯度/).fill("25.055");
+    await page.getByLabel(/Longitude|經度/).fill("121.585");
+    // Blank reason apply rejection
+    await page.getByLabel(/Reason for manual location|手動輸入原因/).fill("");
+    await page
+      .getByRole("button", {
+        name: /Use this location|使用此位置|確認使用此位置/,
+      })
+      .click();
+    // Validate selection didn't change (still dragLat)
+    await expect(page.locator('input[name="lat"]')).toHaveValue(dragLat);
+
+    // Fill valid reason
+    await page
+      .getByLabel(/Reason for manual location|手動輸入原因/)
+      .fill("Valid manual entry reason");
+    await page
+      .getByRole("button", {
+        name: /Use this location|使用此位置|確認使用此位置/,
+      })
+      .click();
+
+    // Check that lat/lng got updated in the selection
+    await expect(page.locator('input[name="lat"]')).toHaveValue("25.055");
+    await expect(page.locator('input[name="lng"]')).toHaveValue("121.585");
+    await expect(page.locator('input[name="coordinateSource"]')).toHaveValue(
+      "manual_pin",
+    );
+    await expect(
+      page.locator('input[name="manualOverrideReason"]'),
+    ).toHaveValue("Valid manual entry reason");
+
+    // Save and reload manual pin
+    const manualResponsePromise = page.waitForResponse(
+      (response) =>
+        response.url().includes("/addresses") &&
+        response.request().method() === "POST",
+    );
+    await page.getByRole("button", { name: /Save Changes|儲存/i }).click();
+    await manualResponsePromise;
+    await page.reload();
+    await expect(
+      page.getByRole("heading", { name: /Edit Address/i }),
+    ).toBeVisible();
+    await expect(page.locator('input[name="lat"]')).toHaveValue("25.055");
+    await expect(page.locator('input[name="lng"]')).toHaveValue("121.585");
+    await expect(page.locator('input[name="coordinateSource"]')).toHaveValue(
+      "saved_address",
+    );
+    await expect(page.locator('input[name="priorGeocodeSource"]')).toHaveValue(
+      "manual",
+    );
+
+    // 4. Pointer click (Map Background click)
+    const svg = picker.locator("svg[role='img']").first();
+    const svgBox = await svg.boundingBox();
+    if (svgBox) {
+      await page.mouse.click(
+        svgBox.x + svgBox.width * 0.2,
+        svgBox.y + svgBox.height * 0.2,
+      );
+    }
+    await expect(
+      page.locator('input[name="manualOverrideReason"]'),
+    ).toHaveValue("agent_map_click");
+
+    await expect(page.locator('input[name="lat"]')).not.toHaveValue(dragLat);
+
+    const clickLat = await page.locator('input[name="lat"]').inputValue();
+    const clickLng = await page.locator('input[name="lng"]').inputValue();
+
+    responsePromise = page.waitForResponse(
+      (response) =>
+        response.url().includes("/addresses") &&
+        response.request().method() === "POST",
+    );
+    await page.getByRole("button", { name: /Save Changes|儲存/i }).click();
+    await responsePromise;
+    await page.reload();
+    await expect(
+      page.getByRole("heading", { name: /Edit Address/i }),
+    ).toBeVisible();
+    await expect(page.locator('input[name="lat"]')).toHaveValue(clickLat);
+    await expect(page.locator('input[name="lng"]')).toHaveValue(clickLng);
+    await expect(page.locator('input[name="coordinateSource"]')).toHaveValue(
+      "saved_address",
+    );
+    await expect(page.locator('input[name="priorGeocodeSource"]')).toHaveValue(
+      "manual",
+    );
+
+    // 5. No-coordinate policy / Clear pin
+    await picker.getByRole("button", { name: /Clear|清除/ }).click();
+    await expect(page.locator('input[name="lat"]')).toHaveValue("");
+    await expect(page.locator('input[name="lng"]')).toHaveValue("");
+    // 5b. Check the warning is visible
+    await expect(page.getByText(/No map coordinates yet/i)).toBeVisible();
+
+    responsePromise = page.waitForResponse(
+      (response) =>
+        response.url().includes("/addresses") &&
+        response.request().method() === "POST",
+    );
+    await page.getByRole("button", { name: /Save Changes|儲存/i }).click();
+    await responsePromise;
+    await page.reload();
+    await expect(
+      page.getByRole("heading", { name: /Edit Address/i }),
+    ).toBeVisible();
+    await expect(page.locator('input[name="lat"]')).toHaveValue("");
+    await expect(page.locator('input[name="lng"]')).toHaveValue("");
+    await expect(page.locator('input[name="coordinateSource"]')).toHaveValue(
+      "",
+    );
+    await expect(page.locator('input[name="priorGeocodeSource"]')).toHaveValue(
+      "none",
+    );
   });
 });

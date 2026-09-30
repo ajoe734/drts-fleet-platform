@@ -106,6 +106,10 @@ describe("JWT controller error mapping", () => {
       {} as never,
       new JwtAuthService(),
       {} as never,
+      {} as never,
+      {} as never,
+      {} as never,
+      {} as never,
     );
 
     let thrown: unknown;

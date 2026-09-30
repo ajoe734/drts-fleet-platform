@@ -6,10 +6,8 @@ import { AuditNotificationModule } from "../audit-notification/audit-notificatio
 import { DriverProfileModule } from "../driver-profile/driver-profile.module";
 import { DriverAcademyModule } from "../driver-academy/driver-academy.module";
 import { TenantPartnerModule } from "../tenant-partner/tenant-partner.module";
-import { FileMailOutbox } from "../notification-delivery/file-mail-outbox";
-import { PostgresMailOutbox } from "../notification-delivery/postgres-mail-outbox";
+import { createNotificationDeliveryServiceFromEnv } from "../notification-delivery/notification-delivery.factory";
 import { NotificationDeliveryService } from "../notification-delivery/notification-delivery.service";
-import { createMailpitSmtpTransportFromEnv } from "../notification-delivery/smtp-mail.transport";
 
 import { ContractOperationalViewService } from "./contract-operational-view.service";
 import { DriverHeartbeatController } from "./driver-heartbeat.controller";
@@ -21,23 +19,7 @@ import { RegulatoryRegistryService } from "./regulatory-registry.service";
 export function createRegistryNotificationDeliveryService(
   databaseService: DatabaseService,
 ): NotificationDeliveryService | null {
-  if (
-    process.env.NOTIFICATION_OUTBOX_TYPE === "postgres" &&
-    databaseService?.isEnabled?.()
-  ) {
-    return new NotificationDeliveryService(
-      new PostgresMailOutbox(databaseService),
-      createMailpitSmtpTransportFromEnv(process.env),
-    );
-  }
-  const directory = process.env.NOTIFICATION_OUTBOX_DIRECTORY?.trim();
-  if (directory) {
-    return new NotificationDeliveryService(
-      new FileMailOutbox(directory),
-      createMailpitSmtpTransportFromEnv(process.env),
-    );
-  }
-  return null;
+  return createNotificationDeliveryServiceFromEnv(process.env, databaseService);
 }
 
 @Module({

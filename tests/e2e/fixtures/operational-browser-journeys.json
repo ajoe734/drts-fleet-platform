@@ -71,20 +71,9 @@
           "control": "[data-drt-operation='referral-rate']"
         },
         {
-          "kind": "navigation",
+          "kind": "absence",
           "name": "receipt",
-          "control": "[data-drt-operation='referral-receipt']",
-          "expectedPath": "/embed/yuhe-residence",
-          "expectedQuery": {
-            "screen": "receipt",
-            "orderId": "{resultId}"
-          },
-          "readback": {
-            "url": "/api/referral/receipt/{resultId}",
-            "idPath": "data.orderId",
-            "statePath": "data.status",
-            "expectedState": "cancelled"
-          }
+          "control": "[data-drt-operation='referral-receipt']"
         }
       ]
     },

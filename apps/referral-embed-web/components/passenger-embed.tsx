@@ -1148,19 +1148,52 @@ function ConsentScreen({ context }: { context: EmbedContext }) {
       context={context}
       badgeTone="live"
       footer={
-        <>
-          <ActionButton
-            href={buildHref(context, { state: "handoff", screen: "book" })}
-            label="同意並開始"
-            theme={theme}
+        <form
+          action="/api/referral/session"
+          method="POST"
+          style={{ display: "contents" }}
+        >
+          <input type="hidden" name="action" value="grant-consent" />
+          {context.session && (
+            <input
+              type="hidden"
+              name="handoffId"
+              value={context.session.handoffId}
+            />
+          )}
+          <input
+            type="hidden"
+            name="entrySlug"
+            value={context.entry.entrySlug}
           />
+          <input
+            type="hidden"
+            name="entryHost"
+            value={
+              context.decision.requestedEntryHost ||
+              context.session?.entryHost ||
+              getEntryHost(context.entry)
+            }
+          />
+          <input
+            type="hidden"
+            name="returnTo"
+            value={buildHref(context, {
+              state: "handoff",
+              screen: context.session?.navigationContext?.screen ?? "book",
+              ...(context.session?.navigationContext?.orderId
+                ? { orderId: context.session.navigationContext.orderId }
+                : {}),
+            })}
+          />
+          <ActionButton type="submit" label="同意並開始" theme={theme} />
           <ActionButton
             href={buildHref(context, { state: "fallback" })}
             label="暫不使用"
             theme={theme}
             variant="ghost"
           />
-        </>
+        </form>
       }
     >
       <div style={{ display: "grid", gap: 4, padding: "6px 0 2px" }}>
@@ -1297,10 +1330,16 @@ function FallbackScreen({ context }: { context: EmbedContext }) {
         <Card theme={theme} title="目前沒有可用的替代入口">
           <div style={{ fontSize: 13, lineHeight: 1.6, color: theme.ink2 }}>
             此入口尚未設定可用的獨立叫車網站，暫時無法在此完成叫車。請透過{" "}
-            <b>{context.strings.displayName}</b> 的社區窗口協助，或稍後點選「回社區
-            App」再試一次。
+            <b>{context.strings.displayName}</b>{" "}
+            的社區窗口協助，或稍後點選「回社區 App」再試一次。
           </div>
-          <DetailRow theme={theme} label="來源入口" value={sourceLabel} mono last />
+          <DetailRow
+            theme={theme}
+            label="來源入口"
+            value={sourceLabel}
+            mono
+            last
+          />
         </Card>
       )}
       <Card theme={theme}>
@@ -1753,7 +1792,31 @@ function TripScreen({
   const theme = buildEmbedTheme(context.accent);
   const [error, setError] = useState<string | null>(null);
   const [isPending, startTransition] = useTransition();
+  const requestedOrderId = liveData?.selectedOrderId;
   const activeTrip = liveData?.activeTrip?.trip;
+  const isRequestedTripActive =
+    !requestedOrderId || activeTrip?.orderId === requestedOrderId;
+
+  if (requestedOrderId && !isRequestedTripActive) {
+    return (
+      <AppShell context={context} badgeTone="neutral">
+        <div style={{ padding: 32, textAlign: "center", color: theme.ink }}>
+          <div style={{ fontSize: 18, fontWeight: 700, marginBottom: 8 }}>
+            行程已結束或更新
+          </div>
+          <div style={{ fontSize: 14, color: theme.muted, marginBottom: 24 }}>
+            您查詢的行程目前不在進行中，可能已完成或取消。
+          </div>
+          <ActionButton
+            href={buildHref(context, { state: "handoff", screen: "trips" })}
+            label="查看歷史行程"
+            theme={theme}
+          />
+        </div>
+      </AppShell>
+    );
+  }
+
   const trip = activeTrip
     ? {
         id: activeTrip.orderNo,
@@ -2158,7 +2221,11 @@ function ReceiptScreen({
   liveData: PassengerEmbedLiveData;
 }) {
   const theme = buildEmbedTheme(context.accent);
-  const receipt = liveData?.receipt
+  // Only a genuinely completed trip gets the "trip completed" receipt: the
+  // API returns whatever the order's current status is, and this screen must
+  // not relabel a cancelled/no-supply/dispatch-failed order as completed just
+  // because a receipt object came back.
+  const receipt = liveData?.receipt && liveData.receipt.status === "completed"
     ? {
         id: liveData.receipt.orderNo,
         orderId: liveData.receipt.orderId,
@@ -2313,12 +2380,20 @@ function OutcomeScreen({
   const [ratingMessage, setRatingMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [isPending, startTransition] = useTransition();
+  const NON_COMPLETED_TERMINAL_STATUSES = [
+    "cancelled",
+    "dispatch_failed",
+    "dispatch_timeout",
+    "no_supply",
+  ];
   const trip =
     liveData?.history?.items.find(
       (item) =>
         (!liveData.selectedOrderId ||
           item.orderId === liveData.selectedOrderId) &&
-        (completed ? item.status === "completed" : item.status === "cancelled"),
+        (completed
+          ? item.status === "completed"
+          : NON_COMPLETED_TERMINAL_STATUSES.includes(item.status)),
     ) ??
     (liveData?.selectedOrderId
       ? ({ orderId: liveData.selectedOrderId } as any)
@@ -2357,17 +2432,19 @@ function OutcomeScreen({
       badgeTone={completed ? "live" : "neutral"}
       footer={
         <>
-          <ActionButton
-            href={buildHref(context, {
-              screen: "receipt",
-              state: "handoff",
-              ...(trip ? { orderId: trip.orderId } : {}),
-            })}
-            label="查看收據"
-            theme={theme}
-            icon="receipt"
-            dataDrtOperation="referral-receipt"
-          />
+          {completed ? (
+            <ActionButton
+              href={buildHref(context, {
+                screen: "receipt",
+                state: "handoff",
+                ...(trip ? { orderId: trip.orderId } : {}),
+              })}
+              label="查看收據"
+              theme={theme}
+              icon="receipt"
+              dataDrtOperation="referral-receipt"
+            />
+          ) : null}
           <ActionButton
             href={buildHref(context, { screen: "book", state: "handoff" })}
             label={completed ? "再叫一次" : "重新叫車"}
@@ -2381,7 +2458,16 @@ function OutcomeScreen({
         theme={theme}
         tone={completed ? "success" : "neutral"}
         icon={completed ? "check" : "x"}
-        title={completed ? "行程已完成" : "行程已取消"}
+        title={
+          completed
+            ? "行程已完成"
+            : trip?.status === "no_supply"
+              ? "暫無可用車輛"
+              : trip?.status === "dispatch_failed" ||
+                  trip?.status === "dispatch_timeout"
+                ? "派車失敗"
+                : "行程已取消"
+        }
         posture={completed ? "completed" : "cancelled"}
       />
       <Card theme={theme}>
@@ -2458,7 +2544,12 @@ function OutcomeScreen({
               marginBottom: 10,
             }}
           >
-            此行程已取消，未產生車資。若於司機抵達後取消可能酌收費用，詳見社區叫車條款。
+            {trip?.status === "no_supply"
+              ? "目前無可用車輛，未產生車資，請稍後再試或重新叫車。"
+              : trip?.status === "dispatch_failed" ||
+                  trip?.status === "dispatch_timeout"
+                ? "本次派車失敗，未產生車資，請重新叫車。"
+                : "此行程已取消，未產生車資。若於司機抵達後取消可能酌收費用，詳見社區叫車條款。"}
           </div>
           <DetailRow
             theme={theme}

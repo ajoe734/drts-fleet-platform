@@ -130,6 +130,7 @@ async function applyUpstreamAuth(
     defaultEmail: CONTROL_PLANE_DEFAULT_EMAILS.platform_admin,
     requestId: request.headers.get("x-request-id"),
     strictIapMode,
+    assumeTenantId: request.headers.get("x-tenant-id"),
     ...(iapJwtSecretOrPublicKey ? { iapJwtSecretOrPublicKey } : {}),
     ...(expectedIapAudience ? { expectedIapAudience } : {}),
     ...(expectedIapIssuer ? { expectedIapIssuer } : {}),

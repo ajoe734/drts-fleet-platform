@@ -12,6 +12,7 @@ on:
   pull_request:
     branches:
       - "dev"
+    types: [opened, synchronize, reopened, ready_for_review]
   workflow_dispatch:
     inputs:
       ref:
@@ -167,6 +168,9 @@ jobs:
           --health-retries 10
     env:
       DATABASE_URL: postgresql://postgres:postgres@localhost:5432/drts_fleet_platform
+      PARTNER_NOTIFY_SEQ_TEST_DATABASE_URL: postgresql://postgres:postgres@localhost:5432/drts_fleet_platform
+      PARTNER_NOTIFY_TRANSPORT_TEST_DATABASE_URL: postgresql://postgres:postgres@localhost:5432/drts_fleet_platform
+      PARTNER_NOTIFY_UI_TEST_DATABASE_URL: postgresql://postgres:postgres@localhost:5432/drts_fleet_platform
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
@@ -200,7 +204,9 @@ jobs:
         # failure. Smoke acceptance runs the same suite without one.
         env:
           DRTS_REQUIRE_API_TEST_IMAGE: "1"
-        run: pnpm run test:unit
+        run: |
+          pnpm db:migrate
+          pnpm run test:unit
 
   integration:
     needs: [candidate, changes]
@@ -223,6 +229,7 @@ jobs:
           --health-retries 10
     env:
       DATABASE_URL: postgresql://postgres:postgres@localhost:5432/drts_fleet_platform
+      PARTNER_NOTIFY_UI_TEST_DATABASE_URL: postgresql://postgres:postgres@localhost:5432/drts_fleet_platform
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
@@ -519,6 +526,9 @@ jobs:
             -exec mv "{}" "{}.disabled" \; || true
           pnpm exec playwright install --with-deps chromium
           pnpm exec playwright test -c playwright.deterministic-route-suite.config.ts
+          pnpm exec playwright test -c playwright.tenant-map-booking.config.ts
+          pnpm exec playwright test -c playwright.partner-booking-surfaces.config.ts
+          pnpm exec playwright test -c playwright.concierge-map-booking.config.ts
 
   e2e:
     needs: [candidate, changes, cross-surface-e2e, ui-route-e2e]
