@@ -1,5 +1,11 @@
 # SR-LIVE-MAP-C114-COVERAGE-20260930
 
+Current hold (2026-09-30 23:31 UTC): Supervisor reopened the owner task for
+F-SESSION-CONTRACT. The supported-path investigation below confirms two product
+prerequisites: renewable driver invitations and a WIF observer exchange. Do not
+dispatch the historical internal-key bootstrap recipe below. It remains unfixed
+in the harness pending those contracts, and all four live gates remain pending.
+
 Planning follow-up (2026-09-30):
 [SD-DP-20260930-001](../../../../docs/01-decisions/SD-DP-20260930-001-c114-session-prerequisites.md)
 records the F-SESSION-CONTRACT disposition: retain durable verification, use
@@ -331,3 +337,131 @@ the audited 2026-09-30T07:20Z instant. Auth/session validation logic remains rea
 Hosted execution and the live 95-second freshness wait always use real time.
 This follow-up changes only the diagnostic clock and this evidence artifact;
 it requires a new candidate SHA and fresh CI rather than reusing checkpoint CI.
+
+## Supervisor rework: supported-session investigation (2026-09-30 23:31 UTC)
+
+Dispatch supersedes the old Secret Manager / internal-key guidance. Owner read
+the full task disposition and SD-DP-20260930-001, retained candidate
+`e3c7ed02701c387d82786bcfd8877e2618851f3b`, and normally merged `origin/dev`
+`739e7e9e44c5128550c79171c3fc48bf0b3b44b0` as anchor
+`ba9937bac09a5343721d6bbea2dd094755e16369`. The merge brings in the product WIF
+contract for executable investigation; it is not a new acceptance candidate.
+The current WIF task branch `072d23233309c3dd5637af25d4a571bc2556d610`
+has the same `AuthController` contract. No product auth source was changed.
+
+### F-SESSION-CONTRACT / driver invitation: first use exists, renewal is missing
+
+The answer to the dispatch's registration-code question is more precise than
+"no issuance route":
+
+1. `DriverProfileService.resolveProvisionableDriverId` treats a known profile ID
+   as a provisionable code. Its real seed includes `drv-demo-002`.
+   `DriverDeviceSessionService.register` calls `issueRegistrationInvitation`
+   **only if no invitation with that code hash already exists**.
+2. With an untouched repository, `POST auth/driver/device/register` using that
+   profile ID issues a valid **15m** session with `driverBindingId === sid`, the
+   device claim, and server-issued scopes `driver:read`, `driver:write`,
+   `dispatch:read`. `JwtAuthService.verifyAccessToken` accepts it.
+3. `POST auth/driver/device/refresh` rotates the refresh token and invalidates the
+   prior access token. `POST auth/driver/device/revoke`, authenticated by the
+   bound driver, revokes the binding, refresh family and durable IAM session.
+4. Revocation does **not** reset the consumed invitation. A second registration
+   for `drv-demo-002`, even with a different device ID, fails with
+   `DRIVER_REGISTRATION_INVALID`. An invented code fails too. The only seeded
+   aliases are for `drv-demo-001`; using that on-duty seed is not an alternative.
+5. Repository-wide production caller search finds no public invitation issuer:
+   `issueRegistrationInvitation` is called only by `register`. Its direct use
+   from a test or manual database insertion is not an authorized live API.
+
+This is a reusable hosted-run provisioning gap, not a reason to loosen the
+single-use or device checks. Current dev invitation consumption is **unknown**;
+the owner made no live registration call and did not consume the initial code.
+The accepted decision explicitly prohibits reusing demo registration codes.
+
+**Requested Supervisor product subtask:** expose an authenticated, audited,
+purpose-limited invitation issuance path for the reserved offline `drv-demo-002`.
+It must issue a new opaque, expiring, single-use code per run after checking
+isolation, preserve the existing register/refresh/revoke contracts, and provide
+an authorized cleanup/recovery path if registration succeeds but its response is
+lost. Do not reactivate a used invitation, overwrite another binding or change
+`validateDurableState`. Product scope needs review for
+`apps/api/src/modules/auth/`, the route auth policy, relevant contracts and product
+tests; these are outside this worker's harness write scope.
+
+### F-SESSION-CONTRACT / observer: Google WIF does not yet issue this identity
+
+The merged SEC-INTERNAL-KEY-WIF-MIGRATION implementation has two distinct paths:
+
+- `x-drts-google-id-token` → `GoogleWorkloadIdentityAdapter` verifies Google JWKS,
+  the registered service-account email, audience and route scopes. In
+  `AuthController.issueToken`, this proof currently authorizes only
+  `resolveCiTenantActorGrant` and the durable tenant-user issuance path. An ops
+  request without a tenant grant fails with `WORKLOAD_CI_TENANT_ACTOR_DENIED`,
+  **even after the Google principal has been verified and persisted**.
+- `x-drts-workload-assertion` → `ServiceWorkloadIdentityAdapter` can issue a 15m
+  system session, but uses a separately configured issuer/key/service-principal
+  registry. The Google token cannot be relabeled as that proof. The WIF migration
+  source explicitly says provisioning this custom signing material was rejected
+  for dev/staging (DEV-WI-SECRETS-001); inventing a key is not a solution.
+
+`resolveRouteAuthPolicy(GET, /api/regulatory-registry/drivers)` permits only
+system/platform/ops and requires `regulatory:read`. A CI tenant session cannot
+replace the observer. The map runner currently pins ops/live-map-observer; both
+bootstrap and coverage consumers plus evidence gate must change together after
+the observer contract is specified. Neither attaching an internal key nor
+injecting membership claims is an acceptable fallback.
+
+**Requested Supervisor coordination with the WIF task:** specify a supported
+Google-native exchange for a registered read-only service observer, with the
+actor/principal/audience and exact `regulatory:read` scope owned by the server,
+15m expiry and a supported revocation contract; or identify a supported verified
+workforce proof delivery mechanism. If selecting system realm, explicitly update
+the observer contract per SD-DP-20260930-001 before the harness uses it. Preserve
+the existing Google route/audience/replay checks and deny caller-selected roles,
+principals or scopes. This needs product auth scope, not another map workflow
+retry. The temporary internal-key exception now expires 2026-10-31; extending
+it did not supply either missing identity.
+
+### Provisioning and verification for this checkpoint
+
+No new GitHub secret is requested or written. Existing `DEV_WIF_PROVIDER` and
+`DEV_WIF_SERVICE_ACCOUNT` remain the cloud proof inputs. Exact transient proof
+delivery names must follow the product contract; no imaginary secret is treated
+as provisioned. The observer's API-side registry is
+`WORKLOAD_IDENTITY_GOOGLE_SERVICE_PRINCIPALS`, supplied by the WIF task's GCP
+secret `drts-dev-workload-identity-google-service-principals`; configuring its
+current tenant grants alone cannot fix observer issuance.
+
+Read-only GitHub inspection still shows `DRTS_LIVE_MAP_TEST_DRIVER_ID` absent
+and `DRTS_LIVE_MAP_ALLOWED_TARGETS` containing only API + ops. The required values
+remain `drv-demo-002` and the exact Google origins listed above. Latest successful
+deploy run `36744111603` reports workflow head
+`cb479ddfc38195f86bd954c68db9f7b3bad4d32f`; this is metadata, not a health proof
+that the map candidate is deployed. No deployment or live workflow was started
+while the known proof/allowlist prerequisites were missing.
+
+The new `supported-session-contract.test.ts` invokes real AuthController,
+DriverDeviceSessionService, DriverProfileService, RegulatoryRegistryService,
+JwtAuthService, GoogleWorkloadIdentityAdapter and repository memory adapters.
+Only Google JWKS/network is replaced by an in-memory disposable issuer key; no
+auth decision is mocked. The driver cases use real time, real signatures and
+ordinary APIs, including negative cross-device refresh and cross-driver revoke.
+The synthetic driver-001 is used only inside an isolated unit fixture. No live
+key/token, database, notification transport, server or browser is involved.
+
+| Finding / acceptance | Source and checkpoint result | Evidence | Remaining limit |
+| --- | --- | --- | --- |
+| F-SESSION-CONTRACT, generic driver/ops token rejection | Prior e3c7ed0 diagnostic replayed on merged product base: both signed sessions still fail durable verification | `session-contract.test.ts`, 2 passed rejection reproductions, exit 0; `.local/c114/session-prerequisites/baseline-test.log` | Historical path remains unsupported; not a successful session test |
+| F-SESSION-CONTRACT, valid driver device session | Formal register → verify → refresh → verify → revoke invalidates old access and refresh credentials; cross-device/cross-driver negatives retained | `supported-session-contract.test.ts`, 4 tests passed, exit 0; `.local/c114/session-prerequisites/supported-contract.log` | Memory adapters only; no claim of dev/PG provisioning |
+| F-SESSION-CONTRACT, repeat run | Code consumed on first register; after revoke, same code/new device and unissued code both rejected by production service | Same 4-test probe, second case | Needs per-run invitation issuer and recovery contract; product subtask requested |
+| F-SESSION-CONTRACT, WIF observer | Real Google adapter persists verified service principal; real controller then rejects ops grant | Same 4-test probe, fourth case | Needs supported observer exchange; product/WIF scope requested |
+| service_area_live_decisions_for_real_taiwan_addresses | Existing five address/decision probes retained | Prior harness evidence only | **Pending live**, credentials/targets/runtime unresolved |
+| location_freshness_live_states | Existing fresh/real wait/stale/low-accuracy/restore probes retained | Unit session lifecycle is not freshness evidence | **Pending live**, renewable isolated driver proof required |
+| browser_map_render_live | Hosted Chromium ready/imagery gate retained | No browser run started | **Pending live**, configured allowed targets and same-SHA runtime required |
+| authorization_gate_and_allowed_targets_enforced | Existing strict authorization/target/SHA gates retained | Local scoped regression to be recorded below | **Pending live**, no skipped run credited as pass |
+
+The first draft of the new unit probe had two fixture assertions wrong (JWT
+uses `sub` before `toRequestIdentity`, and driver-003 has invalid credentials).
+Those were corrected before the 4/4 result above. They are not product failures
+or old/new repair evidence. This delivery diagnoses the supported-path boundary;
+it does not claim the harness is repaired or all four acceptance keys are met.
