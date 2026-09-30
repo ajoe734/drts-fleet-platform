@@ -116,3 +116,71 @@ gantt
     Referral Handoff Key Expiry        :active, excp1, 2026-08-05, 2026-10-31
     Retire EXCP_001 to WIF Tokens      :crit, 2026-10-31, 2026-10-31
 ```
+
+---
+
+## 6. `INTERNAL_KEY_EXCP_002` Caller Inventory (SEC-INTERNAL-KEY-WIF-MIGRATION-20260930)
+
+Full inventory of every call site that presents `x-drts-internal-key` /
+`DRTS_INTERNAL_KEY` under EXCP_002's `* *` and `POST auth/token` scopes,
+gathered by grepping the whole tree for the header, the env var, and the
+`AUTH_LEGACY_INTERNAL_KEY_USED` usage signal that `InternalKeyMiddleware`
+logs on every accepted use (`apps/api/src/common/auth/internal-key.middleware.ts:178-186`).
+No caller currently mints a `WORKLOAD_IDENTITY_*` assertion anywhere in this
+repository (confirmed by grepping for the `x-drts-workload-assertion` header
+outside `apps/api/tests/`).
+
+| # | Caller | File:line | What it sends |
+| - | ------ | --------- | -------------- |
+| 1 | passenger-web control-plane proxy | `apps/passenger-web/app/control-plane-proxy/[...path]/route.ts:117-119` | `DRTS_INTERNAL_KEY` on every proxied request (`* *` scope) |
+| 2 | enterprise-dispatch-web control-plane proxy | `apps/enterprise-dispatch-web/app/control-plane-proxy/[...path]/route.ts:213-215` | same, every proxied request |
+| 3 | enterprise-dispatch-web tenant session verify | `apps/enterprise-dispatch-web/lib/enterprise-session.server.ts:18-19` | same header, alongside a **separate**, already-real GCP mechanism: a Cloud Run metadata-server identity token sent as `x-serverless-authorization` (lines 20-37) when the target host is `*.a.run.app`. That header is verified by Cloud Run's own IAM invoker check at the platform layer, not by `apps/api`'s `ServiceWorkloadIdentityAdapter` — it protects the network hop, not the application-level actor identity that `x-drts-internal-key` currently establishes. |
+| 4 | partner-booking-web control-plane proxy | `apps/partner-booking-web/app/control-plane-proxy/[...path]/route.ts:186-188` | every proxied request |
+| 5 | partner-booking-web API client | `apps/partner-booking-web/lib/api-client.ts:71-77` | same |
+| 6 | tenant-console-web control-plane proxy | `apps/tenant-console-web/app/control-plane-proxy/[...path]/route.ts:186-188` | every proxied request |
+| 7 | referral-embed-web server-to-server authority calls | `apps/referral-embed-web/lib/embed-api.ts:80-86` | `/api/partner/*` calls |
+| 8 | referral-embed-web booking API | `apps/referral-embed-web/lib/embed-booking-api.ts:42-46` | booking calls |
+| 9 | deploy-dev CI operational acceptance | `.github/workflows/deploy-dev.yml:1585-1618` | `POST /api/auth/token` with `x-drts-internal-key` **plus** `x-actor-type: tenant_admin` bootstrap-identity headers, to mint a JWT impersonating a specific fixture tenant actor for the post-deploy acceptance probe |
+
+### Why this is not a header rename
+
+`apps/api`'s app-level workload-identity mechanism
+(`WORKLOAD_IDENTITY_ISSUER` / `WORKLOAD_IDENTITY_AUDIENCE` /
+`WORKLOAD_IDENTITY_JWT_SECRET_OR_PUBLIC_KEY` /
+`WORKLOAD_IDENTITY_SERVICE_PRINCIPALS`, implemented in
+`apps/api/src/modules/auth/service-workload-identity.adapter.ts`) issues a
+`POST /api/auth/token` bearer session for a **registered service principal**
+with a fixed `actorType: "system"` — it does not support impersonating an
+arbitrary tenant actor. Caller #9 above needs exactly that (a specific
+`tenant_admin` actor bound to a fixed test tenant), so it cannot adopt this
+mechanism as-is; it needs its own design decision, not a drop-in swap.
+
+Separately, per `DEV-WI-SECRETS-001` (#1320, 2026-08-08,
+`.github/workflows/deploy-dev.yml` lines 674-693), this mechanism's key
+material and service-principal registry have never been provisioned in any
+dev or staging GCP project, and nothing in this repository mints an
+assertion for it today. That PR's own rationale — *"inventing them would be
+worse than absent: a public key whose private half nobody holds, and a
+registry naming a service principal that does not exist, read as configured
+security while authorising a subject nobody can be"* — applies equally to
+fabricating that material now to close out callers #1-#8. Doing so would
+also violate this task's own instruction not to invent a new long-term key
+(a shared HMAC secret or asymmetric keypair minted for this task is a
+long-term key by another name).
+
+Migrating callers #1-#8 (once a minting strategy is chosen) additionally
+requires write access to each app's proxy/client file above, none of which
+are in this task's `write_scopes`
+(`apps/api/src/common/auth/`, `apps/api/src/modules/auth/`,
+`.github/workflows/deploy-dev.yml`,
+`docs/02-architecture/internal-key-exceptions.md`). Per
+`AI_COLLABORATION_GUIDE.md` §0.7, that expansion is a Supervisor decision;
+the exact paths are items 1-2, 4-8 in the table above.
+
+**Status as of 2026-09-30**: inventory complete with usage evidence (this
+section). `EXCP_002` has not been removed and no caller has been migrated —
+both require the minting-strategy decision above. `SEC-INTERNAL-KEY-EXCP-002-EXTEND-20260930`
+(branch `codex/sec-internal-key-excp-002-extend-20260930`, not yet merged to
+`dev` as of this writing) extends `EXCP_002`'s `ttl`/`expiresAt` to
+`2026-10-31T23:59:59Z` so dev deploys do not go red while this decision is
+pending.
