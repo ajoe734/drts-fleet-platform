@@ -66,15 +66,50 @@ function normalizeEnvelopeRequestId(meta: ApiSuccessMetaWire | undefined) {
   return meta?.requestId ?? meta?.request_id ?? null;
 }
 
-function getServerAuthorityHeaders(): Record<string, string> {
+const METADATA_IDENTITY_TOKEN_URL =
+  "http://metadata.google.internal/computeMetadata/v1/instance/service-accounts/default/identity";
+const RUN_APP_HOST_SUFFIX = ".a.run.app";
+
+async function mintMetadataIdentityToken(
+  audience: string,
+): Promise<string | null> {
+  const metadataUrl = new URL(METADATA_IDENTITY_TOKEN_URL);
+  metadataUrl.searchParams.set("audience", audience);
+  metadataUrl.searchParams.set("format", "full");
+  try {
+    const response = await fetch(metadataUrl, {
+      cache: "no-store",
+      headers: { "Metadata-Flavor": "Google" },
+    });
+    return response.ok ? response.text() : null;
+  } catch {
+    return null;
+  }
+}
+
+async function getServerAuthorityHeaders(): Promise<Record<string, string>> {
+  // TODO(SEC-INTERNAL-KEY-WIF-MIGRATION-20260930 follow-up): drop the
+  // x-drts-internal-key send once dev has proven x-drts-google-id-token
+  // below end-to-end and INTERNAL_KEY_EXCP_002 is retired.
   const internalKey = process.env.DRTS_INTERNAL_KEY?.trim();
-  if (!internalKey) {
-    return {};
+  const headers: Record<string, string> = {};
+  if (internalKey) {
+    headers["x-drts-internal-key"] = internalKey;
   }
 
-  return {
-    "x-drts-internal-key": internalKey,
-  };
+  const configuredAudience = process.env.DRTS_API_AUTH_AUDIENCE?.trim();
+  const targetUrl = new URL(API_URL);
+  const audience =
+    configuredAudience ||
+    (targetUrl.hostname.endsWith(RUN_APP_HOST_SUFFIX) ? targetUrl.origin : null);
+  if (audience) {
+    const identityToken = await mintMetadataIdentityToken(audience);
+    if (identityToken) {
+      headers["x-drts-google-id-token"] = identityToken;
+    }
+  }
+
+  return headers;
 }
 
 export class PartnerAuthorityError extends Error {
@@ -365,7 +400,7 @@ async function requestAuthorityEnvelope<T>(
       ...init,
       headers: {
         "Content-Type": "application/json",
-        ...getServerAuthorityHeaders(),
+        ...(await getServerAuthorityHeaders()),
         ...(init?.headers ?? {}),
         "x-request-id": requestId,
       },
