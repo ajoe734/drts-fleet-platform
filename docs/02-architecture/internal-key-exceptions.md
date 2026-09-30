@@ -184,3 +184,96 @@ both require the minting-strategy decision above. `SEC-INTERNAL-KEY-EXCP-002-EXT
 `dev` as of this writing) extends `EXCP_002`'s `ttl`/`expiresAt` to
 `2026-10-31T23:59:59Z` so dev deploys do not go red while this decision is
 pending.
+
+### Independent re-verification (2026-09-30, same task, second session)
+
+Re-checked the claims above directly against source before continuing:
+
+- `grep -rl "x-drts-workload-assertion"` across the whole tree returns only
+  `apps/api/src/modules/auth/service-workload-identity.adapter.ts` and two
+  test files (`tests/unit/internal-key.middleware.test.ts`,
+  `apps/api/tests/integration/service-workload-identity.integration.test.ts`).
+  No caller — not `deploy-dev.yml`, not any of the eight web-app files below —
+  mints this header anywhere in the repository. Confirmed.
+- `git show 7e5a29d5a` (`DEV-WI-SECRETS-001`, #1320, merged 2026-08-08)
+  confirms in its own commit message, with `gcloud secrets list` evidence
+  against five real GCP projects, that `WORKLOAD_IDENTITY_JWT_SECRET_OR_PUBLIC_KEY`
+  and `WORKLOAD_IDENTITY_SERVICE_PRINCIPALS` "have never existed anywhere" in
+  any dev or staging project, and made dev deploys tolerate their absence
+  specifically so nobody would be pressured into fabricating them. Confirmed.
+- `apps/api/src/modules/auth/auth.controller.ts:349-361` shows the only call
+  site of `ServiceWorkloadIdentityAdapter.resolveSubject` issues a session
+  hardcoded to `actorType: "system"`, `realm: "system"`, `tenantId: null`.
+  Caller #9 (`deploy-dev.yml`) needs a `tenant_admin` session and a
+  `tenant_ops_admin` session, each bound to a specific fixture `tenantId`
+  (`10000000-0000-0000-0000-000000000201`) and `actorId`. This path cannot
+  produce that today; adopting it as-is for caller #9 is not a drop-in swap,
+  independent of the key-material gap. Confirmed and newly load-bearing: this
+  is a second, independent blocker beyond the one already recorded above.
+
+### A possible unblocking path not yet evaluated by anyone, and why it is not a decision for this task to make alone
+
+`.github/workflows/deploy-dev.yml` already performs genuine GCP Workload
+Identity Federation in this same job — see the `Mint identity token — tenant
+console / bank console / enterprise dispatch (operational candidate)` steps,
+which call `google-github-actions/auth@v2` with
+`workload_identity_provider: DEV_WIF_PROVIDER` and
+`service_account: DEV_WIF_SERVICE_ACCOUNT` to obtain a real Google-signed
+`id_token`. That mechanism requires no invented key material at all — Google
+holds the signing key, and dev's `DEV_WIF_PROVIDER`/`DEV_WIF_SERVICE_ACCOUNT`
+are already provisioned and working (they are used elsewhere in this exact
+file today).
+
+In principle, caller #9 could present that same kind of Google-signed
+`id_token` to `/api/auth/token` instead of `x-drts-internal-key`, and
+`apps/api` could verify it against Google's own public JWKS (fixed issuer
+`https://accounts.google.com`, audience = the service's own URL) rather than
+against `WORKLOAD_IDENTITY_JWT_SECRET_OR_PUBLIC_KEY`. This would satisfy the
+"no new long-term key" constraint more literally than provisioning an HMAC or
+PEM secret for `ServiceWorkloadIdentityAdapter` would — but it is a new
+verification code path in `apps/api` (JWKS fetch/cache, issuer/audience
+checks against a different token shape than the app's own
+`WORKLOAD_IDENTITY_*` scheme validates today), not a reuse of the existing
+mechanism as the task's acceptance text specifies. It still leaves the
+tenant-actor-impersonation gap above unresolved: something would still need
+to decide, and enforce, which verified Google service-account identities may
+mint a session for which tenant actors, for the CI acceptance probe to keep
+working.
+
+Choosing between "provision real `WORKLOAD_IDENTITY_JWT_SECRET_OR_PUBLIC_KEY`
+/ `WORKLOAD_IDENTITY_SERVICE_PRINCIPALS` key material in dev/staging GCP now"
+and "build a new Google-native OIDC verification path in `apps/api`" is a
+security-architecture decision with real blast radius on the auth boundary,
+not an implementation detail this task's owner should resolve unilaterally —
+especially since the first option is the literal anti-pattern
+`DEV-WI-SECRETS-001` was written to reject, and the second is outside what
+"沿用現有 WORKLOAD_IDENTITY_ISSUER／AUDIENCE 機制" was scoped to mean.
+
+**Blocked on** (recorded as a `blocker`, not a completion):
+
+1. Supervisor decision + `write_scopes` expansion to the following six paths
+   before callers #1-2, #4-8 can be migrated at all: `apps/passenger-web/app/control-plane-proxy/[...path]/route.ts`,
+   `apps/enterprise-dispatch-web/app/control-plane-proxy/[...path]/route.ts`,
+   `apps/enterprise-dispatch-web/lib/enterprise-session.server.ts`,
+   `apps/partner-booking-web/app/control-plane-proxy/[...path]/route.ts`,
+   `apps/partner-booking-web/lib/api-client.ts`,
+   `apps/tenant-console-web/app/control-plane-proxy/[...path]/route.ts`,
+   `apps/referral-embed-web/lib/embed-api.ts`,
+   `apps/referral-embed-web/lib/embed-booking-api.ts` (eight files across
+   five app directories: `passenger-web`, `enterprise-dispatch-web`,
+   `partner-booking-web`, `tenant-console-web`, `referral-embed-web`).
+2. A minting-strategy decision between provisioning real
+   `WORKLOAD_IDENTITY_JWT_SECRET_OR_PUBLIC_KEY`/`WORKLOAD_IDENTITY_SERVICE_PRINCIPALS`
+   key material in dev/staging GCP (reopens the exact question
+   `DEV-WI-SECRETS-001` closed) versus a new Google-native OIDC verification
+   path in `apps/api` (larger than "reuse existing mechanism").
+3. A security-policy decision on how a verified workload identity may mint a
+   `tenant_admin` / `tenant_ops_admin` session bound to a specific fixture
+   tenant/actor for CI acceptance use, since `ServiceWorkloadIdentityAdapter`'s
+   only current call site is hardcoded to `actorType: "system"`.
+
+None of the three above can be resolved by writing code inside this task's
+current `write_scopes` without either inventing long-term key material (which
+the task explicitly forbids and `DEV-WI-SECRETS-001` already rejected) or
+guessing at a security-boundary design that a reviewer would have to trust
+blind. Escalating via `blocker` rather than guessing.
