@@ -1,4 +1,5 @@
 import { createConnection } from "node:net";
+import { createRemoteSmtpTransportFromEnv } from "./remote-smtp-mail.transport";
 
 import {
   DeliveryTransportError,
@@ -196,12 +197,17 @@ export class MailpitSmtpTransport implements MailTransport {
   }
 }
 
-export function createMailpitSmtpTransportFromEnv(
+export function createMailTransportFromEnv(
   env: NodeJS.ProcessEnv,
-): MailpitSmtpTransport | null {
+): MailTransport | null {
+  const remote = createRemoteSmtpTransportFromEnv(env);
+  if (remote) return remote;
   const port = env.MAILPIT_SMTP_PORT?.trim();
   if (!port) return null;
   if (!/^\d+$/.test(port))
     throw new DeliveryTransportError("SMTP_CONFIGURATION_INVALID", false);
   return new MailpitSmtpTransport({ port: Number(port) });
 }
+
+/** Compatibility entry point for existing invitation/audit/registry callers. */
+export const createMailpitSmtpTransportFromEnv = createMailTransportFromEnv;

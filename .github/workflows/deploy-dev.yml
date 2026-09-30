@@ -746,6 +746,26 @@ jobs:
             exit 1
           fi
 
+          # Remote SMTP is opt-in and fail-closed. Mount secret references only;
+          # never access or print SMTP credentials in the deployment runner.
+          # Dev mail secrets deliberately use the drts-dev- namespace.
+          smtp_mounts=""
+          smtp_secret_count=0
+          for smtp_setting in HOST PORT USERNAME PASSWORD FROM_EMAIL RECIPIENT_ALLOWLIST; do
+            smtp_suffix="$(echo "$smtp_setting" | tr '[:upper:]_' '[:lower:]-')"
+            smtp_secret="drts-dev-smtp-${smtp_suffix}"
+            if gcloud secrets describe "$smtp_secret" --project "$project_id" >/dev/null 2>&1; then
+              smtp_secret_count=$((smtp_secret_count + 1))
+              smtp_mounts="${smtp_mounts},REMOTE_SMTP_${smtp_setting}=${smtp_secret}:latest"
+            fi
+          done
+          if [[ "$smtp_secret_count" -eq 6 ]]; then
+            secret_args="${secret_args}${smtp_mounts},NOTIFICATION_FROM_EMAIL=drts-dev-smtp-from-email:latest"
+          elif [[ "$smtp_secret_count" -ne 0 ]]; then
+            echo "::error::Remote SMTP configuration is partial. Host, port, username, password, sender and recipient allowlist secrets must all exist."
+            exit 1
+          fi
+
           # SR-LIVE-PUSH-001 web push is self-signed VAPID, not an external
           # provider (2026-09-15 decision). --set-secrets replaces the whole
           # set and gcloud run deploy fails on a missing secret name, so all

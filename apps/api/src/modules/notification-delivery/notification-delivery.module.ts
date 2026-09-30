@@ -12,7 +12,7 @@ import {
   PostgresMailOutbox,
   type PostgresMailOutboxOptions,
 } from "./postgres-mail-outbox";
-import { createMailpitSmtpTransportFromEnv } from "./smtp-mail.transport";
+import { createMailTransportFromEnv } from "./smtp-mail.transport";
 
 export type NotificationDeliveryModuleOptions = NotificationDeliveryOptions & {
   outbox: MailOutbox;
@@ -72,7 +72,7 @@ export class NotificationDeliveryModule {
 
   /** Missing storage is a startup error; missing transport stays unavailable. */
   static fromEnvironment(env: NodeJS.ProcessEnv = process.env): DynamicModule {
-    const transport = createMailpitSmtpTransportFromEnv(env);
+    const transport = createMailTransportFromEnv(env);
     const directory = env.NOTIFICATION_OUTBOX_DIRECTORY?.trim();
     const outboxType = env.NOTIFICATION_OUTBOX_TYPE?.trim();
     const databaseUrl = env.DATABASE_URL?.trim();
