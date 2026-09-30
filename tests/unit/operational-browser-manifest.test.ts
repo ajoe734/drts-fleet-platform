@@ -153,7 +153,7 @@ describe("operational browser journeys manifest guard", () => {
         (operation: { readback?: { expectedState: string } }) =>
           operation.readback ? [operation.readback.expectedState] : [],
       ),
-    ).toEqual(["created", "cancelled", "cancelled"]);
+    ).toEqual(["created", "cancelled"]);
     expect(referralJourney.operations).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
@@ -167,10 +167,9 @@ describe("operational browser journeys manifest guard", () => {
           control: "[data-drt-operation='referral-rate']",
         }),
         expect.objectContaining({
-          kind: "navigation",
+          kind: "absence",
           name: "receipt",
-          expectedPath: "/embed/yuhe-residence",
-          expectedQuery: { screen: "receipt", orderId: "{resultId}" },
+          control: "[data-drt-operation='referral-receipt']",
         }),
       ]),
     );
