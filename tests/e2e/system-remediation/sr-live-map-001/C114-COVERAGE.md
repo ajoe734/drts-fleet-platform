@@ -1,5 +1,15 @@
 # SR-LIVE-MAP-C114-COVERAGE-20260930
 
+Planning follow-up (2026-09-30):
+[SD-DP-20260930-001](../../../../docs/01-decisions/SD-DP-20260930-001-c114-session-prerequisites.md)
+records the F-SESSION-CONTRACT disposition: retain durable verification, use
+supported driver-device / verified observer proof paths, and coordinate missing
+provisioning before changing the harness. The
+[unblock helper ledger](../../../../support/unblock/SR-LIVE-MAP-C114-COVERAGE-20260930/SR-LIVE-MAP-C114-COVERAGE-20260930-UNBLOCK-PLANNING-DECISION.md)
+records the pending operator-only parent metadata update. All historical findings
+below remain intact; all four live acceptance gates remain pending. This note
+does not reopen the parent or authorize new auth-source write scopes.
+
 Owner: Codex. Independent reviewer: Claude2. Base: `64b47218d`.
 This artifact extends SR-LIVE-MAP-001; provider run 36658888280 on
 `b35a1f83` does not prove the three new acceptance items.
