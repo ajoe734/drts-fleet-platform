@@ -116,7 +116,12 @@ export class RemoteSmtpMailTransport implements MailTransport {
   #redact(value: string): string {
     for (const secret of this.#redactions)
       value = value.split(secret).join("[redacted]");
-    return value.replace(/[\x00-\x1f\x7f]/g, " ").slice(0, 2048);
+    return Array.from(value, (character) => {
+      const code = character.charCodeAt(0);
+      return code < 32 || code === 127 ? " " : character;
+    })
+      .join("")
+      .slice(0, 2048);
   }
 
   async send(message: TransportMessage): Promise<ProviderAcknowledgement> {
