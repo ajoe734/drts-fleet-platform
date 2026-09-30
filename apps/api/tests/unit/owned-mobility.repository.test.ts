@@ -255,6 +255,7 @@ describe("OwnedMobilityRepository", () => {
       snapshot.assignmentVersion,
       JSON.stringify(snapshot),
       snapshot.createdAt,
+      snapshot.createdAt,
       snapshot.supersededAt,
     ]);
 

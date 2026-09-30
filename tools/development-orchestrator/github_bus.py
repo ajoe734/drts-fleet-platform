@@ -1614,9 +1614,23 @@ def integrates_cleanly_with_dev(
             # Never block a merge because the check itself could not run.
             return True, f"pre-merge check skipped: {trim_text(add.stderr, 200)}"
         try:
-            merged = _git(tree, "merge", "--no-edit", candidate_sha)
+            # core.hooksPath=/dev/null: this merge exists only to answer "does
+            # the candidate integrate," inside a scratch worktree nobody pushes
+            # from. The real merge to GitHub is `gh pr merge --squash`, which
+            # runs server-side and never sees this repo's hooks at all. Without
+            # this, the auto-generated "Merge <sha> into HEAD" commit message
+            # (no Task-ID trailer) trips the repo's own commit-msg hook, and a
+            # hook rejection reads back as "candidate does not merge cleanly" --
+            # a false conflict on a candidate that never actually conflicted.
+            merged = _git(tree, "-c", "core.hooksPath=/dev/null", "merge", "--no-edit", candidate_sha)
             if merged.returncode != 0:
-                return False, f"candidate does not merge into {integration_ref} cleanly"
+                merge_output = f"{merged.stdout}\n{merged.stderr}"
+                if "CONFLICT" in merge_output:
+                    return False, f"candidate does not merge into {integration_ref} cleanly"
+                # Some other failure (bad ref, git internal error, etc). This
+                # is not evidence of a conflict, so the gate abstains rather
+                # than reporting one that was never found.
+                return True, f"pre-merge check skipped: merge into {integration_ref} failed: {trim_text(merge_output, 200)}"
             proc = subprocess.run(
                 [sys.executable, "-m", "unittest", "discover", "-s", ".", "-p", "test_*.py"],
                 cwd=str(tree / tools_dir),

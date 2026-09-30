@@ -2,7 +2,9 @@
 from __future__ import annotations
 
 import subprocess
+import tempfile
 import unittest
+from pathlib import Path
 from unittest import mock
 
 import github_bus
@@ -1119,3 +1121,115 @@ class PreMergeIntegrationGateTests(unittest.TestCase):
 
         self.assertTrue(allowed)
         self.assertIn("skipped", detail)
+
+
+class RealGitPreMergeGateTests(unittest.TestCase):
+    """No-mock regression coverage for `integrates_cleanly_with_dev`.
+
+    On 2026-09-28 the gate's own internal `git merge --no-edit` ran this
+    repo's commit-msg hook. The auto-generated merge message ("Merge <sha>
+    into HEAD") has no Task-ID trailer, so husky rejected it, and the gate
+    read that hook rejection back as "candidate does not merge cleanly" --
+    a false conflict on a candidate that never touched a conflicting line.
+    These tests build a real repo with a real trailer-enforcing commit-msg
+    hook and drive the gate against it, asserting on its actual return
+    value rather than a mocked one.
+    """
+
+    def _run_git(self, cwd: Path, *args: str) -> None:
+        result = subprocess.run(
+            ["git", *args], cwd=str(cwd), capture_output=True, text=True, timeout=30
+        )
+        self.assertEqual(result.returncode, 0, f"git {args} failed: {result.stderr}")
+
+    def _init_repo(self, repo_root: Path) -> None:
+        self._run_git(repo_root, "init", "-q", "-b", "dev")
+        self._run_git(repo_root, "config", "user.email", "test@example.com")
+        self._run_git(repo_root, "config", "user.name", "Test")
+        # The gate runs `python3 -m unittest discover` inside this path; it
+        # needs at least one passing test or discovery itself exits nonzero
+        # ("NO TESTS RAN"), which would masquerade as a broken candidate.
+        orch_dir = repo_root / "tools" / "development-orchestrator"
+        orch_dir.mkdir(parents=True)
+        (orch_dir / "test_placeholder.py").write_text(
+            "import unittest\n\n"
+            "class PlaceholderTest(unittest.TestCase):\n"
+            "    def test_true(self) -> None:\n"
+            "        self.assertTrue(True)\n"
+        )
+        self._commit(repo_root, "base")
+
+    def _install_trailer_hook(self, repo_root: Path) -> None:
+        # Mirrors this repo's real husky commit-msg gate: any commit message
+        # missing a `Task-ID:` trailer is rejected.
+        hook = repo_root / ".git" / "hooks" / "commit-msg"
+        hook.write_text("#!/bin/sh\ngrep -q '^Task-ID:' \"$1\" || exit 1\n")
+        hook.chmod(0o755)
+
+    def _commit(self, repo_root: Path, message: str) -> str:
+        self._run_git(repo_root, "add", "-A")
+        result = subprocess.run(
+            ["git", "commit", "-q", "--no-verify", "-m", message],
+            cwd=str(repo_root), capture_output=True, text=True, timeout=30,
+        )
+        self.assertEqual(result.returncode, 0, f"commit failed: {result.stderr}")
+        return subprocess.run(
+            ["git", "rev-parse", "HEAD"], cwd=str(repo_root), capture_output=True, text=True, timeout=30,
+        ).stdout.strip()
+
+    def _write(self, repo_root: Path, relpath: str, content: str) -> None:
+        target = repo_root / relpath
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(content)
+
+    def _config(self, repo_root: Path) -> dict:
+        return {"paths": {"status_file": str(repo_root / "status.json")}}
+
+    def test_hook_rejected_merge_message_is_not_reported_as_a_conflict(self) -> None:
+        """dev has advanced since the candidate branched: a real merge commit
+        is required, its auto-generated message has no trailer, and the
+        commit-msg hook would reject it -- but this is not a conflict."""
+        with tempfile.TemporaryDirectory(prefix="premerge-nohook-") as tmp:
+            repo_root = Path(tmp)
+            self._init_repo(repo_root)
+            self._install_trailer_hook(repo_root)
+
+            self._run_git(repo_root, "checkout", "-q", "-b", "candidate")
+            self._write(repo_root, "candidate.txt", "candidate change\n")
+            candidate_sha = self._commit(repo_root, "candidate change\n\nTask-ID: X\n")
+
+            self._run_git(repo_root, "checkout", "-q", "dev")
+            self._write(repo_root, "dev.txt", "dev advances\n")
+            self._commit(repo_root, "dev advances\n\nTask-ID: X\n")
+
+            allowed, detail = github_bus.integrates_cleanly_with_dev(
+                self._config(repo_root), candidate_sha, integration_ref="dev"
+            )
+
+        self.assertTrue(allowed, detail)
+
+    def test_a_real_conflict_is_still_reported(self) -> None:
+        """Same hook, but the candidate and dev now edit the same line: this
+        must still be refused, so the fix must not have silenced conflict
+        detection along with the hook."""
+        with tempfile.TemporaryDirectory(prefix="premerge-conflict-") as tmp:
+            repo_root = Path(tmp)
+            self._init_repo(repo_root)
+            self._write(repo_root, "shared.txt", "base\n")
+            self._commit(repo_root, "shared base\n\nTask-ID: X\n")
+            self._install_trailer_hook(repo_root)
+
+            self._run_git(repo_root, "checkout", "-q", "-b", "candidate")
+            self._write(repo_root, "shared.txt", "candidate change\n")
+            candidate_sha = self._commit(repo_root, "candidate change\n\nTask-ID: X\n")
+
+            self._run_git(repo_root, "checkout", "-q", "dev")
+            self._write(repo_root, "shared.txt", "dev change\n")
+            self._commit(repo_root, "dev change\n\nTask-ID: X\n")
+
+            allowed, detail = github_bus.integrates_cleanly_with_dev(
+                self._config(repo_root), candidate_sha, integration_ref="dev"
+            )
+
+        self.assertFalse(allowed, detail)
+        self.assertIn("does not merge", detail)

@@ -137,7 +137,9 @@ const { getTenantRoleScopes } = apiRequire(
 // Acceptance must explicitly select a migrated, dedicated test database.
 const acceptanceDatabaseUrl = process.env.DRTS_TENANT_BINDING_DATABASE_URL;
 if (process.env.DRTS_WEBHOOK_AUTH_EVIDENCE && !acceptanceDatabaseUrl) {
-  throw new Error("Acceptance evidence requires DRTS_TENANT_BINDING_DATABASE_URL");
+  throw new Error(
+    "Acceptance evidence requires DRTS_TENANT_BINDING_DATABASE_URL",
+  );
 }
 
 describe("SR-QA-WEBHOOK-001-FIX-TENANT-BINDING: Full AppModule / PG E2E Harness", () => {
@@ -344,7 +346,10 @@ describe("SR-QA-WEBHOOK-001-FIX-TENANT-BINDING: Full AppModule / PG E2E Harness"
           return service.findTenantUser(tenantId, created.userId)!;
         };
 
-        const victimUser = await seedActiveTenantAdmin(victimTenantId, "victim");
+        const victimUser = await seedActiveTenantAdmin(
+          victimTenantId,
+          "victim",
+        );
         const otherUser = await seedActiveTenantAdmin(otherTenantId, "other");
         const victimPrincipalId = victimUser.userId;
         const otherPrincipalId = otherUser.userId;
@@ -606,9 +611,7 @@ describe("SR-QA-WEBHOOK-001-FIX-TENANT-BINDING: Full AppModule / PG E2E Harness"
         // TenantPartnerService#rotateApiKey. This is a distinct, later,
         // same-tenant mutation and does not affect the attack-phase
         // immutability already proven by `dbStateAfterAttacks` above.
-        const stateAfterRotate = (
-          await repository.loadState()
-        ).apiKeys.filter(
+        const stateAfterRotate = (await repository.loadState()).apiKeys.filter(
           (k: StoredTenantApiKeyRecord) => k.tenantId === victimTenantId,
         );
         const rotatedKeyAfterRotate = stateAfterRotate.find(

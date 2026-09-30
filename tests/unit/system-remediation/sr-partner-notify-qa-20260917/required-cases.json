@@ -1,0 +1,474 @@
+{
+  "schema_version": 1,
+  "tenant_unit": {
+    "sr-partner-notify-ack-20260917/partner-notification-dispatch-facade.test.ts": [
+      "SR-PARTNER-NOTIFY-ACK-20260917: dispatchNotificationAttemptByWebhookId returns a validated accepted ack on a matching 200 response and calls the endpoint exactly once",
+      "SR-PARTNER-NOTIFY-ACK-20260917: dispatchNotificationAttemptByWebhookId classifies an HTTP-ok but invalid ack body as partner_ack_invalid / manual_only, never a success",
+      "SR-PARTNER-NOTIFY-ACK-20260917: dispatchNotificationAttemptByWebhookId classifies 401/403 as credential_rejected / configuration_blocked",
+      "SR-PARTNER-NOTIFY-ACK-20260917: dispatchNotificationAttemptByWebhookId classifies 404/410 as endpoint_unavailable / configuration_blocked",
+      "SR-PARTNER-NOTIFY-ACK-20260917: dispatchNotificationAttemptByWebhookId classifies a 503 as provider_transient_error / automatic with a suggested next attempt bounded by the endpoint's own retry policy",
+      "SR-PARTNER-NOTIFY-ACK-20260917: dispatchNotificationAttemptByWebhookId never starts a second automatic HTTP attempt on its own — one façade call is always exactly one remote attempt",
+      "SR-PARTNER-NOTIFY-ACK-20260917: dispatchNotificationAttemptByWebhookId dedupes the endpoint's failed-delivery count by logical delivery id — only the exhausted final attempt counts, never every attempt",
+      "SR-PARTNER-NOTIFY-ACK-20260917: dispatchNotificationAttemptByWebhookId rejects an already-expired notification as terminal without making any HTTP attempt",
+      "SR-PARTNER-NOTIFY-ACK-20260917: dispatchNotificationAttemptByWebhookId rejects dispatch to an endpoint not subscribed to this event as configuration_blocked",
+      "SR-PARTNER-NOTIFY-ACK-20260917: dispatchNotificationAttemptByWebhookId rejects dispatch to a disabled endpoint as endpoint_disabled without an HTTP attempt",
+      "SR-PARTNER-NOTIFY-ACK-20260917: dispatchNotificationAttemptByWebhookId rejects dispatch to a still test_pending endpoint as configuration_blocked (not yet governed ready for live traffic)",
+      "SR-PARTNER-NOTIFY-ACK-20260917: dispatchNotificationAttemptByWebhookId returns typed endpoint_unavailable for an unknown webhookId, never a tenant-wide scan",
+      "SR-PARTNER-NOTIFY-ACK-20260917: dispatchNotificationAttemptByWebhookId never leaks the signing secret in either an accepted ack or a typed failure"
+    ],
+    "sr-partner-notify-ack-20260917/webhook-dispatch-partner-ack-v1.test.ts": [
+      "SR-PARTNER-NOTIFY-ACK-20260917: WebhookDispatchService partner_ack_v1 ordinary tenant webhook — status-only behavior is unchanged never calls text() when partnerAckV1 is not requested, even if the response exposes it",
+      "SR-PARTNER-NOTIFY-ACK-20260917: WebhookDispatchService partner_ack_v1 ordinary tenant webhook — status-only behavior is unchanged keeps existing retry/backoff classification for a mock that only returns { ok, status }",
+      "SR-PARTNER-NOTIFY-ACK-20260917: WebhookDispatchService partner_ack_v1 partner_ack_v1 opt-in — §7 success condition accepts a matching 200 response with status=accepted and a real receipt_id",
+      "SR-PARTNER-NOTIFY-ACK-20260917: WebhookDispatchService partner_ack_v1 partner_ack_v1 opt-in — §7 success condition accepts status=duplicate as a valid ack",
+      "SR-PARTNER-NOTIFY-ACK-20260917: WebhookDispatchService partner_ack_v1 partner_ack_v1 opt-in — §7 success condition rejects 204 even though it is a success status class",
+      "SR-PARTNER-NOTIFY-ACK-20260917: WebhookDispatchService partner_ack_v1 partner_ack_v1 opt-in — §7 success condition rejects an empty 200 body",
+      "SR-PARTNER-NOTIFY-ACK-20260917: WebhookDispatchService partner_ack_v1 partner_ack_v1 opt-in — §7 success condition rejects an HTML 200 body",
+      "SR-PARTNER-NOTIFY-ACK-20260917: WebhookDispatchService partner_ack_v1 partner_ack_v1 opt-in — §7 success condition rejects a mismatched notification_id/delivery_id/partner_entry_slug",
+      "SR-PARTNER-NOTIFY-ACK-20260917: WebhookDispatchService partner_ack_v1 partner_ack_v1 opt-in — §7 success condition rejects a missing/blank receipt_id",
+      "SR-PARTNER-NOTIFY-ACK-20260917: WebhookDispatchService partner_ack_v1 partner_ack_v1 opt-in — §7 success condition rejects an unrecognized status value",
+      "SR-PARTNER-NOTIFY-ACK-20260917: WebhookDispatchService partner_ack_v1 partner_ack_v1 opt-in — §7 success condition rejects a body over the 4 KiB cap",
+      "SR-PARTNER-NOTIFY-ACK-20260917: WebhookDispatchService partner_ack_v1 partner_ack_v1 opt-in — §7 success condition treats a response with no text() reader as invalid rather than throwing",
+      "SR-PARTNER-NOTIFY-ACK-20260917: WebhookDispatchService partner_ack_v1 partner_ack_v1 opt-in — §7 success condition treats a body read that throws (e.g. aborted at the deadline) as invalid, not a crash",
+      "SR-PARTNER-NOTIFY-ACK-20260917: WebhookDispatchService partner_ack_v1 partner_ack_v1 opt-in — §7 success condition does not attempt to read a body for a non-2xx-eligible status (e.g. 500)"
+    ],
+    "sr-partner-notify-con-20260917/sr-partner-notify-con-20260917.test.ts": [
+      "SR-PARTNER-NOTIFY-CON-20260917: Partner Passenger Notification Contract & Migration Allocation Existing outbox and result enums are unchanged ConsumerNotificationOutboxRecord.status keeps exactly its four values",
+      "SR-PARTNER-NOTIFY-CON-20260917: Partner Passenger Notification Contract & Migration Allocation Existing outbox and result enums are unchanged PASSENGER_PUSH_DELIVERY_RESULTS keeps exactly its three values",
+      "SR-PARTNER-NOTIFY-CON-20260917: Partner Passenger Notification Contract & Migration Allocation Existing outbox and result enums are unchanged TenantWebhookEndpoint keeps its existing required fields (no partner-binding fields added to it)",
+      "SR-PARTNER-NOTIFY-CON-20260917: Partner Passenger Notification Contract & Migration Allocation Event catalog (design §5) fixes schema_version at 1.0",
+      "SR-PARTNER-NOTIFY-CON-20260917: Partner Passenger Notification Contract & Migration Allocation Event catalog (design §5) maps each of the five internal event types to passenger.<name>.v1, unchanged internal names",
+      "SR-PARTNER-NOTIFY-CON-20260917: Partner Passenger Notification Contract & Migration Allocation Event catalog (design §5) keeps the binding-test event distinct and not part of the five real events",
+      "SR-PARTNER-NOTIFY-CON-20260917: Partner Passenger Notification Contract & Migration Allocation PartnerEntryNotificationBinding (design §3.1) exposes the fixed purpose/ack-policy literals and the three lifecycle states",
+      "SR-PARTNER-NOTIFY-CON-20260917: Partner Passenger Notification Contract & Migration Allocation PartnerEntryNotificationBinding (design §3.1) validates the structural shape of a ready binding",
+      "SR-PARTNER-NOTIFY-CON-20260917: Partner Passenger Notification Contract & Migration Allocation OrderPartnerNotificationRoute (design §4) validates the frozen-route shape and keeps internal refs out of the type's own purpose fields",
+      "SR-PARTNER-NOTIFY-CON-20260917: Partner Passenger Notification Contract & Migration Allocation Wire payload (design §6) and navigation (design §10) keeps navigation to type=ride + rideRef only, no deep-link token",
+      "SR-PARTNER-NOTIFY-CON-20260917: Partner Passenger Notification Contract & Migration Allocation Wire payload (design §6) and navigation (design §10) validates a full real-event wire payload allowlist shape",
+      "SR-PARTNER-NOTIFY-CON-20260917: Partner Passenger Notification Contract & Migration Allocation Wire payload (design §6) and navigation (design §10) validates the binding-test wire payload has no ride/recipient fields",
+      "SR-PARTNER-NOTIFY-CON-20260917: Partner Passenger Notification Contract & Migration Allocation Accepted/duplicate ack (design §7) keeps exactly accepted/duplicate as the two success statuses",
+      "SR-PARTNER-NOTIFY-CON-20260917: Partner Passenger Notification Contract & Migration Allocation Accepted/duplicate ack (design §7) validates an accepted ack requires a non-synthetic receiptId",
+      "SR-PARTNER-NOTIFY-CON-20260917: Partner Passenger Notification Contract & Migration Allocation Accepted/duplicate ack (design §7) keeps the evidence ladder ordered outbox_persisted..opened and the v1-only delivery target",
+      "SR-PARTNER-NOTIFY-CON-20260917: Partner Passenger Notification Contract & Migration Allocation Typed failure & retryDisposition (design §9) keeps the five retry dispositions from the design table",
+      "SR-PARTNER-NOTIFY-CON-20260917: Partner Passenger Notification Contract & Migration Allocation Typed failure & retryDisposition (design §9) maps every failure reason to exactly the §9 table's retry disposition",
+      "SR-PARTNER-NOTIFY-CON-20260917: Partner Passenger Notification Contract & Migration Allocation Typed failure & retryDisposition (design §9) validates a typed-failure dispatch outcome carries suggestedNextAttemptAt, never a bare boolean",
+      "SR-PARTNER-NOTIFY-CON-20260917: Partner Passenger Notification Contract & Migration Allocation Typed failure & retryDisposition (design §9) recipient_revoked and notification_expired/obsolete/superseded are terminal, never automatic",
+      "SR-PARTNER-NOTIFY-CON-20260917: Partner Passenger Notification Contract & Migration Allocation Delivery context and platform-fixed dispatch limits validates a fresh (not-yet-attempted) delivery context has null outcome fields",
+      "SR-PARTNER-NOTIFY-CON-20260917: Partner Passenger Notification Contract & Migration Allocation Delivery context and platform-fixed dispatch limits fixes the platform timeout and ack-body limits (design §8)",
+      "SR-PARTNER-NOTIFY-CON-20260917: Partner Passenger Notification Contract & Migration Allocation Migration allocation (schema-allocation.json) allocates V0104 and V0105 without renaming any prior allocation",
+      "SR-PARTNER-NOTIFY-CON-20260917: Partner Passenger Notification Contract & Migration Allocation Migration allocation (schema-allocation.json) does not collide with any version in allocations/additional_allocations/launch_allocations",
+      "SR-PARTNER-NOTIFY-CON-20260917: Partner Passenger Notification Contract & Migration Allocation Migration allocation (schema-allocation.json) records concrete table invariants for each new allocation, not just filenames",
+      "SR-PARTNER-NOTIFY-CON-20260917: Partner Passenger Notification Contract & Migration Allocation Migration allocation (schema-allocation.json) downstream migrations use each reserved filename exactly once",
+      "SR-PARTNER-NOTIFY-CON-20260917: Partner Passenger Notification Contract & Migration Allocation Migration allocation (schema-allocation.json) keeps the highest migration on disk within the reserved allocation range (no unreserved version beyond any allocation, including this task's)"
+    ],
+    "sr-partner-notify-nav-20260917/consent-replay-guards.test.ts": [
+      "SR-PARTNER-NOTIFY-NAV-20260917 consent replay guards (fallback repo) rejects a grant-consent replay once the partner user identity link is revoked, without rewriting the ledger",
+      "SR-PARTNER-NOTIFY-NAV-20260917 consent replay guards (fallback repo) rejects a grant-consent replay once the partner entry's tenant ownership has changed, without rewriting the ledger",
+      "SR-PARTNER-NOTIFY-NAV-20260917 consent replay guards (fallback repo) rejects a grant-consent replay once the partner entry's partner ownership has changed, without rewriting the ledger",
+      "SR-PARTNER-NOTIFY-NAV-20260917 consent replay guards (fallback repo) rejects grant-consent when the partner entry has been deactivated since the handoff was issued, writing zero ledger entries",
+      "SR-PARTNER-NOTIFY-NAV-20260917 consent replay guards (fallback repo) rejects grant-consent for a handoff that has not been consumed yet, writing zero ledger entries",
+      "SR-PARTNER-NOTIFY-NAV-20260917 consent replay guards (fallback repo) rejects the first-ever grant-consent attempt when the identity link was already revoked before any consent was granted, writing zero ledger entries",
+      "SR-PARTNER-NOTIFY-NAV-20260917 consent replay guards (fallback repo) rejects the first-ever grant-consent attempt when the entry's tenant ownership had already changed before any consent was granted, writing zero ledger entries",
+      "SR-PARTNER-NOTIFY-NAV-20260917 consent replay guards (fallback repo) allows grant-consent when the link is active and ownership is unchanged (positive control)"
+    ],
+    "sr-partner-notify-nav-20260917/embed-partner-session.test.ts": [
+      "embed-partner-session rejects cookies older than 8 hours"
+    ],
+    "sr-partner-notify-nav-20260917/embed-session-route.test.ts": [
+      "POST /api/referral/session passes current session context to consume artifact on exchange",
+      "POST /api/referral/session redirectResponse correctly guards against TAB in URL (open redirect fix)",
+      "POST /api/referral/session rejects grant-consent replay when no session cookie exists (cleared cookie / expired-clock repro)",
+      "POST /api/referral/session rejects grant-consent when the session cookie's handoffId does not match the requested one"
+    ],
+    "sr-partner-notify-nav-20260917/notification-navigation-production-path.test.ts": [
+      "SR-PARTNER-NOTIFY-NAV-20260917 BFF production-path regression GET /api/referral/notification-navigation consumes a fresh handoff, sets an HttpOnly session cookie, and redirects to the navigation screen",
+      "SR-PARTNER-NOTIFY-NAV-20260917 BFF production-path regression GET /api/referral/notification-navigation rejects a cross-entry consume when the caller's cookie belongs to a different partner entry, for the *same* passenger, leaving that cookie and the new handoff untouched",
+      "SR-PARTNER-NOTIFY-NAV-20260917 BFF production-path regression GET /api/referral/notification-navigation rejects a cross-subject consume when the caller's cookie belongs to a different passenger at the same entry, leaving that cookie and the new handoff untouched",
+      "SR-PARTNER-NOTIFY-NAV-20260917 BFF production-path regression GET /api/referral/notification-navigation rejects replaying an already-consumed artifact without granting a session to the replaying caller",
+      "SR-PARTNER-NOTIFY-NAV-20260917 BFF production-path regression GET /api/referral/notification-navigation rejects consuming an expired handoff artifact",
+      "SR-PARTNER-NOTIFY-NAV-20260917 BFF production-path regression POST /api/referral/session (exchange, JSON and form) rejects a JSON exchange for a different partner entry when the caller's cookie belongs to the same passenger at another entry, leaving that cookie and the new handoff untouched",
+      "SR-PARTNER-NOTIFY-NAV-20260917 BFF production-path regression POST /api/referral/session (exchange, JSON and form) rejects a form exchange for a different passenger when the caller's cookie belongs to another subject at the same entry, leaving that cookie and the new handoff untouched",
+      "SR-PARTNER-NOTIFY-NAV-20260917 BFF production-path regression POST /api/referral/session (exchange, JSON and form) rejects a JSON exchange for a nonexistent artifact without clearing an existing session, and a subsequent legitimate exchange for a different handoff still succeeds",
+      "SR-PARTNER-NOTIFY-NAV-20260917 BFF production-path regression POST /api/referral/session (exchange, JSON and form) rejects a POST exchange for an expired handoff artifact without clearing the caller's existing session",
+      "SR-PARTNER-NOTIFY-NAV-20260917 BFF production-path regression POST /api/referral/session (exchange, JSON and form) rejects a POST exchange for an already-consumed (replayed) handoff artifact without clearing the caller's existing session",
+      "SR-PARTNER-NOTIFY-NAV-20260917 BFF production-path regression POST /api/referral/session (grant-consent, JSON and form) rejects grant-consent once the real signed cookie has aged past the 8-hour TTL, without invoking consent recording",
+      "SR-PARTNER-NOTIFY-NAV-20260917 BFF production-path regression POST /api/referral/session (grant-consent, JSON and form) rejects grant-consent when the linked identity has been revoked between consume and consent, leaving the pending-consent cookie and the ledger unchanged",
+      "SR-PARTNER-NOTIFY-NAV-20260917 BFF production-path regression POST /api/referral/session (grant-consent, JSON and form) rejects grant-consent for a cross-entry entrySlug in the request body even though the cookie and handoffId match",
+      "SR-PARTNER-NOTIFY-NAV-20260917 BFF production-path regression POST /api/referral/session (grant-consent, JSON and form) grants consent via the real service (form submit) when the cookie, handoffId, and entrySlug all match, and treats a resubmission as an idempotent replay"
+    ],
+    "sr-partner-notify-nav-20260917/partner-notification-navigation.test.ts": [
+      "SR-PARTNER-NOTIFY-NAV-20260917 resolvePartnerNotificationNavigation returns 403 when navigation route does not exist",
+      "SR-PARTNER-NOTIFY-NAV-20260917 resolvePartnerNotificationNavigation returns 403 on cross-tenant access",
+      "SR-PARTNER-NOTIFY-NAV-20260917 resolvePartnerNotificationNavigation returns 403 when identity link is revoked (logout)",
+      "SR-PARTNER-NOTIFY-NAV-20260917 resolvePartnerNotificationNavigation returns 403 when passenger ID mismatches (account switch)",
+      "SR-PARTNER-NOTIFY-NAV-20260917 resolvePartnerNotificationNavigation issues handoff artifact successfully"
+    ],
+    "sr-partner-notify-qa-20260917/partner-notify.test.ts": [
+      "partner transport environment isolation production/unset: rejects loopback and mixed DNS while allowing public HTTPS",
+      "partner transport environment isolation production/false: rejects loopback and mixed DNS while allowing public HTTPS",
+      "partner transport environment isolation production/true: rejects loopback and mixed DNS while allowing public HTTPS",
+      "partner transport environment isolation test/unset: rejects loopback and mixed DNS while allowing public HTTPS",
+      "partner transport environment isolation test/false: rejects loopback and mixed DNS while allowing public HTTPS"
+    ],
+    "sr-partner-notify-route-20260917/multi-taxi-order-partner-notification-route.test.ts": [
+      "MultiTaxiService order-route creation (SR-PARTNER-NOTIFY-ROUTE-20260917 §4) writes a route from the authenticated identity + existing identity link when a partner handoff created the ride",
+      "MultiTaxiService order-route creation (SR-PARTNER-NOTIFY-ROUTE-20260917 §4) does not write a route for a direct (non-partner) booking",
+      "MultiTaxiService order-route creation (SR-PARTNER-NOTIFY-ROUTE-20260917 §4) does not write a route for a call-center booking (identity is always null there)",
+      "MultiTaxiService order-route creation (SR-PARTNER-NOTIFY-ROUTE-20260917 §4) does not write a route when the identity link is revoked",
+      "MultiTaxiService order-route creation (SR-PARTNER-NOTIFY-ROUTE-20260917 §4) does not write a route when no identity link can be resolved (never guesses a recipient)",
+      "MultiTaxiService order-route creation (SR-PARTNER-NOTIFY-ROUTE-20260917 §4) does not write a route (and does not fail ride creation) when the entry cannot be resolved",
+      "MultiTaxiService order-route creation (SR-PARTNER-NOTIFY-ROUTE-20260917 §4) ride creation still succeeds even if route persistence rejects"
+    ],
+    "sr-partner-notify-route-20260917/owned-mobility-outbox-event-sequence.test.ts": [
+      "OwnedMobilityRepository consumer notification outbox event sequence allocates the durable sequence in the same transaction as the outbox insert",
+      "OwnedMobilityRepository consumer notification outbox event sequence keeps the unmodified payload when the order has no partner notification sequence row",
+      "OwnedMobilityRepository consumer notification outbox event sequence does not allocate or overwrite the payload when an event is retried"
+    ],
+    "sr-partner-notify-route-20260917/partner-entry-notification-binding.repository.test.ts": [
+      "PartnerEntryNotificationBindingRepository (fallback, no DATABASE_URL) creates a new binding as test_pending with expectedVersion 0",
+      "PartnerEntryNotificationBindingRepository (fallback, no DATABASE_URL) rejects create when expectedVersion is not 0 and no binding exists",
+      "PartnerEntryNotificationBindingRepository (fallback, no DATABASE_URL) 409s a stale-version PUT instead of silently overwriting",
+      "PartnerEntryNotificationBindingRepository (fallback, no DATABASE_URL) a valid-version PUT bumps version and resets state/validation (URL/events rotation must be re-tested)",
+      "PartnerEntryNotificationBindingRepository (fallback, no DATABASE_URL) setState enable/disable bump version and require the caller's version to match",
+      "PartnerEntryNotificationBindingRepository (fallback, no DATABASE_URL) findByEntrySlug returns null before any binding is created"
+    ],
+    "sr-partner-notify-route-20260917/partner-entry-notification-binding.service.test.ts": [
+      "PartnerEntryNotificationBindingService putBinding creates a test_pending binding scoped to the entry's own tenant/partner",
+      "PartnerEntryNotificationBindingService putBinding rejects an event type the endpoint isn't subscribed to",
+      "PartnerEntryNotificationBindingService putBinding 404s a webhookId that doesn't belong to the entry's tenant",
+      "PartnerEntryNotificationBindingService putBinding 403s a tenant-scoped identity outside the entry's tenant (resource scope check)",
+      "PartnerEntryNotificationBindingService testBinding runs a passenger.notification.test.v1 dispatch and records the current endpoint fingerprint on success",
+      "PartnerEntryNotificationBindingService enableBinding rejects when there is no successful test yet",
+      "PartnerEntryNotificationBindingService enableBinding rejects a stale validation after the endpoint URL rotates (fingerprint mismatch)",
+      "PartnerEntryNotificationBindingService enableBinding succeeds once validated against the current endpoint, and disableBinding reverts it",
+      "PartnerEntryNotificationBindingService testBinding surfaces a typed failure (not an accepted ack) on an invalid partner response, without touching validation state",
+      "computeEndpointFingerprint is deterministic for identical inputs",
+      "computeEndpointFingerprint changes when url, events, secretVersion, or ownerRef change",
+      "computeEndpointFingerprint is insensitive to event array order"
+    ],
+    "sr-partner-notify-seq-20260918/notification-sequence.postgres.test.ts": [
+      "SR-PARTNER-NOTIFY-SEQ-20260918 PostgreSQL uses the caller's transaction and rolls back both outbox and allocated sequence",
+      "SR-PARTNER-NOTIFY-SEQ-20260918 PostgreSQL rolls back allocation and all batch rows when the payload update fails",
+      "SR-PARTNER-NOTIFY-SEQ-20260918 PostgreSQL allocates increasing sequences for all five event types independently of assignmentVersion",
+      "SR-PARTNER-NOTIFY-SEQ-20260918 PostgreSQL keeps ID, sequence, payload and delivery state unchanged on a replay",
+      "SR-PARTNER-NOTIFY-SEQ-20260918 PostgreSQL allocates exactly once across concurrent retries without burning sequence numbers",
+      "SR-PARTNER-NOTIFY-SEQ-20260918 PostgreSQL gives concurrent distinct events unique contiguous sequences per order",
+      "SR-PARTNER-NOTIFY-SEQ-20260918 PostgreSQL preserves non-partner payloads and does not consume another order's sequence"
+    ],
+    "sr-partner-notify-transport-20260918/governance.test.ts": [
+      "current durable notification governance worker B observes endpoint disabled committed by service A",
+      "current durable notification governance worker B observes endpoint rotated committed by service A",
+      "current durable notification governance worker B observes endpoint URL changed committed by service A",
+      "current durable notification governance worker B observes entry tenant changed committed by service A",
+      "current durable notification governance worker B observes entry inactive committed by service A",
+      "current durable notification governance worker B observes entry revoked committed by service A",
+      "current durable notification governance classifies a real inactive public entry lookup as endpoint_disabled",
+      "current durable notification governance classifies a real revoked public entry lookup as endpoint_disabled",
+      "current durable notification governance rechecks endpoint disabled after the transport's last readiness check",
+      "current durable notification governance rechecks endpoint rotated after the transport's last readiness check",
+      "current durable notification governance rechecks endpoint URL changed after the transport's last readiness check",
+      "current durable notification governance rechecks entry tenant changed after the transport's last readiness check",
+      "current durable notification governance rechecks entry inactive after the transport's last readiness check",
+      "current durable notification governance rechecks entry revoked after the transport's last readiness check",
+      "current durable notification governance rejects a rotated fingerprint even after the endpoint is active again",
+      "current durable notification governance uses the current credential after rotation and binding revalidation",
+      "current durable notification governance preserves concurrent disable while recording an acknowledgement",
+      "current durable notification governance preserves concurrent rotate while recording an acknowledgement",
+      "current durable notification governance preserves concurrent disable even when the old attempt exhausts its policy",
+      "current durable notification governance preserves concurrent rotate even when the old attempt exhausts its policy",
+      "current durable notification governance does not replace a deleted durable entry with its cached public entry",
+      "current durable notification governance reads an expired current credential even when the worker's cached credential is valid",
+      "current durable notification governance rolls back endpoint usage and delivery writes together if recording the delivery fails",
+      "current durable notification governance fails closed on durable read failure instead of using the active startup snapshot"
+    ],
+    "sr-partner-notify-transport-20260918/https-client.test.ts": [
+      "bounded HTTPS client without a network server stops reading after 4 KiB and returns an invalid oversized ack",
+      "bounded HTTPS client without a network server never follows a redirect",
+      "bounded HTTPS client without a network server validates all DNS answers at the socket lookup and rejects mixed public/private results",
+      "production HTTPS status preservation through dispatch and the facade retains HTTP 401 after a body connection reset",
+      "production HTTPS status preservation through dispatch and the facade retains HTTP 403 after a body connection reset",
+      "production HTTPS status preservation through dispatch and the facade retains HTTP 404 after a body connection reset",
+      "production HTTPS status preservation through dispatch and the facade retains HTTP 410 after a body connection reset",
+      "production HTTPS status preservation through dispatch and the facade classifies HTTP 401 as configuration blocked without waiting for body end",
+      "production HTTPS status preservation through dispatch and the facade classifies HTTP 403 as configuration blocked without waiting for body end",
+      "production HTTPS status preservation through dispatch and the facade classifies HTTP 404 as configuration blocked without waiting for body end",
+      "production HTTPS status preservation through dispatch and the facade classifies HTTP 410 as configuration blocked without waiting for body end",
+      "production HTTPS status preservation through dispatch and the facade keeps HTTP 200 but retries an interrupted eligible ack body",
+      "production HTTPS status preservation through dispatch and the facade keeps HTTP 201 but retries an interrupted eligible ack body",
+      "production HTTPS status preservation through dispatch and the facade keeps HTTP 202 but retries an interrupted eligible ack body",
+      "production HTTPS status preservation through dispatch and the facade includes the eligible ack body in the platform deadline and retains its status",
+      "production HTTPS status preservation through dispatch and the facade accepts a complete matching ack through the production HTTPS client"
+    ],
+    "sr-partner-notify-transport-20260918/https.test.ts": [
+      "partner HTTPS restrictions rejects nonpublic 127.0.0.1",
+      "partner HTTPS restrictions rejects nonpublic 10.1.2.3",
+      "partner HTTPS restrictions rejects nonpublic 172.16.1.2",
+      "partner HTTPS restrictions rejects nonpublic 192.168.1.1",
+      "partner HTTPS restrictions rejects nonpublic 169.254.169.254",
+      "partner HTTPS restrictions rejects nonpublic 100.64.0.1",
+      "partner HTTPS restrictions rejects nonpublic 0.0.0.0",
+      "partner HTTPS restrictions rejects nonpublic 224.0.0.1",
+      "partner HTTPS restrictions rejects nonpublic ::1",
+      "partner HTTPS restrictions rejects nonpublic fe80::1",
+      "partner HTTPS restrictions rejects nonpublic fc00::1",
+      "partner HTTPS restrictions rejects nonpublic ::ffff:127.0.0.1",
+      "partner HTTPS restrictions rejects nonpublic 2002:7f00:1::1",
+      "partner HTTPS restrictions allows public 8.8.8.8",
+      "partner HTTPS restrictions allows public 1.1.1.1",
+      "partner HTTPS restrictions allows public 2606:4700:4700::1111",
+      "partner HTTPS restrictions rejects unsafe endpoint http://example.com before opening a socket (default behavior)",
+      "partner HTTPS restrictions rejects unsafe endpoint https://user:pass@example.com before opening a socket (default behavior)",
+      "partner HTTPS restrictions rejects unsafe endpoint https://127.0.0.1 before opening a socket (default behavior)",
+      "partner HTTPS restrictions rejects unsafe endpoint https://[::1] before opening a socket (default behavior)",
+      "partner HTTPS restrictions ack body shares the platform deadline even when the reader ignores abort",
+      "partner HTTPS restrictions environment safeguard matrix production env rejects HTTP/local even if flag is true",
+      "partner HTTPS restrictions environment safeguard matrix test env rejects HTTP/local if flag is false or unset",
+      "partner HTTPS restrictions environment safeguard matrix test env explicitly authorizes HTTP/local if flag is true"
+    ],
+    "sr-partner-notify-transport-20260918/repository.test.ts": [
+      "partner outcome transaction receipt, context, outbox metadata/outcome and release all commit on the same connection",
+      "partner outcome transaction rolls back every write when receipts fails",
+      "partner outcome transaction rolls back every write when delivery_contexts fails",
+      "partner outcome transaction rolls back every write when jsonb_set fails",
+      "partner outcome transaction rolls back every write when SET claim_state fails",
+      "partner outcome transaction rejects stale or expired claim { fence: 4 } before any receipt/context write",
+      "partner outcome transaction rejects stale or expired claim { leaseExpired: true } before any receipt/context write",
+      "partner outcome transaction records failures through the same fence with no receipt id or accepted stage"
+    ],
+    "sr-partner-notify-transport-20260918/transport.postgres.test.ts": [
+      "partner transport PostgreSQL transaction gate two real connections grant exactly one claim and reserve exactly one attempt",
+      "partner transport PostgreSQL transaction gate stores immutable context before IO and atomically commits real receipt/outcome/release",
+      "partner transport PostgreSQL transaction gate rejects expired lease even before another worker reclaims",
+      "partner transport PostgreSQL transaction gate rolls back receipt and context when the final outbox write fails",
+      "partner transport PostgreSQL transaction gate unknown fifth attempt is terminalized without reserving a sixth",
+      "partner transport PostgreSQL transaction gate due selection excludes manual/configuration/terminal/delivered and future attempts",
+      "partner transport PostgreSQL transaction gate catalog confirms matching FK types and unknown downstream status"
+    ],
+    "sr-partner-notify-transport-20260918/transport.test.ts": [
+      "partner transport and consumer retry owner DI chooses partner mode and removes WebPush/device resolver providers",
+      "partner transport and consumer retry owner requires route readiness; missing binding never claims availability or uses legacy fallback",
+      "partner transport and consumer retry owner persists context before one HTTP attempt, allowlists fields, and records only the real receipt",
+      "partner transport and consumer retry owner partner enqueues then times out: retries identical bytes and accepts its duplicate receipt",
+      "partner transport and consumer retry owner ack then DB failure remains unknown; lease recovery reuses the delivery and payload",
+      "partner transport and consumer retry owner two workers compete: only the claim winner sends",
+      "partner transport and consumer retry owner an expired lease cannot commit a returned ack",
+      "partner transport and consumer retry owner five maxAttempts means five HTTP attempts; snapshot backoff is retained and no tenant timer restarts it",
+      "partner transport and consumer retry owner stops expiresAt before remote IO",
+      "partner transport and consumer retry owner stops old ETA after reassignment before remote IO",
+      "partner transport and consumer retry owner stops old arrival after cancellation before remote IO",
+      "partner transport and consumer retry owner stops entry moved to another tenant before remote IO",
+      "partner transport and consumer retry owner stops identity revoked before remote IO",
+      "partner transport and consumer retry owner stops route missing before remote IO",
+      "partner transport and consumer retry owner preserves HTTP 401 classification",
+      "partner transport and consumer retry owner preserves HTTP 403 classification",
+      "partner transport and consumer retry owner preserves HTTP 404 classification",
+      "partner transport and consumer retry owner preserves HTTP 410 classification",
+      "partner transport and consumer retry owner preserves HTTP 204 classification",
+      "partner transport and consumer retry owner preserves HTTP 200 classification",
+      "partner transport and consumer retry owner preserves HTTP 400 classification",
+      "partner transport and consumer retry owner restart never schedules a pending passenger retry, and tenant manual retry is rejected",
+      "immutable partner retry context policy changes cannot shorten the frozen attempt budget or replace its backoff",
+      "immutable partner retry context changed endpoint/binding cannot silently retarget an already prepared notification",
+      "immutable partner retry context deliveredAt is local ack validation time, with no route/wire data on the returned outcome"
+    ],
+    "sr-partner-notify-transport-20260918/worker.test.ts": [
+      "consumer outbox production lifecycle registers the worker and dispatches a durable pending row on application bootstrap",
+      "consumer outbox production lifecycle polls newly committed rows after startup",
+      "consumer outbox production lifecycle automatically retries only when due and accepts a duplicate ack for identical bytes",
+      "consumer outbox production lifecycle recovers after process restart and lease expiry when ack persistence failed",
+      "consumer outbox production lifecycle two running application workers compete through the existing claim",
+      "consumer outbox production lifecycle does not overlap polls while a selected delivery is in flight and drains on shutdown",
+      "consumer outbox production lifecycle recovers from a selection failure on the next poll",
+      "consumer outbox production lifecycle stops automatically after five attempts with no tenant passenger retry timer",
+      "consumer outbox production lifecycle does not rescan blocked/manual HTTP 401 outcomes",
+      "consumer outbox production lifecycle does not rescan blocked/manual HTTP 204 outcomes",
+      "consumer outbox production lifecycle terminalizes an expired notification without HTTP or repeated claims",
+      "consumer outbox production lifecycle records absent route configuration even though generic availability is false",
+      "consumer outbox production lifecycle does not start without durable storage"
+    ],
+    "sr-partner-notify-ui-20260917/notification-ui-component.test.tsx": [
+      "PartnerNotificationPanel renders PartnerNotificationPanel and exercises interactions",
+      "PartnerNotificationPanel exercises 409 recovery on update",
+      "PartnerNotificationPanel editable webhook/event selection with expectedVersion payload assertion",
+      "PartnerNotificationPanel newer-version reload/resubmit preserving draft",
+      "PartnerNotificationPanel creation/resume/test/enable and typed failure paths",
+      "PartnerNotificationPanel both management destinations plus authority denial",
+      "PartnerNotificationPanel management links are rendered properly when enabled",
+      "PartnerNotificationPanel pending mutation across entry/client/account/permission/unmount changes"
+    ],
+    "sr-partner-notify-ui-20260917/notification-ui.postgres.test.ts": [
+      "partner notification UI postgres acceptance tests retry lifecycle: legal retry, supersession, active lease fence, and stale rejection",
+      "partner notification UI postgres acceptance tests list API preservation of sequence, hash, receipt, history and same-tenant isolation",
+      "partner notification UI postgres acceptance tests list API pagination boundary",
+      "partner notification UI postgres acceptance tests missing-binding -> configure/test/enable -> retry of SAME contextless outbox -> original worker eligibility",
+      "partner notification UI postgres acceptance tests missing/disabled/test_pending readiness",
+      "partner notification UI postgres acceptance tests cancellation versus independent receipt_ready",
+      "partner notification UI postgres acceptance tests historical context/route ownership changes"
+    ],
+    "sr-partner-notify-ui-20260917/notification-ui.test.ts": [
+      "SR-PARTNER-NOTIFY-UI-20260917 API client contracts api client update binding sends expectedVersion and exact eventTypes, and throws 409 ApiClientError",
+      "SR-PARTNER-NOTIFY-UI-20260917 API client contracts api client get binding handles 404 gracefully",
+      "SR-PARTNER-NOTIFY-UI-20260917 API client contracts api client retry sends correct request and returns structured RequeueOutcome"
+    ],
+    "sr-qa-tenant-001/http-boundary.test.ts": [
+      "tenant acceptance real HTTP boundary projects actual canonical wire keys without manufacturing domain state",
+      "tenant acceptance real HTTP boundary rejects a noncanonical camelCase HTTP payload",
+      "tenant acceptance real HTTP boundary requires real proof for privileged user and approval mutations only"
+    ],
+    "sr-qa-tenant-001/tenant-approval-and-quota-lifecycle.test.ts": [
+      "SR-QA-TENANT-001 — approval-requests: approve happy path (write→read across booking/approval-request/order) approving the resolved approver's request moves the booking to approved and unblocks dispatch",
+      "SR-QA-TENANT-001 — approval-requests: approve happy path (write→read across booking/approval-request/order) rejects a second decision from the same approver while the request is still pending on other approvers (all_of_parallel)",
+      "SR-QA-TENANT-001 — approval-requests: approve happy path (write→read across booking/approval-request/order) rejects a decision from an actor who is not a resolved approver on the request",
+      "SR-QA-TENANT-001 — cost-center quota: consumption ledger and summary read-back (C027/C028 額度) a successful booking against a cost center with sufficient quota is reflected in the ledger and the cost-center quota summary",
+      "SR-QA-TENANT-001 — cost-center quota: consumption ledger and summary read-back (C027/C028 額度) negative: a cost center with a zero booking-count limit blocks new bookings and leaves the ledger untouched (regression, R-existing)"
+    ],
+    "sr-qa-tenant-001/tenant-directory-and-settings.test.ts": [
+      "SR-QA-TENANT-001 — users & invites (C006/C008) creates a tenant user (invited) and lists it back through the tenant directory read path",
+      "SR-QA-TENANT-001 — users & invites (C006/C008) negative: creating a second user with the same email in the same tenant is rejected (TENANT_USER_EXISTS)",
+      "SR-QA-TENANT-001 — users & invites (C006/C008) updates a tenant user's role and the change is visible on re-read",
+      "SR-QA-TENANT-001 — users & invites (C006/C008) revokes a pending invitation and the revoked token can no longer be accepted (gap: not covered by tests/unit/tenant-invitation-lifecycle.test.ts, which only exercises resend)",
+      "SR-QA-TENANT-001 — users & invites (C006/C008) negative: revoking an invitation twice fails closed instead of no-op succeeding (TENANT_INVITATION_NOT_PENDING)",
+      "SR-QA-TENANT-001 — addresses & passengers, including their relationship (C027 常用地址／預約乘客) links a tenant address to a tenant passenger and both are readable back through independent getters",
+      "SR-QA-TENANT-001 — addresses & passengers, including their relationship (C027 常用地址／預約乘客) negative: an address cannot claim ownership of a passenger that does not exist in the tenant (PASSENGER_NOT_FOUND)",
+      "SR-QA-TENANT-001 — addresses & passengers, including their relationship (C027 常用地址／預約乘客) negative: reading a passenger that was created under a different tenant fails closed (PASSENGER_NOT_FOUND), confirming tenant isolation still holds",
+      "SR-QA-TENANT-001 — cost centres directory (C027) creates, lists, and disables a cost center, with the disabled state visible on re-read",
+      "SR-QA-TENANT-001 — cost centres directory (C027) negative: looking up an unknown cost center fails closed (COST_CENTER_NOT_FOUND)",
+      "SR-QA-TENANT-001 — approval rules directory (C028 用車規則) creates an approval rule, reads it back, then reorders and disables it",
+      "SR-QA-TENANT-001 — approval rules directory (C028 用車規則) negative: reordering with an incomplete rule-id list is rejected instead of silently dropping rules",
+      "SR-QA-TENANT-001 — SLA profile (C028) starts unprovisioned for a tenant with no SLA history, then a write is visible through both the raw getter and the UI view read model",
+      "SR-QA-TENANT-001 — SLA profile (C028) negative: recalculating SLA bookings without a reason is rejected (validation, not a silent no-op)",
+      "SR-QA-TENANT-001 — feature flags with tenant scoping (C109; gap: no existing test exercises FeatureFlagsService.upsertTenantOverride) a tenant override write is read back distinctly from the global flag and does not leak to other tenants",
+      "SR-QA-TENANT-001 — feature flags with tenant scoping (C109; gap: no existing test exercises FeatureFlagsService.upsertTenantOverride) negative: an unknown flag key resolves to disabled instead of throwing (safe default for unrecognized flags)",
+      "SR-QA-TENANT-001 — tenant lifecycle (C102 平臺管理員 | 租戶生命週期與跨租戶治理) creates a platform tenant, then updates its settings and status, with each write visible on independent re-read",
+      "SR-QA-TENANT-001 — tenant lifecycle (C102 平臺管理員 | 租戶生命週期與跨租戶治理) negative: creating a tenant with a code that already exists is rejected (TENANT_CODE_CONFLICT)",
+      "SR-QA-TENANT-001 — tenant lifecycle (C102 平臺管理員 | 租戶生命週期與跨租戶治理) negative: transitioning the status of an unknown tenant is rejected instead of creating a phantom record (TENANT_NOT_FOUND)"
+    ],
+    "sr-partner-notify-qa-20260917/controlled-receiver.test.ts": [
+      "controlled receiver with production dispatch commits pending delivery before accepted and reopens with the same duplicate receipt",
+      "controlled receiver with production dispatch serializes concurrent duplicate requests into one durable pending delivery",
+      "controlled receiver with production dispatch rejects changed bytes under an existing notification identity with 409",
+      "controlled receiver with production dispatch rejects altered raw bytes, stale signatures and unrecognized secret versions",
+      "controlled receiver with production dispatch keeps tenant, entry and recipient checks independent of valid signing",
+      "controlled receiver with production dispatch returns 503 when durable storage is unavailable without an accepted receipt",
+      "controlled receiver with production dispatch accepts binding tests without scheduling native delivery and rejects the historical generic ack"
+    ]
+  },
+  "partner_unit": {
+    "sr-partner-notify-qa-20260917/partner-notify.test.ts": [
+      "partner transport environment isolation production/unset: rejects loopback and mixed DNS while allowing public HTTPS",
+      "partner transport environment isolation production/false: rejects loopback and mixed DNS while allowing public HTTPS",
+      "partner transport environment isolation production/true: rejects loopback and mixed DNS while allowing public HTTPS",
+      "partner transport environment isolation test/unset: rejects loopback and mixed DNS while allowing public HTTPS",
+      "partner transport environment isolation test/false: rejects loopback and mixed DNS while allowing public HTTPS"
+    ],
+    "sr-partner-notify-qa-20260917/controlled-receiver.test.ts": [
+      "controlled receiver with production dispatch commits pending delivery before accepted and reopens with the same duplicate receipt",
+      "controlled receiver with production dispatch serializes concurrent duplicate requests into one durable pending delivery",
+      "controlled receiver with production dispatch rejects changed bytes under an existing notification identity with 409",
+      "controlled receiver with production dispatch rejects altered raw bytes, stale signatures and unrecognized secret versions",
+      "controlled receiver with production dispatch keeps tenant, entry and recipient checks independent of valid signing",
+      "controlled receiver with production dispatch returns 503 when durable storage is unavailable without an accepted receipt",
+      "controlled receiver with production dispatch accepts binding tests without scheduling native delivery and rejects the historical generic ack"
+    ]
+  },
+  "webhook_unit": {
+    "sr-qa-webhook-001/sr-qa-webhook-001.test.ts": [
+      "SR-QA-WEBHOOK-001: Verification Suite C111: Tenant API Keys Governance & Lifecycle C111-1 (Normal): Issues API key with minimal scope and normalizes compatibility aliases",
+      "SR-QA-WEBHOOK-001: Verification Suite C111: Tenant API Keys Governance & Lifecycle C111-2 (Normal): Plaintext key returned once, prefix/suffix masked, raw secret excluded from storage",
+      "SR-QA-WEBHOOK-001: Verification Suite C111: Tenant API Keys Governance & Lifecycle C111-3 (Normal & Negative): Enforces default 60-day expiry and rejects expiry exceeding 90 days",
+      "SR-QA-WEBHOOK-001: Verification Suite C111: Tenant API Keys Governance & Lifecycle C111-4 (Normal): Supports key rotation with configurable overlap window",
+      "SR-QA-WEBHOOK-001: Verification Suite C111: Tenant API Keys Governance & Lifecycle C111-5 (Normal): Automatically revokes key after overlap window expires",
+      "SR-QA-WEBHOOK-001: Verification Suite C111: Tenant API Keys Governance & Lifecycle C111-6 (Normal & Negative): Immediate revocation works instantly and blocks rotation",
+      "SR-QA-WEBHOOK-001: Verification Suite C112: Webhook Signing, Delivery, Fault Recovery & Secret Rotation C112-1 (Normal): Real HTTP receiver verifies HMAC-SHA256 signature and activates endpoint on 200",
+      "SR-QA-WEBHOOK-001: Verification Suite C112: Webhook Signing, Delivery, Fault Recovery & Secret Rotation C112-2 (Negative & Normal): Handles 503 response with exponential backoff and queued status",
+      "SR-QA-WEBHOOK-001: Verification Suite C112: Webhook Signing, Delivery, Fault Recovery & Secret Rotation C112-2b (Normal): A queued 503 delivery automatically retries after its real scheduled backoff and recovers to delivered, promoting the endpoint back to active",
+      "SR-QA-WEBHOOK-001: Verification Suite C112: Webhook Signing, Delivery, Fault Recovery & Secret Rotation C112-3 (Negative): A real network timeout (AbortController firing after the response never arrives) is caught as a queued retry, not a thrown error",
+      "SR-QA-WEBHOOK-001: Verification Suite C112: Webhook Signing, Delivery, Fault Recovery & Secret Rotation C112-4 (Negative): Auto-disables endpoint after non-retryable response / delivery failure",
+      "SR-QA-WEBHOOK-001: Verification Suite C112: Webhook Signing, Delivery, Fault Recovery & Secret Rotation C112-5 (Normal): Disabled or test_pending endpoints are excluded from live event dispatches",
+      "SR-QA-WEBHOOK-001: Verification Suite C112: Webhook Signing, Delivery, Fault Recovery & Secret Rotation C112-6 (Normal & Negative): Receiver verifies replay protection via timestamp freshness and delivery ID uniqueness",
+      "SR-QA-WEBHOOK-001: Verification Suite C112: Webhook Signing, Delivery, Fault Recovery & Secret Rotation C112-7 (Normal): Webhook secret rotation advances version to v=2 and updates signature without leaking secret",
+      "SR-QA-WEBHOOK-001: Verification Suite C112: Webhook Signing, Delivery, Fault Recovery & Secret Rotation C112-8 (Normal): Deduplicates identical outbox keys and enqueues idempotent delivery records",
+      "SR-QA-WEBHOOK-001: Verification Suite C112: Webhook Signing, Delivery, Fault Recovery & Secret Rotation C112-9 (Normal): Outbox-key deduplication survives a simulated process restart via a fresh service instance sharing only the persisted repository",
+      "SR-QA-WEBHOOK-001: Verification Suite C112: Webhook Signing, Delivery, Fault Recovery & Secret Rotation C112-10 (Normal): A pending queued webhook delivery attempt survives simulated process restart and is resumed by onModuleInit()",
+      "SR-QA-WEBHOOK-001: Verification Suite C113: ERP & Bank Ledger Settlement Matrix (External Gate Verification) C113-1 (Normal): Retrieves settlement statement records and verifies financial data structure",
+      "SR-QA-WEBHOOK-001: Verification Suite C113: ERP & Bank Ledger Settlement Matrix (External Gate Verification) C113-2 (Negative): Querying invalid settlement statement period throws VALIDATION_ERROR",
+      "SR-QA-WEBHOOK-001: Verification Suite C113: ERP & Bank Ledger Settlement Matrix (External Gate Verification) C113-3 (External Gate Declaration): Documents enterprise ERP/SSO and banking H2H prerequisites",
+      "SR-QA-WEBHOOK-001: Verification Suite C113: ERP & Bank Ledger Settlement Matrix (External Gate Verification) C113-4 (Normal): Ingests sandbox-source fulfillment segments & billing treatments, verifying capability-source mapping and tenant/order isolation",
+      "SR-QA-WEBHOOK-001: Verification Suite C113: ERP & Bank Ledger Settlement Matrix (External Gate Verification) C113-5 (Normal & Idempotency): Resend handling is idempotent and reconciliation issues record immutable audit trail and resolution codes",
+      "SR-QA-WEBHOOK-001: Verification Suite C113: ERP & Bank Ledger Settlement Matrix (External Gate Verification) C113-6 (Negative & Auth): Rejects blank actor or summary and enforces reconciliation command validations",
+      "SR-QA-WEBHOOK-001: Verification Suite C114: Geocoding & Routing Provider Verification (External Gate) C114-1 (Normal): Geocoding provider resolves Taiwan address coordinates within valid boundaries",
+      "SR-QA-WEBHOOK-001: Verification Suite C114: Geocoding & Routing Provider Verification (External Gate) C114-2 (Negative): Blank address throws validation error gracefully",
+      "SR-QA-WEBHOOK-001: Verification Suite C114: Geocoding & Routing Provider Verification (External Gate) C114-3 (External Gate Declaration): Documents Google Maps Platform API key and quota prerequisites",
+      "SR-QA-WEBHOOK-001: Verification Suite C114: Geocoding & Routing Provider Verification (External Gate) C114-4 (Normal): Computes geo route between valid Taiwan locations across travel modes (drive, walk, two_wheeler), returning valid distance and duration",
+      "SR-QA-WEBHOOK-001: Verification Suite C114: Geocoding & Routing Provider Verification (External Gate) C114-5 (Negative): Rejects invalid route commands: invalid travel mode, missing or out-of-range coordinates",
+      "SR-QA-WEBHOOK-001: Verification Suite C114: Geocoding & Routing Provider Verification (External Gate) C114-6 (Negative & Failure Handling): Handles configured provider timeout (504) and internal error (500) with typed ApiRequestError and provider_outage observability",
+      "SR-QA-WEBHOOK-001: Verification Suite C115: Voice Recording Callback & Qualification Background Scan C115-1 (Normal): Phone booking stays in recording_pending until recording.ready callback arrives",
+      "SR-QA-WEBHOOK-001: Verification Suite C115: Voice Recording Callback & Qualification Background Scan C115-2 (Negative): Ingesting recording.failed callback flags order as recording_missing",
+      "SR-QA-WEBHOOK-001: Verification Suite C115: Voice Recording Callback & Qualification Background Scan C115-3 (Live Limitation Declaration): Documents live CTI telephony and Cloud Run persistent scheduler",
+      "SR-QA-WEBHOOK-001: Verification Suite C115: Voice Recording Callback & Qualification Background Scan C115-4 (Normal): Call recording callback deduplication and idempotent processing preserves order compliance state",
+      "SR-QA-WEBHOOK-001: Verification Suite C115: Voice Recording Callback & Qualification Background Scan C115-5 (Normal & Degradation): Driver license & qualification background scan detects expirations, blocks dispatch eligibility, and updates status on renewal"
+    ]
+  },
+  "tenant_e2e": {
+    "sr-qa-tenant-001/approval-rules.spec.ts": [
+      "C028 approval rule writes, evaluation and tenant isolation"
+    ],
+    "sr-qa-tenant-001/cost-center.spec.ts": [
+      "C027 cost center writes, disable and tenant isolation"
+    ],
+    "sr-qa-tenant-001/directory-durability.spec.ts": [
+      "Tenant passenger/address relationship, rules and SLA survive durable readback"
+    ],
+    "sr-qa-tenant-001/governance.spec.ts": [
+      "Tenant quotas and approval decisions have real HTTP/DB readback",
+      "Tenant lifecycle and integration settings persist and reject tenant actors",
+      "Tenant feature flag override has durable isolated readback"
+    ],
+    "sr-qa-tenant-001/invitation-mail.spec.ts": [
+      "Tenant invitations use actual SMTP receiver, one-time acceptance and revocation"
+    ],
+    "sr-qa-tenant-001/passenger-address.spec.ts": [
+      "C027 passenger/address writes, relation readback and tenant isolation"
+    ],
+    "sr-qa-tenant-001/sla.spec.ts": [
+      "C028 SLA settings readback, invalid input and tenant isolation"
+    ],
+    "sr-qa-tenant-001/users.spec.ts": [
+      "Tenant users create, role update and tenant isolation"
+    ]
+  },
+  "webhook_e2e": {
+    "sr-qa-webhook-001/sr-qa-webhook-001.spec.ts": [
+      "C111 & C112 E2E: Validates complete Webhook HMAC signature, fault recovery, and API key governance lifecycle against the real TenantPartnerService with write-then-read evidence"
+    ]
+  },
+  "partner_e2e": {
+    "sr-partner-notify-qa-20260917/partner-notification-uat.spec.ts": [
+      "C201 E2E: Worker positive delivery path",
+      "C202 E2E: Transport timeout triggers retry",
+      "C203 E2E: Missing route triggers 404/permanent failure",
+      "C204 E2E: Receiver invalid ack (HTTP 204 with payload) handling",
+      "C205 E2E: Admin UI displays notification binding and enables retry",
+      "C206 E2E: Same tenant entries deliver only to the original entry",
+      "C207 E2E: Same URL across tenants preserves recipient isolation",
+      "C208 E2E: The same resident in two apps cannot cross entry or subject",
+      "C209 E2E: Entry ownership change refuses historical delivery without sending",
+      "C210 E2E: Revoked recipient link stops delivery without sending",
+      "C211 E2E: Disabled endpoint and secret rotation require retest",
+      "C212 E2E: HTML 200 and mismatched receipt remain manual only",
+      "C213 E2E: Accepted then timeout retries identical bytes and one durable receipt",
+      "C214 E2E: Ack then database failure recovers after lease expiry with duplicate receipt",
+      "C215 E2E: Two workers compete and stale fences cannot commit",
+      "C216 E2E: Five maximum attempts have one retry owner across restart",
+      "C217 E2E: Expired notifications stop without sending",
+      "C218 E2E: Old ETA and cancelled arrival stop while receipt remains independent",
+      "C219 E2E: Payload excludes private driver and passenger information",
+      "C220 E2E: Missing configuration is unavailable and never falls back"
+    ],
+    "sr-partner-notify-qa-20260917/navigation-uat.spec.ts": [
+      "C221 NAV: Resolve issues fresh single-use handoff and HttpOnly session to the latest ride",
+      "C222 NAV: Wrong entry and subject cannot resolve or read a ride",
+      "C223 NAV: Logout and account switch invalidate the previous ride session",
+      "C224 NAV: ReturnTo and every handoff consumption path reject replay"
+    ]
+  }
+}

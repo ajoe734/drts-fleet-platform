@@ -20,6 +20,7 @@ import type {
   RejectPrivilegedRoleRequestCommand,
   RemovePrivilegedRoleGrantCommand,
   StepUpProof,
+  IdentitySessionContext,
 } from "@drts/contracts";
 
 export interface BreakGlassActivationResult {
@@ -33,6 +34,10 @@ export class PlatformAdminIamClient {
   constructor(private readonly client: ApiClient) {}
 
   // ── Session Inventory & Revocation ──────────────────────────────────────────
+
+  async getIdentitySessionContext(): Promise<IdentitySessionContext> {
+    return this.client.get<IdentitySessionContext>("/identity/session-context");
+  }
 
   async listSessions(
     query: IamSessionInventoryQuery = {},
@@ -54,11 +59,18 @@ export class PlatformAdminIamClient {
   async revokeSession(
     sessionId: string,
     command: IamSessionRevokeCommand = {},
-  ): Promise<{ revoked: boolean; sessionId: string; session: MaskedSessionSummary | null }> {
-    return this.client.post<{ revoked: boolean; sessionId: string; session: MaskedSessionSummary | null }>(
-      `/identity/sessions/${encodeURIComponent(sessionId)}/revoke`,
-      { body: command },
-    );
+  ): Promise<{
+    revoked: boolean;
+    sessionId: string;
+    session: MaskedSessionSummary | null;
+  }> {
+    return this.client.post<{
+      revoked: boolean;
+      sessionId: string;
+      session: MaskedSessionSummary | null;
+    }>(`/identity/sessions/${encodeURIComponent(sessionId)}/revoke`, {
+      body: command,
+    });
   }
 
   async createStepUpProof(
@@ -75,9 +87,9 @@ export class PlatformAdminIamClient {
     tenantId?: string,
   ): Promise<PrivilegedRoleApprovalRequestRecord[]> {
     const qs = tenantId ? `?tenantId=${encodeURIComponent(tenantId)}` : "";
-    const response = await this.client.get<{ items: PrivilegedRoleApprovalRequestRecord[] }>(
-      `/identity/privileged-role-requests${qs}`,
-    );
+    const response = await this.client.get<{
+      items: PrivilegedRoleApprovalRequestRecord[];
+    }>(`/identity/privileged-role-requests${qs}`);
     return response?.items ?? [];
   }
 
@@ -129,12 +141,14 @@ export class PlatformAdminIamClient {
 
   // ── Access Reviews ──────────────────────────────────────────────────────────
 
-  async listAccessReviews(params: {
-    realm?: string;
-    tenantId?: string;
-    status?: string;
-    limit?: number;
-  } = {}): Promise<AccessReviewCampaignRecord[]> {
+  async listAccessReviews(
+    params: {
+      realm?: string;
+      tenantId?: string;
+      status?: string;
+      limit?: number;
+    } = {},
+  ): Promise<AccessReviewCampaignRecord[]> {
     const searchParams = new URLSearchParams();
     if (params.realm) searchParams.set("realm", params.realm);
     if (params.tenantId) searchParams.set("tenantId", params.tenantId);
@@ -142,9 +156,9 @@ export class PlatformAdminIamClient {
     if (params.limit) searchParams.set("limit", String(params.limit));
 
     const qs = searchParams.toString();
-    const res = await this.client.get<{ campaigns: AccessReviewCampaignRecord[] }>(
-      `/platform-admin/access-reviews${qs ? `?${qs}` : ""}`,
-    );
+    const res = await this.client.get<{
+      campaigns: AccessReviewCampaignRecord[];
+    }>(`/platform-admin/access-reviews${qs ? `?${qs}` : ""}`);
     return res?.campaigns ?? [];
   }
 
@@ -157,13 +171,16 @@ export class PlatformAdminIamClient {
     );
   }
 
-  async getAccessReviewCampaignDetail(
-    campaignId: string,
-  ): Promise<{ campaign: AccessReviewCampaignRecord; items: AccessReviewItemRecord[] }> {
+  async getAccessReviewCampaignDetail(campaignId: string): Promise<{
+    campaign: AccessReviewCampaignRecord;
+    items: AccessReviewItemRecord[];
+  }> {
     return this.client.get<{
       campaign: AccessReviewCampaignRecord;
       items: AccessReviewItemRecord[];
-    }>(`/platform-admin/access-reviews/campaigns/${encodeURIComponent(campaignId)}`);
+    }>(
+      `/platform-admin/access-reviews/campaigns/${encodeURIComponent(campaignId)}`,
+    );
   }
 
   async decideAccessReview(
@@ -182,12 +199,14 @@ export class PlatformAdminIamClient {
     );
   }
 
-  async queryAccessReviewEvidence(params: {
-    campaignId?: string;
-    reviewId?: string;
-    decision?: string;
-    limit?: number;
-  } = {}): Promise<AccessReviewEvidenceRecord[]> {
+  async queryAccessReviewEvidence(
+    params: {
+      campaignId?: string;
+      reviewId?: string;
+      decision?: string;
+      limit?: number;
+    } = {},
+  ): Promise<AccessReviewEvidenceRecord[]> {
     const searchParams = new URLSearchParams();
     if (params.campaignId) searchParams.set("campaignId", params.campaignId);
     if (params.reviewId) searchParams.set("reviewId", params.reviewId);
@@ -195,13 +214,27 @@ export class PlatformAdminIamClient {
     if (params.limit) searchParams.set("limit", String(params.limit));
 
     const qs = searchParams.toString();
-    const res = await this.client.get<{ evidence: AccessReviewEvidenceRecord[] }>(
-      `/platform-admin/access-reviews/evidence${qs ? `?${qs}` : ""}`,
-    );
+    const res = await this.client.get<{
+      evidence: AccessReviewEvidenceRecord[];
+    }>(`/platform-admin/access-reviews/evidence${qs ? `?${qs}` : ""}`);
     return res?.evidence ?? [];
   }
 
   // ── Break-Glass Emergency Access ────────────────────────────────────────────
+
+  async listBreakGlassRequests(): Promise<{ items: BreakGlassGrantRecord[] }> {
+    return this.client.get<{ items: BreakGlassGrantRecord[] }>(
+      "/platform-admin/break-glass/requests",
+    );
+  }
+
+  async getBreakGlassRequest(
+    requestId: string,
+  ): Promise<BreakGlassGrantRecord> {
+    return this.client.get<BreakGlassGrantRecord>(
+      `/platform-admin/break-glass/requests/${encodeURIComponent(requestId)}`,
+    );
+  }
 
   async requestBreakGlass(
     command: CreateBreakGlassRequestCommand,
@@ -243,6 +276,8 @@ export class PlatformAdminIamClient {
   }
 }
 
-export function createPlatformAdminIamClient(client: ApiClient): PlatformAdminIamClient {
-  return new PlatformAdminIamClient(client);
+export function createPlatformAdminIamClient(
+  client: any,
+): PlatformAdminIamClient {
+  return new PlatformAdminIamClient(client as ApiClient);
 }

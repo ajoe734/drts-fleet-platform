@@ -89,8 +89,11 @@ export interface ReferralEmbedConsentBundle {
 export interface CreateReferralEmbedHandoffArtifactCommand {
   entrySlug: string;
   entryHost: string;
+  currentDrtsPassengerId?: string;
+  currentPartnerEntrySlug?: string;
   apiKey?: string;
   partnerUserRef: string;
+  navigationContext?: { orderId: string; screen: string };
   consentBundle?: ReferralEmbedConsentBundle | null;
 }
 
@@ -102,6 +105,8 @@ export interface ReferralEmbedHandoffArtifact {
   expiresAt: string;
   partnerEntrySlug: string;
   entryHost: string;
+  currentDrtsPassengerId?: string;
+  currentPartnerEntrySlug?: string;
   drtsPassengerId: string;
   consentRequired: boolean;
   consentBundleVersion: string | null;
@@ -111,12 +116,16 @@ export interface ConsumeReferralEmbedHandoffArtifactCommand {
   artifact: string;
   entrySlug: string;
   entryHost: string;
+  currentDrtsPassengerId?: string;
+  currentPartnerEntrySlug?: string;
 }
 
 export interface RecordReferralEmbedConsentCommand {
   handoffId: string;
   entrySlug: string;
   entryHost: string;
+  currentDrtsPassengerId: string;
+  currentPartnerEntrySlug: string;
   consentBundle: ReferralEmbedConsentBundle;
 }
 
@@ -139,8 +148,11 @@ export interface ReferralEmbedSession {
   handoffId: string;
   partnerEntrySlug: string;
   entryHost: string;
+  currentDrtsPassengerId?: string;
+  currentPartnerEntrySlug?: string;
   drtsPassengerId: string;
   identityActive: boolean;
+  navigationContext?: { orderId: string; screen: string };
   consent: {
     requiredScopes: ReferralEmbedRequiredConsentScope[];
     bundleVersion: string | null;
@@ -252,4 +264,15 @@ export interface ReferralPassengerReceipt {
   formattedTotal: string;
   paymentChannel: string;
   downloadUrl?: string;
+}
+
+export interface ResolvePartnerNotificationNavigationCommand {
+  entrySlug: string;
+  rideRef: string;
+  partnerUserRef: string;
+}
+
+export interface PartnerNotificationNavigationResolution {
+  handoffArtifact: ReferralEmbedHandoffArtifact;
+  destinationUrl: string;
 }
