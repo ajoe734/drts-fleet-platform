@@ -11,6 +11,7 @@ import { BreakGlassController } from "./break-glass.controller";
 import { ConsumedOidcStateRepository } from "./consumed-oidc-state.repository";
 import { DriverDeviceSessionRepository } from "./driver-device-session.repository";
 import { DriverDeviceSessionService } from "./driver-device-session.service";
+import { GoogleWorkloadIdentityAdapter } from "./google-workload-identity.adapter";
 import { IAPSubjectAdapter } from "./iap-subject.adapter";
 import { OidcPkceService } from "./oidc-pkce.service";
 import { ServiceWorkloadIdentityAdapter } from "./service-workload-identity.adapter";
@@ -30,6 +31,7 @@ import { ServiceWorkloadIdentityAdapter } from "./service-workload-identity.adap
     DriverDeviceSessionService,
     IAPSubjectAdapter,
     ServiceWorkloadIdentityAdapter,
+    GoogleWorkloadIdentityAdapter,
     OidcPkceService,
     ConsumedOidcStateRepository,
   ],
@@ -39,6 +41,7 @@ import { ServiceWorkloadIdentityAdapter } from "./service-workload-identity.adap
     DriverDeviceSessionService,
     IAPSubjectAdapter,
     ServiceWorkloadIdentityAdapter,
+    GoogleWorkloadIdentityAdapter,
     OidcPkceService,
     ConsumedOidcStateRepository,
   ],

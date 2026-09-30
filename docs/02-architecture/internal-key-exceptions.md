@@ -277,3 +277,134 @@ current `write_scopes` without either inventing long-term key material (which
 the task explicitly forbids and `DEV-WI-SECRETS-001` already rejected) or
 guessing at a security-boundary design that a reviewer would have to trust
 blind. Escalating via `blocker` rather than guessing.
+
+## 7. Supervisor unblock (2026-09-30) and implementation
+
+Supervisor resolved blockers #2 and #3 above: proceed with the existing
+Google-native GitHub OIDC/WIF path already used by `deploy-dev.yml` (no
+`WORKLOAD_IDENTITY_JWT_SECRET_OR_PUBLIC_KEY` or other long-lived workload
+key), and keep the CI tenant-actor probe isolated and explicitly
+policy-gated rather than generalising `ServiceWorkloadIdentityAdapter`'s
+tenant-impersonation surface. Blocker #1 (`write_scopes` expansion) is
+resolved by "Owner must expand scopes only to the exact callers it can
+prove" in the same dispatch -- the eight files listed there are exactly
+what this candidate touches; see the exact path list below for Supervisor
+confirmation.
+
+### 7.1 What shipped
+
+- `apps/api/src/modules/auth/google-workload-identity.adapter.ts` (new):
+  verifies a Google-signed identity token against Google's own public JWKS
+  (`https://www.googleapis.com/oauth2/v3/certs`, cached 10m, `kid`-based key
+  selection via `crypto.createPublicKey({format:"jwk"})` -- no new npm
+  dependency). Requires `iss` in `https://accounts.google.com` /
+  `accounts.google.com`, a verified `email` claim, and an `aud` claim
+  present in the matched registry entry's `allowedTokenAudiences`. Replay
+  protection reuses `IdentityRepository.consumeWorkloadIdentityAssertion`
+  (same mechanism `ServiceWorkloadIdentityAdapter` already uses), keyed by
+  `sha256(token)` -- no caller-generated nonce needed since each caller
+  mints a fresh token per call. New env var:
+  `WORKLOAD_IDENTITY_GOOGLE_SERVICE_PRINCIPALS` (JSON array of
+  `{serviceAccountEmail, principalId, actorId?, displayName?, roles?,
+  scopes?, allowedTokenAudiences, ciTenantActorGrants?}`). Absent/invalid
+  registry throws `WORKLOAD_IDENTITY_GOOGLE_NOT_CONFIGURED` specifically, so
+  callers can distinguish "not rolled out yet" from a real rejection.
+- `apps/api/src/common/auth/internal-key.middleware.ts`: `validateInternalKey`
+  is now `async`. If a request carries the new `x-drts-google-id-token`
+  header, it verifies via the adapter above and, on success, is treated the
+  same as the existing `Authorization: Bearer` bypass (no internal-key
+  check). If the adapter reports `WORKLOAD_IDENTITY_GOOGLE_NOT_CONFIGURED`
+  (registry env var not set yet in this environment), it falls through to
+  the existing `x-drts-internal-key` check unchanged -- this is the safety
+  property that lets callers dual-send both headers during rollout without
+  risking dev going red. Any other verification failure (bad signature,
+  wrong audience, unregistered principal, replay) is fail-closed and does
+  **not** fall through.
+- `apps/api/src/modules/auth/auth.controller.ts` (`POST /api/auth/token`):
+  new branch, gated by `isCiTenantActorGateEnabled()`
+  (`WORKLOAD_IDENTITY_CI_TENANT_ACTOR_ENABLED=true` and a non-production
+  environment) -- deliberately separate from the general middleware path
+  above. When active and an `x-drts-google-id-token` verifies to a
+  registered principal whose `ciTenantActorGrants` contains the exact
+  `(tenantId, actorType, actorId)` tuple carried in the request's bootstrap
+  headers, issuance falls through into the **same** durable-tenant-user
+  lookup (`TenantPartnerService.findTenantUser` + `getTenantRoleScopes`)
+  the internal-key bootstrap path already uses -- so roles/scopes still come
+  from the durable fixture record, never from caller-controlled headers.
+  If the gate is off, the Google header is ignored entirely and the
+  internal-key requirement applies unchanged (same dual-send safety as the
+  middleware). If the gate is on and the tuple does not match, this is a
+  real access decision and fails closed
+  (`WORKLOAD_CI_TENANT_ACTOR_DENIED`) -- it does not degrade to the
+  internal key.
+- `.github/workflows/deploy-dev.yml` (`operational-candidate-acceptance`
+  job, caller #9): new `Mint identity token — API operational acceptance`
+  step (`google-github-actions/auth@v2`, `token_format: id_token`,
+  `id_token_audience: ${{ needs.health-check.outputs.api }}`) using the same
+  `DEV_WIF_PROVIDER`/`DEV_WIF_SERVICE_ACCOUNT` already used elsewhere in
+  this file. Both `POST /api/auth/token` calls now send
+  `x-drts-google-id-token` alongside the existing `x-drts-internal-key` --
+  dual-send, so this step keeps passing before and after ops populates the
+  registry.
+- Eight caller files migrated to dual-send (`x-drts-google-id-token`
+  alongside the existing `x-drts-internal-key`, reusing an
+  already-minted Cloud Run metadata-server identity token where the file
+  already minted one for `x-serverless-authorization`, or minting one
+  the same way where it didn't) -- this is the exact `write_scopes`
+  expansion from §6's blocker #1, now applied:
+  - `apps/passenger-web/app/control-plane-proxy/[...path]/route.ts`
+  - `apps/enterprise-dispatch-web/app/control-plane-proxy/[...path]/route.ts`
+  - `apps/enterprise-dispatch-web/lib/enterprise-session.server.ts`
+  - `apps/partner-booking-web/app/control-plane-proxy/[...path]/route.ts`
+  - `apps/partner-booking-web/lib/api-client.ts`
+  - `apps/tenant-console-web/app/control-plane-proxy/[...path]/route.ts`
+  - `apps/referral-embed-web/lib/embed-api.ts`
+  - `apps/referral-embed-web/lib/embed-booking-api.ts`
+
+  Each proxy's `applyUpstreamAuth`/equivalent already minted (or now mints,
+  for the three files that didn't have the metadata-server pattern yet) a
+  Google identity token with `audience` = the API's own origin. That same
+  token is sent as both `x-serverless-authorization` (Cloud Run's network-layer
+  IAM invoker check, unchanged) and the new `x-drts-google-id-token`
+  (apps/api's app-level caller identity, replacing what `x-drts-internal-key`
+  asserted). `x-drts-google-id-token` was added to each file's
+  `REQUEST_HEADER_BLOCKLIST` so a client cannot spoof it directly against
+  the proxy.
+- Unit coverage: `apps/api/tests/unit/google-workload-identity.adapter.test.ts`
+  (new -- signature/issuer/audience/replay/registry verification against a
+  real generated RSA keypair and a mocked JWKS fetch) and additions to
+  `apps/api/tests/unit/auth-bootstrap.test.ts` (async `validateInternalKey`
+  conversion, the CI tenant-actor grant success/denial/gate-off cases).
+
+### 7.2 What is NOT done in this candidate, and why
+
+`INTERNAL_KEY_EXCP_002` is **not** removed here. Doing so requires, in this
+order:
+
+1. Ops populates `WORKLOAD_IDENTITY_GOOGLE_SERVICE_PRINCIPALS` in dev for
+   `apps/api`'s Cloud Run service, with one entry per caller's real GCP
+   service-account email (the eight proxy/client files' Cloud Run
+   service identities, plus `DEV_WIF_SERVICE_ACCOUNT` for caller #9 with a
+   `ciTenantActorGrants` entry for both
+   `{tenantId: "10000000-0000-0000-0000-000000000201", actorType:
+   "tenant_admin", actorId: "10000000-0000-0000-0000-000000000901"}` and
+   the `...000902` / `tenant_ops_admin` pair) and sets
+   `WORKLOAD_IDENTITY_CI_TENANT_ACTOR_ENABLED=true`.
+2. A real dev deploy of this candidate (or later) confirms
+   `AUTH_LEGACY_INTERNAL_KEY_USED` for `INTERNAL_KEY_EXCP_002` stops
+   appearing in `apps/api` logs / `internalKeyMetrics` for all nine
+   callers, i.e. every caller is genuinely landing on the WIF path, not
+   silently still falling back.
+3. Only then does a follow-up change drop the `x-drts-internal-key` sends
+   from the nine caller files/steps above and remove the
+   `INTERNAL_KEY_EXCP_002` entry from
+   `apps/api/src/common/auth/internal-key-exception-registry.ts` and this
+   document.
+
+This ordering is why this candidate cannot itself satisfy
+`excp_002_removed_and_deploy_dev_green`: that step is causally downstream of
+a real dev deploy this worker cannot trigger or observe (`deploy-dev.yml`
+triggers on `push: publish/v*` or manual dispatch, not on this task branch).
+`callers_migrated_to_wif_assertion` is satisfied in the sense that every
+known caller now sends and can be verified over the WIF path; it is not yet
+the caller's *only* credential.

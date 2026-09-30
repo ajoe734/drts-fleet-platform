@@ -12,6 +12,7 @@ const REQUEST_HEADER_BLOCKLIST = new Set([
   "host",
   "transfer-encoding",
   "x-drts-internal-key",
+  "x-drts-google-id-token",
   "x-actor-id",
   "x-actor-type",
   "x-auth-mode",
@@ -114,6 +115,11 @@ async function mintMetadataIdentityToken(audience: string) {
 }
 
 async function applyUpstreamAuth(headers: Headers, targetUrl: URL) {
+  // TODO(SEC-INTERNAL-KEY-WIF-MIGRATION-20260930 follow-up): drop this send
+  // once dev has proven the `x-drts-google-id-token` path below end-to-end
+  // and INTERNAL_KEY_EXCP_002 is retired. Kept for now so requests still
+  // succeed if the API's WORKLOAD_IDENTITY_GOOGLE_SERVICE_PRINCIPALS
+  // registry has not been populated for this environment yet.
   const internalKey = process.env.DRTS_INTERNAL_KEY?.trim();
   if (internalKey) {
     headers.set("x-drts-internal-key", internalKey);
@@ -129,7 +135,12 @@ async function applyUpstreamAuth(headers: Headers, targetUrl: URL) {
   }
   const identityToken = await mintMetadataIdentityToken(audience);
   if (identityToken) {
+    // Cloud Run's own IAM invoker check (network hop).
     headers.set("x-serverless-authorization", `Bearer ${identityToken}`);
+    // apps/api's app-level caller identity: the same Google-signed identity
+    // token, verified against Google's public JWKS instead of the shared
+    // x-drts-internal-key secret.
+    headers.set("x-drts-google-id-token", identityToken);
   }
 }
 
