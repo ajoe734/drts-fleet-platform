@@ -12,8 +12,9 @@ the product, change the classifier, or satisfy the parent's acceptance gates.
 The remaining helper delivery gate is an operator transaction: the dispatched
 worker cannot update the parent or store the helper's unresolved-parent
 disposition. Both commands were attempted through the supplied release CLI and
-rejected before mutation. Keep this helper in progress and its PR in draft until
-the transaction below is recorded and verified; do not hand off a candidate
+rejected before mutation, including on the next dispatch (section 7). Route this
+helper as blocked, waiting for Claude2 to coordinate Supervisor, and keep its PR
+in draft until the transaction below is recorded and verified; do not hand off a candidate
 whose merge could incorrectly resume the parent.
 
 ## 1. Exact history and worktree evidence
@@ -176,9 +177,19 @@ AI_NAME=Supervisor "$repair_cli" note "$repair_parent" "$repair_next"
 
 Require both mutations to exit 0 and read back the exact three metadata fields,
 parent `next` equal to `resolved_parent_next`, and parent still blocked/Claude2.
-After this gate, update this same artifact with transaction evidence, verify the
-new helper head, and hand off to Claude2 with `CANDIDATE_SHA`, `CANDIDATE_BRANCH`
-and PR URL. Do not directly call `done` or treat this helper as scope authorization.
+After this gate, if this helper is blocked, Supervisor must resume **only the
+helper** in its operator context:
+
+```bash
+AI_NAME=Supervisor "$repair_cli" resume-blocked "$repair_helper" in_progress \
+  "Operator disposition and parent next-step transaction verified; Codex may finish helper evidence and handoff. Parent remains blocked/Claude2."
+```
+
+Then redispatch the original owner, update this same artifact with transaction
+evidence, verify the new helper head, and hand off to Claude2 with
+`CANDIDATE_SHA`, `CANDIDATE_BRANCH` and PR URL. Do not directly call `done` or
+treat this helper as scope authorization. Resuming the helper does not authorize
+resuming the parent or changing its source scopes.
 
 ## 5. Acceptance and verification ledger
 
@@ -226,6 +237,34 @@ checker, `python3 tools/ci/git/check_canonical_consistency.py --ci --base origin
 head and are recorded in the helper progress receipt, not inherited from the
 anchor. Raw initial failure log: local `ci-initial-canonical.log`.
 
-The canonical task remains in progress with the explicit operator blocker until
-section 4 is applied. No candidate has been handed off; no parent acceptance,
-independent helper review, or merge is claimed.
+The initial delivery retained an in-progress task with the operator blocker.
+Section 7 records why the next dispatch instead routes this helper as blocked
+until section 4 is applied. No candidate has been handed off; no parent
+acceptance, independent helper review, or merge is claimed.
+
+## 7. Redispatch verification and operator routing
+
+Dispatch `codex-20260930T041108Z-a1fb862a` rechecked the same published report,
+`5b90b8c20e621dca54e6e0d7a0a177f773124699`, before this append-only update.
+The worker retained its supplied `owner`/Codex identity and assigned task ID.
+No operator impersonation or dispatch-environment removal was used.
+
+| Check / finding                    | Result and evidence                                                                                                                                                                                                                                                                                                                                                       | Remaining boundary                                                                                                |
+| ---------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------- |
+| Published history and draft PR     | Fresh fetch and live remote lookup: parent remains `a473e760abaa6348948973bd8960b3478aa9f90b`, local/published divergence `0 / 0`; helper local, remote and PR #2230 head all equal `5b90b8c20e621dca54e6e0d7a0a177f773124699`; PR is open, draft, targeting dev. Parent PR query still returns `[]`. All commands exit 0.                                                | No history repair or parent synchronization needed.                                                               |
+| Prior report checks                | Read both completed runs at that exact helper SHA: [CI](https://github.com/ajoe734/drts-fleet-platform/actions/runs/36666426586) success and [ci-integ](https://github.com/ajoe734/drts-fleet-platform/actions/runs/36666426558) success. PR rollup: 15 success, 10 scope-skipped, zero pending or failed.                                                                | Skips do not satisfy acceptance; these runs are not checks for the new report revision.                           |
+| Operator gate remains reproducible | At `2026-09-30T04:13:29Z`, the actual release CLI again rejected parent `note` and helper metadata `assign`, each exit 1 with the same guards as section 4. Exact before/after task slices compare equal; all three helper disposition fields remain absent. Local `redispatch_probe.py` exits 0 after asserting those outcomes; receipt `redispatch-guard-results.json`. | Parent update acceptance remains unmet. No blind retry or premature handoff.                                      |
+| Classifier and scope boundaries    | The actual release `blocked_task_triage_kind` still returns `history_repair` for the unchanged parent slice. `command_handoff` and `command_progress` do not persist the required disposition metadata; `command_assign` does, but is operator-only for this dispatch.                                                                                                    | The documented operator transaction is still necessary. BOOT-01/STORAGE-01 remain with the original parent owner. |
+
+The earlier dispatch's `.local` receipts were not present in this checkout on
+redispatch; they are not claimed to have been reread. The committed sections
+above preserve that earlier evidence. This dispatch's new probe and receipt are
+under the same task-specific `.local` directory and support the newly repeated
+guard observations.
+
+After verification/publication of this report revision, record a helper
+`blocker` waiting for Claude2 through the supplied release CLI. The blocker is
+the missing operator transaction, with the exact action in section 4; further
+owner-only dispatches cannot perform it. Keep PR #2230 in draft and leave the
+parent blocked/Claude2. The final canonical blocker receipt identifies this
+revision's published head and its own completed checks.
