@@ -26,6 +26,7 @@ import { OwnedMobilityService } from "../../../../apps/api/src/modules/owned-mob
 import { PlatformTenantGovernanceService } from "../../../../apps/api/src/modules/platform-admin/tenant-governance.service";
 import { TenantsService } from "../../../../apps/api/src/modules/platform-admin/tenants.service";
 import { TenantPartnerService } from "../../../../apps/api/src/modules/tenant-partner/tenant-partner.service";
+import { toTenantQuotaPeriodKey } from "../../../../apps/api/src/modules/tenant-partner/tenant-quota-ledger";
 
 const TENANT_ID = "tenant-demo-001";
 
@@ -105,6 +106,24 @@ function createBookingCommand(
     passenger: { name: "QA Rider", phone: "0912000111" },
     costCenter: "CC-FIN-04",
     ...overrides,
+  };
+}
+
+// Mirrors createBookingCommand's own reservationWindowStart/End calculation
+// (now + 6h / +7h) so a test can capture the exact window a booking will use
+// *before* creating it, and re-use that same value when querying the quota
+// summary — instead of letting the summary read fall back to its own
+// `new Date()` default, which is a different instant than the booking's
+// window whenever the two straddle an Asia/Taipei month boundary.
+function reservationWindowFrom(base: Date): {
+  reservationWindowStart: string;
+  reservationWindowEnd: string;
+} {
+  const startMs = base.getTime() + 6 * 60 * 60 * 1000;
+  const endMs = startMs + 60 * 60 * 1000;
+  return {
+    reservationWindowStart: new Date(startMs).toISOString(),
+    reservationWindowEnd: new Date(endMs).toISOString(),
   };
 }
 
@@ -334,7 +353,22 @@ describe("SR-QA-TENANT-001 — approval-requests: approve happy path (write→re
 });
 
 describe("SR-QA-TENANT-001 — cost-center quota: consumption ledger and summary read-back (C027/C028 額度)", () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
   it("a successful booking against a cost center with sufficient quota is reflected in the ledger and the cost-center quota summary", async () => {
+    // Pin `now` to a safe mid-month instant instead of letting the suite run
+    // against whatever the real wall clock is: createBookingCommand derives
+    // the booking's reservationWindowStart from `now + 6h`
+    // (see tests/unit/.../tenant-approval-and-quota-lifecycle.test.ts::createBookingCommand),
+    // and the quota period is computed in Asia/Taipei time
+    // (apps/api/src/modules/tenant-partner/tenant-quota-ledger.ts::toTenantQuotaPeriodKey),
+    // so a real run started late in a month could otherwise push the
+    // booking's window into the next billing period non-deterministically.
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-06-15T04:00:00Z"));
+
     const { tenantPartnerService, ownedMobilityService } = createHarness();
 
     const costCenter = tenantPartnerService.upsertCostCenter(TENANT_ID, {
@@ -354,14 +388,26 @@ describe("SR-QA-TENANT-001 — cost-center quota: consumption ledger and summary
       },
     } as never);
 
+    // Capture the booking's own reservation window up front and query the
+    // quota summary for that exact window on both sides of the write, so the
+    // before/after comparison always lands on the same billing period as the
+    // ledger entry the booking will create.
+    const { reservationWindowStart, reservationWindowEnd } =
+      reservationWindowFrom(new Date());
+
     const before = tenantPartnerService.getCostCenterQuotaSummary(
       TENANT_ID,
       "CC-QA-QUOTA-01",
+      reservationWindowStart,
     );
     expect(before.usage.confirmedBookingCount + before.usage.pendingReservedBookingCount).toBe(0);
 
     const created = await ownedMobilityService.createTenantBooking(
-      createBookingCommand({ costCenter: "CC-QA-QUOTA-01" }) as never,
+      createBookingCommand({
+        costCenter: "CC-QA-QUOTA-01",
+        reservationWindowStart,
+        reservationWindowEnd,
+      }) as never,
       TENANT_ID,
       undefined,
       "req-qa-quota-positive-create",
@@ -384,6 +430,7 @@ describe("SR-QA-TENANT-001 — cost-center quota: consumption ledger and summary
     const after = tenantPartnerService.getCostCenterQuotaSummary(
       TENANT_ID,
       "CC-QA-QUOTA-01",
+      reservationWindowStart,
     );
     expect(
       after.usage.confirmedBookingCount + after.usage.pendingReservedBookingCount,
@@ -395,6 +442,86 @@ describe("SR-QA-TENANT-001 — cost-center quota: consumption ledger and summary
         before.usage.bookingCountRemaining ?? Number.POSITIVE_INFINITY,
       );
     }
+  });
+
+  it("regression: a booking created between 10:00Z-16:00Z on the last day of the month still lands in the correct billing period (CI-QUOTA-TEST-MONTH-BOUNDARY-20260930)", async () => {
+    // Nov 30 2026 12:00Z is 2026-11-30T20:00+08:00 in Asia/Taipei (still the
+    // last day of November there), but createBookingCommand's `now + 6h`
+    // window lands at 2026-11-30T18:00Z = 2026-12-01T02:00+08:00 — the next
+    // Asia/Taipei billing month. This is exactly the six-hour daily window
+    // (10:00Z-16:00Z on a month's last UTC day) that made the previous
+    // version of this test fail once a month: it queried the quota summary
+    // with the default `new Date().toISOString()` (still November), while
+    // the booking's own ledger entry landed in December.
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-11-30T12:00:00Z"));
+
+    const { tenantPartnerService, ownedMobilityService } = createHarness();
+
+    tenantPartnerService.upsertCostCenter(TENANT_ID, {
+      code: "CC-QA-QUOTA-BOUNDARY",
+      name: "QA Quota Boundary Cost Center",
+    } as never);
+    tenantPartnerService.upsertTenantQuotaPolicy(TENANT_ID, {
+      costCenterCode: "CC-QA-QUOTA-BOUNDARY",
+      period: "monthly",
+      limit: {
+        bookingCountLimit: 10,
+        amountMinorLimit: 5_000_000,
+        currency: "TWD",
+        enforcementMode: "hard_block",
+      },
+    } as never);
+
+    const { reservationWindowStart, reservationWindowEnd } =
+      reservationWindowFrom(new Date());
+
+    // Sanity: confirm this scenario really does straddle the Asia/Taipei
+    // month boundary, i.e. this test exercises the bug it regresses against
+    // rather than accidentally landing in the same period as "now".
+    expect(toTenantQuotaPeriodKey(reservationWindowStart)).not.toBe(
+      toTenantQuotaPeriodKey(new Date().toISOString()),
+    );
+
+    const before = tenantPartnerService.getCostCenterQuotaSummary(
+      TENANT_ID,
+      "CC-QA-QUOTA-BOUNDARY",
+      reservationWindowStart,
+    );
+    expect(before.usage.confirmedBookingCount + before.usage.pendingReservedBookingCount).toBe(0);
+
+    const created = await ownedMobilityService.createTenantBooking(
+      createBookingCommand({
+        costCenter: "CC-QA-QUOTA-BOUNDARY",
+        reservationWindowStart,
+        reservationWindowEnd,
+      }) as never,
+      TENANT_ID,
+      undefined,
+      "req-qa-quota-boundary-create",
+    );
+
+    const ledger = tenantPartnerService.listTenantQuotaLedger(TENANT_ID);
+    const bookingEntries = ledger.filter(
+      (entry) => entry.bookingId === created.bookingId,
+    );
+    expect(bookingEntries.length).toBeGreaterThan(0);
+    expect(
+      bookingEntries.some(
+        (entry) => entry.costCenterCode === "CC-QA-QUOTA-BOUNDARY",
+      ),
+    ).toBe(true);
+
+    const after = tenantPartnerService.getCostCenterQuotaSummary(
+      TENANT_ID,
+      "CC-QA-QUOTA-BOUNDARY",
+      reservationWindowStart,
+    );
+    expect(
+      after.usage.confirmedBookingCount + after.usage.pendingReservedBookingCount,
+    ).toBe(
+      before.usage.confirmedBookingCount + before.usage.pendingReservedBookingCount + 1,
+    );
   });
 
   it("negative: a cost center with a zero booking-count limit blocks new bookings and leaves the ledger untouched (regression, R-existing)", async () => {
