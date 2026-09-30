@@ -191,6 +191,20 @@ or E2E servers; product/runtime tests are not applicable to its file change.
 
 ## Publication
 
-Task-scoped commit, normal push, draft PR and documentation-check results will
-be recorded here before yielding. Final pushed HEAD and PR head must agree;
-no old parent SHA is reused as this helper's delivery identity.
+- Anchor `d9fdb6990e0526ea5fbdbc6d32f84182b2e0b272` contains only this report and
+  the required Codex / task / Claude2 trailers. Normal non-force push succeeded.
+- [Draft PR #2231](https://github.com/ajoe734/drts-fleet-platform/pull/2231)
+  targets `dev` from the assigned helper branch. This appended publication
+  record is a separate commit, preserving the published anchor unchanged.
+- Local documentation checks passed: `check_canonical_consistency.py --ci`
+  (zero findings), `check_commit_trailers.py`, `git diff --check`, and scoped
+  `pnpm exec prettier --check` (Prettier 3.8.2 / Node 22.23.2). The comparison
+  base is `01f516f48663366df9f717b389e307726eac0edf`. Final-HEAD rerun receipts,
+  normal push, remote/PR head equality and hosted CI outcomes are recorded in
+  the helper's canonical status before yielding; no background check is claimed
+  passed.
+- The helper remains blocked on Supervisor's two state operations above. No
+  `handoff`, `approve`, `done`, merge or parent acceptance is claimed. Once the
+  state prerequisite is resolved, the owner can verify the unchanged final
+  `CANDIDATE_SHA=$(git rev-parse HEAD)` and branch against PR #2231, then hand off
+  that exact candidate to Claude2 through the designated release CLI.
