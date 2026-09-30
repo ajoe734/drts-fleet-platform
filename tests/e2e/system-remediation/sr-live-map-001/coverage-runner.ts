@@ -15,6 +15,8 @@ import {
   writeEvidence,
   type LiveEnv,
 } from "./live-map-config";
+import { verifyLiveDeployment } from "./deployment-check";
+import { MAP_OBSERVER_ID } from "./session-bootstrap";
 import { normalizeApiResponse } from "./wire-response";
 import {
   baselineService,
@@ -27,6 +29,7 @@ type Evidence = {
   candidate_sha: string;
   deployed_sha: string;
   status: "failed" | "passed";
+  deployment?: unknown;
   started_at: string;
   api_origin: string;
   service_area: unknown[];
@@ -46,13 +49,13 @@ export async function runCoverage(env: LiveEnv, deps: Deps) {
   const config = validateCoverageInputs(env);
   const evidence: Evidence = {
     candidate_sha: config.candidateSha,
-    deployed_sha: config.deployedSha,
+    deployed_sha: "",
     status: "failed",
     started_at: new Date(deps.now()).toISOString(),
     api_origin: config.apiOrigin,
     service_area: [],
     location: [],
-    stage: "driver-session-and-isolation",
+    stage: "deployment-health",
   };
   const request = async <T>(
     url: string,
@@ -134,6 +137,28 @@ export async function runCoverage(env: LiveEnv, deps: Deps) {
     );
   };
   try {
+    const deployment = await verifyLiveDeployment(env, deps.fetch, (health) => {
+      evidence.deployment = health;
+      deps.save(evidence);
+    });
+    evidence.deployed_sha = deployment.deployed_sha;
+    evidence.stage = "driver-session-and-isolation";
+    const observer = await api<{
+      active: boolean;
+      identity: {
+        realm: string;
+        actorId: string;
+        actorType: string;
+        scopes: string[];
+      };
+    }>("auth/session", config.observerToken);
+    assert(
+      observer.active &&
+        observer.identity.realm === "ops" &&
+        observer.identity.actorType === "ops_user",
+    );
+    assert.equal(observer.identity.actorId, MAP_OBSERVER_ID);
+    assert.deepEqual(observer.identity.scopes, ["regulatory:read"]);
     const session = await api<{
       active: boolean;
       identity: { realm: string; actorId: string; actorType: string };

@@ -15,7 +15,7 @@ name: Live Entry & Map Acceptance (SR-LIVE-ENTRY-MAP-RUNNER-001)
 # This workflow never deploys anything: both jobs only verify a candidate
 # that a separate deploy workflow already published. Each job independently
 # verifies (a) the checked-out git SHA matches the requested candidate_sha
-# and (b) — for the entry profile — the deployed target itself reports that
+# and (b) the deployed target itself reports that
 # same candidate SHA via its x-drts-candidate-sha response header, so a
 # stale/rolled-back deployment cannot silently pass. All inputs are
 # explicit, fail-closed allowlists; there is no historical staging default
@@ -188,6 +188,9 @@ jobs:
     if: ${{ github.event.inputs.run_map_profile != 'false' }}
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    permissions:
+      contents: read
+      id-token: write
     concurrency:
       group: live-map-isolated-driver
       cancel-in-progress: false
@@ -202,10 +205,8 @@ jobs:
       DRTS_LIVE_MAP_AUTHORIZED_ROUTE_LABELS: ${{ vars.DRTS_LIVE_MAP_AUTHORIZED_ROUTE_LABELS }}
       DRTS_LIVE_MAP_AUTHORIZED_ROUTE_LABEL: ${{ vars.DRTS_LIVE_MAP_AUTHORIZED_ROUTE_LABEL }}
       DRTS_LIVE_MAP_API_ORIGIN: ${{ vars.DRTS_LIVE_MAP_API_ORIGIN }}
-      DRTS_LIVE_MAP_DEPLOYED_SHA: ${{ vars.DRTS_LIVE_MAP_DEPLOYED_SHA }}
+      DEV_GCP_PROJECT_ID: ${{ vars.DEV_GCP_PROJECT_ID }}
       DRTS_LIVE_MAP_TEST_DRIVER_ID: ${{ vars.DRTS_LIVE_MAP_TEST_DRIVER_ID }}
-      DRTS_LIVE_MAP_DRIVER_SESSION_TOKEN: ${{ secrets.DRTS_LIVE_MAP_DRIVER_SESSION_TOKEN }}
-      DRTS_LIVE_MAP_OBSERVER_SESSION_TOKEN: ${{ secrets.DRTS_LIVE_MAP_OBSERVER_SESSION_TOKEN }}
       GOOGLE_MAPS_GEOCODING_API_KEY: ${{ secrets.GOOGLE_MAPS_GEOCODING_API_KEY }}
       GOOGLE_MAPS_ROUTES_API_KEY: ${{ secrets.GOOGLE_MAPS_ROUTES_API_KEY }}
       GOOGLE_MAPS_BROWSER_KEY: ${{ secrets.GOOGLE_MAPS_BROWSER_KEY }}
@@ -253,6 +254,25 @@ jobs:
       - name: Verify fail-closed evidence gate
         run: python3 tests/unit/system-remediation/sr-live-map-001/evidence_gate_checks.py
 
+      - name: Gate hosted authorization and targets before cloud authentication
+        id: targets
+        run: ./apps/api/node_modules/.bin/tsx --tsconfig tests/e2e/system-remediation/sr-live-map-001/tsconfig.live.json tests/e2e/system-remediation/sr-live-map-001/session-bootstrap.ts --preflight
+
+      - name: Authenticate to shared dev using existing WIF
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ secrets.DEV_WIF_PROVIDER }}
+          service_account: ${{ secrets.DEV_WIF_SERVICE_ACCOUNT }}
+          project_id: ${{ vars.DEV_GCP_PROJECT_ID }}
+
+      - uses: google-github-actions/setup-gcloud@v2
+        with:
+          project_id: ${{ vars.DEV_GCP_PROJECT_ID }}
+
+      - name: Verify runtime health SHA and issue per-run least-scope sessions
+        id: sessions
+        run: ./apps/api/node_modules/.bin/tsx --tsconfig tests/e2e/system-remediation/sr-live-map-001/tsconfig.live.json tests/e2e/system-remediation/sr-live-map-001/session-bootstrap.ts
+
       - name: Fail closed before billed calls or browser startup
         id: preflight
         run: ./apps/api/node_modules/.bin/tsx --tsconfig tests/e2e/system-remediation/sr-live-map-001/tsconfig.live.json tests/e2e/system-remediation/sr-live-map-001/coverage-runner.ts --preflight
@@ -280,6 +300,7 @@ jobs:
         if: always()
         env:
           INSTALL_OUTCOME: ${{ steps.install.outcome }}
+          SESSIONS_OUTCOME: ${{ steps.sessions.outcome }}
           RUNNER_OUTCOME: ${{ steps.runner.outcome }}
           COVERAGE_OUTCOME: ${{ steps.coverage.outcome }}
           BROWSER_OUTCOME: ${{ steps.browser.outcome }}
@@ -295,6 +316,8 @@ jobs:
             .artifacts/live-map-acceptance/execution-log.txt
             .artifacts/live-map-acceptance/evidence-map.json
             .artifacts/live-map-acceptance/run-status.json
+            .artifacts/live-map-acceptance/evidence-deployment.json
+            .artifacts/live-map-acceptance/evidence-sessions.json
             .artifacts/live-map-acceptance/evidence-coverage.json
             .artifacts/live-map-acceptance/evidence-browser.json
             .artifacts/live-map-acceptance/map-*.png

@@ -148,3 +148,28 @@ After API-only recursive normalization, the same command exits 0 (25 pass).
 Both wire shapes complete all 29 requests, five decisions, three heartbeat
 writes and four freshness observations. Logs: `.local/c114/rework/wire-before.log`
 and `wire-after.log`. Checkpoint commit is not a review candidate.
+
+### F-SESSION-CONTRACT: confirmed product prerequisite, outside write scope
+
+The requested issuance path is now exercised by `session-contract.test.ts`:
+`AuthController.issueToken` → production `IdentityRepository` memory adapter →
+`JwtAuthService.verifyAccessToken`. Both driver_user/driver and ops_user/ops
+produce a signed, persisted active session with `expiresIn=8h`, yet verification
+returns null. Driver `driverBindingId=null` cannot equal the persisted session
+ID (`validateDurableState`); ops `membershipId=null` cannot select an active
+workforce membership. This is **not** a passing session acceptance. No auth
+logic is mocked and no server or database starts. Command: scoped Vitest on
+`session-contract.test.ts`, exit 0 (two reproductions confirmed), log
+`.local/c114/rework/session-contract.log`.
+
+Supervisor must coordinate the supported product session path/scope before live
+success is possible. Current write scopes cover only the harness/workflow, not
+`AuthController`, `JwtAuthService`, device binding or workforce provisioning.
+The harness implements the requested existing WIF + Secret Manager + auth/token
+path with separate least-scope driver and ops identities and refuses to export
+sessions unless both auth/session checks pass. It does not invent device bindings,
+use system privileges, modify product authorization, or locally sign tokens.
+The current API fixes both user session lifetimes at **8 hours**; the harness
+records the actual expiry and rejects longer lifetimes. It does not claim a
+15-minute token. Tokens and the internal key are masked and never committed or
+uploaded. No repository session secrets are consumed.
