@@ -11,7 +11,7 @@ import {
 } from "../../apps/api/src/common/auth/internal-key-exception-registry";
 
 // The registry entries expire on real dates -- EXCP_003 on 2026-08-31,
-// EXCP_002 on 2026-09-30, EXCP_001 on 2026-10-31. Assertions about which
+// EXCP_002 and EXCP_001 on 2026-10-31. Assertions about which
 // exception matches are about the registry's shape, not about today, so
 // they are evaluated at a fixed instant inside every window. Cases that
 // are about expiry pin their own later `now` and are left alone.
@@ -293,7 +293,35 @@ describe("InternalKeyExceptionRegistry (IAM-SVC-002)", () => {
     );
   });
 
-  it("triggers EXCP_003 expiration after 2026-08-31 and total expiration after 2026-09-30", () => {
+  it.each([
+    { now: "2026-10-01T00:00:00Z", valid: true },
+    { now: "2026-10-05T00:00:00Z", valid: true },
+    { now: "2026-10-31T23:59:58.999Z", valid: true },
+    { now: "2026-10-31T23:59:59.000Z", valid: true },
+    { now: "2026-10-31T23:59:59.001Z", valid: false },
+  ])(
+    "evaluates EXCP_002 token exchange at $now as valid=$valid",
+    ({ now, valid }) => {
+      const result = evaluateInternalKey(
+        "secret-key-1234567890123456789012345",
+        "secret-key-1234567890123456789012345",
+        {
+          headerName: "x-drts-internal-key",
+          requestMethod: "POST",
+          requestPath: "/api/auth/token",
+          now: new Date(now),
+          environment: "staging",
+        },
+      );
+
+      expect(result.valid).toBe(valid);
+      expect(result.exception?.exceptionId).toBe("INTERNAL_KEY_EXCP_002");
+      expect(result.keyState).toBe(valid ? "active" : "expired");
+      expect(result.code).toBe(valid ? undefined : "INTERNAL_KEY_EXPIRED");
+    },
+  );
+
+  it("triggers EXCP_003 expiration after 2026-08-31 and total expiration after 2026-10-31", () => {
     const excp003Registry = [RETIRED_STAGING_ONLY];
     const resultPostExpiry003 = evaluateInternalKey(
       "secret-key-1234567890123456789012345",
@@ -320,12 +348,32 @@ describe("InternalKeyExceptionRegistry (IAM-SVC-002)", () => {
         headerName: "x-drts-internal-key",
         requestMethod: "POST",
         requestPath: "/api/ops/test",
-        now: new Date("2026-10-05T00:00:00Z"),
+        now: new Date("2026-11-01T00:00:00Z"),
         environment: "staging",
       },
     );
     expect(resultAllExpired.valid).toBe(false);
     expect(resultAllExpired.code).toBe("INTERNAL_KEY_EXPIRED");
+    expect(resultAllExpired.exception?.exceptionId).toBe(
+      "INTERNAL_KEY_EXCP_002",
+    );
+
+    const resultReferralExpired = evaluateInternalKey(
+      "secret-key-1234567890123456789012345",
+      "secret-key-1234567890123456789012345",
+      {
+        headerName: "x-drts-referral-handoff-key",
+        requestMethod: "POST",
+        requestPath: "/api/partner/ingress/referral-embed-handoff",
+        now: new Date("2026-11-01T00:00:00Z"),
+        environment: "staging",
+      },
+    );
+    expect(resultReferralExpired.valid).toBe(false);
+    expect(resultReferralExpired.code).toBe("INTERNAL_KEY_EXPIRED");
+    expect(resultReferralExpired.exception?.exceptionId).toBe(
+      "INTERNAL_KEY_EXCP_001",
+    );
   });
 
   it("enforces expiration on rotation overlap key when previousKeyExpiresAt is passed", () => {
