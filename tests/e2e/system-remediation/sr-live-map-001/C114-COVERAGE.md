@@ -29,7 +29,10 @@ This artifact extends SR-LIVE-MAP-001; provider run 36658888280 on
 - All probes fail closed on missing authorization, non-hosted execution, SHA
   mismatch, absent credentials or disallowed origins. No local live calls.
 
-## Provisioning (operator / Supervisor only)
+## Original provisioning for ef18713bc63f (historical, superseded)
+
+Do not apply this old recipe. The rework section below replaces static deployed
+SHA and repository session secrets with runtime health and per-run WIF issuance.
 
 Existing `DRTS_LIVE_MAP_TEST_AUTHORIZED` must be exactly `true`.
 New repository variables:
@@ -99,7 +102,7 @@ Local checks (Node 22.23.2, pnpm 10.33.0; logs under `.local/c114/`):
 | browser_map_render_live                               | GoogleMapBaseLayer; live spec/config; hosted workflow                                                    | disconnected → required Chromium step with ready + decoded imagery + map screenshots                                  | Missing imagery, missing screenshots, Google errors rejected by evidence gate                                                     | Actual hosted browser run pending; no local browser executed           |
 | authorization_gate_and_allowed_targets_enforced       | live-map-config.ts; coverage HTTP redirect:error; Chromium request interception including redirects      | ungated browser → hosted-only strict true, exact HTTPS origins, candidate/workflow equality, deployment header checks | Unit unauthorized/disallowed-host/wrong-session/on-duty/wrong-deployment cases pass; no request on config rejection               | Hosted gate run and same-SHA CI tracked by lifecycle                   |
 
-## Hosted execution and handoff
+## Original hosted execution and handoff (ef18713bc63f)
 
 Dispatch `live-entry-map-acceptance.yml` on the **candidate branch/ref itself**,
 with `candidate_sha=<full candidate SHA>`, `run_entry_profile=false`, and
@@ -173,3 +176,121 @@ The current API fixes both user session lifetimes at **8 hours**; the harness
 records the actual expiry and rejects longer lifetimes. It does not claim a
 15-minute token. Tokens and the internal key are masked and never committed or
 uploaded. No repository session secrets are consumed.
+
+### Current provisioning and execution (rework candidate)
+
+No new repository secret is requested. The map job uses existing
+`secrets.DEV_WIF_PROVIDER` and `secrets.DEV_WIF_SERVICE_ACCOUNT`, with job-level
+`permissions: { contents: read, id-token: write }`. After the strict hosted /
+authorization / target preflight, WIF authenticates to
+`vars.DEV_GCP_PROJECT_ID`. The helper reads Secret Manager secret
+`drts-dev-jwt-secret` at execution time, masks it, and posts `{}` to the
+allowlisted `/api/auth/token` with explicit actor/realm/scopes. Only verified,
+masked tokens enter `GITHUB_ENV`; the two `DRTS_LIVE_MAP_*_SESSION_TOKEN` names
+are ephemeral step environment values, **not** GitHub secrets. Issuance is an
+acceptance transport prerequisite, not login/role acceptance evidence.
+
+The old `vars.DRTS_LIVE_MAP_DEPLOYED_SHA` is no longer read. The helper GETs
+`/api/health` with redirects rejected; normalizes only this product API response;
+requires body `candidateSha` (or `candidate_sha`) and the response SHA header to
+match **the requested candidate**; and requires
+`mapProvider.effectiveBackend=google`. `evidence-deployment.json` records the
+actual runtime SHA, including a mismatch, and the runner repeats health validation
+before telemetry. API and ops response headers must continue matching throughout
+the run. The final evidence gate rejects a foreign runtime even if every
+artifact consistently reports that foreign SHA.
+
+Supervisor configuration, exact values (worker has not written any vars/secrets):
+
+| Name                                    | Value / action                                                                                           |
+| --------------------------------------- | -------------------------------------------------------------------------------------------------------- |
+| `DRTS_LIVE_MAP_TEST_AUTHORIZED`         | `true` (existing, verified through GitHub variables)                                                     |
+| `DRTS_LIVE_MAP_API_ORIGIN`              | `https://drts-dev-api-r6ykdme3wa-uc.a.run.app` (already set)                                             |
+| `DRTS_LIVE_MAP_TEST_ORIGIN`             | `https://drts-dev-ops-console-web-r6ykdme3wa-uc.a.run.app` (existing)                                    |
+| `DRTS_LIVE_MAP_TEST_DRIVER_ID`          | **`drv-demo-002`** (must be reserved for this acceptance; absent at this inspection)                     |
+| `DEV_GCP_PROJECT_ID` / `DEV_GCP_REGION` | Existing live vars verified as `drts-dev-devcc-20260825` / `us-central1`; no historical suspended target |
+| `DRTS_LIVE_MAP_ALLOWED_TARGETS`         | Current value contains only API + ops; add the exact Google origins below                                |
+
+Proposed complete comma-separated `DRTS_LIVE_MAP_ALLOWED_TARGETS` value:
+
+```text
+https://drts-dev-ops-console-web-r6ykdme3wa-uc.a.run.app,https://drts-dev-api-r6ykdme3wa-uc.a.run.app,https://maps.googleapis.com,https://maps.gstatic.com,https://routes.googleapis.com,https://fonts.googleapis.com,https://fonts.gstatic.com
+```
+
+`maps.googleapis.com` is necessary for real geocoding and the renderer;
+`maps.gstatic.com` supplies Maps JS resources. The fonts origins cover the map's
+font resources; `routes.googleapis.com` is the existing provider-smoke endpoint.
+No wildcard is accepted. Additional observed resource dependencies remain a
+failure until the operator explicitly approves the exact origin. If hosted
+Chromium reports `RefererNotAllowedMapError`, the key behind existing secret
+`GOOGLE_MAPS_BROWSER_KEY` must allow HTTP referrer
+`https://drts-dev-ops-console-web-r6ykdme3wa-uc.a.run.app/*`. Current Google key
+restrictions have not been inspected or changed; no unknown key ID is invented.
+
+Driver source: `RegulatoryRegistryService.DRIVER_SEED` has `drv-demo-002` / Driver
+Demo Two / offline / valid licenses; `createSeedDriver` derives
+`dispatchEligible=false` from `work_state_offline`, with active lifecycle.
+`onModuleInit` persists the seeds only when no registry state exists; existing
+persisted rows override them. `seed-driver.test.ts` calls the real constructor,
+`listDrivers`, `assertDriverAuthEligible` and `listSupplyPairs`, confirming this
+source without notifications. The demo **does** have a static supply pair to
+`veh-demo-002`; this is not proof of a current assignment. Live registry state,
+empty driver task list, and null current vehicle/task are mandatory before each
+heartbeat. A different/missing/on-duty driver fails before any location mutation
+or Google billing. No registration, work-state change, notification, SOS, order
+or dispatch API is invoked. `buildDriverStateMetrics` excludes this offline,
+non-dispatchable driver from stale alerts. Source audit is not a claim that the
+current persisted dev row has already passed these checks.
+
+After Supervisor resolves F-SESSION-CONTRACT, provisions driver/Google origins,
+and deploys this exact candidate through the authorized shared-dev workflow,
+dispatch `live-entry-map-acceptance.yml` **at that candidate ref** with
+`candidate_sha=<full SHA>`, `run_entry_profile=false`, `run_map_profile=true`.
+Supervisor's reported current runtime `b35a1f83db378d1668f4c0d85712113a0f9f26d9`
+is not this rework candidate and must fail the new SHA gate. The worker has not
+deployed or queried live API/Google from this VM.
+
+Download `live-map-acceptance-<candidate SHA>` and inspect deployment/session,
+provider, coverage, browser and run-status JSON plus both map screenshots.
+Missing/failed/skipped sessions, runtime mismatch, or any missing live evidence
+produces exit 1. Record all four required acceptance keys only after an actual
+hosted success and independent same-SHA review.
+
+### Rework verification ledger (§0.7)
+
+| Finding / required acceptance                         | Source / change                                                                                        | Previous → rework result                                                                                                                                                              | Commands / evidence                                                                                                    | Remaining limitation                                                                                                           |
+| ----------------------------------------------------- | ------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------ |
+| F-WIRE                                                | AppModule / SnakeCaseInterceptor.deepToSnakeCase; coverage-runner.api; wire-response.ts                | ef18713bc63f snake_case regression fails; normalization passes both wire shapes across every request                                                                                  | `wire-before.log` exit 1; `wire-after.log` exit 0; full-chain test now includes health + observer checks (31 requests) | HTTP/time simulated; Google payload/request bodies are not normalized                                                          |
+| F-SESSION-CONTRACT / requested WIF issuance           | AuthController.issueToken; JwtAuthService.validateDurableState; session-bootstrap.ts; workflow map job | Legacy long-lived secret inputs removed; requested WIF path masked, scope-limited, verified before export. Formal product probe confirms driver + ops bootstrap sessions are rejected | `session-contract.test.ts` two confirmed reproductions; bootstrap unit positive/negative transport tests               | **Unresolved**: product driver binding / ops membership path; requires Supervisor scope coordination; current issuer TTL is 8h |
+| Runtime candidate binding                             | HealthController.buildHealthPayload; deployment-check.ts; gate-evidence.py                             | Static deployed SHA input removed; observed runtime must equal candidate and use Google                                                                                               | Health drift/missing SHA/wrong backend tests; Python gate rejects consistently foreign runtime                         | Must deploy exact new candidate on shared Cloud Run; no local runtime                                                          |
+| service_area_live_decisions_for_real_taiwan_addresses | V0049, ServiceAreaService.evaluate; coverage-runner                                                    | API wire chain repaired; expected V0049 decisions retained                                                                                                                            | Five service decision unit probes with production oracle                                                               | **Pending live**: actual addresses/coordinates/product decisions                                                               |
+| location_freshness_live_states                        | RegulatoryRegistryService DRIVER_SEED/classifyDriverLocationFreshness; DriverHeartbeatController       | Audited seed drv-demo-002; fresh/95-second wait/stale/low_accuracy/restoration required                                                                                               | Real seed audit plus unit boundary orchestration and isolation negatives                                               | **Pending live**: valid driver session and actual persisted isolation; unit clock is simulated                                 |
+| browser_map_render_live                               | GoogleMapBaseLayer; google-map-provider.spec.ts; hosted workflow                                       | Hosted Chromium remains mandatory; config now binds deployment to candidate                                                                                                           | Existing imagery/screenshots/errors gate regressions retained                                                          | **Pending live**: Google origins/key restrictions and same-SHA deployed ops                                                    |
+| authorization_gate_and_allowed_targets_enforced       | live-map-config; session-bootstrap; redirect:error; browser CDP interception                           | Added WIF/session/health calls share gate; no key read or HTTP on target/auth rejection                                                                                               | Bootstrap boundary tests; original browser/coverage gates and Python no-skip checks                                    | **Pending live**: four acceptance keys must not be marked pass from units or fail-closed run alone                             |
+
+The owner will supply the immutable SHA/branch/PR and final check results through
+the release `ai-status.sh` gateway. No `done` command is used. Checkpoints preserve
+work only; review, CI and external acceptance must identify the new candidate.
+
+### Final local checks for this rework tree
+
+Node `22.23.2`, pnpm `10.33.0`:
+
+- Scoped Vitest: **61 tests pass**, six files; includes the 16-case Python gate,
+  both full wire-response chains, real seed audit, session boundary cases and
+  the two product session-contract reproductions. Exit 0, log
+  `.local/c114/rework/unit-isolated-deps.log`.
+- Root `pnpm exec tsc -p tsconfig.json --noEmit`: **pass**, exit 0, log
+  `.local/c114/rework/typecheck-isolated-deps.log`.
+- Scoped ESLint (also existing browser spec/config), changed-file Prettier,
+  workflow YAML parse and `git diff --check`: **pass**, exit 0.
+- The initial typecheck failed because shared workspace dependency links pointed
+  into deleted sibling worktrees. No shared link was changed. This worker's links
+  were detached and replaced with its own frozen, offline installation
+  (`pnpm install --offline --frozen-lockfile --ignore-scripts`, exit 0); the
+  isolated dependency run above is authoritative. Repair/install/initial failure
+  logs remain under `.local/c114/rework/`.
+- No live API/provider calls, product runtime, database, browser, E2E server or
+  container was started on this VM. Hosted CI/live results must be read and
+  attached to the same candidate's canonical handoff; local pass does not satisfy
+  any of the four pending live acceptance keys.
