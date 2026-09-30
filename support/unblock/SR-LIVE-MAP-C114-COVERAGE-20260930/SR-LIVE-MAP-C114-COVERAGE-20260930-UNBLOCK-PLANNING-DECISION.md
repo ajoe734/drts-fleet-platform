@@ -7,7 +7,8 @@
 - Audited base: `09ba63dc4c6343a2ca5bd89e8165719ff1d5bb4f`
 - Decision: [SD-DP-20260930-001](../../../docs/01-decisions/SD-DP-20260930-001-c114-session-prerequisites.md)
 - Delivery: planning documents only; parent implementation and live acceptance
-  remain blocked. PR must remain draft until the operator updates machine truth.
+  remain blocked. The initial operator-write hold below was cleared on
+  2026-09-30; see the continuation record for current candidate/CI evidence.
 
 ## Finding history and decision
 
@@ -143,3 +144,58 @@ published SHA and branch to Claude2; do not call `done`.
   must verify those fields and local/remote/PR equality before issuing the usual
   `CANDIDATE_SHA`, `CANDIDATE_BRANCH`, `PR_URL` handoff to Claude2. No `done`,
   parent resume, same-SHA approval or live acceptance is claimed by this helper.
+
+## Continuation: operator hold cleared and CI prerequisite incorporated
+
+The preceding observations describe the initial delivery. Supervisor subsequently
+wrote `resolved_parent_status=blocked`, `resolved_parent_waiting_for=Claude2`
+and the explicit F-SESSION-CONTRACT next step to this helper, and updated the
+parent at `2026-09-30T14:59:04Z`. Owner re-read those fields on this continuation.
+The parent remains blocked on Claude2's formal disposition/reopen and the
+supported proof/provisioning contract; its four live acceptance keys are intact.
+The parent-update acceptance item above is now satisfied. No operator-write
+permission workaround or additional parent mutation was needed.
+
+Candidate `58103f77f88851b6d50bb6971779e57835b4ef74` was handed off at
+15:04 UTC and approved by Claude2 at 15:06 UTC. Ready-for-review CI then exposed
+an existing quota-test calendar dependency. Both
+[integration run 36734354818](https://github.com/ajoe734/drts-fleet-platform/actions/runs/36734354818)
+and [CI run 36734355178](https://github.com/ajoe734/drts-fleet-platform/actions/runs/36734355178)
+finished **failure** at that SHA; their full failure logs were read. Each root
+unit suite reported 4,256 passed, one failed and 39 skipped. The failure was
+`tenant-approval-and-quota-lifecycle.test.ts:390`, expected 1 but received 0.
+The earlier morning success does not supersede these later failed checks.
+
+| Finding / acceptance            | Source and change                                                                                                                                                                                                                                    | Previous → this delivery                                                                                                                                        | Verification / evidence                                                                                                                                                | Remaining limitation                                                       |
+| ------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------- |
+| CI quota month-boundary failure | `createBookingCommand` uses now + 6h; `TenantPartnerService.getCostCenterQuotaSummary` defaults to now; `toTenantQuotaPeriodKey` uses Asia/Taipei. Booking and summary therefore use different months between 10:00Z and 16:00Z on the last UTC day. | Old candidate fails; upstream PR #2241 fixes the test to query the booking's actual window and adds a fixed month-boundary regression. No product code changes. | Old candidate focused Vitest command below: exit 1 at 15:19 UTC, identical expected 1 / actual 0. After ordinary merge: all 67 scoped tests pass, exit 0 at 15:20 UTC. | Fresh CI and independent review must match the new final SHA.              |
+| Parent concrete next step       | Active-release `show` for helper and parent                                                                                                                                                                                                          | Initial dispatch-guard rejection → Supervisor writes verified                                                                                                   | Parent note dated 14:59:04Z; helper blocked disposition and Claude2 routing verified                                                                                   | Parent implementation/provisioning and all four live gates remain pending. |
+
+The failure is already repaired by merged
+[PR #2241](https://github.com/ajoe734/drts-fleet-platform/pull/2241),
+`331c73a54710793d4b35f424d73dcc946687a76b` on `dev`. After both old-candidate
+runs completed, the owner incorporated that single upstream commit using
+`git merge --no-ff origin/dev`. Merge anchor
+`33d1212b30cd3bd75fe2d896d2854a5baab7de75` was normally pushed. No rebase,
+amend, force push, duplicate quota fix or acceptance reduction was used.
+This changes candidate identity; the old approval is historical evidence only.
+
+Local commands, Node `22.23.2`, pnpm `10.33.0`, Vitest `4.1.4`:
+
+```bash
+# At 58103f77f88851b6d50bb6971779e57835b4ef74: exit 1 (one selected failure).
+pnpm exec vitest run tests/unit/system-remediation/sr-qa-tenant-001/tenant-approval-and-quota-lifecycle.test.ts -t 'a successful booking against a cost center' --maxWorkers=2
+# At 33d1212b30cd3bd75fe2d896d2854a5baab7de75: exit 0 (7 files, 67 tests).
+pnpm exec vitest run tests/unit/system-remediation/sr-qa-tenant-001/tenant-approval-and-quota-lifecycle.test.ts tests/unit/system-remediation/sr-live-map-001 --maxWorkers=2
+```
+
+Dependencies were available on this continuation; the initial missing-dependency
+observation above remains historical. These are repository unit checks with the
+existing test doubles, not live authentication, PostgreSQL persistence or map
+acceptance. The two session-contract cases still prove rejection. All started
+local checks finished; no VM product server, browser or database was started.
+Logs are under `.local/c114-planning/ci-20260930T1516/` (`unit.log`,
+`smoke-failed.log`, `quota-before.log`, `quota-and-map-after.log`). Final pushed
+SHA, PR-head comparison and completed hosted results are recorded in this task's
+active-release handoff after verification, keeping commit identity outside its
+own content. No owner `done` or parent resume is authorized by this continuation.
