@@ -89,6 +89,13 @@ env:
   DEV_CONTROL_PLANE_API_ORIGIN: ${{ vars.DEV_CONTROL_PLANE_API_ORIGIN }}
   DEV_WORKLOAD_IDENTITY_ISSUER: ${{ vars.DEV_WORKLOAD_IDENTITY_ISSUER || vars.WORKLOAD_IDENTITY_ISSUER }}
   DEV_WORKLOAD_IDENTITY_AUDIENCE: ${{ vars.DEV_WORKLOAD_IDENTITY_AUDIENCE || vars.WORKLOAD_IDENTITY_AUDIENCE }}
+  # SEC-INTERNAL-KEY-WIF-MIGRATION-20260930: explicit ops opt-in, kept apart
+  # from the workload_google_registry_secret mount below. The CI tenant actor
+  # gate is a stricter, fail-closed access decision (not a dual-send fallback
+  # -- see apps/api/src/modules/auth/auth.controller.ts), so it must not
+  # flip on merely because a registry secret exists; ops sets this repo
+  # variable to "true" only after confirming the registry is complete.
+  DEV_WORKLOAD_IDENTITY_CI_TENANT_ACTOR_ENABLED: ${{ vars.DEV_WORKLOAD_IDENTITY_CI_TENANT_ACTOR_ENABLED }}
   DEV_IAP_CLIENT_ID: ${{ vars.DEV_IAP_CLIENT_ID }}
   DEV_PLATFORM_ADMIN_ORIGIN: ${{ vars.DEV_PLATFORM_ADMIN_ORIGIN }}
   DEV_OPS_CONSOLE_ORIGIN: ${{ vars.DEV_OPS_CONSOLE_ORIGIN }}
@@ -666,6 +673,7 @@ jobs:
           controlled_download_secret="${secret_prefix}-controlled-download-signing-secret"
           workload_key_secret="${secret_prefix}-workload-identity-jwt-public-key"
           workload_registry_secret="${secret_prefix}-workload-identity-service-principals"
+          workload_google_registry_secret="${secret_prefix}-workload-identity-google-service-principals"
           if ! gcloud secrets describe "$controlled_download_secret" --project "$project_id" >/dev/null 2>&1; then
             echo "::error::Required secret ${controlled_download_secret} not found in project ${project_id}."
             exit 1
@@ -695,6 +703,20 @@ jobs:
             workload_mounts="${workload_mounts},WORKLOAD_IDENTITY_SERVICE_PRINCIPALS=${workload_registry_secret}:latest"
           else
             echo "::notice::${workload_registry_secret} is absent; dev deploys without a service principal registry."
+          fi
+          # SEC-INTERNAL-KEY-WIF-MIGRATION-20260930: separate registry for
+          # GoogleWorkloadIdentityAdapter (apps/api/src/modules/auth/google-workload-identity.adapter.ts),
+          # which reads WORKLOAD_IDENTITY_GOOGLE_SERVICE_PRINCIPALS -- a
+          # distinct env var from WORKLOAD_IDENTITY_SERVICE_PRINCIPALS above,
+          # which only ServiceWorkloadIdentityAdapter reads. Same
+          # absent-is-safe pattern: InternalKeyMiddleware treats this
+          # adapter's WORKLOAD_IDENTITY_GOOGLE_NOT_CONFIGURED as "fall back
+          # to x-drts-internal-key", so every EXCP_002 caller's dual-send
+          # keeps working whether or not ops has populated this yet.
+          if gcloud secrets describe "$workload_google_registry_secret" --project "$project_id" >/dev/null 2>&1; then
+            workload_mounts="${workload_mounts},WORKLOAD_IDENTITY_GOOGLE_SERVICE_PRINCIPALS=${workload_google_registry_secret}:latest"
+          else
+            echo "::notice::${workload_google_registry_secret} is absent; dev deploys without the Google workload identity service principal registry (SEC-INTERNAL-KEY-WIF-MIGRATION-20260930 callers stay on x-drts-internal-key)."
           fi
           secret_args="${secret_args}${workload_mounts}"
 
@@ -882,7 +904,7 @@ jobs:
           # Two long-lived LISTEN bridges occupy pool clients. Four query slots
           # keep startup and acceptance traffic moving; one API instance keeps
           # rollout demand below the 25-connection dev database limit.
-          env_vars="^@^NODE_ENV=production@DRTS_ENV=development@DRTS_CANDIDATE_SHA=${{ needs.build-push.outputs.candidate_sha }}@AUTH_MODE=explicit@API_PORT=3001@DATABASE_POOL_MAX=6@JWT_ISSUER=${{ steps.api_secrets.outputs.jwt_issuer }}@JWT_AUDIENCE=${{ steps.api_secrets.outputs.jwt_audience }}@AUTH_ALLOWED_ORIGINS=${auth_allowed_origins}@DRTS_INTERNAL_KEY_ENFORCED=false@PLATFORM_ADMIN_ASSISTANT_ENABLED=true@WORKLOAD_IDENTITY_ISSUER=${DEV_WORKLOAD_IDENTITY_ISSUER}@WORKLOAD_IDENTITY_AUDIENCE=${DEV_WORKLOAD_IDENTITY_AUDIENCE}@LLM_GATEWAY_PROVIDER=${{ steps.api_secrets.outputs.llm_provider }}@LLM_GATEWAY_CHAT_MODEL=${{ steps.api_secrets.outputs.llm_chat_model }}@LLM_GATEWAY_SUMMARIZER_MODEL=${{ steps.api_secrets.outputs.llm_summarizer_model }}@MAP_PROVIDER_MODE=${{ steps.api_secrets.outputs.map_provider_mode }}@MAP_PROVIDER_BACKEND=${{ steps.api_secrets.outputs.map_provider_mode == 'external' && 'google' || 'mock' }}@MAP_PROVIDER_NAME=${{ steps.api_secrets.outputs.map_provider_mode == 'external' && 'google' || 'mock' }}"
+          env_vars="^@^NODE_ENV=production@DRTS_ENV=development@DRTS_CANDIDATE_SHA=${{ needs.build-push.outputs.candidate_sha }}@AUTH_MODE=explicit@API_PORT=3001@DATABASE_POOL_MAX=6@JWT_ISSUER=${{ steps.api_secrets.outputs.jwt_issuer }}@JWT_AUDIENCE=${{ steps.api_secrets.outputs.jwt_audience }}@AUTH_ALLOWED_ORIGINS=${auth_allowed_origins}@DRTS_INTERNAL_KEY_ENFORCED=false@PLATFORM_ADMIN_ASSISTANT_ENABLED=true@WORKLOAD_IDENTITY_ISSUER=${DEV_WORKLOAD_IDENTITY_ISSUER}@WORKLOAD_IDENTITY_AUDIENCE=${DEV_WORKLOAD_IDENTITY_AUDIENCE}@WORKLOAD_IDENTITY_CI_TENANT_ACTOR_ENABLED=${DEV_WORKLOAD_IDENTITY_CI_TENANT_ACTOR_ENABLED:-false}@LLM_GATEWAY_PROVIDER=${{ steps.api_secrets.outputs.llm_provider }}@LLM_GATEWAY_CHAT_MODEL=${{ steps.api_secrets.outputs.llm_chat_model }}@LLM_GATEWAY_SUMMARIZER_MODEL=${{ steps.api_secrets.outputs.llm_summarizer_model }}@MAP_PROVIDER_MODE=${{ steps.api_secrets.outputs.map_provider_mode }}@MAP_PROVIDER_BACKEND=${{ steps.api_secrets.outputs.map_provider_mode == 'external' && 'google' || 'mock' }}@MAP_PROVIDER_NAME=${{ steps.api_secrets.outputs.map_provider_mode == 'external' && 'google' || 'mock' }}"
           # Enable the durable SMTP outbox only with the complete secret set.
           if [[ "${{ steps.api_secrets.outputs.notification_outbox_type }}" == "postgres" ]]; then
             env_vars="${env_vars}@NOTIFICATION_OUTBOX_TYPE=postgres"
