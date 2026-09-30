@@ -12,7 +12,7 @@
 ## Finding history and decision
 
 Continue the existing [C114-COVERAGE.md](../../../tests/e2e/system-remediation/sr-live-map-001/C114-COVERAGE.md)
-F-SESSION-CONTRACT finding; do not replace its earlier F-WIRE, F-RUNTIME or live
+F-SESSION-CONTRACT finding; do not replace its earlier F-WIRE, runtime-binding or live
 verification history. Parent candidate `e3c7ed02701c387d82786bcfd8877e2618851f3b`
 was approved by Claude2 at `2026-09-30T08:10:53Z` and merged in
 [PR #2235](https://github.com/ajoe734/drts-fleet-platform/pull/2235) as the audited
@@ -37,16 +37,16 @@ contract; it cannot silently replace a driver or workforce identity.
 
 ## §0.7 verification and acceptance ledger
 
-| Finding / acceptance | Source and change | Previous → this delivery | Verification / evidence | Remaining limitation |
-| --- | --- | --- | --- | --- |
-| F-SESSION-CONTRACT / route product-contract decision | AuthController.issueToken; JwtAuthService.validateDurableState; decision §§1–3 | Ambiguous product repair request → supported realm paths and precise harness/provisioning split | Static call-path audit at base; existing two-case reproduction and Claude2 same-SHA approval read in full | No auth code changed; valid provisioned sessions still required |
-| Record decision, scope cut, explicit follow-up | SD-DP-20260930-001 | No C114 planning record → named reviewer/operator/owner sequence; no verifier exception or scope expansion | Relative-link/content checks and diff check, final results below | Workforce-proof delivery and invitation provisioning remain Supervisor obligations under parent |
-| Task-scoped commit / push / PR | This branch, decision and original task ledgers | New tracked planning delivery | Final SHA and PR must match local HEAD and remote; publication results below | Draft hold until canonical disposition is written; CI/review/merge are separate |
-| Update parent concrete next step | Canonical parent note and helper resolved_parent_* metadata | Commands attempted → rejected by dispatch guard | Active release CLI: parent note exit 1, own assign exit 1; exact errors and operator commands below | Machine-truth parent update is pending; this is not full helper completion |
-| Parent service_area_live_decisions_for_real_taiwan_addresses | Original C114 ledger / service-area evaluator / V0049 | Pending → pending | Latest hosted parent run 36686169334 completed failure | Real Google + same-SHA deployed product evidence absent |
-| Parent location_freshness_live_states | Original ledger / DriverHeartbeatController | Pending → pending | Current GitHub vars lack DRTS_LIVE_MAP_TEST_DRIVER_ID; no live calls here | Isolated driver, valid binding, actual 95s wait and cleanup pending |
-| Parent browser_map_render_live | Original ledger / live browser spec | Pending → pending | Current allowlist contains only API + ops origins | Hosted imagery/screenshots and Google origins pending |
-| Parent authorization_gate_and_allowed_targets_enforced | Existing workflow / session bootstrap / evidence gate | Fail-closed parent preflight → unchanged | Parent run failed before WIF/session/provider/coverage/browser; no passing skip claimed | Same-candidate hosted evidence required |
+| Finding / acceptance                                         | Source and change                                                              | Previous → this delivery                                                                                   | Verification / evidence                                                                                   | Remaining limitation                                                                            |
+| ------------------------------------------------------------ | ------------------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------- |
+| F-SESSION-CONTRACT / route product-contract decision         | AuthController.issueToken; JwtAuthService.validateDurableState; decision §§1–3 | Ambiguous product repair request → supported realm paths and precise harness/provisioning split            | Static call-path audit at base; existing two-case reproduction and Claude2 same-SHA approval read in full | No auth code changed; valid provisioned sessions still required                                 |
+| Record decision, scope cut, explicit follow-up               | SD-DP-20260930-001                                                             | No C114 planning record → named reviewer/operator/owner sequence; no verifier exception or scope expansion | Relative-link/content checks and diff check, final results below                                          | Workforce-proof delivery and invitation provisioning remain Supervisor obligations under parent |
+| Task-scoped commit / push / PR                               | This branch, decision and original task ledgers                                | New tracked planning delivery                                                                              | Final SHA and PR must match local HEAD and remote; publication results below                              | Draft hold until canonical disposition is written; CI/review/merge are separate                 |
+| Update parent concrete next step                             | Canonical parent note and helper resolved*parent*\* metadata                   | Commands attempted → rejected by dispatch guard                                                            | Active release CLI: parent note exit 1, own assign exit 1; exact errors and operator commands below       | Machine-truth parent update is pending; this is not full helper completion                      |
+| Parent service_area_live_decisions_for_real_taiwan_addresses | Original C114 ledger / service-area evaluator / V0049                          | Pending → pending                                                                                          | Latest hosted parent run 36686169334 completed failure                                                    | Real Google + same-SHA deployed product evidence absent                                         |
+| Parent location_freshness_live_states                        | Original ledger / DriverHeartbeatController                                    | Pending → pending                                                                                          | Current GitHub vars lack DRTS_LIVE_MAP_TEST_DRIVER_ID; no live calls here                                 | Isolated driver, valid binding, actual 95s wait and cleanup pending                             |
+| Parent browser_map_render_live                               | Original ledger / live browser spec                                            | Pending → pending                                                                                          | Current allowlist contains only API + ops origins                                                         | Hosted imagery/screenshots and Google origins pending                                           |
+| Parent authorization_gate_and_allowed_targets_enforced       | Existing workflow / session bootstrap / evidence gate                          | Fail-closed parent preflight → unchanged                                                                   | Parent run failed before WIF/session/provider/coverage/browser; no passing skip claimed                   | Same-candidate hosted evidence required                                                         |
 
 ## Verification observations (2026-09-30)
 
@@ -59,8 +59,10 @@ contract; it cannot silently replace a driver or workforce identity.
   This is historical parent CI, not CI for this helper.
 - `gh run list --workflow live-entry-map-acceptance.yml --limit 3`: exit 0;
   latest run `36686169334` completed failure at the original candidate. Its
-  failed preflight / skipped downstream steps are also in the reviewed parent
-  finding; no new hosted run was dispatched by this helper.
+  jobs/steps were independently read with `gh run view 36686169334 --json
+headSha,conclusion,jobs` (exit 0): preflight failed; WIF, sessions, provider,
+  coverage and browser skipped; run-status step failed. No new hosted run was
+  dispatched by this helper.
 - Read-only `gh variable list`: exit 0; `DRTS_LIVE_MAP_TEST_AUTHORIZED=true`,
   API and ops origins present, Google origins and TEST_DRIVER_ID absent.
   DEV_GCP project/region remain `drts-dev-devcc-20260825` / `us-central1`.
@@ -109,8 +111,35 @@ parent must remain blocked with its old candidate until explicit reviewer
 disposition. Any newly discovered product prerequisite must be recorded under
 the parent or an assigned dependency before execution, not left only in prose.
 
+`tools/development-orchestrator/github_bus.py` automatically makes a draft PR
+ready once `handoff` locks its candidate. Therefore this helper must retain an
+owner checkpoint and defer handoff until the metadata/parent note have actually
+been written. A handoff message asking to keep the PR draft cannot enforce the
+hold. After operator verification, the owner can hand off the unchanged full
+published SHA and branch to Claude2; do not call `done`.
+
 ## Publication and final checks
 
-Pending final content/link checks, anchor publication and candidate PR. Exact
-candidate SHA, PR head comparison and machine-status outcome will be appended
-before handoff; no completion or live acceptance is claimed here.
+- Anchor `4c212bc6d085da139a4cc08eea6814283b22894c` committed all three task-owned
+  documents with owner/task/reviewer trailers and was normally pushed (exit 0).
+- [Draft PR #2236](https://github.com/ajoe734/drts-fleet-platform/pull/2236)
+  targets `dev`; initial PR head matched that anchor. The subsequent evidence and
+  formatting commit remains an owner checkpoint until the operator action.
+  Final full published SHA/head comparison is recorded through the active CLI
+  in this task's status, avoiding a self-referential commit hash in this file.
+- Scoped `pnpm dlx prettier@3.8.2 --check <decision> <helper-artifact>`: exit 0.
+  Version matches the lockfile. Shared `pnpm exec prettier` was unavailable;
+  standalone formatting did not change dependencies or the lockfile. Original
+  parent tables were left as-is to preserve the finding history.
+- Content/reference audit: exit 0; 21 relative links resolve, proposed disposition
+  JSON is valid and keeps the parent blocked, operator commands pass `bash -n`
+  without execution, and the original parent ledger after the new note matches
+  the base byte-for-byte. Log: `.local/c114-planning/content-checks.log`.
+- `git diff --check`: exit 0. No new product tests were added for this planning
+  change. Existing Vitest reproduction remains **not executed**, as recorded
+  above. Hosted checks must be read at the final pushed SHA; draft integration
+  skips are not full test/acceptance results.
+- Handoff remains blocked on canonical metadata/parent-note writes. The owner
+  must verify those fields and local/remote/PR equality before issuing the usual
+  `CANDIDATE_SHA`, `CANDIDATE_BRANCH`, `PR_URL` handoff to Claude2. No `done`,
+  parent resume, same-SHA approval or live acceptance is claimed by this helper.
