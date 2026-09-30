@@ -448,3 +448,50 @@ unconditional default. Callers #3, #5, #7, #8, #9 are narrow-purpose and get
 a real reduction in blast radius: a compromised or misconfigured credential
 for any one of them can no longer be replayed against routes outside its
 declared purpose.
+
+### 7.4 CI fix (2026-09-30, same task, third session): stale synchronous callers of `validateInternalKey`
+
+PR #2243 (candidate `fdbb36d9f`) went red on GitHub: `unit`, `Product smoke
+acceptance`, `Smoke acceptance`, and the `ci-integ` aggregate gate all failed
+with the same root cause, confirmed from each job's own log
+(`gh run view ... --log-failed`) before touching anything.
+
+`2d5f3ad30` (§7.1) converted `validateInternalKey` to `async` (it now
+`await`s `GoogleWorkloadIdentityAdapter.verifyServicePrincipal`) and made
+`InternalKeyMiddleware.use` `await` it. `apps/api/tests/unit/auth-bootstrap.test.ts`
+was updated for this at the time, but two other call sites were not:
+`tests/unit/internal-key.middleware.test.ts` and
+`tests/integration/internal-key-rotation-retirement.integration.test.ts`
+(both at repo root, outside `apps/api/`) still called `validateInternalKey`
+and `middleware.use` synchronously (`expect(() => validateInternalKey(...)).toThrow()`
+/ `.not.toThrow()`). Calling an async function that way never throws
+synchronously -- it returns a rejected promise instead -- so every assertion
+of that shape either read as "didn't throw" or surfaced as an unhandled
+rejection, exactly matching the CI logs' `AssertionError: expected function
+to throw an error, but it didn't` / `expected undefined to be 401` and
+`⎯⎯⎯⎯ Unhandled Rejection ⎯⎯⎯⎯` entries.
+
+Fix: converted the affected `it(...)` bodies to `async` and switched each
+call site to `await`, using `await expect(...).resolves.not.toThrow()` /
+`.rejects.toThrow(...)` where the call itself was the assertion target,
+and `await` before existing try/catch blocks where the test captures the
+thrown `ApiRequestError` by hand. `requireScopedInternalKey`/`requireInternalKey`
+(a separate, still-synchronous function used for scoped keys like
+`x-drts-referral-handoff-key`) were left untouched -- confirmed by reading
+`apps/api/src/common/auth/internal-key.middleware.ts` that only
+`validateInternalKey` and `InternalKeyMiddleware.use` became `async`. No
+production code changed in this fix.
+
+This candidate's `write_scopes` does not literally list `tests/unit/` or
+`tests/integration/` at repo root. Per `AI_COLLABORATION_GUIDE.md` §0.7,
+modifying a shared auth function requires searching all affected callers and
+tests; these two files are exactly that search's result for the async
+conversion this same task made inside its declared scope
+(`apps/api/src/common/auth/internal-key.middleware.ts`), and the fix is
+mechanical (add `await`) with no new design decision, so it is treated as
+the same in-scope coordination already established by §7.1/§7.3's precedent
+rather than a new scope-expansion request.
+
+| Finding / acceptance key | Source & fix location | Before → after | Command, exit code, evidence | Unverified / limits |
+| --- | --- | --- | --- | --- |
+| CI regression on candidate `fdbb36d9f` (blocks `excp_002_removed_and_deploy_dev_green`'s prerequisite: candidate CI must be green) | `tests/unit/internal-key.middleware.test.ts`, `tests/integration/internal-key-rotation-retirement.integration.test.ts`: made 8 `it()` bodies `async` and `await`ed their `validateInternalKey`/`middleware.use` calls | Before (`fdbb36d9f` on PR #2243): GitHub `unit` job 7 failed / 4251 passed; `Product smoke acceptance` 7 failed / 4251 passed; `Smoke acceptance` and `ci-integ` failed as downstream gates -- all citing the same two test files. After (local, same source tree): `pnpm exec vitest run tests/unit/internal-key.middleware.test.ts tests/integration/internal-key-rotation-retirement.integration.test.ts` → 2 files / 14 tests passed. | `pnpm --filter @drts/contracts build` (exit 0); `apps/api: pnpm exec tsc --noEmit -p tsconfig.json` (exit 0, clean); `pnpm exec vitest run tests/unit/internal-key.middleware.test.ts tests/integration/internal-key-rotation-retirement.integration.test.ts` (exit 0, 2/2 files, 14/14 tests); `pnpm test:unit` full root suite (390 passed / 4 failed / 12 skipped test files) -- the 4 failures are all pre-existing and unrelated: 3 explicitly require `DATABASE_URL`/`CONCURRENCY_TEST_DATABASE_URL` (`tests/unit/system-remediation/sr-qa-concurrency-001/*`, `sr-qa-dispatch-001/dispatch-db-persistence.test.ts`), consistent with this VM's no-Postgres restriction, and 1 (`tests/unit/db-apply.test.ts` legacy-migration-replay case) hit this sandbox's 180s test timeout on a slow migration replay, unrelated to internal-key/auth code and not present in the GitHub CI failure list for this candidate. | Did not observe the GitHub-hosted rerun of this fix (no push-triggered rerun observed from this session before recording); the evidence above is the exact CI failure transcript plus a clean local rerun of the same two files against the same source tree. Full DB-backed `sr-qa-*`/`db-apply` suites and a real dev deploy remain out of reach from this sandbox, unchanged from §7.2/§7.3's limitations. |

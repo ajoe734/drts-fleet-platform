@@ -13,13 +13,13 @@ afterEach(() => {
 });
 
 describe("validateInternalKey strict environment behavior", () => {
-  it("fails closed for bootstrap-header direct paths in staging", () => {
+  it("fails closed for bootstrap-header direct paths in staging", async () => {
     process.env.APP_ENV = "staging";
     process.env.DRTS_INTERNAL_KEY = "12345678901234567890123456789012";
 
     let error: ApiRequestError | null = null;
     try {
-      validateInternalKey(
+      await validateInternalKey(
         {
           method: "GET",
           originalUrl: "/api/platform-admin/tenants",
@@ -38,11 +38,11 @@ describe("validateInternalKey strict environment behavior", () => {
     expect(error?.code).toBe("INTERNAL_KEY_REQUIRED");
   });
 
-  it("continues to allow bearer-authenticated requests without internal key", () => {
+  it("continues to allow bearer-authenticated requests without internal key", async () => {
     process.env.APP_ENV = "staging";
     process.env.DRTS_INTERNAL_KEY = "12345678901234567890123456789012";
 
-    expect(() =>
+    await expect(
       validateInternalKey(
         {
           method: "GET",
@@ -53,16 +53,16 @@ describe("validateInternalKey strict environment behavior", () => {
         },
         process.env.DRTS_INTERNAL_KEY,
       ),
-    ).not.toThrow();
+    ).resolves.not.toThrow();
   });
 
-  it("does not treat a workload assertion header as a direct internal-key bypass", () => {
+  it("does not treat a workload assertion header as a direct internal-key bypass", async () => {
     process.env.APP_ENV = "staging";
     delete process.env.DRTS_INTERNAL_KEY;
 
     let error: ApiRequestError | null = null;
     try {
-      validateInternalKey(
+      await validateInternalKey(
         {
           method: "POST",
           originalUrl: "/api/auth/token",
@@ -79,13 +79,13 @@ describe("validateInternalKey strict environment behavior", () => {
     expect(error?.code).toBe("INTERNAL_KEY_NOT_CONFIGURED");
   });
 
-  it("does not bypass internal key enforcement for non-token routes that carry a workload assertion header", () => {
+  it("does not bypass internal key enforcement for non-token routes that carry a workload assertion header", async () => {
     process.env.APP_ENV = "staging";
     process.env.DRTS_INTERNAL_KEY = "12345678901234567890123456789012";
 
     let error: ApiRequestError | null = null;
     try {
-      validateInternalKey(
+      await validateInternalKey(
         {
           method: "GET",
           originalUrl: "/api/platform-admin/tenants",
@@ -102,7 +102,7 @@ describe("validateInternalKey strict environment behavior", () => {
     expect(error?.code).toBe("INTERNAL_KEY_REQUIRED");
   });
 
-  it("middleware still fails closed in staging even when enforcement flag is false", () => {
+  it("middleware still fails closed in staging even when enforcement flag is false", async () => {
     process.env.APP_ENV = "staging";
     process.env.DRTS_INTERNAL_KEY_ENFORCED = "false";
     process.env.DRTS_INTERNAL_KEY = "12345678901234567890123456789012";
@@ -110,7 +110,7 @@ describe("validateInternalKey strict environment behavior", () => {
     const middleware = new InternalKeyMiddleware();
     const next = vi.fn();
 
-    expect(() =>
+    await expect(
       middleware.use(
         {
           method: "GET",
@@ -124,11 +124,11 @@ describe("validateInternalKey strict environment behavior", () => {
         {},
         next,
       ),
-    ).toThrowError(ApiRequestError);
+    ).rejects.toThrowError(ApiRequestError);
     expect(next).not.toHaveBeenCalled();
   });
 
-  it("middleware allows local requests when DRTS_ENV=development disables enforcement", () => {
+  it("middleware allows local requests when DRTS_ENV=development disables enforcement", async () => {
     process.env.NODE_ENV = "production";
     process.env.DRTS_ENV = "development";
     process.env.DRTS_INTERNAL_KEY_ENFORCED = "false";
@@ -137,7 +137,7 @@ describe("validateInternalKey strict environment behavior", () => {
     const middleware = new InternalKeyMiddleware();
     const next = vi.fn();
 
-    expect(() =>
+    await expect(
       middleware.use(
         {
           method: "GET",
@@ -151,11 +151,11 @@ describe("validateInternalKey strict environment behavior", () => {
         {},
         next,
       ),
-    ).not.toThrow();
+    ).resolves.not.toThrow();
     expect(next).toHaveBeenCalledOnce();
   });
 
-  it("middleware bypasses local enforcement when DRTS_ENV=development sets flag false even with mounted key", () => {
+  it("middleware bypasses local enforcement when DRTS_ENV=development sets flag false even with mounted key", async () => {
     process.env.NODE_ENV = "production";
     process.env.DRTS_ENV = "development";
     process.env.DRTS_INTERNAL_KEY_ENFORCED = "false";
@@ -164,7 +164,7 @@ describe("validateInternalKey strict environment behavior", () => {
     const middleware = new InternalKeyMiddleware();
     const next = vi.fn();
 
-    expect(() =>
+    await expect(
       middleware.use(
         {
           method: "GET",
@@ -178,17 +178,17 @@ describe("validateInternalKey strict environment behavior", () => {
         {},
         next,
       ),
-    ).not.toThrow();
+    ).resolves.not.toThrow();
     expect(next).toHaveBeenCalledOnce();
   });
 
-  it("still requires an internal key for token exchange when Dev middleware enforcement is disabled", () => {
+  it("still requires an internal key for token exchange when Dev middleware enforcement is disabled", async () => {
     process.env.NODE_ENV = "production";
     process.env.DRTS_ENV = "development";
     process.env.DRTS_INTERNAL_KEY_ENFORCED = "false";
     process.env.DRTS_INTERNAL_KEY = "12345678901234567890123456789012";
 
-    expect(() =>
+    await expect(
       validateInternalKey(
         {
           method: "POST",
@@ -201,6 +201,6 @@ describe("validateInternalKey strict environment behavior", () => {
         },
         process.env.DRTS_INTERNAL_KEY,
       ),
-    ).toThrowError(ApiRequestError);
+    ).rejects.toThrowError(ApiRequestError);
   });
 });
