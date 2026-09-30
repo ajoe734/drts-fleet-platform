@@ -83,6 +83,18 @@ describe.each(factories)(
           expect(() => factory(database)).toThrow("SMTP_CONFIGURATION_INVALID");
           vi.stubEnv(key, undefined);
         }
+        for (const missing of Object.keys(remote).filter(
+          (key) => key !== "REMOTE_SMTP_RECIPIENT_ALLOWLIST",
+        )) {
+          for (const [key, value] of Object.entries(remote))
+            vi.stubEnv(key, value);
+          for (const value of [undefined, "", " "]) {
+            vi.stubEnv(missing, value);
+            expect(() => factory(database)).toThrow(
+              "SMTP_CONFIGURATION_INVALID",
+            );
+          }
+        }
         expect(connect).not.toHaveBeenCalled();
       },
     );
@@ -109,20 +121,25 @@ describe.each(factories)(
       expect(connect).not.toHaveBeenCalled();
     });
 
-    it("uses the injected database for explicit postgres even when a directory exists", async () => {
-      for (const [key, value] of Object.entries(remote)) vi.stubEnv(key, value);
-      vi.stubEnv("NOTIFICATION_OUTBOX_TYPE", "postgres");
-      vi.stubEnv("NOTIFICATION_OUTBOX_DIRECTORY", directory);
-      const service = factory(database);
-      expect(service).toBeInstanceOf(NotificationDeliveryService);
-      expect(service!.availability()).toBe("available");
-      // Mock only the external connection boundary; the factory, service and
-      // PostgresMailOutbox are real. This does not claim PostgreSQL integration.
-      await expect(
-        service!.get("tenant-fixture", "delivery-fixture"),
-      ).rejects.toThrow("database_boundary_reached");
-      expect(connect).toHaveBeenCalledTimes(1);
-    });
+    it.each([false, true])(
+      "uses the injected database for postgres with directory configured=%s",
+      async (withDirectory) => {
+        for (const [key, value] of Object.entries(remote))
+          vi.stubEnv(key, value);
+        vi.stubEnv("NOTIFICATION_OUTBOX_TYPE", "postgres");
+        if (withDirectory)
+          vi.stubEnv("NOTIFICATION_OUTBOX_DIRECTORY", directory);
+        const service = factory(database);
+        expect(service).toBeInstanceOf(NotificationDeliveryService);
+        expect(service!.availability()).toBe("available");
+        // Mock only the external connection boundary; the factory, service and
+        // PostgresMailOutbox are real. This does not claim PostgreSQL integration.
+        await expect(
+          service!.get("tenant-fixture", "delivery-fixture"),
+        ).rejects.toThrow("database_boundary_reached");
+        expect(connect).toHaveBeenCalledTimes(1);
+      },
+    );
 
     it("fails closed when postgres was requested but the database is disabled", () => {
       vi.stubEnv("NOTIFICATION_OUTBOX_TYPE", "postgres");
