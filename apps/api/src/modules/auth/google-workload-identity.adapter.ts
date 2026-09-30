@@ -5,6 +5,7 @@ import { Injectable, Logger } from "@nestjs/common";
 import * as jwt from "jsonwebtoken";
 
 import { ApiRequestError } from "../../common/api-envelope";
+import { matchesScope } from "../../common/auth/internal-key-exception-registry";
 import { detectAuthEnvironment } from "../../config/auth-startup-config";
 import { IdentityRepository } from "../identity/identity.repository";
 
@@ -51,6 +52,12 @@ export interface RegisteredGooglePrincipal {
   scopes?: string[] | null;
   allowedTokenAudiences: string[];
   ciTenantActorGrants?: CiTenantActorGrant[] | null;
+  // Per-principal least-privilege route allowlist, using the same
+  // "METHOD path" scope pattern DSL (and matcher) as
+  // `InternalKeyExceptionMetadata.scope` -- a verified principal is only
+  // granted bypass of `InternalKeyMiddleware` for routes it is explicitly
+  // registered for, not every route the middleware guards.
+  routeScopes: string[];
 }
 
 export interface ResolvedGoogleWorkloadIdentity {
@@ -233,6 +240,25 @@ export class GoogleWorkloadIdentityAdapter {
       );
     }
 
+    const routeScopes = unique(principal.routeScopes);
+    const routeAllowed = routeScopes.some((pattern) =>
+      matchesScope(pattern, context.requestMethod, context.requestPath),
+    );
+    if (!routeAllowed) {
+      this.logger.warn(
+        `[AUTH_GOOGLE_WORKLOAD_IDENTITY_ROUTE_SCOPE_DENIED] principalId=${principal.principalId} email=${email} route=${context.requestMethod ?? "GET"} ${context.requestPath ?? "*"}`,
+      );
+      throw new ApiRequestError(
+        403,
+        "WORKLOAD_ROUTE_SCOPE_DENIED",
+        "Verified Google workload identity is not authorized for the requested route.",
+        {
+          principalId: principal.principalId,
+          route: `${context.requestMethod ?? "GET"} ${context.requestPath ?? "*"}`,
+        },
+      );
+    }
+
     const replayAccepted =
       await this.identityRepository.consumeWorkloadIdentityAssertion({
         assertionHash: hashAssertion(token),
@@ -321,13 +347,15 @@ export class GoogleWorkloadIdentityAdapter {
         !entry.serviceAccountEmail?.trim() ||
         !entry.principalId?.trim() ||
         !Array.isArray(entry.allowedTokenAudiences) ||
-        entry.allowedTokenAudiences.length === 0,
+        entry.allowedTokenAudiences.length === 0 ||
+        !Array.isArray(entry.routeScopes) ||
+        entry.routeScopes.length === 0,
     );
     if (invalid) {
       throw new ApiRequestError(
         503,
         "WORKLOAD_IDENTITY_GOOGLE_NOT_CONFIGURED",
-        "Google workload identity service principal registry entries must declare serviceAccountEmail, principalId, and allowedTokenAudiences.",
+        "Google workload identity service principal registry entries must declare serviceAccountEmail, principalId, allowedTokenAudiences, and routeScopes.",
       );
     }
 

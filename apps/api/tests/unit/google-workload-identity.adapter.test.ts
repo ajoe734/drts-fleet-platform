@@ -58,6 +58,7 @@ function mockGoogleJwks() {
 function configureRegistry(
   overrides?: Partial<{
     allowedTokenAudiences: string[];
+    routeScopes: string[];
     ciTenantActorGrants: Array<{
       tenantId: string;
       actorType: string;
@@ -74,6 +75,7 @@ function configureRegistry(
       roles: ["control_plane_proxy"],
       scopes: ["proxy:forward"],
       allowedTokenAudiences: overrides?.allowedTokenAudiences ?? [AUDIENCE],
+      routeScopes: overrides?.routeScopes ?? ["* *"],
       ciTenantActorGrants: overrides?.ciTenantActorGrants ?? [],
     },
   ]);
@@ -188,6 +190,48 @@ describe("GoogleWorkloadIdentityAdapter", () => {
     await expect(
       adapter.verifyServicePrincipal({ "x-drts-google-id-token": token }, {}),
     ).rejects.toMatchObject({ code: "WORKLOAD_ASSERTION_REPLAYED" });
+  });
+
+  it("rejects a registered principal whose route scope does not cover the requested route", async () => {
+    // Least-privilege narrowing: a narrow-purpose principal (e.g. a referral
+    // embed proxy only ever granted `/api/partner/*`) must not be able to
+    // ride a verified assertion into an unrelated route the middleware
+    // guards, even though signature/issuer/audience/replay all check out.
+    configureRegistry({ routeScopes: ["POST partner/ingress/handoff"] });
+    const token = signGoogleToken();
+    await expect(
+      adapter.verifyServicePrincipal(
+        { "x-drts-google-id-token": token },
+        { requestMethod: "GET", requestPath: "/api/tenant/passengers" },
+      ),
+    ).rejects.toMatchObject({ code: "WORKLOAD_ROUTE_SCOPE_DENIED" });
+  });
+
+  it("allows a registered principal on a route matching its declared route scope", async () => {
+    configureRegistry({ routeScopes: ["POST partner/ingress/handoff"] });
+    const token = signGoogleToken();
+    const resolved = await adapter.verifyServicePrincipal(
+      { "x-drts-google-id-token": token },
+      { requestMethod: "POST", requestPath: "/api/partner/ingress/handoff" },
+    );
+    expect(resolved.principalId).toBe(PRINCIPAL_ID);
+  });
+
+  it("rejects a registry entry missing routeScopes as not-configured, not a silent bypass", async () => {
+    process.env.WORKLOAD_IDENTITY_GOOGLE_SERVICE_PRINCIPALS = JSON.stringify([
+      {
+        serviceAccountEmail: SERVICE_ACCOUNT_EMAIL,
+        principalId: PRINCIPAL_ID,
+        allowedTokenAudiences: [AUDIENCE],
+      },
+    ]);
+    const token = signGoogleToken();
+    await expect(
+      adapter.verifyServicePrincipal(
+        { "x-drts-google-id-token": token },
+        { requestMethod: "GET", requestPath: "/api/tenant/passengers" },
+      ),
+    ).rejects.toMatchObject({ code: "WORKLOAD_IDENTITY_GOOGLE_NOT_CONFIGURED" });
   });
 });
 

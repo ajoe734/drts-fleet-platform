@@ -465,6 +465,7 @@ describe("auth token issuance", () => {
         serviceAccountEmail,
         principalId: "svc-deploy-dev-ci",
         allowedTokenAudiences: [audience],
+        routeScopes: ["POST auth/token"],
         ciTenantActorGrants: [
           {
             tenantId: "tenant-demo-001",
@@ -583,6 +584,7 @@ describe("auth token issuance", () => {
         serviceAccountEmail,
         principalId: "svc-deploy-dev-ci",
         allowedTokenAudiences: [audience],
+        routeScopes: ["POST auth/token"],
         ciTenantActorGrants: [
           {
             tenantId: "tenant-demo-001",

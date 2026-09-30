@@ -408,3 +408,43 @@ triggers on `push: publish/v*` or manual dispatch, not on this task branch).
 `callers_migrated_to_wif_assertion` is satisfied in the sense that every
 known caller now sends and can be verified over the WIF path; it is not yet
 the caller's *only* credential.
+
+### 7.3 Reopen fix (2026-09-30): per-principal route scope enforcement
+
+Reviewer (`Claude2`) reopened the prior candidate (`REVIEWED_SHA=2d5f3ad30`)
+carrying forward Supervisor's unresolved pre-handoff finding: a verified
+Google-signed principal was granted blanket bypass of
+`InternalKeyMiddleware` for every route it guards, not just the routes that
+principal's own purpose covers -- `GoogleWorkloadIdentityAdapter` accepted
+`context.requestPath`/`requestMethod` but never checked them against
+anything before returning success.
+
+| Finding / acceptance key | Source & fix location | Before → after | Command, exit code, evidence | Unverified / limits |
+| --- | --- | --- | --- | --- |
+| Reopen finding: registered principal not scope-checked against requested route (`callers_migrated_to_wif_assertion`) | `apps/api/src/modules/auth/google-workload-identity.adapter.ts`: added required `routeScopes: string[]` on `RegisteredGooglePrincipal`, enforced via `matchesScope` (imported from `apps/api/src/common/auth/internal-key-exception-registry.ts`, the same "METHOD path" scope-pattern matcher and DSL `INTERNAL_KEY_EXCEPTION_REGISTRY.scope` already uses) right after principal/audience resolution and before replay consumption. Mismatch throws `WORKLOAD_ROUTE_SCOPE_DENIED` (403) and logs `AUTH_GOOGLE_WORKLOAD_IDENTITY_ROUTE_SCOPE_DENIED`. `loadRegistry()` now also rejects any registry entry missing a non-empty `routeScopes` array as `WORKLOAD_IDENTITY_GOOGLE_NOT_CONFIGURED` (fails closed, same as the existing `allowedTokenAudiences` check) instead of defaulting an unscoped principal to `* *`. | Old candidate (`2d5f3ad30`): a principal registered with `scopes:['proxy:forward']` (the adapter's own referral-embed-web-style test fixture) verified successfully against *any* route/method, including ones outside `InternalKeyMiddleware`'s health/auth-token exclusions. New candidate: the same principal, now additionally declaring `routeScopes:["POST partner/ingress/handoff"]`, is rejected with `WORKLOAD_ROUTE_SCOPE_DENIED` when the request is `GET /api/tenant/passengers`, and still accepted on `POST /api/partner/ingress/handoff`. | `pnpm --filter @drts/contracts build` then, from `apps/api`: `pnpm exec tsc --noEmit -p tsconfig.json` (exit 0, clean); `pnpm exec vitest run tests/unit/google-workload-identity.adapter.test.ts tests/unit/auth-bootstrap.test.ts` (exit 0, 110/110 passed, includes the 3 new regression cases: deny out-of-scope route, allow in-scope route, reject a registry entry missing `routeScopes`); `pnpm exec vitest run tests/unit` (exit 0, full apps/api unit suite, 119 files / 1164 tests passed); `pnpm exec eslint` on the 3 touched files (clean -- the one pre-existing `no-unused-vars` hit on `tests/unit/auth-bootstrap.test.ts:490` was confirmed present before this change via `git stash`/`eslint` on the unmodified file, not introduced here). | Not run: full DB-backed integration suite (needs Postgres, unavailable in this sandbox) and a real dev deploy (no trigger path from this branch) -- same limitation recorded in §7.2 and unchanged by this fix. Recommended `routeScopes` values for ops to set per caller when populating `WORKLOAD_IDENTITY_GOOGLE_SERVICE_PRINCIPALS` are documented below (§7.3.1); this candidate does not and cannot populate that env var itself. |
+
+#### 7.3.1 Recommended `routeScopes` per caller (for ops to apply when populating the registry)
+
+Derived from each caller's actual call sites (§6 inventory), using the same
+scope-pattern syntax as `INTERNAL_KEY_EXCEPTION_REGISTRY.scope`:
+
+| # | Caller | Recommended `routeScopes` |
+| - | ------ | -------------------------- |
+| 1 | passenger-web control-plane proxy | `["* *"]` -- generic pass-through proxy, forwards arbitrary API routes by design |
+| 2 | enterprise-dispatch-web control-plane proxy | `["* *"]` -- same |
+| 3 | enterprise-dispatch-web tenant session verify (`enterprise-session.server.ts`) | `["* auth/session"]` -- only ever calls `/api/auth/session` |
+| 4 | partner-booking-web control-plane proxy | `["* *"]` -- generic pass-through proxy |
+| 5 | partner-booking-web API client (`api-client.ts`) | `["* partner/*"]` -- only calls `/api/partner/*` |
+| 6 | tenant-console-web control-plane proxy | `["* *"]` -- generic pass-through proxy |
+| 7 | referral-embed-web `embed-api.ts` | `["* partner/*"]` -- only calls `/api/partner/*` |
+| 8 | referral-embed-web `embed-booking-api.ts` | `["* partner/*"]` -- only calls `/api/partner/referral/passenger/*` |
+| 9 | deploy-dev CI operational acceptance | `["POST auth/token"]` -- only ever calls `POST /api/auth/token` |
+
+Callers #1, #2, #4, #6 are generic reverse proxies that legitimately forward
+arbitrary API traffic, so `* *` reflects their real purpose rather than an
+omitted narrowing -- the enforcement change's value for these four is that
+their scope is now an explicit, auditable declaration instead of an
+unconditional default. Callers #3, #5, #7, #8, #9 are narrow-purpose and get
+a real reduction in blast radius: a compromised or misconfigured credential
+for any one of them can no longer be replayed against routes outside its
+declared purpose.
