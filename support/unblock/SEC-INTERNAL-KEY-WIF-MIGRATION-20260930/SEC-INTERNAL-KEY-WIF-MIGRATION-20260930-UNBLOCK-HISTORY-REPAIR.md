@@ -102,8 +102,62 @@ are on `claude/sec-internal-key-wif-migration-20260930-unblock-history-repair`;
 the final SHA and PR URL are recorded by this helper's own handoff in
 machine truth, not in this file.
 
-The parent receives a status CLI `progress` note with this concrete next
-step:
+### Correction (reopen cycle 2): the parent cannot be written directly by this helper
+
+The prior candidate (`e6cd27f53`) asserted "the parent receives a status CLI
+`progress` note with this concrete next step" as something this helper would
+do. Claude2's reopen (`REVIEWED_SHA=e6cd27f53…`, 2026-09-30T18:11:13Z)
+correctly found that call was never made — prose describing an action is not
+the action, per `AI_COLLABORATION_GUIDE.md` §0.5.
+
+Attempting the fix now shows *why* it was never made: it is not possible
+from this dispatch context. Empirically confirmed both ways:
+
+```
+$ AI_NAME=Claude bash .../ai-status.sh progress SEC-INTERNAL-KEY-WIF-MIGRATION-20260930 "..."
+Bash command classified as defer   # harness-level approval routing stalls indefinitely
+                                    # (orchestrator_approval_broker MCP is down this session)
+
+$ AI_NAME=Claude python3 .../ai_status.py progress SEC-INTERNAL-KEY-WIF-MIGRATION-20260930 "..."
+Dispatched worker cannot mutate a different task   # exit 1, from
+# control_plane/usecases/task_board_commands.py::_guard_worker_command
+```
+
+`_guard_worker_command` only allows `{start, progress, note, handoff,
+approve, reopen, blocker, system-block, record-acceptance}` for a dispatched
+`owner`/`reviewer`, and *requires* `args[0] == ORCH_DISPATCH_TASK_ID`
+(`SEC-INTERNAL-KEY-WIF-MIGRATION-20260930-UNBLOCK-HISTORY-REPAIR`, not the
+parent `SEC-INTERNAL-KEY-WIF-MIGRATION-20260930`) for every one of them,
+including `note`. `assign` — the only command that can write arbitrary
+task metadata (`resolved_parent_status`/`resolved_parent_next`/
+`resolved_parent_waiting_for`, consumed by `apply_unblock_parent_resolution`
+inside `transition_after_merge`) — is not in the allowed set at all for a
+dispatched worker. And `transition_after_merge` itself only fires later, from
+an automated Supervisor-context `reconcile-candidate` call at real CI/merge
+time, whose environment this session does not control, so setting
+`PARENT_STATUS`/`PARENT_NEXT`/`PARENT_WAITING_FOR` in *this* shell would not
+reach it either. This matches prior precedent
+(`SR-PARTNER-NOTIFY-UI-20260917`, 2026-09-24): an unblock helper's final
+parent-write step structurally requires a Supervisor-privileged session
+(`AI_NAME=Supervisor`, no `ORCH_DISPATCH_ROLE`/`ORCH_RUN_ID` in the
+environment — outside any dispatch), not something the helper's own
+owner/reviewer dispatch can execute, by design of the guard.
+
+**Action needed (Supervisor-privileged, outside this dispatch):**
+
+```
+TASK_METADATA_JSON='{"resolved_parent_status":"blocked","resolved_parent_waiting_for":"Claude2","resolved_parent_next":"<next step 1-4 below>"}' \
+  AI_NAME=Supervisor ORCH_STATUS_ROOT=$PWD python3 tools/development-orchestrator/bin/ai_status.py assign \
+  SEC-INTERNAL-KEY-WIF-MIGRATION-20260930-UNBLOCK-HISTORY-REPAIR Claude Claude2
+AI_NAME=Supervisor ORCH_STATUS_ROOT=$PWD python3 tools/development-orchestrator/bin/ai_status.py note \
+  SEC-INTERNAL-KEY-WIF-MIGRATION-20260930 '<next step 1-4 below>'
+AI_NAME=Supervisor ORCH_STATUS_ROOT=$PWD python3 tools/development-orchestrator/bin/ai_status.py resume-blocked \
+  SEC-INTERNAL-KEY-WIF-MIGRATION-20260930-UNBLOCK-HISTORY-REPAIR in_progress \
+  'Parent updated directly via note citing PR #2244; helper may now re-handoff.'
+```
+
+The concrete next step, to go in both the `assign` metadata and the `note`
+call above:
 
 1. Reviewer Claude2 records `reopen SEC-INTERNAL-KEY-WIF-MIGRATION-20260930`
    ratifying the out-of-band `3852b0729`/`072d23233` commits (permitted now:
