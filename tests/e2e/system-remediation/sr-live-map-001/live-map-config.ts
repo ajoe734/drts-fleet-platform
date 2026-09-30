@@ -45,12 +45,6 @@ export function validateLiveMapGate(env: LiveEnv) {
   ) {
     throw new Error("Candidate must be a full SHA matching the workflow SHA");
   }
-  const deployedSha = required(env, "DRTS_LIVE_MAP_DEPLOYED_SHA");
-  if (!/^[a-f0-9]{40}$/.test(deployedSha)) {
-    throw new Error(
-      "DRTS_LIVE_MAP_DEPLOYED_SHA must be the full expected dev deployment SHA",
-    );
-  }
   const allowedTargets = required(env, "DRTS_LIVE_MAP_ALLOWED_TARGETS")
     .split(",")
     .map((value) => origin(value.trim()));
@@ -61,7 +55,8 @@ export function validateLiveMapGate(env: LiveEnv) {
   };
   return {
     candidateSha,
-    deployedSha,
+    // Expected deployment is this candidate; health verifies the observed SHA.
+    deployedSha: candidateSha,
     allowedTargets,
     opsOrigin: requireTarget("DRTS_LIVE_MAP_TEST_ORIGIN"),
     requireTarget,
@@ -80,20 +75,28 @@ export function assertAllowedUrl(url: string, allowedTargets: string[]) {
   }
 }
 
-export function validateCoverageInputs(env: LiveEnv) {
+export const SEEDED_MAP_DRIVER_ID = "drv-demo-002";
+
+export function validateCoverageTargets(env: LiveEnv) {
   const gate = validateLiveMapGate(env);
   const apiOrigin = gate.requireTarget("DRTS_LIVE_MAP_API_ORIGIN");
   assertAllowedUrl("https://maps.googleapis.com", gate.allowedTargets);
   const driverId = required(env, "DRTS_LIVE_MAP_TEST_DRIVER_ID");
-  if (!/^live-map-[a-z0-9-]+$/.test(driverId)) {
+  if (driverId !== SEEDED_MAP_DRIVER_ID) {
     throw new Error(
-      "DRTS_LIVE_MAP_TEST_DRIVER_ID must be a dedicated live-map-* identity",
+      "DRTS_LIVE_MAP_TEST_DRIVER_ID must be the audited offline seed drv-demo-002",
     );
   }
   return {
     ...gate,
     apiOrigin,
     driverId,
+  };
+}
+
+export function validateCoverageInputs(env: LiveEnv) {
+  return {
+    ...validateCoverageTargets(env),
     driverToken: required(env, "DRTS_LIVE_MAP_DRIVER_SESSION_TOKEN"),
     observerToken: required(env, "DRTS_LIVE_MAP_OBSERVER_SESSION_TOKEN"),
     geocodingKey: required(env, "GOOGLE_MAPS_GEOCODING_API_KEY"),

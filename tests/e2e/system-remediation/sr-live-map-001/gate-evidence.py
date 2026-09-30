@@ -5,8 +5,23 @@ from pathlib import Path
 
 
 def verify(root, sha, outcomes, deployed_sha):
+    if deployed_sha != sha:
+        raise ValueError("Runtime deployment must equal the candidate SHA")
     if not all(value == "success" for value in outcomes.values()):
         raise ValueError("All map steps must finish successfully; skip is not pass")
+    deployment = json.loads((root / "evidence-deployment.json").read_text())
+    sessions = json.loads((root / "evidence-sessions.json").read_text())
+    if (deployment.get("candidate_sha") != sha or deployment.get("deployed_sha") != sha
+            or deployment.get("effective_backend") != "google" or deployment.get("status") != "passed"):
+        raise ValueError("Runtime health must prove candidate SHA and Google backend")
+    if sessions.get("candidate_sha") != sha or sessions.get("status") != "passed":
+        raise ValueError("Both per-run sessions must be verified on this candidate")
+    identities = sessions.get("sessions", [])
+    if [(item.get("realm"), item.get("actor_type"), item.get("actor_id"), item.get("scopes")) for item in identities] != [
+        ("driver", "driver_user", "drv-demo-002", ["driver:read"]),
+        ("ops", "ops_user", "live-map-observer", ["regulatory:read"]),
+    ]:
+        raise ValueError("Missing least-scope driver/observer session evidence")
     provider = json.loads((root / "evidence-map.json").read_text())
     coverage = json.loads((root / "evidence-coverage.json").read_text())
     browser = json.loads((root / "evidence-browser.json").read_text())
@@ -44,15 +59,14 @@ def main():
     root.mkdir(parents=True, exist_ok=True)
     sha = os.environ.get("CANDIDATE_SHA", "")
     outcomes = {name: os.environ.get(name, "unknown") for name in [
-        "INSTALL_OUTCOME", "RUNNER_OUTCOME", "COVERAGE_OUTCOME", "BROWSER_OUTCOME"
+        "INSTALL_OUTCOME", "SESSIONS_OUTCOME", "RUNNER_OUTCOME", "COVERAGE_OUTCOME", "BROWSER_OUTCOME"
     ]}
     status = {"candidate_sha": sha, "workflow_sha": os.environ.get("WORKFLOW_SHA"), "status": "failed", "outcomes": outcomes}
     try:
         if len(sha) != 40 or any(c not in "0123456789abcdef" for c in sha) or status["workflow_sha"] != sha:
             raise ValueError("Workflow and candidate SHA must match")
-        deployed_sha = os.environ.get("DRTS_LIVE_MAP_DEPLOYED_SHA", "")
-        if len(deployed_sha) != 40 or any(c not in "0123456789abcdef" for c in deployed_sha):
-            raise ValueError("Expected dev deployment SHA is required")
+        deployment = json.loads((root / "evidence-deployment.json").read_text())
+        deployed_sha = deployment.get("deployed_sha", "")
         status["deployed_sha"] = deployed_sha
         verify(root, sha, outcomes, deployed_sha)
         status["status"] = "passed"

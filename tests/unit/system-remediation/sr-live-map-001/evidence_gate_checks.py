@@ -17,6 +17,11 @@ class EvidenceGateTests(unittest.TestCase):
         self.tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self.tmp.cleanup)
         self.root = Path(self.tmp.name)
+        self.write("evidence-deployment.json", {"candidate_sha": SHA, "deployed_sha": SHA, "effective_backend": "google", "status": "passed"})
+        self.write("evidence-sessions.json", {"candidate_sha": SHA, "status": "passed", "sessions": [
+            {"realm": "driver", "actor_type": "driver_user", "actor_id": "drv-demo-002", "scopes": ["driver:read"]},
+            {"realm": "ops", "actor_type": "ops_user", "actor_id": "live-map-observer", "scopes": ["regulatory:read"]},
+        ]})
         self.write("evidence-map.json", {"candidateSha": SHA, "status": "passed"})
         self.write("evidence-coverage.json", {
             "candidate_sha": SHA, "deployed_sha": SHA, "status": "passed",
@@ -57,6 +62,24 @@ class EvidenceGateTests(unittest.TestCase):
 
     def test_wrong_deployment(self):
         self.change("evidence-browser.json", lambda value: value.update(deployed_sha="b" * 40))
+        self.reject()
+
+    def test_other_runtime_cannot_pass_even_when_all_evidence_agrees(self):
+        for filename in ["evidence-deployment.json", "evidence-coverage.json", "evidence-browser.json"]:
+            self.change(filename, lambda value: value.update(deployed_sha="b" * 40))
+        with self.assertRaises(ValueError):
+            gate.verify(self.root, SHA, OUTCOMES, "b" * 40)
+
+    def test_missing_health(self):
+        (self.root / "evidence-deployment.json").unlink()
+        self.reject()
+
+    def test_unverified_sessions(self):
+        self.change("evidence-sessions.json", lambda value: value.update(status="failed"))
+        self.reject()
+
+    def test_wrong_session_scope(self):
+        self.change("evidence-sessions.json", lambda value: value["sessions"][1].update(scopes=["*"]))
         self.reject()
 
     def test_failed_status(self):

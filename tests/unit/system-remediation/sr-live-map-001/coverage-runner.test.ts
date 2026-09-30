@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
+import { deepToSnakeCase } from "../../../../apps/api/src/common/snake-case.interceptor";
 import { runCoverage } from "../../../e2e/system-remediation/sr-live-map-001/coverage-runner";
 import {
   assertAllowedUrl,
@@ -14,7 +15,6 @@ import {
 const env = {
   GITHUB_ACTIONS: "true",
   RUNNER_ENVIRONMENT: "github-hosted",
-  DRTS_LIVE_MAP_DEPLOYED_SHA: "b".repeat(40),
   DRTS_CANDIDATE_SHA: "a".repeat(40),
   WORKFLOW_SHA: "a".repeat(40),
   DRTS_LIVE_MAP_TEST_AUTHORIZED: "true",
@@ -22,7 +22,7 @@ const env = {
     "https://ops.example.test,https://api.example.test,https://maps.googleapis.com",
   DRTS_LIVE_MAP_TEST_ORIGIN: "https://ops.example.test",
   DRTS_LIVE_MAP_API_ORIGIN: "https://api.example.test",
-  DRTS_LIVE_MAP_TEST_DRIVER_ID: "live-map-isolated",
+  DRTS_LIVE_MAP_TEST_DRIVER_ID: "drv-demo-002",
   DRTS_LIVE_MAP_DRIVER_SESSION_TOKEN: "test-driver-secret",
   DRTS_LIVE_MAP_OBSERVER_SESSION_TOKEN: "test-observer-secret",
   GOOGLE_MAPS_GEOCODING_API_KEY: "test-google-secret",
@@ -30,7 +30,7 @@ const env = {
 
 describe("live map authorization boundary", () => {
   it("accepts an explicit hosted candidate and allowlisted targets", () => {
-    expect(validateCoverageInputs(env).driverId).toBe("live-map-isolated");
+    expect(validateCoverageInputs(env).driverId).toBe("drv-demo-002");
   });
   it.each([
     ["DRTS_LIVE_MAP_TEST_AUTHORIZED", undefined],
@@ -78,6 +78,7 @@ describe("live map authorization boundary", () => {
 // Chromium or any live call. Production service-area evaluation is not mocked.
 function harness(
   options: {
+    wire?: "snake_case" | "camelCase";
     realm?: string;
     actor?: string;
     workState?: string;
@@ -109,11 +110,11 @@ function harness(
     const url = new URL(String(input));
     const reply = (data: unknown) =>
       Response.json(
-        { data },
+        options.wire === "snake_case" ? deepToSnakeCase({ data }) : { data },
         {
           headers: {
             "x-drts-candidate-sha":
-              options.deployedSha ?? env.DRTS_LIVE_MAP_DEPLOYED_SHA,
+              options.deployedSha ?? env.DRTS_CANDIDATE_SHA,
           },
         },
       );
@@ -131,6 +132,35 @@ function harness(
         ],
       });
     }
+    if (url.pathname.endsWith("health")) {
+      const health = {
+        candidateSha: options.deployedSha ?? env.DRTS_CANDIDATE_SHA,
+        mapProvider: { effectiveBackend: "google" },
+      };
+      return Response.json(
+        options.wire === "snake_case" ? deepToSnakeCase(health) : health,
+        {
+          headers: {
+            "x-drts-candidate-sha":
+              options.deployedSha ?? env.DRTS_CANDIDATE_SHA,
+          },
+        },
+      );
+    }
+    if (
+      url.pathname.endsWith("auth/session") &&
+      new Headers(init?.headers).get("authorization") ===
+        `Bearer ${env.DRTS_LIVE_MAP_OBSERVER_SESSION_TOKEN}`
+    )
+      return reply({
+        active: true,
+        identity: {
+          realm: "ops",
+          actorType: "ops_user",
+          actorId: "live-map-observer",
+          scopes: ["regulatory:read"],
+        },
+      });
     if (url.pathname.endsWith("auth/session"))
       return reply({
         active: true,
@@ -224,24 +254,35 @@ describe("C114 coverage orchestration", () => {
       }),
     ).toThrow();
   });
-  it("records all live boundary results, waits >90s, and restores fresh accurate offline telemetry", async () => {
-    const { deps, writes } = harness();
-    const result = await runCoverage(env, deps);
-    expect(result.status).toBe("passed");
-    expect(result.service_area).toHaveLength(5);
-    expect(result.location).toHaveLength(4);
-    expect(deps.sleep.mock.calls.reduce((total, [ms]) => total + ms, 0)).toBe(
-      95_000,
-    );
-    expect(writes.map((item) => item.accuracyM)).toEqual([10, 150, 10]);
-    const serialized = JSON.stringify(result);
-    for (const secret of [
-      env.DRTS_LIVE_MAP_DRIVER_SESSION_TOKEN,
-      env.DRTS_LIVE_MAP_OBSERVER_SESSION_TOKEN,
-      env.GOOGLE_MAPS_GEOCODING_API_KEY,
-    ])
-      expect(serialized).not.toContain(secret);
-  });
+  it.each(["snake_case", "camelCase"] as const)(
+    "completes every request with %s API responses, waits >90s, and restores telemetry",
+    async (wire) => {
+      const { deps, writes } = harness({ wire });
+      const result = await runCoverage(env, deps);
+      expect(result.status).toBe("passed");
+      expect(deps.fetch).toHaveBeenCalledTimes(31);
+      expect(result.service_area).toHaveLength(5);
+      expect(result.service_area).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            formattedAddress: "Public landmark address",
+          }),
+        ]),
+      );
+      expect(result.location).toHaveLength(4);
+      expect(deps.sleep.mock.calls.reduce((total, [ms]) => total + ms, 0)).toBe(
+        95_000,
+      );
+      expect(writes.map((item) => item.accuracyM)).toEqual([10, 150, 10]);
+      const serialized = JSON.stringify(result);
+      for (const secret of [
+        env.DRTS_LIVE_MAP_DRIVER_SESSION_TOKEN,
+        env.DRTS_LIVE_MAP_OBSERVER_SESSION_TOKEN,
+        env.GOOGLE_MAPS_GEOCODING_API_KEY,
+      ])
+        expect(serialized).not.toContain(secret);
+    },
+  );
   it.each([
     { realm: "system" },
     { actor: "live-map-other" },
