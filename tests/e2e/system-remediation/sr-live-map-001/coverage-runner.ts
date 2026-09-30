@@ -15,6 +15,7 @@ import {
   writeEvidence,
   type LiveEnv,
 } from "./live-map-config";
+import { normalizeApiResponse } from "./wire-response";
 import {
   baselineService,
   decisionProjection,
@@ -85,17 +86,15 @@ export async function runCoverage(env: LiveEnv, deps: Deps) {
     token: string,
     body?: unknown,
   ): Promise<T> => {
-    const result = await request<{ data: T }>(
-      `${config.apiOrigin}/api/${path}`,
-      {
-        method: body === undefined ? "GET" : "POST",
-        headers: {
-          authorization: `Bearer ${token}`,
-          "content-type": "application/json",
-        },
-        ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+    const raw = await request<unknown>(`${config.apiOrigin}/api/${path}`, {
+      method: body === undefined ? "GET" : "POST",
+      headers: {
+        authorization: `Bearer ${token}`,
+        "content-type": "application/json",
       },
-    );
+      ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+    });
+    const result = normalizeApiResponse(raw) as { data: T };
     assert(result.data !== undefined, "API success envelope required");
     return result.data;
   };

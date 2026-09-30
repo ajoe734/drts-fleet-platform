@@ -119,3 +119,32 @@ record; this versioned artifact travels with that candidate. Checkpoints
 `c440a12a6` and `b1babc8f0` are recoverability commits, not acceptance results.
 Owner does not close the task. Claude2 must independently review the candidate;
 live acceptance remains outstanding until the hosted evidence above passes.
+
+## Rework after merged candidate ef18713bc63f (2026-09-30)
+
+History is retained: candidate `ef18713bc63f773ae347d7979ff3b5ca70df7886`
+was approved and merged as `01f516f48663366df9f717b389e307726eac0edf`
+(PR #2228). CI 36661338512 / 36661338636 passed; live run 36661347551
+failed at missing static deployment SHA preflight, with provider/coverage/browser
+skipped. That run did not exercise F-WIRE. Supervisor's 07:20 resume explicitly
+requires a new candidate and supersedes the old provisioning section above.
+All four required live acceptance items remain **pending**, not pass.
+
+### F-WIRE: API response contract
+
+`AppModule` installs `SnakeCaseInterceptor`; the previous `runCoverage.api`
+cast raw JSON to camelCase contracts. Session, registry, tracking, decision and
+heartbeat acknowledgements all shared the defective boundary. The regression
+uses the **production** `deepToSnakeCase` serializer on every simulated API
+response, retaining Google's native `formatted_address` contract and the
+production service-area evaluator. HTTP and time are the only simulated
+boundaries; this is not live evidence.
+
+At unchanged production runner `ef18713bc63f`, the new snake_case full-chain test
+failed at driver-session-and-isolation; the camelCase control passed. Command:
+`pnpm exec vitest run tests/unit/system-remediation/sr-live-map-001/coverage-runner.test.ts --maxWorkers=2`,
+exit 1 (24 pass / 1 fail), Node 22.23.2 / pnpm 10.33.0.
+After API-only recursive normalization, the same command exits 0 (25 pass).
+Both wire shapes complete all 29 requests, five decisions, three heartbeat
+writes and four freshness observations. Logs: `.local/c114/rework/wire-before.log`
+and `wire-after.log`. Checkpoint commit is not a review candidate.
