@@ -65,6 +65,45 @@ function buildEmbedAuthorityError(
   return error;
 }
 
+const METADATA_IDENTITY_TOKEN_URL =
+  "http://metadata.google.internal/computeMetadata/v1/instance/service-accounts/default/identity";
+const RUN_APP_HOST_SUFFIX = ".a.run.app";
+
+async function mintMetadataIdentityToken(
+  audience: string,
+): Promise<string | null> {
+  const metadataUrl = new URL(METADATA_IDENTITY_TOKEN_URL);
+  metadataUrl.searchParams.set("audience", audience);
+  metadataUrl.searchParams.set("format", "full");
+  try {
+    const response = await fetch(metadataUrl, {
+      cache: "no-store",
+      headers: { "Metadata-Flavor": "Google" },
+    });
+    return response.ok ? response.text() : null;
+  } catch {
+    return null;
+  }
+}
+
+// SEC-INTERNAL-KEY-WIF-MIGRATION-20260930 follow-up: drop the
+// x-drts-internal-key send in requestAuthority below once dev has proven
+// this header end-to-end and INTERNAL_KEY_EXCP_002 is retired.
+async function getGoogleWorkloadIdentityHeader(): Promise<
+  Record<string, string>
+> {
+  const configuredAudience = process.env.DRTS_API_AUTH_AUDIENCE?.trim();
+  const targetUrl = new URL(API_URL);
+  const audience =
+    configuredAudience ||
+    (targetUrl.hostname.endsWith(RUN_APP_HOST_SUFFIX) ? targetUrl.origin : null);
+  if (!audience) {
+    return {};
+  }
+  const identityToken = await mintMetadataIdentityToken(audience);
+  return identityToken ? { "x-drts-google-id-token": identityToken } : {};
+}
+
 async function requestAuthority<T>(
   path: string,
   init?: RequestInit,
@@ -83,6 +122,7 @@ async function requestAuthority<T>(
         ...(process.env.DRTS_INTERNAL_KEY
           ? { "x-drts-internal-key": process.env.DRTS_INTERNAL_KEY }
           : {}),
+        ...(await getGoogleWorkloadIdentityHeader()),
         ...(process.env.DRTS_REFERRAL_EMBED_HANDOFF_KEY
           ? {
               [REFERRAL_EMBED_HANDOFF_KEY_HEADER]:

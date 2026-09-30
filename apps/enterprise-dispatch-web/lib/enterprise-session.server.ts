@@ -31,10 +31,13 @@ export async function verifyEnterpriseTenantSession(
         cache: "no-store",
       });
       if (!tokenResponse.ok) return { session: null, status: 503 };
-      headers.set(
-        "x-serverless-authorization",
-        `Bearer ${await tokenResponse.text()}`,
-      );
+      const identityToken = await tokenResponse.text();
+      // Cloud Run's own IAM invoker check (network hop).
+      headers.set("x-serverless-authorization", `Bearer ${identityToken}`);
+      // apps/api's app-level caller identity (SEC-INTERNAL-KEY-WIF-MIGRATION-20260930
+      // follow-up: drop the x-drts-internal-key send above once this is
+      // proven end-to-end and INTERNAL_KEY_EXCP_002 is retired).
+      headers.set("x-drts-google-id-token", identityToken);
     }
     const response = await fetch(target, {
       headers,

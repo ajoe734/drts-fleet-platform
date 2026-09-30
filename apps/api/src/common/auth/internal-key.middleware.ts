@@ -14,6 +14,11 @@ import {
 import { internalKeyMetrics } from "./internal-key-metrics";
 import { internalKeyAuditRecorder } from "./internal-key-audit";
 import { SecurityEventsService } from "../../modules/security-events/security-events.service";
+import {
+  extractGoogleWorkloadIdentityAssertion,
+  GoogleWorkloadIdentityAdapter,
+  isGoogleWorkloadIdentityNotConfigured,
+} from "../../modules/auth/google-workload-identity.adapter";
 
 type HeaderValue = string | string[] | undefined;
 
@@ -102,10 +107,11 @@ function isInternalKeyEnforcementDisabled(): boolean {
   );
 }
 
-export function validateInternalKey(
+export async function validateInternalKey(
   request: RequestLike,
   expectedKey: string | undefined,
-): void {
+  options?: { googleWorkloadIdentityAdapter?: GoogleWorkloadIdentityAdapter },
+): Promise<void> {
   const rawPath = request.originalUrl ?? request.url ?? "";
   const requestPath = stripQueryString(rawPath);
   const requestMethod = request.method ?? "GET";
@@ -120,6 +126,28 @@ export function validateInternalKey(
     hasBearerAuthorization(request)
   ) {
     return;
+  }
+
+  const rawGoogleAssertion = extractGoogleWorkloadIdentityAssertion(
+    request.headers,
+  );
+  if (rawGoogleAssertion && options?.googleWorkloadIdentityAdapter) {
+    try {
+      await options.googleWorkloadIdentityAdapter.verifyServicePrincipal(
+        request.headers ?? {},
+        { requestPath, requestMethod },
+      );
+      return;
+    } catch (error) {
+      // Registry not populated yet (ops rollout not complete): fall back to
+      // `x-drts-internal-key` below so dev stays green while EXCP_002 is
+      // still active. Any other error (bad signature, wrong audience,
+      // unregistered principal, replay) is a genuine rejection and must not
+      // be masked by falling through.
+      if (!isGoogleWorkloadIdentityNotConfigured(error)) {
+        throw error;
+      }
+    }
   }
 
   if (!strictEnvironment && !configuredKey) {
@@ -339,9 +367,11 @@ export function requireScopedInternalKey(
 export class InternalKeyMiddleware implements NestMiddleware {
   constructor(
     @Optional() private readonly securityEventsService?: SecurityEventsService,
+    @Optional()
+    private readonly googleWorkloadIdentityAdapter?: GoogleWorkloadIdentityAdapter,
   ) {}
 
-  use(request: RequestLike, _response: unknown, next: () => void) {
+  async use(request: RequestLike, _response: unknown, next: () => void) {
     if (this.securityEventsService) {
       internalKeyAuditRecorder.setSecurityEventsService(
         this.securityEventsService,
@@ -351,7 +381,11 @@ export class InternalKeyMiddleware implements NestMiddleware {
       next();
       return;
     }
-    validateInternalKey(request, process.env.DRTS_INTERNAL_KEY);
+    await validateInternalKey(request, process.env.DRTS_INTERNAL_KEY, {
+      ...(this.googleWorkloadIdentityAdapter
+        ? { googleWorkloadIdentityAdapter: this.googleWorkloadIdentityAdapter }
+        : {}),
+    });
     next();
   }
 }
