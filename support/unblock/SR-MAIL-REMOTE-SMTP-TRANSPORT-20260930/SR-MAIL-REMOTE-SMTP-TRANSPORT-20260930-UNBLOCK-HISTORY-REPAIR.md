@@ -77,7 +77,8 @@ helper's artifact scope.
 ## 3. Remaining parent findings and safe continuation
 
 The original evidence remains at
-[`apps/api/src/modules/notification-delivery/SR-MAIL-REMOTE-SMTP-TRANSPORT-20260930.md`](https://github.com/ajoe734/drts-fleet-platform/blob/a473e760abaa6348948973bd8960b3478aa9f90b/apps/api/src/modules/notification-delivery/SR-MAIL-REMOTE-SMTP-TRANSPORT-20260930.md).
+[the parent checkpoint's evidence file](https://github.com/ajoe734/drts-fleet-platform/blob/a473e760abaa6348948973bd8960b3478aa9f90b/apps/api/src/modules/notification-delivery/SR-MAIL-REMOTE-SMTP-TRANSPORT-20260930.md),
+which exists on the parent branch and has not landed on dev.
 This audit independently read the following production functions at that SHA:
 
 | Finding    | Source and precise remaining behavior                                                                                                                                                                                                                                                                                                                                                                                                                              | Required repair boundary                                                                                                                                           |
@@ -202,6 +203,29 @@ was started. Hosted CI/review/merge remain separate lifecycle gates.
 
 ## 6. Delivery receipt
 
-Publication and final validation receipts will be appended here before yielding.
+Anchor `ed0d8d2728b4c3b27441c0e9b0c55ce4016ecf85` was normally pushed to
+`codex/sr-mail-remote-smtp-transport-20260930-unblock-history-repair`.
+[Draft PR #2230](https://github.com/ajoe734/drts-fleet-platform/pull/2230)
+targets dev and initially matched that exact head. The subsequent append-only
+report correction is identified by the final published SHA in the helper's
+canonical progress record and PR head; no self-referential SHA is embedded here.
+
+Local checks completed with exit 0: Prettier, `git diff --check`, commit trailers,
+exact disposition JSON versus the attempted transaction, operator command
+`bash -n`, artifact-only diff, and existence of the cited commit objects.
+Tool versions: Git 2.43.0, Node 22.23.2, pnpm 10.33.0.
+
+CITE-01 was found by the initial anchor's hosted
+[Canonical consistency job](https://github.com/ajoe734/drts-fleet-platform/actions/runs/36666258319/job/109731468148):
+exit 1 because the parent evidence link's code-formatted label was interpreted as
+a file in this helper checkout. The file exists only on the unpublished-to-dev
+parent branch. This revision uses a descriptive label and retains the immutable
+GitHub checkpoint URL, making that distinction explicit. The same production
+checker, `python3 tools/ci/git/check_canonical_consistency.py --ci --base origin/dev
+--head HEAD`, is rerun locally; final hosted run results belong to their actual
+head and are recorded in the helper progress receipt, not inherited from the
+anchor. Raw initial failure log: local `ci-initial-canonical.log`.
+
 The canonical task remains in progress with the explicit operator blocker until
-section 4 is applied. No candidate has been handed off.
+section 4 is applied. No candidate has been handed off; no parent acceptance,
+independent helper review, or merge is claimed.
