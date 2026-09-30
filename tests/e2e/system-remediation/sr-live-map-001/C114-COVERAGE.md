@@ -49,11 +49,11 @@ This is a pending live acceptance prerequisite, not a passed/skipped test.
 
 ## Verification ledger
 
-| Finding / required acceptance | Source / change | Previous → candidate | Commands / evidence | Remaining limitation |
-| --- | --- | --- | --- | --- |
-| service_area_live_decisions_for_real_taiwan_addresses | V0049; ServiceAreaService.evaluate | absent → in implementation | pending | Hosted credentials / API allowlist |
-| location_freshness_live_states | driver heartbeat batch + tracking-status | absent → in implementation | pending | Isolated driver and sessions |
-| browser_map_render_live | GoogleMapBaseLayer; live Playwright spec | disconnected → in implementation | pending | Hosted Chromium |
-| authorization_gate_and_allowed_targets_enforced | shared live-map-config.ts | browser lacked gate → in implementation | pending | Unit tests and hosted negative gate |
+| Finding / required acceptance                         | Source / change                          | Previous → candidate                    | Commands / evidence | Remaining limitation                |
+| ----------------------------------------------------- | ---------------------------------------- | --------------------------------------- | ------------------- | ----------------------------------- |
+| service_area_live_decisions_for_real_taiwan_addresses | V0049; ServiceAreaService.evaluate       | absent → in implementation              | pending             | Hosted credentials / API allowlist  |
+| location_freshness_live_states                        | driver heartbeat batch + tracking-status | absent → in implementation              | pending             | Isolated driver and sessions        |
+| browser_map_render_live                               | GoogleMapBaseLayer; live Playwright spec | disconnected → in implementation        | pending             | Hosted Chromium                     |
+| authorization_gate_and_allowed_targets_enforced       | shared live-map-config.ts                | browser lacked gate → in implementation | pending             | Unit tests and hosted negative gate |
 
 No candidate is locked at this checkpoint; no live acceptance is claimed.
