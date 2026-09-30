@@ -458,10 +458,35 @@ key/token, database, notification transport, server or browser is involved.
 | service_area_live_decisions_for_real_taiwan_addresses | Existing five address/decision probes retained | Prior harness evidence only | **Pending live**, credentials/targets/runtime unresolved |
 | location_freshness_live_states | Existing fresh/real wait/stale/low-accuracy/restore probes retained | Unit session lifecycle is not freshness evidence | **Pending live**, renewable isolated driver proof required |
 | browser_map_render_live | Hosted Chromium ready/imagery gate retained | No browser run started | **Pending live**, configured allowed targets and same-SHA runtime required |
-| authorization_gate_and_allowed_targets_enforced | Existing strict authorization/target/SHA gates retained | Local scoped regression to be recorded below | **Pending live**, no skipped run credited as pass |
+| authorization_gate_and_allowed_targets_enforced | Existing strict authorization/target/SHA gates retained | 65 scoped unit tests pass, including existing gate negatives and Python evidence checks | **Pending live**, no skipped run credited as pass |
 
 The first draft of the new unit probe had two fixture assertions wrong (JWT
 uses `sub` before `toRequestIdentity`, and driver-003 has invalid credentials).
 Those were corrected before the 4/4 result above. They are not product failures
 or old/new repair evidence. This delivery diagnoses the supported-path boundary;
 it does not claim the harness is repaired or all four acceptance keys are met.
+
+Final local checks for this checkpoint (Node 22.23.2 / pnpm 10.33.0 /
+Vitest 4.1.4), all finished and results read:
+
+- `pnpm exec vitest run tests/unit/system-remediation/sr-live-map-001/ --maxWorkers=2`:
+  **65 passed across 7 files**, exit 0, including the existing 16 Python gate
+  cases and both wire-shape coverage chains. Log: `unit-isolated.log`.
+- `pnpm exec tsc -p tsconfig.json --noEmit`: **pass**, exit 0.
+  Log: `typecheck-isolated.log`.
+- ESLint (`--max-warnings=0`) and Prettier on the new test, plus
+  `git diff --check`: **pass**, exit 0. Historical artifact sections are retained.
+- Initial root typecheck exited 2 because shared `node_modules` resolved private
+  ApiClient types from both canonical and isolated worktrees. Only this worker's
+  22 symlinks were detached; `pnpm install --offline --frozen-lockfile --ignore-scripts`
+  exited 0 and supplied independent links. No shared dependency target or tracked
+  manifest/lockfile was changed. The repeat checks above are authoritative.
+- Logs and read-only GitHub variable/deploy metadata are under
+  `.local/c114/session-prerequisites/`. No live acceptance run was started.
+
+Publish this as a **draft checkpoint**, not a handoff of a repaired harness.
+The last acceptance candidate remains `e3c7ed02701c387d82786bcfd8877e2618851f3b`.
+Route the concrete blockers to Claude2/Supervisor for the invitation product
+subtask and coordination with the WIF owner, then resume this same owner task
+after the supported contracts are available. Draft/scoped CI is not full
+candidate CI or any of the four live acceptance results.
