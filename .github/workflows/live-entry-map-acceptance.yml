@@ -117,7 +117,7 @@ jobs:
         id: runner
         run: |
           set -o pipefail
-          pnpm exec tsx tests/e2e/system-remediation/sr-live-entry-001/entry-acceptance-runner.ts \
+          ./apps/api/node_modules/.bin/tsx tests/e2e/system-remediation/sr-live-entry-001/entry-acceptance-runner.ts \
             2>&1 | tee -a .artifacts/live-entry-acceptance/execution-log.txt
 
       - name: Record run status
@@ -245,7 +245,7 @@ jobs:
         id: runner
         run: |
           set -o pipefail
-          pnpm exec tsx tests/e2e/system-remediation/sr-live-map-001/map-acceptance-runner.ts \
+          ./apps/api/node_modules/.bin/tsx tests/e2e/system-remediation/sr-live-map-001/map-acceptance-runner.ts \
             2>&1 | tee -a .artifacts/live-map-acceptance/execution-log.txt
 
       - name: Record run status
