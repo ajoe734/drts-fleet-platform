@@ -3,7 +3,10 @@ import { JwtAuthService } from "../../../../apps/api/src/common/auth/jwt-auth.se
 import { AuthController } from "../../../../apps/api/src/modules/auth/auth.controller";
 import { IdentityRepository } from "../../../../apps/api/src/modules/identity/identity.repository";
 
-afterEach(() => vi.unstubAllEnvs());
+afterEach(() => {
+  vi.unstubAllEnvs();
+  vi.useRealTimers();
+});
 
 // Reproduce the currently deployed contract before requesting a product scope
 // change. Real issuance, repository (memory adapter), signature and durable
@@ -14,6 +17,10 @@ it.each([
 ] as const)(
   "documents why auth/token %s sessions cannot yet authenticate live coverage",
   async (actorType, realm, actorId, scopes) => {
+    // Reproduce the audited contract before the legacy key exception expires.
+    // Only this unit diagnostic freezes Date; hosted issuance uses real time.
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date("2026-09-30T07:20:00.000Z"));
     vi.stubEnv("NODE_ENV", "test");
     vi.stubEnv("STRICT_IAP_MODE", "false");
     vi.stubEnv("JWT_SECRET", "unit-only-session-contract-key");

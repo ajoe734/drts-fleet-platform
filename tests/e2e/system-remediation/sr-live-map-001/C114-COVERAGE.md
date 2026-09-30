@@ -294,3 +294,30 @@ Node `22.23.2`, pnpm `10.33.0`:
   container was started on this VM. Hosted CI/live results must be read and
   attached to the same candidate's canonical handoff; local pass does not satisfy
   any of the four pending live acceptance keys.
+
+### First rework CI and live checkpoint; deterministic diagnostic follow-up
+
+Rework checkpoint `1ad0a06fe0c2c19511fa99dccc0b2ddf634a9d57` / PR #2235:
+CI [36684857963](https://github.com/ajoe734/drts-fleet-platform/actions/runs/36684857963)
+and integration CI [36684858032](https://github.com/ajoe734/drts-fleet-platform/actions/runs/36684858032)
+completed **success** and were read. Hosted map
+[36684877844](https://github.com/ajoe734/drts-fleet-platform/actions/runs/36684877844)
+completed **failure**: Google origin is outside the existing allowlist, target
+preflight exits 1, WIF/session/provider/coverage/Chromium all skipped. Downloaded
+run-status confirms `failed`; no live acceptance key is satisfied. Artifact
+`live-map-acceptance-1ad0a06fe0c2c19511fa99dccc0b2ddf634a9d57` has GitHub digest
+`sha256:17340eb433d499548919a967751062c9a3e4a0ea42a0c96120e16f76f1ad3e99`.
+The downloaded run-status SHA256 is
+`c19865d4fd08126e6359860859eff39bad04f3e50312065ba4b2339b48b74261`.
+
+Further source inspection found `INTERNAL_KEY_EXCP_002` in
+`internal-key-exception-registry.ts` expires at **2026-09-30T23:59:59Z**;
+`evaluateInternalKey` rejects it afterward. Supervisor's issuance-path
+coordination must account for this existing product restriction as well as driver
+binding / ops membership. The harness does not extend the exception or bypass
+expiry. To keep the defect reproduction replayable after that date, the
+`session-contract.test.ts` diagnostic now fixes **only its unit-test Date** to
+the audited 2026-09-30T07:20Z instant. Auth/session validation logic remains real.
+Hosted execution and the live 95-second freshness wait always use real time.
+This follow-up changes only the diagnostic clock and this evidence artifact;
+it requires a new candidate SHA and fresh CI rather than reusing checkpoint CI.
