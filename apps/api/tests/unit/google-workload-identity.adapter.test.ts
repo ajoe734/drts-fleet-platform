@@ -217,7 +217,24 @@ describe("GoogleWorkloadIdentityAdapter", () => {
     expect(resolved.principalId).toBe(PRINCIPAL_ID);
   });
 
-  it("allows a registry entry missing routeScopes", async () => {
+  it("rejects a registry entry missing allowedTokenAudiences", async () => {
+    process.env.WORKLOAD_IDENTITY_GOOGLE_SERVICE_PRINCIPALS = JSON.stringify([
+      {
+        serviceAccountEmail: SERVICE_ACCOUNT_EMAIL,
+        principalId: PRINCIPAL_ID,
+        routeScopes: ["* *"],
+      },
+    ]);
+    const token = signGoogleToken();
+    await expect(
+      adapter.verifyServicePrincipal(
+        { "x-drts-google-id-token": token },
+        { requestMethod: "GET", requestPath: "/api/tenant/passengers" },
+      ),
+    ).rejects.toMatchObject({ code: "WORKLOAD_IDENTITY_GOOGLE_NOT_CONFIGURED" });
+  });
+
+  it("rejects a registry entry missing routeScopes", async () => {
     process.env.WORKLOAD_IDENTITY_GOOGLE_SERVICE_PRINCIPALS = JSON.stringify([
       {
         serviceAccountEmail: SERVICE_ACCOUNT_EMAIL,
@@ -226,12 +243,12 @@ describe("GoogleWorkloadIdentityAdapter", () => {
       },
     ]);
     const token = signGoogleToken();
-    const principal = await adapter.verifyServicePrincipal(
-      { "x-drts-google-id-token": token },
-      { requestMethod: "GET", requestPath: "/api/tenant/passengers" },
-    );
-    expect(principal.principalId).toBe(PRINCIPAL_ID);
-    expect(principal.email).toBe(SERVICE_ACCOUNT_EMAIL);
+    await expect(
+      adapter.verifyServicePrincipal(
+        { "x-drts-google-id-token": token },
+        { requestMethod: "GET", requestPath: "/api/tenant/passengers" },
+      ),
+    ).rejects.toMatchObject({ code: "WORKLOAD_IDENTITY_GOOGLE_NOT_CONFIGURED" });
   });
 });
 
