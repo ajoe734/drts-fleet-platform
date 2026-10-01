@@ -133,7 +133,7 @@ export class DriverDeviceSessionService implements OnModuleInit {
       invitation = (await this.repository.findInvitationByCodeHash(hash)) ?? undefined;
     }
     
-    if (!invitation || invitation.status !== "pending") {
+    if (!invitation || (invitation.status !== "pending" && invitation.status !== "used")) {
       return { revoked: false };
     }
     
@@ -145,6 +145,14 @@ export class DriverDeviceSessionService implements OnModuleInit {
       await this.repository.saveInvitation(invitation);
     }
     this.invitationsByHash.set(hash, invitation);
+
+    if (invitation.boundBindingId) {
+      await this.revokeBindingAndFamily(
+        invitation.boundBindingId,
+        invitation.revokedAt,
+        "INVITATION_REVOKED",
+      );
+    }
     
     return { revoked: true };
   }
@@ -242,15 +250,6 @@ export class DriverDeviceSessionService implements OnModuleInit {
     const driverId = invitation.driverId;
     this.assertDriverAuthEligible(driverId);
 
-    // Single-use: Mark invitation as used
-    invitation.status = "used";
-    invitation.acceptedAt = nowIso;
-    invitation.updatedAt = nowIso;
-    if (this.repository) {
-      await this.repository.saveInvitation(invitation);
-    }
-    this.invitationsByHash.set(invitation.registrationCodeHash, invitation);
-
     const oldBindingId = await this.revokeActiveBindingForDevice(
       deviceId,
       requestId,
@@ -274,6 +273,16 @@ export class DriverDeviceSessionService implements OnModuleInit {
     const savedBinding = this.repository
       ? await this.repository.saveBinding(binding)
       : binding;
+
+    // Single-use: Mark invitation as used
+    invitation.status = "used";
+    invitation.acceptedAt = nowIso;
+    invitation.updatedAt = nowIso;
+    invitation.boundBindingId = savedBinding.bindingId;
+    if (this.repository) {
+      await this.repository.saveInvitation(invitation);
+    }
+    this.invitationsByHash.set(invitation.registrationCodeHash, invitation);
 
     this.bindingsById.set(savedBinding.bindingId, savedBinding);
     this.activeBindingIdsByDeviceId.set(deviceId, savedBinding.bindingId);

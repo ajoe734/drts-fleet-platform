@@ -101,10 +101,8 @@ function harness(
       expect(typeof body.deviceId).toBe("string");
       return reply({
         data: {
-          accessToken: {
-            token: "driver-test-secret",
-            expiresIn: options.expiresIn ?? "8h",
-          }
+          accessToken: "driver-test-secret",
+          expiresIn: options.expiresIn ?? "8h",
         }
       });
     }
@@ -123,7 +121,7 @@ function harness(
               realm: isDriver ? (options.wrongRealm ? "system" : "driver") : (options.wrongRealm ? "system" : "ops"),
               actorType: isDriver ? "driver_user" : "ops_observer",
               actorId: isDriver ? "drv-demo-002" : "live-map-observer",
-              scopes: options.wrongScope ? ["*"] : (isDriver ? ["driver:read"] : ["regulatory:read"]),
+              scopes: options.wrongScope ? ["*"] : (isDriver ? ["driver:read"] : ["regulatory:read", "sandbox.compliance.read", "sandbox.investigation.read"]),
             },
           },
         },

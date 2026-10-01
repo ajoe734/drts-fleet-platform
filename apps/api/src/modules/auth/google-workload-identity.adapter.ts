@@ -448,7 +448,7 @@ export function resolveCiTenantActorGrant(
   if (!isCiTenantActorGateEnabled()) {
     return null;
   }
-  if (!requested.tenantId || !requested.actorType || !requested.actorId) {
+  if (requested.tenantId == null || !requested.actorType || !requested.actorId) {
     return null;
   }
   return (

@@ -100,14 +100,14 @@ export async function bootstrapMapSessions(env: LiveEnv, deps: BootstrapDeps) {
     assert.equal(session.data.identity.realm, "ops");
     assert.equal(session.data.identity.actorType, "ops_observer");
     assert.equal(session.data.identity.actorId, MAP_OBSERVER_ID);
-    assert.deepEqual([...session.data.identity.scopes].sort(), ["regulatory:read"]);
+    assert.deepEqual([...session.data.identity.scopes].sort(), ["regulatory:read", "sandbox.compliance.read", "sandbox.investigation.read"].sort());
     
     verified.push({ name: "DRTS_LIVE_MAP_OBSERVER_SESSION_TOKEN", token: observerIssued.token });
     evidence.sessions.push({
       realm: "ops",
       actor_type: "ops_observer",
       actor_id: MAP_OBSERVER_ID,
-      scopes: ["regulatory:read"],
+      scopes: ["regulatory:read", "sandbox.compliance.read", "sandbox.investigation.read"],
       expires_in: observerIssued.expiresIn,
     });
 
@@ -147,7 +147,7 @@ export async function bootstrapMapSessions(env: LiveEnv, deps: BootstrapDeps) {
     try {
       evidence.stage = `driver:register-device`;
       const deviceId = `live-map-run-${Date.now()}`;
-      const driverSession = await request<{ data: { accessToken: { token: string; expiresIn: string } } }>(
+      const driverSession = await request<{ data: { accessToken: string; expiresIn: string } }>(
         "auth/driver/device/register",
         {
           method: "POST",
@@ -157,7 +157,7 @@ export async function bootstrapMapSessions(env: LiveEnv, deps: BootstrapDeps) {
           body: JSON.stringify({ registrationCode, deviceId }),
         },
       );
-      const driverToken = driverSession.data.accessToken.token;
+      const driverToken = driverSession.data.accessToken;
       deps.mask(driverToken);
       
       evidence.stage = `driver:verify-session`;
@@ -181,7 +181,7 @@ export async function bootstrapMapSessions(env: LiveEnv, deps: BootstrapDeps) {
         actor_type: "driver_user",
         actor_id: config.driverId,
         scopes: ["driver:read"],
-        expires_in: driverSession.data.accessToken.expiresIn,
+        expires_in: driverSession.data.expiresIn,
       });
       
       // Neither token reaches subsequent steps unless both session checks pass.
