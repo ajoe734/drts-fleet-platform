@@ -10,6 +10,7 @@ import type {
   IamCallbackSessionExchangeCommand,
   IamSessionRevokeCommand,
   IdentityContext,
+  IssueDriverDeviceInvitationCommand,
   PartnerBootstrapSession,
   RefreshDriverDeviceSessionCommand,
   RegisterDriverDeviceCommand,
@@ -29,6 +30,7 @@ import {
   CurrentIdentity,
   OpenRoute,
   RequireRealms,
+  RequireScopes,
 } from "../../common/auth";
 import { getTenantRoleScopes } from "../../common/auth/auth.constants";
 import {
@@ -69,6 +71,7 @@ import {
   isCiTenantActorGateEnabled,
   resolveCiTenantActorGrant,
 } from "./google-workload-identity.adapter";
+import { IdempotencyService } from "../../common/idempotency";
 
 interface TokenRequest {
   headers: AuthBootstrapHeaders & { "x-drts-internal-key"?: string };
@@ -143,6 +146,8 @@ export class AuthController {
     // Appended, and optional, for the same reason as `oidcPkceService` above.
     @Optional()
     private readonly googleWorkloadIdentityAdapter?: GoogleWorkloadIdentityAdapter,
+    @Optional()
+    private readonly idempotencyService?: IdempotencyService,
   ) {}
 
   private requireOidcPkceService(): OidcPkceService {
@@ -154,6 +159,17 @@ export class AuthController {
       );
     }
     return this.oidcPkceService;
+  }
+
+  private requireIdempotencyService(): IdempotencyService {
+    if (!this.idempotencyService) {
+      throw new ApiRequestError(
+        500,
+        "IDEMPOTENCY_UNAVAILABLE",
+        "Idempotency service is required for this operation.",
+      );
+    }
+    return this.idempotencyService;
   }
 
   @OpenRoute()
@@ -573,6 +589,23 @@ export class AuthController {
           scopes: [...durableTenantScopes],
         }
       : identity;
+
+    if (
+      (durableIdentity.realm === "ops" || durableIdentity.realm === "platform") &&
+      !durableIdentity.membershipId &&
+      durableIdentity.actorId
+    ) {
+      if (!this.identityRepository) {
+        throw new ApiRequestError(500, "IDENTITY_REPOSITORY_UNAVAILABLE", "Identity repository is required for ops/platform session issuance.");
+      }
+      const memberships = await this.identityRepository.findMembershipsByPrincipalId(durableIdentity.actorId);
+      const membership = memberships.find((m) => m.realm === durableIdentity.realm && m.status === "active");
+      if (!membership) {
+        throw new ApiRequestError(401, "MEMBERSHIP_NOT_FOUND", "The requested ops/platform session subject has no active membership.");
+      }
+      durableIdentity.membershipId = membership.membershipId;
+    }
+
     const expiresIn: JwtExpiresIn =
       durableIdentity.actorType === "system" ? "15m" : "8h";
     const issuedAt = new Date().toISOString();
@@ -591,6 +624,44 @@ export class AuthController {
         : Date.parse(issuedAt),
     });
     return { token: issued.token, expiresIn };
+  }
+
+  @Post("driver/device/invite")
+  @RequireRealms("system", "platform", "ops")
+  @RequireScopes("driver:provision") // Fits the control path requirement for driver identity overrides
+  async issueDriverDeviceInvitation(
+    @Body() command: IssueDriverDeviceInvitationCommand,
+    @Headers("x-idempotency-key") idempotencyKey: string | undefined,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    const result = await this.requireIdempotencyService().execute({
+      scope: "auth:driver_invite:issue",
+      idempotencyKey,
+      required: false,
+      requestPath: "auth/driver/device/invite",
+      payload: command,
+      execute: async () => this.driverDeviceSessionService.issueRegistrationInvitation(command),
+    });
+    return toApiSuccessEnvelope(result.data, requestId);
+  }
+
+  @Post("driver/device/invite/revoke")
+  @RequireRealms("system", "platform", "ops")
+  @RequireScopes("driver:provision")
+  async revokeDriverDeviceInvitation(
+    @Body() command: { registrationCode: string },
+    @Headers("x-idempotency-key") idempotencyKey: string | undefined,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    const result = await this.requireIdempotencyService().execute({
+      scope: "auth:driver_invite:revoke",
+      idempotencyKey,
+      required: false,
+      requestPath: "auth/driver/device/invite/revoke",
+      payload: command,
+      execute: async () => this.driverDeviceSessionService.revokeInvitation(command),
+    });
+    return toApiSuccessEnvelope(result.data, requestId);
   }
 
   @OpenRoute()

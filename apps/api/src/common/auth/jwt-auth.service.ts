@@ -15,7 +15,7 @@ import { IdentityRepository } from "../../modules/identity/identity.repository";
 import { RegulatoryRegistryService } from "../../modules/regulatory-registry/regulatory-registry.service";
 import { TenantPartnerService } from "../../modules/tenant-partner/tenant-partner.service";
 import { ApiRequestError } from "../api-envelope";
-import { getTenantRoleScopes } from "./auth.constants";
+import { getTenantRoleScopes, AUTH_SCOPE_PRESETS, AUTH_TENANT_ROLE_SCOPE_PRESETS } from "./auth.constants";
 import {
   JwtKeyRetiredError,
   JwtUnknownKeyError,
@@ -27,6 +27,9 @@ import type {
   AuthRoleFamily,
   BootstrapRequestIdentity,
 } from "./auth.types";
+const ALL_CATALOG_SCOPES = new Set<string>();
+Object.values(AUTH_SCOPE_PRESETS).forEach(scopes => scopes.forEach(s => ALL_CATALOG_SCOPES.add(s)));
+Object.values(AUTH_TENANT_ROLE_SCOPE_PRESETS).forEach(scopes => scopes?.forEach(s => ALL_CATALOG_SCOPES.add(s)));
 
 export interface JwtIdentityPayload {
   sub: string | null;
@@ -1069,9 +1072,29 @@ export class JwtAuthService {
         ...roleBindings.map((binding) => binding.updatedAt),
       ];
 
-      return (
-        this.computeWorkforceTokenVersion(timestamps) === payload.tokenVersion
-      );
+      if (this.computeWorkforceTokenVersion(timestamps) !== payload.tokenVersion) {
+        return false;
+      }
+      
+      if (!payload.scopes || !Array.isArray(payload.scopes)) {
+        return false;
+      }
+      
+      const allowedScopes = new Set<string>();
+      for (const binding of roleBindings) {
+        const presets = AUTH_SCOPE_PRESETS[binding.roleCode as AuthActorType] || AUTH_TENANT_ROLE_SCOPE_PRESETS[binding.roleCode];
+        if (presets) {
+          presets.forEach((s) => allowedScopes.add(s));
+        }
+      }
+      
+      for (const scope of payload.scopes) {
+        if (ALL_CATALOG_SCOPES.has(scope) && !allowedScopes.has(scope)) {
+          return false;
+        }
+      }
+
+      return true;
     }
 
     return true;
