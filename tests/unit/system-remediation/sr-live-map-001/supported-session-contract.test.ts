@@ -33,6 +33,7 @@ beforeEach(() => {
 afterEach(() => {
   vi.unstubAllEnvs();
   vi.unstubAllGlobals();
+  vi.useRealTimers();
 });
 
 function driverFixture() {
@@ -196,9 +197,18 @@ it("rejects refresh from another device and revocation by another real driver", 
   }
 });
 
-it.each(["ops_user", "ops_observer"])(
-  "issues a durable %s session through the registered Google WIF proof",
-  async (actorType) => {
+it.each([
+  ["ops_user", 0],
+  ["ops_observer", 0],
+  ["ops_user", 1],
+  ["ops_observer", 1],
+] as const)(
+  "checks real WIF %s durable verification across a %dms issuance boundary",
+  async (actorType, issuanceDelayMs) => {
+    // Unit-only time boundary: issuance and verification code remain real.
+    // The 1ms cases reproduce the unresolved controller/JWT tokenVersion race.
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date("2026-10-01T10:00:00.000Z"));
     // Only Google's JWKS/network boundary is replaced. A disposable signing key
     // models the external issuer in memory; no real token or secret is written.
     const { publicKey, privateKey } = googleIssuer;
@@ -240,6 +250,13 @@ it.each(["ops_user", "ops_observer"])(
     );
     const identities = new IdentityRepository();
     const tokens = new JwtAuthService(identities);
+    const issueSessionToken = tokens.issueSessionToken.bind(tokens);
+    vi.spyOn(tokens, "issueSessionToken").mockImplementation(
+      (identity, options) => {
+        vi.setSystemTime(Date.now() + issuanceDelayMs);
+        return issueSessionToken(identity, options);
+      },
+    );
     const controller = new AuthController(
       tokens,
       {} as never,
@@ -262,13 +279,26 @@ it.each(["ops_user", "ops_observer"])(
       },
     });
     const verified = await tokens.verifyAccessToken(issued.token);
-    expect(verified).toMatchObject({
+    const payload = tokens.verify(issued.token)!;
+    const principal = await identities.findPrincipalById("unit-map-observer");
+    expect(payload).toMatchObject({
       actorType,
       realm: "ops",
       sub: "live-map-observer",
     });
-    if (actorType === "ops_observer")
-      expect(verified?.scopes).toEqual(["regulatory:read"]);
+    if (issuanceDelayMs === 0) {
+      expect(verified).not.toBeNull();
+      if (actorType === "ops_observer")
+        expect(verified?.scopes).toEqual(["regulatory:read"]);
+    } else {
+      // Signed token and active durable session are real; the stale version
+      // alone makes the subsequent auth/session verification reject it.
+      expect(await identities.getSession(payload.sid!)).toMatchObject({
+        status: "active",
+      });
+      expect(Date.parse(principal!.updatedAt) - payload.tokenVersion!).toBe(1);
+      expect(verified).toBeNull();
+    }
     // The real verifier persists principal, membership and role bindings.
     expect(
       await identities.findPrincipalById("unit-map-observer"),

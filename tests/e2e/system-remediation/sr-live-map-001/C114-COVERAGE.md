@@ -1,6 +1,11 @@
 # SR-LIVE-MAP-C114-COVERAGE-20260930
 
-Current repair (2026-10-01): merge R2 prerequisite `5b0ec5283377ece785b0949245ae7dd6da1b0573` without discarding the historical readbacks below. R2 candidate `3ac29a96b69cbfc9f845c52c78596ceff58b67ae` has independent approval and CI; parent consumer/cleanup fixes and all four live acceptance gates remain pending. No live dispatch until configured and safe.
+Current status (2026-10-01): parent identity consumers and mandatory retryable
+cleanup are repaired after R2 merge `5b0ec5283377ece785b0949245ae7dd6da1b0573`.
+The real WIF probe exposes a new deterministic workforce token-version clock
+boundary defect; see [the current repair ledger](#parent-consumer-and-cleanup-repair-after-r2-2026-10-01).
+Keep the draft checkpoint and historical candidate evidence. Product coordination,
+operator provisioning and all four hosted live acceptance gates remain pending.
 
 Historical hold (2026-10-01, before R2): the identity prerequisite helper merged as
 `8da27255f3c668af61a7fd28654198d59993f38b`, but the executable readback below
@@ -619,3 +624,179 @@ The JSON format is shown below (secret/actual values omitted):
 | observer has regulatory:read only and write is denied | AuthController.issueToken / GoogleWorkloadIdentityAdapter | Missing scope enforcement for ops_observer → ops_observer correctly assigned regulatory:read without write scopes | Unit tests passed | **Pending live**: shared Cloud Run verification required |
 | Driver invite/register bootstrap consumes the actual serialized accessToken string and persists a verifiable binding | DriverDeviceSessionService | Missing verifiable binding → registration consumes accessToken string and persists verifiable binding | Unit tests passed | **Pending live**: shared Cloud Run verification required |
 | Consumed-invite revoke failure records durable retryable recovery and cleanup is idempotent without leaving a usable token | DriverDeviceSessionService.revokeInvitation | Revoke failures left usable tokens or were not idempotent → records durable retryable recovery and cleanup is idempotent | Unit tests passed | **Pending live**: shared Cloud Run verification required |
+
+## Parent consumer and cleanup repair after R2 (2026-10-01)
+
+R2 `3ac29a96b69cbfc9f845c52c78596ceff58b67ae` was approved by Claude2 and
+merged as `5b0ec5283377ece785b0949245ae7dd6da1b0573`. The full final review and
+preceding registry fail-open findings were read through the release CLI. The
+parent preserves its published history: merge checkpoint `a8178786d`, consumer
+checkpoint `728f62b7f`, cleanup/test checkpoint `70a0ed9f2`. The historical
+parent candidate `e3c7ed02701c387d82786bcfd8877e2618851f3b` is not rewritten.
+This section supersedes the earlier current-hold/resolved claims; historical
+findings and evidence remain above.
+
+### Repaired parent findings
+
+- F-CONSUMER-DRIFT: coverage now accepts exactly `ops/ops_observer/live-map-observer`
+  with `regulatory:read` and the formal driver scopes `dispatch:read`,
+  `driver:read`, `driver:write`. Bootstrap consumes the real serialized string
+  access token with sibling `expiresIn=15m`. The Python gate checks both exact
+  identities, cardinality and scopes independent of producer order, rejecting
+  the old identity, missing/extra scopes and duplicate identities.
+- F-CLEANUP-GATE: a single `revokeMapInvitation` consumer uses the R2 consumed
+  invitation API, which revokes its bound device and refresh family. Every
+  request validates hosted authorization/allowed targets, rejects redirects,
+  requires the candidate SHA header, enforces a timeout and requires
+  `data.revoked === true`. Errors omit raw responses and credentials. Teardown
+  no longer reads Secret Manager or mints another platform token.
+- Recovery is exported to the hosted job's masked `GITHUB_ENV` before device
+  registration: `DRTS_LIVE_MAP_CLEANUP_SESSION_TOKEN` is the per-run provisioner
+  bearer token (raw token, no `Bearer ` prefix), and `DRTS_LIVE_MAP_INVITE_CODE`
+  is the opaque registration code. These are ephemeral step values, **not new
+  repository secrets**. They are never included in uploaded artifacts. Both
+  coverage session tokens are exported only after both identities verify.
+  Bootstrap performs immediate cleanup on partial failure; `always()` teardown
+  retries using the retained state, including a lost registration response.
+  A failed export before registration triggers immediate cleanup, and cannot
+  produce successful acceptance without positive teardown evidence.
+- Before issuing an invitation, bootstrap checks the live registry through the
+  observer and requires `drv-demo-002` to remain offline/non-dispatchable.
+  Coverage retains its task/vehicle/isolation checks before telemetry. The
+  operator must still reserve the driver and prevent a concurrent mobile client.
+- Workflow gate now requires `TEARDOWN_OUTCOME=success` and candidate-bound
+  `evidence-cleanup.json` with the reserved driver and confirmed revocation.
+  A missing cleanup artifact, false result, skipped/failed/missing step or
+  foreign SHA cannot pass. The explicit artifact allowlist adds only this
+  redacted JSON; no recovery token/code or raw session file is uploaded.
+
+### New concrete product blocker: F-WORKFORCE-VERSION
+
+The first real-time regression intermittently failed durable verification for
+`ops_user` despite successful WIF issuance; the next identical run passed.
+This was investigated rather than dismissed as flakiness. The parameterized
+production probe now fixes only the **unit Date boundary** and proves:
+
+1. `AuthController.issueToken` captures time T and passes `tokenVersion=T` to
+   `JwtAuthService.issueSessionToken` with `ensurePrincipal=true`.
+2. The JWT service captures its own time T+1ms and persists
+   `principal.updatedAt=T+1ms`; the signed token and active session retain T.
+3. `JwtAuthService.validateDurableState` compares that token version against
+   the maximum principal/membership/role-binding timestamp and returns false.
+4. Both registered `ops_user` and the exact required `ops_observer` exhibit
+   this failure. At delta=0 they verify successfully; at delta=1ms both signed
+   tokens have active sessions but `verifyAccessToken` returns null.
+
+Command: `pnpm exec vitest run tests/unit/system-remediation/sr-live-map-001/supported-session-contract.test.ts --maxWorkers=2`,
+11 cases passed, exit 0 (`version-race.log`). **Two passing cases reproduce the
+unresolved defect; this is not usable-session/live acceptance evidence.** The
+wrapper advances unit time then delegates to the original `issueSessionToken`;
+controller, Google adapter, signatures, repository and durable verifier are real.
+Only external Google JWKS/network and time are substituted. No live timestamp is
+forged and no durable verification is bypassed.
+
+Repair boundary for the product owner: coordinate the issuance version with the
+actual persisted workforce principal/membership/role-binding version, preserving
+signature, membership, role/scope and revocation checks. Do not weaken the
+verifier, retry until two clocks happen to agree, or freeze hosted time. Required
+regressions: same-tick and crossed-tick issuance for both roles, subsequent role/
+principal changes invalidating the token, and the real bootstrap session probe.
+Product files `apps/api/src/modules/auth/auth.controller.ts` and
+`apps/api/src/common/auth/jwt-auth.service.ts` are outside this parent scope.
+Supervisor must route this finding to the product owner; parent code changes do
+not reopen or overwrite R2's recorded review/CI evidence.
+
+### Verification ledger and limits
+
+| Finding / acceptance | Production source and change | Previous → repair evidence | Commands / evidence | Outstanding limitation |
+| --- | --- | --- | --- | --- |
+| F-CONSUMER-DRIFT | `runCoverage`, `bootstrapMapSessions`, `gate-evidence.verify` | Same new tests against isolated `a8178786d` harness reject both API wire shapes at identity/scope checks; repaired chains pass | `old-runner.log` exit 1; final scoped Vitest; `old-python-gate.log` exit 1 vs 23 passing Python checks | HTTP/time simulated; formal service-area oracle and serializer are real |
+| F-CLEANUP-GATE | `revokeMapInvitation`, `teardownMapSessions`, workflow gate | Old gate accepts missing cleanup with otherwise legacy-valid evidence; new gate rejects absent/failed/foreign cleanup | `old-cleanup-gate.log` exit 1; cleanup negatives and real-driver regressions in scoped Vitest | No hosted teardown run yet; interrupted runner with no remaining cleanup execution is an operator recovery event, never pass |
+| Partial registration/recovery | Actual controller/device service/serializer and bootstrap | Real registration succeeds; lost response, failed verification and lost cleanup response all recover; repeated teardown invalidates access and refresh tokens | Four parameterized `supported-session-contract` cases pass; old harness lacks recovery state before register | Observer/provisioner HTTP auth deliberately stubbed for these driver cases; separate WIF probe exposes version defect |
+| F-WORKFORCE-VERSION | Real `AuthController.issueToken` → `JwtAuthService.issueSessionToken/validateDurableState` | T→T verifies; T→T+1ms rejects both roles on merged R2 source | Four parameterized clock-boundary probes; `version-race.log` | **Unresolved product blocker**; no auth-source edits in parent |
+| service_area_live_decisions_for_real_taiwan_addresses | V0049 / evaluator / five mandatory service cases retained | Both-shape units pass; actual Google coordinates and dev decisions absent | Scoped coverage tests; no new live run | Pending valid sessions, operator targets and same-SHA deployment |
+| location_freshness_live_states | Tracking observation / real 95s hosted wait / accurate restoration retained | Unit state flow passes; no live heartbeat sent | Scoped coverage plus real binding lifecycle tests | Pending isolated driver and real hosted observation; no eligibility-reason claim |
+| browser_map_render_live | Hosted Chromium / ready / imagery / screenshots retained | Browser remains wired; script-only/Google-error/missing-image evidence rejected | Python evidence gate | Pending same-SHA deployed ops and Google origins; no local browser |
+| authorization_gate_and_allowed_targets_enforced | Bootstrap/coverage/cleanup strict gate and SHA checks | Positive and denial cases pass, cleanup can no longer be omitted | Scoped Vitest/Python; redirect and foreign-target negatives | Full hosted acceptance remains pending; unit/mock success is not live pass |
+
+Old-run replay uses `git archive a8178786d` under `.local/`, with current
+regression cases pointed at those unchanged harness functions and the merged R2
+product dependencies. No active worktree reset. Old-run failures include expected
+identity/scope failures, recovery-state assertions and the renamed error stage;
+none are missing-package failures. The cleanup-specific Python replay retains
+the old valid identity fixture so its failures are not masked by identity drift.
+
+Local logs: `.local/c114/consumer-cleanup-20261001/`. Initial baseline could not
+load dependencies because the worker's links pointed into a reaped sibling. Only
+22 links in this worktree were detached; offline frozen installation with
+`--ignore-scripts` succeeded. No shared target, manifest or lockfile changed.
+The first new WIF probe also assumed the original Google subject lookup survived
+`ensurePrincipal`; it does not. The corrected probe checks the actual principal
+ID and durable token, exposing the independent version race above. Initial
+fixture/environment failures are retained and are not defect-reproduction proof.
+
+### Current operator actions; no secret or variable writes by this worker
+
+Read-only GitHub inspection at 10:53 UTC still finds `DRTS_LIVE_MAP_TEST_DRIVER_ID`
+absent and `DRTS_LIVE_MAP_ALLOWED_TARGETS` limited to the API/ops origins. Set the
+reserved ID to `drv-demo-002` and the exact comma-separated Google-origin list
+already specified above. Latest live map run remains failed `36686169334`.
+Latest deploy attempt `36844351637` failed; last successful deploy metadata is
+`36792041310`, head `b7b6c16baede48821861b19cf1354434f1716eee`, not this parent
+candidate. Live project/region remain `drts-dev-devcc-20260825` / `us-central1`.
+No known-failing live run or deployment was dispatched here.
+
+Correct the earlier R2 illustrative registry example before use: the audience
+must match this harness's Google ID-token audience, and the route must authorize
+the actual exchange. Exact API-side environment name remains
+`WORKLOAD_IDENTITY_GOOGLE_SERVICE_PRINCIPALS`; existing GCP secret name remains
+`drts-dev-workload-identity-google-service-principals`. The observer entry format
+is below; the operator supplies the real numeric principal ID and service account
+email for the existing WIF identity, without duplicating that account's entry or
+adding other roles to this observer. No worker reads/writes registry secret values.
+
+```json
+{
+  "serviceAccountEmail": "<actual WIF service-account email>",
+  "principalId": "<actual registered principal ID>",
+  "actorId": "live-map-observer",
+  "roles": ["ops_observer"],
+  "scopes": ["regulatory:read"],
+  "allowedTokenAudiences": ["https://drts-dev-api-r6ykdme3wa-uc.a.run.app"],
+  "routeScopes": ["POST auth/token"]
+}
+```
+
+This does not resolve F-WORKFORCE-VERSION. Provisioner issuance still follows the
+inherited R2 temporary platform session path using existing `drts-dev-jwt-secret`;
+its compatibility with deployed strict-auth settings and persisted platform
+membership must be confirmed by the operator/product owner. It is not a newly
+implemented narrow WIF provisioner. `x-scopes=driver:provision` is a request,
+not proof of narrow resulting privileges: current product issuance derives
+workforce scopes from persisted role bindings. Observer TTL remains 8h and driver
+TTL 15m; the harness does not claim both tokens are 15-minute credentials.
+No new repository secret is requested, and no internal-key exception is extended.
+
+Keep PR #2247 a recoverable **draft checkpoint**, not a repaired candidate
+handoff, until the supported observer is reliable. All four parent live gates
+remain pending. The owner does not call `done` or claim R2's code review as parent
+Cloud Run acceptance. Supervisor should coordinate the product version fix and
+operator provisioning, then resume the same parent owner for same-SHA CI,
+independent review and hosted acceptance.
+
+Final local verification for this checkpoint (Node 22.23.2, pnpm 10.33.0, Vitest 4.1.4), all completed and read:
+
+- Scoped Vitest: **94 passed / 8 files**, exit 0, including the 23-case Python gate. Two of the WIF clock cases intentionally reproduce F-WORKFORCE-VERSION.
+- Root TypeScript, scoped ESLint `--max-warnings=0`, changed-code/workflow Prettier, YAML cleanup wiring and `git diff --check`: **pass**, exit 0.
+- Old harness replay: **12 failed / 44 passed**, exit 1. Old Python gate: two valid-current-identity cases rejected, exit 1. Legacy-valid cleanup-only probe: three tests / seven subcase failures, exit 1, proving the old gate accepts missing cleanup.
+- No local product/API/PG/browser/E2E server, Docker, live telemetry, deployment or secret/variable write. Hosted checks are recorded after completion in the PR/status checkpoint, not inferred from these unit results.
+
+Evidence hashes under the local log directory above:
+
+- `unit-final.log`: SHA256 `f0f287fecea60b56bcb1cd3ba893beb8f49246eae2fd91aef001286ee3884b4d`.
+- `typecheck-final.log`: SHA256 `e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855`.
+- `lint-final.log`: SHA256 `e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855`.
+- `version-race.log`: SHA256 `abbe6c90ee6bf4fdbc9bf62f3c38164baefa2b2fad96694f84360377f560353f`.
+- `old-runner.log`: SHA256 `9fdd25bf5af0b2cf74f8afc8428162b09db11dc4dbcddf95bb522686616687dd`.
+- `old-python-gate.log`: SHA256 `adb8fed5faee13068c7b9874405633e4b6d979b8f050778fc7329a8f6c55ddeb`.
+- `old-cleanup-gate.log`: SHA256 `b98722ea22e45dda373b1d4e59e16cfb72e8d9d48f0be26424e13175052953a4`.
