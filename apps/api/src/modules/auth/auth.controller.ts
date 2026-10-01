@@ -32,7 +32,7 @@ import {
   RequireRealms,
   RequireScopes,
 } from "../../common/auth";
-import { getTenantRoleScopes } from "../../common/auth/auth.constants";
+import { getTenantRoleScopes, AUTH_SCOPE_PRESETS, AUTH_TENANT_ROLE_SCOPE_PRESETS } from "../../common/auth/auth.constants";
 import {
   toPublicPartnerAuthError,
   toPublicTenantAuthError,
@@ -43,7 +43,7 @@ import {
 } from "../../common/auth/jwt-auth.service";
 import { validateInternalKey } from "../../common/auth/internal-key.middleware";
 import { extractBootstrapRequestIdentity } from "../../common/auth/auth.extractor";
-import type { AuthBootstrapHeaders, AuthRealm } from "../../common/auth/auth.types";
+import type { AuthBootstrapHeaders, AuthRealm, AuthActorType } from "../../common/auth/auth.types";
 import { OPEN_ROUTE_RATE_LIMIT } from "../../common/throttling/rate-limit.constants";
 import type { BootstrapRequestIdentity } from "../../common/auth";
 import { hasTrustedMfa } from "../../common/auth/trusted-mfa.policy";
@@ -604,6 +604,24 @@ export class AuthController {
         throw new ApiRequestError(401, "MEMBERSHIP_NOT_FOUND", "The requested ops/platform session subject has no active membership.");
       }
       durableIdentity.membershipId = membership.membershipId;
+
+      const roleBindings = await this.identityRepository.findRoleBindingsByMembershipId(membership.membershipId);
+      const now = new Date();
+      const activeBindings = roleBindings.filter(
+        (b) => (!b.validTo || new Date(b.validTo) > now) && new Date(b.validFrom) <= now,
+      );
+      
+      const allowedRoles = activeBindings.map((b) => b.roleCode);
+      const allowedScopes = new Set<string>();
+      for (const binding of activeBindings) {
+        const presets = AUTH_SCOPE_PRESETS[binding.roleCode as AuthActorType] || AUTH_TENANT_ROLE_SCOPE_PRESETS[binding.roleCode];
+        if (presets) {
+          presets.forEach((s) => allowedScopes.add(s));
+        }
+      }
+
+      durableIdentity.roles = allowedRoles;
+      durableIdentity.scopes = Array.from(allowedScopes);
     }
 
     const expiresIn: JwtExpiresIn =

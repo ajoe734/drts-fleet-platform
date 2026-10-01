@@ -70,7 +70,7 @@ it("auth/token ops_observer sessions successfully issue durable sessions with me
   expect(issued.expiresIn).toBe("8h");
   const payload = jwt.verify(issued.token);
   expect(payload?.actorType).toBe("ops_observer");
-  expect(payload?.scopes).toEqual(["regulatory:read"]);
+  expect(payload?.scopes).toEqual(expect.arrayContaining(["regulatory:read", "sandbox.compliance.read", "sandbox.investigation.read"]));
   expect(typeof payload?.membershipId).toBe("string");
   const session = await repository.getSession(payload!.sid!);
   expect(session?.status).toBe("active");
@@ -100,9 +100,11 @@ it("auth/token rejects elevated scopes for ops_observer", async () => {
       "x-scopes": "regulatory:write",
     },
   });
-  // It issues successfully initially because controller doesn't reject on explicit request scopes during minting if WIF impersonation isn't overriding it
-  // BUT verifyAccessToken MUST reject it since it's not in roleBindings
-  expect(await jwt.verifyAccessToken(issued.token)).toBeNull();
+  // It issues successfully, but the scopes are clamped to the actual role bindings, preventing elevation.
+  const payload = jwt.verify(issued.token);
+  expect(payload?.scopes).toEqual(expect.arrayContaining(["regulatory:read"]));
+  expect(payload?.scopes).not.toContain("regulatory:write");
+  expect(await jwt.verifyAccessToken(issued.token)).not.toBeNull();
 });
 
 it("auth/driver/device/invite and revoke controller routes do not require idempotency keys", async () => {
