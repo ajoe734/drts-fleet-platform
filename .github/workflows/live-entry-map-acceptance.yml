@@ -296,6 +296,11 @@ jobs:
         id: browser
         run: pnpm exec playwright test -c playwright.google-map-live.config.ts
 
+      - name: Revoke sessions
+        if: always()
+        id: teardown
+        run: ./apps/api/node_modules/.bin/tsx --tsconfig tests/e2e/system-remediation/sr-live-map-001/tsconfig.live.json tests/e2e/system-remediation/sr-live-map-001/session-teardown.ts
+
       - name: Record run status
         if: always()
         env:

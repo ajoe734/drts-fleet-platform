@@ -60,84 +60,133 @@ export async function bootstrapMapSessions(env: LiveEnv, deps: BootstrapDeps) {
       );
       return normalizeApiResponse(await response.json()) as T;
     };
-    const sessions = [
-      {
-        realm: "driver",
-        actorType: "driver_user",
-        actorId: config.driverId,
-        scopes: ["driver:read"],
-        name: "DRTS_LIVE_MAP_DRIVER_SESSION_TOKEN",
-      },
-      {
-        realm: "ops",
-        actorType: "ops_user",
-        actorId: MAP_OBSERVER_ID,
-        scopes: ["regulatory:read"],
-        name: "DRTS_LIVE_MAP_OBSERVER_SESSION_TOKEN",
-      },
-    ];
     const verified: Array<{ name: string; token: string }> = [];
-    for (const subject of sessions) {
-      evidence.stage = `${subject.realm}:issue`;
-      const issued = await request<{ token: string; expiresIn: string }>(
-        "auth/token",
-        {
-          method: "POST",
-          headers: {
-            "content-type": "application/json",
-            "x-drts-internal-key": internalKey,
-            "x-actor-type": subject.actorType,
-            "x-actor-id": subject.actorId,
-            "x-realm": subject.realm,
-            "x-scopes": subject.scopes.join(","),
-          },
-          body: "{}",
+
+    // 1. Get an observer session for ops
+    evidence.stage = `ops:issue`;
+    const observerIssued = await request<{ token: string; expiresIn: string }>(
+      "auth/token",
+      {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "x-drts-internal-key": internalKey,
+          "x-actor-type": "ops_user",
+          "x-actor-id": MAP_OBSERVER_ID,
+          "x-realm": "ops",
+          "x-scopes": "regulatory:read",
         },
-      );
-      assert(
-        typeof issued.token === "string" &&
-          issued.token.length > 0 &&
-          !/\s/.test(issued.token),
-      );
-      deps.mask(issued.token);
-      // The supported dev issuer currently fixes user sessions to 8h. Do not
-      // locally sign/shorten a JWT or misrepresent this as a 15-minute token.
-      assert(/^(?:[1-9]\d*[sm]|[1-8]h)$/.test(issued.expiresIn));
-      const duration =
-        Number.parseInt(issued.expiresIn, 10) *
-        ({ s: 1, m: 60, h: 3600 }[issued.expiresIn.slice(-1)] ?? 0);
-      assert(duration >= 300 && duration <= 8 * 3600);
-      evidence.stage = `${subject.realm}:verify-session`;
-      const session = await request<{
-        data: {
-          active: boolean;
-          identity: {
-            realm: string;
-            actorType: string;
-            actorId: string;
-            scopes: string[];
-          };
-        };
-      }>("auth/session", {
-        headers: { authorization: `Bearer ${issued.token}` },
-      });
-      assert(session.data.active);
-      const identity = session.data.identity;
-      assert.equal(identity.realm, subject.realm);
-      assert.equal(identity.actorType, subject.actorType);
-      assert.equal(identity.actorId, subject.actorId);
-      assert.deepEqual([...identity.scopes].sort(), [...subject.scopes].sort());
-      verified.push({ name: subject.name, token: issued.token });
-      evidence.sessions.push({
-        realm: subject.realm,
-        actor_type: subject.actorType,
-        actor_id: subject.actorId,
-        scopes: subject.scopes,
-        expires_in: issued.expiresIn,
-      });
-    }
+        body: "{}",
+      },
+    );
+    assert(
+      typeof observerIssued.token === "string" &&
+        observerIssued.token.length > 0 &&
+        !/\s/.test(observerIssued.token),
+    );
+    deps.mask(observerIssued.token);
+    assert(/^(?:[1-9]\d*[sm]|[1-8]h)$/.test(observerIssued.expiresIn));
+    
+    evidence.stage = `ops:verify-session`;
+    let session = await request<{
+      data: {
+        active: boolean;
+        identity: { realm: string; actorType: string; actorId: string; scopes: string[] };
+      };
+    }>("auth/session", {
+      headers: { authorization: `Bearer ${observerIssued.token}` },
+    });
+    assert(session.data.active);
+    assert.equal(session.data.identity.realm, "ops");
+    assert.equal(session.data.identity.actorType, "ops_user");
+    assert.equal(session.data.identity.actorId, MAP_OBSERVER_ID);
+    assert.deepEqual([...session.data.identity.scopes].sort(), ["regulatory:read"]);
+    
+    verified.push({ name: "DRTS_LIVE_MAP_OBSERVER_SESSION_TOKEN", token: observerIssued.token });
+    evidence.sessions.push({
+      realm: "ops",
+      actor_type: "ops_user",
+      actor_id: MAP_OBSERVER_ID,
+      scopes: ["regulatory:read"],
+      expires_in: observerIssued.expiresIn,
+    });
+
+    // 2. Get a temp ops session with regulatory:write to issue driver invite
+    evidence.stage = `driver:invite-setup`;
+    const tempOpsIssued = await request<{ token: string; expiresIn: string }>(
+      "auth/token",
+      {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "x-drts-internal-key": internalKey,
+          "x-actor-type": "ops_user",
+          "x-actor-id": MAP_OBSERVER_ID,
+          "x-realm": "ops",
+          "x-scopes": "regulatory:write",
+        },
+        body: "{}",
+      },
+    );
+    
+    evidence.stage = `driver:issue-invite`;
+    const invite = await request<{ data: { registrationCode: string } }>(
+      "auth/driver/device/invite",
+      {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          authorization: `Bearer ${tempOpsIssued.token}`,
+        },
+        body: JSON.stringify({ driverId: config.driverId }),
+      },
+    );
+    const registrationCode = invite.data.registrationCode;
+    deps.mask(registrationCode);
+    
+    evidence.stage = `driver:register-device`;
+    const deviceId = `live-map-run-${Date.now()}`;
+    const driverSession = await request<{ data: { accessToken: { token: string; expiresIn: string } } }>(
+      "auth/driver/device/register",
+      {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({ registrationCode, deviceId }),
+      },
+    );
+    const driverToken = driverSession.data.accessToken.token;
+    deps.mask(driverToken);
+    
+    evidence.stage = `driver:verify-session`;
+    session = await request<{
+      data: {
+        active: boolean;
+        identity: { realm: string; actorType: string; actorId: string; scopes: string[] };
+      };
+    }>("auth/session", {
+      headers: { authorization: `Bearer ${driverToken}` },
+    });
+    assert(session.data.active);
+    assert.equal(session.data.identity.realm, "driver");
+    assert.equal(session.data.identity.actorType, "driver_user");
+    assert.equal(session.data.identity.actorId, config.driverId);
+    assert.deepEqual([...session.data.identity.scopes].sort(), ["driver:read"]);
+    
+    verified.push({ name: "DRTS_LIVE_MAP_DRIVER_SESSION_TOKEN", token: driverToken });
+    evidence.sessions.push({
+      realm: "driver",
+      actor_type: "driver_user",
+      actor_id: config.driverId,
+      scopes: ["driver:read"],
+      expires_in: driverSession.data.accessToken.expiresIn,
+    });
+    
     // Neither token reaches subsequent steps unless both session checks pass.
     for (const { name, token } of verified) deps.exportSession(name, token);
+    deps.exportSession("DRTS_LIVE_MAP_DRIVER_DEVICE_ID", deviceId);
+    
     evidence.status = "passed";
     evidence.stage = "complete";
   } catch {
