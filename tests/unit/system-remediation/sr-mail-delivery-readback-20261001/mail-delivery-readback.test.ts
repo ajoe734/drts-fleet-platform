@@ -32,6 +32,7 @@ function identity(overrides: Partial<IdentityContext> = {}): IdentityContext {
     roleFamilies: ["tenant"],
     roles: ["tenant_admin"],
     scopes: ["tenant:read"],
+    supportedExecutionModes: ["discussion_planning"],
     ...overrides,
   };
 }
