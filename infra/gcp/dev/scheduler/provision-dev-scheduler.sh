@@ -149,12 +149,13 @@ cat <<EOF
    ${SCHEDULER_SA}), then redeploy or otherwise refresh the API's secret
    mount so it picks up the new version.
 2. Verify each job actually reaches the API once the registry above is live.
-   `gcloud scheduler jobs run` only dispatches the job -- it returns before
+   \`gcloud scheduler jobs run\` only dispatches the job -- it returns before
    the target responds -- and lastAttemptTime/state alone cannot tell a
    still-in-flight attempt from a completed one. Use the bounded completion
-   check instead, which polls for a matching Scheduler AttemptFinished
-   record or a Cloud Run HTTP record (either is itself proof the attempt
-   actually finished, unlike lastAttemptTime):
+   check instead, which polls for Cloud Scheduler's own AttemptFinished
+   record (the sole decisive evidence) and also prints a non-decisive Cloud
+   Run request-log line if it sees one, since a Cloud Run log entry cannot be
+   reliably attributed to this specific attempt:
      infra/gcp/dev/scheduler/confirm-job-attempt.sh ${MAIL_OUTBOX_JOB} internal/scheduled-tasks/mail-outbox/drain
      infra/gcp/dev/scheduler/confirm-job-attempt.sh ${APPROVAL_REMINDER_JOB} internal/scheduled-tasks/approval-timeout-reminders/run
    Exit 0 = confirmed completed successfully; exit 1 = confirmed completed

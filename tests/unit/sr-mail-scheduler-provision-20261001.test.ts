@@ -411,13 +411,28 @@ describe("SR-MAIL-SCHEDULER-PROVISION-20261001: runbook sequences deploy, regist
 });
 
 /** Synthetic log record consumed by the offline `gcloud` stand-in at
- * tests/unit/fixtures/sr-mail-scheduler-provision-20261001/fake-gcloud.cjs.
+ * tests/unit/fixtures/sr-mail-scheduler-provision-20261001/fake-gcloud.mjs.
  * Mirrors just the fields confirm-job-attempt.sh's `gcloud logging read`
- * filters key off (job_id/timestamp for the Scheduler query, requestUrl/
- * timestamp for the Cloud Run query). */
+ * filters key off (job_id/location/timestamp for the Scheduler query,
+ * requestMethod/requestUrl/timestamp for the Cloud Run query). `status` is a
+ * scalar `google.rpc.Code` name string (e.g. "OK"/"NOT_FOUND"), matching the
+ * real AttemptFinished log's `jsonPayload.status` field -- not the nested
+ * `status.code` object that belongs to the unrelated `Job` REST resource. */
 type FakeGcloudRecord =
-  | { type: "scheduler"; jobId: string; timestamp: string; statusCode?: string }
-  | { type: "run"; requestUrl: string; timestamp: string; httpStatus: string };
+  | {
+      type: "scheduler";
+      jobId: string;
+      location?: string;
+      timestamp: string;
+      status?: string;
+    }
+  | {
+      type: "run";
+      requestUrl: string;
+      httpMethod?: string;
+      timestamp: string;
+      httpStatus: string;
+    };
 
 /** Runs the real infra/gcp/dev/scheduler/confirm-job-attempt.sh against a
  * synthetic `gcloud` on PATH, entirely offline: no network call, no live
@@ -489,7 +504,7 @@ describe("SR-MAIL-SCHEDULER-PROVISION-20261001: confirm-job-attempt.sh's complet
         type: "scheduler",
         jobId: "drts-dev-mail-outbox-drain",
         timestamp: "2020-01-01T00:00:00Z",
-        statusCode: "0",
+        status: "OK",
       },
     ]);
     expect(result.exitCode).toBe(2);
@@ -502,7 +517,7 @@ describe("SR-MAIL-SCHEDULER-PROVISION-20261001: confirm-job-attempt.sh's complet
           type: "scheduler",
           jobId: "drts-dev-approval-timeout-reminders-run",
           timestamp: "2099-01-01T00:00:00Z",
-          statusCode: "0",
+          status: "OK",
         },
       ],
       { jobName: "drts-dev-mail-outbox-drain" },
@@ -510,33 +525,98 @@ describe("SR-MAIL-SCHEDULER-PROVISION-20261001: confirm-job-attempt.sh's complet
     expect(result.exitCode).toBe(2);
   });
 
-  it("accepts a matching, fresh Scheduler AttemptFinished success record", () => {
+  it("rejects a fresh, matching-job record from a different region (wrong-location evidence)", () => {
+    const result = runConfirmJobAttempt([
+      {
+        type: "scheduler",
+        jobId: "drts-dev-mail-outbox-drain",
+        location: "europe-west1",
+        timestamp: "2099-01-01T00:00:00Z",
+        status: "OK",
+      },
+    ]);
+    expect(result.exitCode).toBe(2);
+  });
+
+  it("accepts a matching, fresh Scheduler AttemptFinished record with scalar status=OK", () => {
     const result = runConfirmJobAttempt([
       {
         type: "scheduler",
         jobId: "drts-dev-mail-outbox-drain",
         timestamp: "2099-01-01T00:00:00Z",
+        status: "OK",
       },
     ]);
     expect(result.exitCode).toBe(0);
     expect(result.output).toContain("CONFIRMED COMPLETED (success");
   });
 
-  it("reports a matching, fresh Scheduler AttemptFinished failure record instead of claiming success", () => {
+  it("reports a matching, fresh Scheduler AttemptFinished record with a recognized scalar failure status, not claiming success", () => {
     const result = runConfirmJobAttempt([
       {
         type: "scheduler",
         jobId: "drts-dev-mail-outbox-drain",
         timestamp: "2099-01-01T00:00:00Z",
-        statusCode: "7",
+        status: "NOT_FOUND",
       },
     ]);
     expect(result.exitCode).toBe(1);
     expect(result.output).toContain("FAILED");
-    expect(result.output).toContain("status.code=7");
+    expect(result.output).toContain("status=NOT_FOUND");
   });
 
-  it("falls back to a matching Cloud Run 2xx record when no Scheduler record exists", () => {
+  it("reports a recognized PERMISSION_DENIED status as failure, not success", () => {
+    const result = runConfirmJobAttempt([
+      {
+        type: "scheduler",
+        jobId: "drts-dev-mail-outbox-drain",
+        timestamp: "2099-01-01T00:00:00Z",
+        status: "PERMISSION_DENIED",
+      },
+    ]);
+    expect(result.exitCode).toBe(1);
+    expect(result.output).toContain("status=PERMISSION_DENIED");
+  });
+
+  it("reports a recognized UNAUTHENTICATED status as failure, not success", () => {
+    const result = runConfirmJobAttempt([
+      {
+        type: "scheduler",
+        jobId: "drts-dev-mail-outbox-drain",
+        timestamp: "2099-01-01T00:00:00Z",
+        status: "UNAUTHENTICATED",
+      },
+    ]);
+    expect(result.exitCode).toBe(1);
+    expect(result.output).toContain("status=UNAUTHENTICATED");
+  });
+
+  it("treats a matching record with an empty/absent status field as unconfirmed, not success (regression: previously printed success because the old jsonPayload.status.code selector is always empty for a scalar status field)", () => {
+    const result = runConfirmJobAttempt([
+      {
+        type: "scheduler",
+        jobId: "drts-dev-mail-outbox-drain",
+        timestamp: "2099-01-01T00:00:00Z",
+      },
+    ]);
+    expect(result.exitCode).toBe(2);
+    expect(result.output).not.toContain("CONFIRMED COMPLETED (success");
+  });
+
+  it("treats a matching record with an unrecognized status string as unconfirmed rather than guessing success or failure", () => {
+    const result = runConfirmJobAttempt([
+      {
+        type: "scheduler",
+        jobId: "drts-dev-mail-outbox-drain",
+        timestamp: "2099-01-01T00:00:00Z",
+        status: "SOME_FUTURE_UNDOCUMENTED_VALUE",
+      },
+    ]);
+    expect(result.exitCode).toBe(2);
+    expect(result.output).not.toContain("CONFIRMED COMPLETED (success");
+  });
+
+  it("does not confirm completion from a matching Cloud Run 2xx record alone -- it is diagnostic only, never decisive (regression: an unrelated CORS preflight to the same route could previously certify success)", () => {
     const result = runConfirmJobAttempt([
       {
         type: "run",
@@ -545,12 +625,34 @@ describe("SR-MAIL-SCHEDULER-PROVISION-20261001: confirm-job-attempt.sh's complet
         httpStatus: "200",
       },
     ]);
-    expect(result.exitCode).toBe(0);
-    expect(result.output).toContain("Cloud Run HTTP 200");
+    expect(result.exitCode).toBe(2);
+    expect(result.output).not.toContain("CONFIRMED COMPLETED");
+    expect(result.output).toContain("DIAGNOSTIC");
+    expect(result.output).toContain("Cloud Run");
   });
 
-  it("reports a matching Cloud Run non-2xx record as failure, not success", () => {
+  it("excludes a non-POST Cloud Run record (e.g. a CORS OPTIONS preflight) even from the diagnostic path", () => {
     const result = runConfirmJobAttempt([
+      {
+        type: "run",
+        requestUrl: "/api/internal/scheduled-tasks/mail-outbox/drain",
+        httpMethod: "OPTIONS",
+        timestamp: "2099-01-01T00:00:00Z",
+        httpStatus: "204",
+      },
+    ]);
+    expect(result.exitCode).toBe(2);
+    expect(result.output).not.toContain("DIAGNOSTIC");
+  });
+
+  it("prefers the decisive Scheduler record over a diagnostic Cloud Run record when both are present", () => {
+    const result = runConfirmJobAttempt([
+      {
+        type: "scheduler",
+        jobId: "drts-dev-mail-outbox-drain",
+        timestamp: "2099-01-01T00:00:00Z",
+        status: "OK",
+      },
       {
         type: "run",
         requestUrl: "/api/internal/scheduled-tasks/mail-outbox/drain",
@@ -558,8 +660,8 @@ describe("SR-MAIL-SCHEDULER-PROVISION-20261001: confirm-job-attempt.sh's complet
         httpStatus: "503",
       },
     ]);
-    expect(result.exitCode).toBe(1);
-    expect(result.output).toContain("Cloud Run HTTP 503");
+    expect(result.exitCode).toBe(0);
+    expect(result.output).toContain("CONFIRMED COMPLETED (success");
   });
 });
 

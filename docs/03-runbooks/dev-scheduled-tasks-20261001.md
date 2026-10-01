@@ -136,16 +136,23 @@ attempt started"; they are not a completed-success check.
 
 **Use the completion-check script instead** —
 `infra/gcp/dev/scheduler/confirm-job-attempt.sh` fires the job and then
-polls (bounded by a timeout) for actual completion evidence: either Cloud
-Scheduler's own per-attempt completion record (the `AttemptFinished` log
-entry Google's troubleshooting guide describes —
-https://docs.cloud.google.com/scheduler/docs/troubleshooting, which pairs
-each `AttemptStarted` with a later `AttemptFinished` carrying the real
-outcome), or a corroborating Cloud Run HTTP request-log entry for the same
-route (Cloud Run only writes that entry once the handler's response has
-been sent). Both lookups are bounded to timestamps at or after the moment
-the script fires the job, so a stale (older) or wrong-job log entry cannot
-be mistaken for this attempt's result:
+polls (bounded by a timeout) for Cloud Scheduler's own per-attempt
+completion record: the `AttemptFinished` log entry Google's troubleshooting
+guide describes (https://docs.cloud.google.com/scheduler/docs/troubleshooting),
+which pairs each `AttemptStarted` with a later `AttemptFinished` carrying
+the real outcome in a scalar `jsonPayload.status` field (a `google.rpc.Code`
+name string such as `"OK"` or `"NOT_FOUND"` — not the nested
+`{code, message}` object the unrelated `Job.status` REST field uses). The
+lookup is bounded to timestamps at or after the moment the script fires the
+job and scoped to this job's exact `job_id`/`location`, so a stale (older),
+wrong-job, or wrong-region log entry cannot be mistaken for this attempt's
+result. The script also looks for a Cloud Run HTTP `POST` request-log entry
+for the same route and prints it if found, but **only as a non-decisive
+diagnostic** — unlike the AttemptFinished record, a Cloud Run log entry
+cannot be reliably attributed to this specific Scheduler attempt (nothing in
+Cloud Logging's structured `httpRequest` fields correlates it to a job
+attempt, and an unrelated request such as a CORS preflight can hit the same
+route), so it never changes the exit code:
 
 ```bash
 infra/gcp/dev/scheduler/confirm-job-attempt.sh \
@@ -154,15 +161,17 @@ infra/gcp/dev/scheduler/confirm-job-attempt.sh \
   drts-dev-approval-timeout-reminders-run internal/scheduled-tasks/approval-timeout-reminders/run
 ```
 
-Exit `0` means confirmed completed successfully; exit `1` means confirmed
-completed but failed (the script prints the Scheduler `status.code` or
-Cloud Run HTTP status); exit `2` means no completion evidence was found
-within the timeout — this is **not** success, it means completion is still
-unproven (keep investigating, or re-run with a longer timeout via the
-script's third argument). A timeout/exit-`2` result does not by itself mean
-nothing downstream ran either — the handler may still complete after the
-poll window closes, which is exactly why this is reported as "unconfirmed,"
-not "failed."
+Exit `0` means a matching Scheduler `AttemptFinished` record with
+`status="OK"` was found; exit `1` means a matching record with a recognized
+non-`OK` `google.rpc.Code` name was found (the script prints it); exit `2`
+means no such record was found within the timeout — either no evidence at
+all, or only a record whose `status` field was empty/unrecognized, or only
+the non-decisive Cloud Run diagnostic. Exit `2` is **not** success, it means
+completion is still unproven (keep investigating, or re-run with a longer
+timeout via the script's third argument). A timeout/exit-`2` result does not
+by itself mean nothing downstream ran either — the handler may still
+complete after the poll window closes, which is exactly why this is reported
+as "unconfirmed," not "failed."
 
 A completed-success result is still not proof the request was authenticated
 and authorized as the scheduler identity: cross-check the application's own

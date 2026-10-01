@@ -5,10 +5,14 @@
 // without any live GCP calls. It emulates just enough of `gcloud scheduler
 // jobs run` and `gcloud logging read` to drive that script's branches:
 // reading a small fixture of synthetic log records (set via
-// FAKE_GCLOUD_FIXTURE) and applying the same job_id/route/timestamp filters
-// the real Cloud Logging query in confirm-job-attempt.sh expresses, so a
-// stale or wrong-job fixture record is excluded exactly as the live filter
-// would exclude it.
+// FAKE_GCLOUD_FIXTURE) and applying the same job_id/location/requestMethod/
+// route/timestamp filters the real Cloud Logging query in
+// confirm-job-attempt.sh expresses, so a stale, wrong-job, wrong-region, or
+// wrong-method fixture record is excluded exactly as the live filter would
+// exclude it. Scheduler records expose a scalar `status` field (a
+// google.rpc.Code name string, e.g. "OK"/"NOT_FOUND") mirroring the real
+// AttemptFinished log's `jsonPayload.status` shape -- not a nested
+// `status.code` object, which belongs to the unrelated `Job` REST resource.
 
 import { appendFileSync, readFileSync } from "node:fs";
 
@@ -34,6 +38,10 @@ if (args[0] === "logging" && args[1] === "read") {
   const isRunQuery = filter.includes("cloud_run_revision");
   const minTimestamp = filter.match(/timestamp>="([^"]+)"/)?.[1] ?? null;
   const jobId = filter.match(/resource\.labels\.job_id="([^"]+)"/)?.[1] ?? null;
+  const location =
+    filter.match(/resource\.labels\.location="([^"]+)"/)?.[1] ?? null;
+  const requestMethod =
+    filter.match(/httpRequest\.requestMethod="([^"]+)"/)?.[1] ?? null;
   const routeSubstring =
     filter.match(/httpRequest\.requestUrl=~"([^"]+)"/)?.[1] ?? null;
 
@@ -42,6 +50,15 @@ if (args[0] === "logging" && args[1] === "read") {
     if (isSchedulerQuery && record.type !== "scheduler") return false;
     if (isRunQuery && record.type !== "run") return false;
     if (jobId && record.jobId !== jobId) return false;
+    if (location && (record.location ?? "us-central1") !== location) {
+      return false;
+    }
+    if (
+      requestMethod &&
+      (record.httpMethod ?? "POST") !== requestMethod
+    ) {
+      return false;
+    }
     if (
       routeSubstring &&
       record.requestUrl &&
@@ -58,7 +75,7 @@ if (args[0] === "logging" && args[1] === "read") {
   }
   const record = candidates[0];
   if (record.type === "scheduler") {
-    process.stdout.write(`${record.timestamp}\t${record.statusCode ?? ""}\n`);
+    process.stdout.write(`${record.timestamp}\t${record.status ?? ""}\n`);
   } else {
     process.stdout.write(`${record.timestamp}\t${record.httpStatus}\n`);
   }

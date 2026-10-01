@@ -13,29 +13,56 @@
 # `state=ENABLED` plus an absent/zero `status.code` is therefore also
 # consistent with an attempt that is still in flight, not only with one that
 # succeeded. This script instead polls, bounded by a timeout, for actual
-# completion evidence:
-#   1. Cloud Scheduler's own per-attempt completion record -- the
-#      `AttemptFinished` log entry Google's troubleshooting guide describes
-#      (https://docs.cloud.google.com/scheduler/docs/troubleshooting), scoped
-#      to this exact job and to timestamps at/after this invocation, so an
-#      earlier/unrelated attempt (stale evidence) or another job's attempt
-#      (wrong-job evidence) cannot be mistaken for this run's result; or
-#   2. a corroborating Cloud Run HTTP request-log entry for the same route,
-#      which (unlike the application's own text log) Cloud Run only writes
-#      once the handler's response has been sent, i.e. it is itself
-#      completion evidence, not an auth-time marker.
+# completion evidence.
+#
+# Why R4 changed how that evidence is read and weighted:
+#   - Scheduler outcome field (F2 part A): the `AttemptFinished` log entry
+#     (https://docs.cloud.google.com/scheduler/docs/troubleshooting) is a
+#     Cloud Logging record, not the `Job` resource -- its `jsonPayload.status`
+#     field is a scalar `google.rpc.Code` NAME STRING (e.g. `"OK"` on
+#     success, `"NOT_FOUND"`/`"PERMISSION_DENIED"`/`"UNAUTHENTICATED"` on
+#     failure), not the nested `{code, message}` `google.rpc.Status` object
+#     that the unrelated `Job.status` REST field uses. A published failing
+#     Scheduler log confirms the scalar shape:
+#     https://discuss.google.dev/t/convert-a-gcp-dataflow-successful-job-into-pipeline/125395 .
+#     Selecting `jsonPayload.status.code` against a scalar `status` prints an
+#     empty field for every outcome -- success, every failure code, and a
+#     malformed/unrecognized record alike -- so treating "empty" as success
+#     silently certified failed and unauthenticated attempts as successful.
+#     This script now selects the scalar `jsonPayload.status` field directly
+#     and classifies it: exactly `"OK"` is success; a recognized
+#     `google.rpc.Code` name other than `OK` is a confirmed failure; anything
+#     else (empty, or a string this script does not recognize) is NOT treated
+#     as success -- it falls through to UNCONFIRMED, because Google has not
+#     published a complete schema for this field and guessing would risk the
+#     same false-success failure mode this fix exists to close.
+#   - Cloud Run corroboration (F2 part B): `apps/api/src/main.ts` enables
+#     CORS, so an unrelated OPTIONS preflight to the same route can return a
+#     2xx while the actual scheduler-triggered POST is still in flight or
+#     later fails, and nothing in the Cloud Run HTTP request log correlates a
+#     given request back to a specific Scheduler job attempt (Cloud
+#     Scheduler's own headers are not part of Cloud Logging's structured
+#     `httpRequest` fields). A Cloud Run log entry for this route can
+#     therefore never be used to CONFIRM this script's own attempt -- it is
+#     printed only as non-decisive diagnostic context (and now scoped to
+#     `requestMethod="POST"` to at least exclude preflights), and completion
+#     success/failure is decided solely by the Scheduler `AttemptFinished`
+#     record.
 #
 # Usage:
 #   confirm-job-attempt.sh <job-name> <route-path-substring> [timeout-seconds]
 #
 # Exit codes:
-#   0 = confirmed COMPLETED successfully (matching AttemptFinished status.code
-#       absent/0, or a matching Cloud Run 2xx response)
-#   1 = confirmed COMPLETED but FAILED (matching AttemptFinished non-zero
-#       status.code, or a matching Cloud Run non-2xx response)
+#   0 = confirmed COMPLETED successfully (matching AttemptFinished
+#       status="OK")
+#   1 = confirmed COMPLETED but FAILED (matching AttemptFinished status is a
+#       recognized non-OK google.rpc.Code name)
 #   2 = UNCONFIRMED -- no completion evidence found at/after invocation time
-#       within the timeout. This is NOT success; absent/pending/stale/
-#       wrong-job evidence all fall through to this outcome.
+#       within the timeout, or a matching record's status field was empty or
+#       unrecognized. This is NOT success; absent/pending/stale/wrong-job/
+#       unrecognized evidence all fall through to this outcome. A diagnostic
+#       Cloud Run POST record, if one was seen, is reported here but never
+#       changes the exit code.
 set -euo pipefail
 
 JOB_NAME="${1:?usage: confirm-job-attempt.sh <job-name> <route-path-substring> [timeout-seconds]}"
@@ -52,49 +79,61 @@ T0="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 echo "Triggering ${JOB_NAME} at ${T0} (bounding all completion evidence below to this time or later)..."
 gcloud scheduler jobs run "$JOB_NAME" --location="$REGION" --project="$PROJECT_ID" >/dev/null
 
+run_diagnostic=""
+
 elapsed=0
 while :; do
-  # Primary evidence: Cloud Scheduler's own AttemptFinished record for this
-  # exact job, bounded to timestamps at/after T0. A record that exists but
-  # predates T0 (stale) or names a different job_id (wrong job) is excluded
-  # by this filter and therefore cannot satisfy this check.
+  # Decisive evidence: Cloud Scheduler's own AttemptFinished record for this
+  # exact job in this exact region, bounded to timestamps at/after T0. A
+  # record that exists but predates T0 (stale), names a different job_id
+  # (wrong job) or a different location (wrong region) is excluded by this
+  # filter and therefore cannot satisfy this check.
   scheduler_result="$(gcloud logging read \
     "resource.type=\"cloud_scheduler_job\"
      resource.labels.job_id=\"${JOB_NAME}\"
+     resource.labels.location=\"${REGION}\"
      jsonPayload.\"@type\"=\"type.googleapis.com/google.cloud.scheduler.logging.AttemptFinished\"
      timestamp>=\"${T0}\"" \
     --project="$PROJECT_ID" --freshness=10m --limit=1 \
-    --format='value(timestamp,jsonPayload.status.code)' 2>/dev/null || true)"
+    --format='value(timestamp,jsonPayload.status)' 2>/dev/null || true)"
 
   if [ -n "$scheduler_result" ]; then
-    status_code="$(printf '%s' "$scheduler_result" | cut -f2)"
-    if [ -z "$status_code" ] || [ "$status_code" = "0" ]; then
-      echo "CONFIRMED COMPLETED (success, Scheduler AttemptFinished): ${scheduler_result}"
-      exit 0
-    fi
-    echo "CONFIRMED COMPLETED (FAILED, Scheduler AttemptFinished status.code=${status_code}): ${scheduler_result}"
-    exit 1
+    status_value="$(printf '%s' "$scheduler_result" | cut -f2)"
+    case "$status_value" in
+      OK)
+        echo "CONFIRMED COMPLETED (success, Scheduler AttemptFinished status=OK): ${scheduler_result}"
+        exit 0
+        ;;
+      CANCELLED | UNKNOWN | INVALID_ARGUMENT | DEADLINE_EXCEEDED | NOT_FOUND | \
+      ALREADY_EXISTS | PERMISSION_DENIED | UNAUTHENTICATED | RESOURCE_EXHAUSTED | \
+      FAILED_PRECONDITION | ABORTED | OUT_OF_RANGE | UNIMPLEMENTED | INTERNAL | \
+      UNAVAILABLE | DATA_LOSS)
+        echo "CONFIRMED COMPLETED (FAILED, Scheduler AttemptFinished status=${status_value}): ${scheduler_result}"
+        exit 1
+        ;;
+      *)
+        echo "WARNING: matching Scheduler AttemptFinished record found but its status ('${status_value}') is empty or not a recognized google.rpc.Code name -- not treating this as success; continuing to poll: ${scheduler_result}" >&2
+        ;;
+    esac
   fi
 
-  # Corroborating evidence: Cloud Run's HTTP request log for this route,
-  # also bounded to timestamps at/after T0 for the same stale/wrong-target
-  # reason as above.
-  run_result="$(gcloud logging read \
-    "resource.type=\"cloud_run_revision\"
-     resource.labels.service_name=\"${CLOUD_RUN_SERVICE}\"
-     httpRequest.requestUrl=~\"${ROUTE_SUBSTRING}\"
-     timestamp>=\"${T0}\"" \
-    --project="$PROJECT_ID" --freshness=10m --limit=1 \
-    --format='value(timestamp,httpRequest.status)' 2>/dev/null || true)"
-
-  if [ -n "$run_result" ]; then
-    http_status="$(printf '%s' "$run_result" | cut -f2)"
-    if [ "$http_status" -ge 200 ] 2>/dev/null && [ "$http_status" -lt 300 ] 2>/dev/null; then
-      echo "CONFIRMED COMPLETED (success, Cloud Run HTTP ${http_status}): ${run_result}"
-      exit 0
+  # Non-decisive diagnostic: a Cloud Run HTTP POST request-log entry for this
+  # route, bounded to timestamps at/after T0. This can never confirm success
+  # or failure on its own -- see the F2 part B note in the header -- so it is
+  # recorded once and only surfaced in the final UNCONFIRMED message.
+  if [ -z "$run_diagnostic" ]; then
+    run_result="$(gcloud logging read \
+      "resource.type=\"cloud_run_revision\"
+       resource.labels.service_name=\"${CLOUD_RUN_SERVICE}\"
+       httpRequest.requestMethod=\"POST\"
+       httpRequest.requestUrl=~\"${ROUTE_SUBSTRING}\"
+       timestamp>=\"${T0}\"" \
+      --project="$PROJECT_ID" --freshness=10m --limit=1 \
+      --format='value(timestamp,httpRequest.status)' 2>/dev/null || true)"
+    if [ -n "$run_result" ]; then
+      run_diagnostic="$run_result"
+      echo "DIAGNOSTIC (not decisive, cannot be correlated to this specific Scheduler attempt): matching Cloud Run POST request-log entry: ${run_result}" >&2
     fi
-    echo "CONFIRMED COMPLETED (FAILED, Cloud Run HTTP ${http_status}): ${run_result}"
-    exit 1
   fi
 
   if [ "$elapsed" -ge "$TIMEOUT_SECONDS" ]; then
@@ -104,5 +143,9 @@ while :; do
   elapsed=$((elapsed + POLL_INTERVAL_SECONDS))
 done
 
-echo "UNCONFIRMED: no Scheduler AttemptFinished or Cloud Run HTTP record for ${JOB_NAME} at/after ${T0} within ${TIMEOUT_SECONDS}s. This does NOT mean the attempt failed -- it means completion is not yet provable. Do not treat this as success; re-run with a longer timeout or investigate per docs/03-runbooks/dev-scheduled-tasks-20261001.md step 4's troubleshooting section." >&2
+if [ -n "$run_diagnostic" ]; then
+  echo "UNCONFIRMED: no Scheduler AttemptFinished record (with a recognized status) for ${JOB_NAME} at/after ${T0} within ${TIMEOUT_SECONDS}s. A diagnostic Cloud Run POST record was seen (${run_diagnostic}) but it cannot be reliably attributed to this specific attempt, so it is NOT used to confirm completion. This does NOT mean the attempt failed -- it means completion is not yet provable. Re-run with a longer timeout or investigate per docs/03-runbooks/dev-scheduled-tasks-20261001.md step 4's troubleshooting section." >&2
+else
+  echo "UNCONFIRMED: no Scheduler AttemptFinished record and no diagnostic Cloud Run POST record for ${JOB_NAME} at/after ${T0} within ${TIMEOUT_SECONDS}s. This does NOT mean the attempt failed -- it means completion is not yet provable. Do not treat this as success; re-run with a longer timeout or investigate per docs/03-runbooks/dev-scheduled-tasks-20261001.md step 4's troubleshooting section." >&2
+fi
 exit 2
