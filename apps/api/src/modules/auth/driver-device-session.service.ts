@@ -121,6 +121,34 @@ export class DriverDeviceSessionService implements OnModuleInit {
     };
   }
 
+  async revokeInvitation(
+    command: { registrationCode: string },
+  ): Promise<{ revoked: boolean }> {
+    const code = command.registrationCode.trim();
+    if (!code) return { revoked: false };
+    
+    const hash = this.hashToken(code);
+    let invitation = this.invitationsByHash.get(hash) ?? undefined;
+    if (!invitation && this.repository) {
+      invitation = (await this.repository.findInvitationByCodeHash(hash)) ?? undefined;
+    }
+    
+    if (!invitation || invitation.status !== "pending") {
+      return { revoked: false };
+    }
+    
+    invitation.status = "revoked";
+    invitation.revokedAt = new Date().toISOString();
+    invitation.updatedAt = invitation.revokedAt;
+    
+    if (this.repository) {
+      await this.repository.saveInvitation(invitation);
+    }
+    this.invitationsByHash.set(hash, invitation);
+    
+    return { revoked: true };
+  }
+
   async register(
     command: RegisterDriverDeviceCommand,
     requestId?: string,

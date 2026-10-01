@@ -42,7 +42,7 @@ describe("Internal Key Exception Rotation & Retirement Integration (IAM-SVC-002)
     }
   });
 
-  it("allows dual-key rotation overlap where both active primary and previous keys succeed", () => {
+  it("allows dual-key rotation overlap where both active primary and previous keys succeed", async () => {
     const primaryKey = "primary-key-32-chars-long-secret-key-1";
     const previousKey = "previous-key-32-chars-long-secret-key-2";
 
@@ -50,7 +50,7 @@ describe("Internal Key Exception Rotation & Retirement Integration (IAM-SVC-002)
     process.env.DRTS_INTERNAL_KEY_PREVIOUS = previousKey;
 
     // 1. Primary key request succeeds
-    expect(() =>
+    await expect(
       validateInternalKey(
         {
           method: "POST",
@@ -61,10 +61,10 @@ describe("Internal Key Exception Rotation & Retirement Integration (IAM-SVC-002)
         },
         primaryKey,
       ),
-    ).not.toThrow();
+    ).resolves.not.toThrow();
 
     // 2. Previous key request during rotation overlap succeeds
-    expect(() =>
+    await expect(
       validateInternalKey(
         {
           method: "POST",
@@ -75,10 +75,10 @@ describe("Internal Key Exception Rotation & Retirement Integration (IAM-SVC-002)
         },
         primaryKey,
       ),
-    ).not.toThrow();
+    ).resolves.not.toThrow();
   });
 
-  it("rejects revoked key even during rotation window with generic 401 INTERNAL_KEY_INVALID and no leaked metadata", () => {
+  it("rejects revoked key even during rotation window with generic 401 INTERNAL_KEY_INVALID and no leaked metadata", async () => {
     const primaryKey = "primary-key-32-chars-long-secret-key-1";
     const revokedKey = "revoked-key-32-chars-long-secret-key-x";
 
@@ -87,7 +87,7 @@ describe("Internal Key Exception Rotation & Retirement Integration (IAM-SVC-002)
 
     let caught: ApiRequestError | null = null;
     try {
-      validateInternalKey(
+      await validateInternalKey(
         {
           method: "POST",
           originalUrl: "/api/partner/ingress/handoff",
@@ -174,7 +174,7 @@ describe("Internal Key Exception Rotation & Retirement Integration (IAM-SVC-002)
     expect(caught?.code).toBe("INTERNAL_KEY_INVALID");
   });
 
-  it("fails closed when an internal key exception is expired with generic 401 INTERNAL_KEY_INVALID", () => {
+  it("fails closed when an internal key exception is expired with generic 401 INTERNAL_KEY_INVALID", async () => {
     const targetExcp = INTERNAL_KEY_EXCEPTION_REGISTRY.find(
       (e) => e.exceptionId === "INTERNAL_KEY_EXCP_002",
     )!;
@@ -189,7 +189,7 @@ describe("Internal Key Exception Rotation & Retirement Integration (IAM-SVC-002)
 
       let caught: ApiRequestError | null = null;
       try {
-        validateInternalKey(
+        await validateInternalKey(
           {
             method: "POST",
             originalUrl: "/api/partner/ingress/handoff",

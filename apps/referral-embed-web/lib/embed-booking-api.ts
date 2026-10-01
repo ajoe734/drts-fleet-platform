@@ -27,10 +27,37 @@ type ReferralPassengerRatingResult = {
   submittedAt: string;
 };
 
-function buildIdentityHeaders(
+const METADATA_IDENTITY_TOKEN_URL =
+  "http://metadata.google.internal/computeMetadata/v1/instance/service-accounts/default/identity";
+const RUN_APP_HOST_SUFFIX = ".a.run.app";
+
+async function mintMetadataIdentityToken(
+  audience: string,
+): Promise<string | null> {
+  const metadataUrl = new URL(METADATA_IDENTITY_TOKEN_URL);
+  metadataUrl.searchParams.set("audience", audience);
+  metadataUrl.searchParams.set("format", "full");
+  try {
+    const response = await fetch(metadataUrl, {
+      cache: "no-store",
+      headers: { "Metadata-Flavor": "Google" },
+    });
+    return response.ok ? response.text() : null;
+  } catch {
+    return null;
+  }
+}
+
+async function buildIdentityHeaders(
   session: NonNullable<Awaited<ReturnType<typeof getReferralEmbedSession>>>,
 ) {
   const id = session.identity;
+  const configuredAudience = process.env.DRTS_API_AUTH_AUDIENCE?.trim();
+  const targetUrl = new URL(API_URL);
+  const audience =
+    configuredAudience ||
+    (targetUrl.hostname.endsWith(RUN_APP_HOST_SUFFIX) ? targetUrl.origin : null);
+  const identityToken = audience ? await mintMetadataIdentityToken(audience) : null;
   return {
     "x-actor-type": id.actorType || "referral_passenger",
     "x-actor-id": id.drtsPassengerId || id.actorId,
@@ -40,9 +67,13 @@ function buildIdentityHeaders(
     "x-partner-program-id": id.partnerProgramId || "",
     "x-partner-entry-slug": id.partnerEntrySlug || session.partnerEntrySlug,
     "x-drts-passenger-id": id.drtsPassengerId || session.drtsPassengerId,
+    // SEC-INTERNAL-KEY-WIF-MIGRATION-20260930 follow-up: drop this send once
+    // dev has proven x-drts-google-id-token below end-to-end and
+    // INTERNAL_KEY_EXCP_002 is retired.
     ...(process.env.DRTS_INTERNAL_KEY
       ? { "x-drts-internal-key": process.env.DRTS_INTERNAL_KEY }
       : {}),
+    ...(identityToken ? { "x-drts-google-id-token": identityToken } : {}),
   };
 }
 
@@ -60,7 +91,7 @@ export async function createReferralBookingServer(
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        ...buildIdentityHeaders(session),
+        ...(await buildIdentityHeaders(session)),
         ...(command.idempotencyKey
           ? { "Idempotency-Key": command.idempotencyKey }
           : {}),
@@ -91,7 +122,7 @@ export async function getReferralActiveTripServer(): Promise<ReferralPassengerAc
       method: "GET",
       headers: {
         "Content-Type": "application/json",
-        ...buildIdentityHeaders(session),
+        ...(await buildIdentityHeaders(session)),
       },
       cache: "no-store",
     },
@@ -121,7 +152,7 @@ export async function getReferralTripHistoryServer(): Promise<{
       method: "GET",
       headers: {
         "Content-Type": "application/json",
-        ...buildIdentityHeaders(session),
+        ...(await buildIdentityHeaders(session)),
       },
       cache: "no-store",
     },
@@ -153,7 +184,7 @@ export async function getReferralTripReceiptServer(
       method: "GET",
       headers: {
         "Content-Type": "application/json",
-        ...buildIdentityHeaders(session),
+        ...(await buildIdentityHeaders(session)),
       },
       cache: "no-store",
     },
@@ -184,7 +215,7 @@ export async function cancelReferralTripServer(
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        ...buildIdentityHeaders(session),
+        ...(await buildIdentityHeaders(session)),
       },
       body: JSON.stringify(command),
       cache: "no-store",
@@ -216,7 +247,7 @@ export async function submitReferralTripRatingServer(
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        ...buildIdentityHeaders(session),
+        ...(await buildIdentityHeaders(session)),
       },
       body: JSON.stringify(command),
       cache: "no-store",
