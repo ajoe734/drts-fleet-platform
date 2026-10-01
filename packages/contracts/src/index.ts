@@ -940,6 +940,7 @@ export interface DriverDeviceInvitationRecord {
   revokedAt: string | null;
   createdAt: string;
   updatedAt: string;
+  boundBindingId?: string | null;
 }
 
 export interface DriverRefreshFamilyRecord {
