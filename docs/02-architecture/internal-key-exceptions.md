@@ -661,3 +661,97 @@ and §7.6's ops guidance before a real dev deploy exercises either.
 by both fixes above -- neither the workflow edit nor the doc edit removes or
 weakens them, and this worker made no shared-dev writes or deployments while
 making them.
+
+### 7.8 Planning-blocker routing (2026-10-01): no new product/contract decision exists
+
+This section is the output of the chairman-auto-generated unblock-helper task
+`SEC-INTERNAL-KEY-WIF-MIGRATION-20260930-UNBLOCK-PLANNING-DECISION`, whose brief
+asked this worker to "resolve or route the missing product/contract decision"
+behind the parent task's latest `blocked` state. Finding: there is no missing
+decision to make. The product decision was already made and recorded on
+2026-09-30 (registry row above: "Temporarily extended per user decision on
+2026-09-30 ... accepting the delay of scheduled security retirement"), and
+every subsequent round (§7.1-§7.7) has operated inside that decision without
+needing a new one. The parent's `blocked` state is correct and does not need
+re-litigation; it needed its root cause made explicit, which is what follows.
+
+**What the parent task's state actually is (re-verified 2026-10-01 from this
+worktree at `origin/dev` HEAD `5b0ec5283`, which contains merge_sha
+`c47ea39ac0131...` recorded on the candidate)**:
+
+- `required_acceptance` items 1-2 (`all_excp_002_callers_inventoried_with_usage_evidence`,
+  `callers_migrated_to_wif_assertion`) are met and merged; reviewer Claude2 has
+  independently re-confirmed this on every round through the `c47ea39ac`
+  merge.
+- `required_acceptance` item 3 (`excp_002_removed_and_deploy_dev_green`) is
+  **not** met: `grep -n "INTERNAL_KEY_EXCP_002"
+  apps/api/src/common/auth/internal-key-exception-registry.ts` still returns a
+  match at this HEAD, and the inventory table in §2 above still lists
+  `INTERNAL_KEY_EXCP_002` as active. The dual-send code path (send both
+  `x-drts-google-id-token` and the legacy `x-drts-internal-key`) is what
+  shipped; removing the legacy fallback is causally downstream of a real
+  `deploy-dev.yml` run that proves every caller lands on WIF, which itself
+  needs the §7.6 2-entry `WORKLOAD_IDENTITY_GOOGLE_SERVICE_PRINCIPALS` GCP
+  secret to exist first (`gcloud secrets describe
+  drts-dev-workload-identity-google-service-principals --project
+  drts-dev-devcc-20260825` returns `NOT_FOUND` as of the most recent prior
+  session's check). Populating that secret, setting the
+  `DEV_WORKLOAD_IDENTITY_CI_TENANT_ACTOR_ENABLED` repo var, and dispatching a
+  real `deploy-dev.yml` run are GCP/GitHub admin writes outside sandbox write
+  reach, and at least one prior session confirmed this is a deliberate
+  reservation for a human operator (its own sandbox credentials technically
+  had `roles/owner` on the GCP project but it still declined to act, per
+  §7.6's session note) -- not a sandbox permission gap to work around.
+- The parent's most recent `blocked` worker-outcome entry
+  (`claude-20261001T025612Z-002820d9`, `2026-10-01T02:58:43Z`, summary
+  `"Claude2"`) is **not** a new finding and carries no decision content. Cross-
+  checked against `ai-activity-log.jsonl`: that worker run requested a Bash
+  approval at `02:57:41Z` (`apr-20261001T025741Z-ead31224`), never received a
+  decision, and was killed (`worker_superseded`) at `02:58:45Z` with the
+  approval `auto-pruned`/`deny`'d a moment later -- the standard failure
+  signature of the `orchestrator_approval_broker` MCP being unreachable, the
+  same `CONNECT_TIMEOUT` this unblock-helper's own session observed live on
+  2026-10-01. This is not isolated: the log holds 404 `approval_pruned` events
+  (`grep -c '"type": "approval_pruned"' ai-activity-log.jsonl`) spanning many
+  unrelated tasks, confirming an infra-wide outage, not a per-task content
+  problem. The synthetic `blocked`/`"Claude2"` receipt is a side effect of
+  that outage, not a signal that a new decision or reviewer input is pending.
+
+**Routing decision**: no entry is added to `PHASE1_OPEN_QUESTIONS.md` or
+`PHASE1_DECISION_LEDGER.md` -- there is no open product/contract question.
+The parent task should remain `blocked`, `waiting_for: Claude2` (the nearest
+valid lane agent; `human`/`Supervisor` are not accepted by
+`ensure_agent`), with its `next` field corrected to state plainly that the
+remaining gate is the human-operator ops action above, not further owner
+code work and not a reviewer decision. Any future dispatch of an owner onto
+the parent while that ops action is still outstanding should re-block
+immediately with the same message rather than re-attempt code changes.
+
+**Why this worker could not write that correction onto the parent task
+directly**: `TaskBoardCommandExecutor._guard_worker_command` restricts a
+dispatched worker (`ORCH_DISPATCH_ROLE`/`ORCH_RUN_ID` set, as every task-brief
+dispatch has) to mutating only `ORCH_DISPATCH_TASK_ID` -- this helper's own
+id, not the parent's. `note <parent-id>` and `assign <parent-id> ...` both
+exit with "Dispatched worker cannot mutate a different task" /
+"Dispatched workers must use their assigned task lifecycle commands". A
+Supervisor-privileged interactive session (no `ORCH_DISPATCH_ROLE`/
+`ORCH_RUN_ID`) must run, in order, once this helper candidate is reviewed:
+
+```
+TASK_METADATA_JSON='{"resolved_parent_status":"blocked","resolved_parent_waiting_for":"Claude2","resolved_parent_next":"No open product/contract decision (user decision stands from 2026-09-30, see internal-key-exceptions.md §7.8). required_acceptance items 1-2 remain merged; item 3 (excp_002_removed_and_deploy_dev_green) remains blocked on a human operator populating the 2-entry WORKLOAD_IDENTITY_GOOGLE_SERVICE_PRINCIPALS GCP secret, setting DEV_WORKLOAD_IDENTITY_CI_TENANT_ACTOR_ENABLED, and running a real green deploy-dev. Do not redispatch an owner for code work until that ops action lands."}' \
+  AI_NAME=Supervisor ORCH_STATUS_ROOT=$PWD python3 tools/development-orchestrator/bin/ai_status.py assign \
+  SEC-INTERNAL-KEY-WIF-MIGRATION-20260930-UNBLOCK-PLANNING-DECISION Claude Claude2
+
+AI_NAME=Supervisor ORCH_STATUS_ROOT=$PWD python3 tools/development-orchestrator/bin/ai_status.py note \
+  SEC-INTERNAL-KEY-WIF-MIGRATION-20260930 'No open product/contract decision (user decision stands from 2026-09-30, see internal-key-exceptions.md §7.8). required_acceptance items 1-2 remain merged; item 3 remains blocked on a human operator GCP/GitHub ops action, not code or review work.'
+```
+
+The `assign` call sets `resolved_parent_status: blocked` on this helper task
+so that, once this helper itself reaches `done` via the normal candidate
+lifecycle (review by Claude2, CI, merge), `apply_unblock_parent_resolution`
+in `bin/ai_status.py` reads that field and keeps the parent correctly
+`blocked` (with the corrected `next` message and a fresh open blocker entry)
+instead of defaulting it to `todo` with a generic message, which is what
+happens when a completed `unblock` helper carries no `resolved_parent_*`
+metadata. The `note` call gives the parent's `next` field the corrected text
+immediately, without waiting for this helper's own merge.
