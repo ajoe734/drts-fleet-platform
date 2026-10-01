@@ -182,7 +182,7 @@ it("auth/token accepts ops_user and ops_observer principals through WIF direct l
   vi.useFakeTimers({ toFake: ["Date"] });
   vi.setSystemTime(new Date("2026-09-30T07:20:00.000Z"));
   vi.stubEnv("NODE_ENV", "test");
-  vi.stubEnv("STRICT_IAP_MODE", "false");
+  vi.stubEnv("STRICT_IAP_MODE", "true");
   vi.stubEnv("JWT_SECRET", "unit-only-session-contract-key");
 
   const repository = new IdentityRepository();
