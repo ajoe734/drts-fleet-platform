@@ -31,7 +31,8 @@ const MAIL_OUTBOX_ROUTE_SCOPE = "POST internal/scheduled-tasks/mail-outbox/drain
 const APPROVAL_REMINDER_ROUTE_SCOPE =
   "POST internal/scheduled-tasks/approval-timeout-reminders/run";
 
-/** The exact routeScopes/scopes this task registers for entry C. */
+/** The exact routeScopes/scopes entry C must declare -- asserted against the
+ * delivered JSON below, not fed to the adapter directly. */
 const ENTRY_C_ROUTE_SCOPES = [
   MAIL_OUTBOX_ROUTE_SCOPE,
   APPROVAL_REMINDER_ROUTE_SCOPE,
@@ -40,6 +41,59 @@ const ENTRY_C_SCOPES = [
   "notification-delivery:drain",
   "tenant-partner:approval-timeout-reminders:run",
 ];
+
+type RegistryEntry = {
+  serviceAccountEmail: string;
+  principalId: string;
+  allowedTokenAudiences: string[];
+  routeScopes: string[];
+  scopes?: string[];
+  ciTenantActorGrants?: unknown[];
+};
+
+function isEntryC(entry: unknown): entry is RegistryEntry {
+  return (
+    !!entry &&
+    typeof entry === "object" &&
+    (entry as RegistryEntry).serviceAccountEmail === SCHEDULER_SA_EMAIL
+  );
+}
+
+/** Parses every ```json fenced block in the doc, skipping blocks that don't
+ * parse. Scoping to fenced code blocks (rather than scanning raw doc text)
+ * is what lets this distinguish the real delivered JSON from prose that
+ * merely mentions the same strings (e.g. the narrative paragraph above
+ * §8.1). */
+function parseJsonFences(doc: string): unknown[] {
+  const fenceRe = /```json\n([\s\S]*?)```/g;
+  const parsed: unknown[] = [];
+  let match: RegExpExecArray | null;
+  while ((match = fenceRe.exec(doc)) !== null) {
+    try {
+      parsed.push(JSON.parse(match[1]));
+    } catch {
+      // Malformed JSON in a fence is a real authoring defect; the lookups
+      // below will report it as "entry C not found" rather than silently
+      // skipping a broken block.
+    }
+  }
+  return parsed;
+}
+
+const registryDocText = readFileSync(registryDocPath, "utf8");
+const jsonFences = parseJsonFences(registryDocText);
+
+/** §8.1's standalone single-object entry C. */
+const standaloneEntryC = jsonFences.find(
+  (parsed): parsed is RegistryEntry => !Array.isArray(parsed) && isEntryC(parsed),
+);
+
+/** §8.2's full three-entry array, and entry C as it appears inside it. */
+const threeEntryArray = jsonFences.find(
+  (parsed): parsed is RegistryEntry[] =>
+    Array.isArray(parsed) && parsed.some(isEntryC),
+);
+const entryCFromArray = threeEntryArray?.find(isEntryC);
 
 describe("SR-MAIL-SCHEDULER-PROVISION-20261001: entry C routeScopes format (matchesScope)", () => {
   it("matches both scheduled-task routes as the guard would present them (leading /api, leading slash)", () => {
@@ -87,6 +141,17 @@ describe("SR-MAIL-SCHEDULER-PROVISION-20261001: entry C enforced end to end thro
     vi.unstubAllGlobals();
   });
 
+  // Registry fed to the adapter is the *delivered* §8.2 entry C, parsed from
+  // the doc above -- not a hand-built literal. A wildcard, extra-route, or
+  // malformed mutation of the delivered JSON therefore changes what these
+  // tests actually exercise, so the denial tests below fail if it regresses.
+  if (!entryCFromArray) {
+    throw new Error(
+      "§8.2 entry C not found/parsable in docs/02-architecture/internal-key-exceptions.md -- cannot drive adapter tests from delivered content",
+    );
+  }
+  const deliveredEntryC = entryCFromArray;
+
   function setUp() {
     const { publicKey, privateKey } = generateKeyPairSync("rsa", {
       modulusLength: 2048,
@@ -111,9 +176,9 @@ describe("SR-MAIL-SCHEDULER-PROVISION-20261001: entry C enforced end to end thro
       {
         iss: "https://accounts.google.com",
         sub: "sr-mail-scheduler-subject",
-        email: SCHEDULER_SA_EMAIL,
+        email: deliveredEntryC.serviceAccountEmail,
         email_verified: true,
-        aud: API_ORIGIN,
+        aud: deliveredEntryC.allowedTokenAudiences[0],
         iat: now,
         exp: now + 300,
       },
@@ -121,13 +186,7 @@ describe("SR-MAIL-SCHEDULER-PROVISION-20261001: entry C enforced end to end thro
       { algorithm: "RS256", keyid: kid },
     );
     process.env.WORKLOAD_IDENTITY_GOOGLE_SERVICE_PRINCIPALS = JSON.stringify([
-      {
-        serviceAccountEmail: SCHEDULER_SA_EMAIL,
-        principalId: "dev-scheduler",
-        allowedTokenAudiences: [API_ORIGIN],
-        routeScopes: ENTRY_C_ROUTE_SCOPES,
-        scopes: ENTRY_C_SCOPES,
-      },
+      deliveredEntryC,
     ]);
     const adapter = new GoogleWorkloadIdentityAdapter(new IdentityRepository());
     return { adapter, token };
@@ -192,40 +251,55 @@ describe("SR-MAIL-SCHEDULER-PROVISION-20261001: entry C enforced end to end thro
   });
 });
 
-describe("SR-MAIL-SCHEDULER-PROVISION-20261001: registry doc provides a pasteable 3-entry JSON consistent with entry C", () => {
-  it("documents entry C with the verified service account, audience, routeScopes, and scopes", () => {
-    const doc = readFileSync(registryDocPath, "utf8");
-    expect(doc).toContain(SCHEDULER_SA_EMAIL);
-    expect(doc).toContain(API_ORIGIN);
-    expect(doc).toContain(MAIL_OUTBOX_ROUTE_SCOPE);
-    expect(doc).toContain(APPROVAL_REMINDER_ROUTE_SCOPE);
-    expect(doc).toContain("notification-delivery:drain");
-    expect(doc).toContain("tenant-partner:approval-timeout-reminders:run");
+describe("SR-MAIL-SCHEDULER-PROVISION-20261001: registry doc's delivered JSON is parsed and locked by tests, not prose-matched", () => {
+  it("both the §8.1 standalone entry and the §8.2 array copy of entry C are present, valid JSON, and agree exactly", () => {
+    expect(
+      standaloneEntryC,
+      "§8.1 standalone entry C JSON block not found/parsable",
+    ).toBeDefined();
+    expect(
+      entryCFromArray,
+      "§8.2 three-entry JSON array (or entry C within it) not found/parsable",
+    ).toBeDefined();
+    expect(standaloneEntryC).toEqual(entryCFromArray);
   });
 
-  it("includes a full three-entry array (A, B, and the new entry C) in one pasteable block", () => {
-    const doc = readFileSync(registryDocPath, "utf8");
-    expect(doc).toContain(
-      "drts-dev-runtime@drts-dev-devcc-20260825.iam.gserviceaccount.com",
+  it("entry C declares exactly the two documented routes and scopes, the verified audience, and nothing else -- no wildcard, no extra route, no ciTenantActorGrants", () => {
+    const entry = standaloneEntryC as RegistryEntry;
+    expect(entry.principalId).toBe("dev-scheduler");
+    expect(entry.allowedTokenAudiences).toEqual([API_ORIGIN]);
+    expect([...entry.routeScopes].sort()).toEqual(
+      [...ENTRY_C_ROUTE_SCOPES].sort(),
     );
-    expect(doc).toContain(
-      "github-actions-deployer@drts-dev-devcc-20260825.iam.gserviceaccount.com",
+    expect(entry.routeScopes).toHaveLength(ENTRY_C_ROUTE_SCOPES.length);
+    expect([...(entry.scopes ?? [])].sort()).toEqual(
+      [...ENTRY_C_SCOPES].sort(),
     );
-    expect(doc).toContain(SCHEDULER_SA_EMAIL);
-    // Entry C must not be given a ciTenantActorGrants entry: that field only
-    // gates the POST auth/token CI-impersonation branch, which entry C's
-    // routeScopes never grants access to in the first place.
-    const entryCIndex = doc.indexOf(SCHEDULER_SA_EMAIL);
-    const afterEntryC = doc.slice(entryCIndex, entryCIndex + 600);
-    expect(afterEntryC).not.toContain("ciTenantActorGrants");
+    // ciTenantActorGrants only gates the POST auth/token CI-impersonation
+    // branch, which entry C's routeScopes never grants access to.
+    expect(Object.keys(entry).sort()).toEqual(
+      [
+        "allowedTokenAudiences",
+        "principalId",
+        "routeScopes",
+        "scopes",
+        "serviceAccountEmail",
+      ].sort(),
+    );
   });
 
-  it("does not grant entry C a wildcard or prefix routeScope", () => {
-    const doc = readFileSync(registryDocPath, "utf8");
-    const entryCIndex = doc.indexOf(SCHEDULER_SA_EMAIL);
-    const entryCBlock = doc.slice(entryCIndex, entryCIndex + 600);
-    expect(entryCBlock).not.toContain('"* *"');
-    expect(entryCBlock).not.toContain("internal/scheduled-tasks/*");
+  it("the §8.2 array has exactly three entries: A, B, and C, each a distinct service account", () => {
+    expect(threeEntryArray).toHaveLength(3);
+    const emails = (threeEntryArray as RegistryEntry[])
+      .map((entry) => entry.serviceAccountEmail)
+      .sort();
+    expect(emails).toEqual(
+      [
+        "drts-dev-runtime@drts-dev-devcc-20260825.iam.gserviceaccount.com",
+        "github-actions-deployer@drts-dev-devcc-20260825.iam.gserviceaccount.com",
+        SCHEDULER_SA_EMAIL,
+      ].sort(),
+    );
   });
 });
 
@@ -235,9 +309,21 @@ describe("SR-MAIL-SCHEDULER-PROVISION-20261001: provisioning script is minimal-p
     expect(script).toContain("set -euo pipefail");
     expect(script).toContain("cloudscheduler.googleapis.com");
     expect(script).toContain("iam service-accounts create");
-    expect(script).toContain("roles/iam.serviceAccountTokenCreator");
     expect(script).toContain("--oidc-service-account-email");
     expect(script).toContain("--oidc-token-audience");
+  });
+
+  it("grants only the OIDC-token-minting role, not the broader token-creator role", () => {
+    const script = readFileSync(scriptPath, "utf8");
+    expect(script).toContain("roles/iam.serviceAccountOpenIdTokenCreator");
+    expect(script).not.toContain("roles/iam.serviceAccountTokenCreator");
+  });
+
+  it("documents the job-describe verification with the real top-level Job fields", () => {
+    const script = readFileSync(scriptPath, "utf8");
+    expect(script).toContain("lastAttemptTime,state,status.code");
+    expect(script).not.toMatch(/status\.lastAttemptTime/);
+    expect(script).not.toMatch(/status\.state/);
   });
 
   it("creates or updates exactly the two documented HTTP jobs", () => {
@@ -289,5 +375,19 @@ describe("SR-MAIL-SCHEDULER-PROVISION-20261001: runbook sequences deploy, regist
     expect(runbook).toContain("scheduler jobs run");
     expect(runbook).toContain("AUTH_GOOGLE_WORKLOAD_IDENTITY_USED");
     expect(runbook).toContain("principalId=dev-scheduler");
+  });
+
+  it("uses the real top-level Job fields and textPayload, not status.* or jsonPayload", () => {
+    const runbook = readFileSync(runbookPath, "utf8");
+    expect(runbook).toContain("lastAttemptTime,state,status.code");
+    expect(runbook).not.toMatch(/status\.lastAttemptTime/);
+    expect(runbook).toContain("textPayload");
+    expect(runbook).not.toMatch(/jsonPayload\.message/);
+  });
+
+  it("documents that BootstrapAuthGuard swallows adapter errors to JWT_INVALID, so only route-scope denial is log-visible", () => {
+    const runbook = readFileSync(runbookPath, "utf8");
+    expect(runbook).toContain("JWT_INVALID");
+    expect(runbook).toContain("AUTH_GOOGLE_WORKLOAD_IDENTITY_ROUTE_SCOPE_DENIED");
   });
 });

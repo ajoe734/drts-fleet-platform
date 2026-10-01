@@ -66,9 +66,9 @@ gc services enable cloudscheduler.googleapis.com
 
 # Cloud Scheduler's per-project service agent is what actually mints the
 # OIDC token at job-execution time; it must exist before it can be granted
-# serviceAccountTokenCreator below. Enabling the API alone does not always
-# provision it in every project, so this call is explicit. Idempotent: it
-# returns the existing identity if one is already provisioned.
+# serviceAccountOpenIdTokenCreator below. Enabling the API alone does not
+# always provision it in every project, so this call is explicit. Idempotent:
+# it returns the existing identity if one is already provisioned.
 say "Ensuring the Cloud Scheduler service agent exists"
 gc beta services identity create --service=cloudscheduler.googleapis.com >/dev/null
 SCHEDULER_SERVICE_AGENT="service-${PROJECT_NUMBER}@gcp-sa-cloudscheduler.iam.gserviceaccount.com"
@@ -84,12 +84,17 @@ fi
 
 # Resource-scoped grant on this one service account only -- not a project
 # IAM role -- so Cloud Scheduler can mint an OIDC token asserting this SA's
-# identity when a job fires. Without this, job creation/execution fails with
-# a permission-denied error naming this exact binding.
-say "Granting the Cloud Scheduler service agent permission to mint tokens as ${SCHEDULER_SA_ID}"
+# identity when a job fires. This uses the OIDC-only role below (grants
+# only iam.serviceAccounts.getOpenIdToken) rather than the broader "token
+# creator" role, which also carries getAccessToken, signBlob, signJwt, and
+# implicitDelegation that these OIDC-only jobs never use -- see
+# https://docs.cloud.google.com/iam/docs/service-account-permissions#service_account_roles.
+# Without this, job creation/execution fails with a permission-denied error
+# naming this exact binding.
+say "Granting the Cloud Scheduler service agent permission to mint OIDC tokens as ${SCHEDULER_SA_ID}"
 gc iam service-accounts add-iam-policy-binding "$SCHEDULER_SA" \
   --member="serviceAccount:${SCHEDULER_SERVICE_AGENT}" \
-  --role="roles/iam.serviceAccountTokenCreator" --quiet >/dev/null
+  --role="roles/iam.serviceAccountOpenIdTokenCreator" --quiet >/dev/null
 
 # ---------------------------------------------------------------- jobs
 create_or_update_job() { # create_or_update_job <name> <schedule> <uri>
@@ -146,9 +151,15 @@ cat <<EOF
 2. Verify each job actually reaches the API once the registry above is live:
      gcloud scheduler jobs run ${MAIL_OUTBOX_JOB} --location=${REGION} --project=${PROJECT_ID}
      gcloud scheduler jobs run ${APPROVAL_REMINDER_JOB} --location=${REGION} --project=${PROJECT_ID}
-     gcloud scheduler jobs describe ${MAIL_OUTBOX_JOB} --location=${REGION} --project=${PROJECT_ID} --format='value(status.lastAttemptTime,status.state)'
-   and confirm the Cloud Run request logs show a 2xx response and an
-   AUTH_GOOGLE_WORKLOAD_IDENTITY_USED log line with principalId=dev-scheduler
-   for the matching route. Full detail in
+     gcloud scheduler jobs describe ${MAIL_OUTBOX_JOB} --location=${REGION} --project=${PROJECT_ID} --format='value(lastAttemptTime,state,status.code)'
+   state=ENABLED alone is not success -- it is the job's own enable/disable
+   toggle, unrelated to whether the last attempt worked. status.code must
+   also be 0/empty (google.rpc.Code.OK); a nonzero status.code means Cloud
+   Scheduler itself recorded the HTTP call as failed. Then cross-check the
+   Cloud Run request logs for a matching AUTH_GOOGLE_WORKLOAD_IDENTITY_USED
+   textPayload line (this app's Nest logger emits plain text, not
+   jsonPayload) with principalId=dev-scheduler for the matching route. Full
+   verification steps, including why a failed run will not surface a
+   specific WORKLOAD_* error code, are in
    docs/03-runbooks/dev-scheduled-tasks-20261001.md.
 EOF

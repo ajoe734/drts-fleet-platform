@@ -94,9 +94,13 @@ PROJECT_ID=drts-dev-devcc-20260825 REGION=us-central1 \
 
 This enables `cloudscheduler.googleapis.com`, creates
 `drts-dev-scheduler@drts-dev-devcc-20260825.iam.gserviceaccount.com`, grants
-the Cloud Scheduler service agent `roles/iam.serviceAccountTokenCreator` on
-that one service account (not a project role), and creates or updates the
-two HTTP jobs (`drts-dev-mail-outbox-drain` every minute,
+the Cloud Scheduler service agent `roles/iam.serviceAccountOpenIdTokenCreator`
+on that one service account (not a project role, and not the broader
+`roles/iam.serviceAccountTokenCreator` — the OIDC-only role grants exactly
+`iam.serviceAccounts.getOpenIdToken` and nothing else, since these jobs only
+ever need an OIDC token minted, never `getAccessToken`/`signBlob`/`signJwt`/
+delegation), and creates or updates the two HTTP jobs
+(`drts-dev-mail-outbox-drain` every minute,
 `drts-dev-approval-timeout-reminders-run` every 5 minutes — rationale in
 `docs/02-architecture/internal-key-exceptions.md` §8.3). It is safe to
 rerun; it does not touch the registry secret from step 2.
@@ -110,30 +114,78 @@ gcloud scheduler jobs run drts-dev-mail-outbox-drain \
   --location=us-central1 --project=drts-dev-devcc-20260825
 gcloud scheduler jobs describe drts-dev-mail-outbox-drain \
   --location=us-central1 --project=drts-dev-devcc-20260825 \
-  --format='value(status.lastAttemptTime,status.state)'
+  --format='value(lastAttemptTime,state,status.code)'
 ```
 
-A successful manual run shows a recent `lastAttemptTime` and no error
-state. Cross-check against the application's own logs, since a Cloud
-Scheduler job can report success at the HTTP layer while the request still
-failed authorization inside the app:
+`lastAttemptTime` and `state` are top-level fields on the `Job` resource,
+not nested under `status` (`status` is a `google.rpc.Status` and only its
+`code` field is meaningful here) — nesting either of the first two fields
+under `status.` in the `--format=value(...)` flag silently prints nothing
+and is not a usable check. Read the three fields together: a fresh
+`lastAttemptTime` (matching when you just ran the command
+above) plus `state=ENABLED` plus `status.code` absent or `0`
+(`google.rpc.Code.OK`) means Cloud Scheduler's own delivery attempt
+succeeded. `state=ENABLED` by itself is not success — it is only the job's
+enable/disable toggle and says nothing about whether the last attempt
+worked; a nonzero `status.code` means Cloud Scheduler recorded the HTTP call
+itself as failed (non-2xx, timeout, etc.) and nothing downstream ran.
+
+A Scheduler-reported success is still not proof the request was
+authenticated and authorized as the scheduler identity: cross-check the
+application's own logs for the specific principal and route. `apps/api`
+uses Nest's default logger
+(`this.logger.log(...)`/`this.logger.warn(...)` in
+`apps/api/src/modules/auth/google-workload-identity.adapter.ts`), which
+writes plain strings — Cloud Run ingests these as `textPayload`, not a
+structured `jsonPayload`, so filtering on a `jsonPayload` field matches
+nothing even when the line is present:
 
 ```bash
 gcloud logging read \
   'resource.type="cloud_run_revision"
    resource.labels.service_name="drts-dev-api"
-   jsonPayload.message=~"AUTH_GOOGLE_WORKLOAD_IDENTITY_USED.*principalId=dev-scheduler"' \
-  --project=drts-dev-devcc-20260825 --limit=5 --format='value(timestamp,jsonPayload.message)'
+   textPayload=~"AUTH_GOOGLE_WORKLOAD_IDENTITY_USED.*principalId=dev-scheduler.*internal/scheduled-tasks/mail-outbox/drain"' \
+  --project=drts-dev-devcc-20260825 --limit=5 --format='value(timestamp,textPayload)'
 ```
 
-Repeat both commands for `drts-dev-approval-timeout-reminders-run`. If
-either job's manual run instead surfaces `WORKLOAD_IDENTITY_GOOGLE_NOT_CONFIGURED`,
-`WORKLOAD_PRINCIPAL_NOT_REGISTERED`, or `WORKLOAD_ROUTE_SCOPE_DENIED` in the
-Cloud Run logs, re-check step 2 (secret not yet redeployed, or JSON pasted
-with a typo in `serviceAccountEmail`/`routeScopes`) before re-running step 3
-or 4 — none of those three errors are fixed by re-running the provisioning
-script.
+Repeat all three commands for `drts-dev-approval-timeout-reminders-run`
+(substitute its own route in the `textPayload` filter). Only a line matching
+both the expected `lastAttemptTime`/run and the specific route confirms that
+*this* attempt reached the handler as the scheduler principal — an older,
+unrelated success log for the same principal is not evidence the current
+attempt worked.
 
-Once both manual runs show a clean `AUTH_GOOGLE_WORKLOAD_IDENTITY_USED` log
-line and a 2xx response, leave the jobs on their configured schedule; no
-further manual trigger is needed.
+Troubleshooting a failed or unconfirmed run: `BootstrapAuthGuard.tryGoogleWorkloadIdentityFallback`
+(`apps/api/src/common/auth/bootstrap-auth.guard.ts:664-698`) wraps the
+adapter call in a bare `catch { return null; }` and falls through to the
+route's ordinary `JWT_INVALID` (401) rejection, so a failing scheduler
+request will **not** surface a specific `WORKLOAD_IDENTITY_GOOGLE_NOT_CONFIGURED`,
+`WORKLOAD_PRINCIPAL_NOT_REGISTERED`, or `WORKLOAD_AUDIENCE_MISMATCH` code in
+either the HTTP response or the Cloud Run logs — the adapter throws those
+without logging anything first. The one exception is route-scope denial:
+`verifyServicePrincipal` logs
+`[AUTH_GOOGLE_WORKLOAD_IDENTITY_ROUTE_SCOPE_DENIED] principalId=... route=...`
+(`this.logger.warn`, same file, before the throw) even though the guard
+still discards the exception and returns `JWT_INVALID` to the caller. So:
+
+- If the `textPayload` search above instead finds
+  `AUTH_GOOGLE_WORKLOAD_IDENTITY_ROUTE_SCOPE_DENIED` for
+  `principalId=dev-scheduler`, the registry is live and the principal
+  resolves, but its `routeScopes` entry does not cover the route/method the
+  job is calling — re-check the pasted JSON for a typo in the route path or
+  method (step 2).
+- If neither the success line nor the route-scope-denied line appears at
+  all, the failure is one of the three silent causes, roughly in order of
+  likelihood: (a) step 2's secret was never actually redeployed/mounted
+  (the Cloud Run revision still has the old or empty registry), (b) a typo
+  in `serviceAccountEmail`/`principalId` means no registry entry matches
+  this service account, or (c) `allowedTokenAudiences` does not match the
+  job's audience. Confirm by re-reading the live secret value and the
+  deployed revision's environment directly — none of those three are fixed
+  by re-running the provisioning script (step 3), since it never touches
+  the registry secret.
+
+Once both jobs' manual runs show a clean, route-specific
+`AUTH_GOOGLE_WORKLOAD_IDENTITY_USED` log line and `status.code` 0/empty,
+leave the jobs on their configured schedule; no further manual trigger is
+needed.
