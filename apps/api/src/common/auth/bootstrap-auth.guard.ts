@@ -26,6 +26,10 @@ import { JwtAuthService } from "./jwt-auth.service";
 import { StepUpProofService } from "./step-up-proof.service";
 import { detectAuthEnvironment } from "../../config/auth-startup-config";
 import { SecurityEventsService } from "../../modules/security-events/security-events.service";
+import {
+  GOOGLE_WORKLOAD_IDENTITY_HEADER,
+  GoogleWorkloadIdentityAdapter,
+} from "../../modules/auth/google-workload-identity.adapter";
 
 function asHeaderRecord(
   headers: unknown,
@@ -166,6 +170,8 @@ export class BootstrapAuthGuard implements CanActivate {
     @Optional() private readonly securityEventsService?: SecurityEventsService,
     @Optional()
     private readonly stepUpProofService?: StepUpProofService,
+    @Optional()
+    private readonly googleWorkloadIdentityAdapter?: GoogleWorkloadIdentityAdapter,
   ) {}
 
   canActivate(context: ExecutionContext): boolean | Promise<boolean> {
@@ -359,14 +365,49 @@ export class BootstrapAuthGuard implements CanActivate {
             allowControlPlaneProxyToken:
               hasControlPlaneInnerBearer(baseHeaders),
           })
-          .then((payload) => {
+          .then(async (payload) => {
             if (!payload) {
-              throw new ApiRequestError(
-                401,
-                "JWT_INVALID",
-                "Bearer token is invalid or expired.",
-                { route: requestUrl },
-              );
+              const workloadIdentity = policy
+                ? await this.tryGoogleWorkloadIdentityFallback(
+                    token,
+                    requestUrl,
+                    request.method ?? "GET",
+                    policy,
+                  )
+                : null;
+              if (!workloadIdentity || !policy) {
+                throw new ApiRequestError(
+                  401,
+                  "JWT_INVALID",
+                  "Bearer token is invalid or expired.",
+                  { route: requestUrl },
+                );
+              }
+              request.identity = workloadIdentity;
+              try {
+                this.assertRealmAllowed(
+                  workloadIdentity,
+                  policy.allowedRealms,
+                  request,
+                );
+                this.assertScopesAllowed(
+                  workloadIdentity,
+                  policy.requiredScopes,
+                  request,
+                );
+                this.stepUpProofService?.assertRequestSatisfied(
+                  workloadIdentity,
+                  request,
+                );
+              } catch (error) {
+                this.recordAuthorizationDenialAudit(
+                  workloadIdentity,
+                  request,
+                  error,
+                );
+                throw error;
+              }
+              return true;
             }
 
             const identity = this.jwtAuthService!.toRequestIdentity(payload);
@@ -604,6 +645,59 @@ export class BootstrapAuthGuard implements CanActivate {
       });
     } catch {
       // never let audit recording mask the original authorization error
+    }
+  }
+
+  // Cloud Scheduler's native OIDC auth always presents its token as
+  // `Authorization: Bearer <token>` (there is no way to redirect it to the
+  // custom x-drts-google-id-token header GoogleWorkloadIdentityAdapter was
+  // originally built for). A Google-signed token never verifies as this
+  // app's own JWT, so the fast path above always resolves `payload` to null
+  // for it; this fallback re-offers that same bearer token to the adapter
+  // before giving up. It is deliberately gated to routes whose resolved
+  // policy allows *only* the "system" realm (e.g. the scheduled-task
+  // triggers below) so a Google-verified service principal can never reach a
+  // user-facing tenant/ops/platform/driver/partner route this way, and any
+  // adapter failure (bad signature, wrong audience, unregistered principal,
+  // replay) falls through to the caller's original JWT_INVALID rejection
+  // rather than a different or looser error.
+  private async tryGoogleWorkloadIdentityFallback(
+    token: string,
+    requestUrl: string,
+    requestMethod: string,
+    policy: { requiredScopes: string[]; allowedRealms: string[] },
+  ): Promise<BootstrapRequestIdentity | null> {
+    if (
+      !this.googleWorkloadIdentityAdapter ||
+      policy.allowedRealms.length !== 1 ||
+      policy.allowedRealms[0] !== "system"
+    ) {
+      return null;
+    }
+
+    try {
+      const resolved =
+        await this.googleWorkloadIdentityAdapter.verifyServicePrincipal(
+          { [GOOGLE_WORKLOAD_IDENTITY_HEADER]: token },
+          { requestPath: requestUrl, requestMethod },
+        );
+      return {
+        authMode: "jwt_bearer",
+        actorType: "system",
+        actorId: resolved.actorId,
+        principalId: resolved.principalId,
+        subject: resolved.subject,
+        realm: "system",
+        tenantId: null,
+        roleFamilies: [],
+        roles: resolved.roles,
+        scopes: resolved.scopes,
+        requestId: null,
+        issuer: "https://accounts.google.com",
+        authTime: resolved.authTime,
+      };
+    } catch {
+      return null;
     }
   }
 
