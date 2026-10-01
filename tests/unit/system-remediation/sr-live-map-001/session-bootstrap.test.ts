@@ -53,7 +53,7 @@ function harness(
       const headers = new Headers(init?.headers);
       const realm = headers.get("x-realm")!;
       const actorType = headers.get("x-actor-type")!;
-      
+
       if (actorType === "ops_observer") {
         expect(headers.get("x-drts-google-id-token")).toBe("google-id-token");
       } else {
@@ -62,7 +62,7 @@ function harness(
       expect(init?.body).toBe("{}");
       const actorId = headers.get("x-actor-id")!;
       const scopes = headers.get("x-scopes");
-      
+
       if (actorType === "platform_admin") {
         expect(realm).toBe("platform");
         expect(actorId).toBe("principal_platform_admin_default");
@@ -72,58 +72,68 @@ function harness(
           expiresIn: options.expiresIn ?? "8h",
         });
       }
-      
+
       expect(realm).toBe("ops");
       expect(actorType).toBe("ops_observer");
       expect(actorId).toBe("live-map-observer");
       expect(scopes).toBeNull();
-      
+
       expect(mask).toHaveBeenCalledWith("google-id-token");
       return reply({
         token: "ops-test-secret",
         expiresIn: options.expiresIn ?? "8h",
       });
     }
-    
+
     if (url.pathname === "/api/auth/driver/device/invite") {
       const headers = new Headers(init?.headers);
       expect(headers.get("authorization")).toBe("Bearer temp-ops-test-secret");
       const body = JSON.parse(String(init?.body));
       expect(body.driverId).toBe("drv-demo-002");
       return reply({
-        data: { registrationCode: "test-reg-code" }
+        data: { registrationCode: "test-reg-code" },
       });
     }
-    
+
     if (url.pathname === "/api/auth/driver/device/register") {
       const body = JSON.parse(String(init?.body));
       expect(body.registrationCode).toBe("test-reg-code");
       expect(typeof body.deviceId).toBe("string");
       return reply({
         data: {
-          accessToken: {
-            token: "driver-test-secret",
-            expiresIn: options.expiresIn ?? "8h",
-          }
-        }
+          accessToken: "driver-test-secret",
+          expiresIn: options.expiresIn ?? "8h",
+        },
       });
     }
-    
+
     if (url.pathname === "/api/auth/session") {
       const auth = new Headers(init?.headers).get("authorization");
       expect(auth).toMatch(/^Bearer (ops-test-secret|driver-test-secret)$/);
       const isDriver = auth === "Bearer driver-test-secret";
-      expect(mask).toHaveBeenCalledWith(isDriver ? "driver-test-secret" : "ops-test-secret");
-      
+      expect(mask).toHaveBeenCalledWith(
+        isDriver ? "driver-test-secret" : "ops-test-secret",
+      );
+
       return reply(
         {
           data: {
             active: true,
             identity: {
-              realm: isDriver ? (options.wrongRealm ? "system" : "driver") : (options.wrongRealm ? "system" : "ops"),
+              realm: isDriver
+                ? options.wrongRealm
+                  ? "system"
+                  : "driver"
+                : options.wrongRealm
+                  ? "system"
+                  : "ops",
               actorType: isDriver ? "driver_user" : "ops_observer",
               actorId: isDriver ? "drv-demo-002" : "live-map-observer",
-              scopes: options.wrongScope ? ["*"] : (isDriver ? ["driver:read"] : ["regulatory:read"]),
+              scopes: options.wrongScope
+                ? ["*"]
+                : isDriver
+                  ? ["driver:read"]
+                  : ["regulatory:read"],
             },
           },
         },

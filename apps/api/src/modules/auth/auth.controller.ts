@@ -32,7 +32,7 @@ import {
   RequireRealms,
   RequireScopes,
 } from "../../common/auth";
-import { getTenantRoleScopes } from "../../common/auth/auth.constants";
+import { getTenantRoleScopes, AUTH_SCOPE_PRESETS, AUTH_TENANT_ROLE_SCOPE_PRESETS } from "../../common/auth/auth.constants";
 import {
   toPublicPartnerAuthError,
   toPublicTenantAuthError,
@@ -43,7 +43,7 @@ import {
 } from "../../common/auth/jwt-auth.service";
 import { validateInternalKey } from "../../common/auth/internal-key.middleware";
 import { extractBootstrapRequestIdentity } from "../../common/auth/auth.extractor";
-import type { AuthBootstrapHeaders, AuthRealm } from "../../common/auth/auth.types";
+import type { AuthBootstrapHeaders, AuthRealm, AuthActorType } from "../../common/auth/auth.types";
 import { OPEN_ROUTE_RATE_LIMIT } from "../../common/throttling/rate-limit.constants";
 import type { BootstrapRequestIdentity } from "../../common/auth";
 import { hasTrustedMfa } from "../../common/auth/trusted-mfa.policy";
@@ -70,6 +70,7 @@ import {
   GoogleWorkloadIdentityAdapter,
   isCiTenantActorGateEnabled,
   resolveCiTenantActorGrant,
+  isGoogleWorkloadIdentityNotConfigured,
 } from "./google-workload-identity.adapter";
 import { IdempotencyService } from "../../common/idempotency";
 
@@ -337,7 +338,7 @@ export class AuthController {
       requestUrl: request.originalUrl ?? request.url,
     });
 
-    if (strictEnvironment && bootstrapIdentity) {
+    if (strictEnvironment && bootstrapIdentity && !rawGoogleAssertion) {
       throw new ApiRequestError(
         401,
         "AUTH_BOOTSTRAP_HEADERS_FORBIDDEN",
@@ -431,7 +432,7 @@ export class AuthController {
     // match a registered grant, that is a real access decision and must fail
     // closed, not silently degrade to the internal key.
     let googleCiTenantActorVerified = false;
-    if (rawGoogleAssertion && isCiTenantActorGateEnabled()) {
+    if (rawGoogleAssertion) {
       if (!bootstrapIdentity) {
         throw new ApiRequestError(
           400,
@@ -440,37 +441,64 @@ export class AuthController {
           {},
         );
       }
-      const resolvedGoogle =
-        await this.googleWorkloadIdentityAdapter?.verifyServicePrincipal(
+      
+      let resolvedGoogle = null;
+      try {
+        if (!this.googleWorkloadIdentityAdapter) {
+          throw new ApiRequestError(
+            503,
+            "WORKLOAD_IDENTITY_GOOGLE_NOT_CONFIGURED",
+            "Google workload identity validation is not configured for this environment.",
+          );
+        }
+        resolvedGoogle = await this.googleWorkloadIdentityAdapter.verifyServicePrincipal(
           request.headers as Record<string, string | string[] | undefined>,
           {
             requestPath: request.originalUrl ?? request.url,
             requestMethod: request.method,
           },
         );
-      if (!resolvedGoogle) {
-        throw new ApiRequestError(
-          503,
-          "WORKLOAD_IDENTITY_GOOGLE_NOT_CONFIGURED",
-          "Google workload identity validation is not configured for this environment.",
-        );
+      } catch (error) {
+        if (isGoogleWorkloadIdentityNotConfigured(error)) {
+          // If the WIF gate/registry is not configured but a token was sent, we ignore it and
+          // let it fall back to internal key (for dual-send transition safety).
+          resolvedGoogle = null;
+        } else {
+          throw error;
+        }
       }
-      const grant = resolveCiTenantActorGrant(resolvedGoogle, {
-        tenantId: bootstrapIdentity.tenantId ?? "",
-        actorType: bootstrapIdentity.actorType,
-        actorId: bootstrapIdentity.actorId ?? "",
-      });
-      if (!grant) {
-        throw new ApiRequestError(
-          403,
-          "WORKLOAD_CI_TENANT_ACTOR_DENIED",
-          "Verified Google workload identity is not granted session issuance for the requested tenant actor.",
-        );
+
+      if (resolvedGoogle) {
+        if (
+          (bootstrapIdentity.actorId === resolvedGoogle.principalId ||
+           bootstrapIdentity.actorId === resolvedGoogle.actorId) &&
+          resolvedGoogle.roles.includes(bootstrapIdentity.actorType)
+        ) {
+          // Direct authentication! The Google SA is asking for a token for ITSELF.
+          googleCiTenantActorVerified = true;
+          bootstrapIdentity.principalId = resolvedGoogle.principalId;
+        } else if (isCiTenantActorGateEnabled()) {
+          const grant = resolveCiTenantActorGrant(resolvedGoogle, {
+            tenantId: bootstrapIdentity.tenantId ?? "",
+            actorType: bootstrapIdentity.actorType,
+            actorId: bootstrapIdentity.actorId ?? "",
+          });
+          if (!grant) {
+            throw new ApiRequestError(
+              403,
+              "WORKLOAD_CI_TENANT_ACTOR_DENIED",
+              "Verified Google workload identity is not granted session issuance for the requested tenant actor.",
+            );
+          }
+          googleCiTenantActorVerified = true;
+        } else {
+          throw new ApiRequestError(
+            403,
+            "WORKLOAD_CI_TENANT_ACTOR_DENIED",
+            "Verified Google workload identity is not granted session issuance.",
+          );
+        }
       }
-      // Fall through to the same durable-tenant-user-backed issuance path
-      // used for the internal-key bootstrap flow below; only the credential
-      // proof differs.
-      googleCiTenantActorVerified = true;
     }
     if (!googleCiTenantActorVerified) {
       // Require internal key to issue tokens when no workload proof is used.
@@ -543,7 +571,7 @@ export class AuthController {
       );
     }
 
-    if (isStrictIap) {
+    if (isStrictIap && !googleCiTenantActorVerified) {
       throw new ApiRequestError(
         401,
         "AUTH_BOOTSTRAP_HEADERS_FORBIDDEN",
@@ -598,12 +626,31 @@ export class AuthController {
       if (!this.identityRepository) {
         throw new ApiRequestError(500, "IDENTITY_REPOSITORY_UNAVAILABLE", "Identity repository is required for ops/platform session issuance.");
       }
-      const memberships = await this.identityRepository.findMembershipsByPrincipalId(durableIdentity.actorId);
+      const principalToLookup = durableIdentity.principalId ?? durableIdentity.actorId;
+      const memberships = await this.identityRepository.findMembershipsByPrincipalId(principalToLookup);
       const membership = memberships.find((m) => m.realm === durableIdentity.realm && m.status === "active");
       if (!membership) {
         throw new ApiRequestError(401, "MEMBERSHIP_NOT_FOUND", "The requested ops/platform session subject has no active membership.");
       }
       durableIdentity.membershipId = membership.membershipId;
+
+      const roleBindings = await this.identityRepository.findRoleBindingsByMembershipId(membership.membershipId);
+      const now = new Date();
+      const activeBindings = roleBindings.filter(
+        (b) => (!b.validTo || new Date(b.validTo) > now) && new Date(b.validFrom) <= now,
+      );
+      
+      const allowedRoles = activeBindings.map((b) => b.roleCode);
+      const allowedScopes = new Set<string>();
+      for (const binding of activeBindings) {
+        const presets = AUTH_SCOPE_PRESETS[binding.roleCode as AuthActorType] || AUTH_TENANT_ROLE_SCOPE_PRESETS[binding.roleCode];
+        if (presets) {
+          presets.forEach((s) => allowedScopes.add(s));
+        }
+      }
+
+      durableIdentity.roles = allowedRoles;
+      durableIdentity.scopes = Array.from(allowedScopes);
     }
 
     const expiresIn: JwtExpiresIn =
