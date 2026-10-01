@@ -230,9 +230,8 @@ export class GoogleWorkloadIdentityAdapter {
       );
     }
 
-    if (principal.allowedTokenAudiences && principal.allowedTokenAudiences.length > 0) {
-      const allowedAudiences = unique(principal.allowedTokenAudiences);
-      if (!allowedAudiences.includes(audience)) {
+    const allowedAudiences = unique(principal.allowedTokenAudiences || []);
+    if (!allowedAudiences.includes(audience)) {
       throw new ApiRequestError(
         403,
         "WORKLOAD_AUDIENCE_MISMATCH",
@@ -240,14 +239,12 @@ export class GoogleWorkloadIdentityAdapter {
         { principalId: principal.principalId },
       );
     }
-    }
 
-    if (principal.routeScopes && principal.routeScopes.length > 0) {
-      const routeScopes = unique(principal.routeScopes);
-      const routeAllowed = routeScopes.some((pattern) =>
-        matchesScope(pattern, context.requestMethod, context.requestPath),
-      );
-      if (!routeAllowed) {
+    const routeScopes = unique(principal.routeScopes || []);
+    const routeAllowed = routeScopes.some((pattern) =>
+      matchesScope(pattern, context.requestMethod, context.requestPath),
+    );
+    if (!routeAllowed) {
       this.logger.warn(
         `[AUTH_GOOGLE_WORKLOAD_IDENTITY_ROUTE_SCOPE_DENIED] principalId=${principal.principalId} email=${email} route=${context.requestMethod ?? "GET"} ${context.requestPath ?? "*"}`,
       );
@@ -260,7 +257,6 @@ export class GoogleWorkloadIdentityAdapter {
           route: `${context.requestMethod ?? "GET"} ${context.requestPath ?? "*"}`,
         },
       );
-    }
     }
 
     const replayAccepted =
@@ -383,13 +379,18 @@ export class GoogleWorkloadIdentityAdapter {
     }
 
     const invalid = (parsed as RegisteredGooglePrincipal[]).find(
-      (entry) => !entry.principalId?.trim()
+      (entry) =>
+        !entry.principalId?.trim() ||
+        !Array.isArray(entry.allowedTokenAudiences) ||
+        entry.allowedTokenAudiences.length === 0 ||
+        !Array.isArray(entry.routeScopes) ||
+        entry.routeScopes.length === 0
     );
     if (invalid) {
       throw new ApiRequestError(
         503,
         "WORKLOAD_IDENTITY_GOOGLE_NOT_CONFIGURED",
-        "Google workload identity service principal registry entries must declare principalId.",
+        "Google workload identity service principal registry entries must declare principalId, allowedTokenAudiences, and routeScopes.",
       );
     }
 

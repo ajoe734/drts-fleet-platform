@@ -339,7 +339,9 @@ The JSON format is shown below (secret/actual values omitted):
     "actorId": "live-map-observer",
     "displayName": "Live Map Operations Observer",
     "roles": ["ops_observer"],
-    "scopes": ["regulatory:read"]
+    "scopes": ["regulatory:read"],
+    "allowedTokenAudiences": ["api://drts-fleet-platform"],
+    "routeScopes": ["GET /api/v1/ops/map/live", "GET /api/v1/ops/map/live/*"]
   }
 ]
 ```
