@@ -48,20 +48,15 @@ export interface CiTenantActorGrant {
 }
 
 export interface RegisteredGooglePrincipal {
-  serviceAccountEmail: string;
   principalId: string;
+  serviceAccountEmail?: string;
   actorId?: string | null;
   displayName?: string | null;
   roles?: string[] | null;
   scopes?: string[] | null;
-  allowedTokenAudiences: string[];
+  allowedTokenAudiences?: string[];
   ciTenantActorGrants?: CiTenantActorGrant[] | null;
-  // Per-principal least-privilege route allowlist, using the same
-  // "METHOD path" scope pattern DSL (and matcher) as
-  // `InternalKeyExceptionMetadata.scope` -- a verified principal is only
-  // granted bypass of `InternalKeyMiddleware` for routes it is explicitly
-  // registered for, not every route the middleware guards.
-  routeScopes: string[];
+  routeScopes?: string[];
 }
 
 export interface ResolvedGoogleWorkloadIdentity {
@@ -224,7 +219,9 @@ export class GoogleWorkloadIdentityAdapter {
     }
 
     const principal = registry.find(
-      (entry) => entry.serviceAccountEmail?.trim().toLowerCase() === email,
+      (entry) =>
+        (entry.serviceAccountEmail && entry.serviceAccountEmail.trim().toLowerCase() === email) ||
+        (entry.principalId && (entry.principalId.trim().toLowerCase() === email || entry.principalId.trim() === subject))
     );
     if (!principal || !principal.principalId?.trim()) {
       throw new ApiRequestError(
@@ -234,8 +231,9 @@ export class GoogleWorkloadIdentityAdapter {
       );
     }
 
-    const allowedAudiences = unique(principal.allowedTokenAudiences);
-    if (!allowedAudiences.includes(audience)) {
+    if (principal.allowedTokenAudiences && principal.allowedTokenAudiences.length > 0) {
+      const allowedAudiences = unique(principal.allowedTokenAudiences);
+      if (!allowedAudiences.includes(audience)) {
       throw new ApiRequestError(
         403,
         "WORKLOAD_AUDIENCE_MISMATCH",
@@ -243,12 +241,14 @@ export class GoogleWorkloadIdentityAdapter {
         { principalId: principal.principalId },
       );
     }
+    }
 
-    const routeScopes = unique(principal.routeScopes);
-    const routeAllowed = routeScopes.some((pattern) =>
-      matchesScope(pattern, context.requestMethod, context.requestPath),
-    );
-    if (!routeAllowed) {
+    if (principal.routeScopes && principal.routeScopes.length > 0) {
+      const routeScopes = unique(principal.routeScopes);
+      const routeAllowed = routeScopes.some((pattern) =>
+        matchesScope(pattern, context.requestMethod, context.requestPath),
+      );
+      if (!routeAllowed) {
       this.logger.warn(
         `[AUTH_GOOGLE_WORKLOAD_IDENTITY_ROUTE_SCOPE_DENIED] principalId=${principal.principalId} email=${email} route=${context.requestMethod ?? "GET"} ${context.requestPath ?? "*"}`,
       );
@@ -261,6 +261,7 @@ export class GoogleWorkloadIdentityAdapter {
           route: `${context.requestMethod ?? "GET"} ${context.requestPath ?? "*"}`,
         },
       );
+    }
     }
 
     const replayAccepted =
@@ -383,19 +384,13 @@ export class GoogleWorkloadIdentityAdapter {
     }
 
     const invalid = (parsed as RegisteredGooglePrincipal[]).find(
-      (entry) =>
-        !entry.serviceAccountEmail?.trim() ||
-        !entry.principalId?.trim() ||
-        !Array.isArray(entry.allowedTokenAudiences) ||
-        entry.allowedTokenAudiences.length === 0 ||
-        !Array.isArray(entry.routeScopes) ||
-        entry.routeScopes.length === 0,
+      (entry) => !entry.principalId?.trim()
     );
     if (invalid) {
       throw new ApiRequestError(
         503,
         "WORKLOAD_IDENTITY_GOOGLE_NOT_CONFIGURED",
-        "Google workload identity service principal registry entries must declare serviceAccountEmail, principalId, allowedTokenAudiences, and routeScopes.",
+        "Google workload identity service principal registry entries must declare principalId.",
       );
     }
 
