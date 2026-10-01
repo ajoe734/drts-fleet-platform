@@ -18,6 +18,7 @@ import {
   extractGoogleWorkloadIdentityAssertion,
   GoogleWorkloadIdentityAdapter,
   isGoogleWorkloadIdentityNotConfigured,
+  isGoogleWorkloadIdentityPrincipalNotRegistered,
 } from "../../modules/auth/google-workload-identity.adapter";
 
 type HeaderValue = string | string[] | undefined;
@@ -135,16 +136,32 @@ export async function validateInternalKey(
     try {
       await options.googleWorkloadIdentityAdapter.verifyServicePrincipal(
         request.headers ?? {},
-        { requestPath, requestMethod },
+        {
+          requestPath,
+          requestMethod,
+          // General proxied requests reuse one Google-minted identity token
+          // for every concurrent call a page makes (the Cloud Run metadata
+          // server caches and returns the same token for its whole validity
+          // window), so this path must not treat repeat presentation of the
+          // identical assertion as a replay. One-time consumption stays
+          // enforced for session issuance (`POST /api/auth/token`), which
+          // calls this adapter separately in `auth.controller.ts`.
+          enforceReplayProtection: false,
+        },
       );
       return;
     } catch (error) {
-      // Registry not populated yet (ops rollout not complete): fall back to
+      // Registry not populated yet (ops rollout not complete), or this
+      // caller's verified identity has no registry entry yet: fall back to
       // `x-drts-internal-key` below so dev stays green while EXCP_002 is
-      // still active. Any other error (bad signature, wrong audience,
-      // unregistered principal, replay) is a genuine rejection and must not
-      // be masked by falling through.
-      if (!isGoogleWorkloadIdentityNotConfigured(error)) {
+      // still active and onboarding is incremental. Any other error (bad
+      // signature, wrong issuer/audience, route scope denial) is a genuine
+      // rejection for an already-registered principal and must not be
+      // masked by falling through.
+      if (
+        !isGoogleWorkloadIdentityNotConfigured(error) &&
+        !isGoogleWorkloadIdentityPrincipalNotRegistered(error)
+      ) {
         throw error;
       }
     }

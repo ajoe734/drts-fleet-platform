@@ -71,6 +71,7 @@ import {
   isCiTenantActorGateEnabled,
   resolveCiTenantActorGrant,
   isGoogleWorkloadIdentityNotConfigured,
+  isGoogleWorkloadIdentityPrincipalNotRegistered,
 } from "./google-workload-identity.adapter";
 import { IdempotencyService } from "../../common/idempotency";
 
@@ -459,9 +460,16 @@ export class AuthController {
           },
         );
       } catch (error) {
-        if (isGoogleWorkloadIdentityNotConfigured(error)) {
-          // If the WIF gate/registry is not configured but a token was sent, we ignore it and
-          // let it fall back to internal key (for dual-send transition safety).
+        if (
+          isGoogleWorkloadIdentityNotConfigured(error) ||
+          isGoogleWorkloadIdentityPrincipalNotRegistered(error)
+        ) {
+          // Registry not configured yet, or this caller's verified identity
+          // has no registry entry yet: ignore the Google assertion and let
+          // issuance fall back to the internal key below (same dual-send
+          // transition safety as InternalKeyMiddleware). Any other failure
+          // (bad signature, issuer/audience mismatch, replay, route scope
+          // denial) for an already-registered principal stays fail-closed.
           resolvedGoogle = null;
         } else {
           throw error;

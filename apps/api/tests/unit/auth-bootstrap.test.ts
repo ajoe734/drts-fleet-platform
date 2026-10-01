@@ -563,6 +563,130 @@ describe("auth token issuance", () => {
     delete process.env.WORKLOAD_IDENTITY_GOOGLE_SERVICE_PRINCIPALS;
   });
 
+  it("issues a session for the first POST auth/token call with a granted Google assertion, then rejects a second call replaying the identical assertion", async () => {
+    process.env.JWT_SECRET = "test-secret";
+    process.env.JWT_ISSUER = "drts-tests";
+    process.env.JWT_AUDIENCE = "drts-api";
+    process.env.AUTH_MODE = "explicit";
+    process.env.WORKLOAD_IDENTITY_CI_TENANT_ACTOR_ENABLED = "true";
+    delete process.env.DRTS_INTERNAL_KEY;
+
+    const audience = "https://api.dev.drts.internal";
+    const serviceAccountEmail =
+      "deploy-dev-ci@dev-project.iam.gserviceaccount.com";
+    const { publicKey, privateKey } = generateKeyPairSync("rsa", {
+      modulusLength: 2048,
+    });
+    const jwk = publicKey.export({ format: "jwk" }) as {
+      kty: string;
+      n: string;
+      e: string;
+    };
+    const kid = "ci-probe-replay-test-key";
+    process.env.WORKLOAD_IDENTITY_GOOGLE_SERVICE_PRINCIPALS = JSON.stringify([
+      {
+        serviceAccountEmail,
+        principalId: "svc-deploy-dev-ci",
+        allowedTokenAudiences: [audience],
+        routeScopes: ["POST auth/token"],
+        ciTenantActorGrants: [
+          {
+            tenantId: "tenant-demo-001",
+            actorType: "tenant_admin",
+            actorId: "tenant-user-demo-001",
+          },
+        ],
+      },
+    ]);
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        new Response(
+          JSON.stringify({
+            keys: [{ kty: jwk.kty, kid, n: jwk.n, e: jwk.e }],
+          }),
+          { status: 200 },
+        ),
+      ),
+    );
+
+    const { jwtAuthService, tenantPartnerService, identityRepository, driverDeviceSessionService } =
+      createAuthFixture();
+    const googleWorkloadIdentityAdapter = new GoogleWorkloadIdentityAdapter(
+      identityRepository,
+    );
+    const controllerWithGoogle = new AuthController(
+      jwtAuthService,
+      tenantPartnerService,
+      driverDeviceSessionService,
+      undefined,
+      undefined,
+      undefined,
+      identityRepository,
+      undefined,
+      googleWorkloadIdentityAdapter,
+    );
+
+    const tenantUser = tenantPartnerService.findTenantUser(
+      "tenant-demo-001",
+      "tenant-user-demo-001",
+    );
+    expect(tenantUser).not.toBeNull();
+
+    const now = Math.floor(Date.now() / 1000);
+    const googleToken = jwt.sign(
+      {
+        iss: "https://accounts.google.com",
+        sub: "111111111111111111111",
+        email: serviceAccountEmail,
+        email_verified: true,
+        aud: audience,
+        iat: now,
+        exp: now + 300,
+      },
+      privateKey,
+      { algorithm: "RS256", keyid: kid },
+    );
+
+    const requestOptions = {
+      headers: {
+        "x-drts-google-id-token": googleToken,
+        "x-actor-type": "tenant_admin",
+        "x-actor-id": "tenant-user-demo-001",
+        "x-realm": "tenant",
+        "x-tenant-id": "tenant-demo-001",
+      },
+      method: "POST",
+      originalUrl: "/api/auth/token",
+      url: "/api/auth/token",
+    };
+
+    const issued = await controllerWithGoogle.issueToken(requestOptions);
+    const payload = jwtAuthService.verify(issued.token);
+    expect(payload).toMatchObject({
+      sub: "tenant-user-demo-001",
+      roles: [tenantUser!.roleCode],
+    });
+
+    // Session issuance (unlike the general proxy path) must stay strictly
+    // one-time-use: replaying the identical Google assertion on a second
+    // POST auth/token call must be denied, not silently re-issued.
+    await expectApiRequestError(
+      () => controllerWithGoogle.issueToken(requestOptions),
+      (error) => {
+        expect(error.code).toBe("WORKLOAD_ASSERTION_REPLAYED");
+      },
+    );
+
+    vi.unstubAllGlobals();
+    delete process.env.JWT_SECRET;
+    delete process.env.JWT_ISSUER;
+    delete process.env.JWT_AUDIENCE;
+    delete process.env.AUTH_MODE;
+    delete process.env.WORKLOAD_IDENTITY_CI_TENANT_ACTOR_ENABLED;
+    delete process.env.WORKLOAD_IDENTITY_GOOGLE_SERVICE_PRINCIPALS;
+  });
+
   it("rejects a Google workload identity CI probe requesting a tenant actor it was not granted", async () => {
     process.env.JWT_SECRET = "test-secret";
     process.env.JWT_ISSUER = "drts-tests";
@@ -724,6 +848,118 @@ describe("auth token issuance", () => {
     delete process.env.JWT_AUDIENCE;
     delete process.env.DRTS_INTERNAL_KEY;
     delete process.env.AUTH_MODE;
+  });
+
+  it("falls back to the internal key when the registry is populated but does not list this caller's service account (unregistered caller must not take the route down)", async () => {
+    process.env.JWT_SECRET = "test-secret";
+    process.env.JWT_ISSUER = "drts-tests";
+    process.env.JWT_AUDIENCE = "drts-api";
+    process.env.DRTS_INTERNAL_KEY = "test-internal-secret";
+    process.env.AUTH_MODE = "explicit";
+    delete process.env.WORKLOAD_IDENTITY_CI_TENANT_ACTOR_ENABLED;
+
+    const audience = "https://api.dev.drts.internal";
+    const registeredEmail = "some-other-caller@dev-project.iam.gserviceaccount.com";
+    const unregisteredEmail = "not-yet-onboarded@dev-project.iam.gserviceaccount.com";
+    const { publicKey, privateKey } = generateKeyPairSync("rsa", {
+      modulusLength: 2048,
+    });
+    const jwk = publicKey.export({ format: "jwk" }) as {
+      kty: string;
+      n: string;
+      e: string;
+    };
+    const kid = "unregistered-caller-test-key";
+    process.env.WORKLOAD_IDENTITY_GOOGLE_SERVICE_PRINCIPALS = JSON.stringify([
+      {
+        serviceAccountEmail: registeredEmail,
+        principalId: "svc-some-other-caller",
+        allowedTokenAudiences: [audience],
+        routeScopes: ["* *"],
+      },
+    ]);
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        new Response(
+          JSON.stringify({
+            keys: [{ kty: jwk.kty, kid, n: jwk.n, e: jwk.e }],
+          }),
+          { status: 200 },
+        ),
+      ),
+    );
+
+    const { jwtAuthService, tenantPartnerService, identityRepository, driverDeviceSessionService } =
+      createAuthFixture();
+    const googleWorkloadIdentityAdapter = new GoogleWorkloadIdentityAdapter(
+      identityRepository,
+    );
+    const controllerWithGoogle = new AuthController(
+      jwtAuthService,
+      tenantPartnerService,
+      driverDeviceSessionService,
+      undefined,
+      undefined,
+      undefined,
+      identityRepository,
+      undefined,
+      googleWorkloadIdentityAdapter,
+    );
+
+    const tenantUser = tenantPartnerService.findTenantUser(
+      "tenant-demo-001",
+      "tenant-user-demo-001",
+    );
+    expect(tenantUser).not.toBeNull();
+
+    const now = Math.floor(Date.now() / 1000);
+    const googleToken = jwt.sign(
+      {
+        iss: "https://accounts.google.com",
+        sub: "222222222222222222222",
+        email: unregisteredEmail,
+        email_verified: true,
+        aud: audience,
+        iat: now,
+        exp: now + 300,
+      },
+      privateKey,
+      { algorithm: "RS256", keyid: kid },
+    );
+
+    const issued = await controllerWithGoogle.issueToken({
+      headers: {
+        // Dual-sent per the rollout pattern: a verified-but-unregistered
+        // Google assertion alongside a still-valid internal key. The
+        // registry already exists (unlike the gate-off case above), so this
+        // exercises WORKLOAD_PRINCIPAL_NOT_REGISTERED specifically, not
+        // WORKLOAD_IDENTITY_GOOGLE_NOT_CONFIGURED.
+        "x-drts-google-id-token": googleToken,
+        "x-drts-internal-key": "test-internal-secret",
+        "x-actor-type": "tenant_admin",
+        "x-actor-id": "tenant-user-demo-001",
+        "x-realm": "tenant",
+        "x-tenant-id": "tenant-demo-001",
+      },
+      method: "POST",
+      originalUrl: "/api/auth/token",
+      url: "/api/auth/token",
+    });
+
+    const payload = jwtAuthService.verify(issued.token);
+    expect(payload).toMatchObject({
+      sub: "tenant-user-demo-001",
+      roles: [tenantUser!.roleCode],
+    });
+
+    vi.unstubAllGlobals();
+    delete process.env.JWT_SECRET;
+    delete process.env.JWT_ISSUER;
+    delete process.env.JWT_AUDIENCE;
+    delete process.env.DRTS_INTERNAL_KEY;
+    delete process.env.AUTH_MODE;
+    delete process.env.WORKLOAD_IDENTITY_GOOGLE_SERVICE_PRINCIPALS;
   });
 
   it("issues trusted workforce MFA claims for internal-key bootstrap platform tokens", async () => {
