@@ -325,6 +325,7 @@ export class GoogleWorkloadIdentityAdapter {
           membershipId: membershipRecord.membershipId,
           roleCode: role,
           grantedByPrincipalId: null,
+          approvalId: null,
           validFrom: authTime,
           validTo: null,
           createdAt: authTime,
