@@ -77,6 +77,10 @@ function createAuthFixture() {
     jwtAuthService,
     tenantPartnerService,
     driverDeviceSessionService,
+    undefined, // securityEventsService
+    undefined, // iapSubjectAdapter
+    undefined, // serviceWorkloadIdentityAdapter
+    identityRepository,
   );
 
   return {
@@ -729,8 +733,17 @@ describe("auth token issuance", () => {
     process.env.DRTS_INTERNAL_KEY = "test-internal-secret";
     process.env.AUTH_MODE = "explicit";
 
-    const { controller, jwtAuthService } = createAuthFixture();
+    const { controller, jwtAuthService, identityRepository } = createAuthFixture();
 
+    vi.spyOn(identityRepository, "findMembershipsByPrincipalId").mockResolvedValue([
+      {
+        membershipId: "mem-platform-123",
+        principalId: "platform-admin-001",
+        realm: "platform",
+        roleCode: "platform_admin",
+        status: "active",
+      } as any,
+    ]);
     const issued = await controller.issueToken({
       headers: {
         "x-drts-internal-key": "test-internal-secret",
