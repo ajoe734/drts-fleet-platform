@@ -387,9 +387,14 @@ order:
    service identities, plus `DEV_WIF_SERVICE_ACCOUNT` for caller #9 with a
    `ciTenantActorGrants` entry for both
    `{tenantId: "10000000-0000-0000-0000-000000000201", actorType:
-   "tenant_admin", actorId: "10000000-0000-0000-0000-000000000901"}` and
-   the `...000902` / `tenant_ops_admin` pair) and sets
-   `WORKLOAD_IDENTITY_CI_TENANT_ACTOR_ENABLED=true`.
+   "tenant_admin", actorId: "10000000-0000-0000-0000-000000000901"}` and the
+   `...000902` pair -- **also** `actorType: "tenant_admin"`, not
+   `tenant_ops_admin` (corrected in §7.9: `deploy-dev.yml` sends the literal
+   header `x-actor-type: tenant_admin` on both `POST /api/auth/token` calls;
+   only `x-actor-id` differs between the two, and the resulting *session's*
+   role still comes out as `tenant_ops_admin` for `...902` from the durable
+   tenant-user fixture lookup, not from this header or this grant) -- and
+   sets `WORKLOAD_IDENTITY_CI_TENANT_ACTOR_ENABLED=true`.
 2. A real dev deploy of this candidate (or later) confirms
    `AUTH_LEGACY_INTERNAL_KEY_USED` for `INTERNAL_KEY_EXCP_002` stops
    appearing in `apps/api` logs / `internalKeyMetrics` for all nine
@@ -578,7 +583,7 @@ two entries, not nine:
 | Entry | `serviceAccountEmail` | `routeScopes` | Covers |
 | --- | --- | --- | --- |
 | A | `drts-dev-runtime@drts-dev-devcc-20260825.iam.gserviceaccount.com` | `["* *"]` | Callers #1-8 (every web app's control-plane proxy / API client in §6's inventory). `* *` is not a narrowing regression here: callers #1/2/4/6 already legitimately need `* *` as generic reverse proxies, and because #3/5/7/8 share that exact same Google identity in dev, there is no request-time signal that can distinguish them -- any `routeScopes` narrower than `* *` on this one entry would incorrectly 403 the broad proxies, and any second entry with the same email would never be reached. |
-| B | the email behind `secrets.DEV_WIF_SERVICE_ACCOUNT` (GitHub Actions deployer identity; this worker cannot read secret values and does not need to -- ops already has it) | `["POST auth/token"]` | Caller #9 (`deploy-dev` operational acceptance), with `ciTenantActorGrants` for both `{tenantId: "10000000-0000-0000-0000-000000000201", actorType: "tenant_admin", actorId: "10000000-0000-0000-0000-000000000901"}` and the `...000902` / `tenant_ops_admin` pair, exactly as §7.2 item 1 already specified. |
+| B | `github-actions-deployer@drts-dev-devcc-20260825.iam.gserviceaccount.com` (verified in §7.9: this is the only service account in the project bound with `roles/iam.workloadIdentityUser` to the GitHub OIDC pool for this repo, i.e. the identity `secrets.DEV_WIF_SERVICE_ACCOUNT` names) | `["POST auth/token"]` | Caller #9 (`deploy-dev` operational acceptance), with `ciTenantActorGrants` for both `{tenantId: "10000000-0000-0000-0000-000000000201", actorType: "tenant_admin", actorId: "10000000-0000-0000-0000-000000000901"}` and `{tenantId: "10000000-0000-0000-0000-000000000201", actorType: "tenant_admin", actorId: "10000000-0000-0000-0000-000000000902"}` -- **both** grants use `actorType: "tenant_admin"` (corrected in §7.9; this table previously said the second grant was `tenant_ops_admin`, which does not match either `POST /api/auth/token` call's actual `x-actor-type: tenant_admin` header in `deploy-dev.yml` and would have made that grant lookup never match). |
 
 Both entries need `principalId` (any stable, human-readable identifier --
 e.g. `dev-web-runtime` / `dev-ci-deployer`).
@@ -755,3 +760,94 @@ instead of defaulting it to `todo` with a generic message, which is what
 happens when a completed `unblock` helper carries no `resolved_parent_*`
 metadata. The `note` call gives the parent's `next` field the corrected text
 immediately, without waiting for this helper's own merge.
+
+## 7.9 Pre-rollout fixes (2026-10-01, `SEC-INTERNAL-KEY-WIF-PROXY-REPLAY-20261001`): proxy replay false-positive, CI authorization mismatch, unregistered-caller blast radius
+
+This task was dispatched specifically because populating
+`WORKLOAD_IDENTITY_GOOGLE_SERVICE_PRINCIPALS` (the still-outstanding step
+from §7.5/§7.6/§7.8) was found, on closer inspection, to be unsafe to do yet:
+three defects in the shipped WIF verification path would each have broken
+dev the moment ops turned the registry on, none of them visible from static
+review of the registry JSON alone. All three are fixed in this candidate;
+none required changing the exception registry's active/expired state in
+`internal-key-exception-registry.ts`, and `INTERNAL_KEY_EXCP_002` remains
+active and unremoved, same as every prior round in this section.
+
+| Finding / acceptance key | Source & fix location | Before → after | Command, exit code, evidence | Unverified / limits |
+| --- | --- | --- | --- | --- |
+| A verified, correctly-registered, non-expired Google ID token is rejected as a replay on the second of two concurrent general proxy requests, because a Cloud Run metadata server returns the byte-identical cached token to every caller within its validity window (`一般代理請求...在Google ID token有效期內可重複使用同一token，並行相同token的請求全部成功`) | `apps/api/src/modules/auth/google-workload-identity.adapter.ts`: `verifyServicePrincipal`'s `context` parameter gains `enforceReplayProtection?: boolean` (default `true`); the `IdentityRepository.consumeWorkloadIdentityAssertion` call (and its `iam.workload_identity_assertions` / in-memory-fallback insert) is skipped entirely when `false`, so repeat presentation of the identical assertion is not rejected and adds no ledger row at all -- not merely a bounded/idempotent write, no write. `apps/api/src/common/auth/internal-key.middleware.ts`'s `validateInternalKey` (the only caller reached via `InternalKeyMiddleware`, i.e. every general proxied route) now passes `enforceReplayProtection: false`. `apps/api/src/modules/auth/auth.controller.ts`'s `POST /api/auth/token` call site is unchanged (no option passed, so the default `true` still applies) -- this is the only call site that mints a durable session from the assertion and must keep one-time-use semantics. | Before: entry A (§7.6/§7.7's shared `drts-dev-runtime@...` SA, `routeScopes: ["* *"]`, covering every one of callers #1-8's proxied requests) would 409 with `WORKLOAD_ASSERTION_REPLAYED` on every request after the first to reuse that SA's cached metadata-server token within its lifetime -- i.e. essentially every second-and-later parallel API call a browser page fires, for every page on every one of the five web apps behind callers #1-8. Populating the registry as §7.6 instructs would have made this fire immediately. After: `apps/api/tests/unit/google-workload-identity.adapter.test.ts` "allows reusing the identical assertion repeatedly when replay protection is disabled" fires 3 concurrent `verifyServicePrincipal` calls with one identical token and `enforceReplayProtection: false`; all 3 resolve. `tests/unit/internal-key.middleware.test.ts` "accepts the same cached Google ID token for concurrent general proxy requests" exercises the same path through the actual `validateInternalKey` entry point `InternalKeyMiddleware` calls. The pre-existing "rejects replaying the same assertion twice by default" test (now renamed, behavior unchanged) and the new "still enforces every other check (issuer, audience, route scope) when replay protection is disabled" test confirm session-issuance replay enforcement and the other verification checks are untouched. | `pnpm --filter @drts/contracts build` (exit 0); `pnpm --filter @drts/control-plane-auth build` (exit 0, pre-existing dependency, needed before `apps/api` typechecks in this worktree); from `apps/api`: `pnpm exec tsc --noEmit -p tsconfig.json` (exit 0, clean); `pnpm exec vitest run tests/unit/google-workload-identity.adapter.test.ts tests/unit/auth-bootstrap.test.ts` (exit 0, 2 files / 114 tests passed); `pnpm exec vitest run tests/unit` (exit 0, full `apps/api` unit suite, 119 files / 1168 tests passed -- confirms no regression anywhere else in the API from the fallback widening or the replay-flag default); from repo root: `pnpm exec vitest run tests/unit/internal-key.middleware.test.ts tests/unit/internal-key-wif-configuration.test.ts` (exit 0, 2 files / 19 tests passed); `pnpm exec vitest run tests/integration/internal-key-rotation-retirement.integration.test.ts` (exit 0, 1 file / 6 tests passed, confirms the unrelated dual-key rotation/retirement behavior in the same middleware is untouched); `pnpm exec eslint` on all five touched source/test files (clean, except the one pre-existing `no-unused-vars` hit on `apps/api/tests/unit/auth-bootstrap.test.ts:495`, confirmed present in this branch's base commit via `git show HEAD:apps/api/tests/unit/auth-bootstrap.test.ts` before this candidate's edits, same pre-existing issue §7.3 already recorded at its then-line-number 490). | Not run to completion: the full root `pnpm test:unit` (hundreds of files beyond this task's scope) was started and reached ~900 files before stalling with near-0% CPU on a DB-dependent e2e file after `tests/e2e/system-remediation/sr-qa-webhook-001-fix-tenant-binding/appmodule-tenant-binding.test.ts`, consistent with this sandbox's no-Postgres restriction (§7.4's own prior finding); not claimed as passing. Also not run: a real Cloud Run metadata server / live dev deploy (no trigger path from this branch, same restriction as every prior round in this section); this fix is verified against a real generated RSA keypair and real `jsonwebtoken` verification, not a live Google-issued token. Separately observed and unrelated to this candidate: `tests/integration/control-plane-auth-prod-resolution.integration.test.ts` fails 2/4 in this specific worktree because `apps/api/node_modules/@drts/control-plane-auth` is a stale pnpm symlink pointing into a different task's worktree (`.../worktrees/auto/gemini-sr-live-map-c114-identity-remediation-r2-20261001/packages/control-plane-auth`), predating this session -- a workspace-linking artifact of this isolated worktree, not a code defect; confirmed by inspecting the symlink target directly. |
+| §7.6's corrected 2-entry registry plan would make the shared-proxy SA's own grant (entry A) also gate `POST auth/token`'s `ciTenantActorGrants` matching, which requires the caller's literal `x-actor-type` header to equal the registered grant's `actorType` -- but the two registered grants in §7.2 item 1 and §7.6 table row B were documented with `actorType: "tenant_admin"` for actorId `...901` and `actorType: "tenant_ops_admin"` for actorId `...902`, while `deploy-dev.yml`'s two `POST /api/auth/token` calls (lines 1653 and 1674) both literally send `x-actor-type: tenant_admin` -- only `x-actor-id` differs (`部署CI授權的actorType與實際header一致`) | `docs/02-architecture/internal-key-exceptions.md` §7.2 item 1 and §7.6's entry-B table row: corrected both to state the `...902` grant also uses `actorType: "tenant_admin"`, matching the header `deploy-dev.yml` actually sends. The *session role* that results for `...902` (`tenant_ops_admin`) is unaffected -- it comes from `TenantPartnerService.findTenantUser`'s durable fixture lookup by `(tenantId, actorId)` in `auth.controller.ts`, not from the bootstrap `x-actor-type` header or this grant's `actorType` field, which only gate `resolveCiTenantActorGrant`'s tuple match. No `apps/api` code changed for this finding -- `resolveCiTenantActorGrant`'s exact-tuple-match logic (`google-workload-identity.adapter.ts:489-496`) was already correct; only the ops-facing documentation of what to register was wrong. | Before: following §7.2/§7.6 literally, ops would have registered `{tenantId: "...201", actorType: "tenant_ops_admin", actorId: "...902"}`. The real request's tuple is `{tenantId: "...201", actorType: "tenant_admin", actorId: "...902"}` (from the header `deploy-dev.yml` sends) -- `actorType` would never match, so `resolveCiTenantActorGrant` returns `null`, and `auth.controller.ts:486-491` throws `WORKLOAD_CI_TENANT_ACTOR_DENIED` (403) for the Tenant Ops dispatch session every single run, once the gate is enabled. After: the doc's two documented grants both say `actorType: "tenant_admin"`, matching the header; the pasteable JSON in this section below reflects the fix directly. | `tests/unit/internal-key-wif-configuration.test.ts` "both operational-acceptance POST /api/auth/token calls send the literal x-actor-type header actually documented for their ciTenantActorGrants entry" parses both header lines from the live `deploy-dev.yml` and asserts both equal `tenant_admin`; "documents both ciTenantActorGrants entries (actorId ...901 and ...902) with actorType tenant_admin, matching the workflow header" asserts the doc text for both entries and asserts the old wrong `tenant_ops_admin`-grant phrasing is gone from both places it previously appeared. | Not run: an actual populated registry against a live `deploy-dev.yml` run (same reservation as §7.5/§7.6/§7.8 -- populating the GCP secret and enabling the gate are human-operator actions outside this sandbox's write reach). This finding was caught by re-deriving the real request tuple from the workflow file and comparing it character-for-character against the doc's prior text, not by exercising a live run. |
+| Once ops populates the registry (even correctly, per this section's corrected 2-entry plan), any future caller whose Google-signed token verifies (good signature, issuer, audience) but whose service-account email is not yet one of the two registered entries gets `WORKLOAD_PRINCIPAL_NOT_REGISTERED` (403) from `verifyServicePrincipal`, and both `InternalKeyMiddleware` and `auth.controller.ts`'s prior `catch` blocks re-threw everything except `WORKLOAD_IDENTITY_GOOGLE_NOT_CONFIGURED` -- so that 403 was hard, with no fallback to the legacy `x-drts-internal-key` the caller may also be dual-sending, for every route that caller's traffic touches (`註冊表未列出的呼叫者不會讓dev網站整體失效`) | `apps/api/src/modules/auth/google-workload-identity.adapter.ts`: new exported `isGoogleWorkloadIdentityPrincipalNotRegistered(error)` helper (mirrors the existing `isGoogleWorkloadIdentityNotConfigured`, checking `error.code === "WORKLOAD_PRINCIPAL_NOT_REGISTERED"`). `internal-key.middleware.ts`'s `validateInternalKey` and `auth.controller.ts`'s `issueToken` both now treat this the same as "registry not configured yet": fall through to the still-fully-enforced legacy `x-drts-internal-key` check instead of hard-denying. Every *other* verification failure for an already-registered principal (bad signature, issuer mismatch, audience mismatch, replay on the session-issuance path, route scope denial) is unchanged and still fails closed -- this widening is scoped to exactly one error code, not "any WIF failure falls back". | Before: a ninth caller (or a typo'd/rotated service-account email on an existing one) dual-sending a verified-but-unregistered Google assertion alongside a perfectly valid internal key would still get a hard 403 on every request -- the internal key was never even inspected. After: the same request resolves successfully via the internal-key path. Security property preserved: falling through does not grant any bypass -- the internal key is independently and fully validated on the fallback path exactly as it is today for any caller that never sent a Google token at all. | `tests/unit/internal-key.middleware.test.ts` "does not let an unregistered caller's Google assertion take the whole route down when a valid internal key is also present" (registry populated with one *other* SA, proxy request); `apps/api/tests/unit/auth-bootstrap.test.ts` "falls back to the internal key when the registry is populated but does not list this caller's service account" (same scenario through `POST /api/auth/token`). The adjacent boundary test "still fails closed for a registered principal's genuinely invalid assertion (wrong audience) even with a valid internal key present" confirms the widening did not accidentally cover audience mismatch, issuer mismatch, or route scope denial for a principal that *is* registered. | Audience mismatch and route-scope denial for an *already-registered* principal are deliberately left fail-closed (not widened) even though a misconfigured `allowedTokenAudiences` entry (e.g. after a Cloud Run redeploy changes the origin, see the `DEV_IAP_CLIENT_ID` caveat in §7.6/§7.7) could in principle also take down every caller sharing that entry. That scenario is a real but distinct configuration-drift risk this task was not asked to solve and did not investigate further; ops should treat the §7.6 "re-verify the live Cloud Run URL" guidance as load-bearing, not optional. |
+
+### 7.9.1 Pasteable `WORKLOAD_IDENTITY_GOOGLE_SERVICE_PRINCIPALS` registry (verified 2026-10-01)
+
+Both values below were independently re-verified from this sandbox's
+read-only `gcloud` credentials (no secret values were read; no GCP/GitHub
+writes were made):
+
+- Entry A's `serviceAccountEmail` and Entry B's `serviceAccountEmail` are
+  confirmed distinct, real service accounts in `drts-dev-devcc-20260825`:
+  `gcloud iam service-accounts list --project=drts-dev-devcc-20260825`
+  returns exactly three service accounts in this project
+  (`github-actions-deployer@...`, the default compute SA, and
+  `drts-dev-runtime@...`). `gcloud run services list ... --format='table(metadata.name,spec.template.spec.serviceAccountName)'`
+  (§7.6's own command, re-run unchanged) confirms every one of the nine
+  Cloud Run services behind callers #1-8 runs as `drts-dev-runtime@...`
+  (Entry A). `gcloud iam service-accounts get-iam-policy github-actions-deployer@drts-dev-devcc-20260825.iam.gserviceaccount.com`
+  shows it alone holds `roles/iam.workloadIdentityUser` for
+  `principalSet://iam.googleapis.com/projects/24645990627/locations/global/workloadIdentityPools/github-actions/attribute.repository/ajoe734/drts-fleet-platform`
+  -- i.e. it is the only service account this repo's GitHub Actions runs can
+  impersonate via WIF at all, confirming it is the identity
+  `secrets.DEV_WIF_SERVICE_ACCOUNT` names for Entry B. (`get-iam-policy` on
+  `drts-dev-runtime@...` separately shows only
+  `github-actions-deployer@...` is permitted to impersonate *it*, for
+  deploying Cloud Run services -- consistent, not conflicting, with the
+  above.)
+- The audience value is the live `drts-dev-api` Cloud Run service URL, per
+  §7.6's own audience correction: `gcloud run services describe drts-dev-api
+  --platform=managed --region=us-central1 --project=drts-dev-devcc-20260825
+  --format='value(status.url)'` returned
+  `https://drts-dev-api-r6ykdme3wa-uc.a.run.app` at the time of this
+  writing. Cloud Run service URLs are stable for the life of the service
+  (they do not change per revision/deploy), but ops should re-run this exact
+  command before pasting the JSON below if there is any doubt, and must
+  switch both entries to `vars.DEV_IAP_CLIENT_ID` instead if that variable
+  is ever set (see §7.6's `DEV_IAP_CLIENT_ID` caveat -- it would change Entry
+  A's audience but not Entry B's).
+
+```json
+[
+  {
+    "serviceAccountEmail": "drts-dev-runtime@drts-dev-devcc-20260825.iam.gserviceaccount.com",
+    "principalId": "dev-web-runtime",
+    "allowedTokenAudiences": ["https://drts-dev-api-r6ykdme3wa-uc.a.run.app"],
+    "routeScopes": ["* *"]
+  },
+  {
+    "serviceAccountEmail": "github-actions-deployer@drts-dev-devcc-20260825.iam.gserviceaccount.com",
+    "principalId": "dev-ci-deployer",
+    "allowedTokenAudiences": ["https://drts-dev-api-r6ykdme3wa-uc.a.run.app"],
+    "routeScopes": ["POST auth/token"],
+    "ciTenantActorGrants": [
+      {
+        "tenantId": "10000000-0000-0000-0000-000000000201",
+        "actorType": "tenant_admin",
+        "actorId": "10000000-0000-0000-0000-000000000901"
+      },
+      {
+        "tenantId": "10000000-0000-0000-0000-000000000201",
+        "actorType": "tenant_admin",
+        "actorId": "10000000-0000-0000-0000-000000000902"
+      }
+    ]
+  }
+]
+```
+
+To apply: `WORKLOAD_IDENTITY_GOOGLE_SERVICE_PRINCIPALS=<the JSON above,
+compacted to one line>` as the Cloud Run secret value mounted by
+`deploy-dev.yml`'s `api_secrets` step (`${secret_prefix}-workload-identity-google-service-principals`,
+per §7.5), alongside setting
+`vars.DEV_WORKLOAD_IDENTITY_CI_TENANT_ACTOR_ENABLED=true`. This section
+documents the values; it does not and cannot write the GCP secret or GitHub
+variable itself (same reservation as every prior round in this section).

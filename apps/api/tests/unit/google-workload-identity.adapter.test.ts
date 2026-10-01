@@ -183,13 +183,50 @@ describe("GoogleWorkloadIdentityAdapter", () => {
     ).rejects.toMatchObject({ code: "WORKLOAD_ISSUER_MISMATCH" });
   });
 
-  it("rejects replaying the same assertion twice", async () => {
+  it("rejects replaying the same assertion twice by default", async () => {
     configureRegistry();
     const token = signGoogleToken();
     await adapter.verifyServicePrincipal({ "x-drts-google-id-token": token }, {});
     await expect(
       adapter.verifyServicePrincipal({ "x-drts-google-id-token": token }, {}),
     ).rejects.toMatchObject({ code: "WORKLOAD_ASSERTION_REPLAYED" });
+  });
+
+  it("allows reusing the identical assertion repeatedly when replay protection is disabled (general proxy requests)", async () => {
+    // A Cloud Run metadata server caches and returns the identical token for
+    // its whole validity window, so concurrent proxied requests on the same
+    // page legitimately present byte-identical assertions. The one-time-use
+    // ledger must not reject that for general requests.
+    configureRegistry();
+    const token = signGoogleToken();
+    const context = {
+      requestMethod: "GET",
+      requestPath: "/api/tenant/passengers",
+      enforceReplayProtection: false,
+    };
+    const [first, second, third] = await Promise.all([
+      adapter.verifyServicePrincipal({ "x-drts-google-id-token": token }, context),
+      adapter.verifyServicePrincipal({ "x-drts-google-id-token": token }, context),
+      adapter.verifyServicePrincipal({ "x-drts-google-id-token": token }, context),
+    ]);
+    expect(first.principalId).toBe(PRINCIPAL_ID);
+    expect(second.principalId).toBe(PRINCIPAL_ID);
+    expect(third.principalId).toBe(PRINCIPAL_ID);
+  });
+
+  it("still enforces every other check (issuer, audience, route scope) when replay protection is disabled", async () => {
+    configureRegistry({ routeScopes: ["POST partner/ingress/handoff"] });
+    const token = signGoogleToken();
+    await expect(
+      adapter.verifyServicePrincipal(
+        { "x-drts-google-id-token": token },
+        {
+          requestMethod: "GET",
+          requestPath: "/api/tenant/passengers",
+          enforceReplayProtection: false,
+        },
+      ),
+    ).rejects.toMatchObject({ code: "WORKLOAD_ROUTE_SCOPE_DENIED" });
   });
 
   it("rejects a registered principal whose route scope does not cover the requested route", async () => {
