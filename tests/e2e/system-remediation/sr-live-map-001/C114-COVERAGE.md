@@ -498,7 +498,7 @@ Supervisor resumed the parent after helper PR #2251 candidate
 Owner read that complete approval and the prior reopen findings. In the assigned
 worktree, published checkpoint `ef7c304ec20168e847ee236468de42d7e90f7551`
 was normally merged with that dev head as
-`ada8b5371` (full SHA in git); no candidate was rewritten. PR #2247 remains a
+`ada8b5371223891710e8c5ea8ba11f5b0811105c`; no candidate was rewritten. PR #2247 remains a
 draft investigation checkpoint. The last parent acceptance candidate remains
 `e3c7ed02701c387d82786bcfd8877e2618851f3b`.
 
@@ -511,7 +511,7 @@ repositories to identify the remaining boundaries:
 | Finding / trigger | Source and actual result on merged helper | Reproduction / evidence | Required repair boundary |
 | --- | --- | --- | --- |
 | F-SESSION-CONTRACT / Google observer, still unresolved | `AuthController.issueToken` always calls `resolveCiTenantActorGrant` for Google proofs; that resolver rejects the observer's empty tenant ID before issuing a session. Merely changing the header to `ops_observer` does not add a grant path. | Parameterized real Google-adapter probes for both `ops_user` and the exact new `ops_observer` request persist the verified Google principal, then receive `WORKLOAD_CI_TENANT_ACTOR_DENIED`. Only external JWKS/network is replaced with a disposable unit issuer. | Helper product owner must implement the registered observer proof/grant path, preserving audience/route/replay/durable checks. Do not add a fabricated tenant ID or internal-key fallback. Requires Supervisor-coordinated auth scope outside this parent. |
-| F-WIRE / real registration response | `DriverDeviceProvisioningSession.accessToken` is a string; `expiresIn` is a sibling. `DriverDeviceSessionService.buildSession` returns that shape. `bootstrapMapSessions` instead expects `{accessToken:{token,expiresIn}}`, so the real response fails at `driver:register-device` while masking an undefined token. Actual driver scopes are `driver:read`, `driver:write`, `dispatch:read`, not the single mocked scope. | Real invite -> register response passes through `deepToSnakeCase` -> the actual bootstrap normalizer. A boundary stub supplies observer/provisioner auth only to isolate this independent defect; this is explicitly not WIF/auth success evidence. | Parent Codex updates the actual consumer and scope assertion to the formal contract after the supported issuance/cleanup contract is settled. Reuse this real-service regression instead of the fabricated registration response in `session-bootstrap.test.ts`. |
+| F-WIRE / real registration response | `DriverDeviceProvisioningSession.accessToken` is a string; `expiresIn` is a sibling. `DriverDeviceSessionService.issueSession` returns that shape. `bootstrapMapSessions` instead expects `{accessToken:{token,expiresIn}}`, so the real response fails at `driver:register-device` while masking an undefined token. Actual driver scopes are `driver:read`, `driver:write`, `dispatch:read`, not the single mocked scope. | Real invite -> register response passes through `deepToSnakeCase` -> the actual bootstrap normalizer. A boundary stub supplies observer/provisioner auth only to isolate this independent defect; this is explicitly not WIF/auth success evidence. | Parent Codex updates the actual consumer and scope assertion to the formal contract after the supported issuance/cleanup contract is settled. Reuse this real-service regression instead of the fabricated registration response in `session-bootstrap.test.ts`. |
 | F-SESSION-CONTRACT / partial registration cleanup, still unresolved | Bootstrap catch revokes only the registration code. `DriverDeviceSessionService.revokeInvitation` returns `revoked:false` for a consumed invite; the registered access token, binding and refresh family remain active. No environment values have been exported, so the workflow teardown cannot recover them. | The same real-service probe observes `revoked:false`, active binding and a token that still passes `verifyAccessToken`; ordinary bound-driver revoke at the end of the isolated unit fixture invalidates it. No live driver was touched. | Product owner must define supported recovery for lost registration responses. Parent must retain per-run recovery state before mutation, revoke binding/family on all partial failures and prove cleanup with the real service, including lost-response and failed-verification cases. |
 | F-SESSION-CONTRACT / provisioning transport and least scope | `session-bootstrap.ts` and `session-teardown.ts` still read `drts-dev-jwt-secret` and mint a platform session via `x-drts-internal-key` for invitations. Observer defaults in `iam-policy-catalog.ts` additionally contain sandbox read scopes, and `AuthController.issueToken` still returns 8h for this actor. | Exact source inspection; the helper's positive observer test uses the internal key plus explicit `x-scopes`, not the hosted WIF request. `DRTS_E2E_PROVISIONING=true` alone cannot add the absent Google observer/provisioner grants. | Supervisor/product owner specifies supported short-lived proof for both observer and per-run invitation authorization. Parent will consume that contract without inventing a new secret, requesting a long-lived token, or loosening checks. |
 | F-CONSUMER-DRIFT / later stages | Bootstrap records observer first with `ops_observer`, then driver. `runCoverage` still demands `ops_user`; `gate-evidence.py` still demands driver-first, `ops_user` and one driver scope. | Exact consumer/producer source comparison; these downstream stages are unreachable behind the current issuance failure. | Parent updates bootstrap, coverage, Python evidence gate and both-shape tests together once identity contract is corrected; no relaxed wildcard acceptance. |
@@ -562,3 +562,26 @@ Supervisor must route the product portion back to the prerequisite owner and
 coordinate its scopes. The parent Codex owns the harness fixes listed above
 after that concrete supported contract is available. Keep PR #2247 draft and
 the parent blocked; this diagnostic checkpoint is not a repaired candidate.
+
+
+Final repository checks for the 2026-10-01 readback code checkpoint
+`6e838d78dc2b661ecb54d9b31229fbce5a40fd6c` (the subsequent ledger-only commit
+changes no executable code): Node 22.23.2 / pnpm 10.33.0 / Vitest 4.1.4.
+
+- `pnpm exec vitest run tests/unit/system-remediation/sr-live-map-001/ --maxWorkers=2`:
+  **69 passed / 7 files**, exit 0. This includes six supported-contract probes
+  and the existing 16-case Python evidence gate. Log `unit-isolated.log`, SHA256
+  `b5933538ef023852943a42cea24e13cce3e7881c00b93e8ac9d402b724254c76`.
+- `pnpm exec tsc -p tsconfig.json --noEmit`: **pass**, exit 0, empty output
+  `typecheck-isolated.log`.
+- Scoped ESLint with `--max-warnings=0`, Prettier check and `git diff --check`:
+  **pass**, exit 0. No runtime, browser or E2E server was started locally.
+- Initial typecheck exited 2 because the worker's shared `node_modules`
+  symlinks resolved private ApiClient types from both canonical and isolated
+  paths. Detached only this worktree's 22 symlinks, preserving every shared
+  target; `pnpm install --offline --frozen-lockfile --ignore-scripts` exited 0.
+  The isolated checks above are authoritative; initial failure is retained.
+- Logs, read-only variables, helper review and CI metadata are in
+  `.local/c114/identity-readback-20261001/`. Hosted run conclusions are recorded
+  through the release status CLI after completion. Draft integration jobs that
+  skip execution do not constitute full CI or any live acceptance.
