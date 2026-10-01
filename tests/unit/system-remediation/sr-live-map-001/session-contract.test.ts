@@ -342,7 +342,6 @@ it("Driver revoke failure records durable retryable recovery and cleanup is idem
 
   const issueResult = await deviceService.issueRegistrationInvitation({
     driverId: "drv-demo-002",
-    expiresIn: "1h",
     reuseExisting: false,
   });
 

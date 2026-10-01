@@ -327,7 +327,6 @@ export class GoogleWorkloadIdentityAdapter {
           grantedByPrincipalId: null,
           validFrom: authTime,
           validTo: null,
-          status: "active",
           createdAt: authTime,
           updatedAt: authTime,
         });
