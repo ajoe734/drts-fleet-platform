@@ -148,18 +148,24 @@ cat <<EOF
    docs/02-architecture/internal-key-exceptions.md §8.2 (includes entry C for
    ${SCHEDULER_SA}), then redeploy or otherwise refresh the API's secret
    mount so it picks up the new version.
-2. Verify each job actually reaches the API once the registry above is live:
-     gcloud scheduler jobs run ${MAIL_OUTBOX_JOB} --location=${REGION} --project=${PROJECT_ID}
-     gcloud scheduler jobs run ${APPROVAL_REMINDER_JOB} --location=${REGION} --project=${PROJECT_ID}
-     gcloud scheduler jobs describe ${MAIL_OUTBOX_JOB} --location=${REGION} --project=${PROJECT_ID} --format='value(lastAttemptTime,state,status.code)'
-   state=ENABLED alone is not success -- it is the job's own enable/disable
-   toggle, unrelated to whether the last attempt worked. status.code must
-   also be 0/empty (google.rpc.Code.OK); a nonzero status.code means Cloud
-   Scheduler itself recorded the HTTP call as failed. Then cross-check the
-   Cloud Run request logs for a matching AUTH_GOOGLE_WORKLOAD_IDENTITY_USED
-   textPayload line (this app's Nest logger emits plain text, not
-   jsonPayload) with principalId=dev-scheduler for the matching route. Full
-   verification steps, including why a failed run will not surface a
-   specific WORKLOAD_* error code, are in
+2. Verify each job actually reaches the API once the registry above is live.
+   `gcloud scheduler jobs run` only dispatches the job -- it returns before
+   the target responds -- and lastAttemptTime/state alone cannot tell a
+   still-in-flight attempt from a completed one. Use the bounded completion
+   check instead, which polls for a matching Scheduler AttemptFinished
+   record or a Cloud Run HTTP record (either is itself proof the attempt
+   actually finished, unlike lastAttemptTime):
+     infra/gcp/dev/scheduler/confirm-job-attempt.sh ${MAIL_OUTBOX_JOB} internal/scheduled-tasks/mail-outbox/drain
+     infra/gcp/dev/scheduler/confirm-job-attempt.sh ${APPROVAL_REMINDER_JOB} internal/scheduled-tasks/approval-timeout-reminders/run
+   Exit 0 = confirmed completed successfully; exit 1 = confirmed completed
+   but failed (script prints the status code); exit 2 = no completion
+   evidence within the timeout, which means unconfirmed, not success. Then
+   cross-check the Cloud Run request logs for a matching
+   AUTH_GOOGLE_WORKLOAD_IDENTITY_USED textPayload line (this app's Nest
+   logger emits plain text, not jsonPayload) with principalId=dev-scheduler
+   for the matching route -- the adapter also logs
+   AUTH_GOOGLE_WORKLOAD_IDENTITY_ROUTE_SCOPE_DENIED in the same shape, so
+   search for either with one query. Full verification steps, including why
+   a failed run will not surface a specific WORKLOAD_* error code, are in
    docs/03-runbooks/dev-scheduled-tasks-20261001.md.
 EOF

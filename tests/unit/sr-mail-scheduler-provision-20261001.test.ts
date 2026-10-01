@@ -1,5 +1,7 @@
+import { execFileSync } from "node:child_process";
 import { generateKeyPairSync } from "node:crypto";
-import { readFileSync } from "node:fs";
+import { chmodSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import path from "node:path";
 
 import * as jwt from "jsonwebtoken";
@@ -21,6 +23,14 @@ const runbookPath = path.join(
 const scriptPath = path.join(
   repoRoot,
   "infra/gcp/dev/scheduler/provision-dev-scheduler.sh",
+);
+const confirmJobAttemptScriptPath = path.join(
+  repoRoot,
+  "infra/gcp/dev/scheduler/confirm-job-attempt.sh",
+);
+const fakeGcloudModulePath = path.join(
+  repoRoot,
+  "tests/unit/fixtures/sr-mail-scheduler-provision-20261001/fake-gcloud.mjs",
 );
 
 const API_ORIGIN = "https://drts-dev-api-r6ykdme3wa-uc.a.run.app";
@@ -321,9 +331,9 @@ describe("SR-MAIL-SCHEDULER-PROVISION-20261001: provisioning script is minimal-p
     expect(script).not.toContain("roles/iam.serviceAccountTokenCreator");
   });
 
-  it("documents the job-describe verification with the real top-level Job fields", () => {
+  it("points operators at the bounded completion check, not just job-describe's top-level fields", () => {
     const script = readFileSync(scriptPath, "utf8");
-    expect(script).toContain("lastAttemptTime,state,status.code");
+    expect(script).toContain("confirm-job-attempt.sh");
     expect(script).not.toMatch(/status\.lastAttemptTime/);
     expect(script).not.toMatch(/status\.state/);
   });
@@ -391,5 +401,197 @@ describe("SR-MAIL-SCHEDULER-PROVISION-20261001: runbook sequences deploy, regist
     const runbook = readFileSync(runbookPath, "utf8");
     expect(runbook).toContain("JWT_INVALID");
     expect(runbook).toContain("AUTH_GOOGLE_WORKLOAD_IDENTITY_ROUTE_SCOPE_DENIED");
+  });
+
+  it("points at the bounded completion check for actual job-run confirmation", () => {
+    const runbook = readFileSync(runbookPath, "utf8");
+    expect(runbook).toContain("confirm-job-attempt.sh");
+    expect(runbook).toContain("AttemptFinished");
+  });
+});
+
+/** Synthetic log record consumed by the offline `gcloud` stand-in at
+ * tests/unit/fixtures/sr-mail-scheduler-provision-20261001/fake-gcloud.cjs.
+ * Mirrors just the fields confirm-job-attempt.sh's `gcloud logging read`
+ * filters key off (job_id/timestamp for the Scheduler query, requestUrl/
+ * timestamp for the Cloud Run query). */
+type FakeGcloudRecord =
+  | { type: "scheduler"; jobId: string; timestamp: string; statusCode?: string }
+  | { type: "run"; requestUrl: string; timestamp: string; httpStatus: string };
+
+/** Runs the real infra/gcp/dev/scheduler/confirm-job-attempt.sh against a
+ * synthetic `gcloud` on PATH, entirely offline: no network call, no live
+ * Scheduler job, no live Cloud Run request. The fake only answers with
+ * whatever `records` this test supplies, filtered the same way the real
+ * `gcloud logging read` filters embedded in the script would filter them
+ * (job_id/route match, timestamp at-or-after invocation) -- so a record
+ * that predates the script's own invocation or names a different job is
+ * excluded exactly as it would be against live Cloud Logging. */
+function runConfirmJobAttempt(
+  records: FakeGcloudRecord[],
+  options: { jobName?: string; routeSubstring?: string; timeoutSeconds?: number } = {},
+): { exitCode: number | null; output: string } {
+  const jobName = options.jobName ?? "drts-dev-mail-outbox-drain";
+  const routeSubstring =
+    options.routeSubstring ?? "internal/scheduled-tasks/mail-outbox/drain";
+  const timeoutSeconds = options.timeoutSeconds ?? 0;
+
+  const dir = mkdtempSync(path.join(tmpdir(), "confirm-job-attempt-"));
+  const fixturePath = path.join(dir, "fixture.json");
+  writeFileSync(fixturePath, JSON.stringify({ records }));
+
+  // bash wrapper named exactly `gcloud`, resolved via a PATH entry that is
+  // prepended ahead of any real `gcloud` -- the script under test is never
+  // told it is talking to anything but `gcloud`.
+  const gcloudWrapperPath = path.join(dir, "gcloud");
+  writeFileSync(
+    gcloudWrapperPath,
+    `#!/usr/bin/env bash\nexec node "${fakeGcloudModulePath}" "$@"\n`,
+  );
+  chmodSync(gcloudWrapperPath, 0o755);
+
+  try {
+    const stdout = execFileSync(
+      "bash",
+      [confirmJobAttemptScriptPath, jobName, routeSubstring, String(timeoutSeconds)],
+      {
+        env: {
+          ...process.env,
+          PATH: `${dir}:${process.env.PATH ?? ""}`,
+          FAKE_GCLOUD_FIXTURE: fixturePath,
+        },
+        encoding: "utf8",
+      },
+    );
+    return { exitCode: 0, output: stdout };
+  } catch (error: unknown) {
+    const execError = error as {
+      status?: number | null;
+      stdout?: string;
+      stderr?: string;
+    };
+    return {
+      exitCode: execError.status ?? null,
+      output: `${execError.stdout ?? ""}${execError.stderr ?? ""}`,
+    };
+  }
+}
+
+describe("SR-MAIL-SCHEDULER-PROVISION-20261001: confirm-job-attempt.sh's completion check is bounded, not just lastAttemptTime/state", () => {
+  it("rejects when there is no completion evidence at all (pending/in-flight)", () => {
+    const result = runConfirmJobAttempt([]);
+    expect(result.exitCode).toBe(2);
+  });
+
+  it("rejects a completion record that predates this invocation (stale evidence)", () => {
+    const result = runConfirmJobAttempt([
+      {
+        type: "scheduler",
+        jobId: "drts-dev-mail-outbox-drain",
+        timestamp: "2020-01-01T00:00:00Z",
+        statusCode: "0",
+      },
+    ]);
+    expect(result.exitCode).toBe(2);
+  });
+
+  it("rejects a fresh completion record for a different job (wrong-job evidence)", () => {
+    const result = runConfirmJobAttempt(
+      [
+        {
+          type: "scheduler",
+          jobId: "drts-dev-approval-timeout-reminders-run",
+          timestamp: "2099-01-01T00:00:00Z",
+          statusCode: "0",
+        },
+      ],
+      { jobName: "drts-dev-mail-outbox-drain" },
+    );
+    expect(result.exitCode).toBe(2);
+  });
+
+  it("accepts a matching, fresh Scheduler AttemptFinished success record", () => {
+    const result = runConfirmJobAttempt([
+      {
+        type: "scheduler",
+        jobId: "drts-dev-mail-outbox-drain",
+        timestamp: "2099-01-01T00:00:00Z",
+      },
+    ]);
+    expect(result.exitCode).toBe(0);
+    expect(result.output).toContain("CONFIRMED COMPLETED (success");
+  });
+
+  it("reports a matching, fresh Scheduler AttemptFinished failure record instead of claiming success", () => {
+    const result = runConfirmJobAttempt([
+      {
+        type: "scheduler",
+        jobId: "drts-dev-mail-outbox-drain",
+        timestamp: "2099-01-01T00:00:00Z",
+        statusCode: "7",
+      },
+    ]);
+    expect(result.exitCode).toBe(1);
+    expect(result.output).toContain("FAILED");
+    expect(result.output).toContain("status.code=7");
+  });
+
+  it("falls back to a matching Cloud Run 2xx record when no Scheduler record exists", () => {
+    const result = runConfirmJobAttempt([
+      {
+        type: "run",
+        requestUrl: "/api/internal/scheduled-tasks/mail-outbox/drain",
+        timestamp: "2099-01-01T00:00:00Z",
+        httpStatus: "200",
+      },
+    ]);
+    expect(result.exitCode).toBe(0);
+    expect(result.output).toContain("Cloud Run HTTP 200");
+  });
+
+  it("reports a matching Cloud Run non-2xx record as failure, not success", () => {
+    const result = runConfirmJobAttempt([
+      {
+        type: "run",
+        requestUrl: "/api/internal/scheduled-tasks/mail-outbox/drain",
+        timestamp: "2099-01-01T00:00:00Z",
+        httpStatus: "503",
+      },
+    ]);
+    expect(result.exitCode).toBe(1);
+    expect(result.output).toContain("Cloud Run HTTP 503");
+  });
+});
+
+describe("SR-MAIL-SCHEDULER-PROVISION-20261001: documented diagnostic query finds both success and denial log lines", () => {
+  const combinedLogQueryPattern = (() => {
+    const runbook = readFileSync(runbookPath, "utf8");
+    const match = runbook.match(
+      /textPayload=~"(AUTH_GOOGLE_WORKLOAD_IDENTITY_[^"]+)"/,
+    );
+    const captured = match?.[1];
+    if (!captured) {
+      throw new Error(
+        "combined AUTH_GOOGLE_WORKLOAD_IDENTITY textPayload query not found in docs/03-runbooks/dev-scheduled-tasks-20261001.md",
+      );
+    }
+    return captured;
+  })();
+
+  it("matches both the real adapter's success and route-scope-denial log templates for the scheduler principal/route", () => {
+    const regex = new RegExp(combinedLogQueryPattern);
+    const successLine =
+      "[AUTH_GOOGLE_WORKLOAD_IDENTITY_USED] principalId=dev-scheduler email=drts-dev-scheduler@drts-dev-devcc-20260825.iam.gserviceaccount.com route=POST /api/internal/scheduled-tasks/mail-outbox/drain";
+    const denialLine =
+      "[AUTH_GOOGLE_WORKLOAD_IDENTITY_ROUTE_SCOPE_DENIED] principalId=dev-scheduler email=drts-dev-scheduler@drts-dev-devcc-20260825.iam.gserviceaccount.com route=POST /api/internal/scheduled-tasks/mail-outbox/drain";
+    expect(regex.test(successLine)).toBe(true);
+    expect(regex.test(denialLine)).toBe(true);
+  });
+
+  it("does not match a log line for a different principal or route", () => {
+    const regex = new RegExp(combinedLogQueryPattern);
+    const otherPrincipalLine =
+      "[AUTH_GOOGLE_WORKLOAD_IDENTITY_USED] principalId=dev-web-runtime email=drts-dev-runtime@drts-dev-devcc-20260825.iam.gserviceaccount.com route=POST /api/tenant/passengers";
+    expect(regex.test(otherPrincipalLine)).toBe(false);
   });
 });

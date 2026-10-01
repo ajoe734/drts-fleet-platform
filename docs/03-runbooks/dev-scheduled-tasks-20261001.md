@@ -107,7 +107,10 @@ rerun; it does not touch the registry secret from step 2.
 
 ### 4. Confirm a scheduled trigger actually succeeds end to end
 
-After both step 2's redeploy and step 3 are done:
+After both step 2's redeploy and step 3 are done.
+
+**`jobs run` only dispatches — it is not proof of completion.** A tempting
+shortcut is:
 
 ```bash
 gcloud scheduler jobs run drts-dev-mail-outbox-drain \
@@ -117,43 +120,76 @@ gcloud scheduler jobs describe drts-dev-mail-outbox-drain \
   --format='value(lastAttemptTime,state,status.code)'
 ```
 
-`lastAttemptTime` and `state` are top-level fields on the `Job` resource,
-not nested under `status` (`status` is a `google.rpc.Status` and only its
-`code` field is meaningful here) — nesting either of the first two fields
-under `status.` in the `--format=value(...)` flag silently prints nothing
-and is not a usable check. Read the three fields together: a fresh
-`lastAttemptTime` (matching when you just ran the command
-above) plus `state=ENABLED` plus `status.code` absent or `0`
-(`google.rpc.Code.OK`) means Cloud Scheduler's own delivery attempt
-succeeded. `state=ENABLED` by itself is not success — it is only the job's
-enable/disable toggle and says nothing about whether the last attempt
-worked; a nonzero `status.code` means Cloud Scheduler recorded the HTTP call
-itself as failed (non-2xx, timeout, etc.) and nothing downstream ran.
+(`lastAttemptTime` and `state` are top-level fields on the `Job` resource,
+not nested under `status` — `status` is a `google.rpc.Status` and only its
+`code` field is meaningful here; nesting the first two under `status.` in
+`--format=value(...)` silently prints nothing.) **Do not stop here.**
+`jobs run` returns as soon as Cloud Scheduler has dispatched the HTTP call,
+before the target responds, and `lastAttemptTime` is bumped the instant the
+attempt *starts*, not when it finishes
+(https://docs.cloud.google.com/scheduler/docs/reference/rest/v1/projects.locations.jobs).
+Immediately after `jobs run`, `state=ENABLED` plus `status.code` absent or
+`0` is consistent with the attempt having already failed-closed, still being
+in flight, *or* having genuinely succeeded — the three are indistinguishable
+from this describe output alone. Treat the two commands above only as "the
+attempt started"; they are not a completed-success check.
 
-A Scheduler-reported success is still not proof the request was
-authenticated and authorized as the scheduler identity: cross-check the
-application's own logs for the specific principal and route. `apps/api`
-uses Nest's default logger
-(`this.logger.log(...)`/`this.logger.warn(...)` in
+**Use the completion-check script instead** —
+`infra/gcp/dev/scheduler/confirm-job-attempt.sh` fires the job and then
+polls (bounded by a timeout) for actual completion evidence: either Cloud
+Scheduler's own per-attempt completion record (the `AttemptFinished` log
+entry Google's troubleshooting guide describes —
+https://docs.cloud.google.com/scheduler/docs/troubleshooting, which pairs
+each `AttemptStarted` with a later `AttemptFinished` carrying the real
+outcome), or a corroborating Cloud Run HTTP request-log entry for the same
+route (Cloud Run only writes that entry once the handler's response has
+been sent). Both lookups are bounded to timestamps at or after the moment
+the script fires the job, so a stale (older) or wrong-job log entry cannot
+be mistaken for this attempt's result:
+
+```bash
+infra/gcp/dev/scheduler/confirm-job-attempt.sh \
+  drts-dev-mail-outbox-drain internal/scheduled-tasks/mail-outbox/drain
+infra/gcp/dev/scheduler/confirm-job-attempt.sh \
+  drts-dev-approval-timeout-reminders-run internal/scheduled-tasks/approval-timeout-reminders/run
+```
+
+Exit `0` means confirmed completed successfully; exit `1` means confirmed
+completed but failed (the script prints the Scheduler `status.code` or
+Cloud Run HTTP status); exit `2` means no completion evidence was found
+within the timeout — this is **not** success, it means completion is still
+unproven (keep investigating, or re-run with a longer timeout via the
+script's third argument). A timeout/exit-`2` result does not by itself mean
+nothing downstream ran either — the handler may still complete after the
+poll window closes, which is exactly why this is reported as "unconfirmed,"
+not "failed."
+
+A completed-success result is still not proof the request was authenticated
+and authorized as the scheduler identity: cross-check the application's own
+logs for the specific principal and route. `apps/api` uses Nest's default
+logger (`this.logger.log(...)`/`this.logger.warn(...)` in
 `apps/api/src/modules/auth/google-workload-identity.adapter.ts`), which
 writes plain strings — Cloud Run ingests these as `textPayload`, not a
 structured `jsonPayload`, so filtering on a `jsonPayload` field matches
-nothing even when the line is present:
+nothing even when the line is present. The adapter logs **both** a success
+line (`AUTH_GOOGLE_WORKLOAD_IDENTITY_USED`) and a route-scope-denial line
+(`AUTH_GOOGLE_WORKLOAD_IDENTITY_ROUTE_SCOPE_DENIED`) with the same
+`principalId=...route=...` shape, so search for either with one query
+rather than assuming only the success line is possible:
 
 ```bash
 gcloud logging read \
   'resource.type="cloud_run_revision"
    resource.labels.service_name="drts-dev-api"
-   textPayload=~"AUTH_GOOGLE_WORKLOAD_IDENTITY_USED.*principalId=dev-scheduler.*internal/scheduled-tasks/mail-outbox/drain"' \
+   textPayload=~"AUTH_GOOGLE_WORKLOAD_IDENTITY_(USED|ROUTE_SCOPE_DENIED)\].*principalId=dev-scheduler.*route=POST /api/internal/scheduled-tasks/mail-outbox/drain"' \
   --project=drts-dev-devcc-20260825 --limit=5 --format='value(timestamp,textPayload)'
 ```
 
-Repeat all three commands for `drts-dev-approval-timeout-reminders-run`
-(substitute its own route in the `textPayload` filter). Only a line matching
-both the expected `lastAttemptTime`/run and the specific route confirms that
-*this* attempt reached the handler as the scheduler principal — an older,
-unrelated success log for the same principal is not evidence the current
-attempt worked.
+Repeat for `drts-dev-approval-timeout-reminders-run` (substitute its own
+route in the `textPayload` filter). Only a line matching both the expected
+time window and the specific route confirms that *this* attempt reached the
+handler as the scheduler principal — an older, unrelated log for the same
+principal is not evidence the current attempt worked.
 
 Troubleshooting a failed or unconfirmed run: `BootstrapAuthGuard.tryGoogleWorkloadIdentityFallback`
 (`apps/api/src/common/auth/bootstrap-auth.guard.ts:664-698`) wraps the
@@ -162,30 +198,28 @@ route's ordinary `JWT_INVALID` (401) rejection, so a failing scheduler
 request will **not** surface a specific `WORKLOAD_IDENTITY_GOOGLE_NOT_CONFIGURED`,
 `WORKLOAD_PRINCIPAL_NOT_REGISTERED`, or `WORKLOAD_AUDIENCE_MISMATCH` code in
 either the HTTP response or the Cloud Run logs — the adapter throws those
-without logging anything first. The one exception is route-scope denial:
-`verifyServicePrincipal` logs
-`[AUTH_GOOGLE_WORKLOAD_IDENTITY_ROUTE_SCOPE_DENIED] principalId=... route=...`
-(`this.logger.warn`, same file, before the throw) even though the guard
-still discards the exception and returns `JWT_INVALID` to the caller. So:
+without logging anything first. The two exceptions are the success and
+route-scope-denial lines above, both logged (`this.logger.log`/
+`this.logger.warn`, same file) before the guard discards whichever outcome
+applies and returns its own response. So:
 
-- If the `textPayload` search above instead finds
+- If the combined query above finds
   `AUTH_GOOGLE_WORKLOAD_IDENTITY_ROUTE_SCOPE_DENIED` for
   `principalId=dev-scheduler`, the registry is live and the principal
   resolves, but its `routeScopes` entry does not cover the route/method the
   job is calling — re-check the pasted JSON for a typo in the route path or
   method (step 2).
-- If neither the success line nor the route-scope-denied line appears at
-  all, the failure is one of the three silent causes, roughly in order of
-  likelihood: (a) step 2's secret was never actually redeployed/mounted
-  (the Cloud Run revision still has the old or empty registry), (b) a typo
-  in `serviceAccountEmail`/`principalId` means no registry entry matches
-  this service account, or (c) `allowedTokenAudiences` does not match the
-  job's audience. Confirm by re-reading the live secret value and the
-  deployed revision's environment directly — none of those three are fixed
-  by re-running the provisioning script (step 3), since it never touches
-  the registry secret.
+- If the combined query finds nothing at all, the failure is one of the
+  three silent causes, roughly in order of likelihood: (a) step 2's secret
+  was never actually redeployed/mounted (the Cloud Run revision still has
+  the old or empty registry), (b) a typo in `serviceAccountEmail`/
+  `principalId` means no registry entry matches this service account, or
+  (c) `allowedTokenAudiences` does not match the job's audience. Confirm by
+  re-reading the live secret value and the deployed revision's environment
+  directly — none of those three are fixed by re-running the provisioning
+  script (step 3), since it never touches the registry secret.
 
-Once both jobs' manual runs show a clean, route-specific
-`AUTH_GOOGLE_WORKLOAD_IDENTITY_USED` log line and `status.code` 0/empty,
-leave the jobs on their configured schedule; no further manual trigger is
-needed.
+Once `confirm-job-attempt.sh` reports a completed success (exit `0`) for
+both jobs and the combined query above shows a matching, route-specific
+`AUTH_GOOGLE_WORKLOAD_IDENTITY_USED` line for each, leave the jobs on their
+configured schedule; no further manual trigger is needed.
