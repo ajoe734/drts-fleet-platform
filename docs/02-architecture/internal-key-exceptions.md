@@ -520,3 +520,91 @@ environment.
 | Finding / acceptance key | Source & fix location | Before → after | Command, exit code, evidence | Unverified / limits |
 | --- | --- | --- | --- | --- |
 | §7.2 item 1 unsatisfiable: no env-var wiring existed for `WORKLOAD_IDENTITY_GOOGLE_SERVICE_PRINCIPALS` or `WORKLOAD_IDENTITY_CI_TENANT_ACTOR_ENABLED` (`excp_002_removed_and_deploy_dev_green`) | `.github/workflows/deploy-dev.yml`: added a third workload secret check (`workload_google_registry_secret="${secret_prefix}-workload-identity-google-service-principals"`) mounted as `WORKLOAD_IDENTITY_GOOGLE_SERVICE_PRINCIPALS` in the `api_secrets` step, following the exact same absent-is-safe `gcloud secrets describe` pattern as the two existing workload mounts; added `DEV_WORKLOAD_IDENTITY_CI_TENANT_ACTOR_ENABLED: ${{ vars.DEV_WORKLOAD_IDENTITY_CI_TENANT_ACTOR_ENABLED }}` to the workflow's top-level `env:` block (same pattern as `DEV_WORKLOAD_IDENTITY_ISSUER`) and threaded it into the `api_env` step's `env_vars` as `WORKLOAD_IDENTITY_CI_TENANT_ACTOR_ENABLED=${DEV_WORKLOAD_IDENTITY_CI_TENANT_ACTOR_ENABLED:-false}`, so it defaults to `false` (gate stays off, `isCiTenantActorGateEnabled()` short-circuits) until ops deliberately sets the repo variable to `"true"`. Kept as a separate explicit opt-in rather than tying it to the registry secret's mere existence: `auth.controller.ts`'s CI-tenant-actor branch calls `verifyServicePrincipal` with no surrounding `try/catch`, so if the gate were ever on while the registry is absent/incomplete, `loadRegistry()`'s `WORKLOAD_IDENTITY_GOOGLE_NOT_CONFIGURED` throw would surface as a request-time 503 there instead of degrading to the internal key (unlike `InternalKeyMiddleware`, which does catch it) -- ops must confirm the registry is complete before flipping this variable. | Before: secret mount for this env var did not exist in the workflow at any point in this task's history; ops populating a secret named `${secret_prefix}-workload-identity-google-service-principals` in GCP would have had no effect on the deployed service. After: the mount exists, gated on the secret's presence exactly like the pre-existing two; the CI-tenant-actor gate is wired but defaults to off. | `python3 -c "import yaml; yaml.safe_load(open('.github/workflows/deploy-dev.yml'))"` (exit 0, valid YAML); `pnpm exec vitest run tests/unit/deployment-architecture-guards.test.ts tests/unit/dev-active-surface-contract.test.ts tests/unit/cloud-run-deploy-retry.test.ts` (exit 0, 3 files / 19 tests passed -- none of these pre-existing guards asserted anything about `WORKLOAD_IDENTITY_GOOGLE_SERVICE_PRINCIPALS` before this change, so this is a regression check, not new coverage of the fix itself); read-through confirmation that `isCiTenantActorGateEnabled()` compares the env var case-insensitively against the literal string `"true"`, so the default `false` correctly disables the gate. | Not run: an actual `deploy-dev.yml` execution (no trigger path from this branch; GitHub `gh run list --workflow=deploy-dev.yml` at the time of this fix showed the most recent run, 36744111603, dispatched at 16:25:41Z against `headSha=cb479ddfc` -- the pre-merge commit -- so no dev deploy has yet exercised this candidate's code, merge commit `739e7e9e44c5`, or this wiring fix). Full §7.2 completion still requires, in order: (1) ops creates GCP secret `${secret_prefix}-workload-identity-google-service-principals` in `drts-dev-devcc-20260825` with real per-caller service-account entries per §7.3.1's `routeScopes` recommendations (this worker cannot invent that data -- see §7.2's original reasoning), (2) a fresh `workflow_dispatch` run of `deploy-dev.yml` against a ref including this fix and confirming `AUTH_LEGACY_INTERNAL_KEY_USED` stops appearing for all nine callers, (3) ops sets `vars.DEV_WORKLOAD_IDENTITY_CI_TENANT_ACTOR_ENABLED=true` and re-verifies caller #9 (`deploy-dev` operational acceptance) still passes, (4) only then a follow-up candidate removes `INTERNAL_KEY_EXCP_002` and the dual-send headers. None of steps (1)-(3) can be performed from this sandbox: (1) requires inventing no data that doesn't exist, and (2)-(3) deploy to and mutate the shared dev environment, which this task's guardrails reserve for an authorized deploy action outside a code-only worker's reach. |
+
+### 7.6 Re-dispatch (2026-10-01, fifth session): dev's shared runtime service account collapses §7.3.1's per-caller entry plan
+
+Re-checked §7.2 item 1 before handing it to ops again, since this task has
+now been re-dispatched to the owner after `aee7c7bcb` (PR #2248) recorded the
+ops blocker. Confirmed this worker *can* read (not write) the real Cloud Run
+topology via the `gcloud` credentials present in this sandbox -- contrary to
+the assumption carried over from an earlier session that no dev read access
+exists at all; only writes (Secret Manager, GitHub repo vars, workflow
+dispatch) are out of reach, per this task's own guardrails on mutating the
+shared dev environment.
+
+```
+$ gcloud run services list --platform=managed --region=us-central1 \
+    --project=drts-dev-devcc-20260825 \
+    --format="table(metadata.name,spec.template.spec.serviceAccountName)"
+NAME                                SERVICE_ACCOUNT_NAME
+drts-channel-partner-portal-web     drts-dev-runtime@drts-dev-devcc-20260825.iam.gserviceaccount.com
+drts-dev-api                        drts-dev-runtime@drts-dev-devcc-20260825.iam.gserviceaccount.com
+drts-dev-bank-console-web           drts-dev-runtime@drts-dev-devcc-20260825.iam.gserviceaccount.com
+drts-dev-enterprise-dispatch-web    drts-dev-runtime@drts-dev-devcc-20260825.iam.gserviceaccount.com
+drts-dev-fleet-partner-portal-web   drts-dev-runtime@drts-dev-devcc-20260825.iam.gserviceaccount.com
+drts-dev-ops-console-web            drts-dev-runtime@drts-dev-devcc-20260825.iam.gserviceaccount.com
+drts-dev-platform-admin-web         drts-dev-runtime@drts-dev-devcc-20260825.iam.gserviceaccount.com
+drts-dev-referral-embed-web         drts-dev-runtime@drts-dev-devcc-20260825.iam.gserviceaccount.com
+drts-dev-tenant-console-web         drts-dev-runtime@drts-dev-devcc-20260825.iam.gserviceaccount.com
+```
+
+Every Cloud Run service behind callers #1-8 runs as the **same** service
+account, `drts-dev-runtime@drts-dev-devcc-20260825.iam.gserviceaccount.com`
+(the `DEV_GCP_RUNTIME_SERVICE_ACCOUNT` GitHub variable; `deploy-dev.yml` even
+fails closed at its "Cloud Run runtime identity resolves to the GitHub
+deployer identity" check if a service were ever misconfigured onto the
+*deployer* SA instead, but there is no check, and no current way, to give
+each web app its *own* runtime SA). This is a dev-environment simplification,
+not an oversight of this task.
+
+This breaks §7.3.1's plan as literally written. `GoogleWorkloadIdentityAdapter.loadRegistry()`
+resolves a principal with
+`registry.find((entry) => entry.serviceAccountEmail?.trim().toLowerCase() === email)`
+(`google-workload-identity.adapter.ts:223`) -- a single first-match lookup
+keyed only on the token's `email` claim. If ops populated the registry with
+eight separate entries, one per caller, all sharing
+`serviceAccountEmail: "drts-dev-runtime@..."` but with the different
+`routeScopes` §7.3.1 recommended per caller, only the **first** matching
+array entry would ever be live for *every* one of those eight callers'
+requests -- the other seven entries' `routeScopes` would be silently dead
+code, giving a false read of per-caller least-privilege that the token's
+actual identity cannot support. Writing it that way would be worse than not
+narrowing at all, because it would look enforced in the registry JSON while
+not being enforced in `verifyServicePrincipal` at request time.
+
+**Corrected ops action for dev**: the registry can and should carry at most
+two entries, not nine:
+
+| Entry | `serviceAccountEmail` | `routeScopes` | Covers |
+| --- | --- | --- | --- |
+| A | `drts-dev-runtime@drts-dev-devcc-20260825.iam.gserviceaccount.com` | `["* *"]` | Callers #1-8 (every web app's control-plane proxy / API client in §6's inventory). `* *` is not a narrowing regression here: callers #1/2/4/6 already legitimately need `* *` as generic reverse proxies, and because #3/5/7/8 share that exact same Google identity in dev, there is no request-time signal that can distinguish them -- any `routeScopes` narrower than `* *` on this one entry would incorrectly 403 the broad proxies, and any second entry with the same email would never be reached. |
+| B | the email behind `secrets.DEV_WIF_SERVICE_ACCOUNT` (GitHub Actions deployer identity; this worker cannot read secret values and does not need to -- ops already has it) | `["POST auth/token"]` | Caller #9 (`deploy-dev` operational acceptance), with `ciTenantActorGrants` for both `{tenantId: "10000000-0000-0000-0000-000000000201", actorType: "tenant_admin", actorId: "10000000-0000-0000-0000-000000000901"}` and the `...000902` / `tenant_ops_admin` pair, exactly as §7.2 item 1 already specified. |
+
+Both entries need `principalId` (any stable, human-readable identifier --
+e.g. `dev-web-runtime` / `dev-ci-deployer`) and
+`allowedTokenAudiences: ["https://auth.dev.drts.internal/token-exchange"]`
+(`DEV_WORKLOAD_IDENTITY_AUDIENCE`, already configured per the task's own
+`summary_zh`).
+
+**What this means for `callers_migrated_to_wif_assertion`**: still satisfied
+in the sense already recorded in §7.2 (every caller sends and can be
+verified over the WIF path), but the acceptance criterion's implicit
+least-privilege intent for the four narrow-purpose callers (#3, #5, #7, #8)
+cannot be realized in dev as this task's write_scopes and deadline allow --
+only as far as entry A's `* *` scope, identical to the broad proxies' blast
+radius. Achieving real narrowing for those four would require a follow-up,
+separate task to give each web app (or at least the narrow-purpose ones) its
+own dedicated Cloud Run runtime service account, which is an IAM/infra
+change this task was not scoped or authorized to make and does not block
+`INTERNAL_KEY_EXCP_002`'s removal, since the legacy exception offered no
+per-caller scoping at all -- entry A is still a strict improvement (bounded,
+auditable, Google-signed identity instead of a shared static key), not a
+regression against the exception it replaces.
+
+**Still outside this worker's reach, unchanged from §7.2/§7.5**: creating the
+GCP secret, setting its two-entry JSON value, flipping
+`vars.DEV_WORKLOAD_IDENTITY_CI_TENANT_ACTOR_ENABLED=true`, and dispatching a
+real `deploy-dev.yml` run all mutate the shared dev environment and are
+reserved for an authorized operator, not a code-only worker. This section
+only corrects the *shape* of that operator's action (2 registry entries, not
+9); it does not perform it. |
