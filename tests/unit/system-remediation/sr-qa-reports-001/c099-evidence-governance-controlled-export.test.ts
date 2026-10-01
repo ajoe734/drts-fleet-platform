@@ -32,7 +32,7 @@ describe("C099: 證據清單治理、逐 Family 授權邊界、法律保留與�
     const catalog = getEvidenceGovernanceCatalog();
 
     expect(catalog.version).toBe("phase1-2026-04-29");
-    expect(catalog.policies.length).toBe(12);
+    expect(catalog.policies.length).toBe(13);
 
     const families = catalog.policies.map((p) => p.family);
     expect(families).toContain("call_recording");
@@ -41,6 +41,7 @@ describe("C099: 證據清單治理、逐 Family 授權邊界、法律保留與�
     expect(families).toContain("audit_log");
     expect(families).toContain("webhook_delivery");
     expect(families).toContain("eligibility_verification");
+    expect(families).toContain("mail_delivery");
     expect(families).toContain("proof_bundle");
 
     // 驗證法律保留共通規範

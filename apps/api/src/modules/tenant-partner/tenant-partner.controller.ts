@@ -2330,6 +2330,31 @@ export class TenantPartnerController {
     );
   }
 
+  @Get("tenant/mail-deliveries/:deliveryId")
+  @RequireRealms("tenant", "platform", "ops")
+  async getMailDelivery(
+    @Param("deliveryId") deliveryId: string,
+    @CurrentIdentity() identity: IdentityContext | null,
+    @Headers("x-tenant-id") tenantId?: string,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    const item = await this.tenantPartnerService.getMailDeliveryReceipt(
+      this.requireTenantId(tenantId),
+      deliveryId,
+      requestId,
+      identity,
+    );
+    if (!item) {
+      throw new ApiRequestError(
+        HttpStatus.NOT_FOUND,
+        "MAIL_DELIVERY_NOT_FOUND",
+        "The mail delivery could not be found.",
+        { deliveryId },
+      );
+    }
+    return toApiSuccessEnvelope(item, requestId);
+  }
+
   @Get("tenant/sla")
   getSlaProfile(
     @Headers("x-tenant-id") tenantId?: string,
