@@ -130,7 +130,7 @@ export class DriverDeviceSessionService implements OnModuleInit {
     const hash = this.hashToken(code);
     let invitation = this.invitationsByHash.get(hash);
     if (!invitation && this.repository) {
-      invitation = await this.repository.findInvitationByHash(hash);
+      invitation = await this.repository.findInvitationByCodeHash(hash);
     }
     
     if (!invitation || invitation.status !== "pending") {

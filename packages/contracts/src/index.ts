@@ -797,6 +797,7 @@ export interface IdentityContext {
     | "platform_admin"
     | "tenant_admin"
     | "ops_user"
+    | "ops_observer"
     | "driver_user"
     | "partner_api_key"
     | "partner_user"
@@ -1332,6 +1333,7 @@ export interface AuditLogRecord {
     | "platform_admin"
     | "tenant_admin"
     | "ops_user"
+    | "ops_observer"
     | "partner_api_key"
     | "partner_user"
     | "referral_passenger";

@@ -104,3 +104,39 @@ it("auth/token rejects elevated scopes for ops_observer", async () => {
   // BUT verifyAccessToken MUST reject it since it's not in roleBindings
   expect(await jwt.verifyAccessToken(issued.token)).toBeNull();
 });
+
+it("auth/driver/device/invite and revoke controller routes do not require idempotency keys", async () => {
+  const repository = new IdentityRepository();
+  const jwt = new JwtAuthService(repository);
+  
+  const mockDriverDeviceSessionService = {
+    issueRegistrationInvitation: vi.fn().mockResolvedValue({ registrationCode: "1234" }),
+    revokeInvitation: vi.fn().mockResolvedValue({ revoked: true })
+  };
+
+  const { IdempotencyService } = await import("../../../../apps/api/src/common/idempotency/idempotency.service");
+  const { IdempotencyRepository } = await import("../../../../apps/api/src/common/idempotency/idempotency.repository");
+  const idempotencyService = new IdempotencyService(new IdempotencyRepository());
+
+  const controller = new AuthController(
+    jwt, 
+    {} as never, 
+    mockDriverDeviceSessionService as never, 
+    undefined, undefined, undefined, repository, undefined, undefined,
+    idempotencyService
+  );
+
+  const issueResult = await controller.issueDriverDeviceInvitation(
+    { } as any,
+    undefined,
+    "req-123"
+  );
+  expect(issueResult.data).toBeDefined();
+
+  const revokeResult = await controller.revokeDriverDeviceInvitation(
+    { registrationCode: "abc" },
+    undefined,
+    "req-456"
+  );
+  expect(revokeResult.data).toBeDefined();
+});

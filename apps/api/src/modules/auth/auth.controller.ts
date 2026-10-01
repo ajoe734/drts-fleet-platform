@@ -637,6 +637,7 @@ export class AuthController {
     const result = await this.requireIdempotencyService().execute({
       scope: "auth:driver_invite:issue",
       idempotencyKey,
+      required: false,
       requestPath: "auth/driver/device/invite",
       payload: command,
       execute: async () => this.driverDeviceSessionService.issueRegistrationInvitation(command),
@@ -655,6 +656,7 @@ export class AuthController {
     const result = await this.requireIdempotencyService().execute({
       scope: "auth:driver_invite:revoke",
       idempotencyKey,
+      required: false,
       requestPath: "auth/driver/device/invite/revoke",
       payload: command,
       execute: async () => this.driverDeviceSessionService.revokeInvitation(command),
